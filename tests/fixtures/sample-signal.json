@@ -1,0 +1,9 @@
+{
+  "symbol": "BTCUSDT",
+  "timeframe": "5",
+  "source": "signals_overlays",
+  "event": "bullish_plus",
+  "direction": "up",
+  "price": 67234.5,
+  "bar_time": 1714867200000
+}
