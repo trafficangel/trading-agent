@@ -13,6 +13,7 @@ import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { getMarketSentiment } from '../exchange/bybit-public.js';
 
 const COOLDOWN_MS = 15 * 60 * 1000;
 const STORAGE_STATE = resolve('data', 'tradingview-storage-state.json');
@@ -80,6 +81,11 @@ export async function maybeDecide(symbol: string): Promise<void> {
     logger.warn('tradingview storage state not present — calling LLM without screenshots');
   }
 
+  const sentiment = await getMarketSentiment(symbol).catch((err: unknown) => {
+    logger.warn({ err, symbol }, 'sentiment fetch failed — proceeding without');
+    return null;
+  });
+
   const result = await callLlm(
     {
       symbol,
@@ -87,6 +93,7 @@ export async function maybeDecide(symbol: string): Promise<void> {
       open_positions: [],
       daily_pnl_pct: 0,
       mode: config.MODE,
+      sentiment,
     },
     screenshots,
   );

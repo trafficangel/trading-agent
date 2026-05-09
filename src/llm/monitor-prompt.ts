@@ -1,6 +1,7 @@
 import { DECISION_JSON_SCHEMA } from './decision.schema.js';
 import type { DecisionRow } from '../db/repos/decisions.js';
 import type { SignalRow } from '../db/repos/signals.js';
+import { formatSentiment, type MarketSentiment } from '../exchange/bybit-public.js';
 
 export function buildMonitorSystemPrompt(): string {
   return `You are managing an open intraday trade on Bybit USDT-perp.
@@ -52,6 +53,7 @@ export type MonitorContext = {
   /** latest known price for the symbol */
   currentPrice: number | null;
   ageMinutes: number;
+  sentiment?: MarketSentiment | null;
 };
 
 export function buildMonitorUserMessage(ctx: MonitorContext): string {
@@ -89,6 +91,9 @@ ${sigs}
 
 Current price (latest signal): ${ctx.currentPrice ?? 'unknown'}
 Estimated open PnL: ${pnlEstimate}
+
+Bybit market sentiment (${p.symbol}):
+${formatSentiment(ctx.sentiment ?? null)}
 
 Attached, in order:
   1. ${p.symbol} 15m NOW

@@ -1,5 +1,6 @@
 import { DECISION_JSON_SCHEMA } from './decision.schema.js';
 import type { AggregatedScore } from '../signals/aggregator.js';
+import { formatSentiment, type MarketSentiment } from '../exchange/bybit-public.js';
 
 export function buildSystemPrompt(): string {
   return `You are a discretionary intraday crypto trader on Bybit USDT-perp.
@@ -17,6 +18,19 @@ Hard rules — violation means SKIP:
 - If signals conflict (mixed bullish/bearish in window) — SKIP.
 - If 1H context on the SUBJECT contradicts the 15m setup direction — SKIP unless you see textbook reversal pattern; in that case still cap confidence at 0.5.
 - BTC alignment: if BTC 15m and 1H are both moving against the proposed direction (e.g. BTC dumping while you want to go LONG alt) — SKIP or cap confidence at 0.45. Crypto alts correlate ~70-80% with BTC; trading against BTC needs textbook reversal evidence on BTC itself.
+- Market sentiment (Bybit funding + OI + L/S ratio):
+  * Funding rate (per 8h):
+    - rate > +0.04%: longs are crowded and paying premium. New LONG: cap confidence at 0.55. New SHORT: small confidence boost.
+    - rate < -0.04%: shorts are crowded. Mirror.
+    - |rate| <= 0.01%: neutral, no adjustment.
+  * Open Interest delta vs price (last 4h):
+    - OI ↑ + price ↑: organic uptrend (real buying) → favours LONG / HOLD.
+    - OI ↑ + price ↓: organic downtrend (real selling) → favours SHORT / HOLD.
+    - OI ↓ + price ↑: short squeeze, fragile continuation. Avoid fresh LONG unless textbook reversal evidence.
+    - OI ↓ + price ↓: long flush, fragile continuation. Avoid fresh SHORT unless textbook reversal evidence.
+  * Long/short account ratio:
+    - > 2.0: heavily long-biased crowd → mean-reversion risk on alts. SHORT setups stronger.
+    - < 0.6: heavily short-biased crowd → squeeze risk. LONG setups stronger.
 - If a position is already open in the same direction on this symbol — SKIP unless adding makes structural sense; explain in reasoning_full.
 
 Style:
@@ -50,6 +64,8 @@ export type LlmContext = {
   open_positions: { side: 'long' | 'short'; entry: number; size_pct: number }[];
   daily_pnl_pct: number;
   mode: string;
+  /** Bybit market sentiment snapshot — may be null if fetch failed */
+  sentiment?: MarketSentiment | null;
 };
 
 export function buildUserMessage(ctx: LlmContext): string {
@@ -75,6 +91,9 @@ ${sigs || '  (none)'}
 Account:
   open_positions: ${JSON.stringify(ctx.open_positions)}
   daily_pnl_pct:  ${ctx.daily_pnl_pct}
+
+Bybit market sentiment (${ctx.symbol}):
+${formatSentiment(ctx.sentiment ?? null)}
 
 Attached, in order:
   1. ${ctx.symbol} 15m  (primary entry timeframe)
