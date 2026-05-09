@@ -57,25 +57,30 @@ export function tradeCaption(i: DecisionPostInput): string {
   if (d.decision === 'OPEN' && d.entry && d.sl) {
     const slPct = pctDistance(d.entry, d.sl);
     lines.push('');
-    lines.push(`📥 Вход:   <code>${d.entry}</code>`);
-    lines.push(`🛡 Стоп:   <code>${d.sl}</code>  (<code>${slPct}%</code>)`);
+    lines.push(`📥 Вход:  <code>${d.entry}</code>`);
+    const slBase = `🛡 Стоп:  <code>${d.sl}</code>  (<code>${slPct}%</code>)`;
+    lines.push(d.sl_reason ? `${slBase} — ${escapeHtml(d.sl_reason)}` : slBase);
     if (d.tp.length) {
       const tp1 = d.tp[0]!;
       const tp1Pct = pctDistance(d.entry, tp1);
-      lines.push(`🎯 Цель:   <code>${tp1}</code>  (<code>${tp1Pct}%</code>)`);
+      const tpBase = `🎯 Цель:  <code>${tp1}</code>  (<code>${tp1Pct}%</code>)`;
+      lines.push(d.tp_reason ? `${tpBase} — ${escapeHtml(d.tp_reason)}` : tpBase);
       const slDist = Math.abs(d.entry - d.sl);
       const tp1Dist = Math.abs(tp1 - d.entry);
       const rr = Math.round((tp1Dist / slDist) * 10) / 10;
-      lines.push(`📐 R:R:    <code>1 : ${rr}</code>`);
-    }
-    if (d.size_pct !== undefined) {
-      lines.push(`🎚 Размер: <code>${d.size_pct}%</code> от депозита`);
+      lines.push(`📐 R:R:   <code>1 : ${rr}</code>`);
     }
     lines.push(`💪 Уверенность: <code>${(d.confidence * 100).toFixed(0)}%</code>`);
   } else if (d.decision === 'MODIFY') {
     lines.push('');
-    if (d.sl !== undefined) lines.push(`🛡 Новый стоп: <code>${d.sl}</code>`);
-    if (d.tp.length) lines.push(`🎯 Новая цель: <code>${d.tp[0]}</code>`);
+    if (d.sl !== undefined) {
+      const slBase = `🛡 Новый стоп: <code>${d.sl}</code>`;
+      lines.push(d.sl_reason ? `${slBase} — ${escapeHtml(d.sl_reason)}` : slBase);
+    }
+    if (d.tp.length) {
+      const tpBase = `🎯 Новая цель: <code>${d.tp[0]}</code>`;
+      lines.push(d.tp_reason ? `${tpBase} — ${escapeHtml(d.tp_reason)}` : tpBase);
+    }
     lines.push(`💪 Уверенность: <code>${(d.confidence * 100).toFixed(0)}%</code>`);
   } else {
     lines.push('');
@@ -84,6 +89,11 @@ export function tradeCaption(i: DecisionPostInput): string {
 
   lines.push('');
   lines.push(escapeHtml(d.reasoning_short));
+
+  if (d.decision === 'OPEN' && d.invalidation) {
+    lines.push('');
+    lines.push(`❌ Отмена сигнала: ${escapeHtml(d.invalidation)}`);
+  }
 
   if (!i.riskGate.ok) {
     lines.push('');

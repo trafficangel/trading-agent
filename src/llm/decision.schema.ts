@@ -39,18 +39,28 @@ export const Decision = z.object({
     .transform((v) => v ?? 0),
   reasoning_short: z.string().min(1).max(220),
   reasoning_full: z.string().min(1).max(2000),
+  /** brief Russian explanation of WHY the SL is exactly at d.sl */
+  sl_reason: opt(z.string().min(1).max(120)),
+  /** brief Russian explanation of WHY the TP is exactly at d.tp[0] */
+  tp_reason: opt(z.string().min(1).max(120)),
+  /** condition that fully invalidates the idea (stronger than SL alone) */
+  invalidation: opt(z.string().min(1).max(160)),
 });
 export type Decision = z.infer<typeof Decision>;
 
 /** JSON-Schema string representation for inclusion in the system prompt. */
 export const DECISION_JSON_SCHEMA = `{
   "decision": "OPEN" | "SKIP" | "CLOSE" | "MODIFY",
-  "side": "long" | "short"  // required when decision == OPEN
-  "entry": number > 0,       // required when decision == OPEN
-  "sl": number > 0,          // required when decision == OPEN
-  "tp": [number > 0, ...],   // 1-5 take-profit levels, ordered nearest first
-  "size_pct": number 0..2,   // % of equity to risk; required when decision == OPEN
-  "confidence": number 0..1, // your honest confidence in this trade
-  "reasoning_short": string, // <=220 chars; goes to Telegram
-  "reasoning_full":  string  // <=2000 chars; the why, in detail
+  "side": "long" | "short",   // required when decision == OPEN
+  "entry": number > 0,        // required when decision == OPEN
+  "sl":    number > 0,        // required when decision == OPEN
+  "tp":    [number > 0],      // EXACTLY ONE take-profit level for OPEN; [] otherwise
+  "size_pct":   number 0..2,  // % of equity to risk; required when decision == OPEN
+  "confidence": number 0..1,  // your honest confidence in this trade
+  "reasoning_short": string,  // <=220 chars; goes to Telegram
+  "reasoning_full":  string,  // <=2000 chars; the why, in detail
+  // For OPEN/MODIFY only — concrete justifications shown next to the levels:
+  "sl_reason":     string,    // <=120 chars, Russian. Example: "за свинг-хаем 14:00, ликвидность зачищена"
+  "tp_reason":     string,    // <=120 chars, Russian. Example: "equal lows на 1H, зона спроса 2.37"
+  "invalidation":  string     // <=160 chars, Russian. Example: "пробой 2.4750 с закрытием 15m выше"
 }`;

@@ -24,6 +24,9 @@ export type DecisionRow = {
   status: string;
   parent_decision_id: number | null;
   closed_at: number | null;
+  sl_reason: string | null;
+  tp_reason: string | null;
+  invalidation: string | null;
 };
 
 const insertStmt = db.prepare(`
@@ -32,8 +35,9 @@ const insertStmt = db.prepare(`
     screenshot_path, llm_input_tokens, llm_output_tokens,
     decision, side, entry, sl, tp_json, size_pct,
     confidence, reasoning_short, reasoning_full, raw_response,
-    status, parent_decision_id
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    status, parent_decision_id,
+    sl_reason, tp_reason, invalidation
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const findActiveStmt = db.prepare<[], DecisionRow>(`
@@ -98,6 +102,9 @@ export function insertDecision(input: InsertDecisionInput): number {
     input.rawResponse,
     status,
     input.parentDecisionId ?? null,
+    input.decision.sl_reason ?? null,
+    input.decision.tp_reason ?? null,
+    input.decision.invalidation ?? null,
   );
   const newId = Number(result.lastInsertRowid);
 
