@@ -16,29 +16,31 @@ type DecisionDayRow = {
   parent_decision_id: number | null;
   closed_at: number | null;
   reasoning_short: string | null;
+  close_price: number | null;
+  close_reason: string | null;
+  pnl_pct: number | null;
+  pnl_r: number | null;
 };
 
 const sigsToday = db.prepare<[number], { symbol: string; timeframe: string; c: number }>(
   'SELECT symbol, timeframe, COUNT(*) AS c FROM signals WHERE received_at >= ? GROUP BY symbol, timeframe ORDER BY symbol, timeframe',
 );
-const decisionsToday = db.prepare<[number], DecisionDayRow>(`
-  SELECT id, created_at, symbol, decision, side, entry, sl, tp_json,
-         status, parent_decision_id, closed_at, reasoning_short
-  FROM decisions WHERE created_at >= ? ORDER BY created_at ASC
-`);
+const SELECT_COLS = `
+  id, created_at, symbol, decision, side, entry, sl, tp_json,
+  status, parent_decision_id, closed_at, reasoning_short,
+  close_price, close_reason, pnl_pct, pnl_r
+`;
+const decisionsToday = db.prepare<[number], DecisionDayRow>(
+  `SELECT ${SELECT_COLS} FROM decisions WHERE created_at >= ? ORDER BY created_at ASC`,
+);
 const closedTradesToday = db.prepare<[number], DecisionDayRow>(`
-  SELECT id, created_at, symbol, decision, side, entry, sl, tp_json,
-         status, parent_decision_id, closed_at, reasoning_short
-  FROM decisions
+  SELECT ${SELECT_COLS} FROM decisions
   WHERE decision = 'OPEN' AND status = 'closed' AND closed_at IS NOT NULL AND closed_at >= ?
   ORDER BY closed_at ASC
 `);
-const stillActive = db.prepare<[], DecisionDayRow>(`
-  SELECT id, created_at, symbol, decision, side, entry, sl, tp_json,
-         status, parent_decision_id, closed_at, reasoning_short
-  FROM decisions WHERE decision = 'OPEN' AND status = 'active'
-  ORDER BY created_at ASC
-`);
+const stillActive = db.prepare<[], DecisionDayRow>(
+  `SELECT ${SELECT_COLS} FROM decisions WHERE decision = 'OPEN' AND status = 'active' ORDER BY created_at ASC`,
+);
 const nearestSignalPrice = db.prepare<[string, number, number, number], { price: number | null }>(`
   SELECT price FROM signals
   WHERE symbol = ? AND price IS NOT NULL
@@ -80,15 +82,21 @@ async function tick(now: Date = new Date()): Promise<void> {
     counts[d.decision as keyof typeof counts] = (counts[d.decision as keyof typeof counts] ?? 0) + 1;
   }
 
-  // Closed trades with approximate PnL
+  // Closed trades — prefer exact close_price/pnl_pct from DB; fall back to
+  // nearest-signal approximation only when those are missing (legacy rows).
   const closed = closedTradesToday.all(dayStart);
   const closedDetails = closed.map((t) => {
-    const exit = t.entry && t.closed_at ? approxClosePrice(t.symbol, t.closed_at) : null;
-    const pnl = exit && t.entry ? pnlPct(t.side, t.entry, exit) : null;
+    let exit = t.close_price;
+    let pnl = t.pnl_pct;
+    if (exit == null) {
+      exit = t.entry && t.closed_at ? approxClosePrice(t.symbol, t.closed_at) : null;
+      pnl = exit && t.entry ? pnlPct(t.side, t.entry, exit) : null;
+    }
     return { ...t, exit, pnl };
   });
   const wins = closedDetails.filter((t) => t.pnl !== null && t.pnl > 0).length;
   const losses = closedDetails.filter((t) => t.pnl !== null && t.pnl < 0).length;
+  const totalR = closedDetails.reduce((s, t) => s + (t.pnl_r ?? 0), 0);
 
   const active = stillActive.all();
 
@@ -117,13 +125,20 @@ async function tick(now: Date = new Date()): Promise<void> {
 
   // Closed today
   if (closedDetails.length) {
-    lines.push(`<b>Закрыто сегодня:</b> ${closedDetails.length} (W ${wins} / L ${losses})`);
+    const rTotalSign = totalR >= 0 ? '+' : '';
+    lines.push(
+      `<b>Закрыто сегодня:</b> ${closedDetails.length} (W ${wins} / L ${losses})  ·  Σ ${rTotalSign}${totalR.toFixed(2)}R`,
+    );
     for (const t of closedDetails) {
       const sideE = t.side === 'long' ? '🟢' : t.side === 'short' ? '🔴' : '';
       const pnlStr = t.pnl !== null ? `${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}%` : '?';
-      const exitStr = t.exit !== null ? `~${t.exit}` : '?';
+      const rStr = t.pnl_r !== null ? ` (${t.pnl_r >= 0 ? '+' : ''}${t.pnl_r.toFixed(2)}R)` : '';
+      const exit = t.close_price ?? t.exit;
+      const exitStr = exit !== null ? `${t.close_price ? '' : '~'}${exit}` : '?';
+      const reason =
+        t.close_reason === 'tp_hit' ? '🎯' : t.close_reason === 'sl_hit' ? '🛑' : t.close_reason === 'llm_close' ? '🏁' : '';
       lines.push(
-        `  #${t.id.toString().padStart(4, '0')} ${sideE} ${t.symbol} · вход ${t.entry} → выход ${exitStr} · <b>${pnlStr}</b>`,
+        `  ${reason} #${t.id.toString().padStart(4, '0')} ${sideE} ${t.symbol} · ${t.entry} → ${exitStr} · <b>${pnlStr}</b>${rStr}`,
       );
     }
   } else {

@@ -7,6 +7,8 @@ import { logger } from '../lib/logger.js';
 import {
   findActivePositions,
   insertDecision,
+  closePositionWithStats,
+  calcPnl,
   type DecisionRow,
 } from '../db/repos/decisions.js';
 import { recentSignals } from '../db/repos/signals.js';
@@ -16,6 +18,8 @@ import { buildMonitorSystemPrompt, buildMonitorUserMessage } from '../llm/monito
 import { aggregateSymbol } from '../signals/aggregator.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { tradeCaption } from '../telegram/decision-template.js';
+import { resultPost } from '../telegram/result-template.js';
+import { getLastPrice } from '../exchange/bybit-public.js';
 
 const STORAGE_STATE = resolve('data', 'tradingview-storage-state.json');
 const MAX_RETRIES = 2;
@@ -184,8 +188,8 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
   // Posting routing:
   //   SKIP (= HOLD)               -> Logs only, compact note
   //   MODIFY (trivial change)     -> Logs only — user shouldn't be pinged for tiny trail tweaks
-  //   MODIFY (substantial change) -> Signals channel with photo
-  //   CLOSE                        -> Signals channel with photo (always substantial)
+  //   MODIFY (substantial change) -> Signals channel with photo (regular trade caption)
+  //   CLOSE                        -> Signals channel with photo (RESULT template — PnL etc.)
   const tradeIdStr = `#${p.id.toString().padStart(4, '0')}`;
 
   if (result.decision.decision === 'SKIP') {
@@ -197,10 +201,62 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
     return;
   }
 
+  // Structural CLOSE from LLM — fetch real Bybit price, compute PnL, close
+  // parent with stats, post the result template (different from MODIFY/OPEN).
+  if (result.decision.decision === 'CLOSE' && p.entry && p.sl && p.side) {
+    const livePrice = (await getLastPrice(p.symbol)) ?? p.entry;
+    const tp = p.tp_json ? Number(JSON.parse(p.tp_json)?.[0]) : null;
+    const { pnlPct, pnlR } = calcPnl(
+      p.side as 'long' | 'short',
+      p.entry,
+      p.sl,
+      livePrice,
+    );
+    closePositionWithStats({
+      id: p.id,
+      closePrice: livePrice,
+      closeReason: 'llm_close',
+      pnlPct,
+      pnlR,
+    });
+    logger.info(
+      { position_id: p.id, close_price: livePrice, pnl_pct: pnlPct, pnl_r: pnlR },
+      'monitor: LLM-driven close with stats',
+    );
+
+    const text = resultPost({
+      parentTradeId: p.id,
+      symbol: p.symbol,
+      side: p.side as 'long' | 'short',
+      entry: p.entry,
+      sl: p.sl,
+      tp,
+      closePrice: livePrice,
+      closeReason: 'llm_close',
+      pnlPct,
+      pnlR,
+      durationMs: Date.now() - p.created_at,
+    });
+    // Append the LLM's structural reasoning so user sees WHY we closed early.
+    const fullText = `${text}\n\n<i>${result.decision.reasoning_short.replace(/[<>&]/g, '')}</i>`.slice(0, 1024);
+
+    if (primaryScreenshot && existsSync(primaryScreenshot)) {
+      const sent = await sendPhoto({
+        channel: 'signals',
+        photoPath: primaryScreenshot,
+        caption: fullText,
+      });
+      if (!sent) await sendMessage({ channel: 'signals', text: fullText });
+    } else {
+      await sendMessage({ channel: 'signals', text: fullText });
+    }
+    await sendMessage({ channel: 'logs', text: fullText, disable_notification: true });
+    return;
+  }
+
   const substantial = isSubstantialChange(p, result.decision);
 
   if (result.decision.decision === 'MODIFY' && !substantial) {
-    // Trivial modify — quiet log. Decision still recorded in DB for audit.
     await sendMessage({
       channel: 'logs',
       text: `🔧 <b>minor MODIFY</b> по сделке ${tradeIdStr} (silent — изменение &lt; ${SUBSTANTIAL_CHANGE_PCT}%): ${result.decision.reasoning_short}`,

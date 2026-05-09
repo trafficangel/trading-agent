@@ -27,7 +27,13 @@ export type DecisionRow = {
   sl_reason: string | null;
   tp_reason: string | null;
   invalidation: string | null;
+  close_price: number | null;
+  close_reason: string | null;
+  pnl_pct: number | null;
+  pnl_r: number | null;
 };
+
+export type CloseReason = 'tp_hit' | 'sl_hit' | 'llm_close' | 'manual';
 
 const insertStmt = db.prepare(`
   INSERT INTO decisions (
@@ -54,6 +60,13 @@ const findActiveBySymbolSideStmt = db.prepare<[string, string], DecisionRow>(`
 
 const closePositionStmt = db.prepare<[number, number]>(`
   UPDATE decisions SET status = 'closed', closed_at = ? WHERE id = ?
+`);
+
+const closePositionWithStatsStmt = db.prepare<[number, number, string, number, number, number]>(`
+  UPDATE decisions
+  SET status = 'closed', closed_at = ?, close_price = ?, close_reason = ?,
+      pnl_pct = ?, pnl_r = ?
+  WHERE id = ?
 `);
 
 const findByIdStmt = db.prepare<[number], DecisionRow>(
@@ -108,11 +121,15 @@ export function insertDecision(input: InsertDecisionInput): number {
   );
   const newId = Number(result.lastInsertRowid);
 
-  // CLOSE flips the parent to 'closed'.
-  if (input.decision.decision === 'CLOSE' && input.parentDecisionId) {
-    closePositionStmt.run(Date.now(), input.parentDecisionId);
-  }
+  // Note: we deliberately do NOT auto-close the parent here for CLOSE
+  // decisions any more — callers (LLM monitor, TP/SL monitor) call
+  // closePositionWithStats() so they can record close_price + PnL atomically.
   return newId;
+}
+
+/** Mark closed without stats (legacy fallback — prefer closePositionWithStats). */
+export function closePosition(id: number): void {
+  closePositionStmt.run(Date.now(), id);
 }
 
 /** All currently active OPEN positions across all symbols. */
@@ -127,6 +144,50 @@ export function findActiveOnSide(symbol: string, side: 'long' | 'short'): Decisi
 
 export function findDecisionById(id: number): DecisionRow | null {
   return findByIdStmt.get(id) ?? null;
+}
+
+/**
+ * Compute realised PnL for an OPEN trade given its SL and a fill price.
+ * pnl_pct: side-adjusted percent move from entry to close.
+ * pnl_r: in R-multiples (1R = SL distance from entry).
+ */
+export function calcPnl(
+  side: 'long' | 'short',
+  entry: number,
+  sl: number,
+  closePrice: number,
+): { pnlPct: number; pnlR: number } {
+  const dir = side === 'long' ? 1 : -1;
+  const pnlPct = ((closePrice - entry) / entry) * 100 * dir;
+  const slDist = Math.abs(entry - sl);
+  if (slDist === 0) return { pnlPct, pnlR: 0 };
+  const pnlDist = Math.abs(closePrice - entry);
+  const sign = pnlPct >= 0 ? 1 : -1;
+  const pnlR = sign * (pnlDist / slDist);
+  return {
+    pnlPct: Math.round(pnlPct * 100) / 100,
+    pnlR: Math.round(pnlR * 100) / 100,
+  };
+}
+
+export type ClosePositionInput = {
+  id: number;
+  closePrice: number;
+  closeReason: CloseReason;
+  pnlPct: number;
+  pnlR: number;
+};
+
+/** Close a position with full exit stats. Used by TP/SL monitor and LLM-driven close. */
+export function closePositionWithStats(input: ClosePositionInput): void {
+  closePositionWithStatsStmt.run(
+    Date.now(),
+    input.closePrice,
+    input.closeReason,
+    input.pnlPct,
+    input.pnlR,
+    input.id,
+  );
 }
 
 /**

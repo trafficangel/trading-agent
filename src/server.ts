@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { logger } from './lib/logger.js';
 import { luxalgoRoute } from './webhooks/luxalgo.route.js';
 import { startMonitorJob } from './jobs/monitor.js';
+import { startTpslMonitorJob } from './jobs/tpsl-monitor.js';
 import { startHeartbeatJob } from './jobs/heartbeat.js';
 import { startDailyWrapJob } from './jobs/daily-wrap.js';
 import { sendMessage } from './telegram/bot.js';
@@ -29,6 +30,7 @@ async function main(): Promise<void> {
 
   await luxalgoRoute(app);
   startMonitorJob();
+  startTpslMonitorJob();
   startHeartbeatJob();
   startDailyWrapJob();
 
