@@ -1,3 +1,6 @@
 allowBuilds:
   better-sqlite3: true
   esbuild: true
+  '@anthropic-ai/sdk': true
+  playwright-core: true
+  playwright: true
