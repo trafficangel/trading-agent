@@ -96,6 +96,30 @@ function latestPriceFor(symbol: string): number | null {
   return recent[0]?.price ?? null;
 }
 
+/** Min relative change of SL or TP (% of current price) to count as "substantial". */
+const SUBSTANTIAL_CHANGE_PCT = 0.3;
+
+/**
+ * A MODIFY is substantial if SL or TP moves >= SUBSTANTIAL_CHANGE_PCT.
+ * Trivial MODIFY (small trailing tweaks) are silenced — logged but not posted.
+ * CLOSE is always substantial.
+ */
+function isSubstantialChange(parent: DecisionRow, d: Decision): boolean {
+  if (d.decision === 'CLOSE') return true;
+  if (d.decision !== 'MODIFY') return true; // OPEN/SKIP — not relevant here
+
+  const parentSl = parent.sl ?? 0;
+  const newSl = d.sl ?? parentSl;
+  const slChangePct = parentSl > 0 ? (Math.abs(newSl - parentSl) / parentSl) * 100 : 0;
+
+  const parentTp =
+    parent.tp_json && parent.tp_json !== 'null' ? Number(JSON.parse(parent.tp_json)?.[0] ?? 0) : 0;
+  const newTp = d.tp[0] ?? parentTp;
+  const tpChangePct = parentTp > 0 ? (Math.abs(newTp - parentTp) / parentTp) * 100 : 0;
+
+  return slChangePct >= SUBSTANTIAL_CHANGE_PCT || tpChangePct >= SUBSTANTIAL_CHANGE_PCT;
+}
+
 async function monitorPosition(p: DecisionRow): Promise<void> {
   const sinceOpen = recentSignals(p.created_at).filter((s) => s.symbol === p.symbol);
   const currentPrice = latestPriceFor(p.symbol);
@@ -157,13 +181,29 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
     'monitor decision stored',
   );
 
-  // Posting:
-  //   SKIP (= HOLD)        -> Logs only, compact note (no Signals spam)
-  //   CLOSE / MODIFY       -> Signals channel with 15m photo + caption referencing parent
+  // Posting routing:
+  //   SKIP (= HOLD)               -> Logs only, compact note
+  //   MODIFY (trivial change)     -> Logs only — user shouldn't be pinged for tiny trail tweaks
+  //   MODIFY (substantial change) -> Signals channel with photo
+  //   CLOSE                        -> Signals channel with photo (always substantial)
+  const tradeIdStr = `#${p.id.toString().padStart(4, '0')}`;
+
   if (result.decision.decision === 'SKIP') {
     await sendMessage({
       channel: 'logs',
-      text: `🟦 <b>HOLD</b> по сделке #${p.id.toString().padStart(4, '0')} ${p.symbol}: ${result.decision.reasoning_short}`,
+      text: `🟦 <b>HOLD</b> по сделке ${tradeIdStr} ${p.symbol}: ${result.decision.reasoning_short}`,
+      disable_notification: true,
+    });
+    return;
+  }
+
+  const substantial = isSubstantialChange(p, result.decision);
+
+  if (result.decision.decision === 'MODIFY' && !substantial) {
+    // Trivial modify — quiet log. Decision still recorded in DB for audit.
+    await sendMessage({
+      channel: 'logs',
+      text: `🔧 <b>minor MODIFY</b> по сделке ${tradeIdStr} (silent — изменение &lt; ${SUBSTANTIAL_CHANGE_PCT}%): ${result.decision.reasoning_short}`,
       disable_notification: true,
     });
     return;
@@ -216,9 +256,10 @@ async function tick(): Promise<void> {
 }
 
 export function startMonitorJob(): void {
-  // Every 30 minutes — 15m primary TF doesn't move structurally faster.
-  cron.schedule('*/30 * * * *', () => {
+  // Once per hour at :00. 15m primary TF doesn't change structure that fast,
+  // and we'd rather burn fewer LLM tokens / produce fewer Telegram pings.
+  cron.schedule('0 * * * *', () => {
     void tick();
   });
-  logger.info('monitor cron started (every 30 min)');
+  logger.info('monitor cron started (every 1h)');
 }
