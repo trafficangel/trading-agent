@@ -15,8 +15,9 @@ export function startSummaryJob(): void {
       return;
     }
     const text = summaryPost(WINDOW_MIN, rows);
-    await sendMessage({ channel: 'signals', text, disable_notification: true });
-    logger.info({ groups: rows.length }, 'summary posted');
+    // Digest goes to Logs only — Signals channel is reserved for actual trades.
+    await sendMessage({ channel: 'logs', text, disable_notification: true });
+    logger.info({ groups: rows.length }, 'summary posted to logs');
   });
   logger.info({ window_min: WINDOW_MIN }, 'summary cron started');
 }

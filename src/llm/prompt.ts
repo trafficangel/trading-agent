@@ -12,7 +12,7 @@ ${DECISION_JSON_SCHEMA}
 Hard rules — violation means SKIP:
 - Never set SL further than 5% from entry, never closer than 0.2%.
 - Never set size_pct above 2.
-- Risk:reward of TP1 must be >= 1.0 (TP1 distance >= SL distance).
+- Provide EXACTLY ONE take-profit level in tp[0]. Risk:reward of that TP must be >= 1.0 (TP distance >= SL distance).
 - If signals conflict (mixed bullish/bearish in window) — SKIP.
 - If 1H context contradicts the 15m setup direction — SKIP unless you see textbook reversal pattern; in that case still cap confidence at 0.5.
 - If a position is already open in the same direction on this symbol — SKIP unless adding makes structural sense; explain in reasoning_full.

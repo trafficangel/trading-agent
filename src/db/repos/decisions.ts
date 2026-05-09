@@ -21,6 +21,9 @@ export type DecisionRow = {
   reasoning_short: string | null;
   reasoning_full: string | null;
   raw_response: string;
+  status: string;
+  parent_decision_id: number | null;
+  closed_at: number | null;
 };
 
 const insertStmt = db.prepare(`
@@ -28,9 +31,30 @@ const insertStmt = db.prepare(`
     created_at, symbol, confluence_score, signal_ids,
     screenshot_path, llm_input_tokens, llm_output_tokens,
     decision, side, entry, sl, tp_json, size_pct,
-    confidence, reasoning_short, reasoning_full, raw_response
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    confidence, reasoning_short, reasoning_full, raw_response,
+    status, parent_decision_id
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
+
+const findActiveStmt = db.prepare<[], DecisionRow>(`
+  SELECT * FROM decisions
+  WHERE status = 'active' AND decision = 'OPEN'
+  ORDER BY created_at ASC
+`);
+
+const findActiveBySymbolSideStmt = db.prepare<[string, string], DecisionRow>(`
+  SELECT * FROM decisions
+  WHERE status = 'active' AND decision = 'OPEN' AND symbol = ? AND side = ?
+  ORDER BY created_at DESC LIMIT 1
+`);
+
+const closePositionStmt = db.prepare<[number, number]>(`
+  UPDATE decisions SET status = 'closed', closed_at = ? WHERE id = ?
+`);
+
+const findByIdStmt = db.prepare<[number], DecisionRow>(
+  'SELECT * FROM decisions WHERE id = ?',
+);
 
 const lastDecisionStmt = db.prepare<[string, string, number], DecisionRow>(`
   SELECT * FROM decisions
@@ -46,10 +70,14 @@ export type InsertDecisionInput = {
   inputTokens: number;
   outputTokens: number;
   rawResponse: string;
+  /** id of the parent OPEN decision when this is a CLOSE/MODIFY follow-up */
+  parentDecisionId?: number;
 };
 
 export function insertDecision(input: InsertDecisionInput): number {
   const winning = input.agg.side === 'long' ? input.agg.bullish : input.agg.bearish;
+  // OPEN starts 'active' (alive position to monitor); everything else is 'final'.
+  const status = input.decision.decision === 'OPEN' ? 'active' : 'final';
   const result = insertStmt.run(
     Date.now(),
     input.symbol,
@@ -68,8 +96,30 @@ export function insertDecision(input: InsertDecisionInput): number {
     input.decision.reasoning_short,
     input.decision.reasoning_full,
     input.rawResponse,
+    status,
+    input.parentDecisionId ?? null,
   );
-  return Number(result.lastInsertRowid);
+  const newId = Number(result.lastInsertRowid);
+
+  // CLOSE flips the parent to 'closed'.
+  if (input.decision.decision === 'CLOSE' && input.parentDecisionId) {
+    closePositionStmt.run(Date.now(), input.parentDecisionId);
+  }
+  return newId;
+}
+
+/** All currently active OPEN positions across all symbols. */
+export function findActivePositions(): DecisionRow[] {
+  return findActiveStmt.all();
+}
+
+/** Active position on (symbol, side) — used to decide if a new OPEN should add or skip. */
+export function findActiveOnSide(symbol: string, side: 'long' | 'short'): DecisionRow | null {
+  return findActiveBySymbolSideStmt.get(symbol, side) ?? null;
+}
+
+export function findDecisionById(id: number): DecisionRow | null {
+  return findByIdStmt.get(id) ?? null;
 }
 
 /**

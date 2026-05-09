@@ -21,9 +21,11 @@ export const Decision = z.object({
   side: opt(DecisionSide),
   entry: opt(z.number().positive()),
   sl: opt(z.number().positive()),
+  // Single TP for now (we keep an array shape so we can grow to TP1/TP2 later
+  // without breaking the storage format).
   tp: z
     .array(z.number().positive())
-    .max(5)
+    .max(1)
     .nullable()
     .optional()
     .transform((v) => v ?? []),

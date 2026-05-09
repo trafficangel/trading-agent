@@ -1,5 +1,9 @@
 import { aggregateSymbol, shouldInvokeLlm } from '../signals/aggregator.js';
-import { recentNonSkipDecision, insertDecision } from '../db/repos/decisions.js';
+import {
+  recentNonSkipDecision,
+  insertDecision,
+  findActiveOnSide,
+} from '../db/repos/decisions.js';
 import { callLlm } from '../llm/client.js';
 import { captureChart } from '../browser/tradingview.js';
 import { checkDecision, type RiskLimits } from '../risk/manager.js';
@@ -33,6 +37,17 @@ export async function maybeDecide(symbol: string): Promise<void> {
     logger.info(
       { symbol, side: agg.side, last_id: recent.id },
       'cooldown active — skipping LLM call',
+    );
+    return;
+  }
+
+  // If there is already an active position in the same direction, monitor cron
+  // owns the lifecycle — we skip a fresh OPEN call.
+  const active = findActiveOnSide(symbol, agg.side);
+  if (active) {
+    logger.info(
+      { symbol, side: agg.side, active_id: active.id },
+      'active position exists — monitor will handle, skipping new OPEN call',
     );
     return;
   }

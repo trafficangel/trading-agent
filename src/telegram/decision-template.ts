@@ -34,36 +34,48 @@ export type DecisionPostInput = {
   decision: Decision;
   riskGate: { ok: true } | { ok: false; reason: string };
   shadowMode: boolean;
+  /** when this is a CLOSE/MODIFY of an earlier OPEN, original trade id */
+  parentTradeId?: number;
 };
 
 /** Russian Telegram caption for OPEN/CLOSE/MODIFY (max 1024 chars). */
 export function tradeCaption(i: DecisionPostInput): string {
   const d = i.decision;
   const tradeId = `#${i.decisionId.toString().padStart(4, '0')}`;
+  const parentRef =
+    i.parentTradeId !== undefined
+      ? ` ← по сделке #${i.parentTradeId.toString().padStart(4, '0')}`
+      : '';
   const sideE = d.side ? SIDE_EMOJI[d.side] ?? '' : '';
   const sideRu = d.side ? SIDE_RU[d.side] ?? d.side : '';
   const shadow = i.shadowMode ? ' <i>(shadow)</i>' : '';
   const lines: string[] = [
-    `<b>${DECISION_RU[d.decision] ?? d.decision} ${tradeId}</b>${shadow}`,
-    `${sideE} <b>${escapeHtml(i.symbol)}</b> ${sideRu} · ${tfLabel('15')} entry`,
+    `<b>${DECISION_RU[d.decision] ?? d.decision} ${tradeId}</b>${parentRef}${shadow}`,
+    `${sideE} <b>${escapeHtml(i.symbol)}</b>${sideRu ? ' ' + sideRu : ''} · ${tfLabel('15')} entry`,
   ];
 
   if (d.decision === 'OPEN' && d.entry && d.sl) {
     const slPct = pctDistance(d.entry, d.sl);
     lines.push('');
     lines.push(`📥 Вход:   <code>${d.entry}</code>`);
-    lines.push(`🛡 Стоп:   <code>${d.sl}</code> (<code>${slPct}%</code>)`);
+    lines.push(`🛡 Стоп:   <code>${d.sl}</code>  (<code>${slPct}%</code>)`);
     if (d.tp.length) {
-      lines.push(`🎯 Цели:   <code>${d.tp.join(' → ')}</code>`);
       const tp1 = d.tp[0]!;
+      const tp1Pct = pctDistance(d.entry, tp1);
+      lines.push(`🎯 Цель:   <code>${tp1}</code>  (<code>${tp1Pct}%</code>)`);
       const slDist = Math.abs(d.entry - d.sl);
       const tp1Dist = Math.abs(tp1 - d.entry);
       const rr = Math.round((tp1Dist / slDist) * 10) / 10;
-      lines.push(`📐 R:R TP1: <code>${rr}</code>`);
+      lines.push(`📐 R:R:    <code>1 : ${rr}</code>`);
     }
     if (d.size_pct !== undefined) {
       lines.push(`🎚 Размер: <code>${d.size_pct}%</code> от депозита`);
     }
+    lines.push(`💪 Уверенность: <code>${(d.confidence * 100).toFixed(0)}%</code>`);
+  } else if (d.decision === 'MODIFY') {
+    lines.push('');
+    if (d.sl !== undefined) lines.push(`🛡 Новый стоп: <code>${d.sl}</code>`);
+    if (d.tp.length) lines.push(`🎯 Новая цель: <code>${d.tp[0]}</code>`);
     lines.push(`💪 Уверенность: <code>${(d.confidence * 100).toFixed(0)}%</code>`);
   } else {
     lines.push('');
@@ -77,11 +89,6 @@ export function tradeCaption(i: DecisionPostInput): string {
     lines.push('');
     lines.push(`⚠️ <i>risk gate: ${escapeHtml(i.riskGate.reason)}</i>`);
   }
-
-  lines.push('');
-  lines.push(
-    `📊 Score: <code>${i.agg.bullish}</code>/<code>${i.agg.bearish}</code> · ${i.agg.signals.length} сигналов / 10м`,
-  );
 
   return lines.join('\n').slice(0, 1024);
 }
