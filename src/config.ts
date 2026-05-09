@@ -29,6 +29,10 @@ const Schema = z.object({
   COOLDOWN_MIN_SAME_SYMBOL: z.coerce.number().int().nonnegative().default(15),
 
   MODE: Mode.default('telemetry'),
+
+  CHROMIUM_PATH: z.string().optional(),
+
+
   SYMBOLS: z
     .string()
     .default('BTCUSDT,ETHUSDT,SOLUSDT')

@@ -25,6 +25,7 @@ async function getContext(): Promise<BrowserContext> {
 
   browserInstance = await chromium.launch({
     headless: true,
+    executablePath: process.env.CHROMIUM_PATH || undefined,
     args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
   });
   contextInstance = await browserInstance.newContext({
