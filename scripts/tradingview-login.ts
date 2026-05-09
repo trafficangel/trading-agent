@@ -1,72 +1,78 @@
 /**
  * One-time TradingView login → save storage state for headless reuse.
  *
- * Run on a machine with a GUI (your Mac). Opens a real Chromium window,
- * navigates to TradingView sign-in, fills email + password from environment,
- * waits for you to confirm any captcha / 2FA, then saves cookies+localStorage
- * to data/tradingview-storage-state.json.
- *
- * After capture: scp data/tradingview-storage-state.json trading-vps:~/apps/trading-agent/data/
- *
- * Env required:
- *   TRADINGVIEW_USER  — email or username
- *   TRADINGVIEW_PASS  — password
+ * Run on a machine with a GUI (your Mac).
+ * Opens a Chromium window pointing at TradingView's signin page.
+ * Wait for the user to log in manually (no env creds, robust to UI changes).
+ * Detection: URL has been on a non-signin TV page for 5+ seconds AND tv_session
+ * cookie is present.
  */
 import { chromium } from 'playwright';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const OUT = resolve('data', 'tradingview-storage-state.json');
-
-const user = process.env.TRADINGVIEW_USER;
-const pass = process.env.TRADINGVIEW_PASS;
-if (!user || !pass) {
-  console.error('Set TRADINGVIEW_USER and TRADINGVIEW_PASS env vars and re-run.');
-  process.exit(1);
-}
+const SIGNIN_URL = 'https://www.tradingview.com/accounts/signin/';
+const TIMEOUT_MS = 10 * 60_000;
 
 (async () => {
   mkdirSync('data', { recursive: true });
-  const browser = await chromium.launch({ headless: false, args: ['--start-maximized'] });
-  const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
+
+  const browser = await chromium.launch({
+    headless: false,
+    args: ['--start-maximized'],
+  });
+  const ctx = await browser.newContext({ viewport: null });
   const page = await ctx.newPage();
 
-  console.log('Opening TradingView sign-in…');
-  await page.goto('https://www.tradingview.com/accounts/signin/', { waitUntil: 'domcontentloaded' });
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('TradingView login flow (manual)');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('1. Sign in in the browser window.');
+  console.log('2. Once any TradingView page loads after signin, the script');
+  console.log('   will detect the session cookie and save state.');
+  console.log('3. You can also manually quit by pressing Ctrl+C — state will');
+  console.log('   be saved on exit if you are logged in.');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-  // Click "Email" button if a chooser is shown
-  const emailButton = page.getByText(/email/i).first();
-  if (await emailButton.count()) {
-    await emailButton.click().catch(() => {});
+  await page.goto(SIGNIN_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+
+  const start = Date.now();
+  let lastReport = 0;
+
+  const isLoggedIn = async (): Promise<boolean> => {
+    try {
+      const cookies = await ctx.cookies('https://www.tradingview.com');
+      const session = cookies.find((c) => c.name === 'sessionid' || c.name === 'tv_session' || c.name === 'sessionid_sign');
+      const url = page.url();
+      const onSignin = /signin|signup|accounts\.tradingview\.com/.test(url);
+      return Boolean(session && session.value && session.value.length > 5) && !onSignin;
+    } catch {
+      return false;
+    }
+  };
+
+  while (Date.now() - start < TIMEOUT_MS) {
+    if (await isLoggedIn()) {
+      console.log(`\n✅ Login detected (URL: ${page.url()})`);
+      await ctx.storageState({ path: OUT });
+      const sz = statSync(OUT).size;
+      console.log(`✅ Storage state saved: ${OUT} (${sz} bytes)`);
+      console.log('\nNext: scp data/tradingview-storage-state.json trading-vps:~/apps/trading-agent/data/');
+      await browser.close();
+      process.exit(0);
+    }
+    if (Date.now() - lastReport > 15000) {
+      console.log(`waiting… (current url: ${page.url()})`);
+      lastReport = Date.now();
+    }
+    await page.waitForTimeout(2000);
   }
 
-  await page.waitForSelector('input[name="id_username"], input[name="username"]', { timeout: 30_000 });
-  await page.fill('input[name="id_username"], input[name="username"]', user);
-  await page.fill('input[name="id_password"], input[name="password"]', pass);
-
-  // Submit
-  const submitBtn = page.getByRole('button', { name: /sign in|войти/i }).first();
-  await submitBtn.click();
-
-  console.log('\nSubmitted. If captcha or email-code appears, solve it in the open browser window.');
-  console.log('Waiting up to 5 minutes for you to land on the chart page…\n');
-
-  // Wait for either the user menu (logged in) or 5 min.
-  const success = await Promise.race([
-    page.waitForURL(/\/chart|\/u\//, { timeout: 5 * 60_000 }).then(() => true).catch(() => false),
-    page.locator('[data-name="header-user-menu-button"]').waitFor({ timeout: 5 * 60_000 }).then(() => true).catch(() => false),
-  ]);
-
-  if (!success) {
-    console.error('Did not detect successful login. Aborting without saving.');
-    await browser.close();
-    process.exit(2);
-  }
-
-  await ctx.storageState({ path: OUT });
-  console.log(`\n✅ Storage state saved to ${OUT}`);
-  console.log('Next: scp data/tradingview-storage-state.json trading-vps:~/apps/trading-agent/data/');
+  console.error('\n❌ Timed out waiting for login.');
+  if (existsSync(OUT)) console.error(`Old state remains at ${OUT}`);
   await browser.close();
+  process.exit(2);
 })().catch((err) => {
   console.error('login flow failed:', err);
   process.exit(1);

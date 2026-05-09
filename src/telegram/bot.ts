@@ -33,7 +33,11 @@ export async function sendMessage(opts: SendOpts): Promise<{ message_id: number 
       logger.error({ channel: opts.channel, err: body.description }, 'telegram send failed');
       return null;
     }
-    return body.result ? { message_id: body.result.message_id } : null;
+    if (body.result) {
+      logger.info({ channel: opts.channel, message_id: body.result.message_id }, 'telegram sent');
+      return { message_id: body.result.message_id };
+    }
+    return null;
   } catch (err) {
     logger.error({ err, channel: opts.channel }, 'telegram request failed');
     return null;

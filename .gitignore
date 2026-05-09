@@ -8,12 +8,10 @@ coverage/
 .env.*.local
 *.local
 
-data/*.sqlite
-data/*.sqlite-journal
-data/*.sqlite-wal
-data/*.sqlite-shm
-data/screenshots/
+data/
 storageState.json
+*storage-state.json
+tradingview-storage-state.json
 
 logs/
 *.log
