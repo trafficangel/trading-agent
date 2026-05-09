@@ -45,7 +45,7 @@ describe('checkDecision', () => {
   });
 
   it('size_pct > cap fails', () => {
-    const r = checkDecision({ ...baseOpenLong, size_pct: 5 });
+    const r = checkDecision({ ...baseOpenLong, size_pct: 2.5 });
     expect(r.ok).toBe(false);
   });
 

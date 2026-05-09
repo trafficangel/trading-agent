@@ -3,8 +3,8 @@ import { recentNonSkipDecision, insertDecision } from '../db/repos/decisions.js'
 import { callLlm } from '../llm/client.js';
 import { captureChart } from '../browser/tradingview.js';
 import { checkDecision, type RiskLimits } from '../risk/manager.js';
-import { sendMessage } from '../telegram/bot.js';
-import { decisionPost } from '../telegram/decision-template.js';
+import { sendMessage, sendPhoto } from '../telegram/bot.js';
+import { tradeCaption, skipLog } from '../telegram/decision-template.js';
 import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
 import { existsSync } from 'node:fs';
@@ -20,7 +20,6 @@ const STORAGE_STATE = resolve('data', 'tradingview-storage-state.json');
  * propagate to the webhook handler.
  */
 export async function maybeDecide(symbol: string): Promise<void> {
-  // Only run in modes that consult the LLM
   if (config.MODE === 'telemetry') return;
 
   const agg = aggregateSymbol(symbol);
@@ -29,7 +28,6 @@ export async function maybeDecide(symbol: string): Promise<void> {
     return;
   }
 
-  // Cooldown
   const recent = recentNonSkipDecision(symbol, agg.side, COOLDOWN_MS);
   if (recent) {
     logger.info(
@@ -44,7 +42,6 @@ export async function maybeDecide(symbol: string): Promise<void> {
     'invoking LLM',
   );
 
-  // Capture screenshots if storage state is available; otherwise skip
   let screenshots: { path: string; mediaType: 'image/png' }[] = [];
   let primaryScreenshot: string | null = null;
   if (existsSync(STORAGE_STATE)) {
@@ -67,8 +64,8 @@ export async function maybeDecide(symbol: string): Promise<void> {
     {
       symbol,
       agg,
-      open_positions: [], // stage 2 stub
-      daily_pnl_pct: 0, // stage 2 stub
+      open_positions: [],
+      daily_pnl_pct: 0,
       mode: config.MODE,
     },
     screenshots,
@@ -85,10 +82,8 @@ export async function maybeDecide(symbol: string): Promise<void> {
     maxSlDistPct: 5.0,
   };
   const riskGate = checkDecision(result.decision, limits);
-  // In shadow mode, post regardless; risk gate result is shown in the message
-  // so we can see how often the model would have been blocked.
 
-  const id = insertDecision({
+  const decisionId = insertDecision({
     symbol,
     agg,
     decision: result.decision,
@@ -100,7 +95,7 @@ export async function maybeDecide(symbol: string): Promise<void> {
 
   logger.info(
     {
-      decision_id: id,
+      decision_id: decisionId,
       symbol,
       decision: result.decision.decision,
       side: result.decision.side,
@@ -113,8 +108,38 @@ export async function maybeDecide(symbol: string): Promise<void> {
     'decision stored',
   );
 
-  await sendMessage({
-    channel: 'signals',
-    text: decisionPost({ symbol, agg, decision: result.decision, riskGate, shadowMode: true }),
-  });
+  const post = {
+    decisionId,
+    symbol,
+    agg,
+    decision: result.decision,
+    riskGate,
+    shadowMode: config.MODE !== 'full_auto',
+  };
+
+  // Routing:
+  //   OPEN / CLOSE / MODIFY → Signals channel with photo (15m chart) + Russian caption
+  //   SKIP                  → Logs channel only, compact one-liner
+  if (result.decision.decision === 'SKIP') {
+    await sendMessage({ channel: 'logs', text: skipLog(post), disable_notification: true });
+    return;
+  }
+
+  const caption = tradeCaption(post);
+  if (primaryScreenshot && existsSync(primaryScreenshot)) {
+    const sent = await sendPhoto({
+      channel: 'signals',
+      photoPath: primaryScreenshot,
+      caption,
+    });
+    if (!sent) {
+      // fallback to text-only if sendPhoto fails (file too big, network etc.)
+      await sendMessage({ channel: 'signals', text: caption });
+    }
+  } else {
+    await sendMessage({ channel: 'signals', text: caption });
+  }
+
+  // Always mirror to Logs for audit trail
+  await sendMessage({ channel: 'logs', text: caption, disable_notification: true });
 }
