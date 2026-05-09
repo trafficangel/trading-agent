@@ -61,13 +61,18 @@ export async function maybeDecide(symbol: string): Promise<void> {
   let primaryScreenshot: string | null = null;
   if (existsSync(STORAGE_STATE)) {
     try {
-      const path15 = await captureChart(symbol, '15');
-      const path1h = await captureChart(symbol, '60');
+      // Subject charts first, then BTC context.
+      const subj15 = await captureChart(symbol, '15');
+      const subj1h = await captureChart(symbol, '60');
+      const btc15 = await captureChart('BTCUSDT', '15');
+      const btc1h = await captureChart('BTCUSDT', '60');
       screenshots = [
-        { path: path15, mediaType: 'image/png' },
-        { path: path1h, mediaType: 'image/png' },
+        { path: subj15, mediaType: 'image/png' },
+        { path: subj1h, mediaType: 'image/png' },
+        { path: btc15, mediaType: 'image/png' },
+        { path: btc1h, mediaType: 'image/png' },
       ];
-      primaryScreenshot = path15;
+      primaryScreenshot = subj15;
     } catch (err) {
       logger.error({ err, symbol }, 'screenshot capture failed — calling LLM without images');
     }
@@ -95,6 +100,7 @@ export async function maybeDecide(symbol: string): Promise<void> {
     maxSizePct: config.RISK_PCT_PER_TRADE * 4,
     minSlDistPct: 0.2,
     maxSlDistPct: 5.0,
+    minRR: 1.5,
   };
   const riskGate = checkDecision(result.decision, limits);
 

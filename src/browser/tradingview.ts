@@ -1,4 +1,4 @@
-import { chromium, type Browser, type BrowserContext } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { existsSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { logger } from '../lib/logger.js';
@@ -39,6 +39,45 @@ async function getContext(): Promise<BrowserContext> {
 }
 
 /**
+ * Detect and dismiss TradingView's "Session disconnected" modal that appears
+ * when another device (e.g. user's laptop) signs into the same TV account.
+ * The modal blocks the chart with a centered dialog and a black "Connect"
+ * button. Clicking Connect reclaims the session for the bot — at the cost of
+ * kicking the other device. That's the deliberate trade-off in shadow mode.
+ */
+async function reclaimSessionIfNeeded(page: Page): Promise<boolean> {
+  // Headings TV uses across locales:
+  //   English:   "Session disconnected"
+  //   Russian:   "Сессия завершена" / "Сеанс завершён"
+  const dialog = page.getByText(
+    /Session disconnected|Сессия завершена|Сеанс завершён|Session ended/i,
+  );
+  if ((await dialog.count()) === 0) return false;
+
+  logger.warn({ url: page.url() }, 'TV session-disconnected modal detected — reclaiming');
+
+  // Try the localized "Connect" / "Подключить" button.
+  const connectBtn = page.getByRole('button', {
+    name: /^\s*(connect|подключить|continue|продолжить)\s*$/i,
+  });
+  if ((await connectBtn.count()) > 0) {
+    await connectBtn.first().click({ timeout: 5_000 }).catch(() => {});
+  } else {
+    // Fallback: any button containing "Connect"-like word.
+    const anyConnect = page.locator('button:has-text("Connect"), button:has-text("Подключить")');
+    await anyConnect.first().click({ timeout: 5_000 }).catch(() => {});
+  }
+
+  await page.waitForTimeout(3_000);
+  // Re-wait for chart canvas after reclaiming.
+  await page
+    .waitForSelector('canvas[data-name="pane-canvas"]', { timeout: 15_000 })
+    .catch(() => {});
+  await page.waitForTimeout(2_000);
+  return true;
+}
+
+/**
  * Capture a chart screenshot for `symbol` at `interval` (TradingView interval string).
  * Returns the PNG path.
  */
@@ -53,15 +92,17 @@ export async function captureChart(
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     // Wait for chart canvas to render
     await page.waitForSelector('canvas[data-name="pane-canvas"]', { timeout: 20_000 }).catch(() => {});
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(4_000);
+
+    // If TV booted us with the session-conflict modal, click Connect and try again.
+    const reclaimed = await reclaimSessionIfNeeded(page);
+    if (reclaimed) await page.waitForTimeout(2_000);
 
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     mkdirSync(SCREENSHOTS_DIR, { recursive: true });
     const out = resolve(SCREENSHOTS_DIR, `${symbol}_${interval}m_${ts}.png`);
     mkdirSync(dirname(out), { recursive: true });
 
-    // Try to crop chart area only (no left toolbar / right symbol panel).
-    // Selector based on TV layout — fallback to full page if it changes.
     const chartLocator = page.locator('.chart-container').first();
     if (await chartLocator.count()) {
       await chartLocator.screenshot({ path: out });
@@ -69,7 +110,7 @@ export async function captureChart(
       await page.screenshot({ path: out, fullPage: false });
     }
 
-    logger.info({ symbol, interval, path: out }, 'chart captured');
+    logger.info({ symbol, interval, path: out, reclaimed }, 'chart captured');
     return out;
   } finally {
     await page.close();

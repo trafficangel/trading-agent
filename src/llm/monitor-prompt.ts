@@ -6,7 +6,7 @@ export function buildMonitorSystemPrompt(): string {
   return `You are managing an open intraday trade on Bybit USDT-perp.
 You receive: (1) the original trade params (entry, SL, TP, side, opened_at, original reasoning),
 (2) signals received on that symbol since the trade opened,
-(3) chart screenshots NOW (15m primary + 1H context),
+(3) chart screenshots NOW: SUBJECT 15m + 1H, plus BTC 15m + 1H for context,
 (4) current price (last known).
 
 Your task: decide whether to HOLD, CLOSE, or MODIFY this trade. Return strict JSON:
@@ -21,12 +21,15 @@ Mapping for monitor mode:
 Hard rules:
 - Only CLOSE if structural reason exists: opposite-direction confluence appeared,
   textbook reversal pattern formed, key support/resistance broken against you,
-  or 1H context flipped against the trade.
+  1H context flipped against the trade, or BTC made a strong move against the
+  alt's direction without local divergence.
 - Do NOT close on noise (single conflicting micro-signal, brief wick).
 - MODIFY may move SL toward break-even after favorable progress, or trail SL behind
   a clear new structure. Never widen SL beyond the original.
 - TP can be raised if price has cleared the original TP zone with continuation
   structure; never lower the TP.
+- If BTC just made a sharp move while the alt is consolidating, factor in pending
+  catch-up move when deciding to HOLD.
 
 Style:
 - reasoning_short and reasoning_full in Russian.
@@ -81,7 +84,11 @@ ${sigs}
 Current price (latest signal): ${ctx.currentPrice ?? 'unknown'}
 Estimated open PnL: ${pnlEstimate}
 
-Attached: 15m chart NOW, 1H chart NOW.
+Attached, in order:
+  1. ${p.symbol} 15m NOW
+  2. ${p.symbol} 1H  NOW
+  3. BTCUSDT 15m NOW (market context)
+  4. BTCUSDT 1H  NOW
 
 Decide HOLD / CLOSE / MODIFY and respond with JSON only.`;
 }

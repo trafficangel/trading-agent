@@ -11,12 +11,15 @@ export type RiskLimits = {
   minSlDistPct: number;
   /** Max SL distance as % of entry. */
   maxSlDistPct: number;
+  /** Minimum R:R ratio for TP1 (TP1 distance / SL distance). */
+  minRR: number;
 };
 
 export const DEFAULT_LIMITS: RiskLimits = {
   maxSizePct: 2.0,
   minSlDistPct: 0.2,
   maxSlDistPct: 5.0,
+  minRR: 1.5,
 };
 
 /**
@@ -49,13 +52,17 @@ export function checkDecision(d: Decision, limits: RiskLimits = DEFAULT_LIMITS):
     return { ok: false, reason: `size_pct ${d.size_pct} exceeds cap ${limits.maxSizePct}` };
   }
 
-  // TP1 R:R >= 1
+  // TP1 R:R >= configured minimum (default 1.5)
   if (d.tp.length === 0) return { ok: false, reason: 'no TP set' };
   const tp1 = d.tp[0]!;
   const slDist = Math.abs(d.entry - d.sl);
   const tp1Dist = Math.abs(tp1 - d.entry);
-  if (tp1Dist < slDist) {
-    return { ok: false, reason: `TP1 R:R < 1 (tp1 dist ${tp1Dist}, sl dist ${slDist})` };
+  const rr = tp1Dist / slDist;
+  if (rr < limits.minRR) {
+    return {
+      ok: false,
+      reason: `TP1 R:R = ${rr.toFixed(2)} < ${limits.minRR} required`,
+    };
   }
 
   // TP1 direction sanity

@@ -105,10 +105,12 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
   let primaryScreenshot: string | null = null;
   if (existsSync(STORAGE_STATE)) {
     try {
-      const path15 = await captureChart(p.symbol, '15');
-      const path1h = await captureChart(p.symbol, '60');
-      screenshots = [path15, path1h];
-      primaryScreenshot = path15;
+      const subj15 = await captureChart(p.symbol, '15');
+      const subj1h = await captureChart(p.symbol, '60');
+      const btc15 = await captureChart('BTCUSDT', '15');
+      const btc1h = await captureChart('BTCUSDT', '60');
+      screenshots = [subj15, subj1h, btc15, btc1h];
+      primaryScreenshot = subj15;
     } catch (err) {
       logger.error({ err, symbol: p.symbol, position_id: p.id }, 'monitor screenshot failed');
     }

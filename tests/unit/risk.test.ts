@@ -7,7 +7,7 @@ const baseOpenLong: Decision = {
   side: 'long',
   entry: 100,
   sl: 98,
-  tp: [104, 108],
+  tp: [104], // 4 / 2 = 2 R:R, passes minRR=1.5
   size_pct: 1,
   confidence: 0.6,
   reasoning_short: 'test',
@@ -39,8 +39,8 @@ describe('checkDecision', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('TP1 R:R < 1 fails', () => {
-    const r = checkDecision({ ...baseOpenLong, entry: 100, sl: 98, tp: [101] });
+  it('TP1 R:R < 1.5 fails', () => {
+    const r = checkDecision({ ...baseOpenLong, entry: 100, sl: 98, tp: [102] });
     expect(r.ok).toBe(false);
   });
 
