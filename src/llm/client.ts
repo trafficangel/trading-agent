@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import { Decision } from './decision.schema.js';
 import { buildSystemPrompt, buildUserMessage, type LlmContext } from './prompt.js';
+import { maybeNotifyBillingError } from './billing-alert.js';
 import { readFileSync } from 'node:fs';
 
 const MAX_RETRIES = 2;
@@ -121,6 +122,9 @@ export async function callLlm(
     } catch (err) {
       logger.error({ err, attempt }, 'anthropic call failed');
       lastError = `API error: ${(err as Error).message}`;
+      // If this is a billing error, no point retrying. Notify and bail.
+      const isBilling = await maybeNotifyBillingError(err, 'decide.callLlm');
+      if (isBilling) break;
     }
   }
 

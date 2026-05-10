@@ -16,6 +16,7 @@ import { recentSignals } from '../db/repos/signals.js';
 import { captureChart } from '../browser/tradingview.js';
 import { Decision } from '../llm/decision.schema.js';
 import { buildMonitorSystemPrompt, buildMonitorUserMessage } from '../llm/monitor-prompt.js';
+import { maybeNotifyBillingError } from '../llm/billing-alert.js';
 import { aggregateSymbol } from '../signals/aggregator.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { tradeCaption } from '../telegram/decision-template.js';
@@ -94,6 +95,8 @@ async function callMonitorLlm(
     } catch (err) {
       logger.error({ err, attempt }, 'monitor llm call failed');
       lastError = `API error: ${(err as Error).message}`;
+      const isBilling = await maybeNotifyBillingError(err, 'monitor.callMonitorLlm');
+      if (isBilling) break;
     }
   }
 

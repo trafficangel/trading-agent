@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { readFileSync } from 'node:fs';
 import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
+import { maybeNotifyBillingError } from './billing-alert.js';
 import type { Decision } from './decision.schema.js';
 import type { LlmContext } from './prompt.js';
 import { formatSentiment } from '../exchange/bybit-public.js';
@@ -202,6 +203,8 @@ export async function critiqueDecision(
     } catch (err) {
       logger.error({ err, attempt }, 'critique call failed');
       lastError = `API error: ${(err as Error).message}`;
+      const isBilling = await maybeNotifyBillingError(err, 'critique');
+      if (isBilling) break;
     }
   }
 
