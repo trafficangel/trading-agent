@@ -1,5 +1,7 @@
 import { request } from 'undici';
 import { logger } from '../lib/logger.js';
+import { normalizeSymbol } from './symbols.js';
+import type { ExchangeOrderbook, ExchangeTicker, OrderbookLevel } from './types.js';
 
 const BASE = 'https://api.bybit.com';
 
@@ -191,6 +193,108 @@ export async function getMarketSentiment(symbol: string): Promise<MarketSentimen
 
   sentimentCache.set(symbol, { data, ts: Date.now() });
   return data;
+}
+
+// ============================================================
+// Multi-exchange adapter API (matches binance-public + okx-public shapes).
+// Internally reuses fetchTickerFull / fetchOiSeries / fetchLsRatio above.
+// ============================================================
+
+/**
+ * Bybit ticker normalized to the cross-exchange shape. Used by the
+ * multi-exchange aggregator alongside binance/okx variants.
+ */
+export async function getBybitTicker(canonical: string): Promise<ExchangeTicker | null> {
+  const ticker = await fetchTickerFull(canonical);
+  if (!ticker || !ticker.lastPrice) return null;
+
+  const lastPrice = Number(ticker.lastPrice);
+  if (!Number.isFinite(lastPrice) || lastPrice <= 0) return null;
+
+  const fundingRate = ticker.fundingRate ? Number(ticker.fundingRate) : null;
+  const openInterest = ticker.openInterest ? Number(ticker.openInterest) : null;
+  const priceChange24hPct = ticker.price24hPcnt
+    ? Math.round(Number(ticker.price24hPcnt) * 10000) / 100
+    : null;
+
+  return {
+    exchange: 'bybit',
+    symbol: canonical,
+    lastPrice,
+    fundingRate: Number.isFinite(fundingRate ?? NaN) ? fundingRate : null,
+    openInterest: openInterest && Number.isFinite(openInterest) ? openInterest : null,
+    openInterestUsd:
+      openInterest && Number.isFinite(openInterest) ? openInterest * lastPrice : null,
+    priceChange24hPct,
+    fetchedAt: Date.now(),
+  };
+}
+
+type OrderbookResp = {
+  retCode: number;
+  retMsg: string;
+  result?: {
+    s: string;
+    a: [string, string][];
+    b: [string, string][];
+    ts: number;
+    u: number;
+  };
+};
+
+/**
+ * Bybit orderbook (linear perp). max limit=200.
+ */
+export async function getBybitOrderbook(
+  canonical: string,
+  limit: 1 | 50 | 200 = 200,
+): Promise<ExchangeOrderbook | null> {
+  const sym = normalizeSymbol(canonical, 'bybit');
+  try {
+    const res = await request(
+      `${BASE}/v5/market/orderbook?category=linear&symbol=${sym}&limit=${limit}`,
+      { method: 'GET', headersTimeout: 5_000, bodyTimeout: 5_000 },
+    );
+    const body = (await res.body.json()) as OrderbookResp;
+    if (body.retCode !== 0 || !body.result) {
+      logger.warn(
+        { retCode: body.retCode, msg: body.retMsg, symbol: canonical },
+        'bybit orderbook non-OK',
+      );
+      return null;
+    }
+    const r = body.result;
+    if (!r.b || !r.a || r.b.length === 0 || r.a.length === 0) return null;
+
+    const parseLevel = (l: [string, string]): OrderbookLevel | null => {
+      const price = Number(l[0]);
+      const qty = Number(l[1]);
+      if (!Number.isFinite(price) || !Number.isFinite(qty) || price <= 0 || qty <= 0) return null;
+      return { price, qty, usd: price * qty };
+    };
+
+    const bids = r.b
+      .map(parseLevel)
+      .filter((x): x is OrderbookLevel => x !== null)
+      .sort((a, b) => b.price - a.price);
+    const asks = r.a
+      .map(parseLevel)
+      .filter((x): x is OrderbookLevel => x !== null)
+      .sort((a, b) => a.price - b.price);
+
+    if (!bids[0] || !asks[0]) return null;
+    return {
+      exchange: 'bybit',
+      symbol: canonical,
+      midPrice: (bids[0].price + asks[0].price) / 2,
+      bids,
+      asks,
+      fetchedAt: Date.now(),
+    };
+  } catch (err) {
+    logger.error({ err, symbol: canonical }, 'bybit orderbook request failed');
+    return null;
+  }
 }
 
 export function formatSentiment(s: MarketSentiment | null): string {
