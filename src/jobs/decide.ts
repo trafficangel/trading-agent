@@ -1,7 +1,6 @@
 import { aggregateSymbol, shouldInvokeLlm } from '../signals/aggregator.js';
 import { detectRegime } from '../signals/regime.js';
 import {
-  recentNonSkipDecision,
   insertDecision,
   findActiveOnSide,
 } from '../db/repos/decisions.js';
@@ -25,14 +24,19 @@ import {
 } from '../exchange/multi-exchange.js';
 import { getLiquidations } from '../exchange/liquidations.js';
 
-const COOLDOWN_MS = 15 * 60 * 1000;
 const STORAGE_STATE = resolve('data', 'tradingview-storage-state.json');
 
 /**
- * Decide pipeline: called after every signal insertion. Computes confluence,
- * checks threshold + cooldown, captures screenshots, calls LLM, stores
- * decision, posts to Telegram. Best-effort; errors are logged but never
- * propagate to the webhook handler.
+ * Decide pipeline: invoked from the scheduled decide-cron (every 15 min on
+ * bar boundaries). Computes confluence, captures screenshots + market
+ * context, calls LLM, applies self-critique + sizing tier + risk gate,
+ * stores decision, posts to Telegram. Errors are logged, never thrown.
+ *
+ * Note on cooldown: the previous event-driven model needed a 15-min cooldown
+ * to avoid firing the LLM multiple times on the same confluence as more
+ * signals trickled in. The cron model removes this — by definition we
+ * evaluate at most once per 15 min on each symbol, and we always see the
+ * full set of webhooks from the just-closed bar at once.
  */
 export async function maybeDecide(symbol: string): Promise<void> {
   if (config.MODE === 'telemetry') return;
@@ -40,15 +44,6 @@ export async function maybeDecide(symbol: string): Promise<void> {
   const agg = aggregateSymbol(symbol);
   if (!shouldInvokeLlm(agg) || !agg.side) {
     logger.debug({ symbol, bullish: agg.bullish, bearish: agg.bearish }, 'below threshold');
-    return;
-  }
-
-  const recent = recentNonSkipDecision(symbol, agg.side, COOLDOWN_MS);
-  if (recent) {
-    logger.info(
-      { symbol, side: agg.side, last_id: recent.id },
-      'cooldown active — skipping LLM call',
-    );
     return;
   }
 

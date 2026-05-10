@@ -5,7 +5,6 @@ import { insertSignal } from '../db/repos/signals.js';
 import { sendMessage } from '../telegram/bot.js';
 import { rawSignalLog } from '../telegram/templates.js';
 import { logger } from '../lib/logger.js';
-import { maybeDecide } from '../jobs/decide.js';
 
 export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { secret: string }; Body: unknown }>(
@@ -35,10 +34,10 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
       sendMessage({ channel: 'logs', text: rawSignalLog(parsed.data, req.body), disable_notification: true })
         .catch((err) => logger.error({ err }, 'telegram log push failed'));
 
-      // Stage 2 pipeline (no-op in telemetry mode)
-      maybeDecide(parsed.data.symbol).catch((err) =>
-        logger.error({ err, symbol: parsed.data.symbol }, 'maybeDecide failed'),
-      );
+      // Decision pipeline is no longer triggered here. Webhooks are pure
+      // data ingestion now — the scheduled decide-cron (every 15min on
+      // bar boundaries) reads accumulated signals and decides. See
+      // src/jobs/decide-cron.ts for rationale.
 
       return reply.send({ ok: true, id: result.id });
     },

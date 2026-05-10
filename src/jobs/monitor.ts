@@ -388,10 +388,13 @@ async function tick(): Promise<void> {
 }
 
 export function startMonitorJob(): void {
-  // Once per hour at :00. 15m primary TF doesn't change structure that fast,
-  // and we'd rather burn fewer LLM tokens / produce fewer Telegram pings.
-  cron.schedule('0 * * * *', () => {
+  // Aligned with decide-cron: 1 min after each 15m bar close. Active
+  // positions get re-evaluated 4× per hour now (was 1×) — more responsive
+  // to structure changes on 15m TF, at the cost of 3 extra LLM calls per
+  // active position per hour. Worth it for tighter trail/CLOSE timing;
+  // can be throttled later via "no significant context change" check.
+  cron.schedule('1,16,31,46 * * * *', () => {
     void tick();
   });
-  logger.info('monitor cron started (every 1h)');
+  logger.info('monitor cron started (1,16,31,46 of every hour, 15m-aligned)');
 }
