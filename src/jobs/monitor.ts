@@ -20,6 +20,7 @@ import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { tradeCaption } from '../telegram/decision-template.js';
 import { resultPost } from '../telegram/result-template.js';
 import { getLastPrice, getMarketSentiment } from '../exchange/bybit-public.js';
+import { getVolumeProfile } from '../exchange/bybit-volume.js';
 
 const STORAGE_STATE = resolve('data', 'tradingview-storage-state.json');
 const MAX_RETRIES = 2;
@@ -145,7 +146,10 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
     }
   }
 
-  const sentiment = await getMarketSentiment(p.symbol).catch(() => null);
+  const [sentiment, volumeProfile] = await Promise.all([
+    getMarketSentiment(p.symbol).catch(() => null),
+    getVolumeProfile(p.symbol).catch(() => null),
+  ]);
 
   const result = await callMonitorLlm(
     buildMonitorSystemPrompt(),
@@ -155,6 +159,7 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
       currentPrice,
       ageMinutes: ageMin,
       sentiment,
+      volumeProfile,
     }),
     screenshots,
   );

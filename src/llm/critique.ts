@@ -6,6 +6,7 @@ import { logger } from '../lib/logger.js';
 import type { Decision } from './decision.schema.js';
 import type { LlmContext } from './prompt.js';
 import { formatSentiment } from '../exchange/bybit-public.js';
+import { formatVolumeProfile } from '../exchange/bybit-volume.js';
 
 const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY ?? 'placeholder' });
 
@@ -105,6 +106,9 @@ ${sigs || '  (none)'}
 
 Bybit market sentiment:
 ${formatSentiment(ctx.sentiment ?? null)}
+
+Volume profile + ATR:
+${formatVolumeProfile(ctx.volumeProfile ?? null)}
 
 Attached, in order: SUBJECT 15m, SUBJECT 1H, SUBJECT 4H, BTCUSDT 15m, BTCUSDT 1H.
 

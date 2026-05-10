@@ -1,6 +1,7 @@
 import { DECISION_JSON_SCHEMA } from './decision.schema.js';
 import type { AggregatedScore } from '../signals/aggregator.js';
 import { formatSentiment, type MarketSentiment } from '../exchange/bybit-public.js';
+import { formatVolumeProfile, type VolumeProfile } from '../exchange/bybit-volume.js';
 
 export function buildSystemPrompt(): string {
   return `You are a discretionary intraday crypto trader on Bybit USDT-perp.
@@ -32,6 +33,19 @@ Hard rules — violation means SKIP:
   confidence at 0.5 even with reversal. The 4H trend is the dominant force;
   trading against it is high-risk and historically the losing pattern.
 - BTC alignment: if BTC 15m and 1H are both moving against the proposed direction (e.g. BTC dumping while you want to go LONG alt) — SKIP or cap confidence at 0.45. Crypto alts correlate ~70-80% with BTC; trading against BTC needs textbook reversal evidence on BTC itself.
+- Volume profile (POC/VAH/VAL/VWAP) and ATR are real, deterministic levels:
+  * POC (Point of Control) = price where most volume traded in 24h. Strong
+    magnet and S/R. Trades that target POC have high follow-through.
+  * VAH/VAL = upper/lower bound of the 70% volume zone. Price often reverts
+    inside this zone; breakouts of VAH/VAL with volume signal regime change.
+  * VWAP = "fair value" anchor. Price above VWAP = bulls in control intraday;
+    below = bears. Long setups below VWAP need clear reversal evidence.
+  * ATR(14) on 15m = typical bar range. Use it to sanity-check SL distance:
+    SL distance < 0.7×ATR is too tight (will be wicked out by noise) → either
+    widen SL to a real structure level or SKIP. SL distance > 4×ATR is too
+    wide (R:R becomes fictional) → either tighten or SKIP.
+  * Prefer SL/TP placements that align with VAH/VAL/POC/VWAP — cite which
+    level you used in sl_reason / tp_reason.
 - Market sentiment (Bybit funding + OI + L/S ratio):
   * Funding rate (per 8h):
     - rate > +0.04%: longs are crowded and paying premium. New LONG: cap confidence at 0.55. New SHORT: small confidence boost.
@@ -80,6 +94,8 @@ export type LlmContext = {
   mode: string;
   /** Bybit market sentiment snapshot — may be null if fetch failed */
   sentiment?: MarketSentiment | null;
+  /** Volume profile + ATR snapshot — may be null if fetch failed */
+  volumeProfile?: VolumeProfile | null;
 };
 
 export function buildUserMessage(ctx: LlmContext): string {
@@ -108,6 +124,9 @@ Account:
 
 Bybit market sentiment (${ctx.symbol}):
 ${formatSentiment(ctx.sentiment ?? null)}
+
+Volume profile + ATR (${ctx.symbol}, last 24h on 15m):
+${formatVolumeProfile(ctx.volumeProfile ?? null)}
 
 Attached, in order:
   1. ${ctx.symbol} 15m  (primary entry timeframe)

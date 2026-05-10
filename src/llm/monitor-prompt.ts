@@ -2,6 +2,7 @@ import { DECISION_JSON_SCHEMA } from './decision.schema.js';
 import type { DecisionRow } from '../db/repos/decisions.js';
 import type { SignalRow } from '../db/repos/signals.js';
 import { formatSentiment, type MarketSentiment } from '../exchange/bybit-public.js';
+import { formatVolumeProfile, type VolumeProfile } from '../exchange/bybit-volume.js';
 
 export function buildMonitorSystemPrompt(): string {
   return `You are managing an open intraday trade on Bybit USDT-perp.
@@ -39,6 +40,13 @@ Hard rules:
     structure; never lower the TP.
 - If BTC just made a sharp move while the alt is consolidating, factor in pending
   catch-up move when deciding to HOLD.
+- Volume profile / ATR usage:
+  * If price has reclaimed POC (Point of Control) in our favor — strong HOLD;
+    POC acts as a magnet for further continuation.
+  * If price has lost VAH/VAL against us with closing 15m candles — that's a
+    structural CLOSE signal (the value area shifted against us).
+  * Use ATR(14) for trail size — trailing SL closer than 1×ATR is too tight
+    and will be wicked out by routine noise. Cite the level you trailed to.
 - HOLD bias: if you can plausibly justify HOLD, prefer HOLD. CLOSE/MODIFY should
   feel necessary, not optional. The user trusts you not to ping them on trivia.
 
@@ -58,6 +66,7 @@ export type MonitorContext = {
   currentPrice: number | null;
   ageMinutes: number;
   sentiment?: MarketSentiment | null;
+  volumeProfile?: VolumeProfile | null;
 };
 
 export function buildMonitorUserMessage(ctx: MonitorContext): string {
@@ -98,6 +107,9 @@ Estimated open PnL: ${pnlEstimate}
 
 Bybit market sentiment (${p.symbol}):
 ${formatSentiment(ctx.sentiment ?? null)}
+
+Volume profile + ATR (${p.symbol}, last 24h on 15m):
+${formatVolumeProfile(ctx.volumeProfile ?? null)}
 
 Attached, in order:
   1. ${p.symbol} 15m NOW

@@ -15,6 +15,7 @@ import { config } from '../config.js';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getMarketSentiment } from '../exchange/bybit-public.js';
+import { getVolumeProfile } from '../exchange/bybit-volume.js';
 
 const COOLDOWN_MS = 15 * 60 * 1000;
 const STORAGE_STATE = resolve('data', 'tradingview-storage-state.json');
@@ -86,10 +87,18 @@ export async function maybeDecide(symbol: string): Promise<void> {
     logger.warn('tradingview storage state not present — calling LLM without screenshots');
   }
 
-  const sentiment = await getMarketSentiment(symbol).catch((err: unknown) => {
-    logger.warn({ err, symbol }, 'sentiment fetch failed — proceeding without');
-    return null;
-  });
+  // Sentiment (funding/OI/LS) and volume profile (POC/VAH/VAL/VWAP/ATR) in
+  // parallel — both are public Bybit endpoints with their own caches.
+  const [sentiment, volumeProfile] = await Promise.all([
+    getMarketSentiment(symbol).catch((err: unknown) => {
+      logger.warn({ err, symbol }, 'sentiment fetch failed — proceeding without');
+      return null;
+    }),
+    getVolumeProfile(symbol).catch((err: unknown) => {
+      logger.warn({ err, symbol }, 'volume profile fetch failed — proceeding without');
+      return null;
+    }),
+  ]);
 
   const result = await callLlm(
     {
@@ -99,6 +108,7 @@ export async function maybeDecide(symbol: string): Promise<void> {
       daily_pnl_pct: 0,
       mode: config.MODE,
       sentiment,
+      volumeProfile,
     },
     screenshots,
   );
@@ -117,7 +127,7 @@ export async function maybeDecide(symbol: string): Promise<void> {
   if (result.decision.decision === 'OPEN') {
     const crit = await critiqueDecision(
       result.decision,
-      { symbol, agg, open_positions: [], daily_pnl_pct: 0, mode: config.MODE, sentiment },
+      { symbol, agg, open_positions: [], daily_pnl_pct: 0, mode: config.MODE, sentiment, volumeProfile },
       screenshots,
     );
     if (crit) {

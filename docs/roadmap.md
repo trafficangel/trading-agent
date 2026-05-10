@@ -38,7 +38,7 @@
 **Стоимость:** +25% input tokens на вызов.
 **Effort:** ~1 час.
 
-### 1.2 ⭐⭐⭐ Volume Profile + VWAP уровни в user-сообщение — `[ ]`
+### 1.2 ⭐⭐⭐ Volume Profile + VWAP уровни в user-сообщение — `[x]` ✅
 **Зачем:** реальные S/R (POC, VAH, VAL, VWAP) вместо «на глаз» по чарту → LLM ставит SL/TP по уровням где реально торговался объём.
 **Файлы:** новый `src/exchange/bybit-volume.ts` (через `/v5/market/kline`), интеграция в `decide.ts` и оба промпта.
 **Effort:** ~4 часа.
@@ -208,6 +208,7 @@ conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OP
 - ✅ **Self-critique pass + threshold 4** — `dbac0b3`
 - ✅ **Window 20 min** — `182d669`
 - ✅ **1.1 Subject 4H chart in context** — adds swing-trend awareness for both decide and monitor passes
+- ✅ **1.2 Volume Profile + ATR in prompt** — POC/VAH/VAL/VWAP/ATR(14) computed from 24h of 15m klines, shown to LLM as deterministic S/R levels with usage rules
 
 ---
 
