@@ -78,8 +78,42 @@ async function reclaimSessionIfNeeded(page: Page): Promise<boolean> {
 }
 
 /**
+ * Heuristic: is the TV session still authenticated? Without login, we get
+ * bare candles + a cookie banner and NO LuxAlgo Premium indicators at all
+ * — those screenshots are useless to the LLM (silent failure mode that
+ * already cost us 10 hours of decisions on blank charts).
+ *
+ * Two checks:
+ *   1. Cookie banner (#onetrust-banner-sdk or similar): visible only when
+ *      anonymous; logged-in users have already accepted cookies.
+ *   2. User avatar / header user button: present only when authenticated.
+ *
+ * Returns true when the page is clearly NOT logged in.
+ */
+async function detectLoggedOut(page: Page): Promise<boolean> {
+  const cookieBanner = page.locator('#onetrust-banner-sdk, .tv-cookie-notice, [data-name="cookies-banner"]').first();
+  const cookieVisible = await cookieBanner.isVisible({ timeout: 500 }).catch(() => false);
+  if (cookieVisible) return true;
+
+  // The user-menu button only appears when authenticated.
+  const userMenu = page
+    .locator(
+      'button[aria-label*="user menu" i], [data-name="header-user-menu-button"], .tv-header__user-menu-button',
+    )
+    .first();
+  const hasUserMenu = (await userMenu.count()) > 0;
+  if (hasUserMenu) return false;
+
+  // Fallback signal: presence of a "Sign in" link in the header.
+  const signInLink = page.locator('a[href*="/signin"], button:has-text("Sign in")').first();
+  const hasSignIn = (await signInLink.count()) > 0;
+  return hasSignIn;
+}
+
+/**
  * Capture a chart screenshot for `symbol` at `interval` (TradingView interval string).
- * Returns the PNG path.
+ * Returns the PNG path. Throws if the TV session is logged out — caller should
+ * surface this loudly instead of silently feeding blank charts to the LLM.
  */
 export async function captureChart(
   symbol: string,
@@ -97,6 +131,16 @@ export async function captureChart(
     // If TV booted us with the session-conflict modal, click Connect and try again.
     const reclaimed = await reclaimSessionIfNeeded(page);
     if (reclaimed) await page.waitForTimeout(2_000);
+
+    // Hard gate: if we're logged out, the chart has NO LuxAlgo indicators.
+    // Blowing up here is correct — we'd rather skip the LLM call than feed
+    // it a bare-candle screenshot pretending to be analysis-ready.
+    if (await detectLoggedOut(page)) {
+      throw new Error(
+        'TradingView session is logged out (cookie banner visible / no user menu). ' +
+          'Indicators are NOT loaded. Re-run scripts/tradingview-login.ts and refresh storage state.',
+      );
+    }
 
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     mkdirSync(SCREENSHOTS_DIR, { recursive: true });

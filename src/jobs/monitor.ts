@@ -148,7 +148,14 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
       screenshots = [subj15, subj1h, subj4h, btc15, btc1h];
       primaryScreenshot = subj15;
     } catch (err) {
+      const msg = (err as Error)?.message ?? String(err);
       logger.error({ err, symbol: p.symbol, position_id: p.id }, 'monitor screenshot failed');
+      if (msg.includes('logged out')) {
+        await sendMessage({
+          channel: 'logs',
+          text: `❗️ <b>TradingView logged out</b> (monitor для #${p.id.toString().padStart(4, '0')}). Залить новый storage state.`,
+        });
+      }
     }
   }
 
