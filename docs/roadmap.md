@@ -116,7 +116,7 @@ conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OP
 **Файлы:** `src/risk/manager.ts` или новый шаг в `src/jobs/decide.ts` после critique.
 **Effort:** ~1 час.
 
-### 2.3 ⭐⭐ Don't-trade-in-chop filter — `[ ]`
+### 2.3 ⭐⭐ Don't-trade-in-chop filter — `[x]` ✅
 **Зачем:** большинство потерь — в боковике. ATR percentile за 7 дней: < 30-го перцентиля → рынок в чопе → не открываем новые позиции (мониторим существующие).
 **Файлы:** новый `src/signals/regime.ts`, gate в `decide.ts`.
 **Effort:** ~3 часа. **Зависит от 2.1** (ATR расчёт уже есть).
@@ -145,7 +145,7 @@ conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OP
 **Зависит от:** 5.1.
 **Effort:** ~4 часа.
 
-### 3.3 ⭐⭐ Жёсткое SL→BE на 1R — `[ ]`
+### 3.3 ⭐⭐ Жёсткое SL→BE на 1R — `[x]` ✅
 **Зачем:** monitor LLM уже двигает SL, но иногда «забывает». Детерминистичное правило в risk-gate: при достижении 1R любой MODIFY должен подвинуть SL не дальше entry.
 **Файлы:** `src/risk/manager.ts` или `src/jobs/monitor.ts`.
 **Effort:** ~2 часа.
@@ -234,6 +234,8 @@ conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OP
 - ✅ **2.1 ATR-based SL sanity** — risk gate rejects OPEN if SL distance < 0.7×ATR (noise risk) or > 4×ATR (fictional R:R). Tests in tests/unit/risk.test.ts
 - ✅ **2.2 Confidence-tiered sizing** — `src/risk/sizing.ts` maps post-critique confidence to fixed size_pct tiers (0.5/1.0/1.5/2.0%); confidence < 0.45 forces SKIP regardless of LLM verdict
 - ✅ **1.3 Multi-exchange orderbook + liquidity clusters** — adapters for Binance + OKX (`binance-public.ts`, `okx-public.ts`), Bybit orderbook extension, symbol mapper. Aggregator `multi-exchange.ts` produces: weighted funding + divergence; aggregated orderbook with cross-exchange-confirmed walls; stop-cluster zones from 4H swings. New system-prompt rules for using cross-confirmed walls vs HFT fakes, stop-hunt avoidance, and divergence signals. Smoke-tested on TONUSDT — 9/9 walls confirmed cross-exchange, divergence detected
+- ✅ **2.3 Don't-trade-in-chop filter** — `src/signals/regime.ts` computes ATR(14) percentile rank over 7 days of 15m klines. Current ATR < 30th percentile → block LLM call entirely (Logs notification only). Existing positions unaffected (monitor cron continues). Smoke-tested: TON percentile 34 (active), BTC/ETH percentile 0 (in chop, blocked)
+- ✅ **3.3 Auto SL→BE on 1R + MODIFY actually applies to position** — tpsl-monitor checks 1R achievement every minute and force-moves SL to entry; subsequent SL hits exit at 0R (true break-even). Bonus fix: monitor LLM's MODIFY decisions previously affected only the audit row but never updated the parent's SL — now `updatePositionSl()` is called for both LLM-MODIFY (with anti-widen guard) and auto-BE flows
 
 ---
 

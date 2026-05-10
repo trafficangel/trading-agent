@@ -8,6 +8,7 @@ import {
   findActivePositions,
   insertDecision,
   closePositionWithStats,
+  updatePositionSl,
   calcPnl,
   type DecisionRow,
 } from '../db/repos/decisions.js';
@@ -280,6 +281,42 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
   }
 
   const substantial = isSubstantialChange(p, result.decision);
+
+  // Apply MODIFY's new SL to the parent position so subsequent TPSL polling
+  // uses it. Without this the MODIFY existed only in the audit trail and
+  // never affected shadow execution. Applies for BOTH substantial and minor
+  // (the LLM thought about it; whatever it decided is the new truth).
+  if (
+    result.decision.decision === 'MODIFY' &&
+    result.decision.sl &&
+    result.decision.sl !== p.sl &&
+    p.entry &&
+    p.side
+  ) {
+    // Sanity: don't widen SL beyond original (rule already in monitor prompt
+    // but defensive): for long, new SL must be >= original; for short, <=.
+    const widensRisk =
+      p.side === 'long'
+        ? result.decision.sl < (p.sl ?? 0)
+        : result.decision.sl > (p.sl ?? Infinity);
+    if (widensRisk) {
+      logger.warn(
+        {
+          position_id: p.id,
+          old_sl: p.sl,
+          attempted_new_sl: result.decision.sl,
+          side: p.side,
+        },
+        'MODIFY would widen SL beyond original — rejected, keeping old SL',
+      );
+    } else {
+      updatePositionSl(p.id, result.decision.sl);
+      logger.info(
+        { position_id: p.id, old_sl: p.sl, new_sl: result.decision.sl },
+        'monitor MODIFY applied: SL updated',
+      );
+    }
+  }
 
   if (result.decision.decision === 'MODIFY' && !substantial) {
     await sendMessage({

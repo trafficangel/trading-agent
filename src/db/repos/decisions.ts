@@ -69,6 +69,10 @@ const closePositionWithStatsStmt = db.prepare<[number, number, string, number, n
   WHERE id = ?
 `);
 
+const updateSlStmt = db.prepare<[number, number]>(`
+  UPDATE decisions SET sl = ? WHERE id = ?
+`);
+
 const findByIdStmt = db.prepare<[number], DecisionRow>(
   'SELECT * FROM decisions WHERE id = ?',
 );
@@ -128,6 +132,16 @@ export function insertDecision(input: InsertDecisionInput): number {
 }
 
 /** Mark closed without stats (legacy fallback — prefer closePositionWithStats). */
+/**
+ * Update the SL field of a position in-place. Used by:
+ *  - the auto-BE rule in tpsl-monitor (move SL to entry on 1R)
+ *  - the LLM monitor when MODIFY decisions are accepted (so subsequent
+ *    TPSL polling uses the new SL, not the stale original).
+ */
+export function updatePositionSl(id: number, newSl: number): void {
+  updateSlStmt.run(newSl, id);
+}
+
 export function closePosition(id: number): void {
   closePositionStmt.run(Date.now(), id);
 }

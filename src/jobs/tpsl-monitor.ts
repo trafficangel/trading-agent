@@ -5,6 +5,7 @@ import {
   findActivePositions,
   calcPnl,
   closePositionWithStats,
+  updatePositionSl,
   type DecisionRow,
 } from '../db/repos/decisions.js';
 import { getLastPrice } from '../exchange/bybit-public.js';
@@ -12,6 +13,56 @@ import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { resultPost } from '../telegram/result-template.js';
 
 let running = false;
+
+/**
+ * Hard SL→BE rule: when price has moved >= 1R in our favor and the SL is
+ * still on the original (loss) side of entry, force-move SL to entry.
+ *
+ * Returns the (possibly updated) SL — caller uses this for the SL/TP hit
+ * comparison so we don't accidentally trigger an SL-hit on the same tick
+ * we just moved SL to BE.
+ */
+function maybeMoveSlToBe(p: DecisionRow, currentPrice: number): number {
+  if (!p.entry || !p.sl || !p.side) return p.sl ?? 0;
+  const slDist = Math.abs(p.entry - p.sl);
+  if (slDist === 0) return p.sl;
+
+  // PnL distance in our favor (positive when in profit)
+  const pnlDist = p.side === 'long' ? currentPrice - p.entry : p.entry - currentPrice;
+  if (pnlDist < slDist) return p.sl; // not at 1R yet
+
+  // Already at-or-better than BE? (long: SL >= entry; short: SL <= entry)
+  const slAtOrBetter =
+    p.side === 'long' ? p.sl >= p.entry : p.sl <= p.entry;
+  if (slAtOrBetter) return p.sl;
+
+  // Move it. Atomically update the DB row.
+  updatePositionSl(p.id, p.entry);
+  logger.info(
+    {
+      position_id: p.id,
+      symbol: p.symbol,
+      side: p.side,
+      entry: p.entry,
+      old_sl: p.sl,
+      new_sl: p.entry,
+      pnl_dist: pnlDist,
+      sl_dist: slDist,
+    },
+    'auto SL→BE: 1R reached',
+  );
+
+  // Logs-channel notification only — not noisy enough for Signals channel
+  // (it's a mechanical BE move, no decision content).
+  const tradeIdStr = `#${p.id.toString().padStart(4, '0')}`;
+  void sendMessage({
+    channel: 'logs',
+    text: `🔒 <b>SL → безубыток</b> по сделке ${tradeIdStr} ${p.symbol}: 1R достигнут, SL подвинут с ${p.sl} на ${p.entry}.`,
+    disable_notification: true,
+  });
+
+  return p.entry;
+}
 
 async function checkPosition(p: DecisionRow): Promise<void> {
   if (!p.entry || !p.sl || !p.side) return;
@@ -21,22 +72,26 @@ async function checkPosition(p: DecisionRow): Promise<void> {
   const price = await getLastPrice(p.symbol);
   if (price == null) return;
 
+  // Auto SL→BE check — may mutate p.sl in DB. We use the returned value for
+  // the rest of this tick.
+  const effectiveSl = maybeMoveSlToBe(p, price);
+
   let hit: 'sl' | 'tp' | null = null;
   let closePrice = price;
 
   if (p.side === 'long') {
-    if (price <= p.sl) {
+    if (price <= effectiveSl) {
       hit = 'sl';
-      closePrice = p.sl; // shadow fill at exact level
+      closePrice = effectiveSl; // shadow fill at exact level
     } else if (tp != null && Number.isFinite(tp) && price >= tp) {
       hit = 'tp';
       closePrice = tp;
     }
   } else {
     // short
-    if (price >= p.sl) {
+    if (price >= effectiveSl) {
       hit = 'sl';
-      closePrice = p.sl;
+      closePrice = effectiveSl;
     } else if (tp != null && Number.isFinite(tp) && price <= tp) {
       hit = 'tp';
       closePrice = tp;
@@ -46,6 +101,10 @@ async function checkPosition(p: DecisionRow): Promise<void> {
   if (!hit) return;
 
   const reason = hit === 'tp' ? 'tp_hit' : 'sl_hit';
+  // R-multiple is computed against the ORIGINAL SL — that's the risk we
+  // actually took. p.sl in memory is still the original (the BE move only
+  // updated DB and effectiveSl). A BE-stopped trade closes at entry → 0R.
+  // A TP-hit after BE move still credits full R from the original setup.
   const { pnlPct, pnlR } = calcPnl(p.side, p.entry, p.sl, closePrice);
 
   closePositionWithStats({ id: p.id, closePrice, closeReason: reason, pnlPct, pnlR });

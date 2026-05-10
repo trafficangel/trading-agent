@@ -1,4 +1,5 @@
 import { aggregateSymbol, shouldInvokeLlm } from '../signals/aggregator.js';
+import { detectRegime } from '../signals/regime.js';
 import {
   recentNonSkipDecision,
   insertDecision,
@@ -61,8 +62,36 @@ export async function maybeDecide(symbol: string): Promise<void> {
     return;
   }
 
+  // Regime gate: skip LLM call entirely if we're in low-vol chop. Saves
+  // tokens and avoids the worst-EV slice of the trade distribution.
+  const regime = await detectRegime(symbol).catch(() => null);
+  if (regime?.inChop) {
+    logger.info(
+      {
+        symbol,
+        side: agg.side,
+        atr_percentile: regime.atrPercentile,
+        threshold: regime.threshold,
+      },
+      'chop regime — blocking new OPEN attempt',
+    );
+    await sendMessage({
+      channel: 'logs',
+      text: `🟫 <b>chop SKIP</b> ${symbol} ${agg.side}: ATR в ${regime.atrPercentile}-м перцентиле (порог ${regime.threshold}). LLM не зовём — рынок в боковике.`,
+      disable_notification: true,
+    });
+    return;
+  }
+
   logger.info(
-    { symbol, side: agg.side, bullish: agg.bullish, bearish: agg.bearish, signals: agg.signals.length },
+    {
+      symbol,
+      side: agg.side,
+      bullish: agg.bullish,
+      bearish: agg.bearish,
+      signals: agg.signals.length,
+      atr_percentile: regime?.atrPercentile ?? null,
+    },
     'invoking LLM',
   );
 
