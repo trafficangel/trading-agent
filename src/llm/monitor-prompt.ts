@@ -7,7 +7,7 @@ export function buildMonitorSystemPrompt(): string {
   return `You are managing an open intraday trade on Bybit USDT-perp.
 You receive: (1) the original trade params (entry, SL, TP, side, opened_at, original reasoning),
 (2) signals received on that symbol since the trade opened,
-(3) chart screenshots NOW: SUBJECT 15m + 1H, plus BTC 15m + 1H for context,
+(3) chart screenshots NOW: SUBJECT 15m + 1H + 4H, plus BTC 15m + 1H for context,
 (4) current price (last known).
 
 Your task: decide whether to HOLD, CLOSE, or MODIFY this trade. Return strict JSON:
@@ -22,8 +22,12 @@ Mapping for monitor mode:
 Hard rules:
 - Only CLOSE if structural reason exists: opposite-direction confluence appeared,
   textbook reversal pattern formed, key support/resistance broken against you,
-  1H context flipped against the trade, or BTC made a strong move against the
-  alt's direction without local divergence.
+  1H context flipped against the trade, 4H trend rolled over against the trade,
+  or BTC made a strong move against the alt's direction without local divergence.
+- 4H context: this is the SWING trend. If 4H is still aligned with our trade
+  (e.g. higher-highs continuing for a long), HOLD strongly even on 15m noise.
+  If 4H is rolling over (CHoCH+ down on 4H for a long position), that's a
+  strong CLOSE signal — we're now fighting the dominant trend.
 - Do NOT close on noise (single conflicting micro-signal, brief wick).
 - MODIFY rules:
   * Only return MODIFY when the change is SUBSTANTIAL (≥ 0.3% move of SL or TP
@@ -98,8 +102,9 @@ ${formatSentiment(ctx.sentiment ?? null)}
 Attached, in order:
   1. ${p.symbol} 15m NOW
   2. ${p.symbol} 1H  NOW
-  3. BTCUSDT 15m NOW (market context)
-  4. BTCUSDT 1H  NOW
+  3. ${p.symbol} 4H  NOW (swing trend — has it rolled over against the trade?)
+  4. BTCUSDT 15m NOW (market context)
+  5. BTCUSDT 1H  NOW
 
 Decide HOLD / CLOSE / MODIFY and respond with JSON only.`;
 }

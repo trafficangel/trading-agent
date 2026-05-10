@@ -32,7 +32,7 @@
 
 ## Tier 1 — Information edge (модель видит больше)
 
-### 1.1 ⭐⭐⭐ Добавить 4H чарт в context — `[ ]`
+### 1.1 ⭐⭐⭐ Добавить 4H чарт в context — `[x]` ✅
 **Зачем:** swing-структура. Большинство «плохих» сделок идут против 4H тренда — модель просто не видит.
 **Файлы:** `src/jobs/decide.ts`, `src/jobs/monitor.ts`, `src/llm/prompt.ts`, `src/llm/monitor-prompt.ts` — добавить пятый screenshot subj 4H, обновить «Attached, in order:» список.
 **Стоимость:** +25% input tokens на вызов.
@@ -57,6 +57,20 @@
 **Зачем:** блокировать новые OPEN перед FOMC/CPI/разлоками токенов. Спасает от непредсказуемых сливов на новостях.
 **Файлы:** новый `src/exchange/event-calendar.ts` (CoinMarketCal API + Bybit announcements), новый блок проверки в `decide.ts` до вызова LLM.
 **Effort:** ~6 часов.
+
+### 1.6 ⭐⭐⭐ Multi-exchange aggregated context (Binance + OKX + Bybit) — `[ ]`
+**Зачем:** Bybit — средняя биржа по объёму. **Binance делает 3-5× объём Bybit на BTC perps**, OKX — следующий по ликвидности. Реальные edge'и:
+- **Aggregated funding:** если на Bybit funding +0.01% а на Binance +0.05% — крупный капитал поджимает шорты на Binance, это сигнал. Усреднённый funding точнее одиночного.
+- **Aggregated OI delta:** рост OI на 3 биржах одновременно = реальный поток. Рост только на Bybit = локальный шум.
+- **Cross-exchange price spread:** на альтах при сильном движении Binance ведёт, Bybit отстаёт на 0.05-0.2%. Если Bybit ниже Binance — алгоритмы подтянут вверх → bullish edge.
+- **Aggregated liquidations:** Coinglass-style данные (можно через Binance liquidation API или агрегированно). Каскад ликвидаций → высокая вероятность mean reversion.
+**Файлы:** новый `src/exchange/multi-exchange.ts` с адаптерами:
+- `binance-public.ts` (`/fapi/v1/premiumIndex`, `/fapi/v1/openInterest`, `/futures/data/openInterestHist`)
+- `okx-public.ts` (`/api/v5/public/funding-rate`, `/api/v5/public/open-interest`)
+- агрегатор который усредняет и считает дивергенции
+**Интеграция:** заменить текущий `getMarketSentiment` на `getAggregatedSentiment` который возвращает per-exchange + aggregated.
+**Стоимость:** 3 публичных API без ключей, кэш 30s. Без рейт-лимитов на нашем объёме.
+**Effort:** ~1 день. **Сильный edge — приоритет вместе с 1.3.**
 
 ---
 
@@ -164,8 +178,9 @@ conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OP
 
 **Неделя следующая:**
 5. 1.3 — Orderbook / liquidity (самый мощный edge)
-6. 2.3 — Don't-trade-in-chop
-7. 3.3 — Жёсткое SL→BE на 1R
+6. 1.6 — Multi-exchange aggregated context (Binance/OKX/Bybit)
+7. 2.3 — Don't-trade-in-chop
+8. 3.3 — Жёсткое SL→BE на 1R
 
 **После 30-50 закрытых сделок:**
 8. 4.1 — Critique calibration
@@ -192,6 +207,7 @@ conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OP
 - ✅ **Bybit sentiment (funding/OI/LS)** — `7fddaea`
 - ✅ **Self-critique pass + threshold 4** — `dbac0b3`
 - ✅ **Window 20 min** — `182d669`
+- ✅ **1.1 Subject 4H chart in context** — adds swing-trend awareness for both decide and monitor passes
 
 ---
 

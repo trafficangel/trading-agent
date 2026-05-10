@@ -63,14 +63,18 @@ export async function maybeDecide(symbol: string): Promise<void> {
   let primaryScreenshot: string | null = null;
   if (existsSync(STORAGE_STATE)) {
     try {
-      // Subject charts first, then BTC context.
+      // Subject charts first (15m → 1H → 4H), then BTC context (15m → 1H).
+      // 4H gives swing structure — most "bad" trades go against the 4H trend
+      // and the model couldn't see it before.
       const subj15 = await captureChart(symbol, '15');
       const subj1h = await captureChart(symbol, '60');
+      const subj4h = await captureChart(symbol, '240');
       const btc15 = await captureChart('BTCUSDT', '15');
       const btc1h = await captureChart('BTCUSDT', '60');
       screenshots = [
         { path: subj15, mediaType: 'image/png' },
         { path: subj1h, mediaType: 'image/png' },
+        { path: subj4h, mediaType: 'image/png' },
         { path: btc15, mediaType: 'image/png' },
         { path: btc1h, mediaType: 'image/png' },
       ];

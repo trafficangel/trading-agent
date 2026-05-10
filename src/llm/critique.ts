@@ -106,7 +106,7 @@ ${sigs || '  (none)'}
 Bybit market sentiment:
 ${formatSentiment(ctx.sentiment ?? null)}
 
-Attached, in order: SUBJECT 15m, SUBJECT 1H, BTCUSDT 15m, BTCUSDT 1H.
+Attached, in order: SUBJECT 15m, SUBJECT 1H, SUBJECT 4H, BTCUSDT 15m, BTCUSDT 1H.
 
 Critique your own OPEN. Respond with JSON only.`;
 }
