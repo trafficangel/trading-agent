@@ -13,6 +13,7 @@ import {
   formatAggregatedSentiment,
   formatStopClusters,
 } from '../exchange/multi-exchange.js';
+import { formatLiquidations } from '../exchange/liquidations.js';
 
 const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY ?? 'placeholder' });
 
@@ -121,6 +122,9 @@ ${formatAggregatedOrderbook(ctx.aggOrderbook ?? null)}
 
 Stop clusters:
 ${formatStopClusters(ctx.stopClusters ?? null)}
+
+Liquidations (5min):
+${formatLiquidations(ctx.liquidations ?? null)}
 
 Attached, in order: SUBJECT 15m, SUBJECT 1H, SUBJECT 4H, BTCUSDT 15m, BTCUSDT 1H.
 

@@ -23,6 +23,7 @@ import {
   getAggregatedSentiment,
   getStopClusters,
 } from '../exchange/multi-exchange.js';
+import { getLiquidations } from '../exchange/liquidations.js';
 
 const COOLDOWN_MS = 15 * 60 * 1000;
 const STORAGE_STATE = resolve('data', 'tradingview-storage-state.json');
@@ -156,6 +157,9 @@ export async function maybeDecide(symbol: string): Promise<void> {
     ? await getStopClusters(symbol, currentPriceForClusters).catch(() => null)
     : null;
 
+  // Liquidations are in-memory rolling 5min — no async fetch, just read.
+  const liquidations = getLiquidations(symbol);
+
   const result = await callLlm(
     {
       symbol,
@@ -168,6 +172,7 @@ export async function maybeDecide(symbol: string): Promise<void> {
       aggSentiment,
       aggOrderbook,
       stopClusters,
+      liquidations,
     },
     screenshots,
   );
@@ -197,6 +202,7 @@ export async function maybeDecide(symbol: string): Promise<void> {
         aggSentiment,
         aggOrderbook,
         stopClusters,
+        liquidations,
       },
       screenshots,
     );

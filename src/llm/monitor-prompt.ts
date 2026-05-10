@@ -11,6 +11,7 @@ import {
   type AggregatedSentiment,
   type StopClustersResult,
 } from '../exchange/multi-exchange.js';
+import { formatLiquidations, type LiquidationsSnapshot } from '../exchange/liquidations.js';
 
 export function buildMonitorSystemPrompt(): string {
   return `You are managing an open intraday trade on Bybit USDT-perp.
@@ -48,6 +49,13 @@ Hard rules:
     structure; never lower the TP.
 - If BTC just made a sharp move while the alt is consolidating, factor in pending
   catch-up move when deciding to HOLD.
+- **Liquidations cascade:** if a CASCADE marker appeared in the
+  liquidations block AGAINST our position (e.g. long-side cascade while
+  we're LONG = forced sells exhausting, our trade is in trouble; short-
+  side cascade while we're SHORT = forced buys exhausting, our short
+  may be done). This is a strong CLOSE signal. Conversely, cascade WITH
+  our position direction (e.g. short-side cascade while LONG) = local
+  bottom likely confirmed, HOLD strongly.
 - **Orderbook walls (cross-exchange):** if a confirmed wall (✓2x or ✓3x)
   appeared near our TP and is large ($500k+), price will struggle to push
   through — consider taking partial / tightening. If the wall vanished
@@ -88,6 +96,7 @@ export type MonitorContext = {
   aggSentiment?: AggregatedSentiment | null;
   aggOrderbook?: AggregatedOrderbook | null;
   stopClusters?: StopClustersResult | null;
+  liquidations?: LiquidationsSnapshot | null;
 };
 
 export function buildMonitorUserMessage(ctx: MonitorContext): string {
@@ -137,6 +146,9 @@ ${formatAggregatedOrderbook(ctx.aggOrderbook ?? null)}
 
 Stop-cluster zones (4H swings):
 ${formatStopClusters(ctx.stopClusters ?? null)}
+
+Liquidations (Binance forceOrder stream, last 5 min):
+${formatLiquidations(ctx.liquidations ?? null)}
 
 Attached, in order:
   1. ${p.symbol} 15m NOW

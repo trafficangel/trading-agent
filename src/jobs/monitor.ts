@@ -28,6 +28,7 @@ import {
   getAggregatedSentiment,
   getStopClusters,
 } from '../exchange/multi-exchange.js';
+import { getLiquidations } from '../exchange/liquidations.js';
 
 const STORAGE_STATE = resolve('data', 'tradingview-storage-state.json');
 const MAX_RETRIES = 2;
@@ -175,6 +176,8 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
     ? await getStopClusters(p.symbol, priceForClusters).catch(() => null)
     : null;
 
+  const liquidations = getLiquidations(p.symbol);
+
   const result = await callMonitorLlm(
     buildMonitorSystemPrompt(),
     buildMonitorUserMessage({
@@ -187,6 +190,7 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
       aggSentiment,
       aggOrderbook,
       stopClusters,
+      liquidations,
     }),
     screenshots,
   );

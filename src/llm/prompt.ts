@@ -10,6 +10,7 @@ import {
   type AggregatedSentiment,
   type StopClustersResult,
 } from '../exchange/multi-exchange.js';
+import { formatLiquidations, type LiquidationsSnapshot } from '../exchange/liquidations.js';
 
 export function buildSystemPrompt(): string {
   return `You are a discretionary intraday crypto trader on Bybit USDT-perp.
@@ -73,6 +74,21 @@ Hard rules — violation means SKIP:
     zone, that's a high-probability target — algorithms WILL drive price
     there to take the liquidity. TP just past the zone (after the hunt) or
     just before (front-running the hunt) — cite which choice in tp_reason.
+- **Liquidations (Binance forceOrder stream, 5-min window):**
+  * "long_liquidated" = forced sells. A LONG-side cascade ($5M+ in 5m AND
+    >= 5× the short-liquidation total) typically marks LOCAL BOTTOM —
+    forced sellers exhausted, residual flow flips bullish. New SHORT
+    setups in this state need exceptional structural evidence; LONG
+    counter-trend off the cascade is a known high-EV play if 1H/4H
+    structure supports it.
+  * SHORT-side cascade ($5M+ in 5m AND >= 5× long total) = forced
+    buyers exhausted, mirror logic — typically marks LOCAL TOP.
+  * The "cascade" field in the liquidations block summarizes this
+    automatically — if it's set, factor it heavily.
+  * Without a cascade, just elevated one-sided liquidations ($1-5M)
+    confirm trend direction (longs being eaten = downtrend continuation).
+  * If the largest single event is huge ($1M+) but other events are
+    small, a single whale got rekt — interesting but not a cascade.
 - **Cross-exchange divergence signals:**
   * Funding divergence > 0.003% between exchanges = crowdedness imbalance.
     Side with crowded funding has mean-reversion risk.
@@ -138,6 +154,8 @@ export type LlmContext = {
   aggOrderbook?: AggregatedOrderbook | null;
   /** Stop-cluster zones derived from 4H swing structure. */
   stopClusters?: StopClustersResult | null;
+  /** Real-time aggregated liquidations from Binance forceOrder stream (5min window). */
+  liquidations?: LiquidationsSnapshot | null;
 };
 
 export function buildUserMessage(ctx: LlmContext): string {
@@ -175,6 +193,9 @@ ${formatAggregatedOrderbook(ctx.aggOrderbook ?? null)}
 
 Stop-cluster zones (4H swings, where retail SL likely sits):
 ${formatStopClusters(ctx.stopClusters ?? null)}
+
+Liquidations (Binance forceOrder stream, last 5 min):
+${formatLiquidations(ctx.liquidations ?? null)}
 
 Attached, in order:
   1. ${ctx.symbol} 15m  (primary entry timeframe)
