@@ -2,7 +2,7 @@ import WebSocket from 'ws';
 import { logger } from '../lib/logger.js';
 
 /**
- * Live aggregator of forced liquidations on Binance USDS-M perpetuals.
+ * Live aggregator of forced liquidations on Bybit USDT-perp.
  *
  * Why this matters: a cascade of liquidations is one of the most predictive
  * short-term signals in crypto. When $5M+ of longs get force-closed in 5
@@ -12,27 +12,55 @@ import { logger } from '../lib/logger.js';
  * a trending move.
  *
  * Implementation:
- *   - One persistent WebSocket to wss://fstream.binance.com/ws/!forceOrder@arr
- *     receives EVERY forceOrder event for ALL Binance perpetual symbols.
- *   - We keep a rolling 5-minute bucket per symbol containing
- *     { ts, side: 'long_liquidated'|'short_liquidated', usd, price }.
+ *   - Persistent WebSocket to wss://stream.bybit.com/v5/public/linear
+ *   - On open, subscribes to allLiquidation.<symbol> for a fixed list of
+ *     top-volume symbols (any pair we'd realistically trade).
+ *   - Per-symbol rolling 5-minute bucket of events >= MIN_EVENT_USD.
  *   - On every decide / monitor call, getLiquidations(symbol) sums the
  *     bucket and returns a snapshot with USD totals + the largest single
- *     event (so the model sees "biggest liquidation in window: $1.2M").
+ *     event.
  *
- * Bybit and OKX don't broadcast all-symbol forceOrder streams as easily.
- * Binance is the largest perp market by volume so its liquidation tape
- * is a strong proxy for the whole market — when Binance cascades, Bybit
- * + OKX cascade in sympathy.
+ * Why Bybit, not Binance:
+ *   We tested both. Bybit's WS reliably delivers liquidation frames; Binance
+ *   futures WebSocket (fstream) had silent-stall issues from our environment
+ *   at deploy time. Since Bybit is also our PRIMARY trading venue, Bybit
+ *   liquidations are the most directly relevant to our trade thesis anyway
+ *   (we exit on Bybit; Bybit cascade = Bybit price action). When Binance
+ *   fstream is healthy again we can layer it in as a confirming source.
  *
  * Reconnection: on close/error we reschedule with exponential backoff
- * capped at 60s. Stale data is fine (just stale, not wrong) — the rolling
- * window naturally drains when no new events arrive.
+ * capped at 60s. The rolling window naturally drains when no new events
+ * arrive.
  */
 
-const STREAM_URL = 'wss://fstream.binance.com/ws/!forceOrder@arr';
+const STREAM_URL = 'wss://stream.bybit.com/v5/public/linear';
 const WINDOW_MS = 5 * 60 * 1000;
 const MIN_EVENT_USD = 1_000; // ignore noise
+
+// Top USDT-perp symbols by 24h volume. Subscribe upfront so any inbound
+// signal symbol is already covered. Add new ones as we expand coverage.
+const SUBSCRIBED_SYMBOLS = [
+  'BTCUSDT',
+  'ETHUSDT',
+  'SOLUSDT',
+  'XRPUSDT',
+  'DOGEUSDT',
+  'TONUSDT',
+  'BNBUSDT',
+  'AVAXUSDT',
+  'LINKUSDT',
+  'ADAUSDT',
+  'PEPEUSDT',
+  'TRXUSDT',
+  'SUIUSDT',
+  'NEARUSDT',
+  'LTCUSDT',
+  'DOTUSDT',
+  'MATICUSDT',
+  'ARBUSDT',
+  'OPUSDT',
+  'WLDUSDT',
+];
 
 type LiquidationEvent = {
   ts: number;
@@ -53,41 +81,68 @@ function pruneBucket(symbol: string, now: number): LiquidationEvent[] {
   const arr = buckets.get(symbol);
   if (!arr) return [];
   const cutoff = now - WINDOW_MS;
-  // events arrive newest, oldest is at index 0; drop expired
   let i = 0;
   while (i < arr.length && arr[i]!.ts < cutoff) i++;
   if (i > 0) arr.splice(0, i);
   return arr;
 }
 
+type BybitLiqMsg = {
+  topic?: string;
+  type?: string;
+  ts?: number;
+  data?: { T: number; s: string; S: 'Buy' | 'Sell'; v: string; p: string }[];
+  op?: string;
+  success?: boolean;
+};
+
 function handleMessage(raw: WebSocket.RawData): void {
   lastMessageAt = Date.now();
-  let msg: { e?: string; o?: { s: string; S: string; q: string; p: string; ap: string; T: number } };
+  let msg: BybitLiqMsg;
   try {
-    msg = JSON.parse(raw.toString()) as typeof msg;
+    msg = JSON.parse(raw.toString()) as BybitLiqMsg;
   } catch {
     return;
   }
-  if (msg.e !== 'forceOrder' || !msg.o) return;
+  // Ignore subscribe acks, pong responses, etc.
+  if (!msg.topic || !msg.topic.startsWith('allLiquidation.') || !msg.data) return;
 
-  const o = msg.o;
-  const qty = Number(o.q);
-  const price = Number(o.ap || o.p);
-  if (!Number.isFinite(qty) || !Number.isFinite(price) || qty <= 0 || price <= 0) return;
+  for (const ev of msg.data) {
+    const qty = Number(ev.v);
+    const price = Number(ev.p);
+    if (!Number.isFinite(qty) || !Number.isFinite(price) || qty <= 0 || price <= 0) continue;
 
-  const usd = qty * price;
-  if (usd < MIN_EVENT_USD) return;
+    const usd = qty * price;
+    if (usd < MIN_EVENT_USD) continue;
 
-  // Binance forceOrder side semantics:
-  //   o.S = "SELL" → forced sell = LONG position got liquidated
-  //   o.S = "BUY"  → forced buy  = SHORT position got liquidated
-  const side: 'long_liquidated' | 'short_liquidated' =
-    o.S === 'SELL' ? 'long_liquidated' : 'short_liquidated';
+    // Bybit side semantics for liquidations:
+    //   S = "Buy"  → forced buy  = SHORT was liquidated (closing short = buy)
+    //   S = "Sell" → forced sell = LONG  was liquidated (closing long = sell)
+    const side: 'long_liquidated' | 'short_liquidated' =
+      ev.S === 'Sell' ? 'long_liquidated' : 'short_liquidated';
 
-  const evt: LiquidationEvent = { ts: o.T || Date.now(), side, usd, price };
-  const arr = buckets.get(o.s) ?? [];
-  arr.push(evt);
-  buckets.set(o.s, arr);
+    const evt: LiquidationEvent = { ts: ev.T || Date.now(), side, usd, price };
+    const arr = buckets.get(ev.s) ?? [];
+    arr.push(evt);
+    buckets.set(ev.s, arr);
+  }
+}
+
+function subscribe(): void {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  // Bybit allows up to ~20 args per subscribe message; we have 20 so one shot.
+  const args = SUBSCRIBED_SYMBOLS.map((s) => `allLiquidation.${s}`);
+  ws.send(JSON.stringify({ op: 'subscribe', args }));
+
+  // Ping every 20s to keep alive (Bybit closes idle connections at 30s)
+  const pingInterval = setInterval(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      clearInterval(pingInterval);
+      return;
+    }
+    ws.send(JSON.stringify({ op: 'ping' }));
+  }, 20_000);
+  ws.once('close', () => clearInterval(pingInterval));
 }
 
 function scheduleReconnect(): void {
@@ -108,12 +163,13 @@ function connect(): void {
       // ignore
     }
   }
-  logger.info({ url: STREAM_URL }, 'liquidations: connecting');
+  logger.info({ url: STREAM_URL, symbols: SUBSCRIBED_SYMBOLS.length }, 'liquidations: connecting');
   ws = new WebSocket(STREAM_URL, { handshakeTimeout: 15_000 });
 
   ws.on('open', () => {
-    logger.info('liquidations: WS connected');
-    reconnectDelayMs = 1_000; // reset backoff on success
+    logger.info('liquidations: WS connected, subscribing');
+    reconnectDelayMs = 1_000;
+    subscribe();
   });
 
   ws.on('message', handleMessage);
@@ -125,21 +181,21 @@ function connect(): void {
 
   ws.on('error', (err) => {
     logger.error({ err: err.message }, 'liquidations: WS error');
-    // 'close' will follow; reconnection scheduled there.
   });
 }
 
-/** Start the listener. Idempotent — multiple calls are no-ops. */
+/** Start the listener. Idempotent. */
 export function startLiquidationsListener(): void {
   if (started) return;
   started = true;
   connect();
 
-  // Liveness probe: if no messages for 2 minutes, force reconnect (Binance
-  // closes idle connections; we can also have a half-open TCP).
   setInterval(() => {
     if (lastMessageAt > 0 && Date.now() - lastMessageAt > 120_000) {
-      logger.warn({ silence_ms: Date.now() - lastMessageAt }, 'liquidations: stale, forcing reconnect');
+      logger.warn(
+        { silence_ms: Date.now() - lastMessageAt },
+        'liquidations: stale, forcing reconnect',
+      );
       lastMessageAt = 0;
       scheduleReconnect();
     }
@@ -148,15 +204,10 @@ export function startLiquidationsListener(): void {
 
 export type LiquidationsSnapshot = {
   symbol: string;
-  /** total USD of LONG positions force-closed in last 5 min */
   longLiqUsd5m: number;
-  /** total USD of SHORT positions force-closed in last 5 min */
   shortLiqUsd5m: number;
-  /** USD value of the single largest liquidation in the window (any side) */
   largestEventUsd: number;
-  /** how many discrete liquidation events in the window */
   eventCount: number;
-  /** is there a one-sided cascade? heuristic: $5M+ on one side AND >= 5x the other side */
   cascade: 'long' | 'short' | null;
   fetchedAt: number;
 };
