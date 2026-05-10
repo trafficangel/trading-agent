@@ -186,8 +186,10 @@ export async function maybeDecide(symbol: string): Promise<void> {
     minSlDistPct: 0.2,
     maxSlDistPct: 5.0,
     minRR: 1.5,
+    minSlAtrMult: 0.7,
+    maxSlAtrMult: 4.0,
   };
-  const riskGate = checkDecision(result.decision, limits);
+  const riskGate = checkDecision(result.decision, limits, volumeProfile?.atr14_15m ?? null);
 
   const decisionId = insertDecision({
     symbol,

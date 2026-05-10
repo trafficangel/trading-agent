@@ -53,4 +53,28 @@ describe('checkDecision', () => {
     const r = checkDecision({ ...baseOpenLong, side: 'short', sl: 102, tp: [104] });
     expect(r.ok).toBe(false);
   });
+
+  it('SL within sane ATR multiple passes', () => {
+    // entry 100, sl 98 → SL distance 2. ATR 1 → 2×ATR, well within [0.7, 4.0]
+    expect(checkDecision(baseOpenLong, undefined, 1).ok).toBe(true);
+  });
+
+  it('SL too tight in ATR multiple fails', () => {
+    // SL distance 2, ATR 5 → 0.4×ATR, below 0.7 floor → fails
+    const r = checkDecision(baseOpenLong, undefined, 5);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('×ATR');
+  });
+
+  it('SL too wide in ATR multiple fails', () => {
+    // SL distance 2, ATR 0.4 → 5×ATR, above 4.0 ceiling → fails
+    const r = checkDecision(baseOpenLong, undefined, 0.4);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('×ATR');
+  });
+
+  it('null/undefined ATR skips ATR check', () => {
+    expect(checkDecision(baseOpenLong, undefined, null).ok).toBe(true);
+    expect(checkDecision(baseOpenLong, undefined, undefined).ok).toBe(true);
+  });
 });

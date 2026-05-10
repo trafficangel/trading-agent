@@ -76,7 +76,7 @@
 
 ## Tier 2 — Дисциплина риска
 
-### 2.1 ⭐⭐⭐ ATR-based SL sanity check — `[ ]`
+### 2.1 ⭐⭐⭐ ATR-based SL sanity check — `[x]` ✅
 **Зачем:** LLM ставит SL по структуре. Но 0.3% SL на символе где средняя 5m свеча 0.25% — самоубийство, выбьет шумом. Считаем ATR(14) на 15m, отклоняем сделку (или даунгрейдим в SKIP) если SL дистанция < 0.7×ATR или > 4×ATR.
 **Файлы:** новая функция в `src/exchange/bybit-volume.ts` (klines→ATR), gate в `src/risk/manager.ts`.
 **Effort:** ~3 часа.
@@ -209,6 +209,7 @@ conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OP
 - ✅ **Window 20 min** — `182d669`
 - ✅ **1.1 Subject 4H chart in context** — adds swing-trend awareness for both decide and monitor passes
 - ✅ **1.2 Volume Profile + ATR in prompt** — POC/VAH/VAL/VWAP/ATR(14) computed from 24h of 15m klines, shown to LLM as deterministic S/R levels with usage rules
+- ✅ **2.1 ATR-based SL sanity** — risk gate rejects OPEN if SL distance < 0.7×ATR (noise risk) or > 4×ATR (fictional R:R). Tests in tests/unit/risk.test.ts
 
 ---
 
