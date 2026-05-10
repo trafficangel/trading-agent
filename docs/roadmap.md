@@ -43,7 +43,7 @@
 **Файлы:** новый `src/exchange/bybit-volume.ts` (через `/v5/market/kline`), интеграция в `decide.ts` и оба промпта.
 **Effort:** ~4 часа.
 
-### 1.3 ⭐⭐⭐ Multi-exchange orderbook + liquidity clusters — `[ ]`
+### 1.3 ⭐⭐⭐ Multi-exchange orderbook + liquidity clusters — `[x]` ✅
 **Зачем:** **Самый сильный edge в крипте.** Aggregated orderbook + stop-cluster detection across Bybit + Binance + OKX. Cross-exchange validation: стенка которая есть на 2+ биржах = настоящая оборона; одиночная стенка только на Bybit = локальный HFT-fake. Stop hunts происходят там где обычно ставят SL → ставим **за** этой зоной.
 **Объединено с прежним 1.6** (multi-exchange context) — оба пункта используют одну и ту же инфраструктуру адаптеров.
 
@@ -233,6 +233,7 @@ conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OP
 - ✅ **1.2 Volume Profile + ATR in prompt** — POC/VAH/VAL/VWAP/ATR(14) computed from 24h of 15m klines, shown to LLM as deterministic S/R levels with usage rules
 - ✅ **2.1 ATR-based SL sanity** — risk gate rejects OPEN if SL distance < 0.7×ATR (noise risk) or > 4×ATR (fictional R:R). Tests in tests/unit/risk.test.ts
 - ✅ **2.2 Confidence-tiered sizing** — `src/risk/sizing.ts` maps post-critique confidence to fixed size_pct tiers (0.5/1.0/1.5/2.0%); confidence < 0.45 forces SKIP regardless of LLM verdict
+- ✅ **1.3 Multi-exchange orderbook + liquidity clusters** — adapters for Binance + OKX (`binance-public.ts`, `okx-public.ts`), Bybit orderbook extension, symbol mapper. Aggregator `multi-exchange.ts` produces: weighted funding + divergence; aggregated orderbook with cross-exchange-confirmed walls; stop-cluster zones from 4H swings. New system-prompt rules for using cross-confirmed walls vs HFT fakes, stop-hunt avoidance, and divergence signals. Smoke-tested on TONUSDT — 9/9 walls confirmed cross-exchange, divergence detected
 
 ---
 

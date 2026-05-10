@@ -2,6 +2,14 @@ import { DECISION_JSON_SCHEMA } from './decision.schema.js';
 import type { AggregatedScore } from '../signals/aggregator.js';
 import { formatSentiment, type MarketSentiment } from '../exchange/bybit-public.js';
 import { formatVolumeProfile, type VolumeProfile } from '../exchange/bybit-volume.js';
+import {
+  formatAggregatedOrderbook,
+  formatAggregatedSentiment,
+  formatStopClusters,
+  type AggregatedOrderbook,
+  type AggregatedSentiment,
+  type StopClustersResult,
+} from '../exchange/multi-exchange.js';
 
 export function buildSystemPrompt(): string {
   return `You are a discretionary intraday crypto trader on Bybit USDT-perp.
@@ -46,6 +54,33 @@ Hard rules — violation means SKIP:
     wide (R:R becomes fictional) → either tighten or SKIP.
   * Prefer SL/TP placements that align with VAH/VAL/POC/VWAP — cite which
     level you used in sl_reason / tp_reason.
+- **Aggregated orderbook walls (cross-exchange):**
+  * Walls confirmed on ≥2 exchanges (marked ✓2x or ✓3x) are REAL defense /
+    real liquidity. Use them for TP placement (target THROUGH the wall on
+    a breakout, or TP just before the wall on a fade).
+  * Walls visible only on one exchange (marked "(bybit only)" etc.) may be
+    HFT fakes that disappear when price approaches. Do NOT use them as
+    structural levels.
+  * Bid/ask depth ratio (±2%): < 0.85 = sellers heavier, raise SHORT confidence
+    + cap LONG confidence at 0.55. > 1.15 = buyers heavier, mirror.
+- **Stop-cluster zones (CRITICAL):**
+  * These are zones 0.1-0.3% past 4H swing highs/lows where retail traders
+    typically place their SL. Algorithms hunt these zones, then reverse.
+  * NEVER place your SL inside a stop-cluster zone — your SL will be wicked
+    out in a stop hunt before the thesis plays. Place SL beyond the zone
+    (further from entry), or SKIP if no good level beyond.
+  * For TP: if price has the path of least resistance toward a stop-cluster
+    zone, that's a high-probability target — algorithms WILL drive price
+    there to take the liquidity. TP just past the zone (after the hunt) or
+    just before (front-running the hunt) — cite which choice in tp_reason.
+- **Cross-exchange divergence signals:**
+  * Funding divergence > 0.003% between exchanges = crowdedness imbalance.
+    Side with crowded funding has mean-reversion risk.
+  * OI growing faster on Binance than Bybit (>2× difference) = real institutional
+    flow — not local Bybit retail, follow it.
+  * Binance vs Bybit price spread: positive (Binance higher) = Binance is
+    leading up; algorithms will pull Bybit up. Mild bullish edge for fresh
+    longs on Bybit. Negative = mirror.
 - Market sentiment (Bybit funding + OI + L/S ratio):
   * Funding rate (per 8h):
     - rate > +0.04%: longs are crowded and paying premium. New LONG: cap confidence at 0.55. New SHORT: small confidence boost.
@@ -92,10 +127,17 @@ export type LlmContext = {
   open_positions: { side: 'long' | 'short'; entry: number; size_pct: number }[];
   daily_pnl_pct: number;
   mode: string;
-  /** Bybit market sentiment snapshot — may be null if fetch failed */
+  /** Bybit-only sentiment snapshot — kept for backwards compatibility but
+   *  the aggregated version below is what the prompt uses now. */
   sentiment?: MarketSentiment | null;
   /** Volume profile + ATR snapshot — may be null if fetch failed */
   volumeProfile?: VolumeProfile | null;
+  /** Multi-exchange aggregated sentiment (Bybit + Binance + OKX). */
+  aggSentiment?: AggregatedSentiment | null;
+  /** Multi-exchange aggregated orderbook (top walls + ratio). */
+  aggOrderbook?: AggregatedOrderbook | null;
+  /** Stop-cluster zones derived from 4H swing structure. */
+  stopClusters?: StopClustersResult | null;
 };
 
 export function buildUserMessage(ctx: LlmContext): string {
@@ -122,11 +164,17 @@ Account:
   open_positions: ${JSON.stringify(ctx.open_positions)}
   daily_pnl_pct:  ${ctx.daily_pnl_pct}
 
-Bybit market sentiment (${ctx.symbol}):
-${formatSentiment(ctx.sentiment ?? null)}
+Multi-exchange sentiment (Bybit + Binance + OKX):
+${formatAggregatedSentiment(ctx.aggSentiment ?? null)}
 
 Volume profile + ATR (${ctx.symbol}, last 24h on 15m):
 ${formatVolumeProfile(ctx.volumeProfile ?? null)}
+
+Aggregated orderbook (Bybit + Binance + OKX, ±2% from mid):
+${formatAggregatedOrderbook(ctx.aggOrderbook ?? null)}
+
+Stop-cluster zones (4H swings, where retail SL likely sits):
+${formatStopClusters(ctx.stopClusters ?? null)}
 
 Attached, in order:
   1. ${ctx.symbol} 15m  (primary entry timeframe)

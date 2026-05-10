@@ -7,6 +7,11 @@ import type { Decision } from './decision.schema.js';
 import type { LlmContext } from './prompt.js';
 import { formatSentiment } from '../exchange/bybit-public.js';
 import { formatVolumeProfile } from '../exchange/bybit-volume.js';
+import {
+  formatAggregatedOrderbook,
+  formatAggregatedSentiment,
+  formatStopClusters,
+} from '../exchange/multi-exchange.js';
 
 const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY ?? 'placeholder' });
 
@@ -104,11 +109,17 @@ Confluence window (last 20m):
   signals (${ctx.agg.signals.length}):
 ${sigs || '  (none)'}
 
-Bybit market sentiment:
-${formatSentiment(ctx.sentiment ?? null)}
+Multi-exchange sentiment:
+${formatAggregatedSentiment(ctx.aggSentiment ?? null)}
 
 Volume profile + ATR:
 ${formatVolumeProfile(ctx.volumeProfile ?? null)}
+
+Aggregated orderbook:
+${formatAggregatedOrderbook(ctx.aggOrderbook ?? null)}
+
+Stop clusters:
+${formatStopClusters(ctx.stopClusters ?? null)}
 
 Attached, in order: SUBJECT 15m, SUBJECT 1H, SUBJECT 4H, BTCUSDT 15m, BTCUSDT 1H.
 

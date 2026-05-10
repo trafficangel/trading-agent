@@ -21,6 +21,11 @@ import { tradeCaption } from '../telegram/decision-template.js';
 import { resultPost } from '../telegram/result-template.js';
 import { getLastPrice, getMarketSentiment } from '../exchange/bybit-public.js';
 import { getVolumeProfile } from '../exchange/bybit-volume.js';
+import {
+  getAggregatedOrderbook,
+  getAggregatedSentiment,
+  getStopClusters,
+} from '../exchange/multi-exchange.js';
 
 const STORAGE_STATE = resolve('data', 'tradingview-storage-state.json');
 const MAX_RETRIES = 2;
@@ -146,10 +151,18 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
     }
   }
 
-  const [sentiment, volumeProfile] = await Promise.all([
+  const [sentiment, volumeProfile, aggSentiment, aggOrderbook] = await Promise.all([
     getMarketSentiment(p.symbol).catch(() => null),
     getVolumeProfile(p.symbol).catch(() => null),
+    getAggregatedSentiment(p.symbol).catch(() => null),
+    getAggregatedOrderbook(p.symbol).catch(() => null),
   ]);
+
+  const priceForClusters =
+    currentPrice ?? aggOrderbook?.midPrice ?? volumeProfile?.vwap ?? null;
+  const stopClusters = priceForClusters
+    ? await getStopClusters(p.symbol, priceForClusters).catch(() => null)
+    : null;
 
   const result = await callMonitorLlm(
     buildMonitorSystemPrompt(),
@@ -160,6 +173,9 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
       ageMinutes: ageMin,
       sentiment,
       volumeProfile,
+      aggSentiment,
+      aggOrderbook,
+      stopClusters,
     }),
     screenshots,
   );

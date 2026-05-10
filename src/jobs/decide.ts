@@ -17,6 +17,11 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getMarketSentiment } from '../exchange/bybit-public.js';
 import { getVolumeProfile } from '../exchange/bybit-volume.js';
+import {
+  getAggregatedOrderbook,
+  getAggregatedSentiment,
+  getStopClusters,
+} from '../exchange/multi-exchange.js';
 
 const COOLDOWN_MS = 15 * 60 * 1000;
 const STORAGE_STATE = resolve('data', 'tradingview-storage-state.json');
@@ -88,18 +93,29 @@ export async function maybeDecide(symbol: string): Promise<void> {
     logger.warn('tradingview storage state not present — calling LLM without screenshots');
   }
 
-  // Sentiment (funding/OI/LS) and volume profile (POC/VAH/VAL/VWAP/ATR) in
-  // parallel — both are public Bybit endpoints with their own caches.
-  const [sentiment, volumeProfile] = await Promise.all([
-    getMarketSentiment(symbol).catch((err: unknown) => {
-      logger.warn({ err, symbol }, 'sentiment fetch failed — proceeding without');
+  // All public-data fetches in parallel: Bybit-only sentiment (kept for
+  // backwards compat), volume profile, multi-exchange aggregated sentiment,
+  // aggregated orderbook, stop clusters. Each has its own cache and graceful
+  // null fallback.
+  const [sentiment, volumeProfile, aggSentiment, aggOrderbook] = await Promise.all([
+    getMarketSentiment(symbol).catch(() => null),
+    getVolumeProfile(symbol).catch(() => null),
+    getAggregatedSentiment(symbol).catch((err: unknown) => {
+      logger.warn({ err, symbol }, 'aggregated sentiment fetch failed');
       return null;
     }),
-    getVolumeProfile(symbol).catch((err: unknown) => {
-      logger.warn({ err, symbol }, 'volume profile fetch failed — proceeding without');
+    getAggregatedOrderbook(symbol).catch((err: unknown) => {
+      logger.warn({ err, symbol }, 'aggregated orderbook fetch failed');
       return null;
     }),
   ]);
+
+  // Stop clusters need current price — fetch after we have it
+  const currentPriceForClusters =
+    aggOrderbook?.midPrice ?? volumeProfile?.vwap ?? aggSentiment?.perExchange.bybit?.lastPrice ?? null;
+  const stopClusters = currentPriceForClusters
+    ? await getStopClusters(symbol, currentPriceForClusters).catch(() => null)
+    : null;
 
   const result = await callLlm(
     {
@@ -110,6 +126,9 @@ export async function maybeDecide(symbol: string): Promise<void> {
       mode: config.MODE,
       sentiment,
       volumeProfile,
+      aggSentiment,
+      aggOrderbook,
+      stopClusters,
     },
     screenshots,
   );
@@ -128,7 +147,18 @@ export async function maybeDecide(symbol: string): Promise<void> {
   if (result.decision.decision === 'OPEN') {
     const crit = await critiqueDecision(
       result.decision,
-      { symbol, agg, open_positions: [], daily_pnl_pct: 0, mode: config.MODE, sentiment, volumeProfile },
+      {
+        symbol,
+        agg,
+        open_positions: [],
+        daily_pnl_pct: 0,
+        mode: config.MODE,
+        sentiment,
+        volumeProfile,
+        aggSentiment,
+        aggOrderbook,
+        stopClusters,
+      },
       screenshots,
     );
     if (crit) {

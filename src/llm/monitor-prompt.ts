@@ -3,6 +3,14 @@ import type { DecisionRow } from '../db/repos/decisions.js';
 import type { SignalRow } from '../db/repos/signals.js';
 import { formatSentiment, type MarketSentiment } from '../exchange/bybit-public.js';
 import { formatVolumeProfile, type VolumeProfile } from '../exchange/bybit-volume.js';
+import {
+  formatAggregatedOrderbook,
+  formatAggregatedSentiment,
+  formatStopClusters,
+  type AggregatedOrderbook,
+  type AggregatedSentiment,
+  type StopClustersResult,
+} from '../exchange/multi-exchange.js';
 
 export function buildMonitorSystemPrompt(): string {
   return `You are managing an open intraday trade on Bybit USDT-perp.
@@ -40,6 +48,16 @@ Hard rules:
     structure; never lower the TP.
 - If BTC just made a sharp move while the alt is consolidating, factor in pending
   catch-up move when deciding to HOLD.
+- **Orderbook walls (cross-exchange):** if a confirmed wall (✓2x or ✓3x)
+  appeared near our TP and is large ($500k+), price will struggle to push
+  through — consider taking partial / tightening. If the wall vanished
+  (was there in last monitor pass, gone now) — likely fake, original
+  thesis still valid.
+- **Stop cluster monitoring:** if price is now hovering inside or just
+  approached a stop-cluster zone ON OUR SIDE (e.g. price near our SL
+  zone for a long), expect a hunt — but if 4H structure is intact and
+  no opposite confluence, HOLD through the wick. The hunt is mechanical;
+  the structure is the thesis.
 - Volume profile / ATR usage:
   * If price has reclaimed POC (Point of Control) in our favor — strong HOLD;
     POC acts as a magnet for further continuation.
@@ -67,6 +85,9 @@ export type MonitorContext = {
   ageMinutes: number;
   sentiment?: MarketSentiment | null;
   volumeProfile?: VolumeProfile | null;
+  aggSentiment?: AggregatedSentiment | null;
+  aggOrderbook?: AggregatedOrderbook | null;
+  stopClusters?: StopClustersResult | null;
 };
 
 export function buildMonitorUserMessage(ctx: MonitorContext): string {
@@ -105,11 +126,17 @@ ${sigs}
 Current price (latest signal): ${ctx.currentPrice ?? 'unknown'}
 Estimated open PnL: ${pnlEstimate}
 
-Bybit market sentiment (${p.symbol}):
-${formatSentiment(ctx.sentiment ?? null)}
+Multi-exchange sentiment (Bybit + Binance + OKX):
+${formatAggregatedSentiment(ctx.aggSentiment ?? null)}
 
 Volume profile + ATR (${p.symbol}, last 24h on 15m):
 ${formatVolumeProfile(ctx.volumeProfile ?? null)}
+
+Aggregated orderbook (Bybit + Binance + OKX, ±2% from mid):
+${formatAggregatedOrderbook(ctx.aggOrderbook ?? null)}
+
+Stop-cluster zones (4H swings):
+${formatStopClusters(ctx.stopClusters ?? null)}
 
 Attached, in order:
   1. ${p.symbol} 15m NOW
