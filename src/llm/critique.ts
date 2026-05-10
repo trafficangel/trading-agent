@@ -97,7 +97,7 @@ function buildCritiqueUserMessage(d: Decision, ctx: LlmContext): string {
   reasoning_short: ${d.reasoning_short}
   reasoning_full:  ${d.reasoning_full}
 
-Confluence window (last 10m):
+Confluence window (last 20m):
   bullish: ${ctx.agg.bullish}
   bearish: ${ctx.agg.bearish}
   signals (${ctx.agg.signals.length}):

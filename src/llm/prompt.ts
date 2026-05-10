@@ -4,7 +4,7 @@ import { formatSentiment, type MarketSentiment } from '../exchange/bybit-public.
 
 export function buildSystemPrompt(): string {
   return `You are a discretionary intraday crypto trader on Bybit USDT-perp.
-You receive: (1) a confluence summary of LuxAlgo signals on a single symbol over the last 10 minutes,
+You receive: (1) a confluence summary of LuxAlgo signals on a single symbol over the last 20 minutes,
 (2) chart screenshots: SUBJECT 15m + 1H plus BTC 15m + 1H for market context,
 (3) account state.
 
@@ -78,7 +78,7 @@ export function buildUserMessage(ctx: LlmContext): string {
 
   return `Symbol: ${ctx.symbol}
 Mode: ${ctx.mode}
-Window: last 10 minutes (${new Date(ctx.agg.windowStart).toISOString()} → ${new Date(ctx.agg.windowEnd).toISOString()})
+Window: last 20 minutes (${new Date(ctx.agg.windowStart).toISOString()} → ${new Date(ctx.agg.windowEnd).toISOString()})
 
 Confluence score:
   bullish: ${ctx.agg.bullish}

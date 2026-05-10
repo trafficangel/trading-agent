@@ -2,7 +2,18 @@ import { recentSignals } from '../db/repos/signals.js';
 import { scoreEvent, SCORE_THRESHOLD } from './weights.js';
 import type { SignalRow } from '../db/repos/signals.js';
 
-const WINDOW_MS = 10 * 60 * 1000;
+/**
+ * Sliding confluence window. We weigh signals received within this many ms
+ * of the latest webhook on the same symbol.
+ *
+ * Why 20 min: primary TF is 15m. Bars close on a 15-min cadence, so signals
+ * arrive in bursts at bar close. A 10-min window cuts confluence between
+ * two adjacent 15m bars (e.g. 15m bullish_plus at 14:00 + 5m confirmation
+ * at 14:11 still in window, but a fresh 15m signal at 14:15 would land
+ * AFTER the 14:00 signal expired). 20 min covers the current 15m bar plus
+ * the previous one in full, without dragging in genuinely stale context.
+ */
+const WINDOW_MS = 20 * 60 * 1000;
 
 export type AggregatedScore = {
   symbol: string;

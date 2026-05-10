@@ -164,7 +164,7 @@ async function monitorPosition(p: DecisionRow): Promise<void> {
   }
 
   // Aggregator output isn't strictly meaningful for monitor decisions, but we still
-  // record the recent context (window=10m of recent signals).
+  // record the recent context (window=20m of recent signals).
   const agg = aggregateSymbol(p.symbol);
 
   const newId = insertDecision({
