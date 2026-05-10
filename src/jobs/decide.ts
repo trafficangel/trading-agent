@@ -8,6 +8,7 @@ import { callLlm } from '../llm/client.js';
 import { critiqueDecision } from '../llm/critique.js';
 import { captureChart } from '../browser/tradingview.js';
 import { checkDecision, type RiskLimits } from '../risk/manager.js';
+import { sizeFromConfidence } from '../risk/sizing.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { tradeCaption, skipLog } from '../telegram/decision-template.js';
 import { logger } from '../lib/logger.js';
@@ -178,6 +179,42 @@ export async function maybeDecide(symbol: string): Promise<void> {
           ),
         };
       }
+    }
+  }
+
+  // Confidence-tiered sizing. Overrides whatever size_pct the LLM picked
+  // (it tends to over-size when confident). Confidence below floor →
+  // additional downgrade to SKIP regardless of self-critique verdict.
+  if (result.decision.decision === 'OPEN') {
+    const sizing = sizeFromConfidence(result.decision.confidence);
+    if (sizing.action === 'SKIP') {
+      logger.info(
+        { symbol, confidence: result.decision.confidence, reason: sizing.reason },
+        'sizing → SKIP (confidence below floor)',
+      );
+      const original = result.decision;
+      result.decision = {
+        decision: 'SKIP',
+        tp: [],
+        confidence: original.confidence,
+        reasoning_short: `Sizing-floor SKIP: ${sizing.reason}`.slice(0, 220),
+        reasoning_full: `Originally OPEN ${original.side} @ ${original.entry} with conf ${original.confidence}.\nSizing tier rejected: ${sizing.reason}.\n\nOriginal reasoning:\n${original.reasoning_full}`.slice(
+          0,
+          2000,
+        ),
+      };
+    } else {
+      logger.info(
+        {
+          symbol,
+          original_size_pct: result.decision.size_pct,
+          tiered_size_pct: sizing.sizePct,
+          tier: sizing.tier,
+          confidence: result.decision.confidence,
+        },
+        'sizing tier applied',
+      );
+      result.decision = { ...result.decision, size_pct: sizing.sizePct };
     }
   }
 

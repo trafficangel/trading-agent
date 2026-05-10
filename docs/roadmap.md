@@ -81,7 +81,7 @@
 **Файлы:** новая функция в `src/exchange/bybit-volume.ts` (klines→ATR), gate в `src/risk/manager.ts`.
 **Effort:** ~3 часа.
 
-### 2.2 ⭐⭐ Динамический size_pct по confidence — `[ ]`
+### 2.2 ⭐⭐ Динамический size_pct по confidence — `[x]` ✅
 **Зачем:** убрать «робкие OPEN с 2% позиции». После self-critique у нас честный confidence. Маппинг:
 ```
 conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OPEN)
@@ -210,6 +210,7 @@ conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OP
 - ✅ **1.1 Subject 4H chart in context** — adds swing-trend awareness for both decide and monitor passes
 - ✅ **1.2 Volume Profile + ATR in prompt** — POC/VAH/VAL/VWAP/ATR(14) computed from 24h of 15m klines, shown to LLM as deterministic S/R levels with usage rules
 - ✅ **2.1 ATR-based SL sanity** — risk gate rejects OPEN if SL distance < 0.7×ATR (noise risk) or > 4×ATR (fictional R:R). Tests in tests/unit/risk.test.ts
+- ✅ **2.2 Confidence-tiered sizing** — `src/risk/sizing.ts` maps post-critique confidence to fixed size_pct tiers (0.5/1.0/1.5/2.0%); confidence < 0.45 forces SKIP regardless of LLM verdict
 
 ---
 
