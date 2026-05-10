@@ -43,10 +43,44 @@
 **Файлы:** новый `src/exchange/bybit-volume.ts` (через `/v5/market/kline`), интеграция в `decide.ts` и оба промпта.
 **Effort:** ~4 часа.
 
-### 1.3 ⭐⭐⭐ Liquidity / orderbook depth — `[ ]`
-**Зачем:** **Самый сильный edge в крипте.** Где висят кит-лимитки, где кластеры стопов (за свингами 4h price action). Передаём текстом: «крупная защита 2.45 (5M USDT), стопы скорее всего за 2.475».
-**Файлы:** `src/exchange/bybit-orderbook.ts` (через `/v5/market/orderbook?limit=200`), интеграция в промпт.
-**Effort:** ~6 часов. Ловушка: rate limit, нужен кэш 30s.
+### 1.3 ⭐⭐⭐ Multi-exchange orderbook + liquidity clusters — `[ ]`
+**Зачем:** **Самый сильный edge в крипте.** Aggregated orderbook + stop-cluster detection across Bybit + Binance + OKX. Cross-exchange validation: стенка которая есть на 2+ биржах = настоящая оборона; одиночная стенка только на Bybit = локальный HFT-fake. Stop hunts происходят там где обычно ставят SL → ставим **за** этой зоной.
+**Объединено с прежним 1.6** (multi-exchange context) — оба пункта используют одну и ту же инфраструктуру адаптеров.
+
+**Архитектура:**
+1. **Adapters** (отдельный файл на биржу, нормализованные shapes):
+   - `src/exchange/binance-public.ts`: `/fapi/v1/depth`, `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest`, `/futures/data/openInterestHist`, `/fapi/v1/klines`
+   - `src/exchange/okx-public.ts`: `/api/v5/market/books`, `/api/v5/public/funding-rate`, `/api/v5/public/open-interest`, `/api/v5/market/candles`
+   - `src/exchange/bybit-public.ts` (extend existing): добавить `/v5/market/orderbook`
+2. **Symbol mapper** — единое каноническое имя `TONUSDT` → Bybit `TONUSDT`, Binance `TONUSDT`, OKX `TON-USDT-SWAP`.
+3. **Aggregator** `src/exchange/multi-exchange.ts`:
+   - `getAggregatedSentiment(symbol)` — weighted avg funding / OI delta / L/S ratio + **divergences между биржами**
+   - `getAggregatedOrderbook(symbol)` — нормализация всех книг по mid-price → биннинг 0.05% → топ стенок с пометкой «на скольки биржах подтверждена» + bid/ask ratio
+   - `getStopClusters(symbol)` — swings из 4h klines (берём биржу с макс. объёмом — обычно Binance), кластеризация близких уровней
+4. **Cross-exchange spread** — если Binance ведёт (price выше Bybit на 0.1%+) → bullish edge для Bybit (алгоритмы подтянут). Для альтов это работает.
+5. **Aggregated liquidations** (если успеем): Binance отдаёт `/fapi/v1/forceOrders` с публичным потоком ликвидаций. Каскад → mean reversion вероятна.
+
+**Интеграция:**
+- Заменить текущие точечные вызовы `getMarketSentiment` на `getAggregatedSentiment`
+- Прокинуть orderbook + stop clusters в `LlmContext` и промпты (decide / monitor / critique)
+- Системные правила в промпт:
+  * SL не должен попадать **внутрь** stop-cluster зоны — сдвинуть за или SKIP
+  * TP цельтесь **через** стенку или **в** stop-cluster зону, не до
+  * Стенка только на 1 бирже = подозрение на fake → не используем как уровень
+  * Cross-exchange divergence: funding на Binance > Bybit + OI растёт на Binance → инициатива на Binance, перетекание ликвидности
+
+**Volume reality для альтов (TON ориентир):** Binance ≈ 60% объёма, Bybit ≈ 25%, OKX ≈ 15%. Один Bybit видит четверть картины.
+
+**Effort:** ~1.5-2 дня. Этапы по дням:
+- День 1: adapters (Binance + OKX) + symbol mapper + базовые тесты с моками
+- День 2: aggregator + интеграция в decide/monitor + промпт-правила + тесты
+- (Опционально, +0.5 дня): liquidations stream
+
+**Ловушки:**
+- Binance геоблокирует API из США/некоторых стран — на нашем VDSina сервере (Россия) должно работать; проверить ping перед началом
+- OKX symbol naming: `BASE-QUOTE-SWAP` для perpetual, не `BASEQUOTE`
+- OKX timestamp в миллисекундах через строку, кастовать аккуратно
+- Rate limits: Binance 2400 req/min, OKX 20 req/2sec, Bybit 50 req/sec — с TTL 30s никаких проблем
 
 ### 1.4 ⭐ Корреляты для альтов (ETH context) — `[ ]`
 **Зачем:** для не-BTC/ETH альтов добавить ETH 1H — иногда альт коррелирует с ETH сильнее чем с BTC.
@@ -58,19 +92,8 @@
 **Файлы:** новый `src/exchange/event-calendar.ts` (CoinMarketCal API + Bybit announcements), новый блок проверки в `decide.ts` до вызова LLM.
 **Effort:** ~6 часов.
 
-### 1.6 ⭐⭐⭐ Multi-exchange aggregated context (Binance + OKX + Bybit) — `[ ]`
-**Зачем:** Bybit — средняя биржа по объёму. **Binance делает 3-5× объём Bybit на BTC perps**, OKX — следующий по ликвидности. Реальные edge'и:
-- **Aggregated funding:** если на Bybit funding +0.01% а на Binance +0.05% — крупный капитал поджимает шорты на Binance, это сигнал. Усреднённый funding точнее одиночного.
-- **Aggregated OI delta:** рост OI на 3 биржах одновременно = реальный поток. Рост только на Bybit = локальный шум.
-- **Cross-exchange price spread:** на альтах при сильном движении Binance ведёт, Bybit отстаёт на 0.05-0.2%. Если Bybit ниже Binance — алгоритмы подтянут вверх → bullish edge.
-- **Aggregated liquidations:** Coinglass-style данные (можно через Binance liquidation API или агрегированно). Каскад ликвидаций → высокая вероятность mean reversion.
-**Файлы:** новый `src/exchange/multi-exchange.ts` с адаптерами:
-- `binance-public.ts` (`/fapi/v1/premiumIndex`, `/fapi/v1/openInterest`, `/futures/data/openInterestHist`)
-- `okx-public.ts` (`/api/v5/public/funding-rate`, `/api/v5/public/open-interest`)
-- агрегатор который усредняет и считает дивергенции
-**Интеграция:** заменить текущий `getMarketSentiment` на `getAggregatedSentiment` который возвращает per-exchange + aggregated.
-**Стоимость:** 3 публичных API без ключей, кэш 30s. Без рейт-лимитов на нашем объёме.
-**Effort:** ~1 день. **Сильный edge — приоритет вместе с 1.3.**
+### 1.6 ⭐⭐⭐ ~~Multi-exchange aggregated context~~ — **MERGED INTO 1.3**
+Объединено с пунктом 1.3 — оба пункта используют одну и ту же инфраструктуру (адаптеры Binance/OKX/Bybit + symbol mapper + aggregator). См. 1.3.
 
 ---
 
@@ -177,10 +200,9 @@ conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OP
 4. 2.2 — Dynamic sizing
 
 **Неделя следующая:**
-5. 1.3 — Orderbook / liquidity (самый мощный edge)
-6. 1.6 — Multi-exchange aggregated context (Binance/OKX/Bybit)
-7. 2.3 — Don't-trade-in-chop
-8. 3.3 — Жёсткое SL→BE на 1R
+5. **1.3 — Multi-exchange orderbook + liquidity (~1.5-2 дня)** — главный приоритет, объединил собой 1.6
+6. 2.3 — Don't-trade-in-chop
+7. 3.3 — Жёсткое SL→BE на 1R
 
 **После 30-50 закрытых сделок:**
 8. 4.1 — Critique calibration
