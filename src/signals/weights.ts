@@ -96,5 +96,12 @@ export function scoreEvent(
   return { bullish: 0, bearish: 0 };
 }
 
-/** Threshold above which the LLM is invoked. */
-export const SCORE_THRESHOLD = 6;
+/** Threshold above which the LLM is invoked.
+ *
+ * History:
+ * - 6: original; required ~2 strong 15m signals per window. Too few decisions
+ *   in shadow-mode; we need volume to evaluate the LLM.
+ * - 4: current. One `bullish_plus` (4) or one 1H signal (×1.5) is enough to
+ *   wake the model; LLM itself filters weak setups to SKIP.
+ */
+export const SCORE_THRESHOLD = 4;

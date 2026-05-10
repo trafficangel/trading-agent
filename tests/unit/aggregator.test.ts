@@ -32,9 +32,10 @@ describe('scoreEvent', () => {
   });
 
   it('SCORE_THRESHOLD is reasonable', () => {
-    // 1× bullish_plus on 15m (4) + 1× S-BOS on 15m (3) = 7 → triggers
-    // 1× bullish_plus on 5m (2.8) alone → does not trigger
-    expect(SCORE_THRESHOLD).toBeGreaterThanOrEqual(5);
+    // Bumped down to 4 so a single 15m bullish_plus (4) wakes the LLM.
+    // The LLM itself does the SKIP filtering. We don't want it so low that
+    // 5m noise alone (×0.7 mult) crosses it: 1× bullish_plus on 5m = 2.8.
+    expect(SCORE_THRESHOLD).toBeGreaterThanOrEqual(3);
     expect(SCORE_THRESHOLD).toBeLessThanOrEqual(8);
   });
 });

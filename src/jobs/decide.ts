@@ -5,6 +5,7 @@ import {
   findActiveOnSide,
 } from '../db/repos/decisions.js';
 import { callLlm } from '../llm/client.js';
+import { critiqueDecision } from '../llm/critique.js';
 import { captureChart } from '../browser/tradingview.js';
 import { checkDecision, type RiskLimits } from '../risk/manager.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
@@ -103,6 +104,69 @@ export async function maybeDecide(symbol: string): Promise<void> {
     return;
   }
 
+  // Self-critique pass: only on OPEN decisions. Forces Claude to enumerate
+  // realistic failure modes and possibly downgrade its own call to SKIP.
+  // Cheap discipline mechanism — costs ~1 extra LLM call per OPEN, no cost
+  // on SKIP/CLOSE/MODIFY. Failure to run critique leaves the original
+  // decision untouched.
+  let critiqueRaw: string | null = null;
+  if (result.decision.decision === 'OPEN') {
+    const crit = await critiqueDecision(
+      result.decision,
+      { symbol, agg, open_positions: [], daily_pnl_pct: 0, mode: config.MODE, sentiment },
+      screenshots,
+    );
+    if (crit) {
+      critiqueRaw = crit.raw;
+      logger.info(
+        {
+          symbol,
+          original_confidence: result.decision.confidence,
+          reassessed_confidence: crit.critique.reassessed_confidence,
+          verdict: crit.critique.verdict,
+          input_tokens: crit.inputTokens,
+          output_tokens: crit.outputTokens,
+          latency_ms: crit.latencyMs,
+        },
+        'self-critique done',
+      );
+
+      if (crit.critique.verdict === 'DOWNGRADE_TO_SKIP') {
+        // Mutate the decision into a SKIP. We keep the original reasoning so
+        // the audit trail shows what Claude WANTED to do before critique
+        // killed it.
+        const risksBlock = crit.critique.risks.map((r, i) => `  ${i + 1}. ${r}`).join('\n');
+        const original = result.decision;
+        result.decision = {
+          decision: 'SKIP',
+          tp: [],
+          confidence: crit.critique.reassessed_confidence,
+          reasoning_short: `Self-critique → SKIP: ${crit.critique.verdict_reason}`.slice(0, 220),
+          reasoning_full:
+            `Originally proposed OPEN ${original.side} @ ${original.entry} (SL ${original.sl}, TP ${original.tp[0]}, conf ${original.confidence}).\n\n` +
+            `Original reasoning:\n${original.reasoning_full}\n\n` +
+            `Self-critique downgraded to SKIP. Reason: ${crit.critique.verdict_reason}\n\nRisks:\n${risksBlock}`.slice(
+              0,
+              2000,
+            ),
+        };
+      } else {
+        // KEEP: lower confidence if critique was harsher; append risks to
+        // reasoning_full so the Telegram caption (and audit log) carries them.
+        const newConf = Math.min(result.decision.confidence, crit.critique.reassessed_confidence);
+        const risksBlock = crit.critique.risks.map((r, i) => `  ${i + 1}. ${r}`).join('\n');
+        result.decision = {
+          ...result.decision,
+          confidence: newConf,
+          reasoning_full: `${result.decision.reasoning_full}\n\nSelf-critique (риски):\n${risksBlock}`.slice(
+            0,
+            2000,
+          ),
+        };
+      }
+    }
+  }
+
   const limits: RiskLimits = {
     maxSizePct: config.RISK_PCT_PER_TRADE * 4,
     minSlDistPct: 0.2,
@@ -118,7 +182,9 @@ export async function maybeDecide(symbol: string): Promise<void> {
     screenshotPath: primaryScreenshot,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
-    rawResponse: result.raw,
+    rawResponse: critiqueRaw
+      ? `${result.raw}\n\n--- CRITIQUE ---\n${critiqueRaw}`
+      : result.raw,
   });
 
   logger.info(
