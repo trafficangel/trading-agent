@@ -8,6 +8,17 @@ const SCREENSHOTS_DIR = resolve('data', 'screenshots');
 
 let browserInstance: Browser | null = null;
 let contextInstance: BrowserContext | null = null;
+/**
+ * In-flight initialization promise. CRITICAL: prevents the race condition
+ * where parallel callers (parallel screenshot capture) all see
+ * `contextInstance === null` at the same moment and each launch their own
+ * Chromium. Without this, 5 parallel captureChart() calls each spawn a
+ * full browser → 5× memory, 5× CPU, contention, hangs, OOM.
+ *
+ * Pattern: first caller creates the promise and starts launching; concurrent
+ * callers await the same promise.
+ */
+let contextInitPromise: Promise<BrowserContext> | null = null;
 
 /** Symbols → TradingView ticker (Bybit perp). */
 function tvSymbol(symbol: string): string {
@@ -16,6 +27,7 @@ function tvSymbol(symbol: string): string {
 
 async function getContext(): Promise<BrowserContext> {
   if (contextInstance) return contextInstance;
+  if (contextInitPromise) return contextInitPromise;
 
   if (!existsSync(STORAGE_STATE_PATH)) {
     throw new Error(
@@ -23,19 +35,28 @@ async function getContext(): Promise<BrowserContext> {
     );
   }
 
-  browserInstance = await chromium.launch({
-    headless: true,
-    executablePath: process.env.CHROMIUM_PATH || undefined,
-    args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+  contextInitPromise = (async () => {
+    browserInstance = await chromium.launch({
+      headless: true,
+      executablePath: process.env.CHROMIUM_PATH || undefined,
+      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+    });
+    const ctx = await browserInstance.newContext({
+      storageState: STORAGE_STATE_PATH,
+      viewport: { width: 1600, height: 900 },
+      userAgent:
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+    });
+    contextInstance = ctx;
+    logger.info('playwright context ready (storage state loaded)');
+    return ctx;
+  })().catch((err) => {
+    // On failure, allow the next caller to retry instead of locking forever.
+    contextInitPromise = null;
+    throw err;
   });
-  contextInstance = await browserInstance.newContext({
-    storageState: STORAGE_STATE_PATH,
-    viewport: { width: 1600, height: 900 },
-    userAgent:
-      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-  });
-  logger.info('playwright context ready (storage state loaded)');
-  return contextInstance;
+
+  return contextInitPromise;
 }
 
 /**

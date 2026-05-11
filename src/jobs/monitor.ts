@@ -447,6 +447,25 @@ async function monitorPositionImpl(p: DecisionRow): Promise<void> {
 
 let monitorRunning = false;
 
+/**
+ * Hard timeout per position. Same rationale as decide-cron's timeout:
+ * a hung Playwright session / stuck Anthropic call shouldn't block all
+ * subsequent monitor ticks.
+ */
+const MONITOR_PER_POSITION_TIMEOUT_MS = 5 * 60 * 1000;
+
+async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout: ${label} > ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function tick(): Promise<void> {
   if (monitorRunning) {
     logger.warn('monitor: previous tick still running, skipping');
@@ -462,7 +481,11 @@ async function tick(): Promise<void> {
     logger.info({ count: positions.length }, 'monitor tick');
     for (const p of positions) {
       try {
-        await monitorPosition(p);
+        await withTimeout(
+          monitorPosition(p),
+          MONITOR_PER_POSITION_TIMEOUT_MS,
+          `monitorPosition(${p.id})`,
+        );
       } catch (err) {
         logger.error({ err, position_id: p.id }, 'monitorPosition failed');
       }

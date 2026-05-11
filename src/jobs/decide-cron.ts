@@ -33,6 +33,30 @@ import { sendMessage } from '../telegram/bot.js';
 
 let running = false;
 
+/**
+ * Hard timeout per symbol's maybeDecide. If a Playwright session hangs or
+ * an Anthropic API call gets stuck, we don't want the whole decide cron
+ * locked for hours blocking subsequent ticks (saw a 3-hour stuck tick on
+ * 2026-05-11 from a getContext() race condition).
+ *
+ * 5 minutes is generous: typical decide pass with 5 screenshots + 2 LLM
+ * calls + sentiment + orderbook fetches is 60-120 sec. 5 min covers
+ * network slowness without false-killing.
+ */
+const PER_SYMBOL_TIMEOUT_MS = 5 * 60 * 1000;
+
+async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout: ${label} > ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 type SymbolEval = {
   symbol: string;
   bullish: number;
@@ -91,7 +115,13 @@ async function tick(): Promise<void> {
         // Run full pipeline (screenshots, sentiment, LLM, critique, sizing,
         // risk gate, telegram post). maybeDecide() re-checks active position
         // internally — defensive safety net.
-        await maybeDecide(symbol);
+        // Wrapped in timeout so a hung Playwright session or stuck LLM call
+        // can't block subsequent ticks indefinitely.
+        await withTimeout(
+          maybeDecide(symbol),
+          PER_SYMBOL_TIMEOUT_MS,
+          `maybeDecide(${symbol})`,
+        );
       } catch (err) {
         logger.error({ err, symbol }, 'decide cron: maybeDecide failed for symbol');
       }
