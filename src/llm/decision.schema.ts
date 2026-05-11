@@ -11,10 +11,15 @@ export type DecisionSide = z.infer<typeof DecisionSide>;
  * return exactly this shape. Our retry logic catches violations and feeds the
  * issues back to the model.
  */
-// Helper: accept null/undefined as "not provided" — Claude often emits null
-// for inapplicable fields on SKIP decisions, which is fine for us.
+// Helper: accept null/undefined/empty-string as "not provided" — Claude
+// emits any of these for inapplicable fields on SKIP decisions. We coerce
+// at the preprocess stage so .enum(...) and other strict schemas never see
+// '' or null.
 const opt = <T extends z.ZodTypeAny>(s: T) =>
-  s.nullable().optional().transform((v) => (v == null ? undefined : v));
+  z.preprocess(
+    (v) => (v == null || v === '' ? undefined : v),
+    s.optional(),
+  );
 
 // Numeric variant that also treats 0 / negatives as "not set". The model
 // sometimes returns {entry: 0, sl: 0, ...} for SKIP decisions instead of
@@ -63,8 +68,11 @@ export const Decision = z.object({
     .nullable()
     .optional()
     .transform((v) => v ?? 0),
-  reasoning_short: z.string().min(1).max(220),
-  reasoning_full: z.string().min(1).max(2000),
+  // Length caps generous enough that Claude's natural-length explanations
+  // pass without truncation tricks. Previously 220/2000 — the model often
+  // ran 1.5x over when given the new orderbook + stop-cluster context.
+  reasoning_short: z.string().min(1).max(400),
+  reasoning_full: z.string().min(1).max(5000),
   /** brief Russian explanation of WHY the SL is exactly at d.sl */
   sl_reason: optString(120),
   /** brief Russian explanation of WHY the TP is exactly at d.tp[0] */

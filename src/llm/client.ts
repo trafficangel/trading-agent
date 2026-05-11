@@ -73,7 +73,7 @@ export async function callLlm(
     try {
       const resp = await anthropic.messages.create({
         model: config.ANTHROPIC_MODEL,
-        max_tokens: 1500,
+        max_tokens: 2500,
         system,
         messages,
       });

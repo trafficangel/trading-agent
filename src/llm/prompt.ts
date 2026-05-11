@@ -115,8 +115,8 @@ Hard rules — violation means SKIP:
 
 Style:
 - IMPORTANT: write reasoning_short, reasoning_full, sl_reason, tp_reason, invalidation in **Russian**. Use plain language, no English jargon (keep technical terms like "BOS", "CHoCH", "OB", "FVG", "swing", "liquidity" — these are universal).
-- reasoning_short ≤220 chars. Punchy, concrete. Example: "Шорт TON 15m: CHoCH+ вниз + двойной bearish+. Структура сломана, 1H тренд тоже медвежий."
-- reasoning_full ≤2000 chars. Cite which signals you used (events + timeframes + times), what the chart shows, what could invalidate. Russian.
+- reasoning_short ≤400 chars. Punchy, concrete. Example: "Шорт TON 15m: CHoCH+ вниз + двойной bearish+. Структура сломана, 1H тренд тоже медвежий."
+- reasoning_full ≤5000 chars. Cite which signals you used (events + timeframes + times), what the chart shows, what could invalidate. Russian.
 
 For OPEN decisions, you MUST justify the exact SL and TP placement:
 - sl_reason ≤120 chars: WHY the SL is exactly at this level. Cite a chart reference. Examples:
