@@ -1,4 +1,5 @@
 import { aggregateSymbol } from '../signals/aggregator.js';
+import { extractFeatures } from '../signals/features.js';
 import {
   insertDecision,
   findActivePosition,
@@ -24,6 +25,18 @@ import {
 import { getLiquidations } from '../exchange/liquidations.js';
 
 const STORAGE_STATE = resolve('data', 'tradingview-storage-state.json');
+
+// Captured once at module load — git hash at the time the service started.
+// Used to tag every decision with the prompt version, so we can A/B
+// compare expectancy across git revisions.
+let PROMPT_VERSION = 'unknown';
+try {
+  // execSync is fine here — runs once at startup. Cost is ~5ms.
+  const { execSync } = await import('node:child_process');
+  PROMPT_VERSION = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+} catch {
+  // Not a git checkout (e.g. Docker without .git): leave 'unknown'.
+}
 
 /**
  * Decide pipeline: invoked from the scheduled decide-cron (every 15 min on
@@ -300,6 +313,18 @@ export async function maybeDecide(symbol: string): Promise<void> {
   const rawCombined = critiqueRaw
     ? `${result.raw}\n\n--- CRITIQUE ---\n${critiqueRaw}`
     : result.raw;
+
+  // Extract structured features for post-hoc analysis. See
+  // src/signals/features.ts for what's captured and why.
+  const features = extractFeatures({
+    decision: result.decision,
+    aggSentiment,
+    liquidations,
+    promptVersion: PROMPT_VERSION,
+    critiqueDowngrade: critiqueRaw !== null && result.decision.decision === 'SKIP',
+    llmInvoked: true,
+  });
+
   const decisionId = insertDecision({
     symbol,
     agg,
@@ -311,6 +336,7 @@ export async function maybeDecide(symbol: string): Promise<void> {
       rawCombined.length > RAW_RESPONSE_CAP
         ? rawCombined.slice(0, RAW_RESPONSE_CAP) + '\n... [truncated]'
         : rawCombined,
+    features,
   });
 
   logger.info(

@@ -2,6 +2,9 @@ import cron from 'node-cron';
 import { sendMessage } from '../telegram/bot.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
+import { config } from '../config.js';
+import { getBinanceKlines } from '../exchange/binance-public.js';
+import { getBybitKlines } from '../exchange/bybit-public.js';
 
 type DecisionDayRow = {
   id: number;
@@ -50,6 +53,32 @@ const nearestSignalPrice = db.prepare<[string, number, number, number], { price:
 
 function startOfTodayUtc(now: Date): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+}
+
+/**
+ * Today's price change for a symbol — used for the HODL baseline.
+ * Fetches the current 1-day kline (open = today 00:00 UTC, close = current
+ * price since the day isn't done yet). Returns pct change open→current, or
+ * null if neither Binance nor Bybit responded.
+ */
+async function fetchTodayPriceChange(
+  symbol: string,
+): Promise<{ open: number; current: number; pctChange: number } | null> {
+  const tryParse = (k: { open: number; close: number } | undefined) => {
+    if (!k || !Number.isFinite(k.open) || !Number.isFinite(k.close) || k.open <= 0) return null;
+    return { open: k.open, current: k.close, pctChange: ((k.close - k.open) / k.open) * 100 };
+  };
+  const binance = await getBinanceKlines(symbol, '1d', 1).catch(() => null);
+  if (binance && binance.length > 0) {
+    const r = tryParse(binance[binance.length - 1]);
+    if (r) return r;
+  }
+  const bybit = await getBybitKlines(symbol, '1d', 1).catch(() => null);
+  if (bybit && bybit.length > 0) {
+    const r = tryParse(bybit[bybit.length - 1]);
+    if (r) return r;
+  }
+  return null;
 }
 
 function approxClosePrice(symbol: string, closedAt: number): number | null {
@@ -159,6 +188,39 @@ async function tick(now: Date = new Date()): Promise<void> {
     lines.push(`<b>Закрытых сделок сегодня нет.</b>`);
   }
   lines.push('');
+
+  // HODL baseline — what would $1000 in each enabled symbol have done today?
+  // Lets us answer "is our selectivity actually adding value, or are we
+  // just buying-and-holding worse than a flat HODL would have?".
+  const hodlResults = await Promise.all(
+    config.SYMBOLS.map(async (sym) => ({ sym, stats: await fetchTodayPriceChange(sym) })),
+  );
+  const hodlPresent = hodlResults.filter(
+    (r): r is { sym: string; stats: { open: number; current: number; pctChange: number } } =>
+      r.stats !== null,
+  );
+  if (hodlPresent.length > 0) {
+    lines.push(`<b>HODL baseline ($1000 в каждом символе с 00:00 UTC):</b>`);
+    let hodlTotalUsd = 0;
+    for (const { sym, stats } of hodlPresent) {
+      const usd = (stats.pctChange / 100) * POSITION_NOTIONAL_USD;
+      hodlTotalUsd += usd;
+      const pctSign = stats.pctChange >= 0 ? '+' : '';
+      const usdSign = usd >= 0 ? '+' : '';
+      lines.push(
+        `  ${sym}: ${pctSign}${stats.pctChange.toFixed(2)}% (${usdSign}$${usd.toFixed(2)})`,
+      );
+    }
+    const hodlSign = hodlTotalUsd >= 0 ? '+' : '';
+    lines.push(`  Σ HODL: <b>${hodlSign}$${hodlTotalUsd.toFixed(2)}</b>`);
+    if (closedDetails.length > 0) {
+      const diff = totalUsd - hodlTotalUsd;
+      const diffSign = diff >= 0 ? '+' : '';
+      const verdict = diff >= 0 ? 'наша стратегия ОБЫГРАЛА HODL' : 'наша стратегия ПРОИГРАЛА HODL';
+      lines.push(`  Δ vs наш PnL: <b>${diffSign}$${diff.toFixed(2)}</b> — ${verdict}`);
+    }
+    lines.push('');
+  }
 
   // Active
   if (active.length) {

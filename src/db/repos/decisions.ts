@@ -42,8 +42,8 @@ const insertStmt = db.prepare(`
     decision, side, entry, sl, tp_json, size_pct,
     confidence, reasoning_short, reasoning_full, raw_response,
     status, parent_decision_id,
-    sl_reason, tp_reason, invalidation
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    sl_reason, tp_reason, invalidation, features_json
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const findActiveStmt = db.prepare<[], DecisionRow>(`
@@ -99,6 +99,9 @@ export type InsertDecisionInput = {
   rawResponse: string;
   /** id of the parent OPEN decision when this is a CLOSE/MODIFY follow-up */
   parentDecisionId?: number;
+  /** Structured features extracted at decision time. Optional (chop-SKIP
+   *  and other early-exit branches may not provide them). */
+  features?: Record<string, unknown> | null;
 };
 
 export function insertDecision(input: InsertDecisionInput): number {
@@ -128,6 +131,7 @@ export function insertDecision(input: InsertDecisionInput): number {
     input.decision.sl_reason ?? null,
     input.decision.tp_reason ?? null,
     input.decision.invalidation ?? null,
+    input.features ? JSON.stringify(input.features) : null,
   );
   const newId = Number(result.lastInsertRowid);
 
