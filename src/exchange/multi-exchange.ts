@@ -6,7 +6,12 @@ import {
   getBinanceOrderbook,
   getBinanceTicker,
 } from './binance-public.js';
-import { getBybitOrderbook, getBybitTicker, getMarketSentiment } from './bybit-public.js';
+import {
+  getBybitKlines,
+  getBybitOrderbook,
+  getBybitTicker,
+  getMarketSentiment,
+} from './bybit-public.js';
 import { getOkxOrderbook, getOkxTicker } from './okx-public.js';
 import type { Exchange } from './symbols.js';
 import type { ExchangeOrderbook, ExchangeTicker, OrderbookLevel } from './types.js';
@@ -326,10 +331,15 @@ export async function getStopClusters(
   const cached = stopClusterCache.get(symbol);
   if (cached && Date.now() - cached.ts < TTL_MS) return cached.data;
 
-  // Try Binance (deeper volume on most alts). If it fails, soft-degrade —
-  // returning null for the stop-cluster block is preferable to integrating
-  // Bybit klines here and adding another failure mode.
+  // Try Binance first (deeper volume on most alts). If unavailable (regional
+  // block / fstream issue), fall back to Bybit klines — same shape, same
+  // algorithm works. Last resort: return null and let the LLM proceed without
+  // stop-cluster context.
   let klines = await getBinanceKlines(symbol, '4h', 60).catch(() => null);
+  if (!klines || klines.length < 10) {
+    logger.debug({ symbol }, 'stop clusters: Binance klines unavailable, trying Bybit');
+    klines = await getBybitKlines(symbol, '4h', 60).catch(() => null);
+  }
   if (!klines || klines.length < 10) {
     return null;
   }

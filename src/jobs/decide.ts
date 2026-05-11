@@ -1,8 +1,8 @@
-import { aggregateSymbol, shouldInvokeLlm } from '../signals/aggregator.js';
+import { aggregateSymbol } from '../signals/aggregator.js';
 import { detectRegime } from '../signals/regime.js';
 import {
   insertDecision,
-  findActiveOnSide,
+  findActivePosition,
 } from '../db/repos/decisions.js';
 import { callLlm } from '../llm/client.js';
 import { critiqueDecision } from '../llm/critique.js';
@@ -51,15 +51,13 @@ export async function maybeDecide(symbol: string): Promise<void> {
     return;
   }
 
-  // Active-position guard: BOTH directions covered. If we have an open
-  // long or open short on this symbol, decide-cron skips — monitor cron
-  // (and the ad-hoc webhook trigger for active positions) owns the
-  // lifecycle. We don't want to OPEN on top of an existing position.
-  const activeLong = findActiveOnSide(symbol, 'long');
-  const activeShort = findActiveOnSide(symbol, 'short');
-  if (activeLong || activeShort) {
+  // Active-position guard. If we have an open position on this symbol
+  // (either side), decide-cron skips — monitor cron + the ad-hoc webhook
+  // trigger own the lifecycle. We don't OPEN on top of an existing position.
+  const active = findActivePosition(symbol);
+  if (active) {
     logger.info(
-      { symbol, active_id: (activeLong ?? activeShort)?.id },
+      { symbol, active_id: active.id, side: active.side },
       'active position exists — monitor owns lifecycle, skipping decide',
     );
     return;
@@ -118,14 +116,19 @@ export async function maybeDecide(symbol: string): Promise<void> {
   let primaryScreenshot: string | null = null;
   if (existsSync(STORAGE_STATE)) {
     try {
-      // Subject charts first (15m → 1H → 4H), then BTC context (15m → 1H).
-      // 4H gives swing structure — most "bad" trades go against the 4H trend
-      // and the model couldn't see it before.
-      const subj15 = await captureChart(symbol, '15');
-      const subj1h = await captureChart(symbol, '60');
-      const subj4h = await captureChart(symbol, '240');
-      const btc15 = await captureChart('BTCUSDT', '15');
-      const btc1h = await captureChart('BTCUSDT', '60');
+      // Parallel capture: 5 screenshots from the SAME Playwright browser
+      // context (multiple tabs of one logged-in session). Sequential took
+      // 25-50 sec just for screenshots before the LLM call could even start;
+      // parallel cuts that to ~10-15 sec (each capture still takes time but
+      // they overlap). Same-context = same TV session — no "multiple devices"
+      // detection risk.
+      const [subj15, subj1h, subj4h, btc15, btc1h] = await Promise.all([
+        captureChart(symbol, '15'),
+        captureChart(symbol, '60'),
+        captureChart(symbol, '240'),
+        captureChart('BTCUSDT', '15'),
+        captureChart('BTCUSDT', '60'),
+      ]);
       screenshots = [
         { path: subj15, mediaType: 'image/png' },
         { path: subj1h, mediaType: 'image/png' },
@@ -315,6 +318,13 @@ export async function maybeDecide(symbol: string): Promise<void> {
   };
   const riskGate = checkDecision(result.decision, limits, volumeProfile?.atr14_15m ?? null);
 
+  // raw_response in DB is for audit only; cap at 30 KB to keep row size sane.
+  // Combined raw + critique can reach 15-20 KB on verbose OPEN decisions;
+  // 30 KB gives headroom without bloating the DB toward GB-scale over years.
+  const RAW_RESPONSE_CAP = 30_000;
+  const rawCombined = critiqueRaw
+    ? `${result.raw}\n\n--- CRITIQUE ---\n${critiqueRaw}`
+    : result.raw;
   const decisionId = insertDecision({
     symbol,
     agg,
@@ -322,9 +332,10 @@ export async function maybeDecide(symbol: string): Promise<void> {
     screenshotPath: primaryScreenshot,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
-    rawResponse: critiqueRaw
-      ? `${result.raw}\n\n--- CRITIQUE ---\n${critiqueRaw}`
-      : result.raw,
+    rawResponse:
+      rawCombined.length > RAW_RESPONSE_CAP
+        ? rawCombined.slice(0, RAW_RESPONSE_CAP) + '\n... [truncated]'
+        : rawCombined,
   });
 
   logger.info(

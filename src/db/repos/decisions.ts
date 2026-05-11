@@ -58,6 +58,12 @@ const findActiveBySymbolSideStmt = db.prepare<[string, string], DecisionRow>(`
   ORDER BY created_at DESC LIMIT 1
 `);
 
+const findActiveBySymbolStmt = db.prepare<[string], DecisionRow>(`
+  SELECT * FROM decisions
+  WHERE status = 'active' AND decision = 'OPEN' AND symbol = ?
+  ORDER BY created_at DESC LIMIT 1
+`);
+
 const closePositionStmt = db.prepare<[number, number]>(`
   UPDATE decisions SET status = 'closed', closed_at = ? WHERE id = ?
 `);
@@ -152,6 +158,16 @@ export function findActivePositions(): DecisionRow[] {
 }
 
 /** Active position on (symbol, side) — used to decide if a new OPEN should add or skip. */
+/**
+ * Return the active position on this symbol regardless of side, or null.
+ * Cheaper than calling findActiveOnSide(symbol, 'long') and 'short' separately.
+ * If both sides are open (shouldn't happen in our pipeline), returns the
+ * most recent.
+ */
+export function findActivePosition(symbol: string): DecisionRow | null {
+  return findActiveBySymbolStmt.get(symbol) ?? null;
+}
+
 export function findActiveOnSide(symbol: string, side: 'long' | 'short'): DecisionRow | null {
   return findActiveBySymbolSideStmt.get(symbol, side) ?? null;
 }

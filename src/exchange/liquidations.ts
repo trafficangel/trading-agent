@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import { logger } from '../lib/logger.js';
+import { config } from '../config.js';
 
 /**
  * Live aggregator of forced liquidations on Bybit USDT-perp.
@@ -37,30 +38,33 @@ const STREAM_URL = 'wss://stream.bybit.com/v5/public/linear';
 const WINDOW_MS = 5 * 60 * 1000;
 const MIN_EVENT_USD = 1_000; // ignore noise
 
-// Top USDT-perp symbols by 24h volume. Subscribe upfront so any inbound
-// signal symbol is already covered. Add new ones as we expand coverage.
-const SUBSCRIBED_SYMBOLS = [
+/**
+ * Baseline of top-volume USDT-perp symbols whose cascades are reliable
+ * market-wide tells (BTC/ETH cascades affect everything via correlation).
+ * UNION'd with whatever's in config.SYMBOLS to ensure we cover every
+ * trading symbol PLUS the macro tells. Adjust this list as new majors
+ * gain volume.
+ */
+const BASELINE_SYMBOLS = [
   'BTCUSDT',
   'ETHUSDT',
   'SOLUSDT',
   'XRPUSDT',
   'DOGEUSDT',
-  'TONUSDT',
   'BNBUSDT',
   'AVAXUSDT',
   'LINKUSDT',
   'ADAUSDT',
   'PEPEUSDT',
-  'TRXUSDT',
   'SUIUSDT',
   'NEARUSDT',
-  'LTCUSDT',
-  'DOTUSDT',
-  'MATICUSDT',
-  'ARBUSDT',
-  'OPUSDT',
-  'WLDUSDT',
 ];
+
+function getSubscribedSymbols(): string[] {
+  // Bybit allows ~20 args per subscribe — keep total under that cap.
+  const union = new Set<string>([...BASELINE_SYMBOLS, ...config.SYMBOLS]);
+  return Array.from(union).slice(0, 20);
+}
 
 type LiquidationEvent = {
   ts: number;
@@ -130,8 +134,8 @@ function handleMessage(raw: WebSocket.RawData): void {
 
 function subscribe(): void {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  // Bybit allows up to ~20 args per subscribe message; we have 20 so one shot.
-  const args = SUBSCRIBED_SYMBOLS.map((s) => `allLiquidation.${s}`);
+  const symbols = getSubscribedSymbols();
+  const args = symbols.map((s) => `allLiquidation.${s}`);
   ws.send(JSON.stringify({ op: 'subscribe', args }));
 
   // Ping every 20s to keep alive (Bybit closes idle connections at 30s)
@@ -163,7 +167,10 @@ function connect(): void {
       // ignore
     }
   }
-  logger.info({ url: STREAM_URL, symbols: SUBSCRIBED_SYMBOLS.length }, 'liquidations: connecting');
+  logger.info(
+    { url: STREAM_URL, symbols: getSubscribedSymbols().length },
+    'liquidations: connecting',
+  );
   ws = new WebSocket(STREAM_URL, { handshakeTimeout: 15_000 });
 
   ws.on('open', () => {

@@ -1,7 +1,7 @@
 import { request } from 'undici';
 import { logger } from '../lib/logger.js';
 import { normalizeSymbol } from './symbols.js';
-import type { ExchangeOrderbook, ExchangeTicker, OrderbookLevel } from './types.js';
+import type { ExchangeKline, ExchangeOrderbook, ExchangeTicker, OrderbookLevel } from './types.js';
 
 const BASE = 'https://api.bybit.com';
 
@@ -293,6 +293,61 @@ export async function getBybitOrderbook(
     };
   } catch (err) {
     logger.error({ err, symbol: canonical }, 'bybit orderbook request failed');
+    return null;
+  }
+}
+
+type BybitKlineResp = {
+  retCode: number;
+  retMsg: string;
+  result?: { list?: string[][] };
+};
+
+const BYBIT_INTERVAL_MAP: Record<string, string> = {
+  '5m': '5',
+  '15m': '15',
+  '30m': '30',
+  '1h': '60',
+  '4h': '240',
+  '1d': 'D',
+};
+
+/**
+ * Bybit klines in normalized ExchangeKline shape. Used as fallback when
+ * Binance is unreachable (e.g. for stop-cluster detection). Returns
+ * oldest-first (matching Binance / OKX adapters) so callers can use a
+ * single algorithm regardless of source.
+ */
+export async function getBybitKlines(
+  canonical: string,
+  interval: '5m' | '15m' | '30m' | '1h' | '4h' | '1d',
+  limit: number,
+): Promise<ExchangeKline[] | null> {
+  const sym = normalizeSymbol(canonical, 'bybit');
+  const bybitInterval = BYBIT_INTERVAL_MAP[interval];
+  if (!bybitInterval) return null;
+  try {
+    const res = await request(
+      `${BASE}/v5/market/kline?category=linear&symbol=${sym}&interval=${bybitInterval}&limit=${limit}`,
+      { method: 'GET', headersTimeout: 5_000, bodyTimeout: 5_000 },
+    );
+    const body = (await res.body.json()) as BybitKlineResp;
+    if (body.retCode !== 0 || !body.result?.list) return null;
+    // Bybit returns newest-first; reverse to oldest-first.
+    return [...body.result.list]
+      .reverse()
+      .map((k): ExchangeKline => ({
+        start: Number(k[0]),
+        open: Number(k[1]),
+        high: Number(k[2]),
+        low: Number(k[3]),
+        close: Number(k[4]),
+        volume: Number(k[5]),
+        turnover: Number(k[6]),
+      }))
+      .filter((k) => Number.isFinite(k.close) && Number.isFinite(k.volume));
+  } catch (err) {
+    logger.error({ err, symbol: canonical, interval }, 'bybit kline request failed');
     return null;
   }
 }

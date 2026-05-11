@@ -34,14 +34,20 @@ const optPositive = () =>
     .optional()
     .transform((v) => (v == null || v <= 0 ? undefined : v));
 
-// Same for strings — model sometimes returns "" instead of null on SKIP.
+// Same for strings — model sometimes returns "" instead of null on SKIP,
+// or runs slightly over the char cap (Claude doesn't count characters
+// reliably). We truncate-then-validate rather than reject so a 125-char
+// sl_reason that exceeded the 120 cap doesn't blow up the whole parse.
 const optString = (max: number) =>
-  z
-    .string()
-    .max(max)
-    .nullable()
-    .optional()
-    .transform((v) => (v == null || v.length === 0 ? undefined : v));
+  z.preprocess(
+    (v) => {
+      if (v == null) return undefined;
+      if (typeof v !== 'string') return undefined;
+      if (v.length === 0) return undefined;
+      return v.length > max ? v.slice(0, max) : v;
+    },
+    z.string().min(1).max(max).optional(),
+  );
 
 export const Decision = z.object({
   decision: DecisionType,
@@ -49,30 +55,39 @@ export const Decision = z.object({
   entry: optPositive(),
   sl: optPositive(),
   // Single TP for now (we keep an array shape so we can grow to TP1/TP2 later
-  // without breaking the storage format).
+  // without breaking the storage format). If model returns multiple TPs we
+  // silently keep the first valid one rather than throwing — extra TPs are
+  // a hint not a contract violation.
   tp: z
     .array(z.number())
-    .max(1)
     .nullable()
     .optional()
-    .transform((v) => (v ?? []).filter((n) => n > 0)),
+    .transform((v) => (v ?? []).filter((n) => n > 0).slice(0, 1)),
   size_pct: z
     .number()
     .nullable()
     .optional()
     .transform((v) => (v == null || v <= 0 ? undefined : Math.min(v, 2))),
+  // Clamp confidence to [0,1] rather than reject — model occasionally
+  // produces 1.5 ("very high confidence") or -0.1 (typo). Either gets
+  // pinned to the valid range.
   confidence: z
     .number()
-    .min(0)
-    .max(1)
     .nullable()
     .optional()
-    .transform((v) => v ?? 0),
+    .transform((v) => (v == null ? 0 : Math.max(0, Math.min(1, v)))),
   // Length caps generous enough that Claude's natural-length explanations
   // pass without truncation tricks. Previously 220/2000 — the model often
   // ran 1.5x over when given the new orderbook + stop-cluster context.
-  reasoning_short: z.string().min(1).max(400),
-  reasoning_full: z.string().min(1).max(5000),
+  // We truncate-on-overflow rather than reject (matches optString behavior).
+  reasoning_short: z.preprocess(
+    (v) => (typeof v === 'string' && v.length > 400 ? v.slice(0, 400) : v),
+    z.string().min(1).max(400),
+  ),
+  reasoning_full: z.preprocess(
+    (v) => (typeof v === 'string' && v.length > 5000 ? v.slice(0, 5000) : v),
+    z.string().min(1).max(5000),
+  ),
   /** brief Russian explanation of WHY the SL is exactly at d.sl */
   sl_reason: optString(120),
   /** brief Russian explanation of WHY the TP is exactly at d.tp[0] */

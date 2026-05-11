@@ -5,7 +5,7 @@ import { insertSignal } from '../db/repos/signals.js';
 import { sendMessage } from '../telegram/bot.js';
 import { rawSignalLog } from '../telegram/templates.js';
 import { logger } from '../lib/logger.js';
-import { findActiveOnSide } from '../db/repos/decisions.js';
+import { findActivePosition } from '../db/repos/decisions.js';
 import { monitorPosition } from '../jobs/monitor.js';
 
 /**
@@ -16,6 +16,17 @@ import { monitorPosition } from '../jobs/monitor.js';
  */
 const adHocCooldown = new Map<string, number>();
 const AD_HOC_COOLDOWN_MS = 5 * 60 * 1000;
+
+// Periodic cleanup of stale cooldown entries. In practice the Map is
+// bounded by the number of distinct trading symbols (<20), so leaking
+// entries isn't a real problem — but explicit cleanup avoids the "this
+// Map has 47 entries because process has been up for 3 weeks" surprise.
+setInterval(() => {
+  const cutoff = Date.now() - AD_HOC_COOLDOWN_MS;
+  for (const [sym, ts] of adHocCooldown) {
+    if (ts < cutoff) adHocCooldown.delete(sym);
+  }
+}, 60_000).unref();
 
 export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { secret: string }; Body: unknown }>(
@@ -54,7 +65,7 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
       // Throttled per-symbol (5 min) to bound LLM cost when signals burst at
       // bar close.
       const sym = parsed.data.symbol;
-      const active = findActiveOnSide(sym, 'long') ?? findActiveOnSide(sym, 'short');
+      const active = findActivePosition(sym);
       if (active) {
         const last = adHocCooldown.get(sym) ?? 0;
         if (Date.now() - last >= AD_HOC_COOLDOWN_MS) {

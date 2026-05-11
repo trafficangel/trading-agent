@@ -3,7 +3,7 @@ import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
 import { maybeDecide } from './decide.js';
 import { aggregateSymbol } from '../signals/aggregator.js';
-import { findActiveOnSide } from '../db/repos/decisions.js';
+import { findActivePosition } from '../db/repos/decisions.js';
 import { sendMessage } from '../telegram/bot.js';
 
 /**
@@ -70,9 +70,7 @@ async function tick(): Promise<void> {
         // is also a reason to be aware in summary, but it's handled by
         // monitor-cron + webhook ad-hoc trigger, not by decide.
         const agg = aggregateSymbol(symbol);
-        const activeLong = findActiveOnSide(symbol, 'long');
-        const activeShort = findActiveOnSide(symbol, 'short');
-        const hasActive = activeLong !== null || activeShort !== null;
+        const hasActive = findActivePosition(symbol) !== null;
         const hasSignals = agg.signals.length > 0;
 
         evaluations.push({

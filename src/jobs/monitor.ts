@@ -195,11 +195,15 @@ async function monitorPositionImpl(p: DecisionRow): Promise<void> {
   let primaryScreenshot: string | null = null;
   if (existsSync(STORAGE_STATE)) {
     try {
-      const subj15 = await captureChart(p.symbol, '15');
-      const subj1h = await captureChart(p.symbol, '60');
-      const subj4h = await captureChart(p.symbol, '240');
-      const btc15 = await captureChart('BTCUSDT', '15');
-      const btc1h = await captureChart('BTCUSDT', '60');
+      // Parallel capture — same Playwright context, 5 tabs simultaneously.
+      // See note in decide.ts for the rationale.
+      const [subj15, subj1h, subj4h, btc15, btc1h] = await Promise.all([
+        captureChart(p.symbol, '15'),
+        captureChart(p.symbol, '60'),
+        captureChart(p.symbol, '240'),
+        captureChart('BTCUSDT', '15'),
+        captureChart('BTCUSDT', '60'),
+      ]);
       screenshots = [subj15, subj1h, subj4h, btc15, btc1h];
       primaryScreenshot = subj15;
     } catch (err) {
