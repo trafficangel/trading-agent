@@ -78,7 +78,7 @@ Hard rules:
 
 Style:
 - reasoning_short and reasoning_full in Russian.
-- reasoning_short ≤220 chars: state action + main reason. Example:
+- reasoning_short ≤400 chars: state action + main reason. Example:
   "HOLD: цена держится выше 1H supportа, новых медвежьих структур нет, движение в плюс."
 - reasoning_full: cite specific signals and chart features.
 

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { logger } from '../lib/logger.js';
 import {
   findActivePositions,
+  findDecisionById,
   calcPnl,
   closePositionWithStats,
   updatePositionSl,
@@ -64,7 +65,17 @@ function maybeMoveSlToBe(p: DecisionRow, currentPrice: number): number {
   return p.entry;
 }
 
-async function checkPosition(p: DecisionRow): Promise<void> {
+async function checkPosition(pInput: DecisionRow): Promise<void> {
+  // Refresh from DB: between when tick() fetched activePositions and now,
+  // monitor LLM may have updated SL via MODIFY, or another tpsl pass may
+  // have moved SL to BE. Using the stale snapshot can cause:
+  //   - false negatives (price crossed the NEW SL but we check the OLD one)
+  //   - blind overwrites of a just-applied MODIFY by our own auto-BE logic
+  // findDecisionById is one cheap indexed query — fine to call every tick.
+  const fresh = findDecisionById(pInput.id);
+  if (!fresh || fresh.status !== 'active') return;
+  const p = fresh;
+
   if (!p.entry || !p.sl || !p.side) return;
   if (p.side !== 'long' && p.side !== 'short') return;
   const tp = p.tp_json ? Number(JSON.parse(p.tp_json)?.[0]) : null;

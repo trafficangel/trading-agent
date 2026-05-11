@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import {
   findActivePositions,
+  findDecisionById,
   insertDecision,
   closePositionWithStats,
   updatePositionSl,
@@ -135,7 +136,57 @@ function isSubstantialChange(parent: DecisionRow, d: Decision): boolean {
   return slChangePct >= SUBSTANTIAL_CHANGE_PCT || tpChangePct >= SUBSTANTIAL_CHANGE_PCT;
 }
 
-export async function monitorPosition(p: DecisionRow): Promise<void> {
+/**
+ * Per-position locks. Prevents two concurrent monitorPosition() calls on
+ * the same position id from racing — which can happen when the webhook
+ * ad-hoc trigger fires at the same time as the scheduled monitor cron tick.
+ *
+ * Two concurrent calls would:
+ *   - Double the LLM cost on a single position
+ *   - Possibly produce conflicting MODIFY decisions (one wants SL=100, the
+ *     other wants SL=101, race-condition on the DB write)
+ *   - Confuse the audit trail with two near-simultaneous decision rows
+ *
+ * Acquired at function entry, released in finally. Late callers see the
+ * lock and skip silently (with a log line).
+ */
+const positionLocks = new Set<number>();
+
+export async function monitorPosition(pInput: DecisionRow): Promise<void> {
+  if (positionLocks.has(pInput.id)) {
+    logger.info(
+      { position_id: pInput.id },
+      'monitorPosition: another pass already running for this position, skipping',
+    );
+    return;
+  }
+  positionLocks.add(pInput.id);
+  try {
+    // Refresh from DB at function entry: between when the caller fetched
+    // the row and now, another path (tpsl auto-BE, a previous monitor
+    // MODIFY, an external CLOSE) may have updated SL or closed the
+    // position entirely. Using the stale snapshot would mean: feeding the
+    // LLM the wrong SL, or running monitor logic on an already-closed
+    // position.
+    const fresh = findDecisionById(pInput.id);
+    if (!fresh) {
+      logger.warn({ position_id: pInput.id }, 'monitorPosition: row gone from DB, skipping');
+      return;
+    }
+    if (fresh.status !== 'active') {
+      logger.info(
+        { position_id: pInput.id, status: fresh.status },
+        'monitorPosition: position no longer active, skipping',
+      );
+      return;
+    }
+    await monitorPositionImpl(fresh);
+  } finally {
+    positionLocks.delete(pInput.id);
+  }
+}
+
+async function monitorPositionImpl(p: DecisionRow): Promise<void> {
   const sinceOpen = recentSignals(p.created_at).filter((s) => s.symbol === p.symbol);
   const currentPrice = latestPriceFor(p.symbol);
   const ageMin = Math.round((Date.now() - p.created_at) / 60000);
@@ -298,37 +349,55 @@ export async function monitorPosition(p: DecisionRow): Promise<void> {
 
   // Apply MODIFY's new SL to the parent position so subsequent TPSL polling
   // uses it. Without this the MODIFY existed only in the audit trail and
-  // never affected shadow execution. Applies for BOTH substantial and minor
-  // (the LLM thought about it; whatever it decided is the new truth).
+  // never affected shadow execution.
+  //
+  // Anti-widen check uses a FRESH DB read of the SL: during the 60-90s
+  // the LLM was thinking, TPSL auto-BE may have moved SL to entry. We must
+  // compare against THAT current SL, not the stale snapshot we passed to
+  // the LLM. Otherwise the MODIFY could regress a freshly-moved BE SL back
+  // to a wider losing-side level.
   if (
     result.decision.decision === 'MODIFY' &&
     result.decision.sl &&
-    result.decision.sl !== p.sl &&
     p.entry &&
     p.side
   ) {
-    // Sanity: don't widen SL beyond original (rule already in monitor prompt
-    // but defensive): for long, new SL must be >= original; for short, <=.
-    const widensRisk =
-      p.side === 'long'
-        ? result.decision.sl < (p.sl ?? 0)
-        : result.decision.sl > (p.sl ?? Infinity);
-    if (widensRisk) {
-      logger.warn(
-        {
-          position_id: p.id,
-          old_sl: p.sl,
-          attempted_new_sl: result.decision.sl,
-          side: p.side,
-        },
-        'MODIFY would widen SL beyond original — rejected, keeping old SL',
+    const currentRow = findDecisionById(p.id);
+    if (!currentRow || currentRow.status !== 'active') {
+      logger.info(
+        { position_id: p.id, status: currentRow?.status ?? 'gone' },
+        'monitor MODIFY: position already closed mid-pass, dropping',
       );
     } else {
-      updatePositionSl(p.id, result.decision.sl);
-      logger.info(
-        { position_id: p.id, old_sl: p.sl, new_sl: result.decision.sl },
-        'monitor MODIFY applied: SL updated',
-      );
+      const currentSl = currentRow.sl ?? p.sl ?? 0;
+      // Anti-widen vs CURRENT SL: long requires new >= current; short requires new <= current.
+      const widensRisk =
+        p.side === 'long'
+          ? result.decision.sl < currentSl
+          : result.decision.sl > currentSl;
+      if (widensRisk) {
+        logger.warn(
+          {
+            position_id: p.id,
+            llm_seen_sl: p.sl,
+            current_db_sl: currentSl,
+            attempted_new_sl: result.decision.sl,
+            side: p.side,
+          },
+          'MODIFY would widen SL vs current — rejected',
+        );
+      } else if (result.decision.sl === currentSl) {
+        logger.debug(
+          { position_id: p.id, sl: currentSl },
+          'monitor MODIFY: SL unchanged from current, no-op',
+        );
+      } else {
+        updatePositionSl(p.id, result.decision.sl);
+        logger.info(
+          { position_id: p.id, old_sl: currentSl, new_sl: result.decision.sl },
+          'monitor MODIFY applied: SL updated',
+        );
+      }
     }
   }
 

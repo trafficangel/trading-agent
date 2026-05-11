@@ -223,31 +223,27 @@ export async function maybeDecide(symbol: string): Promise<void> {
         // killed it.
         const risksBlock = crit.critique.risks.map((r, i) => `  ${i + 1}. ${r}`).join('\n');
         const original = result.decision;
+        const fullReasoning =
+          `Originally proposed OPEN ${original.side} @ ${original.entry} (SL ${original.sl}, TP ${original.tp[0]}, conf ${original.confidence}).\n\n` +
+          `Original reasoning:\n${original.reasoning_full}\n\n` +
+          `Self-critique downgraded to SKIP. Reason: ${crit.critique.verdict_reason}\n\nRisks:\n${risksBlock}`;
         result.decision = {
           decision: 'SKIP',
           tp: [],
           confidence: crit.critique.reassessed_confidence,
-          reasoning_short: `Self-critique → SKIP: ${crit.critique.verdict_reason}`.slice(0, 220),
-          reasoning_full:
-            `Originally proposed OPEN ${original.side} @ ${original.entry} (SL ${original.sl}, TP ${original.tp[0]}, conf ${original.confidence}).\n\n` +
-            `Original reasoning:\n${original.reasoning_full}\n\n` +
-            `Self-critique downgraded to SKIP. Reason: ${crit.critique.verdict_reason}\n\nRisks:\n${risksBlock}`.slice(
-              0,
-              2000,
-            ),
+          reasoning_short: `Self-critique → SKIP: ${crit.critique.verdict_reason}`.slice(0, 400),
+          reasoning_full: fullReasoning.slice(0, 5000),
         };
       } else {
         // KEEP: lower confidence if critique was harsher; append risks to
         // reasoning_full so the Telegram caption (and audit log) carries them.
         const newConf = Math.min(result.decision.confidence, crit.critique.reassessed_confidence);
         const risksBlock = crit.critique.risks.map((r, i) => `  ${i + 1}. ${r}`).join('\n');
+        const fullReasoning = `${result.decision.reasoning_full}\n\nSelf-critique (риски):\n${risksBlock}`;
         result.decision = {
           ...result.decision,
           confidence: newConf,
-          reasoning_full: `${result.decision.reasoning_full}\n\nSelf-critique (риски):\n${risksBlock}`.slice(
-            0,
-            2000,
-          ),
+          reasoning_full: fullReasoning.slice(0, 5000),
         };
       }
     }
@@ -264,15 +260,13 @@ export async function maybeDecide(symbol: string): Promise<void> {
         'sizing → SKIP (confidence below floor)',
       );
       const original = result.decision;
+      const fullReasoning = `Originally OPEN ${original.side} @ ${original.entry} with conf ${original.confidence}.\nSizing tier rejected: ${sizing.reason}.\n\nOriginal reasoning:\n${original.reasoning_full}`;
       result.decision = {
         decision: 'SKIP',
         tp: [],
         confidence: original.confidence,
-        reasoning_short: `Sizing-floor SKIP: ${sizing.reason}`.slice(0, 220),
-        reasoning_full: `Originally OPEN ${original.side} @ ${original.entry} with conf ${original.confidence}.\nSizing tier rejected: ${sizing.reason}.\n\nOriginal reasoning:\n${original.reasoning_full}`.slice(
-          0,
-          2000,
-        ),
+        reasoning_short: `Sizing-floor SKIP: ${sizing.reason}`.slice(0, 400),
+        reasoning_full: fullReasoning.slice(0, 5000),
       };
     } else {
       logger.info(

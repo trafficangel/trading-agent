@@ -91,8 +91,8 @@ export const DECISION_JSON_SCHEMA = `{
   "tp":    [number > 0],      // EXACTLY ONE take-profit level for OPEN; [] otherwise
   "size_pct":   number 0..2,  // % of equity to risk; required when decision == OPEN
   "confidence": number 0..1,  // your honest confidence in this trade
-  "reasoning_short": string,  // <=220 chars; goes to Telegram
-  "reasoning_full":  string,  // <=2000 chars; the why, in detail
+  "reasoning_short": string,  // <=400 chars; goes to Telegram
+  "reasoning_full":  string,  // <=5000 chars; the why, in detail
   // For OPEN/MODIFY only — concrete justifications shown next to the levels:
   "sl_reason":     string,    // <=120 chars, Russian. Example: "за свинг-хаем 14:00, ликвидность зачищена"
   "tp_reason":     string,    // <=120 chars, Russian. Example: "equal lows на 1H, зона спроса 2.37"
