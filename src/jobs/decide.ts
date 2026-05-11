@@ -73,6 +73,28 @@ export async function maybeDecide(symbol: string): Promise<void> {
       { symbol, atr_percentile: regime.atrPercentile, threshold: regime.threshold },
       'chop regime — blocking new OPEN attempt',
     );
+
+    // Audit row: without this, "how many real setups did chop block?" can
+    // only be reconstructed from journalctl logs. With it, we can SELECT
+    // count from decisions table grouped by close_reason / reasoning_short
+    // pattern.
+    const reasoning = `Setup was bullish ${agg.bullish} / bearish ${agg.bearish}, ${agg.signals.length} signals. ATR(14) on 15m at ${regime.atrPercentile}-th percentile of last 7 days, below ${regime.threshold} threshold. No LLM invoked.`;
+    insertDecision({
+      symbol,
+      agg,
+      decision: {
+        decision: 'SKIP',
+        tp: [],
+        confidence: 0,
+        reasoning_short: `chop regime: ATR percentile ${regime.atrPercentile} < ${regime.threshold}`,
+        reasoning_full: reasoning,
+      },
+      screenshotPath: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      rawResponse: '',
+    });
+
     await sendMessage({
       channel: 'logs',
       text: `🟫 <b>chop SKIP</b> ${symbol}: ATR в ${regime.atrPercentile}-м перцентиле (порог ${regime.threshold}). LLM не зовём — рынок в боковике.`,

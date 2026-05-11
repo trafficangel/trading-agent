@@ -1,16 +1,14 @@
 import { logger } from '../lib/logger.js';
 import {
+  getBinanceKlines,
   getBinanceLsRatio,
   getBinanceOiHistory,
   getBinanceOrderbook,
   getBinanceTicker,
 } from './binance-public.js';
-import { getBybitOrderbook, getBybitTicker } from './bybit-public.js';
+import { getBybitOrderbook, getBybitTicker, getMarketSentiment } from './bybit-public.js';
 import { getOkxOrderbook, getOkxTicker } from './okx-public.js';
-import type {
-  Exchange,
-  // re-export
-} from './symbols.js';
+import type { Exchange } from './symbols.js';
 import type { ExchangeOrderbook, ExchangeTicker, OrderbookLevel } from './types.js';
 
 const TTL_MS = 30_000;
@@ -79,16 +77,11 @@ export async function getAggregatedSentiment(symbol: string): Promise<Aggregated
   const fundingDivergence =
     fundings.length >= 2 ? Math.max(...fundings) - Math.min(...fundings) : null;
 
-  // Bybit OI delta — already computed via existing repo path; fetch here.
-  // For minimal coupling we replicate the logic: Bybit's getMarketSentiment
-  // returns oiDelta4hPct, but to keep this module self-contained we do a
-  // separate hit to keep things simple. (Both calls are cached so cost is
-  // marginal.)
-  const bybitOiDelta4hPct = await (async (): Promise<number | null> => {
-    const { getMarketSentiment } = await import('./bybit-public.js');
-    const ms = await getMarketSentiment(symbol).catch(() => null);
-    return ms?.oiDelta4hPct ?? null;
-  })();
+  // One call to Bybit getMarketSentiment (cached 30s) — gives us both OI
+  // delta and L/S ratio in a single hop. Previously this module made TWO
+  // dynamic-import calls to the same function; ugly and redundant.
+  const bybitMs = await getMarketSentiment(symbol).catch(() => null);
+  const bybitOiDelta4hPct = bybitMs?.oiDelta4hPct ?? null;
 
   // Binance OI delta over 4h: oldest = index 4 (5 hourly snapshots → 4h ago)
   let binanceOiDelta4hPct: number | null = null;
@@ -100,11 +93,8 @@ export async function getAggregatedSentiment(symbol: string): Promise<Aggregated
     }
   }
 
-  // L/S ratio: average Bybit + Binance if both available; else whichever exists.
+  // L/S ratio: average Bybit + Binance when both available; else whichever exists.
   const lsValues: number[] = [];
-  // Bybit L/S is in sentimentCache via getMarketSentiment — fetch once more.
-  const { getMarketSentiment } = await import('./bybit-public.js');
-  const bybitMs = await getMarketSentiment(symbol).catch(() => null);
   if (bybitMs?.longShortRatio !== null && bybitMs?.longShortRatio !== undefined) {
     lsValues.push(bybitMs.longShortRatio);
   }
@@ -336,12 +326,11 @@ export async function getStopClusters(
   const cached = stopClusterCache.get(symbol);
   if (cached && Date.now() - cached.ts < TTL_MS) return cached.data;
 
-  // Try Binance first (deeper volume on most alts), Bybit fallback.
-  const { getBinanceKlines } = await import('./binance-public.js');
+  // Try Binance (deeper volume on most alts). If it fails, soft-degrade —
+  // returning null for the stop-cluster block is preferable to integrating
+  // Bybit klines here and adding another failure mode.
   let klines = await getBinanceKlines(symbol, '4h', 60).catch(() => null);
   if (!klines || klines.length < 10) {
-    // Fallback: Bybit kline via existing volume profile path is internal;
-    // skip stop clusters if Binance fails — soft degradation.
     return null;
   }
 

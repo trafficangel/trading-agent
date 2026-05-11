@@ -303,13 +303,22 @@ async function monitorPositionImpl(p: DecisionRow): Promise<void> {
       p.sl,
       livePrice,
     );
-    closePositionWithStats({
+    const closedByUs = closePositionWithStats({
       id: p.id,
       closePrice: livePrice,
       closeReason: 'llm_close',
       pnlPct,
       pnlR,
     });
+    if (!closedByUs) {
+      // TPSL hit (or another monitor pass) won the race and already closed
+      // this position. Skip our result-post to avoid duplicate notifications.
+      logger.info(
+        { position_id: p.id },
+        'monitor LLM CLOSE: position already closed by another path, skipping post',
+      );
+      return;
+    }
     logger.info(
       { position_id: p.id, close_price: livePrice, pnl_pct: pnlPct, pnl_r: pnlR },
       'monitor: LLM-driven close with stats',

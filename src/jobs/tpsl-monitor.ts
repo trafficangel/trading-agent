@@ -118,7 +118,16 @@ async function checkPosition(pInput: DecisionRow): Promise<void> {
   // A TP-hit after BE move still credits full R from the original setup.
   const { pnlPct, pnlR } = calcPnl(p.side, p.entry, p.sl, closePrice);
 
-  closePositionWithStats({ id: p.id, closePrice, closeReason: reason, pnlPct, pnlR });
+  const closedByUs = closePositionWithStats({ id: p.id, closePrice, closeReason: reason, pnlPct, pnlR });
+  if (!closedByUs) {
+    // Monitor LLM beat us to the close (or another tpsl tick if the cron
+    // somehow overlapped). Skip our result-post.
+    logger.info(
+      { position_id: p.id, hit },
+      'tpsl: position already closed by another path, skipping post',
+    );
+    return;
+  }
 
   logger.info(
     {

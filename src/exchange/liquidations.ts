@@ -200,6 +200,24 @@ export function startLiquidationsListener(): void {
       scheduleReconnect();
     }
   }, 30_000).unref();
+
+  // Periodic global prune: getLiquidations(symbol) only prunes the queried
+  // symbol's bucket. Symbols we subscribe to but never query (because they
+  // don't match config.SYMBOLS) would accumulate forever otherwise. With
+  // 20 subscribed symbols × bursty cascades that could be hundreds of KB
+  // of dead events stuck in memory over days/weeks.
+  setInterval(() => {
+    const now = Date.now();
+    let totalKept = 0;
+    for (const sym of buckets.keys()) {
+      const remaining = pruneBucket(sym, now);
+      totalKept += remaining.length;
+    }
+    logger.debug(
+      { symbols: buckets.size, events_in_memory: totalKept },
+      'liquidations: global prune done',
+    );
+  }, 60_000).unref();
 }
 
 export type LiquidationsSnapshot = {

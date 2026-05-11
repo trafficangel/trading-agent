@@ -32,9 +32,17 @@ export const DEFAULT_LIMITS: RiskLimits = {
 };
 
 /**
- * Stage-2 risk gate. Stage 2 doesn't place orders, so this is purely advisory
- * — but we already enforce the same logic that Stage 3 will use, so when we
- * flip the executor on, no surprises.
+ * Stage-2 risk gate. Stage 2 doesn't place orders, so this is currently
+ * PURELY ADVISORY — `checkDecision()` returns `{ok: false, reason}`, the
+ * caller writes that into the audit row, but the OPEN post STILL goes to
+ * Telegram (just with the reason appended to the caption). Risk gate does
+ * NOT block downstream actions in shadow mode.
+ *
+ * IMPORTANT (TODO for Stage 3 / live executor):
+ *   Before flipping the executor to real orders, the code that calls
+ *   `placeOrder()` MUST check `if (!riskGate.ok) skip` and abort the trade.
+ *   See decide.ts where `riskGate` is computed but only used decoratively.
+ *   Audit row is fine to write either way — but no ORDER without ok.
  *
  * `atr15m` is optional: when provided, we additionally check SL distance
  * against ATR(14) on 15m to catch noise-prone tight SLs and fictional-R:R

@@ -66,7 +66,7 @@ const closePositionWithStatsStmt = db.prepare<[number, number, string, number, n
   UPDATE decisions
   SET status = 'closed', closed_at = ?, close_price = ?, close_reason = ?,
       pnl_pct = ?, pnl_r = ?
-  WHERE id = ?
+  WHERE id = ? AND status = 'active'
 `);
 
 const updateSlStmt = db.prepare<[number, number]>(`
@@ -192,9 +192,16 @@ export type ClosePositionInput = {
   pnlR: number;
 };
 
-/** Close a position with full exit stats. Used by TP/SL monitor and LLM-driven close. */
-export function closePositionWithStats(input: ClosePositionInput): void {
-  closePositionWithStatsStmt.run(
+/**
+ * Close a position with full exit stats. Used by TP/SL monitor and LLM-driven
+ * close. Returns true if the row was actually closed by THIS call, false if
+ * the row was already closed (another path got there first — TPSL hit
+ * concurrent with LLM CLOSE, etc.). Callers should skip subsequent side
+ * effects (Telegram post, etc.) when this returns false to avoid duplicate
+ * notifications.
+ */
+export function closePositionWithStats(input: ClosePositionInput): boolean {
+  const result = closePositionWithStatsStmt.run(
     Date.now(),
     input.closePrice,
     input.closeReason,
@@ -202,6 +209,7 @@ export function closePositionWithStats(input: ClosePositionInput): void {
     input.pnlR,
     input.id,
   );
+  return result.changes > 0;
 }
 
 /**

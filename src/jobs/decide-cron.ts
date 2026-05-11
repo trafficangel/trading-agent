@@ -40,8 +40,11 @@ type SymbolEval = {
   side: 'long' | 'short' | null;
   signalsInWindow: number;
   hasActivePosition: boolean;
-  /** true if this symbol's score crossed the LLM threshold (LLM was invoked) */
-  llmCandidate: boolean;
+  /** True if we attempted to invoke maybeDecide() — note this does NOT
+   *  guarantee an LLM call actually happened. maybeDecide has its own
+   *  chop / active-position gates that may short-circuit. The actual
+   *  LLM outcome shows up as its own Telegram post (OPEN / SKIP / chop). */
+  decideAttempted: boolean;
 };
 
 async function tick(): Promise<void> {
@@ -79,9 +82,7 @@ async function tick(): Promise<void> {
           side: agg.side,
           signalsInWindow: agg.signals.length,
           hasActivePosition: hasActive,
-          // "candidate" now just means there's enough activity to ask the LLM.
-          // The LLM decides if it's actually OPEN-worthy.
-          llmCandidate: hasSignals && !hasActive,
+          decideAttempted: hasSignals && !hasActive,
         });
 
         if (!hasSignals) {
@@ -99,29 +100,43 @@ async function tick(): Promise<void> {
     }
 
     const duration = Date.now() - t0;
-    const llmCalled = evaluations.filter((e) => e.llmCandidate).length;
+    const decideAttempts = evaluations.filter((e) => e.decideAttempted).length;
     const activeCount = evaluations.filter((e) => e.hasActivePosition).length;
+    const withSignals = evaluations.filter((e) => e.signalsInWindow > 0).length;
 
     logger.info(
       {
         tick: tickLabel,
         duration_ms: duration,
         symbols_checked: symbols.length,
-        llm_invoked: llmCalled,
+        symbols_with_signals: withSignals,
+        decide_attempts: decideAttempts,
         active_positions: activeCount,
       },
       'decide cron tick complete',
     );
 
-    // Telegram Logs: post a summary only when SOMETHING actionable happened
-    // (LLM invocation OR active position present). Otherwise silent — the
-    // 4h heartbeat already covers "alive" pings, and we don't want to spam
-    // 96 empty-tick messages per day.
-    if (llmCalled > 0 || activeCount > 0) {
+    // Telegram Logs: post a summary only when SOMETHING is worth reporting
+    // (signals exist OR active position present). Otherwise silent — the
+    // 4h heartbeat already covers "alive" pings, and we don't want 96
+    // empty-tick messages per day.
+    //
+    // Note: we do NOT claim "LLM was invoked" here, because maybeDecide()
+    // has internal gates (chop, etc.) that may short-circuit AFTER this
+    // summary is composed. The actual LLM outcome shows up as its own
+    // Telegram post (the OPEN/SKIP/MODIFY caption, chop SKIP note, etc.).
+    // This summary is "context check" — what was the state at tick time.
+    if (withSignals > 0 || activeCount > 0) {
       const lines = [`🔄 <b>cron ${tickLabel}</b> · ${duration}мс`];
       for (const e of evaluations) {
         if (e.signalsInWindow === 0 && !e.hasActivePosition) continue;
-        const tag = e.llmCandidate ? '🧠 LLM' : e.hasActivePosition ? '🛡 active' : '·';
+        // ⚡ = there's signal activity → maybeDecide will run its gates
+        // 🛡 = active position → handled by monitor + ad-hoc trigger
+        const tag = e.decideAttempted
+          ? '⚡ activity'
+          : e.hasActivePosition
+            ? '🛡 active'
+            : '·';
         const sideEmoji = e.side === 'long' ? '🟢' : e.side === 'short' ? '🔴' : '·';
         lines.push(
           `  ${tag} ${e.symbol} ${sideEmoji} bull <code>${e.bullish}</code> / bear <code>${e.bearish}</code> · ${e.signalsInWindow} сигналов`,
