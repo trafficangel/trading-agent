@@ -3,39 +3,41 @@ import type { SignalRow } from '../db/repos/signals.js';
 
 /**
  * Maximum lookback to fetch from DB. Anything older than this is gone from
- * the LLM's view regardless of TF. 24h covers the longest per-TF window
- * below (the 24h slot for daily signals).
+ * the LLM's view regardless of TF. 7 days covers the longest per-TF window
+ * below (1D × 7 bars).
  */
-const MAX_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+const MAX_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Per-timeframe retention window for the LLM context.
  *
- * Rationale: a global flat window forces a tradeoff — too short and we
- * lose 1H/4H structural signals (they close every 60/240 min), too long
- * and 5m noise drowns the model. Tiered per-TF gives each TF its own
- * "freshness" budget:
- *   - 5m  → last 30 min  (6 bars; timing-only refinement)
- *   - 15m → last 90 min  (6 bars; primary entry TF, sees recent setup formation)
- *   - 1H  → last 4 hours (4 bars; session-scale trend context)
- *   - 4H  → last 12 hours (3 bars; swing structure)
- *   - 1D  → last 24 hours (1 bar; macro)
- *   - default → 90 min for anything unrecognized
+ * Updated 2026-05-11: expanded windows to give Claude at least half-a-day
+ * of context per TF, since the LLM weighs recency itself and benefits
+ * from seeing the multi-hour signal pattern, not just the latest bar.
+ * Cost impact is minimal — each signal renders to ~25 tokens, so
+ * +30 signals = +750 tokens (~$0.002 per call).
  *
- * The model still sees absolute timestamps so it weighs recency itself —
- * we just limit DB-to-LLM hydration.
+ *   - 5m  → last 2 hours    (24 bars; recent timing precision)
+ *   - 15m → last 6 hours    (24 bars; half-session entry context)
+ *   - 1H  → last 12 hours   (12 bars; full session trend)
+ *   - 4H  → last 48 hours   (12 bars; 2-day swing structure)
+ *   - 1D  → last 7 days     (7 bars; weekly macro)
+ *   - default → 6 hours for anything unrecognized
+ *
+ * The model still sees absolute timestamps so it weighs recency within
+ * each TF itself. We only limit DB→LLM hydration.
  */
 const TF_WINDOW_MS: Record<string, number> = {
-  '1': 15 * 60 * 1000,
-  '3': 20 * 60 * 1000,
-  '5': 30 * 60 * 1000,
-  '15': 90 * 60 * 1000,
-  '30': 3 * 60 * 60 * 1000,
-  '60': 4 * 60 * 60 * 1000,
-  '240': 12 * 60 * 60 * 1000,
-  D: 24 * 60 * 60 * 1000,
+  '1': 60 * 60 * 1000,
+  '3': 90 * 60 * 1000,
+  '5': 2 * 60 * 60 * 1000,
+  '15': 6 * 60 * 60 * 1000,
+  '30': 8 * 60 * 60 * 1000,
+  '60': 12 * 60 * 60 * 1000,
+  '240': 48 * 60 * 60 * 1000,
+  D: 7 * 24 * 60 * 60 * 1000,
 };
-const DEFAULT_TF_WINDOW_MS = 90 * 60 * 1000;
+const DEFAULT_TF_WINDOW_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Snapshot of what's happening on a symbol in the recent window. Pure data —

@@ -67,10 +67,13 @@ async function callMonitorLlm(
     ];
 
     try {
+      // Prompt caching on monitor system prompt — same pattern as
+      // decide/critique. Monitor cron processes active positions back-to-back
+      // (typically 1, sometimes 2-3), so 2nd+ calls within a tick hit cache.
       const resp = await anthropic.messages.create({
         model: config.ANTHROPIC_MODEL,
         max_tokens: 2500,
-        system: systemPrompt,
+        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
         messages,
       });
       inputTokens += resp.usage.input_tokens;

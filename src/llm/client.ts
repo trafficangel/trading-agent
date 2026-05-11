@@ -71,15 +71,34 @@ export async function callLlm(
     ];
 
     try {
+      // Prompt caching: system prompt is identical across all decide calls
+      // (rules, JSON schema, etc.). Marking it cache_control:ephemeral means
+      // Anthropic caches the tokenized version for 5 min — subsequent calls
+      // within that window pay 10% of the input price for the cached portion.
+      // For a cron tick that processes 4 symbols back-to-back, the 1st call
+      // writes the cache and the next 3 hit it. decide+critique on an OPEN
+      // also share the same system-cache prefix.
+      //
+      // EDITING NOTE: any change to the system prompt invalidates the cache
+      // once (first call after edit pays full price, then re-caches). No
+      // special handling needed — just edit normally.
       const resp = await anthropic.messages.create({
         model: config.ANTHROPIC_MODEL,
         max_tokens: 2500,
-        system,
+        system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
         messages,
       });
 
       inputTokens += resp.usage.input_tokens;
       outputTokens += resp.usage.output_tokens;
+      const cacheWrite = resp.usage.cache_creation_input_tokens ?? 0;
+      const cacheRead = resp.usage.cache_read_input_tokens ?? 0;
+      if (cacheWrite > 0 || cacheRead > 0) {
+        logger.debug(
+          { cache_write: cacheWrite, cache_read: cacheRead, fresh: resp.usage.input_tokens },
+          'llm cache stats',
+        );
+      }
       raw = resp.content.filter((b) => b.type === 'text').map((b) => (b as Anthropic.TextBlock).text).join('\n').trim();
 
       // strip ```json fences if model added them anyway

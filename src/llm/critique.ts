@@ -162,10 +162,15 @@ export async function critiqueDecision(
   let lastError: string | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
+      // Same system-prompt caching strategy as client.ts — critique system
+      // is also static across calls. Critique typically fires right after
+      // decide on OPEN, so it benefits from the cache that decide just
+      // wrote (different system prompt but same caching mechanism per
+      // prompt content).
       const resp = await anthropic.messages.create({
         model: config.ANTHROPIC_MODEL,
         max_tokens: 800,
-        system,
+        system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
         messages: [
           {
             role: 'user',

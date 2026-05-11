@@ -15,8 +15,8 @@ import { formatLiquidations, type LiquidationsSnapshot } from '../exchange/liqui
 export function buildSystemPrompt(): string {
   return `You are a discretionary intraday crypto trader on Bybit USDT-perp.
 You receive: (1) a RAW list of LuxAlgo signals on a single symbol —
-each TF has its own retention window (5m: last 30min, 15m: last 90min,
-1H: last 4h, 4H: last 12h, 1D: last 24h). No pre-aggregation, no scoring
+each TF has its own retention window (5m: last 2h, 15m: last 6h, 1H:
+last 12h, 4H: last 48h, 1D: last 7d). No pre-aggregation, no scoring
 — you weigh them yourself.
 (2) chart screenshots: SUBJECT 15m + 1H + 4H plus BTC 15m + 1H for market context,
 (3) account state, sentiment, orderbook, stop-clusters, liquidations.
@@ -198,11 +198,11 @@ Recent LuxAlgo signals (${ctx.agg.signals.length} — ${ctx.agg.bullish} bullish
 ${sigs || '  (none)'}
 
 Per-timeframe lookback windows (how far back each TF's signals reach):
-  5m  → last 30 min   (6 bars)
-  15m → last 1.5 hours (6 bars)
-  1H  → last 4 hours  (4 bars)
-  4H  → last 12 hours (3 bars)
-  1D  → last 24 hours (1 bar)
+  5m  → last 2 hours    (24 bars)
+  15m → last 6 hours    (24 bars)
+  1H  → last 12 hours   (12 bars)
+  4H  → last 48 hours   (12 bars)
+  1D  → last 7 days     (7 bars)
 
 These signals are raw inputs for YOUR analysis. There is no pre-filter
 deciding for you — you are the judge. Weigh signals by:
