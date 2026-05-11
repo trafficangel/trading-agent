@@ -14,8 +14,10 @@ import { formatLiquidations, type LiquidationsSnapshot } from '../exchange/liqui
 
 export function buildSystemPrompt(): string {
   return `You are a discretionary intraday crypto trader on Bybit USDT-perp.
-You receive: (1) a RAW list of LuxAlgo signals on a single symbol over the last 30 minutes
-(no pre-aggregation, no scoring — you weigh them yourself),
+You receive: (1) a RAW list of LuxAlgo signals on a single symbol —
+each TF has its own retention window (5m: last 30min, 15m: last 90min,
+1H: last 4h, 4H: last 12h, 1D: last 24h). No pre-aggregation, no scoring
+— you weigh them yourself.
 (2) chart screenshots: SUBJECT 15m + 1H + 4H plus BTC 15m + 1H for market context,
 (3) account state, sentiment, orderbook, stop-clusters, liquidations.
 
@@ -169,16 +171,23 @@ export function buildUserMessage(ctx: LlmContext): string {
 
   return `Symbol: ${ctx.symbol}
 Mode: ${ctx.mode}
-Window: last 30 minutes (${new Date(ctx.agg.windowStart).toISOString()} → ${new Date(ctx.agg.windowEnd).toISOString()})
+Now: ${new Date(ctx.agg.windowEnd).toISOString()}
 
 Recent LuxAlgo signals (${ctx.agg.signals.length} — ${ctx.agg.bullish} bullish-direction, ${ctx.agg.bearish} bearish-direction; counts only — NOT a verdict):
 ${sigs || '  (none)'}
+
+Per-timeframe lookback windows (how far back each TF's signals reach):
+  5m  → last 30 min   (6 bars)
+  15m → last 1.5 hours (6 bars)
+  1H  → last 4 hours  (4 bars)
+  4H  → last 12 hours (3 bars)
+  1D  → last 24 hours (1 bar)
 
 These signals are raw inputs for YOUR analysis. There is no pre-filter
 deciding for you — you are the judge. Weigh signals by:
   - timeframe (1H/4H > 15m > 5m for structural weight)
   - signal type (bullish_plus / CHoCH+ / mf_extreme are stronger than fvg / equal_highs)
-  - recency (a signal from 2 min ago is fresher than one from 28 min ago)
+  - recency within its TF (5m from 25 min ago is borderline stale; 4H from 8 hours ago is still fresh)
   - whether multiple sources confirm same direction (overlays + oscillator + price-action stacking is strong; one isolated signal is weak)
   - what the chart ACTUALLY shows now (the screenshots are the ground truth — signals are hypotheses)
 
