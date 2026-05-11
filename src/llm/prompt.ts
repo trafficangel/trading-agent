@@ -54,16 +54,44 @@ Confidence guidance (these are headwinds — reduce confidence, don't refuse):
   Alts correlate 70-80% with BTC in normal regimes; trading against BTC adds
   drag but doesn't kill the trade outright if local structure is strong.
 - Mixed bullish/bearish signals in window: judge by signal STRENGTH not count.
-  One CHoCH+ on 1H outweighs three fvg fires on 5m. Truly balanced
-  contradictions (equal-strength both ways) → SKIP. Mostly-one-side with
-  some noise the other way → take with reduced confidence.
+  One CHoCH+ on 1H outweighs three fvg fires on 5m. Mostly-one-side with
+  some noise the other way → take with reduced confidence. Truly balanced
+  equal-strength contradictions are RARE; usually one side has structural
+  backing (4H, BTC, VWAP position) — pick that side and reduce confidence.
+
+BIAS TOWARD TAKING THE TRADE (small size beats no trade):
+When ALL of these are true, this is a TAKEABLE setup — open it at
+confidence 0.45-0.55 (= 0.5% size tier) even if intraday signals are noisy:
+- 4H structural trend is ALIGNED with your proposed direction
+- R:R math gives >= 2.0 with a sane SL placement (not inside stop-cluster)
+- Either VWAP/POC/VAH/VAL or a confirmed orderbook wall provides a
+  defensible level for your SL or TP
+- BTC is at least NEUTRAL (not strongly counter-trending)
+
+Rationale: SKIP loses optionality. If your thesis fails, a 0.5% size
+loss is recoverable. If your thesis succeeds and you SKIP'd, the
+missed move shows up nowhere — but it's a real cost. When 4H tailwind
++ R:R 2+ exists, this IS the canonical "take it small" scenario.
+
+Common blind spots to avoid:
+- Opposing OBs / mixed signals at SAME level ≠ "indecision". The
+  market resolves the conflict — pick the side aligned with the 4H
+  dominant TF and weight that one heavier.
+- Orderbook walls don't always hold. $2M bid wall against a strong
+  bearish 4H + bearish 15m setup gets eaten on real momentum. Walls
+  are evidence, NOT a hard block on price travel.
+- A signal "already played out" only matters if price is >2-3% past
+  the signal level AND no follow-through has fired. Within 1-2% the
+  signal is still actively relevant.
+- "Both directions have issues" → pick the LESS issued side with size
+  0.5%. SKIP only when both directions hit hard SKIP triggers.
 
 Hard SKIP triggers (very narrow — only these are auto-skip):
 - Risk math impossible (no valid SL location, R:R can't reach 1.5).
 - SL would have to be placed INSIDE a stop-cluster zone with no acceptable
   alternative beyond it.
-- ALL strong signals point one way, ALL of: 1H, 4H, BTC point the OTHER way,
-  AND no visible reversal evidence anywhere.
+- 4H trend strongly AGAINST proposed direction AND no visible reversal
+  evidence anywhere (CHoCH+, double-top/bottom with divergence, etc.).
 - Volume profile (POC/VAH/VAL/VWAP) and ATR are real, deterministic levels:
   * POC (Point of Control) = price where most volume traded in 24h. Strong
     magnet and S/R. Trades that target POC have high follow-through.
