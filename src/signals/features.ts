@@ -34,6 +34,10 @@ export type DecisionFeatures = {
   critique_downgrade: boolean;
   /** Was this an LLM call at all, or short-circuited by gate (chop, etc.)? */
   llm_invoked: boolean;
+  /** How the model wanted the trade entered. Stage-2 shadow doesn't act
+   *  on this, but we capture it now so we can later analyze:
+   *  "do limit-intent trades outperform market-intent in actual outcome?" */
+  entry_type: 'market' | 'limit' | null;
 };
 
 function bucketize(conf: number): DecisionFeatures['confidence_bucket'] {
@@ -138,5 +142,6 @@ export function extractFeatures(input: {
     prompt_version: input.promptVersion,
     critique_downgrade: input.critiqueDowngrade,
     llm_invoked: input.llmInvoked,
+    entry_type: input.decision.entry_type ?? null,
   };
 }

@@ -68,6 +68,8 @@ const byCascade = new Map<string, Bucket>();
 const byBtc = new Map<string, Bucket>();
 // === By prompt_version ===
 const byPrompt = new Map<string, Bucket>();
+// === By entry_type (market vs limit) ===
+const byEntryType = new Map<string, Bucket>();
 
 for (const r of rows) {
   if (r.pnl_r === null) continue;
@@ -115,6 +117,14 @@ for (const r of rows) {
   pb.sumR += r.pnl_r;
   pb.sumPct += r.pnl_pct ?? 0;
   byPrompt.set(pv, pb);
+
+  const etype = String(features.entry_type ?? 'unknown');
+  const eb = byEntryType.get(etype) ?? emptyBucket();
+  eb.count++;
+  if (isWin) eb.wins++;
+  eb.sumR += r.pnl_r;
+  eb.sumPct += r.pnl_pct ?? 0;
+  byEntryType.set(etype, eb);
 }
 
 console.log('By confidence bucket:');
@@ -134,6 +144,9 @@ for (const [k, v] of byBtc) printBucket(k, v);
 
 console.log('\nBy prompt version (git hash at decision time):');
 for (const [k, v] of byPrompt) printBucket(k, v);
+
+console.log('\nBy entry type (market vs limit intent):');
+for (const [k, v] of byEntryType) printBucket(k, v);
 
 console.log();
 process.exit(0);

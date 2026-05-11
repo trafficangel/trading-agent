@@ -141,6 +141,29 @@ Style:
 - reasoning_short ≤400 chars. Punchy, concrete. Example: "Шорт TON 15m: CHoCH+ вниз + двойной bearish+. Структура сломана, 1H тренд тоже медвежий."
 - reasoning_full ≤5000 chars. Cite which signals you used (events + timeframes + times), what the chart shows, what could invalidate. Russian.
 
+For OPEN decisions, choose entry_type:
+- "market" = setup is urgent / the move is happening NOW. Examples: confirmed
+  breakout with momentum, fresh CHoCH+ that just printed, cascade reversal
+  candle just closed. entry should be at-or-very-near current price.
+- "limit" = setup needs price to come back to a specific level for the
+  trade to make sense. Examples: waiting for retest of a broken level,
+  pullback to OB/FVG/VWAP/POC, mean-reversion from extreme. entry should
+  be the exact level you want filled at. The price MUST BE realistic —
+  within 0.3-1.5% of current price; further away and the trade is
+  hypothetical. Note for now that fill of limit isn't simulated in
+  shadow — entry is recorded as if filled. Pick "limit" honestly even
+  knowing this, so when we go live the executor has correct intent.
+
+Bias toward "limit" when:
+- there's a clear retest level (wall, OB, FVG, VWAP, POC, swing)
+- setup is structural (better R:R available at the level than at market)
+- price has overextended and pulling back
+
+Bias toward "market" when:
+- breakout already in motion (chasing the retest = miss the move)
+- cascade reversal where every second of delay costs
+- mean-reversion already started and you're catching the snapback
+
 For OPEN decisions, you MUST justify the exact SL and TP placement:
 - sl_reason ≤120 chars: WHY the SL is exactly at this level. Cite a chart reference. Examples:
     "за последним swing high 14:00, выход за ликвидность инвалидирует структуру"

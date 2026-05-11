@@ -6,6 +6,9 @@ export type DecisionType = z.infer<typeof DecisionType>;
 export const DecisionSide = z.enum(['long', 'short']);
 export type DecisionSide = z.infer<typeof DecisionSide>;
 
+export const EntryType = z.enum(['market', 'limit']);
+export type EntryType = z.infer<typeof EntryType>;
+
 /**
  * Schema enforced on Claude's JSON response. We keep it tight: model MUST
  * return exactly this shape. Our retry logic catches violations and feeds the
@@ -52,6 +55,13 @@ const optString = (max: number) =>
 export const Decision = z.object({
   decision: DecisionType,
   side: opt(DecisionSide),
+  /** How the model wants this trade entered. 'market' = take it now at
+   *  current price; 'limit' = wait for price to retest the `entry` level.
+   *  Default 'market' when omitted (back-compat with old decisions).
+   *  In Stage-2 shadow this field is metadata only — execution doesn't
+   *  branch on it. In Stage-3 testnet the executor will use it to
+   *  decide between market and limit order types. */
+  entry_type: opt(EntryType),
   entry: optPositive(),
   sl: optPositive(),
   // Single TP for now (we keep an array shape so we can grow to TP1/TP2 later
@@ -101,7 +111,8 @@ export type Decision = z.infer<typeof Decision>;
 export const DECISION_JSON_SCHEMA = `{
   "decision": "OPEN" | "SKIP" | "CLOSE" | "MODIFY",
   "side": "long" | "short",   // required when decision == OPEN
-  "entry": number > 0,        // required when decision == OPEN
+  "entry_type": "market" | "limit",  // market = take now at current; limit = wait for retest at "entry"
+  "entry": number > 0,        // required when decision == OPEN; the price level (for limit) or roughly-current (for market)
   "sl":    number > 0,        // required when decision == OPEN
   "tp":    [number > 0],      // EXACTLY ONE take-profit level for OPEN; [] otherwise
   "size_pct":   number 0..2,  // % of equity to risk; required when decision == OPEN

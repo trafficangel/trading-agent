@@ -89,4 +89,51 @@ describe('Decision schema', () => {
     });
     expect(r.size_pct).toBe(2);
   });
+
+  it('entry_type accepted when set, undefined when omitted', () => {
+    const withLimit = Decision.parse({
+      decision: 'OPEN',
+      side: 'long',
+      entry: 100,
+      sl: 98,
+      tp: [104],
+      size_pct: 1,
+      confidence: 0.6,
+      reasoning_short: 'a',
+      reasoning_full: 'b',
+      entry_type: 'limit',
+    });
+    expect(withLimit.entry_type).toBe('limit');
+
+    const without = Decision.parse({
+      decision: 'OPEN',
+      side: 'long',
+      entry: 100,
+      sl: 98,
+      tp: [104],
+      size_pct: 1,
+      confidence: 0.6,
+      reasoning_short: 'a',
+      reasoning_full: 'b',
+    });
+    expect(without.entry_type).toBeUndefined();
+  });
+
+  it('invalid entry_type values get rejected silently to undefined', () => {
+    // Old model behavior: returning {} or unknown string for entry_type
+    // shouldn't crash the parse.
+    const r = Decision.parse({
+      decision: 'OPEN',
+      side: 'long',
+      entry: 100,
+      sl: 98,
+      tp: [104],
+      size_pct: 1,
+      confidence: 0.6,
+      reasoning_short: 'a',
+      reasoning_full: 'b',
+      entry_type: '',
+    });
+    expect(r.entry_type).toBeUndefined();
+  });
 });

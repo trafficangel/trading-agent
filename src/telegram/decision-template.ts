@@ -57,7 +57,8 @@ export function tradeCaption(i: DecisionPostInput): string {
   if (d.decision === 'OPEN' && d.entry && d.sl) {
     const slPct = pctDistance(d.entry, d.sl);
     lines.push('');
-    lines.push(`📥 Вход:  <code>${d.entry}</code>`);
+    const entryLabel = d.entry_type === 'limit' ? '📥 Вход (limit):' : '📥 Вход:';
+    lines.push(`${entryLabel}  <code>${d.entry}</code>`);
     const slBase = `🛡 Стоп:  <code>${d.sl}</code>  (<code>${slPct}%</code>)`;
     lines.push(d.sl_reason ? `${slBase} — ${escapeHtml(d.sl_reason)}` : slBase);
     if (d.tp.length) {
