@@ -97,6 +97,14 @@ async function tick(now: Date = new Date()): Promise<void> {
   const wins = closedDetails.filter((t) => t.pnl !== null && t.pnl > 0).length;
   const losses = closedDetails.filter((t) => t.pnl !== null && t.pnl < 0).length;
   const totalR = closedDetails.reduce((s, t) => s + (t.pnl_r ?? 0), 0);
+  // Hypothetical: if we'd entered each closed trade with $1000 notional.
+  // USD PnL = $1000 × pnl_pct/100. Doesn't apply leverage, fees, or slippage
+  // — pure setup quality measurement.
+  const POSITION_NOTIONAL_USD = 1000;
+  const totalUsd = closedDetails.reduce(
+    (s, t) => s + (t.pnl !== null ? (t.pnl / 100) * POSITION_NOTIONAL_USD : 0),
+    0,
+  );
 
   const active = stillActive.all();
 
@@ -126,19 +134,25 @@ async function tick(now: Date = new Date()): Promise<void> {
   // Closed today
   if (closedDetails.length) {
     const rTotalSign = totalR >= 0 ? '+' : '';
+    const usdTotalSign = totalUsd >= 0 ? '+' : '';
     lines.push(
       `<b>Закрыто сегодня:</b> ${closedDetails.length} (W ${wins} / L ${losses})  ·  Σ ${rTotalSign}${totalR.toFixed(2)}R`,
+    );
+    lines.push(
+      `<i>Симуляция $1000 на позицию:</i> <b>${usdTotalSign}$${totalUsd.toFixed(2)}</b>`,
     );
     for (const t of closedDetails) {
       const sideE = t.side === 'long' ? '🟢' : t.side === 'short' ? '🔴' : '';
       const pnlStr = t.pnl !== null ? `${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}%` : '?';
       const rStr = t.pnl_r !== null ? ` (${t.pnl_r >= 0 ? '+' : ''}${t.pnl_r.toFixed(2)}R)` : '';
+      const usdPnl = t.pnl !== null ? (t.pnl / 100) * POSITION_NOTIONAL_USD : null;
+      const usdStr = usdPnl !== null ? ` · ${usdPnl >= 0 ? '+' : ''}$${usdPnl.toFixed(2)}` : '';
       const exit = t.close_price ?? t.exit;
       const exitStr = exit !== null ? `${t.close_price ? '' : '~'}${exit}` : '?';
       const reason =
         t.close_reason === 'tp_hit' ? '🎯' : t.close_reason === 'sl_hit' ? '🛑' : t.close_reason === 'llm_close' ? '🏁' : '';
       lines.push(
-        `  ${reason} #${t.id.toString().padStart(4, '0')} ${sideE} ${t.symbol} · ${t.entry} → ${exitStr} · <b>${pnlStr}</b>${rStr}`,
+        `  ${reason} #${t.id.toString().padStart(4, '0')} ${sideE} ${t.symbol} · ${t.entry} → ${exitStr} · <b>${pnlStr}</b>${rStr}${usdStr}`,
       );
     }
   } else {
