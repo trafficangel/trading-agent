@@ -16,20 +16,46 @@ export type DecisionSide = z.infer<typeof DecisionSide>;
 const opt = <T extends z.ZodTypeAny>(s: T) =>
   s.nullable().optional().transform((v) => (v == null ? undefined : v));
 
+// Numeric variant that also treats 0 / negatives as "not set". The model
+// sometimes returns {entry: 0, sl: 0, ...} for SKIP decisions instead of
+// {entry: null, sl: null, ...} — both should be valid. We can't use
+// z.number().positive() inside opt() because .positive() throws BEFORE
+// .nullable() / .optional() get a chance to handle null. So we accept
+// any number and coerce non-positives to undefined.
+const optPositive = () =>
+  z
+    .number()
+    .nullable()
+    .optional()
+    .transform((v) => (v == null || v <= 0 ? undefined : v));
+
+// Same for strings — model sometimes returns "" instead of null on SKIP.
+const optString = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .nullable()
+    .optional()
+    .transform((v) => (v == null || v.length === 0 ? undefined : v));
+
 export const Decision = z.object({
   decision: DecisionType,
   side: opt(DecisionSide),
-  entry: opt(z.number().positive()),
-  sl: opt(z.number().positive()),
+  entry: optPositive(),
+  sl: optPositive(),
   // Single TP for now (we keep an array shape so we can grow to TP1/TP2 later
   // without breaking the storage format).
   tp: z
-    .array(z.number().positive())
+    .array(z.number())
     .max(1)
     .nullable()
     .optional()
-    .transform((v) => v ?? []),
-  size_pct: opt(z.number().min(0).max(2)),
+    .transform((v) => (v ?? []).filter((n) => n > 0)),
+  size_pct: z
+    .number()
+    .nullable()
+    .optional()
+    .transform((v) => (v == null || v <= 0 ? undefined : Math.min(v, 2))),
   confidence: z
     .number()
     .min(0)
@@ -40,11 +66,11 @@ export const Decision = z.object({
   reasoning_short: z.string().min(1).max(220),
   reasoning_full: z.string().min(1).max(2000),
   /** brief Russian explanation of WHY the SL is exactly at d.sl */
-  sl_reason: opt(z.string().min(1).max(120)),
+  sl_reason: optString(120),
   /** brief Russian explanation of WHY the TP is exactly at d.tp[0] */
-  tp_reason: opt(z.string().min(1).max(120)),
+  tp_reason: optString(120),
   /** condition that fully invalidates the idea (stronger than SL alone) */
-  invalidation: opt(z.string().min(1).max(160)),
+  invalidation: optString(160),
 });
 export type Decision = z.infer<typeof Decision>;
 

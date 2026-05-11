@@ -18,7 +18,17 @@ export type RegimeSnapshot = {
   fetchedAt: number;
 };
 
-const CHOP_PERCENTILE_THRESHOLD = 30;
+/**
+ * Percentile below which we consider the market "dead chop" and block new
+ * entries. History:
+ *   - 30 was way too aggressive: TON spent 24h continuously at percentile
+ *     24-26 (perfectly normal weekend low-vol, not "dead"), blocking 18
+ *     valid setups. Killed all trading.
+ *   - 15 only blocks GENUINELY dead markets — overnight Sunday holidays,
+ *     mid-month doldrums, etc. Trade selectivity is still enforced by the
+ *     LLM, self-critique, confidence floor, and the ATR-vs-SL sanity gate.
+ */
+const CHOP_PERCENTILE_THRESHOLD = 15;
 
 function computeAtr(klines: ExchangeKline[], window: number): number | null {
   if (klines.length < window + 1) return null;
