@@ -419,11 +419,31 @@ export async function captureChart(
     const out = resolve(SCREENSHOTS_DIR, `${symbol}_${interval}m_${ts}.png`);
     mkdirSync(dirname(out), { recursive: true });
 
+    // Mask known-modal containers in the screenshot itself. Even if CSS
+    // hiding fails or TV adds a new modal class we don't recognize, the
+    // mask replaces the area with a black rectangle in the saved image.
+    // Far more robust than fighting the DOM — we just paint over it.
+    // Trade-off: if a mask accidentally covers part of the chart, that
+    // area is lost. Selectors below are conservative — modal-specific
+    // patterns, not generic dialogs.
+    const maskLocators = [
+      page.locator('[class*="toastCommonBase"]'),
+      page.locator('[class*="toastGroup"]'),
+      page.locator('[class*="toastContainer"]'),
+      page.locator('[class*="contentContainerWrapper"]'),
+      page.locator('[class*="contentContainerInner"]'),
+      page.locator('[class*="overlap-manager-root"]'),
+      page.locator('[class*="marketingDialog"]'),
+      page.locator('[class*="promo-banner"]'),
+      page.locator('[class*="bottom-banner"]'),
+      page.locator('#onetrust-banner-sdk'),
+    ];
+
     const chartLocator = page.locator('.chart-container').first();
     if (await chartLocator.count()) {
-      await chartLocator.screenshot({ path: out });
+      await chartLocator.screenshot({ path: out, mask: maskLocators });
     } else {
-      await page.screenshot({ path: out, fullPage: false });
+      await page.screenshot({ path: out, fullPage: false, mask: maskLocators });
     }
 
     logger.info({ symbol, interval, path: out, reclaimed }, 'chart captured');
