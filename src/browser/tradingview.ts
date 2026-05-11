@@ -146,8 +146,12 @@ async function dismissOverlays(page: Page): Promise<void> {
   // entirely guarantees the screenshot won't show it. We don't care about
   // state — these are non-functional decorative overlays during automated
   // capture.
+  // Use Function-string form so we don't depend on `document` being in
+  // TypeScript's lib (our tsconfig doesn't include DOM lib because the
+  // server is Node-only; Playwright's evaluate runs the function in the
+  // browser context where `document` exists.)
   await page
-    .evaluate(() => {
+    .evaluate(`(() => {
       const selectors = [
         '[class*="overlap-manager-root"]',
         '[class*="js-rootresizer"] [role="dialog"]',
@@ -158,7 +162,6 @@ async function dismissOverlays(page: Page): Promise<void> {
         '[class*="marketingDialog"]',
         '[class*="bottom-banner"]',
         '[class*="promo-banner"]',
-        // OneTrust cookie banner — non-functional, just visual noise
         '#onetrust-banner-sdk',
         '#onetrust-consent-sdk',
       ];
@@ -170,7 +173,7 @@ async function dismissOverlays(page: Page): Promise<void> {
         });
       }
       return removed;
-    })
+    })()`)
     .catch(() => 0);
 
   // 4. Settle after DOM removal
