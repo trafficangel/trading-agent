@@ -5,6 +5,17 @@ import { insertSignal } from '../db/repos/signals.js';
 import { sendMessage } from '../telegram/bot.js';
 import { rawSignalLog } from '../telegram/templates.js';
 import { logger } from '../lib/logger.js';
+import { findActiveOnSide } from '../db/repos/decisions.js';
+import { monitorPosition } from '../jobs/monitor.js';
+
+/**
+ * Throttle ad-hoc monitor triggers per symbol. A new signal arriving on an
+ * active-position symbol should re-evaluate immediately — but if 5 signals
+ * land in 30 seconds at bar close, we don't want 5 full monitor passes
+ * (each costs ~$0.10 + 5 screenshots + 6 API calls).
+ */
+const adHocCooldown = new Map<string, number>();
+const AD_HOC_COOLDOWN_MS = 5 * 60 * 1000;
 
 export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { secret: string }; Body: unknown }>(
@@ -34,10 +45,35 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
       sendMessage({ channel: 'logs', text: rawSignalLog(parsed.data, req.body), disable_notification: true })
         .catch((err) => logger.error({ err }, 'telegram log push failed'));
 
-      // Decision pipeline is no longer triggered here. Webhooks are pure
-      // data ingestion now — the scheduled decide-cron (every 15min on
-      // bar boundaries) reads accumulated signals and decides. See
-      // src/jobs/decide-cron.ts for rationale.
+      // Ad-hoc monitor trigger for ACTIVE positions only. New OPEN candidates
+      // wait for the 15m decide-cron (scheduled architecture). But if we
+      // already have a live position on this symbol, a fresh signal — especially
+      // one against our direction — should re-evaluate immediately rather
+      // than wait up to 15 min for the next scheduled tick.
+      //
+      // Throttled per-symbol (5 min) to bound LLM cost when signals burst at
+      // bar close.
+      const sym = parsed.data.symbol;
+      const active = findActiveOnSide(sym, 'long') ?? findActiveOnSide(sym, 'short');
+      if (active) {
+        const last = adHocCooldown.get(sym) ?? 0;
+        if (Date.now() - last >= AD_HOC_COOLDOWN_MS) {
+          adHocCooldown.set(sym, Date.now());
+          logger.info(
+            { symbol: sym, position_id: active.id, event: parsed.data.event },
+            'ad-hoc monitor trigger — signal arrived on active position',
+          );
+          // Fire and forget — webhook response shouldn't wait for the LLM.
+          monitorPosition(active).catch((err) =>
+            logger.error({ err, position_id: active.id }, 'ad-hoc monitorPosition failed'),
+          );
+        } else {
+          logger.debug(
+            { symbol: sym, ms_since_last: Date.now() - last },
+            'ad-hoc monitor: cooldown active, skipping',
+          );
+        }
+      }
 
       return reply.send({ ok: true, id: result.id });
     },

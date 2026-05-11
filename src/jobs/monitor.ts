@@ -135,7 +135,7 @@ function isSubstantialChange(parent: DecisionRow, d: Decision): boolean {
   return slChangePct >= SUBSTANTIAL_CHANGE_PCT || tpChangePct >= SUBSTANTIAL_CHANGE_PCT;
 }
 
-async function monitorPosition(p: DecisionRow): Promise<void> {
+export async function monitorPosition(p: DecisionRow): Promise<void> {
   const sinceOpen = recentSignals(p.created_at).filter((s) => s.symbol === p.symbol);
   const currentPrice = latestPriceFor(p.symbol);
   const ageMin = Math.round((Date.now() - p.created_at) / 60000);

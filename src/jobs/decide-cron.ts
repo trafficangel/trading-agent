@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
 import { maybeDecide } from './decide.js';
-import { aggregateSymbol, shouldInvokeLlm } from '../signals/aggregator.js';
+import { aggregateSymbol } from '../signals/aggregator.js';
 import { findActiveOnSide } from '../db/repos/decisions.js';
 import { sendMessage } from '../telegram/bot.js';
 
@@ -62,12 +62,15 @@ async function tick(): Promise<void> {
 
     for (const symbol of symbols) {
       try {
-        // Cheap pre-check: aggregate first, see if there's anything to do.
-        // This avoids paying for screenshots / orderbook / LLM on empty ticks.
+        // Cheap pre-check: any signals at all in window? If not, no LLM
+        // call (saves tokens on empty ticks). Either-side active position
+        // is also a reason to be aware in summary, but it's handled by
+        // monitor-cron + webhook ad-hoc trigger, not by decide.
         const agg = aggregateSymbol(symbol);
-        const winning = agg.side === 'long' ? agg.bullish : agg.bearish;
-        const llmCandidate = shouldInvokeLlm(agg);
-        const active = agg.side ? findActiveOnSide(symbol, agg.side) : null;
+        const activeLong = findActiveOnSide(symbol, 'long');
+        const activeShort = findActiveOnSide(symbol, 'short');
+        const hasActive = activeLong !== null || activeShort !== null;
+        const hasSignals = agg.signals.length > 0;
 
         evaluations.push({
           symbol,
@@ -75,21 +78,20 @@ async function tick(): Promise<void> {
           bearish: agg.bearish,
           side: agg.side,
           signalsInWindow: agg.signals.length,
-          hasActivePosition: active !== null,
-          llmCandidate,
+          hasActivePosition: hasActive,
+          // "candidate" now just means there's enough activity to ask the LLM.
+          // The LLM decides if it's actually OPEN-worthy.
+          llmCandidate: hasSignals && !hasActive,
         });
 
-        if (!llmCandidate) {
-          logger.debug(
-            { symbol, bullish: agg.bullish, bearish: agg.bearish, signals: agg.signals.length },
-            'cron: below threshold, skipping LLM',
-          );
+        if (!hasSignals) {
+          logger.debug({ symbol }, 'cron: no signals in window, skipping LLM');
           continue;
         }
 
         // Run full pipeline (screenshots, sentiment, LLM, critique, sizing,
         // risk gate, telegram post). maybeDecide() re-checks active position
-        // internally — fine, just a redundant safety net.
+        // internally — defensive safety net.
         await maybeDecide(symbol);
       } catch (err) {
         logger.error({ err, symbol }, 'decide cron: maybeDecide failed for symbol');

@@ -42,18 +42,25 @@ export async function maybeDecide(symbol: string): Promise<void> {
   if (config.MODE === 'telemetry') return;
 
   const agg = aggregateSymbol(symbol);
-  if (!shouldInvokeLlm(agg) || !agg.side) {
-    logger.debug({ symbol, bullish: agg.bullish, bearish: agg.bearish }, 'below threshold');
+  // Pure activity gate: any recent signals at all? If literally nothing
+  // happened in the last 30 min, no point burning tokens on a blank LLM
+  // call. The model gets to decide the side and confidence — we don't
+  // pre-judge with weighted heuristics anymore.
+  if (agg.signals.length === 0) {
+    logger.debug({ symbol }, 'no signals in window, skipping LLM');
     return;
   }
 
-  // If there is already an active position in the same direction, monitor cron
-  // owns the lifecycle — we skip a fresh OPEN call.
-  const active = findActiveOnSide(symbol, agg.side);
-  if (active) {
+  // Active-position guard: BOTH directions covered. If we have an open
+  // long or open short on this symbol, decide-cron skips — monitor cron
+  // (and the ad-hoc webhook trigger for active positions) owns the
+  // lifecycle. We don't want to OPEN on top of an existing position.
+  const activeLong = findActiveOnSide(symbol, 'long');
+  const activeShort = findActiveOnSide(symbol, 'short');
+  if (activeLong || activeShort) {
     logger.info(
-      { symbol, side: agg.side, active_id: active.id },
-      'active position exists — monitor will handle, skipping new OPEN call',
+      { symbol, active_id: (activeLong ?? activeShort)?.id },
+      'active position exists — monitor owns lifecycle, skipping decide',
     );
     return;
   }
@@ -63,17 +70,12 @@ export async function maybeDecide(symbol: string): Promise<void> {
   const regime = await detectRegime(symbol).catch(() => null);
   if (regime?.inChop) {
     logger.info(
-      {
-        symbol,
-        side: agg.side,
-        atr_percentile: regime.atrPercentile,
-        threshold: regime.threshold,
-      },
+      { symbol, atr_percentile: regime.atrPercentile, threshold: regime.threshold },
       'chop regime — blocking new OPEN attempt',
     );
     await sendMessage({
       channel: 'logs',
-      text: `🟫 <b>chop SKIP</b> ${symbol} ${agg.side}: ATR в ${regime.atrPercentile}-м перцентиле (порог ${regime.threshold}). LLM не зовём — рынок в боковике.`,
+      text: `🟫 <b>chop SKIP</b> ${symbol}: ATR в ${regime.atrPercentile}-м перцентиле (порог ${regime.threshold}). LLM не зовём — рынок в боковике.`,
       disable_notification: true,
     });
     return;
@@ -82,9 +84,8 @@ export async function maybeDecide(symbol: string): Promise<void> {
   logger.info(
     {
       symbol,
-      side: agg.side,
-      bullish: agg.bullish,
-      bearish: agg.bearish,
+      bullish_count: agg.bullish,
+      bearish_count: agg.bearish,
       signals: agg.signals.length,
       atr_percentile: regime?.atrPercentile ?? null,
     },

@@ -14,9 +14,10 @@ import { formatLiquidations, type LiquidationsSnapshot } from '../exchange/liqui
 
 export function buildSystemPrompt(): string {
   return `You are a discretionary intraday crypto trader on Bybit USDT-perp.
-You receive: (1) a confluence summary of LuxAlgo signals on a single symbol over the last 20 minutes,
+You receive: (1) a RAW list of LuxAlgo signals on a single symbol over the last 30 minutes
+(no pre-aggregation, no scoring — you weigh them yourself),
 (2) chart screenshots: SUBJECT 15m + 1H + 4H plus BTC 15m + 1H for market context,
-(3) account state.
+(3) account state, sentiment, orderbook, stop-clusters, liquidations.
 
 Timeframe roles:
 - 15m: entry timeframe — exact level placement of SL/TP, recent structure
@@ -168,15 +169,18 @@ export function buildUserMessage(ctx: LlmContext): string {
 
   return `Symbol: ${ctx.symbol}
 Mode: ${ctx.mode}
-Window: last 20 minutes (${new Date(ctx.agg.windowStart).toISOString()} → ${new Date(ctx.agg.windowEnd).toISOString()})
+Window: last 30 minutes (${new Date(ctx.agg.windowStart).toISOString()} → ${new Date(ctx.agg.windowEnd).toISOString()})
 
-Confluence score:
-  bullish: ${ctx.agg.bullish}
-  bearish: ${ctx.agg.bearish}
-  dominant side: ${ctx.agg.side ?? 'none'}
-
-Signals in window (${ctx.agg.signals.length}):
+Recent LuxAlgo signals (${ctx.agg.signals.length} — ${ctx.agg.bullish} bullish-direction, ${ctx.agg.bearish} bearish-direction; counts only — NOT a verdict):
 ${sigs || '  (none)'}
+
+These signals are raw inputs for YOUR analysis. There is no pre-filter
+deciding for you — you are the judge. Weigh signals by:
+  - timeframe (1H/4H > 15m > 5m for structural weight)
+  - signal type (bullish_plus / CHoCH+ / mf_extreme are stronger than fvg / equal_highs)
+  - recency (a signal from 2 min ago is fresher than one from 28 min ago)
+  - whether multiple sources confirm same direction (overlays + oscillator + price-action stacking is strong; one isolated signal is weak)
+  - what the chart ACTUALLY shows now (the screenshots are the ground truth — signals are hypotheses)
 
 Account:
   open_positions: ${JSON.stringify(ctx.open_positions)}
