@@ -419,6 +419,50 @@ export async function captureChart(
     const out = resolve(SCREENSHOTS_DIR, `${symbol}_${interval}m_${ts}.png`);
     mkdirSync(dirname(out), { recursive: true });
 
+    // Last-resort modal-killer: find anything overlapping the chart center
+    // and remove it. The chart canvas is the topmost element at center on
+    // a clean page; if something else is on top (modal/promo), we drop it.
+    await page
+      .evaluate(`(() => {
+        const removed = [];
+        // Sample multiple points to catch wide modals
+        const points = [
+          [800, 450],   // center
+          [400, 450],   // mid-left
+          [1200, 450],  // mid-right
+          [800, 300],   // upper
+        ];
+        for (const [x, y] of points) {
+          const at = document.elementFromPoint(x, y);
+          if (!at) continue;
+          // Walk up to find fixed/absolute high-z-index ancestor
+          let cur = at;
+          while (cur && cur.tagName !== 'BODY' && cur.tagName !== 'HTML') {
+            const cs = getComputedStyle(cur);
+            const isCanvas = cur.tagName === 'CANVAS';
+            // Don't touch chart canvases or their parents
+            if (isCanvas || (cur.className && cur.className.toString().includes('chart-'))) {
+              break;
+            }
+            // Modal-like: fixed/absolute position with high z-index
+            const isFixed = cs.position === 'fixed' || cs.position === 'absolute';
+            const z = parseInt(cs.zIndex) || 0;
+            if (isFixed && z > 100) {
+              const cls = (cur.className && cur.className.toString) ? cur.className.toString().slice(0, 80) : '';
+              removed.push({ tag: cur.tagName, cls, z });
+              cur.remove();
+              break;
+            }
+            cur = cur.parentElement;
+          }
+        }
+        return removed;
+      })()`)
+      .catch(() => []);
+
+    // Settle after removal
+    await page.waitForTimeout(300);
+
     // Mask known-modal containers in the screenshot itself. Even if CSS
     // hiding fails or TV adds a new modal class we don't recognize, the
     // mask replaces the area with a black rectangle in the saved image.
