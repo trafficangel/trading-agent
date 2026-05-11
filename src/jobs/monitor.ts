@@ -19,6 +19,7 @@ import { Decision } from '../llm/decision.schema.js';
 import { buildMonitorSystemPrompt, buildMonitorUserMessage } from '../llm/monitor-prompt.js';
 import { maybeNotifyBillingError } from '../llm/billing-alert.js';
 import { aggregateSymbol } from '../signals/aggregator.js';
+import { markTick } from '../lib/health-tracker.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { tradeCaption } from '../telegram/decision-template.js';
 import { resultPost } from '../telegram/result-template.js';
@@ -492,6 +493,7 @@ async function tick(): Promise<void> {
     }
   } finally {
     monitorRunning = false;
+    markTick('monitor');
   }
 }
 

@@ -12,6 +12,7 @@ import {
 import { getLastPrice } from '../exchange/bybit-public.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { resultPost } from '../telegram/result-template.js';
+import { markTick } from '../lib/health-tracker.js';
 
 let running = false;
 
@@ -185,6 +186,7 @@ async function tick(): Promise<void> {
     }
   } finally {
     running = false;
+    markTick('tpsl');
   }
 }
 

@@ -5,6 +5,7 @@ import { maybeDecide } from './decide.js';
 import { aggregateSymbol } from '../signals/aggregator.js';
 import { findActivePosition } from '../db/repos/decisions.js';
 import { sendMessage } from '../telegram/bot.js';
+import { markTick } from '../lib/health-tracker.js';
 
 /**
  * Scheduled decision pipeline.
@@ -178,6 +179,10 @@ async function tick(): Promise<void> {
     }
   } finally {
     running = false;
+    // Mark tick AFTER running flag is cleared. Even if the tick had errors
+    // on some symbols, we made a pass — health watchdog cares about
+    // "the cron is alive", not "every symbol succeeded".
+    markTick('decide');
   }
 }
 
