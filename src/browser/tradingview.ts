@@ -110,21 +110,18 @@ async function reclaimSessionIfNeeded(page: Page): Promise<boolean> {
  *   2. Press Escape twice — most TV modals support keyboard dismiss.
  */
 async function dismissOverlays(page: Page): Promise<void> {
+  // 1. Click known close buttons
   const closeSelectors = [
-    // Generic close-button patterns
     'button[aria-label="Close" i]',
     'button[data-name="close"]',
     '.tv-dialog__close',
     '[class*="closeButton" i]',
-    // Promo / marketing modal close buttons (TV uses different DOM here)
-    'div[role="dialog"] button:has(svg[class*="close" i])',
-    'div[class*="modal" i] button[class*="close" i]',
-    // "No thanks" / "Decline" buttons on offer modals
+    'div[role="dialog"] button:has(svg)',
     'button:has-text("No thanks")',
     'button:has-text("Decline")',
     'button:has-text("Skip")',
+    'button:has-text("Maybe later")',
   ];
-
   for (const sel of closeSelectors) {
     try {
       const btn = page.locator(sel).first();
@@ -133,15 +130,51 @@ async function dismissOverlays(page: Page): Promise<void> {
         await page.waitForTimeout(400);
       }
     } catch {
-      // ignore per-selector failures
+      // ignore
     }
   }
 
-  // Generic Escape twice — closes most TV dialogs that we didn't match above
+  // 2. Press Escape twice — handles most generic TV dialogs
   for (let i = 0; i < 2; i++) {
     await page.keyboard.press('Escape').catch(() => {});
     await page.waitForTimeout(200);
   }
+
+  // 3. Nuclear option: directly remove any modal/dialog/promo containers
+  // from the DOM. TradingView wraps marketing promos in various containers
+  // we can't reliably target by close-button. Removing the container
+  // entirely guarantees the screenshot won't show it. We don't care about
+  // state — these are non-functional decorative overlays during automated
+  // capture.
+  await page
+    .evaluate(() => {
+      const selectors = [
+        '[class*="overlap-manager-root"]',
+        '[class*="js-rootresizer"] [role="dialog"]',
+        '[data-name="dialog"]',
+        '[data-dialog-name]',
+        '[class*="i-dialog"]',
+        '[class*="popup-modal"]',
+        '[class*="marketingDialog"]',
+        '[class*="bottom-banner"]',
+        '[class*="promo-banner"]',
+        // OneTrust cookie banner — non-functional, just visual noise
+        '#onetrust-banner-sdk',
+        '#onetrust-consent-sdk',
+      ];
+      let removed = 0;
+      for (const sel of selectors) {
+        document.querySelectorAll(sel).forEach((el) => {
+          el.remove();
+          removed++;
+        });
+      }
+      return removed;
+    })
+    .catch(() => 0);
+
+  // 4. Settle after DOM removal
+  await page.waitForTimeout(300);
 }
 
 /**
