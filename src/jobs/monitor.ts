@@ -218,6 +218,11 @@ async function monitorPositionImpl(p: DecisionRow): Promise<void> {
           channel: 'logs',
           text: `❗️ <b>TradingView logged out</b> (monitor для #${p.id.toString().padStart(4, '0')}). Залить новый storage state.`,
         });
+      } else if (msg.includes('indicators not loaded')) {
+        await sendMessage({
+          channel: 'logs',
+          text: `❗️ <b>Индикаторы LuxAlgo не загрузились</b> (monitor для #${p.id.toString().padStart(4, '0')}). Восстанови шаблон чарта или задай TV_LAYOUT_ID.`,
+        });
       }
     }
   }

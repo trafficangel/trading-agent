@@ -128,13 +128,21 @@ export async function maybeDecide(symbol: string): Promise<void> {
     } catch (err) {
       const msg = (err as Error)?.message ?? String(err);
       logger.error({ err, symbol }, 'screenshot capture failed — calling LLM without images');
-      // Loud alert when it's a known logged-out failure mode: the LLM is
-      // about to reason without charts, which we don't want to repeat the
-      // 10h-blind-mode incident from May 9-10.
       if (msg.includes('logged out') || msg.includes('storage state')) {
         await sendMessage({
           channel: 'logs',
           text: `❗️ <b>TradingView logged out</b> — скриншоты не делаются, LLM решает без чартов.\nНа маке: <code>pnpm tsx scripts/tradingview-login.ts</code>, потом залить data/tradingview-storage-state.json на VPS.\nКаждый decide идёт без визуального контекста до починки.`,
+        });
+      } else if (msg.includes('indicators not loaded')) {
+        await sendMessage({
+          channel: 'logs',
+          text:
+            `❗️ <b>TradingView: индикаторы LuxAlgo не загрузились</b> на чарте — голые свечи.\n` +
+            `Открой TradingView в браузере, добавь LuxAlgo индикаторы на default layout, сохрани.\n` +
+            `Или (рекомендуется): создай отдельный layout с индикаторами, скопируй ID из URL ` +
+            `(<code>tradingview.com/chart/XXXXX/</code>) и пропиши в .env как ` +
+            `<code>TV_LAYOUT_ID=XXXXX</code>, перезапусти сервис.\n\n` +
+            `Скриншоты не делаются пока не починишь — LLM решает без чартов на текстовом контексте.`,
         });
       }
     }

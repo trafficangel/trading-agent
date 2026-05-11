@@ -2,6 +2,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { existsSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { logger } from '../lib/logger.js';
+import { config } from '../config.js';
 
 const STORAGE_STATE_PATH = resolve('data', 'tradingview-storage-state.json');
 const SCREENSHOTS_DIR = resolve('data', 'screenshots');
@@ -99,6 +100,48 @@ async function reclaimSessionIfNeeded(page: Page): Promise<boolean> {
 }
 
 /**
+ * Are LuxAlgo indicators actually loaded on the chart?
+ *
+ * Distinct from detectLoggedOut(): we may be perfectly authenticated but
+ * still get a bare-candle chart because TradingView served the default
+ * layout without our saved indicators (template reset, account migration,
+ * etc.). The model can't see LuxAlgo signals on the chart at all, even
+ * though the bullish_plus / CHoCH webhooks are still firing in the data
+ * pipeline. We must NOT feed such screenshots to the LLM.
+ *
+ * Heuristic: the chart legend (top-left) lists every data source on the
+ * pane. A clean LuxAlgo setup shows 4+ entries (price + Signals & Overlays
+ * + Price Action Concepts + Oscillator Matrix). A blank chart shows just 1
+ * (the price symbol). We require >= 2 to consider indicators loaded.
+ */
+async function detectIndicatorsLoaded(page: Page): Promise<boolean> {
+  // Give the chart 2 sec to render legend after navigation. waitForTimeout
+  // is OK here because we're checking final state, not racing renders.
+  await page.waitForTimeout(2000);
+
+  // Multiple selector variants — TV's DOM has changed over time and
+  // different chart versions use different attributes.
+  const legendSelectors = [
+    '[data-name="legend-source-item"]',
+    '.legend-source-item',
+    '[class*="sourcesWrapper"] [class*="item"]',
+  ];
+
+  for (const sel of legendSelectors) {
+    const count = await page.locator(sel).count().catch(() => 0);
+    if (count >= 2) return true;
+  }
+
+  // Fallback: search for "LuxAlgo" text anywhere on the chart (the indicator
+  // names usually contain that string).
+  const luxAlgoText = await page
+    .getByText(/luxalgo|lux algo/i)
+    .count()
+    .catch(() => 0);
+  return luxAlgoText > 0;
+}
+
+/**
  * Heuristic: is the TV session still authenticated? Without login, we get
  * bare candles + a cookie banner and NO LuxAlgo Premium indicators at all
  * — those screenshots are useless to the LLM (silent failure mode that
@@ -143,7 +186,12 @@ export async function captureChart(
   const ctx = await getContext();
   const page = await ctx.newPage();
   try {
-    const url = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol(symbol))}&interval=${interval}`;
+    // If TV_LAYOUT_ID is configured, navigate to that specific saved layout
+    // (which has LuxAlgo indicators pre-attached). Otherwise use the default
+    // chart route, which is fragile — depends on the user's default layout
+    // not being mutated.
+    const layoutPath = config.TV_LAYOUT_ID ? `${config.TV_LAYOUT_ID}/` : '';
+    const url = `https://www.tradingview.com/chart/${layoutPath}?symbol=${encodeURIComponent(tvSymbol(symbol))}&interval=${interval}`;
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     // Wait for chart canvas to render
     await page.waitForSelector('canvas[data-name="pane-canvas"]', { timeout: 20_000 }).catch(() => {});
@@ -160,6 +208,19 @@ export async function captureChart(
       throw new Error(
         'TradingView session is logged out (cookie banner visible / no user menu). ' +
           'Indicators are NOT loaded. Re-run scripts/tradingview-login.ts and refresh storage state.',
+      );
+    }
+
+    // Second gate: we're logged in but the chart layout has no indicators.
+    // This happens when TV serves the default-empty layout instead of the
+    // user's saved one (template reset, layout migration). Same fail-loud
+    // policy — better skip the LLM than feed bare candles.
+    if (!(await detectIndicatorsLoaded(page))) {
+      throw new Error(
+        'TradingView indicators not loaded on chart — only bare candles visible. ' +
+          'The chart layout has lost LuxAlgo overlays. Open TradingView in browser, ' +
+          'add LuxAlgo indicators back to the default chart layout, save, and ' +
+          'optionally set TV_LAYOUT_ID env to a specific layout URL ID.',
       );
     }
 

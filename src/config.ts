@@ -32,6 +32,19 @@ const Schema = z.object({
 
   CHROMIUM_PATH: z.string().optional(),
 
+  /**
+   * Optional: ID of a saved TradingView chart layout to pin charts to.
+   * Without this, captureChart() opens the "default" chart, which can
+   * lose its indicator overlays if the user accidentally modifies the
+   * default layout in the TV UI. With this set, we always open the
+   * specific named layout that has LuxAlgo indicators saved.
+   *
+   * To find it: open your TradingView chart with indicators set up, look
+   * at the URL — it'll be `tradingview.com/chart/XXXXX/` where XXXXX is
+   * the layout ID. Set TV_LAYOUT_ID=XXXXX in .env.
+   */
+  TV_LAYOUT_ID: z.string().optional(),
+
 
   SYMBOLS: z
     .string()
