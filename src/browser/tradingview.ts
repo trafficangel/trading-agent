@@ -100,6 +100,51 @@ async function reclaimSessionIfNeeded(page: Page): Promise<boolean> {
 }
 
 /**
+ * Dismiss any visible TradingView modal/overlay that would obscure the chart.
+ * TV occasionally shows promo modals ("Don't miss this crypto sale 80% off"),
+ * tutorial popups, feature-announcement dialogs, etc. Without dismissing them
+ * the screenshot is unusable — the LLM sees the promo, not the chart.
+ *
+ * Two passes:
+ *   1. Click any visible close-button (X) inside dialogs we recognize.
+ *   2. Press Escape twice — most TV modals support keyboard dismiss.
+ */
+async function dismissOverlays(page: Page): Promise<void> {
+  const closeSelectors = [
+    // Generic close-button patterns
+    'button[aria-label="Close" i]',
+    'button[data-name="close"]',
+    '.tv-dialog__close',
+    '[class*="closeButton" i]',
+    // Promo / marketing modal close buttons (TV uses different DOM here)
+    'div[role="dialog"] button:has(svg[class*="close" i])',
+    'div[class*="modal" i] button[class*="close" i]',
+    // "No thanks" / "Decline" buttons on offer modals
+    'button:has-text("No thanks")',
+    'button:has-text("Decline")',
+    'button:has-text("Skip")',
+  ];
+
+  for (const sel of closeSelectors) {
+    try {
+      const btn = page.locator(sel).first();
+      if (await btn.isVisible({ timeout: 300 }).catch(() => false)) {
+        await btn.click({ timeout: 1000 }).catch(() => {});
+        await page.waitForTimeout(400);
+      }
+    } catch {
+      // ignore per-selector failures
+    }
+  }
+
+  // Generic Escape twice — closes most TV dialogs that we didn't match above
+  for (let i = 0; i < 2; i++) {
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.waitForTimeout(200);
+  }
+}
+
+/**
  * Are LuxAlgo indicators actually loaded on the chart?
  *
  * Distinct from detectLoggedOut(): we may be perfectly authenticated but
@@ -200,6 +245,12 @@ export async function captureChart(
     // If TV booted us with the session-conflict modal, click Connect and try again.
     const reclaimed = await reclaimSessionIfNeeded(page);
     if (reclaimed) await page.waitForTimeout(2_000);
+
+    // Dismiss any promo / tutorial / feature-announcement overlay that
+    // could visually obscure the chart. Indicators may be loaded in the
+    // DOM (passes detectIndicatorsLoaded) but rendered behind a "Crypto
+    // sale 80% off" modal — screenshot useless.
+    await dismissOverlays(page);
 
     // Hard gate: if we're logged out, the chart has NO LuxAlgo indicators.
     // Blowing up here is correct — we'd rather skip the LLM call than feed
