@@ -48,6 +48,49 @@ async function getContext(): Promise<BrowserContext> {
       userAgent:
         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
     });
+
+    // Inject overlay-hiding CSS into EVERY page that opens in this context.
+    // Applied BEFORE the page's own JS runs, so even modals that try to
+    // appear at first paint get caught.
+    await ctx.addInitScript(`
+      (() => {
+        const css = \`
+          [class*="toastCommonBase"],
+          [class*="toastContainer"],
+          [class*="swipable-"],
+          [class*="contentContainerWrapper"],
+          [class*="contentContainerInner"],
+          [class*="contentContainer-"],
+          [class*="itemInnerInner"],
+          [class*="overlap-manager-root"],
+          [class*="popup-modal"],
+          [class*="marketingDialog"],
+          [class*="bottom-banner"],
+          [class*="promo-banner"],
+          [class*="i-dialog"],
+          [data-name="dialog"],
+          [data-dialog-name],
+          #onetrust-banner-sdk,
+          #onetrust-consent-sdk,
+          .ot-sdk-row,
+          [class*="tour-step"],
+          [class*="onboarding"] {
+            display: none !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+        \`;
+        const style = document.createElement('style');
+        style.setAttribute('data-injected', 'overlay-hide');
+        style.textContent = css;
+        if (document.head) {
+          document.head.appendChild(style);
+        } else {
+          document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style));
+        }
+      })();
+    `);
+
     contextInstance = ctx;
     logger.info('playwright context ready (storage state loaded)');
     return ctx;
@@ -109,7 +152,59 @@ async function reclaimSessionIfNeeded(page: Page): Promise<boolean> {
  *   1. Click any visible close-button (X) inside dialogs we recognize.
  *   2. Press Escape twice — most TV modals support keyboard dismiss.
  */
+/**
+ * Inject CSS that hides every TradingView promo / dialog / cookie banner
+ * container we know about. This is more robust than DOM removal because:
+ *   - TV's React/Angular layer re-injects removed elements within ms
+ *   - CSS persists even after re-render — the element stays hidden
+ *
+ * Called once per page load. Pure visual hide; doesn't break any TV
+ * functionality we use.
+ */
+async function injectOverlayHidingCSS(page: Page): Promise<void> {
+  await page
+    .addStyleTag({
+      content: `
+        /* TV "toast" promo popups (Crypto sale, feature announcements) */
+        [class*="toastCommonBase"],
+        [class*="toastContainer"],
+        [class*="swipable-"],
+        [class*="contentContainerWrapper"],
+        [class*="contentContainerInner"],
+        [class*="contentContainer-"],
+        [class*="itemInnerInner"],
+        /* Generic dialogs/popups */
+        [class*="overlap-manager-root"],
+        [class*="popup-modal"],
+        [class*="marketingDialog"],
+        [class*="bottom-banner"],
+        [class*="promo-banner"],
+        [class*="i-dialog"],
+        [data-name="dialog"],
+        [data-dialog-name],
+        /* Cookie consent (OneTrust) */
+        #onetrust-banner-sdk,
+        #onetrust-consent-sdk,
+        .ot-sdk-row,
+        /* Side-effect: hide tutorial-style intro tours */
+        [class*="tour-step"],
+        [class*="onboarding"] {
+          display: none !important;
+          visibility: hidden !important;
+          opacity: 0 !important;
+          pointer-events: none !important;
+        }
+      `,
+    })
+    .catch(() => {
+      // addStyleTag can fail if page is navigating; ignore.
+    });
+}
+
 async function dismissOverlays(page: Page): Promise<void> {
+  // 0. Inject CSS to hide overlays permanently (survives re-injection by TV)
+  await injectOverlayHidingCSS(page);
+
   // 1. Click known close buttons
   const closeSelectors = [
     'button[aria-label="Close" i]',
