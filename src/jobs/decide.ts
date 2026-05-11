@@ -1,5 +1,4 @@
 import { aggregateSymbol } from '../signals/aggregator.js';
-import { detectRegime } from '../signals/regime.js';
 import {
   insertDecision,
   findActivePosition,
@@ -63,43 +62,20 @@ export async function maybeDecide(symbol: string): Promise<void> {
     return;
   }
 
-  // Regime gate: skip LLM call entirely if we're in low-vol chop. Saves
-  // tokens and avoids the worst-EV slice of the trade distribution.
-  const regime = await detectRegime(symbol).catch(() => null);
-  if (regime?.inChop) {
-    logger.info(
-      { symbol, atr_percentile: regime.atrPercentile, threshold: regime.threshold },
-      'chop regime — blocking new OPEN attempt',
-    );
-
-    // Audit row: without this, "how many real setups did chop block?" can
-    // only be reconstructed from journalctl logs. With it, we can SELECT
-    // count from decisions table grouped by close_reason / reasoning_short
-    // pattern.
-    const reasoning = `Setup was bullish ${agg.bullish} / bearish ${agg.bearish}, ${agg.signals.length} signals. ATR(14) on 15m at ${regime.atrPercentile}-th percentile of last 7 days, below ${regime.threshold} threshold. No LLM invoked.`;
-    insertDecision({
-      symbol,
-      agg,
-      decision: {
-        decision: 'SKIP',
-        tp: [],
-        confidence: 0,
-        reasoning_short: `chop regime: ATR percentile ${regime.atrPercentile} < ${regime.threshold}`,
-        reasoning_full: reasoning,
-      },
-      screenshotPath: null,
-      inputTokens: 0,
-      outputTokens: 0,
-      rawResponse: '',
-    });
-
-    await sendMessage({
-      channel: 'logs',
-      text: `🟫 <b>chop SKIP</b> ${symbol}: ATR в ${regime.atrPercentile}-м перцентиле (порог ${regime.threshold}). LLM не зовём — рынок в боковике.`,
-      disable_notification: true,
-    });
-    return;
-  }
+  // Note: chop regime gate REMOVED. Two reasons:
+  //   1. Same philosophical reason we removed weighted confluence — it was
+  //      an arbitrary heuristic OUTSIDE the LLM, and the LLM is better at
+  //      judging "is the chart tradeable" than a single ATR percentile.
+  //   2. Percentile-based detection has a fundamental flaw: after a big
+  //      move, recent extreme bars dominate the historical distribution,
+  //      making subsequent NORMAL volatility look like "chop" by comparison.
+  //      Concrete case from 2026-05-11: TON had a 10% intraday range (real
+  //      moves on huge bars), then traded normally at 0.9%/bar — the
+  //      detector reported percentile 7 (= "dead") because the big bars
+  //      from the same day inflated the baseline. We blocked LLM on the
+  //      entire post-move calm trading window.
+  // The LLM sees ATR(14) 15m directly in the volume profile block and can
+  // self-assess volatility regime.
 
   logger.info(
     {
@@ -107,7 +83,6 @@ export async function maybeDecide(symbol: string): Promise<void> {
       bullish_count: agg.bullish,
       bearish_count: agg.bearish,
       signals: agg.signals.length,
-      atr_percentile: regime?.atrPercentile ?? null,
     },
     'invoking LLM',
   );

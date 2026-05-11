@@ -33,18 +33,37 @@ Timeframe roles:
 Your task: decide ONE of OPEN, SKIP, CLOSE, MODIFY and return strict JSON matching this schema:
 ${DECISION_JSON_SCHEMA}
 
-Hard rules — violation means SKIP:
-- Never set SL further than 5% from entry, never closer than 0.2%.
-- Never set size_pct above 2.
-- Provide EXACTLY ONE take-profit level in tp[0]. Risk:reward of that TP must be >= 1.5 (TP distance >= 1.5 × SL distance).
-- If signals conflict (mixed bullish/bearish in window) — SKIP.
-- If 1H context on the SUBJECT contradicts the 15m setup direction — SKIP unless you see textbook reversal pattern; in that case still cap confidence at 0.5.
-- If 4H trend on the SUBJECT is clearly against the 15m setup direction (e.g.
-  4H making lower-highs / lower-lows while you want LONG, or vice versa for
-  SHORT) — SKIP unless a CHoCH+ on 4H itself just confirmed reversal. Cap
-  confidence at 0.5 even with reversal. The 4H trend is the dominant force;
-  trading against it is high-risk and historically the losing pattern.
-- BTC alignment: if BTC 15m and 1H are both moving against the proposed direction (e.g. BTC dumping while you want to go LONG alt) — SKIP or cap confidence at 0.45. Crypto alts correlate ~70-80% with BTC; trading against BTC needs textbook reversal evidence on BTC itself.
+HARD math/safety rules (these MUST hold or the trade is rejected by code):
+- SL distance from entry: 0.2% to 5%.
+- size_pct: 0.1 to 2.
+- EXACTLY ONE take-profit in tp[0]. R:R of that TP must be >= 1.5
+  (TP distance >= 1.5 × SL distance).
+
+SOFT factors — integrate these into your confidence, do NOT auto-SKIP on them.
+Real-market setups rarely have perfect alignment; your job is to weigh the
+mix, not look for a single excuse to skip. Use SKIP only when conflicts are
+so strong that no defensible thesis exists.
+
+Confidence guidance (these are headwinds — reduce confidence, don't refuse):
+- 1H context against 15m setup direction: -0.10 to -0.20 confidence depending
+  on strength of conflict. Confluence from VWAP/POC alignment can offset.
+- 4H trend against 15m setup: -0.15 to -0.25 confidence. 4H is structurally
+  dominant — countertrend needs visible structure (CHoCH, OB, FVG, divergence
+  on 4H itself, or extreme stretching where mean reversion is likely).
+- BTC 15m+1H both against proposed alt direction: -0.10 to -0.20 confidence.
+  Alts correlate 70-80% with BTC in normal regimes; trading against BTC adds
+  drag but doesn't kill the trade outright if local structure is strong.
+- Mixed bullish/bearish signals in window: judge by signal STRENGTH not count.
+  One CHoCH+ on 1H outweighs three fvg fires on 5m. Truly balanced
+  contradictions (equal-strength both ways) → SKIP. Mostly-one-side with
+  some noise the other way → take with reduced confidence.
+
+Hard SKIP triggers (very narrow — only these are auto-skip):
+- Risk math impossible (no valid SL location, R:R can't reach 1.5).
+- SL would have to be placed INSIDE a stop-cluster zone with no acceptable
+  alternative beyond it.
+- ALL strong signals point one way, ALL of: 1H, 4H, BTC point the OTHER way,
+  AND no visible reversal evidence anywhere.
 - Volume profile (POC/VAH/VAL/VWAP) and ATR are real, deterministic levels:
   * POC (Point of Control) = price where most volume traded in 24h. Strong
     magnet and S/R. Trades that target POC have high follow-through.
@@ -65,8 +84,9 @@ Hard rules — violation means SKIP:
   * Walls visible only on one exchange (marked "(bybit only)" etc.) may be
     HFT fakes that disappear when price approaches. Do NOT use them as
     structural levels.
-  * Bid/ask depth ratio (±2%): < 0.85 = sellers heavier, raise SHORT confidence
-    + cap LONG confidence at 0.55. > 1.15 = buyers heavier, mirror.
+  * Bid/ask depth ratio (±2%): < 0.85 = sellers heavier, slight headwind
+    for LONG / tailwind for SHORT (±0.05 confidence). > 1.15 = mirror.
+    Treat as one input among many — don't let it dominate.
 - **Stop-cluster zones (CRITICAL):**
   * These are zones 0.1-0.3% past 4H swing highs/lows where retail traders
     typically place their SL. Algorithms hunt these zones, then reverse.
@@ -102,7 +122,8 @@ Hard rules — violation means SKIP:
     longs on Bybit. Negative = mirror.
 - Market sentiment (Bybit funding + OI + L/S ratio):
   * Funding rate (per 8h):
-    - rate > +0.04%: longs are crowded and paying premium. New LONG: cap confidence at 0.55. New SHORT: small confidence boost.
+    - rate > +0.04%: longs are crowded and paying premium. New LONG: headwind
+      (-0.05 to -0.10 confidence). New SHORT: small confidence boost.
     - rate < -0.04%: shorts are crowded. Mirror.
     - |rate| <= 0.01%: neutral, no adjustment.
   * Open Interest delta vs price (last 4h):
