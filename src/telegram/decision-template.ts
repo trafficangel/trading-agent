@@ -26,6 +26,81 @@ function pctDistance(a: number, b: number): number {
   return Math.round((Math.abs(a - b) / a) * 10000) / 100;
 }
 
+/**
+ * Telegram caption for a freshly-PLACED limit order (not yet filled).
+ * Uses #L prefix to make clear this isn't a real trade yet.
+ */
+export function limitPlacedCaption(input: {
+  decisionId: number;
+  symbol: string;
+  side: 'long' | 'short';
+  entry: number;
+  sl: number;
+  tp: number;
+  confidence: number;
+  reasoningShort: string;
+  slReason?: string;
+  tpReason?: string;
+  invalidation?: string;
+  pendingUntilMs: number;
+}): string {
+  const id = `#L${input.decisionId.toString().padStart(4, '0')}`;
+  const sideE = input.side === 'long' ? '🟢' : '🔴';
+  const sideRu = input.side === 'long' ? 'ЛОНГ' : 'ШОРТ';
+  const slPct = pctDistance(input.entry, input.sl);
+  const tpPct = pctDistance(input.entry, input.tp);
+  const slDist = Math.abs(input.entry - input.sl);
+  const tpDist = Math.abs(input.tp - input.entry);
+  const rr = slDist > 0 ? Math.round((tpDist / slDist) * 10) / 10 : 0;
+  const expiresAt = new Date(input.pendingUntilMs).toISOString().slice(11, 16) + 'Z';
+
+  const lines = [
+    `<b>📋 Лимит размещён ${id}</b>`,
+    `${sideE} <b>${input.symbol}</b> ${sideRu} · ждём ретест`,
+    '',
+    `🎯 Уровень входа: <code>${input.entry}</code>`,
+    `🛡 Стоп: <code>${input.sl}</code> (<code>${slPct}%</code>)${input.slReason ? ' — ' + escapeHtml(input.slReason) : ''}`,
+    `🎯 Цель: <code>${input.tp}</code> (<code>${tpPct}%</code>)${input.tpReason ? ' — ' + escapeHtml(input.tpReason) : ''}`,
+    `📐 R:R: <code>1 : ${rr}</code>`,
+    `💪 Уверенность: <code>${(input.confidence * 100).toFixed(0)}%</code>`,
+    `⏱ Действителен до: <code>${expiresAt}</code>`,
+    '',
+    escapeHtml(input.reasoningShort),
+  ];
+  if (input.invalidation) {
+    lines.push('');
+    lines.push(`❌ Отмена: ${escapeHtml(input.invalidation)}`);
+  }
+  return lines.join('\n').slice(0, 1024);
+}
+
+/** Telegram message when a pending limit just got filled. */
+export function limitFilledCaption(input: {
+  decisionId: number;
+  symbol: string;
+  side: 'long' | 'short';
+  entry: number;
+}): string {
+  const tradeId = `#${input.decisionId.toString().padStart(4, '0')}`;
+  const sideE = input.side === 'long' ? '🟢' : '🔴';
+  const sideRu = input.side === 'long' ? 'ЛОНГ' : 'ШОРТ';
+  return `🟢 <b>Лимит активирован → сделка ${tradeId}</b>\n${sideE} ${input.symbol} ${sideRu} @ <code>${input.entry}</code>\nЦена коснулась уровня — позиция открыта.`;
+}
+
+/** Telegram message when a pending limit expired without filling. */
+export function limitCancelledCaption(input: {
+  decisionId: number;
+  symbol: string;
+  side: 'long' | 'short';
+  entry: number;
+  reason: 'expired' | 'manual';
+}): string {
+  const id = `#L${input.decisionId.toString().padStart(4, '0')}`;
+  const sideRu = input.side === 'long' ? 'ЛОНГ' : 'ШОРТ';
+  const reasonText = input.reason === 'expired' ? 'ретест не пришёл за 2 часа' : 'отмена вручную';
+  return `⏱ <b>Лимит ${id} отменён</b>\n${input.symbol} ${sideRu} @ <code>${input.entry}</code> — ${reasonText}.\nСделка не открыта, в статистике не учитывается.`;
+}
+
 export type DecisionPostInput = {
   /** decision row id from DB → unique trade number */
   decisionId: number;

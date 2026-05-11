@@ -61,6 +61,12 @@ export function checkDecision(
     return { ok: false, reason: 'OPEN missing side/entry/sl/size_pct' };
   }
 
+  // SL must differ from entry — defensive against LLM bugs where entry==sl
+  // would produce zero risk (and infinite R:R math).
+  if (d.entry === d.sl) {
+    return { ok: false, reason: 'SL equals entry (zero risk — schema bug)' };
+  }
+
   // SL distance sanity (% of entry)
   const slDist = Math.abs(d.entry - d.sl);
   const slDistPct = (slDist / d.entry) * 100;

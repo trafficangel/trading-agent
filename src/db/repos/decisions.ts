@@ -31,6 +31,9 @@ export type DecisionRow = {
   close_reason: string | null;
   pnl_pct: number | null;
   pnl_r: number | null;
+  features_json: string | null;
+  pending_until: number | null;
+  filled_at: number | null;
 };
 
 export type CloseReason = 'tp_hit' | 'sl_hit' | 'llm_close' | 'manual';
@@ -42,8 +45,27 @@ const insertStmt = db.prepare(`
     decision, side, entry, sl, tp_json, size_pct,
     confidence, reasoning_short, reasoning_full, raw_response,
     status, parent_decision_id,
-    sl_reason, tp_reason, invalidation, features_json
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    sl_reason, tp_reason, invalidation, features_json,
+    pending_until, filled_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+const findPendingLimitsStmt = db.prepare<[], DecisionRow>(`
+  SELECT * FROM decisions
+  WHERE status = 'pending' AND decision = 'OPEN'
+  ORDER BY created_at ASC
+`);
+
+const activatePendingStmt = db.prepare<[number, number]>(`
+  UPDATE decisions
+  SET status = 'active', filled_at = ?
+  WHERE id = ? AND status = 'pending'
+`);
+
+const cancelPendingStmt = db.prepare<[number, number]>(`
+  UPDATE decisions
+  SET status = 'cancelled', closed_at = ?
+  WHERE id = ? AND status = 'pending'
 `);
 
 const findActiveStmt = db.prepare<[], DecisionRow>(`
@@ -102,12 +124,21 @@ export type InsertDecisionInput = {
   /** Structured features extracted at decision time. Optional (chop-SKIP
    *  and other early-exit branches may not provide them). */
   features?: Record<string, unknown> | null;
+  /** Override the default status. For limit orders we pass 'pending';
+   *  default behavior (status='active' for OPEN) handles market orders. */
+  statusOverride?: 'pending' | 'active' | 'final';
+  /** TTL for pending limit orders. After this wall-clock ms, the limit
+   *  will be auto-cancelled by tpsl-monitor. Null for market/non-limit. */
+  pendingUntil?: number | null;
 };
 
 export function insertDecision(input: InsertDecisionInput): number {
   const winning = input.agg.side === 'long' ? input.agg.bullish : input.agg.bearish;
-  // OPEN starts 'active' (alive position to monitor); everything else is 'final'.
-  const status = input.decision.decision === 'OPEN' ? 'active' : 'final';
+  // OPEN normally starts 'active'. For limit-entry OPEN we pass
+  // statusOverride='pending' so the order sits in the queue until price
+  // touches entry; non-OPEN decisions are 'final'.
+  const defaultStatus = input.decision.decision === 'OPEN' ? 'active' : 'final';
+  const status = input.statusOverride ?? defaultStatus;
   const result = insertStmt.run(
     Date.now(),
     input.symbol,
@@ -132,6 +163,8 @@ export function insertDecision(input: InsertDecisionInput): number {
     input.decision.tp_reason ?? null,
     input.decision.invalidation ?? null,
     input.features ? JSON.stringify(input.features) : null,
+    input.pendingUntil ?? null,
+    null, // filled_at — set later when limit fills
   );
   const newId = Number(result.lastInsertRowid);
 
@@ -142,6 +175,30 @@ export function insertDecision(input: InsertDecisionInput): number {
 }
 
 /** Mark closed without stats (legacy fallback — prefer closePositionWithStats). */
+/** All pending limit orders (regardless of symbol). */
+export function findPendingLimits(): DecisionRow[] {
+  return findPendingLimitsStmt.all();
+}
+
+/**
+ * Promote a pending limit to active (i.e., the limit just got filled).
+ * Returns true if THIS call did the activation; false if someone else
+ * already activated (race protection — only one fill per limit).
+ */
+export function activatePendingLimit(id: number, filledAt: number): boolean {
+  const r = activatePendingStmt.run(filledAt, id);
+  return r.changes > 0;
+}
+
+/**
+ * Cancel an unfilled pending limit (expired, or LLM explicitly cancelled).
+ * Returns true if THIS call cancelled it.
+ */
+export function cancelPendingLimit(id: number): boolean {
+  const r = cancelPendingStmt.run(Date.now(), id);
+  return r.changes > 0;
+}
+
 /**
  * Update the SL field of a position in-place. Used by:
  *  - the auto-BE rule in tpsl-monitor (move SL to entry on 1R)

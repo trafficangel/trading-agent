@@ -10,7 +10,7 @@ import { captureChart } from '../browser/tradingview.js';
 import { checkDecision, type RiskLimits } from '../risk/manager.js';
 import { sizeFromConfidence } from '../risk/sizing.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
-import { tradeCaption, skipLog } from '../telegram/decision-template.js';
+import { tradeCaption, skipLog, limitPlacedCaption } from '../telegram/decision-template.js';
 import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
 import { existsSync } from 'node:fs';
@@ -333,6 +333,15 @@ export async function maybeDecide(symbol: string): Promise<void> {
     llmInvoked: true,
   });
 
+  // Limit orders are stored as 'pending' — they're NOT a real trade until
+  // price touches the entry level (tpsl-monitor handles activation). Until
+  // then they don't get counted in P&L stats or active-position checks.
+  // 2-hour TTL matches typical 15m bar play-out window; unfilled limits
+  // beyond that are stale anyway.
+  const PENDING_LIMIT_TTL_MS = 2 * 60 * 60 * 1000;
+  const isPendingLimit =
+    result.decision.decision === 'OPEN' && result.decision.entry_type === 'limit';
+
   const decisionId = insertDecision({
     symbol,
     agg,
@@ -345,6 +354,8 @@ export async function maybeDecide(symbol: string): Promise<void> {
         ? rawCombined.slice(0, RAW_RESPONSE_CAP) + '\n... [truncated]'
         : rawCombined,
     features,
+    statusOverride: isPendingLimit ? 'pending' : undefined,
+    pendingUntil: isPendingLimit ? Date.now() + PENDING_LIMIT_TTL_MS : null,
   });
 
   logger.info(
@@ -372,10 +383,38 @@ export async function maybeDecide(symbol: string): Promise<void> {
   };
 
   // Routing:
-  //   OPEN / CLOSE / MODIFY → Signals channel with photo (15m chart) + Russian caption
-  //   SKIP                  → Logs channel only, compact one-liner
+  //   OPEN market   → Signals: trade caption with photo, real trade #
+  //   OPEN limit    → Signals: "limit placed" caption with #L prefix.
+  //                   Trade # stays reserved until/unless the limit fills.
+  //   CLOSE / MODIFY → Signals: trade caption with photo
+  //   SKIP          → Logs: compact one-liner
   if (result.decision.decision === 'SKIP') {
     await sendMessage({ channel: 'logs', text: skipLog(post), disable_notification: true });
+    return;
+  }
+
+  if (isPendingLimit && result.decision.entry && result.decision.sl && result.decision.tp[0] && result.decision.side) {
+    const placedCaption = limitPlacedCaption({
+      decisionId,
+      symbol,
+      side: result.decision.side,
+      entry: result.decision.entry,
+      sl: result.decision.sl,
+      tp: result.decision.tp[0],
+      confidence: result.decision.confidence,
+      reasoningShort: result.decision.reasoning_short,
+      slReason: result.decision.sl_reason,
+      tpReason: result.decision.tp_reason,
+      invalidation: result.decision.invalidation,
+      pendingUntilMs: Date.now() + PENDING_LIMIT_TTL_MS,
+    });
+    if (primaryScreenshot && existsSync(primaryScreenshot)) {
+      const sent = await sendPhoto({ channel: 'signals', photoPath: primaryScreenshot, caption: placedCaption });
+      if (!sent) await sendMessage({ channel: 'signals', text: placedCaption });
+    } else {
+      await sendMessage({ channel: 'signals', text: placedCaption });
+    }
+    await sendMessage({ channel: 'logs', text: placedCaption, disable_notification: true });
     return;
   }
 

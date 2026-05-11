@@ -4,6 +4,9 @@ import { logger } from '../lib/logger.js';
 import {
   findActivePositions,
   findDecisionById,
+  findPendingLimits,
+  activatePendingLimit,
+  cancelPendingLimit,
   calcPnl,
   closePositionWithStats,
   updatePositionSl,
@@ -12,6 +15,7 @@ import {
 import { getLastPrice } from '../exchange/bybit-public.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { resultPost } from '../telegram/result-template.js';
+import { limitFilledCaption, limitCancelledCaption } from '../telegram/decision-template.js';
 import { markTick } from '../lib/health-tracker.js';
 
 let running = false;
@@ -171,17 +175,81 @@ async function checkPosition(pInput: DecisionRow): Promise<void> {
   await sendMessage({ channel: 'logs', text, disable_notification: true });
 }
 
+/**
+ * Pending-limit watcher. For each pending limit:
+ *   - If now > pending_until → cancel + post
+ *   - Else fetch latest price; if it touched the entry level, promote
+ *     to status='active' + post "filled"
+ *
+ * Touch rule:
+ *   LONG limit @ X is filled when price <= X (we sell into the bid? no,
+ *   we BUY at X when price drops down to it). Exchange would fill at X.
+ *   SHORT limit @ X is filled when price >= X.
+ */
+async function checkPendingLimit(p: DecisionRow): Promise<void> {
+  if (!p.entry || !p.side || (p.side !== 'long' && p.side !== 'short')) return;
+
+  // Expiry check first — cheaper than price fetch
+  if (p.pending_until && Date.now() > p.pending_until) {
+    if (cancelPendingLimit(p.id)) {
+      logger.info({ position_id: p.id }, 'pending limit expired, cancelled');
+      const text = limitCancelledCaption({
+        decisionId: p.id,
+        symbol: p.symbol,
+        side: p.side,
+        entry: p.entry,
+        reason: 'expired',
+      });
+      await sendMessage({ channel: 'signals', text });
+      await sendMessage({ channel: 'logs', text, disable_notification: true });
+    }
+    return;
+  }
+
+  const price = await getLastPrice(p.symbol);
+  if (price == null) return;
+
+  const touched = p.side === 'long' ? price <= p.entry : price >= p.entry;
+  if (!touched) return;
+
+  // Activate. activatePendingLimit returns false if someone beat us to it.
+  if (activatePendingLimit(p.id, Date.now())) {
+    logger.info(
+      { position_id: p.id, fill_price: p.entry, tick_price: price },
+      'pending limit FILLED — promoted to active',
+    );
+    const text = limitFilledCaption({
+      decisionId: p.id,
+      symbol: p.symbol,
+      side: p.side,
+      entry: p.entry,
+    });
+    await sendMessage({ channel: 'signals', text });
+    await sendMessage({ channel: 'logs', text, disable_notification: true });
+  }
+}
+
 async function tick(): Promise<void> {
   if (running) return;
   running = true;
   try {
+    // Process active positions (TP/SL hit + auto-BE)
     const positions = findActivePositions();
-    if (positions.length === 0) return;
     for (const p of positions) {
       try {
         await checkPosition(p);
       } catch (err) {
         logger.error({ err, position_id: p.id }, 'tpsl checkPosition failed');
+      }
+    }
+
+    // Process pending limit orders (fill or expire)
+    const pending = findPendingLimits();
+    for (const p of pending) {
+      try {
+        await checkPendingLimit(p);
+      } catch (err) {
+        logger.error({ err, position_id: p.id }, 'tpsl checkPendingLimit failed');
       }
     }
   } finally {
