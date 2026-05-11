@@ -153,6 +153,13 @@ async function dismissOverlays(page: Page): Promise<void> {
   await page
     .evaluate(`(() => {
       const selectors = [
+        // TV "toast" promo overlays (e.g. "Crypto sale 80% off") use
+        // hashed class names like toastCommonBase-zMOxH_8U; match by prefix.
+        '[class*="toastCommonBase"]',
+        '[class*="toastContainer"]',
+        '[class*="swipable-"]',
+        '[class*="contentContainerWrapper"]',
+        // Generic dialog/popup containers
         '[class*="overlap-manager-root"]',
         '[class*="js-rootresizer"] [role="dialog"]',
         '[data-name="dialog"]',
@@ -162,6 +169,7 @@ async function dismissOverlays(page: Page): Promise<void> {
         '[class*="marketingDialog"]',
         '[class*="bottom-banner"]',
         '[class*="promo-banner"]',
+        // Cookie banner — visual noise at bottom-left
         '#onetrust-banner-sdk',
         '#onetrust-consent-sdk',
       ];
