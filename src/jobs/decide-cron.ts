@@ -4,7 +4,6 @@ import { config } from '../config.js';
 import { maybeDecide } from './decide.js';
 import { aggregateSymbol } from '../signals/aggregator.js';
 import { findActiveOrPendingPosition } from '../db/repos/decisions.js';
-import { sendMessage } from '../telegram/bot.js';
 import { markTick } from '../lib/health-tracker.js';
 
 /**
@@ -130,55 +129,24 @@ async function tick(): Promise<void> {
       }
     }
 
-    const duration = Date.now() - t0;
-    const decideAttempts = evaluations.filter((e) => e.decideAttempted).length;
-    const activeCount = evaluations.filter((e) => e.hasActivePosition).length;
-    const withSignals = evaluations.filter((e) => e.signalsInWindow > 0).length;
-
+    // journalctl-only structured log of the tick. NOTHING goes to Telegram
+    // from here — the cron-tick summary ("🔄 cron HH:MMZ · ⚡ ...") was
+    // removed 2026-05-12 per user feedback (4 cryptic posts/hour with no
+    // user-actionable info). Telegram now shows only:
+    //   1. "Сигнал получен" — webhook arrival (luxalgo.route.ts)
+    //   2. "Анализ вызван" → OPEN/SKIP/MODIFY post (decide.ts)
+    //   3. SL→BE / fill / cancel / TP-hit (tpsl-monitor.ts)
     logger.info(
       {
         tick: tickLabel,
-        duration_ms: duration,
+        duration_ms: Date.now() - t0,
         symbols_checked: symbols.length,
-        symbols_with_signals: withSignals,
-        decide_attempts: decideAttempts,
-        active_positions: activeCount,
+        symbols_with_signals: evaluations.filter((e) => e.signalsInWindow > 0).length,
+        decide_attempts: evaluations.filter((e) => e.decideAttempted).length,
+        active_positions: evaluations.filter((e) => e.hasActivePosition).length,
       },
       'decide cron tick complete',
     );
-
-    // Telegram Logs: post a summary only when SOMETHING is worth reporting
-    // (signals exist OR active position present). Otherwise silent — the
-    // 4h heartbeat already covers "alive" pings, and we don't want 96
-    // empty-tick messages per day.
-    //
-    // Note: we do NOT claim "LLM was invoked" here, because maybeDecide()
-    // has internal gates (chop, etc.) that may short-circuit AFTER this
-    // summary is composed. The actual LLM outcome shows up as its own
-    // Telegram post (the OPEN/SKIP/MODIFY caption, chop SKIP note, etc.).
-    // This summary is "context check" — what was the state at tick time.
-    if (withSignals > 0 || activeCount > 0) {
-      const lines = [`🔄 <b>cron ${tickLabel}</b> · ${duration}мс`];
-      for (const e of evaluations) {
-        if (e.signalsInWindow === 0 && !e.hasActivePosition) continue;
-        // ⚡ = there's signal activity → maybeDecide will run its gates
-        // 🛡 = active position → handled by monitor + ad-hoc trigger
-        const tag = e.decideAttempted
-          ? '⚡ activity'
-          : e.hasActivePosition
-            ? '🛡 active'
-            : '·';
-        const sideEmoji = e.side === 'long' ? '🟢' : e.side === 'short' ? '🔴' : '·';
-        lines.push(
-          `  ${tag} ${e.symbol} ${sideEmoji} bull <code>${e.bullish}</code> / bear <code>${e.bearish}</code> · ${e.signalsInWindow} сигналов`,
-        );
-      }
-      await sendMessage({
-        channel: 'logs',
-        text: lines.join('\n'),
-        disable_notification: true,
-      }).catch((err) => logger.error({ err }, 'cron summary send failed'));
-    }
   } finally {
     running = false;
     // Mark tick AFTER running flag is cleared. Even if the tick had errors
