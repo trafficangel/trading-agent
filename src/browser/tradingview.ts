@@ -204,9 +204,21 @@ async function injectOverlayHidingCSS(page: Page): Promise<void> {
 /**
  * Zoom the chart in to a sensible per-TF range. Default TradingView view
  * shows 80-120 bars which is fine for 15m but on 4H means looking at a
- * full month of data — too wide for spotting actionable setups. We use
- * mouse-wheel scroll on the chart center to zoom in. Per-TF zoom amounts
- * tuned so we end up with roughly 30-60 most recent bars visible.
+ * full month of data — too wide for spotting actionable setups.
+ *
+ * Implementation note: page.mouse.wheel doesn't reliably reach TradingView's
+ * chart — TV attaches `wheel` listeners with `{passive:false}` to the
+ * specific time-scale canvas, and Playwright's synthesized scroll often
+ * lands on a parent layer instead. So we use TWO approaches in sequence:
+ *
+ *   1. Direct dispatchEvent on the pane canvas — fires a real `wheel`
+ *      event with the exact target/coordinates TV expects. This is the
+ *      one that actually zooms.
+ *   2. Fallback: page.mouse.wheel — in case dispatchEvent path is blocked
+ *      by a future TV change (e.g. they switch to PointerEvent).
+ *
+ * Per-TF zoom amounts tuned so we end up with roughly 30-60 most recent
+ * bars visible.
  */
 async function adjustChartZoom(page: Page, interval: string): Promise<void> {
   const canvas = page.locator('canvas[data-name="pane-canvas"]').first();
@@ -216,34 +228,73 @@ async function adjustChartZoom(page: Page, interval: string): Promise<void> {
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
 
-  // First — make sure we're looking at the most recent data (End key
-  // scrolls to latest), then mouse-wheel zoom in.
-  // Click on the chart to focus it (and position mouse at center).
-  await page.mouse.move(cx, cy);
-  await page.waitForTimeout(100);
+  // Bring chart into focus by clicking once (mouse hover alone doesn't
+  // make the chart the active keyboard target).
+  await page.mouse.click(cx, cy, { delay: 50 }).catch(() => {});
+  await page.waitForTimeout(150);
+
+  // End-key sometimes scrolls to most recent, sometimes not (TV setting
+  // dependent). Wrap in try-catch — not a hard failure if no-op.
   await page.keyboard.press('End').catch(() => {});
   await page.waitForTimeout(200);
 
-  // Mouse-wheel zoom-in. Negative deltaY = scroll up = zoom in on TV chart.
-  // Each "step" of -400 is roughly one zoom level. Per-TF amounts:
-  //   5m, 15m:  default already shows ~30-50 recent bars, mild zoom only
-  //   1H:       wider default, zoom 2-3 steps
-  //   4H:       widest default (month+), zoom 4-5 steps (USER COMPLAINT)
-  //   1D:       similar to 4H
+  // Per-TF zoom levels. Higher number = more zoomed in.
+  //   5m, 15m: default already shows ~30-50 recent bars, light zoom
+  //   1H:       wider default, moderate zoom
+  //   4H, 1D:   TV defaults to MONTHS of bars, aggressive zoom needed
   const zoomSteps: Record<string, number> = {
-    '5': 2,
-    '15': 2,
-    '60': 3,
-    '240': 5,
-    D: 4,
+    '5': 3,
+    '15': 3,
+    '60': 6,
+    '240': 12,
+    D: 10,
   };
-  const steps = zoomSteps[interval] ?? 2;
+  const steps = zoomSteps[interval] ?? 3;
+
+  // PRIMARY method: dispatch synthetic wheel events directly on the
+  // canvas at chart-center coordinates. TV's wheel handler reads
+  // ctrlKey to differentiate zoom from pan — but actually for chart zoom
+  // it just needs deltaY != 0 on the chart pane. We send strong deltaY
+  // so each event is one full zoom level.
+  await page
+    .evaluate(
+      `(async () => {
+        const steps = ${steps};
+        const target = document.querySelector('canvas[data-name="pane-canvas"]');
+        if (!target) return 'no-canvas';
+        const rect = target.getBoundingClientRect();
+        const clientX = rect.left + rect.width / 2;
+        const clientY = rect.top + rect.height / 2;
+        for (let i = 0; i < steps; i++) {
+          const ev = new WheelEvent('wheel', {
+            deltaY: -200,
+            deltaMode: 0,
+            clientX,
+            clientY,
+            bubbles: true,
+            cancelable: true,
+            ctrlKey: false,
+          });
+          target.dispatchEvent(ev);
+          await new Promise((r) => setTimeout(r, 120));
+        }
+        return 'done:' + steps;
+      })()`,
+    )
+    .catch(() => 'evaluate-failed');
+
+  // FALLBACK: page.mouse.wheel — in case the dispatchEvent path didn't
+  // work for some reason (different TV build, etc.). Same number of
+  // steps, but with deltaY=-400 since mouse.wheel goes through a
+  // different code path.
+  await page.mouse.move(cx, cy);
   for (let i = 0; i < steps; i++) {
     await page.mouse.wheel(0, -400);
-    await page.waitForTimeout(120);
+    await page.waitForTimeout(80);
   }
-  // Settle after zoom changes
-  await page.waitForTimeout(400);
+
+  // Settle after zoom changes — TV renders animations async
+  await page.waitForTimeout(600);
 }
 
 async function dismissOverlays(page: Page): Promise<void> {
