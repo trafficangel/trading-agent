@@ -33,6 +33,58 @@ Timeframe roles:
 Your task: decide ONE of OPEN, SKIP, CLOSE, MODIFY and return strict JSON matching this schema:
 ${DECISION_JSON_SCHEMA}
 
+VISUAL CHART READING — LuxAlgo Premium overlays you MUST extract from each screenshot:
+The chart has these indicators loaded. Cite them by name in reasoning_full
+when they back your thesis (e.g. "Smart Trail на 1H флипнул бычий"). Don't
+just say "график подтверждает" — name the specific overlay.
+
+- **Smart Trail** — colored stair-line trail. Blue/green = bullish trail
+  (price respects it from above as dynamic support). Red = bearish trail
+  (price respects from below as resistance). A "flip" (color change) is a
+  significant trend-change signal — note WHICH TF flipped and when.
+- **Trend Catcher** — short-cycle trend coloring on candles or a sub-line.
+  Aligns with Smart Trail when trend is clean; diverges in chop.
+- **Trend Strength** — gauge/meter (usually 0-100 with green→red gradient
+  or a histogram in a sub-pane). High green = strong uptrend, high red =
+  strong downtrend, mid grey = chop. Don't fight high Trend Strength
+  against your direction without textbook reversal evidence.
+- **Reversal Signals** — small diamond / circle markers at swing extremes
+  (often at the top/bottom of impulse moves). Bullish reversal (bottom) +
+  CHoCH+ on same bar = high-conviction long setup. Same logic mirrored
+  for shorts.
+- **Money Flow / Oscillator Matrix** — sub-pane oscillator (0-100 or
+  ±range). Extreme readings (>80 / <20) with reversal = high-EV; mid-range
+  readings are noise. Look for divergence between price and Money Flow at
+  swing extremes — classic exhaustion signal.
+- **Volume Sentiment** — candle colouring tinted by delta volume (buy vs
+  sell pressure within the bar). A bullish-marked candle with high
+  body-to-wick ratio = real buying. A "bullish" candle that's mostly wick
+  = trapped longs / failed breakout. Read this AT the entry bar of your
+  proposed setup.
+- **Squeeze indicator** — compression marker (often dots/bars below or
+  above price). A "squeeze on" state means Bollinger inside Keltner =
+  consolidation building. Squeeze RELEASE in direction of higher TF trend
+  = high-EV breakout setup. Squeeze release counter-trend = fade quickly.
+- **Volatility / Bands** — outer bands (BB/KC style envelope). Price
+  riding the upper band = strong trend, not "overbought stop". Price
+  pinned against opposite band with reversal signal = mean-reversion setup.
+- **Order Blocks (OB)** — coloured rectangles (typically blue bullish, red
+  bearish). Active OBs are the institutional defense zones. Price returning
+  to an unmitigated bullish OB = high-EV long entry; price BREAKING
+  through it = thesis invalidated.
+- **Fair Value Gaps (FVG)** — small unfilled gaps between bar wicks.
+  Price tends to fill them. Useful as TP magnets, not entry triggers
+  by themselves.
+- **Liquidity grabs / sweeps** — wicks that pierce a swing high/low then
+  reverse. Often paired with CHoCH+ for setup confirmation. Cite the
+  swept level explicitly (e.g. "снёс 4H swing low 2.34, потом CHoCH+").
+
+WHEN VISUAL AND SIGNAL DISAGREE: screenshots are ground truth. A "bullish+"
+signal fires on the bar — but if Smart Trail is still red, Trend Strength
+red, and price is below a major bearish OB, the SIGNAL is the noise, the
+PICTURE is the truth. Trust the integrated visual over individual signal
+events.
+
 HARD math/safety rules (these MUST hold or the trade is rejected by code):
 - SL distance from entry: 0.2% to 5%.
 - size_pct: 0.1 to 2.
