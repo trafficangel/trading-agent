@@ -53,12 +53,21 @@ async function callMonitorLlm(
   let inputTokens = 0;
   let outputTokens = 0;
 
+  // Same anti-hallucination warning as client.ts when no screenshots:
+  const blindnessWarning =
+    screenshots.length === 0
+      ? `\n\n⚠️ ВАЖНО: чарты в этом вызове НЕДОСТУПНЫ. Анализируй ТОЛЬКО ` +
+        `текстовые данные. НЕ описывай "что видно на графике". Если без ` +
+        `визуального контекста уверенно решить не можешь — HOLD (= SKIP) ` +
+        `с reasoning_short, начинающимся "Нет визуального контекста: ".`
+      : '';
+
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const messages: Anthropic.MessageParam[] = [
       {
         role: 'user',
         content: [
-          { type: 'text', text: userText },
+          { type: 'text', text: userText + blindnessWarning },
           ...screenshots.map(imageBlock),
           ...(lastError
             ? [{ type: 'text' as const, text: `Previous response failed validation:\n${lastError}\nReturn valid JSON only.` }]

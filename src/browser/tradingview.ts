@@ -299,11 +299,11 @@ async function dismissOverlays(page: Page): Promise<void> {
  * (the price symbol). We require >= 2 to consider indicators loaded.
  */
 async function detectIndicatorsLoaded(page: Page): Promise<boolean> {
-  // Two-pass detection. First pass after 2 sec — fast for normal pages.
-  // If first pass fails, wait an additional 4 sec and retry — handles
-  // slow renders where TV's chart engine is still booting indicators.
-  // Without retry we had 4-8 false-positive alerts per hour overnight
-  // on BTCUSDT 15m specifically (rendered later than other TFs).
+  // Multi-pass detection with progressive backoff. Total wait up to 15 sec.
+  // Empirical observation: BTC 15m specifically renders indicators
+  // 5-8 seconds later than other TFs (heavier chart). 2-sec single-pass
+  // detector caused 4-8 false positives/hour overnight.
+  // Now we wait 2s → 5s → 8s = up to 15s total before declaring failure.
   const legendSelectors = [
     '[data-name="legend-source-item"]',
     '.legend-source-item',
@@ -322,12 +322,12 @@ async function detectIndicatorsLoaded(page: Page): Promise<boolean> {
     return luxAlgoText > 0;
   };
 
-  await page.waitForTimeout(2000);
-  if (await checkOnce()) return true;
-
-  // Retry after additional 4 sec — gives slow charts time to populate.
-  await page.waitForTimeout(4000);
-  return checkOnce();
+  const waitsMs = [2000, 5000, 8000];
+  for (const ms of waitsMs) {
+    await page.waitForTimeout(ms);
+    if (await checkOnce()) return true;
+  }
+  return false;
 }
 
 /**
@@ -365,10 +365,40 @@ async function detectLoggedOut(page: Page): Promise<boolean> {
 
 /**
  * Capture a chart screenshot for `symbol` at `interval` (TradingView interval string).
- * Returns the PNG path. Throws if the TV session is logged out — caller should
- * surface this loudly instead of silently feeding blank charts to the LLM.
+ * Returns the PNG path. Throws if the TV session is logged out OR indicators
+ * don't render even after one retry.
+ *
+ * Two-attempt strategy: if the first capture fails on the "indicators not
+ * loaded" gate, we close the page and try once more in a fresh tab. TV
+ * intermittently serves a half-loaded chart (especially BTC 15m); a single
+ * retry catches almost all such cases. Hard auth failures (logged out)
+ * skip the retry — those won't fix themselves by re-trying.
  */
 export async function captureChart(
+  symbol: string,
+  interval: '5' | '15' | '60' | '240' | 'D',
+): Promise<string> {
+  try {
+    return await captureChartOnce(symbol, interval);
+  } catch (err) {
+    const msg = (err as Error)?.message ?? String(err);
+    // Only retry the soft failure case (indicators not loaded). Logged-out
+    // / storage-state failures need user action and won't self-heal.
+    if (msg.includes('indicators not loaded')) {
+      logger.warn(
+        { symbol, interval },
+        'capture failed on indicators, retrying once in fresh tab',
+      );
+      // Brief pause so TV's rendering pipeline isn't immediately overloaded
+      // by an instant re-navigation.
+      await new Promise((r) => setTimeout(r, 1500));
+      return await captureChartOnce(symbol, interval);
+    }
+    throw err;
+  }
+}
+
+async function captureChartOnce(
   symbol: string,
   interval: '5' | '15' | '60' | '240' | 'D',
 ): Promise<string> {

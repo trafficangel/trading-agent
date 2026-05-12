@@ -51,12 +51,30 @@ export async function callLlm(
   let outputTokens = 0;
   const t0 = Date.now();
 
+  // Blindness warning — if no screenshots made it through the capture
+  // pipeline (TV layout glitch, all 5 charts failed), we MUST tell the
+  // model explicitly. Otherwise it will hallucinate "I see X on the
+  // chart" descriptions from the numeric context alone, producing
+  // confident-sounding but baseless reasoning. Observed in production
+  // 2026-05-12: 15 overnight decisions ran blind with reasoning
+  // referencing "higher lows on chart" while screenshot_path was NULL.
+  const blindnessWarning =
+    screenshots.length === 0
+      ? `\n\n⚠️ ВАЖНО: чарты в этом вызове НЕДОСТУПНЫ (capture failed для всех 5). ` +
+        `Анализируй ТОЛЬКО на основе текстовых данных выше (signals, sentiment, ` +
+        `volume profile, orderbook, liquidations, stop clusters). ` +
+        `НЕ описывай "что видно на графике", "candle wicks", "higher highs" ` +
+        `и подобные визуальные паттерны — графиков ты НЕ ВИДИШЬ. ` +
+        `Если без визуального контекста уверенность падает ниже 0.45 — выдай SKIP ` +
+        `с reasoning_short, начинающимся с "Нет визуального контекста: ".`
+      : '';
+
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const messages: Anthropic.MessageParam[] = [
       {
         role: 'user',
         content: [
-          { type: 'text', text: userText },
+          { type: 'text', text: userText + blindnessWarning },
           ...screenshots.map(imageBlock),
           ...(lastError
             ? [
