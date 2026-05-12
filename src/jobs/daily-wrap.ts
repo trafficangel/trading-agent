@@ -2,9 +2,6 @@ import cron from 'node-cron';
 import { sendMessage } from '../telegram/bot.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
-import { config } from '../config.js';
-import { getBinanceKlines } from '../exchange/binance-public.js';
-import { getBybitKlines } from '../exchange/bybit-public.js';
 
 type DecisionDayRow = {
   id: number;
@@ -18,11 +15,14 @@ type DecisionDayRow = {
   status: string;
   parent_decision_id: number | null;
   closed_at: number | null;
+  filled_at: number | null;
+  pending_until: number | null;
   reasoning_short: string | null;
   close_price: number | null;
   close_reason: string | null;
   pnl_pct: number | null;
   pnl_r: number | null;
+  features_json: string | null;
 };
 
 const sigsToday = db.prepare<[number], { symbol: string; timeframe: string; c: number }>(
@@ -30,72 +30,72 @@ const sigsToday = db.prepare<[number], { symbol: string; timeframe: string; c: n
 );
 const SELECT_COLS = `
   id, created_at, symbol, decision, side, entry, sl, tp_json,
-  status, parent_decision_id, closed_at, reasoning_short,
-  close_price, close_reason, pnl_pct, pnl_r
+  status, parent_decision_id, closed_at, filled_at, pending_until, reasoning_short,
+  close_price, close_reason, pnl_pct, pnl_r, features_json
 `;
 const decisionsToday = db.prepare<[number], DecisionDayRow>(
   `SELECT ${SELECT_COLS} FROM decisions WHERE created_at >= ? ORDER BY created_at ASC`,
 );
+
+// Trades that REALLY closed today (TP/SL hit, or LLM CLOSE). Only these
+// produce real PnL. Excludes the broken-data zombie (entry==sl → pnl null)
+// via the explicit pnl_pct IS NOT NULL filter — those rows shouldn't show
+// up in win/loss/USD stats.
 const closedTradesToday = db.prepare<[number], DecisionDayRow>(`
   SELECT ${SELECT_COLS} FROM decisions
-  WHERE decision = 'OPEN' AND status = 'closed' AND closed_at IS NOT NULL AND closed_at >= ?
+  WHERE decision = 'OPEN' AND status = 'closed'
+    AND closed_at IS NOT NULL AND closed_at >= ?
+    AND pnl_pct IS NOT NULL
   ORDER BY closed_at ASC
 `);
+
+// Currently-active trades (market entries OR filled limits).
 const stillActive = db.prepare<[], DecisionDayRow>(
   `SELECT ${SELECT_COLS} FROM decisions WHERE decision = 'OPEN' AND status = 'active' ORDER BY created_at ASC`,
 );
-const nearestSignalPrice = db.prepare<[string, number, number, number], { price: number | null }>(`
-  SELECT price FROM signals
-  WHERE symbol = ? AND price IS NOT NULL
-    AND received_at BETWEEN ? AND ?
-  ORDER BY ABS(received_at - ?) ASC LIMIT 1
+
+// Limits still waiting for price touch. They might still fire today.
+const pendingLimits = db.prepare<[], DecisionDayRow>(
+  `SELECT ${SELECT_COLS} FROM decisions WHERE status = 'pending' ORDER BY created_at ASC`,
+);
+
+// Limits that expired without filling today. Important for transparency
+// but NOT counted in PnL (they were never trades).
+const cancelledLimitsToday = db.prepare<[number], DecisionDayRow>(`
+  SELECT ${SELECT_COLS} FROM decisions
+  WHERE status = 'cancelled' AND closed_at IS NOT NULL AND closed_at >= ?
+  ORDER BY closed_at ASC
 `);
 
 function startOfTodayUtc(now: Date): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
 }
 
-/**
- * Today's price change for a symbol — used for the HODL baseline.
- * Fetches the current 1-day kline (open = today 00:00 UTC, close = current
- * price since the day isn't done yet). Returns pct change open→current, or
- * null if neither Binance nor Bybit responded.
- */
-async function fetchTodayPriceChange(
-  symbol: string,
-): Promise<{ open: number; current: number; pctChange: number } | null> {
-  const tryParse = (k: { open: number; close: number } | undefined) => {
-    if (!k || !Number.isFinite(k.open) || !Number.isFinite(k.close) || k.open <= 0) return null;
-    return { open: k.open, current: k.close, pctChange: ((k.close - k.open) / k.open) * 100 };
-  };
-  const binance = await getBinanceKlines(symbol, '1d', 1).catch(() => null);
-  if (binance && binance.length > 0) {
-    const r = tryParse(binance[binance.length - 1]);
-    if (r) return r;
+/** $1000 per position simulation — what closed-trade PnL maps to in USD. */
+const POSITION_NOTIONAL_USD = 1000;
+
+function entryTypeOf(row: DecisionDayRow): 'market' | 'limit' | 'unknown' {
+  if (!row.features_json) return 'unknown';
+  try {
+    const f = JSON.parse(row.features_json) as { entry_type?: string };
+    if (f.entry_type === 'market' || f.entry_type === 'limit') return f.entry_type;
+  } catch {
+    // ignore parse errors
   }
-  const bybit = await getBybitKlines(symbol, '1d', 1).catch(() => null);
-  if (bybit && bybit.length > 0) {
-    const r = tryParse(bybit[bybit.length - 1]);
-    if (r) return r;
-  }
-  return null;
+  return 'unknown';
 }
 
-function approxClosePrice(symbol: string, closedAt: number): number | null {
-  const window = 30 * 60 * 1000;
-  const row = nearestSignalPrice.get(symbol, closedAt - window, closedAt + window, closedAt);
-  return row?.price ?? null;
-}
-
-function pnlPct(side: string | null, entry: number, exit: number): number {
-  const dir = side === 'short' ? -1 : 1;
-  return ((exit - entry) / entry) * 100 * dir;
+function reasonEmoji(reason: string | null): string {
+  if (reason === 'tp_hit') return '🎯';
+  if (reason === 'sl_hit') return '🛑';
+  if (reason === 'llm_close') return '🏁';
+  return '·';
 }
 
 async function tick(now: Date = new Date()): Promise<void> {
   const dayStart = startOfTodayUtc(now);
 
-  // Signals: group by symbol, then bucket by timeframe inside.
+  // === Signals ===
   const sigRows = sigsToday.all(dayStart);
   const sigBySymbol = new Map<string, { tf: string; n: number }[]>();
   for (const r of sigRows) {
@@ -104,43 +104,44 @@ async function tick(now: Date = new Date()): Promise<void> {
     sigBySymbol.set(r.symbol, arr);
   }
 
-  // Decisions count by type
+  // === Decisions by type ===
   const allDec = decisionsToday.all(dayStart);
   const counts = { OPEN: 0, CLOSE: 0, MODIFY: 0, SKIP: 0 };
   for (const d of allDec) {
     counts[d.decision as keyof typeof counts] = (counts[d.decision as keyof typeof counts] ?? 0) + 1;
   }
 
-  // Closed trades — prefer exact close_price/pnl_pct from DB; fall back to
-  // nearest-signal approximation only when those are missing (legacy rows).
+  // === Real closed trades (have actual PnL) ===
   const closed = closedTradesToday.all(dayStart);
-  const closedDetails = closed.map((t) => {
-    let exit = t.close_price;
-    let pnl = t.pnl_pct;
-    if (exit == null) {
-      exit = t.entry && t.closed_at ? approxClosePrice(t.symbol, t.closed_at) : null;
-      pnl = exit && t.entry ? pnlPct(t.side, t.entry, exit) : null;
-    }
-    return { ...t, exit, pnl };
-  });
-  const wins = closedDetails.filter((t) => t.pnl !== null && t.pnl > 0).length;
-  const losses = closedDetails.filter((t) => t.pnl !== null && t.pnl < 0).length;
-  const totalR = closedDetails.reduce((s, t) => s + (t.pnl_r ?? 0), 0);
-  // Hypothetical: if we'd entered each closed trade with $1000 notional.
-  // USD PnL = $1000 × pnl_pct/100. Doesn't apply leverage, fees, or slippage
-  // — pure setup quality measurement.
-  const POSITION_NOTIONAL_USD = 1000;
-  const totalUsd = closedDetails.reduce(
-    (s, t) => s + (t.pnl !== null ? (t.pnl / 100) * POSITION_NOTIONAL_USD : 0),
+  const wins = closed.filter((t) => (t.pnl_pct ?? 0) > 0).length;
+  const losses = closed.filter((t) => (t.pnl_pct ?? 0) < 0).length;
+  const breakevens = closed.filter((t) => (t.pnl_pct ?? 0) === 0).length;
+  const totalR = closed.reduce((s, t) => s + (t.pnl_r ?? 0), 0);
+  const totalUsd = closed.reduce(
+    (s, t) => s + ((t.pnl_pct ?? 0) / 100) * POSITION_NOTIONAL_USD,
     0,
   );
+  // Breakdown by entry type (after limit-vs-market is meaningful)
+  const closedByType = { market: 0, limit: 0, unknown: 0 };
+  const winsByType = { market: 0, limit: 0, unknown: 0 };
+  for (const t of closed) {
+    const k = entryTypeOf(t);
+    closedByType[k]++;
+    if ((t.pnl_pct ?? 0) > 0) winsByType[k]++;
+  }
 
+  // === Pending limits (still waiting) ===
+  const pending = pendingLimits.all();
+  // === Cancelled limits today (expired without fill) ===
+  const cancelled = cancelledLimitsToday.all(dayStart);
+  // === Active trades right now ===
   const active = stillActive.all();
 
+  // === Render ===
   const dateStr = now.toISOString().slice(0, 10);
   const lines: string[] = [`📊 <b>Сводка за ${dateStr}</b> (23:55 UTC)`, ''];
 
-  // Signals
+  // --- Signals ---
   if (sigBySymbol.size === 0) {
     lines.push(`Сигналов: <i>не было</i>`);
   } else {
@@ -153,35 +154,56 @@ async function tick(now: Date = new Date()): Promise<void> {
   }
   lines.push('');
 
-  // Decisions
+  // --- Decisions counts ---
   lines.push(`<b>Решения LLM:</b> ${allDec.length}`);
   if (allDec.length) {
-    lines.push(`  📈 OPEN: <b>${counts.OPEN}</b>  ·  🏁 CLOSE: <b>${counts.CLOSE}</b>  ·  🔧 MODIFY: <b>${counts.MODIFY}</b>  ·  ⏸ SKIP: <b>${counts.SKIP}</b>`);
+    lines.push(
+      `  📈 OPEN: <b>${counts.OPEN}</b>  ·  🏁 CLOSE: <b>${counts.CLOSE}</b>  ·  🔧 MODIFY: <b>${counts.MODIFY}</b>  ·  ⏸ SKIP: <b>${counts.SKIP}</b>`,
+    );
   }
   lines.push('');
 
-  // Closed today
-  if (closedDetails.length) {
-    const rTotalSign = totalR >= 0 ? '+' : '';
-    const usdTotalSign = totalUsd >= 0 ? '+' : '';
+  // --- Real closed trades (the meat of the report) ---
+  if (closed.length > 0) {
+    const rSign = totalR >= 0 ? '+' : '';
+    const usdSign = totalUsd >= 0 ? '+' : '';
+    const winrate = ((wins / closed.length) * 100).toFixed(0);
+    const avgR = (totalR / closed.length).toFixed(2);
+    const avgRSign = totalR >= 0 ? '+' : '';
+
+    lines.push(`<b>💼 Закрыто сделок: ${closed.length}</b>`);
     lines.push(
-      `<b>Закрыто сегодня:</b> ${closedDetails.length} (W ${wins} / L ${losses})  ·  Σ ${rTotalSign}${totalR.toFixed(2)}R`,
+      `  Win: <b>${wins}</b>  ·  Loss: <b>${losses}</b>${breakevens ? `  ·  BE: ${breakevens}` : ''}  ·  Win-rate: <b>${winrate}%</b>`,
     );
-    lines.push(
-      `<i>Симуляция $1000 на позицию:</i> <b>${usdTotalSign}$${totalUsd.toFixed(2)}</b>`,
-    );
-    for (const t of closedDetails) {
+    lines.push(`  Σ R: <b>${rSign}${totalR.toFixed(2)}R</b>  ·  Avg R/trade: <b>${avgRSign}${avgR}</b>`);
+    lines.push(`  💰 PnL при $1000/позиция: <b>${usdSign}$${totalUsd.toFixed(2)}</b>`);
+    // Per-entry-type stats (useful once we have enough trades)
+    if (closedByType.limit > 0 || closedByType.market > 0) {
+      const segs: string[] = [];
+      if (closedByType.market > 0) {
+        const wr = ((winsByType.market / closedByType.market) * 100).toFixed(0);
+        segs.push(`market ${closedByType.market} (W ${wr}%)`);
+      }
+      if (closedByType.limit > 0) {
+        const wr = ((winsByType.limit / closedByType.limit) * 100).toFixed(0);
+        segs.push(`limit ${closedByType.limit} (W ${wr}%)`);
+      }
+      if (segs.length) lines.push(`  Тип входа: ${segs.join(' · ')}`);
+    }
+    lines.push('');
+    lines.push('<b>Детально:</b>');
+    for (const t of closed) {
       const sideE = t.side === 'long' ? '🟢' : t.side === 'short' ? '🔴' : '';
-      const pnlStr = t.pnl !== null ? `${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}%` : '?';
-      const rStr = t.pnl_r !== null ? ` (${t.pnl_r >= 0 ? '+' : ''}${t.pnl_r.toFixed(2)}R)` : '';
-      const usdPnl = t.pnl !== null ? (t.pnl / 100) * POSITION_NOTIONAL_USD : null;
-      const usdStr = usdPnl !== null ? ` · ${usdPnl >= 0 ? '+' : ''}$${usdPnl.toFixed(2)}` : '';
-      const exit = t.close_price ?? t.exit;
-      const exitStr = exit !== null ? `${t.close_price ? '' : '~'}${exit}` : '?';
-      const reason =
-        t.close_reason === 'tp_hit' ? '🎯' : t.close_reason === 'sl_hit' ? '🛑' : t.close_reason === 'llm_close' ? '🏁' : '';
+      const pnlPct = t.pnl_pct ?? 0;
+      const pnlStr = `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%`;
+      const r = t.pnl_r ?? 0;
+      const rStr = `(${r >= 0 ? '+' : ''}${r.toFixed(2)}R)`;
+      const usdPnl = (pnlPct / 100) * POSITION_NOTIONAL_USD;
+      const usdStr = `${usdPnl >= 0 ? '+' : ''}$${usdPnl.toFixed(2)}`;
+      const etype = entryTypeOf(t);
+      const typeTag = etype === 'limit' ? ' <i>limit</i>' : '';
       lines.push(
-        `  ${reason} #${t.id.toString().padStart(4, '0')} ${sideE} ${t.symbol} · ${t.entry} → ${exitStr} · <b>${pnlStr}</b>${rStr}${usdStr}`,
+        `  ${reasonEmoji(t.close_reason)} #${t.id.toString().padStart(4, '0')}${typeTag} ${sideE} ${t.symbol} · ${t.entry} → ${t.close_price ?? '?'} · <b>${pnlStr}</b> ${rStr} · ${usdStr}`,
       );
     }
   } else {
@@ -189,54 +211,65 @@ async function tick(now: Date = new Date()): Promise<void> {
   }
   lines.push('');
 
-  // HODL baseline — what would $1000 in each enabled symbol have done today?
-  // Lets us answer "is our selectivity actually adding value, or are we
-  // just buying-and-holding worse than a flat HODL would have?".
-  const hodlResults = await Promise.all(
-    config.SYMBOLS.map(async (sym) => ({ sym, stats: await fetchTodayPriceChange(sym) })),
-  );
-  const hodlPresent = hodlResults.filter(
-    (r): r is { sym: string; stats: { open: number; current: number; pctChange: number } } =>
-      r.stats !== null,
-  );
-  if (hodlPresent.length > 0) {
-    lines.push(`<b>HODL baseline ($1000 в каждом символе с 00:00 UTC):</b>`);
-    let hodlTotalUsd = 0;
-    for (const { sym, stats } of hodlPresent) {
-      const usd = (stats.pctChange / 100) * POSITION_NOTIONAL_USD;
-      hodlTotalUsd += usd;
-      const pctSign = stats.pctChange >= 0 ? '+' : '';
-      const usdSign = usd >= 0 ? '+' : '';
+  // --- Active trades ---
+  if (active.length > 0) {
+    lines.push(`<b>🛡 Открытые сделки: ${active.length}</b>`);
+    for (const t of active) {
+      const sideE = t.side === 'long' ? '🟢' : '🔴';
+      const ageMin = Math.round((Date.now() - (t.filled_at ?? t.created_at)) / 60000);
+      const ageStr = ageMin < 60 ? `${ageMin}мин` : `${Math.round(ageMin / 60)}ч`;
+      const etype = entryTypeOf(t);
+      const tag = etype === 'limit' ? ' <i>(filled limit)</i>' : '';
       lines.push(
-        `  ${sym}: ${pctSign}${stats.pctChange.toFixed(2)}% (${usdSign}$${usd.toFixed(2)})`,
+        `  #${t.id.toString().padStart(4, '0')}${tag} ${sideE} ${t.symbol} @ ${t.entry} (открыта ${ageStr} назад)`,
       );
-    }
-    const hodlSign = hodlTotalUsd >= 0 ? '+' : '';
-    lines.push(`  Σ HODL: <b>${hodlSign}$${hodlTotalUsd.toFixed(2)}</b>`);
-    if (closedDetails.length > 0) {
-      const diff = totalUsd - hodlTotalUsd;
-      const diffSign = diff >= 0 ? '+' : '';
-      const verdict = diff >= 0 ? 'наша стратегия ОБЫГРАЛА HODL' : 'наша стратегия ПРОИГРАЛА HODL';
-      lines.push(`  Δ vs наш PnL: <b>${diffSign}$${diff.toFixed(2)}</b> — ${verdict}`);
     }
     lines.push('');
   }
 
-  // Active
-  if (active.length) {
-    lines.push(`<b>Открытые сделки:</b> ${active.length}`);
-    for (const t of active) {
+  // --- Pending limits (still waiting) ---
+  if (pending.length > 0) {
+    lines.push(`<b>📋 Лимитные ордера в ожидании: ${pending.length}</b>`);
+    for (const t of pending) {
       const sideE = t.side === 'long' ? '🟢' : '🔴';
-      const ageH = Math.round((Date.now() - t.created_at) / 3600000);
-      lines.push(`  #${t.id.toString().padStart(4, '0')} ${sideE} ${t.symbol} @ ${t.entry} (открыта ${ageH}ч назад)`);
+      const expiresIn = t.pending_until ? Math.max(0, Math.round((t.pending_until - Date.now()) / 60000)) : 0;
+      lines.push(
+        `  ${sideE} ${t.symbol} @ ${t.entry} (истекает через ${expiresIn}мин)`,
+      );
     }
-  } else {
-    lines.push(`<b>Открытых сделок нет.</b>`);
+    lines.push('');
+  }
+
+  // --- Cancelled limits today (didn't fire) ---
+  if (cancelled.length > 0) {
+    lines.push(`<b>⏱ Лимитов отменено сегодня: ${cancelled.length}</b>`);
+    lines.push(`  <i>(ретест не пришёл за 2ч — в P&L не учитываются)</i>`);
+    for (const t of cancelled) {
+      const sideE = t.side === 'long' ? '🟢' : '🔴';
+      lines.push(`  ${sideE} ${t.symbol} @ ${t.entry}`);
+    }
+    lines.push('');
+  }
+
+  // --- Empty footer if nothing happened ---
+  if (active.length === 0 && pending.length === 0 && cancelled.length === 0 && closed.length === 0) {
+    lines.push(`<i>Без открытых, закрытых и pending позиций.</i>`);
   }
 
   const text = lines.join('\n');
   await sendMessage({ channel: 'signals', text });
-  logger.info({ trades_today: closedDetails.length, active: active.length, decisions: allDec.length }, 'daily wrap sent');
+  logger.info(
+    {
+      closed_today: closed.length,
+      active: active.length,
+      pending: pending.length,
+      cancelled_today: cancelled.length,
+      decisions: allDec.length,
+      total_r: Math.round(totalR * 100) / 100,
+      total_usd: Math.round(totalUsd * 100) / 100,
+    },
+    'daily wrap sent',
+  );
 }
 
 export function startDailyWrapJob(): void {
