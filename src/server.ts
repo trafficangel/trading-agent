@@ -9,6 +9,7 @@ import { startDailyWrapJob } from './jobs/daily-wrap.js';
 import { startDecideCronJob } from './jobs/decide-cron.js';
 import { startHealthJob } from './jobs/health.js';
 import { startChartTestJob } from './jobs/chart-test.js';
+import { startSelfReviewJob } from './jobs/self-review.js';
 import { startLiquidationsListener } from './exchange/liquidations.js';
 import { sendMessage } from './telegram/bot.js';
 import { startupBanner, statusReply } from './telegram/templates.js';
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
   startDailyWrapJob();
   startHealthJob();
   startChartTestJob();
+  startSelfReviewJob();
   startLiquidationsListener();
 
   await app.listen({ host: '0.0.0.0', port: config.PORT });

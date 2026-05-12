@@ -9,6 +9,7 @@ import { critiqueDecision } from '../llm/critique.js';
 import { captureChartCached } from '../browser/tradingview.js';
 import { checkDecision, limitsFor } from '../risk/manager.js';
 import { sizeFromConfidence } from '../risk/sizing.js';
+import { effectiveScalpFloor } from '../risk/scalp-floor.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { tradeCaption, skipLog, limitPlacedCaption } from '../telegram/decision-template.js';
 import { logger } from '../lib/logger.js';
@@ -326,7 +327,10 @@ export async function maybeDecide(symbol: string): Promise<void> {
     // gate, and result.decision may be mutated (downgraded to SKIP) in
     // between.
     const strategy = result.decision.tp_strategy ?? 'swing';
-    const sizing = sizeFromConfidence(result.decision.confidence, strategy);
+    // For scalp, read live floor from runtime_config (self-review may have
+    // adjusted it since startup). Swing ignores this argument.
+    const scalpFloor = effectiveScalpFloor();
+    const sizing = sizeFromConfidence(result.decision.confidence, strategy, scalpFloor);
     if (sizing.action === 'SKIP') {
       logger.info(
         { symbol, confidence: result.decision.confidence, reason: sizing.reason },
