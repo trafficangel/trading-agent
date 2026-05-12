@@ -7,7 +7,7 @@ import {
 import { callLlm } from '../llm/client.js';
 import { critiqueDecision } from '../llm/critique.js';
 import { captureChartCached } from '../browser/tradingview.js';
-import { checkDecision, type RiskLimits } from '../risk/manager.js';
+import { checkDecision, limitsFor } from '../risk/manager.js';
 import { sizeFromConfidence } from '../risk/sizing.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { tradeCaption, skipLog, limitPlacedCaption } from '../telegram/decision-template.js';
@@ -322,7 +322,13 @@ export async function maybeDecide(symbol: string): Promise<void> {
   // (it tends to over-size when confident). Confidence below floor →
   // additional downgrade to SKIP regardless of self-critique verdict.
   if (result.decision.decision === 'OPEN') {
-    const sizing = sizeFromConfidence(result.decision.confidence);
+    // tp_strategy gates BOTH the sizing floor and the risk limits below.
+    // Defaults to 'swing' if model omitted (back-compat). Stored as a
+    // local because we'll reach into the same field again for the risk
+    // gate, and result.decision may be mutated (downgraded to SKIP) in
+    // between.
+    const strategy = result.decision.tp_strategy ?? 'swing';
+    const sizing = sizeFromConfidence(result.decision.confidence, strategy);
     if (sizing.action === 'SKIP') {
       logger.info(
         { symbol, confidence: result.decision.confidence, reason: sizing.reason },
@@ -352,14 +358,13 @@ export async function maybeDecide(symbol: string): Promise<void> {
     }
   }
 
-  const limits: RiskLimits = {
-    maxSizePct: config.RISK_PCT_PER_TRADE * 4,
-    minSlDistPct: 0.2,
-    maxSlDistPct: 5.0,
-    minRR: 1.5,
-    minSlAtrMult: 0.7,
-    maxSlAtrMult: 4.0,
-  };
+  // Per-strategy risk limits. limitsFor() returns SWING_LIMITS or SCALP_LIMITS
+  // based on result.decision.tp_strategy. maxSizePct is overridden from
+  // config (env-controlled), other thresholds come from the strategy preset.
+  const baseLimits = limitsFor(
+    result.decision.decision === 'OPEN' ? result.decision.tp_strategy : undefined,
+  );
+  const limits = { ...baseLimits, maxSizePct: config.RISK_PCT_PER_TRADE * 4 };
   const riskGate = checkDecision(result.decision, limits, volumeProfile?.atr14_15m ?? null);
 
   // raw_response in DB is for audit only; cap at 30 KB to keep row size sane.

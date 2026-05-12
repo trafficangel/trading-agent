@@ -86,10 +86,43 @@ PICTURE is the truth. Trust the integrated visual over individual signal
 events.
 
 HARD math/safety rules (these MUST hold or the trade is rejected by code):
-- SL distance from entry: 0.2% to 5%.
+- SL distance from entry: 0.2% to 5% (swing) / 0.2% to 1.5% (scalp).
 - size_pct: 0.1 to 2.
-- EXACTLY ONE take-profit in tp[0]. R:R of that TP must be >= 1.5
-  (TP distance >= 1.5 × SL distance).
+- EXACTLY ONE take-profit in tp[0]. R:R of that TP must be:
+  * >= 1.5 for tp_strategy = 'swing'
+  * >= 1.2 for tp_strategy = 'scalp'
+
+WHEN TO SCALP vs SWING (tp_strategy field on every OPEN):
+
+Pick **scalp** (tp_strategy='scalp') when:
+- Setup is a clean reaction at a structural level (OB retest, wall, swept
+  swing high/low) with **fast resolution expected (1–3 свечи 15m)**.
+- Invalidation is OBVIOUS and TIGHT — a 0.4–0.9% adverse move clearly
+  kills the thesis. No vague "may dip and recover".
+- TP target is a NEARBY magnet (POC, VAH/VAL, opposite OB, FVG fill) at
+  0.8–1.5% distance.
+- BTC is neutral or mildly aligned — scalp doesn't need full macro tailwind
+  but shouldn't fight a strong BTC trend.
+- Confidence ≥ 0.50 (hardcoded floor for scalp tier — code SKIPs below).
+
+Pick **swing** (tp_strategy='swing') when:
+- Setup is in confluence with the 4H structural trend (Smart Trail aligned,
+  Trend Strength > 60 same direction).
+- TP target is 2%+ away — riding a larger move.
+- SL is 0.8–2.5% away — gives the trade room to breathe past noise.
+- You expect the trade to live HOURS, not minutes.
+- Confidence ≥ 0.40.
+
+Examples:
+- Bullish OB retest at 2.385 on TON 15m, immediate target VAH 2.395 (0.4%
+  away) → tp_strategy='scalp', SL 2.376 (0.4%), TP 2.395 (0.4%) → R:R 1.0
+  is BELOW scalp floor → push TP to 2.398 (R:R 1.3, still under "fast
+  magnet" definition).
+- Smart Trail flipped bullish on 4H, retest of previous resistance at 2.40
+  → tp_strategy='swing', SL 2.36 (1.7%), TP 2.50 (2.5%) → R:R 1.5+.
+
+NEVER set tp_strategy='scalp' with TP > 1.8% or SL > 1.5% — those numbers
+mean you actually want a swing. Code will reject the trade on risk gate.
 
 SOFT factors — integrate these into your confidence, do NOT auto-SKIP on them.
 Real-market setups rarely have perfect alignment; your job is to weigh the

@@ -1,4 +1,4 @@
-import type { Decision } from '../llm/decision.schema.js';
+import type { Decision, TpStrategy } from '../llm/decision.schema.js';
 
 export type RiskCheckResult =
   | { ok: true }
@@ -9,20 +9,25 @@ export type RiskLimits = {
   maxSizePct: number;
   /** Min SL distance as % of entry. */
   minSlDistPct: number;
-  /** Max SL distance as % of entry. */
+  /** Max SL distance as % of entry. Swing 5%, scalp 1.5% (tighter — scalp
+   *  is meant to be a fast move, a 4% SL on scalp = swing-disguised-as-scalp). */
   maxSlDistPct: number;
-  /** Minimum R:R ratio for TP1 (TP1 distance / SL distance). */
+  /** Minimum R:R ratio for TP1 (TP1 distance / SL distance). Swing 1.5,
+   *  scalp 1.2 — scalp lives with tighter R:R because moves are smaller
+   *  and faster, expectancy compensated by frequency. */
   minRR: number;
   /** Min SL distance as multiple of ATR(14) on 15m. Below this, noise wicks
-   *  the SL out before the thesis plays. Default 0.7. */
+   *  the SL out before the thesis plays. Swing 0.7, scalp 0.5 — scalp
+   *  accepts tighter SLs because invalidation should be quick and obvious. */
   minSlAtrMult: number;
   /** Max SL distance as multiple of ATR(14) on 15m. Beyond this the R:R
    *  becomes fictional — TP at 1.5× of a giant SL is unrealistic to hit.
-   *  Default 4.0. */
+   *  Default 4.0 for swing, 2.0 for scalp (scalp shouldn't have giant SLs). */
   maxSlAtrMult: number;
 };
 
-export const DEFAULT_LIMITS: RiskLimits = {
+/** Limits for swing trades (default behaviour pre-scalp-tier). */
+export const SWING_LIMITS: RiskLimits = {
   maxSizePct: 2.0,
   minSlDistPct: 0.2,
   maxSlDistPct: 5.0,
@@ -30,6 +35,26 @@ export const DEFAULT_LIMITS: RiskLimits = {
   minSlAtrMult: 0.7,
   maxSlAtrMult: 4.0,
 };
+
+/** Limits for scalp trades — tighter on every axis. */
+export const SCALP_LIMITS: RiskLimits = {
+  maxSizePct: 2.0,
+  minSlDistPct: 0.2,
+  maxSlDistPct: 1.5,
+  minRR: 1.2,
+  minSlAtrMult: 0.5,
+  maxSlAtrMult: 2.0,
+};
+
+/** Back-compat alias — pre-scalp callers may still reference DEFAULT_LIMITS.
+ *  All new code should pass tp_strategy and let limitsFor() pick. */
+export const DEFAULT_LIMITS: RiskLimits = SWING_LIMITS;
+
+/** Pick the appropriate RiskLimits set based on the decision's tp_strategy.
+ *  Falls back to swing if not specified (back-compat with old decisions). */
+export function limitsFor(strategy: TpStrategy | undefined): RiskLimits {
+  return strategy === 'scalp' ? SCALP_LIMITS : SWING_LIMITS;
+}
 
 /**
  * Stage-2 risk gate. Stage 2 doesn't place orders, so this is currently

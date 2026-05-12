@@ -10,6 +10,22 @@ export const EntryType = z.enum(['market', 'limit']);
 export type EntryType = z.infer<typeof EntryType>;
 
 /**
+ * Trade horizon — affects R:R floor, max SL distance and confidence floor.
+ *
+ * - `scalp`  = 1–3 свечи 15m, TP 0.8–1.5%, SL 0.4–0.9%, R:R floor 1.2.
+ *              Requires confidence ≥ 0.50. Used for clean OB-retests / walls
+ *              with tight invalidation and fast expected resolution.
+ * - `swing`  = несколько часов, TP ≥ 2%, SL ≥ 0.8%, R:R floor 1.5.
+ *              Confidence floor 0.40. Used when confluence aligns with the
+ *              4H structural trend.
+ *
+ * Defaults to `swing` if model omits — keeps back-compat with old decisions
+ * stored before this field existed.
+ */
+export const TpStrategy = z.enum(['scalp', 'swing']);
+export type TpStrategy = z.infer<typeof TpStrategy>;
+
+/**
  * Schema enforced on Claude's JSON response. We keep it tight: model MUST
  * return exactly this shape. Our retry logic catches violations and feeds the
  * issues back to the model.
@@ -62,6 +78,10 @@ export const Decision = z.object({
    *  branch on it. In Stage-3 testnet the executor will use it to
    *  decide between market and limit order types. */
   entry_type: opt(EntryType),
+  /** Trade horizon — scalp (tight, fast) or swing (wider, longer). See
+   *  TpStrategy comment above. Defaults to 'swing' for OPEN decisions
+   *  when omitted. */
+  tp_strategy: opt(TpStrategy),
   entry: optPositive(),
   sl: optPositive(),
   // Single TP for now (we keep an array shape so we can grow to TP1/TP2 later
@@ -112,6 +132,7 @@ export const DECISION_JSON_SCHEMA = `{
   "decision": "OPEN" | "SKIP" | "CLOSE" | "MODIFY",
   "side": "long" | "short",   // required when decision == OPEN
   "entry_type": "market" | "limit",  // market = take now at current; limit = wait for retest at "entry"
+  "tp_strategy": "scalp" | "swing",  // required when decision == OPEN — see Scalp vs Swing section
   "entry": number > 0,        // required when decision == OPEN; the price level (for limit) or roughly-current (for market)
   "sl":    number > 0,        // required when decision == OPEN
   "tp":    [number > 0],      // EXACTLY ONE take-profit level for OPEN; [] otherwise

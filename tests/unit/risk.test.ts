@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkDecision } from '../../src/risk/manager.js';
+import { checkDecision, limitsFor, SCALP_LIMITS, SWING_LIMITS } from '../../src/risk/manager.js';
 import type { Decision } from '../../src/llm/decision.schema.js';
 
 const baseOpenLong: Decision = {
@@ -76,5 +76,35 @@ describe('checkDecision', () => {
   it('null/undefined ATR skips ATR check', () => {
     expect(checkDecision(baseOpenLong, undefined, null).ok).toBe(true);
     expect(checkDecision(baseOpenLong, undefined, undefined).ok).toBe(true);
+  });
+
+  it('limitsFor("scalp") returns SCALP_LIMITS', () => {
+    expect(limitsFor('scalp')).toBe(SCALP_LIMITS);
+    expect(SCALP_LIMITS.minRR).toBe(1.2);
+    expect(SCALP_LIMITS.maxSlDistPct).toBe(1.5);
+  });
+
+  it('limitsFor("swing") and undefined return SWING_LIMITS', () => {
+    expect(limitsFor('swing')).toBe(SWING_LIMITS);
+    expect(limitsFor(undefined)).toBe(SWING_LIMITS);
+    expect(SWING_LIMITS.minRR).toBe(1.5);
+  });
+
+  it('scalp R:R 1.3 passes scalp limits but fails swing limits', () => {
+    // entry 100, sl 99 → SL dist 1 (1%). TP 101.3 → TP dist 1.3 → R:R 1.3.
+    const scalpDecision: Decision = {
+      ...baseOpenLong,
+      entry: 100,
+      sl: 99,
+      tp: [101.3],
+    };
+    expect(checkDecision(scalpDecision, SCALP_LIMITS).ok).toBe(true);
+    expect(checkDecision(scalpDecision, SWING_LIMITS).ok).toBe(false);
+  });
+
+  it('scalp SL 2% fails scalp limits (maxSlDist 1.5%) but passes swing', () => {
+    // entry 100, sl 98 → SL dist 2 (2%).
+    expect(checkDecision(baseOpenLong, SCALP_LIMITS).ok).toBe(false);
+    expect(checkDecision(baseOpenLong, SWING_LIMITS).ok).toBe(true);
   });
 });

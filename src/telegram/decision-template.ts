@@ -138,6 +138,15 @@ export function tradeCaption(i: DecisionPostInput): string {
   if (d.decision === 'OPEN' && d.entry && d.sl) {
     const slPct = pctDistance(d.entry, d.sl);
     lines.push('');
+    // tp_strategy badge — SCALP (быстро, тугой R:R) или SWING (длиннее).
+    // Помогает в TG-канале с одного взгляда понять, чего ждать от сделки.
+    const strategyBadge =
+      d.tp_strategy === 'scalp'
+        ? '⚡ <i>scalp</i>'
+        : d.tp_strategy === 'swing'
+          ? '🌊 <i>swing</i>'
+          : null;
+    if (strategyBadge) lines.push(strategyBadge);
     const entryLabel = d.entry_type === 'limit' ? '📥 Вход (limit):' : '📥 Вход:';
     lines.push(`${entryLabel}  <code>${d.entry}</code>`);
     const slBase = `🛡 Стоп:  <code>${d.sl}</code>  (<code>${slPct}%</code>)`;
