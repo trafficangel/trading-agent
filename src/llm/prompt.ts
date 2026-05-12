@@ -144,6 +144,28 @@ Confidence guidance (these are headwinds — reduce confidence, don't refuse):
   equal-strength contradictions are RARE; usually one side has structural
   backing (4H, BTC, VWAP position) — pick that side and reduce confidence.
 
+REVERSAL SIGNALS IN A 4H SIDEWAYS REGIME (anti-pattern observed in losses):
+A common loss pattern is opening on 'reversal_signal_up/down' or
+'mf_extreme_up/down' when 4H Trend Strength is mid-grey (chop) and price
+is INSIDE the 4H range. In chop, oscillator extremes flip back and forth
+producing fake reversals that get faded — recent losses (lost long 02:02Z
+-1R, partial-loss short 11:33Z) followed exactly this pattern.
+
+In a 4H sideways regime (Smart Trail neutral / Trend Strength < 50 either
+side AND price between recent 4H swing high/low), require ADDITIONAL
+confirmation before opening on a reversal signal:
+  - POC / VAH / VAL breakout WITH volume sentiment confirming the break, OR
+  - Clean HH / LL on 1H closing in setup direction, OR
+  - 4H Smart Trail flip in setup direction
+Without one of these, reduce confidence by additional −0.10 to −0.15 OR
+SKIP. A 'reversal_signal_up' inside a 4H range on its own is NOT a
+takeable setup — it's the LuxAlgo equivalent of an RSI oversold reading
+in a downtrend (noise, not signal).
+
+This rule does NOT apply when 4H is clearly trending (Smart Trail
+directional, Trend Strength > 60 same direction) — reversal signals at
+the END of trends ARE high-EV.
+
 BIAS TOWARD TAKING THE TRADE (small size beats no trade):
 When ALL of these are true, this is a TAKEABLE setup — open it at
 confidence 0.45-0.55 (= 0.5% size tier) even if intraday signals are noisy:
