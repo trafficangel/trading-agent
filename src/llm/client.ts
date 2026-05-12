@@ -31,6 +31,32 @@ function imageBlock(img: ImageInput): Anthropic.ImageBlockParam {
 }
 
 /**
+ * Build the array of image blocks with ephemeral cache_control on the
+ * LAST one. Anthropic's prompt cache treats everything before a
+ * cache_control marker as the cacheable prefix; marking only the final
+ * image means the system prompt + ALL screenshots get cached as one
+ * block. When the next call sends the same bytes (because
+ * captureChartCached returned the same file), we pay 10% for the cached
+ * portion. If even one screenshot's bytes differ (new bar boundary),
+ * only that image + everything after re-tokenizes.
+ *
+ * Order matters: we send screenshots in fixed order (15m, 1H, 4H, 1D
+ * etc.) so the prefix stays maximal across calls.
+ */
+function buildImageBlocks(screenshots: ImageInput[]): Anthropic.ImageBlockParam[] {
+  if (screenshots.length === 0) return [];
+  const blocks = screenshots.map(imageBlock);
+  // Mark the last image with cache_control — caches the entire prefix
+  // (system + text + all prior images + this image).
+  const last = blocks[blocks.length - 1];
+  blocks[blocks.length - 1] = {
+    ...last,
+    cache_control: { type: 'ephemeral' },
+  } as Anthropic.ImageBlockParam;
+  return blocks;
+}
+
+/**
  * Call Claude with the confluence context + chart screenshots.
  * Retries up to MAX_RETRIES on invalid JSON, feeding zod issues back to the model.
  */
@@ -75,7 +101,7 @@ export async function callLlm(
         role: 'user',
         content: [
           { type: 'text', text: userText + blindnessWarning },
-          ...screenshots.map(imageBlock),
+          ...buildImageBlocks(screenshots),
           ...(lastError
             ? [
                 {

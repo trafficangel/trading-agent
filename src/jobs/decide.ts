@@ -6,7 +6,7 @@ import {
 } from '../db/repos/decisions.js';
 import { callLlm } from '../llm/client.js';
 import { critiqueDecision } from '../llm/critique.js';
-import { captureChart } from '../browser/tradingview.js';
+import { captureChartCached } from '../browser/tradingview.js';
 import { checkDecision, type RiskLimits } from '../risk/manager.js';
 import { sizeFromConfidence } from '../risk/sizing.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
@@ -130,11 +130,11 @@ export async function maybeDecide(symbol: string): Promise<void> {
     // ones failed.
     const labels = ['subj15', 'subj1h', 'subj4h', 'btc15', 'btc1h'] as const;
     const results = await Promise.allSettled([
-      captureChart(symbol, '15'),
-      captureChart(symbol, '60'),
-      captureChart(symbol, '240'),
-      captureChart('BTCUSDT', '15'),
-      captureChart('BTCUSDT', '60'),
+      captureChartCached(symbol, '15'),
+      captureChartCached(symbol, '60'),
+      captureChartCached(symbol, '240'),
+      captureChartCached('BTCUSDT', '15'),
+      captureChartCached('BTCUSDT', '60'),
     ]);
 
     const succeeded: string[] = [];

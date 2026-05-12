@@ -581,6 +581,68 @@ async function captureChartOnce(
   }
 }
 
+/**
+ * Bar-boundary screenshot cache.
+ *
+ * Higher timeframes don't change visually within their bar — a 4H chart at
+ * 12:00 and 13:30 shows IDENTICAL bars (the in-progress 12:00-16:00 candle
+ * just grew a wick). Re-capturing every cron tick is wasted CPU and, more
+ * importantly, wasted image input tokens (a chart PNG is ~25-50K tokens
+ * input). For 4 symbols × 5 charts × 4 ticks/hour = 80 PNG sends per hour;
+ * caching the 4H + 1H levels saves ~60% of that.
+ *
+ * Cache key: (symbol, interval, barStart). Hit only if the saved file still
+ * exists on disk (file may have been swept by `data/screenshots` cleanup).
+ *
+ * TTL strategy is implicit via barStart: as soon as a new bar begins, the
+ * key changes and we capture fresh. 15m: ~15 min cache, 1H: ~1h, 4H: ~4h,
+ * 1D: ~24h.
+ *
+ * Critically: the IDENTICAL bytes are read again, so when paired with
+ * cache_control on the image block in client.ts, Anthropic's vision cache
+ * hits and we pay 10% of the image-input price.
+ */
+function barStart(intervalMs: number, now: number = Date.now()): number {
+  return Math.floor(now / intervalMs) * intervalMs;
+}
+
+const INTERVAL_MS: Record<string, number> = {
+  '5': 5 * 60 * 1000,
+  '15': 15 * 60 * 1000,
+  '60': 60 * 60 * 1000,
+  '240': 4 * 60 * 60 * 1000,
+  D: 24 * 60 * 60 * 1000,
+};
+
+type CacheEntry = { path: string; barStart: number };
+const screenshotCache = new Map<string, CacheEntry>();
+
+/**
+ * Wraps captureChart with per-bar caching. Use for LLM-bound captures
+ * (decide.ts, monitor.ts). For test/QA captures (chart-test.ts) keep using
+ * captureChart directly so the user always sees current rendering state.
+ */
+export async function captureChartCached(
+  symbol: string,
+  interval: '5' | '15' | '60' | '240' | 'D',
+): Promise<string> {
+  const ms = INTERVAL_MS[interval];
+  if (!ms) return captureChart(symbol, interval);
+
+  const bs = barStart(ms);
+  const cacheKey = `${symbol}_${interval}`;
+  const cached = screenshotCache.get(cacheKey);
+
+  if (cached && cached.barStart === bs && existsSync(cached.path)) {
+    logger.debug({ symbol, interval, path: cached.path, barStart: bs }, 'chart cache hit');
+    return cached.path;
+  }
+
+  const path = await captureChart(symbol, interval);
+  screenshotCache.set(cacheKey, { path, barStart: bs });
+  return path;
+}
+
 export async function closeBrowser(): Promise<void> {
   if (contextInstance) await contextInstance.close();
   if (browserInstance) await browserInstance.close();
