@@ -1,7 +1,6 @@
 import cron from 'node-cron';
 import { existsSync } from 'node:fs';
 import { logger } from '../lib/logger.js';
-import { config } from '../config.js';
 import { captureChart } from '../browser/tradingview.js';
 import { sendPhoto, sendMessage } from '../telegram/bot.js';
 
@@ -85,14 +84,11 @@ export function startChartTestJob(): void {
   });
   logger.info('chart-test cron started (every 4h)');
 
-  // Also send one set 30 seconds after startup — gives the user immediate
-  // visual confirmation that the just-deployed version is rendering
-  // correctly without waiting up to 4 hours.
-  if (config.MODE !== 'telemetry') {
-    setTimeout(() => {
-      void sendTestSet();
-    }, 30_000);
-  }
+  // NOTE: previously also fired one set 30s after startup as a "deploy
+  // smoke test". Removed — every deploy was spamming the Logs channel
+  // with a 5-screenshot set (user complaint 2026-05-12). The 4h cron is
+  // sufficient; manual trigger available via `_internal.sendTestSet()`
+  // for ad-hoc checks.
 }
 
 /** Exposed for manual /test-charts trigger if we add a Telegram command later. */
