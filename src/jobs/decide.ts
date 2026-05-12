@@ -119,55 +119,83 @@ export async function maybeDecide(symbol: string): Promise<void> {
 
   let screenshots: { path: string; mediaType: 'image/png' }[] = [];
   let primaryScreenshot: string | null = null;
+  let captureError: Error | null = null;
   if (existsSync(STORAGE_STATE)) {
-    try {
-      // Parallel capture: 5 screenshots from the SAME Playwright browser
-      // context (multiple tabs of one logged-in session). Sequential took
-      // 25-50 sec just for screenshots before the LLM call could even start;
-      // parallel cuts that to ~10-15 sec (each capture still takes time but
-      // they overlap). Same-context = same TV session — no "multiple devices"
-      // detection risk.
-      const [subj15, subj1h, subj4h, btc15, btc1h] = await Promise.all([
-        captureChart(symbol, '15'),
-        captureChart(symbol, '60'),
-        captureChart(symbol, '240'),
-        captureChart('BTCUSDT', '15'),
-        captureChart('BTCUSDT', '60'),
-      ]);
-      screenshots = [
-        { path: subj15, mediaType: 'image/png' },
-        { path: subj1h, mediaType: 'image/png' },
-        { path: subj4h, mediaType: 'image/png' },
-        { path: btc15, mediaType: 'image/png' },
-        { path: btc1h, mediaType: 'image/png' },
-      ];
-      primaryScreenshot = subj15;
-    } catch (err) {
-      const msg = (err as Error)?.message ?? String(err);
-      logger.error({ err, symbol }, 'screenshot capture failed — calling LLM without images');
-      if (msg.includes('logged out') || msg.includes('storage state')) {
-        if (shouldAlertChart('logged-out')) {
-          await sendMessage({
-            channel: 'logs',
-            text: `❗️ <b>TradingView logged out</b> — скриншоты не делаются, LLM решает без чартов.\nНа маке: <code>pnpm tsx scripts/tradingview-login.ts</code>, потом залить data/tradingview-storage-state.json на VPS.\nАлерт повторится не чаще раза в час.`,
-          });
-        }
-      } else if (msg.includes('indicators not loaded')) {
-        if (shouldAlertChart('indicators-missing')) {
-          await sendMessage({
-            channel: 'logs',
-            text:
-              `❗️ <b>Индикаторы LuxAlgo не отрисовались</b> на одном из чартов.\n` +
-              `Может быть intermittent (рендер не успел за 2-3 сек) или layout слетел. ` +
-              `Если повторяется — проверь TV в браузере, добавь индикаторы на default layout, либо задай <code>TV_LAYOUT_ID</code> в .env.\n` +
-              `Алерт повторится не чаще раза в час.`,
-            disable_notification: true,
-          });
-        }
+    // Parallel capture with Promise.allSettled — if one chart fails (e.g.,
+    // BTC 15m intermittent indicator-load fail), the OTHER 4 captures are
+    // still valid and passed to the LLM. Previously Promise.all rejected
+    // the whole batch on any failure → LLM ran blind 100% of the time
+    // there was a single bad capture, even though 4 good screenshots were
+    // ready. With allSettled the LLM gets the partial set + we log which
+    // ones failed.
+    const labels = ['subj15', 'subj1h', 'subj4h', 'btc15', 'btc1h'] as const;
+    const results = await Promise.allSettled([
+      captureChart(symbol, '15'),
+      captureChart(symbol, '60'),
+      captureChart(symbol, '240'),
+      captureChart('BTCUSDT', '15'),
+      captureChart('BTCUSDT', '60'),
+    ]);
+
+    const succeeded: string[] = [];
+    const failedLabels: string[] = [];
+    let firstError: Error | null = null;
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i]!;
+      if (r.status === 'fulfilled') {
+        succeeded.push(r.value);
+      } else {
+        failedLabels.push(labels[i]!);
+        if (!firstError) firstError = r.reason as Error;
       }
     }
-  } else {
+
+    if (succeeded.length > 0) {
+      screenshots = succeeded.map((path) => ({ path, mediaType: 'image/png' as const }));
+      // Use the first successful capture as the primary screenshot for
+      // Telegram. Prefer subj15 (index 0) if it succeeded — that's the
+      // user's main view.
+      primaryScreenshot =
+        results[0]!.status === 'fulfilled' ? results[0]!.value : succeeded[0]!;
+    }
+
+    if (failedLabels.length > 0) {
+      logger.warn(
+        { symbol, failed: failedLabels, succeeded_count: succeeded.length, err: firstError?.message },
+        'partial screenshot capture failure — LLM gets ' + succeeded.length + ' of 5 images',
+      );
+      captureError = firstError;
+    }
+  }
+
+  if (!existsSync(STORAGE_STATE)) {
     logger.warn('tradingview storage state not present — calling LLM without screenshots');
+  } else if (captureError && screenshots.length === 0) {
+    // Full failure: NO screenshots captured at all. Alert (throttled).
+    // Partial failures (some succeeded) are logged at warn level but no
+    // Telegram alert — those don't degrade LLM context badly.
+    const err = captureError;
+    const msg = err.message ?? String(err);
+    logger.error({ err, symbol }, 'screenshot capture FULLY failed — LLM called without images');
+    if (msg.includes('logged out') || msg.includes('storage state')) {
+      if (shouldAlertChart('logged-out')) {
+        await sendMessage({
+          channel: 'logs',
+          text: `❗️ <b>TradingView logged out</b> — скриншоты не делаются, LLM решает без чартов.\nНа маке: <code>pnpm tsx scripts/tradingview-login.ts</code>, потом залить data/tradingview-storage-state.json на VPS.\nАлерт повторится не чаще раза в час.`,
+        });
+      }
+    } else if (msg.includes('indicators not loaded')) {
+      if (shouldAlertChart('indicators-missing')) {
+        await sendMessage({
+          channel: 'logs',
+          text:
+            `❗️ <b>Индикаторы LuxAlgo не отрисовались</b> на ВСЕХ чартах одновременно.\n` +
+            `Если повторяется — проверь TV в браузере, добавь индикаторы на default layout, либо задай <code>TV_LAYOUT_ID</code> в .env.\n` +
+            `Алерт повторится не чаще раза в час.`,
+          disable_notification: true,
+        });
+      }
+    }
   }
 
   // All public-data fetches in parallel: Bybit-only sentiment (kept for

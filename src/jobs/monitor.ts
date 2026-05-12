@@ -198,28 +198,33 @@ async function monitorPositionImpl(p: DecisionRow): Promise<void> {
   let screenshots: string[] = [];
   let primaryScreenshot: string | null = null;
   if (existsSync(STORAGE_STATE)) {
-    try {
-      // Parallel capture — same Playwright context, 5 tabs simultaneously.
-      // See note in decide.ts for the rationale.
-      const [subj15, subj1h, subj4h, btc15, btc1h] = await Promise.all([
-        captureChart(p.symbol, '15'),
-        captureChart(p.symbol, '60'),
-        captureChart(p.symbol, '240'),
-        captureChart('BTCUSDT', '15'),
-        captureChart('BTCUSDT', '60'),
-      ]);
-      screenshots = [subj15, subj1h, subj4h, btc15, btc1h];
-      primaryScreenshot = subj15;
-    } catch (err) {
-      const msg = (err as Error)?.message ?? String(err);
-      logger.error({ err, symbol: p.symbol, position_id: p.id }, 'monitor screenshot failed');
-      // Monitor uses the SAME throttle keys as decide-cron so both contexts
-      // share rate-limit — one alert/hour total regardless of which path fires.
-      // (Throttling state is per-module though; close enough — minor over-
-      // sending at module boundaries isn't a real problem.)
-      if (msg.includes('logged out') || msg.includes('indicators not loaded')) {
-        logger.warn({ position_id: p.id, msg }, 'monitor chart issue — see decide.ts throttled alerts');
-      }
+    // allSettled: if one capture fails, the others still get used by LLM.
+    // Same rationale as decide.ts — single-chart failure shouldn't blind
+    // the whole monitor pass.
+    const labels = ['subj15', 'subj1h', 'subj4h', 'btc15', 'btc1h'] as const;
+    const results = await Promise.allSettled([
+      captureChart(p.symbol, '15'),
+      captureChart(p.symbol, '60'),
+      captureChart(p.symbol, '240'),
+      captureChart('BTCUSDT', '15'),
+      captureChart('BTCUSDT', '60'),
+    ]);
+    const succeeded: string[] = [];
+    const failed: string[] = [];
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i]!;
+      if (r.status === 'fulfilled') succeeded.push(r.value);
+      else failed.push(labels[i]!);
+    }
+    if (succeeded.length > 0) {
+      screenshots = succeeded;
+      primaryScreenshot = results[0]!.status === 'fulfilled' ? results[0]!.value : succeeded[0]!;
+    }
+    if (failed.length > 0) {
+      logger.warn(
+        { symbol: p.symbol, position_id: p.id, failed, succeeded_count: succeeded.length },
+        'monitor: partial screenshot failure — LLM gets ' + succeeded.length + ' of 5 images',
+      );
     }
   }
 
