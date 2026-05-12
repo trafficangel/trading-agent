@@ -274,7 +274,19 @@ Hard SKIP triggers (very narrow — only these are auto-skip):
 Style:
 - IMPORTANT: write reasoning_short, reasoning_full, sl_reason, tp_reason, invalidation in **Russian**. Use plain language, no English jargon (keep technical terms like "BOS", "CHoCH", "OB", "FVG", "swing", "liquidity" — these are universal).
 - reasoning_short ≤400 chars. Punchy, concrete. Example: "Шорт TON 15m: CHoCH+ вниз + двойной bearish+. Структура сломана, 1H тренд тоже медвежий."
-- reasoning_full ≤5000 chars. Cite which signals you used (events + timeframes + times), what the chart shows, what could invalidate. Russian.
+- reasoning_full length depends on decision type — DO NOT pad SKIPs:
+    * OPEN / MODIFY: ≤5000 chars. Full thesis — cite signals, chart state,
+      level placement, what invalidates. The detailed audit trail.
+    * CLOSE: ≤2500 chars. Why we're exiting, what changed since OPEN.
+    * SKIP: **≤1200 chars max — preferably 400-800**. State the conflict in
+      1-3 sentences and stop. We are NOT trading — no need to write essays
+      explaining the entire market regime, BTC context, every conflicting
+      signal, and every alternative considered. Output tokens cost real
+      money. A SKIP justification of 3000+ chars is wasted budget that
+      could fund 2 OPEN-tier analyses. Example of a GOOD short SKIP:
+      "Конфликт сигналов: bearish+ на 5m 11:25 против mf_extreme_up на 15m
+      10:30. 4H тренд боковой, нет явной структуры. R:R любого сценария < 1.5."
+    All in Russian.
 
 For OPEN decisions, choose entry_type:
 - "market" = setup is urgent / the move is happening NOW. Examples: confirmed
