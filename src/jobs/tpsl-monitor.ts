@@ -194,7 +194,6 @@ async function checkPendingLimit(p: DecisionRow): Promise<void> {
     if (cancelPendingLimit(p.id)) {
       logger.info({ position_id: p.id }, 'pending limit expired, cancelled');
       const text = limitCancelledCaption({
-        decisionId: p.id,
         symbol: p.symbol,
         side: p.side,
         entry: p.entry,

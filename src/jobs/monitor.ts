@@ -213,16 +213,12 @@ async function monitorPositionImpl(p: DecisionRow): Promise<void> {
     } catch (err) {
       const msg = (err as Error)?.message ?? String(err);
       logger.error({ err, symbol: p.symbol, position_id: p.id }, 'monitor screenshot failed');
-      if (msg.includes('logged out')) {
-        await sendMessage({
-          channel: 'logs',
-          text: `❗️ <b>TradingView logged out</b> (monitor для #${p.id.toString().padStart(4, '0')}). Залить новый storage state.`,
-        });
-      } else if (msg.includes('indicators not loaded')) {
-        await sendMessage({
-          channel: 'logs',
-          text: `❗️ <b>Индикаторы LuxAlgo не загрузились</b> (monitor для #${p.id.toString().padStart(4, '0')}). Восстанови шаблон чарта или задай TV_LAYOUT_ID.`,
-        });
+      // Monitor uses the SAME throttle keys as decide-cron so both contexts
+      // share rate-limit — one alert/hour total regardless of which path fires.
+      // (Throttling state is per-module though; close enough — minor over-
+      // sending at module boundaries isn't a real problem.)
+      if (msg.includes('logged out') || msg.includes('indicators not loaded')) {
+        logger.warn({ position_id: p.id, msg }, 'monitor chart issue — see decide.ts throttled alerts');
       }
     }
   }

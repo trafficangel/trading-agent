@@ -24,6 +24,21 @@ import {
 } from '../exchange/multi-exchange.js';
 import { getLiquidations } from '../exchange/liquidations.js';
 
+// Throttle for Telegram alerts about chart-capture failures. Without this,
+// an intermittent detection-bug or recurring layout glitch can fire 4-8
+// alerts/hour, drowning the Logs channel. We post once per failure-class
+// per hour; the journalctl error log still records every occurrence.
+const CHART_ALERT_COOLDOWN_MS = 60 * 60 * 1000;
+const lastChartAlertAt = new Map<string, number>();
+function shouldAlertChart(key: string): boolean {
+  const last = lastChartAlertAt.get(key) ?? 0;
+  if (Date.now() - last >= CHART_ALERT_COOLDOWN_MS) {
+    lastChartAlertAt.set(key, Date.now());
+    return true;
+  }
+  return false;
+}
+
 const STORAGE_STATE = resolve('data', 'tradingview-storage-state.json');
 
 // Captured once at module load — git hash at the time the service started.
@@ -129,21 +144,24 @@ export async function maybeDecide(symbol: string): Promise<void> {
       const msg = (err as Error)?.message ?? String(err);
       logger.error({ err, symbol }, 'screenshot capture failed — calling LLM without images');
       if (msg.includes('logged out') || msg.includes('storage state')) {
-        await sendMessage({
-          channel: 'logs',
-          text: `❗️ <b>TradingView logged out</b> — скриншоты не делаются, LLM решает без чартов.\nНа маке: <code>pnpm tsx scripts/tradingview-login.ts</code>, потом залить data/tradingview-storage-state.json на VPS.\nКаждый decide идёт без визуального контекста до починки.`,
-        });
+        if (shouldAlertChart('logged-out')) {
+          await sendMessage({
+            channel: 'logs',
+            text: `❗️ <b>TradingView logged out</b> — скриншоты не делаются, LLM решает без чартов.\nНа маке: <code>pnpm tsx scripts/tradingview-login.ts</code>, потом залить data/tradingview-storage-state.json на VPS.\nАлерт повторится не чаще раза в час.`,
+          });
+        }
       } else if (msg.includes('indicators not loaded')) {
-        await sendMessage({
-          channel: 'logs',
-          text:
-            `❗️ <b>TradingView: индикаторы LuxAlgo не загрузились</b> на чарте — голые свечи.\n` +
-            `Открой TradingView в браузере, добавь LuxAlgo индикаторы на default layout, сохрани.\n` +
-            `Или (рекомендуется): создай отдельный layout с индикаторами, скопируй ID из URL ` +
-            `(<code>tradingview.com/chart/XXXXX/</code>) и пропиши в .env как ` +
-            `<code>TV_LAYOUT_ID=XXXXX</code>, перезапусти сервис.\n\n` +
-            `Скриншоты не делаются пока не починишь — LLM решает без чартов на текстовом контексте.`,
-        });
+        if (shouldAlertChart('indicators-missing')) {
+          await sendMessage({
+            channel: 'logs',
+            text:
+              `❗️ <b>Индикаторы LuxAlgo не отрисовались</b> на одном из чартов.\n` +
+              `Может быть intermittent (рендер не успел за 2-3 сек) или layout слетел. ` +
+              `Если повторяется — проверь TV в браузере, добавь индикаторы на default layout, либо задай <code>TV_LAYOUT_ID</code> в .env.\n` +
+              `Алерт повторится не чаще раза в час.`,
+            disable_notification: true,
+          });
+        }
       }
     }
   } else {

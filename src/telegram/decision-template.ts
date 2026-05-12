@@ -28,7 +28,11 @@ function pctDistance(a: number, b: number): number {
 
 /**
  * Telegram caption for a freshly-PLACED limit order (not yet filled).
- * Uses #L prefix to make clear this isn't a real trade yet.
+ *
+ * Deliberately has NO trade number — until the limit actually fills it
+ * isn't a trade. The first sequential number a user sees is when the
+ * limit activates (limitFilledCaption). Internal decision ID is still
+ * stored in DB for audit (passed in `decisionId` for log purposes only).
  */
 export function limitPlacedCaption(input: {
   decisionId: number;
@@ -44,7 +48,6 @@ export function limitPlacedCaption(input: {
   invalidation?: string;
   pendingUntilMs: number;
 }): string {
-  const id = `#L${input.decisionId.toString().padStart(4, '0')}`;
   const sideE = input.side === 'long' ? '🟢' : '🔴';
   const sideRu = input.side === 'long' ? 'ЛОНГ' : 'ШОРТ';
   const slPct = pctDistance(input.entry, input.sl);
@@ -55,8 +58,8 @@ export function limitPlacedCaption(input: {
   const expiresAt = new Date(input.pendingUntilMs).toISOString().slice(11, 16) + 'Z';
 
   const lines = [
-    `<b>📋 Лимит размещён ${id}</b>`,
-    `${sideE} <b>${input.symbol}</b> ${sideRu} · ждём ретест`,
+    `<b>📋 Лимитный ордер размещён</b>`,
+    `${sideE} <b>${input.symbol}</b> ${sideRu} · ждём ретест на уровень`,
     '',
     `🎯 Уровень входа: <code>${input.entry}</code>`,
     `🛡 Стоп: <code>${input.sl}</code> (<code>${slPct}%</code>)${input.slReason ? ' — ' + escapeHtml(input.slReason) : ''}`,
@@ -64,6 +67,8 @@ export function limitPlacedCaption(input: {
     `📐 R:R: <code>1 : ${rr}</code>`,
     `💪 Уверенность: <code>${(input.confidence * 100).toFixed(0)}%</code>`,
     `⏱ Действителен до: <code>${expiresAt}</code>`,
+    '',
+    `<i>Это ещё не сделка. Номер появится если цена коснётся уровня.</i>`,
     '',
     escapeHtml(input.reasoningShort),
   ];
@@ -87,18 +92,19 @@ export function limitFilledCaption(input: {
   return `🟢 <b>Лимит активирован → сделка ${tradeId}</b>\n${sideE} ${input.symbol} ${sideRu} @ <code>${input.entry}</code>\nЦена коснулась уровня — позиция открыта.`;
 }
 
-/** Telegram message when a pending limit expired without filling. */
+/**
+ * Telegram message when a pending limit expired without filling.
+ * No trade number — was never a trade.
+ */
 export function limitCancelledCaption(input: {
-  decisionId: number;
   symbol: string;
   side: 'long' | 'short';
   entry: number;
   reason: 'expired' | 'manual';
 }): string {
-  const id = `#L${input.decisionId.toString().padStart(4, '0')}`;
   const sideRu = input.side === 'long' ? 'ЛОНГ' : 'ШОРТ';
   const reasonText = input.reason === 'expired' ? 'ретест не пришёл за 2 часа' : 'отмена вручную';
-  return `⏱ <b>Лимит ${id} отменён</b>\n${input.symbol} ${sideRu} @ <code>${input.entry}</code> — ${reasonText}.\nСделка не открыта, в статистике не учитывается.`;
+  return `⏱ <b>Лимитный ордер отменён</b>\n${input.symbol} ${sideRu} @ <code>${input.entry}</code> — ${reasonText}.\nСделка не открылась, в статистике не учитывается.`;
 }
 
 export type DecisionPostInput = {

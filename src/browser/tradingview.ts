@@ -299,30 +299,35 @@ async function dismissOverlays(page: Page): Promise<void> {
  * (the price symbol). We require >= 2 to consider indicators loaded.
  */
 async function detectIndicatorsLoaded(page: Page): Promise<boolean> {
-  // Give the chart 2 sec to render legend after navigation. waitForTimeout
-  // is OK here because we're checking final state, not racing renders.
-  await page.waitForTimeout(2000);
-
-  // Multiple selector variants — TV's DOM has changed over time and
-  // different chart versions use different attributes.
+  // Two-pass detection. First pass after 2 sec — fast for normal pages.
+  // If first pass fails, wait an additional 4 sec and retry — handles
+  // slow renders where TV's chart engine is still booting indicators.
+  // Without retry we had 4-8 false-positive alerts per hour overnight
+  // on BTCUSDT 15m specifically (rendered later than other TFs).
   const legendSelectors = [
     '[data-name="legend-source-item"]',
     '.legend-source-item',
     '[class*="sourcesWrapper"] [class*="item"]',
   ];
 
-  for (const sel of legendSelectors) {
-    const count = await page.locator(sel).count().catch(() => 0);
-    if (count >= 2) return true;
-  }
+  const checkOnce = async (): Promise<boolean> => {
+    for (const sel of legendSelectors) {
+      const count = await page.locator(sel).count().catch(() => 0);
+      if (count >= 2) return true;
+    }
+    const luxAlgoText = await page
+      .getByText(/luxalgo|lux algo/i)
+      .count()
+      .catch(() => 0);
+    return luxAlgoText > 0;
+  };
 
-  // Fallback: search for "LuxAlgo" text anywhere on the chart (the indicator
-  // names usually contain that string).
-  const luxAlgoText = await page
-    .getByText(/luxalgo|lux algo/i)
-    .count()
-    .catch(() => 0);
-  return luxAlgoText > 0;
+  await page.waitForTimeout(2000);
+  if (await checkOnce()) return true;
+
+  // Retry after additional 4 sec — gives slow charts time to populate.
+  await page.waitForTimeout(4000);
+  return checkOnce();
 }
 
 /**
