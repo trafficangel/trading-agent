@@ -42,14 +42,12 @@ const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY ?? 'placehold
 
 const WINDOW_MS = 12 * 60 * 60 * 1000;
 
-type DecisionRow = {
+type DecisionRowRaw = {
   id: number;
   created_at: number;
   symbol: string;
   decision: string;
   side: string | null;
-  tp_strategy: string | null;
-  entry_type: string | null;
   entry: number | null;
   sl: number | null;
   tp_json: string | null;
@@ -57,19 +55,63 @@ type DecisionRow = {
   confidence: number;
   reasoning_short: string;
   status: string | null;
-  exit_reason: string | null;
+  close_reason: string | null;
   pnl_pct: number | null;
   pnl_r: number | null;
+  features_json: string | null;
 };
 
-const recentDecisionsStmt = db.prepare<[number, number], DecisionRow>(`
-  SELECT id, created_at, symbol, decision, side, tp_strategy, entry_type,
+/** Enriched row: tp_strategy and entry_type live inside features_json (the
+ *  decisions table doesn't have dedicated columns for them — they were
+ *  added to the LLM schema later). We parse once here and pass the
+ *  flattened shape around the rest of self-review. */
+type DecisionRow = Omit<DecisionRowRaw, 'features_json' | 'close_reason'> & {
+  tp_strategy: string | null;
+  entry_type: string | null;
+  exit_reason: string | null;
+};
+
+const recentDecisionsStmt = db.prepare<[number, number], DecisionRowRaw>(`
+  SELECT id, created_at, symbol, decision, side,
          entry, sl, tp_json, size_pct, confidence, reasoning_short,
-         status, exit_reason, pnl_pct, pnl_r
+         status, close_reason, pnl_pct, pnl_r, features_json
   FROM decisions
   WHERE created_at BETWEEN ? AND ?
   ORDER BY created_at ASC
 `);
+
+function parseRow(r: DecisionRowRaw): DecisionRow {
+  let tp_strategy: string | null = null;
+  let entry_type: string | null = null;
+  if (r.features_json) {
+    try {
+      const f = JSON.parse(r.features_json) as { tp_strategy?: string; entry_type?: string };
+      tp_strategy = f.tp_strategy ?? null;
+      entry_type = f.entry_type ?? null;
+    } catch {
+      // Malformed features_json — ignore, leave nulls.
+    }
+  }
+  return {
+    id: r.id,
+    created_at: r.created_at,
+    symbol: r.symbol,
+    decision: r.decision,
+    side: r.side,
+    entry: r.entry,
+    sl: r.sl,
+    tp_json: r.tp_json,
+    size_pct: r.size_pct,
+    confidence: r.confidence,
+    reasoning_short: r.reasoning_short,
+    status: r.status,
+    exit_reason: r.close_reason,
+    pnl_pct: r.pnl_pct,
+    pnl_r: r.pnl_r,
+    tp_strategy,
+    entry_type,
+  };
+}
 
 const insertReviewStmt = db.prepare<
   [number, number, number, number, number, number, number, number, number | null, number | null, string, string | null],
@@ -138,7 +180,7 @@ function summariseSkipReason(text: string): string {
 function collectStats(now: number): ReviewStats {
   const windowEnd = now;
   const windowStart = now - WINDOW_MS;
-  const rows = recentDecisionsStmt.all(windowStart, windowEnd);
+  const rows = recentDecisionsStmt.all(windowStart, windowEnd).map(parseRow);
 
   const stats: ReviewStats = {
     windowStart,
