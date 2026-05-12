@@ -201,6 +201,51 @@ async function injectOverlayHidingCSS(page: Page): Promise<void> {
     });
 }
 
+/**
+ * Zoom the chart in to a sensible per-TF range. Default TradingView view
+ * shows 80-120 bars which is fine for 15m but on 4H means looking at a
+ * full month of data — too wide for spotting actionable setups. We use
+ * mouse-wheel scroll on the chart center to zoom in. Per-TF zoom amounts
+ * tuned so we end up with roughly 30-60 most recent bars visible.
+ */
+async function adjustChartZoom(page: Page, interval: string): Promise<void> {
+  const canvas = page.locator('canvas[data-name="pane-canvas"]').first();
+  const box = await canvas.boundingBox().catch(() => null);
+  if (!box) return;
+
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+
+  // First — make sure we're looking at the most recent data (End key
+  // scrolls to latest), then mouse-wheel zoom in.
+  // Click on the chart to focus it (and position mouse at center).
+  await page.mouse.move(cx, cy);
+  await page.waitForTimeout(100);
+  await page.keyboard.press('End').catch(() => {});
+  await page.waitForTimeout(200);
+
+  // Mouse-wheel zoom-in. Negative deltaY = scroll up = zoom in on TV chart.
+  // Each "step" of -400 is roughly one zoom level. Per-TF amounts:
+  //   5m, 15m:  default already shows ~30-50 recent bars, mild zoom only
+  //   1H:       wider default, zoom 2-3 steps
+  //   4H:       widest default (month+), zoom 4-5 steps (USER COMPLAINT)
+  //   1D:       similar to 4H
+  const zoomSteps: Record<string, number> = {
+    '5': 2,
+    '15': 2,
+    '60': 3,
+    '240': 5,
+    D: 4,
+  };
+  const steps = zoomSteps[interval] ?? 2;
+  for (let i = 0; i < steps; i++) {
+    await page.mouse.wheel(0, -400);
+    await page.waitForTimeout(120);
+  }
+  // Settle after zoom changes
+  await page.waitForTimeout(400);
+}
+
 async function dismissOverlays(page: Page): Promise<void> {
   // 0. Inject CSS to hide overlays permanently (survives re-injection by TV)
   await injectOverlayHidingCSS(page);
@@ -453,6 +498,10 @@ async function captureChartOnce(
     mkdirSync(SCREENSHOTS_DIR, { recursive: true });
     const out = resolve(SCREENSHOTS_DIR, `${symbol}_${interval}m_${ts}.png`);
     mkdirSync(dirname(out), { recursive: true });
+
+    // Zoom in per-TF so we don't show LLM a month of 4H data when we
+    // only need the recent 30-50 bars for analysis.
+    await adjustChartZoom(page, interval);
 
     // Last-resort modal-killer: find anything overlapping the chart center
     // and remove it. The chart canvas is the topmost element at center on
