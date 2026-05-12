@@ -46,9 +46,22 @@ const Schema = z.object({
   TV_LAYOUT_ID: z.string().optional(),
 
 
+  /**
+   * Symbols we actively MAKE DECISIONS on (decide-cron iterates this list).
+   *
+   * NOTE: This is NOT "symbols we look at". BTC is always pulled as macro
+   * context (15m + 1H screenshots + sentiment + liquidations) in every
+   * decide call regardless of subject — see `captureChartCached('BTCUSDT', ...)`
+   * in src/jobs/decide.ts. So removing BTC from SYMBOLS does NOT remove
+   * BTC context from analysis of other coins.
+   *
+   * Default 'TONUSDT' = we currently trade only TON. Adding more symbols
+   * multiplies token cost (decide + critique per symbol per 15-min tick),
+   * so keep this list tight to what you actually trade.
+   */
   SYMBOLS: z
     .string()
-    .default('BTCUSDT,ETHUSDT,SOLUSDT')
+    .default('TONUSDT')
     .transform((s) => s.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean)),
 });
 
