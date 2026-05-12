@@ -10,29 +10,35 @@ import type { TpStrategy } from '../llm/decision.schema.js';
  * confidence calls to SKIP entirely.
  *
  * Tiers (per-strategy):
- *   swing (default):
- *     < 0.40 → DOWNGRADE_TO_SKIP
- *     0.40-0.50 → 0.5%
- *     0.50-0.60 → 1.0%
- *     0.60-0.70 → 1.5%
- *     ≥ 0.70   → 2.0%
- *   scalp (tighter floor — R:R is small, errors are expensive):
+ *   swing:
+ *     < 0.50 → DOWNGRADE_TO_SKIP
+ *     0.50-0.60 → 0.5%
+ *     0.60-0.70 → 1.0%
+ *     0.70-0.80 → 1.5%
+ *     ≥ 0.80   → 2.0%
+ *   scalp (same floor — R:R tighter):
  *     < 0.50 → DOWNGRADE_TO_SKIP
  *     0.50-0.60 → 0.5%
  *     0.60-0.70 → 1.0%
  *     ≥ 0.70   → 1.5%   (scalp never gets 2.0% — tight R:R doesn't deserve max size)
  *
- * History: 2026-05-11 swing floor lowered 0.45 → 0.40 because Claude rarely
- * produces > 0.55 confidence with all the context layers. Scalp tier added
- * 2026-05-12 — scalp needs a higher floor BECAUSE its R:R is tight, so
- * low-conviction scalps lose money faster than low-conviction swings.
+ * History:
+ *   2026-05-11 swing floor lowered 0.45 → 0.40 because Claude rarely
+ *     produces > 0.55 confidence with all the context layers.
+ *   2026-05-12 swing floor RAISED back 0.40 → 0.50 after 4 days of trades
+ *     showed 0/7 win rate and PnL −4.41R. Of 4 SL-hits, three had
+ *     confidence in [0.41, 0.48] — exactly the borderline tier we should
+ *     never trade. Raising the floor would have skipped 3 of 4 SL-hits
+ *     (≈+3R for the period). Tier ladder shifted up to match — 0.5%
+ *     starts at 0.50 instead of 0.40, max 2% reserved for ≥0.80.
+ *   2026-05-12 scalp tier added with the same 0.50 floor.
  */
 
 export type SizingResult =
   | { action: 'SIZE'; sizePct: number; tier: string }
   | { action: 'SKIP'; reason: string };
 
-export const SIZING_FLOOR_SWING = 0.4;
+export const SIZING_FLOOR_SWING = 0.5;
 /** Default scalp floor. The EFFECTIVE floor is read at runtime from
  *  `runtime_config['scalp.confidence_floor']` so the self-review job can
  *  auto-tune ±0.05 within [0.40, 0.55] without a deploy. Falls back to
@@ -92,8 +98,8 @@ export function sizeFromConfidence(
       reason: `swing confidence ${confidence.toFixed(2)} < ${SIZING_FLOOR_SWING} floor`,
     };
   }
-  if (confidence < 0.5) return { action: 'SIZE', sizePct: 0.5, tier: 'swing:0.40-0.50' };
-  if (confidence < 0.6) return { action: 'SIZE', sizePct: 1.0, tier: 'swing:0.50-0.60' };
-  if (confidence < 0.7) return { action: 'SIZE', sizePct: 1.5, tier: 'swing:0.60-0.70' };
-  return { action: 'SIZE', sizePct: 2.0, tier: 'swing:≥0.70' };
+  if (confidence < 0.6) return { action: 'SIZE', sizePct: 0.5, tier: 'swing:0.50-0.60' };
+  if (confidence < 0.7) return { action: 'SIZE', sizePct: 1.0, tier: 'swing:0.60-0.70' };
+  if (confidence < 0.8) return { action: 'SIZE', sizePct: 1.5, tier: 'swing:0.70-0.80' };
+  return { action: 'SIZE', sizePct: 2.0, tier: 'swing:≥0.80' };
 }

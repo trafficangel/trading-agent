@@ -111,7 +111,14 @@ Pick **swing** (tp_strategy='swing') when:
 - TP target is 2%+ away — riding a larger move.
 - SL is 0.8–2.5% away — gives the trade room to breathe past noise.
 - You expect the trade to live HOURS, not minutes.
-- Confidence ≥ 0.40.
+- Confidence ≥ 0.50 (unified with scalp floor 2026-05-12).
+
+CRITICAL: minimum confidence for ANY new OPEN is 0.50. If you're
+hesitating in the 0.42-0.49 band — that's a SKIP signal, not a
+borderline OPEN. Backtest of 4 days (2026-05-09..2026-05-12) showed
+EVERY trade with confidence < 0.50 closed at full SL loss. There is
+no shame in SKIP — there's a lot of shame in -1R losses you saw
+coming. When in doubt at 0.45-0.49, SKIP.
 
 Examples:
 - Bullish OB retest at 2.385 on TON 15m, immediate target VAH 2.395 (0.4%
@@ -168,7 +175,8 @@ the END of trends ARE high-EV.
 
 BIAS TOWARD TAKING THE TRADE (small size beats no trade):
 When ALL of these are true, this is a TAKEABLE setup — open it at
-confidence 0.45-0.55 (= 0.5% size tier) even if intraday signals are noisy:
+confidence 0.50-0.60 (= 0.5% size tier, the smallest after the
+2026-05-12 floor raise) even if intraday signals are noisy:
 - 4H structural trend is ALIGNED with your proposed direction
 - R:R math gives >= 2.0 with a sane SL placement (not inside stop-cluster)
 - Either VWAP/POC/VAH/VAL or a confirmed orderbook wall provides a
@@ -192,6 +200,26 @@ Common blind spots to avoid:
   signal is still actively relevant.
 - "Both directions have issues" → pick the LESS issued side with size
   0.5%. SKIP only when both directions hit hard SKIP triggers.
+
+HARD RULE — no catching knives against BTC macro (added 2026-05-12 after
+observing 4 SL-hits in 4 days, all longs against a falling BTC):
+
+If BTC 4H Smart Trail is RED **AND** BTC 15m Trend Strength is red >50
+**AND** BTC 1H Trend Strength is red >50 → **HARD SKIP** any new LONG on
+ANY alt regardless of local setup quality.
+
+Rationale: in a confirmed BTC downtrend, alts get dragged down on
+correlation alone. Every "bullish OB retest" / "bid wall ✓3x" / "VAL
+bounce" / "double-bottom on 15m" on the alt becomes a knife. We observed
+exactly this pattern: 4 SL-hits in a row, all longs at "support levels"
+that got eaten by macro flow.
+
+Mirror rule for SHORTs against bullish BTC.
+
+This rule supersedes the soft BTC-headwind confidence penalty. We tried
+"reduce confidence by 0.10 if BTC against" — it wasn't enough, model
+still took the trades and lost. Hard SKIP only when ALL THREE BTC
+timeframes confirm the macro is hostile.
 
 Hard SKIP triggers (very narrow — only these are auto-skip):
 - Risk math impossible (no valid SL location, R:R can't reach 1.5).

@@ -13,20 +13,26 @@ describe('sizeFromConfidence', () => {
     if (r.action === 'SIZE') expect(r.sizePct).toBe(0.5);
   });
 
-  it('mid 0.55 → 1.0%', () => {
+  it('mid 0.55 → 0.5% (lowest swing tier after 2026-05-12 floor raise)', () => {
     const r = sizeFromConfidence(0.55);
+    expect(r.action).toBe('SIZE');
+    if (r.action === 'SIZE') expect(r.sizePct).toBe(0.5);
+  });
+
+  it('mid 0.65 → 1.0%', () => {
+    const r = sizeFromConfidence(0.65);
     expect(r.action).toBe('SIZE');
     if (r.action === 'SIZE') expect(r.sizePct).toBe(1.0);
   });
 
-  it('mid 0.65 → 1.5%', () => {
-    const r = sizeFromConfidence(0.65);
+  it('high 0.75 → 1.5%', () => {
+    const r = sizeFromConfidence(0.75);
     expect(r.action).toBe('SIZE');
     if (r.action === 'SIZE') expect(r.sizePct).toBe(1.5);
   });
 
-  it('high 0.75+ → 2.0%', () => {
-    const r = sizeFromConfidence(0.8);
+  it('very high 0.85+ → 2.0%', () => {
+    const r = sizeFromConfidence(0.85);
     expect(r.action).toBe('SIZE');
     if (r.action === 'SIZE') expect(r.sizePct).toBe(2.0);
   });
@@ -39,6 +45,13 @@ describe('sizeFromConfidence', () => {
     const r = sizeFromConfidence(1);
     expect(r.action).toBe('SIZE');
     if (r.action === 'SIZE') expect(r.sizePct).toBe(2.0);
+  });
+
+  it('borderline 0.45 swing → SKIP (post-2026-05-12 floor 0.50)', () => {
+    // This was previously SIZE 0.5% but 4-day backtest showed these
+    // borderline trades lost. Floor raised 0.40 → 0.50.
+    const r = sizeFromConfidence(0.45);
+    expect(r.action).toBe('SKIP');
   });
 
   it('scalp tier: confidence 0.49 → SKIP (below 0.5 floor)', () => {
@@ -64,9 +77,12 @@ describe('sizeFromConfidence', () => {
     if (r.action === 'SIZE') expect(r.sizePct).toBe(1.5);
   });
 
-  it('scalp tier: confidence 0.45 = swing-OK but scalp-SKIP', () => {
-    // Same confidence, different verdicts depending on strategy.
-    expect(sizeFromConfidence(0.45, 'swing').action).toBe('SIZE');
+  it('post-2026-05-12: swing and scalp share 0.50 floor', () => {
+    // Both strategies now require ≥0.50 confidence. We unified the floor
+    // after the 2026-05-12 backtest review.
+    expect(sizeFromConfidence(0.45, 'swing').action).toBe('SKIP');
     expect(sizeFromConfidence(0.45, 'scalp').action).toBe('SKIP');
+    expect(sizeFromConfidence(0.50, 'swing').action).toBe('SIZE');
+    expect(sizeFromConfidence(0.50, 'scalp').action).toBe('SIZE');
   });
 });
