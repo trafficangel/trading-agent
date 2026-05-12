@@ -128,7 +128,14 @@ export async function callLlm(
       // special handling needed — just edit normally.
       const resp = await anthropic.messages.create({
         model: config.ANTHROPIC_MODEL,
-        max_tokens: 2500,
+        // Output token cap. Was 2500 — observed in Anthropic Console that
+        // EVERY call hit the cap, meaning Claude was always writing to max.
+        // 1500 is enough for: reasoning_full ≤5000 chars (~1250 tok) +
+        // reasoning_short + JSON wrapper. SKIPs (most calls) will use
+        // ~600-800 with the new prompt cap. Drops output spend by ~40%.
+        // If valid JSON gets truncated by this, lower the soft cap in
+        // prompt.ts instead of raising max_tokens.
+        max_tokens: 1500,
         system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
         messages,
       });
