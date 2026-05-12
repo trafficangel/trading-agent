@@ -1,4 +1,4 @@
-import type { Decision, TpStrategy } from '../llm/decision.schema.js';
+import type { Decision, TpStrategy, SpiderSetup } from '../llm/decision.schema.js';
 
 export type RiskCheckResult =
   | { ok: true }
@@ -54,6 +54,58 @@ export const DEFAULT_LIMITS: RiskLimits = SWING_LIMITS;
  *  Falls back to swing if not specified (back-compat with old decisions). */
 export function limitsFor(strategy: TpStrategy | undefined): RiskLimits {
   return strategy === 'scalp' ? SCALP_LIMITS : SWING_LIMITS;
+}
+
+/** Spider-leg limits — applied to each entry in `spider_setups[]`.
+ *  Critically tighter than swing on max SL (2% vs 5%) because spiders are
+ *  small bets, and R:R floor is 3.0 (much higher than swing's 1.5). */
+export const SPIDER_LIMITS: RiskLimits = {
+  maxSizePct: 0.25,
+  minSlDistPct: 0.3,
+  maxSlDistPct: 2.0,
+  minRR: 3.0,
+  minSlAtrMult: 0.5,
+  maxSlAtrMult: 3.0,
+};
+
+/** Validate a single spider setup against SPIDER_LIMITS + geometry.
+ *  Returns `{ok:true}` or `{ok:false, reason}`. */
+export function checkSpiderSetup(
+  s: SpiderSetup,
+  currentPrice: number,
+): RiskCheckResult {
+  // Entry within 2% of current price — no pipe-dream setups 5% away
+  const distFromPx = Math.abs(s.entry - currentPrice) / currentPrice * 100;
+  if (distFromPx > 2.0) {
+    return { ok: false, reason: `spider entry ${distFromPx.toFixed(2)}% from price — too far` };
+  }
+
+  // Geometry sanity
+  if (s.side === 'long' && (s.sl >= s.entry || s.tp <= s.entry)) {
+    return { ok: false, reason: 'spider long geometry: sl<entry<tp violated' };
+  }
+  if (s.side === 'short' && (s.sl <= s.entry || s.tp >= s.entry)) {
+    return { ok: false, reason: 'spider short geometry: tp<entry<sl violated' };
+  }
+
+  // SL distance bounds
+  const slDist = Math.abs(s.entry - s.sl);
+  const slPct = (slDist / s.entry) * 100;
+  if (slPct < SPIDER_LIMITS.minSlDistPct) {
+    return { ok: false, reason: `spider SL too tight: ${slPct.toFixed(2)}%` };
+  }
+  if (slPct > SPIDER_LIMITS.maxSlDistPct) {
+    return { ok: false, reason: `spider SL too wide: ${slPct.toFixed(2)}%` };
+  }
+
+  // R:R floor — the whole point of spiders
+  const tpDist = Math.abs(s.tp - s.entry);
+  const rr = tpDist / slDist;
+  if (rr < SPIDER_LIMITS.minRR) {
+    return { ok: false, reason: `spider R:R ${rr.toFixed(2)} < ${SPIDER_LIMITS.minRR} required` };
+  }
+
+  return { ok: true };
 }
 
 /**

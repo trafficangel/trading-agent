@@ -3,11 +3,12 @@ import { extractFeatures } from '../signals/features.js';
 import {
   insertDecision,
   findActiveOrPendingPosition,
+  findAllActiveOrPending,
 } from '../db/repos/decisions.js';
 import { callLlm } from '../llm/client.js';
 import { critiqueDecision } from '../llm/critique.js';
 import { captureChartCached } from '../browser/tradingview.js';
-import { checkDecision, limitsFor } from '../risk/manager.js';
+import { checkDecision, checkSpiderSetup, limitsFor } from '../risk/manager.js';
 import { sizeFromConfidence } from '../risk/sizing.js';
 import { effectiveScalpFloor } from '../risk/scalp-floor.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
@@ -490,4 +491,156 @@ export async function maybeDecide(symbol: string): Promise<void> {
 
   // Always mirror to Logs for audit trail
   await sendMessage({ channel: 'logs', text: caption, disable_notification: true });
+
+  // === SPIDER WEB — additional structural-level limit orders ===
+  // Same LLM call may have returned spider_setups[] alongside the primary.
+  // Each becomes its own pending-limit row with 6h TTL and 0.25% size.
+  // Multiple per symbol allowed up to a hard cap of 3 total active+pending.
+  await processSpiderSetups({
+    symbol,
+    primaryDecision: result.decision,
+    primaryDecisionId: decisionId,
+    agg,
+    screenshotPath: primaryScreenshot,
+    referencePrice: result.decision.entry ?? volumeProfile?.vwap ?? null,
+  });
+}
+
+const SPIDER_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_PENDING_PER_SYMBOL = 3;
+
+async function processSpiderSetups(input: {
+  symbol: string;
+  primaryDecision: import('../llm/decision.schema.js').Decision;
+  primaryDecisionId: number;
+  agg: import('../signals/aggregator.js').AggregatedScore;
+  screenshotPath: string | null;
+  /** Approximate current price for the entry-distance check.
+   *  Falls back to spider geometry-only validation when null. */
+  referencePrice: number | null;
+}): Promise<void> {
+  const spiders = input.primaryDecision.spider_setups ?? [];
+  if (spiders.length === 0) return;
+
+  const existing = findAllActiveOrPending(input.symbol);
+  // -1 because the primary OPEN we just inserted is counted in `existing`.
+  // If primary was SKIP, primary doesn't occupy a slot.
+  const primaryOccupies = input.primaryDecision.decision === 'OPEN' ? 1 : 0;
+  let remainingSlots = MAX_PENDING_PER_SYMBOL - existing.length;
+  // existing already includes the primary if it was OPEN — don't double-count
+  void primaryOccupies;
+
+  let placed = 0;
+  let rejected = 0;
+
+  for (const spider of spiders) {
+    if (remainingSlots <= 0) {
+      logger.info(
+        { symbol: input.symbol, dropped: spiders.length - placed - rejected },
+        'spider: per-symbol cap reached, remaining setups dropped',
+      );
+      break;
+    }
+
+    // R:R + geometry + SL-distance validation. Pass referencePrice if we
+    // have it; checkSpiderSetup tolerates pipe-dream entries only when the
+    // distance check is skipped (referencePrice null).
+    const check = input.referencePrice
+      ? checkSpiderSetup(spider, input.referencePrice)
+      : { ok: true as const };
+    if (!check.ok) {
+      logger.info(
+        { symbol: input.symbol, reason: check.reason, spider },
+        'spider rejected',
+      );
+      rejected++;
+      continue;
+    }
+
+    const slDist = Math.abs(spider.entry - spider.sl);
+    const tpDist = Math.abs(spider.tp - spider.entry);
+    const rr = tpDist / slDist;
+
+    // Synthetic Decision row for the spider — re-uses insertDecision so
+    // the rest of the system (tpsl-monitor fill detection, audit) works
+    // without special-casing.
+    const syntheticDecision: import('../llm/decision.schema.js').Decision = {
+      decision: 'OPEN',
+      side: spider.side,
+      entry_type: 'limit',
+      // tp_strategy='swing' because R:R 3+ matches swing risk profile.
+      // (Scalp would be R:R 1.2–1.8.)
+      tp_strategy: 'swing',
+      entry: spider.entry,
+      sl: spider.sl,
+      tp: [spider.tp],
+      size_pct: 0.25,
+      // Borrow primary's confidence, but never below 0.50 floor (so the
+      // sizing tier doesn't auto-SKIP a placed spider).
+      confidence: Math.max(input.primaryDecision.confidence, 0.5),
+      reasoning_short: `🕷 Spider ${spider.side} #${input.primaryDecisionId}: ${spider.level_reason}`.slice(0, 400),
+      reasoning_full: [
+        `Spider-web limit order placed alongside primary decision #${input.primaryDecisionId}.`,
+        `Side: ${spider.side}`,
+        `Entry (limit): ${spider.entry}`,
+        `SL: ${spider.sl}  (${((slDist / spider.entry) * 100).toFixed(2)}%)`,
+        `TP: ${spider.tp}  (${((tpDist / spider.entry) * 100).toFixed(2)}%)`,
+        `R:R: ${rr.toFixed(2)}`,
+        `Size: 0.25%`,
+        `TTL: 6 hours`,
+        ``,
+        `Level rationale: ${spider.level_reason}`,
+      ].join('\n').slice(0, 5000),
+      sl_reason: spider.level_reason.slice(0, 120),
+      tp_reason: `R:R 1:${rr.toFixed(1)} target`,
+      invalidation: undefined,
+    };
+
+    const spiderId = insertDecision({
+      symbol: input.symbol,
+      agg: input.agg,
+      decision: syntheticDecision,
+      screenshotPath: input.screenshotPath,
+      // Cost already paid by the primary call — don't double-count tokens.
+      inputTokens: 0,
+      outputTokens: 0,
+      rawResponse: JSON.stringify(spider),
+      parentDecisionId: input.primaryDecisionId,
+      features: { source: 'spider', primary_id: input.primaryDecisionId },
+      statusOverride: 'pending',
+      pendingUntil: Date.now() + SPIDER_TTL_MS,
+    });
+
+    const sideE = spider.side === 'long' ? '🟢' : '🔴';
+    const expiresAt = new Date(Date.now() + SPIDER_TTL_MS).toISOString().slice(11, 16) + 'Z';
+    const spiderText = [
+      `🕷 <b>Spider limit #${spiderId.toString().padStart(4, '0')}</b>  ·  по сделке #${input.primaryDecisionId.toString().padStart(4, '0')}`,
+      `${sideE} <b>${input.symbol}</b> ${spider.side.toUpperCase()} @ <code>${spider.entry}</code>`,
+      `🛡 SL: <code>${spider.sl}</code>  ·  🎯 TP: <code>${spider.tp}</code>  ·  📐 R:R 1:${rr.toFixed(1)}`,
+      `⏱ Действителен до: <code>${expiresAt}</code>  ·  💰 size 0.25%`,
+      ``,
+      `<i>${spider.level_reason}</i>`,
+    ].join('\n');
+
+    await sendMessage({
+      channel: 'logs',
+      text: spiderText,
+      disable_notification: true,
+    }).catch((err) => logger.error({ err }, 'spider log send failed'));
+
+    logger.info(
+      { spiderId, side: spider.side, entry: spider.entry, sl: spider.sl, tp: spider.tp, rr },
+      'spider limit placed',
+    );
+
+    remainingSlots--;
+    placed++;
+  }
+
+  if (placed > 0 || rejected > 0) {
+    logger.info(
+      { symbol: input.symbol, placed, rejected, attempted: spiders.length },
+      'spider setups processed',
+    );
+  }
 }

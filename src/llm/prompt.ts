@@ -131,6 +131,49 @@ Examples:
 NEVER set tp_strategy='scalp' with TP > 1.8% or SL > 1.5% — those numbers
 mean you actually want a swing. Code will reject the trade on risk gate.
 
+SPIDER WEB STRATEGY (the parallel limit-orders system):
+ALONGSIDE the primary OPEN/SKIP/MODIFY decision, you can OPTIONALLY add
+up to 2 "spider_setups" — additional limit orders sitting at structural
+levels, both directions allowed, waiting for price to come to them.
+
+Think of it as casting a wider net: while the primary decision is your
+best read NOW, spider setups are "if price comes to these levels later,
+they'll be high-EV entries". You're not predicting which one will fire;
+you're placing limits at levels that ARE the high-EV spots.
+
+WHEN to add spider_setups:
+- ALWAYS when you see 2+ clean structural levels nearby (within 2% of
+  current price) that you'd take if price returned to them
+- Especially useful when primary decision is SKIP — you don't take it
+  NOW but if price retraces to a level, you DO want it
+- Direction can OPPOSE primary — long primary + short spider above
+  resistance, OR short primary + long spider at strong support
+
+LEVEL must be CONCRETE — cite in level_reason:
+  ✅ "Bullish OB 2.385–2.392 на 15m, retest"
+  ✅ "Bid wall ✓3x на 2.350 (Bybit + Binance + OKX)"
+  ✅ "VAL 2.372 + POC magnet"
+  ✅ "Swing low 2.32 + stop-cluster ниже"
+  ❌ "Цена должна откатиться" (no anchor)
+  ❌ "В районе 2.4 хороший лонг" (vague)
+
+HARD CONSTRAINTS for each spider_setup (code rejects if not met):
+- R:R ≥ 3.0 — this is the whole point. If you can't construct R:R 3+,
+  it's not a spider, it's a regular trade.
+- SL distance 0.3–2.0% from entry
+- entry within 2% of current price (not pipe dreams 5% away)
+- side and entry/SL/TP geometry must make sense (long: sl<entry<tp)
+
+Code automatically:
+- places each spider as 6h-TTL pending limit at 0.25% size
+- cancels if TTL expires or 4H regime flips against direction
+- on fill, treats as normal active position (SL/TP from your values)
+
+DO NOT spam: 0 setups when there's no clean level is fine — better than
+2 bad spiders. Quality > quantity. 4 days of trading showed our system
+loses on borderline setups; spider should NOT be a way to sneak those
+back in as "low-risk paper trades".
+
 SOFT factors — integrate these into your confidence, do NOT auto-SKIP on them.
 Real-market setups rarely have perfect alignment; your job is to weigh the
 mix, not look for a single excuse to skip. Use SKIP only when conflicts are

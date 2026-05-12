@@ -229,14 +229,31 @@ const findActiveOrPendingBySymbolStmt = db.prepare<[string], DecisionRow>(`
   ORDER BY created_at DESC LIMIT 1
 `);
 
+const findAllActiveOrPendingBySymbolStmt = db.prepare<[string], DecisionRow>(`
+  SELECT * FROM decisions
+  WHERE decision = 'OPEN' AND symbol = ?
+    AND (status = 'active' OR status = 'pending')
+  ORDER BY created_at DESC
+`);
+
 /**
- * Active OR pending-limit position on this symbol. Used as the
- * decide-cron guard: while a limit is waiting for fill on TON, we
- * should NOT open another market position on TON. Otherwise we'd end
- * up with double exposure (the pending limit might fill any minute).
+ * Active OR pending-limit position on this symbol — single LATEST row.
+ * Used as the decide-cron PRIMARY guard: while a limit is waiting for
+ * fill on TON, we should NOT open another market position on TON.
+ * Otherwise we'd end up with double exposure.
+ *
+ * For spider-mode (multi-limit, 2026-05-12), use findAllActiveOrPending()
+ * which returns the FULL list so we can count slots and apply the
+ * max-3-per-symbol cap.
  */
 export function findActiveOrPendingPosition(symbol: string): DecisionRow | null {
   return findActiveOrPendingBySymbolStmt.get(symbol) ?? null;
+}
+
+/** All active or pending OPEN rows on this symbol. Spider-mode counts
+ *  these to enforce "max 3 pending/active per symbol". */
+export function findAllActiveOrPending(symbol: string): DecisionRow[] {
+  return findAllActiveOrPendingBySymbolStmt.all(symbol);
 }
 
 export function findDecisionById(id: number): DecisionRow | null {
