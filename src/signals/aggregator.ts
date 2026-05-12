@@ -99,19 +99,9 @@ export function aggregateSymbol(symbol: string, now: number = Date.now()): Aggre
 
 /**
  * Cheap gate: do we have ANY recent signals worth showing the LLM?
- *
- * This replaces the old weighted threshold. Now the LLM is the judge —
- * we just check that something happened recently so we're not burning
- * tokens on empty 15-minute windows.
+ * Used to be a weighted-threshold check; now just "is there anything to
+ * analyze". Single source of truth — no aliases.
  */
 export function hasRecentActivity(agg: AggregatedScore): boolean {
   return agg.signals.length > 0;
-}
-
-/**
- * Legacy name kept so existing callers don't break. Same semantics as
- * hasRecentActivity now: gate is just "is there anything to analyze?".
- */
-export function shouldInvokeLlm(agg: AggregatedScore): boolean {
-  return hasRecentActivity(agg);
 }

@@ -74,12 +74,6 @@ const findActiveStmt = db.prepare<[], DecisionRow>(`
   ORDER BY created_at ASC
 `);
 
-const findActiveBySymbolSideStmt = db.prepare<[string, string], DecisionRow>(`
-  SELECT * FROM decisions
-  WHERE status = 'active' AND decision = 'OPEN' AND symbol = ? AND side = ?
-  ORDER BY created_at DESC LIMIT 1
-`);
-
 const findActiveBySymbolStmt = db.prepare<[string], DecisionRow>(`
   SELECT * FROM decisions
   WHERE status = 'active' AND decision = 'OPEN' AND symbol = ?
@@ -221,7 +215,6 @@ export function findActivePositions(): DecisionRow[] {
 /** Active position on (symbol, side) — used to decide if a new OPEN should add or skip. */
 /**
  * Return the active position on this symbol regardless of side, or null.
- * Cheaper than calling findActiveOnSide(symbol, 'long') and 'short' separately.
  * If both sides are open (shouldn't happen in our pipeline), returns the
  * most recent.
  */
@@ -229,8 +222,21 @@ export function findActivePosition(symbol: string): DecisionRow | null {
   return findActiveBySymbolStmt.get(symbol) ?? null;
 }
 
-export function findActiveOnSide(symbol: string, side: 'long' | 'short'): DecisionRow | null {
-  return findActiveBySymbolSideStmt.get(symbol, side) ?? null;
+const findActiveOrPendingBySymbolStmt = db.prepare<[string], DecisionRow>(`
+  SELECT * FROM decisions
+  WHERE decision = 'OPEN' AND symbol = ?
+    AND (status = 'active' OR status = 'pending')
+  ORDER BY created_at DESC LIMIT 1
+`);
+
+/**
+ * Active OR pending-limit position on this symbol. Used as the
+ * decide-cron guard: while a limit is waiting for fill on TON, we
+ * should NOT open another market position on TON. Otherwise we'd end
+ * up with double exposure (the pending limit might fill any minute).
+ */
+export function findActiveOrPendingPosition(symbol: string): DecisionRow | null {
+  return findActiveOrPendingBySymbolStmt.get(symbol) ?? null;
 }
 
 export function findDecisionById(id: number): DecisionRow | null {

@@ -3,7 +3,7 @@ import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
 import { maybeDecide } from './decide.js';
 import { aggregateSymbol } from '../signals/aggregator.js';
-import { findActivePosition } from '../db/repos/decisions.js';
+import { findActiveOrPendingPosition } from '../db/repos/decisions.js';
 import { sendMessage } from '../telegram/bot.js';
 import { markTick } from '../lib/health-tracker.js';
 
@@ -95,7 +95,9 @@ async function tick(): Promise<void> {
         // is also a reason to be aware in summary, but it's handled by
         // monitor-cron + webhook ad-hoc trigger, not by decide.
         const agg = aggregateSymbol(symbol);
-        const hasActive = findActivePosition(symbol) !== null;
+        // Same guard semantics as maybeDecide: active OR pending limit
+        // counts as "symbol occupied" — won't open a second one.
+        const hasActive = findActiveOrPendingPosition(symbol) !== null;
         const hasSignals = agg.signals.length > 0;
 
         evaluations.push({

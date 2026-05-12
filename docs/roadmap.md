@@ -4,29 +4,41 @@
 
 ---
 
-## Текущее состояние (baseline)
+## Текущее состояние (baseline) — обновлено 2026-05-12
 
-- ✅ Stage 1: webhook receiver + SQLite + Telegram raw logs
-- ✅ Stage 2 shadow mode: aggregator → LLM decide (4 чарта: subj 15m+1H + BTC 15m+1H) → Telegram Signals
-- ✅ Hourly monitor LLM (HOLD/CLOSE/MODIFY) с подавлением тривиальных MODIFY < 0.3%
-- ✅ TP/SL hit detection через minute-poll Bybit price + result-template
-- ✅ Heartbeat (4h) + Daily wrap (23:55 UTC)
-- ✅ Bybit sentiment в промпт: funding rate + OI delta + L/S ratio
-- ✅ Self-critique pass на каждом OPEN (KEEP / DOWNGRADE_TO_SKIP)
-- ✅ SCORE_THRESHOLD=4, WINDOW=20 мин — настройки на объём решений в shadow
-- ✅ TradingView "Session disconnected" auto-reclaim в Playwright
+### Архитектура
+- ✅ **Scheduled decisions** (не event-driven): cron `1,16,31,46 * * * *`
+- ✅ Aggregator: per-TF retention windows (5m: 2h, 15m: 6h, 1H: 12h, 4H: 48h, 1D: 7d)
+- ✅ Веса confluence **убраны** — LLM сама судит сырые сигналы
+- ✅ LLM context: 5 чартов (subj 15m+1H+4H + BTC 15m+1H), multi-exchange sentiment (Bybit+Binance+OKX), volume profile, aggregated orderbook, stop clusters, liquidations
+- ✅ Self-critique pass + Confidence-tier sizing + Risk gates (SL%, ATR×, R:R)
+- ✅ **Pending-limit lifecycle:** limit размещается → ждёт ретест 2h → активируется в реальную сделку с trade# ИЛИ отменяется
+- ✅ Active-or-pending guard: не открываем дубль на символе где есть live или waiting позиция
 
-**Параметры в проде:**
-- `SCORE_THRESHOLD = 4`
-- `WINDOW_MS = 20 min`
-- `COOLDOWN_MS = 15 min` на ту же сторону на символе
-- `SUBSTANTIAL_CHANGE_PCT = 0.3` для MODIFY
-- TF multipliers: 5m=×0.7, 15m=×1.0, 1H=×1.5, 4H=×1.8, D=×2.0
-- LLM: claude-sonnet-4-5, vision, 1500 max_tokens decide / 800 critique / 1500 monitor
-- Monitor cron: `0 * * * *` (раз в час)
-- TPSL cron: `* * * * *` (раз в минуту)
+### Cron'ы
+- Decide-cron: `1,16,31,46 * * * *` (15m-aligned)
+- Monitor-cron: same schedule (active position management)
+- TPSL-cron: `* * * * *` (TP/SL hit + pending-limit fill/expire + auto SL→BE)
+- Health watchdog: `*/10 * * * *` (alert if any cron stale > 30 min or RAM > 1GB)
 - Heartbeat: `0 */4 * * *`
 - Daily wrap: `55 23 * * *` UTC
+
+### Параметры в проде
+- TF windows aggregator (на сигнал): см. выше
+- LLM: `claude-sonnet-4-5`, vision, 2500 max_tokens decide/monitor, 800 critique
+- Prompt caching: system prompts cache_control=ephemeral (5-min TTL, ~30% input savings)
+- Confidence floor: 0.40 (ниже → SKIP)
+- Sizing tiers: 0.40-0.50 → 0.5% / 0.50-0.60 → 1.0% / 0.60-0.70 → 1.5% / ≥0.70 → 2.0%
+- Risk gates: SL 0.2-5%, 0.7×ATR ≤ SL ≤ 4×ATR, R:R ≥ 1.5, size ≤ 2%
+- Pending-limit TTL: 2 hours
+- Auto SL→BE: при достижении 1R
+- Anthropic billing alert + TradingView logged-out/no-indicators detection + modal-killer
+- TV_LAYOUT_ID env для пина layout с индикаторами
+
+### Continuous improvement layer
+- ✅ Outcome enrichment: features_json в каждом decision (confidence_bucket, cited_levels, cascade, funding_state, btc_alignment, prompt_version, critique_downgrade, entry_type)
+- ✅ Calibration analysis script (`scripts/analyze-calibration.ts`): win-rate/avgR по bucket / level / cascade / btc / prompt-version / entry-type
+- ✅ Daily wrap показывает: closed trades с PnL%/R/USD, win-rate, avg R, breakdown по entry_type, pending limits с TTL, cancelled limits отдельно (не в P&L)
 
 ---
 
@@ -191,28 +203,65 @@ conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OP
 
 ---
 
-## Приоритет по неделям
+## Приоритет — обновлено 2026-05-12
 
-**Неделя текущая** (быстрый edge, дешёвый эффект):
-1. 1.1 — 4H chart
-2. 1.2 — Volume profile / VWAP
-3. 2.1 — ATR sanity
-4. 2.2 — Dynamic sizing
+### Что СЕЙЧАС блокирует прогресс
+Главное узкое место — **мало закрытых сделок с реальным PnL** для валидации. К утру 12 мая в production:
+- 3 закрытые сделки за день (1W/2L = 33% win-rate, -3R, -$33/$1000)
+- 1 pending limit, 3 cancelled limits (75% лимитов не сработали)
+- Все аналитические инструменты на месте, **ждут данных**
 
-**Неделя следующая:**
-5. **1.3 — Multi-exchange orderbook + liquidity (~1.5-2 дня)** — главный приоритет, объединил собой 1.6
-6. 2.3 — Don't-trade-in-chop
-7. 3.3 — Жёсткое SL→BE на 1R
+Без 30-50 закрытых сделок calibration/post-mortem/A-B не дадут осмысленных цифр.
 
-**После 30-50 закрытых сделок:**
-8. 4.1 — Critique calibration
-9. 4.2 — Weekly post-mortem
-10. 1.5 — News calendar (если уже доказали edge без него)
+### Текущая неделя (defensive — пока копится статистика)
+1. **5.3 — Daily kill-switch + circuit-breaker (~4ч)** — нужно ДО любого live trading. После 3 убытков подряд или DD -2%/день → halt. Можно делать пока ждём статистики.
+2. **2.5 — Funding-clock pause (~1ч)** — мелкая, дешёвая, реально полезная.
+3. **Backtest harness (~1-2 дня)** — НЕ в roadmap старом, добавлен. Прогон pipeline на 6-12 мес исторических данных = **единственный честный способ** узнать expectancy ДО рисковки. См. новый раздел "Tier 6" ниже.
 
-**Когда shadow mode даёт стабильно прибыльные решения:**
-11. 5.1 — Bybit testnet (Stage 3)
-12. 5.3 — Kill-switches
-13. 5.2 — Approve flow (Stage 4)
+### Когда накопится 20-30 закрытых сделок (~3-5 дней при текущем темпе)
+4. **4.1 — Critique calibration** — реально работает self-critique или режет хорошее
+5. **4.2 — Weekly post-mortem cron** — automated insights от LLM
+6. **2.4 — Time-of-day filter** — какие часы УТК выигрывают/проигрывают
+7. Возможно: подкрутить prompt на основании эмпирики из calibration
+
+### Когда статистика покажет positive expectancy (после backtest + 50 closed)
+8. **5.1 — Bybit testnet integration (2-3 дня)** — переход на real exchange execution
+9. **5.2 — Approve flow** (Stage 4 semi-auto)
+10. **3.1 — Multiple TPs** (TP1/TP2 + trailing) — реализуется в testnet
+11. **3.2 — Real limit orders** на бирже (текущий pending-limit будет executor'om)
+
+### Опциональные info edges (если базовая стратегия работает)
+12. **1.4 — ETH context для альтов** (~2ч)
+13. **1.5 — News calendar** (~6ч)
+14. **4.3 — A/B prompt testing** (после 100+ trades)
+
+---
+
+## Tier 6 — Validation infrastructure (новый, добавлено 2026-05-12)
+
+### 6.1 ⭐⭐⭐ Backtest harness — `[ ]`
+**Зачем:** Сейчас 3 закрытые сделки = недостаточно для оценки edge. Backtest за 6-12 мес даст 100-500 trades за час прогона. Без этого live trading = вера, не торговля.
+
+**Архитектура:**
+- Загрузить исторические klines на нужные TF (5m, 15m, 1h, 4h) за 6+ мес через Bybit/Binance public API
+- Реконструировать "что бы видел aggregator" — для каждого 15m boundary, какие signals были в окне
+  - Альтернатива: re-fetch TV alert history (если доступно) или эмулировать события из klines с indicator-replica
+- Прогнать `maybeDecide()` на каждом 15m boundary с замороженным prompt'ом
+- Имитировать pending-limit fills через klines (high/low сравнить с entry)
+- Имитировать SL/TP hits через polling симуляцию
+- Собрать distribution: win-rate, avg R, max DD, Sharpe, expectancy
+
+**Effort:** 1-2 дня. **Critical** перед любым live.
+
+### 6.2 ⭐⭐ Monitor LLM для pending limits — `[ ]`
+**Зачем:** Сейчас pending limit живёт до TTL или fill, без переоценки. Если контекст изменился (новый CHoCH против направления) — лимит может стать неактуальным, но мы его не отменяем. Идея: каждые 15 мин cron проверяет каждый pending limit с monitor-prompt'ом «отменить лимит или оставить?».
+
+**Effort:** ~3ч. Низкий приоритет — TTL 2ч и так отметает stale лимиты.
+
+### 6.3 ⭐ Adaptive sizing tiers — `[ ]`
+**Зачем:** После 50+ closed trades calibration script покажет реальный edge per confidence-bucket. Текущие tiers (0.40-0.50→0.5%, etc.) — на глаз. Kelly criterion даёт оптимальный sizing исходя из реальной win-rate × avg R/L ratio per bucket.
+
+**Effort:** ~2ч после данных.
 
 ---
 
@@ -239,6 +288,17 @@ conf < 0.45 → SKIP (даунгрейд даже если LLM сказала OP
 - ✅ **1.3 Phase D: Aggregated liquidations stream** — Binance forceOrder WebSocket listener (started in server.ts, persistent connection with auto-reconnect + idle-detection). Per-symbol rolling 5-min bucket of liquidations >= $1k. Cascade detection: $5M+ on one side AND >= 5x other side → mean-reversion signal. Wired into decide / monitor / critique with explicit prompt rules ("LONG-side cascade against position = forced sells exhausting, our LONG is in trouble"). Hourly billing-error alerts safe (this stream is free public data)
 - ✅ **Anthropic billing alert** — `src/llm/billing-alert.ts` detects credit-balance/quota errors in API responses and posts loud Logs notification with throttle 1/hr. Wired into all 3 LLM call sites (decide, monitor, critique) with retry-loop short-circuit
 - ✅ **TradingView session detector + auto-relogin script** — `detectLoggedOut()` in tradingview.ts throws hard error when cookie banner / no user-menu indicates anonymous session; alerts Logs channel. `scripts/tradingview-login-auto.ts` automates the full login including 2FA backup-code consumption from `~/.ssh/trading-creds.txt`
+- ✅ **Architectural change: scheduled decisions** — webhook just stores signals, decide-cron at `1,16,31,46 * * * *` evaluates accumulated context per symbol. Eliminates race-condition with cooldown that limited decisions to weakest snapshot.
+- ✅ **Removed weighted confluence** — LLM judges raw signals directly instead of arbitrary threshold math. Window expanded to per-TF retention (5m: 2h, 15m: 6h, 1H: 12h, 4H: 48h, 1D: 7d) for richer multi-hour pattern context.
+- ✅ **Prompt caching** — Anthropic ephemeral cache on system prompts. ~30% input savings on batch ticks (4 symbols back-to-back) and decide+critique pairs.
+- ✅ **Schema robustness** — opt() preprocesses null/empty-string/zero coercion; confidence clamped to [0,1]; numbers/strings truncate-on-overflow instead of throw. Risk gate: entry must differ from sl.
+- ✅ **Pending-limit lifecycle** — limits stored as status='pending' until tpsl-monitor sees price touch entry → status='active' with trade#. Timeout 2h → status='cancelled' (not in PnL). Telegram posts: 📋 Лимит размещён (no trade#), 🟢 Лимит активирован → сделка #NNNN (trade# appears first time here), ⏱ Лимит отменён.
+- ✅ **Critical correctness fixes** — getContext() race in parallel screenshots, per-cron 5-min timeouts, idempotent closePositionWithStats, monitorPosition per-position mutex, fresh DB read for MODIFY anti-widen, TPSL refreshes pos from DB.
+- ✅ **Screenshot resilience** — indicator-missing detector, promo-modal killer via elementFromPoint walk-up, mask param, addInitScript CSS injection, dismissOverlays helper. Throttled chart-error alerts (1/hr) to avoid spam.
+- ✅ **Continuous improvement layer** — features_json on every decision (confidence_bucket, cited_levels, cascade, funding_state, btc_alignment, prompt_version, critique_downgrade, entry_type, llm_invoked); calibration analysis script.
+- ✅ **Health watchdog** — `*/10 * * * *` cron checks decide/monitor/tpsl tick freshness + RAM. Alert to Logs (1/hr per issue) if any cron stale > 30 min or RSS > 1 GB.
+- ✅ **Daily wrap redesign** — removed HODL baseline (user feedback), focus on actual closed trades: win-rate, Σ R, Avg R/trade, $1000-per-position USD PnL, breakdown by entry_type, pending/cancelled limit sections, broken-data zombie excluded.
+- ✅ **Audit fixes 2026-05-12** — `findActiveOrPendingPosition()` blocks new OPEN while pending limit waits on same symbol (prevented potential double-exposure bug). Removed dead `shouldInvokeLlm` alias and `findActiveOnSide` (no callers). Server shutdown now closes Playwright browser + sets 5-sec hard timeout.
 
 ---
 

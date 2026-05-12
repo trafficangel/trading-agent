@@ -2,7 +2,7 @@ import { aggregateSymbol } from '../signals/aggregator.js';
 import { extractFeatures } from '../signals/features.js';
 import {
   insertDecision,
-  findActivePosition,
+  findActiveOrPendingPosition,
 } from '../db/repos/decisions.js';
 import { callLlm } from '../llm/client.js';
 import { critiqueDecision } from '../llm/critique.js';
@@ -78,14 +78,16 @@ export async function maybeDecide(symbol: string): Promise<void> {
     return;
   }
 
-  // Active-position guard. If we have an open position on this symbol
-  // (either side), decide-cron skips — monitor cron + the ad-hoc webhook
-  // trigger own the lifecycle. We don't OPEN on top of an existing position.
-  const active = findActivePosition(symbol);
-  if (active) {
+  // Active OR pending-limit guard. If we have:
+  //   - an active position (market or filled-limit) on this symbol → monitor owns it
+  //   - a pending limit waiting for fill on this symbol → it might fill any
+  //     minute; opening a second position now creates double exposure
+  // In both cases skip — let the existing position run its course first.
+  const occupied = findActiveOrPendingPosition(symbol);
+  if (occupied) {
     logger.info(
-      { symbol, active_id: active.id, side: active.side },
-      'active position exists — monitor owns lifecycle, skipping decide',
+      { symbol, occupied_id: occupied.id, side: occupied.side, status: occupied.status },
+      'symbol occupied (active or pending) — skipping decide to avoid double exposure',
     );
     return;
   }

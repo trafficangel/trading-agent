@@ -13,6 +13,7 @@ import { sendMessage } from './telegram/bot.js';
 import { startupBanner, statusReply } from './telegram/templates.js';
 import { countSignalsSince } from './db/repos/signals.js';
 import { closeDb } from './db/client.js';
+import { closeBrowser } from './browser/tradingview.js';
 
 const startedAt = Date.now();
 
@@ -46,10 +47,24 @@ async function main(): Promise<void> {
   sendMessage({ channel: 'logs', text: startupBanner(config.MODE, config.PORT), disable_notification: true })
     .catch((err) => logger.error({ err }, 'telegram startup banner failed'));
 
+  // Graceful shutdown order matters:
+  //   1. Stop accepting new HTTP (app.close)
+  //   2. Close Playwright browser (releases /tmp/chromium handles)
+  //   3. Close DB connection (flushes WAL)
+  // Liquidations WebSocket and setInterval timers are .unref()'d so they
+  // don't block exit; OS reclaims sockets on process.exit.
+  // 5-second hard timeout so a stuck cleanup doesn't block systemd's
+  // restart cycle.
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'shutting down');
+    const timer = setTimeout(() => {
+      logger.warn('shutdown taking >5s, forcing exit');
+      process.exit(1);
+    }, 5000);
+    timer.unref();
     try {
       await app.close();
+      await closeBrowser();
       closeDb();
     } catch (err) {
       logger.error({ err }, 'shutdown error');
