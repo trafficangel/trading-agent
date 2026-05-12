@@ -4,7 +4,6 @@ import {
   insertDecision,
   findActiveOrPendingPosition,
 } from '../db/repos/decisions.js';
-import { countFreshSignals } from '../db/repos/signals.js';
 import { callLlm } from '../llm/client.js';
 import { critiqueDecision } from '../llm/critique.js';
 import { captureChartCached } from '../browser/tradingview.js';
@@ -96,30 +95,15 @@ export async function maybeDecide(symbol: string): Promise<void> {
   // Note: chop regime gate REMOVED. The LLM sees ATR(14) 15m directly in
   // the volume profile block and can self-assess volatility regime. See
   // git history (2026-05-11) for the percentile-bias rationale.
-
-  // === FRESH-ACTIVITY PRE-FILTER ===
-  // If no NEW LuxAlgo events fired on subject TFs (15m/1H/4H) in the last
-  // 30 minutes, the chart looks identical to what it looked like at the
-  // previous tick — Claude will reach the same conclusion and burn tokens
-  // doing it. Skip the LLM call entirely (no DB row, no Telegram noise).
   //
-  // 30 min window covers exactly TWO 15m bar closes, so we always see
-  // at least one fresh signal between consecutive ticks when the market
-  // is actually active. If even one TF fires (e.g. a 15m bullish+ or 1H
-  // CHoCH), the filter passes — that's "something changed, ask Claude".
-  //
-  // Subject TFs only ('15', '60', '240') — 5m is too noisy to count as
-  // a freshness signal on its own, and 1D fires rarely enough that we
-  // don't want to gate on its absence.
-  const FRESH_WINDOW_MS = 30 * 60 * 1000;
-  const freshCount = countFreshSignals(symbol, Date.now() - FRESH_WINDOW_MS);
-  if (freshCount === 0) {
-    logger.info(
-      { symbol, window_min: 30 },
-      'no fresh signals in last 30 min — skipping LLM (silent SKIP, no DB row)',
-    );
-    return;
-  }
+  // Also tried: fresh-signal pre-filter (skip LLM if no new LuxAlgo alert
+  // on 15m/1H/4H in last 30 min). Reverted same day — alerts don't equal
+  // trade moments. A common pattern is: OB formed at T+0 with one alert,
+  // then price retests OB at T+45min with NO new alert — that retest is
+  // often the best entry of the day. Gating on alert-recency would silently
+  // skip exactly the kind of structural setup the system is supposed to
+  // catch. The right place for "is this tradeable right now" judgment is
+  // inside the LLM, not as a pre-filter outside it.
 
   logger.info(
     {
@@ -127,7 +111,6 @@ export async function maybeDecide(symbol: string): Promise<void> {
       bullish_count: agg.bullish,
       bearish_count: agg.bearish,
       signals: agg.signals.length,
-      fresh_signals_30m: freshCount,
     },
     'invoking LLM',
   );
