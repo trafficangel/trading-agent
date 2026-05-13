@@ -23,6 +23,8 @@ type DecisionDayRow = {
   pnl_pct: number | null;
   pnl_r: number | null;
   features_json: string | null;
+  /** A/B bucket — 'llm' or 'signal'. Migration 008. */
+  track: string;
 };
 
 const sigsToday = db.prepare<[number], { symbol: string; timeframe: string; c: number }>(
@@ -31,7 +33,7 @@ const sigsToday = db.prepare<[number], { symbol: string; timeframe: string; c: n
 const SELECT_COLS = `
   id, created_at, symbol, decision, side, entry, sl, tp_json,
   status, parent_decision_id, closed_at, filled_at, pending_until, reasoning_short,
-  close_price, close_reason, pnl_pct, pnl_r, features_json
+  close_price, close_reason, pnl_pct, pnl_r, features_json, track
 `;
 const decisionsToday = db.prepare<[number], DecisionDayRow>(
   `SELECT ${SELECT_COLS} FROM decisions WHERE created_at >= ? ORDER BY created_at ASC`,
@@ -154,12 +156,24 @@ async function tick(now: Date = new Date()): Promise<void> {
   }
   lines.push('');
 
-  // --- Decisions counts ---
-  lines.push(`<b>Решения LLM:</b> ${allDec.length}`);
+  // --- Decisions counts + per-track breakdown ---
+  // "Решения" instead of "Решения LLM" because Track B (signal-trader)
+  // also writes decisions here without involving Claude. Per-track
+  // counters help during the A/B test.
+  const llmDec = allDec.filter((d) => d.track === 'llm');
+  const sigDec = allDec.filter((d) => d.track === 'signal');
+  lines.push(`<b>Решения за день:</b> ${allDec.length}`);
   if (allDec.length) {
     lines.push(
       `  📈 OPEN: <b>${counts.OPEN}</b>  ·  🏁 CLOSE: <b>${counts.CLOSE}</b>  ·  🔧 MODIFY: <b>${counts.MODIFY}</b>  ·  ⏸ SKIP: <b>${counts.SKIP}</b>`,
     );
+    if (llmDec.length > 0 && sigDec.length > 0) {
+      lines.push(`  🤖 LLM: <b>${llmDec.length}</b>  ·  📡 Signal: <b>${sigDec.length}</b>`);
+    } else if (sigDec.length > 0) {
+      lines.push(`  📡 Все сделки — Track B (Signal, без LLM)`);
+    } else if (llmDec.length > 0) {
+      lines.push(`  🤖 Все сделки — Track A (LLM)`);
+    }
   }
   lines.push('');
 
@@ -202,8 +216,10 @@ async function tick(now: Date = new Date()): Promise<void> {
       const usdStr = `${usdPnl >= 0 ? '+' : ''}$${usdPnl.toFixed(2)}`;
       const etype = entryTypeOf(t);
       const typeTag = etype === 'limit' ? ' <i>limit</i>' : '';
+      // Track-aware trade ID prefix ('S#' for signal, '#' for LLM).
+      const idPrefix = t.track === 'signal' ? 'S#' : '#';
       lines.push(
-        `  ${reasonEmoji(t.close_reason)} #${t.id.toString().padStart(4, '0')}${typeTag} ${sideE} ${t.symbol} · ${t.entry} → ${t.close_price ?? '?'} · <b>${pnlStr}</b> ${rStr} · ${usdStr}`,
+        `  ${reasonEmoji(t.close_reason)} ${idPrefix}${t.id.toString().padStart(4, '0')}${typeTag} ${sideE} ${t.symbol} · ${t.entry} → ${t.close_price ?? '?'} · <b>${pnlStr}</b> ${rStr} · ${usdStr}`,
       );
     }
   } else {
@@ -220,8 +236,9 @@ async function tick(now: Date = new Date()): Promise<void> {
       const ageStr = ageMin < 60 ? `${ageMin}мин` : `${Math.round(ageMin / 60)}ч`;
       const etype = entryTypeOf(t);
       const tag = etype === 'limit' ? ' <i>(filled limit)</i>' : '';
+      const idPrefix = t.track === 'signal' ? 'S#' : '#';
       lines.push(
-        `  #${t.id.toString().padStart(4, '0')}${tag} ${sideE} ${t.symbol} @ ${t.entry} (открыта ${ageStr} назад)`,
+        `  ${idPrefix}${t.id.toString().padStart(4, '0')}${tag} ${sideE} ${t.symbol} @ ${t.entry} (открыта ${ageStr} назад)`,
       );
     }
     lines.push('');
