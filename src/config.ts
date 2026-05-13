@@ -28,6 +28,24 @@ const Schema = z.object({
   DAILY_DD_LIMIT_PCT: z.coerce.number().positive().default(2.0),
   COOLDOWN_MIN_SAME_SYMBOL: z.coerce.number().int().nonnegative().default(15),
 
+  /**
+   * A/B test toggle for Track B (pure-LuxAlgo signal trader, no LLM).
+   * When true, qualifying webhook events trigger immediate OPEN decisions
+   * stored with track='signal'. Independent from the LLM cron flow.
+   * Default off — turn on explicitly when ready to run the parallel test.
+   */
+  SIGNAL_TRADER_ENABLED: z.coerce.boolean().default(false),
+
+  /** Size (% of equity) per signal-track trade. Lower than LLM track by
+   *  default because signal trades fire on every qualifying event (high
+   *  frequency), so each individual bet should be small. */
+  SIGNAL_TRADE_SIZE_PCT: z.coerce.number().positive().default(0.5),
+
+  /** Minimum gap between signal-track OPENs on the SAME symbol, in min.
+   *  Prevents back-to-back trades on the same bar when 2 signals fire in
+   *  quick succession (e.g. bullish_plus on 15m + 5m almost simultaneously). */
+  SIGNAL_COOLDOWN_MIN: z.coerce.number().int().nonnegative().default(30),
+
   MODE: Mode.default('telemetry'),
 
   CHROMIUM_PATH: z.string().optional(),

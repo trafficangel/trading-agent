@@ -2,7 +2,7 @@ import { aggregateSymbol } from '../signals/aggregator.js';
 import { extractFeatures } from '../signals/features.js';
 import {
   insertDecision,
-  findActiveOrPendingPosition,
+  findActiveOrPendingByTrack,
   findAllActiveOrPending,
 } from '../db/repos/decisions.js';
 import { callLlm } from '../llm/client.js';
@@ -85,7 +85,9 @@ export async function maybeDecide(symbol: string): Promise<void> {
   //   - a pending limit waiting for fill on this symbol → it might fill any
   //     minute; opening a second position now creates double exposure
   // In both cases skip — let the existing position run its course first.
-  const occupied = findActiveOrPendingPosition(symbol);
+  // Track-scoped occupancy: LLM track ignores signal-track positions
+  // (they're an independent A/B bucket — see migration 008).
+  const occupied = findActiveOrPendingByTrack(symbol, 'llm');
   if (occupied) {
     logger.info(
       { symbol, occupied_id: occupied.id, side: occupied.side, status: occupied.status },

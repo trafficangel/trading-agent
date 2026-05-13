@@ -119,9 +119,14 @@ export type DecisionPostInput = {
   parentTradeId?: number;
 };
 
-/** Russian Telegram caption for OPEN/CLOSE/MODIFY (max 1024 chars). */
+/** Russian Telegram caption for OPEN/CLOSE/MODIFY (max 1024 chars).
+ *  Used by Track A (LLM). Track B has its own caption inside
+ *  src/signals/signal-trader.ts with [TRACK B · SIGNAL] prefix. */
 export function tradeCaption(i: DecisionPostInput): string {
   const d = i.decision;
+  // Visual track marker — even though Track A is the default, being
+  // explicit prevents confusion when reading mixed posts in the channel.
+  const trackBadge = '[A · LLM] ';
   const tradeId = `#${i.decisionId.toString().padStart(4, '0')}`;
   const parentRef =
     i.parentTradeId !== undefined
@@ -131,7 +136,7 @@ export function tradeCaption(i: DecisionPostInput): string {
   const sideRu = d.side ? SIDE_RU[d.side] ?? d.side : '';
   const shadow = i.shadowMode ? ' <i>(shadow)</i>' : '';
   const lines: string[] = [
-    `<b>${DECISION_RU[d.decision] ?? d.decision} ${tradeId}</b>${parentRef}${shadow}`,
+    `<b>${trackBadge}${DECISION_RU[d.decision] ?? d.decision} ${tradeId}</b>${parentRef}${shadow}`,
     `${sideE} <b>${escapeHtml(i.symbol)}</b>${sideRu ? ' ' + sideRu : ''} · ${tfLabel('15')} entry`,
   ];
 

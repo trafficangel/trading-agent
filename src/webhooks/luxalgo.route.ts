@@ -7,6 +7,7 @@ import { rawSignalLog } from '../telegram/templates.js';
 import { logger } from '../lib/logger.js';
 import { findActivePosition } from '../db/repos/decisions.js';
 import { monitorPosition } from '../jobs/monitor.js';
+import { maybeTriggerSignalTrade } from '../signals/signal-trader.js';
 
 /**
  * Throttle ad-hoc monitor triggers per symbol. A new signal arriving on an
@@ -55,6 +56,15 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
 
       sendMessage({ channel: 'logs', text: rawSignalLog(parsed.data, req.body), disable_notification: true })
         .catch((err) => logger.error({ err }, 'telegram log push failed'));
+
+      // === TRACK B — pure-signal trader ===
+      // Fire-and-forget. The signal-trader checks SIGNAL_TRADER_ENABLED
+      // internally and silently no-ops when the flag is off, so this is
+      // safe to call unconditionally. Runs INSTEAD of waiting for the
+      // 15m decide cron — that's the whole "event-driven" point of Track B.
+      void maybeTriggerSignalTrade(parsed.data).catch((err) =>
+        logger.error({ err, symbol: parsed.data.symbol }, 'signal-trader: trigger failed'),
+      );
 
       // Ad-hoc monitor trigger for ACTIVE positions only. New OPEN candidates
       // wait for the 15m decide-cron (scheduled architecture). But if we

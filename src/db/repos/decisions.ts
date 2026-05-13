@@ -34,7 +34,12 @@ export type DecisionRow = {
   features_json: string | null;
   pending_until: number | null;
   filled_at: number | null;
+  /** A/B test bucket. 'llm' = original Claude-driven decision flow,
+   *  'signal' = pure-LuxAlgo rule-based trader (no LLM). */
+  track: string;
 };
+
+export type Track = 'llm' | 'signal';
 
 export type CloseReason = 'tp_hit' | 'sl_hit' | 'llm_close' | 'manual';
 
@@ -46,8 +51,8 @@ const insertStmt = db.prepare(`
     confidence, reasoning_short, reasoning_full, raw_response,
     status, parent_decision_id,
     sl_reason, tp_reason, invalidation, features_json,
-    pending_until, filled_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    pending_until, filled_at, track
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const findPendingLimitsStmt = db.prepare<[], DecisionRow>(`
@@ -124,6 +129,8 @@ export type InsertDecisionInput = {
   /** TTL for pending limit orders. After this wall-clock ms, the limit
    *  will be auto-cancelled by tpsl-monitor. Null for market/non-limit. */
   pendingUntil?: number | null;
+  /** A/B track bucket. Defaults to 'llm' for back-compat. */
+  track?: Track;
 };
 
 export function insertDecision(input: InsertDecisionInput): number {
@@ -159,6 +166,7 @@ export function insertDecision(input: InsertDecisionInput): number {
     input.features ? JSON.stringify(input.features) : null,
     input.pendingUntil ?? null,
     null, // filled_at — set later when limit fills
+    input.track ?? 'llm',
   );
   const newId = Number(result.lastInsertRowid);
 
@@ -229,6 +237,20 @@ const findActiveOrPendingBySymbolStmt = db.prepare<[string], DecisionRow>(`
   ORDER BY created_at DESC LIMIT 1
 `);
 
+const findActiveOrPendingBySymbolTrackStmt = db.prepare<[string, string], DecisionRow>(`
+  SELECT * FROM decisions
+  WHERE decision = 'OPEN' AND symbol = ? AND track = ?
+    AND (status = 'active' OR status = 'pending')
+  ORDER BY created_at DESC LIMIT 1
+`);
+
+const findLastSignalOpenStmt = db.prepare<[string, number], DecisionRow>(`
+  SELECT * FROM decisions
+  WHERE decision = 'OPEN' AND symbol = ? AND track = 'signal'
+    AND created_at >= ?
+  ORDER BY created_at DESC LIMIT 1
+`);
+
 const findAllActiveOrPendingBySymbolStmt = db.prepare<[string], DecisionRow>(`
   SELECT * FROM decisions
   WHERE decision = 'OPEN' AND symbol = ?
@@ -248,6 +270,19 @@ const findAllActiveOrPendingBySymbolStmt = db.prepare<[string], DecisionRow>(`
  */
 export function findActiveOrPendingPosition(symbol: string): DecisionRow | null {
   return findActiveOrPendingBySymbolStmt.get(symbol) ?? null;
+}
+
+/** Track-aware variant — LLM and signal tracks have INDEPENDENT
+ *  occupancy. Track 'llm' should only check llm-track positions when
+ *  deciding to skip, and track 'signal' only signal-track. */
+export function findActiveOrPendingByTrack(symbol: string, track: Track): DecisionRow | null {
+  return findActiveOrPendingBySymbolTrackStmt.get(symbol, track) ?? null;
+}
+
+/** Most recent SIGNAL-track OPEN on this symbol within the cooldown
+ *  window. Used by signal-trader to enforce SIGNAL_COOLDOWN_MIN. */
+export function findRecentSignalOpen(symbol: string, sinceMs: number): DecisionRow | null {
+  return findLastSignalOpenStmt.get(symbol, sinceMs) ?? null;
 }
 
 /** All active or pending OPEN rows on this symbol. Spider-mode counts
