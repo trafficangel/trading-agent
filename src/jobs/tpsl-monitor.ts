@@ -124,10 +124,12 @@ async function checkPosition(pInput: DecisionRow): Promise<void> {
 
   const reason = hit === 'tp' ? 'tp_hit' : 'sl_hit';
   // R-multiple is computed against the ORIGINAL SL — that's the risk we
-  // actually took. p.sl in memory is still the original (the BE move only
-  // updated DB and effectiveSl). A BE-stopped trade closes at entry → 0R.
-  // A TP-hit after BE move still credits full R from the original setup.
-  const { pnlPct, pnlR } = calcPnl(p.side, p.entry, p.sl, closePrice);
+  // actually took. Use the frozen original_sl column (migration 009).
+  // p.sl in DB may have been overwritten by BE move (entry-level), so
+  // using it for R math would divide by zero on TP-hit-after-BE. Fall
+  // back to p.sl if original_sl missing (very old rows, pre-migration).
+  const slForR = p.original_sl ?? p.sl;
+  const { pnlPct, pnlR } = calcPnl(p.side, p.entry, slForR, closePrice);
 
   const closedByUs = closePositionWithStats({ id: p.id, closePrice, closeReason: reason, pnlPct, pnlR });
   if (!closedByUs) {

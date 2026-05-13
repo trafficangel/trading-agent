@@ -52,7 +52,15 @@ async function main(): Promise<void> {
   startHeartbeatJob();
   startDailyWrapJob();
   startHealthJob();
-  startChartTestJob();
+  // chart-test (4h screenshots to Logs) is purely Track A QC — it
+  // verifies TradingView session still works for LLM vision input.
+  // Track B doesn't use screenshots, so when LLM track is off we skip
+  // this entirely to avoid noise + Playwright resource use.
+  if (config.LLM_TRACK_ENABLED) {
+    startChartTestJob();
+  } else {
+    logger.info('chart-test cron skipped — LLM_TRACK_ENABLED=false');
+  }
   startSelfReviewJob();
   startLiquidationsListener();
 

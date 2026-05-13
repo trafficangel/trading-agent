@@ -37,6 +37,10 @@ export type DecisionRow = {
   /** A/B test bucket. 'llm' = original Claude-driven decision flow,
    *  'signal' = pure-LuxAlgo rule-based trader (no LLM). */
   track: string;
+  /** The SL at the moment the trade was opened. Stable — never modified
+   *  by BE move or LLM-MODIFY. Used by calcPnl to compute R-multiple
+   *  honestly (denominator = original risk, not the moved SL). */
+  original_sl: number | null;
 };
 
 export type Track = 'llm' | 'signal';
@@ -51,8 +55,8 @@ const insertStmt = db.prepare(`
     confidence, reasoning_short, reasoning_full, raw_response,
     status, parent_decision_id,
     sl_reason, tp_reason, invalidation, features_json,
-    pending_until, filled_at, track
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    pending_until, filled_at, track, original_sl
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const findPendingLimitsStmt = db.prepare<[], DecisionRow>(`
@@ -173,6 +177,7 @@ export function insertDecision(input: InsertDecisionInput): number {
     input.pendingUntil ?? null,
     null, // filled_at — set later when limit fills
     input.track ?? 'llm',
+    input.decision.sl ?? null, // original_sl — frozen at open time
   );
   const newId = Number(result.lastInsertRowid);
 
