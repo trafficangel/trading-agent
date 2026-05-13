@@ -1,75 +1,231 @@
-# TradingView alerts → trading-agent
+# TradingView Alerts — Полный Setup Guide (Track B)
 
-Каждый алерт LuxAlgo шлёт `POST` на `https://<твой-домен>/webhook/luxalgo/<WEBHOOK_SECRET>` с JSON-телом ниже. Все алерты — **Once Per Bar Close**.
+Конфигурация всех алертов для signal-trader. Этот документ — твоя
+шпаргалка при настройке в TradingView.
 
-## Webhook URL и заголовок
+## ⚙ Общие настройки для КАЖДОГО алерта
 
-- URL: `https://<домен>/webhook/luxalgo/<WEBHOOK_SECRET>` (значение `WEBHOOK_SECRET` — из `.env`)
-- Headers: TradingView не позволяет кастомные заголовки. Авторизация — через секрет в URL.
-- Method: POST с `Content-Type: application/json`.
+При создании алерта в TradingView (правый клик на индикатор → Add alert) укажи:
 
-## Поля JSON
+| Поле | Значение |
+|------|----------|
+| **Condition** | См. таблицу ниже для каждого алерта |
+| **Trigger** | **`Once Per Bar Close`** ⭐ (критически важно — не repaint) |
+| **Expiration** | `Open-ended alert` (бессрочный) |
+| **Alert name** | (любое, для удобства) |
+| **Webhook URL** | `https://<твой_домен>/webhook/luxalgo/<WEBHOOK_SECRET>` |
+| **Message** | JSON payload — см. ниже |
 
-| поле | тип | пример | описание |
-|------|-----|--------|----------|
-| `symbol` | string | `"BTCUSDT"` | биржевой тикер (Bybit perp) |
-| `timeframe` | string | `"5"` / `"15"` | минуты, как TradingView отдаёт `{{interval}}` |
-| `source` | enum | `"signals_overlays"` / `"pac"` / `"oscillator_matrix"` | какой LuxAlgo индикатор |
-| `event` | string | `"bullish_plus"` | конкретное событие, см. ниже |
-| `direction` | enum | `"up"` / `"down"` / `"neutral"` | опционально |
-| `price` | number | `67234.5` | цена в момент бара |
-| `bar_time` | number | `1714867200000` | unix ms закрытия бара (TradingView `{{timenow}}` или `{{time}}`) |
+### ❌ НЕ используй
 
-## Список алертов
+- ❌ `Once Per Bar` — fires при первом появлении сигнала в баре, может repaint
+- ❌ `Only Once` — сработает один раз и алерт выключится
+- ❌ `Every time` — спам, repaint
 
-Создавай по одному алерту на каждое событие × каждый символ × таймфрейм 5m и 15m.
+---
 
-### Signals & Overlays
-| event (значение) | когда срабатывает |
-|------------------|--------------------|
-| `bullish_plus` | сигнал Bullish+ |
-| `bearish_plus` | сигнал Bearish+ |
-| `smart_trail_flip_up` | Smart Trail сменил цвет на бычий |
-| `smart_trail_flip_down` | Smart Trail сменил цвет на медвежий |
-| `tp1_hit` / `tp2_hit` / `tp3_hit` | пробитие TP-зон |
+## 📋 Базовые алерты (24 шт.) — обязательно
 
-### Price Action Concepts
-| event | описание |
-|-------|----------|
-| `bos_up` / `bos_down` | подтверждённый Break Of Structure |
-| `choch_up` / `choch_down` | Change Of Character |
-| `ob_bullish_formed` / `ob_bearish_formed` | формирование Order Block |
-| `fvg_up` / `fvg_down` | новый Fair Value Gap |
+Все на символе **BYBIT:TONUSDT.P** (Bybit USDT perpetual).
 
-### Oscillator Matrix
-| event | описание |
-|-------|----------|
-| `mf_extreme_up` / `mf_extreme_down` | Money Flow в зоне экстремума |
-| `reversal_signal_up` / `reversal_signal_down` | сигнал разворота |
-| `divergence_bullish` / `divergence_bearish` | дивергенция |
+### S&O — Bullish+ / Bearish+ (8 алертов: 4 TF × 2 стороны)
 
-## Шаблон сообщения (Message в окне Create Alert)
+| # | TF | Indicator condition | Event в JSON |
+|---|------|--------------------|--------------|
+| 1 | 5m | `Signals & Overlays` → `Bullish+` | `bullish_plus` |
+| 2 | 5m | `Signals & Overlays` → `Bearish+` | `bearish_plus` |
+| 3 | 15m | `Signals & Overlays` → `Bullish+` | `bullish_plus` |
+| 4 | 15m | `Signals & Overlays` → `Bearish+` | `bearish_plus` |
+| 5 | 1H | `Signals & Overlays` → `Bullish+` | `bullish_plus` |
+| 6 | 1H | `Signals & Overlays` → `Bearish+` | `bearish_plus` |
+| 7 | 4H | `Signals & Overlays` → `Bullish+` | `bullish_plus` |
+| 8 | 4H | `Signals & Overlays` → `Bearish+` | `bearish_plus` |
 
-Замени `{{...}}` на нужное событие, остальное TradingView подставит сам.
-
+**Message JSON для всех Bullish+:**
 ```json
-{
-  "symbol": "{{ticker}}",
-  "timeframe": "{{interval}}",
-  "source": "signals_overlays",
-  "event": "bullish_plus",
-  "direction": "up",
-  "price": {{close}},
-  "bar_time": {{timenow}}
-}
+{"symbol":"{{ticker}}","timeframe":"{{interval}}","source":"signals_overlays","event":"bullish_plus","direction":"up","price":{{close}},"bar_time":{{time}}}
 ```
 
-Для `pac` (Price Action Concepts) поставь `"source": "pac"` и `event` по таблице. Для Oscillator Matrix — `"source": "oscillator_matrix"`.
+**Message JSON для всех Bearish+:**
+```json
+{"symbol":"{{ticker}}","timeframe":"{{interval}}","source":"signals_overlays","event":"bearish_plus","direction":"down","price":{{close}},"bar_time":{{time}}}
+```
 
-## Проверка алерта
+### PAC — CHoCH+ Up / Down (6 алертов: 3 TF × 2 стороны)
 
-После создания одного алерта запусти бота и подожди ближайший close. В Telegram-канал «Logs» должно прийти сообщение с твоим JSON в `<pre>`-блоке. Если не пришло:
+| # | TF | Indicator condition | Event |
+|---|------|--------------------|---------|
+| 9 | 15m | `Price Action Concepts` → `CHoCH+` (Bullish) | `choch_swing_plus_up` |
+| 10 | 15m | `Price Action Concepts` → `CHoCH+` (Bearish) | `choch_swing_plus_down` |
+| 11 | 1H | same → Bullish CHoCH+ | `choch_swing_plus_up` |
+| 12 | 1H | same → Bearish CHoCH+ | `choch_swing_plus_down` |
+| 13 | 4H | same → Bullish CHoCH+ | `choch_swing_plus_up` |
+| 14 | 4H | same → Bearish CHoCH+ | `choch_swing_plus_down` |
 
-1. Проверь, что URL без опечаток (TradingView показывает HTTP-код ответа в `Alert Log`).
-2. Сверь поле `secret` в URL с `.env`.
-3. Открой `journalctl -u trading-agent -f` на VPS — увидишь `invalid_payload` если поля не совпадают.
+**Message JSON CHoCH+ Up:**
+```json
+{"symbol":"{{ticker}}","timeframe":"{{interval}}","source":"pac","event":"choch_swing_plus_up","direction":"up","price":{{close}},"bar_time":{{time}}}
+```
+
+**Message JSON CHoCH+ Down:**
+```json
+{"symbol":"{{ticker}}","timeframe":"{{interval}}","source":"pac","event":"choch_swing_plus_down","direction":"down","price":{{close}},"bar_time":{{time}}}
+```
+
+### PAC — BOS Up / Down (6 алертов: 3 TF × 2 стороны)
+
+| # | TF | Indicator condition | Event |
+|---|------|--------------------|---------|
+| 15 | 15m | `Price Action Concepts` → `Bullish BOS` | `bos_swing_up` |
+| 16 | 15m | `Price Action Concepts` → `Bearish BOS` | `bos_swing_down` |
+| 17 | 1H | same → Bullish BOS | `bos_swing_up` |
+| 18 | 1H | same → Bearish BOS | `bos_swing_down` |
+| 19 | 4H | same → Bullish BOS | `bos_swing_up` |
+| 20 | 4H | same → Bearish BOS | `bos_swing_down` |
+
+**Message JSON BOS Up:**
+```json
+{"symbol":"{{ticker}}","timeframe":"{{interval}}","source":"pac","event":"bos_swing_up","direction":"up","price":{{close}},"bar_time":{{time}}}
+```
+
+**Message JSON BOS Down:**
+```json
+{"symbol":"{{ticker}}","timeframe":"{{interval}}","source":"pac","event":"bos_swing_down","direction":"down","price":{{close}},"bar_time":{{time}}}
+```
+
+### S&O — Reversal Signals (4 алерта: 2 TF × 2 стороны)
+
+| # | TF | Indicator condition | Event |
+|---|------|--------------------|---------|
+| 21 | 15m | `Signals & Overlays` → `Reversal Signal` (Bullish) | `reversal_signal_up` |
+| 22 | 15m | `Signals & Overlays` → `Reversal Signal` (Bearish) | `reversal_signal_down` |
+| 23 | 1H | same → Bullish | `reversal_signal_up` |
+| 24 | 1H | same → Bearish | `reversal_signal_down` |
+
+**Message JSON Reversal Up:**
+```json
+{"symbol":"{{ticker}}","timeframe":"{{interval}}","source":"signals_overlays","event":"reversal_signal_up","direction":"up","price":{{close}},"bar_time":{{time}}}
+```
+
+**Message JSON Reversal Down:**
+```json
+{"symbol":"{{ticker}}","timeframe":"{{interval}}","source":"signals_overlays","event":"reversal_signal_down","direction":"down","price":{{close}},"bar_time":{{time}}}
+```
+
+---
+
+## ❌ Эти алерты УДАЛИ в TradingView (если есть)
+
+Не используются signal-trader'ом — просто пишутся в БД и засоряют логи:
+
+- `OB Bullish Created` / `OB Bearish Created` — уведомления о появлении уровня, не entry-сигналы
+- `MF Extreme Up` / `MF Extreme Down` — oscillator extremes (могут быть как confluence — см. опциональные)
+- `Divergence Bullish` / `Divergence Bearish` — тоже confluence, не entry
+
+---
+
+## 🟡 Опциональные алерты (confluence boosters)
+
+Эти можно настроить позже если захочешь усиливать фильтрацию. Сейчас не используются signal-trader'ом, но я могу добавить confluence-логику когда покажет смысл по данным.
+
+### OM — Oscillator Matrix (8 опциональных алертов)
+
+| Indicator | TF | Event |
+|-----------|------|----------|
+| `Oscillator Matrix` → `Money Flow Extreme Up` | 15m | `mf_extreme_up` |
+| `Oscillator Matrix` → `Money Flow Extreme Down` | 15m | `mf_extreme_down` |
+| `Oscillator Matrix` → `Divergence Bullish` | 15m | `divergence_bullish` |
+| `Oscillator Matrix` → `Divergence Bearish` | 15m | `divergence_bearish` |
+| (same) | 1H | mirror |
+
+**Message JSON MF Extreme Up:**
+```json
+{"symbol":"{{ticker}}","timeframe":"{{interval}}","source":"oscillator_matrix","event":"mf_extreme_up","direction":"up","price":{{close}},"bar_time":{{time}}}
+```
+
+(Аналогично для `mf_extreme_down`, `divergence_bullish`, `divergence_bearish` — меняй только `event` и `direction`.)
+
+---
+
+## ✅ Итоговая таблица
+
+| Группа | Алертов | Используется Track B | Приоритет |
+|--------|---------|----------------------|-----------|
+| **Bullish+/Bearish+** (S&O) | 8 (5m/15m/1H/4H × 2) | ✅ ДА | 🔴 высокий |
+| **CHoCH+** (PAC) | 6 (15m/1H/4H × 2) | ✅ ДА | 🔴 высокий |
+| **BOS** (PAC) | 6 (15m/1H/4H × 2) | ✅ ДА | 🟡 средний |
+| **Reversal Signal** (S&O) | 4 (15m/1H × 2) | ✅ ДА | 🟡 средний |
+| **MF Extreme** (OM) | 4 | ⏸ Пока нет | 🟢 опционально |
+| **Divergence** (OM) | 4 | ⏸ Пока нет | 🟢 опционально |
+
+**ИТОГО:** 24 базовых + 8 опциональных = до **32 алертов** на TON.
+
+---
+
+## 🔍 Как проверить что алерты приходят
+
+После настройки каждого алерта — подожди ближайший close 5m свечи (≤5 мин) и проверь:
+
+### 1. Telegram Logs канал
+Должно прийти raw-сообщение с эмодзи source и direction.
+
+### 2. БД на VPS
+```bash
+ssh trading-vps "su - trader -c 'sqlite3 /home/trader/apps/trading-agent/data/trading.sqlite \"SELECT datetime(received_at/1000,\\\"unixepoch\\\") as t, timeframe, event FROM signals WHERE received_at > strftime(\\\"%s\\\",\\\"now\\\",\\\"-30 minutes\\\")*1000 ORDER BY received_at DESC\"'"
+```
+
+### 3. journalctl
+```bash
+ssh trading-vps "sudo journalctl -u trading-agent --since '10 minutes ago' --no-pager | grep 'signal stored'"
+```
+
+### 4. TradingView Alert Log
+Открой в TradingView: `Alerts` (правая панель) → `Alert Log` — там HTTP-код ответа. `200` = ОК, любая ошибка = что-то не так.
+
+---
+
+## ⚠ Важные ньюансы
+
+### 1. Repaint vs Once Per Bar Close
+LuxAlgo сигналы могут repaint'ить **во время** формирования бара. Только закрытие бара даёт окончательный сигнал. `Once Per Bar Close` гарантирует стабильный сигнал.
+
+### 2. Timezone — UTC
+TradingView отправляет `{{time}}` как UNIX millisecond UTC. Webhook'ы интерпретируют правильно.
+
+### 3. Дедупликация
+Каждый сигнал имеет хеш `(symbol|event|bar_time)`. Если один и тот же сигнал прилетит дважды (например, перенастройка алерта) — второй будет проигнорирован.
+
+### 4. Какой Symbol указывать
+В TradingView ticker: **`BYBIT:TONUSDT.P`** (с `.P` для perpetual). Webhook `{{ticker}}` извлечёт `TONUSDT.P`, наш код нормализует к `TONUSDT`.
+
+### 5. Несколько символов
+Если в будущем добавишь BTCUSDT/ETHUSDT/etc — каждый символ нужно настроить отдельно (TradingView один алерт = один тикер). 24 алерта × N символов.
+
+### 6. Закрытие бара ≠ момент алерта
+TradingView отправляет webhook через **0-5 секунд** после закрытия бара. Из-за этого:
+- 5m бар закрылся в 14:25:00 UTC → webhook прилетит в 14:25:01-05
+- Цена в `{{close}}` = цена закрытия бара (точная, не текущая)
+- В `bar_time` = timestamp начала бара (для 14:25 закрытия = 14:20:00 UTC = timestamp 14:20)
+
+---
+
+## 📐 Какая логика signal-trader применяет к каждому сигналу
+
+При получении webhook на 14:25:03 UTC с `event=bullish_plus`, `tf=15m`:
+
+1. **Event qualifies?** `bullish_plus` ∈ `ENTRY_EVENTS_LONG` ✅
+2. **TF в TRADEABLE_TIMEFRAMES?** `15m` ✅
+3. **Confluence нужна?** Для 5m — да (15m в last 60 min). Для 15m+ — нет.
+4. **Cooldown?** Per-TF:
+   - 5m: 30 мин с последнего Track B OPEN на TON
+   - 15m: 30 мин
+   - 1H: 2 часа
+   - 4H: 6 часов
+   - 1D: 24 часа
+5. **Slot?** Нет другой active+pending Track B позиции на TON
+6. **Геометрия** (по ATR(14) на 15m, кэш 60 сек):
+   - SL = entry − 1.5×ATR (long) / + 1.5×ATR (short)
+   - TP = entry + 3×ATR / − 3×ATR (R:R 1:2)
+   - Fallback (ATR API down): SL=1%, TP=2%
+7. **Открытие**: market order, size 0.5%, status='active'
+8. **Telegram**: пост `📡 [TRACK B · SIGNAL] S#NNNN` в Signals
