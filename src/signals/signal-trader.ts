@@ -306,16 +306,40 @@ export async function maybeTriggerSignalTrade(payload: LuxAlgoPayload): Promise<
   const tfSource = REQUIRES_CONFLUENCE[payload.timeframe]
     ? ` · ✅ ${REQUIRES_CONFLUENCE[payload.timeframe]?.higherTf}m confluence`
     : '';
+
+  // Expanded geometry breakdown — user wanted to see WHY these SL/TP
+  // numbers (not just the abstract "1.5×ATR" multiplier).
+  const slDist = Math.abs(geo.entry - geo.sl);
+  const tpDist = Math.abs(geo.tp - geo.entry);
+  const geometryLines =
+    geo.source === 'atr' && atr15m
+      ? [
+          `⚙️ <b>Как рассчитан стоп и цель:</b>`,
+          `   ATR(14) на 15m свече = <code>${atr15m.toFixed(4)}</code> (~<code>${((atr15m / geo.entry) * 100).toFixed(2)}%</code>)`,
+          `   — это типичный размах ОДНОЙ 15m свечи сейчас`,
+          `   SL = 1.5×ATR = <code>${slDist.toFixed(4)}</code> (<code>${geo.slPct.toFixed(2)}%</code>) от входа`,
+          `   TP = 3.0×ATR = <code>${tpDist.toFixed(4)}</code> (<code>${geo.tpPct.toFixed(2)}%</code>) от входа`,
+          `   <i>Стоп шире одной свечи = меньше шанс быть выбитым шумом.</i>`,
+          `   <i>Цель в 2 раза дальше стопа = R:R 1:2.</i>`,
+        ]
+      : [
+          `⚙️ <b>Как рассчитан стоп и цель:</b>`,
+          `   <i>ATR недоступен → fixed 1% SL / 2% TP fallback</i>`,
+          `   SL = <code>1%</code> от входа (<code>${slDist.toFixed(4)}</code>)`,
+          `   TP = <code>2%</code> от входа (<code>${tpDist.toFixed(4)}</code>)`,
+        ];
+
   const tgText = [
     `📡 <b>[TRACK B · SIGNAL] ${tradeIdStr}</b>`,
     `${sideE} <b>${payload.symbol}</b> ${sideRu} · pure-rule trigger`,
     ``,
-    `🎯 Trigger: <code>${payload.event}</code> на <code>${payload.timeframe}m</code>${tfSource}`,
-    `📥 Вход:  <code>${geo.entry}</code> (market)`,
+    `🎯 Сигнал: <code>${payload.event}</code> на <code>${payload.timeframe}m</code>${tfSource}`,
+    `📥 Вход:  <code>${geo.entry}</code> (по рынку)`,
     `🛡 Стоп:  <code>${geo.sl}</code>  (<code>${geo.slPct.toFixed(2)}%</code>)`,
     `🎯 Цель:  <code>${geo.tp}</code>  (<code>${geo.tpPct.toFixed(2)}%</code>)`,
-    `📐 R:R:   <code>1 : ${geo.rr.toFixed(1)}</code>  ·  size <code>${config.SIGNAL_TRADE_SIZE_PCT}%</code>`,
-    `⚙️ Геометрия: <i>${geo.source === 'atr' ? `1.5×ATR / 3×ATR (ATR=${atr15m?.toFixed(4)})` : 'fixed 1% / 2% fallback'}</i>`,
+    `📐 R:R:   <code>1 : ${geo.rr.toFixed(1)}</code>`,
+    ``,
+    ...geometryLines,
     ``,
     `<i>Параллельная стратегия — без LLM, чистые сигналы LuxAlgo.</i>`,
   ].join('\n');
