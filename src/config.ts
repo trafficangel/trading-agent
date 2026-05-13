@@ -3,6 +3,27 @@ import { z } from 'zod';
 
 const Mode = z.enum(['telemetry', 'shadow', 'paper', 'semi_auto', 'full_auto']);
 
+/**
+ * Env-var boolean parser. CRITICAL: do NOT use z.coerce.boolean() — it
+ * interprets EVERY non-empty string (including "false", "0", "no") as
+ * `true` because it's just `Boolean(value)` under the hood. Caused us
+ * a deploy bug 2026-05-13 where LLM_TRACK_ENABLED=false stayed on.
+ *
+ * Accepts: "true"/"1"/"yes"/"on" (case-insensitive) → true
+ * Accepts: "false"/"0"/"no"/"off"/empty → false
+ */
+const envBool = (defaultValue: boolean) =>
+  z.preprocess(
+    (v) => {
+      if (typeof v !== 'string') return v;
+      const s = v.trim().toLowerCase();
+      if (['true', '1', 'yes', 'on'].includes(s)) return true;
+      if (['false', '0', 'no', 'off', ''].includes(s)) return false;
+      return v; // let z.boolean fail validation for anything else
+    },
+    z.boolean().default(defaultValue),
+  );
+
 const Schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -38,7 +59,7 @@ const Schema = z.object({
    * NOT start. tpsl-monitor still runs (rule-based, needed for Track B).
    * Self-review still runs (analyzes whichever track has data).
    */
-  LLM_TRACK_ENABLED: z.coerce.boolean().default(true),
+  LLM_TRACK_ENABLED: envBool(true),
 
   /**
    * A/B test toggle for Track B (pure-LuxAlgo signal trader, no LLM).
@@ -46,7 +67,7 @@ const Schema = z.object({
    * stored with track='signal'. Independent from the LLM cron flow.
    * Default off — turn on explicitly when ready to run the parallel test.
    */
-  SIGNAL_TRADER_ENABLED: z.coerce.boolean().default(false),
+  SIGNAL_TRADER_ENABLED: envBool(false),
 
   /** Size (% of equity) per signal-track trade. Lower than LLM track by
    *  default because signal trades fire on every qualifying event (high
