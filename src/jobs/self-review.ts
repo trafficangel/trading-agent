@@ -40,7 +40,7 @@ import { effectiveScalpFloor } from '../risk/scalp-floor.js';
 
 const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY ?? 'placeholder' });
 
-const WINDOW_MS = 12 * 60 * 60 * 1000;
+const WINDOW_MS = 8 * 60 * 60 * 1000;
 
 type DecisionRowRaw = {
   id: number;
@@ -557,12 +557,15 @@ export async function runSelfReview(): Promise<void> {
 }
 
 export function startSelfReviewJob(): void {
-  // 03:00 and 15:00 UTC — covers EU-morning and US-afternoon analysis windows.
-  // 12h apart means each review sees a fresh half-day of activity.
-  cron.schedule('0 3,15 * * *', () => {
+  // Every 8h: 00:00, 08:00, 16:00 UTC.
+  // User feedback 2026-05-13: 12h was too rare — when system is in
+  // unhelpful state (all-SKIP storm), 12h delay means a full half-day
+  // of paralysis before we even diagnose it. 8h reviews react faster
+  // and still see enough decisions per window for meaningful patterns.
+  cron.schedule('0 0,8,16 * * *', () => {
     runSelfReview().catch((err) => logger.error({ err }, 'self-review crashed'));
   });
-  logger.info('self-review cron started (03:00 + 15:00 UTC, every 12h)');
+  logger.info('self-review cron started (00:00 + 08:00 + 16:00 UTC, every 8h)');
 }
 
 // Make functions reachable for ad-hoc trigger from REPL / debug.

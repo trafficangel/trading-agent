@@ -113,12 +113,26 @@ Pick **swing** (tp_strategy='swing') when:
 - You expect the trade to live HOURS, not minutes.
 - Confidence ≥ 0.50 (unified with scalp floor 2026-05-12).
 
-CRITICAL: minimum confidence for ANY new OPEN is 0.50. If you're
-hesitating in the 0.42-0.49 band — that's a SKIP signal, not a
-borderline OPEN. Backtest of 4 days (2026-05-09..2026-05-12) showed
-EVERY trade with confidence < 0.50 closed at full SL loss. There is
-no shame in SKIP — there's a lot of shame in -1R losses you saw
-coming. When in doubt at 0.45-0.49, SKIP.
+Confidence floors (updated 2026-05-13):
+  swing: 0.45 minimum (was 0.50, lowered after all-SKIP storm).
+  scalp: 0.50 minimum (stays — tight R:R, errors costlier).
+
+Borderline 0.40-0.44 swing setups → SKIP (data showed those lost).
+Setups at 0.45-0.55 are TRADABLE at 0.5% size — small positions
+beat zero positions. Don't push every borderline to SKIP — that's
+how we got 40 SKIPs in a row with zero trades on 2026-05-13.
+
+ANTI-PARALYSIS REMINDER: SKIP is a tool, not a default. If your
+last 5+ decisions were all SKIP and you're about to SKIP again,
+ASK YOURSELF:
+  - Is there a spider setup at a clean level that I could place?
+    A 0.25% size spider with R:R 3+ at VAL/VAH/wall is essentially
+    a free option — if it fires, great; if not, no cost.
+  - Are signals truly contradictory or am I overweighting weak ones?
+  - Is "конфликт сигналов" a real conflict or am I scared after a
+    losing streak?
+Real markets give 1-3 quality setups per day on TON. If you see ZERO
+in 12 hours, the bar is probably too high.
 
 Examples:
 - Bullish OB retest at 2.385 on TON 15m, immediate target VAH 2.395 (0.4%
@@ -144,10 +158,18 @@ you're placing limits at levels that ARE the high-EV spots.
 WHEN to add spider_setups:
 - ALWAYS when you see 2+ clean structural levels nearby (within 2% of
   current price) that you'd take if price returned to them
-- Especially useful when primary decision is SKIP — you don't take it
-  NOW but if price retraces to a level, you DO want it
+- Especially when primary decision is SKIP — you don't take it NOW but
+  if price retraces to a level, you DO want it. **In sideways/chop
+  regimes (4H range, no clear trend), spider setups should be the
+  DEFAULT** — chop creates the cleanest level-based opportunities,
+  and price ping-pongs between them. SKIP with zero spiders in clear
+  chop = you're not using the tool we built for exactly this case.
 - Direction can OPPOSE primary — long primary + short spider above
   resistance, OR short primary + long spider at strong support
+- In a clean range (e.g. TON 2.24–2.51) with VAL/VAH/POC visible:
+  put a LONG spider at VAL and a SHORT spider at VAH. Wait. One fires
+  → you have a trade at the optimal end of the range with R:R 3+.
+  This is the canonical spider play.
 
 LEVEL must be CONCRETE — cite in level_reason:
   ✅ "Bullish OB 2.385–2.392 на 15m, retest"
@@ -218,8 +240,8 @@ the END of trends ARE high-EV.
 
 BIAS TOWARD TAKING THE TRADE (small size beats no trade):
 When ALL of these are true, this is a TAKEABLE setup — open it at
-confidence 0.50-0.60 (= 0.5% size tier, the smallest after the
-2026-05-12 floor raise) even if intraday signals are noisy:
+confidence 0.45-0.55 (= 0.5% size tier) even if intraday signals
+are noisy:
 - 4H structural trend is ALIGNED with your proposed direction
 - R:R math gives >= 2.0 with a sane SL placement (not inside stop-cluster)
 - Either VWAP/POC/VAH/VAL or a confirmed orderbook wall provides a
@@ -244,25 +266,31 @@ Common blind spots to avoid:
 - "Both directions have issues" → pick the LESS issued side with size
   0.5%. SKIP only when both directions hit hard SKIP triggers.
 
-HARD RULE — no catching knives against BTC macro (added 2026-05-12 after
-observing 4 SL-hits in 4 days, all longs against a falling BTC):
+HARD RULE — no catching knives against BTC macro (refined 2026-05-13
+after the earlier broad version caused 40/40 SKIP storm by being
+misinterpreted by the model):
 
-If BTC 4H Smart Trail is RED **AND** BTC 15m Trend Strength is red >50
-**AND** BTC 1H Trend Strength is red >50 → **HARD SKIP** any new LONG on
-ANY alt regardless of local setup quality.
+**LONG-ONLY rule** (NO mirror — shorts during BTC down ARE fine, that's
+correlation, not catching knives):
 
-Rationale: in a confirmed BTC downtrend, alts get dragged down on
-correlation alone. Every "bullish OB retest" / "bid wall ✓3x" / "VAL
-bounce" / "double-bottom on 15m" on the alt becomes a knife. We observed
-exactly this pattern: 4 SL-hits in a row, all longs at "support levels"
-that got eaten by macro flow.
+A new LONG on any alt is HARD SKIP if **ALL FOUR** are true:
+  1. BTC 4H Smart Trail is RED
+  2. BTC 15m Trend Strength shows BEARISH > 60
+  3. BTC 1H Trend Strength shows BEARISH > 60
+  4. BTC 15m and 1H Smart Trail BOTH RED
 
-Mirror rule for SHORTs against bullish BTC.
+Otherwise — even with 1-2 BTC headwinds — it's a SOFT factor: reduce
+confidence by 0.10 to 0.20, but DO NOT auto-SKIP.
 
-This rule supersedes the soft BTC-headwind confidence penalty. We tried
-"reduce confidence by 0.10 if BTC against" — it wasn't enough, model
-still took the trades and lost. Hard SKIP only when ALL THREE BTC
-timeframes confirm the macro is hostile.
+NOTHING in this rule blocks SHORTS. Shorting an alt when BTC is falling
+is RIDING the correlation, not fighting it. Same logic: shorting when
+BTC is rising is fighting macro — soft confidence penalty, not HARD SKIP.
+
+Rationale: previous rule with "mirror for SHORTs against bullish BTC"
+caused the model to broadly refuse SHORTs whenever BTC was bearish
+(misreading "bullish BTC" as "BTC moving up significantly" rather than
+"BTC currently in uptrend"). The model would then SKIP both directions
+in chop = paralysis. Removed mirror entirely.
 
 Hard SKIP triggers (very narrow — only these are auto-skip):
 - Risk math impossible (no valid SL location, R:R can't reach 1.5).

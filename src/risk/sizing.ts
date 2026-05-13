@@ -11,34 +11,34 @@ import type { TpStrategy } from '../llm/decision.schema.js';
  *
  * Tiers (per-strategy):
  *   swing:
+ *     < 0.45 → DOWNGRADE_TO_SKIP
+ *     0.45-0.55 → 0.5%
+ *     0.55-0.65 → 1.0%
+ *     0.65-0.75 → 1.5%
+ *     ≥ 0.75   → 2.0%
+ *   scalp (slightly higher floor — R:R tighter, errors costlier):
  *     < 0.50 → DOWNGRADE_TO_SKIP
  *     0.50-0.60 → 0.5%
  *     0.60-0.70 → 1.0%
- *     0.70-0.80 → 1.5%
- *     ≥ 0.80   → 2.0%
- *   scalp (same floor — R:R tighter):
- *     < 0.50 → DOWNGRADE_TO_SKIP
- *     0.50-0.60 → 0.5%
- *     0.60-0.70 → 1.0%
- *     ≥ 0.70   → 1.5%   (scalp never gets 2.0% — tight R:R doesn't deserve max size)
+ *     ≥ 0.70   → 1.5%
  *
  * History:
- *   2026-05-11 swing floor lowered 0.45 → 0.40 because Claude rarely
- *     produces > 0.55 confidence with all the context layers.
- *   2026-05-12 swing floor RAISED back 0.40 → 0.50 after 4 days of trades
- *     showed 0/7 win rate and PnL −4.41R. Of 4 SL-hits, three had
- *     confidence in [0.41, 0.48] — exactly the borderline tier we should
- *     never trade. Raising the floor would have skipped 3 of 4 SL-hits
- *     (≈+3R for the period). Tier ladder shifted up to match — 0.5%
- *     starts at 0.50 instead of 0.40, max 2% reserved for ≥0.80.
- *   2026-05-12 scalp tier added with the same 0.50 floor.
+ *   2026-05-11 swing floor lowered 0.45 → 0.40.
+ *   2026-05-12 swing floor RAISED 0.40 → 0.50 after 0/7 win-rate trades
+ *     showed borderline 0.41-0.48 confidence trades all lost.
+ *   2026-05-13 swing floor LOWERED back to 0.45 — middle ground.
+ *     0.50 caused 40/40 SKIPs over 12h (full paralysis). User explicitly
+ *     wants more activity. 0.45 still blocks the 0.41-0.44 band that
+ *     historically lost while letting 0.45-0.49 borderline-but-tradable
+ *     setups through at smallest (0.5%) size.
+ *   2026-05-12 scalp tier kept at 0.50 (R:R tight, errors expensive).
  */
 
 export type SizingResult =
   | { action: 'SIZE'; sizePct: number; tier: string }
   | { action: 'SKIP'; reason: string };
 
-export const SIZING_FLOOR_SWING = 0.5;
+export const SIZING_FLOOR_SWING = 0.45;
 /** Default scalp floor. The EFFECTIVE floor is read at runtime from
  *  `runtime_config['scalp.confidence_floor']` so the self-review job can
  *  auto-tune ±0.05 within [0.40, 0.55] without a deploy. Falls back to
@@ -98,8 +98,8 @@ export function sizeFromConfidence(
       reason: `swing confidence ${confidence.toFixed(2)} < ${SIZING_FLOOR_SWING} floor`,
     };
   }
-  if (confidence < 0.6) return { action: 'SIZE', sizePct: 0.5, tier: 'swing:0.50-0.60' };
-  if (confidence < 0.7) return { action: 'SIZE', sizePct: 1.0, tier: 'swing:0.60-0.70' };
-  if (confidence < 0.8) return { action: 'SIZE', sizePct: 1.5, tier: 'swing:0.70-0.80' };
-  return { action: 'SIZE', sizePct: 2.0, tier: 'swing:≥0.80' };
+  if (confidence < 0.55) return { action: 'SIZE', sizePct: 0.5, tier: 'swing:0.45-0.55' };
+  if (confidence < 0.65) return { action: 'SIZE', sizePct: 1.0, tier: 'swing:0.55-0.65' };
+  if (confidence < 0.75) return { action: 'SIZE', sizePct: 1.5, tier: 'swing:0.65-0.75' };
+  return { action: 'SIZE', sizePct: 2.0, tier: 'swing:≥0.75' };
 }

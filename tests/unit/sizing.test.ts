@@ -13,26 +13,26 @@ describe('sizeFromConfidence', () => {
     if (r.action === 'SIZE') expect(r.sizePct).toBe(0.5);
   });
 
-  it('mid 0.55 → 0.5% (lowest swing tier after 2026-05-12 floor raise)', () => {
-    const r = sizeFromConfidence(0.55);
+  it('low-mid 0.50 → 0.5% (lowest tradable swing tier after 2026-05-13 floor)', () => {
+    const r = sizeFromConfidence(0.50);
     expect(r.action).toBe('SIZE');
     if (r.action === 'SIZE') expect(r.sizePct).toBe(0.5);
   });
 
-  it('mid 0.65 → 1.0%', () => {
-    const r = sizeFromConfidence(0.65);
+  it('mid 0.60 → 1.0%', () => {
+    const r = sizeFromConfidence(0.60);
     expect(r.action).toBe('SIZE');
     if (r.action === 'SIZE') expect(r.sizePct).toBe(1.0);
   });
 
-  it('high 0.75 → 1.5%', () => {
-    const r = sizeFromConfidence(0.75);
+  it('high 0.70 → 1.5%', () => {
+    const r = sizeFromConfidence(0.70);
     expect(r.action).toBe('SIZE');
     if (r.action === 'SIZE') expect(r.sizePct).toBe(1.5);
   });
 
-  it('very high 0.85+ → 2.0%', () => {
-    const r = sizeFromConfidence(0.85);
+  it('very high 0.80+ → 2.0%', () => {
+    const r = sizeFromConfidence(0.80);
     expect(r.action).toBe('SIZE');
     if (r.action === 'SIZE') expect(r.sizePct).toBe(2.0);
   });
@@ -47,11 +47,15 @@ describe('sizeFromConfidence', () => {
     if (r.action === 'SIZE') expect(r.sizePct).toBe(2.0);
   });
 
-  it('borderline 0.45 swing → SKIP (post-2026-05-12 floor 0.50)', () => {
-    // This was previously SIZE 0.5% but 4-day backtest showed these
-    // borderline trades lost. Floor raised 0.40 → 0.50.
-    const r = sizeFromConfidence(0.45);
+  it('borderline 0.44 swing → SKIP (just below 0.45 floor)', () => {
+    const r = sizeFromConfidence(0.44);
     expect(r.action).toBe('SKIP');
+  });
+
+  it('borderline 0.45 swing → SIZE 0.5% (exactly at floor)', () => {
+    const r = sizeFromConfidence(0.45);
+    expect(r.action).toBe('SIZE');
+    if (r.action === 'SIZE') expect(r.sizePct).toBe(0.5);
   });
 
   it('scalp tier: confidence 0.49 → SKIP (below 0.5 floor)', () => {
@@ -77,10 +81,11 @@ describe('sizeFromConfidence', () => {
     if (r.action === 'SIZE') expect(r.sizePct).toBe(1.5);
   });
 
-  it('post-2026-05-12: swing and scalp share 0.50 floor', () => {
-    // Both strategies now require ≥0.50 confidence. We unified the floor
-    // after the 2026-05-12 backtest review.
-    expect(sizeFromConfidence(0.45, 'swing').action).toBe('SKIP');
+  it('post-2026-05-13: swing 0.45 floor, scalp 0.50 floor', () => {
+    // After all-SKIP storm we split floors again: swing at 0.45 lets
+    // borderline-but-tradable setups through; scalp stays at 0.50
+    // because tight R:R = errors hurt more.
+    expect(sizeFromConfidence(0.45, 'swing').action).toBe('SIZE');
     expect(sizeFromConfidence(0.45, 'scalp').action).toBe('SKIP');
     expect(sizeFromConfidence(0.50, 'swing').action).toBe('SIZE');
     expect(sizeFromConfidence(0.50, 'scalp').action).toBe('SIZE');
