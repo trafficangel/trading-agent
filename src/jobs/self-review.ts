@@ -59,22 +59,25 @@ type DecisionRowRaw = {
   pnl_pct: number | null;
   pnl_r: number | null;
   features_json: string | null;
+  track: string;
 };
 
 /** Enriched row: tp_strategy and entry_type live inside features_json (the
  *  decisions table doesn't have dedicated columns for them — they were
- *  added to the LLM schema later). We parse once here and pass the
- *  flattened shape around the rest of self-review. */
+ *  added to the LLM schema later). For Track B we also pull trigger_event
+ *  + the source TF so the LLM reviewer can see which signals win/lose. */
 type DecisionRow = Omit<DecisionRowRaw, 'features_json' | 'close_reason'> & {
   tp_strategy: string | null;
   entry_type: string | null;
   exit_reason: string | null;
+  trigger_event: string | null; // 'bullish_plus' / 'choch_swing_plus_up' / etc. (Track B)
+  trigger_tf: string | null;    // '5' / '15' / '60' / '240' (Track B)
 };
 
 const recentDecisionsStmt = db.prepare<[number, number], DecisionRowRaw>(`
   SELECT id, created_at, symbol, decision, side,
          entry, sl, tp_json, size_pct, confidence, reasoning_short,
-         status, close_reason, pnl_pct, pnl_r, features_json
+         status, close_reason, pnl_pct, pnl_r, features_json, track
   FROM decisions
   WHERE created_at BETWEEN ? AND ?
   ORDER BY created_at ASC
@@ -83,11 +86,20 @@ const recentDecisionsStmt = db.prepare<[number, number], DecisionRowRaw>(`
 function parseRow(r: DecisionRowRaw): DecisionRow {
   let tp_strategy: string | null = null;
   let entry_type: string | null = null;
+  let trigger_event: string | null = null;
+  let trigger_tf: string | null = null;
   if (r.features_json) {
     try {
-      const f = JSON.parse(r.features_json) as { tp_strategy?: string; entry_type?: string };
+      const f = JSON.parse(r.features_json) as {
+        tp_strategy?: string;
+        entry_type?: string;
+        trigger_event?: string;
+        trigger_tf?: string;
+      };
       tp_strategy = f.tp_strategy ?? null;
       entry_type = f.entry_type ?? null;
+      trigger_event = f.trigger_event ?? null;
+      trigger_tf = f.trigger_tf ?? null;
     } catch {
       // Malformed features_json — ignore, leave nulls.
     }
@@ -110,6 +122,9 @@ function parseRow(r: DecisionRowRaw): DecisionRow {
     pnl_r: r.pnl_r,
     tp_strategy,
     entry_type,
+    trigger_event,
+    trigger_tf,
+    track: r.track,
   };
 }
 
@@ -135,6 +150,8 @@ const insertActionStmt = db.prepare<
 
 // --- Stats computation -----------------------------------------------------
 
+type EventWinrate = { event: string; tf: string; wins: number; losses: number; openR: number };
+
 type ReviewStats = {
   windowStart: number;
   windowEnd: number;
@@ -153,6 +170,28 @@ type ReviewStats = {
   topSkipReasons: { reason: string; count: number }[];
   openDecisions: DecisionRow[];
   closedDecisions: DecisionRow[];
+
+  // ===== A/B per-track =====
+  /** Counts per track in the window. */
+  llmDecisions: number;
+  signalDecisions: number;
+  /** Closed-trades net R per track. */
+  llmClosedR: number;
+  signalClosedR: number;
+  /** Closed-trades W/L per track. */
+  llmWins: number;
+  llmLosses: number;
+  signalWins: number;
+  signalLosses: number;
+
+  // ===== Track B granular =====
+  /** Per (event, tf) breakdown — winners vs losers + total R. */
+  signalEventStats: EventWinrate[];
+  /** Per-side win rate for signal track. */
+  signalLongWins: number;
+  signalLongLosses: number;
+  signalShortWins: number;
+  signalShortLosses: number;
 };
 
 function summariseSkipReason(text: string): string {
@@ -200,18 +239,76 @@ function collectStats(now: number): ReviewStats {
     topSkipReasons: [],
     openDecisions: [],
     closedDecisions: [],
+    llmDecisions: 0,
+    signalDecisions: 0,
+    llmClosedR: 0,
+    signalClosedR: 0,
+    llmWins: 0,
+    llmLosses: 0,
+    signalWins: 0,
+    signalLosses: 0,
+    signalEventStats: [],
+    signalLongWins: 0,
+    signalLongLosses: 0,
+    signalShortWins: 0,
+    signalShortLosses: 0,
   };
 
   const skipReasonCounts = new Map<string, number>();
   const currentFloor = effectiveScalpFloor();
   const bandLow = currentFloor - 0.08;
+  // Aggregator for Track B per-(event,tf) win-rate.
+  const eventKey = (ev: string, tf: string): string => `${ev}@${tf}`;
+  const eventAgg = new Map<string, EventWinrate>();
 
   for (const r of rows) {
+    // Per-track decision counters
+    if (r.track === 'llm') stats.llmDecisions++;
+    else if (r.track === 'signal') stats.signalDecisions++;
+
     if (r.decision === 'OPEN') {
       stats.openCount++;
       if (r.tp_strategy === 'scalp') stats.scalpOpenCount++;
       else stats.swingOpenCount++;
       stats.openDecisions.push(r);
+
+      // A closed result row carries decision='OPEN' AND status='closed' AND pnl_r.
+      // (Track B has no separate decision='CLOSE' row — tpsl-monitor mutates
+      //  the OPEN row to status='closed' on TP/SL hit.)
+      if (r.status === 'closed' && r.pnl_r !== null) {
+        stats.closedDecisions.push(r);
+        const isWin = r.pnl_r > 0;
+
+        // Per-track win/loss + total R
+        if (r.track === 'llm') {
+          stats.llmClosedR += r.pnl_r;
+          if (isWin) stats.llmWins++;
+          else stats.llmLosses++;
+        } else if (r.track === 'signal') {
+          stats.signalClosedR += r.pnl_r;
+          if (isWin) stats.signalWins++;
+          else stats.signalLosses++;
+
+          // Per-side breakdown for signal track
+          if (r.side === 'long') (isWin ? stats.signalLongWins++ : stats.signalLongLosses++);
+          else if (r.side === 'short') (isWin ? stats.signalShortWins++ : stats.signalShortLosses++);
+
+          // Per-(event, tf) aggregator
+          const ev = r.trigger_event ?? 'unknown';
+          const tf = r.trigger_tf ?? '?';
+          const k = eventKey(ev, tf);
+          const cur = eventAgg.get(k) ?? { event: ev, tf, wins: 0, losses: 0, openR: 0 };
+          cur.openR += r.pnl_r;
+          if (isWin) cur.wins++;
+          else cur.losses++;
+          eventAgg.set(k, cur);
+        }
+
+        // Legacy scalp/swing buckets (LLM-track meaningful, keep for back-compat)
+        const isScalp = r.tp_strategy === 'scalp';
+        if (isWin) (isScalp ? stats.closedScalpWins++ : stats.closedSwingWins++);
+        else (isScalp ? stats.closedScalpLosses++ : stats.closedSwingLosses++);
+      }
     } else if (r.decision === 'SKIP') {
       stats.skipCount++;
       const cat = summariseSkipReason(r.reasoning_short);
@@ -220,13 +317,9 @@ function collectStats(now: number): ReviewStats {
         stats.sizingFloorSkipsInBand++;
       }
     } else if (r.decision === 'CLOSE') {
+      // LLM-track explicit close decision row (different from the OPEN row
+      // it closed). Don't double-count P&L — that's on the OPEN row.
       stats.closeCount++;
-      stats.closedDecisions.push(r);
-      if (r.pnl_r !== null) {
-        const isScalp = r.tp_strategy === 'scalp';
-        if (r.pnl_r > 0) (isScalp ? stats.closedScalpWins++ : stats.closedSwingWins++);
-        else (isScalp ? stats.closedScalpLosses++ : stats.closedSwingLosses++);
-      }
     } else if (r.decision === 'MODIFY') {
       stats.modifyCount++;
     }
@@ -236,6 +329,11 @@ function collectStats(now: number): ReviewStats {
     .map(([reason, count]) => ({ reason, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 5);
+
+  // Sort event stats by total trades desc (most data first)
+  stats.signalEventStats = [...eventAgg.values()].sort(
+    (a, b) => b.wins + b.losses - (a.wins + a.losses),
+  );
 
   return stats;
 }
@@ -266,6 +364,11 @@ type TuneAction = {
  * No-op if both lower- and raise-triggers fire (mixed signal — leave alone).
  */
 function maybeAutoTuneScalpFloor(stats: ReviewStats): TuneAction | null {
+  // No-op when LLM track is disabled — scalp floor only affects LLM-track
+  // decisions (Track B uses its own rule-based geometry), so tuning it
+  // when LLM is off is meaningless.
+  if (!config.LLM_TRACK_ENABLED) return null;
+
   const current = effectiveScalpFloor();
 
   const scalpClosed = stats.closedScalpWins + stats.closedScalpLosses;
@@ -310,7 +413,21 @@ function maybeAutoTuneScalpFloor(stats: ReviewStats): TuneAction | null {
 // --- LLM self-review -------------------------------------------------------
 
 function buildReviewPrompt(stats: ReviewStats): { system: string; user: string } {
-  const system = `Ты — ревизор-аналитик собственной торговой системы. Ты только что отработал 12 часов как discretionary crypto trader (см. данные ниже). Твоя задача — оценить свою работу критически и предложить улучшения.
+  // Choose prompt mode based on which tracks have decisions in this window.
+  // - "track_b_only" — pure-signal mode (LLM_TRACK_ENABLED=false) — focus
+  //   suggestions on rule-based parameters: trigger event set, TF additions,
+  //   confluence rules, geometry (ATR multipliers, R:R), cooldowns.
+  // - "llm_only" — original LLM-driven analysis (suggestions on prompt /
+  //   scalp floor / sizing).
+  // - "hybrid" — both tracks have activity; review compares them.
+  const mode: 'track_b_only' | 'llm_only' | 'hybrid' =
+    !config.LLM_TRACK_ENABLED || (stats.signalDecisions > 0 && stats.llmDecisions === 0)
+      ? 'track_b_only'
+      : stats.signalDecisions > 0 && stats.llmDecisions > 0
+        ? 'hybrid'
+        : 'llm_only';
+
+  const systemHeader = `Ты — ревизор-аналитик собственной торговой системы. Ты только что отработал 12 часов и должен оценить работу критически и предложить улучшения.
 
 Формат ответа — строгий JSON:
 {
@@ -325,19 +442,71 @@ function buildReviewPrompt(stats: ReviewStats): { system: string; user: string }
   ] (1-3 предложений)
 }
 
+ОТВЕЧАЙ ТОЛЬКО JSON, без markdown-обёрток.`;
+
+  const trackBRules = `
+КОНТЕКСТ: сейчас активен ТОЛЬКО Track B (Pure-LuxAlgo Signal Trader). Это
+rule-based трейдер БЕЗ LLM-вызовов. Алгоритм работает так:
+  - Webhook от TradingView → проверка qualifying events (bullish_plus,
+    bearish_plus, choch_swing_plus_*, bos_swing_*, reversal_signal_*)
+  - TFs: 5m (с 15m confluence), 15m, 1H, 4H, 1D
+  - Геометрия: SL = 1.5×ATR(14) на 15m, TP = 3×ATR (R:R 1:2)
+  - Размер: 0.5% флэт
+  - Per-TF cooldown между OPENs на символе (5m/15m=30мин, 1H=2ч, 4H=6ч)
+  - tpsl-monitor каждую минуту: SL/TP hit detection + auto-BE на 1R
+
+ЦЕЛИ КОТОРЫЕ ОЦЕНИВАЕМ:
+1. Прибыльность по сигналам — какие event/tf комбинации стабильно выигрывают
+2. Win rate в целом ≥45% (R:R 1:2 → breakeven при wr=33%)
+3. Достаточная частота сделок (3-10 в день норма)
+4. Долгие losing streaks = повод пересмотреть условия
+
+ЧТО МОЖНО ПРЕДЛОЖИТЬ (suggestions):
+- 📝 "prompt_tweak" — НЕ применимо (нет LLM в этом треке). Не использовать.
+- ⚙️ "param_change" — изменить КОНКРЕТНОЕ значение:
+    * ATR multipliers (1.5×/3× → может 1.2×/3.6× для большего R:R 1:3?)
+    * cooldown на конкретном TF
+    * SIGNAL_TRADE_SIZE_PCT
+    * R:R соотношение (TP/SL ratio)
+- ✨ "new_feature" — добавить логику:
+    * Добавить TF в TRADEABLE_TIMEFRAMES если 1H/4H пустые
+    * Добавить event в qualifying set (например liquidity_grab)
+    * Добавить confluence требование для слабых сигналов
+    * Добавить trailing stop после BE
+    * Counter-signal exit (closing position when opposite signal fires)
+- 🗑 "discard" — убрать что-то:
+    * Event/TF комбинация с win rate <30% после ≥5 сделок → удалить из triggers
+    * Слишком короткий cooldown — увеличить
+    * Лишний confluence — убрать
+
+ПРАВИЛА:
+- ПОКАЗЫВАЙ ЦИФРЫ в rationale — "bullish_plus@5m: 1W/3L = 25% wr"
+- Размер позиции и риск-лимиты — священны, не предлагай поднимать
+- Если выборка <10 сделок — не говори "удалить", говори "продолжать собирать данные"
+- Если за 12ч было 0 OPEN — диагностируй ПОЧЕМУ (не было сигналов? confluence режет?)`;
+
+  const llmRules = `
+КОНТЕКСТ: активен Track A (LLM-driven) — Claude каждые 15 мин принимает
+торговое решение на основе чартов + контекста. Сlf-tune может опускать
+scalp confidence floor в [0.40-0.55].
+
 ПРАВИЛА:
 - НЕ говори "увеличить размер позиции / убрать риск-лимиты". Размер и риск — священны.
 - НЕ предлагай "торговать больше" если рынок реально плохой. SKIP в чопе = правильно.
-- ЦЕЛИ: прибыльность сделок + достаточное количество (1-3 сделки/день норма).
-- Если за 12ч было 0 OPEN — это либо мёртвый рынок (норма), либо мы пропустили
-  очевидное (надо это диагностировать).
 - Если много "Self-critique → SKIP" — может промпт critique слишком строгий?
-- Если много "Sizing-floor SKIP" — а если опустить floor scalp с 0.50 до 0.45,
-  что мы потеряем? (Это уже автоматически тюнится — просто отметь паттерн.)
-- Если scalp-сделки убыточны — что общего у них? Не научила ли модель торговать
-  чопо ради чопа?
+- Если много "Sizing-floor SKIP" — паттерн для авто-tune.
+- Если scalp-сделки убыточны — что общего у них?`;
 
-ОТВЕЧАЙ ТОЛЬКО JSON, без markdown-обёрток.`;
+  const hybridRules = `
+КОНТЕКСТ: оба трека активны параллельно (A/B test).
+  Track A (LLM): ${stats.llmDecisions} решений, ${stats.llmWins}W/${stats.llmLosses}L, ${stats.llmClosedR.toFixed(2)}R
+  Track B (Signal): ${stats.signalDecisions} решений, ${stats.signalWins}W/${stats.signalLosses}L, ${stats.signalClosedR.toFixed(2)}R
+ЗАДАЧА: сравнить треки, отметить какой работает лучше и почему.`;
+
+  const system =
+    systemHeader +
+    '\n' +
+    (mode === 'track_b_only' ? trackBRules : mode === 'hybrid' ? hybridRules + llmRules : llmRules);
 
   const skipReasonsLines = stats.topSkipReasons
     .map((r) => `  - ${r.reason}: ${r.count}`)
@@ -359,23 +528,50 @@ function buildReviewPrompt(stats: ReviewStats): { system: string; user: string }
     )
     .join('\n');
 
+  // Track B per-(event, tf) breakdown — used when track_b_only or hybrid.
+  const eventStatsLines = stats.signalEventStats.length
+    ? stats.signalEventStats
+        .map((e) => {
+          const total = e.wins + e.losses;
+          const wr = total > 0 ? Math.round((e.wins / total) * 100) : 0;
+          return `  ${e.event}@${e.tf}m: ${e.wins}W/${e.losses}L (${wr}% wr, ${e.openR.toFixed(2)}R)`;
+        })
+        .join('\n')
+    : '  (нет закрытых Track B сделок в окне)';
+
+  const signalSideLines =
+    stats.signalWins + stats.signalLosses > 0
+      ? `  LONG: ${stats.signalLongWins}W/${stats.signalLongLosses}L  ·  SHORT: ${stats.signalShortWins}W/${stats.signalShortLosses}L`
+      : '  (нет данных)';
+
+  const trackBlock = `
+=== TRACK B (Signal) детально ===
+Решений: ${stats.signalDecisions}
+Закрытых: ${stats.signalWins}W / ${stats.signalLosses}L  (Σ R: ${stats.signalClosedR.toFixed(2)})
+По стороне:
+${signalSideLines}
+По (event, tf):
+${eventStatsLines}`;
+
+  const trackAblock =
+    stats.llmDecisions > 0
+      ? `
+
+=== TRACK A (LLM) ===
+Решений: ${stats.llmDecisions}
+Закрытых: ${stats.llmWins}W / ${stats.llmLosses}L  (Σ R: ${stats.llmClosedR.toFixed(2)})
+Scalp floor: ${effectiveScalpFloor().toFixed(2)}
+Near-miss sizing-floor SKIPs (band [floor-0.08, floor)): ${stats.sizingFloorSkipsInBand}`
+      : '';
+
   const user = `Окно: ${new Date(stats.windowStart).toISOString().slice(0, 16)}Z … ${new Date(stats.windowEnd).toISOString().slice(0, 16)}Z
 
 Всего решений: ${stats.total}
-  OPEN: ${stats.openCount}   (scalp ${stats.scalpOpenCount} / swing ${stats.swingOpenCount})
-  SKIP: ${stats.skipCount}
-  CLOSE: ${stats.closeCount}
-  MODIFY: ${stats.modifyCount}
-
-Закрытые позиции (выборка scalp/swing):
-  scalp: ${stats.closedScalpWins}W / ${stats.closedScalpLosses}L
-  swing: ${stats.closedSwingWins}W / ${stats.closedSwingLosses}L
+  OPEN: ${stats.openCount}   ·   SKIP: ${stats.skipCount}   ·   CLOSE: ${stats.closeCount}   ·   MODIFY: ${stats.modifyCount}
+${trackBlock}${trackAblock}
 
 Топ причин SKIP:
 ${skipReasonsLines || '  (нет SKIPов)'}
-
-Текущий scalp floor: ${effectiveScalpFloor().toFixed(2)}
-Near-miss SKIPs (sizing-floor с confidence в зоне floor−0.08…floor): ${stats.sizingFloorSkipsInBand}
 
 Последние OPEN:
 ${openLines || '  (нет OPEN)'}
@@ -433,22 +629,57 @@ async function callReviewLlm(stats: ReviewStats): Promise<LlmReview | null> {
 // --- Report formatting -----------------------------------------------------
 
 function formatReport(stats: ReviewStats, review: LlmReview | null, action: TuneAction | null): string {
-  const winLossOverall =
-    stats.closeCount > 0
-      ? `${stats.closedScalpWins + stats.closedSwingWins}W / ${stats.closedScalpLosses + stats.closedSwingLosses}L`
-      : '—';
+  const sigClosed = stats.signalWins + stats.signalLosses;
+  const llmClosed = stats.llmWins + stats.llmLosses;
+
+  const modeLabel = !config.LLM_TRACK_ENABLED
+    ? '📡 <b>Track B only</b>'
+    : llmClosed > 0 && sigClosed > 0
+      ? '🤖📡 <b>A/B (LLM + Signal)</b>'
+      : '🤖 <b>Track A only</b>';
 
   const lines: string[] = [
-    `🔬 <b>Самоанализ за 12 часов</b>`,
+    `🔬 <b>Самоанализ за 12 часов</b>  ·  ${modeLabel}`,
     `<i>${new Date(stats.windowStart).toISOString().slice(0, 16)}Z … ${new Date(stats.windowEnd).toISOString().slice(0, 16)}Z</i>`,
     '',
-    `<b>Цифры:</b>`,
-    `  Всего решений: <code>${stats.total}</code>`,
-    `  OPEN: <code>${stats.openCount}</code> (⚡${stats.scalpOpenCount} / 🌊${stats.swingOpenCount})`,
-    `  SKIP: <code>${stats.skipCount}</code>  ·  CLOSE: <code>${stats.closeCount}</code>  ·  MODIFY: <code>${stats.modifyCount}</code>`,
-    `  Закрытые: <b>${winLossOverall}</b>`,
-    `  Текущий scalp floor: <code>${effectiveScalpFloor().toFixed(2)}</code>`,
+    `<b>Всего решений: ${stats.total}</b>`,
+    `  OPEN: <code>${stats.openCount}</code>  ·  SKIP: <code>${stats.skipCount}</code>  ·  CLOSE: <code>${stats.closeCount}</code>  ·  MODIFY: <code>${stats.modifyCount}</code>`,
   ];
+
+  // Track B detailed breakdown (when signal track has activity)
+  if (stats.signalDecisions > 0) {
+    const sigWr = sigClosed > 0 ? Math.round((stats.signalWins / sigClosed) * 100) : 0;
+    lines.push('', `📡 <b>Track B (Signal)</b>`);
+    lines.push(
+      `  Решений: <code>${stats.signalDecisions}</code>  ·  Закрытых: <b>${stats.signalWins}W/${stats.signalLosses}L</b> (${sigWr}%)  ·  Σ R: <b>${stats.signalClosedR >= 0 ? '+' : ''}${stats.signalClosedR.toFixed(2)}R</b>`,
+    );
+    if (sigClosed > 0) {
+      lines.push(
+        `  По стороне: LONG ${stats.signalLongWins}W/${stats.signalLongLosses}L  ·  SHORT ${stats.signalShortWins}W/${stats.signalShortLosses}L`,
+      );
+    }
+    if (stats.signalEventStats.length > 0) {
+      lines.push(`  <b>По сигналам (event@tf):</b>`);
+      for (const e of stats.signalEventStats) {
+        const total = e.wins + e.losses;
+        const wr = total > 0 ? Math.round((e.wins / total) * 100) : 0;
+        const rSign = e.openR >= 0 ? '+' : '';
+        lines.push(
+          `    · <code>${e.event}@${e.tf}m</code>: ${e.wins}W/${e.losses}L (${wr}%, ${rSign}${e.openR.toFixed(2)}R)`,
+        );
+      }
+    }
+  }
+
+  // Track A breakdown (when LLM has activity)
+  if (stats.llmDecisions > 0) {
+    const llmWr = llmClosed > 0 ? Math.round((stats.llmWins / llmClosed) * 100) : 0;
+    lines.push('', `🤖 <b>Track A (LLM)</b>`);
+    lines.push(
+      `  Решений: <code>${stats.llmDecisions}</code>  ·  Закрытых: <b>${stats.llmWins}W/${stats.llmLosses}L</b> (${llmWr}%)  ·  Σ R: <b>${stats.llmClosedR >= 0 ? '+' : ''}${stats.llmClosedR.toFixed(2)}R</b>`,
+    );
+    lines.push(`  Scalp floor: <code>${effectiveScalpFloor().toFixed(2)}</code>`);
+  }
 
   if (stats.topSkipReasons.length > 0) {
     lines.push('', `<b>Топ причин SKIP:</b>`);

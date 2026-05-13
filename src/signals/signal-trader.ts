@@ -301,7 +301,12 @@ export async function maybeTriggerSignalTrade(payload: LuxAlgoPayload): Promise<
     inputTokens: 0,
     outputTokens: 0,
     rawResponse: JSON.stringify({ payload, geometry: geo }),
-    features: { source: 'signal_trader', trigger_event: payload.event, geometry_source: geo.source },
+    features: {
+      source: 'signal_trader',
+      trigger_event: payload.event,
+      trigger_tf: payload.timeframe, // used by self-review for per-TF win-rate breakdown
+      geometry_source: geo.source,
+    },
     track: 'signal',
   });
 
