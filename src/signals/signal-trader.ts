@@ -44,18 +44,20 @@ import type { Decision } from '../llm/decision.schema.js';
  *   provably improve the win rate.
  */
 
+// Event names verified against actual webhook payloads stored in the
+// signals table (sqlite3 query 2026-05-13). The earlier guess of
+// 'choch_up'/'bos_up' was wrong — real names include "_swing_plus" suffix.
+// `bullish_plus_strong` doesn't exist at all in our LuxAlgo alert setup.
 const ENTRY_EVENTS_LONG = new Set([
   'bullish_plus',
-  'bullish_plus_strong',
-  'choch_up',
-  'bos_up',
+  'choch_swing_plus_up',
+  'bos_swing_up',
   'reversal_signal_up',
 ]);
 const ENTRY_EVENTS_SHORT = new Set([
   'bearish_plus',
-  'bearish_plus_strong',
-  'choch_down',
-  'bos_down',
+  'choch_swing_plus_down',
+  'bos_swing_down',
   'reversal_signal_down',
 ]);
 
