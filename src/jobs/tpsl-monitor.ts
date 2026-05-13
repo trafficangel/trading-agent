@@ -58,14 +58,20 @@ function maybeMoveSlToBe(p: DecisionRow, currentPrice: number): number {
     'auto SL→BE: 1R reached',
   );
 
-  // Logs-channel notification only — not noisy enough for Signals channel
-  // (it's a mechanical BE move, no decision content).
-  const tradeIdStr = `#${p.id.toString().padStart(4, '0')}`;
-  void sendMessage({
-    channel: 'logs',
-    text: `🔒 <b>SL → безубыток</b> по сделке ${tradeIdStr} ${p.symbol}: 1R достигнут, SL подвинут с ${p.sl} на ${p.entry}.`,
-    disable_notification: true,
-  });
+  // Post to BOTH Signals (full lifecycle visibility) and Logs (audit).
+  // Signals gets disable_notification=true — visible in-channel but no
+  // phone alert, since BE move is mechanical not a new trade decision.
+  // Track-aware trade ID: 'S#XXXX' for signal track, '#XXXX' for LLM.
+  const prefix = p.track === 'signal' ? 'S#' : '#';
+  const tradeIdStr = `${prefix}${p.id.toString().padStart(4, '0')}`;
+  const beText = [
+    `🔒 <b>SL → безубыток</b> по сделке ${tradeIdStr} ${p.symbol}:`,
+    `1R достигнут, SL подвинут с <code>${p.sl}</code> на <code>${p.entry}</code>.`,
+    ``,
+    `<i>⏸ Теперь проиграть невозможно — максимум выход на BE.</i>`,
+  ].join('\n');
+  void sendMessage({ channel: 'signals', text: beText, disable_notification: true });
+  void sendMessage({ channel: 'logs', text: beText, disable_notification: true });
 
   return p.entry;
 }
@@ -160,6 +166,7 @@ async function checkPosition(pInput: DecisionRow): Promise<void> {
     pnlPct,
     pnlR,
     durationMs: Date.now() - p.created_at,
+    track: p.track, // pass A/B marker for trade-id prefix ('S#' vs '#')
   });
 
   if (p.screenshot_path && existsSync(p.screenshot_path)) {
