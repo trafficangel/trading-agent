@@ -62,16 +62,33 @@ const ENTRY_EVENTS_SHORT = new Set([
   'reversal_signal_down',
 ]);
 
-/** Timeframes we accept as triggers. 15m fires alone; 5m REQUIRES
- *  same-direction confluence on 15m within last 60 min (see CONFLUENCE_TFS).
- *  1H signals would also work standalone — but in practice they don't fire
- *  yet (TradingView alerts aren't configured for 1H). Easy to add when ready. */
-const TRADEABLE_TIMEFRAMES = new Set(['15', '5']);
+/** Timeframes we accept as triggers.
+ *
+ *   '5'   — fires only WITH 15m same-direction confluence (see REQUIRES_CONFLUENCE)
+ *   '15'  — primary, fires alone
+ *   '60'  — 1H, primary swing TF, fires alone
+ *   '240' — 4H, big swing TF, fires alone
+ *   'D'   — daily, fires alone (very rare, very strong)
+ *
+ * All TFs above 15m are "primary" because the higher you go, the less noise
+ * per signal — a 4H bullish_plus has spent 4 hours forming, vs a 5m
+ * bullish_plus that resolved in 5 min. No confluence needed for primaries. */
+const TRADEABLE_TIMEFRAMES = new Set(['5', '15', '60', '240', 'D']);
 
 /** Timeframes that REQUIRE same-direction confluence on a higher TF before
- *  firing a Track B trade. Confluence rules in needsConfluence() below. */
+ *  firing a Track B trade. Currently only 5m → 15m (noisy fast TF). */
 const REQUIRES_CONFLUENCE: Record<string, { higherTf: string; lookbackMs: number }> = {
   '5': { higherTf: '15', lookbackMs: 60 * 60 * 1000 }, // 5m needs 15m in last 60 min
+};
+
+/** Per-TF cooldown: shorter for fast TFs, longer for swing.
+ *  Default config.SIGNAL_COOLDOWN_MIN used as fallback / for unlisted TFs. */
+const COOLDOWN_MS_BY_TF: Record<string, number> = {
+  '5':   30 * 60 * 1000,    // 30 min between back-to-back 5m setups
+  '15':  30 * 60 * 1000,    // 30 min — one or two 15m bars
+  '60':  2 * 60 * 60 * 1000, // 2h — must close a 1H bar fully
+  '240': 6 * 60 * 60 * 1000, // 6h — one+ 4H bar
+  'D':   24 * 60 * 60 * 1000, // 24h — full day
 };
 
 function isEntryEvent(event: string): 'long' | 'short' | null {
@@ -195,8 +212,12 @@ export async function maybeTriggerSignalTrade(payload: LuxAlgoPayload): Promise<
   // 15m fires alone. 5m requires a same-side 15m qualifying event in last 60 min.
   if (!hasConfluence(payload.symbol, payload.timeframe, side)) return;
 
-  // 3. Cooldown check — last signal OPEN on this symbol within window?
-  const cooldownMs = config.SIGNAL_COOLDOWN_MIN * 60 * 1000;
+  // 3. Cooldown check — last signal OPEN on this symbol within window.
+  // Per-TF cooldown (set by COOLDOWN_MS_BY_TF table). Higher TFs need
+  // longer cooldown so we don't open a fresh 1H trade 5 min after the
+  // previous 1H setup got stopped — context hasn't changed in 5 min on 1H.
+  const cooldownMs =
+    COOLDOWN_MS_BY_TF[payload.timeframe] ?? config.SIGNAL_COOLDOWN_MIN * 60 * 1000;
   const recent = findRecentSignalOpen(payload.symbol, Date.now() - cooldownMs);
   if (recent) {
     logger.info(
