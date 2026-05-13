@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import {
-  findActivePositions,
+  findActivePositionsByTrack,
   findDecisionById,
   insertDecision,
   closePositionWithStats,
@@ -489,12 +489,16 @@ async function tick(): Promise<void> {
   }
   monitorRunning = true;
   try {
-    const positions = findActivePositions();
+    // Track-scoped: only LLM-track positions get the Claude re-evaluation.
+    // Track B (signal) is pure rule-based — its positions are managed by
+    // tpsl-monitor (SL/TP hit detection + BE move) WITHOUT Claude touching
+    // them, so the A/B comparison stays clean.
+    const positions = findActivePositionsByTrack('llm');
     if (positions.length === 0) {
-      logger.debug('monitor: no active positions');
+      logger.debug('monitor: no active LLM-track positions');
       return;
     }
-    logger.info({ count: positions.length }, 'monitor tick');
+    logger.info({ count: positions.length, track: 'llm' }, 'monitor tick');
     for (const p of positions) {
       try {
         await withTimeout(

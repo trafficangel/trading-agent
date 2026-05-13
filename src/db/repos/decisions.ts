@@ -79,6 +79,12 @@ const findActiveStmt = db.prepare<[], DecisionRow>(`
   ORDER BY created_at ASC
 `);
 
+const findActiveByTrackStmt = db.prepare<[string], DecisionRow>(`
+  SELECT * FROM decisions
+  WHERE status = 'active' AND decision = 'OPEN' AND track = ?
+  ORDER BY created_at ASC
+`);
+
 const findActiveBySymbolStmt = db.prepare<[string], DecisionRow>(`
   SELECT * FROM decisions
   WHERE status = 'active' AND decision = 'OPEN' AND symbol = ?
@@ -216,6 +222,12 @@ export function closePosition(id: number): void {
 }
 
 /** All currently active OPEN positions across all symbols. */
+/** All active OPEN positions across ALL tracks. Use this in track-agnostic
+ *  contexts (tpsl-monitor: SL/TP hit detection works the same regardless). */
+export function findActivePositionsByTrack(track: Track): DecisionRow[] {
+  return findActiveByTrackStmt.all(track);
+}
+
 export function findActivePositions(): DecisionRow[] {
   return findActiveStmt.all();
 }

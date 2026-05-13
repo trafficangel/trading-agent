@@ -5,7 +5,7 @@ import { insertSignal } from '../db/repos/signals.js';
 import { sendMessage } from '../telegram/bot.js';
 import { rawSignalLog } from '../telegram/templates.js';
 import { logger } from '../lib/logger.js';
-import { findActivePosition } from '../db/repos/decisions.js';
+import { findActiveOrPendingByTrack } from '../db/repos/decisions.js';
 import { monitorPosition } from '../jobs/monitor.js';
 import { maybeTriggerSignalTrade } from '../signals/signal-trader.js';
 
@@ -66,17 +66,18 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
         logger.error({ err, symbol: parsed.data.symbol }, 'signal-trader: trigger failed'),
       );
 
-      // Ad-hoc monitor trigger for ACTIVE positions only. New OPEN candidates
-      // wait for the 15m decide-cron (scheduled architecture). But if we
-      // already have a live position on this symbol, a fresh signal — especially
-      // one against our direction — should re-evaluate immediately rather
-      // than wait up to 15 min for the next scheduled tick.
+      // Ad-hoc monitor trigger for ACTIVE LLM-track positions only.
+      // Track B (signal) positions are intentionally NOT re-evaluated
+      // by Claude — they run on pure rules so the A/B test stays clean.
+      // New OPEN candidates wait for the 15m decide-cron. But if we
+      // already have a live LLM-track position on this symbol, a fresh
+      // signal — especially one against our direction — should
+      // re-evaluate immediately rather than wait up to 15 min.
       //
-      // Throttled per-symbol (5 min) to bound LLM cost when signals burst at
-      // bar close.
+      // Throttled per-symbol (5 min) to bound LLM cost when signals burst.
       const sym = parsed.data.symbol;
-      const active = findActivePosition(sym);
-      if (active) {
+      const active = findActiveOrPendingByTrack(sym, 'llm');
+      if (active && active.status === 'active') {
         const last = adHocCooldown.get(sym) ?? 0;
         if (Date.now() - last >= AD_HOC_COOLDOWN_MS) {
           adHocCooldown.set(sym, Date.now());
