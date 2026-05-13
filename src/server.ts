@@ -35,8 +35,19 @@ async function main(): Promise<void> {
   });
 
   await luxalgoRoute(app);
-  startDecideCronJob();
-  startMonitorJob();
+  // Track A — LLM-driven decide-cron + 5-min monitor. Gated by env so we
+  // can run Track B alone during the A/B comparison (or after, if signal
+  // beats LLM). tpsl-monitor stays on regardless — it's rule-based and
+  // manages BOTH tracks' active positions for SL/TP/BE move.
+  if (config.LLM_TRACK_ENABLED) {
+    startDecideCronJob();
+    startMonitorJob();
+    logger.info('Track A (LLM) enabled — decide cron + monitor started');
+  } else {
+    logger.warn(
+      'Track A (LLM) DISABLED via LLM_TRACK_ENABLED=false — only Track B (signals) will trade',
+    );
+  }
   startTpslMonitorJob();
   startHeartbeatJob();
   startDailyWrapJob();

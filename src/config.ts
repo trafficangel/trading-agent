@@ -29,6 +29,18 @@ const Schema = z.object({
   COOLDOWN_MIN_SAME_SYMBOL: z.coerce.number().int().nonnegative().default(15),
 
   /**
+   * Master switch for Track A (LLM-driven decide + critique + monitor).
+   * Default true (back-compat). Set false to run Track B alone — useful
+   * when the A/B comparison is done and Track B is the chosen strategy,
+   * or for cost-saving while observing pure-signal behaviour.
+   *
+   * When disabled, the 15-min decide-cron and the 5-min LLM monitor do
+   * NOT start. tpsl-monitor still runs (rule-based, needed for Track B).
+   * Self-review still runs (analyzes whichever track has data).
+   */
+  LLM_TRACK_ENABLED: z.coerce.boolean().default(true),
+
+  /**
    * A/B test toggle for Track B (pure-LuxAlgo signal trader, no LLM).
    * When true, qualifying webhook events trigger immediate OPEN decisions
    * stored with track='signal'. Independent from the LLM cron flow.
