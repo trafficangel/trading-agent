@@ -87,6 +87,31 @@ export function countFreshSignals(symbol: string, sinceMs: number): number {
   return countFreshBySymbolStmt.get(symbol, sinceMs)?.c ?? 0;
 }
 
+/** Find the most recent signal for `symbol` on `timeframe` with event in
+ *  the given set, received at or after `sinceMs`. Returns null if none.
+ *  Used by Track B for the 5m → 15m confluence gate: a 5m trigger fires
+ *  only when a same-direction 15m qualifying event arrived in the last
+ *  60 minutes. */
+export function findRecentSignalInSet(
+  symbol: string,
+  timeframe: string,
+  events: string[],
+  sinceMs: number,
+): SignalRow | null {
+  if (events.length === 0) return null;
+  const placeholders = events.map(() => '?').join(',');
+  const stmt = db.prepare<unknown[], SignalRow>(`
+    SELECT * FROM signals
+    WHERE symbol = ?
+      AND timeframe = ?
+      AND event IN (${placeholders})
+      AND received_at >= ?
+    ORDER BY received_at DESC
+    LIMIT 1
+  `);
+  return stmt.get(symbol, timeframe, ...events, sinceMs) ?? null;
+}
+
 export function groupedSignalsSince(sinceMs: number) {
   return groupedSinceStmt.all(sinceMs);
 }

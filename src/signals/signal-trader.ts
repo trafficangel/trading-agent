@@ -6,6 +6,7 @@ import {
   findActiveOrPendingByTrack,
   findRecentSignalOpen,
 } from '../db/repos/decisions.js';
+import { findRecentSignalInSet } from '../db/repos/signals.js';
 import { getVolumeProfile } from '../exchange/bybit-volume.js';
 import { sendMessage } from '../telegram/bot.js';
 import type { LuxAlgoPayload } from '../webhooks/luxalgo.schema.js';
@@ -61,8 +62,17 @@ const ENTRY_EVENTS_SHORT = new Set([
   'reversal_signal_down',
 ]);
 
-/** Only the 15m entry timeframe is wired up. Easy to add 1H later if needed. */
-const TRADEABLE_TIMEFRAMES = new Set(['15']);
+/** Timeframes we accept as triggers. 15m fires alone; 5m REQUIRES
+ *  same-direction confluence on 15m within last 60 min (see CONFLUENCE_TFS).
+ *  1H signals would also work standalone — but in practice they don't fire
+ *  yet (TradingView alerts aren't configured for 1H). Easy to add when ready. */
+const TRADEABLE_TIMEFRAMES = new Set(['15', '5']);
+
+/** Timeframes that REQUIRE same-direction confluence on a higher TF before
+ *  firing a Track B trade. Confluence rules in needsConfluence() below. */
+const REQUIRES_CONFLUENCE: Record<string, { higherTf: string; lookbackMs: number }> = {
+  '5': { higherTf: '15', lookbackMs: 60 * 60 * 1000 }, // 5m needs 15m in last 60 min
+};
 
 function isEntryEvent(event: string): 'long' | 'short' | null {
   if (ENTRY_EVENTS_LONG.has(event)) return 'long';
@@ -118,6 +128,49 @@ function round(n: number, digits: number): number {
 }
 
 /**
+ * Confluence gate: for triggers on lower timeframes (5m), require a
+ * same-direction qualifying event to have fired on a higher timeframe
+ * within a recent lookback window.
+ *
+ * Returns true (ok to trade) for triggers whose TF doesn't require
+ * confluence (e.g. 15m always passes). Returns true for 5m when a 15m
+ * same-direction event fired in the last 60 min. Returns false otherwise.
+ *
+ * Why: 5m signals on TON come almost exclusively as bullish_plus /
+ * bearish_plus (LuxAlgo S&O), which are noisy on lower TFs. Requiring
+ * 15m alignment filters out the "wrong-side scalp" cases where 5m fires
+ * against the 15m structure.
+ */
+function hasConfluence(symbol: string, tf: string, side: 'long' | 'short'): boolean {
+  const rule = REQUIRES_CONFLUENCE[tf];
+  if (!rule) return true; // 15m and 1H don't require confluence
+
+  const expectedEvents = side === 'long' ? [...ENTRY_EVENTS_LONG] : [...ENTRY_EVENTS_SHORT];
+  const since = Date.now() - rule.lookbackMs;
+  const match = findRecentSignalInSet(symbol, rule.higherTf, expectedEvents, since);
+
+  if (!match) {
+    logger.info(
+      { symbol, tf, side, higherTf: rule.higherTf, lookback_min: rule.lookbackMs / 60000 },
+      `signal-trader: ${tf}m trigger blocked — no ${rule.higherTf}m ${side} confluence in last ${rule.lookbackMs / 60000} min`,
+    );
+    return false;
+  }
+  logger.info(
+    {
+      symbol,
+      tf,
+      side,
+      confluence_event: match.event,
+      confluence_tf: match.timeframe,
+      age_min: Math.round((Date.now() - match.received_at) / 60000),
+    },
+    `signal-trader: ${tf}m trigger confirmed by ${rule.higherTf}m ${match.event}`,
+  );
+  return true;
+}
+
+/**
  * Process an incoming signal — called from the webhook route after the
  * raw signal has been inserted into `signals`. No-op if the feature flag
  * is off, the event doesn't qualify, or guards block.
@@ -137,6 +190,10 @@ export async function maybeTriggerSignalTrade(payload: LuxAlgoPayload): Promise<
     logger.debug({ tf: payload.timeframe }, 'signal-trader: timeframe not in tradeable set');
     return;
   }
+
+  // 2b. Confluence gate (TF-dependent — see REQUIRES_CONFLUENCE).
+  // 15m fires alone. 5m requires a same-side 15m qualifying event in last 60 min.
+  if (!hasConfluence(payload.symbol, payload.timeframe, side)) return;
 
   // 3. Cooldown check — last signal OPEN on this symbol within window?
   const cooldownMs = config.SIGNAL_COOLDOWN_MIN * 60 * 1000;
@@ -246,11 +303,14 @@ export async function maybeTriggerSignalTrade(payload: LuxAlgoPayload): Promise<
   const sideE = side === 'long' ? '🟢' : '🔴';
   const sideRu = side === 'long' ? 'ЛОНГ' : 'ШОРТ';
   const tradeIdStr = `S#${decisionId.toString().padStart(4, '0')}`;
+  const tfSource = REQUIRES_CONFLUENCE[payload.timeframe]
+    ? ` · ✅ ${REQUIRES_CONFLUENCE[payload.timeframe]?.higherTf}m confluence`
+    : '';
   const tgText = [
     `📡 <b>[TRACK B · SIGNAL] ${tradeIdStr}</b>`,
     `${sideE} <b>${payload.symbol}</b> ${sideRu} · pure-rule trigger`,
     ``,
-    `🎯 Trigger: <code>${payload.event}</code> на <code>${payload.timeframe}m</code>`,
+    `🎯 Trigger: <code>${payload.event}</code> на <code>${payload.timeframe}m</code>${tfSource}`,
     `📥 Вход:  <code>${geo.entry}</code> (market)`,
     `🛡 Стоп:  <code>${geo.sl}</code>  (<code>${geo.slPct.toFixed(2)}%</code>)`,
     `🎯 Цель:  <code>${geo.tp}</code>  (<code>${geo.tpPct.toFixed(2)}%</code>)`,
