@@ -27,6 +27,16 @@ function fmt(n: number, withSign = false): string {
   return `${sign}${n.toFixed(2)}`;
 }
 
+/** Telegram parse_mode=HTML supports only <b>/<i>/<a>/<code>/<pre>/<s>/<u>.
+ *  Any literal `<` or `>` (e.g. `MF<50`) must be escaped or the API
+ *  rejects the message with "Unsupported start tag". */
+function escapeTgHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function buildPost(code: string): { text: string; detailUrl: string } | null {
   const cfg =
     Object.values(STRATEGY_CONFIGS).find((s) => s.code === code) ?? getStrategyConfig(code);
@@ -41,11 +51,11 @@ function buildPost(code: string): { text: string; detailUrl: string } | null {
     `🤖 <b>STRAT-${cfg.code}</b> · ${cfg.symbol ?? 'ANY'} ${cfg.timeframe}m`,
     ``,
     `📋 <b>Логика:</b>`,
-    `<code>${cfg.description}</code>`,
+    `<code>${escapeTgHtml(cfg.description)}</code>`,
   ];
 
   if (cfg.longDescription) {
-    lines.push(``, `<i>${cfg.longDescription}</i>`);
+    lines.push(``, `<i>${escapeTgHtml(cfg.longDescription)}</i>`);
   }
 
   if (b) {
