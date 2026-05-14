@@ -1163,5 +1163,8 @@
       "netPnlUsdt": -4.29,
       "cumulativePnlUsdt": 864.65
     }
-  ]
+  ],
+  "totalTradesInStrategy": 104,
+  "tradesLogCap": 150,
+  "tradesLogCapped": false
 }

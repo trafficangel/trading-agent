@@ -93,6 +93,12 @@ type ScrapeResult = {
   performance: ScrapedPerformance;
   tradesAnalysis: ScrapedTradesAnalysis;
   tradesLog: TradeRow[];
+  /** Total trades in the strategy (from Performance tab), regardless of cap. */
+  totalTradesInStrategy: number;
+  /** Cap that was applied to tradesLog. */
+  tradesLogCap: number;
+  /** True if tradesLog was truncated (collected.length < totalTradesInStrategy). */
+  tradesLogCapped: boolean;
 };
 
 // ---------- Date parsing (RU locale) ----------
@@ -433,8 +439,18 @@ async function scrapeTradesAnalysis(page: Page): Promise<ScrapedTradesAnalysis> 
 
 // ---------- Scrape: Trades Log tab ----------
 
-async function scrapeTradesLog(page: Page, expectedTotal: number): Promise<TradeRow[]> {
+async function scrapeTradesLog(
+  page: Page,
+  expectedTotal: number,
+  maxTrades: number,
+): Promise<TradeRow[]> {
   await clickTab(page, 'Trades Log');
+
+  // Target: collect MIN(expectedTotal, maxTrades). LuxAlgo's Trades Log
+  // shows newest first (top of list = trade #N), scrolling down loads
+  // older trades. So stopping early gives us the MOST RECENT N — exactly
+  // what subscribers care about.
+  const target = Math.min(expectedTotal || Infinity, maxTrades);
 
   const collected = new Map<number, TradeRow>(); // dedup by trade number
 
@@ -536,7 +552,7 @@ async function scrapeTradesLog(page: Page, expectedTotal: number): Promise<Trade
     if (collected.size === before) stuck++;
     else stuck = 0;
 
-    if (collected.size >= expectedTotal) break;
+    if (collected.size >= target) break;
     if (stuck >= 5) break;
 
     // Scroll the inner container if we have a handle, else page scroll.
@@ -666,17 +682,29 @@ function renderConfigBlock(
   },`;
 }
 
+/**
+ * Default cap on how many trades to scrape into the JSON file. Aggregate
+ * stats come from LuxAlgo's Performance/Analysis tables and are unaffected;
+ * this only limits the per-trade detail log used for the equity curve +
+ * landing-page trades table. Tunable via --max-trades on the CLI.
+ */
+const DEFAULT_MAX_TRADES = 150;
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const url = args.find((a) => a.startsWith('http'));
   if (!url) {
-    console.error('Usage: pnpm tsx scripts/import-strategy.ts <luxalgo-strategy-url> [--code 002] [--slug ton-foo]');
+    console.error(
+      'Usage: pnpm tsx scripts/import-strategy.ts <luxalgo-strategy-url> [--code 002] [--slug ton-foo] [--max-trades 150]',
+    );
     process.exit(1);
   }
   const codeIdx = args.indexOf('--code');
   const slugIdx = args.indexOf('--slug');
+  const maxIdx = args.indexOf('--max-trades');
   const code = codeIdx !== -1 ? args[codeIdx + 1]! : 'XXX';
   const slug = slugIdx !== -1 ? args[slugIdx + 1]! : 'TBD';
+  const maxTrades = maxIdx !== -1 ? parseInt(args[maxIdx + 1]!, 10) : DEFAULT_MAX_TRADES;
 
   const ctx = await getLuxAlgoContext();
   const page = await ctx.newPage();
@@ -705,9 +733,11 @@ async function main(): Promise<void> {
     const tradesAnalysis = await scrapeTradesAnalysis(page);
     console.error(`  closedTrades=${tradesAnalysis.closedTrades.all}, largestLoss=${tradesAnalysis.largestLosingTrade.all} USDT`);
 
-    console.error(`→ Scraping Trades Log tab (expecting ~${performance.trades} rows)…`);
-    const tradesLog = await scrapeTradesLog(page, performance.trades);
-    console.error(`  collected ${tradesLog.length} trades`);
+    const totalTrades = tradesAnalysis.closedTrades.all || performance.trades || 0;
+    console.error(`→ Scraping Trades Log tab (expecting ~${totalTrades} rows, cap=${maxTrades})…`);
+    const tradesLog = await scrapeTradesLog(page, totalTrades, maxTrades);
+    const capped = totalTrades > 0 && tradesLog.length < totalTrades;
+    console.error(`  collected ${tradesLog.length} trades${capped ? ` (capped from ${totalTrades})` : ''}`);
 
     const sl = deriveSlPctFromTrades(tradesLog);
     console.error(`→ ${sl.rationale}`);
@@ -718,6 +748,9 @@ async function main(): Promise<void> {
       performance,
       tradesAnalysis,
       tradesLog,
+      totalTradesInStrategy: totalTrades,
+      tradesLogCap: maxTrades,
+      tradesLogCapped: capped,
     };
 
     // Write to src/strategies/data/ so the trades log ships with the

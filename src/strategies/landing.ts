@@ -31,9 +31,16 @@ type BacktestTrade = {
   cumulativePnlUsdt: number;
 };
 
-const backtestTradesCache = new Map<string, BacktestTrade[] | null>();
+type BacktestTradesBundle = {
+  trades: BacktestTrade[];
+  /** Full strategy trade count (from Performance tab), may exceed trades.length when capped. */
+  totalTradesInStrategy: number;
+  capped: boolean;
+};
 
-function loadBacktestTrades(strategyId: string): BacktestTrade[] | null {
+const backtestTradesCache = new Map<string, BacktestTradesBundle | null>();
+
+function loadBacktestTrades(strategyId: string): BacktestTradesBundle | null {
   if (backtestTradesCache.has(strategyId)) {
     return backtestTradesCache.get(strategyId) ?? null;
   }
@@ -49,8 +56,15 @@ function loadBacktestTrades(strategyId: string): BacktestTrade[] | null {
       try {
         const json = JSON.parse(readFileSync(p, 'utf-8'));
         const trades = (json?.tradesLog ?? []) as BacktestTrade[];
-        backtestTradesCache.set(strategyId, trades);
-        return trades;
+        const total = (json?.totalTradesInStrategy as number) ?? trades.length;
+        const capped = (json?.tradesLogCapped as boolean) ?? false;
+        const bundle: BacktestTradesBundle = {
+          trades,
+          totalTradesInStrategy: total,
+          capped,
+        };
+        backtestTradesCache.set(strategyId, bundle);
+        return bundle;
       } catch {
         // fall through
       }
@@ -657,15 +671,21 @@ function renderBacktestSection(b: BacktestSnapshot, strategyId: string): string 
   const pnlClass = classForValue(b.netPnlPct);
   const longClass = classForValue(b.longPnlPct);
   const shortClass = classForValue(b.shortPnlPct);
-  const trades = loadBacktestTrades(strategyId);
+  const bundle = loadBacktestTrades(strategyId);
+  const trades = bundle?.trades ?? [];
+  const totalInStrategy = bundle?.totalTradesInStrategy ?? trades.length;
+  const wasCapped = bundle?.capped ?? false;
+  const equityLabel = wasCapped
+    ? `последние ${trades.length} из ${totalInStrategy} сделок`
+    : `${trades.length} сделок`;
 
   return `
   <div class="section">
     <div class="section-title">Backtest · ${escapeHtml(b.periodLabel)} (${b.periodDays} дней)</div>
 
-    ${trades && trades.length > 0 ? `
+    ${trades.length > 0 ? `
     <div class="equity-card" style="margin-bottom: 16px;">
-      <div class="chart-title" style="margin-bottom: 8px;">Equity curve · ${trades.length} сделок</div>
+      <div class="chart-title" style="margin-bottom: 8px;">Equity curve · ${equityLabel}</div>
       ${equityCurveSvg(trades)}
     </div>
     ` : ''}
@@ -791,9 +811,14 @@ function renderBacktestSection(b: BacktestSnapshot, strategyId: string): string 
       </div></div>
     </div>
 
-    ${trades && trades.length > 0 ? `
+    ${trades.length > 0 ? `
     <div class="section">
-      <div class="section-title">Trades Log · ${trades.length} backtest сделок</div>
+      <div class="section-title">
+        Trades Log · ${wasCapped ? `последние ${trades.length} из ${totalInStrategy}` : `${trades.length}`} сделок
+      </div>
+      ${wasCapped ? `<div style="font-size: 12px; color: var(--text-faint); margin-bottom: 8px;">
+        Показаны самые свежие сделки. Полная статистика (WR / PF / DD) выше — считается по всем ${totalInStrategy} сделкам.
+      </div>` : ''}
       ${backtestTradesTable(trades, 20)}
     </div>
     ` : ''}
