@@ -23,6 +23,60 @@
  * — that level of tuning is unnecessary in shadow mode.
  */
 
+/** Backtest snapshot taken from TradingView Strategy Tester with
+ *  realistic commissions + position size, used for the public landing
+ *  page. ALL fields are honest backtest results (not optimistic
+ *  forward-tests). Period is operator-controlled (usually 90 days
+ *  prior to strategy launch). */
+export type BacktestSnapshot = {
+  /** e.g. "Feb 12 — May 14, 2026" */
+  periodLabel: string;
+  /** Days the backtest covers (90, 180, etc.) */
+  periodDays: number;
+  /** Initial account balance used. */
+  initialCapital: number;
+  /** Notional per trade (same constant for the live system). */
+  notionalUsd: number;
+  /** Commission per side (Bybit USDT-perp taker: 0.00055). */
+  commissionPctPerSide: number;
+
+  /** Net profit/loss in USDT and percent. */
+  netPnlUsd: number;
+  netPnlPct: number;
+  /** Annualised CAGR. */
+  cagrPct: number;
+
+  /** Trade counts. */
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  /** Win rate 0..1 (60% = 0.6). */
+  winRate: number;
+
+  /** Profit factor (gross profit / gross loss). */
+  profitFactor: number;
+  /** Total commission paid over the period. */
+  commissionPaidUsd: number;
+
+  /** Max equity drawdown. */
+  maxDrawdownPct: number;
+  maxDrawdownUsd: number;
+
+  /** Per-trade averages. */
+  avgWinUsd: number;
+  avgWinPct: number;
+  avgLossUsd: number;
+  avgLossPct: number;
+  largestWinUsd: number;
+  largestLossUsd: number;
+
+  /** Long/short breakdown. */
+  longTrades: number;
+  longPnlPct: number;
+  shortTrades: number;
+  shortPnlPct: number;
+};
+
 export type StrategyConfig = {
   /** Must match the `strategy_id` field in webhook payloads. ≤64 chars.
    *  Internal identifier — used as map key + in self-review aggregation. */
@@ -34,6 +88,8 @@ export type StrategyConfig = {
    *  `<SYMBOL> <TF>m | LONG: <conditions> | SHORT: <conditions> | EXIT: <conditions>`.
    *  Shown on every entry/exit post for context. */
   description: string;
+  /** Long-form prose explanation, for the public landing page. Optional. */
+  longDescription?: string;
   /** Optional symbol pin. If set, webhook with a different symbol is
    *  rejected ('symbol_mismatch'). Leave undefined to accept any symbol. */
   symbol?: string;
@@ -46,6 +102,12 @@ export type StrategyConfig = {
    *  set explicitly per strategy based on backtest analysis. Examples:
    *  0.02 = 2%, 0.025 = 2.5%, 0.015 = 1.5%. */
   slPct: number;
+  /** When the strategy went live (unix ms). Used by landing page to scope
+   *  "live performance since launch" stats. */
+  launchedAt: number;
+  /** Backtest snapshot for landing-page presentation. Optional — strategies
+   *  without a backtest just don't render that section. */
+  backtest?: BacktestSnapshot;
 };
 
 /**
@@ -71,10 +133,44 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     code: '001',
     description:
       'BNB 15m | LONG: CONT Any Br + TT Br + MF>50 | SHORT: CONT Any Bl + TT Bl + MF<50 | EXIT: CONT Built-in',
+    longDescription:
+      'Контр-трендовая стратегия на 15-минутном таймфрейме с фильтрами по среднесрочному тренду (Trend Tracer) и денежному потоку (Money Flow). ' +
+      'LONG-вход срабатывает когда Contrarian Any выдаёт bearish-сигнал (контр-индикатор разворота вверх), Trend Tracer показывает bearish-тренд (зона перепроданности) и Money Flow выше 50 (давление покупателей преобладает). ' +
+      'SHORT — зеркально. ' +
+      'Выход полностью передан встроенным exits стратегии — без фиксированных TP. Safety SL 2.5% страхует от случаев когда стратегия не закроет позицию вовремя.',
     symbol: 'BNBUSDT',
     timeframe: '15',
     enabled: true,
     slPct: 0.025,
+    launchedAt: Date.parse('2026-05-14T12:00:00Z'),
+    backtest: {
+      periodLabel: 'Feb 12 — May 14, 2026',
+      periodDays: 91,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 203.95,
+      netPnlPct: 20.39,
+      cagrPct: 110.60,
+      totalTrades: 49,
+      wins: 30,
+      losses: 19,
+      winRate: 0.6122,
+      profitFactor: 1.787,
+      commissionPaidUsd: 54.45,
+      maxDrawdownPct: 11.96,
+      maxDrawdownUsd: 140.78,
+      avgWinUsd: 15.62,
+      avgWinPct: 1.56,
+      avgLossUsd: -13.80,
+      avgLossPct: -1.38,
+      largestWinUsd: 46.73,
+      largestLossUsd: -53.09,
+      longTrades: 21,
+      longPnlPct: 11.90,
+      shortTrades: 28,
+      shortPnlPct: 8.75,
+    },
   },
 };
 

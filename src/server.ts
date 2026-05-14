@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { config } from './config.js';
 import { logger } from './lib/logger.js';
 import { luxalgoRoute } from './webhooks/luxalgo.route.js';
+import { landingRoute } from './strategies/landing.js';
 import { startMonitorJob } from './jobs/monitor.js';
 import { startTpslMonitorJob } from './jobs/tpsl-monitor.js';
 import { startHeartbeatJob } from './jobs/heartbeat.js';
@@ -35,6 +36,7 @@ async function main(): Promise<void> {
   });
 
   await luxalgoRoute(app);
+  await landingRoute(app);
   // Track A — LLM-driven decide-cron + 5-min monitor. Gated by env so we
   // can run Track B alone during the A/B comparison (or after, if signal
   // beats LLM). tpsl-monitor stays on regardless — it's rule-based and
