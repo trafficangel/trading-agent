@@ -108,6 +108,15 @@ export type StrategyConfig = {
   /** Backtest snapshot for landing-page presentation. Optional — strategies
    *  without a backtest just don't render that section. */
   backtest?: BacktestSnapshot;
+  /** Operator-defined alert identifier matching the TradingView alert
+   *  name. Surfaced verbatim in Telegram posts AND on the landing page
+   *  so subscribers can match a post to a source. Example:
+   *  `BNBUSD|15|LONG=CONTAnyBr&TTBr&MFa50|SHORT=CONTAnyBl&TTBl&MFb50|EXIT=CONTBltExt` */
+  alertName?: string;
+  /** URL of the original LuxAlgo AI Builder chat that produced this
+   *  strategy. Shown next to the alertName on the landing page so users
+   *  can verify the source. Auto-populated by scripts/import-strategy.ts. */
+  sourceUrl?: string;
 };
 
 /**
@@ -149,6 +158,8 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     enabled: true,
     slPct: 0.025,
     launchedAt: Date.parse('2026-05-14T12:00:00Z'),
+    alertName: 'BNBUSD|15|LONG=CONTAnyBr&TTBr&MFa50|SHORT=CONTAnyBl&TTBl&MFb50|EXIT=CONTBltExt',
+    sourceUrl: 'https://www.luxalgo.com/chat/xff5y4hjob6d2qitfo1lhbxa/',
     backtest: {
       periodLabel: 'Oct 19, 2025 — May 14, 2026',
       periodDays: 207,

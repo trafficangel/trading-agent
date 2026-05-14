@@ -651,6 +651,10 @@ function renderConfigBlock(
     enabled: true,
     slPct: ${slPct},
     launchedAt: Date.parse('${new Date().toISOString()}'),
+    // TODO: set the TradingView alert identifier you use in posts, e.g.
+    //   '<SYMBOL>|<TF>|LONG=...|SHORT=...|EXIT=...'
+    // alertName: '',
+    sourceUrl: '${url}',
     backtest: {
       periodLabel: ${JSON.stringify(periodLabel)},
       periodDays: ${periodDays},

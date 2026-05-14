@@ -602,6 +602,30 @@ const STYLE = `
   /* Equity curve container */
   .equity-card { background: var(--bg-card); border: 1px solid var(--border);
     border-radius: 10px; padding: 14px 16px; }
+
+  /* Alert ID card — shown right under the header */
+  .alert-id-card {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 12px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 14px; margin-top: 8px;
+  }
+  .alert-id-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-faint); font-weight: 600; flex-shrink: 0;
+  }
+  .alert-id-value {
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 12px;
+    color: var(--text); background: var(--bg); padding: 4px 8px;
+    border-radius: 4px; word-break: break-all; flex: 1; min-width: 200px;
+  }
+  .alert-id-link {
+    font-size: 12px; color: var(--accent); text-decoration: none;
+    padding: 4px 10px; border: 1px solid var(--accent-soft);
+    border-radius: 4px; transition: background 120ms; flex-shrink: 0;
+  }
+  .alert-id-link:hover {
+    background: var(--accent-soft); text-decoration: none;
+  }
 `;
 
 function pageShell(title: string, body: string): string {
@@ -959,6 +983,25 @@ function renderLogicSection(cfg: StrategyConfig): string {
   `;
 }
 
+function renderAlertIdBlock(cfg: StrategyConfig): string {
+  if (!cfg.alertName && !cfg.sourceUrl) return '';
+  const idText = cfg.alertName ?? cfg.id;
+  // Source link rendered as a separate badge so on mobile the long
+  // alert ID can wrap independently.
+  const link = cfg.sourceUrl
+    ? `<a class="alert-id-link" href="${escapeHtml(cfg.sourceUrl)}" target="_blank" rel="noopener nofollow">
+         LuxAlgo source <span aria-hidden="true">↗</span>
+       </a>`
+    : '';
+  return `
+    <div class="alert-id-card">
+      <span class="alert-id-label">Alert&nbsp;ID</span>
+      <code class="alert-id-value">${escapeHtml(idText)}</code>
+      ${link}
+    </div>
+  `;
+}
+
 function renderStrategyDetail(cfg: StrategyConfig): string {
   const live = getStrategyLiveStats(cfg.id);
   return pageShell(
@@ -969,6 +1012,8 @@ function renderStrategyDetail(cfg: StrategyConfig): string {
       <h1 class="title">${escapeHtml(cfg.description.split('|')[0]?.trim() ?? cfg.id)}</h1>
       <p class="subtitle">Track C · LuxAlgo AI Strategy Builder webhook · <a href="/strategies">все стратегии</a></p>
     </div>
+
+    ${renderAlertIdBlock(cfg)}
 
     ${cfg.backtest ? renderBacktestSection(cfg.backtest, cfg.id) : ''}
 
