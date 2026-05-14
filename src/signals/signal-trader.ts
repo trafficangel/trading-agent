@@ -330,44 +330,22 @@ export async function maybeTriggerSignalTrade(payload: LuxAlgoPayload): Promise<
   const sideRu = side === 'long' ? 'ЛОНГ' : 'ШОРТ';
   const tradeIdStr = `S#${decisionId.toString().padStart(4, '0')}`;
   const tfSource = REQUIRES_CONFLUENCE[payload.timeframe]
-    ? ` · ✅ ${REQUIRES_CONFLUENCE[payload.timeframe]?.higherTf}m confluence`
+    ? ` · ✅ ${REQUIRES_CONFLUENCE[payload.timeframe]?.higherTf}m`
     : '';
 
-  // Expanded geometry breakdown — user wanted to see WHY these SL/TP
-  // numbers (not just the abstract "1.5×ATR" multiplier).
-  const slDist = Math.abs(geo.entry - geo.sl);
-  const tpDist = Math.abs(geo.tp - geo.entry);
-  const geometryLines =
-    geo.source === 'atr' && atr15m
-      ? [
-          `⚙️ <b>Как рассчитан стоп и цель:</b>`,
-          `   ATR(14) на 15m свече = <code>${atr15m.toFixed(4)}</code> (~<code>${((atr15m / geo.entry) * 100).toFixed(2)}%</code>)`,
-          `   — это типичный размах ОДНОЙ 15m свечи сейчас`,
-          `   SL = 1.5×ATR = <code>${slDist.toFixed(4)}</code> (<code>${geo.slPct.toFixed(2)}%</code>) от входа`,
-          `   TP = 3.0×ATR = <code>${tpDist.toFixed(4)}</code> (<code>${geo.tpPct.toFixed(2)}%</code>) от входа`,
-          `   <i>Стоп шире одной свечи = меньше шанс быть выбитым шумом.</i>`,
-          `   <i>Цель в 2 раза дальше стопа = R:R 1:2.</i>`,
-        ]
-      : [
-          `⚙️ <b>Как рассчитан стоп и цель:</b>`,
-          `   <i>ATR недоступен → fixed 1% SL / 2% TP fallback</i>`,
-          `   SL = <code>1%</code> от входа (<code>${slDist.toFixed(4)}</code>)`,
-          `   TP = <code>2%</code> от входа (<code>${tpDist.toFixed(4)}</code>)`,
-        ];
-
+  // Minimal Signals post — entry/SL/TP/R:R and nothing else.
+  // Detailed geometry (ATR multipliers, "почему такой SL", etc.) lives in
+  // reasoning_full in the DB row + in the Logs detailed log message. Keeps
+  // Signals channel readable for the user who already understands the
+  // math after the explainer we walked through.
   const tgText = [
-    `📡 <b>[TRACK B · SIGNAL] ${tradeIdStr}</b>`,
-    `${sideE} <b>${payload.symbol}</b> ${sideRu} · pure-rule trigger`,
+    `📡 <b>${tradeIdStr}</b>  ${sideE} <b>${payload.symbol}</b> ${sideRu}`,
     ``,
-    `🎯 Сигнал: <code>${payload.event}</code> на <code>${payload.timeframe}m</code>${tfSource}`,
-    `📥 Вход:  <code>${geo.entry}</code> (по рынку)`,
-    `🛡 Стоп:  <code>${geo.sl}</code>  (<code>${geo.slPct.toFixed(2)}%</code>)`,
-    `🎯 Цель:  <code>${geo.tp}</code>  (<code>${geo.tpPct.toFixed(2)}%</code>)`,
-    `📐 R:R:   <code>1 : ${geo.rr.toFixed(1)}</code>`,
-    ``,
-    ...geometryLines,
-    ``,
-    `<i>Параллельная стратегия — без LLM, чистые сигналы LuxAlgo.</i>`,
+    `🎯 ${payload.event} · ${payload.timeframe}m${tfSource}`,
+    `📥 Вход:  <code>${geo.entry}</code>`,
+    `🛡 Стоп:  <code>${geo.sl}</code>  (${geo.slPct.toFixed(2)}%)`,
+    `🎯 Цель:  <code>${geo.tp}</code>  (${geo.tpPct.toFixed(2)}%)`,
+    `📐 R:R 1:${geo.rr.toFixed(1)}`,
   ].join('\n');
 
   await sendMessage({ channel: 'signals', text: tgText }).catch((err) =>
