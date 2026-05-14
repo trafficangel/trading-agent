@@ -8,6 +8,7 @@ import { logger } from '../lib/logger.js';
 import { findActiveOrPendingByTrack } from '../db/repos/decisions.js';
 import { monitorPosition } from '../jobs/monitor.js';
 import { maybeTriggerSignalTrade } from '../signals/signal-trader.js';
+import { maybeCounterExit } from '../signals/counter-exit.js';
 
 /**
  * Throttle ad-hoc monitor triggers per symbol. A new signal arriving on an
@@ -64,6 +65,16 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
       // 15m decide cron — that's the whole "event-driven" point of Track B.
       void maybeTriggerSignalTrade(parsed.data).catch((err) =>
         logger.error({ err, symbol: parsed.data.symbol }, 'signal-trader: trigger failed'),
+      );
+
+      // === TRACK B — counter-signal early-exit ===
+      // If the incoming signal REVERSES the active Track B thesis on this
+      // symbol, force-close the position at market. See src/signals/counter-exit.ts
+      // for the rules (structural reversal on same/higher TF, or major
+      // signal on strictly higher TF). No-op when no active Track B
+      // position exists.
+      void maybeCounterExit(parsed.data).catch((err) =>
+        logger.error({ err, symbol: parsed.data.symbol }, 'counter-exit: failed'),
       );
 
       // Ad-hoc monitor trigger for ACTIVE LLM-track positions only.

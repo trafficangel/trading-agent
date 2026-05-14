@@ -10,6 +10,8 @@ import {
   calcPnl,
   closePositionWithStats,
   updatePositionSl,
+  partialCloseAtTp1,
+  forceClose,
   type DecisionRow,
 } from '../db/repos/decisions.js';
 import { getLastPrice } from '../exchange/bybit-public.js';
@@ -76,111 +78,206 @@ function maybeMoveSlToBe(p: DecisionRow, currentPrice: number): number {
   return p.entry;
 }
 
+// Max position age before time-guard force-close kicks in (24h).
+// Reason: positions older than this without reaching TP1 are usually
+// "stranded" — the market has moved on and SL/TP just won't trigger.
+// 24h covers all current TFs: 5m/15m/1H/4H all reasonably resolve in <24h.
+const TIME_GUARD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 async function checkPosition(pInput: DecisionRow): Promise<void> {
-  // Refresh from DB: between when tick() fetched activePositions and now,
-  // monitor LLM may have updated SL via MODIFY, or another tpsl pass may
-  // have moved SL to BE. Using the stale snapshot can cause:
-  //   - false negatives (price crossed the NEW SL but we check the OLD one)
-  //   - blind overwrites of a just-applied MODIFY by our own auto-BE logic
-  // findDecisionById is one cheap indexed query — fine to call every tick.
+  // Refresh from DB on each tick — see comment in previous version. Concurrent
+  // mutations (BE move, partial close, MODIFY) require fresh state.
   const fresh = findDecisionById(pInput.id);
   if (!fresh || fresh.status !== 'active') return;
   const p = fresh;
 
   if (!p.entry || !p.sl || !p.side) return;
   if (p.side !== 'long' && p.side !== 'short') return;
-  const tp = p.tp_json ? Number(JSON.parse(p.tp_json)?.[0]) : null;
+
+  // Parse tp_json — may be [tp1, tp2] (multi-TP) or [tp] (legacy single-TP).
+  const tpArr = p.tp_json ? (JSON.parse(p.tp_json) as unknown[]).filter((x) => typeof x === 'number') as number[] : [];
+  const isMultiTp = p.tp1_price !== null && tpArr.length >= 2;
+  const tp1 = isMultiTp ? (p.tp1_price as number) : null;
+  const tpFinal = isMultiTp ? (tpArr[1] as number) : tpArr[0] ?? null;
 
   const price = await getLastPrice(p.symbol);
   if (price == null) return;
 
-  // Auto SL→BE check — may mutate p.sl in DB. We use the returned value for
-  // the rest of this tick.
-  const effectiveSl = maybeMoveSlToBe(p, price);
-
-  let hit: 'sl' | 'tp' | null = null;
-  let closePrice = price;
-
-  if (p.side === 'long') {
-    if (price <= effectiveSl) {
-      hit = 'sl';
-      closePrice = effectiveSl; // shadow fill at exact level
-    } else if (tp != null && Number.isFinite(tp) && price >= tp) {
-      hit = 'tp';
-      closePrice = tp;
+  // === TIME GUARD ===
+  // Position open too long without resolution → force-close at market.
+  const ageMs = Date.now() - (p.filled_at ?? p.created_at);
+  if (ageMs > TIME_GUARD_MAX_AGE_MS) {
+    const slForR = p.original_sl ?? p.sl;
+    const { pnlPct, pnlR } = computeWeightedPnl(p, price, slForR);
+    const closed = forceClose({
+      id: p.id,
+      closePrice: price,
+      closeReason: 'manual',
+      pnlPct,
+      pnlR,
+      forceReason: 'time_guard',
+    });
+    if (closed) {
+      logger.info(
+        { position_id: p.id, age_h: Math.round(ageMs / 3600000), pnlR },
+        'tpsl: time-guard force-close',
+      );
+      await postCloseMessage(p, price, 'manual', pnlPct, pnlR, '⏱ time-guard (24h)');
     }
-  } else {
-    // short
-    if (price >= effectiveSl) {
-      hit = 'sl';
-      closePrice = effectiveSl;
-    } else if (tp != null && Number.isFinite(tp) && price <= tp) {
-      hit = 'tp';
-      closePrice = tp;
-    }
-  }
-
-  if (!hit) return;
-
-  const reason = hit === 'tp' ? 'tp_hit' : 'sl_hit';
-  // R-multiple is computed against the ORIGINAL SL — that's the risk we
-  // actually took. Use the frozen original_sl column (migration 009).
-  // p.sl in DB may have been overwritten by BE move (entry-level), so
-  // using it for R math would divide by zero on TP-hit-after-BE. Fall
-  // back to p.sl if original_sl missing (very old rows, pre-migration).
-  const slForR = p.original_sl ?? p.sl;
-  const { pnlPct, pnlR } = calcPnl(p.side, p.entry, slForR, closePrice);
-
-  const closedByUs = closePositionWithStats({ id: p.id, closePrice, closeReason: reason, pnlPct, pnlR });
-  if (!closedByUs) {
-    // Monitor LLM beat us to the close (or another tpsl tick if the cron
-    // somehow overlapped). Skip our result-post.
-    logger.info(
-      { position_id: p.id, hit },
-      'tpsl: position already closed by another path, skipping post',
-    );
     return;
   }
 
+  // === MULTI-TP path ===
+  if (isMultiTp && tp1 !== null && tpFinal !== null) {
+    // Stage 1: pre-TP1 (partial_closed_pct = 0)
+    if (p.partial_closed_pct === 0) {
+      // SL hit before TP1 — full close at original SL, -1R
+      const slHit = (p.side === 'long' && price <= p.sl) || (p.side === 'short' && price >= p.sl);
+      if (slHit) {
+        return closeFull(p, p.sl, 'sl_hit', '🛑 SL hit (до TP1)');
+      }
+      // TP1 hit — partial close 50% + move SL to BE
+      const tp1Hit = (p.side === 'long' && price >= tp1) || (p.side === 'short' && price <= tp1);
+      if (tp1Hit) {
+        const partialDone = partialCloseAtTp1(p.id, tp1, p.entry);
+        if (partialDone) {
+          logger.info(
+            { position_id: p.id, tp1, newSl: p.entry },
+            'tpsl: TP1 hit — 50% closed, SL → BE',
+          );
+          await postPartialClose(p, tp1);
+        }
+        return;
+      }
+      return; // no hit yet
+    }
+
+    // Stage 2: post-TP1 (partial_closed_pct = 50)
+    // SL is now at entry (BE). Remaining 50% lives until TP2 or BE-touch.
+    if (p.partial_closed_pct === 50) {
+      const slHit = (p.side === 'long' && price <= p.sl) || (p.side === 'short' && price >= p.sl);
+      if (slHit) {
+        // BE-touch on remainder. Weighted PnL: 50%×(+1R) + 50%×(0R) = +0.5R
+        return closeFull(p, p.sl, 'sl_hit', '🔄 BE-touch (после TP1) — итог +0.5R');
+      }
+      const tp2Hit = (p.side === 'long' && price >= tpFinal) || (p.side === 'short' && price <= tpFinal);
+      if (tp2Hit) {
+        // Full TP2. Weighted PnL: 50%×(+1R) + 50%×(+2R) = +1.5R
+        return closeFull(p, tpFinal, 'tp_hit', '🎉 TP2 — итог +1.5R');
+      }
+      return; // no final hit yet
+    }
+    return; // partial_closed_pct=100 shouldn't reach here (status would be 'closed')
+  }
+
+  // === LEGACY single-TP path (Track A historical rows) ===
+  // Original behaviour: maybeMoveSlToBe → SL/TP hit detection.
+  const effectiveSl = maybeMoveSlToBe(p, price);
+  let hit: 'sl' | 'tp' | null = null;
+  let closePrice = price;
+  if (p.side === 'long') {
+    if (price <= effectiveSl) { hit = 'sl'; closePrice = effectiveSl; }
+    else if (tpFinal != null && price >= tpFinal) { hit = 'tp'; closePrice = tpFinal; }
+  } else {
+    if (price >= effectiveSl) { hit = 'sl'; closePrice = effectiveSl; }
+    else if (tpFinal != null && price <= tpFinal) { hit = 'tp'; closePrice = tpFinal; }
+  }
+  if (!hit) return;
+  const reason = hit === 'tp' ? 'tp_hit' : 'sl_hit';
+  return closeFull(p, closePrice, reason, hit === 'tp' ? '🎉 TP' : '🛑 SL');
+}
+
+/**
+ * Compute weighted PnL for a position that may be partially closed.
+ *   partial_closed_pct = 0  → standard calcPnl on remaining 100%
+ *   partial_closed_pct = 50 → 0.5×(TP1 R) + 0.5×(final R)
+ */
+function computeWeightedPnl(
+  p: DecisionRow,
+  finalClosePrice: number,
+  slForR: number,
+): { pnlPct: number; pnlR: number } {
+  if (p.partial_closed_pct === 50 && p.partial_close_price !== null && p.entry !== null && p.side) {
+    const partialResult = calcPnl(p.side as 'long' | 'short', p.entry, slForR, p.partial_close_price);
+    const finalResult = calcPnl(p.side as 'long' | 'short', p.entry, slForR, finalClosePrice);
+    return {
+      pnlPct: (partialResult.pnlPct + finalResult.pnlPct) / 2,
+      pnlR: Math.round((partialResult.pnlR + finalResult.pnlR) * 0.5 * 100) / 100,
+    };
+  }
+  return calcPnl(p.side as 'long' | 'short', p.entry!, slForR, finalClosePrice);
+}
+
+/** Close the full (or remaining) position with computed weighted PnL. */
+async function closeFull(
+  p: DecisionRow,
+  closePrice: number,
+  reason: 'tp_hit' | 'sl_hit' | 'manual',
+  hint: string,
+): Promise<void> {
+  if (!p.entry || !p.side) return;
+  const slForR = p.original_sl ?? p.sl ?? p.entry;
+  const { pnlPct, pnlR } = computeWeightedPnl(p, closePrice, slForR);
+  const closed = closePositionWithStats({ id: p.id, closePrice, closeReason: reason, pnlPct, pnlR });
+  if (!closed) {
+    logger.info({ position_id: p.id, reason }, 'tpsl: already closed elsewhere, skip post');
+    return;
+  }
   logger.info(
-    {
-      position_id: p.id,
-      symbol: p.symbol,
-      side: p.side,
-      hit,
-      close_price: closePrice,
-      tick_price: price,
-      pnl_pct: pnlPct,
-      pnl_r: pnlR,
-    },
+    { position_id: p.id, reason, closePrice, pnlPct, pnlR, hint, partial: p.partial_closed_pct },
     'tpsl monitor: position closed',
   );
+  await postCloseMessage(p, closePrice, reason, pnlPct, pnlR, hint);
+}
 
+/** Send the result post (used by all close paths). */
+async function postCloseMessage(
+  p: DecisionRow,
+  closePrice: number,
+  reason: 'tp_hit' | 'sl_hit' | 'manual',
+  pnlPct: number,
+  pnlR: number,
+  _hint: string,
+): Promise<void> {
+  if (!p.entry || !p.side || !p.sl) return;
+  const tpFinal = p.tp_json ? (JSON.parse(p.tp_json) as number[]).at(-1) ?? null : null;
   const text = resultPost({
     parentTradeId: p.id,
     symbol: p.symbol,
-    side: p.side,
+    side: p.side as 'long' | 'short',
     entry: p.entry,
     sl: p.sl,
-    tp,
+    tp: tpFinal,
     closePrice,
     closeReason: reason,
     pnlPct,
     pnlR,
-    durationMs: Date.now() - p.created_at,
-    track: p.track, // pass A/B marker for trade-id prefix ('S#' vs '#')
+    durationMs: Date.now() - (p.filled_at ?? p.created_at),
+    track: p.track,
   });
-
   if (p.screenshot_path && existsSync(p.screenshot_path)) {
-    const sent = await sendPhoto({
-      channel: 'signals',
-      photoPath: p.screenshot_path,
-      caption: text,
-    });
+    const sent = await sendPhoto({ channel: 'signals', photoPath: p.screenshot_path, caption: text });
     if (!sent) await sendMessage({ channel: 'signals', text });
   } else {
     await sendMessage({ channel: 'signals', text });
   }
+  await sendMessage({ channel: 'logs', text, disable_notification: true });
+}
+
+/** Send TP1 partial-close notification (50% closed + SL → BE). */
+async function postPartialClose(p: DecisionRow, tp1Price: number): Promise<void> {
+  const prefix = p.track === 'signal' ? 'S#' : '#';
+  const tradeIdStr = `${prefix}${p.id.toString().padStart(4, '0')}`;
+  const sideE = p.side === 'long' ? '🟢' : '🔴';
+  const text = [
+    `💰 <b>TP1 взят</b> · ${tradeIdStr}  ${sideE} ${p.symbol}`,
+    ``,
+    `Закрыли 50% позиции на <code>${tp1Price}</code> (+1R)`,
+    `SL подвинут в безубыток (<code>${p.entry}</code>)`,
+    ``,
+    `<i>Оставшиеся 50% едут к TP2 (+2R). Минимальный итог = +0.5R.</i>`,
+  ].join('\n');
+  await sendMessage({ channel: 'signals', text, disable_notification: true });
   await sendMessage({ channel: 'logs', text, disable_notification: true });
 }
 

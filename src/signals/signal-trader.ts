@@ -100,9 +100,16 @@ function isEntryEvent(event: string): 'long' | 'short' | null {
 type TradeGeometry = {
   entry: number;
   sl: number;
+  /** TP2 — final target (50% closes here when partial mode is on). */
   tp: number;
+  /** TP1 — partial target (50% closes here, SL → BE on remaining 50%).
+   *  null in legacy single-TP mode. */
+  tp1: number;
   slPct: number;
+  /** Distance to TP2 as % of entry. */
   tpPct: number;
+  /** Distance to TP1 as % of entry. */
+  tp1Pct: number;
   rr: number;
   source: 'atr' | 'fixed';
 };
@@ -110,31 +117,39 @@ type TradeGeometry = {
 function computeGeometry(side: 'long' | 'short', entry: number, atr15m: number | null): TradeGeometry {
   if (atr15m && atr15m > 0) {
     const slDist = 1.5 * atr15m;
-    const tpDist = 3.0 * atr15m;
+    const tp1Dist = slDist;        // TP1 = +1R = same distance as SL
+    const tp2Dist = 2 * slDist;    // TP2 = +2R = double SL distance
     const sl = side === 'long' ? entry - slDist : entry + slDist;
-    const tp = side === 'long' ? entry + tpDist : entry - tpDist;
+    const tp1 = side === 'long' ? entry + tp1Dist : entry - tp1Dist;
+    const tp2 = side === 'long' ? entry + tp2Dist : entry - tp2Dist;
     return {
       entry,
       sl: round(sl, 4),
-      tp: round(tp, 4),
+      tp: round(tp2, 4),
+      tp1: round(tp1, 4),
       slPct: (slDist / entry) * 100,
-      tpPct: (tpDist / entry) * 100,
-      rr: tpDist / slDist,
+      tpPct: (tp2Dist / entry) * 100,
+      tp1Pct: (tp1Dist / entry) * 100,
+      rr: tp2Dist / slDist,         // 2.0 for the headline R:R
       source: 'atr',
     };
   }
-  // Fixed-percent fallback
-  const slPct = 0.01; // 1%
-  const tpPct = 0.02; // 2%
+  // Fixed-percent fallback (ATR unavailable)
+  const slPct = 0.01;   // 1%
+  const tp1Pct = 0.01;  // TP1 = +1R = same as SL distance
+  const tp2Pct = 0.02;  // TP2 = +2R
   const sl = side === 'long' ? entry * (1 - slPct) : entry * (1 + slPct);
-  const tp = side === 'long' ? entry * (1 + tpPct) : entry * (1 - tpPct);
+  const tp1 = side === 'long' ? entry * (1 + tp1Pct) : entry * (1 - tp1Pct);
+  const tp2 = side === 'long' ? entry * (1 + tp2Pct) : entry * (1 - tp2Pct);
   return {
     entry,
     sl: round(sl, 4),
-    tp: round(tp, 4),
+    tp: round(tp2, 4),
+    tp1: round(tp1, 4),
     slPct: slPct * 100,
-    tpPct: tpPct * 100,
-    rr: tpPct / slPct,
+    tpPct: tp2Pct * 100,
+    tp1Pct: tp1Pct * 100,
+    rr: tp2Pct / slPct,
     source: 'fixed',
   };
 }
@@ -267,12 +282,15 @@ export async function maybeTriggerSignalTrade(payload: LuxAlgoPayload): Promise<
     tp_strategy: 'swing', // R:R 1:2 fits swing, not scalp
     entry: geo.entry,
     sl: geo.sl,
-    tp: [geo.tp],
+    // tp_json now stores [TP1, TP2] for multi-TP. TP1 = +1R (50% close + BE),
+    // TP2 = +2R (final 50% close). Legacy single-TP rows (track='llm' before
+    // 2026-05-14) have tp_json with 1 element — still parseable.
+    tp: [geo.tp1, geo.tp],
     size_pct: config.SIGNAL_TRADE_SIZE_PCT,
     confidence: 0.5, // arbitrary — there's no LLM here, but downstream code reads this
-    reasoning_short: `📡 SIG ${side} ${payload.symbol}: ${payload.event} on ${payload.timeframe}m @ ${geo.entry}. SL ${geo.sl} (${geo.slPct.toFixed(2)}%), TP ${geo.tp} (${geo.tpPct.toFixed(2)}%), R:R 1:${geo.rr.toFixed(1)} (${geo.source}).`,
+    reasoning_short: `📡 SIG ${side} ${payload.symbol}: ${payload.event} on ${payload.timeframe}m @ ${geo.entry}. SL ${geo.sl} (${geo.slPct.toFixed(2)}%), TP1 ${geo.tp1} (50%), TP2 ${geo.tp} (50%).`,
     reasoning_full: [
-      `Pure-signal Track B trigger.`,
+      `Pure-signal Track B trigger (multi-TP 50/50).`,
       ``,
       `Trigger event: ${payload.event} on ${payload.timeframe}m`,
       `Source: ${payload.source}`,
@@ -280,13 +298,15 @@ export async function maybeTriggerSignalTrade(payload: LuxAlgoPayload): Promise<
       ``,
       `Side: ${side}`,
       `Entry: ${geo.entry} (market)`,
-      `SL: ${geo.sl} (${geo.slPct.toFixed(2)}%)`,
-      `TP: ${geo.tp} (${geo.tpPct.toFixed(2)}%)`,
-      `R:R: 1:${geo.rr.toFixed(2)}`,
+      `SL:  ${geo.sl} (${geo.slPct.toFixed(2)}%) — original risk = 1R`,
+      `TP1: ${geo.tp1} (${geo.tp1Pct.toFixed(2)}%) — close 50%, SL → BE`,
+      `TP2: ${geo.tp} (${geo.tpPct.toFixed(2)}%) — close remaining 50%`,
       `Geometry source: ${geo.source} (ATR15m=${atr15m ?? 'unavailable'})`,
       `Size: ${config.SIGNAL_TRADE_SIZE_PCT}%`,
       ``,
-      `No LLM was consulted — pure rule-based trade for A/B comparison vs the LLM track.`,
+      `Expected per win (full path): +1.5R weighted.`,
+      `Expected on TP1 + BE-touch: +0.5R.`,
+      `Expected on early SL: -1R.`,
     ].join('\n'),
   };
 
@@ -306,7 +326,10 @@ export async function maybeTriggerSignalTrade(payload: LuxAlgoPayload): Promise<
       trigger_event: payload.event,
       trigger_tf: payload.timeframe, // used by self-review for per-TF win-rate breakdown
       geometry_source: geo.source,
+      tp1: geo.tp1,
+      tp2: geo.tp,
     },
+    tp1Price: geo.tp1, // persisted as a dedicated column for tpsl-monitor
     track: 'signal',
   });
 
@@ -333,18 +356,16 @@ export async function maybeTriggerSignalTrade(payload: LuxAlgoPayload): Promise<
     ? ` · ✅ ${REQUIRES_CONFLUENCE[payload.timeframe]?.higherTf}m`
     : '';
 
-  // Minimal Signals post — entry/SL/TP/R:R and nothing else.
-  // Detailed geometry (ATR multipliers, "почему такой SL", etc.) lives in
-  // reasoning_full in the DB row + in the Logs detailed log message. Keeps
-  // Signals channel readable for the user who already understands the
-  // math after the explainer we walked through.
+  // Minimal Signals post — entry/SL/TP1/TP2 + R:R. Multi-TP 50/50:
+  // first 50% locks at TP1 (+1R) with auto-BE on remainder, last 50% at TP2.
   const tgText = [
     `📡 <b>${tradeIdStr}</b>  ${sideE} <b>${payload.symbol}</b> ${sideRu}`,
     ``,
     `🎯 ${payload.event} · ${payload.timeframe}m${tfSource}`,
     `📥 Вход:  <code>${geo.entry}</code>`,
     `🛡 Стоп:  <code>${geo.sl}</code>  (${geo.slPct.toFixed(2)}%)`,
-    `🎯 Цель:  <code>${geo.tp}</code>  (${geo.tpPct.toFixed(2)}%)`,
+    `🎯 TP1:   <code>${geo.tp1}</code>  (${geo.tp1Pct.toFixed(2)}%) · закрыть 50% + SL → BE`,
+    `🎯 TP2:   <code>${geo.tp}</code>  (${geo.tpPct.toFixed(2)}%) · закрыть остальное`,
     `📐 R:R 1:${geo.rr.toFixed(1)}`,
   ].join('\n');
 

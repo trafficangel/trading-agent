@@ -41,6 +41,17 @@ export type DecisionRow = {
    *  by BE move or LLM-MODIFY. Used by calcPnl to compute R-multiple
    *  honestly (denominator = original risk, not the moved SL). */
   original_sl: number | null;
+  /** Multi-TP: percent of position already closed (0, 50, or 100). */
+  partial_closed_pct: number;
+  /** Fill price of the partial close (= TP1 value when partial_closed_pct=50). */
+  partial_close_price: number | null;
+  /** When the partial close happened (unix ms). */
+  partial_closed_at: number | null;
+  /** TP1 level snapshot at open time (= entry ± 1×SL_distance). */
+  tp1_price: number | null;
+  /** Force-close reason ('counter_structural', 'counter_signal', 'time_guard')
+   *  when tpsl-monitor or signal-trader closes the position early. */
+  force_close_reason: string | null;
 };
 
 export type Track = 'llm' | 'signal';
@@ -55,8 +66,8 @@ const insertStmt = db.prepare(`
     confidence, reasoning_short, reasoning_full, raw_response,
     status, parent_decision_id,
     sl_reason, tp_reason, invalidation, features_json,
-    pending_until, filled_at, track, original_sl
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    pending_until, filled_at, track, original_sl, tp1_price
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const findPendingLimitsStmt = db.prepare<[], DecisionRow>(`
@@ -141,6 +152,10 @@ export type InsertDecisionInput = {
   pendingUntil?: number | null;
   /** A/B track bucket. Defaults to 'llm' for back-compat. */
   track?: Track;
+  /** Optional TP1 level (multi-TP). When set, signals that the position
+   *  has a 50/50 partial-close plan. tpsl-monitor will close 50% on TP1
+   *  hit and move SL to entry (BE). Null = legacy single-TP behaviour. */
+  tp1Price?: number | null;
 };
 
 export function insertDecision(input: InsertDecisionInput): number {
@@ -178,6 +193,7 @@ export function insertDecision(input: InsertDecisionInput): number {
     null, // filled_at — set later when limit fills
     input.track ?? 'llm',
     input.decision.sl ?? null, // original_sl — frozen at open time
+    input.tp1Price ?? null, // tp1_price — multi-TP partial close target
   );
   const newId = Number(result.lastInsertRowid);
 
@@ -362,6 +378,60 @@ export function closePositionWithStats(input: ClosePositionInput): boolean {
     input.id,
   );
   return result.changes > 0;
+}
+
+const partialCloseStmt = db.prepare<[number, number, number, number, number]>(`
+  UPDATE decisions
+  SET partial_closed_pct = ?, partial_close_price = ?, partial_closed_at = ?,
+      sl = ?
+  WHERE id = ? AND status = 'active' AND partial_closed_pct = 0
+`);
+
+/**
+ * Mark a position as 50%-closed at TP1 and move SL to BE (entry).
+ * Returns true if THIS call did the partial-close (false = another path
+ * already did it / the position is no longer eligible).
+ *
+ * The remaining 50% stays in status='active' until TP2 / SL hit.
+ */
+export function partialCloseAtTp1(
+  id: number,
+  tp1Price: number,
+  newSl: number,
+): boolean {
+  const r = partialCloseStmt.run(50, tp1Price, Date.now(), newSl, id);
+  return r.changes > 0;
+}
+
+const forceCloseStmt = db.prepare<[number, number, string, number, number, string, number]>(`
+  UPDATE decisions
+  SET status = 'closed', closed_at = ?, close_price = ?, close_reason = ?,
+      pnl_pct = ?, pnl_r = ?, force_close_reason = ?
+  WHERE id = ? AND status = 'active'
+`);
+
+/**
+ * Force-close a position (counter-signal / time-guard / manual). Same as
+ * closePositionWithStats but records WHY in force_close_reason for audit.
+ */
+export function forceClose(input: {
+  id: number;
+  closePrice: number;
+  closeReason: CloseReason;
+  pnlPct: number;
+  pnlR: number;
+  forceReason: string; // 'counter_structural' | 'counter_signal' | 'time_guard'
+}): boolean {
+  const r = forceCloseStmt.run(
+    Date.now(),
+    input.closePrice,
+    input.closeReason,
+    input.pnlPct,
+    input.pnlR,
+    input.forceReason,
+    input.id,
+  );
+  return r.changes > 0;
 }
 
 /**
