@@ -12,8 +12,13 @@ import type { LuxAlgoPayload } from '../webhooks/luxalgo.schema.js';
 /**
  * Counter-signal exit logic for Track B (signal-trader).
  *
- * When a webhook arrives that REVERSES the active position's thesis, close
- * the position early at market — don't wait for SL.
+ * Track C (LuxAlgo Strategy Builder) is **IMMUNE** — this module only
+ * queries `findActiveOrPendingByTrack(symbol, 'signal')`, so Track C
+ * positions are never touched. That's intentional: Track C exits are
+ * fully owned by the strategy's Builtin Exits webhook.
+ *
+ * When a webhook arrives that REVERSES the active Track B position's
+ * thesis, close the position early at market — don't wait for SL.
  *
  * Two rules:
  *   1. **Structural reversal** (high confidence): opposing CHoCH+ or BOS

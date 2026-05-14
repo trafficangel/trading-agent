@@ -76,7 +76,12 @@ export type ResultPostInput = {
 
 /** Build the result post (≤1024 chars, HTML, ready for sendPhoto caption). */
 export function resultPost(i: ResultPostInput): string {
-  const prefix = i.track === 'signal' ? 'S#' : '#';
+  // Track-aware trade-id prefix:
+  //   'signal'   (Track B) → 'S#XXXX'
+  //   'strategy' (Track C) → 'T#XXXX'
+  //   else (Track A / legacy) → '#XXXX'
+  const prefix =
+    i.track === 'strategy' ? 'T#' : i.track === 'signal' ? 'S#' : '#';
   const tradeId = `${prefix}${i.parentTradeId.toString().padStart(4, '0')}`;
   const sideE = SIDE_EMOJI[i.side] ?? '';
   const sideRu = SIDE_RU[i.side] ?? i.side;

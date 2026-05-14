@@ -69,6 +69,15 @@ const Schema = z.object({
    */
   SIGNAL_TRADER_ENABLED: envBool(false),
 
+  /**
+   * Track C — LuxAlgo AI Strategy Builder webhook trader.
+   * When true, webhooks with `"kind":"strategy"` get dispatched to
+   * strategy-trader for entry/exit handling. Independent of Tracks A/B.
+   * Default off — operator turns it on AFTER registering ≥1 strategy in
+   * STRATEGY_CONFIGS (src/strategies/track-c-config.ts).
+   */
+  TRACK_C_ENABLED: envBool(false),
+
   /** Size (% of equity) per signal-track trade. Lower than LLM track by
    *  default because signal trades fire on every qualifying event (high
    *  frequency), so each individual bet should be small. */

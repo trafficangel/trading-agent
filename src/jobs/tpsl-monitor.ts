@@ -127,6 +127,20 @@ async function checkPosition(pInput: DecisionRow): Promise<void> {
     return;
   }
 
+  // === TRACK C path — SL-only, no TP, no BE move ===
+  // Strategy Builder positions delegate exit to LuxAlgo's Builtin Exits
+  // (delivered via webhook → strategy-trader.handleStrategyExit). The
+  // safety SL here is just that — a safety net for "strategy didn't send
+  // exit in time / wrong direction / lost in transit". No multi-TP logic,
+  // no BE move, no R-multiple chasing.
+  if (p.track === 'strategy') {
+    const slHit = (p.side === 'long' && price <= p.sl) || (p.side === 'short' && price >= p.sl);
+    if (slHit) {
+      return closeFull(p, p.sl, 'sl_hit', '🛡 Safety SL');
+    }
+    return;
+  }
+
   // === MULTI-TP path ===
   if (isMultiTp && tp1 !== null && tpFinal !== null) {
     // Stage 1: pre-TP1 (partial_closed_pct = 0)

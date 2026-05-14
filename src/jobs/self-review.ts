@@ -60,6 +60,8 @@ type DecisionRowRaw = {
   pnl_r: number | null;
   features_json: string | null;
   track: string;
+  strategy_id: string | null;
+  force_close_reason: string | null;
 };
 
 /** Enriched row: tp_strategy and entry_type live inside features_json (the
@@ -77,7 +79,8 @@ type DecisionRow = Omit<DecisionRowRaw, 'features_json' | 'close_reason'> & {
 const recentDecisionsStmt = db.prepare<[number, number], DecisionRowRaw>(`
   SELECT id, created_at, symbol, decision, side,
          entry, sl, tp_json, size_pct, confidence, reasoning_short,
-         status, close_reason, pnl_pct, pnl_r, features_json, track
+         status, close_reason, pnl_pct, pnl_r, features_json, track,
+         strategy_id, force_close_reason
   FROM decisions
   WHERE created_at BETWEEN ? AND ?
   ORDER BY created_at ASC
@@ -125,6 +128,8 @@ function parseRow(r: DecisionRowRaw): DecisionRow {
     trigger_event,
     trigger_tf,
     track: r.track,
+    strategy_id: r.strategy_id,
+    force_close_reason: r.force_close_reason,
   };
 }
 
@@ -151,6 +156,17 @@ const insertActionStmt = db.prepare<
 // --- Stats computation -----------------------------------------------------
 
 type EventWinrate = { event: string; tf: string; wins: number; losses: number; openR: number };
+
+type StrategyWinrate = {
+  strategy_id: string;
+  wins: number;
+  losses: number;
+  openR: number;
+  /** count of closes by reason — diagnoses where exits come from */
+  exits_strategy: number;
+  exits_sl: number;
+  exits_timeguard: number;
+};
 
 type ReviewStats = {
   windowStart: number;
@@ -192,6 +208,16 @@ type ReviewStats = {
   signalLongLosses: number;
   signalShortWins: number;
   signalShortLosses: number;
+
+  // ===== Track C granular =====
+  /** Decisions made by Track C in the window. */
+  strategyDecisions: number;
+  /** Closed-trades W/L + R for Track C. */
+  strategyWins: number;
+  strategyLosses: number;
+  strategyClosedR: number;
+  /** Per-strategy_id breakdown for Track C. */
+  strategyStats: StrategyWinrate[];
 };
 
 function summariseSkipReason(text: string): string {
@@ -252,6 +278,11 @@ function collectStats(now: number): ReviewStats {
     signalLongLosses: 0,
     signalShortWins: 0,
     signalShortLosses: 0,
+    strategyDecisions: 0,
+    strategyWins: 0,
+    strategyLosses: 0,
+    strategyClosedR: 0,
+    strategyStats: [],
   };
 
   const skipReasonCounts = new Map<string, number>();
@@ -260,11 +291,14 @@ function collectStats(now: number): ReviewStats {
   // Aggregator for Track B per-(event,tf) win-rate.
   const eventKey = (ev: string, tf: string): string => `${ev}@${tf}`;
   const eventAgg = new Map<string, EventWinrate>();
+  // Aggregator for Track C per-strategy stats.
+  const stratAgg = new Map<string, StrategyWinrate>();
 
   for (const r of rows) {
     // Per-track decision counters
     if (r.track === 'llm') stats.llmDecisions++;
     else if (r.track === 'signal') stats.signalDecisions++;
+    else if (r.track === 'strategy') stats.strategyDecisions++;
 
     if (r.decision === 'OPEN') {
       stats.openCount++;
@@ -302,6 +336,32 @@ function collectStats(now: number): ReviewStats {
           if (isWin) cur.wins++;
           else cur.losses++;
           eventAgg.set(k, cur);
+        } else if (r.track === 'strategy') {
+          stats.strategyClosedR += r.pnl_r;
+          if (isWin) stats.strategyWins++;
+          else stats.strategyLosses++;
+
+          // Per-strategy aggregator with exit-reason breakdown.
+          // exit_reason is the canonical close_reason ('sl_hit' / 'manual')
+          // — for Track C, force_close_reason disambiguates 'manual' into
+          // 'strategy_exit' vs 'time_guard'.
+          const sid = r.strategy_id ?? 'unknown';
+          const cur = stratAgg.get(sid) ?? {
+            strategy_id: sid,
+            wins: 0,
+            losses: 0,
+            openR: 0,
+            exits_strategy: 0,
+            exits_sl: 0,
+            exits_timeguard: 0,
+          };
+          cur.openR += r.pnl_r;
+          if (isWin) cur.wins++;
+          else cur.losses++;
+          if (r.exit_reason === 'sl_hit') cur.exits_sl++;
+          else if (r.force_close_reason === 'strategy_exit') cur.exits_strategy++;
+          else if (r.force_close_reason === 'time_guard') cur.exits_timeguard++;
+          stratAgg.set(sid, cur);
         }
 
         // Legacy scalp/swing buckets (LLM-track meaningful, keep for back-compat)
@@ -332,6 +392,10 @@ function collectStats(now: number): ReviewStats {
 
   // Sort event stats by total trades desc (most data first)
   stats.signalEventStats = [...eventAgg.values()].sort(
+    (a, b) => b.wins + b.losses - (a.wins + a.losses),
+  );
+  // Per-strategy stats sorted by activity
+  stats.strategyStats = [...stratAgg.values()].sort(
     (a, b) => b.wins + b.losses - (a.wins + a.losses),
   );
 
@@ -413,19 +477,28 @@ function maybeAutoTuneScalpFloor(stats: ReviewStats): TuneAction | null {
 // --- LLM self-review -------------------------------------------------------
 
 function buildReviewPrompt(stats: ReviewStats): { system: string; user: string } {
-  // Choose prompt mode based on which tracks have decisions in this window.
-  // - "track_b_only" — pure-signal mode (LLM_TRACK_ENABLED=false) — focus
-  //   suggestions on rule-based parameters: trigger event set, TF additions,
-  //   confluence rules, geometry (ATR multipliers, R:R), cooldowns.
-  // - "llm_only" — original LLM-driven analysis (suggestions on prompt /
-  //   scalp floor / sizing).
-  // - "hybrid" — both tracks have activity; review compares them.
-  const mode: 'track_b_only' | 'llm_only' | 'hybrid' =
-    !config.LLM_TRACK_ENABLED || (stats.signalDecisions > 0 && stats.llmDecisions === 0)
-      ? 'track_b_only'
-      : stats.signalDecisions > 0 && stats.llmDecisions > 0
-        ? 'hybrid'
-        : 'llm_only';
+  // Pick mode based on which tracks have ACTIVITY in the window.
+  // Priorities when multiple tracks are active:
+  //   - All three → 'hybrid' (compare)
+  //   - LLM + Signal → 'hybrid'
+  //   - LLM + Strategy → 'hybrid_ac'
+  //   - Signal + Strategy → 'hybrid_bc'
+  //   - Strategy only → 'track_c_only'
+  //   - Signal only → 'track_b_only'
+  //   - LLM only → 'llm_only'
+  const hasLlm = stats.llmDecisions > 0 && config.LLM_TRACK_ENABLED;
+  const hasSignal = stats.signalDecisions > 0;
+  const hasStrategy = stats.strategyDecisions > 0;
+
+  type Mode = 'track_b_only' | 'track_c_only' | 'llm_only' | 'hybrid' | 'hybrid_bc' | 'hybrid_ac';
+  let mode: Mode;
+  if (hasLlm && hasSignal && hasStrategy) mode = 'hybrid';
+  else if (hasLlm && hasSignal) mode = 'hybrid';
+  else if (hasSignal && hasStrategy) mode = 'hybrid_bc';
+  else if (hasLlm && hasStrategy) mode = 'hybrid_ac';
+  else if (hasStrategy) mode = 'track_c_only';
+  else if (hasSignal || !config.LLM_TRACK_ENABLED) mode = 'track_b_only';
+  else mode = 'llm_only';
 
   const systemHeader = `Ты — ревизор-аналитик собственной торговой системы. Ты только что отработал 12 часов и должен оценить работу критически и предложить улучшения.
 
@@ -498,15 +571,68 @@ scalp confidence floor в [0.40-0.55].
 - Если scalp-сделки убыточны — что общего у них?`;
 
   const hybridRules = `
-КОНТЕКСТ: оба трека активны параллельно (A/B test).
+КОНТЕКСТ: несколько треков активны параллельно (A/B/C сравнение).
   Track A (LLM): ${stats.llmDecisions} решений, ${stats.llmWins}W/${stats.llmLosses}L, ${stats.llmClosedR.toFixed(2)}R
   Track B (Signal): ${stats.signalDecisions} решений, ${stats.signalWins}W/${stats.signalLosses}L, ${stats.signalClosedR.toFixed(2)}R
+  Track C (Strategy): ${stats.strategyDecisions} решений, ${stats.strategyWins}W/${stats.strategyLosses}L, ${stats.strategyClosedR.toFixed(2)}R
 ЗАДАЧА: сравнить треки, отметить какой работает лучше и почему.`;
 
-  const system =
-    systemHeader +
-    '\n' +
-    (mode === 'track_b_only' ? trackBRules : mode === 'hybrid' ? hybridRules + llmRules : llmRules);
+  const trackCRules = `
+КОНТЕКСТ: активен Track C — LuxAlgo AI Strategy Builder webhook trader.
+Каждая сделка приходит как webhook от настроенной в LuxAlgo стратегии:
+  - ENTRY webhook → открыли market-позицию с safety SL (без TP)
+  - EXIT webhook → закрыли market-позицию (force_close_reason='strategy_exit')
+  - SL hit → tpsl-monitor закрыл по safety stop'у (close_reason='sl_hit')
+  - Time-guard 24h → принудительное закрытие если стратегия молчит
+       (force_close_reason='time_guard')
+
+ВАЖНО: мы НЕ контролируем логику входов/выходов — её владеет LuxAlgo
+стратегия. Мы только исполнители + safety SL. Поэтому:
+  - prompt_tweak — НЕ применимо (нет промпта для Track C)
+  - param_change — применимо ТОЛЬКО к slPct в STRATEGY_CONFIGS на
+    конкретный strategy_id, на основе фактических данных:
+      * sl_hit преобладает + средний adverse excursion > slPct → SL шире
+      * strategy_exit преобладает + редкие sl_hit → SL OK, можно тестить уже
+  - new_feature — добавить новую стратегию НЕ предлагать (это manual workflow),
+    можно предлагать архитектурные улучшения (trailing после X R, partial
+    close, и т.д.) — но flag'ом 'new_feature' с описанием
+  - discard — отключить strategy_id с явным провалом (<30% wr после ≥10 сделок,
+    или net negative R после ≥15 сделок)
+
+ЦЕЛИ ОЦЕНКИ per-strategy:
+1. Win rate (LuxAlgo бектест обещал >60%, проверяем live)
+2. exit_reason ratio: strategy_exit / sl_hit / time_guard
+   * Здоровый: 70%+ strategy_exit, 20-30% sl_hit, <5% time_guard
+   * Сломанный: time_guard >20% → webhook config не работает
+3. Avg PnL per trade > 0 после ≥10 сделок
+
+ПРАВИЛА:
+- ПОКАЗЫВАЙ ЦИФРЫ — "strategy_id 'ton-xyz': 8W/3L, +3.4R, 9 strategy_exit / 2 sl_hit"
+- Если выборка <10 сделок — "продолжать собирать данные", не "удалить"
+- Размер позиции ($1000 notional) и core SL bounds [0.5%, 5%] — священны`;
+
+  let modeRules: string;
+  switch (mode) {
+    case 'track_b_only':
+      modeRules = trackBRules;
+      break;
+    case 'track_c_only':
+      modeRules = trackCRules;
+      break;
+    case 'hybrid':
+      modeRules = hybridRules + llmRules + trackBRules + trackCRules;
+      break;
+    case 'hybrid_bc':
+      modeRules = hybridRules + trackBRules + trackCRules;
+      break;
+    case 'hybrid_ac':
+      modeRules = hybridRules + llmRules + trackCRules;
+      break;
+    case 'llm_only':
+    default:
+      modeRules = llmRules;
+  }
+  const system = systemHeader + '\n' + modeRules;
 
   const skipReasonsLines = stats.topSkipReasons
     .map((r) => `  - ${r.reason}: ${r.count}`)
@@ -564,11 +690,33 @@ Scalp floor: ${effectiveScalpFloor().toFixed(2)}
 Near-miss sizing-floor SKIPs (band [floor-0.08, floor)): ${stats.sizingFloorSkipsInBand}`
       : '';
 
+  // Per-strategy stats block for Track C.
+  const strategyStatsLines = stats.strategyStats.length
+    ? stats.strategyStats
+        .map((s) => {
+          const total = s.wins + s.losses;
+          const wr = total > 0 ? Math.round((s.wins / total) * 100) : 0;
+          return `  ${s.strategy_id}: ${s.wins}W/${s.losses}L (${wr}% wr, ${s.openR.toFixed(2)}R) · exits: ${s.exits_strategy} strat / ${s.exits_sl} sl / ${s.exits_timeguard} time`;
+        })
+        .join('\n')
+    : '  (нет закрытых Track C сделок в окне)';
+
+  const trackCblock =
+    stats.strategyDecisions > 0
+      ? `
+
+=== TRACK C (Strategy Builder) ===
+Решений: ${stats.strategyDecisions}
+Закрытых: ${stats.strategyWins}W / ${stats.strategyLosses}L  (Σ R: ${stats.strategyClosedR.toFixed(2)})
+Per-strategy (id: W/L, wr%, total R, exits breakdown):
+${strategyStatsLines}`
+      : '';
+
   const user = `Окно: ${new Date(stats.windowStart).toISOString().slice(0, 16)}Z … ${new Date(stats.windowEnd).toISOString().slice(0, 16)}Z
 
 Всего решений: ${stats.total}
   OPEN: ${stats.openCount}   ·   SKIP: ${stats.skipCount}   ·   CLOSE: ${stats.closeCount}   ·   MODIFY: ${stats.modifyCount}
-${trackBlock}${trackAblock}
+${trackBlock}${trackAblock}${trackCblock}
 
 Топ причин SKIP:
 ${skipReasonsLines || '  (нет SKIPов)'}
@@ -631,12 +779,19 @@ async function callReviewLlm(stats: ReviewStats): Promise<LlmReview | null> {
 function formatReport(stats: ReviewStats, review: LlmReview | null, action: TuneAction | null): string {
   const sigClosed = stats.signalWins + stats.signalLosses;
   const llmClosed = stats.llmWins + stats.llmLosses;
+  const stratClosed = stats.strategyWins + stats.strategyLosses;
 
-  const modeLabel = !config.LLM_TRACK_ENABLED
-    ? '📡 <b>Track B only</b>'
-    : llmClosed > 0 && sigClosed > 0
-      ? '🤖📡 <b>A/B (LLM + Signal)</b>'
-      : '🤖 <b>Track A only</b>';
+  // Combine active-track badges. With Track C added we have up to 3 markers.
+  const active: string[] = [];
+  if (stats.llmDecisions > 0 && config.LLM_TRACK_ENABLED) active.push('🤖 LLM');
+  if (stats.signalDecisions > 0) active.push('📡 Signal');
+  if (stats.strategyDecisions > 0) active.push('🛠 Strategy');
+  const modeLabel =
+    active.length === 0
+      ? '<i>—</i>'
+      : active.length === 1
+        ? `<b>${active[0]} only</b>`
+        : `<b>${active.join(' + ')}</b>`;
 
   const lines: string[] = [
     `🔬 <b>Самоанализ за 12 часов</b>  ·  ${modeLabel}`,
@@ -679,6 +834,29 @@ function formatReport(stats: ReviewStats, review: LlmReview | null, action: Tune
       `  Решений: <code>${stats.llmDecisions}</code>  ·  Закрытых: <b>${stats.llmWins}W/${stats.llmLosses}L</b> (${llmWr}%)  ·  Σ R: <b>${stats.llmClosedR >= 0 ? '+' : ''}${stats.llmClosedR.toFixed(2)}R</b>`,
     );
     lines.push(`  Scalp floor: <code>${effectiveScalpFloor().toFixed(2)}</code>`);
+  }
+
+  // Track C breakdown (when Strategy Builder has activity)
+  if (stats.strategyDecisions > 0) {
+    const strWr = stratClosed > 0 ? Math.round((stats.strategyWins / stratClosed) * 100) : 0;
+    lines.push('', `🛠 <b>Track C (Strategy Builder)</b>`);
+    lines.push(
+      `  Решений: <code>${stats.strategyDecisions}</code>  ·  Закрытых: <b>${stats.strategyWins}W/${stats.strategyLosses}L</b> (${strWr}%)  ·  Σ R: <b>${stats.strategyClosedR >= 0 ? '+' : ''}${stats.strategyClosedR.toFixed(2)}R</b>`,
+    );
+    if (stats.strategyStats.length > 0) {
+      lines.push(`  <b>Per-strategy:</b>`);
+      for (const s of stats.strategyStats) {
+        const total = s.wins + s.losses;
+        const wr = total > 0 ? Math.round((s.wins / total) * 100) : 0;
+        const rSign = s.openR >= 0 ? '+' : '';
+        lines.push(
+          `    · <code>${s.strategy_id}</code>: ${s.wins}W/${s.losses}L (${wr}%, ${rSign}${s.openR.toFixed(2)}R)`,
+        );
+        lines.push(
+          `      выходы: ${s.exits_strategy} strategy / ${s.exits_sl} sl / ${s.exits_timeguard} time`,
+        );
+      }
+    }
   }
 
   if (stats.topSkipReasons.length > 0) {

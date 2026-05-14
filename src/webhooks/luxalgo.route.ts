@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
-import { LuxAlgoPayload } from './luxalgo.schema.js';
+import { parseLuxAlgoWebhook } from './luxalgo.schema.js';
 import { insertSignal } from '../db/repos/signals.js';
 import { sendMessage } from '../telegram/bot.js';
 import { rawSignalLog } from '../telegram/templates.js';
@@ -9,6 +9,7 @@ import { findActiveOrPendingByTrack } from '../db/repos/decisions.js';
 import { monitorPosition } from '../jobs/monitor.js';
 import { maybeTriggerSignalTrade } from '../signals/signal-trader.js';
 import { maybeCounterExit } from '../signals/counter-exit.js';
+import { handleStrategyWebhook } from '../strategies/strategy-trader.js';
 
 /**
  * Throttle ad-hoc monitor triggers per symbol. A new signal arriving on an
@@ -38,24 +39,41 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
         return reply.code(401).send({ ok: false, error: 'unauthorized' });
       }
 
-      const parsed = LuxAlgoPayload.safeParse(req.body);
+      const parsed = parseLuxAlgoWebhook(req.body);
       if (!parsed.success) {
-        logger.warn({ issues: parsed.error.issues, body: req.body }, 'invalid webhook payload');
-        return reply.code(400).send({ ok: false, error: 'invalid_payload', issues: parsed.error.issues });
+        logger.warn({ issues: parsed.issues, body: req.body }, 'invalid webhook payload');
+        return reply.code(400).send({ ok: false, error: 'invalid_payload', issues: parsed.issues });
       }
 
-      const result = insertSignal(parsed.data, req.body);
+      // === TRACK C path — LuxAlgo Strategy Builder webhook ===
+      // Dispatched BEFORE the legacy event-alert path. Track C webhooks
+      // have a different shape and semantics: they don't go to the signals
+      // table (dedup-key wouldn't match), don't trigger Track A's ad-hoc
+      // monitor, don't trigger Track B's signal-trader or counter-exit.
+      // All Track C logic lives in strategy-trader.
+      if (parsed.data.kind === 'strategy') {
+        const r = await handleStrategyWebhook(parsed.data);
+        return reply.send({ ok: r.ok, reason: r.reason, id: r.decisionId });
+      }
+
+      // === LEGACY event-alert path (Track A + B) ===
+      // parsed.data.kind === 'event' here. Strip the kind marker so
+      // insertSignal + downstream signal handlers see the original shape.
+      const { kind: _kind, ...eventPayload } = parsed.data;
+      void _kind;
+
+      const result = insertSignal(eventPayload, req.body);
       if (!result.inserted) {
-        logger.debug({ symbol: parsed.data.symbol, event: parsed.data.event }, 'duplicate signal');
+        logger.debug({ symbol: eventPayload.symbol, event: eventPayload.event }, 'duplicate signal');
         return reply.send({ ok: true, deduplicated: true });
       }
 
       logger.info(
-        { id: result.id, symbol: parsed.data.symbol, event: parsed.data.event },
+        { id: result.id, symbol: eventPayload.symbol, event: eventPayload.event },
         'signal stored',
       );
 
-      sendMessage({ channel: 'logs', text: rawSignalLog(parsed.data, req.body), disable_notification: true })
+      sendMessage({ channel: 'logs', text: rawSignalLog(eventPayload, req.body), disable_notification: true })
         .catch((err) => logger.error({ err }, 'telegram log push failed'));
 
       // === TRACK B — pure-signal trader ===
@@ -63,8 +81,8 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
       // internally and silently no-ops when the flag is off, so this is
       // safe to call unconditionally. Runs INSTEAD of waiting for the
       // 15m decide cron — that's the whole "event-driven" point of Track B.
-      void maybeTriggerSignalTrade(parsed.data).catch((err) =>
-        logger.error({ err, symbol: parsed.data.symbol }, 'signal-trader: trigger failed'),
+      void maybeTriggerSignalTrade(eventPayload).catch((err) =>
+        logger.error({ err, symbol: eventPayload.symbol }, 'signal-trader: trigger failed'),
       );
 
       // === TRACK B — counter-signal early-exit ===
@@ -72,9 +90,10 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
       // symbol, force-close the position at market. See src/signals/counter-exit.ts
       // for the rules (structural reversal on same/higher TF, or major
       // signal on strictly higher TF). No-op when no active Track B
-      // position exists.
-      void maybeCounterExit(parsed.data).catch((err) =>
-        logger.error({ err, symbol: parsed.data.symbol }, 'counter-exit: failed'),
+      // position exists. NOTE: Track C positions are IMMUNE — counter-exit
+      // queries track='signal' only.
+      void maybeCounterExit(eventPayload).catch((err) =>
+        logger.error({ err, symbol: eventPayload.symbol }, 'counter-exit: failed'),
       );
 
       // Ad-hoc monitor trigger for ACTIVE LLM-track positions only.
@@ -86,14 +105,14 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
       // re-evaluate immediately rather than wait up to 15 min.
       //
       // Throttled per-symbol (5 min) to bound LLM cost when signals burst.
-      const sym = parsed.data.symbol;
+      const sym = eventPayload.symbol;
       const active = findActiveOrPendingByTrack(sym, 'llm');
       if (active && active.status === 'active') {
         const last = adHocCooldown.get(sym) ?? 0;
         if (Date.now() - last >= AD_HOC_COOLDOWN_MS) {
           adHocCooldown.set(sym, Date.now());
           logger.info(
-            { symbol: sym, position_id: active.id, event: parsed.data.event },
+            { symbol: sym, position_id: active.id, event: eventPayload.event },
             'ad-hoc monitor trigger — signal arrived on active position',
           );
           // Fire and forget — webhook response shouldn't wait for the LLM.

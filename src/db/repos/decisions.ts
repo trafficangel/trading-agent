@@ -35,8 +35,12 @@ export type DecisionRow = {
   pending_until: number | null;
   filled_at: number | null;
   /** A/B test bucket. 'llm' = original Claude-driven decision flow,
-   *  'signal' = pure-LuxAlgo rule-based trader (no LLM). */
+   *  'signal' = pure-LuxAlgo rule-based trader (no LLM),
+   *  'strategy' = LuxAlgo AI Strategy Builder webhook (Track C). */
   track: string;
+  /** Track C only: strategy_id from LuxAlgo Strategy Builder. NULL for
+   *  Track A / B rows. See src/strategies/track-c-config.ts. */
+  strategy_id: string | null;
   /** The SL at the moment the trade was opened. Stable — never modified
    *  by BE move or LLM-MODIFY. Used by calcPnl to compute R-multiple
    *  honestly (denominator = original risk, not the moved SL). */
@@ -54,7 +58,7 @@ export type DecisionRow = {
   force_close_reason: string | null;
 };
 
-export type Track = 'llm' | 'signal';
+export type Track = 'llm' | 'signal' | 'strategy';
 
 export type CloseReason = 'tp_hit' | 'sl_hit' | 'llm_close' | 'manual';
 
@@ -66,8 +70,8 @@ const insertStmt = db.prepare(`
     confidence, reasoning_short, reasoning_full, raw_response,
     status, parent_decision_id,
     sl_reason, tp_reason, invalidation, features_json,
-    pending_until, filled_at, track, original_sl, tp1_price
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    pending_until, filled_at, track, original_sl, tp1_price, strategy_id
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const findPendingLimitsStmt = db.prepare<[], DecisionRow>(`
@@ -156,6 +160,8 @@ export type InsertDecisionInput = {
    *  has a 50/50 partial-close plan. tpsl-monitor will close 50% on TP1
    *  hit and move SL to entry (BE). Null = legacy single-TP behaviour. */
   tp1Price?: number | null;
+  /** Track C only: strategy_id from LuxAlgo Strategy Builder. */
+  strategyId?: string | null;
 };
 
 export function insertDecision(input: InsertDecisionInput): number {
@@ -194,6 +200,7 @@ export function insertDecision(input: InsertDecisionInput): number {
     input.track ?? 'llm',
     input.decision.sl ?? null, // original_sl — frozen at open time
     input.tp1Price ?? null, // tp1_price — multi-TP partial close target
+    input.strategyId ?? null, // strategy_id — Track C only
   );
   const newId = Number(result.lastInsertRowid);
 
@@ -316,6 +323,25 @@ export function findActiveOrPendingByTrack(symbol: string, track: Track): Decisi
  *  window. Used by signal-trader to enforce SIGNAL_COOLDOWN_MIN. */
 export function findRecentSignalOpen(symbol: string, sinceMs: number): DecisionRow | null {
   return findLastSignalOpenStmt.get(symbol, sinceMs) ?? null;
+}
+
+const findActiveByStrategyStmt = db.prepare<[string, string], DecisionRow>(`
+  SELECT * FROM decisions
+  WHERE status = 'active' AND decision = 'OPEN'
+    AND track = 'strategy' AND symbol = ? AND strategy_id = ?
+  ORDER BY created_at DESC LIMIT 1
+`);
+
+/** Find the open Track C position for a given (symbol, strategy_id) pair.
+ *  Used by:
+ *    - strategy-trader entry path: guard against duplicate entries
+ *    - strategy-trader exit path: locate the position to close
+ *  Returns null if no active position exists. */
+export function findActiveByStrategy(
+  symbol: string,
+  strategyId: string,
+): DecisionRow | null {
+  return findActiveByStrategyStmt.get(symbol, strategyId) ?? null;
 }
 
 /** All active or pending OPEN rows on this symbol. Spider-mode counts

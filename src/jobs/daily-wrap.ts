@@ -157,22 +157,28 @@ async function tick(now: Date = new Date()): Promise<void> {
   lines.push('');
 
   // --- Decisions counts + per-track breakdown ---
-  // "Решения" instead of "Решения LLM" because Track B (signal-trader)
-  // also writes decisions here without involving Claude. Per-track
-  // counters help during the A/B test.
+  // "Решения за день" — нейтрально для всех треков (A/B/C).
   const llmDec = allDec.filter((d) => d.track === 'llm');
   const sigDec = allDec.filter((d) => d.track === 'signal');
+  const stratDec = allDec.filter((d) => d.track === 'strategy');
   lines.push(`<b>Решения за день:</b> ${allDec.length}`);
   if (allDec.length) {
     lines.push(
       `  📈 OPEN: <b>${counts.OPEN}</b>  ·  🏁 CLOSE: <b>${counts.CLOSE}</b>  ·  🔧 MODIFY: <b>${counts.MODIFY}</b>  ·  ⏸ SKIP: <b>${counts.SKIP}</b>`,
     );
-    if (llmDec.length > 0 && sigDec.length > 0) {
-      lines.push(`  🤖 LLM: <b>${llmDec.length}</b>  ·  📡 Signal: <b>${sigDec.length}</b>`);
-    } else if (sigDec.length > 0) {
-      lines.push(`  📡 Все сделки — Track B (Signal, без LLM)`);
-    } else if (llmDec.length > 0) {
-      lines.push(`  🤖 Все сделки — Track A (LLM)`);
+    const activeTracks = [
+      llmDec.length > 0 ? `🤖 LLM: <b>${llmDec.length}</b>` : null,
+      sigDec.length > 0 ? `📡 Signal: <b>${sigDec.length}</b>` : null,
+      stratDec.length > 0 ? `🛠 Strategy: <b>${stratDec.length}</b>` : null,
+    ].filter((x): x is string => x !== null);
+    if (activeTracks.length > 1) {
+      lines.push(`  ${activeTracks.join('  ·  ')}`);
+    } else if (activeTracks.length === 1) {
+      const onlyTrack =
+        llmDec.length > 0 ? 'Track A (LLM)' :
+        sigDec.length > 0 ? 'Track B (Signal)' :
+        'Track C (Strategy)';
+      lines.push(`  ${activeTracks[0]} — все сделки на ${onlyTrack}`);
     }
   }
   lines.push('');
@@ -217,7 +223,7 @@ async function tick(now: Date = new Date()): Promise<void> {
       const etype = entryTypeOf(t);
       const typeTag = etype === 'limit' ? ' <i>limit</i>' : '';
       // Track-aware trade ID prefix ('S#' for signal, '#' for LLM).
-      const idPrefix = t.track === 'signal' ? 'S#' : '#';
+      const idPrefix = t.track === 'strategy' ? 'T#' : t.track === 'signal' ? 'S#' : '#';
       lines.push(
         `  ${reasonEmoji(t.close_reason)} ${idPrefix}${t.id.toString().padStart(4, '0')}${typeTag} ${sideE} ${t.symbol} · ${t.entry} → ${t.close_price ?? '?'} · <b>${pnlStr}</b> ${rStr} · ${usdStr}`,
       );
@@ -236,7 +242,7 @@ async function tick(now: Date = new Date()): Promise<void> {
       const ageStr = ageMin < 60 ? `${ageMin}мин` : `${Math.round(ageMin / 60)}ч`;
       const etype = entryTypeOf(t);
       const tag = etype === 'limit' ? ' <i>(filled limit)</i>' : '';
-      const idPrefix = t.track === 'signal' ? 'S#' : '#';
+      const idPrefix = t.track === 'strategy' ? 'T#' : t.track === 'signal' ? 'S#' : '#';
       lines.push(
         `  ${idPrefix}${t.id.toString().padStart(4, '0')}${tag} ${sideE} ${t.symbol} @ ${t.entry} (открыта ${ageStr} назад)`,
       );
