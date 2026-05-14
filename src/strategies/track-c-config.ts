@@ -47,15 +47,27 @@ export type StrategyConfig = {
  * each entry after analyzing the strategy's backtest in LuxAlgo.
  */
 export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
-  // Example template (commented out):
-  // 'ton-cntr-tt-mf50': {
-  //   id: 'ton-cntr-tt-mf50',
-  //   description: 'Contrarian Any Bearish + Trend Tracer Bearish + MF > 50',
-  //   symbol: 'TONUSDT',
-  //   timeframe: '15',
-  //   enabled: true,
-  //   slPct: 0.020,
-  // },
+  // First registered strategy (May 14, 2026).
+  // LuxAlgo AI Strategy Builder backtest on BNBUSDT 15m (2025-10-19 .. 2026-05-14):
+  //   - 104 trades, 76W / 28L → 73.08% WR
+  //   - Profit factor 3.02
+  //   - Max DD 0.95%
+  //   - Avg losing trade: -15.26 USDT on $1000 notional = -1.53%
+  //   - Largest losing trade: -49.60 USDT = -4.96%
+  //
+  // slPct=0.025 (2.5%) chosen as safety buffer ≈1.6× the avg loss.
+  // This will preempt the worst outlier losses (-4.96% would hit our SL
+  // before the strategy's own exit, capping downside) while leaving room
+  // for normal adverse excursions of the strategy's Builtin Exits.
+  // Iterate after 10-20 live trades based on observed exits_strategy / sl_hit ratio.
+  'bnb-cntr-tt-mf50': {
+    id: 'bnb-cntr-tt-mf50',
+    description: 'Contrarian Any + Trend Tracer + Money Flow Above 50',
+    symbol: 'BNBUSDT',
+    timeframe: '15',
+    enabled: true,
+    slPct: 0.025,
+  },
 };
 
 /** Look up a strategy by id. Returns null for unknown or unregistered ids. */

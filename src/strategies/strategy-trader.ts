@@ -9,7 +9,7 @@ import {
 import { aggregateSymbol } from '../signals/aggregator.js';
 import { getLastPrice } from '../exchange/bybit-public.js';
 import { sendMessage } from '../telegram/bot.js';
-import type { LuxAlgoStrategyPayload } from '../webhooks/luxalgo.schema.js';
+import { deriveActionSide, type LuxAlgoStrategyPayload } from '../webhooks/luxalgo.schema.js';
 import type { Decision } from '../llm/decision.schema.js';
 import {
   getStrategyConfig,
@@ -78,8 +78,12 @@ export async function handleStrategyWebhook(
     return { ok: true, reason: 'symbol_mismatch' };
   }
 
-  if (p.action === 'entry') {
-    return handleStrategyEntry(p, cfg);
+  // Normalise LuxAlgo's strategy_event placeholder (or explicit action+side)
+  // into a single {action, side} pair the rest of the trader works with.
+  const derived = deriveActionSide(p);
+
+  if (derived.action === 'entry') {
+    return handleStrategyEntry(p, cfg, derived.side);
   }
   return handleStrategyExit(p, cfg);
 }
@@ -87,11 +91,13 @@ export async function handleStrategyWebhook(
 async function handleStrategyEntry(
   p: LuxAlgoStrategyPayload,
   cfg: StrategyConfig,
+  derivedSide: 'long' | 'short' | undefined,
 ): Promise<StrategyWebhookResult> {
-  // Type-narrow: entry payload always has `side` (enforced by superRefine).
-  const side = p.side;
+  // Side from deriveActionSide() — works for both explicit (form A) and
+  // strategy_event-driven (form B) payloads.
+  const side = derivedSide;
   if (side !== 'long' && side !== 'short') {
-    logger.warn({ strategy_id: p.strategy_id, side: p.side }, 'strategy-trader: missing side on entry');
+    logger.warn({ strategy_id: p.strategy_id, derivedSide }, 'strategy-trader: missing side on entry');
     return { ok: false, reason: 'missing_side' };
   }
 

@@ -43,22 +43,47 @@ export type LuxAlgoEventPayload = z.infer<typeof LuxAlgoEventPayload>;
 export const LuxAlgoPayload = LuxAlgoEventPayload;
 export type LuxAlgoPayload = LuxAlgoEventPayload;
 
-/** Track C — LuxAlgo AI Strategy Builder webhook. Distinct shape from
- *  event-alerts: carries `strategy_id` + explicit `action: 'entry'|'exit'`.
- *  TradingView alert template must include `"kind":"strategy"` so the
- *  webhook router can dispatch correctly. */
+/** Strategy event as emitted by LuxAlgo's `[[strategy_event]]` placeholder.
+ *  Used by the AI Strategy Builder alert template. Server derives
+ *  action+side from this value (see deriveActionSide below). */
+export const StrategyEvent = z.enum(['long', 'short', 'exit_long', 'exit_short']);
+export type StrategyEvent = z.infer<typeof StrategyEvent>;
+
+/** Track C — LuxAlgo AI Strategy Builder webhook.
+ *
+ *  TWO accepted shapes (Strategy Builder UI uses option B):
+ *    A) Explicit form: { action: 'entry'|'exit', side?: 'long'|'short' }
+ *       — manual / curl testing
+ *    B) LuxAlgo-native form: { strategy_event: 'long'|'short'|'exit_long'|'exit_short' }
+ *       — what {{strategy_event}} placeholder substitutes to in the alert
+ *
+ *  Server normalises B → A via deriveActionSide() before routing to trader. */
 export const LuxAlgoStrategyPayload = z
   .object({
     kind: z.literal('strategy'),
     strategy_id: z.string().min(1).max(64),
-    action: z.enum(['entry', 'exit']),
+    // Form A — explicit
+    action: z.enum(['entry', 'exit']).optional(),
+    side: z.enum(['long', 'short']).optional(),
+    // Form B — LuxAlgo native
+    strategy_event: StrategyEvent.optional(),
+    // Common fields
     symbol: SymbolField,
     timeframe: z.string().min(1),
-    side: z.enum(['long', 'short']).optional(),
     price: z.coerce.number().positive().optional(),
     bar_time: BarTime,
   })
   .superRefine((v, ctx) => {
+    // Must have either action (form A) or strategy_event (form B)
+    if (!v.action && !v.strategy_event) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['action'],
+        message: 'either action or strategy_event is required',
+      });
+      return;
+    }
+    // Form A: side required for entry
     if (v.action === 'entry' && !v.side) {
       ctx.addIssue({
         code: 'custom',
@@ -68,6 +93,35 @@ export const LuxAlgoStrategyPayload = z
     }
   });
 export type LuxAlgoStrategyPayload = z.infer<typeof LuxAlgoStrategyPayload>;
+
+/** Translate LuxAlgo's strategy_event values into our internal action+side.
+ *  - 'long'        → entry long
+ *  - 'short'       → entry short
+ *  - 'exit_long'   → exit (closing a previously-long position; side here is
+ *                    informational — exit handler uses the active row's side)
+ *  - 'exit_short'  → exit (mirror)
+ *  Returns {action, side?} ready for the trader. */
+export function deriveActionSide(p: LuxAlgoStrategyPayload): {
+  action: 'entry' | 'exit';
+  side?: 'long' | 'short';
+} {
+  // Form A — already explicit
+  if (p.action) return { action: p.action, side: p.side };
+  // Form B — derive from strategy_event
+  switch (p.strategy_event) {
+    case 'long':
+      return { action: 'entry', side: 'long' };
+    case 'short':
+      return { action: 'entry', side: 'short' };
+    case 'exit_long':
+      return { action: 'exit', side: 'long' };
+    case 'exit_short':
+      return { action: 'exit', side: 'short' };
+    default:
+      // Unreachable — superRefine guarantees one of action / strategy_event.
+      return { action: 'exit' };
+  }
+}
 
 /** Webhook router input — discriminated by `kind`. Default 'event' if the
  *  field is absent (back-compat with 28 existing TV alerts).
