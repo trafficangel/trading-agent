@@ -112,14 +112,37 @@ const RU_MONTH: Record<string, number> = {
  * we manually parse. If user switches LuxAlgo to English, falls back to
  * Date.parse (which handles English month names natively).
  */
+const EN_MONTH: Record<string, number> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+};
+
 function parseLuxAlgoDate(raw: string): number | null {
   const s = raw.trim();
-  // Try English first (Date.parse handles "Wed, May 13, 2026, 12:45")
+  // English: "Sun, Oct 19, 2025, 00:45" — parse explicitly (Date.parse
+  // doesn't accept this exact comma-heavy form in all engines).
+  const enMatch = s.match(
+    /([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4}),?\s*(\d{1,2}):(\d{2})/,
+  );
+  if (enMatch) {
+    const monKey = enMatch[1]!.toLowerCase().slice(0, 3);
+    if (EN_MONTH[monKey] !== undefined) {
+      return Date.UTC(
+        parseInt(enMatch[3]!, 10),
+        EN_MONTH[monKey]!,
+        parseInt(enMatch[2]!, 10),
+        parseInt(enMatch[4]!, 10),
+        parseInt(enMatch[5]!, 10),
+      );
+    }
+  }
+  // Fallback: lenient Date.parse
   const en = Date.parse(s);
   if (!Number.isNaN(en)) return en;
-  // Russian: "ср, 13 мая 2026 г., 12:45"
+  // Russian: "ср, 13 мая 2026 г., 12:45" — note the period after month
+  // ("окт.") for some months. Allow optional period + optional whitespace.
   const m = s.match(
-    /(\d{1,2})\s+([а-яё]+)\s+(\d{4})\s*г?\.?,?\s*(\d{1,2}):(\d{2})/i,
+    /(\d{1,2})\s+([а-яё]+)\.?\s*(\d{4})\s*г?\.?,?\s*(\d{1,2}):(\d{2})/i,
   );
   if (!m) return null;
   const day = parseInt(m[1]!, 10);
@@ -182,33 +205,71 @@ async function clickTab(page: Page, name: 'Performance' | 'Trades Analysis' | 'T
  * Generic helper — works on both Performance detailed table and
  * Trades Analysis table since both use the same layout pattern.
  *
- * Strategy: locate the label text node, walk to its row container,
- * pull the next three numeric-looking cells.
+ * Strategy: walk UP from the label element until we find an ancestor
+ * whose text contains the label AND at least 3 numeric tokens. The first
+ * such ancestor is the row.
+ *
+ * The naive "first div ancestor" approach fails when LuxAlgo wraps the
+ * label cell in a div separate from the value cells — the label's own
+ * div has no numbers, so we'd read just the label and bail.
  */
 async function readTriple(page: Page, label: string): Promise<TripleNum> {
-  // Approach: locate the row by label, then read ALL spans/cells inside,
-  // pick last 3 numeric values.
-  // LuxAlgo uses a div-based table. The label and values share a parent.
-  const row = page.locator(`xpath=//*[normalize-space(text())="${label}"]/ancestor::*[self::tr or self::div][1]`).first();
-  const text = await row.innerText({ timeout: 5_000 }).catch(() => '');
-  if (!text) return { all: NaN, long: NaN, short: NaN };
-  // Strip the label, split remainder on whitespace/newlines, find numbers.
-  const tail = text.replace(label, '').trim();
-  // Match signed numbers possibly followed by k/M suffix and units.
-  const nums = tail
-    .split(/[\s\n]+/)
-    .map((t) => parseNum(t))
-    .filter((n) => !Number.isNaN(n));
-  if (nums.length < 3) {
-    // Fallback — maybe split picked the wrong tokens. Try regex.
-    const numRe = /-?\d[\d,.]*\s*(?:K|M)?(?=\s|$|USDT|%)/gi;
-    const matches = tail.match(numRe) ?? [];
-    const parsed = matches.map(parseNum).filter((n) => !Number.isNaN(n));
-    if (parsed.length >= 3) {
-      return { all: parsed[0]!, long: parsed[1]!, short: parsed[2]! };
+  const tail = (await page.evaluate(`(() => {
+    const target = ${JSON.stringify(label)};
+    // Collect ALL elements whose text content equals the label exactly.
+    // (Same label can appear in chart legend + table — try each until one
+    // walks up to a valid row.)
+    const all = document.querySelectorAll('*');
+    const candidates = [];
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+      // Skip nodes inside SVG (chart legend lives there).
+      let p = el;
+      let inSvg = false;
+      while (p) {
+        if (p.tagName === 'svg' || p.tagName === 'SVG') { inSvg = true; break; }
+        p = p.parentElement;
+      }
+      if (inSvg) continue;
+      if (el.children.length !== 0) continue;
+      const tc = (el.textContent || '').trim();
+      if (tc === target) candidates.push(el);
     }
-  }
-  return { all: nums[0] ?? NaN, long: nums[1] ?? NaN, short: nums[2] ?? NaN };
+    // For each candidate, walk up looking for an ancestor with the label
+    // AND 3+ numeric tokens AND total text < 500 chars AND the FIRST
+    // non-whitespace char after the label is a digit or sign (rules out
+    // chart-container catch where the legend has multiple label words
+    // BEFORE any numbers).
+    for (const cand of candidates) {
+      let cur = cand.parentElement;
+      for (let depth = 0; depth < 12 && cur; depth++) {
+        const t = (cur.innerText || cur.textContent || '');
+        if (!t.includes(target)) break;
+        if (t.length > 500) break;
+        const idx = t.indexOf(target);
+        const after = t.slice(idx + target.length);
+        // First non-whitespace after label must be digit or +/- sign
+        const firstChar = after.trimStart().charAt(0);
+        if (!/[+\\-\\d]/.test(firstChar)) {
+          cur = cur.parentElement;
+          continue;
+        }
+        const nums = after.match(/[+-]?\\d[\\d,]*(?:\\.\\d+)?\\s*[kKmM]?(?=\\s|$|USDT|%|\\))/g) || [];
+        if (nums.length >= 3) return after;
+        cur = cur.parentElement;
+      }
+    }
+    return null;
+  })()`)) as string | null;
+
+  if (!tail) return { all: NaN, long: NaN, short: NaN };
+  const numRe = /[+-]?\d[\d,]*(?:\.\d+)?\s*[kKmM]?(?=\s|$|USDT|%|\))/g;
+  const matches = (tail.match(numRe) ?? []).map((s) => parseNum(s)).filter((n) => !Number.isNaN(n));
+  return {
+    all: matches[0] ?? NaN,
+    long: matches[1] ?? NaN,
+    short: matches[2] ?? NaN,
+  };
 }
 
 async function scrapePerformance(page: Page): Promise<ScrapedPerformance> {
@@ -255,15 +316,44 @@ async function scrapePerformance(page: Page): Promise<ScrapedPerformance> {
   const summaryProse = summaryBlock.replace(/^Performance Summary\s*/i, '').trim();
 
   // Top KPI strip: NET PROFIT / TRADES / WIN RATE / MAX DRAWDOWN / PROFIT FACTOR
-  // These render as label-then-value pairs. Read each by label.
+  // Each label has its value directly below in the same flex column.
+  // Walk up from the label until we find a container that ALSO contains
+  // numeric content (the value sibling).
   async function readKpi(label: string): Promise<string> {
-    const loc = page.locator(`text=${label}`).first();
-    // The value is the immediate sibling block; walk to parent and grab.
-    return loc
-      .locator('xpath=..')
-      .innerText()
-      .then((t) => t.replace(label, '').trim())
-      .catch(() => '');
+    return ((await page.evaluate(`(() => {
+      const target = ${JSON.stringify(label)};
+      // Strategy: find ALL elements whose textContent equals target.
+      // For each, try:
+      //   (a) parent's innerText starting with target → take suffix
+      //   (b) next sibling's innerText
+      //   (c) walk up to grandparent
+      const all = document.querySelectorAll('*');
+      const candidates = [];
+      for (let i = 0; i < all.length; i++) {
+        const el = all[i];
+        const tc = (el.textContent || '').trim();
+        if (tc === target) candidates.push(el);
+      }
+      for (const cand of candidates) {
+        // Try sibling first — KPI cards often have <label/><value/>.
+        const next = cand.nextElementSibling;
+        if (next) {
+          const sib = (next.textContent || '').trim();
+          if (sib && /^[+-]?\\d/.test(sib)) return sib;
+        }
+        // Try parent.innerText
+        let cur = cand.parentElement;
+        for (let d = 0; d < 6 && cur; d++) {
+          const t = (cur.innerText || cur.textContent || '').trim();
+          if (t.startsWith(target) && t.length < 200) {
+            const after = t.slice(target.length).trim();
+            if (after && /^[+-]?\\d/.test(after)) return after;
+          }
+          cur = cur.parentElement;
+        }
+      }
+      return null;
+    })()`)) as string | null) ?? '';
   }
   const netProfitStr = await readKpi('NET PROFIT');
   const tradesStr = await readKpi('TRADES');
@@ -355,30 +445,38 @@ async function scrapeTradesLog(page: Page, expectedTotal: number): Promise<Trade
 
   type VisibleRow = { num: number; side: 'long' | 'short'; cells: string[] };
   const extractVisibleRows = async (): Promise<VisibleRow[]> => {
-    // page.evaluate body is serialized as a string, so DOM types aren't
-    // needed in our TS lib. Pass as a Function-string (same pattern as
-    // src/browser/tradingview.ts).
+    // Rows are matched by: starts with "<num>\n<side>" AND contains 4+ USDT
+    // mentions (2 prices + net PnL + cumulative PnL). We pick the SMALLEST
+    // element that satisfies both — going deeper than that would lose data,
+    // going wider would pull in the whole table.
     const raw = (await page.evaluate(`(() => {
       const rows = [];
-      const all = document.querySelectorAll('[role="row"], tr, div');
+      const seen = new Set();
+      const all = document.querySelectorAll('div, tr, [role="row"]');
       for (const el of Array.from(all)) {
         const t = el.innerText || '';
-        if (!t || t.length > 400) continue;
-        const m = t.match(/^\\s*(\\d{1,3})\\s*\\n?\\s*(long|short)/i);
+        if (!t || t.length > 800) continue;
+        const m = t.match(/^\\s*(\\d{1,3})\\s*\\n\\s*(long|short)/i);
         if (!m) continue;
+        // Must contain at least 2 price/USDT amounts.
+        const usdtCount = (t.match(/USDT/g) || []).length;
+        if (usdtCount < 2) continue;
         const num = parseInt(m[1], 10);
         const side = m[2].toLowerCase();
-        // Skip if any child matches too — pick deepest match
-        const children = el.querySelectorAll('*');
-        let childMatch = false;
-        for (let i = 0; i < children.length; i++) {
-          const ct = children[i].innerText || '';
-          if (ct !== t && /^\\s*\\d{1,3}\\s*\\n?\\s*(long|short)/i.test(ct)) {
-            childMatch = true; break;
-          }
-        }
-        if (childMatch) continue;
-        rows.push({ num, side, cells: t.split('\\n').map(function(s){return s.trim();}).filter(Boolean) });
+        // Dedup by (num, side, text-length) — keep the FIRST (smallest)
+        // matching element. Since DOM walk is in document order and
+        // ancestors come AFTER their descendants in querySelectorAll only
+        // for some configurations, we explicitly skip if we already have
+        // a smaller-text row for this trade num.
+        const key = num + ':' + side;
+        const existing = seen.has(key);
+        if (existing) continue;
+        seen.add(key);
+        rows.push({
+          num,
+          side,
+          cells: t.split('\\n').map(function(s){return s.trim();}).filter(Boolean),
+        });
       }
       return rows;
     })()`)) as VisibleRow[];
@@ -392,36 +490,48 @@ async function scrapeTradesLog(page: Page, expectedTotal: number): Promise<Trade
     const before = collected.size;
     for (const v of visible) {
       if (collected.has(v.num)) continue;
-      // Cells layout: [num, side, entryDate, entryPrice "672.5750 USDT",
-      //                exitDate, exitPrice, netPnL, cumPnL]
-      // Some cells may glob together; reconstruct conservatively.
-      const flat = v.cells.join(' ');
-      const dateAndPrice = (chunk: string) => {
-        // "ср, 13 мая 2026 г., 12:45 672.5750 USDT"
-        const priceMatch = chunk.match(/(\d+\.\d+)\s*USDT/);
-        const price = priceMatch ? parseFloat(priceMatch[1]!) : NaN;
-        const dateMatch = chunk.match(/^(.*?)\s*\d+\.\d+\s*USDT/);
-        const at = dateMatch ? parseLuxAlgoDate(dateMatch[1]!) : null;
-        return { price, at };
-      };
-      // Split by USDT occurrences — net PnL and cumulative PnL each have USDT
-      // Pattern overall: NUM SIDE DATE1 PRICE1_USDT DATE2 PRICE2_USDT NETPNL_USDT CUMPNL_USDT
-      const usdtSplits = flat.split(/(?<=\d\.\d{2,4}\s*USDT)/);
-      // After splits we likely have: [entry chunk] [exit chunk] [net pnl chunk] [cum pnl chunk]
-      const entry = dateAndPrice(usdtSplits[0] ?? '');
-      const exit = dateAndPrice(usdtSplits[1] ?? '');
-      const netNum = parseNum(usdtSplits[2] ?? '');
-      const cumNum = parseNum(usdtSplits[3] ?? '');
-      collected.set(v.num, {
-        num: v.num,
-        side: v.side,
-        entryAt: entry.at,
-        entryPrice: entry.price,
-        exitAt: exit.at,
-        exitPrice: exit.price,
-        netPnlUsdt: netNum,
-        cumulativePnlUsdt: cumNum,
-      });
+      // Cells layout: [num, side, entryDate, entryPriceUSDT, exitDate,
+      //                exitPriceUSDT, "+netUSDT\t+cumUSDT"]
+      // Parse via a single regex against the flat-string. Supports both
+      // English ("Sun, Oct 19, 2025, 00:45") and Russian ("ср, 19 окт.
+      // 2025 г., 04:15") date formats; the (.+?) lazy groups handle both.
+      // Whitespace between price digits and USDT is optional (LuxAlgo
+      // sometimes omits it).
+      const flat = v.cells.join('|');
+      const rowRe =
+        /^(?<num>\d+)\|(?<side>long|short)\|(?<eDate>[^|]+)\|(?<eP>\d+\.\d+)\s*USDT\|(?<xDate>[^|]+)\|(?<xP>\d+\.\d+)\s*USDT\|(?<net>[+\-]?\d+\.\d+)\s*USDT[\s\t]*(?<cum>[+\-]?\d+\.\d+)\s*USDT/;
+      const m = flat.match(rowRe);
+      if (m && m.groups) {
+        collected.set(v.num, {
+          num: v.num,
+          side: v.side,
+          entryAt: parseLuxAlgoDate(m.groups.eDate ?? ''),
+          entryPrice: parseFloat(m.groups.eP ?? 'NaN'),
+          exitAt: parseLuxAlgoDate(m.groups.xDate ?? ''),
+          exitPrice: parseFloat(m.groups.xP ?? 'NaN'),
+          netPnlUsdt: parseFloat((m.groups.net ?? 'NaN').replace('+', '')),
+          cumulativePnlUsdt: parseFloat((m.groups.cum ?? 'NaN').replace('+', '')),
+        });
+      } else {
+        // Fallback: capture what we can from cells positionally
+        const priceFromCell = (c: string): number => {
+          const pm = c.match(/(\d+\.\d+)/);
+          return pm ? parseFloat(pm[1]!) : NaN;
+        };
+        const last = v.cells[v.cells.length - 1] ?? '';
+        // last cell often: "+9.15USDT\t+9.15USDT"
+        const pnlParts = last.split(/[\s\t]+/).filter(Boolean);
+        collected.set(v.num, {
+          num: v.num,
+          side: v.side,
+          entryAt: parseLuxAlgoDate(v.cells[2] ?? ''),
+          entryPrice: priceFromCell(v.cells[3] ?? ''),
+          exitAt: parseLuxAlgoDate(v.cells[4] ?? ''),
+          exitPrice: priceFromCell(v.cells[5] ?? ''),
+          netPnlUsdt: parseFloat((pnlParts[0] ?? 'NaN').replace(/[+USDT]/g, '')),
+          cumulativePnlUsdt: parseFloat((pnlParts[1] ?? 'NaN').replace(/[+USDT]/g, '')),
+        });
+      }
     }
     if (collected.size === before) stuck++;
     else stuck = 0;
@@ -498,7 +608,15 @@ function renderConfigBlock(
   // Period label: "<start> — <today>"
   const periodLabel = `${perf.evaluationStart ?? '?'} — today`;
 
-  // Long/Short PnL % off detailed table
+  // PREFER detailed-table values over fragile top-KPI scrape. The KPI
+  // strip layout (NET PROFIT / TRADES / WIN RATE / etc) varies between
+  // LuxAlgo versions; the detailed All/Long/Short table is stable.
+  const netPnlUsd = perf.detailed.netProfit.all;
+  const totalTrades = analysis.closedTrades.all;
+  const winRatePct = analysis.winRatePct.all;
+  const profitFactor = perf.detailed.profitFactor.all;
+  const maxDdUsd = perf.detailed.drawdown.usdt;
+  const maxDdPct = perf.detailed.drawdown.pct;
   const longPnlPct = perf.detailed.netProfit.long / 10; // $1000 notional
   const shortPnlPct = perf.detailed.netProfit.short / 10;
 
@@ -523,17 +641,17 @@ function renderConfigBlock(
       initialCapital: 1000,
       notionalUsd: 1000,
       commissionPctPerSide: 0.00055,
-      netPnlUsd: ${perf.netProfit.toFixed(2)},
-      netPnlPct: ${(perf.netProfit / 10).toFixed(2)},
+      netPnlUsd: ${netPnlUsd.toFixed(2)},
+      netPnlPct: ${(netPnlUsd / 10).toFixed(2)},
       cagrPct: ${perf.detailed.cagrPct.all.toFixed(2)},
-      totalTrades: ${perf.trades},
+      totalTrades: ${totalTrades},
       wins: ${analysis.winningTrades.all},
       losses: ${analysis.losingTrades.all},
-      winRate: ${(perf.winRatePct / 100).toFixed(4)},
-      profitFactor: ${perf.profitFactor.toFixed(3)},
-      commissionPaidUsd: ${(perf.trades * 1000 * 0.00055 * 2).toFixed(2)},
-      maxDrawdownPct: ${perf.maxDrawdownPct.toFixed(2)},
-      maxDrawdownUsd: ${perf.maxDrawdownUsdt.toFixed(2)},
+      winRate: ${(winRatePct / 100).toFixed(4)},
+      profitFactor: ${profitFactor.toFixed(3)},
+      commissionPaidUsd: ${(totalTrades * 1000 * 0.00055 * 2).toFixed(2)},
+      maxDrawdownPct: ${maxDdPct.toFixed(2)},
+      maxDrawdownUsd: ${maxDdUsd.toFixed(2)},
       avgWinUsd: ${analysis.avgWinningTrade.all.toFixed(2)},
       avgWinPct: ${(analysis.avgWinningTrade.all / 10).toFixed(2)},
       avgLossUsd: ${analysis.avgLosingTrade.all.toFixed(2)},
@@ -566,7 +684,16 @@ async function main(): Promise<void> {
     console.error(`→ Opening ${url}`);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     // Strategy Tester right pane takes a couple of seconds to render.
-    await page.waitForSelector('text=Strategy Configuration', { timeout: 30_000 });
+    // If selector still not visible after 30s, save a screenshot for debug.
+    try {
+      await page.waitForSelector('text=Strategy Configuration', { timeout: 60_000 });
+    } catch (err) {
+      const dbgPath = resolve('data', 'imports', `_debug-${Date.now()}.png`);
+      await page.screenshot({ path: dbgPath, fullPage: true }).catch(() => {});
+      console.error(`Strategy Configuration not visible. Debug screenshot: ${dbgPath}`);
+      console.error(`Current URL: ${page.url()}`);
+      throw err;
+    }
     await page.waitForSelector('text=Performance', { timeout: 15_000 });
     await page.waitForTimeout(2_000);
 

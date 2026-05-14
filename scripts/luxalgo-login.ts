@@ -38,10 +38,12 @@ const TIMEOUT_MS = 10 * 60_000;
   console.log('LuxAlgo login flow (manual)');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('1. Sign in in the browser window (top-right "Sign in").');
-  console.log('2. Once you land on the dashboard / any non-signin page,');
-  console.log('   storage state will save automatically.');
-  console.log('3. You can also navigate to your AI Strategy Builder chat');
-  console.log('   to verify everything works before the script captures.');
+  console.log('2. After signing in, NAVIGATE TO YOUR AI BUILDER CHAT URL');
+  console.log('   (e.g. https://www.luxalgo.com/chat/<chat-id>/) or any');
+  console.log('   authenticated page — script will not save while you are');
+  console.log('   on the homepage to avoid false positives.');
+  console.log('3. Once you land on /chat/ or any non-root path, storage');
+  console.log('   state saves automatically.');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   await page.goto(SIGNIN_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
@@ -52,18 +54,41 @@ const TIMEOUT_MS = 10 * 60_000;
   const isLoggedIn = async (): Promise<boolean> => {
     try {
       const cookies = await ctx.cookies('https://www.luxalgo.com');
-      // Look for any session-like cookie. LuxAlgo cookie names vary by
-      // their auth provider (could be Supabase, NextAuth, Auth0...) so we
-      // do a generic "has substantial cookie value" check.
+      // Filter out KNOWN analytics/tracking cookie patterns. PostHog
+      // (ph_phc_*) is the big false-positive culprit — it sets a long
+      // value on first page load even while user is anonymous.
+      const ANALYTICS_PATTERNS = /^(ph_phc_|__ph_|_ga|_gid|_gcl|_fbp|_fbc|cf_|hubspotutk|__hs|mp_|_pin_|_uetsid|_uetvid|_ttp)/i;
       const sessionish = cookies.find(
-        (c) =>
-          c.value.length > 20 &&
-          !/^(_ga|_gid|_gcl|cf_|hubspotutk|__hs|mp_)/i.test(c.name),
+        (c) => c.value.length > 20 && !ANALYTICS_PATTERNS.test(c.name),
       );
+
+      // Cross-check via PostHog state: if the only cookie we have IS
+      // PostHog AND its $user_state is "anonymous", we're definitely not
+      // logged in yet regardless of URL.
+      const phCookie = cookies.find((c) => c.name.startsWith('ph_phc_'));
+      if (phCookie && /\$user_state%22%3A%22anonymous/.test(phCookie.value)) {
+        // Only block if we ALSO don't have a real session cookie
+        if (!sessionish) return false;
+      }
+
       const url = page.url();
       const onSignin = /signin|signup|login|auth\//i.test(url);
       const onLuxalgo = /luxalgo\.com/.test(url);
-      return Boolean(sessionish) && !onSignin && onLuxalgo;
+
+      // The HOMEPAGE (luxalgo.com/) shows a "Sign in" button even after
+      // a fresh login flow opens, so we also require the user to navigate
+      // to an authenticated section (/chat, /dashboard, /account, /pricing
+      // hits an auth check, etc.) before we declare success.
+      const urlPath = (() => {
+        try {
+          return new URL(url).pathname;
+        } catch {
+          return '/';
+        }
+      })();
+      const onAuthSection = urlPath !== '/' && urlPath !== '';
+
+      return Boolean(sessionish) && !onSignin && onLuxalgo && onAuthSection;
     } catch {
       return false;
     }

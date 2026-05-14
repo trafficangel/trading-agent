@@ -116,18 +116,24 @@ export type StrategyConfig = {
  */
 export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   // First registered strategy (May 14, 2026).
-  // LuxAlgo AI Strategy Builder backtest on BNBUSDT 15m (2025-10-19 .. 2026-05-14):
+  // Backtest data scraped from LuxAlgo AI Strategy Builder via
+  // `pnpm tsx scripts/import-strategy.ts` against
+  //   https://www.luxalgo.com/chat/xff5y4hjob6d2qitfo1lhbxa/
+  //
+  // Period Oct 19 2025 → May 14 2026 (207 days, the FULL backtest window
+  // since LuxAlgo's evaluation start — replacing earlier 91-day snapshot).
   //   - 104 trades, 76W / 28L → 73.08% WR
   //   - Profit factor 3.02
-  //   - Max DD 0.95%
-  //   - Avg losing trade: -15.26 USDT on $1000 notional = -1.53%
-  //   - Largest losing trade: -49.60 USDT = -4.96%
+  //   - Max DD 0.95% (103.56 USDT) — exceptionally tight
+  //   - Net +864.65 USDT (+86.47% on $1000 notional), CAGR 15.96%
+  //   - Long 47 trades +194.32 USDT, Short 57 trades +670.33 USDT
+  //   - Avg loss -15.26 USDT (-1.53%), worst loss -49.60 USDT (-4.96%)
   //
-  // slPct=0.025 (2.5%) chosen as safety buffer ≈1.6× the avg loss.
-  // This will preempt the worst outlier losses (-4.96% would hit our SL
-  // before the strategy's own exit, capping downside) while leaving room
-  // for normal adverse excursions of the strategy's Builtin Exits.
-  // Iterate after 10-20 live trades based on observed exits_strategy / sl_hit ratio.
+  // slPct=0.025 (2.5%) deliberately kept TIGHTER than the importer's
+  // suggested 6.5% (90th-pct loss × 1.2). Importer's number lets the
+  // strategy hit its own worst-case excursions; 2.5% acts as a safety
+  // governor that caps the tail. After 10-20 live trades we revisit
+  // based on observed sl_hit ratio (>20% → widen; near zero → confirm).
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
@@ -144,32 +150,32 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     slPct: 0.025,
     launchedAt: Date.parse('2026-05-14T12:00:00Z'),
     backtest: {
-      periodLabel: 'Feb 12 — May 14, 2026',
-      periodDays: 91,
+      periodLabel: 'Oct 19, 2025 — May 14, 2026',
+      periodDays: 207,
       initialCapital: 1000,
       notionalUsd: 1000,
       commissionPctPerSide: 0.00055,
-      netPnlUsd: 203.95,
-      netPnlPct: 20.39,
-      cagrPct: 110.60,
-      totalTrades: 49,
-      wins: 30,
-      losses: 19,
-      winRate: 0.6122,
-      profitFactor: 1.787,
-      commissionPaidUsd: 54.45,
-      maxDrawdownPct: 11.96,
-      maxDrawdownUsd: 140.78,
-      avgWinUsd: 15.62,
-      avgWinPct: 1.56,
-      avgLossUsd: -13.80,
-      avgLossPct: -1.38,
-      largestWinUsd: 46.73,
-      largestLossUsd: -53.09,
-      longTrades: 21,
-      longPnlPct: 11.90,
-      shortTrades: 28,
-      shortPnlPct: 8.75,
+      netPnlUsd: 864.65,
+      netPnlPct: 86.47,
+      cagrPct: 15.96,
+      totalTrades: 104,
+      wins: 76,
+      losses: 28,
+      winRate: 0.7308,
+      profitFactor: 3.020,
+      commissionPaidUsd: 114.40,
+      maxDrawdownPct: 0.95,
+      maxDrawdownUsd: 103.56,
+      avgWinUsd: 17.00,
+      avgWinPct: 1.70,
+      avgLossUsd: -15.26,
+      avgLossPct: -1.53,
+      largestWinUsd: 136.61,
+      largestLossUsd: -49.60,
+      longTrades: 47,
+      longPnlPct: 19.43,
+      shortTrades: 57,
+      shortPnlPct: 67.03,
     },
   },
 };
