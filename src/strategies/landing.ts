@@ -50,6 +50,107 @@ function classForValue(n: number): 'pos' | 'neg' | 'neu' {
   return 'neu';
 }
 
+// --- Inline SVG charts ---
+// Hand-rolled, no external lib. Three visualisations:
+//   1. Donut — win-rate (W vs L ratio)
+//   2. Diverging bar — long vs short P&L contribution
+//   3. Win/loss spectrum — avg/largest win and loss on a single axis
+
+function donutChart(winPct: number, losses: number, wins: number): string {
+  // SVG donut with two arcs.
+  // Standard trick: stroke-dasharray on a circle, stroke-dashoffset to rotate.
+  const r = 60;
+  const cx = 80;
+  const cy = 80;
+  const circumference = 2 * Math.PI * r;
+  const winArc = (winPct / 100) * circumference;
+  return `
+  <svg viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="Win/Loss donut">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--danger)" stroke-width="22"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--accent)" stroke-width="22"
+      stroke-dasharray="${winArc} ${circumference - winArc}"
+      stroke-dashoffset="${circumference / 4}"
+      transform="rotate(-90 ${cx} ${cy})"
+      style="transition: stroke-dasharray 600ms ease;"/>
+    <text x="${cx}" y="${cy - 2}" text-anchor="middle" fill="var(--text)"
+      font-size="22" font-weight="600">${winPct.toFixed(1)}%</text>
+    <text x="${cx}" y="${cy + 18}" text-anchor="middle" fill="var(--text-dim)"
+      font-size="10" letter-spacing="0.08em">WIN RATE</text>
+  </svg>
+  <div class="legend">
+    <span class="legend-row"><i class="dot pos"></i> Wins <b>${wins}</b></span>
+    <span class="legend-row"><i class="dot neg"></i> Losses <b>${losses}</b></span>
+  </div>
+  `;
+}
+
+function divergingBar(
+  label1: string, value1: number,
+  label2: string, value2: number,
+  unit: string = '%',
+): string {
+  const max = Math.max(Math.abs(value1), Math.abs(value2), 0.01);
+  const w1 = Math.abs(value1) / max * 100;
+  const w2 = Math.abs(value2) / max * 100;
+  const sign1 = value1 >= 0 ? '+' : '';
+  const sign2 = value2 >= 0 ? '+' : '';
+  const cls1 = value1 >= 0 ? 'pos' : 'neg';
+  const cls2 = value2 >= 0 ? 'pos' : 'neg';
+  return `
+  <div class="diverging-bar">
+    <div class="bar-row">
+      <span class="bar-label">${label1}</span>
+      <span class="bar-track"><span class="bar-fill ${cls1}" style="width:${w1}%"></span></span>
+      <span class="bar-value ${cls1}">${sign1}${value1.toFixed(2)}${unit}</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">${label2}</span>
+      <span class="bar-track"><span class="bar-fill ${cls2}" style="width:${w2}%"></span></span>
+      <span class="bar-value ${cls2}">${sign2}${value2.toFixed(2)}${unit}</span>
+    </div>
+  </div>
+  `;
+}
+
+function winLossSpectrum(avgWin: number, avgLoss: number, largestWin: number, largestLoss: number): string {
+  // Single axis where the wider end shows the largest win / loss and the
+  // narrower end shows the average. Visually communicates the asymmetry.
+  const max = Math.max(Math.abs(avgWin), Math.abs(avgLoss), Math.abs(largestWin), Math.abs(largestLoss), 0.01);
+  const pctAvgW = (avgWin / max) * 100;
+  const pctAvgL = (Math.abs(avgLoss) / max) * 100;
+  const pctMaxW = (largestWin / max) * 100;
+  const pctMaxL = (Math.abs(largestLoss) / max) * 100;
+  return `
+  <div class="spectrum">
+    <div class="spec-line">
+      <span class="spec-col">
+        <span class="spec-label">Largest loss</span>
+        <span class="spec-value neg">$${largestLoss.toFixed(2)}</span>
+        <span class="spec-bar neg" style="width:${pctMaxL}%"></span>
+      </span>
+      <span class="spec-col">
+        <span class="spec-label">Avg loss</span>
+        <span class="spec-value neg">$${avgLoss.toFixed(2)}</span>
+        <span class="spec-bar neg" style="width:${pctAvgL}%"></span>
+      </span>
+    </div>
+    <div class="spec-axis"></div>
+    <div class="spec-line">
+      <span class="spec-col">
+        <span class="spec-label">Avg win</span>
+        <span class="spec-value pos">+$${avgWin.toFixed(2)}</span>
+        <span class="spec-bar pos" style="width:${pctAvgW}%"></span>
+      </span>
+      <span class="spec-col">
+        <span class="spec-label">Largest win</span>
+        <span class="spec-value pos">+$${largestWin.toFixed(2)}</span>
+        <span class="spec-bar pos" style="width:${pctMaxW}%"></span>
+      </span>
+    </div>
+  </div>
+  `;
+}
+
 // --- Shared CSS (dark "trading dashboard" theme matching LuxAlgo aesthetic) ---
 const STYLE = `
   :root {
@@ -165,6 +266,75 @@ const STYLE = `
   .strategy-list .row .name { font-weight: 500; }
   .strategy-list .row .sub { font-size: 12px; color: var(--text-dim); }
   .strategy-list .row .pnl { font-size: 16px; font-weight: 600; }
+
+  /* Charts */
+  .charts-grid {
+    display: grid; gap: 16px;
+    grid-template-columns: minmax(260px, 1fr) minmax(320px, 2fr);
+    align-items: stretch;
+  }
+  @media (max-width: 720px) {
+    .charts-grid { grid-template-columns: 1fr; }
+  }
+  .chart-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px 20px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .chart-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-faint); font-weight: 600;
+  }
+  .chart-card .donut-wrap {
+    display: flex; gap: 18px; align-items: center;
+  }
+  .legend { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+  .legend-row { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
+  .legend-row b { color: var(--text); font-weight: 600; margin-left: 4px; }
+  .dot {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  }
+  .dot.pos { background: var(--accent); }
+  .dot.neg { background: var(--danger); }
+
+  /* Diverging bar */
+  .diverging-bar { display: flex; flex-direction: column; gap: 10px; }
+  .bar-row {
+    display: grid; grid-template-columns: 60px 1fr 90px; align-items: center; gap: 12px;
+  }
+  .bar-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-faint); font-weight: 600;
+  }
+  .bar-track {
+    height: 10px; background: var(--bg); border-radius: 6px; overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .bar-fill {
+    display: block; height: 100%; border-radius: 6px;
+    transition: width 600ms ease;
+  }
+  .bar-fill.pos { background: linear-gradient(90deg, var(--accent-soft), var(--accent)); }
+  .bar-fill.neg { background: linear-gradient(90deg, var(--danger-soft), var(--danger)); }
+  .bar-value { font-family: 'SF Mono', 'Menlo', monospace; font-size: 13px; text-align: right; font-weight: 600; }
+  .bar-value.pos { color: var(--accent); }
+  .bar-value.neg { color: var(--danger); }
+
+  /* Win/Loss spectrum */
+  .spectrum { display: flex; flex-direction: column; gap: 8px; }
+  .spec-line { display: flex; gap: 14px; }
+  .spec-col { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .spec-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-faint);
+  }
+  .spec-value { font-family: 'SF Mono', 'Menlo', monospace; font-size: 14px; font-weight: 600; }
+  .spec-value.pos { color: var(--accent); }
+  .spec-value.neg { color: var(--danger); }
+  .spec-bar { display: block; height: 6px; border-radius: 3px; transition: width 600ms ease; }
+  .spec-bar.pos { background: linear-gradient(90deg, var(--accent), var(--accent-soft)); }
+  .spec-bar.neg { background: linear-gradient(90deg, var(--danger), var(--danger-soft)); }
+  .spec-axis { height: 1px; background: var(--border); margin: 4px 0; }
 `;
 
 function pageShell(title: string, body: string): string {
@@ -238,6 +408,22 @@ function renderBacktestSection(b: BacktestSnapshot): string {
   return `
   <div class="section">
     <div class="section-title">Backtest · ${escapeHtml(b.periodLabel)} (${b.periodDays} дней)</div>
+
+    <div class="charts-grid" style="margin-bottom: 16px;">
+      <div class="chart-card">
+        <div class="chart-title">Win / Loss ratio</div>
+        <div class="donut-wrap">
+          ${donutChart(b.winRate * 100, b.losses, b.wins)}
+        </div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Long vs Short P&L contribution</div>
+        ${divergingBar('LONG', b.longPnlPct, 'SHORT', b.shortPnlPct)}
+        <div class="chart-title" style="margin-top: 8px;">Avg vs largest (USDT)</div>
+        ${winLossSpectrum(b.avgWinUsd, b.avgLossUsd, b.largestWinUsd, b.largestLossUsd)}
+      </div>
+    </div>
+
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-label">Net P&L</div>

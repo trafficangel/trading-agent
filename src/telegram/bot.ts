@@ -15,6 +15,10 @@ type SendOpts = {
   text: string;
   reply_to_message_id?: number;
   disable_notification?: boolean;
+  /** Default true (most posts are noisy with previews). Set false for
+   *  announcement posts where we WANT subscribers to see the landing
+   *  page preview card. */
+  disable_web_page_preview?: boolean;
 };
 
 export async function sendMessage(opts: SendOpts): Promise<{ message_id: number } | null> {
@@ -28,7 +32,7 @@ export async function sendMessage(opts: SendOpts): Promise<{ message_id: number 
         chat_id,
         text: opts.text,
         parse_mode: 'HTML',
-        disable_web_page_preview: true,
+        disable_web_page_preview: opts.disable_web_page_preview ?? true,
         reply_to_message_id: opts.reply_to_message_id,
         disable_notification: opts.disable_notification ?? false,
       }),
