@@ -108,10 +108,12 @@ export function resultPost(i: ResultPostInput): string {
     note = isWin ? pickRandom(LLM_CLOSE_WIN_NOTES) : pickRandom(LLM_CLOSE_LOSS_NOTES);
   }
 
+  // pnlR kept in the ResultPostInput type but NOT displayed in the user-
+  // facing message — operator preference (R-multiple is noisy for a non-
+  // quant reader, % already conveys the result). Still persisted to DB
+  // and used internally by self-review LLM prompts.
   const pnlSign = i.pnlPct >= 0 ? '+' : '';
-  const rSign = i.pnlR >= 0 ? '+' : '';
   const pnlStr = `${pnlSign}${i.pnlPct.toFixed(2)}%`;
-  const rStr = `${rSign}${i.pnlR.toFixed(2)}R`;
 
   const lines: string[] = [
     header,
@@ -120,7 +122,7 @@ export function resultPost(i: ResultPostInput): string {
     '',
     `📥 Вход:   <code>${i.entry}</code>`,
     `📤 Выход:  <code>${i.closePrice}</code>${exitTag}`,
-    `📊 Результат: <b>${pnlStr}</b>  ·  ${rStr}`,
+    `📊 Результат: <b>${pnlStr}</b>`,
     `⏱ Длительность: ${formatDuration(i.durationMs)}`,
     '',
     escapeHtml(note),

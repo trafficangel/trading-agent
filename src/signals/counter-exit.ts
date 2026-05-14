@@ -174,7 +174,8 @@ async function sendCounterExitPost(
         ? 'противоположный сигнал на старшем TF'
         : reason;
   const pnlSign = pnlPct >= 0 ? '+' : '';
-  const rSign = pnlR >= 0 ? '+' : '';
+  // pnlR persisted to DB but not displayed in TG — operator preference.
+  void pnlR;
 
   const text = [
     `⚡ <b>Досрочный выход</b> · ${tradeIdStr}  ${sideE} ${p.symbol}`,
@@ -183,7 +184,7 @@ async function sendCounterExitPost(
     `Триггер: <code>${payload.event}</code> на <code>${payload.timeframe}m</code>`,
     ``,
     `📤 Выход:  <code>${price}</code> (по рынку)`,
-    `📊 Результат: <b>${pnlSign}${pnlPct.toFixed(2)}%</b>  ·  ${rSign}${pnlR.toFixed(2)}R`,
+    `📊 Результат: <b>${pnlSign}${pnlPct.toFixed(2)}%</b>`,
     p.partial_closed_pct === 50
       ? `<i>Закрыли остаток после TP1.</i>`
       : `<i>Закрыли всю позицию.</i>`,

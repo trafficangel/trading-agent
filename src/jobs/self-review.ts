@@ -809,7 +809,7 @@ function formatReport(stats: ReviewStats, review: LlmReview | null, action: Tune
     const sigWr = sigClosed > 0 ? Math.round((stats.signalWins / sigClosed) * 100) : 0;
     lines.push('', `📡 <b>Track B (Signal)</b>`);
     lines.push(
-      `  Решений: <code>${stats.signalDecisions}</code>  ·  Закрытых: <b>${stats.signalWins}W/${stats.signalLosses}L</b> (${sigWr}%)  ·  Σ R: <b>${stats.signalClosedR >= 0 ? '+' : ''}${stats.signalClosedR.toFixed(2)}R</b>`,
+      `  Решений: <code>${stats.signalDecisions}</code>  ·  Закрытых: <b>${stats.signalWins}W/${stats.signalLosses}L</b> (${sigWr}%)`,
     );
     if (sigClosed > 0) {
       lines.push(
@@ -821,9 +821,8 @@ function formatReport(stats: ReviewStats, review: LlmReview | null, action: Tune
       for (const e of stats.signalEventStats) {
         const total = e.wins + e.losses;
         const wr = total > 0 ? Math.round((e.wins / total) * 100) : 0;
-        const rSign = e.openR >= 0 ? '+' : '';
         lines.push(
-          `    · <code>${e.event}@${e.tf}m</code>: ${e.wins}W/${e.losses}L (${wr}%, ${rSign}${e.openR.toFixed(2)}R)`,
+          `    · <code>${e.event}@${e.tf}m</code>: ${e.wins}W/${e.losses}L (${wr}%)`,
         );
       }
     }
@@ -834,7 +833,7 @@ function formatReport(stats: ReviewStats, review: LlmReview | null, action: Tune
     const llmWr = llmClosed > 0 ? Math.round((stats.llmWins / llmClosed) * 100) : 0;
     lines.push('', `🤖 <b>Track A (LLM)</b>`);
     lines.push(
-      `  Решений: <code>${stats.llmDecisions}</code>  ·  Закрытых: <b>${stats.llmWins}W/${stats.llmLosses}L</b> (${llmWr}%)  ·  Σ R: <b>${stats.llmClosedR >= 0 ? '+' : ''}${stats.llmClosedR.toFixed(2)}R</b>`,
+      `  Решений: <code>${stats.llmDecisions}</code>  ·  Закрытых: <b>${stats.llmWins}W/${stats.llmLosses}L</b> (${llmWr}%)`,
     );
     lines.push(`  Scalp floor: <code>${effectiveScalpFloor().toFixed(2)}</code>`);
   }
@@ -844,21 +843,20 @@ function formatReport(stats: ReviewStats, review: LlmReview | null, action: Tune
     const strWr = stratClosed > 0 ? Math.round((stats.strategyWins / stratClosed) * 100) : 0;
     lines.push('', `🛠 <b>Track C (Strategy Builder)</b>`);
     lines.push(
-      `  Решений: <code>${stats.strategyDecisions}</code>  ·  Закрытых: <b>${stats.strategyWins}W/${stats.strategyLosses}L</b> (${strWr}%)  ·  Σ R: <b>${stats.strategyClosedR >= 0 ? '+' : ''}${stats.strategyClosedR.toFixed(2)}R</b>`,
+      `  Решений: <code>${stats.strategyDecisions}</code>  ·  Закрытых: <b>${stats.strategyWins}W/${stats.strategyLosses}L</b> (${strWr}%)`,
     );
     if (stats.strategyStats.length > 0) {
       lines.push(`  <b>Per-strategy:</b>`);
       for (const s of stats.strategyStats) {
         const total = s.wins + s.losses;
         const wr = total > 0 ? Math.round((s.wins / total) * 100) : 0;
-        const rSign = s.openR >= 0 ? '+' : '';
         // Look up the strategy's numeric code from the static config (the
         // 'STRAT-001' tag is the operator-friendly label, strategy_id is
         // the canonical key).
         const cfg = getStrategyConfig(s.strategy_id);
         const codeLabel = cfg ? `[STRAT-${cfg.code}] ` : '';
         lines.push(
-          `    · ${codeLabel}<code>${s.strategy_id}</code>: ${s.wins}W/${s.losses}L (${wr}%, ${rSign}${s.openR.toFixed(2)}R)`,
+          `    · ${codeLabel}<code>${s.strategy_id}</code>: ${s.wins}W/${s.losses}L (${wr}%)`,
         );
         lines.push(
           `      выходы: ${s.exits_strategy} strategy / ${s.exits_sl} sl / ${s.exits_timeguard} time`,

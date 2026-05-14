@@ -337,16 +337,17 @@ async function sendStrategyExitPost(
   const tradeIdStr = `T#${decisionId.toString().padStart(4, '0')}`;
   const durMs = Date.now() - (filledAt ?? createdAt);
   const pnlSign = pnlPct >= 0 ? '+' : '';
-  const rSign = pnlR >= 0 ? '+' : '';
   const usdPnl = (pnlPct / 100) * TRACK_C_NOTIONAL_USD;
   const usdSign = usdPnl >= 0 ? '+' : '';
+  // pnlR computed (passed in) but not displayed — operator preference.
+  void pnlR;
   const text = [
     `🏁 <b>Сигнал выхода · ${tradeIdStr}</b>  <b>[STRAT-${cfg.code}]</b>  ${sideEmoji(side)} ${escapeHtml(p.symbol)}`,
     `🏷 <code>${escapeHtml(cfg.description)}</code>`,
     ``,
     `📥 Вход:   <code>${entry}</code>`,
     `📤 Выход:  <code>${closePrice}</code>  (по сигналу стратегии)`,
-    `📊 Результат: <b>${pnlSign}${pnlPct.toFixed(2)}%</b>  ·  ${rSign}${pnlR.toFixed(2)}R  ·  <b>${usdSign}$${usdPnl.toFixed(2)}</b>`,
+    `📊 Результат: <b>${pnlSign}${pnlPct.toFixed(2)}%</b>  ·  <b>${usdSign}$${usdPnl.toFixed(2)}</b>`,
     `⏱ Длительность: ${formatDuration(durMs)}`,
   ].join('\n');
   await sendMessage({ channel: 'signals', text }).catch((err) =>

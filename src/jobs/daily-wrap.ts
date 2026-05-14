@@ -188,17 +188,19 @@ async function tick(now: Date = new Date()): Promise<void> {
 
   // --- Real closed trades (the meat of the report) ---
   if (closed.length > 0) {
-    const rSign = totalR >= 0 ? '+' : '';
     const usdSign = totalUsd >= 0 ? '+' : '';
     const winrate = ((wins / closed.length) * 100).toFixed(0);
-    const avgR = (totalR / closed.length).toFixed(2);
-    const avgRSign = totalR >= 0 ? '+' : '';
+    const avgPctRaw = closed.reduce((s, t) => s + (t.pnl_pct ?? 0), 0) / closed.length;
+    const avgPctSign = avgPctRaw >= 0 ? '+' : '';
+    // totalR / avgR computed but no longer displayed — operator preference,
+    // % and USD are the primary metrics in the daily summary.
+    void totalR;
 
     lines.push(`<b>💼 Закрыто сделок: ${closed.length}</b>`);
     lines.push(
       `  Win: <b>${wins}</b>  ·  Loss: <b>${losses}</b>${breakevens ? `  ·  BE: ${breakevens}` : ''}  ·  Win-rate: <b>${winrate}%</b>`,
     );
-    lines.push(`  Σ R: <b>${rSign}${totalR.toFixed(2)}R</b>  ·  Avg R/trade: <b>${avgRSign}${avgR}</b>`);
+    lines.push(`  Avg % / trade: <b>${avgPctSign}${avgPctRaw.toFixed(2)}%</b>`);
     lines.push(`  💰 PnL при $1000/позиция: <b>${usdSign}$${totalUsd.toFixed(2)}</b>`);
     // Per-entry-type stats (useful once we have enough trades)
     if (closedByType.limit > 0 || closedByType.market > 0) {
@@ -232,8 +234,12 @@ async function tick(now: Date = new Date()): Promise<void> {
         t.track === 'strategy' && t.strategy_id
           ? ` <b>[STRAT-${getStrategyConfig(t.strategy_id)?.code ?? '?'}]</b>`
           : '';
+      // R-multiple deliberately omitted from the detail line — % + USD
+      // is enough for the daily report. rStr still computed earlier but
+      // unused here (kept the local in case operator preference flips back).
+      void rStr;
       lines.push(
-        `  ${reasonEmoji(t.close_reason)} ${idPrefix}${t.id.toString().padStart(4, '0')}${stratTag}${typeTag} ${sideE} ${t.symbol} · ${t.entry} → ${t.close_price ?? '?'} · <b>${pnlStr}</b> ${rStr} · ${usdStr}`,
+        `  ${reasonEmoji(t.close_reason)} ${idPrefix}${t.id.toString().padStart(4, '0')}${stratTag}${typeTag} ${sideE} ${t.symbol} · ${t.entry} → ${t.close_price ?? '?'} · <b>${pnlStr}</b> · ${usdStr}`,
       );
     }
   } else {

@@ -286,10 +286,10 @@ async function postPartialClose(p: DecisionRow, tp1Price: number): Promise<void>
   const text = [
     `💰 <b>TP1 взят</b> · ${tradeIdStr}  ${sideE} ${p.symbol}`,
     ``,
-    `Закрыли 50% позиции на <code>${tp1Price}</code> (+1R)`,
+    `Закрыли 50% позиции на <code>${tp1Price}</code>`,
     `SL подвинут в безубыток (<code>${p.entry}</code>)`,
     ``,
-    `<i>Оставшиеся 50% едут к TP2 (+2R). Минимальный итог = +0.5R.</i>`,
+    `<i>Оставшиеся 50% едут к TP2. Дальше — либо TP2, либо безубыток.</i>`,
   ].join('\n');
   await sendMessage({ channel: 'signals', text, disable_notification: true });
   await sendMessage({ channel: 'logs', text, disable_notification: true });
