@@ -716,24 +716,184 @@ const STYLE = `
   /* Status pills */
   .pill.running { background: var(--accent-soft); color: var(--accent); }
   .pill.paused { background: rgba(245, 177, 77, 0.12); color: var(--warning); }
+
+  /* ---------- Top-right nav (language toggle) ---------- */
+  .top-right-nav {
+    position: absolute; top: 16px; right: 20px;
+    display: flex; gap: 6px; font-size: 12px;
+  }
+  .top-right-nav a {
+    color: var(--text-faint); text-decoration: none;
+    padding: 4px 10px; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--bg-card);
+    transition: color 120ms, border-color 120ms;
+  }
+  .top-right-nav a:hover { color: var(--text); border-color: var(--text-faint); }
+  .top-right-nav a.active { color: var(--accent); border-color: var(--accent-soft); }
+  .container { position: relative; }
+
+  /* ---------- Home page sections ---------- */
+  .hero {
+    padding: 40px 0 28px; text-align: left;
+  }
+  .hero-eyebrow {
+    display: inline-block; font-family: 'SF Mono', 'Menlo', monospace;
+    font-size: 11px; letter-spacing: 0.12em; color: var(--text-dim);
+    background: var(--bg-card); border: 1px solid var(--border);
+    padding: 4px 12px; border-radius: 4px; margin-bottom: 18px;
+  }
+  .hero-title {
+    font-size: 42px; font-weight: 700; margin: 0 0 12px;
+    letter-spacing: -0.02em; line-height: 1.05;
+  }
+  .hero-title .accent { color: var(--accent); }
+  .hero-subtitle {
+    font-size: 17px; color: var(--text-dim); margin: 0 0 28px;
+    line-height: 1.55; max-width: 640px;
+  }
+  .hero-cta { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 18px; border-radius: 6px; font-size: 14px;
+    font-weight: 500; text-decoration: none; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg-card);
+    color: var(--text); transition: all 120ms;
+  }
+  .btn:hover { background: var(--bg-card-hover); text-decoration: none; }
+  .btn.btn-primary {
+    background: var(--accent); color: var(--bg); border-color: var(--accent);
+  }
+  .btn.btn-primary:hover { opacity: 0.9; }
+  .btn.btn-ghost { background: transparent; }
+
+  /* Live portfolio strip */
+  .live-strip {
+    display: flex; gap: 24px; flex-wrap: wrap; align-items: center;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 22px; margin: 0 0 36px;
+  }
+  .live-strip-item { display: flex; flex-direction: column; gap: 2px; }
+  .live-strip-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-faint); font-weight: 600;
+  }
+  .live-strip-value { font-size: 18px; font-weight: 600; }
+  .live-strip-value.pos { color: var(--accent); }
+  .live-strip-value.neg { color: var(--danger); }
+  .live-strip-sep {
+    color: var(--text-faint); font-size: 18px; user-select: none;
+  }
+
+  /* How it works grid */
+  .how-grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .how-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 22px 20px;
+  }
+  .how-step {
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 11px;
+    color: var(--accent); letter-spacing: 0.1em; margin-bottom: 8px;
+  }
+  .how-title { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+  .how-body { font-size: 13px; color: var(--text-dim); line-height: 1.55; margin: 0; }
+
+  /* Roadmap */
+  .roadmap-list { list-style: none; padding: 0; margin: 0; }
+  .roadmap-item {
+    display: flex; gap: 12px; padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .roadmap-item:last-child { border-bottom: none; }
+  .roadmap-status {
+    flex-shrink: 0; width: 24px; text-align: center;
+  }
+  .roadmap-status.done { color: var(--accent); }
+  .roadmap-status.todo { color: var(--text-faint); }
+  .roadmap-meta { display: flex; flex-direction: column; gap: 2px; }
+  .roadmap-when {
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 11px;
+    color: var(--text-faint); letter-spacing: 0.06em;
+  }
+  .roadmap-title { font-size: 14px; color: var(--text); font-weight: 500; }
+
+  /* FAQ */
+  .faq-list { display: flex; flex-direction: column; gap: 8px; }
+  .faq-item {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 18px;
+  }
+  .faq-item summary {
+    cursor: pointer; font-size: 15px; font-weight: 500; color: var(--text);
+    list-style: none; user-select: none;
+  }
+  .faq-item summary::-webkit-details-marker { display: none; }
+  .faq-item summary::before { content: '+ '; color: var(--accent); }
+  .faq-item[open] summary::before { content: '– '; }
+  .faq-answer {
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+    font-size: 14px; color: var(--text-dim); line-height: 1.55;
+  }
+
+  /* Strategy preview on home — compact */
+  .strategy-preview-list { display: flex; flex-direction: column; gap: 8px; }
+  .strategy-preview-link {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px; background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 8px;
+    text-decoration: none; color: inherit; transition: background 120ms;
+  }
+  .strategy-preview-link:hover {
+    background: var(--bg-card-hover); text-decoration: none;
+  }
+  .strategy-preview-name { font-weight: 500; }
+  .strategy-preview-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .strategy-preview-right { text-align: right; }
+
+  /* Section spacing on home */
+  .home-section { margin: 56px 0 0; }
+  .home-section-title {
+    font-size: 22px; font-weight: 600; margin: 0 0 18px;
+    letter-spacing: -0.01em;
+  }
+  .home-section-sub {
+    font-size: 14px; color: var(--text-dim); margin: -10px 0 22px;
+    max-width: 600px; line-height: 1.55;
+  }
 `;
 
-function pageShell(title: string, body: string): string {
+/** Reusable page shell. Exported so the home-page route can reuse the
+ *  exact same CSS / theme. The optional `lang` param swaps the
+ *  `<html lang>` attribute and the footer copy; defaults to RU.
+ *  `topRight` is rendered as a tiny element absolutely-positioned in
+ *  the header (e.g. language toggle on the home page). */
+export function pageShell(
+  title: string,
+  body: string,
+  lang: 'ru' | 'en' = 'ru',
+  topRight: string = '',
+): string {
+  const footerText =
+    lang === 'en'
+      ? 'Data refreshes automatically from the bot DB. Cache: 60 sec.<br/>⚠ Backtest ≠ guarantee. Past performance does not guarantee future returns.'
+      : 'Данные обновляются автоматически из БД бота. Кэш: 60 сек.<br/>⚠ Backtest ≠ guarantee. Прошлые результаты не гарантируют будущих.';
   return `<!DOCTYPE html>
-<html lang="ru">
+<html lang="${lang}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="robots" content="noindex" />
+<meta name="robots" content="${lang === 'en' ? 'index, follow' : 'index, follow'}" />
 <title>${escapeHtml(title)}</title>
 <style>${STYLE}</style>
 </head>
 <body>
 <div class="container">
+${topRight ? `<div class="top-right-nav">${topRight}</div>` : ''}
 ${body}
 <div class="footer">
-  Данные обновляются автоматически из БД бота. Кэш: 60 сек.<br/>
-  ⚠ Backtest ≠ guarantee. Прошлые результаты не гарантируют будущих.
+  ${footerText}
 </div>
 </div>
 </body>
