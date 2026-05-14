@@ -185,7 +185,7 @@ const CONTENT: Record<Lang, Content> = {
       telegram: 'Telegram канал',
       strategies: 'Все стратегии',
     },
-    telegramUrl: 'https://t.me/robotclaude_signals',
+    telegramUrl: 'https://t.me/luxalgosignal',
   },
   en: {
     htmlTitle: 'Robot Claude — automated trading strategies',
@@ -303,7 +303,7 @@ const CONTENT: Record<Lang, Content> = {
       telegram: 'Telegram channel',
       strategies: 'All strategies',
     },
-    telegramUrl: 'https://t.me/robotclaude_signals',
+    telegramUrl: 'https://t.me/luxalgosignal',
   },
 };
 
