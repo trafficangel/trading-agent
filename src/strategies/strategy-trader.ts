@@ -179,6 +179,7 @@ async function handleStrategyEntry(
     features: {
       source: 'strategy_trader',
       strategy_id: p.strategy_id,
+      strategy_code: cfg.code,
       strategy_description: cfg.description,
       strategy_timeframe: p.timeframe,
       notional_usd: TRACK_C_NOTIONAL_USD,
@@ -307,9 +308,8 @@ async function sendStrategyEntryPost(
   const tradeIdStr = `T#${decisionId.toString().padStart(4, '0')}`;
   const slPctDisplay = (cfg.slPct * 100).toFixed(2);
   const text = [
-    `🤖 <b>${tradeIdStr}</b>  ${sideEmoji(side)} <b>${escapeHtml(p.symbol)}</b> ${sideRu(side)}`,
-    `🏷 Стратегия: <code>${escapeHtml(p.strategy_id)}</code>`,
-    `📋 ${escapeHtml(cfg.description)} · ${p.timeframe}m`,
+    `🤖 <b>${tradeIdStr}</b>  <b>[STRAT-${cfg.code}]</b>  ${sideEmoji(side)} <b>${escapeHtml(p.symbol)}</b> ${sideRu(side)}`,
+    `🏷 <code>${escapeHtml(cfg.description)}</code>`,
     ``,
     `📥 Вход:  <code>${entry}</code>  (по рынку)`,
     `🛡 Стоп:  <code>${sl}</code>  (${slPctDisplay}%) — страховка`,
@@ -341,15 +341,13 @@ async function sendStrategyExitPost(
   const usdPnl = (pnlPct / 100) * TRACK_C_NOTIONAL_USD;
   const usdSign = usdPnl >= 0 ? '+' : '';
   const text = [
-    `🏁 <b>Сигнал выхода · ${tradeIdStr}</b>  ${sideEmoji(side)} ${escapeHtml(p.symbol)}`,
-    `🏷 <code>${escapeHtml(p.strategy_id)}</code>`,
+    `🏁 <b>Сигнал выхода · ${tradeIdStr}</b>  <b>[STRAT-${cfg.code}]</b>  ${sideEmoji(side)} ${escapeHtml(p.symbol)}`,
+    `🏷 <code>${escapeHtml(cfg.description)}</code>`,
     ``,
     `📥 Вход:   <code>${entry}</code>`,
     `📤 Выход:  <code>${closePrice}</code>  (по сигналу стратегии)`,
     `📊 Результат: <b>${pnlSign}${pnlPct.toFixed(2)}%</b>  ·  ${rSign}${pnlR.toFixed(2)}R  ·  <b>${usdSign}$${usdPnl.toFixed(2)}</b>`,
     `⏱ Длительность: ${formatDuration(durMs)}`,
-    ``,
-    `<i>${escapeHtml(cfg.description)}: Builtin Exit отработал.</i>`,
   ].join('\n');
   await sendMessage({ channel: 'signals', text }).catch((err) =>
     logger.error({ err }, 'strategy-trader: exit post to signals failed'),

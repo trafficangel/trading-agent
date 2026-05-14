@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { sendMessage } from '../telegram/bot.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
+import { getStrategyConfig } from '../strategies/track-c-config.js';
 
 type DecisionDayRow = {
   id: number;
@@ -23,8 +24,10 @@ type DecisionDayRow = {
   pnl_pct: number | null;
   pnl_r: number | null;
   features_json: string | null;
-  /** A/B bucket — 'llm' or 'signal'. Migration 008. */
+  /** A/B bucket — 'llm' / 'signal' / 'strategy'. Migration 008. */
   track: string;
+  /** Track C strategy_id (NULL for other tracks). Migration 011. */
+  strategy_id: string | null;
 };
 
 const sigsToday = db.prepare<[number], { symbol: string; timeframe: string; c: number }>(
@@ -33,7 +36,7 @@ const sigsToday = db.prepare<[number], { symbol: string; timeframe: string; c: n
 const SELECT_COLS = `
   id, created_at, symbol, decision, side, entry, sl, tp_json,
   status, parent_decision_id, closed_at, filled_at, pending_until, reasoning_short,
-  close_price, close_reason, pnl_pct, pnl_r, features_json, track
+  close_price, close_reason, pnl_pct, pnl_r, features_json, track, strategy_id
 `;
 const decisionsToday = db.prepare<[number], DecisionDayRow>(
   `SELECT ${SELECT_COLS} FROM decisions WHERE created_at >= ? ORDER BY created_at ASC`,
@@ -222,10 +225,15 @@ async function tick(now: Date = new Date()): Promise<void> {
       const usdStr = `${usdPnl >= 0 ? '+' : ''}$${usdPnl.toFixed(2)}`;
       const etype = entryTypeOf(t);
       const typeTag = etype === 'limit' ? ' <i>limit</i>' : '';
-      // Track-aware trade ID prefix ('S#' for signal, '#' for LLM).
+      // Track-aware trade ID prefix ('T#' Track C, 'S#' Track B signal, '#' Track A LLM).
       const idPrefix = t.track === 'strategy' ? 'T#' : t.track === 'signal' ? 'S#' : '#';
+      // Track C: show [STRAT-NNN] tag if config has the strategy.
+      const stratTag =
+        t.track === 'strategy' && t.strategy_id
+          ? ` <b>[STRAT-${getStrategyConfig(t.strategy_id)?.code ?? '?'}]</b>`
+          : '';
       lines.push(
-        `  ${reasonEmoji(t.close_reason)} ${idPrefix}${t.id.toString().padStart(4, '0')}${typeTag} ${sideE} ${t.symbol} · ${t.entry} → ${t.close_price ?? '?'} · <b>${pnlStr}</b> ${rStr} · ${usdStr}`,
+        `  ${reasonEmoji(t.close_reason)} ${idPrefix}${t.id.toString().padStart(4, '0')}${stratTag}${typeTag} ${sideE} ${t.symbol} · ${t.entry} → ${t.close_price ?? '?'} · <b>${pnlStr}</b> ${rStr} · ${usdStr}`,
       );
     }
   } else {

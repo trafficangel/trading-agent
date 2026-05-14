@@ -14,6 +14,7 @@ import {
   SIZING_FLOOR_SCALP_MAX,
 } from '../risk/sizing.js';
 import { effectiveScalpFloor } from '../risk/scalp-floor.js';
+import { getStrategyConfig } from '../strategies/track-c-config.js';
 
 /**
  * Self-review job. Runs every 12 hours (03:00, 15:00 UTC).
@@ -696,7 +697,9 @@ Near-miss sizing-floor SKIPs (band [floor-0.08, floor)): ${stats.sizingFloorSkip
         .map((s) => {
           const total = s.wins + s.losses;
           const wr = total > 0 ? Math.round((s.wins / total) * 100) : 0;
-          return `  ${s.strategy_id}: ${s.wins}W/${s.losses}L (${wr}% wr, ${s.openR.toFixed(2)}R) · exits: ${s.exits_strategy} strat / ${s.exits_sl} sl / ${s.exits_timeguard} time`;
+          const cfg = getStrategyConfig(s.strategy_id);
+          const codeLabel = cfg ? `[STRAT-${cfg.code}] ` : '';
+          return `  ${codeLabel}${s.strategy_id}: ${s.wins}W/${s.losses}L (${wr}% wr, ${s.openR.toFixed(2)}R) · exits: ${s.exits_strategy} strat / ${s.exits_sl} sl / ${s.exits_timeguard} time`;
         })
         .join('\n')
     : '  (нет закрытых Track C сделок в окне)';
@@ -849,8 +852,13 @@ function formatReport(stats: ReviewStats, review: LlmReview | null, action: Tune
         const total = s.wins + s.losses;
         const wr = total > 0 ? Math.round((s.wins / total) * 100) : 0;
         const rSign = s.openR >= 0 ? '+' : '';
+        // Look up the strategy's numeric code from the static config (the
+        // 'STRAT-001' tag is the operator-friendly label, strategy_id is
+        // the canonical key).
+        const cfg = getStrategyConfig(s.strategy_id);
+        const codeLabel = cfg ? `[STRAT-${cfg.code}] ` : '';
         lines.push(
-          `    · <code>${s.strategy_id}</code>: ${s.wins}W/${s.losses}L (${wr}%, ${rSign}${s.openR.toFixed(2)}R)`,
+          `    · ${codeLabel}<code>${s.strategy_id}</code>: ${s.wins}W/${s.losses}L (${wr}%, ${rSign}${s.openR.toFixed(2)}R)`,
         );
         lines.push(
           `      выходы: ${s.exits_strategy} strategy / ${s.exits_sl} sl / ${s.exits_timeguard} time`,

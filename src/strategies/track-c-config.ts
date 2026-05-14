@@ -24,9 +24,15 @@
  */
 
 export type StrategyConfig = {
-  /** Must match the `strategy_id` field in webhook payloads. ≤64 chars. */
+  /** Must match the `strategy_id` field in webhook payloads. ≤64 chars.
+   *  Internal identifier — used as map key + in self-review aggregation. */
   id: string;
-  /** Human-readable description. Surfaced in Telegram entry post. */
+  /** Short sequential numeric tag, e.g. '001', '002'. Used as the prominent
+   *  `[STRAT-001]` prefix in Telegram posts for quick visual scanning. */
+  code: string;
+  /** Human-readable description in the structured format
+   *  `<SYMBOL> <TF>m | LONG: <conditions> | SHORT: <conditions> | EXIT: <conditions>`.
+   *  Shown on every entry/exit post for context. */
   description: string;
   /** Optional symbol pin. If set, webhook with a different symbol is
    *  rejected ('symbol_mismatch'). Leave undefined to accept any symbol. */
@@ -62,7 +68,9 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   // Iterate after 10-20 live trades based on observed exits_strategy / sl_hit ratio.
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
-    description: 'Contrarian Any + Trend Tracer + Money Flow Above 50',
+    code: '001',
+    description:
+      'BNB 15m | LONG: CONT Any Br + TT Br + MF>50 | SHORT: CONT Any Bl + TT Bl + MF<50 | EXIT: CONT Built-in',
     symbol: 'BNBUSDT',
     timeframe: '15',
     enabled: true,
