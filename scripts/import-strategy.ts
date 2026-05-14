@@ -720,8 +720,11 @@ async function main(): Promise<void> {
       tradesLog,
     };
 
-    mkdirSync(resolve('data', 'imports'), { recursive: true });
-    const outPath = resolve('data', 'imports', `${slug}.json`);
+    // Write to src/strategies/data/ so the trades log ships with the
+    // repo and the landing page can render it server-side. (data/ is
+    // gitignored; we want this artifact under version control.)
+    mkdirSync(resolve('src', 'strategies', 'data'), { recursive: true });
+    const outPath = resolve('src', 'strategies', 'data', `${slug}.json`);
     writeFileSync(outPath, JSON.stringify(out, null, 2));
     console.error(`✅ Raw data → ${outPath}`);
 

@@ -9,6 +9,9 @@ coverage/
 *.local
 
 data/
+# Strategy backtest trades (scraped from LuxAlgo) ship with the repo so
+# the landing page can render the equity curve + trades log server-side.
+!src/strategies/data/
 storageState.json
 *storage-state.json
 tradingview-storage-state.json

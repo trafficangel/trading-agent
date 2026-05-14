@@ -125,3 +125,65 @@ export function getStrategyLiveStats(strategyId: string): StrategyLiveStats {
 
   return stats;
 }
+
+/** A closed Track C trade ready for landing-page rendering. */
+export type LiveTradeRow = {
+  id: number;
+  side: 'long' | 'short';
+  entryAt: number;       // unix ms (filled_at or created_at)
+  entryPrice: number;
+  exitAt: number;
+  exitPrice: number;
+  pnlPct: number;
+  pnlUsd: number;
+  closeReason: string | null;       // 'sl_hit' | 'manual' | etc.
+  forceCloseReason: string | null;  // 'strategy_exit' | 'time_guard' | etc.
+};
+
+type TradeRow = {
+  id: number;
+  side: string | null;
+  entry: number | null;
+  close_price: number | null;
+  pnl_pct: number | null;
+  close_reason: string | null;
+  force_close_reason: string | null;
+  filled_at: number | null;
+  created_at: number;
+  closed_at: number | null;
+};
+
+const recentTradesStmt = db.prepare<[string, number], TradeRow>(`
+  SELECT id, side, entry, close_price, pnl_pct, close_reason,
+         force_close_reason, filled_at, created_at, closed_at
+  FROM decisions
+  WHERE track = 'strategy' AND strategy_id = ?
+    AND status = 'closed' AND pnl_pct IS NOT NULL
+  ORDER BY closed_at DESC
+  LIMIT ?
+`);
+
+/** Most recent N closed trades for the landing-page "Recent live trades"
+ *  table. Includes only fully-closed decisions with a recorded pnl_pct. */
+export function getStrategyRecentTrades(strategyId: string, limit = 50): LiveTradeRow[] {
+  const rows = recentTradesStmt.all(strategyId, limit);
+  const out: LiveTradeRow[] = [];
+  for (const r of rows) {
+    if (!r.side || (r.side !== 'long' && r.side !== 'short')) continue;
+    if (r.entry === null || r.close_price === null) continue;
+    if (r.closed_at === null || r.pnl_pct === null) continue;
+    out.push({
+      id: r.id,
+      side: r.side,
+      entryAt: r.filled_at ?? r.created_at,
+      entryPrice: r.entry,
+      exitAt: r.closed_at,
+      exitPrice: r.close_price,
+      pnlPct: r.pnl_pct,
+      pnlUsd: (r.pnl_pct / 100) * TRACK_C_NOTIONAL_USD,
+      closeReason: r.close_reason,
+      forceCloseReason: r.force_close_reason,
+    });
+  }
+  return out;
+}

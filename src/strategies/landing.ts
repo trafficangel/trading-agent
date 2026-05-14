@@ -1,4 +1,6 @@
 import type { FastifyInstance } from 'fastify';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   STRATEGY_CONFIGS,
   getStrategyConfig,
@@ -6,7 +8,57 @@ import {
   type BacktestSnapshot,
   TRACK_C_NOTIONAL_USD,
 } from './track-c-config.js';
-import { getStrategyLiveStats, type StrategyLiveStats } from './live-stats.js';
+import {
+  getStrategyLiveStats,
+  getStrategyRecentTrades,
+  type StrategyLiveStats,
+  type LiveTradeRow,
+} from './live-stats.js';
+
+// --- Backtest trades loader ---
+// Scraped trades log lives in src/strategies/data/<id>.json (written by
+// scripts/import-strategy.ts). Loaded lazily on first request per strategy
+// and cached forever — the file is immutable per deploy.
+
+type BacktestTrade = {
+  num: number;
+  side: 'long' | 'short';
+  entryAt: number | null;
+  entryPrice: number;
+  exitAt: number | null;
+  exitPrice: number;
+  netPnlUsdt: number;
+  cumulativePnlUsdt: number;
+};
+
+const backtestTradesCache = new Map<string, BacktestTrade[] | null>();
+
+function loadBacktestTrades(strategyId: string): BacktestTrade[] | null {
+  if (backtestTradesCache.has(strategyId)) {
+    return backtestTradesCache.get(strategyId) ?? null;
+  }
+  // Resolve from process.cwd() — same root the server starts from.
+  // dist/ build keeps the src/strategies/data/ siblings, so this works
+  // both in dev (tsx from src/) and prod (node from dist/).
+  const candidates = [
+    resolve('src', 'strategies', 'data', `${strategyId}.json`),
+    resolve('dist', 'strategies', 'data', `${strategyId}.json`),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) {
+      try {
+        const json = JSON.parse(readFileSync(p, 'utf-8'));
+        const trades = (json?.tradesLog ?? []) as BacktestTrade[];
+        backtestTradesCache.set(strategyId, trades);
+        return trades;
+      } catch {
+        // fall through
+      }
+    }
+  }
+  backtestTradesCache.set(strategyId, null);
+  return null;
+}
 
 /**
  * Public landing-page routes for Track C strategies.
@@ -109,6 +161,169 @@ function divergingBar(
       <span class="bar-value ${cls2}">${sign2}${value2.toFixed(2)}${unit}</span>
     </div>
   </div>
+  `;
+}
+
+/**
+ * Equity curve SVG. X = trade number, Y = cumulative P&L USDT.
+ * Visualises the same equity curve LuxAlgo shows at the top of their
+ * Strategy Tester. Drawdowns show as dips; consistent strategies look
+ * like a steady up-and-to-the-right line.
+ */
+function equityCurveSvg(trades: BacktestTrade[]): string {
+  if (trades.length === 0) return '';
+  const w = 720;
+  const h = 200;
+  const padX = 24;
+  const padTop = 12;
+  const padBot = 28;
+  const innerW = w - 2 * padX;
+  const innerH = h - padTop - padBot;
+  const cumValues = trades.map((t) => t.cumulativePnlUsdt);
+  const yMin = Math.min(0, ...cumValues);
+  const yMax = Math.max(0, ...cumValues);
+  const yRange = yMax - yMin || 1;
+  const xStep = innerW / Math.max(trades.length - 1, 1);
+  const yZero = padTop + ((yMax - 0) / yRange) * innerH;
+  // Build path
+  const pts = trades.map((t, i) => {
+    const x = padX + i * xStep;
+    const y = padTop + ((yMax - t.cumulativePnlUsdt) / yRange) * innerH;
+    return { x, y };
+  });
+  const linePath = pts.map((p, i) => (i === 0 ? `M${p.x.toFixed(1)},${p.y.toFixed(1)}` : `L${p.x.toFixed(1)},${p.y.toFixed(1)}`)).join(' ');
+  // Filled area (from zero line down to curve)
+  const areaPath = `${linePath} L${pts[pts.length - 1]!.x.toFixed(1)},${yZero.toFixed(1)} L${pts[0]!.x.toFixed(1)},${yZero.toFixed(1)} Z`;
+  // Y-axis tick labels (min, zero, max)
+  const yTicks = [
+    { v: yMax, y: padTop },
+    ...(yMin < 0 ? [{ v: 0, y: yZero }] : []),
+    { v: yMin, y: padTop + innerH },
+  ];
+  // Drawdown markers (red dots on local maxima followed by dips)
+  const finalUsd = cumValues[cumValues.length - 1]!.toFixed(0);
+
+  return `
+  <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img"
+       aria-label="Equity curve over ${trades.length} backtest trades">
+    <defs>
+      <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.32"/>
+        <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    ${yMin < 0 ? `<line x1="${padX}" y1="${yZero.toFixed(1)}" x2="${(padX + innerW).toFixed(1)}" y2="${yZero.toFixed(1)}" stroke="var(--border)" stroke-dasharray="3,4"/>` : ''}
+    <path d="${areaPath}" fill="url(#eqGrad)"/>
+    <path d="${linePath}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+    ${yTicks.map((t) => `<text x="${padX - 4}" y="${(t.y + 3).toFixed(1)}" font-size="10" fill="var(--text-faint)" text-anchor="end">${t.v >= 0 ? '+' : ''}${Math.round(t.v)}</text>`).join('')}
+    <text x="${padX}" y="${h - 8}" font-size="10" fill="var(--text-faint)">Trade #1</text>
+    <text x="${padX + innerW}" y="${h - 8}" font-size="10" fill="var(--text-faint)" text-anchor="end">#${trades.length} · final +${finalUsd} USDT</text>
+  </svg>
+  `;
+}
+
+/**
+ * Render a trades table. Columns: # / Date / Side / Entry / Exit /
+ * P&L USDT / Cum P&L. First `visibleCount` rows are shown; rest are
+ * wrapped in <details> (native expand/collapse, no JS).
+ */
+function backtestTradesTable(trades: BacktestTrade[], visibleCount = 20): string {
+  if (trades.length === 0) return '';
+  // Show most recent first (reverse chronological).
+  const rev = [...trades].reverse();
+  const fmtDate = (ts: number | null): string => {
+    if (!ts) return '—';
+    const d = new Date(ts);
+    return `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)}`;
+  };
+  const renderRow = (t: BacktestTrade): string => {
+    const cls = t.netPnlUsdt >= 0 ? 'pos' : 'neg';
+    const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
+    return `
+      <tr>
+        <td>${t.num}</td>
+        <td class="dt">${fmtDate(t.entryAt)}</td>
+        <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
+        <td class="right mono">${t.entryPrice.toFixed(4)}</td>
+        <td class="right mono">${t.exitPrice.toFixed(4)}</td>
+        <td class="right mono ${cls}">${t.netPnlUsdt >= 0 ? '+' : ''}${t.netPnlUsdt.toFixed(2)}</td>
+        <td class="right mono">${t.cumulativePnlUsdt >= 0 ? '+' : ''}${t.cumulativePnlUsdt.toFixed(2)}</td>
+      </tr>`;
+  };
+  const head = `
+    <thead>
+      <tr>
+        <th>#</th><th>Дата (UTC)</th><th>Side</th>
+        <th class="right">Entry</th><th class="right">Exit</th>
+        <th class="right">P&amp;L USDT</th><th class="right">Cum USDT</th>
+      </tr>
+    </thead>`;
+  const first = rev.slice(0, visibleCount).map(renderRow).join('');
+  const rest = rev.slice(visibleCount).map(renderRow).join('');
+  const restBlock = rest
+    ? `
+      <details class="trades-more">
+        <summary>Показать ещё ${rev.length - visibleCount} сделок</summary>
+        <div class="card" style="margin-top: 12px;">
+          <table>${head}<tbody>${rest}</tbody></table>
+        </div>
+      </details>`
+    : '';
+  return `
+    <div class="card">
+      <table>${head}<tbody>${first}</tbody></table>
+    </div>
+    ${restBlock}
+  `;
+}
+
+/**
+ * Live trades table. Identical column structure to backtest version so
+ * the visual is consistent; close-reason badge added (strategy_exit /
+ * sl_hit / time_guard).
+ */
+function liveTradesTable(trades: LiveTradeRow[]): string {
+  if (trades.length === 0) return '';
+  const fmtDate = (ts: number): string => {
+    const d = new Date(ts);
+    return `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)}`;
+  };
+  const reasonLabel = (t: LiveTradeRow): { label: string; cls: string } => {
+    if (t.closeReason === 'sl_hit') return { label: 'SL', cls: 'reason-sl' };
+    if (t.forceCloseReason === 'strategy_exit') return { label: 'strat', cls: 'reason-strat' };
+    if (t.forceCloseReason === 'time_guard') return { label: 'time', cls: 'reason-time' };
+    return { label: t.closeReason ?? '—', cls: 'reason-strat' };
+  };
+  const rows = trades
+    .map((t) => {
+      const cls = t.pnlUsd >= 0 ? 'pos' : 'neg';
+      const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
+      const r = reasonLabel(t);
+      return `
+      <tr>
+        <td>T#${t.id}</td>
+        <td class="dt">${fmtDate(t.entryAt)}</td>
+        <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
+        <td class="right mono">${t.entryPrice.toFixed(4)}</td>
+        <td class="right mono">${t.exitPrice.toFixed(4)}</td>
+        <td class="right mono ${cls}">${t.pnlUsd >= 0 ? '+' : ''}${t.pnlUsd.toFixed(2)}</td>
+        <td><span class="reason-pill ${r.cls}">${r.label}</span></td>
+      </tr>`;
+    })
+    .join('');
+  return `
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>T#</th><th>Дата (UTC)</th><th>Side</th>
+            <th class="right">Entry</th><th class="right">Exit</th>
+            <th class="right">P&amp;L USDT</th><th>Exit reason</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -335,6 +550,44 @@ const STYLE = `
   .spec-bar.pos { background: linear-gradient(90deg, var(--accent), var(--accent-soft)); }
   .spec-bar.neg { background: linear-gradient(90deg, var(--danger), var(--danger-soft)); }
   .spec-axis { height: 1px; background: var(--border); margin: 4px 0; }
+
+  /* Trades tables */
+  td.dt, th.dt { font-family: 'SF Mono', 'Menlo', monospace; font-size: 12px; color: var(--text-dim); }
+  td.mono, th.mono { font-family: 'SF Mono', 'Menlo', monospace; font-size: 13px; }
+  td.pos { color: var(--accent); }
+  td.neg { color: var(--danger); }
+  td.right, th.right { text-align: right; }
+  .side-long, .side-short {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  }
+  .side-long { background: var(--accent-soft); color: var(--accent); }
+  .side-short { background: var(--danger-soft); color: var(--danger); }
+  .reason-pill {
+    display: inline-block; padding: 2px 7px; border-radius: 4px;
+    font-size: 10px; font-weight: 500; letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .reason-strat { background: rgba(74, 217, 145, 0.10); color: var(--accent); }
+  .reason-sl    { background: rgba(239, 91, 107, 0.14); color: var(--danger); }
+  .reason-time  { background: rgba(245, 177, 77, 0.12); color: var(--warning); }
+  .trades-more {
+    margin-top: 12px;
+  }
+  .trades-more summary {
+    cursor: pointer; color: var(--text-dim); font-size: 13px; padding: 10px 0;
+    list-style: none; user-select: none;
+  }
+  .trades-more summary::-webkit-details-marker { display: none; }
+  .trades-more summary::before {
+    content: '▸ '; display: inline-block; transition: transform 200ms;
+  }
+  .trades-more[open] summary::before { content: '▾ '; }
+  .trades-more summary:hover { color: var(--text); }
+
+  /* Equity curve container */
+  .equity-card { background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px; }
 `;
 
 function pageShell(title: string, body: string): string {
@@ -400,14 +653,22 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
   );
 }
 
-function renderBacktestSection(b: BacktestSnapshot): string {
+function renderBacktestSection(b: BacktestSnapshot, strategyId: string): string {
   const pnlClass = classForValue(b.netPnlPct);
   const longClass = classForValue(b.longPnlPct);
   const shortClass = classForValue(b.shortPnlPct);
+  const trades = loadBacktestTrades(strategyId);
 
   return `
   <div class="section">
     <div class="section-title">Backtest · ${escapeHtml(b.periodLabel)} (${b.periodDays} дней)</div>
+
+    ${trades && trades.length > 0 ? `
+    <div class="equity-card" style="margin-bottom: 16px;">
+      <div class="chart-title" style="margin-bottom: 8px;">Equity curve · ${trades.length} сделок</div>
+      ${equityCurveSvg(trades)}
+    </div>
+    ` : ''}
 
     <div class="charts-grid" style="margin-bottom: 16px;">
       <div class="chart-card">
@@ -529,11 +790,18 @@ function renderBacktestSection(b: BacktestSnapshot): string {
         </div>
       </div></div>
     </div>
+
+    ${trades && trades.length > 0 ? `
+    <div class="section">
+      <div class="section-title">Trades Log · ${trades.length} backtest сделок</div>
+      ${backtestTradesTable(trades, 20)}
+    </div>
+    ` : ''}
   </div>
   `;
 }
 
-function renderLiveSection(live: StrategyLiveStats, launchedAt: number): string {
+function renderLiveSection(live: StrategyLiveStats, launchedAt: number, strategyId: string): string {
   const launchLabel = new Date(launchedAt).toISOString().slice(0, 10);
   if (live.closed === 0 && live.open === 0) {
     return `
@@ -597,6 +865,17 @@ function renderLiveSection(live: StrategyLiveStats, launchedAt: number): string 
         </div>
       </div></div>
     </div>
+
+    ${(() => {
+      const liveTrades = getStrategyRecentTrades(strategyId, 50);
+      if (liveTrades.length === 0) return '';
+      return `
+        <div class="section">
+          <div class="section-title">Live сделки · последние ${liveTrades.length}</div>
+          ${liveTradesTable(liveTrades)}
+        </div>
+      `;
+    })()}
   </div>
   `;
 }
@@ -666,9 +945,9 @@ function renderStrategyDetail(cfg: StrategyConfig): string {
       <p class="subtitle">Track C · LuxAlgo AI Strategy Builder webhook · <a href="/strategies">все стратегии</a></p>
     </div>
 
-    ${cfg.backtest ? renderBacktestSection(cfg.backtest) : ''}
+    ${cfg.backtest ? renderBacktestSection(cfg.backtest, cfg.id) : ''}
 
-    ${renderLiveSection(live, cfg.launchedAt)}
+    ${renderLiveSection(live, cfg.launchedAt, cfg.id)}
 
     ${renderRiskSection(cfg)}
 
