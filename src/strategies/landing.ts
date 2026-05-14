@@ -626,6 +626,96 @@ const STYLE = `
   .alert-id-link:hover {
     background: var(--accent-soft); text-decoration: none;
   }
+
+  /* ---------- Portfolio dashboard on /strategies ---------- */
+  .portfolio-dashboard {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    margin-bottom: 28px;
+  }
+  .dash-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 18px;
+  }
+  .dash-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-faint); margin-bottom: 6px; font-weight: 600;
+  }
+  .dash-value { font-size: 26px; font-weight: 600; line-height: 1; }
+  .dash-value.pos { color: var(--accent); }
+  .dash-value.neg { color: var(--danger); }
+  .dash-sub { font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+
+  /* ---------- Timeframe groups ---------- */
+  .tf-group { margin-bottom: 28px; }
+  .tf-group-header {
+    display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
+    padding: 0 4px;
+  }
+  .tf-group-label {
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 14px;
+    font-weight: 600; color: var(--accent); letter-spacing: 0.04em;
+    background: var(--accent-soft); padding: 3px 10px; border-radius: 4px;
+  }
+  .tf-group-count {
+    font-size: 12px; color: var(--text-faint);
+  }
+
+  /* ---------- Strategy row cards ---------- */
+  .strat-row-list {
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .strat-row {
+    display: block; text-decoration: none; color: inherit;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 18px;
+    transition: background 120ms, border-color 120ms;
+  }
+  .strat-row:hover {
+    background: var(--bg-card-hover); border-color: var(--text-faint);
+    text-decoration: none;
+  }
+  .strat-row-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px; gap: 12px; flex-wrap: wrap;
+  }
+  .strat-row-id { display: flex; align-items: baseline; gap: 8px; }
+  .strat-code-mini {
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 11px;
+    color: var(--text-faint); letter-spacing: 0.08em; font-weight: 600;
+  }
+  .strat-row-symbol {
+    font-size: 17px; font-weight: 600; color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .strat-row-tf {
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 12px;
+    color: var(--text-dim); padding: 2px 6px;
+    background: var(--bg); border-radius: 3px;
+  }
+  .strat-row-desc {
+    font-size: 13px; color: var(--text-dim); margin-bottom: 8px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .row-stat-line {
+    display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+    font-size: 13px; margin-top: 4px;
+  }
+  .row-stat-line.dim { color: var(--text-faint); font-style: italic; }
+  .stat-tag {
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 10px;
+    font-weight: 700; letter-spacing: 0.06em;
+    color: var(--text-faint); padding: 2px 6px;
+    background: var(--bg); border-radius: 3px; min-width: 36px;
+    text-align: center; margin-right: 4px;
+  }
+  .row-stat-line .pos { color: var(--accent); }
+  .row-stat-line .neg { color: var(--danger); }
+  .row-stat-line .dim { color: var(--text-faint); }
+
+  /* Status pills */
+  .pill.running { background: var(--accent-soft); color: var(--accent); }
+  .pill.paused { background: rgba(245, 177, 77, 0.12); color: var(--warning); }
 `;
 
 function pageShell(title: string, body: string): string {
@@ -650,27 +740,179 @@ ${body}
 </html>`;
 }
 
+/** Sort key for timeframes — keeps "5m, 15m, 1H, 4H, 1D" semantic order
+ *  rather than alphabetical. Maps string TF to minutes for comparison. */
+function tfMinutes(tf: string): number {
+  const t = tf.trim().toLowerCase();
+  // Bare numbers = minutes (TradingView convention: "15" = 15 min, "240" = 4h)
+  if (/^\d+$/.test(t)) return parseInt(t, 10);
+  if (/^\d+m$/.test(t)) return parseInt(t, 10);
+  if (/^\d+h$/.test(t)) return parseInt(t, 10) * 60;
+  if (t === 'd' || t === '1d' || t === 'day') return 1440;
+  if (t === 'w' || t === '1w' || t === 'week') return 10080;
+  return parseInt(t, 10) || 0;
+}
+
+function tfLabel(tf: string): string {
+  const m = tfMinutes(tf);
+  if (m < 60) return `${m}m`;
+  if (m < 1440) return `${m / 60}H`;
+  if (m < 10080) return `${m / 1440}D`;
+  return `${m / 10080}W`;
+}
+
 function renderStrategyIndex(strategies: StrategyConfig[]): string {
-  const rows = strategies
-    .map((s) => {
-      const live = getStrategyLiveStats(s.id);
-      const livePnlClass = classForValue(live.netPnlPct);
-      const pnlDisplay = live.closed > 0
-        ? `<span class="${livePnlClass}">${fmtPct(live.netPnlPct, true)}</span>`
-        : '<span style="color: var(--text-faint)">—</span>';
-      return `
-        <a href="/strategies/${escapeHtml(s.code)}" class="row" style="text-decoration: none; color: inherit;">
-          <div class="meta">
-            <div class="name">[STRAT-${escapeHtml(s.code)}] ${escapeHtml(s.symbol ?? 'ANY')} ${escapeHtml(s.timeframe)}m</div>
-            <div class="sub">${escapeHtml(s.description.slice(0, 80))}${s.description.length > 80 ? '…' : ''}</div>
+  // ---------- Portfolio aggregate ----------
+  let totalClosed = 0;
+  let totalOpen = 0;
+  let totalWins = 0;
+  let totalLosses = 0;
+  let totalPnlUsd = 0;
+  let runningCount = 0;
+
+  const enriched = strategies.map((s) => {
+    const live = getStrategyLiveStats(s.id);
+    totalClosed += live.closed;
+    totalOpen += live.open;
+    totalWins += live.wins;
+    totalLosses += live.losses;
+    totalPnlUsd += live.netPnlUsd;
+    if (s.enabled) runningCount++;
+    return { s, live };
+  });
+  const totalWinRate =
+    totalClosed > 0 ? (totalWins / totalClosed) * 100 : null;
+  const portfolioCls = classForValue(totalPnlUsd);
+
+  // ---------- Group by timeframe ----------
+  const groups = new Map<number, Array<typeof enriched[number]>>();
+  for (const e of enriched) {
+    const m = tfMinutes(e.s.timeframe);
+    if (!groups.has(m)) groups.set(m, []);
+    groups.get(m)!.push(e);
+  }
+  const sortedTfs = [...groups.keys()].sort((a, b) => a - b);
+
+  // ---------- Single strategy row renderer ----------
+  const renderRow = (e: typeof enriched[number]): string => {
+    const { s, live } = e;
+    const b = s.backtest;
+    const livePnlCls = classForValue(live.netPnlUsd);
+    const bgClass = classForValue(b?.netPnlUsd ?? 0);
+    const launchDays = Math.max(
+      0,
+      Math.floor((Date.now() - s.launchedAt) / 86_400_000),
+    );
+    const launchLabel =
+      launchDays === 0 ? 'сегодня' : `${launchDays}д назад`;
+    const statusPill = !s.enabled
+      ? '<span class="pill paused">⏸ PAUSED</span>'
+      : live.open > 0
+      ? `<span class="pill live">🟢 ${live.open} OPEN</span>`
+      : '<span class="pill running">🟢 WAITING</span>';
+
+    // BT row only shown if backtest snapshot exists
+    const btRow = b
+      ? `<div class="row-stat-line">
+          <span class="stat-tag">BT</span>
+          <span class="${bgClass}"><b>${fmtPct(b.netPnlPct, true)}</b></span>
+          <span class="dim">·</span>
+          <span class="dim">${(b.winRate * 100).toFixed(1)}% WR</span>
+          <span class="dim">·</span>
+          <span class="dim">PF ${b.profitFactor.toFixed(2)}</span>
+          <span class="dim">·</span>
+          <span class="dim">${b.totalTrades} trades</span>
+        </div>`
+      : '';
+
+    // LIVE row — uses real DB data (or empty placeholder)
+    const liveRow =
+      live.closed > 0
+        ? `<div class="row-stat-line">
+            <span class="stat-tag">LIVE</span>
+            <span class="${livePnlCls}"><b>${fmtUsd(live.netPnlUsd, true)}</b></span>
+            <span class="dim">·</span>
+            <span class="${livePnlCls}">${fmtPct(live.netPnlPct, true)}</span>
+            <span class="dim">·</span>
+            <span class="dim">${live.wins}W / ${live.losses}L</span>
+            <span class="dim">·</span>
+            <span class="dim">${live.closed} closed</span>
+          </div>`
+        : `<div class="row-stat-line dim">
+            <span class="stat-tag">LIVE</span>
+            <span>0 закрытых сделок · ждём первый сигнал · запуск ${launchLabel}</span>
+          </div>`;
+
+    return `
+      <a href="/strategies/${escapeHtml(s.code)}" class="strat-row">
+        <div class="strat-row-head">
+          <div class="strat-row-id">
+            <span class="strat-code-mini">STRAT-${escapeHtml(s.code)}</span>
+            <span class="strat-row-symbol">${escapeHtml(s.symbol ?? 'ANY')}</span>
+            <span class="strat-row-tf">${escapeHtml(tfLabel(s.timeframe))}</span>
           </div>
-          <div class="pnl">${pnlDisplay}<span class="sub" style="margin-left: 10px;">${live.closed} closed</span></div>
-        </a>`;
+          ${statusPill}
+        </div>
+        <div class="strat-row-desc">${escapeHtml(s.description.split('|')[0]?.trim() ?? s.id)}</div>
+        ${btRow}
+        ${liveRow}
+      </a>`;
+  };
+
+  // ---------- Group sections ----------
+  const groupsHtml = sortedTfs
+    .map((tf) => {
+      const rows = groups.get(tf)!;
+      // Sort within group: by Live P&L desc, then by launch date desc
+      rows.sort((a, b) => {
+        if (b.live.netPnlUsd !== a.live.netPnlUsd) {
+          return b.live.netPnlUsd - a.live.netPnlUsd;
+        }
+        return b.s.launchedAt - a.s.launchedAt;
+      });
+      return `
+        <div class="tf-group">
+          <div class="tf-group-header">
+            <span class="tf-group-label">${tfLabel(String(tf))}</span>
+            <span class="tf-group-count">${rows.length} стратегий</span>
+          </div>
+          <div class="strat-row-list">
+            ${rows.map(renderRow).join('\n')}
+          </div>
+        </div>`;
     })
     .join('\n');
 
-  const empty = strategies.length === 0
-    ? '<div class="empty-state">Активных стратегий пока нет.</div>'
+  const empty =
+    strategies.length === 0
+      ? '<div class="empty-state">Активных стратегий пока нет.</div>'
+      : '';
+
+  const portfolioDashboard = strategies.length > 0
+    ? `
+    <div class="portfolio-dashboard">
+      <div class="dash-card">
+        <div class="dash-label">Стратегий</div>
+        <div class="dash-value">${strategies.length}</div>
+        <div class="dash-sub">${runningCount} активных</div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-label">Live сделок</div>
+        <div class="dash-value">${totalClosed}</div>
+        <div class="dash-sub">${totalOpen} открыто сейчас</div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-label">Live P&amp;L</div>
+        <div class="dash-value ${portfolioCls}">${fmtUsd(totalPnlUsd, true)}</div>
+        <div class="dash-sub">${TRACK_C_NOTIONAL_USD} USDT/сделка</div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-label">Win Rate</div>
+        <div class="dash-value">${totalWinRate !== null ? totalWinRate.toFixed(1) + '%' : '—'}</div>
+        <div class="dash-sub">${totalWins}W / ${totalLosses}L</div>
+      </div>
+    </div>
+    `
     : '';
 
   return pageShell(
@@ -679,14 +921,13 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
     <div class="header">
       <span class="strat-code">ROBOT CLAUDE</span>
       <h1 class="title">Активные стратегии</h1>
-      <p class="subtitle">Live торговля LuxAlgo AI Strategy Builder · shadow mode</p>
+      <p class="subtitle">Live торговля LuxAlgo AI Strategy Builder · shadow mode · по ${TRACK_C_NOTIONAL_USD} USDT на сделку</p>
     </div>
-    <div class="card strategy-list">
-      <div class="card-body">
-        ${rows}
-        ${empty}
-      </div>
-    </div>
+
+    ${portfolioDashboard}
+
+    ${groupsHtml}
+    ${empty}
     `,
   );
 }
