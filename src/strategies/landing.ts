@@ -1159,6 +1159,12 @@ const STYLE = `
     margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
     font-size: 14px; color: var(--text-dim); line-height: 1.55;
   }
+  /* renderRichText() output — bulleted cost breakdowns etc. */
+  .rich-list {
+    margin: 8px 0; padding-left: 20px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .rich-list li { line-height: 1.5; }
 
   /* Strategy preview on home — compact */
   .strategy-preview-list { display: flex; flex-direction: column; gap: 8px; }

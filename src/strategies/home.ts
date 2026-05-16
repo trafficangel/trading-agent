@@ -187,8 +187,12 @@ const CONTENT: Record<Lang, Content> = {
         {
           q: 'Это правда бесплатно? Почему?',
           a:
-            'Да, полностью. Сайт, статистика, Telegram-канал — бесплатно для всех. ' +
-            'Сами для нас это НЕ бесплатно: [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) для сборки стратегий + [TradingView Premium](https://ru.tradingview.com/pricing/) для контрольных бэктестов + сервер и инфраструктура. ' +
+            'Да, полностью. Сайт, статистика, Telegram-канал — бесплатно для всех.\n\n' +
+            'Сами для нас это НЕ бесплатно — около $230 в месяц:\n' +
+            '- [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) — ~$60/мес, сборка стратегий в AI Builder\n' +
+            '- [TradingView Premium](https://ru.tradingview.com/pricing/) — ~$60/мес, контрольные бэктесты с реальной комиссией Bybit\n' +
+            '- [Claude Code](https://claude.com/product/claude-code) — ~$100/мес, AI для разработки системы и анализа результатов сделок\n' +
+            '- Сервер, домен и инфраструктура — ~$10/мес\n\n' +
             'Зачем тогда отдаём бесплатно? В ближайшее время запустим копитрейдинг на Bybit — там наш доход будет только процентом от вашей прибыли. ' +
             'Если стратегии действительно работают, через 3-6 месяцев у нас будет публичная статистика и подписчики которые ХОТЯТ копировать наши сделки. ' +
             'Это честнее чем продавать «курсы по трейдингу» — мы зарабатываем только когда вы зарабатываете.',
@@ -338,8 +342,12 @@ const CONTENT: Record<Lang, Content> = {
         {
           q: 'Is it really free? Why?',
           a:
-            'Yes, completely. The site, statistics, Telegram channel — free for everyone. ' +
-            'It\'s NOT free for us though: [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) for building strategies + [TradingView Premium](https://www.tradingview.com/pricing/) for control backtests + server and infrastructure. ' +
+            'Yes, completely. The site, statistics, Telegram channel — free for everyone.\n\n' +
+            'It\'s NOT free for us — about $230/month:\n' +
+            '- [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) — ~$60/mo, strategy building in AI Builder\n' +
+            '- [TradingView Premium](https://www.tradingview.com/pricing/) — ~$60/mo, control backtests with realistic Bybit commission\n' +
+            '- [Claude Code](https://claude.com/product/claude-code) — ~$100/mo, AI for system development and trade-result analysis\n' +
+            '- Server, domain, infrastructure — ~$10/mo\n\n' +
             'Why give it away free? We\'re launching copy trading on Bybit soon — our revenue will come solely from a percentage of YOUR profits. ' +
             'If the strategies genuinely work, in 3-6 months we\'ll have public statistics and subscribers who WANT to copy our trades. ' +
             'More honest than selling "trading courses" — we only earn when you earn.',
@@ -391,22 +399,41 @@ function escapeHtml(s: string): string {
   })[c] ?? c);
 }
 
-// Escapes HTML THEN converts markdown-style links [label](https://...) into
-// <a target="_blank" rel="noopener nofollow"> anchors. Use this for content
-// fields where we want plain text + a small number of outbound links —
-// keeps the rest of the text XSS-safe while letting us point to LuxAlgo/TV
-// pricing pages, channel URLs, etc.
+// Escapes HTML THEN converts a tiny subset of markdown into HTML for
+// content fields where we want safe-by-default text + a few inline
+// formatting affordances:
+//   - [label](https://...)        → outbound link (rel="noopener nofollow")
+//   - lines starting with "- "    → grouped into <ul><li>…</li></ul>
+//   - blank line                  → paragraph break (rendered as <br><br>)
+// XSS-safe because everything is escaped FIRST, then we re-interpret a
+// strict subset of patterns. URLs are http(s)-only.
+//
+// Callers should render the result inside a <div>, not a <p> — a <ul>
+// or <br> in a paragraph is invalid HTML in some validators.
 function renderRichText(s: string): string {
-  // Escape entire string first (URL too — quotes inside an href would
-  // otherwise break out of the attribute).
   const escaped = escapeHtml(s);
-  // Then re-interpret [label](url) inside the escaped string. After escape:
-  //   '[' → '[', ']' → ']', '(' → '(', ')' → ')'  (unchanged)
-  // URLs only allow http/https to avoid javascript: payloads sneaking in.
-  return escaped.replace(
+  const withLinks = escaped.replace(
     /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
     (_m, label, url) => `<a href="${url}" target="_blank" rel="noopener nofollow">${label}</a>`,
   );
+  // Group "- ..." lines into a single <ul>. Other lines pass through;
+  // blank lines become <br><br> paragraph breaks.
+  const lines = withLinks.split('\n');
+  const out: string[] = [];
+  let inList = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^- /.test(trimmed)) {
+      if (!inList) { out.push('<ul class="rich-list">'); inList = true; }
+      out.push(`<li>${trimmed.slice(2)}</li>`);
+    } else {
+      if (inList) { out.push('</ul>'); inList = false; }
+      if (trimmed === '') out.push('<br><br>');
+      else out.push(line);
+    }
+  }
+  if (inList) out.push('</ul>');
+  return out.join('\n');
 }
 
 function fmtUsd(n: number, withSign = false): string {
@@ -623,7 +650,7 @@ function renderHome(lang: Lang): string {
           <div class="how-card">
             <div class="how-step">${escapeHtml(s.step)}</div>
             <h3 class="how-title">${escapeHtml(s.title)}</h3>
-            <p class="how-body">${renderRichText(s.body)}</p>
+            <div class="how-body">${renderRichText(s.body)}</div>
           </div>
         `,
           )
