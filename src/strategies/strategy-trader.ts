@@ -111,12 +111,13 @@ async function handleStrategyEntry(
       { strategy_id: p.strategy_id, occupied_id: occupied.id, symbol: p.symbol },
       'strategy-trader: entry rejected — strategy already has open position',
     );
+    const occupiedNum = occupied.strategy_trade_num ?? occupied.id;
     await sendMessage({
       channel: 'logs',
       text:
         `⚠️ <b>Track C duplicate entry ignored</b>\n` +
         `Стратегия: <code>${p.strategy_id}</code> на ${p.symbol}\n` +
-        `Уже открыта позиция T#${occupied.id.toString().padStart(4, '0')}. Новый entry webhook отброшен.`,
+        `Уже открыта позиция T#${occupiedNum.toString().padStart(3, '0')}. Новый entry webhook отброшен.`,
       disable_notification: true,
     }).catch(() => {});
     return { ok: true, reason: 'already_open', decisionId: occupied.id };

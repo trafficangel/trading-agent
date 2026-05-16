@@ -28,6 +28,8 @@ type DecisionDayRow = {
   track: string;
   /** Track C strategy_id (NULL for other tracks). Migration 011. */
   strategy_id: string | null;
+  /** Track C per-strategy sequential counter. Migration 012. */
+  strategy_trade_num: number | null;
 };
 
 const sigsToday = db.prepare<[number], { symbol: string; timeframe: string; c: number }>(
@@ -36,7 +38,8 @@ const sigsToday = db.prepare<[number], { symbol: string; timeframe: string; c: n
 const SELECT_COLS = `
   id, created_at, symbol, decision, side, entry, sl, tp_json,
   status, parent_decision_id, closed_at, filled_at, pending_until, reasoning_short,
-  close_price, close_reason, pnl_pct, pnl_r, features_json, track, strategy_id
+  close_price, close_reason, pnl_pct, pnl_r, features_json, track, strategy_id,
+  strategy_trade_num
 `;
 const decisionsToday = db.prepare<[number], DecisionDayRow>(
   `SELECT ${SELECT_COLS} FROM decisions WHERE created_at >= ? ORDER BY created_at ASC`,
@@ -228,7 +231,13 @@ async function tick(now: Date = new Date()): Promise<void> {
       const etype = entryTypeOf(t);
       const typeTag = etype === 'limit' ? ' <i>limit</i>' : '';
       // Track-aware trade ID prefix ('T#' Track C, 'S#' Track B signal, '#' Track A LLM).
+      // Track C uses per-strategy counter (T#001) instead of global id (T#0202)
+      // — see migration 012. Falls back to global id only for pre-migration rows.
       const idPrefix = t.track === 'strategy' ? 'T#' : t.track === 'signal' ? 'S#' : '#';
+      const idNum = t.track === 'strategy'
+        ? (t.strategy_trade_num ?? t.id)
+        : t.id;
+      const idPad = t.track === 'strategy' ? 3 : 4;
       // Track C: show [STRAT-NNN] tag if config has the strategy.
       const stratTag =
         t.track === 'strategy' && t.strategy_id
@@ -239,7 +248,7 @@ async function tick(now: Date = new Date()): Promise<void> {
       // unused here (kept the local in case operator preference flips back).
       void rStr;
       lines.push(
-        `  ${reasonEmoji(t.close_reason)} ${idPrefix}${t.id.toString().padStart(4, '0')}${stratTag}${typeTag} ${sideE} ${t.symbol} · ${t.entry} → ${t.close_price ?? '?'} · <b>${pnlStr}</b> · ${usdStr}`,
+        `  ${reasonEmoji(t.close_reason)} ${idPrefix}${idNum.toString().padStart(idPad, '0')}${stratTag}${typeTag} ${sideE} ${t.symbol} · ${t.entry} → ${t.close_price ?? '?'} · <b>${pnlStr}</b> · ${usdStr}`,
       );
     }
   } else {
@@ -257,8 +266,12 @@ async function tick(now: Date = new Date()): Promise<void> {
       const etype = entryTypeOf(t);
       const tag = etype === 'limit' ? ' <i>(filled limit)</i>' : '';
       const idPrefix = t.track === 'strategy' ? 'T#' : t.track === 'signal' ? 'S#' : '#';
+      const idNum = t.track === 'strategy'
+        ? (t.strategy_trade_num ?? t.id)
+        : t.id;
+      const idPad = t.track === 'strategy' ? 3 : 4;
       lines.push(
-        `  ${idPrefix}${t.id.toString().padStart(4, '0')}${tag} ${sideE} ${t.symbol} @ ${t.entry} (открыта ${ageStr} назад)`,
+        `  ${idPrefix}${idNum.toString().padStart(idPad, '0')}${tag} ${sideE} ${t.symbol} @ ${t.entry} (открыта ${ageStr} назад)`,
       );
     }
     lines.push('');

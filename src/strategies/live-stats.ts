@@ -129,6 +129,9 @@ export function getStrategyLiveStats(strategyId: string): StrategyLiveStats {
 /** A closed Track C trade ready for landing-page rendering. */
 export type LiveTradeRow = {
   id: number;
+  /** Per-strategy sequential counter (T#001 ... T#NNN). Falls back
+   *  to global id if NULL (legacy rows before migration 012). */
+  strategyTradeNum: number | null;
   side: 'long' | 'short';
   entryAt: number;       // unix ms (filled_at or created_at)
   entryPrice: number;
@@ -142,6 +145,7 @@ export type LiveTradeRow = {
 
 type TradeRow = {
   id: number;
+  strategy_trade_num: number | null;
   side: string | null;
   entry: number | null;
   close_price: number | null;
@@ -154,7 +158,7 @@ type TradeRow = {
 };
 
 const recentTradesStmt = db.prepare<[string, number], TradeRow>(`
-  SELECT id, side, entry, close_price, pnl_pct, close_reason,
+  SELECT id, strategy_trade_num, side, entry, close_price, pnl_pct, close_reason,
          force_close_reason, filled_at, created_at, closed_at
   FROM decisions
   WHERE track = 'strategy' AND strategy_id = ?
@@ -174,6 +178,7 @@ export function getStrategyRecentTrades(strategyId: string, limit = 50): LiveTra
     if (r.closed_at === null || r.pnl_pct === null) continue;
     out.push({
       id: r.id,
+      strategyTradeNum: r.strategy_trade_num,
       side: r.side,
       entryAt: r.filled_at ?? r.created_at,
       entryPrice: r.entry,

@@ -346,10 +346,16 @@ function liveTradesTable(trades: LiveTradeRow[]): string {
       const cls = t.pnlUsd >= 0 ? 'pos' : 'neg';
       const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
       const r = reasonLabel(t);
+      // Per-strategy counter (T#001, T#002...) — falls back to global
+      // decision.id only when the row was inserted before migration 012
+      // (shouldn't happen in current data, but defensive).
+      const num = t.strategyTradeNum ?? t.id;
+      const tradeIdStr = `T#${num.toString().padStart(3, '0')}`;
       return `
       <tr>
-        <td>T#${t.id}</td>
+        <td>${tradeIdStr}</td>
         <td class="dt">${fmtDate(t.entryAt)}</td>
+        <td class="dt">${fmtDate(t.exitAt)}</td>
         <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
         <td class="right mono">${t.entryPrice.toFixed(4)}</td>
         <td class="right mono">${t.exitPrice.toFixed(4)}</td>
@@ -363,9 +369,14 @@ function liveTradesTable(trades: LiveTradeRow[]): string {
       <table>
         <thead>
           <tr>
-            <th>T#</th><th>Дата (UTC)</th><th>Side</th>
-            <th class="right">Entry</th><th class="right">Exit</th>
-            <th class="right">P&amp;L USDT</th><th>Exit reason</th>
+            <th>T#</th>
+            <th>Вход (UTC)</th>
+            <th>Выход (UTC)</th>
+            <th>Side</th>
+            <th class="right">Entry</th>
+            <th class="right">Exit</th>
+            <th class="right">P&amp;L USDT</th>
+            <th>Exit reason</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
