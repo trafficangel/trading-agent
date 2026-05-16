@@ -50,36 +50,40 @@ const LLM_CLOSE_LOSS_NOTES: string[] = [
 ];
 
 /**
- * Track C exit-reason tail line. Context-specific (NOT randomised) so
- * subscribers learn what each exit kind means and trust the system.
+ * Track C motivational tail. Always randomised so the channel feels
+ * alive — subscribers see a different uplifting phrase every close.
+ * Each note explicitly references the $1000 notional so newcomers
+ * understand the math being shown.
+ *
+ * Functions accept the USD pnl (already-signed) so they can interpolate
+ * the actual number.
  */
-function strategyExitTail(
-  forceReason: string | null | undefined,
-  closeReason: CloseReason,
-  isWin: boolean,
-): string {
-  // Safety SL hit (closeReason='sl_hit')
-  if (closeReason === 'sl_hit') {
-    return isWin
-      ? '🛡 Safety SL зафиксировал прибыль раньше выхода стратегии.'
-      : '🛡 Сработал safety SL — стратегия задержалась с выходом, мы отрезали убыток на 2.5%.';
-  }
-  // Strategy's own exit signal arrived (Builtin Exits)
-  if (forceReason === 'strategy_exit') {
-    return isWin
-      ? '✅ Выход по сигналу стратегии — Builtin Exits сработали в плюсе как и задумано.'
-      : '✅ Выход по сигналу стратегии — Builtin Exits сработали по своей логике.';
-  }
-  // Time-guard 24h
-  if (forceReason === 'time_guard') {
-    return isWin
-      ? '⏰ Сработал 24h time-guard: стратегия не выдала выходной сигнал за сутки. Закрыли в плюс автоматически.'
-      : '⏰ Сработал 24h time-guard: стратегия не выдала выходной сигнал за сутки. Закрыли по таймауту.';
-  }
-  // Fallback for any other manual close
-  return isWin
-    ? 'Сделка закрыта в плюсе.'
-    : 'Сделка закрыта с убытком.';
+type NoteBuilder = (usdAbs: string, notional: number) => string;
+
+const TRACK_C_WIN_NOTES: NoteBuilder[] = [
+  (usd, n) => `Edge сработал. На каждые $${n} в позиции — плюс $${usd}. Идём дальше! 🚀`,
+  (usd, n) => `Дисциплина приносит плоды. +$${usd} на $${n} ставку — в копилку! 💪`,
+  (usd, n) => `Стратегия отработала чисто. +$${usd} с каждой $${n}-позиции. Так строится система. 🎯`,
+  (usd, n) => `Patience paid off. +$${usd} на наши $${n} капитала. Маленькие победы → большая дистанция.`,
+  (usd, n) => `Win rate × R = profit. +$${usd} на $${n} позицию — формула работает. ⚡`,
+  (usd, n) => `Capital в работе → +$${usd} на $${n}. Каждая такая сделка приближает цель. 📈`,
+  (usd, n) => `Setup отработал. Плюс $${usd} на $${n}-позицию. Холодная голова + риск-менеджмент. 🧊`,
+  (usd, n) => `Заработано $${usd} на каждые $${n} ставки. Это и есть смысл системного подхода. ✨`,
+];
+
+const TRACK_C_LOSS_NOTES: NoteBuilder[] = [
+  (usd, n) => `Минус контролируемый: −$${usd} на $${n}-позицию. Risk management отработал — главное капитал цел. ⏭`,
+  (usd, n) => `−$${usd} с $${n} ставки — часть бизнеса. Profit = winrate × avg R, не победами подряд.`,
+  (usd, n) => `Setup не подтвердился. −$${usd} на $${n} — это цена за разведку, дешевле чем большой убыток.`,
+  (usd, n) => `Без страха идём дальше. −$${usd} с $${n} — норма в системе. Дисциплина → долгий профит. 💪`,
+  (usd, n) => `Не угадали. Risk был под контролем: −$${usd} на $${n}-позицию. Следующий сетап впереди. ⚡`,
+  (usd, n) => `−$${usd} с $${n} — нормальная цена за edge. В долгосрочной winrate × R даёт plus. Едем дальше.`,
+];
+
+function pickStrategyNote(usdAbs: number, notional: number, isWin: boolean): string {
+  const bank = isWin ? TRACK_C_WIN_NOTES : TRACK_C_LOSS_NOTES;
+  const fn = bank[Math.floor(Math.random() * bank.length)]!;
+  return fn(usdAbs.toFixed(2), notional);
 }
 
 function pickRandom<T>(arr: T[]): T {
@@ -168,10 +172,12 @@ export function resultPost(i: ResultPostInput): string {
         ? `${lossEmoji} <b>Убыток ${usdStr}</b>  ·  ${tradeId}`
         : `${lossEmoji} <b>Убыток ${i.pnlPct.toFixed(2)}%</b>  ·  ${tradeId}`;
     }
-    // Tag for "(time-out)" / "(stop)" / "(signal)"
+    // Exit-reason tag on the "Выход" line. time_guard is intentionally
+    // NOT tagged for Track C — those force-closes shouldn't even
+    // happen here (guard disabled for strategies), and if they do
+    // we don't want subscribers to see "(24h time-out)" wording.
     if (i.closeReason === 'sl_hit') exitTag = ' (safety SL)';
     else if (i.forceCloseReason === 'strategy_exit') exitTag = ' (сигнал стратегии)';
-    else if (i.forceCloseReason === 'time_guard') exitTag = ' (24h time-out)';
   } else {
     // Track A/B — legacy headers
     if (i.closeReason === 'tp_hit') {
@@ -189,9 +195,11 @@ export function resultPost(i: ResultPostInput): string {
   }
 
   // ---------- Tail line ----------
+  // Track C: motivational note that mentions $1000 notional explicitly.
+  // Track A/B: legacy randomised banks by close reason.
   let tail: string;
-  if (isStrategy) {
-    tail = strategyExitTail(i.forceCloseReason, i.closeReason, isWin);
+  if (isStrategy && typeof i.notionalUsd === 'number' && usdPnl !== null) {
+    tail = pickStrategyNote(Math.abs(usdPnl), i.notionalUsd, isWin);
   } else if (i.closeReason === 'tp_hit') {
     tail = pickRandom(TP_HIT_NOTES);
   } else if (i.closeReason === 'sl_hit') {

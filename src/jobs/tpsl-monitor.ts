@@ -78,10 +78,16 @@ function maybeMoveSlToBe(p: DecisionRow, currentPrice: number): number {
   return p.entry;
 }
 
-// Max position age before time-guard force-close kicks in (24h).
-// Reason: positions older than this without reaching TP1 are usually
-// "stranded" — the market has moved on and SL/TP just won't trigger.
-// 24h covers all current TFs: 5m/15m/1H/4H all reasonably resolve in <24h.
+// Max position age before time-guard force-close kicks in.
+//
+// Per-track behaviour:
+//   - Track A (LLM)    : 24h. Setups are minute/hour-scale; older = stranded.
+//   - Track B (signal) : 24h. Same reasoning as Track A.
+//   - Track C (strategy): NO time-guard. LuxAlgo strategy backtests
+//     regularly hold positions for multiple days (avg duration on
+//     STRAT-001 = ~155 bars ≈ 39 hours on 15m). Force-closing at 24h
+//     bypasses the strategy's own edge — the long tail of winning
+//     trades comes from holding through noise.
 const TIME_GUARD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 async function checkPosition(pInput: DecisionRow): Promise<void> {
@@ -105,8 +111,10 @@ async function checkPosition(pInput: DecisionRow): Promise<void> {
 
   // === TIME GUARD ===
   // Position open too long without resolution → force-close at market.
+  // Skip entirely for Track C — strategies own their exit logic and a
+  // 24h cap actively breaks profitable long-hold setups.
   const ageMs = Date.now() - (p.filled_at ?? p.created_at);
-  if (ageMs > TIME_GUARD_MAX_AGE_MS) {
+  if (p.track !== 'strategy' && ageMs > TIME_GUARD_MAX_AGE_MS) {
     const slForR = p.original_sl ?? p.sl;
     const { pnlPct, pnlR } = computeWeightedPnl(p, price, slForR);
     const closed = forceClose({
