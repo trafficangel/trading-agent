@@ -9,7 +9,7 @@ import { findActiveOrPendingByTrack } from '../db/repos/decisions.js';
 import { monitorPosition } from '../jobs/monitor.js';
 import { maybeTriggerSignalTrade } from '../signals/signal-trader.js';
 import { maybeCounterExit } from '../signals/counter-exit.js';
-import { handleStrategyWebhook } from '../strategies/strategy-trader.js';
+import { handleStrategyWebhook, formatStrategyWebhookLog } from '../strategies/strategy-trader.js';
 
 /**
  * Throttle ad-hoc monitor triggers per symbol. A new signal arriving on an
@@ -53,6 +53,13 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
       // All Track C logic lives in strategy-trader.
       if (parsed.data.kind === 'strategy') {
         const r = await handleStrategyWebhook(parsed.data);
+        // Mirror every Track C webhook to the Logs channel — operator
+        // sees every incoming signal regardless of outcome (accepted,
+        // duplicate, unknown strategy, etc.). disable_notification so
+        // the channel doesn't ping for routine traffic.
+        const logText = formatStrategyWebhookLog(parsed.data, r);
+        sendMessage({ channel: 'logs', text: logText, disable_notification: true })
+          .catch((err) => logger.error({ err }, 'telegram log push (track c) failed'));
         return reply.send({ ok: r.ok, reason: r.reason, id: r.decisionId });
       }
 

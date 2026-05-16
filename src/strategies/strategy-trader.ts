@@ -55,6 +55,68 @@ function round(n: number, digits: number): number {
   return Math.round(n * f) / f;
 }
 
+/**
+ * Format a Track C webhook arrival + its dispatch result into an HTML
+ * message for the Logs channel. Called from the webhook route on every
+ * Track C webhook so the operator sees:
+ *   - which strategy / symbol / direction
+ *   - the bar time + price
+ *   - whether it was accepted, ignored (duplicate, no position, etc.)
+ *
+ * Pure function — no DB / no side effects — so it's reusable from the
+ * historical-replay script too.
+ */
+export function formatStrategyWebhookLog(
+  p: LuxAlgoStrategyPayload,
+  result: StrategyWebhookResult,
+): string {
+  const cfg = getStrategyConfig(p.strategy_id);
+  const stratLabel = cfg
+    ? `STRAT-${cfg.code}`
+    : `<i>unknown</i> (<code>${p.strategy_id}</code>)`;
+  const derived = deriveActionSide(p);
+  const side = derived.side ?? 'long';
+  const sideEmoji = side === 'long' ? '🟢' : '🔴';
+  const actionLabel = derived.action === 'entry' ? 'ENTRY' : 'EXIT';
+  const sideLabel = side === 'long' ? 'LONG' : 'SHORT';
+  const tf = `${p.timeframe}m`;
+  const priceStr = p.price !== undefined ? String(p.price) : '—';
+  const barTime = p.bar_time
+    ? new Date(p.bar_time).toISOString().slice(0, 16).replace('T', ' ')
+    : '—';
+
+  let statusIcon = 'ℹ️';
+  let statusText = result.reason ?? 'ok';
+  if (result.ok && result.decisionId) {
+    statusIcon = '✅';
+    statusText = result.reason === 'already_closed'
+      ? `already_closed — позиция уже закрыта`
+      : derived.action === 'entry'
+      ? `позиция открыта (T#${result.decisionId})`
+      : `позиция закрыта (T#${result.decisionId})`;
+  } else if (!result.ok) {
+    statusIcon = '❌';
+  } else {
+    // ok=true but no decisionId — silent no-op (duplicate / no_position / etc.)
+    statusIcon = '⏭';
+    const map: Record<string, string> = {
+      already_open: 'позиция уже открыта',
+      no_active_position: 'нет открытой позиции',
+      unknown_or_disabled_strategy: 'неизвестная или отключённая стратегия',
+      symbol_mismatch: 'символ не совпадает с конфигом',
+      track_c_disabled: 'Track C отключён глобально',
+    };
+    statusText = map[result.reason ?? ''] ?? result.reason ?? '';
+  }
+
+  return [
+    `📡 <b>Webhook · ${stratLabel}</b>`,
+    `${sideEmoji} ${sideLabel} ${actionLabel} · ${p.symbol} ${tf} · <code>${priceStr}</code>`,
+    `<code>${barTime} UTC</code>`,
+    `${statusIcon} ${statusText}`,
+  ].join('\n');
+}
+
 export async function handleStrategyWebhook(
   p: LuxAlgoStrategyPayload,
 ): Promise<StrategyWebhookResult> {
