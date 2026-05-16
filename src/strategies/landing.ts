@@ -1447,9 +1447,80 @@ const STYLE = `
   }
   .live-pos-link:hover { text-decoration: underline; }
 
+  /* ---------- Compact table layout (4+ positions) ----------
+   * Activated when activePositions.length >= 4. Each position becomes
+   * a single 32-44px row instead of a ~280px card — 5 positions fit
+   * in ~250px instead of 1400px on mobile. Same data-* hooks so the
+   * polling JS patches both layouts uniformly. */
+  .live-pos-table {
+    background: var(--bg-card);
+    border: 1px solid rgba(74, 217, 145, 0.18);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .live-pos-row {
+    display: grid;
+    grid-template-columns: 110px 70px 1fr 130px 80px 70px;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text);
+    text-decoration: none;
+    transition: background 0.15s ease;
+  }
+  .live-pos-row:first-child { border-top: none; }
+  a.live-pos-row:hover { background: var(--bg-card-hover); }
+  .live-pos-row-head {
+    color: var(--text-faint);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 8px 16px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .live-pos-row-id b { font-family: 'SF Mono', 'Menlo', monospace; }
+  .live-pos-row-side.side-long  { color: var(--accent); font-weight: 600; }
+  .live-pos-row-side.side-short { color: var(--danger); font-weight: 600; }
+  .live-pos-row-price.mono {
+    font-family: 'SF Mono', 'Menlo', monospace;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .live-pos-row-pnl {
+    display: inline-flex; flex-direction: column; gap: 1px;
+    padding: 4px 8px; border-radius: 6px;
+    font-variant-numeric: tabular-nums; font-weight: 600;
+    transition: background 0.4s ease;
+  }
+  .live-pos-row-pnl.pos { background: rgba(74, 217, 145, 0.10); color: var(--accent); }
+  .live-pos-row-pnl.neg { background: rgba(239, 91, 107, 0.10); color: var(--danger); }
+  .live-pos-row-pct {
+    font-size: 11px; font-weight: 500; opacity: 0.9;
+  }
+  .live-pos-row-pnl.is-flashing { animation: pnl-flash 0.6s ease-out; }
+  .live-pos-row-age, .live-pos-row-pnl-r {
+    color: var(--text-dim); font-variant-numeric: tabular-nums;
+  }
+  /* Mobile: collapse some columns by stacking into 2 lines per row.
+   * At <640px, hide R-multiple and age columns; PnL goes inline with
+   * price. This keeps the rows ~50px each on mobile too. */
+  @media (max-width: 640px) {
+    .live-pos-row {
+      grid-template-columns: 1fr 70px 1fr;
+      grid-template-rows: auto auto;
+      row-gap: 4px;
+    }
+    .live-pos-row-id { grid-column: 1 / -1; }
+    .live-pos-row-pnl-r, .live-pos-row-age { display: none; }
+    .live-pos-row-head { display: none; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .live-pos-pulse { animation: none; }
-    .live-pos-pnl.is-flashing { animation: none; }
+    .live-pos-pnl.is-flashing,
+    .live-pos-row-pnl.is-flashing { animation: none; }
   }
 
   .home-section-title {

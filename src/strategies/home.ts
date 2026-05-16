@@ -711,8 +711,15 @@ function homeEffectsScript(): string {
             hasNew = true;
           }
         });
-        if (hasNew) {
-          // Soft reload — preserves scroll position via History API
+        // Layout-mode boundary: cards layout up to 3 positions,
+        // compact-table layout for 4+. If the count crosses that
+        // threshold we need a full SSR re-render to switch layouts.
+        var prevCount = parseInt(section.getAttribute('data-position-count') || '0', 10);
+        var nextCount = positions.length;
+        var modeChanged = (prevCount < 4 && nextCount >= 4) || (prevCount >= 4 && nextCount < 4);
+        section.setAttribute('data-position-count', String(nextCount));
+        if (hasNew || modeChanged) {
+          // Soft reload — preserves scroll position via sessionStorage
           var y = window.scrollY;
           window.sessionStorage.setItem('scrollY', String(y));
           window.location.reload();
@@ -819,16 +826,67 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
       </div>
     `;
   };
+  // Layout selector — full card grid for 1-3 positions (eye-catcher
+  // hero treatment), compact dense table for 4+ (avoids dominating
+  // the page when many strategies fire concurrently). The JS poller
+  // patches the same data-* hooks regardless of layout, so live PnL
+  // updates work for both. When the count crosses the 3→4 boundary,
+  // the soft-reload path (also used for new trade IDs) re-renders
+  // server-side with the right layout.
+  const COMPACT_THRESHOLD = 4;
+  const renderPositionRow = (p: import('../api/active-positions.js').ActivePositionView): string => {
+    const sideEmoji = p.side === 'long' ? '🟢' : '🔴';
+    const sideLabel = lang === 'en' ? (p.side === 'long' ? 'LONG' : 'SHORT') : (p.side === 'long' ? 'ЛОНГ' : 'ШОРТ');
+    const pnlSign = p.pnlUsd >= 0 ? '+' : '−';
+    const pnlPctSign = p.pnlPct >= 0 ? '+' : '−';
+    const pnlCls2 = p.pnlUsd >= 0 ? 'pos' : 'neg';
+    const arrow = (p.side === 'long' && p.currentPrice >= p.entry) ||
+                  (p.side === 'short' && p.currentPrice <= p.entry) ? '↑' : '↓';
+    const arrowCls = (p.side === 'long' && p.currentPrice >= p.entry) ||
+                     (p.side === 'short' && p.currentPrice <= p.entry) ? 'pos' : 'neg';
+    return `
+      <a class="live-pos-row" href="/strategies/${escapeHtml(p.strategyCode)}" data-trade-id="${escapeHtml(p.tradeId)}" data-strategy="${escapeHtml(p.strategyCode)}">
+        <span class="live-pos-row-id">${sideEmoji} <b>${escapeHtml(p.tradeId)}</b></span>
+        <span class="live-pos-row-side side-${p.side}">${sideLabel}</span>
+        <span class="live-pos-row-price mono">
+          <span data-current-price>$${p.currentPrice.toFixed(4)}</span>
+          <span class="live-pos-arrow ${arrowCls}" data-arrow>${arrow}</span>
+        </span>
+        <span class="live-pos-row-pnl ${pnlCls2}" data-pnl-block>
+          <span data-pnl-usd>${pnlSign}$${Math.abs(p.pnlUsd).toFixed(2)}</span>
+          <span class="live-pos-row-pct" data-pnl-pct>${pnlPctSign}${Math.abs(p.pnlPct).toFixed(2)}%</span>
+        </span>
+        <span class="live-pos-row-age" data-age data-opened-at="${p.openedAt}">${formatAge(p.ageMs, lang)}</span>
+        <span class="live-pos-row-pnl-r mono" data-pnl-r>${(p.pnlR >= 0 ? '+' : '−')}${Math.abs(p.pnlR).toFixed(2)}R</span>
+      </a>
+    `;
+  };
+  const useCompact = activePositions.length >= COMPACT_THRESHOLD;
+  const positionsBody = activePositions.length === 0
+    ? ''
+    : useCompact
+      ? `<div class="live-pos-table" data-positions-grid data-mode="compact">
+           <div class="live-pos-row live-pos-row-head">
+             <span>${lang === 'en' ? 'Trade' : 'Сделка'}</span>
+             <span>${lang === 'en' ? 'Side' : 'Сторона'}</span>
+             <span>${lang === 'en' ? 'Price' : 'Цена'}</span>
+             <span>P&amp;L</span>
+             <span>${lang === 'en' ? 'Age' : 'Возраст'}</span>
+             <span>R</span>
+           </div>
+           ${activePositions.map(renderPositionRow).join('')}
+         </div>`
+      : `<div class="live-pos-grid" data-positions-grid data-mode="cards">
+           ${activePositions.map(renderPositionCard).join('')}
+         </div>`;
   const livePositionsHtml = `
-    <div class="home-section live-pos-section" id="live-positions" data-empty="${activePositions.length === 0 ? 'true' : 'false'}">
+    <div class="home-section live-pos-section" id="live-positions" data-empty="${activePositions.length === 0 ? 'true' : 'false'}" data-position-count="${activePositions.length}">
       <div class="live-pos-header">
         <span class="live-pos-pulse" aria-hidden="true"></span>
         <h2 class="live-pos-title">${lang === 'en' ? 'Working right now' : 'В работе прямо сейчас'}</h2>
         <span class="live-pos-count" data-count-label>${activePositions.length === 0 ? (lang === 'en' ? 'no open positions' : 'нет открытых позиций') : `${activePositions.length} ${pluralRu(activePositions.length, 'позиция', 'позиции', 'позиций')}`}</span>
       </div>
-      <div class="live-pos-grid" data-positions-grid>
-        ${activePositions.map(renderPositionCard).join('')}
-      </div>
+      ${positionsBody}
     </div>
   `;
 
