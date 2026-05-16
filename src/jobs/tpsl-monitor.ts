@@ -255,6 +255,18 @@ async function postCloseMessage(
 ): Promise<void> {
   if (!p.entry || !p.side || !p.sl) return;
   const tpFinal = p.tp_json ? (JSON.parse(p.tp_json) as number[]).at(-1) ?? null : null;
+  // Track C extras: USD P&L on $1000 notional, force-close reason context,
+  // STRAT-XXX badge in header. Pulled lazily so we don't import track-c-config
+  // at the top of tpsl-monitor (circular).
+  let notionalUsd: number | undefined;
+  let strategyCode: string | null = null;
+  if (p.track === 'strategy') {
+    const { TRACK_C_NOTIONAL_USD, getStrategyConfig } = await import('../strategies/track-c-config.js');
+    notionalUsd = TRACK_C_NOTIONAL_USD;
+    if (p.strategy_id) {
+      strategyCode = getStrategyConfig(p.strategy_id)?.code ?? null;
+    }
+  }
   const text = resultPost({
     parentTradeId: p.id,
     symbol: p.symbol,
@@ -268,6 +280,9 @@ async function postCloseMessage(
     pnlR,
     durationMs: Date.now() - (p.filled_at ?? p.created_at),
     track: p.track,
+    notionalUsd,
+    forceCloseReason: p.force_close_reason ?? null,
+    strategyCode,
   });
   if (p.screenshot_path && existsSync(p.screenshot_path)) {
     const sent = await sendPhoto({ channel: 'signals', photoPath: p.screenshot_path, caption: text });

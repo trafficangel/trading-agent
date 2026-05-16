@@ -9,6 +9,7 @@ import {
 import { aggregateSymbol } from '../signals/aggregator.js';
 import { getLastPrice } from '../exchange/bybit-public.js';
 import { sendMessage } from '../telegram/bot.js';
+import { resultPost } from '../telegram/result-template.js';
 import { deriveActionSide, type LuxAlgoStrategyPayload } from '../webhooks/luxalgo.schema.js';
 import type { Decision } from '../llm/decision.schema.js';
 import {
@@ -269,7 +270,7 @@ async function handleStrategyExit(
     'strategy-trader: position closed via strategy exit webhook',
   );
 
-  await sendStrategyExitPost(active.id, p, cfg, active.entry, closePrice, side, pnlPct, pnlR, active.created_at, active.filled_at);
+  await sendStrategyExitPost(active.id, p, cfg, active.entry, closePrice, side, pnlPct, pnlR, active.created_at, active.filled_at, active.sl ?? active.entry);
   return { ok: true, decisionId: active.id };
 }
 
@@ -333,23 +334,28 @@ async function sendStrategyExitPost(
   pnlR: number,
   createdAt: number,
   filledAt: number | null,
+  sl: number,
 ): Promise<void> {
-  const tradeIdStr = `T#${decisionId.toString().padStart(4, '0')}`;
-  const durMs = Date.now() - (filledAt ?? createdAt);
-  const pnlSign = pnlPct >= 0 ? '+' : '';
-  const usdPnl = (pnlPct / 100) * TRACK_C_NOTIONAL_USD;
-  const usdSign = usdPnl >= 0 ? '+' : '';
-  // pnlR computed (passed in) but not displayed — operator preference.
-  void pnlR;
-  const text = [
-    `🏁 <b>Сигнал выхода · ${tradeIdStr}</b>  <b>[STRAT-${cfg.code}]</b>  ${sideEmoji(side)} ${escapeHtml(p.symbol)}`,
-    `🏷 <code>${escapeHtml(cfg.description)}</code>`,
-    ``,
-    `📥 Вход:   <code>${entry}</code>`,
-    `📤 Выход:  <code>${closePrice}</code>  (по сигналу стратегии)`,
-    `📊 Результат: <b>${pnlSign}${pnlPct.toFixed(2)}%</b>  ·  <b>${usdSign}$${usdPnl.toFixed(2)}</b>`,
-    `⏱ Длительность: ${formatDuration(durMs)}`,
-  ].join('\n');
+  // Use the shared resultPost template so strategy_exit posts have the
+  // same look-and-feel as time_guard / sl_hit posts. Single source of
+  // truth for header / USD / exit-reason tail.
+  const text = resultPost({
+    parentTradeId: decisionId,
+    symbol: p.symbol,
+    side,
+    entry,
+    sl,
+    tp: null,
+    closePrice,
+    closeReason: 'manual',           // exits via strategy webhook are 'manual' in DB
+    pnlPct,
+    pnlR,
+    durationMs: Date.now() - (filledAt ?? createdAt),
+    track: 'strategy',
+    notionalUsd: TRACK_C_NOTIONAL_USD,
+    forceCloseReason: 'strategy_exit',
+    strategyCode: cfg.code,
+  });
   await sendMessage({ channel: 'signals', text }).catch((err) =>
     logger.error({ err }, 'strategy-trader: exit post to signals failed'),
   );
