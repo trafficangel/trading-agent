@@ -129,8 +129,8 @@ const CONTENT: Record<Lang, Content> = {
           step: 'ШАГ 01',
           title: 'Двухэтапный отбор',
           body:
-            'Сначала собираем стратегию в LuxAlgo Premium Ultimate (~$60/мес) с тестом на 200+ дней. ' +
-            'Если winrate ≥55% и прибыль превышает убытки в 2 раза — переходим ко второму этапу: проверяем в TradingView Premium ($60/мес) с реальной комиссией Bybit и защитным стопом. ' +
+            'Сначала собираем стратегию в [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) с тестом на 200+ дней. ' +
+            'Если winrate ≥55% и прибыль превышает убытки в 2 раза — переходим ко второму этапу: проверяем в [TradingView Premium](https://ru.tradingview.com/pricing/) с реальной комиссией Bybit и защитным стопом. ' +
             'Только стратегии прошедшие обе проверки попадают на сайт.',
         },
         {
@@ -188,7 +188,7 @@ const CONTENT: Record<Lang, Content> = {
           q: 'Это правда бесплатно? Почему?',
           a:
             'Да, полностью. Сайт, статистика, Telegram-канал — бесплатно для всех. ' +
-            'Сами для нас это НЕ бесплатно: LuxAlgo Premium Ultimate ($60/мес) для сборки стратегий + TradingView Premium ($60/мес) для контрольных бэктестов + сервер и инфраструктура. ' +
+            'Сами для нас это НЕ бесплатно: [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) для сборки стратегий + [TradingView Premium](https://ru.tradingview.com/pricing/) для контрольных бэктестов + сервер и инфраструктура. ' +
             'Зачем тогда отдаём бесплатно? В ближайшее время запустим копитрейдинг на Bybit — там наш доход будет только процентом от вашей прибыли. ' +
             'Если стратегии действительно работают, через 3-6 месяцев у нас будет публичная статистика и подписчики которые ХОТЯТ копировать наши сделки. ' +
             'Это честнее чем продавать «курсы по трейдингу» — мы зарабатываем только когда вы зарабатываете.',
@@ -280,8 +280,8 @@ const CONTENT: Record<Lang, Content> = {
           step: 'STEP 01',
           title: 'Two-stage vetting',
           body:
-            'First we build the strategy in LuxAlgo Premium Ultimate (~$60/mo) with a 200+ day backtest. ' +
-            'If win rate ≥55% and profits are at least 2× larger than losses, we move to stage two: re-test in TradingView Premium ($60/mo) with realistic Bybit commission and a safety stop. ' +
+            'First we build the strategy in [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) with a 200+ day backtest. ' +
+            'If win rate ≥55% and profits are at least 2× larger than losses, we move to stage two: re-test in [TradingView Premium](https://www.tradingview.com/pricing/) with realistic Bybit commission and a safety stop. ' +
             'Only strategies passing both stages make it onto the site.',
         },
         {
@@ -339,7 +339,7 @@ const CONTENT: Record<Lang, Content> = {
           q: 'Is it really free? Why?',
           a:
             'Yes, completely. The site, statistics, Telegram channel — free for everyone. ' +
-            'It\'s NOT free for us though: LuxAlgo Premium Ultimate ($60/mo) for building strategies + TradingView Premium ($60/mo) for control backtests + server and infrastructure. ' +
+            'It\'s NOT free for us though: [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) for building strategies + [TradingView Premium](https://www.tradingview.com/pricing/) for control backtests + server and infrastructure. ' +
             'Why give it away free? We\'re launching copy trading on Bybit soon — our revenue will come solely from a percentage of YOUR profits. ' +
             'If the strategies genuinely work, in 3-6 months we\'ll have public statistics and subscribers who WANT to copy our trades. ' +
             'More honest than selling "trading courses" — we only earn when you earn.',
@@ -389,6 +389,24 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[c] ?? c);
+}
+
+// Escapes HTML THEN converts markdown-style links [label](https://...) into
+// <a target="_blank" rel="noopener nofollow"> anchors. Use this for content
+// fields where we want plain text + a small number of outbound links —
+// keeps the rest of the text XSS-safe while letting us point to LuxAlgo/TV
+// pricing pages, channel URLs, etc.
+function renderRichText(s: string): string {
+  // Escape entire string first (URL too — quotes inside an href would
+  // otherwise break out of the attribute).
+  const escaped = escapeHtml(s);
+  // Then re-interpret [label](url) inside the escaped string. After escape:
+  //   '[' → '[', ']' → ']', '(' → '(', ')' → ')'  (unchanged)
+  // URLs only allow http/https to avoid javascript: payloads sneaking in.
+  return escaped.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    (_m, label, url) => `<a href="${url}" target="_blank" rel="noopener nofollow">${label}</a>`,
+  );
 }
 
 function fmtUsd(n: number, withSign = false): string {
@@ -587,7 +605,7 @@ function renderHome(lang: Lang): string {
           <div class="how-card">
             <div class="how-step">${escapeHtml(s.step)}</div>
             <h3 class="how-title">${escapeHtml(s.title)}</h3>
-            <p class="how-body">${escapeHtml(s.body)}</p>
+            <p class="how-body">${renderRichText(s.body)}</p>
           </div>
         `,
           )
@@ -642,7 +660,7 @@ function renderHome(lang: Lang): string {
             (f) => `
           <details class="faq-item">
             <summary>${escapeHtml(f.q)}</summary>
-            <div class="faq-answer">${escapeHtml(f.a)}</div>
+            <div class="faq-answer">${renderRichText(f.a)}</div>
           </details>
         `,
           )
