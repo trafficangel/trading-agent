@@ -116,6 +116,35 @@ function classForValue(n: number): 'pos' | 'neg' | 'neu' {
   return 'neu';
 }
 
+/**
+ * LuxAlgo's `netPnlUsdt` in the scraped JSON is "Unit order size" math
+ * (≈ 1 contract × price diff), NOT our actual $1000 notional. Recompute
+ * each trade's P&L on $1000 from raw entry/exit prices, then walk the
+ * list to rebuild cumulativePnlUsdt. Mutates the trade objects only on
+ * a copy — the cached source bundle stays untouched.
+ *
+ * Net of round-trip commission: $1000 × 0.055% × 2 sides = $1.10 per
+ * closed trade. Subtracted to match Bybit-realistic execution math.
+ */
+const NOTIONAL_USD = TRACK_C_NOTIONAL_USD;
+const COMMISSION_USD_PER_TRADE = NOTIONAL_USD * 0.00055 * 2;
+
+function recomputeTradesOnNotional(trades: BacktestTrade[]): BacktestTrade[] {
+  let cum = 0;
+  return trades.map((t) => {
+    const sign = t.side === 'long' ? 1 : -1;
+    const grossPct = (sign * (t.exitPrice - t.entryPrice)) / t.entryPrice;
+    const grossUsd = grossPct * NOTIONAL_USD;
+    const netUsd = grossUsd - COMMISSION_USD_PER_TRADE;
+    cum += netUsd;
+    return {
+      ...t,
+      netPnlUsdt: Math.round(netUsd * 100) / 100,
+      cumulativePnlUsdt: Math.round(cum * 100) / 100,
+    };
+  });
+}
+
 // --- Inline SVG charts ---
 // Hand-rolled, no external lib. Three visualisations:
 //   1. Donut — win-rate (W vs L ratio)
@@ -257,19 +286,23 @@ function backtestTradesTable(trades: BacktestTrade[], visibleCount = 20): string
       <tr>
         <td>${t.num}</td>
         <td class="dt">${fmtDate(t.entryAt)}</td>
+        <td class="dt">${fmtDate(t.exitAt)}</td>
         <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
         <td class="right mono">${t.entryPrice.toFixed(4)}</td>
         <td class="right mono">${t.exitPrice.toFixed(4)}</td>
         <td class="right mono ${cls}">${t.netPnlUsdt >= 0 ? '+' : ''}${t.netPnlUsdt.toFixed(2)}</td>
-        <td class="right mono">${t.cumulativePnlUsdt >= 0 ? '+' : ''}${t.cumulativePnlUsdt.toFixed(2)}</td>
       </tr>`;
   };
   const head = `
     <thead>
       <tr>
-        <th>#</th><th>Дата (UTC)</th><th>Side</th>
-        <th class="right">Entry</th><th class="right">Exit</th>
-        <th class="right">P&amp;L USDT</th><th class="right">Cum USDT</th>
+        <th>#</th>
+        <th>Вход (UTC)</th>
+        <th>Выход (UTC)</th>
+        <th>Side</th>
+        <th class="right">Entry</th>
+        <th class="right">Exit</th>
+        <th class="right">P&amp;L USDT</th>
       </tr>
     </thead>`;
   const first = rev.slice(0, visibleCount).map(renderRow).join('');
@@ -874,17 +907,25 @@ export function pageShell(
   body: string,
   lang: 'ru' | 'en' = 'ru',
   topRight: string = '',
+  autoRefreshSec: number | null = null,
 ): string {
   const footerText =
     lang === 'en'
       ? 'Data refreshes automatically from the bot DB. Cache: 60 sec.<br/>⚠ Backtest ≠ guarantee. Past performance does not guarantee future returns.'
       : 'Данные обновляются автоматически из БД бота. Кэш: 60 сек.<br/>⚠ Backtest ≠ guarantee. Прошлые результаты не гарантируют будущих.';
+  // Detail pages set autoRefreshSec so the live-trades table reflects new
+  // closed positions without the visitor manually reloading. Server-side
+  // render is cheap; cache-control still caps the actual fetch rate.
+  const metaRefresh = autoRefreshSec !== null
+    ? `<meta http-equiv="refresh" content="${autoRefreshSec}" />`
+    : '';
   return `<!DOCTYPE html>
 <html lang="${lang}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="${lang === 'en' ? 'index, follow' : 'index, follow'}" />
+${metaRefresh}
 <title>${escapeHtml(title)}</title>
 <style>${STYLE}</style>
 </head>
@@ -1097,7 +1138,10 @@ function renderBacktestSection(b: BacktestSnapshot, strategyId: string): string 
   const longClass = classForValue(b.longPnlPct);
   const shortClass = classForValue(b.shortPnlPct);
   const bundle = loadBacktestTrades(strategyId);
-  const trades = bundle?.trades ?? [];
+  // Recompute P&L on $1000 notional minus round-trip commission so the
+  // displayed numbers match what subscribers would actually realize
+  // trading our system size — NOT LuxAlgo's "Unit order" math.
+  const trades = bundle ? recomputeTradesOnNotional(bundle.trades) : [];
   const totalInStrategy = bundle?.totalTradesInStrategy ?? trades.length;
   const wasCapped = bundle?.capped ?? false;
   const equityLabel = wasCapped
@@ -1251,81 +1295,37 @@ function renderBacktestSection(b: BacktestSnapshot, strategyId: string): string 
   `;
 }
 
-function renderLiveSection(live: StrategyLiveStats, launchedAt: number, strategyId: string): string {
-  const launchLabel = new Date(launchedAt).toISOString().slice(0, 10);
-  if (live.closed === 0 && live.open === 0) {
+function renderLiveSection(_live: StrategyLiveStats, _launchedAt: number, strategyId: string): string {
+  // Slimmed per operator request: removed the "Live · с DATE / SHADOW MODE"
+  // header block, removed the KPI stats grid (Net P&L, Closed, Open, etc.),
+  // removed the "Структура выходов" sub-card. Only the recent trades table
+  // remains — that's the surface subscribers actually care about.
+  //
+  // Auto-refresh handled at the page level via <meta http-equiv="refresh">
+  // so this table updates in near-real-time when new closes land.
+  const liveTrades = getStrategyRecentTrades(strategyId, 50);
+  if (liveTrades.length === 0) {
     return `
     <div class="section">
-      <div class="section-title">Live · с ${launchLabel}</div>
+      <div class="section-title">Live сделки</div>
       <div class="card"><div class="card-body">
         <div class="empty-state" style="padding: 24px 0;">
           ⏳ Ждём первого сигнала стратегии.<br/>
-          <span style="font-size: 12px; color: var(--text-faint);">Backtest показывает ~1 сделка в 1.8 дня. Подождите.</span>
+          <span style="font-size: 12px; color: var(--text-faint);">Страница обновляется автоматически каждые 60 сек.</span>
         </div>
       </div></div>
     </div>
     `;
   }
-  const pnlClass = classForValue(live.netPnlPct);
-  const wrDisplay = live.winRate !== null
-    ? `${(live.winRate * 100).toFixed(0)}% (${live.wins}W / ${live.losses}L)`
-    : '—';
-  const exits = `${live.exitsStrategy} strat / ${live.exitsSafetySL} sl / ${live.exitsTimeGuard} time`;
   return `
   <div class="section">
-    <div class="section-title">Live · с ${launchLabel} <span class="pill shadow">SHADOW MODE</span></div>
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-label">Net P&L</div>
-        <div class="stat-value ${pnlClass}">${fmtPct(live.netPnlPct, true)}</div>
-        <div class="stat-sub ${pnlClass}">${fmtUsd(live.netPnlUsd, true)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Closed</div>
-        <div class="stat-value">${live.closed}</div>
-        <div class="stat-sub">${wrDisplay}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Open / Pending</div>
-        <div class="stat-value">${live.open}</div>
-        <div class="stat-sub">прямо сейчас</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Avg Duration</div>
-        <div class="stat-value">${live.avgDurationMin !== null ? `${live.avgDurationMin}m` : '—'}</div>
-        <div class="stat-sub">в минутах</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Largest Win</div>
-        <div class="stat-value pos">${fmtUsd(live.largestWinUsd, true)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Largest Loss</div>
-        <div class="stat-value neg">${fmtUsd(live.largestLossUsd, true)}</div>
-      </div>
+    <div class="section-title">
+      Live сделки · последние ${liveTrades.length}
+      <span style="font-size: 11px; color: var(--text-faint); font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 8px;">
+        ⟳ обновляется каждые 60 сек
+      </span>
     </div>
-    <div class="section">
-      <div class="section-title">Структура выходов</div>
-      <div class="card"><div class="card-body">
-        <div class="desc">${escapeHtml(exits)}</div>
-        <div style="margin-top: 10px; font-size: 12px; color: var(--text-faint);">
-          <b>strat</b> — закрытие по сигналу стратегии (как в backtest) ·
-          <b>sl</b> — safety SL 2.5% сработал ·
-          <b>time</b> — 24ч time-guard
-        </div>
-      </div></div>
-    </div>
-
-    ${(() => {
-      const liveTrades = getStrategyRecentTrades(strategyId, 50);
-      if (liveTrades.length === 0) return '';
-      return `
-        <div class="section">
-          <div class="section-title">Live сделки · последние ${liveTrades.length}</div>
-          ${liveTradesTable(liveTrades)}
-        </div>
-      `;
-    })()}
+    ${liveTradesTable(liveTrades)}
   </div>
   `;
 }
@@ -1351,10 +1351,6 @@ function renderRiskSection(cfg: StrategyConfig): string {
         <div class="info-item">
           <div class="lbl">Exit</div>
           <div class="val">LuxAlgo Builtin Exits</div>
-        </div>
-        <div class="info-item">
-          <div class="lbl">Time-guard</div>
-          <div class="val">24 часа максимум</div>
         </div>
         <div class="info-item">
           <div class="lbl">Slippage</div>
@@ -1424,6 +1420,9 @@ function renderStrategyDetail(cfg: StrategyConfig): string {
 
     ${renderLogicSection(cfg)}
     `,
+    'ru',
+    '',
+    60, // auto-refresh every 60s so the Live трейды таблица обновляется
   );
 }
 
