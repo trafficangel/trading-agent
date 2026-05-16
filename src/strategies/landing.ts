@@ -2423,11 +2423,13 @@ function renderGatedPreview(
   const formHtml = `
     <div class="gate-overlay">
       <div class="gate-card">
-        <div class="gate-icon">🔒</div>
-        <h2 class="gate-title">Доступ к детальной статистике</h2>
+        <div class="gate-head">
+          <span class="gate-icon" aria-hidden="true">🔒</span>
+          <h2 class="gate-title">Доступ к детальной статистике</h2>
+        </div>
         <p class="gate-sub">
-          Введите номер телефона — мы отправим 6-значный код через
-          официальный сервис подтверждения Telegram.
+          Введите номер — отправим 6-значный код через официальный сервис
+          подтверждения Telegram.
         </p>
 
         <!-- Stage 1: phone -->
@@ -2628,57 +2630,67 @@ ${metrikaScript}
   }
   .gate-card {
     background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 14px; padding: 32px 28px; max-width: 440px;
-    width: 100%; text-align: center;
+    border-radius: 14px; padding: 24px 22px; max-width: 400px;
+    width: 100%;
     box-shadow: 0 20px 60px rgba(0,0,0,0.5);
   }
-  .gate-icon { font-size: 32px; margin-bottom: 12px; }
+  /* Header — lock icon + title on the same row for compactness.
+   *  Was previously 32px lock + 22px title stacked; consumes ~80px
+   *  of vertical space. Inline saves ~40px. */
+  .gate-head {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 8px;
+  }
+  .gate-icon { font-size: 18px; line-height: 1; }
   .gate-title {
-    font-size: 22px; font-weight: 700; margin: 0 0 10px;
+    font-size: 18px; font-weight: 700; margin: 0;
     letter-spacing: -0.01em;
   }
   .gate-sub {
-    color: var(--text-dim); font-size: 14px; line-height: 1.55;
-    margin: 0 0 22px;
+    color: var(--text-dim); font-size: 13px; line-height: 1.45;
+    margin: 0 0 16px;
   }
-  .gate-form { display: flex; flex-direction: column; gap: 10px; }
+  .gate-form { display: flex; flex-direction: column; gap: 8px; }
   .gate-form input {
     background: var(--bg); border: 1px solid var(--border);
-    color: var(--text); padding: 12px 14px; border-radius: 8px;
-    font-size: 15px; outline: none; font-family: inherit;
+    color: var(--text); padding: 11px 13px; border-radius: 8px;
+    font-size: 14px; outline: none; font-family: inherit;
     transition: border-color 120ms;
   }
   .gate-form input:focus { border-color: var(--accent); }
   .gate-form button {
     background: var(--accent); color: var(--bg); border: none;
-    padding: 12px; border-radius: 8px; font-size: 15px;
+    padding: 11px; border-radius: 8px; font-size: 14px;
     font-weight: 600; cursor: pointer; transition: opacity 120ms;
   }
   .gate-form button:hover { opacity: 0.92; }
   .gate-form button:disabled { opacity: 0.5; cursor: wait; }
   .gate-msg {
-    margin: 16px 0 8px; font-size: 13px; color: var(--text-dim);
-    min-height: 16px;
+    margin: 10px 0 0; font-size: 12px; color: var(--text-dim);
+    min-height: 14px;
   }
   .gate-msg.err { color: var(--danger); }
   .gate-note {
-    font-size: 11px; color: var(--text-faint); line-height: 1.5;
-    margin: 16px 0 0;
+    font-size: 11px; color: var(--text-faint); line-height: 1.45;
+    margin: 12px 0 0; text-align: center;
   }
-  /* Trust row block on phone stage — three icon+text rows that tell
-   *  the user the code comes from Telegram's own service, not from us. */
+  /* Trust row block on phone stage — three icon+text rows. Compact
+   *  vertical rhythm: 6px between rows, icons aligned to first text
+   *  line baseline via padding-top trick on the icon column. */
   .gate-trust {
-    margin-top: 18px; padding-top: 14px;
+    margin-top: 14px; padding-top: 12px;
     border-top: 1px solid var(--border);
-    display: flex; flex-direction: column; gap: 8px;
+    display: flex; flex-direction: column; gap: 6px;
   }
   .gate-trust-row {
-    display: flex; align-items: flex-start; gap: 10px;
-    font-size: 12px; color: var(--text-dim); line-height: 1.5;
+    display: grid;
+    grid-template-columns: 20px 1fr;
+    gap: 10px; align-items: start;
+    font-size: 12px; color: var(--text-dim); line-height: 1.45;
   }
   .gate-trust-icon {
-    flex-shrink: 0; width: 18px; text-align: center;
-    font-size: 14px;
+    text-align: center; font-size: 13px;
+    line-height: 1.45; /* matches the text so icon sits on first line */
   }
   .gate-trust-row a {
     color: var(--accent); text-decoration: none;
@@ -2687,30 +2699,31 @@ ${metrikaScript}
   /* Telegram-blue verified checkmark — visually says "official". */
   .gate-verified {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 14px; height: 14px; border-radius: 50%;
+    width: 13px; height: 13px; border-radius: 50%;
     background: #2aabee; color: #fff;
-    font-size: 9px; font-weight: 700; line-height: 1;
-    vertical-align: -1px; margin: 0 1px;
+    font-size: 8px; font-weight: 700; line-height: 1;
+    vertical-align: 0; margin: 0 1px;
   }
   /* Code stage — 3 numbered steps explaining WHERE the code arrives. */
   .gate-tg-instructions {
     background: rgba(42, 171, 238, 0.06);
     border: 1px solid rgba(42, 171, 238, 0.20);
     border-radius: 8px;
-    padding: 14px 16px;
-    margin-bottom: 16px;
-    display: flex; flex-direction: column; gap: 10px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    display: flex; flex-direction: column; gap: 8px;
   }
   .gate-tg-step {
-    display: flex; align-items: flex-start; gap: 12px;
-    font-size: 13px; color: var(--text); line-height: 1.45;
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 10px; align-items: start;
+    font-size: 12.5px; color: var(--text); line-height: 1.4;
   }
   .gate-tg-num {
-    flex-shrink: 0;
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px; border-radius: 50%;
+    width: 20px; height: 20px; border-radius: 50%;
     background: #2aabee; color: #fff;
-    font-size: 12px; font-weight: 700;
+    font-size: 11px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
   }
   .gate-tg-link {
     display: inline-flex; align-items: center; gap: 4px;
@@ -2718,8 +2731,8 @@ ${metrikaScript}
   }
   .gate-tg-link:hover { text-decoration: underline; }
   .gate-resend {
-    font-size: 11px; color: var(--text-faint); line-height: 1.5;
-    margin: 12px 0 0; text-align: center;
+    font-size: 11px; color: var(--text-faint); line-height: 1.45;
+    margin: 10px 0 0; text-align: center;
   }
   .gate-resend a {
     color: var(--accent); text-decoration: none;
