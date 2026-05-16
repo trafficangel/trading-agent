@@ -441,28 +441,40 @@ function renderHome(lang: Lang): string {
   const pnlCls = classForValue(totalPnlUsd);
 
   // ---------- Top 5 strategy preview ----------
+  // Layout:
+  //   Left  → [STRAT-00X] SYMBOL TFm
+  //           Human-readable backtest summary (win-rate + return + period)
+  //   Right → Live PnL (only when there are closed trades — empty otherwise
+  //           to avoid the "ждём сигнал / 0 закрытых" visual noise before
+  //           the strategy has produced live data)
   const previewItems = enabled
     .map((s) => {
       const live = getStrategyLiveStats(s.id);
       const bt = s.backtest;
+      // Plain-Russian backtest summary. WR / PF / % are jargon for most
+      // visitors — spell it out and add the period so the number means
+      // something concrete instead of just being "a big positive number".
       const btLabel = bt
-        ? `BT: ${(bt.winRate * 100).toFixed(1)}% WR · ${bt.netPnlPct >= 0 ? '+' : ''}${bt.netPnlPct.toFixed(1)}%`
+        ? lang === 'en'
+          ? `${(bt.winRate * 100).toFixed(1)}% wins · ${bt.netPnlPct >= 0 ? '+' : ''}${bt.netPnlPct.toFixed(1)}% return over ${bt.periodDays} days`
+          : `${(bt.winRate * 100).toFixed(1)}% прибыльных сделок · доходность ${bt.netPnlPct >= 0 ? '+' : ''}${bt.netPnlPct.toFixed(1)}% за ${bt.periodDays} дней`
         : '';
-      const liveCls = classForValue(live.netPnlUsd);
-      const liveLabel =
+      // Right column appears ONLY once the strategy has closed trades.
+      // Before then the row is left-aligned and uncluttered.
+      const rightBlock =
         live.closed > 0
-          ? `<span class="${liveCls}">${fmtUsd(live.netPnlUsd, true)}</span>`
-          : `<span style="color: var(--text-faint)">${lang === 'en' ? 'waiting' : 'ждём сигнал'}</span>`;
+          ? `<div class="strategy-preview-right">
+              <div><span class="${classForValue(live.netPnlUsd)}">${fmtUsd(live.netPnlUsd, true)}</span></div>
+              <div class="strategy-preview-meta">${live.closed} ${lang === 'en' ? 'closed trades' : live.closed === 1 ? 'закрытая сделка' : 'закрытых сделок'}</div>
+            </div>`
+          : '';
       return `
         <a href="/strategies/${escapeHtml(s.code)}" class="strategy-preview-link">
           <div>
             <div class="strategy-preview-name">[STRAT-${escapeHtml(s.code)}] ${escapeHtml(s.symbol ?? 'ANY')} ${escapeHtml(s.timeframe)}m</div>
             <div class="strategy-preview-meta">${btLabel}</div>
           </div>
-          <div class="strategy-preview-right">
-            <div>${liveLabel}</div>
-            <div class="strategy-preview-meta">${live.closed} ${lang === 'en' ? 'closed' : 'закрытых'}</div>
-          </div>
+          ${rightBlock}
         </a>`;
     })
     .slice(0, 5)
