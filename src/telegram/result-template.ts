@@ -121,7 +121,10 @@ function pickStrategyNote(
     bank = TRACK_C_WIN_NOTES;
   } else if (closeReason === 'sl_hit') {
     bank = TRACK_C_LOSS_SL_NOTES;
-  } else if (forceReason === 'strategy_exit') {
+  } else if (forceReason === 'strategy_exit' || forceReason === 'reverse_signal') {
+    // Both are "disciplined strategy-driven exits" emotionally — the
+    // reverse_signal case is just an exit that also opens an opposite
+    // position. Same tail-note bank.
     bank = TRACK_C_LOSS_STRAT_NOTES;
   } else {
     bank = TRACK_C_LOSS_OTHER_NOTES;
@@ -228,11 +231,13 @@ export function resultPost(i: ResultPostInput): string {
       // 🔻 — any other loss path (manual / counter / unknown)
       const lossEmoji =
         i.closeReason === 'sl_hit' ? '🛡' :
-        i.forceCloseReason === 'strategy_exit' ? '🎯' : '🔻';
+        i.forceCloseReason === 'strategy_exit' ? '🎯' :
+        i.forceCloseReason === 'reverse_signal' ? '🔁' : '🔻';
       header = `${lossEmoji} <b>Убыток ${usdStr || i.pnlPct.toFixed(2) + '%'}</b>`;
     }
     if (i.closeReason === 'sl_hit') exitTag = ' (safety SL)';
     else if (i.forceCloseReason === 'strategy_exit') exitTag = ' (сигнал стратегии)';
+    else if (i.forceCloseReason === 'reverse_signal') exitTag = ' (разворот сигнала)';
   } else {
     if (i.closeReason === 'tp_hit') {
       header = `🎉 <b>ЦЕЛЬ ВЗЯТА</b> · сделка ${tradeId}`;

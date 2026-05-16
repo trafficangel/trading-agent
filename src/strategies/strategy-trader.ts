@@ -40,8 +40,15 @@ import {
  *   - Unknown / disabled strategy: ignored
  *   - Symbol mismatch (config has symbol pin): ignored
  *
- * One position per (symbol, strategy_id) at a time — flip-without-exit is
- * NOT auto-handled (forces clean exit→entry sequence in the alert config).
+ * One position per (symbol, strategy_id) at a time. Two flip modes:
+ *   - Default: opposite-side entries while a position is open are
+ *     rejected as `already_open` (operator must configure explicit
+ *     exit alerts in LuxAlgo to close cleanly).
+ *   - `cfg.exitOnReverseSignal=true`: opposite-side entries trigger
+ *     close-and-reopen — existing position closed at the new bar's
+ *     price with `force_close_reason='reverse_signal'`, then a fresh
+ *     entry opens on the new side. Use for strategies with EXIT=null
+ *     where the next entry IS the previous exit.
  */
 
 export type StrategyWebhookResult = {
@@ -174,26 +181,9 @@ async function handleStrategyEntry(
     return { ok: false, reason: 'missing_side' };
   }
 
-  // Single-position-per-(symbol, strategy_id) guard.
-  const occupied = findActiveByStrategy(p.symbol, p.strategy_id);
-  if (occupied) {
-    logger.warn(
-      { strategy_id: p.strategy_id, occupied_id: occupied.id, symbol: p.symbol },
-      'strategy-trader: entry rejected — strategy already has open position',
-    );
-    const occupiedNum = occupied.strategy_trade_num ?? occupied.id;
-    await sendMessage({
-      channel: 'logs',
-      text:
-        `⚠️ <b>Track C duplicate entry ignored</b>\n` +
-        `Стратегия: <code>${p.strategy_id}</code> на ${p.symbol}\n` +
-        `Уже открыта позиция T#${occupiedNum.toString().padStart(3, '0')}. Новый entry webhook отброшен.`,
-      disable_notification: true,
-    }).catch(() => {});
-    return { ok: true, reason: 'already_open', decisionId: occupied.id };
-  }
-
-  // Entry price: payload's `price` (TV bar close) or fallback to ticker.
+  // Resolve entry price up-front — also serves as the close price if
+  // we end up doing a reverse-signal flip below. `price` from payload
+  // (TV bar close) is preferred; fall back to live ticker.
   let entry = p.price ?? null;
   if (entry == null) {
     entry = await getLastPrice(p.symbol);
@@ -201,6 +191,89 @@ async function handleStrategyEntry(
   if (entry == null) {
     logger.warn({ strategy_id: p.strategy_id, symbol: p.symbol }, 'strategy-trader: no entry price available');
     return { ok: false, reason: 'no_price' };
+  }
+
+  // Single-position-per-(symbol, strategy_id) guard, with reverse-signal
+  // override for strategies that express "exit + flip" as a fresh entry
+  // on the opposite side (EXIT=null strategies — see cfg.exitOnReverseSignal).
+  const occupied = findActiveByStrategy(p.symbol, p.strategy_id);
+  if (occupied) {
+    const occupiedSide = (occupied.side ?? null) as 'long' | 'short' | null;
+    const isReverse =
+      cfg.exitOnReverseSignal === true &&
+      occupiedSide !== null &&
+      occupiedSide !== side &&
+      occupied.entry != null;
+
+    if (isReverse) {
+      // Close existing position at the incoming bar's price, then fall
+      // through to open the new opposite-side position. The close is
+      // tagged `force_close_reason='reverse_signal'` so reporting can
+      // distinguish it from clean strategy_exit closes.
+      const closeEntry = occupied.entry!;
+      const slForR = occupied.original_sl ?? occupied.sl ?? closeEntry;
+      const { pnlPct, pnlR } = calcPnl(occupiedSide, closeEntry, slForR, entry);
+      const closed = forceClose({
+        id: occupied.id,
+        closePrice: entry,
+        closeReason: 'manual',
+        pnlPct,
+        pnlR,
+        forceReason: 'reverse_signal',
+      });
+      if (closed) {
+        logger.info(
+          {
+            decision_id: occupied.id,
+            strategy_id: p.strategy_id,
+            symbol: p.symbol,
+            prev_side: occupiedSide,
+            new_side: side,
+            close_price: entry,
+            pnl_pct: pnlPct,
+            pnl_r: pnlR,
+          },
+          'strategy-trader: reverse signal — closed prior position to flip',
+        );
+        await sendStrategyExitPost(
+          occupied.id,
+          p,
+          cfg,
+          closeEntry,
+          entry,
+          occupiedSide,
+          pnlPct,
+          pnlR,
+          occupied.created_at,
+          occupied.filled_at,
+          occupied.sl ?? closeEntry,
+          'reverse_signal',
+        );
+      } else {
+        // Rare race — another path closed it between our check and now.
+        // Continue to open the new position regardless.
+        logger.info(
+          { decision_id: occupied.id },
+          'strategy-trader: reverse signal — prior position already closed elsewhere',
+        );
+      }
+      // Fall through to open the new position.
+    } else {
+      logger.warn(
+        { strategy_id: p.strategy_id, occupied_id: occupied.id, symbol: p.symbol },
+        'strategy-trader: entry rejected — strategy already has open position',
+      );
+      const occupiedNum = occupied.strategy_trade_num ?? occupied.id;
+      await sendMessage({
+        channel: 'logs',
+        text:
+          `⚠️ <b>Track C duplicate entry ignored</b>\n` +
+          `Стратегия: <code>${p.strategy_id}</code> на ${p.symbol}\n` +
+          `Уже открыта позиция T#${occupiedNum.toString().padStart(3, '0')}. Новый entry webhook отброшен.`,
+        disable_notification: true,
+      }).catch(() => {});
+      return { ok: true, reason: 'already_open', decisionId: occupied.id };
+    }
   }
 
   // Safety SL = entry ± entry × slPct
@@ -433,6 +506,10 @@ async function sendStrategyExitPost(
   createdAt: number,
   filledAt: number | null,
   sl: number,
+  /** Why this close happened — controls the tail-note bank and the
+   *  exit-tag label. Defaults to 'strategy_exit' for the standard
+   *  exit-webhook path. Pass 'reverse_signal' from the flip path. */
+  forceCloseReason: 'strategy_exit' | 'reverse_signal' = 'strategy_exit',
 ): Promise<void> {
   const row = findDecisionById(decisionId);
   const num = row?.strategy_trade_num ?? null;
@@ -451,7 +528,7 @@ async function sendStrategyExitPost(
     durationMs: Date.now() - (filledAt ?? createdAt),
     track: 'strategy',
     notionalUsd: TRACK_C_NOTIONAL_USD,
-    forceCloseReason: 'strategy_exit',
+    forceCloseReason,
     strategyCode: cfg.code,
     strategyName: name,
     strategyTradeNum: num,

@@ -1,0 +1,1140 @@
+{
+  "url": "https://www.luxalgo.com/chat/p19leyc5pzvt3s32mj36rnzn",
+  "scrapedAt": 1778957477847,
+  "performance": {
+    "symbol": "XRPUSDT",
+    "timeframe": "15",
+    "strategyTitle": "Contrarian Any - Trend Catcher - Money Flow Above 50",
+    "evaluationStart": "20 октября 2025 г.",
+    "longConditions": "сигнал Contrarian Any Bullish, фильтр Trend Catcher Bearish и Money Flow Above 50.",
+    "shortConditions": "сигнал Contrarian Any Bearish, фильтр Trend Catcher Bullish и Money Flow Below 50.",
+    "exitCondition": "отсутствует (позиция закрывается при обратном сигнале).",
+    "orderSize": "используется единичный объем (unit order size).",
+    "performanceSummaryProse": null,
+    "netProfit": null,
+    "trades": null,
+    "winRatePct": null,
+    "winsLossesLabel": null,
+    "maxDrawdownUsdt": null,
+    "maxDrawdownPct": null,
+    "profitFactor": null,
+    "detailed": {
+      "netProfit": {
+        "all": 2.48,
+        "long": 0.73,
+        "short": 1.75
+      },
+      "cagrPct": {
+        "all": 0.05,
+        "long": 0.01,
+        "short": 0.03
+      },
+      "grossProfit": {
+        "all": 3.84,
+        "long": 1.55,
+        "short": 2.28
+      },
+      "grossLoss": {
+        "all": 1.36,
+        "long": 0.82,
+        "short": 0.54
+      },
+      "profitFactor": {
+        "all": 2.82,
+        "long": 1.89,
+        "short": 4.25
+      },
+      "avgPerDay": {
+        "all": 0.03,
+        "long": 0.02,
+        "short": 0.04
+      },
+      "avgPerWeek": {
+        "all": 0.09,
+        "long": 0.03,
+        "short": 0.07
+      },
+      "drawdown": {
+        "usdt": 0.39,
+        "pct": 0
+      }
+    }
+  },
+  "tradesAnalysis": {
+    "closedTrades": {
+      "all": 101,
+      "long": 51,
+      "short": 50
+    },
+    "winningTrades": {
+      "all": 67,
+      "long": 34,
+      "short": 33
+    },
+    "losingTrades": {
+      "all": 34,
+      "long": 17,
+      "short": 17
+    },
+    "winRatePct": {
+      "all": 66.34,
+      "long": 66.67,
+      "short": 66
+    },
+    "avgPnl": {
+      "all": 0.02,
+      "long": 0.01,
+      "short": 0.03
+    },
+    "avgWinningTrade": {
+      "all": 0.06,
+      "long": 0.05,
+      "short": 0.07
+    },
+    "avgLosingTrade": {
+      "all": -0.04,
+      "long": -0.05,
+      "short": -0.03
+    },
+    "largestWinningTrade": {
+      "all": 0.35,
+      "long": 0.29,
+      "short": 0.35
+    },
+    "largestLosingTrade": {
+      "all": -0.26,
+      "long": -0.14,
+      "short": -0.26
+    },
+    "avgTradeDurationBars": {
+      "all": 188.79,
+      "long": 166.24,
+      "short": 211.8
+    },
+    "avgWinningDurationBars": {
+      "all": 183.37,
+      "long": 180.09,
+      "short": 186.76
+    },
+    "avgLosingDurationBars": {
+      "all": 199.47,
+      "long": 138.53,
+      "short": 260.41
+    }
+  },
+  "tradesLog": [
+    {
+      "num": 1,
+      "side": "long",
+      "entryAt": 1760978700000,
+      "entryPrice": 2.43495,
+      "exitAt": 1761468300000,
+      "exitPrice": 2.63545,
+      "netPnlUsdt": 0.2,
+      "cumulativePnlUsdt": 0.2
+    },
+    {
+      "num": 2,
+      "side": "short",
+      "entryAt": 1761468300000,
+      "entryPrice": 2.63545,
+      "exitAt": 1761598800000,
+      "exitPrice": 2.62675,
+      "netPnlUsdt": 0.01,
+      "cumulativePnlUsdt": 0.21
+    },
+    {
+      "num": 3,
+      "side": "long",
+      "entryAt": 1761598800000,
+      "entryPrice": 2.62675,
+      "exitAt": 1761641100000,
+      "exitPrice": 2.65895,
+      "netPnlUsdt": 0.03,
+      "cumulativePnlUsdt": 0.24
+    },
+    {
+      "num": 4,
+      "side": "short",
+      "entryAt": 1761641100000,
+      "entryPrice": 2.65895,
+      "exitAt": 1761682500000,
+      "exitPrice": 2.616,
+      "netPnlUsdt": 0.04,
+      "cumulativePnlUsdt": 0.28
+    },
+    {
+      "num": 5,
+      "side": "long",
+      "entryAt": 1761682500000,
+      "entryPrice": 2.616,
+      "exitAt": 1761873300000,
+      "exitPrice": 2.4731,
+      "netPnlUsdt": -0.14,
+      "cumulativePnlUsdt": 0.14
+    },
+    {
+      "num": 6,
+      "side": "short",
+      "entryAt": 1761873300000,
+      "entryPrice": 2.4731,
+      "exitAt": 1761931800000,
+      "exitPrice": 2.4918,
+      "netPnlUsdt": -0.02,
+      "cumulativePnlUsdt": 0.12
+    },
+    {
+      "num": 7,
+      "side": "long",
+      "entryAt": 1761931800000,
+      "entryPrice": 2.4918,
+      "exitAt": 1761940800000,
+      "exitPrice": 2.5437,
+      "netPnlUsdt": 0.05,
+      "cumulativePnlUsdt": 0.17
+    },
+    {
+      "num": 8,
+      "side": "short",
+      "entryAt": 1761940800000,
+      "entryPrice": 2.5437,
+      "exitAt": 1762133400000,
+      "exitPrice": 2.49285,
+      "netPnlUsdt": 0.05,
+      "cumulativePnlUsdt": 0.23
+    },
+    {
+      "num": 9,
+      "side": "long",
+      "entryAt": 1762133400000,
+      "entryPrice": 2.49285,
+      "exitAt": 1762227900000,
+      "exitPrice": 2.35965,
+      "netPnlUsdt": -0.13,
+      "cumulativePnlUsdt": 0.09
+    },
+    {
+      "num": 10,
+      "side": "short",
+      "entryAt": 1762227900000,
+      "entryPrice": 2.35965,
+      "exitAt": 1762274700000,
+      "exitPrice": 2.24925,
+      "netPnlUsdt": 0.11,
+      "cumulativePnlUsdt": 0.2
+    },
+    {
+      "num": 11,
+      "side": "long",
+      "entryAt": 1762274700000,
+      "entryPrice": 2.24925,
+      "exitAt": 1762313400000,
+      "exitPrice": 2.24145,
+      "netPnlUsdt": -0.01,
+      "cumulativePnlUsdt": 0.19
+    },
+    {
+      "num": 12,
+      "side": "short",
+      "entryAt": 1762313400000,
+      "entryPrice": 2.24145,
+      "exitAt": 1762657200000,
+      "exitPrice": 2.25875,
+      "netPnlUsdt": -0.02,
+      "cumulativePnlUsdt": 0.18
+    },
+    {
+      "num": 13,
+      "side": "long",
+      "entryAt": 1762657200000,
+      "entryPrice": 2.25875,
+      "exitAt": 1762937100000,
+      "exitPrice": 2.4092,
+      "netPnlUsdt": 0.15,
+      "cumulativePnlUsdt": 0.33
+    },
+    {
+      "num": 14,
+      "side": "short",
+      "entryAt": 1762937100000,
+      "entryPrice": 2.4092,
+      "exitAt": 1762959600000,
+      "exitPrice": 2.41255,
+      "netPnlUsdt": 0,
+      "cumulativePnlUsdt": 0.32
+    },
+    {
+      "num": 15,
+      "side": "long",
+      "entryAt": 1762959600000,
+      "entryPrice": 2.41255,
+      "exitAt": 1763131500000,
+      "exitPrice": 2.30535,
+      "netPnlUsdt": -0.11,
+      "cumulativePnlUsdt": 0.22
+    },
+    {
+      "num": 16,
+      "side": "short",
+      "entryAt": 1763131500000,
+      "entryPrice": 2.30535,
+      "exitAt": 1763196300000,
+      "exitPrice": 2.25825,
+      "netPnlUsdt": 0.05,
+      "cumulativePnlUsdt": 0.26
+    },
+    {
+      "num": 17,
+      "side": "long",
+      "entryAt": 1763196300000,
+      "entryPrice": 2.25825,
+      "exitAt": 1763390700000,
+      "exitPrice": 2.2675,
+      "netPnlUsdt": 0.01,
+      "cumulativePnlUsdt": 0.27
+    },
+    {
+      "num": 18,
+      "side": "short",
+      "entryAt": 1763390700000,
+      "entryPrice": 2.2675,
+      "exitAt": 1763800200000,
+      "exitPrice": 1.92135,
+      "netPnlUsdt": 0.35,
+      "cumulativePnlUsdt": 0.62
+    },
+    {
+      "num": 19,
+      "side": "long",
+      "entryAt": 1763800200000,
+      "entryPrice": 1.92135,
+      "exitAt": 1764112500000,
+      "exitPrice": 2.2163,
+      "netPnlUsdt": 0.29,
+      "cumulativePnlUsdt": 0.91
+    },
+    {
+      "num": 20,
+      "side": "short",
+      "entryAt": 1764112500000,
+      "entryPrice": 2.2163,
+      "exitAt": 1764130500000,
+      "exitPrice": 2.17325,
+      "netPnlUsdt": 0.04,
+      "cumulativePnlUsdt": 0.96
+    },
+    {
+      "num": 21,
+      "side": "long",
+      "entryAt": 1764130500000,
+      "entryPrice": 2.17325,
+      "exitAt": 1764260100000,
+      "exitPrice": 2.21345,
+      "netPnlUsdt": 0.04,
+      "cumulativePnlUsdt": 1
+    },
+    {
+      "num": 22,
+      "side": "short",
+      "entryAt": 1764260100000,
+      "entryPrice": 2.21345,
+      "exitAt": 1764288900000,
+      "exitPrice": 2.1957,
+      "netPnlUsdt": 0.02,
+      "cumulativePnlUsdt": 1.02
+    },
+    {
+      "num": 23,
+      "side": "long",
+      "entryAt": 1764288900000,
+      "entryPrice": 2.1957,
+      "exitAt": 1764309600000,
+      "exitPrice": 2.21415,
+      "netPnlUsdt": 0.02,
+      "cumulativePnlUsdt": 1.03
+    },
+    {
+      "num": 24,
+      "side": "short",
+      "entryAt": 1764309600000,
+      "entryPrice": 2.21415,
+      "exitAt": 1764329400000,
+      "exitPrice": 2.1952,
+      "netPnlUsdt": 0.02,
+      "cumulativePnlUsdt": 1.05
+    },
+    {
+      "num": 25,
+      "side": "long",
+      "entryAt": 1764329400000,
+      "entryPrice": 2.1952,
+      "exitAt": 1764343800000,
+      "exitPrice": 2.26135,
+      "netPnlUsdt": 0.07,
+      "cumulativePnlUsdt": 1.12
+    },
+    {
+      "num": 26,
+      "side": "short",
+      "entryAt": 1764343800000,
+      "entryPrice": 2.26135,
+      "exitAt": 1764515700000,
+      "exitPrice": 2.18845,
+      "netPnlUsdt": 0.07,
+      "cumulativePnlUsdt": 1.19
+    },
+    {
+      "num": 27,
+      "side": "long",
+      "entryAt": 1764515700000,
+      "entryPrice": 2.18845,
+      "exitAt": 1764947700000,
+      "exitPrice": 2.08665,
+      "netPnlUsdt": -0.1,
+      "cumulativePnlUsdt": 1.09
+    },
+    {
+      "num": 28,
+      "side": "short",
+      "entryAt": 1764947700000,
+      "entryPrice": 2.08665,
+      "exitAt": 1765011600000,
+      "exitPrice": 2.0175,
+      "netPnlUsdt": 0.07,
+      "cumulativePnlUsdt": 1.16
+    },
+    {
+      "num": 29,
+      "side": "long",
+      "entryAt": 1765011600000,
+      "entryPrice": 2.0175,
+      "exitAt": 1765123200000,
+      "exitPrice": 2.05265,
+      "netPnlUsdt": 0.04,
+      "cumulativePnlUsdt": 1.19
+    },
+    {
+      "num": 30,
+      "side": "short",
+      "entryAt": 1765123200000,
+      "entryPrice": 2.05265,
+      "exitAt": 1765144800000,
+      "exitPrice": 2.049,
+      "netPnlUsdt": 0,
+      "cumulativePnlUsdt": 1.2
+    },
+    {
+      "num": 31,
+      "side": "long",
+      "entryAt": 1765144800000,
+      "entryPrice": 2.049,
+      "exitAt": 1765394100000,
+      "exitPrice": 2.0736,
+      "netPnlUsdt": 0.02,
+      "cumulativePnlUsdt": 1.22
+    },
+    {
+      "num": 32,
+      "side": "short",
+      "entryAt": 1765394100000,
+      "entryPrice": 2.0736,
+      "exitAt": 1765755900000,
+      "exitPrice": 1.97845,
+      "netPnlUsdt": 0.1,
+      "cumulativePnlUsdt": 1.32
+    },
+    {
+      "num": 33,
+      "side": "long",
+      "entryAt": 1765755900000,
+      "entryPrice": 1.97845,
+      "exitAt": 1765881900000,
+      "exitPrice": 1.90495,
+      "netPnlUsdt": -0.07,
+      "cumulativePnlUsdt": 1.24
+    },
+    {
+      "num": 34,
+      "side": "short",
+      "entryAt": 1765881900000,
+      "entryPrice": 1.90495,
+      "exitAt": 1766078100000,
+      "exitPrice": 1.86865,
+      "netPnlUsdt": 0.04,
+      "cumulativePnlUsdt": 1.28
+    },
+    {
+      "num": 35,
+      "side": "long",
+      "entryAt": 1766078100000,
+      "entryPrice": 1.86865,
+      "exitAt": 1766115000000,
+      "exitPrice": 1.84135,
+      "netPnlUsdt": -0.03,
+      "cumulativePnlUsdt": 1.25
+    },
+    {
+      "num": 36,
+      "side": "short",
+      "entryAt": 1766115000000,
+      "entryPrice": 1.84135,
+      "exitAt": 1766471400000,
+      "exitPrice": 1.87595,
+      "netPnlUsdt": -0.03,
+      "cumulativePnlUsdt": 1.22
+    },
+    {
+      "num": 37,
+      "side": "long",
+      "entryAt": 1766471400000,
+      "entryPrice": 1.87595,
+      "exitAt": 1766487600000,
+      "exitPrice": 1.89885,
+      "netPnlUsdt": 0.02,
+      "cumulativePnlUsdt": 1.24
+    },
+    {
+      "num": 38,
+      "side": "short",
+      "entryAt": 1766487600000,
+      "entryPrice": 1.89885,
+      "exitAt": 1766498400000,
+      "exitPrice": 1.87905,
+      "netPnlUsdt": 0.02,
+      "cumulativePnlUsdt": 1.26
+    },
+    {
+      "num": 39,
+      "side": "long",
+      "entryAt": 1766498400000,
+      "entryPrice": 1.87905,
+      "exitAt": 1766573100000,
+      "exitPrice": 1.86855,
+      "netPnlUsdt": -0.01,
+      "cumulativePnlUsdt": 1.25
+    },
+    {
+      "num": 40,
+      "side": "short",
+      "entryAt": 1766573100000,
+      "entryPrice": 1.86855,
+      "exitAt": 1767001500000,
+      "exitPrice": 1.87405,
+      "netPnlUsdt": -0.01,
+      "cumulativePnlUsdt": 1.25
+    },
+    {
+      "num": 41,
+      "side": "long",
+      "entryAt": 1767001500000,
+      "entryPrice": 1.87405,
+      "exitAt": 1767067200000,
+      "exitPrice": 1.8612,
+      "netPnlUsdt": -0.01,
+      "cumulativePnlUsdt": 1.23
+    },
+    {
+      "num": 42,
+      "side": "short",
+      "entryAt": 1767067200000,
+      "entryPrice": 1.8612,
+      "exitAt": 1767620700000,
+      "exitPrice": 2.11625,
+      "netPnlUsdt": -0.26,
+      "cumulativePnlUsdt": 0.98
+    },
+    {
+      "num": 43,
+      "side": "long",
+      "entryAt": 1767620700000,
+      "entryPrice": 2.11625,
+      "exitAt": 1767972600000,
+      "exitPrice": 2.1452,
+      "netPnlUsdt": 0.03,
+      "cumulativePnlUsdt": 1.01
+    },
+    {
+      "num": 44,
+      "side": "short",
+      "entryAt": 1767972600000,
+      "entryPrice": 2.1452,
+      "exitAt": 1767983400000,
+      "exitPrice": 2.0834,
+      "netPnlUsdt": 0.06,
+      "cumulativePnlUsdt": 1.07
+    },
+    {
+      "num": 45,
+      "side": "long",
+      "entryAt": 1767983400000,
+      "entryPrice": 2.0834,
+      "exitAt": 1768402800000,
+      "exitPrice": 2.15985,
+      "netPnlUsdt": 0.08,
+      "cumulativePnlUsdt": 1.15
+    },
+    {
+      "num": 46,
+      "side": "short",
+      "entryAt": 1768402800000,
+      "entryPrice": 2.15985,
+      "exitAt": 1768996800000,
+      "exitPrice": 1.88965,
+      "netPnlUsdt": 0.27,
+      "cumulativePnlUsdt": 1.42
+    },
+    {
+      "num": 47,
+      "side": "long",
+      "entryAt": 1768996800000,
+      "entryPrice": 1.88965,
+      "exitAt": 1769434200000,
+      "exitPrice": 1.91265,
+      "netPnlUsdt": 0.02,
+      "cumulativePnlUsdt": 1.44
+    },
+    {
+      "num": 48,
+      "side": "short",
+      "entryAt": 1769434200000,
+      "entryPrice": 1.91265,
+      "exitAt": 1769737500000,
+      "exitPrice": 1.7448,
+      "netPnlUsdt": 0.17,
+      "cumulativePnlUsdt": 1.61
+    },
+    {
+      "num": 49,
+      "side": "long",
+      "entryAt": 1769737500000,
+      "entryPrice": 1.7448,
+      "exitAt": 1769799600000,
+      "exitPrice": 1.7731,
+      "netPnlUsdt": 0.03,
+      "cumulativePnlUsdt": 1.63
+    },
+    {
+      "num": 50,
+      "side": "short",
+      "entryAt": 1769799600000,
+      "entryPrice": 1.7731,
+      "exitAt": 1769845500000,
+      "exitPrice": 1.71685,
+      "netPnlUsdt": 0.06,
+      "cumulativePnlUsdt": 1.69
+    },
+    {
+      "num": 51,
+      "side": "long",
+      "entryAt": 1769845500000,
+      "entryPrice": 1.71685,
+      "exitAt": 1769902200000,
+      "exitPrice": 1.6478,
+      "netPnlUsdt": -0.07,
+      "cumulativePnlUsdt": 1.62
+    },
+    {
+      "num": 52,
+      "side": "short",
+      "entryAt": 1769902200000,
+      "entryPrice": 1.6478,
+      "exitAt": 1770111000000,
+      "exitPrice": 1.596,
+      "netPnlUsdt": 0.05,
+      "cumulativePnlUsdt": 1.67
+    },
+    {
+      "num": 53,
+      "side": "long",
+      "entryAt": 1770111000000,
+      "entryPrice": 1.596,
+      "exitAt": 1770151500000,
+      "exitPrice": 1.6138,
+      "netPnlUsdt": 0.02,
+      "cumulativePnlUsdt": 1.69
+    },
+    {
+      "num": 54,
+      "side": "short",
+      "entryAt": 1770151500000,
+      "entryPrice": 1.6138,
+      "exitAt": 1770447600000,
+      "exitPrice": 1.43415,
+      "netPnlUsdt": 0.18,
+      "cumulativePnlUsdt": 1.87
+    },
+    {
+      "num": 55,
+      "side": "long",
+      "entryAt": 1770447600000,
+      "entryPrice": 1.43415,
+      "exitAt": 1770539400000,
+      "exitPrice": 1.43755,
+      "netPnlUsdt": 0,
+      "cumulativePnlUsdt": 1.87
+    },
+    {
+      "num": 56,
+      "side": "short",
+      "entryAt": 1770539400000,
+      "entryPrice": 1.43755,
+      "exitAt": 1770569100000,
+      "exitPrice": 1.42445,
+      "netPnlUsdt": 0.01,
+      "cumulativePnlUsdt": 1.89
+    },
+    {
+      "num": 57,
+      "side": "long",
+      "entryAt": 1770569100000,
+      "entryPrice": 1.42445,
+      "exitAt": 1770745500000,
+      "exitPrice": 1.42535,
+      "netPnlUsdt": 0,
+      "cumulativePnlUsdt": 1.89
+    },
+    {
+      "num": 58,
+      "side": "short",
+      "entryAt": 1770745500000,
+      "entryPrice": 1.42535,
+      "exitAt": 1770822000000,
+      "exitPrice": 1.3619,
+      "netPnlUsdt": 0.06,
+      "cumulativePnlUsdt": 1.95
+    },
+    {
+      "num": 59,
+      "side": "long",
+      "entryAt": 1770822000000,
+      "entryPrice": 1.3619,
+      "exitAt": 1771429500000,
+      "exitPrice": 1.48335,
+      "netPnlUsdt": 0.12,
+      "cumulativePnlUsdt": 2.07
+    },
+    {
+      "num": 60,
+      "side": "short",
+      "entryAt": 1771429500000,
+      "entryPrice": 1.48335,
+      "exitAt": 1771762500000,
+      "exitPrice": 1.4133,
+      "netPnlUsdt": 0.07,
+      "cumulativePnlUsdt": 2.14
+    },
+    {
+      "num": 61,
+      "side": "long",
+      "entryAt": 1771762500000,
+      "entryPrice": 1.4133,
+      "exitAt": 1771982100000,
+      "exitPrice": 1.3837,
+      "netPnlUsdt": -0.03,
+      "cumulativePnlUsdt": 2.11
+    },
+    {
+      "num": 62,
+      "side": "short",
+      "entryAt": 1771982100000,
+      "entryPrice": 1.3837,
+      "exitAt": 1772187300000,
+      "exitPrice": 1.3938,
+      "netPnlUsdt": -0.01,
+      "cumulativePnlUsdt": 2.1
+    },
+    {
+      "num": 63,
+      "side": "long",
+      "entryAt": 1772187300000,
+      "entryPrice": 1.3938,
+      "exitAt": 1772287200000,
+      "exitPrice": 1.3415,
+      "netPnlUsdt": -0.05,
+      "cumulativePnlUsdt": 2.05
+    },
+    {
+      "num": 64,
+      "side": "short",
+      "entryAt": 1772287200000,
+      "entryPrice": 1.3415,
+      "exitAt": 1772393400000,
+      "exitPrice": 1.359,
+      "netPnlUsdt": -0.02,
+      "cumulativePnlUsdt": 2.03
+    },
+    {
+      "num": 65,
+      "side": "long",
+      "entryAt": 1772393400000,
+      "entryPrice": 1.359,
+      "exitAt": 1772414100000,
+      "exitPrice": 1.3754,
+      "netPnlUsdt": 0.02,
+      "cumulativePnlUsdt": 2.05
+    },
+    {
+      "num": 66,
+      "side": "short",
+      "entryAt": 1772414100000,
+      "entryPrice": 1.3754,
+      "exitAt": 1772938800000,
+      "exitPrice": 1.3479,
+      "netPnlUsdt": 0.03,
+      "cumulativePnlUsdt": 2.08
+    },
+    {
+      "num": 67,
+      "side": "long",
+      "entryAt": 1772938800000,
+      "entryPrice": 1.3479,
+      "exitAt": 1772954100000,
+      "exitPrice": 1.3595,
+      "netPnlUsdt": 0.01,
+      "cumulativePnlUsdt": 2.09
+    },
+    {
+      "num": 68,
+      "side": "short",
+      "entryAt": 1772954100000,
+      "entryPrice": 1.3595,
+      "exitAt": 1772972100000,
+      "exitPrice": 1.3481,
+      "netPnlUsdt": 0.01,
+      "cumulativePnlUsdt": 2.1
+    },
+    {
+      "num": 69,
+      "side": "long",
+      "entryAt": 1772972100000,
+      "entryPrice": 1.3481,
+      "exitAt": 1772998200000,
+      "exitPrice": 1.3568,
+      "netPnlUsdt": 0.01,
+      "cumulativePnlUsdt": 2.11
+    },
+    {
+      "num": 70,
+      "side": "short",
+      "entryAt": 1772998200000,
+      "entryPrice": 1.3568,
+      "exitAt": 1773326700000,
+      "exitPrice": 1.3703,
+      "netPnlUsdt": -0.01,
+      "cumulativePnlUsdt": 2.1
+    },
+    {
+      "num": 71,
+      "side": "long",
+      "entryAt": 1773326700000,
+      "entryPrice": 1.3703,
+      "exitAt": 1773357300000,
+      "exitPrice": 1.3873,
+      "netPnlUsdt": 0.02,
+      "cumulativePnlUsdt": 2.11
+    },
+    {
+      "num": 72,
+      "side": "short",
+      "entryAt": 1773357300000,
+      "entryPrice": 1.3873,
+      "exitAt": 1773416700000,
+      "exitPrice": 1.4125,
+      "netPnlUsdt": -0.03,
+      "cumulativePnlUsdt": 2.09
+    },
+    {
+      "num": 73,
+      "side": "long",
+      "entryAt": 1773416700000,
+      "entryPrice": 1.4125,
+      "exitAt": 1773673200000,
+      "exitPrice": 1.5093,
+      "netPnlUsdt": 0.1,
+      "cumulativePnlUsdt": 2.18
+    },
+    {
+      "num": 74,
+      "side": "short",
+      "entryAt": 1773673200000,
+      "entryPrice": 1.5093,
+      "exitAt": 1773722700000,
+      "exitPrice": 1.5279,
+      "netPnlUsdt": -0.02,
+      "cumulativePnlUsdt": 2.17
+    },
+    {
+      "num": 75,
+      "side": "long",
+      "entryAt": 1773722700000,
+      "entryPrice": 1.5279,
+      "exitAt": 1773765000000,
+      "exitPrice": 1.522,
+      "netPnlUsdt": -0.01,
+      "cumulativePnlUsdt": 2.16
+    },
+    {
+      "num": 76,
+      "side": "short",
+      "entryAt": 1773765000000,
+      "entryPrice": 1.522,
+      "exitAt": 1774137600000,
+      "exitPrice": 1.4087,
+      "netPnlUsdt": 0.11,
+      "cumulativePnlUsdt": 2.27
+    },
+    {
+      "num": 77,
+      "side": "long",
+      "entryAt": 1774137600000,
+      "entryPrice": 1.4087,
+      "exitAt": 1774242900000,
+      "exitPrice": 1.3934,
+      "netPnlUsdt": -0.02,
+      "cumulativePnlUsdt": 2.26
+    },
+    {
+      "num": 78,
+      "side": "short",
+      "entryAt": 1774242900000,
+      "entryPrice": 1.3934,
+      "exitAt": 1774359900000,
+      "exitPrice": 1.4043,
+      "netPnlUsdt": -0.01,
+      "cumulativePnlUsdt": 2.25
+    },
+    {
+      "num": 79,
+      "side": "long",
+      "entryAt": 1774359900000,
+      "entryPrice": 1.4043,
+      "exitAt": 1774385100000,
+      "exitPrice": 1.4071,
+      "netPnlUsdt": 0,
+      "cumulativePnlUsdt": 2.25
+    },
+    {
+      "num": 80,
+      "side": "short",
+      "entryAt": 1774385100000,
+      "entryPrice": 1.4071,
+      "exitAt": 1774634400000,
+      "exitPrice": 1.324,
+      "netPnlUsdt": 0.08,
+      "cumulativePnlUsdt": 2.33
+    },
+    {
+      "num": 81,
+      "side": "long",
+      "entryAt": 1774634400000,
+      "entryPrice": 1.324,
+      "exitAt": 1774920600000,
+      "exitPrice": 1.3365,
+      "netPnlUsdt": 0.01,
+      "cumulativePnlUsdt": 2.35
+    },
+    {
+      "num": 82,
+      "side": "short",
+      "entryAt": 1774920600000,
+      "entryPrice": 1.3365,
+      "exitAt": 1774930500000,
+      "exitPrice": 1.3226,
+      "netPnlUsdt": 0.01,
+      "cumulativePnlUsdt": 2.36
+    },
+    {
+      "num": 83,
+      "side": "long",
+      "entryAt": 1774930500000,
+      "entryPrice": 1.3226,
+      "exitAt": 1775161800000,
+      "exitPrice": 1.3163,
+      "netPnlUsdt": -0.01,
+      "cumulativePnlUsdt": 2.35
+    },
+    {
+      "num": 84,
+      "side": "short",
+      "entryAt": 1775161800000,
+      "entryPrice": 1.3163,
+      "exitAt": 1775697300000,
+      "exitPrice": 1.3328,
+      "netPnlUsdt": -0.02,
+      "cumulativePnlUsdt": 2.34
+    },
+    {
+      "num": 85,
+      "side": "long",
+      "entryAt": 1775697300000,
+      "entryPrice": 1.3328,
+      "exitAt": 1775747700000,
+      "exitPrice": 1.3375,
+      "netPnlUsdt": 0,
+      "cumulativePnlUsdt": 2.34
+    },
+    {
+      "num": 86,
+      "side": "short",
+      "entryAt": 1775747700000,
+      "entryPrice": 1.3375,
+      "exitAt": 1775778300000,
+      "exitPrice": 1.344,
+      "netPnlUsdt": -0.01,
+      "cumulativePnlUsdt": 2.33
+    },
+    {
+      "num": 87,
+      "side": "long",
+      "entryAt": 1775778300000,
+      "entryPrice": 1.344,
+      "exitAt": 1775830500000,
+      "exitPrice": 1.3474,
+      "netPnlUsdt": 0,
+      "cumulativePnlUsdt": 2.34
+    },
+    {
+      "num": 88,
+      "side": "short",
+      "entryAt": 1775830500000,
+      "entryPrice": 1.3474,
+      "exitAt": 1775949300000,
+      "exitPrice": 1.3541,
+      "netPnlUsdt": -0.01,
+      "cumulativePnlUsdt": 2.33
+    },
+    {
+      "num": 89,
+      "side": "long",
+      "entryAt": 1775949300000,
+      "entryPrice": 1.3541,
+      "exitAt": 1776016800000,
+      "exitPrice": 1.3329,
+      "netPnlUsdt": -0.02,
+      "cumulativePnlUsdt": 2.31
+    },
+    {
+      "num": 90,
+      "side": "short",
+      "entryAt": 1776016800000,
+      "entryPrice": 1.3329,
+      "exitAt": 1776033000000,
+      "exitPrice": 1.3262,
+      "netPnlUsdt": 0.01,
+      "cumulativePnlUsdt": 2.32
+    },
+    {
+      "num": 91,
+      "side": "long",
+      "entryAt": 1776033000000,
+      "entryPrice": 1.3262,
+      "exitAt": 1776174300000,
+      "exitPrice": 1.3826,
+      "netPnlUsdt": 0.06,
+      "cumulativePnlUsdt": 2.37
+    },
+    {
+      "num": 92,
+      "side": "short",
+      "entryAt": 1776174300000,
+      "entryPrice": 1.3826,
+      "exitAt": 1776348000000,
+      "exitPrice": 1.4071,
+      "netPnlUsdt": -0.02,
+      "cumulativePnlUsdt": 2.35
+    },
+    {
+      "num": 93,
+      "side": "long",
+      "entryAt": 1776348000000,
+      "entryPrice": 1.4071,
+      "exitAt": 1776416400000,
+      "exitPrice": 1.44675,
+      "netPnlUsdt": 0.04,
+      "cumulativePnlUsdt": 2.39
+    },
+    {
+      "num": 94,
+      "side": "short",
+      "entryAt": 1776416400000,
+      "entryPrice": 1.44675,
+      "exitAt": 1776579300000,
+      "exitPrice": 1.4205,
+      "netPnlUsdt": 0.03,
+      "cumulativePnlUsdt": 2.41
+    },
+    {
+      "num": 95,
+      "side": "long",
+      "entryAt": 1776579300000,
+      "entryPrice": 1.4205,
+      "exitAt": 1776753900000,
+      "exitPrice": 1.4377,
+      "netPnlUsdt": 0.02,
+      "cumulativePnlUsdt": 2.43
+    },
+    {
+      "num": 96,
+      "side": "short",
+      "entryAt": 1776753900000,
+      "entryPrice": 1.4377,
+      "exitAt": 1776775500000,
+      "exitPrice": 1.4286,
+      "netPnlUsdt": 0.01,
+      "cumulativePnlUsdt": 2.44
+    },
+    {
+      "num": 97,
+      "side": "long",
+      "entryAt": 1776775500000,
+      "entryPrice": 1.4286,
+      "exitAt": 1777029300000,
+      "exitPrice": 1.4368,
+      "netPnlUsdt": 0.01,
+      "cumulativePnlUsdt": 2.45
+    },
+    {
+      "num": 98,
+      "side": "short",
+      "entryAt": 1777029300000,
+      "entryPrice": 1.4368,
+      "exitAt": 1777524300000,
+      "exitPrice": 1.3614,
+      "netPnlUsdt": 0.08,
+      "cumulativePnlUsdt": 2.52
+    },
+    {
+      "num": 99,
+      "side": "long",
+      "entryAt": 1777524300000,
+      "entryPrice": 1.3614,
+      "exitAt": 1777577400000,
+      "exitPrice": 1.3731,
+      "netPnlUsdt": 0.01,
+      "cumulativePnlUsdt": 2.54
+    },
+    {
+      "num": 100,
+      "side": "short",
+      "entryAt": 1777577400000,
+      "entryPrice": 1.3731,
+      "exitAt": 1778074200000,
+      "exitPrice": 1.426,
+      "netPnlUsdt": -0.05,
+      "cumulativePnlUsdt": 2.48
+    },
+    {
+      "num": 101,
+      "side": "long",
+      "entryAt": 1778074200000,
+      "entryPrice": 1.426,
+      "exitAt": 1778139900000,
+      "exitPrice": 1.4206,
+      "netPnlUsdt": -0.01,
+      "cumulativePnlUsdt": 2.48
+    }
+  ],
+  "totalTradesInStrategy": 101,
+  "tradesLogCap": 150,
+  "tradesLogCapped": false
+}

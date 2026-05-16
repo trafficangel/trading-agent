@@ -122,6 +122,21 @@ export type StrategyConfig = {
    *  instead of the cryptic `description` string. If not set, falls
    *  back to `symbol + " " + timeframe + "m"`. */
   name?: string;
+  /** When true, an incoming entry webhook on the OPPOSITE side of the
+   *  currently-open position triggers an immediate close-and-reopen:
+   *  the current position is force-closed at the incoming price with
+   *  `force_close_reason='reverse_signal'`, then a new position opens
+   *  on the new side.
+   *
+   *  Default false → opposite-side entries are rejected as
+   *  `already_open` (same as same-side duplicates).
+   *
+   *  Use this for strategies where LuxAlgo does NOT emit an explicit
+   *  exit alert (EXIT=null) and instead expresses "exit + reverse" as
+   *  a fresh entry on the opposite side. STRAT-002 is the prototypical
+   *  case; STRAT-001 has its own EXIT alert and should keep this OFF
+   *  to avoid double-closing. */
+  exitOnReverseSignal?: boolean;
 };
 
 /**
@@ -148,6 +163,89 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   // strategy hit its own worst-case excursions; 2.5% acts as a safety
   // governor that caps the tail. After 10-20 live trades we revisit
   // based on observed sl_hit ratio (>20% → widen; near zero → confirm).
+  // Second registered strategy (May 16, 2026).
+  // Backtest scraped from
+  //   https://www.luxalgo.com/chat/p19leyc5pzvt3s32mj36rnzn
+  // Period Oct 20 2025 → May 06 2026 (198 days, full LuxAlgo window).
+  // Recomputed on our standard $1000 notional + Bybit commission:
+  //   - 101 trades, 66W / 35L → 65.35% WR
+  //   - Profit factor 2.59
+  //   - Net +$1214.18 (+121.42% on $1000 notional), CAGR 223.8%
+  //   - Max DD 19.23% ($192.28) — MUCH higher than STRAT-001 (0.95%)
+  //   - Largest loss -$138.14 (-13.81%) — also significantly worse
+  //   - Avg loss -$21.85 (-2.19%), avg win +$29.99 (+3.00%)
+  //   - Long 51 trades +38.27%, Short 50 trades +83.15%
+  //
+  // SAFETY-SL CALIBRATION:
+  // Importer suggested 6.5% (90th-pct loss × 1.2 buffer). Operator
+  // chose 2.5% to match STRAT-001 — deliberately TIGHTER than the
+  // strategy's natural worst-case excursions. Trade-off: the safety SL
+  // will fire on ~25-30% of the strategy's natural losers (those with
+  // adverse excursion > 2.5%), capping each at -2.5% instead of letting
+  // them run to -5-14%. Expected effect on live PnL: lower expectancy
+  // per trade but tighter max DD. Revisit after 10-20 live trades based
+  // on observed sl_hit ratio + comparison to ideal (strategy_exit) PnL.
+  //
+  // STRATEGY FORMULATION (different from STRAT-001):
+  //   LONG  = Contrarian Any Bullish + Trend Catcher Bearish + MF>50
+  //   SHORT = Contrarian Any Bearish + Trend Catcher Bullish + MF<50
+  //   EXIT  = none (position closes on reverse signal — i.e. SHORT
+  //                 entry fires while LONG is open and vice-versa)
+  // Note this uses Trend CATCHER (TC) not Trend TRACER (TT) like
+  // STRAT-001 — different LuxAlgo indicator, same general idea.
+  'xrp-cntr-tc-mf50': {
+    id: 'xrp-cntr-tc-mf50',
+    code: '002',
+    description:
+      'XRP 15m | LONG: CONT Any Bl + TC Br + MF>50 | SHORT: CONT Any Br + TC Bl + MF<50 | EXIT: reverse signal',
+    longDescription:
+      'Контр-трендовая стратегия на 15-минутном таймфрейме с фильтрами по среднесрочному тренду (Trend Catcher) и денежному потоку (Money Flow). ' +
+      'LONG-вход срабатывает когда Contrarian Any выдаёт bullish-сигнал, Trend Catcher показывает bearish-тренд (зона перепроданности) и Money Flow выше 50. ' +
+      'SHORT — зеркально. ' +
+      'У стратегии нет встроенного exit условия — позиции закрываются по обратному сигналу (LONG закроется когда придёт SHORT entry и наоборот). ' +
+      'Safety SL 2.5% страхует от резких движений между сигналами; в бектесте без него worst trade был −13.8%.',
+    symbol: 'XRPUSDT',
+    timeframe: '15',
+    enabled: true,
+    slPct: 0.025,
+    launchedAt: Date.parse('2026-05-16T19:00:00Z'),
+    alertName: 'XRPUSD|15|LONG=CONTAnyBl&TCBr&MFa50|SHORT=CONTAnyBr&TCBl&MFb50|EXIT=null',
+    sourceUrl: 'https://www.luxalgo.com/chat/p19leyc5pzvt3s32mj36rnzn/',
+    name: 'XRP Contrarian',
+    // No explicit exit alert — strategy expresses "exit + flip" as a
+    // fresh entry on the opposite side. We honour that by closing
+    // the open position first, then opening the new one.
+    exitOnReverseSignal: true,
+    backtest: {
+      periodLabel: 'Oct 20, 2025 — May 6, 2026',
+      periodDays: 198,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 1214.18,
+      netPnlPct: 121.42,
+      cagrPct: 223.83,
+      totalTrades: 101,
+      wins: 66,
+      losses: 35,
+      winRate: 0.6535,
+      profitFactor: 2.588,
+      commissionPaidUsd: 111.10,
+      maxDrawdownPct: 19.23,
+      maxDrawdownUsd: 192.28,
+      avgWinUsd: 29.99,
+      avgWinPct: 3.00,
+      avgLossUsd: -21.85,
+      avgLossPct: -2.19,
+      largestWinUsd: 152.41,
+      largestLossUsd: -138.14,
+      longTrades: 51,
+      longPnlPct: 38.27,
+      shortTrades: 50,
+      shortPnlPct: 83.15,
+    },
+  },
+
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',

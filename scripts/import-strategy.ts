@@ -299,18 +299,38 @@ async function scrapePerformance(page: Page): Promise<ScrapedPerformance> {
     .innerText()
     .catch(() => '');
 
-  // Strategy Configuration block (left side)
+  // Strategy Configuration block (left side). Older LuxAlgo layouts
+  // included a dedicated "Strategy Configuration" header on the right
+  // pane; the newer chat-based layout drops it and only shows the
+  // strategy details inline in the chat reply (in the user's locale —
+  // typically Russian or English depending on account settings).
+  //
+  // We try BOTH layouts. If nothing matches, the fields stay null —
+  // they're informational only (the actual backtest stats come from
+  // the right-side Strategy Tester KPIs, which are always English).
   const configBlock = await page
     .locator('text=Strategy Configuration')
     .first()
     .locator('xpath=..')
     .innerText()
     .catch(() => '');
-  const evalMatch = configBlock.match(/Evaluation Start[:\s]+([^\n•]+)/i);
-  const longMatch = configBlock.match(/Long Entry Conditions[:\s]+([^\n•]+)/i);
-  const shortMatch = configBlock.match(/Short Entry Conditions[:\s]+([^\n•]+)/i);
-  const exitMatch = configBlock.match(/Exit Condition[:\s]+([^\n•]+)/i);
-  const orderSizeMatch = configBlock.match(/Order Size[:\s]+([^\n•]+)/i);
+  const bodyText = ((await page
+    .evaluate(`document.body.innerText`)
+    .catch(() => '')) as string) || '';
+  // EN layout patterns
+  let evalMatch = configBlock.match(/Evaluation Start[:\s]+([^\n•]+)/i);
+  let longMatch = configBlock.match(/Long Entry Conditions[:\s]+([^\n•]+)/i);
+  let shortMatch = configBlock.match(/Short Entry Conditions[:\s]+([^\n•]+)/i);
+  let exitMatch = configBlock.match(/Exit Condition[:\s]+([^\n•]+)/i);
+  let orderSizeMatch = configBlock.match(/Order Size[:\s]+([^\n•]+)/i);
+  // RU chat-layout fallback. LuxAlgo's chat reply renders:
+  //   "Условия входа\nLong: …\nShort: …\nДетали стратегии\n
+  //    Условие выхода: …\nДата начала: …\nРазмер ордера: …"
+  if (!longMatch) longMatch = bodyText.match(/Long:\s*([^\n]+)/);
+  if (!shortMatch) shortMatch = bodyText.match(/Short:\s*([^\n]+)/);
+  if (!exitMatch) exitMatch = bodyText.match(/Условие выхода:\s*([^\n]+)/);
+  if (!evalMatch) evalMatch = bodyText.match(/Дата начала:\s*([^\n]+)/);
+  if (!orderSizeMatch) orderSizeMatch = bodyText.match(/Размер ордера:\s*([^\n]+)/);
 
   // Performance Summary prose
   const summaryBlock = await page
@@ -716,13 +736,17 @@ async function main(): Promise<void> {
     console.error(`→ Opening ${url}`);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     // Strategy Tester right pane takes a couple of seconds to render.
-    // If selector still not visible after 30s, save a screenshot for debug.
+    // Anchor on a KPI label that ALWAYS exists on the right panel
+    // ('NET PROFIT'). The chat-side panel localizes (RU/EN) but the
+    // Strategy Tester KPIs stay in English — this is the most robust
+    // gate. ('Strategy Configuration' block was used previously, but
+    // LuxAlgo's newer chat layout no longer renders it inline.)
     try {
-      await page.waitForSelector('text=Strategy Configuration', { timeout: 60_000 });
+      await page.waitForSelector('text=NET PROFIT', { timeout: 60_000 });
     } catch (err) {
       const dbgPath = resolve('data', 'imports', `_debug-${Date.now()}.png`);
       await page.screenshot({ path: dbgPath, fullPage: true }).catch(() => {});
-      console.error(`Strategy Configuration not visible. Debug screenshot: ${dbgPath}`);
+      console.error(`NET PROFIT not visible. Debug screenshot: ${dbgPath}`);
       console.error(`Current URL: ${page.url()}`);
       throw err;
     }
