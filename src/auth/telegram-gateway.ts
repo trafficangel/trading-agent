@@ -68,10 +68,20 @@ export async function sendVerificationMessage(
   const json = (await res.body.json()) as GatewayResponse<SendVerificationResult>;
   if (!json.ok || !json.result) {
     logger.error(
-      { phone_redacted: phoneE164.slice(0, 4) + '***', error: json.error },
+      {
+        phone_redacted: phoneE164.slice(0, 4) + '***',
+        status: res.statusCode,
+        error: json.error,
+        full: json,
+      },
       'telegram-gateway: sendVerificationMessage failed',
     );
-    throw new Error(`Gateway error: ${json.error ?? 'unknown'}`);
+    // "Bad request" with HTTP 200 means the token/account itself is invalid
+    // (no balance, wrong token, etc.) — Gateway uses generic message.
+    const hint = json.error === 'Bad request'
+      ? 'Gateway отклонил запрос — возможно нулевой баланс или невалидный токен'
+      : `Gateway error: ${json.error ?? 'unknown'}`;
+    throw new Error(hint);
   }
   return json.result;
 }

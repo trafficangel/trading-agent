@@ -129,9 +129,18 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
       );
       return { ok: true, masked_phone: maskPhone(phoneE164) };
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       logger.error({ err, phone: maskPhone(phoneE164), ip }, 'auth: send verification failed');
       reply.code(500);
-      return { ok: false, error: 'gateway_error', message: 'Не удалось отправить код. Попробуйте позже.' };
+      return {
+        ok: false,
+        error: 'gateway_error',
+        // Surface the actual reason instead of opaque "Не удалось" so
+        // the operator can debug from the browser console.
+        message: msg.includes('Gateway')
+          ? `Сервис верификации недоступен: ${msg}`
+          : 'Не удалось отправить код. Попробуйте позже.',
+      };
     }
   });
 
