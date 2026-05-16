@@ -45,6 +45,14 @@ type Content = {
     title: string;
     items: string[];
   };
+  signalPreview: {
+    title: string;
+    subtitle: string;
+    entryLabel: string;
+    closeLabel: string;
+    timeBetween: string;
+    cta: string;
+  };
   how: {
     title: string;
     subtitle: string;
@@ -105,14 +113,25 @@ const CONTENT: Record<Lang, Content> = {
         '💼 Прозрачный учёт — каждая сделка публична и проверяема',
       ],
     },
+    signalPreview: {
+      title: 'Как выглядят сигналы в Telegram',
+      subtitle: 'Каждое открытие и закрытие сделки приходит в канал автоматически — с ценой, размером и причиной выхода. Можете повторять за нами вручную или ждать запуска копитрейдинга.',
+      entryLabel: 'Вход в позицию',
+      closeLabel: 'Закрытие позиции',
+      timeBetween: '↓ через 2 часа',
+      cta: 'Подписаться на канал ↗',
+    },
     how: {
       title: 'Как это работает',
       subtitle: 'Простой путь от сигнала до сделки — и публичный отчёт о каждом результате.',
       steps: [
         {
           step: 'ШАГ 01',
-          title: 'Отбор стратегий',
-          body: 'Каждая стратегия проходит проверку на исторических данных за 200+ дней. Минимальный winrate 55%, прибыль должна превышать убытки минимум в 2 раза. На сайт попадают только проверенные стратегии — никаких сырых идей.',
+          title: 'Двухэтапный отбор',
+          body:
+            'Сначала собираем стратегию в LuxAlgo Premium Ultimate (~$60/мес) с тестом на 200+ дней. ' +
+            'Если winrate ≥55% и прибыль превышает убытки в 2 раза — переходим ко второму этапу: проверяем в TradingView Premium ($60/мес) с реальной комиссией Bybit и защитным стопом. ' +
+            'Только стратегии прошедшие обе проверки попадают на сайт.',
         },
         {
           step: 'ШАГ 02',
@@ -166,8 +185,13 @@ const CONTENT: Record<Lang, Content> = {
       title: 'Частые вопросы',
       items: [
         {
-          q: 'Это бесплатно?',
-          a: 'Да, полностью. Доступ к сайту, статистике, Telegram-каналу с сигналами — всё бесплатно. Никаких подписок, премиум-уровней или скрытых платежей. Когда мы запустим копитрейдинг на Bybit, наш доход будет только процентом от прибыли подписчиков — если вы зарабатываете, мы тоже. Если нет — ничего не платите.',
+          q: 'Это правда бесплатно? Почему?',
+          a:
+            'Да, полностью. Сайт, статистика, Telegram-канал — бесплатно для всех. ' +
+            'Сами для нас это НЕ бесплатно: LuxAlgo Premium Ultimate ($60/мес) для сборки стратегий + TradingView Premium ($60/мес) для контрольных бэктестов + сервер и инфраструктура. ' +
+            'Зачем тогда отдаём бесплатно? В ближайшее время запустим копитрейдинг на Bybit — там наш доход будет только процентом от вашей прибыли. ' +
+            'Если стратегии действительно работают, через 3-6 месяцев у нас будет публичная статистика и подписчики которые ХОТЯТ копировать наши сделки. ' +
+            'Это честнее чем продавать «курсы по трейдингу» — мы зарабатываем только когда вы зарабатываете.',
         },
         {
           q: 'Откуда берутся стратегии?',
@@ -240,14 +264,25 @@ const CONTENT: Record<Lang, Content> = {
         '💼 Transparent accounting — every trade public and verifiable',
       ],
     },
+    signalPreview: {
+      title: 'What signals look like in Telegram',
+      subtitle: 'Every entry and close arrives in the channel automatically — with price, size, and exit reason. Follow manually or wait for copy trading to launch.',
+      entryLabel: 'Position opened',
+      closeLabel: 'Position closed',
+      timeBetween: '↓ 2 hours later',
+      cta: 'Subscribe to channel ↗',
+    },
     how: {
       title: 'How it works',
       subtitle: 'Simple path from signal to trade — with a public record of every outcome.',
       steps: [
         {
           step: 'STEP 01',
-          title: 'Strategy vetting',
-          body: 'Each strategy is tested on 200+ days of historical data. We require a minimum 55% win rate and profits at least 2× larger than losses. Only proven setups make it onto the site — no untested ideas.',
+          title: 'Two-stage vetting',
+          body:
+            'First we build the strategy in LuxAlgo Premium Ultimate (~$60/mo) with a 200+ day backtest. ' +
+            'If win rate ≥55% and profits are at least 2× larger than losses, we move to stage two: re-test in TradingView Premium ($60/mo) with realistic Bybit commission and a safety stop. ' +
+            'Only strategies passing both stages make it onto the site.',
         },
         {
           step: 'STEP 02',
@@ -301,8 +336,13 @@ const CONTENT: Record<Lang, Content> = {
       title: 'Frequently asked',
       items: [
         {
-          q: 'Is it really free?',
-          a: 'Yes, completely. Access to the site, statistics, Telegram channel with signals — all free. No subscriptions, premium tiers, or hidden charges. When we launch copy trading on Bybit, our revenue will come solely from a percentage of subscribers\' profits — if you earn, we earn. If you don\'t, you pay nothing.',
+          q: 'Is it really free? Why?',
+          a:
+            'Yes, completely. The site, statistics, Telegram channel — free for everyone. ' +
+            'It\'s NOT free for us though: LuxAlgo Premium Ultimate ($60/mo) for building strategies + TradingView Premium ($60/mo) for control backtests + server and infrastructure. ' +
+            'Why give it away free? We\'re launching copy trading on Bybit soon — our revenue will come solely from a percentage of YOUR profits. ' +
+            'If the strategies genuinely work, in 3-6 months we\'ll have public statistics and subscribers who WANT to copy our trades. ' +
+            'More honest than selling "trading courses" — we only earn when you earn.',
         },
         {
           q: 'Where do the strategies come from?',
@@ -470,6 +510,71 @@ function renderHome(lang: Lang): string {
     </div>
   `;
 
+  // ---------- Telegram signal mockups ----------
+  // Two stacked styled "Telegram message" cards showing exactly what an
+  // entry post and a close post look like in the channel. Visuals match
+  // the actual templates verbatim — same icons, same line structure.
+  const sp = c.signalPreview;
+  const signalPreviewHtml = `
+    <div class="home-section">
+      <h2 class="home-section-title">${escapeHtml(sp.title)}</h2>
+      <p class="home-section-sub">${escapeHtml(sp.subtitle)}</p>
+      <div class="tg-mockup-grid">
+        <div class="tg-mockup">
+          <div class="tg-mockup-header">
+            <div class="tg-avatar">🟢</div>
+            <div class="tg-channel-info">
+              <div class="tg-channel-name">LuxAlgo | Claude | Signals</div>
+              <div class="tg-channel-sub">@luxalgosignal · ${escapeHtml(sp.entryLabel)}</div>
+            </div>
+          </div>
+          <div class="tg-mockup-body">
+            <div class="tg-line"><b>🔴 ШОРТ · BNBUSDT · 15m</b></div>
+            <div class="tg-line"></div>
+            <div class="tg-line">🤖 <b>STRAT-001</b> · BNB Contrarian</div>
+            <div class="tg-line">🆔 <b>T#001</b></div>
+            <div class="tg-line"></div>
+            <div class="tg-line">📥 Вход:&nbsp;&nbsp;<code>676.28</code>&nbsp;(по рынку)</div>
+            <div class="tg-line">🛡 Стоп:&nbsp;&nbsp;<code>693.187</code>&nbsp;(2.50%)</div>
+            <div class="tg-line">💵 Размер позиции: $1000</div>
+            <div class="tg-line"></div>
+            <div class="tg-line tg-italic">Выход — по сигналу стратегии. Без фиксированных TP.</div>
+          </div>
+        </div>
+
+        <div class="tg-mockup-separator">${escapeHtml(sp.timeBetween)}</div>
+
+        <div class="tg-mockup">
+          <div class="tg-mockup-header">
+            <div class="tg-avatar">💰</div>
+            <div class="tg-channel-info">
+              <div class="tg-channel-name">LuxAlgo | Claude | Signals</div>
+              <div class="tg-channel-sub">@luxalgosignal · ${escapeHtml(sp.closeLabel)}</div>
+            </div>
+          </div>
+          <div class="tg-mockup-body">
+            <div class="tg-line"><b>💰 ПРОФИТ +$17.90</b>&nbsp;&nbsp;🔴 <b>BNBUSDT</b> ШОРТ</div>
+            <div class="tg-line"></div>
+            <div class="tg-line">🤖 <b>STRAT-001</b> · BNB Contrarian</div>
+            <div class="tg-line">🆔 <b>T#001</b></div>
+            <div class="tg-line"></div>
+            <div class="tg-line">📥 Вход:&nbsp;&nbsp;&nbsp;<code>676.28</code></div>
+            <div class="tg-line">📤 Выход:&nbsp;&nbsp;<code>664.20</code>&nbsp;(сигнал стратегии)</div>
+            <div class="tg-line">📊 Результат: <b class="tg-pos">+1.79%</b>&nbsp;·&nbsp;<b class="tg-pos">+$17.90</b></div>
+            <div class="tg-line">⏱ Длительность: 2ч</div>
+            <div class="tg-line"></div>
+            <div class="tg-line tg-italic">Дисциплина приносит плоды. +$17.90 на $1000 ставку — в копилку! 💪</div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top: 20px; text-align: center;">
+        <a class="btn btn-primary" href="${escapeHtml(c.telegramUrl)}" target="_blank" rel="noopener">
+          ${escapeHtml(sp.cta)}
+        </a>
+      </div>
+    </div>
+  `;
+
   // ---------- How it works ----------
   const howHtml = `
     <div class="home-section">
@@ -566,6 +671,7 @@ function renderHome(lang: Lang): string {
     ${heroHtml}
     ${whatYouGetHtml}
     ${howHtml}
+    ${signalPreviewHtml}
     ${strategiesPreviewHtml}
     ${roadmapHtml}
     ${faqHtml}

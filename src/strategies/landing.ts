@@ -297,13 +297,13 @@ function backtestTradesTable(
     ? `
       <details class="trades-more">
         <summary>Показать ещё ${rev.length - visibleCount} сделок</summary>
-        <div class="card" style="margin-top: 12px;">
+        <div class="card table-wrap" style="margin-top: 12px;">
           <table>${head}<tbody>${rest}</tbody></table>
         </div>
       </details>`
     : '';
   return `
-    <div class="card">
+    <div class="card table-wrap">
       <table>${head}<tbody>${first}</tbody></table>
     </div>
     ${restBlock}
@@ -351,7 +351,7 @@ function liveTradesTable(trades: LiveTradeRow[]): string {
     })
     .join('');
   return `
-    <div class="card">
+    <div class="card table-wrap">
       <table>
         <thead>
           <tr>
@@ -618,6 +618,17 @@ const STYLE = `
   .spec-axis { height: 1px; background: var(--border); margin: 4px 0; }
 
   /* Trades tables */
+  .table-wrap {
+    /* Horizontal scroll on narrow viewports — keeps wide tables
+     * (entry/exit/dates/price columns) usable on phones without
+     * crushing column widths. */
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .table-wrap table {
+    /* Don't shrink below the natural width — force scroll instead. */
+    min-width: 720px;
+  }
   td.dt, th.dt { font-family: 'SF Mono', 'Menlo', monospace; font-size: 12px; color: var(--text-dim); }
   td.mono, th.mono { font-family: 'SF Mono', 'Menlo', monospace; font-size: 13px; }
   td.pos { color: var(--accent); }
@@ -1022,6 +1033,65 @@ const STYLE = `
     color: var(--text-faint); font-size: 18px; user-select: none;
   }
 
+  /* Telegram mockup cards — emulates how a Telegram channel post
+   * looks on mobile. Used on the home page to show subscribers
+   * what entry/close signals look like before they subscribe. */
+  .tg-mockup-grid {
+    display: flex; flex-direction: column; gap: 12px;
+    align-items: center;
+  }
+  .tg-mockup {
+    width: 100%; max-width: 420px;
+    background: #17212b;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    border: 1px solid #232e3c;
+  }
+  .tg-mockup-header {
+    display: flex; gap: 10px; align-items: center;
+    padding: 10px 14px;
+    background: #232e3c;
+    border-bottom: 1px solid #2c3a4d;
+  }
+  .tg-avatar {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, #4ad991, #2ea968);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
+  }
+  .tg-channel-info { flex: 1; min-width: 0; }
+  .tg-channel-name {
+    color: #ffffff; font-size: 14px; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tg-channel-sub {
+    color: #7d8e9e; font-size: 11px; margin-top: 1px;
+  }
+  .tg-mockup-body {
+    padding: 14px 16px;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+    font-size: 14px; line-height: 1.45;
+    color: #ffffff;
+  }
+  .tg-line { min-height: 4px; }
+  .tg-line code {
+    background: rgba(255, 255, 255, 0.08); padding: 1px 5px;
+    border-radius: 3px; font-size: 13px;
+    font-family: 'SF Mono', 'Menlo', monospace;
+  }
+  .tg-line .tg-pos { color: #64bf60; }
+  .tg-italic { color: #7d8e9e; font-style: italic; margin-top: 4px; }
+  .tg-mockup-separator {
+    color: var(--text-faint); font-size: 12px;
+    padding: 4px 0;
+    font-family: 'SF Mono', 'Menlo', monospace;
+  }
+  @media (max-width: 480px) {
+    .tg-mockup-body { font-size: 13px; }
+  }
+
   /* What you get — green-tinted benefit grid */
   .what-you-get {
     background: linear-gradient(135deg, rgba(74, 217, 145, 0.04), transparent 70%);
@@ -1306,36 +1376,37 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
   // ---------- Single strategy row renderer ----------
   const renderRow = (e: typeof enriched[number]): string => {
     const { s, live } = e;
-    const b = s.backtest;
+    // Prefer recomputed-from-trades-log stats (same source as detail page)
+    // over the static config snapshot. Falls back to snapshot if no log.
+    let b: BacktestSnapshot | import('./backtest-recompute.js').RecomputedStats | undefined = s.backtest;
+    const bundle = loadBacktestTrades(s.id);
+    if (s.backtest && bundle && bundle.trades.length > 0) {
+      b = recomputeBacktestStats(bundle.trades, {
+        periodLabel: s.backtest.periodLabel,
+        periodDays: s.backtest.periodDays,
+      });
+    }
     const livePnlCls = classForValue(live.netPnlUsd);
     const bgClass = classForValue(b?.netPnlUsd ?? 0);
-    const launchDays = Math.max(
-      0,
-      Math.floor((Date.now() - s.launchedAt) / 86_400_000),
-    );
-    const launchLabel =
-      launchDays === 0 ? 'сегодня' : `${launchDays}д назад`;
     const statusPill = !s.enabled
-      ? '<span class="pill paused">⏸ PAUSED</span>'
+      ? '<span class="pill paused">⏸ Пауза</span>'
       : live.open > 0
-      ? `<span class="pill live">🟢 ${live.open} OPEN</span>`
-      : '<span class="pill running">🟢 WAITING</span>';
+      ? `<span class="pill live">🟢 В работе: ${live.open}</span>`
+      : '';
 
-    // BT row only shown if backtest snapshot exists
+    // Backtest row — human-readable Russian, no abbreviations
     const btRow = b
       ? `<div class="row-stat-line">
-          <span class="stat-tag">BT</span>
-          <span class="${bgClass}"><b>${fmtPct(b.netPnlPct, true)}</b></span>
+          <span class="stat-tag">БЭКТЕСТ</span>
+          <span class="${bgClass}"><b>${fmtPct(b.netPnlPct, true)}</b> доходность</span>
           <span class="dim">·</span>
-          <span class="dim">${(b.winRate * 100).toFixed(1)}% WR</span>
+          <span class="dim">${(b.winRate * 100).toFixed(0)}% побед</span>
           <span class="dim">·</span>
-          <span class="dim">PF ${b.profitFactor.toFixed(2)}</span>
-          <span class="dim">·</span>
-          <span class="dim">${b.totalTrades} trades</span>
+          <span class="dim">${b.totalTrades} сделок за ${b.periodDays} дней</span>
         </div>`
       : '';
 
-    // LIVE row — uses real DB data (or empty placeholder)
+    // LIVE row — only when there's something to show
     const liveRow =
       live.closed > 0
         ? `<div class="row-stat-line">
@@ -1344,14 +1415,9 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
             <span class="dim">·</span>
             <span class="${livePnlCls}">${fmtPct(live.netPnlPct, true)}</span>
             <span class="dim">·</span>
-            <span class="dim">${live.wins}W / ${live.losses}L</span>
-            <span class="dim">·</span>
-            <span class="dim">${live.closed} closed</span>
+            <span class="dim">${live.wins} прибыльных / ${live.losses} убыточных</span>
           </div>`
-        : `<div class="row-stat-line dim">
-            <span class="stat-tag">LIVE</span>
-            <span>0 закрытых сделок · ждём первый сигнал · запуск ${launchLabel}</span>
-          </div>`;
+        : '';
 
     return `
       <a href="/strategies/${escapeHtml(s.code)}" class="strat-row">
@@ -1363,7 +1429,7 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
           </div>
           ${statusPill}
         </div>
-        <div class="strat-row-desc">${escapeHtml(s.description.split('|')[0]?.trim() ?? s.id)}</div>
+        <div class="strat-row-desc">${escapeHtml(s.name ?? s.description.split('|')[0]?.trim() ?? s.id)}</div>
         ${btRow}
         ${liveRow}
       </a>`;
@@ -1665,7 +1731,7 @@ function activeTradesTable(trades: ActiveTradeRow[]): string {
     })
     .join('');
   return `
-    <div class="card">
+    <div class="card table-wrap">
       <table>
         <thead>
           <tr>
