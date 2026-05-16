@@ -17,7 +17,10 @@
  * automatically through src/config.ts.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { STRATEGY_CONFIGS, getStrategyConfig } from '../src/strategies/track-c-config.js';
+import { recomputeBacktestStats } from '../src/strategies/backtest-recompute.js';
 import { sendMessage } from '../src/telegram/bot.js';
 
 const LANDING_BASE = process.env.LANDING_BASE_URL ?? 'https://robotclaude.biz';
@@ -42,7 +45,29 @@ function buildPost(code: string): { text: string; detailUrl: string } | null {
     Object.values(STRATEGY_CONFIGS).find((s) => s.code === code) ?? getStrategyConfig(code);
   if (!cfg) return null;
 
-  const b = cfg.backtest;
+  // Prefer SINGLE SOURCE OF TRUTH: recompute aggregate stats from the
+  // scraped trades log on $1000 notional minus commission. This matches
+  // exactly what the landing page shows (no divergence between the
+  // announcement post and robotclaude.biz/strategies/<code>).
+  // Falls back to the static backtest snapshot when no trades log was
+  // scraped — typically only for strategies added before the scraper
+  // existed.
+  let b = cfg.backtest;
+  const tradesPath = resolve('src', 'strategies', 'data', `${cfg.id}.json`);
+  if (b && existsSync(tradesPath)) {
+    try {
+      const json = JSON.parse(readFileSync(tradesPath, 'utf-8'));
+      const trades = json?.tradesLog ?? [];
+      if (Array.isArray(trades) && trades.length > 0) {
+        b = recomputeBacktestStats(trades, {
+          periodLabel: cfg.backtest!.periodLabel,
+          periodDays: cfg.backtest!.periodDays,
+        }) as typeof cfg.backtest;
+      }
+    } catch {
+      // fall back to static snapshot
+    }
+  }
   const detailUrl = `${LANDING_BASE}/strategies/${cfg.code}`;
 
   const lines: string[] = [
@@ -77,17 +102,18 @@ function buildPost(code: string): { text: string; detailUrl: string } | null {
 
   lines.push(``);
   lines.push(`🛡 <b>Управление риском:</b>`);
-  lines.push(`  • Позиция: 1000 USDT на сделку`);
+  lines.push(`  • Позиция: ${b?.notionalUsd ?? 1000} USDT на сделку`);
   lines.push(`  • Safety stop-loss: ${(cfg.slPct * 100).toFixed(2)}% от entry`);
   lines.push(`  • Выходы: полностью на стратегии (Builtin Exits)`);
-  lines.push(`  • Time-guard: автоматическое закрытие через 24ч`);
 
   lines.push(``);
   lines.push(`🔗 <b>Детальная статистика + live-результаты:</b>`);
   lines.push(`<a href="${detailUrl}">${detailUrl}</a>`);
 
   lines.push(``);
-  lines.push(`<i>⚠ Прошлые результаты не гарантируют будущих. Shadow mode — реальные ордера НЕ ставятся, цель — собрать live-статистику для оценки edge.</i>`);
+  lines.push(`<i>ℹ️ Все цифры пересчитаны на нашу позицию $1000 с учётом комиссии Bybit. Safety SL в бэктесте не моделируется — в живой торговле работает как tail-risk cap.</i>`);
+  lines.push(``);
+  lines.push(`<i>⚠ Прошлые результаты не гарантируют будущих. Shadow mode — реальные ордера НЕ ставятся, цель — собрать live-статистику.</i>`);
 
   return { text: lines.join('\n'), detailUrl };
 }

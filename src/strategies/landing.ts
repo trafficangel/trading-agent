@@ -8,6 +8,7 @@ import {
   type BacktestSnapshot,
   TRACK_C_NOTIONAL_USD,
 } from './track-c-config.js';
+import { recomputeBacktestStats, enrichTrades, type RecomputedStats } from './backtest-recompute.js';
 import {
   getStrategyLiveStats,
   getStrategyRecentTrades,
@@ -123,34 +124,8 @@ function classForValue(n: number): 'pos' | 'neg' | 'neu' {
   return 'neu';
 }
 
-/**
- * LuxAlgo's `netPnlUsdt` in the scraped JSON is "Unit order size" math
- * (≈ 1 contract × price diff), NOT our actual $1000 notional. Recompute
- * each trade's P&L on $1000 from raw entry/exit prices, then walk the
- * list to rebuild cumulativePnlUsdt. Mutates the trade objects only on
- * a copy — the cached source bundle stays untouched.
- *
- * Net of round-trip commission: $1000 × 0.055% × 2 sides = $1.10 per
- * closed trade. Subtracted to match Bybit-realistic execution math.
- */
-const NOTIONAL_USD = TRACK_C_NOTIONAL_USD;
-const COMMISSION_USD_PER_TRADE = NOTIONAL_USD * 0.00055 * 2;
-
-function recomputeTradesOnNotional(trades: BacktestTrade[]): BacktestTrade[] {
-  let cum = 0;
-  return trades.map((t) => {
-    const sign = t.side === 'long' ? 1 : -1;
-    const grossPct = (sign * (t.exitPrice - t.entryPrice)) / t.entryPrice;
-    const grossUsd = grossPct * NOTIONAL_USD;
-    const netUsd = grossUsd - COMMISSION_USD_PER_TRADE;
-    cum += netUsd;
-    return {
-      ...t,
-      netPnlUsdt: Math.round(netUsd * 100) / 100,
-      cumulativePnlUsdt: Math.round(cum * 100) / 100,
-    };
-  });
-}
+// Per-trade $1000 recompute moved to ./backtest-recompute.ts (single
+// source of truth used by landing, scraper, and announcement script).
 
 // --- Inline SVG charts ---
 // Hand-rolled, no external lib. Three visualisations:
@@ -220,7 +195,7 @@ function divergingBar(
  * Strategy Tester. Drawdowns show as dips; consistent strategies look
  * like a steady up-and-to-the-right line.
  */
-function equityCurveSvg(trades: BacktestTrade[]): string {
+function equityCurveSvg(trades: import('./backtest-recompute.js').EnrichedTrade[]): string {
   if (trades.length === 0) return '';
   const w = 720;
   const h = 200;
@@ -229,7 +204,7 @@ function equityCurveSvg(trades: BacktestTrade[]): string {
   const padBot = 28;
   const innerW = w - 2 * padX;
   const innerH = h - padTop - padBot;
-  const cumValues = trades.map((t) => t.cumulativePnlUsdt);
+  const cumValues = trades.map((t) => t.cumulativePnlUsd);
   const yMin = Math.min(0, ...cumValues);
   const yMax = Math.max(0, ...cumValues);
   const yRange = yMax - yMin || 1;
@@ -238,7 +213,7 @@ function equityCurveSvg(trades: BacktestTrade[]): string {
   // Build path
   const pts = trades.map((t, i) => {
     const x = padX + i * xStep;
-    const y = padTop + ((yMax - t.cumulativePnlUsdt) / yRange) * innerH;
+    const y = padTop + ((yMax - t.cumulativePnlUsd) / yRange) * innerH;
     return { x, y };
   });
   const linePath = pts.map((p, i) => (i === 0 ? `M${p.x.toFixed(1)},${p.y.toFixed(1)}` : `L${p.x.toFixed(1)},${p.y.toFixed(1)}`)).join(' ');
@@ -277,27 +252,30 @@ function equityCurveSvg(trades: BacktestTrade[]): string {
  * P&L USDT / Cum P&L. First `visibleCount` rows are shown; rest are
  * wrapped in <details> (native expand/collapse, no JS).
  */
-function backtestTradesTable(trades: BacktestTrade[], visibleCount = 20): string {
+function backtestTradesTable(
+  trades: import('./backtest-recompute.js').EnrichedTrade[],
+  visibleCount = 20,
+): string {
   if (trades.length === 0) return '';
   // Show most recent first (reverse chronological).
   const rev = [...trades].reverse();
-  const fmtDate = (ts: number | null): string => {
+  const fmtDateLocal = (ts: number | null): string => {
     if (!ts) return '—';
     const d = new Date(ts);
     return `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)}`;
   };
-  const renderRow = (t: BacktestTrade): string => {
-    const cls = t.netPnlUsdt >= 0 ? 'pos' : 'neg';
+  const renderRow = (t: import('./backtest-recompute.js').EnrichedTrade): string => {
+    const cls = t.netPnlUsd >= 0 ? 'pos' : 'neg';
     const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
     return `
       <tr>
         <td>${t.num}</td>
-        <td class="dt">${fmtDate(t.entryAt)}</td>
-        <td class="dt">${fmtDate(t.exitAt)}</td>
+        <td class="dt">${fmtDateLocal(t.entryAt)}</td>
+        <td class="dt">${fmtDateLocal(t.exitAt)}</td>
         <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
         <td class="right mono">${t.entryPrice.toFixed(4)}</td>
         <td class="right mono">${t.exitPrice.toFixed(4)}</td>
-        <td class="right mono ${cls}">${t.netPnlUsdt >= 0 ? '+' : ''}${t.netPnlUsdt.toFixed(2)}</td>
+        <td class="right mono ${cls}">${t.netPnlUsd >= 0 ? '+' : ''}${t.netPnlUsd.toFixed(2)}</td>
       </tr>`;
   };
   const head = `
@@ -679,6 +657,13 @@ const STYLE = `
     font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--text-faint); margin: 12px 0 8px; font-weight: 600;
   }
+
+  /* ---------- Disclaimer note inside backtest section ---------- */
+  .disclaimer-note {
+    margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--text-dim); line-height: 1.6;
+  }
+  .disclaimer-note b { color: var(--text); font-weight: 600; }
 
   /* ---------- Top-right nav-link buttons ---------- */
   .top-right-nav a.nav-link {
@@ -1208,15 +1193,26 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
   );
 }
 
-function renderBacktestSection(b: BacktestSnapshot, strategyId: string): string {
+function renderBacktestSection(snap: BacktestSnapshot, strategyId: string, cfg?: StrategyConfig): string {
+  const bundle = loadBacktestTrades(strategyId);
+  // SINGLE SOURCE OF TRUTH: recompute ALL stats from the raw trades log
+  // on $1000 notional minus commission. The static `backtest` snapshot in
+  // track-c-config.ts is now only used as a FALLBACK when the trades log
+  // is missing — and for period metadata (label, days).
+  let b: BacktestSnapshot | RecomputedStats;
+  let trades: ReturnType<typeof enrichTrades> = [];
+  if (bundle && bundle.trades.length > 0) {
+    b = recomputeBacktestStats(bundle.trades, {
+      periodLabel: snap.periodLabel,
+      periodDays: snap.periodDays,
+    });
+    trades = enrichTrades(bundle.trades);
+  } else {
+    b = snap;
+  }
   const pnlClass = classForValue(b.netPnlPct);
   const longClass = classForValue(b.longPnlPct);
   const shortClass = classForValue(b.shortPnlPct);
-  const bundle = loadBacktestTrades(strategyId);
-  // Recompute P&L on $1000 notional minus round-trip commission so the
-  // displayed numbers match what subscribers would actually realize
-  // trading our system size — NOT LuxAlgo's "Unit order" math.
-  const trades = bundle ? recomputeTradesOnNotional(bundle.trades) : [];
   const totalInStrategy = bundle?.totalTradesInStrategy ?? trades.length;
   const wasCapped = bundle?.capped ?? false;
   const equityLabel = wasCapped
@@ -1351,6 +1347,18 @@ function renderBacktestSection(b: BacktestSnapshot, strategyId: string): string 
             <div class="lbl">Period</div>
             <div class="val">${escapeHtml(b.periodLabel)}</div>
           </div>
+        </div>
+        <div class="disclaimer-note">
+          ℹ️ Все числа пересчитаны из сырых сделок LuxAlgo на наш sizing
+          <b>$${TRACK_C_NOTIONAL_USD} на сделку</b> с вычетом комиссии Bybit
+          (${(b.commissionPctPerSide * 100).toFixed(3)}% × 2 сторон). Сумма
+          P&amp;L таблицы сделок ниже совпадает с Net P&amp;L сверху.
+          <br/><br/>
+          Safety SL ${(cfg?.slPct ? (cfg.slPct * 100).toFixed(2) : '2.50')}%
+          в бэктесте <b>не моделируется</b> — для точной симуляции нужны
+          OHLC данные внутри каждой сделки. В живой торговле SL работает
+          как tail-risk cap, обрезая ~5-10% худших сделок, поэтому
+          реальный Max Drawdown будет <b>не больше</b> бэктестового.
         </div>
       </div></div>
     </div>
@@ -1563,7 +1571,7 @@ function renderStrategyDetail(cfg: StrategyConfig): string {
 
     ${renderLiveSection(live, cfg.launchedAt, cfg.id)}
 
-    ${cfg.backtest ? renderBacktestSection(cfg.backtest, cfg.id) : ''}
+    ${cfg.backtest ? renderBacktestSection(cfg.backtest, cfg.id, cfg) : ''}
 
     ${renderRiskSection(cfg)}
 
