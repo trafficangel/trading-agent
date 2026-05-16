@@ -997,6 +997,15 @@ const STYLE = `
     animation: drift-2 22s ease-in-out infinite alternate;
     opacity: 0.25;
   }
+  /* Third blob — violet, drifts in a different rhythm; gives the
+   *  aurora a richer 3-colour palette instead of just green + blue. */
+  .blob-3 {
+    width: 320px; height: 320px;
+    background: radial-gradient(circle, #a06cff, transparent 70%);
+    top: 30%; left: 45%;
+    animation: drift-3 26s ease-in-out infinite alternate;
+    opacity: 0.18;
+  }
   @keyframes drift-1 {
     0%   { transform: translate(0, 0) scale(1); }
     100% { transform: translate(-40px, 30px) scale(1.1); }
@@ -1005,6 +1014,27 @@ const STYLE = `
     0%   { transform: translate(0, 0) scale(1); }
     100% { transform: translate(60px, -20px) scale(0.95); }
   }
+  @keyframes drift-3 {
+    0%   { transform: translate(-50%, -50%) scale(1); }
+    100% { transform: translate(calc(-50% + 80px), calc(-50% + 40px)) scale(1.08); }
+  }
+  /* Cursor-following spotlight inside the hero. JS sets --sx/--sy in
+   *  pixels relative to .hero on mousemove; the radial gradient is
+   *  anchored at that point. Soft white tint, very low opacity — the
+   *  effect should feel like the page is alive, not gimmicky. Disabled
+   *  by hero[data-spotlight-armed] toggling (so SSR HTML doesn't have
+   *  a stuck spotlight at 0,0 before JS runs). */
+  .hero-spotlight {
+    position: absolute; inset: 0; pointer-events: none;
+    opacity: 0; transition: opacity 0.3s ease;
+    background: radial-gradient(
+      400px circle at var(--sx, 50%) var(--sy, 50%),
+      rgba(255, 255, 255, 0.06),
+      transparent 65%
+    );
+    mix-blend-mode: screen;
+  }
+  .hero[data-spotlight-armed] .hero-spotlight { opacity: 1; }
   /* Animated equity-curve background trace */
   .hero-equity {
     position: absolute; inset: 0; width: 100%; height: 100%;
@@ -1022,6 +1052,49 @@ const STYLE = `
   @media (prefers-reduced-motion: reduce) {
     .blob, .hero-equity-line { animation: none; }
     .hero-equity-line { stroke-dashoffset: 0; }
+    .reveal { opacity: 1 !important; transform: none !important; }
+    .hero-spotlight { display: none; }
+  }
+
+  /* Scroll-reveal — each .home-section fades up as it enters viewport.
+   * Initial state hides; JS toggles .is-visible via IntersectionObserver.
+   * will-change hints the compositor (removed after animation by GC). */
+  .reveal {
+    opacity: 0; transform: translateY(24px);
+    transition: opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: opacity, transform;
+  }
+  .reveal.is-visible {
+    opacity: 1; transform: none;
+  }
+  /* Stagger when multiple cards reveal at once — gives a wave effect
+   *  rather than every card popping in at the same instant. */
+  .reveal.is-visible.stagger-1 { transition-delay: 0.08s; }
+  .reveal.is-visible.stagger-2 { transition-delay: 0.16s; }
+  .reveal.is-visible.stagger-3 { transition-delay: 0.24s; }
+
+  /* Scroll-progress bar fixed to the very top of the viewport. A thin
+   *  green-to-cyan gradient that grows left-to-right as the user scrolls.
+   *  Visual cue that the page has depth + the user is making progress. */
+  .scroll-progress {
+    position: fixed; top: 0; left: 0;
+    width: 0%; height: 2px; z-index: 200;
+    background: linear-gradient(90deg, var(--accent), #5b8cff);
+    transition: width 0.08s ease-out;
+    pointer-events: none;
+  }
+
+  /* Primary CTA button — adds a smooth transform transition so the
+   *  magnetic-hover JS animates instead of teleporting. Existing
+   *  background/box-shadow rules remain in place elsewhere. */
+  .btn-primary {
+    transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.18s ease,
+                background 0.18s ease;
+  }
+  .btn-primary:hover {
+    box-shadow: 0 8px 24px -8px rgba(74, 217, 145, 0.45);
   }
   .hero-eyebrow {
     display: inline-block; font-family: 'SF Mono', 'Menlo', monospace;

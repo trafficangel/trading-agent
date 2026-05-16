@@ -481,6 +481,98 @@ function classForValue(n: number): 'pos' | 'neg' | 'neu' {
   return 'neu';
 }
 
+/**
+ * Inline <script> emitted at the bottom of the home body. Wires up the
+ * four "feel alive" effects:
+ *   1. Hero cursor spotlight (soft white radial glow follows the cursor
+ *      inside the hero, mix-blend-mode: screen).
+ *   2. Scroll-reveal — each .home-section fades up as it enters the
+ *      viewport via IntersectionObserver.
+ *   3. Scroll-progress bar — a thin gradient line at the very top of
+ *      the page grows from 0% to 100% as the user scrolls.
+ *   4. Magnetic primary CTA — buttons softly translate toward the
+ *      cursor on hover, return on leave.
+ *
+ * All effects bail out automatically on prefers-reduced-motion or when
+ * the browser lacks IntersectionObserver (handled gracefully in the
+ * fallback paths).
+ *
+ * Kept inline so there's no extra HTTP request, no bundler, no script
+ * tag with a hash to rotate on every deploy. Net cost: ~1.5KB gzipped.
+ */
+function homeEffectsScript(): string {
+  return `<script>
+(function() {
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---- 1. Hero cursor spotlight ----
+  var hero = document.querySelector('.hero[data-spotlight]');
+  if (hero && !reduce && window.matchMedia('(hover: hover)').matches) {
+    hero.addEventListener('mousemove', function(e) {
+      var r = hero.getBoundingClientRect();
+      hero.style.setProperty('--sx', (e.clientX - r.left) + 'px');
+      hero.style.setProperty('--sy', (e.clientY - r.top) + 'px');
+      if (!hero.hasAttribute('data-spotlight-armed')) hero.setAttribute('data-spotlight-armed', '');
+    });
+    hero.addEventListener('mouseleave', function() {
+      hero.removeAttribute('data-spotlight-armed');
+    });
+  }
+
+  // ---- 2. Scroll-reveal ----
+  var sections = document.querySelectorAll('.home-section, .hero');
+  if ('IntersectionObserver' in window && !reduce) {
+    sections.forEach(function(el) { el.classList.add('reveal'); });
+    var io = new IntersectionObserver(function(entries) {
+      entries.forEach(function(en) {
+        if (en.isIntersecting) {
+          en.target.classList.add('is-visible');
+          io.unobserve(en.target);
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+    sections.forEach(function(el) { io.observe(el); });
+    // Hero is the first thing visible — reveal immediately rather
+    // than wait for the observer's intersection event after paint.
+    var h = document.querySelector('.hero');
+    if (h) h.classList.add('is-visible');
+  }
+
+  // ---- 3. Scroll-progress bar ----
+  var bar = document.querySelector('.scroll-progress');
+  if (bar) {
+    var ticking = false;
+    function update() {
+      var d = document.documentElement;
+      var max = d.scrollHeight - d.clientHeight;
+      var pct = max > 0 ? (d.scrollTop / max) * 100 : 0;
+      bar.style.width = pct + '%';
+      ticking = false;
+    }
+    document.addEventListener('scroll', function() {
+      if (!ticking) { requestAnimationFrame(update); ticking = true; }
+    }, { passive: true });
+    update();
+  }
+
+  // ---- 4. Magnetic primary CTA ----
+  if (!reduce && window.matchMedia('(hover: hover)').matches) {
+    document.querySelectorAll('.btn-primary').forEach(function(btn) {
+      btn.addEventListener('mousemove', function(e) {
+        var r = btn.getBoundingClientRect();
+        var x = (e.clientX - r.left - r.width / 2) * 0.18;
+        var y = (e.clientY - r.top - r.height / 2) * 0.18;
+        btn.style.transform = 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px)';
+      });
+      btn.addEventListener('mouseleave', function() {
+        btn.style.transform = '';
+      });
+    });
+  }
+})();
+</script>`;
+}
+
 function renderHome(lang: Lang): string {
   const c = CONTENT[lang];
   const otherLang: Lang = lang === 'ru' ? 'en' : 'ru';
@@ -552,10 +644,12 @@ function renderHome(lang: Lang): string {
   // curve. stroke-dasharray animation makes it "draw itself" on page load.
   // Plus two gradient blobs that drift slowly for ambient depth.
   const heroHtml = `
-    <div class="hero">
+    <div class="hero" data-spotlight>
       <div class="hero-bg" aria-hidden="true">
         <div class="blob blob-1"></div>
         <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+        <div class="hero-spotlight"></div>
         <svg class="hero-equity" viewBox="0 0 1200 300" preserveAspectRatio="none">
           <defs>
             <linearGradient id="hero-line-grad" x1="0" y1="0" x2="1" y2="0">
@@ -765,6 +859,7 @@ function renderHome(lang: Lang): string {
   // Top-right nav is now handled by site-header in pageShell.
 
   const body = `
+    <div class="scroll-progress" aria-hidden="true"></div>
     ${heroHtml}
     ${whatYouGetHtml}
     ${howHtml}
@@ -773,6 +868,7 @@ function renderHome(lang: Lang): string {
     ${roadmapHtml}
     ${faqHtml}
     ${ctaHtml}
+    ${homeEffectsScript()}
   `;
 
   // Use _ for the unused param suppression
