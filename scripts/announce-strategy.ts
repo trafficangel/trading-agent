@@ -1,13 +1,15 @@
 /**
- * Operator script — publishes (or previews) a Telegram announcement post
- * for a Track C strategy to the Signals channel.
+ * Operator script — publishes / edits / previews a Telegram announcement
+ * post for a Track C strategy in the Signals channel.
  *
  * Usage:
- *   pnpm tsx scripts/announce-strategy.ts <code-or-id>            # publishes
- *   pnpm tsx scripts/announce-strategy.ts <code-or-id> --dry-run  # prints only
+ *   pnpm tsx scripts/announce-strategy.ts <code-or-id>                # publishes new
+ *   pnpm tsx scripts/announce-strategy.ts <code-or-id> --dry-run      # prints only
+ *   pnpm tsx scripts/announce-strategy.ts <code-or-id> --edit <id>    # edit existing post
  *
  * Example:
- *   pnpm tsx scripts/announce-strategy.ts 001
+ *   pnpm tsx scripts/announce-strategy.ts 001              # new post
+ *   pnpm tsx scripts/announce-strategy.ts 001 --edit 975   # update post 975 in place
  *
  * Optional env: LANDING_BASE_URL (defaults to the public domain). The
  * script appends /strategies/<code> to build the deep link, which
@@ -19,9 +21,11 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { request } from 'undici';
 import { STRATEGY_CONFIGS, getStrategyConfig } from '../src/strategies/track-c-config.js';
 import { recomputeBacktestStats } from '../src/strategies/backtest-recompute.js';
 import { sendMessage } from '../src/telegram/bot.js';
+import { config } from '../src/config.js';
 
 const LANDING_BASE = process.env.LANDING_BASE_URL ?? 'https://robotclaude.biz';
 
@@ -118,12 +122,34 @@ function buildPost(code: string): { text: string; detailUrl: string } | null {
   return { text: lines.join('\n'), detailUrl };
 }
 
+async function editMessage(
+  messageId: number,
+  text: string,
+): Promise<{ ok: boolean; description?: string }> {
+  const url = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/editMessageText`;
+  const res = await request(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: config.TELEGRAM_CHANNEL_SIGNALS,
+      message_id: messageId,
+      text,
+      parse_mode: 'HTML',
+      disable_web_page_preview: false,
+    }),
+  });
+  const body = (await res.body.json()) as { ok: boolean; description?: string };
+  return body;
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
-  const code = args.find((a) => !a.startsWith('--'));
+  const editIdx = args.indexOf('--edit');
+  const editMessageId = editIdx !== -1 ? parseInt(args[editIdx + 1]!, 10) : null;
+  const code = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--edit');
   if (!code) {
-    console.error('Usage: pnpm tsx scripts/announce-strategy.ts <code-or-id> [--dry-run]');
+    console.error('Usage: pnpm tsx scripts/announce-strategy.ts <code-or-id> [--dry-run | --edit <message_id>]');
     process.exit(1);
   }
 
@@ -142,6 +168,17 @@ async function main(): Promise<void> {
     console.log(post.text);
     console.log('---');
     console.log(`Would post to channel 'signals' with link preview ENABLED → ${post.detailUrl}`);
+    return;
+  }
+
+  if (editMessageId !== null) {
+    console.error(`Editing message_id=${editMessageId} in signals channel…`);
+    const result = await editMessage(editMessageId, post.text);
+    if (!result.ok) {
+      console.error(`Edit failed: ${result.description}`);
+      process.exit(1);
+    }
+    console.error(`✅ Edited OK. Landing: ${post.detailUrl}`);
     return;
   }
 
