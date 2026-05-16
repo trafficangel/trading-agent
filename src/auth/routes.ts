@@ -66,9 +66,15 @@ function checkStartRateLimit(ip: string): boolean {
 }
 
 function clientIp(req: FastifyRequest): string {
-  // Caddy is in front of us — uses X-Forwarded-For. Fastify
-  // populates req.ip from that when trustProxy is set; we read both
-  // to be safe across proxy configurations.
+  // Layered proxies — Cloudflare → Caddy → Fastify:
+  //   1. `CF-Connecting-IP` is set by CF edge to the original client IP.
+  //      Most authoritative.
+  //   2. `X-Forwarded-For` is appended by Caddy when CF passes through.
+  //      First value is the original client. Used as fallback (if CF
+  //      proxy is off for some reason).
+  //   3. `req.ip` falls back to socket remote address.
+  const cf = (req.headers['cf-connecting-ip'] as string | undefined)?.trim();
+  if (cf) return cf;
   const xff = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
   return xff || req.ip || 'unknown';
 }
