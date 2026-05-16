@@ -1,6 +1,18 @@
 import { db } from '../client.js';
-import type { Decision } from '../../llm/decision.schema.js';
-import type { AggregatedScore } from '../../signals/aggregator.js';
+
+/**
+ * decisions table — Track C (LuxAlgo Strategy Builder) trade records.
+ *
+ * Tracks A (LLM) and B (signal-trader) were removed in May 2026. The
+ * `track` column is kept (for migration safety + historical data),
+ * but only the value 'strategy' is written going forward. Other rows
+ * remain readable for audit / debugging.
+ *
+ * Many columns (tp_json, screenshot_path, llm_input_tokens, confidence,
+ * spider/limit fields, etc.) are legacy — populated as NULL for Track C.
+ * They live on so that historical rows remain queryable and so that the
+ * raw schema doesn't need a destructive migration.
+ */
 
 export type DecisionRow = {
   id: number;
@@ -34,36 +46,22 @@ export type DecisionRow = {
   features_json: string | null;
   pending_until: number | null;
   filled_at: number | null;
-  /** A/B test bucket. 'llm' = original Claude-driven decision flow,
-   *  'signal' = pure-LuxAlgo rule-based trader (no LLM),
-   *  'strategy' = LuxAlgo AI Strategy Builder webhook (Track C). */
+  /** Always 'strategy' for new rows. Historical rows may be 'llm' / 'signal'. */
   track: string;
-  /** Track C only: strategy_id from LuxAlgo Strategy Builder. NULL for
-   *  Track A / B rows. See src/strategies/track-c-config.ts. */
+  /** Track C: strategy_id from LuxAlgo Strategy Builder. */
   strategy_id: string | null;
-  /** The SL at the moment the trade was opened. Stable — never modified
-   *  by BE move or LLM-MODIFY. Used by calcPnl to compute R-multiple
-   *  honestly (denominator = original risk, not the moved SL). */
+  /** The SL at the moment the trade was opened. Stable — never modified. */
   original_sl: number | null;
-  /** Multi-TP: percent of position already closed (0, 50, or 100). */
+  /** Legacy (Track A multi-TP). Always 0/null for Track C. */
   partial_closed_pct: number;
-  /** Fill price of the partial close (= TP1 value when partial_closed_pct=50). */
   partial_close_price: number | null;
-  /** When the partial close happened (unix ms). */
   partial_closed_at: number | null;
-  /** TP1 level snapshot at open time (= entry ± 1×SL_distance). */
   tp1_price: number | null;
-  /** Force-close reason ('counter_structural', 'counter_signal', 'time_guard')
-   *  when tpsl-monitor or signal-trader closes the position early. */
+  /** Force-close reason ('strategy_exit' / 'reverse_signal' / 'time_guard'). */
   force_close_reason: string | null;
-  /** Track C only: per-strategy sequential counter (1, 2, 3, ... within
-   *  each strategy_id). Used for the "T#1 / T#2 / ..." display in posts —
-   *  much more useful for subscribers than the global decision.id which
-   *  mixes Track A / B / C records. NULL for Track A / B rows. */
+  /** Per-strategy sequential counter (1, 2, 3, ... within each strategy_id). */
   strategy_trade_num: number | null;
 };
-
-export type Track = 'llm' | 'signal' | 'strategy';
 
 export type CloseReason = 'tp_hit' | 'sl_hit' | 'llm_close' | 'manual';
 
@@ -80,30 +78,12 @@ const insertStmt = db.prepare(`
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
-/** For Track C inserts only — returns the next sequential number for this
- *  strategy_id (1, 2, 3, ...). Atomic when called inside the same Node
- *  event-loop tick as the subsequent INSERT (better-sqlite3 is sync). */
+/** Per-strategy sequential counter for the post prefix ('T#001').
+ *  Atomic when called inside the same Node event-loop tick as the
+ *  subsequent INSERT (better-sqlite3 is sync). */
 const maxStrategyNumStmt = db.prepare<[string], { n: number | null }>(`
   SELECT MAX(strategy_trade_num) AS n FROM decisions
   WHERE track = 'strategy' AND strategy_id = ?
-`);
-
-const findPendingLimitsStmt = db.prepare<[], DecisionRow>(`
-  SELECT * FROM decisions
-  WHERE status = 'pending' AND decision = 'OPEN'
-  ORDER BY created_at ASC
-`);
-
-const activatePendingStmt = db.prepare<[number, number]>(`
-  UPDATE decisions
-  SET status = 'active', filled_at = ?
-  WHERE id = ? AND status = 'pending'
-`);
-
-const cancelPendingStmt = db.prepare<[number, number]>(`
-  UPDATE decisions
-  SET status = 'cancelled', closed_at = ?
-  WHERE id = ? AND status = 'pending'
 `);
 
 const findActiveStmt = db.prepare<[], DecisionRow>(`
@@ -112,21 +92,9 @@ const findActiveStmt = db.prepare<[], DecisionRow>(`
   ORDER BY created_at ASC
 `);
 
-const findActiveByTrackStmt = db.prepare<[string], DecisionRow>(`
-  SELECT * FROM decisions
-  WHERE status = 'active' AND decision = 'OPEN' AND track = ?
-  ORDER BY created_at ASC
-`);
-
-const findActiveBySymbolStmt = db.prepare<[string], DecisionRow>(`
-  SELECT * FROM decisions
-  WHERE status = 'active' AND decision = 'OPEN' AND symbol = ?
-  ORDER BY created_at DESC LIMIT 1
-`);
-
-const closePositionStmt = db.prepare<[number, number]>(`
-  UPDATE decisions SET status = 'closed', closed_at = ? WHERE id = ?
-`);
+const findByIdStmt = db.prepare<[number], DecisionRow>(
+  'SELECT * FROM decisions WHERE id = ?',
+);
 
 const closePositionWithStatsStmt = db.prepare<[number, number, string, number, number, number]>(`
   UPDATE decisions
@@ -135,227 +103,82 @@ const closePositionWithStatsStmt = db.prepare<[number, number, string, number, n
   WHERE id = ? AND status = 'active'
 `);
 
-const updateSlStmt = db.prepare<[number, number]>(`
-  UPDATE decisions SET sl = ? WHERE id = ?
-`);
-
-const findByIdStmt = db.prepare<[number], DecisionRow>(
-  'SELECT * FROM decisions WHERE id = ?',
-);
-
-const lastDecisionStmt = db.prepare<[string, string, number], DecisionRow>(`
-  SELECT * FROM decisions
-  WHERE symbol = ? AND side = ? AND created_at >= ?
-  ORDER BY created_at DESC LIMIT 1
-`);
-
-export type InsertDecisionInput = {
-  symbol: string;
-  agg: AggregatedScore;
-  decision: Decision;
-  screenshotPath: string | null;
-  inputTokens: number;
-  outputTokens: number;
-  rawResponse: string;
-  /** id of the parent OPEN decision when this is a CLOSE/MODIFY follow-up */
-  parentDecisionId?: number;
-  /** Structured features extracted at decision time. Optional (chop-SKIP
-   *  and other early-exit branches may not provide them). */
-  features?: Record<string, unknown> | null;
-  /** Override the default status. For limit orders we pass 'pending';
-   *  default behavior (status='active' for OPEN) handles market orders. */
-  statusOverride?: 'pending' | 'active' | 'final';
-  /** TTL for pending limit orders. After this wall-clock ms, the limit
-   *  will be auto-cancelled by tpsl-monitor. Null for market/non-limit. */
-  pendingUntil?: number | null;
-  /** A/B track bucket. Defaults to 'llm' for back-compat. */
-  track?: Track;
-  /** Optional TP1 level (multi-TP). When set, signals that the position
-   *  has a 50/50 partial-close plan. tpsl-monitor will close 50% on TP1
-   *  hit and move SL to entry (BE). Null = legacy single-TP behaviour. */
-  tp1Price?: number | null;
-  /** Track C only: strategy_id from LuxAlgo Strategy Builder. */
-  strategyId?: string | null;
-};
-
-export function insertDecision(input: InsertDecisionInput): number {
-  const winning = input.agg.side === 'long' ? input.agg.bullish : input.agg.bearish;
-  // OPEN normally starts 'active'. For limit-entry OPEN we pass
-  // statusOverride='pending' so the order sits in the queue until price
-  // touches entry; non-OPEN decisions are 'final'.
-  const defaultStatus = input.decision.decision === 'OPEN' ? 'active' : 'final';
-  const status = input.statusOverride ?? defaultStatus;
-
-  // Track C: assign per-strategy sequential counter for the post prefix.
-  // 1-based: first trade of STRAT-001 → strategy_trade_num=1, displayed
-  // as T#001. Global decision.id remains the foreign-key primary key.
-  let strategyTradeNum: number | null = null;
-  if (input.track === 'strategy' && input.strategyId) {
-    const max = maxStrategyNumStmt.get(input.strategyId)?.n ?? 0;
-    strategyTradeNum = max + 1;
-  }
-
-  const result = insertStmt.run(
-    Date.now(),
-    input.symbol,
-    winning,
-    JSON.stringify(input.agg.signals.map((s) => s.id)),
-    input.screenshotPath,
-    input.inputTokens,
-    input.outputTokens,
-    input.decision.decision,
-    input.decision.side ?? null,
-    input.decision.entry ?? null,
-    input.decision.sl ?? null,
-    input.decision.tp.length ? JSON.stringify(input.decision.tp) : null,
-    input.decision.size_pct ?? null,
-    input.decision.confidence,
-    input.decision.reasoning_short,
-    input.decision.reasoning_full,
-    input.rawResponse,
-    status,
-    input.parentDecisionId ?? null,
-    input.decision.sl_reason ?? null,
-    input.decision.tp_reason ?? null,
-    input.decision.invalidation ?? null,
-    input.features ? JSON.stringify(input.features) : null,
-    input.pendingUntil ?? null,
-    null, // filled_at — set later when limit fills
-    input.track ?? 'llm',
-    input.decision.sl ?? null, // original_sl — frozen at open time
-    input.tp1Price ?? null, // tp1_price — multi-TP partial close target
-    input.strategyId ?? null, // strategy_id — Track C only
-    strategyTradeNum, // strategy_trade_num — Track C per-strategy counter
-  );
-  const newId = Number(result.lastInsertRowid);
-
-  // Note: we deliberately do NOT auto-close the parent here for CLOSE
-  // decisions any more — callers (LLM monitor, TP/SL monitor) call
-  // closePositionWithStats() so they can record close_price + PnL atomically.
-  return newId;
-}
-
-/** Mark closed without stats (legacy fallback — prefer closePositionWithStats). */
-/** All pending limit orders (regardless of symbol). */
-export function findPendingLimits(): DecisionRow[] {
-  return findPendingLimitsStmt.all();
-}
-
-/**
- * Promote a pending limit to active (i.e., the limit just got filled).
- * Returns true if THIS call did the activation; false if someone else
- * already activated (race protection — only one fill per limit).
- */
-export function activatePendingLimit(id: number, filledAt: number): boolean {
-  const r = activatePendingStmt.run(filledAt, id);
-  return r.changes > 0;
-}
-
-/**
- * Cancel an unfilled pending limit (expired, or LLM explicitly cancelled).
- * Returns true if THIS call cancelled it.
- */
-export function cancelPendingLimit(id: number): boolean {
-  const r = cancelPendingStmt.run(Date.now(), id);
-  return r.changes > 0;
-}
-
-/**
- * Update the SL field of a position in-place. Used by:
- *  - the auto-BE rule in tpsl-monitor (move SL to entry on 1R)
- *  - the LLM monitor when MODIFY decisions are accepted (so subsequent
- *    TPSL polling uses the new SL, not the stale original).
- */
-export function updatePositionSl(id: number, newSl: number): void {
-  updateSlStmt.run(newSl, id);
-}
-
-export function closePosition(id: number): void {
-  closePositionStmt.run(Date.now(), id);
-}
-
-/** All currently active OPEN positions across all symbols. */
-/** All active OPEN positions across ALL tracks. Use this in track-agnostic
- *  contexts (tpsl-monitor: SL/TP hit detection works the same regardless). */
-export function findActivePositionsByTrack(track: Track): DecisionRow[] {
-  return findActiveByTrackStmt.all(track);
-}
-
-export function findActivePositions(): DecisionRow[] {
-  return findActiveStmt.all();
-}
-
-/** Active position on (symbol, side) — used to decide if a new OPEN should add or skip. */
-/**
- * Return the active position on this symbol regardless of side, or null.
- * If both sides are open (shouldn't happen in our pipeline), returns the
- * most recent.
- */
-export function findActivePosition(symbol: string): DecisionRow | null {
-  return findActiveBySymbolStmt.get(symbol) ?? null;
-}
-
-const findActiveOrPendingBySymbolStmt = db.prepare<[string], DecisionRow>(`
-  SELECT * FROM decisions
-  WHERE decision = 'OPEN' AND symbol = ?
-    AND (status = 'active' OR status = 'pending')
-  ORDER BY created_at DESC LIMIT 1
-`);
-
-const findActiveOrPendingBySymbolTrackStmt = db.prepare<[string, string], DecisionRow>(`
-  SELECT * FROM decisions
-  WHERE decision = 'OPEN' AND symbol = ? AND track = ?
-    AND (status = 'active' OR status = 'pending')
-  ORDER BY created_at DESC LIMIT 1
-`);
-
-const findLastSignalOpenStmt = db.prepare<[string, number], DecisionRow>(`
-  SELECT * FROM decisions
-  WHERE decision = 'OPEN' AND symbol = ? AND track = 'signal'
-    AND created_at >= ?
-  ORDER BY created_at DESC LIMIT 1
-`);
-
-const findAllActiveOrPendingBySymbolStmt = db.prepare<[string], DecisionRow>(`
-  SELECT * FROM decisions
-  WHERE decision = 'OPEN' AND symbol = ?
-    AND (status = 'active' OR status = 'pending')
-  ORDER BY created_at DESC
-`);
-
-/**
- * Active OR pending-limit position on this symbol — single LATEST row.
- * Used as the decide-cron PRIMARY guard: while a limit is waiting for
- * fill on TON, we should NOT open another market position on TON.
- * Otherwise we'd end up with double exposure.
- *
- * For spider-mode (multi-limit, 2026-05-12), use findAllActiveOrPending()
- * which returns the FULL list so we can count slots and apply the
- * max-3-per-symbol cap.
- */
-export function findActiveOrPendingPosition(symbol: string): DecisionRow | null {
-  return findActiveOrPendingBySymbolStmt.get(symbol) ?? null;
-}
-
-/** Track-aware variant — LLM and signal tracks have INDEPENDENT
- *  occupancy. Track 'llm' should only check llm-track positions when
- *  deciding to skip, and track 'signal' only signal-track. */
-export function findActiveOrPendingByTrack(symbol: string, track: Track): DecisionRow | null {
-  return findActiveOrPendingBySymbolTrackStmt.get(symbol, track) ?? null;
-}
-
-/** Most recent SIGNAL-track OPEN on this symbol within the cooldown
- *  window. Used by signal-trader to enforce SIGNAL_COOLDOWN_MIN. */
-export function findRecentSignalOpen(symbol: string, sinceMs: number): DecisionRow | null {
-  return findLastSignalOpenStmt.get(symbol, sinceMs) ?? null;
-}
-
 const findActiveByStrategyStmt = db.prepare<[string, string], DecisionRow>(`
   SELECT * FROM decisions
   WHERE status = 'active' AND decision = 'OPEN'
     AND track = 'strategy' AND symbol = ? AND strategy_id = ?
   ORDER BY created_at DESC LIMIT 1
 `);
+
+/**
+ * Minimal input for a Track C insert. All Track A/B-only fields
+ * (LLM tokens, screenshots, spider setups, multi-TP, etc.) are
+ * persisted as NULL — kept in the table schema for back-compat with
+ * historical rows but no longer populated.
+ */
+export type InsertDecisionInput = {
+  symbol: string;
+  side: 'long' | 'short';
+  entry: number;
+  sl: number;
+  reasoningShort: string;
+  reasoningFull: string;
+  rawResponse: string;
+  features?: Record<string, unknown> | null;
+  strategyId: string;
+};
+
+export function insertDecision(input: InsertDecisionInput): number {
+  // Track C: assign per-strategy sequential counter for the post prefix.
+  // 1-based: first trade of STRAT-001 → strategy_trade_num=1, displayed
+  // as T#001. Global decision.id remains the foreign-key primary key.
+  const maxNum = maxStrategyNumStmt.get(input.strategyId)?.n ?? 0;
+  const strategyTradeNum = maxNum + 1;
+
+  const result = insertStmt.run(
+    Date.now(),
+    input.symbol,
+    0, // confluence_score — legacy, Track C has no aggregator score
+    JSON.stringify([]), // signal_ids — Track C has no upstream signal rows
+    null, // screenshot_path
+    null, // llm_input_tokens
+    null, // llm_output_tokens
+    'OPEN',
+    input.side,
+    input.entry,
+    input.sl,
+    null, // tp_json — Track C has no TP (exit via webhook)
+    null, // size_pct — Track C uses fixed $1000 notional
+    null, // confidence — Track C has no LLM confidence
+    input.reasoningShort,
+    input.reasoningFull,
+    input.rawResponse,
+    'active',
+    null, // parent_decision_id
+    null, // sl_reason
+    null, // tp_reason
+    null, // invalidation
+    input.features ? JSON.stringify(input.features) : null,
+    null, // pending_until — Track C is market-entry only
+    null, // filled_at — set later when limit fills (n/a Track C)
+    'strategy',
+    input.sl, // original_sl — frozen at open time
+    null, // tp1_price
+    input.strategyId,
+    strategyTradeNum,
+  );
+  return Number(result.lastInsertRowid);
+}
+
+/** All currently-active OPEN positions (any track). tpsl-monitor uses
+ *  this to scan every active row for safety-SL hits and time-guard. */
+export function findActivePositions(): DecisionRow[] {
+  return findActiveStmt.all();
+}
+
+export function findDecisionById(id: number): DecisionRow | null {
+  return findByIdStmt.get(id) ?? null;
+}
 
 /** Find the open Track C position for a given (symbol, strategy_id) pair.
  *  Used by:
@@ -367,16 +190,6 @@ export function findActiveByStrategy(
   strategyId: string,
 ): DecisionRow | null {
   return findActiveByStrategyStmt.get(symbol, strategyId) ?? null;
-}
-
-/** All active or pending OPEN rows on this symbol. Spider-mode counts
- *  these to enforce "max 3 pending/active per symbol". */
-export function findAllActiveOrPending(symbol: string): DecisionRow[] {
-  return findAllActiveOrPendingBySymbolStmt.all(symbol);
-}
-
-export function findDecisionById(id: number): DecisionRow | null {
-  return findByIdStmt.get(id) ?? null;
 }
 
 /**
@@ -412,12 +225,10 @@ export type ClosePositionInput = {
 };
 
 /**
- * Close a position with full exit stats. Used by TP/SL monitor and LLM-driven
- * close. Returns true if the row was actually closed by THIS call, false if
- * the row was already closed (another path got there first — TPSL hit
- * concurrent with LLM CLOSE, etc.). Callers should skip subsequent side
- * effects (Telegram post, etc.) when this returns false to avoid duplicate
- * notifications.
+ * Close a position with full exit stats. Returns true if the row was
+ * actually closed by THIS call, false if the row was already closed
+ * (another path got there first). Callers should skip subsequent side
+ * effects (Telegram post, etc.) when this returns false.
  */
 export function closePositionWithStats(input: ClosePositionInput): boolean {
   const result = closePositionWithStatsStmt.run(
@@ -431,29 +242,6 @@ export function closePositionWithStats(input: ClosePositionInput): boolean {
   return result.changes > 0;
 }
 
-const partialCloseStmt = db.prepare<[number, number, number, number, number]>(`
-  UPDATE decisions
-  SET partial_closed_pct = ?, partial_close_price = ?, partial_closed_at = ?,
-      sl = ?
-  WHERE id = ? AND status = 'active' AND partial_closed_pct = 0
-`);
-
-/**
- * Mark a position as 50%-closed at TP1 and move SL to BE (entry).
- * Returns true if THIS call did the partial-close (false = another path
- * already did it / the position is no longer eligible).
- *
- * The remaining 50% stays in status='active' until TP2 / SL hit.
- */
-export function partialCloseAtTp1(
-  id: number,
-  tp1Price: number,
-  newSl: number,
-): boolean {
-  const r = partialCloseStmt.run(50, tp1Price, Date.now(), newSl, id);
-  return r.changes > 0;
-}
-
 const forceCloseStmt = db.prepare<[number, number, string, number, number, string, number]>(`
   UPDATE decisions
   SET status = 'closed', closed_at = ?, close_price = ?, close_reason = ?,
@@ -462,8 +250,8 @@ const forceCloseStmt = db.prepare<[number, number, string, number, number, strin
 `);
 
 /**
- * Force-close a position (counter-signal / time-guard / manual). Same as
- * closePositionWithStats but records WHY in force_close_reason for audit.
+ * Force-close a position (strategy_exit / reverse_signal / time_guard).
+ * Same as closePositionWithStats but records WHY in force_close_reason.
  */
 export function forceClose(input: {
   id: number;
@@ -471,7 +259,7 @@ export function forceClose(input: {
   closeReason: CloseReason;
   pnlPct: number;
   pnlR: number;
-  forceReason: string; // 'counter_structural' | 'counter_signal' | 'time_guard'
+  forceReason: string;
 }): boolean {
   const r = forceCloseStmt.run(
     Date.now(),
@@ -483,19 +271,4 @@ export function forceClose(input: {
     input.id,
   );
   return r.changes > 0;
-}
-
-/**
- * Has the LLM already produced a non-SKIP decision for (symbol, side) within
- * the cooldown window? Used to suppress spam.
- */
-export function recentNonSkipDecision(
-  symbol: string,
-  side: 'long' | 'short',
-  cooldownMs: number,
-): DecisionRow | null {
-  const since = Date.now() - cooldownMs;
-  const row = lastDecisionStmt.get(symbol, side, since);
-  if (!row) return null;
-  return row.decision === 'SKIP' ? null : row;
 }

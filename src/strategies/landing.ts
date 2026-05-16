@@ -19,10 +19,8 @@ import {
   type ActiveTradeRow,
 } from './live-stats.js';
 
-/** Support contact (operator's personal Telegram). Surfaced as a small
- *  link in the top-right nav on every page so visitors can reach out
- *  with questions / issues. */
-const SUPPORT_URL = 'https://t.me/dboykod';
+// (SUPPORT_URL placeholder removed — never referenced in the rendered
+//  pages. Re-add if/when a contact link appears in the page shell.)
 
 // --- Backtest trades loader ---
 // Scraped trades log lives in src/strategies/data/<id>.json (written by

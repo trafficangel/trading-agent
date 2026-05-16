@@ -7,12 +7,10 @@ import {
   forceClose,
   calcPnl,
 } from '../db/repos/decisions.js';
-import { aggregateSymbol } from '../signals/aggregator.js';
 import { getLastPrice } from '../exchange/bybit-public.js';
 import { sendMessage } from '../telegram/bot.js';
 import { resultPost } from '../telegram/result-template.js';
 import { deriveActionSide, type LuxAlgoStrategyPayload } from '../webhooks/luxalgo.schema.js';
-import type { Decision } from '../llm/decision.schema.js';
 import {
   getStrategyConfig,
   TRACK_C_NOTIONAL_USD,
@@ -286,52 +284,58 @@ async function handleStrategyEntry(
     }
   }
 
-  // Safety SL = entry ± entry × slPct
+  // Safety SL = entry ± entry × slPct. validateStrategyConfigs() at
+  // boot guarantees slPct is a finite positive number ≤ 0.20, but we
+  // re-check here in case the module was hot-reloaded or the config
+  // was edited at runtime. Without this guard, slPct=undefined produces
+  // slDist=NaN → sl=NaN → SQLite stores NULL → tpsl-monitor's
+  // `price <= null` never fires → position has no working safety stop.
+  if (typeof cfg.slPct !== 'number' || !Number.isFinite(cfg.slPct) || cfg.slPct <= 0) {
+    logger.error(
+      { strategy_id: p.strategy_id, slPct: cfg.slPct },
+      'strategy-trader: refusing to open — invalid slPct in config',
+    );
+    await sendMessage({
+      channel: 'logs',
+      text:
+        `🚨 <b>Track C entry refused — invalid slPct</b>\n` +
+        `Стратегия <code>${p.strategy_id}</code> имеет битый slPct ` +
+        `(<code>${String(cfg.slPct)}</code>). Позиция НЕ открыта. ` +
+        `Срочно проверить track-c-config.ts.`,
+      disable_notification: false,
+    }).catch(() => {});
+    return { ok: false, reason: 'invalid_sl_config' };
+  }
   const slDist = entry * cfg.slPct;
   const sl = round(side === 'long' ? entry - slDist : entry + slDist, 4);
   const slPctDisplay = (cfg.slPct * 100).toFixed(2);
 
-  // Build a synthetic Decision that flows through the existing insertDecision
-  // pipeline. Empty tp[] + tp1Price=null keeps tpsl-monitor on the SL-only
-  // branch (added in this commit) — no TP detection, no BE move.
-  const decision: Decision = {
-    decision: 'OPEN',
-    side,
-    entry_type: 'market',
-    tp_strategy: 'swing', // arbitrary — Track C has no scalp/swing concept
-    entry,
-    sl,
-    tp: [], // empty — strategy decides exit via webhook
-    size_pct: 0.5, // cosmetic — actual sizing is $1000 fixed (see TRACK_C_NOTIONAL_USD)
-    confidence: 0.5, // arbitrary — no LLM here
-    reasoning_short:
-      `🤖 STRAT [${p.strategy_id}] ${side} ${p.symbol} @ ${entry} · SL ${sl} (${slPctDisplay}%)`,
-    reasoning_full: [
-      `Track C — LuxAlgo Strategy Builder entry.`,
-      ``,
-      `Strategy: ${p.strategy_id}`,
-      `Description: ${cfg.description}`,
-      `Symbol: ${p.symbol}`,
-      `Timeframe: ${p.timeframe}m`,
-      ``,
-      `Side: ${side}`,
-      `Entry: ${entry} (market)`,
-      `Safety SL: ${sl} (${slPctDisplay}% from entry)`,
-      `Notional: $${TRACK_C_NOTIONAL_USD}`,
-      ``,
-      `Exit is delegated to the strategy's Builtin Exits via webhook.`,
-      `Time-guard: 24h hard close if no exit webhook arrives.`,
-    ].join('\n'),
-  };
+  const reasoningShort =
+    `🤖 STRAT [${p.strategy_id}] ${side} ${p.symbol} @ ${entry} · SL ${sl} (${slPctDisplay}%)`;
+  const reasoningFull = [
+    `Track C — LuxAlgo Strategy Builder entry.`,
+    ``,
+    `Strategy: ${p.strategy_id}`,
+    `Description: ${cfg.description}`,
+    `Symbol: ${p.symbol}`,
+    `Timeframe: ${p.timeframe}m`,
+    ``,
+    `Side: ${side}`,
+    `Entry: ${entry} (market)`,
+    `Safety SL: ${sl} (${slPctDisplay}% from entry)`,
+    `Notional: $${TRACK_C_NOTIONAL_USD}`,
+    ``,
+    `Exit is delegated to the strategy's Builtin Exits via webhook.`,
+    `Track C has NO time-guard — strategies may hold positions for days.`,
+  ].join('\n');
 
-  const agg = aggregateSymbol(p.symbol);
   const decisionId = insertDecision({
     symbol: p.symbol,
-    agg,
-    decision,
-    screenshotPath: null,
-    inputTokens: 0,
-    outputTokens: 0,
+    side,
+    entry,
+    sl,
+    reasoningShort,
+    reasoningFull,
     rawResponse: JSON.stringify(p),
     features: {
       source: 'strategy_trader',
@@ -341,7 +345,6 @@ async function handleStrategyEntry(
       strategy_timeframe: p.timeframe,
       notional_usd: TRACK_C_NOTIONAL_USD,
     },
-    track: 'strategy',
     strategyId: p.strategy_id,
   });
 
@@ -394,17 +397,21 @@ async function handleStrategyExit(
   // first → flipped position via reverse_signal → THEN the original
   // exit webhook arrives) would close the wrong-direction position.
   //
-  // deriveActionSide() always sets `side` for exits in form B (it's
-  // informational per the deriveActionSide contract). In form A the
-  // operator's curl can omit `side` on exit — in that case we skip the
-  // guard (trust manual testing).
+  // Form B (LuxAlgo strategy_event="exit long"/"exit short") always
+  // sets derived.side. Form A (manual `{action:'exit'}` curl) may omit
+  // `side`. We require derived.side for ALL exits — if absent, we
+  // assume the operator's manual curl matches the active position's
+  // side (the only safe interpretation given we have no way to tell).
+  // Crucially this no longer has a hole where derived.side===undefined
+  // silently bypassed the comparison.
   const derived = deriveActionSide(p);
-  if (derived.side && derived.side !== active.side) {
+  const exitSide = derived.side ?? active.side;
+  if (exitSide !== active.side) {
     logger.warn(
       {
         strategy_id: p.strategy_id,
         symbol: p.symbol,
-        exit_side: derived.side,
+        exit_side: exitSide,
         active_side: active.side,
         active_id: active.id,
       },
@@ -415,7 +422,7 @@ async function handleStrategyExit(
       text:
         `⚠️ <b>Track C stale exit ignored</b>\n` +
         `Стратегия: <code>${p.strategy_id}</code> на ${p.symbol}\n` +
-        `Exit пришёл на <b>${derived.side}</b>, но активная позиция <b>${active.side}</b> ` +
+        `Exit пришёл на <b>${exitSide}</b>, но активная позиция <b>${active.side}</b> ` +
         `(вероятно, флип через reverse_signal уже произошёл).`,
       disable_notification: true,
     }).catch(() => {});
@@ -476,16 +483,6 @@ function sideRu(side: 'long' | 'short'): string {
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c] ?? c);
-}
-
-function formatDuration(ms: number): string {
-  const totalMin = Math.max(0, Math.floor(ms / 60_000));
-  const d = Math.floor(totalMin / (60 * 24));
-  const h = Math.floor((totalMin % (60 * 24)) / 60);
-  const m = totalMin % 60;
-  if (d > 0) return `${d}д ${h}ч ${m}м`;
-  if (h > 0) return `${h}ч ${m}м`;
-  return `${m}м`;
 }
 
 async function sendStrategyEntryPost(

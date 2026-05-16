@@ -2,7 +2,6 @@ import cron from 'node-cron';
 import { logger } from '../lib/logger.js';
 import { getLastTick } from '../lib/health-tracker.js';
 import { sendMessage } from '../telegram/bot.js';
-import { config } from '../config.js';
 
 /**
  * Health watchdog.
@@ -30,16 +29,10 @@ type HealthCheck = {
   maxAgeMs: number;
 };
 
-// decide + monitor are LLM-track-only — when LLM_TRACK_ENABLED=false they
-// don't tick at all (by design, not by failure). Skip those checks in that
-// mode, otherwise the watchdog spams "never-ticked" alerts every 30 min.
+// Track C runs only the tpsl safety monitor on a cron. Heartbeat &
+// daily-wrap don't tick frequently enough to be useful staleness checks,
+// so we just watch tpsl + RSS.
 const CHECKS: HealthCheck[] = [
-  ...(config.LLM_TRACK_ENABLED
-    ? [
-        { key: 'decide', label: 'decide-cron', maxAgeMs: 30 * 60 * 1000 },
-        { key: 'monitor', label: 'monitor-cron', maxAgeMs: 30 * 60 * 1000 },
-      ]
-    : []),
   { key: 'tpsl', label: 'tpsl-monitor', maxAgeMs: 10 * 60 * 1000 }, // every 1m → 10m grace
 ];
 

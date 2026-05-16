@@ -4,95 +4,39 @@ import { logger } from '../lib/logger.js';
 import {
   findActivePositions,
   findDecisionById,
-  findPendingLimits,
-  activatePendingLimit,
-  cancelPendingLimit,
   calcPnl,
   closePositionWithStats,
-  updatePositionSl,
-  partialCloseAtTp1,
   forceClose,
   type DecisionRow,
 } from '../db/repos/decisions.js';
 import { getLastPrice } from '../exchange/bybit-public.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { resultPost } from '../telegram/result-template.js';
-import { limitFilledCaption, limitCancelledCaption } from '../telegram/decision-template.js';
 import { markTick } from '../lib/health-tracker.js';
 
 let running = false;
 
 /**
- * Hard SL→BE rule: when price has moved >= 1R in our favor and the SL is
- * still on the original (loss) side of entry, force-move SL to entry.
+ * Track C tpsl-monitor — safety SL only.
  *
- * Returns the (possibly updated) SL — caller uses this for the SL/TP hit
- * comparison so we don't accidentally trigger an SL-hit on the same tick
- * we just moved SL to BE.
+ * LuxAlgo Strategy Builder positions delegate primary exit logic to the
+ * strategy's own "Builtin Exits" via webhook (handled in
+ * src/strategies/strategy-trader.ts). This monitor is the safety net for:
+ *   - Strategy didn't send exit in time (or webhook lost in transit) AND
+ *     price moved against us beyond the configured safety SL.
+ *
+ * No TP detection, no SL→BE move, no multi-TP / partial-close logic —
+ * those were Track A/B concepts and have been removed.
+ *
+ * Time-guard: Track C positions are INTENTIONALLY exempt from the 24h
+ * time-cap. LuxAlgo backtests routinely hold positions multiple days
+ * (avg duration on STRAT-001 ≈ 39h on 15m), and force-closing at 24h
+ * bypasses the strategy's own edge.
  */
-function maybeMoveSlToBe(p: DecisionRow, currentPrice: number): number {
-  if (!p.entry || !p.sl || !p.side) return p.sl ?? 0;
-  const slDist = Math.abs(p.entry - p.sl);
-  if (slDist === 0) return p.sl;
-
-  // PnL distance in our favor (positive when in profit)
-  const pnlDist = p.side === 'long' ? currentPrice - p.entry : p.entry - currentPrice;
-  if (pnlDist < slDist) return p.sl; // not at 1R yet
-
-  // Already at-or-better than BE? (long: SL >= entry; short: SL <= entry)
-  const slAtOrBetter =
-    p.side === 'long' ? p.sl >= p.entry : p.sl <= p.entry;
-  if (slAtOrBetter) return p.sl;
-
-  // Move it. Atomically update the DB row.
-  updatePositionSl(p.id, p.entry);
-  logger.info(
-    {
-      position_id: p.id,
-      symbol: p.symbol,
-      side: p.side,
-      entry: p.entry,
-      old_sl: p.sl,
-      new_sl: p.entry,
-      pnl_dist: pnlDist,
-      sl_dist: slDist,
-    },
-    'auto SL→BE: 1R reached',
-  );
-
-  // Post to BOTH Signals (full lifecycle visibility) and Logs (audit).
-  // Signals gets disable_notification=true — visible in-channel but no
-  // phone alert, since BE move is mechanical not a new trade decision.
-  // Track-aware trade ID: 'S#XXXX' for signal track, '#XXXX' for LLM.
-  const prefix = p.track === 'signal' ? 'S#' : '#';
-  const tradeIdStr = `${prefix}${p.id.toString().padStart(4, '0')}`;
-  const beText = [
-    `🔒 <b>SL → безубыток</b> по сделке ${tradeIdStr} ${p.symbol}:`,
-    `1R достигнут, SL подвинут с <code>${p.sl}</code> на <code>${p.entry}</code>.`,
-    ``,
-    `<i>⏸ Теперь проиграть невозможно — максимум выход на BE.</i>`,
-  ].join('\n');
-  void sendMessage({ channel: 'signals', text: beText, disable_notification: true });
-  void sendMessage({ channel: 'logs', text: beText, disable_notification: true });
-
-  return p.entry;
-}
-
-// Max position age before time-guard force-close kicks in.
-//
-// Per-track behaviour:
-//   - Track A (LLM)    : 24h. Setups are minute/hour-scale; older = stranded.
-//   - Track B (signal) : 24h. Same reasoning as Track A.
-//   - Track C (strategy): NO time-guard. LuxAlgo strategy backtests
-//     regularly hold positions for multiple days (avg duration on
-//     STRAT-001 = ~155 bars ≈ 39 hours on 15m). Force-closing at 24h
-//     bypasses the strategy's own edge — the long tail of winning
-//     trades comes from holding through noise.
-const TIME_GUARD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 async function checkPosition(pInput: DecisionRow): Promise<void> {
-  // Refresh from DB on each tick — see comment in previous version. Concurrent
-  // mutations (BE move, partial close, MODIFY) require fresh state.
+  // Refresh from DB on each tick. Concurrent mutations (force_close
+  // from a strategy_exit webhook) require fresh state.
   const fresh = findDecisionById(pInput.id);
   if (!fresh || fresh.status !== 'active') return;
   const p = fresh;
@@ -100,137 +44,18 @@ async function checkPosition(pInput: DecisionRow): Promise<void> {
   if (!p.entry || !p.sl || !p.side) return;
   if (p.side !== 'long' && p.side !== 'short') return;
 
-  // Parse tp_json — may be [tp1, tp2] (multi-TP) or [tp] (legacy single-TP).
-  const tpArr = p.tp_json ? (JSON.parse(p.tp_json) as unknown[]).filter((x) => typeof x === 'number') as number[] : [];
-  const isMultiTp = p.tp1_price !== null && tpArr.length >= 2;
-  const tp1 = isMultiTp ? (p.tp1_price as number) : null;
-  const tpFinal = isMultiTp ? (tpArr[1] as number) : tpArr[0] ?? null;
-
   const price = await getLastPrice(p.symbol);
   if (price == null) return;
 
-  // === TIME GUARD ===
-  // Position open too long without resolution → force-close at market.
-  // Skip entirely for Track C — strategies own their exit logic and a
-  // 24h cap actively breaks profitable long-hold setups.
-  const ageMs = Date.now() - (p.filled_at ?? p.created_at);
-  if (p.track !== 'strategy' && ageMs > TIME_GUARD_MAX_AGE_MS) {
-    const slForR = p.original_sl ?? p.sl;
-    const { pnlPct, pnlR } = computeWeightedPnl(p, price, slForR);
-    const closed = forceClose({
-      id: p.id,
-      closePrice: price,
-      closeReason: 'manual',
-      pnlPct,
-      pnlR,
-      forceReason: 'time_guard',
-    });
-    if (closed) {
-      logger.info(
-        { position_id: p.id, age_h: Math.round(ageMs / 3600000), pnlR },
-        'tpsl: time-guard force-close',
-      );
-      await postCloseMessage(p, price, 'manual', pnlPct, pnlR, '⏱ time-guard (24h)');
-    }
-    return;
+  // Safety SL check — Track C is SL-only, no TP, no BE move.
+  const slHit = (p.side === 'long' && price <= p.sl) || (p.side === 'short' && price >= p.sl);
+  if (slHit) {
+    return closeFull(p, p.sl, 'sl_hit', '🛡 Safety SL');
   }
-
-  // === TRACK C path — SL-only, no TP, no BE move ===
-  // Strategy Builder positions delegate exit to LuxAlgo's Builtin Exits
-  // (delivered via webhook → strategy-trader.handleStrategyExit). The
-  // safety SL here is just that — a safety net for "strategy didn't send
-  // exit in time / wrong direction / lost in transit". No multi-TP logic,
-  // no BE move, no R-multiple chasing.
-  if (p.track === 'strategy') {
-    const slHit = (p.side === 'long' && price <= p.sl) || (p.side === 'short' && price >= p.sl);
-    if (slHit) {
-      return closeFull(p, p.sl, 'sl_hit', '🛡 Safety SL');
-    }
-    return;
-  }
-
-  // === MULTI-TP path ===
-  if (isMultiTp && tp1 !== null && tpFinal !== null) {
-    // Stage 1: pre-TP1 (partial_closed_pct = 0)
-    if (p.partial_closed_pct === 0) {
-      // SL hit before TP1 — full close at original SL, -1R
-      const slHit = (p.side === 'long' && price <= p.sl) || (p.side === 'short' && price >= p.sl);
-      if (slHit) {
-        return closeFull(p, p.sl, 'sl_hit', '🛑 SL hit (до TP1)');
-      }
-      // TP1 hit — partial close 50% + move SL to BE
-      const tp1Hit = (p.side === 'long' && price >= tp1) || (p.side === 'short' && price <= tp1);
-      if (tp1Hit) {
-        const partialDone = partialCloseAtTp1(p.id, tp1, p.entry);
-        if (partialDone) {
-          logger.info(
-            { position_id: p.id, tp1, newSl: p.entry },
-            'tpsl: TP1 hit — 50% closed, SL → BE',
-          );
-          await postPartialClose(p, tp1);
-        }
-        return;
-      }
-      return; // no hit yet
-    }
-
-    // Stage 2: post-TP1 (partial_closed_pct = 50)
-    // SL is now at entry (BE). Remaining 50% lives until TP2 or BE-touch.
-    if (p.partial_closed_pct === 50) {
-      const slHit = (p.side === 'long' && price <= p.sl) || (p.side === 'short' && price >= p.sl);
-      if (slHit) {
-        // BE-touch on remainder. Weighted PnL: 50%×(+1R) + 50%×(0R) = +0.5R
-        return closeFull(p, p.sl, 'sl_hit', '🔄 BE-touch (после TP1) — итог +0.5R');
-      }
-      const tp2Hit = (p.side === 'long' && price >= tpFinal) || (p.side === 'short' && price <= tpFinal);
-      if (tp2Hit) {
-        // Full TP2. Weighted PnL: 50%×(+1R) + 50%×(+2R) = +1.5R
-        return closeFull(p, tpFinal, 'tp_hit', '🎉 TP2 — итог +1.5R');
-      }
-      return; // no final hit yet
-    }
-    return; // partial_closed_pct=100 shouldn't reach here (status would be 'closed')
-  }
-
-  // === LEGACY single-TP path (Track A historical rows) ===
-  // Original behaviour: maybeMoveSlToBe → SL/TP hit detection.
-  const effectiveSl = maybeMoveSlToBe(p, price);
-  let hit: 'sl' | 'tp' | null = null;
-  let closePrice = price;
-  if (p.side === 'long') {
-    if (price <= effectiveSl) { hit = 'sl'; closePrice = effectiveSl; }
-    else if (tpFinal != null && price >= tpFinal) { hit = 'tp'; closePrice = tpFinal; }
-  } else {
-    if (price >= effectiveSl) { hit = 'sl'; closePrice = effectiveSl; }
-    else if (tpFinal != null && price <= tpFinal) { hit = 'tp'; closePrice = tpFinal; }
-  }
-  if (!hit) return;
-  const reason = hit === 'tp' ? 'tp_hit' : 'sl_hit';
-  return closeFull(p, closePrice, reason, hit === 'tp' ? '🎉 TP' : '🛑 SL');
 }
 
-/**
- * Compute weighted PnL for a position that may be partially closed.
- *   partial_closed_pct = 0  → standard calcPnl on remaining 100%
- *   partial_closed_pct = 50 → 0.5×(TP1 R) + 0.5×(final R)
- */
-function computeWeightedPnl(
-  p: DecisionRow,
-  finalClosePrice: number,
-  slForR: number,
-): { pnlPct: number; pnlR: number } {
-  if (p.partial_closed_pct === 50 && p.partial_close_price !== null && p.entry !== null && p.side) {
-    const partialResult = calcPnl(p.side as 'long' | 'short', p.entry, slForR, p.partial_close_price);
-    const finalResult = calcPnl(p.side as 'long' | 'short', p.entry, slForR, finalClosePrice);
-    return {
-      pnlPct: (partialResult.pnlPct + finalResult.pnlPct) / 2,
-      pnlR: Math.round((partialResult.pnlR + finalResult.pnlR) * 0.5 * 100) / 100,
-    };
-  }
-  return calcPnl(p.side as 'long' | 'short', p.entry!, slForR, finalClosePrice);
-}
-
-/** Close the full (or remaining) position with computed weighted PnL. */
+/** Close the position with computed PnL (R is computed from original SL
+ *  so partial fills / SL moves never inflate the realised-R number). */
 async function closeFull(
   p: DecisionRow,
   closePrice: number,
@@ -239,33 +64,30 @@ async function closeFull(
 ): Promise<void> {
   if (!p.entry || !p.side) return;
   const slForR = p.original_sl ?? p.sl ?? p.entry;
-  const { pnlPct, pnlR } = computeWeightedPnl(p, closePrice, slForR);
+  const { pnlPct, pnlR } = calcPnl(p.side as 'long' | 'short', p.entry, slForR, closePrice);
   const closed = closePositionWithStats({ id: p.id, closePrice, closeReason: reason, pnlPct, pnlR });
   if (!closed) {
     logger.info({ position_id: p.id, reason }, 'tpsl: already closed elsewhere, skip post');
     return;
   }
   logger.info(
-    { position_id: p.id, reason, closePrice, pnlPct, pnlR, hint, partial: p.partial_closed_pct },
+    { position_id: p.id, reason, closePrice, pnlPct, pnlR, hint },
     'tpsl monitor: position closed',
   );
-  await postCloseMessage(p, closePrice, reason, pnlPct, pnlR, hint);
+  await postCloseMessage(p, closePrice, reason, pnlPct, pnlR);
 }
 
-/** Send the result post (used by all close paths). */
 async function postCloseMessage(
   p: DecisionRow,
   closePrice: number,
   reason: 'tp_hit' | 'sl_hit' | 'manual',
   pnlPct: number,
   pnlR: number,
-  _hint: string,
 ): Promise<void> {
   if (!p.entry || !p.side || !p.sl) return;
-  const tpFinal = p.tp_json ? (JSON.parse(p.tp_json) as number[]).at(-1) ?? null : null;
-  // Track C extras: USD P&L on $1000 notional, force-close reason context,
-  // STRAT-XXX badge, per-strategy counter, landing link. Lazy-imported
-  // to avoid circular import between tpsl-monitor → track-c-config.
+  // Track C extras: USD P&L on $1000 notional, STRAT-XXX badge,
+  // per-strategy counter, landing link. Lazy-imported to avoid
+  // circular import between tpsl-monitor → track-c-config.
   let notionalUsd: number | undefined;
   let strategyCode: string | null = null;
   let strategyName: string | null = null;
@@ -287,7 +109,7 @@ async function postCloseMessage(
     side: p.side as 'long' | 'short',
     entry: p.entry,
     sl: p.sl,
-    tp: tpFinal,
+    tp: null,
     closePrice,
     closeReason: reason,
     pnlPct,
@@ -310,81 +132,10 @@ async function postCloseMessage(
   await sendMessage({ channel: 'logs', text, disable_notification: true });
 }
 
-/** Send TP1 partial-close notification (50% closed + SL → BE). */
-async function postPartialClose(p: DecisionRow, tp1Price: number): Promise<void> {
-  const prefix = p.track === 'signal' ? 'S#' : '#';
-  const tradeIdStr = `${prefix}${p.id.toString().padStart(4, '0')}`;
-  const sideE = p.side === 'long' ? '🟢' : '🔴';
-  const text = [
-    `💰 <b>TP1 взят</b> · ${tradeIdStr}  ${sideE} ${p.symbol}`,
-    ``,
-    `Закрыли 50% позиции на <code>${tp1Price}</code>`,
-    `SL подвинут в безубыток (<code>${p.entry}</code>)`,
-    ``,
-    `<i>Оставшиеся 50% едут к TP2. Дальше — либо TP2, либо безубыток.</i>`,
-  ].join('\n');
-  await sendMessage({ channel: 'signals', text, disable_notification: true });
-  await sendMessage({ channel: 'logs', text, disable_notification: true });
-}
-
-/**
- * Pending-limit watcher. For each pending limit:
- *   - If now > pending_until → cancel + post
- *   - Else fetch latest price; if it touched the entry level, promote
- *     to status='active' + post "filled"
- *
- * Touch rule:
- *   LONG limit @ X is filled when price <= X (we sell into the bid? no,
- *   we BUY at X when price drops down to it). Exchange would fill at X.
- *   SHORT limit @ X is filled when price >= X.
- */
-async function checkPendingLimit(p: DecisionRow): Promise<void> {
-  if (!p.entry || !p.side || (p.side !== 'long' && p.side !== 'short')) return;
-
-  // Expiry check first — cheaper than price fetch
-  if (p.pending_until && Date.now() > p.pending_until) {
-    if (cancelPendingLimit(p.id)) {
-      logger.info({ position_id: p.id }, 'pending limit expired, cancelled');
-      const text = limitCancelledCaption({
-        symbol: p.symbol,
-        side: p.side,
-        entry: p.entry,
-        reason: 'expired',
-      });
-      await sendMessage({ channel: 'signals', text });
-      await sendMessage({ channel: 'logs', text, disable_notification: true });
-    }
-    return;
-  }
-
-  const price = await getLastPrice(p.symbol);
-  if (price == null) return;
-
-  const touched = p.side === 'long' ? price <= p.entry : price >= p.entry;
-  if (!touched) return;
-
-  // Activate. activatePendingLimit returns false if someone beat us to it.
-  if (activatePendingLimit(p.id, Date.now())) {
-    logger.info(
-      { position_id: p.id, fill_price: p.entry, tick_price: price },
-      'pending limit FILLED — promoted to active',
-    );
-    const text = limitFilledCaption({
-      decisionId: p.id,
-      symbol: p.symbol,
-      side: p.side,
-      entry: p.entry,
-    });
-    await sendMessage({ channel: 'signals', text });
-    await sendMessage({ channel: 'logs', text, disable_notification: true });
-  }
-}
-
 async function tick(): Promise<void> {
   if (running) return;
   running = true;
   try {
-    // Process active positions (TP/SL hit + auto-BE)
     const positions = findActivePositions();
     for (const p of positions) {
       try {
@@ -393,21 +144,15 @@ async function tick(): Promise<void> {
         logger.error({ err, position_id: p.id }, 'tpsl checkPosition failed');
       }
     }
-
-    // Process pending limit orders (fill or expire)
-    const pending = findPendingLimits();
-    for (const p of pending) {
-      try {
-        await checkPendingLimit(p);
-      } catch (err) {
-        logger.error({ err, position_id: p.id }, 'tpsl checkPendingLimit failed');
-      }
-    }
   } finally {
     running = false;
     markTick('tpsl');
   }
 }
+
+// Re-export for forceClose users (none currently outside the monitor itself,
+// but kept here so jobs that import forceClose see one source of truth).
+export { forceClose };
 
 export function startTpslMonitorJob(): void {
   // Every minute. Bybit public API allows this with massive headroom.

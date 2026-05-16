@@ -9,5 +9,16 @@
 -- Now we store the actual 6-digit code we asked Gateway to deliver,
 -- and verify by direct string compare on the user's submission.
 -- Removes one HTTPS round-trip per login.
+--
+-- HISTORICAL NOTE: this migration originally did
+--   ALTER TABLE verification_attempts ADD COLUMN code TEXT;
+-- but migration 013 was edited in-place AFTER prod had already applied
+-- the original version. The new 013 now includes `code TEXT NOT NULL`
+-- directly in the CREATE TABLE — so on a fresh deploy this 014 would
+-- error with "duplicate column name: code".
+--
+-- Prod is unaffected (014 already ran against the original 013 schema
+-- and is recorded in schema_migrations as completed). For fresh DB
+-- installs we make this migration an explicit no-op.
 
-ALTER TABLE verification_attempts ADD COLUMN code TEXT;
+SELECT 1 WHERE 0;  -- no-op

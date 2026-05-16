@@ -159,8 +159,6 @@ async function tick(now: Date = new Date()): Promise<void> {
   ];
 
   // Portfolio mini-dashboard
-  const sumSign = portPnlAllUsd >= 0 ? '+' : '';
-  const todaySign = portPnlTodayUsd >= 0 ? '+' : '';
   lines.push(`<b>🏛 Портфель:</b>`);
   lines.push(
     `  Стратегий: <b>${enabled.length}</b> · Открытых позиций: <b>${portActiveNow}</b>`,

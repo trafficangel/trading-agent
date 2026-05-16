@@ -307,6 +307,57 @@ export function getStrategyConfig(id: string): StrategyConfig | null {
   return STRATEGY_CONFIGS[id] ?? null;
 }
 
+/**
+ * Boot-time validation — call once from server.ts before accepting webhooks.
+ *
+ * Catches the silent-killer scenario: operator copy-pastes a StrategyConfig
+ * and forgets to set `slPct`. At runtime that would produce `slDist=NaN`
+ * → `sl=NaN` → SQLite stores NULL → tpsl-monitor's `price <= null` is
+ * always false → safety SL never fires. Track C is also exempt from
+ * the 24h time-guard, so the position stays open until reverse-signal
+ * or explicit exit — potentially forever.
+ *
+ * Better to crash loud at boot than to discover this in production.
+ *
+ * Throws on the first invalid config it sees. Validates only enabled
+ * strategies (disabled ones can have placeholder values).
+ */
+export function validateStrategyConfigs(): void {
+  const errors: string[] = [];
+  for (const [id, cfg] of Object.entries(STRATEGY_CONFIGS)) {
+    if (cfg.id !== id) {
+      errors.push(`STRATEGY_CONFIGS["${id}"].id is "${cfg.id}" — must match the map key`);
+    }
+    if (!cfg.enabled) continue; // disabled configs can be sloppy
+
+    if (typeof cfg.slPct !== 'number' || !Number.isFinite(cfg.slPct) || cfg.slPct <= 0) {
+      errors.push(`STRAT-${cfg.code} (${id}): slPct must be a finite positive number, got ${String(cfg.slPct)}`);
+    } else if (cfg.slPct > 0.20) {
+      // >20% SL means an order this far from entry is no longer a
+      // "safety net" — almost certainly a typo (e.g. wrote 0.25 meaning
+      // 0.025). Fail loud rather than silently take 25% losses.
+      errors.push(`STRAT-${cfg.code} (${id}): slPct ${cfg.slPct} exceeds 20% — probable typo (did you mean ${(cfg.slPct / 10).toFixed(3)}?)`);
+    }
+    if (!cfg.code || !/^\d+$/.test(cfg.code)) {
+      errors.push(`STRAT-${cfg.code} (${id}): code must be a numeric string like "001"`);
+    }
+    if (!cfg.timeframe) {
+      errors.push(`STRAT-${cfg.code} (${id}): timeframe is required`);
+    }
+    if (!cfg.description) {
+      errors.push(`STRAT-${cfg.code} (${id}): description is required`);
+    }
+    if (typeof cfg.launchedAt !== 'number' || Number.isNaN(cfg.launchedAt)) {
+      errors.push(`STRAT-${cfg.code} (${id}): launchedAt must be a unix-ms number (use Date.parse('YYYY-MM-DD'))`);
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(
+      `Invalid STRATEGY_CONFIGS — fix before starting:\n  - ${errors.join('\n  - ')}`,
+    );
+  }
+}
+
 /** Notional position size for ALL Track C trades, in USD. Mirrors
  *  POSITION_NOTIONAL_USD in daily-wrap so PnL display is consistent. */
 export const TRACK_C_NOTIONAL_USD = 1000;

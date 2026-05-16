@@ -7,24 +7,30 @@ import { landingRoute } from './strategies/landing.js';
 import { homeRoute } from './strategies/home.js';
 import { authRoute } from './auth/routes.js';
 import { adminRoute } from './admin/routes.js';
-import { startMonitorJob } from './jobs/monitor.js';
 import { startTpslMonitorJob } from './jobs/tpsl-monitor.js';
 import { startHeartbeatJob } from './jobs/heartbeat.js';
 import { startDailyWrapJob } from './jobs/daily-wrap.js';
-import { startDecideCronJob } from './jobs/decide-cron.js';
 import { startHealthJob } from './jobs/health.js';
-import { startChartTestJob } from './jobs/chart-test.js';
-import { startSelfReviewJob } from './jobs/self-review.js';
-import { startLiquidationsListener } from './exchange/liquidations.js';
 import { sendMessage } from './telegram/bot.js';
 import { startupBanner, statusReply } from './telegram/templates.js';
 import { countSignalsSince } from './db/repos/signals.js';
 import { closeDb } from './db/client.js';
-import { closeBrowser } from './browser/tradingview.js';
+import { validateStrategyConfigs } from './strategies/track-c-config.js';
 
 const startedAt = Date.now();
 
 async function main(): Promise<void> {
+  // Validate STRATEGY_CONFIGS BEFORE anything else — a malformed config
+  // (missing slPct, typo'd code, etc.) can lead to positions opened
+  // without a working safety stop. Crash loud at boot, not silently
+  // mid-trade. See validateStrategyConfigs() for the full rule list.
+  try {
+    validateStrategyConfigs();
+  } catch (err) {
+    logger.fatal({ err: (err as Error).message }, 'STRATEGY_CONFIGS validation failed — refusing to start');
+    process.exit(1);
+  }
+
   const app = Fastify({
     logger: false,
     bodyLimit: 256 * 1024,
@@ -52,34 +58,15 @@ async function main(): Promise<void> {
   await adminRoute(app);
   await landingRoute(app);
   await homeRoute(app);
-  // Track A — LLM-driven decide-cron + 5-min monitor. Gated by env so we
-  // can run Track B alone during the A/B comparison (or after, if signal
-  // beats LLM). tpsl-monitor stays on regardless — it's rule-based and
-  // manages BOTH tracks' active positions for SL/TP/BE move.
-  if (config.LLM_TRACK_ENABLED) {
-    startDecideCronJob();
-    startMonitorJob();
-    logger.info('Track A (LLM) enabled — decide cron + monitor started');
-  } else {
-    logger.warn(
-      'Track A (LLM) DISABLED via LLM_TRACK_ENABLED=false — only Track B (signals) will trade',
-    );
-  }
+
+  // Track C runtime services. tpsl-monitor manages safety SL + 24h
+  // time-guard exemption for strategy positions. Heartbeat & health
+  // watchdog keep the operator informed of liveness. Daily wrap runs
+  // the per-strategy report at 23:55 UTC.
   startTpslMonitorJob();
   startHeartbeatJob();
   startDailyWrapJob();
   startHealthJob();
-  // chart-test (4h screenshots to Logs) is purely Track A QC — it
-  // verifies TradingView session still works for LLM vision input.
-  // Track B doesn't use screenshots, so when LLM track is off we skip
-  // this entirely to avoid noise + Playwright resource use.
-  if (config.LLM_TRACK_ENABLED) {
-    startChartTestJob();
-  } else {
-    logger.info('chart-test cron skipped — LLM_TRACK_ENABLED=false');
-  }
-  startSelfReviewJob();
-  startLiquidationsListener();
 
   await app.listen({ host: '0.0.0.0', port: config.PORT });
   logger.info({ port: config.PORT, mode: config.MODE }, 'server listening');
@@ -89,10 +76,9 @@ async function main(): Promise<void> {
 
   // Graceful shutdown order matters:
   //   1. Stop accepting new HTTP (app.close)
-  //   2. Close Playwright browser (releases /tmp/chromium handles)
-  //   3. Close DB connection (flushes WAL)
-  // Liquidations WebSocket and setInterval timers are .unref()'d so they
-  // don't block exit; OS reclaims sockets on process.exit.
+  //   2. Close DB connection (flushes WAL)
+  // setInterval timers are .unref()'d so they don't block exit; OS
+  // reclaims sockets on process.exit.
   // 5-second hard timeout so a stuck cleanup doesn't block systemd's
   // restart cycle.
   const shutdown = async (signal: string): Promise<void> => {
@@ -104,7 +90,6 @@ async function main(): Promise<void> {
     timer.unref();
     try {
       await app.close();
-      await closeBrowser();
       closeDb();
     } catch (err) {
       logger.error({ err }, 'shutdown error');

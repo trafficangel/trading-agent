@@ -1,13 +1,10 @@
 /**
- * Templates for trade-result posts (TP hit, SL hit, strategy exit, time-guard,
- * LLM-driven close). Different from the regular OPEN/MODIFY caption — these
- * summarise the OUTCOME with actual fill price, PnL %, USD PnL (when notional
- * known), duration, and an exit-reason-specific tail line.
+ * Templates for trade-result posts (TP hit, SL hit, strategy exit, time-guard).
  *
- * Two flavours:
- *   - Track A/B (signal & LLM tracks): % only, randomised morale note
- *   - Track C (strategy): % + USD on $1000 notional, exit-reason-specific
- *     tail line (NOT randomised — subscribers want consistent context).
+ * Track C only. Track A/B were removed in May 2026 — historical rows
+ * may still exist in the DB but they're never closed by the live system
+ * anymore, so this template renders only the Track C / strategy variant
+ * (% + USD on $1000 notional, exit-reason-specific tail line).
  */
 import type { CloseReason } from '../db/repos/decisions.js';
 
@@ -19,44 +16,11 @@ function escapeHtml(s: string): string {
 const SIDE_RU: Record<string, string> = { long: 'ЛОНГ', short: 'ШОРТ' };
 const SIDE_EMOJI: Record<string, string> = { long: '🟢', short: '🔴' };
 
-const TP_HIT_NOTES: string[] = [
-  'Дисциплина окупается. План отработан, плановое закрытие. 💪',
-  'Сетап отработал чисто. Терпение → результат. 🎯',
-  'Структурный анализ + момент входа = плюс. Идём дальше с холодной головой.',
-  '+1 в копилку. Не зацикливаемся, ищем следующий setup. ⚡',
-  'TP взят. Это и есть смысл — рисковать малым ради большего.',
-  'Ровно по плану. Так и зарабатывают: 50%+ winrate × R≥1.5.',
-];
-
-const SL_HIT_NOTES: string[] = [
-  'Риск был контролируемым. Стоп уберёг от большего убытка — план сработал. ⏭',
-  'Стоп. Минус в плане. Идея не подтвердилась — рынок не обязан.',
-  'Часть бизнеса. Главное — соблюдён risk management. Капитал цел.',
-  '−1R, и это норма. Профит = winrate × avg R, а не победами подряд.',
-  'Не угадали. Без страха идём в следующий setup. ⚡',
-  'Сигнал не сработал — нормально, у LuxAlgo есть и ошибочные. Следующий.',
-];
-
-const LLM_CLOSE_WIN_NOTES: string[] = [
-  'Закрытие до TP — структура изменилась, фиксируем плюс пока есть.',
-  'Контекст подсказал выйти заранее. Лучше синица в руках.',
-  'Не жадничаем — выходим в плюсе пока сетап ещё держится.',
-];
-
-const LLM_CLOSE_LOSS_NOTES: string[] = [
-  'Закрытие до SL — структура слома, риск растёт. Сохраняем капитал.',
-  'Сетап перестал работать. Выходим с малым убытком — это лучше большого.',
-  'Дисциплина: лучше уйти на −0.5R чем досидеть до −1R.',
-];
-
 /**
  * Track C motivational tail. Always randomised so the channel feels
  * alive — subscribers see a different uplifting phrase every close.
  * Each note explicitly references the $1000 notional so newcomers
  * understand the math being shown.
- *
- * Functions accept the USD pnl (already-signed) so they can interpolate
- * the actual number.
  */
 type NoteBuilder = (usdAbs: string, notional: number) => string;
 
@@ -77,16 +41,15 @@ const TRACK_C_WIN_NOTES: NoteBuilder[] = [
  *   - Safety SL fired (`closeReason='sl_hit'`):
  *     The strategy DIDN'T exit on its own — our 2.5% safety net caught
  *     the move. Wording emphasises "risk management", "stop fire saved
- *     us", "could have been worse". This is the worst-case outcome
- *     within our design.
+ *     us", "could have been worse".
  *
- *   - Strategy decided to exit at a loss (`forceReason='strategy_exit'`):
- *     The strategy's own Builtin Exit logic detected something wrong
- *     and bailed BEFORE hitting SL. That's actually GOOD discipline —
- *     small loss instead of a big one. Wording emphasises "edge worked",
+ *   - Strategy decided to exit at a loss (`forceReason='strategy_exit'`
+ *     or `reverse_signal`):
+ *     The strategy's own logic detected something wrong and bailed
+ *     BEFORE hitting SL. Wording emphasises "edge worked",
  *     "стратегия сама вышла", "spotted invalidation early".
  *
- *   - Other (rare — manual close, counter_exit, etc.):
+ *   - Other (rare — manual close, time_guard, etc.):
  *     Generic discipline language.
  */
 const TRACK_C_LOSS_SL_NOTES: NoteBuilder[] = [
@@ -122,19 +85,12 @@ function pickStrategyNote(
   } else if (closeReason === 'sl_hit') {
     bank = TRACK_C_LOSS_SL_NOTES;
   } else if (forceReason === 'strategy_exit' || forceReason === 'reverse_signal') {
-    // Both are "disciplined strategy-driven exits" emotionally — the
-    // reverse_signal case is just an exit that also opens an opposite
-    // position. Same tail-note bank.
     bank = TRACK_C_LOSS_STRAT_NOTES;
   } else {
     bank = TRACK_C_LOSS_OTHER_NOTES;
   }
   const fn = bank[Math.floor(Math.random() * bank.length)]!;
   return fn(usdAbs.toFixed(2), notional);
-}
-
-function pickRandom<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)] as T;
 }
 
 function formatDuration(ms: number): string {
@@ -159,51 +115,43 @@ export type ResultPostInput = {
   pnlPct: number;
   pnlR: number;
   durationMs: number;
-  /** Track marker — controls trade-id prefix:
-   *   'strategy' (Track C) → 'T#XXXX'
-   *   'signal'   (Track B) → 'S#XXXX'
-   *   else (Track A / legacy) → '#XXXX'
-   */
+  /** Track marker. For Track C ('strategy') the post uses the T#NNN
+   *  prefix from strategyTradeNum. Other values exist only on historical
+   *  rows and render with a fallback '#NNNN' id. */
   track?: string;
-  /** Notional USD per trade. When set, the post adds a USD P&L line
-   *  (e.g. "+$17.90"). Track C uses TRACK_C_NOTIONAL_USD = 1000. */
+  /** Notional USD per trade. Track C uses TRACK_C_NOTIONAL_USD = 1000. */
   notionalUsd?: number;
-  /** Force-close reason from decisions table — used for Track C to
-   *  pick the right tail line. One of:
-   *  'strategy_exit' | 'time_guard' | 'counter_exit' | null. */
+  /** Force-close reason — one of:
+   *  'strategy_exit' | 'reverse_signal' | 'time_guard' | null. */
   forceCloseReason?: string | null;
-  /** Track C — show "[STRAT-001]" badge in header for context. */
+  /** STRAT-XXX code badge in header for context. */
   strategyCode?: string | null;
-  /** Track C — short human name (e.g. "BNB Contrarian") rendered
-   *  alongside the STRAT code. */
+  /** Short human name (e.g. "BNB Contrarian") rendered alongside STRAT code. */
   strategyName?: string | null;
-  /** Track C — per-strategy sequential trade counter (1, 2, 3, ...).
+  /** Per-strategy sequential trade counter (1, 2, 3, ...).
    *  Used for the T#001 prefix instead of the global decision.id. */
   strategyTradeNum?: number | null;
-  /** Track C — landing-page URL for "see details" link at the bottom. */
+  /** Landing-page URL for the "see details" link at the bottom. */
   landingUrl?: string | null;
 };
 
-/** Build the result post (≤1024 chars, HTML, ready for sendPhoto caption). */
+/** Build the result post (≤1024 chars, HTML, ready for sendPhoto caption).
+ *  Renders Track C layout when `track === 'strategy'`; otherwise falls
+ *  back to a minimal historical layout (only used if legacy rows are
+ *  re-closed somehow — shouldn't happen in normal Track C operation). */
 export function resultPost(i: ResultPostInput): string {
   const isStrategy = i.track === 'strategy';
-  // Track C uses per-strategy counter (T#001, T#002, ...) instead of
-  // the global decision.id. Falls back to global id if not provided
-  // (for legacy compatibility — should never happen in new code).
   const tradeNumForId =
     isStrategy && typeof i.strategyTradeNum === 'number'
       ? i.strategyTradeNum
       : i.parentTradeId;
   const padDigits = isStrategy ? 3 : 4;
-  const prefix =
-    i.track === 'strategy' ? 'T#' : i.track === 'signal' ? 'S#' : '#';
+  const prefix = isStrategy ? 'T#' : '#';
   const tradeId = `${prefix}${tradeNumForId.toString().padStart(padDigits, '0')}`;
   const sideE = SIDE_EMOJI[i.side] ?? '';
   const sideRu = SIDE_RU[i.side] ?? i.side;
   const isWin = i.pnlPct > 0;
 
-  // Compute USD P&L when notional known. Format as "+$X.XX" / "-$X.XX"
-  // (sign BEFORE the dollar symbol, never "$-X.XX").
   const usdPnl =
     typeof i.notionalUsd === 'number'
       ? (i.pnlPct / 100) * i.notionalUsd
@@ -214,8 +162,6 @@ export function resultPost(i: ResultPostInput): string {
       : '';
 
   // ---------- Header ----------
-  // Wins get the EXPRESSIVE treatment — big emoji, USD front-and-centre.
-  // Losses stay calm and informative — no doom-and-gloom drama.
   let header: string;
   let exitTag = '';
 
@@ -228,7 +174,8 @@ export function resultPost(i: ResultPostInput): string {
     } else {
       // 🛡 — safety SL fired (worst case caught by the net)
       // 🎯 — strategy itself exited at a small loss (disciplined Builtin Exit)
-      // 🔻 — any other loss path (manual / counter / unknown)
+      // 🔁 — reverse-signal flip
+      // 🔻 — any other loss path (manual / time_guard / etc.)
       const lossEmoji =
         i.closeReason === 'sl_hit' ? '🛡' :
         i.forceCloseReason === 'strategy_exit' ? '🎯' :
@@ -239,24 +186,11 @@ export function resultPost(i: ResultPostInput): string {
     else if (i.forceCloseReason === 'strategy_exit') exitTag = ' (сигнал стратегии)';
     else if (i.forceCloseReason === 'reverse_signal') exitTag = ' (разворот сигнала)';
   } else {
-    if (i.closeReason === 'tp_hit') {
-      header = `🎉 <b>ЦЕЛЬ ВЗЯТА</b> · сделка ${tradeId}`;
-      exitTag = ' (TP)';
-    } else if (i.closeReason === 'sl_hit') {
-      header = `🛑 <b>СТОП</b> · сделка ${tradeId}`;
-      exitTag = ' (SL)';
-    } else if (i.closeReason === 'llm_close') {
-      header = `🏁 <b>Досрочное закрытие</b> · сделка ${tradeId}`;
-      exitTag = ' (структурно)';
-    } else {
-      header = `🏁 <b>Закрытие</b> · сделка ${tradeId}`;
-    }
+    header = `🏁 <b>Закрытие</b> · сделка ${tradeId}`;
   }
 
   // ---------- Tail line ----------
-  // Track C: motivational note that mentions $1000 notional explicitly.
-  // Track A/B: legacy randomised banks by close reason.
-  let tail: string;
+  let tail = '';
   if (isStrategy && typeof i.notionalUsd === 'number' && usdPnl !== null) {
     tail = pickStrategyNote(
       Math.abs(usdPnl),
@@ -265,29 +199,16 @@ export function resultPost(i: ResultPostInput): string {
       i.closeReason,
       i.forceCloseReason,
     );
-  } else if (i.closeReason === 'tp_hit') {
-    tail = pickRandom(TP_HIT_NOTES);
-  } else if (i.closeReason === 'sl_hit') {
-    tail = pickRandom(SL_HIT_NOTES);
-  } else {
-    tail = pickRandom(isWin ? LLM_CLOSE_WIN_NOTES : LLM_CLOSE_LOSS_NOTES);
   }
 
-  // ---------- P&L line ----------
-  // Strategy: "+1.79%  ·  +$17.90"
-  // Legacy:   "+1.79%"
   const pnlSign = i.pnlPct >= 0 ? '+' : '';
   const pnlPct = `${pnlSign}${i.pnlPct.toFixed(2)}%`;
   const resultLine = usdStr
     ? `📊 Результат: <b>${pnlPct}</b>  ·  <b>${usdStr}</b>`
     : `📊 Результат: <b>${pnlPct}</b>`;
 
-  // ---------- Compose ----------
   let lines: string[];
   if (isStrategy) {
-    // Mirrors the new entry post layout: big headline, strategy label,
-    // trade ID, monospaced numbers, landing link, italic note. Mobile-
-    // friendly — each row fits a single iPhone-narrow column.
     const nameLine = i.strategyName
       ? `🤖 <b>STRAT-${escapeHtml(i.strategyCode ?? '???')}</b> · ${escapeHtml(i.strategyName)}`
       : `🤖 <b>STRAT-${escapeHtml(i.strategyCode ?? '???')}</b>`;
@@ -306,9 +227,9 @@ export function resultPost(i: ResultPostInput): string {
       `⏱ Длительность: ${formatDuration(i.durationMs)}`,
       ``,
       linkLine,
-      linkLine ? `` : '', // visual gap before tail only when link rendered
+      linkLine ? `` : '',
       `<i>${escapeHtml(tail)}</i>`,
-    ].filter((l) => l !== false as unknown as string); // keep nulls out
+    ];
   } else {
     lines = [
       `${header}`,
@@ -319,8 +240,6 @@ export function resultPost(i: ResultPostInput): string {
       `📤 Выход:  <code>${i.closePrice}</code>${exitTag}`,
       resultLine,
       `⏱ Длительность: ${formatDuration(i.durationMs)}`,
-      '',
-      escapeHtml(tail),
     ];
   }
 

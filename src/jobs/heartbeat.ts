@@ -15,37 +15,34 @@ function formatUptime(ms: number): string {
   return `${h}ч ${m}м`;
 }
 
-const sigCount = db.prepare<[number], { c: number }>(
-  'SELECT COUNT(*) AS c FROM signals WHERE received_at >= ?',
-);
-const decGroup = db.prepare<[number], { decision: string; c: number }>(
-  'SELECT decision, COUNT(*) AS c FROM decisions WHERE created_at >= ? GROUP BY decision',
-);
+// Track C-only stats. The signals table is no longer written to (Track A/B
+// removed) but historical rows still exist — we just don't surface them.
 const activeCount = db.prepare<[], { c: number }>(
-  "SELECT COUNT(*) AS c FROM decisions WHERE status = 'active'",
+  "SELECT COUNT(*) AS c FROM decisions WHERE status = 'active' AND track = 'strategy'",
+);
+const closedSinceStmt = db.prepare<[number], { c: number }>(
+  "SELECT COUNT(*) AS c FROM decisions WHERE status = 'closed' AND track = 'strategy' AND closed_at >= ?",
+);
+const openedSinceStmt = db.prepare<[number], { c: number }>(
+  "SELECT COUNT(*) AS c FROM decisions WHERE track = 'strategy' AND created_at >= ?",
 );
 
 async function tick(): Promise<void> {
   const now = Date.now();
-  const since6h = now - 6 * 3600 * 1000;
   const since24h = now - 24 * 3600 * 1000;
 
-  const sigs6h = sigCount.get(since6h)?.c ?? 0;
-  const decisions24h = decGroup.all(since24h);
-  const totalDec = decisions24h.reduce((s, r) => s + r.c, 0);
-  const openCount = decisions24h.find((r) => r.decision === 'OPEN')?.c ?? 0;
-  const closeCount = decisions24h.find((r) => r.decision === 'CLOSE')?.c ?? 0;
-  const skipCount = decisions24h.find((r) => r.decision === 'SKIP')?.c ?? 0;
   const active = activeCount.get()?.c ?? 0;
+  const opened = openedSinceStmt.get(since24h)?.c ?? 0;
+  const closed = closedSinceStmt.get(since24h)?.c ?? 0;
 
   const text =
     `🟢 <b>alive</b>  ·  uptime ${formatUptime(now - startedAt)}  ·  ` +
-    `сигналов/6ч: <b>${sigs6h}</b>  ·  активных сделок: <b>${active}</b>\n` +
-    `Решений/24ч: <b>${totalDec}</b> (OPEN ${openCount}, CLOSE ${closeCount}, SKIP ${skipCount})  ·  ` +
+    `активных сделок: <b>${active}</b>\n` +
+    `Track C/24ч: открыто <b>${opened}</b>, закрыто <b>${closed}</b>  ·  ` +
     `mode: <code>${config.MODE}</code>`;
 
   await sendMessage({ channel: 'logs', text, disable_notification: true });
-  logger.info({ sigs6h, active, totalDec }, 'heartbeat sent');
+  logger.info({ active, opened, closed }, 'heartbeat sent');
 }
 
 export function startHeartbeatJob(): void {
