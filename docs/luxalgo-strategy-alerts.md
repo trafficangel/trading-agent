@@ -167,7 +167,12 @@ Webhook URL: `https://robotclaude.biz/webhook/luxalgo/<WEBHOOK_SECRET>` —
    StrategyConfig блок.
 3. Я ревьюю стэты, выбираю slPct, добавляю запись в `STRATEGY_CONFIGS`,
    git commit + push + deploy.
-4. Пользователь создаёт ONE webhook алерт в LuxAlgo с payload выше
+4. **Обязательный шаг:** публикую анонс в Telegram канал командой
+   `pnpm tsx scripts/announce-strategy.ts <code>` (запускать на VPS —
+   локально бот не имеет доступа к каналу). Анонс берёт описание +
+   бектест из STRATEGY_CONFIGS и постит в @luxalgosignal со ссылкой
+   на лендинг.
+5. Пользователь создаёт ONE webhook алерт в LuxAlgo с payload выше
    (хардкодит `strategy_id` под нашу запись), включает все 4 события.
-5. Готово — следующий сигнал прилетит в @luxalgosignal с пометкой
+6. Готово — следующий сигнал прилетит в @luxalgosignal с пометкой
    `STRAT-00X`.
