@@ -2426,25 +2426,64 @@ function renderGatedPreview(
         <div class="gate-icon">🔒</div>
         <h2 class="gate-title">Доступ к детальной статистике</h2>
         <p class="gate-sub">
-          Введите номер телефона — мы отправим 6-значный код через Telegram.
-          После проверки откроется live-статистика по всем стратегиям и канал.
+          Введите номер телефона — мы отправим 6-значный код через
+          официальный сервис подтверждения Telegram.
         </p>
-        <form id="gate-phone-form" class="gate-form" novalidate>
-          <input type="tel" name="phone" required placeholder="+79991234567"
-                 inputmode="tel" autocomplete="tel" />
-          <button type="submit">Получить код</button>
-        </form>
-        <form id="gate-code-form" class="gate-form" style="display:none" novalidate>
-          <input type="text" name="code" required placeholder="Код из Telegram"
-                 inputmode="numeric" pattern="\\d{4,9}" maxlength="9"
-                 autocomplete="one-time-code" />
-          <button type="submit">Подтвердить</button>
-        </form>
+
+        <!-- Stage 1: phone -->
+        <div id="gate-phone-stage">
+          <form id="gate-phone-form" class="gate-form" novalidate>
+            <input type="tel" name="phone" required placeholder="+79991234567"
+                   inputmode="tel" autocomplete="tel" />
+            <button type="submit">Получить код в Telegram</button>
+          </form>
+          <div class="gate-trust">
+            <div class="gate-trust-row">
+              <span class="gate-trust-icon">📱</span>
+              <span>Код придёт от <a href="https://t.me/VerificationCodes" target="_blank" rel="noopener"><b>@VerificationCodes</b></a> <span class="gate-verified" title="Официальный сервис Telegram">✓</span></span>
+            </div>
+            <div class="gate-trust-row">
+              <span class="gate-trust-icon">🛡</span>
+              <span>Это официальный сервис Telegram. Мы не получаем доступ к вашему аккаунту.</span>
+            </div>
+            <div class="gate-trust-row">
+              <span class="gate-trust-icon">🔐</span>
+              <span>Номер хранится только для подтверждения, третьим лицам не передаётся.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stage 2: code (hidden until phone submitted) -->
+        <div id="gate-code-stage" style="display:none">
+          <div class="gate-tg-instructions">
+            <div class="gate-tg-step">
+              <span class="gate-tg-num">1</span>
+              <span>Откройте <b>Telegram</b> на телефоне или компьютере</span>
+            </div>
+            <div class="gate-tg-step">
+              <span class="gate-tg-num">2</span>
+              <span>Найдите чат <a href="https://t.me/VerificationCodes" target="_blank" rel="noopener" class="gate-tg-link">@VerificationCodes <span class="gate-verified">✓</span> →</a></span>
+            </div>
+            <div class="gate-tg-step">
+              <span class="gate-tg-num">3</span>
+              <span>Скопируйте 6-значный код из последнего сообщения и введите ниже</span>
+            </div>
+          </div>
+          <form id="gate-code-form" class="gate-form" novalidate>
+            <input type="text" name="code" required placeholder="123456"
+                   inputmode="numeric" pattern="\\d{4,9}" maxlength="9"
+                   autocomplete="one-time-code" />
+            <button type="submit">Подтвердить</button>
+          </form>
+          <p class="gate-resend">
+            Не пришёл код? Подождите 30 секунд — иногда Telegram доставляет
+            с задержкой. <a href="#" id="gate-back">← Изменить номер</a>
+          </p>
+        </div>
+
         <div id="gate-msg" class="gate-msg"></div>
         <p class="gate-note">
           Cookie сохраняется на 90 дней — больше вводить номер не понадобится.
-          Номер используется только для подтверждения и операционной связи,
-          третьим лицам не передаётся.
         </p>
       </div>
     </div>
@@ -2454,11 +2493,33 @@ function renderGatedPreview(
     <script>
       (function() {
         var msg = document.getElementById('gate-msg');
+        var phoneStage = document.getElementById('gate-phone-stage');
+        var codeStage = document.getElementById('gate-code-stage');
         var phoneForm = document.getElementById('gate-phone-form');
         var codeForm = document.getElementById('gate-code-form');
+        var backLink = document.getElementById('gate-back');
         function setMsg(text, isError) {
           msg.textContent = text || '';
           msg.className = 'gate-msg' + (isError ? ' err' : '');
+        }
+        function showCodeStage(masked) {
+          phoneStage.style.display = 'none';
+          codeStage.style.display = 'block';
+          setMsg('✓ Код отправлен на ' + masked + ' через Telegram');
+          codeForm.code.focus();
+        }
+        function showPhoneStage() {
+          codeStage.style.display = 'none';
+          phoneStage.style.display = 'block';
+          setMsg('');
+          phoneForm.phone.focus();
+        }
+        if (backLink) {
+          backLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            showPhoneStage();
+            phoneForm.querySelector('button').disabled = false;
+          });
         }
         phoneForm.addEventListener('submit', async function(e) {
           e.preventDefault();
@@ -2477,10 +2538,7 @@ function renderGatedPreview(
               phoneForm.querySelector('button').disabled = false;
               return;
             }
-            setMsg('Код отправлен на ' + (data.masked_phone || phone) + ' в Telegram');
-            phoneForm.style.display = 'none';
-            codeForm.style.display = 'flex';
-            codeForm.code.focus();
+            showCodeStage(data.masked_phone || phone);
           } catch (err) {
             setMsg('Ошибка сети, попробуйте позже', true);
             phoneForm.querySelector('button').disabled = false;
@@ -2607,6 +2665,66 @@ ${metrikaScript}
     font-size: 11px; color: var(--text-faint); line-height: 1.5;
     margin: 16px 0 0;
   }
+  /* Trust row block on phone stage — three icon+text rows that tell
+   *  the user the code comes from Telegram's own service, not from us. */
+  .gate-trust {
+    margin-top: 18px; padding-top: 14px;
+    border-top: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .gate-trust-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    font-size: 12px; color: var(--text-dim); line-height: 1.5;
+  }
+  .gate-trust-icon {
+    flex-shrink: 0; width: 18px; text-align: center;
+    font-size: 14px;
+  }
+  .gate-trust-row a {
+    color: var(--accent); text-decoration: none;
+  }
+  .gate-trust-row a:hover { text-decoration: underline; }
+  /* Telegram-blue verified checkmark — visually says "official". */
+  .gate-verified {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #2aabee; color: #fff;
+    font-size: 9px; font-weight: 700; line-height: 1;
+    vertical-align: -1px; margin: 0 1px;
+  }
+  /* Code stage — 3 numbered steps explaining WHERE the code arrives. */
+  .gate-tg-instructions {
+    background: rgba(42, 171, 238, 0.06);
+    border: 1px solid rgba(42, 171, 238, 0.20);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .gate-tg-step {
+    display: flex; align-items: flex-start; gap: 12px;
+    font-size: 13px; color: var(--text); line-height: 1.45;
+  }
+  .gate-tg-num {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #2aabee; color: #fff;
+    font-size: 12px; font-weight: 700;
+  }
+  .gate-tg-link {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: #2aabee; text-decoration: none; font-weight: 600;
+  }
+  .gate-tg-link:hover { text-decoration: underline; }
+  .gate-resend {
+    font-size: 11px; color: var(--text-faint); line-height: 1.5;
+    margin: 12px 0 0; text-align: center;
+  }
+  .gate-resend a {
+    color: var(--accent); text-decoration: none;
+  }
+  .gate-resend a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
