@@ -824,7 +824,59 @@ const STYLE = `
 
   /* ---------- Home page sections ---------- */
   .hero {
-    padding: 40px 0 28px; text-align: left;
+    position: relative;
+    padding: 60px 0 48px; text-align: left;
+    overflow: hidden; border-radius: 16px;
+    margin-bottom: 16px;
+  }
+  .hero-content { position: relative; z-index: 2; }
+  .hero-bg {
+    position: absolute; inset: 0; z-index: 0;
+    pointer-events: none; overflow: hidden;
+  }
+  /* Two ambient gradient blobs drifting slowly */
+  .blob {
+    position: absolute; border-radius: 50%; filter: blur(60px);
+    opacity: 0.35;
+  }
+  .blob-1 {
+    width: 360px; height: 360px;
+    background: radial-gradient(circle, var(--accent), transparent 70%);
+    top: -120px; right: 10%;
+    animation: drift-1 18s ease-in-out infinite alternate;
+  }
+  .blob-2 {
+    width: 280px; height: 280px;
+    background: radial-gradient(circle, #5b8cff, transparent 70%);
+    bottom: -80px; left: 5%;
+    animation: drift-2 22s ease-in-out infinite alternate;
+    opacity: 0.25;
+  }
+  @keyframes drift-1 {
+    0%   { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(-40px, 30px) scale(1.1); }
+  }
+  @keyframes drift-2 {
+    0%   { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(60px, -20px) scale(0.95); }
+  }
+  /* Animated equity-curve background trace */
+  .hero-equity {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0.55;
+  }
+  .hero-equity-line {
+    stroke-dasharray: 3000;
+    stroke-dashoffset: 3000;
+    animation: draw-curve 3.2s cubic-bezier(0.4, 0, 0.2, 1) 0.3s forwards;
+  }
+  @keyframes draw-curve {
+    to { stroke-dashoffset: 0; }
+  }
+  /* Reduce motion preference */
+  @media (prefers-reduced-motion: reduce) {
+    .blob, .hero-equity-line { animation: none; }
+    .hero-equity-line { stroke-dashoffset: 0; }
   }
   .hero-eyebrow {
     display: inline-block; font-family: 'SF Mono', 'Menlo', monospace;
@@ -855,6 +907,11 @@ const STYLE = `
   }
   .btn.btn-primary:hover { opacity: 0.9; }
   .btn.btn-ghost { background: transparent; }
+  .btn.btn-link-out {
+    background: transparent; border: none; color: var(--text-dim);
+    padding: 10px 12px; font-size: 13px; font-weight: 500;
+  }
+  .btn.btn-link-out:hover { color: var(--text); background: var(--bg-card); }
 
   /* Live portfolio strip */
   .live-strip {

@@ -70,14 +70,15 @@ type Content = {
 
 const CONTENT: Record<Lang, Content> = {
   ru: {
-    htmlTitle: 'Robot Claude — автоматизированные торговые стратегии',
+    htmlTitle: 'Robot Claude — проверенные торговые стратегии LuxAlgo',
     hero: {
-      eyebrow: 'SHADOW MODE · BYBIT USDT-PERP',
-      title1: 'Автоматизированные ',
-      titleAccent: 'торговые стратегии',
-      title2: ' на крипто-фьючерсах',
+      eyebrow: 'POWERED BY LUXALGO AI · BYBIT PERPETUALS',
+      title1: 'Проверенные стратегии от ',
+      titleAccent: 'LuxAlgo AI',
+      title2: '',
       subtitle:
-        'Сигналы из LuxAlgo AI Strategy Builder исполняются в нашей системе автоматически и логируются в реальном времени. Каждая сделка публична и проверяема.',
+        'Каждая стратегия проходит независимый бектест 200+ дней, подбирается по profit factor и win rate, исполняется автоматически через webhook'
+        + ' и логируется публично в реальном времени. Никаких чёрных ящиков — каждый трейд можно проверить.',
       ctaPrimary: 'Активные стратегии →',
       ctaSecondary: 'Telegram канал ↗',
     },
@@ -89,63 +90,58 @@ const CONTENT: Record<Lang, Content> = {
     },
     how: {
       title: 'Как это работает',
-      subtitle: 'Технический пайплайн от сигнала до сделки и до отчёта.',
+      subtitle: 'Технический пайплайн от сигнала до сделки и до публичного отчёта.',
       steps: [
         {
           step: 'STEP 01',
           title: 'LuxAlgo AI Strategy Builder',
-          body: 'Стратегии собираются в признанной платформе LuxAlgo Premium. Multi-condition (Contrarian + Trend Tracer + Money Flow и др.) с встроенным бектестом и динамическими выходами.',
+          body: 'Каждая стратегия собирается в признанной платформе LuxAlgo Premium — multi-condition логика (Contrarian / Trend Tracer / Money Flow и др.) с встроенным бектестом и динамическими выходами. Принимаем только стратегии с PF ≥ 2 и WR ≥ 55% на 200+ днях истории.',
         },
         {
           step: 'STEP 02',
           title: 'Webhook → наша система',
-          body: 'TradingView Alert по сигналу стратегии отправляет JSON в наш Fastify-сервер. Дедупликация, валидация, маршрутизация в обработчик за <100ms.',
+          body: 'TradingView Alert по сигналу стратегии отправляет JSON в наш сервер. Дедупликация, валидация, маршрутизация в исполнитель за <100ms. Если webhook не доставлен — safety SL страхует позицию.',
         },
         {
           step: 'STEP 03',
           title: 'Bybit / Hyperliquid execution',
-          body: 'Market entry с safety stop-loss. Выходы — либо по обратному сигналу стратегии (Builtin Exits), либо по 24-часовому time-guard, либо по safety SL.',
+          body: 'Market entry с safety stop-loss. Выходы — либо по обратному сигналу стратегии (Builtin Exits), либо по safety SL как страховке. Никакого ручного вмешательства — система работает 24/7.',
         },
         {
           step: 'STEP 04',
           title: 'Публичный учёт',
-          body: 'Каждая сделка летит в SQLite и рендерится на лендинге стратегии: equity curve, trades log, exit reasons. Никаких чёрных ящиков.',
+          body: 'Каждая сделка летит в БД и отображается на лендинге стратегии: equity curve, полный trades log, exit reasons, P&L в реальном времени. Подписчик может проверить каждую сделку до тика.',
         },
       ],
     },
     strategiesPreview: {
       title: 'Активные стратегии',
       subtitle:
-        'Все стратегии работают в shadow mode — собирают live статистику до перехода на реальное исполнение. Лучшие переедут на Bybit live в первую очередь.',
+        'Каждая стратегия со своим лендингом — equity curve, полный лог сделок и live результаты. Числа пересчитаны на нашу позицию $1000 с учётом комиссии Bybit.',
       seeAll: 'Все стратегии →',
     },
     roadmap: {
       title: 'Roadmap',
       items: [
         {
-          when: 'МАЙ 2026',
+          when: 'СЕЙЧАС',
           done: true,
-          title: 'Shadow trading запущен. Первая стратегия BNB 15m работает.',
-        },
-        {
-          when: 'ИЮНЬ 2026',
-          done: false,
-          title: 'Расширение портфеля до 5-10 стратегий разных TF и символов.',
+          title: '🚀 Расширение портфеля проверенных LuxAlgo стратегий. Каждая со своим лендингом и live статистикой.',
         },
         {
           when: 'ИЮЛЬ 2026',
           done: false,
-          title: 'Bybit live — малый размер ($200-500), одна-две лучшие стратегии.',
+          title: 'Подключение Bybit live на лучшие стратегии. Малый размер для отработки исполнения.',
         },
         {
           when: 'АВГУСТ 2026',
           done: false,
-          title: 'Hyperliquid Vault — параллельный канал для copy traders.',
+          title: 'Hyperliquid Vault — параллельный канал для on-chain copy traders.',
         },
         {
-          when: 'ОСЕНЬ 2026',
+          when: 'Q4 2026',
           done: false,
-          title: 'Bybit Copy Trading — после 90 дней live истории. Открытый набор followers.',
+          title: 'Bybit Copy Trading — открытый набор followers после 90 дней live истории.',
         },
       ],
     },
@@ -153,28 +149,28 @@ const CONTENT: Record<Lang, Content> = {
       title: 'FAQ',
       items: [
         {
-          q: 'Когда можно будет подключиться к копи-трейдингу?',
-          a: 'После 90 дней live истории на Bybit mainnet. По плану — осень 2026. Hyperliquid Vault может стартовать раньше (август 2026) — там barrier ниже.',
+          q: 'Откуда берутся стратегии?',
+          a: 'Все стратегии собираются в LuxAlgo AI Strategy Builder — на признанной платформе для multi-condition стратегий с автоматическим бектестом. Каждая стратегия имеет ссылку на оригинальный chat в LuxAlgo на детальном лендинге для верификации.',
         },
         {
           q: 'Какой риск-менеджмент?',
-          a: 'Каждая стратегия имеет safety stop-loss (обычно 2-3% от entry). Размер позиции фиксированный $1000 notional на сделку. Max 1 позиция на (символ × стратегия). 24-часовой time-guard принудительно закрывает зависшие позиции.',
+          a: 'Каждая стратегия имеет safety stop-loss (обычно 2-3% от entry) как страховку на случай задержки webhook. Размер позиции фиксированный $1000 на сделку. Max 1 позиция на (символ × стратегия). Выходы полностью на стратегии — никакого ручного вмешательства.',
         },
         {
-          q: 'Где смотреть live результаты?',
-          a: 'На /strategies — общий dashboard. На /strategies/<code> — детальная страница каждой стратегии с equity curve, trades log, breakdown по long/short. Обновляется автоматически из БД.',
+          q: 'Как смотреть live результаты?',
+          a: 'Главный дашборд на /strategies с группировкой по таймфреймам. На /strategies/<code> — детальная страница каждой стратегии с equity curve, полным trades log, breakdown long/short. Обновляется автоматически каждые 60 секунд.',
         },
         {
           q: 'Что если стратегия в просадке?',
-          a: 'Сначала пытаемся понять — рыночная аномалия или сломанный edge. Если 10+ убыточных сделок подряд → автоматический pause через kill-switch. Followers могут отключиться в любой момент (Bybit Copy) или выйти из Vault.',
+          a: 'Сначала разбираемся: рыночная аномалия или сломанный edge. Если 10+ убыточных сделок подряд → автоматический pause. Followers могут отключиться в любой момент (Bybit Copy) или выйти из Vault.',
         },
         {
-          q: 'Какие комиссии?',
-          a: 'Bybit perp taker: 0.055% × 2 (открытие+закрытие) = 0.11% круговая. Hyperliquid: 0.025% × 2 = 0.05%. В наших бектестах эти комиссии уже учтены — числа на лендингах реалистичные.',
+          q: 'Какие комиссии учитываются?',
+          a: 'Bybit perp taker: 0.055% × 2 (открытие+закрытие) = 0.11% круговая. Hyperliquid: 0.025% × 2 = 0.05%. В наших бектестах эти комиссии вычитаются на каждой сделке — числа на лендингах honest.',
         },
         {
-          q: 'Какие максимальные открытые позиции?',
-          a: 'Текущий проект — Track C (LuxAlgo strategies). Каждая стратегия открывает максимум 1 позицию на символ. С 10 активными стратегиями и 5 уникальными символами — максимум 10 позиций одновременно (capped на уровне риск-менеджмента).',
+          q: 'Безопасны ли мои деньги?',
+          a: 'Copy Trading на Bybit использует ваш собственный аккаунт — мы не имеем доступа к вашим средствам. Hyperliquid Vault работает на смарт-контракте, депозит/вывод по запросу. Мы получаем процент только с прибыли.',
         },
       ],
     },
@@ -188,14 +184,15 @@ const CONTENT: Record<Lang, Content> = {
     telegramUrl: 'https://t.me/luxalgosignal',
   },
   en: {
-    htmlTitle: 'Robot Claude — automated trading strategies',
+    htmlTitle: 'Robot Claude — verified LuxAlgo trading strategies',
     hero: {
-      eyebrow: 'SHADOW MODE · BYBIT USDT-PERP',
-      title1: 'Automated ',
-      titleAccent: 'trading strategies',
-      title2: ' on crypto perpetuals',
+      eyebrow: 'POWERED BY LUXALGO AI · BYBIT PERPETUALS',
+      title1: 'Verified strategies from ',
+      titleAccent: 'LuxAlgo AI',
+      title2: '',
       subtitle:
-        'Signals from LuxAlgo AI Strategy Builder execute in our system automatically and log in real-time. Every trade is public and auditable.',
+        'Each strategy goes through 200+ days of independent backtesting, is selected by profit factor and win rate,'
+        + ' executes automatically via webhook, and is logged publicly in real-time. No black boxes — every trade is verifiable.',
       ctaPrimary: 'View strategies →',
       ctaSecondary: 'Telegram channel ↗',
     },
@@ -207,63 +204,58 @@ const CONTENT: Record<Lang, Content> = {
     },
     how: {
       title: 'How it works',
-      subtitle: 'Technical pipeline from signal to execution to public report.',
+      subtitle: 'Technical pipeline from signal to execution to public audit trail.',
       steps: [
         {
           step: 'STEP 01',
           title: 'LuxAlgo AI Strategy Builder',
-          body: 'Strategies are assembled in the LuxAlgo Premium platform. Multi-condition logic (Contrarian + Trend Tracer + Money Flow, etc.) with embedded backtest and dynamic exits.',
+          body: 'Every strategy is built in the LuxAlgo Premium platform — multi-condition logic (Contrarian / Trend Tracer / Money Flow etc.) with embedded backtest and dynamic exits. We accept only strategies with PF ≥ 2 and WR ≥ 55% over 200+ days.',
         },
         {
           step: 'STEP 02',
           title: 'Webhook → our system',
-          body: 'TradingView Alert from the strategy posts JSON to our Fastify server. Dedup, validate, route to handler within <100ms.',
+          body: 'TradingView Alert posts JSON to our server on every signal. Dedup, validate, route to handler in <100ms. If webhook is lost — safety SL protects the position.',
         },
         {
           step: 'STEP 03',
           title: 'Bybit / Hyperliquid execution',
-          body: 'Market entry with safety stop-loss. Exits triggered by reverse strategy signal (built-in exits), 24-hour time-guard, or safety SL.',
+          body: 'Market entry with safety stop-loss. Exits triggered by reverse strategy signal (Builtin Exits) or safety SL as backup. No manual intervention — system runs 24/7.',
         },
         {
           step: 'STEP 04',
           title: 'Public audit trail',
-          body: 'Every trade lands in SQLite and renders on the strategy landing page: equity curve, trades log, exit reasons. No black boxes.',
+          body: 'Every trade lands in DB and renders on the strategy landing page: equity curve, full trades log, exit reasons, real-time P&L. Subscribers can verify every trade down to the tick.',
         },
       ],
     },
     strategiesPreview: {
       title: 'Active strategies',
       subtitle:
-        'All strategies run in shadow mode — collecting live stats before promotion to real execution. The best performers migrate to Bybit live first.',
+        'Each strategy has its own landing page — equity curve, full trade log, live results. Numbers are recomputed for our $1000 position size with Bybit commission included.',
       seeAll: 'All strategies →',
     },
     roadmap: {
       title: 'Roadmap',
       items: [
         {
-          when: 'MAY 2026',
+          when: 'NOW',
           done: true,
-          title: 'Shadow trading deployed. First strategy BNB 15m is running.',
-        },
-        {
-          when: 'JUNE 2026',
-          done: false,
-          title: 'Portfolio expansion to 5-10 strategies across timeframes and symbols.',
+          title: '🚀 Growing the portfolio of verified LuxAlgo strategies. Each gets its own landing page and live stats.',
         },
         {
           when: 'JULY 2026',
           done: false,
-          title: 'Bybit live — small size ($200-500), top one or two strategies.',
+          title: 'Bybit live for top-performing strategies. Small size to validate execution.',
         },
         {
           when: 'AUGUST 2026',
           done: false,
-          title: 'Hyperliquid Vault — parallel channel for copy traders.',
+          title: 'Hyperliquid Vault — parallel channel for on-chain copy traders.',
         },
         {
-          when: 'FALL 2026',
+          when: 'Q4 2026',
           done: false,
-          title: 'Bybit Copy Trading — after 90 days of live history. Open follower onboarding.',
+          title: 'Bybit Copy Trading — open follower onboarding after 90 days of live history.',
         },
       ],
     },
@@ -271,28 +263,28 @@ const CONTENT: Record<Lang, Content> = {
       title: 'FAQ',
       items: [
         {
-          q: 'When can I copy-trade?',
-          a: 'After 90 days of live Bybit mainnet history. Planned for fall 2026. Hyperliquid Vault can start earlier (August 2026) — lower platform barrier.',
+          q: 'Where do the strategies come from?',
+          a: 'All strategies are built in LuxAlgo AI Strategy Builder — a recognized platform for multi-condition strategies with automated backtesting. Each strategy includes a link to its original LuxAlgo chat on its detail page for verification.',
         },
         {
           q: 'What is the risk management?',
-          a: 'Every strategy has a safety stop-loss (typically 2-3% from entry). Position size fixed at $1000 notional per trade. Max 1 position per (symbol × strategy). 24-hour time-guard force-closes stuck positions.',
+          a: 'Every strategy has a safety stop-loss (typically 2-3% from entry) as backup in case webhooks are delayed. Position size fixed at $1000 per trade. Max 1 position per (symbol × strategy). Exits are entirely strategy-driven — no manual intervention.',
         },
         {
           q: 'Where can I see live results?',
-          a: 'At /strategies — overall dashboard. At /strategies/<code> — per-strategy detail with equity curve, trades log, long/short breakdown. Auto-refreshed from DB.',
+          a: 'Main dashboard at /strategies grouped by timeframe. At /strategies/<code> — per-strategy detail with equity curve, full trades log, long/short breakdown. Auto-refreshes every 60 seconds.',
         },
         {
           q: 'What if a strategy is in drawdown?',
-          a: 'First we assess — market anomaly vs broken edge. After 10+ losses in a row → automatic pause via kill-switch. Followers can disconnect anytime (Bybit Copy) or exit the Vault.',
+          a: 'First we assess — market anomaly vs broken edge. After 10+ losses in a row → automatic pause. Followers can disconnect anytime (Bybit Copy) or exit the Vault.',
         },
         {
-          q: 'What are the fees?',
-          a: 'Bybit perp taker: 0.055% × 2 (open + close) = 0.11% round-trip. Hyperliquid: 0.025% × 2 = 0.05%. These fees are already factored into our backtests — landing page numbers are realistic.',
+          q: 'What fees are factored in?',
+          a: 'Bybit perp taker: 0.055% × 2 (open + close) = 0.11% round-trip. Hyperliquid: 0.025% × 2 = 0.05%. These fees are deducted on every trade in our backtests — landing page numbers are honest.',
         },
         {
-          q: 'How many concurrent positions?',
-          a: 'Current project — Track C (LuxAlgo strategies). Each strategy opens max 1 position per symbol. With 10 active strategies and 5 unique symbols — max 10 concurrent positions (capped at the risk-management layer).',
+          q: 'Are my funds safe?',
+          a: 'Bybit Copy Trading uses your own account — we never have access to your funds. Hyperliquid Vault runs on smart contracts with deposit/withdraw on demand. We only earn a percentage of profits.',
         },
       ],
     },
@@ -372,47 +364,53 @@ function renderHome(lang: Lang): string {
     .slice(0, 5)
     .join('');
 
-  // ---------- Hero ----------
+  // ---------- Hero with animated SVG equity curve as background ----------
+  // The squiggly line is a hand-crafted SVG path mimicking a real equity
+  // curve. stroke-dasharray animation makes it "draw itself" on page load.
+  // Plus two gradient blobs that drift slowly for ambient depth.
   const heroHtml = `
     <div class="hero">
-      <span class="hero-eyebrow">${escapeHtml(c.hero.eyebrow)}</span>
-      <h1 class="hero-title">
-        ${escapeHtml(c.hero.title1)}<span class="accent">${escapeHtml(c.hero.titleAccent)}</span>${escapeHtml(c.hero.title2)}
-      </h1>
-      <p class="hero-subtitle">${escapeHtml(c.hero.subtitle)}</p>
-      <div class="hero-cta">
-        <a class="btn btn-primary" href="/strategies">${escapeHtml(c.hero.ctaPrimary)}</a>
-        <a class="btn btn-ghost" href="${escapeHtml(c.telegramUrl)}" target="_blank" rel="noopener">
-          ${escapeHtml(c.hero.ctaSecondary)}
-        </a>
+      <div class="hero-bg" aria-hidden="true">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <svg class="hero-equity" viewBox="0 0 1200 300" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="hero-line-grad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.1"/>
+              <stop offset="50%" stop-color="var(--accent)" stop-opacity="0.65"/>
+              <stop offset="100%" stop-color="var(--accent)" stop-opacity="1"/>
+            </linearGradient>
+          </defs>
+          <path class="hero-equity-line"
+                d="M0,250 C80,240 130,260 180,235 C230,210 280,250 340,200 C400,160 460,210 520,180 C580,150 640,170 700,130 C760,90 820,140 880,110 C940,80 990,100 1050,70 C1110,40 1170,55 1200,30"
+                fill="none"
+                stroke="url(#hero-line-grad)"
+                stroke-width="2.5"
+                stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="hero-content">
+        <span class="hero-eyebrow">${escapeHtml(c.hero.eyebrow)}</span>
+        <h1 class="hero-title">
+          ${escapeHtml(c.hero.title1)}<span class="accent">${escapeHtml(c.hero.titleAccent)}</span>${escapeHtml(c.hero.title2)}
+        </h1>
+        <p class="hero-subtitle">${escapeHtml(c.hero.subtitle)}</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="/strategies">${escapeHtml(c.hero.ctaPrimary)}</a>
+          <a class="btn btn-ghost" href="${escapeHtml(c.telegramUrl)}" target="_blank" rel="noopener">
+            ${escapeHtml(c.hero.ctaSecondary)}
+          </a>
+          <a class="btn btn-link-out" href="https://www.luxalgo.com/" target="_blank" rel="noopener">
+            ⚡ ${lang === 'en' ? 'Powered by LuxAlgo' : 'Powered by LuxAlgo'} ↗
+          </a>
+        </div>
       </div>
     </div>
   `;
-
-  // ---------- Live strip ----------
-  const liveStripHtml = `
-    <div class="live-strip">
-      <div class="live-strip-item">
-        <span class="live-strip-label">${escapeHtml(c.liveStrip.strategies)}</span>
-        <span class="live-strip-value">${enabled.length}</span>
-      </div>
-      <span class="live-strip-sep">·</span>
-      <div class="live-strip-item">
-        <span class="live-strip-label">${escapeHtml(c.liveStrip.livePnl)}</span>
-        <span class="live-strip-value ${pnlCls}">${fmtUsd(totalPnlUsd, true)}</span>
-      </div>
-      <span class="live-strip-sep">·</span>
-      <div class="live-strip-item">
-        <span class="live-strip-label">${escapeHtml(c.liveStrip.liveTrades)}</span>
-        <span class="live-strip-value">${totalClosed}</span>
-      </div>
-      <span class="live-strip-sep">·</span>
-      <div class="live-strip-item">
-        <span class="live-strip-label">${escapeHtml(c.liveStrip.bestWr)}</span>
-        <span class="live-strip-value">${bestBacktestWr > 0 ? (bestBacktestWr * 100).toFixed(1) + '%' : '—'}</span>
-      </div>
-    </div>
-  `;
+  // Live strip intentionally removed per operator request (May 2026):
+  // numbers belonged on /strategies, not on the marketing front page.
+  // Local refs preserved to avoid touching the lambda below.
+  void enabled; void totalClosed; void totalPnlUsd; void bestBacktestWr; void pnlCls;
 
   // ---------- How it works ----------
   const howHtml = `
@@ -514,7 +512,6 @@ function renderHome(lang: Lang): string {
 
   const body = `
     ${heroHtml}
-    ${liveStripHtml}
     ${howHtml}
     ${strategiesPreviewHtml}
     ${roadmapHtml}
