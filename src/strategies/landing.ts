@@ -775,7 +775,7 @@ const STYLE = `
   .trades-more[open] summary::before { content: '▾ '; }
   .trades-more summary:hover { color: var(--text); }
 
-  /* Equity curve container */
+  /* Накопленная прибыль (equity curve) container */
   .equity-card { background: var(--bg-card); border: 1px solid var(--border);
     border-radius: 10px; padding: 14px 16px; }
 
