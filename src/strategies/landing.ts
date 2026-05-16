@@ -11,9 +11,16 @@ import {
 import {
   getStrategyLiveStats,
   getStrategyRecentTrades,
+  getStrategyActiveTrades,
   type StrategyLiveStats,
   type LiveTradeRow,
+  type ActiveTradeRow,
 } from './live-stats.js';
+
+/** Support contact (operator's personal Telegram). Surfaced as a small
+ *  link in the top-right nav on every page so visitors can reach out
+ *  with questions / issues. */
+const SUPPORT_URL = 'https://t.me/dboykod';
 
 // --- Backtest trades loader ---
 // Scraped trades log lives in src/strategies/data/<id>.json (written by
@@ -629,6 +636,60 @@ const STYLE = `
   .reason-strat { background: rgba(74, 217, 145, 0.10); color: var(--accent); }
   .reason-sl    { background: rgba(239, 91, 107, 0.14); color: var(--danger); }
   .reason-time  { background: rgba(245, 177, 77, 0.12); color: var(--warning); }
+  .reason-active{ background: rgba(74, 217, 145, 0.18); color: var(--accent); }
+
+  /* ---------- Live status: pulsing dot ---------- */
+  .live-status {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    text-transform: none; letter-spacing: 0;
+  }
+  .pulse-dot {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    position: relative; flex-shrink: 0;
+  }
+  .pulse-dot.active {
+    background: var(--accent);
+    box-shadow: 0 0 0 0 rgba(74, 217, 145, 0.7);
+    animation: pulse-green 1.6s ease-out infinite;
+  }
+  .pulse-dot.waiting {
+    background: var(--danger);
+    box-shadow: 0 0 0 0 rgba(239, 91, 107, 0.5);
+    animation: pulse-red 2.4s ease-out infinite;
+  }
+  @keyframes pulse-green {
+    0%   { box-shadow: 0 0 0 0 rgba(74, 217, 145, 0.7); }
+    70%  { box-shadow: 0 0 0 14px rgba(74, 217, 145, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(74, 217, 145, 0); }
+  }
+  @keyframes pulse-red {
+    0%   { box-shadow: 0 0 0 0 rgba(239, 91, 107, 0.5); }
+    70%  { box-shadow: 0 0 0 10px rgba(239, 91, 107, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(239, 91, 107, 0); }
+  }
+  .status-label {
+    font-size: 14px; font-weight: 600; color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .refresh-note {
+    font-size: 11px; color: var(--text-faint); font-weight: 400;
+    margin-left: auto;
+  }
+  .section-subtitle {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-faint); margin: 12px 0 8px; font-weight: 600;
+  }
+
+  /* ---------- Top-right nav-link buttons ---------- */
+  .top-right-nav a.nav-link {
+    background: var(--bg-card); border: 1px solid var(--border);
+    color: var(--text-dim); padding: 4px 10px; border-radius: 4px;
+    font-size: 12px; text-decoration: none; transition: all 120ms;
+  }
+  .top-right-nav a.nav-link:hover {
+    color: var(--text); border-color: var(--accent-soft);
+    background: var(--bg-card-hover); text-decoration: none;
+  }
   .trades-more {
     margin-top: 12px;
   }
@@ -1141,6 +1202,9 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
     ${groupsHtml}
     ${empty}
     `,
+    'ru',
+    standardTopRight('ru'),
+    60, // auto-refresh portfolio dashboard too
   );
 }
 
@@ -1306,37 +1370,111 @@ function renderBacktestSection(b: BacktestSnapshot, strategyId: string): string 
   `;
 }
 
-function renderLiveSection(_live: StrategyLiveStats, _launchedAt: number, strategyId: string): string {
-  // Slimmed per operator request: removed the "Live · с DATE / SHADOW MODE"
-  // header block, removed the KPI stats grid (Net P&L, Closed, Open, etc.),
-  // removed the "Структура выходов" sub-card. Only the recent trades table
-  // remains — that's the surface subscribers actually care about.
-  //
-  // Auto-refresh handled at the page level via <meta http-equiv="refresh">
-  // so this table updates in near-real-time when new closes land.
-  const liveTrades = getStrategyRecentTrades(strategyId, 50);
-  if (liveTrades.length === 0) {
-    return `
-    <div class="section">
-      <div class="section-title">Live сделки</div>
-      <div class="card"><div class="card-body">
-        <div class="empty-state" style="padding: 24px 0;">
-          ⏳ Ждём первого сигнала стратегии.<br/>
-          <span style="font-size: 12px; color: var(--text-faint);">Страница обновляется автоматически каждые 60 сек.</span>
-        </div>
-      </div></div>
+function fmtDate(ts: number | null): string {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)}`;
+}
+
+function fmtDuration(ms: number): string {
+  const totalMin = Math.max(0, Math.floor(ms / 60_000));
+  const d = Math.floor(totalMin / (60 * 24));
+  const h = Math.floor((totalMin % (60 * 24)) / 60);
+  const m = totalMin % 60;
+  if (d > 0) return `${d}д ${h}ч`;
+  if (h > 0) return `${h}ч ${m}м`;
+  return `${m}м`;
+}
+
+function activeTradesTable(trades: ActiveTradeRow[]): string {
+  if (trades.length === 0) return '';
+  const rows = trades
+    .map((t) => {
+      const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
+      const num = t.strategyTradeNum ?? t.id;
+      const tradeIdStr = `T#${num.toString().padStart(3, '0')}`;
+      const ageMs = Date.now() - t.entryAt;
+      return `
+      <tr>
+        <td>${tradeIdStr}</td>
+        <td class="dt">${fmtDate(t.entryAt)}</td>
+        <td class="dt">${fmtDuration(ageMs)}</td>
+        <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
+        <td class="right mono">${t.entryPrice.toFixed(4)}</td>
+        <td class="right mono">${t.sl !== null ? t.sl.toFixed(4) : '—'}</td>
+        <td><span class="reason-pill reason-active">🟢 В работе</span></td>
+      </tr>`;
+    })
+    .join('');
+  return `
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>T#</th>
+            <th>Открыта (UTC)</th>
+            <th>В работе</th>
+            <th>Side</th>
+            <th class="right">Entry</th>
+            <th class="right">Safety SL</th>
+            <th>Статус</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
     </div>
-    `;
-  }
+  `;
+}
+
+function renderLiveSection(_live: StrategyLiveStats, _launchedAt: number, strategyId: string): string {
+  // Two stacked sub-tables (when relevant):
+  //  - ACTIVE: currently-open positions, with pulsing-green status badge
+  //  - CLOSED: most recent closed positions
+  // Section header reflects state with a coloured pulsing dot — green
+  // dot + "позиция в работе" when active>0, red dot + "ждём сигнал"
+  // when nothing's open.
+  const active = getStrategyActiveTrades(strategyId);
+  const closed = getStrategyRecentTrades(strategyId, 50);
+
+  // Status badge for the section title
+  const isWorking = active.length > 0;
+  const statusBadge = isWorking
+    ? `<span class="pulse-dot active" aria-hidden="true"></span>
+       <span class="status-label">Позиция в работе</span>`
+    : `<span class="pulse-dot waiting" aria-hidden="true"></span>
+       <span class="status-label">Ждём сигнал стратегии</span>`;
+
+  // Active block
+  const activeBlock = active.length > 0
+    ? `<div class="section">
+         <div class="section-subtitle">Сейчас открыто: ${active.length}</div>
+         ${activeTradesTable(active)}
+       </div>`
+    : '';
+
+  // Closed block
+  const closedBlock = closed.length > 0
+    ? `<div class="section">
+         <div class="section-subtitle">Закрытые сделки · последние ${closed.length}</div>
+         ${liveTradesTable(closed)}
+       </div>`
+    : (active.length === 0
+        ? `<div class="card"><div class="card-body">
+             <div class="empty-state" style="padding: 24px 0;">
+               ⏳ Ждём первого сигнала стратегии.<br/>
+               <span style="font-size: 12px; color: var(--text-faint);">Страница обновляется автоматически каждые 60 сек.</span>
+             </div>
+           </div></div>`
+        : '');
+
   return `
   <div class="section">
-    <div class="section-title">
-      Live сделки · последние ${liveTrades.length}
-      <span style="font-size: 11px; color: var(--text-faint); font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 8px;">
-        ⟳ обновляется каждые 60 сек
-      </span>
+    <div class="section-title live-status">
+      ${statusBadge}
+      <span class="refresh-note">⟳ обновляется каждые 60 сек</span>
     </div>
-    ${liveTradesTable(liveTrades)}
+    ${activeBlock}
+    ${closedBlock}
   </div>
   `;
 }
@@ -1423,18 +1561,26 @@ function renderStrategyDetail(cfg: StrategyConfig): string {
 
     ${renderAlertIdBlock(cfg)}
 
-    ${cfg.backtest ? renderBacktestSection(cfg.backtest, cfg.id) : ''}
-
     ${renderLiveSection(live, cfg.launchedAt, cfg.id)}
+
+    ${cfg.backtest ? renderBacktestSection(cfg.backtest, cfg.id) : ''}
 
     ${renderRiskSection(cfg)}
 
     ${renderLogicSection(cfg)}
     `,
     'ru',
-    '',
+    standardTopRight('ru'),
     60, // auto-refresh every 60s so the Live трейды таблица обновляется
   );
+}
+
+/** Standard top-right nav for non-home pages: ← Home + Support contact. */
+function standardTopRight(_lang: 'ru' | 'en'): string {
+  return `
+    <a href="/" class="nav-link" title="На главную">← Главная</a>
+    <a href="${escapeHtml(SUPPORT_URL)}" class="nav-link" target="_blank" rel="noopener" title="Поддержка">💬 Поддержка</a>
+  `;
 }
 
 export async function landingRoute(app: FastifyInstance): Promise<void> {
@@ -1458,6 +1604,8 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
       return pageShell(
         'Not found',
         `<div class="header"><h1 class="title">404</h1></div><div class="empty-state">Стратегия не найдена. <a href="/strategies">Все стратегии</a></div>`,
+        'ru',
+        standardTopRight('ru'),
       );
     }
     reply.type('text/html; charset=utf-8');

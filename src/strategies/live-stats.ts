@@ -167,6 +167,55 @@ const recentTradesStmt = db.prepare<[string, number], TradeRow>(`
   LIMIT ?
 `);
 
+/** Currently-open Track C position for the strategy. Returned in the
+ *  same row shape as recent trades (without exit price / close reason).
+ *  Used on the landing page to show "позиция в работе" with a pulsing
+ *  green dot, distinct from closed trades. */
+export type ActiveTradeRow = {
+  id: number;
+  strategyTradeNum: number | null;
+  side: 'long' | 'short';
+  entryAt: number;
+  entryPrice: number;
+  sl: number | null;
+};
+
+type ActiveRow = {
+  id: number;
+  strategy_trade_num: number | null;
+  side: string | null;
+  entry: number | null;
+  sl: number | null;
+  filled_at: number | null;
+  created_at: number;
+};
+
+const activeTradesStmt = db.prepare<[string], ActiveRow>(`
+  SELECT id, strategy_trade_num, side, entry, sl, filled_at, created_at
+  FROM decisions
+  WHERE track = 'strategy' AND strategy_id = ?
+    AND status IN ('active', 'pending')
+  ORDER BY created_at DESC
+`);
+
+export function getStrategyActiveTrades(strategyId: string): ActiveTradeRow[] {
+  const rows = activeTradesStmt.all(strategyId);
+  const out: ActiveTradeRow[] = [];
+  for (const r of rows) {
+    if (r.side !== 'long' && r.side !== 'short') continue;
+    if (r.entry === null) continue;
+    out.push({
+      id: r.id,
+      strategyTradeNum: r.strategy_trade_num,
+      side: r.side,
+      entryAt: r.filled_at ?? r.created_at,
+      entryPrice: r.entry,
+      sl: r.sl,
+    });
+  }
+  return out;
+}
+
 /** Most recent N closed trades for the landing-page "Recent live trades"
  *  table. Includes only fully-closed decisions with a recorded pnl_pct. */
 export function getStrategyRecentTrades(strategyId: string, limit = 50): LiveTradeRow[] {

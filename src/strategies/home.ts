@@ -504,8 +504,10 @@ function renderHome(lang: Lang): string {
     </div>
   `;
 
-  // ---------- Top-right language toggle ----------
+  // ---------- Top-right nav (Support + RU/EN toggle) ----------
+  const supportLabel = lang === 'en' ? '💬 Support' : '💬 Поддержка';
   const topRight = `
+    <a href="https://t.me/dboykod" class="nav-link" target="_blank" rel="noopener" title="${supportLabel}">${supportLabel}</a>
     <a href="/" class="${lang === 'ru' ? 'active' : ''}">RU</a>
     <a href="/en" class="${lang === 'en' ? 'active' : ''}">EN</a>
   `;
