@@ -118,22 +118,36 @@ Short) в одном webhook — это правильный режим. Каж�
 особой причины (например — разный `notification` channel для entry vs
 exit).
 
-### 4. EXIT=null стратегии — `exitOnReverseSignal: true`
+### 4. Двойной путь закрытия (default behaviour)
 
-Если у стратегии в LuxAlgo нет встроенного exit условия (EXIT=null,
-позиция закрывается только по reverse signal) — поставь в
-StrategyConfig:
+Все Track C стратегии по умолчанию закрываются **WHICHEVER fires
+first** — defence in depth:
 
-```ts
-exitOnReverseSignal: true
-```
+| Путь | Что вызывает | force_close_reason |
+|------|--------------|---------------------|
+| Явный exit webhook | `[[strategy_event]] = "exit long"` / `"exit short"` | `strategy_exit` (🎯) |
+| Reverse-signal flip | `[[strategy_event]] = "short"` пока открыт LONG (или наоборот) | `reverse_signal` (🔁) |
+| Safety SL | Цена дошла до SL | (close_reason = `sl_hit`, 🛡) |
 
-Без этого флага, когда LuxAlgo шлёт SHORT entry при открытой LONG
-позиции, наш handler отвергнет его как `already_open` и LONG зависнет
-до safety SL.
+Поведение по умолчанию: `cfg.exitOnReverseSignal = true` (можно не
+указывать). Защищает от:
+- **EXIT=null стратегий** (STRAT-002 case) — exit-webhook'ов нет
+  вообще, reverse-signal единственный путь exit'а кроме SL
+- **Потерянных exit-вебхуков** на стратегиях с явным exit'ом
+  (STRAT-001 case) — STRAT-001 однажды потеряла exit-вебхук и
+  закрылась только 24h time-guard'ом, дорогая бага
 
-С флагом — handler сначала закроет LONG (force_close_reason='reverse_signal',
-🔁 эмодзи в TG), потом откроет SHORT. См. STRAT-002 как пример.
+Race safety:
+- `forceClose()` идемпотентен — если exit-webhook закроет первым,
+  пришедший после reverse-entry увидит `position already closed`
+  и просто откроет новую позицию.
+- `handleStrategyExit` имеет stale-side-guard — если reverse-flip
+  уже произошёл и SHORT открыт, опоздавший `exit long` будет
+  отвергнут как `stale_exit_side_mismatch` (не закроет SHORT).
+
+Опт-аут — `exitOnReverseSignal: false` — нужен только если стратегия
+имеет необычную семантику где reverse signal НЕ должен закрывать
+позицию (почти никогда не бывает в реальных стратегиях).
 
 ### 5. Имя webhook URL secret
 

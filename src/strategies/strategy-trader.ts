@@ -40,15 +40,20 @@ import {
  *   - Unknown / disabled strategy: ignored
  *   - Symbol mismatch (config has symbol pin): ignored
  *
- * One position per (symbol, strategy_id) at a time. Two flip modes:
- *   - Default: opposite-side entries while a position is open are
- *     rejected as `already_open` (operator must configure explicit
- *     exit alerts in LuxAlgo to close cleanly).
- *   - `cfg.exitOnReverseSignal=true`: opposite-side entries trigger
- *     close-and-reopen — existing position closed at the new bar's
- *     price with `force_close_reason='reverse_signal'`, then a fresh
- *     entry opens on the new side. Use for strategies with EXIT=null
- *     where the next entry IS the previous exit.
+ * One position per (symbol, strategy_id) at a time. Default close
+ * behaviour is defence-in-depth — the position closes via WHICHEVER
+ * of these fires first:
+ *   1. Explicit exit webhook (clean close, force_close_reason='strategy_exit')
+ *   2. Reverse-direction entry webhook (close-and-reopen,
+ *      force_close_reason='reverse_signal') — for EXIT=null strategies
+ *      OR as a fallback when (1) is lost / delayed.
+ *   3. Safety SL hit (force_close_reason absent; close_reason='sl_hit')
+ *
+ * Race safety: forceClose is idempotent; out-of-order delivery is
+ * handled by the stale-exit side-guard in handleStrategyExit.
+ *
+ * Opt out of (2) per-strategy with `cfg.exitOnReverseSignal: false`
+ * (rare — only if a reverse signal isn't meant to exit the prior pos).
  */
 
 export type StrategyWebhookResult = {
@@ -199,8 +204,13 @@ async function handleStrategyEntry(
   const occupied = findActiveByStrategy(p.symbol, p.strategy_id);
   if (occupied) {
     const occupiedSide = (occupied.side ?? null) as 'long' | 'short' | null;
+    // Default behaviour: opposite-side entries trigger a reverse-signal
+    // flip (close prior, open new). The config can disable this via
+    // exitOnReverseSignal=false for the unusual case where the strategy
+    // doesn't treat reverse signals as exits.
+    const reverseSignalEnabled = cfg.exitOnReverseSignal !== false;
     const isReverse =
-      cfg.exitOnReverseSignal === true &&
+      reverseSignalEnabled &&
       occupiedSide !== null &&
       occupiedSide !== side &&
       occupied.entry != null;
@@ -376,6 +386,40 @@ async function handleStrategyExit(
   if (!active.entry || !active.side) {
     logger.error({ id: active.id }, 'strategy-trader: active position missing entry/side, cannot exit');
     return { ok: false, reason: 'corrupt_position' };
+  }
+
+  // Stale-exit guard: the exit's intended side (derived from
+  // 'exit long' / 'exit short') must match the open position's side.
+  // Without this guard, an out-of-order delivery (reverse entry arrived
+  // first → flipped position via reverse_signal → THEN the original
+  // exit webhook arrives) would close the wrong-direction position.
+  //
+  // deriveActionSide() always sets `side` for exits in form B (it's
+  // informational per the deriveActionSide contract). In form A the
+  // operator's curl can omit `side` on exit — in that case we skip the
+  // guard (trust manual testing).
+  const derived = deriveActionSide(p);
+  if (derived.side && derived.side !== active.side) {
+    logger.warn(
+      {
+        strategy_id: p.strategy_id,
+        symbol: p.symbol,
+        exit_side: derived.side,
+        active_side: active.side,
+        active_id: active.id,
+      },
+      'strategy-trader: exit side mismatch — stale exit ignored (probably out-of-order delivery after reverse-signal flip)',
+    );
+    await sendMessage({
+      channel: 'logs',
+      text:
+        `⚠️ <b>Track C stale exit ignored</b>\n` +
+        `Стратегия: <code>${p.strategy_id}</code> на ${p.symbol}\n` +
+        `Exit пришёл на <b>${derived.side}</b>, но активная позиция <b>${active.side}</b> ` +
+        `(вероятно, флип через reverse_signal уже произошёл).`,
+      disable_notification: true,
+    }).catch(() => {});
+    return { ok: true, reason: 'stale_exit_side_mismatch' };
   }
 
   // Close at the strategy-reported price, or fallback to current ticker.

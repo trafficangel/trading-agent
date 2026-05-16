@@ -128,14 +128,20 @@ export type StrategyConfig = {
    *  `force_close_reason='reverse_signal'`, then a new position opens
    *  on the new side.
    *
-   *  Default false → opposite-side entries are rejected as
-   *  `already_open` (same as same-side duplicates).
+   *  **Default: true** — defense-in-depth. Every Track C strategy
+   *  benefits from accepting BOTH paths to close:
+   *    1. Explicit exit webhook (if the strategy has EXIT condition)
+   *    2. Reverse-signal flip (if (1) is lost or doesn't fire)
    *
-   *  Use this for strategies where LuxAlgo does NOT emit an explicit
-   *  exit alert (EXIT=null) and instead expresses "exit + reverse" as
-   *  a fresh entry on the opposite side. STRAT-002 is the prototypical
-   *  case; STRAT-001 has its own EXIT alert and should keep this OFF
-   *  to avoid double-closing. */
+   *  Race safety: `forceClose` is idempotent — if path (1) closes
+   *  first and (2) tries to close again, the second one no-ops.
+   *  And `handleStrategyExit` has a stale-exit side-guard that
+   *  ignores exits whose side no longer matches the open position
+   *  (handles out-of-order delivery).
+   *
+   *  Set false ONLY if the strategy has unusual semantics where a
+   *  reverse-direction signal is NOT meant to close the prior position
+   *  (almost no real strategy works that way). */
   exitOnReverseSignal?: boolean;
 };
 
@@ -212,10 +218,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     alertName: 'XRPUSD|15|LONG=CONTAnyBl&TCBr&MFa50|SHORT=CONTAnyBr&TCBl&MFb50|EXIT=null',
     sourceUrl: 'https://www.luxalgo.com/chat/p19leyc5pzvt3s32mj36rnzn/',
     name: 'XRP Contrarian',
-    // No explicit exit alert — strategy expresses "exit + flip" as a
-    // fresh entry on the opposite side. We honour that by closing
-    // the open position first, then opening the new one.
-    exitOnReverseSignal: true,
+    // exitOnReverseSignal: default true (see StrategyConfig docs). For
+    // this strategy reverse-signal is the ONLY close path apart from
+    // safety SL (no explicit exit alert). For other strategies the
+    // default acts as a fallback when the explicit exit webhook is
+    // lost / delayed.
     backtest: {
       periodLabel: 'Oct 20, 2025 — May 6, 2026',
       periodDays: 198,
