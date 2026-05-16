@@ -188,7 +188,7 @@ const CONTENT: Record<Lang, Content> = {
           q: 'Это правда бесплатно? Почему?',
           a:
             'Да, полностью. Сайт, статистика, Telegram-канал — бесплатно для всех.\n\n' +
-            'Сами для нас это НЕ бесплатно — около $230 в месяц:\n' +
+            'А нам содержание системы обходится примерно в $230 в месяц:\n' +
             '- [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) — ~$60/мес, сборка стратегий в AI Builder\n' +
             '- [TradingView Premium](https://ru.tradingview.com/pricing/) — ~$60/мес, контрольные бэктесты с реальной комиссией Bybit\n' +
             '- [Claude Code](https://claude.com/product/claude-code) — ~$100/мес, AI для разработки системы и анализа результатов сделок\n' +
@@ -343,7 +343,7 @@ const CONTENT: Record<Lang, Content> = {
           q: 'Is it really free? Why?',
           a:
             'Yes, completely. The site, statistics, Telegram channel — free for everyone.\n\n' +
-            'It\'s NOT free for us — about $230/month:\n' +
+            'Running this system costs us about $230/month:\n' +
             '- [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) — ~$60/mo, strategy building in AI Builder\n' +
             '- [TradingView Premium](https://www.tradingview.com/pricing/) — ~$60/mo, control backtests with realistic Bybit commission\n' +
             '- [Claude Code](https://claude.com/product/claude-code) — ~$100/mo, AI for system development and trade-result analysis\n' +
