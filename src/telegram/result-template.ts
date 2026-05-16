@@ -127,18 +127,33 @@ export type ResultPostInput = {
   forceCloseReason?: string | null;
   /** Track C — show "[STRAT-001]" badge in header for context. */
   strategyCode?: string | null;
+  /** Track C — short human name (e.g. "BNB Contrarian") rendered
+   *  alongside the STRAT code. */
+  strategyName?: string | null;
+  /** Track C — per-strategy sequential trade counter (1, 2, 3, ...).
+   *  Used for the T#001 prefix instead of the global decision.id. */
+  strategyTradeNum?: number | null;
+  /** Track C — landing-page URL for "see details" link at the bottom. */
+  landingUrl?: string | null;
 };
 
 /** Build the result post (≤1024 chars, HTML, ready for sendPhoto caption). */
 export function resultPost(i: ResultPostInput): string {
+  const isStrategy = i.track === 'strategy';
+  // Track C uses per-strategy counter (T#001, T#002, ...) instead of
+  // the global decision.id. Falls back to global id if not provided
+  // (for legacy compatibility — should never happen in new code).
+  const tradeNumForId =
+    isStrategy && typeof i.strategyTradeNum === 'number'
+      ? i.strategyTradeNum
+      : i.parentTradeId;
+  const padDigits = isStrategy ? 3 : 4;
   const prefix =
     i.track === 'strategy' ? 'T#' : i.track === 'signal' ? 'S#' : '#';
-  const tradeId = `${prefix}${i.parentTradeId.toString().padStart(4, '0')}`;
+  const tradeId = `${prefix}${tradeNumForId.toString().padStart(padDigits, '0')}`;
   const sideE = SIDE_EMOJI[i.side] ?? '';
   const sideRu = SIDE_RU[i.side] ?? i.side;
   const isWin = i.pnlPct > 0;
-  const isStrategy = i.track === 'strategy';
-  const stratBadge = i.strategyCode ? `<b>[STRAT-${escapeHtml(i.strategyCode)}]</b>  ` : '';
 
   // Compute USD P&L when notional known. Format as "+$X.XX" / "-$X.XX"
   // (sign BEFORE the dollar symbol, never "$-X.XX").
@@ -158,28 +173,18 @@ export function resultPost(i: ResultPostInput): string {
   let exitTag = '';
 
   if (isStrategy) {
-    // Track C — strategy header
     if (isWin) {
       const winEmoji =
         Math.abs(i.pnlPct) >= 3 ? '🚀' :
         Math.abs(i.pnlPct) >= 1.5 ? '💰' : '✅';
-      header = usdStr
-        ? `${winEmoji} <b>ПРОФИТ ${usdStr}</b>  ·  ${tradeId}`
-        : `${winEmoji} <b>ПРОФИТ +${i.pnlPct.toFixed(2)}%</b>  ·  ${tradeId}`;
+      header = `${winEmoji} <b>ПРОФИТ ${usdStr || `+${i.pnlPct.toFixed(2)}%`}</b>`;
     } else {
       const lossEmoji = i.closeReason === 'sl_hit' ? '🛡' : '🔻';
-      header = usdStr
-        ? `${lossEmoji} <b>Убыток ${usdStr}</b>  ·  ${tradeId}`
-        : `${lossEmoji} <b>Убыток ${i.pnlPct.toFixed(2)}%</b>  ·  ${tradeId}`;
+      header = `${lossEmoji} <b>Убыток ${usdStr || i.pnlPct.toFixed(2) + '%'}</b>`;
     }
-    // Exit-reason tag on the "Выход" line. time_guard is intentionally
-    // NOT tagged for Track C — those force-closes shouldn't even
-    // happen here (guard disabled for strategies), and if they do
-    // we don't want subscribers to see "(24h time-out)" wording.
     if (i.closeReason === 'sl_hit') exitTag = ' (safety SL)';
     else if (i.forceCloseReason === 'strategy_exit') exitTag = ' (сигнал стратегии)';
   } else {
-    // Track A/B — legacy headers
     if (i.closeReason === 'tp_hit') {
       header = `🎉 <b>ЦЕЛЬ ВЗЯТА</b> · сделка ${tradeId}`;
       exitTag = ' (TP)';
@@ -218,16 +223,46 @@ export function resultPost(i: ResultPostInput): string {
     : `📊 Результат: <b>${pnlPct}</b>`;
 
   // ---------- Compose ----------
-  const lines: string[] = [
-    `${header}  ${stratBadge}${sideE} <b>${escapeHtml(i.symbol)}</b> ${sideRu}`,
-    '',
-    `📥 Вход:   <code>${i.entry}</code>`,
-    `📤 Выход:  <code>${i.closePrice}</code>${exitTag}`,
-    resultLine,
-    `⏱ Длительность: ${formatDuration(i.durationMs)}`,
-    '',
-    escapeHtml(tail),
-  ];
+  let lines: string[];
+  if (isStrategy) {
+    // Mirrors the new entry post layout: big headline, strategy label,
+    // trade ID, monospaced numbers, landing link, italic note. Mobile-
+    // friendly — each row fits a single iPhone-narrow column.
+    const nameLine = i.strategyName
+      ? `🤖 <b>STRAT-${escapeHtml(i.strategyCode ?? '???')}</b> · ${escapeHtml(i.strategyName)}`
+      : `🤖 <b>STRAT-${escapeHtml(i.strategyCode ?? '???')}</b>`;
+    const linkLine = i.landingUrl
+      ? `📊 <a href="${i.landingUrl}">Детали и live статистика</a>`
+      : '';
+    lines = [
+      `${header}  ${sideE} <b>${escapeHtml(i.symbol)}</b> ${sideRu}`,
+      ``,
+      nameLine,
+      `🆔 <b>${tradeId}</b>`,
+      ``,
+      `📥 Вход:   <code>${i.entry}</code>`,
+      `📤 Выход:  <code>${i.closePrice}</code>${exitTag}`,
+      resultLine,
+      `⏱ Длительность: ${formatDuration(i.durationMs)}`,
+      ``,
+      linkLine,
+      linkLine ? `` : '', // visual gap before tail only when link rendered
+      `<i>${escapeHtml(tail)}</i>`,
+    ].filter((l) => l !== false as unknown as string); // keep nulls out
+  } else {
+    lines = [
+      `${header}`,
+      '',
+      `${sideE} <b>${escapeHtml(i.symbol)}</b> ${sideRu}`,
+      '',
+      `📥 Вход:   <code>${i.entry}</code>`,
+      `📤 Выход:  <code>${i.closePrice}</code>${exitTag}`,
+      resultLine,
+      `⏱ Длительность: ${formatDuration(i.durationMs)}`,
+      '',
+      escapeHtml(tail),
+    ];
+  }
 
   return lines.join('\n').slice(0, 1024);
 }

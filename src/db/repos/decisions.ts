@@ -56,6 +56,11 @@ export type DecisionRow = {
   /** Force-close reason ('counter_structural', 'counter_signal', 'time_guard')
    *  when tpsl-monitor or signal-trader closes the position early. */
   force_close_reason: string | null;
+  /** Track C only: per-strategy sequential counter (1, 2, 3, ... within
+   *  each strategy_id). Used for the "T#1 / T#2 / ..." display in posts —
+   *  much more useful for subscribers than the global decision.id which
+   *  mixes Track A / B / C records. NULL for Track A / B rows. */
+  strategy_trade_num: number | null;
 };
 
 export type Track = 'llm' | 'signal' | 'strategy';
@@ -70,8 +75,17 @@ const insertStmt = db.prepare(`
     confidence, reasoning_short, reasoning_full, raw_response,
     status, parent_decision_id,
     sl_reason, tp_reason, invalidation, features_json,
-    pending_until, filled_at, track, original_sl, tp1_price, strategy_id
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    pending_until, filled_at, track, original_sl, tp1_price, strategy_id,
+    strategy_trade_num
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+/** For Track C inserts only — returns the next sequential number for this
+ *  strategy_id (1, 2, 3, ...). Atomic when called inside the same Node
+ *  event-loop tick as the subsequent INSERT (better-sqlite3 is sync). */
+const maxStrategyNumStmt = db.prepare<[string], { n: number | null }>(`
+  SELECT MAX(strategy_trade_num) AS n FROM decisions
+  WHERE track = 'strategy' AND strategy_id = ?
 `);
 
 const findPendingLimitsStmt = db.prepare<[], DecisionRow>(`
@@ -171,6 +185,16 @@ export function insertDecision(input: InsertDecisionInput): number {
   // touches entry; non-OPEN decisions are 'final'.
   const defaultStatus = input.decision.decision === 'OPEN' ? 'active' : 'final';
   const status = input.statusOverride ?? defaultStatus;
+
+  // Track C: assign per-strategy sequential counter for the post prefix.
+  // 1-based: first trade of STRAT-001 → strategy_trade_num=1, displayed
+  // as T#001. Global decision.id remains the foreign-key primary key.
+  let strategyTradeNum: number | null = null;
+  if (input.track === 'strategy' && input.strategyId) {
+    const max = maxStrategyNumStmt.get(input.strategyId)?.n ?? 0;
+    strategyTradeNum = max + 1;
+  }
+
   const result = insertStmt.run(
     Date.now(),
     input.symbol,
@@ -201,6 +225,7 @@ export function insertDecision(input: InsertDecisionInput): number {
     input.decision.sl ?? null, // original_sl — frozen at open time
     input.tp1Price ?? null, // tp1_price — multi-TP partial close target
     input.strategyId ?? null, // strategy_id — Track C only
+    strategyTradeNum, // strategy_trade_num — Track C per-strategy counter
   );
   const newId = Number(result.lastInsertRowid);
 

@@ -117,6 +117,11 @@ export type StrategyConfig = {
    *  strategy. Shown next to the alertName on the landing page so users
    *  can verify the source. Auto-populated by scripts/import-strategy.ts. */
   sourceUrl?: string;
+  /** Short human-readable name for posts (e.g. "BNB Contrarian").
+   *  Surfaced in Telegram entry/exit posts as the strategy label
+   *  instead of the cryptic `description` string. If not set, falls
+   *  back to `symbol + " " + timeframe + "m"`. */
+  name?: string;
 };
 
 /**
@@ -160,6 +165,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     launchedAt: Date.parse('2026-05-14T12:00:00Z'),
     alertName: 'BNBUSD|15|LONG=CONTAnyBr&TTBr&MFa50|SHORT=CONTAnyBl&TTBl&MFb50|EXIT=CONTBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/xff5y4hjob6d2qitfo1lhbxa/',
+    name: 'BNB Contrarian',
     backtest: {
       periodLabel: 'Oct 19, 2025 — May 14, 2026',
       periodDays: 207,
@@ -199,3 +205,9 @@ export function getStrategyConfig(id: string): StrategyConfig | null {
 /** Notional position size for ALL Track C trades, in USD. Mirrors
  *  POSITION_NOTIONAL_USD in daily-wrap so PnL display is consistent. */
 export const TRACK_C_NOTIONAL_USD = 1000;
+
+/** Public landing-page base URL. Surfaced in Telegram posts (entry +
+ *  exit) as the deep link `${base}/strategies/${cfg.code}`. Override
+ *  via env LANDING_BASE_URL if you operate a staging instance. */
+export const LANDING_BASE_URL =
+  process.env.LANDING_BASE_URL ?? 'https://robotclaude.biz';

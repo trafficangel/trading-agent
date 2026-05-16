@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import {
   insertDecision,
   findActiveByStrategy,
+  findDecisionById,
   forceClose,
   calcPnl,
 } from '../db/repos/decisions.js';
@@ -15,6 +16,7 @@ import type { Decision } from '../llm/decision.schema.js';
 import {
   getStrategyConfig,
   TRACK_C_NOTIONAL_USD,
+  LANDING_BASE_URL,
   type StrategyConfig,
 } from './track-c-config.js';
 
@@ -306,20 +308,45 @@ async function sendStrategyEntryPost(
   sl: number,
   side: 'long' | 'short',
 ): Promise<void> {
-  const tradeIdStr = `T#${decisionId.toString().padStart(4, '0')}`;
+  // Per-strategy trade counter (T#1, T#2, ...) — populated by
+  // insertDecision() right before this post is built.
+  const row = findDecisionById(decisionId);
+  const num = row?.strategy_trade_num ?? 1;
+  const tradeIdStr = `T#${num.toString().padStart(3, '0')}`;
+
   const slPctDisplay = (cfg.slPct * 100).toFixed(2);
+  const tfLabel = `${p.timeframe}m`;
+  const name = cfg.name ?? `${p.symbol} ${tfLabel}`;
+  const landingUrl = `${LANDING_BASE_URL}/strategies/${cfg.code}`;
+
+  // Mobile-friendly layout:
+  //  - Big headline line (1 emoji, side, symbol, TF) — fits on one line
+  //    even on iPhone SE width
+  //  - Compact info block with monospace numbers
+  //  - Single bottom line with strategy details + landing link
+  // No long-form description — operator name handles human readability.
   const text = [
-    `🤖 <b>${tradeIdStr}</b>  <b>[STRAT-${cfg.code}]</b>  ${sideEmoji(side)} <b>${escapeHtml(p.symbol)}</b> ${sideRu(side)}`,
-    `🏷 <code>${escapeHtml(cfg.description)}</code>`,
+    `${sideEmoji(side)} <b>${sideRu(side)} · ${escapeHtml(p.symbol)} · ${escapeHtml(tfLabel)}</b>`,
+    ``,
+    `🤖 <b>STRAT-${escapeHtml(cfg.code)}</b> · ${escapeHtml(name)}`,
+    `🆔 <b>${tradeIdStr}</b>`,
     ``,
     `📥 Вход:  <code>${entry}</code>  (по рынку)`,
-    `🛡 Стоп:  <code>${sl}</code>  (${slPctDisplay}%) — страховка`,
+    `🛡 Стоп:  <code>${sl}</code>  (${slPctDisplay}%)`,
+    `💵 Размер позиции: $${TRACK_C_NOTIONAL_USD}`,
     ``,
-    `<i>Выход — по сигналу стратегии (Builtin Exits).</i>`,
+    `📊 <a href="${landingUrl}">Детали и live статистика</a>`,
+    ``,
+    `<i>Выход — по сигналу стратегии. Без фиксированных TP.</i>`,
   ].join('\n');
-  await sendMessage({ channel: 'signals', text }).catch((err) =>
-    logger.error({ err }, 'strategy-trader: entry post to signals failed'),
-  );
+
+  await sendMessage({
+    channel: 'signals',
+    text,
+    // Allow link preview on the landing URL — gives subscribers a card
+    // with strategy stats inline in the message.
+    disable_web_page_preview: false,
+  }).catch((err) => logger.error({ err }, 'strategy-trader: entry post to signals failed'));
   await sendMessage({ channel: 'logs', text, disable_notification: true }).catch(() => {});
 }
 
@@ -336,9 +363,9 @@ async function sendStrategyExitPost(
   filledAt: number | null,
   sl: number,
 ): Promise<void> {
-  // Use the shared resultPost template so strategy_exit posts have the
-  // same look-and-feel as time_guard / sl_hit posts. Single source of
-  // truth for header / USD / exit-reason tail.
+  const row = findDecisionById(decisionId);
+  const num = row?.strategy_trade_num ?? null;
+  const name = cfg.name ?? `${p.symbol} ${p.timeframe}m`;
   const text = resultPost({
     parentTradeId: decisionId,
     symbol: p.symbol,
@@ -347,7 +374,7 @@ async function sendStrategyExitPost(
     sl,
     tp: null,
     closePrice,
-    closeReason: 'manual',           // exits via strategy webhook are 'manual' in DB
+    closeReason: 'manual',
     pnlPct,
     pnlR,
     durationMs: Date.now() - (filledAt ?? createdAt),
@@ -355,9 +382,14 @@ async function sendStrategyExitPost(
     notionalUsd: TRACK_C_NOTIONAL_USD,
     forceCloseReason: 'strategy_exit',
     strategyCode: cfg.code,
+    strategyName: name,
+    strategyTradeNum: num,
+    landingUrl: `${LANDING_BASE_URL}/strategies/${cfg.code}`,
   });
-  await sendMessage({ channel: 'signals', text }).catch((err) =>
-    logger.error({ err }, 'strategy-trader: exit post to signals failed'),
-  );
+  await sendMessage({
+    channel: 'signals',
+    text,
+    disable_web_page_preview: false,
+  }).catch((err) => logger.error({ err }, 'strategy-trader: exit post to signals failed'));
   await sendMessage({ channel: 'logs', text, disable_notification: true }).catch(() => {});
 }
