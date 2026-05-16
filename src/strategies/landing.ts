@@ -48,7 +48,7 @@ type BacktestTradesBundle = {
 
 const backtestTradesCache = new Map<string, BacktestTradesBundle | null>();
 
-function loadBacktestTrades(strategyId: string): BacktestTradesBundle | null {
+export function loadBacktestTrades(strategyId: string): BacktestTradesBundle | null {
   if (backtestTradesCache.has(strategyId)) {
     return backtestTradesCache.get(strategyId) ?? null;
   }
@@ -1302,12 +1302,156 @@ const STYLE = `
   .strategy-preview-link:hover {
     background: var(--bg-card-hover); text-decoration: none;
   }
+  .strategy-preview-left { flex: 1; min-width: 0; }
   .strategy-preview-name { font-weight: 500; }
   .strategy-preview-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-  .strategy-preview-right { text-align: right; }
+  .strategy-preview-right { text-align: right; flex-shrink: 0; }
+  .strategy-preview-spark {
+    display: flex; align-items: center; flex-shrink: 0;
+    padding: 0 12px; opacity: 0.85;
+  }
+  @media (max-width: 480px) {
+    .strategy-preview-spark { display: none; }
+  }
+  .sparkline {
+    /* stroke="currentColor" picks up this color */
+    color: var(--accent);
+  }
+  .sparkline.neg { color: var(--danger); }
 
   /* Section spacing on home */
   .home-section { margin: 56px 0 0; }
+
+  /* ---------- Live "Working right now" section ----------
+   * Renders one card per currently-open Track C position. Server SSR
+   * provides initial state from getActivePositionsCached() (8s TTL),
+   * client polls /api/active-positions every 10s and patches DOM
+   * in-place. data-* hooks tell the JS which nodes to update.
+   *
+   * Visual hierarchy: brighter than surrounding sections (this is the
+   * "alive money" moment), but still calm — green glow on pulse dot,
+   * accent border on card, mono-font prices for that trading-terminal
+   * vibe. */
+  .live-pos-section { margin: 32px 0 0; }
+  .live-pos-section[data-empty="true"] { display: none; }
+  .live-pos-header {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px;
+  }
+  .live-pos-pulse {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 0 rgba(74, 217, 145, 0.7);
+    animation: pulse-green 1.6s ease-out infinite;
+  }
+  .live-pos-title {
+    font-size: 22px; font-weight: 600; margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .live-pos-count {
+    margin-left: 4px; padding: 2px 10px; border-radius: 12px;
+    background: rgba(74, 217, 145, 0.10); color: var(--accent);
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .live-pos-grid {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+  .live-pos-card {
+    background: var(--bg-card);
+    border: 1px solid rgba(74, 217, 145, 0.18);
+    border-radius: 12px; padding: 16px;
+    position: relative; overflow: hidden;
+  }
+  .live-pos-card::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(
+      400px circle at 100% 0%,
+      rgba(74, 217, 145, 0.06),
+      transparent 60%
+    );
+    pointer-events: none;
+  }
+  .live-pos-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 8px; margin-bottom: 12px;
+  }
+  .live-pos-id { font-size: 14px; }
+  .live-pos-id b { font-family: 'SF Mono', 'Menlo', monospace; }
+  .live-pos-side { font-size: 12px; color: var(--text-dim); }
+  .live-pos-side .side-long { color: var(--accent); font-weight: 600; }
+  .live-pos-side .side-short { color: var(--danger); font-weight: 600; }
+  .live-pos-prices {
+    display: flex; flex-direction: column; gap: 4px;
+    margin-bottom: 12px;
+  }
+  .live-pos-price-row {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px;
+  }
+  .live-pos-label {
+    color: var(--text-dim); width: 64px; flex-shrink: 0;
+  }
+  .live-pos-val.mono {
+    font-family: 'SF Mono', 'Menlo', monospace;
+    color: var(--text);
+  }
+  .live-pos-arrow {
+    font-weight: 700; font-size: 14px;
+    /* Smooth fade when value flips */
+    transition: color 0.3s ease;
+  }
+  .live-pos-arrow.pos { color: var(--accent); }
+  .live-pos-arrow.neg { color: var(--danger); }
+  .live-pos-meta {
+    color: var(--text-faint); font-size: 11px;
+  }
+  /* Big PnL line — the eye-catcher of the card. */
+  .live-pos-pnl {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 12px 14px; border-radius: 8px;
+    margin-bottom: 10px;
+    transition: background 0.4s ease;
+  }
+  .live-pos-pnl.pos {
+    background: rgba(74, 217, 145, 0.10);
+    color: var(--accent);
+  }
+  .live-pos-pnl.neg {
+    background: rgba(239, 91, 107, 0.10);
+    color: var(--danger);
+  }
+  .live-pos-pnl-usd {
+    font-size: 22px; font-weight: 700;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+  }
+  .live-pos-pnl-pct, .live-pos-pnl-r {
+    font-size: 13px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Brief flash on value change — JS toggles .is-flashing for 600ms */
+  .live-pos-pnl.is-flashing { animation: pnl-flash 0.6s ease-out; }
+  @keyframes pnl-flash {
+    0%   { transform: scale(1); }
+    50%  { transform: scale(1.02); }
+    100% { transform: scale(1); }
+  }
+  .live-pos-foot {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; color: var(--text-dim);
+  }
+  .live-pos-link {
+    color: var(--accent); text-decoration: none; font-weight: 500;
+  }
+  .live-pos-link:hover { text-decoration: underline; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .live-pos-pulse { animation: none; }
+    .live-pos-pnl.is-flashing { animation: none; }
+  }
+
   .home-section-title {
     font-size: 22px; font-weight: 600; margin: 0 0 18px;
     letter-spacing: -0.01em;
@@ -1448,8 +1592,64 @@ ${body}
   ${footerText}
 </div>
 </div>
+${countUpScript()}
 </body>
 </html>`;
+}
+
+/** Inline script that animates any element with [data-count] from 0 to
+ *  its target value when it enters the viewport. Attributes:
+ *    data-count       — target number (required)
+ *    data-decimals    — fraction digits (default 0)
+ *    data-prefix      — prefix string (e.g. "$")
+ *    data-suffix      — suffix string (e.g. "%")
+ *    data-signed      — if "true", always show "+" or "−" for the sign
+ *  Bails out on prefers-reduced-motion or no IntersectionObserver. */
+function countUpScript(): string {
+  return `<script>
+(function() {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (!('IntersectionObserver' in window)) return;
+  function ease(t) { return 1 - Math.pow(1 - t, 3); }
+  function fmt(el, v) {
+    var dec = parseInt(el.getAttribute('data-decimals') || '0', 10);
+    var prefix = el.getAttribute('data-prefix') || '';
+    var suffix = el.getAttribute('data-suffix') || '';
+    var signed = el.getAttribute('data-signed') === 'true';
+    var sign = '';
+    var abs = v;
+    if (signed) {
+      sign = v >= 0 ? '+' : '−';
+      abs = Math.abs(v);
+    }
+    return sign + prefix + abs.toFixed(dec) + suffix;
+  }
+  function run(el) {
+    var target = parseFloat(el.getAttribute('data-count') || '0');
+    if (isNaN(target)) return;
+    var dur = 1100;
+    var start = performance.now();
+    function step(now) {
+      var t = Math.min(1, (now - start) / dur);
+      var v = target * ease(t);
+      el.textContent = fmt(el, v);
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+  var io = new IntersectionObserver(function(entries) {
+    entries.forEach(function(en) {
+      if (en.isIntersecting) {
+        run(en.target);
+        io.unobserve(en.target);
+      }
+    });
+  }, { threshold: 0.4 });
+  document.querySelectorAll('[data-count]').forEach(function(el) {
+    io.observe(el);
+  });
+})();
+</script>`;
 }
 
 /** Sort key for timeframes — keeps "5m, 15m, 1H, 4H, 1D" semantic order
@@ -1645,22 +1845,22 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
     <div class="portfolio-dashboard">
       <div class="dash-card">
         <div class="dash-label">Стратегии</div>
-        <div class="dash-value">${strategies.length}</div>
+        <div class="dash-value" data-count="${strategies.length}" data-decimals="0">${strategies.length}</div>
         <div class="dash-sub">${runningCount === strategies.length ? `все ${stratPlural}` : `${runningCount} ${stratPlural}`}</div>
       </div>
       <div class="dash-card">
         <div class="dash-label">Сейчас открыто</div>
-        <div class="dash-value ${totalOpen > 0 ? 'pos' : ''}">${totalOpen}</div>
+        <div class="dash-value ${totalOpen > 0 ? 'pos' : ''}" data-count="${totalOpen}" data-decimals="0">${totalOpen}</div>
         <div class="dash-sub">${openSub}</div>
       </div>
       <div class="dash-card">
         <div class="dash-label">Закрытых сделок</div>
-        <div class="dash-value">${totalClosed}</div>
+        <div class="dash-value" data-count="${totalClosed}" data-decimals="0">${totalClosed}</div>
         <div class="dash-sub">${closedSub}</div>
       </div>
       <div class="dash-card">
         <div class="dash-label">Live прибыль</div>
-        <div class="dash-value ${hasLiveData ? portfolioCls : ''}">${pnlValue}</div>
+        <div class="dash-value ${hasLiveData ? portfolioCls : ''}"${hasLiveData ? ` data-count="${totalPnlUsd}" data-decimals="2" data-prefix="$" data-signed="true"` : ''}>${pnlValue}</div>
         <div class="dash-sub">${pnlSub}</div>
       </div>
     </div>
@@ -1747,32 +1947,32 @@ function renderBacktestSection(snap: BacktestSnapshot, strategyId: string, cfg?:
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-label">Net P&L</div>
-        <div class="stat-value ${pnlClass}">${fmtPct(b.netPnlPct, true)}</div>
+        <div class="stat-value ${pnlClass}" data-count="${b.netPnlPct}" data-decimals="2" data-suffix="%" data-signed="true">${fmtPct(b.netPnlPct, true)}</div>
         <div class="stat-sub ${pnlClass}">${fmtUsd(b.netPnlUsd, true)}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Win Rate</div>
-        <div class="stat-value">${(b.winRate * 100).toFixed(2)}%</div>
+        <div class="stat-value" data-count="${(b.winRate * 100).toFixed(2)}" data-decimals="2" data-suffix="%">${(b.winRate * 100).toFixed(2)}%</div>
         <div class="stat-sub">${b.wins}W / ${b.losses}L · ${b.totalTrades} trades</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Profit Factor</div>
-        <div class="stat-value">${b.profitFactor.toFixed(2)}</div>
+        <div class="stat-value" data-count="${b.profitFactor.toFixed(2)}" data-decimals="2">${b.profitFactor.toFixed(2)}</div>
         <div class="stat-sub">gross profit / gross loss</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Max Drawdown</div>
-        <div class="stat-value neg">${b.maxDrawdownPct.toFixed(2)}%</div>
+        <div class="stat-value neg" data-count="${b.maxDrawdownPct.toFixed(2)}" data-decimals="2" data-suffix="%">${b.maxDrawdownPct.toFixed(2)}%</div>
         <div class="stat-sub neg">${fmtUsd(-b.maxDrawdownUsd)}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">CAGR</div>
-        <div class="stat-value ${classForValue(b.cagrPct)}">${b.cagrPct.toFixed(2)}%</div>
+        <div class="stat-value ${classForValue(b.cagrPct)}" data-count="${b.cagrPct.toFixed(2)}" data-decimals="2" data-suffix="%">${b.cagrPct.toFixed(2)}%</div>
         <div class="stat-sub">аннуализированная доходность</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Commission Paid</div>
-        <div class="stat-value">${fmtUsd(b.commissionPaidUsd)}</div>
+        <div class="stat-value" data-count="${b.commissionPaidUsd.toFixed(2)}" data-decimals="2" data-prefix="$">${fmtUsd(b.commissionPaidUsd)}</div>
         <div class="stat-sub">${(b.commissionPctPerSide * 100 * 2).toFixed(3)}% round-trip</div>
       </div>
     </div>

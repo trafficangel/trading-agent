@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 import { getStrategyLiveStats } from './live-stats.js';
-import { pageShell } from './landing.js';
+import { pageShell, loadBacktestTrades } from './landing.js';
+import { enrichTrades } from './backtest-recompute.js';
 
 /**
  * Marketing-facing home page (robotclaude.biz/).
@@ -482,6 +483,53 @@ function classForValue(n: number): 'pos' | 'neg' | 'neu' {
 }
 
 /**
+ * Tiny inline SVG of the cumulative-PnL line (sparkline). 80x20px,
+ * one accent-colour stroke, no axes. Used in the strategy-preview
+ * rows so visitors get a one-glance impression of "this strategy
+ * went up" without having to click through to the detail page.
+ *
+ * Input is an array of `cumulativePnlUsd` values from the enriched
+ * trades log; output is an SVG element ready to inline in HTML.
+ * Returns empty string when fewer than 2 points (need a segment).
+ */
+function sparklineSvg(cumValues: number[]): string {
+  if (cumValues.length < 2) return '';
+  const w = 80;
+  const h = 20;
+  const padY = 2;
+  const min = Math.min(...cumValues);
+  const max = Math.max(...cumValues);
+  const range = max - min || 1;
+  const pts = cumValues.map((v, i) => {
+    const x = (i / (cumValues.length - 1)) * w;
+    const y = h - padY - ((v - min) / range) * (h - 2 * padY);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const last = cumValues[cumValues.length - 1] ?? 0;
+  const cls = last >= 0 ? 'pos' : 'neg';
+  return `<svg class="sparkline ${cls}" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true">
+    <polyline points="${pts.join(' ')}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+/** Compact age — used by the live-position card and updated client-side
+ *  every 10 seconds. Keep formats short so cards stay narrow. */
+function formatAge(ms: number, lang: 'ru' | 'en'): string {
+  const totalMin = Math.max(0, Math.floor(ms / 60_000));
+  const d = Math.floor(totalMin / (60 * 24));
+  const h = Math.floor((totalMin % (60 * 24)) / 60);
+  const m = totalMin % 60;
+  if (lang === 'en') {
+    if (d > 0) return `${d}d ${h}h ago`;
+    if (h > 0) return `${h}h ${m}m ago`;
+    return `${m}m ago`;
+  }
+  if (d > 0) return `${d}д ${h}ч назад`;
+  if (h > 0) return `${h}ч ${m}м назад`;
+  return `${m}м назад`;
+}
+
+/**
  * Inline <script> emitted at the bottom of the home body. Wires up the
  * four "feel alive" effects:
  *   1. Hero cursor spotlight (soft white radial glow follows the cursor
@@ -569,11 +617,131 @@ function homeEffectsScript(): string {
       });
     });
   }
+
+  // ---- 5. Live active-positions polling ----
+  // Fetches /api/active-positions every 10s and patches the existing
+  // cards in-place. New positions get a freshly-built card appended;
+  // closed positions get their card removed. Cards "flash" briefly
+  // when their PnL changes so the visitor sees movement.
+  var POLL_MS = 10000;
+  var section = document.getElementById('live-positions');
+  var grid = section ? section.querySelector('[data-positions-grid]') : null;
+  var countLabel = section ? section.querySelector('[data-count-label]') : null;
+  function fmtAge(ms) {
+    var totalMin = Math.max(0, Math.floor(ms / 60000));
+    var d = Math.floor(totalMin / 1440);
+    var h = Math.floor((totalMin % 1440) / 60);
+    var m = totalMin % 60;
+    var ru = document.documentElement.lang !== 'en';
+    if (d > 0) return ru ? (d + 'д ' + h + 'ч назад') : (d + 'd ' + h + 'h ago');
+    if (h > 0) return ru ? (h + 'ч ' + m + 'м назад') : (h + 'h ' + m + 'm ago');
+    return ru ? (m + 'м назад') : (m + 'm ago');
+  }
+  function plural(n) {
+    var ru = document.documentElement.lang !== 'en';
+    if (!ru) return n === 1 ? 'position' : 'positions';
+    var mod10 = n % 10, mod100 = n % 100;
+    if (mod100 >= 11 && mod100 <= 14) return 'позиций';
+    if (mod10 === 1) return 'позиция';
+    if (mod10 >= 2 && mod10 <= 4) return 'позиции';
+    return 'позиций';
+  }
+  function patchCard(card, p) {
+    var ru = document.documentElement.lang !== 'en';
+    var sign = p.pnlUsd >= 0 ? '+' : '−';
+    var pctSign = p.pnlPct >= 0 ? '+' : '−';
+    var rSign = p.pnlR >= 0 ? '+' : '−';
+    var pnlBlock = card.querySelector('[data-pnl-block]');
+    var oldUsd = card.querySelector('[data-pnl-usd]').textContent;
+    var newUsd = sign + '$' + Math.abs(p.pnlUsd).toFixed(2);
+    card.querySelector('[data-pnl-usd]').textContent = newUsd;
+    card.querySelector('[data-pnl-pct]').textContent = pctSign + Math.abs(p.pnlPct).toFixed(2) + '%';
+    card.querySelector('[data-pnl-r]').textContent = rSign + Math.abs(p.pnlR).toFixed(2) + 'R';
+    card.querySelector('[data-current-price]').textContent = '$' + p.currentPrice.toFixed(4);
+    var arrowEl = card.querySelector('[data-arrow]');
+    var goodMove = (p.side === 'long' && p.currentPrice >= p.entry) || (p.side === 'short' && p.currentPrice <= p.entry);
+    arrowEl.textContent = (p.side === 'long' ? (p.currentPrice >= p.entry ? '↑' : '↓') : (p.currentPrice <= p.entry ? '↓' : '↑'));
+    arrowEl.className = 'live-pos-arrow ' + (goodMove ? 'pos' : 'neg');
+    pnlBlock.classList.remove('pos', 'neg');
+    pnlBlock.classList.add(p.pnlUsd >= 0 ? 'pos' : 'neg');
+    if (oldUsd !== newUsd) {
+      pnlBlock.classList.remove('is-flashing');
+      // Force reflow then re-add for restart
+      void pnlBlock.offsetWidth;
+      pnlBlock.classList.add('is-flashing');
+    }
+    var ageEl = card.querySelector('[data-age]');
+    var openedAt = parseInt(ageEl.getAttribute('data-opened-at') || '0', 10);
+    ageEl.textContent = fmtAge(Date.now() - openedAt);
+    void ru;
+  }
+  function poll() {
+    if (!section || !grid) return;
+    fetch('/api/active-positions', { headers: { 'accept': 'application/json' } })
+      .then(function(r) { return r.json(); })
+      .then(function(j) {
+        var positions = (j && j.positions) || [];
+        if (countLabel) {
+          var ru = document.documentElement.lang !== 'en';
+          countLabel.textContent = positions.length === 0
+            ? (ru ? 'нет открытых позиций' : 'no open positions')
+            : (positions.length + ' ' + plural(positions.length));
+        }
+        section.setAttribute('data-empty', positions.length === 0 ? 'true' : 'false');
+        // Patch existing cards by trade ID; remove cards no longer present.
+        var seen = {};
+        positions.forEach(function(p) { seen[p.tradeId] = true; });
+        Array.prototype.forEach.call(grid.querySelectorAll('.live-pos-card'), function(card) {
+          var tid = card.getAttribute('data-trade-id');
+          if (!seen[tid]) card.remove();
+        });
+        // Patch / no insert here — for a brand-new position we want
+        // a full page reload so the SSR template is the source of
+        // truth (avoids JS templating duplication). Trigger reload
+        // when we detect new IDs.
+        var existing = {};
+        Array.prototype.forEach.call(grid.querySelectorAll('.live-pos-card'), function(card) {
+          existing[card.getAttribute('data-trade-id')] = card;
+        });
+        var hasNew = false;
+        positions.forEach(function(p) {
+          if (existing[p.tradeId]) {
+            patchCard(existing[p.tradeId], p);
+          } else {
+            hasNew = true;
+          }
+        });
+        if (hasNew) {
+          // Soft reload — preserves scroll position via History API
+          var y = window.scrollY;
+          window.sessionStorage.setItem('scrollY', String(y));
+          window.location.reload();
+        }
+      })
+      .catch(function() { /* swallow — try again next tick */ });
+  }
+  if (section) {
+    // Restore scroll if we reloaded for a new position
+    var savedY = window.sessionStorage.getItem('scrollY');
+    if (savedY) {
+      window.sessionStorage.removeItem('scrollY');
+      window.scrollTo(0, parseInt(savedY, 10));
+    }
+    setInterval(poll, POLL_MS);
+    // Also tick age display every 60s so "X min ago" stays fresh
+    // even when the polling response is identical.
+    setInterval(function() {
+      Array.prototype.forEach.call(grid.querySelectorAll('[data-age]'), function(el) {
+        var openedAt = parseInt(el.getAttribute('data-opened-at') || '0', 10);
+        if (openedAt > 0) el.textContent = fmtAge(Date.now() - openedAt);
+      });
+    }, 60000);
+  }
 })();
 </script>`;
 }
 
-function renderHome(lang: Lang): string {
+function renderHome(lang: Lang, activePositions: import('../api/active-positions.js').ActivePositionView[]): string {
   const c = CONTENT[lang];
   const otherLang: Lang = lang === 'ru' ? 'en' : 'ru';
   const otherLangPath = otherLang === 'ru' ? '/' : '/en';
@@ -599,6 +767,71 @@ function renderHome(lang: Lang): string {
   }
   const pnlCls = classForValue(totalPnlUsd);
 
+  // ---------- Live "working right now" card(s) ----------
+  // Server renders initial state from getActivePositionsCached().
+  // Client polls /api/active-positions every 10s and patches the DOM
+  // in-place — numbers (price / PnL / age) update without a reload.
+  // Each card has data-* hooks the script reads/writes.
+  const renderPositionCard = (p: import('../api/active-positions.js').ActivePositionView): string => {
+    const sideEmoji = p.side === 'long' ? '🟢' : '🔴';
+    const sideLabel = lang === 'en' ? (p.side === 'long' ? 'LONG' : 'SHORT') : (p.side === 'long' ? 'ЛОНГ' : 'ШОРТ');
+    const pnlSign = p.pnlUsd >= 0 ? '+' : '−';
+    const pnlPctSign = p.pnlPct >= 0 ? '+' : '−';
+    const pnlRSign = p.pnlR >= 0 ? '+' : '−';
+    const pnlCls2 = p.pnlUsd >= 0 ? 'pos' : 'neg';
+    const arrow = p.side === 'long'
+      ? (p.currentPrice >= p.entry ? '↑' : '↓')
+      : (p.currentPrice <= p.entry ? '↓' : '↑');
+    const arrowCls = p.side === 'long'
+      ? (p.currentPrice >= p.entry ? 'pos' : 'neg')
+      : (p.currentPrice <= p.entry ? 'pos' : 'neg');
+    return `
+      <div class="live-pos-card" data-strategy="${escapeHtml(p.strategyCode)}" data-trade-id="${escapeHtml(p.tradeId)}">
+        <div class="live-pos-head">
+          <div class="live-pos-id">${sideEmoji} <b>${escapeHtml(p.tradeId)}</b> · STRAT-${escapeHtml(p.strategyCode)}</div>
+          <div class="live-pos-side"><span class="side-${p.side}">${sideLabel}</span> · ${escapeHtml(p.symbol)}</div>
+        </div>
+        <div class="live-pos-prices">
+          <div class="live-pos-price-row">
+            <span class="live-pos-label">${lang === 'en' ? 'Entry' : 'Вход'}</span>
+            <span class="live-pos-val mono">$${p.entry.toFixed(4)}</span>
+          </div>
+          <div class="live-pos-price-row">
+            <span class="live-pos-label">${lang === 'en' ? 'Now' : 'Сейчас'}</span>
+            <span class="live-pos-val mono" data-current-price>$${p.currentPrice.toFixed(4)}</span>
+            <span class="live-pos-arrow ${arrowCls}" data-arrow>${arrow}</span>
+          </div>
+          <div class="live-pos-price-row">
+            <span class="live-pos-label">${lang === 'en' ? 'Safety SL' : 'Стоп'}</span>
+            <span class="live-pos-val mono">$${p.sl.toFixed(4)}</span>
+            <span class="live-pos-meta">(${p.slPct.toFixed(2)}%)</span>
+          </div>
+        </div>
+        <div class="live-pos-pnl ${pnlCls2}" data-pnl-block>
+          <span class="live-pos-pnl-usd" data-pnl-usd>${pnlSign}$${Math.abs(p.pnlUsd).toFixed(2)}</span>
+          <span class="live-pos-pnl-pct" data-pnl-pct>${pnlPctSign}${Math.abs(p.pnlPct).toFixed(2)}%</span>
+          <span class="live-pos-pnl-r" data-pnl-r>${pnlRSign}${Math.abs(p.pnlR).toFixed(2)}R</span>
+        </div>
+        <div class="live-pos-foot">
+          <span class="live-pos-age" data-age data-opened-at="${p.openedAt}">${formatAge(p.ageMs, lang)}</span>
+          <a class="live-pos-link" href="/strategies/${escapeHtml(p.strategyCode)}">${lang === 'en' ? 'Details →' : 'Подробнее →'}</a>
+        </div>
+      </div>
+    `;
+  };
+  const livePositionsHtml = `
+    <div class="home-section live-pos-section" id="live-positions" data-empty="${activePositions.length === 0 ? 'true' : 'false'}">
+      <div class="live-pos-header">
+        <span class="live-pos-pulse" aria-hidden="true"></span>
+        <h2 class="live-pos-title">${lang === 'en' ? 'Working right now' : 'В работе прямо сейчас'}</h2>
+        <span class="live-pos-count" data-count-label>${activePositions.length === 0 ? (lang === 'en' ? 'no open positions' : 'нет открытых позиций') : `${activePositions.length} ${pluralRu(activePositions.length, 'позиция', 'позиции', 'позиций')}`}</span>
+      </div>
+      <div class="live-pos-grid" data-positions-grid>
+        ${activePositions.map(renderPositionCard).join('')}
+      </div>
+    </div>
+  `;
+
   // ---------- Top 5 strategy preview ----------
   // Layout:
   //   Left  → [STRAT-00X] SYMBOL TFm
@@ -618,6 +851,12 @@ function renderHome(lang: Lang): string {
           ? `${(bt.winRate * 100).toFixed(1)}% wins · ${bt.netPnlPct >= 0 ? '+' : ''}${bt.netPnlPct.toFixed(1)}% return over ${bt.periodDays} days`
           : `${(bt.winRate * 100).toFixed(1)}% прибыльных сделок · доходность ${bt.netPnlPct >= 0 ? '+' : ''}${bt.netPnlPct.toFixed(1)}% за ${bt.periodDays} ${pluralRu(bt.periodDays, 'день', 'дня', 'дней')}`
         : '';
+      // Inline sparkline of cumulative-pnl over the backtest trades.
+      // One-glance signal: green-up = the strategy made money.
+      const bundle = loadBacktestTrades(s.id);
+      const sparkline = bundle && bundle.trades.length > 1
+        ? sparklineSvg(enrichTrades(bundle.trades).map((t) => t.cumulativePnlUsd))
+        : '';
       // Right column appears ONLY once the strategy has closed trades.
       // Before then the row is left-aligned and uncluttered.
       const rightBlock =
@@ -629,10 +868,11 @@ function renderHome(lang: Lang): string {
           : '';
       return `
         <a href="/strategies/${escapeHtml(s.code)}" class="strategy-preview-link">
-          <div>
+          <div class="strategy-preview-left">
             <div class="strategy-preview-name">[STRAT-${escapeHtml(s.code)}] ${escapeHtml(s.symbol ?? 'ANY')} ${escapeHtml(s.timeframe)}m</div>
             <div class="strategy-preview-meta">${btLabel}</div>
           </div>
+          ${sparkline ? `<div class="strategy-preview-spark">${sparkline}</div>` : ''}
           ${rightBlock}
         </a>`;
     })
@@ -861,6 +1101,7 @@ function renderHome(lang: Lang): string {
   const body = `
     <div class="scroll-progress" aria-hidden="true"></div>
     ${heroHtml}
+    ${livePositionsHtml}
     ${whatYouGetHtml}
     ${howHtml}
     ${signalPreviewHtml}
@@ -879,17 +1120,23 @@ function renderHome(lang: Lang): string {
 }
 
 export async function homeRoute(app: FastifyInstance): Promise<void> {
+  const { getActivePositionsCached } = await import('../api/active-positions.js');
+
   // Russian (default) home
   app.get('/', async (_req, reply) => {
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
-    return renderHome('ru');
+    // Server-render with whatever's in the 8s cache. Client polls the
+    // /api/active-positions endpoint every 10s to keep numbers fresh.
+    const positions = await getActivePositionsCached().catch(() => []);
+    return renderHome('ru', positions);
   });
 
   // English variant
   app.get('/en', async (_req, reply) => {
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
-    return renderHome('en');
+    const positions = await getActivePositionsCached().catch(() => []);
+    return renderHome('en', positions);
   });
 }

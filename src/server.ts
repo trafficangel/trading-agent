@@ -7,6 +7,7 @@ import { landingRoute } from './strategies/landing.js';
 import { homeRoute } from './strategies/home.js';
 import { authRoute } from './auth/routes.js';
 import { adminRoute } from './admin/routes.js';
+import { activePositionsRoute } from './api/active-positions.js';
 import { startTpslMonitorJob } from './jobs/tpsl-monitor.js';
 import { startHeartbeatJob } from './jobs/heartbeat.js';
 import { startDailyWrapJob } from './jobs/daily-wrap.js';
@@ -56,6 +57,7 @@ async function main(): Promise<void> {
   await luxalgoRoute(app);
   await authRoute(app);
   await adminRoute(app);
+  await activePositionsRoute(app);
   await landingRoute(app);
   await homeRoute(app);
 
