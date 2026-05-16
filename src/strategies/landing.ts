@@ -522,12 +522,16 @@ const STYLE = `
   }
   .desc { color: var(--text-dim); line-height: 1.65; }
   .pill {
-    display: inline-block; padding: 3px 8px; border-radius: 4px;
-    font-size: 11px; font-weight: 500; text-transform: uppercase;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px 3px 8px; border-radius: 14px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
     letter-spacing: 0.05em;
   }
   .pill.live { background: var(--accent-soft); color: var(--accent); }
   .pill.shadow { background: rgba(245, 177, 77, 0.12); color: var(--warning); }
+  .pill.idle { background: rgba(150, 158, 175, 0.10); color: var(--text-dim); }
+  /* Slightly smaller pulse dot inside a pill */
+  .pill .pulse-dot { width: 7px; height: 7px; }
   .empty-state { text-align: center; color: var(--text-dim); padding: 40px 20px; }
   .footer {
     margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--border);
@@ -667,6 +671,19 @@ const STYLE = `
     box-shadow: 0 0 0 0 rgba(239, 91, 107, 0.5);
     animation: pulse-red 2.4s ease-out infinite;
   }
+  /* "Idle" — strategy is enabled and watching for signal, but no
+   *  position is currently open. Slow neutral pulse so the user
+   *  sees the system is alive but not currently engaged. */
+  .pulse-dot.idle {
+    background: var(--text-faint);
+    box-shadow: 0 0 0 0 rgba(150, 158, 175, 0.4);
+    animation: pulse-neutral 3.2s ease-out infinite;
+  }
+  @keyframes pulse-neutral {
+    0%   { box-shadow: 0 0 0 0 rgba(150, 158, 175, 0.4); }
+    70%  { box-shadow: 0 0 0 8px rgba(150, 158, 175, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(150, 158, 175, 0); }
+  }
   @keyframes pulse-green {
     0%   { box-shadow: 0 0 0 0 rgba(74, 217, 145, 0.7); }
     70%  { box-shadow: 0 0 0 14px rgba(74, 217, 145, 0); }
@@ -684,6 +701,20 @@ const STYLE = `
   .refresh-note {
     font-size: 11px; color: var(--text-faint); font-weight: 400;
     margin-left: auto;
+  }
+  /* "обновление каждую минуту" badge — sits inline at the end of the
+   *  subtitle so visitors immediately know the page isn't stale. */
+  .refresh-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-left: 10px; padding: 2px 10px 2px 8px;
+    background: rgba(74, 217, 145, 0.10); color: var(--accent);
+    border-radius: 12px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    vertical-align: middle;
+  }
+  .refresh-pill .pulse-dot { width: 7px; height: 7px; }
+  @media (max-width: 720px) {
+    .refresh-pill { display: inline-flex; margin-left: 0; margin-top: 4px; }
   }
   .section-subtitle {
     font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
@@ -1219,10 +1250,13 @@ export function pageShell(
   const showLangToggle = opts.showLangToggle ?? false;
   const autoRefreshSec = opts.autoRefreshSec ?? null;
   const robots = opts.robots ?? 'index, follow';
+  // Footer: keep ONLY the legal disclaimer here. The refresh indicator
+  // moved into the header subtitle as a more prominent pill — the
+  // technical-cache wording ("Кэш: 60 сек") was confusing to visitors.
   const footerText =
     lang === 'en'
-      ? 'Data refreshes automatically from the bot DB. Cache: 60 sec.<br/>⚠ Backtest ≠ guarantee. Past performance does not guarantee future returns.'
-      : 'Данные обновляются автоматически из БД бота. Кэш: 60 сек.<br/>⚠ Backtest ≠ guarantee. Прошлые результаты не гарантируют будущих.';
+      ? '⚠ Past performance does not guarantee future returns. Backtest results are a model — live trading carries additional execution risk.'
+      : '⚠ Прошлые результаты не гарантируют будущих. Бэктест — это модель; в живой торговле возможна дополнительная погрешность исполнения.';
   // Detail pages set autoRefreshSec so the live-trades table reflects new
   // closed positions without the visitor manually reloading. Server-side
   // render is cheap; cache-control still caps the actual fetch rate.
@@ -1353,6 +1387,7 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
   let totalLosses = 0;
   let totalPnlUsd = 0;
   let runningCount = 0;
+  const openStrategyLabels: string[] = []; // e.g. ["BNB LONG", "XRP SHORT"]
 
   const enriched = strategies.map((s) => {
     const live = getStrategyLiveStats(s.id);
@@ -1362,11 +1397,23 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
     totalLosses += live.losses;
     totalPnlUsd += live.netPnlUsd;
     if (s.enabled) runningCount++;
+    // Collect labels for currently-open positions so the dashboard
+    // can list WHICH strategies are open ("STRAT-001 BNBUSDT") rather
+    // than just the count.
+    if (live.open > 0) {
+      const active = getStrategyActiveTrades(s.id);
+      for (const t of active) {
+        const sideStr = t.side === 'long' ? 'LONG' : 'SHORT';
+        openStrategyLabels.push(`${s.symbol ?? s.id} ${sideStr}`);
+      }
+    }
     return { s, live };
   });
-  const totalWinRate =
-    totalClosed > 0 ? (totalWins / totalClosed) * 100 : null;
   const portfolioCls = classForValue(totalPnlUsd);
+  const portfolioPnlPct = totalClosed > 0
+    ? (totalPnlUsd / TRACK_C_NOTIONAL_USD)  // pct of single-trade notional
+    : 0;
+  void portfolioPnlPct;
 
   // ---------- Group by timeframe ----------
   const groups = new Map<number, Array<typeof enriched[number]>>();
@@ -1392,11 +1439,18 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
     }
     const livePnlCls = classForValue(live.netPnlUsd);
     const bgClass = classForValue(b?.netPnlUsd ?? 0);
+    // Each strategy row gets exactly ONE status pill so the user can
+    // tell at a glance what's happening with it right now:
+    //   ⏸ Пауза            — disabled in config
+    //   🟢 В работе         — at least one position currently open
+    //   ⏳ Ждём сигнал      — enabled but no open position (default state
+    //                          between signals); previously the row was
+    //                          empty here which made XRPUSDT look broken
     const statusPill = !s.enabled
       ? '<span class="pill paused">⏸ Пауза</span>'
       : live.open > 0
-      ? `<span class="pill live">🟢 В работе: ${live.open}</span>`
-      : '';
+      ? `<span class="pill live"><span class="pulse-dot active" aria-hidden="true"></span> В работе</span>`
+      : `<span class="pill idle"><span class="pulse-dot idle" aria-hidden="true"></span> Ждём сигнал</span>`;
 
     // Backtest row — human-readable Russian, no abbreviations
     const btRow = b
@@ -1468,28 +1522,52 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
       ? '<div class="empty-state">Активных стратегий пока нет.</div>'
       : '';
 
+  // ---------- Dashboard cards ----------
+  // Reworked to be informative BOTH before first closed trade and after.
+  // Pre-first-close (the current state): cells say "появится после
+  // первого закрытия" rather than a meaningless 0 or em-dash. Once
+  // closed trades accumulate, the same cells fill with real numbers.
+  //
+  // The "Win Rate" card was removed — each strategy's win rate is
+  // already in its row, and a single portfolio-level WR is misleading
+  // when one strategy carries the other (Simpson's paradox).
+  const hasLiveData = totalClosed > 0;
+  const openSub = totalOpen === 0
+    ? 'нет активных позиций'
+    : openStrategyLabels.length <= 2
+      ? openStrategyLabels.join(' · ')
+      : `${openStrategyLabels.length} позиций`;
+  const closedSub = hasLiveData
+    ? `<span class="${classForValue(totalWins - totalLosses)}">${totalWins} ✓ / ${totalLosses} ✗</span>`
+    : 'появятся после первого закрытия';
+  const pnlValue = hasLiveData ? fmtUsd(totalPnlUsd, true) : '—';
+  const pnlSub = hasLiveData
+    ? `${TRACK_C_NOTIONAL_USD} USDT на сделку`
+    : 'появится после первого закрытия';
+  const stratPlural = runningCount === 1 ? 'активна' : runningCount < 5 ? 'активны' : 'активны';
+
   const portfolioDashboard = strategies.length > 0
     ? `
     <div class="portfolio-dashboard">
       <div class="dash-card">
-        <div class="dash-label">Стратегий</div>
+        <div class="dash-label">Стратегии</div>
         <div class="dash-value">${strategies.length}</div>
-        <div class="dash-sub">${runningCount} активных</div>
+        <div class="dash-sub">${runningCount === strategies.length ? `все ${stratPlural}` : `${runningCount} ${stratPlural}`}</div>
       </div>
       <div class="dash-card">
-        <div class="dash-label">Live сделок</div>
+        <div class="dash-label">Сейчас открыто</div>
+        <div class="dash-value ${totalOpen > 0 ? 'pos' : ''}">${totalOpen}</div>
+        <div class="dash-sub">${openSub}</div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-label">Закрытых сделок</div>
         <div class="dash-value">${totalClosed}</div>
-        <div class="dash-sub">${totalOpen} открыто сейчас</div>
+        <div class="dash-sub">${closedSub}</div>
       </div>
       <div class="dash-card">
-        <div class="dash-label">Live P&amp;L</div>
-        <div class="dash-value ${portfolioCls}">${fmtUsd(totalPnlUsd, true)}</div>
-        <div class="dash-sub">${TRACK_C_NOTIONAL_USD} USDT/сделка</div>
-      </div>
-      <div class="dash-card">
-        <div class="dash-label">Win Rate</div>
-        <div class="dash-value">${totalWinRate !== null ? totalWinRate.toFixed(1) + '%' : '—'}</div>
-        <div class="dash-sub">${totalWins}W / ${totalLosses}L</div>
+        <div class="dash-label">Live прибыль</div>
+        <div class="dash-value ${hasLiveData ? portfolioCls : ''}">${pnlValue}</div>
+        <div class="dash-sub">${pnlSub}</div>
       </div>
     </div>
     `
@@ -1501,7 +1579,14 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
     <div class="header">
       <span class="strat-code">ROBOT CLAUDE</span>
       <h1 class="title">Активные стратегии</h1>
-      <p class="subtitle">Live торговля LuxAlgo AI Strategy Builder · shadow mode · по ${TRACK_C_NOTIONAL_USD} USDT на сделку</p>
+      <p class="subtitle">
+        Автоматическая торговля по стратегиям LuxAlgo AI Strategy Builder в режиме shadow ·
+        по ${TRACK_C_NOTIONAL_USD} USDT на сделку
+        <span class="refresh-pill" aria-label="Страница обновляется каждую минуту">
+          <span class="pulse-dot active" aria-hidden="true"></span>
+          обновление каждую минуту
+        </span>
+      </p>
     </div>
 
     ${portfolioDashboard}
