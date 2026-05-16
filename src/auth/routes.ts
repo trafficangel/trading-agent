@@ -183,7 +183,7 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
     // attempt.phone is now always populated (migration 015 + writer).
     // Empty-string fallback kept for the brief period before that fix.
     const phone = attempt.phone && attempt.phone.length > 0 ? attempt.phone : '';
-    const { sessionId } = registerOrRefresh(
+    const { sessionId, isNew } = registerOrRefresh(
       phone,
       attempt.phone_hash,
       ip,
@@ -198,8 +198,11 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
       sameSite: 'lax',
       maxAge: SESSION_TTL_DAYS * 24 * 60 * 60,
     });
-    logger.info({ request_id: requestId }, 'auth: session created');
-    return { ok: true };
+    logger.info({ request_id: requestId, is_new: isNew }, 'auth: session created');
+    // is_new_registration drives the Metrika `registration` goal — we
+    // only want to count UNIQUE phones, not repeat logins from new
+    // devices or after cookie wipe.
+    return { ok: true, is_new_registration: isNew };
   });
 
   // ---------------- /auth/me ----------------

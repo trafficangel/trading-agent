@@ -1833,6 +1833,13 @@ function renderGatedPreview(
             });
             var data = await res.json();
             if (data.ok) {
+              // Fire Metrika goal ONLY for first-time registrations.
+              // The server flags repeat-login (cookie wipe, new device,
+              // 90-day expiry on the same phone) with is_new_registration:false
+              // so the goal stays per-unique-phone.
+              if (data.is_new_registration && typeof ym === 'function') {
+                try { ym(109255043, 'reachGoal', 'registration'); } catch (e) {}
+              }
               setMsg('✅ Доступ открыт! Перезагружаем…');
               setTimeout(function() { window.location.reload(); }, 800);
               return;
