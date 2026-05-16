@@ -13,6 +13,7 @@ import { resultPost } from '../telegram/result-template.js';
 import { deriveActionSide, type LuxAlgoStrategyPayload } from '../webhooks/luxalgo.schema.js';
 import {
   getStrategyConfig,
+  formatStrategyTradeId,
   TRACK_C_NOTIONAL_USD,
   LANDING_BASE_URL,
   type StrategyConfig,
@@ -98,10 +99,14 @@ export function formatStrategyWebhookLog(
     ? new Date(p.bar_time).toISOString().slice(0, 16).replace('T', ' ')
     : '—';
 
-  // Prefer per-strategy counter (T#001) over the global decision.id.
+  // Prefer per-strategy counter (BNB#001) over the global decision.id.
+  // Fall back to `#NNNN` raw global id if we have neither cfg nor a
+  // per-strategy num (rare — happens only for unknown strategy_id rows).
   const displayNum = tradeNum ?? result.decisionId;
   const displayId = displayNum
-    ? `T#${displayNum.toString().padStart(3, '0')}`
+    ? cfg
+      ? formatStrategyTradeId(cfg, displayNum)
+      : `#${displayNum.toString().padStart(3, '0')}`
     : '';
   let statusIcon = 'ℹ️';
   let statusText = result.reason ?? 'ok';
@@ -272,12 +277,13 @@ async function handleStrategyEntry(
         'strategy-trader: entry rejected — strategy already has open position',
       );
       const occupiedNum = occupied.strategy_trade_num ?? occupied.id;
+      const occupiedId = formatStrategyTradeId(cfg, occupiedNum);
       await sendMessage({
         channel: 'logs',
         text:
           `⚠️ <b>Track C duplicate entry ignored</b>\n` +
           `Стратегия: <code>${p.strategy_id}</code> на ${p.symbol}\n` +
-          `Уже открыта позиция T#${occupiedNum.toString().padStart(3, '0')}. Новый entry webhook отброшен.`,
+          `Уже открыта позиция ${occupiedId}. Новый entry webhook отброшен.`,
         disable_notification: true,
       }).catch(() => {});
       return { ok: true, reason: 'already_open', decisionId: occupied.id };
@@ -493,11 +499,12 @@ async function sendStrategyEntryPost(
   sl: number,
   side: 'long' | 'short',
 ): Promise<void> {
-  // Per-strategy trade counter (T#1, T#2, ...) — populated by
-  // insertDecision() right before this post is built.
+  // Per-strategy trade counter — populated by insertDecision() right
+  // before this post is built. Rendered with the strategy's symbol
+  // prefix (BNB#001, XRP#001, ...).
   const row = findDecisionById(decisionId);
   const num = row?.strategy_trade_num ?? 1;
-  const tradeIdStr = `T#${num.toString().padStart(3, '0')}`;
+  const tradeIdStr = formatStrategyTradeId(cfg, num);
 
   const slPctDisplay = (cfg.slPct * 100).toFixed(2);
   const tfLabel = `${p.timeframe}m`;
@@ -573,6 +580,7 @@ async function sendStrategyExitPost(
     strategyCode: cfg.code,
     strategyName: name,
     strategyTradeNum: num,
+    tradeIdStr: num ? formatStrategyTradeId(cfg, num) : null,
     landingUrl: `${LANDING_BASE_URL}/strategies/${cfg.code}`,
   });
   await sendMessage({

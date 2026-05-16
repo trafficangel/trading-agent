@@ -237,7 +237,7 @@ const CONTENT: Record<Lang, Content> = {
     ctaSection: {
       title: 'Следить за прогрессом',
       subtitle:
-        'Каждая открытая и закрытая сделка публикуется в Telegram канал в реальном времени с номером T# и ссылкой на страницу стратегии.',
+        'Каждая открытая и закрытая сделка публикуется в Telegram канал в реальном времени с уникальным ID (например BNB#001) и ссылкой на страницу стратегии.',
       telegram: 'Telegram канал',
       strategies: 'Все стратегии',
     },
@@ -399,7 +399,7 @@ const CONTENT: Record<Lang, Content> = {
     ctaSection: {
       title: 'Follow progress',
       subtitle:
-        'Every open and close lands in the Telegram channel in real-time with a T# ID and a direct link to the detail page.',
+        'Every open and close lands in the Telegram channel in real-time with a unique ID (e.g. BNB#001) and a direct link to the detail page.',
       telegram: 'Telegram channel',
       strategies: 'All strategies',
     },
@@ -723,7 +723,7 @@ function renderHome(lang: Lang): string {
             <div class="tg-line"><b>🔴 ШОРТ · BNBUSDT · 15m</b></div>
             <div class="tg-line"></div>
             <div class="tg-line">🤖 <b>STRAT-001</b> · BNB Contrarian</div>
-            <div class="tg-line">🆔 <b>T#001</b></div>
+            <div class="tg-line">🆔 <b>BNB#001</b></div>
             <div class="tg-line"></div>
             <div class="tg-line">📥 Вход:&nbsp;&nbsp;<code>676.28</code>&nbsp;(по рынку)</div>
             <div class="tg-line">🛡 Стоп:&nbsp;&nbsp;<code>693.187</code>&nbsp;(2.50%)</div>
@@ -747,7 +747,7 @@ function renderHome(lang: Lang): string {
             <div class="tg-line"><b>💰 ПРОФИТ +$17.90</b>&nbsp;&nbsp;🔴 <b>BNBUSDT</b> ШОРТ</div>
             <div class="tg-line"></div>
             <div class="tg-line">🤖 <b>STRAT-001</b> · BNB Contrarian</div>
-            <div class="tg-line">🆔 <b>T#001</b></div>
+            <div class="tg-line">🆔 <b>BNB#001</b></div>
             <div class="tg-line"></div>
             <div class="tg-line">📥 Вход:&nbsp;&nbsp;&nbsp;<code>676.28</code></div>
             <div class="tg-line">📤 Выход:&nbsp;&nbsp;<code>664.20</code>&nbsp;(сигнал стратегии)</div>

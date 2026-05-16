@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import {
   STRATEGY_CONFIGS,
   getStrategyConfig,
+  formatStrategyTradeId,
   type StrategyConfig,
   type BacktestSnapshot,
   TRACK_C_NOTIONAL_USD,
@@ -333,7 +334,7 @@ function backtestTradesTable(
  * the visual is consistent; close-reason badge added (strategy_exit /
  * sl_hit / time_guard).
  */
-function liveTradesTable(trades: LiveTradeRow[]): string {
+function liveTradesTable(trades: LiveTradeRow[], cfg: StrategyConfig): string {
   if (trades.length === 0) return '';
   const fmtDate = (ts: number): string => {
     const d = new Date(ts);
@@ -350,11 +351,11 @@ function liveTradesTable(trades: LiveTradeRow[]): string {
       const cls = t.pnlUsd >= 0 ? 'pos' : 'neg';
       const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
       const r = reasonLabel(t);
-      // Per-strategy counter (T#001, T#002...) — falls back to global
-      // decision.id only when the row was inserted before migration 012
-      // (shouldn't happen in current data, but defensive).
+      // Per-strategy counter (BNB#001, XRP#001...) — falls back to
+      // global decision.id only when the row was inserted before
+      // migration 012 (shouldn't happen in current data, but defensive).
       const num = t.strategyTradeNum ?? t.id;
-      const tradeIdStr = `T#${num.toString().padStart(3, '0')}`;
+      const tradeIdStr = formatStrategyTradeId(cfg, num);
       return `
       <tr>
         <td>${tradeIdStr}</td>
@@ -373,7 +374,7 @@ function liveTradesTable(trades: LiveTradeRow[]): string {
       <table>
         <thead>
           <tr>
-            <th>T#</th>
+            <th>ID</th>
             <th>Вход (UTC)</th>
             <th>Выход (UTC)</th>
             <th>Side</th>
@@ -1892,13 +1893,13 @@ function fmtDuration(ms: number): string {
   return `${m}м`;
 }
 
-function activeTradesTable(trades: ActiveTradeRow[]): string {
+function activeTradesTable(trades: ActiveTradeRow[], cfg: StrategyConfig): string {
   if (trades.length === 0) return '';
   const rows = trades
     .map((t) => {
       const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
       const num = t.strategyTradeNum ?? t.id;
-      const tradeIdStr = `T#${num.toString().padStart(3, '0')}`;
+      const tradeIdStr = formatStrategyTradeId(cfg, num);
       const ageMs = Date.now() - t.entryAt;
       return `
       <tr>
@@ -1917,7 +1918,7 @@ function activeTradesTable(trades: ActiveTradeRow[]): string {
       <table>
         <thead>
           <tr>
-            <th>T#</th>
+            <th>ID</th>
             <th>Открыта (UTC)</th>
             <th>В работе</th>
             <th>Side</th>
@@ -1932,15 +1933,15 @@ function activeTradesTable(trades: ActiveTradeRow[]): string {
   `;
 }
 
-function renderLiveSection(_live: StrategyLiveStats, _launchedAt: number, strategyId: string): string {
+function renderLiveSection(_live: StrategyLiveStats, _launchedAt: number, cfg: StrategyConfig): string {
   // Two stacked sub-tables (when relevant):
   //  - ACTIVE: currently-open positions, with pulsing-green status badge
   //  - CLOSED: most recent closed positions
   // Section header reflects state with a coloured pulsing dot — green
   // dot + "позиция в работе" when active>0, red dot + "ждём сигнал"
   // when nothing's open.
-  const active = getStrategyActiveTrades(strategyId);
-  const closed = getStrategyRecentTrades(strategyId, 50);
+  const active = getStrategyActiveTrades(cfg.id);
+  const closed = getStrategyRecentTrades(cfg.id, 50);
 
   // Status badge for the section title
   const isWorking = active.length > 0;
@@ -1954,7 +1955,7 @@ function renderLiveSection(_live: StrategyLiveStats, _launchedAt: number, strate
   const activeBlock = active.length > 0
     ? `<div class="section">
          <div class="section-subtitle">Сейчас открыто: ${active.length}</div>
-         ${activeTradesTable(active)}
+         ${activeTradesTable(active, cfg)}
        </div>`
     : '';
 
@@ -1962,7 +1963,7 @@ function renderLiveSection(_live: StrategyLiveStats, _launchedAt: number, strate
   const closedBlock = closed.length > 0
     ? `<div class="section">
          <div class="section-subtitle">Закрытые сделки · последние ${closed.length}</div>
-         ${liveTradesTable(closed)}
+         ${liveTradesTable(closed, cfg)}
        </div>`
     : (active.length === 0
         ? `<div class="card"><div class="card-body">
@@ -2067,7 +2068,7 @@ function renderStrategyDetail(cfg: StrategyConfig): string {
 
     ${renderAlertIdBlock(cfg)}
 
-    ${renderLiveSection(live, cfg.launchedAt, cfg.id)}
+    ${renderLiveSection(live, cfg.launchedAt, cfg)}
 
     ${cfg.backtest ? renderBacktestSection(cfg.backtest, cfg.id, cfg) : ''}
 

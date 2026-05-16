@@ -129,8 +129,13 @@ export type ResultPostInput = {
   /** Short human name (e.g. "BNB Contrarian") rendered alongside STRAT code. */
   strategyName?: string | null;
   /** Per-strategy sequential trade counter (1, 2, 3, ...).
-   *  Used for the T#001 prefix instead of the global decision.id. */
+   *  Used to build the trade ID instead of the global decision.id. */
   strategyTradeNum?: number | null;
+  /** Pre-formatted trade ID string ("BNB#001", "XRP#042", "S003#005").
+   *  Caller computes this via formatStrategyTradeId(cfg, num) — we don't
+   *  re-derive from symbol here to keep this template free of strategy-
+   *  config coupling. */
+  tradeIdStr?: string | null;
   /** Landing-page URL for the "see details" link at the bottom. */
   landingUrl?: string | null;
 };
@@ -141,13 +146,22 @@ export type ResultPostInput = {
  *  re-closed somehow — shouldn't happen in normal Track C operation). */
 export function resultPost(i: ResultPostInput): string {
   const isStrategy = i.track === 'strategy';
-  const tradeNumForId =
-    isStrategy && typeof i.strategyTradeNum === 'number'
-      ? i.strategyTradeNum
-      : i.parentTradeId;
-  const padDigits = isStrategy ? 3 : 4;
-  const prefix = isStrategy ? 'T#' : '#';
-  const tradeId = `${prefix}${tradeNumForId.toString().padStart(padDigits, '0')}`;
+  // Prefer pre-formatted trade ID (e.g. "BNB#001") provided by the
+  // caller. Fall back to the legacy "#NNNN" / "T#NNN" form for safety
+  // — should only fire on historical rows where the caller doesn't
+  // know the strategy config.
+  let tradeId: string;
+  if (i.tradeIdStr) {
+    tradeId = i.tradeIdStr;
+  } else {
+    const tradeNumForId =
+      isStrategy && typeof i.strategyTradeNum === 'number'
+        ? i.strategyTradeNum
+        : i.parentTradeId;
+    const padDigits = isStrategy ? 3 : 4;
+    const prefix = isStrategy ? 'T#' : '#';
+    tradeId = `${prefix}${tradeNumForId.toString().padStart(padDigits, '0')}`;
+  }
   const sideE = SIDE_EMOJI[i.side] ?? '';
   const sideRu = SIDE_RU[i.side] ?? i.side;
   const isWin = i.pnlPct > 0;

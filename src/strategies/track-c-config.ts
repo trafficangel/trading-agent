@@ -308,6 +308,30 @@ export function getStrategyConfig(id: string): StrategyConfig | null {
 }
 
 /**
+ * Format a per-strategy trade number into the user-facing trade ID.
+ *
+ *   BNB Contrarian, trade #1   → "BNB#001"
+ *   XRP Contrarian, trade #42  → "XRP#042"
+ *   universal strategy (no symbol pin), trade #5 → "S003#005"
+ *
+ * The format dropped the legacy "T#" prefix in May 2026 — it stood for
+ * "Track C" back when we also had Track A (LLM) and Track B (signal-
+ * trader). Now that Track C is the only system, a self-describing
+ * symbol prefix beats an opaque "T". Trade IDs are also globally
+ * unique without needing a separate `STRAT-NNN` badge alongside them.
+ */
+export function formatStrategyTradeId(cfg: StrategyConfig, tradeNum: number): string {
+  const padded = tradeNum.toString().padStart(3, '0');
+  // Strip USDT / USDC / USD suffix; fall back to `S<code>` for
+  // strategies without a symbol pin (rare — they accept any symbol
+  // and we'd be guessing if we used the webhook's incoming ticker).
+  const base = cfg.symbol
+    ? cfg.symbol.replace(/USD[TC]?$/i, '')
+    : `S${cfg.code}`;
+  return `${base}#${padded}`;
+}
+
+/**
  * Boot-time validation — call once from server.ts before accepting webhooks.
  *
  * Catches the silent-killer scenario: operator copy-pastes a StrategyConfig
