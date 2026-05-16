@@ -71,17 +71,61 @@ const TRACK_C_WIN_NOTES: NoteBuilder[] = [
   (usd, n) => `Заработано $${usd} на каждые $${n} ставки. Это и есть смысл системного подхода. ✨`,
 ];
 
-const TRACK_C_LOSS_NOTES: NoteBuilder[] = [
-  (usd, n) => `Минус контролируемый: −$${usd} на $${n}-позицию. Risk management отработал — главное капитал цел. ⏭`,
-  (usd, n) => `−$${usd} с $${n} ставки — часть бизнеса. Profit = winrate × avg R, не победами подряд.`,
-  (usd, n) => `Setup не подтвердился. −$${usd} на $${n} — это цена за разведку, дешевле чем большой убыток.`,
-  (usd, n) => `Без страха идём дальше. −$${usd} с $${n} — норма в системе. Дисциплина → долгий профит. 💪`,
-  (usd, n) => `Не угадали. Risk был под контролем: −$${usd} на $${n}-позицию. Следующий сетап впереди. ⚡`,
-  (usd, n) => `−$${usd} с $${n} — нормальная цена за edge. В долгосрочной winrate × R даёт plus. Едем дальше.`,
+/**
+ * Loss notes split by HOW the position closed:
+ *
+ *   - Safety SL fired (`closeReason='sl_hit'`):
+ *     The strategy DIDN'T exit on its own — our 2.5% safety net caught
+ *     the move. Wording emphasises "risk management", "stop fire saved
+ *     us", "could have been worse". This is the worst-case outcome
+ *     within our design.
+ *
+ *   - Strategy decided to exit at a loss (`forceReason='strategy_exit'`):
+ *     The strategy's own Builtin Exit logic detected something wrong
+ *     and bailed BEFORE hitting SL. That's actually GOOD discipline —
+ *     small loss instead of a big one. Wording emphasises "edge worked",
+ *     "стратегия сама вышла", "spotted invalidation early".
+ *
+ *   - Other (rare — manual close, counter_exit, etc.):
+ *     Generic discipline language.
+ */
+const TRACK_C_LOSS_SL_NOTES: NoteBuilder[] = [
+  (usd, n) => `Safety SL отработал — отрезали убыток на 2.5%. −$${usd} с $${n} вместо большего. Капитал цел. 🛡`,
+  (usd, n) => `Стратегия не успела сама выйти, сработал safety SL: −$${usd} на $${n}. Это и есть смысл стоп-лосса. ⏭`,
+  (usd, n) => `−$${usd} с $${n} — крайний сценарий, для которого мы и держим SL. Идём дальше дисциплинированно. 💪`,
+  (usd, n) => `SL сработал на −2.5% позиции $${n} (−$${usd}). Setup не подтвердился, ножом отрезали. Так и зарабатывают долгосрочно.`,
 ];
 
-function pickStrategyNote(usdAbs: number, notional: number, isWin: boolean): string {
-  const bank = isWin ? TRACK_C_WIN_NOTES : TRACK_C_LOSS_NOTES;
+const TRACK_C_LOSS_STRAT_NOTES: NoteBuilder[] = [
+  (usd, n) => `Стратегия сама вышла с минимальным минусом: −$${usd} с $${n}. Logic spotted что setup перестал работать, не дала просадке разрастись. 🎯`,
+  (usd, n) => `Builtin Exit в минус: −$${usd} на $${n}. Edge подсказал — выйти. Лучше малый минус сейчас, чем большой потом. ⚡`,
+  (usd, n) => `Стратегия закрылась раньше SL: −$${usd} с $${n}. Это **дисциплинированный** выход, не паника. Risk control работает. 💪`,
+  (usd, n) => `−$${usd} на $${n} — стратегия увидела разворот условий и вышла сама. Profit factor 3.0 не из воздуха берётся. 🧊`,
+  (usd, n) => `Контролируемый минус: −$${usd} с $${n}-позиции. Strategy logic решила что setup invalidated — закрылись досрочно. Капитал в работе дальше.`,
+];
+
+const TRACK_C_LOSS_OTHER_NOTES: NoteBuilder[] = [
+  (usd, n) => `Минус контролируемый: −$${usd} на $${n}-позицию. Часть бизнеса — едем дальше с холодной головой. ⏭`,
+  (usd, n) => `−$${usd} с $${n} — нормальная цена за edge. В долгосрочной winrate × R даёт plus. ⚡`,
+];
+
+function pickStrategyNote(
+  usdAbs: number,
+  notional: number,
+  isWin: boolean,
+  closeReason: CloseReason,
+  forceReason: string | null | undefined,
+): string {
+  let bank: NoteBuilder[];
+  if (isWin) {
+    bank = TRACK_C_WIN_NOTES;
+  } else if (closeReason === 'sl_hit') {
+    bank = TRACK_C_LOSS_SL_NOTES;
+  } else if (forceReason === 'strategy_exit') {
+    bank = TRACK_C_LOSS_STRAT_NOTES;
+  } else {
+    bank = TRACK_C_LOSS_OTHER_NOTES;
+  }
   const fn = bank[Math.floor(Math.random() * bank.length)]!;
   return fn(usdAbs.toFixed(2), notional);
 }
@@ -179,7 +223,12 @@ export function resultPost(i: ResultPostInput): string {
         Math.abs(i.pnlPct) >= 1.5 ? '💰' : '✅';
       header = `${winEmoji} <b>ПРОФИТ ${usdStr || `+${i.pnlPct.toFixed(2)}%`}</b>`;
     } else {
-      const lossEmoji = i.closeReason === 'sl_hit' ? '🛡' : '🔻';
+      // 🛡 — safety SL fired (worst case caught by the net)
+      // 🎯 — strategy itself exited at a small loss (disciplined Builtin Exit)
+      // 🔻 — any other loss path (manual / counter / unknown)
+      const lossEmoji =
+        i.closeReason === 'sl_hit' ? '🛡' :
+        i.forceCloseReason === 'strategy_exit' ? '🎯' : '🔻';
       header = `${lossEmoji} <b>Убыток ${usdStr || i.pnlPct.toFixed(2) + '%'}</b>`;
     }
     if (i.closeReason === 'sl_hit') exitTag = ' (safety SL)';
@@ -204,7 +253,13 @@ export function resultPost(i: ResultPostInput): string {
   // Track A/B: legacy randomised banks by close reason.
   let tail: string;
   if (isStrategy && typeof i.notionalUsd === 'number' && usdPnl !== null) {
-    tail = pickStrategyNote(Math.abs(usdPnl), i.notionalUsd, isWin);
+    tail = pickStrategyNote(
+      Math.abs(usdPnl),
+      i.notionalUsd,
+      isWin,
+      i.closeReason,
+      i.forceCloseReason,
+    );
   } else if (i.closeReason === 'tp_hit') {
     tail = pickRandom(TP_HIT_NOTES);
   } else if (i.closeReason === 'sl_hit') {
