@@ -34,10 +34,15 @@ export function generateSessionId(): string {
 type RegistrationRow = {
   id: number;
   phone_hash: string;
+  /** Plaintext phone (E.164). Added in migration 015 for admin dashboard
+   *  visibility. NULL for rows registered before that migration. */
+  phone: string | null;
   tg_user_id: number | null;
   session_id: string;
   created_at: number;
   last_seen_at: number;
+  ip_first: string | null;
+  user_agent_first: string | null;
 };
 
 const findBySessionStmt = db.prepare<[string], RegistrationRow>(
@@ -50,10 +55,14 @@ const findByPhoneStmt = db.prepare<[string], RegistrationRow>(
 
 const insertRegistrationStmt = db.prepare(`
   INSERT INTO registrations (
-    phone_hash, tg_user_id, session_id, created_at, last_seen_at,
+    phone_hash, phone, tg_user_id, session_id, created_at, last_seen_at,
     ip_first, user_agent_first
-  ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `);
+
+const updatePhoneStmt = db.prepare(
+  `UPDATE registrations SET phone = ? WHERE id = ? AND phone IS NULL`,
+);
 
 const updateLastSeenStmt = db.prepare(`
   UPDATE registrations SET last_seen_at = ? WHERE session_id = ?
@@ -85,8 +94,12 @@ export function touchSession(sessionId: string): void {
  * Register a verified phone. If we've seen this phone before, rotate
  * the session_id (so a new device gets a fresh cookie) and return that.
  * If not, create a new registration row.
+ *
+ * Stores plaintext phone too (for admin dashboard). Backfills the
+ * phone column on returning users registered before migration 015.
  */
 export function registerOrRefresh(
+  phone: string,
   phoneHash: string,
   ip: string | null,
   userAgent: string | null,
@@ -97,10 +110,12 @@ export function registerOrRefresh(
   const existing = findByPhoneStmt.get(phoneHash);
   if (existing) {
     updateSessionStmt.run(sessionId, now, existing.id);
+    if (existing.phone === null) updatePhoneStmt.run(phone, existing.id);
     return { sessionId, isNew: false };
   }
   insertRegistrationStmt.run(
     phoneHash,
+    phone,
     tgUserId ?? null,
     sessionId,
     now,
@@ -111,11 +126,37 @@ export function registerOrRefresh(
   return { sessionId, isNew: true };
 }
 
+// --- Admin: list all registrations for dashboard ---
+
+export type RegistrationListRow = {
+  id: number;
+  phone: string | null;
+  phone_hash: string;
+  tg_user_id: number | null;
+  created_at: number;
+  last_seen_at: number;
+  ip_first: string | null;
+  user_agent_first: string | null;
+};
+
+const listAllStmt = db.prepare<[number], RegistrationListRow>(`
+  SELECT id, phone, phone_hash, tg_user_id, created_at, last_seen_at,
+         ip_first, user_agent_first
+  FROM registrations
+  ORDER BY created_at DESC
+  LIMIT ?
+`);
+
+export function listRegistrations(limit = 500): RegistrationListRow[] {
+  return listAllStmt.all(limit);
+}
+
 // --- verification_attempts (pending verification state) ---
 
 type VerifAttemptRow = {
   request_id: string;
   phone_hash: string;
+  phone: string | null;
   code: string | null;
   created_at: number;
   attempts: number;
@@ -128,8 +169,8 @@ const findAttemptStmt = db.prepare<[string], VerifAttemptRow>(
 );
 
 const insertAttemptStmt = db.prepare(`
-  INSERT INTO verification_attempts (request_id, phone_hash, code, created_at, attempts, ip, user_agent)
-  VALUES (?, ?, ?, ?, 0, ?, ?)
+  INSERT INTO verification_attempts (request_id, phone_hash, phone, code, created_at, attempts, ip, user_agent)
+  VALUES (?, ?, ?, ?, ?, 0, ?, ?)
 `);
 
 const incAttemptStmt = db.prepare(
@@ -147,13 +188,14 @@ const purgeOldStmt = db.prepare(
 export function recordVerificationAttempt(
   requestId: string,
   phoneHash: string,
+  phone: string,
   code: string,
   ip: string | null,
   userAgent: string | null,
 ): void {
   // Purge anything older than 1h to keep the table tidy.
   purgeOldStmt.run(Date.now() - 60 * 60 * 1000);
-  insertAttemptStmt.run(requestId, phoneHash, code, Date.now(), ip, userAgent);
+  insertAttemptStmt.run(requestId, phoneHash, phone, code, Date.now(), ip, userAgent);
 }
 
 export function getVerificationAttempt(requestId: string): VerifAttemptRow | null {

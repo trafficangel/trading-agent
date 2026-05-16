@@ -112,7 +112,7 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
       const ua = (req.headers['user-agent'] as string | undefined) ?? null;
       // Server-generated code: we stored what Gateway delivered, so we
       // can compare locally on /auth/verify — no extra Gateway call.
-      recordVerificationAttempt(res.request_id, phoneHash, res.code, ip, ua);
+      recordVerificationAttempt(res.request_id, phoneHash, phoneE164, res.code, ip, ua);
 
       // Pending cookie carries request_id between /auth/start and /auth/verify.
       reply.setCookie(PENDING_COOKIE, res.request_id, {
@@ -174,7 +174,12 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
     }
     const ip = clientIp(req);
     const ua = (req.headers['user-agent'] as string | undefined) ?? null;
-    const { sessionId } = registerOrRefresh(attempt.phone_hash, ip, ua);
+    const { sessionId } = registerOrRefresh(
+      attempt.phone ?? '',
+      attempt.phone_hash,
+      ip,
+      ua,
+    );
     clearVerificationAttempt(requestId);
     reply.clearCookie(PENDING_COOKIE, { path: '/' });
     reply.setCookie(SESSION_COOKIE, sessionId, {

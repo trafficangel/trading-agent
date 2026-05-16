@@ -6,6 +6,7 @@ import { luxalgoRoute } from './webhooks/luxalgo.route.js';
 import { landingRoute } from './strategies/landing.js';
 import { homeRoute } from './strategies/home.js';
 import { authRoute } from './auth/routes.js';
+import { adminRoute } from './admin/routes.js';
 import { startMonitorJob } from './jobs/monitor.js';
 import { startTpslMonitorJob } from './jobs/tpsl-monitor.js';
 import { startHeartbeatJob } from './jobs/heartbeat.js';
@@ -48,6 +49,7 @@ async function main(): Promise<void> {
 
   await luxalgoRoute(app);
   await authRoute(app);
+  await adminRoute(app);
   await landingRoute(app);
   await homeRoute(app);
   // Track A — LLM-driven decide-cron + 5-min monitor. Gated by env so we
