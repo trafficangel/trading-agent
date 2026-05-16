@@ -110,7 +110,9 @@ export function registerOrRefresh(
   const existing = findByPhoneStmt.get(phoneHash);
   if (existing) {
     updateSessionStmt.run(sessionId, now, existing.id);
-    if (existing.phone === null) updatePhoneStmt.run(phone, existing.id);
+    // Backfill phone for rows registered before migration 015 OR with
+    // an empty value from an earlier transition deploy.
+    if (!existing.phone && phone) updatePhoneStmt.run(phone, existing.id);
     return { sessionId, isNew: false };
   }
   insertRegistrationStmt.run(

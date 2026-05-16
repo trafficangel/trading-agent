@@ -180,8 +180,11 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
     }
     const ip = clientIp(req);
     const ua = (req.headers['user-agent'] as string | undefined) ?? null;
+    // attempt.phone is now always populated (migration 015 + writer).
+    // Empty-string fallback kept for the brief period before that fix.
+    const phone = attempt.phone && attempt.phone.length > 0 ? attempt.phone : '';
     const { sessionId } = registerOrRefresh(
-      attempt.phone ?? '',
+      phone,
       attempt.phone_hash,
       ip,
       ua,
