@@ -437,7 +437,29 @@ const STYLE = `
   }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  .container { max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; }
+  .container {
+    max-width: 980px; margin: 0 auto;
+    padding: clamp(20px, 4vw, 32px) clamp(14px, 4vw, 20px) clamp(48px, 8vw, 80px);
+  }
+  @media (max-width: 720px) {
+    .stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
+    .portfolio-dashboard { grid-template-columns: repeat(2, 1fr) !important; }
+    .charts-grid { grid-template-columns: 1fr !important; }
+    table { font-size: 13px; }
+    th, td { padding: 8px 10px; }
+    .title { font-size: 24px; }
+    .section-title { font-size: 13px; }
+    .info-grid { grid-template-columns: 1fr 1fr !important; }
+  }
+  @media (max-width: 480px) {
+    .stats-grid { grid-template-columns: 1fr !important; }
+    .portfolio-dashboard { grid-template-columns: 1fr 1fr !important; }
+    .dash-value { font-size: 20px !important; }
+    table { font-size: 12px; }
+    th, td { padding: 6px 8px; }
+    .title { font-size: 22px; }
+    .alert-id-value { font-size: 10px; padding: 4px 6px; }
+  }
   .header { display: flex; flex-direction: column; gap: 6px; margin-bottom: 24px; }
   .strat-code {
     display: inline-block; font-family: 'SF Mono', 'Menlo', monospace;
@@ -666,13 +688,16 @@ const STYLE = `
   }
   .disclaimer-note b { color: var(--text); font-weight: 600; }
 
-  /* ---------- Top-right nav-link buttons ---------- */
-  .top-right-nav a.nav-link {
+  /* Legacy .top-right-nav buttons removed — replaced by .site-header.
+   * Keeping .nav-link as a generic ghost-button utility in case any
+   * remaining markup still uses it.
+   */
+  a.nav-link {
     background: var(--bg-card); border: 1px solid var(--border);
-    color: var(--text-dim); padding: 4px 10px; border-radius: 4px;
-    font-size: 12px; text-decoration: none; transition: all 120ms;
+    color: var(--text-dim); padding: 6px 12px; border-radius: 6px;
+    font-size: 13px; text-decoration: none; transition: all 120ms;
   }
-  .top-right-nav a.nav-link:hover {
+  a.nav-link:hover {
     color: var(--text); border-color: var(--accent-soft);
     background: var(--bg-card-hover); text-decoration: none;
   }
@@ -808,25 +833,84 @@ const STYLE = `
   .pill.running { background: var(--accent-soft); color: var(--accent); }
   .pill.paused { background: rgba(245, 177, 77, 0.12); color: var(--warning); }
 
-  /* ---------- Top-right nav (language toggle) ---------- */
-  .top-right-nav {
-    position: absolute; top: 16px; right: 20px;
-    display: flex; gap: 6px; font-size: 12px;
+  /* ---------- Site header (sticky, on every page) ---------- */
+  .site-header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(11, 14, 19, 0.85); backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
   }
-  .top-right-nav a {
+  .site-header-inner {
+    max-width: 1140px; margin: 0 auto;
+    display: flex; align-items: center; gap: 24px;
+    padding: 12px clamp(16px, 4vw, 24px);
+    height: 56px; box-sizing: border-box;
+  }
+  .brand {
+    display: inline-flex; align-items: center; gap: 10px;
+    text-decoration: none; color: var(--text); font-weight: 600;
+    letter-spacing: -0.01em; flex-shrink: 0;
+  }
+  .brand:hover { text-decoration: none; }
+  .brand-mark { width: 28px; height: 28px; flex-shrink: 0; }
+  .brand-name { font-size: 15px; }
+  .site-nav {
+    display: flex; gap: 4px; flex: 1;
+    margin-left: 12px;
+  }
+  .site-nav a {
+    color: var(--text-dim); text-decoration: none;
+    padding: 8px 14px; border-radius: 6px; font-size: 14px;
+    font-weight: 500; transition: all 120ms;
+  }
+  .site-nav a:hover {
+    color: var(--text); background: var(--bg-card); text-decoration: none;
+  }
+  .site-nav-end {
+    display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+  }
+  .lang-toggle {
+    display: inline-flex; gap: 2px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 6px; padding: 2px;
+  }
+  .lang-toggle a {
     color: var(--text-faint); text-decoration: none;
-    padding: 4px 10px; border-radius: 4px;
-    border: 1px solid var(--border); background: var(--bg-card);
-    transition: color 120ms, border-color 120ms;
+    padding: 4px 10px; border-radius: 4px; font-size: 11px;
+    font-weight: 600; letter-spacing: 0.04em; transition: all 120ms;
   }
-  .top-right-nav a:hover { color: var(--text); border-color: var(--text-faint); }
-  .top-right-nav a.active { color: var(--accent); border-color: var(--accent-soft); }
-  .container { position: relative; }
+  .lang-toggle a:hover { color: var(--text); text-decoration: none; }
+  .lang-toggle a.active {
+    background: var(--accent-soft); color: var(--accent);
+  }
+  .site-help-icon {
+    display: none; /* visible only on mobile, see media query */
+    width: 36px; height: 36px; align-items: center; justify-content: center;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 8px; text-decoration: none; font-size: 16px;
+  }
+  .site-help-icon:hover {
+    background: var(--bg-card-hover); text-decoration: none;
+  }
+  /* Mobile: hide center nav, show compact help icon */
+  @media (max-width: 720px) {
+    .site-header-inner { gap: 12px; }
+    .site-nav { display: none; }
+    .site-help-icon { display: inline-flex; }
+    .brand-name { font-size: 14px; }
+    .brand-mark { width: 24px; height: 24px; }
+  }
+  /* Very narrow phones: tighten further */
+  @media (max-width: 380px) {
+    .site-header-inner { padding: 10px 12px; height: 52px; }
+    .brand-name { display: none; }
+  }
 
   /* ---------- Home page sections ---------- */
   .hero {
     position: relative;
-    padding: 60px 0 48px; text-align: left;
+    padding: clamp(40px, 8vw, 64px) clamp(16px, 4vw, 32px) clamp(32px, 6vw, 48px);
+    text-align: left;
     overflow: hidden; border-radius: 16px;
     margin-bottom: 16px;
   }
@@ -886,15 +970,21 @@ const STYLE = `
     padding: 4px 12px; border-radius: 4px; margin-bottom: 18px;
   }
   .hero-title {
-    font-size: 42px; font-weight: 700; margin: 0 0 12px;
+    font-size: clamp(28px, 6vw, 48px);
+    font-weight: 700; margin: 0 0 14px;
     letter-spacing: -0.02em; line-height: 1.05;
   }
   .hero-title .accent { color: var(--accent); }
   .hero-subtitle {
-    font-size: 17px; color: var(--text-dim); margin: 0 0 28px;
+    font-size: clamp(15px, 2.2vw, 17px);
+    color: var(--text-dim); margin: 0 0 28px;
     line-height: 1.55; max-width: 640px;
   }
   .hero-cta { display: flex; gap: 10px; flex-wrap: wrap; }
+  @media (max-width: 480px) {
+    .hero-cta { flex-direction: column; align-items: stretch; }
+    .hero-cta .btn { justify-content: center; }
+  }
   .btn {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 10px 18px; border-radius: 6px; font-size: 14px;
@@ -1017,13 +1107,27 @@ const STYLE = `
  *  `<html lang>` attribute and the footer copy; defaults to RU.
  *  `topRight` is rendered as a tiny element absolutely-positioned in
  *  the header (e.g. language toggle on the home page). */
+export type PageShellOpts = {
+  lang?: 'ru' | 'en';
+  /** Show RU/EN language toggle in the header. Only the home page is
+   *  bilingual today — set true there. */
+  showLangToggle?: boolean;
+  /** Hard meta-refresh interval (seconds) for stats pages so the live
+   *  table updates without manual reload. */
+  autoRefreshSec?: number | null;
+  /** Robots meta. Defaults to index,follow. Gated stats pages set noindex. */
+  robots?: string;
+};
+
 export function pageShell(
   title: string,
   body: string,
-  lang: 'ru' | 'en' = 'ru',
-  topRight: string = '',
-  autoRefreshSec: number | null = null,
+  opts: PageShellOpts = {},
 ): string {
+  const lang: 'ru' | 'en' = opts.lang ?? 'ru';
+  const showLangToggle = opts.showLangToggle ?? false;
+  const autoRefreshSec = opts.autoRefreshSec ?? null;
+  const robots = opts.robots ?? 'index, follow';
   const footerText =
     lang === 'en'
       ? 'Data refreshes automatically from the bot DB. Cache: 60 sec.<br/>⚠ Backtest ≠ guarantee. Past performance does not guarantee future returns.'
@@ -1067,12 +1171,50 @@ export function pageShell(
 </script>
 <noscript><div><img src="https://mc.yandex.ru/watch/109255043" style="position:absolute; left:-9999px;" alt="" /></div></noscript>`;
 
+  // ---------- Site header (sticky, on every page) ----------
+  // Layout:
+  //   Brand-mark (logo + name)  | center nav links | right group (lang + support)
+  // Mobile (<720px): center nav hides, support icon stays compact.
+  const langToggleHtml = showLangToggle
+    ? `<a href="/" class="${lang === 'ru' ? 'active' : ''}" aria-label="Русский">RU</a>` +
+      `<a href="/en" class="${lang === 'en' ? 'active' : ''}" aria-label="English">EN</a>`
+    : '';
+  const labels = lang === 'en'
+    ? { strategies: 'Strategies', channel: 'Channel', support: 'Support', supportShort: 'Support' }
+    : { strategies: 'Стратегии', channel: 'Канал', support: 'Поддержка', supportShort: 'Help' };
+
+  const siteHeader = `
+<header class="site-header">
+  <div class="site-header-inner">
+    <a class="brand" href="/" aria-label="Robot Claude">
+      <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+        <rect width="64" height="64" rx="14" fill="#0b0e13"/>
+        <path d="M8 48 L18 42 L26 44 L36 30 L46 32 L56 14" fill="none"
+              stroke="#4ad991" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="56" cy="14" r="5" fill="#4ad991"/>
+      </svg>
+      <span class="brand-name">Robot&nbsp;Claude</span>
+    </a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="/strategies">${labels.strategies}</a>
+      <a href="https://t.me/luxalgosignal" target="_blank" rel="noopener">${labels.channel}</a>
+      <a href="https://t.me/dboykod" target="_blank" rel="noopener">${labels.support}</a>
+    </nav>
+    <div class="site-nav-end">
+      ${langToggleHtml ? `<div class="lang-toggle">${langToggleHtml}</div>` : ''}
+      <a class="site-help-icon" href="https://t.me/dboykod" target="_blank" rel="noopener"
+         aria-label="${labels.support}" title="${labels.support}">💬</a>
+    </div>
+  </div>
+</header>
+`;
+
   return `<!DOCTYPE html>
 <html lang="${lang}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="robots" content="${lang === 'en' ? 'index, follow' : 'index, follow'}" />
+<meta name="robots" content="${robots}" />
 ${metaRefresh}
 <title>${escapeHtml(title)}</title>
 ${faviconLink}
@@ -1080,8 +1222,8 @@ ${faviconLink}
 ${metrikaScript}
 </head>
 <body>
+${siteHeader}
 <div class="container">
-${topRight ? `<div class="top-right-nav">${topRight}</div>` : ''}
 ${body}
 <div class="footer">
   ${footerText}
@@ -1280,9 +1422,7 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
     ${groupsHtml}
     ${empty}
     `,
-    'ru',
-    standardTopRight('ru'),
-    60, // auto-refresh portfolio dashboard too
+    { autoRefreshSec: 60 },
   );
 }
 
@@ -1670,18 +1810,8 @@ function renderStrategyDetail(cfg: StrategyConfig): string {
 
     ${renderLogicSection(cfg)}
     `,
-    'ru',
-    standardTopRight('ru'),
-    60, // auto-refresh every 60s so the Live трейды таблица обновляется
+    { autoRefreshSec: 60 },
   );
-}
-
-/** Standard top-right nav for non-home pages: ← Home + Support contact. */
-function standardTopRight(_lang: 'ru' | 'en'): string {
-  return `
-    <a href="/" class="nav-link" title="На главную">← Главная</a>
-    <a href="${escapeHtml(SUPPORT_URL)}" class="nav-link" target="_blank" rel="noopener" title="Поддержка">💬 Поддержка</a>
-  `;
 }
 
 export async function landingRoute(app: FastifyInstance): Promise<void> {
@@ -1710,8 +1840,7 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
       return pageShell(
         'Not found',
         `<div class="header"><h1 class="title">404</h1></div><div class="empty-state">Стратегия не найдена. <a href="/strategies">Все стратегии</a></div>`,
-        'ru',
-        standardTopRight('ru'),
+        {},
       );
     }
     reply.type('text/html; charset=utf-8');

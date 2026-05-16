@@ -152,7 +152,7 @@ function renderDashboard(): string {
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
   `;
-  return pageShell('Admin — Регистрации', body, 'ru', '', null);
+  return pageShell('Admin — Регистрации', body, { robots: 'noindex, nofollow' });
 }
 
 export async function adminRoute(app: FastifyInstance): Promise<void> {

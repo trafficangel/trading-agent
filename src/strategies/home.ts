@@ -502,13 +502,7 @@ function renderHome(lang: Lang): string {
     </div>
   `;
 
-  // ---------- Top-right nav (Support + RU/EN toggle) ----------
-  const supportLabel = lang === 'en' ? '💬 Support' : '💬 Поддержка';
-  const topRight = `
-    <a href="https://t.me/dboykod" class="nav-link" target="_blank" rel="noopener" title="${supportLabel}">${supportLabel}</a>
-    <a href="/" class="${lang === 'ru' ? 'active' : ''}">RU</a>
-    <a href="/en" class="${lang === 'en' ? 'active' : ''}">EN</a>
-  `;
+  // Top-right nav is now handled by site-header in pageShell.
 
   const body = `
     ${heroHtml}
@@ -523,7 +517,7 @@ function renderHome(lang: Lang): string {
   void otherLangPath;
   void TRACK_C_NOTIONAL_USD;
 
-  return pageShell(c.htmlTitle, body, lang, topRight);
+  return pageShell(c.htmlTitle, body, { lang, showLangToggle: true });
 }
 
 export async function homeRoute(app: FastifyInstance): Promise<void> {
