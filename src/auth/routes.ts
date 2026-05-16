@@ -23,10 +23,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { logger } from '../lib/logger.js';
-import {
-  sendVerificationMessage,
-  checkVerificationStatus,
-} from './telegram-gateway.js';
+import { sendVerificationMessage } from './telegram-gateway.js';
 import {
   hashPhone,
   registerOrRefresh,
@@ -113,7 +110,9 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
       const res = await sendVerificationMessage(phoneE164);
       const phoneHash = hashPhone(phoneE164);
       const ua = (req.headers['user-agent'] as string | undefined) ?? null;
-      recordVerificationAttempt(res.request_id, phoneHash, ip, ua);
+      // Server-generated code: we stored what Gateway delivered, so we
+      // can compare locally on /auth/verify — no extra Gateway call.
+      recordVerificationAttempt(res.request_id, phoneHash, res.code, ip, ua);
 
       // Pending cookie carries request_id between /auth/start and /auth/verify.
       reply.setCookie(PENDING_COOKIE, res.request_id, {
@@ -168,31 +167,25 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
     }
     bumpVerificationAttempts(requestId);
 
-    try {
-      const result = await checkVerificationStatus(requestId, parsed.data.code);
-      if (result.verification_status.status !== 'code_valid') {
-        return { ok: false, error: 'code_invalid', status: result.verification_status.status };
-      }
-      // Code verified — promote to a session.
-      const ip = clientIp(req);
-      const ua = (req.headers['user-agent'] as string | undefined) ?? null;
-      const { sessionId } = registerOrRefresh(attempt.phone_hash, ip, ua);
-      clearVerificationAttempt(requestId);
-      reply.clearCookie(PENDING_COOKIE, { path: '/' });
-      reply.setCookie(SESSION_COOKIE, sessionId, {
-        path: '/',
-        httpOnly: true,
-        secure: true,
-        sameSite: 'lax',
-        maxAge: SESSION_TTL_DAYS * 24 * 60 * 60,
-      });
-      logger.info({ request_id: requestId }, 'auth: session created');
-      return { ok: true };
-    } catch (err) {
-      logger.error({ err, request_id: requestId }, 'auth: check verification failed');
-      reply.code(500);
-      return { ok: false, error: 'gateway_error' };
+    // Local compare — code was generated server-side at /auth/start
+    // and stored in verification_attempts.
+    if (!attempt.code || parsed.data.code !== attempt.code) {
+      return { ok: false, error: 'code_invalid' };
     }
+    const ip = clientIp(req);
+    const ua = (req.headers['user-agent'] as string | undefined) ?? null;
+    const { sessionId } = registerOrRefresh(attempt.phone_hash, ip, ua);
+    clearVerificationAttempt(requestId);
+    reply.clearCookie(PENDING_COOKIE, { path: '/' });
+    reply.setCookie(SESSION_COOKIE, sessionId, {
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      maxAge: SESSION_TTL_DAYS * 24 * 60 * 60,
+    });
+    logger.info({ request_id: requestId }, 'auth: session created');
+    return { ok: true };
   });
 
   // ---------------- /auth/me ----------------

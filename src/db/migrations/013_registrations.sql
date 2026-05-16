@@ -34,9 +34,12 @@ CREATE INDEX idx_registrations_session ON registrations(session_id);
 CREATE INDEX idx_registrations_created_at ON registrations(created_at);
 
 -- In-flight verifications (TTL ~10 min, cleaned by cron or on-the-fly).
+-- We use the "server generates code" pattern: store the actual code
+-- here, compare on /auth/verify. Gateway just delivers it to Telegram.
 CREATE TABLE verification_attempts (
   request_id TEXT PRIMARY KEY,
   phone_hash TEXT NOT NULL,
+  code TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0,
   ip TEXT,

@@ -116,6 +116,7 @@ export function registerOrRefresh(
 type VerifAttemptRow = {
   request_id: string;
   phone_hash: string;
+  code: string | null;
   created_at: number;
   attempts: number;
   ip: string | null;
@@ -127,8 +128,8 @@ const findAttemptStmt = db.prepare<[string], VerifAttemptRow>(
 );
 
 const insertAttemptStmt = db.prepare(`
-  INSERT INTO verification_attempts (request_id, phone_hash, created_at, attempts, ip, user_agent)
-  VALUES (?, ?, ?, 0, ?, ?)
+  INSERT INTO verification_attempts (request_id, phone_hash, code, created_at, attempts, ip, user_agent)
+  VALUES (?, ?, ?, ?, 0, ?, ?)
 `);
 
 const incAttemptStmt = db.prepare(
@@ -146,12 +147,13 @@ const purgeOldStmt = db.prepare(
 export function recordVerificationAttempt(
   requestId: string,
   phoneHash: string,
+  code: string,
   ip: string | null,
   userAgent: string | null,
 ): void {
   // Purge anything older than 1h to keep the table tidy.
   purgeOldStmt.run(Date.now() - 60 * 60 * 1000);
-  insertAttemptStmt.run(requestId, phoneHash, Date.now(), ip, userAgent);
+  insertAttemptStmt.run(requestId, phoneHash, code, Date.now(), ip, userAgent);
 }
 
 export function getVerificationAttempt(requestId: string): VerifAttemptRow | null {

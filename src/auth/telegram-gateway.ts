@@ -1,21 +1,28 @@
 /**
  * Telegram Gateway API client.
  *
- * docs: https://core.telegram.org/gateway
+ * IMPORTANT: the correct base URL is `https://gatewayapi.telegram.org/`
+ * (yes — "gatewayapi" as subdomain, NO `/api/` path prefix). The other
+ * `gateway.telegram.org/api/...` is a different surface that always
+ * returns "Bad request" for everything — discovered the hard way by
+ * comparing with a working sibling project.
  *
- * Two endpoints used:
- *   POST /api/sendVerificationMessage  → deliver code via Telegram
- *   POST /api/checkVerificationStatus  → verify the code the user entered
+ * Two flow patterns are supported by Gateway:
+ *   A) Server-generated code   — we pass `code` param, Gateway delivers
+ *      OUR code to the user. We verify locally by comparing strings.
+ *      Simpler. No extra round-trip to Gateway for verification.
+ *   B) Gateway-generated code  — we omit `code`, Gateway makes one,
+ *      we later POST /checkVerificationStatus to verify.
  *
- * Auth: Bearer token in `TELEGRAM_GATEWAY_TOKEN` env. NEVER log it.
- * Pricing: ~$0.01 per delivered+verified message (free if user never
- * submits the code). Keep an eye on volume.
+ * We use pattern A — matches our sibling project's implementation and
+ * avoids an extra HTTPS call per login attempt.
  */
 
+import crypto from 'node:crypto';
 import { request } from 'undici';
 import { logger } from '../lib/logger.js';
 
-const API_BASE = 'https://gateway.telegram.org/api';
+const API_BASE = 'https://gatewayapi.telegram.org';
 
 function token(): string {
   const t = process.env.TELEGRAM_GATEWAY_TOKEN;
@@ -23,101 +30,93 @@ function token(): string {
   return t;
 }
 
-/** Common Gateway response wrapper. */
 type GatewayResponse<T> = {
   ok: boolean;
   result?: T;
   error?: string;
 };
 
-export type SendVerificationResult = {
+export type SendResult = {
   request_id: string;
-  phone_number: string;
-  request_cost: number;
-  remaining_balance?: number;
-  delivery_status: {
+  /** The 6-digit code we generated and asked Gateway to deliver. We
+   *  keep it server-side and compare against the user's input. */
+  code: string;
+  delivery_status?: {
     status: 'sent' | 'read' | 'revoked';
     updated_at: number;
   };
-  verification_status?: unknown;
-  payload?: string;
 };
 
+/** Generate a random N-digit code (default 6). */
+function generateCode(length = 6): string {
+  let s = '';
+  for (let i = 0; i < length; i++) {
+    s += crypto.randomInt(0, 10).toString();
+  }
+  return s;
+}
+
 /**
- * Send a verification code to a phone number via Telegram.
- * code_length=6, ttl=300 (5 min). We let Gateway generate the code —
- * we never see it. Verification happens via checkVerificationStatus.
+ * Send a verification code to the user. WE generate the code and pass
+ * it to Gateway — Gateway just delivers it via Telegram. Returns the
+ * generated code so the caller can persist it for later comparison.
  */
 export async function sendVerificationMessage(
   phoneE164: string,
-  opts: { codeLength?: number; ttl?: number } = {},
-): Promise<SendVerificationResult> {
-  const body = {
-    phone_number: phoneE164,
-    code_length: opts.codeLength ?? 6,
-    ttl: opts.ttl ?? 300,
-  };
+  opts: { ttl?: number; codeLength?: number } = {},
+): Promise<SendResult> {
+  const code = generateCode(opts.codeLength ?? 6);
+  const ttl = opts.ttl ?? 300;
   const res = await request(`${API_BASE}/sendVerificationMessage`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token()}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      phone_number: phoneE164,
+      code,
+      ttl,
+    }),
   });
-  const json = (await res.body.json()) as GatewayResponse<SendVerificationResult>;
+  const json = (await res.body.json()) as GatewayResponse<{
+    request_id: string;
+    delivery_status?: { status: 'sent' | 'read' | 'revoked'; updated_at: number };
+  }>;
   if (!json.ok || !json.result) {
     logger.error(
       {
         phone_redacted: phoneE164.slice(0, 4) + '***',
         status: res.statusCode,
         error: json.error,
-        full: json,
       },
       'telegram-gateway: sendVerificationMessage failed',
     );
-    // "Bad request" with HTTP 200 means the token/account itself is invalid
-    // (no balance, wrong token, etc.) — Gateway uses generic message.
-    const hint = json.error === 'Bad request'
-      ? 'Gateway отклонил запрос — возможно нулевой баланс или невалидный токен'
-      : `Gateway error: ${json.error ?? 'unknown'}`;
-    throw new Error(hint);
+    throw new Error(`Gateway: ${json.error ?? 'unknown error'}`);
   }
-  return json.result;
+  return {
+    request_id: json.result.request_id,
+    code,
+    delivery_status: json.result.delivery_status,
+  };
 }
 
-export type CheckVerificationResult = {
-  request_id: string;
-  phone_number: string;
-  verification_status: {
-    status: 'code_valid' | 'code_invalid' | 'code_max_attempts_exceeded' | 'expired';
-    updated_at: number;
-  };
-};
-
 /**
- * Verify the code the user submitted. Returns the status from Gateway.
- * `code_valid` = success; anything else = failure (caller decides UX).
+ * Optionally revoke a pending code (e.g. on logout while pending). Not
+ * strictly required — codes auto-expire after TTL. Used by /auth/start
+ * when the user re-submits a new phone within the same browser session.
  */
-export async function checkVerificationStatus(
-  requestId: string,
-  code: string,
-): Promise<CheckVerificationResult> {
-  const res = await request(`${API_BASE}/checkVerificationStatus`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token()}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ request_id: requestId, code }),
-  });
-  const json = (await res.body.json()) as GatewayResponse<CheckVerificationResult>;
-  if (!json.ok || !json.result) {
-    logger.error(
-      { request_id: requestId, error: json.error },
-      'telegram-gateway: checkVerificationStatus failed',
-    );
-    throw new Error(`Gateway error: ${json.error ?? 'unknown'}`);
+export async function revokeVerificationMessage(requestId: string): Promise<void> {
+  try {
+    await request(`${API_BASE}/revokeVerificationMessage`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token()}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ request_id: requestId }),
+    });
+  } catch (err) {
+    logger.warn({ err, request_id: requestId }, 'telegram-gateway: revoke failed (non-fatal)');
   }
-  return json.result;
 }
