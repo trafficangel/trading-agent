@@ -399,6 +399,18 @@ function escapeHtml(s: string): string {
   })[c] ?? c);
 }
 
+/** Russian plural selector — same impl as landing.ts. Kept local to
+ *  avoid an extra import for a 5-line helper. */
+function pluralRu(n: number, one: string, few: string, many: string): string {
+  const abs = Math.abs(n);
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
 // Escapes HTML THEN converts a tiny subset of markdown into HTML for
 // content fields where we want safe-by-default text + a few inline
 // formatting affordances:
@@ -490,7 +502,7 @@ function renderHome(lang: Lang): string {
       const btLabel = bt
         ? lang === 'en'
           ? `${(bt.winRate * 100).toFixed(1)}% wins · ${bt.netPnlPct >= 0 ? '+' : ''}${bt.netPnlPct.toFixed(1)}% return over ${bt.periodDays} days`
-          : `${(bt.winRate * 100).toFixed(1)}% прибыльных сделок · доходность ${bt.netPnlPct >= 0 ? '+' : ''}${bt.netPnlPct.toFixed(1)}% за ${bt.periodDays} дней`
+          : `${(bt.winRate * 100).toFixed(1)}% прибыльных сделок · доходность ${bt.netPnlPct >= 0 ? '+' : ''}${bt.netPnlPct.toFixed(1)}% за ${bt.periodDays} ${pluralRu(bt.periodDays, 'день', 'дня', 'дней')}`
         : '';
       // Right column appears ONLY once the strategy has closed trades.
       // Before then the row is left-aligned and uncluttered.

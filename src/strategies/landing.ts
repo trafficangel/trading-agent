@@ -123,6 +123,24 @@ function classForValue(n: number): 'pos' | 'neg' | 'neu' {
   return 'neu';
 }
 
+/**
+ * Russian plural selector. Pass three forms:
+ *   pluralRu(1, 'сделка', 'сделки', 'сделок')  → 'сделка'
+ *   pluralRu(2, 'сделка', 'сделки', 'сделок')  → 'сделки'
+ *   pluralRu(5, 'сделка', 'сделки', 'сделок')  → 'сделок'
+ *   pluralRu(101, ...)                          → 'сделка' (101 = 1)
+ * Mirrors the standard Slavic plural-rules algorithm.
+ */
+function pluralRu(n: number, one: string, few: string, many: string): string {
+  const abs = Math.abs(n);
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
 // Per-trade $1000 recompute moved to ./backtest-recompute.ts (single
 // source of truth used by landing, scraper, and announcement script).
 
@@ -225,11 +243,13 @@ function equityCurveSvg(trades: import('./backtest-recompute.js').EnrichedTrade[
     { v: yMin, y: padTop + innerH },
   ];
   // Drawdown markers (red dots on local maxima followed by dips)
-  const finalUsd = cumValues[cumValues.length - 1]!.toFixed(0);
+  const finalUsdRaw = cumValues[cumValues.length - 1]!;
+  const finalUsdSigned = finalUsdRaw >= 0 ? '+' : '−';
+  const finalUsd = Math.abs(finalUsdRaw).toFixed(0);
 
   return `
   <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img"
-       aria-label="Equity curve over ${trades.length} backtest trades">
+       aria-label="Накопленная прибыль за ${trades.length} ${pluralRu(trades.length, 'сделку', 'сделки', 'сделок')} бэктеста">
     <defs>
       <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.32"/>
@@ -240,8 +260,8 @@ function equityCurveSvg(trades: import('./backtest-recompute.js').EnrichedTrade[
     <path d="${areaPath}" fill="url(#eqGrad)"/>
     <path d="${linePath}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
     ${yTicks.map((t) => `<text x="${padX - 4}" y="${(t.y + 3).toFixed(1)}" font-size="10" fill="var(--text-faint)" text-anchor="end">${t.v >= 0 ? '+' : ''}${Math.round(t.v)}</text>`).join('')}
-    <text x="${padX}" y="${h - 8}" font-size="10" fill="var(--text-faint)">Trade #1</text>
-    <text x="${padX + innerW}" y="${h - 8}" font-size="10" fill="var(--text-faint)" text-anchor="end">#${trades.length} · final +${finalUsd} USDT</text>
+    <text x="${padX}" y="${h - 8}" font-size="10" fill="var(--text-faint)">Сделка №1</text>
+    <text x="${padX + innerW}" y="${h - 8}" font-size="10" fill="var(--text-faint)" text-anchor="end">Сделка №${trades.length} · итог ${finalUsdSigned}${finalUsd} USDT</text>
   </svg>
   `;
 }
@@ -294,7 +314,7 @@ function backtestTradesTable(
   const restBlock = rest
     ? `
       <details class="trades-more">
-        <summary>Показать ещё ${rev.length - visibleCount} сделок</summary>
+        <summary>Показать ещё ${rev.length - visibleCount} ${pluralRu(rev.length - visibleCount, 'сделку', 'сделки', 'сделок')}</summary>
         <div class="card table-wrap" style="margin-top: 12px;">
           <table>${head}<tbody>${rest}</tbody></table>
         </div>
@@ -1460,7 +1480,7 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
           <span class="dim">·</span>
           <span class="dim">${(b.winRate * 100).toFixed(0)}% побед</span>
           <span class="dim">·</span>
-          <span class="dim">${b.totalTrades} сделок за ${b.periodDays} дней</span>
+          <span class="dim">${b.totalTrades} ${pluralRu(b.totalTrades, 'сделка', 'сделки', 'сделок')} за ${b.periodDays} ${pluralRu(b.periodDays, 'день', 'дня', 'дней')}</span>
         </div>`
       : '';
 
@@ -1508,7 +1528,7 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
         <div class="tf-group">
           <div class="tf-group-header">
             <span class="tf-group-label">${tfLabel(String(tf))}</span>
-            <span class="tf-group-count">${rows.length} стратегий</span>
+            <span class="tf-group-count">${rows.length} ${pluralRu(rows.length, 'стратегия', 'стратегии', 'стратегий')}</span>
           </div>
           <div class="strat-row-list">
             ${rows.map(renderRow).join('\n')}
@@ -1621,16 +1641,16 @@ function renderBacktestSection(snap: BacktestSnapshot, strategyId: string, cfg?:
   const totalInStrategy = bundle?.totalTradesInStrategy ?? trades.length;
   const wasCapped = bundle?.capped ?? false;
   const equityLabel = wasCapped
-    ? `последние ${trades.length} из ${totalInStrategy} сделок`
-    : `${trades.length} сделок`;
+    ? `последние ${trades.length} из ${totalInStrategy} ${pluralRu(totalInStrategy, 'сделки', 'сделок', 'сделок')}`
+    : `${trades.length} ${pluralRu(trades.length, 'сделка', 'сделки', 'сделок')}`;
 
   return `
   <div class="section">
-    <div class="section-title">Backtest · ${escapeHtml(b.periodLabel)} (${b.periodDays} дней)</div>
+    <div class="section-title">Бэктест · ${escapeHtml(b.periodLabel)} (${b.periodDays} дней)</div>
 
     ${trades.length > 0 ? `
     <div class="equity-card" style="margin-bottom: 16px;">
-      <div class="chart-title" style="margin-bottom: 8px;">Equity curve · ${equityLabel}</div>
+      <div class="chart-title" style="margin-bottom: 8px;">Накопленная прибыль · ${equityLabel}</div>
       ${equityCurveSvg(trades)}
     </div>
     ` : ''}
