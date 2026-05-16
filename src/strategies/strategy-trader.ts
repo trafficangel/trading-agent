@@ -69,6 +69,9 @@ function round(n: number, digits: number): number {
 export function formatStrategyWebhookLog(
   p: LuxAlgoStrategyPayload,
   result: StrategyWebhookResult,
+  /** Per-strategy counter (T#001). Falls back to result.decisionId
+   *  (global id) when not provided. */
+  tradeNum?: number | null,
 ): string {
   const cfg = getStrategyConfig(p.strategy_id);
   const stratLabel = cfg
@@ -85,6 +88,11 @@ export function formatStrategyWebhookLog(
     ? new Date(p.bar_time).toISOString().slice(0, 16).replace('T', ' ')
     : '—';
 
+  // Prefer per-strategy counter (T#001) over the global decision.id.
+  const displayNum = tradeNum ?? result.decisionId;
+  const displayId = displayNum
+    ? `T#${displayNum.toString().padStart(3, '0')}`
+    : '';
   let statusIcon = 'ℹ️';
   let statusText = result.reason ?? 'ok';
   if (result.ok && result.decisionId) {
@@ -92,8 +100,8 @@ export function formatStrategyWebhookLog(
     statusText = result.reason === 'already_closed'
       ? `already_closed — позиция уже закрыта`
       : derived.action === 'entry'
-      ? `позиция открыта (T#${result.decisionId})`
-      : `позиция закрыта (T#${result.decisionId})`;
+      ? `позиция открыта (${displayId})`
+      : `позиция закрыта (${displayId})`;
   } else if (!result.ok) {
     statusIcon = '❌';
   } else {

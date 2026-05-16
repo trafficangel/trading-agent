@@ -57,7 +57,12 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
         // sees every incoming signal regardless of outcome (accepted,
         // duplicate, unknown strategy, etc.). disable_notification so
         // the channel doesn't ping for routine traffic.
-        const logText = formatStrategyWebhookLog(parsed.data, r);
+        let tradeNum: number | null = null;
+        if (r.decisionId) {
+          const { findDecisionById } = await import('../db/repos/decisions.js');
+          tradeNum = findDecisionById(r.decisionId)?.strategy_trade_num ?? null;
+        }
+        const logText = formatStrategyWebhookLog(parsed.data, r, tradeNum);
         sendMessage({ channel: 'logs', text: logText, disable_notification: true })
           .catch((err) => logger.error({ err }, 'telegram log push (track c) failed'));
         return reply.send({ ok: r.ok, reason: r.reason, id: r.decisionId });

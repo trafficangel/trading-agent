@@ -80,10 +80,11 @@ async function main(): Promise<void> {
     } catch {
       continue;
     }
-    const entryLog = formatStrategyWebhookLog(entryPayload, {
-      ok: true,
-      decisionId: r.id,
-    });
+    const entryLog = formatStrategyWebhookLog(
+      entryPayload,
+      { ok: true, decisionId: r.id },
+      r.strategy_trade_num,
+    );
     const entryHeader = `<i>(replay · #${r.id})</i>\n` + entryLog;
 
     if (dryRun) {
@@ -110,10 +111,11 @@ async function main(): Promise<void> {
         price: r.close_price ?? undefined,
         bar_time: r.closed_at,
       } as LuxAlgoStrategyPayload;
-      const exitLog = formatStrategyWebhookLog(exitPayload, {
-        ok: true,
-        decisionId: r.id,
-      });
+      const exitLog = formatStrategyWebhookLog(
+        exitPayload,
+        { ok: true, decisionId: r.id },
+        r.strategy_trade_num,
+      );
       const exitHeader = `<i>(replay · #${r.id})</i>\n` + exitLog;
       if (dryRun) {
         console.log('--- EXIT ---');
