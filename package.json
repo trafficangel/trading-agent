@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
+    "@fastify/cookie": "^11.0.2",
     "@fastify/sensible": "^6.0.1",
     "@types/ws": "^8.18.1",
     "better-sqlite3": "^11.7.0",

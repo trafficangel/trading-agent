@@ -1,9 +1,11 @@
 import Fastify from 'fastify';
+import fastifyCookie from '@fastify/cookie';
 import { config } from './config.js';
 import { logger } from './lib/logger.js';
 import { luxalgoRoute } from './webhooks/luxalgo.route.js';
 import { landingRoute } from './strategies/landing.js';
 import { homeRoute } from './strategies/home.js';
+import { authRoute } from './auth/routes.js';
 import { startMonitorJob } from './jobs/monitor.js';
 import { startTpslMonitorJob } from './jobs/tpsl-monitor.js';
 import { startHeartbeatJob } from './jobs/heartbeat.js';
@@ -22,7 +24,15 @@ import { closeBrowser } from './browser/tradingview.js';
 const startedAt = Date.now();
 
 async function main(): Promise<void> {
-  const app = Fastify({ logger: false, bodyLimit: 256 * 1024 });
+  const app = Fastify({
+    logger: false,
+    bodyLimit: 256 * 1024,
+    // Trust Caddy reverse proxy — X-Forwarded-For / X-Forwarded-Proto.
+    // Needed so req.ip resolves to the real client behind Caddy, and
+    // so cookie `secure` flag aligns with https detection.
+    trustProxy: true,
+  });
+  await app.register(fastifyCookie);
 
   app.get('/health', async () => ({ ok: true, mode: config.MODE }));
 
@@ -37,6 +47,7 @@ async function main(): Promise<void> {
   });
 
   await luxalgoRoute(app);
+  await authRoute(app);
   await landingRoute(app);
   await homeRoute(app);
   // Track A — LLM-driven decide-cron + 5-min monitor. Gated by env so we

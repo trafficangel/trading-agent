@@ -9,6 +9,7 @@ import {
   TRACK_C_NOTIONAL_USD,
 } from './track-c-config.js';
 import { recomputeBacktestStats, enrichTrades, type RecomputedStats } from './backtest-recompute.js';
+import { isAuthed } from '../auth/routes.js';
 import {
   getStrategyLiveStats,
   getStrategyRecentTrades,
@@ -1649,20 +1650,25 @@ function standardTopRight(_lang: 'ru' | 'en'): string {
 }
 
 export async function landingRoute(app: FastifyInstance): Promise<void> {
-  // Index of all enabled strategies
-  app.get('/strategies', async (_req, reply) => {
+  // Index of all enabled strategies. Gated — anonymous visitors see a
+  // blurred preview with a registration form overlay; authed visitors
+  // see the real dashboard.
+  app.get('/strategies', async (req, reply) => {
     const enabled = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
     reply.type('text/html; charset=utf-8');
+    if (!isAuthed(req)) {
+      // No-cache on the gated stub so re-visits after auth get fresh HTML.
+      reply.header('Cache-Control', 'private, no-store');
+      return renderGatedPreview('index', renderStrategyIndex(enabled));
+    }
     reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
     return renderStrategyIndex(enabled);
   });
 
-  // Detail by code (e.g. /strategies/001)
+  // Detail by code (e.g. /strategies/001) — same gating.
   app.get<{ Params: { code: string } }>('/strategies/:code', async (req, reply) => {
-    // Lookup by `code` (operator-friendly numeric tag) — first match wins.
     const cfg =
       Object.values(STRATEGY_CONFIGS).find((s) => s.code === req.params.code) ??
-      // Fallback: maybe operator typed the id instead of the code
       getStrategyConfig(req.params.code);
     if (!cfg) {
       reply.code(404).type('text/html; charset=utf-8');
@@ -1674,7 +1680,204 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
       );
     }
     reply.type('text/html; charset=utf-8');
+    if (!isAuthed(req)) {
+      reply.header('Cache-Control', 'private, no-store');
+      return renderGatedPreview('detail', renderStrategyDetail(cfg));
+    }
     reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
     return renderStrategyDetail(cfg);
   });
+}
+
+/**
+ * Wrap a server-rendered stats page in a blur layer + access form.
+ * The underlying page is fully rendered into HTML and made visually
+ * unreadable via CSS filter. Form overlay calls /auth/start →
+ * /auth/verify; on success page reloads and the gate falls away.
+ *
+ * Why render the full page anyway: gives the page real height & visible
+ * shapes (so subscribers see "yes there's data here"), and lets the
+ * server be the single rendering source — no parallel "preview"
+ * template that drifts.
+ */
+function renderGatedPreview(
+  _kind: 'index' | 'detail',
+  innerHtml: string,
+): string {
+  // Extract the inner <body> content of the rendered page so we don't
+  // nest <html>. Quick'n'dirty: find first <div class="container">
+  // and grab to its matching closer. Easier: rebuild via the same pageShell.
+  // Trick — wrap pageShell-rendered HTML in a div with .gated-blur class
+  // + overlay form. We embed the full HTML doc into a sandboxed iframe
+  // would be ideal, but inline approach is simpler.
+  //
+  // Implementation: just strip the <html>/<head>/<body> wrapper and
+  // re-wrap.
+  const bodyMatch = innerHtml.match(/<body[^>]*>([\s\S]*)<\/body>/);
+  const bodyInner = bodyMatch ? bodyMatch[1]! : innerHtml;
+  // Pull the <style> from the original so the preview keeps the same look.
+  const styleMatch = innerHtml.match(/<style>([\s\S]*?)<\/style>/);
+  const inlineStyle = styleMatch ? styleMatch[1]! : '';
+
+  const formHtml = `
+    <div class="gate-overlay">
+      <div class="gate-card">
+        <div class="gate-icon">🔒</div>
+        <h2 class="gate-title">Доступ к детальной статистике</h2>
+        <p class="gate-sub">
+          Введите номер телефона — мы отправим 6-значный код через Telegram.
+          После проверки откроется live-статистика по всем стратегиям и канал.
+        </p>
+        <form id="gate-phone-form" class="gate-form" novalidate>
+          <input type="tel" name="phone" required placeholder="+79991234567"
+                 inputmode="tel" autocomplete="tel" />
+          <button type="submit">Получить код</button>
+        </form>
+        <form id="gate-code-form" class="gate-form" style="display:none" novalidate>
+          <input type="text" name="code" required placeholder="Код из Telegram"
+                 inputmode="numeric" pattern="\\d{4,9}" maxlength="9"
+                 autocomplete="one-time-code" />
+          <button type="submit">Подтвердить</button>
+        </form>
+        <div id="gate-msg" class="gate-msg"></div>
+        <p class="gate-note">
+          Cookie сохраняется на 90 дней — больше вводить номер не понадобится.
+          Мы храним только хэш номера, plaintext не сохраняется.
+        </p>
+      </div>
+    </div>
+  `;
+
+  const script = `
+    <script>
+      (function() {
+        var msg = document.getElementById('gate-msg');
+        var phoneForm = document.getElementById('gate-phone-form');
+        var codeForm = document.getElementById('gate-code-form');
+        function setMsg(text, isError) {
+          msg.textContent = text || '';
+          msg.className = 'gate-msg' + (isError ? ' err' : '');
+        }
+        phoneForm.addEventListener('submit', async function(e) {
+          e.preventDefault();
+          var phone = phoneForm.phone.value.trim();
+          setMsg('Отправляем код…');
+          phoneForm.querySelector('button').disabled = true;
+          try {
+            var res = await fetch('/auth/start', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ phone: phone }),
+            });
+            var data = await res.json();
+            if (!data.ok) {
+              setMsg(data.message || 'Не удалось отправить код. Проверьте номер.', true);
+              phoneForm.querySelector('button').disabled = false;
+              return;
+            }
+            setMsg('Код отправлен на ' + (data.masked_phone || phone) + ' в Telegram');
+            phoneForm.style.display = 'none';
+            codeForm.style.display = 'flex';
+            codeForm.code.focus();
+          } catch (err) {
+            setMsg('Ошибка сети, попробуйте позже', true);
+            phoneForm.querySelector('button').disabled = false;
+          }
+        });
+        codeForm.addEventListener('submit', async function(e) {
+          e.preventDefault();
+          var code = codeForm.code.value.trim();
+          setMsg('Проверяем код…');
+          codeForm.querySelector('button').disabled = true;
+          try {
+            var res = await fetch('/auth/verify', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ code: code }),
+            });
+            var data = await res.json();
+            if (data.ok) {
+              setMsg('✅ Доступ открыт! Перезагружаем…');
+              setTimeout(function() { window.location.reload(); }, 800);
+              return;
+            }
+            setMsg('Неверный код, попробуйте ещё раз', true);
+            codeForm.querySelector('button').disabled = false;
+            codeForm.code.value = '';
+            codeForm.code.focus();
+          } catch (err) {
+            setMsg('Ошибка сети, попробуйте позже', true);
+            codeForm.querySelector('button').disabled = false;
+          }
+        });
+      })();
+    </script>
+  `;
+
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Robot Claude — доступ к статистике</title>
+<style>${inlineStyle}
+  /* Gate overlay */
+  .gated-blur {
+    filter: blur(8px); pointer-events: none; user-select: none;
+    transform: scale(1.02); transform-origin: top center;
+  }
+  .gate-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(11, 14, 19, 0.6); backdrop-filter: blur(6px);
+    padding: 24px;
+  }
+  .gate-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 32px 28px; max-width: 440px;
+    width: 100%; text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .gate-icon { font-size: 32px; margin-bottom: 12px; }
+  .gate-title {
+    font-size: 22px; font-weight: 700; margin: 0 0 10px;
+    letter-spacing: -0.01em;
+  }
+  .gate-sub {
+    color: var(--text-dim); font-size: 14px; line-height: 1.55;
+    margin: 0 0 22px;
+  }
+  .gate-form { display: flex; flex-direction: column; gap: 10px; }
+  .gate-form input {
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 12px 14px; border-radius: 8px;
+    font-size: 15px; outline: none; font-family: inherit;
+    transition: border-color 120ms;
+  }
+  .gate-form input:focus { border-color: var(--accent); }
+  .gate-form button {
+    background: var(--accent); color: var(--bg); border: none;
+    padding: 12px; border-radius: 8px; font-size: 15px;
+    font-weight: 600; cursor: pointer; transition: opacity 120ms;
+  }
+  .gate-form button:hover { opacity: 0.92; }
+  .gate-form button:disabled { opacity: 0.5; cursor: wait; }
+  .gate-msg {
+    margin: 16px 0 8px; font-size: 13px; color: var(--text-dim);
+    min-height: 16px;
+  }
+  .gate-msg.err { color: var(--danger); }
+  .gate-note {
+    font-size: 11px; color: var(--text-faint); line-height: 1.5;
+    margin: 16px 0 0;
+  }
+</style>
+</head>
+<body>
+<div class="gated-blur" aria-hidden="true">${bodyInner}</div>
+${formHtml}
+${script}
+</body>
+</html>`;
 }
