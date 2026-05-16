@@ -429,7 +429,13 @@ function renderHome(lang: Lang): string {
   let totalClosed = 0;
   let totalPnlUsd = 0;
   let bestBacktestWr = 0;
-  const enabled = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
+  // Sort enabled strategies by launch date ASCENDING (oldest first).
+  // The home-page preview block is capped at 5 below — older strategies
+  // get the prime real estate; once we have >5 active, the newest ones
+  // overflow to the dedicated /strategies index page.
+  const enabled = Object.values(STRATEGY_CONFIGS)
+    .filter((s) => s.enabled)
+    .sort((a, b) => a.launchedAt - b.launchedAt);
   for (const s of enabled) {
     const live = getStrategyLiveStats(s.id);
     totalClosed += live.closed;
