@@ -1034,6 +1034,23 @@ export function pageShell(
   const metaRefresh = autoRefreshSec !== null
     ? `<meta http-equiv="refresh" content="${autoRefreshSec}" />`
     : '';
+  // Yandex.Metrika counter 109255043 — clickmap + webvisor + accurate
+  // bounce + outbound-link tracking. Loaded async via injected script
+  // tag (the standard m,e,t,r,i,k,a pattern). Noscript fallback below
+  // for non-JS visitors. Single counter across home, /strategies,
+  // detail pages and /admin.
+  const metrikaScript = `
+<script type="text/javascript">
+   (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+   m[i].l=1*new Date();
+   for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+   k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+   (window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=109255043', 'ym');
+
+   ym(109255043, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:'dataLayer', referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+</script>
+<noscript><div><img src="https://mc.yandex.ru/watch/109255043" style="position:absolute; left:-9999px;" alt="" /></div></noscript>`;
+
   return `<!DOCTYPE html>
 <html lang="${lang}">
 <head>
@@ -1043,6 +1060,7 @@ export function pageShell(
 ${metaRefresh}
 <title>${escapeHtml(title)}</title>
 <style>${STYLE}</style>
+${metrikaScript}
 </head>
 <body>
 <div class="container">
