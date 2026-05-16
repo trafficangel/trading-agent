@@ -41,6 +41,10 @@ type Content = {
     liveTrades: string;
     bestWr: string;
   };
+  whatYouGet: {
+    title: string;
+    items: string[];
+  };
   how: {
     title: string;
     subtitle: string;
@@ -70,15 +74,17 @@ type Content = {
 
 const CONTENT: Record<Lang, Content> = {
   ru: {
-    htmlTitle: 'Robot Claude — проверенные торговые стратегии LuxAlgo',
+    htmlTitle: 'Robot Claude — проверенные стратегии и сигналы 24/7',
     hero: {
-      eyebrow: 'POWERED BY LUXALGO AI · BYBIT PERPETUALS',
-      title1: 'Проверенные стратегии от ',
-      titleAccent: 'LuxAlgo AI',
-      title2: '',
+      eyebrow: '🆓 БЕСПЛАТНО · АВТОМАТИЧЕСКАЯ ТОРГОВЛЯ 24/7',
+      title1: 'Проверенные ',
+      titleAccent: 'стратегии и сигналы',
+      title2: ' для криптотрейдинга',
       subtitle:
-        'Каждая стратегия проходит независимый бектест 200+ дней, подбирается по profit factor и win rate, исполняется автоматически через webhook'
-        + ' и логируется публично в реальном времени. Никаких чёрных ящиков — каждый трейд можно проверить.',
+        'Каждая стратегия проходит тщательный отбор по результатам тестирования за 200+ дней. '
+        + 'Наша система автоматически открывает и закрывает позиции на бирже круглосуточно, '
+        + 'а все сигналы дублируются в Telegram канале — можете торговать вместе с нами или сами. '
+        + 'Все сделки публичны в реальном времени. Без подписок и платных уровней.',
       ctaPrimary: 'Активные стратегии →',
       ctaSecondary: 'Telegram канал ↗',
     },
@@ -88,29 +94,40 @@ const CONTENT: Record<Lang, Content> = {
       liveTrades: 'Live сделок',
       bestWr: 'Лучший WR backtest',
     },
+    whatYouGet: {
+      title: 'Что вы получаете — бесплатно',
+      items: [
+        '🆓 Полный доступ ко всем стратегиям и их статистике',
+        '📊 Live результаты каждой сделки в реальном времени',
+        '📡 Сигналы в Telegram канале — вход, выход, стоп',
+        '🤖 Автоматическое исполнение на бирже (для подписчиков копитрейдинга)',
+        '🔓 Никаких подписок, премиум-уровней или скрытых платежей',
+        '💼 Прозрачный учёт — каждая сделка публична и проверяема',
+      ],
+    },
     how: {
       title: 'Как это работает',
-      subtitle: 'Технический пайплайн от сигнала до сделки и до публичного отчёта.',
+      subtitle: 'Простой путь от сигнала до сделки — и публичный отчёт о каждом результате.',
       steps: [
         {
-          step: 'STEP 01',
-          title: 'LuxAlgo AI Strategy Builder',
-          body: 'Каждая стратегия собирается в признанной платформе LuxAlgo Premium — multi-condition логика (Contrarian / Trend Tracer / Money Flow и др.) с встроенным бектестом и динамическими выходами. Принимаем только стратегии с PF ≥ 2 и WR ≥ 55% на 200+ днях истории.',
+          step: 'ШАГ 01',
+          title: 'Отбор стратегий',
+          body: 'Каждая стратегия проходит проверку на исторических данных за 200+ дней. Минимальный winrate 55%, прибыль должна превышать убытки минимум в 2 раза. На сайт попадают только проверенные стратегии — никаких сырых идей.',
         },
         {
-          step: 'STEP 02',
-          title: 'Webhook → наша система',
-          body: 'TradingView Alert по сигналу стратегии отправляет JSON в наш сервер. Дедупликация, валидация, маршрутизация в исполнитель за <100ms. Если webhook не доставлен — safety SL страхует позицию.',
+          step: 'ШАГ 02',
+          title: 'Сигнал → автоматическая сделка',
+          body: 'Когда стратегия выдаёт сигнал, наша система мгновенно открывает позицию на бирже с защитным стопом. Сделка ведётся автоматически до выхода — без вашего участия. Работаем круглосуточно, 7 дней в неделю.',
         },
         {
-          step: 'STEP 03',
-          title: 'Bybit / Hyperliquid execution',
-          body: 'Market entry с safety stop-loss. Выходы — либо по обратному сигналу стратегии (Builtin Exits), либо по safety SL как страховке. Никакого ручного вмешательства — система работает 24/7.',
+          step: 'ШАГ 03',
+          title: 'Дублирование в Telegram',
+          body: 'Каждый сигнал — вход, выход, стоп — публикуется в нашем Telegram-канале. Если хотите торговать вручную на своём счёте — просто повторяйте за нами. Если хотите присоединиться к копитрейдингу — оставляйте номер на сайте.',
         },
         {
-          step: 'STEP 04',
-          title: 'Публичный учёт',
-          body: 'Каждая сделка летит в БД и отображается на лендинге стратегии: equity curve, полный trades log, exit reasons, P&L в реальном времени. Подписчик может проверить каждую сделку до тика.',
+          step: 'ШАГ 04',
+          title: 'Полный публичный учёт',
+          body: 'Каждая сделка отображается на странице стратегии: время входа, цена выхода, прибыль или убыток. Никаких чёрных ящиков и закрытой статистики — можете проверить каждый результат сами.',
         },
       ],
     },
@@ -146,31 +163,39 @@ const CONTENT: Record<Lang, Content> = {
       ],
     },
     faq: {
-      title: 'FAQ',
+      title: 'Частые вопросы',
       items: [
         {
+          q: 'Это бесплатно?',
+          a: 'Да, полностью. Доступ к сайту, статистике, Telegram-каналу с сигналами — всё бесплатно. Никаких подписок, премиум-уровней или скрытых платежей. Когда мы запустим копитрейдинг на Bybit, наш доход будет только процентом от прибыли подписчиков — если вы зарабатываете, мы тоже. Если нет — ничего не платите.',
+        },
+        {
           q: 'Откуда берутся стратегии?',
-          a: 'Все стратегии собираются в LuxAlgo AI Strategy Builder — на признанной платформе для multi-condition стратегий с автоматическим бектестом. Каждая стратегия имеет ссылку на оригинальный chat в LuxAlgo на детальном лендинге для верификации.',
+          a: 'Все стратегии собираются в LuxAlgo AI Strategy Builder — это признанная платформа для тестирования торговых идей. Каждая стратегия имеет публичную ссылку на оригинал на странице стратегии — вы можете проверить её сами.',
         },
         {
-          q: 'Какой риск-менеджмент?',
-          a: 'Каждая стратегия имеет safety stop-loss (обычно 2-3% от entry) как страховку на случай задержки webhook. Размер позиции фиксированный $1000 на сделку. Max 1 позиция на (символ × стратегия). Выходы полностью на стратегии — никакого ручного вмешательства.',
+          q: 'Как контролируется риск?',
+          a: 'Каждая стратегия имеет защитный стоп-лосс (обычно 2-3% от цены входа) — это страховка на случай резкого движения. Размер позиции фиксированный — 1000 долларов на сделку. На один символ и одну стратегию открыта максимум одна позиция одновременно.',
         },
         {
-          q: 'Как смотреть live результаты?',
-          a: 'Главный дашборд на /strategies с группировкой по таймфреймам. На /strategies/<code> — детальная страница каждой стратегии с equity curve, полным trades log, breakdown long/short. Обновляется автоматически каждые 60 секунд.',
+          q: 'Где смотреть результаты?',
+          a: 'На странице «Активные стратегии» — общий список со статистикой по каждой. На странице конкретной стратегии — график доходности, полный список всех сделок, разбивка лонг/шорт. Данные обновляются автоматически каждые 60 секунд.',
+        },
+        {
+          q: 'Сигналы в Telegram-канале платные?',
+          a: 'Нет. Все сигналы публикуются в нашем канале @luxalgosignal — это бесплатно и доступно всем. Каждое открытие и закрытие сделки приходит в канал с указанием цены, размера и причины выхода. Можете повторять за нами вручную или дождаться запуска копитрейдинга.',
         },
         {
           q: 'Что если стратегия в просадке?',
-          a: 'Сначала разбираемся: рыночная аномалия или сломанный edge. Если 10+ убыточных сделок подряд → автоматический pause. Followers могут отключиться в любой момент (Bybit Copy) или выйти из Vault.',
+          a: 'Сначала разбираемся — рыночная аномалия или стратегия сломалась. Если 10 убыточных сделок подряд — стратегия автоматически ставится на паузу. В копитрейдинге вы сможете отключиться в любой момент.',
         },
         {
-          q: 'Какие комиссии учитываются?',
-          a: 'Bybit perp taker: 0.055% × 2 (открытие+закрытие) = 0.11% круговая. Hyperliquid: 0.025% × 2 = 0.05%. В наших бектестах эти комиссии вычитаются на каждой сделке — числа на лендингах honest.',
+          q: 'Безопасны ли мои деньги в копитрейдинге?',
+          a: 'Когда мы запустим копитрейдинг на Bybit — он работает на вашем собственном аккаунте. Мы не имеем доступа к вашим средствам, только к функции копирования сделок. На Hyperliquid Vault — работает на смарт-контракте, депозит и вывод по запросу.',
         },
         {
-          q: 'Безопасны ли мои деньги?',
-          a: 'Copy Trading на Bybit использует ваш собственный аккаунт — мы не имеем доступа к вашим средствам. Hyperliquid Vault работает на смарт-контракте, депозит/вывод по запросу. Мы получаем процент только с прибыли.',
+          q: 'Какие комиссии биржи учитываются?',
+          a: 'В наших расчётах уже вычтена комиссия Bybit — 0.055% × 2 стороны = 0.11% за круг сделки. Цифры на сайте — реалистичные, такие же получите и вы при торговле.',
         },
       ],
     },
@@ -184,15 +209,17 @@ const CONTENT: Record<Lang, Content> = {
     telegramUrl: 'https://t.me/luxalgosignal',
   },
   en: {
-    htmlTitle: 'Robot Claude — verified LuxAlgo trading strategies',
+    htmlTitle: 'Robot Claude — verified trading strategies & signals 24/7',
     hero: {
-      eyebrow: 'POWERED BY LUXALGO AI · BYBIT PERPETUALS',
-      title1: 'Verified strategies from ',
-      titleAccent: 'LuxAlgo AI',
-      title2: '',
+      eyebrow: '🆓 FREE · AUTOMATED TRADING 24/7',
+      title1: 'Verified ',
+      titleAccent: 'strategies & signals',
+      title2: ' for crypto trading',
       subtitle:
-        'Each strategy goes through 200+ days of independent backtesting, is selected by profit factor and win rate,'
-        + ' executes automatically via webhook, and is logged publicly in real-time. No black boxes — every trade is verifiable.',
+        'Each strategy is rigorously vetted against 200+ days of historical data. '
+        + 'Our system opens and closes positions on the exchange automatically around the clock, '
+        + 'and every signal is duplicated to our Telegram channel — trade alongside us or follow manually. '
+        + 'All trades are public in real-time. No subscriptions, no paid tiers.',
       ctaPrimary: 'View strategies →',
       ctaSecondary: 'Telegram channel ↗',
     },
@@ -202,29 +229,40 @@ const CONTENT: Record<Lang, Content> = {
       liveTrades: 'Live trades',
       bestWr: 'Best backtest WR',
     },
+    whatYouGet: {
+      title: 'What you get — free',
+      items: [
+        '🆓 Full access to all strategies and their stats',
+        '📊 Live results from every trade in real-time',
+        '📡 Signals in our Telegram channel — entry, exit, stop',
+        '🤖 Automatic execution on the exchange (for copy traders)',
+        '🔓 No subscriptions, no premium tiers, no hidden charges',
+        '💼 Transparent accounting — every trade public and verifiable',
+      ],
+    },
     how: {
       title: 'How it works',
-      subtitle: 'Technical pipeline from signal to execution to public audit trail.',
+      subtitle: 'Simple path from signal to trade — with a public record of every outcome.',
       steps: [
         {
           step: 'STEP 01',
-          title: 'LuxAlgo AI Strategy Builder',
-          body: 'Every strategy is built in the LuxAlgo Premium platform — multi-condition logic (Contrarian / Trend Tracer / Money Flow etc.) with embedded backtest and dynamic exits. We accept only strategies with PF ≥ 2 and WR ≥ 55% over 200+ days.',
+          title: 'Strategy vetting',
+          body: 'Each strategy is tested on 200+ days of historical data. We require a minimum 55% win rate and profits at least 2× larger than losses. Only proven setups make it onto the site — no untested ideas.',
         },
         {
           step: 'STEP 02',
-          title: 'Webhook → our system',
-          body: 'TradingView Alert posts JSON to our server on every signal. Dedup, validate, route to handler in <100ms. If webhook is lost — safety SL protects the position.',
+          title: 'Signal → automatic trade',
+          body: 'When a strategy fires, our system instantly opens a position on the exchange with a protective stop. The trade runs autonomously until exit — no manual touch. Running 24/7, every day.',
         },
         {
           step: 'STEP 03',
-          title: 'Bybit / Hyperliquid execution',
-          body: 'Market entry with safety stop-loss. Exits triggered by reverse strategy signal (Builtin Exits) or safety SL as backup. No manual intervention — system runs 24/7.',
+          title: 'Mirrored to Telegram',
+          body: 'Every signal — entry, exit, stop — is posted to our Telegram channel. Trade manually on your own account by copying us, or join the upcoming copy-trading service.',
         },
         {
           step: 'STEP 04',
-          title: 'Public audit trail',
-          body: 'Every trade lands in DB and renders on the strategy landing page: equity curve, full trades log, exit reasons, real-time P&L. Subscribers can verify every trade down to the tick.',
+          title: 'Full public record',
+          body: 'Every trade appears on its strategy page: entry time, exit price, profit or loss. No black boxes, no hidden stats — verify every result yourself.',
         },
       ],
     },
@@ -260,31 +298,39 @@ const CONTENT: Record<Lang, Content> = {
       ],
     },
     faq: {
-      title: 'FAQ',
+      title: 'Frequently asked',
       items: [
         {
+          q: 'Is it really free?',
+          a: 'Yes, completely. Access to the site, statistics, Telegram channel with signals — all free. No subscriptions, premium tiers, or hidden charges. When we launch copy trading on Bybit, our revenue will come solely from a percentage of subscribers\' profits — if you earn, we earn. If you don\'t, you pay nothing.',
+        },
+        {
           q: 'Where do the strategies come from?',
-          a: 'All strategies are built in LuxAlgo AI Strategy Builder — a recognized platform for multi-condition strategies with automated backtesting. Each strategy includes a link to its original LuxAlgo chat on its detail page for verification.',
+          a: 'All strategies are built in LuxAlgo AI Strategy Builder — a recognized platform for testing trading ideas. Each strategy has a public link to its source on its detail page — you can verify it yourself.',
         },
         {
-          q: 'What is the risk management?',
-          a: 'Every strategy has a safety stop-loss (typically 2-3% from entry) as backup in case webhooks are delayed. Position size fixed at $1000 per trade. Max 1 position per (symbol × strategy). Exits are entirely strategy-driven — no manual intervention.',
+          q: 'How is risk controlled?',
+          a: 'Each strategy has a protective stop-loss (typically 2-3% from entry price) as backup against sharp moves. Position size is fixed at $1000 per trade. Max one position per symbol × strategy at any time.',
         },
         {
-          q: 'Where can I see live results?',
-          a: 'Main dashboard at /strategies grouped by timeframe. At /strategies/<code> — per-strategy detail with equity curve, full trades log, long/short breakdown. Auto-refreshes every 60 seconds.',
+          q: 'Where can I see results?',
+          a: 'On the "Active strategies" page — overall list with stats. On each strategy\'s page — equity curve, full trade log, long/short breakdown. Data refreshes automatically every 60 seconds.',
+        },
+        {
+          q: 'Are signals in the Telegram channel paid?',
+          a: 'No. All signals are published to our channel @luxalgosignal — free and accessible to anyone. Every open and close arrives with price, size, and exit reason. Follow us manually, or wait for copy trading launch.',
         },
         {
           q: 'What if a strategy is in drawdown?',
-          a: 'First we assess — market anomaly vs broken edge. After 10+ losses in a row → automatic pause. Followers can disconnect anytime (Bybit Copy) or exit the Vault.',
+          a: 'First we assess — market anomaly or broken edge. After 10 losing trades in a row, the strategy auto-pauses. In copy trading, you can disconnect anytime.',
         },
         {
-          q: 'What fees are factored in?',
-          a: 'Bybit perp taker: 0.055% × 2 (open + close) = 0.11% round-trip. Hyperliquid: 0.025% × 2 = 0.05%. These fees are deducted on every trade in our backtests — landing page numbers are honest.',
+          q: 'Are my funds safe in copy trading?',
+          a: 'When we launch copy trading on Bybit, it runs on your own account — we never have access to your funds, only to the copying feature. Hyperliquid Vault works via smart contracts with deposit/withdraw on demand.',
         },
         {
-          q: 'Are my funds safe?',
-          a: 'Bybit Copy Trading uses your own account — we never have access to your funds. Hyperliquid Vault runs on smart contracts with deposit/withdraw on demand. We only earn a percentage of profits.',
+          q: 'What exchange fees are included?',
+          a: 'Our numbers already deduct Bybit fees — 0.055% × 2 sides = 0.11% round-trip per trade. The figures on the site are realistic — same as what you\'ll get trading along with us.',
         },
       ],
     },
@@ -412,6 +458,18 @@ function renderHome(lang: Lang): string {
   // Local refs preserved to avoid touching the lambda below.
   void enabled; void totalClosed; void totalPnlUsd; void bestBacktestWr; void pnlCls;
 
+  // ---------- What you get (free + Telegram emphasis) ----------
+  const whatYouGetHtml = `
+    <div class="home-section what-you-get">
+      <h2 class="home-section-title">${escapeHtml(c.whatYouGet.title)}</h2>
+      <div class="benefit-grid">
+        ${c.whatYouGet.items
+          .map((item) => `<div class="benefit-item">${escapeHtml(item)}</div>`)
+          .join('')}
+      </div>
+    </div>
+  `;
+
   // ---------- How it works ----------
   const howHtml = `
     <div class="home-section">
@@ -506,6 +564,7 @@ function renderHome(lang: Lang): string {
 
   const body = `
     ${heroHtml}
+    ${whatYouGetHtml}
     ${howHtml}
     ${strategiesPreviewHtml}
     ${roadmapHtml}

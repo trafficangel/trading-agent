@@ -1022,6 +1022,23 @@ const STYLE = `
     color: var(--text-faint); font-size: 18px; user-select: none;
   }
 
+  /* What you get — green-tinted benefit grid */
+  .what-you-get {
+    background: linear-gradient(135deg, rgba(74, 217, 145, 0.04), transparent 70%);
+    border: 1px solid rgba(74, 217, 145, 0.18);
+    border-radius: 14px;
+    padding: 28px clamp(20px, 4vw, 32px) 32px;
+  }
+  .benefit-grid {
+    display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+  .benefit-item {
+    padding: 12px 16px; font-size: 14px; color: var(--text);
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 8px; line-height: 1.5;
+  }
+
   /* How it works grid */
   .how-grid {
     display: grid; gap: 14px;
