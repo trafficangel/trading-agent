@@ -429,6 +429,7 @@ function pluralRu(n: number, one: string, few: string, many: string): string {
 // content fields where we want safe-by-default text + a few inline
 // formatting affordances:
 //   - [label](https://...)        → outbound link (rel="noopener nofollow")
+//   - **text**                    → <strong>text</strong>
 //   - lines starting with "- "    → grouped into <ul><li>…</li></ul>
 //   - blank line                  → paragraph break (rendered as <br><br>)
 // XSS-safe because everything is escaped FIRST, then we re-interpret a
@@ -438,7 +439,14 @@ function pluralRu(n: number, one: string, few: string, many: string): string {
 // or <br> in a paragraph is invalid HTML in some validators.
 function renderRichText(s: string): string {
   const escaped = escapeHtml(s);
-  const withLinks = escaped.replace(
+  // Bold first (cheapest), then links (so a label can contain bold if
+  // ever needed — though not used in current copy). Both work on the
+  // already-escaped string so they can't introduce XSS.
+  const withBold = escaped.replace(
+    /\*\*([^*\n]+)\*\*/g,
+    (_m, text) => `<strong>${text}</strong>`,
+  );
+  const withLinks = withBold.replace(
     /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
     (_m, label, url) => `<a href="${url}" target="_blank" rel="noopener nofollow">${label}</a>`,
   );
