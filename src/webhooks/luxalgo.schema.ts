@@ -46,7 +46,22 @@ export type LuxAlgoPayload = LuxAlgoEventPayload;
 /** Strategy event as emitted by LuxAlgo's `[[strategy_event]]` placeholder.
  *  Used by the AI Strategy Builder alert template. Server derives
  *  action+side from this value (see deriveActionSide below). */
-export const StrategyEvent = z.enum(['long', 'short', 'exit_long', 'exit_short']);
+/**
+ * LuxAlgo's `{{strategy.order.action}}` placeholder emits values with
+ * a SPACE — e.g. "exit long" / "exit short" (NOT "exit_long" with
+ * underscore as the docs suggested). Discovered after STRAT-001's
+ * first live signal: entry "short" succeeded but every subsequent
+ * "exit long" payload was rejected by this schema, and the position
+ * closed by our internal 24h time-guard instead of the strategy's
+ * built-in exit. Costly bug — we should have caught it before launch.
+ *
+ * Preprocess any "exit foo" form into "exit_foo" before enum validation
+ * so the wire format becomes irrelevant. Both forms accepted forever.
+ */
+export const StrategyEvent = z.preprocess(
+  (v) => (typeof v === 'string' ? v.trim().toLowerCase().replace(/\s+/g, '_') : v),
+  z.enum(['long', 'short', 'exit_long', 'exit_short']),
+);
 export type StrategyEvent = z.infer<typeof StrategyEvent>;
 
 /** Track C — LuxAlgo AI Strategy Builder webhook.
