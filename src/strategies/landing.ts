@@ -1034,6 +1034,22 @@ export function pageShell(
   const metaRefresh = autoRefreshSec !== null
     ? `<meta http-equiv="refresh" content="${autoRefreshSec}" />`
     : '';
+  // Inline SVG favicon — green equity-curve going up on a dark rounded
+  // square. Echoes the hero-curve animation visual. Data-URI form so
+  // there's no extra HTTP request + works on every page from a single
+  // declaration. Apple touch icon points to the same SVG (iOS 16.4+
+  // supports it natively).
+  const faviconSvg =
+    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>` +
+    `<rect width='64' height='64' rx='14' fill='%230b0e13'/>` +
+    `<path d='M8 48 L18 42 L26 44 L36 30 L46 32 L56 14' fill='none' ` +
+    `stroke='%234ad991' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/>` +
+    `<circle cx='56' cy='14' r='4' fill='%234ad991'/>` +
+    `</svg>`;
+  const faviconLink =
+    `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${faviconSvg}"/>` +
+    `<link rel="apple-touch-icon" href="data:image/svg+xml,${faviconSvg}"/>`;
+
   // Yandex.Metrika counter 109255043 — clickmap + webvisor + accurate
   // bounce + outbound-link tracking. Loaded async via injected script
   // tag (the standard m,e,t,r,i,k,a pattern). Noscript fallback below
@@ -1059,6 +1075,7 @@ export function pageShell(
 <meta name="robots" content="${lang === 'en' ? 'index, follow' : 'index, follow'}" />
 ${metaRefresh}
 <title>${escapeHtml(title)}</title>
+${faviconLink}
 <style>${STYLE}</style>
 ${metrikaScript}
 </head>
@@ -1846,6 +1863,17 @@ function renderGatedPreview(
    ym(109255043, 'init', {webvisor:true, clickmap:true, referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
 </script>
 <noscript><div><img src="https://mc.yandex.ru/watch/109255043" style="position:absolute; left:-9999px;" alt="" /></div></noscript>`;
+  const faviconSvg =
+    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>` +
+    `<rect width='64' height='64' rx='14' fill='%230b0e13'/>` +
+    `<path d='M8 48 L18 42 L26 44 L36 30 L46 32 L56 14' fill='none' ` +
+    `stroke='%234ad991' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/>` +
+    `<circle cx='56' cy='14' r='4' fill='%234ad991'/>` +
+    `</svg>`;
+  const faviconLink =
+    `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${faviconSvg}"/>` +
+    `<link rel="apple-touch-icon" href="data:image/svg+xml,${faviconSvg}"/>`;
+
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -1853,6 +1881,7 @@ function renderGatedPreview(
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <title>Robot Claude — доступ к статистике</title>
+${faviconLink}
 ${metrikaScript}
 <style>${inlineStyle}
   /* Gate overlay */
