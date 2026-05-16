@@ -216,6 +216,52 @@ export function getStrategyActiveTrades(strategyId: string): ActiveTradeRow[] {
   return out;
 }
 
+/** Aggregate stats for a strategy over a specific time window — used
+ *  by the daily wrap report to show "today's" performance vs cumulative
+ *  since launch. dayStartMs is the UTC midnight cutoff. */
+export type StrategyDailyStats = {
+  closed: number;
+  wins: number;
+  losses: number;
+  netPnlUsd: number;
+  netPnlPct: number;
+  exitsStrategy: number;
+  exitsSafetySL: number;
+};
+
+const dailyClosedStmt = db.prepare<[string, number], {
+  pnl_pct: number;
+  close_reason: string | null;
+  force_close_reason: string | null;
+}>(`
+  SELECT pnl_pct, close_reason, force_close_reason
+  FROM decisions
+  WHERE track = 'strategy' AND strategy_id = ?
+    AND status = 'closed' AND pnl_pct IS NOT NULL
+    AND closed_at >= ?
+`);
+
+export function getStrategyDailyStats(strategyId: string, dayStartMs: number): StrategyDailyStats {
+  const rows = dailyClosedStmt.all(strategyId, dayStartMs);
+  const stats: StrategyDailyStats = {
+    closed: 0, wins: 0, losses: 0,
+    netPnlUsd: 0, netPnlPct: 0,
+    exitsStrategy: 0, exitsSafetySL: 0,
+  };
+  let sumPct = 0;
+  for (const r of rows) {
+    stats.closed++;
+    sumPct += r.pnl_pct;
+    if (r.pnl_pct > 0) stats.wins++;
+    else if (r.pnl_pct < 0) stats.losses++;
+    if (r.close_reason === 'sl_hit') stats.exitsSafetySL++;
+    else if (r.force_close_reason === 'strategy_exit') stats.exitsStrategy++;
+  }
+  stats.netPnlPct = Math.round(sumPct * 100) / 100;
+  stats.netPnlUsd = Math.round((sumPct / 100) * TRACK_C_NOTIONAL_USD * 100) / 100;
+  return stats;
+}
+
 /** Most recent N closed trades for the landing-page "Recent live trades"
  *  table. Includes only fully-closed decisions with a recorded pnl_pct. */
 export function getStrategyRecentTrades(strategyId: string, limit = 50): LiveTradeRow[] {

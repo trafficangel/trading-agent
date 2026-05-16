@@ -2,333 +2,220 @@ import cron from 'node-cron';
 import { sendMessage } from '../telegram/bot.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
-import { getStrategyConfig } from '../strategies/track-c-config.js';
+import {
+  STRATEGY_CONFIGS,
+  TRACK_C_NOTIONAL_USD,
+  LANDING_BASE_URL,
+  type StrategyConfig,
+} from '../strategies/track-c-config.js';
+import {
+  getStrategyLiveStats,
+  getStrategyDailyStats,
+  getStrategyActiveTrades,
+} from '../strategies/live-stats.js';
 
-type DecisionDayRow = {
-  id: number;
-  created_at: number;
-  symbol: string;
-  decision: string;
-  side: string | null;
-  entry: number | null;
-  sl: number | null;
-  tp_json: string | null;
-  status: string;
-  parent_decision_id: number | null;
-  closed_at: number | null;
-  filled_at: number | null;
-  pending_until: number | null;
-  reasoning_short: string | null;
-  close_price: number | null;
-  close_reason: string | null;
-  pnl_pct: number | null;
-  pnl_r: number | null;
-  features_json: string | null;
-  /** A/B bucket — 'llm' / 'signal' / 'strategy'. Migration 008. */
-  track: string;
-  /** Track C strategy_id (NULL for other tracks). Migration 011. */
-  strategy_id: string | null;
-  /** Track C per-strategy sequential counter. Migration 012. */
-  strategy_trade_num: number | null;
-};
+/**
+ * Daily wrap-up to the Signals channel.
+ *
+ * Re-architected (May 2026) around per-strategy blocks for Track C —
+ * the only track currently running. Each enabled strategy gets its
+ * own block with:
+ *   - Today's slice  (closed trades, W/L, P&L, exit-reason mix)
+ *   - Cumulative since launch (totals, win rate, live P&L)
+ *   - Currently-open positions (T#NNN ids)
+ *   - Link to the strategy detail page
+ *
+ * Plus a portfolio aggregate footer summing across all strategies.
+ *
+ * Why this layout: subscribers care about "what did MY strategies do
+ * today and how are they doing overall" — not raw decision counts.
+ * One report = one scroll on mobile.
+ */
 
 const sigsToday = db.prepare<[number], { symbol: string; timeframe: string; c: number }>(
   'SELECT symbol, timeframe, COUNT(*) AS c FROM signals WHERE received_at >= ? GROUP BY symbol, timeframe ORDER BY symbol, timeframe',
 );
-const SELECT_COLS = `
-  id, created_at, symbol, decision, side, entry, sl, tp_json,
-  status, parent_decision_id, closed_at, filled_at, pending_until, reasoning_short,
-  close_price, close_reason, pnl_pct, pnl_r, features_json, track, strategy_id,
-  strategy_trade_num
-`;
-const decisionsToday = db.prepare<[number], DecisionDayRow>(
-  `SELECT ${SELECT_COLS} FROM decisions WHERE created_at >= ? ORDER BY created_at ASC`,
-);
-
-// Trades that REALLY closed today (TP/SL hit, or LLM CLOSE). Only these
-// produce real PnL. Excludes the broken-data zombie (entry==sl → pnl null)
-// via the explicit pnl_pct IS NOT NULL filter — those rows shouldn't show
-// up in win/loss/USD stats.
-const closedTradesToday = db.prepare<[number], DecisionDayRow>(`
-  SELECT ${SELECT_COLS} FROM decisions
-  WHERE decision = 'OPEN' AND status = 'closed'
-    AND closed_at IS NOT NULL AND closed_at >= ?
-    AND pnl_pct IS NOT NULL
-  ORDER BY closed_at ASC
-`);
-
-// Currently-active trades (market entries OR filled limits).
-const stillActive = db.prepare<[], DecisionDayRow>(
-  `SELECT ${SELECT_COLS} FROM decisions WHERE decision = 'OPEN' AND status = 'active' ORDER BY created_at ASC`,
-);
-
-// Limits still waiting for price touch. They might still fire today.
-const pendingLimits = db.prepare<[], DecisionDayRow>(
-  `SELECT ${SELECT_COLS} FROM decisions WHERE status = 'pending' ORDER BY created_at ASC`,
-);
-
-// Limits that expired without filling today. Important for transparency
-// but NOT counted in PnL (they were never trades).
-const cancelledLimitsToday = db.prepare<[number], DecisionDayRow>(`
-  SELECT ${SELECT_COLS} FROM decisions
-  WHERE status = 'cancelled' AND closed_at IS NOT NULL AND closed_at >= ?
-  ORDER BY closed_at ASC
-`);
 
 function startOfTodayUtc(now: Date): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
 }
 
-/** $1000 per position simulation — what closed-trade PnL maps to in USD. */
-const POSITION_NOTIONAL_USD = 1000;
-
-function entryTypeOf(row: DecisionDayRow): 'market' | 'limit' | 'unknown' {
-  if (!row.features_json) return 'unknown';
-  try {
-    const f = JSON.parse(row.features_json) as { entry_type?: string };
-    if (f.entry_type === 'market' || f.entry_type === 'limit') return f.entry_type;
-  } catch {
-    // ignore parse errors
-  }
-  return 'unknown';
+function fmtUsd(n: number, withSign = false): string {
+  const sign = withSign && n >= 0 ? '+' : '';
+  return `${sign}$${n.toFixed(2)}`;
 }
 
-function reasonEmoji(reason: string | null): string {
-  if (reason === 'tp_hit') return '🎯';
-  if (reason === 'sl_hit') return '🛑';
-  if (reason === 'llm_close') return '🏁';
-  return '·';
+function fmtAge(ms: number): string {
+  const totalMin = Math.max(0, Math.floor(ms / 60_000));
+  const d = Math.floor(totalMin / (60 * 24));
+  const h = Math.floor((totalMin % (60 * 24)) / 60);
+  const m = totalMin % 60;
+  if (d > 0) return `${d}д ${h}ч`;
+  if (h > 0) return `${h}ч ${m}м`;
+  return `${m}м`;
+}
+
+/** Render per-strategy block. Returns array of lines to push into the
+ *  report. Caller adds blank separator lines around it. */
+function renderStrategyBlock(cfg: StrategyConfig, dayStart: number): string[] {
+  const live = getStrategyLiveStats(cfg.id);
+  const daily = getStrategyDailyStats(cfg.id, dayStart);
+  const active = getStrategyActiveTrades(cfg.id);
+  const launchDays = Math.max(0, Math.floor((Date.now() - cfg.launchedAt) / 86_400_000));
+  const launchLabel = launchDays === 0 ? 'сегодня' : `${launchDays}д назад`;
+  const landingUrl = `${LANDING_BASE_URL}/strategies/${cfg.code}`;
+  const name = cfg.name ?? `${cfg.symbol ?? 'ANY'} ${cfg.timeframe}m`;
+
+  const lines: string[] = [];
+  lines.push(`🤖 <b>STRAT-${cfg.code}</b> · ${name} · ${cfg.symbol ?? 'ANY'} ${cfg.timeframe}m`);
+
+  // --- TODAY slice ---
+  lines.push(`<b>📅 Сегодня:</b>`);
+  if (daily.closed === 0 && active.length === 0) {
+    lines.push(`  <i>Сделок не было</i>`);
+  } else {
+    if (daily.closed > 0) {
+      const wr = daily.closed > 0 ? ((daily.wins / daily.closed) * 100).toFixed(0) : '—';
+      const sign = daily.netPnlUsd >= 0 ? '+' : '';
+      lines.push(
+        `  Закрыто: <b>${daily.closed}</b> · ${daily.wins}W / ${daily.losses}L · WR ${wr}%`,
+      );
+      lines.push(
+        `  P&amp;L: <b>${sign}${daily.netPnlPct.toFixed(2)}%</b> · <b>${fmtUsd(daily.netPnlUsd, true)}</b>`,
+      );
+      const exitMix: string[] = [];
+      if (daily.exitsStrategy > 0) exitMix.push(`${daily.exitsStrategy} по сигналу`);
+      if (daily.exitsSafetySL > 0) exitMix.push(`${daily.exitsSafetySL} по SL`);
+      if (exitMix.length > 0) lines.push(`  Выходы: ${exitMix.join(', ')}`);
+    }
+    if (active.length > 0) {
+      const openLine = active
+        .map((t) => {
+          const num = t.strategyTradeNum ?? t.id;
+          const side = t.side === 'long' ? '🟢' : '🔴';
+          const age = fmtAge(Date.now() - t.entryAt);
+          return `${side} T#${num.toString().padStart(3, '0')} (${age})`;
+        })
+        .join(' · ');
+      lines.push(`  В работе: <b>${active.length}</b> — ${openLine}`);
+    }
+  }
+
+  // --- Since launch ---
+  lines.push(`<b>📊 С запуска (${launchLabel}):</b>`);
+  if (live.closed === 0) {
+    lines.push(`  <i>Ждём первый закрытый трейд</i>`);
+  } else {
+    const wrPct = live.winRate !== null ? (live.winRate * 100).toFixed(1) : '—';
+    const sign = live.netPnlUsd >= 0 ? '+' : '';
+    lines.push(
+      `  Всего: <b>${live.closed}</b> · ${live.wins}W / ${live.losses}L · WR <b>${wrPct}%</b>`,
+    );
+    lines.push(
+      `  P&amp;L: <b>${sign}${live.netPnlPct.toFixed(2)}%</b> · <b>${fmtUsd(live.netPnlUsd, true)}</b>`,
+    );
+  }
+
+  lines.push(`<a href="${landingUrl}">📊 Детали → ${landingUrl}</a>`);
+
+  return lines;
 }
 
 async function tick(now: Date = new Date()): Promise<void> {
   const dayStart = startOfTodayUtc(now);
-
-  // === Signals ===
-  const sigRows = sigsToday.all(dayStart);
-  const sigBySymbol = new Map<string, { tf: string; n: number }[]>();
-  for (const r of sigRows) {
-    const arr = sigBySymbol.get(r.symbol) ?? [];
-    arr.push({ tf: r.timeframe, n: r.c });
-    sigBySymbol.set(r.symbol, arr);
-  }
-
-  // === Decisions by type ===
-  const allDec = decisionsToday.all(dayStart);
-  const counts = { OPEN: 0, CLOSE: 0, MODIFY: 0, SKIP: 0 };
-  for (const d of allDec) {
-    counts[d.decision as keyof typeof counts] = (counts[d.decision as keyof typeof counts] ?? 0) + 1;
-  }
-
-  // === Real closed trades (have actual PnL) ===
-  const closed = closedTradesToday.all(dayStart);
-  const wins = closed.filter((t) => (t.pnl_pct ?? 0) > 0).length;
-  const losses = closed.filter((t) => (t.pnl_pct ?? 0) < 0).length;
-  const breakevens = closed.filter((t) => (t.pnl_pct ?? 0) === 0).length;
-  const totalR = closed.reduce((s, t) => s + (t.pnl_r ?? 0), 0);
-  const totalUsd = closed.reduce(
-    (s, t) => s + ((t.pnl_pct ?? 0) / 100) * POSITION_NOTIONAL_USD,
-    0,
-  );
-  // Breakdown by entry type (after limit-vs-market is meaningful)
-  const closedByType = { market: 0, limit: 0, unknown: 0 };
-  const winsByType = { market: 0, limit: 0, unknown: 0 };
-  for (const t of closed) {
-    const k = entryTypeOf(t);
-    closedByType[k]++;
-    if ((t.pnl_pct ?? 0) > 0) winsByType[k]++;
-  }
-
-  // === Pending limits (still waiting) ===
-  const pending = pendingLimits.all();
-  // === Cancelled limits today (expired without fill) ===
-  const cancelled = cancelledLimitsToday.all(dayStart);
-  // === Active trades right now ===
-  const active = stillActive.all();
-
-  // === Render ===
   const dateStr = now.toISOString().slice(0, 10);
-  const lines: string[] = [`📊 <b>Сводка за ${dateStr}</b> (23:55 UTC)`, ''];
 
-  // --- Signals ---
-  if (sigBySymbol.size === 0) {
-    lines.push(`Сигналов: <i>не было</i>`);
-  } else {
-    lines.push('<b>Сигналы за день:</b>');
-    for (const [sym, arr] of sigBySymbol) {
-      const total = arr.reduce((s, x) => s + x.n, 0);
-      const detail = arr.map((x) => `${x.tf}m×${x.n}`).join(', ');
-      lines.push(`  ${sym}: ${total} (${detail})`);
-    }
+  const enabled = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
+
+  // --- Portfolio aggregate ---
+  let portClosedToday = 0;
+  let portWinsToday = 0;
+  let portLossesToday = 0;
+  let portPnlTodayUsd = 0;
+  let portActiveNow = 0;
+  let portClosedAll = 0;
+  let portPnlAllUsd = 0;
+  for (const cfg of enabled) {
+    const live = getStrategyLiveStats(cfg.id);
+    const daily = getStrategyDailyStats(cfg.id, dayStart);
+    portClosedToday += daily.closed;
+    portWinsToday += daily.wins;
+    portLossesToday += daily.losses;
+    portPnlTodayUsd += daily.netPnlUsd;
+    portActiveNow += live.open;
+    portClosedAll += live.closed;
+    portPnlAllUsd += live.netPnlUsd;
   }
-  lines.push('');
 
-  // --- Decisions counts + per-track breakdown ---
-  // "Решения за день" — нейтрально для всех треков (A/B/C).
-  const llmDec = allDec.filter((d) => d.track === 'llm');
-  const sigDec = allDec.filter((d) => d.track === 'signal');
-  const stratDec = allDec.filter((d) => d.track === 'strategy');
-  lines.push(`<b>Решения за день:</b> ${allDec.length}`);
-  if (allDec.length) {
+  // --- Signals webhook counter ---
+  const sigRows = sigsToday.all(dayStart);
+  const sigTotal = sigRows.reduce((s, r) => s + r.c, 0);
+
+  // --- Compose ---
+  const lines: string[] = [
+    `📊 <b>Сводка за ${dateStr}</b>`,
+    `<i>Track C · LuxAlgo Strategy Builder · ${TRACK_C_NOTIONAL_USD} USDT/сделка</i>`,
+    ``,
+  ];
+
+  // Portfolio mini-dashboard
+  const sumSign = portPnlAllUsd >= 0 ? '+' : '';
+  const todaySign = portPnlTodayUsd >= 0 ? '+' : '';
+  lines.push(`<b>🏛 Портфель:</b>`);
+  lines.push(
+    `  Стратегий: <b>${enabled.length}</b> · Открытых позиций: <b>${portActiveNow}</b>`,
+  );
+  if (portClosedToday > 0) {
+    const wrToday = ((portWinsToday / portClosedToday) * 100).toFixed(0);
     lines.push(
-      `  📈 OPEN: <b>${counts.OPEN}</b>  ·  🏁 CLOSE: <b>${counts.CLOSE}</b>  ·  🔧 MODIFY: <b>${counts.MODIFY}</b>  ·  ⏸ SKIP: <b>${counts.SKIP}</b>`,
+      `  Сегодня: <b>${portClosedToday}</b> сделок · ${portWinsToday}W / ${portLossesToday}L · WR ${wrToday}% · <b>${fmtUsd(portPnlTodayUsd, true)}</b>`,
     );
-    const activeTracks = [
-      llmDec.length > 0 ? `🤖 LLM: <b>${llmDec.length}</b>` : null,
-      sigDec.length > 0 ? `📡 Signal: <b>${sigDec.length}</b>` : null,
-      stratDec.length > 0 ? `🛠 Strategy: <b>${stratDec.length}</b>` : null,
-    ].filter((x): x is string => x !== null);
-    if (activeTracks.length > 1) {
-      lines.push(`  ${activeTracks.join('  ·  ')}`);
-    } else if (activeTracks.length === 1) {
-      const onlyTrack =
-        llmDec.length > 0 ? 'Track A (LLM)' :
-        sigDec.length > 0 ? 'Track B (Signal)' :
-        'Track C (Strategy)';
-      lines.push(`  ${activeTracks[0]} — все сделки на ${onlyTrack}`);
-    }
-  }
-  lines.push('');
-
-  // --- Real closed trades (the meat of the report) ---
-  if (closed.length > 0) {
-    const usdSign = totalUsd >= 0 ? '+' : '';
-    const winrate = ((wins / closed.length) * 100).toFixed(0);
-    const avgPctRaw = closed.reduce((s, t) => s + (t.pnl_pct ?? 0), 0) / closed.length;
-    const avgPctSign = avgPctRaw >= 0 ? '+' : '';
-    // totalR / avgR computed but no longer displayed — operator preference,
-    // % and USD are the primary metrics in the daily summary.
-    void totalR;
-
-    lines.push(`<b>💼 Закрыто сделок: ${closed.length}</b>`);
-    lines.push(
-      `  Win: <b>${wins}</b>  ·  Loss: <b>${losses}</b>${breakevens ? `  ·  BE: ${breakevens}` : ''}  ·  Win-rate: <b>${winrate}%</b>`,
-    );
-    lines.push(`  Avg % / trade: <b>${avgPctSign}${avgPctRaw.toFixed(2)}%</b>`);
-    lines.push(`  💰 PnL при $1000/позиция: <b>${usdSign}$${totalUsd.toFixed(2)}</b>`);
-    // Per-entry-type stats (useful once we have enough trades)
-    if (closedByType.limit > 0 || closedByType.market > 0) {
-      const segs: string[] = [];
-      if (closedByType.market > 0) {
-        const wr = ((winsByType.market / closedByType.market) * 100).toFixed(0);
-        segs.push(`market ${closedByType.market} (W ${wr}%)`);
-      }
-      if (closedByType.limit > 0) {
-        const wr = ((winsByType.limit / closedByType.limit) * 100).toFixed(0);
-        segs.push(`limit ${closedByType.limit} (W ${wr}%)`);
-      }
-      if (segs.length) lines.push(`  Тип входа: ${segs.join(' · ')}`);
-    }
-    lines.push('');
-    lines.push('<b>Детально:</b>');
-    for (const t of closed) {
-      const sideE = t.side === 'long' ? '🟢' : t.side === 'short' ? '🔴' : '';
-      const pnlPct = t.pnl_pct ?? 0;
-      const pnlStr = `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%`;
-      const r = t.pnl_r ?? 0;
-      const rStr = `(${r >= 0 ? '+' : ''}${r.toFixed(2)}R)`;
-      const usdPnl = (pnlPct / 100) * POSITION_NOTIONAL_USD;
-      const usdStr = `${usdPnl >= 0 ? '+' : ''}$${usdPnl.toFixed(2)}`;
-      const etype = entryTypeOf(t);
-      const typeTag = etype === 'limit' ? ' <i>limit</i>' : '';
-      // Track-aware trade ID prefix ('T#' Track C, 'S#' Track B signal, '#' Track A LLM).
-      // Track C uses per-strategy counter (T#001) instead of global id (T#0202)
-      // — see migration 012. Falls back to global id only for pre-migration rows.
-      const idPrefix = t.track === 'strategy' ? 'T#' : t.track === 'signal' ? 'S#' : '#';
-      const idNum = t.track === 'strategy'
-        ? (t.strategy_trade_num ?? t.id)
-        : t.id;
-      const idPad = t.track === 'strategy' ? 3 : 4;
-      // Track C: show [STRAT-NNN] tag if config has the strategy.
-      const stratTag =
-        t.track === 'strategy' && t.strategy_id
-          ? ` <b>[STRAT-${getStrategyConfig(t.strategy_id)?.code ?? '?'}]</b>`
-          : '';
-      // R-multiple deliberately omitted from the detail line — % + USD
-      // is enough for the daily report. rStr still computed earlier but
-      // unused here (kept the local in case operator preference flips back).
-      void rStr;
-      lines.push(
-        `  ${reasonEmoji(t.close_reason)} ${idPrefix}${idNum.toString().padStart(idPad, '0')}${stratTag}${typeTag} ${sideE} ${t.symbol} · ${t.entry} → ${t.close_price ?? '?'} · <b>${pnlStr}</b> · ${usdStr}`,
-      );
-    }
   } else {
-    lines.push(`<b>Закрытых сделок сегодня нет.</b>`);
+    lines.push(`  Сегодня: <i>закрытых сделок не было</i>`);
+  }
+  if (portClosedAll > 0) {
+    lines.push(
+      `  С запуска: <b>${portClosedAll}</b> сделок · <b>${fmtUsd(portPnlAllUsd, true)}</b>`,
+    );
   }
   lines.push('');
 
-  // --- Active trades ---
-  if (active.length > 0) {
-    lines.push(`<b>🛡 Открытые сделки: ${active.length}</b>`);
-    for (const t of active) {
-      const sideE = t.side === 'long' ? '🟢' : '🔴';
-      const ageMin = Math.round((Date.now() - (t.filled_at ?? t.created_at)) / 60000);
-      const ageStr = ageMin < 60 ? `${ageMin}мин` : `${Math.round(ageMin / 60)}ч`;
-      const etype = entryTypeOf(t);
-      const tag = etype === 'limit' ? ' <i>(filled limit)</i>' : '';
-      const idPrefix = t.track === 'strategy' ? 'T#' : t.track === 'signal' ? 'S#' : '#';
-      const idNum = t.track === 'strategy'
-        ? (t.strategy_trade_num ?? t.id)
-        : t.id;
-      const idPad = t.track === 'strategy' ? 3 : 4;
-      lines.push(
-        `  ${idPrefix}${idNum.toString().padStart(idPad, '0')}${tag} ${sideE} ${t.symbol} @ ${t.entry} (открыта ${ageStr} назад)`,
-      );
+  // Per-strategy blocks
+  if (enabled.length === 0) {
+    lines.push(`<i>Активных стратегий нет.</i>`);
+  } else {
+    for (const cfg of enabled) {
+      lines.push(...renderStrategyBlock(cfg, dayStart));
+      lines.push('');
     }
-    lines.push('');
   }
 
-  // --- Pending limits (still waiting) ---
-  if (pending.length > 0) {
-    lines.push(`<b>📋 Лимитные ордера в ожидании: ${pending.length}</b>`);
-    for (const t of pending) {
-      const sideE = t.side === 'long' ? '🟢' : '🔴';
-      const expiresIn = t.pending_until ? Math.max(0, Math.round((t.pending_until - Date.now()) / 60000)) : 0;
-      lines.push(
-        `  ${sideE} ${t.symbol} @ ${t.entry} (истекает через ${expiresIn}мин)`,
-      );
-    }
-    lines.push('');
-  }
-
-  // --- Cancelled limits today (didn't fire) ---
-  if (cancelled.length > 0) {
-    lines.push(`<b>⏱ Лимитов отменено сегодня: ${cancelled.length}</b>`);
-    lines.push(`  <i>(ретест не пришёл за 2ч — в P&L не учитываются)</i>`);
-    for (const t of cancelled) {
-      const sideE = t.side === 'long' ? '🟢' : '🔴';
-      lines.push(`  ${sideE} ${t.symbol} @ ${t.entry}`);
-    }
-    lines.push('');
-  }
-
-  // --- Empty footer if nothing happened ---
-  if (active.length === 0 && pending.length === 0 && cancelled.length === 0 && closed.length === 0) {
-    lines.push(`<i>Без открытых, закрытых и pending позиций.</i>`);
-  }
+  // Signals counter as a tiny footer
+  lines.push(`<i>⚙ Webhooks за день: ${sigTotal}</i>`);
+  lines.push(`<i>⚠ Прошлые результаты не гарантируют будущих.</i>`);
 
   const text = lines.join('\n');
-  await sendMessage({ channel: 'signals', text });
-  logger.info(
-    {
-      closed_today: closed.length,
-      active: active.length,
-      pending: pending.length,
-      cancelled_today: cancelled.length,
-      decisions: allDec.length,
-      total_r: Math.round(totalR * 100) / 100,
-      total_usd: Math.round(totalUsd * 100) / 100,
-    },
-    'daily wrap sent',
-  );
+  await sendMessage({
+    channel: 'signals',
+    text,
+    disable_web_page_preview: true,
+    disable_notification: true,
+  }).catch((err) => logger.error({ err }, 'daily-wrap: send failed'));
+  await sendMessage({
+    channel: 'logs',
+    text,
+    disable_web_page_preview: true,
+    disable_notification: true,
+  }).catch(() => {});
 }
 
 export function startDailyWrapJob(): void {
-  // 23:55 UTC daily.
+  // 23:55 UTC daily — slightly before end of UTC day so all candles close.
   cron.schedule('55 23 * * *', () => {
-    void tick(new Date());
+    void tick();
   });
-  logger.info('daily wrap cron started (23:55 UTC)');
+  logger.info('daily-wrap cron started (23:55 UTC)');
 }
 
-// Exposed for one-off invocations / tests.
-export const _internal = { tick, startOfTodayUtc };
+// Export for manual trigger from CLI / test harnesses.
+export { tick as runDailyWrap };
