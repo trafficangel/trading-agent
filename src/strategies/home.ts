@@ -199,7 +199,14 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           q: 'Откуда берутся стратегии?',
-          a: 'Все стратегии собираются в LuxAlgo AI Strategy Builder — это признанная платформа для тестирования торговых идей. Каждая стратегия имеет публичную ссылку на оригинал на странице стратегии — вы можете проверить её сами.',
+          a:
+            '[LuxAlgo](https://www.luxalgo.com/) — это набор индикаторов для TradingView, которыми пользуются больше 200 тысяч трейдеров. В премиум-подписке доступны четыре основных пакета:\n\n' +
+            '- **Signals & Overlays** — сигналы разворота тренда (Bullish+ / Bearish+), Smart Trail, Reversal Zones\n' +
+            '- **Price Action Concepts** — структура рынка по концепциям ICT/SMC: BOS (break of structure), CHoCH (change of character), Order Blocks, Fair Value Gaps\n' +
+            '- **Oscillator Matrix** — Money Flow, Trend Catcher, Contrarian Any, дивергенции и десяток других осцилляторов для подтверждения сигналов\n' +
+            '- **AI Strategy Builder** — конструктор стратегий: комбинируем условия из всех индикаторов выше и сразу получаем полный бэктест на 200+ дней истории по символу и таймфрейму\n\n' +
+            'Как мы выбираем стратегии. В AI Builder тестируем десятки комбинаций — например «Contrarian Any Bullish + Trend Catcher Bearish + Money Flow > 50». Только те что показывают **winrate ≥55%** и **profit factor ≥2** идут в финальную проверку: пересчитываем результаты в TradingView Premium с реальной комиссией Bybit (0.11% за круг) и нашей фиксированной позицией $1000. Если стратегия сохраняет показатели — добавляем на сайт.\n\n' +
+            'Прозрачность. На странице каждой стратегии — прямая ссылка на её оригинальный LuxAlgo chat. Там видны точные условия входа/выхода, бэктест и все 100+ исторических сделок. Никакие числа не подделаны — каждый результат проверяем сами по сделкам, всё открыто.',
         },
         {
           q: 'Как контролируется риск?',
@@ -354,7 +361,14 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           q: 'Where do the strategies come from?',
-          a: 'All strategies are built in LuxAlgo AI Strategy Builder — a recognized platform for testing trading ideas. Each strategy has a public link to its source on its detail page — you can verify it yourself.',
+          a:
+            '[LuxAlgo](https://www.luxalgo.com/) is a TradingView indicator suite used by 200,000+ traders. The premium subscription bundles four indicator packs:\n\n' +
+            '- **Signals & Overlays** — trend-reversal signals (Bullish+ / Bearish+), Smart Trail, Reversal Zones\n' +
+            '- **Price Action Concepts** — market structure via ICT/SMC concepts: BOS (break of structure), CHoCH (change of character), Order Blocks, Fair Value Gaps\n' +
+            '- **Oscillator Matrix** — Money Flow, Trend Catcher, Contrarian Any, divergences, plus a dozen other confirmation oscillators\n' +
+            '- **AI Strategy Builder** — strategy combinator: mix conditions from any of the above and immediately get a full backtest over 200+ days of history on a chosen symbol/timeframe\n\n' +
+            'How we pick strategies. We test dozens of combinations in AI Builder — e.g. "Contrarian Any Bullish + Trend Catcher Bearish + Money Flow > 50". Only those with **win rate ≥55%** and **profit factor ≥2** advance to the final check: recompute on TradingView Premium with realistic Bybit commission (0.11% round-trip) and our fixed $1000 position. If the strategy still holds up — onto the site it goes.\n\n' +
+            'Transparency. Every strategy page links directly to its original LuxAlgo chat. The exact entry/exit conditions, the backtest, and all 100+ historical trades are visible there. No numbers are doctored — we re-verify each result trade-by-trade, everything is open.',
         },
         {
           q: 'How is risk controlled?',
