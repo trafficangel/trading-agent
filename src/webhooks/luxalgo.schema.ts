@@ -70,9 +70,16 @@ export type StrategyEvent = z.infer<typeof StrategyEvent>;
  *    A) Explicit form: { action: 'entry'|'exit', side?: 'long'|'short' }
  *       — manual / curl testing
  *    B) LuxAlgo-native form: { strategy_event: 'long'|'short'|'exit_long'|'exit_short' }
- *       — what {{strategy_event}} placeholder substitutes to in the alert
+ *       — what [[strategy_event]] placeholder substitutes to in the alert
  *
- *  Server normalises B → A via deriveActionSide() before routing to trader. */
+ *  Server normalises B → A via deriveActionSide() before routing to trader.
+ *
+ *  ⚠ **LuxAlgo uses [[placeholder]] syntax, NOT TradingView's {{placeholder}}.**
+ *  Before suggesting an alert payload to the user, read
+ *  `docs/luxalgo-strategy-alerts.md` — it lists all available [[...]]
+ *  placeholders (different names than TradingView: `[[timeframe]]` not
+ *  `[[interval]]`, `[[strategy_order_price]]` not `[[close]]`, etc.).
+ *  Using {{...}} produces an "Invalid" payload in the LuxAlgo editor. */
 export const LuxAlgoStrategyPayload = z
   .object({
     kind: z.literal('strategy'),
