@@ -253,6 +253,89 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     },
   },
 
+  // Third registered strategy (May 17, 2026).
+  // Source: https://www.luxalgo.com/chat/dwfkaafmqd0ce3io4vjirb79
+  // Trades log assembled from operator screenshots (scraper TF
+  // detection got confused on this chat — fed 118 trades manually).
+  //
+  // Confirmation Any + Trend Catcher + Trend Strength Trending on
+  // UNIUSDT 1h — an exceptionally high-win-rate setup that hunts
+  // strong trends with momentum-confirmation filters.
+  //
+  // BACKTEST (Feb 5 2024 → May 12 2026, 827 days, recomputed on
+  // $1000 notional + Bybit commission):
+  //   - 118 trades, 104W / 14L → 88.14% WR
+  //   - Profit factor 4.38 (Long 5.99 / Short 3.04)
+  //   - Net +$4112.90 (+411% on $1000 notional) · CAGR 181.5%
+  //   - Max DD $243.66 (24.4%) — driven by a single -24% trade (#38)
+  //   - Avg win +$51 (+5.12%), avg loss -$87 (-8.69%)
+  //   - 5 worst losses: -24%, -17%, -16%, -13%, -9%
+  //   - Long 56 trades +263.7%, Short 62 trades +147.6%
+  //   - Avg trade duration: 79h (≈3.3 days), avg ~1.5 trades/week
+  //
+  // SAFETY-SL CALIBRATION:
+  // Set 10% (vs the 2.5% we use for BNB/XRP) because:
+  //   - Only 14 of 118 trades lose at all (12%)
+  //   - Of those 14, only 4 exceed -10% (the 24/17/16/13 cluster)
+  //   - Avg natural loss is -8.7%, so SL at 5% would chop in half
+  //     and would likely cut winners drawing-down during hold
+  //   - 10% acts as catastrophe protection ONLY — won't fire on
+  //     normal strategy losses, will save us from any tail event
+  //     similar to the -24% trade
+  // Revisit after 10-20 live trades based on observed sl_hit ratio.
+  'uni-cfm-tc-tst': {
+    id: 'uni-cfm-tc-tst',
+    code: '003',
+    description:
+      'UNI 1h | LONG: CFM Any Bl + TC Br + TST Trending | SHORT: CFM Any Br + TC Bl + TST Trending | EXIT: CFM Built-in',
+    longDescription:
+      'Трендовая стратегия на часовом таймфрейме UNIUSDT, сочетающая сигналы Confirmation Any с фильтрами Trend Catcher и Trend Strength Trending. ' +
+      'LONG-вход срабатывает когда Confirmation Any выдаёт bullish сигнал, Trend Catcher показывает bearish (контр-разворотная зона), и Trend Strength фиксирует трендовое состояние. ' +
+      'SHORT — зеркально. ' +
+      'Выход через встроенные Confirmation Builtin-Exits. ' +
+      'Стратегия отличается экстремально высоким winrate (88%) и средней длительностью сделки около 3 дней. ' +
+      'Safety SL 10% — защита от tail-событий: за 2 года истории только одна сделка дошла до −24%, остальные убытки естественно ограничены логикой выходов стратегии.',
+    symbol: 'UNIUSDT',
+    timeframe: '60',
+    enabled: true,
+    slPct: 0.10,
+    launchedAt: Date.parse('2026-05-17T10:30:00Z'),
+    alertName: 'UNIUSDT|60|LONG=CFMAnyBl&TCBr&TSTTr|SHORT=CFMAnyBr&TCBl&TSTTr|EXIT=CFMBltExt',
+    sourceUrl: 'https://www.luxalgo.com/chat/dwfkaafmqd0ce3io4vjirb79/',
+    name: 'UNI Trend Strength',
+    // exitOnReverseSignal: default true. CFM has Built-in Exits so
+    // explicit exit webhooks WILL fire, but the reverse-signal path
+    // catches any lost/delayed exit as fallback.
+    backtest: {
+      periodLabel: 'Feb 5, 2024 — May 12, 2026',
+      periodDays: 827,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 4112.90,
+      netPnlPct: 411.29,
+      cagrPct: 181.52,
+      totalTrades: 118,
+      wins: 104,
+      losses: 14,
+      winRate: 0.8814,
+      profitFactor: 4.382,
+      commissionPaidUsd: 129.80,
+      maxDrawdownPct: 24.37,
+      maxDrawdownUsd: 243.66,
+      avgWinUsd: 51.24,
+      avgWinPct: 5.12,
+      avgLossUsd: -86.87,
+      avgLossPct: -8.69,
+      largestWinUsd: 737.63,
+      largestLossUsd: -243.66,
+      longTrades: 56,
+      longPnlPct: 263.70,
+      shortTrades: 62,
+      shortPnlPct: 147.59,
+    },
+  },
+
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
