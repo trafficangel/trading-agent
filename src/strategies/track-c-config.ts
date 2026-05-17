@@ -336,6 +336,93 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     },
   },
 
+  // Fourth registered strategy (May 17, 2026).
+  // Source: https://www.luxalgo.com/chat/dwfkaafmqd0ce3io4vjirb79
+  // (Same chat as STRAT-003 — LuxAlgo's "Dive Deeper" generated a
+  // separate strategy variant for TRXUSDT on 1h.)
+  //
+  // Confirmation Any + Trend Tracer + Weak Confluence on TRXUSDT 1h.
+  // Unusual filter combo: Bullish entry requires Trend Tracer
+  // BULLISH (with trend) + Weak Bearish Confluence (counter-momentum
+  // hint) — looks for setups where trend is intact but momentum is
+  // softening.
+  //
+  // BACKTEST (Feb 3 2024 → May 14 2026, 831 days, recomputed on
+  // $1000 notional + Bybit commission):
+  //   - 114 trades, 99W / 15L → 86.84% WR
+  //   - Profit factor 2.87 (Long 5.99 / Short 2.07 in LuxAlgo's
+  //     unit-size; OUR recompute on $1000 notional shows lower PF
+  //     because commission scales with position — see below)
+  //   - Net +$1118.72 (+111.87% on $1000) · CAGR 49.14%
+  //   - Max DD $241.66 (24.17%) — driven by 1 trade (-13.90%)
+  //   - Avg win +$17.34 (+1.73%), avg loss -$39.86 (-3.99%)
+  //   - 5 worst losses: -13.90%, -11.50%, -8.24%, -3.53%, -3.39%
+  //   - Median loss: -2.45% (most losses are small)
+  //   - Long 69 trades +88.57%, Short 45 trades +23.30%
+  //
+  // COMMISSION NOTE: LuxAlgo reports PF 4.05 on their unit-size
+  // backtest. We report 2.87. The difference is honest commission
+  // accounting — Bybit charges 0.055% × 2 sides = 0.11% round-trip,
+  // which on $1000 notional × 114 trades = $125.40 total. On LuxAlgo's
+  // unit size (~$0.20/trade), commission is $0.025 total — negligible.
+  // Our PF is what you'd actually see at Bybit. Don't be confused by
+  // the gap.
+  //
+  // SAFETY-SL CALIBRATION:
+  // Set 5% — tighter than UNI's 10% because TRX losses are smaller
+  // and more concentrated (only 3 of 15 exceed -5%, vs UNI where 5
+  // of 14 exceed -10%). 5% catches the 3 worst (-13.9, -11.5, -8.2)
+  // while leaving the typical -2.5% natural losses alone.
+  'trx-cfm-tt-wc': {
+    id: 'trx-cfm-tt-wc',
+    code: '004',
+    description:
+      'TRX 1h | LONG: CFM Any Bl + TT Bullish + Weak Br Confluence | SHORT: CFM Any Br + TT Bearish + Weak Bl Confluence | EXIT: CFM Built-in',
+    longDescription:
+      'Трендовая стратегия на TRXUSDT 1h с необычным фильтром Weak Confluence — ищет ситуации когда тренд (Trend Tracer) подтверждён, но моментум начинает ослабевать в противоположную сторону. ' +
+      'LONG-вход: Confirmation Any bullish сигнал + Trend Tracer Bullish (восходящий тренд) + Weak Bearish Confluence (слабый медвежий моментум как фильтр входа). ' +
+      'SHORT — зеркально. ' +
+      'Выход через встроенные Confirmation Builtin-Exits. ' +
+      'Win rate 87% при 114 сделках за 2 года, дисциплинированный выход стратегии минимизирует крупные просадки. ' +
+      'Safety SL 5% — отсекает только 3 худших сделки в истории (−14%, −11%, −8%), не мешает обычным небольшим минусам.',
+    symbol: 'TRXUSDT',
+    timeframe: '60',
+    enabled: true,
+    slPct: 0.05,
+    launchedAt: Date.parse('2026-05-17T10:35:00Z'),
+    alertName: 'TRXUSDT|60|LONG=CFMAnyBl&TTBl&WkBrCfl|SHORT=CFMAnyBr&TTBr&WkBlCfl|EXIT=CFMBltExt',
+    sourceUrl: 'https://www.luxalgo.com/chat/dwfkaafmqd0ce3io4vjirb79/',
+    name: 'TRX Weak Confluence',
+    backtest: {
+      periodLabel: 'Feb 3, 2024 — May 14, 2026',
+      periodDays: 831,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 1118.72,
+      netPnlPct: 111.87,
+      cagrPct: 49.14,
+      totalTrades: 114,
+      wins: 99,
+      losses: 15,
+      winRate: 0.8684,
+      profitFactor: 2.871,
+      commissionPaidUsd: 125.40,
+      maxDrawdownPct: 24.17,
+      maxDrawdownUsd: 241.66,
+      avgWinUsd: 17.34,
+      avgWinPct: 1.73,
+      avgLossUsd: -39.86,
+      avgLossPct: -3.99,
+      largestWinUsd: 106.53,
+      largestLossUsd: -140.13,
+      longTrades: 69,
+      longPnlPct: 88.57,
+      shortTrades: 45,
+      shortPnlPct: 23.30,
+    },
+  },
+
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
