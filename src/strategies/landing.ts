@@ -2077,8 +2077,8 @@ function renderBacktestSection(snap: BacktestSnapshot, strategyId: string, cfg?:
       </div>
       <div class="stat-card">
         <div class="stat-label">Годовая доходность</div>
-        <div class="stat-value ${classForValue(b.cagrPct)}">${fmtCagr(b.cagrPct, b.periodDays)}</div>
-        <div class="stat-sub">${b.periodDays >= 365 ? `за ${(b.periodDays / 365).toFixed(1)} года` : `прогноз по ${b.periodDays} ${pluralRu(b.periodDays, 'дню', 'дням', 'дням')} (линейная аннуализация)`}</div>
+        <div class="stat-value ${classForValue(b.cagrPct)}">${b.periodDays >= 365 ? '≈' : '~'}${b.cagrPct >= 0 ? '+' : ''}${Math.round(b.cagrPct)}%</div>
+        <div class="stat-sub">${b.periodDays >= 365 ? `годовых · за ${(b.periodDays / 365).toFixed(1)} года` : `годовых · прогноз по ${b.periodDays} ${pluralRu(b.periodDays, 'дню', 'дням', 'дням')}`}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Commission Paid</div>
