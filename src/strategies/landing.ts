@@ -142,6 +142,31 @@ function pluralRu(n: number, one: string, few: string, many: string): string {
   return many;
 }
 
+/**
+ * Format annualised return ("X% годовых") with an explicit projection
+ * marker when the backtest period is shorter than a year.
+ *
+ * The CAGR calculation itself is linear: (totalPct × 365) / periodDays.
+ * Fine for periods ≥ 365 — that's an actual year-over-year rate.
+ * For < 365 day periods it's a PROJECTION — extrapolating a partial
+ * year onto a full year. Mark it clearly so visitors don't assume
+ * "this strategy made 200% last year" when in reality it ran 6 months.
+ *
+ *   periodDays >= 365  →  "≈49% годовых"
+ *   periodDays < 365   →  "~167% годовых (прогноз по N дн)"
+ *
+ * Always rounds to whole percent — extra precision is false precision
+ * for projections.
+ */
+function fmtCagr(cagrPct: number, periodDays: number): string {
+  const rounded = Math.round(cagrPct);
+  const sign = rounded >= 0 ? '+' : '';
+  if (periodDays >= 365) {
+    return `≈${sign}${rounded}% годовых`;
+  }
+  return `~${sign}${rounded}% годовых (прогноз по ${periodDays} дн)`;
+}
+
 // Per-trade $1000 recompute moved to ./backtest-recompute.ts (single
 // source of truth used by landing, scraper, and announcement script).
 
@@ -889,6 +914,13 @@ const STYLE = `
   .row-stat-line .pos { color: var(--accent); }
   .row-stat-line .neg { color: var(--danger); }
   .row-stat-line .dim { color: var(--text-faint); }
+  /* CAGR line — subtler than the main backtest summary, since it's
+   *  derived/projected. Smaller font, dimmer color, but the value
+   *  itself keeps the green/red accent. */
+  .row-stat-cagr {
+    font-size: 12px; color: var(--text-dim); margin-top: 2px;
+  }
+  .row-stat-cagr .stat-tag { background: transparent; padding: 1px 5px; }
 
   /* Status pills */
   .pill.running { background: var(--accent-soft); color: var(--accent); }
@@ -1817,7 +1849,10 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
       ? `<span class="pill live"><span class="pulse-dot active" aria-hidden="true"></span> В работе</span>`
       : `<span class="pill idle"><span class="pulse-dot idle" aria-hidden="true"></span> Ждём сигнал</span>`;
 
-    // Backtest row — human-readable Russian, no abbreviations
+    // Backtest row — human-readable Russian, no abbreviations.
+    // CAGR adds the "годовая доходность" annualised projection on a
+    // separate line below so the eye reads total → annual → context
+    // in a natural cascade.
     const btRow = b
       ? `<div class="row-stat-line">
           <span class="stat-tag">БЭКТЕСТ</span>
@@ -1826,6 +1861,10 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
           <span class="dim">${(b.winRate * 100).toFixed(0)}% побед</span>
           <span class="dim">·</span>
           <span class="dim">${b.totalTrades} ${pluralRu(b.totalTrades, 'сделка', 'сделки', 'сделок')} за ${b.periodDays} ${pluralRu(b.periodDays, 'день', 'дня', 'дней')}</span>
+        </div>
+        <div class="row-stat-line row-stat-cagr">
+          <span class="stat-tag">ГОДОВЫХ</span>
+          <span class="${classForValue(b.cagrPct)}"><b>${fmtCagr(b.cagrPct, b.periodDays)}</b></span>
         </div>`
       : '';
 
@@ -2037,9 +2076,9 @@ function renderBacktestSection(snap: BacktestSnapshot, strategyId: string, cfg?:
         <div class="stat-sub neg">${fmtUsd(-b.maxDrawdownUsd)}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">CAGR</div>
-        <div class="stat-value ${classForValue(b.cagrPct)}" data-count="${b.cagrPct.toFixed(2)}" data-decimals="2" data-suffix="%">${b.cagrPct.toFixed(2)}%</div>
-        <div class="stat-sub">аннуализированная доходность</div>
+        <div class="stat-label">Годовая доходность</div>
+        <div class="stat-value ${classForValue(b.cagrPct)}">${fmtCagr(b.cagrPct, b.periodDays)}</div>
+        <div class="stat-sub">${b.periodDays >= 365 ? `за ${(b.periodDays / 365).toFixed(1)} года` : `прогноз по ${b.periodDays} ${pluralRu(b.periodDays, 'дню', 'дням', 'дням')} (линейная аннуализация)`}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Commission Paid</div>
