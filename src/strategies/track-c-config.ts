@@ -674,6 +674,99 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     },
   },
 
+  // STRAT-008 — BTC 5m Confirmation Strong + Trend Strength Trending
+  // ----------------------------------------------------------------
+  // Operator's TIER S pick #4 (last in current batch). LuxAlgo's
+  // unit-size backtest shows blockbuster numbers (PF 3.09, +25K USDT,
+  // 85.29% WR, MaxDD 11.97%) over Mar 7 - May 15, 2026 (68 days).
+  //
+  // Recomputed on our standard $1000 notional + 0.11% Bybit round-trip:
+  //   - 102 trades, 79W / 23L → 77.45% WR (lower than LuxAlgo because
+  //     commission flips ~8 small breakeven wins into net losses)
+  //   - Profit factor 2.18 (vs LuxAlgo 3.09)
+  //   - Net +$222.87 (+22.29%) · CAGR 119.1%
+  //   - Max DD $39.27 (3.93%) — much tighter than LuxAlgo's compounding-
+  //     based 11.97%, since fixed notional doesn't amplify on drawdowns
+  //   - Commission paid: $112.20 (50% of gross loss!)
+  //   - Long 51 trades, 82.4% WR, +$182
+  //   - Short 51 trades, 72.5% WR, +$41 (asymmetric — long edge dominates)
+  //   - Avg duration 110 bars (~9 hours on 5m)
+  //   - ~1.96 trades/day
+  //
+  // COMMISSION REALITY CHECK (same as BCH/STRAT-007):
+  // 102 trades × 0.11% = 11.2% paid in commission. Less brutal than BCH
+  // (155 trades) but still material. On 5m strategies with sub-1% median
+  // moves, the spread + fee structure compresses Bybit edge significantly.
+  //
+  // SAFETY-SL CALIBRATION:
+  // Loss distribution: median -0.40%, p95 -3.38%, worst -3.54%.
+  // 21 of 23 losses are ≤ -2.07%; only 2 fat-tail trades exceed -3%.
+  // Set 5% as catastrophe-only cap: well above all 23 historical
+  // losses with ~40% buffer, so safety SL almost never fires unless
+  // exit-webhook is genuinely lost.
+  //
+  // STRATEGY FORMULATION:
+  //   LONG  = Confirmation Strong Bearish + Trend Strength Trending
+  //   SHORT = Confirmation Strong Bullish + Trend Strength Trending
+  //   EXIT  = Confirmation Built-in Exits
+  //
+  // Note "Confirmation Strong" (the stricter variant) instead of
+  // "Confirmation Any" — fewer signals but higher per-trade quality.
+  'btc-cfm-strong-tst': {
+    id: 'btc-cfm-strong-tst',
+    code: '008',
+    description:
+      'BTC 5m | LONG: CFM Strong Br + TST Trending | SHORT: CFM Strong Bl + TST Trending | EXIT: CFM Built-in',
+    longDescription:
+      'Трендовая стратегия на BTCUSDT 5m с фильтром по силе тренда (Trend Strength Trending). ' +
+      'LONG-вход срабатывает когда Confirmation Strong выдаёт bearish-сигнал в трендовой фазе рынка (рынок чётко идёт куда-то, и сильный contrarian-сигнал говорит «здесь разворот»). ' +
+      'SHORT — зеркально. ' +
+      'Выход через встроенные Confirmation Builtin-Exits. ' +
+      'Используется СТРОГИЙ вариант Confirmation Strong (не Any) — даёт меньше сигналов, но более качественных. ' +
+      'Win rate 77% на $1000 размере (LuxAlgo показывает 85% на unit-size без учёта комиссии). ' +
+      'Long-сторона значительно сильнее short (82% vs 72% WR), что характерно для BTC в бычьем рынке 2026. ' +
+      'Средняя длительность сделки ~9 часов, средняя частота ~2 сделки в день. ' +
+      'ВАЖНО: 102 сделки за 2.3 месяца = $112 уплаченной комиссии (11% от капитала). На 5m стратегиях с медианным движением сделки ~0.4% комиссия Bybit съедает существенную часть edge — это честно отражено в наших цифрах PF 2.18 (LuxAlgo 3.09 на unit-size). ' +
+      'Safety SL 5% — выше всех 23 исторических убытков (худший −3.54%) с буфером ~40%. Срабатывает только при катастрофе; обычные минусы стратегия закрывает сама. ' +
+      'Бэктест короткий — всего 2.3 месяца. Цифры предварительные, ждём накопления реальной статистики.',
+    symbol: 'BTCUSDT',
+    timeframe: '5',
+    enabled: true,
+    slPct: 0.05,
+    launchedAt: Date.parse('2026-05-19T00:00:00Z'),
+    alertName: 'BTCUSDT|5|LONG=CFMStrongBr&TSTTr|SHORT=CFMStrongBl&TSTTr|EXIT=CFMBltExt',
+    sourceUrl: 'https://www.luxalgo.com/chat/pqw04cy9q2unzkju7afj5ihh/',
+    name: 'BTC Confirmation Strong',
+    backtest: {
+      periodLabel: 'Mar 7, 2026 — May 15, 2026',
+      periodDays: 68,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 222.87,
+      netPnlPct: 22.29,
+      cagrPct: 119.13,
+      totalTrades: 102,
+      wins: 79,
+      losses: 23,
+      winRate: 0.7745,
+      profitFactor: 2.181,
+      commissionPaidUsd: 112.20,
+      maxDrawdownPct: 3.93,
+      maxDrawdownUsd: 39.27,
+      avgWinUsd: 5.21,
+      avgWinPct: 0.52,
+      avgLossUsd: -8.20,
+      avgLossPct: -0.82,
+      largestWinUsd: 17.10,
+      largestLossUsd: -35.44,
+      longTrades: 51,
+      longPnlPct: 18.21,
+      shortTrades: 51,
+      shortPnlPct: 4.08,
+    },
+  },
+
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
