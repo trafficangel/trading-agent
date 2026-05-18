@@ -182,15 +182,14 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   //   - Avg loss -$21.85 (-2.19%), avg win +$29.99 (+3.00%)
   //   - Long 51 trades +38.27%, Short 50 trades +83.15%
   //
-  // SAFETY-SL CALIBRATION:
-  // Importer suggested 6.5% (90th-pct loss × 1.2 buffer). Operator
-  // chose 2.5% to match STRAT-001 — deliberately TIGHTER than the
-  // strategy's natural worst-case excursions. Trade-off: the safety SL
-  // will fire on ~25-30% of the strategy's natural losers (those with
-  // adverse excursion > 2.5%), capping each at -2.5% instead of letting
-  // them run to -5-14%. Expected effect on live PnL: lower expectancy
-  // per trade but tighter max DD. Revisit after 10-20 live trades based
-  // on observed sl_hit ratio + comparison to ideal (strategy_exit) PnL.
+  // SAFETY-SL CALIBRATION (revised 2026-05-18):
+  // Originally set to 2.5% (matching STRAT-001 tight-cap philosophy).
+  // Revised to 15% after auditing all 7 strategies against actual loss
+  // distributions — see commit "safety-sl: raise above p95 historical
+  // losses, lift validator cap to 35%". Old 2.5% fired on ~25% of
+  // natural losers, actively truncating the strategy's mean reversion.
+  // New 15% sits above the worst historical loss (-13.7%) and only
+  // fires on catastrophe (lost exit-webhook / exchange freeze).
   //
   // STRATEGY FORMULATION (different from STRAT-001):
   //   LONG  = Contrarian Any Bullish + Trend Catcher Bearish + MF>50
@@ -209,11 +208,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'LONG-вход срабатывает когда Contrarian Any выдаёт bullish-сигнал, Trend Catcher показывает bearish-тренд (зона перепроданности) и Money Flow выше 50. ' +
       'SHORT — зеркально. ' +
       'У стратегии нет встроенного exit условия — позиции закрываются по обратному сигналу (LONG закроется когда придёт SHORT entry и наоборот). ' +
-      'Safety SL 2.5% страхует от резких движений между сигналами; в бектесте без него worst trade был −13.8%.',
+      'Safety SL 15% — выше всех 34 исторических убытков (худший −13.8%, остальные ≤ −5.5%). Срабатывает только если пропадёт reverse-signal или биржа застрянет, в живой торговле почти всегда «спящий».',
     symbol: 'XRPUSDT',
     timeframe: '15',
     enabled: true,
-    slPct: 0.025,
+    slPct: 0.15,
     launchedAt: Date.parse('2026-05-16T19:00:00Z'),
     alertName: 'XRPUSD|15|LONG=CONTAnyBl&TCBr&MFa50|SHORT=CONTAnyBr&TCBl&MFb50|EXIT=null',
     sourceUrl: 'https://www.luxalgo.com/chat/p19leyc5pzvt3s32mj36rnzn/',
@@ -294,11 +293,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'SHORT — зеркально. ' +
       'Выход через встроенные Confirmation Builtin-Exits. ' +
       'Стратегия отличается экстремально высоким winrate (88%) и средней длительностью сделки около 3 дней. ' +
-      'Safety SL 10% — защита от tail-событий: за 2 года истории только одна сделка дошла до −24%, остальные убытки естественно ограничены логикой выходов стратегии.',
+      'Safety SL 30% — выше p95 убытков (24.3%) и худшего трейда (−24.3%) за 2 года истории. Идея: дать стратегии полную свободу досидеть до встроенного exit-сигнала, а SL держать как страховку от потери вебхука. На 1h контр-трендовых стратегиях нормально сидеть в просадке −15-20% перед разворотом.',
     symbol: 'UNIUSDT',
     timeframe: '60',
     enabled: true,
-    slPct: 0.10,
+    slPct: 0.30,
     launchedAt: Date.parse('2026-05-17T10:30:00Z'),
     alertName: 'UNIUSDT|60|LONG=CFMAnyBl&TCBr&TSTTr|SHORT=CFMAnyBr&TCBl&TSTTr|EXIT=CFMBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/dwfkaafmqd0ce3io4vjirb79/',
@@ -384,11 +383,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'SHORT — зеркально. ' +
       'Выход через встроенные Confirmation Builtin-Exits. ' +
       'Win rate 87% при 114 сделках за 2 года, дисциплинированный выход стратегии минимизирует крупные просадки. ' +
-      'Safety SL 5% — отсекает только 3 худших сделки в истории (−14%, −11%, −8%), не мешает обычным небольшим минусам.',
+      'Safety SL 15% — выше всех 15 исторических убытков (худший −13.9%). Срабатывает только при потере exit-вебхука или зависании биржи; обычные мелкие минусы стратегия закрывает сама.',
     symbol: 'TRXUSDT',
     timeframe: '60',
     enabled: true,
-    slPct: 0.05,
+    slPct: 0.15,
     launchedAt: Date.parse('2026-05-17T10:35:00Z'),
     alertName: 'TRXUSDT|60|LONG=CFMAnyBl&TTBl&WkBrCfl|SHORT=CFMAnyBr&TTBr&WkBlCfl|EXIT=CFMBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/dwfkaafmqd0ce3io4vjirb79/',
@@ -464,11 +463,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'SHORT — зеркально. ' +
       'Выход через встроенные Confirmation Builtin-Exits. ' +
       'Win rate 88% за 600+ дней истории, средняя длительность сделки ~92 часа (~4 дня). ' +
-      'Safety SL 10% — защита от tail-событий: за 20 месяцев истории только одна сделка дошла до −23%, основной массив убытков ограничен логикой выходов стратегии в районе −8%.',
+      'Safety SL 25% — выше p95 убытков (22.7%) и худшего трейда. Контр-трендовая 4-дневная сделка регулярно сидит в просадке −10-15% до разворота; SL держим только как страховку от потери exit-вебхука.',
     symbol: 'TONUSDT',
     timeframe: '60',
     enabled: true,
-    slPct: 0.10,
+    slPct: 0.25,
     launchedAt: Date.parse('2026-05-18T11:00:00Z'),
     alertName: 'TONUSDT|60|LONG=CNTRNormBl&CFMDn&NeoCloudBr|SHORT=CNTRNormBr&CFMUp&NeoCloudBl|EXIT=CNTRBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/hwuqef4lmptf74imngdysti5/',
@@ -546,11 +545,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Выход через встроенные Contrarian Builtin-Exits. ' +
       'Win rate 67.52% — ниже чем у других стратегий портфеля, но компенсируется отношением риск/прибыль: средний выигрыш +9.78% против среднего убытка −6.21%. ' +
       'Самая доходная стратегия портфеля: +536% за 831 день (CAGR 235%). ' +
-      'Safety SL 10% — защита от tail-событий: за 27 месяцев истории всего 5 сделок дошли до −10% и ниже, основной массив убытков ограничен логикой выходов в районе −5%.',
+      'Safety SL 28% — выше p95 (20.4%) и второго худшего трейда (−20.4%); единственный исторический выброс −26.6%. На таком соотношении R:R стратегия часто сидит в глубокой просадке перед разворотом — ранний выход safety-стопом превращает потенциальный winner в фиксированный убыток. Держим SL как страховку от пропажи exit-вебхука.',
     symbol: 'HBARUSDT',
     timeframe: '60',
     enabled: true,
-    slPct: 0.10,
+    slPct: 0.28,
     launchedAt: Date.parse('2026-05-18T11:30:00Z'),
     alertName: 'HBARUSDT|60|LONG=CNTRNormBr&TSRng&StrongBlCfl|SHORT=CNTRNormBl&TSRng&StrongBrCfl|EXIT=CNTRBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/k4a2u1wnjp3jrjdcftz1rfl2/',
@@ -616,12 +615,12 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   // Ours shows 1.99 — still profitable but visitors comparing to LuxAlgo
   // need to understand the gap.
   //
-  // SAFETY-SL CALIBRATION:
-  // Operator suggested 0.8% — too tight (median loss is -0.41%, would
-  // fire on many normal trades). Set 2.5% to match BNB/XRP profile —
-  // catches the 5 worst losers (all > -1.5%) while letting typical
-  // sub-1% operational losses play out. 5m TF + low per-trade
-  // volatility (BCH at $400-500) makes 2.5% a good catastrophe cap.
+  // SAFETY-SL CALIBRATION (revised 2026-05-18):
+  // Operator suggested 0.8% (too tight, fires on most normal trades).
+  // Initially set to 2.5%, then revised to 4% during the 2026-05-18
+  // portfolio-wide SL audit. Sits above all 22 historical losses
+  // (worst -2.99%) so only fires on catastrophe — the strategy's
+  // built-in exit handles normal moves in the -0.5% range.
   'bch-cntr-cfm-tc': {
     id: 'bch-cntr-cfm-tc',
     code: '007',
@@ -635,12 +634,12 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Win rate 75% на $1000 размере (LuxAlgo показывает 84% на unit-size без учёта комиссии). ' +
       'Средняя длительность сделки ~5.5 часов, средняя частота 2-3 сделки в день. ' +
       'ВАЖНО: 155 сделок за 2.3 месяца = $170 уплаченной комиссии (0.11% × 155 = 17% от капитала). На высокочастотной 5m стратегии комиссия съедает почти половину валовой прибыли — это честно отражено в наших цифрах. ' +
-      'Safety SL 2.5% — защита от tail-событий: за всю историю только 5 сделок дошли до −1.5% и хуже, основной массив убытков ограничен логикой выходов в районе −0.5%. ' +
+      'Safety SL 4% — выше всех 22 исторических убытков (худший −2.99%). Срабатывает только при пропаже exit-вебхука; обычные минусы стратегия закрывает сама в районе −0.5%. ' +
       'Бэктест короткий — всего 2.3 месяца. Цифры предварительные, ждём накопления реальной статистики.',
     symbol: 'BCHUSDT',
     timeframe: '5',
     enabled: true,
-    slPct: 0.025,
+    slPct: 0.04,
     launchedAt: Date.parse('2026-05-18T12:00:00Z'),
     alertName: 'BCHUSDT|5|LONG=CNTRNormBl&CFMDn&TCBl|SHORT=CNTRNormBr&CFMUp&TCBr|EXIT=CNTRBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/kc1ibd3cc9ubbr33z7k5sci5/',
@@ -684,11 +683,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Контр-трендовая стратегия на 15-минутном таймфрейме с фильтрами по среднесрочному тренду (Trend Tracer) и денежному потоку (Money Flow). ' +
       'LONG-вход срабатывает когда Contrarian Any выдаёт bearish-сигнал (контр-индикатор разворота вверх), Trend Tracer показывает bearish-тренд (зона перепроданности) и Money Flow выше 50 (давление покупателей преобладает). ' +
       'SHORT — зеркально. ' +
-      'Выход полностью передан встроенным exits стратегии — без фиксированных TP. Safety SL 2.5% страхует от случаев когда стратегия не закроет позицию вовремя.',
+      'Выход полностью передан встроенным exits стратегии — без фиксированных TP. Safety SL 7.5% — выше всех 28 исторических убытков (худший −6.0%, медиана −1.1%). Срабатывает только в катастрофическом случае (потеря exit-вебхука / зависание биржи); обычные минусы стратегия закрывает сама.',
     symbol: 'BNBUSDT',
     timeframe: '15',
     enabled: true,
-    slPct: 0.025,
+    slPct: 0.075,
     launchedAt: Date.parse('2026-05-14T12:00:00Z'),
     alertName: 'BNBUSD|15|LONG=CONTAnyBr&TTBr&MFa50|SHORT=CONTAnyBl&TTBl&MFb50|EXIT=CONTBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/xff5y4hjob6d2qitfo1lhbxa/',
@@ -778,11 +777,18 @@ export function validateStrategyConfigs(): void {
 
     if (typeof cfg.slPct !== 'number' || !Number.isFinite(cfg.slPct) || cfg.slPct <= 0) {
       errors.push(`STRAT-${cfg.code} (${id}): slPct must be a finite positive number, got ${String(cfg.slPct)}`);
-    } else if (cfg.slPct > 0.20) {
-      // >20% SL means an order this far from entry is no longer a
-      // "safety net" — almost certainly a typo (e.g. wrote 0.25 meaning
-      // 0.025). Fail loud rather than silently take 25% losses.
-      errors.push(`STRAT-${cfg.code} (${id}): slPct ${cfg.slPct} exceeds 20% — probable typo (did you mean ${(cfg.slPct / 10).toFixed(3)}?)`);
+    } else if (cfg.slPct > 0.35) {
+      // >35% SL means an order this far from entry is no longer a
+      // "safety net" — almost certainly a typo (e.g. wrote 0.4 meaning
+      // 0.04). Fail loud rather than silently take 40% losses.
+      //
+      // Cap raised from 20% to 35% on 2026-05-18 after re-analyzing
+      // 1h contrarian strategies (UNI/TON/HBAR) — they regularly hold
+      // through 20-26% adverse excursions before reversing. A 20% cap
+      // would force-close winning trades at the worst possible moment.
+      // The safety SL should sit ABOVE the historical p95 loss, not
+      // inside the strategy's natural noise band.
+      errors.push(`STRAT-${cfg.code} (${id}): slPct ${cfg.slPct} exceeds 35% — probable typo (did you mean ${(cfg.slPct / 10).toFixed(3)}?)`);
     }
     if (!cfg.code || !/^\d+$/.test(cfg.code)) {
       errors.push(`STRAT-${cfg.code} (${id}): code must be a numeric string like "001"`);
