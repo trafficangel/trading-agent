@@ -585,6 +585,96 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     },
   },
 
+  // Seventh registered strategy (May 18, 2026).
+  // Source: https://www.luxalgo.com/chat/kc1ibd3cc9ubbr33z7k5sci5
+  // Operator-curated TIER S — fast 5m timeframe, fresh backtest.
+  //
+  // ⚠ SHORT BACKTEST: only 69 days of history (vs 600-800 for others).
+  // CAGR 117% is extrapolated from 2.3 months — treat as preliminary
+  // until 3-6 more months accumulate.
+  //
+  // BACKTEST (Mar 8 2026 → May 16 2026, 69 days, $1000 notional):
+  //   - 155 trades, 116W / 39L → 74.84% WR (our count differs from
+  //     LuxAlgo's 83.87% — they treat break-even as wins, we count
+  //     commission impact, so trades with raw +0% become -$1.10 losers)
+  //   - PF 1.99 (LuxAlgo reports 3.02 on unit-size; commission eats
+  //     nearly half the gross profit at $1000 notional — see notes)
+  //   - Net +$222.12 (+22.21%) · CAGR 117.5%
+  //   - Max DD $52.94 (5.29%)
+  //   - Avg win +$3.86 (+0.39%), avg loss -$5.78 (-0.58%)
+  //   - Median loss: -0.41% (very small typical moves)
+  //   - 5 worst losses: -2.99%, -2.98%, -2.49%, -2.38%, -1.56%
+  //   - Long 72 trades +14.8%, Short 83 trades +7.4%
+  //   - Avg duration 66.92 bars (5.5 hours on 5m) — fast turnover
+  //   - Avg 2.72 trades/day
+  //
+  // COMMISSION REALITY CHECK:
+  // 155 trades × 0.11% round-trip = 17.05% paid in commission alone.
+  // Gross profit ~39%, commission $170, net $222. This is a HIGH-FREQUENCY
+  // strategy where Bybit's 0.055%×2 fee structure materially eats the edge.
+  // LuxAlgo's unit-size backtest (~$0.025 total commission) shows PF 3.02.
+  // Ours shows 1.99 — still profitable but visitors comparing to LuxAlgo
+  // need to understand the gap.
+  //
+  // SAFETY-SL CALIBRATION:
+  // Operator suggested 0.8% — too tight (median loss is -0.41%, would
+  // fire on many normal trades). Set 2.5% to match BNB/XRP profile —
+  // catches the 5 worst losers (all > -1.5%) while letting typical
+  // sub-1% operational losses play out. 5m TF + low per-trade
+  // volatility (BCH at $400-500) makes 2.5% a good catastrophe cap.
+  'bch-cntr-cfm-tc': {
+    id: 'bch-cntr-cfm-tc',
+    code: '007',
+    description:
+      'BCH 5m | LONG: CNTR Normal Bl + CFM Downtrend + TC Bl | SHORT: CNTR Normal Br + CFM Uptrend + TC Br | EXIT: CNTR Built-in',
+    longDescription:
+      'Высокочастотная контр-трендовая стратегия на BCHUSDT 5m: ищет краткосрочные развороты с подтверждением через Confirmation и Trend Catcher. ' +
+      'LONG-вход: Contrarian Normal Bullish сигнал + Confirmation Downtrend (тренд вниз = зона перепроданности) + Trend Catcher Bullish (момент развернулся вверх). ' +
+      'SHORT — зеркально. ' +
+      'Выход через встроенные Contrarian Builtin-Exits. ' +
+      'Win rate 75% на $1000 размере (LuxAlgo показывает 84% на unit-size без учёта комиссии). ' +
+      'Средняя длительность сделки ~5.5 часов, средняя частота 2-3 сделки в день. ' +
+      'ВАЖНО: 155 сделок за 2.3 месяца = $170 уплаченной комиссии (0.11% × 155 = 17% от капитала). На высокочастотной 5m стратегии комиссия съедает почти половину валовой прибыли — это честно отражено в наших цифрах. ' +
+      'Safety SL 2.5% — защита от tail-событий: за всю историю только 5 сделок дошли до −1.5% и хуже, основной массив убытков ограничен логикой выходов в районе −0.5%. ' +
+      'Бэктест короткий — всего 2.3 месяца. Цифры предварительные, ждём накопления реальной статистики.',
+    symbol: 'BCHUSDT',
+    timeframe: '5',
+    enabled: true,
+    slPct: 0.025,
+    launchedAt: Date.parse('2026-05-18T12:00:00Z'),
+    alertName: 'BCHUSDT|5|LONG=CNTRNormBl&CFMDn&TCBl|SHORT=CNTRNormBr&CFMUp&TCBr|EXIT=CNTRBltExt',
+    sourceUrl: 'https://www.luxalgo.com/chat/kc1ibd3cc9ubbr33z7k5sci5/',
+    name: 'BCH Contrarian Scalper',
+    backtest: {
+      periodLabel: 'Mar 8, 2026 — May 16, 2026',
+      periodDays: 69,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 222.12,
+      netPnlPct: 22.21,
+      cagrPct: 117.50,
+      totalTrades: 155,
+      wins: 116,
+      losses: 39,
+      winRate: 0.7484,
+      profitFactor: 1.985,
+      commissionPaidUsd: 170.50,
+      maxDrawdownPct: 5.29,
+      maxDrawdownUsd: 52.94,
+      avgWinUsd: 3.86,
+      avgWinPct: 0.39,
+      avgLossUsd: -5.78,
+      avgLossPct: -0.58,
+      largestWinUsd: 27.30,
+      largestLossUsd: -31.00,
+      longTrades: 72,
+      longPnlPct: 14.83,
+      shortTrades: 83,
+      shortPnlPct: 7.38,
+    },
+  },
+
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
