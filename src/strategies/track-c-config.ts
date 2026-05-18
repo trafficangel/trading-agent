@@ -423,6 +423,86 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     },
   },
 
+  // Fifth registered strategy (May 18, 2026).
+  // Source: https://www.luxalgo.com/chat/hwuqef4lmptf74imngdysti5
+  // Operator-curated TIER S strategy from a manual selection.
+  //
+  // Contrarian Normal + Confirmation Downtrend + Neo Cloud on
+  // TONUSDT 1h. Reversal hunter — Long fires on Contrarian Normal
+  // Bullish trigger while Confirmation is in Downtrend and Neo Cloud
+  // shows Bearish state (counter-trend entries with momentum-flip
+  // confirmation).
+  //
+  // BACKTEST (Aug 30 2024 → May 1 2026, 608 days, recomputed on
+  // $1000 notional + Bybit commission):
+  //   - 102 trades, 90W / 12L → 88.24% WR
+  //   - Profit factor 2.50 (LuxAlgo reports 3.19 on unit-size;
+  //     commission impact at $1000 brings it down — see notes)
+  //   - Net +$1468.92 (+146.89% on $1000 notional) · CAGR 88%
+  //   - Max DD $249.29 (24.93%) — one -22.72% tail trade
+  //   - Avg win +$27.18 (+2.72%), avg loss -$81.43 (-8.14%)
+  //   - Median loss -8.3% (concentrated cluster, not skewed)
+  //   - 5 worst losses: -22.72%, -14.72%, -12.42%, -11.43%, -9.58%
+  //   - Long 55 trades +70.2%, Short 47 trades +76.7%
+  //
+  // SAFETY-SL CALIBRATION:
+  // Operator's initial suggestion was SL 0.8% — far too tight.
+  // The strategy's NATURAL losses cluster around -8% (median).
+  // A 1% SL would fire on every trade, killing it. Set 10% to
+  // match UNI's profile: catch the catastrophic tail (-22% trade
+  // capped, possibly -14%, -12% too) while leaving the normal
+  // -8% operational losses to play out as the strategy intended.
+  // The Confirmation Builtin-Exit handles those internally.
+  'ton-cntr-cfm-neo': {
+    id: 'ton-cntr-cfm-neo',
+    code: '005',
+    description:
+      'TON 1h | LONG: CNTR Normal Bl + CFM Downtrend + Neo Cloud Br | SHORT: CNTR Normal Br + CFM Uptrend + Neo Cloud Bl | EXIT: CNTR Built-in',
+    longDescription:
+      'Контр-трендовая стратегия на TONUSDT 1h: ищет развороты тренда с подтверждением через Confirmation и Neo Cloud. ' +
+      'LONG-вход: Contrarian Normal выдаёт бычий сигнал, при этом Confirmation в нисходящем тренде и Neo Cloud в bearish-состоянии — классическая reversal-сетап с momentum-flip фильтрами. ' +
+      'SHORT — зеркально. ' +
+      'Выход через встроенные Confirmation Builtin-Exits. ' +
+      'Win rate 88% за 600+ дней истории, средняя длительность сделки ~92 часа (~4 дня). ' +
+      'Safety SL 10% — защита от tail-событий: за 20 месяцев истории только одна сделка дошла до −23%, основной массив убытков ограничен логикой выходов стратегии в районе −8%.',
+    symbol: 'TONUSDT',
+    timeframe: '60',
+    enabled: true,
+    slPct: 0.10,
+    launchedAt: Date.parse('2026-05-18T11:00:00Z'),
+    alertName: 'TONUSDT|60|LONG=CNTRNormBl&CFMDn&NeoCloudBr|SHORT=CNTRNormBr&CFMUp&NeoCloudBl|EXIT=CNTRBltExt',
+    sourceUrl: 'https://www.luxalgo.com/chat/hwuqef4lmptf74imngdysti5/',
+    name: 'TON Contrarian Neo',
+    backtest: {
+      periodLabel: 'Aug 30, 2024 — May 1, 2026',
+      periodDays: 608,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 1468.92,
+      netPnlPct: 146.89,
+      cagrPct: 88.18,
+      totalTrades: 102,
+      wins: 90,
+      losses: 12,
+      winRate: 0.8824,
+      profitFactor: 2.503,
+      commissionPaidUsd: 112.20,
+      maxDrawdownPct: 24.93,
+      maxDrawdownUsd: 249.29,
+      avgWinUsd: 27.18,
+      avgWinPct: 2.72,
+      avgLossUsd: -81.43,
+      avgLossPct: -8.14,
+      largestWinUsd: 127.37,
+      largestLossUsd: -228.32,
+      longTrades: 55,
+      longPnlPct: 70.23,
+      shortTrades: 47,
+      shortPnlPct: 76.67,
+    },
+  },
+
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
