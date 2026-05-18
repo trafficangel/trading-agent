@@ -503,6 +503,88 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     },
   },
 
+  // Sixth registered strategy (May 18, 2026).
+  // Source: https://www.luxalgo.com/chat/k4a2u1wnjp3jrjdcftz1rfl2
+  // Operator-curated TIER S — highest CAGR in the portfolio.
+  //
+  // Contrarian Normal + Trend Strength Ranging + Strong Confluence
+  // on HBARUSDT 1h. Hunts reversals during ranging market phases.
+  // Note the CONTRARIAN trigger inverts: Long fires on Bearish
+  // signal, Short on Bullish — classic mean-reversion logic with
+  // Strong Confluence as the momentum filter.
+  //
+  // BACKTEST (Feb 4 2024 → May 15 2026, 831 days):
+  //   - 117 trades, 79W / 38L → 67.52% WR (lowest in TIER S)
+  //   - PF 3.27 (close to LuxAlgo's 3.02)
+  //   - Net +$5363.41 (+536.34%) — highest absolute payoff
+  //   - CAGR 235.58% — best in portfolio
+  //   - Max DD $361.26 (36.13%) — also the highest
+  //   - Avg win +$97.78 (+9.78%), avg loss -$62.14 (-6.21%)
+  //   - Median loss: -4.62%
+  //   - 5 worst: -26.64, -20.35, -16.67, -15.97, -10.19
+  //   - Long 42 trades +335%, Short 75 trades +201%
+  //   - Strategy is short-heavy (Long WR 54.76% vs Short 74.67%)
+  //
+  // R:R profile is the key — Avg win (+9.78%) > Avg loss (-6.21%)
+  // means even with 67% WR the expectancy is strong positive.
+  //
+  // SAFETY-SL CALIBRATION:
+  // Operator suggested 1.0% — would fire on every trade (median
+  // loss is -4.62%). Set 10% to catch the catastrophic tail (5
+  // trades exceed -10%, with -26% the worst). Same defensive
+  // approach as UNI and TON — tail-event protection without
+  // interfering with normal operational losses.
+  'hbar-cntr-tsr-scfl': {
+    id: 'hbar-cntr-tsr-scfl',
+    code: '006',
+    description:
+      'HBAR 1h | LONG: CNTR Normal Br + TS Ranging + Strong Bl Cfl | SHORT: CNTR Normal Bl + TS Ranging + Strong Br Cfl | EXIT: CNTR Built-in',
+    longDescription:
+      'Контр-трендовая стратегия на HBARUSDT 1h, специализирующаяся на разворотах в боковых движениях рынка. ' +
+      'LONG-вход срабатывает когда Contrarian Normal выдаёт МЕДВЕЖИЙ сигнал (как контр-индикатор разворота вверх), Trend Strength показывает Ranging (боковое движение), и Strong Bullish Confluence подтверждает накопление покупателей. ' +
+      'SHORT — зеркально. ' +
+      'Выход через встроенные Contrarian Builtin-Exits. ' +
+      'Win rate 67.52% — ниже чем у других стратегий портфеля, но компенсируется отношением риск/прибыль: средний выигрыш +9.78% против среднего убытка −6.21%. ' +
+      'Самая доходная стратегия портфеля: +536% за 831 день (CAGR 235%). ' +
+      'Safety SL 10% — защита от tail-событий: за 27 месяцев истории всего 5 сделок дошли до −10% и ниже, основной массив убытков ограничен логикой выходов в районе −5%.',
+    symbol: 'HBARUSDT',
+    timeframe: '60',
+    enabled: true,
+    slPct: 0.10,
+    launchedAt: Date.parse('2026-05-18T11:30:00Z'),
+    alertName: 'HBARUSDT|60|LONG=CNTRNormBr&TSRng&StrongBlCfl|SHORT=CNTRNormBl&TSRng&StrongBrCfl|EXIT=CNTRBltExt',
+    sourceUrl: 'https://www.luxalgo.com/chat/k4a2u1wnjp3jrjdcftz1rfl2/',
+    name: 'HBAR Contrarian Ranging',
+    backtest: {
+      periodLabel: 'Feb 4, 2024 — May 15, 2026',
+      periodDays: 831,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 5363.41,
+      netPnlPct: 536.34,
+      cagrPct: 235.58,
+      totalTrades: 117,
+      wins: 79,
+      losses: 38,
+      winRate: 0.6752,
+      profitFactor: 3.272,
+      commissionPaidUsd: 128.70,
+      maxDrawdownPct: 36.13,
+      maxDrawdownUsd: 361.26,
+      avgWinUsd: 97.78,
+      avgWinPct: 9.78,
+      avgLossUsd: -62.14,
+      avgLossPct: -6.21,
+      largestWinUsd: 1157.02,
+      largestLossUsd: -267.48,
+      longTrades: 42,
+      longPnlPct: 335.23,
+      shortTrades: 75,
+      shortPnlPct: 201.12,
+    },
+  },
+
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
