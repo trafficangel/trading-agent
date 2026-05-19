@@ -175,7 +175,7 @@ export function renderTradesPage(args: {
     ${styles()}
     <main class="cabinet-main">
       <div class="cabinet-greeting">
-        <div class="cabinet-greeting-label">Личный кабинет · Сделки</div>
+        <div class="cabinet-greeting-label"><a href="/account" class="cabinet-crumb">Личный кабинет</a> · Сделки</div>
         <h1 class="cabinet-title">История сделок</h1>
         <p class="trades-sub">
           Все сделки, исполненные на вашем счёте Bybit по подключённым
@@ -281,6 +281,8 @@ function styles(): string {
     font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
     color: #6b7480; margin-bottom: 6px;
   }
+  .cabinet-crumb { color: inherit; text-decoration: none; transition: color 0.15s; }
+  .cabinet-crumb:hover { color: #4ad991; }
   .cabinet-title { font-size: 26px; font-weight: 600; margin: 0 0 10px 0; color: #e8edf2; }
   .cabinet-ico { display: inline-block; margin-right: 8px; vertical-align: -1px; line-height: 1; }
   .trades-sub { color: #9aa5b1; font-size: 13.5px; line-height: 1.55; margin: 0 0 24px 0; max-width: 740px; }

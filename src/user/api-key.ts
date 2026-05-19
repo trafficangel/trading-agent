@@ -95,7 +95,7 @@ export function renderApiKeyPage(args: {
     ${styles()}
     <main class="cabinet-main">
       <div class="cabinet-greeting">
-        <div class="cabinet-greeting-label">Личный кабинет · API-ключ</div>
+        <div class="cabinet-greeting-label"><a href="/account" class="cabinet-crumb">Личный кабинет</a> · API-ключ</div>
         <h1 class="cabinet-title">Подключение Bybit</h1>
         <p class="key-sub">
           Чтобы стратегии могли автоматически торговать на вашем счёте, нужен
@@ -316,6 +316,8 @@ function styles(): string {
     font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
     color: #6b7480; margin-bottom: 6px;
   }
+  .cabinet-crumb { color: inherit; text-decoration: none; transition: color 0.15s; }
+  .cabinet-crumb:hover { color: #4ad991; }
   .cabinet-title { font-size: 26px; font-weight: 600; margin: 0 0 10px 0; color: #e8edf2; }
   .cabinet-ico { display: inline-block; margin-right: 8px; vertical-align: -1px; line-height: 1; }
   .key-sub { color: #9aa5b1; font-size: 13.5px; line-height: 1.55; margin: 0; }

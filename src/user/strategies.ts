@@ -209,7 +209,7 @@ export function renderStrategiesPage(args: RenderArgs): string {
     ${styles()}
     <main class="cabinet-main">
       <div class="cabinet-greeting">
-        <div class="cabinet-greeting-label">Личный кабинет · Стратегии</div>
+        <div class="cabinet-greeting-label"><a href="/account" class="cabinet-crumb">Личный кабинет</a> · Стратегии</div>
         <h1 class="cabinet-title">Мои стратегии</h1>
         <p class="strat-sub">
           Выберите стратегии, размер позиции (USDT на каждую сделку) и плечо.
@@ -384,6 +384,10 @@ function styles(): string {
     font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
     color: #6b7480; margin-bottom: 6px;
   }
+  .cabinet-crumb {
+    color: inherit; text-decoration: none; transition: color 0.15s;
+  }
+  .cabinet-crumb:hover { color: #4ad991; }
   .cabinet-title {
     font-size: 26px; font-weight: 600; margin: 0 0 10px 0; color: #e8edf2;
   }
