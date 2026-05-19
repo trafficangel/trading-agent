@@ -2548,7 +2548,16 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
   // see the real dashboard.
   app.get('/strategies', async (req, reply) => {
     const enabled = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
+    const fromAutotrading = (req.query as { from?: string } | undefined)?.from === 'autotrading';
     reply.type('text/html; charset=utf-8');
+    // Authed users who came from an autotrading CTA shouldn't see the
+    // strategies list — they're already past the marketing funnel and
+    // want the cabinet (where the next step is "connect Bybit / pick
+    // strategies"). 302 → /account.
+    if (fromAutotrading && isAuthed(req)) {
+      reply.redirect('/account');
+      return;
+    }
     if (!isAuthed(req)) {
       // No-cache on the gated stub so re-visits after auth get fresh HTML.
       reply.header('Cache-Control', 'private, no-store');
@@ -2557,7 +2566,6 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
       // бесплатно» on /autotrading lands on a page whose modal says
       // "Доступ к детальной статистике" — semantically wrong for an
       // autotrading-signup intent.
-      const fromAutotrading = (req.query as { from?: string } | undefined)?.from === 'autotrading';
       return renderGatedPreview('index', renderStrategyIndex(enabled), { fromAutotrading });
     }
     reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
