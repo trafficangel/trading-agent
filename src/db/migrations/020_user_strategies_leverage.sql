@@ -1,0 +1,34 @@
+-- Track D — SaaS copytrading: add per-strategy leverage.
+--
+-- The user picks BOTH notional_usd (position face value per entry) AND
+-- leverage (Bybit margin multiplier). These interact:
+--   - notional_usd = position size in USDT (e.g. $500)
+--   - leverage    = margin multiplier (e.g. 10x means user puts up $50)
+--   - qty         = notional_usd / entry_price (unchanged by leverage)
+--
+-- WHY ALSO TRACK LEVERAGE (not just notional):
+--   - Margin used per position
+--   - Liquidation distance — at 10x leverage, liquidation triggers
+--     around ~9% adverse move. If our safety SL is 10%, the position
+--     liquidates BEFORE our SL fires → user loses 100% of margin
+--     instead of slPct% of notional. CRITICAL safety boundary.
+--
+-- RECOMMENDED MAX LEVERAGE per strategy (helper in code):
+--   max_lev = floor(0.7 / slPct)   -- 30% buffer for funding/MM/slippage
+--   STRAT-001 (slPct=7.5%)  → max 9x recommended
+--   STRAT-002 (slPct=15%)   → max 4x
+--   STRAT-003 (slPct=30%)   → max 2x
+--   STRAT-006 (slPct=28%)   → max 2x
+--   STRAT-007 (slPct=4%)    → max 17x
+--
+-- The UI shows the recommended max next to the leverage input. User
+-- CAN pick higher with a warning, but our verify step at /account/api-key
+-- validates leverage <= max-allowed-on-Bybit (depends on symbol; 100x for
+-- BTC, less for others).
+--
+-- Default 1x for new rows — safe baseline, no leverage applied.
+
+ALTER TABLE user_strategies ADD COLUMN leverage INTEGER NOT NULL DEFAULT 1;
+
+-- Safety floor and ceiling enforced at the application layer:
+--   1 <= leverage <= 100 (Bybit max for BTC; less for other pairs)

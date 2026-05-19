@@ -17,6 +17,7 @@ import { startupBanner, statusReply } from './telegram/templates.js';
 import { countSignalsSince } from './db/repos/signals.js';
 import { closeDb } from './db/client.js';
 import { validateStrategyConfigs } from './strategies/track-c-config.js';
+import { selfTest as cryptoSelfTest } from './auth/crypto.js';
 
 const startedAt = Date.now();
 
@@ -29,6 +30,18 @@ async function main(): Promise<void> {
     validateStrategyConfigs();
   } catch (err) {
     logger.fatal({ err: (err as Error).message }, 'STRATEGY_CONFIGS validation failed — refusing to start');
+    process.exit(1);
+  }
+
+  // Track D — verify the master key for client API-key encryption is
+  // valid BEFORE accepting connections. A broken master key (truncated
+  // env var, wrong hex encoding) would silently corrupt every encrypted
+  // row written until the first decrypt fails — which might be days
+  // later. Fail at boot.
+  try {
+    cryptoSelfTest();
+  } catch (err) {
+    logger.fatal({ err: (err as Error).message }, 'crypto self-test failed — refusing to start');
     process.exit(1);
   }
 

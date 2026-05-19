@@ -912,3 +912,34 @@ export const TRACK_C_NOTIONAL_USD = 1000;
  *  via env LANDING_BASE_URL if you operate a staging instance. */
 export const LANDING_BASE_URL =
   process.env.LANDING_BASE_URL ?? 'https://robotclaude.biz';
+
+/**
+ * Track D — recommended max leverage for a given strategy.
+ *
+ * Logic: keep the user's liquidation distance comfortably WIDER than
+ * our safety SL, so the safety SL fires first (slPct loss) instead of
+ * a liquidation (100% margin wipe).
+ *
+ * Formula:
+ *   max_lev = floor(0.7 / slPct)
+ *
+ * The 0.7 factor leaves a 30% buffer for funding, maintenance margin,
+ * spread, and slippage between SL trigger and actual fill.
+ *
+ * Examples (with current SL config):
+ *   slPct  5%  (BTC scalper)   → max  14x
+ *   slPct  7.5%(BNB)           → max  9x
+ *   slPct 15%  (XRP / TRX)     → max  4x
+ *   slPct 25%  (TON)           → max  2x
+ *   slPct 28%  (HBAR)          → max  2x
+ *   slPct 30%  (UNI)           → max  2x
+ *
+ * Floor at 1x (no leverage) — user always allowed to skip leverage.
+ * Ceiling at 100x (Bybit max for BTC) — beyond that Bybit rejects
+ * setLeverage with an error.
+ */
+export function recommendedMaxLeverage(slPct: number): number {
+  if (!Number.isFinite(slPct) || slPct <= 0) return 1;
+  const raw = Math.floor(0.7 / slPct);
+  return Math.max(1, Math.min(100, raw));
+}

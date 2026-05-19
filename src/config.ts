@@ -38,6 +38,29 @@ const Schema = z.object({
   TELEGRAM_CHANNEL_LOGS: z.string().min(1),
 
   /**
+   * Track D — SaaS copytrading.
+   *
+   * Master secret for AES-256-GCM encryption of client Bybit API keys.
+   * Must be exactly 64 hex chars (32 bytes). Generate once with:
+   *   openssl rand -hex 32
+   *
+   * Without this var the server refuses to start — see src/auth/crypto.ts.
+   * Losing this secret = losing all stored API keys (no recovery path).
+   * Back it up offline somewhere safe BEFORE the first client connects.
+   */
+  API_KEY_MASTER_SECRET: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, 'API_KEY_MASTER_SECRET must be 64 hex chars (32 bytes)'),
+
+  /** Trial length for new registrations (Track D), in days. */
+  TRACK_D_TRIAL_DAYS: z.coerce.number().int().min(0).max(365).default(14),
+
+  /** Use Bybit testnet for client API calls. Set true during dev /
+   *  staging; production is testnet=false (mainnet). The base URL
+   *  selection lives in src/exchange/bybit-private.ts. */
+  BYBIT_USE_TESTNET: envBool(true),
+
+  /**
    * Track C — LuxAlgo AI Strategy Builder webhook trader.
    * When true, webhooks with `"kind":"strategy"` get dispatched to
    * strategy-trader for entry/exit handling. Default off — operator turns
