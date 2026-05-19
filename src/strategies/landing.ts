@@ -976,20 +976,61 @@ const STYLE = `
   .lang-toggle a.active {
     background: var(--accent-soft); color: var(--accent);
   }
-  .site-help-icon {
-    display: none; /* visible only on mobile, see media query */
-    width: 36px; height: 36px; align-items: center; justify-content: center;
+  /* Mobile burger button — hidden on desktop, replaces the .site-nav
+     on narrow viewports. Toggles the .site-nav-mobile drawer below. */
+  .site-burger {
+    display: none;
+    width: 38px; height: 38px;
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px;
     background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 8px; text-decoration: none; font-size: 16px;
+    border-radius: 8px; cursor: pointer; padding: 0;
   }
-  .site-help-icon:hover {
-    background: var(--bg-card-hover); text-decoration: none;
+  .site-burger span {
+    display: block; width: 18px; height: 2px;
+    background: var(--text); border-radius: 2px;
+    transition: transform 180ms, opacity 180ms;
   }
-  /* Mobile: hide center nav, show compact help icon */
+  .site-burger[aria-expanded="true"] span:nth-child(1) {
+    transform: translateY(6px) rotate(45deg);
+  }
+  .site-burger[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+  .site-burger[aria-expanded="true"] span:nth-child(3) {
+    transform: translateY(-6px) rotate(-45deg);
+  }
+  /* Mobile drawer — full-width panel that drops below the header. */
+  .site-nav-mobile {
+    display: none;
+    background: rgba(11, 14, 19, 0.97); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    overflow: hidden; max-height: 0;
+    transition: max-height 250ms ease;
+  }
+  .site-nav-mobile[aria-hidden="false"] {
+    display: block; max-height: 400px;
+  }
+  .site-nav-mobile-inner {
+    max-width: 1140px; margin: 0 auto;
+    padding: 8px clamp(16px, 4vw, 24px) 16px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .site-nav-mobile-inner a {
+    color: var(--text-dim); text-decoration: none;
+    padding: 12px 14px; border-radius: 8px; font-size: 15px;
+    font-weight: 500; transition: all 120ms;
+    border: 1px solid transparent;
+  }
+  .site-nav-mobile-inner a:hover, .site-nav-mobile-inner a:active {
+    color: var(--text); background: var(--bg-card);
+    border-color: var(--border); text-decoration: none;
+  }
+  body.nav-open { overflow: hidden; }
+
+  /* Mobile: hide center nav, show burger */
   @media (max-width: 720px) {
     .site-header-inner { gap: 12px; }
     .site-nav { display: none; }
-    .site-help-icon { display: inline-flex; }
+    .site-burger { display: inline-flex; }
     .brand-name { font-size: 14px; }
     .brand-mark { width: 24px; height: 24px; }
   }
@@ -1150,6 +1191,34 @@ const STYLE = `
   @media (max-width: 480px) {
     .hero-cta { flex-direction: column; align-items: stretch; }
     .hero-cta .btn { justify-content: center; }
+  }
+
+  /* Funnel CTA — SEE → FOLLOW → AUTOMATE.
+     3 stat-card-shaped boxes; the last one (autotrading) is the climactic
+     CTA with accent border + primary green button. */
+  .funnel-cards {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px; margin-top: 22px;
+  }
+  .funnel-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 22px 22px 24px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .funnel-card-title {
+    font-size: 16px; font-weight: 600; color: var(--text);
+  }
+  .funnel-card-body {
+    font-size: 13.5px; line-height: 1.55; color: var(--text-dim);
+    flex: 1;
+  }
+  .funnel-card .btn { align-self: flex-start; }
+  .funnel-card-accent {
+    border-color: rgba(74, 217, 145, 0.45);
+    background: linear-gradient(180deg, rgba(74,217,145,0.04) 0%, var(--bg-card) 70%);
+  }
+  @media (max-width: 480px) {
+    .funnel-card .btn { align-self: stretch; justify-content: center; }
   }
   .btn {
     display: inline-flex; align-items: center; gap: 6px;
@@ -1580,9 +1649,8 @@ export type PageShellOpts = {
   autoRefreshSec?: number | null;
   /** Robots meta. Defaults to index,follow. Gated stats pages set noindex. */
   robots?: string;
-  /** Hide the floating mobile chat icon (💬). Cabinet pages use the
-   *  inline "Поддержка" nav link instead — the icon overlay was
-   *  visually noisy for authenticated pages. */
+  /** @deprecated The floating 💬 icon was removed entirely in May 2026.
+   *  This flag is kept for back-compat with cabinet callers and is a no-op. */
   hideMobileHelpIcon?: boolean;
 };
 
@@ -1643,15 +1711,26 @@ export function pageShell(
 
   // ---------- Site header (sticky, on every page) ----------
   // Layout:
-  //   Brand-mark (logo + name)  | center nav links | right group (lang + support)
-  // Mobile (<720px): center nav hides, support icon stays compact.
+  //   Brand-mark (logo + name)  | center nav links | right group (lang)
+  // Mobile (<720px): center nav collapses behind a hamburger button that
+  //   opens a full-width drawer with the same links.
+  //
+  // The floating 💬 help icon was removed entirely (operator dislike) —
+  // «Поддержка» / «Support» is reachable via the nav link instead.
   const langToggleHtml = showLangToggle
     ? `<a href="/" class="${lang === 'ru' ? 'active' : ''}" aria-label="Русский">RU</a>` +
       `<a href="/en" class="${lang === 'en' ? 'active' : ''}" aria-label="English">EN</a>`
     : '';
   const labels = lang === 'en'
-    ? { strategies: 'Strategies', autotrading: 'Auto-trading', channel: 'Channel', support: 'Support', supportShort: 'Support' }
-    : { strategies: 'Стратегии', autotrading: 'Автотрейдинг', channel: 'Канал', support: 'Поддержка', supportShort: 'Help' };
+    ? { strategies: 'Strategies', autotrading: 'Auto-trading', channel: 'Channel', support: 'Support', menu: 'Menu', close: 'Close' }
+    : { strategies: 'Стратегии', autotrading: 'Автотрейдинг', channel: 'Канал', support: 'Поддержка', menu: 'Меню', close: 'Закрыть' };
+
+  const navLinksHtml = `
+      <a href="/strategies">${labels.strategies}</a>
+      <a href="/autotrading">${labels.autotrading}</a>
+      <a href="https://t.me/luxalgosignal" target="_blank" rel="noopener">${labels.channel}</a>
+      <a href="https://t.me/dboykod" target="_blank" rel="noopener">${labels.support}</a>
+  `;
 
   const siteHeader = `
 <header class="site-header">
@@ -1665,21 +1744,43 @@ export function pageShell(
       </svg>
       <span class="brand-name">Robot&nbsp;Claude</span>
     </a>
-    <nav class="site-nav" aria-label="Primary">
-      <a href="/strategies">${labels.strategies}</a>
-      <a href="/autotrading">${labels.autotrading}</a>
-      <a href="https://t.me/luxalgosignal" target="_blank" rel="noopener">${labels.channel}</a>
-      <a href="https://t.me/dboykod" target="_blank" rel="noopener">${labels.support}</a>
-    </nav>
+    <nav class="site-nav" aria-label="Primary">${navLinksHtml}</nav>
     <div class="site-nav-end">
       ${langToggleHtml ? `<div class="lang-toggle">${langToggleHtml}</div>` : ''}
-      ${opts.hideMobileHelpIcon
-        ? ''
-        : `<a class="site-help-icon" href="https://t.me/dboykod" target="_blank" rel="noopener"
-         aria-label="${labels.support}" title="${labels.support}">💬</a>`}
+      <button class="site-burger" type="button" aria-label="${labels.menu}" aria-expanded="false" aria-controls="site-nav-mobile">
+        <span></span><span></span><span></span>
+      </button>
     </div>
   </div>
+  <div class="site-nav-mobile" id="site-nav-mobile" aria-hidden="true">
+    <nav class="site-nav-mobile-inner" aria-label="Primary mobile">${navLinksHtml}</nav>
+  </div>
 </header>
+<script>
+  (function() {
+    var btn = document.querySelector('.site-burger');
+    var drawer = document.getElementById('site-nav-mobile');
+    if (!btn || !drawer) return;
+    function close() {
+      btn.setAttribute('aria-expanded', 'false');
+      drawer.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('nav-open');
+    }
+    btn.addEventListener('click', function() {
+      var open = btn.getAttribute('aria-expanded') === 'true';
+      if (open) { close(); return; }
+      btn.setAttribute('aria-expanded', 'true');
+      drawer.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('nav-open');
+    });
+    drawer.addEventListener('click', function(e) {
+      if (e.target.tagName === 'A') close();
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') close();
+    });
+  })();
+</script>
 `;
 
   return `<!DOCTYPE html>

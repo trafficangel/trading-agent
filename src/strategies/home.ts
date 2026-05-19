@@ -83,18 +83,17 @@ type Content = {
 
 const CONTENT: Record<Lang, Content> = {
   ru: {
-    htmlTitle: 'Robot Claude — проверенные стратегии и сигналы 24/7',
+    htmlTitle: 'Robot Claude — проверенные стратегии для криптотрейдинга',
     hero: {
-      eyebrow: '🆓 БЕСПЛАТНО · АВТОМАТИЧЕСКАЯ ТОРГОВЛЯ 24/7',
+      eyebrow: '📊 ОТКРЫТАЯ СТАТИСТИКА · 📡 TELEGRAM-СИГНАЛЫ · 🤖 АВТОТРЕЙДИНГ',
       title1: 'Проверенные ',
       titleAccent: 'стратегии и сигналы',
       title2: ' для криптотрейдинга',
       subtitle:
-        'Каждая стратегия проходит тщательный отбор по результатам тестирования за 200+ дней. '
-        + 'Наша система автоматически открывает и закрывает позиции на бирже круглосуточно, '
-        + 'а все сигналы дублируются в Telegram канале — можете торговать вместе с нами или сами. '
-        + 'Все сделки публичны в реальном времени. Без подписок и платных уровней.',
-      ctaPrimary: 'Активные стратегии →',
+        'Каждая стратегия отобрана по бэктестам на 200+ дней и пересчитана на реальную комиссию Bybit. '
+        + 'Смотрите live-сделки на сайте, ловите сигналы в Telegram бесплатно — '
+        + 'или подключите автотрейдинг, и наши стратегии будут торговать на вашем счёте Bybit автоматически.',
+      ctaPrimary: 'Посмотреть стратегии →',
       ctaSecondary: 'Telegram канал ↗',
     },
     liveStrip: {
@@ -104,19 +103,19 @@ const CONTENT: Record<Lang, Content> = {
       bestWr: 'Лучший WR backtest',
     },
     whatYouGet: {
-      title: 'Что вы получаете — бесплатно',
+      title: 'Что доступно',
       items: [
-        '🆓 Полный доступ ко всем стратегиям и их статистике',
-        '📊 Live результаты каждой сделки в реальном времени',
-        '📡 Сигналы в Telegram канале — вход, выход, стоп',
-        '🤖 Автоматическое исполнение на бирже (для подписчиков копитрейдинга)',
-        '🔓 Никаких подписок, премиум-уровней или скрытых платежей',
-        '💼 Прозрачный учёт — каждая сделка публична и проверяема',
+        '📊 Полная статистика по каждой стратегии — бэктест, live-сделки, графики (открыто всем)',
+        '📡 Сигналы в Telegram канале @luxalgosignal — вход, выход, стоп (бесплатно)',
+        '💼 Прозрачный учёт — каждая сделка публична с уникальным ID и проверяема',
+        '🤖 Автотрейдинг по подписке — наши стратегии торгуют автоматически на вашем счёте Bybit',
+        '🔑 Ваши деньги остаются у вас — API-ключ без права на вывод, мы только исполняем сделки',
+        '⚙ Гибкая настройка — сами выбираете стратегии, размер позиции и плечо',
       ],
     },
     signalPreview: {
       title: 'Как выглядят сигналы в Telegram',
-      subtitle: 'Каждое открытие и закрытие сделки приходит в канал автоматически — с ценой, размером и причиной выхода. Можете повторять за нами вручную или ждать запуска копитрейдинга.',
+      subtitle: 'Каждое открытие и закрытие сделки приходит в канал автоматически — с ценой, размером и причиной выхода. Можно повторять вручную на своём счёте, а можно подключить автотрейдинг и не отвлекаться.',
       entryLabel: 'Вход в позицию',
       closeLabel: 'Закрытие позиции',
       timeBetween: '↓ через 2 часа',
@@ -124,11 +123,11 @@ const CONTENT: Record<Lang, Content> = {
     },
     how: {
       title: 'Как это работает',
-      subtitle: 'Простой путь от сигнала до сделки — и публичный отчёт о каждом результате.',
+      subtitle: 'Сначала посмотрите как мы торгуем. Если результат нравится — подключите автотрейдинг.',
       steps: [
         {
           step: 'ШАГ 01',
-          title: 'Двухэтапный отбор',
+          title: 'Двухэтапный отбор стратегий',
           body:
             'Сначала собираем стратегию в [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) с тестом на 200+ дней. ' +
             'Если winrate ≥55% и прибыль превышает убытки в 2 раза — переходим ко второму этапу: проверяем в [TradingView Premium](https://ru.tradingview.com/pricing/) с реальной комиссией Bybit и защитным стопом. ' +
@@ -136,18 +135,26 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           step: 'ШАГ 02',
-          title: 'Сигнал → автоматическая сделка',
-          body: 'Когда стратегия выдаёт сигнал, наша система мгновенно открывает позицию на бирже с защитным стопом. Сделка ведётся автоматически до выхода — без вашего участия. Работаем круглосуточно, 7 дней в неделю.',
+          title: 'Смотрите live-результаты',
+          body:
+            'Каждая стратегия торгует на нашем shadow-счёте 24/7 — это публичный трек-рекорд. ' +
+            'На странице стратегии видны все сделки в реальном времени: время входа, цена выхода, ' +
+            'прибыль/убыток с уникальным ID. Проверяемо до копейки.',
         },
         {
           step: 'ШАГ 03',
-          title: 'Дублирование в Telegram',
-          body: 'Каждый сигнал — вход, выход, стоп — публикуется в нашем Telegram-канале. Если хотите торговать вручную на своём счёте — просто повторяйте за нами. Если хотите присоединиться к копитрейдингу — оставляйте номер на сайте.',
+          title: 'Бесплатные сигналы в Telegram',
+          body:
+            'Каждый сигнал — вход, выход, стоп — публикуется в [@luxalgosignal](https://t.me/luxalgosignal) сразу как срабатывает. ' +
+            'Можете повторять вручную на своём счёте, или просто следить за результатами. Никакой оплаты за сигналы.',
         },
         {
           step: 'ШАГ 04',
-          title: 'Полный публичный учёт',
-          body: 'Каждая сделка отображается на странице стратегии: время входа, цена выхода, прибыль или убыток. Никаких чёрных ящиков и закрытой статистики — можете проверить каждый результат сами.',
+          title: 'Хотите автоматически? Подключите автотрейдинг',
+          body:
+            'Когда убедились что результаты реальные — подключите свой Bybit-аккаунт через API-ключ ' +
+            '(без права на вывод). Выберите стратегии, размер позиции и плечо — система начнёт торговать ' +
+            'за вас автоматически. 14 дней бесплатного триала, потом $50/мес.',
         },
       ],
     },
@@ -161,24 +168,34 @@ const CONTENT: Record<Lang, Content> = {
       title: 'Roadmap',
       items: [
         {
+          when: 'АПРЕЛЬ 2026',
+          done: true,
+          title: '✅ Запущен сайт с публичной статистикой по стратегиям + Telegram-канал @luxalgosignal с сигналами в реальном времени.',
+        },
+        {
+          when: 'МАЙ 2026',
+          done: true,
+          title: '✅ Расширен портфель до 8 проверенных стратегий (BNB, XRP, UNI, TRX, TON, HBAR, BCH, BTC). Каждая со своей страницей, бэктестом и live-сделками.',
+        },
+        {
           when: 'СЕЙЧАС',
           done: true,
-          title: '🚀 Расширение портфеля проверенных LuxAlgo стратегий. Каждая со своей отдельной страницей и статистикой в реальном времени.',
+          title: '🚀 Запущен автотрейдинг — клиенты подключают свой Bybit-аккаунт через API-ключ и наши стратегии торгуют автоматически за них. Бета-тестирование с первыми пользователями.',
         },
         {
-          when: 'ИЮЛЬ 2026',
+          when: 'ИЮНЬ 2026',
           done: false,
-          title: 'Подключение реальной торговли на Bybit для лучших стратегий. Начнём с малого размера — обкатать исполнение.',
+          title: 'Открытие подписки для всех желающих после успешного завершения beta. Автоматическая оплата через Stripe / ЮKassa.',
         },
         {
-          when: 'АВГУСТ 2026',
+          when: 'ЛЕТО 2026',
           done: false,
-          title: 'Hyperliquid Vault — параллельный канал для тех кто хочет копировать через смарт-контракт.',
+          title: 'Hyperliquid Vault — параллельный канал для тех кто хочет копировать через смарт-контракт без выдачи API-ключа.',
         },
         {
           when: 'Q4 2026',
           done: false,
-          title: 'Bybit Copy Trading — открытый набор подписчиков после 90 дней реальной торговли.',
+          title: 'Расширение списка бирж: Binance, OKX. Пользователь сможет выбрать на какой бирже торговать.',
         },
       ],
     },
@@ -186,17 +203,16 @@ const CONTENT: Record<Lang, Content> = {
       title: 'Частые вопросы',
       items: [
         {
-          q: 'Это правда бесплатно? Почему?',
+          q: 'Что бесплатно, а что платно?',
           a:
-            'Да, полностью. Сайт, статистика, Telegram-канал — бесплатно для всех.\n\n' +
-            'А нам содержание системы обходится примерно в $230 в месяц:\n' +
-            '- [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) — ~$60/мес, сборка стратегий в AI Builder\n' +
-            '- [TradingView Premium](https://ru.tradingview.com/pricing/) — ~$60/мес, контрольные бэктесты с реальной комиссией Bybit\n' +
-            '- [Claude Code](https://claude.com/product/claude-code) — ~$100/мес, AI для разработки системы и анализа результатов сделок\n' +
-            '- Сервер, домен и инфраструктура — ~$10/мес\n\n' +
-            'Зачем тогда отдаём бесплатно? В ближайшее время запустим копитрейдинг на Bybit — там наш доход будет только процентом от вашей прибыли. ' +
-            'Если стратегии действительно работают, через 3-6 месяцев у нас будет публичная статистика и подписчики которые ХОТЯТ копировать наши сделки. ' +
-            'Это честнее чем продавать «курсы по трейдингу» — мы зарабатываем только когда вы зарабатываете.',
+            '**Бесплатно:**\n' +
+            '- Сайт и вся статистика по стратегиям — открыто для всех\n' +
+            '- Telegram-канал [@luxalgosignal](https://t.me/luxalgosignal) с сигналами в реальном времени\n' +
+            '- Личный кабинет, бэктесты, история сделок shadow-аккаунта\n\n' +
+            '**Платно — только автотрейдинг:**\n' +
+            '- $50/мес за автоматическое исполнение сигналов на вашем счёте Bybit\n' +
+            '- 14 дней бесплатного триала чтобы попробовать без обязательств\n\n' +
+            'Идея простая: смотрите как мы торгуем сколько хотите — а если результат нравится и не хочется каждый раз руками открывать сделку, подключите автотрейдинг. Деньги остаются у вас, мы только исполняем сделки через API.',
         },
         {
           q: 'Откуда берутся стратегии?',
@@ -219,15 +235,15 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           q: 'Сигналы в Telegram-канале платные?',
-          a: 'Нет. Все сигналы публикуются в нашем канале @luxalgosignal — это бесплатно и доступно всем. Каждое открытие и закрытие сделки приходит в канал с указанием цены, размера и причины выхода. Можете повторять за нами вручную или дождаться запуска копитрейдинга.',
+          a: 'Нет. Канал [@luxalgosignal](https://t.me/luxalgosignal) бесплатный, каждое открытие и закрытие сделки приходит автоматически с ценой, размером и причиной выхода. Можете повторять за нами вручную или подключить автотрейдинг, чтобы не отвлекаться.',
         },
         {
           q: 'Что если стратегия в просадке?',
-          a: 'Сначала разбираемся — рыночная аномалия или стратегия сломалась. Если 10 убыточных сделок подряд — стратегия автоматически ставится на паузу. В копитрейдинге вы сможете отключиться в любой момент.',
+          a: 'Просадка — это нормально, любая торговая система проходит через периоды убытков. У каждой стратегии есть Safety SL (защитный стоп выше исторических убытков), который ограничивает максимальную потерю. В автотрейдинге можете в любой момент отключить конкретную стратегию или весь автотрейдинг — открытые позиции продолжат жить до естественного выхода.',
         },
         {
-          q: 'Безопасны ли мои деньги в копитрейдинге?',
-          a: 'Когда мы запустим копитрейдинг на Bybit — он работает на вашем собственном аккаунте. Мы не имеем доступа к вашим средствам, только к функции копирования сделок. На Hyperliquid Vault — работает на смарт-контракте, депозит и вывод по запросу.',
+          q: 'Безопасны ли мои деньги в автотрейдинге?',
+          a: 'Да. Автотрейдинг работает на вашем собственном Bybit-аккаунте через API-ключ. Создавая ключ, вы НЕ даёте права на вывод средств — Bybit отклонит любую попытку вывести с нашей стороны. Мы можем только открывать и закрывать позиции на ваших USDT-фьючерсах. Ключ шифруется AES-256-GCM при сохранении и работает только с нашего сервера (IP-whitelist). Подробная инструкция по созданию ключа — на странице [Автотрейдинг](/autotrading).',
         },
         {
           q: 'Какие комиссии биржи учитываются?',
@@ -236,26 +252,25 @@ const CONTENT: Record<Lang, Content> = {
       ],
     },
     ctaSection: {
-      title: 'Следить за прогрессом',
+      title: 'С чего начать',
       subtitle:
-        'Каждая открытая и закрытая сделка публикуется в Telegram канал в реальном времени с уникальным ID (например BNB#001) и ссылкой на страницу стратегии.',
+        'Сначала посмотрите статистику и подпишитесь на канал — ловите live-сделки в реальном времени. Когда убедитесь что результаты вам нравятся — подключите автотрейдинг и пусть стратегии торгуют за вас.',
       telegram: 'Telegram канал',
       strategies: 'Все стратегии',
     },
     telegramUrl: 'https://t.me/luxalgosignal',
   },
   en: {
-    htmlTitle: 'Robot Claude — verified trading strategies & signals 24/7',
+    htmlTitle: 'Robot Claude — verified strategies for crypto trading',
     hero: {
-      eyebrow: '🆓 FREE · AUTOMATED TRADING 24/7',
+      eyebrow: '📊 OPEN STATS · 📡 TELEGRAM SIGNALS · 🤖 AUTO-TRADING',
       title1: 'Verified ',
       titleAccent: 'strategies & signals',
       title2: ' for crypto trading',
       subtitle:
-        'Each strategy is rigorously vetted against 200+ days of historical data. '
-        + 'Our system opens and closes positions on the exchange automatically around the clock, '
-        + 'and every signal is duplicated to our Telegram channel — trade alongside us or follow manually. '
-        + 'All trades are public in real-time. No subscriptions, no paid tiers.',
+        'Each strategy is rigorously vetted against 200+ days of historical data and recomputed for real Bybit commissions. '
+        + 'Watch live trades on the site, catch signals in Telegram for free — '
+        + 'or enable auto-trading and let our strategies trade your Bybit account automatically.',
       ctaPrimary: 'View strategies →',
       ctaSecondary: 'Telegram channel ↗',
     },
@@ -266,19 +281,19 @@ const CONTENT: Record<Lang, Content> = {
       bestWr: 'Best backtest WR',
     },
     whatYouGet: {
-      title: 'What you get — free',
+      title: 'What\'s available',
       items: [
-        '🆓 Full access to all strategies and their stats',
-        '📊 Live results from every trade in real-time',
-        '📡 Signals in our Telegram channel — entry, exit, stop',
-        '🤖 Automatic execution on the exchange (for copy traders)',
-        '🔓 No subscriptions, no premium tiers, no hidden charges',
-        '💼 Transparent accounting — every trade public and verifiable',
+        '📊 Full stats on every strategy — backtest, live trades, charts (open to all)',
+        '📡 Signals in our Telegram channel @luxalgosignal — entry, exit, stop (free)',
+        '💼 Transparent accounting — every trade public with a unique ID and verifiable',
+        '🤖 Auto-trading by subscription — our strategies trade automatically on your Bybit account',
+        '🔑 Your funds stay with you — API key without withdrawal rights, we only execute trades',
+        '⚙ Flexible setup — pick your own strategies, position size and leverage',
       ],
     },
     signalPreview: {
       title: 'What signals look like in Telegram',
-      subtitle: 'Every entry and close arrives in the channel automatically — with price, size, and exit reason. Follow manually or wait for copy trading to launch.',
+      subtitle: 'Every entry and close arrives in the channel automatically — with price, size, and exit reason. Copy manually on your own account, or enable auto-trading and stay hands-off.',
       entryLabel: 'Position opened',
       closeLabel: 'Position closed',
       timeBetween: '↓ 2 hours later',
@@ -286,11 +301,11 @@ const CONTENT: Record<Lang, Content> = {
     },
     how: {
       title: 'How it works',
-      subtitle: 'Simple path from signal to trade — with a public record of every outcome.',
+      subtitle: 'First watch how we trade. If you like the result — enable auto-trading.',
       steps: [
         {
           step: 'STEP 01',
-          title: 'Two-stage vetting',
+          title: 'Two-stage strategy vetting',
           body:
             'First we build the strategy in [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) with a 200+ day backtest. ' +
             'If win rate ≥55% and profits are at least 2× larger than losses, we move to stage two: re-test in [TradingView Premium](https://www.tradingview.com/pricing/) with realistic Bybit commission and a safety stop. ' +
@@ -298,18 +313,26 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           step: 'STEP 02',
-          title: 'Signal → automatic trade',
-          body: 'When a strategy fires, our system instantly opens a position on the exchange with a protective stop. The trade runs autonomously until exit — no manual touch. Running 24/7, every day.',
+          title: 'Watch live results',
+          body:
+            'Every strategy trades on our shadow account 24/7 — that\'s the public track record. ' +
+            'The strategy page shows every trade in real-time: entry time, exit price, profit/loss with a unique ID. ' +
+            'Verifiable to the cent.',
         },
         {
           step: 'STEP 03',
-          title: 'Mirrored to Telegram',
-          body: 'Every signal — entry, exit, stop — is posted to our Telegram channel. Trade manually on your own account by copying us, or join the upcoming copy-trading service.',
+          title: 'Free Telegram signals',
+          body:
+            'Every signal — entry, exit, stop — is posted to [@luxalgosignal](https://t.me/luxalgosignal) the moment it fires. ' +
+            'Copy manually on your own account, or just observe the results. No fee for signals.',
         },
         {
           step: 'STEP 04',
-          title: 'Full public record',
-          body: 'Every trade appears on its strategy page: entry time, exit price, profit or loss. No black boxes, no hidden stats — verify every result yourself.',
+          title: 'Want automation? Enable auto-trading',
+          body:
+            'Once you\'re convinced the results are real — connect your Bybit account via an API key ' +
+            '(no withdraw rights). Pick strategies, position size and leverage — the system starts trading ' +
+            'for you automatically. 14-day free trial, then $50/mo.',
         },
       ],
     },
@@ -323,24 +346,34 @@ const CONTENT: Record<Lang, Content> = {
       title: 'Roadmap',
       items: [
         {
+          when: 'APR 2026',
+          done: true,
+          title: '✅ Site with public per-strategy stats + @luxalgosignal Telegram channel with real-time signals.',
+        },
+        {
+          when: 'MAY 2026',
+          done: true,
+          title: '✅ Portfolio expanded to 8 verified strategies (BNB, XRP, UNI, TRX, TON, HBAR, BCH, BTC). Each with its own page, backtest and live trades.',
+        },
+        {
           when: 'NOW',
           done: true,
-          title: '🚀 Growing the portfolio of verified LuxAlgo strategies. Each gets its own landing page and live stats.',
+          title: '🚀 Auto-trading launched — clients connect their Bybit account via API key and our strategies trade automatically on their behalf. Beta-testing with first users.',
         },
         {
-          when: 'JULY 2026',
+          when: 'JUNE 2026',
           done: false,
-          title: 'Bybit live for top-performing strategies. Small size to validate execution.',
+          title: 'Public subscription open after beta completes. Automated payments via Stripe.',
         },
         {
-          when: 'AUGUST 2026',
+          when: 'SUMMER 2026',
           done: false,
-          title: 'Hyperliquid Vault — parallel channel for on-chain copy traders.',
+          title: 'Hyperliquid Vault — on-chain channel for those who prefer smart-contract copy trading over API keys.',
         },
         {
           when: 'Q4 2026',
           done: false,
-          title: 'Bybit Copy Trading — open follower onboarding after 90 days of live history.',
+          title: 'Multi-exchange: Binance, OKX. Users choose where to run their strategies.',
         },
       ],
     },
@@ -348,17 +381,16 @@ const CONTENT: Record<Lang, Content> = {
       title: 'Frequently asked',
       items: [
         {
-          q: 'Is it really free? Why?',
+          q: 'What\'s free and what costs money?',
           a:
-            'Yes, completely. The site, statistics, Telegram channel — free for everyone.\n\n' +
-            'Running this system costs us about $230/month:\n' +
-            '- [LuxAlgo Premium Ultimate](https://www.luxalgo.com/pricing/) — ~$60/mo, strategy building in AI Builder\n' +
-            '- [TradingView Premium](https://www.tradingview.com/pricing/) — ~$60/mo, control backtests with realistic Bybit commission\n' +
-            '- [Claude Code](https://claude.com/product/claude-code) — ~$100/mo, AI for system development and trade-result analysis\n' +
-            '- Server, domain, infrastructure — ~$10/mo\n\n' +
-            'Why give it away free? We\'re launching copy trading on Bybit soon — our revenue will come solely from a percentage of YOUR profits. ' +
-            'If the strategies genuinely work, in 3-6 months we\'ll have public statistics and subscribers who WANT to copy our trades. ' +
-            'More honest than selling "trading courses" — we only earn when you earn.',
+            '**Free:**\n' +
+            '- The site and all per-strategy stats — open to everyone\n' +
+            '- [@luxalgosignal](https://t.me/luxalgosignal) Telegram channel with real-time signals\n' +
+            '- Account dashboard, backtests, shadow-account trade history\n\n' +
+            '**Paid — only auto-trading:**\n' +
+            '- $50/mo for automatic signal execution on your Bybit account\n' +
+            '- 14-day free trial to try without commitment\n\n' +
+            'Simple idea: watch how we trade for as long as you want — and if you like the results and don\'t want to open every trade manually, enable auto-trading. Your funds stay with you; we only execute trades via the API.',
         },
         {
           q: 'Where do the strategies come from?',
@@ -373,7 +405,7 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           q: 'How is risk controlled?',
-          a: 'Each strategy has a protective stop-loss (typically 2-3% from entry price) as backup against sharp moves. Position size is fixed at $1000 per trade. Max one position per symbol × strategy at any time.',
+          a: 'Each strategy has a protective stop-loss (typically 4-30% from entry price depending on strategy type and timeframe). It\'s an insurance against losing the exit signal — the strategy itself does the main exit. In auto-trading you set position size and leverage per strategy. Max one position per symbol × strategy at any time.',
         },
         {
           q: 'Where can I see results?',
@@ -381,15 +413,15 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           q: 'Are signals in the Telegram channel paid?',
-          a: 'No. All signals are published to our channel @luxalgosignal — free and accessible to anyone. Every open and close arrives with price, size, and exit reason. Follow us manually, or wait for copy trading launch.',
+          a: 'No. The [@luxalgosignal](https://t.me/luxalgosignal) channel is free; every open and close arrives automatically with price, size, and exit reason. Copy manually or enable auto-trading to stay hands-off.',
         },
         {
           q: 'What if a strategy is in drawdown?',
-          a: 'First we assess — market anomaly or broken edge. After 10 losing trades in a row, the strategy auto-pauses. In copy trading, you can disconnect anytime.',
+          a: 'Drawdown is normal — any trading system goes through losing periods. Each strategy has a Safety SL (protective stop above historical losses) that caps the maximum loss. In auto-trading you can disable any single strategy or turn the whole thing off at any time — open positions continue to their natural exit.',
         },
         {
-          q: 'Are my funds safe in copy trading?',
-          a: 'When we launch copy trading on Bybit, it runs on your own account — we never have access to your funds, only to the copying feature. Hyperliquid Vault works via smart contracts with deposit/withdraw on demand.',
+          q: 'Are my funds safe in auto-trading?',
+          a: 'Yes. Auto-trading runs on your own Bybit account via an API key. When creating the key you do NOT grant withdraw rights — Bybit will reject any withdrawal attempt from our side. We can only open and close positions on your USDT-futures. The key is AES-256-GCM encrypted at rest and only works from our server (IP whitelist). Full setup instructions on the [Auto-trading page](/autotrading).',
         },
         {
           q: 'What exchange fees are included?',
@@ -398,9 +430,9 @@ const CONTENT: Record<Lang, Content> = {
       ],
     },
     ctaSection: {
-      title: 'Follow progress',
+      title: 'Where to start',
       subtitle:
-        'Every open and close lands in the Telegram channel in real-time with a unique ID (e.g. BNB#001) and a direct link to the detail page.',
+        'First check the stats and subscribe to the channel — catch live trades in real-time. Once you\'re convinced the results are what you want, enable auto-trading and let the strategies trade for you.',
       telegram: 'Telegram channel',
       strategies: 'All strategies',
     },
@@ -1141,15 +1173,47 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
   `;
 
   // ---------- CTA section ----------
+  // Funnel-shaped: 3 cards = SEE (free) → FOLLOW (free) → AUTOMATE (paid).
+  // Autotrading card is the climactic CTA — gradient border + green button.
+  const isRu = lang === 'ru';
+  const cta1Title = isRu ? '1. Смотрите статистику' : '1. Browse stats';
+  const cta1Body = isRu
+    ? 'Откройте список стратегий — у каждой свой бэктест, live-сделки и график доходности. Проверяемо до копейки.'
+    : 'Open the strategies list — each has its own backtest, live trades, and equity curve. Verifiable down to the cent.';
+  const cta1Btn = isRu ? 'Все стратегии →' : 'All strategies →';
+
+  const cta2Title = isRu ? '2. Подпишитесь на канал' : '2. Subscribe to channel';
+  const cta2Body = isRu
+    ? 'Получайте сигналы в Telegram сразу как срабатывают. Бесплатно. Можно повторять вручную или просто следить.'
+    : 'Get signals in Telegram the moment they fire. Free. Follow manually or just observe.';
+  const cta2Btn = isRu ? 'Telegram канал ↗' : 'Telegram channel ↗';
+
+  const cta3Title = isRu ? '3. Подключите автотрейдинг' : '3. Enable auto-trading';
+  const cta3Body = isRu
+    ? 'Когда убедились что нравится — подключите свой Bybit через API-ключ и пусть стратегии торгуют за вас. 14 дней бесплатно, потом $50/мес.'
+    : 'Once you like what you see — connect your Bybit via API key and let strategies trade for you. 14 days free, then $50/mo.';
+  const cta3Btn = isRu ? 'Попробовать автотрейдинг →' : 'Try auto-trading →';
+
   const ctaHtml = `
     <div class="home-section">
       <h2 class="home-section-title">${escapeHtml(c.ctaSection.title)}</h2>
       <p class="home-section-sub">${escapeHtml(c.ctaSection.subtitle)}</p>
-      <div class="hero-cta">
-        <a class="btn btn-primary" href="${escapeHtml(c.telegramUrl)}" target="_blank" rel="noopener">
-          ${escapeHtml(c.ctaSection.telegram)} ↗
-        </a>
-        <a class="btn btn-ghost" href="/strategies">${escapeHtml(c.ctaSection.strategies)}</a>
+      <div class="funnel-cards">
+        <div class="funnel-card">
+          <div class="funnel-card-title">${escapeHtml(cta1Title)}</div>
+          <div class="funnel-card-body">${escapeHtml(cta1Body)}</div>
+          <a class="btn btn-ghost" href="/strategies">${escapeHtml(cta1Btn)}</a>
+        </div>
+        <div class="funnel-card">
+          <div class="funnel-card-title">${escapeHtml(cta2Title)}</div>
+          <div class="funnel-card-body">${escapeHtml(cta2Body)}</div>
+          <a class="btn btn-ghost" href="${escapeHtml(c.telegramUrl)}" target="_blank" rel="noopener">${escapeHtml(cta2Btn)}</a>
+        </div>
+        <div class="funnel-card funnel-card-accent">
+          <div class="funnel-card-title">${escapeHtml(cta3Title)}</div>
+          <div class="funnel-card-body">${escapeHtml(cta3Body)}</div>
+          <a class="btn btn-primary" href="/autotrading">${escapeHtml(cta3Btn)}</a>
+        </div>
       </div>
     </div>
   `;
