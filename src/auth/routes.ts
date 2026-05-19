@@ -23,6 +23,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { logger } from '../lib/logger.js';
+import { sendMessage } from '../telegram/bot.js';
 import { sendVerificationMessage } from './telegram-gateway.js';
 import {
   hashPhone,
@@ -199,6 +200,30 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
       maxAge: SESSION_TTL_DAYS * 24 * 60 * 60,
     });
     logger.info({ request_id: requestId, is_new: isNew }, 'auth: session created');
+
+    // Notify operator about new registrations (not repeat logins) via
+    // Logs channel. Phone shown in full — this is the operator's own
+    // private channel, not a public space. IP + UA help spot abuse
+    // patterns (e.g. one IP creating multiple accounts).
+    if (isNew && phone) {
+      // HTML-escape UA — TG parse_mode='HTML' would crash on raw <, >, &
+      // characters inside user-agent strings. Phone and IP are
+      // safe by shape (digits + dots), no escaping needed.
+      const escapeHtml = (s: string): string =>
+        s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const uaShort = ua
+        ? escapeHtml(ua.length > 80 ? ua.slice(0, 77) + '…' : ua)
+        : '—';
+      const text =
+        `👤 <b>Новая регистрация</b>\n` +
+        `📞 <code>${phone}</code>\n` +
+        `🌍 IP: <code>${ip ?? '—'}</code>\n` +
+        `🖥 UA: <code>${uaShort}</code>`;
+      sendMessage({ channel: 'logs', text, disable_notification: true }).catch((err) =>
+        logger.error({ err }, 'auth: failed to send new-registration notice'),
+      );
+    }
+
     // is_new_registration drives the Metrika `registration` goal — we
     // only want to count UNIQUE phones, not repeat logins from new
     // devices or after cookie wipe.
