@@ -19,7 +19,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { pageShell } from './landing.js';
-import { STRATEGY_CONFIGS } from './track-c-config.js';
+import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
 
 const PRICE_USD = 50;
 const TRIAL_DAYS = 14;
@@ -54,6 +54,7 @@ function renderPage(): string {
     ${styles()}
     <main class="at-main">
       ${renderHero()}
+      ${renderBybitBonus()}
       ${renderHowItWorks()}
       ${renderSafety()}
 
@@ -109,6 +110,33 @@ function renderHero(): string {
   `;
 }
 
+function renderBybitBonus(): string {
+  return `
+    <section class="at-section at-bonus">
+      <div class="at-bonus-card">
+        <div class="at-bonus-icon">${ico('🎁')}</div>
+        <div class="at-bonus-body">
+          <div class="at-bonus-title">Нет аккаунта на Bybit? Получите +${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно</div>
+          <div class="at-bonus-sub">
+            Зарегистрируйтесь на Bybit по нашей ссылке — и мы добавим вам
+            <b>${BYBIT_REF_BONUS_DAYS} дней автотрейдинга</b> сверх 14-дневного триала.
+            После регистрации пришлите ваш Bybit UID оператору в Telegram —
+            продлим подписку вручную.
+          </div>
+        </div>
+        <div class="at-bonus-actions">
+          <a class="at-btn-primary" href="${BYBIT_REF_URL}" target="_blank" rel="noopener">
+            ${ico('🚀')}Открыть Bybit
+          </a>
+          <a class="at-btn-secondary" href="${SUPPORT_TG}" target="_blank" rel="noopener">
+            Написать оператору
+          </a>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderHowItWorks(): string {
   return `
     <section class="at-section at-how">
@@ -126,8 +154,9 @@ function renderHowItWorks(): string {
           <div class="at-how-num">2</div>
           <div class="at-how-title">Bybit API-ключ</div>
           <div class="at-how-body">
-            Создайте ключ на Bybit с правом <b>только на торговлю</b> и
-            IP-whitelist (наш VPS). Подробная инструкция в кабинете.
+            <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">Зарегистрируйтесь на Bybit</a>
+            (+${BYBIT_REF_BONUS_DAYS} дней бесплатно за нашу реф-ссылку) и создайте API-ключ
+            с правом <b>только на торговлю</b> + IP-whitelist. Инструкция в кабинете.
           </div>
         </div>
         <div class="at-how-step">
@@ -216,6 +245,10 @@ function renderPricing(): string {
 
 function renderFaq(): string {
   const items = [
+    {
+      q: `Как получить +${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно?`,
+      a: `Зарегистрируйтесь на Bybit по нашей реферальной ссылке — кнопка «Открыть Bybit» в жёлтой плашке наверху этой страницы. После создания аккаунта откройте свой профиль на Bybit, скопируйте Bybit UID (8-значное число вашего аккаунта) и пришлите его оператору @dboykod в Telegram вместе со скриншотом подтверждающим, что вы зарегистрированы по нашей ссылке. Мы вручную продлим вашу подписку на ${BYBIT_REF_BONUS_DAYS} дней сверх стандартного 14-дневного триала — итого ${14 + BYBIT_REF_BONUS_DAYS} дней бесплатно.`,
+    },
     {
       q: 'Где хранятся мои деньги?',
       a: 'На вашем счёте Bybit. Мы только отправляем ордера через API. Депозит, баланс, прибыль — всё на вашей бирже, мы доступа к выводу не имеем.',
@@ -334,6 +367,41 @@ function styles(): string {
   .at-section-sub {
     color: #9aa5b1; font-size: 14px; line-height: 1.55;
     text-align: center; max-width: 640px; margin: 0 auto 26px;
+  }
+
+  /* ----- Bybit referral bonus ----- */
+  .at-bonus { margin: 36px 0; }
+  .at-bonus-card {
+    display: grid; grid-template-columns: auto 1fr auto;
+    gap: 22px; align-items: center;
+    padding: 22px 26px;
+    background: linear-gradient(135deg, rgba(212,175,55,0.10) 0%, rgba(74,217,145,0.08) 100%);
+    border: 1px solid rgba(212, 175, 55, 0.45);
+    border-radius: 16px;
+  }
+  .at-bonus-icon { font-size: 36px; line-height: 1; }
+  .at-bonus-title {
+    font-size: 17px; font-weight: 600; color: #f3d266;
+    margin-bottom: 6px; line-height: 1.3;
+  }
+  .at-bonus-sub {
+    font-size: 13.5px; color: #cfd6dd; line-height: 1.55;
+  }
+  .at-bonus-sub b { color: #f3d266; }
+  .at-bonus-actions {
+    display: flex; flex-direction: column; gap: 8px;
+    flex-shrink: 0;
+  }
+  .at-bonus-actions .at-btn-primary {
+    padding: 11px 18px; font-size: 13.5px; white-space: nowrap;
+  }
+  .at-bonus-actions .at-btn-secondary {
+    padding: 9px 14px; font-size: 12.5px; text-align: center; white-space: nowrap;
+  }
+  @media (max-width: 720px) {
+    .at-bonus-card { grid-template-columns: 1fr; text-align: left; }
+    .at-bonus-icon { font-size: 28px; }
+    .at-bonus-actions { flex-direction: row; flex-wrap: wrap; }
   }
 
   /* ----- How it works ----- */

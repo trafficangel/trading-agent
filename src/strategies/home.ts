@@ -211,7 +211,8 @@ const CONTENT: Record<Lang, Content> = {
             '- Личный кабинет, бэктесты, история сделок shadow-аккаунта\n\n' +
             '**Платно — только автотрейдинг:**\n' +
             '- $50/мес за автоматическое исполнение сигналов на вашем счёте Bybit\n' +
-            '- 14 дней бесплатного триала чтобы попробовать без обязательств\n\n' +
+            '- 14 дней бесплатного триала чтобы попробовать без обязательств\n' +
+            '- 🎁 **+30 дней бонусом** если регистрируетесь на Bybit по нашей [реферальной ссылке](https://www.bybit.com/invite?ref=MY6W8R) — итого 44 дня бесплатно\n\n' +
             'Идея простая: смотрите как мы торгуем сколько хотите — а если результат нравится и не хочется каждый раз руками открывать сделку, подключите автотрейдинг. Деньги остаются у вас, мы только исполняем сделки через API.',
         },
         {
@@ -389,7 +390,8 @@ const CONTENT: Record<Lang, Content> = {
             '- Account dashboard, backtests, shadow-account trade history\n\n' +
             '**Paid — only auto-trading:**\n' +
             '- $50/mo for automatic signal execution on your Bybit account\n' +
-            '- 14-day free trial to try without commitment\n\n' +
+            '- 14-day free trial to try without commitment\n' +
+            '- 🎁 **+30 bonus days** if you register on Bybit via our [referral link](https://www.bybit.com/invite?ref=MY6W8R) — 44 days free total\n\n' +
             'Simple idea: watch how we trade for as long as you want — and if you like the results and don\'t want to open every trade manually, enable auto-trading. Your funds stay with you; we only execute trades via the API.',
         },
         {

@@ -14,6 +14,7 @@
 
 import { pageShell } from '../strategies/landing.js';
 import type { ApiKeySummary } from '../db/repos/user-api-keys.js';
+import { BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from '../strategies/track-c-config.js';
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({
@@ -165,12 +166,20 @@ function renderInputs(): string {
 
 function renderGuide(): string {
   return `
+    <div class="key-bonus-banner">
+      ${ico('🎁')}<b>Нет аккаунта на Bybit?</b>
+      <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">Зарегистрируйтесь по нашей ссылке</a> —
+      получите <b>+${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно</b>.
+      После регистрации пришлите ваш Bybit UID оператору
+      <a href="https://t.me/dboykod" target="_blank" rel="noopener">@dboykod</a>.
+    </div>
     <div class="key-guide">
       <h2 class="key-guide-title">${ico('📖')}Как создать ключ на Bybit</h2>
       <ol class="key-guide-steps">
         <li>
-          Войдите в Bybit и откройте <b>Profile → API</b> (или прямая ссылка
-          <a href="https://www.bybit.com/app/user/api-management" target="_blank" rel="noopener">bybit.com/app/user/api-management</a>).
+          Войдите в Bybit (или <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">зарегистрируйтесь по нашей ссылке</a>
+          с бонусом +${BYBIT_REF_BONUS_DAYS} дней) и откройте <b>Profile → API</b> — прямая ссылка
+          <a href="https://www.bybit.com/app/user/api-management" target="_blank" rel="noopener">bybit.com/app/user/api-management</a>.
         </li>
         <li>
           Нажмите <b>Create New Key → System-generated API Keys</b>.
@@ -281,6 +290,16 @@ function styles(): string {
   .key-rotate-block[open] { padding-bottom: 22px; }
   .key-rotate-block .key-form { margin-top: 14px; }
 
+  .key-bonus-banner {
+    background: linear-gradient(135deg, rgba(212,175,55,0.10) 0%, rgba(74,217,145,0.06) 100%);
+    border: 1px solid rgba(212, 175, 55, 0.45);
+    border-radius: 12px; padding: 14px 18px;
+    color: #cfd6dd; font-size: 13.5px; line-height: 1.6;
+    margin: 24px 0 8px;
+  }
+  .key-bonus-banner a { color: #f3d266; text-decoration: none; }
+  .key-bonus-banner a:hover { text-decoration: underline; }
+  .key-bonus-banner b { color: #f3d266; }
   .key-guide {
     background: #0e131a; border: 1px solid #1a1f27; border-radius: 12px;
     padding: 22px 24px; margin: 24px 0;

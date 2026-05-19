@@ -914,6 +914,21 @@ export const LANDING_BASE_URL =
   process.env.LANDING_BASE_URL ?? 'https://robotclaude.biz';
 
 /**
+ * Operator's Bybit referral link. Surfaced wherever we tell users
+ * "go to Bybit" — autotrading landing, API-key setup page, docs.
+ *
+ * Bonus: users who register Bybit through this link get +30 days
+ * free autotrading. Verification is manual — the user messages
+ * @dboykod with their Bybit UID and a screenshot showing they
+ * registered via the ref, then the admin uses /admin/users/:id/extend
+ * to grant the bonus.
+ */
+export const BYBIT_REF_URL = 'https://www.bybit.com/invite?ref=MY6W8R';
+
+/** Bonus days awarded for registering Bybit via BYBIT_REF_URL. */
+export const BYBIT_REF_BONUS_DAYS = 30;
+
+/**
  * Track D — recommended max leverage for a given strategy.
  *
  * Logic: keep the user's liquidation distance comfortably WIDER than
