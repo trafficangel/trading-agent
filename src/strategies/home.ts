@@ -285,7 +285,7 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           q: 'Безопасны ли мои деньги в автотрейдинге?',
-          a: 'Да. Автотрейдинг работает на вашем собственном Bybit-аккаунте через API-ключ. Создавая ключ, вы НЕ даёте права на вывод средств — Bybit отклонит любую попытку вывести с нашей стороны. Мы можем только открывать и закрывать позиции на ваших USDT-фьючерсах. Ключ шифруется AES-256-GCM при сохранении и работает только с нашего сервера (IP-whitelist). Подробная инструкция по созданию ключа — на странице [Автотрейдинг](/autotrading).',
+          a: 'Да. Автотрейдинг работает на вашем собственном Bybit-аккаунте через API-ключ. Создавая ключ, вы НЕ даёте права на вывод средств — Bybit отклонит любую попытку вывести с нашей стороны. Мы можем только открывать и закрывать позиции на ваших USDT-фьючерсах + ставить защитные стопы. Ключ шифруется AES-256-GCM при сохранении на нашей стороне. Подробная инструкция по созданию ключа со скриншотами — в кабинете на странице «Подключение Bybit» после регистрации.',
         },
         {
           q: 'Какие комиссии биржи учитываются?',
@@ -505,7 +505,7 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           q: 'Are my funds safe in auto-trading?',
-          a: 'Yes. Auto-trading runs on your own Bybit account via an API key. When creating the key you do NOT grant withdraw rights — Bybit will reject any withdrawal attempt from our side. We can only open and close positions on your USDT-futures. The key is AES-256-GCM encrypted at rest and only works from our server (IP whitelist). Full setup instructions on the [Auto-trading page](/autotrading).',
+          a: 'Yes. Auto-trading runs on your own Bybit account via an API key. When creating the key you do NOT grant withdraw rights — Bybit will reject any withdrawal attempt from our side. We can only open and close positions on your USDT-futures + attach protective stops. The key is AES-256-GCM encrypted at rest on our side. Detailed step-by-step setup with screenshots is in the cabinet on the «Connect Bybit» page after registration.',
         },
         {
           q: 'What exchange fees are included?',

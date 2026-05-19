@@ -178,40 +178,98 @@ function renderGuide(): string {
       После регистрации пришлите ваш Bybit UID оператору
       <a href="https://t.me/dboykod" target="_blank" rel="noopener">@dboykod</a>.
     </div>
+
+    <div class="key-warn-block">
+      ${ico('⚠️')}<b>Прежде чем начать:</b>
+      <ul class="key-warn-list">
+        <li>Убедитесь что на Bybit у вас <b>включена двухфакторная защита</b> (Google Authenticator + SMS). Без неё создать ключ нельзя — Bybit спросит код подтверждения на финальном шаге.</li>
+        <li><b>Подготовьте текстовый файл или менеджер паролей</b> (Bitwarden, 1Password, Заметки на телефоне). API Secret покажется <b>только один раз</b> — потерял = надо создавать ключ заново.</li>
+      </ul>
+    </div>
+
     <div class="key-guide">
-      <h2 class="key-guide-title">${ico('📖')}Как создать ключ на Bybit</h2>
+      <h2 class="key-guide-title">${ico('📖')}Пошаговая инструкция</h2>
       <ol class="key-guide-steps">
         <li>
-          Войдите в Bybit (или <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">зарегистрируйтесь по нашей ссылке</a>
-          с бонусом +${BYBIT_REF_BONUS_DAYS} дней) и откройте <b>Profile → API</b> — прямая ссылка
+          Откройте Bybit → <b>Profile → API</b> →
           <a href="https://www.bybit.com/app/user/api-management" target="_blank" rel="noopener">bybit.com/app/user/api-management</a>.
+          Нажмите <b>«Create New Key»</b> → выберите <b>«System-generated API Keys»</b>.
         </li>
         <li>
-          Нажмите <b>Create New Key → System-generated API Keys</b>.
+          <b>API Key Usage:</b> «API Transaction» (по умолчанию).<br/>
+          <b>Name for the API key:</b> любое, например <code>Robot Claude</code>.
         </li>
         <li>
-          Тип ключа: <b>API Transaction</b>. Имя — любое (например «Robot Claude»).
+          <b>API Key Permissions:</b> выберите <b>«Read-Write»</b>, ниже <b>«No IP restriction»</b>
+          (так проще — IP-адрес не нужен).
+          <div class="key-guide-note">
+            Bybit предупредит что без IP-привязки ключ <b>истечёт через 3 месяца</b> — это
+            нормально, через 3 месяца просто создадите новый по этой же инструкции.
+          </div>
         </li>
         <li>
-          Permissions: включить <b>Unified Trading → Trade</b>. <b>Withdraw, Transfer и Subaccount</b> НЕ включать.
+          <b>Permissions — самое важное:</b>
+          <div class="key-perm-block key-perm-ok">
+            <b>✅ Поставьте галочки только тут:</b>
+            <div class="key-perm-row"><code>Unified Trading → Contracts → Orders</code></div>
+            <div class="key-perm-row"><code>Unified Trading → Contracts → Positions</code></div>
+            <div class="key-perm-note">Эти два пункта — единственное что нам нужно. Открывать и закрывать позиции на ваших USDT-фьючерсах.</div>
+          </div>
+          <div class="key-perm-block key-perm-bad">
+            <b>❌ НЕ ставьте галочки тут:</b>
+            <div class="key-perm-row">SPOT · Trade</div>
+            <div class="key-perm-row">Assets · Account Transfer</div>
+            <div class="key-perm-row">Assets · Subaccount Transfer</div>
+            <div class="key-perm-row">Assets · Withdrawal</div>
+            <div class="key-perm-row">Assets · Exchange · Convert</div>
+            <div class="key-perm-row">Любые другие пункты в Assets, P2P, Bybit Pay</div>
+            <div class="key-perm-note">Эти права нам не нужны. Withdrawal особенно важно НЕ давать — это и есть гарантия что мы не сможем вывести ваши деньги.</div>
+          </div>
         </li>
         <li>
-          IP restriction: добавить наш IP-адрес <code>144.124.250.47</code> (это
-          адрес нашего VPS — никто другой ключом не воспользуется).
+          Нажмите <b>«Submit»</b>. Bybit попросит:
+          <div class="key-guide-note">
+            <b>1.</b> 6-значный SMS-код (придёт автоматически)<br/>
+            <b>2.</b> 6-значный код Google Authenticator
+          </div>
+          Введите оба → нажмите <b>«Next Step»</b>.
         </li>
         <li>
-          Position mode: <b>One-Way</b> (для USDT-перпов). Hedge mode пока не поддерживается.
+          Появится окно <b>«Key successfully added»</b> с двумя полями:
+          <div class="key-guide-note">
+            <b>API Key</b> — длинная строка букв и цифр<br/>
+            <b>API Secret</b> — ещё длиннее, показывается <b>один раз и навсегда исчезнет</b>
+          </div>
+          <div class="key-perm-block key-perm-warn">
+            <b>${ico('🛑')}СТОП! Не нажимайте «Understood» сразу!</b>
+            <div class="key-perm-row" style="margin-top:8px">
+              <b>1.</b> Скопируйте <b>API Key</b> и вставьте в <b>сохранённый текстовый файл</b> (или менеджер паролей)
+            </div>
+            <div class="key-perm-row">
+              <b>2.</b> Скопируйте <b>API Secret</b> туда же
+            </div>
+            <div class="key-perm-row">
+              <b>3.</b> Только теперь нажимайте <b>«Understood»</b>
+            </div>
+          </div>
         </li>
         <li>
-          Скопируйте <b>API Key</b> и <b>API Secret</b> — secret показывается
-          один раз. Вставьте их в форму выше.
+          Вернитесь сюда на эту страницу. Вставьте API Key и API Secret в форму выше,
+          нажмите <b>«Проверить и сохранить»</b>. Если всё ок — увидите ваш баланс на счёте.
         </li>
       </ol>
       <div class="key-guide-safety">
-        ${ico('🛡')}<b>Безопасность:</b> мы шифруем ключ при сохранении, не
-        логируем секрет и физически не можем вывести средства — у ключа
-        нет соответствующего права. Если хотите проверить — отзовите ключ
-        в Bybit или нажмите «Отключить» в кабинете в любой момент.
+        ${ico('🛡')}<b>Что мы можем и не можем:</b>
+        <div style="margin-top:6px">
+          <b>Можем:</b> открывать и закрывать позиции на USDT-фьючерсах + ставить защитные стопы.<br/>
+          <b>Не можем:</b> вывести ваши средства (нет права Withdrawal), залезть в спот-кошелёк,
+          переводить между аккаунтами, изменить ваш профиль.
+        </div>
+        <div style="margin-top:8px">
+          Ключ при сохранении на нашей стороне шифруется <b>AES-256-GCM</b> — секрет нельзя
+          прочитать даже из нашей БД. В любой момент отключите ключ кнопкой «Отключить» наверху
+          этой страницы, или удалите его на Bybit — мы это увидим при следующей сверке.
+        </div>
       </div>
     </div>
   `;
@@ -305,6 +363,71 @@ function styles(): string {
   .key-bonus-banner a { color: #f3d266; text-decoration: none; }
   .key-bonus-banner a:hover { text-decoration: underline; }
   .key-bonus-banner b { color: #f3d266; }
+
+  .key-warn-block {
+    background: rgba(255, 188, 70, 0.06);
+    border: 1px solid rgba(255, 188, 70, 0.40);
+    border-radius: 12px; padding: 14px 18px;
+    color: #cfd6dd; font-size: 13.5px; line-height: 1.6;
+    margin: 14px 0 0;
+  }
+  .key-warn-block b { color: #ffbc46; }
+  .key-warn-list { margin: 8px 0 0 0; padding-left: 20px; }
+  .key-warn-list li { margin-bottom: 6px; }
+
+  .key-perm-block {
+    margin-top: 10px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 13px; line-height: 1.55;
+  }
+  .key-perm-ok {
+    background: rgba(74, 217, 145, 0.07);
+    border-left: 3px solid #4ad991;
+  }
+  .key-perm-ok b { color: #4ad991; }
+  .key-perm-bad {
+    background: rgba(255, 99, 99, 0.07);
+    border-left: 3px solid #ff8b8b;
+  }
+  .key-perm-bad b { color: #ff8b8b; }
+  .key-perm-warn {
+    background: rgba(255, 188, 70, 0.10);
+    border-left: 3px solid #ffbc46;
+    padding: 14px 16px;
+  }
+  .key-perm-warn b { color: #ffbc46; }
+  .key-perm-row {
+    padding: 3px 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    color: #cfd6dd;
+  }
+  .key-perm-warn .key-perm-row {
+    font-family: inherit; font-size: 13px;
+  }
+  .key-perm-note {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #8590a0;
+    font-style: italic;
+    line-height: 1.5;
+  }
+  .key-guide-note {
+    background: #0b0e13;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-top: 6px;
+    font-size: 12.5px;
+    color: #9aa5b1;
+    line-height: 1.55;
+  }
+  .key-guide-note code {
+    background: #1a1f27;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
   .key-guide {
     background: #0e131a; border: 1px solid #1a1f27; border-radius: 12px;
     padding: 22px 24px; margin: 24px 0;

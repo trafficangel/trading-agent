@@ -156,7 +156,8 @@ function renderHowItWorks(): string {
           <div class="at-how-body">
             <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">Зарегистрируйтесь на Bybit</a>
             (+${BYBIT_REF_BONUS_DAYS} дней бесплатно за нашу реф-ссылку) и создайте API-ключ
-            с правом <b>только на торговлю</b> + IP-whitelist. Инструкция в кабинете.
+            с правом <b>только на торговлю</b> (без вывода средств). Подробная пошаговая
+            инструкция со скриншотами появится в кабинете после регистрации.
           </div>
         </div>
         <div class="at-how-step">
@@ -196,11 +197,12 @@ function renderSafety(): string {
           </div>
         </div>
         <div class="at-safety-card">
-          <div class="at-safety-icon">${ico('🌐')}</div>
-          <div class="at-safety-title">IP-whitelist</div>
+          <div class="at-safety-icon">${ico('🤖')}</div>
+          <div class="at-safety-title">Только маркет-ордера и SL</div>
           <div class="at-safety-body">
-            Ключ работает <b>только с нашего VPS</b>. Даже если ключ
-            утечёт — он бесполезен для атакующего без правильного IP.
+            С вашим ключом мы можем только три действия: открыть позицию,
+            закрыть позицию, поставить защитный стоп. Никакой доступ к споту,
+            переводам и профилю невозможен — Bybit отклонит любую попытку.
           </div>
         </div>
         <div class="at-safety-card">
