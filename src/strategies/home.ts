@@ -766,13 +766,12 @@ function homeEffectsScript(): string {
     var ru = document.documentElement.lang !== 'en';
     var sign = p.pnlUsd >= 0 ? '+' : '−';
     var pctSign = p.pnlPct >= 0 ? '+' : '−';
-    var rSign = p.pnlR >= 0 ? '+' : '−';
     var pnlBlock = card.querySelector('[data-pnl-block]');
     var oldUsd = card.querySelector('[data-pnl-usd]').textContent;
     var newUsd = sign + '$' + Math.abs(p.pnlUsd).toFixed(2);
     card.querySelector('[data-pnl-usd]').textContent = newUsd;
     card.querySelector('[data-pnl-pct]').textContent = pctSign + Math.abs(p.pnlPct).toFixed(2) + '%';
-    card.querySelector('[data-pnl-r]').textContent = rSign + Math.abs(p.pnlR).toFixed(2) + 'R';
+    // data-pnl-r removed from DOM (was R-multiple) — no longer patched.
     card.querySelector('[data-current-price]').textContent = '$' + p.currentPrice.toFixed(4);
     var arrowEl = card.querySelector('[data-arrow]');
     var goodMove = (p.side === 'long' && p.currentPrice >= p.entry) || (p.side === 'short' && p.currentPrice <= p.entry);
@@ -900,7 +899,6 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
     const sideLabel = lang === 'en' ? (p.side === 'long' ? 'LONG' : 'SHORT') : (p.side === 'long' ? 'ЛОНГ' : 'ШОРТ');
     const pnlSign = p.pnlUsd >= 0 ? '+' : '−';
     const pnlPctSign = p.pnlPct >= 0 ? '+' : '−';
-    const pnlRSign = p.pnlR >= 0 ? '+' : '−';
     const pnlCls2 = p.pnlUsd >= 0 ? 'pos' : 'neg';
     const arrow = p.side === 'long'
       ? (p.currentPrice >= p.entry ? '↑' : '↓')
@@ -933,7 +931,6 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
         <div class="live-pos-pnl ${pnlCls2}" data-pnl-block>
           <span class="live-pos-pnl-usd" data-pnl-usd>${pnlSign}$${Math.abs(p.pnlUsd).toFixed(2)}</span>
           <span class="live-pos-pnl-pct" data-pnl-pct>${pnlPctSign}${Math.abs(p.pnlPct).toFixed(2)}%</span>
-          <span class="live-pos-pnl-r" data-pnl-r>${pnlRSign}${Math.abs(p.pnlR).toFixed(2)}R</span>
         </div>
         <div class="live-pos-foot">
           <span class="live-pos-age" data-age data-opened-at="${p.openedAt}">${formatAge(p.ageMs, lang)}</span>
@@ -964,6 +961,7 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
       <a class="live-pos-row" href="/strategies/${escapeHtml(p.strategyCode)}" data-trade-id="${escapeHtml(p.tradeId)}" data-strategy="${escapeHtml(p.strategyCode)}">
         <span class="live-pos-row-id">${sideEmoji} <b>${escapeHtml(p.tradeId)}</b></span>
         <span class="live-pos-row-side side-${p.side}">${sideLabel}</span>
+        <span class="live-pos-row-entry mono">$${p.entry.toFixed(4)}</span>
         <span class="live-pos-row-price mono">
           <span data-current-price>$${p.currentPrice.toFixed(4)}</span>
           <span class="live-pos-arrow ${arrowCls}" data-arrow>${arrow}</span>
@@ -973,7 +971,6 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
           <span class="live-pos-row-pct" data-pnl-pct>${pnlPctSign}${Math.abs(p.pnlPct).toFixed(2)}%</span>
         </span>
         <span class="live-pos-row-age" data-age data-opened-at="${p.openedAt}">${formatAge(p.ageMs, lang)}</span>
-        <span class="live-pos-row-pnl-r mono" data-pnl-r>${(p.pnlR >= 0 ? '+' : '−')}${Math.abs(p.pnlR).toFixed(2)}R</span>
       </a>
     `;
   };
@@ -985,10 +982,10 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
            <div class="live-pos-row live-pos-row-head">
              <span>${lang === 'en' ? 'Trade' : 'Сделка'}</span>
              <span>${lang === 'en' ? 'Side' : 'Сторона'}</span>
+             <span>${lang === 'en' ? 'Entry' : 'Вход'}</span>
              <span>${lang === 'en' ? 'Price' : 'Цена'}</span>
              <span>P&amp;L</span>
              <span>${lang === 'en' ? 'Age' : 'Возраст'}</span>
-             <span>R</span>
            </div>
            ${activePositions.map(renderPositionRow).join('')}
          </div>`

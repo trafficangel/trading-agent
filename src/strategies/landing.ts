@@ -1596,7 +1596,7 @@ const STYLE = `
     letter-spacing: -0.01em;
     font-variant-numeric: tabular-nums;
   }
-  .live-pos-pnl-pct, .live-pos-pnl-r {
+  .live-pos-pnl-pct {
     font-size: 13px; font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
@@ -1629,7 +1629,8 @@ const STYLE = `
   }
   .live-pos-row {
     display: grid;
-    grid-template-columns: 110px 70px 1fr 130px 80px 70px;
+    /* Trade · Side · Entry · Price · PnL · Age */
+    grid-template-columns: 110px 70px 120px 1fr 130px 80px;
     gap: 12px;
     align-items: center;
     padding: 10px 16px;
@@ -1669,12 +1670,15 @@ const STYLE = `
     font-size: 11px; font-weight: 500; opacity: 0.9;
   }
   .live-pos-row-pnl.is-flashing { animation: pnl-flash 0.6s ease-out; }
-  .live-pos-row-age, .live-pos-row-pnl-r {
+  .live-pos-row-age {
     color: var(--text-dim); font-variant-numeric: tabular-nums;
   }
-  /* Mobile: collapse some columns by stacking into 2 lines per row.
-   * At <640px, hide R-multiple and age columns; PnL goes inline with
-   * price. This keeps the rows ~50px each on mobile too. */
+  .live-pos-row-entry.mono {
+    font-family: 'SF Mono', 'Menlo', monospace;
+    color: var(--text-dim);
+  }
+  /* Mobile: collapse columns by stacking into 2 lines per row.
+   * At <640px hide entry + age, PnL goes inline with current price. */
   @media (max-width: 640px) {
     .live-pos-row {
       grid-template-columns: 1fr 70px 1fr;
@@ -1682,7 +1686,7 @@ const STYLE = `
       row-gap: 4px;
     }
     .live-pos-row-id { grid-column: 1 / -1; }
-    .live-pos-row-pnl-r, .live-pos-row-age { display: none; }
+    .live-pos-row-entry, .live-pos-row-age { display: none; }
     .live-pos-row-head { display: none; }
   }
 
