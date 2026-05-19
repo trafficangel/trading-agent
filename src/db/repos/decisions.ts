@@ -99,7 +99,7 @@ const insertStmt = db.prepare(`
  *  subsequent INSERT (better-sqlite3 is sync). */
 const maxStrategyNumStmt = db.prepare<[string], { n: number | null }>(`
   SELECT MAX(strategy_trade_num) AS n FROM decisions
-  WHERE track = 'strategy' AND strategy_id = ?
+  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id = ?
 `);
 
 const findActiveStmt = db.prepare<[], DecisionRow>(`
@@ -122,7 +122,8 @@ const closePositionWithStatsStmt = db.prepare<[number, number, string, number, n
 const findActiveByStrategyStmt = db.prepare<[string, string], DecisionRow>(`
   SELECT * FROM decisions
   WHERE status = 'active' AND decision = 'OPEN'
-    AND track = 'strategy' AND symbol = ? AND strategy_id = ?
+    AND track = 'strategy' AND user_id IS NULL
+    AND symbol = ? AND strategy_id = ?
   ORDER BY created_at DESC LIMIT 1
 `);
 

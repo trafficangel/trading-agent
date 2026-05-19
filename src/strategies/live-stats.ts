@@ -51,13 +51,13 @@ const stmt = db.prepare<[string], Row>(`
   SELECT status, pnl_pct, close_reason, force_close_reason,
          created_at, filled_at, closed_at
   FROM decisions
-  WHERE track = 'strategy' AND strategy_id = ?
+  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id = ?
 `);
 
 const firstAtStmt = db.prepare<[string], { created_at: number }>(`
   SELECT MIN(created_at) AS created_at
   FROM decisions
-  WHERE track = 'strategy' AND strategy_id = ?
+  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id = ?
 `);
 
 export function getStrategyLiveStats(strategyId: string): StrategyLiveStats {
@@ -161,7 +161,7 @@ const recentTradesStmt = db.prepare<[string, number], TradeRow>(`
   SELECT id, strategy_trade_num, side, entry, close_price, pnl_pct, close_reason,
          force_close_reason, filled_at, created_at, closed_at
   FROM decisions
-  WHERE track = 'strategy' AND strategy_id = ?
+  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id = ?
     AND status = 'closed' AND pnl_pct IS NOT NULL
   ORDER BY closed_at DESC
   LIMIT ?
@@ -193,7 +193,7 @@ type ActiveRow = {
 const activeTradesStmt = db.prepare<[string], ActiveRow>(`
   SELECT id, strategy_trade_num, side, entry, sl, filled_at, created_at
   FROM decisions
-  WHERE track = 'strategy' AND strategy_id = ?
+  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id = ?
     AND status IN ('active', 'pending')
   ORDER BY created_at DESC
 `);
@@ -236,7 +236,7 @@ const dailyClosedStmt = db.prepare<[string, number], {
 }>(`
   SELECT pnl_pct, close_reason, force_close_reason
   FROM decisions
-  WHERE track = 'strategy' AND strategy_id = ?
+  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id = ?
     AND status = 'closed' AND pnl_pct IS NOT NULL
     AND closed_at >= ?
 `);

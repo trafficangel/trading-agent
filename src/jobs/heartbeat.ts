@@ -17,14 +17,17 @@ function formatUptime(ms: number): string {
 
 // Track C-only stats. The signals table is no longer written to (Track A/B
 // removed) but historical rows still exist — we just don't surface them.
+// Operator heartbeat counts SHADOW rows only (user_id IS NULL); per-user
+// fan-out rows live in the same table but represent the same signal and
+// would double-count here.
 const activeCount = db.prepare<[], { c: number }>(
-  "SELECT COUNT(*) AS c FROM decisions WHERE status = 'active' AND track = 'strategy'",
+  "SELECT COUNT(*) AS c FROM decisions WHERE status = 'active' AND track = 'strategy' AND user_id IS NULL",
 );
 const closedSinceStmt = db.prepare<[number], { c: number }>(
-  "SELECT COUNT(*) AS c FROM decisions WHERE status = 'closed' AND track = 'strategy' AND closed_at >= ?",
+  "SELECT COUNT(*) AS c FROM decisions WHERE status = 'closed' AND track = 'strategy' AND user_id IS NULL AND closed_at >= ?",
 );
 const openedSinceStmt = db.prepare<[number], { c: number }>(
-  "SELECT COUNT(*) AS c FROM decisions WHERE track = 'strategy' AND created_at >= ?",
+  "SELECT COUNT(*) AS c FROM decisions WHERE track = 'strategy' AND user_id IS NULL AND created_at >= ?",
 );
 
 async function tick(): Promise<void> {
