@@ -546,6 +546,10 @@ function styles(): string {
     .at-section-title { font-size: 19px; }
     .at-cta-title { font-size: 24px; }
   }
+  @media (max-width: 480px) {
+    .at-price-num { font-size: 38px; }
+    .at-hero-title { font-size: 26px; }
+  }
 </style>
 `;
 }

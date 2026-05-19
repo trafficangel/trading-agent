@@ -314,6 +314,7 @@ function styles(): string {
 
   .trades-table-wrap {
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     background: #11161d; border: 1px solid #1f2630; border-radius: 12px;
   }
   .trades-table {
@@ -366,6 +367,16 @@ function styles(): string {
   .trades-back { text-align: center; margin-top: 28px; }
   .trades-back a { color: #8590a0; font-size: 13px; text-decoration: none; }
   .trades-back a:hover { color: #4ad991; }
+
+  @media (max-width: 640px) {
+    .trades-table { min-width: 760px; }
+    .trades-pagination { padding: 12px 14px; gap: 8px; }
+    .trades-pagination-nav { gap: 8px; }
+    .trades-pagination-nav a { padding: 4px 8px; font-size: 12px; }
+  }
+  @media (max-width: 380px) {
+    .cabinet-main { padding: 20px 12px 60px; }
+  }
 </style>
 `;
 }

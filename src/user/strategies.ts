@@ -671,6 +671,7 @@ function styles(): string {
     padding: 16px 18px;
     background: #11161d; border: 1px solid #1f2630; border-radius: 12px;
     transition: border-color 0.15s, background 0.15s;
+    min-width: 0;
   }
   .strat-row-on { border-color: rgba(74, 217, 145, 0.45); background: #11181a; }
 
@@ -710,11 +711,13 @@ function styles(): string {
   }
   .strat-field {
     display: flex; flex-direction: column; gap: 4px;
+    min-width: 0;
   }
   .strat-field-label {
     font-size: 11.5px; color: #8590a0; letter-spacing: 0.02em;
   }
   .strat-field input {
+    width: 100%; box-sizing: border-box;
     padding: 8px 10px;
     background: #0b0e13; border: 1px solid #2a323d;
     border-radius: 8px; color: #e8edf2; font-size: 14px;
@@ -756,6 +759,12 @@ function styles(): string {
   @media (max-width: 640px) {
     .strat-row-controls { grid-template-columns: 1fr; padding-left: 0; }
     .strat-banner { flex-direction: column; align-items: flex-start; }
+  }
+  @media (max-width: 380px) {
+    .cabinet-main { padding: 20px 12px 60px; }
+    .strat-row { padding: 14px 12px; }
+    .strat-actions { flex-direction: column; gap: 10px; }
+    .strat-actions a, .strat-actions button { width: 100%; text-align: center; box-sizing: border-box; }
   }
 </style>
 `;

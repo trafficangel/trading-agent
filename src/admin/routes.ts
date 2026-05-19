@@ -319,8 +319,9 @@ function renderDashboard(csrfToken: string): string {
 
     <div class="section">
       <div class="section-title">Все регистрации (${rows.length})</div>
-      <div class="card" style="overflow-x:auto">
-        <table>
+      <div class="card adm-table-wrap">
+        <div class="adm-scroll-hint">прокрутите таблицу вправо →</div>
+        <table class="adm-users-table">
           <thead>
             <tr>
               <th>Дата (UTC)</th>
@@ -373,6 +374,19 @@ function renderDashboard(csrfToken: string): string {
       .adm-btn-secondary:hover { border-color: #4ad991; color: #fff; }
       .adm-btn-danger { border-color: rgba(255, 99, 99, 0.5); color: #ff8b8b; }
       .adm-btn-danger:hover { background: rgba(255, 99, 99, 0.10); }
+      .adm-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .adm-users-table { min-width: 1100px; }
+      .adm-scroll-hint { display: none; font-size: 12px; color: #8590a0; padding: 0 0 8px; }
+      @media (max-width: 900px) {
+        .adm-scroll-hint { display: block; }
+        .adm-users-table th:first-child,
+        .adm-users-table td:first-child {
+          position: sticky; left: 0; z-index: 2;
+          background: #11161d;
+          box-shadow: 2px 0 4px rgba(0,0,0,0.4);
+        }
+        .adm-users-table th:first-child { background: #161d27; }
+      }
       .adm-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
       .adm-select {
         background: #0b0e13; color: #cfd6dd; border: 1px solid #2a323d;

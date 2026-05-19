@@ -384,10 +384,13 @@ function styles(): string {
   }
 
   .sub-meta-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 14px 24px; margin: 18px 0;
     padding: 16px 18px; background: rgba(255,255,255,0.02);
     border-radius: 10px; border: 1px solid #1a1f27;
+  }
+  @media (max-width: 480px) {
+    .sub-meta-grid { grid-template-columns: 1fr; padding: 14px; }
   }
   .sub-meta-label {
     font-size: 11px; color: #6b7480; letter-spacing: 0.06em;
@@ -422,6 +425,9 @@ function styles(): string {
     .sub-card { padding: 20px; }
     .sub-card-title { font-size: 18px; }
     .sub-days-big { font-size: 22px; }
+  }
+  @media (max-width: 380px) {
+    .cabinet-main { padding: 20px 12px 60px; }
   }
 </style>
 `;

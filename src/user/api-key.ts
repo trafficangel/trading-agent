@@ -376,13 +376,15 @@ function styles(): string {
 
   .key-card-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
-  .key-form { display: flex; flex-direction: column; gap: 14px; }
-  .key-field-row { display: flex; flex-direction: column; gap: 6px; }
+  .key-form { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .key-field-row { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .key-form input {
+    width: 100%; box-sizing: border-box;
     padding: 10px 12px; background: #0b0e13; border: 1px solid #2a323d;
     border-radius: 8px; color: #e8edf2; font-size: 14px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
+  .key-field-value { overflow-wrap: anywhere; }
   .key-form input:focus { outline: none; border-color: #4ad991; }
   .key-form-hint { font-size: 12.5px; color: #6b7480; line-height: 1.5; }
 
@@ -510,6 +512,16 @@ function styles(): string {
   .key-back { text-align: center; margin-top: 24px; }
   .key-back a { color: #8590a0; font-size: 13px; text-decoration: none; }
   .key-back a:hover { color: #4ad991; }
+
+  @media (max-width: 480px) {
+    .key-card { padding: 16px 14px; }
+    .key-card-grid { grid-template-columns: 1fr; gap: 10px; }
+    .key-card-actions { flex-direction: column; align-items: stretch; }
+    .key-card-actions button { width: 100%; }
+  }
+  @media (max-width: 380px) {
+    .cabinet-main { padding: 20px 12px 60px; }
+  }
 </style>
 `;
 }

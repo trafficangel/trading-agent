@@ -502,7 +502,7 @@ const STYLE = `
     table { font-size: 12px; }
     th, td { padding: 6px 8px; }
     .title { font-size: 22px; }
-    .alert-id-value { font-size: 10px; padding: 4px 6px; }
+    .alert-id-value { font-size: 10px; padding: 4px 6px; min-width: 0; flex-basis: 100%; }
   }
   .header { display: flex; flex-direction: column; gap: 6px; margin-bottom: 24px; }
   .strat-code {
@@ -1047,11 +1047,16 @@ const STYLE = `
   }
   body.nav-open { overflow: hidden; }
 
-  /* Mobile: hide center nav, show burger */
+  /* Mobile: hide center nav, show burger. Without .site-nav (flex:1)
+   * pushing things apart, the .site-nav-end group (lang-toggle +
+   * burger) would stick to the brand on the left — push it right with
+   * margin-left:auto so the burger lands in the corner where users
+   * expect it. */
   @media (max-width: 720px) {
     .site-header-inner { gap: 12px; }
     .site-nav { display: none; }
     .site-burger { display: inline-flex; }
+    .site-nav-end { margin-left: auto; }
     .brand-name { font-size: 14px; }
     .brand-mark { width: 24px; height: 24px; }
     .brand-beta { font-size: 9px; padding: 2px 5px; }
@@ -1324,6 +1329,12 @@ const STYLE = `
   .live-strip-sep {
     color: var(--text-faint); font-size: 18px; user-select: none;
   }
+  /* On narrow phones the «·» separators wrap to their own line and
+   * look broken. Hide them — items still read fine with just gap. */
+  @media (max-width: 540px) {
+    .live-strip { gap: 12px 18px; padding: 12px 16px; }
+    .live-strip-sep { display: none; }
+  }
 
   /* Telegram mockup cards — emulates how a Telegram channel post
    * looks on mobile. Used on the home page to show subscribers
@@ -1525,7 +1536,7 @@ const STYLE = `
   }
   .live-pos-grid {
     display: grid; gap: 12px;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   }
   .live-pos-card {
     background: var(--bg-card);
@@ -2964,6 +2975,14 @@ ${metrikaScript}
     display: flex; align-items: center; justify-content: center;
     background: rgba(11, 14, 19, 0.6); backdrop-filter: blur(6px);
     padding: 24px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* On short viewports (iOS keyboard up, landscape phone) center
+   * alignment hides the submit button under the keyboard. Anchor
+   * card to the top so user can scroll the panel itself. */
+  @media (max-height: 640px), (max-width: 480px) {
+    .gate-overlay { align-items: flex-start; padding-top: 16px; padding-bottom: 32px; }
   }
   .gate-card {
     background: var(--bg-card); border: 1px solid var(--border);

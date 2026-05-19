@@ -783,6 +783,7 @@ function cabinetStyles(): string {
     font-size: 13px;
     font-weight: 600;
     text-decoration: none;
+    text-align: center;
   }
   .cabinet-banner-btn:hover { background: #5ce0a0; }
   .cabinet-banner-btn-secondary {
@@ -800,6 +801,10 @@ function cabinetStyles(): string {
     .cabinet-banner-bad,
     .cabinet-banner-ok,
     .cabinet-banner-amber { flex-direction: column; }
+  }
+  @media (max-width: 380px) {
+    .cabinet-main { padding: 20px 12px 60px; }
+    .cabinet-stat-grid { grid-template-columns: 1fr; }
   }
 </style>
 `;
