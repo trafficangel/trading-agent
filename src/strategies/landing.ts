@@ -2552,7 +2552,13 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
     if (!isAuthed(req)) {
       // No-cache on the gated stub so re-visits after auth get fresh HTML.
       reply.header('Cache-Control', 'private, no-store');
-      return renderGatedPreview('index', renderStrategyIndex(enabled));
+      // Detect ?from=autotrading so the gate framing matches the CTA
+      // the user just clicked. Without this, hitting «Попробовать
+      // бесплатно» on /autotrading lands on a page whose modal says
+      // "Доступ к детальной статистике" — semantically wrong for an
+      // autotrading-signup intent.
+      const fromAutotrading = (req.query as { from?: string } | undefined)?.from === 'autotrading';
+      return renderGatedPreview('index', renderStrategyIndex(enabled), { fromAutotrading });
     }
     reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
     return renderStrategyIndex(enabled);
@@ -2595,6 +2601,7 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
 function renderGatedPreview(
   _kind: 'index' | 'detail',
   innerHtml: string,
+  opts: { fromAutotrading?: boolean } = {},
 ): string {
   // Extract the inner <body> content of the rendered page so we don't
   // nest <html>. Quick'n'dirty: find first <div class="container">
@@ -2611,16 +2618,25 @@ function renderGatedPreview(
   const styleMatch = innerHtml.match(/<style>([\s\S]*?)<\/style>/);
   const inlineStyle = styleMatch ? styleMatch[1]! : '';
 
+  // Frame the gate differently for users who came from /autotrading
+  // CTAs — they expect a signup screen, not a "see-the-stats" gate.
+  const gateIcon = opts.fromAutotrading ? '🚀' : '🔒';
+  const gateTitle = opts.fromAutotrading
+    ? '14 дней автотрейдинга бесплатно'
+    : 'Доступ к детальной статистике';
+  const gateSub = opts.fromAutotrading
+    ? 'Введите имя и номер — отправим 6-значный код в Telegram. После подтверждения попадёте в личный кабинет и сможете подключить свой Bybit-аккаунт.'
+    : 'Введите номер — отправим 6-значный код через официальный сервис подтверждения Telegram.';
+
   const formHtml = `
     <div class="gate-overlay">
       <div class="gate-card">
         <div class="gate-head">
-          <span class="gate-icon" aria-hidden="true">🔒</span>
-          <h2 class="gate-title">Доступ к детальной статистике</h2>
+          <span class="gate-icon" aria-hidden="true">${gateIcon}</span>
+          <h2 class="gate-title">${gateTitle}</h2>
         </div>
         <p class="gate-sub">
-          Введите номер — отправим 6-значный код через официальный сервис
-          подтверждения Telegram.
+          ${gateSub}
         </p>
 
         <!-- Stage 1: name + phone -->

@@ -96,7 +96,7 @@ function renderHero(): string {
         права на вывод.
       </p>
       <div class="at-hero-cta">
-        <a href="/strategies" class="at-btn-primary">${ico('🚀')}Попробовать бесплатно</a>
+        <a href="/strategies?from=autotrading" class="at-btn-primary">${ico('🚀')}Попробовать бесплатно</a>
         <div class="at-hero-pricing">
           <b>${TRIAL_DAYS} дней бесплатно</b>, потом <b>$${PRICE_USD}/мес</b>
         </div>
@@ -233,7 +233,7 @@ function renderPricing(): string {
           <li>${ico('💬')}Поддержка в Telegram</li>
           <li>${ico('⏹')}Отмена в любой момент</li>
         </ul>
-        <a href="/strategies" class="at-btn-primary at-btn-full">Начать ${TRIAL_DAYS}-дневный триал</a>
+        <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-full">Начать ${TRIAL_DAYS}-дневный триал</a>
         <div class="at-price-note">
           Оплата подписки пока вручную через оператора. После окончания
           триала свяжемся в Telegram для оплаты — никаких автосписаний.
@@ -299,7 +299,7 @@ function renderFinalCta(): string {
       <p class="at-cta-sub">
         ${TRIAL_DAYS} дней бесплатного доступа. Без привязки карты. Отмена в один клик.
       </p>
-      <a href="/strategies" class="at-btn-primary at-btn-large">Зарегистрироваться</a>
+      <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">Зарегистрироваться</a>
       <p class="at-cta-help">
         Вопросы? Напишите оператору: <a href="${SUPPORT_TG}" target="_blank" rel="noopener">@dboykod</a>
       </p>

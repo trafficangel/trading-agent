@@ -129,6 +129,22 @@ const adminListSubsStmt = db.prepare<[], SubscriptionRow>(
   `SELECT * FROM user_subscriptions`,
 );
 
+/** Bulk-fetch API key status (one row per user_id) — non-revoked,
+ *  verified keys count as «connected». */
+const adminListKeysStmt = db.prepare<[], { user_id: number; verified: number | null; revoked: number | null }>(
+  `SELECT user_id, last_verified_at AS verified, revoked_at AS revoked
+     FROM user_api_keys
+    WHERE exchange = 'bybit'`,
+);
+
+/** Count of enabled strategies per user — small table, single GROUP-BY scan. */
+const adminListStrategyCountsStmt = db.prepare<[], { user_id: number; n: number }>(
+  `SELECT user_id, COUNT(*) AS n
+     FROM user_strategies
+    WHERE enabled = 1
+    GROUP BY user_id`,
+);
+
 function planBadge(plan: 'standard' | 'vip', status: string): string {
   if (plan === 'vip') {
     return `<span class="plan-badge plan-vip" title="VIP — постоянный доступ">👑 VIP</span>`;
@@ -150,9 +166,33 @@ function renderDashboard(csrfToken: string): string {
   const rows = listRegistrations(500);
   const subs = new Map<number, SubscriptionRow>();
   for (const s of adminListSubsStmt.all()) subs.set(s.user_id, s);
+  // Indicates "the user has reached the «autotrading active» stage"
+  // (key + at least one strategy enabled). These are real adoption
+  // signals to track separately from raw registration.
+  const keys = new Map<number, { verified: number | null; revoked: number | null }>();
+  for (const k of adminListKeysStmt.all()) keys.set(k.user_id, { verified: k.verified, revoked: k.revoked });
+  const stratCounts = new Map<number, number>();
+  for (const r of adminListStrategyCountsStmt.all()) stratCounts.set(r.user_id, r.n);
+
+  // Aggregate funnel counters for the top dashboard. Computed off the
+  // already-loaded rows so no extra queries.
+  let cKey = 0;
+  let cStrats = 0;
+  let cFullActive = 0; // key + strategies + active sub
+  const now = Date.now();
+  for (const r of rows) {
+    const k = keys.get(r.id);
+    const hasKey = !!k && k.revoked === null && k.verified !== null;
+    const stratN = stratCounts.get(r.id) ?? 0;
+    const sub = subs.get(r.id);
+    const hasAccess = !!sub && (sub.plan === 'vip' || (sub.access_until > now && (sub.status === 'trial' || sub.status === 'active')));
+    if (hasKey) cKey++;
+    if (stratN > 0) cStrats++;
+    if (hasKey && stratN > 0 && hasAccess) cFullActive++;
+  }
 
   const tableRows = rows.length === 0
-    ? `<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:24px">Регистраций пока нет</td></tr>`
+    ? `<tr><td colspan="10" style="text-align:center;color:var(--text-faint);padding:24px">Регистраций пока нет</td></tr>`
     : rows
         .map((r: RegistrationListRow) => {
           const phone = r.phone ?? '—';
@@ -162,6 +202,22 @@ function renderDashboard(csrfToken: string): string {
           const plan = sub?.plan ?? 'standard';
           const status = sub?.status ?? '—';
           const badge = sub ? planBadge(plan, status) : '<span class="plan-badge plan-bad">—</span>';
+
+          // Autotrading-funnel signals at-a-glance:
+          //   - API: green ✓ if connected + verified + not revoked, dash otherwise
+          //   - Strategies: number of enabled rows, dash if zero
+          const k = keys.get(r.id);
+          const apiCell = !k
+            ? `<span class="plan-badge plan-bad">— нет</span>`
+            : k.revoked
+              ? `<span class="plan-badge plan-bad">⏸ отозван</span>`
+              : k.verified
+                ? `<span class="plan-badge plan-active">✓ подключён</span>`
+                : `<span class="plan-badge plan-trial">⚠ не верифиц.</span>`;
+          const stratN = stratCounts.get(r.id) ?? 0;
+          const stratCell = stratN > 0
+            ? `<b>${stratN}</b>`
+            : `<span style="color:#6b7480">—</span>`;
           // Three buttons per row:
           //   1. VIP toggle (Сделать VIP / Снять VIP)
           //   2. Продлить на 30 дней — bumps access_until forward for
@@ -208,6 +264,8 @@ function renderDashboard(csrfToken: string): string {
               <td>${escapeHtml(name)}</td>
               <td class="mono">${escapeHtml(phone)}</td>
               <td>${badge}${daysLeftBadge}</td>
+              <td>${apiCell}</td>
+              <td style="text-align:center">${stratCell}</td>
               <td class="mono">${escapeHtml(r.ip_first ?? '—')}</td>
               <td class="mono">${tg}</td>
               <td>${fmtAge(r.last_seen_at)}</td>
@@ -225,17 +283,24 @@ function renderDashboard(csrfToken: string): string {
 
     <div class="portfolio-dashboard">
       <div class="dash-card">
-        <div class="dash-label">Всего</div>
+        <div class="dash-label">Всего регистраций</div>
         <div class="dash-value">${stats.total}</div>
-        <div class="dash-sub">с момента запуска</div>
+        <div class="dash-sub">+${stats.last24h} за 24ч · +${stats.last7d} за 7д</div>
       </div>
       <div class="dash-card">
-        <div class="dash-label">За 24 часа</div>
-        <div class="dash-value">${stats.last24h}</div>
+        <div class="dash-label">Подключили API</div>
+        <div class="dash-value">${cKey}</div>
+        <div class="dash-sub">из ${stats.total} (${stats.total > 0 ? Math.round((cKey / stats.total) * 100) : 0}%)</div>
       </div>
       <div class="dash-card">
-        <div class="dash-label">За 7 дней</div>
-        <div class="dash-value">${stats.last7d}</div>
+        <div class="dash-label">Выбрали стратегии</div>
+        <div class="dash-value">${cStrats}</div>
+        <div class="dash-sub">из ${stats.total} (${stats.total > 0 ? Math.round((cStrats / stats.total) * 100) : 0}%)</div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-label">Автотрейдинг живёт</div>
+        <div class="dash-value">${cFullActive}</div>
+        <div class="dash-sub">подписка + ключ + ≥1 стратегия</div>
       </div>
     </div>
 
@@ -249,6 +314,8 @@ function renderDashboard(csrfToken: string): string {
               <th>Имя</th>
               <th>Телефон</th>
               <th>План</th>
+              <th>API Bybit</th>
+              <th>Страт.</th>
               <th>IP</th>
               <th>TG user_id</th>
               <th>Последняя активность</th>
