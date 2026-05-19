@@ -43,7 +43,7 @@ import {
   getDecryptedCreds,
   recordVerifyResult,
 } from '../db/repos/user-api-keys.js';
-import { hasActiveAccess } from '../db/repos/user-subscriptions.js';
+import { isTradingActive } from '../db/repos/user-subscriptions.js';
 import {
   insertDecision,
   findActiveUserDecisions,
@@ -136,13 +136,13 @@ export async function fanOutEntry(args: FanOutEntryArgs): Promise<{
 }
 
 async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promise<boolean> {
-  // Re-check access right before placing the order — defends against
-  // the race where access expired (or user cancelled) between
-  // listEligibleTargets() and now. Without this we'd place a real
-  // order on a sub'd-out user, then refuse to close it later (no key
-  // for the next exit signal).
-  if (!hasActiveAccess(t.user_id)) {
-    logger.info({ userId: t.user_id }, 'fanOutEntry: access lapsed between query and execute');
+  // Re-check trading-active right before placing the order — defends
+  // against two races: (a) access expired / cancelled between
+  // listEligibleTargets() and now, and (b) user clicked «Остановить»
+  // in the cabinet while we were in flight. isTradingActive covers
+  // both (hasActiveAccess + trading_paused_at IS NULL).
+  if (!isTradingActive(t.user_id)) {
+    logger.info({ userId: t.user_id }, 'fanOutEntry: trading lapsed between query and execute');
     return false;
   }
   const keyRow = findActiveKey(t.user_id);

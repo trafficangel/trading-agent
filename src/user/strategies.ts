@@ -49,6 +49,8 @@ type RenderArgs = {
   flash?: { ok: boolean; message: string } | null;
   /** CSRF token to embed in the form's hidden input. */
   csrfToken: string;
+  /** Unix ms when user paused trading globally, NULL if active. */
+  tradingPausedAt: number | null;
 };
 
 export function renderStrategiesPage(args: RenderArgs): string {
@@ -70,6 +72,73 @@ export function renderStrategiesPage(args: RenderArgs): string {
       </div>
     `;
 
+  // Pause/resume banner. When paused, fan-out skips this user entirely
+  // (see listEligibleTargets SQL + isTradingActive race check).
+  const pauseBanner = args.tradingPausedAt
+    ? `
+      <div class="strat-pause-banner strat-pause-paused">
+        <div>
+          <strong>⏸ Автотрейдинг приостановлен.</strong>
+          Новые сделки на ваш счёт не открываются. Открытые позиции продолжают жить до естественного выхода.
+        </div>
+        <form method="POST" action="/account/strategies/resume" style="display:inline">
+          ${csrfInput(args.csrfToken)}
+          <button class="strat-pause-btn strat-pause-btn-resume" type="submit">▶ Возобновить торговлю</button>
+        </form>
+      </div>
+    `
+    : `
+      <div class="strat-pause-banner strat-pause-active">
+        <div>
+          <strong>${ico('🟢')}Автотрейдинг включён.</strong>
+          Система открывает позиции на вашем счёте по сигналам стратегий ниже.
+        </div>
+        <form method="POST" action="/account/strategies/pause" style="display:inline"
+              onsubmit="return confirm('Остановить торговлю? Новые сделки прекратятся. Открытые позиции продолжат жить.');">
+          ${csrfInput(args.csrfToken)}
+          <button class="strat-pause-btn strat-pause-btn-stop" type="submit">⏸ Остановить торговлю</button>
+        </form>
+      </div>
+    `;
+
+  // Calculator card — sums up notional, required margin, and per-trade
+  // max-loss across enabled strategies. Recomputes live on input change
+  // via the inline JS at the bottom of the page. SSR shows the initial
+  // values from the DB so the page is correct without JS.
+  const initialEnabled = enabledStrategies.filter((s) => args.userStrategies.get(s.id)?.enabled === 1);
+  const initialNotional = initialEnabled.reduce((acc, s) => acc + (args.userStrategies.get(s.id)?.notional_usd ?? 0), 0);
+  const initialMargin = initialEnabled.reduce((acc, s) => {
+    const row = args.userStrategies.get(s.id);
+    if (!row) return acc;
+    return acc + row.notional_usd / Math.max(1, row.leverage);
+  }, 0);
+  const calcCard = `
+    <div class="strat-calc-card" id="strat-calc">
+      <div class="strat-calc-title">${ico('🧮')}Калькулятор обеспечения</div>
+      <div class="strat-calc-grid">
+        <div class="strat-calc-stat">
+          <div class="strat-calc-label">Включено стратегий</div>
+          <div class="strat-calc-value" data-calc="count">${initialEnabled.length}</div>
+          <div class="strat-calc-sub">из ${enabledStrategies.length}</div>
+        </div>
+        <div class="strat-calc-stat">
+          <div class="strat-calc-label">Размер по сделке</div>
+          <div class="strat-calc-value" data-calc="notional">$${initialNotional.toFixed(0)}</div>
+          <div class="strat-calc-sub">суммарный nominal</div>
+        </div>
+        <div class="strat-calc-stat strat-calc-stat-highlight">
+          <div class="strat-calc-label">Нужно USDT на счёте</div>
+          <div class="strat-calc-value" data-calc="margin">$${initialMargin.toFixed(2)}</div>
+          <div class="strat-calc-sub">обеспечение под все одновременно открытые позиции</div>
+        </div>
+      </div>
+      <div class="strat-calc-note">
+        Реальное обеспечение = размер_позиции ÷ плечо. Например, $100 на сделку при 10× плече = $10 обеспечения.
+        Bybit спишет это с баланса при открытии позиции и вернёт при закрытии (минус комиссия).
+      </div>
+    </div>
+  `;
+
   const flashHtml = args.flash
     ? `<div class="strat-flash ${args.flash.ok ? 'ok' : 'err'}">${escapeHtml(args.flash.message)}</div>`
     : '';
@@ -87,10 +156,12 @@ export function renderStrategiesPage(args: RenderArgs): string {
         </p>
       </div>
 
+      ${pauseBanner}
       ${keyBanner}
+      ${calcCard}
       ${flashHtml}
 
-      <form method="POST" action="/account/strategies" class="strat-form">
+      <form method="POST" action="/account/strategies" class="strat-form" id="strat-form">
         ${csrfInput(args.csrfToken)}
         <div class="strat-grid">
           ${rows}
@@ -101,6 +172,7 @@ export function renderStrategiesPage(args: RenderArgs): string {
         </div>
       </form>
     </main>
+    ${calculatorScript()}
   `;
 
   return pageShell('Стратегии · Robot Claude', body, {
@@ -158,6 +230,51 @@ function renderRow(cfg: StrategyConfig, existing: UserStrategyRow | null): strin
   `;
 }
 
+function calculatorScript(): string {
+  // Walk every .strat-row, sum (notional × enabled) and
+  // (notional / leverage × enabled), write into the calc card.
+  // Fires on every input/change event on inputs in the form.
+  return `
+    <script>
+      (function() {
+        var form = document.getElementById('strat-form');
+        var calc = document.getElementById('strat-calc');
+        if (!form || !calc) return;
+        var elCount = calc.querySelector('[data-calc="count"]');
+        var elNotional = calc.querySelector('[data-calc="notional"]');
+        var elMargin = calc.querySelector('[data-calc="margin"]');
+        function recompute() {
+          var rows = form.querySelectorAll('.strat-row');
+          var count = 0, notional = 0, margin = 0;
+          rows.forEach(function(row) {
+            var enabledInput = row.querySelector('input[type="checkbox"]');
+            if (!enabledInput || !enabledInput.checked) return;
+            var n = parseFloat((row.querySelector('input[name$="__notional"]') || {}).value) || 0;
+            var l = parseFloat((row.querySelector('input[name$="__leverage"]') || {}).value) || 1;
+            if (l < 1) l = 1;
+            count++;
+            notional += n;
+            margin += n / l;
+          });
+          elCount.textContent = String(count);
+          elNotional.textContent = '$' + notional.toFixed(0);
+          elMargin.textContent = '$' + margin.toFixed(2);
+        }
+        form.addEventListener('input', recompute);
+        form.addEventListener('change', recompute);
+        // Visual feedback: toggle row's strat-row-on class live so the
+        // green border follows the checkbox state without waiting for
+        // server-side rerender.
+        form.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+          cb.addEventListener('change', function() {
+            cb.closest('.strat-row').classList.toggle('strat-row-on', cb.checked);
+          });
+        });
+      })();
+    </script>
+  `;
+}
+
 function styles(): string {
   return `
 <style>
@@ -181,6 +298,81 @@ function styles(): string {
   .cabinet-ico {
     display: inline-block; margin-right: 8px; font-style: normal;
     font-size: 1.05em; line-height: 1; vertical-align: -1px;
+  }
+
+  /* Pause / resume control. Two visual states share the layout. */
+  .strat-pause-banner {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 14px 18px;
+    border-radius: 12px; margin: 18px 0;
+    font-size: 13.5px; line-height: 1.5;
+    flex-wrap: wrap;
+  }
+  .strat-pause-active {
+    background: rgba(74, 217, 145, 0.06);
+    border: 1px solid rgba(74, 217, 145, 0.40);
+    color: #cfd6dd;
+  }
+  .strat-pause-active strong { color: #4ad991; }
+  .strat-pause-paused {
+    background: rgba(255, 188, 70, 0.08);
+    border: 1px solid rgba(255, 188, 70, 0.45);
+    color: #e0d9c5;
+  }
+  .strat-pause-paused strong { color: #ffbc46; }
+  .strat-pause-btn {
+    padding: 8px 14px; border-radius: 8px; cursor: pointer;
+    font-size: 13px; font-weight: 600; font-family: inherit;
+    border: 1px solid;
+    flex-shrink: 0;
+  }
+  .strat-pause-btn-stop {
+    background: #141a22; border-color: rgba(255, 188, 70, 0.5); color: #ffbc46;
+  }
+  .strat-pause-btn-stop:hover { background: rgba(255, 188, 70, 0.10); }
+  .strat-pause-btn-resume {
+    background: #4ad991; border-color: #4ad991; color: #0b0e13;
+  }
+  .strat-pause-btn-resume:hover { background: #5ce0a0; }
+
+  /* Live calculator: shows aggregate notional + required margin while
+     the user fiddles with per-strategy inputs. Updates via inline JS. */
+  .strat-calc-card {
+    background: #11161d; border: 1px solid #1f2630;
+    border-radius: 14px; padding: 18px 20px; margin: 18px 0;
+  }
+  .strat-calc-title {
+    font-size: 14.5px; font-weight: 600; color: #e8edf2;
+    margin-bottom: 14px;
+  }
+  .strat-calc-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+  }
+  .strat-calc-stat {
+    background: #0e131a; border: 1px solid #1a1f27;
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .strat-calc-stat-highlight {
+    border-color: rgba(74, 217, 145, 0.45);
+    background: linear-gradient(180deg, rgba(74,217,145,0.04) 0%, #0e131a 100%);
+  }
+  .strat-calc-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: #6b7480; margin-bottom: 6px;
+  }
+  .strat-calc-value {
+    font-size: 22px; font-weight: 600; color: #e8edf2;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    line-height: 1.15; margin-bottom: 4px;
+  }
+  .strat-calc-stat-highlight .strat-calc-value { color: #4ad991; }
+  .strat-calc-sub {
+    font-size: 11.5px; color: #8590a0;
+  }
+  .strat-calc-note {
+    margin-top: 14px;
+    font-size: 12px; color: #6b7480; line-height: 1.55;
   }
 
   .strat-banner {

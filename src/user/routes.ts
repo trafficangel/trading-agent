@@ -13,7 +13,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getAuthedUser } from '../auth/routes.js';
-import { findSubscription } from '../db/repos/user-subscriptions.js';
+import { findSubscription, setTradingPaused } from '../db/repos/user-subscriptions.js';
 import {
   findActiveKey,
   findAnyKey,
@@ -144,6 +144,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       return;
     }
     const apiKey = findActiveKey(user.userId);
+    const sub = findSubscription(user.userId);
     const csrf = issueCsrfToken(req, reply);
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
@@ -154,6 +155,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         userStrategies: userStrategyMap(user.userId),
         flash: null,
         csrfToken: csrf,
+        tradingPausedAt: sub?.trading_paused_at ?? null,
       }),
     );
   });
@@ -227,6 +229,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       : { ok: true, message: `Сохранено: ${okCount} стратегий включено${skipCount ? `, ${skipCount} пропущено` : ''}` };
 
     const apiKey = findActiveKey(user.userId);
+    const sub2 = findSubscription(user.userId);
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
     return reply.send(
@@ -236,8 +239,36 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         userStrategies: userStrategyMap(user.userId),
         flash,
         csrfToken: issueCsrfToken(req, reply),
+        tradingPausedAt: sub2?.trading_paused_at ?? null,
       }),
     );
+  });
+
+  // -------- POST /account/strategies/pause + /resume --------
+  // User-controlled trading pause. When paused, fan-out skips this
+  // user entirely; open positions continue to natural exit. Resume
+  // is the inverse — re-eligible for new fan-out signals.
+  app.post('/account/strategies/pause', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) {
+      reply.redirect('/strategies');
+      return;
+    }
+    if (!requireCsrf(req, reply)) return;
+    setTradingPaused(user.userId, true);
+    logger.info({ userId: user.userId }, 'cabinet: trading paused');
+    reply.code(303).header('location', '/account/strategies').send();
+  });
+  app.post('/account/strategies/resume', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) {
+      reply.redirect('/strategies');
+      return;
+    }
+    if (!requireCsrf(req, reply)) return;
+    setTradingPaused(user.userId, false);
+    logger.info({ userId: user.userId }, 'cabinet: trading resumed');
+    reply.code(303).header('location', '/account/strategies').send();
   });
 
   // -------- GET /account/api-key --------

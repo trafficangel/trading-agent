@@ -126,6 +126,7 @@ const findEligibleStmt = db.prepare<
      AND us.enabled = 1
      AND s.status IN ('trial', 'active')
      AND s.access_until > ?
+     AND s.trading_paused_at IS NULL
      AND k.revoked_at IS NULL
      AND k.last_verified_at IS NOT NULL
 `);

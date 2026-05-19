@@ -28,6 +28,9 @@ export type SubscriptionRow = {
   manual_extension_note: string | null;
   created_at: number;
   updated_at: number;
+  /** User-controlled trading pause. NULL = active, ms = paused at.
+   *  When set, fan-out skips this user; open positions keep running. */
+  trading_paused_at: number | null;
 };
 
 const insertStmt = db.prepare(`
@@ -86,13 +89,26 @@ export function findSubscription(userId: number): SubscriptionRow | null {
 
 /** Return true when the user currently has access. VIP plan grants
  *  unconditional access (no trial countdown, no expiry). Standard plan
- *  requires status != expired/cancelled AND access_until > now. */
+ *  requires status != expired/cancelled AND access_until > now.
+ *  Paused state is NOT considered here — paused users still have access
+ *  (they need to be able to log into the cabinet to unpause). For
+ *  fan-out gating use isTradingActive() instead. */
 export function hasActiveAccess(userId: number, now = Date.now()): boolean {
   const sub = findByUserStmt.get(userId);
   if (!sub) return false;
   if (sub.plan === 'vip') return sub.status !== 'cancelled';
   if (sub.status === 'expired' || sub.status === 'cancelled') return false;
   return sub.access_until > now;
+}
+
+/** Stricter check used right before fan-out fires an order: hasActiveAccess
+ *  AND the user hasn't paused trading. Defends against the race where
+ *  the user clicks "Pause" between listEligibleTargets() and the actual
+ *  placeMarketOrder call. */
+export function isTradingActive(userId: number, now = Date.now()): boolean {
+  if (!hasActiveAccess(userId, now)) return false;
+  const sub = findByUserStmt.get(userId);
+  return !!sub && sub.trading_paused_at === null;
 }
 
 /**
@@ -122,6 +138,17 @@ export function adminExtend(
 
 export function setStatus(userId: number, status: SubscriptionStatus): void {
   setStatusStmt.run(status, Date.now(), userId);
+}
+
+const setPausedStmt = db.prepare(`
+  UPDATE user_subscriptions SET trading_paused_at = ?, updated_at = ? WHERE user_id = ?
+`);
+
+/** Pause/resume the user's autotrading globally. While paused,
+ *  listEligibleTargets excludes them so no new orders fan out;
+ *  existing open positions keep running normally. */
+export function setTradingPaused(userId: number, paused: boolean): void {
+  setPausedStmt.run(paused ? Date.now() : null, Date.now(), userId);
 }
 
 const setPlanStmt = db.prepare(`
