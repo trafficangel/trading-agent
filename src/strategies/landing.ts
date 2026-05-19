@@ -947,6 +947,27 @@ const STYLE = `
   .brand:hover { text-decoration: none; }
   .brand-mark { width: 28px; height: 28px; flex-shrink: 0; }
   .brand-name { font-size: 15px; }
+  /* Beta badge — pill next to the brand-name. Always visible, even when
+     brand-name is hidden on very narrow screens, so the "active beta"
+     status doesn't disappear with the wordmark. Subtle orange because
+     green collides with our brand-mark colour. */
+  .brand-beta {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(255, 188, 70, 0.14);
+    color: #ffbc46;
+    border: 1px solid rgba(255, 188, 70, 0.40);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    margin-left: 2px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    cursor: help;
+  }
   .site-nav {
     display: flex; gap: 4px; flex: 1;
     margin-left: 12px;
@@ -1033,11 +1054,14 @@ const STYLE = `
     .site-burger { display: inline-flex; }
     .brand-name { font-size: 14px; }
     .brand-mark { width: 24px; height: 24px; }
+    .brand-beta { font-size: 9px; padding: 2px 5px; }
   }
   /* Very narrow phones: tighten further */
   @media (max-width: 380px) {
     .site-header-inner { padding: 10px 12px; height: 52px; }
     .brand-name { display: none; }
+    /* Keep .brand-beta visible — it's the only beta status indicator
+       when the wordmark is hidden. */
   }
 
   /* ---------- Home page sections ---------- */
@@ -1779,7 +1803,7 @@ export function pageShell(
   const siteHeader = `
 <header class="site-header">
   <div class="site-header-inner">
-    <a class="brand" href="/" aria-label="Robot Claude">
+    <a class="brand" href="/" aria-label="Robot Claude (beta)">
       <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
         <rect width="64" height="64" rx="14" fill="#0b0e13"/>
         <path d="M8 48 L18 42 L26 44 L36 30 L46 32 L56 14" fill="none"
@@ -1787,6 +1811,7 @@ export function pageShell(
         <circle cx="56" cy="14" r="5" fill="#4ad991"/>
       </svg>
       <span class="brand-name">Robot&nbsp;Claude</span>
+      <span class="brand-beta" title="Сервис в стадии активного бета-тестирования. Возможны изменения функционала, переключения серверов и кратковременные перебои.">BETA</span>
     </a>
     <nav class="site-nav" aria-label="Primary">${navLinksHtml}</nav>
     <div class="site-nav-end">
