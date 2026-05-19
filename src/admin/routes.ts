@@ -31,6 +31,7 @@ import {
   findSubscription,
   setPlan,
   ensureTrialFor,
+  adminExtend,
   type SubscriptionRow,
 } from '../db/repos/user-subscriptions.js';
 import { db } from '../db/client.js';
@@ -92,6 +93,17 @@ function fmtAge(ts: number): string {
   return `${d} д назад`;
 }
 
+/** Compact "X дн осталось" / "истекло N дн назад" label for the План
+ *  column, shown below the status badge for non-VIP users. */
+function daysLeftLabel(accessUntil: number): string {
+  const ms = accessUntil - Date.now();
+  const days = Math.ceil(ms / 86_400_000);
+  if (days < 0) return `<span class="plan-days-bad">истекло ${Math.abs(days)} дн назад</span>`;
+  if (days === 0) return `<span class="plan-days-warn">истекает сегодня</span>`;
+  if (days <= 3) return `<span class="plan-days-warn">${days} дн осталось</span>`;
+  return `<span class="plan-days-ok">${days} дн осталось</span>`;
+}
+
 /** Bulk-fetch subscriptions for a list of user_ids in one query so the
  *  admin table doesn't N+1 across N rows. */
 const adminListSubsStmt = db.prepare<[], SubscriptionRow>(
@@ -131,7 +143,12 @@ function renderDashboard(): string {
           const plan = sub?.plan ?? 'standard';
           const status = sub?.status ?? '—';
           const badge = sub ? planBadge(plan, status) : '<span class="plan-badge plan-bad">—</span>';
-          const toggle = plan === 'vip'
+          // Three buttons per row:
+          //   1. VIP toggle (Сделать VIP / Снять VIP)
+          //   2. Продлить на 30 дней — bumps access_until forward for
+          //      non-VIP users (no-op for VIP since they're already permanent)
+          //   3. Days-left preview when on standard plan
+          const vipToggle = plan === 'vip'
             ? `<form method="POST" action="/admin/users/${r.id}/plan" style="display:inline">
                  <input type="hidden" name="plan" value="standard">
                  <button class="adm-btn adm-btn-warn" type="submit"
@@ -142,12 +159,32 @@ function renderDashboard(): string {
                  <button class="adm-btn adm-btn-vip" type="submit"
                    onclick="return confirm('Выдать VIP пользователю ${escapeHtml(name)}?')">Сделать VIP</button>
                </form>`;
+          // Extend by 30/90/365 dropdown — applies only for non-VIP users
+          // and is functionally a no-op (rejected on server) for VIPs.
+          // We still show it on VIP rows greyed-out so the layout stays
+          // consistent.
+          const extendForm = plan === 'vip'
+            ? ''
+            : `<form method="POST" action="/admin/users/${r.id}/extend" style="display:inline; margin-left:4px">
+                 <select name="days" class="adm-select">
+                   <option value="30">+30 дней</option>
+                   <option value="90">+90 дней</option>
+                   <option value="365">+1 год</option>
+                 </select>
+                 <button class="adm-btn adm-btn-secondary" type="submit"
+                   onclick="return confirm('Продлить подписку для ${escapeHtml(name)}?')">Продлить</button>
+               </form>`;
+          const toggle = `<div class="adm-actions">${vipToggle}${extendForm}</div>`;
+          // Days-left badge for the План column when on standard.
+          const daysLeftBadge = sub && plan === 'standard' && status !== 'cancelled'
+            ? `<div class="plan-days">${daysLeftLabel(sub.access_until)}</div>`
+            : '';
           return `
             <tr>
               <td class="dt">${fmtDateTime(r.created_at)}</td>
               <td>${escapeHtml(name)}</td>
               <td class="mono">${escapeHtml(phone)}</td>
-              <td>${badge}</td>
+              <td>${badge}${daysLeftBadge}</td>
               <td class="mono">${escapeHtml(r.ip_first ?? '—')}</td>
               <td class="mono">${tg}</td>
               <td>${fmtAge(r.last_seen_at)}</td>
@@ -229,6 +266,17 @@ function renderDashboard(): string {
       .adm-btn-vip:hover { background: rgba(212, 175, 55, 0.12); }
       .adm-btn-warn { border-color: rgba(255, 188, 70, 0.5); color: #ffbc46; }
       .adm-btn-warn:hover { background: rgba(255, 188, 70, 0.10); }
+      .adm-btn-secondary { border-color: #2a323d; color: #cfd6dd; }
+      .adm-btn-secondary:hover { border-color: #4ad991; color: #fff; }
+      .adm-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+      .adm-select {
+        background: #0b0e13; color: #cfd6dd; border: 1px solid #2a323d;
+        border-radius: 6px; padding: 5px 8px; font-size: 12px; font-family: inherit;
+      }
+      .plan-days { display: block; font-size: 11px; margin-top: 4px; }
+      .plan-days-ok { color: #4ad991; }
+      .plan-days-warn { color: #ffbc46; }
+      .plan-days-bad { color: #ff8b8b; }
       td.ua { font-size: 11px; color: var(--text-faint); max-width: 240px;
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
@@ -285,4 +333,46 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     }
     reply.code(303).header('location', '/admin').send();
   });
+
+  // ---------------- POST /admin/users/:id/extend ----------------
+  // Bump access_until forward by N days for non-VIP users. Useful for
+  // manually onboarding paying customers before automated billing is
+  // wired. Rejected for VIP users (their access is already permanent).
+  app.post('/admin/users/:id/extend', async (req, reply) => {
+    if (!checkAuth(req, reply)) return;
+    const userId = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      reply.code(400).send('bad user id');
+      return;
+    }
+    const parsed = extendFormSchema.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400).send('days field required (positive integer)');
+      return;
+    }
+    const days = parsed.data.days;
+    const existing = findSubscription(userId);
+    if (!existing) {
+      // Auto-create then extend — handles users that registered before
+      // Track D shipped.
+      ensureTrialFor(userId);
+    } else if (existing.plan === 'vip') {
+      reply.code(400).send('cannot extend VIP — already permanent');
+      return;
+    }
+    const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
+    try {
+      adminExtend(userId, days, adminEmail, `manual extend +${days}d via /admin`);
+      logger.info({ user_id: userId, days, by: adminEmail }, 'admin: subscription extended');
+    } catch (err) {
+      logger.error({ err, user_id: userId }, 'admin: extend failed');
+      reply.code(500).send('failed to extend subscription');
+      return;
+    }
+    reply.code(303).header('location', '/admin').send();
+  });
 }
+
+const extendFormSchema = z.object({
+  days: z.coerce.number().int().min(1).max(3650),
+});
