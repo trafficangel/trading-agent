@@ -33,6 +33,7 @@ import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
 import { renderDashboard } from './dashboard.js';
 import { renderStrategiesPage } from './strategies.js';
 import { renderApiKeyPage } from './api-key.js';
+import { renderTradesPage, type UserTradeRow } from './trades.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import type { UserStrategyRow } from '../db/repos/user-strategies.js';
@@ -43,6 +44,27 @@ import type { UserStrategyRow } from '../db/repos/user-strategies.js';
 const userOpenPositionsCount = db.prepare<[number], { c: number }>(
   `SELECT COUNT(*) AS c FROM decisions
     WHERE user_id = ? AND status = 'active' AND track = 'strategy'`,
+);
+
+const userActiveTradesStmt = db.prepare<[number], UserTradeRow>(
+  `SELECT id, created_at, closed_at, status, symbol, side, entry, sl,
+          close_price, close_reason, pnl_pct, pnl_r, strategy_id,
+          strategy_trade_num, exchange_order_id, bybit_qty, bybit_avg_price,
+          bybit_close_avg_price, order_error
+     FROM decisions
+    WHERE user_id = ? AND status = 'active' AND track = 'strategy'
+    ORDER BY created_at DESC`,
+);
+
+const userClosedTradesStmt = db.prepare<[number], UserTradeRow>(
+  `SELECT id, created_at, closed_at, status, symbol, side, entry, sl,
+          close_price, close_reason, pnl_pct, pnl_r, strategy_id,
+          strategy_trade_num, exchange_order_id, bybit_qty, bybit_avg_price,
+          bybit_close_avg_price, order_error
+     FROM decisions
+    WHERE user_id = ? AND status = 'closed' AND track = 'strategy'
+    ORDER BY closed_at DESC, created_at DESC
+    LIMIT 200`,
 );
 
 const userClosedPnlAgg = db.prepare<[number], { net: number | null }>(
@@ -335,6 +357,28 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       ok: true,
       message: 'Ключ отключён. Открытые позиции продолжат жить до своего естественного выхода.',
     });
+  });
+
+  // -------- GET /account/trades --------
+  app.get('/account/trades', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) {
+      reply.redirect('/strategies');
+      return;
+    }
+    const active = userActiveTradesStmt.all(user.userId);
+    const closed = userClosedTradesStmt.all(user.userId);
+    const apiKey = findActiveKey(user.userId);
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('cache-control', 'private, no-store');
+    return reply.send(
+      renderTradesPage({
+        displayName: user.displayName,
+        activeTrades: active,
+        closedTrades: closed,
+        hasApiKey: !!apiKey && apiKey.last_verified_at !== null,
+      }),
+    );
   });
 }
 
