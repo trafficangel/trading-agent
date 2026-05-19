@@ -146,6 +146,19 @@ export function findActiveKey(userId: number, exchange = 'bybit'): ApiKeyRow | n
   return findByUserStmt.get(userId, exchange) ?? null;
 }
 
+const pickOneActiveStmt = db.prepare<unknown[], ApiKeyRow>(`
+  SELECT * FROM user_api_keys
+   WHERE revoked_at IS NULL
+   ORDER BY RANDOM()
+   LIMIT 1
+`);
+
+/** Audit C4 — boot-time self-test helper.
+ *  Returns one random unrevoked api-key row, or null if no rows exist. */
+export function pickRandomActiveKey(): ApiKeyRow | null {
+  return pickOneActiveStmt.get() ?? null;
+}
+
 export function findAnyKey(userId: number, exchange = 'bybit'): ApiKeyRow | null {
   return findByUserAnyStmt.get(userId, exchange) ?? null;
 }

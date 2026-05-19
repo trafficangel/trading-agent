@@ -50,11 +50,14 @@ import {
   findActiveUserDecisions,
   closeUserDecision,
   calcPnl,
+  findUserDecisionByParent,
 } from '../db/repos/decisions.js';
 import {
   setLeverage,
   placeMarketOrder,
   fetchOrderResult,
+  fetchPosition,
+  setPositionSL,
   roundContractQty,
   bybitErrorLabel,
 } from '../exchange/bybit-private.js';
@@ -150,6 +153,21 @@ export async function fanOutEntry(args: FanOutEntryArgs): Promise<{
 }
 
 async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promise<boolean> {
+  // Audit C2 — fan-out idempotency pre-flight.
+  // TradingView retries webhooks aggressively on 5xx / network glitch.
+  // The shadow row is deduped by webhook_dedup_key, but the per-user
+  // fan-out runs ASYNC after that — so a retry can land while the
+  // first run is still mid-flight (or after partial completion). If
+  // we already wrote a row for this (parent, user) pair, skip cleanly.
+  // Migration 026 also has a partial unique index as a hard backstop.
+  const existing = findUserDecisionByParent(args.shadowDecisionId, t.user_id);
+  if (existing !== null) {
+    logger.info(
+      { userId: t.user_id, parent: args.shadowDecisionId, existing },
+      'fanOutEntry: skip, already processed (idempotency)',
+    );
+    return false;
+  }
   // Re-check trading-active right before placing the order — defends
   // against two races: (a) access expired / cancelled between
   // listEligibleTargets() and now, and (b) user clicked «Остановить»
@@ -171,7 +189,13 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
   } catch (err) {
     logger.error({ err, userId: t.user_id }, 'fanOutEntry: decrypt failed');
     recordVerifyResult(keyRow.id, false, 'decrypt_failed');
-    await alertOperator(`🚨 Не удалось расшифровать ключ user_id=${t.user_id}. Проверь API_KEY_MASTER_SECRET.`);
+    // Critical: decrypt failure usually means API_KEY_MASTER_SECRET was
+    // rotated incorrectly, the row was corrupted, or the legacy-secret
+    // fallback was removed. Without the master key we cannot close any
+    // open positions for this user — operator must act immediately.
+    await alertOperatorCritical(
+      `🚨 Не удалось расшифровать ключ user_id=${t.user_id}. Проверь API_KEY_MASTER_SECRET.`,
+    );
     return false;
   }
 
@@ -271,6 +295,56 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
       break;
     }
     await sleep(250);
+  }
+
+  // 3b. Audit C3 — verify SL actually attached to the position.
+  //
+  // placeMarketOrder includes stopLoss in the order body, but Bybit can
+  // silently drop the param (validation, mode mismatch, etc.) and still
+  // return 200 + orderId. We do NOT trust the order response — we read
+  // the position back and check that stopLoss > 0 within tolerance of
+  // what we asked for. If missing, retry setPositionSL up to 3 times.
+  // If still missing, EMERGENCY-CLOSE the position with a reduceOnly
+  // market order — better to take a tiny slippage loss than to leave
+  // a user position open and unprotected.
+  const slOk = await verifyOrAttachSL(creds, args.symbol, args.sl, t.user_id);
+  if (!slOk) {
+    // Position is open without SL after all retries failed. Emergency
+    // close. We do this with a reduceOnly market order in the opposite
+    // direction; size from the position we just fetched.
+    const emergencyOk = await emergencyCloseUnprotected(
+      creds,
+      args.symbol,
+      args.side,
+      filledQty,
+      args.shadowDecisionId,
+      t.user_id,
+    );
+    await alertOperator(
+      `🚨 Track D fan-out: user_id=${t.user_id} entry on ${args.symbol} ` +
+        `opened BUT SL failed to attach after 3 retries. Emergency close: ` +
+        `${emergencyOk ? 'OK' : 'ALSO FAILED — manual intervention required'}.`,
+    );
+    insertDecision({
+      symbol: args.symbol,
+      side: args.side,
+      entry: avgPrice,
+      sl: args.sl,
+      reasoningShort: `🚨 SL verify failed, position emergency-closed`,
+      reasoningFull:
+        `Order ${orderRes.orderId} filled @${avgPrice} qty=${filledQty} but ` +
+        `Bybit did not attach stopLoss. After 3 setPositionSL retries we ` +
+        `${emergencyOk ? 'emergency-closed via reduceOnly market' : 'FAILED to close — operator must close manually'}.`,
+      rawResponse: args.rawWebhook,
+      strategyId: args.strategyId,
+      userId: t.user_id,
+      parentDecisionId: args.shadowDecisionId,
+      exchangeOrderId: orderRes.orderId,
+      bybitQty: filledQty,
+      bybitAvgPrice: avgPrice,
+      orderError: emergencyOk ? 'sl_attach_failed_closed' : 'sl_attach_failed_open',
+    });
+    return false;
   }
 
   // 4. Persist the user row.
@@ -415,11 +489,15 @@ async function executeUserExit(
   // PnL math — reuse calcPnl which knows about side + entry direction.
   // Pass original_sl (frozen at open) for R-multiple, matches our shadow
   // accounting convention.
+  // Signature: calcPnl(side, entry, sl, closePrice) — historically this
+  // call swapped sl/closePrice, which produced inverted pnl_pct and a
+  // mirrored R-multiple. Audit C1, 2026-05-19.
+  const slForR = row.original_sl ?? row.sl ?? row.entry;
   const pnl = calcPnl(
     row.side as 'long' | 'short',
     row.entry,
+    slForR,
     closePrice,
-    row.original_sl ?? row.sl ?? row.entry,
   );
 
   closeUserDecision({
@@ -444,4 +522,111 @@ function sleep(ms: number): Promise<void> {
 
 async function alertOperator(text: string): Promise<void> {
   await sendMessage({ channel: 'logs', text, disable_notification: true }).catch(() => {});
+}
+
+/** Critical-priority operator alert (notification on, no silence flag).
+ *  Reserved for events where money is on the line and immediate human
+ *  intervention may be needed (audit C3 emergency close, decrypt fail). */
+async function alertOperatorCritical(text: string): Promise<void> {
+  await sendMessage({ channel: 'logs', text, disable_notification: false }).catch(() => {});
+}
+
+/**
+ * Audit C3 — verify SL attachment, with retries.
+ *
+ * Reads fetchPosition to see whether Bybit accepted the stopLoss param
+ * from placeMarketOrder. If missing or far from target, calls
+ * setPositionSL up to 3 times with backoff. Returns true only when the
+ * position has a SL within 0.5% of the requested price. Returns false
+ * if all retries fail OR if the position no longer exists (already
+ * closed by SL during our retries, which is its own kind of "ok" but
+ * we let the caller decide).
+ *
+ * 0.5% tolerance handles Bybit's tick-rounding of the stopLoss field
+ * (BTC at 70000 has $1 ticks → 0.0014% rounding, well within tolerance).
+ */
+async function verifyOrAttachSL(
+  creds: Parameters<typeof setPositionSL>[0],
+  symbol: string,
+  targetSl: number,
+  userId: number,
+): Promise<boolean> {
+  const tolerance = 0.005; // 0.5%
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    // Position changes (fill, SL hit) propagate to /v5/position/list
+    // within ~100ms. Wait a bit on the first read so we don't false-
+    // positive on a freshly-opened position whose stopLoss hasn't
+    // indexed yet.
+    if (attempt === 1) await sleep(300);
+    const posRes = await fetchPosition(creds, symbol);
+    if (!posRes.ok) {
+      logger.warn({ userId, code: posRes.code, attempt }, 'verifyOrAttachSL: fetchPosition failed');
+      await sleep(500);
+      continue;
+    }
+    if (!posRes.position || posRes.position.size === 0) {
+      // Position no longer exists — either SL already triggered or the
+      // user closed it on the website. Either way, no SL to verify.
+      logger.warn({ userId, attempt }, 'verifyOrAttachSL: position vanished between order and verify');
+      return false;
+    }
+    const attachedSl = posRes.position.stopLoss;
+    if (attachedSl > 0 && Math.abs(attachedSl - targetSl) / targetSl < tolerance) {
+      // All good.
+      if (attempt > 1) {
+        logger.info({ userId, attempt, sl: attachedSl }, 'verifyOrAttachSL: attached on retry');
+      }
+      return true;
+    }
+    logger.warn(
+      { userId, attempt, attachedSl, targetSl },
+      'verifyOrAttachSL: SL missing or off — re-attaching',
+    );
+    const setRes = await setPositionSL(creds, symbol, targetSl);
+    if (!setRes.ok) {
+      logger.error(
+        { userId, attempt, code: setRes.code, msg: setRes.msg },
+        'verifyOrAttachSL: setPositionSL retry failed',
+      );
+    }
+    await sleep(500 * attempt); // 500, 1000, 1500
+  }
+  return false;
+}
+
+/** Audit C3 — last-resort: close the position via reduceOnly market.
+ *  Used when SL never attached. We don't trust the position to remain
+ *  flat in adverse markets even for the seconds between detection
+ *  and close, but a market reduceOnly is the closest thing to a SL
+ *  available without one. */
+async function emergencyCloseUnprotected(
+  creds: Parameters<typeof setPositionSL>[0],
+  symbol: string,
+  entrySide: 'long' | 'short',
+  qty: number,
+  shadowDecisionId: number,
+  userId: number,
+): Promise<boolean> {
+  // Reverse the side: a long position closes with a Sell, short with Buy.
+  const closeSide = entrySide === 'long' ? 'short' : 'long';
+  const closeRes = await placeMarketOrder(creds, {
+    symbol,
+    side: closeSide,
+    qty,
+    reduceOnly: true,
+    clientOrderId: `td-${shadowDecisionId}-u${userId}-emergclose`,
+  });
+  if (!closeRes.ok) {
+    logger.error(
+      { userId, code: closeRes.code, msg: closeRes.msg },
+      'emergencyCloseUnprotected: close failed',
+    );
+    await alertOperatorCritical(
+      `🚨🚨 Track D: emergency-close FAILED for user_id=${userId} ${symbol}. ` +
+        `Position is OPEN AND UNPROTECTED. ${bybitErrorLabel(closeRes.code)}: ${closeRes.msg}. ` +
+        `MANUAL CLOSE REQUIRED.`,
+    );
+    return false;
+  }
+  return true;
 }

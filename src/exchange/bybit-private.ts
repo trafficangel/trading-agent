@@ -331,6 +331,10 @@ export type Position = {
   avgPrice: number;
   unrealisedPnl: number;
   positionIdx: number;
+  /** Bybit's currently-attached SL trigger. 0 / "" → not set. Audit C3
+   *  uses this to verify the SL actually attached after placeMarketOrder
+   *  before trusting that the position is protected. */
+  stopLoss: number;
 };
 
 /** Read the current open position for a symbol. Returns null if flat. */
@@ -346,6 +350,7 @@ export async function fetchPosition(
       avgPrice: string;
       unrealisedPnl: string;
       positionIdx: number;
+      stopLoss?: string;
     }>;
   }>(creds, '/v5/position/list', { category: 'linear', symbol });
   if (!r.ok) return r;
@@ -362,6 +367,7 @@ export async function fetchPosition(
       avgPrice: Number(row.avgPrice),
       unrealisedPnl: Number(row.unrealisedPnl),
       positionIdx: row.positionIdx,
+      stopLoss: row.stopLoss ? Number(row.stopLoss) : 0,
     },
   };
 }

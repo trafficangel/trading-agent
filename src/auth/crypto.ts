@@ -119,3 +119,37 @@ export function selfTest(): void {
     throw new Error('crypto self-test failed: round-trip mismatch');
   }
 }
+
+/** Audit C4 — stronger self-test that also decrypts an EXISTING user
+ *  api-key row at boot. The basic selfTest() only verifies the master
+ *  key is well-formed and round-trip-stable for FRESH ciphertexts; it
+ *  does NOT catch the catastrophic case where the master key has been
+ *  rotated/replaced and the existing DB rows are no longer decryptable.
+ *
+ *  Picks one random unrevoked row, attempts decrypt of both api_key
+ *  and api_secret. If decryption fails (authTag mismatch / wrong key)
+ *  we throw — server refuses to start, preserving the encrypted blob
+ *  intact and giving the operator a chance to restore the right key
+ *  before any new orders are placed (or attempted decrypts mid-flight
+ *  destroy log clarity).
+ *
+ *  No rows in DB → no-op (fresh deploy). */
+export function selfTestExistingRow(
+  decryptOneRow: () => { apiKey: string; apiSecret: string } | null,
+): void {
+  let creds;
+  try {
+    creds = decryptOneRow();
+  } catch (err) {
+    throw new Error(
+      `crypto self-test (existing row) FAILED: ${(err as Error).message}. ` +
+        `Master key cannot decrypt stored API keys. Likely cause: ` +
+        `API_KEY_MASTER_SECRET was rotated without re-encrypting rows. ` +
+        `Restore the original master key from backup before starting.`,
+    );
+  }
+  if (creds && (!creds.apiKey || !creds.apiSecret)) {
+    throw new Error('crypto self-test (existing row): decrypted to empty fields');
+  }
+  // creds === null → no rows, fresh deploy, OK.
+}

@@ -21,7 +21,8 @@ import { startupBanner, statusReply } from './telegram/templates.js';
 import { countSignalsSince } from './db/repos/signals.js';
 import { closeDb } from './db/client.js';
 import { validateStrategyConfigs } from './strategies/track-c-config.js';
-import { selfTest as cryptoSelfTest } from './auth/crypto.js';
+import { selfTest as cryptoSelfTest, selfTestExistingRow as cryptoSelfTestRow } from './auth/crypto.js';
+import { pickRandomActiveKey, getDecryptedCreds } from './db/repos/user-api-keys.js';
 
 const startedAt = Date.now();
 
@@ -46,6 +47,25 @@ async function main(): Promise<void> {
     cryptoSelfTest();
   } catch (err) {
     logger.fatal({ err: (err as Error).message }, 'crypto self-test failed — refusing to start');
+    process.exit(1);
+  }
+
+  // Audit C4 — also decrypt one existing user_api_keys row. The basic
+  // self-test above only verifies round-trip on fresh ciphertext; it
+  // does NOT catch the case where API_KEY_MASTER_SECRET was rotated
+  // without re-encrypting existing rows. Without this check, the
+  // server would start happily and only fail on the first user trade.
+  try {
+    cryptoSelfTestRow(() => {
+      const row = pickRandomActiveKey();
+      if (!row) return null;
+      return getDecryptedCreds(row);
+    });
+  } catch (err) {
+    logger.fatal(
+      { err: (err as Error).message },
+      'crypto self-test (existing row) failed — refusing to start',
+    );
     process.exit(1);
   }
 

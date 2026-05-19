@@ -233,27 +233,11 @@ export function findActiveByStrategy(
 
 /**
  * Compute realised PnL for an OPEN trade given its SL and a fill price.
- * pnl_pct: side-adjusted percent move from entry to close.
- * pnl_r: in R-multiples (1R = SL distance from entry).
+ * Logic lives in src/lib/pnl.ts (pure, DB-free). Re-exported here so
+ * existing call-sites (`import { calcPnl } from '.../decisions.js'`)
+ * keep working without churn.
  */
-export function calcPnl(
-  side: 'long' | 'short',
-  entry: number,
-  sl: number,
-  closePrice: number,
-): { pnlPct: number; pnlR: number } {
-  const dir = side === 'long' ? 1 : -1;
-  const pnlPct = ((closePrice - entry) / entry) * 100 * dir;
-  const slDist = Math.abs(entry - sl);
-  if (slDist === 0) return { pnlPct, pnlR: 0 };
-  const pnlDist = Math.abs(closePrice - entry);
-  const sign = pnlPct >= 0 ? 1 : -1;
-  const pnlR = sign * (pnlDist / slDist);
-  return {
-    pnlPct: Math.round(pnlPct * 100) / 100,
-    pnlR: Math.round(pnlR * 100) / 100,
-  };
-}
+export { calcPnl } from '../../lib/pnl.js';
 
 export type ClosePositionInput = {
   id: number;
@@ -338,6 +322,27 @@ const findActiveUserDecisionsStmt = db.prepare<[string, string], DecisionRow>(`
      AND symbol = ? AND strategy_id = ?
      AND user_id IS NOT NULL
 `);
+
+const findUserDecisionByParentStmt = db.prepare<[number, number], { id: number }>(`
+  SELECT id FROM decisions
+   WHERE parent_decision_id = ? AND user_id = ?
+   LIMIT 1
+`);
+
+/** Audit C2 — fan-out idempotency.
+ *  Returns the existing user decision id if this (parent_decision_id, user_id)
+ *  pair was already processed (entry attempted — success OR failure row).
+ *  Caller must skip placing a duplicate Bybit order when this is non-null.
+ *
+ *  Together with migration 026's partial unique index this is a belt-and-
+ *  suspenders pair: the index is the hard backstop, this read is the
+ *  cheap pre-flight that avoids hitting Bybit for already-known users. */
+export function findUserDecisionByParent(
+  parentDecisionId: number,
+  userId: number,
+): number | null {
+  return findUserDecisionByParentStmt.get(parentDecisionId, userId)?.id ?? null;
+}
 
 /** All currently-active user-fanout positions for a strategy+symbol.
  *  Used by exit fan-out to know which user rows to close. */
