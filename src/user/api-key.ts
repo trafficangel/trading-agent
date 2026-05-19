@@ -1,0 +1,310 @@
+/**
+ * Track D — `/account/api-key` renderer.
+ *
+ * Two stages:
+ *   1. No key connected (or revoked) → show form + inline guide
+ *      for creating a trade-only Bybit API key with IP whitelist
+ *   2. Key connected → show last_verified_at + balance preview,
+ *      with a "rotate key" form and a destructive "отключить" action
+ *
+ * Form POSTs to /account/api-key with {apiKey, apiSecret}. Server
+ * verifies via fetchBalanceUsdt() before encrypting+storing. Failed
+ * verify → flash banner with the bybit error label, no DB change.
+ */
+
+import { pageShell } from '../strategies/landing.js';
+import type { ApiKeySummary } from '../db/repos/user-api-keys.js';
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[c] ?? c);
+}
+
+function ico(emoji: string): string {
+  return `<span class="cabinet-ico" aria-hidden="true">${emoji}</span>`;
+}
+
+function fmtAgo(ms: number | null): string {
+  if (!ms) return '—';
+  const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (sec < 60) return `${sec} сек назад`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} мин назад`;
+  const hrs = Math.floor(min / 60);
+  if (hrs < 24) return `${hrs} ч назад`;
+  return `${Math.floor(hrs / 24)} дн назад`;
+}
+
+export function renderApiKeyPage(args: {
+  displayName: string | null;
+  apiKey: ApiKeySummary | null;
+  /** Balance from the last verify call, if known + still fresh. Shown
+   *  as confidence-builder "everything works, here's your balance". */
+  balanceUsdt: number | null;
+  flash?: { ok: boolean; message: string } | null;
+}): string {
+  const flashHtml = args.flash
+    ? `<div class="key-flash ${args.flash.ok ? 'ok' : 'err'}">${escapeHtml(args.flash.message)}</div>`
+    : '';
+
+  const main = args.apiKey && !args.apiKey.revoked_at
+    ? renderConnectedState(args.apiKey, args.balanceUsdt)
+    : renderConnectForm();
+
+  const body = `
+    ${styles()}
+    <main class="cabinet-main">
+      <div class="cabinet-greeting">
+        <div class="cabinet-greeting-label">Личный кабинет · API-ключ</div>
+        <h1 class="cabinet-title">Подключение Bybit</h1>
+        <p class="key-sub">
+          Чтобы стратегии могли автоматически торговать на вашем счёте, нужен
+          API-ключ Bybit с правом на торговлю (без права на вывод средств).
+          Мы никогда не имеем доступа к выводу — только открываем и закрываем
+          позиции по сигналам системы.
+        </p>
+      </div>
+
+      ${flashHtml}
+      ${main}
+      ${renderGuide()}
+
+      <div class="key-back">
+        <a href="/account">← Назад в кабинет</a>
+      </div>
+    </main>
+  `;
+
+  return pageShell('API-ключ · Robot Claude', body, {
+    lang: 'ru',
+    robots: 'noindex, nofollow',
+    hideMobileHelpIcon: true,
+  });
+}
+
+function renderConnectedState(key: ApiKeySummary, balance: number | null): string {
+  const hasErr = !!key.last_verify_error;
+  return `
+    <div class="key-card ${hasErr ? 'key-card-warn' : 'key-card-ok'}">
+      <div class="key-card-title">
+        ${ico(hasErr ? '⚠️' : '✅')}${hasErr ? 'Ключ подключён, но требует проверки' : 'Ключ подключён'}
+      </div>
+      <div class="key-card-grid">
+        <div>
+          <div class="key-field-label">Статус</div>
+          <div class="key-field-value">${hasErr ? escapeHtml(key.last_verify_error ?? 'ошибка проверки') : 'Активен'}</div>
+        </div>
+        <div>
+          <div class="key-field-label">Последняя проверка</div>
+          <div class="key-field-value">${fmtAgo(key.last_verified_at)}</div>
+        </div>
+        ${balance !== null
+          ? `<div>
+              <div class="key-field-label">Баланс на счёте</div>
+              <div class="key-field-value mono">${balance.toFixed(2)} USDT</div>
+            </div>`
+          : ''}
+        <div>
+          <div class="key-field-label">Подключено</div>
+          <div class="key-field-value">${fmtAgo(key.created_at)}</div>
+        </div>
+      </div>
+      <div class="key-card-actions">
+        <form method="POST" action="/account/api-key/verify" style="display:inline">
+          <button class="key-btn-secondary" type="submit">Проверить связь</button>
+        </form>
+        <form method="POST" action="/account/api-key/revoke" style="display:inline"
+              onsubmit="return confirm('Отключить ключ? Открытые позиции продолжат жить, новые сделки система открывать перестанет.');">
+          <button class="key-btn-danger" type="submit">Отключить ключ</button>
+        </form>
+      </div>
+    </div>
+
+    <details class="key-rotate-block">
+      <summary>Заменить ключ на новый</summary>
+      ${renderInputs(/* labels for re-submit */)}
+    </details>
+  `;
+}
+
+function renderConnectForm(): string {
+  return `
+    <div class="key-card">
+      <div class="key-card-title">${ico('🔑')}Подключите ключ Bybit</div>
+      ${renderInputs()}
+    </div>
+  `;
+}
+
+function renderInputs(): string {
+  return `
+    <form method="POST" action="/account/api-key" class="key-form">
+      <label class="key-field-row">
+        <span class="key-field-label">API Key</span>
+        <input type="text" name="apiKey" required autocomplete="off"
+          placeholder="например: nDAxXXXXXXXXXXXXXX" />
+      </label>
+      <label class="key-field-row">
+        <span class="key-field-label">API Secret</span>
+        <input type="password" name="apiSecret" required autocomplete="off"
+          placeholder="64-символьная строка" />
+      </label>
+      <div class="key-form-hint">
+        Мы шифруем ключ AES-256-GCM при сохранении. Проверим связь с Bybit
+        до того как сохранить — если ключ невалидный, форма скажет почему.
+      </div>
+      <button type="submit" class="key-btn-primary">Проверить и сохранить</button>
+    </form>
+  `;
+}
+
+function renderGuide(): string {
+  return `
+    <div class="key-guide">
+      <h2 class="key-guide-title">${ico('📖')}Как создать ключ на Bybit</h2>
+      <ol class="key-guide-steps">
+        <li>
+          Войдите в Bybit и откройте <b>Profile → API</b> (или прямая ссылка
+          <a href="https://www.bybit.com/app/user/api-management" target="_blank" rel="noopener">bybit.com/app/user/api-management</a>).
+        </li>
+        <li>
+          Нажмите <b>Create New Key → System-generated API Keys</b>.
+        </li>
+        <li>
+          Тип ключа: <b>API Transaction</b>. Имя — любое (например «Robot Claude»).
+        </li>
+        <li>
+          Permissions: включить <b>Unified Trading → Trade</b>. <b>Withdraw, Transfer и Subaccount</b> НЕ включать.
+        </li>
+        <li>
+          IP restriction: добавить наш IP-адрес <code>144.124.250.47</code> (это
+          адрес нашего VPS — никто другой ключом не воспользуется).
+        </li>
+        <li>
+          Position mode: <b>One-Way</b> (для USDT-перпов). Hedge mode пока не поддерживается.
+        </li>
+        <li>
+          Скопируйте <b>API Key</b> и <b>API Secret</b> — secret показывается
+          один раз. Вставьте их в форму выше.
+        </li>
+      </ol>
+      <div class="key-guide-safety">
+        ${ico('🛡')}<b>Безопасность:</b> мы шифруем ключ при сохранении, не
+        логируем секрет и физически не можем вывести средства — у ключа
+        нет соответствующего права. Если хотите проверить — отзовите ключ
+        в Bybit или нажмите «Отключить» в кабинете в любой момент.
+      </div>
+    </div>
+  `;
+}
+
+function styles(): string {
+  return `
+<style>
+  .cabinet-main { max-width: 880px; margin: 0 auto; padding: 28px 20px 80px; }
+  .cabinet-greeting { margin-bottom: 18px; }
+  .cabinet-greeting-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
+    color: #6b7480; margin-bottom: 6px;
+  }
+  .cabinet-title { font-size: 26px; font-weight: 600; margin: 0 0 10px 0; color: #e8edf2; }
+  .cabinet-ico { display: inline-block; margin-right: 8px; vertical-align: -1px; line-height: 1; }
+  .key-sub { color: #9aa5b1; font-size: 13.5px; line-height: 1.55; margin: 0; }
+
+  .key-flash {
+    padding: 12px 16px; border-radius: 8px; font-size: 13.5px; margin: 14px 0;
+  }
+  .key-flash.ok { background: rgba(74, 217, 145, 0.10); border: 1px solid rgba(74, 217, 145, 0.45); color: #4ad991; }
+  .key-flash.err { background: rgba(255, 99, 99, 0.10); border: 1px solid rgba(255, 99, 99, 0.45); color: #ff8b8b; }
+
+  .key-card {
+    background: #11161d; border: 1px solid #1f2630; border-radius: 14px;
+    padding: 22px; margin: 20px 0;
+  }
+  .key-card-ok { border-color: rgba(74, 217, 145, 0.45); }
+  .key-card-warn { border-color: rgba(255, 188, 70, 0.45); }
+  .key-card-title {
+    font-size: 16px; font-weight: 600; color: #e8edf2; margin-bottom: 16px;
+  }
+  .key-card-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px 24px; margin-bottom: 18px;
+  }
+  .key-field-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: #6b7480; margin-bottom: 4px;
+  }
+  .key-field-value { font-size: 14px; color: #e8edf2; }
+  .key-field-value.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  .key-card-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  .key-form { display: flex; flex-direction: column; gap: 14px; }
+  .key-field-row { display: flex; flex-direction: column; gap: 6px; }
+  .key-form input {
+    padding: 10px 12px; background: #0b0e13; border: 1px solid #2a323d;
+    border-radius: 8px; color: #e8edf2; font-size: 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .key-form input:focus { outline: none; border-color: #4ad991; }
+  .key-form-hint { font-size: 12.5px; color: #6b7480; line-height: 1.5; }
+
+  .key-btn-primary, .key-btn-secondary, .key-btn-danger {
+    padding: 9px 16px; border-radius: 8px; font-size: 13.5px; cursor: pointer;
+    border: 1px solid; font-family: inherit;
+  }
+  .key-btn-primary {
+    background: #4ad991; border-color: #4ad991; color: #0b0e13; font-weight: 600;
+  }
+  .key-btn-primary:hover { background: #5ce0a0; }
+  .key-btn-secondary {
+    background: #141a22; border-color: #2a323d; color: #cfd6dd;
+  }
+  .key-btn-secondary:hover { border-color: #4ad991; color: #fff; }
+  .key-btn-danger {
+    background: #141a22; border-color: rgba(255, 99, 99, 0.5); color: #ff8b8b;
+  }
+  .key-btn-danger:hover { background: rgba(255, 99, 99, 0.10); }
+
+  .key-rotate-block {
+    background: #11161d; border: 1px solid #1f2630; border-radius: 12px;
+    padding: 16px 22px; margin: 14px 0; color: #9aa5b1;
+  }
+  .key-rotate-block summary {
+    cursor: pointer; font-size: 14px; padding: 4px 0; color: #cfd6dd;
+  }
+  .key-rotate-block[open] { padding-bottom: 22px; }
+  .key-rotate-block .key-form { margin-top: 14px; }
+
+  .key-guide {
+    background: #0e131a; border: 1px solid #1a1f27; border-radius: 12px;
+    padding: 22px 24px; margin: 24px 0;
+  }
+  .key-guide-title { font-size: 15px; font-weight: 600; color: #e8edf2; margin: 0 0 12px 0; }
+  .key-guide-steps {
+    margin: 0 0 14px 0; padding-left: 22px; color: #cfd6dd;
+    font-size: 13.5px; line-height: 1.7;
+  }
+  .key-guide-steps li { margin-bottom: 6px; }
+  .key-guide-steps a { color: #4ad991; }
+  .key-guide-steps code {
+    background: #1a1f27; padding: 2px 6px; border-radius: 4px;
+    font-size: 12.5px;
+  }
+  .key-guide-safety {
+    background: rgba(74, 217, 145, 0.07); border-left: 3px solid #4ad991;
+    padding: 12px 16px; border-radius: 0 6px 6px 0;
+    font-size: 13px; color: #cfd6dd; line-height: 1.55;
+  }
+
+  .key-back { text-align: center; margin-top: 24px; }
+  .key-back a { color: #8590a0; font-size: 13px; text-decoration: none; }
+  .key-back a:hover { color: #4ad991; }
+</style>
+`;
+}

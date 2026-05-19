@@ -14,7 +14,16 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getAuthedUser } from '../auth/routes.js';
 import { findSubscription } from '../db/repos/user-subscriptions.js';
-import { findActiveKey, summaryOf } from '../db/repos/user-api-keys.js';
+import {
+  findActiveKey,
+  findAnyKey,
+  summaryOf,
+  upsertApiKey,
+  revokeApiKey,
+  recordVerifyResult,
+  getDecryptedCreds,
+} from '../db/repos/user-api-keys.js';
+import { fetchBalanceUsdt, bybitErrorLabel } from '../exchange/bybit-private.js';
 import {
   listUserStrategies,
   enableUserStrategy,
@@ -23,6 +32,7 @@ import {
 import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
 import { renderDashboard } from './dashboard.js';
 import { renderStrategiesPage } from './strategies.js';
+import { renderApiKeyPage } from './api-key.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import type { UserStrategyRow } from '../db/repos/user-strategies.js';
@@ -195,4 +205,164 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       }),
     );
   });
+
+  // -------- GET /account/api-key --------
+  app.get('/account/api-key', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) {
+      reply.redirect('/strategies');
+      return;
+    }
+    const key = findAnyKey(user.userId);
+    const balance = key && !key.revoked_at && key.last_verified_at !== null
+      ? balanceCache.get(user.userId) ?? null
+      : null;
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('cache-control', 'private, no-store');
+    return reply.send(
+      renderApiKeyPage({
+        displayName: user.displayName,
+        apiKey: summaryOf(key),
+        balanceUsdt: balance,
+        flash: null,
+      }),
+    );
+  });
+
+  // -------- POST /account/api-key --------
+  // Submit apiKey + apiSecret. Verify against Bybit BEFORE encrypting +
+  // storing (no DB write on bad creds). On success, persist + cache the
+  // balance for the connected-state UI.
+  app.post('/account/api-key', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) {
+      reply.redirect('/strategies');
+      return;
+    }
+    const body = (req.body ?? {}) as { apiKey?: string; apiSecret?: string };
+    const apiKey = (body.apiKey ?? '').trim();
+    const apiSecret = (body.apiSecret ?? '').trim();
+    if (!apiKey || !apiSecret) {
+      return renderApiKeyWithFlash(reply, user, { ok: false, message: 'Заполните оба поля.' });
+    }
+    const verifyRes = await fetchBalanceUsdt({ apiKey, apiSecret });
+    if (!verifyRes.ok) {
+      const label = bybitErrorLabel(verifyRes.code);
+      logger.warn({ userId: user.userId, code: verifyRes.code, label }, 'api-key verify failed');
+      return renderApiKeyWithFlash(reply, user, {
+        ok: false,
+        message: `Bybit отклонил ключ (${label}): ${verifyRes.msg}. Проверьте права ключа и IP-whitelist.`,
+      });
+    }
+    try {
+      upsertApiKey({
+        userId: user.userId,
+        apiKey,
+        apiSecret,
+        verifiedAt: Date.now(),
+        verifyError: null,
+      });
+    } catch (err) {
+      logger.error({ err, userId: user.userId }, 'upsertApiKey failed');
+      return renderApiKeyWithFlash(reply, user, {
+        ok: false,
+        message: 'Не удалось сохранить ключ. Попробуйте позже.',
+      });
+    }
+    balanceCache.set(user.userId, verifyRes.totalUsdt);
+    return renderApiKeyWithFlash(reply, user, {
+      ok: true,
+      message: `Ключ сохранён. Баланс на счёте: ${verifyRes.totalUsdt.toFixed(2)} USDT.`,
+    });
+  });
+
+  // -------- POST /account/api-key/verify --------
+  // Re-check existing key without changing it. Updates last_verified_at /
+  // last_verify_error in the row; cabinet badge reflects fresh state.
+  app.post('/account/api-key/verify', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) {
+      reply.redirect('/strategies');
+      return;
+    }
+    const row = findActiveKey(user.userId);
+    if (!row) {
+      return renderApiKeyWithFlash(reply, user, {
+        ok: false,
+        message: 'Сначала подключите ключ.',
+      });
+    }
+    const creds = getDecryptedCreds(row);
+    const verifyRes = await fetchBalanceUsdt(creds);
+    if (!verifyRes.ok) {
+      const label = bybitErrorLabel(verifyRes.code);
+      recordVerifyResult(row.id, false, label);
+      return renderApiKeyWithFlash(reply, user, {
+        ok: false,
+        message: `Bybit отклонил ключ (${label}): ${verifyRes.msg}`,
+      });
+    }
+    recordVerifyResult(row.id, true);
+    balanceCache.set(user.userId, verifyRes.totalUsdt);
+    return renderApiKeyWithFlash(reply, user, {
+      ok: true,
+      message: `Связь с Bybit ОК. Баланс: ${verifyRes.totalUsdt.toFixed(2)} USDT.`,
+    });
+  });
+
+  // -------- POST /account/api-key/revoke --------
+  // Soft-delete the key. Open positions on Bybit stay open (we can't
+  // close them without the key); they'll be reconciled and closed by
+  // the strategy's natural exit signal. New entries no longer fire
+  // for this user until they connect a new key.
+  app.post('/account/api-key/revoke', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) {
+      reply.redirect('/strategies');
+      return;
+    }
+    const row = findActiveKey(user.userId);
+    if (!row) {
+      return renderApiKeyWithFlash(reply, user, {
+        ok: false,
+        message: 'Активного ключа нет.',
+      });
+    }
+    revokeApiKey(row.id);
+    balanceCache.delete(user.userId);
+    logger.info({ userId: user.userId, keyId: row.id }, 'api-key revoked by user');
+    return renderApiKeyWithFlash(reply, user, {
+      ok: true,
+      message: 'Ключ отключён. Открытые позиции продолжат жить до своего естественного выхода.',
+    });
+  });
+}
+
+/** Small process-level cache for the connected-state balance preview.
+ *  TTL is implicit — entries live until the next verify call or
+ *  /api-key/revoke. Reset on process restart (safe, just shows '—'
+ *  until the user clicks «Проверить связь»). */
+const balanceCache = new Map<number, number>();
+
+/** Re-render the API-key page after a POST. Reads fresh key state +
+ *  cached balance so the user sees the result of their action. */
+function renderApiKeyWithFlash(
+  reply: FastifyReply,
+  user: { userId: number; displayName: string | null },
+  flash: { ok: boolean; message: string },
+): FastifyReply {
+  const key = findAnyKey(user.userId);
+  const balance = key && !key.revoked_at && key.last_verified_at !== null
+    ? balanceCache.get(user.userId) ?? null
+    : null;
+  reply.header('content-type', 'text/html; charset=utf-8');
+  reply.header('cache-control', 'private, no-store');
+  return reply.send(
+    renderApiKeyPage({
+      displayName: user.displayName,
+      apiKey: summaryOf(key),
+      balanceUsdt: balance,
+      flash,
+    }),
+  );
 }

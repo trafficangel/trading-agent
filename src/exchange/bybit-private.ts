@@ -77,14 +77,24 @@ async function signedGet<T>(
       headersTimeout: 8_000,
       bodyTimeout: 8_000,
     });
-    const body = (await res.body.json()) as { retCode: number; retMsg: string; result?: unknown };
+    const text = await res.body.text();
+    let body: { retCode: number; retMsg: string; result?: unknown };
+    try {
+      body = JSON.parse(text);
+    } catch {
+      // Non-JSON response means we hit something other than the V5 API
+      // (e.g. CDN error page, 5xx with no body, wrong URL). Surface a
+      // clean message so the cabinet doesn't show a JSON parse error.
+      logger.error({ path, status: res.statusCode, snippet: text.slice(0, 100) }, 'bybit-private GET: non-JSON');
+      return { ok: false, code: -1, msg: `Bybit вернул ответ без JSON (HTTP ${res.statusCode})` };
+    }
     if (body.retCode !== 0) {
       return { ok: false, code: body.retCode, msg: body.retMsg };
     }
     return { ok: true, data: body.result as T };
   } catch (err) {
     logger.error({ err, path }, 'bybit-private GET failed');
-    return { ok: false, code: -1, msg: (err as Error).message };
+    return { ok: false, code: -1, msg: 'Не удалось связаться с Bybit (сеть/таймаут)' };
   }
 }
 
@@ -112,14 +122,21 @@ async function signedPost<T>(
       headersTimeout: 8_000,
       bodyTimeout: 8_000,
     });
-    const respBody = (await res.body.json()) as { retCode: number; retMsg: string; result?: unknown };
+    const text = await res.body.text();
+    let respBody: { retCode: number; retMsg: string; result?: unknown };
+    try {
+      respBody = JSON.parse(text);
+    } catch {
+      logger.error({ path, status: res.statusCode, snippet: text.slice(0, 100) }, 'bybit-private POST: non-JSON');
+      return { ok: false, code: -1, msg: `Bybit вернул ответ без JSON (HTTP ${res.statusCode})` };
+    }
     if (respBody.retCode !== 0) {
       return { ok: false, code: respBody.retCode, msg: respBody.retMsg };
     }
     return { ok: true, data: respBody.result as T };
   } catch (err) {
     logger.error({ err, path }, 'bybit-private POST failed');
-    return { ok: false, code: -1, msg: (err as Error).message };
+    return { ok: false, code: -1, msg: 'Не удалось связаться с Bybit (сеть/таймаут)' };
   }
 }
 
