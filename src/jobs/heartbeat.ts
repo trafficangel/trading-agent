@@ -46,9 +46,17 @@ async function tick(): Promise<void> {
 }
 
 export function startHeartbeatJob(): void {
-  // Top of every 4 hours UTC: 00:00, 04:00, 08:00, 12:00, 16:00, 20:00.
-  cron.schedule('0 */4 * * *', () => {
+  // Once a day at 12:00 UTC — confirms the system is alive even on
+  // days with no trade activity. Daily-wrap at 23:55 covers trade
+  // stats; heartbeat covers OS-level liveness (uptime, mode) and
+  // intentionally fires at a different hour so the Logs channel
+  // doesn't go silent for more than ~12h.
+  //
+  // Reduced from every-4h on 2026-05-19 — at 6 pings/day the channel
+  // was mostly noise. One daily pulse + health watchdog (which fires
+  // ONLY on actual problems) is enough.
+  cron.schedule('0 12 * * *', () => {
     void tick();
   });
-  logger.info('heartbeat cron started (every 4h)');
+  logger.info('heartbeat cron started (daily at 12:00 UTC)');
 }
