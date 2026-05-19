@@ -1629,8 +1629,8 @@ const STYLE = `
   }
   .live-pos-row {
     display: grid;
-    /* Trade · Side · Entry · Price · PnL · Age */
-    grid-template-columns: 110px 70px 120px 1fr 130px 80px;
+    /* Trade · Side · Entry · Price · Size · PnL · Age */
+    grid-template-columns: 110px 70px 120px 1fr 70px 130px 80px;
     gap: 12px;
     align-items: center;
     padding: 10px 16px;
@@ -1673,21 +1673,41 @@ const STYLE = `
   .live-pos-row-age {
     color: var(--text-dim); font-variant-numeric: tabular-nums;
   }
-  .live-pos-row-entry.mono {
+  .live-pos-row-entry.mono, .live-pos-row-size.mono {
     font-family: 'SF Mono', 'Menlo', monospace;
     color: var(--text-dim);
   }
-  /* Mobile: collapse columns by stacking into 2 lines per row.
-   * At <640px hide entry + age, PnL goes inline with current price. */
+  /* Mobile (<640px): grid-template-areas so every field is visible.
+   * 2-column layout, 4 rows:
+   *   Row 1: trade-id . . . . . . . . . side-chip
+   *   Row 2: ВХОД value         · ЦЕНА value
+   *   Row 3: РАЗМЕР value       · P&L block
+   *   Row 4: age (full width, right-aligned, dim)
+   * Labels are injected via ::before pseudo-elements so we don't
+   * touch the SSR HTML. */
   @media (max-width: 640px) {
     .live-pos-row {
-      grid-template-columns: 1fr 70px 1fr;
-      grid-template-rows: auto auto;
-      row-gap: 4px;
+      grid-template-columns: 1fr 1fr;
+      grid-template-areas:
+        "id    side"
+        "entry price"
+        "size  pnl"
+        "age   age";
+      row-gap: 6px;
+      column-gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
     }
-    .live-pos-row-id { grid-column: 1 / -1; }
-    .live-pos-row-entry, .live-pos-row-age { display: none; }
-    .live-pos-row-head { display: none; }
+    .live-pos-row-id    { grid-area: id; }
+    .live-pos-row-side  { grid-area: side; justify-self: end; }
+    .live-pos-row-entry { grid-area: entry; display: inline-flex; align-items: baseline; gap: 6px; font-size: 12px; }
+    .live-pos-row-entry::before { content: 'Вход'; color: var(--text-faint); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .live-pos-row-price { grid-area: price; justify-self: end; font-size: 12px; }
+    .live-pos-row-size  { grid-area: size; display: inline-flex; align-items: baseline; gap: 6px; font-size: 12px; }
+    .live-pos-row-size::before { content: 'Размер'; color: var(--text-faint); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .live-pos-row-pnl   { grid-area: pnl; justify-self: end; }
+    .live-pos-row-age   { grid-area: age; display: block; font-size: 11px; color: var(--text-faint); }
+    .live-pos-row-head  { display: none; }
   }
 
   @media (prefers-reduced-motion: reduce) {

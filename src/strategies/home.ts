@@ -927,6 +927,10 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
             <span class="live-pos-val mono">$${p.sl.toFixed(4)}</span>
             <span class="live-pos-meta">(${p.slPct.toFixed(2)}%)</span>
           </div>
+          <div class="live-pos-price-row">
+            <span class="live-pos-label">${lang === 'en' ? 'Size' : 'Размер'}</span>
+            <span class="live-pos-val mono">$${p.notionalUsd.toFixed(0)}</span>
+          </div>
         </div>
         <div class="live-pos-pnl ${pnlCls2}" data-pnl-block>
           <span class="live-pos-pnl-usd" data-pnl-usd>${pnlSign}$${Math.abs(p.pnlUsd).toFixed(2)}</span>
@@ -966,6 +970,7 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
           <span data-current-price>$${p.currentPrice.toFixed(4)}</span>
           <span class="live-pos-arrow ${arrowCls}" data-arrow>${arrow}</span>
         </span>
+        <span class="live-pos-row-size mono">$${p.notionalUsd.toFixed(0)}</span>
         <span class="live-pos-row-pnl ${pnlCls2}" data-pnl-block>
           <span data-pnl-usd>${pnlSign}$${Math.abs(p.pnlUsd).toFixed(2)}</span>
           <span class="live-pos-row-pct" data-pnl-pct>${pnlPctSign}${Math.abs(p.pnlPct).toFixed(2)}%</span>
@@ -984,6 +989,7 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
              <span>${lang === 'en' ? 'Side' : 'Сторона'}</span>
              <span>${lang === 'en' ? 'Entry' : 'Вход'}</span>
              <span>${lang === 'en' ? 'Price' : 'Цена'}</span>
+             <span>${lang === 'en' ? 'Size' : 'Размер'}</span>
              <span>P&amp;L</span>
              <span>${lang === 'en' ? 'Age' : 'Возраст'}</span>
            </div>

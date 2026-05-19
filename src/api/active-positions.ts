@@ -41,6 +41,10 @@ export type ActivePositionView = {
   pnlUsd: number;
   pnlR: number;
   ageMs: number;
+  /** Operator's fixed notional per trade (TRACK_C_NOTIONAL_USD).
+   *  Surfaced so the public table can show «Размер $1000» — answers
+   *  the user's «на каком размере считается этот PnL» question. */
+  notionalUsd: number;
 };
 
 type Cache = { data: ActivePositionView[]; expires: number };
@@ -88,6 +92,7 @@ async function compute(): Promise<ActivePositionView[]> {
         pnlUsd: Math.round(pnlUsd * 100) / 100,
         pnlR: Math.round(pnlR * 100) / 100,
         ageMs: Date.now() - t.entryAt,
+        notionalUsd: TRACK_C_NOTIONAL_USD,
       });
     }
   }
