@@ -129,6 +129,7 @@ const findEligibleStmt = db.prepare<
      AND s.trading_paused_at IS NULL
      AND k.revoked_at IS NULL
      AND k.last_verified_at IS NOT NULL
+     AND k.insufficient_balance_at IS NULL
 `);
 
 export type EligibleTarget = {

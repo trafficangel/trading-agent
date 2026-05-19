@@ -25,6 +25,12 @@ export type ApiKeyRow = {
    *  Persists across server restarts (was in-memory before). */
   last_balance_usdt: number | null;
   last_balance_at: number | null;
+  /** Set when Bybit rejected an order with retCode 110007/110012
+   *  («insufficient balance»). While non-NULL, listEligibleTargets
+   *  filters this user out so we don't spam Bybit with rejected
+   *  orders. Cleared automatically on the next successful order
+   *  OR when the user manually clicks «Проверить связь». */
+  insufficient_balance_at: number | null;
 };
 
 /** Public view (no secrets) for cabinet / admin UI. */
@@ -200,4 +206,14 @@ export function recordVerifyResult(
  *  fetchBalanceUsdt call. */
 export function recordBalance(id: number, balanceUsdt: number): void {
   updateBalanceStmt.run(balanceUsdt, Date.now(), id);
+}
+
+const setInsufficientStmt = db.prepare(`
+  UPDATE user_api_keys SET insufficient_balance_at = ? WHERE id = ?
+`);
+
+/** Flip the insufficient_balance flag. Pass null to clear (user
+ *  topped up or admin reset it). Pass Date.now() to set. */
+export function setInsufficientBalance(id: number, value: number | null): void {
+  setInsufficientStmt.run(value, id);
 }

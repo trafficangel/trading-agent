@@ -42,6 +42,7 @@ import {
   findActiveKey,
   getDecryptedCreds,
   recordVerifyResult,
+  setInsufficientBalance,
 } from '../db/repos/user-api-keys.js';
 import { isTradingActive } from '../db/repos/user-subscriptions.js';
 import {
@@ -74,8 +75,21 @@ const AUTH_CLASS_ERROR_CODES = new Set([
   10006, // rate limit / abusive — treat as auth issue too
 ]);
 
+/** Codes that mean "balance / margin insufficient on the unified
+ *  account". When seen, we flip insufficient_balance_at on the key
+ *  so subsequent signals are skipped until the user tops up. */
+const INSUFFICIENT_BALANCE_CODES = new Set([
+  110007, // insufficient available balance
+  110012, // insufficient margin
+  110045, // insufficient quote (USDT) balance
+]);
+
 function shouldMarkKeyBroken(code: number): boolean {
   return AUTH_CLASS_ERROR_CODES.has(code);
+}
+
+function isInsufficientBalance(code: number): boolean {
+  return INSUFFICIENT_BALANCE_CODES.has(code);
 }
 
 export type FanOutEntryArgs = {
@@ -208,9 +222,21 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
     if (shouldMarkKeyBroken(orderRes.code)) {
       recordVerifyResult(keyRow.id, false, `placeOrder: ${label}`);
     }
-    await alertOperator(
-      `⚠️ Track D fan-out: user_id=${t.user_id} entry on ${args.symbol} failed: ${label} · ${orderRes.msg}`,
-    );
+    // Insufficient balance: set the flag so the user is skipped from
+    // future fan-outs until they top up + re-verify (manual click on
+    // «Проверить связь» auto-clears it). Avoids hammering Bybit with
+    // rejected orders every time a signal fires.
+    if (isInsufficientBalance(orderRes.code)) {
+      setInsufficientBalance(keyRow.id, Date.now());
+      await alertOperator(
+        `💸 Track D: user_id=${t.user_id} insufficient balance on ${args.symbol}. ` +
+        `Required: $${(t.notional_usd / t.leverage).toFixed(2)} margin. Skipping until top-up.`,
+      );
+    } else {
+      await alertOperator(
+        `⚠️ Track D fan-out: user_id=${t.user_id} entry on ${args.symbol} failed: ${label} · ${orderRes.msg}`,
+      );
+    }
     // Record the failure as an inactive decision row so it shows in the
     // user's history with order_error populated.
     insertDecision({
@@ -279,6 +305,9 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
 
   // Mark the key as freshly verified (it just worked).
   recordVerifyResult(keyRow.id, true);
+  // Successful entry → user clearly had enough balance, so a previous
+  // insufficient_balance flag (if set) was stale. Clear it.
+  if (keyRow.insufficient_balance_at) setInsufficientBalance(keyRow.id, null);
   return true;
 }
 

@@ -22,6 +22,7 @@ import {
   revokeApiKey,
   recordVerifyResult,
   recordBalance,
+  setInsufficientBalance,
   getDecryptedCreds,
 } from '../db/repos/user-api-keys.js';
 import { fetchBalanceUsdt, bybitErrorLabel } from '../exchange/bybit-private.js';
@@ -156,6 +157,8 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         flash: null,
         csrfToken: csrf,
         tradingPausedAt: sub?.trading_paused_at ?? null,
+        insufficientBalanceAt: apiKey?.insufficient_balance_at ?? null,
+        lastBalanceUsdt: apiKey?.last_balance_usdt ?? null,
       }),
     );
   });
@@ -240,6 +243,8 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         flash,
         csrfToken: issueCsrfToken(req, reply),
         tradingPausedAt: sub2?.trading_paused_at ?? null,
+        insufficientBalanceAt: apiKey?.insufficient_balance_at ?? null,
+        lastBalanceUsdt: apiKey?.last_balance_usdt ?? null,
       }),
     );
   });
@@ -293,6 +298,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         displayName: user.displayName,
         apiKey: summaryOf(key),
         balanceUsdt: balance,
+        insufficientBalanceAt: key?.insufficient_balance_at ?? null,
         flash: null,
         csrfToken: csrf,
       }),
@@ -379,6 +385,11 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     }
     recordVerifyResult(row.id, true);
     recordBalance(row.id, verifyRes.totalUsdt);
+    // Trust the user: if they're clicking «Проверить связь», they
+    // likely just topped up. Clear the insufficient_balance flag so
+    // they're eligible for the next signal. If balance is still
+    // inadequate, the next placeMarketOrder will re-set it.
+    if (row.insufficient_balance_at) setInsufficientBalance(row.id, null);
     return renderApiKeyWithFlash(req, reply, user, {
       ok: true,
       message: `Связь с Bybit ОК. Баланс: ${verifyRes.totalUsdt.toFixed(2)} USDT.`,
@@ -489,6 +500,7 @@ function renderApiKeyWithFlash(
       displayName: user.displayName,
       apiKey: summaryOf(key),
       balanceUsdt: balance,
+      insufficientBalanceAt: key?.insufficient_balance_at ?? null,
       flash,
       csrfToken: csrf,
     }),

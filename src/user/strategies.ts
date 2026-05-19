@@ -51,6 +51,12 @@ type RenderArgs = {
   csrfToken: string;
   /** Unix ms when user paused trading globally, NULL if active. */
   tradingPausedAt: number | null;
+  /** Unix ms when Bybit last rejected an order for insufficient
+   *  balance. NULL = balance is sufficient (or unknown). */
+  insufficientBalanceAt: number | null;
+  /** Last known USDT balance (cached on user_api_keys), for the
+   *  "your balance is $X, need $Y" message. */
+  lastBalanceUsdt: number | null;
 };
 
 export function renderStrategiesPage(args: RenderArgs): string {
@@ -71,6 +77,26 @@ export function renderStrategiesPage(args: RenderArgs): string {
         <a class="strat-banner-btn" href="/account/api-key">Подключить →</a>
       </div>
     `;
+
+  // Insufficient-balance banner. Set when Bybit returned 110007/110012
+  // on the most recent fan-out attempt. Until cleared (top up + manual
+  // verify), new fan-out skips this user entirely.
+  const balanceBanner = args.insufficientBalanceAt
+    ? `
+      <div class="strat-banner-bad">
+        <div>
+          <strong>${ico('💸')}Недостаточно средств на фьючерсном счёте Bybit.</strong>
+          ${args.lastBalanceUsdt !== null
+            ? `Последний известный баланс: <b>$${args.lastBalanceUsdt.toFixed(2)} USDT</b>. `
+            : ''}
+          Bybit отклонил последнюю сделку из-за нехватки обеспечения. Новые сигналы
+          не исполняются пока вы не пополните USDT-кошелёк (раздел <b>Derivatives</b>
+          в Bybit) и не нажмёте «Проверить связь» в кабинете.
+        </div>
+        <a class="strat-banner-btn" href="/account/api-key">Проверить связь →</a>
+      </div>
+    `
+    : '';
 
   // Pause/resume banner. When paused, fan-out skips this user entirely
   // (see listEligibleTargets SQL + isTradingActive race check).
@@ -157,6 +183,7 @@ export function renderStrategiesPage(args: RenderArgs): string {
       </div>
 
       ${pauseBanner}
+      ${balanceBanner}
       ${keyBanner}
       ${calcCard}
       ${flashHtml}
@@ -382,6 +409,17 @@ function styles(): string {
     border-radius: 12px; color: #e0d9c5; margin: 18px 0;
     font-size: 13.5px;
   }
+  .strat-banner-bad {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 14px 18px;
+    background: rgba(255, 99, 99, 0.08);
+    border: 1px solid rgba(255, 99, 99, 0.45);
+    border-radius: 12px; color: #e8c5c5; margin: 18px 0;
+    font-size: 13.5px; line-height: 1.55;
+    flex-wrap: wrap;
+  }
+  .strat-banner-bad strong { color: #ff8b8b; }
+  .strat-banner-bad b { color: #ffd17a; }
   .strat-banner-btn {
     flex-shrink: 0; padding: 8px 14px; background: rgba(255, 188, 70, 0.12);
     border: 1px solid rgba(255, 188, 70, 0.5); border-radius: 8px;

@@ -48,11 +48,37 @@ export function renderApiKeyPage(args: {
   /** Balance from the last verify call, if known + still fresh. Shown
    *  as confidence-builder "everything works, here's your balance". */
   balanceUsdt: number | null;
+  /** Set when Bybit rejected a recent order for insufficient balance.
+   *  Banner explains how to top up + verify. */
+  insufficientBalanceAt: number | null;
   flash?: { ok: boolean; message: string } | null;
   csrfToken: string;
 }): string {
   const flashHtml = args.flash
     ? `<div class="key-flash ${args.flash.ok ? 'ok' : 'err'}">${escapeHtml(args.flash.message)}</div>`
+    : '';
+
+  // Insufficient-balance banner — set by fan-out when Bybit rejected
+  // an order with 110007/110012. Cleared automatically by «Проверить
+  // связь» which user typically clicks after topping up.
+  const balanceBanner = args.insufficientBalanceAt
+    ? `
+      <div class="key-balance-warn">
+        <div class="key-balance-warn-title">${ico('💸')}Недостаточно средств на фьючерсном счёте</div>
+        <div class="key-balance-warn-body">
+          ${args.balanceUsdt !== null ? `Последний известный баланс: <b>$${args.balanceUsdt.toFixed(2)} USDT</b>. ` : ''}
+          Bybit отклонил последнюю сделку: на счёте не хватило обеспечения.
+          <br/><br/>
+          <b>Что делать:</b>
+          <ol class="key-balance-warn-steps">
+            <li>Пополните USDT-кошелёк раздела <b>Derivatives</b> в Bybit
+              (или переведите из Funding / Spot во фьючерсный кошелёк).</li>
+            <li>Нажмите <b>«Проверить связь»</b> в карточке ключа выше —
+              мы перечитаем баланс и снова включим вас в сигналы.</li>
+          </ol>
+        </div>
+      </div>
+    `
     : '';
 
   const isConnected = !!(args.apiKey && !args.apiKey.revoked_at);
@@ -80,6 +106,7 @@ export function renderApiKeyPage(args: {
       </div>
 
       ${flashHtml}
+      ${balanceBanner}
       ${main}
       ${showGuide ? renderGuide() : ''}
 
@@ -298,6 +325,32 @@ function styles(): string {
   }
   .key-flash.ok { background: rgba(74, 217, 145, 0.10); border: 1px solid rgba(74, 217, 145, 0.45); color: #4ad991; }
   .key-flash.err { background: rgba(255, 99, 99, 0.10); border: 1px solid rgba(255, 99, 99, 0.45); color: #ff8b8b; }
+
+  .key-balance-warn {
+    background: rgba(255, 99, 99, 0.07);
+    border: 1px solid rgba(255, 99, 99, 0.45);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin: 18px 0;
+    color: #e8c5c5;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+  .key-balance-warn-title {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: #ff8b8b;
+    margin-bottom: 8px;
+  }
+  .key-balance-warn-body { color: #cfd6dd; }
+  .key-balance-warn-body b { color: #ffd17a; }
+  .key-balance-warn-steps {
+    margin: 6px 0 0 0;
+    padding-left: 22px;
+    line-height: 1.7;
+  }
+  .key-balance-warn-steps li { margin-bottom: 4px; }
+  .key-balance-warn-steps b { color: #e8edf2; }
 
   .key-card {
     background: #11161d; border: 1px solid #1f2630; border-radius: 14px;
