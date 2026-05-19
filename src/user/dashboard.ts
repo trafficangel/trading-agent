@@ -126,6 +126,10 @@ export function renderDashboard(args: {
   // set the flag (computed deficit), or fan-out just hit a rejected
   // order. Either way, message + CTA to /account/api-key.
   const marginBanner = renderMarginBanner(args);
+  // Status banner: shown when marginBanner doesn't apply. Tells the
+  // user explicitly whether trading is active, paused, missing config,
+  // etc. Mutually exclusive with marginBanner — they're both at the top.
+  const statusBanner = marginBanner ? '' : renderStatusBanner(args);
 
   const marginCard = renderMarginCard(args.margin, args.enabledStrategiesCount);
 
@@ -166,6 +170,7 @@ export function renderDashboard(args: {
     <main class="cabinet-main">
       ${greeting}
       ${marginBanner}
+      ${statusBanner}
       ${cards}
       ${quickLinks}
     </main>
@@ -385,6 +390,113 @@ function renderMarginBanner(args: {
   `;
 }
 
+/**
+ * Status banner — top-of-dashboard explicit "what's happening" strip.
+ *
+ * Three states (mutually exclusive, in priority order):
+ *
+ *   - missing setup → amber. Subscription card / api-key card already
+ *     visualise the specific gap; this banner just adds an explicit
+ *     line so the user can't miss it ("выберите стратегии", etc).
+ *
+ *   - paused → amber. trading_paused_at is set; trading is off until
+ *     user resumes it from /account/strategies.
+ *
+ *   - all-green → green. Subscription active, key verified, strategies
+ *     enabled, margin sufficient, not paused. The user needed a way to
+ *     confirm "yes, everything's running, just waiting for a signal" —
+ *     this is it.
+ *
+ * Returns '' when the user has no subscription / no key — those cases
+ * surface their own warning cards and a banner would be redundant.
+ */
+function renderStatusBanner(args: {
+  subscription: SubscriptionRow | null;
+  apiKey: ApiKeySummary | null;
+  enabledStrategiesCount: number;
+  margin: MarginState;
+}): string {
+  const sub = args.subscription;
+  const key = args.apiKey;
+
+  // Subscription gates — if any fail, show no banner. The Sub /
+  // ApiKey cards already shout the issue with a contrasting border
+  // and a direct link, and we don't want to compete with them.
+  if (!sub) return '';
+  if (sub.status === 'expired' || sub.status === 'cancelled') return '';
+  if (!key || key.revoked_at !== null) return '';
+  if (key.last_verified_at === null || key.last_verify_error) return '';
+
+  // Strategy gate — amber, with a clear CTA.
+  if (args.enabledStrategiesCount === 0) {
+    return `
+      <div class="cabinet-banner-amber">
+        <div class="cabinet-banner-icon">${ico('⚙️')}</div>
+        <div class="cabinet-banner-body">
+          <div class="cabinet-banner-title-amber">Выберите стратегии для автоматической торговли</div>
+          <div class="cabinet-banner-text">
+            Ключ Bybit подключён, доступ активен — осталось включить хотя бы одну стратегию
+            и указать размер позиции. После этого бот начнёт торговать по сигналам.
+          </div>
+          <div class="cabinet-banner-actions">
+            <a class="cabinet-banner-btn" href="/account/strategies">Выбрать стратегии →</a>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Paused gate — amber. User can resume from /account/strategies.
+  if (sub.trading_paused_at !== null) {
+    return `
+      <div class="cabinet-banner-amber">
+        <div class="cabinet-banner-icon">${ico('⏸')}</div>
+        <div class="cabinet-banner-body">
+          <div class="cabinet-banner-title-amber">Торговля на паузе</div>
+          <div class="cabinet-banner-text">
+            Вы остановили автоматическую торговлю. Новые сделки не открываются.
+            Уже открытые позиции продолжают работать со стопами.
+          </div>
+          <div class="cabinet-banner-actions">
+            <a class="cabinet-banner-btn" href="/account/strategies">Возобновить торговлю →</a>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // All-green path. Mention margin state inline so the user sees the
+  // exact numbers without scrolling — confirms "we know your balance
+  // is enough, we're tracking signals".
+  const m = args.margin;
+  const hasBalanceInfo = m.balanceUsdt !== null && args.enabledStrategiesCount > 0;
+  const marginLine = hasBalanceInfo
+    ? `Обеспечения хватает: свободно <b>$${(m.freeUsdt ?? 0).toFixed(2)}</b>, нужно <b>$${m.requiredUsdt.toFixed(2)}</b> при одновременном срабатывании всех стратегий.`
+    : '';
+  return `
+    <div class="cabinet-banner-ok">
+      <div class="cabinet-banner-icon">${ico('✅')}</div>
+      <div class="cabinet-banner-body">
+        <div class="cabinet-banner-title-ok">Всё готово — стратегии активны</div>
+        <div class="cabinet-banner-text">
+          ${args.enabledStrategiesCount} ${pluralStrategy(args.enabledStrategiesCount)} включено,
+          ключ Bybit подключён, доступ активен.
+          <b>Ждём сигнал стратегии</b> — как только сработает, бот откроет позицию на вашем счёте автоматически.
+          ${marginLine ? `<br/>${marginLine}` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function pluralStrategy(n: number): string {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'стратегия';
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'стратегии';
+  return 'стратегий';
+}
+
 /** Stat card showing margin breakdown — balance / required / used / free.
  *  Always visible (even when ok) so the user understands the model and
  *  can plan ahead. Colour reflects status:
@@ -552,6 +664,44 @@ function cabinetStyles(): string {
     line-height: 1.45;
   }
 
+  /* Full-width green "everything's running" banner — same shape as
+     the red insufficient-balance banner, different palette. */
+  .cabinet-banner-ok {
+    display: flex;
+    gap: 16px;
+    padding: 16px 22px;
+    margin: 0 0 24px;
+    background: linear-gradient(180deg, rgba(74, 217, 145, 0.10) 0%, rgba(74, 217, 145, 0.04) 100%);
+    border: 1px solid rgba(74, 217, 145, 0.40);
+    border-radius: 14px;
+    color: #cfd6dd;
+    align-items: flex-start;
+  }
+  .cabinet-banner-title-ok {
+    font-size: 15px;
+    font-weight: 600;
+    color: #4ad991;
+    margin-bottom: 6px;
+  }
+  /* Amber banner — needs-action variants (no strategies enabled,
+     trading paused, etc). */
+  .cabinet-banner-amber {
+    display: flex;
+    gap: 16px;
+    padding: 16px 22px;
+    margin: 0 0 24px;
+    background: linear-gradient(180deg, rgba(255, 188, 70, 0.10) 0%, rgba(255, 188, 70, 0.04) 100%);
+    border: 1px solid rgba(255, 188, 70, 0.45);
+    border-radius: 14px;
+    color: #cfd6dd;
+    align-items: flex-start;
+  }
+  .cabinet-banner-title-amber {
+    font-size: 15px;
+    font-weight: 600;
+    color: #ffbc46;
+    margin-bottom: 6px;
+  }
   /* Full-width red insufficient-balance banner */
   .cabinet-banner-bad {
     display: flex;
@@ -612,7 +762,9 @@ function cabinetStyles(): string {
 
   @media (max-width: 540px) {
     .cabinet-title { font-size: 22px; }
-    .cabinet-banner-bad { flex-direction: column; }
+    .cabinet-banner-bad,
+    .cabinet-banner-ok,
+    .cabinet-banner-amber { flex-direction: column; }
   }
 </style>
 `;
