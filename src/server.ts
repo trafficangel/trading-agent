@@ -10,6 +10,7 @@ import { authRoute } from './auth/routes.js';
 import { adminRoute } from './admin/routes.js';
 import { activePositionsRoute } from './api/active-positions.js';
 import { userRoute } from './user/routes.js';
+import { autotradingRoute } from './strategies/autotrading.js';
 import { startTpslMonitorJob } from './jobs/tpsl-monitor.js';
 import { startHeartbeatJob } from './jobs/heartbeat.js';
 import { startDailyWrapJob } from './jobs/daily-wrap.js';
@@ -78,6 +79,7 @@ async function main(): Promise<void> {
   await adminRoute(app);
   await activePositionsRoute(app);
   await userRoute(app);
+  await autotradingRoute(app);
   await landingRoute(app);
   await homeRoute(app);
 

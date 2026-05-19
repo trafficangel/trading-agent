@@ -1650,8 +1650,8 @@ export function pageShell(
       `<a href="/en" class="${lang === 'en' ? 'active' : ''}" aria-label="English">EN</a>`
     : '';
   const labels = lang === 'en'
-    ? { strategies: 'Strategies', channel: 'Channel', support: 'Support', supportShort: 'Support' }
-    : { strategies: 'Стратегии', channel: 'Канал', support: 'Поддержка', supportShort: 'Help' };
+    ? { strategies: 'Strategies', autotrading: 'Auto-trading', channel: 'Channel', support: 'Support', supportShort: 'Support' }
+    : { strategies: 'Стратегии', autotrading: 'Автотрейдинг', channel: 'Канал', support: 'Поддержка', supportShort: 'Help' };
 
   const siteHeader = `
 <header class="site-header">
@@ -1667,6 +1667,7 @@ export function pageShell(
     </a>
     <nav class="site-nav" aria-label="Primary">
       <a href="/strategies">${labels.strategies}</a>
+      <a href="/autotrading">${labels.autotrading}</a>
       <a href="https://t.me/luxalgosignal" target="_blank" rel="noopener">${labels.channel}</a>
       <a href="https://t.me/dboykod" target="_blank" rel="noopener">${labels.support}</a>
     </nav>
