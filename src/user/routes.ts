@@ -25,7 +25,7 @@ import {
   setInsufficientBalance,
   getDecryptedCreds,
 } from '../db/repos/user-api-keys.js';
-import { fetchBalanceUsdt, bybitErrorLabel } from '../exchange/bybit-private.js';
+import { fetchBalanceUsdt, bybitErrorLabel, switchToOneWayMode } from '../exchange/bybit-private.js';
 import {
   listUserStrategies,
   enableUserStrategy,
@@ -338,6 +338,21 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         ok: false,
         message: `Bybit отклонил ключ (${label}): ${verifyRes.msg}. Проверьте права ключа и IP-whitelist.`,
       });
+    }
+    // Force One-Way position mode at onboarding. Our order code assumes
+    // One-Way (positionIdx=0); if the user has their account on Hedge
+    // mode, first signal would fail with 10001. Better to surface at
+    // connect time. Idempotent — returns ok if already One-Way.
+    const modeRes = await switchToOneWayMode({ apiKey, apiSecret });
+    if (!modeRes.ok) {
+      const label = bybitErrorLabel(modeRes.code);
+      logger.warn({ userId: user.userId, code: modeRes.code, label }, 'api-key switchMode failed');
+      // 110024: you have an open Hedge-mode position — user must close
+      // it manually on Bybit before we can switch.
+      const msg = modeRes.code === 110024
+        ? `Не удалось переключить аккаунт в One-Way режим (${label}): у вас уже есть открытая позиция в Hedge mode на Bybit. Закройте её вручную на бирже и попробуйте ещё раз.`
+        : `Не удалось переключить аккаунт в One-Way режим (${label}): ${modeRes.msg}.`;
+      return renderApiKeyWithFlash(req, reply, user, { ok: false, message: msg });
     }
     try {
       upsertApiKey({

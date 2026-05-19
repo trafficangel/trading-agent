@@ -60,6 +60,7 @@ import {
   fetchOrderResult,
   fetchPosition,
   setPositionSL,
+  switchToOneWayMode,
   bybitErrorLabel,
 } from '../exchange/bybit-private.js';
 import { roundQtyToStep } from '../exchange/bybit-public.js';
@@ -229,6 +230,33 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
     await alertOperatorCritical(
       `🚨 Не удалось расшифровать ключ user_id=${t.user_id}. Проверь API_KEY_MASTER_SECRET.`,
     );
+    return false;
+  }
+
+  // 0. Force One-Way position mode. Idempotent on Bybit's side
+  //    (110025 = "not modified" → treated as OK). If the user toggled
+  //    their account to Hedge mode on Bybit's website our order code
+  //    (which always uses positionIdx=0) would otherwise fail with
+  //    10001 "position idx not match position mode". This is cheap
+  //    (~150ms) and runs every fan-out tick — if we ever need to
+  //    optimise we can cache the One-Way state per key.
+  const modeRes = await switchToOneWayMode(creds);
+  if (!modeRes.ok) {
+    logger.warn(
+      { userId: t.user_id, code: modeRes.code, msg: modeRes.msg },
+      'fanOutEntry: switchToOneWayMode failed',
+    );
+    // 110024 ("Position is currently in cross margin mode") on accounts
+    // that have an OPEN position in Hedge mode — we can't auto-switch
+    // until they close it. Surface a clear message and skip.
+    if (modeRes.code === 110024) {
+      await alertOperator(
+        `⚠️ Track D: user_id=${t.user_id} has open positions in Hedge mode on Bybit. ` +
+          `Auto-switch to One-Way blocked. User must close existing positions manually first.`,
+      );
+    } else if (shouldMarkKeyBroken(modeRes.code)) {
+      recordVerifyResult(keyRow.id, false, `switchMode: ${bybitErrorLabel(modeRes.code)}`);
+    }
     return false;
   }
 

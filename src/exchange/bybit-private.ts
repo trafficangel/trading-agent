@@ -225,6 +225,40 @@ export async function fetchPositionMode(creds: Creds): Promise<{
   return { ok: true, isOneWay: true, raw: r.data };
 }
 
+/**
+ * Force the user's USDT-perp account into ONE-WAY position mode.
+ *
+ * Bybit V5 accounts default to One-Way but users (and copy-trading tools)
+ * sometimes flip to Hedge mode. Our order placement code uses positionIdx=0
+ * (One-Way semantics); under Hedge mode that returns retCode 10001
+ * "position idx not match position mode" and the order is REJECTED.
+ *
+ * We call this once before the first order on any symbol — Bybit makes
+ * it idempotent: retCode 110025 "Position mode is not modified" means
+ * we're already in the requested mode, treat as success.
+ *
+ * Modes (V5): 0 = MergedSingle (One-Way), 3 = BothSide (Hedge).
+ * We always force 0.
+ *
+ * `coin: 'USDT'` switches mode for ALL USDT-quoted perps at once —
+ * cheaper than calling per-symbol for users with multiple strategies.
+ */
+export async function switchToOneWayMode(
+  creds: Creds,
+): Promise<{ ok: true } | { ok: false; code: number; msg: string }> {
+  const r = await signedPost<unknown>(creds, '/v5/position/switch-mode', {
+    category: 'linear',
+    coin: 'USDT',
+    mode: 0,
+  });
+  if (!r.ok) {
+    // 110025: position mode not modified — already One-Way, idempotent OK.
+    if (r.code === 110025) return { ok: true };
+    return r;
+  }
+  return { ok: true };
+}
+
 export async function setLeverage(
   creds: Creds,
   symbol: string,
