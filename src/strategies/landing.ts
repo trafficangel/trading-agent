@@ -1193,6 +1193,50 @@ const STYLE = `
     .hero-cta .btn { justify-content: center; }
   }
 
+  /* «How the system works» flow diagram — 4 nodes with arrows.
+     Desktop: row of 4 boxes + arrows between. Mobile: column with
+     vertical arrows between rows. */
+  .flow-section .home-section-title { text-align: center; }
+  .flow-section .home-section-sub { text-align: center; max-width: 720px; margin-left: auto; margin-right: auto; }
+  .flow-diagram {
+    display: flex; align-items: stretch; justify-content: center;
+    gap: 8px; flex-wrap: nowrap; margin: 26px 0 18px;
+  }
+  .flow-node {
+    flex: 1; min-width: 0;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 18px 16px;
+    display: flex; flex-direction: column;
+  }
+  .flow-node-icon { font-size: 26px; line-height: 1; margin-bottom: 10px; }
+  .flow-node-title {
+    font-size: 14.5px; font-weight: 600; color: var(--text);
+    margin-bottom: 6px;
+  }
+  .flow-node-body {
+    font-size: 12.5px; color: var(--text-dim); line-height: 1.55;
+    flex: 1;
+  }
+  .flow-arrow {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent); font-size: 22px; font-weight: 700;
+    flex-shrink: 0; padding: 0 2px;
+  }
+  .flow-footnote {
+    background: rgba(74, 217, 145, 0.06);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 18px;
+    font-size: 13.5px; color: var(--text-dim); line-height: 1.6;
+    max-width: 820px; margin: 18px auto 0;
+  }
+  .flow-footnote b { color: var(--accent); }
+  .flow-footnote em { color: var(--text); font-style: normal; font-weight: 500; }
+  @media (max-width: 880px) {
+    .flow-diagram { flex-direction: column; align-items: stretch; gap: 4px; }
+    .flow-arrow { transform: rotate(90deg); padding: 4px 0; font-size: 24px; }
+  }
+
   /* Funnel CTA — SEE → FOLLOW → AUTOMATE.
      3 stat-card-shaped boxes; the last one (autotrading) is the climactic
      CTA with accent border + primary green button. */

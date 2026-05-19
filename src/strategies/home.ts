@@ -159,10 +159,10 @@ const CONTENT: Record<Lang, Content> = {
       ],
     },
     strategiesPreview: {
-      title: 'Активные стратегии',
+      title: 'TOP-3 по live-доходности',
       subtitle:
-        'Для каждой стратегии — отдельная страница: график доходности, полный список сделок и результаты в реальном времени. Числа пересчитаны на нашу позицию $1000 с учётом комиссии Bybit.',
-      seeAll: 'Все стратегии →',
+        'Три лучшие стратегии по реальной прибыли на нашем shadow-счёте. Полная статистика, бэктесты, сделки и графики по каждой — на странице стратегии. Числа пересчитаны на позицию $1000 с реальной комиссией Bybit.',
+      seeAll: 'Все 8 стратегий →',
     },
     roadmap: {
       title: 'Roadmap',
@@ -216,15 +216,56 @@ const CONTENT: Record<Lang, Content> = {
             'Идея простая: смотрите как мы торгуем сколько хотите — а если результат нравится и не хочется каждый раз руками открывать сделку, подключите автотрейдинг. Деньги остаются у вас, мы только исполняем сделки через API.',
         },
         {
-          q: 'Откуда берутся стратегии?',
+          q: 'Как это всё работает простыми словами?',
           a:
-            '[LuxAlgo](https://www.luxalgo.com/) — это набор индикаторов для TradingView, которыми пользуются больше 200 тысяч трейдеров. В премиум-подписке доступны четыре основных пакета:\n\n' +
+            'Очень коротко — система делает три вещи:\n\n' +
+            '**1.** Мы собираем торговые стратегии в специальном инструменте от LuxAlgo (см. вопрос ниже), отбираем те что показывают хорошие результаты на истории, и публикуем их на сайте.\n\n' +
+            '**2.** Каждая стратегия торгует круглосуточно на нашем «теневом» счёте — это и есть публичный трек-рекорд. Когда стратегия открывает или закрывает сделку, информация о ней появляется и на сайте, и в [Telegram-канале](https://t.me/luxalgosignal). Это бесплатно и видно всем.\n\n' +
+            '**3.** Если вы хотите чтобы те же самые сделки выполнялись на вашем счёте — подключаете свой Bybit-аккаунт через API-ключ. Наша система делает на вашем счёте те же сделки что и на нашем — автоматически, без вашего участия. Это уже платно: $50/мес (+30 дней бонусом если регистрируетесь на Bybit через нас).\n\n' +
+            'Никакой магии: всё что вы видите в Telegram-канале — это именно то, что система сделает на вашем счёте. Деньги остаются у вас, мы не имеем права на вывод.',
+        },
+        {
+          q: 'Кто такие LuxAlgo?',
+          a:
+            '[LuxAlgo](https://www.luxalgo.com/) — крупный коммерческий продукт для TradingView (~$60/мес). Это **не наша разработка**, мы их лицензированный пользователь.\n\n' +
+            'Они делают набор торговых индикаторов и инструмент **AI Strategy Builder** — это конструктор, в котором можно комбинировать условия из их индикаторов и сразу получать полный бэктест за 200+ дней истории по любому символу и таймфрейму.\n\n' +
+            '**Почему мы их используем:**\n' +
+            '- 200 000+ трейдеров по всему миру — продукт проверенный, не «свежий стартап»\n' +
+            '- Бэктесты делаются на их сервере с открытыми условиями входа/выхода — на странице каждой стратегии у нас есть **прямая ссылка на её LuxAlgo chat**, где можно перепроверить наши цифры самостоятельно\n' +
+            '- Их сигналы — это математика на ценах и объёмах (а не «угадайка», как у большинства сигнальщиков в Telegram)\n\n' +
+            '**Что важно понять:** LuxAlgo даёт «сырьё» — индикаторы и бэктестер. Превращение этого в работающую систему (отбор стратегий, исполнение на бирже, мониторинг, безопасность ключей) — это уже наша часть.',
+        },
+        {
+          q: 'Как именно вы отбираете стратегии?',
+          a:
+            'Двухэтапная проверка перед публикацией:\n\n' +
+            '**Этап 1 — LuxAlgo AI Builder.** Тестируем комбинации индикаторов в режиме конструктора. Например: «Contrarian Any Bullish + Trend Catcher Bearish + Money Flow > 50» на BTCUSDT 5m. Только если стратегия показывает **winrate ≥ 55%** и **profit factor ≥ 2** (выигрыши в 2 раза больше убытков) на 200+ дней истории — переходим к этапу 2.\n\n' +
+            '**Этап 2 — пересчёт на реальные условия.** Скачиваем все сделки из LuxAlgo, пересчитываем их на нашу фиксированную позицию $1000 с **реальной комиссией Bybit** (0.055% × 2 стороны = 0.11% за круг). Это критически важно: на тонких 5m-стратегиях комиссия может «съесть» половину прибыли — мы это честно показываем (см. например страницу BCH или BTC — там видна разница между «LuxAlgo unit-size» и «наш $1000 nominal»).\n\n' +
+            '**Что НЕ проходит:**\n' +
+            '- Стратегии с слишком высоким winrate (90%+) — обычно это значит что в бэктесте мало сделок или есть curve-fitting\n' +
+            '- Стратегии где profit factor падает ниже 1.5 после учёта комиссии\n' +
+            '- Стратегии с просадкой больше 30% — слишком жёсткие хвостовые риски\n\n' +
+            '**Прозрачность.** На странице каждой стратегии есть прямая ссылка на её LuxAlgo chat — кликаете и видите оригинальные условия, оригинальный бэктест и все исторические сделки на стороне LuxAlgo. Сравниваете с нашими цифрами — ничего не скрыто.',
+        },
+        {
+          q: 'Чем вы отличаетесь от обычных Telegram-каналов с сигналами?',
+          a:
+            'Три отличия, которые легко проверить:\n\n' +
+            '**1. Открытая статистика, не маркетинговые скриншоты.** На странице каждой стратегии — все 100+ исторических сделок с датами, ценами входа/выхода и PnL. Можно ткнуть в любую конкретную сделку и проверить — пересчитываем заново на ваших данных, цифры сойдутся. Большинство Telegram-каналов показывают только успешные сделки скриншотами.\n\n' +
+            '**2. Реальное исполнение, не «вот сигнал — торгуй сам».** У нас работает робот, который реально открывает и закрывает позиции на нашем shadow-счёте 24/7. То что вы видите в канале — это то что *действительно* произошло, а не то что мы *планировали* сделать.\n\n' +
+            '**3. Автотрейдинг на ВАШЕМ счёте, не «зачисляйте деньги нам».** Когда вам понравится результат — подключаете свой Bybit через API-ключ без права на вывод. Деньги остаются на вашей бирже, мы только посылаем туда ордера. Ни одного канала-сигнальщика которым мы видели нет такой связки.\n\n' +
+            'И главное: $50/мес платится **после** того как вы посмотрели результаты в течение 14 дней триала — мы не берём деньги авансом.',
+        },
+        {
+          q: 'Откуда берутся стратегии? (технические детали)',
+          a:
+            '[LuxAlgo](https://www.luxalgo.com/) даёт нам четыре основных пакета индикаторов:\n\n' +
             '- **Signals & Overlays** — сигналы разворота тренда (Bullish+ / Bearish+), Smart Trail, Reversal Zones\n' +
             '- **Price Action Concepts** — структура рынка по концепциям ICT/SMC: BOS (break of structure), CHoCH (change of character), Order Blocks, Fair Value Gaps\n' +
-            '- **Oscillator Matrix** — Money Flow, Trend Catcher, Contrarian Any, дивергенции и десяток других осцилляторов для подтверждения сигналов\n' +
-            '- **AI Strategy Builder** — конструктор стратегий: комбинируем условия из всех индикаторов выше и сразу получаем полный бэктест на 200+ дней истории по символу и таймфрейму\n\n' +
-            'Как мы выбираем стратегии. В AI Builder тестируем десятки комбинаций — например «Contrarian Any Bullish + Trend Catcher Bearish + Money Flow > 50». Только те что показывают **winrate ≥55%** и **profit factor ≥2** идут в финальную проверку: пересчитываем результаты в TradingView Premium с реальной комиссией Bybit (0.11% за круг) и нашей фиксированной позицией $1000. Если стратегия сохраняет показатели — добавляем на сайт.\n\n' +
-            'Прозрачность. На странице каждой стратегии — прямая ссылка на её оригинальный LuxAlgo chat. Там видны точные условия входа/выхода, бэктест и все 100+ исторических сделок. Никакие числа не подделаны — каждый результат проверяем сами по сделкам, всё открыто.',
+            '- **Oscillator Matrix** — Money Flow, Trend Catcher, Contrarian Any, дивергенции и десяток других осцилляторов\n' +
+            '- **AI Strategy Builder** — конструктор стратегий с инстант-бэктестом на 200+ дней\n\n' +
+            'В Builder мы тестируем десятки комбинаций — например «Contrarian Any Bullish + Trend Catcher Bearish + Money Flow > 50». Только те что проходят оба этапа отбора (см. вопрос «Как именно вы отбираете стратегии?») попадают на сайт.\n\n' +
+            'Имя стратегии в нашей системе кодирует её условия. Например, **STRAT-001 «BNB Contrarian»** = LuxAlgo Contrarian Any + Trend Tracer + Money Flow на BNBUSDT 15m. На странице STRAT-001 будет прямая ссылка на её LuxAlgo chat для полной проверки.',
         },
         {
           q: 'Как контролируется риск?',
@@ -338,10 +379,10 @@ const CONTENT: Record<Lang, Content> = {
       ],
     },
     strategiesPreview: {
-      title: 'Active strategies',
+      title: 'TOP-3 by live profit',
       subtitle:
-        'Each strategy has its own landing page — equity curve, full trade log, live results. Numbers are recomputed for our $1000 position size with Bybit commission included.',
-      seeAll: 'All strategies →',
+        'Three best strategies by real PnL on our shadow account. Full stats, backtests, trades and charts for every strategy — on its individual page. Numbers are recomputed for our $1000 position size with real Bybit commission.',
+      seeAll: 'All 8 strategies →',
     },
     roadmap: {
       title: 'Roadmap',
@@ -395,15 +436,56 @@ const CONTENT: Record<Lang, Content> = {
             'Simple idea: watch how we trade for as long as you want — and if you like the results and don\'t want to open every trade manually, enable auto-trading. Your funds stay with you; we only execute trades via the API.',
         },
         {
-          q: 'Where do the strategies come from?',
+          q: 'How does it all work in plain English?',
           a:
-            '[LuxAlgo](https://www.luxalgo.com/) is a TradingView indicator suite used by 200,000+ traders. The premium subscription bundles four indicator packs:\n\n' +
+            'The system does three things:\n\n' +
+            '**1.** We build trading strategies in a LuxAlgo tool (see the next FAQ), pick the ones with solid historical results, and publish them on the site.\n\n' +
+            '**2.** Each strategy trades 24/7 on our shadow account — that\'s the public track record. Every open/close is mirrored to the site AND to the [Telegram channel](https://t.me/luxalgosignal). Free and visible to anyone.\n\n' +
+            '**3.** If you want those same trades on your account — connect your Bybit via an API key. Our system places identical orders on your account automatically. This is the paid part: $50/mo (+30 bonus days if you sign up Bybit via our referral).\n\n' +
+            'No magic: what you see in the channel is exactly what the system does on your account. Your funds stay with you; we have no withdraw rights.',
+        },
+        {
+          q: 'Who is LuxAlgo?',
+          a:
+            '[LuxAlgo](https://www.luxalgo.com/) is a commercial TradingView add-on (~$60/mo). **Not our product** — we\'re a licensed user.\n\n' +
+            'They make trading indicators and an **AI Strategy Builder** — a combinator where you mix conditions from their indicators and instantly get a full backtest over 200+ days on any symbol/timeframe.\n\n' +
+            '**Why we use them:**\n' +
+            '- 200,000+ traders globally — proven product, not a fresh startup\n' +
+            '- Backtests run on LuxAlgo servers with open entry/exit conditions — every strategy page on our site has a **direct link to its LuxAlgo chat** so you can verify our numbers yourself\n' +
+            '- Their signals are math on price + volume (not "vibes", unlike most signal channels)\n\n' +
+            '**Important:** LuxAlgo gives us the raw materials — indicators + backtester. Turning that into a working production system (strategy selection, exchange execution, monitoring, key security) is the part we add.',
+        },
+        {
+          q: 'How exactly do you select strategies?',
+          a:
+            'Two-stage vetting before anything goes live:\n\n' +
+            '**Stage 1 — LuxAlgo AI Builder.** Test indicator combinations in the builder. E.g. "Contrarian Any Bullish + Trend Catcher Bearish + Money Flow > 50" on BTCUSDT 5m. Only if the strategy hits **win rate ≥ 55%** AND **profit factor ≥ 2** (wins 2× larger than losses) on 200+ days of history — does it move to stage 2.\n\n' +
+            '**Stage 2 — recompute on realistic conditions.** Pull all trades from LuxAlgo, recompute on our fixed $1000 position with **real Bybit commission** (0.055% × 2 sides = 0.11% round-trip). Critical: on tight 5m strategies commission can eat half the profit — we surface this honestly (see BCH or BTC pages, where "LuxAlgo unit-size" vs "our $1000 nominal" is shown side by side).\n\n' +
+            '**What gets rejected:**\n' +
+            '- Win rates over 90% — usually too few trades or curve-fitting\n' +
+            '- Profit factor below 1.5 after commission\n' +
+            '- Drawdowns over 30% — tail risk too high\n\n' +
+            '**Transparency.** Every strategy page links directly to its LuxAlgo chat — click it and see the original conditions, original backtest, all historical trades on LuxAlgo\'s side. Compare to our numbers — nothing hidden.',
+        },
+        {
+          q: 'How are you different from regular Telegram signal channels?',
+          a:
+            'Three differences, easy to verify:\n\n' +
+            '**1. Open stats, not marketing screenshots.** Every strategy page shows all 100+ historical trades with dates, entry/exit prices, PnL. Pick any trade and verify — recompute on your data and the numbers match. Most signal channels only post winning trades as screenshots.\n\n' +
+            '**2. Real execution, not "here\'s the signal, trade it yourself".** A robot runs 24/7 actually opening and closing positions on our shadow account. What you see in the channel is what *actually happened*, not what we *intended* to do.\n\n' +
+            '**3. Auto-trading on YOUR account, not "deposit funds with us".** When you\'re happy with the results, connect your Bybit via an API key with no withdraw rights. Funds stay on your exchange; we just send orders. No signal channel we\'ve seen offers this kind of integration.\n\n' +
+            'And key: $50/mo is paid **after** you\'ve watched results for 14 days of trial — no upfront capture.',
+        },
+        {
+          q: 'Where do the strategies come from? (technical details)',
+          a:
+            '[LuxAlgo](https://www.luxalgo.com/) gives us four indicator packs:\n\n' +
             '- **Signals & Overlays** — trend-reversal signals (Bullish+ / Bearish+), Smart Trail, Reversal Zones\n' +
-            '- **Price Action Concepts** — market structure via ICT/SMC concepts: BOS (break of structure), CHoCH (change of character), Order Blocks, Fair Value Gaps\n' +
-            '- **Oscillator Matrix** — Money Flow, Trend Catcher, Contrarian Any, divergences, plus a dozen other confirmation oscillators\n' +
-            '- **AI Strategy Builder** — strategy combinator: mix conditions from any of the above and immediately get a full backtest over 200+ days of history on a chosen symbol/timeframe\n\n' +
-            'How we pick strategies. We test dozens of combinations in AI Builder — e.g. "Contrarian Any Bullish + Trend Catcher Bearish + Money Flow > 50". Only those with **win rate ≥55%** and **profit factor ≥2** advance to the final check: recompute on TradingView Premium with realistic Bybit commission (0.11% round-trip) and our fixed $1000 position. If the strategy still holds up — onto the site it goes.\n\n' +
-            'Transparency. Every strategy page links directly to its original LuxAlgo chat. The exact entry/exit conditions, the backtest, and all 100+ historical trades are visible there. No numbers are doctored — we re-verify each result trade-by-trade, everything is open.',
+            '- **Price Action Concepts** — ICT/SMC market structure: BOS, CHoCH, Order Blocks, Fair Value Gaps\n' +
+            '- **Oscillator Matrix** — Money Flow, Trend Catcher, Contrarian Any, divergences, dozen+ confirmation oscillators\n' +
+            '- **AI Strategy Builder** — strategy combinator with instant 200+ day backtest\n\n' +
+            'We test dozens of combinations in Builder — e.g. "Contrarian Any Bullish + Trend Catcher Bearish + Money Flow > 50". Only those passing both selection stages (see "How exactly do you select strategies?") make it onto the site.\n\n' +
+            'Strategy names encode their conditions. E.g. **STRAT-001 "BNB Contrarian"** = LuxAlgo Contrarian Any + Trend Tracer + Money Flow on BNBUSDT 15m. The STRAT-001 page has a direct LuxAlgo-chat link for full verification.',
         },
         {
           q: 'How is risk controlled?',
@@ -924,16 +1006,27 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
     </div>
   `;
 
-  // ---------- Top 5 strategy preview ----------
+  // ---------- TOP 3 strategy preview ----------
+  // Ranking: by live netPnlUsd descending (only strategies with closed
+  // trades). Operator's spec: "show TOP 3 by live profit explicitly, rest
+  // behind a link". If fewer than 3 have closed trades, we backfill from
+  // strategies-by-backtest-CAGR so the section never looks empty.
+  //
   // Layout:
-  //   Left  → [STRAT-00X] SYMBOL TFm
-  //           Human-readable backtest summary (win-rate + return + period)
-  //   Right → Live PnL (only when there are closed trades — empty otherwise
-  //           to avoid the "ждём сигнал / 0 закрытых" visual noise before
-  //           the strategy has produced live data)
-  const previewItems = enabled
-    .map((s) => {
-      const live = getStrategyLiveStats(s.id);
+  //   Left  → [STRAT-00X] SYMBOL TFm + plain-Russian backtest summary
+  //   Right → Live PnL only when closed > 0
+  const withLive = enabled.map((s) => ({ cfg: s, live: getStrategyLiveStats(s.id) }));
+  const liveLeaders = withLive
+    .filter((x) => x.live.closed > 0)
+    .sort((a, b) => b.live.netPnlUsd - a.live.netPnlUsd);
+  const noLiveYet = withLive
+    .filter((x) => x.live.closed === 0)
+    .sort((a, b) => (b.cfg.backtest?.cagrPct ?? 0) - (a.cfg.backtest?.cagrPct ?? 0));
+  // Pad with no-live strategies if we have <3 live leaders, so the
+  // marketing section always shows 3 cards and never looks under-baked.
+  const top3 = [...liveLeaders, ...noLiveYet].slice(0, 3);
+  const previewItems = top3
+    .map(({ cfg: s, live }) => {
       const bt = s.backtest;
       // Plain-Russian backtest summary. WR / PF / % are jargon for most
       // visitors — spell it out and add the period so the number means
@@ -968,7 +1061,6 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
           ${rightBlock}
         </a>`;
     })
-    .slice(0, 5)
     .join('');
 
   // ---------- Hero with animated SVG equity curve as background ----------
@@ -1220,12 +1312,62 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
     </div>
   `;
 
+  // ---------- Flow diagram (visual «how it works») ----------
+  // Frequent feedback: "I don't fully understand how it all works".
+  // This is a non-technical 4-node pipeline showing the path from
+  // LuxAlgo signal → our server → public channel → optional user
+  // account. Plain CSS boxes + arrows, no heavy SVG. Lives between
+  // hero and «Что доступно» so it's seen before the funnel CTA.
+  const flowTitle = lang === 'en' ? 'How the system works (in 30 seconds)' : 'Как устроена система (за 30 секунд)';
+  const flowSub = lang === 'en'
+    ? 'A signal travels from LuxAlgo through our server to your Telegram and (optionally) to your Bybit account. Same data, same path, four hops.'
+    : 'Сигнал проходит путь от LuxAlgo через наш сервер в ваш Telegram и (опционально) на ваш счёт Bybit. Те же данные, тот же путь, четыре шага.';
+  const flowNodes = lang === 'en'
+    ? [
+        { icon: '🧮', title: 'LuxAlgo', body: 'Strategy fires a signal based on indicator conditions (e.g. "Contrarian + Trend Catcher + Money Flow"). Sent as a webhook to our server.' },
+        { icon: '🤖', title: 'Our server', body: 'Receives the webhook, executes the trade on the SHADOW account, records it in the public DB. <50ms.' },
+        { icon: '📡', title: 'Telegram channel', body: 'Trade is mirrored to @luxalgosignal with entry/exit price, size, and trade ID. Free for everyone.' },
+        { icon: '💼', title: 'Your Bybit account', body: 'If you have auto-trading enabled — our server places the IDENTICAL trade on your account via your API key. Same time, same price, same direction.' },
+      ]
+    : [
+        { icon: '🧮', title: 'LuxAlgo', body: 'Стратегия выдаёт сигнал по условиям индикаторов (например «Contrarian + Trend Catcher + Money Flow»). Отправляется вебхуком на наш сервер.' },
+        { icon: '🤖', title: 'Наш сервер', body: 'Получает вебхук, открывает позицию на SHADOW-счёте, записывает в публичную БД. <50мс.' },
+        { icon: '📡', title: 'Telegram канал', body: 'Сделка дублируется в @luxalgosignal с ценой входа/выхода, размером и ID сделки. Бесплатно для всех.' },
+        { icon: '💼', title: 'Ваш счёт Bybit', body: 'Если у вас включён автотрейдинг — наш сервер делает ТАКУЮ ЖЕ сделку на вашем счёте через ваш API-ключ. То же время, та же цена, то же направление.' },
+      ];
+  const flowDiagramHtml = `
+    <div class="home-section flow-section">
+      <h2 class="home-section-title">${escapeHtml(flowTitle)}</h2>
+      <p class="home-section-sub">${escapeHtml(flowSub)}</p>
+      <div class="flow-diagram">
+        ${flowNodes
+          .map(
+            (n, i) => `
+              <div class="flow-node">
+                <div class="flow-node-icon" aria-hidden="true">${n.icon}</div>
+                <div class="flow-node-title">${escapeHtml(n.title)}</div>
+                <div class="flow-node-body">${n.body}</div>
+              </div>
+              ${i < flowNodes.length - 1 ? '<div class="flow-arrow" aria-hidden="true">→</div>' : ''}
+            `,
+          )
+          .join('')}
+      </div>
+      <div class="flow-footnote">
+        ${lang === 'en'
+          ? `<b>The shadow account is real money</b> on our own Bybit. So the public stats you see on /strategies aren't a simulation — they're actual fills with real commission. When you enable auto-trading, your account gets the same fills <em>at the same prices</em>, just on a different UID.`
+          : `<b>Shadow-счёт — это настоящие деньги</b> на нашем Bybit. Поэтому публичная статистика на /strategies — не симуляция, а реальные исполнения с реальной комиссией. Когда вы включаете автотрейдинг, на вашем счёте проходят те же сделки <em>по тем же ценам</em>, просто на другом UID.`}
+      </div>
+    </div>
+  `;
+
   // Top-right nav is now handled by site-header in pageShell.
 
   const body = `
     <div class="scroll-progress" aria-hidden="true"></div>
     ${heroHtml}
     ${livePositionsHtml}
+    ${flowDiagramHtml}
     ${whatYouGetHtml}
     ${howHtml}
     ${signalPreviewHtml}
