@@ -8,6 +8,7 @@ import {
   closePositionWithStats,
   closeUserDecision,
   forceClose,
+  syncUserDecisionFromExchange,
   type DecisionRow,
 } from '../db/repos/decisions.js';
 import { getLastPrice } from '../exchange/bybit-public.js';
@@ -196,23 +197,77 @@ async function reconcileUserPosition(p: DecisionRow): Promise<void> {
   if (!posRes.ok) return;
 
   if (posRes.position && posRes.position.size > 0) {
-    // Position still open — verify SL is still attached. Bybit can
-    // strip a position-based SL on margin events or if the user
-    // changed the symbol's leverage manually. We catch this here and
-    // re-attach so the position is never unprotected.
-    // posRes.position doesn't carry stopLoss; we'd need /v5/position/list
-    // with a richer response. For now, opportunistic re-attach when
-    // we already have the row's sl value. Cheap insurance.
-    if (p.sl) {
-      const slCheck = await setPositionSL(creds, p.symbol, p.sl);
-      if (!slCheck.ok && slCheck.code !== 0) {
-        // Most likely: SL already exists at this price → noop error.
-        // Don't spam logs unless retCode is something genuinely odd.
-        if (slCheck.code !== 34040 /* not modified */) {
-          logger.warn({ decision_id: p.id, code: slCheck.code, msg: slCheck.msg }, 'tpsl: SL re-attach attempt');
+    // Position still open. Three things to check in order:
+    //
+    //   1. PARTIAL CLOSE — Bybit size is meaningfully smaller than our
+    //      recorded bybit_qty. The user closed part of the position on
+    //      Bybit directly (panic close, partial profit-take, whatever).
+    //      Sync our row so subsequent close logic uses the correct qty.
+    //
+    //   2. USER-MOVED SL — Bybit's attached stopLoss is non-zero AND
+    //      differs from our recorded sl by more than 0.5%. The user
+    //      manually dragged the stop on Bybit's UI. Respect their
+    //      intent: UPDATE our sl to match Bybit, don't re-attach the
+    //      old one. R-multiple PnL stays anchored to original_sl
+    //      (audit decision — see syncUserDecisionFromExchange comment).
+    //
+    //   3. SL DETACHED — Bybit's attached stopLoss is exactly 0. The
+    //      stop was somehow removed (margin event, manual cancel,
+    //      leverage change). Re-attach our sl as the safety net.
+    const live = posRes.position;
+    const logFields: Record<string, unknown> = {
+      decision_id: p.id,
+      user_id: p.user_id,
+      symbol: p.symbol,
+    };
+
+    // (1) partial close detection — 5% tolerance to ignore tiny
+    //     rounding diffs (Bybit can report 0.001 vs 0.001000001).
+    if (p.bybit_qty && Math.abs(live.size - p.bybit_qty) / p.bybit_qty > 0.05 && live.size < p.bybit_qty) {
+      const closedAmount = p.bybit_qty - live.size;
+      const closedPct = (closedAmount / p.bybit_qty) * 100;
+      logger.warn(
+        { ...logFields, was_qty: p.bybit_qty, now_qty: live.size, closed_pct: closedPct.toFixed(1) },
+        'tpsl reconcile: partial close detected on exchange',
+      );
+      syncUserDecisionFromExchange({ id: p.id, bybitQty: live.size });
+      // Operator notification — silent so it doesn't ping every minute.
+      // First-detection only — subsequent reconciles won't re-fire
+      // because the qty diff will now be ≤ tolerance.
+      void sendMessage({
+        channel: 'logs',
+        text:
+          `📉 Track D: user_id=${p.user_id} закрыл часть позиции вручную на Bybit · ` +
+          `${p.symbol} ${p.side} · было ${p.bybit_qty} → стало ${live.size} (-${closedPct.toFixed(1)}%). ` +
+          `Наша БД синхронизирована, оставшаяся часть продолжает работать.`,
+        disable_notification: true,
+      }).catch(() => {});
+    }
+
+    // (2) + (3) SL state. live.stopLoss = 0 means "no SL attached",
+    //     otherwise it's the price level Bybit is tracking.
+    if (live.stopLoss === 0) {
+      // Detached — re-attach our sl as safety net (audit C3 path).
+      if (p.sl) {
+        const slCheck = await setPositionSL(creds, p.symbol, p.sl);
+        if (slCheck.ok) {
+          logger.warn({ ...logFields, sl: p.sl }, 'tpsl reconcile: SL was detached, re-attached');
+        } else if (slCheck.code !== 34040 /* not modified */) {
+          logger.warn(
+            { ...logFields, code: slCheck.code, msg: slCheck.msg },
+            'tpsl reconcile: SL re-attach failed',
+          );
         }
       }
+    } else if (p.sl && Math.abs(live.stopLoss - p.sl) / p.sl > 0.005) {
+      // User-moved SL. Trust them — update our row to match.
+      logger.info(
+        { ...logFields, our_sl: p.sl, bybit_sl: live.stopLoss },
+        'tpsl reconcile: user moved SL on Bybit, syncing our record',
+      );
+      syncUserDecisionFromExchange({ id: p.id, sl: live.stopLoss });
     }
+
     return;
   }
 
@@ -296,15 +351,43 @@ async function reconcileUserPosition(p: DecisionRow): Promise<void> {
 
   const slForR = p.original_sl ?? p.sl ?? p.entry;
   const { pnlPct, pnlR } = calcPnl(p.side as 'long' | 'short', p.entry, slForR, closePrice);
+  // Map closeReason → forceReason so trade history shows the right
+  // origin: sl_hit = Bybit triggered our safety stop; manual_close =
+  // user closed the position on Bybit directly; bybit_reconcile =
+  // catch-all when we don't know.
+  const forceReason: 'bybit_reconcile' | 'manual_close' | 'bybit_sl_hit' =
+    closeReason === 'sl_hit'
+      ? 'bybit_sl_hit'
+      : closeReason === 'manual'
+        ? 'manual_close'
+        : 'bybit_reconcile';
   closeUserDecision({
     id: p.id,
     closePrice,
     closeReason,
     pnlPct,
     pnlR,
-    forceReason: 'bybit_reconcile',
+    forceReason,
     bybitCloseAvgPrice,
   });
+  // Operator log — silent. Distinct from the partial-close ping above:
+  // this fires only when the position is FULLY closed via reconcile,
+  // not on every minute.
+  const pnlSign = pnlPct >= 0 ? '+' : '';
+  const reasonLabel =
+    forceReason === 'manual_close'
+      ? '✋ закрыл вручную на Bybit'
+      : forceReason === 'bybit_sl_hit'
+        ? '🛑 сработал SL'
+        : '🔄 закрыто (sync)';
+  void sendMessage({
+    channel: 'logs',
+    text:
+      `${reasonLabel} · user_id=${p.user_id} · ${p.symbol} ${p.side} · ` +
+      `${p.entry} → ${closePrice.toFixed(4)} · ` +
+      `PnL ${pnlSign}${pnlPct.toFixed(2)}% (${pnlSign}${pnlR.toFixed(2)}R)`,
+    disable_notification: true,
+  }).catch(() => {});
   logger.info(
     {
       decision_id: p.id,

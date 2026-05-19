@@ -342,6 +342,30 @@ export function findActiveByUser(userId: number): DecisionRow[] {
   return findActiveByUserStmt.all(userId);
 }
 
+const updateUserSyncStmt = db.prepare(`
+  UPDATE decisions
+     SET bybit_qty = COALESCE(?, bybit_qty),
+         sl = COALESCE(?, sl)
+   WHERE id = ?
+`);
+
+/** Audit «user manually edited position on Bybit» — sync our row's
+ *  bybit_qty and/or sl to what Bybit currently reports. Used by
+ *  reconcileUserPosition when it detects a partial close or a
+ *  user-driven SL move. Pass null for fields you don't want to touch.
+ *
+ *  We don't touch original_sl on purpose — R-multiple PnL stays
+ *  anchored to the entry-time SL (the "we planned this risk" number),
+ *  while sl reflects the LIVE protective stop the user/exchange has
+ *  attached now. */
+export function syncUserDecisionFromExchange(input: {
+  id: number;
+  bybitQty?: number | null;
+  sl?: number | null;
+}): void {
+  updateUserSyncStmt.run(input.bybitQty ?? null, input.sl ?? null, input.id);
+}
+
 /** Audit C2 — fan-out idempotency.
  *  Returns the existing user decision id if this (parent_decision_id, user_id)
  *  pair was already processed (entry attempted — success OR failure row).
