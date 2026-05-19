@@ -6,10 +6,13 @@ import {
   findDecisionById,
   calcPnl,
   closePositionWithStats,
+  closeUserDecision,
   forceClose,
   type DecisionRow,
 } from '../db/repos/decisions.js';
 import { getLastPrice } from '../exchange/bybit-public.js';
+import { fetchPosition } from '../exchange/bybit-private.js';
+import { findActiveKey, getDecryptedCreds } from '../db/repos/user-api-keys.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { resultPost } from '../telegram/result-template.js';
 import { markTick } from '../lib/health-tracker.js';
@@ -139,17 +142,76 @@ async function tick(): Promise<void> {
   running = true;
   try {
     const positions = findActivePositions();
+    const userPositions: DecisionRow[] = [];
     for (const p of positions) {
+      // Track D — user fan-out rows (user_id != NULL) are managed by
+      // Bybit's position-based SL (attached atomically at order create).
+      // The exchange fires the stop on its side; our price-tracking loop
+      // here would either (a) double-close them or (b) close them at our
+      // wrong ticker price. They're reconciled separately below.
+      if (p.user_id !== null) {
+        userPositions.push(p);
+        continue;
+      }
       try {
         await checkPosition(p);
       } catch (err) {
         logger.error({ err, position_id: p.id }, 'tpsl checkPosition failed');
       }
     }
+    // Phase C reconcile — for each active user row, query Bybit. If the
+    // position is flat there (SL fired / closed externally) but our DB
+    // says active, mark our row closed using ticker as the close-price
+    // proxy. Production hardening: poll /v5/execution/list to recover
+    // the exact close price + close reason.
+    for (const p of userPositions) {
+      try {
+        await reconcileUserPosition(p);
+      } catch (err) {
+        logger.error({ err, position_id: p.id }, 'tpsl reconcileUser failed');
+      }
+    }
   } finally {
     running = false;
     markTick('tpsl');
   }
+}
+
+async function reconcileUserPosition(p: DecisionRow): Promise<void> {
+  if (!p.user_id || !p.side || !p.entry || !p.strategy_id) return;
+  const keyRow = findActiveKey(p.user_id);
+  if (!keyRow) return; // key revoked; row will be cleaned manually
+  let creds;
+  try {
+    creds = getDecryptedCreds(keyRow);
+  } catch {
+    return;
+  }
+  const posRes = await fetchPosition(creds, p.symbol);
+  if (!posRes.ok) return;
+  if (posRes.position && posRes.position.size > 0) return; // still open
+
+  // Bybit shows flat → our row is stale. Close it using last price as
+  // a proxy for the actual fill price (acceptable for SL-hit case where
+  // close happened at our SL level; if external close, we lose a few
+  // basis points of accuracy until /v5/execution/list lookup is added).
+  const lastPrice = await getLastPrice(p.symbol);
+  if (lastPrice == null) return;
+  const slForR = p.original_sl ?? p.sl ?? p.entry;
+  const { pnlPct, pnlR } = calcPnl(p.side as 'long' | 'short', p.entry, slForR, lastPrice);
+  closeUserDecision({
+    id: p.id,
+    closePrice: lastPrice,
+    closeReason: 'sl_hit', // best-guess; refine later via execution-list
+    pnlPct,
+    pnlR,
+    forceReason: 'bybit_reconcile',
+    bybitCloseAvgPrice: null,
+  });
+  logger.info(
+    { decision_id: p.id, user_id: p.user_id, symbol: p.symbol, close_price: lastPrice },
+    'tpsl reconcile: closed stale user row (Bybit position flat)',
+  );
 }
 
 // Re-export for forceClose users (none currently outside the monitor itself,

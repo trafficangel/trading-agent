@@ -61,6 +61,20 @@ export type DecisionRow = {
   force_close_reason: string | null;
   /** Per-strategy sequential counter (1, 2, 3, ... within each strategy_id). */
   strategy_trade_num: number | null;
+  /** Track D — owning user (NULL = operator shadow row). */
+  user_id: number | null;
+  /** Track D — Bybit's orderId for the market entry. */
+  exchange_order_id: string | null;
+  /** Track D — Bybit's orderId of the position-based SL (if separate). */
+  exchange_sl_order_id: string | null;
+  /** Track D — real filled qty on the user's Bybit account. */
+  bybit_qty: number | null;
+  /** Track D — real avg fill price on entry. */
+  bybit_avg_price: number | null;
+  /** Track D — real avg fill price on exit (close). */
+  bybit_close_avg_price: number | null;
+  /** Track D — error label populated when an order is rejected by Bybit. */
+  order_error: string | null;
 };
 
 export type CloseReason = 'tp_hit' | 'sl_hit' | 'llm_close' | 'manual';
@@ -74,8 +88,9 @@ const insertStmt = db.prepare(`
     status, parent_decision_id,
     sl_reason, tp_reason, invalidation, features_json,
     pending_until, filled_at, track, original_sl, tp1_price, strategy_id,
-    strategy_trade_num
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    strategy_trade_num,
+    user_id, exchange_order_id, exchange_sl_order_id, bybit_qty, bybit_avg_price, order_error
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 /** Per-strategy sequential counter for the post prefix ('T#001').
@@ -126,12 +141,25 @@ export type InsertDecisionInput = {
   rawResponse: string;
   features?: Record<string, unknown> | null;
   strategyId: string;
+  /** Track D — link this row to a registered user. NULL = operator shadow row
+   *  (public marketing trade-log). Non-NULL = real fill on a user's Bybit
+   *  account; siblings of the same parent_decision_id share the signal. */
+  userId?: number | null;
+  parentDecisionId?: number | null;
+  exchangeOrderId?: string | null;
+  exchangeSlOrderId?: string | null;
+  bybitQty?: number | null;
+  bybitAvgPrice?: number | null;
+  orderError?: string | null;
 };
 
 export function insertDecision(input: InsertDecisionInput): number {
   // Track C: assign per-strategy sequential counter for the post prefix.
   // 1-based: first trade of STRAT-001 → strategy_trade_num=1, displayed
   // as T#001. Global decision.id remains the foreign-key primary key.
+  //
+  // Track D user-fanout rows reuse the SAME counter so a user can see
+  // "BTC#017 на моём счёте" matching the public "BTC#017 в канале".
   const maxNum = maxStrategyNumStmt.get(input.strategyId)?.n ?? 0;
   const strategyTradeNum = maxNum + 1;
 
@@ -154,7 +182,7 @@ export function insertDecision(input: InsertDecisionInput): number {
     input.reasoningFull,
     input.rawResponse,
     'active',
-    null, // parent_decision_id
+    input.parentDecisionId ?? null,
     null, // sl_reason
     null, // tp_reason
     null, // invalidation
@@ -166,6 +194,12 @@ export function insertDecision(input: InsertDecisionInput): number {
     null, // tp1_price
     input.strategyId,
     strategyTradeNum,
+    input.userId ?? null,
+    input.exchangeOrderId ?? null,
+    input.exchangeSlOrderId ?? null,
+    input.bybitQty ?? null,
+    input.bybitAvgPrice ?? null,
+    input.orderError ?? null,
   );
   return Number(result.lastInsertRowid);
 }
@@ -268,6 +302,53 @@ export function forceClose(input: {
     input.pnlPct,
     input.pnlR,
     input.forceReason,
+    input.id,
+  );
+  return r.changes > 0;
+}
+
+// ============================================================
+// Track D — user fan-out helpers
+// ============================================================
+
+const findActiveUserDecisionsStmt = db.prepare<[string, string], DecisionRow>(`
+  SELECT * FROM decisions
+   WHERE track = 'strategy' AND status = 'active'
+     AND symbol = ? AND strategy_id = ?
+     AND user_id IS NOT NULL
+`);
+
+/** All currently-active user-fanout positions for a strategy+symbol.
+ *  Used by exit fan-out to know which user rows to close. */
+export function findActiveUserDecisions(symbol: string, strategyId: string): DecisionRow[] {
+  return findActiveUserDecisionsStmt.all(symbol, strategyId);
+}
+
+const closeUserDecisionStmt = db.prepare(`
+  UPDATE decisions
+     SET status = 'closed', closed_at = ?, close_price = ?, close_reason = ?,
+         pnl_pct = ?, pnl_r = ?, force_close_reason = ?,
+         bybit_close_avg_price = ?
+   WHERE id = ? AND status = 'active'
+`);
+
+export function closeUserDecision(input: {
+  id: number;
+  closePrice: number;
+  closeReason: CloseReason;
+  pnlPct: number;
+  pnlR: number;
+  forceReason: string;
+  bybitCloseAvgPrice: number | null;
+}): boolean {
+  const r = closeUserDecisionStmt.run(
+    Date.now(),
+    input.closePrice,
+    input.closeReason,
+    input.pnlPct,
+    input.pnlR,
+    input.forceReason,
+    input.bybitCloseAvgPrice,
     input.id,
   );
   return r.changes > 0;

@@ -219,6 +219,11 @@ export type PlaceMarketArgs = {
   qty: number;              // base coin units
   reduceOnly?: boolean;     // for closing
   clientOrderId?: string;   // idempotency key
+  /** Attach a position-based safety SL atomically with the entry.
+   *  Bybit V5 accepts stopLoss directly on /order/create — using this
+   *  avoids the window where a position exists without a stop, which
+   *  would otherwise require a separate /position/trading-stop call. */
+  stopLoss?: number;
 };
 
 export type PlaceMarketResult = {
@@ -231,25 +236,35 @@ export type PlaceMarketResult = {
  * Open or close a position at market. For `reduceOnly: true` we're
  * closing — Bybit requires the OPPOSITE side of the position direction.
  * The caller (executeUserExit) inverts internally.
+ *
+ * If `stopLoss` is provided AND reduceOnly is false, the SL is attached
+ * to the entry atomically (single API call) — Bybit applies it as a
+ * position-based stop visible in /position/list.
  */
 export async function placeMarketOrder(
   creds: Creds,
   args: PlaceMarketArgs,
 ): Promise<PlaceMarketResult> {
   const bybitSide = args.side === 'long' ? 'Buy' : 'Sell';
+  const body: Record<string, unknown> = {
+    category: 'linear',
+    symbol: args.symbol,
+    side: bybitSide,
+    orderType: 'Market',
+    qty: String(args.qty),
+    timeInForce: 'IOC',
+    reduceOnly: args.reduceOnly ?? false,
+    orderLinkId: args.clientOrderId, // idempotency
+  };
+  if (args.stopLoss && !args.reduceOnly) {
+    body.stopLoss = String(args.stopLoss);
+    body.slTriggerBy = 'LastPrice';
+    body.tpslMode = 'Full';
+  }
   const r = await signedPost<{ orderId: string; orderLinkId: string }>(
     creds,
     '/v5/order/create',
-    {
-      category: 'linear',
-      symbol: args.symbol,
-      side: bybitSide,
-      orderType: 'Market',
-      qty: String(args.qty),
-      timeInForce: 'IOC',
-      reduceOnly: args.reduceOnly ?? false,
-      orderLinkId: args.clientOrderId, // idempotency
-    },
+    body,
   );
   if (!r.ok) return r;
   return { ok: true, orderId: r.data.orderId, orderLinkId: r.data.orderLinkId };

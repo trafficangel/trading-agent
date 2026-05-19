@@ -18,6 +18,7 @@ import {
   LANDING_BASE_URL,
   type StrategyConfig,
 } from './track-c-config.js';
+import { fanOutEntry, fanOutExit } from './user-fanout.js';
 
 /**
  * Track C — LuxAlgo AI Strategy Builder webhook trader.
@@ -262,6 +263,16 @@ async function handleStrategyEntry(
           occupied.sl ?? closeEntry,
           'reverse_signal',
         );
+        // Track D — close all user fan-out rows for this strategy
+        // BEFORE the new entry fires. fanOutEntry below will then open
+        // the opposite side on the same eligible users.
+        void fanOutExit({
+          strategyId: p.strategy_id,
+          symbol: p.symbol,
+          forceReason: 'reverse_signal',
+        }).catch((err) =>
+          logger.error({ err, strategyId: p.strategy_id }, 'fanOutExit (reverse) threw'),
+        );
       } else {
         // Rare race — another path closed it between our check and now.
         // Continue to open the new position regardless.
@@ -368,6 +379,21 @@ async function handleStrategyEntry(
   );
 
   await sendStrategyEntryPost(decisionId, p, cfg, entry, sl, side);
+
+  // Track D — replay this signal on every eligible user's Bybit account.
+  // The shadow row above stays the source of truth for the public landing;
+  // each user gets their own decision row keyed by user_id + linked back
+  // via parent_decision_id = decisionId.
+  void fanOutEntry({
+    shadowDecisionId: decisionId,
+    strategyId: p.strategy_id,
+    symbol: p.symbol,
+    side,
+    entry,
+    sl,
+    rawWebhook: JSON.stringify(p),
+  }).catch((err) => logger.error({ err, decisionId }, 'fanOutEntry threw'));
+
   return { ok: true, decisionId };
 }
 
@@ -474,6 +500,16 @@ async function handleStrategyExit(
   );
 
   await sendStrategyExitPost(active.id, p, cfg, active.entry, closePrice, side, pnlPct, pnlR, active.created_at, active.filled_at, active.sl ?? active.entry);
+
+  // Track D — close all user fan-out rows that mirror this shadow trade.
+  void fanOutExit({
+    strategyId: p.strategy_id,
+    symbol: p.symbol,
+    forceReason: 'strategy_exit',
+  }).catch((err) =>
+    logger.error({ err, strategyId: p.strategy_id }, 'fanOutExit threw'),
+  );
+
   return { ok: true, decisionId: active.id };
 }
 
