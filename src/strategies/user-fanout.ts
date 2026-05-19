@@ -43,6 +43,7 @@ import {
   getDecryptedCreds,
   recordVerifyResult,
 } from '../db/repos/user-api-keys.js';
+import { hasActiveAccess } from '../db/repos/user-subscriptions.js';
 import {
   insertDecision,
   findActiveUserDecisions,
@@ -60,6 +61,22 @@ import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 
 const PARALLEL_LIMIT = 10; // well below Bybit's 50 req/s global cap
 const limit = pLimit(PARALLEL_LIMIT);
+
+/** Bybit error codes that indicate the API KEY itself is broken
+ *  (revoked, wrong IP, missing permission). Other codes (insufficient
+ *  balance, qty too small, leverage conflict) are operational and
+ *  shouldn't poison the key as verify_failed. */
+const AUTH_CLASS_ERROR_CODES = new Set([
+  10003, // invalid API key
+  10004, // invalid sign
+  10005, // permission denied
+  10010, // unmatched IP
+  10006, // rate limit / abusive — treat as auth issue too
+]);
+
+function shouldMarkKeyBroken(code: number): boolean {
+  return AUTH_CLASS_ERROR_CODES.has(code);
+}
 
 export type FanOutEntryArgs = {
   shadowDecisionId: number;
@@ -119,6 +136,15 @@ export async function fanOutEntry(args: FanOutEntryArgs): Promise<{
 }
 
 async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promise<boolean> {
+  // Re-check access right before placing the order — defends against
+  // the race where access expired (or user cancelled) between
+  // listEligibleTargets() and now. Without this we'd place a real
+  // order on a sub'd-out user, then refuse to close it later (no key
+  // for the next exit signal).
+  if (!hasActiveAccess(t.user_id)) {
+    logger.info({ userId: t.user_id }, 'fanOutEntry: access lapsed between query and execute');
+    return false;
+  }
   const keyRow = findActiveKey(t.user_id);
   if (!keyRow) {
     // Should not happen because listEligibleTargets joined on it, but
@@ -136,14 +162,25 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
   }
 
   // 1. Set leverage. Idempotent — already at this value → ok.
+  //    110044 = "leverage cannot change with open position" — not the
+  //    key's fault, the user just has an existing position. Skip
+  //    gracefully without marking the key broken.
   const levRes = await setLeverage(creds, args.symbol, t.leverage);
   if (!levRes.ok) {
     const label = bybitErrorLabel(levRes.code);
     logger.warn({ userId: t.user_id, code: levRes.code, msg: levRes.msg }, 'fanOutEntry: setLeverage failed');
-    recordVerifyResult(keyRow.id, false, `setLeverage: ${label}`);
-    await alertOperator(
-      `⚠️ Track D fan-out: user_id=${t.user_id} setLeverage(${args.symbol}, ${t.leverage}×) failed: ${label} · ${levRes.msg}`,
-    );
+    if (shouldMarkKeyBroken(levRes.code)) {
+      recordVerifyResult(keyRow.id, false, `setLeverage: ${label}`);
+    }
+    if (levRes.code === 110044) {
+      await alertOperator(
+        `ℹ️ Track D: user_id=${t.user_id} has an existing position on ${args.symbol}, skipping. Should close it on Bybit first.`,
+      );
+    } else {
+      await alertOperator(
+        `⚠️ Track D fan-out: user_id=${t.user_id} setLeverage(${args.symbol}, ${t.leverage}×) failed: ${label} · ${levRes.msg}`,
+      );
+    }
     return false;
   }
 
@@ -151,7 +188,7 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
   const qty = roundContractQty(t.notional_usd / args.entry, args.symbol);
   if (qty <= 0) {
     logger.warn({ userId: t.user_id, notional: t.notional_usd, entry: args.entry }, 'fanOutEntry: qty rounded to 0');
-    recordVerifyResult(keyRow.id, false, 'qty_too_small');
+    // Not an auth issue — don't poison the key.
     return false;
   }
   const clientOrderId = `td-${args.shadowDecisionId}-u${t.user_id}-e`;
@@ -165,7 +202,12 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
   if (!orderRes.ok) {
     const label = bybitErrorLabel(orderRes.code);
     logger.warn({ userId: t.user_id, code: orderRes.code, msg: orderRes.msg }, 'fanOutEntry: placeMarketOrder failed');
-    recordVerifyResult(keyRow.id, false, `placeOrder: ${label}`);
+    // Only mark key broken on auth-class errors. Insufficient balance
+    // (110007/110012), invalid qty (170131) etc. are operational and
+    // shouldn't make the user re-verify their key.
+    if (shouldMarkKeyBroken(orderRes.code)) {
+      recordVerifyResult(keyRow.id, false, `placeOrder: ${label}`);
+    }
     await alertOperator(
       `⚠️ Track D fan-out: user_id=${t.user_id} entry on ${args.symbol} failed: ${label} · ${orderRes.msg}`,
     );

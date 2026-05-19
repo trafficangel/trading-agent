@@ -17,6 +17,7 @@
 
 import crypto from 'node:crypto';
 import { db } from '../db/client.js';
+import { config } from '../config.js';
 
 export const SESSION_COOKIE = 'sid';
 export const PENDING_COOKIE = 'pending_auth';
@@ -220,7 +221,30 @@ export function recordVerificationAttempt(
 ): void {
   // Purge anything older than 1h to keep the table tidy.
   purgeOldStmt.run(Date.now() - 60 * 60 * 1000);
-  insertAttemptStmt.run(requestId, phoneHash, phone, displayName, code, Date.now(), ip, userAgent);
+  // Hash the OTP code with the global pepper before storing — a DB leak
+  // before the user verifies should not expose the live code. Pepper is
+  // in process.env, never in DB → leaking the DB alone is harmless.
+  const codeHash = hashOtp(code);
+  insertAttemptStmt.run(requestId, phoneHash, phone, displayName, codeHash, Date.now(), ip, userAgent);
+}
+
+/** Returns true iff `submitted` matches the stored hash for this
+ *  attempt. Hash is sha256(pepper + code) — constant-time-ish (Node
+ *  built-in compare). */
+export function verifyOtpCode(requestId: string, submitted: string): boolean {
+  const attempt = findAttemptStmt.get(requestId);
+  if (!attempt || !attempt.code) return false;
+  const submittedHash = hashOtp(submitted);
+  if (submittedHash.length !== attempt.code.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < submittedHash.length; i++) {
+    mismatch |= submittedHash.charCodeAt(i) ^ attempt.code.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
+function hashOtp(code: string): string {
+  return crypto.createHmac('sha256', config.OTP_PEPPER).update(code).digest('hex');
 }
 
 export function getVerificationAttempt(requestId: string): VerifAttemptRow | null {

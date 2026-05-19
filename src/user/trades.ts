@@ -69,6 +69,9 @@ export function renderTradesPage(args: {
   activeTrades: UserTradeRow[];
   closedTrades: UserTradeRow[];
   hasApiKey: boolean;
+  page: number;
+  pageSize: number;
+  closedTotal: number;
 }): string {
   const activeRows = args.activeTrades
     .map((t) => renderActiveRow(t))
@@ -119,10 +122,33 @@ export function renderTradesPage(args: {
     `
     : '';
 
+  // Pagination footer: «Показано 50 из 247 · ‹ Назад · Вперёд ›».
+  // Shown only when closedTotal > pageSize. Pages are 1-indexed; the
+  // current page disables its arrow.
+  const totalPages = Math.max(1, Math.ceil(args.closedTotal / args.pageSize));
+  const showFrom = args.closedTotal === 0 ? 0 : (args.page - 1) * args.pageSize + 1;
+  const showTo = Math.min(args.page * args.pageSize, args.closedTotal);
+  const paginationHtml = totalPages > 1
+    ? `
+      <div class="trades-pagination">
+        <span class="trades-pagination-info">Показано ${showFrom}-${showTo} из ${args.closedTotal}</span>
+        <span class="trades-pagination-nav">
+          ${args.page > 1
+            ? `<a href="/account/trades?page=${args.page - 1}">← Предыдущая</a>`
+            : `<span class="trades-pagination-disabled">← Предыдущая</span>`}
+          <span class="trades-pagination-page">стр. ${args.page} из ${totalPages}</span>
+          ${args.page < totalPages
+            ? `<a href="/account/trades?page=${args.page + 1}">Следующая →</a>`
+            : `<span class="trades-pagination-disabled">Следующая →</span>`}
+        </span>
+      </div>
+    `
+    : '';
+
   const closedSection = args.closedTrades.length > 0
     ? `
       <section class="trades-section">
-        <h2 class="trades-section-title">${ico('📂')}История сделок (${args.closedTrades.length})</h2>
+        <h2 class="trades-section-title">${ico('📂')}История сделок (${args.closedTotal})</h2>
         <div class="trades-table-wrap">
           <table class="trades-table">
             <thead>
@@ -140,6 +166,7 @@ export function renderTradesPage(args: {
             <tbody>${closedRows}</tbody>
           </table>
         </div>
+        ${paginationHtml}
       </section>
     `
     : '';
@@ -318,6 +345,21 @@ function styles(): string {
 
   .pnl-pos { color: #4ad991; }
   .pnl-neg { color: #ff8b8b; }
+
+  .trades-pagination {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 16px; border-top: 1px solid #1a1f27;
+    font-size: 13px; color: #9aa5b1; flex-wrap: wrap; gap: 12px;
+  }
+  .trades-pagination-info { color: #6b7480; }
+  .trades-pagination-nav { display: flex; gap: 16px; align-items: center; }
+  .trades-pagination-nav a {
+    color: #4ad991; text-decoration: none; padding: 4px 10px;
+    border: 1px solid #2a323d; border-radius: 6px; transition: border-color 0.15s;
+  }
+  .trades-pagination-nav a:hover { border-color: #4ad991; }
+  .trades-pagination-disabled { color: #3a4350; padding: 4px 10px; }
+  .trades-pagination-page { color: #cfd6dd; }
 
   .trades-back { text-align: center; margin-top: 28px; }
   .trades-back a { color: #8590a0; font-size: 13px; text-decoration: none; }

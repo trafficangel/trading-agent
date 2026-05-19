@@ -15,6 +15,7 @@ import { startTpslMonitorJob } from './jobs/tpsl-monitor.js';
 import { startHeartbeatJob } from './jobs/heartbeat.js';
 import { startDailyWrapJob } from './jobs/daily-wrap.js';
 import { startHealthJob } from './jobs/health.js';
+import { startSubscriptionSweeperJob } from './jobs/subscription-sweeper.js';
 import { sendMessage } from './telegram/bot.js';
 import { startupBanner, statusReply } from './telegram/templates.js';
 import { countSignalsSince } from './db/repos/signals.js';
@@ -91,6 +92,7 @@ async function main(): Promise<void> {
   startHeartbeatJob();
   startDailyWrapJob();
   startHealthJob();
+  startSubscriptionSweeperJob();
 
   await app.listen({ host: '0.0.0.0', port: config.PORT });
   logger.info({ port: config.PORT, mode: config.MODE }, 'server listening');

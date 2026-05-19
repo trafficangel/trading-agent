@@ -20,6 +20,7 @@
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import {
   listRegistrations,
@@ -34,6 +35,8 @@ import {
   adminExtend,
   type SubscriptionRow,
 } from '../db/repos/user-subscriptions.js';
+import { recordAdminAction } from '../db/repos/admin-audit.js';
+import { adminCsrfToken, requireAdminCsrf } from '../auth/csrf.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 
@@ -41,6 +44,20 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[c] ?? c);
+}
+
+/** Constant-time string compare — preserves no timing side-channel.
+ *  Pads to a fixed length (64) to avoid the early-return when lengths
+ *  differ, which itself leaks. */
+function constTimeEq(a: string, b: string): boolean {
+  const PAD = 64;
+  const padded = (s: string): Buffer => {
+    const buf = Buffer.alloc(PAD);
+    Buffer.from(s).copy(buf, 0, 0, Math.min(s.length, PAD));
+    return buf;
+  };
+  // Comparison is on padded buffers so length itself doesn't leak.
+  return timingSafeEqual(padded(a), padded(b)) && a.length === b.length;
 }
 
 function checkAuth(req: FastifyRequest, reply: FastifyReply): boolean {
@@ -68,7 +85,9 @@ function checkAuth(req: FastifyRequest, reply: FastifyReply): boolean {
     }
     const user = decoded.slice(0, idx);
     const pass = decoded.slice(idx + 1);
-    if (user === adminEmail && pass === adminPassword) return true;
+    // Constant-time on both fields. Avoids timing-based username
+    // enumeration ("invalid creds" took 5µs vs 50µs for valid email).
+    if (constTimeEq(user, adminEmail) && constTimeEq(pass, adminPassword)) return true;
   } catch {
     // fall through
   }
@@ -126,7 +145,7 @@ function planBadge(plan: 'standard' | 'vip', status: string): string {
   return `<span class="plan-badge plan-bad">⛔ Expired</span>`;
 }
 
-function renderDashboard(): string {
+function renderDashboard(csrfToken: string): string {
   const stats = getRegistrationStats();
   const rows = listRegistrations(500);
   const subs = new Map<number, SubscriptionRow>();
@@ -148,13 +167,16 @@ function renderDashboard(): string {
           //   2. Продлить на 30 дней — bumps access_until forward for
           //      non-VIP users (no-op for VIP since they're already permanent)
           //   3. Days-left preview when on standard plan
+          const csrfField = `<input type="hidden" name="_csrf" value="${csrfToken}">`;
           const vipToggle = plan === 'vip'
             ? `<form method="POST" action="/admin/users/${r.id}/plan" style="display:inline">
+                 ${csrfField}
                  <input type="hidden" name="plan" value="standard">
                  <button class="adm-btn adm-btn-warn" type="submit"
                    onclick="return confirm('Снять VIP с ${escapeHtml(name)}?')">Снять VIP</button>
                </form>`
             : `<form method="POST" action="/admin/users/${r.id}/plan" style="display:inline">
+                 ${csrfField}
                  <input type="hidden" name="plan" value="vip">
                  <button class="adm-btn adm-btn-vip" type="submit"
                    onclick="return confirm('Выдать VIP пользователю ${escapeHtml(name)}?')">Сделать VIP</button>
@@ -166,6 +188,7 @@ function renderDashboard(): string {
           const extendForm = plan === 'vip'
             ? ''
             : `<form method="POST" action="/admin/users/${r.id}/extend" style="display:inline; margin-left:4px">
+                 ${csrfField}
                  <select name="days" class="adm-select">
                    <option value="30">+30 дней</option>
                    <option value="90">+90 дней</option>
@@ -293,7 +316,8 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     if (!checkAuth(req, reply)) return;
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'private, no-store');
-    return renderDashboard();
+    const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
+    return renderDashboard(adminCsrfToken(adminEmail));
   });
 
   // ---------------- POST /admin/users/:id/plan ----------------
@@ -303,6 +327,8 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
   // without the operator seeing a JSON blob.
   app.post('/admin/users/:id/plan', async (req, reply) => {
     if (!checkAuth(req, reply)) return;
+    const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
+    if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;
     const userId = Number((req.params as { id?: string }).id);
     if (!Number.isFinite(userId) || userId <= 0) {
       reply.code(400).send('bad user id');
@@ -323,8 +349,17 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     if (!findSubscription(userId)) ensureTrialFor(userId);
 
     const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
+    const before = findSubscription(userId);
     try {
-      setPlan(userId, plan, adminEmail, `set via /admin at ${new Date().toISOString()}`);
+      const after = setPlan(userId, plan, adminEmail, `set via /admin at ${new Date().toISOString()}`);
+      recordAdminAction({
+        adminEmail,
+        targetUserId: userId,
+        action: 'set_plan',
+        before: before ? { plan: before.plan, status: before.status, access_until: before.access_until } : null,
+        after: { plan: after.plan, status: after.status, access_until: after.access_until },
+        ip: req.ip,
+      });
       logger.info({ user_id: userId, plan, by: adminEmail }, 'admin: plan changed');
     } catch (err) {
       logger.error({ err, user_id: userId }, 'admin: setPlan failed');
@@ -340,6 +375,8 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
   // wired. Rejected for VIP users (their access is already permanent).
   app.post('/admin/users/:id/extend', async (req, reply) => {
     if (!checkAuth(req, reply)) return;
+    const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
+    if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;
     const userId = Number((req.params as { id?: string }).id);
     if (!Number.isFinite(userId) || userId <= 0) {
       reply.code(400).send('bad user id');
@@ -361,8 +398,18 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
       return;
     }
     const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
+    const before = findSubscription(userId);
     try {
-      adminExtend(userId, days, adminEmail, `manual extend +${days}d via /admin`);
+      const after = adminExtend(userId, days, adminEmail, `manual extend +${days}d via /admin`);
+      recordAdminAction({
+        adminEmail,
+        targetUserId: userId,
+        action: 'extend_subscription',
+        before: before ? { access_until: before.access_until, status: before.status } : null,
+        after: { access_until: after.access_until, status: after.status },
+        note: `+${days} days`,
+        ip: req.ip,
+      });
       logger.info({ user_id: userId, days, by: adminEmail }, 'admin: subscription extended');
     } catch (err) {
       logger.error({ err, user_id: userId }, 'admin: extend failed');

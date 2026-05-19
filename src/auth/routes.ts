@@ -32,6 +32,7 @@ import {
   registerOrRefresh,
   recordVerificationAttempt,
   getVerificationAttempt,
+  verifyOtpCode,
   clearVerificationAttempt,
   bumpVerificationAttempts,
   findSession,
@@ -190,8 +191,9 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
     bumpVerificationAttempts(requestId);
 
     // Local compare — code was generated server-side at /auth/start
-    // and stored in verification_attempts.
-    if (!attempt.code || parsed.data.code !== attempt.code) {
+    // and stored in verification_attempts as sha256(code + OTP_PEPPER).
+    // verifyOtpCode does constant-time hash comparison.
+    if (!verifyOtpCode(requestId, parsed.data.code)) {
       return { ok: false, error: 'code_invalid' };
     }
     const ip = clientIp(req);

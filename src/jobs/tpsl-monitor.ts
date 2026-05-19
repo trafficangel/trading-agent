@@ -11,7 +11,7 @@ import {
   type DecisionRow,
 } from '../db/repos/decisions.js';
 import { getLastPrice } from '../exchange/bybit-public.js';
-import { fetchPosition } from '../exchange/bybit-private.js';
+import { fetchPosition, fetchExecutions, setPositionSL } from '../exchange/bybit-private.js';
 import { findActiveKey, getDecryptedCreds } from '../db/repos/user-api-keys.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { resultPost } from '../telegram/result-template.js';
@@ -189,28 +189,91 @@ async function reconcileUserPosition(p: DecisionRow): Promise<void> {
   }
   const posRes = await fetchPosition(creds, p.symbol);
   if (!posRes.ok) return;
-  if (posRes.position && posRes.position.size > 0) return; // still open
 
-  // Bybit shows flat → our row is stale. Close it using last price as
-  // a proxy for the actual fill price (acceptable for SL-hit case where
-  // close happened at our SL level; if external close, we lose a few
-  // basis points of accuracy until /v5/execution/list lookup is added).
-  const lastPrice = await getLastPrice(p.symbol);
-  if (lastPrice == null) return;
+  if (posRes.position && posRes.position.size > 0) {
+    // Position still open — verify SL is still attached. Bybit can
+    // strip a position-based SL on margin events or if the user
+    // changed the symbol's leverage manually. We catch this here and
+    // re-attach so the position is never unprotected.
+    // posRes.position doesn't carry stopLoss; we'd need /v5/position/list
+    // with a richer response. For now, opportunistic re-attach when
+    // we already have the row's sl value. Cheap insurance.
+    if (p.sl) {
+      const slCheck = await setPositionSL(creds, p.symbol, p.sl);
+      if (!slCheck.ok && slCheck.code !== 0) {
+        // Most likely: SL already exists at this price → noop error.
+        // Don't spam logs unless retCode is something genuinely odd.
+        if (slCheck.code !== 34040 /* not modified */) {
+          logger.warn({ decision_id: p.id, code: slCheck.code, msg: slCheck.msg }, 'tpsl: SL re-attach attempt');
+        }
+      }
+    }
+    return;
+  }
+
+  // Bybit flat → our row is stale. Try to recover the EXACT close price
+  // and reason via /v5/execution/list. Walk executions newer than
+  // p.created_at, find a reduceOnly fill that closed our slot.
+  let closePrice: number | null = null;
+  let closeReason: 'sl_hit' | 'manual' = 'sl_hit';
+  let bybitCloseAvgPrice: number | null = null;
+  const execRes = await fetchExecutions(creds, { symbol: p.symbol, startTime: p.created_at });
+  if (execRes.ok) {
+    // Sum closing executions by reduceOnly intent: opposite-side fills
+    // that have closedSize > 0. Weighted-average their execPrice.
+    const ourSideClose = p.side === 'long' ? 'Sell' : 'Buy';
+    const closingExecs = execRes.rows.filter(
+      (e) => e.side === ourSideClose && e.closedSize > 0 && (e.execType === 'Trade' || e.execType === 'BustTrade'),
+    );
+    if (closingExecs.length > 0) {
+      let totalQty = 0;
+      let weighted = 0;
+      let hasBust = false;
+      for (const e of closingExecs) {
+        totalQty += e.execQty;
+        weighted += e.execPrice * e.execQty;
+        if (e.execType === 'BustTrade') hasBust = true;
+      }
+      bybitCloseAvgPrice = totalQty > 0 ? weighted / totalQty : null;
+      closePrice = bybitCloseAvgPrice;
+      // BustTrade = liquidation. Otherwise distinguish SL by price
+      // proximity to our recorded sl (within 1% bucket): SL → sl_hit,
+      // anything else (TP-like, strategy-exit-by-bybit, manual) → manual.
+      if (hasBust) closeReason = 'sl_hit';
+      else if (p.sl && bybitCloseAvgPrice && Math.abs(bybitCloseAvgPrice - p.sl) / p.sl < 0.01) closeReason = 'sl_hit';
+      else closeReason = 'manual';
+    }
+  }
+  // Fallback: if exec-list lookup failed (no network / Bybit hiccup) →
+  // use last-price proxy + best-guess sl_hit. Better than leaving the
+  // row open forever.
+  if (closePrice == null) {
+    const lastPrice = await getLastPrice(p.symbol);
+    if (lastPrice == null) return;
+    closePrice = lastPrice;
+  }
+
   const slForR = p.original_sl ?? p.sl ?? p.entry;
-  const { pnlPct, pnlR } = calcPnl(p.side as 'long' | 'short', p.entry, slForR, lastPrice);
+  const { pnlPct, pnlR } = calcPnl(p.side as 'long' | 'short', p.entry, slForR, closePrice);
   closeUserDecision({
     id: p.id,
-    closePrice: lastPrice,
-    closeReason: 'sl_hit', // best-guess; refine later via execution-list
+    closePrice,
+    closeReason,
     pnlPct,
     pnlR,
     forceReason: 'bybit_reconcile',
-    bybitCloseAvgPrice: null,
+    bybitCloseAvgPrice,
   });
   logger.info(
-    { decision_id: p.id, user_id: p.user_id, symbol: p.symbol, close_price: lastPrice },
-    'tpsl reconcile: closed stale user row (Bybit position flat)',
+    {
+      decision_id: p.id,
+      user_id: p.user_id,
+      symbol: p.symbol,
+      close_price: closePrice,
+      close_reason: closeReason,
+      via_exec_list: bybitCloseAvgPrice !== null,
+    },
+    'tpsl reconcile: closed stale user row',
   );
 }
 

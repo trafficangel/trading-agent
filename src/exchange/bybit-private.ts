@@ -98,46 +98,78 @@ async function signedGet<T>(
   }
 }
 
+/** Retry config for 429 / 5xx — exponential backoff with jitter.
+ *  Bybit V5 per-key trading limit is 10 req/s; if we hit it on a
+ *  fan-out wave, brief retries usually recover instantly. */
+const RETRY_BACKOFF_MS = [200, 600, 1500];
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 async function signedPost<T>(
   creds: Creds,
   path: string,
   body: Record<string, unknown>,
 ): Promise<{ ok: true; data: T } | { ok: false; code: number; msg: string }> {
   const json = JSON.stringify(body);
-  const timestamp = String(Date.now());
-  const signature = sign(creds, timestamp, json);
   const url = `${baseUrl()}${path}`;
-  try {
-    const res = await request(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-BAPI-API-KEY': creds.apiKey,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-SIGN-TYPE': '2',
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-RECV-WINDOW': RECV_WINDOW,
-      },
-      body: json,
-      headersTimeout: 8_000,
-      bodyTimeout: 8_000,
-    });
-    const text = await res.body.text();
-    let respBody: { retCode: number; retMsg: string; result?: unknown };
+  // Retry loop — re-sign on each attempt because timestamp changes.
+  // Retryable conditions: HTTP 429, HTTP 5xx, network errors, retCode 10006.
+  let lastResult: { ok: false; code: number; msg: string } | null = null;
+  for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
+    const timestamp = String(Date.now());
+    const signature = sign(creds, timestamp, json);
     try {
-      respBody = JSON.parse(text);
-    } catch {
-      logger.error({ path, status: res.statusCode, snippet: text.slice(0, 100) }, 'bybit-private POST: non-JSON');
-      return { ok: false, code: -1, msg: `Bybit вернул ответ без JSON (HTTP ${res.statusCode})` };
+      const res = await request(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-BAPI-API-KEY': creds.apiKey,
+          'X-BAPI-SIGN': signature,
+          'X-BAPI-SIGN-TYPE': '2',
+          'X-BAPI-TIMESTAMP': timestamp,
+          'X-BAPI-RECV-WINDOW': RECV_WINDOW,
+        },
+        body: json,
+        headersTimeout: 8_000,
+        bodyTimeout: 8_000,
+      });
+      const text = await res.body.text();
+      // Retry on 5xx / 429 with empty body.
+      if ((res.statusCode === 429 || res.statusCode >= 500) && attempt < RETRY_BACKOFF_MS.length) {
+        logger.warn({ path, status: res.statusCode, attempt }, 'bybit-private POST: retrying');
+        lastResult = { ok: false, code: -1, msg: `HTTP ${res.statusCode}` };
+        await sleep(RETRY_BACKOFF_MS[attempt]!);
+        continue;
+      }
+      let respBody: { retCode: number; retMsg: string; result?: unknown };
+      try {
+        respBody = JSON.parse(text);
+      } catch {
+        logger.error({ path, status: res.statusCode, snippet: text.slice(0, 100) }, 'bybit-private POST: non-JSON');
+        return { ok: false, code: -1, msg: `Bybit вернул ответ без JSON (HTTP ${res.statusCode})` };
+      }
+      // Retry on rate-limit retCode.
+      if (respBody.retCode === 10006 && attempt < RETRY_BACKOFF_MS.length) {
+        logger.warn({ path, attempt }, 'bybit-private POST: rate limit, retrying');
+        lastResult = { ok: false, code: respBody.retCode, msg: respBody.retMsg };
+        await sleep(RETRY_BACKOFF_MS[attempt]!);
+        continue;
+      }
+      if (respBody.retCode !== 0) {
+        return { ok: false, code: respBody.retCode, msg: respBody.retMsg };
+      }
+      return { ok: true, data: respBody.result as T };
+    } catch (err) {
+      logger.error({ err, path, attempt }, 'bybit-private POST failed');
+      lastResult = { ok: false, code: -1, msg: 'Не удалось связаться с Bybit (сеть/таймаут)' };
+      if (attempt < RETRY_BACKOFF_MS.length) {
+        await sleep(RETRY_BACKOFF_MS[attempt]!);
+      }
     }
-    if (respBody.retCode !== 0) {
-      return { ok: false, code: respBody.retCode, msg: respBody.retMsg };
-    }
-    return { ok: true, data: respBody.result as T };
-  } catch (err) {
-    logger.error({ err, path }, 'bybit-private POST failed');
-    return { ok: false, code: -1, msg: 'Не удалось связаться с Bybit (сеть/таймаут)' };
   }
+  return lastResult ?? { ok: false, code: -1, msg: 'Не удалось связаться с Bybit (исчерпаны ретраи)' };
 }
 
 // ============================================================
@@ -332,6 +364,67 @@ export async function fetchPosition(
       positionIdx: row.positionIdx,
     },
   };
+}
+
+/** Read recent executions (fills) for a symbol since `startTime`.
+ *  Used by the reconcile loop to recover the EXACT close price + reason
+ *  for a user position that Bybit closed on its own (SL hit / margin /
+ *  manual close on the website). Bybit V5 returns executions in
+ *  descending-time order with full price + side + execType. */
+export type ExecutionRow = {
+  /** "Trade" for ordinary fills, "BustTrade" for liquidations,
+   *  "Funding" for funding payments. We care about Trade + BustTrade. */
+  execType: string;
+  symbol: string;
+  side: 'Buy' | 'Sell';
+  execPrice: number;
+  execQty: number;
+  closedSize: number;
+  /** Bybit closes the slot when (entry side, reduceOnly) executes;
+   *  closedPnl is signed PnL for THAT specific exec. */
+  closedPnl: number;
+  execTime: number;
+  orderId: string;
+  orderLinkId: string | null;
+};
+
+export async function fetchExecutions(
+  creds: Creds,
+  args: { symbol: string; startTime: number; limit?: number },
+): Promise<{ ok: true; rows: ExecutionRow[] } | { ok: false; code: number; msg: string }> {
+  const r = await signedGet<{
+    list?: Array<{
+      execType: string;
+      symbol: string;
+      side: string;
+      execPrice: string;
+      execQty: string;
+      closedSize: string;
+      closedPnl: string;
+      execTime: string;
+      orderId: string;
+      orderLinkId?: string;
+    }>;
+  }>(creds, '/v5/execution/list', {
+    category: 'linear',
+    symbol: args.symbol,
+    startTime: args.startTime,
+    limit: args.limit ?? 50,
+  });
+  if (!r.ok) return r;
+  const rows: ExecutionRow[] = (r.data.list ?? []).map((row) => ({
+    execType: row.execType,
+    symbol: row.symbol,
+    side: row.side === 'Buy' ? 'Buy' : 'Sell',
+    execPrice: Number(row.execPrice),
+    execQty: Number(row.execQty),
+    closedSize: Number(row.closedSize),
+    closedPnl: Number(row.closedPnl),
+    execTime: Number(row.execTime),
+    orderId: row.orderId,
+    orderLinkId: row.orderLinkId ?? null,
+  }));
+  return { ok: true, rows };
 }
 
 /** Fetch an order's current status (filled qty, avg price) by orderLinkId

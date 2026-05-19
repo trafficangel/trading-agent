@@ -4,9 +4,11 @@ import {
   insertDecision,
   findActiveByStrategy,
   findDecisionById,
+  findDecisionByDedupKey,
   forceClose,
   calcPnl,
 } from '../db/repos/decisions.js';
+import { createHash } from 'node:crypto';
 import { getLastPrice } from '../exchange/bybit-public.js';
 import { sendMessage } from '../telegram/bot.js';
 import { resultPost } from '../telegram/result-template.js';
@@ -190,6 +192,23 @@ async function handleStrategyEntry(
     return { ok: false, reason: 'missing_side' };
   }
 
+  // Webhook idempotency. TradingView retries on network glitch / our
+  // 5xx — without a dedup key we'd open dup positions on each retry.
+  // Key = sha256(strategy_id|symbol|side|bar_time). bar_time is the
+  // unique discriminator: TV only fires once per bar close, retries
+  // share the same bar_time.
+  const dedupKey = createHash('sha256')
+    .update(`${p.strategy_id}|${p.symbol}|${side}|${p.bar_time}`)
+    .digest('hex');
+  const dup = findDecisionByDedupKey(dedupKey);
+  if (dup) {
+    logger.info(
+      { strategy_id: p.strategy_id, symbol: p.symbol, side, bar_time: p.bar_time, existing_id: dup },
+      'strategy-trader: duplicate webhook (idempotent skip)',
+    );
+    return { ok: true, reason: 'duplicate_webhook', decisionId: dup };
+  }
+
   // Resolve entry price up-front — also serves as the close price if
   // we end up doing a reverse-signal flip below. `price` from payload
   // (TV bar close) is preferred; fall back to live ticker.
@@ -363,6 +382,7 @@ async function handleStrategyEntry(
       notional_usd: TRACK_C_NOTIONAL_USD,
     },
     strategyId: p.strategy_id,
+    webhookDedupKey: dedupKey,
   });
 
   logger.info(

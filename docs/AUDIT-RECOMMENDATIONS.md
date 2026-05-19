@@ -250,4 +250,62 @@ clickmap снимает — для бизнес-метрик нужны custom e
 
 ## DONE
 
-(пусто пока)
+### Sprint 1 — hardening (19 мая 2026)
+
+**CRITICAL:**
+- ✅ #1 CSRF protection — `src/auth/csrf.ts` (double-submit pattern); все
+  4 cabinet POST'а и 2 admin POST'а защищены. Token = HMAC(session_id /
+  admin:email, CSRF_SECRET).
+- ✅ #2 Expiry-sweeper — `src/jobs/subscription-sweeper.ts` cron каждые
+  5 мин; flip trial/active → expired когда access_until истёк.
+- ✅ #3 Reconcile via /v5/execution/list — `tpsl-monitor.ts` теперь
+  пытается прочитать точную цену и причину закрытия через executions;
+  fallback на тикерную цену если ничего не вернулось. SL_hit vs manual
+  определяется по proximity к p.sl + наличию BustTrade (=ликвидация).
+- ✅ #4 Race check before order — `user-fanout.ts` повторно проверяет
+  `hasActiveAccess(userId)` ровно перед placeMarketOrder.
+- ✅ #5 OTP hashing — `verification_attempts.code` теперь sha256(code +
+  OTP_PEPPER); plaintext исчезает в течение 1ч purge'а.
+
+**HIGH:**
+- ✅ #6 Webhook idempotency — новый column `webhook_dedup_key` +
+  unique-index; dedup key = sha256(strategy_id|symbol|side|bar_time).
+  Дубль возвращает existing decision id без действий.
+- ✅ #7 Balance в DB — колонки `last_balance_usdt` + `last_balance_at`
+  на user_api_keys; in-memory Map удалён.
+- ✅ #8 Pagination — `/account/trades` теперь `?page=N` с 50 на стр,
+  показывает «50-100 из 247» + кнопки навигации.
+- ✅ #9 Rate-limit retry — `signedPost` retry с exponential backoff
+  [200, 600, 1500] мс на HTTP 429/5xx и retCode 10006.
+- ✅ #10 Leverage 110044 — `setLeverage` failure не помечает ключ как
+  broken; alert в Logs «закройте позицию вручную».
+- ✅ #11 Admin audit table — `admin_audit_log` + `recordAdminAction`
+  вызывается на set_plan + extend_subscription.
+- ✅ #12 Admin timing-safe — `timingSafeEqual` с padding до 64 байт.
+- ✅ #13 SL re-verify — reconcile делает opportunistic `setPositionSL`
+  на каждом тике для активных user-позиций (idempotent если SL уже там).
+- ✅ #14 Trial-expiry notifier — daily 09:00 UTC, alert в Logs канал
+  с phone + name за 24-48ч до конца триала. `expiry_notified_at` field
+  предотвращает дубли.
+
+**NICE-TO-HAVE (попутно закрыто):**
+- ✅ #19 recordVerifyResult точнее — только auth-class коды
+  (10003/10004/10005/10010/10006) метят ключ как broken. Insufficient
+  balance / qty too small / leverage conflict — не метят.
+
+Commit-хеши: см. `git log --grep="hardening"` после деплоя.
+
+### Остаётся (Sprint 2)
+
+- #15 PRG-паттерн на cabinet POST
+- #16 UX dead-end на /account/api-key при verify_failed (CTA с инструкцией)
+- #17 VIP_PHONES → DB-driven
+- #18 /admin pagination + search
+- #20 Графики PnL в кабинете (sparkline)
+- #21 Onboarding wizard
+- #22 Email/SMS fallback regtoration
+- #23 Stripe / ЮKassa billing
+- #24 Real healthcheck endpoint
+- #25 Hyperliquid Vault (отдельный проект)
+
+Плюс метрики конверсии (см. таблицу в основном документе).

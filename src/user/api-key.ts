@@ -15,6 +15,7 @@
 import { pageShell } from '../strategies/landing.js';
 import type { ApiKeySummary } from '../db/repos/user-api-keys.js';
 import { BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from '../strategies/track-c-config.js';
+import { csrfInput } from '../auth/csrf.js';
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({
@@ -48,14 +49,15 @@ export function renderApiKeyPage(args: {
    *  as confidence-builder "everything works, here's your balance". */
   balanceUsdt: number | null;
   flash?: { ok: boolean; message: string } | null;
+  csrfToken: string;
 }): string {
   const flashHtml = args.flash
     ? `<div class="key-flash ${args.flash.ok ? 'ok' : 'err'}">${escapeHtml(args.flash.message)}</div>`
     : '';
 
   const main = args.apiKey && !args.apiKey.revoked_at
-    ? renderConnectedState(args.apiKey, args.balanceUsdt)
-    : renderConnectForm();
+    ? renderConnectedState(args.apiKey, args.balanceUsdt, args.csrfToken)
+    : renderConnectForm(args.csrfToken);
 
   const body = `
     ${styles()}
@@ -88,7 +90,7 @@ export function renderApiKeyPage(args: {
   });
 }
 
-function renderConnectedState(key: ApiKeySummary, balance: number | null): string {
+function renderConnectedState(key: ApiKeySummary, balance: number | null, csrfToken: string): string {
   const hasErr = !!key.last_verify_error;
   return `
     <div class="key-card ${hasErr ? 'key-card-warn' : 'key-card-ok'}">
@@ -117,10 +119,12 @@ function renderConnectedState(key: ApiKeySummary, balance: number | null): strin
       </div>
       <div class="key-card-actions">
         <form method="POST" action="/account/api-key/verify" style="display:inline">
+          ${csrfInput(csrfToken)}
           <button class="key-btn-secondary" type="submit">Проверить связь</button>
         </form>
         <form method="POST" action="/account/api-key/revoke" style="display:inline"
               onsubmit="return confirm('Отключить ключ? Открытые позиции продолжат жить, новые сделки система открывать перестанет.');">
+          ${csrfInput(csrfToken)}
           <button class="key-btn-danger" type="submit">Отключить ключ</button>
         </form>
       </div>
@@ -128,23 +132,24 @@ function renderConnectedState(key: ApiKeySummary, balance: number | null): strin
 
     <details class="key-rotate-block">
       <summary>Заменить ключ на новый</summary>
-      ${renderInputs(/* labels for re-submit */)}
+      ${renderInputs(csrfToken)}
     </details>
   `;
 }
 
-function renderConnectForm(): string {
+function renderConnectForm(csrfToken: string): string {
   return `
     <div class="key-card">
       <div class="key-card-title">${ico('🔑')}Подключите ключ Bybit</div>
-      ${renderInputs()}
+      ${renderInputs(csrfToken)}
     </div>
   `;
 }
 
-function renderInputs(): string {
+function renderInputs(csrfToken: string): string {
   return `
     <form method="POST" action="/account/api-key" class="key-form">
+      ${csrfInput(csrfToken)}
       <label class="key-field-row">
         <span class="key-field-label">API Key</span>
         <input type="text" name="apiKey" required autocomplete="off"

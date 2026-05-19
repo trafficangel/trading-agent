@@ -25,6 +25,7 @@ import {
   type StrategyConfig,
 } from '../strategies/track-c-config.js';
 import type { UserStrategyRow } from '../db/repos/user-strategies.js';
+import { csrfInput } from '../auth/csrf.js';
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({
@@ -46,6 +47,8 @@ type RenderArgs = {
   userStrategies: Map<string, UserStrategyRow>;
   /** Banner shown above the form after a save round-trip. */
   flash?: { ok: boolean; message: string } | null;
+  /** CSRF token to embed in the form's hidden input. */
+  csrfToken: string;
 };
 
 export function renderStrategiesPage(args: RenderArgs): string {
@@ -88,6 +91,7 @@ export function renderStrategiesPage(args: RenderArgs): string {
       ${flashHtml}
 
       <form method="POST" action="/account/strategies" class="strat-form">
+        ${csrfInput(args.csrfToken)}
         <div class="strat-grid">
           ${rows}
         </div>

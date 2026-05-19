@@ -89,8 +89,9 @@ const insertStmt = db.prepare(`
     sl_reason, tp_reason, invalidation, features_json,
     pending_until, filled_at, track, original_sl, tp1_price, strategy_id,
     strategy_trade_num,
-    user_id, exchange_order_id, exchange_sl_order_id, bybit_qty, bybit_avg_price, order_error
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    user_id, exchange_order_id, exchange_sl_order_id, bybit_qty, bybit_avg_price, order_error,
+    webhook_dedup_key
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 /** Per-strategy sequential counter for the post prefix ('T#001').
@@ -151,6 +152,9 @@ export type InsertDecisionInput = {
   bybitQty?: number | null;
   bybitAvgPrice?: number | null;
   orderError?: string | null;
+  /** Idempotency key for the inbound webhook. Only the shadow row
+   *  (user_id=null) carries this; user-fanout rows have it NULL. */
+  webhookDedupKey?: string | null;
 };
 
 export function insertDecision(input: InsertDecisionInput): number {
@@ -200,6 +204,7 @@ export function insertDecision(input: InsertDecisionInput): number {
     input.bybitQty ?? null,
     input.bybitAvgPrice ?? null,
     input.orderError ?? null,
+    input.webhookDedupKey ?? null,
   );
   return Number(result.lastInsertRowid);
 }
@@ -305,6 +310,22 @@ export function forceClose(input: {
     input.id,
   );
   return r.changes > 0;
+}
+
+// ============================================================
+// Webhook idempotency (Track C/D)
+// ============================================================
+
+const findByDedupKeyStmt = db.prepare<[string], { id: number }>(
+  `SELECT id FROM decisions WHERE webhook_dedup_key = ? LIMIT 1`,
+);
+
+/** Returns the existing decision id if this webhook was already
+ *  processed, otherwise null. TradingView retries the webhook on
+ *  network glitch / our 5xx — without this dedup we'd open duplicate
+ *  positions on every retry. */
+export function findDecisionByDedupKey(key: string): number | null {
+  return findByDedupKeyStmt.get(key)?.id ?? null;
 }
 
 // ============================================================

@@ -52,6 +52,21 @@ const Schema = z.object({
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, 'API_KEY_MASTER_SECRET must be 64 hex chars (32 bytes)'),
 
+  /** Pepper for OTP code hashing in verification_attempts.code. Without
+   *  this the OTP would be stored as plaintext — a DB leak before the
+   *  user types the code would let an attacker walk in.
+   *  Generate once with: openssl rand -hex 32 */
+  OTP_PEPPER: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, 'OTP_PEPPER must be 64 hex chars (32 bytes)'),
+
+  /** HMAC secret for CSRF tokens. Tokens are issued at session creation
+   *  and verified on every state-changing POST.
+   *  Generate once with: openssl rand -hex 32 */
+  CSRF_SECRET: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, 'CSRF_SECRET must be 64 hex chars (32 bytes)'),
+
   /** Trial length for new registrations (Track D), in days. */
   TRACK_D_TRIAL_DAYS: z.coerce.number().int().min(0).max(365).default(14),
 

@@ -21,6 +21,10 @@ export type ApiKeyRow = {
   last_verified_at: number | null;
   last_verify_error: string | null;
   revoked_at: number | null;
+  /** Cached USDT-equivalent balance from the last verify call.
+   *  Persists across server restarts (was in-memory before). */
+  last_balance_usdt: number | null;
+  last_balance_at: number | null;
 };
 
 /** Public view (no secrets) for cabinet / admin UI. */
@@ -69,6 +73,12 @@ const revokeStmt = db.prepare(`
 const updateVerifyStmt = db.prepare(`
   UPDATE user_api_keys
      SET last_verified_at = ?, last_verify_error = ?
+   WHERE id = ?
+`);
+
+const updateBalanceStmt = db.prepare(`
+  UPDATE user_api_keys
+     SET last_balance_usdt = ?, last_balance_at = ?
    WHERE id = ?
 `);
 
@@ -183,4 +193,11 @@ export function recordVerifyResult(
   error?: string | null,
 ): void {
   updateVerifyStmt.run(ok ? Date.now() : null, ok ? null : error ?? 'unknown_error', id);
+}
+
+/** Persist the most recent USDT-equivalent balance read for this key.
+ *  Updated alongside recordVerifyResult(true) on every successful
+ *  fetchBalanceUsdt call. */
+export function recordBalance(id: number, balanceUsdt: number): void {
+  updateBalanceStmt.run(balanceUsdt, Date.now(), id);
 }

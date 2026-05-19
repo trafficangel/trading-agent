@@ -21,6 +21,7 @@ import {
   upsertApiKey,
   revokeApiKey,
   recordVerifyResult,
+  recordBalance,
   getDecryptedCreds,
 } from '../db/repos/user-api-keys.js';
 import { fetchBalanceUsdt, bybitErrorLabel } from '../exchange/bybit-private.js';
@@ -33,6 +34,7 @@ import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
 import { renderDashboard } from './dashboard.js';
 import { renderStrategiesPage } from './strategies.js';
 import { renderApiKeyPage } from './api-key.js';
+import { issueCsrfToken, requireCsrf } from '../auth/csrf.js';
 import { renderTradesPage, type UserTradeRow } from './trades.js';
 import { renderSubscriptionPage } from './subscription.js';
 import { db } from '../db/client.js';
@@ -57,7 +59,7 @@ const userActiveTradesStmt = db.prepare<[number], UserTradeRow>(
     ORDER BY created_at DESC`,
 );
 
-const userClosedTradesStmt = db.prepare<[number], UserTradeRow>(
+const userClosedTradesStmt = db.prepare<[number, number, number], UserTradeRow>(
   `SELECT id, created_at, closed_at, status, symbol, side, entry, sl,
           close_price, close_reason, pnl_pct, pnl_r, strategy_id,
           strategy_trade_num, exchange_order_id, bybit_qty, bybit_avg_price,
@@ -65,7 +67,12 @@ const userClosedTradesStmt = db.prepare<[number], UserTradeRow>(
      FROM decisions
     WHERE user_id = ? AND status = 'closed' AND track = 'strategy'
     ORDER BY closed_at DESC, created_at DESC
-    LIMIT 200`,
+    LIMIT ? OFFSET ?`,
+);
+
+const userClosedTradesTotalStmt = db.prepare<[number], { c: number }>(
+  `SELECT COUNT(*) AS c FROM decisions
+    WHERE user_id = ? AND status = 'closed' AND track = 'strategy'`,
 );
 
 const userClosedPnlAgg = db.prepare<[number], { net: number | null }>(
@@ -137,6 +144,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       return;
     }
     const apiKey = findActiveKey(user.userId);
+    const csrf = issueCsrfToken(req, reply);
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
     return reply.send(
@@ -145,6 +153,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         apiKeyConnected: !!apiKey && apiKey.last_verified_at !== null,
         userStrategies: userStrategyMap(user.userId),
         flash: null,
+        csrfToken: csrf,
       }),
     );
   });
@@ -161,6 +170,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       reply.redirect('/strategies');
       return;
     }
+    if (!requireCsrf(req, reply)) return;
     const body = (req.body ?? {}) as Record<string, string>;
     const grouped = new Map<string, { enabled: boolean; notional?: string; leverage?: string }>();
     for (const [key, value] of Object.entries(body)) {
@@ -225,6 +235,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         apiKeyConnected: !!apiKey && apiKey.last_verified_at !== null,
         userStrategies: userStrategyMap(user.userId),
         flash,
+        csrfToken: issueCsrfToken(req, reply),
       }),
     );
   });
@@ -237,9 +248,13 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       return;
     }
     const key = findAnyKey(user.userId);
+    // Balance now lives in user_api_keys.last_balance_usdt — survives
+    // restarts, no in-memory cache. Refresh happens on every verify
+    // (manual or on key save).
     const balance = key && !key.revoked_at && key.last_verified_at !== null
-      ? balanceCache.get(user.userId) ?? null
+      ? key.last_balance_usdt
       : null;
+    const csrf = issueCsrfToken(req, reply);
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
     return reply.send(
@@ -248,6 +263,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         apiKey: summaryOf(key),
         balanceUsdt: balance,
         flash: null,
+        csrfToken: csrf,
       }),
     );
   });
@@ -262,17 +278,18 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       reply.redirect('/strategies');
       return;
     }
+    if (!requireCsrf(req, reply)) return;
     const body = (req.body ?? {}) as { apiKey?: string; apiSecret?: string };
     const apiKey = (body.apiKey ?? '').trim();
     const apiSecret = (body.apiSecret ?? '').trim();
     if (!apiKey || !apiSecret) {
-      return renderApiKeyWithFlash(reply, user, { ok: false, message: 'Заполните оба поля.' });
+      return renderApiKeyWithFlash(req, reply, user, { ok: false, message: 'Заполните оба поля.' });
     }
     const verifyRes = await fetchBalanceUsdt({ apiKey, apiSecret });
     if (!verifyRes.ok) {
       const label = bybitErrorLabel(verifyRes.code);
       logger.warn({ userId: user.userId, code: verifyRes.code, label }, 'api-key verify failed');
-      return renderApiKeyWithFlash(reply, user, {
+      return renderApiKeyWithFlash(req, reply, user, {
         ok: false,
         message: `Bybit отклонил ключ (${label}): ${verifyRes.msg}. Проверьте права ключа и IP-whitelist.`,
       });
@@ -285,15 +302,18 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         verifiedAt: Date.now(),
         verifyError: null,
       });
+      // Persist the freshly-read balance so the cabinet doesn't show
+      // "—" after a restart.
+      const savedKey = findActiveKey(user.userId);
+      if (savedKey) recordBalance(savedKey.id, verifyRes.totalUsdt);
     } catch (err) {
       logger.error({ err, userId: user.userId }, 'upsertApiKey failed');
-      return renderApiKeyWithFlash(reply, user, {
+      return renderApiKeyWithFlash(req, reply, user, {
         ok: false,
         message: 'Не удалось сохранить ключ. Попробуйте позже.',
       });
     }
-    balanceCache.set(user.userId, verifyRes.totalUsdt);
-    return renderApiKeyWithFlash(reply, user, {
+    return renderApiKeyWithFlash(req, reply, user, {
       ok: true,
       message: `Ключ сохранён. Баланс на счёте: ${verifyRes.totalUsdt.toFixed(2)} USDT.`,
     });
@@ -308,9 +328,10 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       reply.redirect('/strategies');
       return;
     }
+    if (!requireCsrf(req, reply)) return;
     const row = findActiveKey(user.userId);
     if (!row) {
-      return renderApiKeyWithFlash(reply, user, {
+      return renderApiKeyWithFlash(req, reply, user, {
         ok: false,
         message: 'Сначала подключите ключ.',
       });
@@ -320,14 +341,14 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     if (!verifyRes.ok) {
       const label = bybitErrorLabel(verifyRes.code);
       recordVerifyResult(row.id, false, label);
-      return renderApiKeyWithFlash(reply, user, {
+      return renderApiKeyWithFlash(req, reply, user, {
         ok: false,
         message: `Bybit отклонил ключ (${label}): ${verifyRes.msg}`,
       });
     }
     recordVerifyResult(row.id, true);
-    balanceCache.set(user.userId, verifyRes.totalUsdt);
-    return renderApiKeyWithFlash(reply, user, {
+    recordBalance(row.id, verifyRes.totalUsdt);
+    return renderApiKeyWithFlash(req, reply, user, {
       ok: true,
       message: `Связь с Bybit ОК. Баланс: ${verifyRes.totalUsdt.toFixed(2)} USDT.`,
     });
@@ -344,17 +365,17 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       reply.redirect('/strategies');
       return;
     }
+    if (!requireCsrf(req, reply)) return;
     const row = findActiveKey(user.userId);
     if (!row) {
-      return renderApiKeyWithFlash(reply, user, {
+      return renderApiKeyWithFlash(req, reply, user, {
         ok: false,
         message: 'Активного ключа нет.',
       });
     }
     revokeApiKey(row.id);
-    balanceCache.delete(user.userId);
     logger.info({ userId: user.userId, keyId: row.id }, 'api-key revoked by user');
-    return renderApiKeyWithFlash(reply, user, {
+    return renderApiKeyWithFlash(req, reply, user, {
       ok: true,
       message: 'Ключ отключён. Открытые позиции продолжат жить до своего естественного выхода.',
     });
@@ -388,8 +409,16 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       reply.redirect('/strategies');
       return;
     }
+    // Pagination: 50 closed trades per page. Active positions always
+    // shown in full (rare for a user to have >50 open at once).
+    const PAGE_SIZE = 50;
+    const queryParams = (req.query ?? {}) as { page?: string };
+    const pageRaw = Number(queryParams.page ?? '1');
+    const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.floor(pageRaw) : 1;
+    const offset = (page - 1) * PAGE_SIZE;
     const active = userActiveTradesStmt.all(user.userId);
-    const closed = userClosedTradesStmt.all(user.userId);
+    const closed = userClosedTradesStmt.all(user.userId, PAGE_SIZE, offset);
+    const closedTotal = userClosedTradesTotalStmt.get(user.userId)?.c ?? 0;
     const apiKey = findActiveKey(user.userId);
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
@@ -399,28 +428,29 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         activeTrades: active,
         closedTrades: closed,
         hasApiKey: !!apiKey && apiKey.last_verified_at !== null,
+        page,
+        pageSize: PAGE_SIZE,
+        closedTotal,
       }),
     );
   });
 }
 
-/** Small process-level cache for the connected-state balance preview.
- *  TTL is implicit — entries live until the next verify call or
- *  /api-key/revoke. Reset on process restart (safe, just shows '—'
- *  until the user clicks «Проверить связь»). */
-const balanceCache = new Map<number, number>();
-
 /** Re-render the API-key page after a POST. Reads fresh key state +
- *  cached balance so the user sees the result of their action. */
+ *  persisted balance (column on user_api_keys) so the user sees the
+ *  result of their action. Caller must pass req+reply so we can issue
+ *  a fresh CSRF token for the embedded forms. */
 function renderApiKeyWithFlash(
+  req: FastifyRequest,
   reply: FastifyReply,
   user: { userId: number; displayName: string | null },
   flash: { ok: boolean; message: string },
 ): FastifyReply {
   const key = findAnyKey(user.userId);
   const balance = key && !key.revoked_at && key.last_verified_at !== null
-    ? balanceCache.get(user.userId) ?? null
+    ? key.last_balance_usdt
     : null;
+  const csrf = issueCsrfToken(req, reply);
   reply.header('content-type', 'text/html; charset=utf-8');
   reply.header('cache-control', 'private, no-store');
   return reply.send(
@@ -429,6 +459,7 @@ function renderApiKeyWithFlash(
       apiKey: summaryOf(key),
       balanceUsdt: balance,
       flash,
+      csrfToken: csrf,
     }),
   );
 }
