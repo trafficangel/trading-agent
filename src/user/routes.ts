@@ -34,6 +34,7 @@ import { renderDashboard } from './dashboard.js';
 import { renderStrategiesPage } from './strategies.js';
 import { renderApiKeyPage } from './api-key.js';
 import { renderTradesPage, type UserTradeRow } from './trades.js';
+import { renderSubscriptionPage } from './subscription.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import type { UserStrategyRow } from '../db/repos/user-strategies.js';
@@ -357,6 +358,27 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       ok: true,
       message: 'Ключ отключён. Открытые позиции продолжат жить до своего естественного выхода.',
     });
+  });
+
+  // -------- GET /account/subscription --------
+  // Detailed subscription view — bigger than the dashboard stat-card,
+  // with progress bar for trial, exact expiry date/time, plan tier,
+  // and contextual CTA for renewal (manual via Telegram).
+  app.get('/account/subscription', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) {
+      reply.redirect('/strategies');
+      return;
+    }
+    const sub = findSubscription(user.userId);
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('cache-control', 'private, no-store');
+    return reply.send(
+      renderSubscriptionPage({
+        displayName: user.displayName,
+        subscription: sub,
+      }),
+    );
   });
 
   // -------- GET /account/trades --------
