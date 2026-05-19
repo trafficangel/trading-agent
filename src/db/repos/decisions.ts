@@ -163,10 +163,30 @@ export function insertDecision(input: InsertDecisionInput): number {
   // 1-based: first trade of STRAT-001 → strategy_trade_num=1, displayed
   // as T#001. Global decision.id remains the foreign-key primary key.
   //
-  // Track D user-fanout rows reuse the SAME counter so a user can see
-  // "BTC#017 на моём счёте" matching the public "BTC#017 в канале".
-  const maxNum = maxStrategyNumStmt.get(input.strategyId)?.n ?? 0;
-  const strategyTradeNum = maxNum + 1;
+  // Audit C-NEW-2 — only SHADOW rows (operator, user_id IS NULL) bump
+  // the counter via MAX(...)+1. User-fanout rows REUSE the parent
+  // shadow's strategy_trade_num so all clones of one signal share the
+  // same T#NNN. Without this, every user-row was also incrementing
+  // the counter, causing the public channel to skip numbers
+  // (T#001 → T#003 → T#005) as user-rows ate the slots.
+  let strategyTradeNum: number;
+  if (input.userId == null) {
+    // Shadow row: assign next number. maxStrategyNumStmt already
+    // filters `user_id IS NULL` (see audit fix in live-stats pass).
+    const maxNum = maxStrategyNumStmt.get(input.strategyId)?.n ?? 0;
+    strategyTradeNum = maxNum + 1;
+  } else if (input.parentDecisionId != null) {
+    // User-fanout row: copy from parent. If parent vanished (shouldn't
+    // happen — caller passes a fresh shadowDecisionId), fall back to
+    // current max so we still write SOMETHING coherent.
+    const parent = findByIdStmt.get(input.parentDecisionId);
+    strategyTradeNum = parent?.strategy_trade_num
+      ?? (maxStrategyNumStmt.get(input.strategyId)?.n ?? 0) + 1;
+  } else {
+    // Defensive fallback: user row without parent_id (shouldn't be a
+    // real code path, but don't crash — copy current MAX).
+    strategyTradeNum = maxStrategyNumStmt.get(input.strategyId)?.n ?? 1;
+  }
 
   const result = insertStmt.run(
     Date.now(),

@@ -38,7 +38,25 @@ const markNotifiedStmt = db.prepare(`
   UPDATE user_subscriptions SET expiry_notified_at = ?, updated_at = ? WHERE user_id = ?
 `);
 
+let sweepRunning = false;
+
 async function sweepExpired(): Promise<void> {
+  // Audit H-NEW-1 — guard against overlapping ticks. closeAllUserPositions
+  // can take 5+ seconds per expired user (Bybit network latency), so 50
+  // overdue subs × 5s = 4 minutes which is close to the 5-min cron
+  // interval. Without this guard a slow first tick gets stomped on by
+  // the next one and we'd issue duplicate close orders (reduceOnly
+  // protects from over-trade, but logs double-fire).
+  if (sweepRunning) return;
+  sweepRunning = true;
+  try {
+    await sweepExpiredInner();
+  } finally {
+    sweepRunning = false;
+  }
+}
+
+async function sweepExpiredInner(): Promise<void> {
   const overdue = listOverdue();
   if (overdue.length === 0) return;
   for (const sub of overdue) {

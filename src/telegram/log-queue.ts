@@ -44,6 +44,16 @@ export function enqueueOperatorLog(text: string): void {
   timer = setTimeout(flush, FLUSH_MS);
 }
 
+/** Drain the buffer immediately. Called on graceful shutdown so the
+ *  last 200 buffered events aren't lost when the process exits. */
+export async function flushOperatorLog(): Promise<void> {
+  if (timer !== null) {
+    clearTimeout(timer);
+    timer = null;
+  }
+  await flush();
+}
+
 async function flush(): Promise<void> {
   timer = null;
   if (buf.length === 0) return;

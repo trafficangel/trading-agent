@@ -23,6 +23,7 @@ import { countSignalsSince } from './db/repos/signals.js';
 import { closeDb } from './db/client.js';
 import { validateStrategyConfigs } from './strategies/track-c-config.js';
 import { selfTest as cryptoSelfTest, selfTestExistingRow as cryptoSelfTestRow } from './auth/crypto.js';
+import { flushOperatorLog } from './telegram/log-queue.js';
 import { pickRandomActiveKey, getDecryptedCreds } from './db/repos/user-api-keys.js';
 
 const startedAt = Date.now();
@@ -176,6 +177,12 @@ async function main(): Promise<void> {
     timer.unref();
     try {
       await app.close();
+      // Audit H-NEW-4 — flush buffered operator alerts before exit.
+      // The log-queue holds non-critical events for ~1.5s; without
+      // this drain, the last batch is lost on every restart.
+      await flushOperatorLog().catch((err) =>
+        logger.error({ err }, 'log-queue flush on shutdown failed'),
+      );
       closeDb();
     } catch (err) {
       logger.error({ err }, 'shutdown error');

@@ -365,6 +365,40 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
     await sleep(250);
   }
 
+  // 3a. Audit C-NEW-1 — post-order trading-active re-check.
+  //     The pre-flight on :211 covered access lapse BEFORE we placed
+  //     the order. But the order itself takes ~500-1000ms (place +
+  //     fill poll), and a user clicking «Отключить ключ» mid-flight
+  //     would set trading_paused_at AFTER our isTradingActive check.
+  //     If we then commit insertDecision, we'd write a row tied to a
+  //     key that's about to be revoked — orphan position on Bybit
+  //     once revoke completes.
+  //     Re-check now. If access is gone, emergency-close before
+  //     anyone (user OR revoke flow) has a chance to remove the key.
+  if (!isTradingActive(t.user_id)) {
+    logger.warn(
+      { userId: t.user_id, orderId: orderRes.orderId },
+      'fanOutEntry: trading lapsed between order and persist — emergency closing',
+    );
+    const closedOk = await emergencyCloseUnprotected(
+      creds,
+      args.symbol,
+      args.side,
+      filledQty,
+      args.shadowDecisionId,
+      t.user_id,
+    );
+    if (closedOk) {
+      alertOperator(
+        `⚠️ Track D: user_id=${t.user_id} on ${args.symbol} — trading was paused mid-order, emergency-closed reduceOnly. Position safe.`,
+      );
+    }
+    // No decision row written — the trade essentially didn't happen
+    // from the user's perspective. The shadow row remains as the
+    // operator-side record.
+    return false;
+  }
+
   // 3b. Audit C3 — verify SL actually attached to the position.
   //
   // placeMarketOrder includes stopLoss in the order body, but Bybit can
