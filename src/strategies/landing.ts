@@ -1580,6 +1580,10 @@ export type PageShellOpts = {
   autoRefreshSec?: number | null;
   /** Robots meta. Defaults to index,follow. Gated stats pages set noindex. */
   robots?: string;
+  /** Hide the floating mobile chat icon (💬). Cabinet pages use the
+   *  inline "Поддержка" nav link instead — the icon overlay was
+   *  visually noisy for authenticated pages. */
+  hideMobileHelpIcon?: boolean;
 };
 
 export function pageShell(
@@ -1668,8 +1672,10 @@ export function pageShell(
     </nav>
     <div class="site-nav-end">
       ${langToggleHtml ? `<div class="lang-toggle">${langToggleHtml}</div>` : ''}
-      <a class="site-help-icon" href="https://t.me/dboykod" target="_blank" rel="noopener"
-         aria-label="${labels.support}" title="${labels.support}">💬</a>
+      ${opts.hideMobileHelpIcon
+        ? ''
+        : `<a class="site-help-icon" href="https://t.me/dboykod" target="_blank" rel="noopener"
+         aria-label="${labels.support}" title="${labels.support}">💬</a>`}
     </div>
   </div>
 </header>
@@ -2471,9 +2477,11 @@ function renderGatedPreview(
           подтверждения Telegram.
         </p>
 
-        <!-- Stage 1: phone -->
+        <!-- Stage 1: name + phone -->
         <div id="gate-phone-stage">
           <form id="gate-phone-form" class="gate-form" novalidate>
+            <input type="text" name="name" required placeholder="Как к вам обращаться?"
+                   maxlength="40" autocomplete="given-name" />
             <input type="tel" name="phone" required placeholder="+79991234567"
                    inputmode="tel" autocomplete="tel" />
             <button type="submit">Получить код в Telegram</button>
@@ -2564,14 +2572,20 @@ function renderGatedPreview(
         }
         phoneForm.addEventListener('submit', async function(e) {
           e.preventDefault();
+          var name = phoneForm.name.value.trim();
           var phone = phoneForm.phone.value.trim();
+          if (!name) {
+            setMsg('Введите имя, чтобы продолжить', true);
+            phoneForm.name.focus();
+            return;
+          }
           setMsg('Отправляем код…');
           phoneForm.querySelector('button').disabled = true;
           try {
             var res = await fetch('/auth/start', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ phone: phone }),
+              body: JSON.stringify({ phone: phone, name: name }),
             });
             var data = await res.json();
             if (!data.ok) {

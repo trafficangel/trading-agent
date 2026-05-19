@@ -37,6 +37,11 @@ type RegistrationRow = {
   /** Plaintext phone (E.164). Added in migration 015 for admin dashboard
    *  visibility. NULL for rows registered before that migration. */
   phone: string | null;
+  /** Self-chosen display name used in /account cabinet and admin panel.
+   *  Captured during phone-OTP registration (migration 021). NULL for
+   *  rows that registered before name capture was added — those users
+   *  see a generic greeting and an inline form to set it. */
+  display_name: string | null;
   tg_user_id: number | null;
   session_id: string;
   created_at: number;
@@ -55,9 +60,13 @@ const findByPhoneStmt = db.prepare<[string], RegistrationRow>(
 
 const insertRegistrationStmt = db.prepare(`
   INSERT INTO registrations (
-    phone_hash, phone, tg_user_id, session_id, created_at, last_seen_at,
+    phone_hash, phone, display_name, tg_user_id, session_id, created_at, last_seen_at,
     ip_first, user_agent_first
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+const updateDisplayNameStmt = db.prepare(`
+  UPDATE registrations SET display_name = ? WHERE id = ?
 `);
 
 const updatePhoneStmt = db.prepare(
@@ -104,7 +113,8 @@ export function registerOrRefresh(
   ip: string | null,
   userAgent: string | null,
   tgUserId?: number | null,
-): { sessionId: string; isNew: boolean } {
+  displayName?: string | null,
+): { sessionId: string; isNew: boolean; userId: number } {
   const sessionId = generateSessionId();
   const now = Date.now();
   const existing = findByPhoneStmt.get(phoneHash);
@@ -113,11 +123,19 @@ export function registerOrRefresh(
     // Backfill phone for rows registered before migration 015 OR with
     // an empty value from an earlier transition deploy.
     if (!existing.phone && phone) updatePhoneStmt.run(phone, existing.id);
-    return { sessionId, isNew: false };
+    // Backfill display_name on returning users who registered before
+    // migration 021 — the new gate form now asks them again. Don't
+    // OVERWRITE an existing name (returning users shouldn't be
+    // forced to re-type if they already set one).
+    if (!existing.display_name && displayName) {
+      updateDisplayNameStmt.run(displayName, existing.id);
+    }
+    return { sessionId, isNew: false, userId: existing.id };
   }
-  insertRegistrationStmt.run(
+  const info = insertRegistrationStmt.run(
     phoneHash,
     phone,
+    displayName ?? null,
     tgUserId ?? null,
     sessionId,
     now,
@@ -125,7 +143,7 @@ export function registerOrRefresh(
     ip,
     userAgent,
   );
-  return { sessionId, isNew: true };
+  return { sessionId, isNew: true, userId: Number(info.lastInsertRowid) };
 }
 
 // --- Admin: list all registrations for dashboard ---
@@ -133,6 +151,7 @@ export function registerOrRefresh(
 export type RegistrationListRow = {
   id: number;
   phone: string | null;
+  display_name: string | null;
   phone_hash: string;
   tg_user_id: number | null;
   created_at: number;
@@ -142,7 +161,7 @@ export type RegistrationListRow = {
 };
 
 const listAllStmt = db.prepare<[number], RegistrationListRow>(`
-  SELECT id, phone, phone_hash, tg_user_id, created_at, last_seen_at,
+  SELECT id, phone, display_name, phone_hash, tg_user_id, created_at, last_seen_at,
          ip_first, user_agent_first
   FROM registrations
   ORDER BY created_at DESC
@@ -159,6 +178,9 @@ type VerifAttemptRow = {
   request_id: string;
   phone_hash: string;
   phone: string | null;
+  /** Self-chosen display name typed at /auth/start. Carried through to
+   *  the registration row on /auth/verify (migration 021). */
+  display_name: string | null;
   code: string | null;
   created_at: number;
   attempts: number;
@@ -171,8 +193,8 @@ const findAttemptStmt = db.prepare<[string], VerifAttemptRow>(
 );
 
 const insertAttemptStmt = db.prepare(`
-  INSERT INTO verification_attempts (request_id, phone_hash, phone, code, created_at, attempts, ip, user_agent)
-  VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+  INSERT INTO verification_attempts (request_id, phone_hash, phone, display_name, code, created_at, attempts, ip, user_agent)
+  VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
 `);
 
 const incAttemptStmt = db.prepare(
@@ -194,10 +216,11 @@ export function recordVerificationAttempt(
   code: string,
   ip: string | null,
   userAgent: string | null,
+  displayName: string | null = null,
 ): void {
   // Purge anything older than 1h to keep the table tidy.
   purgeOldStmt.run(Date.now() - 60 * 60 * 1000);
-  insertAttemptStmt.run(requestId, phoneHash, phone, code, Date.now(), ip, userAgent);
+  insertAttemptStmt.run(requestId, phoneHash, phone, displayName, code, Date.now(), ip, userAgent);
 }
 
 export function getVerificationAttempt(requestId: string): VerifAttemptRow | null {

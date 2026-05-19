@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
+import fastifyFormbody from '@fastify/formbody';
 import { config } from './config.js';
 import { logger } from './lib/logger.js';
 import { luxalgoRoute } from './webhooks/luxalgo.route.js';
@@ -8,6 +9,7 @@ import { homeRoute } from './strategies/home.js';
 import { authRoute } from './auth/routes.js';
 import { adminRoute } from './admin/routes.js';
 import { activePositionsRoute } from './api/active-positions.js';
+import { userRoute } from './user/routes.js';
 import { startTpslMonitorJob } from './jobs/tpsl-monitor.js';
 import { startHeartbeatJob } from './jobs/heartbeat.js';
 import { startDailyWrapJob } from './jobs/daily-wrap.js';
@@ -54,6 +56,10 @@ async function main(): Promise<void> {
     trustProxy: true,
   });
   await app.register(fastifyCookie);
+  // application/x-www-form-urlencoded — used by admin <form> POSTs
+  // (VIP toggle, subscription extend) and the /account/strategies form.
+  // Without this plugin Fastify leaves req.body undefined for form data.
+  await app.register(fastifyFormbody);
 
   app.get('/health', async () => ({ ok: true, mode: config.MODE }));
 
@@ -71,6 +77,7 @@ async function main(): Promise<void> {
   await authRoute(app);
   await adminRoute(app);
   await activePositionsRoute(app);
+  await userRoute(app);
   await landingRoute(app);
   await homeRoute(app);
 

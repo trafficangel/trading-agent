@@ -25,6 +25,8 @@ import { z } from 'zod';
 import { logger } from '../lib/logger.js';
 import { sendMessage } from '../telegram/bot.js';
 import { sendVerificationMessage } from './telegram-gateway.js';
+import { ensureTrialFor, setPlan, findSubscription } from '../db/repos/user-subscriptions.js';
+import { isVipPhone } from './vip-allowlist.js';
 import {
   hashPhone,
   registerOrRefresh,
@@ -42,6 +44,11 @@ import {
 
 const startSchema = z.object({
   phone: z.string().min(7).max(20),
+  /** Self-chosen display name (used in cabinet greeting + admin panel).
+   *  Optional for back-compat with older clients; the gate form on
+   *  /strategies sends it. Trimmed + truncated to 40 chars at the
+   *  application layer. */
+  name: z.string().trim().min(1).max(40).optional(),
 });
 
 const verifySchema = z.object({
@@ -119,7 +126,15 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
       const ua = (req.headers['user-agent'] as string | undefined) ?? null;
       // Server-generated code: we stored what Gateway delivered, so we
       // can compare locally on /auth/verify — no extra Gateway call.
-      recordVerificationAttempt(res.request_id, phoneHash, phoneE164, res.code, ip, ua);
+      recordVerificationAttempt(
+        res.request_id,
+        phoneHash,
+        phoneE164,
+        res.code,
+        ip,
+        ua,
+        parsed.data.name ?? null,
+      );
 
       // Pending cookie carries request_id between /auth/start and /auth/verify.
       reply.setCookie(PENDING_COOKIE, res.request_id, {
@@ -184,12 +199,32 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
     // attempt.phone is now always populated (migration 015 + writer).
     // Empty-string fallback kept for the brief period before that fix.
     const phone = attempt.phone && attempt.phone.length > 0 ? attempt.phone : '';
-    const { sessionId, isNew } = registerOrRefresh(
+    const { sessionId, isNew, userId } = registerOrRefresh(
       phone,
       attempt.phone_hash,
       ip,
       ua,
+      null, // tg_user_id — set when we later wire Gateway's user_id passthrough
+      attempt.display_name ?? null,
     );
+
+    // Track D — auto-issue a trial subscription on first registration.
+    // Idempotent: ensureTrialFor returns the existing row if one exists,
+    // so re-logins (isNew=false) don't reset the trial clock. New rows
+    // get TRACK_D_TRIAL_DAYS days of free access starting from now().
+    ensureTrialFor(userId);
+
+    // VIP allowlist auto-promote: if the phone matches a known beta
+    // tester (operator's friend / first paying invite), grant them
+    // perpetual access immediately. Only fires when their current
+    // plan is still 'standard' so manual demotions stick.
+    if (phone && isVipPhone(phone)) {
+      const sub = findSubscription(userId);
+      if (sub && sub.plan === 'standard') {
+        setPlan(userId, 'vip', 'system', 'auto-promoted via VIP_PHONES allowlist');
+        logger.info({ user_id: userId, phone: maskPhone(phone) }, 'auth: VIP auto-promote');
+      }
+    }
     clearVerificationAttempt(requestId);
     reply.clearCookie(PENDING_COOKIE, { path: '/' });
     reply.setCookie(SESSION_COOKIE, sessionId, {
@@ -214,8 +249,12 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
       const uaShort = ua
         ? escapeHtml(ua.length > 80 ? ua.slice(0, 77) + '…' : ua)
         : '—';
+      const displayName = attempt.display_name
+        ? escapeHtml(attempt.display_name)
+        : '<i>имя не указано</i>';
       const text =
         `👤 <b>Новая регистрация</b>\n` +
+        `🪪 ${displayName}\n` +
         `📞 <code>${phone}</code>\n` +
         `🌍 IP: <code>${ip ?? '—'}</code>\n` +
         `🖥 UA: <code>${uaShort}</code>`;
@@ -256,4 +295,30 @@ export function isAuthed(req: FastifyRequest): boolean {
   if (!sess) return false;
   touchSession(sid);
   return true;
+}
+
+/** Auth-guard for cabinet pages — returns the registration row (with
+ *  `id`, `phone`, etc.) if the session is valid, otherwise null. Caller
+ *  should `reply.redirect('/strategies')` on null so the user lands on
+ *  the OTP-gated registration form. Touches last_seen_at as a side
+ *  effect. */
+export function getAuthedUser(req: FastifyRequest): {
+  userId: number;
+  phone: string | null;
+  displayName: string | null;
+  createdAt: number;
+  lastSeenAt: number;
+} | null {
+  const sid = req.cookies?.[SESSION_COOKIE];
+  if (!sid) return null;
+  const sess = findSession(sid);
+  if (!sess) return null;
+  touchSession(sid);
+  return {
+    userId: sess.id,
+    phone: sess.phone ?? null,
+    displayName: sess.display_name ?? null,
+    createdAt: sess.created_at,
+    lastSeenAt: sess.last_seen_at,
+  };
 }

@@ -10,11 +10,18 @@ import { db } from '../client.js';
 import { config } from '../../config.js';
 
 export type SubscriptionStatus = 'trial' | 'active' | 'expired' | 'cancelled';
+export type SubscriptionPlan = 'standard' | 'vip';
+
+/** When promoting to VIP we set access_until to far future (year 2099)
+ *  so the column stays meaningful + sortable; hasActiveAccess() also
+ *  short-circuits on plan='vip' so the date is just a backstop. */
+export const VIP_ACCESS_UNTIL = Date.UTC(2099, 11, 31, 23, 59, 59);
 
 export type SubscriptionRow = {
   id: number;
   user_id: number;
   status: SubscriptionStatus;
+  plan: SubscriptionPlan;
   trial_started_at: number;
   access_until: number;
   manually_extended_by: string | null;
@@ -77,11 +84,13 @@ export function findSubscription(userId: number): SubscriptionRow | null {
   return findByUserStmt.get(userId) ?? null;
 }
 
-/** Return true when the user currently has access (status != expired/cancelled
- *  AND access_until > now). */
+/** Return true when the user currently has access. VIP plan grants
+ *  unconditional access (no trial countdown, no expiry). Standard plan
+ *  requires status != expired/cancelled AND access_until > now. */
 export function hasActiveAccess(userId: number, now = Date.now()): boolean {
   const sub = findByUserStmt.get(userId);
   if (!sub) return false;
+  if (sub.plan === 'vip') return sub.status !== 'cancelled';
   if (sub.status === 'expired' || sub.status === 'cancelled') return false;
   return sub.access_until > now;
 }
@@ -113,6 +122,41 @@ export function adminExtend(
 
 export function setStatus(userId: number, status: SubscriptionStatus): void {
   setStatusStmt.run(status, Date.now(), userId);
+}
+
+const setPlanStmt = db.prepare(`
+  UPDATE user_subscriptions
+     SET plan = ?, status = ?, access_until = ?,
+         manually_extended_by = ?, manual_extension_note = ?, updated_at = ?
+   WHERE user_id = ?
+`);
+
+/**
+ * Promote a user to VIP (perpetual access) or demote them back to
+ * standard. The audit fields (manually_extended_by + note) are
+ * overwritten on every change so the operator can trace who flipped
+ * the plan and why.
+ *
+ * Promoting to VIP: status forced to 'active', access_until pushed to
+ * VIP_ACCESS_UNTIL (year 2099). Demoting to standard: status forced
+ * to 'expired' and access_until set to now() — the operator should
+ * then manually extend if they want the demoted user to keep access.
+ */
+export function setPlan(
+  userId: number,
+  plan: SubscriptionPlan,
+  byAdmin: string,
+  note: string | null = null,
+): SubscriptionRow {
+  const sub = findByUserStmt.get(userId);
+  if (!sub) throw new Error(`setPlan: no subscription for user_id=${userId}`);
+  const now = Date.now();
+  const nextStatus: SubscriptionStatus = plan === 'vip' ? 'active' : 'expired';
+  const nextAccess = plan === 'vip' ? VIP_ACCESS_UNTIL : now;
+  setPlanStmt.run(plan, nextStatus, nextAccess, byAdmin, note, now, userId);
+  const updated = findByUserStmt.get(userId);
+  if (!updated) throw new Error('setPlan: row vanished');
+  return updated;
 }
 
 /** Used by the expiry-sweeper cron: returns subs that should flip to
