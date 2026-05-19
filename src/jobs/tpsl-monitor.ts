@@ -1,4 +1,5 @@
 import cron from 'node-cron';
+import pLimit from 'p-limit';
 import { existsSync } from 'node:fs';
 import { logger } from '../lib/logger.js';
 import {
@@ -168,15 +169,26 @@ async function tick(): Promise<void> {
     // Phase C reconcile — for each active user row, query Bybit. If the
     // position is flat there (SL fired / closed externally) but our DB
     // says active, mark our row closed using ticker as the close-price
-    // proxy. Production hardening: poll /v5/execution/list to recover
-    // the exact close price + close reason.
-    for (const p of userPositions) {
-      try {
-        await reconcileUserPosition(p);
-      } catch (err) {
-        logger.error({ err, position_id: p.id }, 'tpsl reconcileUser failed');
-      }
-    }
+    // proxy. Reads /v5/execution/list / /v5/position/closed-pnl to
+    // recover the exact close price + close reason.
+    //
+    // Audit H2 — parallel reconcile via p-limit(8). Sequential `for
+    // await` chews ~400ms per user-position × N — at 50 users with 3
+    // positions each that's 60s and the cron tick overruns the
+    // 1-minute schedule, accumulating lag. Parallel reads stay well
+    // under Bybit's per-UID rate (each user hits their own bucket).
+    const reconcileLimit = pLimit(8);
+    await Promise.allSettled(
+      userPositions.map((p) =>
+        reconcileLimit(async () => {
+          try {
+            await reconcileUserPosition(p);
+          } catch (err) {
+            logger.error({ err, position_id: p.id }, 'tpsl reconcileUser failed');
+          }
+        }),
+      ),
+    );
   } finally {
     running = false;
     markTick('tpsl');

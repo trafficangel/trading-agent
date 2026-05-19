@@ -480,11 +480,21 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         message: 'Активного ключа нет.',
       });
     }
+    // Audit C1 — close-then-revoke race. Without an upfront block,
+    // an incoming TradingView webhook can fan-out an order for this
+    // user in the millisecond window between `closeAllUserPositions`
+    // and `revokeApiKey`, leaving an orphan position that can no
+    // longer be closed (key revoked → no decrypted creds).
+    // Pause trading FIRST. listEligibleTargets filters paused users,
+    // so fan-out skips them immediately even if a signal lands
+    // mid-flight. Pause stays on after revoke — user reconnects a
+    // new key and resumes manually.
+    setTradingPaused(user.userId, true);
     const closeStats = await closeAllUserPositions(user.userId);
     revokeApiKey(row.id);
     logger.info(
       { userId: user.userId, keyId: row.id, closeStats },
-      'api-key revoked by user, positions closed first',
+      'api-key revoked by user (paused → closed → revoked)',
     );
     let msg = 'Ключ отключён.';
     if (closeStats.attempted > 0) {

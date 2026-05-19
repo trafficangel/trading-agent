@@ -22,6 +22,7 @@ import { sendMessage } from '../telegram/bot.js';
 import { db } from '../db/client.js';
 import { listOverdue, setStatus } from '../db/repos/user-subscriptions.js';
 import type { SubscriptionRow } from '../db/repos/user-subscriptions.js';
+import { closeAllUserPositions } from '../strategies/user-fanout.js';
 
 const findExpiringSoonStmt = db.prepare<[number, number], SubscriptionRow & { phone: string | null; display_name: string | null }>(`
   SELECT s.*, r.phone, r.display_name
@@ -37,15 +38,30 @@ const markNotifiedStmt = db.prepare(`
   UPDATE user_subscriptions SET expiry_notified_at = ?, updated_at = ? WHERE user_id = ?
 `);
 
-function sweepExpired(): void {
+async function sweepExpired(): Promise<void> {
   const overdue = listOverdue();
   if (overdue.length === 0) return;
   for (const sub of overdue) {
     try {
+      // Audit C2 — close open positions BEFORE flipping to 'expired'.
+      // Without this, the user's access lapses while positions on Bybit
+      // are still open and bound to their key. fanOutExit later won't
+      // include them (listEligibleTargets filters expired), so a normal
+      // strategy_exit signal can't close their position via our system.
+      // The Bybit-side safety SL would still trigger on adverse move,
+      // but a winning position would stay open indefinitely. Close
+      // cleanly now while the key is still active.
+      const closeStats = await closeAllUserPositions(sub.user_id, 'strategy_exit');
+      if (closeStats.attempted > 0) {
+        logger.info(
+          { user_id: sub.user_id, closeStats },
+          'sub-sweeper: closed positions before expiring',
+        );
+      }
       setStatus(sub.user_id, 'expired');
       logger.info({ user_id: sub.user_id }, 'sub-sweeper: status → expired');
     } catch (err) {
-      logger.error({ err, user_id: sub.user_id }, 'sub-sweeper: setStatus failed');
+      logger.error({ err, user_id: sub.user_id }, 'sub-sweeper: expire flow failed');
     }
   }
 }
@@ -81,9 +97,9 @@ function escapeHtml(s: string): string {
 export function startSubscriptionSweeperJob(): void {
   // Sweeper: every 5 minutes. SQLite is fast, query is indexed.
   cron.schedule('*/5 * * * *', () => {
-    try { sweepExpired(); } catch (err) {
+    void sweepExpired().catch((err) => {
       logger.error({ err }, 'sub-sweeper tick failed');
-    }
+    });
   });
   // Notifier: daily at 09:00 UTC.
   cron.schedule('0 9 * * *', () => {

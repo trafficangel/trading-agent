@@ -34,6 +34,7 @@
 import pLimit from 'p-limit';
 import { logger } from '../lib/logger.js';
 import { sendMessage } from '../telegram/bot.js';
+import { enqueueOperatorLog } from '../telegram/log-queue.js';
 import {
   listEligibleTargets,
   type EligibleTarget,
@@ -179,7 +180,7 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
       const keyRow = findActiveKey(t.user_id);
       if (keyRow && !keyRow.insufficient_balance_at) {
         setInsufficientBalance(keyRow.id, Date.now());
-        await alertOperator(
+        alertOperator(
           `💸 Track D pre-flight: user_id=${t.user_id} margin shortfall on ${args.symbol}. ` +
             `Free $${free.toFixed(2)} < needed $${buffered.toFixed(2)} (with buffer). Order skipped.`,
         );
@@ -250,7 +251,7 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
     // that have an OPEN position in Hedge mode — we can't auto-switch
     // until they close it. Surface a clear message and skip.
     if (modeRes.code === 110024) {
-      await alertOperator(
+      alertOperator(
         `⚠️ Track D: user_id=${t.user_id} has open positions in Hedge mode on Bybit. ` +
           `Auto-switch to One-Way blocked. User must close existing positions manually first.`,
       );
@@ -272,11 +273,11 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
       recordVerifyResult(keyRow.id, false, `setLeverage: ${label}`);
     }
     if (levRes.code === 110044) {
-      await alertOperator(
+      alertOperator(
         `ℹ️ Track D: user_id=${t.user_id} has an existing position on ${args.symbol}, skipping. Should close it on Bybit first.`,
       );
     } else {
-      await alertOperator(
+      alertOperator(
         `⚠️ Track D fan-out: user_id=${t.user_id} setLeverage(${args.symbol}, ${t.leverage}×) failed: ${label} · ${levRes.msg}`,
       );
     }
@@ -319,12 +320,12 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
     // rejected orders every time a signal fires.
     if (isInsufficientBalance(orderRes.code)) {
       setInsufficientBalance(keyRow.id, Date.now());
-      await alertOperator(
+      alertOperator(
         `💸 Track D: user_id=${t.user_id} insufficient balance on ${args.symbol}. ` +
         `Required: $${(t.notional_usd / t.leverage).toFixed(2)} margin. Skipping until top-up.`,
       );
     } else {
-      await alertOperator(
+      alertOperator(
         `⚠️ Track D fan-out: user_id=${t.user_id} entry on ${args.symbol} failed: ${label} · ${orderRes.msg}`,
       );
     }
@@ -387,7 +388,7 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
       args.shadowDecisionId,
       t.user_id,
     );
-    await alertOperator(
+    alertOperator(
       `🚨 Track D fan-out: user_id=${t.user_id} entry on ${args.symbol} ` +
         `opened BUT SL failed to attach after 3 retries. Emergency close: ` +
         `${emergencyOk ? 'OK' : 'ALSO FAILED — manual intervention required'}.`,
@@ -538,7 +539,7 @@ async function executeUserExit(
   if (!closeRes.ok) {
     const label = bybitErrorLabel(closeRes.code);
     logger.warn({ userId: row.user_id, code: closeRes.code, msg: closeRes.msg }, 'fanOutExit: close failed');
-    await alertOperator(
+    alertOperator(
       `⚠️ Track D fan-out exit failed: user_id=${row.user_id} id=${row.id} on ${row.symbol}: ${label} · ${closeRes.msg}`,
     );
     return false;
@@ -594,13 +595,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function alertOperator(text: string): Promise<void> {
-  await sendMessage({ channel: 'logs', text, disable_notification: true }).catch(() => {});
+/** Non-critical operator log. Routed through the batch queue (audit H1)
+ *  so a market-wide incident (50 users insufficient_balance in one
+ *  minute) doesn't 429-rate-limit the bot. The queue waits up to
+ *  ~1.5 sec to collect siblings then sends ONE digest message. */
+function alertOperator(text: string): void {
+  enqueueOperatorLog(text);
 }
 
-/** Critical-priority operator alert (notification on, no silence flag).
+/** Critical-priority operator alert (notification on, immediate flush).
  *  Reserved for events where money is on the line and immediate human
- *  intervention may be needed (audit C3 emergency close, decrypt fail). */
+ *  intervention may be needed (emergency close, decrypt fail). Always
+ *  bypasses the queue — operator MUST see this without delay. */
 async function alertOperatorCritical(text: string): Promise<void> {
   await sendMessage({ channel: 'logs', text, disable_notification: false }).catch(() => {});
 }
