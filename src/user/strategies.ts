@@ -61,13 +61,17 @@ type RenderArgs = {
    *  balance to compute free margin for the calculator's "хватает"
    *  status badge. */
   usedMarginUsdt: number;
+  /** Live price + qtyStep per symbol so each strategy row can show
+   *  "ваш $100 на BTC реально откроется как $76.76 (0.001)" hint.
+   *  Symbols missing from the map degrade to no-hint (UI still works). */
+  lotInfo: Map<string, { price: number; qtyStep: number; minOrderQty: number }>;
 };
 
 export function renderStrategiesPage(args: RenderArgs): string {
   const enabledStrategies = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
   const rows = enabledStrategies
     .sort((a, b) => a.code.localeCompare(b.code))
-    .map((cfg) => renderRow(cfg, args.userStrategies.get(cfg.id) ?? null))
+    .map((cfg) => renderRow(cfg, args.userStrategies.get(cfg.id) ?? null, args.lotInfo))
     .join('');
 
   const keyBanner = args.apiKeyConnected
@@ -245,7 +249,11 @@ export function renderStrategiesPage(args: RenderArgs): string {
   });
 }
 
-function renderRow(cfg: StrategyConfig, existing: UserStrategyRow | null): string {
+function renderRow(
+  cfg: StrategyConfig,
+  existing: UserStrategyRow | null,
+  lotInfo: Map<string, { price: number; qtyStep: number; minOrderQty: number }>,
+): string {
   const isEnabled = existing?.enabled === 1;
   const checkedAttr = isEnabled ? 'checked' : '';
   const notional = existing?.notional_usd ?? 100;
@@ -261,8 +269,26 @@ function renderRow(cfg: StrategyConfig, existing: UserStrategyRow | null): strin
   const notionalName = `s__${cfg.id}__notional`;
   const leverageName = `s__${cfg.id}__leverage`;
 
+  // Lot-size hint. When we have live price + qtyStep for this symbol,
+  // pre-compute SSR-friendly text for the current notional and stash
+  // data-* on the row so the calc JS can recompute as the user types.
+  // Without lot info (network failed / unknown symbol) we hide the hint.
+  const info = cfg.symbol ? lotInfo.get(cfg.symbol) : undefined;
+  let hintHtml = '';
+  let dataAttrs = '';
+  if (info) {
+    const rawQty = notional / info.price;
+    const qty = Math.floor(rawQty / info.qtyStep) * info.qtyStep;
+    const actual = qty * info.price;
+    dataAttrs = ` data-price="${info.price}" data-qty-step="${info.qtyStep}" data-min-qty="${info.minOrderQty}"`;
+    const initialText = qty <= 0
+      ? `минимум на этой паре — ${(info.minOrderQty * info.price).toFixed(2)} USDT (${info.minOrderQty} ${escapeHtml(coinBase(cfg.symbol!))})`
+      : `на бирже: <b>$${actual.toFixed(2)}</b> (${formatQty(qty)} ${escapeHtml(coinBase(cfg.symbol!))})${actual < notional * 0.98 ? ` · цена лота ${(info.qtyStep * info.price).toFixed(2)} USDT` : ''}`;
+    hintHtml = `<span class="strat-field-lot" data-lot-hint>${initialText}</span>`;
+  }
+
   return `
-    <div class="strat-row ${isEnabled ? 'strat-row-on' : ''}">
+    <div class="strat-row ${isEnabled ? 'strat-row-on' : ''}"${dataAttrs}>
       <div class="strat-row-head">
         <label class="strat-toggle">
           <input type="checkbox" name="${enabledName}" value="1" ${checkedAttr} />
@@ -282,6 +308,7 @@ function renderRow(cfg: StrategyConfig, existing: UserStrategyRow | null): strin
           <span class="strat-field-label">Размер позиции, USDT</span>
           <input type="number" name="${notionalName}" value="${notional}" min="10" max="100000" step="1" />
           <span class="strat-field-hint">сколько средств в каждой сделке</span>
+          ${hintHtml}
         </label>
         <label class="strat-field">
           <span class="strat-field-label">Плечо</span>
@@ -291,6 +318,19 @@ function renderRow(cfg: StrategyConfig, existing: UserStrategyRow | null): strin
       </div>
     </div>
   `;
+}
+
+/** Best-effort base-coin extraction from a Bybit symbol code.
+ *  BTCUSDT → BTC, 1000PEPEUSDT → 1000PEPE, etc. */
+function coinBase(symbol: string): string {
+  if (symbol.endsWith('USDT')) return symbol.slice(0, -4);
+  if (symbol.endsWith('USDC')) return symbol.slice(0, -4);
+  return symbol;
+}
+
+/** Format qty without trailing zeros. 0.001000 → "0.001", 1.0 → "1". */
+function formatQty(qty: number): string {
+  return Number(qty.toFixed(8)).toString();
 }
 
 function calculatorScript(): string {
@@ -356,8 +396,58 @@ function calculatorScript(): string {
           elStatus.className = 'strat-calc-status ' + cls;
           elStatus.textContent = text;
         }
-        form.addEventListener('input', recompute);
-        form.addEventListener('change', recompute);
+        function recomputeLotHints() {
+          // For each row with data-price + data-qty-step, recompute the
+          // "actual on exchange" hint from the current notional input.
+          form.querySelectorAll('.strat-row').forEach(function(row) {
+            var hint = row.querySelector('[data-lot-hint]');
+            if (!hint) return;
+            var price = parseFloat(row.getAttribute('data-price'));
+            var step = parseFloat(row.getAttribute('data-qty-step'));
+            var minQty = parseFloat(row.getAttribute('data-min-qty')) || 0;
+            if (!price || !step) return;
+            var notInput = row.querySelector('input[name$="__notional"]');
+            var n = parseFloat((notInput || {}).value) || 0;
+            if (n <= 0) {
+              hint.innerHTML = 'введите размер';
+              hint.className = 'strat-field-lot strat-field-lot-warn';
+              return;
+            }
+            var rawQty = n / price;
+            var qty = Math.floor(rawQty / step) * step;
+            var actual = qty * price;
+            // Symbol code for the qty unit — pull from the sub-row label.
+            // Simpler: use a data-coin attribute if we want stricter; we
+            // don't render coin name in the JS path to avoid duplication
+            // (SSR already has it correct; JS just updates the number).
+            var coinMatch = hint.textContent.match(/[A-Z0-9]+$/);
+            var coin = coinMatch ? coinMatch[0] : '';
+            if (qty < minQty || qty <= 0) {
+              var minNotional = (minQty * price).toFixed(2);
+              hint.innerHTML = '<b style="color:#ff8b8b">слишком мало</b> · минимум ' + minNotional + ' USDT (' + minQty + ' ' + coin + ')';
+              hint.className = 'strat-field-lot strat-field-lot-warn';
+              return;
+            }
+            var diff = n - actual;
+            var diffPct = (diff / n) * 100;
+            // Format qty cleanly (strip trailing zeros) — same as SSR.
+            var qtyStr = (+qty.toFixed(8)).toString();
+            var lotPrice = (step * price);
+            var ok = diffPct < 2;
+            var prefix = ok ? 'на бирже: ' : '<b style="color:#ffbc46">на бирже:</b> ';
+            var suffix = ok ? '' : ' · цена лота ' + lotPrice.toFixed(2) + ' USDT';
+            hint.innerHTML = prefix + '<b>$' + actual.toFixed(2) + '</b> (' + qtyStr + ' ' + coin + ')' + suffix;
+            hint.className = ok ? 'strat-field-lot' : 'strat-field-lot strat-field-lot-warn';
+          });
+        }
+        form.addEventListener('input', function() {
+          recompute();
+          recomputeLotHints();
+        });
+        form.addEventListener('change', function() {
+          recompute();
+          recomputeLotHints();
+        });
         // Visual feedback: toggle row's strat-row-on class live so the
         // green border follows the checkbox state without waiting for
         // server-side rerender.
@@ -601,6 +691,15 @@ function styles(): string {
     font-size: 11.5px; color: #6b7480; line-height: 1.4;
   }
   .strat-field-hint b { color: #4ad991; }
+  .strat-field-lot {
+    display: block;
+    font-size: 11.5px;
+    color: #8590a0;
+    line-height: 1.4;
+    margin-top: 2px;
+  }
+  .strat-field-lot b { color: #cfd6dd; }
+  .strat-field-lot-warn { color: #ffbc46; }
 
   .strat-actions {
     display: flex; justify-content: space-between; gap: 12px;

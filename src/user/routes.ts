@@ -33,6 +33,33 @@ import {
 } from '../db/repos/user-strategies.js';
 import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
 import { closeAllUserPositions } from '../strategies/user-fanout.js';
+import { getLastPrice, getInstrumentInfo } from '../exchange/bybit-public.js';
+
+/**
+ * For the /account/strategies calculator: for every enabled strategy
+ * row we want to show the user "your $X on BTC at the current price
+ * actually executes as $Y (qty 0.001) because of Bybit's lot-size".
+ *
+ * Fetch live price + qtyStep concurrently for every distinct symbol
+ * used by the configs. Cached upstream (1h for instrument info, 5s
+ * for tickers) so this is cheap even on many strategies.
+ *
+ * Returns Map<symbol, { price, qtyStep, minOrderQty }>. Symbols where
+ * either lookup fails are simply omitted — UI degrades gracefully
+ * (no hint shown for that row, but field still works).
+ */
+async function gatherLotInfo(symbols: string[]): Promise<Map<string, { price: number; qtyStep: number; minOrderQty: number }>> {
+  const map = new Map<string, { price: number; qtyStep: number; minOrderQty: number }>();
+  const uniq = Array.from(new Set(symbols.filter((s) => !!s)));
+  await Promise.allSettled(
+    uniq.map(async (symbol) => {
+      const [price, info] = await Promise.all([getLastPrice(symbol), getInstrumentInfo(symbol)]);
+      if (price === null || !info || info.qtyStep <= 0) return;
+      map.set(symbol, { price, qtyStep: info.qtyStep, minOrderQty: info.minOrderQty });
+    }),
+  );
+  return map;
+}
 import { renderDashboard } from './dashboard.js';
 import { computeMarginState } from './margin.js';
 import { renderStrategiesPage } from './strategies.js';
@@ -154,6 +181,10 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
     const margin = computeMarginState(user.userId);
+    const symbols = Object.values(STRATEGY_CONFIGS)
+      .filter((s) => s.enabled && s.symbol)
+      .map((s) => s.symbol!);
+    const lotInfo = await gatherLotInfo(symbols);
     return reply.send(
       renderStrategiesPage({
         displayName: user.displayName,
@@ -165,6 +196,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         insufficientBalanceAt: apiKey?.insufficient_balance_at ?? null,
         lastBalanceUsdt: apiKey?.last_balance_usdt ?? null,
         usedMarginUsdt: margin.usedUsdt,
+        lotInfo,
       }),
     );
   });
@@ -240,6 +272,10 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     const apiKey = findActiveKey(user.userId);
     const sub2 = findSubscription(user.userId);
     const margin2 = computeMarginState(user.userId);
+    const symbols2 = Object.values(STRATEGY_CONFIGS)
+      .filter((s) => s.enabled && s.symbol)
+      .map((s) => s.symbol!);
+    const lotInfo2 = await gatherLotInfo(symbols2);
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
     return reply.send(
@@ -253,6 +289,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         insufficientBalanceAt: apiKey?.insufficient_balance_at ?? null,
         lastBalanceUsdt: apiKey?.last_balance_usdt ?? null,
         usedMarginUsdt: margin2.usedUsdt,
+        lotInfo: lotInfo2,
       }),
     );
   });
