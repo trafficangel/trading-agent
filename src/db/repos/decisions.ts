@@ -329,6 +329,19 @@ const findUserDecisionByParentStmt = db.prepare<[number, number], { id: number }
    LIMIT 1
 `);
 
+const findActiveByUserStmt = db.prepare<[number], DecisionRow>(`
+  SELECT * FROM decisions
+   WHERE user_id = ? AND status = 'active' AND track = 'strategy'
+`);
+
+/** Audit H4 — used by /account/api-key/revoke to close all open user
+ *  positions BEFORE the key is soft-deleted. After revoke we no longer
+ *  have decrypted creds, so any position left open here would be
+ *  permanently stuck on Bybit from our side. */
+export function findActiveByUser(userId: number): DecisionRow[] {
+  return findActiveByUserStmt.all(userId);
+}
+
 /** Audit C2 — fan-out idempotency.
  *  Returns the existing user decision id if this (parent_decision_id, user_id)
  *  pair was already processed (entry attempted — success OR failure row).

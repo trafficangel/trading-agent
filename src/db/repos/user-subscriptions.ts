@@ -140,6 +140,36 @@ export function setStatus(userId: number, status: SubscriptionStatus): void {
   setStatusStmt.run(status, Date.now(), userId);
 }
 
+const cancelStmt = db.prepare(`
+  UPDATE user_subscriptions
+     SET status = 'cancelled',
+         manually_extended_by = ?,
+         manual_extension_note = ?,
+         updated_at = ?
+   WHERE user_id = ?
+`);
+
+/**
+ * Audit H6 — explicit cancel state. Distinct from 'expired' (natural
+ * end-of-paid-period) — 'cancelled' means the user (or admin acting on
+ * their behalf) deliberately ended the subscription before its expiry.
+ * Both block trading via hasActiveAccess(), but the cabinet UI shows
+ * different copy ("отменена" vs "истекла") and admin can filter on
+ * status to follow up. Re-activating a cancelled user requires explicit
+ * adminExtend() or setPlan() — the cancel doesn't lapse on its own.
+ *
+ * Trading positions are NOT closed here — call closeAllUserPositions
+ * from the caller if needed. (Future cabinet "cancel my subscription"
+ * button will call both.)
+ */
+export function cancelSubscription(
+  userId: number,
+  byAdmin: string,
+  reason: string | null = null,
+): void {
+  cancelStmt.run(byAdmin, reason, Date.now(), userId);
+}
+
 const setPausedStmt = db.prepare(`
   UPDATE user_subscriptions SET trading_paused_at = ?, updated_at = ? WHERE user_id = ?
 `);

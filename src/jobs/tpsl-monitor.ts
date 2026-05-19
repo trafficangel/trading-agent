@@ -11,7 +11,12 @@ import {
   type DecisionRow,
 } from '../db/repos/decisions.js';
 import { getLastPrice } from '../exchange/bybit-public.js';
-import { fetchPosition, fetchExecutions, setPositionSL } from '../exchange/bybit-private.js';
+import {
+  fetchPosition,
+  fetchExecutions,
+  fetchClosedPnl,
+  setPositionSL,
+} from '../exchange/bybit-private.js';
 import { findActiveKey, getDecryptedCreds } from '../db/repos/user-api-keys.js';
 import { sendMessage, sendPhoto } from '../telegram/bot.js';
 import { resultPost } from '../telegram/result-template.js';
@@ -244,13 +249,49 @@ async function reconcileUserPosition(p: DecisionRow): Promise<void> {
       else closeReason = 'manual';
     }
   }
-  // Fallback: if exec-list lookup failed (no network / Bybit hiccup) →
-  // use last-price proxy + best-guess sl_hit. Better than leaving the
-  // row open forever.
+  // Audit H7 — second-tier fallback: closed-PnL records. Bybit's
+  // execution-list only goes back 7 days; closed-pnl persists longer.
+  // Useful when a position was orphaned across a long restart, or our
+  // reconcile loop didn't catch the SL hit in the same week it happened.
+  if (closePrice == null) {
+    const cpRes = await fetchClosedPnl(creds, { symbol: p.symbol, limit: 20 });
+    if (cpRes.ok && cpRes.rows.length > 0) {
+      // Pick the row whose qty matches our recorded bybit_qty (or
+      // entry qty) AND whose createdTime is later than our open.
+      // Bybit closed-pnl side is the CLOSING side (opposite of position).
+      const ourCloseSide = p.side === 'long' ? 'Sell' : 'Buy';
+      const candidate = cpRes.rows.find(
+        (row) =>
+          row.side === ourCloseSide &&
+          row.createdTime >= p.created_at &&
+          (p.bybit_qty ? Math.abs(row.qty - p.bybit_qty) / p.bybit_qty < 0.05 : true),
+      );
+      if (candidate) {
+        closePrice = candidate.avgExitPrice;
+        bybitCloseAvgPrice = candidate.avgExitPrice;
+        // exitType from Bybit: "TakeProfit"/"StopLoss"/"Liquidation"/"Trade"
+        if (candidate.exitType === 'StopLoss' || candidate.exitType === 'Liquidation') {
+          closeReason = 'sl_hit';
+        } else {
+          closeReason = 'manual';
+        }
+        logger.info(
+          { decision_id: p.id, exitType: candidate.exitType, closePrice },
+          'tpsl reconcile: recovered via closed-pnl',
+        );
+      }
+    }
+  }
+  // Last-resort fallback: last-price proxy. Far less accurate but
+  // better than leaving the row open forever.
   if (closePrice == null) {
     const lastPrice = await getLastPrice(p.symbol);
     if (lastPrice == null) return;
     closePrice = lastPrice;
+    logger.warn(
+      { decision_id: p.id, lastPrice },
+      'tpsl reconcile: using last-price fallback (exec-list + closed-pnl both empty)',
+    );
   }
 
   const slForR = p.original_sl ?? p.sl ?? p.entry;

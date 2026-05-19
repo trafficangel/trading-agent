@@ -31,6 +31,7 @@ import { pageShell } from '../strategies/landing.js';
 import {
   findSubscription,
   setPlan,
+  cancelSubscription,
   ensureTrialFor,
   adminExtend,
   type SubscriptionRow,
@@ -253,7 +254,19 @@ function renderDashboard(csrfToken: string): string {
                  <button class="adm-btn adm-btn-secondary" type="submit"
                    onclick="return confirm('Продлить подписку для ${escapeHtml(name)}?')">Продлить</button>
                </form>`;
-          const toggle = `<div class="adm-actions">${vipToggle}${extendForm}</div>`;
+          // Audit H6 — cancel button. Hidden for already-cancelled
+          // and expired rows (no point cancelling an already-dead sub).
+          // VIPs can be cancelled too — operator may want to wind one
+          // down before re-issuing under different terms.
+          const cancelForm =
+            status === 'cancelled' || status === 'expired'
+              ? ''
+              : `<form method="POST" action="/admin/users/${r.id}/cancel" style="display:inline; margin-left:4px"
+                       onsubmit="return confirm('Отменить подписку для ${escapeHtml(name)}? Доступ к торговле будет заблокирован, открытые позиции НЕ закрываются автоматически.');">
+                   ${csrfField}
+                   <button class="adm-btn adm-btn-danger" type="submit">Отменить</button>
+                 </form>`;
+          const toggle = `<div class="adm-actions">${vipToggle}${extendForm}${cancelForm}</div>`;
           // Days-left badge for the План column when on standard.
           const daysLeftBadge = sub && plan === 'standard' && status !== 'cancelled'
             ? `<div class="plan-days">${daysLeftLabel(sub.access_until)}</div>`
@@ -358,6 +371,8 @@ function renderDashboard(csrfToken: string): string {
       .adm-btn-warn:hover { background: rgba(255, 188, 70, 0.10); }
       .adm-btn-secondary { border-color: #2a323d; color: #cfd6dd; }
       .adm-btn-secondary:hover { border-color: #4ad991; color: #fff; }
+      .adm-btn-danger { border-color: rgba(255, 99, 99, 0.5); color: #ff8b8b; }
+      .adm-btn-danger:hover { background: rgba(255, 99, 99, 0.10); }
       .adm-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
       .adm-select {
         background: #0b0e13; color: #cfd6dd; border: 1px solid #2a323d;
@@ -481,6 +496,50 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     } catch (err) {
       logger.error({ err, user_id: userId }, 'admin: extend failed');
       reply.code(500).send('failed to extend subscription');
+      return;
+    }
+    reply.code(303).header('location', '/admin').send();
+  });
+
+  // ---------------- POST /admin/users/:id/cancel ----------------
+  // Audit H6 — explicit cancel state, distinct from natural expiry.
+  // Used when a user requests cancellation by Telegram before their
+  // paid period ends, or for fraud/abuse. Status → 'cancelled', which
+  // gates listEligibleTargets and shows different cabinet copy.
+  app.post('/admin/users/:id/cancel', async (req, reply) => {
+    if (!checkAuth(req, reply)) return;
+    const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
+    if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;
+    const userId = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      reply.code(400).send('bad user id');
+      return;
+    }
+    const before = findSubscription(userId);
+    if (!before) {
+      reply.code(404).send('no subscription');
+      return;
+    }
+    const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
+    const note = typeof (req.body as { reason?: unknown })?.reason === 'string'
+      ? String((req.body as { reason: string }).reason).slice(0, 200)
+      : 'cancelled via /admin';
+    try {
+      cancelSubscription(userId, adminEmail, note);
+      const after = findSubscription(userId);
+      recordAdminAction({
+        adminEmail,
+        targetUserId: userId,
+        action: 'cancel_subscription',
+        before: { status: before.status, access_until: before.access_until },
+        after: after ? { status: after.status, access_until: after.access_until } : null,
+        note,
+        ip: req.ip,
+      });
+      logger.info({ user_id: userId, by: adminEmail, note }, 'admin: subscription cancelled');
+    } catch (err) {
+      logger.error({ err, user_id: userId }, 'admin: cancel failed');
+      reply.code(500).send('failed to cancel subscription');
       return;
     }
     reply.code(303).header('location', '/admin').send();

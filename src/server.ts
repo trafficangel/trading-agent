@@ -83,6 +83,44 @@ async function main(): Promise<void> {
   // Without this plugin Fastify leaves req.body undefined for form data.
   await app.register(fastifyFormbody);
 
+  // Audit H2 — security headers on every HTML response. Defends against
+  // XSS-stolen-CSRF (no third-party scripts can execute), clickjacking
+  // (no embedding in iframes), MIME-sniffing attacks, and protocol
+  // downgrade. The webhook endpoint returns JSON and is unaffected.
+  //
+  // CSP allows inline scripts/styles because the cabinet uses several
+  // <style> blocks and onsubmit="confirm(...)" attributes. Full strict
+  // CSP (no 'unsafe-inline') would require a templating refactor —
+  // tracked as a follow-up. The headers below still block the most
+  // common XSS vector (third-party script-src) and remove
+  // frame-ancestors as a vector for clickjacking.
+  app.addHook('onSend', async (req, reply, payload) => {
+    // Skip for webhooks + JSON APIs (preserve their content-type-based behaviour)
+    if (req.url.startsWith('/webhook/')) return payload;
+    reply.header(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: https:",
+        "font-src 'self' data:",
+        "connect-src 'self'",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "object-src 'none'",
+        "upgrade-insecure-requests",
+      ].join('; '),
+    );
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY'); // legacy, redundant with frame-ancestors
+    reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    reply.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), payment=()');
+    return payload;
+  });
+
   app.get('/health', async () => ({ ok: true, mode: config.MODE }));
 
   app.get('/status', async () => {

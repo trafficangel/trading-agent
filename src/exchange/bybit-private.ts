@@ -398,6 +398,12 @@ export async function fetchExecutions(
   creds: Creds,
   args: { symbol: string; startTime: number; limit?: number },
 ): Promise<{ ok: true; rows: ExecutionRow[] } | { ok: false; code: number; msg: string }> {
+  // Audit H7 — Bybit V5 execution-list only goes back 7 days. Passing
+  // an older startTime returns retCode 10001 ("invalid param"). Clamp
+  // here so we degrade to "no executions found" (caller falls back to
+  // closed-pnl / last-price) instead of erroring out.
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const clampedStartTime = Math.max(args.startTime, sevenDaysAgo);
   const r = await signedGet<{
     list?: Array<{
       execType: string;
@@ -414,7 +420,7 @@ export async function fetchExecutions(
   }>(creds, '/v5/execution/list', {
     category: 'linear',
     symbol: args.symbol,
-    startTime: args.startTime,
+    startTime: clampedStartTime,
     limit: args.limit ?? 50,
   });
   if (!r.ok) return r;
@@ -429,6 +435,72 @@ export async function fetchExecutions(
     execTime: Number(row.execTime),
     orderId: row.orderId,
     orderLinkId: row.orderLinkId ?? null,
+  }));
+  return { ok: true, rows };
+}
+
+/** Audit H7 — closed-PnL records persist on Bybit longer than the 7-day
+ *  execution-list window. Used by tpsl-monitor reconcile to recover the
+ *  exact close price + side + qty for positions Bybit closed on its own
+ *  more than a week ago (e.g. a stop hit on a position we orphaned across
+ *  a long restart or before our reconcile loop ran).
+ *
+ *  Returns at most `limit` (default 10) closed-pnl rows for the symbol,
+ *  newest first. Caller filters by execTime / qty to find the row that
+ *  matches a specific decision. */
+export type ClosedPnlRow = {
+  symbol: string;
+  /** Bybit closed-pnl uses the OPPOSITE side from the closed position:
+   *  a long closed by a Sell → side='Sell'. */
+  side: 'Buy' | 'Sell';
+  qty: number;
+  avgEntryPrice: number;
+  avgExitPrice: number;
+  closedPnl: number;
+  /** "Liquidation" | "TakeProfit" | "StopLoss" | "Trade" | ... */
+  exitType: string;
+  createdTime: number;
+  updatedTime: number;
+  orderId: string;
+};
+
+export async function fetchClosedPnl(
+  creds: Creds,
+  args: { symbol: string; startTime?: number; limit?: number },
+): Promise<{ ok: true; rows: ClosedPnlRow[] } | { ok: false; code: number; msg: string }> {
+  const query: Record<string, string | number | undefined> = {
+    category: 'linear',
+    symbol: args.symbol,
+    limit: args.limit ?? 10,
+  };
+  if (args.startTime) query.startTime = args.startTime;
+  const r = await signedGet<{
+    list?: Array<{
+      symbol: string;
+      side: string;
+      qty: string;
+      avgEntryPrice: string;
+      avgExitPrice: string;
+      closedPnl: string;
+      exitType?: string;
+      execType?: string;
+      createdTime: string;
+      updatedTime: string;
+      orderId: string;
+    }>;
+  }>(creds, '/v5/position/closed-pnl', query);
+  if (!r.ok) return r;
+  const rows: ClosedPnlRow[] = (r.data.list ?? []).map((row) => ({
+    symbol: row.symbol,
+    side: row.side === 'Buy' ? 'Buy' : 'Sell',
+    qty: Number(row.qty),
+    avgEntryPrice: Number(row.avgEntryPrice),
+    avgExitPrice: Number(row.avgExitPrice),
+    closedPnl: Number(row.closedPnl),
+    exitType: row.exitType ?? row.execType ?? 'unknown',
+    createdTime: Number(row.createdTime),
+    updatedTime: Number(row.updatedTime),
+    orderId: row.orderId,
   }));
   return { ok: true, rows };
 }
@@ -467,12 +539,11 @@ export async function fetchOrderResult(
 // Helpers
 // ============================================================
 
-/** Round contract qty to Bybit's per-symbol step. Conservatively uses
- *  6 decimals on small-tick coins (e.g. BCH at 0.001 step is fine).
- *  TODO Phase C polish: cache instruments-info per symbol for exact step. */
+/** @deprecated Use `roundQtyToStep` from bybit-public.ts which fetches
+ *  the actual per-symbol qtyStep from instruments-info. Kept here only
+ *  for compile-time back-compat — audit H5. */
 export function roundContractQty(qty: number, _symbol: string): number {
   if (!Number.isFinite(qty) || qty <= 0) return 0;
-  // 4 decimals covers BTC (0.001 step), ETH (0.01), and majority of alts.
   return Math.floor(qty * 10_000) / 10_000;
 }
 

@@ -352,6 +352,103 @@ export async function getBybitKlines(
   }
 }
 
+// ============================================================
+// Instrument info — audit H5
+// ============================================================
+//
+// Each Bybit USDT-perp symbol has its own qty step (`lotSizeFilter.qtyStep`)
+// and minimum order qty. Hard-coding 4 decimals (the previous behaviour)
+// worked for BTC and ETH but breaks on:
+//   - dirt-cheap memecoins where qty must be integer (PEPE step=1)
+//   - expensive coins with tighter steps (BTC step=0.001)
+//   - new listings with unusual steps (0.0001, 0.5, etc.)
+// Wrong rounding → Bybit 170131 invalid_qty error → user_fanout failure.
+//
+// We fetch once per symbol, cache 1h. Instrument specs change only on
+// re-listings / param updates — 1h TTL is safe.
+
+export type InstrumentInfo = {
+  symbol: string;
+  qtyStep: number; // e.g. 0.001 (BTC), 0.01 (ETH), 1 (PEPE)
+  minOrderQty: number;
+  maxOrderQty: number;
+  tickSize: number; // price step
+  fetchedAt: number;
+};
+
+type InstrumentInfoResp = {
+  retCode: number;
+  retMsg: string;
+  result?: {
+    list?: Array<{
+      symbol: string;
+      lotSizeFilter?: {
+        qtyStep?: string;
+        minOrderQty?: string;
+        maxOrderQty?: string;
+      };
+      priceFilter?: {
+        tickSize?: string;
+      };
+    }>;
+  };
+};
+
+const instrumentCache = new Map<string, InstrumentInfo>();
+const INSTRUMENT_TTL_MS = 60 * 60 * 1000; // 1h
+
+export async function getInstrumentInfo(symbol: string): Promise<InstrumentInfo | null> {
+  const cached = instrumentCache.get(symbol);
+  if (cached && Date.now() - cached.fetchedAt < INSTRUMENT_TTL_MS) return cached;
+  try {
+    const res = await request(
+      `${BASE}/v5/market/instruments-info?category=linear&symbol=${symbol}`,
+      { method: 'GET', headersTimeout: 5_000, bodyTimeout: 5_000 },
+    );
+    const body = (await res.body.json()) as InstrumentInfoResp;
+    if (body.retCode !== 0 || !body.result?.list?.[0]) {
+      logger.warn({ retCode: body.retCode, msg: body.retMsg, symbol }, 'bybit instruments-info non-OK');
+      return null;
+    }
+    const row = body.result.list[0];
+    const lot = row.lotSizeFilter ?? {};
+    const px = row.priceFilter ?? {};
+    const info: InstrumentInfo = {
+      symbol: row.symbol,
+      qtyStep: Number(lot.qtyStep ?? '0.001'),
+      minOrderQty: Number(lot.minOrderQty ?? '0'),
+      maxOrderQty: Number(lot.maxOrderQty ?? '0'),
+      tickSize: Number(px.tickSize ?? '0.01'),
+      fetchedAt: Date.now(),
+    };
+    instrumentCache.set(symbol, info);
+    return info;
+  } catch (err) {
+    logger.error({ err, symbol }, 'bybit instruments-info request failed');
+    return null;
+  }
+}
+
+/** Round qty DOWN to the symbol's qty step. If the step is missing
+ *  (cache miss + network failed), falls back to 4-decimal floor —
+ *  same as the legacy behaviour, so we never silently widen behaviour. */
+export async function roundQtyToStep(qty: number, symbol: string): Promise<number> {
+  if (!Number.isFinite(qty) || qty <= 0) return 0;
+  const info = await getInstrumentInfo(symbol);
+  if (!info || info.qtyStep <= 0) {
+    return Math.floor(qty * 10_000) / 10_000;
+  }
+  // Floor to step. Use integer arithmetic to avoid float drift: scale
+  // by 1/step, floor, scale back. For step=1 this is just Math.floor(qty).
+  const stepScale = 1 / info.qtyStep;
+  const rounded = Math.floor(qty * stepScale) / stepScale;
+  // Clamp to [min, max]. If rounded < min we return 0 — caller treats
+  // that as "skip, notional too small for this user".
+  if (rounded < info.minOrderQty) return 0;
+  if (info.maxOrderQty > 0 && rounded > info.maxOrderQty) return info.maxOrderQty;
+  return rounded;
+}
+
 export function formatSentiment(s: MarketSentiment | null): string {
   if (!s) return '  (sentiment data unavailable)';
   const fr = s.fundingRate !== null ? `${(s.fundingRate * 100).toFixed(4)}%` : 'n/a';

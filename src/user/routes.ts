@@ -32,6 +32,7 @@ import {
   disableUserStrategy,
 } from '../db/repos/user-strategies.js';
 import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
+import { closeAllUserPositions } from '../strategies/user-fanout.js';
 import { renderDashboard } from './dashboard.js';
 import { renderStrategiesPage } from './strategies.js';
 import { renderApiKeyPage } from './api-key.js';
@@ -397,10 +398,15 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
   });
 
   // -------- POST /account/api-key/revoke --------
-  // Soft-delete the key. Open positions on Bybit stay open (we can't
-  // close them without the key); they'll be reconciled and closed by
-  // the strategy's natural exit signal. New entries no longer fire
-  // for this user until they connect a new key.
+  // Audit H4 — close every active position on Bybit BEFORE soft-deleting
+  // the key. Without this step a revoke would orphan open positions on
+  // Bybit because once revoked we have no decrypted creds left to close
+  // them — the user would be on the hook to find and close them by hand.
+  //
+  // If some closes fail (network glitch, balance gate, etc.) we surface
+  // a clear message naming the symbols; the user can finish closing
+  // manually on Bybit. Revoke still proceeds so the user's expressed
+  // intent ("disconnect") is honoured.
   app.post('/account/api-key/revoke', async (req, reply) => {
     const user = getAuthedUser(req);
     if (!user) {
@@ -415,11 +421,25 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         message: 'Активного ключа нет.',
       });
     }
+    const closeStats = await closeAllUserPositions(user.userId);
     revokeApiKey(row.id);
-    logger.info({ userId: user.userId, keyId: row.id }, 'api-key revoked by user');
+    logger.info(
+      { userId: user.userId, keyId: row.id, closeStats },
+      'api-key revoked by user, positions closed first',
+    );
+    let msg = 'Ключ отключён.';
+    if (closeStats.attempted > 0) {
+      if (closeStats.failed === 0) {
+        msg += ` Закрыто ${closeStats.succeeded} открытых позиций.`;
+      } else {
+        msg +=
+          ` Закрыто ${closeStats.succeeded} из ${closeStats.attempted} позиций. ` +
+          `Закройте вручную на Bybit: ${closeStats.failedSymbols.join(', ')}.`;
+      }
+    }
     return renderApiKeyWithFlash(req, reply, user, {
-      ok: true,
-      message: 'Ключ отключён. Открытые позиции продолжат жить до своего естественного выхода.',
+      ok: closeStats.failed === 0,
+      message: msg,
     });
   });
 

@@ -43,11 +43,13 @@ import {
   getDecryptedCreds,
   recordVerifyResult,
   setInsufficientBalance,
+  clearInsufficientBalanceIfUnchanged,
 } from '../db/repos/user-api-keys.js';
 import { isTradingActive } from '../db/repos/user-subscriptions.js';
 import {
   insertDecision,
   findActiveUserDecisions,
+  findActiveByUser,
   closeUserDecision,
   calcPnl,
   findUserDecisionByParent,
@@ -58,9 +60,9 @@ import {
   fetchOrderResult,
   fetchPosition,
   setPositionSL,
-  roundContractQty,
   bybitErrorLabel,
 } from '../exchange/bybit-private.js';
+import { roundQtyToStep } from '../exchange/bybit-public.js';
 import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 
 const PARALLEL_LIMIT = 10; // well below Bybit's 50 req/s global cap
@@ -223,9 +225,15 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
   }
 
   // 2. Place market entry with atomic SL.
-  const qty = roundContractQty(t.notional_usd / args.entry, args.symbol);
+  // Audit H5: round to the symbol's actual qtyStep from instruments-info
+  // (cached 1h). Pre-fix this was a hardcoded 4-decimal floor which
+  // breaks for integer-step coins (PEPE, SHIB) and tight-step majors.
+  const qty = await roundQtyToStep(t.notional_usd / args.entry, args.symbol);
   if (qty <= 0) {
-    logger.warn({ userId: t.user_id, notional: t.notional_usd, entry: args.entry }, 'fanOutEntry: qty rounded to 0');
+    logger.warn(
+      { userId: t.user_id, notional: t.notional_usd, entry: args.entry, symbol: args.symbol },
+      'fanOutEntry: qty rounded to 0 (notional below min or step lookup failed)',
+    );
     // Not an auth issue — don't poison the key.
     return false;
   }
@@ -379,9 +387,16 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
 
   // Mark the key as freshly verified (it just worked).
   recordVerifyResult(keyRow.id, true);
-  // Successful entry → user clearly had enough balance, so a previous
-  // insufficient_balance flag (if set) was stale. Clear it.
-  if (keyRow.insufficient_balance_at) setInsufficientBalance(keyRow.id, null);
+  // Audit H3 — clear the insufficient_balance flag with compare-and-swap.
+  // Race we're guarding against: this fanout started before a concurrent
+  // fanout on a DIFFERENT symbol set the flag (real failure). A naive
+  // `setInsufficientBalance(keyRow.id, null)` would wipe that flag and
+  // re-include the user in eligible-targets even though their balance
+  // is still insufficient for the new symbol.
+  // CAS only clears if the flag still equals what we read at the start.
+  if (keyRow.insufficient_balance_at) {
+    clearInsufficientBalanceIfUnchanged(keyRow.id, keyRow.insufficient_balance_at);
+  }
   return true;
 }
 
@@ -529,6 +544,60 @@ async function alertOperator(text: string): Promise<void> {
  *  intervention may be needed (audit C3 emergency close, decrypt fail). */
 async function alertOperatorCritical(text: string): Promise<void> {
   await sendMessage({ channel: 'logs', text, disable_notification: false }).catch(() => {});
+}
+
+/**
+ * Audit H4 — close every active user position before the key is revoked.
+ *
+ * Called from /account/api-key/revoke. Without this, soft-deleting the
+ * row leaves any open Bybit position permanently un-closable from our
+ * side (we no longer have decrypted creds), and the user's only safety
+ * net is the position-based SL Bybit holds on its own.
+ *
+ * Returns counts so the caller can flash a meaningful message:
+ *   { attempted: N, succeeded: K, failed: N-K }
+ *
+ * On failure we still let the revoke proceed — the user explicitly
+ * asked to disconnect. The flash message tells them which positions
+ * they need to close manually on Bybit.
+ */
+export async function closeAllUserPositions(
+  userId: number,
+  reason: 'strategy_exit' | 'reverse_signal' = 'strategy_exit',
+): Promise<{ attempted: number; succeeded: number; failed: number; failedSymbols: string[] }> {
+  const rows = findActiveByUser(userId);
+  if (rows.length === 0) {
+    return { attempted: 0, succeeded: 0, failed: 0, failedSymbols: [] };
+  }
+  let succeeded = 0;
+  let failed = 0;
+  const failedSymbols: string[] = [];
+  await Promise.allSettled(
+    rows.map((row) =>
+      limit(async () => {
+        if (!row.strategy_id) {
+          failed++;
+          failedSymbols.push(row.symbol);
+          return;
+        }
+        const ok = await executeUserExit(row, {
+          strategyId: row.strategy_id,
+          symbol: row.symbol,
+          forceReason: reason,
+        });
+        if (ok) succeeded++;
+        else {
+          failed++;
+          failedSymbols.push(row.symbol);
+        }
+      }),
+    ),
+  );
+  logger.info(
+    { userId, attempted: rows.length, succeeded, failed },
+    'closeAllUserPositions: done',
+  );
+  return { attempted: rows.length, succeeded, failed, failedSymbols };
 }
 
 /**

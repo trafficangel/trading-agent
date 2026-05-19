@@ -225,8 +225,34 @@ const setInsufficientStmt = db.prepare(`
   UPDATE user_api_keys SET insufficient_balance_at = ? WHERE id = ?
 `);
 
+const clearInsufficientCasStmt = db.prepare(`
+  UPDATE user_api_keys
+     SET insufficient_balance_at = NULL
+   WHERE id = ? AND insufficient_balance_at = ?
+`);
+
 /** Flip the insufficient_balance flag. Pass null to clear (user
  *  topped up or admin reset it). Pass Date.now() to set. */
 export function setInsufficientBalance(id: number, value: number | null): void {
   setInsufficientStmt.run(value, id);
+}
+
+/**
+ * Audit H3 — compare-and-swap clear.
+ *
+ * Only clears the flag if the current value matches `expectedTs`. Used
+ * by the fan-out's "successful entry → clear flag" path so a concurrent
+ * fan-out on a DIFFERENT symbol (which just hit insufficient_balance and
+ * SET the flag to a newer timestamp) doesn't get its flag wiped by an
+ * older successful order's clearing call.
+ *
+ * Returns true if the clear actually happened, false if the value moved
+ * underneath us (meaning some other thread set a newer flag — don't touch).
+ */
+export function clearInsufficientBalanceIfUnchanged(
+  id: number,
+  expectedTs: number,
+): boolean {
+  const res = clearInsufficientCasStmt.run(id, expectedTs);
+  return res.changes > 0;
 }

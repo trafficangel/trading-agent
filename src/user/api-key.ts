@@ -156,7 +156,7 @@ function renderConnectedState(key: ApiKeySummary, balance: number | null, csrfTo
           <button class="key-btn-secondary" type="submit">Проверить связь</button>
         </form>
         <form method="POST" action="/account/api-key/revoke" style="display:inline"
-              onsubmit="return confirm('Отключить ключ? Открытые позиции продолжат жить, новые сделки система открывать перестанет.');">
+              onsubmit="return confirm('Отключить ключ? Все ваши открытые позиции по стратегиям сначала будут закрыты на бирже по рынку, затем ключ будет удалён. Это безопаснее чем оставить позиции висеть без управления.');">
           ${csrfInput(csrfToken)}
           <button class="key-btn-danger" type="submit">Отключить ключ</button>
         </form>
