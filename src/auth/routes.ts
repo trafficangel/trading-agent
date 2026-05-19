@@ -36,6 +36,7 @@ import {
   clearVerificationAttempt,
   bumpVerificationAttempts,
   findSession,
+  findByPhoneHash,
   touchSession,
   SESSION_COOKIE,
   PENDING_COOKIE,
@@ -50,6 +51,13 @@ const startSchema = z.object({
    *  /strategies sends it. Trimmed + truncated to 40 chars at the
    *  application layer. */
   name: z.string().trim().min(1).max(40).optional(),
+  /** Intent:
+   *   - 'register' (default): create account if not exists, name required
+   *   - 'login': phone must already exist, name ignored
+   *
+   *  We distinguish so a "login" attempt with an unknown phone doesn't
+   *  silently create an account with no display_name. */
+  mode: z.enum(['login', 'register']).optional().default('register'),
 });
 
 const verifySchema = z.object({
@@ -120,10 +128,21 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
       reply.code(400);
       return { ok: false, error: 'invalid_phone_format', message: 'Введите номер с кодом страны, например +79991234567' };
     }
+    const phoneHash = hashPhone(phoneE164);
+
+    // Login mode: phone must already be in registrations. If not, bail
+    // out with phone_not_registered so the frontend can prompt the user
+    // to switch to register mode (and ask for their name).
+    if (parsed.data.mode === 'login' && !findByPhoneHash(phoneHash)) {
+      return {
+        ok: false,
+        error: 'phone_not_registered',
+        message: 'Этот номер не зарегистрирован. Зарегистрируйтесь сначала — это займёт минуту.',
+      };
+    }
 
     try {
       const res = await sendVerificationMessage(phoneE164);
-      const phoneHash = hashPhone(phoneE164);
       const ua = (req.headers['user-agent'] as string | undefined) ?? null;
       // Server-generated code: we stored what Gateway delivered, so we
       // can compare locally on /auth/verify — no extra Gateway call.

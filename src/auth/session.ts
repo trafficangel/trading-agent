@@ -96,6 +96,13 @@ export function findSession(sessionId: string): RegistrationRow | null {
   return findBySessionStmt.get(sessionId) ?? null;
 }
 
+/** Lookup an existing registration by phone hash. Used by the login flow
+ *  to bail out early if the phone isn't on file (so we don't auto-create
+ *  an account for someone who clicked «Войти» by mistake). */
+export function findByPhoneHash(phoneHash: string): RegistrationRow | null {
+  return findByPhoneStmt.get(phoneHash) ?? null;
+}
+
 export function touchSession(sessionId: string): void {
   updateLastSeenStmt.run(Date.now(), sessionId);
 }

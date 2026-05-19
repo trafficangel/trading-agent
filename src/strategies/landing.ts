@@ -2548,25 +2548,20 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
   // see the real dashboard.
   app.get('/strategies', async (req, reply) => {
     const enabled = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
-    const fromAutotrading = (req.query as { from?: string } | undefined)?.from === 'autotrading';
+    const q = (req.query ?? {}) as { from?: string; login?: string };
+    const fromAutotrading = q.from === 'autotrading';
+    const loginMode = q.login === '1';
     reply.type('text/html; charset=utf-8');
-    // Authed users who came from an autotrading CTA shouldn't see the
-    // strategies list — they're already past the marketing funnel and
-    // want the cabinet (where the next step is "connect Bybit / pick
-    // strategies"). 302 → /account.
-    if (fromAutotrading && isAuthed(req)) {
+    // Authed users who came from an autotrading CTA or a login CTA
+    // shouldn't see the strategies list — bounce them to /account.
+    if ((fromAutotrading || loginMode) && isAuthed(req)) {
       reply.redirect('/account');
       return;
     }
     if (!isAuthed(req)) {
       // No-cache on the gated stub so re-visits after auth get fresh HTML.
       reply.header('Cache-Control', 'private, no-store');
-      // Detect ?from=autotrading so the gate framing matches the CTA
-      // the user just clicked. Without this, hitting «Попробовать
-      // бесплатно» on /autotrading lands on a page whose modal says
-      // "Доступ к детальной статистике" — semantically wrong for an
-      // autotrading-signup intent.
-      return renderGatedPreview('index', renderStrategyIndex(enabled), { fromAutotrading });
+      return renderGatedPreview('index', renderStrategyIndex(enabled), { fromAutotrading, loginMode });
     }
     reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
     return renderStrategyIndex(enabled);
@@ -2609,7 +2604,7 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
 function renderGatedPreview(
   _kind: 'index' | 'detail',
   innerHtml: string,
-  opts: { fromAutotrading?: boolean } = {},
+  opts: { fromAutotrading?: boolean; loginMode?: boolean } = {},
 ): string {
   // Extract the inner <body> content of the rendered page so we don't
   // nest <html>. Quick'n'dirty: find first <div class="container">
@@ -2626,36 +2621,75 @@ function renderGatedPreview(
   const styleMatch = innerHtml.match(/<style>([\s\S]*?)<\/style>/);
   const inlineStyle = styleMatch ? styleMatch[1]! : '';
 
-  // Frame the gate differently for users who came from /autotrading
-  // CTAs — they expect a signup screen, not a "see-the-stats" gate.
-  const gateIcon = opts.fromAutotrading ? '🚀' : '🔒';
-  const gateTitle = opts.fromAutotrading
-    ? '14 дней автотрейдинга бесплатно'
-    : 'Доступ к детальной статистике';
-  const gateSub = opts.fromAutotrading
+  // 3-way framing of the gate:
+  //   - loginMode → phone-only «Войти»; if phone unknown, page JS
+  //     pivots to register flow with the phone pre-filled.
+  //   - fromAutotrading → register flow with autotrading-style copy
+  //   - default → register flow with "see-the-stats" copy
+  const gateIcon = opts.loginMode ? '👋' : opts.fromAutotrading ? '🚀' : '🔒';
+  const gateTitle = opts.loginMode
+    ? 'Вход в личный кабинет'
+    : opts.fromAutotrading
+      ? '14 дней автотрейдинга бесплатно'
+      : 'Доступ к детальной статистике';
+  const gateSub = opts.loginMode
+    ? 'Введите номер — пришлём 6-значный код в Telegram. Имя у нас уже есть.'
+    : opts.fromAutotrading
+      ? 'Введите имя и номер — отправим 6-значный код в Telegram. После подтверждения попадёте в личный кабинет и сможете подключить свой Bybit-аккаунт.'
+      : 'Введите имя и номер — отправим 6-значный код через официальный сервис подтверждения Telegram.';
+  // Initial mode for the JS controller. The form field rendering is
+  // identical (name + phone); on login mode the name field is hidden
+  // via CSS but the JS knows whether to send mode='login' or 'register'.
+  const initialMode = opts.loginMode ? 'login' : 'register';
+
+  // Pre-render both register + login copy so the JS toggle can swap
+  // them in-place without a fresh server roundtrip. Visibility is
+  // CSS-driven by [data-mode] on the wrapping #gate-phone-stage.
+  const registerIcon = opts.fromAutotrading ? '🚀' : '🔒';
+  const registerTitle = opts.fromAutotrading ? '14 дней автотрейдинга бесплатно' : 'Доступ к детальной статистике';
+  const registerSub = opts.fromAutotrading
     ? 'Введите имя и номер — отправим 6-значный код в Telegram. После подтверждения попадёте в личный кабинет и сможете подключить свой Bybit-аккаунт.'
-    : 'Введите номер — отправим 6-значный код через официальный сервис подтверждения Telegram.';
+    : 'Введите имя и номер — отправим 6-значный код через официальный сервис подтверждения Telegram.';
+  void gateIcon; void gateTitle; void gateSub; // initial values were used to set data-mode
 
   const formHtml = `
     <div class="gate-overlay">
-      <div class="gate-card">
+      <div class="gate-card" data-mode="${initialMode}">
         <div class="gate-head">
-          <span class="gate-icon" aria-hidden="true">${gateIcon}</span>
-          <h2 class="gate-title">${gateTitle}</h2>
+          <span class="gate-icon gate-icon-register" aria-hidden="true">${registerIcon}</span>
+          <span class="gate-icon gate-icon-login" aria-hidden="true">👋</span>
+          <h2 class="gate-title">
+            <span class="gate-title-register">${registerTitle}</span>
+            <span class="gate-title-login">Вход в личный кабинет</span>
+          </h2>
         </div>
         <p class="gate-sub">
-          ${gateSub}
+          <span class="gate-sub-register">${registerSub}</span>
+          <span class="gate-sub-login">Введите номер — пришлём 6-значный код в Telegram. Имя у нас уже есть.</span>
         </p>
 
-        <!-- Stage 1: name + phone -->
+        <!-- Stage 1: (name +) phone — name hidden in login mode -->
         <div id="gate-phone-stage">
           <form id="gate-phone-form" class="gate-form" novalidate>
-            <input type="text" name="name" required placeholder="Как к вам обращаться?"
-                   maxlength="40" autocomplete="given-name" />
+            <div class="gate-name-field">
+              <input type="text" name="name" placeholder="Как к вам обращаться?"
+                     maxlength="40" autocomplete="given-name" />
+            </div>
             <input type="tel" name="phone" required placeholder="+79991234567"
                    inputmode="tel" autocomplete="tel" />
-            <button type="submit">Получить код в Telegram</button>
+            <button type="submit">
+              <span class="gate-btn-label-register">Зарегистрироваться</span>
+              <span class="gate-btn-label-login">Войти</span>
+            </button>
           </form>
+          <p class="gate-mode-toggle">
+            <span class="gate-toggle-to-login">
+              Уже регистрировались? <a href="#" id="gate-switch-to-login">Войти</a>
+            </span>
+            <span class="gate-toggle-to-register">
+              Впервые здесь? <a href="#" id="gate-switch-to-register">Зарегистрироваться</a>
+            </span>
+          </p>
           <div class="gate-trust">
             <div class="gate-trust-row">
               <span class="gate-trust-icon">📱</span>
@@ -2740,11 +2774,30 @@ function renderGatedPreview(
             phoneForm.querySelector('button').disabled = false;
           });
         }
+
+        // Mode toggle. data-mode on .gate-card controls visibility of
+        // every mode-specific element (icon, title, sub, name field,
+        // button label, toggle links) via CSS. Single source of truth.
+        var gateCard = document.querySelector('.gate-card');
+        function getMode() {
+          return gateCard ? (gateCard.getAttribute('data-mode') || 'register') : 'register';
+        }
+        function setMode(mode) {
+          if (gateCard) gateCard.setAttribute('data-mode', mode);
+          setMsg('');
+          phoneForm.querySelector('button').disabled = false;
+        }
+        var toLogin = document.getElementById('gate-switch-to-login');
+        var toRegister = document.getElementById('gate-switch-to-register');
+        if (toLogin) toLogin.addEventListener('click', function(e) { e.preventDefault(); setMode('login'); phoneForm.phone.focus(); });
+        if (toRegister) toRegister.addEventListener('click', function(e) { e.preventDefault(); setMode('register'); phoneForm.name.focus(); });
+
         phoneForm.addEventListener('submit', async function(e) {
           e.preventDefault();
+          var mode = getMode();
           var name = phoneForm.name.value.trim();
           var phone = phoneForm.phone.value.trim();
-          if (!name) {
+          if (mode === 'register' && !name) {
             setMsg('Введите имя, чтобы продолжить', true);
             phoneForm.name.focus();
             return;
@@ -2752,13 +2805,25 @@ function renderGatedPreview(
           setMsg('Отправляем код…');
           phoneForm.querySelector('button').disabled = true;
           try {
+            var body = mode === 'login'
+              ? { phone: phone, mode: 'login' }
+              : { phone: phone, name: name, mode: 'register' };
             var res = await fetch('/auth/start', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ phone: phone, name: name }),
+              body: JSON.stringify(body),
             });
             var data = await res.json();
             if (!data.ok) {
+              // Special-case: user typed a phone we don't know in login
+              // mode → switch to register, pre-fill the phone, focus name.
+              if (data.error === 'phone_not_registered') {
+                setMode('register');
+                setMsg('Этот номер не зарегистрирован. Введите имя и нажмите «Зарегистрироваться».', true);
+                phoneForm.name.focus();
+                phoneForm.querySelector('button').disabled = false;
+                return;
+              }
               setMsg(data.message || 'Не удалось отправить код. Проверьте номер.', true);
               phoneForm.querySelector('button').disabled = false;
               return;
@@ -2888,6 +2953,32 @@ ${metrikaScript}
   }
   .gate-form button:hover { opacity: 0.92; }
   .gate-form button:disabled { opacity: 0.5; cursor: wait; }
+
+  /* Mode-driven visibility — single data-mode on .gate-card cascades to
+     every mode-specific element (icon, title, sub, fields, button label,
+     toggle links). data-mode=login → hide everything tagged -register
+     and vice versa. */
+  .gate-card[data-mode="login"]  .gate-icon-register,
+  .gate-card[data-mode="login"]  .gate-title-register,
+  .gate-card[data-mode="login"]  .gate-sub-register,
+  .gate-card[data-mode="login"]  .gate-name-field,
+  .gate-card[data-mode="login"]  .gate-btn-label-register,
+  .gate-card[data-mode="login"]  .gate-toggle-to-login {
+    display: none;
+  }
+  .gate-card[data-mode="register"] .gate-icon-login,
+  .gate-card[data-mode="register"] .gate-title-login,
+  .gate-card[data-mode="register"] .gate-sub-login,
+  .gate-card[data-mode="register"] .gate-btn-label-login,
+  .gate-card[data-mode="register"] .gate-toggle-to-register {
+    display: none;
+  }
+  .gate-mode-toggle {
+    text-align: center; font-size: 12.5px; color: var(--text-faint);
+    margin-top: 10px;
+  }
+  .gate-mode-toggle a { color: var(--accent); text-decoration: none; }
+  .gate-mode-toggle a:hover { text-decoration: underline; }
   .gate-msg {
     margin: 10px 0 0; font-size: 12px; color: var(--text-dim);
     min-height: 14px;

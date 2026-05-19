@@ -100,6 +100,9 @@ function renderHero(): string {
         <div class="at-hero-pricing">
           <b>${TRIAL_DAYS} дней бесплатно</b>, потом <b>$${PRICE_USD}/мес</b>
         </div>
+        <div class="at-hero-login">
+          Уже регистрировались? <a href="/strategies?login=1">Войти →</a>
+        </div>
       </div>
       <div class="at-hero-pills">
         <span class="at-pill">${ico('🛡')}Ключ без права на вывод</span>
@@ -302,6 +305,9 @@ function renderFinalCta(): string {
         ${TRIAL_DAYS} дней бесплатного доступа. Без привязки карты. Отмена в один клик.
       </p>
       <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">Зарегистрироваться</a>
+      <p class="at-cta-login">
+        Уже регистрировались? <a href="/strategies?login=1">Войти →</a>
+      </p>
       <p class="at-cta-help">
         Вопросы? Напишите оператору: <a href="${SUPPORT_TG}" target="_blank" rel="noopener">@dboykod</a>
       </p>
@@ -333,6 +339,13 @@ function styles(): string {
   .at-hero-cta { display: flex; flex-direction: column; align-items: center; gap: 10px; }
   .at-hero-pricing { font-size: 13.5px; color: #8590a0; }
   .at-hero-pricing b { color: #cfd6dd; }
+  .at-hero-login {
+    font-size: 13px; color: #6b7480; margin-top: 4px;
+  }
+  .at-hero-login a {
+    color: #4ad991; text-decoration: none; font-weight: 500;
+  }
+  .at-hero-login a:hover { text-decoration: underline; }
   .at-hero-pills {
     display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
     margin-top: 28px;
@@ -515,6 +528,13 @@ function styles(): string {
   .at-cta-sub {
     font-size: 14.5px; color: #9aa5b1; margin: 0 auto 28px; max-width: 480px;
   }
+  .at-cta-login {
+    font-size: 13.5px; color: #8590a0; margin-top: 16px;
+  }
+  .at-cta-login a {
+    color: #4ad991; text-decoration: none; font-weight: 500;
+  }
+  .at-cta-login a:hover { text-decoration: underline; }
   .at-cta-help { font-size: 13px; color: #6b7480; margin-top: 20px; }
   .at-cta-help a { color: #4ad991; text-decoration: none; }
   .at-cta-help a:hover { text-decoration: underline; }

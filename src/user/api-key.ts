@@ -55,9 +55,15 @@ export function renderApiKeyPage(args: {
     ? `<div class="key-flash ${args.flash.ok ? 'ok' : 'err'}">${escapeHtml(args.flash.message)}</div>`
     : '';
 
-  const main = args.apiKey && !args.apiKey.revoked_at
-    ? renderConnectedState(args.apiKey, args.balanceUsdt, args.csrfToken)
+  const isConnected = !!(args.apiKey && !args.apiKey.revoked_at);
+  const main = isConnected
+    ? renderConnectedState(args.apiKey!, args.balanceUsdt, args.csrfToken)
     : renderConnectForm(args.csrfToken);
+  // Guide only matters when the user hasn't connected a key yet (or
+  // has revoked their previous one). Once connected, the page becomes
+  // a status view — no need to show the multi-step instructions or
+  // the "replace key" form below.
+  const showGuide = !isConnected;
 
   const body = `
     ${styles()}
@@ -75,7 +81,7 @@ export function renderApiKeyPage(args: {
 
       ${flashHtml}
       ${main}
-      ${renderGuide()}
+      ${showGuide ? renderGuide() : ''}
 
       <div class="key-back">
         <a href="/account">← Назад в кабинет</a>
@@ -128,12 +134,11 @@ function renderConnectedState(key: ApiKeySummary, balance: number | null, csrfTo
           <button class="key-btn-danger" type="submit">Отключить ключ</button>
         </form>
       </div>
+      <div class="key-rotate-hint">
+        Хотите заменить ключ на новый? Нажмите <b>«Отключить ключ»</b> выше — форма
+        ввода нового ключа появится автоматически.
+      </div>
     </div>
-
-    <details class="key-rotate-block">
-      <summary>Заменить ключ на новый</summary>
-      ${renderInputs(csrfToken)}
-    </details>
   `;
 }
 
@@ -343,15 +348,13 @@ function styles(): string {
   }
   .key-btn-danger:hover { background: rgba(255, 99, 99, 0.10); }
 
-  .key-rotate-block {
-    background: #11161d; border: 1px solid #1f2630; border-radius: 12px;
-    padding: 16px 22px; margin: 14px 0; color: #9aa5b1;
+  .key-rotate-hint {
+    margin-top: 14px;
+    font-size: 12.5px;
+    color: #6b7480;
+    line-height: 1.55;
   }
-  .key-rotate-block summary {
-    cursor: pointer; font-size: 14px; padding: 4px 0; color: #cfd6dd;
-  }
-  .key-rotate-block[open] { padding-bottom: 22px; }
-  .key-rotate-block .key-form { margin-top: 14px; }
+  .key-rotate-hint b { color: #cfd6dd; }
 
   .key-bonus-banner {
     background: linear-gradient(135deg, rgba(212,175,55,0.10) 0%, rgba(74,217,145,0.06) 100%);
