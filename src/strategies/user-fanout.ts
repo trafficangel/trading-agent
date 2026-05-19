@@ -64,6 +64,7 @@ import {
 } from '../exchange/bybit-private.js';
 import { roundQtyToStep } from '../exchange/bybit-public.js';
 import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD } from './track-c-config.js';
+import { computeMarginState } from '../user/margin.js';
 
 const PARALLEL_LIMIT = 10; // well below Bybit's 50 req/s global cap
 const limit = pLimit(PARALLEL_LIMIT);
@@ -155,6 +156,36 @@ export async function fanOutEntry(args: FanOutEntryArgs): Promise<{
 }
 
 async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promise<boolean> {
+  // Margin pre-flight. The balance-monitor cron sets insufficient_balance_at
+  // (and listEligibleTargets filters those out) every 5 minutes — but a
+  // signal might fire seconds after a position closes when the cron hasn't
+  // re-evaluated yet. Belt-and-braces: also check the computed deficit
+  // RIGHT BEFORE sending the order. If balance is known and free margin
+  // can't cover the new trade, skip + flip the flag immediately so the
+  // user sees the banner on their next page load.
+  const margin = computeMarginState(t.user_id);
+  if (margin.balanceUsdt !== null) {
+    const free = margin.freeUsdt ?? 0;
+    const needed = t.notional_usd / Math.max(1, t.leverage);
+    const buffered = needed * 1.05; // 5% buffer for fees/slippage
+    if (free < buffered) {
+      logger.warn(
+        { userId: t.user_id, free, needed, balance: margin.balanceUsdt, used: margin.usedUsdt },
+        'fanOutEntry: pre-flight margin check failed, skipping',
+      );
+      // Flag the user so they see the banner. The cron clears it once
+      // they top up.
+      const keyRow = findActiveKey(t.user_id);
+      if (keyRow && !keyRow.insufficient_balance_at) {
+        setInsufficientBalance(keyRow.id, Date.now());
+        await alertOperator(
+          `💸 Track D pre-flight: user_id=${t.user_id} margin shortfall on ${args.symbol}. ` +
+            `Free $${free.toFixed(2)} < needed $${buffered.toFixed(2)} (with buffer). Order skipped.`,
+        );
+      }
+      return false;
+    }
+  }
   // Audit C2 — fan-out idempotency pre-flight.
   // TradingView retries webhooks aggressively on 5xx / network glitch.
   // The shadow row is deduped by webhook_dedup_key, but the per-user

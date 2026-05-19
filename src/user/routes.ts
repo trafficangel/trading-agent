@@ -34,6 +34,7 @@ import {
 import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
 import { closeAllUserPositions } from '../strategies/user-fanout.js';
 import { renderDashboard } from './dashboard.js';
+import { computeMarginState } from './margin.js';
 import { renderStrategiesPage } from './strategies.js';
 import { renderApiKeyPage } from './api-key.js';
 import { issueCsrfToken, requireCsrf } from '../auth/csrf.js';
@@ -122,6 +123,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
 
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
+    const margin = computeMarginState(user.userId);
     return reply.send(
       renderDashboard({
         displayName: user.displayName,
@@ -134,6 +136,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         openPositionsCount: openNow,
         closedPositionsCount: closed,
         totalPnlPct,
+        margin,
       }),
     );
   });
@@ -150,6 +153,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     const csrf = issueCsrfToken(req, reply);
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
+    const margin = computeMarginState(user.userId);
     return reply.send(
       renderStrategiesPage({
         displayName: user.displayName,
@@ -160,6 +164,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         tradingPausedAt: sub?.trading_paused_at ?? null,
         insufficientBalanceAt: apiKey?.insufficient_balance_at ?? null,
         lastBalanceUsdt: apiKey?.last_balance_usdt ?? null,
+        usedMarginUsdt: margin.usedUsdt,
       }),
     );
   });
@@ -234,6 +239,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
 
     const apiKey = findActiveKey(user.userId);
     const sub2 = findSubscription(user.userId);
+    const margin2 = computeMarginState(user.userId);
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
     return reply.send(
@@ -246,6 +252,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         tradingPausedAt: sub2?.trading_paused_at ?? null,
         insufficientBalanceAt: apiKey?.insufficient_balance_at ?? null,
         lastBalanceUsdt: apiKey?.last_balance_usdt ?? null,
+        usedMarginUsdt: margin2.usedUsdt,
       }),
     );
   });

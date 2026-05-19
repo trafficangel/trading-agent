@@ -14,6 +14,7 @@
 import { pageShell } from '../strategies/landing.js';
 import type { SubscriptionRow } from '../db/repos/user-subscriptions.js';
 import type { ApiKeySummary } from '../db/repos/user-api-keys.js';
+import type { MarginState } from './margin.js';
 
 function escapeHtml(s: string): string {
   return s
@@ -89,6 +90,7 @@ export function renderDashboard(args: {
   openPositionsCount: number;
   closedPositionsCount: number;
   totalPnlPct: number | null;
+  margin: MarginState;
 }): string {
   const sub = args.subscription;
   const subBlock = sub
@@ -119,11 +121,20 @@ export function renderDashboard(args: {
     </div>
   `;
 
+  // Margin banner: red full-width strip shown ONLY when the user is
+  // currently flagged as having insufficient balance. Either the cron
+  // set the flag (computed deficit), or fan-out just hit a rejected
+  // order. Either way, message + CTA to /account/api-key.
+  const marginBanner = renderMarginBanner(args);
+
+  const marginCard = renderMarginCard(args.margin, args.enabledStrategiesCount);
+
   const cards = `
     <div class="cabinet-stat-grid">
       ${subBlock}
       ${apiKeyBlock}
       ${strategiesBlock}
+      ${marginCard}
       ${openBlock}
       ${pnlBlock}
     </div>
@@ -154,6 +165,7 @@ export function renderDashboard(args: {
     ${cabinetStyles()}
     <main class="cabinet-main">
       ${greeting}
+      ${marginBanner}
       ${cards}
       ${quickLinks}
     </main>
@@ -316,6 +328,112 @@ function renderPnlCard(args: { pnlPct: number | null; closedCount: number }): st
   `;
 }
 
+/** Full-width red banner shown when the user's wallet doesn't have
+ *  enough margin to cover their enabled strategies. Two trigger paths:
+ *
+ *  1. balance-monitor cron observed `balance < required + used`
+ *     → set insufficient_balance_at, flag is non-null here
+ *  2. fan-out hit a Bybit 110007/110012 rejection
+ *     → same flag set, same display
+ *
+ *  We render the SAME banner for both. Body adapts to whichever data
+ *  is available (live computed deficit vs cached snapshot from the
+ *  rejection). Always shows the CTA "Пополните Derivatives + Проверить
+ *  связь" with the api-key route link. */
+function renderMarginBanner(args: {
+  margin: MarginState;
+  enabledStrategiesCount: number;
+}): string {
+  const m = args.margin;
+  const flagged = m.insufficientBalanceAt !== null;
+  const computedShort =
+    m.balanceUsdt !== null &&
+    m.requiredUsdt > 0 &&
+    m.freeUsdt !== null &&
+    m.freeUsdt < m.requiredUsdt;
+  if (!flagged && !computedShort) return '';
+  // Don't show the banner for users with zero enabled strategies —
+  // there's no margin to be short of. The cron also won't flag them.
+  if (args.enabledStrategiesCount === 0) return '';
+
+  const balance = m.balanceUsdt !== null ? `$${m.balanceUsdt.toFixed(2)}` : '—';
+  const required = `$${m.requiredUsdt.toFixed(2)}`;
+  const used = `$${m.usedUsdt.toFixed(2)}`;
+  const deficitHint = m.deficitUsdt !== null && m.deficitUsdt > 0
+    ? `Не хватает: <b>$${m.deficitUsdt.toFixed(2)}</b>.`
+    : '';
+  return `
+    <div class="cabinet-banner-bad">
+      <div class="cabinet-banner-icon">${ico('💸')}</div>
+      <div class="cabinet-banner-body">
+        <div class="cabinet-banner-title">Недостаточно средств на фьючерсном счёте Bybit</div>
+        <div class="cabinet-banner-text">
+          Баланс: <b>${balance}</b> · Нужно: <b>${required}</b> (под все включённые стратегии)${m.usedUsdt > 0 ? ` · В позициях: <b>${used}</b>` : ''}.
+          ${deficitHint}
+          <br/>
+          Пока баланса недостаточно — <b>новые сделки система не открывает</b>. Уже открытые позиции продолжают работать.
+          <br/>
+          Пополните USDT-кошелёк раздела <b>Derivatives</b> в Bybit (или переведите из Funding/Spot во фьючерсный кошелёк) —
+          в течение 5 минут мы проверим баланс и снова включим вас в сигналы.
+        </div>
+        <div class="cabinet-banner-actions">
+          <a class="cabinet-banner-btn" href="/account/api-key">Проверить связь →</a>
+          <a class="cabinet-banner-btn cabinet-banner-btn-secondary" href="/account/strategies">Изменить стратегии</a>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/** Stat card showing margin breakdown — balance / required / used / free.
+ *  Always visible (even when ok) so the user understands the model and
+ *  can plan ahead. Colour reflects status:
+ *    - red    when deficit > 0 OR flag set
+ *    - amber  when free < required × 1.2 (close to the edge)
+ *    - green  otherwise */
+function renderMarginCard(m: MarginState, enabledCount: number): string {
+  if (enabledCount === 0) {
+    return `
+      <div class="stat-card cabinet-card">
+        <div class="stat-card-label">${ico('💵')}Обеспечение</div>
+        <div class="stat-card-value">—</div>
+        <div class="stat-card-sub">Выберите стратегии чтобы увидеть расчёт</div>
+      </div>
+    `;
+  }
+  if (m.balanceUsdt === null) {
+    return `
+      <div class="stat-card cabinet-card cabinet-card-warn">
+        <div class="stat-card-label">${ico('💵')}Обеспечение</div>
+        <div class="stat-card-value">Нужно: $${m.requiredUsdt.toFixed(2)}</div>
+        <div class="stat-card-sub"><a href="/account/api-key">Подключите ключ для проверки баланса →</a></div>
+      </div>
+    `;
+  }
+  const flagged = m.insufficientBalanceAt !== null;
+  const free = m.freeUsdt ?? 0;
+  const isShort = flagged || free < m.requiredUsdt;
+  const isClose = !isShort && free < m.requiredUsdt * 1.2;
+  const cls = isShort ? 'cabinet-card-bad' : isClose ? 'cabinet-card-warn' : 'cabinet-card-ok';
+  const statusEmoji = isShort ? '⚠️' : isClose ? '⚡' : '✅';
+  const statusText = isShort
+    ? `Не хватает $${Math.max(0, m.requiredUsdt - free).toFixed(2)}`
+    : isClose
+      ? `Запас тонкий`
+      : `Хватает с запасом`;
+  return `
+    <div class="stat-card cabinet-card ${cls}">
+      <div class="stat-card-label">${ico('💵')}Обеспечение</div>
+      <div class="stat-card-value">${statusEmoji} $${free.toFixed(2)}</div>
+      <div class="stat-card-sub">
+        нужно $${m.requiredUsdt.toFixed(2)} · ${statusText}
+        <br/>
+        <span style="opacity:0.7">баланс $${m.balanceUsdt.toFixed(2)}${m.usedUsdt > 0 ? ` · в позициях $${m.usedUsdt.toFixed(2)}` : ''}</span>
+      </div>
+    </div>
+  `;
+}
+
 /** Cabinet-local styles. Inherits .stat-card / .stat-card-value /
  *  .stat-card-sub / .stat-card-label from the landing's global CSS
  *  (no duplication). Only the cabinet-specific layout pieces and
@@ -434,8 +552,67 @@ function cabinetStyles(): string {
     line-height: 1.45;
   }
 
+  /* Full-width red insufficient-balance banner */
+  .cabinet-banner-bad {
+    display: flex;
+    gap: 16px;
+    padding: 18px 22px;
+    margin: 0 0 24px;
+    background: linear-gradient(180deg, rgba(255, 99, 99, 0.12) 0%, rgba(255, 99, 99, 0.06) 100%);
+    border: 1px solid rgba(255, 99, 99, 0.45);
+    border-radius: 14px;
+    color: #e8c5c5;
+    align-items: flex-start;
+  }
+  .cabinet-banner-icon {
+    font-size: 28px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .cabinet-banner-icon .cabinet-ico { margin-right: 0; }
+  .cabinet-banner-body { flex: 1; }
+  .cabinet-banner-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #ff8b8b;
+    margin-bottom: 8px;
+  }
+  .cabinet-banner-text {
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: #cfd6dd;
+    margin-bottom: 12px;
+  }
+  .cabinet-banner-text b { color: #ffd17a; }
+  .cabinet-banner-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .cabinet-banner-btn {
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 8px;
+    background: #4ad991;
+    color: #0b0e13;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .cabinet-banner-btn:hover { background: #5ce0a0; }
+  .cabinet-banner-btn-secondary {
+    background: transparent;
+    color: #cfd6dd;
+    border: 1px solid #2a323d;
+  }
+  .cabinet-banner-btn-secondary:hover {
+    border-color: #4ad991;
+    color: #fff;
+  }
+
   @media (max-width: 540px) {
     .cabinet-title { font-size: 22px; }
+    .cabinet-banner-bad { flex-direction: column; }
   }
 </style>
 `;

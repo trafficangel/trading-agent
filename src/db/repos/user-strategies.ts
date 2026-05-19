@@ -140,6 +140,23 @@ export type EligibleTarget = {
   api_key_id: number;
 };
 
+/**
+ * Sum required isolated margin across all ENABLED strategies for a user.
+ * required = Σ(notional_usd / leverage). This is the "if every strategy
+ * fires concurrently, how much USDT margin will Bybit demand" worst-case.
+ * Used by the dashboard banner + balance-monitor cron + pre-flight.
+ */
+const sumRequiredStmt = db.prepare<[number], { total: number | null }>(`
+  SELECT SUM(notional_usd / leverage) AS total
+    FROM user_strategies
+   WHERE user_id = ? AND enabled = 1 AND leverage > 0
+`);
+
+export function sumEnabledRequiredMargin(userId: number): number {
+  const r = sumRequiredStmt.get(userId);
+  return r?.total ?? 0;
+}
+
 export function listEligibleTargets(strategyId: string, now = Date.now()): EligibleTarget[] {
   return findEligibleStmt.all(strategyId, now);
 }

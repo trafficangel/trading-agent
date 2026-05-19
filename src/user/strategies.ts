@@ -57,6 +57,10 @@ type RenderArgs = {
   /** Last known USDT balance (cached on user_api_keys), for the
    *  "your balance is $X, need $Y" message. */
   lastBalanceUsdt: number | null;
+  /** USDT margin already locked by open positions. Subtracted from
+   *  balance to compute free margin for the calculator's "хватает"
+   *  status badge. */
+  usedMarginUsdt: number;
 };
 
 export function renderStrategiesPage(args: RenderArgs): string {
@@ -138,8 +142,37 @@ export function renderStrategiesPage(args: RenderArgs): string {
     if (!row) return acc;
     return acc + row.notional_usd / Math.max(1, row.leverage);
   }, 0);
+  // Balance / free / status — only meaningful when we have a key
+  // connected and have observed at least one balance read. If not, we
+  // hide the balance row and show only the requirement.
+  const haveBalance = args.lastBalanceUsdt !== null;
+  const balanceVal = haveBalance ? args.lastBalanceUsdt! : 0;
+  const freeVal = haveBalance ? balanceVal - args.usedMarginUsdt : 0;
+  // For the SSR status: green if free >= margin, amber if 0.8–1.0×, red if <0.8×.
+  const ssrStatusCls = !haveBalance
+    ? 'strat-calc-status-unknown'
+    : freeVal >= initialMargin
+      ? 'strat-calc-status-ok'
+      : freeVal >= initialMargin * 0.8
+        ? 'strat-calc-status-warn'
+        : 'strat-calc-status-bad';
+  const ssrStatusText = !haveBalance
+    ? 'Подключите ключ — посчитаем хватает ли'
+    : freeVal >= initialMargin
+      ? `✅ Хватает с запасом · свободно $${freeVal.toFixed(2)}`
+      : `⚠️ Не хватает $${(initialMargin - freeVal).toFixed(2)} · пополните Bybit Derivatives`;
+
+  const balanceRow = haveBalance
+    ? `<div class="strat-calc-stat">
+         <div class="strat-calc-label">На счёте Bybit</div>
+         <div class="strat-calc-value" data-calc="balance">$${balanceVal.toFixed(2)}</div>
+         <div class="strat-calc-sub">${args.usedMarginUsdt > 0 ? `в позициях $${args.usedMarginUsdt.toFixed(2)} · ` : ''}свободно <span data-calc="free">$${freeVal.toFixed(2)}</span></div>
+       </div>`
+    : '';
+
   const calcCard = `
-    <div class="strat-calc-card" id="strat-calc">
+    <div class="strat-calc-card" id="strat-calc"
+         data-balance="${balanceVal}" data-used="${args.usedMarginUsdt}" data-have-balance="${haveBalance ? '1' : '0'}">
       <div class="strat-calc-title">${ico('🧮')}Калькулятор обеспечения</div>
       <div class="strat-calc-grid">
         <div class="strat-calc-stat">
@@ -157,10 +190,13 @@ export function renderStrategiesPage(args: RenderArgs): string {
           <div class="strat-calc-value" data-calc="margin">$${initialMargin.toFixed(2)}</div>
           <div class="strat-calc-sub">обеспечение под все одновременно открытые позиции</div>
         </div>
+        ${balanceRow}
       </div>
+      <div class="strat-calc-status ${ssrStatusCls}" data-calc="status">${ssrStatusText}</div>
       <div class="strat-calc-note">
         Реальное обеспечение = размер_позиции ÷ плечо. Например, $100 на сделку при 10× плече = $10 обеспечения.
         Bybit спишет это с баланса при открытии позиции и вернёт при закрытии (минус комиссия).
+        ${haveBalance ? '<br/>Если на счёте недостаточно — новые сделки система откроет только после пополнения.' : ''}
       </div>
     </div>
   `;
@@ -260,7 +296,9 @@ function renderRow(cfg: StrategyConfig, existing: UserStrategyRow | null): strin
 function calculatorScript(): string {
   // Walk every .strat-row, sum (notional × enabled) and
   // (notional / leverage × enabled), write into the calc card.
-  // Fires on every input/change event on inputs in the form.
+  // Also recompute the "хватает / не хватает" status badge by comparing
+  // required margin against (balance - used) read from data-attrs on
+  // the calc card (rendered SSR by the server).
   return `
     <script>
       (function() {
@@ -270,6 +308,11 @@ function calculatorScript(): string {
         var elCount = calc.querySelector('[data-calc="count"]');
         var elNotional = calc.querySelector('[data-calc="notional"]');
         var elMargin = calc.querySelector('[data-calc="margin"]');
+        var elFree = calc.querySelector('[data-calc="free"]');
+        var elStatus = calc.querySelector('[data-calc="status"]');
+        var balance = parseFloat(calc.getAttribute('data-balance')) || 0;
+        var used = parseFloat(calc.getAttribute('data-used')) || 0;
+        var haveBalance = calc.getAttribute('data-have-balance') === '1';
         function recompute() {
           var rows = form.querySelectorAll('.strat-row');
           var count = 0, notional = 0, margin = 0;
@@ -286,6 +329,32 @@ function calculatorScript(): string {
           elCount.textContent = String(count);
           elNotional.textContent = '$' + notional.toFixed(0);
           elMargin.textContent = '$' + margin.toFixed(2);
+          // Live status — green/amber/red. Only meaningful when we know
+          // the actual balance.
+          if (!elStatus) return;
+          if (!haveBalance) {
+            elStatus.className = 'strat-calc-status strat-calc-status-unknown';
+            elStatus.textContent = 'Подключите ключ — посчитаем хватает ли';
+            return;
+          }
+          var free = balance - used;
+          if (elFree) elFree.textContent = '$' + free.toFixed(2);
+          var cls, text;
+          if (count === 0) {
+            cls = 'strat-calc-status-unknown';
+            text = 'Включите хотя бы одну стратегию';
+          } else if (free >= margin) {
+            cls = 'strat-calc-status-ok';
+            text = '✅ Хватает с запасом · свободно $' + free.toFixed(2);
+          } else if (free >= margin * 0.8) {
+            cls = 'strat-calc-status-warn';
+            text = '⚡ Запас тонкий · не хватает $' + (margin - free).toFixed(2) + ' при одновременном срабатывании всех стратегий';
+          } else {
+            cls = 'strat-calc-status-bad';
+            text = '⚠️ Не хватает $' + (margin - free).toFixed(2) + ' · пополните Bybit Derivatives, иначе торговля приостановлена';
+          }
+          elStatus.className = 'strat-calc-status ' + cls;
+          elStatus.textContent = text;
         }
         form.addEventListener('input', recompute);
         form.addEventListener('change', recompute);
@@ -400,6 +469,35 @@ function styles(): string {
   .strat-calc-note {
     margin-top: 14px;
     font-size: 12px; color: #6b7480; line-height: 1.55;
+  }
+  .strat-calc-status {
+    margin-top: 14px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    border: 1px solid;
+  }
+  .strat-calc-status-ok {
+    background: rgba(74, 217, 145, 0.08);
+    border-color: rgba(74, 217, 145, 0.45);
+    color: #5ce0a0;
+  }
+  .strat-calc-status-warn {
+    background: rgba(255, 188, 70, 0.10);
+    border-color: rgba(255, 188, 70, 0.45);
+    color: #ffbc46;
+  }
+  .strat-calc-status-bad {
+    background: rgba(255, 99, 99, 0.10);
+    border-color: rgba(255, 99, 99, 0.45);
+    color: #ff8b8b;
+  }
+  .strat-calc-status-unknown {
+    background: rgba(133, 144, 160, 0.08);
+    border-color: rgba(133, 144, 160, 0.30);
+    color: #8590a0;
   }
 
   .strat-banner {
