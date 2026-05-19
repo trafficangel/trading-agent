@@ -333,57 +333,81 @@ function renderPnlCard(args: { pnlPct: number | null; closedCount: number }): st
   `;
 }
 
-/** Full-width red banner shown when the user's wallet doesn't have
- *  enough margin to cover their enabled strategies. Two trigger paths:
+/** Full-width banner about margin state. Two states (mutually exclusive):
  *
- *  1. balance-monitor cron observed `balance < required + used`
- *     → set insufficient_balance_at, flag is non-null here
- *  2. fan-out hit a Bybit 110007/110012 rejection
- *     → same flag set, same display
+ *  1. RED — trading is currently blocked. The api-key row has
+ *     insufficient_balance_at set, which only happens reactively:
+ *       a) fan-out tried to open a trade and Bybit said insufficient
+ *          (110007 / 110012 / 110045), OR
+ *       b) pre-flight in executeUserEntry saw free < single-trade need.
+ *     This is the "real" block: the next signal WILL fail unless they
+ *     top up.
  *
- *  We render the SAME banner for both. Body adapts to whichever data
- *  is available (live computed deficit vs cached snapshot from the
- *  rejection). Always shows the CTA "Пополните Derivatives + Проверить
- *  связь" with the api-key route link. */
+ *  2. YELLOW — informational only. The worst-case sum across all
+ *     enabled strategies (Σ notional/leverage) exceeds free margin.
+ *     Trading still works for individual signals (it's rare for many
+ *     strategies to fire concurrently across different symbols/TFs).
+ *     We just warn that under a coordinated spike not every signal
+ *     would fit. No action needed unless they want full coverage.
+ *
+ *  Returns '' if neither condition holds. */
 function renderMarginBanner(args: {
   margin: MarginState;
   enabledStrategiesCount: number;
 }): string {
   const m = args.margin;
-  const flagged = m.insufficientBalanceAt !== null;
-  const computedShort =
-    m.balanceUsdt !== null &&
-    m.requiredUsdt > 0 &&
-    m.freeUsdt !== null &&
-    m.freeUsdt < m.requiredUsdt;
-  if (!flagged && !computedShort) return '';
-  // Don't show the banner for users with zero enabled strategies —
-  // there's no margin to be short of. The cron also won't flag them.
   if (args.enabledStrategiesCount === 0) return '';
 
-  const balance = m.balanceUsdt !== null ? `$${m.balanceUsdt.toFixed(2)}` : '—';
-  const required = `$${m.requiredUsdt.toFixed(2)}`;
-  const used = `$${m.usedUsdt.toFixed(2)}`;
-  const deficitHint = m.deficitUsdt !== null && m.deficitUsdt > 0
-    ? `Не хватает: <b>$${m.deficitUsdt.toFixed(2)}</b>.`
-    : '';
+  const flagged = m.insufficientBalanceAt !== null;
+  const balanceStr = m.balanceUsdt !== null ? `$${m.balanceUsdt.toFixed(2)}` : '—';
+  const usedStr = `$${m.usedUsdt.toFixed(2)}`;
+  const freeStr = m.freeUsdt !== null ? `$${m.freeUsdt.toFixed(2)}` : '—';
+
+  if (flagged) {
+    // Hard block. Bybit said "no" (or our per-trade pre-flight did).
+    return `
+      <div class="cabinet-banner-bad">
+        <div class="cabinet-banner-icon">${ico('💸')}</div>
+        <div class="cabinet-banner-body">
+          <div class="cabinet-banner-title">Торговля приостановлена — недостаточно средств</div>
+          <div class="cabinet-banner-text">
+            Bybit отклонил последнюю попытку открыть сделку из-за нехватки обеспечения.
+            Баланс: <b>${balanceStr}</b>${m.usedUsdt > 0 ? ` · В позициях: <b>${usedStr}</b>` : ''} · Свободно: <b>${freeStr}</b>.
+            <br/>
+            <b>Новые сделки система не открывает</b> пока баланс не вырастет. Уже открытые позиции продолжают работать.
+            <br/>
+            Пополните USDT-кошелёк раздела <b>Derivatives</b> в Bybit (или переведите из Funding/Spot во фьючерсный кошелёк) —
+            в течение 5 минут мы проверим баланс и снова включим вас в сигналы.
+          </div>
+          <div class="cabinet-banner-actions">
+            <a class="cabinet-banner-btn" href="/account/api-key">Проверить связь →</a>
+            <a class="cabinet-banner-btn cabinet-banner-btn-secondary" href="/account/strategies">Изменить стратегии</a>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Soft warning: worst-case (all strategies fire at once) doesn't
+  // fit in free margin, but individual signals work fine. Don't show
+  // unless balance is known.
+  const worstCaseShort =
+    m.balanceUsdt !== null && m.requiredUsdt > 0 && m.freeUsdt !== null && m.freeUsdt < m.requiredUsdt;
+  if (!worstCaseShort) return '';
+  const shortBy = `$${(m.requiredUsdt - (m.freeUsdt ?? 0)).toFixed(2)}`;
   return `
-    <div class="cabinet-banner-bad">
-      <div class="cabinet-banner-icon">${ico('💸')}</div>
+    <div class="cabinet-banner-amber">
+      <div class="cabinet-banner-icon">${ico('💡')}</div>
       <div class="cabinet-banner-body">
-        <div class="cabinet-banner-title">Недостаточно средств на фьючерсном счёте Bybit</div>
+        <div class="cabinet-banner-title-amber">Не хватит обеспечения при одновременном срабатывании всех стратегий</div>
         <div class="cabinet-banner-text">
-          Баланс: <b>${balance}</b> · Нужно: <b>${required}</b> (под все включённые стратегии)${m.usedUsdt > 0 ? ` · В позициях: <b>${used}</b>` : ''}.
-          ${deficitHint}
+          Сейчас свободно <b>${freeStr}</b>. Это покрывает любую <b>одну</b> сделку из ваших стратегий — торговля идёт нормально.
+          Но если все ${args.enabledStrategiesCount} стратегий выстрелят в одну минуту (редкий случай), не хватит <b>${shortBy}</b> на полное покрытие — последние ордера будут пропущены.
           <br/>
-          Пока баланса недостаточно — <b>новые сделки система не открывает</b>. Уже открытые позиции продолжают работать.
-          <br/>
-          Пополните USDT-кошелёк раздела <b>Derivatives</b> в Bybit (или переведите из Funding/Spot во фьючерсный кошелёк) —
-          в течение 5 минут мы проверим баланс и снова включим вас в сигналы.
+          Чтобы такого не было — либо пополните счёт ещё на <b>${shortBy}</b>, либо уменьшите размер позиции / увеличьте плечо на 1-2 стратегиях.
         </div>
         <div class="cabinet-banner-actions">
-          <a class="cabinet-banner-btn" href="/account/api-key">Проверить связь →</a>
-          <a class="cabinet-banner-btn cabinet-banner-btn-secondary" href="/account/strategies">Изменить стратегии</a>
+          <a class="cabinet-banner-btn cabinet-banner-btn-secondary" href="/account/strategies">Настроить стратегии</a>
         </div>
       </div>
     </div>
@@ -465,14 +489,16 @@ function renderStatusBanner(args: {
     `;
   }
 
-  // All-green path. Mention margin state inline so the user sees the
-  // exact numbers without scrolling — confirms "we know your balance
-  // is enough, we're tracking signals".
+  // All-green path. The yellow worst-case banner already handles the
+  // "хватит на одиночные но не на все" case; here we only land when
+  // either margin is fully sufficient OR balance is unknown (no key
+  // / not yet verified). Keep the banner crisp — just "all good".
   const m = args.margin;
-  const hasBalanceInfo = m.balanceUsdt !== null && args.enabledStrategiesCount > 0;
-  const marginLine = hasBalanceInfo
-    ? `Обеспечения хватает: свободно <b>$${(m.freeUsdt ?? 0).toFixed(2)}</b>, нужно <b>$${m.requiredUsdt.toFixed(2)}</b> при одновременном срабатывании всех стратегий.`
-    : '';
+  const worstCaseFits = m.balanceUsdt !== null && (m.freeUsdt ?? 0) >= m.requiredUsdt;
+  const marginLine =
+    m.balanceUsdt !== null && worstCaseFits
+      ? `Свободно <b>$${(m.freeUsdt ?? 0).toFixed(2)}</b> — хватает на все стратегии при одновременном срабатывании.`
+      : '';
   return `
     <div class="cabinet-banner-ok">
       <div class="cabinet-banner-icon">${ico('✅')}</div>
@@ -524,23 +550,32 @@ function renderMarginCard(m: MarginState, enabledCount: number): string {
   }
   const flagged = m.insufficientBalanceAt !== null;
   const free = m.freeUsdt ?? 0;
-  const isShort = flagged || free < m.requiredUsdt;
-  const isClose = !isShort && free < m.requiredUsdt * 1.2;
-  const cls = isShort ? 'cabinet-card-bad' : isClose ? 'cabinet-card-warn' : 'cabinet-card-ok';
-  const statusEmoji = isShort ? '⚠️' : isClose ? '⚡' : '✅';
-  const statusText = isShort
-    ? `Не хватает $${Math.max(0, m.requiredUsdt - free).toFixed(2)}`
-    : isClose
-      ? `Запас тонкий`
-      : `Хватает с запасом`;
+  // Three-tier status:
+  //   - red:   currently flagged (Bybit said no / pre-flight blocked).
+  //            That's an ACTIONABLE state: trading halted until top-up.
+  //   - amber: worst-case sum doesn't fit. Trading WORKS, just may
+  //            skip a few signals under simultaneous fire. Soft hint.
+  //   - green: even worst-case sum fits.
+  const worstCaseFits = free >= m.requiredUsdt;
+  const cls = flagged
+    ? 'cabinet-card-bad'
+    : worstCaseFits
+      ? 'cabinet-card-ok'
+      : 'cabinet-card-warn';
+  const statusEmoji = flagged ? '⚠️' : worstCaseFits ? '✅' : '💡';
+  const statusText = flagged
+    ? `Заблокировано Bybit'ом`
+    : worstCaseFits
+      ? `Хватает на все стратегии одновременно`
+      : `Хватает на одиночные сделки`;
   return `
     <div class="stat-card cabinet-card ${cls}">
       <div class="stat-card-label">${ico('💵')}Обеспечение</div>
       <div class="stat-card-value">${statusEmoji} $${free.toFixed(2)}</div>
       <div class="stat-card-sub">
-        нужно $${m.requiredUsdt.toFixed(2)} · ${statusText}
+        ${statusText}
         <br/>
-        <span style="opacity:0.7">баланс $${m.balanceUsdt.toFixed(2)}${m.usedUsdt > 0 ? ` · в позициях $${m.usedUsdt.toFixed(2)}` : ''}</span>
+        <span style="opacity:0.7">баланс $${m.balanceUsdt.toFixed(2)} · нужно макс $${m.requiredUsdt.toFixed(2)}${m.usedUsdt > 0 ? ` · в позициях $${m.usedUsdt.toFixed(2)}` : ''}</span>
       </div>
     </div>
   `;

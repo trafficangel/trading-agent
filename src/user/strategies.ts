@@ -152,19 +152,40 @@ export function renderStrategiesPage(args: RenderArgs): string {
   const haveBalance = args.lastBalanceUsdt !== null;
   const balanceVal = haveBalance ? args.lastBalanceUsdt! : 0;
   const freeVal = haveBalance ? balanceVal - args.usedMarginUsdt : 0;
-  // For the SSR status: green if free >= margin, amber if 0.8–1.0×, red if <0.8×.
-  const ssrStatusCls = !haveBalance
-    ? 'strat-calc-status-unknown'
-    : freeVal >= initialMargin
-      ? 'strat-calc-status-ok'
-      : freeVal >= initialMargin * 0.8
-        ? 'strat-calc-status-warn'
-        : 'strat-calc-status-bad';
-  const ssrStatusText = !haveBalance
-    ? 'Подключите ключ — посчитаем хватает ли'
-    : freeVal >= initialMargin
-      ? `✅ Хватает с запасом · свободно $${freeVal.toFixed(2)}`
-      : `⚠️ Не хватает $${(initialMargin - freeVal).toFixed(2)} · пополните Bybit Derivatives`;
+  // SSR status. Three tiers — same logic as dashboard:
+  //   - green: free >= worst-case sum (every strategy can fire at once)
+  //   - amber: free < worst-case sum but ≥ largest single-trade margin
+  //            (individual signals work, simultaneous fire = some skips)
+  //   - red:   currently flagged (Bybit said no) OR free < single-trade
+  //            (next signal definitely won't fit)
+  // We don't have per-strategy margin breakdown SSR-side without more
+  // plumbing — approximate "next signal fits" as `free >= largest
+  // single notional/leverage among enabled rows`, computed below.
+  let largestSingle = 0;
+  for (const s of enabledStrategies) {
+    const row = args.userStrategies.get(s.id);
+    if (!row || row.enabled !== 1) continue;
+    const m = row.notional_usd / Math.max(1, row.leverage);
+    if (m > largestSingle) largestSingle = m;
+  }
+  const flagged = args.insufficientBalanceAt !== null;
+  let ssrStatusCls: string;
+  let ssrStatusText: string;
+  if (!haveBalance) {
+    ssrStatusCls = 'strat-calc-status-unknown';
+    ssrStatusText = 'Подключите ключ — посчитаем хватает ли';
+  } else if (flagged || (largestSingle > 0 && freeVal < largestSingle)) {
+    ssrStatusCls = 'strat-calc-status-bad';
+    ssrStatusText = flagged
+      ? '⚠️ Торговля заблокирована · Bybit отклонил последнюю сделку. Пополните счёт'
+      : `⚠️ Не хватит даже на одну сделку · нужно минимум $${largestSingle.toFixed(2)}, свободно $${freeVal.toFixed(2)}`;
+  } else if (freeVal >= initialMargin) {
+    ssrStatusCls = 'strat-calc-status-ok';
+    ssrStatusText = `✅ Хватает на все стратегии одновременно · свободно $${freeVal.toFixed(2)}`;
+  } else {
+    ssrStatusCls = 'strat-calc-status-warn';
+    ssrStatusText = `💡 Хватает на одиночные сделки. При одновременном срабатывании всех стратегий не хватит $${(initialMargin - freeVal).toFixed(2)} — последние ордера будут пропущены`;
+  }
 
   const balanceRow = haveBalance
     ? `<div class="strat-calc-stat">
@@ -379,19 +400,31 @@ function calculatorScript(): string {
           }
           var free = balance - used;
           if (elFree) elFree.textContent = '$' + free.toFixed(2);
+          // Also recompute largest single-trade margin from current
+          // inputs — for the "хватит ли хотя бы на одну сделку" check.
+          var largestSingle = 0;
+          form.querySelectorAll('.strat-row').forEach(function(row) {
+            var enabledInput = row.querySelector('input[type="checkbox"]');
+            if (!enabledInput || !enabledInput.checked) return;
+            var n = parseFloat((row.querySelector('input[name$="__notional"]') || {}).value) || 0;
+            var l = parseFloat((row.querySelector('input[name$="__leverage"]') || {}).value) || 1;
+            if (l < 1) l = 1;
+            var m = n / l;
+            if (m > largestSingle) largestSingle = m;
+          });
           var cls, text;
           if (count === 0) {
             cls = 'strat-calc-status-unknown';
             text = 'Включите хотя бы одну стратегию';
+          } else if (free < largestSingle) {
+            cls = 'strat-calc-status-bad';
+            text = '⚠️ Не хватит даже на одну сделку · нужно минимум $' + largestSingle.toFixed(2) + ', свободно $' + free.toFixed(2);
           } else if (free >= margin) {
             cls = 'strat-calc-status-ok';
-            text = '✅ Хватает с запасом · свободно $' + free.toFixed(2);
-          } else if (free >= margin * 0.8) {
-            cls = 'strat-calc-status-warn';
-            text = '⚡ Запас тонкий · не хватает $' + (margin - free).toFixed(2) + ' при одновременном срабатывании всех стратегий';
+            text = '✅ Хватает на все стратегии одновременно · свободно $' + free.toFixed(2);
           } else {
-            cls = 'strat-calc-status-bad';
-            text = '⚠️ Не хватает $' + (margin - free).toFixed(2) + ' · пополните Bybit Derivatives, иначе торговля приостановлена';
+            cls = 'strat-calc-status-warn';
+            text = '💡 Хватает на одиночные сделки. При одновременном срабатывании всех стратегий не хватит $' + (margin - free).toFixed(2) + ' — последние ордера будут пропущены';
           }
           elStatus.className = 'strat-calc-status ' + cls;
           elStatus.textContent = text;
