@@ -243,12 +243,9 @@ async function tick(now: Date = new Date()): Promise<void> {
     disable_web_page_preview: true,
     disable_notification: true,
   }).catch((err) => logger.error({ err }, 'daily-wrap: send failed'));
-  await sendMessage({
-    channel: 'logs',
-    text,
-    disable_web_page_preview: true,
-    disable_notification: true,
-  }).catch(() => {});
+  // Daily wrap is user-facing content (per-strategy stats, portfolio
+  // summary) and belongs only in Signals. Logs is reserved for system /
+  // webhook monitoring.
 }
 
 export function startDailyWrapJob(): void {

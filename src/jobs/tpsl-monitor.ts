@@ -129,7 +129,9 @@ async function postCloseMessage(
   } else {
     await sendMessage({ channel: 'signals', text });
   }
-  await sendMessage({ channel: 'logs', text, disable_notification: true });
+  // Close posts (SL hit, TP hit, time guard) go ONLY to Signals — Logs
+  // is reserved for system/webhook monitoring. Operator follows trades
+  // via Signals channel, system health via Logs.
 }
 
 async function tick(): Promise<void> {

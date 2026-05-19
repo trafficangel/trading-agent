@@ -539,7 +539,9 @@ async function sendStrategyEntryPost(
     // with strategy stats inline in the message.
     disable_web_page_preview: false,
   }).catch((err) => logger.error({ err }, 'strategy-trader: entry post to signals failed'));
-  await sendMessage({ channel: 'logs', text, disable_notification: true }).catch(() => {});
+  // Note: deliberately NOT duplicating to Logs channel — Logs is reserved
+  // for webhook/system monitoring (warns, errors, heartbeat). Entry posts
+  // are user-facing signal content and belong only in Signals.
 }
 
 async function sendStrategyExitPost(
@@ -588,5 +590,5 @@ async function sendStrategyExitPost(
     text,
     disable_web_page_preview: false,
   }).catch((err) => logger.error({ err }, 'strategy-trader: exit post to signals failed'));
-  await sendMessage({ channel: 'logs', text, disable_notification: true }).catch(() => {});
+  // Note: deliberately NOT duplicating to Logs — see sendStrategyEntryPost.
 }
