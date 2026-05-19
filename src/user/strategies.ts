@@ -21,9 +21,13 @@
 import { pageShell } from '../strategies/landing.js';
 import {
   STRATEGY_CONFIGS,
-  recommendedMaxLeverage,
   type StrategyConfig,
 } from '../strategies/track-c-config.js';
+
+/** Default leverage for newly-enabled strategy rows. 10× is the
+ *  sensible middle-ground for crypto perps — covers most SL distances
+ *  without ballooning margin requirements. User can override per-row. */
+const DEFAULT_LEVERAGE = 10;
 import type { UserStrategyRow } from '../db/repos/user-strategies.js';
 import { csrfInput } from '../auth/csrf.js';
 
@@ -278,9 +282,8 @@ function renderRow(
   const isEnabled = existing?.enabled === 1;
   const checkedAttr = isEnabled ? 'checked' : '';
   const notional = existing?.notional_usd ?? 100;
-  const leverage = existing?.leverage ?? 1;
+  const leverage = existing?.leverage ?? DEFAULT_LEVERAGE;
   const slPctStr = (cfg.slPct * 100).toFixed(1);
-  const recommendedLev = recommendedMaxLeverage(cfg.slPct);
   const symbolLabel = cfg.symbol ?? 'ANY';
   const name = cfg.name ?? `${symbolLabel} ${cfg.timeframe}m`;
 
@@ -334,7 +337,7 @@ function renderRow(
         <label class="strat-field">
           <span class="strat-field-label">Плечо</span>
           <input type="number" name="${leverageName}" value="${leverage}" min="1" max="100" step="1" />
-          <span class="strat-field-hint">рекомендуется не более <b>${recommendedLev}×</b> при SL ${slPctStr}%</span>
+          <span class="strat-field-hint">по умолчанию <b>${DEFAULT_LEVERAGE}×</b> · Bybit допускает 1–100×</span>
         </label>
       </div>
     </div>

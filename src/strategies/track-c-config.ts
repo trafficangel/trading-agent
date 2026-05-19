@@ -928,33 +928,11 @@ export const BYBIT_REF_URL = 'https://www.bybit.com/invite?ref=MY6W8R';
 /** Bonus days awarded for registering Bybit via BYBIT_REF_URL. */
 export const BYBIT_REF_BONUS_DAYS = 30;
 
-/**
- * Track D — recommended max leverage for a given strategy.
- *
- * Logic: keep the user's liquidation distance comfortably WIDER than
- * our safety SL, so the safety SL fires first (slPct loss) instead of
- * a liquidation (100% margin wipe).
- *
- * Formula:
- *   max_lev = floor(0.7 / slPct)
- *
- * The 0.7 factor leaves a 30% buffer for funding, maintenance margin,
- * spread, and slippage between SL trigger and actual fill.
- *
- * Examples (with current SL config):
- *   slPct  5%  (BTC scalper)   → max  14x
- *   slPct  7.5%(BNB)           → max  9x
- *   slPct 15%  (XRP / TRX)     → max  4x
- *   slPct 25%  (TON)           → max  2x
- *   slPct 28%  (HBAR)          → max  2x
- *   slPct 30%  (UNI)           → max  2x
- *
- * Floor at 1x (no leverage) — user always allowed to skip leverage.
- * Ceiling at 100x (Bybit max for BTC) — beyond that Bybit rejects
- * setLeverage with an error.
- */
-export function recommendedMaxLeverage(slPct: number): number {
-  if (!Number.isFinite(slPct) || slPct <= 0) return 1;
-  const raw = Math.floor(0.7 / slPct);
-  return Math.max(1, Math.min(100, raw));
-}
+// Track D leverage policy:
+//   - DEFAULT_LEVERAGE = 10× (lives in src/user/strategies.ts) is applied
+//     to every newly-enabled row regardless of strategy SL%. Users can
+//     override per-row in the cabinet.
+//   - The earlier `recommendedMaxLeverage(slPct)` heuristic was removed
+//     — it produced very different ceilings per strategy (14× vs 2×)
+//     which confused users. A flat default plus the user's own
+//     adjustment proved cleaner during beta feedback.
