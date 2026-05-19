@@ -13,6 +13,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getAuthedUser } from '../auth/routes.js';
+import { rotateSessionForUser, SESSION_COOKIE, SESSION_TTL_DAYS } from '../auth/session.js';
 import { findSubscription, setTradingPaused } from '../db/repos/user-subscriptions.js';
 import {
   findActiveKey,
@@ -492,9 +493,24 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     setTradingPaused(user.userId, true);
     const closeStats = await closeAllUserPositions(user.userId);
     revokeApiKey(row.id);
+    // Audit M-NEW-1 — rotate the session cookie at revoke time. If a
+    // cookie was ever stolen, the attacker would otherwise still hold
+    // a valid sid 90 days after key revoke and could re-add THEIR key.
+    // We rotate proactively at any «privileged» action that the
+    // attacker might want to exploit (revoke = the prime example).
+    // The legitimate user (running this request) gets the fresh cookie
+    // set in this same response; the old sid stops resolving.
+    const newSid = rotateSessionForUser(user.userId);
+    reply.setCookie(SESSION_COOKIE, newSid, {
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      maxAge: SESSION_TTL_DAYS * 24 * 60 * 60,
+    });
     logger.info(
       { userId: user.userId, keyId: row.id, closeStats },
-      'api-key revoked by user (paused → closed → revoked)',
+      'api-key revoked by user (paused → closed → revoked → session rotated)',
     );
     let msg = 'Ключ отключён.';
     if (closeStats.attempted > 0) {

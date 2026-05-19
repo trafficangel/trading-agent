@@ -1,15 +1,43 @@
 import type { FastifyInstance } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import { config } from '../config.js';
 import { parseLuxAlgoWebhook } from './luxalgo.schema.js';
 import { sendMessage } from '../telegram/bot.js';
 import { logger } from '../lib/logger.js';
 import { handleStrategyWebhook, formatStrategyWebhookLog } from '../strategies/strategy-trader.js';
 
+/**
+ * Audit H-NEW-2 — constant-time secret comparison. `req.params.secret`
+ * is attacker-controlled; `===` leaks comparison position via timing.
+ * Negligible at our scale, but free to fix and means brute-force
+ * attempts can't probe character-by-character.
+ */
+function constTimeEqualStr(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
 export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { secret: string }; Body: unknown }>(
     '/webhook/luxalgo/:secret',
+    {
+      // Audit H-NEW-2 — tight body limit. TradingView webhooks are
+      // ~500 bytes JSON; 8KB is generous headroom. Without an
+      // override, the global server limit (256KB) makes a malicious
+      // unauth POST consume ~32× more memory per request.
+      bodyLimit: 8 * 1024,
+      // Per-IP rate-limit. The secret is 32+ hex chars — practically
+      // unguessable — but if it ever leaks, throttle gives us time
+      // to rotate. Also bounds log noise from misconfigured TV alerts.
+      // TradingView itself fires <30/min in practice; 60/min is
+      // headroom for retries. Limit is keyed on IP, not secret, so
+      // a real alert from TradingView's egress range still fits.
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' },
+      },
+    },
     async (req, reply) => {
-      if (req.params.secret !== config.WEBHOOK_SECRET) {
+      if (!constTimeEqualStr(req.params.secret, config.WEBHOOK_SECRET)) {
         return reply.code(401).send({ ok: false, error: 'unauthorized' });
       }
 

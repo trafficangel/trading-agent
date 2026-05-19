@@ -408,7 +408,15 @@ const planFormSchema = z.object({
 });
 
 export async function adminRoute(app: FastifyInstance): Promise<void> {
-  app.get('/admin', async (req, reply) => {
+  // Audit H-NEW-3 — rate-limit on each /admin/* route.
+  // Basic-Auth secret is constant-time compared, but without throttle
+  // an attacker can brute-force ADMIN_PASSWORD at 100s of req/sec
+  // over HTTPS. 20/min per IP is enough headroom for a real operator
+  // (refresh + a few form posts) and slow enough to make brute-force
+  // useless: a 16-char alphanumeric needs ~10^28 tries.
+  const adminRateLimit = { max: 20, timeWindow: '1 minute' };
+
+  app.get('/admin', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
     if (!checkAuth(req, reply)) return;
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'private, no-store');
@@ -421,7 +429,7 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
   // body (the admin table renders bare <form method=POST>). After
   // the flip we redirect back to /admin so the table refreshes
   // without the operator seeing a JSON blob.
-  app.post('/admin/users/:id/plan', async (req, reply) => {
+  app.post('/admin/users/:id/plan', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
     if (!checkAuth(req, reply)) return;
     const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
     if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;
@@ -469,7 +477,7 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
   // Bump access_until forward by N days for non-VIP users. Useful for
   // manually onboarding paying customers before automated billing is
   // wired. Rejected for VIP users (their access is already permanent).
-  app.post('/admin/users/:id/extend', async (req, reply) => {
+  app.post('/admin/users/:id/extend', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
     if (!checkAuth(req, reply)) return;
     const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
     if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;
@@ -520,7 +528,7 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
   // Used when a user requests cancellation by Telegram before their
   // paid period ends, or for fraud/abuse. Status → 'cancelled', which
   // gates listEligibleTargets and shows different cabinet copy.
-  app.post('/admin/users/:id/cancel', async (req, reply) => {
+  app.post('/admin/users/:id/cancel', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
     if (!checkAuth(req, reply)) return;
     const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
     if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;

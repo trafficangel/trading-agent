@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import fastifyFormbody from '@fastify/formbody';
+import fastifyRateLimit from '@fastify/rate-limit';
 import { config } from './config.js';
 import { logger } from './lib/logger.js';
 import { luxalgoRoute } from './webhooks/luxalgo.route.js';
@@ -17,6 +18,7 @@ import { startDailyWrapJob } from './jobs/daily-wrap.js';
 import { startHealthJob } from './jobs/health.js';
 import { startSubscriptionSweeperJob } from './jobs/subscription-sweeper.js';
 import { startBalanceMonitorJob } from './jobs/balance-monitor.js';
+import { startRecoveryMonitorJob } from './jobs/recovery-monitor.js';
 import { sendMessage } from './telegram/bot.js';
 import { startupBanner, statusReply } from './telegram/templates.js';
 import { countSignalsSince } from './db/repos/signals.js';
@@ -84,6 +86,29 @@ async function main(): Promise<void> {
   // (VIP toggle, subscription extend) and the /account/strategies form.
   // Without this plugin Fastify leaves req.body undefined for form data.
   await app.register(fastifyFormbody);
+
+  // Audit H-NEW-2/3 — global rate-limit plugin in OPT-IN mode.
+  // `global: false` means routes without `config.rateLimit` are not
+  // limited (default behaviour preserved). Routes that ARE limited
+  // declare their bucket in their `config` option:
+  //   - /webhook/luxalgo/:secret → 60/min (TV alerts + brute-force guard)
+  //   - /admin/* → 10/min (Basic-auth brute-force guard)
+  //   - /auth/start, /auth/verify (existing in-memory limiter already)
+  // Memory backend is fine for our single-process deployment.
+  await app.register(fastifyRateLimit, {
+    global: false,
+    max: 60,
+    timeWindow: '1 minute',
+    // Use Caddy-forwarded IP, not the proxy.
+    keyGenerator: (req) => req.ip,
+    // Return JSON instead of plain text for HTTP API ergonomics; admin
+    // pages will see this body but rendered fine in any client.
+    errorResponseBuilder: (_req, ctx) => ({
+      ok: false,
+      error: 'rate_limit_exceeded',
+      retryAfterSec: Math.ceil(ctx.ttl / 1000),
+    }),
+  });
 
   // Audit H2 — security headers on every HTML response. Defends against
   // XSS-stolen-CSRF (no third-party scripts can execute), clickjacking
@@ -154,6 +179,7 @@ async function main(): Promise<void> {
   startHealthJob();
   startSubscriptionSweeperJob();
   startBalanceMonitorJob();
+  startRecoveryMonitorJob();
 
   await app.listen({ host: '0.0.0.0', port: config.PORT });
   logger.info({ port: config.PORT, mode: config.MODE }, 'server listening');

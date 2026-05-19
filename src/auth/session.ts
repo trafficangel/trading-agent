@@ -108,6 +108,23 @@ export function touchSession(sessionId: string): void {
 }
 
 /**
+ * Audit M-NEW-1 — rotate a user's session_id by user_id. Used by the
+ * api-key revoke flow: if a session cookie was ever stolen, revoking
+ * the key alone doesn't kick the attacker out — they can still reach
+ * /account/api-key with the captured cookie and connect THEIR key.
+ * Rotating invalidates the old cookie; the legitimate user (who is
+ * actively doing the revoke) gets the new value set in this same
+ * response.
+ *
+ * Returns the new session_id so the caller can issue the cookie.
+ */
+export function rotateSessionForUser(userId: number): string {
+  const newSid = generateSessionId();
+  updateSessionStmt.run(newSid, Date.now(), userId);
+  return newSid;
+}
+
+/**
  * Register a verified phone. If we've seen this phone before, rotate
  * the session_id (so a new device gets a fresh cookie) and return that.
  * If not, create a new registration row.

@@ -371,6 +371,49 @@ export type Position = {
   stopLoss: number;
 };
 
+/**
+ * Audit M-NEW-4 — read ALL open positions on the account (no symbol
+ * filter). Used by the crash-recovery cron to detect positions on
+ * Bybit that have no matching decision row in our DB (orphans from
+ * an OS crash between placeMarketOrder and insertDecision).
+ *
+ * Bybit's `/v5/position/list` accepts `settleCoin=USDT` to return all
+ * USDT-perp positions in one call (vs N calls per-symbol). Empty
+ * list when the account is flat.
+ */
+export async function fetchAllPositions(
+  creds: Creds,
+): Promise<{ ok: true; positions: Position[] } | { ok: false; code: number; msg: string }> {
+  const r = await signedGet<{
+    list?: Array<{
+      symbol: string;
+      side: string;
+      size: string;
+      avgPrice: string;
+      unrealisedPnl: string;
+      positionIdx: number;
+      stopLoss?: string;
+    }>;
+  }>(creds, '/v5/position/list', { category: 'linear', settleCoin: 'USDT' });
+  if (!r.ok) return r;
+  const positions: Position[] = [];
+  for (const row of r.data.list ?? []) {
+    if (!row.size || Number(row.size) === 0) continue;
+    const side: 'long' | 'short' | null =
+      row.side === 'Buy' ? 'long' : row.side === 'Sell' ? 'short' : null;
+    positions.push({
+      symbol: row.symbol,
+      side,
+      size: Number(row.size),
+      avgPrice: Number(row.avgPrice),
+      unrealisedPnl: Number(row.unrealisedPnl),
+      positionIdx: row.positionIdx,
+      stopLoss: row.stopLoss ? Number(row.stopLoss) : 0,
+    });
+  }
+  return { ok: true, positions };
+}
+
 /** Read the current open position for a symbol. Returns null if flat. */
 export async function fetchPosition(
   creds: Creds,
