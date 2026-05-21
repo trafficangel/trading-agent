@@ -20,7 +20,7 @@
 import type { FastifyInstance } from 'fastify';
 import { pageShell } from './landing.js';
 import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
-import { listTiers } from './tier-config.js';
+import { listTiers, tierCoinTickers } from './tier-config.js';
 
 const SUPPORT_TG = 'https://t.me/dboykod';
 
@@ -418,14 +418,15 @@ function renderPricing(): string {
         <span class="at-tier-price-num">$0</span>
         <span class="at-tier-price-period">/мес × ${BYBIT_REF_BONUS_DAYS} дней</span>
       </div>
+      <p class="at-tier-pitch-top">Полный Starter на ${BYBIT_REF_BONUS_DAYS} дней без оплаты — попробуйте автотрейдинг на реальных деньгах.</p>
       <ul class="at-tier-features">
-        <li>3 стратегии (как Starter)</li>
-        <li>До 2 одновременных позиций</li>
-        <li>Реальная торговля на вашем счёте</li>
-        <li><b>Условие</b>: новый аккаунт Bybit по <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">нашей ссылке</a></li>
+        <li><span class="at-tier-feat-icon">🪙</span><span class="at-tier-feat-label">3 монеты:</span> BTC, BNB, BCH</li>
+        <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">Сделок одновременно:</span> до 2</li>
+        <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">Торговля:</span> настоящая, на вашем счёте</li>
+        <li><span class="at-tier-feat-icon">🎁</span><span class="at-tier-feat-label">Условие:</span> новый аккаунт Bybit по <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">нашей ссылке</a></li>
       </ul>
-      <div class="at-tier-pitch">
-        Полный Starter на ${BYBIT_REF_BONUS_DAYS} дней, без оплаты. После — переход на платный Starter $${starterPrice}/мес или отключение.
+      <div class="at-tier-after-bonus">
+        После ${BYBIT_REF_BONUS_DAYS} дней — переход на платный Starter $${starterPrice}/мес или отключение в один клик.
       </div>
     </div>
   `;
@@ -435,6 +436,9 @@ function renderPricing(): string {
       const isPopular = t.id === 'standard';
       const maxStr = t.maxBalanceUsdt === Number.POSITIVE_INFINITY ? '∞' : `$${t.maxBalanceUsdt.toLocaleString()}`;
       const sub = t.expectedMonthlyPnlRangeUsd;
+      const coins = tierCoinTickers(t.id);
+      const coinsStr = coins.length > 0 ? coins.join(', ') : '—';
+      const worstUsd = Math.round(t.minBalanceUsdt * t.expectedMaxDdPct / 100);
       const badge = isPopular ? `<div class="at-tier-badge at-tier-badge-popular">${ico('⭐')}Популярный</div>` : '';
       return `
         <div class="at-tier-card ${isPopular ? 'at-tier-popular' : ''}" data-tier-index="${i + 1}">
@@ -445,13 +449,13 @@ function renderPricing(): string {
             <span class="at-tier-price-num">$${t.monthlyPriceUsd}</span>
             <span class="at-tier-price-period">/мес</span>
           </div>
+          <p class="at-tier-pitch-top">${escapeHtml(t.pitch)}</p>
           <ul class="at-tier-features">
-            <li>${t.strategyIds.length} стратегий в портфеле</li>
-            <li>~$${sub.low}–$${sub.high}/мес ожидаемая прибыль</li>
-            <li>Max просадка ≤${t.expectedMaxDdPct}%</li>
-            <li>До ${t.maxConcurrentPositions} одновременных позиций</li>
+            <li><span class="at-tier-feat-icon">💰</span><span class="at-tier-feat-label">Заработок:</span> ~$${sub.low}–$${sub.high}/мес</li>
+            <li><span class="at-tier-feat-icon">🪙</span><span class="at-tier-feat-label">${coins.length} монеты:</span> ${escapeHtml(coinsStr)}</li>
+            <li><span class="at-tier-feat-icon">🛡</span><span class="at-tier-feat-label">Просадка:</span> до ${t.expectedMaxDdPct}% (~$${worstUsd})</li>
+            <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">Сделок одновременно:</span> до ${t.maxConcurrentPositions}</li>
           </ul>
-          <div class="at-tier-pitch">${escapeHtml(t.pitch)}</div>
         </div>
       `;
     })
@@ -855,24 +859,30 @@ function styles(): string {
   .at-tier-price-num { font-size: 28px; font-weight: 700; color: #4ad991; }
   .at-tier-free .at-tier-price-num { color: #f3d266; }
   .at-tier-price-period { font-size: 12px; color: #8590a0; }
+  .at-tier-pitch-top {
+    font-size: 12.5px; color: #cfd6dd; line-height: 1.55;
+    margin: 0 0 12px; padding-bottom: 10px;
+    border-bottom: 1px dashed #1a1f27;
+  }
   .at-tier-features {
     list-style: none; padding: 0; margin: 0 0 12px 0;
-    font-size: 12.5px; color: #cfd6dd; line-height: 1.55;
+    font-size: 12.5px; color: #cfd6dd; line-height: 1.5;
     flex: 1;
   }
   .at-tier-features li {
-    padding: 4px 0;
-    padding-left: 14px;
-    position: relative;
+    padding: 6px 0; display: flex; align-items: flex-start; gap: 6px;
   }
-  .at-tier-features li::before {
-    content: '✓'; color: #4ad991;
-    position: absolute; left: 0;
-  }
+  .at-tier-feat-icon { flex-shrink: 0; font-size: 13px; line-height: 1.5; }
+  .at-tier-feat-label { color: #8590a0; }
   .at-tier-features a {
     color: #4ad991; text-decoration: none;
   }
   .at-tier-features a:hover { text-decoration: underline; }
+  .at-tier-after-bonus {
+    font-size: 11.5px; color: #8590a0; line-height: 1.5;
+    margin-top: auto; padding-top: 10px; border-top: 1px solid #1a1f27;
+  }
+  /* Legacy pitch class kept in case other layouts still use it. */
   .at-tier-pitch { font-size: 11.5px; color: #8590a0; line-height: 1.5; margin-top: auto; padding-top: 10px; border-top: 1px solid #1a1f27; }
   .at-pricing-cta { text-align: center; margin: 28px 0 18px; }
   .at-pricing-cta-sub { font-size: 12.5px; color: #8590a0; margin-top: 10px; }

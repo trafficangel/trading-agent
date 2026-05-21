@@ -82,7 +82,7 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     maxConcurrentPositions: 2,
     expectedMonthlyPnlRangeUsd: { low: 50, high: 80 },
     expectedMaxDdPct: 8,
-    pitch: 'Старт для новичков: 3 стратегии с минимальным риском. До 8% просадки.',
+    pitch: 'Тариф для знакомства с автотрейдингом. Маленькие сделки, минимальный риск, понятный результат.',
   },
   standard: {
     id: 'standard',
@@ -97,7 +97,7 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     maxConcurrentPositions: 3,
     expectedMonthlyPnlRangeUsd: { low: 150, high: 240 },
     expectedMaxDdPct: 15,
-    pitch: 'Базовый набор: 4 проверенных стратегии. 15-24% в месяц по бэктесту.',
+    pitch: 'Самый популярный выбор. Больше монет в работе, больше сделок, заметный доход в месяц.',
   },
   plus: {
     id: 'plus',
@@ -118,7 +118,7 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     maxConcurrentPositions: 4,
     expectedMonthlyPnlRangeUsd: { low: 390, high: 580 },
     expectedMaxDdPct: 18,
-    pitch: 'Полный набор стратегий, оптимальный размер позиций. 13-19% в месяц.',
+    pitch: 'Полный портфель монет в работе. Хороший выбор когда депозит уже серьёзный, а время — нет.',
   },
   pro: {
     id: 'pro',
@@ -139,7 +139,7 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     maxConcurrentPositions: 5,
     expectedMonthlyPnlRangeUsd: { low: 1000, high: 1500 },
     expectedMaxDdPct: 18,
-    pitch: 'Для серьёзных инвесторов: те же 5 стратегий, максимальный размер позиций.',
+    pitch: 'Тот же портфель монет, но сделки больше — пропорционально вашему депозиту растёт и заработок.',
   },
   vip: {
     id: 'vip',
@@ -161,7 +161,7 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     maxConcurrentPositions: 5,
     expectedMonthlyPnlRangeUsd: { low: 2500, high: 4000 },
     expectedMaxDdPct: 18,
-    pitch: 'Премиум: индивидуальная настройка через оператора, success-fee 12% доступен.',
+    pitch: 'Премиум: персональная настройка через оператора, гибкие условия (success-fee вместо фиксированной подписки).',
   },
 };
 
@@ -194,6 +194,18 @@ export function getTier(id: TierId): TierConfig {
 
 export function listTiers(): TierConfig[] {
   return TIER_ORDER.map((id) => TIER_CONFIGS[id]);
+}
+
+/** List of coin tickers (e.g. "BTC, BNB, BCH") used by strategies in this
+ *  tier. Used in UI to make "3 стратегий" concrete: tells the user
+ *  exactly which crypto-assets will be traded on their account. */
+export function tierCoinTickers(tierId: TierId): string[] {
+  const tier = TIER_CONFIGS[tierId];
+  if (!tier) return [];
+  return tier.strategyIds
+    .map((sid) => STRATEGY_CONFIGS[sid]?.symbol ?? '')
+    .filter(Boolean)
+    .map((sym) => sym.replace(/USDT$/, ''));
 }
 
 /**

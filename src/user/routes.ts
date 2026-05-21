@@ -36,6 +36,7 @@ import {
   MIN_AUTOTRADING_DEPOSIT_USDT,
   listTiers,
   getTier,
+  tierCoinTickers,
   type TierId,
 } from '../strategies/tier-config.js';
 import { pageShell } from '../strategies/landing.js';
@@ -824,12 +825,16 @@ function renderTierPicker(p: {
     const maxStr = t.maxBalanceUsdt === Number.POSITIVE_INFINITY
       ? '∞'
       : `$${t.maxBalanceUsdt.toLocaleString()}`;
+    const coins = tierCoinTickers(t.id);
+    const coinsStr = coins.length > 0 ? coins.join(', ') : '—';
+    // Worst-case dollar loss at the tier's stated max DD, using its minBalance.
+    const worstUsd = Math.round(t.minBalanceUsdt * t.expectedMaxDdPct / 100);
 
     const badges: string[] = [];
     if (isActive) badges.push('<span class="tp-badge tp-badge-cur">✓ Активен</span>');
     else if (isSelected) badges.push('<span class="tp-badge tp-badge-pending">⏳ Выбран</span>');
     if (isMatched && !isActive && !isSelected) {
-      badges.push('<span class="tp-badge tp-badge-rec">Рекомендуется</span>');
+      badges.push('<span class="tp-badge tp-badge-rec">Подходит вам</span>');
     }
 
     let actionBtn = '';
@@ -838,9 +843,6 @@ function renderTierPicker(p: {
     } else if (isVipLocked) {
       actionBtn = '<a href="https://t.me/dboykod" class="tp-btn tp-btn-vip" target="_blank" rel="noopener">Написать оператору</a>';
     } else {
-      // Phase G — choice is ALWAYS allowed; activation requires balance.
-      // If sufficient balance → "Выбрать и активировать" → POST → assignTier
-      // If insufficient → "Выбрать (нужно +$X)" → POST → stores choice + redirects to picker
       const need = Math.max(0, t.minBalanceUsdt - (p.balance ?? 0));
       const label = canAfford
         ? (isSelected ? `Активировать ${escapeHtmlMin(t.name)}` : `Выбрать ${escapeHtmlMin(t.name)} →`)
@@ -870,13 +872,14 @@ function renderTierPicker(p: {
         <div class="tp-card-depo">Депозит $${t.minBalanceUsdt.toLocaleString()}–${maxStr}</div>
         <div class="tp-card-price">
           <span class="tp-card-price-num">$${t.monthlyPriceUsd}</span>
-          <span class="tp-card-price-period">/мес</span>
+          <span class="tp-card-price-period">/мес подписки</span>
         </div>
+        <p class="tp-card-pitch">${escapeHtmlMin(t.pitch)}</p>
         <ul class="tp-card-features">
-          <li>${t.strategyIds.length} стратегий</li>
-          <li>~$${subRange.low}–$${subRange.high}/мес</li>
-          <li>Max DD ≤${t.expectedMaxDdPct}%</li>
-          <li>До ${t.maxConcurrentPositions} позиций</li>
+          <li><span class="tp-card-feature-emoji">💰</span><span class="tp-card-feature-label">Заработок:</span> ~$${subRange.low}–$${subRange.high}/мес</li>
+          <li><span class="tp-card-feature-emoji">🪙</span><span class="tp-card-feature-label">${coins.length} монеты в работе:</span> ${escapeHtmlMin(coinsStr)}</li>
+          <li><span class="tp-card-feature-emoji">🛡</span><span class="tp-card-feature-label">Просадка:</span> до ${t.expectedMaxDdPct}% депо (~$${worstUsd} в худший месяц)</li>
+          <li><span class="tp-card-feature-emoji">⚡</span><span class="tp-card-feature-label">Сделок одновременно:</span> до ${t.maxConcurrentPositions}</li>
         </ul>
         <div class="tp-card-action">${actionBtn}</div>
       </div>
@@ -943,10 +946,20 @@ function renderTierPicker(p: {
       .tp-card-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 12px; }
       .tp-card-price-num { font-size: 24px; font-weight: 700; color: #4ad991; }
       .tp-card-price-period { font-size: 12px; color: #8590a0; }
-      .tp-card-features { list-style: none; padding: 0; margin: 0 0 14px; flex: 1;
-        font-size: 12px; color: #cfd6dd; line-height: 1.6; }
-      .tp-card-features li { padding: 2px 0; padding-left: 12px; position: relative; }
-      .tp-card-features li::before { content: '✓'; color: #4ad991; position: absolute; left: 0; }
+      .tp-card-pitch {
+        font-size: 12.5px; color: #cfd6dd; line-height: 1.55;
+        margin: 0 0 14px; padding-bottom: 12px;
+        border-bottom: 1px dashed #1a1f27;
+      }
+      .tp-card-features {
+        list-style: none; padding: 0; margin: 0 0 14px; flex: 1;
+        font-size: 12.5px; color: #cfd6dd; line-height: 1.5;
+      }
+      .tp-card-features li {
+        padding: 6px 0; display: flex; align-items: flex-start; gap: 6px;
+      }
+      .tp-card-feature-emoji { flex-shrink: 0; font-size: 13px; line-height: 1.5; }
+      .tp-card-feature-label { color: #8590a0; }
       .tp-card-action { margin-top: auto; }
       .tp-btn { display: block; width: 100%; box-sizing: border-box; padding: 10px 12px;
         border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none;
@@ -963,13 +976,33 @@ function renderTierPicker(p: {
       .tp-note { font-size: 12.5px; color: #6b7480; line-height: 1.6; margin-top: 22px;
         background: #11161d; border: 1px solid #1f2630; padding: 14px 18px; border-radius: 10px; }
       .tp-note b { color: #cfd6dd; }
+      .tp-glossary {
+        margin-top: 24px; padding: 18px 22px; border-radius: 14px;
+        background: #0e131a; border: 1px solid #1a1f27;
+      }
+      .tp-glossary-title {
+        font-size: 14px; font-weight: 600; color: #e8edf2; margin-bottom: 14px;
+      }
+      .tp-glossary-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;
+      }
+      .tp-glossary-item {
+        font-size: 12.5px; color: #9aa5b1; line-height: 1.55;
+        padding: 12px 14px; background: #11161d; border-radius: 8px;
+        border: 1px solid #1a1f27;
+      }
+      .tp-glossary-item b {
+        display: block; color: #cfd6dd; font-size: 13px; font-weight: 600;
+        margin-bottom: 4px;
+      }
     </style>
     <div class="tp-wrap">
       <div class="tp-back"><a href="/account">← В кабинет</a></div>
       <h1 class="tp-h1">Выбор тарифа</h1>
       <p class="tp-sub">
-        Тариф определяет какие стратегии торгуют на вашем счёте и каким объёмом.
-        Выберите тот, который подходит под ваш депозит на Bybit. Можно сменить в любой момент.
+        Тариф — это конфигурация автотрейдинга под размер вашего депозита.
+        Чем больше депозит — тем больше монет в работе и тем выше потенциальный доход.
+        Сменить можно в любой момент.
       </p>
       <div class="tp-balance-row">
         <div class="tp-balance">
@@ -982,6 +1015,31 @@ function renderTierPicker(p: {
       ${okBlock}
       ${pendingBlock}
       <div class="tp-grid">${cards}</div>
+      <div class="tp-glossary">
+        <div class="tp-glossary-title">📖 Что значат эти цифры</div>
+        <div class="tp-glossary-grid">
+          <div class="tp-glossary-item">
+            <b>💰 Заработок в месяц</b>
+            Сколько примерно вы заработаете по нашим бэктестам и реальной статистике shadow-аккаунта.
+            Это <b>оценка диапазона</b>, не гарантия — рынок меняется и реальный результат может быть выше или ниже.
+          </div>
+          <div class="tp-glossary-item">
+            <b>🪙 Монеты в работе</b>
+            Криптовалюты, с которыми торгует система на вашем счёте — параллельно, разными алгоритмами.
+            Каждая монета — отдельная стратегия которую мы предварительно отобрали.
+          </div>
+          <div class="tp-glossary-item">
+            <b>🛡 Просадка</b>
+            Насколько ваш депозит может временно упасть в неудачный месяц. Это нормальная часть торговли —
+            убыточные периоды бывают у любой системы, главное что они ограничены и затем восстанавливаются.
+          </div>
+          <div class="tp-glossary-item">
+            <b>⚡ Сделок одновременно</b>
+            Максимум сделок, которые система держит открытыми в один момент. Ограничение защищает
+            ваш депозит от перегрузки маржой, если несколько монет сработают синхронно.
+          </div>
+        </div>
+      </div>
       <div class="tp-note">
         <b>Как это работает:</b> вы можете выбрать любой тариф — даже если сейчас на счёте меньше минимума.
         Если баланса хватает, тариф активируется сразу. Если не хватает — мы запомним ваш выбор; пополните
