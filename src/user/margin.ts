@@ -2,7 +2,7 @@
  * Margin accounting for Track D users.
  *
  * Three numbers a user needs to see at a glance:
- *   - balance:   USDT available on their Bybit Derivatives wallet
+ *   - balance:   USDT available on their Bybit Unified Trading Account
  *   - required:  Σ(notional/leverage) across every ENABLED strategy
  *                (worst-case: if every strategy fires at once)
  *   - used:      Σ(bybit_qty × bybit_avg_price / leverage) across active

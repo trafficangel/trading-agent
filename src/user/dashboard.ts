@@ -376,16 +376,21 @@ function renderApiKeyCard(key: ApiKeySummary | null): string {
   `;
 }
 
+/** Legacy strategies-count card. Used now only on the VIP path (operator's
+ *  manual override flow) — non-VIP users see renderTierStatCard /
+ *  renderTierUnsetCard instead. The "Не выбраны" + «Открыть стратегии»
+ *  fallback exists for the edge case where a VIP user has user_strategies
+ *  empty (operator hasn't seeded their overrides yet). */
 function renderStrategiesCard(args: {
   enabled: number;
   available: number;
   notional: number;
 }): string {
   const label = args.enabled === 0
-    ? 'Не выбраны'
+    ? 'Ещё не настроены'
     : `${args.enabled} из ${args.available}`;
   const sub = args.enabled === 0
-    ? `<a href="/account/strategies">Выбрать стратегии →</a>`
+    ? `<a href="/account/strategies">Открыть стратегии →</a>`
     : `общий депозит $${args.notional.toFixed(0)}`;
   return `
     <div class="stat-card cabinet-card">

@@ -2721,7 +2721,7 @@ function renderGatedPreview(
   const gateTitle = opts.loginMode
     ? 'Вход в личный кабинет'
     : opts.fromAutotrading
-      ? '14 дней автотрейдинга бесплатно'
+      ? '14 дней теста + до 30 дней бонусом по реф-ссылке'
       : 'Доступ к детальной статистике';
   const gateSub = opts.loginMode
     ? 'Введите номер — пришлём 6-значный код в Telegram. Имя у нас уже есть.'
@@ -2737,7 +2737,7 @@ function renderGatedPreview(
   // them in-place without a fresh server roundtrip. Visibility is
   // CSS-driven by [data-mode] on the wrapping #gate-phone-stage.
   const registerIcon = opts.fromAutotrading ? '🚀' : '🔒';
-  const registerTitle = opts.fromAutotrading ? '14 дней автотрейдинга бесплатно' : 'Доступ к детальной статистике';
+  const registerTitle = opts.fromAutotrading ? '14 дней теста + до 30 дней бонусом по реф-ссылке' : 'Доступ к детальной статистике';
   const registerSub = opts.fromAutotrading
     ? 'Введите имя и номер — отправим 6-значный код в Telegram. После подтверждения попадёте в личный кабинет и сможете подключить свой Bybit-аккаунт.'
     : 'Введите имя и номер — отправим 6-значный код через официальный сервис подтверждения Telegram.';
