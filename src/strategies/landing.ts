@@ -1538,6 +1538,37 @@ const STYLE = `
     display: grid; gap: 12px;
     grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   }
+  /* Horizontal scroll-snap carousel for 4+ positions. Same .live-pos-card
+   * markup inside — only the container layout differs. The poller swaps
+   * classes when count crosses the 3↔4 boundary. */
+  .live-pos-carousel {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(min(320px, 88%), 360px);
+    gap: 12px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding: 4px 4px 12px;
+    margin: 0 -4px;
+    scrollbar-color: rgba(74, 217, 145, 0.4) transparent;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+  .live-pos-carousel::-webkit-scrollbar { height: 8px; }
+  .live-pos-carousel::-webkit-scrollbar-track { background: transparent; }
+  .live-pos-carousel::-webkit-scrollbar-thumb {
+    background: rgba(74, 217, 145, 0.4); border-radius: 4px;
+  }
+  .live-pos-carousel > .live-pos-card { scroll-snap-align: start; }
+  .live-pos-scroll-hint {
+    text-align: center; font-size: 11.5px; color: var(--text-muted, #6b7480);
+    margin: 4px 0 0; letter-spacing: 0.02em; opacity: 0.85;
+  }
+  .live-pos-subtitle {
+    text-align: center; margin: 6px 0 14px;
+    color: var(--text-muted, #8590a0); font-size: 13px; line-height: 1.55;
+    max-width: 720px; margin-left: auto; margin-right: auto;
+  }
   .live-pos-card {
     background: var(--bg-card);
     border: 1px solid rgba(74, 217, 145, 0.18);

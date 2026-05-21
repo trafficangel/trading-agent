@@ -40,6 +40,13 @@ export type SubscriptionRow = {
   /** TRACK E — anti-flap state for transition timing. */
   tier_transition_target_id: string | null;
   tier_transition_first_seen_at: number | null;
+  /** TRACK E Phase E2 — money-back guarantee accounting.
+   *  paid_started_at: ms when the user first transitioned to PAID. Until set,
+   *  the user is on trial / bonus and the guarantee doesn't apply. */
+  paid_started_at: number | null;
+  last_pnl_guarantee_at: number | null;
+  last_pnl_guarantee_month: string | null;       // YYYY-MM
+  last_pnl_guarantee_pnl_usd: number | null;     // negative value when applied
 };
 
 // TRACK E — trial users get tier_id='standard' for a better first
@@ -128,12 +135,18 @@ export function isTradingActive(userId: number, now = Date.now()): boolean {
  * Admin extends a subscription. `extraDays` is added to whichever is
  * later: current access_until or now() — so extending an expired sub
  * grants `extraDays` from today, not from the past expiry date.
+ *
+ * Phase E2: by default this marks paid_started_at on first call (so the
+ * money-back guarantee starts counting). Pass `markPaidStart: false` for
+ * free/bonus extensions (Bybit-referral bonus, gift extension by operator)
+ * that don't represent a paid month.
  */
 export function adminExtend(
   userId: number,
   extraDays: number,
   adminEmail: string,
   note: string | null,
+  opts: { markPaidStart?: boolean } = {},
 ): SubscriptionRow {
   const sub = findByUserStmt.get(userId);
   if (!sub) throw new Error(`adminExtend: no subscription for user_id=${userId}`);
@@ -144,9 +157,68 @@ export function adminExtend(
   // expired/trial user promotes them to 'active' (assumed payment).
   const newStatus: SubscriptionStatus = 'active';
   extendStmt.run(newAccessUntil, newStatus, adminEmail, note ?? null, now, userId);
+  // Stamp paid_started_at the FIRST time admin extends as a paid renewal.
+  // Bybit-bonus and free extensions should pass markPaidStart=false to
+  // skip this side-effect.
+  const markPaidStart = opts.markPaidStart !== false;
+  if (markPaidStart && !sub.paid_started_at) {
+    db.prepare('UPDATE user_subscriptions SET paid_started_at = ?, updated_at = ? WHERE user_id = ?')
+      .run(now, now, userId);
+  }
   const updated = findByUserStmt.get(userId);
   if (!updated) throw new Error('adminExtend: row vanished');
   return updated;
+}
+
+/** TRACK E Phase E2 — apply money-back guarantee for a given user/month.
+ *  Idempotent: callers must check `last_pnl_guarantee_month` before calling.
+ *  Extends access_until by ~30 days (no charge for next month) and stamps
+ *  the audit fields. */
+export function applyPnlGuarantee(
+  userId: number,
+  monthYyyymm: string,
+  pnlUsd: number,
+): SubscriptionRow {
+  const sub = findByUserStmt.get(userId);
+  if (!sub) throw new Error(`applyPnlGuarantee: no subscription for user_id=${userId}`);
+  const now = Date.now();
+  const base = Math.max(sub.access_until, now);
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+  const newAccessUntil = base + THIRTY_DAYS_MS;
+  db.prepare(`
+    UPDATE user_subscriptions
+       SET access_until = ?,
+           status = 'active',
+           last_pnl_guarantee_at = ?,
+           last_pnl_guarantee_month = ?,
+           last_pnl_guarantee_pnl_usd = ?,
+           updated_at = ?
+     WHERE user_id = ?
+  `).run(newAccessUntil, now, monthYyyymm, pnlUsd, now, userId);
+  const updated = findByUserStmt.get(userId);
+  if (!updated) throw new Error('applyPnlGuarantee: row vanished');
+  return updated;
+}
+
+/** Returns users eligible for the monthly PnL-guarantee sweep:
+ *   - status='active' (paying subs only, not trial/expired/cancelled)
+ *   - plan='standard' (VIP has its own success-fee accounting)
+ *   - paid_started_at IS NOT NULL AND paid_started_at < startOfPrevMonth
+ *     (must have been paying for the FULL evaluated month)
+ *   - last_pnl_guarantee_month != evaluatedMonth (idempotency)
+ */
+export function listPnlGuaranteeCandidates(
+  startOfPrevMonth: number,
+  evaluatedMonthYyyymm: string,
+): SubscriptionRow[] {
+  return db.prepare<[number, string], SubscriptionRow>(`
+    SELECT * FROM user_subscriptions
+     WHERE status = 'active'
+       AND plan = 'standard'
+       AND paid_started_at IS NOT NULL
+       AND paid_started_at < ?
+       AND (last_pnl_guarantee_month IS NULL OR last_pnl_guarantee_month != ?)
+  `).all(startOfPrevMonth, evaluatedMonthYyyymm);
 }
 
 export function setStatus(userId: number, status: SubscriptionStatus): void {

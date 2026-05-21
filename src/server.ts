@@ -19,6 +19,7 @@ import { startHealthJob } from './jobs/health.js';
 import { startSubscriptionSweeperJob } from './jobs/subscription-sweeper.js';
 import { startBalanceMonitorJob } from './jobs/balance-monitor.js';
 import { startRecoveryMonitorJob } from './jobs/recovery-monitor.js';
+import { startPnlGuaranteeMonthlyJob } from './jobs/pnl-guarantee-monthly.js';
 import { sendMessage } from './telegram/bot.js';
 import { startupBanner, statusReply } from './telegram/templates.js';
 import { countSignalsSince } from './db/repos/signals.js';
@@ -180,6 +181,7 @@ async function main(): Promise<void> {
   startSubscriptionSweeperJob();
   startBalanceMonitorJob();
   startRecoveryMonitorJob();
+  startPnlGuaranteeMonthlyJob();
 
   await app.listen({ host: '0.0.0.0', port: config.PORT });
   logger.info({ port: config.PORT, mode: config.MODE }, 'server listening');

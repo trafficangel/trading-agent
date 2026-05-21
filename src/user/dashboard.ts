@@ -338,6 +338,8 @@ function renderTierStatCard(tierId: TierId): string {
         <br/>
         <span style="color:#4ad991">$${sub.low}–$${sub.high}/мес</span> по бэктесту
         <br/>
+        <span style="color:#4ad991; font-size:11.5px">${ico('🛡')}Money-back: минус-месяц → следующий бесплатно</span>
+        <br/>
         <a href="/account/subscription/select-tier" style="color:#8590a0; font-size:11.5px; text-decoration:underline">Сменить тариф →</a>
       </div>
     </div>
