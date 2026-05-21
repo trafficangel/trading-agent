@@ -18,9 +18,26 @@
 
 import { pageShell } from '../strategies/landing.js';
 import type { SubscriptionRow } from '../db/repos/user-subscriptions.js';
+import { TIER_CONFIGS, type TierId } from '../strategies/tier-config.js';
 
 const SUPPORT_TG = 'https://t.me/dboykod';
-const PRICE_USD = 50;
+
+/**
+ * Resolve the price the user will see on this page. Priority order:
+ *   1. Activated tier (sub.tier_id when it represents an actual paid tier)
+ *   2. Selected tier (chosen but not activated yet — same price will apply)
+ *   3. Starter as a sane default if nothing chosen yet (cheapest visible
+ *      price, no false promises).
+ * Returns { price, tierName } so the page can show «Starter $12/мес»
+ * instead of the misleading flat $50.
+ */
+function resolveTierPricing(sub: SubscriptionRow): { price: number; tierName: string } {
+  const tierId = (sub.selected_tier_id ?? sub.tier_id) as TierId | undefined;
+  const tier = tierId && TIER_CONFIGS[tierId];
+  if (tier) return { price: tier.monthlyPriceUsd, tierName: tier.name };
+  const starter = TIER_CONFIGS.starter;
+  return { price: starter.monthlyPriceUsd, tierName: starter.name };
+}
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({
@@ -154,6 +171,7 @@ function renderTrialBlock(sub: SubscriptionRow): string {
   const isUrgent = daysLeft <= 3;
   const totalTrial = daysBetween(sub.trial_started_at, sub.access_until);
   const pct = totalTrial > 0 ? Math.min(100, ((totalTrial - daysLeft) / totalTrial) * 100) : 0;
+  const { price, tierName } = resolveTierPricing(sub);
 
   return `
     <div class="sub-card ${isUrgent ? 'sub-card-warn' : 'sub-card-ok'}">
@@ -182,7 +200,7 @@ function renderTrialBlock(sub: SubscriptionRow): string {
         </div>
         <div>
           <div class="sub-meta-label">После триала</div>
-          <div class="sub-meta-value">$${PRICE_USD} / мес</div>
+          <div class="sub-meta-value">${escapeHtml(tierName)} · $${price}/мес</div>
         </div>
       </div>
 
@@ -190,14 +208,15 @@ function renderTrialBlock(sub: SubscriptionRow): string {
         ${isUrgent
           ? `<b class="sub-warn-text">⚠️ Триал почти закончился.</b> Чтобы продолжить
              пользоваться автотрейдингом после ${fmtDate(sub.access_until)}, напишите
-             оператору для оплаты и продления.`
+             оператору для оплаты и продления тарифа <b>${escapeHtml(tierName)}</b> ($${price}/мес).`
           : `После ${fmtDate(sub.access_until)} торговля автоматически приостановится.
              Чтобы продолжить — напишите оператору в Telegram, мы продлим подписку
-             вручную после оплаты ($${PRICE_USD}/мес).`}
+             вручную после оплаты тарифа <b>${escapeHtml(tierName)}</b> ($${price}/мес).
+             Сменить тариф можно в <a href="/account/subscription/select-tier">кабинете</a>.`}
       </div>
 
       <a class="sub-btn-primary" href="${SUPPORT_TG}" target="_blank" rel="noopener">
-        ${ico('💳')}Оплатить $${PRICE_USD} / мес — @dboykod
+        ${ico('💳')}Оплатить $${price}/мес (${escapeHtml(tierName)}) — @dboykod
       </a>
     </div>
   `;
@@ -206,6 +225,7 @@ function renderTrialBlock(sub: SubscriptionRow): string {
 function renderActiveBlock(sub: SubscriptionRow): string {
   const daysLeft = Math.max(0, daysBetween(Date.now(), sub.access_until));
   const isUrgent = daysLeft <= 7;
+  const { price, tierName } = resolveTierPricing(sub);
   return `
     <div class="sub-card ${isUrgent ? 'sub-card-warn' : 'sub-card-ok'}">
       <div class="sub-badge sub-badge-active">${ico('✅')}Активна</div>
@@ -216,7 +236,7 @@ function renderActiveBlock(sub: SubscriptionRow): string {
       <div class="sub-meta-grid">
         <div>
           <div class="sub-meta-label">План</div>
-          <div class="sub-meta-value">Стандарт · $${PRICE_USD}/мес</div>
+          <div class="sub-meta-value">${escapeHtml(tierName)} · $${price}/мес</div>
         </div>
         <div>
           <div class="sub-meta-label">Срок действия до</div>
@@ -233,14 +253,14 @@ function renderActiveBlock(sub: SubscriptionRow): string {
       <div class="sub-card-body">
         ${isUrgent
           ? `<b class="sub-warn-text">Подписка истекает через ${daysLeft} ${pluralDay(daysLeft)}.</b>
-             Чтобы продлить — напишите оператору, пришлёт реквизиты для оплаты.`
+             Чтобы продлить — напишите оператору, пришлёт реквизиты для оплаты $${price}/мес.`
           : `Доступ активен до ${fmtDate(sub.access_until)}. Можете торговать без ограничений.
              Для продления свяжитесь с оператором ближе к концу периода.`}
       </div>
 
       ${isUrgent
         ? `<a class="sub-btn-primary" href="${SUPPORT_TG}" target="_blank" rel="noopener">
-            ${ico('💳')}Продлить — @dboykod
+            ${ico('💳')}Продлить $${price}/мес — @dboykod
           </a>`
         : ''}
     </div>
@@ -249,6 +269,7 @@ function renderActiveBlock(sub: SubscriptionRow): string {
 
 function renderExpiredBlock(sub: SubscriptionRow): string {
   const daysExpired = daysBetween(sub.access_until, Date.now());
+  const { price, tierName } = resolveTierPricing(sub);
   return `
     <div class="sub-card sub-card-bad">
       <div class="sub-badge sub-badge-bad">${ico('⛔')}Истекла</div>
@@ -261,7 +282,7 @@ function renderExpiredBlock(sub: SubscriptionRow): string {
         </div>
         <div>
           <div class="sub-meta-label">Был план</div>
-          <div class="sub-meta-value">${sub.plan === 'vip' ? 'VIP' : 'Стандарт'}</div>
+          <div class="sub-meta-value">${sub.plan === 'vip' ? 'VIP' : escapeHtml(tierName)}</div>
         </div>
       </div>
 
@@ -271,11 +292,11 @@ function renderExpiredBlock(sub: SubscriptionRow): string {
         Кабинет, история и настройки доступны как обычно.
         <br/><br/>
         Чтобы возобновить торговлю — напишите оператору в Telegram, мы продлим
-        подписку вручную после оплаты ($${PRICE_USD}/мес).
+        подписку вручную после оплаты тарифа <b>${escapeHtml(tierName)}</b> ($${price}/мес).
       </div>
 
       <a class="sub-btn-primary" href="${SUPPORT_TG}" target="_blank" rel="noopener">
-        ${ico('💳')}Продлить — @dboykod
+        ${ico('💳')}Продлить $${price}/мес — @dboykod
       </a>
     </div>
   `;
