@@ -59,6 +59,7 @@ function renderPage(): string {
       ${renderLeveragePositive()}
       ${renderSafety()}
       ${renderLeverageEducation()}
+      ${renderStrategyPipeline()}
 
       <section class="at-section at-strat-details">
         <details class="at-strat-details-toggle">
@@ -296,8 +297,8 @@ function renderLeveragePositive(): string {
             <div class="at-lev-pos-row"><span>Маржа в сделке</span><b>$200</b></div>
             <div class="at-lev-pos-row"><span>Размер позиции</span><b>$200</b></div>
             <div class="at-lev-pos-row"><span>Плечо</span><b>1×</b></div>
-            <div class="at-lev-pos-row at-lev-pos-row-hl"><span>Ожидаемый PnL/мес</span><b>~$2.6</b></div>
-            <div class="at-lev-pos-row"><span>Худшая потеря (SL hit)</span><b>$8 (0.8%)</b></div>
+            <div class="at-lev-pos-row at-lev-pos-row-hl"><span>Ожидаемый PnL/мес</span><b>~$2.7</b></div>
+            <div class="at-lev-pos-row"><span>Худшая потеря (SL hit)</span><b>$7 (0.7%)</b></div>
           </div>
           <div class="at-lev-pos-conclusion">
             На таком депозите плечо 1× даёт <b>0.3% прироста в месяц</b> — это меньше,
@@ -305,16 +306,16 @@ function renderLeveragePositive(): string {
           </div>
         </div>
         <div class="at-lev-pos-col at-lev-pos-with">
-          <div class="at-lev-pos-col-title">${ico('🚀')}С безопасным плечом 11× — тот же $1 000</div>
+          <div class="at-lev-pos-col-title">${ico('🚀')}С безопасным плечом 12× — тот же $1 000</div>
           <div class="at-lev-pos-stats">
             <div class="at-lev-pos-row"><span>Маржа в сделке</span><b>$200</b></div>
-            <div class="at-lev-pos-row"><span>Размер позиции</span><b>$2 200</b></div>
-            <div class="at-lev-pos-row"><span>Плечо</span><b>11×</b></div>
-            <div class="at-lev-pos-row at-lev-pos-row-hl"><span>Ожидаемый PnL/мес</span><b>~$29</b></div>
-            <div class="at-lev-pos-row"><span>Худшая потеря (SL hit)</span><b>$88 (8.8%)</b></div>
+            <div class="at-lev-pos-row"><span>Размер позиции</span><b>$2 400</b></div>
+            <div class="at-lev-pos-row"><span>Плечо</span><b>12×</b></div>
+            <div class="at-lev-pos-row at-lev-pos-row-hl"><span>Ожидаемый PnL/мес</span><b>~$32</b></div>
+            <div class="at-lev-pos-row"><span>Худшая потеря (SL hit)</span><b>$84 (8.4%)</b></div>
           </div>
           <div class="at-lev-pos-conclusion">
-            То же депозита, но <b>в 11 раз больше торгового объёма</b> → в 11 раз
+            То же депозита, но <b>в 12 раз больше торгового объёма</b> → в 12 раз
             больше прибыли. <b>Стоп-лосс срабатывает раньше ликвидации</b>: убыток
             заранее известный, фиксированный.
           </div>
@@ -360,7 +361,7 @@ function renderLeverageEducation(): string {
           <ol class="at-lev-list">
             <li><b>Плечо подбирается под стоп-лосс</b> стратегии — индивидуально для каждой пары</li>
             <li><b>Формула</b>: <code>leverage = floor(0.7 / (slPct + 0.02))</code> — 30% запас до ликвидации</li>
-            <li>Например BCH с SL 4% → плечо 11× (а не 50×). На BTC SL 5% → плечо 10×</li>
+            <li>Например BCH с SL 3.5% → плечо 12× (а не 50×). На BTC SL 4% → плечо 11×</li>
             <li>Если цена идёт против — сначала срабатывает наш стоп-лосс (фиксируем известный убыток), <b>биржа не успевает ликвидировать</b></li>
             <li>Максимальная потеря на одной сделке — <b>1.5-2.5%</b> от вашего депозита</li>
           </ol>
@@ -375,19 +376,19 @@ function renderLeverageEducation(): string {
           </div>
           <div class="at-lev-stat">
             <div class="at-lev-stat-label">Margin (заморозка)</div>
-            <div class="at-lev-stat-val">$90 <span class="at-lev-pct">(3%)</span></div>
+            <div class="at-lev-stat-val">$120 <span class="at-lev-pct">(4%)</span></div>
           </div>
           <div class="at-lev-stat">
             <div class="at-lev-stat-label">Плечо</div>
-            <div class="at-lev-stat-val">11×</div>
+            <div class="at-lev-stat-val">12×</div>
           </div>
           <div class="at-lev-stat">
             <div class="at-lev-stat-label">Размер позиции</div>
-            <div class="at-lev-stat-val">$990</div>
+            <div class="at-lev-stat-val">$1 440</div>
           </div>
           <div class="at-lev-stat at-lev-stat-bad">
             <div class="at-lev-stat-label">Худший убыток (SL hit)</div>
-            <div class="at-lev-stat-val">$39.60 <span class="at-lev-pct">(1.3%)</span></div>
+            <div class="at-lev-stat-val">$50.40 <span class="at-lev-pct">(1.7%)</span></div>
           </div>
           <div class="at-lev-stat at-lev-stat-ok">
             <div class="at-lev-stat-label">Ликвидация</div>
@@ -399,6 +400,73 @@ function renderLeverageEducation(): string {
           между ним и ликвидационной ценой биржи. Это не магия — это математика
           управления риском.
         </p>
+      </div>
+    </section>
+  `;
+}
+
+/**
+ * Strategy pipeline — explains how we test new strategies on shadow account
+ * before promoting them to user tiers, and how the safety SL works.
+ * Two pieces of trust-building information that don't fit the FAQ format.
+ */
+function renderStrategyPipeline(): string {
+  return `
+    <section class="at-section at-pipeline">
+      <h2 class="at-section-title">${ico('🧪')}Как мы работаем со стратегиями</h2>
+      <p class="at-section-sub">
+        В тарифы попадают только те стратегии, которые предварительно прошли
+        многомесячную проверку на нашем shadow-аккаунте. Параллельно мы постоянно
+        тестируем новые — лучшие добавляем в портфели, слабые отбрасываем.
+      </p>
+      <div class="at-pipeline-grid">
+        <div class="at-pipeline-step">
+          <div class="at-pipeline-num">1</div>
+          <div class="at-pipeline-title">${ico('🔬')}Бэктест на 200+ дней</div>
+          <div class="at-pipeline-body">
+            Каждая новая стратегия из LuxAlgo Strategy Builder тестируется на исторических
+            данных. Отсев по простым правилам: <b>win-rate ≥ 55%</b>, <b>profit factor ≥ 2</b>,
+            <b>просадка не больше 30%</b>, минимум 100 сделок в выборке. Только ~5%
+            кандидатов проходят этот фильтр.
+          </div>
+        </div>
+        <div class="at-pipeline-step">
+          <div class="at-pipeline-num">2</div>
+          <div class="at-pipeline-title">${ico('👁')}Shadow-режим на реальные деньги</div>
+          <div class="at-pipeline-body">
+            Прошедшие фильтр стратегии запускаются на нашем собственном Bybit-аккаунте.
+            <b>Это реальные деньги, не симулятор</b> — комиссия, проскальзывание,
+            ночной фондинг учтены. Сделки публичны в Telegram-канале и на сайте,
+            каждую можно перепроверить по trade ID.
+          </div>
+        </div>
+        <div class="at-pipeline-step">
+          <div class="at-pipeline-num">3</div>
+          <div class="at-pipeline-title">${ico('🏆')}Только лучшие — в тарифы</div>
+          <div class="at-pipeline-body">
+            После 1-3 месяцев shadow-торговли смотрим: соответствует ли live-доходность
+            бэктесту? Стабильны ли убытки в допустимом коридоре? Если да —
+            стратегия добавляется в тариф (Starter / Standard / Plus в зависимости
+            от риск-профиля). Слабые — отключаются.
+          </div>
+        </div>
+        <div class="at-pipeline-step">
+          <div class="at-pipeline-num">4</div>
+          <div class="at-pipeline-title">${ico('🛡')}Safety SL — это страховка</div>
+          <div class="at-pipeline-body">
+            Каждая стратегия сама знает, когда выходить — это её внутренняя логика.
+            <b>Наш safety-стоп срабатывает только в случае сбоя</b> (потеря сигнала,
+            зависание биржи). Он выставлен <b>выше всех исторических убытков
+            стратегии</b> + буфер 15-30%, поэтому в нормальной работе не мешает.
+            Обычные убытки стратегия закрывает сама в районе 0.5-2%.
+          </div>
+        </div>
+      </div>
+      <div class="at-pipeline-foot">
+        <b>Что это значит для вас:</b> состав стратегий в каждом тарифе меняется со временем.
+        Когда добавится новая хорошая стратегия — она автоматически появится в вашем портфеле,
+        если ваш тариф её поддерживает. Удалить плохую — наша работа, не ваша.
+        За изменениями состава можно следить в <a href="/strategies">разделе «Стратегии»</a>.
       </div>
     </section>
   `;
@@ -1024,6 +1092,43 @@ function styles(): string {
     font-size: 13px; color: #8590a0; line-height: 1.6; margin: 0;
     padding-top: 14px; border-top: 1px solid #1a1f27;
   }
+
+  /* ----- Strategy Pipeline (Phase I) ----- */
+  .at-pipeline { margin: 60px auto; }
+  .at-pipeline-grid {
+    display: grid; gap: 18px;
+    grid-template-columns: repeat(2, 1fr);
+  }
+  @media (max-width: 720px) {
+    .at-pipeline-grid { grid-template-columns: 1fr; }
+  }
+  .at-pipeline-step {
+    background: #11161d; border: 1px solid #1f2630; border-radius: 14px;
+    padding: 22px 24px; position: relative;
+  }
+  .at-pipeline-num {
+    position: absolute; top: -12px; left: 22px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #4ad991; color: #0b0e13; font-weight: 700; font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .at-pipeline-title {
+    font-size: 15px; font-weight: 600; color: #e8edf2; margin-bottom: 10px; margin-top: 4px;
+  }
+  .at-pipeline-body {
+    font-size: 13px; color: #9aa5b1; line-height: 1.6;
+  }
+  .at-pipeline-body b { color: #cfd6dd; }
+  .at-pipeline-foot {
+    margin-top: 18px; padding: 16px 20px;
+    background: rgba(74, 217, 145, 0.06);
+    border: 1px solid rgba(74, 217, 145, 0.30);
+    border-radius: 12px;
+    font-size: 13px; color: #cfd6dd; line-height: 1.6;
+  }
+  .at-pipeline-foot b { color: #4ad991; }
+  .at-pipeline-foot a { color: #4ad991; text-decoration: none; }
+  .at-pipeline-foot a:hover { text-decoration: underline; }
 
   /* ----- Strategy details (collapse) ----- */
   .at-strat-details { margin: 50px auto; }

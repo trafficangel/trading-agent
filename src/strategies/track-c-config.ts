@@ -664,11 +664,13 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'bch-cntr-cfm-tc': {
     id: 'bch-cntr-cfm-tc',
     code: '007',
-    // TRACK E — low band (DD 5%), eligible all tiers. Tight SL 4% allows
-    // aggressive 11× leverage with safety margin.
+    // TRACK E — low band (DD 5%), eligible all tiers. Tight SL 3.5% allows
+    // aggressive 12× leverage with ~17% buffer over historical worst (-2.99%).
+    // Tightened from 4%/11× on May 21 2026 after re-analyzing loss distribution:
+    // median loss only −0.41%, worst −2.99%, p95 −2.98% → 3.5% buffer = comfortable.
     riskBand: 'low',
     tierEligible: true,
-    maxSafeLeverage: 11,
+    maxSafeLeverage: 12,
     description:
       'BCH 5m | LONG: CNTR Normal Bl + CFM Downtrend + TC Bl | SHORT: CNTR Normal Br + CFM Uptrend + TC Br | EXIT: CNTR Built-in',
     longDescription:
@@ -679,12 +681,12 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Win rate 75% на $1000 размере (LuxAlgo показывает 84% на unit-size без учёта комиссии). ' +
       'Средняя длительность сделки ~5.5 часов, средняя частота 2-3 сделки в день. ' +
       'ВАЖНО: 155 сделок за 2.3 месяца = $170 уплаченной комиссии (0.11% × 155 = 17% от капитала). На высокочастотной 5m стратегии комиссия съедает почти половину валовой прибыли — это честно отражено в наших цифрах. ' +
-      'Safety SL 4% — выше всех 22 исторических убытков (худший −2.99%). Срабатывает только при пропаже exit-вебхука; обычные минусы стратегия закрывает сама в районе −0.5%. ' +
+      'Safety SL 3.5% — выше всех 22 исторических убытков (худший −2.99%, медиана −0.41%) с буфером ~17%. Срабатывает только при пропаже exit-вебхука; обычные минусы стратегия закрывает сама в районе −0.5%. ' +
       'Бэктест короткий — всего 2.3 месяца. Цифры предварительные, ждём накопления реальной статистики.',
     symbol: 'BCHUSDT',
     timeframe: '5',
     enabled: true,
-    slPct: 0.04,
+    slPct: 0.035,
     launchedAt: Date.parse('2026-05-18T12:00:00Z'),
     alertName: 'BCHUSDT|5|LONG=CNTRNormBl&CFMDn&TCBl|SHORT=CNTRNormBr&CFMUp&TCBr|EXIT=CNTRBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/kc1ibd3cc9ubbr33z7k5sci5/',
@@ -760,10 +762,12 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'btc-cfm-strong-tst': {
     id: 'btc-cfm-strong-tst',
     code: '008',
-    // TRACK E — low band (DD 4%), eligible all tiers. SL 5% → 10× safe lev.
+    // TRACK E — low band (DD 4%), eligible all tiers. SL 4% → 11× safe lev.
+    // Tightened from 5%/10× on May 21 2026: historical worst -3.43%, median -0.66%,
+    // 4% gives ~17% buffer over worst — comfortable.
     riskBand: 'low',
     tierEligible: true,
-    maxSafeLeverage: 10,
+    maxSafeLeverage: 11,
     description:
       'BTC 5m | LONG: CFM Strong Br + TST Trending | SHORT: CFM Strong Bl + TST Trending | EXIT: CFM Built-in',
     longDescription:
@@ -776,12 +780,12 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Long-сторона значительно сильнее short (82% vs 72% WR), что характерно для BTC в бычьем рынке 2026. ' +
       'Средняя длительность сделки ~9 часов, средняя частота ~2 сделки в день. ' +
       'ВАЖНО: 102 сделки за 2.3 месяца = $112 уплаченной комиссии (11% от капитала). На 5m стратегиях с медианным движением сделки ~0.4% комиссия Bybit съедает существенную часть edge — это честно отражено в наших цифрах PF 2.18 (LuxAlgo 3.09 на unit-size). ' +
-      'Safety SL 5% — выше всех 23 исторических убытков (худший −3.54%) с буфером ~40%. Срабатывает только при катастрофе; обычные минусы стратегия закрывает сама. ' +
+      'Safety SL 4% — выше всех 23 исторических убытков (худший −3.43%, медиана −0.66%) с буфером ~17%. Срабатывает только при катастрофе; обычные минусы стратегия закрывает сама. ' +
       'Бэктест короткий — всего 2.3 месяца. Цифры предварительные, ждём накопления реальной статистики.',
     symbol: 'BTCUSDT',
     timeframe: '5',
     enabled: true,
-    slPct: 0.05,
+    slPct: 0.04,
     launchedAt: Date.parse('2026-05-19T00:00:00Z'),
     alertName: 'BTCUSDT|5|LONG=CFMStrongBr&TSTTr|SHORT=CFMStrongBl&TSTTr|EXIT=CFMBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/pqw04cy9q2unzkju7afj5ihh/',

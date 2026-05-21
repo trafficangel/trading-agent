@@ -13,7 +13,7 @@
  *   - Each strategy uses its own `maxSafeLeverage` (computed from
  *     slPct in track-c-config.ts) to derive notional:
  *       notional = margin_per_trade × strategy.maxSafeLeverage
- *   - This way tight-SL strategies (BCH 4%, BTC 5%) get high leverage
+ *   - This way tight-SL strategies (BCH 3.5%, BTC 4%) get high leverage
  *     and large notional; wide-SL strategies (XRP 15%) get low leverage
  *     and small notional. Risk per trade stays bounded by SL × notional.
  *
