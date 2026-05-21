@@ -530,7 +530,7 @@ function renderOnboardingChecklist(args: {
         // form CTA (POST with csrf)
         return `
           <form method="POST" action="${escapeHtml(c.action)}" style="display:inline">
-            <input type="hidden" name="csrf" value="${escapeHtml(args.csrfToken ?? '')}"/>
+            <input type="hidden" name="_csrf" value="${escapeHtml(args.csrfToken ?? '')}"/>
             <button type="submit" class="${btnCls}">${escapeHtml(c.label)}</button>
           </form>
         `;

@@ -797,7 +797,7 @@ function renderTierPicker(p: {
         <div class="tp-pending-actions">
           <a href="https://www.bybit.com/user/assets/home/overview" target="_blank" rel="noopener" class="tp-btn-mini tp-btn-go">Открыть Bybit ↗</a>
           <form method="POST" action="/account/api-key/verify?return_to=picker" style="display:inline">
-            <input type="hidden" name="csrf" value="${p.csrf}"/>
+            <input type="hidden" name="_csrf" value="${p.csrf}"/>
             <button type="submit" class="tp-btn-mini tp-btn-ghost">Проверить баланс</button>
           </form>
         </div>
@@ -809,7 +809,7 @@ function renderTierPicker(p: {
   // may want to refresh balance before deciding.
   const refreshBlock = `
     <form method="POST" action="/account/api-key/verify?return_to=picker" class="tp-refresh-form">
-      <input type="hidden" name="csrf" value="${p.csrf}"/>
+      <input type="hidden" name="_csrf" value="${p.csrf}"/>
       <button type="submit" class="tp-refresh-btn">↻ Проверить баланс на Bybit</button>
     </form>
   `;
@@ -848,7 +848,7 @@ function renderTierPicker(p: {
       const btnCls = canAfford ? 'tp-btn tp-btn-go' : 'tp-btn tp-btn-soft';
       actionBtn = `
         <form method="POST" action="/account/subscription/select-tier" style="display:inline">
-          <input type="hidden" name="csrf" value="${p.csrf}"/>
+          <input type="hidden" name="_csrf" value="${p.csrf}"/>
           <input type="hidden" name="targetTier" value="${t.id}"/>
           <button type="submit" class="${btnCls}">${label}</button>
         </form>
