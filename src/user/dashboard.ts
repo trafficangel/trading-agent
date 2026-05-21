@@ -579,11 +579,11 @@ function renderOnboardingChecklist(args: {
       hint: tradingStarted
         ? undefined
         : tierActivated
-          ? 'Тариф активирован, ждём сигнал от стратегий. Это может занять от нескольких минут до пары часов в зависимости от рынка — стратегии открывают сделки автоматически, как только условия совпадут. Можно подписаться на Telegram-канал и наблюдать в реальном времени.'
-          : 'Этот шаг завершится автоматически, как только стратегия откроет первую сделку на вашем счёте.',
+          ? 'Сигнал может прийти от нескольких минут до пары часов — стратегии срабатывают сами, как только условия совпадут.'
+          : 'Шаг завершится, как только стратегия откроет первую сделку.',
       ctas: tradingStarted || !tierActivated
         ? undefined
-        : [{ kind: 'link', label: 'Telegram-канал сигналов ↗', href: 'https://t.me/luxalgosignal', primary: false }],
+        : [{ kind: 'link', label: 'Telegram-канал ↗', href: 'https://t.me/luxalgosignal', primary: false }],
     },
   ];
 
@@ -608,8 +608,10 @@ function renderOnboardingChecklist(args: {
         <div class="onboarding-step ${cls}">
           <div class="onboarding-marker">${s.done ? '✓' : s.num}</div>
           <div class="onboarding-body">
-            <div class="onboarding-title">${escapeHtml(s.title)}</div>
-            ${s.hint && !s.done ? `<div class="onboarding-hint">${escapeHtml(s.hint)}</div>` : ''}
+            <div class="onboarding-content">
+              <div class="onboarding-title">${escapeHtml(s.title)}</div>
+              ${s.hint && !s.done ? `<div class="onboarding-hint">${escapeHtml(s.hint)}</div>` : ''}
+            </div>
             ${ctaHtml ? `<div class="onboarding-cta-row">${ctaHtml}</div>` : ''}
           </div>
         </div>
@@ -1223,9 +1225,17 @@ function cabinetStyles(): string {
   .onboarding-body {
     flex: 1;
     display: flex; align-items: center; justify-content: space-between;
-    gap: 12px;
+    gap: 14px; flex-wrap: wrap;
+    min-width: 0;
   }
-  .onboarding-title { font-size: 14px; color: #cfd6dd; }
+  /* Content column — title stacked above optional hint. min-width:0 lets
+   * the column shrink properly inside flex parent (otherwise long titles
+   * push the CTA off-screen instead of wrapping). */
+  .onboarding-content {
+    flex: 1 1 auto; min-width: 0;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .onboarding-title { font-size: 14px; color: #cfd6dd; line-height: 1.35; }
   .onboarding-step.done .onboarding-title { color: #8590a0; text-decoration: line-through; }
   /* Trading-control panel — bottom-of-dashboard "panic button" pair. */
   .cabinet-control {
@@ -1270,11 +1280,11 @@ function cabinetStyles(): string {
   .cabinet-control-btn-go:hover { background: #5ce0a0; }
 
   .onboarding-hint {
-    font-size: 12.5px; color: #8590a0; line-height: 1.55;
-    margin-top: 6px; max-width: 720px;
+    font-size: 12px; color: #8590a0; line-height: 1.45;
   }
   .onboarding-cta-row {
-    display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;
+    display: flex; gap: 8px; flex-wrap: wrap;
+    flex-shrink: 0;
   }
   .onboarding-cta {
     background: #4ad991; color: #0b0e13; padding: 6px 14px;
