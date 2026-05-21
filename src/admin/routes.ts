@@ -40,6 +40,8 @@ import { recordAdminAction } from '../db/repos/admin-audit.js';
 import { adminCsrfToken, requireAdminCsrf } from '../auth/csrf.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
+import { TIER_CONFIGS, TIER_ORDER } from '../strategies/tier-config.js';
+import { listRecentTransitions } from '../db/repos/user-tier-history.js';
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({
@@ -318,7 +320,10 @@ function renderDashboard(csrfToken: string): string {
     </div>
 
     <div class="section">
-      <div class="section-title">Все регистрации (${rows.length})</div>
+      <div class="section-title">
+        Все регистрации (${rows.length})
+        <a href="/admin/tiers" style="float:right;font-size:12px;text-transform:none;color:#4ad991;text-decoration:none">📊 Tier-статистика →</a>
+      </div>
       <div class="card adm-table-wrap">
         <div class="adm-scroll-hint">прокрутите таблицу вправо →</div>
         <table class="adm-users-table">
@@ -422,6 +427,15 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     reply.header('Cache-Control', 'private, no-store');
     const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
     return renderDashboard(adminCsrfToken(adminEmail));
+  });
+
+  // ---------------- GET /admin/tiers (TRACK E Phase B) ----------------
+  // Tier distribution, MRR, recent transitions. Read-only stats page.
+  app.get('/admin/tiers', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
+    if (!checkAuth(req, reply)) return;
+    reply.type('text/html; charset=utf-8');
+    reply.header('Cache-Control', 'private, no-store');
+    return renderTiersDashboard();
   });
 
   // ---------------- POST /admin/users/:id/plan ----------------
@@ -571,3 +585,166 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
 const extendFormSchema = z.object({
   days: z.coerce.number().int().min(1).max(3650),
 });
+
+/**
+ * TRACK E Phase B — /admin/tiers stats dashboard.
+ *
+ * Shows operator: distribution of users across tiers, monthly recurring
+ * revenue (sum of subscription prices for active users), recent
+ * transitions feed (last 30), and a list of VIP-override users.
+ *
+ * Pure SQL read — no mutations, no CSRF needed.
+ */
+const tierDistStmt = db.prepare<[], { tier_id: string; n: number }>(`
+  SELECT tier_id, COUNT(*) AS n
+    FROM user_subscriptions
+   WHERE status IN ('trial', 'active')
+   GROUP BY tier_id
+   ORDER BY tier_id
+`);
+
+const vipOverrideListStmt = db.prepare<[], {
+  user_id: number;
+  display_name: string | null;
+  phone: string | null;
+  tier_override_strategies: string | null;
+  tier_override_margin: number | null;
+}>(`
+  SELECT s.user_id, r.display_name, r.phone,
+         s.tier_override_strategies, s.tier_override_margin
+    FROM user_subscriptions s
+    JOIN registrations r ON r.id = s.user_id
+   WHERE s.plan = 'vip'
+   ORDER BY s.user_id
+`);
+
+function renderTiersDashboard(): string {
+  const dist = new Map<string, number>();
+  for (const row of tierDistStmt.all()) dist.set(row.tier_id, row.n);
+
+  // Build distribution rows: every tier shown, even if zero users.
+  const distRows = TIER_ORDER.map((id) => {
+    const tier = TIER_CONFIGS[id];
+    const n = dist.get(id) ?? 0;
+    const mrr = n * tier.monthlyPriceUsd;
+    return { id, name: tier.name, n, price: tier.monthlyPriceUsd, mrr };
+  });
+  const totalUsers = distRows.reduce((acc, r) => acc + r.n, 0);
+  const totalMrr = distRows.reduce((acc, r) => acc + r.mrr, 0);
+
+  const recentTransitions = listRecentTransitions(30);
+  const vipUsers = vipOverrideListStmt.all();
+
+  const distTable = `
+    <table class="adm-tier-table">
+      <thead>
+        <tr><th>Tier</th><th>Юзеров</th><th>Подписка/мес</th><th>MRR вклад</th></tr>
+      </thead>
+      <tbody>
+        ${distRows.map((r) => `
+          <tr>
+            <td><b>${escapeHtml(r.name)}</b> <span class="adm-tier-id">(${r.id})</span></td>
+            <td>${r.n}</td>
+            <td>$${r.price}</td>
+            <td>$${r.mrr}</td>
+          </tr>
+        `).join('')}
+        <tr class="adm-tier-total">
+          <td>Всего</td><td>${totalUsers}</td><td>—</td><td>$${totalMrr}/мес</td>
+        </tr>
+      </tbody>
+    </table>
+  `;
+
+  const transitionsTable = recentTransitions.length === 0
+    ? '<p class="adm-empty">Переходов ещё не было.</p>'
+    : `
+      <table class="adm-tier-table">
+        <thead>
+          <tr><th>Дата</th><th>User</th><th>Откуда → Куда</th><th>Причина</th><th>Баланс</th></tr>
+        </thead>
+        <tbody>
+          ${recentTransitions.map((t) => `
+            <tr>
+              <td class="adm-dt">${new Date(t.created_at).toISOString().slice(0, 16).replace('T', ' ')}</td>
+              <td>${t.user_id}</td>
+              <td>${escapeHtml(t.from_tier ?? '—')} → <b>${escapeHtml(t.to_tier)}</b></td>
+              <td>${escapeHtml(t.reason)}</td>
+              <td>${t.balance_at_change_usdt !== null ? `$${t.balance_at_change_usdt.toFixed(2)}` : '—'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+  const vipTable = vipUsers.length === 0
+    ? '<p class="adm-empty">VIP-пользователей нет.</p>'
+    : `
+      <table class="adm-tier-table">
+        <thead>
+          <tr><th>User</th><th>Имя</th><th>Телефон</th><th>Стратегии (override)</th><th>Margin override</th></tr>
+        </thead>
+        <tbody>
+          ${vipUsers.map((u) => {
+            const strats = u.tier_override_strategies ? (() => {
+              try { return (JSON.parse(u.tier_override_strategies!) as string[]).length + ' шт.'; } catch { return '—'; }
+            })() : '—';
+            return `
+              <tr>
+                <td>${u.user_id}</td>
+                <td>${escapeHtml(u.display_name ?? '—')}</td>
+                <td class="adm-mono">${escapeHtml(u.phone ?? '—')}</td>
+                <td>${strats}</td>
+                <td>${u.tier_override_margin !== null ? `$${u.tier_override_margin.toFixed(2)}` : '—'}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+
+  const body = `
+    <main class="adm-main">
+      <header class="adm-header">
+        <h1>Tier статистика</h1>
+        <nav><a href="/admin">← К списку юзеров</a></nav>
+      </header>
+
+      <section class="adm-section">
+        <h2>📊 Распределение по тарифам</h2>
+        ${distTable}
+      </section>
+
+      <section class="adm-section">
+        <h2>🔄 Последние переходы (${recentTransitions.length})</h2>
+        ${transitionsTable}
+      </section>
+
+      <section class="adm-section">
+        <h2>👑 VIP с override (${vipUsers.length})</h2>
+        ${vipTable}
+      </section>
+    </main>
+
+    <style>
+      .adm-main { max-width: 1100px; margin: 0 auto; padding: 24px; color: #cfd6dd; font-family: ui-sans-serif, system-ui, sans-serif; }
+      .adm-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; padding-bottom: 16px; border-bottom: 1px solid #1f2630; }
+      .adm-header h1 { font-size: 22px; margin: 0; color: #e8edf2; }
+      .adm-header nav a { color: #4ad991; text-decoration: none; font-size: 13px; }
+      .adm-section { margin-bottom: 36px; }
+      .adm-section h2 { font-size: 15px; color: #cfd6dd; margin: 0 0 14px 0; font-weight: 600; }
+      .adm-tier-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #11161d; border-radius: 8px; overflow: hidden; }
+      .adm-tier-table thead { background: #0e131a; }
+      .adm-tier-table th { text-align: left; padding: 10px 14px; color: #8590a0; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+      .adm-tier-table td { padding: 10px 14px; border-top: 1px solid #1a1f27; }
+      .adm-tier-table tr:first-child td { border-top: none; }
+      .adm-tier-total { background: #0e131a; font-weight: 600; }
+      .adm-tier-id { color: #6b7480; font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+      .adm-dt { color: #8590a0; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+      .adm-mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+      .adm-empty { color: #6b7480; font-style: italic; padding: 12px 0; }
+      body { background: #0b0e13; }
+    </style>
+  `;
+  return body;
+}

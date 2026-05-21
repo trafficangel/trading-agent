@@ -15,7 +15,8 @@ import { pageShell } from '../strategies/landing.js';
 import type { SubscriptionRow } from '../db/repos/user-subscriptions.js';
 import type { ApiKeySummary } from '../db/repos/user-api-keys.js';
 import type { MarginState } from './margin.js';
-import { TIER_CONFIGS, type TierId } from '../strategies/tier-config.js';
+import { TIER_CONFIGS, TIER_ORDER, type TierId } from '../strategies/tier-config.js';
+import { csrfInput } from '../auth/csrf.js';
 
 function escapeHtml(s: string): string {
   return s
@@ -92,6 +93,8 @@ export function renderDashboard(args: {
   closedPositionsCount: number;
   totalPnlPct: number | null;
   margin: MarginState;
+  /** CSRF token for upgrade form. Issued by the GET handler. */
+  csrfToken?: string;
 }): string {
   const sub = args.subscription;
   const subBlock = sub
@@ -172,12 +175,18 @@ export function renderDashboard(args: {
     </div>
   `;
 
+  // TRACK E — upgrade promo. Shown when balance-monitor noted that
+  // user's balance moved them up a tier (tier_transition_target_id set
+  // to a HIGHER tier). User clicks to confirm — applyUpgrade via POST.
+  const upgradePromo = renderUpgradePromo(args);
+
   const body = `
     ${cabinetStyles()}
     <main class="cabinet-main">
       ${greeting}
       ${marginBanner}
       ${statusBanner}
+      ${upgradePromo}
       ${cards}
       ${quickLinks}
     </main>
@@ -334,6 +343,52 @@ function tierEmoji(tierId: TierId): string {
     case 'pro': return '🏆';
     case 'vip': return '👑';
   }
+}
+
+/** Upgrade promo banner. Shown when balance-monitor saw the user's
+ *  balance climb above their current tier's max — tier_transition_target_id
+ *  points at a HIGHER tier. User clicks «Перейти» to confirm; we don't
+ *  auto-apply upgrades because they increase the subscription price. */
+function renderUpgradePromo(args: {
+  subscription: SubscriptionRow | null;
+  csrfToken?: string;
+}): string {
+  const sub = args.subscription;
+  if (!sub || sub.plan === 'vip') return '';
+  const targetTier = sub.tier_transition_target_id as TierId | null;
+  if (!targetTier) return '';
+  const currentTier = sub.tier_id as TierId;
+  const fromIdx = TIER_ORDER.indexOf(currentTier);
+  const toIdx = TIER_ORDER.indexOf(targetTier);
+  if (toIdx <= fromIdx) return ''; // only upgrades, not downgrade-pending
+  const target = TIER_CONFIGS[targetTier];
+  if (!target) return '';
+  const current = TIER_CONFIGS[currentTier];
+  const expectedDelta = target.expectedMonthlyPnlRangeUsd.low - current.expectedMonthlyPnlRangeUsd.low;
+  return `
+    <div class="cabinet-banner-promo">
+      <div class="cabinet-banner-icon">${ico('🚀')}</div>
+      <div class="cabinet-banner-body">
+        <div class="cabinet-banner-title-promo">Доступен новый тариф: ${tierEmoji(targetTier)} ${target.name}</div>
+        <div class="cabinet-banner-text">
+          Ваш депозит вырос — открылся доступ к <b>${target.name}</b> с ${target.strategyIds.length} стратегиями.
+          Ожидаемая прибыль <b>$${target.expectedMonthlyPnlRangeUsd.low}–$${target.expectedMonthlyPnlRangeUsd.high}/мес</b>
+          (примерно +$${expectedDelta} к текущему уровню). Подписка <b>$${target.monthlyPriceUsd}/мес</b>.
+        </div>
+        <div class="cabinet-banner-actions">
+          <form method="POST" action="/account/subscription/upgrade" style="display:inline">
+            ${args.csrfToken ? csrfInput(args.csrfToken) : ''}
+            <input type="hidden" name="targetTier" value="${targetTier}" />
+            <button class="cabinet-banner-btn" type="submit">Перейти на ${target.name} →</button>
+          </form>
+          <form method="POST" action="/account/subscription/dismiss-upgrade" style="display:inline">
+            ${args.csrfToken ? csrfInput(args.csrfToken) : ''}
+            <button class="cabinet-banner-btn cabinet-banner-btn-secondary" type="submit">Пока остаться</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function renderOpenPositionsCard(openNow: number): string {
@@ -774,6 +829,18 @@ function cabinetStyles(): string {
     color: #ffbc46;
     margin-bottom: 6px;
   }
+  /* Upgrade promo banner — blue-ish accent, less alarming than red */
+  .cabinet-banner-promo {
+    display: flex; gap: 16px; padding: 18px 22px; margin: 0 0 24px;
+    background: linear-gradient(180deg, rgba(74, 217, 145, 0.12) 0%, rgba(74, 217, 145, 0.04) 100%);
+    border: 1px solid rgba(74, 217, 145, 0.50);
+    border-radius: 14px; color: #cfd6dd; align-items: flex-start;
+  }
+  .cabinet-banner-title-promo {
+    font-size: 15px; font-weight: 600; color: #4ad991; margin-bottom: 6px;
+  }
+  .cabinet-banner-promo .cabinet-banner-text b { color: #e8edf2; }
+
   /* Full-width red insufficient-balance banner */
   .cabinet-banner-bad {
     display: flex;

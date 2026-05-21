@@ -85,7 +85,7 @@ async function processOne(key: ApiKeyRow): Promise<void> {
   // continuous below current tier min. Upgrade tracked but not
   // auto-applied (Phase A: prompt only, Phase B: prorated billing).
   try {
-    const transition = evaluateTierTransition(key.user_id, balance);
+    const transition = await evaluateTierTransition(key.user_id, balance);
     if (transition.action === 'downgrade' && transition.fromTier !== transition.toTier) {
       // Already applied inside evaluateTierTransition if grace elapsed.
       // No further action here — log the decision is included there.

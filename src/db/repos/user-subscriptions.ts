@@ -42,11 +42,15 @@ export type SubscriptionRow = {
   tier_transition_first_seen_at: number | null;
 };
 
+// TRACK E — trial users get tier_id='standard' for a better first
+// impression (4 strategies, larger margin pool than starter). If they
+// connect a key with low balance, balance-monitor's evaluateTierTransition
+// will downgrade them within 72h as normal.
 const insertStmt = db.prepare(`
   INSERT INTO user_subscriptions
-    (user_id, status, trial_started_at, access_until, created_at, updated_at)
+    (user_id, status, trial_started_at, access_until, tier_id, created_at, updated_at)
   VALUES
-    (?, ?, ?, ?, ?, ?)
+    (?, ?, ?, ?, 'standard', ?, ?)
 `);
 
 const findByUserStmt = db.prepare<[number], SubscriptionRow>(`

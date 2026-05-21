@@ -125,6 +125,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
     const margin = computeMarginState(user.userId);
+    const csrfToken = issueCsrfToken(req, reply);
     return reply.send(
       renderDashboard({
         displayName: user.displayName,
@@ -138,6 +139,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         closedPositionsCount: closed,
         totalPnlPct,
         margin,
+        csrfToken,
       }),
     );
   });
@@ -204,6 +206,69 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     setTradingPaused(user.userId, false);
     logger.info({ userId: user.userId }, 'cabinet: trading resumed');
     reply.code(303).header('location', '/account/strategies').send();
+  });
+
+  // -------- POST /account/subscription/upgrade (TRACK E Phase B) --------
+  // User confirms upgrade to a higher tier suggested by balance-monitor.
+  // Verifies the target matches current matchTier(balance) (anti-fraud:
+  // user can't jump to a tier their balance doesn't support).
+  app.post('/account/subscription/upgrade', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) {
+      reply.redirect('/strategies');
+      return;
+    }
+    if (!requireCsrf(req, reply)) return;
+    const targetTier = (req.body as { targetTier?: string })?.targetTier;
+    if (!targetTier || !['standard', 'plus', 'pro', 'vip'].includes(targetTier)) {
+      reply.code(400).send('bad target tier');
+      return;
+    }
+    const key = findActiveKey(user.userId);
+    const balance = key?.last_balance_usdt;
+    if (balance == null) {
+      reply.code(400).send('no balance to verify against');
+      return;
+    }
+    const matched = matchTier(balance);
+    if (matched !== targetTier) {
+      logger.warn(
+        { userId: user.userId, requested: targetTier, balance, matched },
+        'upgrade rejected: target does not match current balance',
+      );
+      reply.code(400).send('target tier does not match your current balance');
+      return;
+    }
+    try {
+      await assignTier(user.userId, targetTier as 'standard' | 'plus' | 'pro' | 'vip', {
+        reason: 'manual_upgrade_user_confirmed',
+        balanceUsdt: balance,
+      });
+    } catch (err) {
+      logger.error({ err, userId: user.userId, targetTier }, 'upgrade assignTier failed');
+      reply.code(500).send('upgrade failed');
+      return;
+    }
+    reply.code(303).header('location', '/account').send();
+  });
+
+  // Dismiss the upgrade promo. Just clears the pending transition state —
+  // balance-monitor will set it again next tick if balance is still above.
+  app.post('/account/subscription/dismiss-upgrade', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) {
+      reply.redirect('/strategies');
+      return;
+    }
+    if (!requireCsrf(req, reply)) return;
+    db.prepare(`
+      UPDATE user_subscriptions
+         SET tier_transition_target_id = NULL,
+             tier_transition_first_seen_at = NULL,
+             updated_at = ?
+       WHERE user_id = ?
+    `).run(Date.now(), user.userId);
+    reply.code(303).header('location', '/account').send();
   });
 
   // -------- GET /account/api-key --------
@@ -302,7 +367,10 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       const tierId = matchTier(verifyRes.totalUsdt);
       if (tierId !== null) {
         try {
-          assignTier(user.userId, tierId);
+          await assignTier(user.userId, tierId, {
+            reason: sub?.tier_id ? 'rebalance_on_api_key_verify' : 'initial_assign',
+            balanceUsdt: verifyRes.totalUsdt,
+          });
         } catch (err) {
           logger.error({ err, userId: user.userId, tierId }, 'assignTier after verify failed');
         }
