@@ -96,7 +96,7 @@ function renderPage(): string {
 function renderHero(): string {
   return `
     <section class="at-hero">
-      <div class="at-hero-eyebrow">Автоматическая торговля криптой · Bybit</div>
+      <div class="at-hero-eyebrow">Автоматическая торговля криптовалютой · Bybit</div>
       <h1 class="at-hero-title">
         Пассивный доход на криптотрейдинге. <span class="at-accent">Деньги — на вашей бирже.</span>
       </h1>
@@ -108,13 +108,14 @@ function renderHero(): string {
       </p>
       <div class="at-hero-cta">
         <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Регистрация</a>
-        <a href="#pricing" class="at-btn-secondary">Тарифы и доходность ↓</a>
+        <span class="at-hero-cta-or">или</span>
+        <a href="#pricing" class="at-hero-link">посмотреть тарифы ↓</a>
       </div>
       <div class="at-hero-pills">
-        <span class="at-pill">${ico('🛡')}Ваши деньги на Bybit, не у нас</span>
+        <span class="at-pill">${ico('🛡')}Деньги на Bybit, не у нас</span>
         <span class="at-pill">${ico('🚫')}Ключ без права на вывод</span>
-        <span class="at-pill at-pill-hl">${ico('💸')}Месяц в минусе → следующий бесплатно</span>
-        <span class="at-pill">${ico('🎁')}+${BYBIT_REF_BONUS_DAYS} дней при регистрации Bybit по нашей ссылке</span>
+        <span class="at-pill at-pill-hl">${ico('💸')}Минус-месяц → следующий бесплатно</span>
+        <span class="at-pill">${ico('🎁')}+${BYBIT_REF_BONUS_DAYS} дней бесплатно</span>
         <span class="at-pill">${ico('⏹')}Отмена в один клик</span>
       </div>
       <div class="at-hero-login">
@@ -623,7 +624,15 @@ function styles(): string {
     font-size: 17px; line-height: 1.55; color: #9aa5b1; max-width: 680px;
     margin: 0 auto 28px; padding: 0 12px;
   }
-  .at-hero-cta { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .at-hero-cta {
+    display: flex; flex-direction: row; flex-wrap: wrap;
+    align-items: center; justify-content: center; gap: 12px;
+  }
+  .at-hero-cta-or { font-size: 13px; color: #6b7480; }
+  .at-hero-link {
+    color: #4ad991; font-size: 14px; text-decoration: none; font-weight: 500;
+  }
+  .at-hero-link:hover { text-decoration: underline; }
   .at-hero-pricing { font-size: 13.5px; color: #8590a0; }
   .at-hero-pricing b { color: #cfd6dd; }
   .at-hero-login {
@@ -711,9 +720,18 @@ function styles(): string {
   }
 
   /* ----- How it works ----- */
+  /* Explicit breakpoints to avoid the 3+1 wrap that auto-fit produces
+   * around 1000px width: desktop = 4 in a row, tablet = 2×2 grid,
+   * mobile = single column. Predictable composition for the funnel. */
   .at-how-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 18px;
+    display: grid; gap: 18px;
+    grid-template-columns: repeat(4, 1fr);
+  }
+  @media (max-width: 980px) {
+    .at-how-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 540px) {
+    .at-how-grid { grid-template-columns: 1fr; }
   }
   .at-how-step {
     background: #11161d; border: 1px solid #1f2630; border-radius: 14px;
@@ -775,20 +793,24 @@ function styles(): string {
   }
   .at-strat-meta { font-size: 11.5px; color: #8590a0; }
 
-  /* ----- Pricing (TRACK E carousel) ----- */
+  /* ----- Pricing (TRACK E carousel) -----
+   * Horizontal scroll-snap carousel using flexbox with FIXED-width cards.
+   * The earlier grid-auto-columns approach broke on desktop because 1fr
+   * stretched all 6 cards to fit the container instead of overflowing.
+   * Flex with "flex: 0 0 320px" forces each card to keep its width and
+   * the row overflows horizontally so the user has something to scroll.
+   */
   .at-pricing-intro {
     text-align: center; color: #cfd6dd; font-size: 14px; line-height: 1.6;
     max-width: 720px; margin: 0 auto 24px;
   }
   .at-pricing-intro b { color: #4ad991; }
   .at-tier-carousel {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(280px, 1fr);
+    display: flex;
     gap: 16px;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
-    padding: 8px 4px 16px;
+    padding: 24px 4px 16px;
     margin: 0 -4px 12px;
     scrollbar-color: #2a323d transparent;
     scrollbar-width: thin;
@@ -797,9 +819,6 @@ function styles(): string {
   .at-tier-carousel::-webkit-scrollbar { height: 8px; }
   .at-tier-carousel::-webkit-scrollbar-track { background: transparent; }
   .at-tier-carousel::-webkit-scrollbar-thumb { background: #2a323d; border-radius: 4px; }
-  @media (min-width: 1080px) {
-    .at-tier-carousel { grid-auto-columns: minmax(0, calc((100% - 32px) / 3)); }
-  }
   .at-tier-scroll-hint {
     text-align: center; font-size: 11.5px; color: #6b7480;
     margin: 6px 0 18px; letter-spacing: 0.02em;
@@ -807,11 +826,18 @@ function styles(): string {
   .at-tier-card {
     background: linear-gradient(180deg, #161c25 0%, #11161d 70%);
     border: 1px solid #1f2630; border-radius: 14px;
-    padding: 20px 18px;
+    padding: 28px 18px 20px;
     display: flex; flex-direction: column;
     scroll-snap-align: start;
     position: relative;
+    /* Fixed width so the row actually overflows and a horizontal scroll
+     * appears. 320px wide ≈ comfortable card; on mobile (≤640px) we use
+     * 86vw so only one card is visible at a time and the swipe feels natural. */
+    flex: 0 0 320px;
     min-width: 0;
+  }
+  @media (max-width: 640px) {
+    .at-tier-card { flex: 0 0 86vw; }
   }
   .at-tier-card.at-tier-popular {
     border-color: rgba(74, 217, 145, 0.55);
@@ -822,7 +848,9 @@ function styles(): string {
     background: linear-gradient(180deg, rgba(243,210,102,0.05) 0%, #11161d 70%);
   }
   .at-tier-badge {
-    position: absolute; top: -10px; right: 14px;
+    /* Badge sits inside the card padding (top: 8px) so the carousel
+     * overflow-x doesn't clip it. Padding-top on the card reserves room. */
+    position: absolute; top: 8px; left: 14px;
     background: rgba(243, 210, 102, 0.18);
     color: #f3d266;
     padding: 3px 10px; border-radius: 999px;
