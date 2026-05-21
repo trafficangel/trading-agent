@@ -154,7 +154,7 @@ const CONTENT: Record<Lang, Content> = {
           body:
             'Когда убедились что результаты реальные — подключите свой Bybit-аккаунт через API-ключ ' +
             '(без права на вывод). Выберите тариф, переведите USDT на Unified Trading Account (единый торговый аккаунт) — система начнёт торговать ' +
-            'за вас автоматически. Тарифы от $12/мес, +30 дней бесплатно при регистрации Bybit по нашей ссылке.',
+            'за вас автоматически. Тарифы от $12/мес, 14 дней теста бесплатно + ещё 30 дней при регистрации Bybit по нашей ссылке.',
         },
       ],
     },
@@ -1278,7 +1278,7 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
 
   const cta3Title = isRu ? '3. Подключите автотрейдинг' : '3. Enable auto-trading';
   const cta3Body = isRu
-    ? 'Когда убедились что нравится — подключите свой Bybit через API-ключ и пусть стратегии торгуют за вас. Тарифы от $12/мес, +30 дней бесплатно при регистрации Bybit по нашей ссылке.'
+    ? 'Когда убедились что нравится — подключите свой Bybit через API-ключ и пусть стратегии торгуют за вас. Тарифы от $12/мес, 14 дней теста бесплатно + ещё 30 дней по реф-ссылке Bybit.'
     : 'Once you like what you see — connect your Bybit via API key and let strategies trade for you. Tiers from $12/mo, +30 days free if you sign up Bybit via our link.';
   const cta3Btn = isRu ? 'Попробовать автотрейдинг →' : 'Try auto-trading →';
 

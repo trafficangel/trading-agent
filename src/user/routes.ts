@@ -28,7 +28,7 @@ import {
 } from '../db/repos/user-api-keys.js';
 import { fetchBalanceUsdt, bybitErrorLabel, switchToOneWayMode } from '../exchange/bybit-private.js';
 import { listUserStrategies } from '../db/repos/user-strategies.js';
-import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
+import { STRATEGY_CONFIGS, BYBIT_REF_URL } from '../strategies/track-c-config.js';
 import { closeAllUserPositions } from '../strategies/user-fanout.js';
 import { assignTier } from './tier-assignment.js';
 import {
@@ -827,8 +827,6 @@ function renderTierPicker(p: {
       : `$${t.maxBalanceUsdt.toLocaleString()}`;
     const coins = tierCoinTickers(t.id);
     const coinsStr = coins.length > 0 ? coins.join(', ') : '—';
-    // Worst-case dollar loss at the tier's stated max DD, using its minBalance.
-    const worstUsd = Math.round(t.minBalanceUsdt * t.expectedMaxDdPct / 100);
 
     const badges: string[] = [];
     if (isActive) badges.push('<span class="tp-badge tp-badge-cur">✓ Активен</span>');
@@ -877,9 +875,9 @@ function renderTierPicker(p: {
         <p class="tp-card-pitch">${escapeHtmlMin(t.pitch)}</p>
         <ul class="tp-card-features">
           <li><span class="tp-card-feature-emoji">💰</span><span class="tp-card-feature-label">Заработок:</span> ~$${subRange.low}–$${subRange.high}/мес</li>
-          <li><span class="tp-card-feature-emoji">🪙</span><span class="tp-card-feature-label">${coins.length} монеты в работе:</span> ${escapeHtmlMin(coinsStr)}</li>
-          <li><span class="tp-card-feature-emoji">🛡</span><span class="tp-card-feature-label">Просадка:</span> до ${t.expectedMaxDdPct}% депо (~$${worstUsd} в худший месяц)</li>
+          <li><span class="tp-card-feature-emoji">🎯</span><span class="tp-card-feature-label">${t.strategyIds.length} стратегий:</span> ${escapeHtmlMin(coinsStr)}</li>
           <li><span class="tp-card-feature-emoji">⚡</span><span class="tp-card-feature-label">Сделок одновременно:</span> до ${t.maxConcurrentPositions}</li>
+          <li><span class="tp-card-feature-emoji">💎</span><span class="tp-card-feature-label">Бесплатно:</span> 14 дней теста</li>
         </ul>
         <div class="tp-card-action">${actionBtn}</div>
       </div>
@@ -1024,19 +1022,21 @@ function renderTierPicker(p: {
             Это <b>оценка диапазона</b>, не гарантия — рынок меняется и реальный результат может быть выше или ниже.
           </div>
           <div class="tp-glossary-item">
-            <b>🪙 Монеты в работе</b>
-            Криптовалюты, с которыми торгует система на вашем счёте — параллельно, разными алгоритмами.
-            Каждая монета — отдельная стратегия которую мы предварительно отобрали.
-          </div>
-          <div class="tp-glossary-item">
-            <b>🛡 Просадка</b>
-            Насколько ваш депозит может временно упасть в неудачный месяц. Это нормальная часть торговли —
-            убыточные периоды бывают у любой системы, главное что они ограничены и затем восстанавливаются.
+            <b>🎯 Стратегии</b>
+            Каждая стратегия — это отдельный алгоритм, который мы предварительно отобрали и проверили.
+            На одной монете работает одна стратегия. Чем выше тариф — тем больше стратегий запускается
+            одновременно на вашем счёте.
           </div>
           <div class="tp-glossary-item">
             <b>⚡ Сделок одновременно</b>
             Максимум сделок, которые система держит открытыми в один момент. Ограничение защищает
             ваш депозит от перегрузки маржой, если несколько монет сработают синхронно.
+          </div>
+          <div class="tp-glossary-item">
+            <b>💎 14 дней теста бесплатно</b>
+            Любой тариф можно попробовать 14 дней без оплаты — подключаете Bybit, торговля идёт как обычно,
+            подписка не списывается. После — продлеваете оплатой или отключаете в один клик.
+            <b>+30 дней</b> если зарегистрируете Bybit по <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener" style="color:#4ad991">нашей ссылке</a>.
           </div>
         </div>
       </div>

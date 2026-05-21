@@ -114,7 +114,7 @@ function renderHero(): string {
       <div class="at-hero-pills">
         <span class="at-pill">${ico('🛡')}Деньги на Bybit, не у нас</span>
         <span class="at-pill">${ico('🚫')}Ключ без права на вывод</span>
-        <span class="at-pill">${ico('🎁')}+${BYBIT_REF_BONUS_DAYS} дней бесплатно</span>
+        <span class="at-pill">${ico('💎')}14 дней теста + ${BYBIT_REF_BONUS_DAYS} дней бонуса по реф-ссылке</span>
         <span class="at-pill">${ico('⏹')}Отмена в один клик</span>
       </div>
       <div class="at-hero-login">
@@ -130,12 +130,12 @@ function renderBybitBonus(): string {
       <div class="at-bonus-card">
         <div class="at-bonus-icon">${ico('🎁')}</div>
         <div class="at-bonus-body">
-          <div class="at-bonus-title">Получите +${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно</div>
+          <div class="at-bonus-title">До ${14 + BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно</div>
           <div class="at-bonus-sub">
-            Зарегистрируйте новый аккаунт на Bybit по нашей ссылке — и мы добавим вам
-            <b>${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно</b>. Полный Starter:
-            3 стратегии, реальная торговля, ваш депозит, ваш контроль.
-            Кнопка ниже — стандартная регистрация на Bybit, без скрытых платежей.
+            Всем — <b>14 дней тестового периода</b> на любом тарифе без оплаты подписки.
+            Если зарегистрируете новый аккаунт на Bybit по нашей ссылке —
+            <b>+${BYBIT_REF_BONUS_DAYS} дней бонусом</b>. Итого до ${14 + BYBIT_REF_BONUS_DAYS} дней реальной торговли
+            без оплаты, ваш депозит и ваш контроль.
           </div>
         </div>
         <div class="at-bonus-actions">
@@ -418,15 +418,15 @@ function renderPricing(): string {
         <span class="at-tier-price-num">$0</span>
         <span class="at-tier-price-period">/мес × ${BYBIT_REF_BONUS_DAYS} дней</span>
       </div>
-      <p class="at-tier-pitch-top">Полный Starter на ${BYBIT_REF_BONUS_DAYS} дней без оплаты — попробуйте автотрейдинг на реальных деньгах.</p>
+      <p class="at-tier-pitch-top">Бонус для тех, кто регистрирует Bybit по нашей ссылке — ${BYBIT_REF_BONUS_DAYS} дней Starter бесплатно сверх стандартного 14-дневного теста.</p>
       <ul class="at-tier-features">
-        <li><span class="at-tier-feat-icon">🪙</span><span class="at-tier-feat-label">3 монеты:</span> BTC, BNB, BCH</li>
+        <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">3 стратегии:</span> BTC, BNB, BCH</li>
         <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">Сделок одновременно:</span> до 2</li>
-        <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">Торговля:</span> настоящая, на вашем счёте</li>
+        <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">Бесплатно:</span> 14 дней теста + ${BYBIT_REF_BONUS_DAYS} дней бонуса = ${14 + BYBIT_REF_BONUS_DAYS} дней</li>
         <li><span class="at-tier-feat-icon">🎁</span><span class="at-tier-feat-label">Условие:</span> новый аккаунт Bybit по <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">нашей ссылке</a></li>
       </ul>
       <div class="at-tier-after-bonus">
-        После ${BYBIT_REF_BONUS_DAYS} дней — переход на платный Starter $${starterPrice}/мес или отключение в один клик.
+        После — переход на платный Starter $${starterPrice}/мес или отключение в один клик.
       </div>
     </div>
   `;
@@ -438,7 +438,6 @@ function renderPricing(): string {
       const sub = t.expectedMonthlyPnlRangeUsd;
       const coins = tierCoinTickers(t.id);
       const coinsStr = coins.length > 0 ? coins.join(', ') : '—';
-      const worstUsd = Math.round(t.minBalanceUsdt * t.expectedMaxDdPct / 100);
       const badge = isPopular ? `<div class="at-tier-badge at-tier-badge-popular">${ico('⭐')}Популярный</div>` : '';
       return `
         <div class="at-tier-card ${isPopular ? 'at-tier-popular' : ''}" data-tier-index="${i + 1}">
@@ -452,9 +451,9 @@ function renderPricing(): string {
           <p class="at-tier-pitch-top">${escapeHtml(t.pitch)}</p>
           <ul class="at-tier-features">
             <li><span class="at-tier-feat-icon">💰</span><span class="at-tier-feat-label">Заработок:</span> ~$${sub.low}–$${sub.high}/мес</li>
-            <li><span class="at-tier-feat-icon">🪙</span><span class="at-tier-feat-label">${coins.length} монеты:</span> ${escapeHtml(coinsStr)}</li>
-            <li><span class="at-tier-feat-icon">🛡</span><span class="at-tier-feat-label">Просадка:</span> до ${t.expectedMaxDdPct}% (~$${worstUsd})</li>
+            <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">${t.strategyIds.length} стратегий:</span> ${escapeHtml(coinsStr)}</li>
             <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">Сделок одновременно:</span> до ${t.maxConcurrentPositions}</li>
+            <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">Бесплатно:</span> 14 дней теста</li>
           </ul>
         </div>
       `;
@@ -513,8 +512,8 @@ function renderFaq(): string {
       a: 'Тариф выбираете вы сами при подключении Bybit-аккаунта. Мы только проверяем, что ваш баланс достаточен для выбранного тарифа: $300+ для Starter, $800+ для Standard, $2 500+ для Plus и т.д. Если выбрали Plus, а на счёте $500 — попросим пополнить или выбрать тариф попроще. Если депозит вырастет — подскажем перейти на тариф выше с пересчётом подписки. Если депозит сильно упадёт — автоматически переключим на меньший тариф через 72 часа, открытые позиции не трогаются.',
     },
     {
-      q: `Как получить ${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно?`,
-      a: `Условие одно: зарегистрируйте новый аккаунт на Bybit по нашей ссылке (кнопка «Открыть Bybit» в блоке «Получите +${BYBIT_REF_BONUS_DAYS} дней» на этой странице). После регистрации создаёте API-ключ как обычно и подключаете его в нашем кабинете. Мы автоматически проверим что ваш Bybit-аккаунт зарегистрирован по нашему партнёрскому каналу, и активируем ${BYBIT_REF_BONUS_DAYS} дней автотрейдинга без оплаты. По истечении бонусного периода — стандартная подписка $${listTiers()[0]?.monthlyPriceUsd ?? 12}/мес за Starter или отключение в один клик.`,
+      q: 'Сколько дней автотрейдинга бесплатно?',
+      a: `Каждый новый пользователь получает <b>14 дней тестового периода</b> на любом тарифе — подключаете Bybit, торговля идёт как обычно, подписка не списывается. Это позволяет посмотреть на реальный результат до оплаты. <br/><br/><b>+${BYBIT_REF_BONUS_DAYS} дней бонусом</b>, если зарегистрируете новый аккаунт на Bybit по нашей ссылке (кнопка «Открыть Bybit» на этой странице). Итого до <b>${14 + BYBIT_REF_BONUS_DAYS} дней</b> автотрейдинга без оплаты. После — стандартная подписка по выбранному тарифу или отключение в один клик.`,
     },
     {
       q: 'Сколько денег нужно для начала?',
@@ -550,7 +549,7 @@ function renderFaq(): string {
     },
     {
       q: 'Как происходит оплата?',
-      a: `Если вы зарегистрировали Bybit по нашей ссылке — первые ${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно (определяется автоматически при подключении ключа). После окончания бонусного периода — связываемся с вами в Telegram для оплаты подписки. Если вы пришли со «своим» Bybit — подписка начинается с первого дня. Никаких автосписаний с карты, оплата ручная через оператора. Вы сами решаете, продлевать ли подписку.`,
+      a: `Первые <b>14 дней</b> — тестовый период на любом тарифе, подписка не списывается. Если вы зарегистрировали Bybit по нашей ссылке — добавляются ещё <b>${BYBIT_REF_BONUS_DAYS} дней</b> бонуса (итого до ${14 + BYBIT_REF_BONUS_DAYS} дней без оплаты). После окончания бесплатного периода связываемся с вами в Telegram для оплаты подписки. Никаких автосписаний с карты — оплата ручная через оператора, вы сами решаете продлевать или нет.`,
     },
   ];
   const html = items
@@ -578,7 +577,7 @@ function renderFinalCta(): string {
       <p class="at-cta-sub">
         Регистрация — 30 секунд. Без привязки карты. Отмена в один клик.
         Ваш капитал остаётся на Bybit под вашим контролем.
-        +${BYBIT_REF_BONUS_DAYS} дней бесплатно если зарегистрируетесь на Bybit по <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">нашей ссылке</a>.
+        14 дней теста бесплатно на любом тарифе + ещё ${BYBIT_REF_BONUS_DAYS} дней бонусом если зарегистрируетесь на Bybit по <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">нашей ссылке</a>.
       </p>
       <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">Зарегистрироваться</a>
       <p class="at-cta-login">
