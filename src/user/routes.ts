@@ -791,7 +791,7 @@ function renderTierPicker(p: {
         <div class="tp-pending-body">
           Для активации тарифа <b>${escapeHtmlMin(selectedTierObj.name)}</b> на Bybit нужно <b>$${selectedTierObj.minBalanceUsdt}</b>.
           Сейчас на счёте <b>$${(p.balance ?? 0).toFixed(0)}</b>. Не хватает <b>$${(selectedTierObj.minBalanceUsdt - (p.balance ?? 0)).toFixed(0)}</b>.
-          Пополните Unified Trading Account на Bybit и нажмите «Проверить баланс» ниже —
+          Пополните Unified Trading Account (единый торговый аккаунт) на Bybit и нажмите «Проверить баланс» ниже —
           как только средств станет достаточно, тариф активируется автоматически.
         </div>
         <div class="tp-pending-actions">
@@ -985,7 +985,7 @@ function renderTierPicker(p: {
       <div class="tp-note">
         <b>Как это работает:</b> вы можете выбрать любой тариф — даже если сейчас на счёте меньше минимума.
         Если баланса хватает, тариф активируется сразу. Если не хватает — мы запомним ваш выбор; пополните
-        Unified Trading Account на Bybit и нажмите «Проверить баланс» — тариф автоматически активируется,
+        Unified Trading Account (единый торговый аккаунт) на Bybit и нажмите «Проверить баланс» — тариф автоматически активируется,
         как только средств станет достаточно. Депозит остаётся на вашем Bybit-аккаунте, мы не имеем права
         на вывод.
       </div>

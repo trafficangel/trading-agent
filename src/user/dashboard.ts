@@ -373,7 +373,7 @@ function renderTierUnsetCard(
       <div class="stat-card-value" style="font-size:18px">${tier?.name ?? 'Тариф'} · ждём депозит</div>
       <div class="stat-card-sub" style="line-height:1.6">
         Нужно <b style="color:#f3d266">$${need.toFixed(0)}</b> на Bybit для активации.
-        Пополните Unified Trading Account.
+        Пополните Unified Trading Account (единый торговый аккаунт).
         <br/>
         <a href="/account/subscription/select-tier" style="color:#4ad991; text-decoration:none">Проверить баланс →</a>
       </div>
@@ -688,7 +688,7 @@ function renderMarginBanner(args: {
             <br/>
             <b>Новые сделки система не открывает</b> пока баланс не вырастет. Уже открытые позиции продолжают работать.
             <br/>
-            Пополните <b>Unified Trading Account</b> в Bybit (или переведите USDT из Funding во фьючерсный единый кошелёк) —
+            Пополните <b>Unified Trading Account (единый торговый аккаунт)</b> в Bybit (или переведите USDT из Funding-кошелька) —
             в течение 5 минут мы проверим баланс и снова включим вас в сигналы.
           </div>
           <div class="cabinet-banner-actions">
@@ -780,7 +780,7 @@ function renderStatusBanner(args: {
       : 'Выберите тариф автотрейдинга';
     const text = selectedTier
       ? `${balanceLine}Для активации тарифа <b>${selectedTier.name}</b> нужен баланс от <b>$${selectedTier.minBalanceUsdt}</b>. ` +
-        `Пополните Unified Trading Account на Bybit и нажмите «Проверить баланс» — тариф активируется автоматически.`
+        `Пополните Unified Trading Account (единый торговый аккаунт) на Bybit и нажмите «Проверить баланс» — тариф активируется автоматически.`
       : `${balanceLine}Тариф определяет какие стратегии работают на вашем счёте и каким объёмом. ` +
         `Подбор стратегий внутри тарифа — наша задача, вы только выбираете план под размер депозита.`;
     return `

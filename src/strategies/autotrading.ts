@@ -195,7 +195,7 @@ function renderHowItWorks(): string {
           <div class="at-how-num">4</div>
           <div class="at-how-title">Пополнение и старт</div>
           <div class="at-how-body">
-            Переведите USDT на ваш <b>Unified Trading Account</b> на Bybit под выбранный тариф
+            Переведите USDT на ваш <b>Unified Trading Account (единый торговый аккаунт)</b> на Bybit под выбранный тариф
             (минимум $300 для Starter, $800 для Standard, и т.д.).
             Стратегии включатся автоматически и <b>сама начнут торговать</b>.
             Открывайте кабинет — и просто смотрите, как идут сделки.

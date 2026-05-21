@@ -71,7 +71,7 @@ export function renderApiKeyPage(args: {
           <br/><br/>
           <b>Что делать:</b>
           <ol class="key-balance-warn-steps">
-            <li>Пополните USDT на <b>Unified Trading Account</b> в Bybit
+            <li>Пополните USDT на <b>Unified Trading Account (единый торговый аккаунт)</b> в Bybit
               (или переведите из Funding / Spot во фьючерсный кошелёк).</li>
             <li>Нажмите <b>«Проверить баланс»</b> в карточке ключа выше —
               мы перечитаем баланс и снова включим вас в сигналы.</li>
