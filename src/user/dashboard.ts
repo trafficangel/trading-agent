@@ -316,7 +316,11 @@ function renderApiKeyCard(key: ApiKeySummary | null): string {
     <div class="stat-card cabinet-card cabinet-card-ok">
       <div class="stat-card-label">${ico('🔑')}API-ключ Bybit</div>
       <div class="stat-card-value">Подключён</div>
-      <div class="stat-card-sub">проверен ${relativeAgo(key.last_verified_at)}</div>
+      <div class="stat-card-sub">
+        проверен ${relativeAgo(key.last_verified_at)}
+        <br/>
+        <a href="/account/api-key" style="color:#8590a0; font-size:11.5px; text-decoration:underline">Изменить или отключить →</a>
+      </div>
     </div>
   `;
 }
