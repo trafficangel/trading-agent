@@ -891,6 +891,12 @@ function styles(): string {
     flex: 0 0 320px;
     min-width: 0;
   }
+  /* Cards with a badge need extra top padding to clear it. Without this
+   * the «🎁 Бонус» / «⭐ Популярный» pill overlaps the tier name below. */
+  .at-tier-card.at-tier-popular,
+  .at-tier-card.at-tier-free {
+    padding-top: 42px;
+  }
   @media (max-width: 640px) {
     .at-tier-card { flex: 0 0 86vw; }
   }
@@ -903,9 +909,10 @@ function styles(): string {
     background: linear-gradient(180deg, rgba(243,210,102,0.05) 0%, #11161d 70%);
   }
   .at-tier-badge {
-    /* Badge sits inside the card padding (top: 8px) so the carousel
-     * overflow-x doesn't clip it. Padding-top on the card reserves room. */
-    position: absolute; top: 8px; left: 14px;
+    /* Badge sits inside the card padding (top: 10px) so the carousel
+     * overflow-x doesn't clip it. Cards with a badge get extra padding-top
+     * (.at-tier-popular / .at-tier-free) to reserve room — see above. */
+    position: absolute; top: 10px; left: 14px;
     background: rgba(243, 210, 102, 0.18);
     color: #f3d266;
     padding: 3px 10px; border-radius: 999px;
