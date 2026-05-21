@@ -33,6 +33,10 @@ export type SubscriptionRow = {
   trading_paused_at: number | null;
   /** TRACK E — auto-tier. 'starter' by default for new rows. */
   tier_id: string;
+  /** Phase G — user's CHOSEN tier (set by /account/subscription/select-tier).
+   *  NULL until they visit the picker. May differ from tier_id (which is
+   *  the ACTIVE tier set by assignTier once balance is sufficient). */
+  selected_tier_id: string | null;
   /** TRACK E — VIP override fields. NULL = use tier defaults. */
   tier_override_strategies: string | null;  // JSON array
   tier_override_margin: number | null;
@@ -223,6 +227,14 @@ export function listPnlGuaranteeCandidates(
 
 export function setStatus(userId: number, status: SubscriptionStatus): void {
   setStatusStmt.run(status, Date.now(), userId);
+}
+
+/** Phase G — store the user's tier choice without necessarily activating it.
+ *  assignTier (called separately when balance is sufficient) is what
+ *  actually creates user_strategies rows. */
+export function setSelectedTier(userId: number, tierId: string | null): void {
+  db.prepare('UPDATE user_subscriptions SET selected_tier_id = ?, updated_at = ? WHERE user_id = ?')
+    .run(tierId, Date.now(), userId);
 }
 
 const cancelStmt = db.prepare(`

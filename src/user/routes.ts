@@ -14,7 +14,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getAuthedUser } from '../auth/routes.js';
 import { rotateSessionForUser, SESSION_COOKIE, SESSION_TTL_DAYS } from '../auth/session.js';
-import { findSubscription, setTradingPaused } from '../db/repos/user-subscriptions.js';
+import { findSubscription, setTradingPaused, setSelectedTier } from '../db/repos/user-subscriptions.js';
 import {
   findActiveKey,
   findAnyKey,
@@ -302,31 +302,6 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       reply.code(303).header('location', '/account').send();
       return;
     }
-    const key = findActiveKey(user.userId);
-    const balance = key?.last_balance_usdt;
-    if (balance == null) {
-      reply.code(303)
-        .header('location', '/account/subscription/select-tier?error=' + encodeURIComponent('Сначала подключите Bybit-ключ — нам нужно увидеть баланс'))
-        .send();
-      return;
-    }
-    const tier = getTier(targetTier as TierId);
-    if (balance < tier.minBalanceUsdt) {
-      const shortfall = (tier.minBalanceUsdt - balance).toFixed(0);
-      const matched = matchTier(balance);
-      const suggestion = matched
-        ? ` Сейчас вам доступен ${getTier(matched).name} ($${getTier(matched).minBalanceUsdt}+).`
-        : '';
-      reply.code(303)
-        .header('location', '/account/subscription/select-tier?error=' +
-          encodeURIComponent(
-            `Для тарифа ${tier.name} нужен баланс $${tier.minBalanceUsdt}+. ` +
-            `На вашем счёте $${balance.toFixed(0)} — не хватает $${shortfall}.${suggestion} ` +
-            `Пополните Bybit-кошелёк или выберите тариф попроще.`,
-          ))
-        .send();
-      return;
-    }
     if (targetTier === 'vip') {
       // VIP requires manual operator setup (success-fee or custom overrides) —
       // refuse self-service.
@@ -336,20 +311,35 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         .send();
       return;
     }
-    try {
-      await assignTier(user.userId, targetTier as Exclude<TierId, 'vip'>, {
-        reason: 'manual_choice',
-        balanceUsdt: balance,
-      });
-    } catch (err) {
-      logger.error({ err, userId: user.userId, targetTier }, 'select-tier assignTier failed');
-      reply.code(303)
-        .header('location', '/account/subscription/select-tier?error=' +
-          encodeURIComponent('Не удалось применить тариф. Попробуйте позже или напишите оператору.'))
-        .send();
+    // Phase G: store the choice unconditionally. assignTier (which creates
+    // user_strategies and starts trading) only fires when balance is enough;
+    // otherwise we keep the choice and prompt the user to top up. Onboarding
+    // step 3 (tier selection) becomes "done" purely on selected_tier_id.
+    setSelectedTier(user.userId, targetTier);
+    const key = findActiveKey(user.userId);
+    const balance = key?.last_balance_usdt ?? null;
+    const tier = getTier(targetTier as TierId);
+    const balanceOk = balance !== null && balance >= tier.minBalanceUsdt;
+    if (balanceOk) {
+      try {
+        await assignTier(user.userId, targetTier as Exclude<TierId, 'vip'>, {
+          reason: 'manual_choice',
+          balanceUsdt: balance,
+        });
+      } catch (err) {
+        logger.error({ err, userId: user.userId, targetTier }, 'select-tier assignTier failed');
+        reply.code(303)
+          .header('location', '/account/subscription/select-tier?error=' +
+            encodeURIComponent('Не удалось применить тариф. Попробуйте позже или напишите оператору.'))
+          .send();
+        return;
+      }
+      reply.code(303).header('location', '/account?tier-changed=' + targetTier).send();
       return;
     }
-    reply.code(303).header('location', '/account?tier-changed=' + targetTier).send();
+    // Balance insufficient — choice saved, user lands back on dashboard with
+    // step 4 (deposit) highlighting the shortfall for this tier.
+    reply.code(303).header('location', '/account?tier-selected=' + targetTier).send();
   });
 
   // Dismiss the upgrade promo. Just clears the pending transition state —
@@ -538,27 +528,50 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     }
     recordVerifyResult(row.id, true);
     recordBalance(row.id, verifyRes.totalUsdt);
-    // Trust the user: if they're clicking «Проверить связь», they
+    // Trust the user: if they're clicking «Проверить баланс», they
     // likely just topped up. Clear the insufficient_balance flag so
     // they're eligible for the next signal. If balance is still
     // inadequate, the next placeMarketOrder will re-set it.
     if (row.insufficient_balance_at) setInsufficientBalance(row.id, null);
-    // Phase F: if balance just became enough AND user hasn't picked a tier
-    // yet, route them straight to the tier picker — that's the natural
-    // next step in onboarding.
+    // Phase G — three paths after a balance verify, in order:
+    //   1. User already activated tier → just refresh balance, show flash.
+    //   2. User picked tier (selected_tier_id set) AND balance is now enough
+    //      → auto-call assignTier, route to dashboard.
+    //   3. User hasn't picked tier AND balance ≥ $300 → route to picker.
+    //   4. Otherwise just flash the new balance.
     const subRow = findSubscription(user.userId);
     const pickedTier = listUserStrategies(user.userId).length > 0;
+    const selectedTier = subRow?.selected_tier_id as TierId | null | undefined;
+    if (subRow?.plan !== 'vip' && !pickedTier && selectedTier && selectedTier !== 'vip') {
+      const tier = getTier(selectedTier);
+      if (verifyRes.totalUsdt >= tier.minBalanceUsdt) {
+        try {
+          await assignTier(user.userId, selectedTier, {
+            reason: 'auto_activate_on_balance_verify',
+            balanceUsdt: verifyRes.totalUsdt,
+          });
+          reply.code(303).header('location', '/account?tier-activated=' + selectedTier).send();
+          return;
+        } catch (err) {
+          logger.error({ err, userId: user.userId, selectedTier }, 'auto-activate failed');
+          // Fall through to flash — we don't want to block the user.
+        }
+      }
+    }
     if (
       subRow?.plan !== 'vip' &&
       !pickedTier &&
+      !selectedTier &&
       verifyRes.totalUsdt >= MIN_AUTOTRADING_DEPOSIT_USDT
     ) {
       reply.code(303).header('location', '/account/subscription/select-tier?from=verify').send();
       return;
     }
-    const tail = !pickedTier && subRow?.plan !== 'vip'
+    const tail = !pickedTier && subRow?.plan !== 'vip' && !selectedTier
       ? ` Минимум для запуска — $${MIN_AUTOTRADING_DEPOSIT_USDT}. Пополните счёт и проверьте снова.`
-      : '';
+      : selectedTier && !pickedTier
+        ? ` Для тарифа ${getTier(selectedTier).name} нужно $${getTier(selectedTier).minBalanceUsdt}+ — пополните счёт.`
+        : '';
     return renderApiKeyWithFlash(req, reply, user, {
       ok: true,
       message: `Связь с Bybit ОК. Баланс: ${verifyRes.totalUsdt.toFixed(2)} USDT.${tail}`,

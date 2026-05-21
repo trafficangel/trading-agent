@@ -124,10 +124,10 @@ function renderBanners(args: RenderArgs): string {
           ${args.lastBalanceUsdt !== null
             ? `Последний известный баланс: <b>$${args.lastBalanceUsdt.toFixed(2)} USDT</b>. `
             : ''}
-          Bybit отклонил последнюю сделку из-за нехватки обеспечения. Пополните Derivatives-кошелёк
-          и нажмите «Проверить связь» в карточке ключа.
+          Bybit отклонил последнюю сделку из-за нехватки обеспечения. Пополните Unified Trading Account
+          и нажмите «Проверить баланс» в карточке ключа.
         </div>
-        <a class="strat-banner-btn" href="/account/api-key">Проверить связь →</a>
+        <a class="strat-banner-btn" href="/account/api-key">Проверить баланс →</a>
       </div>
     `);
   }
@@ -207,7 +207,7 @@ function renderLowBalanceCard(args: RenderArgs): string {
         <div class="strat-tier-sub">${args.apiKeyConnected ? 'Депозит ниже минимума автотрейдинга ($300)' : 'API-ключ Bybit не подключён'}</div>
       </div>
       <div class="strat-tier-pitch">
-        Минимальный депозит для автоматической торговли — <b>$300 USDT</b> на Derivatives-кошельке Bybit.
+        Минимальный депозит для автоматической торговли — <b>$300 USDT</b> на Unified Trading Account Bybit.
         ${args.lastBalanceUsdt !== null
           ? `Сейчас на счёте: <b>$${args.lastBalanceUsdt.toFixed(2)} USDT</b>. Пополните ещё на <b>$${Math.max(0, 300 - args.lastBalanceUsdt).toFixed(2)}</b>.`
           : 'Подключите ключ Bybit и пополните счёт — мы автоматически подберём тариф.'}

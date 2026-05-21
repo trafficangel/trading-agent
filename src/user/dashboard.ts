@@ -405,8 +405,6 @@ function renderTierStatCard(tierId: TierId): string {
         <br/>
         <span style="color:#4ad991">$${sub.low}–$${sub.high}/мес</span> по бэктесту
         <br/>
-        <span style="color:#4ad991; font-size:11.5px">${ico('🛡')}Money-back: минус-месяц → следующий бесплатно</span>
-        <br/>
         <a href="/account/subscription/select-tier" style="color:#8590a0; font-size:11.5px; text-decoration:underline">Сменить тариф →</a>
       </div>
     </div>
@@ -431,11 +429,14 @@ function tierEmoji(tierId: TierId): string {
  * action button (CTA to next step). Hidden when all done OR when
  * user has VIP override (operator setup).
  *
- * Checkpoints (Phase F — 5 steps, tier selection split out from "стратегии"):
- *   1. Регистрация (always done by definition — user is in /account)
- *   2. Подключение Bybit-ключа + verify (api_key.last_verified_at !== null)
- *   3. Депозит ≥ $300 (api_key.last_balance_usdt >= 300)
- *   4. Выбор тарифа (enabledStrategiesCount > 0 — assignTier creates rows)
+ * Checkpoints (Phase G — 5 steps, tier choice before deposit so user knows
+ * how much to deposit; verify-balance button right next to deposit CTA):
+ *   1. Регистрация (always done — user is in /account)
+ *   2. Подключение Bybit (api_key.last_verified_at !== null)
+ *   3. Выбор тарифа (selected_tier_id IS NOT NULL)
+ *   4. Депозит на Bybit ≥ minimum для выбранного тарифа
+ *      → две кнопки рядом: «Открыть Bybit для пополнения» + «Проверить баланс»
+ *      → при достаточном балансе verify auto-activates assignTier
  *   5. Стратегии работают (openCount + closedCount > 0)
  */
 function renderOnboardingChecklist(args: {
@@ -445,6 +446,7 @@ function renderOnboardingChecklist(args: {
   openPositionsCount: number;
   closedPositionsCount: number;
   margin: MarginState;
+  csrfToken?: string;
 }): string {
   const sub = args.subscription;
   if (!sub) return '';
@@ -453,64 +455,98 @@ function renderOnboardingChecklist(args: {
   // Compute checkpoint statuses.
   const keyConnected = !!(args.apiKey && args.apiKey.last_verified_at && !args.apiKey.revoked_at);
   const balance = args.margin.balanceUsdt ?? 0;
-  const depositOk = balance >= 300;
-  const tierPicked = args.enabledStrategiesCount > 0;
+  const tierPicked = !!sub.selected_tier_id;
+  const tierConfig = sub.selected_tier_id
+    ? TIER_CONFIGS[sub.selected_tier_id as TierId]
+    : null;
+  const requiredBalance = tierConfig?.minBalanceUsdt ?? 300;
+  const depositOk = balance >= requiredBalance;
   const tradingStarted = args.openPositionsCount + args.closedPositionsCount > 0;
 
   // If all done → hide. User no longer needs the wizard.
-  if (keyConnected && depositOk && tierPicked && tradingStarted) return '';
+  if (keyConnected && tierPicked && depositOk && tradingStarted) return '';
 
-  type Step = { num: number; title: string; done: boolean; cta?: { label: string; href: string } };
+  type CtaLink = { kind: 'link'; label: string; href: string; primary?: boolean };
+  type CtaForm = { kind: 'form'; label: string; action: string; primary?: boolean };
+  type Cta = CtaLink | CtaForm;
+  type Step = { num: number; title: string; done: boolean; ctas?: Cta[] };
+
+  const depositStepCtas: Cta[] = [];
+  if (!depositOk && keyConnected) {
+    depositStepCtas.push({
+      kind: 'link',
+      label: 'Открыть Bybit для пополнения →',
+      href: 'https://www.bybit.com/user/assets/home/overview',
+      primary: true,
+    });
+    if (args.csrfToken) {
+      depositStepCtas.push({
+        kind: 'form',
+        label: 'Проверить баланс',
+        action: '/account/api-key/verify',
+      });
+    }
+  }
+
   const steps: Step[] = [
     { num: 1, title: 'Регистрация', done: true },
     {
       num: 2,
-      title: 'Подключение Bybit и проверка баланса',
+      title: 'Подключение Bybit',
       done: keyConnected,
-      cta: keyConnected ? undefined : { label: 'Подключить ключ →', href: '/account/api-key' },
+      ctas: keyConnected
+        ? undefined
+        : [{ kind: 'link', label: 'Подключить ключ →', href: '/account/api-key', primary: true }],
     },
     {
       num: 3,
-      title: 'Депозит на Bybit ≥ $300',
-      done: depositOk,
-      cta: depositOk
+      title: 'Выбор тарифа',
+      done: tierPicked,
+      ctas: tierPicked
         ? undefined
         : keyConnected
-          ? { label: 'Открыть Bybit для пополнения →', href: 'https://www.bybit.com/user/assets/deposit' }
+          ? [{ kind: 'link', label: 'Выбрать тариф →', href: '/account/subscription/select-tier', primary: true }]
           : undefined,
     },
     {
       num: 4,
-      title: 'Выбор тарифа',
-      done: tierPicked,
-      cta: tierPicked
-        ? undefined
-        : depositOk
-          ? { label: 'Выбрать тариф →', href: '/account/subscription/select-tier' }
-          : undefined,
+      title: tierConfig
+        ? `Пополнить Bybit · нужно $${tierConfig.minBalanceUsdt}+ для ${tierConfig.name}`
+        : 'Пополнить Bybit под выбранный тариф',
+      done: depositOk && tierPicked,
+      ctas: depositStepCtas.length > 0 ? depositStepCtas : undefined,
     },
     {
       num: 5,
       title: 'Стратегии работают',
       done: tradingStarted,
-      cta: tradingStarted || !tierPicked
-        ? undefined
-        : { label: 'Посмотреть стратегии →', href: '/account/strategies' },
+      ctas: undefined,
     },
   ];
 
   const stepsHtml = steps
     .map((s) => {
       const cls = s.done ? 'done' : steps.findIndex((x) => !x.done) === steps.indexOf(s) ? 'current' : 'pending';
-      const cta = s.cta
-        ? `<a class="onboarding-cta" href="${escapeHtml(s.cta.href)}"${s.cta.href.startsWith('http') ? ' target="_blank" rel="noopener"' : ''}>${escapeHtml(s.cta.label)}</a>`
-        : '';
+      const ctaHtml = (s.ctas ?? []).map((c) => {
+        const btnCls = c.primary ? 'onboarding-cta' : 'onboarding-cta onboarding-cta-ghost';
+        if (c.kind === 'link') {
+          const external = c.href.startsWith('http');
+          return `<a class="${btnCls}" href="${escapeHtml(c.href)}"${external ? ' target="_blank" rel="noopener"' : ''}>${escapeHtml(c.label)}</a>`;
+        }
+        // form CTA (POST with csrf)
+        return `
+          <form method="POST" action="${escapeHtml(c.action)}" style="display:inline">
+            <input type="hidden" name="csrf" value="${escapeHtml(args.csrfToken ?? '')}"/>
+            <button type="submit" class="${btnCls}">${escapeHtml(c.label)}</button>
+          </form>
+        `;
+      }).join('');
       return `
         <div class="onboarding-step ${cls}">
           <div class="onboarding-marker">${s.done ? '✓' : s.num}</div>
           <div class="onboarding-body">
             <div class="onboarding-title">${escapeHtml(s.title)}</div>
-            ${cta}
+            ${ctaHtml ? `<div class="onboarding-cta-row">${ctaHtml}</div>` : ''}
           </div>
         </div>
       `;
@@ -658,7 +694,7 @@ function renderMarginBanner(args: {
             <br/>
             <b>Новые сделки система не открывает</b> пока баланс не вырастет. Уже открытые позиции продолжают работать.
             <br/>
-            Пополните USDT-кошелёк раздела <b>Derivatives</b> в Bybit (или переведите из Funding/Spot во фьючерсный кошелёк) —
+            Пополните <b>Unified Trading Account</b> в Bybit (или переведите USDT из Funding во фьючерсный единый кошелёк) —
             в течение 5 минут мы проверим баланс и снова включим вас в сигналы.
           </div>
           <div class="cabinet-banner-actions">
@@ -750,7 +786,7 @@ function renderStatusBanner(args: {
             <div class="cabinet-banner-title-amber">Пополните Bybit-кошелёк</div>
             <div class="cabinet-banner-text">
               Ключ подключён. Сейчас на счёте ${cur}. Для запуска автотрейдинга нужен
-              баланс <b>от $300</b> на Derivatives-кошельке Bybit. Пополните счёт и
+              баланс <b>от $300</b> на Unified Trading Account Bybit. Пополните счёт и
               нажмите «Проверить баланс» — затем сможете выбрать тариф.
             </div>
             <div class="cabinet-banner-actions">
@@ -1110,13 +1146,22 @@ function cabinetStyles(): string {
   }
   .onboarding-title { font-size: 14px; color: #cfd6dd; }
   .onboarding-step.done .onboarding-title { color: #8590a0; text-decoration: line-through; }
+  .onboarding-cta-row {
+    display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px;
+  }
   .onboarding-cta {
     background: #4ad991; color: #0b0e13; padding: 6px 14px;
     border-radius: 7px; font-size: 13px; font-weight: 600;
     text-decoration: none;
     white-space: nowrap;
+    border: none; cursor: pointer; font-family: inherit;
   }
   .onboarding-cta:hover { background: #5ce0a0; text-decoration: none; }
+  .onboarding-cta-ghost {
+    background: transparent; color: #cfd6dd;
+    border: 1px solid #2a323d;
+  }
+  .onboarding-cta-ghost:hover { background: rgba(74,217,145,0.08); border-color: #4ad991; color: #4ad991; }
 
   /* Upgrade promo banner — blue-ish accent, less alarming than red */
   .cabinet-banner-promo {
