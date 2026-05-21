@@ -205,6 +205,14 @@ export function renderDashboard(args: {
   // to a HIGHER tier). User clicks to confirm — applyUpgrade via POST.
   const upgradePromo = renderUpgradePromo(args);
 
+  // Trading-control panel — visible only when tier is actually active
+  // (user_strategies rows exist). Shows either "Stop" or "Resume" button
+  // depending on trading_paused_at state. Skip for VIP override users —
+  // they have a different control path through the operator.
+  const tradingControl = !isVip && args.enabledStrategiesCount > 0
+    ? renderTradingControl(sub, args.csrfToken)
+    : '';
+
   const body = `
     ${cabinetStyles()}
     <main class="cabinet-main">
@@ -215,6 +223,7 @@ export function renderDashboard(args: {
       ${upgradePromo}
       ${cards}
       ${quickLinks}
+      ${tradingControl}
     </main>
   `;
 
@@ -280,6 +289,52 @@ function renderSubscriptionCard(sub: SubscriptionRow | null): string {
       <div class="stat-card-label">${ico(emoji)}Подписка</div>
       <div class="stat-card-value">${title}</div>
       <div class="stat-card-sub">${isCancelled ? '—' : `${escapeHtml(days.text)} · до ${accessDateStr}`}</div>
+    </div>
+  `;
+}
+
+/** Prominent stop/resume trading panel at the bottom of the dashboard.
+ *  Hard-stop semantics: clicking "Остановить" closes ALL open positions on
+ *  Bybit via market-order and flips trading_paused_at. The form posts to
+ *  /account/strategies/pause?from=dashboard which closes positions + redirects
+ *  back here with ?paused=1. Resume just flips the flag back. */
+function renderTradingControl(
+  sub: SubscriptionRow | null,
+  csrfToken?: string,
+): string {
+  const paused = sub?.trading_paused_at !== null && sub?.trading_paused_at !== undefined;
+  if (paused) {
+    return `
+      <div class="cabinet-control cabinet-control-resume">
+        <div class="cabinet-control-body">
+          <div class="cabinet-control-title">${ico('⏸')}Торговля сейчас остановлена</div>
+          <div class="cabinet-control-text">
+            Новые сигналы не исполняются. Депозит на Bybit — на месте.
+            Готовы продолжить? Возобновим автотрейдинг по выбранному тарифу.
+          </div>
+        </div>
+        <form method="POST" action="/account/strategies/resume?from=dashboard" class="cabinet-control-form">
+          <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken ?? '')}"/>
+          <button type="submit" class="cabinet-control-btn cabinet-control-btn-go">▶ Возобновить торговлю</button>
+        </form>
+      </div>
+    `;
+  }
+  return `
+    <div class="cabinet-control cabinet-control-stop">
+      <div class="cabinet-control-body">
+        <div class="cabinet-control-title">${ico('🛑')}Остановить торговлю</div>
+        <div class="cabinet-control-text">
+          Нужна срочная остановка? Нажмите — мы <b>закроем все ваши открытые сделки на Bybit
+          по рынку</b> и больше не будем открывать новые. Депозит при этом остаётся на вашем
+          счёте Bybit, мы его не трогаем. В любой момент можно возобновить торговлю.
+        </div>
+      </div>
+      <form method="POST" action="/account/strategies/pause?from=dashboard" class="cabinet-control-form"
+            onsubmit="return confirm('Остановить автотрейдинг? Все ваши открытые сделки будут закрыты на Bybit по рыночной цене прямо сейчас. Это действие необратимо для текущих позиций — их PnL зафиксируется на момент закрытия.');">
+        <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken ?? '')}"/>
+        <button type="submit" class="cabinet-control-btn cabinet-control-btn-stop">🛑 Остановить и закрыть сделки</button>
+      </form>
     </div>
   `;
 }
@@ -766,6 +821,7 @@ function renderStatusBanner(args: {
   apiKey: ApiKeySummary | null;
   enabledStrategiesCount: number;
   margin: MarginState;
+  csrfToken?: string;
 }): string {
   const sub = args.subscription;
   const key = args.apiKey;
@@ -812,19 +868,23 @@ function renderStatusBanner(args: {
     `;
   }
 
-  // Paused gate — amber. User can resume from /account/strategies.
+  // Paused gate — amber. User can resume from this banner directly.
   if (sub.trading_paused_at !== null) {
     return `
       <div class="cabinet-banner-amber">
         <div class="cabinet-banner-icon">${ico('⏸')}</div>
         <div class="cabinet-banner-body">
-          <div class="cabinet-banner-title-amber">Торговля на паузе</div>
+          <div class="cabinet-banner-title-amber">Торговля остановлена</div>
           <div class="cabinet-banner-text">
-            Вы остановили автоматическую торговлю. Новые сделки не открываются.
-            Уже открытые позиции продолжают работать со стопами.
+            Вы остановили автоматическую торговлю. Все открытые сделки закрыты на Bybit market-ордером,
+            новые сделки не открываются. Депозит остаётся на вашем счёте — мы ничего с ним не делаем,
+            пока вы не нажмёте «Возобновить».
           </div>
           <div class="cabinet-banner-actions">
-            <a class="cabinet-banner-btn" href="/account/strategies">Возобновить торговлю →</a>
+            <form method="POST" action="/account/strategies/resume?from=dashboard" style="display:inline">
+              <input type="hidden" name="_csrf" value="${escapeHtml(args.csrfToken ?? '')}"/>
+              <button type="submit" class="cabinet-banner-btn" style="border:none; cursor:pointer; font-family:inherit">▶ Возобновить торговлю</button>
+            </form>
           </div>
         </div>
       </div>
@@ -1156,6 +1216,48 @@ function cabinetStyles(): string {
   }
   .onboarding-title { font-size: 14px; color: #cfd6dd; }
   .onboarding-step.done .onboarding-title { color: #8590a0; text-decoration: line-through; }
+  /* Trading-control panel — bottom-of-dashboard "panic button" pair. */
+  .cabinet-control {
+    margin: 28px 0 0;
+    padding: 20px 24px;
+    border-radius: 14px;
+    display: flex; gap: 18px; align-items: center;
+    flex-wrap: wrap;
+  }
+  .cabinet-control-stop {
+    background: linear-gradient(180deg, rgba(239, 91, 107, 0.06) 0%, rgba(239, 91, 107, 0.02) 100%);
+    border: 1px solid rgba(239, 91, 107, 0.30);
+  }
+  .cabinet-control-resume {
+    background: linear-gradient(180deg, rgba(74, 217, 145, 0.06) 0%, rgba(74, 217, 145, 0.02) 100%);
+    border: 1px solid rgba(74, 217, 145, 0.40);
+  }
+  .cabinet-control-body { flex: 1; min-width: 280px; }
+  .cabinet-control-title {
+    font-size: 15px; font-weight: 600; margin-bottom: 6px;
+  }
+  .cabinet-control-stop .cabinet-control-title { color: #ff8b8b; }
+  .cabinet-control-resume .cabinet-control-title { color: #4ad991; }
+  .cabinet-control-text {
+    font-size: 13px; color: #9aa5b1; line-height: 1.55;
+  }
+  .cabinet-control-text b { color: #cfd6dd; }
+  .cabinet-control-form { display: inline; flex-shrink: 0; }
+  .cabinet-control-btn {
+    padding: 12px 22px; border-radius: 10px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    border: none; font-family: inherit; white-space: nowrap;
+  }
+  .cabinet-control-btn-stop {
+    background: rgba(239, 91, 107, 0.18); color: #ff8b8b;
+    border: 1px solid rgba(239, 91, 107, 0.40);
+  }
+  .cabinet-control-btn-stop:hover { background: rgba(239, 91, 107, 0.30); }
+  .cabinet-control-btn-go {
+    background: #4ad991; color: #0b0e13;
+  }
+  .cabinet-control-btn-go:hover { background: #5ce0a0; }
+
   .onboarding-cta-row {
     display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px;
   }

@@ -190,9 +190,14 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
   // and /resume for trading on-off control.
 
   // -------- POST /account/strategies/pause + /resume --------
-  // User-controlled trading pause. When paused, fan-out skips this
-  // user entirely; open positions continue to natural exit. Resume
-  // is the inverse — re-eligible for new fan-out signals.
+  // User-controlled trading stop. When stopped:
+  //   - trading_paused_at is set → fan-out skips this user for any new signal
+  //   - All currently OPEN user-decisions are closed on Bybit via market-order
+  //     (forced exit with reason='strategy_exit'). Removing the position from
+  //     the exchange is the user's explicit ask: «при остановке все сделки
+  //     закрываются на бирже» — soft pause was confusing.
+  // Resume just unflips the flag; positions don't re-open automatically.
+  // The accept-from query param controls where we redirect (dashboard vs strategies).
   app.post('/account/strategies/pause', async (req, reply) => {
     const user = getAuthedUser(req);
     if (!user) {
@@ -200,9 +205,14 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       return;
     }
     if (!requireCsrf(req, reply)) return;
+    const from = (req.query as { from?: string } | undefined)?.from;
     setTradingPaused(user.userId, true);
-    logger.info({ userId: user.userId }, 'cabinet: trading paused');
-    reply.code(303).header('location', '/account/strategies').send();
+    // Hard stop — close all open positions on Bybit. We don't wait for
+    // strategy exit signals or natural SL; the user wants out NOW.
+    const closeStats = await closeAllUserPositions(user.userId, 'strategy_exit');
+    logger.info({ userId: user.userId, closeStats }, 'cabinet: trading paused + positions closed');
+    const target = from === 'dashboard' ? '/account?paused=1' : '/account/strategies';
+    reply.code(303).header('location', target).send();
   });
   app.post('/account/strategies/resume', async (req, reply) => {
     const user = getAuthedUser(req);
@@ -211,9 +221,11 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       return;
     }
     if (!requireCsrf(req, reply)) return;
+    const from = (req.query as { from?: string } | undefined)?.from;
     setTradingPaused(user.userId, false);
     logger.info({ userId: user.userId }, 'cabinet: trading resumed');
-    reply.code(303).header('location', '/account/strategies').send();
+    const target = from === 'dashboard' ? '/account?resumed=1' : '/account/strategies';
+    reply.code(303).header('location', target).send();
   });
 
   // -------- POST /account/subscription/upgrade (TRACK E Phase B) --------
