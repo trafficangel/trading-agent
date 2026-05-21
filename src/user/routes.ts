@@ -491,9 +491,13 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
           `($${MIN_AUTOTRADING_DEPOSIT_USDT}). Пополните счёт и нажмите «Проверить связь», затем выберите тариф.`,
       });
     }
-    // Balance sufficient. If no tier yet → send user to picker. If tier
-    // already selected — keep it (manual choice persists), just refresh balance.
-    if (!sub?.tier_id) {
+    // Balance sufficient. Phase F: tier_id is always set by ensureTrialFor
+    // default ('standard'), so checking it doesn't tell us whether user
+    // has actually PICKED a tier. The real signal is user_strategies rows:
+    // assignTier creates them, so listUserStrategies(...).length > 0 means
+    // user has been through the tier picker.
+    const picked = listUserStrategies(user.userId).length > 0;
+    if (!picked) {
       reply.code(303).header('location', '/account/subscription/select-tier?from=api-key').send();
       return;
     }
@@ -539,9 +543,25 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     // they're eligible for the next signal. If balance is still
     // inadequate, the next placeMarketOrder will re-set it.
     if (row.insufficient_balance_at) setInsufficientBalance(row.id, null);
+    // Phase F: if balance just became enough AND user hasn't picked a tier
+    // yet, route them straight to the tier picker — that's the natural
+    // next step in onboarding.
+    const subRow = findSubscription(user.userId);
+    const pickedTier = listUserStrategies(user.userId).length > 0;
+    if (
+      subRow?.plan !== 'vip' &&
+      !pickedTier &&
+      verifyRes.totalUsdt >= MIN_AUTOTRADING_DEPOSIT_USDT
+    ) {
+      reply.code(303).header('location', '/account/subscription/select-tier?from=verify').send();
+      return;
+    }
+    const tail = !pickedTier && subRow?.plan !== 'vip'
+      ? ` Минимум для запуска — $${MIN_AUTOTRADING_DEPOSIT_USDT}. Пополните счёт и проверьте снова.`
+      : '';
     return renderApiKeyWithFlash(req, reply, user, {
       ok: true,
-      message: `Связь с Bybit ОК. Баланс: ${verifyRes.totalUsdt.toFixed(2)} USDT.`,
+      message: `Связь с Bybit ОК. Баланс: ${verifyRes.totalUsdt.toFixed(2)} USDT.${tail}`,
     });
   });
 

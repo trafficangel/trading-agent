@@ -73,7 +73,7 @@ export function renderApiKeyPage(args: {
           <ol class="key-balance-warn-steps">
             <li>Пополните USDT-кошелёк раздела <b>Derivatives</b> в Bybit
               (или переведите из Funding / Spot во фьючерсный кошелёк).</li>
-            <li>Нажмите <b>«Проверить связь»</b> в карточке ключа выше —
+            <li>Нажмите <b>«Проверить баланс»</b> в карточке ключа выше —
               мы перечитаем баланс и снова включим вас в сигналы.</li>
           </ol>
         </div>
@@ -153,7 +153,7 @@ function renderConnectedState(key: ApiKeySummary, balance: number | null, csrfTo
       <div class="key-card-actions">
         <form method="POST" action="/account/api-key/verify" style="display:inline">
           ${csrfInput(csrfToken)}
-          <button class="key-btn-secondary" type="submit">Проверить связь</button>
+          <button class="key-btn-secondary" type="submit">Проверить баланс</button>
         </form>
         <form method="POST" action="/account/api-key/revoke" style="display:inline"
               onsubmit="return confirm('Отключить ключ? Все ваши открытые позиции по стратегиям сначала будут закрыты на бирже по рынку, затем ключ будет удалён. Это безопаснее чем оставить позиции висеть без управления.');">

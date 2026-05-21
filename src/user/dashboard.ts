@@ -106,14 +106,25 @@ export function renderDashboard(args: {
   // TRACK E — tier card replaces the generic strategies-count card
   // for non-VIP users. VIP keeps the manual one (their strategies are
   // operator-defined, not tier-derived).
+  //
+  // Phase E follow-up: only show the tier card AFTER user explicitly
+  // picks a tier. Heuristic = user_strategies rows exist (enabledStrategiesCount > 0).
+  // Before that, render a "Тариф не выбран" prompt — the default
+  // tier_id='standard' inserted by ensureTrialFor is misleading otherwise
+  // (user sees Standard before connecting Bybit or picking anything).
   const isVip = sub?.plan === 'vip';
-  const strategiesBlock = !isVip && sub?.tier_id
-    ? renderTierStatCard(sub.tier_id as TierId)
-    : renderStrategiesCard({
-        enabled: args.enabledStrategiesCount,
-        available: args.totalStrategiesAvailable,
-        notional: args.totalNotionalUsd,
-      });
+  let strategiesBlock: string;
+  if (isVip) {
+    strategiesBlock = renderStrategiesCard({
+      enabled: args.enabledStrategiesCount,
+      available: args.totalStrategiesAvailable,
+      notional: args.totalNotionalUsd,
+    });
+  } else if (sub?.tier_id && args.enabledStrategiesCount > 0) {
+    strategiesBlock = renderTierStatCard(sub.tier_id as TierId);
+  } else {
+    strategiesBlock = renderTierUnsetCard(args.apiKey, args.margin.balanceUsdt);
+  }
 
   const openBlock = renderOpenPositionsCard(args.openPositionsCount);
 
@@ -157,8 +168,12 @@ export function renderDashboard(args: {
   const quickLinks = `
     <div class="cabinet-actions">
       <a class="cabinet-action" href="/account/strategies">
-        <div class="cabinet-action-title">${ico('⚙️')}Мои стратегии</div>
-        <div class="cabinet-action-sub">Включить, выключить, изменить размер позиции и плечо</div>
+        <div class="cabinet-action-title">${ico('⚙️')}Стратегии в работе</div>
+        <div class="cabinet-action-sub">Какие стратегии торгуют на вашем счёте и с каким размером позиции</div>
+      </a>
+      <a class="cabinet-action" href="/account/subscription/select-tier">
+        <div class="cabinet-action-title">${ico('💳')}Сменить тариф</div>
+        <div class="cabinet-action-sub">Выбрать другой тариф автотрейдинга под текущий депозит</div>
       </a>
       <a class="cabinet-action" href="/account/api-key">
         <div class="cabinet-action-title">${ico('🔑')}Подключение Bybit</div>
@@ -322,6 +337,58 @@ function renderStrategiesCard(args: {
   `;
 }
 
+/** Phase F — prompt card shown when the user hasn't picked a tier yet.
+ *  Replaces the misleading "Standard" tier card that came from the
+ *  ensureTrialFor default. Behavior:
+ *   - No Bybit key connected yet → ask to connect first.
+ *   - Connected but balance < $300 → ask to top up Bybit.
+ *   - Balance ≥ $300 → CTA "Выбрать тариф" to /account/subscription/select-tier.
+ */
+function renderTierUnsetCard(
+  apiKey: ApiKeySummary | null,
+  balanceUsdt: number | null,
+): string {
+  const keyConnected = !!(apiKey && apiKey.last_verified_at && !apiKey.revoked_at);
+  const balanceOk = balanceUsdt !== null && balanceUsdt >= 300;
+  let body = '';
+  if (!keyConnected) {
+    body = `
+      <div class="stat-card-value" style="font-size:18px">Подключите Bybit</div>
+      <div class="stat-card-sub" style="line-height:1.6">
+        После подключения API-ключа мы увидим ваш баланс и подберём подходящий тариф.
+        <br/>
+        <a href="/account/api-key" style="color:#4ad991; text-decoration:none">Подключить ключ →</a>
+      </div>
+    `;
+  } else if (!balanceOk) {
+    const cur = balanceUsdt !== null ? `$${balanceUsdt.toFixed(0)}` : '—';
+    body = `
+      <div class="stat-card-value" style="font-size:18px">Пополните счёт</div>
+      <div class="stat-card-sub" style="line-height:1.6">
+        На счёте ${cur}. Для автотрейдинга нужен баланс <b style="color:#cfd6dd">от $300</b>.
+        <br/>
+        <a href="/account/api-key" style="color:#4ad991; text-decoration:none">Проверить баланс →</a>
+      </div>
+    `;
+  } else {
+    body = `
+      <div class="stat-card-value" style="font-size:18px">Выберите тариф</div>
+      <div class="stat-card-sub" style="line-height:1.6">
+        Баланс на Bybit: <b style="color:#4ad991">$${balanceUsdt!.toFixed(0)}</b>.
+        Можно стартовать автотрейдинг.
+        <br/>
+        <a href="/account/subscription/select-tier" style="color:#4ad991; text-decoration:none; font-weight:600">Выбрать тариф →</a>
+      </div>
+    `;
+  }
+  return `
+    <div class="stat-card cabinet-card">
+      <div class="stat-card-label">${ico('💳')}Тариф автотрейдинга</div>
+      ${body}
+    </div>
+  `;
+}
+
 /** TRACK E — tier-card replaces the generic strategies-count card.
  *  Shows tier name, expected PnL range, max DD, and # strategies. */
 function renderTierStatCard(tierId: TierId): string {
@@ -364,11 +431,12 @@ function tierEmoji(tierId: TierId): string {
  * action button (CTA to next step). Hidden when all done OR when
  * user has VIP override (operator setup).
  *
- * Checkpoints:
+ * Checkpoints (Phase F — 5 steps, tier selection split out from "стратегии"):
  *   1. Регистрация (always done by definition — user is in /account)
- *   2. Подключен Bybit-ключ (api_key.last_verified_at !== null)
+ *   2. Подключение Bybit-ключа + verify (api_key.last_verified_at !== null)
  *   3. Депозит ≥ $300 (api_key.last_balance_usdt >= 300)
- *   4. Тариф назначен + есть первая сделка (openPositionsCount + closedCount > 0)
+ *   4. Выбор тарифа (enabledStrategiesCount > 0 — assignTier creates rows)
+ *   5. Стратегии работают (openCount + closedCount > 0)
  */
 function renderOnboardingChecklist(args: {
   subscription: SubscriptionRow | null;
@@ -386,17 +454,18 @@ function renderOnboardingChecklist(args: {
   const keyConnected = !!(args.apiKey && args.apiKey.last_verified_at && !args.apiKey.revoked_at);
   const balance = args.margin.balanceUsdt ?? 0;
   const depositOk = balance >= 300;
+  const tierPicked = args.enabledStrategiesCount > 0;
   const tradingStarted = args.openPositionsCount + args.closedPositionsCount > 0;
 
   // If all done → hide. User no longer needs the wizard.
-  if (keyConnected && depositOk && tradingStarted) return '';
+  if (keyConnected && depositOk && tierPicked && tradingStarted) return '';
 
   type Step = { num: number; title: string; done: boolean; cta?: { label: string; href: string } };
   const steps: Step[] = [
     { num: 1, title: 'Регистрация', done: true },
     {
       num: 2,
-      title: 'Подключение Bybit',
+      title: 'Подключение Bybit и проверка баланса',
       done: keyConnected,
       cta: keyConnected ? undefined : { label: 'Подключить ключ →', href: '/account/api-key' },
     },
@@ -412,9 +481,21 @@ function renderOnboardingChecklist(args: {
     },
     {
       num: 4,
+      title: 'Выбор тарифа',
+      done: tierPicked,
+      cta: tierPicked
+        ? undefined
+        : depositOk
+          ? { label: 'Выбрать тариф →', href: '/account/subscription/select-tier' }
+          : undefined,
+    },
+    {
+      num: 5,
       title: 'Стратегии работают',
       done: tradingStarted,
-      cta: tradingStarted ? undefined : { label: 'Подробнее →', href: '/account/strategies' },
+      cta: tradingStarted || !tierPicked
+        ? undefined
+        : { label: 'Посмотреть стратегии →', href: '/account/strategies' },
     },
   ];
 
@@ -652,19 +733,47 @@ function renderStatusBanner(args: {
   if (!key || key.revoked_at !== null) return '';
   if (key.last_verified_at === null || key.last_verify_error) return '';
 
-  // Strategy gate — amber, with a clear CTA.
+  // Phase F — tier-pick gate (replaces old strategy-selection prompt).
+  // User no longer picks individual strategies; they pick a tier and the
+  // platform bundles strategies into it. If balance is below the autotrading
+  // minimum, prompt to top up first — selecting a tier with insufficient
+  // balance will fail validation anyway.
   if (args.enabledStrategiesCount === 0) {
+    const balance = args.margin.balanceUsdt;
+    const balanceOk = balance !== null && balance >= 300;
+    if (!balanceOk) {
+      const cur = balance !== null ? `$${balance.toFixed(0)}` : '—';
+      return `
+        <div class="cabinet-banner-amber">
+          <div class="cabinet-banner-icon">${ico('💰')}</div>
+          <div class="cabinet-banner-body">
+            <div class="cabinet-banner-title-amber">Пополните Bybit-кошелёк</div>
+            <div class="cabinet-banner-text">
+              Ключ подключён. Сейчас на счёте ${cur}. Для запуска автотрейдинга нужен
+              баланс <b>от $300</b> на Derivatives-кошельке Bybit. Пополните счёт и
+              нажмите «Проверить баланс» — затем сможете выбрать тариф.
+            </div>
+            <div class="cabinet-banner-actions">
+              <a class="cabinet-banner-btn" href="/account/api-key">Открыть страницу ключа →</a>
+              <a class="cabinet-banner-btn cabinet-banner-btn-secondary" href="https://www.bybit.com/app/user/assets/home/overview" target="_blank" rel="noopener">Открыть Bybit ↗</a>
+            </div>
+          </div>
+        </div>
+      `;
+    }
     return `
       <div class="cabinet-banner-amber">
-        <div class="cabinet-banner-icon">${ico('⚙️')}</div>
+        <div class="cabinet-banner-icon">${ico('💳')}</div>
         <div class="cabinet-banner-body">
-          <div class="cabinet-banner-title-amber">Выберите стратегии для автоматической торговли</div>
+          <div class="cabinet-banner-title-amber">Выберите тариф автотрейдинга</div>
           <div class="cabinet-banner-text">
-            Ключ Bybit подключён, доступ активен — осталось включить хотя бы одну стратегию
-            и указать размер позиции. После этого бот начнёт торговать по сигналам.
+            Ключ Bybit подключён, баланс <b>$${balance!.toFixed(0)}</b> — можно стартовать.
+            Тариф определяет какие стратегии будут работать на вашем счёте и каким
+            объёмом. Подбор стратегий внутри тарифа — наша задача, вы только выбираете
+            план под размер депозита.
           </div>
           <div class="cabinet-banner-actions">
-            <a class="cabinet-banner-btn" href="/account/strategies">Выбрать стратегии →</a>
+            <a class="cabinet-banner-btn" href="/account/subscription/select-tier">Выбрать тариф →</a>
           </div>
         </div>
       </div>
