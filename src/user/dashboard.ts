@@ -337,6 +337,8 @@ function renderTierStatCard(tierId: TierId): string {
         ${tier.strategyIds.length} стратегий · ≤${tier.expectedMaxDdPct}% DD
         <br/>
         <span style="color:#4ad991">$${sub.low}–$${sub.high}/мес</span> по бэктесту
+        <br/>
+        <a href="/account/subscription/select-tier" style="color:#8590a0; font-size:11.5px; text-decoration:underline">Сменить тариф →</a>
       </div>
     </div>
   `;

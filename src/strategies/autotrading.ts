@@ -1,20 +1,20 @@
 /**
- * Public landing — `/autotrading` (Track D pitch).
+ * Public landing — `/autotrading` (Track D/E pitch).
  *
- * Explains the SaaS copytrading product to potential subscribers:
- *   - Hero with pricing
- *   - 3-step "how it works" funnel
- *   - Safety section (trade-only key, IP whitelist, no withdraw)
- *   - Strategies preview
- *   - FAQ
+ * Phase D rewrite (May 21, 2026):
+ *   - 14-day automatic trial REMOVED. Free month is conditional on
+ *     Bybit referral signup via BYBIT_REF_URL.
+ *   - Pricing changed from grid to horizontal scroll-snap carousel
+ *     with virtual «Free» card upfront.
+ *   - Hero CTA is explicit «Регистрация» (not «How it works»).
+ *   - Tier choice belongs to the user (auto-assign reframed as
+ *     «suggested by your balance»). Balance check just validates.
+ *   - FAQ adds BingX + Hyperliquid roadmap.
+ *   - New positive-leverage block alongside the red/green safety block.
  *
  * CTA leads to /strategies (existing OTP-gated registration form).
- * Once registered, users land in /account and see the trial-day
- * countdown — they connect their API key + pick strategies inside
- * the cabinet, not on this page.
- *
- * Visual identity matches the public home page (same hero spacing,
- * same stat cards, same CSS variables).
+ * Once registered, users land in /account and see the onboarding
+ * checklist (register ✓ → Bybit → deposit → trade).
  */
 
 import type { FastifyInstance } from 'fastify';
@@ -22,9 +22,6 @@ import { pageShell } from './landing.js';
 import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
 import { listTiers } from './tier-config.js';
 
-// Legacy single-price constant removed — tiers in TIER_CONFIGS now drive
-// pricing (Starter $12 / Standard $35 / Plus $90 / Pro $235 / VIP $580).
-const TRIAL_DAYS = 14;
 const SUPPORT_TG = 'https://t.me/dboykod';
 
 function escapeHtml(s: string): string {
@@ -56,9 +53,10 @@ function renderPage(): string {
     ${styles()}
     <main class="at-main">
       ${renderHero()}
-      ${renderBybitBonus()}
       ${renderHowItWorks()}
       ${renderPricing()}
+      ${renderBybitBonus()}
+      ${renderLeveragePositive()}
       ${renderSafety()}
       ${renderLeverageEducation()}
 
@@ -109,13 +107,13 @@ function renderHero(): string {
         Ваши средства всегда у вас на бирже под вашим контролем.
       </p>
       <div class="at-hero-cta">
-        <a href="#how" class="at-btn-primary">${ico('🚀')}Как это работает</a>
-        <a href="#pricing" class="at-btn-secondary">Тарифы и доходность</a>
+        <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Регистрация</a>
+        <a href="#pricing" class="at-btn-secondary">Тарифы и доходность ↓</a>
       </div>
       <div class="at-hero-pills">
         <span class="at-pill">${ico('🛡')}Ваши деньги на Bybit, не у нас</span>
         <span class="at-pill">${ico('🚫')}Ключ без права на вывод</span>
-        <span class="at-pill">${ico('🎁')}${TRIAL_DAYS} дней бесплатно</span>
+        <span class="at-pill">${ico('🎁')}+${BYBIT_REF_BONUS_DAYS} дней бесплатно при регистрации Bybit по нашей ссылке</span>
         <span class="at-pill">${ico('⏹')}Отмена в один клик</span>
       </div>
       <div class="at-hero-login">
@@ -127,16 +125,16 @@ function renderHero(): string {
 
 function renderBybitBonus(): string {
   return `
-    <section class="at-section at-bonus">
+    <section class="at-section at-bonus" id="bonus">
       <div class="at-bonus-card">
         <div class="at-bonus-icon">${ico('🎁')}</div>
         <div class="at-bonus-body">
-          <div class="at-bonus-title">Нет аккаунта на Bybit? Получите +${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно</div>
+          <div class="at-bonus-title">Получите +${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно</div>
           <div class="at-bonus-sub">
-            Зарегистрируйтесь на Bybit по нашей ссылке — и мы добавим вам
-            <b>${BYBIT_REF_BONUS_DAYS} дней автотрейдинга</b> сверх 14-дневного триала.
-            После регистрации пришлите ваш Bybit UID оператору в Telegram —
-            продлим подписку вручную.
+            Зарегистрируйте новый аккаунт на Bybit по нашей ссылке — и мы добавим вам
+            <b>${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно</b>. Полный Starter:
+            3 стратегии, реальная торговля, ваш депозит, ваш контроль.
+            Кнопка ниже — стандартная регистрация на Bybit, без скрытых платежей.
           </div>
         </div>
         <div class="at-bonus-actions">
@@ -144,7 +142,7 @@ function renderBybitBonus(): string {
             ${ico('🚀')}Открыть Bybit
           </a>
           <a class="at-btn-secondary" href="${SUPPORT_TG}" target="_blank" rel="noopener">
-            Написать оператору
+            Спросить оператора
           </a>
         </div>
       </div>
@@ -157,28 +155,27 @@ function renderHowItWorks(): string {
     <section class="at-section at-how" id="how">
       <h2 class="at-section-title">${ico('🛠')}Как начать за 4 шага</h2>
       <p class="at-section-sub">
-        Чем меньше депозит вы готовы выделить на автотрейдинг —
-        тем проще тариф и ниже потенциальная прибыль (и риск).
-        Сначала определитесь с тарифом — потом регистрация и подключение биржи.
+        Если у вас уже есть Bybit-аккаунт с депозитом — все 4 шага занимают ~10 минут.
+        Если нет — сначала Bybit (см. шаг 3 — там бонус +${BYBIT_REF_BONUS_DAYS} дней автотрейдинга).
       </p>
       <div class="at-how-grid">
         <div class="at-how-step">
           <div class="at-how-num">1</div>
-          <div class="at-how-title">Выберите тариф</div>
+          <div class="at-how-title">Регистрация</div>
           <div class="at-how-body">
-            Посмотрите <a href="#pricing">тарифную сетку</a> ниже на странице.
-            Решите, какой депозит готовы выделить ($300 минимум). Чем больше —
-            тем больше стратегий включается в работу и тем выше потенциальная прибыль.
-            <b>Депозит остаётся на вашем счёте Bybit</b>, никуда переводить не нужно.
+            По номеру телефона через Telegram-бот — 30 секунд. Без паролей, без email,
+            без подтверждения карты. Сразу попадаете в личный кабинет.
+            <a href="/strategies?from=autotrading">Зарегистрироваться →</a>
           </div>
         </div>
         <div class="at-how-step">
           <div class="at-how-num">2</div>
-          <div class="at-how-title">Регистрация</div>
+          <div class="at-how-title">Выбор тарифа</div>
           <div class="at-how-body">
-            По номеру телефона через Telegram — 30 секунд. Без паролей, без email.
-            <b>${TRIAL_DAYS} дней бесплатного триала</b>, никаких автосписаний.
-            Сразу попадаете в личный кабинет.
+            Посмотрите <a href="#pricing">тарифную сетку</a> ниже на странице.
+            Решите, какой депозит готовы выделить ($300 минимум). Чем больше —
+            тем больше стратегий включается в работу и тем выше потенциальная прибыль.
+            <b>Депозит остаётся на вашем Bybit</b>, нам ничего переводить не нужно.
           </div>
         </div>
         <div class="at-how-step">
@@ -187,10 +184,10 @@ function renderHowItWorks(): string {
           <div class="at-how-body">
             Если у вас ещё нет аккаунта на Bybit —
             <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">зарегистрируйтесь по нашей ссылке</a>
-            и получите <b>+${BYBIT_REF_BONUS_DAYS} дней бесплатного автотрейдинга</b>.
-            Дальше в кабинете создаёте API-ключ <b>с правом только на торговлю</b>
-            (без вывода средств) — подробная инструкция со скриншотами прямо на странице,
-            одна кнопка «Открыть Bybit API» откроет нужную страницу биржи.
+            и получите <b>+${BYBIT_REF_BONUS_DAYS} дней автотрейдинга</b>.
+            Затем создаёте API-ключ <b>с правом только на торговлю</b>
+            (без вывода средств) — инструкция со скриншотами в кабинете,
+            одна кнопка открывает нужную страницу Bybit.
           </div>
         </div>
         <div class="at-how-step">
@@ -199,9 +196,8 @@ function renderHowItWorks(): string {
           <div class="at-how-body">
             Переведите USDT на <b>Derivatives-кошелёк</b> Bybit под выбранный тариф
             (минимум $300 для Starter, $800 для Standard, и т.д.).
-            Система автоматически определит ваш тариф по балансу,
-            включит нужные стратегии и <b>сама начнёт торговать</b>.
-            Никаких дополнительных действий — открывайте кабинет и смотрите как идут сделки.
+            Стратегии включатся автоматически и <b>сама начнут торговать</b>.
+            Открывайте кабинет — и просто смотрите, как идут сделки.
           </div>
         </div>
       </div>
@@ -279,6 +275,61 @@ function renderSafety(): string {
 }
 
 /**
+ * Positive framing of leverage — answer to «но я же боюсь плеча,
+ * меня тренировали так думать». Показываем что плечо + защитный
+ * стоп = инструмент роста PnL без увеличения риска.
+ */
+function renderLeveragePositive(): string {
+  return `
+    <section class="at-section at-lev-pos">
+      <h2 class="at-section-title">${ico('⚡')}Зачем нам плечо: больше прибыли с управляемым риском</h2>
+      <p class="at-section-sub">
+        Плечо у нас — это не «казино», это инструмент. Оно позволяет открыть позицию
+        <b>в несколько раз больше</b>, чем размер маржи, и заработать больше с того же депозита —
+        при условии что риск контролируется фиксированным стоп-лоссом.
+      </p>
+      <div class="at-lev-pos-grid">
+        <div class="at-lev-pos-col at-lev-pos-without">
+          <div class="at-lev-pos-col-title">${ico('🐢')}Без плеча — депозит $1 000 на BCH</div>
+          <div class="at-lev-pos-stats">
+            <div class="at-lev-pos-row"><span>Маржа в сделке</span><b>$200</b></div>
+            <div class="at-lev-pos-row"><span>Размер позиции</span><b>$200</b></div>
+            <div class="at-lev-pos-row"><span>Плечо</span><b>1×</b></div>
+            <div class="at-lev-pos-row at-lev-pos-row-hl"><span>Ожидаемый PnL/мес</span><b>~$2.6</b></div>
+            <div class="at-lev-pos-row"><span>Худшая потеря (SL hit)</span><b>$8 (0.8%)</b></div>
+          </div>
+          <div class="at-lev-pos-conclusion">
+            На таком депозите плечо 1× даёт <b>0.3% прироста в месяц</b> — это меньше,
+            чем стоит подписка, и даже банковский вклад прибыльнее.
+          </div>
+        </div>
+        <div class="at-lev-pos-col at-lev-pos-with">
+          <div class="at-lev-pos-col-title">${ico('🚀')}С безопасным плечом 11× — тот же $1 000</div>
+          <div class="at-lev-pos-stats">
+            <div class="at-lev-pos-row"><span>Маржа в сделке</span><b>$200</b></div>
+            <div class="at-lev-pos-row"><span>Размер позиции</span><b>$2 200</b></div>
+            <div class="at-lev-pos-row"><span>Плечо</span><b>11×</b></div>
+            <div class="at-lev-pos-row at-lev-pos-row-hl"><span>Ожидаемый PnL/мес</span><b>~$29</b></div>
+            <div class="at-lev-pos-row"><span>Худшая потеря (SL hit)</span><b>$88 (8.8%)</b></div>
+          </div>
+          <div class="at-lev-pos-conclusion">
+            То же депозита, но <b>в 11 раз больше торгового объёма</b> → в 11 раз
+            больше прибыли. <b>Стоп-лосс срабатывает раньше ликвидации</b>: убыток
+            заранее известный, фиксированный.
+          </div>
+        </div>
+      </div>
+      <div class="at-lev-pos-callout">
+        ${ico('🎯')}<b>Главная мысль:</b> плечо — это <b>множитель доступного капитала</b>.
+        Без управления риском оно опасно. С нашим стоп-лоссом (формула <code>safe_leverage = floor(0.7 / (slPct + 0.02))</code>)
+        ликвидация структурно невозможна, а PnL растёт пропорционально плечу.
+        Это <b>не «играть в казино плечом 50×»</b> — это математически выверенный размер позиции.
+      </div>
+    </section>
+  `;
+}
+
+/**
  * Leverage demystification — отдельная секция для пользователей, которые
  * боятся плеча из-за прошлых неудачных опытов или травмирующего опыта
  * мейнстримных «гуру» которые говорят «плечо = смерть».
@@ -286,11 +337,11 @@ function renderSafety(): string {
 function renderLeverageEducation(): string {
   return `
     <section class="at-section at-leverage">
-      <h2 class="at-section-title">${ico('⚡')}Безопасное плечо без ликвидации</h2>
+      <h2 class="at-section-title">${ico('🛡')}Почему ликвидация исключена</h2>
       <p class="at-section-sub">
-        Многие блогеры говорят «плечо — это смерть». На самом деле плечо —
-        это <b>инструмент</b>. Опасно его использовать <b>без управления риском</b>.
-        У нас плечо контролируется автоматически, ликвидация исключена по построению.
+        Многие блогеры говорят «плечо — это смерть». На самом деле плечо опасно
+        не само по себе, а <b>без управления риском</b>. Сравним два подхода —
+        типичный и наш.
       </p>
       <div class="at-lev-grid">
         <div class="at-lev-bad">
@@ -354,15 +405,45 @@ function renderLeverageEducation(): string {
 
 function renderPricing(): string {
   const tiers = listTiers();
+  const starterPrice = tiers[0]?.monthlyPriceUsd ?? 12;
+
+  // Virtual Free card — not in TIER_CONFIGS. Conditional on Bybit referral signup.
+  const freeCard = `
+    <div class="at-tier-card at-tier-free">
+      <div class="at-tier-badge">${ico('🎁')}Бонус</div>
+      <div class="at-tier-name">🆓 Free</div>
+      <div class="at-tier-depo">$300+ депозит на Bybit</div>
+      <div class="at-tier-price">
+        <span class="at-tier-price-num">$0</span>
+        <span class="at-tier-price-period">/мес × ${BYBIT_REF_BONUS_DAYS} дней</span>
+      </div>
+      <ul class="at-tier-features">
+        <li>3 стратегии (как Starter)</li>
+        <li>До 2 одновременных позиций</li>
+        <li>Реальная торговля на вашем счёте</li>
+        <li><b>Условие</b>: новый аккаунт Bybit по <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">нашей ссылке</a></li>
+      </ul>
+      <div class="at-tier-pitch">
+        Полный Starter на ${BYBIT_REF_BONUS_DAYS} дней, без оплаты. После — переход на платный Starter $${starterPrice}/мес или отключение.
+      </div>
+    </div>
+  `;
+
   const cards = tiers
-    .map((t) => {
+    .map((t, i) => {
+      const isPopular = t.id === 'standard';
       const maxStr = t.maxBalanceUsdt === Number.POSITIVE_INFINITY ? '∞' : `$${t.maxBalanceUsdt.toLocaleString()}`;
       const sub = t.expectedMonthlyPnlRangeUsd;
+      const badge = isPopular ? `<div class="at-tier-badge at-tier-badge-popular">${ico('⭐')}Популярный</div>` : '';
       return `
-        <div class="at-tier-card">
+        <div class="at-tier-card ${isPopular ? 'at-tier-popular' : ''}" data-tier-index="${i + 1}">
+          ${badge}
           <div class="at-tier-name">${tierEmoji(t.id)} ${escapeHtml(t.name)}</div>
           <div class="at-tier-depo">Депозит $${t.minBalanceUsdt.toLocaleString()}–${maxStr}</div>
-          <div class="at-tier-price"><span class="at-tier-price-num">$${t.monthlyPriceUsd}</span><span class="at-tier-price-period">/мес</span></div>
+          <div class="at-tier-price">
+            <span class="at-tier-price-num">$${t.monthlyPriceUsd}</span>
+            <span class="at-tier-price-period">/мес</span>
+          </div>
           <ul class="at-tier-features">
             <li>${t.strategyIds.length} стратегий в портфеле</li>
             <li>~$${sub.low}–$${sub.high}/мес ожидаемая прибыль</li>
@@ -374,19 +455,28 @@ function renderPricing(): string {
       `;
     })
     .join('');
+
   return `
-    <section class="at-section at-pricing">
-      <h2 class="at-section-title">${ico('💳')}Тарифы</h2>
+    <section class="at-section at-pricing" id="pricing">
+      <h2 class="at-section-title">${ico('💳')}Тарифы и доходность</h2>
       <p class="at-pricing-intro">
-        Тариф назначается автоматически по балансу вашего Bybit-счёта.
-        Чем больше депозит — тем больше доступных стратегий и тем выше ожидаемая прибыль.
+        Тариф вы выбираете сами по размеру депозита, который готовы выделить под автотрейдинг.
+        Чем больше депозит — тем больше стратегий в работе и тем выше ожидаемая прибыль.
         Подписка покрывает не больше 18-20% потенциального месячного дохода.
+        <b>Прокрутите вправо</b>, чтобы увидеть все тарифы →
       </p>
-      <div class="at-tier-grid">
+      <div class="at-tier-carousel" role="region" aria-label="Тарифы">
+        ${freeCard}
         ${cards}
       </div>
+      <div class="at-tier-scroll-hint">
+        ${ico('👆')}Свайпните или прокрутите вбок чтобы листать тарифы
+      </div>
       <div class="at-pricing-cta">
-        <a href="/strategies?from=autotrading" class="at-btn-primary">${ico('🎁')}Начать ${TRIAL_DAYS} дней бесплатно</a>
+        <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Зарегистрироваться</a>
+        <div class="at-pricing-cta-sub">
+          После регистрации — выберете тариф, подключите Bybit, начнёте торговать.
+        </div>
       </div>
       <div class="at-price-disclaimer">
         ⚠ Цифры доходности рассчитаны по историческим данным бэктестов. <b>Прошлые результаты не гарантируют будущих</b>.
@@ -415,19 +505,27 @@ function renderFaq(): string {
     },
     {
       q: 'Как назначается тариф? Я могу выбрать сам?',
-      a: 'Тариф определяется автоматически по балансу вашего Bybit Derivatives кошелька. $300-799 = Starter (3 стратегии), $800-2499 = Standard (4), $2500-5999 = Plus (5), и так далее. Когда депозит растёт, мы предлагаем перейти на следующий тариф (с вашим подтверждением). Если выводите средства — автоматически переходим на меньший тариф через 72 часа.',
+      a: 'Тариф выбираете вы сами при подключении Bybit-аккаунта. Мы только проверяем, что ваш баланс достаточен для выбранного тарифа: $300+ для Starter, $800+ для Standard, $2 500+ для Plus и т.д. Если выбрали Plus, а на счёте $500 — попросим пополнить или выбрать тариф попроще. Если депозит вырастет — подскажем перейти на тариф выше с пересчётом подписки. Если депозит сильно упадёт — автоматически переключим на меньший тариф через 72 часа, открытые позиции не трогаются.',
+    },
+    {
+      q: `Как получить ${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно?`,
+      a: `Условие одно: зарегистрируйте новый аккаунт на Bybit по нашей ссылке (кнопка «Открыть Bybit» в блоке «Получите +${BYBIT_REF_BONUS_DAYS} дней» на этой странице). После регистрации создаёте API-ключ как обычно и подключаете его в нашем кабинете. Мы автоматически проверим что ваш Bybit-аккаунт зарегистрирован по нашему партнёрскому каналу, и активируем ${BYBIT_REF_BONUS_DAYS} дней автотрейдинга без оплаты. По истечении бонусного периода — стандартная подписка $${listTiers()[0]?.monthlyPriceUsd ?? 12}/мес за Starter или отключение в один клик.`,
     },
     {
       q: 'Сколько денег нужно для начала?',
-      a: 'Минимум $300 USDT на Bybit Derivatives кошельке. Ниже этой суммы автотрейдинг не запускается — это экономически невыгодно ни вам, ни нам (подписка съест значимую часть ожидаемой прибыли).',
-    },
-    {
-      q: `Как получить +${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно?`,
-      a: `Зарегистрируйтесь на Bybit по нашей ссылке — кнопка «Открыть Bybit» в жёлтой плашке наверху страницы. После регистрации откройте профиль на Bybit, скопируйте Bybit UID (8-значное число) и пришлите его оператору @dboykod в Telegram вместе со скриншотом регистрации. Мы продлим вашу подписку на ${BYBIT_REF_BONUS_DAYS} дней сверх стандартного 14-дневного триала.`,
+      a: 'Минимум $300 USDT на Bybit Derivatives кошельке. Ниже этой суммы автотрейдинг не запускается — это экономически невыгодно ни вам, ни нам (даже подписка съест значимую часть ожидаемой прибыли).',
     },
     {
       q: 'Что такое плечо и не опасно ли это?',
-      a: 'Плечо — это инструмент, который позволяет открыть позицию больше, чем у вас заморожено маржи. Опасно его использовать БЕЗ управления риском. У нас плечо подобрано автоматически под стоп-лосс каждой стратегии так, чтобы СНАЧАЛА срабатывал наш стоп (фиксированный убыток 1-3% депозита), а не ликвидация биржи. Ваш максимальный убыток на одной сделке известен заранее. Подробнее в секции «Безопасное плечо» выше.',
+      a: 'Плечо — это инструмент, который позволяет открыть позицию больше, чем у вас заморожено маржи. Опасно его использовать БЕЗ управления риском. У нас плечо подобрано автоматически под стоп-лосс каждой стратегии так, чтобы СНАЧАЛА срабатывал наш стоп (фиксированный убыток 1-3% депозита), а не ликвидация биржи. Ваш максимальный убыток на одной сделке известен заранее. Подробнее в секциях «Безопасное плечо» и «Почему ликвидация исключена» выше.',
+    },
+    {
+      q: 'Зачем тогда плечо если оно опасно?',
+      a: 'Без плеча торговать криптофьючерсами в режиме автотрейдинга экономически бессмысленно: на депозите $1 000 при размере позиции $200 ожидаемая прибыль ~$2.6/мес — меньше подписки. С плечом 11× (безопасно подобранным под наш SL) тот же депозит торгует объёмом $2 200, и ожидаемая прибыль становится $29/мес. Главное — стоп-лосс срабатывает раньше ликвидации, поэтому худший убыток в сделке известен заранее. Это математика, а не казино.',
+    },
+    {
+      q: 'Какие биржи поддерживаются? Будут ли другие?',
+      a: 'Сейчас только Bybit USDT-perp futures — выбрали потому что хорошая ликвидность, низкие комиссии (0.055% taker), и удобный API. На очереди: <b>BingX</b> (CEX, для рынков где Bybit недоступен по гео — Q3 2026), затем <b>Hyperliquid</b> (DEX-perp, для пользователей которые принципиально не хотят KYC и предпочитают on-chain — Q4 2026). Когда добавим — вы сможете в кабинете переключить «биржу для автотрейдинга» без перерегистрации.',
     },
     {
       q: 'Что если стратегия в минусе?',
@@ -447,7 +545,7 @@ function renderFaq(): string {
     },
     {
       q: 'Как происходит оплата?',
-      a: `Первые ${TRIAL_DAYS} дней бесплатно (триал). После окончания триала — связываемся с вами в Telegram для оплаты подписки. На старте сервиса оплата ручная через оператора. Никаких автосписаний — вы сами решаете, продлевать ли подписку.`,
+      a: `Если вы зарегистрировали Bybit по нашей ссылке — первые ${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно (определяется автоматически при подключении ключа). После окончания бонусного периода — связываемся с вами в Telegram для оплаты подписки. Если вы пришли со «своим» Bybit — подписка начинается с первого дня. Никаких автосписаний с карты, оплата ручная через оператора. Вы сами решаете, продлевать ли подписку.`,
     },
   ];
   const html = items
@@ -455,7 +553,7 @@ function renderFaq(): string {
       (it) => `
         <details class="at-faq-item">
           <summary>${escapeHtml(it.q)}</summary>
-          <div class="at-faq-answer">${escapeHtml(it.a)}</div>
+          <div class="at-faq-answer">${it.a}</div>
         </details>
       `,
     )
@@ -473,8 +571,9 @@ function renderFinalCta(): string {
     <section class="at-section at-cta-final">
       <h2 class="at-cta-title">Готовы запустить пассивный доход?</h2>
       <p class="at-cta-sub">
-        ${TRIAL_DAYS} дней бесплатного триала. Без привязки карты. Отмена в один клик.
+        Регистрация — 30 секунд. Без привязки карты. Отмена в один клик.
         Ваш капитал остаётся на Bybit под вашим контролем.
+        +${BYBIT_REF_BONUS_DAYS} дней бесплатно если зарегистрируетесь на Bybit по <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">нашей ссылке</a>.
       </p>
       <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">Зарегистрироваться</a>
       <p class="at-cta-login">
@@ -508,11 +607,11 @@ function styles(): string {
     font-size: 17px; line-height: 1.55; color: #9aa5b1; max-width: 680px;
     margin: 0 auto 28px; padding: 0 12px;
   }
-  .at-hero-cta { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .at-hero-cta { display: flex; flex-direction: column; align-items: center; gap: 12px; }
   .at-hero-pricing { font-size: 13.5px; color: #8590a0; }
   .at-hero-pricing b { color: #cfd6dd; }
   .at-hero-login {
-    font-size: 13px; color: #6b7480; margin-top: 4px;
+    font-size: 13px; color: #6b7480; margin-top: 8px;
   }
   .at-hero-login a {
     color: #4ad991; text-decoration: none; font-weight: 500;
@@ -593,7 +692,7 @@ function styles(): string {
 
   /* ----- How it works ----- */
   .at-how-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 18px;
   }
   .at-how-step {
@@ -610,6 +709,8 @@ function styles(): string {
     font-size: 16px; font-weight: 600; color: #e8edf2; margin-bottom: 8px;
   }
   .at-how-body { font-size: 13.5px; color: #9aa5b1; line-height: 1.55; }
+  .at-how-body a { color: #4ad991; text-decoration: none; }
+  .at-how-body a:hover { text-decoration: underline; }
 
   /* ----- Safety ----- */
   .at-safety-grid {
@@ -646,29 +747,73 @@ function styles(): string {
   }
   .at-strat-meta { font-size: 11.5px; color: #8590a0; }
 
-  /* ----- Pricing (TRACK E tier table) ----- */
+  /* ----- Pricing (TRACK E carousel) ----- */
   .at-pricing-intro {
     text-align: center; color: #cfd6dd; font-size: 14px; line-height: 1.6;
     max-width: 720px; margin: 0 auto 24px;
   }
-  .at-tier-grid {
-    display: grid; gap: 16px;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    margin-bottom: 28px;
+  .at-pricing-intro b { color: #4ad991; }
+  .at-tier-carousel {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(280px, 1fr);
+    gap: 16px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding: 8px 4px 16px;
+    margin: 0 -4px 12px;
+    scrollbar-color: #2a323d transparent;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+  .at-tier-carousel::-webkit-scrollbar { height: 8px; }
+  .at-tier-carousel::-webkit-scrollbar-track { background: transparent; }
+  .at-tier-carousel::-webkit-scrollbar-thumb { background: #2a323d; border-radius: 4px; }
+  @media (min-width: 1080px) {
+    .at-tier-carousel { grid-auto-columns: minmax(0, calc((100% - 32px) / 3)); }
+  }
+  .at-tier-scroll-hint {
+    text-align: center; font-size: 11.5px; color: #6b7480;
+    margin: 6px 0 18px; letter-spacing: 0.02em;
   }
   .at-tier-card {
     background: linear-gradient(180deg, #161c25 0%, #11161d 70%);
     border: 1px solid #1f2630; border-radius: 14px;
     padding: 20px 18px;
     display: flex; flex-direction: column;
+    scroll-snap-align: start;
+    position: relative;
+    min-width: 0;
   }
-  .at-tier-card:nth-child(3) { border-color: rgba(74, 217, 145, 0.45); }
+  .at-tier-card.at-tier-popular {
+    border-color: rgba(74, 217, 145, 0.55);
+    background: linear-gradient(180deg, rgba(74,217,145,0.06) 0%, #11161d 70%);
+  }
+  .at-tier-card.at-tier-free {
+    border-color: rgba(243, 210, 102, 0.55);
+    background: linear-gradient(180deg, rgba(243,210,102,0.05) 0%, #11161d 70%);
+  }
+  .at-tier-badge {
+    position: absolute; top: -10px; right: 14px;
+    background: rgba(243, 210, 102, 0.18);
+    color: #f3d266;
+    padding: 3px 10px; border-radius: 999px;
+    font-size: 10.5px; font-weight: 600;
+    border: 1px solid rgba(243, 210, 102, 0.4);
+    letter-spacing: 0.04em;
+  }
+  .at-tier-badge-popular {
+    background: rgba(74, 217, 145, 0.18);
+    color: #4ad991;
+    border-color: rgba(74, 217, 145, 0.45);
+  }
   .at-tier-name {
     font-size: 16px; font-weight: 600; color: #e8edf2; margin-bottom: 4px;
   }
   .at-tier-depo { font-size: 11.5px; color: #8590a0; margin-bottom: 12px; }
   .at-tier-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 14px; }
   .at-tier-price-num { font-size: 28px; font-weight: 700; color: #4ad991; }
+  .at-tier-free .at-tier-price-num { color: #f3d266; }
   .at-tier-price-period { font-size: 12px; color: #8590a0; }
   .at-tier-features {
     list-style: none; padding: 0; margin: 0 0 12px 0;
@@ -684,8 +829,13 @@ function styles(): string {
     content: '✓'; color: #4ad991;
     position: absolute; left: 0;
   }
+  .at-tier-features a {
+    color: #4ad991; text-decoration: none;
+  }
+  .at-tier-features a:hover { text-decoration: underline; }
   .at-tier-pitch { font-size: 11.5px; color: #8590a0; line-height: 1.5; margin-top: auto; padding-top: 10px; border-top: 1px solid #1a1f27; }
-  .at-pricing-cta { text-align: center; margin-bottom: 18px; }
+  .at-pricing-cta { text-align: center; margin: 28px 0 18px; }
+  .at-pricing-cta-sub { font-size: 12.5px; color: #8590a0; margin-top: 10px; }
   .at-price-disclaimer {
     background: rgba(255, 188, 70, 0.06); border: 1px solid rgba(255, 188, 70, 0.30);
     border-radius: 8px; padding: 12px 16px;
@@ -720,7 +870,55 @@ function styles(): string {
     font-size: 12px; color: #6b7480; margin-top: 12px; line-height: 1.5;
   }
 
-  /* ----- Leverage Education ----- */
+  /* ----- Leverage Positive (new — emphasize PnL upside) ----- */
+  .at-lev-pos { margin: 60px auto; }
+  .at-lev-pos-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+  }
+  .at-lev-pos-col {
+    padding: 22px 24px; border-radius: 14px;
+    background: #11161d;
+    border: 1px solid #1f2630;
+  }
+  .at-lev-pos-col.at-lev-pos-without { opacity: 0.85; }
+  .at-lev-pos-col.at-lev-pos-with {
+    border-color: rgba(74, 217, 145, 0.45);
+    background: linear-gradient(180deg, rgba(74,217,145,0.05) 0%, #11161d 70%);
+  }
+  .at-lev-pos-col-title {
+    font-size: 15px; font-weight: 600; color: #e8edf2; margin-bottom: 14px;
+  }
+  .at-lev-pos-with .at-lev-pos-col-title { color: #4ad991; }
+  .at-lev-pos-stats { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+  .at-lev-pos-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 6px 0; font-size: 13px; color: #9aa5b1;
+    border-bottom: 1px dashed #1a1f27;
+  }
+  .at-lev-pos-row:last-child { border-bottom: none; }
+  .at-lev-pos-row b { color: #e8edf2; font-size: 13.5px; font-weight: 600; }
+  .at-lev-pos-row-hl b { color: #4ad991; font-size: 16px; }
+  .at-lev-pos-conclusion {
+    font-size: 12.5px; color: #cfd6dd; line-height: 1.6;
+    padding-top: 12px; border-top: 1px solid #1a1f27;
+  }
+  .at-lev-pos-callout {
+    margin-top: 24px;
+    padding: 18px 22px;
+    background: rgba(74, 217, 145, 0.06);
+    border: 1px solid rgba(74, 217, 145, 0.30);
+    border-radius: 12px;
+    font-size: 13.5px; color: #cfd6dd; line-height: 1.6;
+  }
+  .at-lev-pos-callout code {
+    font-family: ui-monospace, Menlo, monospace; font-size: 12.5px;
+    background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;
+  }
+  @media (max-width: 720px) {
+    .at-lev-pos-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ----- Leverage Education (original red/green block) ----- */
   .at-leverage { margin: 60px auto; }
   .at-lev-grid {
     display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
@@ -827,6 +1025,7 @@ function styles(): string {
     padding-top: 10px; margin-top: 10px; border-top: 1px solid #1a1f27;
     font-size: 13.5px; color: #9aa5b1; line-height: 1.6;
   }
+  .at-faq-answer b { color: #e8edf2; }
 
   /* ----- Final CTA ----- */
   .at-cta-final { text-align: center; margin: 80px 0 40px; }
@@ -834,8 +1033,10 @@ function styles(): string {
     font-size: 30px; font-weight: 700; color: #e8edf2; margin: 0 0 12px 0;
   }
   .at-cta-sub {
-    font-size: 14.5px; color: #9aa5b1; margin: 0 auto 28px; max-width: 480px;
+    font-size: 14.5px; color: #9aa5b1; margin: 0 auto 28px; max-width: 520px; line-height: 1.55;
   }
+  .at-cta-sub a { color: #4ad991; text-decoration: none; }
+  .at-cta-sub a:hover { text-decoration: underline; }
   .at-cta-login {
     font-size: 13.5px; color: #8590a0; margin-top: 16px;
   }

@@ -153,8 +153,8 @@ const CONTENT: Record<Lang, Content> = {
           title: 'Хотите автоматически? Подключите автотрейдинг',
           body:
             'Когда убедились что результаты реальные — подключите свой Bybit-аккаунт через API-ключ ' +
-            '(без права на вывод). Выберите стратегии, размер позиции и плечо — система начнёт торговать ' +
-            'за вас автоматически. 14 дней бесплатного триала, потом $50/мес.',
+            '(без права на вывод). Выберите тариф, переведите USDT на Derivatives — система начнёт торговать ' +
+            'за вас автоматически. Тарифы от $12/мес, +30 дней бесплатно при регистрации Bybit по нашей ссылке.',
         },
       ],
     },
@@ -210,9 +210,8 @@ const CONTENT: Record<Lang, Content> = {
             '- Telegram-канал [@luxalgosignal](https://t.me/luxalgosignal) с сигналами в реальном времени\n' +
             '- Личный кабинет, бэктесты, история сделок shadow-аккаунта\n\n' +
             '**Платно — только автотрейдинг:**\n' +
-            '- $50/мес за автоматическое исполнение сигналов на вашем счёте Bybit\n' +
-            '- 14 дней бесплатного триала чтобы попробовать без обязательств\n' +
-            '- 🎁 **+30 дней бонусом** если регистрируетесь на Bybit по нашей [реферальной ссылке](https://www.bybit.com/invite?ref=MY6W8R) — итого 44 дня бесплатно\n\n' +
+            '- Тарифы от **$12/мес** (Starter, депозит $300+) до **$580/мес** (VIP, депозит $15 000+) — выбираете сами по размеру депозита\n' +
+            '- 🎁 **30 дней бесплатно** если регистрируетесь на Bybit по [нашей ссылке](https://www.bybit.com/invite?ref=MY6W8R) — полный Starter без оплаты\n\n' +
             'Идея простая: смотрите как мы торгуем сколько хотите — а если результат нравится и не хочется каждый раз руками открывать сделку, подключите автотрейдинг. Деньги остаются у вас, мы только исполняем сделки через API.',
         },
         {
@@ -221,7 +220,7 @@ const CONTENT: Record<Lang, Content> = {
             'Очень коротко — система делает три вещи:\n\n' +
             '**1.** Мы собираем торговые стратегии в специальном инструменте от LuxAlgo (см. вопрос ниже), отбираем те что показывают хорошие результаты на истории, и публикуем их на сайте.\n\n' +
             '**2.** Каждая стратегия торгует круглосуточно на нашем «теневом» счёте — это и есть публичный трек-рекорд. Когда стратегия открывает или закрывает сделку, информация о ней появляется и на сайте, и в [Telegram-канале](https://t.me/luxalgosignal). Это бесплатно и видно всем.\n\n' +
-            '**3.** Если вы хотите чтобы те же самые сделки выполнялись на вашем счёте — подключаете свой Bybit-аккаунт через API-ключ. Наша система делает на вашем счёте те же сделки что и на нашем — автоматически, без вашего участия. Это уже платно: $50/мес (+30 дней бонусом если регистрируетесь на Bybit через нас).\n\n' +
+            '**3.** Если вы хотите чтобы те же самые сделки выполнялись на вашем счёте — подключаете свой Bybit-аккаунт через API-ключ. Наша система делает на вашем счёте те же сделки что и на нашем — автоматически, без вашего участия. Это уже платно: тарифы от $12 до $580/мес по размеру депозита. **30 дней бесплатно** если регистрируетесь на Bybit через нас.\n\n' +
             'Никакой магии: всё что вы видите в Telegram-канале — это именно то, что система сделает на вашем счёте. Деньги остаются у вас, мы не имеем права на вывод.',
         },
         {
@@ -254,7 +253,7 @@ const CONTENT: Record<Lang, Content> = {
             '**1. Открытая статистика, не маркетинговые скриншоты.** На странице каждой стратегии — все 100+ исторических сделок с датами, ценами входа/выхода и PnL. Можно ткнуть в любую конкретную сделку и проверить — пересчитываем заново на ваших данных, цифры сойдутся. Большинство Telegram-каналов показывают только успешные сделки скриншотами.\n\n' +
             '**2. Реальное исполнение, не «вот сигнал — торгуй сам».** У нас работает робот, который реально открывает и закрывает позиции на нашем shadow-счёте 24/7. То что вы видите в канале — это то что *действительно* произошло, а не то что мы *планировали* сделать.\n\n' +
             '**3. Автотрейдинг на ВАШЕМ счёте, не «зачисляйте деньги нам».** Когда вам понравится результат — подключаете свой Bybit через API-ключ без права на вывод. Деньги остаются на вашей бирже, мы только посылаем туда ордера. Ни одного канала-сигнальщика которым мы видели нет такой связки.\n\n' +
-            'И главное: $50/мес платится **после** того как вы посмотрели результаты в течение 14 дней триала — мы не берём деньги авансом.',
+            'И главное: подписка платится **после** того как вы посмотрели результаты — никаких автосписаний, никаких авансов. Регистрация на Bybit по нашей ссылке открывает 30 дней автотрейдинга без оплаты.',
         },
         {
           q: 'Откуда берутся стратегии? (технические детали)',
@@ -374,7 +373,7 @@ const CONTENT: Record<Lang, Content> = {
           body:
             'Once you\'re convinced the results are real — connect your Bybit account via an API key ' +
             '(no withdraw rights). Pick strategies, position size and leverage — the system starts trading ' +
-            'for you automatically. 14-day free trial, then $50/mo.',
+            'for you automatically. Tiers from $12/mo, +30 days free if you sign up on Bybit via our link.',
         },
       ],
     },
@@ -430,9 +429,8 @@ const CONTENT: Record<Lang, Content> = {
             '- [@luxalgosignal](https://t.me/luxalgosignal) Telegram channel with real-time signals\n' +
             '- Account dashboard, backtests, shadow-account trade history\n\n' +
             '**Paid — only auto-trading:**\n' +
-            '- $50/mo for automatic signal execution on your Bybit account\n' +
-            '- 14-day free trial to try without commitment\n' +
-            '- 🎁 **+30 bonus days** if you register on Bybit via our [referral link](https://www.bybit.com/invite?ref=MY6W8R) — 44 days free total\n\n' +
+            '- Tiers from **$12/mo** (Starter, $300+ deposit) to **$580/mo** (VIP, $15,000+ deposit) — pick by your deposit size\n' +
+            '- 🎁 **30 days free** when you sign up on Bybit via our [referral link](https://www.bybit.com/invite?ref=MY6W8R) — full Starter without payment\n\n' +
             'Simple idea: watch how we trade for as long as you want — and if you like the results and don\'t want to open every trade manually, enable auto-trading. Your funds stay with you; we only execute trades via the API.',
         },
         {
@@ -441,7 +439,7 @@ const CONTENT: Record<Lang, Content> = {
             'The system does three things:\n\n' +
             '**1.** We build trading strategies in a LuxAlgo tool (see the next FAQ), pick the ones with solid historical results, and publish them on the site.\n\n' +
             '**2.** Each strategy trades 24/7 on our shadow account — that\'s the public track record. Every open/close is mirrored to the site AND to the [Telegram channel](https://t.me/luxalgosignal). Free and visible to anyone.\n\n' +
-            '**3.** If you want those same trades on your account — connect your Bybit via an API key. Our system places identical orders on your account automatically. This is the paid part: $50/mo (+30 bonus days if you sign up Bybit via our referral).\n\n' +
+            '**3.** If you want those same trades on your account — connect your Bybit via an API key. Our system places identical orders on your account automatically. This is the paid part: tiers from $12 to $580/mo by deposit size. **30 days free** if you sign up Bybit via our referral.\n\n' +
             'No magic: what you see in the channel is exactly what the system does on your account. Your funds stay with you; we have no withdraw rights.',
         },
         {
@@ -474,7 +472,7 @@ const CONTENT: Record<Lang, Content> = {
             '**1. Open stats, not marketing screenshots.** Every strategy page shows all 100+ historical trades with dates, entry/exit prices, PnL. Pick any trade and verify — recompute on your data and the numbers match. Most signal channels only post winning trades as screenshots.\n\n' +
             '**2. Real execution, not "here\'s the signal, trade it yourself".** A robot runs 24/7 actually opening and closing positions on our shadow account. What you see in the channel is what *actually happened*, not what we *intended* to do.\n\n' +
             '**3. Auto-trading on YOUR account, not "deposit funds with us".** When you\'re happy with the results, connect your Bybit via an API key with no withdraw rights. Funds stay on your exchange; we just send orders. No signal channel we\'ve seen offers this kind of integration.\n\n' +
-            'And key: $50/mo is paid **after** you\'ve watched results for 14 days of trial — no upfront capture.',
+            'And key: the subscription is paid **after** you\'ve seen results — no upfront capture, no card-on-file. Signing up Bybit via our link unlocks 30 days of auto-trading at no cost.',
         },
         {
           q: 'Where do the strategies come from? (technical details)',
@@ -1287,8 +1285,8 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
 
   const cta3Title = isRu ? '3. Подключите автотрейдинг' : '3. Enable auto-trading';
   const cta3Body = isRu
-    ? 'Когда убедились что нравится — подключите свой Bybit через API-ключ и пусть стратегии торгуют за вас. 14 дней бесплатно, потом $50/мес.'
-    : 'Once you like what you see — connect your Bybit via API key and let strategies trade for you. 14 days free, then $50/mo.';
+    ? 'Когда убедились что нравится — подключите свой Bybit через API-ключ и пусть стратегии торгуют за вас. Тарифы от $12/мес, +30 дней бесплатно при регистрации Bybit по нашей ссылке.'
+    : 'Once you like what you see — connect your Bybit via API key and let strategies trade for you. Tiers from $12/mo, +30 days free if you sign up Bybit via our link.';
   const cta3Btn = isRu ? 'Попробовать автотрейдинг →' : 'Try auto-trading →';
 
   const ctaHtml = `

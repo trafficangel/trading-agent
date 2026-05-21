@@ -1829,8 +1829,8 @@ export function pageShell(
     : { strategies: 'Стратегии', autotrading: 'Автотрейдинг', channel: 'Канал', support: 'Поддержка', menu: 'Меню', close: 'Закрыть' };
 
   const navLinksHtml = `
-      <a href="/strategies">${labels.strategies}</a>
       <a href="/autotrading">${labels.autotrading}</a>
+      <a href="/strategies">${labels.strategies}</a>
       <a href="https://t.me/luxalgosignal" target="_blank" rel="noopener">${labels.channel}</a>
       <a href="https://t.me/dboykod" target="_blank" rel="noopener">${labels.support}</a>
   `;

@@ -31,7 +31,14 @@ import { listUserStrategies } from '../db/repos/user-strategies.js';
 import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
 import { closeAllUserPositions } from '../strategies/user-fanout.js';
 import { assignTier } from './tier-assignment.js';
-import { matchTier, MIN_AUTOTRADING_DEPOSIT_USDT } from '../strategies/tier-config.js';
+import {
+  matchTier,
+  MIN_AUTOTRADING_DEPOSIT_USDT,
+  listTiers,
+  getTier,
+  type TierId,
+} from '../strategies/tier-config.js';
+import { pageShell } from '../strategies/landing.js';
 // TRACK E note: gatherLotInfo helper (for instruments-info lookup in
 // the old manual form) removed — read-only tier view no longer needs it.
 import { renderDashboard } from './dashboard.js';
@@ -252,6 +259,99 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     reply.code(303).header('location', '/account').send();
   });
 
+  // -------- /account/subscription/select-tier (TRACK E Phase D) --------
+  // User picks any tier they can afford. Unlike /upgrade which only
+  // accepts the matchTier(balance) target, this endpoint accepts any
+  // tier as long as balance ≥ tier.minBalanceUsdt. Downshifts are also
+  // allowed (user choosing more conservative tier than balance permits).
+  app.get('/account/subscription/select-tier', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) { reply.redirect('/strategies'); return; }
+    const sub = findSubscription(user.userId);
+    if (sub?.plan === 'vip') { reply.redirect('/account'); return; }
+    const key = findActiveKey(user.userId);
+    const balance = key?.last_balance_usdt ?? null;
+    const matched = balance != null ? matchTier(balance) : null;
+    const currentTier = sub?.tier_id as TierId | undefined;
+    const flash = (req.query as { error?: string; ok?: string } | undefined);
+    const csrf = issueCsrfToken(req, reply);
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('cache-control', 'private, no-store');
+    return reply.send(renderTierPicker({
+      balance,
+      matched,
+      currentTier,
+      csrf,
+      errorMsg: flash?.error ?? null,
+      okMsg: flash?.ok ?? null,
+    }));
+  });
+
+  app.post('/account/subscription/select-tier', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) { reply.redirect('/strategies'); return; }
+    if (!requireCsrf(req, reply)) return;
+    const targetTier = (req.body as { targetTier?: string })?.targetTier;
+    const validTiers: TierId[] = ['starter', 'standard', 'plus', 'pro', 'vip'];
+    if (!targetTier || !validTiers.includes(targetTier as TierId)) {
+      reply.code(400).send('bad target tier');
+      return;
+    }
+    const sub = findSubscription(user.userId);
+    if (sub?.plan === 'vip') {
+      reply.code(303).header('location', '/account').send();
+      return;
+    }
+    const key = findActiveKey(user.userId);
+    const balance = key?.last_balance_usdt;
+    if (balance == null) {
+      reply.code(303)
+        .header('location', '/account/subscription/select-tier?error=' + encodeURIComponent('Сначала подключите Bybit-ключ — нам нужно увидеть баланс'))
+        .send();
+      return;
+    }
+    const tier = getTier(targetTier as TierId);
+    if (balance < tier.minBalanceUsdt) {
+      const shortfall = (tier.minBalanceUsdt - balance).toFixed(0);
+      const matched = matchTier(balance);
+      const suggestion = matched
+        ? ` Сейчас вам доступен ${getTier(matched).name} ($${getTier(matched).minBalanceUsdt}+).`
+        : '';
+      reply.code(303)
+        .header('location', '/account/subscription/select-tier?error=' +
+          encodeURIComponent(
+            `Для тарифа ${tier.name} нужен баланс $${tier.minBalanceUsdt}+. ` +
+            `На вашем счёте $${balance.toFixed(0)} — не хватает $${shortfall}.${suggestion} ` +
+            `Пополните Bybit-кошелёк или выберите тариф попроще.`,
+          ))
+        .send();
+      return;
+    }
+    if (targetTier === 'vip') {
+      // VIP requires manual operator setup (success-fee or custom overrides) —
+      // refuse self-service.
+      reply.code(303)
+        .header('location', '/account/subscription/select-tier?error=' +
+          encodeURIComponent('Тариф VIP активируется оператором вручную — напишите @dboykod в Telegram.'))
+        .send();
+      return;
+    }
+    try {
+      await assignTier(user.userId, targetTier as Exclude<TierId, 'vip'>, {
+        reason: 'manual_choice',
+        balanceUsdt: balance,
+      });
+    } catch (err) {
+      logger.error({ err, userId: user.userId, targetTier }, 'select-tier assignTier failed');
+      reply.code(303)
+        .header('location', '/account/subscription/select-tier?error=' +
+          encodeURIComponent('Не удалось применить тариф. Попробуйте позже или напишите оператору.'))
+        .send();
+      return;
+    }
+    reply.code(303).header('location', '/account?tier-changed=' + targetTier).send();
+  });
+
   // Dismiss the upgrade promo. Just clears the pending transition state —
   // balance-monitor will set it again next tick if balance is still above.
   app.post('/account/subscription/dismiss-upgrade', async (req, reply) => {
@@ -371,33 +471,37 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         message: 'Не удалось сохранить ключ. Попробуйте позже.',
       });
     }
-    // TRACK E — assign tier based on balance. VIP users (operator + Eldar)
-    // are handled separately and don't go through auto-assignment.
+    // TRACK E Phase D — user chooses tier explicitly. We no longer auto-assign
+    // based on balance: we just verify the key, store the balance, and direct
+    // the user to /account/subscription/select-tier where they pick a tier
+    // they can afford. VIP users (operator + Eldar) keep their override.
     const sub = findSubscription(user.userId);
-    if (sub?.plan !== 'vip') {
-      const tierId = matchTier(verifyRes.totalUsdt);
-      if (tierId !== null) {
-        try {
-          await assignTier(user.userId, tierId, {
-            reason: sub?.tier_id ? 'rebalance_on_api_key_verify' : 'initial_assign',
-            balanceUsdt: verifyRes.totalUsdt,
-          });
-        } catch (err) {
-          logger.error({ err, userId: user.userId, tierId }, 'assignTier after verify failed');
-        }
-      } else {
-        return renderApiKeyWithFlash(req, reply, user, {
-          ok: true,
-          message:
-            `Ключ сохранён. Баланс: ${verifyRes.totalUsdt.toFixed(2)} USDT — ниже минимума автотрейдинга ` +
-            `($${MIN_AUTOTRADING_DEPOSIT_USDT}). Пополните счёт и нажмите «Проверить связь» — мы автоматически ` +
-            `подберём тариф и включим стратегии.`,
-        });
-      }
+    if (sub?.plan === 'vip') {
+      // VIP — no tier picker, they keep override settings.
+      return renderApiKeyWithFlash(req, reply, user, {
+        ok: true,
+        message: `Ключ сохранён. Баланс на счёте: ${verifyRes.totalUsdt.toFixed(2)} USDT.`,
+      });
+    }
+    if (verifyRes.totalUsdt < MIN_AUTOTRADING_DEPOSIT_USDT) {
+      return renderApiKeyWithFlash(req, reply, user, {
+        ok: true,
+        message:
+          `Ключ сохранён. Баланс: ${verifyRes.totalUsdt.toFixed(2)} USDT — ниже минимума автотрейдинга ` +
+          `($${MIN_AUTOTRADING_DEPOSIT_USDT}). Пополните счёт и нажмите «Проверить связь», затем выберите тариф.`,
+      });
+    }
+    // Balance sufficient. If no tier yet → send user to picker. If tier
+    // already selected — keep it (manual choice persists), just refresh balance.
+    if (!sub?.tier_id) {
+      reply.code(303).header('location', '/account/subscription/select-tier?from=api-key').send();
+      return;
     }
     return renderApiKeyWithFlash(req, reply, user, {
       ok: true,
-      message: `Ключ сохранён. Баланс на счёте: ${verifyRes.totalUsdt.toFixed(2)} USDT.`,
+      message:
+        `Ключ сохранён. Баланс: ${verifyRes.totalUsdt.toFixed(2)} USDT. ` +
+        `Если хотите сменить тариф — откройте «Сменить тариф» в кабинете.`,
     });
   });
 
@@ -594,4 +698,161 @@ function renderApiKeyWithFlash(
       csrfToken: csrf,
     }),
   );
+}
+
+/**
+ * Tier-picker UI (TRACK E Phase D). Replaces the previous «balance → auto-assign»
+ * flow with explicit user choice. Shows all 5 tiers as cards; the tier that
+ * matches the user's current Bybit balance is highlighted as «recommended».
+ * Tiers requiring more balance than the user has are shown but disabled with
+ * a «not enough balance» hint. VIP is read-only (operator activates manually).
+ */
+function renderTierPicker(p: {
+  balance: number | null;
+  matched: import('../strategies/tier-config.js').TierId | null;
+  currentTier: import('../strategies/tier-config.js').TierId | undefined;
+  csrf: string;
+  errorMsg: string | null;
+  okMsg: string | null;
+}): string {
+  const tiers = listTiers();
+  const balanceStr = p.balance != null ? `$${p.balance.toFixed(0)} USDT` : '—';
+  const errBlock = p.errorMsg
+    ? `<div class="tp-flash tp-flash-err">⚠ ${escapeHtmlMin(p.errorMsg)}</div>`
+    : '';
+  const okBlock = p.okMsg
+    ? `<div class="tp-flash tp-flash-ok">✓ ${escapeHtmlMin(p.okMsg)}</div>`
+    : '';
+
+  const cards = tiers.map((t) => {
+    const isMatched = p.matched === t.id;
+    const isCurrent = p.currentTier === t.id;
+    const canAfford = p.balance != null && p.balance >= t.minBalanceUsdt;
+    const isVipLocked = t.id === 'vip';
+    const subRange = t.expectedMonthlyPnlRangeUsd;
+    const maxStr = t.maxBalanceUsdt === Number.POSITIVE_INFINITY
+      ? '∞'
+      : `$${t.maxBalanceUsdt.toLocaleString()}`;
+
+    const badges: string[] = [];
+    if (isCurrent) badges.push('<span class="tp-badge tp-badge-cur">Текущий</span>');
+    if (isMatched && !isCurrent) badges.push('<span class="tp-badge tp-badge-rec">Рекомендуется</span>');
+
+    let actionBtn = '';
+    if (isCurrent) {
+      actionBtn = '<button type="button" class="tp-btn tp-btn-disabled" disabled>Уже выбран</button>';
+    } else if (isVipLocked) {
+      actionBtn = '<a href="https://t.me/dboykod" class="tp-btn tp-btn-vip" target="_blank" rel="noopener">Написать оператору</a>';
+    } else if (!canAfford) {
+      const need = (t.minBalanceUsdt - (p.balance ?? 0)).toFixed(0);
+      actionBtn = `<button type="button" class="tp-btn tp-btn-disabled" disabled title="Нужно +$${need} на Bybit">Не хватает $${need}</button>`;
+    } else {
+      actionBtn = `
+        <form method="POST" action="/account/subscription/select-tier" style="display:inline">
+          <input type="hidden" name="csrf" value="${p.csrf}"/>
+          <input type="hidden" name="targetTier" value="${t.id}"/>
+          <button type="submit" class="tp-btn tp-btn-go">Выбрать ${escapeHtmlMin(t.name)} →</button>
+        </form>
+      `;
+    }
+
+    return `
+      <div class="tp-card ${isCurrent ? 'tp-card-cur' : ''} ${isMatched && !isCurrent ? 'tp-card-rec' : ''} ${!canAfford ? 'tp-card-locked' : ''}">
+        <div class="tp-card-badges">${badges.join('')}</div>
+        <div class="tp-card-name">${escapeHtmlMin(t.name)}</div>
+        <div class="tp-card-depo">Депозит $${t.minBalanceUsdt.toLocaleString()}–${maxStr}</div>
+        <div class="tp-card-price">
+          <span class="tp-card-price-num">$${t.monthlyPriceUsd}</span>
+          <span class="tp-card-price-period">/мес</span>
+        </div>
+        <ul class="tp-card-features">
+          <li>${t.strategyIds.length} стратегий</li>
+          <li>~$${subRange.low}–$${subRange.high}/мес</li>
+          <li>Max DD ≤${t.expectedMaxDdPct}%</li>
+          <li>До ${t.maxConcurrentPositions} позиций</li>
+        </ul>
+        <div class="tp-card-action">${actionBtn}</div>
+      </div>
+    `;
+  }).join('');
+
+  const body = `
+    <style>
+      .tp-wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 64px; }
+      .tp-back { font-size: 13px; color: #8590a0; margin-bottom: 18px; }
+      .tp-back a { color: #4ad991; text-decoration: none; }
+      .tp-back a:hover { text-decoration: underline; }
+      .tp-h1 { font-size: 26px; font-weight: 700; color: #e8edf2; margin: 0 0 8px; }
+      .tp-sub { font-size: 14px; color: #9aa5b1; line-height: 1.6; margin: 0 0 18px; max-width: 720px; }
+      .tp-balance { display: inline-flex; gap: 16px; align-items: baseline; padding: 14px 18px;
+        background: #11161d; border: 1px solid #1f2630; border-radius: 12px; margin-bottom: 22px; }
+      .tp-balance-label { font-size: 12px; color: #6b7480; text-transform: uppercase; letter-spacing: 0.05em; }
+      .tp-balance-val { font-size: 18px; color: #4ad991; font-weight: 600; }
+      .tp-flash { padding: 12px 16px; border-radius: 10px; margin-bottom: 18px; font-size: 13.5px; line-height: 1.55; }
+      .tp-flash-err { background: rgba(255,99,99,0.08); border: 1px solid rgba(255,99,99,0.35); color: #ff8b8b; }
+      .tp-flash-ok { background: rgba(74,217,145,0.08); border: 1px solid rgba(74,217,145,0.35); color: #4ad991; }
+      .tp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+      .tp-card { background: #11161d; border: 1px solid #1f2630; border-radius: 14px; padding: 18px;
+        display: flex; flex-direction: column; position: relative; }
+      .tp-card-cur { border-color: rgba(74,217,145,0.55); background: linear-gradient(180deg, rgba(74,217,145,0.06) 0%, #11161d 70%); }
+      .tp-card-rec { border-color: rgba(243,210,102,0.45); }
+      .tp-card-locked { opacity: 0.6; }
+      .tp-card-badges { min-height: 22px; margin-bottom: 6px; }
+      .tp-badge { display: inline-block; padding: 3px 9px; border-radius: 999px;
+        font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; margin-right: 4px; }
+      .tp-badge-cur { background: rgba(74,217,145,0.18); color: #4ad991; border: 1px solid rgba(74,217,145,0.4); }
+      .tp-badge-rec { background: rgba(243,210,102,0.18); color: #f3d266; border: 1px solid rgba(243,210,102,0.4); }
+      .tp-card-name { font-size: 16px; font-weight: 600; color: #e8edf2; margin-bottom: 4px; }
+      .tp-card-depo { font-size: 11.5px; color: #8590a0; margin-bottom: 10px; }
+      .tp-card-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 12px; }
+      .tp-card-price-num { font-size: 24px; font-weight: 700; color: #4ad991; }
+      .tp-card-price-period { font-size: 12px; color: #8590a0; }
+      .tp-card-features { list-style: none; padding: 0; margin: 0 0 14px; flex: 1;
+        font-size: 12px; color: #cfd6dd; line-height: 1.6; }
+      .tp-card-features li { padding: 2px 0; padding-left: 12px; position: relative; }
+      .tp-card-features li::before { content: '✓'; color: #4ad991; position: absolute; left: 0; }
+      .tp-card-action { margin-top: auto; }
+      .tp-btn { display: block; width: 100%; box-sizing: border-box; padding: 10px 12px;
+        border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none;
+        text-decoration: none; text-align: center; }
+      .tp-btn-go { background: #4ad991; color: #0b0e13; }
+      .tp-btn-go:hover { background: #5ce0a0; }
+      .tp-btn-disabled { background: #1a1f27; color: #6b7480; cursor: not-allowed; }
+      .tp-btn-vip { background: rgba(243,210,102,0.18); color: #f3d266; border: 1px solid rgba(243,210,102,0.4); }
+      .tp-btn-vip:hover { background: rgba(243,210,102,0.3); }
+      .tp-note { font-size: 12.5px; color: #6b7480; line-height: 1.6; margin-top: 22px;
+        background: #11161d; border: 1px solid #1f2630; padding: 14px 18px; border-radius: 10px; }
+      .tp-note b { color: #cfd6dd; }
+    </style>
+    <div class="tp-wrap">
+      <div class="tp-back"><a href="/account">← В кабинет</a></div>
+      <h1 class="tp-h1">Выбор тарифа</h1>
+      <p class="tp-sub">
+        Тариф определяет какие стратегии торгуют на вашем счёте и каким объёмом.
+        Выберите тот, что подходит под ваш депозит на Bybit. Можно сменить в любой момент.
+      </p>
+      <div class="tp-balance">
+        <span class="tp-balance-label">Баланс на Bybit</span>
+        <span class="tp-balance-val">${balanceStr}</span>
+      </div>
+      ${errBlock}
+      ${okBlock}
+      <div class="tp-grid">${cards}</div>
+      <div class="tp-note">
+        <b>Как это работает:</b> мы только проверяем что вашего баланса хватит на выбранный тариф.
+        Депозит остаётся на вашем Bybit-аккаунте — мы не имеем права на вывод. Если хотите перейти
+        на более крупный тариф — пополните счёт, нажмите «Проверить связь» в <a href="/account/api-key">кабинете API-ключа</a>,
+        затем возвращайтесь сюда и выберите. Чтобы понизить тариф — выбирайте меньший прямо сейчас:
+        открытые позиции отторгуются как есть, новые сделки пойдут по новому тарифу.
+      </div>
+    </div>
+  `;
+  return pageShell('Выбор тарифа · Robot Claude', body, { lang: 'ru', robots: 'noindex' });
+}
+
+/** Tiny HTML-escape — keeps the dependency surface of routes.ts minimal. */
+function escapeHtmlMin(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[c] ?? c);
 }
