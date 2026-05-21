@@ -552,16 +552,27 @@ function renderOnboardingChecklist(args: {
     .join('');
 
   const doneCount = steps.filter((s) => s.done).length;
+  const pct = Math.round((doneCount / steps.length) * 100);
+  // Segmented progress bar — one segment per onboarding step, individually
+  // filled when the corresponding step is done. Gives a visual map of the
+  // funnel state instead of a vague half-filled bar.
+  const segments = steps
+    .map((s, i) => {
+      const isCurrent = !s.done && steps.findIndex((x) => !x.done) === i;
+      const cls = s.done ? 'onboarding-seg-done' : isCurrent ? 'onboarding-seg-current' : 'onboarding-seg-pending';
+      return `<div class="onboarding-seg ${cls}" title="Шаг ${s.num}: ${escapeHtml(s.title)}"></div>`;
+    })
+    .join('');
 
   return `
     <div class="onboarding-checklist">
       <div class="onboarding-header">
         <div class="onboarding-h-left">
           <div class="onboarding-h-title">${ico('🎯')}Что осталось сделать</div>
-          <div class="onboarding-h-sub">${doneCount} из ${steps.length} шагов выполнено</div>
+          <div class="onboarding-h-sub">${doneCount} из ${steps.length} шагов · <b style="color:#4ad991">${pct}%</b></div>
         </div>
         <div class="onboarding-progress">
-          <div class="onboarding-progress-bar" style="width:${Math.round((doneCount / steps.length) * 100)}%"></div>
+          ${segments}
         </div>
       </div>
       <div class="onboarding-steps">${stepsHtml}</div>
@@ -1082,14 +1093,28 @@ function cabinetStyles(): string {
   }
   .onboarding-h-title { font-size: 15px; font-weight: 600; color: #4ad991; margin-bottom: 2px; }
   .onboarding-h-sub { font-size: 12px; color: #8590a0; }
+  /* Segmented progress — one bar per onboarding step. Done = green,
+   * current step = pulsing amber outline, pending = dim. Beats a single
+   * percent bar because the segments visually map 1:1 to the checklist below. */
   .onboarding-progress {
-    width: 180px; height: 6px;
-    background: rgba(255, 255, 255, 0.06);
-    border-radius: 3px; overflow: hidden;
+    display: flex; gap: 4px;
+    width: 220px;
   }
-  .onboarding-progress-bar {
-    height: 100%; background: #4ad991;
-    transition: width 0.3s ease;
+  .onboarding-seg {
+    flex: 1; height: 8px; border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+  }
+  .onboarding-seg-done { background: #4ad991; }
+  .onboarding-seg-current {
+    background: rgba(243, 210, 102, 0.30);
+    box-shadow: 0 0 0 1px rgba(243, 210, 102, 0.55) inset;
+    animation: onboarding-pulse 1.8s ease-in-out infinite;
+  }
+  .onboarding-seg-pending { background: rgba(255, 255, 255, 0.06); }
+  @keyframes onboarding-pulse {
+    0%, 100% { background: rgba(243, 210, 102, 0.20); }
+    50%      { background: rgba(243, 210, 102, 0.45); }
   }
   .onboarding-steps {
     display: flex; flex-direction: column; gap: 12px;
