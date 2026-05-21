@@ -272,7 +272,17 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     const key = findActiveKey(user.userId);
     const balance = key?.last_balance_usdt ?? null;
     const matched = balance != null ? matchTier(balance) : null;
-    const currentTier = sub?.tier_id as TierId | undefined;
+    // Phase G follow-up — distinguish three states:
+    //   - activatedTier: actual currently-active tier (only set when user_strategies rows exist)
+    //   - selectedTier: user's saved choice without activation (selected_tier_id set, no strategies yet)
+    //   - neither: fresh user; default tier_id='standard' should NOT show as "Текущий"
+    const userStrategiesCount = listUserStrategies(user.userId).length;
+    const activatedTier: TierId | undefined = userStrategiesCount > 0
+      ? (sub?.tier_id as TierId | undefined)
+      : undefined;
+    const selectedTier: TierId | undefined = sub?.selected_tier_id
+      ? (sub.selected_tier_id as TierId)
+      : undefined;
     const flash = (req.query as { error?: string; ok?: string } | undefined);
     const csrf = issueCsrfToken(req, reply);
     reply.header('content-type', 'text/html; charset=utf-8');
@@ -280,7 +290,8 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     return reply.send(renderTierPicker({
       balance,
       matched,
-      currentTier,
+      activatedTier,
+      selectedTier,
       csrf,
       errorMsg: flash?.error ?? null,
       okMsg: flash?.ok ?? null,
@@ -558,6 +569,14 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         }
       }
     }
+    // Phase G follow-up — when the verify was triggered from the tier-picker
+    // page (button there), return the user back to the picker so they can
+    // see the refreshed balance + pick a now-affordable tier.
+    const returnTo = (req.query as { return_to?: string } | undefined)?.return_to;
+    if (returnTo === 'picker') {
+      reply.code(303).header('location', '/account/subscription/select-tier?from=verify').send();
+      return;
+    }
     if (
       subRow?.plan !== 'vip' &&
       !pickedTier &&
@@ -743,7 +762,10 @@ function renderApiKeyWithFlash(
 function renderTierPicker(p: {
   balance: number | null;
   matched: import('../strategies/tier-config.js').TierId | null;
-  currentTier: import('../strategies/tier-config.js').TierId | undefined;
+  /** Tier that is ACTUALLY active (assignTier called, user_strategies rows exist). */
+  activatedTier: import('../strategies/tier-config.js').TierId | undefined;
+  /** Tier the user chose but haven't activated yet (balance still insufficient). */
+  selectedTier: import('../strategies/tier-config.js').TierId | undefined;
   csrf: string;
   errorMsg: string | null;
   okMsg: string | null;
@@ -757,9 +779,45 @@ function renderTierPicker(p: {
     ? `<div class="tp-flash tp-flash-ok">✓ ${escapeHtmlMin(p.okMsg)}</div>`
     : '';
 
+  // Notice shown when user chose a tier but doesn't have enough balance yet.
+  const selectedTierObj = p.selectedTier ? getTier(p.selectedTier) : null;
+  const selectedNeedsMore = selectedTierObj
+    && p.activatedTier !== p.selectedTier
+    && (p.balance ?? 0) < selectedTierObj.minBalanceUsdt;
+  const pendingBlock = selectedNeedsMore && selectedTierObj
+    ? `
+      <div class="tp-pending">
+        <div class="tp-pending-title">⏳ Вы выбрали <b>${escapeHtmlMin(selectedTierObj.name)}</b> — нужно пополнить депозит</div>
+        <div class="tp-pending-body">
+          Для активации тарифа <b>${escapeHtmlMin(selectedTierObj.name)}</b> на Bybit нужно <b>$${selectedTierObj.minBalanceUsdt}</b>.
+          Сейчас на счёте <b>$${(p.balance ?? 0).toFixed(0)}</b>. Не хватает <b>$${(selectedTierObj.minBalanceUsdt - (p.balance ?? 0)).toFixed(0)}</b>.
+          Пополните Unified Trading Account на Bybit и нажмите «Проверить баланс» ниже —
+          как только средств станет достаточно, тариф активируется автоматически.
+        </div>
+        <div class="tp-pending-actions">
+          <a href="https://www.bybit.com/user/assets/home/overview" target="_blank" rel="noopener" class="tp-btn-mini tp-btn-go">Открыть Bybit ↗</a>
+          <form method="POST" action="/account/api-key/verify?return_to=picker" style="display:inline">
+            <input type="hidden" name="csrf" value="${p.csrf}"/>
+            <button type="submit" class="tp-btn-mini tp-btn-ghost">Проверить баланс</button>
+          </form>
+        </div>
+      </div>
+    `
+    : '';
+
+  // Standalone "Проверить баланс" — even when no tier picked yet, the user
+  // may want to refresh balance before deciding.
+  const refreshBlock = `
+    <form method="POST" action="/account/api-key/verify?return_to=picker" class="tp-refresh-form">
+      <input type="hidden" name="csrf" value="${p.csrf}"/>
+      <button type="submit" class="tp-refresh-btn">↻ Проверить баланс на Bybit</button>
+    </form>
+  `;
+
   const cards = tiers.map((t) => {
     const isMatched = p.matched === t.id;
-    const isCurrent = p.currentTier === t.id;
+    const isActive = p.activatedTier === t.id;
+    const isSelected = p.selectedTier === t.id && !isActive;
     const canAfford = p.balance != null && p.balance >= t.minBalanceUsdt;
     const isVipLocked = t.id === 'vip';
     const subRange = t.expectedMonthlyPnlRangeUsd;
@@ -768,29 +826,45 @@ function renderTierPicker(p: {
       : `$${t.maxBalanceUsdt.toLocaleString()}`;
 
     const badges: string[] = [];
-    if (isCurrent) badges.push('<span class="tp-badge tp-badge-cur">Текущий</span>');
-    if (isMatched && !isCurrent) badges.push('<span class="tp-badge tp-badge-rec">Рекомендуется</span>');
+    if (isActive) badges.push('<span class="tp-badge tp-badge-cur">✓ Активен</span>');
+    else if (isSelected) badges.push('<span class="tp-badge tp-badge-pending">⏳ Выбран</span>');
+    if (isMatched && !isActive && !isSelected) {
+      badges.push('<span class="tp-badge tp-badge-rec">Рекомендуется</span>');
+    }
 
     let actionBtn = '';
-    if (isCurrent) {
-      actionBtn = '<button type="button" class="tp-btn tp-btn-disabled" disabled>Уже выбран</button>';
+    if (isActive) {
+      actionBtn = '<button type="button" class="tp-btn tp-btn-disabled" disabled>Уже активен</button>';
     } else if (isVipLocked) {
       actionBtn = '<a href="https://t.me/dboykod" class="tp-btn tp-btn-vip" target="_blank" rel="noopener">Написать оператору</a>';
-    } else if (!canAfford) {
-      const need = (t.minBalanceUsdt - (p.balance ?? 0)).toFixed(0);
-      actionBtn = `<button type="button" class="tp-btn tp-btn-disabled" disabled title="Нужно +$${need} на Bybit">Не хватает $${need}</button>`;
     } else {
+      // Phase G — choice is ALWAYS allowed; activation requires balance.
+      // If sufficient balance → "Выбрать и активировать" → POST → assignTier
+      // If insufficient → "Выбрать (нужно +$X)" → POST → stores choice + redirects to picker
+      const need = Math.max(0, t.minBalanceUsdt - (p.balance ?? 0));
+      const label = canAfford
+        ? (isSelected ? `Активировать ${escapeHtmlMin(t.name)}` : `Выбрать ${escapeHtmlMin(t.name)} →`)
+        : `Выбрать (нужно +$${need.toFixed(0)})`;
+      const btnCls = canAfford ? 'tp-btn tp-btn-go' : 'tp-btn tp-btn-soft';
       actionBtn = `
         <form method="POST" action="/account/subscription/select-tier" style="display:inline">
           <input type="hidden" name="csrf" value="${p.csrf}"/>
           <input type="hidden" name="targetTier" value="${t.id}"/>
-          <button type="submit" class="tp-btn tp-btn-go">Выбрать ${escapeHtmlMin(t.name)} →</button>
+          <button type="submit" class="${btnCls}">${label}</button>
         </form>
       `;
     }
 
+    const cardCls = isActive
+      ? 'tp-card-cur'
+      : isSelected
+        ? 'tp-card-selected'
+        : isMatched
+          ? 'tp-card-rec'
+          : '';
+
     return `
-      <div class="tp-card ${isCurrent ? 'tp-card-cur' : ''} ${isMatched && !isCurrent ? 'tp-card-rec' : ''} ${!canAfford ? 'tp-card-locked' : ''}">
+      <div class="tp-card ${cardCls}">
         <div class="tp-card-badges">${badges.join('')}</div>
         <div class="tp-card-name">${escapeHtmlMin(t.name)}</div>
         <div class="tp-card-depo">Депозит $${t.minBalanceUsdt.toLocaleString()}–${maxStr}</div>
@@ -817,24 +891,53 @@ function renderTierPicker(p: {
       .tp-back a:hover { text-decoration: underline; }
       .tp-h1 { font-size: 26px; font-weight: 700; color: #e8edf2; margin: 0 0 8px; }
       .tp-sub { font-size: 14px; color: #9aa5b1; line-height: 1.6; margin: 0 0 18px; max-width: 720px; }
+      .tp-balance-row {
+        display: flex; gap: 12px; align-items: center; margin-bottom: 22px; flex-wrap: wrap;
+      }
       .tp-balance { display: inline-flex; gap: 16px; align-items: baseline; padding: 14px 18px;
-        background: #11161d; border: 1px solid #1f2630; border-radius: 12px; margin-bottom: 22px; }
+        background: #11161d; border: 1px solid #1f2630; border-radius: 12px; }
       .tp-balance-label { font-size: 12px; color: #6b7480; text-transform: uppercase; letter-spacing: 0.05em; }
       .tp-balance-val { font-size: 18px; color: #4ad991; font-weight: 600; }
+      .tp-refresh-form { display: inline; }
+      .tp-refresh-btn {
+        background: transparent; border: 1px solid #2a323d; color: #cfd6dd;
+        padding: 12px 16px; border-radius: 10px; font-size: 13px; cursor: pointer;
+        font-family: inherit; font-weight: 500;
+      }
+      .tp-refresh-btn:hover { border-color: #4ad991; color: #4ad991; }
       .tp-flash { padding: 12px 16px; border-radius: 10px; margin-bottom: 18px; font-size: 13.5px; line-height: 1.55; }
       .tp-flash-err { background: rgba(255,99,99,0.08); border: 1px solid rgba(255,99,99,0.35); color: #ff8b8b; }
       .tp-flash-ok { background: rgba(74,217,145,0.08); border: 1px solid rgba(74,217,145,0.35); color: #4ad991; }
+      .tp-pending {
+        background: linear-gradient(180deg, rgba(243,210,102,0.10) 0%, rgba(243,210,102,0.04) 100%);
+        border: 1px solid rgba(243,210,102,0.45); border-radius: 14px;
+        padding: 18px 22px; margin-bottom: 22px;
+      }
+      .tp-pending-title { font-size: 15px; color: #f3d266; font-weight: 600; margin-bottom: 6px; }
+      .tp-pending-title b { color: #ffe294; }
+      .tp-pending-body { font-size: 13px; color: #cfd6dd; line-height: 1.6; margin-bottom: 12px; }
+      .tp-pending-body b { color: #f3d266; }
+      .tp-pending-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+      .tp-btn-mini {
+        padding: 8px 14px; border-radius: 7px; font-size: 12.5px; font-weight: 600;
+        text-decoration: none; cursor: pointer; border: none; font-family: inherit;
+      }
+      .tp-btn-ghost {
+        background: transparent; border: 1px solid #2a323d; color: #cfd6dd;
+      }
+      .tp-btn-ghost:hover { border-color: #4ad991; color: #4ad991; }
       .tp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
       .tp-card { background: #11161d; border: 1px solid #1f2630; border-radius: 14px; padding: 18px;
         display: flex; flex-direction: column; position: relative; }
       .tp-card-cur { border-color: rgba(74,217,145,0.55); background: linear-gradient(180deg, rgba(74,217,145,0.06) 0%, #11161d 70%); }
-      .tp-card-rec { border-color: rgba(243,210,102,0.45); }
-      .tp-card-locked { opacity: 0.6; }
+      .tp-card-rec { border-color: rgba(243,210,102,0.30); }
+      .tp-card-selected { border-color: rgba(243,210,102,0.55); background: linear-gradient(180deg, rgba(243,210,102,0.06) 0%, #11161d 70%); }
       .tp-card-badges { min-height: 22px; margin-bottom: 6px; }
       .tp-badge { display: inline-block; padding: 3px 9px; border-radius: 999px;
         font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; margin-right: 4px; }
       .tp-badge-cur { background: rgba(74,217,145,0.18); color: #4ad991; border: 1px solid rgba(74,217,145,0.4); }
       .tp-badge-rec { background: rgba(243,210,102,0.18); color: #f3d266; border: 1px solid rgba(243,210,102,0.4); }
+      .tp-badge-pending { background: rgba(243,210,102,0.30); color: #ffe294; border: 1px solid rgba(243,210,102,0.55); }
       .tp-card-name { font-size: 16px; font-weight: 600; color: #e8edf2; margin-bottom: 4px; }
       .tp-card-depo { font-size: 11.5px; color: #8590a0; margin-bottom: 10px; }
       .tp-card-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 12px; }
@@ -847,9 +950,13 @@ function renderTierPicker(p: {
       .tp-card-action { margin-top: auto; }
       .tp-btn { display: block; width: 100%; box-sizing: border-box; padding: 10px 12px;
         border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none;
-        text-decoration: none; text-align: center; }
+        text-decoration: none; text-align: center; font-family: inherit; }
       .tp-btn-go { background: #4ad991; color: #0b0e13; }
       .tp-btn-go:hover { background: #5ce0a0; }
+      .tp-btn-soft {
+        background: transparent; color: #cfd6dd; border: 1px solid #2a323d;
+      }
+      .tp-btn-soft:hover { border-color: #f3d266; color: #f3d266; }
       .tp-btn-disabled { background: #1a1f27; color: #6b7480; cursor: not-allowed; }
       .tp-btn-vip { background: rgba(243,210,102,0.18); color: #f3d266; border: 1px solid rgba(243,210,102,0.4); }
       .tp-btn-vip:hover { background: rgba(243,210,102,0.3); }
@@ -862,21 +969,25 @@ function renderTierPicker(p: {
       <h1 class="tp-h1">Выбор тарифа</h1>
       <p class="tp-sub">
         Тариф определяет какие стратегии торгуют на вашем счёте и каким объёмом.
-        Выберите тот, что подходит под ваш депозит на Bybit. Можно сменить в любой момент.
+        Выберите тот, который подходит под ваш депозит на Bybit. Можно сменить в любой момент.
       </p>
-      <div class="tp-balance">
-        <span class="tp-balance-label">Баланс на Bybit</span>
-        <span class="tp-balance-val">${balanceStr}</span>
+      <div class="tp-balance-row">
+        <div class="tp-balance">
+          <span class="tp-balance-label">Баланс на Bybit</span>
+          <span class="tp-balance-val">${balanceStr}</span>
+        </div>
+        ${refreshBlock}
       </div>
       ${errBlock}
       ${okBlock}
+      ${pendingBlock}
       <div class="tp-grid">${cards}</div>
       <div class="tp-note">
-        <b>Как это работает:</b> мы только проверяем что вашего баланса хватит на выбранный тариф.
-        Депозит остаётся на вашем Bybit-аккаунте — мы не имеем права на вывод. Если хотите перейти
-        на более крупный тариф — пополните счёт, нажмите «Проверить связь» в <a href="/account/api-key">кабинете API-ключа</a>,
-        затем возвращайтесь сюда и выберите. Чтобы понизить тариф — выбирайте меньший прямо сейчас:
-        открытые позиции отторгуются как есть, новые сделки пойдут по новому тарифу.
+        <b>Как это работает:</b> вы можете выбрать любой тариф — даже если сейчас на счёте меньше минимума.
+        Если баланса хватает, тариф активируется сразу. Если не хватает — мы запомним ваш выбор; пополните
+        Unified Trading Account на Bybit и нажмите «Проверить баланс» — тариф автоматически активируется,
+        как только средств станет достаточно. Депозит остаётся на вашем Bybit-аккаунте, мы не имеем права
+        на вывод.
       </div>
     </div>
   `;

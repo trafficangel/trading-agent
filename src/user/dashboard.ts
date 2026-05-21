@@ -123,7 +123,11 @@ export function renderDashboard(args: {
   } else if (sub?.tier_id && args.enabledStrategiesCount > 0) {
     strategiesBlock = renderTierStatCard(sub.tier_id as TierId);
   } else {
-    strategiesBlock = renderTierUnsetCard(args.apiKey, args.margin.balanceUsdt);
+    strategiesBlock = renderTierUnsetCard(
+      args.apiKey,
+      args.margin.balanceUsdt,
+      sub?.selected_tier_id ?? null,
+    );
   }
 
   const openBlock = renderOpenPositionsCard(args.openPositionsCount);
@@ -337,45 +341,48 @@ function renderStrategiesCard(args: {
   `;
 }
 
-/** Phase F — prompt card shown when the user hasn't picked a tier yet.
- *  Replaces the misleading "Standard" tier card that came from the
- *  ensureTrialFor default. Behavior:
+/** Phase G follow-up — pre-activation tier card. Three states:
  *   - No Bybit key connected yet → ask to connect first.
- *   - Connected but balance < $300 → ask to top up Bybit.
- *   - Balance ≥ $300 → CTA "Выбрать тариф" to /account/subscription/select-tier.
+ *   - Key connected, no tier picked → CTA «Выбрать тариф».
+ *   - Tier picked but not yet activated (balance < min) → show shortfall.
+ *  Deposit gating is handled INSIDE the picker page (where the
+ *  «Проверить баланс» button lives), so this card no longer
+ *  intermediates a separate "deposit first, then pick" flow.
  */
 function renderTierUnsetCard(
   apiKey: ApiKeySummary | null,
   balanceUsdt: number | null,
+  selectedTierId: string | null,
 ): string {
   const keyConnected = !!(apiKey && apiKey.last_verified_at && !apiKey.revoked_at);
-  const balanceOk = balanceUsdt !== null && balanceUsdt >= 300;
   let body = '';
   if (!keyConnected) {
     body = `
       <div class="stat-card-value" style="font-size:18px">Подключите Bybit</div>
       <div class="stat-card-sub" style="line-height:1.6">
-        После подключения API-ключа мы увидим ваш баланс и подберём подходящий тариф.
+        После подключения API-ключа сможете выбрать тариф.
         <br/>
         <a href="/account/api-key" style="color:#4ad991; text-decoration:none">Подключить ключ →</a>
       </div>
     `;
-  } else if (!balanceOk) {
-    const cur = balanceUsdt !== null ? `$${balanceUsdt.toFixed(0)}` : '—';
+  } else if (selectedTierId) {
+    const tier = TIER_CONFIGS[selectedTierId as TierId];
+    const cur = balanceUsdt !== null ? balanceUsdt : 0;
+    const need = tier ? Math.max(0, tier.minBalanceUsdt - cur) : 0;
     body = `
-      <div class="stat-card-value" style="font-size:18px">Пополните счёт</div>
+      <div class="stat-card-value" style="font-size:18px">${tier?.name ?? 'Тариф'} · ждём депозит</div>
       <div class="stat-card-sub" style="line-height:1.6">
-        На счёте ${cur}. Для автотрейдинга нужен баланс <b style="color:#cfd6dd">от $300</b>.
+        Нужно <b style="color:#f3d266">$${need.toFixed(0)}</b> на Bybit для активации.
+        Пополните Unified Trading Account.
         <br/>
-        <a href="/account/api-key" style="color:#4ad991; text-decoration:none">Проверить баланс →</a>
+        <a href="/account/subscription/select-tier" style="color:#4ad991; text-decoration:none">Проверить баланс →</a>
       </div>
     `;
   } else {
     body = `
-      <div class="stat-card-value" style="font-size:18px">Выберите тариф</div>
+      <div class="stat-card-value" style="font-size:18px">Тариф не выбран</div>
       <div class="stat-card-sub" style="line-height:1.6">
-        Баланс на Bybit: <b style="color:#4ad991">$${balanceUsdt!.toFixed(0)}</b>.
-        Можно стартовать автотрейдинг.
+        Выберите план под размер депозита. Можно сменить в любой момент.
         <br/>
         <a href="/account/subscription/select-tier" style="color:#4ad991; text-decoration:none; font-weight:600">Выбрать тариф →</a>
       </div>
@@ -429,15 +436,16 @@ function tierEmoji(tierId: TierId): string {
  * action button (CTA to next step). Hidden when all done OR when
  * user has VIP override (operator setup).
  *
- * Checkpoints (Phase G — 5 steps, tier choice before deposit so user knows
- * how much to deposit; verify-balance button right next to deposit CTA):
+ * Checkpoints (Phase G follow-up — 4 steps, deposit folded INTO tier-picker
+ * page where the "Проверить баланс" button lives):
  *   1. Регистрация (always done — user is in /account)
  *   2. Подключение Bybit (api_key.last_verified_at !== null)
- *   3. Выбор тарифа (selected_tier_id IS NOT NULL)
- *   4. Депозит на Bybit ≥ minimum для выбранного тарифа
- *      → две кнопки рядом: «Открыть Bybit для пополнения» + «Проверить баланс»
- *      → при достаточном балансе verify auto-activates assignTier
- *   5. Стратегии работают (openCount + closedCount > 0)
+ *   3. Выбор тарифа и активация
+ *       - "done" when tier is actually activated (user_strategies > 0)
+ *       - "current" if not yet activated; CTA leads to /select-tier
+ *         where the user picks + tops up + clicks "Проверить баланс"
+ *         (assignTier auto-fires when balance is sufficient).
+ *   4. Стратегии работают (openCount + closedCount > 0)
  */
 function renderOnboardingChecklist(args: {
   subscription: SubscriptionRow | null;
@@ -454,38 +462,29 @@ function renderOnboardingChecklist(args: {
 
   // Compute checkpoint statuses.
   const keyConnected = !!(args.apiKey && args.apiKey.last_verified_at && !args.apiKey.revoked_at);
-  const balance = args.margin.balanceUsdt ?? 0;
-  const tierPicked = !!sub.selected_tier_id;
-  const tierConfig = sub.selected_tier_id
-    ? TIER_CONFIGS[sub.selected_tier_id as TierId]
-    : null;
-  const requiredBalance = tierConfig?.minBalanceUsdt ?? 300;
-  const depositOk = balance >= requiredBalance;
+  const tierActivated = args.enabledStrategiesCount > 0;
   const tradingStarted = args.openPositionsCount + args.closedPositionsCount > 0;
 
   // If all done → hide. User no longer needs the wizard.
-  if (keyConnected && tierPicked && depositOk && tradingStarted) return '';
+  if (keyConnected && tierActivated && tradingStarted) return '';
 
   type CtaLink = { kind: 'link'; label: string; href: string; primary?: boolean };
   type CtaForm = { kind: 'form'; label: string; action: string; primary?: boolean };
   type Cta = CtaLink | CtaForm;
   type Step = { num: number; title: string; done: boolean; ctas?: Cta[] };
 
-  const depositStepCtas: Cta[] = [];
-  if (!depositOk && keyConnected) {
-    depositStepCtas.push({
-      kind: 'link',
-      label: 'Открыть Bybit для пополнения →',
-      href: 'https://www.bybit.com/user/assets/home/overview',
-      primary: true,
-    });
-    if (args.csrfToken) {
-      depositStepCtas.push({
-        kind: 'form',
-        label: 'Проверить баланс',
-        action: '/account/api-key/verify',
-      });
-    }
+  // Step 3 title is dynamic to reflect state:
+  //   - tier picked but balance insufficient → "Выбор тарифа · ждём депозит для {Tier}"
+  //   - tier picked + activated → "Тариф {Tier} активирован" (will be done=true)
+  //   - nothing picked → "Выбор тарифа и активация"
+  const selectedTierObj = sub.selected_tier_id
+    ? TIER_CONFIGS[sub.selected_tier_id as TierId]
+    : null;
+  let tierStepTitle = 'Выбор тарифа и активация';
+  if (tierActivated && selectedTierObj) {
+    tierStepTitle = `Тариф ${selectedTierObj.name} активирован`;
+  } else if (selectedTierObj) {
+    tierStepTitle = `Выбран ${selectedTierObj.name} · нужен депозит $${selectedTierObj.minBalanceUsdt}+`;
   }
 
   const steps: Step[] = [
@@ -500,24 +499,19 @@ function renderOnboardingChecklist(args: {
     },
     {
       num: 3,
-      title: 'Выбор тарифа',
-      done: tierPicked,
-      ctas: tierPicked
+      title: tierStepTitle,
+      done: tierActivated,
+      ctas: tierActivated || !keyConnected
         ? undefined
-        : keyConnected
-          ? [{ kind: 'link', label: 'Выбрать тариф →', href: '/account/subscription/select-tier', primary: true }]
-          : undefined,
+        : [{
+            kind: 'link',
+            label: sub.selected_tier_id ? 'Открыть выбор тарифа →' : 'Выбрать тариф →',
+            href: '/account/subscription/select-tier',
+            primary: true,
+          }],
     },
     {
       num: 4,
-      title: tierConfig
-        ? `Пополнить Bybit · нужно $${tierConfig.minBalanceUsdt}+ для ${tierConfig.name}`
-        : 'Пополнить Bybit под выбранный тариф',
-      done: depositOk && tierPicked,
-      ctas: depositStepCtas.length > 0 ? depositStepCtas : undefined,
-    },
-    {
-      num: 5,
       title: 'Стратегии работают',
       done: tradingStarted,
       ctas: undefined,
@@ -769,47 +763,34 @@ function renderStatusBanner(args: {
   if (!key || key.revoked_at !== null) return '';
   if (key.last_verified_at === null || key.last_verify_error) return '';
 
-  // Phase F — tier-pick gate (replaces old strategy-selection prompt).
-  // User no longer picks individual strategies; they pick a tier and the
-  // platform bundles strategies into it. If balance is below the autotrading
-  // minimum, prompt to top up first — selecting a tier with insufficient
-  // balance will fail validation anyway.
+  // Phase G follow-up — single «Выберите тариф» banner. The tier-picker
+  // page itself handles the balance check (with «Проверить баланс»
+  // button + auto-activate when sufficient), so dashboard doesn't gate
+  // on balance anymore — it just routes the user to the picker.
   if (args.enabledStrategiesCount === 0) {
     const balance = args.margin.balanceUsdt;
-    const balanceOk = balance !== null && balance >= 300;
-    if (!balanceOk) {
-      const cur = balance !== null ? `$${balance.toFixed(0)}` : '—';
-      return `
-        <div class="cabinet-banner-amber">
-          <div class="cabinet-banner-icon">${ico('💰')}</div>
-          <div class="cabinet-banner-body">
-            <div class="cabinet-banner-title-amber">Пополните Bybit-кошелёк</div>
-            <div class="cabinet-banner-text">
-              Ключ подключён. Сейчас на счёте ${cur}. Для запуска автотрейдинга нужен
-              баланс <b>от $300</b> на Unified Trading Account Bybit. Пополните счёт и
-              нажмите «Проверить баланс» — затем сможете выбрать тариф.
-            </div>
-            <div class="cabinet-banner-actions">
-              <a class="cabinet-banner-btn" href="/account/api-key">Открыть страницу ключа →</a>
-              <a class="cabinet-banner-btn cabinet-banner-btn-secondary" href="https://www.bybit.com/app/user/assets/home/overview" target="_blank" rel="noopener">Открыть Bybit ↗</a>
-            </div>
-          </div>
-        </div>
-      `;
-    }
+    const balanceLine = balance !== null
+      ? `Сейчас на счёте <b>$${balance.toFixed(0)} USDT</b>. `
+      : '';
+    const selectedTier = sub.selected_tier_id
+      ? TIER_CONFIGS[sub.selected_tier_id as TierId]
+      : null;
+    const title = selectedTier
+      ? `Тариф ${selectedTier.name} выбран — ждём пополнение`
+      : 'Выберите тариф автотрейдинга';
+    const text = selectedTier
+      ? `${balanceLine}Для активации тарифа <b>${selectedTier.name}</b> нужен баланс от <b>$${selectedTier.minBalanceUsdt}</b>. ` +
+        `Пополните Unified Trading Account на Bybit и нажмите «Проверить баланс» — тариф активируется автоматически.`
+      : `${balanceLine}Тариф определяет какие стратегии работают на вашем счёте и каким объёмом. ` +
+        `Подбор стратегий внутри тарифа — наша задача, вы только выбираете план под размер депозита.`;
     return `
       <div class="cabinet-banner-amber">
         <div class="cabinet-banner-icon">${ico('💳')}</div>
         <div class="cabinet-banner-body">
-          <div class="cabinet-banner-title-amber">Выберите тариф автотрейдинга</div>
-          <div class="cabinet-banner-text">
-            Ключ Bybit подключён, баланс <b>$${balance!.toFixed(0)}</b> — можно стартовать.
-            Тариф определяет какие стратегии будут работать на вашем счёте и каким
-            объёмом. Подбор стратегий внутри тарифа — наша задача, вы только выбираете
-            план под размер депозита.
-          </div>
+          <div class="cabinet-banner-title-amber">${title}</div>
+          <div class="cabinet-banner-text">${text}</div>
           <div class="cabinet-banner-actions">
-            <a class="cabinet-banner-btn" href="/account/subscription/select-tier">Выбрать тариф →</a>
+            <a class="cabinet-banner-btn" href="/account/subscription/select-tier">${selectedTier ? 'Открыть выбор тарифа →' : 'Выбрать тариф →'}</a>
           </div>
         </div>
       </div>
