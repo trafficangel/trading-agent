@@ -15,6 +15,7 @@ import { pageShell } from '../strategies/landing.js';
 import type { SubscriptionRow } from '../db/repos/user-subscriptions.js';
 import type { ApiKeySummary } from '../db/repos/user-api-keys.js';
 import type { MarginState } from './margin.js';
+import { TIER_CONFIGS, type TierId } from '../strategies/tier-config.js';
 
 function escapeHtml(s: string): string {
   return s
@@ -99,11 +100,17 @@ export function renderDashboard(args: {
 
   const apiKeyBlock = renderApiKeyCard(args.apiKey);
 
-  const strategiesBlock = renderStrategiesCard({
-    enabled: args.enabledStrategiesCount,
-    available: args.totalStrategiesAvailable,
-    notional: args.totalNotionalUsd,
-  });
+  // TRACK E — tier card replaces the generic strategies-count card
+  // for non-VIP users. VIP keeps the manual one (their strategies are
+  // operator-defined, not tier-derived).
+  const isVip = sub?.plan === 'vip';
+  const strategiesBlock = !isVip && sub?.tier_id
+    ? renderTierStatCard(sub.tier_id as TierId)
+    : renderStrategiesCard({
+        enabled: args.enabledStrategiesCount,
+        available: args.totalStrategiesAvailable,
+        notional: args.totalNotionalUsd,
+      });
 
   const openBlock = renderOpenPositionsCard(args.openPositionsCount);
 
@@ -297,6 +304,36 @@ function renderStrategiesCard(args: {
       <div class="stat-card-sub">${sub}</div>
     </div>
   `;
+}
+
+/** TRACK E — tier-card replaces the generic strategies-count card.
+ *  Shows tier name, expected PnL range, max DD, and # strategies. */
+function renderTierStatCard(tierId: TierId): string {
+  const tier = TIER_CONFIGS[tierId];
+  if (!tier) return '';
+  const emoji = tierEmoji(tierId);
+  const sub = tier.expectedMonthlyPnlRangeUsd;
+  return `
+    <div class="stat-card cabinet-card">
+      <div class="stat-card-label">${ico(emoji)}Ваш тариф</div>
+      <div class="stat-card-value">${tier.name}</div>
+      <div class="stat-card-sub">
+        ${tier.strategyIds.length} стратегий · ≤${tier.expectedMaxDdPct}% DD
+        <br/>
+        <span style="color:#4ad991">$${sub.low}–$${sub.high}/мес</span> по бэктесту
+      </div>
+    </div>
+  `;
+}
+
+function tierEmoji(tierId: TierId): string {
+  switch (tierId) {
+    case 'starter': return '🥉';
+    case 'standard': return '🥈';
+    case 'plus': return '🥇';
+    case 'pro': return '🏆';
+    case 'vip': return '👑';
+  }
 }
 
 function renderOpenPositionsCard(openNow: number): string {

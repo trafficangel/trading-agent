@@ -31,6 +31,15 @@ export type SubscriptionRow = {
   /** User-controlled trading pause. NULL = active, ms = paused at.
    *  When set, fan-out skips this user; open positions keep running. */
   trading_paused_at: number | null;
+  /** TRACK E — auto-tier. 'starter' by default for new rows. */
+  tier_id: string;
+  /** TRACK E — VIP override fields. NULL = use tier defaults. */
+  tier_override_strategies: string | null;  // JSON array
+  tier_override_margin: number | null;
+  tier_override_leverage: string | null;    // JSON map
+  /** TRACK E — anti-flap state for transition timing. */
+  tier_transition_target_id: string | null;
+  tier_transition_first_seen_at: number | null;
 };
 
 const insertStmt = db.prepare(`

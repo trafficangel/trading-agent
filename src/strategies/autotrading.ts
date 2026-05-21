@@ -20,6 +20,7 @@
 import type { FastifyInstance } from 'fastify';
 import { pageShell } from './landing.js';
 import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
+import { listTiers } from './tier-config.js';
 
 const PRICE_USD = 50;
 const TRIAL_DAYS = 14;
@@ -223,29 +224,58 @@ function renderSafety(): string {
 }
 
 function renderPricing(): string {
+  const tiers = listTiers();
+  const cards = tiers
+    .map((t) => {
+      const maxStr = t.maxBalanceUsdt === Number.POSITIVE_INFINITY ? '∞' : `$${t.maxBalanceUsdt.toLocaleString()}`;
+      const sub = t.expectedMonthlyPnlRangeUsd;
+      return `
+        <div class="at-tier-card">
+          <div class="at-tier-name">${tierEmoji(t.id)} ${escapeHtml(t.name)}</div>
+          <div class="at-tier-depo">Депозит $${t.minBalanceUsdt.toLocaleString()}–${maxStr}</div>
+          <div class="at-tier-price"><span class="at-tier-price-num">$${t.monthlyPriceUsd}</span><span class="at-tier-price-period">/мес</span></div>
+          <ul class="at-tier-features">
+            <li>${t.strategyIds.length} стратегий в портфеле</li>
+            <li>~$${sub.low}–$${sub.high}/мес ожидаемая прибыль</li>
+            <li>Max просадка ≤${t.expectedMaxDdPct}%</li>
+            <li>До ${t.maxConcurrentPositions} одновременных позиций</li>
+          </ul>
+          <div class="at-tier-pitch">${escapeHtml(t.pitch)}</div>
+        </div>
+      `;
+    })
+    .join('');
   return `
     <section class="at-section at-pricing">
-      <h2 class="at-section-title">${ico('💳')}Стоимость</h2>
-      <div class="at-price-card">
-        <div class="at-price-amount">
-          <span class="at-price-num">$${PRICE_USD}</span>
-          <span class="at-price-period">/ месяц</span>
-        </div>
-        <ul class="at-price-features">
-          <li>${ico('🎁')}<b>${TRIAL_DAYS} дней бесплатно</b> — без привязки карты</li>
-          <li>${ico('🤖')}Все стратегии портфеля доступны сразу</li>
-          <li>${ico('📊')}Кабинет с live-статистикой и историей сделок</li>
-          <li>${ico('💬')}Поддержка в Telegram</li>
-          <li>${ico('⏹')}Отмена в любой момент</li>
-        </ul>
-        <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-full">Начать ${TRIAL_DAYS}-дневный триал</a>
-        <div class="at-price-note">
-          Оплата подписки пока вручную через оператора. После окончания
-          триала свяжемся в Telegram для оплаты — никаких автосписаний.
-        </div>
+      <h2 class="at-section-title">${ico('💳')}Тарифы</h2>
+      <p class="at-pricing-intro">
+        Тариф назначается автоматически по балансу вашего Bybit-счёта.
+        Чем больше депозит — тем больше доступных стратегий и тем выше ожидаемая прибыль.
+        Подписка покрывает не больше 18-20% потенциального месячного дохода.
+      </p>
+      <div class="at-tier-grid">
+        ${cards}
+      </div>
+      <div class="at-pricing-cta">
+        <a href="/strategies?from=autotrading" class="at-btn-primary">${ico('🎁')}Начать ${TRIAL_DAYS} дней бесплатно</a>
+      </div>
+      <div class="at-price-disclaimer">
+        ⚠ Цифры доходности рассчитаны по историческим данным бэктестов. <b>Прошлые результаты не гарантируют будущих</b>.
+        Криптотрейдинг сопряжён с риском полной потери капитала. Robot Claude — сервис автоматизации сделок,
+        не финансовый консультант. Все решения о размере депозита и риске вы принимаете самостоятельно.
       </div>
     </section>
   `;
+}
+
+function tierEmoji(id: 'starter' | 'standard' | 'plus' | 'pro' | 'vip'): string {
+  switch (id) {
+    case 'starter': return '🥉';
+    case 'standard': return '🥈';
+    case 'plus': return '🥇';
+    case 'pro': return '🏆';
+    case 'vip': return '👑';
+  }
 }
 
 function renderFaq(): string {
@@ -474,7 +504,55 @@ function styles(): string {
   }
   .at-strat-meta { font-size: 11.5px; color: #8590a0; }
 
-  /* ----- Pricing ----- */
+  /* ----- Pricing (TRACK E tier table) ----- */
+  .at-pricing-intro {
+    text-align: center; color: #cfd6dd; font-size: 14px; line-height: 1.6;
+    max-width: 720px; margin: 0 auto 24px;
+  }
+  .at-tier-grid {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    margin-bottom: 28px;
+  }
+  .at-tier-card {
+    background: linear-gradient(180deg, #161c25 0%, #11161d 70%);
+    border: 1px solid #1f2630; border-radius: 14px;
+    padding: 20px 18px;
+    display: flex; flex-direction: column;
+  }
+  .at-tier-card:nth-child(3) { border-color: rgba(74, 217, 145, 0.45); }
+  .at-tier-name {
+    font-size: 16px; font-weight: 600; color: #e8edf2; margin-bottom: 4px;
+  }
+  .at-tier-depo { font-size: 11.5px; color: #8590a0; margin-bottom: 12px; }
+  .at-tier-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 14px; }
+  .at-tier-price-num { font-size: 28px; font-weight: 700; color: #4ad991; }
+  .at-tier-price-period { font-size: 12px; color: #8590a0; }
+  .at-tier-features {
+    list-style: none; padding: 0; margin: 0 0 12px 0;
+    font-size: 12.5px; color: #cfd6dd; line-height: 1.55;
+    flex: 1;
+  }
+  .at-tier-features li {
+    padding: 4px 0;
+    padding-left: 14px;
+    position: relative;
+  }
+  .at-tier-features li::before {
+    content: '✓'; color: #4ad991;
+    position: absolute; left: 0;
+  }
+  .at-tier-pitch { font-size: 11.5px; color: #8590a0; line-height: 1.5; margin-top: auto; padding-top: 10px; border-top: 1px solid #1a1f27; }
+  .at-pricing-cta { text-align: center; margin-bottom: 18px; }
+  .at-price-disclaimer {
+    background: rgba(255, 188, 70, 0.06); border: 1px solid rgba(255, 188, 70, 0.30);
+    border-radius: 8px; padding: 12px 16px;
+    font-size: 12px; color: #cfd6dd; line-height: 1.55;
+    max-width: 760px; margin: 0 auto;
+  }
+  .at-price-disclaimer b { color: #ffbc46; }
+
+  /* Legacy single-price card kept for back-compat in other landing layouts */
   .at-price-card {
     max-width: 480px; margin: 0 auto;
     background: linear-gradient(180deg, #161c25 0%, #11161d 70%);

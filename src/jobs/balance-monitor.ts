@@ -39,6 +39,7 @@ import {
 import { fetchBalanceUsdt } from '../exchange/bybit-private.js';
 import { sumUsedMargin } from '../user/margin.js';
 import { hasActiveAccess } from '../db/repos/user-subscriptions.js';
+import { evaluateTierTransition } from '../user/tier-assignment.js';
 
 const limit = pLimit(5); // throttle parallel Bybit calls
 
@@ -79,6 +80,19 @@ async function processOne(key: ApiKeyRow): Promise<void> {
 
   const balance = balRes.totalUsdt;
   recordBalance(key.id, balance);
+
+  // TRACK E — evaluate tier transition. Auto-downgrade after 72h
+  // continuous below current tier min. Upgrade tracked but not
+  // auto-applied (Phase A: prompt only, Phase B: prorated billing).
+  try {
+    const transition = evaluateTierTransition(key.user_id, balance);
+    if (transition.action === 'downgrade' && transition.fromTier !== transition.toTier) {
+      // Already applied inside evaluateTierTransition if grace elapsed.
+      // No further action here — log the decision is included there.
+    }
+  } catch (err) {
+    logger.error({ err, userId: key.user_id }, 'balance-monitor: tier transition eval failed');
+  }
 
   // Recovery: ONLY clear the flag if Bybit explicitly set it (via a real
   // rejection or per-trade pre-flight). Use the LARGEST single-trade

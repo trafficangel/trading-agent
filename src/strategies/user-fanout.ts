@@ -67,6 +67,8 @@ import {
 import { roundQtyToStep } from '../exchange/bybit-public.js';
 import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 import { computeMarginState } from '../user/margin.js';
+import { resolveUserTierParams } from '../user/tier-assignment.js';
+import { TIER_CONFIGS } from './tier-config.js';
 
 const PARALLEL_LIMIT = 10; // well below Bybit's 50 req/s global cap
 const limit = pLimit(PARALLEL_LIMIT);
@@ -188,6 +190,22 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
       return false;
     }
   }
+  // TRACK E — max concurrent positions per tier. Even if margin
+  // would allow more, the tier promises a cap (e.g. Plus = 4 max).
+  // This stops accidental over-concentration during multi-symbol bursts.
+  const tierParams = resolveUserTierParams(t.user_id);
+  if (tierParams) {
+    const tierMaxConcurrent = TIER_CONFIGS[tierParams.tierId].maxConcurrentPositions;
+    const activeCount = findActiveByUser(t.user_id).length;
+    if (activeCount >= tierMaxConcurrent) {
+      logger.info(
+        { userId: t.user_id, tier: tierParams.tierId, activeCount, max: tierMaxConcurrent },
+        'fanOutEntry: tier max-concurrent reached, skipping',
+      );
+      return false;
+    }
+  }
+
   // Audit C2 — fan-out idempotency pre-flight.
   // TradingView retries webhooks aggressively on 5xx / network glitch.
   // The shadow row is deduped by webhook_dedup_key, but the per-user

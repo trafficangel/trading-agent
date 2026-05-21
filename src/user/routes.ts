@@ -27,40 +27,13 @@ import {
   getDecryptedCreds,
 } from '../db/repos/user-api-keys.js';
 import { fetchBalanceUsdt, bybitErrorLabel, switchToOneWayMode } from '../exchange/bybit-private.js';
-import {
-  listUserStrategies,
-  enableUserStrategy,
-  disableUserStrategy,
-} from '../db/repos/user-strategies.js';
+import { listUserStrategies } from '../db/repos/user-strategies.js';
 import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
 import { closeAllUserPositions } from '../strategies/user-fanout.js';
-import { getLastPrice, getInstrumentInfo } from '../exchange/bybit-public.js';
-
-/**
- * For the /account/strategies calculator: for every enabled strategy
- * row we want to show the user "your $X on BTC at the current price
- * actually executes as $Y (qty 0.001) because of Bybit's lot-size".
- *
- * Fetch live price + qtyStep concurrently for every distinct symbol
- * used by the configs. Cached upstream (1h for instrument info, 5s
- * for tickers) so this is cheap even on many strategies.
- *
- * Returns Map<symbol, { price, qtyStep, minOrderQty }>. Symbols where
- * either lookup fails are simply omitted — UI degrades gracefully
- * (no hint shown for that row, but field still works).
- */
-async function gatherLotInfo(symbols: string[]): Promise<Map<string, { price: number; qtyStep: number; minOrderQty: number }>> {
-  const map = new Map<string, { price: number; qtyStep: number; minOrderQty: number }>();
-  const uniq = Array.from(new Set(symbols.filter((s) => !!s)));
-  await Promise.allSettled(
-    uniq.map(async (symbol) => {
-      const [price, info] = await Promise.all([getLastPrice(symbol), getInstrumentInfo(symbol)]);
-      if (price === null || !info || info.qtyStep <= 0) return;
-      map.set(symbol, { price, qtyStep: info.qtyStep, minOrderQty: info.minOrderQty });
-    }),
-  );
-  return map;
-}
+import { assignTier } from './tier-assignment.js';
+import { matchTier, MIN_AUTOTRADING_DEPOSIT_USDT } from '../strategies/tier-config.js';
+// TRACK E note: gatherLotInfo helper (for instruments-info lookup in
+// the old manual form) removed — read-only tier view no longer needs it.
 import { renderDashboard } from './dashboard.js';
 import { computeMarginState } from './margin.js';
 import { renderStrategiesPage } from './strategies.js';
@@ -182,118 +155,29 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
     const margin = computeMarginState(user.userId);
-    const symbols = Object.values(STRATEGY_CONFIGS)
-      .filter((s) => s.enabled && s.symbol)
-      .map((s) => s.symbol!);
-    const lotInfo = await gatherLotInfo(symbols);
+    // TRACK E — tier-based read-only view. Manual strategy form removed.
+    const tierId = sub?.tier_id as import('../strategies/tier-config.js').TierId | undefined;
+    const isVip = sub?.plan === 'vip';
     return reply.send(
       renderStrategiesPage({
         displayName: user.displayName,
+        tierId: !isVip && tierId ? tierId : null,
+        isVip,
         apiKeyConnected: !!apiKey && apiKey.last_verified_at !== null,
         userStrategies: userStrategyMap(user.userId),
-        flash: null,
         csrfToken: csrf,
         tradingPausedAt: sub?.trading_paused_at ?? null,
         insufficientBalanceAt: apiKey?.insufficient_balance_at ?? null,
         lastBalanceUsdt: apiKey?.last_balance_usdt ?? null,
         usedMarginUsdt: margin.usedUsdt,
-        lotInfo,
+        pendingUpgradeTier: (sub?.tier_transition_target_id ?? null) as import('../strategies/tier-config.js').TierId | null,
       }),
     );
   });
 
-  // -------- POST /account/strategies --------
-  // Form-encoded body of shape `s__<strategy_id>__<field>` repeated for
-  // every strategy on the page. Each (enabled, notional, leverage) trio
-  // is upserted; unchecked rows are disabled. We tolerate unknown
-  // strategy_ids quietly (could happen if STRATEGY_CONFIGS was edited
-  // between page load and submit).
-  app.post('/account/strategies', async (req, reply) => {
-    const user = getAuthedUser(req);
-    if (!user) {
-      reply.redirect('/strategies');
-      return;
-    }
-    if (!requireCsrf(req, reply)) return;
-    const body = (req.body ?? {}) as Record<string, string>;
-    const grouped = new Map<string, { enabled: boolean; notional?: string; leverage?: string }>();
-    for (const [key, value] of Object.entries(body)) {
-      const m = key.match(/^s__(.+?)__(enabled|notional|leverage)$/);
-      if (!m) continue;
-      const sid = m[1]!;
-      const field = m[2]!;
-      const existing = grouped.get(sid) ?? { enabled: false };
-      if (field === 'enabled') existing.enabled = value === '1';
-      else if (field === 'notional') existing.notional = value;
-      else if (field === 'leverage') existing.leverage = value;
-      grouped.set(sid, existing);
-    }
-
-    let okCount = 0;
-    let skipCount = 0;
-    const errors: string[] = [];
-
-    for (const [strategyId, fields] of grouped) {
-      if (!STRATEGY_CONFIGS[strategyId]?.enabled) {
-        skipCount++;
-        continue;
-      }
-      if (!fields.enabled) {
-        disableUserStrategy(user.userId, strategyId);
-        continue;
-      }
-      const notional = Number(fields.notional);
-      const leverage = Math.floor(Number(fields.leverage));
-      if (!Number.isFinite(notional) || notional < 10) {
-        errors.push(`${strategyId}: размер позиции должен быть ≥ 10 USDT`);
-        continue;
-      }
-      if (!Number.isFinite(leverage) || leverage < 1 || leverage > 100) {
-        errors.push(`${strategyId}: плечо должно быть от 1× до 100×`);
-        continue;
-      }
-      try {
-        enableUserStrategy({
-          userId: user.userId,
-          strategyId,
-          notionalUsd: notional,
-          leverage,
-        });
-        okCount++;
-      } catch (err) {
-        logger.error({ err, userId: user.userId, strategyId }, 'enableUserStrategy failed');
-        errors.push(`${strategyId}: ${(err as Error).message}`);
-      }
-    }
-
-    const flash = errors.length
-      ? { ok: false, message: errors.join(' · ') }
-      : { ok: true, message: `Сохранено: ${okCount} стратегий включено${skipCount ? `, ${skipCount} пропущено` : ''}` };
-
-    const apiKey = findActiveKey(user.userId);
-    const sub2 = findSubscription(user.userId);
-    const margin2 = computeMarginState(user.userId);
-    const symbols2 = Object.values(STRATEGY_CONFIGS)
-      .filter((s) => s.enabled && s.symbol)
-      .map((s) => s.symbol!);
-    const lotInfo2 = await gatherLotInfo(symbols2);
-    reply.header('content-type', 'text/html; charset=utf-8');
-    reply.header('cache-control', 'private, no-store');
-    return reply.send(
-      renderStrategiesPage({
-        displayName: user.displayName,
-        apiKeyConnected: !!apiKey && apiKey.last_verified_at !== null,
-        userStrategies: userStrategyMap(user.userId),
-        flash,
-        csrfToken: issueCsrfToken(req, reply),
-        tradingPausedAt: sub2?.trading_paused_at ?? null,
-        insufficientBalanceAt: apiKey?.insufficient_balance_at ?? null,
-        lastBalanceUsdt: apiKey?.last_balance_usdt ?? null,
-        usedMarginUsdt: margin2.usedUsdt,
-        lotInfo: lotInfo2,
-      }),
-    );
-  });
+  // POST /account/strategies (manual strategy update) — REMOVED in TRACK E.
+  // Tier is auto-assigned by balance. Users use /account/strategies/pause
+  // and /resume for trading on-off control.
 
   // -------- POST /account/strategies/pause + /resume --------
   // User-controlled trading pause. When paused, fan-out skips this
@@ -410,6 +294,27 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         ok: false,
         message: 'Не удалось сохранить ключ. Попробуйте позже.',
       });
+    }
+    // TRACK E — assign tier based on balance. VIP users (operator + Eldar)
+    // are handled separately and don't go through auto-assignment.
+    const sub = findSubscription(user.userId);
+    if (sub?.plan !== 'vip') {
+      const tierId = matchTier(verifyRes.totalUsdt);
+      if (tierId !== null) {
+        try {
+          assignTier(user.userId, tierId);
+        } catch (err) {
+          logger.error({ err, userId: user.userId, tierId }, 'assignTier after verify failed');
+        }
+      } else {
+        return renderApiKeyWithFlash(req, reply, user, {
+          ok: true,
+          message:
+            `Ключ сохранён. Баланс: ${verifyRes.totalUsdt.toFixed(2)} USDT — ниже минимума автотрейдинга ` +
+            `($${MIN_AUTOTRADING_DEPOSIT_USDT}). Пополните счёт и нажмите «Проверить связь» — мы автоматически ` +
+            `подберём тариф и включим стратегии.`,
+        });
+      }
     }
     return renderApiKeyWithFlash(req, reply, user, {
       ok: true,

@@ -122,6 +122,25 @@ export type StrategyConfig = {
    *  instead of the cryptic `description` string. If not set, falls
    *  back to `symbol + " " + timeframe + "m"`. */
   name?: string;
+  /** TRACK E (tier system) — risk band classification. Drives which
+   *  tiers can include this strategy without operator-explicit listing.
+   *    - low      → DD ≤ 6%   (BNB-class, very safe)
+   *    - medium   → DD 6-15%  (XRP-class, moderate)
+   *    - high     → DD 15-25% (TRX/UNI/TON-class, aggressive)
+   *    - extreme  → DD > 25%  (HBAR-class, only for VIP / operator override) */
+  riskBand?: 'low' | 'medium' | 'high' | 'extreme';
+  /** TRACK E — whether this strategy is eligible for inclusion in
+   *  public tier-packages. false = available only via VIP override
+   *  (operator hand-picks for whale users). Default true. Used to
+   *  exclude TON/UNI/HBAR (large SL = scary marketing) from tiers. */
+  tierEligible?: boolean;
+  /** TRACK E — maximum leverage that keeps the safety SL firing BEFORE
+   *  Bybit-side liquidation. Computed once from slPct using:
+   *    floor((1 - 0.30) / (slPct + 0.02))
+   *  where 0.30 = margin safety buffer (funding/fees/maintenance), 0.02
+   *  = slippage assumption between SL trigger and actual fill.
+   *  If omitted, runtime falls back to default leverage from tier. */
+  maxSafeLeverage?: number;
   /** When true, an incoming entry webhook on the OPPOSITE side of the
    *  currently-open position triggers an immediate close-and-reopen:
    *  the current position is force-closed at the incoming price with
@@ -201,6 +220,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'xrp-cntr-tc-mf50': {
     id: 'xrp-cntr-tc-mf50',
     code: '002',
+    // TRACK E — high band (DD 19% > 15% medium ceiling), eligible for
+    // Standard+ tiers. maxSafeLeverage 4× keeps liquidation buffer.
+    riskBand: 'high',
+    tierEligible: true,
+    maxSafeLeverage: 4,
     description:
       'XRP 15m | LONG: CONT Any Bl + TC Br + MF>50 | SHORT: CONT Any Br + TC Bl + MF<50 | EXIT: reverse signal',
     longDescription:
@@ -285,6 +309,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'uni-cfm-tc-tst': {
     id: 'uni-cfm-tc-tst',
     code: '003',
+    // TRACK E — extreme band (SL 30% scary for retail). Excluded from
+    // public tiers, available only via VIP operator override.
+    riskBand: 'extreme',
+    tierEligible: false,
+    maxSafeLeverage: 2,
     description:
       'UNI 1h | LONG: CFM Any Bl + TC Br + TST Trending | SHORT: CFM Any Br + TC Bl + TST Trending | EXIT: CFM Built-in',
     longDescription:
@@ -375,6 +404,9 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'trx-cfm-tt-wc': {
     id: 'trx-cfm-tt-wc',
     code: '004',
+    riskBand: 'high',
+    tierEligible: true,
+    maxSafeLeverage: 4,
     description:
       'TRX 1h | LONG: CFM Any Bl + TT Bullish + Weak Br Confluence | SHORT: CFM Any Br + TT Bearish + Weak Bl Confluence | EXIT: CFM Built-in',
     longDescription:
@@ -455,6 +487,10 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'ton-cntr-cfm-neo': {
     id: 'ton-cntr-cfm-neo',
     code: '005',
+    // TRACK E — extreme band (SL 25%), VIP override only.
+    riskBand: 'extreme',
+    tierEligible: false,
+    maxSafeLeverage: 2,
     description:
       'TON 1h | LONG: CNTR Normal Bl + CFM Downtrend + Neo Cloud Br | SHORT: CNTR Normal Br + CFM Uptrend + Neo Cloud Bl | EXIT: CNTR Built-in',
     longDescription:
@@ -536,6 +572,10 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'hbar-cntr-tsr-scfl': {
     id: 'hbar-cntr-tsr-scfl',
     code: '006',
+    // TRACK E — extreme band (DD 36%, SL 28%), VIP override only.
+    riskBand: 'extreme',
+    tierEligible: false,
+    maxSafeLeverage: 2,
     description:
       'HBAR 1h | LONG: CNTR Normal Br + TS Ranging + Strong Bl Cfl | SHORT: CNTR Normal Bl + TS Ranging + Strong Br Cfl | EXIT: CNTR Built-in',
     longDescription:
@@ -624,6 +664,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'bch-cntr-cfm-tc': {
     id: 'bch-cntr-cfm-tc',
     code: '007',
+    // TRACK E — low band (DD 5%), eligible all tiers. Tight SL 4% allows
+    // aggressive 11× leverage with safety margin.
+    riskBand: 'low',
+    tierEligible: true,
+    maxSafeLeverage: 11,
     description:
       'BCH 5m | LONG: CNTR Normal Bl + CFM Downtrend + TC Bl | SHORT: CNTR Normal Br + CFM Uptrend + TC Br | EXIT: CNTR Built-in',
     longDescription:
@@ -715,6 +760,10 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'btc-cfm-strong-tst': {
     id: 'btc-cfm-strong-tst',
     code: '008',
+    // TRACK E — low band (DD 4%), eligible all tiers. SL 5% → 10× safe lev.
+    riskBand: 'low',
+    tierEligible: true,
+    maxSafeLeverage: 10,
     description:
       'BTC 5m | LONG: CFM Strong Br + TST Trending | SHORT: CFM Strong Bl + TST Trending | EXIT: CFM Built-in',
     longDescription:
@@ -770,6 +819,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
+    // TRACK E — low band (DD 0.95%, the safest). Eligible all tiers.
+    // SL 7.5% → 7× safe lev.
+    riskBand: 'low',
+    tierEligible: true,
+    maxSafeLeverage: 7,
     description:
       'BNB 15m | LONG: CONT Any Br + TT Br + MF>50 | SHORT: CONT Any Bl + TT Bl + MF<50 | EXIT: CONT Built-in',
     longDescription:
