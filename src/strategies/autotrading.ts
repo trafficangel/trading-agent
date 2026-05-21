@@ -56,7 +56,6 @@ function renderPage(): string {
       ${renderHowItWorks()}
       ${renderPricing()}
       ${renderBybitBonus()}
-      ${renderLeveragePositive()}
       ${renderSafety()}
       ${renderLeverageEducation()}
       ${renderStrategyPipeline()}
@@ -271,61 +270,6 @@ function renderSafety(): string {
             «отобранных» успешных скриншотов.
           </div>
         </div>
-      </div>
-    </section>
-  `;
-}
-
-/**
- * Positive framing of leverage — answer to «но я же боюсь плеча,
- * меня тренировали так думать». Показываем что плечо + защитный
- * стоп = инструмент роста PnL без увеличения риска.
- */
-function renderLeveragePositive(): string {
-  return `
-    <section class="at-section at-lev-pos">
-      <h2 class="at-section-title">${ico('⚡')}Зачем нам плечо: больше прибыли с управляемым риском</h2>
-      <p class="at-section-sub">
-        Плечо у нас — это не «казино», это инструмент. Оно позволяет открыть позицию
-        <b>в несколько раз больше</b>, чем размер маржи, и заработать больше с того же депозита —
-        при условии что риск контролируется фиксированным стоп-лоссом.
-      </p>
-      <div class="at-lev-pos-grid">
-        <div class="at-lev-pos-col at-lev-pos-without">
-          <div class="at-lev-pos-col-title">${ico('🐢')}Без плеча — депозит $1 000 на BCH</div>
-          <div class="at-lev-pos-stats">
-            <div class="at-lev-pos-row"><span>Маржа в сделке</span><b>$200</b></div>
-            <div class="at-lev-pos-row"><span>Размер позиции</span><b>$200</b></div>
-            <div class="at-lev-pos-row"><span>Плечо</span><b>1×</b></div>
-            <div class="at-lev-pos-row at-lev-pos-row-hl"><span>Ожидаемый PnL/мес</span><b>~$2.7</b></div>
-            <div class="at-lev-pos-row"><span>Худшая потеря (SL hit)</span><b>$7 (0.7%)</b></div>
-          </div>
-          <div class="at-lev-pos-conclusion">
-            На таком депозите плечо 1× даёт <b>0.3% прироста в месяц</b> — это меньше,
-            чем стоит подписка, и даже банковский вклад прибыльнее.
-          </div>
-        </div>
-        <div class="at-lev-pos-col at-lev-pos-with">
-          <div class="at-lev-pos-col-title">${ico('🚀')}С безопасным плечом 12× — тот же $1 000</div>
-          <div class="at-lev-pos-stats">
-            <div class="at-lev-pos-row"><span>Маржа в сделке</span><b>$200</b></div>
-            <div class="at-lev-pos-row"><span>Размер позиции</span><b>$2 400</b></div>
-            <div class="at-lev-pos-row"><span>Плечо</span><b>12×</b></div>
-            <div class="at-lev-pos-row at-lev-pos-row-hl"><span>Ожидаемый PnL/мес</span><b>~$32</b></div>
-            <div class="at-lev-pos-row"><span>Худшая потеря (SL hit)</span><b>$84 (8.4%)</b></div>
-          </div>
-          <div class="at-lev-pos-conclusion">
-            То же депозита, но <b>в 12 раз больше торгового объёма</b> → в 12 раз
-            больше прибыли. <b>Стоп-лосс срабатывает раньше ликвидации</b>: убыток
-            заранее известный, фиксированный.
-          </div>
-        </div>
-      </div>
-      <div class="at-lev-pos-callout">
-        ${ico('🎯')}<b>Главная мысль:</b> плечо — это <b>множитель доступного капитала</b>.
-        Без управления риском оно опасно. С нашим стоп-лоссом (формула <code>safe_leverage = floor(0.7 / (slPct + 0.02))</code>)
-        ликвидация структурно невозможна, а PnL растёт пропорционально плечу.
-        Это <b>не «играть в казино плечом 50×»</b> — это математически выверенный размер позиции.
       </div>
     </section>
   `;
