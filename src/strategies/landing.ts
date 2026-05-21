@@ -1584,12 +1584,35 @@ const STYLE = `
     );
     pointer-events: none;
   }
+  /* Two-row layout: top row = trade ID + side pill (no wrapping issues),
+   * bottom row = dim meta (STRAT-XXX · SYMBOL). Was a single squeezed flex
+   * row that wrapped the «ШОРТ» label badly when card width tightened. */
   .live-pos-head {
-    display: flex; justify-content: space-between; align-items: baseline;
-    gap: 8px; margin-bottom: 12px;
+    display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;
+  }
+  .live-pos-id-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
   }
   .live-pos-id { font-size: 14px; }
   .live-pos-id b { font-family: 'SF Mono', 'Menlo', monospace; }
+  .live-pos-side-pill {
+    font-size: 10.5px; font-weight: 600;
+    padding: 2px 8px; border-radius: 999px;
+    letter-spacing: 0.04em; line-height: 1.4;
+    flex-shrink: 0;
+  }
+  .live-pos-side-pill.side-long {
+    background: rgba(74, 217, 145, 0.16); color: var(--accent);
+    border: 1px solid rgba(74, 217, 145, 0.40);
+  }
+  .live-pos-side-pill.side-short {
+    background: rgba(239, 91, 107, 0.16); color: var(--danger);
+    border: 1px solid rgba(239, 91, 107, 0.40);
+  }
+  .live-pos-meta-row {
+    font-size: 11.5px; color: var(--text-dim); letter-spacing: 0.02em;
+  }
+  /* Legacy classes kept for back-compat if any cached HTML still uses them. */
   .live-pos-side { font-size: 12px; color: var(--text-dim); }
   .live-pos-side .side-long { color: var(--accent); font-weight: 600; }
   .live-pos-side .side-short { color: var(--danger); font-weight: 600; }

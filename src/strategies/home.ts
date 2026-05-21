@@ -932,8 +932,11 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
     return `
       <div class="live-pos-card" data-strategy="${escapeHtml(p.strategyCode)}" data-trade-id="${escapeHtml(p.tradeId)}">
         <div class="live-pos-head">
-          <div class="live-pos-id">${sideEmoji} <b>${escapeHtml(p.tradeId)}</b> · STRAT-${escapeHtml(p.strategyCode)}</div>
-          <div class="live-pos-side"><span class="side-${p.side}">${sideLabel}</span> · ${escapeHtml(p.symbol)}</div>
+          <div class="live-pos-id-row">
+            <span class="live-pos-id">${sideEmoji} <b>${escapeHtml(p.tradeId)}</b></span>
+            <span class="live-pos-side-pill side-${p.side}">${sideLabel}</span>
+          </div>
+          <div class="live-pos-meta-row">STRAT-${escapeHtml(p.strategyCode)} · ${escapeHtml(p.symbol)}</div>
         </div>
         <div class="live-pos-prices">
           <div class="live-pos-price-row">
