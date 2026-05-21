@@ -530,7 +530,7 @@ function renderOnboardingChecklist(args: {
   type CtaLink = { kind: 'link'; label: string; href: string; primary?: boolean };
   type CtaForm = { kind: 'form'; label: string; action: string; primary?: boolean };
   type Cta = CtaLink | CtaForm;
-  type Step = { num: number; title: string; done: boolean; ctas?: Cta[] };
+  type Step = { num: number; title: string; done: boolean; ctas?: Cta[]; hint?: string };
 
   // Step 3 title is dynamic to reflect state:
   //   - tier picked but balance insufficient → "Выбор тарифа · ждём депозит для {Tier}"
@@ -571,9 +571,19 @@ function renderOnboardingChecklist(args: {
     },
     {
       num: 4,
-      title: 'Стратегии работают',
+      title: tradingStarted ? 'Стратегии работают' : 'Ждём первую сделку',
       done: tradingStarted,
-      ctas: undefined,
+      // Last step is a passive "wait" — there's nothing the user can do here,
+      // signals fire when the market gives them. Explain that explicitly so
+      // the 75% progress doesn't feel stuck.
+      hint: tradingStarted
+        ? undefined
+        : tierActivated
+          ? 'Тариф активирован, ждём сигнал от стратегий. Это может занять от нескольких минут до пары часов в зависимости от рынка — стратегии открывают сделки автоматически, как только условия совпадут. Можно подписаться на Telegram-канал и наблюдать в реальном времени.'
+          : 'Этот шаг завершится автоматически, как только стратегия откроет первую сделку на вашем счёте.',
+      ctas: tradingStarted || !tierActivated
+        ? undefined
+        : [{ kind: 'link', label: 'Telegram-канал сигналов ↗', href: 'https://t.me/luxalgosignal', primary: false }],
     },
   ];
 
@@ -599,6 +609,7 @@ function renderOnboardingChecklist(args: {
           <div class="onboarding-marker">${s.done ? '✓' : s.num}</div>
           <div class="onboarding-body">
             <div class="onboarding-title">${escapeHtml(s.title)}</div>
+            ${s.hint && !s.done ? `<div class="onboarding-hint">${escapeHtml(s.hint)}</div>` : ''}
             ${ctaHtml ? `<div class="onboarding-cta-row">${ctaHtml}</div>` : ''}
           </div>
         </div>
@@ -1258,8 +1269,12 @@ function cabinetStyles(): string {
   }
   .cabinet-control-btn-go:hover { background: #5ce0a0; }
 
+  .onboarding-hint {
+    font-size: 12.5px; color: #8590a0; line-height: 1.55;
+    margin-top: 6px; max-width: 720px;
+  }
   .onboarding-cta-row {
-    display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px;
+    display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;
   }
   .onboarding-cta {
     background: #4ad991; color: #0b0e13; padding: 6px 14px;
