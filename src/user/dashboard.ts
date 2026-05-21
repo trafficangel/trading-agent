@@ -169,27 +169,19 @@ export function renderDashboard(args: {
     </div>
   `;
 
+  // Quick-links — navigation to pages that DON'T have an inline CTA in
+  // the stat-card grid above. We removed «Сменить тариф», «Подключение
+  // Bybit» and «Подписка» quick-links because they duplicated inline
+  // links already present on the tier-card / api-key-card / subscription-card.
   const quickLinks = `
     <div class="cabinet-actions">
       <a class="cabinet-action" href="/account/strategies">
         <div class="cabinet-action-title">${ico('⚙️')}Стратегии в работе</div>
         <div class="cabinet-action-sub">Какие стратегии торгуют на вашем счёте и с каким размером позиции</div>
       </a>
-      <a class="cabinet-action" href="/account/subscription/select-tier">
-        <div class="cabinet-action-title">${ico('💳')}Сменить тариф</div>
-        <div class="cabinet-action-sub">Выбрать другой тариф автотрейдинга под текущий депозит</div>
-      </a>
-      <a class="cabinet-action" href="/account/api-key">
-        <div class="cabinet-action-title">${ico('🔑')}Подключение Bybit</div>
-        <div class="cabinet-action-sub">API-ключ для исполнения сделок на вашем счёте</div>
-      </a>
       <a class="cabinet-action" href="/account/trades">
         <div class="cabinet-action-title">${ico('📈')}История сделок</div>
         <div class="cabinet-action-sub">Все ваши сделки по подключённым стратегиям</div>
-      </a>
-      <a class="cabinet-action" href="/account/subscription">
-        <div class="cabinet-action-title">${ico('💳')}Подписка</div>
-        <div class="cabinet-action-sub">Статус доступа и продление</div>
       </a>
     </div>
   `;
@@ -288,7 +280,11 @@ function renderSubscriptionCard(sub: SubscriptionRow | null): string {
     <div class="stat-card cabinet-card ${cls}">
       <div class="stat-card-label">${ico(emoji)}Подписка</div>
       <div class="stat-card-value">${title}</div>
-      <div class="stat-card-sub">${isCancelled ? '—' : `${escapeHtml(days.text)} · до ${accessDateStr}`}</div>
+      <div class="stat-card-sub">
+        ${isCancelled ? '—' : `${escapeHtml(days.text)} · до ${accessDateStr}`}
+        <br/>
+        <a href="/account/subscription" style="color:#8590a0; font-size:11.5px; text-decoration:underline">Управление подпиской →</a>
+      </div>
     </div>
   `;
 }
