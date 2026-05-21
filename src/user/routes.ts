@@ -312,8 +312,19 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     }
     if (!requireCsrf(req, reply)) return;
     const body = (req.body ?? {}) as { apiKey?: string; apiSecret?: string };
-    const apiKey = (body.apiKey ?? '').trim();
-    const apiSecret = (body.apiSecret ?? '').trim();
+    let apiKey = (body.apiKey ?? '').trim();
+    let apiSecret = (body.apiSecret ?? '').trim();
+    // Phase C — server-side fallback for smart-paste. If the user
+    // pasted both values into the API Key field separated by newline
+    // or colon (and the JS smart-split didn't fire — e.g. JS disabled
+    // or different paste behaviour in some browsers), parse it here.
+    if (apiKey && !apiSecret) {
+      const parts = apiKey.split(/[\r\n:]+/).map((s) => s.trim()).filter(Boolean);
+      if (parts.length === 2 && parts[0] && parts[1] && parts[0].length > 8 && parts[1].length > 16) {
+        apiKey = parts[0];
+        apiSecret = parts[1];
+      }
+    }
     if (!apiKey || !apiSecret) {
       return renderApiKeyWithFlash(req, reply, user, { ok: false, message: 'Заполните оба поля.' });
     }

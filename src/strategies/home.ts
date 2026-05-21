@@ -83,18 +83,18 @@ type Content = {
 
 const CONTENT: Record<Lang, Content> = {
   ru: {
-    htmlTitle: 'Robot Claude — проверенные стратегии для криптотрейдинга',
+    htmlTitle: 'Robot Claude — автоматический криптотрейдинг на вашем Bybit',
     hero: {
-      eyebrow: '📊 ОТКРЫТАЯ СТАТИСТИКА · 📡 TELEGRAM-СИГНАЛЫ · 🤖 АВТОТРЕЙДИНГ',
-      title1: 'Проверенные ',
-      titleAccent: 'стратегии и сигналы',
-      title2: ' для криптотрейдинга',
+      eyebrow: '🤖 АВТОТРЕЙДИНГ · 💰 ВАШИ ДЕНЬГИ НА BYBIT · 📊 ОТКРЫТАЯ СТАТИСТИКА',
+      title1: 'Пассивный доход на ',
+      titleAccent: 'криптотрейдинге',
+      title2: ' — без вашего участия',
       subtitle:
-        'Каждая стратегия отобрана по бэктестам на 200+ дней и пересчитана на реальную комиссию Bybit. '
-        + 'Смотрите live-сделки на сайте, ловите сигналы в Telegram бесплатно — '
-        + 'или подключите автотрейдинг, и наши стратегии будут торговать на вашем счёте Bybit автоматически.',
-      ctaPrimary: 'Посмотреть стратегии →',
-      ctaSecondary: 'Telegram канал ↗',
+        'Наша система автоматически торгует на вашем счёте Bybit по проверенным стратегиям. '
+        + 'Деньги остаются у вас на бирже — это не фонд и не пирамида. '
+        + 'Все сделки видны в реальном времени. Тариф подбирается под ваш депозит автоматически.',
+      ctaPrimary: 'Как начать →',
+      ctaSecondary: 'Live-сделки ↓',
     },
     liveStrip: {
       strategies: 'Стратегий',
@@ -1100,12 +1100,12 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
         </h1>
         <p class="hero-subtitle">${escapeHtml(c.hero.subtitle)}</p>
         <div class="hero-cta">
-          <a class="btn btn-primary" href="/strategies">${escapeHtml(c.hero.ctaPrimary)}</a>
-          <a class="btn btn-ghost" href="${escapeHtml(c.telegramUrl)}" target="_blank" rel="noopener">
+          <a class="btn btn-primary" href="/autotrading">${escapeHtml(c.hero.ctaPrimary)}</a>
+          <a class="btn btn-ghost" href="#live-positions">
             ${escapeHtml(c.hero.ctaSecondary)}
           </a>
           <a class="btn btn-link-out" href="https://www.luxalgo.com/" target="_blank" rel="noopener">
-            ⚡ ${lang === 'en' ? 'Powered by LuxAlgo' : 'Powered by LuxAlgo'} ↗
+            ⚡ Powered by LuxAlgo ↗
           </a>
         </div>
       </div>

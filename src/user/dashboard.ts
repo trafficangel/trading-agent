@@ -175,6 +175,12 @@ export function renderDashboard(args: {
     </div>
   `;
 
+  // TRACK E Phase C — onboarding checklist. Shows new users what's
+  // left to do (connect key, top up balance) until trading actually
+  // starts. Hidden once all checkpoints are complete + first trade
+  // is open. For VIP override users we skip the checklist.
+  const onboardingChecklist = renderOnboardingChecklist(args);
+
   // TRACK E — upgrade promo. Shown when balance-monitor noted that
   // user's balance moved them up a tier (tier_transition_target_id set
   // to a HIGHER tier). User clicks to confirm — applyUpgrade via POST.
@@ -186,6 +192,7 @@ export function renderDashboard(args: {
       ${greeting}
       ${marginBanner}
       ${statusBanner}
+      ${onboardingChecklist}
       ${upgradePromo}
       ${cards}
       ${quickLinks}
@@ -343,6 +350,104 @@ function tierEmoji(tierId: TierId): string {
     case 'pro': return '🏆';
     case 'vip': return '👑';
   }
+}
+
+/**
+ * TRACK E Phase C — onboarding checklist.
+ *
+ * For new users guides them step-by-step from registration → first
+ * trade. Each checkpoint either shows a green ✓ (done) or an amber
+ * action button (CTA to next step). Hidden when all done OR when
+ * user has VIP override (operator setup).
+ *
+ * Checkpoints:
+ *   1. Регистрация (always done by definition — user is in /account)
+ *   2. Подключен Bybit-ключ (api_key.last_verified_at !== null)
+ *   3. Депозит ≥ $300 (api_key.last_balance_usdt >= 300)
+ *   4. Тариф назначен + есть первая сделка (openPositionsCount + closedCount > 0)
+ */
+function renderOnboardingChecklist(args: {
+  subscription: SubscriptionRow | null;
+  apiKey: ApiKeySummary | null;
+  enabledStrategiesCount: number;
+  openPositionsCount: number;
+  closedPositionsCount: number;
+  margin: MarginState;
+}): string {
+  const sub = args.subscription;
+  if (!sub) return '';
+  if (sub.plan === 'vip') return ''; // VIP override = bypass onboarding
+
+  // Compute checkpoint statuses.
+  const keyConnected = !!(args.apiKey && args.apiKey.last_verified_at && !args.apiKey.revoked_at);
+  const balance = args.margin.balanceUsdt ?? 0;
+  const depositOk = balance >= 300;
+  const tradingStarted = args.openPositionsCount + args.closedPositionsCount > 0;
+
+  // If all done → hide. User no longer needs the wizard.
+  if (keyConnected && depositOk && tradingStarted) return '';
+
+  type Step = { num: number; title: string; done: boolean; cta?: { label: string; href: string } };
+  const steps: Step[] = [
+    { num: 1, title: 'Регистрация', done: true },
+    {
+      num: 2,
+      title: 'Подключение Bybit',
+      done: keyConnected,
+      cta: keyConnected ? undefined : { label: 'Подключить ключ →', href: '/account/api-key' },
+    },
+    {
+      num: 3,
+      title: 'Депозит на Bybit ≥ $300',
+      done: depositOk,
+      cta: depositOk
+        ? undefined
+        : keyConnected
+          ? { label: 'Открыть Bybit для пополнения →', href: 'https://www.bybit.com/user/assets/deposit' }
+          : undefined,
+    },
+    {
+      num: 4,
+      title: 'Стратегии работают',
+      done: tradingStarted,
+      cta: tradingStarted ? undefined : { label: 'Подробнее →', href: '/account/strategies' },
+    },
+  ];
+
+  const stepsHtml = steps
+    .map((s) => {
+      const cls = s.done ? 'done' : steps.findIndex((x) => !x.done) === steps.indexOf(s) ? 'current' : 'pending';
+      const cta = s.cta
+        ? `<a class="onboarding-cta" href="${escapeHtml(s.cta.href)}"${s.cta.href.startsWith('http') ? ' target="_blank" rel="noopener"' : ''}>${escapeHtml(s.cta.label)}</a>`
+        : '';
+      return `
+        <div class="onboarding-step ${cls}">
+          <div class="onboarding-marker">${s.done ? '✓' : s.num}</div>
+          <div class="onboarding-body">
+            <div class="onboarding-title">${escapeHtml(s.title)}</div>
+            ${cta}
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+
+  const doneCount = steps.filter((s) => s.done).length;
+
+  return `
+    <div class="onboarding-checklist">
+      <div class="onboarding-header">
+        <div class="onboarding-h-left">
+          <div class="onboarding-h-title">${ico('🎯')}Что осталось сделать</div>
+          <div class="onboarding-h-sub">${doneCount} из ${steps.length} шагов выполнено</div>
+        </div>
+        <div class="onboarding-progress">
+          <div class="onboarding-progress-bar" style="width:${Math.round((doneCount / steps.length) * 100)}%"></div>
+        </div>
+      </div>
+      <div class="onboarding-steps">${stepsHtml}</div>
+    </div>
+  `;
 }
 
 /** Upgrade promo banner. Shown when balance-monitor saw the user's
@@ -829,6 +934,77 @@ function cabinetStyles(): string {
     color: #ffbc46;
     margin-bottom: 6px;
   }
+  /* TRACK E Phase C — onboarding checklist */
+  .onboarding-checklist {
+    background: linear-gradient(180deg, rgba(74, 217, 145, 0.06) 0%, rgba(74, 217, 145, 0.02) 100%);
+    border: 1px solid rgba(74, 217, 145, 0.35);
+    border-radius: 14px;
+    padding: 20px 22px;
+    margin: 0 0 24px;
+  }
+  .onboarding-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; margin-bottom: 16px;
+  }
+  .onboarding-h-title { font-size: 15px; font-weight: 600; color: #4ad991; margin-bottom: 2px; }
+  .onboarding-h-sub { font-size: 12px; color: #8590a0; }
+  .onboarding-progress {
+    width: 180px; height: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 3px; overflow: hidden;
+  }
+  .onboarding-progress-bar {
+    height: 100%; background: #4ad991;
+    transition: width 0.3s ease;
+  }
+  .onboarding-steps {
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .onboarding-step {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 14px; border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid transparent;
+  }
+  .onboarding-step.done {
+    opacity: 0.6;
+  }
+  .onboarding-step.current {
+    border-color: rgba(74, 217, 145, 0.35);
+    background: rgba(74, 217, 145, 0.04);
+  }
+  .onboarding-marker {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+    flex-shrink: 0;
+  }
+  .onboarding-step.done .onboarding-marker {
+    background: #4ad991; color: #0b0e13;
+  }
+  .onboarding-step.current .onboarding-marker {
+    background: rgba(74, 217, 145, 0.20); color: #4ad991;
+    border: 2px solid #4ad991;
+  }
+  .onboarding-step.pending .onboarding-marker {
+    background: rgba(255, 255, 255, 0.05); color: #6b7480;
+  }
+  .onboarding-body {
+    flex: 1;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+  }
+  .onboarding-title { font-size: 14px; color: #cfd6dd; }
+  .onboarding-step.done .onboarding-title { color: #8590a0; text-decoration: line-through; }
+  .onboarding-cta {
+    background: #4ad991; color: #0b0e13; padding: 6px 14px;
+    border-radius: 7px; font-size: 13px; font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .onboarding-cta:hover { background: #5ce0a0; text-decoration: none; }
+
   /* Upgrade promo banner — blue-ish accent, less alarming than red */
   .cabinet-banner-promo {
     display: flex; gap: 16px; padding: 18px 22px; margin: 0 0 24px;

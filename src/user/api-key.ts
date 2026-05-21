@@ -173,6 +173,38 @@ function renderConnectForm(csrfToken: string): string {
   return `
     <div class="key-card">
       <div class="key-card-title">${ico('🔑')}Подключите ключ Bybit</div>
+
+      <!-- Phase C — quick-start helper. Прямая ссылка-кнопка на Bybit
+           API management в новой вкладке. Юзер не должен бродить по
+           меню профиля чтобы найти страницу — мы её открываем сразу. -->
+      <div class="key-quickstart">
+        <div class="key-quickstart-step">
+          <div class="key-quickstart-num">1</div>
+          <div class="key-quickstart-body">
+            <b>Откройте страницу API на Bybit</b><br/>
+            <a href="https://www.bybit.com/app/user/api-management"
+               target="_blank" rel="noopener"
+               class="key-btn-secondary key-btn-quickstart">
+              ${ico('🌐')}Открыть Bybit API Management →
+            </a>
+          </div>
+        </div>
+        <div class="key-quickstart-step">
+          <div class="key-quickstart-num">2</div>
+          <div class="key-quickstart-body">
+            <b>Создайте ключ с правом на торговлю</b> (см. пошаговую инструкцию ниже).
+            После создания скопируйте <b>API Key</b> и <b>API Secret</b>.
+          </div>
+        </div>
+        <div class="key-quickstart-step">
+          <div class="key-quickstart-num">3</div>
+          <div class="key-quickstart-body">
+            <b>Вставьте оба значения в форму ниже</b> и нажмите «Проверить и сохранить».
+            Тариф назначится автоматически по вашему балансу.
+          </div>
+        </div>
+      </div>
+
       ${renderInputs(csrfToken)}
     </div>
   `;
@@ -180,24 +212,52 @@ function renderConnectForm(csrfToken: string): string {
 
 function renderInputs(csrfToken: string): string {
   return `
-    <form method="POST" action="/account/api-key" class="key-form">
+    <form method="POST" action="/account/api-key" class="key-form" id="key-form">
       ${csrfInput(csrfToken)}
       <label class="key-field-row">
         <span class="key-field-label">API Key</span>
-        <input type="text" name="apiKey" required autocomplete="off"
+        <input type="text" name="apiKey" id="key-input-key" required autocomplete="off"
           placeholder="например: nDAxXXXXXXXXXXXXXX" />
       </label>
       <label class="key-field-row">
         <span class="key-field-label">API Secret</span>
-        <input type="password" name="apiSecret" required autocomplete="off"
+        <input type="password" name="apiSecret" id="key-input-secret" required autocomplete="off"
           placeholder="64-символьная строка" />
       </label>
       <div class="key-form-hint">
+        ${ico('💡')}<b>Подсказка</b>: если вы скопировали оба значения в один буфер
+        (через перевод строки или «:»), просто вставьте всё в поле <b>API Key</b> —
+        мы автоматически разделим на key и secret.
+      </div>
+      <div class="key-form-hint">
         Мы шифруем ключ AES-256-GCM при сохранении. Проверим связь с Bybit
-        до того как сохранить — если ключ невалидный, форма скажет почему.
+        до сохранения — если ключ невалидный, форма скажет почему.
       </div>
       <button type="submit" class="key-btn-primary">Проверить и сохранить</button>
     </form>
+    <script>
+      // Smart paste — если юзер вставил «KEY\\nSECRET» или «KEY:SECRET»
+      // в поле API Key, автоматически разделяем на два поля.
+      (function() {
+        var keyInput = document.getElementById('key-input-key');
+        var secretInput = document.getElementById('key-input-secret');
+        if (!keyInput || !secretInput) return;
+        keyInput.addEventListener('paste', function(e) {
+          var text = (e.clipboardData || window.clipboardData).getData('text');
+          if (!text) return;
+          // Split on newline OR colon (but not within URL etc.)
+          var parts = text.trim().split(/[\\n\\r:]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+          if (parts.length === 2 && parts[0].length > 8 && parts[1].length > 16) {
+            e.preventDefault();
+            keyInput.value = parts[0];
+            secretInput.value = parts[1];
+            // Focus secret so user immediately sees both filled
+            secretInput.focus();
+            secretInput.blur();
+          }
+        });
+      })();
+    </script>
   `;
 }
 
@@ -412,6 +472,39 @@ function styles(): string {
     line-height: 1.55;
   }
   .key-rotate-hint b { color: #cfd6dd; }
+
+  /* TRACK E Phase C — quick-start steps above the form */
+  .key-quickstart {
+    background: rgba(74, 217, 145, 0.05);
+    border: 1px solid rgba(74, 217, 145, 0.30);
+    border-radius: 10px; padding: 16px 18px; margin: 14px 0 20px;
+  }
+  .key-quickstart-step {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 8px 0;
+  }
+  .key-quickstart-step + .key-quickstart-step { border-top: 1px solid rgba(74, 217, 145, 0.15); margin-top: 8px; padding-top: 14px; }
+  .key-quickstart-num {
+    flex: 0 0 28px; width: 28px; height: 28px;
+    background: #4ad991; color: #0b0e13;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+  }
+  .key-quickstart-body {
+    flex: 1; color: #cfd6dd; font-size: 13.5px; line-height: 1.55;
+  }
+  .key-quickstart-body b { color: #e8edf2; }
+  .key-btn-quickstart {
+    display: inline-block; margin-top: 6px;
+    padding: 8px 14px; border-radius: 8px;
+    background: rgba(74, 217, 145, 0.12);
+    border: 1px solid rgba(74, 217, 145, 0.50);
+    color: #4ad991;
+    font-size: 13px; font-weight: 600; text-decoration: none;
+    cursor: pointer;
+  }
+  .key-btn-quickstart:hover { background: rgba(74, 217, 145, 0.20); }
 
   .key-bonus-banner {
     background: linear-gradient(135deg, rgba(212,175,55,0.10) 0%, rgba(74,217,145,0.06) 100%);
