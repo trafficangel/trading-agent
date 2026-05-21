@@ -580,9 +580,12 @@ const STYLE = `
   .pill .pulse-dot { width: 7px; height: 7px; }
   .empty-state { text-align: center; color: var(--text-dim); padding: 40px 20px; }
   .footer {
-    margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--border);
+    margin-top: 60px; padding: 24px 16px 32px;
+    border-top: 1px solid var(--border);
     color: var(--text-faint); font-size: 12px; text-align: center;
+    line-height: 1.6; max-width: 880px; margin-left: auto; margin-right: auto;
   }
+  .footer b { color: var(--text-dim); }
   .strategy-list .card-body { padding: 0; }
   .strategy-list .row {
     display: flex; justify-content: space-between; align-items: center;
@@ -1836,8 +1839,16 @@ export function pageShell(
   // technical-cache wording ("Кэш: 60 сек") was confusing to visitors.
   const footerText =
     lang === 'en'
-      ? '⚠ Past performance does not guarantee future returns. Backtest results are a model — live trading carries additional execution risk.'
-      : '⚠ Прошлые результаты не гарантируют будущих. Бэктест — это модель; в живой торговле возможна дополнительная погрешность исполнения.';
+      ? '⚠ <b>Risk disclaimer.</b> Robot Claude is a software automation service, not a financial advisor or fund. ' +
+        'Past performance does not guarantee future returns; backtest results are a model and live trading carries additional ' +
+        'execution risk. Cryptocurrency derivatives can result in total loss of capital. By using the service you accept all ' +
+        'trading risks; Robot Claude is not liable for any losses incurred on your exchange account. ' +
+        'Do not deposit more than you are prepared to lose.'
+      : '⚠ <b>Дисклеймер о рисках.</b> Robot Claude — сервис автоматизации торговли, не финансовый советник и не фонд. ' +
+        'Прошлые результаты не гарантируют будущих; бэктест — это модель, а в живой торговле возможна дополнительная ' +
+        'погрешность исполнения. Криптовалютные деривативы сопряжены с риском полной потери капитала. Используя сервис, ' +
+        'вы принимаете на себя все риски, связанные с трейдингом — Robot Claude не несёт ответственности за убытки на ' +
+        'вашем биржевом счёте. Не торгуйте на средства, потерю которых не готовы пережить.';
   // Detail pages set autoRefreshSec so the live-trades table reflects new
   // closed positions without the visitor manually reloading. Server-side
   // render is cheap; cache-control still caps the actual fetch rate.
@@ -1890,10 +1901,11 @@ export function pageShell(
       `<a href="/en" class="${lang === 'en' ? 'active' : ''}" aria-label="English">EN</a>`
     : '';
   const labels = lang === 'en'
-    ? { strategies: 'Strategies', autotrading: 'Auto-trading', channel: 'Channel', support: 'Support', menu: 'Menu', close: 'Close' }
-    : { strategies: 'Стратегии', autotrading: 'Автотрейдинг', channel: 'Канал', support: 'Поддержка', menu: 'Меню', close: 'Закрыть' };
+    ? { home: 'Home', strategies: 'Strategies', autotrading: 'Auto-trading', channel: 'Channel', support: 'Support', menu: 'Menu', close: 'Close' }
+    : { home: 'Главная', strategies: 'Стратегии', autotrading: 'Автотрейдинг', channel: 'Канал', support: 'Поддержка', menu: 'Меню', close: 'Закрыть' };
 
   const navLinksHtml = `
+      <a href="/">${labels.home}</a>
       <a href="/autotrading">${labels.autotrading}</a>
       <a href="/strategies">${labels.strategies}</a>
       <a href="https://t.me/luxalgosignal" target="_blank" rel="noopener">${labels.channel}</a>
