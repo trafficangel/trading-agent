@@ -112,14 +112,14 @@ function renderHero(): string {
         <span class="at-hero-cta-or">или</span>
         <a href="#pricing" class="at-hero-link">посмотреть тарифы ↓</a>
       </div>
+      <div class="at-hero-login">
+        Уже зарегистрированы? <a href="/strategies?login=1">Войти в кабинет →</a>
+      </div>
       <div class="at-hero-pills">
         <span class="at-pill">${ico('🛡')}Деньги на Bybit, не у нас</span>
         <span class="at-pill">${ico('🚫')}Ключ без права на вывод</span>
         <span class="at-pill">${ico('💎')}14 дней теста + ${BYBIT_REF_BONUS_DAYS} дней бонуса по реф-ссылке</span>
         <span class="at-pill">${ico('⏹')}Отмена в один клик</span>
-      </div>
-      <div class="at-hero-login">
-        Уже зарегистрированы? <a href="/strategies?login=1">Войти в кабинет →</a>
       </div>
     </section>
   `;
