@@ -1023,9 +1023,17 @@ function styles(): string {
   .at-lev-example-title {
     margin: 0 0 16px 0; font-size: 15px; color: #e8edf2;
   }
+  /* Worked example grid — 6 stat cards. Explicit breakpoints avoid 4+2
+   * shuffle around 760px. Desktop=3 columns × 2 rows, tablet=2×3, mobile=1×6. */
   .at-lev-example-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 14px; margin-bottom: 16px;
+    display: grid; gap: 14px; margin-bottom: 16px;
+    grid-template-columns: repeat(3, 1fr);
+  }
+  @media (max-width: 720px) {
+    .at-lev-example-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 480px) {
+    .at-lev-example-grid { grid-template-columns: 1fr; }
   }
   .at-lev-stat {
     padding: 12px 14px;

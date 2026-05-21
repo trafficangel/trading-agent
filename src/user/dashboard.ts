@@ -1255,6 +1255,12 @@ function cabinetStyles(): string {
     border: 1px solid rgba(74, 217, 145, 0.40);
   }
   .cabinet-control-body { flex: 1; min-width: 280px; }
+  @media (max-width: 480px) {
+    .cabinet-control { flex-direction: column; align-items: stretch; gap: 14px; }
+    .cabinet-control-body { min-width: 0; }
+    .cabinet-control-form { width: 100%; }
+    .cabinet-control-btn { width: 100%; box-sizing: border-box; }
+  }
   .cabinet-control-title {
     font-size: 15px; font-weight: 600; margin-bottom: 6px;
   }

@@ -404,11 +404,16 @@ function styles(): string {
     font-size: 11.5px; color: #6b7480; margin-bottom: 22px;
   }
 
+  /* Explicit breakpoints — auto-fit produced 3+1 wrap with 3 children on
+   * narrow viewports (600-720px range). Desktop=3, tablet=2, mobile=1. */
   .sub-meta-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    display: grid; grid-template-columns: repeat(3, 1fr);
     gap: 14px 24px; margin: 18px 0;
     padding: 16px 18px; background: rgba(255,255,255,0.02);
     border-radius: 10px; border: 1px solid #1a1f27;
+  }
+  @media (max-width: 720px) {
+    .sub-meta-grid { grid-template-columns: repeat(2, 1fr); }
   }
   @media (max-width: 480px) {
     .sub-meta-grid { grid-template-columns: 1fr; padding: 14px; }

@@ -1534,9 +1534,20 @@ const STYLE = `
     font-size: 11px; font-weight: 600; text-transform: uppercase;
     letter-spacing: 0.05em;
   }
+  /* Active positions cards: minmax bounded by an explicit max so that 1-2
+   * positions don't stretch into oversize banners on a 1100px viewport.
+   * For 4+ positions the JS swaps in .live-pos-carousel instead. */
   .live-pos-grid {
     display: grid; gap: 12px;
     grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+    /* On desktop, cap each card at a reasonable width even when there's
+     * only 1-2 of them — prevents single-card-stretched-100% look. */
+  }
+  @media (min-width: 720px) {
+    .live-pos-grid {
+      grid-template-columns: repeat(auto-fill, minmax(320px, 380px));
+      justify-content: center;
+    }
   }
   /* Horizontal scroll-snap carousel for 4+ positions. Same .live-pos-card
    * markup inside — only the container layout differs. The poller swaps

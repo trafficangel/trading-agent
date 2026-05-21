@@ -939,7 +939,15 @@ function renderTierPicker(p: {
         background: transparent; border: 1px solid #2a323d; color: #cfd6dd;
       }
       .tp-btn-ghost:hover { border-color: #4ad991; color: #4ad991; }
-      .tp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+      /* Explicit breakpoints — auto-fit produced ugly «4+1» wrap with 5 cards
+       * around 1100-1200px. Desktop=5 in a row, tablet=3, narrow tablet=2, mobile=1. */
+      .tp-grid {
+        display: grid; gap: 14px;
+        grid-template-columns: repeat(5, 1fr);
+      }
+      @media (max-width: 1080px) { .tp-grid { grid-template-columns: repeat(3, 1fr); } }
+      @media (max-width: 720px)  { .tp-grid { grid-template-columns: repeat(2, 1fr); } }
+      @media (max-width: 480px)  { .tp-grid { grid-template-columns: 1fr; } }
       .tp-card { background: #11161d; border: 1px solid #1f2630; border-radius: 14px; padding: 18px;
         display: flex; flex-direction: column; position: relative; }
       .tp-card-cur { border-color: rgba(74,217,145,0.55); background: linear-gradient(180deg, rgba(74,217,145,0.06) 0%, #11161d 70%); }
