@@ -3153,8 +3153,16 @@ function renderGatedPreview(
               <input type="text" name="name" placeholder="Как к вам обращаться?"
                      maxlength="40" autocomplete="given-name" />
             </div>
-            <input type="tel" name="phone" required placeholder="+79991234567"
+            <label class="gate-phone-label" for="gate-phone-input">
+              Номер телефона, к которому привязан ваш Telegram
+            </label>
+            <input id="gate-phone-input" type="tel" name="phone" required
+                   placeholder="+_ _ _ _ _ _ _ _ _ _ _"
                    inputmode="tel" autocomplete="tel" />
+            <p class="gate-phone-hint">
+              Полный международный формат: <b>+</b> код страны + номер.
+              Например: <code>+7</code> Россия, <code>+1</code> США, <code>+44</code> Великобритания, <code>+994</code> Азербайджан.
+            </p>
             <button type="submit">
               <span class="gate-btn-label-register">Зарегистрироваться</span>
               <span class="gate-btn-label-login">Войти</span>
@@ -3439,6 +3447,20 @@ ${metrikaScript}
   }
   .gate-form button:hover { opacity: 0.92; }
   .gate-form button:disabled { opacity: 0.5; cursor: wait; }
+  .gate-phone-label {
+    color: var(--text-dim); font-size: 12px; line-height: 1.4;
+    margin: 4px 0 -2px; display: block;
+  }
+  .gate-phone-hint {
+    color: var(--text-dim); font-size: 11px; line-height: 1.5;
+    margin: -2px 0 2px;
+  }
+  .gate-phone-hint code {
+    background: var(--bg); border: 1px solid var(--border);
+    padding: 1px 5px; border-radius: 4px; font-size: 10.5px;
+    color: var(--text); font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .gate-phone-hint b { color: var(--text); }
 
   /* Mode-driven visibility — single data-mode on .gate-card cascades to
      every mode-specific element (icon, title, sub, fields, button label,

@@ -126,7 +126,7 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
     const phoneE164 = normalisePhone(parsed.data.phone);
     if (!phoneE164) {
       reply.code(400);
-      return { ok: false, error: 'invalid_phone_format', message: 'Введите номер с кодом страны, например +79991234567' };
+      return { ok: false, error: 'invalid_phone_format', message: 'Введите номер в международном формате с кодом страны (например, +7 для России, +1 для США, +44 для Великобритании)' };
     }
     const phoneHash = hashPhone(phoneE164);
 
