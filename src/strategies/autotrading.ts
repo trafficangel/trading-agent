@@ -503,13 +503,14 @@ function renderPricing(): string {
   `;
 }
 
-function tierEmoji(id: 'starter' | 'standard' | 'plus' | 'pro' | 'vip'): string {
+function tierEmoji(id: 'starter' | 'standard' | 'plus' | 'pro' | 'vip' | 'prof'): string {
   switch (id) {
     case 'starter': return '🥉';
     case 'standard': return '🥈';
     case 'plus': return '🥇';
     case 'pro': return '🏆';
     case 'vip': return '👑';
+    case 'prof': return '💼';
   }
 }
 

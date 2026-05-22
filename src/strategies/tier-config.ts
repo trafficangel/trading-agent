@@ -35,7 +35,7 @@
 
 import { STRATEGY_CONFIGS } from './track-c-config.js';
 
-export type TierId = 'starter' | 'standard' | 'plus' | 'pro' | 'vip';
+export type TierId = 'starter' | 'standard' | 'plus' | 'pro' | 'vip' | 'prof';
 
 export type TierConfig = {
   id: TierId;
@@ -163,11 +163,43 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     expectedMaxDdPct: 18,
     pitch: 'Премиум: персональная настройка через оператора, гибкие условия (success-fee вместо фиксированной подписки).',
   },
+  // Phase K — Pro Manual («Prof»). Special tier for experienced users who
+  // want full control. ALL 8 strategies eligible (including the wide-SL
+  // ones: UNI/TON/HBAR). marginPoolUsd here is a SUGGESTED starting point;
+  // each user_strategies row's notional+leverage is user-editable on
+  // /account/strategies. Balance gate + auto-downgrade are bypassed —
+  // user is on their own (with explicit «I know what I'm doing» disclaimer
+  // at activation time). minBalanceUsdt = $300 is the hard global floor
+  // for autotrading economics, not a tier-specific limit.
+  prof: {
+    id: 'prof',
+    name: 'Prof',
+    minBalanceUsdt: 300,
+    maxBalanceUsdt: Number.POSITIVE_INFINITY,
+    monthlyPriceUsd: 99,
+    strategyIds: [
+      'bnb-cntr-tt-mf50',
+      'btc-cfm-strong-tst',
+      'bch-cntr-cfm-tc',
+      'xrp-cntr-tc-mf50',
+      'trx-cfm-tt-wc',
+      'uni-cfm-tc-tst',
+      'ton-cntr-cfm-neo',
+      'hbar-cntr-tsr-scfl',
+    ],
+    // Suggested pool — user can override per-strategy notional after activation.
+    marginPoolUsd: 200,
+    maxConcurrentPositions: 8,
+    // No PnL estimate — depends entirely on user's chosen sizes.
+    expectedMonthlyPnlRangeUsd: { low: 0, high: 0 },
+    expectedMaxDdPct: 100, // sentinel: «no platform-promised cap, user owns risk»
+    pitch: 'Для опытных трейдеров. Все 8 стратегий доступны, размер позиции и плечо настраиваете вручную. Платформа не контролирует ваш баланс и не предлагает down/upgrade — вы сами принимаете риски.',
+  },
 };
 
 /** Ordered list of tiers from cheapest to most expensive. Used in UI
  *  for landing pricing-table + admin stats grouping. */
-export const TIER_ORDER: TierId[] = ['starter', 'standard', 'plus', 'pro', 'vip'];
+export const TIER_ORDER: TierId[] = ['starter', 'standard', 'plus', 'pro', 'vip', 'prof'];
 
 /** Below this balance no tier is assigned — user is asked to top up. */
 export const MIN_AUTOTRADING_DEPOSIT_USDT = 300;
@@ -178,9 +210,13 @@ export const MIN_AUTOTRADING_DEPOSIT_USDT = 300;
  *
  * Boundary semantics: ≥ min, ≤ max. No overlap between adjacent tiers.
  */
+/** Tiers that participate in balance-based auto-suggest/auto-downgrade.
+ *  Excludes 'prof' which is opt-in only and bypasses the balance loop. */
+const BALANCE_BASED_TIERS: TierId[] = ['starter', 'standard', 'plus', 'pro', 'vip'];
+
 export function matchTier(balanceUsdt: number): TierId | null {
   if (balanceUsdt < MIN_AUTOTRADING_DEPOSIT_USDT) return null;
-  for (const id of TIER_ORDER) {
+  for (const id of BALANCE_BASED_TIERS) {
     const t = TIER_CONFIGS[id];
     if (balanceUsdt >= t.minBalanceUsdt && balanceUsdt <= t.maxBalanceUsdt) return id;
   }

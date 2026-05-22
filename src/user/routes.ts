@@ -27,7 +27,7 @@ import {
   getDecryptedCreds,
 } from '../db/repos/user-api-keys.js';
 import { fetchBalanceUsdt, bybitErrorLabel, switchToOneWayMode } from '../exchange/bybit-private.js';
-import { listUserStrategies } from '../db/repos/user-strategies.js';
+import { listUserStrategies, enableUserStrategy, disableUserStrategy } from '../db/repos/user-strategies.js';
 import { STRATEGY_CONFIGS, BYBIT_REF_URL } from '../strategies/track-c-config.js';
 import { closeAllUserPositions } from '../strategies/user-fanout.js';
 import { assignTier } from './tier-assignment.js';
@@ -166,13 +166,17 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     reply.header('cache-control', 'private, no-store');
     const margin = computeMarginState(user.userId);
     // TRACK E — tier-based read-only view. Manual strategy form removed.
+    // Phase K — re-enabled in editable mode for «prof» tier only.
     const tierId = sub?.tier_id as import('../strategies/tier-config.js').TierId | undefined;
     const isVip = sub?.plan === 'vip';
+    const isProf = tierId === 'prof';
+    const flash = (req.query as { saved?: string; err?: string } | undefined);
     return reply.send(
       renderStrategiesPage({
         displayName: user.displayName,
         tierId: !isVip && tierId ? tierId : null,
         isVip,
+        isProf,
         apiKeyConnected: !!apiKey && apiKey.last_verified_at !== null,
         userStrategies: userStrategyMap(user.userId),
         csrfToken: csrf,
@@ -181,13 +185,66 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         lastBalanceUsdt: apiKey?.last_balance_usdt ?? null,
         usedMarginUsdt: margin.usedUsdt,
         pendingUpgradeTier: (sub?.tier_transition_target_id ?? null) as import('../strategies/tier-config.js').TierId | null,
+        savedFlash: flash?.saved === '1',
+        errorFlash: flash?.err ?? null,
       }),
     );
   });
 
-  // POST /account/strategies (manual strategy update) — REMOVED in TRACK E.
-  // Tier is auto-assigned by balance. Users use /account/strategies/pause
-  // and /resume for trading on-off control.
+  // -------- POST /account/strategies (Phase K — Prof tier editable) --------
+  // Accepts form body with FLAT keys (fastify-formbody uses fast-querystring
+  // which doesn't expand bracket notation):
+  //   enabled_<strategyId>=on        (absent = disabled)
+  //   notional_<strategyId>=300
+  //   leverage_<strategyId>=12
+  // Tier-gated: only «prof» can edit.
+  app.post('/account/strategies', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) { reply.redirect('/strategies'); return; }
+    if (!requireCsrf(req, reply)) return;
+    const sub = findSubscription(user.userId);
+    if (sub?.tier_id !== 'prof') {
+      reply.code(303).header('location', '/account/strategies?err=' +
+        encodeURIComponent('Редактирование стратегий доступно только на тарифе Prof.')).send();
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, string | undefined>;
+    const errors: string[] = [];
+    let updated = 0;
+    for (const sid of Object.keys(STRATEGY_CONFIGS)) {
+      const cfg = STRATEGY_CONFIGS[sid];
+      if (!cfg || !cfg.enabled) continue;
+      const enabled = body[`enabled_${sid}`] === 'on' || body[`enabled_${sid}`] === '1';
+      if (!enabled) {
+        disableUserStrategy(user.userId, sid);
+        updated++;
+        continue;
+      }
+      const notional = Number.parseFloat(body[`notional_${sid}`] ?? '');
+      const leverage = Number.parseInt(body[`leverage_${sid}`] ?? '', 10);
+      if (!Number.isFinite(notional) || notional < 10) {
+        errors.push(`${cfg.code}: размер сделки должен быть ≥ $10`);
+        continue;
+      }
+      if (!Number.isFinite(leverage) || leverage < 1 || leverage > 100) {
+        errors.push(`${cfg.code}: плечо должно быть от 1 до 100`);
+        continue;
+      }
+      try {
+        enableUserStrategy({ userId: user.userId, strategyId: sid, notionalUsd: notional, leverage });
+        updated++;
+      } catch (err) {
+        errors.push(`${cfg.code}: ${(err as Error).message}`);
+      }
+    }
+    logger.info({ userId: user.userId, updated, errors: errors.length }, 'prof strategies updated');
+    if (errors.length > 0) {
+      reply.code(303).header('location', '/account/strategies?err=' +
+        encodeURIComponent(errors.join('; '))).send();
+      return;
+    }
+    reply.code(303).header('location', '/account/strategies?saved=1').send();
+  });
 
   // -------- POST /account/strategies/pause + /resume --------
   // User-controlled trading stop. When stopped:
@@ -316,7 +373,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     if (!user) { reply.redirect('/strategies'); return; }
     if (!requireCsrf(req, reply)) return;
     const targetTier = (req.body as { targetTier?: string })?.targetTier;
-    const validTiers: TierId[] = ['starter', 'standard', 'plus', 'pro', 'vip'];
+    const validTiers: TierId[] = ['starter', 'standard', 'plus', 'pro', 'vip', 'prof'];
     if (!targetTier || !validTiers.includes(targetTier as TierId)) {
       reply.code(400).send('bad target tier');
       return;
@@ -335,10 +392,10 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         .send();
       return;
     }
-    // Phase G: store the choice unconditionally. assignTier (which creates
-    // user_strategies and starts trading) only fires when balance is enough;
-    // otherwise we keep the choice and prompt the user to top up. Onboarding
-    // step 3 (tier selection) becomes "done" purely on selected_tier_id.
+    // Phase K — «prof» is the self-managed tier. Activate immediately if
+    // balance ≥ $300 (the global autotrading floor); user controls per-strategy
+    // sizes after activation via /account/strategies. NO balance gate per
+    // tier-minBalance, NO auto-downgrade tracking — user owns risk.
     setSelectedTier(user.userId, targetTier);
     const key = findActiveKey(user.userId);
     const balance = key?.last_balance_usdt ?? null;
@@ -346,7 +403,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     const balanceOk = balance !== null && balance >= tier.minBalanceUsdt;
     if (balanceOk) {
       try {
-        await assignTier(user.userId, targetTier as Exclude<TierId, 'vip'>, {
+        await assignTier(user.userId, targetTier as TierId, {
           reason: 'manual_choice',
           balanceUsdt: balance,
         });
@@ -833,6 +890,7 @@ function renderTierPicker(p: {
     const isSelected = p.selectedTier === t.id && !isActive;
     const canAfford = p.balance != null && p.balance >= t.minBalanceUsdt;
     const isVipLocked = t.id === 'vip';
+    const isProf = t.id === 'prof';
     const subRange = t.expectedMonthlyPnlRangeUsd;
     const maxStr = t.maxBalanceUsdt === Number.POSITIVE_INFINITY
       ? '∞'
@@ -843,7 +901,8 @@ function renderTierPicker(p: {
     const badges: string[] = [];
     if (isActive) badges.push('<span class="tp-badge tp-badge-cur">✓ Активен</span>');
     else if (isSelected) badges.push('<span class="tp-badge tp-badge-pending">⏳ Выбран</span>');
-    if (isMatched && !isActive && !isSelected) {
+    if (isProf) badges.push('<span class="tp-badge tp-badge-prof">⚠ Для профи</span>');
+    if (isMatched && !isActive && !isSelected && !isProf) {
       badges.push('<span class="tp-badge tp-badge-rec">Подходит вам</span>');
     }
 
@@ -852,6 +911,21 @@ function renderTierPicker(p: {
       actionBtn = '<button type="button" class="tp-btn tp-btn-disabled" disabled>Уже активен</button>';
     } else if (isVipLocked) {
       actionBtn = '<a href="https://t.me/dboykod" class="tp-btn tp-btn-vip" target="_blank" rel="noopener">Написать оператору</a>';
+    } else if (isProf) {
+      // Prof: confirm() with big-fat warning before POST. No balance gate per
+      // tier minimum (only the global $300 floor still applies).
+      const confirmMsg = 'Тариф Prof — для опытных трейдеров. Платформа НЕ контролирует ваш баланс, НЕ предупреждает о рисках и НЕ переключает тариф автоматически. Все настройки plus риск-управление полностью на вас. Активировать?';
+      const label = canAfford
+        ? (isSelected ? 'Активировать Prof' : 'Выбрать Prof →')
+        : `Выбрать (нужно +$${Math.max(0, t.minBalanceUsdt - (p.balance ?? 0)).toFixed(0)})`;
+      actionBtn = `
+        <form method="POST" action="/account/subscription/select-tier" style="display:inline"
+              onsubmit="return confirm(${JSON.stringify(confirmMsg)});">
+          <input type="hidden" name="_csrf" value="${p.csrf}"/>
+          <input type="hidden" name="targetTier" value="${t.id}"/>
+          <button type="submit" class="tp-btn tp-btn-prof">${label}</button>
+        </form>
+      `;
     } else {
       const need = Math.max(0, t.minBalanceUsdt - (p.balance ?? 0));
       const label = canAfford
@@ -871,26 +945,43 @@ function renderTierPicker(p: {
       ? 'tp-card-cur'
       : isSelected
         ? 'tp-card-selected'
-        : isMatched
-          ? 'tp-card-rec'
-          : '';
+        : isProf
+          ? 'tp-card-prof'
+          : isMatched
+            ? 'tp-card-rec'
+            : '';
 
-    return `
-      <div class="tp-card ${cardCls}">
-        <div class="tp-card-badges">${badges.join('')}</div>
-        <div class="tp-card-name">${escapeHtmlMin(t.name)}</div>
-        <div class="tp-card-depo">Депозит $${t.minBalanceUsdt.toLocaleString()}–${maxStr}</div>
-        <div class="tp-card-price">
-          <span class="tp-card-price-num">$${t.monthlyPriceUsd}</span>
-          <span class="tp-card-price-period">/мес подписки</span>
-        </div>
-        <p class="tp-card-pitch">${escapeHtmlMin(t.pitch)}</p>
+    // Prof card: no "earnings" estimate (user controls sizes), no "free 14 days"
+    // promise (user pays $99/mo for control, doesn't fit trial framing).
+    const featuresHtml = isProf
+      ? `
+        <ul class="tp-card-features">
+          <li><span class="tp-card-feature-emoji">🎯</span><span class="tp-card-feature-label">${t.strategyIds.length} стратегий:</span> ${escapeHtmlMin(coinsStr)}</li>
+          <li><span class="tp-card-feature-emoji">⚙️</span><span class="tp-card-feature-label">Управление:</span> margin + плечо по каждой стратегии</li>
+          <li><span class="tp-card-feature-emoji">⚡</span><span class="tp-card-feature-label">Сделок одновременно:</span> до ${t.maxConcurrentPositions}</li>
+          <li><span class="tp-card-feature-emoji">🚫</span><span class="tp-card-feature-label">Платформа НЕ:</span> контролирует баланс, переключает тариф, ограничивает плечо</li>
+        </ul>
+      `
+      : `
         <ul class="tp-card-features">
           <li><span class="tp-card-feature-emoji">💰</span><span class="tp-card-feature-label">Заработок:</span> ~$${subRange.low}–$${subRange.high}/мес</li>
           <li><span class="tp-card-feature-emoji">🎯</span><span class="tp-card-feature-label">${t.strategyIds.length} стратегий:</span> ${escapeHtmlMin(coinsStr)}</li>
           <li><span class="tp-card-feature-emoji">⚡</span><span class="tp-card-feature-label">Сделок одновременно:</span> до ${t.maxConcurrentPositions}</li>
           <li><span class="tp-card-feature-emoji">💎</span><span class="tp-card-feature-label">Бесплатно:</span> 14 дней теста</li>
         </ul>
+      `;
+
+    return `
+      <div class="tp-card ${cardCls}">
+        <div class="tp-card-badges">${badges.join('')}</div>
+        <div class="tp-card-name">${escapeHtmlMin(t.name)}</div>
+        <div class="tp-card-depo">Депозит ${isProf ? `$${t.minBalanceUsdt}+ (минимум)` : `$${t.minBalanceUsdt.toLocaleString()}–${maxStr}`}</div>
+        <div class="tp-card-price">
+          <span class="tp-card-price-num">$${t.monthlyPriceUsd}</span>
+          <span class="tp-card-price-period">/мес подписки</span>
+        </div>
+        <p class="tp-card-pitch">${escapeHtmlMin(t.pitch)}</p>
+        ${featuresHtml}
         <div class="tp-card-action">${actionBtn}</div>
       </div>
     `;
@@ -959,6 +1050,16 @@ function renderTierPicker(p: {
       .tp-badge-cur { background: rgba(74,217,145,0.18); color: #4ad991; border: 1px solid rgba(74,217,145,0.4); }
       .tp-badge-rec { background: rgba(243,210,102,0.18); color: #f3d266; border: 1px solid rgba(243,210,102,0.4); }
       .tp-badge-pending { background: rgba(243,210,102,0.30); color: #ffe294; border: 1px solid rgba(243,210,102,0.55); }
+      .tp-badge-prof { background: rgba(239,91,107,0.18); color: #ff8b8b; border: 1px solid rgba(239,91,107,0.45); }
+      .tp-card-prof {
+        border-color: rgba(239,91,107,0.40);
+        background: linear-gradient(180deg, rgba(239,91,107,0.04) 0%, #11161d 70%);
+      }
+      .tp-btn-prof {
+        background: rgba(239,91,107,0.18); color: #ff8b8b;
+        border: 1px solid rgba(239,91,107,0.45);
+      }
+      .tp-btn-prof:hover { background: rgba(239,91,107,0.30); }
       .tp-card-name { font-size: 16px; font-weight: 600; color: #e8edf2; margin-bottom: 4px; }
       .tp-card-depo { font-size: 11.5px; color: #8590a0; margin-bottom: 10px; }
       .tp-card-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 12px; }

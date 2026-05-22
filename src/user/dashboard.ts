@@ -485,6 +485,7 @@ function tierEmoji(tierId: TierId): string {
     case 'plus': return '🥇';
     case 'pro': return '🏆';
     case 'vip': return '👑';
+    case 'prof': return '💼';
   }
 }
 
