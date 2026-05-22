@@ -159,7 +159,7 @@ const CONTENT: Record<Lang, Content> = {
       ],
     },
     strategiesPreview: {
-      title: 'TOP-3 по live-доходности',
+      title: 'ТОП-3 стратегии по доходности',
       subtitle:
         'Три лучшие стратегии по реальной прибыли на нашем shadow-счёте. Полная статистика, бэктесты, сделки и графики по каждой — на странице стратегии. Числа пересчитаны на позицию $1000 с реальной комиссией Bybit.',
       seeAll: 'Все 8 стратегий →',
@@ -378,7 +378,7 @@ const CONTENT: Record<Lang, Content> = {
       ],
     },
     strategiesPreview: {
-      title: 'TOP-3 by live profit',
+      title: 'Top 3 strategies by return',
       subtitle:
         'Three best strategies by real PnL on our shadow account. Full stats, backtests, trades and charts for every strategy — on its individual page. Numbers are recomputed for our $1000 position size with real Bybit commission.',
       seeAll: 'All 8 strategies →',
