@@ -1823,7 +1823,23 @@ export type PageShellOpts = {
   /** @deprecated The floating 💬 icon was removed entirely in May 2026.
    *  This flag is kept for back-compat with cabinet callers and is a no-op. */
   hideMobileHelpIcon?: boolean;
+  /** Phase L SEO — meta description (under 160 chars recommended). */
+  description?: string;
+  /** Phase L SEO — canonical URL path (e.g. '/autotrading'); becomes
+   *  https://robotclaude.biz<path>. Defaults to '/' when omitted. */
+  canonicalPath?: string;
+  /** Phase L SEO — optional Open Graph image URL (absolute). Defaults to
+   *  a generic site card. */
+  ogImage?: string;
+  /** Phase L SEO — JSON-LD structured data objects to inject. Use the
+   *  jsonLd*() helpers from this file. Each entry should be an
+   *  already-serialised JSON string (without the <script> wrapper). */
+  jsonLd?: string[];
 };
+
+/** Public-facing origin used to build absolute URLs for SEO tags
+ *  (canonical, OG, sitemap). Hard-coded today; could move to env later. */
+export const PUBLIC_ORIGIN = 'https://robotclaude.biz';
 
 export function pageShell(
   title: string,
@@ -1964,6 +1980,30 @@ export function pageShell(
 </script>
 `;
 
+  // Phase L SEO — derive defaults for description, canonical, OG image.
+  const defaultDescriptionRu = 'Robot Claude — автоматический криптотрейдинг на вашем Bybit-аккаунте по проверенным стратегиям. Прозрачная статистика, ключ без права на вывод, тарифы от $12/мес.';
+  const defaultDescriptionEn = 'Robot Claude — automated crypto trading on your Bybit account using verified strategies. Open stats, withdraw-disabled API key, tiers from $12/mo.';
+  const description = opts.description
+    ?? (lang === 'en' ? defaultDescriptionEn : defaultDescriptionRu);
+  const canonicalPath = opts.canonicalPath ?? '/';
+  const canonicalUrl = `${PUBLIC_ORIGIN}${canonicalPath}`;
+  const ogImage = opts.ogImage ?? `${PUBLIC_ORIGIN}/og-default.png`;
+  const ogLocale = lang === 'en' ? 'en_US' : 'ru_RU';
+  const ogAlt = lang === 'en' ? 'ru_RU' : 'en_US';
+  const siteName = 'Robot Claude';
+
+  // JSON-LD blocks — caller supplies pre-serialised JSON strings. Always
+  // append the WebSite + Organization defaults so search engines have a
+  // baseline graph even on pages that don't add anything extra.
+  const baseLd: string[] = [
+    jsonLdOrganization(),
+    jsonLdWebSite(),
+  ];
+  const allLd = [...baseLd, ...(opts.jsonLd ?? [])];
+  const jsonLdHtml = allLd
+    .map((s) => `<script type="application/ld+json">${s}</script>`)
+    .join('\n');
+
   return `<!DOCTYPE html>
 <html lang="${lang}">
 <head>
@@ -1972,10 +2012,32 @@ export function pageShell(
 <meta name="robots" content="${robots}" />
 ${metaRefresh}
 <title>${escapeHtml(title)}</title>
+<meta name="description" content="${escapeHtml(description)}" />
+<link rel="canonical" href="${canonicalUrl}" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="${siteName}" />
+<meta property="og:locale" content="${ogLocale}" />
+<meta property="og:locale:alternate" content="${ogAlt}" />
+<meta property="og:title" content="${escapeHtml(title)}" />
+<meta property="og:description" content="${escapeHtml(description)}" />
+<meta property="og:url" content="${canonicalUrl}" />
+<meta property="og:image" content="${ogImage}" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="${escapeHtml(title)}" />
+<meta name="twitter:description" content="${escapeHtml(description)}" />
+<meta name="twitter:image" content="${ogImage}" />
 ${faviconLink}
+${jsonLdHtml}
 <style>${STYLE}</style>
 ${metrikaScript}
 </head>
+<!-- Generative-search hints: this site explains Robot Claude — a SaaS
+     copytrading platform that executes strategies on a user's Bybit
+     futures account via API key (trade-only, no withdraw). Tiered
+     pricing $12/mo–$580/mo by user deposit; Prof tier $99/mo with
+     manual strategy controls. 14-day free trial + 30-day bonus for
+     Bybit signups via referral. Public stats at /strategies.
+-->
 <body>
 ${siteHeader}
 <div class="container">
@@ -1988,6 +2050,89 @@ ${countUpScript()}
 </body>
 </html>`;
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase L — JSON-LD helpers for SEO + GEO
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Organization schema — name, URL, contact, logo. Emitted on every page. */
+export function jsonLdOrganization(): string {
+  return JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'Organization',
+    name: 'Robot Claude',
+    url: PUBLIC_ORIGIN,
+    logo: `${PUBLIC_ORIGIN}/og-default.png`,
+    description: 'SaaS-сервис автоматизации криптотрейдинга на Bybit',
+    sameAs: ['https://t.me/luxalgosignal', 'https://t.me/dboykod'],
+    contactPoint: {
+      '@type': 'ContactPoint',
+      contactType: 'customer support',
+      url: 'https://t.me/dboykod',
+      availableLanguage: ['Russian', 'English'],
+    },
+  });
+}
+
+/** WebSite schema with SearchAction. Emitted on every page. */
+export function jsonLdWebSite(): string {
+  return JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: 'Robot Claude',
+    url: PUBLIC_ORIGIN,
+    inLanguage: ['ru-RU', 'en-US'],
+    publisher: { '@type': 'Organization', name: 'Robot Claude' },
+  });
+}
+
+/** Service / Product schema — used on landing pages that pitch a tier. */
+export function jsonLdService(args: {
+  name: string;
+  description: string;
+  priceUsd?: number;
+}): string {
+  const offers = args.priceUsd
+    ? {
+        '@type': 'Offer',
+        price: args.priceUsd,
+        priceCurrency: 'USD',
+        priceSpecification: {
+          '@type': 'UnitPriceSpecification',
+          price: args.priceUsd,
+          priceCurrency: 'USD',
+          billingDuration: 'P1M',
+        },
+      }
+    : undefined;
+  const obj: Record<string, unknown> = {
+    '@context': 'https://schema.org',
+    '@type': 'Service',
+    name: args.name,
+    description: args.description,
+    provider: { '@type': 'Organization', name: 'Robot Claude' },
+    areaServed: 'Worldwide',
+  };
+  if (offers) obj.offers = offers;
+  return JSON.stringify(obj);
+}
+
+/** FAQPage schema — feed it our autotrading FAQ items. */
+export function jsonLdFaqPage(items: Array<{ q: string; a: string }>): string {
+  return JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: items.map((it) => ({
+      '@type': 'Question',
+      name: it.q,
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: it.a.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+      },
+    })),
+  });
+}
+
 
 /** Inline script that animates any element with [data-count] from 0 to
  *  its target value when it enters the viewport. Attributes:
@@ -2680,6 +2825,94 @@ function renderStrategyDetail(cfg: StrategyConfig): string {
 }
 
 export async function landingRoute(app: FastifyInstance): Promise<void> {
+  // ── Phase L SEO routes ──────────────────────────────────────────────────
+  // /robots.txt — allow most, point to sitemap, restrict /account.
+  app.get('/robots.txt', async (_req, reply) => {
+    reply.type('text/plain; charset=utf-8');
+    reply.header('Cache-Control', 'public, max-age=86400');
+    return [
+      'User-agent: *',
+      'Allow: /',
+      'Disallow: /account',
+      'Disallow: /auth',
+      'Disallow: /admin',
+      'Disallow: /webhook',
+      'Disallow: /api/',
+      '',
+      `Sitemap: ${PUBLIC_ORIGIN}/sitemap.xml`,
+      '',
+    ].join('\n');
+  });
+
+  // /sitemap.xml — list public marketing pages + every enabled strategy.
+  app.get('/sitemap.xml', async (_req, reply) => {
+    const enabled = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
+    const lastmod = new Date().toISOString().slice(0, 10);
+    const urls: Array<{ loc: string; priority: string; changefreq: string }> = [
+      { loc: '/', priority: '1.0', changefreq: 'daily' },
+      { loc: '/en', priority: '0.8', changefreq: 'daily' },
+      { loc: '/autotrading', priority: '0.9', changefreq: 'weekly' },
+      { loc: '/strategies', priority: '0.7', changefreq: 'daily' },
+    ];
+    for (const s of enabled) {
+      urls.push({ loc: `/strategies/${s.code}`, priority: '0.6', changefreq: 'daily' });
+    }
+    const body = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+      ...urls.map((u) =>
+        `  <url><loc>${PUBLIC_ORIGIN}${u.loc}</loc><lastmod>${lastmod}</lastmod>` +
+        `<changefreq>${u.changefreq}</changefreq><priority>${u.priority}</priority></url>`),
+      '</urlset>',
+    ].join('\n');
+    reply.type('application/xml; charset=utf-8');
+    reply.header('Cache-Control', 'public, max-age=3600');
+    return body;
+  });
+
+  // /llms.txt — emerging standard analogue of robots.txt for AI agents.
+  // Spec-compliant minimal version: name + summary + sections of useful links.
+  app.get('/llms.txt', async (_req, reply) => {
+    reply.type('text/plain; charset=utf-8');
+    reply.header('Cache-Control', 'public, max-age=86400');
+    return [
+      '# Robot Claude',
+      '',
+      '> Robot Claude is a SaaS copytrading service that executes verified',
+      '> trading strategies on a user\'s Bybit USDT-perp futures account via',
+      '> an API key (trade-only, no withdraw). User funds stay on Bybit;',
+      '> the platform never accepts deposits and cannot withdraw funds.',
+      '',
+      '## Pricing tiers',
+      '',
+      '- **Starter** ($12/mo, deposit $300–$799, 3 strategies)',
+      '- **Standard** ($35/mo, deposit $800–$2 499, 4 strategies)',
+      '- **Plus** ($90/mo, deposit $2 500–$5 999, 5 strategies)',
+      '- **Pro** ($235/mo, deposit $6 000–$14 999, 5 strategies, larger sizes)',
+      '- **VIP** ($580/mo, deposit $15 000+, custom)',
+      '- **Prof** ($99/mo, manual control of position size + leverage, 8 strategies)',
+      '',
+      '## Key pages',
+      '',
+      `- [Home](${PUBLIC_ORIGIN}/) — live trades and stats`,
+      `- [Auto-trading pitch](${PUBLIC_ORIGIN}/autotrading) — how it works, tiers, FAQ`,
+      `- [Strategies index](${PUBLIC_ORIGIN}/strategies) — full per-strategy stats`,
+      '',
+      '## Risk note',
+      '',
+      'Crypto-derivatives trading carries risk of total loss. Users accept',
+      'all trading risks. The platform is software automation, not a',
+      'financial advisor or fund. Past performance does not guarantee',
+      'future returns.',
+      '',
+      '## Contact',
+      '',
+      '- Telegram signals channel: https://t.me/luxalgosignal',
+      '- Operator support: https://t.me/dboykod',
+      '',
+    ].join('\n');
+  });
+
   // Index of all enabled strategies. Gated — anonymous visitors see a
   // blurred preview with a registration form overlay; authed visitors
   // see the real dashboard.

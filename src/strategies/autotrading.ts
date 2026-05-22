@@ -18,7 +18,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { pageShell } from './landing.js';
+import { pageShell, jsonLdService, jsonLdFaqPage } from './landing.js';
 import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
 import { listTiers, tierCoinTickers } from './tier-config.js';
 
@@ -87,9 +87,24 @@ function renderPage(): string {
     </main>
   `;
 
-  return pageShell('Автотрейдинг · Robot Claude', body, {
+  return pageShell('Автотрейдинг на Bybit · Robot Claude', body, {
     lang: 'ru',
     robots: 'index, follow',
+    canonicalPath: '/autotrading',
+    description:
+      'Автотрейдинг на вашем Bybit-аккаунте по проверенным стратегиям. ' +
+      'Тарифы от $12/мес, ключ без права на вывод, прозрачная статистика. ' +
+      '14 дней теста + 30 дней бонуса по реф-ссылке Bybit.',
+    jsonLd: [
+      jsonLdService({
+        name: 'Robot Claude — автотрейдинг на Bybit',
+        description:
+          'SaaS-сервис автоматического исполнения торговых стратегий на USDT-perp фьючерсах Bybit. ' +
+          'Подписка от $12/мес. Ключ trade-only, без права на withdraw.',
+        priceUsd: 12,
+      }),
+      jsonLdFaqPage(FAQ_ITEMS),
+    ],
   });
 }
 
@@ -514,8 +529,9 @@ function tierEmoji(id: 'starter' | 'standard' | 'plus' | 'pro' | 'vip' | 'prof')
   }
 }
 
-function renderFaq(): string {
-  const items = [
+/** FAQ items — exposed at module scope so SEO can emit a FAQPage JSON-LD
+ *  graph mirroring exactly what appears in the visible accordion. */
+const FAQ_ITEMS: Array<{ q: string; a: string }> = [
     {
       q: 'Чем вы отличаетесь от копитрейдинг-пирамид и «волшебных» сервисов?',
       a: 'Главное: ваши деньги остаются на вашем Bybit-аккаунте. Мы их не принимаем, не управляем фондом, не обещаем фиксированную доходность. Наш сервис — это софт, который выставляет торговые ордера на вашем счёте по проверенным стратегиям. Технически невозможно вывести что-то с вашего счёта в нашу сторону: ключ создаётся без права на withdraw и transfer.',
@@ -560,12 +576,14 @@ function renderFaq(): string {
       q: 'Прошлая доходность гарантирует будущую?',
       a: 'Нет. Все цифры на сайте — это исторический бэктест и реальная статистика наших стратегий. Рынок меняется, любая стратегия может перестать работать. Криптотрейдинг сопряжён с риском полной потери капитала. Не торгуйте больше, чем готовы потерять.',
     },
-    {
-      q: 'Как происходит оплата?',
-      a: `Первые <b>14 дней</b> — тестовый период на любом тарифе, подписка не списывается. Если вы зарегистрировали Bybit по нашей ссылке — добавляются ещё <b>${BYBIT_REF_BONUS_DAYS} дней</b> бонуса (итого до ${14 + BYBIT_REF_BONUS_DAYS} дней без оплаты). После окончания бесплатного периода связываемся с вами в Telegram для оплаты подписки. Никаких автосписаний с карты — оплата ручная через оператора, вы сами решаете продлевать или нет.`,
-    },
-  ];
-  const html = items
+  {
+    q: 'Как происходит оплата?',
+    a: `Первые <b>14 дней</b> — тестовый период на любом тарифе, подписка не списывается. Если вы зарегистрировали Bybit по нашей ссылке — добавляются ещё <b>${BYBIT_REF_BONUS_DAYS} дней</b> бонуса (итого до ${14 + BYBIT_REF_BONUS_DAYS} дней без оплаты). После окончания бесплатного периода связываемся с вами в Telegram для оплаты подписки. Никаких автосписаний с карты — оплата ручная через оператора, вы сами решаете продлевать или нет.`,
+  },
+];
+
+function renderFaq(): string {
+  const html = FAQ_ITEMS
     .map(
       (it) => `
         <details class="at-faq-item">

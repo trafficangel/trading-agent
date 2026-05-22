@@ -1379,7 +1379,16 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
   void otherLangPath;
   void TRACK_C_NOTIONAL_USD;
 
-  return pageShell(c.htmlTitle, body, { lang, showLangToggle: true });
+  const canonicalPath = lang === 'en' ? '/en' : '/';
+  const description = lang === 'en'
+    ? 'Robot Claude — automated crypto trading on your own Bybit account. Verified strategies, open live stats, withdraw-disabled API key. Tiers from $12/mo.'
+    : 'Robot Claude — автоматический криптотрейдинг на вашем Bybit-аккаунте. Проверенные стратегии, прозрачная live-статистика, ключ без права на вывод. Тарифы от $12/мес.';
+  return pageShell(c.htmlTitle, body, {
+    lang,
+    showLangToggle: true,
+    canonicalPath,
+    description,
+  });
 }
 
 export async function homeRoute(app: FastifyInstance): Promise<void> {
