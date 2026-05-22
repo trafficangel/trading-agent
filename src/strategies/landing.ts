@@ -701,6 +701,16 @@ const STYLE = `
   .reason-time  { background: rgba(245, 177, 77, 0.12); color: var(--warning); }
   .reason-active{ background: rgba(74, 217, 145, 0.18); color: var(--accent); }
 
+  /* Phase N — «live started on …» note above the trade tables. */
+  .live-since-note {
+    font-size: 12.5px; color: var(--text-dim);
+    padding: 10px 14px; margin: 0 0 16px;
+    background: rgba(74, 217, 145, 0.04);
+    border: 1px solid rgba(74, 217, 145, 0.20);
+    border-radius: 8px; line-height: 1.55;
+  }
+  .live-since-note b { color: var(--accent); font-weight: 600; }
+
   /* ---------- Live status: pulsing dot ---------- */
   .live-status {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -1850,6 +1860,22 @@ export type PageShellOpts = {
  *  (canonical, OG, sitemap). Hard-coded today; could move to env later. */
 export const PUBLIC_ORIGIN = 'https://robotclaude.biz';
 
+/** Format a «since DATE» suffix for live-stats blocks.
+ *  Example: formatSinceDate(t, 'ru') → «с 1 мая 2026»
+ *           formatSinceDate(t, 'en') → «since May 1, 2026»
+ *  Returns empty string when ms is null/undefined (no live trades yet). */
+export function formatSinceDate(
+  ms: number | null | undefined,
+  lang: 'ru' | 'en' = 'ru',
+): string {
+  if (!ms) return '';
+  const d = new Date(ms);
+  const opts = { day: 'numeric', month: 'long', year: 'numeric' } as const;
+  const formatted = d.toLocaleDateString(lang === 'en' ? 'en-US' : 'ru-RU', opts)
+    .replace(/\s*г\.?$/u, ''); // strip the «г.» suffix Russian locale adds
+  return lang === 'en' ? `since ${formatted}` : `с ${formatted}`;
+}
+
 /** Cookie name for language preference (Phase M). Short to keep cookie
  *  header small; value is the literal 'ru' or 'en' string. */
 export const LANG_COOKIE = 'rclang';
@@ -2254,12 +2280,16 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
   let totalLosses = 0;
   let totalPnlUsd = 0;
   let runningCount = 0;
+  let earliestLiveStart: number | null = null; // for portfolio «since X» label
   const openStrategyLabels: string[] = []; // e.g. ["BNB LONG", "XRP SHORT"]
 
   const enriched = strategies.map((s) => {
     const live = getStrategyLiveStats(s.id);
     totalClosed += live.closed;
     totalOpen += live.open;
+    if (live.firstTradeAt && (!earliestLiveStart || live.firstTradeAt < earliestLiveStart)) {
+      earliestLiveStart = live.firstTradeAt;
+    }
     totalWins += live.wins;
     totalLosses += live.losses;
     totalPnlUsd += live.netPnlUsd;
@@ -2338,7 +2368,10 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
         </div>`
       : '';
 
-    // LIVE row — only when there's something to show
+    // LIVE row — only when there's something to show. Includes the
+    // «since DATE» context so visitors see how much trading history
+    // the % is based on (10 trades over 1 day ≠ 10 over 6 months).
+    const sinceLabel = formatSinceDate(live.firstTradeAt, 'ru');
     const liveRow =
       live.closed > 0
         ? `<div class="row-stat-line">
@@ -2348,6 +2381,7 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
             <span class="${livePnlCls}">${fmtPct(live.netPnlPct, true)}</span>
             <span class="dim">·</span>
             <span class="dim">${live.wins} прибыльных / ${live.losses} убыточных</span>
+            ${sinceLabel ? `<span class="dim">·</span><span class="dim">${sinceLabel}</span>` : ''}
           </div>`
         : '';
 
@@ -2415,8 +2449,9 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
     ? `<span class="${classForValue(totalWins - totalLosses)}">${totalWins} ✓ / ${totalLosses} ✗</span>`
     : 'появятся после первого закрытия';
   const pnlValue = hasLiveData ? fmtUsd(totalPnlUsd, true) : '—';
+  const sinceTotal = formatSinceDate(earliestLiveStart, 'ru');
   const pnlSub = hasLiveData
-    ? `${TRACK_C_NOTIONAL_USD} USDT на сделку`
+    ? `$${TRACK_C_NOTIONAL_USD} на сделку${sinceTotal ? ` · ${sinceTotal}` : ''}`
     : 'появится после первого закрытия';
   const stratPlural = runningCount === 1 ? 'активна' : runningCount < 5 ? 'активны' : 'активны';
 
@@ -2713,7 +2748,7 @@ function activeTradesTable(trades: ActiveTradeRow[], cfg: StrategyConfig): strin
   `;
 }
 
-function renderLiveSection(_live: StrategyLiveStats, _launchedAt: number, cfg: StrategyConfig): string {
+function renderLiveSection(live: StrategyLiveStats, _launchedAt: number, cfg: StrategyConfig): string {
   // Two stacked sub-tables (when relevant):
   //  - ACTIVE: currently-open positions, with pulsing-green status badge
   //  - CLOSED: most recent closed positions
@@ -2722,6 +2757,9 @@ function renderLiveSection(_live: StrategyLiveStats, _launchedAt: number, cfg: S
   // when nothing's open.
   const active = getStrategyActiveTrades(cfg.id);
   const closed = getStrategyRecentTrades(cfg.id, 50);
+  // Phase N — explicit «live started on DATE» note so the visitor sees
+  // the sample period. Empty string when no live trades yet.
+  const liveSince = formatSinceDate(live.firstTradeAt, 'ru');
 
   // Status badge for the section title
   const isWorking = active.length > 0;
@@ -2760,6 +2798,9 @@ function renderLiveSection(_live: StrategyLiveStats, _launchedAt: number, cfg: S
       ${statusBadge}
       <span class="refresh-note">⟳ обновляется каждые 60 сек</span>
     </div>
+    ${liveSince
+      ? `<div class="live-since-note">Live-торговля на shadow-счёте ведётся <b>${liveSince}</b>. Все цифры ниже — реальные сделки, не симуляция.</div>`
+      : ''}
     ${activeBlock}
     ${closedBlock}
   </div>

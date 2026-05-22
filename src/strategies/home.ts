@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 import { getStrategyLiveStats } from './live-stats.js';
-import { pageShell, loadBacktestTrades } from './landing.js';
+import { pageShell, loadBacktestTrades, formatSinceDate } from './landing.js';
 import { enrichTrades } from './backtest-recompute.js';
 
 /**
@@ -1036,19 +1036,12 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
       let liveLine = '';
       if (live.closed > 0) {
         const sign = live.netPnlPct >= 0 ? '+' : '';
-        const ageDays = live.firstTradeAt
-          ? Math.max(1, Math.round((Date.now() - live.firstTradeAt) / 86_400_000))
-          : null;
         const cls = classForValue(live.netPnlPct);
         const closedWord = lang === 'en'
           ? `${live.closed} closed`
           : `${live.closed} ${pluralRu(live.closed, 'сделка', 'сделки', 'сделок')}`;
-        const daysWord = ageDays
-          ? (lang === 'en' ? `~${ageDays}d` : `~${ageDays} ${pluralRu(ageDays, 'день', 'дня', 'дней')}`)
-          : '';
-        liveLine = lang === 'en'
-          ? `<b>Live:</b> <span class="${cls}">${sign}${live.netPnlPct.toFixed(2)}%</span> · ${closedWord}${daysWord ? ` · ${daysWord}` : ''}`
-          : `<b>Live:</b> <span class="${cls}">${sign}${live.netPnlPct.toFixed(2)}%</span> · ${closedWord}${daysWord ? ` · ${daysWord}` : ''}`;
+        const since = formatSinceDate(live.firstTradeAt, lang);
+        liveLine = `<b>${lang === 'en' ? 'Live' : 'Live'}:</b> <span class="${cls}">${sign}${live.netPnlPct.toFixed(2)}%</span> · ${closedWord}${since ? ` · ${since}` : ''}`;
       } else {
         liveLine = lang === 'en'
           ? '<i>No live trades yet — only backtest below</i>'
