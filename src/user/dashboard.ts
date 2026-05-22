@@ -143,6 +143,12 @@ export function renderDashboard(args: {
     <div class="cabinet-greeting">
       <div class="cabinet-greeting-label">Личный кабинет</div>
       <h1 class="cabinet-title">${greetingTitle(args.displayName)}</h1>
+      <form method="POST" action="/auth/logout" class="cabinet-logout-form">
+        <button type="submit" class="cabinet-logout-btn"
+                onclick="return confirm('Выйти из аккаунта? Сессия завершится, торговля стратегий продолжит работать в фоне.');">
+          ${ico('🚪')}Выйти из аккаунта
+        </button>
+      </form>
     </div>
   `;
 
@@ -1012,6 +1018,10 @@ function cabinetStyles(): string {
   }
   .cabinet-greeting {
     margin-bottom: 28px;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap;
+  }
+  .cabinet-greeting > *:not(.cabinet-logout-form) { /* greeting-label + title go in the same column */
   }
   .cabinet-greeting-label {
     font-size: 11px;
@@ -1025,6 +1035,16 @@ function cabinetStyles(): string {
     font-weight: 600;
     margin: 0;
     color: #e8edf2;
+  }
+  /* Phase K — logout button in the greeting row (right-aligned). */
+  .cabinet-logout-form { display: inline; margin-left: auto; }
+  .cabinet-logout-btn {
+    background: transparent; border: 1px solid #2a323d; color: #8590a0;
+    padding: 8px 14px; border-radius: 8px; font-size: 12.5px; cursor: pointer;
+    font-family: inherit; display: inline-flex; align-items: center; gap: 4px;
+  }
+  .cabinet-logout-btn:hover {
+    border-color: #ff8b8b; color: #ff8b8b;
   }
   .cabinet-name {
     color: #4ad991;

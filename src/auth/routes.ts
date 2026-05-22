@@ -301,8 +301,16 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
   });
 
   // ---------------- /auth/logout ----------------
-  app.post('/auth/logout', async (_req, reply) => {
+  // Phase K — form-POST friendly: when a browser submits the form,
+  // Accept includes 'text/html' and we 303-redirect to home. JSON
+  // callers (curl / programmatic) still get { ok: true }.
+  app.post('/auth/logout', async (req, reply) => {
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
+    const acceptsHtml = (req.headers.accept ?? '').includes('text/html');
+    if (acceptsHtml) {
+      reply.code(303).header('location', '/').send();
+      return;
+    }
     return { ok: true };
   });
 }
