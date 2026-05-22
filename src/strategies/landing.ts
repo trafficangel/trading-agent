@@ -1845,6 +1845,13 @@ export const PUBLIC_ORIGIN = 'https://robotclaude.biz';
  *  /yandex_<TOKEN>.html AND as a <meta> tag in every page head. */
 export const YANDEX_VERIFICATION_TOKEN = '69cdf664c1588e36';
 
+/** Google Search Console verification — TOKEN part after «=» from the
+ *  DNS TXT record «google-site-verification=<TOKEN>». Primary verification
+ *  is done via the Cloudflare-mediated DNS TXT record; this meta tag is
+ *  a belt-and-suspenders backup in case the operator also adds an
+ *  HTML-tag method property in Google Search Console. */
+export const GOOGLE_VERIFICATION_TOKEN = '_s5B7EW78dla89PL9tsBXXiyuxxIdPTZnsr99rb12us';
+
 export function pageShell(
   title: string,
   body: string,
@@ -2018,6 +2025,7 @@ ${metaRefresh}
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}" />
 <meta name="yandex-verification" content="${YANDEX_VERIFICATION_TOKEN}" />
+<meta name="google-site-verification" content="${GOOGLE_VERIFICATION_TOKEN}" />
 <link rel="canonical" href="${canonicalUrl}" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="${siteName}" />
