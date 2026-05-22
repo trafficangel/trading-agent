@@ -3039,7 +3039,7 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
     if (!isAuthed(req)) {
       // No-cache on the gated stub so re-visits after auth get fresh HTML.
       reply.header('Cache-Control', 'private, no-store');
-      return renderGatedPreview('index', renderStrategyIndex(enabled), { fromAutotrading, loginMode });
+      return renderGatedPreview('index', renderStrategyIndex(enabled), { fromAutotrading, loginMode, lang: getLang(req) });
     }
     reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
     return renderStrategyIndex(enabled);
@@ -3061,7 +3061,7 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
     reply.type('text/html; charset=utf-8');
     if (!isAuthed(req)) {
       reply.header('Cache-Control', 'private, no-store');
-      return renderGatedPreview('detail', renderStrategyDetail(cfg));
+      return renderGatedPreview('detail', renderStrategyDetail(cfg), { lang: getLang(req) });
     }
     reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
     return renderStrategyDetail(cfg);
@@ -3082,8 +3082,88 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
 function renderGatedPreview(
   _kind: 'index' | 'detail',
   innerHtml: string,
-  opts: { fromAutotrading?: boolean; loginMode?: boolean } = {},
+  opts: { fromAutotrading?: boolean; loginMode?: boolean; lang?: 'ru' | 'en' } = {},
 ): string {
+  const lang = opts.lang ?? 'ru';
+  const t = lang === 'en'
+    ? {
+        loginTitle: 'Sign in to your account',
+        registerTitleAuto: '14-day trial + up to 30 days bonus via referral',
+        registerTitleDefault: 'Unlock detailed statistics',
+        loginSub: 'Enter your phone — we will send a 6-digit code on Telegram. We already have your name.',
+        registerSubAuto: 'Enter your name and phone — we will send a 6-digit code on Telegram. After confirming you will land in your dashboard and can connect your Bybit account.',
+        registerSubDefault: 'Enter your name and phone — we will send a 6-digit code through the official Telegram verification service.',
+        namePlaceholder: 'How should we address you?',
+        phoneLabel: 'Phone number linked to your Telegram',
+        phoneHint: 'Full international format: <b>+</b> country code + number. Examples: <code>+1</code> USA, <code>+44</code> UK, <code>+49</code> Germany, <code>+7</code> Russia.',
+        btnRegister: 'Sign up',
+        btnLogin: 'Sign in',
+        toggleToLogin: 'Already registered?',
+        toggleToLoginLink: 'Sign in',
+        toggleToRegister: 'New here?',
+        toggleToRegisterLink: 'Sign up',
+        trustCodeFrom: 'Code arrives from',
+        trustOfficial: 'This is the official Telegram service. We never access your account.',
+        trustPrivacy: 'Your phone is stored only for verification, never shared with third parties.',
+        tgStep1: 'Open <b>Telegram</b> on your phone or computer',
+        tgStep2Prefix: 'Find the chat ',
+        tgStep3: 'Copy the 6-digit code from the latest message and enter it below',
+        codePlaceholder: '123456',
+        btnConfirm: 'Confirm',
+        resend: 'No code? Wait 30 seconds — Telegram sometimes delivers with a delay.',
+        editPhone: '← Change number',
+        cookieNote: 'Cookie is saved for 90 days — you will not need to enter your number again.',
+        // JS messages
+        jsEnterName: 'Enter your name to continue',
+        jsSendingCode: 'Sending code…',
+        jsCodeSent: '✓ Code sent to',
+        jsCodeSentVia: 'via Telegram',
+        jsPhoneNotRegistered: 'This number is not registered. Enter your name and tap «Sign up».',
+        jsSendFail: 'Could not send code. Check the number.',
+        jsNetErr: 'Network error, try again later',
+        jsCheckingCode: 'Verifying code…',
+        jsAccessGranted: '✅ Access granted! Reloading…',
+        jsWrongCode: 'Wrong code, try again',
+      }
+    : {
+        loginTitle: 'Вход в личный кабинет',
+        registerTitleAuto: '14 дней теста + до 30 дней бонусом по реф-ссылке',
+        registerTitleDefault: 'Доступ к детальной статистике',
+        loginSub: 'Введите номер — пришлём 6-значный код в Telegram. Имя у нас уже есть.',
+        registerSubAuto: 'Введите имя и номер — отправим 6-значный код в Telegram. После подтверждения попадёте в личный кабинет и сможете подключить свой Bybit-аккаунт.',
+        registerSubDefault: 'Введите имя и номер — отправим 6-значный код через официальный сервис подтверждения Telegram.',
+        namePlaceholder: 'Как к вам обращаться?',
+        phoneLabel: 'Номер телефона, к которому привязан ваш Telegram',
+        phoneHint: 'Полный международный формат: <b>+</b> код страны + номер. Например: <code>+7</code> Россия, <code>+1</code> США, <code>+44</code> Великобритания, <code>+994</code> Азербайджан.',
+        btnRegister: 'Зарегистрироваться',
+        btnLogin: 'Войти',
+        toggleToLogin: 'Уже регистрировались?',
+        toggleToLoginLink: 'Войти',
+        toggleToRegister: 'Впервые здесь?',
+        toggleToRegisterLink: 'Зарегистрироваться',
+        trustCodeFrom: 'Код придёт от',
+        trustOfficial: 'Это официальный сервис Telegram. Мы не получаем доступ к вашему аккаунту.',
+        trustPrivacy: 'Номер хранится только для подтверждения, третьим лицам не передаётся.',
+        tgStep1: 'Откройте <b>Telegram</b> на телефоне или компьютере',
+        tgStep2Prefix: 'Найдите чат ',
+        tgStep3: 'Скопируйте 6-значный код из последнего сообщения и введите ниже',
+        codePlaceholder: '123456',
+        btnConfirm: 'Подтвердить',
+        resend: 'Не пришёл код? Подождите 30 секунд — иногда Telegram доставляет с задержкой.',
+        editPhone: '← Изменить номер',
+        cookieNote: 'Cookie сохраняется на 90 дней — больше вводить номер не понадобится.',
+        // JS messages
+        jsEnterName: 'Введите имя, чтобы продолжить',
+        jsSendingCode: 'Отправляем код…',
+        jsCodeSent: '✓ Код отправлен на',
+        jsCodeSentVia: 'через Telegram',
+        jsPhoneNotRegistered: 'Этот номер не зарегистрирован. Введите имя и нажмите «Зарегистрироваться».',
+        jsSendFail: 'Не удалось отправить код. Проверьте номер.',
+        jsNetErr: 'Ошибка сети, попробуйте позже',
+        jsCheckingCode: 'Проверяем код…',
+        jsAccessGranted: '✅ Доступ открыт! Перезагружаем…',
+        jsWrongCode: 'Неверный код, попробуйте ещё раз',
+      };
   // Extract the inner <body> content of the rendered page so we don't
   // nest <html>. Quick'n'dirty: find first <div class="container">
   // and grab to its matching closer. Easier: rebuild via the same pageShell.
@@ -3106,15 +3186,15 @@ function renderGatedPreview(
   //   - default → register flow with "see-the-stats" copy
   const gateIcon = opts.loginMode ? '👋' : opts.fromAutotrading ? '🚀' : '🔒';
   const gateTitle = opts.loginMode
-    ? 'Вход в личный кабинет'
+    ? t.loginTitle
     : opts.fromAutotrading
-      ? '14 дней теста + до 30 дней бонусом по реф-ссылке'
-      : 'Доступ к детальной статистике';
+      ? t.registerTitleAuto
+      : t.registerTitleDefault;
   const gateSub = opts.loginMode
-    ? 'Введите номер — пришлём 6-значный код в Telegram. Имя у нас уже есть.'
+    ? t.loginSub
     : opts.fromAutotrading
-      ? 'Введите имя и номер — отправим 6-значный код в Telegram. После подтверждения попадёте в личный кабинет и сможете подключить свой Bybit-аккаунт.'
-      : 'Введите имя и номер — отправим 6-значный код через официальный сервис подтверждения Telegram.';
+      ? t.registerSubAuto
+      : t.registerSubDefault;
   // Initial mode for the JS controller. The form field rendering is
   // identical (name + phone); on login mode the name field is hidden
   // via CSS but the JS knows whether to send mode='login' or 'register'.
@@ -3124,10 +3204,8 @@ function renderGatedPreview(
   // them in-place without a fresh server roundtrip. Visibility is
   // CSS-driven by [data-mode] on the wrapping #gate-phone-stage.
   const registerIcon = opts.fromAutotrading ? '🚀' : '🔒';
-  const registerTitle = opts.fromAutotrading ? '14 дней теста + до 30 дней бонусом по реф-ссылке' : 'Доступ к детальной статистике';
-  const registerSub = opts.fromAutotrading
-    ? 'Введите имя и номер — отправим 6-значный код в Telegram. После подтверждения попадёте в личный кабинет и сможете подключить свой Bybit-аккаунт.'
-    : 'Введите имя и номер — отправим 6-значный код через официальный сервис подтверждения Telegram.';
+  const registerTitle = opts.fromAutotrading ? t.registerTitleAuto : t.registerTitleDefault;
+  const registerSub = opts.fromAutotrading ? t.registerSubAuto : t.registerSubDefault;
   void gateIcon; void gateTitle; void gateSub; // initial values were used to set data-mode
 
   const formHtml = `
@@ -3138,56 +3216,53 @@ function renderGatedPreview(
           <span class="gate-icon gate-icon-login" aria-hidden="true">👋</span>
           <h2 class="gate-title">
             <span class="gate-title-register">${registerTitle}</span>
-            <span class="gate-title-login">Вход в личный кабинет</span>
+            <span class="gate-title-login">${t.loginTitle}</span>
           </h2>
         </div>
         <p class="gate-sub">
           <span class="gate-sub-register">${registerSub}</span>
-          <span class="gate-sub-login">Введите номер — пришлём 6-значный код в Telegram. Имя у нас уже есть.</span>
+          <span class="gate-sub-login">${t.loginSub}</span>
         </p>
 
         <!-- Stage 1: (name +) phone — name hidden in login mode -->
         <div id="gate-phone-stage">
           <form id="gate-phone-form" class="gate-form" novalidate>
             <div class="gate-name-field">
-              <input type="text" name="name" placeholder="Как к вам обращаться?"
+              <input type="text" name="name" placeholder="${t.namePlaceholder}"
                      maxlength="40" autocomplete="given-name" />
             </div>
             <label class="gate-phone-label" for="gate-phone-input">
-              Номер телефона, к которому привязан ваш Telegram
+              ${t.phoneLabel}
             </label>
             <input id="gate-phone-input" type="tel" name="phone" required
                    placeholder="+_ _ _ _ _ _ _ _ _ _ _"
                    inputmode="tel" autocomplete="tel" />
-            <p class="gate-phone-hint">
-              Полный международный формат: <b>+</b> код страны + номер.
-              Например: <code>+7</code> Россия, <code>+1</code> США, <code>+44</code> Великобритания, <code>+994</code> Азербайджан.
-            </p>
+            <p class="gate-phone-hint">${t.phoneHint}</p>
             <button type="submit">
-              <span class="gate-btn-label-register">Зарегистрироваться</span>
-              <span class="gate-btn-label-login">Войти</span>
+              <span class="gate-btn-label-register">${t.btnRegister}</span>
+              <span class="gate-btn-label-login">${t.btnLogin}</span>
             </button>
           </form>
           <p class="gate-mode-toggle">
             <span class="gate-toggle-to-login">
-              Уже регистрировались? <a href="#" id="gate-switch-to-login">Войти</a>
+              ${t.toggleToLogin} <a href="#" id="gate-switch-to-login">${t.toggleToLoginLink}</a>
             </span>
             <span class="gate-toggle-to-register">
-              Впервые здесь? <a href="#" id="gate-switch-to-register">Зарегистрироваться</a>
+              ${t.toggleToRegister} <a href="#" id="gate-switch-to-register">${t.toggleToRegisterLink}</a>
             </span>
           </p>
           <div class="gate-trust">
             <div class="gate-trust-row">
               <span class="gate-trust-icon">📱</span>
-              <span>Код придёт от <a href="https://t.me/VerificationCodes" target="_blank" rel="noopener"><b>@VerificationCodes</b></a> <span class="gate-verified" title="Официальный сервис Telegram">✓</span></span>
+              <span>${t.trustCodeFrom} <a href="https://t.me/VerificationCodes" target="_blank" rel="noopener"><b>@VerificationCodes</b></a> <span class="gate-verified" title="Telegram official service">✓</span></span>
             </div>
             <div class="gate-trust-row">
               <span class="gate-trust-icon">🛡</span>
-              <span>Это официальный сервис Telegram. Мы не получаем доступ к вашему аккаунту.</span>
+              <span>${t.trustOfficial}</span>
             </div>
             <div class="gate-trust-row">
               <span class="gate-trust-icon">🔐</span>
-              <span>Номер хранится только для подтверждения, третьим лицам не передаётся.</span>
+              <span>${t.trustPrivacy}</span>
             </div>
           </div>
         </div>
@@ -3197,33 +3272,30 @@ function renderGatedPreview(
           <div class="gate-tg-instructions">
             <div class="gate-tg-step">
               <span class="gate-tg-num">1</span>
-              <span>Откройте <b>Telegram</b> на телефоне или компьютере</span>
+              <span>${t.tgStep1}</span>
             </div>
             <div class="gate-tg-step">
               <span class="gate-tg-num">2</span>
-              <span>Найдите чат <a href="https://t.me/VerificationCodes" target="_blank" rel="noopener" class="gate-tg-link">@VerificationCodes <span class="gate-verified">✓</span> →</a></span>
+              <span>${t.tgStep2Prefix}<a href="https://t.me/VerificationCodes" target="_blank" rel="noopener" class="gate-tg-link">@VerificationCodes <span class="gate-verified">✓</span> →</a></span>
             </div>
             <div class="gate-tg-step">
               <span class="gate-tg-num">3</span>
-              <span>Скопируйте 6-значный код из последнего сообщения и введите ниже</span>
+              <span>${t.tgStep3}</span>
             </div>
           </div>
           <form id="gate-code-form" class="gate-form" novalidate>
-            <input type="text" name="code" required placeholder="123456"
+            <input type="text" name="code" required placeholder="${t.codePlaceholder}"
                    inputmode="numeric" pattern="\\d{4,9}" maxlength="9"
                    autocomplete="one-time-code" />
-            <button type="submit">Подтвердить</button>
+            <button type="submit">${t.btnConfirm}</button>
           </form>
           <p class="gate-resend">
-            Не пришёл код? Подождите 30 секунд — иногда Telegram доставляет
-            с задержкой. <a href="#" id="gate-back">← Изменить номер</a>
+            ${t.resend} <a href="#" id="gate-back">${t.editPhone}</a>
           </p>
         </div>
 
         <div id="gate-msg" class="gate-msg"></div>
-        <p class="gate-note">
-          Cookie сохраняется на 90 дней — больше вводить номер не понадобится.
-        </p>
+        <p class="gate-note">${t.cookieNote}</p>
       </div>
     </div>
   `;
@@ -3244,7 +3316,7 @@ function renderGatedPreview(
         function showCodeStage(masked) {
           phoneStage.style.display = 'none';
           codeStage.style.display = 'block';
-          setMsg('✓ Код отправлен на ' + masked + ' через Telegram');
+          setMsg(${JSON.stringify(t.jsCodeSent)} + ' ' + masked + ' ' + ${JSON.stringify(t.jsCodeSentVia)});
           codeForm.code.focus();
         }
         function showPhoneStage() {
@@ -3284,11 +3356,11 @@ function renderGatedPreview(
           var name = phoneForm.name.value.trim();
           var phone = phoneForm.phone.value.trim();
           if (mode === 'register' && !name) {
-            setMsg('Введите имя, чтобы продолжить', true);
+            setMsg(${JSON.stringify(t.jsEnterName)}, true);
             phoneForm.name.focus();
             return;
           }
-          setMsg('Отправляем код…');
+          setMsg(${JSON.stringify(t.jsSendingCode)});
           phoneForm.querySelector('button').disabled = true;
           try {
             var body = mode === 'login'
@@ -3305,25 +3377,25 @@ function renderGatedPreview(
               // mode → switch to register, pre-fill the phone, focus name.
               if (data.error === 'phone_not_registered') {
                 setMode('register');
-                setMsg('Этот номер не зарегистрирован. Введите имя и нажмите «Зарегистрироваться».', true);
+                setMsg(${JSON.stringify(t.jsPhoneNotRegistered)}, true);
                 phoneForm.name.focus();
                 phoneForm.querySelector('button').disabled = false;
                 return;
               }
-              setMsg(data.message || 'Не удалось отправить код. Проверьте номер.', true);
+              setMsg(data.message || ${JSON.stringify(t.jsSendFail)}, true);
               phoneForm.querySelector('button').disabled = false;
               return;
             }
             showCodeStage(data.masked_phone || phone);
           } catch (err) {
-            setMsg('Ошибка сети, попробуйте позже', true);
+            setMsg(${JSON.stringify(t.jsNetErr)}, true);
             phoneForm.querySelector('button').disabled = false;
           }
         });
         codeForm.addEventListener('submit', async function(e) {
           e.preventDefault();
           var code = codeForm.code.value.trim();
-          setMsg('Проверяем код…');
+          setMsg(${JSON.stringify(t.jsCheckingCode)});
           codeForm.querySelector('button').disabled = true;
           try {
             var res = await fetch('/auth/verify', {
@@ -3340,16 +3412,16 @@ function renderGatedPreview(
               if (data.is_new_registration && typeof ym === 'function') {
                 try { ym(109255043, 'reachGoal', 'registration'); } catch (e) {}
               }
-              setMsg('✅ Доступ открыт! Перезагружаем…');
+              setMsg(${JSON.stringify(t.jsAccessGranted)});
               setTimeout(function() { window.location.reload(); }, 800);
               return;
             }
-            setMsg('Неверный код, попробуйте ещё раз', true);
+            setMsg(${JSON.stringify(t.jsWrongCode)}, true);
             codeForm.querySelector('button').disabled = false;
             codeForm.code.value = '';
             codeForm.code.focus();
           } catch (err) {
-            setMsg('Ошибка сети, попробуйте позже', true);
+            setMsg(${JSON.stringify(t.jsNetErr)}, true);
             codeForm.querySelector('button').disabled = false;
           }
         });
