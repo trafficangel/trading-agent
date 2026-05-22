@@ -1841,6 +1841,10 @@ export type PageShellOpts = {
  *  (canonical, OG, sitemap). Hard-coded today; could move to env later. */
 export const PUBLIC_ORIGIN = 'https://robotclaude.biz';
 
+/** Yandex Webmaster verification token (Phase L). Served at
+ *  /yandex_<TOKEN>.html AND as a <meta> tag in every page head. */
+export const YANDEX_VERIFICATION_TOKEN = '69cdf664c1588e36';
+
 export function pageShell(
   title: string,
   body: string,
@@ -2013,6 +2017,7 @@ export function pageShell(
 ${metaRefresh}
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}" />
+<meta name="yandex-verification" content="${YANDEX_VERIFICATION_TOKEN}" />
 <link rel="canonical" href="${canonicalUrl}" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="${siteName}" />
@@ -2826,6 +2831,22 @@ function renderStrategyDetail(cfg: StrategyConfig): string {
 
 export async function landingRoute(app: FastifyInstance): Promise<void> {
   // ── Phase L SEO routes ──────────────────────────────────────────────────
+  // Yandex Webmaster verification — exact filename + body Yandex expects.
+  // Token also embedded as <meta name="yandex-verification"> on every page
+  // for belt-and-suspenders (Yandex accepts either method).
+  app.get(`/yandex_${YANDEX_VERIFICATION_TOKEN}.html`, async (_req, reply) => {
+    reply.type('text/html; charset=utf-8');
+    reply.header('Cache-Control', 'public, max-age=86400');
+    return [
+      '<html>',
+      '    <head>',
+      '        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">',
+      '    </head>',
+      `    <body>Verification: ${YANDEX_VERIFICATION_TOKEN}</body>`,
+      '</html>',
+    ].join('\n');
+  });
+
   // /robots.txt — allow most, point to sitemap, restrict /account.
   app.get('/robots.txt', async (_req, reply) => {
     reply.type('text/plain; charset=utf-8');
