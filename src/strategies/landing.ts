@@ -1841,9 +1841,22 @@ export type PageShellOpts = {
  *  (canonical, OG, sitemap). Hard-coded today; could move to env later. */
 export const PUBLIC_ORIGIN = 'https://robotclaude.biz';
 
-/** Yandex Webmaster verification token (Phase L). Served at
- *  /yandex_<TOKEN>.html AND as a <meta> tag in every page head. */
-export const YANDEX_VERIFICATION_TOKEN = '69cdf664c1588e36';
+/** Cookie name for language preference (Phase M). Short to keep cookie
+ *  header small; value is the literal 'ru' or 'en' string. */
+export const LANG_COOKIE = 'rclang';
+
+/** Read the user's preferred language. Priority:
+ *   1. rclang cookie (set explicitly by the toggle)
+ *   2. Accept-Language header (browser default; en-prefix → EN)
+ *   3. Fallback 'ru' (primary market).
+ */
+export function getLang(req: import('fastify').FastifyRequest): 'ru' | 'en' {
+  const cookieLang = req.cookies?.[LANG_COOKIE];
+  if (cookieLang === 'en' || cookieLang === 'ru') return cookieLang;
+  const acceptLang = String(req.headers['accept-language'] ?? '').toLowerCase();
+  if (acceptLang.startsWith('en')) return 'en';
+  return 'ru';
+}
 
 /** Google Search Console verification — TOKEN part after «=» from the
  *  DNS TXT record «google-site-verification=<TOKEN>». Primary verification
@@ -1923,10 +1936,12 @@ export function pageShell(
   //
   // The floating 💬 help icon was removed entirely (operator dislike) —
   // «Поддержка» / «Support» is reachable via the nav link instead.
-  const langToggleHtml = showLangToggle
-    ? `<a href="/" class="${lang === 'ru' ? 'active' : ''}" aria-label="Русский">RU</a>` +
-      `<a href="/en" class="${lang === 'en' ? 'active' : ''}" aria-label="English">EN</a>`
-    : '';
+  // Phase M — always show lang toggle. Click sets cookie + reloads.
+  // Self-link (same-lang) is kept active-styled but still functional.
+  void showLangToggle; // legacy flag — no-op since Phase M.
+  const langToggleHtml =
+    `<a href="/set-lang/ru" class="${lang === 'ru' ? 'active' : ''}" aria-label="Русский">RU</a>` +
+    `<a href="/set-lang/en" class="${lang === 'en' ? 'active' : ''}" aria-label="English">EN</a>`;
   const labels = lang === 'en'
     ? { home: 'Home', strategies: 'Strategies', autotrading: 'Auto-trading', channel: 'Channel', support: 'Support', menu: 'Menu', close: 'Close' }
     : { home: 'Главная', strategies: 'Стратегии', autotrading: 'Автотрейдинг', channel: 'Канал', support: 'Поддержка', menu: 'Меню', close: 'Закрыть' };
@@ -2024,7 +2039,6 @@ export function pageShell(
 ${metaRefresh}
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}" />
-<meta name="yandex-verification" content="${YANDEX_VERIFICATION_TOKEN}" />
 <meta name="google-site-verification" content="${GOOGLE_VERIFICATION_TOKEN}" />
 <link rel="canonical" href="${canonicalUrl}" />
 <meta property="og:type" content="website" />
@@ -2838,22 +2852,37 @@ function renderStrategyDetail(cfg: StrategyConfig): string {
 }
 
 export async function landingRoute(app: FastifyInstance): Promise<void> {
-  // ── Phase L SEO routes ──────────────────────────────────────────────────
-  // Yandex Webmaster verification — exact filename + body Yandex expects.
-  // Token also embedded as <meta name="yandex-verification"> on every page
-  // for belt-and-suspenders (Yandex accepts either method).
-  app.get(`/yandex_${YANDEX_VERIFICATION_TOKEN}.html`, async (_req, reply) => {
-    reply.type('text/html; charset=utf-8');
-    reply.header('Cache-Control', 'public, max-age=86400');
-    return [
-      '<html>',
-      '    <head>',
-      '        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">',
-      '    </head>',
-      `    <body>Verification: ${YANDEX_VERIFICATION_TOKEN}</body>`,
-      '</html>',
-    ].join('\n');
+  // ── Phase M language toggle ────────────────────────────────────────────
+  // GET /set-lang/:lang → set the rclang cookie and 303-redirect back.
+  // Both the public site header and any in-page «Switch to EN/RU» link
+  // point here. Idempotent; safe with GET (just a preference cookie).
+  app.get<{ Params: { lang: string } }>('/set-lang/:lang', async (req, reply) => {
+    const lang = req.params.lang;
+    if (lang !== 'ru' && lang !== 'en') {
+      reply.code(400).send('bad lang');
+      return;
+    }
+    reply.setCookie(LANG_COOKIE, lang, {
+      path: '/',
+      httpOnly: false,
+      secure: true,
+      sameSite: 'lax',
+      maxAge: 365 * 24 * 60 * 60,
+    });
+    const referer = (req.headers.referer as string | undefined) ?? '/';
+    // Sanitize referer — must be a relative URL or same-origin to avoid
+    // open-redirect. Accept only paths starting with '/'.
+    let safe = '/';
+    try {
+      const u = new URL(referer, PUBLIC_ORIGIN);
+      if (u.origin === PUBLIC_ORIGIN) safe = u.pathname + u.search + u.hash;
+    } catch { /* fall through to '/' */ }
+    reply.code(303).header('location', safe).send();
   });
+
+  // ── Phase L SEO routes ──────────────────────────────────────────────────
+  // (Yandex Webmaster removed — RU IP blocks made it unreachable. Only
+  // Google Search Console is supported; verified via DNS TXT + meta tag.)
 
   // /robots.txt — allow most, point to sitemap, restrict /account.
   app.get('/robots.txt', async (_req, reply) => {

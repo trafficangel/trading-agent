@@ -15,12 +15,19 @@
  * CTA leads to /strategies (existing OTP-gated registration form).
  * Once registered, users land in /account and see the onboarding
  * checklist (register ✓ → Bybit → deposit → trade).
+ *
+ * Phase M (May 22, 2026):
+ *   - Bilingual RU/EN. All visible strings switch by `lang` parameter
+ *     threaded through every render function. The route reads the
+ *     preferred lang via getLang() (cookie → Accept-Language → 'ru').
  */
 
 import type { FastifyInstance } from 'fastify';
-import { pageShell, jsonLdService, jsonLdFaqPage } from './landing.js';
+import { pageShell, jsonLdService, jsonLdFaqPage, getLang } from './landing.js';
 import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
 import { listTiers, tierCoinTickers } from './tier-config.js';
+
+type Lang = 'ru' | 'en';
 
 const SUPPORT_TG = 'https://t.me/dboykod';
 
@@ -34,7 +41,7 @@ function ico(emoji: string): string {
   return `<span class="at-ico" aria-hidden="true">${emoji}</span>`;
 }
 
-function renderPage(): string {
+function renderPage(lang: Lang): string {
   const strategies = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
   const stratList = strategies
     .sort((a, b) => a.code.localeCompare(b.code))
@@ -49,66 +56,117 @@ function renderPage(): string {
     )
     .join('');
 
+  const stratDetailsSummary = lang === 'en'
+    ? `${ico('🔍')}Want to see which strategies are actually trading?`
+    : `${ico('🔍')}Хотите разобраться, какие именно стратегии торгуют?`;
+  const stratDetailsHint = lang === 'en' ? '(for the curious)' : '(для дотошных)';
+  const stratDetailsP = lang === 'en'
+    ? `We use strategies built with <b>LuxAlgo AI Strategy Builder</b> — a well-known service for designing algorithmic strategies. Every strategy is first validated on at least 200 days of backtest data and revaluated using Bybit's real fees. Each strategy page shows its full trade history, win-rate and drawdown.`
+    : `Мы используем стратегии созданные через <b>LuxAlgo AI Strategy Builder</b> — известный сервис для разработки алгоритмических стратегий. Каждую стратегию мы предварительно проверяем на бэктесте минимум 200 дней и пересчитываем доходность на реальную комиссию Bybit. На странице каждой стратегии — её полная история сделок, win-rate, drawdown.`;
+  const stratDetailsLink = lang === 'en'
+    ? 'Full statistics for all strategies →'
+    : 'Полная статистика всех стратегий →';
+
   const body = `
     ${styles()}
     <main class="at-main">
-      ${renderHero()}
-      ${renderHowItWorks()}
-      ${renderPricing()}
-      ${renderBybitBonus()}
-      ${renderSafety()}
-      ${renderLeverageEducation()}
-      ${renderStrategyPipeline()}
+      ${renderHero(lang)}
+      ${renderHowItWorks(lang)}
+      ${renderPricing(lang)}
+      ${renderBybitBonus(lang)}
+      ${renderSafety(lang)}
+      ${renderLeverageEducation(lang)}
+      ${renderStrategyPipeline(lang)}
 
       <section class="at-section at-strat-details">
         <details class="at-strat-details-toggle">
           <summary>
-            ${ico('🔍')}Хотите разобраться, какие именно стратегии торгуют?
-            <span class="at-strat-details-hint">(для дотошных)</span>
+            ${stratDetailsSummary}
+            <span class="at-strat-details-hint">${stratDetailsHint}</span>
           </summary>
           <div class="at-strat-details-content">
-            <p>
-              Мы используем стратегии созданные через <b>LuxAlgo AI Strategy Builder</b> —
-              известный сервис для разработки алгоритмических стратегий.
-              Каждую стратегию мы предварительно проверяем на бэктесте минимум 200 дней
-              и пересчитываем доходность на реальную комиссию Bybit.
-              На странице каждой стратегии — её полная история сделок, win-rate, drawdown.
-            </p>
+            <p>${stratDetailsP}</p>
             <div class="at-strat-grid">${stratList}</div>
             <div style="text-align:center; margin-top:18px">
-              <a href="/strategies" class="at-btn-secondary">Полная статистика всех стратегий →</a>
+              <a href="/strategies" class="at-btn-secondary">${stratDetailsLink}</a>
             </div>
           </div>
         </details>
       </section>
 
-      ${renderFaq()}
-      ${renderFinalCta()}
+      ${renderFaq(lang)}
+      ${renderFinalCta(lang)}
     </main>
   `;
 
-  return pageShell('Автотрейдинг на Bybit · Robot Claude', body, {
-    lang: 'ru',
+  const title = lang === 'en'
+    ? 'Auto-trading on Bybit · Robot Claude'
+    : 'Автотрейдинг на Bybit · Robot Claude';
+
+  const description = lang === 'en'
+    ? 'Auto-trading on your own Bybit account using vetted strategies. ' +
+      'Plans from $12/mo, trade-only API key, transparent live statistics. ' +
+      '14-day trial + 30 bonus days via Bybit referral signup.'
+    : 'Автотрейдинг на вашем Bybit-аккаунте по проверенным стратегиям. ' +
+      'Тарифы от $12/мес, ключ без права на вывод, прозрачная статистика. ' +
+      '14 дней теста + 30 дней бонуса по реф-ссылке Bybit.';
+
+  const serviceName = lang === 'en'
+    ? 'Robot Claude — auto-trading on Bybit'
+    : 'Robot Claude — автотрейдинг на Bybit';
+  const serviceDesc = lang === 'en'
+    ? 'SaaS that executes trading strategies automatically on Bybit USDT-perp futures. ' +
+      'Subscriptions from $12/mo. Trade-only API key, withdraw permission disabled.'
+    : 'SaaS-сервис автоматического исполнения торговых стратегий на USDT-perp фьючерсах Bybit. ' +
+      'Подписка от $12/мес. Ключ trade-only, без права на withdraw.';
+
+  return pageShell(title, body, {
+    lang,
     robots: 'index, follow',
     canonicalPath: '/autotrading',
-    description:
-      'Автотрейдинг на вашем Bybit-аккаунте по проверенным стратегиям. ' +
-      'Тарифы от $12/мес, ключ без права на вывод, прозрачная статистика. ' +
-      '14 дней теста + 30 дней бонуса по реф-ссылке Bybit.',
+    description,
     jsonLd: [
       jsonLdService({
-        name: 'Robot Claude — автотрейдинг на Bybit',
-        description:
-          'SaaS-сервис автоматического исполнения торговых стратегий на USDT-perp фьючерсах Bybit. ' +
-          'Подписка от $12/мес. Ключ trade-only, без права на withdraw.',
+        name: serviceName,
+        description: serviceDesc,
         priceUsd: 12,
       }),
-      jsonLdFaqPage(FAQ_ITEMS),
+      jsonLdFaqPage(lang === 'en' ? FAQ_ITEMS_EN : FAQ_ITEMS_RU),
     ],
   });
 }
 
-function renderHero(): string {
+function renderHero(lang: Lang): string {
+  if (lang === 'en') {
+    return `
+    <section class="at-hero">
+      <div class="at-hero-eyebrow">Automated cryptocurrency trading · Bybit</div>
+      <h1 class="at-hero-title">
+        Passive income from crypto trading. <span class="at-accent">Funds stay on your exchange.</span>
+      </h1>
+      <p class="at-hero-sub">
+        Our system trades for you on your own Bybit account using vetted strategies.
+        You don't trade manually — the system opens and closes positions automatically.
+        <b>This is not a fund and not a pyramid scheme</b> — we never accept deposits on our side.
+        Your funds remain on the exchange, under your control at all times.
+      </p>
+      <div class="at-hero-cta">
+        <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Sign up</a>
+        <span class="at-hero-cta-or">or</span>
+        <a href="#pricing" class="at-hero-link">see pricing ↓</a>
+      </div>
+      <div class="at-hero-login">
+        Already registered? <a href="/strategies?login=1">Sign in →</a>
+      </div>
+      <div class="at-hero-pills">
+        <span class="at-pill">${ico('🛡')}Funds on Bybit, not with us</span>
+        <span class="at-pill">${ico('🚫')}Trade-only key, no withdraw</span>
+        <span class="at-pill">${ico('💎')}14-day trial + ${BYBIT_REF_BONUS_DAYS} bonus days via referral</span>
+        <span class="at-pill">${ico('⏹')}Cancel in one click</span>
+      </div>
+    </section>
+  `;
+  }
   return `
     <section class="at-hero">
       <div class="at-hero-eyebrow">Автоматическая торговля криптовалютой · Bybit</div>
@@ -139,7 +197,33 @@ function renderHero(): string {
   `;
 }
 
-function renderBybitBonus(): string {
+function renderBybitBonus(lang: Lang): string {
+  if (lang === 'en') {
+    return `
+    <section class="at-section at-bonus" id="bonus">
+      <div class="at-bonus-card">
+        <div class="at-bonus-icon">${ico('🎁')}</div>
+        <div class="at-bonus-body">
+          <div class="at-bonus-title">Up to ${14 + BYBIT_REF_BONUS_DAYS} days of auto-trading for free</div>
+          <div class="at-bonus-sub">
+            Everyone gets a <b>14-day trial</b> on any tier with no subscription charge.
+            Register a brand-new Bybit account via our link and we'll add
+            <b>+${BYBIT_REF_BONUS_DAYS} bonus days</b> on top. That's up to ${14 + BYBIT_REF_BONUS_DAYS} days of real trading
+            without paying — your deposit, your control.
+          </div>
+        </div>
+        <div class="at-bonus-actions">
+          <a class="at-btn-primary" href="${BYBIT_REF_URL}" target="_blank" rel="noopener">
+            ${ico('🚀')}Open Bybit
+          </a>
+          <a class="at-btn-secondary" href="${SUPPORT_TG}" target="_blank" rel="noopener">
+            Ask the operator
+          </a>
+        </div>
+      </div>
+    </section>
+  `;
+  }
   return `
     <section class="at-section at-bonus" id="bonus">
       <div class="at-bonus-card">
@@ -166,7 +250,61 @@ function renderBybitBonus(): string {
   `;
 }
 
-function renderHowItWorks(): string {
+function renderHowItWorks(lang: Lang): string {
+  if (lang === 'en') {
+    return `
+    <section class="at-section at-how" id="how">
+      <h2 class="at-section-title">${ico('🛠')}Get started in 4 steps</h2>
+      <p class="at-section-sub">
+        If you already have a funded Bybit account, all 4 steps take ~10 minutes.
+        If not — start with Bybit (see step 3 — that's where the +${BYBIT_REF_BONUS_DAYS}-day auto-trading bonus lives).
+      </p>
+      <div class="at-how-grid">
+        <div class="at-how-step">
+          <div class="at-how-num">1</div>
+          <div class="at-how-title">Sign up</div>
+          <div class="at-how-body">
+            Phone number + Telegram bot — takes 30 seconds. No passwords, no email,
+            no card check. You're dropped straight into your account.
+            <a href="/strategies?from=autotrading">Register now →</a>
+          </div>
+        </div>
+        <div class="at-how-step">
+          <div class="at-how-num">2</div>
+          <div class="at-how-title">Pick a tier</div>
+          <div class="at-how-body">
+            Look at the <a href="#pricing">pricing table</a> below.
+            Decide how much capital you want to allocate (minimum $300). The larger
+            the deposit, the more strategies run in parallel and the higher the expected profit.
+            <b>Your deposit stays on your Bybit</b> — there is nothing to transfer to us.
+          </div>
+        </div>
+        <div class="at-how-step">
+          <div class="at-how-num">3</div>
+          <div class="at-how-title">Connect Bybit</div>
+          <div class="at-how-body">
+            If you don't have a Bybit account yet —
+            <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">sign up via our link</a>
+            and get <b>+${BYBIT_REF_BONUS_DAYS} bonus auto-trading days</b>.
+            Then create an API key <b>with trading permission only</b>
+            (no withdraw) — there is an illustrated walkthrough in your account,
+            with a button that opens the correct Bybit page directly.
+          </div>
+        </div>
+        <div class="at-how-step">
+          <div class="at-how-num">4</div>
+          <div class="at-how-title">Fund and go</div>
+          <div class="at-how-body">
+            Transfer USDT to your <b>Unified Trading Account (UTA)</b> on Bybit, sized for the tier
+            you picked (minimum $300 for Starter, $800 for Standard, and so on).
+            Strategies switch on automatically and <b>start trading on their own</b>.
+            Open the dashboard and watch the trades come in.
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+  }
   return `
     <section class="at-section at-how" id="how">
       <h2 class="at-section-title">${ico('🛠')}Как начать за 4 шага</h2>
@@ -221,7 +359,74 @@ function renderHowItWorks(): string {
   `;
 }
 
-function renderSafety(): string {
+function renderSafety(lang: Lang): string {
+  if (lang === 'en') {
+    return `
+    <section class="at-section at-safety">
+      <h2 class="at-section-title">${ico('🛡')}Not a pyramid, not a fund</h2>
+      <p class="at-section-sub">
+        The main difference between us and the "magic strategies" or copy-trading pyramids:
+        <b>your money stays with you the whole time</b>. We're a software service that places
+        orders on your Bybit account via API. Not a bank, not a fund manager, not a fund.
+      </p>
+      <div class="at-safety-grid">
+        <div class="at-safety-card">
+          <div class="at-safety-icon">${ico('💰')}</div>
+          <div class="at-safety-title">Deposit stays on your exchange</div>
+          <div class="at-safety-body">
+            You don't transfer anything to us. Your deposit sits in <b>your</b> Bybit account.
+            A tier on our side is simply a trading configuration for your capital —
+            not an investment in our "fund".
+          </div>
+        </div>
+        <div class="at-safety-card">
+          <div class="at-safety-icon">${ico('🚫')}</div>
+          <div class="at-safety-title">We can't withdraw your funds</div>
+          <div class="at-safety-body">
+            The API key is created <b>without withdraw or transfer permission</b>.
+            Pulling anything from your account is technically impossible —
+            Bybit rejects any such request from our side.
+          </div>
+        </div>
+        <div class="at-safety-card">
+          <div class="at-safety-icon">${ico('🔒')}</div>
+          <div class="at-safety-title">Keys are encrypted</div>
+          <div class="at-safety-body">
+            Keys are encrypted with <b>AES-256-GCM</b> at rest. Once stored, even our own
+            server can't read your secret — it can only use it to place orders
+            via the Bybit API.
+          </div>
+        </div>
+        <div class="at-safety-card">
+          <div class="at-safety-icon">${ico('🤖')}</div>
+          <div class="at-safety-title">Trade and stop, nothing else</div>
+          <div class="at-safety-body">
+            With your key we only do three things: open a position, close a position,
+            place a protective stop. Spot, transfers and your profile are
+            entirely out of reach.
+          </div>
+        </div>
+        <div class="at-safety-card">
+          <div class="at-safety-icon">${ico('⏹')}</div>
+          <div class="at-safety-title">Revoke in one click</div>
+          <div class="at-safety-body">
+            Don't like the results? Disable the key in your dashboard or delete it
+            on Bybit. We'll close open positions with a market order before
+            shutting down. Your funds remain exactly as they are.
+          </div>
+        </div>
+        <div class="at-safety-card">
+          <div class="at-safety-icon">${ico('📊')}</div>
+          <div class="at-safety-title">Open statistics</div>
+          <div class="at-safety-body">
+            Every trade made by our strategies is published live on the site in
+            real time. Nothing is hidden, no cherry-picked "winning screenshots".
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+  }
   return `
     <section class="at-section at-safety">
       <h2 class="at-section-title">${ico('🛡')}Это не пирамида и не фонд</h2>
@@ -295,7 +500,75 @@ function renderSafety(): string {
  * боятся плеча из-за прошлых неудачных опытов или травмирующего опыта
  * мейнстримных «гуру» которые говорят «плечо = смерть».
  */
-function renderLeverageEducation(): string {
+function renderLeverageEducation(lang: Lang): string {
+  if (lang === 'en') {
+    return `
+    <section class="at-section at-leverage">
+      <h2 class="at-section-title">${ico('🛡')}Why liquidation is off the table</h2>
+      <p class="at-section-sub">
+        A lot of influencers will tell you "leverage equals death". In reality leverage isn't
+        dangerous on its own — it's dangerous <b>without risk management</b>. Here are the
+        two approaches side by side: the typical one, and ours.
+      </p>
+      <div class="at-lev-grid">
+        <div class="at-lev-bad">
+          <div class="at-lev-card-title">${ico('💀')}How most people blow up</div>
+          <ol class="at-lev-list">
+            <li>Open a position with 20×-50× leverage "because they want it fast"</li>
+            <li>Skip the stop-loss "because they believe in the trade"</li>
+            <li>Price moves 2-5% against them — the exchange force-closes the position (liquidation)</li>
+            <li>The entire margin deposit is gone in minutes</li>
+            <li>"Leverage is evil"</li>
+          </ol>
+        </div>
+        <div class="at-lev-good">
+          <div class="at-lev-card-title">${ico('🛡')}How we do it</div>
+          <ol class="at-lev-list">
+            <li><b>Leverage is sized to match the stop-loss</b> of each strategy — set individually per pair</li>
+            <li><b>Formula</b>: <code>leverage = floor(0.7 / (slPct + 0.02))</code> — 30% buffer to liquidation</li>
+            <li>Example: BCH with a 3.5% SL → 12× leverage (not 50×). BTC with a 4% SL → 11× leverage</li>
+            <li>When price moves against the trade our stop-loss fires first (taking a known loss), <b>the exchange never gets to liquidate</b></li>
+            <li>Maximum loss per trade — <b>1.5-2.5%</b> of your deposit</li>
+          </ol>
+        </div>
+      </div>
+      <div class="at-lev-example">
+        <h3 class="at-lev-example-title">Example: a single BCH trade on the Plus tier</h3>
+        <div class="at-lev-example-grid">
+          <div class="at-lev-stat">
+            <div class="at-lev-stat-label">Your deposit</div>
+            <div class="at-lev-stat-val">$3,000</div>
+          </div>
+          <div class="at-lev-stat">
+            <div class="at-lev-stat-label">Margin (locked)</div>
+            <div class="at-lev-stat-val">$120 <span class="at-lev-pct">(4%)</span></div>
+          </div>
+          <div class="at-lev-stat">
+            <div class="at-lev-stat-label">Leverage</div>
+            <div class="at-lev-stat-val">12×</div>
+          </div>
+          <div class="at-lev-stat">
+            <div class="at-lev-stat-label">Position size</div>
+            <div class="at-lev-stat-val">$1,440</div>
+          </div>
+          <div class="at-lev-stat at-lev-stat-bad">
+            <div class="at-lev-stat-label">Worst-case loss (SL hit)</div>
+            <div class="at-lev-stat-val">$50.40 <span class="at-lev-pct">(1.7%)</span></div>
+          </div>
+          <div class="at-lev-stat at-lev-stat-ok">
+            <div class="at-lev-stat-label">Liquidation</div>
+            <div class="at-lev-stat-val">${ico('🚫')}Impossible</div>
+          </div>
+        </div>
+        <p class="at-lev-note">
+          The stop-loss fires before liquidation can because we kept a 30% buffer between
+          it and the exchange's liquidation price. That's not magic — it's plain risk-management
+          math.
+        </p>
+      </div>
+    </section>
+  `;
+  }
   return `
     <section class="at-section at-leverage">
       <h2 class="at-section-title">${ico('🛡')}Почему ликвидация исключена</h2>
@@ -369,7 +642,68 @@ function renderLeverageEducation(): string {
  * before promoting them to user tiers, and how the safety SL works.
  * Two pieces of trust-building information that don't fit the FAQ format.
  */
-function renderStrategyPipeline(): string {
+function renderStrategyPipeline(lang: Lang): string {
+  if (lang === 'en') {
+    return `
+    <section class="at-section at-pipeline">
+      <h2 class="at-section-title">${ico('🧪')}How we work with strategies</h2>
+      <p class="at-section-sub">
+        Only strategies that have passed months of validation on our shadow account ever make
+        it into a paid tier. We continuously test new candidates in parallel — the best ones
+        are added to the portfolios, the weak ones are dropped.
+      </p>
+      <div class="at-pipeline-grid">
+        <div class="at-pipeline-step">
+          <div class="at-pipeline-num">1</div>
+          <div class="at-pipeline-title">${ico('🔬')}200+ day backtest</div>
+          <div class="at-pipeline-body">
+            Every new LuxAlgo Strategy Builder candidate is tested against historical data.
+            The filter is simple: <b>win-rate ≥ 55%</b>, <b>profit factor ≥ 2</b>,
+            <b>drawdown ≤ 30%</b>, at least 100 trades in the sample. Only ~5%
+            of candidates pass this gate.
+          </div>
+        </div>
+        <div class="at-pipeline-step">
+          <div class="at-pipeline-num">2</div>
+          <div class="at-pipeline-title">${ico('👁')}Shadow mode on real money</div>
+          <div class="at-pipeline-body">
+            Strategies that pass the filter are launched on our own Bybit account.
+            <b>This is real money, not a simulator</b> — fees, slippage and overnight funding
+            are all included. Every trade is published in our Telegram channel and on the site,
+            and each one can be cross-checked by trade ID.
+          </div>
+        </div>
+        <div class="at-pipeline-step">
+          <div class="at-pipeline-num">3</div>
+          <div class="at-pipeline-title">${ico('🏆')}Only the best make it into a tier</div>
+          <div class="at-pipeline-body">
+            After 1-3 months of shadow trading we check: does the live PnL match the backtest?
+            Are losses staying inside the expected band? If yes — the strategy is added to a
+            tier (Starter / Standard / Plus depending on its risk profile). If not — it's
+            turned off.
+          </div>
+        </div>
+        <div class="at-pipeline-step">
+          <div class="at-pipeline-num">4</div>
+          <div class="at-pipeline-title">${ico('🛡')}The safety stop-loss is an insurance line</div>
+          <div class="at-pipeline-body">
+            Each strategy decides when to exit on its own — that's its internal logic.
+            <b>Our safety stop only fires in a failure mode</b> (lost signal, exchange hang).
+            It sits <b>above every historical loss the strategy has taken</b>, plus a
+            15-30% buffer, so it never interferes with normal operation. Ordinary losses are
+            closed by the strategy itself in the 0.5-2% range.
+          </div>
+        </div>
+      </div>
+      <div class="at-pipeline-foot">
+        <b>What this means for you:</b> the lineup of strategies inside each tier evolves over time.
+        When a good new strategy is added it shows up in your portfolio automatically, as long as
+        your tier supports it. Pruning weak ones is our job, not yours.
+        You can watch the lineup change in the <a href="/strategies">Strategies</a> section.
+      </div>
+    </section>
+  `;
+  }
   return `
     <section class="at-section at-pipeline">
       <h2 class="at-section-title">${ico('🧪')}Как мы работаем со стратегиями</h2>
@@ -431,56 +765,125 @@ function renderStrategyPipeline(): string {
   `;
 }
 
-function renderPricing(): string {
+function renderPricing(lang: Lang): string {
   const tiers = listTiers();
   const starterPrice = tiers[0]?.monthlyPriceUsd ?? 12;
+
+  const t = lang === 'en'
+    ? {
+        bonus: 'Bonus',
+        freeName: '🆓 Free',
+        freeDepo: '$300+ Bybit deposit',
+        perMonthDays: `/mo × ${BYBIT_REF_BONUS_DAYS} days`,
+        freePitch: `Bonus for new users who sign up to Bybit via our link — ${BYBIT_REF_BONUS_DAYS} days of Starter free, on top of the standard 14-day trial.`,
+        feat3Strats: '3 strategies:',
+        featConcurrent: 'Concurrent trades:',
+        upTo: 'up to',
+        featFree: 'Free:',
+        featFreeBreakdown: `14-day trial + ${BYBIT_REF_BONUS_DAYS} bonus days = ${14 + BYBIT_REF_BONUS_DAYS} days`,
+        featCondition: 'Requirement:',
+        featConditionVal: 'new Bybit account via',
+        ourLink: 'our link',
+        afterBonus: `After that — switch to paid Starter at $${starterPrice}/mo, or cancel in one click.`,
+        popular: 'Popular',
+        deposit: 'Deposit',
+        perMonth: '/mo',
+        featProfit: 'Profit:',
+        featStrats: 'strategies:',
+        featTrial: 'Free:',
+        featTrialVal: '14-day trial',
+        sectionTitle: 'Pricing and expected returns',
+        intro: `Pick the tier yourself based on the deposit you want to allocate to auto-trading. The larger the deposit, the more strategies run in parallel and the higher the expected profit. Subscription cost stays under 18-20% of the expected monthly return. <b>Scroll right</b> to see all tiers →`,
+        carouselAria: 'Pricing',
+        scrollHint: 'Swipe or scroll sideways to flip through tiers',
+        cta: 'Sign up',
+        ctaSub: 'After registration — pick a tier, connect Bybit, start trading.',
+        disclaimer: `⚠ Return figures are derived from historical backtests. <b>Past results do not guarantee future returns</b>. Crypto trading carries the risk of total capital loss. Robot Claude is a trade-automation service, not a financial advisor. All decisions about deposit size and risk are yours alone.`,
+        approx: '~$',
+        perMonthShort: '/mo',
+        slash: '–',
+      }
+    : {
+        bonus: 'Бонус',
+        freeName: '🆓 Free',
+        freeDepo: '$300+ депозит на Bybit',
+        perMonthDays: `/мес × ${BYBIT_REF_BONUS_DAYS} дней`,
+        freePitch: `Бонус для тех, кто регистрирует Bybit по нашей ссылке — ${BYBIT_REF_BONUS_DAYS} дней Starter бесплатно сверх стандартного 14-дневного теста.`,
+        feat3Strats: '3 стратегии:',
+        featConcurrent: 'Сделок одновременно:',
+        upTo: 'до',
+        featFree: 'Бесплатно:',
+        featFreeBreakdown: `14 дней теста + ${BYBIT_REF_BONUS_DAYS} дней бонуса = ${14 + BYBIT_REF_BONUS_DAYS} дней`,
+        featCondition: 'Условие:',
+        featConditionVal: 'новый аккаунт Bybit по',
+        ourLink: 'нашей ссылке',
+        afterBonus: `После — переход на платный Starter $${starterPrice}/мес или отключение в один клик.`,
+        popular: 'Популярный',
+        deposit: 'Депозит',
+        perMonth: '/мес',
+        featProfit: 'Заработок:',
+        featStrats: 'стратегий:',
+        featTrial: 'Бесплатно:',
+        featTrialVal: '14 дней теста',
+        sectionTitle: 'Тарифы и доходность',
+        intro: `Тариф вы выбираете сами по размеру депозита, который готовы выделить под автотрейдинг. Чем больше депозит — тем больше стратегий в работе и тем выше ожидаемая прибыль. Подписка покрывает не больше 18-20% потенциального месячного дохода. <b>Прокрутите вправо</b>, чтобы увидеть все тарифы →`,
+        carouselAria: 'Тарифы',
+        scrollHint: 'Свайпните или прокрутите вбок чтобы листать тарифы',
+        cta: 'Зарегистрироваться',
+        ctaSub: 'После регистрации — выберете тариф, подключите Bybit, начнёте торговать.',
+        disclaimer: `⚠ Цифры доходности рассчитаны по историческим данным бэктестов. <b>Прошлые результаты не гарантируют будущих</b>. Криптотрейдинг сопряжён с риском полной потери капитала. Robot Claude — сервис автоматизации сделок, не финансовый консультант. Все решения о размере депозита и риске вы принимаете самостоятельно.`,
+        approx: '~$',
+        perMonthShort: '/мес',
+        slash: '–',
+      };
 
   // Virtual Free card — not in TIER_CONFIGS. Conditional on Bybit referral signup.
   const freeCard = `
     <div class="at-tier-card at-tier-free">
-      <div class="at-tier-badge">${ico('🎁')}Бонус</div>
-      <div class="at-tier-name">🆓 Free</div>
-      <div class="at-tier-depo">$300+ депозит на Bybit</div>
+      <div class="at-tier-badge">${ico('🎁')}${t.bonus}</div>
+      <div class="at-tier-name">${t.freeName}</div>
+      <div class="at-tier-depo">${t.freeDepo}</div>
       <div class="at-tier-price">
         <span class="at-tier-price-num">$0</span>
-        <span class="at-tier-price-period">/мес × ${BYBIT_REF_BONUS_DAYS} дней</span>
+        <span class="at-tier-price-period">${t.perMonthDays}</span>
       </div>
-      <p class="at-tier-pitch-top">Бонус для тех, кто регистрирует Bybit по нашей ссылке — ${BYBIT_REF_BONUS_DAYS} дней Starter бесплатно сверх стандартного 14-дневного теста.</p>
+      <p class="at-tier-pitch-top">${t.freePitch}</p>
       <ul class="at-tier-features">
-        <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">3 стратегии:</span> BTC, BNB, BCH</li>
-        <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">Сделок одновременно:</span> до 2</li>
-        <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">Бесплатно:</span> 14 дней теста + ${BYBIT_REF_BONUS_DAYS} дней бонуса = ${14 + BYBIT_REF_BONUS_DAYS} дней</li>
-        <li><span class="at-tier-feat-icon">🎁</span><span class="at-tier-feat-label">Условие:</span> новый аккаунт Bybit по <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">нашей ссылке</a></li>
+        <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">${t.feat3Strats}</span> BTC, BNB, BCH</li>
+        <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">${t.featConcurrent}</span> ${t.upTo} 2</li>
+        <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">${t.featFree}</span> ${t.featFreeBreakdown}</li>
+        <li><span class="at-tier-feat-icon">🎁</span><span class="at-tier-feat-label">${t.featCondition}</span> ${t.featConditionVal} <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">${t.ourLink}</a></li>
       </ul>
-      <div class="at-tier-after-bonus">
-        После — переход на платный Starter $${starterPrice}/мес или отключение в один клик.
-      </div>
+      <div class="at-tier-after-bonus">${t.afterBonus}</div>
     </div>
   `;
 
   const cards = tiers
-    .map((t, i) => {
-      const isPopular = t.id === 'standard';
-      const maxStr = t.maxBalanceUsdt === Number.POSITIVE_INFINITY ? '∞' : `$${t.maxBalanceUsdt.toLocaleString()}`;
-      const sub = t.expectedMonthlyPnlRangeUsd;
-      const coins = tierCoinTickers(t.id);
+    .map((tier, i) => {
+      const isPopular = tier.id === 'standard';
+      const maxStr = tier.maxBalanceUsdt === Number.POSITIVE_INFINITY ? '∞' : `$${tier.maxBalanceUsdt.toLocaleString()}`;
+      const sub = tier.expectedMonthlyPnlRangeUsd;
+      const coins = tierCoinTickers(tier.id);
       const coinsStr = coins.length > 0 ? coins.join(', ') : '—';
-      const badge = isPopular ? `<div class="at-tier-badge at-tier-badge-popular">${ico('⭐')}Популярный</div>` : '';
+      const badge = isPopular ? `<div class="at-tier-badge at-tier-badge-popular">${ico('⭐')}${t.popular}</div>` : '';
+      // Tier `pitch` is RU-only in tier-config; for EN we still render it (untranslated)
+      // because most tier pitches are coin names + numbers anyway and translation would
+      // be its own task. For now we keep the source string.
       return `
         <div class="at-tier-card ${isPopular ? 'at-tier-popular' : ''}" data-tier-index="${i + 1}">
           ${badge}
-          <div class="at-tier-name">${tierEmoji(t.id)} ${escapeHtml(t.name)}</div>
-          <div class="at-tier-depo">Депозит $${t.minBalanceUsdt.toLocaleString()}–${maxStr}</div>
+          <div class="at-tier-name">${tierEmoji(tier.id)} ${escapeHtml(tier.name)}</div>
+          <div class="at-tier-depo">${t.deposit} $${tier.minBalanceUsdt.toLocaleString()}${t.slash}${maxStr}</div>
           <div class="at-tier-price">
-            <span class="at-tier-price-num">$${t.monthlyPriceUsd}</span>
-            <span class="at-tier-price-period">/мес</span>
+            <span class="at-tier-price-num">$${tier.monthlyPriceUsd}</span>
+            <span class="at-tier-price-period">${t.perMonth}</span>
           </div>
-          <p class="at-tier-pitch-top">${escapeHtml(t.pitch)}</p>
+          <p class="at-tier-pitch-top">${escapeHtml(tier.pitch)}</p>
           <ul class="at-tier-features">
-            <li><span class="at-tier-feat-icon">💰</span><span class="at-tier-feat-label">Заработок:</span> ~$${sub.low}–$${sub.high}/мес</li>
-            <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">${t.strategyIds.length} стратегий:</span> ${escapeHtml(coinsStr)}</li>
-            <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">Сделок одновременно:</span> до ${t.maxConcurrentPositions}</li>
-            <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">Бесплатно:</span> 14 дней теста</li>
+            <li><span class="at-tier-feat-icon">💰</span><span class="at-tier-feat-label">${t.featProfit}</span> ${t.approx}${sub.low}${t.slash}$${sub.high}${t.perMonthShort}</li>
+            <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">${tier.strategyIds.length} ${t.featStrats}</span> ${escapeHtml(coinsStr)}</li>
+            <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">${t.featConcurrent}</span> ${t.upTo} ${tier.maxConcurrentPositions}</li>
+            <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">${t.featTrial}</span> ${t.featTrialVal}</li>
           </ul>
         </div>
       `;
@@ -489,31 +892,20 @@ function renderPricing(): string {
 
   return `
     <section class="at-section at-pricing" id="pricing">
-      <h2 class="at-section-title">${ico('💳')}Тарифы и доходность</h2>
-      <p class="at-pricing-intro">
-        Тариф вы выбираете сами по размеру депозита, который готовы выделить под автотрейдинг.
-        Чем больше депозит — тем больше стратегий в работе и тем выше ожидаемая прибыль.
-        Подписка покрывает не больше 18-20% потенциального месячного дохода.
-        <b>Прокрутите вправо</b>, чтобы увидеть все тарифы →
-      </p>
-      <div class="at-tier-carousel" role="region" aria-label="Тарифы">
+      <h2 class="at-section-title">${ico('💳')}${t.sectionTitle}</h2>
+      <p class="at-pricing-intro">${t.intro}</p>
+      <div class="at-tier-carousel" role="region" aria-label="${t.carouselAria}">
         ${freeCard}
         ${cards}
       </div>
       <div class="at-tier-scroll-hint">
-        ${ico('👆')}Свайпните или прокрутите вбок чтобы листать тарифы
+        ${ico('👆')}${t.scrollHint}
       </div>
       <div class="at-pricing-cta">
-        <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Зарегистрироваться</a>
-        <div class="at-pricing-cta-sub">
-          После регистрации — выберете тариф, подключите Bybit, начнёте торговать.
-        </div>
+        <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}${t.cta}</a>
+        <div class="at-pricing-cta-sub">${t.ctaSub}</div>
       </div>
-      <div class="at-price-disclaimer">
-        ⚠ Цифры доходности рассчитаны по историческим данным бэктестов. <b>Прошлые результаты не гарантируют будущих</b>.
-        Криптотрейдинг сопряжён с риском полной потери капитала. Robot Claude — сервис автоматизации сделок,
-        не финансовый консультант. Все решения о размере депозита и риске вы принимаете самостоятельно.
-      </div>
+      <div class="at-price-disclaimer">${t.disclaimer}</div>
     </section>
   `;
 }
@@ -531,7 +923,7 @@ function tierEmoji(id: 'starter' | 'standard' | 'plus' | 'pro' | 'vip' | 'prof')
 
 /** FAQ items — exposed at module scope so SEO can emit a FAQPage JSON-LD
  *  graph mirroring exactly what appears in the visible accordion. */
-const FAQ_ITEMS: Array<{ q: string; a: string }> = [
+const FAQ_ITEMS_RU: Array<{ q: string; a: string }> = [
     {
       q: 'Чем вы отличаетесь от копитрейдинг-пирамид и «волшебных» сервисов?',
       a: 'Главное: ваши деньги остаются на вашем Bybit-аккаунте. Мы их не принимаем, не управляем фондом, не обещаем фиксированную доходность. Наш сервис — это софт, который выставляет торговые ордера на вашем счёте по проверенным стратегиям. Технически невозможно вывести что-то с вашего счёта в нашу сторону: ключ создаётся без права на withdraw и transfer.',
@@ -582,8 +974,61 @@ const FAQ_ITEMS: Array<{ q: string; a: string }> = [
   },
 ];
 
-function renderFaq(): string {
-  const html = FAQ_ITEMS
+const FAQ_ITEMS_EN: Array<{ q: string; a: string }> = [
+  {
+    q: 'How are you different from copy-trading pyramids and "magic" services?',
+    a: 'The key point: your money stays in your own Bybit account. We don\'t accept deposits, we don\'t run a fund, we don\'t promise a fixed return. Our service is software that places trading orders on your account using vetted strategies. Pulling anything from your account to ours is technically impossible — the API key is created without withdraw or transfer permission.',
+  },
+  {
+    q: 'How is my tier assigned? Can I pick it myself?',
+    a: 'You pick the tier yourself when you connect your Bybit account. All we do is check that your balance is enough for the selected tier: $300+ for Starter, $800+ for Standard, $2,500+ for Plus and so on. If you picked Plus with only $500 on the account, we\'ll ask you to top up or choose a smaller tier. If your deposit grows we\'ll suggest moving up with a pro-rated subscription. If the deposit drops significantly we\'ll switch you down to a smaller tier automatically after 72 hours — open positions are not touched.',
+  },
+  {
+    q: 'How many days of auto-trading do I get for free?',
+    a: `Every new user gets a <b>14-day trial</b> on any tier — connect Bybit, trading runs as usual, no subscription is charged. That lets you see real results before paying. <br/><br/><b>+${BYBIT_REF_BONUS_DAYS} bonus days</b> if you sign up to Bybit via our link (the "Open Bybit" button on this page). Up to <b>${14 + BYBIT_REF_BONUS_DAYS} days</b> of auto-trading with no payment. After that — standard subscription on your chosen tier, or cancel in one click.`,
+  },
+  {
+    q: 'How much money do I need to start?',
+    a: 'A minimum of $300 USDT on the Bybit Unified Trading Account (UTA). Below that we won\'t start auto-trading — it doesn\'t make economic sense for you or for us (even the subscription would eat a meaningful share of the expected profit).',
+  },
+  {
+    q: 'What is leverage and isn\'t it dangerous?',
+    a: 'Leverage is a tool that lets you open a position larger than the margin you have locked. It IS dangerous to use without risk management. On our side leverage is matched to each strategy\'s stop-loss so that OUR stop fires first (a known 1-3% deposit loss) — never the exchange\'s liquidation. Your maximum loss per trade is known in advance. See the "Safe leverage" and "Why liquidation is off the table" sections above for the details.',
+  },
+  {
+    q: 'Then why use leverage at all if it\'s dangerous?',
+    a: 'Auto-trading crypto futures without leverage is economically pointless: on a $1,000 deposit with a $200 position the expected profit is ~$2.7/mo — less than the subscription. With 12× leverage (safely sized to our SL) the same deposit trades $2,400 of size, and the expected profit becomes ~$32/mo. The key is that the stop-loss fires before liquidation, so the worst-case per-trade loss is known in advance. This is math, not a casino.',
+  },
+  {
+    q: 'Which exchanges are supported? Will there be more?',
+    a: 'Today only Bybit USDT-perp futures — picked for its strong liquidity, low fees (0.055% taker), and a clean API. Next up: <b>BingX</b> (CEX, for markets where Bybit isn\'t available by geo — Q3 2026), then <b>Hyperliquid</b> (DEX-perp, for users who want to skip KYC and stay on-chain — Q4 2026). When they\'re added you\'ll be able to switch the "auto-trading exchange" right from your account, no re-registration.',
+  },
+  {
+    q: 'What if a strategy goes into the red?',
+    a: 'Every strategy has a protective stop-loss. Drawdowns happen — that\'s normal for any trading system. Each tier comes with a max-drawdown commitment (Starter ≤8%, Standard ≤15%, Plus/Pro/VIP ≤18%). If the drawdown exceeds what we promised, we revisit the tier or remove the strategy.',
+  },
+  {
+    q: 'Can I close a position manually or trade on my own?',
+    a: 'Yes, at any time through Bybit\'s interface. Our system doesn\'t fight back — it sees the close on the next reconciliation (once a minute) and marks the trade as completed in your history. You can trade in parallel on the same account — we only touch the positions our system opened.',
+  },
+  {
+    q: 'How do I stop trading?',
+    a: 'In your account, at the bottom of the page, there\'s a big red <b>"🛑 Stop and close trades"</b> button. Press it and we immediately close all your open trades on Bybit at market price and stop opening new ones. Your deposit stays on your account — we don\'t touch it. You can press "▶ Resume trading" any time and auto-trading continues on your chosen tier. To disconnect from the system entirely, revoke the API key at /account/api-key.',
+  },
+  {
+    q: 'Do past returns guarantee future ones?',
+    a: 'No. Every number on the site comes from historical backtests and the live statistics of our strategies. Markets change, any strategy can stop working. Crypto trading carries the risk of total capital loss. Never trade more than you are prepared to lose.',
+  },
+  {
+    q: 'How does payment work?',
+    a: `The first <b>14 days</b> are a trial on any tier — no subscription charge. If you signed up to Bybit via our link, another <b>${BYBIT_REF_BONUS_DAYS} bonus days</b> are added (up to ${14 + BYBIT_REF_BONUS_DAYS} days free in total). Once the free period ends we reach out on Telegram to take the subscription payment. No automatic card charges — payments are processed manually by the operator, and you decide whether to renew.`,
+  },
+];
+
+function renderFaq(lang: Lang): string {
+  const items = lang === 'en' ? FAQ_ITEMS_EN : FAQ_ITEMS_RU;
+  const title = lang === 'en' ? 'Frequently asked questions' : 'Частые вопросы';
+  const html = items
     .map(
       (it) => `
         <details class="at-faq-item">
@@ -595,13 +1040,32 @@ function renderFaq(): string {
     .join('');
   return `
     <section class="at-section at-faq">
-      <h2 class="at-section-title">${ico('❓')}Частые вопросы</h2>
+      <h2 class="at-section-title">${ico('❓')}${title}</h2>
       <div class="at-faq-list">${html}</div>
     </section>
   `;
 }
 
-function renderFinalCta(): string {
+function renderFinalCta(lang: Lang): string {
+  if (lang === 'en') {
+    return `
+    <section class="at-section at-cta-final">
+      <h2 class="at-cta-title">Ready to switch on passive income?</h2>
+      <p class="at-cta-sub">
+        Registration takes 30 seconds. No card required. Cancel in one click.
+        Your capital stays on Bybit, under your control.
+        14-day trial free on any tier + another ${BYBIT_REF_BONUS_DAYS} bonus days if you sign up to Bybit via <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">our link</a>.
+      </p>
+      <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">Sign up</a>
+      <p class="at-cta-login">
+        Already registered? <a href="/strategies?login=1">Sign in →</a>
+      </p>
+      <p class="at-cta-help">
+        Questions? Message the operator: <a href="${SUPPORT_TG}" target="_blank" rel="noopener">@dboykod</a>
+      </p>
+    </section>
+  `;
+  }
   return `
     <section class="at-section at-cta-final">
       <h2 class="at-cta-title">Готовы запустить пассивный доход?</h2>
@@ -1196,9 +1660,13 @@ function styles(): string {
 }
 
 export async function autotradingRoute(app: FastifyInstance): Promise<void> {
-  app.get('/autotrading', async (_req, reply) => {
+  app.get('/autotrading', async (req, reply) => {
+    const lang = getLang(req);
     reply.header('content-type', 'text/html; charset=utf-8');
-    reply.header('cache-control', 'public, max-age=300'); // 5 min CDN-style cache
-    return reply.send(renderPage());
+    // Vary on Cookie: the page content differs by `rclang` cookie, and any
+    // upstream cache (CDN, browser) must keep one variant per cookie value
+    // — otherwise an EN visitor could get an RU-cached page or vice versa.
+    reply.header('vary', 'Cookie');
+    return reply.send(renderPage(lang));
   });
 }
