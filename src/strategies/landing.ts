@@ -1487,8 +1487,17 @@ const STYLE = `
   }
   .strategy-preview-left { flex: 1; min-width: 0; }
   .strategy-preview-name { font-weight: 500; }
-  .strategy-preview-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .strategy-preview-meta { font-size: 12.5px; color: var(--text-dim); margin-top: 4px; line-height: 1.45; }
+  .strategy-preview-meta b { color: var(--text-faint); font-weight: 600; letter-spacing: 0.02em; }
+  .strategy-preview-meta-dim { opacity: 0.78; }
   .strategy-preview-right { text-align: right; flex-shrink: 0; }
+  /* Big % number on the right — primary visual anchor for "live profit". */
+  .strategy-preview-big {
+    font-size: 20px; font-weight: 700; line-height: 1.1;
+    letter-spacing: -0.01em; font-family: ui-monospace, Menlo, monospace;
+  }
+  .strategy-preview-big.pos { color: var(--accent); }
+  .strategy-preview-big.neg { color: var(--danger); }
   .strategy-preview-spark {
     display: flex; align-items: center; flex-shrink: 0;
     padding: 0 12px; opacity: 0.85;

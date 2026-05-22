@@ -1004,55 +1004,76 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
   `;
 
   // ---------- TOP 3 strategy preview ----------
-  // Ranking: by live netPnlUsd descending (only strategies with closed
-  // trades). Operator's spec: "show TOP 3 by live profit explicitly, rest
-  // behind a link". If fewer than 3 have closed trades, we backfill from
-  // strategies-by-backtest-CAGR so the section never looks empty.
+  // Ranking: by live netPnlPct descending (same order as netPnlUsd since
+  // every shadow-trade uses fixed $1000 notional, but conceptually labeled
+  // as «return %» so visitors read a single normalized metric).
+  // Backfill with backtest-CAGR-ranked strategies when fewer than 3 have
+  // live trades — section never looks under-baked.
   //
-  // Layout:
-  //   Left  → [STRAT-00X] SYMBOL TFm + plain-Russian backtest summary
-  //   Right → Live PnL only when closed > 0
+  // Layout per row:
+  //   Left   → [STRAT-XXX] SYMBOL TFm
+  //            «Live: +X.XX% (N сделок · ~M дней)»  ← what we earned for real
+  //            «Бэктест: +Y.YY% за P дней, WR ZZ%»   ← clearly labelled history
+  //   Center → sparkline of backtest equity curve
+  //   Right  → big +/-$ number with % suffix (live) — visible from a distance
   const withLive = enabled.map((s) => ({ cfg: s, live: getStrategyLiveStats(s.id) }));
   const liveLeaders = withLive
     .filter((x) => x.live.closed > 0)
-    .sort((a, b) => b.live.netPnlUsd - a.live.netPnlUsd);
+    .sort((a, b) => b.live.netPnlPct - a.live.netPnlPct);
   const noLiveYet = withLive
     .filter((x) => x.live.closed === 0)
     .sort((a, b) => (b.cfg.backtest?.cagrPct ?? 0) - (a.cfg.backtest?.cagrPct ?? 0));
-  // Pad with no-live strategies if we have <3 live leaders, so the
-  // marketing section always shows 3 cards and never looks under-baked.
   const top3 = [...liveLeaders, ...noLiveYet].slice(0, 3);
   const previewItems = top3
     .map(({ cfg: s, live }) => {
       const bt = s.backtest;
-      // Plain-Russian backtest summary. WR / PF / % are jargon for most
-      // visitors — spell it out and add the period so the number means
-      // something concrete instead of just being "a big positive number".
-      const btLabel = bt
-        ? lang === 'en'
-          ? `${(bt.winRate * 100).toFixed(1)}% wins · ${bt.netPnlPct >= 0 ? '+' : ''}${bt.netPnlPct.toFixed(1)}% return over ${bt.periodDays} days`
-          : `${(bt.winRate * 100).toFixed(1)}% прибыльных сделок · доходность ${bt.netPnlPct >= 0 ? '+' : ''}${bt.netPnlPct.toFixed(1)}% за ${bt.periodDays} ${pluralRu(bt.periodDays, 'день', 'дня', 'дней')}`
-        : '';
       // Inline sparkline of cumulative-pnl over the backtest trades.
-      // One-glance signal: green-up = the strategy made money.
       const bundle = loadBacktestTrades(s.id);
       const sparkline = bundle && bundle.trades.length > 1
         ? sparklineSvg(enrichTrades(bundle.trades).map((t) => t.cumulativePnlUsd))
         : '';
-      // Right column appears ONLY once the strategy has closed trades.
-      // Before then the row is left-aligned and uncluttered.
+      // ── Live metric line (the new headline) ───────────────────────────
+      let liveLine = '';
+      if (live.closed > 0) {
+        const sign = live.netPnlPct >= 0 ? '+' : '';
+        const ageDays = live.firstTradeAt
+          ? Math.max(1, Math.round((Date.now() - live.firstTradeAt) / 86_400_000))
+          : null;
+        const cls = classForValue(live.netPnlPct);
+        const closedWord = lang === 'en'
+          ? `${live.closed} closed`
+          : `${live.closed} ${pluralRu(live.closed, 'сделка', 'сделки', 'сделок')}`;
+        const daysWord = ageDays
+          ? (lang === 'en' ? `~${ageDays}d` : `~${ageDays} ${pluralRu(ageDays, 'день', 'дня', 'дней')}`)
+          : '';
+        liveLine = lang === 'en'
+          ? `<b>Live:</b> <span class="${cls}">${sign}${live.netPnlPct.toFixed(2)}%</span> · ${closedWord}${daysWord ? ` · ${daysWord}` : ''}`
+          : `<b>Live:</b> <span class="${cls}">${sign}${live.netPnlPct.toFixed(2)}%</span> · ${closedWord}${daysWord ? ` · ${daysWord}` : ''}`;
+      } else {
+        liveLine = lang === 'en'
+          ? '<i>No live trades yet — only backtest below</i>'
+          : '<i>Live-сделок ещё нет — пока только бэктест ниже</i>';
+      }
+      // ── Backtest line (explicitly labelled now, not floating numbers) ─
+      const btLine = bt
+        ? lang === 'en'
+          ? `<b>Backtest:</b> ${bt.netPnlPct >= 0 ? '+' : ''}${bt.netPnlPct.toFixed(1)}% over ${bt.periodDays} days · WR ${(bt.winRate * 100).toFixed(0)}%`
+          : `<b>Бэктест:</b> ${bt.netPnlPct >= 0 ? '+' : ''}${bt.netPnlPct.toFixed(1)}% за ${bt.periodDays} ${pluralRu(bt.periodDays, 'день', 'дня', 'дней')} · WR ${(bt.winRate * 100).toFixed(0)}%`
+        : '';
+      // Right column: big % (live, primary metric), small $ amount below.
       const rightBlock =
         live.closed > 0
           ? `<div class="strategy-preview-right">
-              <div><span class="${classForValue(live.netPnlUsd)}">${fmtUsd(live.netPnlUsd, true)}</span></div>
-              <div class="strategy-preview-meta">${live.closed} ${lang === 'en' ? 'closed trades' : live.closed === 1 ? 'закрытая сделка' : 'закрытых сделок'}</div>
+              <div class="strategy-preview-big ${classForValue(live.netPnlPct)}">${live.netPnlPct >= 0 ? '+' : ''}${live.netPnlPct.toFixed(2)}%</div>
+              <div class="strategy-preview-meta">${fmtUsd(live.netPnlUsd, true)} на $1000</div>
             </div>`
           : '';
       return `
         <a href="/strategies/${escapeHtml(s.code)}" class="strategy-preview-link">
           <div class="strategy-preview-left">
             <div class="strategy-preview-name">[STRAT-${escapeHtml(s.code)}] ${escapeHtml(s.symbol ?? 'ANY')} ${escapeHtml(s.timeframe)}m</div>
-            <div class="strategy-preview-meta">${btLabel}</div>
+            <div class="strategy-preview-meta">${liveLine}</div>
+            <div class="strategy-preview-meta strategy-preview-meta-dim">${btLine}</div>
           </div>
           ${sparkline ? `<div class="strategy-preview-spark">${sparkline}</div>` : ''}
           ${rightBlock}
