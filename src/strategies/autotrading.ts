@@ -152,10 +152,8 @@ function renderHero(lang: Lang): string {
         Passive income from crypto trading. <span class="at-accent">Funds stay on your exchange.</span>
       </h1>
       <p class="at-hero-sub">
-        Our system trades for you on your own Bybit account using vetted strategies.
-        You don't trade manually — the system opens and closes positions automatically.
-        <b>This is not a fund and not a pyramid scheme</b> — we never accept deposits on our side.
-        Your funds remain on the exchange, under your control at all times.
+        Our system runs vetted strategies on your own Bybit account. <b>Not a fund, not a pyramid</b> —
+        we never accept deposits, your money stays on the exchange the whole time.
       </p>
       <div class="at-hero-cta">
         <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Sign up</a>
@@ -163,7 +161,7 @@ function renderHero(lang: Lang): string {
         <a href="#pricing" class="at-hero-link">see pricing ↓</a>
       </div>
       <div class="at-hero-trial">
-        ${ico('🎁')}<b>14 days of real trading on us</b> — no subscription, no card. Try it before you pay.
+        ${ico('🎁')}<b>14 days of real trading on us</b> — no subscription, no card.
       </div>
       <div class="at-hero-login">
         Already registered? <a href="/strategies?login=1">Sign in →</a>
@@ -171,7 +169,6 @@ function renderHero(lang: Lang): string {
       <div class="at-hero-pills">
         <span class="at-pill">${ico('🛡')}Funds on Bybit, not with us</span>
         <span class="at-pill">${ico('🚫')}Trade-only key, no withdraw</span>
-        <span class="at-pill">${ico('💎')}14-day trial + ${BYBIT_REF_BONUS_DAYS} bonus days via referral</span>
         <span class="at-pill">${ico('⏹')}Cancel in one click</span>
       </div>
     </section>
@@ -184,10 +181,8 @@ function renderHero(lang: Lang): string {
         Пассивный доход на криптотрейдинге. <span class="at-accent">Деньги — на вашей бирже.</span>
       </h1>
       <p class="at-hero-sub">
-        Наша система торгует за вас на вашем счёте Bybit по проверенным стратегиям.
-        Вы не торгуете руками — система открывает и закрывает позиции автоматически.
-        <b>Это не фонд и не пирамида</b> — мы не принимаем депозиты на нашу сторону.
-        Ваши средства всегда у вас на бирже под вашим контролем.
+        Система торгует за вас на вашем счёте Bybit по проверенным стратегиям. <b>Не фонд и не пирамида</b> —
+        мы не принимаем депозиты, ваши деньги всегда на бирже под вашим контролем.
       </p>
       <div class="at-hero-cta">
         <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Регистрация</a>
@@ -195,7 +190,7 @@ function renderHero(lang: Lang): string {
         <a href="#pricing" class="at-hero-link">посмотреть тарифы ↓</a>
       </div>
       <div class="at-hero-trial">
-        ${ico('🎁')}<b>14 дней реальной торговли бесплатно</b> — без подписки и без карты. Попробуйте до оплаты.
+        ${ico('🎁')}<b>14 дней реальной торговли бесплатно</b> — без подписки, без карты.
       </div>
       <div class="at-hero-login">
         Уже зарегистрированы? <a href="/strategies?login=1">Войти в кабинет →</a>
@@ -203,7 +198,6 @@ function renderHero(lang: Lang): string {
       <div class="at-hero-pills">
         <span class="at-pill">${ico('🛡')}Деньги на Bybit, не у нас</span>
         <span class="at-pill">${ico('🚫')}Ключ без права на вывод</span>
-        <span class="at-pill">${ico('💎')}14 дней теста + ${BYBIT_REF_BONUS_DAYS} дней бонуса по реф-ссылке</span>
         <span class="at-pill">${ico('⏹')}Отмена в один клик</span>
       </div>
     </section>
