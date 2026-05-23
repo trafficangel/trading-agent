@@ -304,6 +304,18 @@ export function countAllClosedShadowTrades(): number {
   return allClosedCountStmt.get()?.n ?? 0;
 }
 
+const earliestShadowTradeStmt = db.prepare<[], { ts: number | null }>(`
+  SELECT MIN(created_at) AS ts FROM decisions
+  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id IS NOT NULL
+`);
+/** Earliest shadow trade timestamp ever recorded — used by the
+ *  /autotrading hero «работает с MMM YYYY» social-proof line so the
+ *  date moves with the actual data instead of being a hardcoded string
+ *  the operator has to remember to update. */
+export function earliestShadowTradeAt(): number | null {
+  return earliestShadowTradeStmt.get()?.ts ?? null;
+}
+
 /** Sort modes for the /strategies live feed. Default `close_desc` =
  *  newest closed at top (matches what most users expect). */
 export type FeedSort = 'close_desc' | 'close_asc' | 'entry_desc' | 'entry_asc' | 'pnl_desc' | 'pnl_asc';

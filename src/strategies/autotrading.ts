@@ -27,6 +27,7 @@ import { pageShell, jsonLdService, jsonLdFaqPage, getLang } from './landing.js';
 import { getAuthedUser } from '../auth/routes.js';
 import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
 import { listTiers, tierCoinTickers, getTierMarketingNumbers, computeTierTradeSize } from './tier-config.js';
+import { countAllClosedShadowTrades, earliestShadowTradeAt } from './live-stats.js';
 
 type Lang = 'ru' | 'en';
 
@@ -75,12 +76,13 @@ function renderPage(
     ${styles()}
     <main class="at-main">
       ${renderHero(lang)}
-      ${renderBybitBonus(lang)}
-      ${renderPricing(lang)}
-      ${renderForecastTable(lang)}
       ${renderHowItWorks(lang)}
-      ${renderDepositBreakdown(lang)}
+      ${renderForecastTable(lang)}
       ${renderSafety(lang)}
+      ${renderPricing(lang)}
+      ${renderBybitBonus(lang)}
+      ${renderComparison(lang)}
+      ${renderDepositBreakdown(lang)}
       ${renderLeverageEducation(lang)}
       ${renderStrategyPipeline(lang)}
 
@@ -144,6 +146,38 @@ function renderPage(
 }
 
 function renderHero(lang: Lang): string {
+  // Social-proof badge — three live counters pulled at request time from
+  // the shadow-trade ledger. Numbers move on their own as new trades close
+  // so the operator never has to touch the hero copy. Hidden entirely
+  // when the system is too young to have meaningful stats (<10 trades),
+  // because « 0 сделок отработано » would read as «nothing's happening».
+  const closedTotal = countAllClosedShadowTrades();
+  const firstAt = earliestShadowTradeAt();
+  const activeStrats = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled).length;
+  const showProof = closedTotal >= 10 && firstAt !== null;
+  const monthLabels = lang === 'en'
+    ? ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    : ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  const sinceLabel = firstAt
+    ? `${monthLabels[new Date(firstAt).getUTCMonth()]} ${new Date(firstAt).getUTCFullYear()}`
+    : null;
+  const proofBadge = showProof
+    ? (lang === 'en'
+        ? `<div class="at-hero-proof">
+             <span class="at-hero-proof-item">${ico('📈')}<b>${closedTotal.toLocaleString()}</b> live trades closed</span>
+             <span class="at-hero-proof-sep">·</span>
+             <span class="at-hero-proof-item">${ico('🕐')}running since <b>${sinceLabel}</b></span>
+             <span class="at-hero-proof-sep">·</span>
+             <span class="at-hero-proof-item">${ico('🎯')}<b>${activeStrats}</b> live strategies</span>
+           </div>`
+        : `<div class="at-hero-proof">
+             <span class="at-hero-proof-item">${ico('📈')}<b>${closedTotal.toLocaleString()}</b> сделок отработано</span>
+             <span class="at-hero-proof-sep">·</span>
+             <span class="at-hero-proof-item">${ico('🕐')}работает с <b>${sinceLabel}</b></span>
+             <span class="at-hero-proof-sep">·</span>
+             <span class="at-hero-proof-item">${ico('🎯')}<b>${activeStrats}</b> стратегий в живой торговле</span>
+           </div>`)
+    : '';
   if (lang === 'en') {
     return `
     <section class="at-hero">
@@ -155,6 +189,7 @@ function renderHero(lang: Lang): string {
         Our system runs vetted strategies on your own Bybit account. <b>Not a fund, not a pyramid</b> —
         we never accept deposits, your money stays on the exchange the whole time.
       </p>
+      ${proofBadge}
       <div class="at-hero-cta">
         <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Sign up</a>
         <span class="at-hero-cta-or">or</span>
@@ -184,6 +219,7 @@ function renderHero(lang: Lang): string {
         Система торгует за вас на вашем счёте Bybit по проверенным стратегиям. <b>Не фонд и не пирамида</b> —
         мы не принимаем депозиты, ваши деньги всегда на бирже под вашим контролем.
       </p>
+      ${proofBadge}
       <div class="at-hero-cta">
         <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Регистрация</a>
         <span class="at-hero-cta-or">или</span>
@@ -313,6 +349,95 @@ function renderForecastTable(lang: Lang): string {
         </table>
       </div>
       <p class="at-fc-note">${t.disclaimer}</p>
+    </section>
+  `;
+}
+
+/**
+ * Comparison section — answers «зачем мне это, если я уже...» (objection
+ * handler). Visitors typically arrive comparing us to one of: manual
+ * trading, paid signals, copytrading services, or a managed crypto fund.
+ * We put all four side-by-side and show why auto-trading on your own
+ * account wins on every single dimension.
+ *
+ * Cognitive trigger: anchoring + loss aversion. By making the visitor
+ * notice the explicit downsides of alternatives, the «no card / no
+ * deposit / your money / cancel anytime» of our offer reads as obvious.
+ */
+function renderComparison(lang: Lang): string {
+  const t = lang === 'en'
+    ? {
+        title: 'How does it compare to the alternatives?',
+        sub: 'You probably already trade crypto in one of these ways. Here\'s honestly how Robot Claude stacks up.',
+        rows: [
+          { feat: 'Money stays on your exchange',  manual: 'yes',  signals: 'yes',  copy: 'no',  fund: 'no',  rc: 'yes' },
+          { feat: '24/7 — no manual screen time',  manual: 'no',   signals: 'no',   copy: 'yes', fund: 'yes', rc: 'yes' },
+          { feat: 'No emotion / FOMO',             manual: 'no',   signals: 'no',   copy: 'yes', fund: 'yes', rc: 'yes' },
+          { feat: 'Verifiable historical results', manual: 'no',   signals: 'rare', copy: 'rare',fund: 'rare',rc: 'yes' },
+          { feat: 'You see every trade live',      manual: 'yes',  signals: 'yes',  copy: 'no',  fund: 'no',  rc: 'yes' },
+          { feat: 'Cancel in one click',           manual: 'yes',  signals: 'yes',  copy: 'partial', fund: 'no', rc: 'yes' },
+          { feat: 'No success fee on profits',     manual: 'yes',  signals: 'yes',  copy: 'no',  fund: 'no',  rc: 'yes' },
+          { feat: 'Worst-case loss is bounded',    manual: 'no',   signals: 'no',   copy: 'no',  fund: 'partial', rc: 'yes' },
+        ],
+        colHead: ['Feature', 'Manual trading', 'Signal channels', 'Copytrading', 'Managed fund', 'Robot Claude'] as const,
+        footer: 'You get the «hands-off» of a fund without ever sending us your money. Best of both worlds.',
+      }
+    : {
+        title: 'Чем это лучше альтернатив?',
+        sub: 'Вы наверняка уже торгуете криптой одним из этих способов. Честно сравним их с Robot Claude.',
+        rows: [
+          { feat: 'Деньги остаются на бирже',       manual: 'yes',  signals: 'yes',  copy: 'no',  fund: 'no',  rc: 'yes' },
+          { feat: 'Работает 24/7 без вашего участия', manual: 'no', signals: 'no',   copy: 'yes', fund: 'yes', rc: 'yes' },
+          { feat: 'Без эмоций и FOMO',              manual: 'no',   signals: 'no',   copy: 'yes', fund: 'yes', rc: 'yes' },
+          { feat: 'Историю результатов можно проверить', manual: 'no', signals: 'rare', copy: 'rare', fund: 'rare', rc: 'yes' },
+          { feat: 'Вы видите каждую сделку в момент', manual: 'yes',signals: 'yes',  copy: 'no',  fund: 'no',  rc: 'yes' },
+          { feat: 'Отказ в один клик',              manual: 'yes',  signals: 'yes',  copy: 'partial', fund: 'no', rc: 'yes' },
+          { feat: 'Нет комиссии с прибыли',         manual: 'yes',  signals: 'yes',  copy: 'no',  fund: 'no',  rc: 'yes' },
+          { feat: 'Худший убыток ограничен заранее',manual: 'no',   signals: 'no',   copy: 'no',  fund: 'partial', rc: 'yes' },
+        ],
+        colHead: ['Свойство', 'Руками', 'Сигналы', 'Копитрейдинг', 'Управление', 'Robot Claude'] as const,
+        footer: 'Получаете «не надо следить за рынком» как у фонда, но никому ничего не переводите. Лучшее из обоих миров.',
+      };
+
+  const cell = (v: string): string => {
+    if (v === 'yes') return `<span class="at-cmp-yes" title="Да">✓</span>`;
+    if (v === 'no') return `<span class="at-cmp-no" title="Нет">✗</span>`;
+    if (v === 'partial') return `<span class="at-cmp-partial" title="Частично">~</span>`;
+    if (v === 'rare') return `<span class="at-cmp-partial" title="Редко / не у всех">~</span>`;
+    return '—';
+  };
+
+  const rows = t.rows.map((r) => `
+    <tr>
+      <td class="at-cmp-feat">${escapeHtml(r.feat)}</td>
+      <td class="at-cmp-c">${cell(r.manual)}</td>
+      <td class="at-cmp-c">${cell(r.signals)}</td>
+      <td class="at-cmp-c">${cell(r.copy)}</td>
+      <td class="at-cmp-c">${cell(r.fund)}</td>
+      <td class="at-cmp-c at-cmp-us">${cell(r.rc)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <section class="at-section at-compare">
+      <h2 class="at-section-title">${ico('⚖️')}${t.title}</h2>
+      <p class="at-section-sub">${t.sub}</p>
+      <div class="at-cmp-wrap">
+        <table class="at-cmp-tbl">
+          <thead>
+            <tr>
+              <th class="at-cmp-feat">${escapeHtml(t.colHead[0])}</th>
+              <th>${escapeHtml(t.colHead[1])}</th>
+              <th>${escapeHtml(t.colHead[2])}</th>
+              <th>${escapeHtml(t.colHead[3])}</th>
+              <th>${escapeHtml(t.colHead[4])}</th>
+              <th class="at-cmp-us">${escapeHtml(t.colHead[5])}</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="at-cmp-foot">${t.footer}</p>
     </section>
   `;
 }
@@ -1445,6 +1570,26 @@ function styles(): string {
     box-shadow: 0 6px 20px -10px rgba(243, 210, 102, 0.45);
   }
   .at-hero-trial b { color: #fff; font-weight: 700; }
+  /* Social-proof line between sub and CTA. Subtle — not louder than
+     the H1 above or the gold trial pill below. Reads as «look, we
+     already have a real footprint» without screaming. */
+  .at-hero-proof {
+    display: inline-flex; flex-wrap: wrap; justify-content: center;
+    align-items: center; gap: 6px 12px;
+    margin: 0 auto 22px; padding: 10px 18px;
+    background: rgba(74, 217, 145, 0.05);
+    border: 1px solid rgba(74, 217, 145, 0.22);
+    border-radius: 999px;
+    font-size: 13px; color: #9aa5b1;
+    max-width: fit-content;
+  }
+  .at-hero-proof-item { display: inline-flex; align-items: center; gap: 4px; }
+  .at-hero-proof-item b { color: #4ad991; font-weight: 700; }
+  .at-hero-proof-sep { color: #2a323d; }
+  @media (max-width: 640px) {
+    .at-hero-proof { font-size: 12px; padding: 8px 14px; gap: 4px 10px; }
+    .at-hero-proof-sep { display: none; }
+  }
   .at-hero-pills {
     display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
     margin-top: 28px;
@@ -2204,6 +2349,55 @@ function styles(): string {
   }
   @media (max-width: 720px) {
     .at-fc-profit-mo, .at-fc-pct-mo { font-size: 15px; }
+  }
+
+  /* ----- Comparison table — «vs alternatives» ----- */
+  .at-compare { margin-top: 50px; }
+  .at-cmp-wrap {
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    background: #11161d; border: 1px solid #1f2630; border-radius: 12px;
+    margin: 0 auto; max-width: 980px;
+  }
+  .at-cmp-tbl {
+    width: 100%; border-collapse: collapse;
+    font-size: 13.5px; color: #cfd6dd;
+    min-width: 640px;
+  }
+  .at-cmp-tbl thead { background: #0e131a; }
+  .at-cmp-tbl th {
+    padding: 14px 14px; text-align: center; font-weight: 600;
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: #8590a0; border-bottom: 1px solid #1f2630;
+  }
+  .at-cmp-tbl th.at-cmp-feat { text-align: left; }
+  .at-cmp-tbl th.at-cmp-us {
+    color: #4ad991;
+    background: rgba(74, 217, 145, 0.06);
+  }
+  .at-cmp-tbl td {
+    padding: 12px 14px; border-bottom: 1px solid #1a1f27;
+    text-align: center; font-size: 18px; line-height: 1.2;
+  }
+  .at-cmp-tbl td.at-cmp-feat {
+    text-align: left; font-size: 13.5px; color: #e8edf2; font-weight: 500;
+  }
+  .at-cmp-tbl td.at-cmp-us {
+    background: rgba(74, 217, 145, 0.04);
+  }
+  .at-cmp-tbl tr:last-child td { border-bottom: none; }
+  .at-cmp-yes { color: #4ad991; font-weight: 700; }
+  .at-cmp-no { color: #ff6363; font-weight: 700; }
+  .at-cmp-partial { color: #f5b14d; font-weight: 700; }
+  .at-cmp-foot {
+    margin: 18px auto 0; max-width: 720px;
+    text-align: center; font-size: 13.5px;
+    color: #b6c1cf; line-height: 1.6;
+  }
+  @media (max-width: 640px) {
+    .at-cmp-tbl { font-size: 12.5px; }
+    .at-cmp-tbl td.at-cmp-feat { font-size: 12px; }
+    .at-cmp-tbl td { font-size: 16px; padding: 10px 8px; }
+    .at-cmp-tbl th { font-size: 10.5px; padding: 10px 6px; }
   }
 
   /* Carousel arrows + edge fade — defined globally in pageShell so every
