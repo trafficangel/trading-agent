@@ -2111,13 +2111,12 @@ function styles(): string {
     /* THREE redundant ring layers + GPU promote — six previous tries
        got eaten by iOS Safari's carousel composite pipeline. At least
        one of these has to render reliably:
-         1. Full `border` shorthand (forces a fresh paint).
-         2. `outline` with negative offset — independent paint layer
+         1. Full border shorthand (forces a fresh paint).
+         2. outline with negative offset — independent paint layer
             painted on top of all descendants.
-         3. `transform: scale(1) translateZ(0)` — combined with the
-            carousel's scale(1), translateZ(0) promotes the card to its
-            own GPU compositing layer which sidesteps the buggy CPU
-            composite path. */
+         3. transform: scale(1) translateZ(0) — translateZ promotes the
+            card to its own GPU compositing layer which sidesteps the
+            buggy CPU composite path. */
     [data-carousel="focus"] .at-tier-card.rc-card-active {
       border: 2px solid var(--tier-accent);
       outline: 2px solid var(--tier-accent);
