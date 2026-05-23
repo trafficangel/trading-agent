@@ -75,11 +75,11 @@ function renderPage(
     ${styles()}
     <main class="at-main">
       ${renderHero(lang)}
+      ${renderBybitBonus(lang)}
       ${renderPricing(lang)}
       ${renderForecastTable(lang)}
       ${renderHowItWorks(lang)}
       ${renderDepositBreakdown(lang)}
-      ${renderBybitBonus(lang)}
       ${renderSafety(lang)}
       ${renderLeverageEducation(lang)}
       ${renderStrategyPipeline(lang)}
