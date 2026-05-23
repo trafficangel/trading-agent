@@ -833,6 +833,18 @@ const STYLE = `
     font-size: 10.5px; color: var(--text-faint);
     margin-left: 2px;
   }
+  /* Two-line entry+exit cell — saves a whole column in narrow viewports. */
+  .feed-time-cell {
+    display: flex; flex-direction: column; gap: 2px;
+    white-space: nowrap; line-height: 1.35;
+  }
+  .feed-time-entry {
+    font-size: 12px; color: var(--text);
+  }
+  .feed-time-exit {
+    font-size: 11.5px; color: var(--text-dim);
+  }
+  .feed-time-exit-empty { font-style: italic; opacity: 0.7; }
   /* Legend below the table — explains each reason-pill colour. */
   .feed-reason-legend {
     font-size: 12px; color: var(--text-dim);
@@ -2509,6 +2521,20 @@ function renderAllStrategiesFeed(page: number): string {
   // Position notional — TRACK_C_NOTIONAL_USD for shadow trades (always $1000).
   const notionalStr = `$${TRACK_C_NOTIONAL_USD}`;
 
+  // Two-line entry+exit cell — saves horizontal space compared to two
+  // separate columns. Top = вход, bottom = выход (or "—" for active).
+  const timeCellHtml = (entryAt: number, exitAt: number | null): string => {
+    const exitLine = exitAt === null
+      ? `<span class="feed-time-exit feed-time-exit-empty">— ещё открыта</span>`
+      : `<span class="feed-time-exit">→ ${fmtDate(exitAt)}</span>`;
+    return (
+      `<div class="feed-time-cell">` +
+        `<span class="feed-time-entry">${fmtDate(entryAt)}</span>` +
+        exitLine +
+      `</div>`
+    );
+  };
+
   const activeRows = active.map((t: ActiveTradeFeedRow) => {
     const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
     const ageMs = Date.now() - t.entryAt;
@@ -2522,8 +2548,7 @@ function renderAllStrategiesFeed(page: number): string {
     return `
       <tr class="feed-row-active">
         <td>${stratCellHtml(t.strategyId, t.strategyTradeNum, t.id)}</td>
-        <td class="dt">${fmtDate(t.entryAt)}</td>
-        <td class="dt">—</td>
+        <td class="dt">${timeCellHtml(t.entryAt, null)}</td>
         <td class="dt">${fmtDuration(ageMs)}</td>
         <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
         <td class="right mono">${notionalStr}</td>
@@ -2544,8 +2569,7 @@ function renderAllStrategiesFeed(page: number): string {
     return `
       <tr>
         <td>${stratCellHtml(t.strategyId, t.strategyTradeNum, t.id)}</td>
-        <td class="dt">${fmtDate(t.entryAt)}</td>
-        <td class="dt">${fmtDate(t.exitAt)}</td>
+        <td class="dt">${timeCellHtml(t.entryAt, t.exitAt)}</td>
         <td class="dt">${dur}</td>
         <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
         <td class="right mono">${notionalStr}</td>
@@ -2615,8 +2639,7 @@ function renderAllStrategiesFeed(page: number): string {
           <thead>
             <tr>
               <th>Стратегия</th>
-              <th>Вход (UTC)</th>
-              <th>Выход (UTC)</th>
+              <th>Время сделки <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-faint);font-size:10.5px;">(UTC)</span></th>
               <th>Длительн.</th>
               <th>Сторона</th>
               <th class="right" title="Размер shadow-сделки — фиксированный $1000 на каждую">Объём</th>
