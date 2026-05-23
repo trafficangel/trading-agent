@@ -2367,19 +2367,27 @@ export function pageShell(
      neighbour cards visually murky AND the dark gradient eats into
      the active card text. On phones the swipe gesture already
      communicates «scroll for more», so we drop both effects: neighbours
-     stay full-opacity, edge gradients are hidden. */
+     stay full-opacity, edge gradients are hidden.
+
+     Critical: we also remove the scale-down on neighbours. The desktop
+     pattern was «neighbours at scale(0.96), active at scale(1)» so
+     active appears bigger. But scroll-snap positions the cards by their
+     UNTRANSFORMED box, and then the post-snap transform expands the
+     active card outward from its centre by 2% on each side — pushing
+     the right edge ~7px past the viewport boundary. Cards now stay at
+     scale(1) on mobile; dim/active distinction is opacity-only. */
   @media (max-width: 640px) {
     [data-carousel="true"]::before,
     [data-carousel="true"]::after,
     [data-carousel="focus"]::before,
     [data-carousel="focus"]::after { display: none; }
     [data-carousel="focus"] .rc-carousel-track > * {
-      transform: scale(0.96);
-      opacity: 0.75;
+      transform: none;
+      opacity: 0.6;
       filter: none;
     }
     [data-carousel="focus"] .rc-carousel-track > .rc-card-active {
-      transform: scale(1);
+      transform: none;
       opacity: 1;
     }
   }

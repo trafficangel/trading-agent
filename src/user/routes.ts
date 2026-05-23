@@ -1212,16 +1212,11 @@ function renderTierPicker(p: {
           box-shadow: 0 4px 16px rgba(0,0,0,0.30);
         }
         [data-carousel="focus"] .tp-card.rc-card-active {
-          border: 2px solid var(--tier-accent);
-          outline: 2px solid var(--tier-accent);
-          outline-offset: -2px;
-          transform: scale(1) translateZ(0);
+          border-color: var(--tier-accent);
           box-shadow: 0 6px 20px rgba(0,0,0,0.40);
         }
         .tp-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
-        /* Hide deco on mobile — see autotrading.ts comment for the
-           border-rendering reason. */
-        .tp-card-deco { display: none; }
+        .tp-card-deco { font-size: 88px; top: 6px; right: 6px; }
         .tp-card-glow { height: 72px; }
       }
       .tp-scroll-hint {

@@ -2108,32 +2108,19 @@ function styles(): string {
       border-width: 2px;
       box-shadow: 0 4px 16px rgba(0,0,0,0.30);
     }
-    /* THREE redundant ring layers + GPU promote — six previous tries
-       got eaten by iOS Safari's carousel composite pipeline. At least
-       one of these has to render reliably:
-         1. Full border shorthand (forces a fresh paint).
-         2. outline with negative offset — independent paint layer
-            painted on top of all descendants.
-         3. transform: scale(1) translateZ(0) — translateZ promotes the
-            card to its own GPU compositing layer which sidesteps the
-            buggy CPU composite path. */
+    /* Active card on mobile — simple 2px tier-accent border now that
+       the root cause is fixed (focus-mode no longer scales neighbours
+     down → active doesn't grow on snap → right edge stays inside
+       the viewport). Border renders fine on iOS without any tricks. */
     [data-carousel="focus"] .at-tier-card.rc-card-active {
-      border: 2px solid var(--tier-accent);
-      outline: 2px solid var(--tier-accent);
-      outline-offset: -2px;
-      transform: scale(1) translateZ(0);
+      border-color: var(--tier-accent);
       box-shadow: 0 6px 20px rgba(0,0,0,0.40);
     }
     .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
     /* Smaller deco + glow on mobile so they don't dominate the smaller card. */
-    /* Hide the deco emoji on mobile entirely. Five iterations of trying
-       to make the right border show up consistently while the emoji
-       was rendered in the upper-right corner all failed — iOS Safari's
-       compositing of color-emoji + absolute positioning + border-radius
-       + the carousel's overflow chain seems to drop the right border.
-       The emoji adds visual personality but isn't worth losing the
-       active-tier indicator over. Stays on desktop. */
-    .at-tier-card-deco { display: none; }
+    /* Smaller deco emoji on mobile (root cause of vanishing right border
+       was the focus-mode scale on neighbours, not the emoji — restored). */
+    .at-tier-card-deco { font-size: 92px; top: 6px; right: 6px; }
     .at-tier-card-glow { height: 80px; }
     .at-tier-badge { font-size: 9.5px; padding: 3px 9px; margin-bottom: 12px; }
     .at-tier-name { font-size: 17px; }
