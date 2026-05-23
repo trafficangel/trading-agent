@@ -36,6 +36,18 @@ import {
 import { fetchAllPositions } from '../exchange/bybit-private.js';
 import { findActiveByUser } from '../db/repos/decisions.js';
 import { hasActiveAccess } from '../db/repos/user-subscriptions.js';
+import { config } from '../config.js';
+
+// Operator-controlled allowlist of user_ids that should NEVER receive
+// orphan-position alerts. Parsed from ORPHAN_ALERT_SKIP_USER_IDS env once
+// at module load — runtime changes require a service restart, which is
+// fine for an ops-only toggle.
+const SKIP_ORPHAN_ALERT_USER_IDS = new Set<number>(
+  config.ORPHAN_ALERT_SKIP_USER_IDS
+    .split(',')
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n > 0),
+);
 
 const limit = pLimit(5);
 let running = false;
@@ -83,6 +95,9 @@ async function tick(): Promise<void> {
 
 async function processOne(key: ApiKeyRow): Promise<void> {
   if (!hasActiveAccess(key.user_id)) return;
+  // Operator skip-list — user opens manual positions on Bybit deliberately
+  // (e.g. operator's own account), no point re-detecting them as orphans.
+  if (SKIP_ORPHAN_ALERT_USER_IDS.has(key.user_id)) return;
   let creds;
   try {
     creds = getDecryptedCreds(key);

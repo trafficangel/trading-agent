@@ -84,6 +84,13 @@ const Schema = z.object({
    */
   TRACK_C_ENABLED: envBool(false),
 
+  /** Comma-separated user_id list whose orphan-position alerts should be
+   *  silently dropped by the recovery-monitor. Use for the operator's own
+   *  account (we manually open positions on Bybit there all the time —
+   *  every one would falsely trigger an «ORPHAN POSITION DETECTED» alarm).
+   *  Example: ORPHAN_ALERT_SKIP_USER_IDS=2,5 */
+  ORPHAN_ALERT_SKIP_USER_IDS: z.string().default(''),
+
   MODE: Mode.default('telemetry'),
 });
 
