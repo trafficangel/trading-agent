@@ -262,6 +262,82 @@ export function getStrategyDailyStats(strategyId: string, dayStartMs: number): S
   return stats;
 }
 
+/** All-strategies feed for the /strategies index page. Same row shape
+ *  as the per-strategy table but with an extra `strategyId` so the UI
+ *  can decorate each row with the coin / timeframe / name. */
+export type LiveTradeFeedRow = LiveTradeRow & { strategyId: string };
+export type ActiveTradeFeedRow = ActiveTradeRow & { strategyId: string };
+
+const allActiveTradesStmt = db.prepare<[], ActiveRow & { strategy_id: string }>(`
+  SELECT id, strategy_id, strategy_trade_num, side, entry, sl, filled_at, created_at
+  FROM decisions
+  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id IS NOT NULL
+    AND status IN ('active', 'pending')
+  ORDER BY COALESCE(filled_at, created_at) DESC
+`);
+
+export function getAllActiveShadowTrades(): ActiveTradeFeedRow[] {
+  const rows = allActiveTradesStmt.all();
+  const out: ActiveTradeFeedRow[] = [];
+  for (const r of rows) {
+    if (r.side !== 'long' && r.side !== 'short') continue;
+    if (r.entry === null) continue;
+    out.push({
+      id: r.id,
+      strategyId: r.strategy_id,
+      strategyTradeNum: r.strategy_trade_num,
+      side: r.side,
+      entryAt: r.filled_at ?? r.created_at,
+      entryPrice: r.entry,
+      sl: r.sl,
+    });
+  }
+  return out;
+}
+
+const allClosedCountStmt = db.prepare<[], { n: number }>(`
+  SELECT COUNT(*) AS n FROM decisions
+  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id IS NOT NULL
+    AND status = 'closed' AND pnl_pct IS NOT NULL
+`);
+export function countAllClosedShadowTrades(): number {
+  return allClosedCountStmt.get()?.n ?? 0;
+}
+
+const allClosedPageStmt = db.prepare<[number, number], TradeRow & { strategy_id: string }>(`
+  SELECT id, strategy_id, strategy_trade_num, side, entry, close_price, pnl_pct,
+         close_reason, force_close_reason, filled_at, created_at, closed_at
+  FROM decisions
+  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id IS NOT NULL
+    AND status = 'closed' AND pnl_pct IS NOT NULL
+  ORDER BY closed_at DESC
+  LIMIT ? OFFSET ?
+`);
+export function getAllClosedShadowTrades(limit: number, offset: number): LiveTradeFeedRow[] {
+  const rows = allClosedPageStmt.all(limit, offset);
+  const out: LiveTradeFeedRow[] = [];
+  for (const r of rows) {
+    if (!r.side || (r.side !== 'long' && r.side !== 'short')) continue;
+    if (r.entry === null || r.close_price === null) continue;
+    if (r.closed_at === null || r.pnl_pct === null) continue;
+    out.push({
+      id: r.id,
+      strategyId: r.strategy_id,
+      strategyTradeNum: r.strategy_trade_num,
+      side: r.side,
+      entryAt: r.filled_at ?? r.created_at,
+      entryPrice: r.entry,
+      exitAt: r.closed_at,
+      exitPrice: r.close_price,
+      pnlPct: r.pnl_pct,
+      pnlUsd: (r.pnl_pct / 100) * TRACK_C_NOTIONAL_USD,
+      closeReason: r.close_reason,
+      forceCloseReason: r.force_close_reason,
+    });
+  }
+  return out;
+}
+
 /** Most recent N closed trades for the landing-page "Recent live trades"
  *  table. Includes only fully-closed decisions with a recorded pnl_pct. */
 export function getStrategyRecentTrades(strategyId: string, limit = 50): LiveTradeRow[] {

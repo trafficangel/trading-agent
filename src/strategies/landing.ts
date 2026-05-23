@@ -15,9 +15,14 @@ import {
   getStrategyLiveStats,
   getStrategyRecentTrades,
   getStrategyActiveTrades,
+  getAllActiveShadowTrades,
+  getAllClosedShadowTrades,
+  countAllClosedShadowTrades,
   type StrategyLiveStats,
   type LiveTradeRow,
   type ActiveTradeRow,
+  type LiveTradeFeedRow,
+  type ActiveTradeFeedRow,
 } from './live-stats.js';
 
 // (SUPPORT_URL placeholder removed — never referenced in the rendered
@@ -777,6 +782,66 @@ const STYLE = `
     font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--text-faint); margin: 12px 0 8px; font-weight: 600;
   }
+
+  /* ---------- All-strategies live feed (Phase O) ---------- */
+  .feed-subsection { margin: 14px 0 6px; }
+  .feed-subsection-title {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .feed-subsection-title b { color: var(--text); }
+  .feed-table .feed-strat-cell {
+    display: inline-flex; flex-direction: column; line-height: 1.25;
+    text-decoration: none;
+  }
+  .feed-table .feed-strat-cell:hover .feed-strat-id { color: var(--accent); }
+  .feed-strat-id {
+    font-weight: 600; color: var(--text); font-size: 12.5px;
+    font-family: ui-monospace, Menlo, monospace;
+    transition: color 120ms;
+  }
+  .feed-strat-meta {
+    font-size: 10.5px; color: var(--text-faint);
+    margin-top: 2px;
+  }
+  .feed-table tr.feed-row-active {
+    background: rgba(74,217,145,0.04);
+  }
+  .feed-table tr.feed-row-active td {
+    border-top: 1px solid rgba(74,217,145,0.18);
+  }
+  .reason-pill.reason-active {
+    background: rgba(74,217,145,0.15); color: var(--accent);
+    border: 1px solid rgba(74,217,145,0.45);
+  }
+  /* Pagination footer for the live-feed table */
+  .feed-pagination {
+    display: flex; align-items: center; justify-content: center;
+    gap: 6px; flex-wrap: wrap;
+    margin: 18px 0 0; padding: 12px 0;
+  }
+  .feed-page-link {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 32px; height: 32px; padding: 0 10px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text-dim);
+    font-size: 13px; font-weight: 600; text-decoration: none;
+    transition: all 120ms;
+  }
+  .feed-page-link:hover {
+    border-color: var(--accent); color: var(--accent);
+  }
+  .feed-page-current {
+    background: var(--accent-soft); border-color: var(--accent);
+    color: var(--accent); cursor: default;
+  }
+  .feed-page-disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+  .feed-page-info {
+    margin: 0 8px; font-size: 12px; color: var(--text-dim);
+  }
+  .feed-page-info b { color: var(--text); }
+  .feed-page-info .dim { color: var(--text-faint); }
 
   /* ---------- Disclaimer note inside backtest section ---------- */
   .disclaimer-note {
@@ -2337,9 +2402,172 @@ function tfLabel(tf: string): string {
   return `${m / 10080}W`;
 }
 
+/** Combined live-trades feed across ALL strategies — used on /strategies
+ *  to give visitors a single timeline of what shadow trading is doing.
+ *  Active trades pinned at top, closed trades below with pagination. */
+const FEED_PAGE_SIZE = 20;
+function renderAllStrategiesFeed(page: number): string {
+  const active = getAllActiveShadowTrades();
+  const totalClosed = countAllClosedShadowTrades();
+  const totalPages = Math.max(1, Math.ceil(totalClosed / FEED_PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const offset = (safePage - 1) * FEED_PAGE_SIZE;
+  const closed = getAllClosedShadowTrades(FEED_PAGE_SIZE, offset);
+
+  if (active.length === 0 && totalClosed === 0) {
+    return `
+      <div class="section">
+        <div class="section-title">📋 Все сделки (shadow)</div>
+        <div class="card"><div class="card-body">
+          <div class="empty-state" style="padding: 24px 0;">
+            ⏳ Пока ни одной сделки в shadow-режиме. Страница обновляется автоматически.
+          </div>
+        </div></div>
+      </div>
+    `;
+  }
+
+  // Strategy metadata column — links to the detail page, shows symbol +
+  // timeframe + T# in a compact stack so the table doesn't get too wide.
+  const stratCellHtml = (strategyId: string, tradeNum: number | null, fallbackId: number): string => {
+    const cfg = STRATEGY_CONFIGS[strategyId];
+    if (!cfg) {
+      return `<span class="dim">${escapeHtml(strategyId)}</span>`;
+    }
+    const num = tradeNum ?? fallbackId;
+    const tradeIdStr = formatStrategyTradeId(cfg, num);
+    const symbol = cfg.symbol ?? 'ANY';
+    return (
+      `<a class="feed-strat-cell" href="/strategies/${escapeHtml(cfg.code)}">` +
+        `<span class="feed-strat-id">${tradeIdStr}</span>` +
+        `<span class="feed-strat-meta">${escapeHtml(symbol)} · ${escapeHtml(cfg.timeframe)}m</span>` +
+      `</a>`
+    );
+  };
+
+  const reasonLabel = (t: LiveTradeFeedRow): { label: string; cls: string } => {
+    if (t.closeReason === 'sl_hit') return { label: 'SL', cls: 'reason-sl' };
+    if (t.forceCloseReason === 'strategy_exit') return { label: 'strat', cls: 'reason-strat' };
+    if (t.forceCloseReason === 'time_guard') return { label: 'time', cls: 'reason-time' };
+    return { label: t.closeReason ?? '—', cls: 'reason-strat' };
+  };
+
+  const activeRows = active.map((t: ActiveTradeFeedRow) => {
+    const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
+    const ageMs = Date.now() - t.entryAt;
+    return `
+      <tr class="feed-row-active">
+        <td>${stratCellHtml(t.strategyId, t.strategyTradeNum, t.id)}</td>
+        <td class="dt">${fmtDate(t.entryAt)}</td>
+        <td class="dt">${fmtDuration(ageMs)}</td>
+        <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
+        <td class="right mono">${t.entryPrice.toFixed(4)}</td>
+        <td class="right mono">${t.sl !== null ? t.sl.toFixed(4) : '—'}</td>
+        <td class="right">—</td>
+        <td><span class="reason-pill reason-active">🟢 В работе</span></td>
+      </tr>
+    `;
+  }).join('');
+
+  const closedRows = closed.map((t: LiveTradeFeedRow) => {
+    const cls = t.pnlUsd >= 0 ? 'pos' : 'neg';
+    const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
+    const r = reasonLabel(t);
+    const dur = fmtDuration(t.exitAt - t.entryAt);
+    return `
+      <tr>
+        <td>${stratCellHtml(t.strategyId, t.strategyTradeNum, t.id)}</td>
+        <td class="dt">${fmtDate(t.entryAt)}</td>
+        <td class="dt">${dur}</td>
+        <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
+        <td class="right mono">${t.entryPrice.toFixed(4)}</td>
+        <td class="right mono">${t.exitPrice.toFixed(4)}</td>
+        <td class="right mono ${cls}">${t.pnlUsd >= 0 ? '+' : ''}${t.pnlUsd.toFixed(2)}</td>
+        <td><span class="reason-pill ${r.cls}">${r.label}</span></td>
+      </tr>
+    `;
+  }).join('');
+
+  // Pagination — show first/prev/next/last + current page indicator.
+  // Generates plain ?p=N links so it works without JS.
+  const pageLink = (n: number, label: string, disabled: boolean, current = false): string => {
+    if (disabled) return `<span class="feed-page-link feed-page-disabled">${label}</span>`;
+    if (current) return `<span class="feed-page-link feed-page-current">${label}</span>`;
+    return `<a class="feed-page-link" href="?p=${n}">${label}</a>`;
+  };
+  const paginationHtml = totalClosed > FEED_PAGE_SIZE
+    ? `
+      <div class="feed-pagination">
+        ${pageLink(1, '«', safePage === 1)}
+        ${pageLink(Math.max(1, safePage - 1), '‹', safePage === 1)}
+        <span class="feed-page-info">
+          Страница <b>${safePage}</b> из <b>${totalPages}</b>
+          <span class="dim">· ${totalClosed} закрытых сделок всего</span>
+        </span>
+        ${pageLink(Math.min(totalPages, safePage + 1), '›', safePage === totalPages)}
+        ${pageLink(totalPages, '»', safePage === totalPages)}
+      </div>
+    `
+    : '';
+
+  const activeBlock = active.length > 0
+    ? `
+      <div class="feed-subsection">
+        <div class="feed-subsection-title">
+          <span class="pulse-dot active" aria-hidden="true"></span>
+          Сейчас открыто: <b>${active.length}</b>
+        </div>
+      </div>
+    `
+    : '';
+
+  const closedBlock = closed.length > 0
+    ? `
+      <div class="feed-subsection">
+        <div class="feed-subsection-title">
+          Закрытые · показано ${closed.length} из ${totalClosed}
+        </div>
+      </div>
+    `
+    : '';
+
+  return `
+    <div class="section" id="feed">
+      <div class="section-title">
+        📋 Все сделки в shadow
+        <span class="refresh-note">⟳ обновляется каждые 60 сек</span>
+      </div>
+
+      ${activeBlock}
+      ${closedBlock}
+
+      <div class="card table-wrap">
+        <table class="feed-table">
+          <thead>
+            <tr>
+              <th>Стратегия</th>
+              <th>Вход (UTC)</th>
+              <th>Длительн.</th>
+              <th>Side</th>
+              <th class="right">Entry</th>
+              <th class="right">Exit / SL</th>
+              <th class="right">P&amp;L USDT</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>${activeRows}${closedRows}</tbody>
+        </table>
+      </div>
+
+      ${paginationHtml}
+    </div>
+  `;
+}
+
 function renderStrategyIndex(
   strategies: StrategyConfig[],
   authed: { displayName: string | null; phone: string | null } | null = null,
+  page = 1,
 ): string {
   // ---------- Portfolio aggregate ----------
   let totalClosed = 0;
@@ -2570,6 +2798,8 @@ function renderStrategyIndex(
 
     ${groupsHtml}
     ${empty}
+
+    ${renderAllStrategiesFeed(page)}
     `,
     { autoRefreshSec: 60, authed },
   );
@@ -3097,9 +3327,12 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
   // see the real dashboard.
   app.get('/strategies', async (req, reply) => {
     const enabled = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
-    const q = (req.query ?? {}) as { from?: string; login?: string };
+    const q = (req.query ?? {}) as { from?: string; login?: string; p?: string };
     const fromAutotrading = q.from === 'autotrading';
     const loginMode = q.login === '1';
+    // Feed pagination — clamped 1..N inside renderAllStrategiesFeed.
+    const page = Number.parseInt(q.p ?? '1', 10);
+    const safePage = Number.isFinite(page) && page > 0 ? page : 1;
     reply.type('text/html; charset=utf-8');
     // Authed users who came from an autotrading CTA or a login CTA
     // shouldn't see the strategies list — bounce them to /account.
@@ -3110,13 +3343,13 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
     if (!isAuthed(req)) {
       // No-cache on the gated stub so re-visits after auth get fresh HTML.
       reply.header('Cache-Control', 'private, no-store');
-      return renderGatedPreview('index', renderStrategyIndex(enabled), { fromAutotrading, loginMode, lang: getLang(req) });
+      return renderGatedPreview('index', renderStrategyIndex(enabled, null, safePage), { fromAutotrading, loginMode, lang: getLang(req) });
     }
     // Personalised header for authed users — must NOT be public-cached.
     reply.header('Cache-Control', 'private, no-store');
     const u = getAuthedUser(req);
     const authed = u ? { displayName: u.displayName, phone: u.phone } : null;
-    return renderStrategyIndex(enabled, authed);
+    return renderStrategyIndex(enabled, authed, safePage);
   });
 
   // Detail by code (e.g. /strategies/001) — same gating.
