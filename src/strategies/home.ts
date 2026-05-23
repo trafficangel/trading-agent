@@ -801,13 +801,22 @@ function homeEffectsScript(): string {
           grid.setAttribute('data-mode', 'grid');
         }
         // Re-number cards 1/N, 2/N, ... after every poll tick so a
-        // closed/added position doesn't leave stale «3/5» on the next card.
-        var remaining = grid.querySelectorAll('.live-pos-card');
-        for (var nIdx = 0; nIdx < remaining.length; nIdx++) {
-          var cur = remaining[nIdx].querySelector('[data-pos-num-cur]');
-          var tot = remaining[nIdx].querySelector('[data-pos-num-total]');
-          if (cur) cur.textContent = String(nIdx + 1);
-          if (tot) tot.textContent = String(remaining.length);
+        // closed/added position doesn't leave stale «3/5» on the next
+        // card. Exclude .rc-clone (focus-loop carousel clones the first
+        // and last card for the wrap-around) — they should stay invisible
+        // in the counter, and the «total» must reflect REAL positions only.
+        var allCards = grid.querySelectorAll('.live-pos-card');
+        var realCards = [];
+        for (var aIdx = 0; aIdx < allCards.length; aIdx++) {
+          if (!allCards[aIdx].classList.contains('rc-clone')) {
+            realCards.push(allCards[aIdx]);
+          }
+        }
+        for (var rIdx = 0; rIdx < realCards.length; rIdx++) {
+          var cur = realCards[rIdx].querySelector('[data-pos-num-cur]');
+          var tot = realCards[rIdx].querySelector('[data-pos-num-total]');
+          if (cur) cur.textContent = String(rIdx + 1);
+          if (tot) tot.textContent = String(realCards.length);
         }
         // Toggle the carousel-hint banner that lives just below the grid.
         var hint = section.querySelector('.live-pos-scroll-hint');
