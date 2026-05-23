@@ -2097,6 +2097,17 @@ function styles(): string {
     .at-tier-card {
       flex: 0 0 86vw; padding: 28px 20px 22px;
       border-radius: 16px;
+      /* Lighter drop shadow on mobile — the desktop 0 18px 48px was
+         strong enough to visually compete with the active-card border,
+         making the outline read as «only top is gold». */
+      box-shadow: 0 4px 16px rgba(0,0,0,0.30);
+    }
+    /* Active card on mobile: thicker solid border, no soft outer glow.
+       Replaces the desktop multi-layer box-shadow which looked clipped. */
+    [data-carousel="focus"] .at-tier-card.rc-card-active {
+      border-width: 2px;
+      border-color: var(--tier-accent);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.40);
     }
     .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
     /* Smaller deco + glow on mobile so they don't dominate the smaller card. */
