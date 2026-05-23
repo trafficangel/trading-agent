@@ -2244,6 +2244,106 @@ export function pageShell(
 </script>
 `;
 
+  // Phase O — Carousel arrows + edge-fade hint, sitewide. Any element
+  // marked [data-carousel="true"] with a child .rc-carousel-track gets
+  // clickable « / » buttons and a fade-out gradient at start/end edges.
+  // Touch devices hide the buttons (swipe is natural there); the fade
+  // stays everywhere so non-techy visitors notice the carousel can move.
+  const carouselBlock = `
+<style>
+  [data-carousel="true"] {
+    position: relative;
+  }
+  [data-carousel="true"]::before,
+  [data-carousel="true"]::after {
+    content: '';
+    position: absolute; top: 0; bottom: 14px;
+    width: 56px;
+    pointer-events: none;
+    z-index: 2;
+    transition: opacity 200ms;
+  }
+  [data-carousel="true"]::before {
+    left: 0;
+    background: linear-gradient(90deg, #0b0e13 0%, rgba(11,14,19,0.7) 40%, rgba(11,14,19,0) 100%);
+  }
+  [data-carousel="true"]::after {
+    right: 0;
+    background: linear-gradient(270deg, #0b0e13 0%, rgba(11,14,19,0.7) 40%, rgba(11,14,19,0) 100%);
+  }
+  [data-carousel="true"].rc-at-start::before { opacity: 0; }
+  [data-carousel="true"].rc-at-end::after    { opacity: 0; }
+  .rc-carousel-arrow {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 40px; height: 40px;
+    background: rgba(20, 24, 31, 0.92);
+    border: 1px solid #2a323d;
+    border-radius: 50%;
+    color: #e8edf2;
+    font-size: 22px; font-weight: 400;
+    cursor: pointer;
+    z-index: 3;
+    display: flex; align-items: center; justify-content: center;
+    line-height: 1;
+    transition: background 150ms, border-color 150ms, opacity 200ms;
+    padding: 0;
+  }
+  .rc-carousel-arrow:hover {
+    background: rgba(74, 217, 145, 0.18);
+    border-color: rgba(74, 217, 145, 0.55);
+    color: #4ad991;
+  }
+  .rc-carousel-arrow:disabled { opacity: 0.25; cursor: default; }
+  .rc-carousel-arrow-prev { left: -8px; }
+  .rc-carousel-arrow-next { right: -8px; }
+  @media (max-width: 640px) {
+    .rc-carousel-arrow { width: 34px; height: 34px; font-size: 19px; }
+    .rc-carousel-arrow-prev { left: 2px; }
+    .rc-carousel-arrow-next { right: 2px; }
+  }
+  @media (hover: none) and (pointer: coarse) {
+    .rc-carousel-arrow { display: none; }
+  }
+</style>
+<script>
+  (function() {
+    function ready(fn) {
+      if (document.readyState !== 'loading') return fn();
+      document.addEventListener('DOMContentLoaded', fn);
+    }
+    ready(function() {
+      var carousels = document.querySelectorAll('[data-carousel="true"]');
+      carousels.forEach(function(wrap) {
+        var track = wrap.querySelector('.rc-carousel-track');
+        var prev  = wrap.querySelector('[data-rc-prev]');
+        var next  = wrap.querySelector('[data-rc-next]');
+        if (!track) return;
+        function updateEdgeState() {
+          var atStart = track.scrollLeft <= 4;
+          var atEnd   = track.scrollLeft + track.clientWidth >= track.scrollWidth - 4;
+          wrap.classList.toggle('rc-at-start', atStart);
+          wrap.classList.toggle('rc-at-end',   atEnd);
+          if (prev) prev.disabled = atStart;
+          if (next) next.disabled = atEnd;
+        }
+        function scrollBy(dir) {
+          var firstChild = track.firstElementChild;
+          var step = firstChild
+            ? firstChild.getBoundingClientRect().width + 16
+            : track.clientWidth * 0.8;
+          track.scrollBy({ left: dir * step, behavior: 'smooth' });
+        }
+        if (prev) prev.addEventListener('click', function() { scrollBy(-1); });
+        if (next) next.addEventListener('click', function() { scrollBy(1);  });
+        track.addEventListener('scroll', updateEdgeState, { passive: true });
+        window.addEventListener('resize', updateEdgeState);
+        updateEdgeState();
+      });
+    });
+  })();
+</script>
+`;
+
   // Phase L SEO — derive defaults for description, canonical, OG image.
   const defaultDescriptionRu = 'Robot Claude — автоматический криптотрейдинг на вашем Bybit-аккаунте по проверенным стратегиям. Прозрачная статистика, ключ без права на вывод, тарифы от $12/мес.';
   const defaultDescriptionEn = 'Robot Claude — automated crypto trading on your Bybit account using verified strategies. Open stats, withdraw-disabled API key, tiers from $12/mo.';
@@ -2305,6 +2405,7 @@ ${metrikaScript}
 -->
 <body>
 ${siteHeader}
+${carouselBlock}
 <div class="container">
 ${body}
 <div class="footer">

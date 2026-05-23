@@ -988,11 +988,25 @@ function renderHome(
   const CAROUSEL_THRESHOLD = 4;
   const useCarousel = activePositions.length >= CAROUSEL_THRESHOLD;
   const gridClass = useCarousel ? 'live-pos-carousel' : 'live-pos-grid';
-  const positionsBody = activePositions.length === 0
+  // Wrap with carousel-arrow shell when in carousel mode — adds the
+  // clickable « / » buttons + edge fade. JS poller may flip the inner
+  // class between grid/carousel at runtime; the wrapper stays harmless
+  // either way because the [data-carousel] hook only fires when the
+  // inner .rc-carousel-track is present.
+  const innerHtml = activePositions.length === 0
     ? ''
-    : `<div class="${gridClass}" data-positions-grid data-mode="${useCarousel ? 'carousel' : 'grid'}">
+    : `<div class="${gridClass} ${useCarousel ? 'rc-carousel-track' : ''}" data-positions-grid data-mode="${useCarousel ? 'carousel' : 'grid'}">
          ${activePositions.map(renderPositionCard).join('')}
        </div>`;
+  const positionsBody = activePositions.length === 0
+    ? ''
+    : (useCarousel
+        ? `<div class="live-pos-carousel-wrap" data-carousel="true">
+             <button class="rc-carousel-arrow rc-carousel-arrow-prev" data-rc-prev aria-label="prev">‹</button>
+             ${innerHtml}
+             <button class="rc-carousel-arrow rc-carousel-arrow-next" data-rc-next aria-label="next">›</button>
+           </div>`
+        : innerHtml);
   const carouselHintHtml = useCarousel
     ? `<div class="live-pos-scroll-hint">${lang === 'en' ? '← swipe to browse all positions →' : '← смахните, чтобы посмотреть все позиции →'}</div>`
     : '';

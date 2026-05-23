@@ -533,7 +533,11 @@ function renderDepositBreakdown(lang: Lang): string {
         </div>
       </div>
 
-      <div class="at-bd-tiers">${tierBlocks}</div>
+      <div class="at-bd-carousel-wrap" data-carousel="true">
+        <button class="rc-carousel-arrow rc-carousel-arrow-prev" data-rc-prev aria-label="prev">‹</button>
+        <div class="at-bd-tiers rc-carousel-track">${tierBlocks}</div>
+        <button class="rc-carousel-arrow rc-carousel-arrow-next" data-rc-next aria-label="next">›</button>
+      </div>
 
       <p class="at-bd-note">${t.disclaimer}</p>
     </section>
@@ -1079,9 +1083,13 @@ function renderPricing(lang: Lang): string {
     <section class="at-section at-pricing" id="pricing">
       <h2 class="at-section-title">${ico('💳')}${t.sectionTitle}</h2>
       <p class="at-pricing-intro">${t.intro}</p>
-      <div class="at-tier-carousel" role="region" aria-label="${t.carouselAria}">
-        ${freeCard}
-        ${cards}
+      <div class="at-tier-carousel-wrap" data-carousel="true">
+        <button class="rc-carousel-arrow rc-carousel-arrow-prev" data-rc-prev aria-label="prev">‹</button>
+        <div class="at-tier-carousel rc-carousel-track" role="region" aria-label="${t.carouselAria}">
+          ${freeCard}
+          ${cards}
+        </div>
+        <button class="rc-carousel-arrow rc-carousel-arrow-next" data-rc-next aria-label="next">›</button>
       </div>
       <div class="at-tier-scroll-hint">
         ${ico('👆')}${t.scrollHint}
@@ -1870,12 +1878,32 @@ function styles(): string {
   .at-bd-step-body {
     font-size: 12.5px; color: #98a2b3; line-height: 1.5;
   }
-  .at-bd-tiers {
-    display: flex; flex-direction: column; gap: 16px;
+  /* Deposit-breakdown carousel — one tier per slide. Slimmer than the
+     pricing carousel (no padding mess from badges). */
+  .at-bd-carousel-wrap {
+    position: relative;
+    margin: 0 -4px 18px;
   }
+  .at-bd-tiers {
+    display: flex; gap: 16px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding: 0 4px 14px;
+    scrollbar-color: #2a323d transparent;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+  .at-bd-tiers::-webkit-scrollbar { height: 8px; }
+  .at-bd-tiers::-webkit-scrollbar-track { background: transparent; }
+  .at-bd-tiers::-webkit-scrollbar-thumb { background: #2a323d; border-radius: 4px; }
   .at-bd-tier {
     background: #11161d; border: 1px solid #1f2630;
     border-radius: 12px; padding: 18px 20px;
+    /* Fixed slide width — one tier visible at a time on tablet+, two
+       at very wide desktops via wrap. On mobile takes 90vw so one card
+       fills the screen and the swipe is obvious. */
+    flex: 0 0 min(580px, 92vw);
+    scroll-snap-align: start;
   }
   .at-bd-tier-head {
     display: flex; align-items: baseline; justify-content: space-between;
@@ -1958,6 +1986,9 @@ function styles(): string {
     .at-bd-tier-name { font-size: 16px; }
     .at-bd-tier-stats { gap: 14px; }
   }
+
+  /* Carousel arrows + edge fade — defined globally in pageShell so every
+     page gets them. See src/strategies/landing.ts → CAROUSEL_BLOCK. */
 </style>
 `;
 }
