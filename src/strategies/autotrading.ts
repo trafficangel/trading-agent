@@ -1702,7 +1702,7 @@ function styles(): string {
     padding: 6px 0; display: flex; align-items: flex-start; gap: 6px;
   }
   .at-tier-feat-icon { flex-shrink: 0; font-size: 13px; line-height: 1.5; }
-  .at-tier-feat-label { color: #8590a0; }
+  .at-tier-feat-label { color: #8590a0; white-space: nowrap; flex-shrink: 0; }
   .at-tier-features a {
     color: #4ad991; text-decoration: none;
   }
