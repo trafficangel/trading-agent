@@ -2106,13 +2106,15 @@ function styles(): string {
          making the outline read as «only top is gold». */
       box-shadow: 0 4px 16px rgba(0,0,0,0.30);
     }
-    /* Active card on mobile: tier-accent ring drawn as INSET box-shadow
-       so it sits inside the card's visible bounds and can't be clipped
-       by parent overflow / scroll containers. Keeps the regular 1px
-       border layout intact (no width jump → no layout shift). */
+    /* Active card on mobile: outline rendered INSIDE the card edges
+       (negative outline-offset). Outlines are painted ABOVE the card's
+       descendants AND aren't clipped by parent overflow, so the ring
+       reliably renders on all four sides regardless of any glow div,
+       deco emoji or carousel scroll position underneath. */
     [data-carousel="focus"] .at-tier-card.rc-card-active {
-      box-shadow: inset 0 0 0 2px var(--tier-accent),
-                  0 6px 20px rgba(0,0,0,0.40);
+      outline: 2px solid var(--tier-accent);
+      outline-offset: -2px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.40);
     }
     .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
     /* Smaller deco + glow on mobile so they don't dominate the smaller card. */
