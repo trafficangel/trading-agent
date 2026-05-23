@@ -28,7 +28,7 @@ import {
 } from '../db/repos/user-api-keys.js';
 import { fetchBalanceUsdt, bybitErrorLabel, switchToOneWayMode } from '../exchange/bybit-private.js';
 import { listUserStrategies, enableUserStrategy, disableUserStrategy } from '../db/repos/user-strategies.js';
-import { STRATEGY_CONFIGS, BYBIT_REF_URL } from '../strategies/track-c-config.js';
+import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
 import { closeAllUserPositions } from '../strategies/user-fanout.js';
 import { assignTier } from './tier-assignment.js';
 import {
@@ -1186,25 +1186,6 @@ function renderTierPicker(p: {
       .tp-note { font-size: 12.5px; color: #6b7480; line-height: 1.6; margin-top: 22px;
         background: #11161d; border: 1px solid #1f2630; padding: 14px 18px; border-radius: 10px; }
       .tp-note b { color: #cfd6dd; }
-      .tp-glossary {
-        margin-top: 24px; padding: 18px 22px; border-radius: 14px;
-        background: #0e131a; border: 1px solid #1a1f27;
-      }
-      .tp-glossary-title {
-        font-size: 14px; font-weight: 600; color: #e8edf2; margin-bottom: 14px;
-      }
-      .tp-glossary-grid {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;
-      }
-      .tp-glossary-item {
-        font-size: 12.5px; color: #9aa5b1; line-height: 1.55;
-        padding: 12px 14px; background: #11161d; border-radius: 8px;
-        border: 1px solid #1a1f27;
-      }
-      .tp-glossary-item b {
-        display: block; color: #cfd6dd; font-size: 13px; font-weight: 600;
-        margin-bottom: 4px;
-      }
     </style>
     <div class="tp-wrap">
       <div class="tp-back"><a href="/account">← В кабинет</a></div>
@@ -1245,33 +1226,6 @@ function renderTierPicker(p: {
         <button class="rc-carousel-arrow rc-carousel-arrow-next" data-rc-next aria-label="next">›</button>
       </div>
       <div class="tp-scroll-hint">👆 Свайпните или прокрутите вбок, чтобы листать тарифы</div>
-      <div class="tp-glossary">
-        <div class="tp-glossary-title">📖 Что значат эти цифры</div>
-        <div class="tp-glossary-grid">
-          <div class="tp-glossary-item">
-            <b>💰 Заработок в месяц</b>
-            Сколько примерно вы заработаете по нашим бэктестам и реальной статистике shadow-аккаунта.
-            Это <b>оценка диапазона</b>, не гарантия — рынок меняется и реальный результат может быть выше или ниже.
-          </div>
-          <div class="tp-glossary-item">
-            <b>🎯 Стратегии</b>
-            Каждая стратегия — это отдельный алгоритм, который мы предварительно отобрали и проверили.
-            На одной монете работает одна стратегия. Чем выше тариф — тем больше стратегий запускается
-            одновременно на вашем счёте.
-          </div>
-          <div class="tp-glossary-item">
-            <b>⚡ Сделок одновременно</b>
-            Максимум сделок, которые система держит открытыми в один момент. Ограничение защищает
-            ваш депозит от перегрузки маржой, если несколько монет сработают синхронно.
-          </div>
-          <div class="tp-glossary-item">
-            <b>💎 14 дней теста бесплатно</b>
-            Любой тариф можно попробовать 14 дней без оплаты — подключаете Bybit, торговля идёт как обычно,
-            подписка не списывается. После — продлеваете оплатой или отключаете в один клик.
-            <b>+30 дней</b> если зарегистрируете Bybit по <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener" style="color:#4ad991">нашей ссылке</a>.
-          </div>
-        </div>
-      </div>
       <div class="tp-note">
         <b>Как это работает:</b> вы можете выбрать любой тариф — даже если сейчас на счёте меньше минимума.
         Если баланса хватает, тариф активируется сразу. Если не хватает — мы запомним ваш выбор; пополните
