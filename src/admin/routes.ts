@@ -40,7 +40,7 @@ import { recordAdminAction } from '../db/repos/admin-audit.js';
 import { adminCsrfToken, requireAdminCsrf } from '../auth/csrf.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
-import { TIER_CONFIGS, TIER_ORDER } from '../strategies/tier-config.js';
+import { TIER_CONFIGS, TIER_ORDER, computeTierTradeSize, type TierId } from '../strategies/tier-config.js';
 import { listRecentTransitions } from '../db/repos/user-tier-history.js';
 
 function escapeHtml(s: string): string {
@@ -618,6 +618,74 @@ const vipOverrideListStmt = db.prepare<[], {
    ORDER BY s.user_id
 `);
 
+/**
+ * Phase N — per-tier live PnL simulation for the operator dashboard.
+ *
+ * Replays the last `windowMs` worth of CLOSED shadow decisions
+ * (`user_id IS NULL`) and computes what each tier WOULD HAVE earned by
+ * sizing each trade at that tier's notional for the corresponding
+ * strategy. Result is a row per tier with closed-trade count, win-rate
+ * and gross USD PnL.
+ *
+ * Why shadow rather than real user_decisions: we want a stable view
+ * that doesn't depend on which/how many users were subscribed at the
+ * moment. At launch we have 1 Prof user — real user trades give a
+ * misleading picture for the other 5 tiers (no data) while shadow
+ * replay shows the actual signal-history performance at tier sizes.
+ */
+const shadowClosedRecentStmt = db.prepare<
+  [number],
+  { strategy_id: string; pnl_pct: number }
+>(`
+  SELECT strategy_id, pnl_pct
+    FROM decisions
+   WHERE user_id IS NULL
+     AND strategy_id IS NOT NULL
+     AND status = 'closed'
+     AND closed_at IS NOT NULL
+     AND pnl_pct IS NOT NULL
+     AND closed_at >= ?
+`);
+
+type TierLiveStats = {
+  tierId: TierId;
+  trades: number;
+  wins: number;
+  losses: number;
+  winRatePct: number | null;   // null when trades=0
+  grossUsd: number;            // sum of per-trade pnl_pct/100 × tier-notional
+};
+
+function computeTierLiveStats(windowMs: number): TierLiveStats[] {
+  const sinceMs = Date.now() - windowMs;
+  const rows = shadowClosedRecentStmt.all(sinceMs);
+
+  return TIER_ORDER.map((tierId) => {
+    const tier = TIER_CONFIGS[tierId];
+    let trades = 0;
+    let wins = 0;
+    let losses = 0;
+    let grossUsd = 0;
+    for (const row of rows) {
+      if (!tier.strategyIds.includes(row.strategy_id)) continue;
+      const size = computeTierTradeSize(tierId, row.strategy_id);
+      if (!size) continue;
+      trades++;
+      if (row.pnl_pct > 0) wins++;
+      else if (row.pnl_pct < 0) losses++;
+      grossUsd += (row.pnl_pct / 100) * size.notionalUsd;
+    }
+    return {
+      tierId,
+      trades,
+      wins,
+      losses,
+      winRatePct: trades === 0 ? null : (wins / trades) * 100,
+      grossUsd: Math.round(grossUsd * 100) / 100,
+    };
+  });
+}
+
 function renderTiersDashboard(): string {
   const dist = new Map<string, number>();
   for (const row of tierDistStmt.all()) dist.set(row.tier_id, row.n);
@@ -634,6 +702,62 @@ function renderTiersDashboard(): string {
 
   const recentTransitions = listRecentTransitions(30);
   const vipUsers = vipOverrideListStmt.all();
+
+  // Phase N — 30-day shadow-replay PnL per tier.
+  const liveStats = computeTierLiveStats(30 * 24 * 60 * 60 * 1000);
+  const liveStatsTable = (() => {
+    const totalTrades = liveStats.reduce((acc, s) => acc + s.trades, 0);
+    if (totalTrades === 0) {
+      return '<p class="adm-empty">За последние 30 дней не было закрытых сделок.</p>';
+    }
+    return `
+      <table class="adm-tier-table">
+        <thead>
+          <tr>
+            <th>Tier</th>
+            <th>Стратегий</th>
+            <th>Сделок</th>
+            <th>Wins</th>
+            <th>Losses</th>
+            <th>Win-rate</th>
+            <th>Gross PnL (USD)</th>
+            <th>vs expected</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${liveStats.map((s) => {
+            const tier = TIER_CONFIGS[s.tierId];
+            const expected = tier.expectedMonthlyPnlRangeUsd;
+            const expectedLabel = expected.low === 0 && expected.high === 0
+              ? '<span class="adm-tier-id">—</span>'
+              : `<span class="adm-tier-id">$${expected.low}–$${expected.high}</span>`;
+            const wrLabel = s.winRatePct === null ? '—' : `${s.winRatePct.toFixed(1)}%`;
+            const grossClass = s.grossUsd > 0 ? 'adm-pnl-pos' : s.grossUsd < 0 ? 'adm-pnl-neg' : '';
+            const grossSign = s.grossUsd > 0 ? '+' : '';
+            return `
+              <tr>
+                <td><b>${escapeHtml(tier.name)}</b> <span class="adm-tier-id">(${s.tierId})</span></td>
+                <td>${tier.strategyIds.length}</td>
+                <td>${s.trades}</td>
+                <td>${s.wins}</td>
+                <td>${s.losses}</td>
+                <td>${wrLabel}</td>
+                <td class="${grossClass}">${grossSign}$${s.grossUsd.toFixed(2)}</td>
+                <td>${expectedLabel}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+      <p class="adm-tier-note">
+        Симуляция: для каждой закрытой shadow-сделки (operator-уровень, <code>user_id IS NULL</code>)
+        за последние 30 дней PnL пересчитан в USD на notional соответствующего тарифа.
+        Это <b>не реальный</b> PnL юзеров (у них могут быть свои overrides), а оценка
+        «что бы тариф заработал на актуальной истории сигналов». Сравните с колонкой
+        <i>vs expected</i> — это диапазон из <code>tier-config.ts</code>.
+      </p>
+    `;
+  })();
 
   const distTable = `
     <table class="adm-tier-table">
@@ -716,6 +840,11 @@ function renderTiersDashboard(): string {
       </section>
 
       <section class="adm-section">
+        <h2>💹 Live-результаты по тарифам (последние 30 дней)</h2>
+        ${liveStatsTable}
+      </section>
+
+      <section class="adm-section">
         <h2>🔄 Последние переходы (${recentTransitions.length})</h2>
         ${transitionsTable}
       </section>
@@ -743,6 +872,10 @@ function renderTiersDashboard(): string {
       .adm-dt { color: #8590a0; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
       .adm-mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
       .adm-empty { color: #6b7480; font-style: italic; padding: 12px 0; }
+      .adm-pnl-pos { color: #4ad991; font-weight: 600; }
+      .adm-pnl-neg { color: #ff8b8b; font-weight: 600; }
+      .adm-tier-note { font-size: 12px; color: #8590a0; line-height: 1.5; margin: 12px 2px 0; }
+      .adm-tier-note code { background: #0e131a; padding: 1px 5px; border-radius: 4px; font-size: 11px; color: #cfd6dd; font-family: ui-monospace, Menlo, monospace; }
       body { background: #0b0e13; }
     </style>
   `;
