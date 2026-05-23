@@ -511,23 +511,26 @@ function tierEmoji(tierId: TierId): string {
 }
 
 /**
- * TRACK E Phase C — onboarding checklist.
+ * TRACK E Phase C — onboarding checklist (rewired May 2026).
  *
- * For new users guides them step-by-step from registration → first
- * trade. Each checkpoint either shows a green ✓ (done) or an amber
- * action button (CTA to next step). Hidden when all done OR when
- * user has VIP override (operator setup).
- *
- * Checkpoints (Phase G follow-up — 4 steps, deposit folded INTO tier-picker
- * page where the "Проверить баланс" button lives):
+ * Five-step flow that matches how a new user actually thinks about
+ * signing up:
  *   1. Регистрация (always done — user is in /account)
- *   2. Подключение Bybit (api_key.last_verified_at !== null)
- *   3. Выбор тарифа и активация
- *       - "done" when tier is actually activated (user_strategies > 0)
- *       - "current" if not yet activated; CTA leads to /select-tier
- *         where the user picks + tops up + clicks "Проверить баланс"
- *         (assignTier auto-fires when balance is sufficient).
- *   4. Стратегии работают (openCount + closedCount > 0)
+ *   2. Выбор тарифа — pick FIRST so users immediately understand what
+ *      they're aiming for. State = sub.selected_tier_id set (or tier
+ *      already activated).
+ *   3. Bybit-аккаунт — branch between «у меня уже есть» (→ /account/
+ *      api-key) and «нужно зарегистрироваться» (→ /account/bybit-signup).
+ *      State = api_key.last_verified_at !== null. Both CTAs render side-
+ *      by-side until one is done.
+ *   4. Достаточный баланс — balance ≥ selected-tier minBalance. If not,
+ *      CTA leads to /account/deposit (funding instructions + «Проверить
+ *      баланс» button). When balance becomes sufficient AND api-key is
+ *      connected, assignTier auto-fires server-side and this step
+ *      auto-completes.
+ *   5. Стратегии работают — first trade opened or already closed.
+ *
+ * Hidden when all done OR when user has VIP override.
  */
 function renderOnboardingChecklist(args: {
   subscription: SubscriptionRow | null;
@@ -547,64 +550,127 @@ function renderOnboardingChecklist(args: {
   const tierActivated = args.enabledStrategiesCount > 0;
   const tradingStarted = args.openPositionsCount + args.closedPositionsCount > 0;
 
+  // Tier-selection step: user has either explicitly picked (selected_tier_id)
+  // or the operator/auto-activate already promoted them into a tier
+  // (enabledStrategiesCount > 0).
+  const selectedTierObj = sub.selected_tier_id
+    ? TIER_CONFIGS[sub.selected_tier_id as TierId]
+    : null;
+  const tierPicked = tierActivated || selectedTierObj !== null;
+
+  // Balance check — counts as done either when the tier is fully
+  // activated (assignTier ran, so balance was sufficient by construction)
+  // or when the user's balance currently meets the selected tier's floor.
+  const balance = args.margin.balanceUsdt ?? null;
+  const targetMin = selectedTierObj?.minBalanceUsdt ?? null;
+  const balanceOk = tierActivated || (
+    targetMin !== null && balance !== null && balance >= targetMin
+  );
+
   // If all done → hide. User no longer needs the wizard.
-  if (keyConnected && tierActivated && tradingStarted) return '';
+  if (tierPicked && keyConnected && balanceOk && tradingStarted) return '';
 
   type CtaLink = { kind: 'link'; label: string; href: string; primary?: boolean };
   type CtaForm = { kind: 'form'; label: string; action: string; primary?: boolean };
   type Cta = CtaLink | CtaForm;
   type Step = { num: number; title: string; done: boolean; ctas?: Cta[]; hint?: string };
 
-  // Step 3 title is dynamic to reflect state:
-  //   - tier picked but balance insufficient → "Выбор тарифа · ждём депозит для {Tier}"
-  //   - tier picked + activated → "Тариф {Tier} активирован" (will be done=true)
-  //   - nothing picked → "Выбор тарифа и активация"
-  const selectedTierObj = sub.selected_tier_id
-    ? TIER_CONFIGS[sub.selected_tier_id as TierId]
-    : null;
-  let tierStepTitle = 'Выбор тарифа и активация';
-  if (tierActivated && selectedTierObj) {
-    tierStepTitle = `Тариф ${selectedTierObj.name} активирован`;
+  // Step 2 title: «Выбор тарифа» until picked, then «Тариф {Name} выбран».
+  const tierStepTitle = tierActivated && selectedTierObj
+    ? `Тариф ${selectedTierObj.name} активирован`
+    : selectedTierObj
+      ? `Выбран ${selectedTierObj.name}`
+      : 'Выбор тарифа';
+
+  // Step 4 title — dynamic so the user sees progress as the balance
+  // ticks up vs the requirement.
+  let balanceStepTitle = 'Достаточный баланс на Bybit';
+  if (balanceOk && selectedTierObj) {
+    balanceStepTitle = `Баланс достаточен для ${selectedTierObj.name}`;
+  } else if (selectedTierObj && balance !== null) {
+    const need = Math.max(0, selectedTierObj.minBalanceUsdt - balance);
+    balanceStepTitle = `Баланс: $${balance.toFixed(0)} · нужно ещё $${need.toFixed(0)} для ${selectedTierObj.name}`;
   } else if (selectedTierObj) {
-    tierStepTitle = `Выбран ${selectedTierObj.name} · нужен депозит $${selectedTierObj.minBalanceUsdt}+`;
+    balanceStepTitle = `Баланс ≥ $${selectedTierObj.minBalanceUsdt} для ${selectedTierObj.name}`;
   }
 
   const steps: Step[] = [
     { num: 1, title: 'Регистрация', done: true },
     {
       num: 2,
-      title: 'Подключение Bybit',
-      done: keyConnected,
-      ctas: keyConnected
-        ? undefined
-        : [{ kind: 'link', label: 'Подключить ключ →', href: '/account/api-key', primary: true }],
-    },
-    {
-      num: 3,
       title: tierStepTitle,
-      done: tierActivated,
-      ctas: tierActivated || !keyConnected
+      done: tierPicked,
+      ctas: tierPicked
         ? undefined
         : [{
             kind: 'link',
-            label: sub.selected_tier_id ? 'Открыть выбор тарифа →' : 'Выбрать тариф →',
+            label: 'Выбрать тариф →',
             href: '/account/subscription/select-tier',
             primary: true,
           }],
+      hint: tierPicked
+        ? undefined
+        : '14 дней бесплатно на любом тарифе — без оплаты подписки, без привязки карты.',
+    },
+    {
+      num: 3,
+      title: keyConnected ? 'Bybit подключён' : 'Bybit-аккаунт',
+      done: keyConnected,
+      // Two CTAs side-by-side: one for users WITH Bybit, one for users
+      // without. Whichever path the user picks, this step completes once
+      // an API key is verified.
+      ctas: keyConnected
+        ? undefined
+        : [
+            {
+              kind: 'link',
+              label: 'У меня есть Bybit · Подключить ключ →',
+              href: '/account/api-key',
+              primary: true,
+            },
+            {
+              kind: 'link',
+              label: 'Нет Bybit · Открыть инструкцию →',
+              href: '/account/bybit-signup',
+              primary: false,
+            },
+          ],
+      hint: keyConnected
+        ? undefined
+        : 'Если уже есть Bybit — нажмите «Подключить ключ». Нет аккаунта — инструкция по регистрации с +30 днями бонуса.',
     },
     {
       num: 4,
+      title: balanceStepTitle,
+      done: balanceOk,
+      // Three sub-states:
+      //   - keyConnected && balance insufficient → CTA to /account/deposit
+      //   - !keyConnected → no CTA yet, user is on step 3
+      //   - balanceOk → step done, no CTA
+      ctas: balanceOk || !keyConnected
+        ? undefined
+        : [{
+            kind: 'link',
+            label: 'Как пополнить →',
+            href: '/account/deposit',
+            primary: true,
+          }],
+      hint: balanceOk
+        ? undefined
+        : keyConnected
+          ? 'После пополнения нажмите «Проверить баланс» — стратегии включатся автоматически.'
+          : 'Сначала подключите Bybit (шаг 3), потом мы сможем проверять баланс.',
+    },
+    {
+      num: 5,
       title: tradingStarted ? 'Стратегии работают' : 'Ждём первую сделку',
       done: tradingStarted,
-      // Last step is a passive "wait" — there's nothing the user can do here,
-      // signals fire when the market gives them. Explain that explicitly so
-      // the 75% progress doesn't feel stuck.
       hint: tradingStarted
         ? undefined
-        : tierActivated
+        : balanceOk && tierActivated
           ? 'Сигнал может прийти от нескольких минут до пары часов — стратегии срабатывают сами, как только условия совпадут.'
           : 'Шаг завершится, как только стратегия откроет первую сделку.',
-      ctas: tradingStarted || !tierActivated
+      ctas: tradingStarted || !balanceOk || !tierActivated
         ? undefined
         : [{ kind: 'link', label: 'Telegram-канал ↗', href: 'https://t.me/luxalgosignal', primary: false }],
     },

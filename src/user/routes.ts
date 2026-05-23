@@ -47,6 +47,8 @@ import { renderDashboard } from './dashboard.js';
 import { computeMarginState } from './margin.js';
 import { renderStrategiesPage } from './strategies.js';
 import { renderApiKeyPage } from './api-key.js';
+import { renderBybitSignupPage } from './bybit-signup.js';
+import { renderDepositPage } from './deposit.js';
 import { issueCsrfToken, requireCsrf } from '../auth/csrf.js';
 import { renderTradesPage } from './trades.js';
 import {
@@ -453,6 +455,49 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     reply.code(303).header('location', '/account').send();
   });
 
+  // -------- GET /account/bybit-signup --------
+  // Branch of the onboarding for users without a Bybit account yet.
+  // Sister page to /account/api-key (the «I already have Bybit» branch).
+  app.get('/account/bybit-signup', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) { reply.redirect('/strategies'); return; }
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('cache-control', 'private, no-store');
+    return reply.send(renderBybitSignupPage({ displayName: user.displayName }));
+  });
+
+  // -------- GET /account/deposit --------
+  // Onboarding step 4 — funding instructions for users whose Bybit
+  // balance is below the selected tier's minimum. The «Проверить баланс»
+  // button uses the existing verify endpoint with return_to=deposit so
+  // insufficient amounts loop back to this page (with a flash).
+  app.get('/account/deposit', async (req, reply) => {
+    const user = getAuthedUser(req);
+    if (!user) { reply.redirect('/strategies'); return; }
+    const sub = findSubscription(user.userId);
+    const key = findActiveKey(user.userId);
+    const balance = key && !key.revoked_at && key.last_verified_at !== null
+      ? key.last_balance_usdt
+      : null;
+    const selectedTier = (sub?.selected_tier_id ?? sub?.tier_id ?? null) as TierId | null;
+    const flashQs = (req.query as { ok?: string; error?: string } | undefined);
+    const flash = flashQs?.error
+      ? { ok: false, message: flashQs.error }
+      : flashQs?.ok
+        ? { ok: true, message: flashQs.ok }
+        : null;
+    const csrf = issueCsrfToken(req, reply);
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('cache-control', 'private, no-store');
+    return reply.send(renderDepositPage({
+      displayName: user.displayName,
+      balanceUsdt: balance,
+      selectedTier,
+      flash,
+      csrfToken: csrf,
+    }));
+  });
+
   // -------- GET /account/api-key --------
   app.get('/account/api-key', async (req, reply) => {
     const user = getAuthedUser(req);
@@ -656,6 +701,24 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     const returnTo = (req.query as { return_to?: string } | undefined)?.return_to;
     if (returnTo === 'picker') {
       reply.code(303).header('location', '/account/subscription/select-tier?from=verify').send();
+      return;
+    }
+    // Onboarding step 4 — deposit page «Проверить баланс» button. If the
+    // amount is now sufficient, the auto-activate branch above already
+    // redirected to /account. We only hit this branch when balance is
+    // still insufficient → bounce back to /account/deposit with a flash
+    // so the user sees the refreshed number on the same page.
+    if (returnTo === 'deposit') {
+      const stillNeeds = selectedTier
+        ? verifyRes.totalUsdt < getTier(selectedTier).minBalanceUsdt
+        : verifyRes.totalUsdt < MIN_AUTOTRADING_DEPOSIT_USDT;
+      const msg = stillNeeds
+        ? `Баланс обновлён: $${verifyRes.totalUsdt.toFixed(0)} USDT. Пополните ещё, чтобы активировать тариф.`
+        : `Баланс обновлён: $${verifyRes.totalUsdt.toFixed(0)} USDT.`;
+      const qs = stillNeeds
+        ? `?error=${encodeURIComponent(msg)}`
+        : `?ok=${encodeURIComponent(msg)}`;
+      reply.code(303).header('location', `/account/deposit${qs}`).send();
       return;
     }
     if (
