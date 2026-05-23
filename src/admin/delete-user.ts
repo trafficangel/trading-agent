@@ -63,6 +63,11 @@ const DELETE_STATEMENTS: ReadonlyArray<readonly [string, 'user_id' | 'phone' | '
   ['DELETE FROM user_subscriptions WHERE user_id = ?', 'user_id'],
   ['DELETE FROM decisions WHERE user_id = ?', 'user_id'],
   ['DELETE FROM verification_attempts WHERE phone = ?', 'phone'],
+  // admin_audit_log has a FK to registrations(id). We preserve the
+  // audit history (action / before / after / note are still valuable
+  // even without the user link) but NULL out the link so DELETE FROM
+  // registrations doesn't trip the FK constraint.
+  ['UPDATE admin_audit_log SET target_user_id = NULL WHERE target_user_id = ?', 'reg_id'],
   ['DELETE FROM registrations WHERE id = ?', 'reg_id'],
 ];
 
