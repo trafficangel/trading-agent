@@ -370,10 +370,20 @@ function liveTradesTable(trades: LiveTradeRow[], cfg: StrategyConfig): string {
     const d = new Date(ts);
     return `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)}`;
   };
+  // Same exhaustive mapping as renderAllStrategiesFeed (the all-strategies
+  // table on /strategies). Audit gap: the previous version only knew 3
+  // reasons, so any reconcile-derived close — manual_close, bybit_sl_hit,
+  // bybit_reconcile, reverse_signal — rendered as the raw closeReason
+  // string («manual») in the pill.
   const reasonLabel = (t: LiveTradeRow): { label: string; cls: string } => {
-    if (t.closeReason === 'sl_hit') return { label: 'SL', cls: 'reason-sl' };
+    if (t.closeReason === 'sl_hit' || t.forceCloseReason === 'bybit_sl_hit') {
+      return { label: 'SL', cls: 'reason-sl' };
+    }
     if (t.forceCloseReason === 'strategy_exit') return { label: 'strat', cls: 'reason-strat' };
+    if (t.forceCloseReason === 'reverse_signal') return { label: 'flip', cls: 'reason-reverse' };
     if (t.forceCloseReason === 'time_guard') return { label: 'time', cls: 'reason-time' };
+    if (t.forceCloseReason === 'manual_close') return { label: 'manual', cls: 'reason-manual' };
+    if (t.forceCloseReason === 'bybit_reconcile') return { label: 'sync', cls: 'reason-manual' };
     return { label: t.closeReason ?? '—', cls: 'reason-strat' };
   };
   const rows = trades

@@ -294,6 +294,13 @@ async function reconcileUserPosition(p: DecisionRow): Promise<void> {
   // 'sl_hit' which mis-labelled strategy-exit closures (e.g. profitable
   // closes via Builtin Exit) as if the safety stop had fired.
   let closeReason: 'sl_hit' | 'manual' = 'manual';
+  // Track whether we got positive evidence from either Bybit endpoint.
+  // When BOTH exec-list and closed-pnl return nothing AND we have to fall
+  // back to last-price, we genuinely don't know how the position closed —
+  // and that's the only case where forceReason should be 'bybit_reconcile'.
+  // Without this flag, every fallback row was being mis-labelled as
+  // manual_close («user closed on Bybit») which it usually isn't.
+  let evidenceFound = false;
   let bybitCloseAvgPrice: number | null = null;
   const execRes = await fetchExecutions(creds, { symbol: p.symbol, startTime: p.created_at });
   if (execRes.ok) {
@@ -304,6 +311,7 @@ async function reconcileUserPosition(p: DecisionRow): Promise<void> {
       (e) => e.side === ourSideClose && e.closedSize > 0 && (e.execType === 'Trade' || e.execType === 'BustTrade'),
     );
     if (closingExecs.length > 0) {
+      evidenceFound = true;
       let totalQty = 0;
       let weighted = 0;
       let hasBust = false;
@@ -350,6 +358,7 @@ async function reconcileUserPosition(p: DecisionRow): Promise<void> {
           (p.bybit_qty ? Math.abs(row.qty - p.bybit_qty) / p.bybit_qty < 0.05 : true),
       );
       if (candidate) {
+        evidenceFound = true;
         closePrice = candidate.avgExitPrice;
         bybitCloseAvgPrice = candidate.avgExitPrice;
         // exitType from Bybit: "TakeProfit"/"StopLoss"/"Liquidation"/"Trade"
@@ -379,14 +388,18 @@ async function reconcileUserPosition(p: DecisionRow): Promise<void> {
 
   const slForR = p.original_sl ?? p.sl ?? p.entry;
   const { pnlPct, pnlR } = calcPnl(p.side as 'long' | 'short', p.entry, slForR, closePrice);
-  // Map closeReason → forceReason so trade history shows the right
-  // origin: sl_hit = Bybit triggered our safety stop; manual_close =
-  // user closed the position on Bybit directly; bybit_reconcile =
-  // catch-all when we don't know.
+  // Map closeReason → forceReason. Three buckets:
+  //   bybit_sl_hit   — closeReason ended up sl_hit (BustTrade or
+  //                    near-SL+loss-side match)
+  //   manual_close   — we have positive evidence (exec-list or
+  //                    closed-pnl) but it WASN'T an SL trigger →
+  //                    most likely user closed manually on Bybit
+  //   bybit_reconcile — last-price fallback fired; both endpoints
+  //                    came back empty; we genuinely don't know
   const forceReason: 'bybit_reconcile' | 'manual_close' | 'bybit_sl_hit' =
     closeReason === 'sl_hit'
       ? 'bybit_sl_hit'
-      : closeReason === 'manual'
+      : evidenceFound
         ? 'manual_close'
         : 'bybit_reconcile';
   closeUserDecision({

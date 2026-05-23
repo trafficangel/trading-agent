@@ -1642,7 +1642,12 @@ function renderCalculator(lang: Lang): string {
           const net = monthlyMid - tier.priceUsd;
           const yearNet = net * 12;
           const pctMo = depo > 0 ? (monthlyMid / depo * 100) : 0;
-          const ratio = tier.priceUsd > 0 ? (tier.priceUsd / monthlyMid * 100) : 0;
+          // Guard against divide-by-zero AND infinite ratio: if monthlyMid
+          // is 0 (e.g. a tier whose backtests collapse to zero forecast)
+          // we can\\'t express the ratio meaningfully — show 0%.
+          const ratio = tier.priceUsd > 0 && monthlyMid > 0
+            ? (tier.priceUsd / monthlyMid * 100)
+            : 0;
           // Suffix («/мес», « от депозита», « ×12») rendered as a separate
           // <span class="at-calc-card-suffix"> so it can wrap to a new line
           // OR sit beside the value with smaller font. Keeps the headline
