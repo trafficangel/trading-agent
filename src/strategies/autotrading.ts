@@ -580,7 +580,7 @@ function renderDepositBreakdown(lang: Lang): string {
     return `
       <div class="at-bd-tier">
         <div class="at-bd-tier-head">
-          <div class="at-bd-tier-name">${escapeHtml(tier.name)}</div>
+          <div class="at-bd-tier-name">${tierEmoji(tier.id)} ${escapeHtml(tier.name)}</div>
           <div class="at-bd-tier-depo">${t.atDepo} <b>$${minDepo.toLocaleString()}</b></div>
         </div>
         <div class="at-bd-tier-stats">
