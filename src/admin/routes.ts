@@ -710,8 +710,33 @@ function renderTiersDashboard(): string {
     if (totalTrades === 0) {
       return '<p class="adm-empty">За последние 30 дней не было закрытых сделок.</p>';
     }
+    // Helpers for colour cues — keep the table scannable at a glance.
+    const wrClass = (pct: number | null): string => {
+      if (pct === null) return '';
+      if (pct >= 70) return 'adm-wr-great';
+      if (pct >= 55) return 'adm-wr-good';
+      if (pct >= 40) return 'adm-wr-meh';
+      return 'adm-wr-bad';
+    };
+    const expectedBadge = (
+      actual: number,
+      range: { low: number; high: number },
+    ): string => {
+      if (range.low === 0 && range.high === 0) {
+        return '<span class="adm-badge adm-badge-neutral">N/A</span>';
+      }
+      const rangeStr = `$${range.low}–$${range.high}`;
+      // Bands: ≥80% of range.low = on track; below = lagging; above range.high = ahead.
+      if (actual >= range.high) {
+        return `<span class="adm-badge adm-badge-ahead">▲ ahead</span><span class="adm-range">${rangeStr}</span>`;
+      }
+      if (actual >= range.low * 0.8) {
+        return `<span class="adm-badge adm-badge-ok">● on track</span><span class="adm-range">${rangeStr}</span>`;
+      }
+      return `<span class="adm-badge adm-badge-lag">▼ lagging</span><span class="adm-range">${rangeStr}</span>`;
+    };
     return `
-      <table class="adm-tier-table">
+      <table class="adm-tier-table adm-tier-live">
         <thead>
           <tr>
             <th>Tier</th>
@@ -728,22 +753,21 @@ function renderTiersDashboard(): string {
           ${liveStats.map((s) => {
             const tier = TIER_CONFIGS[s.tierId];
             const expected = tier.expectedMonthlyPnlRangeUsd;
-            const expectedLabel = expected.low === 0 && expected.high === 0
-              ? '<span class="adm-tier-id">—</span>'
-              : `<span class="adm-tier-id">$${expected.low}–$${expected.high}</span>`;
             const wrLabel = s.winRatePct === null ? '—' : `${s.winRatePct.toFixed(1)}%`;
-            const grossClass = s.grossUsd > 0 ? 'adm-pnl-pos' : s.grossUsd < 0 ? 'adm-pnl-neg' : '';
-            const grossSign = s.grossUsd > 0 ? '+' : '';
+            const grossClass = s.grossUsd > 0 ? 'adm-pnl-pos' : s.grossUsd < 0 ? 'adm-pnl-neg' : 'adm-pnl-zero';
+            const grossSign = s.grossUsd > 0 ? '+' : s.grossUsd < 0 ? '−' : '';
+            const grossDisplay = `${grossSign}$${Math.abs(s.grossUsd).toFixed(2)}`;
+            const rowAccent = s.grossUsd > 0 ? 'adm-row-pos' : s.grossUsd < 0 ? 'adm-row-neg' : '';
             return `
-              <tr>
+              <tr class="${rowAccent}">
                 <td><b>${escapeHtml(tier.name)}</b> <span class="adm-tier-id">(${s.tierId})</span></td>
-                <td>${tier.strategyIds.length}</td>
-                <td>${s.trades}</td>
-                <td>${s.wins}</td>
-                <td>${s.losses}</td>
-                <td>${wrLabel}</td>
-                <td class="${grossClass}">${grossSign}$${s.grossUsd.toFixed(2)}</td>
-                <td>${expectedLabel}</td>
+                <td class="adm-num">${tier.strategyIds.length}</td>
+                <td class="adm-num">${s.trades}</td>
+                <td class="adm-num adm-cell-wins">${s.wins}</td>
+                <td class="adm-num adm-cell-losses">${s.losses}</td>
+                <td class="adm-num ${wrClass(s.winRatePct)}">${wrLabel}</td>
+                <td class="adm-num ${grossClass}">${grossDisplay}</td>
+                <td>${expectedBadge(s.grossUsd, expected)}</td>
               </tr>
             `;
           }).join('')}
@@ -753,8 +777,10 @@ function renderTiersDashboard(): string {
         Симуляция: для каждой закрытой shadow-сделки (operator-уровень, <code>user_id IS NULL</code>)
         за последние 30 дней PnL пересчитан в USD на notional соответствующего тарифа.
         Это <b>не реальный</b> PnL юзеров (у них могут быть свои overrides), а оценка
-        «что бы тариф заработал на актуальной истории сигналов». Сравните с колонкой
-        <i>vs expected</i> — это диапазон из <code>tier-config.ts</code>.
+        «что бы тариф заработал на актуальной истории сигналов». Бейдж в колонке
+        <i>vs expected</i>: <b>▲ ahead</b> — выше верхней планки диапазона из
+        <code>tier-config.ts</code>, <b>● on track</b> — в пределах ≥80% от нижней
+        границы, <b>▼ lagging</b> — недотягивает.
       </p>
     `;
   })();
@@ -878,11 +904,52 @@ function renderTiersDashboard(): string {
       .adm-dt { color: #98a2b3; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
       .adm-mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #e8edf2; }
       .adm-empty { color: #98a2b3; font-style: italic; padding: 12px 0; }
-      .adm-pnl-pos { color: #4ad991; font-weight: 700; }
-      .adm-pnl-neg { color: #ff8b8b; font-weight: 700; }
+      /* PnL columns — must override .adm-tier-table td color via higher
+         specificity (selector matches the same depth + the modifier class). */
+      .adm-tier-table td.adm-pnl-pos { color: #4ad991; font-weight: 700; }
+      .adm-tier-table td.adm-pnl-neg { color: #ff6b6b; font-weight: 700; }
+      .adm-tier-table td.adm-pnl-zero { color: #98a2b3; font-weight: 600; }
+
+      /* Numeric columns get the tabular look — Menlo + right-aligned. */
+      .adm-tier-table td.adm-num {
+        font-family: ui-monospace, Menlo, monospace;
+        font-variant-numeric: tabular-nums;
+      }
+      .adm-tier-table td.adm-cell-wins { color: #6fd9a0; }
+      .adm-tier-table td.adm-cell-losses { color: #ff9b9b; }
+
+      /* Win-rate gradient: great / good / meh / bad. */
+      .adm-tier-table td.adm-wr-great { color: #4ad991; font-weight: 700; }
+      .adm-tier-table td.adm-wr-good  { color: #88e1b4; font-weight: 600; }
+      .adm-tier-table td.adm-wr-meh   { color: #e0c275; font-weight: 600; }
+      .adm-tier-table td.adm-wr-bad   { color: #ff6b6b; font-weight: 700; }
+
+      /* Whole-row tinting based on PnL sign — subtle, so the table still
+         reads as a unit, but each row earns its colour. */
+      .adm-tier-live tr.adm-row-pos { background: linear-gradient(90deg, rgba(74,217,145,0.06), rgba(74,217,145,0) 60%); }
+      .adm-tier-live tr.adm-row-neg { background: linear-gradient(90deg, rgba(255,107,107,0.08), rgba(255,107,107,0) 60%); }
+      .adm-tier-live tr.adm-row-pos td { border-top-color: rgba(74,217,145,0.12); }
+      .adm-tier-live tr.adm-row-neg td { border-top-color: rgba(255,107,107,0.14); }
+
+      /* Badges in the "vs expected" column. */
+      .adm-badge {
+        display: inline-block; padding: 3px 9px; border-radius: 999px;
+        font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+        line-height: 1.4; vertical-align: middle;
+      }
+      .adm-badge-ahead   { background: rgba(74,217,145,0.18);  color: #5ce0a0; border: 1px solid rgba(74,217,145,0.45); }
+      .adm-badge-ok      { background: rgba(116,170,255,0.18); color: #9bc1ff; border: 1px solid rgba(116,170,255,0.40); }
+      .adm-badge-lag     { background: rgba(255,107,107,0.18); color: #ff8b8b; border: 1px solid rgba(255,107,107,0.45); }
+      .adm-badge-neutral { background: rgba(133,144,160,0.18); color: #98a2b3; border: 1px solid rgba(133,144,160,0.40); }
+      .adm-range {
+        margin-left: 8px; font-size: 11px; color: #98a2b3;
+        font-family: ui-monospace, Menlo, monospace;
+      }
+
       .adm-tier-note { font-size: 12px; color: #98a2b3; line-height: 1.55; margin: 12px 2px 0; }
       .adm-tier-note code { background: #0e131a; padding: 1px 5px; border-radius: 4px; font-size: 11px; color: #e8edf2; font-family: ui-monospace, Menlo, monospace; }
       .adm-tier-note b { color: #e8edf2; }
+      .adm-tier-note i { color: #cfd6dd; font-style: normal; font-weight: 500; }
     </style>
   `;
   return body;
