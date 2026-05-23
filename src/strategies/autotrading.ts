@@ -1502,7 +1502,11 @@ function renderFaq(lang: Lang): string {
  * third of the frame.
  */
 function renderAboutFounder(lang: Lang): string {
-  const avatarSrc = '/static/founder.jpg';
+  // Cache-bust query string — first deploy of /static/* hit a stale
+  // Cloudflare cache-miss saved before @fastify/static was wired up,
+  // and CF holds 404s for 4 hours. Bumping the `v=` integer forces a
+  // fresh origin fetch. Increment whenever the photo file is replaced.
+  const avatarSrc = '/static/founder.jpg?v=1';
 
   if (lang === 'en') {
     return `
