@@ -27,7 +27,7 @@ import {
   getRegistrationStats,
   type RegistrationListRow,
 } from '../auth/session.js';
-import { pageShell } from '../strategies/landing.js';
+import { pageShell, formatSinceDate } from '../strategies/landing.js';
 import {
   findSubscription,
   setPlan,
@@ -648,6 +648,20 @@ const shadowClosedRecentStmt = db.prepare<
      AND closed_at >= ?
 `);
 
+/** Earliest CLOSED shadow decision's close timestamp. Used to label
+ *  the «last 365 days» block honestly — at launch (system runs for
+ *  weeks/months only), we show «since DD month YYYY» instead of the
+ *  misleading «last 365 days». Returns null when no shadow trades
+ *  have closed yet. */
+const earliestClosedShadowStmt = db.prepare<[], { ts: number | null }>(`
+  SELECT MIN(closed_at) AS ts
+    FROM decisions
+   WHERE user_id IS NULL
+     AND strategy_id IS NOT NULL
+     AND status = 'closed'
+     AND closed_at IS NOT NULL
+`);
+
 type TierLiveStats = {
   tierId: TierId;
   trades: number;
@@ -829,7 +843,7 @@ function renderTiersDashboard(): string {
                 <div class="adm-pct-annual" title="Грубая экстраполяция × 12">≈ ${annualPctStr} <span class="adm-pct-suf">/ год</span></div>
               `
               : `
-                <div class="adm-pct-monthly ${pctClass}" title="Депозит ${depoTitle} (минимум для тарифа). Окно: 365 дней, без экстраполяции.">${annualPctStr} <span class="adm-pct-suf">/ год</span></div>
+                <div class="adm-pct-monthly ${pctClass}" title="Депозит ${depoTitle} (минимум для тарифа). Реальная цифра за всё накопленное окно (до 365 дней), без экстраполяции.">${annualPctStr} <span class="adm-pct-suf">/ год</span></div>
                 <div class="adm-pct-annual" title="Среднее по году ÷ 12 (без учёта сезонности)">≈ ${monthlyPctStr} <span class="adm-pct-suf">/ мес сред.</span></div>
               `;
             return `
@@ -860,6 +874,15 @@ function renderTiersDashboard(): string {
     'year',
     'За последние 365 дней не было закрытых сделок.',
   );
+  // Honest label for the "year" block: if the system has been running
+  // < 365 days, show «с DD month YYYY» (the first closed shadow trade)
+  // so the operator sees this is a cumulative-since-launch view, not
+  // a true year-on-year figure.
+  const earliestClosedMs = earliestClosedShadowStmt.get()?.ts ?? null;
+  const yearCutoffMs = Date.now() - 365 * 24 * 60 * 60 * 1000;
+  const yearBlockLabel = earliestClosedMs && earliestClosedMs > yearCutoffMs
+    ? formatSinceDate(earliestClosedMs, 'ru')         // e.g. «с 14 марта 2026»
+    : 'последние 365 дней';
   const forecastTable = renderTierStatsTable(
     computeTierForecastStats(),
     'month',
@@ -988,7 +1011,7 @@ function renderTiersDashboard(): string {
       </section>
 
       <section class="adm-section">
-        <h2>📅 Live-результаты по тарифам — последние 365 дней</h2>
+        <h2>📅 Live-результаты по тарифам — ${escapeHtml(yearBlockLabel)}</h2>
         ${liveStatsTable365d}
         ${liveStatsNote}
       </section>
