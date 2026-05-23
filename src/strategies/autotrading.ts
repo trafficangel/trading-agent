@@ -2545,9 +2545,11 @@ function styles(): string {
     border: 1px solid #1f2630;
     border-radius: 14px;
     padding: 22px 24px;
+    min-width: 0;
+    box-sizing: border-box;
     /* One card per view + a peek of the next so visitor sees "there
-       is more". 560px desktop, 86vw mobile. */
-    flex: 0 0 min(560px, 86vw);
+       is more". 560px desktop, 92vw mobile. */
+    flex: 0 0 min(560px, 92vw);
     box-shadow: 0 8px 24px rgba(0,0,0,0.25);
   }
   /* Active card pops harder via the box-shadow + border accent. */
@@ -2635,6 +2637,48 @@ function styles(): string {
     .at-bd-steps { grid-template-columns: 1fr; }
     .at-bd-tier-name { font-size: 16px; }
     .at-bd-tier-stats { gap: 14px; }
+  }
+
+  /* Mobile: card sits inside a 86vw flex item, so the inner table can't
+     be 6 columns wide without overflowing. Compresses padding, font and
+     column widths so the table fits, AND drops the duplicated SL% column
+     (the % of deposit column at the right communicates the same risk
+     in user-relevant units). */
+  @media (max-width: 640px) {
+    .at-bd-tier {
+      padding: 16px 12px;
+      flex: 0 0 92vw;
+    }
+    .at-bd-tier-head { margin-bottom: 10px; }
+    .at-bd-tier-depo { font-size: 11.5px; }
+    .at-bd-tier-stats {
+      padding: 8px 10px; gap: 10px;
+      font-size: 11.5px;
+    }
+    .at-bd-stat-value { font-size: 12.5px; }
+    .at-bd-stat-label { font-size: 9.5px; }
+    .at-bd-tbl {
+      font-size: 11.5px; table-layout: fixed; width: 100%;
+    }
+    .at-bd-tbl th {
+      font-size: 9px; padding: 6px 4px;
+      letter-spacing: 0.03em;
+    }
+    .at-bd-tbl td { padding: 8px 4px; }
+    .at-bd-tbl th:first-child, .at-bd-tbl td:first-child { padding-left: 2px; }
+    .at-bd-tbl th:last-child, .at-bd-tbl td:last-child { padding-right: 2px; }
+    /* Hide leverage and SL% columns on mobile — the size + max-loss
+       + %-of-deposit columns already tell the full story. */
+    .at-bd-tbl th:nth-child(2), .at-bd-tbl td:nth-child(2),
+    .at-bd-tbl th:nth-child(4), .at-bd-tbl td:nth-child(4) { display: none; }
+    .at-bd-strat b { font-size: 12px; }
+    .at-bd-strat-meta { font-size: 9.5px; }
+    .at-bd-worst {
+      padding: 10px 12px; gap: 6px;
+      flex-direction: column; align-items: flex-start;
+    }
+    .at-bd-worst-label { font-size: 11.5px; }
+    .at-bd-worst-value { font-size: 13px; }
   }
 
   /* ---------- Forecast table (Phase O) — sits right after pricing ---------- */
