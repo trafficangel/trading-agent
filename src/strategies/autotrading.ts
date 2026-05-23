@@ -2101,12 +2101,13 @@ function styles(): string {
          making the outline read as «only top is gold». */
       box-shadow: 0 4px 16px rgba(0,0,0,0.30);
     }
-    /* Active card on mobile: thicker solid border, no soft outer glow.
-       Replaces the desktop multi-layer box-shadow which looked clipped. */
+    /* Active card on mobile: tier-accent ring drawn as INSET box-shadow
+       so it sits inside the card's visible bounds and can't be clipped
+       by parent overflow / scroll containers. Keeps the regular 1px
+       border layout intact (no width jump → no layout shift). */
     [data-carousel="focus"] .at-tier-card.rc-card-active {
-      border-width: 2px;
-      border-color: var(--tier-accent);
-      box-shadow: 0 6px 20px rgba(0,0,0,0.40);
+      box-shadow: inset 0 0 0 2px var(--tier-accent),
+                  0 6px 20px rgba(0,0,0,0.40);
     }
     .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
     /* Smaller deco + glow on mobile so they don't dominate the smaller card. */

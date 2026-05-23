@@ -1211,9 +1211,8 @@ function renderTierPicker(p: {
           box-shadow: 0 4px 16px rgba(0,0,0,0.30);
         }
         [data-carousel="focus"] .tp-card.rc-card-active {
-          border-width: 2px;
-          border-color: var(--tier-accent);
-          box-shadow: 0 6px 20px rgba(0,0,0,0.40);
+          box-shadow: inset 0 0 0 2px var(--tier-accent),
+                      0 6px 20px rgba(0,0,0,0.40);
         }
         .tp-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
         .tp-card-deco { font-size: 88px; top: 6px; right: 6px; }
