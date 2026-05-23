@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 import { getStrategyLiveStats } from './live-stats.js';
-import { pageShell, loadBacktestTrades, formatSinceDate } from './landing.js';
+import { pageShell, loadBacktestTrades, formatSinceDate, getLang } from './landing.js';
 import { enrichTrades } from './backtest-recompute.js';
 
 /**
@@ -1408,20 +1408,34 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
 export async function homeRoute(app: FastifyInstance): Promise<void> {
   const { getActivePositionsCached } = await import('../api/active-positions.js');
 
-  // Russian (default) home
-  app.get('/', async (_req, reply) => {
+  // `/` follows the rclang cookie set by /set-lang/:lang so the language
+  // toggle works from the home page. Vary: Cookie tells the CDN to keep
+  // separate cached variants per cookie value — otherwise an EN visitor
+  // could get an RU-cached page or vice versa.
+  app.get('/', async (req, reply) => {
+    const lang = getLang(req);
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
+    reply.header('Vary', 'Cookie');
     // Server-render with whatever's in the 8s cache. Client polls the
     // /api/active-positions endpoint every 10s to keep numbers fresh.
     const positions = await getActivePositionsCached().catch(() => []);
-    return renderHome('ru', positions);
+    return renderHome(lang, positions);
   });
 
-  // English variant
+  // /en — explicit alias for direct deep-links (sitemap, external SEO).
+  // Also flips the cookie so subsequent navigation stays in English.
   app.get('/en', async (_req, reply) => {
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
+    reply.header('Vary', 'Cookie');
+    reply.setCookie('rclang', 'en', {
+      path: '/',
+      httpOnly: false,
+      secure: true,
+      sameSite: 'lax',
+      maxAge: 365 * 24 * 60 * 60,
+    });
     const positions = await getActivePositionsCached().catch(() => []);
     return renderHome('en', positions);
   });
