@@ -287,7 +287,13 @@ async function reconcileUserPosition(p: DecisionRow): Promise<void> {
   // and reason via /v5/execution/list. Walk executions newer than
   // p.created_at, find a reduceOnly fill that closed our slot.
   let closePrice: number | null = null;
-  let closeReason: 'sl_hit' | 'manual' = 'sl_hit';
+  // Default to 'manual' (i.e. closed somehow OTHER than the safety SL).
+  // Only switch to 'sl_hit' when we have positive evidence: a Bust trade
+  // (liquidation), close price near the recorded SL, OR Bybit's
+  // closed-pnl exitType says StopLoss/Liquidation. Old default was
+  // 'sl_hit' which mis-labelled strategy-exit closures (e.g. profitable
+  // closes via Builtin Exit) as if the safety stop had fired.
+  let closeReason: 'sl_hit' | 'manual' = 'manual';
   let bybitCloseAvgPrice: number | null = null;
   const execRes = await fetchExecutions(creds, { symbol: p.symbol, startTime: p.created_at });
   if (execRes.ok) {
@@ -308,12 +314,22 @@ async function reconcileUserPosition(p: DecisionRow): Promise<void> {
       }
       bybitCloseAvgPrice = totalQty > 0 ? weighted / totalQty : null;
       closePrice = bybitCloseAvgPrice;
-      // BustTrade = liquidation. Otherwise distinguish SL by price
-      // proximity to our recorded sl (within 1% bucket): SL → sl_hit,
-      // anything else (TP-like, strategy-exit-by-bybit, manual) → manual.
-      if (hasBust) closeReason = 'sl_hit';
-      else if (p.sl && bybitCloseAvgPrice && Math.abs(bybitCloseAvgPrice - p.sl) / p.sl < 0.01) closeReason = 'sl_hit';
-      else closeReason = 'manual';
+      // BustTrade = liquidation. Otherwise mark sl_hit ONLY when the
+      // exit price is near the recorded SL AND on the LOSS side of
+      // entry — strategy_exit closes can land anywhere price-wise, so
+      // we need both a price-proximity match AND a directional sanity
+      // check (LONG SL is always below entry; SHORT SL above) to
+      // distinguish a real safety-stop trigger from a same-tick
+      // coincidence.
+      if (hasBust) {
+        closeReason = 'sl_hit';
+      } else if (p.sl && bybitCloseAvgPrice) {
+        const nearSl = Math.abs(bybitCloseAvgPrice - p.sl) / p.sl < 0.01;
+        const onLossSide = p.side === 'long'
+          ? bybitCloseAvgPrice <= p.entry  // LONG closed at or below entry
+          : bybitCloseAvgPrice >= p.entry; // SHORT closed at or above entry
+        closeReason = nearSl && onLossSide ? 'sl_hit' : 'manual';
+      }
     }
   }
   // Audit H7 — second-tier fallback: closed-PnL records. Bybit's
