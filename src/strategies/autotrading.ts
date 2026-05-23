@@ -167,9 +167,7 @@ function renderHero(lang: Lang): string {
         we never accept deposits, your money stays on the exchange the whole time.
       </p>
       <div class="at-hero-cta">
-        <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Sign up</a>
-        <span class="at-hero-cta-or">or</span>
-        <a href="#pricing" class="at-hero-link">see pricing ↓</a>
+        <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Start free</a>
       </div>
       <div class="at-hero-trial">
         ${ico('🎁')}<b>14 days of real trading on us</b> — no subscription, no card.
@@ -196,9 +194,7 @@ function renderHero(lang: Lang): string {
         мы не принимаем депозиты, ваши деньги всегда на бирже под вашим контролем.
       </p>
       <div class="at-hero-cta">
-        <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Регистрация</a>
-        <span class="at-hero-cta-or">или</span>
-        <a href="#pricing" class="at-hero-link">посмотреть тарифы ↓</a>
+        <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Начать бесплатно</a>
       </div>
       <div class="at-hero-trial">
         ${ico('🎁')}<b>14 дней реальной торговли бесплатно</b> — без подписки, без карты.
