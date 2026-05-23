@@ -2353,6 +2353,26 @@ export function pageShell(
     opacity: 1;
     filter: saturate(1);
   }
+  /* Mobile: focus-mode dimming + edge fade combined make the peeking
+     neighbour cards visually murky AND the dark gradient eats into
+     the active card text. On phones the swipe gesture already
+     communicates «scroll for more», so we drop both effects: neighbours
+     stay full-opacity, edge gradients are hidden. */
+  @media (max-width: 640px) {
+    [data-carousel="true"]::before,
+    [data-carousel="true"]::after,
+    [data-carousel="focus"]::before,
+    [data-carousel="focus"]::after { display: none; }
+    [data-carousel="focus"] .rc-carousel-track > * {
+      transform: scale(0.96);
+      opacity: 0.75;
+      filter: none;
+    }
+    [data-carousel="focus"] .rc-carousel-track > .rc-card-active {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
   .rc-carousel-arrow {
     position: absolute; top: 50%; transform: translateY(-50%);
     width: 42px; height: 42px;
