@@ -103,7 +103,12 @@ function checkAuth(req: FastifyRequest, reply: FastifyReply): boolean {
 
 function fmtDateTime(ts: number): string {
   const d = new Date(ts);
-  return `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 19)}`;
+  // Two-line: date on top, time below — keeps the column narrow without
+  // breaking the date mid-hyphen on mobile. Each line is `nowrap`.
+  return (
+    `<span class="dt-date">${d.toISOString().slice(0, 10)}</span>` +
+    `<span class="dt-time">${d.toISOString().slice(11, 19)}</span>`
+  );
 }
 
 function fmtAge(ts: number): string {
@@ -201,7 +206,6 @@ function renderDashboard(csrfToken: string): string {
         .map((r: RegistrationListRow) => {
           const phone = r.phone ?? '—';
           const name = r.display_name ?? '—';
-          const tg = r.tg_user_id ? String(r.tg_user_id) : '—';
           const sub = subs.get(r.id);
           const plan = sub?.plan ?? 'standard';
           const status = sub?.status ?? '—';
@@ -294,7 +298,6 @@ function renderDashboard(csrfToken: string): string {
               <td>${apiCell}</td>
               <td style="text-align:center">${stratCell}</td>
               <td class="mono">${escapeHtml(r.ip_first ?? '—')}</td>
-              <td class="mono">${tg}</td>
               <td>${fmtAge(r.last_seen_at)}</td>
               <td>${toggle}</td>
             </tr>`;
@@ -348,7 +351,6 @@ function renderDashboard(csrfToken: string): string {
               <th>API Bybit</th>
               <th>Страт.</th>
               <th>IP</th>
-              <th>TG user_id</th>
               <th>Последняя активность</th>
               <th>Действия</th>
             </tr>
@@ -391,8 +393,12 @@ function renderDashboard(csrfToken: string): string {
       .adm-btn-secondary:hover { border-color: #4ad991; color: #fff; }
       .adm-btn-danger { border-color: rgba(255, 99, 99, 0.5); color: #ff8b8b; }
       .adm-btn-danger:hover { background: rgba(255, 99, 99, 0.10); }
+      /* Date cell — date over time, both nowrap, monospace, tidy. */
+      td.dt { white-space: nowrap; line-height: 1.35; }
+      td.dt .dt-date { display: block; }
+      td.dt .dt-time { display: block; color: #8590a0; font-size: 11.5px; }
       .adm-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-      .adm-users-table { min-width: 1100px; }
+      .adm-users-table { min-width: 1000px; }
       .adm-scroll-hint { display: none; font-size: 12px; color: #8590a0; padding: 0 0 8px; }
       @media (max-width: 900px) {
         .adm-scroll-hint { display: block; }
