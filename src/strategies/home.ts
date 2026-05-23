@@ -687,56 +687,9 @@ function homeEffectsScript(): string {
     });
   }
 
-  // ---- 2. Scroll-reveal ----
-  var sections = document.querySelectorAll('.home-section, .hero');
-  if ('IntersectionObserver' in window && !reduce) {
-    sections.forEach(function(el) { el.classList.add('reveal'); });
-    var io = new IntersectionObserver(function(entries) {
-      entries.forEach(function(en) {
-        if (en.isIntersecting) {
-          en.target.classList.add('is-visible');
-          io.unobserve(en.target);
-        }
-      });
-    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
-    sections.forEach(function(el) { io.observe(el); });
-    // Hero is the first thing visible — reveal immediately rather
-    // than wait for the observer's intersection event after paint.
-    var h = document.querySelector('.hero');
-    if (h) h.classList.add('is-visible');
-  }
-
-  // ---- 3. Scroll-progress bar ----
-  var bar = document.querySelector('.scroll-progress');
-  if (bar) {
-    var ticking = false;
-    function update() {
-      var d = document.documentElement;
-      var max = d.scrollHeight - d.clientHeight;
-      var pct = max > 0 ? (d.scrollTop / max) * 100 : 0;
-      bar.style.width = pct + '%';
-      ticking = false;
-    }
-    document.addEventListener('scroll', function() {
-      if (!ticking) { requestAnimationFrame(update); ticking = true; }
-    }, { passive: true });
-    update();
-  }
-
-  // ---- 4. Magnetic primary CTA ----
-  if (!reduce && window.matchMedia('(hover: hover)').matches) {
-    document.querySelectorAll('.btn-primary').forEach(function(btn) {
-      btn.addEventListener('mousemove', function(e) {
-        var r = btn.getBoundingClientRect();
-        var x = (e.clientX - r.left - r.width / 2) * 0.18;
-        var y = (e.clientY - r.top - r.height / 2) * 0.18;
-        btn.style.transform = 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px)';
-      });
-      btn.addEventListener('mouseleave', function() {
-        btn.style.transform = '';
-      });
-    });
-  }
+  // (2-4) Scroll-reveal, scroll-progress bar, magnetic CTA — moved to
+  // pageShell (Phase O) so they run sitewide. Only spotlight + live
+  // polling remain home-specific.
 
   // ---- 5. Live active-positions polling ----
   // Fetches /api/active-positions every 10s and patches the existing
@@ -1399,7 +1352,6 @@ function renderHome(
   // Top-right nav is now handled by site-header in pageShell.
 
   const body = `
-    <div class="scroll-progress" aria-hidden="true"></div>
     ${heroHtml}
     ${livePositionsHtml}
     ${flowDiagramHtml}

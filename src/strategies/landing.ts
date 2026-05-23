@@ -2549,6 +2549,83 @@ export function pageShell(
 </script>
 `;
 
+  // Phase O — «come-alive» effects taken from the home page and made
+  // sitewide. Three independent pieces, all bail out on
+  // prefers-reduced-motion or when the browser lacks IntersectionObserver:
+  //   1. Scroll-progress bar — thin gradient line growing left→right at
+  //      the top of every page as the user scrolls.
+  //   2. Scroll-reveal — sections fade-up the moment they enter the
+  //      viewport. Selector is broadened so .home-section, .at-section,
+  //      .section, and anything with [data-reveal] participate.
+  //   3. Magnetic CTA — primary buttons subtly translate toward the
+  //      cursor on hover (desktop only).
+  // CSS for .reveal, .scroll-progress, .btn-primary already lives in
+  // pageShell so nothing extra is needed there.
+  const effectsBlock = `
+<div class="scroll-progress" aria-hidden="true"></div>
+<script>
+(function() {
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // 1. Scroll-reveal — fade-up sections as they enter the viewport.
+  var revealSel = '.home-section, .at-section, .section, [data-reveal]';
+  var sections = document.querySelectorAll(revealSel);
+  if ('IntersectionObserver' in window && !reduce && sections.length > 0) {
+    sections.forEach(function(el) { el.classList.add('reveal'); });
+    var io = new IntersectionObserver(function(entries) {
+      entries.forEach(function(en) {
+        if (en.isIntersecting) {
+          en.target.classList.add('is-visible');
+          io.unobserve(en.target);
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+    sections.forEach(function(el) { io.observe(el); });
+    // Anything already in view on first paint (hero, top sections)
+    // reveals immediately so there's no first-frame blink.
+    sections.forEach(function(el) {
+      var r = el.getBoundingClientRect();
+      if (r.top < window.innerHeight && r.bottom > 0) {
+        el.classList.add('is-visible');
+      }
+    });
+  }
+
+  // 2. Scroll-progress bar.
+  var bar = document.querySelector('.scroll-progress');
+  if (bar) {
+    var ticking = false;
+    function update() {
+      var d = document.documentElement;
+      var max = d.scrollHeight - d.clientHeight;
+      var pct = max > 0 ? (d.scrollTop / max) * 100 : 0;
+      bar.style.width = pct + '%';
+      ticking = false;
+    }
+    document.addEventListener('scroll', function() {
+      if (!ticking) { requestAnimationFrame(update); ticking = true; }
+    }, { passive: true });
+    update();
+  }
+
+  // 3. Magnetic CTA — buttons softly follow the cursor on hover.
+  if (!reduce && window.matchMedia('(hover: hover)').matches) {
+    document.querySelectorAll('.btn-primary, .at-btn-primary, .at-btn-large').forEach(function(btn) {
+      btn.addEventListener('mousemove', function(e) {
+        var r = btn.getBoundingClientRect();
+        var x = (e.clientX - r.left - r.width / 2) * 0.16;
+        var y = (e.clientY - r.top - r.height / 2) * 0.16;
+        btn.style.transform = 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px)';
+      });
+      btn.addEventListener('mouseleave', function() {
+        btn.style.transform = '';
+      });
+    });
+  }
+})();
+</script>
+`;
+
   // Phase L SEO — derive defaults for description, canonical, OG image.
   const defaultDescriptionRu = 'Robot Claude — автоматический криптотрейдинг на вашем Bybit-аккаунте по проверенным стратегиям. Прозрачная статистика, ключ без права на вывод, тарифы от $12/мес.';
   const defaultDescriptionEn = 'Robot Claude — automated crypto trading on your Bybit account using verified strategies. Open stats, withdraw-disabled API key, tiers from $12/mo.';
@@ -2611,6 +2688,7 @@ ${metrikaScript}
 <body>
 ${siteHeader}
 ${carouselBlock}
+${effectsBlock}
 <div class="container">
 ${body}
 <div class="footer">
