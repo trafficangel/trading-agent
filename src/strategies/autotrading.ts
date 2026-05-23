@@ -75,9 +75,10 @@ function renderPage(
     ${styles()}
     <main class="at-main">
       ${renderHero(lang)}
+      ${renderPricing(lang)}
+      ${renderForecastTable(lang)}
       ${renderHowItWorks(lang)}
       ${renderDepositBreakdown(lang)}
-      ${renderPricing(lang)}
       ${renderBybitBonus(lang)}
       ${renderSafety(lang)}
       ${renderLeverageEducation(lang)}
@@ -199,6 +200,119 @@ function renderHero(lang: Lang): string {
         <span class="at-pill">${ico('💎')}14 дней теста + ${BYBIT_REF_BONUS_DAYS} дней бонуса по реф-ссылке</span>
         <span class="at-pill">${ico('⏹')}Отмена в один клик</span>
       </div>
+    </section>
+  `;
+}
+
+/**
+ * Forecast table — Phase O. Sits right after pricing on /autotrading so
+ * visitors who just looked at the prices immediately see the expected
+ * monthly profit (in USD AND % of deposit) for each tier. Numbers come
+ * from STRATEGY_CONFIGS[*].backtest scaled to the tier's notional —
+ * same source as /admin/tiers, so if a strategy's backtest is updated
+ * or the tier's strategy list changes, this section auto-recomputes.
+ */
+function renderForecastTable(lang: Lang): string {
+  const tiers = listTiers().filter((tier) => tier.id !== 'prof');
+  const t = lang === 'en'
+    ? {
+        title: 'Forecast monthly returns by plan',
+        sub:
+          'Numbers derived from each strategy\'s backtest, scaled to the trade size you would get on that plan. ' +
+          'These are math expectations on historical data, not guarantees — live results will fluctuate around them.',
+        colTier: 'Plan',
+        colDepo: 'Deposit',
+        colSub: 'Subscription',
+        colProfit: 'Forecast profit',
+        colPct: '% of deposit',
+        colTrades: 'Trades/mo',
+        perMo: '/mo',
+        perYr: '/yr (× 12)',
+        avgMo: 'avg',
+        disclaimer: 'Past results do not guarantee future returns. Plan deposit is the minimum to qualify — actual profit scales with your deposit.',
+      }
+    : {
+        title: 'Прогнозируемая доходность по тарифам',
+        sub:
+          'Цифры рассчитаны из проверки каждой стратегии на исторических данных и масштабированы на размер сделки вашего тарифа. ' +
+          'Это математическое ожидание, а не гарантия — реальные результаты будут колебаться вокруг этих значений.',
+        colTier: 'Тариф',
+        colDepo: 'Депозит',
+        colSub: 'Подписка',
+        colProfit: 'Прогноз прибыли',
+        colPct: '% депозита',
+        colTrades: 'Сделок/мес',
+        perMo: '/мес',
+        perYr: '/год (× 12)',
+        avgMo: 'средн.',
+        disclaimer: 'Прошлые результаты не гарантируют будущих. Депозит тарифа — минимальный для активации; реальная прибыль масштабируется с вашим депозитом.',
+      };
+
+  const rows = tiers.map((tier) => {
+    // Per-tier monthly aggregates from backtests scaled to tier notional.
+    let tradesPerMonth = 0;
+    let monthlyGrossUsd = 0;
+    for (const sid of tier.strategyIds) {
+      const cfg = STRATEGY_CONFIGS[sid];
+      const sz = computeTierTradeSize(tier.id, sid);
+      const bt = cfg?.backtest;
+      if (!cfg || !sz || !bt || bt.periodDays <= 0 || bt.notionalUsd <= 0) continue;
+      const scale = sz.notionalUsd / bt.notionalUsd;
+      const monthlyFactor = 30 / bt.periodDays;
+      tradesPerMonth += bt.totalTrades * monthlyFactor;
+      monthlyGrossUsd += bt.netPnlUsd * scale * monthlyFactor;
+    }
+    const monthlyUsd = Math.round(monthlyGrossUsd);
+    const annualUsd = monthlyUsd * 12;
+    const pctMonthly = tier.minBalanceUsdt > 0
+      ? (monthlyUsd / tier.minBalanceUsdt) * 100
+      : 0;
+    const pctAnnual = pctMonthly * 12;
+    const trades = Math.round(tradesPerMonth);
+    const isPopular = tier.id === 'standard';
+    return `
+      <tr class="${isPopular ? 'at-fc-popular' : ''}">
+        <td class="at-fc-tier-cell">
+          <div class="at-fc-tier-name">${tierEmoji(tier.id)} ${escapeHtml(tier.name)}</div>
+          ${isPopular ? `<div class="at-fc-tier-pop">⭐ ${lang === 'en' ? 'most popular' : 'популярный'}</div>` : ''}
+        </td>
+        <td class="at-fc-num">$${tier.minBalanceUsdt.toLocaleString()}+</td>
+        <td class="at-fc-num">$${tier.monthlyPriceUsd}${t.perMo}</td>
+        <td class="at-fc-num at-fc-profit">
+          <div class="at-fc-profit-mo"><b>+$${monthlyUsd}</b>${t.perMo}</div>
+          <div class="at-fc-profit-yr">≈ +$${annualUsd}${t.perYr}</div>
+        </td>
+        <td class="at-fc-num at-fc-pct">
+          <div class="at-fc-pct-mo"><b>+${pctMonthly.toFixed(1)}%</b>${t.perMo}</div>
+          <div class="at-fc-pct-yr">≈ +${pctAnnual.toFixed(0)}%${t.perYr}</div>
+        </td>
+        <td class="at-fc-num at-fc-trades">
+          <div><b>${trades}</b></div>
+          <div class="at-fc-trades-sub">${t.avgMo}</div>
+        </td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <section class="at-section at-forecast" id="forecast">
+      <h2 class="at-section-title">${ico('📊')}${t.title}</h2>
+      <p class="at-section-sub">${t.sub}</p>
+      <div class="at-fc-tbl-wrap">
+        <table class="at-fc-tbl">
+          <thead>
+            <tr>
+              <th>${t.colTier}</th>
+              <th class="at-fc-num-h">${t.colDepo}</th>
+              <th class="at-fc-num-h">${t.colSub}</th>
+              <th class="at-fc-num-h">${t.colProfit}</th>
+              <th class="at-fc-num-h">${t.colPct}</th>
+              <th class="at-fc-num-h">${t.colTrades}</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="at-fc-note">${t.disclaimer}</p>
     </section>
   `;
 }
@@ -2003,6 +2117,79 @@ function styles(): string {
     .at-bd-steps { grid-template-columns: 1fr; }
     .at-bd-tier-name { font-size: 16px; }
     .at-bd-tier-stats { gap: 14px; }
+  }
+
+  /* ---------- Forecast table (Phase O) — sits right after pricing ---------- */
+  .at-forecast {}
+  .at-fc-tbl-wrap {
+    overflow-x: auto;
+    margin: 22px 0 14px;
+    border: 1px solid #1f2630;
+    border-radius: 14px;
+    background: #11161d;
+  }
+  .at-fc-tbl {
+    width: 100%; border-collapse: collapse;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    color: #e8edf2;
+    min-width: 720px;
+  }
+  .at-fc-tbl thead { background: #0e131a; }
+  .at-fc-tbl th {
+    text-align: left; padding: 14px 16px;
+    font-size: 11px; color: #6b7480;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    font-weight: 600;
+    border-bottom: 1px solid #1f2630;
+  }
+  .at-fc-tbl td {
+    padding: 16px;
+    border-bottom: 1px solid #1a1f27;
+    vertical-align: middle;
+  }
+  .at-fc-tbl tr:last-child td { border-bottom: none; }
+  .at-fc-tbl tr.at-fc-popular {
+    background: rgba(74, 217, 145, 0.04);
+  }
+  .at-fc-tbl tr.at-fc-popular td {
+    border-bottom-color: rgba(74, 217, 145, 0.18);
+  }
+  .at-fc-num, .at-fc-num-h {
+    text-align: right;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .at-fc-tier-cell { white-space: nowrap; }
+  .at-fc-tier-name {
+    font-size: 16px; font-weight: 700; color: #fff;
+  }
+  .at-fc-tier-pop {
+    margin-top: 4px; font-size: 10.5px;
+    color: #4ad991; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .at-fc-profit-mo, .at-fc-pct-mo {
+    font-size: 17px; line-height: 1.2;
+    color: #4ad991;
+  }
+  .at-fc-profit-mo b, .at-fc-pct-mo b { font-weight: 700; }
+  .at-fc-profit-yr, .at-fc-pct-yr {
+    font-size: 11px; color: #8590a0;
+    margin-top: 3px;
+  }
+  .at-fc-trades { font-size: 15px; }
+  .at-fc-trades-sub {
+    font-size: 10.5px; color: #6b7480;
+    margin-top: 2px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    text-transform: lowercase;
+  }
+  .at-fc-note {
+    font-size: 12px; color: #8590a0;
+    text-align: center; max-width: 720px;
+    margin: 14px auto 0; line-height: 1.55;
+  }
+  @media (max-width: 720px) {
+    .at-fc-profit-mo, .at-fc-pct-mo { font-size: 15px; }
   }
 
   /* Carousel arrows + edge fade — defined globally in pageShell so every
