@@ -654,6 +654,14 @@ type TierLiveStats = {
   losses: number;
   winRatePct: number | null;   // null when trades=0
   grossUsd: number;            // sum of per-trade pnl_pct/100 × tier-notional
+  /** grossUsd as % of tier.minBalanceUsdt — what a user with the
+   *  minimum qualifying deposit would have earned over the 30-day
+   *  window. Conservative: real users with bigger balances see a
+   *  smaller percentage on the same dollar PnL. */
+  pctOfMinDepoMonthly: number;
+  /** Naive annualization of the monthly figure (× 12). Useful as a
+   *  rule-of-thumb "X%/year" headline next to MRR. */
+  pctOfMinDepoAnnual: number;
 };
 
 function computeTierLiveStats(windowMs: number): TierLiveStats[] {
@@ -675,13 +683,18 @@ function computeTierLiveStats(windowMs: number): TierLiveStats[] {
       else if (row.pnl_pct < 0) losses++;
       grossUsd += (row.pnl_pct / 100) * size.notionalUsd;
     }
+    const grossRounded = Math.round(grossUsd * 100) / 100;
+    const minDepo = tier.minBalanceUsdt;
+    const monthlyPct = minDepo > 0 ? (grossRounded / minDepo) * 100 : 0;
     return {
       tierId,
       trades,
       wins,
       losses,
       winRatePct: trades === 0 ? null : (wins / trades) * 100,
-      grossUsd: Math.round(grossUsd * 100) / 100,
+      grossUsd: grossRounded,
+      pctOfMinDepoMonthly: Math.round(monthlyPct * 100) / 100,
+      pctOfMinDepoAnnual: Math.round(monthlyPct * 12 * 10) / 10,
     };
   });
 }
@@ -746,6 +759,7 @@ function renderTiersDashboard(): string {
             <th>Losses</th>
             <th>Win-rate</th>
             <th>Gross PnL (USD)</th>
+            <th>% капитала <span class="adm-th-sub">(на min-депо)</span></th>
             <th>vs expected</th>
           </tr>
         </thead>
@@ -758,6 +772,12 @@ function renderTiersDashboard(): string {
             const grossSign = s.grossUsd > 0 ? '+' : s.grossUsd < 0 ? '−' : '';
             const grossDisplay = `${grossSign}$${Math.abs(s.grossUsd).toFixed(2)}`;
             const rowAccent = s.grossUsd > 0 ? 'adm-row-pos' : s.grossUsd < 0 ? 'adm-row-neg' : '';
+            const pctClass = s.pctOfMinDepoMonthly > 0 ? 'adm-pnl-pos'
+                            : s.pctOfMinDepoMonthly < 0 ? 'adm-pnl-neg' : 'adm-pnl-zero';
+            const pctSign = s.pctOfMinDepoMonthly > 0 ? '+'
+                          : s.pctOfMinDepoMonthly < 0 ? '−' : '';
+            const monthlyPctStr = `${pctSign}${Math.abs(s.pctOfMinDepoMonthly).toFixed(2)}%`;
+            const annualPctStr = `${pctSign}${Math.abs(s.pctOfMinDepoAnnual).toFixed(1)}%`;
             return `
               <tr class="${rowAccent}">
                 <td><b>${escapeHtml(tier.name)}</b> <span class="adm-tier-id">(${s.tierId})</span></td>
@@ -767,6 +787,10 @@ function renderTiersDashboard(): string {
                 <td class="adm-num adm-cell-losses">${s.losses}</td>
                 <td class="adm-num ${wrClass(s.winRatePct)}">${wrLabel}</td>
                 <td class="adm-num ${grossClass}">${grossDisplay}</td>
+                <td class="adm-num adm-pct-cell">
+                  <div class="adm-pct-monthly ${pctClass}" title="Депозит ${tier.minBalanceUsdt > 0 ? '$' + tier.minBalanceUsdt : '—'} (минимум для тарифа)">${monthlyPctStr} <span class="adm-pct-suf">/ мес</span></div>
+                  <div class="adm-pct-annual" title="Грубая экстраполяция × 12">≈ ${annualPctStr} <span class="adm-pct-suf">/ год</span></div>
+                </td>
                 <td>${expectedBadge(s.grossUsd, expected)}</td>
               </tr>
             `;
@@ -777,8 +801,14 @@ function renderTiersDashboard(): string {
         Симуляция: для каждой закрытой shadow-сделки (operator-уровень, <code>user_id IS NULL</code>)
         за последние 30 дней PnL пересчитан в USD на notional соответствующего тарифа.
         Это <b>не реальный</b> PnL юзеров (у них могут быть свои overrides), а оценка
-        «что бы тариф заработал на актуальной истории сигналов». Бейдж в колонке
-        <i>vs expected</i>: <b>▲ ahead</b> — выше верхней планки диапазона из
+        «что бы тариф заработал на актуальной истории сигналов».
+        <br><br>
+        <b>% капитала</b> рассчитан от <i>минимального</i> депозита тарифа (Starter $300,
+        Standard $800, Plus $2 500, Pro $6 000, VIP $15 000, Prof $300). Юзер с большим
+        балансом увидит меньший процент при той же долларовой PnL. Годовой показатель —
+        грубая экстраполяция «× 12», без compounding и без учёта изменения волатильности.
+        <br><br>
+        Бейдж в колонке <i>vs expected</i>: <b>▲ ahead</b> — выше верхней планки диапазона из
         <code>tier-config.ts</code>, <b>● on track</b> — в пределах ≥80% от нижней
         границы, <b>▼ lagging</b> — недотягивает.
       </p>
@@ -944,6 +974,24 @@ function renderTiersDashboard(): string {
       .adm-range {
         margin-left: 8px; font-size: 11px; color: #98a2b3;
         font-family: ui-monospace, Menlo, monospace;
+      }
+
+      /* % капитала cell — two-line layout: monthly headline + annual sub. */
+      .adm-tier-table td.adm-pct-cell {
+        line-height: 1.2;
+      }
+      .adm-pct-monthly { font-size: 13px; font-weight: 700; }
+      .adm-pct-annual {
+        font-size: 11px; color: #98a2b3; margin-top: 3px;
+        font-family: ui-monospace, Menlo, monospace;
+      }
+      .adm-pct-suf {
+        font-size: 10px; color: #8590a0; font-weight: 500;
+        letter-spacing: 0.02em;
+      }
+      .adm-th-sub {
+        text-transform: none; font-weight: 500; font-size: 10px;
+        color: #6b7480; letter-spacing: 0;
       }
 
       .adm-tier-note { font-size: 12px; color: #98a2b3; line-height: 1.55; margin: 12px 2px 0; }
