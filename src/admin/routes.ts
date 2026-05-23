@@ -813,15 +813,19 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
         reply.code(303).header('location', '/admin').send();
         return;
       }
+      // targetUserId MUST be null here — admin_audit_log.target_user_id
+      // has a FK to registrations(id) and the row we just deleted is
+      // gone. We keep the deleted user_id inside the note so support can
+      // still grep by id; before/after fields are populated as usual.
       recordAdminAction({
         adminEmail,
-        targetUserId: userId,
+        targetUserId: null,
         action: 'delete_user',
         before: beforeSub
           ? { status: beforeSub.status, plan: beforeSub.plan, tier_id: beforeSub.tier_id, access_until: beforeSub.access_until }
           : null,
         after: null,
-        note: `phone=${result.phone} positions_closed=${result.positionsClosed?.succeeded ?? 0}/${result.positionsClosed?.attempted ?? 0}` +
+        note: `deleted user_id=${userId} phone=${result.phone} positions_closed=${result.positionsClosed?.succeeded ?? 0}/${result.positionsClosed?.attempted ?? 0}` +
               (result.positionsCloseError ? ` close_error=${result.positionsCloseError}` : '') +
               ` rows=${JSON.stringify(result.summary)}`,
         ip: req.ip,
