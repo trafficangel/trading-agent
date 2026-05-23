@@ -1016,23 +1016,82 @@ const STYLE = `
     font-size: 12px; color: var(--text-faint);
   }
 
-  /* ---------- Strategy row cards ---------- */
-  .strat-row-list {
-    display: flex; flex-direction: column; gap: 10px;
+  /* ---------- Strategy row cards — horizontal focus carousel ----------
+     Same pattern as the /autotrading pricing slider. Each timeframe
+     group is a track of cards, snap-centred, with a focused (full-
+     opacity) middle card and dimmed peeking neighbours. */
+  .strat-row-carousel-wrap {
+    position: relative; margin: 0 -4px 4px;
   }
+  .strat-row-carousel {
+    display: flex; gap: 16px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    /* Side-padding = (viewport_half − card_half) so first/last cards
+       can snap to centre. Card 360px → padding = 50% - 180px on wide
+       viewports, clamped at 20px minimum. */
+    padding: 14px max(20px, calc(50% - 190px)) 16px;
+    scrollbar-color: #2a323d transparent;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
+    overscroll-behavior-x: contain;
+  }
+  .strat-row-carousel::-webkit-scrollbar { height: 8px; }
+  .strat-row-carousel::-webkit-scrollbar-track { background: transparent; }
+  .strat-row-carousel::-webkit-scrollbar-thumb { background: #2a323d; border-radius: 4px; }
+  /* Single-strategy timeframe groups skip the carousel chrome and just
+     render the card centred at its desktop width. */
+  .strat-row-single {
+    display: flex; justify-content: center; padding: 8px 4px 4px;
+  }
+  .strat-row-single .strat-row { max-width: 600px; width: 100%; }
+
   .strat-row {
-    display: block; text-decoration: none; color: inherit;
+    display: flex; flex-direction: column; gap: 4px;
+    text-decoration: none; color: inherit; position: relative;
     background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 14px 18px;
-    transition: background 120ms, border-color 120ms;
+    border-radius: 12px; padding: 16px 18px 14px;
+    flex: 0 0 360px; min-width: 0;
+    scroll-snap-align: center;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.20);
+    transition: border-color 180ms;
   }
   .strat-row:hover {
     background: var(--bg-card-hover); border-color: var(--text-faint);
     text-decoration: none;
   }
+  /* Position-in-group badge — small chip in the upper-right corner with
+     the strategy's rank inside this timeframe (1 / 5, 2 / 5, …). */
+  .strat-row-num {
+    position: absolute; top: 10px; right: 14px;
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 11px;
+    font-weight: 700; color: var(--text-dim);
+    padding: 2px 8px; border-radius: 999px;
+    background: var(--bg); border: 1px solid var(--border);
+    letter-spacing: 0.04em;
+  }
+  .strat-row-num-total { color: var(--text-faint); font-weight: 500; }
+  /* Active card in focus carousel — full opacity (others dim per the
+     global focus-mode rule), tier-colour-ish accent border. */
+  [data-carousel="focus"] .strat-row.rc-card-active {
+    border-color: rgba(74, 217, 145, 0.45);
+    box-shadow: 0 10px 28px rgba(0,0,0,0.35),
+                0 0 0 1px rgba(74, 217, 145, 0.20);
+  }
+  @media (max-width: 640px) {
+    .strat-row {
+      flex: 0 0 80vw; padding: 14px 16px 12px;
+    }
+    .strat-row-carousel { padding-left: 10vw; padding-right: 10vw; gap: 12px; }
+    .strat-row-num { top: 8px; right: 10px; font-size: 10.5px; padding: 2px 7px; }
+  }
   .strat-row-head {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 6px; gap: 12px; flex-wrap: wrap;
+    /* Reserve room on the right for the absolute-positioned number
+       badge so the status pill doesn't run into it. */
+    padding-right: 56px;
   }
   .strat-row-id { display: flex; align-items: baseline; gap: 8px; }
   .strat-code-mini {
@@ -3229,7 +3288,13 @@ function renderStrategyIndex(
   const sortedTfs = [...groups.keys()].sort((a, b) => a - b);
 
   // ---------- Single strategy row renderer ----------
-  const renderRow = (e: typeof enriched[number]): string => {
+  // posInGroup / groupSize are 1-indexed for human-readable "№3 из 5"
+  // numbering inside the timeframe carousel.
+  const renderRow = (
+    e: typeof enriched[number],
+    posInGroup: number,
+    groupSize: number,
+  ): string => {
     const { s, live } = e;
     // Prefer recomputed-from-trades-log stats (same source as detail page)
     // over the static config snapshot. Falls back to snapshot if no log.
@@ -3323,6 +3388,7 @@ function renderStrategyIndex(
 
     return `
       <a href="/strategies/${escapeHtml(s.code)}" class="strat-row">
+        <span class="strat-row-num" title="Позиция в таймфрейме">№${posInGroup}<span class="strat-row-num-total"> / ${groupSize}</span></span>
         <div class="strat-row-head">
           <div class="strat-row-id">
             <span class="strat-code-mini">STRAT-${escapeHtml(s.code)}</span>
@@ -3338,7 +3404,12 @@ function renderStrategyIndex(
       </a>`;
   };
 
-  // ---------- Group sections ----------
+  // ---------- Group sections — each timeframe becomes a focus carousel ----------
+  // Same pattern as the /autotrading pricing carousel: one active card
+  // centered, neighbours dimmed via opacity. Arrow buttons on desktop,
+  // swipe on mobile. Each card carries its position within the group
+  // («№3 / 5») so the user can see how many strategies they're scrolling
+  // through.
   const groupsHtml = sortedTfs
     .map((tf) => {
       const rows = groups.get(tf)!;
@@ -3349,14 +3420,34 @@ function renderStrategyIndex(
         }
         return b.s.launchedAt - a.s.launchedAt;
       });
+      const groupSize = rows.length;
+      const cardsHtml = rows
+        .map((row, i) => renderRow(row, i + 1, groupSize))
+        .join('\n');
+      // Single-card groups skip the carousel chrome (arrows/snap make
+      // no sense with 1 item) and render as a plain centred card.
+      if (groupSize === 1) {
+        return `
+          <div class="tf-group">
+            <div class="tf-group-header">
+              <span class="tf-group-label">${tfLabel(String(tf))}</span>
+              <span class="tf-group-count">${groupSize} ${pluralRu(groupSize, 'стратегия', 'стратегии', 'стратегий')}</span>
+            </div>
+            <div class="strat-row-single">${cardsHtml}</div>
+          </div>`;
+      }
       return `
         <div class="tf-group">
           <div class="tf-group-header">
             <span class="tf-group-label">${tfLabel(String(tf))}</span>
-            <span class="tf-group-count">${rows.length} ${pluralRu(rows.length, 'стратегия', 'стратегии', 'стратегий')}</span>
+            <span class="tf-group-count">${groupSize} ${pluralRu(groupSize, 'стратегия', 'стратегии', 'стратегий')}</span>
           </div>
-          <div class="strat-row-list">
-            ${rows.map(renderRow).join('\n')}
+          <div class="strat-row-carousel-wrap" data-carousel="focus">
+            <button class="rc-carousel-arrow rc-carousel-arrow-prev" data-rc-prev aria-label="prev">‹</button>
+            <div class="strat-row-carousel rc-carousel-track" role="region" aria-label="Стратегии ${tfLabel(String(tf))}">
+              ${cardsHtml}
+            </div>
+            <button class="rc-carousel-arrow rc-carousel-arrow-next" data-rc-next aria-label="next">›</button>
           </div>
         </div>`;
     })
