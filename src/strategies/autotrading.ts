@@ -2114,11 +2114,14 @@ function styles(): string {
     }
     .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
     /* Smaller deco + glow on mobile so they don't dominate the smaller card. */
-    /* Pull the deco emoji further from the right edge on mobile so its
-       glyph bounding box can't visually interfere with the right
-       border (especially with iOS Safari's emoji rendering, which
-       sometimes adds invisible padding to the right of the glyph). */
-    .at-tier-card-deco { font-size: 80px; top: 10px; right: 16px; }
+    /* Hide the deco emoji on mobile entirely. Five iterations of trying
+       to make the right border show up consistently while the emoji
+       was rendered in the upper-right corner all failed — iOS Safari's
+       compositing of color-emoji + absolute positioning + border-radius
+       + the carousel's overflow chain seems to drop the right border.
+       The emoji adds visual personality but isn't worth losing the
+       active-tier indicator over. Stays on desktop. */
+    .at-tier-card-deco { display: none; }
     .at-tier-card-glow { height: 80px; }
     .at-tier-badge { font-size: 9.5px; padding: 3px 9px; margin-bottom: 12px; }
     .at-tier-name { font-size: 17px; }
