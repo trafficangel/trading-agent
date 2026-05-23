@@ -1832,6 +1832,10 @@ const STYLE = `
   .live-pos-num [data-pos-num-cur] { color: var(--accent); }
   .live-pos-num .live-pos-num-sep { color: rgba(74, 217, 145, 0.55); margin: 0 1px; }
   .live-pos-num [data-pos-num-total] { color: var(--text-dim); font-weight: 500; }
+  /* Carousel loop-clones — used only for visual continuity (last card
+     peeking before first, first peeking after last). Hide the number
+     pill so they don't pretend to be additional positions. */
+  .rc-clone .live-pos-num { display: none; }
   /* Two-row layout: top row = trade ID + side pill (no wrapping issues),
    * bottom row = dim meta (STRAT-XXX · SYMBOL). Was a single squeezed flex
    * row that wrapped the «ШОРТ» label badly when card width tightened. */
