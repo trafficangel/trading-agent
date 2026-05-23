@@ -15,7 +15,9 @@ export type AdminAction =
   | 'force_close_position'
   | 'cancel_subscription'
   | 'delete_user'
-  | 'assign_tier';
+  | 'assign_tier'
+  | 'emergency_stop'
+  | 'resume_all_trading';
 
 const insertStmt = db.prepare(`
   INSERT INTO admin_audit_log

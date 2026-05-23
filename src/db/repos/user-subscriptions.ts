@@ -278,6 +278,46 @@ export function setTradingPaused(userId: number, paused: boolean): void {
   setPausedStmt.run(paused ? Date.now() : null, Date.now(), userId);
 }
 
+/** List user_ids with trading currently ENABLED — used by the admin
+ *  emergency-stop button to figure out who to pause. */
+const listTradingActiveUserIdsStmt = db.prepare<[number], { user_id: number }>(`
+  SELECT user_id FROM user_subscriptions
+   WHERE status IN ('trial', 'active')
+     AND access_until > ?
+     AND trading_paused_at IS NULL
+`);
+export function listTradingActiveUserIds(now = Date.now()): number[] {
+  return listTradingActiveUserIdsStmt.all(now).map((r) => r.user_id);
+}
+
+/** Bulk-pause every currently-trading user in one transaction. Returns
+ *  the number of rows touched. Used by /admin/emergency-stop. */
+const bulkPauseStmt = db.prepare(`
+  UPDATE user_subscriptions
+     SET trading_paused_at = ?, updated_at = ?
+   WHERE status IN ('trial', 'active')
+     AND access_until > ?
+     AND trading_paused_at IS NULL
+`);
+export function bulkPauseAllTrading(): number {
+  const now = Date.now();
+  const res = bulkPauseStmt.run(now, now, now);
+  return res.changes;
+}
+
+/** Bulk-resume every paused user. WARNING: this clears trading_paused_at
+ *  for users who paused themselves too — operator should call this only
+ *  when undoing an emergency stop, not as a routine action. */
+const bulkResumeStmt = db.prepare(`
+  UPDATE user_subscriptions
+     SET trading_paused_at = NULL, updated_at = ?
+   WHERE trading_paused_at IS NOT NULL
+`);
+export function bulkResumeAllTrading(): number {
+  const res = bulkResumeStmt.run(Date.now());
+  return res.changes;
+}
+
 const setPlanStmt = db.prepare(`
   UPDATE user_subscriptions
      SET plan = ?, status = ?, access_until = ?,

@@ -33,8 +33,13 @@ import {
   setPlan,
   ensureTrialFor,
   adminExtend,
+  listTradingActiveUserIds,
+  bulkPauseAllTrading,
+  bulkResumeAllTrading,
   type SubscriptionRow,
 } from '../db/repos/user-subscriptions.js';
+import { closeAllUserPositions } from '../strategies/user-fanout.js';
+import { sendMessage } from '../telegram/bot.js';
 import { recordAdminAction } from '../db/repos/admin-audit.js';
 import { adminCsrfToken, requireAdminCsrf } from '../auth/csrf.js';
 import { db } from '../db/client.js';
@@ -193,7 +198,7 @@ function planBadge(plan: 'standard' | 'vip', status: string): string {
   return `<span class="plan-badge plan-bad">⛔ Expired</span>`;
 }
 
-function renderDashboard(csrfToken: string): string {
+function renderDashboard(csrfToken: string, query: Record<string, string | undefined> = {}): string {
   const stats = getRegistrationStats();
   const rows = listRegistrations(500);
   const subs = new Map<number, SubscriptionRow>();
@@ -324,12 +329,76 @@ function renderDashboard(csrfToken: string): string {
         })
         .join('');
 
+  // Emergency-stop result banner — shown after a successful POST to
+  // /admin/emergency-stop or /admin/resume-all-trading.
+  const emergencyBanner = (() => {
+    const q = query;
+    if (q.emergency === 'stopped') {
+      return `
+        <div class="adm-emergency-banner adm-emergency-stopped">
+          🚨 <b>EMERGENCY STOP применён.</b>
+          Поставлено на паузу: <b>${escapeHtml(q.paused ?? '0')}</b>.
+          Позиций закрыто: <b>${escapeHtml(q.closed ?? '0')}</b>${q.failed && q.failed !== '0' ? `, не удалось закрыть: <b>${escapeHtml(q.failed)}</b>` : ''}.
+        </div>
+      `;
+    }
+    if (q.emergency === 'resumed') {
+      return `
+        <div class="adm-emergency-banner adm-emergency-resumed">
+          ▶️ <b>Торговля возобновлена.</b>
+          Снято с паузы пользователей: <b>${escapeHtml(q.count ?? '0')}</b>.
+        </div>
+      `;
+    }
+    return '';
+  })();
+
+  // Big red panic panel + recover panel. Visible at the very top so
+  // the operator can hit it without scrolling. Triple confirm + typed
+  // phrase before either fires — no accidental clicks.
+  const adminEmailForBtn = process.env.ADMIN_EMAIL ?? 'admin';
+  const csrfFieldTop = `<input type="hidden" name="_csrf" value="${adminCsrfToken(adminEmailForBtn)}">`;
+  const emergencyPanel = `
+    <div class="adm-emergency-panel">
+      <div class="adm-emergency-headline">
+        <span class="adm-emergency-icon">🚨</span>
+        <div>
+          <div class="adm-emergency-title">Экстренная остановка</div>
+          <div class="adm-emergency-sub">
+            Поставит на паузу всех активных юзеров и попытается закрыть
+            все открытые позиции на их Bybit-аккаунтах. Используется при
+            ЧП — баге кода, дикой волатильности, проблемах с Bybit.
+          </div>
+        </div>
+      </div>
+      <div class="adm-emergency-actions">
+        <form method="POST" action="/admin/emergency-stop" style="display:inline"
+              onsubmit="var a=prompt('ЭКСТРЕННАЯ ОСТАНОВКА?\\n\\nЭто:\\n• Поставит на паузу ВСЕХ активных юзеров (новые сделки не пойдут)\\n• Попытается закрыть ВСЕ открытые позиции на Bybit (best-effort, market-reduce-only)\\n\\nНельзя отменить автоматически — открытые позиции будут закрыты.\\n\\nВведите СТОП заглавными чтобы подтвердить:'); return a === 'СТОП';">
+          ${csrfFieldTop}
+          <button class="adm-emergency-btn adm-emergency-btn-stop" type="submit">
+            🚨 ОСТАНОВИТЬ ВСЁ
+          </button>
+        </form>
+        <form method="POST" action="/admin/resume-all-trading" style="display:inline"
+              onsubmit="return confirm('Возобновить торговлю для ВСЕХ пользователей? Это снимет паузу также и с тех, кто поставил её сам.');">
+          ${csrfFieldTop}
+          <button class="adm-emergency-btn adm-emergency-btn-resume" type="submit">
+            ▶ Возобновить всем
+          </button>
+        </form>
+      </div>
+    </div>
+  `;
+
   const body = `
     <div class="header">
       <span class="strat-code">ADMIN</span>
       <h1 class="title">Регистрации</h1>
       <p class="subtitle">Статистика подключений через Telegram Gateway</p>
     </div>
+
+    ${emergencyBanner}
+    ${emergencyPanel}
 
     <div class="portfolio-dashboard">
       <div class="dash-card">
@@ -412,6 +481,60 @@ function renderDashboard(csrfToken: string): string {
       .adm-btn-secondary:hover { border-color: #4ad991; color: #fff; }
       .adm-btn-danger { border-color: rgba(255, 99, 99, 0.5); color: #ff8b8b; }
       .adm-btn-danger:hover { background: rgba(255, 99, 99, 0.10); }
+      /* Emergency panic panel — top of /admin. Big red, hard to miss. */
+      .adm-emergency-panel {
+        margin: 0 0 20px;
+        padding: 16px 18px;
+        background: linear-gradient(135deg, rgba(255,99,99,0.12), rgba(255,99,99,0.04));
+        border: 1px solid rgba(255,99,99,0.45);
+        border-radius: 10px;
+        display: flex; flex-direction: column; gap: 14px;
+      }
+      .adm-emergency-headline {
+        display: flex; gap: 14px; align-items: flex-start;
+      }
+      .adm-emergency-icon { font-size: 28px; line-height: 1; }
+      .adm-emergency-title {
+        color: #ff8b8b; font-weight: 700; font-size: 16px;
+        margin-bottom: 4px; letter-spacing: 0.02em;
+      }
+      .adm-emergency-sub {
+        color: #cfd6dd; font-size: 12.5px; line-height: 1.5;
+      }
+      .adm-emergency-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+      .adm-emergency-btn {
+        font-family: inherit; cursor: pointer;
+        padding: 10px 16px; border-radius: 8px; font-size: 13px;
+        font-weight: 600; letter-spacing: 0.02em;
+      }
+      .adm-emergency-btn-stop {
+        background: #c43d3d; color: #fff;
+        border: 1px solid #ff8b8b;
+      }
+      .adm-emergency-btn-stop:hover { background: #d44848; }
+      .adm-emergency-btn-resume {
+        background: transparent; color: #cfd6dd;
+        border: 1px solid #2a323d;
+      }
+      .adm-emergency-btn-resume:hover {
+        border-color: #4ad991; color: #fff;
+      }
+      .adm-emergency-banner {
+        margin: 0 0 16px; padding: 12px 14px;
+        border-radius: 8px; font-size: 13px; line-height: 1.5;
+      }
+      .adm-emergency-stopped {
+        background: rgba(255,99,99,0.12);
+        border: 1px solid rgba(255,99,99,0.45);
+        color: #ff8b8b;
+      }
+      .adm-emergency-stopped b { color: #fff; }
+      .adm-emergency-resumed {
+        background: rgba(74,217,145,0.10);
+        border: 1px solid rgba(74,217,145,0.45);
+        color: #4ad991;
+      }
+      .adm-emergency-resumed b { color: #fff; }
       /* Date cell — date over time, both nowrap, monospace, tidy. */
       td.dt { white-space: nowrap; line-height: 1.35; }
       td.dt .dt-date { display: block; }
@@ -475,7 +598,7 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'private, no-store');
     const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
-    return renderDashboard(adminCsrfToken(adminEmail));
+    return renderDashboard(adminCsrfToken(adminEmail), (req.query ?? {}) as Record<string, string | undefined>);
   });
 
   // ---------------- GET /admin/tiers (TRACK E Phase B) ----------------
@@ -708,6 +831,117 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
       return;
     }
     reply.code(303).header('location', '/admin').send();
+  });
+
+  // ---------------- POST /admin/emergency-stop ----------------
+  // 🚨 Panic button. For each currently-trading user (status in
+  // trial/active, not paused, access_until in the future):
+  //   1. Set trading_paused_at = now → no new fan-out orders will fire
+  //   2. Best-effort close every open position (closeAllUserPositions)
+  // Returns 303 to /admin with a flash-style query param.
+  //
+  // After this fires, operator must hit «Возобновить всех» manually
+  // OR each user can resume themselves from their cabinet.
+  app.post('/admin/emergency-stop', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
+    if (!checkAuth(req, reply)) return;
+    const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
+    if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;
+    const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
+
+    // 1. Snapshot active set before pausing — we close positions only
+    //    for users who were actually trading.
+    const activeUserIds = listTradingActiveUserIds();
+
+    // 2. Bulk-pause everything in one UPDATE.
+    const pausedCount = bulkPauseAllTrading();
+
+    // 3. Close open positions for every previously-active user, in parallel.
+    let attempted = 0;
+    let succeeded = 0;
+    let failed = 0;
+    const failures: string[] = [];
+    await Promise.allSettled(activeUserIds.map(async (uid) => {
+      try {
+        const res = await closeAllUserPositions(uid, 'strategy_exit');
+        attempted += res.attempted;
+        succeeded += res.succeeded;
+        failed += res.failed;
+        if (res.failed > 0) {
+          failures.push(`user_id=${uid}: ${res.failedSymbols.join(', ')}`);
+        }
+      } catch (err) {
+        failed++;
+        failures.push(`user_id=${uid}: ${(err as Error).message}`);
+        logger.error({ err, userId: uid }, 'emergency-stop: closeAllUserPositions threw');
+      }
+    }));
+
+    recordAdminAction({
+      adminEmail,
+      targetUserId: null,
+      action: 'emergency_stop',
+      before: null,
+      after: { paused_users: pausedCount, position_close_attempted: attempted, succeeded, failed },
+      note: failures.length > 0 ? `failures: ${failures.slice(0, 5).join(' | ')}` : null,
+      ip: req.ip,
+    });
+
+    logger.warn(
+      { by: adminEmail, pausedCount, attempted, succeeded, failed },
+      'admin: EMERGENCY STOP fired',
+    );
+
+    // Telegram alert — push to ops Logs channel.
+    await sendMessage({
+      channel: 'logs',
+      text:
+        `🚨 <b>EMERGENCY STOP</b> by <code>${escapeHtml(adminEmail)}</code>\n` +
+        `Paused users: <b>${pausedCount}</b>\n` +
+        `Positions: ${succeeded}✓ / ${failed}✗ (of ${attempted} attempted)` +
+        (failures.length > 0 ? `\n⚠️ Failures: ${failures.slice(0, 3).join(' · ')}` : ''),
+      disable_notification: false,
+    }).catch((err) => logger.error({ err }, 'emergency-stop: telegram alert failed'));
+
+    reply.code(303).header(
+      'location',
+      `/admin?emergency=stopped&paused=${pausedCount}&closed=${succeeded}&failed=${failed}`,
+    ).send();
+  });
+
+  // ---------------- POST /admin/resume-all-trading ----------------
+  // Undo the emergency stop — clear trading_paused_at for EVERYONE
+  // (including users who paused themselves; that's the trade-off for
+  // having a single bulk action). Open positions are NOT re-opened —
+  // they were already closed by the emergency stop.
+  app.post('/admin/resume-all-trading', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
+    if (!checkAuth(req, reply)) return;
+    const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
+    if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;
+    const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
+
+    const resumedCount = bulkResumeAllTrading();
+
+    recordAdminAction({
+      adminEmail,
+      targetUserId: null,
+      action: 'resume_all_trading',
+      before: null,
+      after: { resumed_users: resumedCount },
+      note: null,
+      ip: req.ip,
+    });
+
+    logger.warn({ by: adminEmail, resumedCount }, 'admin: bulk resume-all fired');
+
+    await sendMessage({
+      channel: 'logs',
+      text:
+        `▶️ <b>Resume-all</b> by <code>${escapeHtml(adminEmail)}</code>\n` +
+        `Resumed users: <b>${resumedCount}</b>`,
+      disable_notification: false,
+    }).catch((err) => logger.error({ err }, 'resume-all: telegram alert failed'));
+
+    reply.code(303).header('location', `/admin?emergency=resumed&count=${resumedCount}`).send();
   });
 }
 
