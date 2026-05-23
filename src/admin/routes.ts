@@ -716,21 +716,28 @@ function renderTiersDashboard(): string {
   const recentTransitions = listRecentTransitions(30);
   const vipUsers = vipOverrideListStmt.all();
 
-  // Phase N — 30-day shadow-replay PnL per tier.
-  const liveStats = computeTierLiveStats(30 * 24 * 60 * 60 * 1000);
-  const liveStatsTable = (() => {
-    const totalTrades = liveStats.reduce((acc, s) => acc + s.trades, 0);
+  // Phase N — shadow-replay PnL per tier. Two windows: 30 days (recent
+  // signal) and 365 days (cumulative since live launch — extrapolation-free
+  // annual figure). Same table layout, different headline emphasis in the
+  // «% капитала» cell.
+  const wrClass = (pct: number | null): string => {
+    if (pct === null) return '';
+    if (pct >= 70) return 'adm-wr-great';
+    if (pct >= 55) return 'adm-wr-good';
+    if (pct >= 40) return 'adm-wr-meh';
+    return 'adm-wr-bad';
+  };
+
+  const renderLiveTierTable = (
+    windowMs: number,
+    kind: 'month' | 'year',
+    emptyLabel: string,
+  ): string => {
+    const stats = computeTierLiveStats(windowMs);
+    const totalTrades = stats.reduce((acc, s) => acc + s.trades, 0);
     if (totalTrades === 0) {
-      return '<p class="adm-empty">За последние 30 дней не было закрытых сделок.</p>';
+      return `<p class="adm-empty">${escapeHtml(emptyLabel)}</p>`;
     }
-    // Helpers for colour cues — keep the table scannable at a glance.
-    const wrClass = (pct: number | null): string => {
-      if (pct === null) return '';
-      if (pct >= 70) return 'adm-wr-great';
-      if (pct >= 55) return 'adm-wr-good';
-      if (pct >= 40) return 'adm-wr-meh';
-      return 'adm-wr-bad';
-    };
     return `
       <table class="adm-tier-table adm-tier-live">
         <thead>
@@ -746,19 +753,32 @@ function renderTiersDashboard(): string {
           </tr>
         </thead>
         <tbody>
-          ${liveStats.map((s) => {
+          ${stats.map((s) => {
             const tier = TIER_CONFIGS[s.tierId];
             const wrLabel = s.winRatePct === null ? '—' : `${s.winRatePct.toFixed(1)}%`;
             const grossClass = s.grossUsd > 0 ? 'adm-pnl-pos' : s.grossUsd < 0 ? 'adm-pnl-neg' : 'adm-pnl-zero';
             const grossSign = s.grossUsd > 0 ? '+' : s.grossUsd < 0 ? '−' : '';
             const grossDisplay = `${grossSign}$${Math.abs(s.grossUsd).toFixed(2)}`;
             const rowAccent = s.grossUsd > 0 ? 'adm-row-pos' : s.grossUsd < 0 ? 'adm-row-neg' : '';
+            // Pct-cell content depends on the window:
+            //   month window → headline = monthly, sub = annualised (× 12)
+            //   year window  → headline = annual (real), sub = monthly avg (÷ 12)
             const pctClass = s.pctOfMinDepoMonthly > 0 ? 'adm-pnl-pos'
                             : s.pctOfMinDepoMonthly < 0 ? 'adm-pnl-neg' : 'adm-pnl-zero';
             const pctSign = s.pctOfMinDepoMonthly > 0 ? '+'
                           : s.pctOfMinDepoMonthly < 0 ? '−' : '';
             const monthlyPctStr = `${pctSign}${Math.abs(s.pctOfMinDepoMonthly).toFixed(2)}%`;
             const annualPctStr = `${pctSign}${Math.abs(s.pctOfMinDepoAnnual).toFixed(1)}%`;
+            const depoTitle = tier.minBalanceUsdt > 0 ? '$' + tier.minBalanceUsdt : '—';
+            const pctCell = kind === 'month'
+              ? `
+                <div class="adm-pct-monthly ${pctClass}" title="Депозит ${depoTitle} (минимум для тарифа)">${monthlyPctStr} <span class="adm-pct-suf">/ мес</span></div>
+                <div class="adm-pct-annual" title="Грубая экстраполяция × 12">≈ ${annualPctStr} <span class="adm-pct-suf">/ год</span></div>
+              `
+              : `
+                <div class="adm-pct-monthly ${pctClass}" title="Депозит ${depoTitle} (минимум для тарифа). Окно: 365 дней, без экстраполяции.">${annualPctStr} <span class="adm-pct-suf">/ год</span></div>
+                <div class="adm-pct-annual" title="Среднее по году ÷ 12 (без учёта сезонности)">≈ ${monthlyPctStr} <span class="adm-pct-suf">/ мес сред.</span></div>
+              `;
             return `
               <tr class="${rowAccent}">
                 <td><b>${escapeHtml(tier.name)}</b> <span class="adm-tier-id">(${s.tierId})</span></td>
@@ -768,28 +788,39 @@ function renderTiersDashboard(): string {
                 <td class="adm-num adm-cell-losses">${s.losses}</td>
                 <td class="adm-num ${wrClass(s.winRatePct)}">${wrLabel}</td>
                 <td class="adm-num ${grossClass}">${grossDisplay}</td>
-                <td class="adm-num adm-pct-cell">
-                  <div class="adm-pct-monthly ${pctClass}" title="Депозит ${tier.minBalanceUsdt > 0 ? '$' + tier.minBalanceUsdt : '—'} (минимум для тарифа)">${monthlyPctStr} <span class="adm-pct-suf">/ мес</span></div>
-                  <div class="adm-pct-annual" title="Грубая экстраполяция × 12">≈ ${annualPctStr} <span class="adm-pct-suf">/ год</span></div>
-                </td>
+                <td class="adm-num adm-pct-cell">${pctCell}</td>
               </tr>
             `;
           }).join('')}
         </tbody>
       </table>
-      <p class="adm-tier-note">
-        Симуляция: для каждой закрытой shadow-сделки (operator-уровень, <code>user_id IS NULL</code>)
-        за последние 30 дней PnL пересчитан в USD на notional соответствующего тарифа.
-        Это <b>не реальный</b> PnL юзеров (у них могут быть свои overrides), а оценка
-        «что бы тариф заработал на актуальной истории сигналов».
-        <br><br>
-        <b>% капитала</b> рассчитан от <i>минимального</i> депозита тарифа (Starter $300,
-        Standard $800, Plus $2 500, Pro $6 000, VIP $15 000, Prof $300). Юзер с большим
-        балансом увидит меньший процент при той же долларовой PnL. Годовой показатель —
-        грубая экстраполяция «× 12», без compounding и без учёта изменения волатильности.
-      </p>
     `;
-  })();
+  };
+
+  const liveStatsTable30d = renderLiveTierTable(
+    30 * 24 * 60 * 60 * 1000,
+    'month',
+    'За последние 30 дней не было закрытых сделок.',
+  );
+  const liveStatsTable365d = renderLiveTierTable(
+    365 * 24 * 60 * 60 * 1000,
+    'year',
+    'За последние 365 дней не было закрытых сделок.',
+  );
+  const liveStatsNote = `
+    <p class="adm-tier-note">
+      Симуляция: для каждой закрытой shadow-сделки (operator-уровень, <code>user_id IS NULL</code>)
+      PnL пересчитан в USD на notional соответствующего тарифа.
+      Это <b>не реальный</b> PnL юзеров (у них могут быть свои overrides), а оценка
+      «что бы тариф заработал на актуальной истории сигналов».
+      <br><br>
+      <b>% капитала</b> рассчитан от <i>минимального</i> депозита тарифа (Starter $300,
+      Standard $800, Plus $2 500, Pro $6 000, VIP $15 000, Prof $300). Юзер с большим
+      балансом увидит меньший процент при той же долларовой PnL. В блоке за 30 дней годовая
+      цифра — грубая экстраполяция «× 12»; в блоке за год она реальная, а помесячная
+      выводится делением «÷ 12».
+    </p>
+  `;
 
   const distTable = `
     <table class="adm-tier-table">
@@ -872,8 +903,14 @@ function renderTiersDashboard(): string {
       </section>
 
       <section class="adm-section">
-        <h2>💹 Live-результаты по тарифам (последние 30 дней)</h2>
-        ${liveStatsTable}
+        <h2>💹 Live-результаты по тарифам — последние 30 дней</h2>
+        ${liveStatsTable30d}
+      </section>
+
+      <section class="adm-section">
+        <h2>📅 Live-результаты по тарифам — последние 365 дней</h2>
+        ${liveStatsTable365d}
+        ${liveStatsNote}
       </section>
 
       <section class="adm-section">
