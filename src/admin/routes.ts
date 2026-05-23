@@ -222,7 +222,7 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
   }
 
   const tableRows = rows.length === 0
-    ? `<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:24px">Регистраций пока нет</td></tr>`
+    ? `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:24px">Регистраций пока нет</td></tr>`
     : rows
         .map((r: RegistrationListRow) => {
           const phone = r.phone ?? '—';
@@ -318,7 +318,6 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
               <td class="mono">${escapeHtml(phone)}</td>
               <td>${badge}</td>
               <td>${apiCell}</td>
-              <td class="mono">${escapeHtml(r.ip_first ?? '—')}</td>
               <td class="acc-cell">${accessCell(sub)}</td>
               <td>${toggle}</td>
             </tr>`;
@@ -434,7 +433,6 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
               <th>Телефон</th>
               <th>План</th>
               <th>API Bybit</th>
-              <th>IP</th>
               <th>Доступ</th>
               <th>Действия</th>
             </tr>
@@ -557,7 +555,7 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
       .acc-cell-sub.acc-cell-warn { color: #ffbc46; }
       .acc-cell-sub.acc-cell-ok   { color: #8590a0; }
       .adm-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-      .adm-users-table { min-width: 920px; }
+      .adm-users-table { min-width: 840px; }
       .adm-scroll-hint { display: none; font-size: 12px; color: #8590a0; padding: 0 0 8px; }
       @media (max-width: 900px) {
         .adm-scroll-hint { display: block; }
