@@ -2414,6 +2414,7 @@ export function pageShell(
           return out;
         }
 
+        var isTeleporting = false;
         function alignToFirstReal() {
           if (!loopable) return;
           var firstReal = track.children[1]; // index 0 is the prepended clone
@@ -2422,7 +2423,13 @@ export function pageShell(
           var firstRect = firstReal.getBoundingClientRect();
           var firstCentre = firstRect.left + firstRect.width / 2 - trackRect.left + track.scrollLeft;
           var target = firstCentre - track.clientWidth / 2;
+          isTeleporting = true;
           track.scrollTo({ left: target, behavior: 'auto' });
+          // Release the lock on the next animation frame so the resulting
+          // scroll event doesn't immediately re-trigger maybeTeleport.
+          requestAnimationFrame(function() {
+            requestAnimationFrame(function() { isTeleporting = false; });
+          });
         }
         alignToFirstReal();
 
@@ -2465,38 +2472,53 @@ export function pageShell(
         var teleportTimer = null;
         function maybeTeleport() {
           if (!loopable) return;
-          // If the centred card is a clone, silently jump scrollLeft to
-          // its real twin. Debounced so it doesn't fire mid-scroll.
+          if (isTeleporting) return; // suppress re-entry from our own scroll
           if (teleportTimer) clearTimeout(teleportTimer);
+          // Debounce on scroll END — we only teleport after the user
+          // actually finished moving, not during inertia. 200ms covers
+          // smooth-scroll trails on most platforms.
           teleportTimer = setTimeout(function() {
             var nodes = track.children;
             if (nodes.length < 3) return;
             var trackRect = track.getBoundingClientRect();
             var viewCentre = trackRect.left + trackRect.width / 2;
-            var firstNode = nodes[0]; // prepended clone of last
-            var lastNode  = nodes[nodes.length - 1]; // appended clone of first
-            var firstRect = firstNode.getBoundingClientRect();
-            var lastRect  = lastNode.getBoundingClientRect();
-            var threshold = trackRect.width / 2;
-            // Scrolled onto the prepended clone → jump forward by N
-            // real-card widths to land on the real last card.
-            if (firstRect.left + firstRect.width / 2 > viewCentre - threshold &&
-                firstRect.left + firstRect.width / 2 < viewCentre + threshold) {
+            var firstClone = nodes[0]; // clone of LAST real card
+            var lastClone  = nodes[nodes.length - 1]; // clone of FIRST real card
+            var firstRect = firstClone.getBoundingClientRect();
+            var lastRect  = lastClone.getBoundingClientRect();
+            // Tight threshold: clone must be ESSENTIALLY centred —
+            // within 25% of its own width from the viewport centre.
+            // Previously the threshold was trackRect.width/2 which
+            // matched as soon as the clone was even partially visible,
+            // causing endless teleport-bounce.
+            var tight = firstRect.width * 0.25;
+            var firstCentre = firstRect.left + firstRect.width / 2;
+            var lastCentre  = lastRect.left + lastRect.width / 2;
+            // Scrolled past start → centre is on the prepended clone
+            // → jump forward to the real-last twin.
+            if (Math.abs(firstCentre - viewCentre) < tight) {
               var realLast = nodes[nodes.length - 2];
               var realLastRect = realLast.getBoundingClientRect();
               var jump = (realLastRect.left + realLastRect.width / 2) - viewCentre;
+              isTeleporting = true;
               track.scrollTo({ left: track.scrollLeft + jump, behavior: 'auto' });
+              requestAnimationFrame(function() {
+                requestAnimationFrame(function() { isTeleporting = false; });
+              });
             }
-            // Scrolled onto the appended clone → jump back by N widths
-            // to land on the real first card.
-            else if (lastRect.left + lastRect.width / 2 > viewCentre - threshold &&
-                     lastRect.left + lastRect.width / 2 < viewCentre + threshold) {
+            // Scrolled past end → centre is on the appended clone
+            // → jump back to the real-first twin.
+            else if (Math.abs(lastCentre - viewCentre) < tight) {
               var realFirst = nodes[1];
               var realFirstRect = realFirst.getBoundingClientRect();
               var jump2 = (realFirstRect.left + realFirstRect.width / 2) - viewCentre;
+              isTeleporting = true;
               track.scrollTo({ left: track.scrollLeft + jump2, behavior: 'auto' });
+              requestAnimationFrame(function() {
+                requestAnimationFrame(function() { isTeleporting = false; });
+              });
             }
-          }, 90);
+          }, 200);
         }
         function scrollByOne(dir) {
           var firstChild = track.firstElementChild;
