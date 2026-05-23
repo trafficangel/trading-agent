@@ -903,11 +903,11 @@ function renderHome(
       : (p.currentPrice <= p.entry ? 'pos' : 'neg');
     return `
       <div class="live-pos-card" data-strategy="${escapeHtml(p.strategyCode)}" data-trade-id="${escapeHtml(p.tradeId)}">
-        <div class="live-pos-num" data-pos-num aria-label="${lang === 'en' ? 'Position' : 'Позиция'} ${idx} ${lang === 'en' ? 'of' : 'из'} ${total}">
-          <span data-pos-num-cur>${idx}</span><span class="live-pos-num-sep">/</span><span data-pos-num-total>${total}</span>
-        </div>
         <div class="live-pos-head">
           <div class="live-pos-id-row">
+            <span class="live-pos-num" data-pos-num aria-label="${lang === 'en' ? 'Position' : 'Позиция'} ${idx} ${lang === 'en' ? 'of' : 'из'} ${total}">
+              <span data-pos-num-cur>${idx}</span><span class="live-pos-num-sep">/</span><span data-pos-num-total>${total}</span>
+            </span>
             <span class="live-pos-id">${sideEmoji} <b>${escapeHtml(p.tradeId)}</b></span>
             <span class="live-pos-side-pill side-${p.side}">${sideLabel}</span>
           </div>

@@ -1813,23 +1813,21 @@ const STYLE = `
     );
     pointer-events: none;
   }
-  /* Position counter — small pill in the top-right showing «3/6».
-     Sits above the radial glow (z-index:2) and inside the card's
-     overflow:hidden so it never spills outside. */
+  /* Position counter — compact pill that sits inline at the start of
+     the id row, BEFORE the trade-id and side pill, so it never overlaps
+     ЛОНГ/ШОРТ. Tight padding so it doesn't push the row layout. */
   .live-pos-num {
-    position: absolute; top: 10px; right: 10px;
-    z-index: 2;
     display: inline-flex; align-items: baseline; gap: 1px;
-    background: rgba(11, 14, 19, 0.85);
+    flex-shrink: 0;
+    background: rgba(74, 217, 145, 0.10);
     border: 1px solid rgba(74, 217, 145, 0.30);
     color: var(--accent);
-    padding: 3px 10px; border-radius: 999px;
+    padding: 2px 8px; border-radius: 999px;
     font-family: ui-monospace, Menlo, monospace;
-    font-size: 11.5px; font-weight: 700;
+    font-size: 10.5px; font-weight: 700;
     letter-spacing: 0.02em;
     line-height: 1.3;
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    margin-right: 6px;
   }
   .live-pos-num [data-pos-num-cur] { color: var(--accent); }
   .live-pos-num .live-pos-num-sep { color: rgba(74, 217, 145, 0.55); margin: 0 1px; }
