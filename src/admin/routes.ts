@@ -731,23 +731,6 @@ function renderTiersDashboard(): string {
       if (pct >= 40) return 'adm-wr-meh';
       return 'adm-wr-bad';
     };
-    const expectedBadge = (
-      actual: number,
-      range: { low: number; high: number },
-    ): string => {
-      if (range.low === 0 && range.high === 0) {
-        return '<span class="adm-badge adm-badge-neutral">N/A</span>';
-      }
-      const rangeStr = `$${range.low}–$${range.high}`;
-      // Bands: ≥80% of range.low = on track; below = lagging; above range.high = ahead.
-      if (actual >= range.high) {
-        return `<span class="adm-badge adm-badge-ahead">▲ ahead</span><span class="adm-range">${rangeStr}</span>`;
-      }
-      if (actual >= range.low * 0.8) {
-        return `<span class="adm-badge adm-badge-ok">● on track</span><span class="adm-range">${rangeStr}</span>`;
-      }
-      return `<span class="adm-badge adm-badge-lag">▼ lagging</span><span class="adm-range">${rangeStr}</span>`;
-    };
     return `
       <table class="adm-tier-table adm-tier-live">
         <thead>
@@ -760,13 +743,11 @@ function renderTiersDashboard(): string {
             <th>Win-rate</th>
             <th>Gross PnL (USD)</th>
             <th>% капитала <span class="adm-th-sub">(на min-депо)</span></th>
-            <th>vs expected</th>
           </tr>
         </thead>
         <tbody>
           ${liveStats.map((s) => {
             const tier = TIER_CONFIGS[s.tierId];
-            const expected = tier.expectedMonthlyPnlRangeUsd;
             const wrLabel = s.winRatePct === null ? '—' : `${s.winRatePct.toFixed(1)}%`;
             const grossClass = s.grossUsd > 0 ? 'adm-pnl-pos' : s.grossUsd < 0 ? 'adm-pnl-neg' : 'adm-pnl-zero';
             const grossSign = s.grossUsd > 0 ? '+' : s.grossUsd < 0 ? '−' : '';
@@ -791,7 +772,6 @@ function renderTiersDashboard(): string {
                   <div class="adm-pct-monthly ${pctClass}" title="Депозит ${tier.minBalanceUsdt > 0 ? '$' + tier.minBalanceUsdt : '—'} (минимум для тарифа)">${monthlyPctStr} <span class="adm-pct-suf">/ мес</span></div>
                   <div class="adm-pct-annual" title="Грубая экстраполяция × 12">≈ ${annualPctStr} <span class="adm-pct-suf">/ год</span></div>
                 </td>
-                <td>${expectedBadge(s.grossUsd, expected)}</td>
               </tr>
             `;
           }).join('')}
@@ -807,10 +787,6 @@ function renderTiersDashboard(): string {
         Standard $800, Plus $2 500, Pro $6 000, VIP $15 000, Prof $300). Юзер с большим
         балансом увидит меньший процент при той же долларовой PnL. Годовой показатель —
         грубая экстраполяция «× 12», без compounding и без учёта изменения волатильности.
-        <br><br>
-        Бейдж в колонке <i>vs expected</i>: <b>▲ ahead</b> — выше верхней планки диапазона из
-        <code>tier-config.ts</code>, <b>● on track</b> — в пределах ≥80% от нижней
-        границы, <b>▼ lagging</b> — недотягивает.
       </p>
     `;
   })();
@@ -960,21 +936,6 @@ function renderTiersDashboard(): string {
       .adm-tier-live tr.adm-row-neg { background: linear-gradient(90deg, rgba(255,107,107,0.08), rgba(255,107,107,0) 60%); }
       .adm-tier-live tr.adm-row-pos td { border-top-color: rgba(74,217,145,0.12); }
       .adm-tier-live tr.adm-row-neg td { border-top-color: rgba(255,107,107,0.14); }
-
-      /* Badges in the "vs expected" column. */
-      .adm-badge {
-        display: inline-block; padding: 3px 9px; border-radius: 999px;
-        font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
-        line-height: 1.4; vertical-align: middle;
-      }
-      .adm-badge-ahead   { background: rgba(74,217,145,0.18);  color: #5ce0a0; border: 1px solid rgba(74,217,145,0.45); }
-      .adm-badge-ok      { background: rgba(116,170,255,0.18); color: #9bc1ff; border: 1px solid rgba(116,170,255,0.40); }
-      .adm-badge-lag     { background: rgba(255,107,107,0.18); color: #ff8b8b; border: 1px solid rgba(255,107,107,0.45); }
-      .adm-badge-neutral { background: rgba(133,144,160,0.18); color: #98a2b3; border: 1px solid rgba(133,144,160,0.40); }
-      .adm-range {
-        margin-left: 8px; font-size: 11px; color: #98a2b3;
-        font-family: ui-monospace, Menlo, monospace;
-      }
 
       /* % капитала cell — two-line layout: monthly headline + annual sub. */
       .adm-tier-table td.adm-pct-cell {
