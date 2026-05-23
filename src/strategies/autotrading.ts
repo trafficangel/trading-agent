@@ -1643,6 +1643,10 @@ function renderCalculator(lang: Lang): string {
           const yearNet = net * 12;
           const pctMo = depo > 0 ? (monthlyMid / depo * 100) : 0;
           const ratio = tier.priceUsd > 0 ? (tier.priceUsd / monthlyMid * 100) : 0;
+          // Suffix («/мес», « от депозита», « ×12») rendered as a separate
+          // <span class="at-calc-card-suffix"> so it can wrap to a new line
+          // OR sit beside the value with smaller font. Keeps the headline
+          // number on one line at small widths.
           out.innerHTML =
             '<div class="at-calc-card at-calc-card-tier">' +
               '<div class="at-calc-card-label">' + T.outTier + '</div>' +
@@ -1651,7 +1655,8 @@ function renderCalculator(lang: Lang): string {
             '</div>' +
             '<div class="at-calc-card at-calc-card-profit">' +
               '<div class="at-calc-card-label">' + T.outProfitMo + '</div>' +
-              '<div class="at-calc-card-value">+' + fmtUsd(tier.monthlyLow) + '–' + fmtUsd(tier.monthlyHigh) + T.perMo + '</div>' +
+              '<div class="at-calc-card-value">+' + fmtUsd(tier.monthlyLow) + '–' + fmtUsd(tier.monthlyHigh) +
+                '<span class="at-calc-card-suffix">' + T.perMo + '</span></div>' +
               '<div class="at-calc-card-sub">≈ ' + pctMo.toFixed(1) + '% ' + T.ofDepo + '</div>' +
             '</div>' +
             '<div class="at-calc-card at-calc-card-year">' +
@@ -1662,7 +1667,8 @@ function renderCalculator(lang: Lang): string {
             '<div class="at-calc-card at-calc-card-ratio">' +
               '<div class="at-calc-card-label">' + T.ratio + '</div>' +
               '<div class="at-calc-card-value">' + ratio.toFixed(0) + '%</div>' +
-              '<div class="at-calc-card-sub">' + T.outNet + ': ' + (net >= 0 ? '+' : '') + fmtUsd(net) + T.perMo + '</div>' +
+              '<div class="at-calc-card-sub">' + T.outNet + ': ' + (net >= 0 ? '+' : '') + fmtUsd(net) +
+                '<span class="at-calc-card-suffix"> ' + T.perMo + '</span></div>' +
             '</div>';
         }
         input.addEventListener('input', render);
@@ -2789,29 +2795,59 @@ function styles(): string {
   }
   .at-calc-output {
     display: grid; gap: 12px;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    /* Wider min-column (200px) + responsive scaling: 2-col on tablet,
+     * 1-col on phone. Avoids the squeezed-2nd-column where /мес got
+     * pushed onto a new line. */
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  @media (max-width: 880px) {
+    .at-calc-output { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 480px) {
+    .at-calc-output { grid-template-columns: 1fr; }
   }
   .at-calc-card {
     padding: 16px 18px;
     background: #0e131a; border: 1px solid #1f2630;
-    border-radius: 10px; min-height: 96px;
+    border-radius: 10px; min-height: 110px;
     display: flex; flex-direction: column; gap: 4px;
+    min-width: 0; /* allow flex/grid item to shrink with long content */
   }
   .at-calc-card-label {
     font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
     color: #8590a0; font-weight: 600;
+    line-height: 1.35; min-height: 30px;
   }
   .at-calc-card-value {
-    font-size: 22px; font-weight: 700; color: #e8edf2;
+    font-size: 20px; font-weight: 700; color: #e8edf2;
     line-height: 1.15;
+    /* Allow long numeric values like «+$135–$250» to break between
+     * pieces if needed, but keep digits + currency stuck together. */
+    word-break: keep-all; overflow-wrap: anywhere;
+  }
+  /* Period suffix («/мес», «×12»). Smaller font + dimmed colour. The
+   * leading space character keeps the suffix from glueing to the value. */
+  .at-calc-card-suffix {
+    font-size: 13px; font-weight: 600; color: #8590a0;
+    margin-left: 2px; letter-spacing: 0;
+    white-space: nowrap;
   }
   .at-calc-card-sub {
     font-size: 12px; color: #8590a0; margin-top: auto;
+    line-height: 1.4;
   }
   .at-calc-card-tier .at-calc-card-value { color: #e8edf2; }
   .at-calc-card-profit .at-calc-card-value { color: #4ad991; }
   .at-calc-card-year .at-calc-card-value { color: #4ad991; }
   .at-calc-card-ratio .at-calc-card-value { color: #f5b14d; }
+  /* When the card is narrow (≤520px column), drop one font-size step
+     so the headline number always fits on one line. */
+  @media (max-width: 1080px) {
+    .at-calc-card-value { font-size: 19px; }
+  }
+  @media (max-width: 880px) {
+    .at-calc-card-value { font-size: 20px; }
+  }
   .at-calc-toolow {
     padding: 14px 16px; border-radius: 9px;
     background: rgba(245, 177, 77, 0.08);
