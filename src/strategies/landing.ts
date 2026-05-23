@@ -698,6 +698,7 @@ const STYLE = `
     display: inline-block; padding: 2px 7px; border-radius: 4px;
     font-size: 10px; font-weight: 500; letter-spacing: 0.04em;
     text-transform: uppercase;
+    white-space: nowrap;
   }
   .reason-strat { background: rgba(74, 217, 145, 0.10); color: var(--accent); }
   .reason-sl    { background: rgba(239, 91, 107, 0.14); color: var(--danger); }
