@@ -2073,12 +2073,8 @@ function styles(): string {
     opacity: 0.12; transform: scale(1.04) rotate(-3deg);
   }
 
-  /* Cards with a badge need extra top padding to clear it. Without this
-   * the «🎁 Бонус» / «⭐ Популярный» pill overlaps the tier name below. */
-  .at-tier-card.at-tier-popular,
-  .at-tier-card.at-tier-free {
-    padding-top: 58px;
-  }
+  /* Badge is now an INLINE chip in the card flow (sits above the tier
+   * name as a regular element). No padding-top reservation needed. */
   /* Active card lifts more + accent border + soft tier-coloured shadow. */
   [data-carousel="focus"] .at-tier-card.rc-card-active {
     border-color: color-mix(in srgb, var(--tier-accent) 60%, #1f2630);
@@ -2102,12 +2098,7 @@ function styles(): string {
     /* Smaller deco + glow on mobile so they don't dominate the smaller card. */
     .at-tier-card-deco { font-size: 88px; bottom: -12px; right: -10px; }
     .at-tier-card-glow { height: 80px; }
-    /* Cards with badge need bigger top padding here because the badge
-       sits ABOVE the card content; without this the tier name pushes
-       up against the pill. */
-    .at-tier-card.at-tier-popular,
-    .at-tier-card.at-tier-free { padding-top: 54px; }
-    .at-tier-badge { top: 13px; left: 14px; font-size: 9.5px; padding: 3px 9px; }
+    .at-tier-badge { font-size: 9.5px; padding: 3px 9px; margin-bottom: 12px; }
     .at-tier-name { font-size: 17px; }
     .at-tier-price-num { font-size: 32px; }
     .at-tier-features { font-size: 12.5px; }
@@ -2124,13 +2115,12 @@ function styles(): string {
     background: linear-gradient(180deg, rgba(243,210,102,0.05) 0%, #11161d 70%);
   }
 
+  /* Inline chip at the very top of the card (above the tier name).
+   * No absolute positioning — sits in the normal flow with a fixed
+   * width so it can never extend across the card width visually. */
   .at-tier-badge {
-    /* Compact pill in the upper-left corner. No halo box-shadow — it
-     * read as a wider bar combined with the top glow strip, making the
-     * pill look stretched. With padding-top:58px on the parent card,
-     * the badge sits clear above the tier name. */
-    position: absolute; top: 14px; left: 16px; z-index: 2;
     display: inline-flex; align-items: center;
+    width: fit-content;
     background: rgba(243, 210, 102, 0.20);
     color: #f3d266;
     padding: 4px 10px; border-radius: 999px;
@@ -2138,6 +2128,7 @@ function styles(): string {
     border: 1px solid rgba(243, 210, 102, 0.50);
     letter-spacing: 0.05em; text-transform: uppercase;
     line-height: 1.2;
+    margin-bottom: 14px;
   }
   .at-tier-badge-popular {
     background: rgba(74, 217, 145, 0.20);
