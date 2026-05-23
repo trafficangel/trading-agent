@@ -533,7 +533,7 @@ function renderDepositBreakdown(lang: Lang): string {
         </div>
       </div>
 
-      <div class="at-bd-carousel-wrap" data-carousel="true">
+      <div class="at-bd-carousel-wrap" data-carousel="focus">
         <button class="rc-carousel-arrow rc-carousel-arrow-prev" data-rc-prev aria-label="prev">‹</button>
         <div class="at-bd-tiers rc-carousel-track">${tierBlocks}</div>
         <button class="rc-carousel-arrow rc-carousel-arrow-next" data-rc-next aria-label="next">›</button>
@@ -1878,17 +1878,22 @@ function styles(): string {
   .at-bd-step-body {
     font-size: 12.5px; color: #98a2b3; line-height: 1.5;
   }
-  /* Deposit-breakdown carousel — one tier per slide. Slimmer than the
-     pricing carousel (no padding mess from badges). */
+  /* Deposit-breakdown carousel — focus mode (one tier centred, others
+     dimmed). Padding on the track lets first and last cards reach the
+     centre of the viewport on scroll-snap. */
   .at-bd-carousel-wrap {
     position: relative;
     margin: 0 -4px 18px;
+    /* Extra vertical room so scale(0.88) on side cards doesn't clip. */
+    padding: 8px 0 14px;
   }
   .at-bd-tiers {
-    display: flex; gap: 16px;
+    display: flex; gap: 24px;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
-    padding: 0 4px 14px;
+    /* Center-padding equal to half the gap between viewport edge and
+       the centred card so first/last snap to centre, not edge. */
+    padding: 4px max(20px, calc(50% - 290px)) 14px;
     scrollbar-color: #2a323d transparent;
     scrollbar-width: thin;
     -webkit-overflow-scrolling: touch;
@@ -1897,13 +1902,19 @@ function styles(): string {
   .at-bd-tiers::-webkit-scrollbar-track { background: transparent; }
   .at-bd-tiers::-webkit-scrollbar-thumb { background: #2a323d; border-radius: 4px; }
   .at-bd-tier {
-    background: #11161d; border: 1px solid #1f2630;
-    border-radius: 12px; padding: 18px 20px;
-    /* Fixed slide width — one tier visible at a time on tablet+, two
-       at very wide desktops via wrap. On mobile takes 90vw so one card
-       fills the screen and the swipe is obvious. */
-    flex: 0 0 min(580px, 92vw);
-    scroll-snap-align: start;
+    background: linear-gradient(180deg, #161c25 0%, #11161d 70%);
+    border: 1px solid #1f2630;
+    border-radius: 14px;
+    padding: 22px 24px;
+    /* One card per view + a peek of the next so visitor sees "there
+       is more". 560px desktop, 86vw mobile. */
+    flex: 0 0 min(560px, 86vw);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  }
+  /* Active card pops harder via the box-shadow + border accent. */
+  [data-carousel="focus"] .at-bd-tier.rc-card-active {
+    border-color: rgba(74, 217, 145, 0.35);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.45), 0 0 0 1px rgba(74,217,145,0.18);
   }
   .at-bd-tier-head {
     display: flex; align-items: baseline; justify-content: space-between;

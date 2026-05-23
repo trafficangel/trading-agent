@@ -2276,8 +2276,46 @@ export function pageShell(
     right: 0;
     background: linear-gradient(270deg, rgba(11,14,19,0.85) 0%, rgba(11,14,19,0.55) 50%, rgba(11,14,19,0) 100%);
   }
-  [data-carousel="true"].rc-at-start::before { opacity: 0; }
-  [data-carousel="true"].rc-at-end::after    { opacity: 0; }
+  [data-carousel="true"].rc-at-start::before,
+  [data-carousel="focus"].rc-at-start::before { opacity: 0; }
+  [data-carousel="true"].rc-at-end::after,
+  [data-carousel="focus"].rc-at-end::after    { opacity: 0; }
+
+  /* Focus mode — active card front-and-center, neighbours dimmed and
+     scaled down so visitor sees one tier at a time but understands
+     there are more behind. Opt-in via data-carousel="focus". */
+  [data-carousel="focus"] {
+    position: relative;
+  }
+  [data-carousel="focus"]::before,
+  [data-carousel="focus"]::after {
+    content: '';
+    position: absolute; top: 0; bottom: 14px;
+    width: 60px;
+    pointer-events: none;
+    z-index: 2;
+    transition: opacity 200ms;
+  }
+  [data-carousel="focus"]::before {
+    left: 0;
+    background: linear-gradient(90deg, rgba(11,14,19,0.92) 0%, rgba(11,14,19,0.55) 55%, rgba(11,14,19,0) 100%);
+  }
+  [data-carousel="focus"]::after {
+    right: 0;
+    background: linear-gradient(270deg, rgba(11,14,19,0.92) 0%, rgba(11,14,19,0.55) 55%, rgba(11,14,19,0) 100%);
+  }
+  [data-carousel="focus"] .rc-carousel-track > * {
+    scroll-snap-align: center;
+    transition: transform 280ms ease, opacity 280ms ease, filter 280ms ease;
+    transform: scale(0.88);
+    opacity: 0.45;
+    filter: saturate(0.7);
+  }
+  [data-carousel="focus"] .rc-carousel-track > .rc-card-active {
+    transform: scale(1);
+    opacity: 1;
+    filter: saturate(1);
+  }
   .rc-carousel-arrow {
     position: absolute; top: 50%; transform: translateY(-50%);
     width: 42px; height: 42px;
@@ -2326,12 +2364,14 @@ export function pageShell(
       document.addEventListener('DOMContentLoaded', fn);
     }
     ready(function() {
-      var carousels = document.querySelectorAll('[data-carousel="true"]');
+      // Pick up BOTH legacy data-carousel="true" and the focus variant.
+      var carousels = document.querySelectorAll('[data-carousel]');
       carousels.forEach(function(wrap) {
         var track = wrap.querySelector('.rc-carousel-track');
         var prev  = wrap.querySelector('[data-rc-prev]');
         var next  = wrap.querySelector('[data-rc-next]');
         if (!track) return;
+        var isFocus = wrap.getAttribute('data-carousel') === 'focus';
         function updateEdgeState() {
           var atStart = track.scrollLeft <= 4;
           var atEnd   = track.scrollLeft + track.clientWidth >= track.scrollWidth - 4;
@@ -2339,6 +2379,26 @@ export function pageShell(
           wrap.classList.toggle('rc-at-end',   atEnd);
           if (prev) prev.disabled = atStart;
           if (next) next.disabled = atEnd;
+        }
+        function updateActive() {
+          if (!isFocus) return;
+          // Active card = the one whose centre is closest to the
+          // track's viewport centre. Pure JS, no IntersectionObserver
+          // needed for ≤10 cards.
+          var trackRect = track.getBoundingClientRect();
+          var viewCentre = trackRect.left + trackRect.width / 2;
+          var bestCard = null;
+          var bestDist = Infinity;
+          for (var i = 0; i < track.children.length; i++) {
+            var card = track.children[i];
+            var r = card.getBoundingClientRect();
+            var cardCentre = r.left + r.width / 2;
+            var d = Math.abs(cardCentre - viewCentre);
+            if (d < bestDist) { bestDist = d; bestCard = card; }
+          }
+          for (var j = 0; j < track.children.length; j++) {
+            track.children[j].classList.toggle('rc-card-active', track.children[j] === bestCard);
+          }
         }
         function scrollBy(dir) {
           var firstChild = track.firstElementChild;
@@ -2349,9 +2409,16 @@ export function pageShell(
         }
         if (prev) prev.addEventListener('click', function() { scrollBy(-1); });
         if (next) next.addEventListener('click', function() { scrollBy(1);  });
-        track.addEventListener('scroll', updateEdgeState, { passive: true });
-        window.addEventListener('resize', updateEdgeState);
+        track.addEventListener('scroll', function() {
+          updateEdgeState();
+          updateActive();
+        }, { passive: true });
+        window.addEventListener('resize', function() {
+          updateEdgeState();
+          updateActive();
+        });
         updateEdgeState();
+        updateActive();
       });
     });
   })();
