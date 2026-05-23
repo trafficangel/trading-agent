@@ -224,7 +224,7 @@ function renderDashboard(csrfToken: string): string {
   }
 
   const tableRows = rows.length === 0
-    ? `<tr><td colspan="10" style="text-align:center;color:var(--text-faint);padding:24px">Регистраций пока нет</td></tr>`
+    ? `<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:24px">Регистраций пока нет</td></tr>`
     : rows
         .map((r: RegistrationListRow) => {
           const phone = r.phone ?? '—';
@@ -245,10 +245,6 @@ function renderDashboard(csrfToken: string): string {
               : k.verified
                 ? `<span class="plan-badge plan-active">✓ подключён</span>`
                 : `<span class="plan-badge plan-trial">⚠ не верифиц.</span>`;
-          const stratN = stratCounts.get(r.id) ?? 0;
-          const stratCell = stratN > 0
-            ? `<b>${stratN}</b>`
-            : `<span style="color:#6b7480">—</span>`;
           // Three buttons per row:
           //   1. VIP toggle (Сделать VIP / Снять VIP)
           //   2. Продлить на 30 дней — bumps access_until forward for
@@ -319,7 +315,6 @@ function renderDashboard(csrfToken: string): string {
               <td class="mono">${escapeHtml(phone)}</td>
               <td>${badge}${daysLeftBadge}</td>
               <td>${apiCell}</td>
-              <td style="text-align:center">${stratCell}</td>
               <td class="mono">${escapeHtml(r.ip_first ?? '—')}</td>
               <td class="acc-cell">${accessCell(sub)}</td>
               <td>${toggle}</td>
@@ -372,7 +367,6 @@ function renderDashboard(csrfToken: string): string {
               <th>Телефон</th>
               <th>План</th>
               <th>API Bybit</th>
-              <th>Страт.</th>
               <th>IP</th>
               <th>Доступ</th>
               <th>Действия</th>
@@ -433,7 +427,7 @@ function renderDashboard(csrfToken: string): string {
       .acc-cell-sub.acc-cell-warn { color: #ffbc46; }
       .acc-cell-sub.acc-cell-ok   { color: #8590a0; }
       .adm-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-      .adm-users-table { min-width: 1000px; }
+      .adm-users-table { min-width: 920px; }
       .adm-scroll-hint { display: none; font-size: 12px; color: #8590a0; padding: 0 0 8px; }
       @media (max-width: 900px) {
         .adm-scroll-hint { display: block; }
