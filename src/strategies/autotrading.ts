@@ -25,7 +25,7 @@
 import type { FastifyInstance } from 'fastify';
 import { pageShell, jsonLdService, jsonLdFaqPage, getLang } from './landing.js';
 import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
-import { listTiers, tierCoinTickers } from './tier-config.js';
+import { listTiers, tierCoinTickers, getTierMarketingNumbers } from './tier-config.js';
 
 type Lang = 'ru' | 'en';
 
@@ -862,7 +862,11 @@ function renderPricing(lang: Lang): string {
     .map((tier, i) => {
       const isPopular = tier.id === 'standard';
       const maxStr = tier.maxBalanceUsdt === Number.POSITIVE_INFINITY ? '∞' : `$${tier.maxBalanceUsdt.toLocaleString()}`;
-      const sub = tier.expectedMonthlyPnlRangeUsd;
+      // Phase N — marketing numbers derived from backtests; auto-updates
+      // whenever a strategy is added/removed/re-backtested without manual
+      // edits to tier-config.ts (with fallback to hardcoded ranges).
+      const mkt = getTierMarketingNumbers(tier.id);
+      const sub = { low: mkt.rangeLow, high: mkt.rangeHigh };
       const coins = tierCoinTickers(tier.id);
       const coinsStr = coins.length > 0 ? coins.join(', ') : '—';
       const badge = isPopular ? `<div class="at-tier-badge at-tier-badge-popular">${ico('⭐')}${t.popular}</div>` : '';

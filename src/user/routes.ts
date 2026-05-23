@@ -37,6 +37,7 @@ import {
   listTiers,
   getTier,
   tierCoinTickers,
+  getTierMarketingNumbers,
   type TierId,
 } from '../strategies/tier-config.js';
 import { pageShell } from '../strategies/landing.js';
@@ -915,7 +916,11 @@ function renderTierPicker(p: {
     const canAfford = p.balance != null && p.balance >= t.minBalanceUsdt;
     const isVipLocked = t.id === 'vip';
     const isProf = t.id === 'prof';
-    const subRange = t.expectedMonthlyPnlRangeUsd;
+    // Phase N — auto-derived from backtests when strategy set changes.
+    const subRange = (() => {
+      const mkt = getTierMarketingNumbers(t.id);
+      return { low: mkt.rangeLow, high: mkt.rangeHigh };
+    })();
     const maxStr = t.maxBalanceUsdt === Number.POSITIVE_INFINITY
       ? '∞'
       : `$${t.maxBalanceUsdt.toLocaleString()}`;

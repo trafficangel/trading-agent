@@ -15,7 +15,7 @@ import { pageShell } from '../strategies/landing.js';
 import type { SubscriptionRow } from '../db/repos/user-subscriptions.js';
 import type { ApiKeySummary } from '../db/repos/user-api-keys.js';
 import type { MarginState } from './margin.js';
-import { TIER_CONFIGS, TIER_ORDER, type TierId } from '../strategies/tier-config.js';
+import { TIER_CONFIGS, TIER_ORDER, getTierMarketingNumbers, type TierId } from '../strategies/tier-config.js';
 import { csrfInput } from '../auth/csrf.js';
 
 function escapeHtml(s: string): string {
@@ -468,15 +468,17 @@ function renderTierStatCard(tierId: TierId): string {
   const tier = TIER_CONFIGS[tierId];
   if (!tier) return '';
   const emoji = tierEmoji(tierId);
-  const sub = tier.expectedMonthlyPnlRangeUsd;
+  // Phase N — auto-derived from backtests; updates when STRATEGY_CONFIGS
+  // or tier.strategyIds change, without touching tier-config marketing fields.
+  const mkt = getTierMarketingNumbers(tierId);
   return `
     <div class="stat-card cabinet-card">
       <div class="stat-card-label">${ico(emoji)}Ваш тариф</div>
       <div class="stat-card-value">${tier.name}</div>
       <div class="stat-card-sub">
-        ${tier.strategyIds.length} стратегий · ≤${tier.expectedMaxDdPct}% DD
+        ${tier.strategyIds.length} стратегий · ≤${mkt.maxDdPct}% DD
         <br/>
-        <span style="color:#4ad991">$${sub.low}–$${sub.high}/мес</span> по бэктесту
+        <span style="color:#4ad991">$${mkt.rangeLow}–$${mkt.rangeHigh}/мес</span> по бэктесту
         <br/>
         <a href="/account/subscription/select-tier" style="color:#8590a0; font-size:11.5px; text-decoration:underline">Сменить тариф →</a>
       </div>
@@ -674,8 +676,10 @@ function renderUpgradePromo(args: {
   if (toIdx <= fromIdx) return ''; // only upgrades, not downgrade-pending
   const target = TIER_CONFIGS[targetTier];
   if (!target) return '';
-  const current = TIER_CONFIGS[currentTier];
-  const expectedDelta = target.expectedMonthlyPnlRangeUsd.low - current.expectedMonthlyPnlRangeUsd.low;
+  // Phase N — both target and current PnL ranges derived from backtests.
+  const targetMkt = getTierMarketingNumbers(targetTier);
+  const currentMkt = getTierMarketingNumbers(currentTier);
+  const expectedDelta = targetMkt.rangeLow - currentMkt.rangeLow;
   return `
     <div class="cabinet-banner-promo">
       <div class="cabinet-banner-icon">${ico('🚀')}</div>
@@ -683,7 +687,7 @@ function renderUpgradePromo(args: {
         <div class="cabinet-banner-title-promo">Доступен новый тариф: ${tierEmoji(targetTier)} ${target.name}</div>
         <div class="cabinet-banner-text">
           Ваш депозит вырос — открылся доступ к <b>${target.name}</b> с ${target.strategyIds.length} стратегиями.
-          Ожидаемая прибыль <b>$${target.expectedMonthlyPnlRangeUsd.low}–$${target.expectedMonthlyPnlRangeUsd.high}/мес</b>
+          Ожидаемая прибыль <b>$${targetMkt.rangeLow}–$${targetMkt.rangeHigh}/мес</b>
           (примерно +$${expectedDelta} к текущему уровню). Подписка <b>$${target.monthlyPriceUsd}/мес</b>.
         </div>
         <div class="cabinet-banner-actions">

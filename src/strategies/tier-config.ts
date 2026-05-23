@@ -56,13 +56,18 @@ export type TierConfig = {
   /** Hard cap on simultaneously-open positions. Belt-and-braces with
    *  pool size: even if margin allows more, this stops concentration. */
   maxConcurrentPositions: number;
-  /** Range of expected monthly PnL in USD (low/high). Used for cabinet
-   *  display + landing. Calculated by combining backtest PnL per $1000
-   *  with the computed notional per strategy and applying ±30% range. */
+  /** FALLBACK ONLY (Phase N). Static range used when no usable backtests
+   *  are available for the tier's strategies. UI consumers should call
+   *  `getTierMarketingNumbers(tierId)` which derives the range from
+   *  STRATEGY_CONFIGS[*].backtest dynamically — that way adding a new
+   *  strategy to `strategyIds` re-prices the landing/cabinet/dashboard
+   *  cards automatically. Keep this field in sync as a safety net for
+   *  scenarios where the backtest data is missing or zero-PnL. */
   expectedMonthlyPnlRangeUsd: { low: number; high: number };
-  /** Stated max drawdown for marketing — user explicitly accepts this
-   *  when signing up to the tier. Computed from worst-case scenarios
-   *  in backtest aggregation. */
+  /** FALLBACK ONLY (Phase N). Static max-drawdown promise. UI consumers
+   *  use `getTierMarketingNumbers(tierId).maxDdPct` which takes the worst
+   *  observed bt.maxDrawdownPct across the tier's strategies (conservative
+   *  worst-case correlation assumption). */
   expectedMaxDdPct: number;
   /** Free-text marketing one-liner for the landing tier-card. */
   pitch: string;
@@ -292,5 +297,57 @@ export function computeExpectedMonthlyPnl(tierId: TierId): {
     point: Math.round(total),
     low: Math.round(total * 0.7),
     high: Math.round(total * 1.3),
+  };
+}
+
+/**
+ * Conservative max-drawdown estimate for a tier — the worst observed
+ * single-strategy drawdown across the tier's strategies. Assumes worst-
+ * case correlation (every strategy peaks-and-troughs together). If any
+ * strategy is missing a backtest, falls back to the hardcoded
+ * `tier.expectedMaxDdPct`.
+ */
+export function computeExpectedMaxDdPct(tierId: TierId): number {
+  const tier = TIER_CONFIGS[tierId];
+  let worst = 0;
+  let haveAll = true;
+  for (const sid of tier.strategyIds) {
+    const bt = STRATEGY_CONFIGS[sid]?.backtest;
+    if (!bt) { haveAll = false; break; }
+    if (bt.maxDrawdownPct > worst) worst = bt.maxDrawdownPct;
+  }
+  return haveAll && worst > 0 ? Math.round(worst * 10) / 10 : tier.expectedMaxDdPct;
+}
+
+/**
+ * Single helper for UI: returns derived-from-backtests marketing numbers
+ * with safe fallback to the hardcoded TIER_CONFIGS values.
+ *
+ * Use this everywhere outward-facing (landing, cabinet, dashboard) so the
+ * public copy auto-updates when STRATEGY_CONFIGS / strategyIds change.
+ */
+export function getTierMarketingNumbers(tierId: TierId): {
+  rangeLow: number;
+  rangeHigh: number;
+  point: number;
+  maxDdPct: number;
+} {
+  const tier = TIER_CONFIGS[tierId];
+  const range = computeExpectedMonthlyPnl(tierId);
+  // If point == 0 (no usable backtests yet), keep the hardcoded marketing
+  // range so cards don't render as «$0–$0» on a fresh tier.
+  if (range.point <= 0) {
+    return {
+      rangeLow: tier.expectedMonthlyPnlRangeUsd.low,
+      rangeHigh: tier.expectedMonthlyPnlRangeUsd.high,
+      point: Math.round((tier.expectedMonthlyPnlRangeUsd.low + tier.expectedMonthlyPnlRangeUsd.high) / 2),
+      maxDdPct: tier.expectedMaxDdPct,
+    };
+  }
+  return {
+    rangeLow: range.low,
+    rangeHigh: range.high,
+    point: range.point,
+    maxDdPct: computeExpectedMaxDdPct(tierId),
   };
 }
