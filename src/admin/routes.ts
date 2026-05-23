@@ -276,6 +276,25 @@ function renderDashboard(csrfToken: string): string {
               <button class="adm-btn adm-btn-vip" type="submit">Назначить</button>
             </form>
           `;
+          // «Продлить» — pure access_until bump WITHOUT re-running
+          // assignTier. Crucial for Prof users so their custom notional /
+          // leverage / sl_pct_override survives a renewal. Hidden for VIP
+          // because their access is already permanent.
+          const extendOnlyForm = plan === 'vip'
+            ? ''
+            : `<form method="POST" action="/admin/users/${r.id}/extend" style="display:inline; margin-left:4px"
+                     onsubmit="return confirm('Продлить срок без смены тарифа для ${escapeHtml(name)}?');">
+                ${csrfField}
+                <select name="days" class="adm-select" title="На сколько продлить">
+                  <option value="7">+7 дней</option>
+                  <option value="30" selected>+30 дней</option>
+                  <option value="60">+60 дней</option>
+                  <option value="90">+90 дней</option>
+                  <option value="180">+180 дней</option>
+                  <option value="365">+1 год</option>
+                </select>
+                <button class="adm-btn adm-btn-secondary" type="submit" title="Продлить срок без смены тарифа">⏱ Продлить</button>
+              </form>`;
           // Audit H6 — cancel button. Hidden for already-cancelled
           // and expired rows (no point cancelling an already-dead sub).
           // VIPs can be cancelled too — operator may want to wind one
@@ -299,7 +318,7 @@ function renderDashboard(csrfToken: string): string {
                 ${csrfField}
                 <button class="adm-btn adm-btn-danger" type="submit" title="Удалить пользователя и все его данные">🗑 Удалить</button>
               </form>`;
-          const toggle = `<div class="adm-actions">${assignForm}${cancelForm}${deleteForm}</div>`;
+          const toggle = `<div class="adm-actions">${assignForm}${extendOnlyForm}${cancelForm}${deleteForm}</div>`;
           // Days-left badge for the План column when on standard.
           const daysLeftBadge = sub && plan === 'standard' && status !== 'cancelled'
             ? `<div class="plan-days">${daysLeftLabel(sub.access_until)}</div>`
