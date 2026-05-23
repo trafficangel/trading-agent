@@ -269,7 +269,18 @@ function renderDashboard(csrfToken: string): string {
                    ${csrfField}
                    <button class="adm-btn adm-btn-danger" type="submit">Отменить</button>
                  </form>`;
-          const toggle = `<div class="adm-actions">${vipToggle}${extendForm}${cancelForm}</div>`;
+          // Hard-delete — wipes user_tier_history → user_strategies →
+          // user_api_keys → user_subscriptions → decisions →
+          // verification_attempts → registrations, after best-effort
+          // closing any open Bybit positions. Triple-typed confirm so
+          // an accidental click can't nuke a real account.
+          const deleteForm =
+            `<form method="POST" action="/admin/users/${r.id}/delete" style="display:inline; margin-left:4px"
+                   onsubmit="var ans = prompt('УДАЛИТЬ пользователя ${escapeHtml(name)} (${escapeHtml(phone)}) безвозвратно?\\n\\nЭто закроет открытые позиции на Bybit и сотрёт ВСЕ его данные: ключи, подписку, стратегии, историю сделок.\\n\\nВведите УДАЛИТЬ заглавными чтобы подтвердить:'); return ans === 'УДАЛИТЬ';">
+                ${csrfField}
+                <button class="adm-btn adm-btn-danger" type="submit" title="Удалить пользователя и все его данные">🗑 Удалить</button>
+              </form>`;
+          const toggle = `<div class="adm-actions">${vipToggle}${extendForm}${cancelForm}${deleteForm}</div>`;
           // Days-left badge for the План column when on standard.
           const daysLeftBadge = sub && plan === 'standard' && status !== 'cancelled'
             ? `<div class="plan-days">${daysLeftLabel(sub.access_until)}</div>`
@@ -577,6 +588,57 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     } catch (err) {
       logger.error({ err, user_id: userId }, 'admin: cancel failed');
       reply.code(500).send('failed to cancel subscription');
+      return;
+    }
+    reply.code(303).header('location', '/admin').send();
+  });
+
+  // ---------------- POST /admin/users/:id/delete ----------------
+  // Hard-delete the user. Cascades through user_tier_history →
+  // user_strategies → user_api_keys → user_subscriptions → decisions
+  // → verification_attempts → registrations after best-effort closing
+  // any open Bybit positions. Same code-path as scripts/delete-user.ts.
+  app.post('/admin/users/:id/delete', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
+    if (!checkAuth(req, reply)) return;
+    const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
+    if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;
+    const userId = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      reply.code(400).send('bad user id');
+      return;
+    }
+    const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
+    const beforeSub = findSubscription(userId);
+    try {
+      const { deleteUserCascade } = await import('./delete-user.js');
+      const result = await deleteUserCascade(userId);
+      if (!result.deleted) {
+        // 404 isn't quite right (the route worked) — render a 303 back
+        // to /admin where the table will already not show the user.
+        logger.info({ user_id: userId, by: adminEmail }, 'admin: delete: target not found');
+        reply.code(303).header('location', '/admin').send();
+        return;
+      }
+      recordAdminAction({
+        adminEmail,
+        targetUserId: userId,
+        action: 'delete_user',
+        before: beforeSub
+          ? { status: beforeSub.status, plan: beforeSub.plan, tier_id: beforeSub.tier_id, access_until: beforeSub.access_until }
+          : null,
+        after: null,
+        note: `phone=${result.phone} positions_closed=${result.positionsClosed?.succeeded ?? 0}/${result.positionsClosed?.attempted ?? 0}` +
+              (result.positionsCloseError ? ` close_error=${result.positionsCloseError}` : '') +
+              ` rows=${JSON.stringify(result.summary)}`,
+        ip: req.ip,
+      });
+      logger.info(
+        { user_id: userId, by: adminEmail, summary: result.summary, positionsCloseError: result.positionsCloseError },
+        'admin: user deleted',
+      );
+    } catch (err) {
+      logger.error({ err, user_id: userId }, 'admin: delete failed');
+      reply.code(500).send('failed to delete user');
       return;
     }
     reply.code(303).header('location', '/admin').send();

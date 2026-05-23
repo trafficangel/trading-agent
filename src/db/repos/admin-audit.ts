@@ -13,7 +13,8 @@ export type AdminAction =
   | 'extend_subscription'
   | 'revoke_key'
   | 'force_close_position'
-  | 'cancel_subscription';
+  | 'cancel_subscription'
+  | 'delete_user';
 
 const insertStmt = db.prepare(`
   INSERT INTO admin_audit_log
