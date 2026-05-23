@@ -2821,9 +2821,14 @@ function styles(): string {
   .at-calc-card-value {
     font-size: 20px; font-weight: 700; color: #e8edf2;
     line-height: 1.15;
-    /* Allow long numeric values like «+$135–$250» to break between
-     * pieces if needed, but keep digits + currency stuck together. */
-    word-break: keep-all; overflow-wrap: anywhere;
+    /* Force numeric values like «+$337–$626» onto a single line. The
+     * en-dash is a default break opportunity for the browser, so
+     * without nowrap «$337–» and «$626» land on separate lines. */
+    white-space: nowrap;
+    /* Hide overflow at extreme narrow widths instead of breaking — the
+     * mobile media query drops the font enough that this shouldn't
+     * trigger in practice. */
+    overflow: hidden; text-overflow: ellipsis;
   }
   /* Period suffix («/мес», «×12»). Smaller font + dimmed colour. The
    * leading space character keeps the suffix from glueing to the value. */
@@ -2840,13 +2845,21 @@ function styles(): string {
   .at-calc-card-profit .at-calc-card-value { color: #4ad991; }
   .at-calc-card-year .at-calc-card-value { color: #4ad991; }
   .at-calc-card-ratio .at-calc-card-value { color: #f5b14d; }
-  /* When the card is narrow (≤520px column), drop one font-size step
-     so the headline number always fits on one line. */
+  /* Font scales down as columns get narrower so the nowrap value
+     always fits without ellipsis. Card columns go 4 → 2 → 1 across
+     the breakpoints above. */
   @media (max-width: 1080px) {
-    .at-calc-card-value { font-size: 19px; }
+    .at-calc-card-value { font-size: 18px; }
+    .at-calc-card-suffix { font-size: 12px; }
   }
   @media (max-width: 880px) {
+    /* 2 columns = wider cards again. */
     .at-calc-card-value { font-size: 20px; }
+    .at-calc-card-suffix { font-size: 13px; }
+  }
+  @media (max-width: 480px) {
+    /* Single column, full width. */
+    .at-calc-card-value { font-size: 22px; }
   }
   .at-calc-toolow {
     padding: 14px 16px; border-radius: 9px;
