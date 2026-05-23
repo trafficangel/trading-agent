@@ -1057,17 +1057,81 @@ function renderTierPicker(p: {
         background: transparent; border: 1px solid #2a323d; color: #cfd6dd;
       }
       .tp-btn-ghost:hover { border-color: #4ad991; color: #4ad991; }
-      /* Explicit breakpoints — auto-fit produced ugly «4+1» wrap with 5 cards
-       * around 1100-1200px. Desktop=5 in a row, tablet=3, narrow tablet=2, mobile=1. */
-      .tp-grid {
-        display: grid; gap: 14px;
-        grid-template-columns: repeat(5, 1fr);
+      /* Carousel layout — matches the landing pricing slider so the user
+       * has one consistent UX from /autotrading to the cabinet. The track
+       * uses data-carousel="focus"; arrow + edge-fade + active-card
+       * styling all come from the global CAROUSEL_BLOCK in pageShell. */
+      .tp-carousel-wrap {
+        position: relative; margin: 0 -4px 12px;
       }
-      @media (max-width: 1080px) { .tp-grid { grid-template-columns: repeat(3, 1fr); } }
-      @media (max-width: 720px)  { .tp-grid { grid-template-columns: repeat(2, 1fr); } }
-      @media (max-width: 480px)  { .tp-grid { grid-template-columns: 1fr; } }
-      .tp-card { background: #11161d; border: 1px solid #1f2630; border-radius: 14px; padding: 18px;
-        display: flex; flex-direction: column; position: relative; }
+      .tp-carousel {
+        display: flex;
+        gap: 24px;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        /* Side-padding so first/last cards can scroll-snap into centre.
+         * Card width 380px → padding = 50% - 190px on wide viewports. */
+        padding: 24px max(20px, calc(50% - 200px)) 16px;
+        scrollbar-color: #2a323d transparent;
+        scrollbar-width: thin;
+        -webkit-overflow-scrolling: touch;
+      }
+      .tp-carousel::-webkit-scrollbar { height: 8px; }
+      .tp-carousel::-webkit-scrollbar-track { background: transparent; }
+      .tp-carousel::-webkit-scrollbar-thumb { background: #2a323d; border-radius: 4px; }
+      .tp-card { background: #11161d; border: 1px solid #1f2630; border-radius: 16px;
+        padding: 24px 22px 20px;
+        display: flex; flex-direction: column; position: relative;
+        flex: 0 0 380px; min-width: 0;
+        scroll-snap-align: center;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+      }
+      [data-carousel="focus"] .tp-card.rc-card-active {
+        box-shadow: 0 14px 40px rgba(0,0,0,0.45);
+      }
+      @media (max-width: 640px) {
+        .tp-card { flex: 0 0 86vw; }
+        .tp-carousel { padding-left: 7vw; padding-right: 7vw; }
+      }
+      .tp-scroll-hint {
+        text-align: center; font-size: 11.5px; color: #6b7480;
+        margin: 6px 0 18px; letter-spacing: 0.02em;
+      }
+      /* 14-day trial banner above the slider — calls out the headline
+       * value prop right where the user is making a decision. Gold halo
+       * matches the «🎁 14 дней» pill on /autotrading. */
+      .tp-trial-banner {
+        display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+        margin: 0 0 20px; padding: 18px 22px;
+        background: linear-gradient(90deg, rgba(243,210,102,0.08), rgba(243,210,102,0.14), rgba(243,210,102,0.08));
+        border: 1px solid rgba(243,210,102,0.40);
+        border-radius: 14px;
+        box-shadow: 0 6px 24px -10px rgba(243,210,102,0.40);
+      }
+      .tp-trial-icon { font-size: 28px; flex-shrink: 0; }
+      .tp-trial-body { flex: 1; min-width: 240px; }
+      .tp-trial-title {
+        font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 6px;
+      }
+      .tp-trial-title .tp-trial-hl { color: #f5d970; }
+      .tp-trial-steps {
+        display: flex; flex-wrap: wrap; gap: 6px 14px;
+        font-size: 13px; color: #cfd6dd; line-height: 1.4;
+      }
+      .tp-trial-step { display: inline-flex; align-items: center; gap: 5px; }
+      .tp-trial-step-num {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 18px; height: 18px; border-radius: 50%;
+        font-size: 11px; font-weight: 700;
+        background: rgba(243,210,102,0.20); color: #f5d970;
+      }
+      .tp-trial-step.done .tp-trial-step-num {
+        background: rgba(74,217,145,0.25); color: #4ad991;
+      }
+      .tp-trial-step.current .tp-trial-step-num {
+        background: #f5d970; color: #0b0e13;
+      }
+      .tp-trial-step-arrow { color: #6b7480; }
       .tp-card-cur { border-color: rgba(74,217,145,0.55); background: linear-gradient(180deg, rgba(74,217,145,0.06) 0%, #11161d 70%); }
       .tp-card-rec { border-color: rgba(243,210,102,0.30); }
       .tp-card-selected { border-color: rgba(243,210,102,0.55); background: linear-gradient(180deg, rgba(243,210,102,0.06) 0%, #11161d 70%); }
@@ -1160,7 +1224,27 @@ function renderTierPicker(p: {
       ${errBlock}
       ${okBlock}
       ${pendingBlock}
-      <div class="tp-grid">${cards}</div>
+      <div class="tp-trial-banner">
+        <div class="tp-trial-icon">🎁</div>
+        <div class="tp-trial-body">
+          <div class="tp-trial-title">
+            <span class="tp-trial-hl">14 дней бесплатно</span> на любом тарифе — без оплаты подписки
+          </div>
+          <div class="tp-trial-steps">
+            <span class="tp-trial-step done"><span class="tp-trial-step-num">1</span> Bybit подключён</span>
+            <span class="tp-trial-step-arrow">→</span>
+            <span class="tp-trial-step current"><span class="tp-trial-step-num">2</span> выберите тариф ниже</span>
+            <span class="tp-trial-step-arrow">→</span>
+            <span class="tp-trial-step"><span class="tp-trial-step-num">3</span> сразу 14 дней теста</span>
+          </div>
+        </div>
+      </div>
+      <div class="tp-carousel-wrap" data-carousel="focus">
+        <button class="rc-carousel-arrow rc-carousel-arrow-prev" data-rc-prev aria-label="prev">‹</button>
+        <div class="tp-carousel rc-carousel-track" role="region" aria-label="Тарифы">${cards}</div>
+        <button class="rc-carousel-arrow rc-carousel-arrow-next" data-rc-next aria-label="next">›</button>
+      </div>
+      <div class="tp-scroll-hint">👆 Свайпните или прокрутите вбок, чтобы листать тарифы</div>
       <div class="tp-glossary">
         <div class="tp-glossary-title">📖 Что значат эти цифры</div>
         <div class="tp-glossary-grid">
