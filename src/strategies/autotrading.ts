@@ -26,7 +26,7 @@ import type { FastifyInstance } from 'fastify';
 import { pageShell, jsonLdService, jsonLdFaqPage, getLang } from './landing.js';
 import { getAuthedUser } from '../auth/routes.js';
 import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
-import { listTiers, tierCoinTickers, getTierMarketingNumbers } from './tier-config.js';
+import { listTiers, tierCoinTickers, getTierMarketingNumbers, computeTierTradeSize } from './tier-config.js';
 
 type Lang = 'ru' | 'en';
 
@@ -76,6 +76,7 @@ function renderPage(
     <main class="at-main">
       ${renderHero(lang)}
       ${renderHowItWorks(lang)}
+      ${renderDepositBreakdown(lang)}
       ${renderPricing(lang)}
       ${renderBybitBonus(lang)}
       ${renderSafety(lang)}
@@ -360,6 +361,181 @@ function renderHowItWorks(lang: Lang): string {
           </div>
         </div>
       </div>
+    </section>
+  `;
+}
+
+/**
+ * «Как тариф распоряжается вашим депозитом» — Phase O. Operator
+ * feedback: visitors looking at the pricing cards couldn't reconcile
+ * the wide SLs they saw on /strategies (UNI 30%, TON 25%, HBAR 28%)
+ * with the «безопасно» promise. They need a concrete breakdown.
+ *
+ * For each balance-based tier (Starter / Standard / Plus / Pro / VIP)
+ * we render a card with:
+ *   - Total margin pool (% of min-balance + USD)
+ *   - Per-strategy notional + SL% + max loss in USD AND % of min-depo
+ *   - Worst-case-all-stops aggregate at the bottom
+ *
+ * Prof tier is intentionally excluded — it's user-managed, no fixed
+ * sizes to display.
+ */
+function renderDepositBreakdown(lang: Lang): string {
+  const tiers = listTiers().filter((t) => t.id !== 'prof');
+  const t = lang === 'en'
+    ? {
+        title: 'How a tier uses your deposit',
+        sub:
+          'No magic. Each plan only freezes a fraction of your Bybit balance as «margin pool»; the rest stays untouched. ' +
+          'The pool is split between strategies; each opens a tightly-sized position whose worst-case stop loss falls below 2% of your deposit. ' +
+          'Below — exact numbers for every plan at the minimum qualifying deposit.',
+        step1Title: '1. Deposit → Margin pool',
+        step1Body: 'Each plan uses 12–20% of your deposit as a working margin pool. The remaining 80%+ is reserve, untouched, available for trading any time.',
+        step2Title: '2. Pool → strategies',
+        step2Body: 'The pool is split equally between the strategies in your plan. Each strategy gets the same margin to work with.',
+        step3Title: '3. Strategy → trade',
+        step3Body: 'Each strategy uses its margin × its safe leverage to derive a notional. Wider SL = lower leverage = smaller trade. Risk per trade stays bounded by SL × notional.',
+        colStrat: 'Strategy',
+        colSL: 'SL on price',
+        colSize: 'Trade size',
+        colLeverage: 'Leverage',
+        colMaxLoss: 'Max loss per stop',
+        colDepoPct: '% of deposit',
+        atDepo: 'At minimum deposit',
+        marginPool: 'Margin pool',
+        perStrat: 'Per strategy',
+        allStops: 'If ALL stops fire at once',
+        ofDepo: 'of deposit',
+        disclaimer: 'Calculations use the minimum qualifying deposit for each plan. With a larger deposit, the percentages drop proportionally.',
+      }
+    : {
+        title: 'Как тариф распоряжается вашим депозитом',
+        sub:
+          'Никакой магии. Каждый тариф замораживает только часть вашего баланса на Bybit как «маржинальный пул»; остальное лежит нетронутым. ' +
+          'Пул делится между стратегиями; каждая открывает аккуратно рассчитанную позицию так, чтобы worst-case потеря по SL не превышала 2% от депозита. ' +
+          'Ниже — точные цифры для каждого пакета при минимальном депо.',
+        step1Title: '1. Депозит → маржинальный пул',
+        step1Body: 'Каждый тариф использует 12–20% депозита как рабочий margin pool. Остальные 80%+ — резерв, нетронутый, доступен вам в любой момент.',
+        step2Title: '2. Пул → стратегии',
+        step2Body: 'Пул делится поровну между стратегиями тарифа. Каждая стратегия получает одинаковую сумму маржи под работу.',
+        step3Title: '3. Стратегия → сделка',
+        step3Body: 'Каждая стратегия умножает свою маржу на безопасное плечо и получает размер позиции (notional). Шире SL → меньше плечо → меньше сделка. Риск по сделке всегда ограничен SL × notional.',
+        colStrat: 'Стратегия',
+        colSL: 'SL по цене',
+        colSize: 'Размер сделки',
+        colLeverage: 'Плечо',
+        colMaxLoss: 'Макс. потеря',
+        colDepoPct: '% депозита',
+        atDepo: 'При минимальном депо',
+        marginPool: 'Маржинальный пул',
+        perStrat: 'На каждую стратегию',
+        allStops: 'Если ВСЕ стопы сработают одновременно',
+        ofDepo: 'от депозита',
+        disclaimer: 'Все расчёты сделаны на минимальном депозите тарифа. При большем балансе проценты пропорционально снижаются.',
+      };
+
+  const tierBlocks = tiers.map((tier) => {
+    const minDepo = tier.minBalanceUsdt;
+    const poolPctOfDepo = (tier.marginPoolUsd / minDepo) * 100;
+    const perStratMargin = tier.marginPoolUsd / tier.strategyIds.length;
+    let worstAllStops = 0;
+    const rows = tier.strategyIds.map((sid) => {
+      const cfg = STRATEGY_CONFIGS[sid];
+      const size = computeTierTradeSize(tier.id, sid);
+      if (!cfg || !size) {
+        return `<tr><td colspan="6" class="at-bd-empty">${escapeHtml(sid)} — нет данных</td></tr>`;
+      }
+      const maxLoss = cfg.slPct * size.notionalUsd;
+      const maxLossPct = (maxLoss / minDepo) * 100;
+      worstAllStops += maxLoss;
+      const coin = (cfg.symbol ?? 'ANY').replace(/USDT$/, '');
+      return `
+        <tr>
+          <td class="at-bd-strat">
+            <b>${escapeHtml(coin)}</b>
+            <span class="at-bd-strat-meta">${escapeHtml(cfg.timeframe)}m · STRAT-${escapeHtml(cfg.code)}</span>
+          </td>
+          <td class="at-bd-num">−${(cfg.slPct * 100).toFixed(1)}%</td>
+          <td class="at-bd-num">$${size.notionalUsd.toFixed(0)}</td>
+          <td class="at-bd-num at-bd-dim">${size.leverage}×</td>
+          <td class="at-bd-num at-bd-loss">−$${maxLoss.toFixed(2)}</td>
+          <td class="at-bd-num at-bd-loss">−${maxLossPct.toFixed(2)}%</td>
+        </tr>`;
+    }).join('');
+    const worstAllPct = (worstAllStops / minDepo) * 100;
+    return `
+      <div class="at-bd-tier">
+        <div class="at-bd-tier-head">
+          <div class="at-bd-tier-name">${escapeHtml(tier.name)}</div>
+          <div class="at-bd-tier-depo">${t.atDepo} <b>$${minDepo.toLocaleString()}</b></div>
+        </div>
+        <div class="at-bd-tier-stats">
+          <div class="at-bd-stat">
+            <div class="at-bd-stat-label">${t.marginPool}</div>
+            <div class="at-bd-stat-value"><b>$${tier.marginPoolUsd}</b> <span class="at-bd-dim">(${poolPctOfDepo.toFixed(1)}% ${t.ofDepo})</span></div>
+          </div>
+          <div class="at-bd-stat">
+            <div class="at-bd-stat-label">${t.perStrat}</div>
+            <div class="at-bd-stat-value"><b>$${perStratMargin.toFixed(0)}</b> <span class="at-bd-dim">× ${tier.strategyIds.length}</span></div>
+          </div>
+        </div>
+        <div class="at-bd-tbl-wrap">
+          <table class="at-bd-tbl">
+            <thead>
+              <tr>
+                <th>${t.colStrat}</th>
+                <th class="at-bd-num-h">${t.colSL}</th>
+                <th class="at-bd-num-h">${t.colSize}</th>
+                <th class="at-bd-num-h">${t.colLeverage}</th>
+                <th class="at-bd-num-h">${t.colMaxLoss}</th>
+                <th class="at-bd-num-h">${t.colDepoPct}</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="at-bd-worst">
+          <span class="at-bd-worst-label">${t.allStops}:</span>
+          <span class="at-bd-worst-value">
+            <b>−$${worstAllStops.toFixed(2)}</b>
+            <span class="at-bd-dim">= <b>−${worstAllPct.toFixed(2)}%</b> ${t.ofDepo}</span>
+          </span>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <section class="at-section at-bd" id="deposit-breakdown">
+      <h2 class="at-section-title">${ico('💰')}${t.title}</h2>
+      <p class="at-section-sub">${t.sub}</p>
+
+      <div class="at-bd-steps">
+        <div class="at-bd-step">
+          <div class="at-bd-step-num">1</div>
+          <div>
+            <div class="at-bd-step-title">${t.step1Title}</div>
+            <div class="at-bd-step-body">${t.step1Body}</div>
+          </div>
+        </div>
+        <div class="at-bd-step">
+          <div class="at-bd-step-num">2</div>
+          <div>
+            <div class="at-bd-step-title">${t.step2Title}</div>
+            <div class="at-bd-step-body">${t.step2Body}</div>
+          </div>
+        </div>
+        <div class="at-bd-step">
+          <div class="at-bd-step-num">3</div>
+          <div>
+            <div class="at-bd-step-title">${t.step3Title}</div>
+            <div class="at-bd-step-body">${t.step3Body}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="at-bd-tiers">${tierBlocks}</div>
+
+      <p class="at-bd-note">${t.disclaimer}</p>
     </section>
   `;
 }
@@ -1663,6 +1839,124 @@ function styles(): string {
   @media (max-width: 480px) {
     .at-price-num { font-size: 38px; }
     .at-hero-title { font-size: 26px; }
+  }
+
+  /* ---------- Deposit breakdown section (Phase O) ---------- */
+  .at-bd {}
+  .at-bd-steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin: 24px 0 28px;
+  }
+  .at-bd-step {
+    display: flex; gap: 14px; align-items: flex-start;
+    background: #11161d; border: 1px solid #1f2630;
+    border-radius: 10px; padding: 16px;
+  }
+  .at-bd-step-num {
+    width: 32px; height: 32px;
+    background: rgba(74, 217, 145, 0.14);
+    color: #4ad991;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px;
+    flex-shrink: 0;
+  }
+  .at-bd-step-title {
+    font-size: 13.5px; font-weight: 600; color: #e8edf2;
+    margin-bottom: 4px;
+  }
+  .at-bd-step-body {
+    font-size: 12.5px; color: #98a2b3; line-height: 1.5;
+  }
+  .at-bd-tiers {
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .at-bd-tier {
+    background: #11161d; border: 1px solid #1f2630;
+    border-radius: 12px; padding: 18px 20px;
+  }
+  .at-bd-tier-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 12px; flex-wrap: wrap; gap: 8px;
+  }
+  .at-bd-tier-name {
+    font-size: 18px; font-weight: 700; color: #fff;
+  }
+  .at-bd-tier-depo {
+    font-size: 12.5px; color: #98a2b3;
+  }
+  .at-bd-tier-depo b { color: #e8edf2; font-weight: 600; }
+  .at-bd-tier-stats {
+    display: flex; gap: 24px; margin-bottom: 14px;
+    padding: 10px 12px; background: #0e131a;
+    border-radius: 8px; flex-wrap: wrap;
+  }
+  .at-bd-stat-label {
+    font-size: 10.5px; color: #6b7480;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    margin-bottom: 2px;
+  }
+  .at-bd-stat-value {
+    font-size: 14px; color: #e8edf2;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .at-bd-stat-value b { color: #fff; font-weight: 600; }
+  .at-bd-dim { color: #8590a0; font-weight: 400; }
+  .at-bd-tbl-wrap { overflow-x: auto; }
+  .at-bd-tbl {
+    width: 100%; border-collapse: collapse;
+    font-size: 13px; color: #e8edf2;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+  .at-bd-tbl th {
+    text-align: left; padding: 8px 10px;
+    font-size: 10.5px; color: #6b7480;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    font-weight: 600;
+    border-bottom: 1px solid #1f2630;
+  }
+  .at-bd-tbl td {
+    padding: 9px 10px; border-bottom: 1px solid #1a1f27;
+  }
+  .at-bd-tbl tr:last-child td { border-bottom: none; }
+  .at-bd-num, .at-bd-num-h {
+    text-align: right;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .at-bd-strat b { color: #fff; font-weight: 600; font-size: 13.5px; }
+  .at-bd-strat-meta {
+    display: block; font-size: 10.5px; color: #6b7480;
+    margin-top: 2px;
+  }
+  .at-bd-loss { color: #ff8b8b; font-weight: 600; }
+  .at-bd-empty { color: #6b7480; font-style: italic; text-align: center; }
+  .at-bd-worst {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 8px;
+    margin-top: 14px; padding: 12px 14px;
+    background: rgba(255, 188, 70, 0.08);
+    border: 1px solid rgba(255, 188, 70, 0.30);
+    border-radius: 8px;
+  }
+  .at-bd-worst-label {
+    font-size: 12.5px; color: #ffbc46; font-weight: 600;
+  }
+  .at-bd-worst-value {
+    font-size: 14.5px; color: #ff8b8b; font-weight: 600;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .at-bd-worst-value b { color: #ffc16b; font-weight: 700; }
+  .at-bd-note {
+    font-size: 12px; color: #8590a0; text-align: center;
+    margin-top: 18px; line-height: 1.5;
+  }
+
+  @media (max-width: 720px) {
+    .at-bd-steps { grid-template-columns: 1fr; }
+    .at-bd-tier-name { font-size: 16px; }
+    .at-bd-tier-stats { gap: 14px; }
   }
 </style>
 `;
