@@ -2045,11 +2045,14 @@ function styles(): string {
     opacity: 0.85;
   }
   /* Huge dimmed tier emoji floating behind the content — adds personality
-     without sacrificing legibility (z-index keeps text on top). */
+     without sacrificing legibility. Pinned to the BOTTOM-RIGHT corner so
+     it doesn't clip into the badge pill / tier name at the top (where
+     medal-emoji ribbons used to read as a visible green line crossing
+     the popular/bonus badges). */
   .at-tier-card-deco {
-    position: absolute; top: -20px; right: -16px;
-    font-size: 132px; line-height: 1;
-    opacity: 0.07; pointer-events: none;
+    position: absolute; bottom: -24px; right: -18px;
+    font-size: 120px; line-height: 1;
+    opacity: 0.05; pointer-events: none;
     filter: grayscale(0.3);
     transition: opacity 320ms, transform 320ms;
   }
@@ -2096,7 +2099,7 @@ function styles(): string {
     }
     .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
     /* Smaller deco + glow on mobile so they don't dominate the smaller card. */
-    .at-tier-card-deco { font-size: 88px; top: -10px; right: -8px; }
+    .at-tier-card-deco { font-size: 88px; bottom: -12px; right: -10px; }
     .at-tier-card-glow { height: 80px; }
     /* Cards with badge need bigger top padding here because the badge
        sits ABOVE the card content; without this the tier name pushes
