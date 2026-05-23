@@ -111,15 +111,6 @@ function fmtDateTime(ts: number): string {
   );
 }
 
-function fmtAge(ts: number): string {
-  const ageMs = Date.now() - ts;
-  const min = Math.floor(ageMs / 60_000);
-  if (min < 60) return `${min} мин назад`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h} ч назад`;
-  const d = Math.floor(h / 24);
-  return `${d} д назад`;
-}
 
 /** Compact "X дн осталось" / "истекло N дн назад" label for the План
  *  column, shown below the status badge for non-VIP users. */
@@ -130,6 +121,38 @@ function daysLeftLabel(accessUntil: number): string {
   if (days === 0) return `<span class="plan-days-warn">истекает сегодня</span>`;
   if (days <= 3) return `<span class="plan-days-warn">${days} дн осталось</span>`;
   return `<span class="plan-days-ok">${days} дн осталось</span>`;
+}
+
+/** Access cell — what the operator wants to see at a glance: is this
+ *  user on a TRIAL, on a paid ACTIVE plan, expired, cancelled, or VIP
+ *  (permanent), and how many days remain. Replaces the «last activity»
+ *  column. */
+function accessCell(sub: SubscriptionRow | undefined): string {
+  if (!sub) {
+    return `<span class="acc-cell-empty">— нет подписки</span>`;
+  }
+  if (sub.plan === 'vip') {
+    return `<span class="acc-cell-vip">👑 VIP · бессрочно</span>`;
+  }
+  if (sub.status === 'cancelled') {
+    return `<span class="acc-cell-bad">⏹ отменён</span>`;
+  }
+  const ms = sub.access_until - Date.now();
+  const days = Math.ceil(ms / 86_400_000);
+  if (sub.status === 'expired' || days < 0) {
+    return (
+      `<span class="acc-cell-bad">✗ истёк</span>` +
+      `<span class="acc-cell-sub">${days < 0 ? `${Math.abs(days)} дн назад` : 'сегодня'}</span>`
+    );
+  }
+  const isTrial = sub.status === 'trial';
+  const label = isTrial ? '🎁 Триал' : '✓ Активна';
+  const cls = isTrial ? 'acc-cell-trial' : 'acc-cell-active';
+  const daysCls = days === 0 ? 'acc-cell-warn'
+                : days <= 3 ? 'acc-cell-warn'
+                : 'acc-cell-ok';
+  const daysStr = days === 0 ? 'истекает сегодня' : `${days} дн осталось`;
+  return `<span class="${cls}">${label}</span><span class="acc-cell-sub ${daysCls}">${daysStr}</span>`;
 }
 
 /** Bulk-fetch subscriptions for a list of user_ids in one query so the
@@ -298,7 +321,7 @@ function renderDashboard(csrfToken: string): string {
               <td>${apiCell}</td>
               <td style="text-align:center">${stratCell}</td>
               <td class="mono">${escapeHtml(r.ip_first ?? '—')}</td>
-              <td>${fmtAge(r.last_seen_at)}</td>
+              <td class="acc-cell">${accessCell(sub)}</td>
               <td>${toggle}</td>
             </tr>`;
         })
@@ -351,7 +374,7 @@ function renderDashboard(csrfToken: string): string {
               <th>API Bybit</th>
               <th>Страт.</th>
               <th>IP</th>
-              <th>Последняя активность</th>
+              <th>Доступ</th>
               <th>Действия</th>
             </tr>
           </thead>
@@ -397,6 +420,18 @@ function renderDashboard(csrfToken: string): string {
       td.dt { white-space: nowrap; line-height: 1.35; }
       td.dt .dt-date { display: block; }
       td.dt .dt-time { display: block; color: #8590a0; font-size: 11.5px; }
+      /* Access cell — replaces «last activity». Two-line: kind on top
+         («Триал»/«Активна»/«VIP»/«истёк»), days-left below. */
+      td.acc-cell { white-space: nowrap; line-height: 1.35; }
+      td.acc-cell > span { display: block; }
+      .acc-cell-trial  { color: #88e1b4; font-weight: 600; }
+      .acc-cell-active { color: #4ad991; font-weight: 600; }
+      .acc-cell-vip    { color: #f3d266; font-weight: 600; }
+      .acc-cell-bad    { color: #ff8b8b; font-weight: 600; }
+      .acc-cell-empty  { color: #8590a0; font-style: italic; }
+      .acc-cell-sub    { color: #8590a0; font-size: 11.5px; }
+      .acc-cell-sub.acc-cell-warn { color: #ffbc46; }
+      .acc-cell-sub.acc-cell-ok   { color: #8590a0; }
       .adm-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
       .adm-users-table { min-width: 1000px; }
       .adm-scroll-hint { display: none; font-size: 12px; color: #8590a0; padding: 0 0 8px; }
