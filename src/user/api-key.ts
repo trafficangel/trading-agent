@@ -120,6 +120,7 @@ export function renderApiKeyPage(args: {
     lang: 'ru',
     robots: 'noindex, nofollow',
     hideMobileHelpIcon: true,
+    authed: { displayName: args.displayName, phone: null },
   });
 }
 

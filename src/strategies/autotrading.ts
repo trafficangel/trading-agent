@@ -24,6 +24,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { pageShell, jsonLdService, jsonLdFaqPage, getLang } from './landing.js';
+import { getAuthedUser } from '../auth/routes.js';
 import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
 import { listTiers, tierCoinTickers, getTierMarketingNumbers } from './tier-config.js';
 
@@ -41,7 +42,10 @@ function ico(emoji: string): string {
   return `<span class="at-ico" aria-hidden="true">${emoji}</span>`;
 }
 
-function renderPage(lang: Lang): string {
+function renderPage(
+  lang: Lang,
+  authed: { displayName: string | null; phone: string | null } | null = null,
+): string {
   const strategies = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
   const stratList = strategies
     .sort((a, b) => a.code.localeCompare(b.code))
@@ -125,6 +129,7 @@ function renderPage(lang: Lang): string {
     robots: 'index, follow',
     canonicalPath: '/autotrading',
     description,
+    authed,
     jsonLd: [
       jsonLdService({
         name: serviceName,
@@ -1671,6 +1676,8 @@ export async function autotradingRoute(app: FastifyInstance): Promise<void> {
     // upstream cache (CDN, browser) must keep one variant per cookie value
     // — otherwise an EN visitor could get an RU-cached page or vice versa.
     reply.header('vary', 'Cookie');
-    return reply.send(renderPage(lang));
+    const u = getAuthedUser(req);
+    const authed = u ? { displayName: u.displayName, phone: u.phone } : null;
+    return reply.send(renderPage(lang, authed));
   });
 }

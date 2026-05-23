@@ -75,6 +75,7 @@ export function renderStrategiesPage(args: RenderArgs): string {
     lang: 'ru',
     robots: 'noindex, nofollow',
     hideMobileHelpIcon: true,
+    authed: { displayName: args.displayName, phone: null },
   });
 }
 

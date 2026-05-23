@@ -2,6 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 import { getStrategyLiveStats } from './live-stats.js';
 import { pageShell, loadBacktestTrades, formatSinceDate, getLang } from './landing.js';
+import { getAuthedUser } from '../auth/routes.js';
+
+function authedFromReq(req: import('fastify').FastifyRequest): { displayName: string | null; phone: string | null } | null {
+  const u = getAuthedUser(req);
+  return u ? { displayName: u.displayName, phone: u.phone } : null;
+}
 import { enrichTrades } from './backtest-recompute.js';
 
 /**
@@ -886,7 +892,11 @@ function homeEffectsScript(): string {
 </script>`;
 }
 
-function renderHome(lang: Lang, activePositions: import('../api/active-positions.js').ActivePositionView[]): string {
+function renderHome(
+  lang: Lang,
+  activePositions: import('../api/active-positions.js').ActivePositionView[],
+  authed: { displayName: string | null; phone: string | null } | null = null,
+): string {
   const c = CONTENT[lang];
   const otherLang: Lang = lang === 'ru' ? 'en' : 'ru';
   const otherLangPath = otherLang === 'ru' ? '/' : '/en';
@@ -1402,6 +1412,7 @@ function renderHome(lang: Lang, activePositions: import('../api/active-positions
     showLangToggle: true,
     canonicalPath,
     description,
+    authed,
   });
 }
 
@@ -1415,19 +1426,26 @@ export async function homeRoute(app: FastifyInstance): Promise<void> {
   app.get('/', async (req, reply) => {
     const lang = getLang(req);
     reply.type('text/html; charset=utf-8');
-    reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
+    // Cache only when anonymous — once a session cookie is present the
+    // header includes a personalised auth pill, so we must not let the
+    // CDN return a logged-in variant to other visitors.
+    const authed = authedFromReq(req);
+    if (authed) reply.header('Cache-Control', 'private, no-store');
+    else reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
     reply.header('Vary', 'Cookie');
     // Server-render with whatever's in the 8s cache. Client polls the
     // /api/active-positions endpoint every 10s to keep numbers fresh.
     const positions = await getActivePositionsCached().catch(() => []);
-    return renderHome(lang, positions);
+    return renderHome(lang, positions, authed);
   });
 
   // /en — explicit alias for direct deep-links (sitemap, external SEO).
   // Also flips the cookie so subsequent navigation stays in English.
-  app.get('/en', async (_req, reply) => {
+  app.get('/en', async (req, reply) => {
     reply.type('text/html; charset=utf-8');
-    reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
+    const authed = authedFromReq(req);
+    if (authed) reply.header('Cache-Control', 'private, no-store');
+    else reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
     reply.header('Vary', 'Cookie');
     reply.setCookie('rclang', 'en', {
       path: '/',
@@ -1437,6 +1455,6 @@ export async function homeRoute(app: FastifyInstance): Promise<void> {
       maxAge: 365 * 24 * 60 * 60,
     });
     const positions = await getActivePositionsCached().catch(() => []);
-    return renderHome('en', positions);
+    return renderHome('en', positions, authed);
   });
 }

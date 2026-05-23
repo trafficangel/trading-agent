@@ -10,7 +10,7 @@ import {
   TRACK_C_NOTIONAL_USD,
 } from './track-c-config.js';
 import { recomputeBacktestStats, enrichTrades, type RecomputedStats } from './backtest-recompute.js';
-import { isAuthed } from '../auth/routes.js';
+import { isAuthed, getAuthedUser } from '../auth/routes.js';
 import {
   getStrategyLiveStats,
   getStrategyRecentTrades,
@@ -95,8 +95,6 @@ export function loadBacktestTrades(strategyId: string): BacktestTradesBundle | n
  * Cache-Control: 60 seconds — protects against scrape storms while
  * keeping the data near-realtime for genuine readers.
  */
-
-const PAGE_CACHE_SECONDS = 60;
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({
@@ -1010,6 +1008,54 @@ const STYLE = `
   .lang-toggle a.active {
     background: var(--accent-soft); color: var(--accent);
   }
+  /* Header auth-pill — visible at-a-glance indicator of session state.
+     Logged-in form shows a green dot + name (with the «›» nudging the
+     user toward /account). Anonymous form is a plain «Войти» link
+     styled like the nav links. */
+  .header-auth {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 10px 5px 11px; border-radius: 999px;
+    text-decoration: none; font-size: 12px; font-weight: 600;
+    line-height: 1.2; letter-spacing: 0.01em;
+    transition: border-color 120ms, background 120ms, color 120ms;
+    max-width: 220px;
+  }
+  .header-auth-in {
+    background: rgba(74,217,145,0.08);
+    border: 1px solid rgba(74,217,145,0.35);
+    color: #cfd6dd;
+  }
+  .header-auth-in:hover {
+    background: rgba(74,217,145,0.14);
+    border-color: rgba(74,217,145,0.55);
+    color: #fff;
+  }
+  .header-auth-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #4ad991;
+    box-shadow: 0 0 6px rgba(74,217,145,0.65);
+    flex-shrink: 0;
+  }
+  .header-auth-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 140px;
+  }
+  .header-auth-arrow {
+    color: #4ad991; font-weight: 700; font-size: 13px;
+    margin-left: -2px;
+  }
+  .header-auth-out {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  .header-auth-out:hover {
+    border-color: var(--accent); color: var(--accent);
+  }
+  @media (max-width: 540px) {
+    .header-auth-name { max-width: 80px; }
+    .header-auth { font-size: 11px; padding: 4px 9px; }
+  }
   /* Mobile burger button — hidden on desktop, replaces the .site-nav
      on narrow viewports. Toggles the .site-nav-mobile drawer below. */
   .site-burger {
@@ -1854,6 +1900,10 @@ export type PageShellOpts = {
    *  jsonLd*() helpers from this file. Each entry should be an
    *  already-serialised JSON string (without the <script> wrapper). */
   jsonLd?: string[];
+  /** Authenticated user — when set, the header renders a name pill +
+   *  «Кабинет» link instead of the «Войти» link. Pass `null` (or
+   *  omit) to render the anonymous header. */
+  authed?: { displayName: string | null; phone: string | null } | null;
 };
 
 /** Public-facing origin used to build absolute URLs for SEO tags
@@ -1978,8 +2028,22 @@ export function pageShell(
     `<a href="/set-lang/ru" class="${lang === 'ru' ? 'active' : ''}" aria-label="Русский">RU</a>` +
     `<a href="/set-lang/en" class="${lang === 'en' ? 'active' : ''}" aria-label="English">EN</a>`;
   const labels = lang === 'en'
-    ? { home: 'Home', strategies: 'Strategies', autotrading: 'Auto-trading', channel: 'Channel', support: 'Support', menu: 'Menu', close: 'Close' }
-    : { home: 'Главная', strategies: 'Стратегии', autotrading: 'Автотрейдинг', channel: 'Канал', support: 'Поддержка', menu: 'Меню', close: 'Закрыть' };
+    ? { home: 'Home', strategies: 'Strategies', autotrading: 'Auto-trading', channel: 'Channel', support: 'Support', menu: 'Menu', close: 'Close',
+        cabinet: 'Cabinet', login: 'Log in', greeting: 'Hi' }
+    : { home: 'Главная', strategies: 'Стратегии', autotrading: 'Автотрейдинг', channel: 'Канал', support: 'Поддержка', menu: 'Меню', close: 'Закрыть',
+        cabinet: 'Кабинет', login: 'Войти', greeting: 'Привет' };
+
+  // Auth pill in the header — either:
+  //  - logged in: «Привет, NAME · Кабинет» (clickable, goes to /account)
+  //  - anonymous: «Войти» link (goes to the login-mode gate)
+  const authedUser = opts.authed ?? null;
+  const authPillHtml = authedUser
+    ? `<a class="header-auth header-auth-in" href="/account" title="${escapeHtml(authedUser.displayName ?? authedUser.phone ?? '')}">` +
+        `<span class="header-auth-dot" aria-hidden="true"></span>` +
+        `<span class="header-auth-name">${escapeHtml(authedUser.displayName ?? authedUser.phone ?? labels.cabinet)}</span>` +
+        `<span class="header-auth-arrow" aria-hidden="true">›</span>` +
+      `</a>`
+    : `<a class="header-auth header-auth-out" href="/strategies?login=1">${labels.login}</a>`;
 
   const navLinksHtml = `
       <a href="/">${labels.home}</a>
@@ -2004,6 +2068,7 @@ export function pageShell(
     </a>
     <nav class="site-nav" aria-label="Primary">${navLinksHtml}</nav>
     <div class="site-nav-end">
+      ${authPillHtml}
       ${langToggleHtml ? `<div class="lang-toggle">${langToggleHtml}</div>` : ''}
       <button class="site-burger" type="button" aria-label="${labels.menu}" aria-expanded="false" aria-controls="site-nav-mobile">
         <span></span><span></span><span></span>
@@ -2272,7 +2337,10 @@ function tfLabel(tf: string): string {
   return `${m / 10080}W`;
 }
 
-function renderStrategyIndex(strategies: StrategyConfig[]): string {
+function renderStrategyIndex(
+  strategies: StrategyConfig[],
+  authed: { displayName: string | null; phone: string | null } | null = null,
+): string {
   // ---------- Portfolio aggregate ----------
   let totalClosed = 0;
   let totalOpen = 0;
@@ -2503,7 +2571,7 @@ function renderStrategyIndex(strategies: StrategyConfig[]): string {
     ${groupsHtml}
     ${empty}
     `,
-    { autoRefreshSec: 60 },
+    { autoRefreshSec: 60, authed },
   );
 }
 
@@ -2876,7 +2944,10 @@ function renderAlertIdBlock(cfg: StrategyConfig): string {
   `;
 }
 
-function renderStrategyDetail(cfg: StrategyConfig): string {
+function renderStrategyDetail(
+  cfg: StrategyConfig,
+  authed: { displayName: string | null; phone: string | null } | null = null,
+): string {
   const live = getStrategyLiveStats(cfg.id);
   return pageShell(
     `[STRAT-${cfg.code}] ${cfg.symbol ?? ''} ${cfg.timeframe}m`,
@@ -2897,7 +2968,7 @@ function renderStrategyDetail(cfg: StrategyConfig): string {
 
     ${renderLogicSection(cfg)}
     `,
-    { autoRefreshSec: 60 },
+    { autoRefreshSec: 60, authed },
   );
 }
 
@@ -3041,8 +3112,11 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
       reply.header('Cache-Control', 'private, no-store');
       return renderGatedPreview('index', renderStrategyIndex(enabled), { fromAutotrading, loginMode, lang: getLang(req) });
     }
-    reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
-    return renderStrategyIndex(enabled);
+    // Personalised header for authed users — must NOT be public-cached.
+    reply.header('Cache-Control', 'private, no-store');
+    const u = getAuthedUser(req);
+    const authed = u ? { displayName: u.displayName, phone: u.phone } : null;
+    return renderStrategyIndex(enabled, authed);
   });
 
   // Detail by code (e.g. /strategies/001) — same gating.
@@ -3063,8 +3137,11 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
       reply.header('Cache-Control', 'private, no-store');
       return renderGatedPreview('detail', renderStrategyDetail(cfg), { lang: getLang(req) });
     }
-    reply.header('Cache-Control', `public, max-age=${PAGE_CACHE_SECONDS}`);
-    return renderStrategyDetail(cfg);
+    // Personalised header — same caching concern as the index page.
+    reply.header('Cache-Control', 'private, no-store');
+    const u = getAuthedUser(req);
+    const authed = u ? { displayName: u.displayName, phone: u.phone } : null;
+    return renderStrategyDetail(cfg, authed);
   });
 }
 
