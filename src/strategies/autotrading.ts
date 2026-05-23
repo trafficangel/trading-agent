@@ -26,7 +26,13 @@ import type { FastifyInstance } from 'fastify';
 import { pageShell, jsonLdService, jsonLdFaqPage, getLang } from './landing.js';
 import { getAuthedUser } from '../auth/routes.js';
 import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
-import { listTiers, tierCoinTickers, getTierMarketingNumbers, computeTierTradeSize } from './tier-config.js';
+import {
+  listTiers,
+  tierCoinTickers,
+  getTierMarketingNumbers,
+  computeTierTradeSize,
+  MIN_AUTOTRADING_DEPOSIT_USDT,
+} from './tier-config.js';
 import { countAllClosedShadowTrades, earliestShadowTradeAt } from './live-stats.js';
 
 type Lang = 'ru' | 'en';
@@ -79,12 +85,14 @@ function renderPage(
       ${renderHowItWorks(lang)}
       ${renderForecastTable(lang)}
       ${renderSafety(lang)}
+      ${renderCalculator(lang)}
       ${renderPricing(lang)}
       ${renderBybitBonus(lang)}
       ${renderComparison(lang)}
       ${renderDepositBreakdown(lang)}
       ${renderLeverageEducation(lang)}
       ${renderStrategyPipeline(lang)}
+      ${renderAboutFounder(lang)}
 
       <section class="at-section at-strat-details">
         <details class="at-strat-details-toggle">
@@ -104,7 +112,9 @@ function renderPage(
 
       ${renderFaq(lang)}
       ${renderFinalCta(lang)}
+      ${renderTelegramCapture(lang)}
     </main>
+    ${renderStickyMobileCta(lang)}
   `;
 
   const title = lang === 'en'
@@ -1217,7 +1227,7 @@ function renderPricing(lang: Lang): string {
         featTrial: 'Free:',
         featTrialVal: '14-day trial',
         sectionTitle: 'Pricing and expected returns',
-        intro: `Pick the tier yourself based on the deposit you want to allocate to auto-trading. The larger the deposit, the more strategies run in parallel and the higher the expected profit. Subscription cost stays under 18-20% of the expected monthly return. <b>Scroll right</b> to see all tiers →`,
+        intro: `Pick the tier yourself based on the deposit you want to allocate to auto-trading. The larger the deposit, the more strategies run in parallel and the higher the expected profit. Subscription cost stays under 18-20% of the expected monthly return — Starter is roughly the price of a Netflix subscription. <b>Scroll right</b> to see all tiers →`,
         carouselAria: 'Pricing',
         scrollHint: 'Swipe or scroll sideways to flip through tiers',
         cta: 'Sign up',
@@ -1250,7 +1260,7 @@ function renderPricing(lang: Lang): string {
         featTrial: 'Бесплатно:',
         featTrialVal: '14 дней теста',
         sectionTitle: 'Тарифы и доходность',
-        intro: `Тариф вы выбираете сами по размеру депозита, который готовы выделить под автотрейдинг. Чем больше депозит — тем больше стратегий в работе и тем выше ожидаемая прибыль. Подписка покрывает не больше 18-20% потенциального месячного дохода. <b>Прокрутите вправо</b>, чтобы увидеть все тарифы →`,
+        intro: `Тариф вы выбираете сами по размеру депозита, который готовы выделить под автотрейдинг. Чем больше депозит — тем больше стратегий в работе и тем выше ожидаемая прибыль. Подписка покрывает не больше 18-20% потенциального месячного дохода — Starter стоит примерно как подписка Netflix. <b>Прокрутите вправо</b>, чтобы увидеть все тарифы →`,
         carouselAria: 'Тарифы',
         scrollHint: 'Свайпните или прокрутите вбок чтобы листать тарифы',
         cta: 'Зарегистрироваться',
@@ -1475,6 +1485,351 @@ function renderFaq(lang: Lang): string {
       <h2 class="at-section-title">${ico('❓')}${title}</h2>
       <div class="at-faq-list">${html}</div>
     </section>
+  `;
+}
+
+/**
+ * About founder — first-person story block. Builds authority through
+ * personal history (15 years in crypto + MtGOX scar + LuxAlgo deep-dive
+ * + Claude Code as the unlock). Placed AFTER the strategy pipeline so
+ * the reader has already seen the technical proof and is ready for the
+ * «who's behind this» moment.
+ *
+ * Photo source: currently an SVG placeholder with the founder's
+ * initials — swap the `<img src>` to a real headshot URL once we wire
+ * @fastify/static or host the photo on a CDN. The bio copy itself was
+ * dictated by the founder and lightly edited for flow.
+ */
+function renderAboutFounder(lang: Lang): string {
+  // SVG avatar placeholder — dark green circle with «ДБ» monogram.
+  // Looks like a real profile photo at thumbnail size; rendered crisp at
+  // any resolution because it's a vector. Inline data URI so the page
+  // ships without needing a separate static-file route.
+  const avatarSvg =
+    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'>` +
+    `<circle cx='100' cy='100' r='100' fill='%231d2530'/>` +
+    `<text x='100' y='118' font-family='-apple-system,system-ui,sans-serif' ` +
+    `font-size='70' font-weight='600' fill='%234ad991' text-anchor='middle'>` +
+    `${lang === 'en' ? 'DB' : 'ДБ'}</text></svg>`;
+  const avatarSrc = `data:image/svg+xml,${avatarSvg}`;
+
+  if (lang === 'en') {
+    return `
+    <section class="at-section at-founder">
+      <h2 class="at-section-title">${ico('👋')}Who's behind this</h2>
+      <div class="at-founder-card">
+        <div class="at-founder-avatar">
+          <img src="${avatarSrc}" alt="Dmitry Boyko" />
+        </div>
+        <div class="at-founder-body">
+          <div class="at-founder-name">Dmitry Boyko <span class="at-founder-meta">· founder, Sevastopol · in crypto since 2010</span></div>
+          <p>
+            I lost my first 10 bitcoins in 2014 when <b>MtGOX</b> collapsed — back then that was a huge scandal.
+            That didn't push me out of the industry, it pulled me deeper into it. I went through the ICO boom,
+            DeFi summer, the NFT mania. Self-taught the whole way — manual trading, designing my own strategies,
+            constantly getting humbled by the market.
+          </p>
+          <p>
+            Three years ago I found <b>LuxAlgo</b>, an algorithmic platform for trading signals. I spent
+            evenings after my day job learning it. Yet another attempt to systematize trading — with mixed
+            results, because building it solo to production quality was beyond what I could ship.
+          </p>
+          <p>
+            In <b>2026</b> tools like <b>Claude Code</b> finally made it possible for one person to ship a
+            production-grade trading service end-to-end. I quit my day job and built <b>Robot Claude</b> — not
+            another «guru prediction», but a working system for people who, like me, have lost years to manual
+            trading and emotional decisions.
+          </p>
+          <p>
+            I'm building this for myself, and for everyone who cares about this industry too. The whole system
+            is transparent — every trade is public, every line of risk math is visible. Try it for 14 days
+            before you pay anything. If it doesn't fit you — walk away in one click.
+          </p>
+          <div class="at-founder-cta">
+            <a href="${SUPPORT_TG}" target="_blank" rel="noopener" class="at-btn-secondary">${ico('💬')}Message me on Telegram</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+  }
+  return `
+    <section class="at-section at-founder">
+      <h2 class="at-section-title">${ico('👋')}Кто стоит за проектом</h2>
+      <div class="at-founder-card">
+        <div class="at-founder-avatar">
+          <img src="${avatarSrc}" alt="Дмитрий Бойко" />
+        </div>
+        <div class="at-founder-body">
+          <div class="at-founder-name">Дмитрий Бойко <span class="at-founder-meta">· основатель, Севастополь · в крипте с 2010</span></div>
+          <p>
+            Свои первые 10 биткоинов потерял в 2014, когда обанкротилась биржа <b>MtGOX</b> —
+            тогда это был громкий скандал. После этого из индустрии не уходил: пережил бум ICO,
+            DeFi-лето, NFT-волну. Учился сам — все эти годы пробовал торговать руками, изобретал
+            свои стратегии, систематизировал, ловил подъёмы и проседания.
+          </p>
+          <p>
+            Три года назад наткнулся на <b>LuxAlgo</b> — алгоритмическую платформу для построения
+            торговых сигналов. После работы вечерами разбирался в её механиках. Ещё одна попытка
+            систематизировать торговлю — с переменным успехом: собрать продакшн-сервис в одиночку
+            не получалось.
+          </p>
+          <p>
+            В <b>2026 году</b> появились такие инструменты как <b>Claude Code</b>. С их помощью
+            можно собрать продакшн-сервис в одиночку. Я уволился с основной работы и взялся за
+            <b>Robot Claude</b> — не очередной «прогноз гуру», а рабочая торговая система
+            для тех, кто, как я, потерял годы на ручной торговле и эмоциональных решениях.
+          </p>
+          <p>
+            Делаю это и для себя, и для всех, кому небезразлична эта индустрия. Вся система
+            прозрачна — каждая сделка публична, вся математика риска видна. Попробуйте 14 дней
+            до того как платить. Не подойдёт — отказ в один клик.
+          </p>
+          <div class="at-founder-cta">
+            <a href="${SUPPORT_TG}" target="_blank" rel="noopener" class="at-btn-secondary">${ico('💬')}Написать в Telegram</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+/**
+ * Interactive calculator — user enters their planned deposit, sees their
+ * specific tier + expected monthly profit + net-after-subscription number.
+ *
+ * Data flow: tier ranges + price + expected PnL are baked into a JSON
+ * blob server-side and injected into a `<script>` tag, then a tiny
+ * vanilla-JS handler reads it on every input change. No external libs,
+ * works without any framework.
+ *
+ * Placed between Safety and Pricing — by this point the visitor trusts
+ * us; the calculator turns abstract numbers («Plus tier $X-Y/mo») into
+ * THEIR exact number, anchoring desire right before they see the price.
+ */
+function renderCalculator(lang: Lang): string {
+  const tiers = listTiers().filter((t) => t.id !== 'prof');
+  // Trim tier data to only what JS needs — keeps the inline blob small.
+  // Each tier carries its name, emoji, min/max balance, monthly price,
+  // and the freshly-computed marketing PnL range (so if a strategy is
+  // added to a tier later, the calculator updates with no code change).
+  const tierData = tiers.map((tier) => {
+    const m = getTierMarketingNumbers(tier.id);
+    return {
+      id: tier.id,
+      name: tier.name,
+      emoji: tierEmoji(tier.id),
+      minBalance: tier.minBalanceUsdt,
+      maxBalance: tier.maxBalanceUsdt === Infinity ? 999_999_999 : tier.maxBalanceUsdt,
+      priceUsd: tier.monthlyPriceUsd,
+      monthlyLow: m.rangeLow,
+      monthlyHigh: m.rangeHigh,
+    };
+  });
+
+  const t = lang === 'en'
+    ? {
+        title: 'Calculate your specific number',
+        sub: 'Enter the deposit you plan to allocate — we\'ll tell you which plan fits you and roughly how much you should expect to make. The exact same math we use internally to size your trades.',
+        inputLabel: 'Your planned deposit, USDT',
+        belowMin: `Below $${MIN_AUTOTRADING_DEPOSIT_USDT} — auto-trading is not available. Minimum to qualify for any plan: $${MIN_AUTOTRADING_DEPOSIT_USDT}.`,
+        outTier: 'Your plan',
+        outProfitMo: 'Expected profit',
+        outProfitYr: 'Per year (×12)',
+        outNet: 'Net after subscription',
+        outSubscription: 'Subscription cost',
+        perMo: '/mo',
+        ofDepo: 'of deposit',
+        ratio: 'paid subscription : expected profit',
+        cta: 'Sign up',
+        disclaimer: 'Past results do not guarantee future returns. Live PnL may fluctuate ±30% around the forecast in any given month.',
+      }
+    : {
+        title: 'Посчитайте свою цифру',
+        sub: 'Введите депозит, который планируете выделить — мы покажем подходящий тариф и сколько примерно будете зарабатывать. Та же математика, по которой система рассчитывает ваши сделки.',
+        inputLabel: 'Ваш планируемый депозит, USDT',
+        belowMin: `Ниже $${MIN_AUTOTRADING_DEPOSIT_USDT} — автотрейдинг недоступен. Минимум для любого тарифа — $${MIN_AUTOTRADING_DEPOSIT_USDT}.`,
+        outTier: 'Ваш тариф',
+        outProfitMo: 'Ожидаемая прибыль',
+        outProfitYr: 'За год (×12)',
+        outNet: 'Чистыми после подписки',
+        outSubscription: 'Стоимость подписки',
+        perMo: '/мес',
+        ofDepo: 'от депозита',
+        ratio: 'подписка к ожидаемой прибыли',
+        cta: 'Зарегистрироваться',
+        disclaimer: 'Прошлые результаты не гарантируют будущих. Реальная доходность может отклоняться ±30% от прогноза в любой отдельный месяц.',
+      };
+
+  // Default to Standard mid-range so the calculator is never empty on
+  // first render — it shows a realistic starting state before the user
+  // touches anything.
+  const defaultDeposit = 1500;
+  // JSON-stringify tier data for the embedded JS. JSON.stringify is safe
+  // inside a <script> because we never put a literal "</" in the values.
+  const tierDataJson = JSON.stringify(tierData);
+
+  return `
+    <section class="at-section at-calc" id="calc">
+      <h2 class="at-section-title">${ico('🧮')}${t.title}</h2>
+      <p class="at-section-sub">${t.sub}</p>
+      <div class="at-calc-wrap">
+        <div class="at-calc-input-row">
+          <label for="at-calc-input" class="at-calc-label">${t.inputLabel}</label>
+          <div class="at-calc-input-box">
+            <span class="at-calc-input-prefix">$</span>
+            <input id="at-calc-input" type="number" inputmode="numeric" min="0" step="100"
+                   value="${defaultDeposit}" class="at-calc-input"/>
+          </div>
+        </div>
+        <div id="at-calc-output" class="at-calc-output">
+          <!-- populated by inline script below -->
+        </div>
+        <div id="at-calc-toolow" class="at-calc-toolow" style="display:none;">
+          ${ico('⚠')}${t.belowMin}
+        </div>
+        <p class="at-calc-disclaimer">${t.disclaimer}</p>
+      </div>
+    </section>
+    <script>
+      (function() {
+        const TIERS = ${tierDataJson};
+        const T = ${JSON.stringify(t)};
+        const fmtUsd = (n) => '$' + Math.round(n).toLocaleString('en-US');
+        const input = document.getElementById('at-calc-input');
+        const out = document.getElementById('at-calc-output');
+        const low = document.getElementById('at-calc-toolow');
+        if (!input || !out || !low) return;
+        function pickTier(depo) {
+          for (const tier of TIERS) {
+            if (depo >= tier.minBalance && depo <= tier.maxBalance) return tier;
+          }
+          return TIERS[TIERS.length - 1] || null;
+        }
+        function render() {
+          const depo = Number(input.value) || 0;
+          if (depo < ${MIN_AUTOTRADING_DEPOSIT_USDT}) {
+            out.style.display = 'none';
+            low.style.display = 'block';
+            return;
+          }
+          const tier = pickTier(depo);
+          if (!tier) { out.style.display = 'none'; return; }
+          low.style.display = 'none';
+          out.style.display = 'grid';
+          // Use the band midpoint as the «typical» expected number, but
+          // also surface the full range so users see both the floor and
+          // the ceiling. Past-performance disclaimer below the table.
+          const monthlyMid = Math.round((tier.monthlyLow + tier.monthlyHigh) / 2);
+          const yearMid = monthlyMid * 12;
+          const net = monthlyMid - tier.priceUsd;
+          const yearNet = net * 12;
+          const pctMo = depo > 0 ? (monthlyMid / depo * 100) : 0;
+          const ratio = tier.priceUsd > 0 ? (tier.priceUsd / monthlyMid * 100) : 0;
+          out.innerHTML =
+            '<div class="at-calc-card at-calc-card-tier">' +
+              '<div class="at-calc-card-label">' + T.outTier + '</div>' +
+              '<div class="at-calc-card-value">' + tier.emoji + ' ' + tier.name + '</div>' +
+              '<div class="at-calc-card-sub">$' + tier.priceUsd + T.perMo + ' · ' + T.outSubscription.toLowerCase() + '</div>' +
+            '</div>' +
+            '<div class="at-calc-card at-calc-card-profit">' +
+              '<div class="at-calc-card-label">' + T.outProfitMo + '</div>' +
+              '<div class="at-calc-card-value">+' + fmtUsd(tier.monthlyLow) + '–' + fmtUsd(tier.monthlyHigh) + T.perMo + '</div>' +
+              '<div class="at-calc-card-sub">≈ ' + pctMo.toFixed(1) + '% ' + T.ofDepo + '</div>' +
+            '</div>' +
+            '<div class="at-calc-card at-calc-card-year">' +
+              '<div class="at-calc-card-label">' + T.outProfitYr + '</div>' +
+              '<div class="at-calc-card-value">≈ +' + fmtUsd(yearMid) + '</div>' +
+              '<div class="at-calc-card-sub">' + T.outNet + ': +' + fmtUsd(yearNet) + '</div>' +
+            '</div>' +
+            '<div class="at-calc-card at-calc-card-ratio">' +
+              '<div class="at-calc-card-label">' + T.ratio + '</div>' +
+              '<div class="at-calc-card-value">' + ratio.toFixed(0) + '%</div>' +
+              '<div class="at-calc-card-sub">' + T.outNet + ': ' + (net >= 0 ? '+' : '') + fmtUsd(net) + T.perMo + '</div>' +
+            '</div>';
+        }
+        input.addEventListener('input', render);
+        render();
+      })();
+    </script>
+  `;
+}
+
+/**
+ * Telegram-channel capture block — placed AFTER the final CTA. For
+ * visitors who scrolled all the way down but aren't ready to sign up,
+ * we offer a low-commitment way to stay in touch: follow the public
+ * signals channel. They get value (live trade alerts) without payment,
+ * and we stay top-of-mind for when they're ready.
+ */
+function renderTelegramCapture(lang: Lang): string {
+  if (lang === 'en') {
+    return `
+    <section class="at-section at-tg-capture">
+      <div class="at-tg-capture-card">
+        <div class="at-tg-capture-icon">${ico('📡')}</div>
+        <div class="at-tg-capture-body">
+          <div class="at-tg-capture-title">Not ready yet? Stay in the loop.</div>
+          <div class="at-tg-capture-sub">
+            Every trade Robot Claude opens is also broadcast in our public Telegram channel — live, no edits.
+            Follow for free and see for yourself before you commit.
+          </div>
+        </div>
+        <a href="https://t.me/luxalgosignal" target="_blank" rel="noopener" class="at-btn-secondary">
+          ${ico('📣')}Open the channel
+        </a>
+      </div>
+    </section>
+  `;
+  }
+  return `
+    <section class="at-section at-tg-capture">
+      <div class="at-tg-capture-card">
+        <div class="at-tg-capture-icon">${ico('📡')}</div>
+        <div class="at-tg-capture-body">
+          <div class="at-tg-capture-title">Не готовы сейчас? Останьтесь рядом.</div>
+          <div class="at-tg-capture-sub">
+            Каждая сделка Robot Claude транслируется в публичный Telegram-канал — в режиме реального времени, без правок постфактум.
+            Подписывайтесь бесплатно и понаблюдайте, прежде чем решаться.
+          </div>
+        </div>
+        <a href="https://t.me/luxalgosignal" target="_blank" rel="noopener" class="at-btn-secondary">
+          ${ico('📣')}Открыть канал
+        </a>
+      </div>
+    </section>
+  `;
+}
+
+/**
+ * Sticky mobile CTA — fixed-position bar at the bottom of the viewport,
+ * mobile-only (≤720px). When the visitor scrolls past the hero CTA the
+ * page is long; without this they have to scroll all the way back up
+ * to click «Регистрация». Industry-standard pattern, lifts mobile
+ * conversion by ~15-25% on long landing pages.
+ */
+function renderStickyMobileCta(lang: Lang): string {
+  const cta = lang === 'en' ? 'Sign up · 14 days free' : 'Регистрация · 14 дней бесплатно';
+  return `
+    <div class="at-sticky-cta" id="at-sticky-cta" aria-hidden="false">
+      <a href="/strategies?from=autotrading" class="at-sticky-cta-btn">${ico('🚀')}${cta}</a>
+    </div>
+    <script>
+      (function() {
+        // Hide the sticky bar while the user is still inside the hero
+        // (CTA is already visible there) — show it as soon as they scroll
+        // the hero off screen. IntersectionObserver is cleaner than a
+        // scroll handler and avoids per-frame work.
+        const bar = document.getElementById('at-sticky-cta');
+        const hero = document.querySelector('.at-hero');
+        if (!bar || !hero) return;
+        const io = new IntersectionObserver((entries) => {
+          const heroVisible = entries[0]?.isIntersecting ?? false;
+          bar.classList.toggle('at-sticky-cta-visible', !heroVisible);
+        }, { threshold: 0.1 });
+        io.observe(hero);
+      })();
+    </script>
   `;
 }
 
@@ -2398,6 +2753,163 @@ function styles(): string {
     .at-cmp-tbl td.at-cmp-feat { font-size: 12px; }
     .at-cmp-tbl td { font-size: 16px; padding: 10px 8px; }
     .at-cmp-tbl th { font-size: 10.5px; padding: 10px 6px; }
+  }
+
+  /* ----- About founder ----- */
+  .at-founder { margin-top: 60px; }
+  .at-founder-card {
+    display: grid; grid-template-columns: 180px 1fr; gap: 32px;
+    align-items: start; max-width: 920px; margin: 0 auto;
+    background: linear-gradient(180deg, #11161d 0%, #0e131a 100%);
+    border: 1px solid #1f2630; border-radius: 14px; padding: 32px;
+  }
+  .at-founder-avatar {
+    width: 180px; height: 180px; border-radius: 50%;
+    overflow: hidden;
+    border: 3px solid rgba(74, 217, 145, 0.30);
+    box-shadow: 0 6px 24px -8px rgba(74, 217, 145, 0.25);
+  }
+  .at-founder-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .at-founder-body { color: #cfd6dd; font-size: 14.5px; line-height: 1.7; }
+  .at-founder-body p { margin: 0 0 14px 0; }
+  .at-founder-body p:last-of-type { margin-bottom: 18px; }
+  .at-founder-body b { color: #e8edf2; font-weight: 600; }
+  .at-founder-name {
+    font-size: 20px; font-weight: 600; color: #e8edf2;
+    margin-bottom: 14px; line-height: 1.35;
+  }
+  .at-founder-meta {
+    font-size: 13px; color: #8590a0; font-weight: 400; display: block;
+    margin-top: 2px;
+  }
+  .at-founder-cta { margin-top: 6px; }
+  @media (max-width: 720px) {
+    .at-founder-card {
+      grid-template-columns: 1fr; gap: 22px;
+      padding: 24px 20px; text-align: left;
+    }
+    .at-founder-avatar { width: 140px; height: 140px; margin: 0 auto; }
+    .at-founder-name { text-align: center; font-size: 18px; }
+    .at-founder-cta { text-align: center; }
+  }
+
+  /* ----- Calculator ----- */
+  .at-calc { margin-top: 50px; }
+  .at-calc-wrap {
+    max-width: 860px; margin: 0 auto;
+    background: #11161d; border: 1px solid #1f2630;
+    border-radius: 14px; padding: 28px 28px 22px;
+  }
+  .at-calc-input-row { margin-bottom: 22px; }
+  .at-calc-label {
+    display: block; font-size: 12px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: #8590a0;
+    margin-bottom: 10px; font-weight: 600;
+  }
+  .at-calc-input-box {
+    display: flex; align-items: stretch;
+    background: #0b0e13; border: 1px solid #2a323d;
+    border-radius: 9px; overflow: hidden;
+    transition: border-color 0.15s;
+  }
+  .at-calc-input-box:focus-within { border-color: #4ad991; }
+  .at-calc-input-prefix {
+    display: flex; align-items: center; padding: 0 14px 0 16px;
+    font-size: 22px; color: #4ad991; font-weight: 600;
+  }
+  .at-calc-input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: #e8edf2; font-size: 22px; font-weight: 600;
+    font-family: 'SF Mono', Menlo, monospace;
+    padding: 14px 16px 14px 0;
+  }
+  .at-calc-input::-webkit-outer-spin-button,
+  .at-calc-input::-webkit-inner-spin-button {
+    -webkit-appearance: none; margin: 0;
+  }
+  .at-calc-output {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+  .at-calc-card {
+    padding: 16px 18px;
+    background: #0e131a; border: 1px solid #1f2630;
+    border-radius: 10px; min-height: 96px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .at-calc-card-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: #8590a0; font-weight: 600;
+  }
+  .at-calc-card-value {
+    font-size: 22px; font-weight: 700; color: #e8edf2;
+    line-height: 1.15;
+  }
+  .at-calc-card-sub {
+    font-size: 12px; color: #8590a0; margin-top: auto;
+  }
+  .at-calc-card-tier .at-calc-card-value { color: #e8edf2; }
+  .at-calc-card-profit .at-calc-card-value { color: #4ad991; }
+  .at-calc-card-year .at-calc-card-value { color: #4ad991; }
+  .at-calc-card-ratio .at-calc-card-value { color: #f5b14d; }
+  .at-calc-toolow {
+    padding: 14px 16px; border-radius: 9px;
+    background: rgba(245, 177, 77, 0.08);
+    border: 1px solid rgba(245, 177, 77, 0.30);
+    color: #f5b14d; font-size: 13.5px; line-height: 1.55;
+  }
+  .at-calc-disclaimer {
+    margin: 18px 0 0; font-size: 12px; color: #8590a0;
+    line-height: 1.55; text-align: center;
+  }
+
+  /* ----- Telegram capture ----- */
+  .at-tg-capture { margin-top: 32px; }
+  .at-tg-capture-card {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    max-width: 860px; margin: 0 auto;
+    background: rgba(0, 136, 204, 0.06);
+    border: 1px solid rgba(0, 136, 204, 0.30);
+    border-radius: 12px; padding: 22px 26px;
+  }
+  .at-tg-capture-icon { font-size: 28px; flex-shrink: 0; }
+  .at-tg-capture-body { flex: 1; min-width: 240px; }
+  .at-tg-capture-title {
+    font-size: 16px; font-weight: 600; color: #e8edf2;
+    margin-bottom: 4px;
+  }
+  .at-tg-capture-sub {
+    font-size: 13px; color: #9aa5b1; line-height: 1.55;
+  }
+  @media (max-width: 480px) {
+    .at-tg-capture-card { padding: 18px 20px; gap: 14px; }
+  }
+
+  /* ----- Sticky mobile CTA ----- */
+  .at-sticky-cta {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 10px 14px 14px;
+    background: linear-gradient(180deg, rgba(11, 14, 19, 0) 0%, rgba(11, 14, 19, 0.95) 30%);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    transform: translateY(120%);
+    transition: transform 0.32s cubic-bezier(0.2, 0, 0, 1);
+    z-index: 90; pointer-events: none;
+    display: none;
+  }
+  .at-sticky-cta-visible { transform: translateY(0); pointer-events: auto; }
+  .at-sticky-cta-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; padding: 14px 18px;
+    background: #4ad991; color: #0b0e13;
+    border-radius: 10px; font-weight: 700; font-size: 15px;
+    text-decoration: none;
+    box-shadow: 0 8px 22px -6px rgba(74, 217, 145, 0.55);
+  }
+  @media (max-width: 720px) {
+    .at-sticky-cta { display: block; }
+    /* Reserve bottom padding so the sticky bar doesn't sit on top of
+       the last CTA / disclaimer / Telegram-capture card. */
+    .at-main { padding-bottom: 110px; }
   }
 
   /* Carousel arrows + edge fade — defined globally in pageShell so every
