@@ -2370,7 +2370,7 @@ export function pageShell(
       document.addEventListener('DOMContentLoaded', fn);
     }
     ready(function() {
-      // Pick up BOTH legacy data-carousel="true" and the focus variant.
+      // Pick up both data-carousel="true" and the focus variant.
       var carousels = document.querySelectorAll('[data-carousel]');
       carousels.forEach(function(wrap) {
         var track = wrap.querySelector('.rc-carousel-track');
@@ -2378,7 +2378,57 @@ export function pageShell(
         var next  = wrap.querySelector('[data-rc-next]');
         if (!track) return;
         var isFocus = wrap.getAttribute('data-carousel') === 'focus';
+
+        // ---- Looped carousel: clone last → prepend, clone first → append ----
+        // Focus mode only — gives the «cards wrap around» feel so the
+        // first card never has empty space on its left. Disabled when
+        // there are <2 real cards (looping a single card is silly).
+        var realCount = track.children.length;
+        var loopable = isFocus && realCount >= 2;
+        if (loopable) {
+          var first = track.firstElementChild;
+          var last  = track.lastElementChild;
+          var cloneLast = last.cloneNode(true);
+          var cloneFirst = first.cloneNode(true);
+          cloneLast.classList.add('rc-clone');
+          cloneFirst.classList.add('rc-clone');
+          cloneLast.setAttribute('aria-hidden', 'true');
+          cloneFirst.setAttribute('aria-hidden', 'true');
+          track.insertBefore(cloneLast, first);
+          track.appendChild(cloneFirst);
+        }
+
+        function realChildren() {
+          var nodes = track.children;
+          if (!loopable) return [].slice.call(nodes);
+          var out = [];
+          for (var i = 0; i < nodes.length; i++) {
+            if (!nodes[i].classList.contains('rc-clone')) out.push(nodes[i]);
+          }
+          return out;
+        }
+
+        function alignToFirstReal() {
+          if (!loopable) return;
+          var firstReal = track.children[1]; // index 0 is the prepended clone
+          if (!firstReal) return;
+          var trackRect = track.getBoundingClientRect();
+          var firstRect = firstReal.getBoundingClientRect();
+          var firstCentre = firstRect.left + firstRect.width / 2 - trackRect.left + track.scrollLeft;
+          var target = firstCentre - track.clientWidth / 2;
+          track.scrollTo({ left: target, behavior: 'auto' });
+        }
+        alignToFirstReal();
+
         function updateEdgeState() {
+          // In looped mode the carousel never «ends» — keep both gradient
+          // sides visible and both arrows active.
+          if (loopable) {
+            wrap.classList.remove('rc-at-start', 'rc-at-end');
+            if (prev) prev.disabled = false;
+            if (next) next.disabled = false;
+            return;
+          }
           var atStart = track.scrollLeft <= 4;
           var atEnd   = track.scrollLeft + track.clientWidth >= track.scrollWidth - 4;
           wrap.classList.toggle('rc-at-start', atStart);
@@ -2388,9 +2438,9 @@ export function pageShell(
         }
         function updateActive() {
           if (!isFocus) return;
-          // Active card = the one whose centre is closest to the
-          // track's viewport centre. Pure JS, no IntersectionObserver
-          // needed for ≤10 cards.
+          // Pick the card whose centre is closest to the viewport centre.
+          // Clones can become «active» momentarily — that's fine, the
+          // teleport step below replaces them with the real twin.
           var trackRect = track.getBoundingClientRect();
           var viewCentre = trackRect.left + trackRect.width / 2;
           var bestCard = null;
@@ -2406,25 +2456,65 @@ export function pageShell(
             track.children[j].classList.toggle('rc-card-active', track.children[j] === bestCard);
           }
         }
-        function scrollBy(dir) {
+        var teleportTimer = null;
+        function maybeTeleport() {
+          if (!loopable) return;
+          // If the centred card is a clone, silently jump scrollLeft to
+          // its real twin. Debounced so it doesn't fire mid-scroll.
+          if (teleportTimer) clearTimeout(teleportTimer);
+          teleportTimer = setTimeout(function() {
+            var nodes = track.children;
+            if (nodes.length < 3) return;
+            var trackRect = track.getBoundingClientRect();
+            var viewCentre = trackRect.left + trackRect.width / 2;
+            var firstNode = nodes[0]; // prepended clone of last
+            var lastNode  = nodes[nodes.length - 1]; // appended clone of first
+            var firstRect = firstNode.getBoundingClientRect();
+            var lastRect  = lastNode.getBoundingClientRect();
+            var threshold = trackRect.width / 2;
+            // Scrolled onto the prepended clone → jump forward by N
+            // real-card widths to land on the real last card.
+            if (firstRect.left + firstRect.width / 2 > viewCentre - threshold &&
+                firstRect.left + firstRect.width / 2 < viewCentre + threshold) {
+              var realLast = nodes[nodes.length - 2];
+              var realLastRect = realLast.getBoundingClientRect();
+              var jump = (realLastRect.left + realLastRect.width / 2) - viewCentre;
+              track.scrollTo({ left: track.scrollLeft + jump, behavior: 'auto' });
+            }
+            // Scrolled onto the appended clone → jump back by N widths
+            // to land on the real first card.
+            else if (lastRect.left + lastRect.width / 2 > viewCentre - threshold &&
+                     lastRect.left + lastRect.width / 2 < viewCentre + threshold) {
+              var realFirst = nodes[1];
+              var realFirstRect = realFirst.getBoundingClientRect();
+              var jump2 = (realFirstRect.left + realFirstRect.width / 2) - viewCentre;
+              track.scrollTo({ left: track.scrollLeft + jump2, behavior: 'auto' });
+            }
+          }, 90);
+        }
+        function scrollByOne(dir) {
           var firstChild = track.firstElementChild;
           var step = firstChild
             ? firstChild.getBoundingClientRect().width + 16
             : track.clientWidth * 0.8;
           track.scrollBy({ left: dir * step, behavior: 'smooth' });
         }
-        if (prev) prev.addEventListener('click', function() { scrollBy(-1); });
-        if (next) next.addEventListener('click', function() { scrollBy(1);  });
+        if (prev) prev.addEventListener('click', function() { scrollByOne(-1); });
+        if (next) next.addEventListener('click', function() { scrollByOne(1);  });
         track.addEventListener('scroll', function() {
           updateEdgeState();
           updateActive();
+          maybeTeleport();
         }, { passive: true });
         window.addEventListener('resize', function() {
           updateEdgeState();
           updateActive();
+          alignToFirstReal();
         });
         updateEdgeState();
         updateActive();
+        // Silence unused-var lint in case realChildren is dropped later.
+        void realChildren;
       });
     });
   })();
