@@ -1206,7 +1206,7 @@ function renderTierPicker(p: {
       [data-carousel="focus"] .tp-card.rc-card-active .tp-card-deco { opacity: 0.12; }
       @media (max-width: 640px) {
         .tp-card {
-          flex: 0 0 86vw; padding: 22px 18px 18px;
+          flex: 0 0 80vw; padding: 22px 18px 18px;
           border-radius: 16px;
           border-width: 2px;
           box-shadow: 0 4px 16px rgba(0,0,0,0.30);
@@ -1215,7 +1215,7 @@ function renderTierPicker(p: {
           border-color: var(--tier-accent);
           box-shadow: 0 6px 20px rgba(0,0,0,0.40);
         }
-        .tp-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
+        .tp-carousel { padding-left: 10vw; padding-right: 10vw; gap: 16px; }
         .tp-card-deco { font-size: 88px; top: 6px; right: 6px; }
         .tp-card-glow { height: 72px; }
       }

@@ -2099,7 +2099,12 @@ function styles(): string {
 
   @media (max-width: 640px) {
     .at-tier-card {
-      flex: 0 0 86vw; padding: 28px 20px 22px;
+      /* 80vw + 10vw padding on each side of the carousel = ~40px of
+         safe room from the viewport edge on a 390px iPhone. Earlier
+         86vw left only ~27px of margin, which combined with the card's
+         own border + active-state outline put the right-edge paint
+         dangerously close to the viewport boundary. */
+      flex: 0 0 80vw; padding: 28px 20px 22px;
       border-radius: 16px;
       /* All mobile cards get a uniform 2px border. Dim by default,
          tier-accent when active. Uniform width = no layout shift between
@@ -2116,7 +2121,10 @@ function styles(): string {
       border-color: var(--tier-accent);
       box-shadow: 0 6px 20px rgba(0,0,0,0.40);
     }
-    .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
+    /* Carousel side padding = (100 - card-width) / 2 = (100 - 80) / 2
+       = 10vw. Keeps the centred card visually balanced + leaves
+       breathing room from the viewport edge. */
+    .at-tier-carousel { padding-left: 10vw; padding-right: 10vw; gap: 16px; }
     /* Smaller deco + glow on mobile so they don't dominate the smaller card. */
     /* Smaller deco emoji on mobile (root cause of vanishing right border
        was the focus-mode scale on neighbours, not the emoji — restored). */
