@@ -1232,7 +1232,7 @@ function renderPricing(lang: Lang): string {
         featConcurrent: 'Concurrent trades:',
         upTo: 'up to',
         featFree: 'Free:',
-        featFreeBreakdown: `14-day trial + ${BYBIT_REF_BONUS_DAYS} bonus days = ${14 + BYBIT_REF_BONUS_DAYS} days`,
+        featFreeBreakdown: `${14 + BYBIT_REF_BONUS_DAYS} days (14 + ${BYBIT_REF_BONUS_DAYS} bonus)`,
         featCondition: 'Requirement:',
         featConditionVal: 'new Bybit account via',
         ourLink: 'our link',
@@ -1265,7 +1265,7 @@ function renderPricing(lang: Lang): string {
         featConcurrent: 'Сделок одновременно:',
         upTo: 'до',
         featFree: 'Бесплатно:',
-        featFreeBreakdown: `14 дней теста + ${BYBIT_REF_BONUS_DAYS} дней бонуса = ${14 + BYBIT_REF_BONUS_DAYS} дней`,
+        featFreeBreakdown: `${14 + BYBIT_REF_BONUS_DAYS} дней (14 + ${BYBIT_REF_BONUS_DAYS} бонусом)`,
         featCondition: 'Условие:',
         featConditionVal: 'новый аккаунт Bybit по',
         ourLink: 'нашей ссылке',
@@ -2052,11 +2052,10 @@ function styles(): string {
     opacity: 0.55;
   }
   /* Dimmed tier emoji in the upper-right corner — fully inside the card
-     (8px inset) so it isn't clipped by the card's overflow:hidden.
-     Slightly smaller font now that the whole emoji is visible. */
+     so it isn't clipped by the card's overflow:hidden. */
   .at-tier-card-deco {
-    position: absolute; top: 10px; right: 10px;
-    font-size: 96px; line-height: 1;
+    position: absolute; top: 8px; right: 8px;
+    font-size: 120px; line-height: 1;
     opacity: 0.07; pointer-events: none;
     filter: grayscale(0.3);
     transition: opacity 320ms, transform 320ms;
@@ -2111,7 +2110,7 @@ function styles(): string {
     }
     .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
     /* Smaller deco + glow on mobile so they don't dominate the smaller card. */
-    .at-tier-card-deco { font-size: 72px; top: 8px; right: 8px; }
+    .at-tier-card-deco { font-size: 92px; top: 6px; right: 6px; }
     .at-tier-card-glow { height: 80px; }
     .at-tier-badge { font-size: 9.5px; padding: 3px 9px; margin-bottom: 12px; }
     .at-tier-name { font-size: 17px; }

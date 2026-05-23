@@ -1183,8 +1183,8 @@ function renderTierPicker(p: {
         opacity: 0.85;
       }
       .tp-card-deco {
-        position: absolute; top: 10px; right: 10px;
-        font-size: 92px; line-height: 1;
+        position: absolute; top: 8px; right: 8px;
+        font-size: 116px; line-height: 1;
         opacity: 0.07; pointer-events: none;
         filter: grayscale(0.3);
         transition: opacity 320ms, transform 320ms;
@@ -1216,7 +1216,7 @@ function renderTierPicker(p: {
           box-shadow: 0 6px 20px rgba(0,0,0,0.40);
         }
         .tp-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
-        .tp-card-deco { font-size: 68px; top: 8px; right: 8px; }
+        .tp-card-deco { font-size: 88px; top: 6px; right: 6px; }
         .tp-card-glow { height: 72px; }
       }
       .tp-scroll-hint {
