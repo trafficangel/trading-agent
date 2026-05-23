@@ -117,17 +117,6 @@ function fmtDateTime(ts: number): string {
 }
 
 
-/** Compact "X дн осталось" / "истекло N дн назад" label for the План
- *  column, shown below the status badge for non-VIP users. */
-function daysLeftLabel(accessUntil: number): string {
-  const ms = accessUntil - Date.now();
-  const days = Math.ceil(ms / 86_400_000);
-  if (days < 0) return `<span class="plan-days-bad">истекло ${Math.abs(days)} дн назад</span>`;
-  if (days === 0) return `<span class="plan-days-warn">истекает сегодня</span>`;
-  if (days <= 3) return `<span class="plan-days-warn">${days} дн осталось</span>`;
-  return `<span class="plan-days-ok">${days} дн осталось</span>`;
-}
-
 /** Access cell — what the operator wants to see at a glance: is this
  *  user on a TRIAL, on a paid ACTIVE plan, expired, cancelled, or VIP
  *  (permanent), and how many days remain. Replaces the «last activity»
@@ -182,20 +171,31 @@ const adminListStrategyCountsStmt = db.prepare<[], { user_id: number; n: number 
     GROUP BY user_id`,
 );
 
-function planBadge(plan: 'standard' | 'vip', status: string): string {
-  if (plan === 'vip') {
-    return `<span class="plan-badge plan-vip" title="VIP — постоянный доступ">👑 VIP</span>`;
+/** Visible name of the tier the user is on. Independent of VIP-STATUS
+ *  (which is a separate billing flag — see vipStatusBadge below). */
+function tierBadge(tierId: TierId | null): string {
+  if (!tierId) {
+    return `<span class="plan-badge plan-bad">— нет тарифа</span>`;
   }
-  if (status === 'trial') {
-    return `<span class="plan-badge plan-trial">🎁 Trial</span>`;
-  }
-  if (status === 'active') {
-    return `<span class="plan-badge plan-active">✓ Active</span>`;
-  }
-  if (status === 'cancelled') {
-    return `<span class="plan-badge plan-bad">⏸ Cancelled</span>`;
-  }
-  return `<span class="plan-badge plan-bad">⛔ Expired</span>`;
+  const tier = TIER_CONFIGS[tierId];
+  const emoji =
+    tierId === 'starter'  ? '🥉'
+    : tierId === 'standard' ? '🥈'
+    : tierId === 'plus'   ? '🥇'
+    : tierId === 'pro'    ? '🏆'
+    : tierId === 'vip'    ? '👑'
+    : tierId === 'prof'   ? '💼'
+    : '•';
+  return `<span class="plan-badge tier-badge tier-badge-${tierId}" title="Тариф: ${escapeHtml(tier.name)}">${emoji} ${escapeHtml(tier.name)}</span>`;
+}
+
+/** VIP STATUS — completely separate from the VIP TIER. Set via
+ *  user_subscriptions.plan='vip', this is the "operator's friend /
+ *  beta tester — free access forever" flag. Shown as a small chip
+ *  next to the tier badge ONLY when set. */
+function vipStatusBadge(plan: 'standard' | 'vip'): string {
+  if (plan !== 'vip') return '';
+  return `<span class="plan-badge vip-status" title="VIP-статус: бесплатный безлимитный доступ к сервису">⭐ VIP-доступ</span>`;
 }
 
 function renderDashboard(csrfToken: string, query: Record<string, string | undefined> = {}): string {
@@ -236,8 +236,13 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
           const name = r.display_name ?? '—';
           const sub = subs.get(r.id);
           const plan = sub?.plan ?? 'standard';
-          const status = sub?.status ?? '—';
-          const badge = sub ? planBadge(plan, status) : '<span class="plan-badge plan-bad">—</span>';
+          // План column — show actual tier + (separately) VIP-status chip
+          // when the operator has flagged this user for free access.
+          // Trial/active/expired status lives in the «Доступ» column now.
+          const tier = (sub?.tier_id as TierId | null | undefined) ?? null;
+          const badge = sub
+            ? tierBadge(tier) + vipStatusBadge(plan)
+            : '<span class="plan-badge plan-bad">— нет подписки</span>';
 
           // Autotrading-funnel signals at-a-glance:
           //   - API: green ✓ if connected + verified + not revoked, dash otherwise
@@ -311,16 +316,12 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
                 <button class="adm-btn adm-btn-danger" type="submit" title="Удалить пользователя и все его данные">🗑 Удалить</button>
               </form>`;
           const toggle = `<div class="adm-actions">${assignForm}${extendOnlyForm}${deleteForm}</div>`;
-          // Days-left badge for the План column when on standard.
-          const daysLeftBadge = sub && plan === 'standard' && status !== 'cancelled'
-            ? `<div class="plan-days">${daysLeftLabel(sub.access_until)}</div>`
-            : '';
           return `
             <tr>
               <td class="dt">${fmtDateTime(r.created_at)}</td>
               <td>${escapeHtml(name)}</td>
               <td class="mono">${escapeHtml(phone)}</td>
-              <td>${badge}${daysLeftBadge}</td>
+              <td>${badge}</td>
               <td>${apiCell}</td>
               <td class="mono">${escapeHtml(r.ip_first ?? '—')}</td>
               <td class="acc-cell">${accessCell(sub)}</td>
@@ -462,6 +463,25 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
       .plan-trial { background: rgba(74, 217, 145, 0.10); color: #4ad991; border: 1px solid rgba(74, 217, 145, 0.4); }
       .plan-active { background: rgba(74, 217, 145, 0.10); color: #4ad991; border: 1px solid rgba(74, 217, 145, 0.4); }
       .plan-bad { background: rgba(255, 99, 99, 0.10); color: #ff8b8b; border: 1px solid rgba(255, 99, 99, 0.4); }
+      /* Tier badges in the «План» column — one colour per tier so the
+         operator can scan distribution at a glance. */
+      .tier-badge { font-weight: 600; }
+      .tier-badge-starter  { background: rgba(160,160,160,0.12); color: #cfd6dd; border: 1px solid rgba(160,160,160,0.40); }
+      .tier-badge-standard { background: rgba(116,170,255,0.14); color: #9bc1ff; border: 1px solid rgba(116,170,255,0.45); }
+      .tier-badge-plus     { background: rgba(74,217,145,0.14);  color: #5ce0a0; border: 1px solid rgba(74,217,145,0.45); }
+      .tier-badge-pro      { background: rgba(255,193,107,0.14); color: #ffc16b; border: 1px solid rgba(255,193,107,0.50); }
+      .tier-badge-vip      { background: rgba(212,175,55,0.16);  color: #f3d266; border: 1px solid rgba(212,175,55,0.55); }
+      .tier-badge-prof     { background: rgba(180,120,255,0.14); color: #c599ff; border: 1px solid rgba(180,120,255,0.50); }
+      /* VIP-STATUS chip — separate from VIP TIER. Means «free access
+         forever», granted to operator friends / beta testers. Rendered
+         next to the tier badge with the ⭐ icon. */
+      .vip-status {
+        margin-left: 6px; padding: 2px 7px; border-radius: 6px;
+        background: rgba(243,210,102,0.18);
+        color: #f5d970; border: 1px solid rgba(243,210,102,0.55);
+        font-size: 10.5px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.04em;
+      }
       .adm-btn {
         background: #1a2129;
         border: 1px solid #2a323d;
