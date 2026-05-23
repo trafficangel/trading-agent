@@ -2045,15 +2045,13 @@ function styles(): string {
     background: radial-gradient(ellipse 60% 100% at 50% 0%, var(--tier-accent-soft) 0%, transparent 75%);
     opacity: 0.55;
   }
-  /* Huge dimmed tier emoji floating behind the content — adds personality
-     without sacrificing legibility. Pinned to the BOTTOM-RIGHT corner so
-     it doesn't clip into the badge pill / tier name at the top (where
-     medal-emoji ribbons used to read as a visible green line crossing
-     the popular/bonus badges). */
+  /* Huge dimmed tier emoji in the upper-right corner. Safe to put back
+     up here now that the badge is an inline chip in the card flow
+     (no more absolute-positioned pill clashing with the medal ribbon). */
   .at-tier-card-deco {
-    position: absolute; bottom: -24px; right: -18px;
+    position: absolute; top: -20px; right: -16px;
     font-size: 120px; line-height: 1;
-    opacity: 0.05; pointer-events: none;
+    opacity: 0.06; pointer-events: none;
     filter: grayscale(0.3);
     transition: opacity 320ms, transform 320ms;
   }
@@ -2096,7 +2094,7 @@ function styles(): string {
     }
     .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
     /* Smaller deco + glow on mobile so they don't dominate the smaller card. */
-    .at-tier-card-deco { font-size: 88px; bottom: -12px; right: -10px; }
+    .at-tier-card-deco { font-size: 88px; top: -12px; right: -10px; }
     .at-tier-card-glow { height: 80px; }
     .at-tier-badge { font-size: 9.5px; padding: 3px 9px; margin-bottom: 12px; }
     .at-tier-name { font-size: 17px; }
