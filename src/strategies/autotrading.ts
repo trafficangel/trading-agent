@@ -2106,14 +2106,16 @@ function styles(): string {
          making the outline read as «only top is gold». */
       box-shadow: 0 4px 16px rgba(0,0,0,0.30);
     }
-    /* Active card on mobile: outline rendered INSIDE the card edges
-       (negative outline-offset). Outlines are painted ABOVE the card's
-       descendants AND aren't clipped by parent overflow, so the ring
-       reliably renders on all four sides regardless of any glow div,
-       deco emoji or carousel scroll position underneath. */
+    /* Active card on mobile: real 2px border in the tier accent colour.
+       Both inset box-shadow and outline tried first — both rendered
+       inconsistently on iOS Safari around the carousel's overflow + scroll-
+       snap interactions. A real border is the most reliable; we offset
+       the +1px width change with a -1px margin so layout stays stable
+       and the card stays exactly aligned with its siblings in the strip. */
     [data-carousel="focus"] .at-tier-card.rc-card-active {
-      outline: 2px solid var(--tier-accent);
-      outline-offset: -2px;
+      border-width: 2px;
+      border-color: var(--tier-accent);
+      margin: -1px;
       box-shadow: 0 6px 20px rgba(0,0,0,0.40);
     }
     .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
