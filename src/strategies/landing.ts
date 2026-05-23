@@ -1813,6 +1813,27 @@ const STYLE = `
     );
     pointer-events: none;
   }
+  /* Position counter — small pill in the top-right showing «3/6».
+     Sits above the radial glow (z-index:2) and inside the card's
+     overflow:hidden so it never spills outside. */
+  .live-pos-num {
+    position: absolute; top: 10px; right: 10px;
+    z-index: 2;
+    display: inline-flex; align-items: baseline; gap: 1px;
+    background: rgba(11, 14, 19, 0.85);
+    border: 1px solid rgba(74, 217, 145, 0.30);
+    color: var(--accent);
+    padding: 3px 10px; border-radius: 999px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11.5px; font-weight: 700;
+    letter-spacing: 0.02em;
+    line-height: 1.3;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  .live-pos-num [data-pos-num-cur] { color: var(--accent); }
+  .live-pos-num .live-pos-num-sep { color: rgba(74, 217, 145, 0.55); margin: 0 1px; }
+  .live-pos-num [data-pos-num-total] { color: var(--text-dim); font-weight: 500; }
   /* Two-row layout: top row = trade ID + side pill (no wrapping issues),
    * bottom row = dim meta (STRAT-XXX · SYMBOL). Was a single squeezed flex
    * row that wrapped the «ШОРТ» label badly when card width tightened. */

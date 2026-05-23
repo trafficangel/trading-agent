@@ -800,6 +800,15 @@ function homeEffectsScript(): string {
           grid.classList.add('live-pos-grid');
           grid.setAttribute('data-mode', 'grid');
         }
+        // Re-number cards 1/N, 2/N, ... after every poll tick so a
+        // closed/added position doesn't leave stale «3/5» on the next card.
+        var remaining = grid.querySelectorAll('.live-pos-card');
+        for (var nIdx = 0; nIdx < remaining.length; nIdx++) {
+          var cur = remaining[nIdx].querySelector('[data-pos-num-cur]');
+          var tot = remaining[nIdx].querySelector('[data-pos-num-total]');
+          if (cur) cur.textContent = String(nIdx + 1);
+          if (tot) tot.textContent = String(remaining.length);
+        }
         // Toggle the carousel-hint banner that lives just below the grid.
         var hint = section.querySelector('.live-pos-scroll-hint');
         if (nextCount >= 4 && !hint) {
@@ -880,7 +889,7 @@ function renderHome(
   // Client polls /api/active-positions every 10s and patches the DOM
   // in-place — numbers (price / PnL / age) update without a reload.
   // Each card has data-* hooks the script reads/writes.
-  const renderPositionCard = (p: import('../api/active-positions.js').ActivePositionView): string => {
+  const renderPositionCard = (p: import('../api/active-positions.js').ActivePositionView, idx: number, total: number): string => {
     const sideEmoji = p.side === 'long' ? '🟢' : '🔴';
     const sideLabel = lang === 'en' ? (p.side === 'long' ? 'LONG' : 'SHORT') : (p.side === 'long' ? 'ЛОНГ' : 'ШОРТ');
     const pnlSign = p.pnlUsd >= 0 ? '+' : '−';
@@ -894,6 +903,9 @@ function renderHome(
       : (p.currentPrice <= p.entry ? 'pos' : 'neg');
     return `
       <div class="live-pos-card" data-strategy="${escapeHtml(p.strategyCode)}" data-trade-id="${escapeHtml(p.tradeId)}">
+        <div class="live-pos-num" data-pos-num aria-label="${lang === 'en' ? 'Position' : 'Позиция'} ${idx} ${lang === 'en' ? 'of' : 'из'} ${total}">
+          <span data-pos-num-cur>${idx}</span><span class="live-pos-num-sep">/</span><span data-pos-num-total>${total}</span>
+        </div>
         <div class="live-pos-head">
           <div class="live-pos-id-row">
             <span class="live-pos-id">${sideEmoji} <b>${escapeHtml(p.tradeId)}</b></span>
@@ -949,7 +961,7 @@ function renderHome(
   const innerHtml = activePositions.length === 0
     ? ''
     : `<div class="${gridClass} ${useCarousel ? 'rc-carousel-track' : ''}" data-positions-grid data-mode="${useCarousel ? 'carousel' : 'grid'}">
-         ${activePositions.map(renderPositionCard).join('')}
+         ${activePositions.map((p, i) => renderPositionCard(p, i + 1, activePositions.length)).join('')}
        </div>`;
   const positionsBody = activePositions.length === 0
     ? ''
