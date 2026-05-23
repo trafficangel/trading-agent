@@ -171,8 +171,10 @@ const adminListStrategyCountsStmt = db.prepare<[], { user_id: number; n: number 
     GROUP BY user_id`,
 );
 
-/** Visible name of the tier the user is on. Independent of VIP-STATUS
- *  (which is a separate billing flag — see vipStatusBadge below). */
+/** Visible name of the tier the user is on. VIP-status (the «free
+ *  access forever» billing flag, plan='vip') is NOT shown here — the
+ *  Доступ column already says «👑 VIP · бессрочно» when applicable,
+ *  no need to duplicate. */
 function tierBadge(tierId: TierId | null): string {
   if (!tierId) {
     return `<span class="plan-badge plan-bad">— нет тарифа</span>`;
@@ -187,15 +189,6 @@ function tierBadge(tierId: TierId | null): string {
     : tierId === 'prof'   ? '💼'
     : '•';
   return `<span class="plan-badge tier-badge tier-badge-${tierId}" title="Тариф: ${escapeHtml(tier.name)}">${emoji} ${escapeHtml(tier.name)}</span>`;
-}
-
-/** VIP STATUS — completely separate from the VIP TIER. Set via
- *  user_subscriptions.plan='vip', this is the "operator's friend /
- *  beta tester — free access forever" flag. Shown as a small chip
- *  next to the tier badge ONLY when set. */
-function vipStatusBadge(plan: 'standard' | 'vip'): string {
-  if (plan !== 'vip') return '';
-  return `<span class="plan-badge vip-status" title="VIP-статус: бесплатный безлимитный доступ к сервису">⭐ VIP-доступ</span>`;
 }
 
 function renderDashboard(csrfToken: string, query: Record<string, string | undefined> = {}): string {
@@ -236,12 +229,14 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
           const name = r.display_name ?? '—';
           const sub = subs.get(r.id);
           const plan = sub?.plan ?? 'standard';
-          // План column — show actual tier + (separately) VIP-status chip
-          // when the operator has flagged this user for free access.
-          // Trial/active/expired status lives in the «Доступ» column now.
+          // План column — tier name ONLY. VIP-status («бессрочный
+          // бесплатный доступ») is already conveyed by «👑 VIP ·
+          // бессрочно» in the «Доступ» column, no need to dup it here.
+          // `plan` itself is still needed below for the «Продлить»
+          // button visibility (hidden for VIP).
           const tier = (sub?.tier_id as TierId | null | undefined) ?? null;
           const badge = sub
-            ? tierBadge(tier) + vipStatusBadge(plan)
+            ? tierBadge(tier)
             : '<span class="plan-badge plan-bad">— нет подписки</span>';
 
           // Autotrading-funnel signals at-a-glance:
@@ -472,16 +467,6 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
       .tier-badge-pro      { background: rgba(255,193,107,0.14); color: #ffc16b; border: 1px solid rgba(255,193,107,0.50); }
       .tier-badge-vip      { background: rgba(212,175,55,0.16);  color: #f3d266; border: 1px solid rgba(212,175,55,0.55); }
       .tier-badge-prof     { background: rgba(180,120,255,0.14); color: #c599ff; border: 1px solid rgba(180,120,255,0.50); }
-      /* VIP-STATUS chip — separate from VIP TIER. Means «free access
-         forever», granted to operator friends / beta testers. Rendered
-         next to the tier badge with the ⭐ icon. */
-      .vip-status {
-        margin-left: 6px; padding: 2px 7px; border-radius: 6px;
-        background: rgba(243,210,102,0.18);
-        color: #f5d970; border: 1px solid rgba(243,210,102,0.55);
-        font-size: 10.5px; font-weight: 700;
-        text-transform: uppercase; letter-spacing: 0.04em;
-      }
       .adm-btn {
         background: #1a2129;
         border: 1px solid #2a323d;
