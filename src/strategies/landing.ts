@@ -1755,29 +1755,35 @@ const STYLE = `
       justify-content: center;
     }
   }
-  /* Horizontal scroll-snap carousel for 4+ positions. Same .live-pos-card
-   * markup inside — only the container layout differs. The poller swaps
-   * classes when count crosses the 3↔4 boundary. */
+  /* Horizontal scroll-snap carousel for 4+ positions. Switched from
+     grid to flex so JS-cloned looped cards lay out predictably. Each
+     card carries a fixed flex-basis; gap handled at container level. */
   .live-pos-carousel {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: min(360px, 88vw);
+    display: flex;
     gap: 16px;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
     /* Centred padding so first/last card can snap to viewport centre. */
     padding: 8px max(12px, calc(50% - 180px)) 14px;
     margin: 0 -4px;
-    scrollbar-color: rgba(74, 217, 145, 0.4) transparent;
-    scrollbar-width: thin;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     -webkit-overflow-scrolling: touch;
   }
-  .live-pos-carousel::-webkit-scrollbar { height: 8px; }
-  .live-pos-carousel::-webkit-scrollbar-track { background: transparent; }
-  .live-pos-carousel::-webkit-scrollbar-thumb {
-    background: rgba(74, 217, 145, 0.4); border-radius: 4px;
+  /* Hide the native horizontal scrollbar entirely — arrows + edge-fade
+     do the affordance, and the bright-green scrollbar was reading as a
+     UI element instead of a hint. */
+  .live-pos-carousel::-webkit-scrollbar { height: 0; display: none; }
+  .live-pos-carousel > .live-pos-card {
+    flex: 0 0 min(360px, 88vw);
+    scroll-snap-align: center;
   }
-  .live-pos-carousel > .live-pos-card { scroll-snap-align: center; }
+  /* Loop-mode hides the «← смахните, чтобы посмотреть все позиции →»
+     hint because there's no end — it cycles forever. */
+  [data-carousel="focus"] + .live-pos-scroll-hint,
+  .live-pos-carousel-wrap[data-carousel="focus"] ~ .live-pos-scroll-hint {
+    display: none;
+  }
   /* Active live-pos card glows brighter green in focus mode. */
   [data-carousel="focus"] .live-pos-card.rc-card-active {
     border-color: rgba(74, 217, 145, 0.45);
