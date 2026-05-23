@@ -815,6 +815,35 @@ const STYLE = `
     background: rgba(74,217,145,0.15); color: var(--accent);
     border: 1px solid rgba(74,217,145,0.45);
   }
+  .reason-pill.reason-reverse {
+    background: rgba(255,193,107,0.14); color: #ffc16b;
+    border: 1px solid rgba(255,193,107,0.45);
+  }
+  .reason-pill.reason-manual {
+    background: rgba(133,144,160,0.18); color: #cfd6dd;
+    border: 1px solid rgba(133,144,160,0.40);
+  }
+  /* PnL cell — secondary % suffix dimmer than the headline $ amount. */
+  .feed-pnl-pct {
+    font-size: 11px; font-weight: 500;
+    margin-left: 4px; opacity: 0.75;
+  }
+  /* SL distance shown beside the SL price for active trades. */
+  .feed-sl-pct {
+    font-size: 10.5px; color: var(--text-faint);
+    margin-left: 2px;
+  }
+  /* Legend below the table — explains each reason-pill colour. */
+  .feed-reason-legend {
+    font-size: 12px; color: var(--text-dim);
+    margin: 14px 4px 0; padding: 12px 14px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    line-height: 2.1;
+  }
+  .feed-reason-legend b { color: var(--text); margin-right: 6px; }
+  .feed-reason-legend .reason-pill { vertical-align: middle; margin: 0 2px; }
   /* Pagination footer for the live-feed table */
   .feed-pagination {
     display: flex; align-items: center; justify-content: center;
@@ -2445,26 +2474,63 @@ function renderAllStrategiesFeed(page: number): string {
     );
   };
 
-  const reasonLabel = (t: LiveTradeFeedRow): { label: string; cls: string } => {
-    if (t.closeReason === 'sl_hit') return { label: 'SL', cls: 'reason-sl' };
-    if (t.forceCloseReason === 'strategy_exit') return { label: 'strat', cls: 'reason-strat' };
-    if (t.forceCloseReason === 'time_guard') return { label: 'time', cls: 'reason-time' };
-    return { label: t.closeReason ?? '—', cls: 'reason-strat' };
+  // Reason labels — friendly Russian + tooltip explaining each. Maps the
+  // internal close_reason / force_close_reason codes to a UI label.
+  const reasonLabel = (t: LiveTradeFeedRow): { label: string; cls: string; title: string } => {
+    // SL hit on Bybit (either we caught it directly, or reconciliation
+    // saw the position was already closed by Bybit's safety stop).
+    if (t.closeReason === 'sl_hit' || t.forceCloseReason === 'bybit_sl_hit') {
+      return { label: 'Стоп-лосс', cls: 'reason-sl',
+        title: 'Safety stop-loss сработал на Bybit' };
+    }
+    if (t.forceCloseReason === 'strategy_exit') {
+      return { label: 'По стратегии', cls: 'reason-strat',
+        title: 'Стратегия LuxAlgo прислала сигнал на выход (Builtin Exit)' };
+    }
+    if (t.forceCloseReason === 'reverse_signal') {
+      return { label: 'Разворот', cls: 'reason-reverse',
+        title: 'Стратегия прислала противоположный сигнал — позиция закрыта чтобы открыть новую в обратную сторону' };
+    }
+    if (t.forceCloseReason === 'time_guard') {
+      return { label: 'Тайм-аут 24ч', cls: 'reason-time',
+        title: 'Позиция держалась > 24ч без сигнала на выход — закрыта по тайм-гарду' };
+    }
+    if (t.forceCloseReason === 'manual_close') {
+      return { label: 'Вручную', cls: 'reason-manual',
+        title: 'Позиция закрыта вручную на Bybit (оператор или экстренная остановка). Не сигнал стратегии.' };
+    }
+    if (t.forceCloseReason === 'bybit_reconcile') {
+      return { label: 'Реконсиль', cls: 'reason-manual',
+        title: 'Позиция исчезла с Bybit между нашими проверками, точная причина не известна — записываем как реконсиль' };
+    }
+    return { label: t.closeReason ?? '—', cls: 'reason-strat', title: '' };
   };
+
+  // Position notional — TRACK_C_NOTIONAL_USD for shadow trades (always $1000).
+  const notionalStr = `$${TRACK_C_NOTIONAL_USD}`;
 
   const activeRows = active.map((t: ActiveTradeFeedRow) => {
     const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
     const ageMs = Date.now() - t.entryAt;
+    // SL distance in % — gives a sense of how much risk the trade is taking.
+    const slDistPct = t.sl !== null
+      ? (Math.abs(t.entryPrice - t.sl) / t.entryPrice) * 100
+      : null;
+    const slCell = t.sl !== null
+      ? `${t.sl.toFixed(4)} <span class="feed-sl-pct">(−${slDistPct!.toFixed(2)}%)</span>`
+      : '—';
     return `
       <tr class="feed-row-active">
         <td>${stratCellHtml(t.strategyId, t.strategyTradeNum, t.id)}</td>
         <td class="dt">${fmtDate(t.entryAt)}</td>
+        <td class="dt">—</td>
         <td class="dt">${fmtDuration(ageMs)}</td>
         <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
+        <td class="right mono">${notionalStr}</td>
         <td class="right mono">${t.entryPrice.toFixed(4)}</td>
-        <td class="right mono">${t.sl !== null ? t.sl.toFixed(4) : '—'}</td>
+        <td class="right mono">${slCell}</td>
         <td class="right">—</td>
-        <td><span class="reason-pill reason-active">🟢 В работе</span></td>
+        <td><span class="reason-pill reason-active" title="Позиция сейчас открыта, ждём сигнал выхода или SL">🟢 В работе</span></td>
       </tr>
     `;
   }).join('');
@@ -2474,16 +2540,19 @@ function renderAllStrategiesFeed(page: number): string {
     const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
     const r = reasonLabel(t);
     const dur = fmtDuration(t.exitAt - t.entryAt);
+    const pnlSign = t.pnlUsd >= 0 ? '+' : '';
     return `
       <tr>
         <td>${stratCellHtml(t.strategyId, t.strategyTradeNum, t.id)}</td>
         <td class="dt">${fmtDate(t.entryAt)}</td>
+        <td class="dt">${fmtDate(t.exitAt)}</td>
         <td class="dt">${dur}</td>
         <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
+        <td class="right mono">${notionalStr}</td>
         <td class="right mono">${t.entryPrice.toFixed(4)}</td>
         <td class="right mono">${t.exitPrice.toFixed(4)}</td>
-        <td class="right mono ${cls}">${t.pnlUsd >= 0 ? '+' : ''}${t.pnlUsd.toFixed(2)}</td>
-        <td><span class="reason-pill ${r.cls}">${r.label}</span></td>
+        <td class="right mono ${cls}">${pnlSign}$${t.pnlUsd.toFixed(2)} <span class="feed-pnl-pct ${cls}">(${pnlSign}${t.pnlPct.toFixed(2)}%)</span></td>
+        <td><span class="reason-pill ${r.cls}" title="${escapeHtml(r.title)}">${r.label}</span></td>
       </tr>
     `;
   }).join('');
@@ -2547,16 +2616,27 @@ function renderAllStrategiesFeed(page: number): string {
             <tr>
               <th>Стратегия</th>
               <th>Вход (UTC)</th>
+              <th>Выход (UTC)</th>
               <th>Длительн.</th>
-              <th>Side</th>
+              <th>Сторона</th>
+              <th class="right" title="Размер shadow-сделки — фиксированный $1000 на каждую">Объём</th>
               <th class="right">Entry</th>
-              <th class="right">Exit / SL</th>
-              <th class="right">P&amp;L USDT</th>
-              <th>Reason</th>
+              <th class="right" title="Цена выхода для закрытых, safety SL (и расстояние в %) для активных">Exit / SL</th>
+              <th class="right">P&amp;L</th>
+              <th>Причина выхода</th>
             </tr>
           </thead>
           <tbody>${activeRows}${closedRows}</tbody>
         </table>
+      </div>
+
+      <div class="feed-reason-legend">
+        <b>Расшифровка причин:</b>
+        <span class="reason-pill reason-strat">По стратегии</span> — exit-сигнал LuxAlgo. ·
+        <span class="reason-pill reason-sl">Стоп-лосс</span> — сработал safety SL. ·
+        <span class="reason-pill reason-reverse">Разворот</span> — пришёл противоположный сигнал. ·
+        <span class="reason-pill reason-time">Тайм-аут</span> — позиция > 24ч без сигнала. ·
+        <span class="reason-pill reason-manual">Вручную</span> — оператор закрыл руками на Bybit (экстренная остановка / тех.причины).
       </div>
 
       ${paginationHtml}
