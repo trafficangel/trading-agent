@@ -162,6 +162,9 @@ function renderHero(lang: Lang): string {
         <span class="at-hero-cta-or">or</span>
         <a href="#pricing" class="at-hero-link">see pricing ↓</a>
       </div>
+      <div class="at-hero-trial">
+        ${ico('🎁')}<b>14 days of real trading on us</b> — no subscription, no card. Try it before you pay.
+      </div>
       <div class="at-hero-login">
         Already registered? <a href="/strategies?login=1">Sign in →</a>
       </div>
@@ -190,6 +193,9 @@ function renderHero(lang: Lang): string {
         <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Регистрация</a>
         <span class="at-hero-cta-or">или</span>
         <a href="#pricing" class="at-hero-link">посмотреть тарифы ↓</a>
+      </div>
+      <div class="at-hero-trial">
+        ${ico('🎁')}<b>14 дней реальной торговли бесплатно</b> — без подписки и без карты. Попробуйте до оплаты.
       </div>
       <div class="at-hero-login">
         Уже зарегистрированы? <a href="/strategies?login=1">Войти в кабинет →</a>
@@ -1431,6 +1437,20 @@ function styles(): string {
     color: #4ad991; text-decoration: none; font-weight: 500;
   }
   .at-hero-login a:hover { text-decoration: underline; }
+  /* Free-trial accent right under the CTA buttons. Soft gold halo so
+     it reads as a «bonus / gift» without competing with the green
+     primary CTA above. */
+  .at-hero-trial {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin: 14px auto 4px;
+    padding: 10px 18px; border-radius: 999px;
+    background: linear-gradient(90deg, rgba(243,210,102,0.08), rgba(243,210,102,0.16), rgba(243,210,102,0.08));
+    border: 1px solid rgba(243,210,102,0.40);
+    color: #f5d970;
+    font-size: 14px;
+    box-shadow: 0 6px 20px -10px rgba(243, 210, 102, 0.45);
+  }
+  .at-hero-trial b { color: #fff; font-weight: 700; }
   .at-hero-pills {
     display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
     margin-top: 28px;
