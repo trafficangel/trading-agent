@@ -1083,7 +1083,7 @@ function renderPricing(lang: Lang): string {
     <section class="at-section at-pricing" id="pricing">
       <h2 class="at-section-title">${ico('💳')}${t.sectionTitle}</h2>
       <p class="at-pricing-intro">${t.intro}</p>
-      <div class="at-tier-carousel-wrap" data-carousel="true">
+      <div class="at-tier-carousel-wrap" data-carousel="focus">
         <button class="rc-carousel-arrow rc-carousel-arrow-prev" data-rc-prev aria-label="prev">‹</button>
         <div class="at-tier-carousel rc-carousel-track" role="region" aria-label="${t.carouselAria}">
           ${freeCard}
@@ -1482,10 +1482,13 @@ function styles(): string {
   .at-pricing-intro b { color: #4ad991; }
   .at-tier-carousel {
     display: flex;
-    gap: 16px;
+    gap: 24px;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
-    padding: 24px 4px 16px;
+    /* Side-padding equals (viewport-half − card-half), so first and last
+       card can scroll-snap into the centre. Clamped to 20px minimum so
+       there's always breathing room from the section edge. */
+    padding: 28px max(20px, calc(50% - 200px)) 16px;
     margin: 0 -4px 12px;
     scrollbar-color: #2a323d transparent;
     scrollbar-width: thin;
@@ -1500,25 +1503,29 @@ function styles(): string {
   }
   .at-tier-card {
     background: linear-gradient(180deg, #161c25 0%, #11161d 70%);
-    border: 1px solid #1f2630; border-radius: 14px;
-    padding: 28px 18px 20px;
+    border: 1px solid #1f2630; border-radius: 16px;
+    padding: 32px 24px 24px;
     display: flex; flex-direction: column;
-    scroll-snap-align: start;
     position: relative;
-    /* Fixed width so the row actually overflows and a horizontal scroll
-     * appears. 320px wide ≈ comfortable card; on mobile (≤640px) we use
-     * 86vw so only one card is visible at a time and the swipe feels natural. */
-    flex: 0 0 320px;
+    /* Bigger cards now that focus mode shows one at a time. 380px lets
+       all features breathe; on mobile we keep 86vw so swipe feels natural. */
+    flex: 0 0 380px;
     min-width: 0;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
   }
   /* Cards with a badge need extra top padding to clear it. Without this
    * the «🎁 Бонус» / «⭐ Популярный» pill overlaps the tier name below. */
   .at-tier-card.at-tier-popular,
   .at-tier-card.at-tier-free {
-    padding-top: 42px;
+    padding-top: 46px;
+  }
+  /* Active card lifts more, others fade harder in focus mode. */
+  [data-carousel="focus"] .at-tier-card.rc-card-active {
+    box-shadow: 0 14px 40px rgba(0,0,0,0.45);
   }
   @media (max-width: 640px) {
     .at-tier-card { flex: 0 0 86vw; }
+    .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; }
   }
   .at-tier-card.at-tier-popular {
     border-color: rgba(74, 217, 145, 0.55);

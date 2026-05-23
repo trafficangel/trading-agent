@@ -1001,7 +1001,7 @@ function renderHome(
   const positionsBody = activePositions.length === 0
     ? ''
     : (useCarousel
-        ? `<div class="live-pos-carousel-wrap" data-carousel="true">
+        ? `<div class="live-pos-carousel-wrap" data-carousel="focus">
              <button class="rc-carousel-arrow rc-carousel-arrow-prev" data-rc-prev aria-label="prev">‹</button>
              ${innerHtml}
              <button class="rc-carousel-arrow rc-carousel-arrow-next" data-rc-next aria-label="next">›</button>

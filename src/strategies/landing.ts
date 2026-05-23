@@ -1761,11 +1761,12 @@ const STYLE = `
   .live-pos-carousel {
     display: grid;
     grid-auto-flow: column;
-    grid-auto-columns: minmax(min(320px, 88%), 360px);
-    gap: 12px;
+    grid-auto-columns: min(360px, 88vw);
+    gap: 16px;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
-    padding: 4px 4px 12px;
+    /* Centred padding so first/last card can snap to viewport centre. */
+    padding: 8px max(12px, calc(50% - 180px)) 14px;
     margin: 0 -4px;
     scrollbar-color: rgba(74, 217, 145, 0.4) transparent;
     scrollbar-width: thin;
@@ -1776,7 +1777,12 @@ const STYLE = `
   .live-pos-carousel::-webkit-scrollbar-thumb {
     background: rgba(74, 217, 145, 0.4); border-radius: 4px;
   }
-  .live-pos-carousel > .live-pos-card { scroll-snap-align: start; }
+  .live-pos-carousel > .live-pos-card { scroll-snap-align: center; }
+  /* Active live-pos card glows brighter green in focus mode. */
+  [data-carousel="focus"] .live-pos-card.rc-card-active {
+    border-color: rgba(74, 217, 145, 0.45);
+    box-shadow: 0 10px 30px rgba(74, 217, 145, 0.12), 0 4px 14px rgba(0,0,0,0.35);
+  }
   .live-pos-scroll-hint {
     text-align: center; font-size: 11.5px; color: var(--text-muted, #6b7480);
     margin: 4px 0 0; letter-spacing: 0.02em; opacity: 0.85;
