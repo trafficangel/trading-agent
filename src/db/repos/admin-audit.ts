@@ -14,7 +14,8 @@ export type AdminAction =
   | 'revoke_key'
   | 'force_close_position'
   | 'cancel_subscription'
-  | 'delete_user';
+  | 'delete_user'
+  | 'assign_tier';
 
 const insertStmt = db.prepare(`
   INSERT INTO admin_audit_log

@@ -41,6 +41,7 @@ import { adminCsrfToken, requireAdminCsrf } from '../auth/csrf.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { TIER_CONFIGS, TIER_ORDER, computeTierTradeSize, type TierId } from '../strategies/tier-config.js';
+import { assignTier } from '../user/tier-assignment.js';
 import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
 import { listRecentTransitions } from '../db/repos/user-tier-history.js';
 
@@ -245,41 +246,36 @@ function renderDashboard(csrfToken: string): string {
               : k.verified
                 ? `<span class="plan-badge plan-active">✓ подключён</span>`
                 : `<span class="plan-badge plan-trial">⚠ не верифиц.</span>`;
-          // Three buttons per row:
-          //   1. VIP toggle (Сделать VIP / Снять VIP)
-          //   2. Продлить на 30 дней — bumps access_until forward for
-          //      non-VIP users (no-op for VIP since they're already permanent)
-          //   3. Days-left preview when on standard plan
+          // Combined «Назначить тариф + срок» form replaces the two
+          // legacy buttons (VIP-toggle + Extend). One submit does
+          // everything: sets billing plan, reassigns tier, refreshes
+          // user_strategies, bumps access_until. For VIP the days
+          // dropdown is ignored server-side (access goes far-future).
           const csrfField = `<input type="hidden" name="_csrf" value="${csrfToken}">`;
-          const vipToggle = plan === 'vip'
-            ? `<form method="POST" action="/admin/users/${r.id}/plan" style="display:inline">
-                 ${csrfField}
-                 <input type="hidden" name="plan" value="standard">
-                 <button class="adm-btn adm-btn-warn" type="submit"
-                   onclick="return confirm('Снять VIP с ${escapeHtml(name)}?')">Снять VIP</button>
-               </form>`
-            : `<form method="POST" action="/admin/users/${r.id}/plan" style="display:inline">
-                 ${csrfField}
-                 <input type="hidden" name="plan" value="vip">
-                 <button class="adm-btn adm-btn-vip" type="submit"
-                   onclick="return confirm('Выдать VIP пользователю ${escapeHtml(name)}?')">Сделать VIP</button>
-               </form>`;
-          // Extend by 30/90/365 dropdown — applies only for non-VIP users
-          // and is functionally a no-op (rejected on server) for VIPs.
-          // We still show it on VIP rows greyed-out so the layout stays
-          // consistent.
-          const extendForm = plan === 'vip'
-            ? ''
-            : `<form method="POST" action="/admin/users/${r.id}/extend" style="display:inline; margin-left:4px">
-                 ${csrfField}
-                 <select name="days" class="adm-select">
-                   <option value="30">+30 дней</option>
-                   <option value="90">+90 дней</option>
-                   <option value="365">+1 год</option>
-                 </select>
-                 <button class="adm-btn adm-btn-secondary" type="submit"
-                   onclick="return confirm('Продлить подписку для ${escapeHtml(name)}?')">Продлить</button>
-               </form>`;
+          const currentTier = (sub?.tier_id as TierId | undefined) ?? 'standard';
+          const tierOptionsHtml = TIER_ORDER.map((tid) => {
+            const t = TIER_CONFIGS[tid];
+            const label = tid === 'vip'
+              ? `${t.name} (бессрочно)`
+              : `${t.name} ($${t.monthlyPriceUsd}/мес)`;
+            return `<option value="${tid}"${tid === currentTier ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+          }).join('');
+          const assignForm = `
+            <form method="POST" action="/admin/users/${r.id}/assign-tier" style="display:inline"
+                  onsubmit="return confirm('Назначить тариф для ${escapeHtml(name)}? Текущие настройки стратегий будут пересоздать.');">
+              ${csrfField}
+              <select name="tierId" class="adm-select" title="Тариф">${tierOptionsHtml}</select>
+              <select name="days" class="adm-select" title="Срок действия (игнорируется для VIP)">
+                <option value="7">+7 дней</option>
+                <option value="30" selected>+30 дней</option>
+                <option value="60">+60 дней</option>
+                <option value="90">+90 дней</option>
+                <option value="180">+180 дней</option>
+                <option value="365">+1 год</option>
+              </select>
+              <button class="adm-btn adm-btn-vip" type="submit">Назначить</button>
+            </form>
+          `;
           // Audit H6 — cancel button. Hidden for already-cancelled
           // and expired rows (no point cancelling an already-dead sub).
           // VIPs can be cancelled too — operator may want to wind one
@@ -303,7 +299,7 @@ function renderDashboard(csrfToken: string): string {
                 ${csrfField}
                 <button class="adm-btn adm-btn-danger" type="submit" title="Удалить пользователя и все его данные">🗑 Удалить</button>
               </form>`;
-          const toggle = `<div class="adm-actions">${vipToggle}${extendForm}${cancelForm}${deleteForm}</div>`;
+          const toggle = `<div class="adm-actions">${assignForm}${cancelForm}${deleteForm}</div>`;
           // Days-left badge for the План column when on standard.
           const daysLeftBadge = sub && plan === 'standard' && status !== 'cancelled'
             ? `<div class="plan-days">${daysLeftLabel(sub.access_until)}</div>`
@@ -628,6 +624,78 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     reply.code(303).header('location', '/admin').send();
   });
 
+  // ---------------- POST /admin/users/:id/assign-tier ----------------
+  // Atomic «assign tier + set period» from the admin row form. Supersedes
+  // the legacy «Сделать VIP» + «Продлить» buttons.
+  //
+  // Body: tierId in TIER_ORDER, days in [1, 3650] (ignored for VIP).
+  //
+  // Sequence:
+  //   1. Ensure a subscription exists (auto-create trial if needed).
+  //   2. If target is VIP    → setPlan('vip')   (access_until → far future)
+  //      If target is non-VIP and current is VIP → demote billing to 'standard'
+  //      In both cases also call assignTier() which refreshes user_strategies
+  //      with the new tier's defaults (CAVEAT for Prof users — see UI confirm).
+  //   3. For non-VIP, bump access_until by N days via adminExtend.
+  //   4. Audit log entry + admin_audit_log row.
+  app.post('/admin/users/:id/assign-tier', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
+    if (!checkAuth(req, reply)) return;
+    const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
+    if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;
+    const userId = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      reply.code(400).send('bad user id');
+      return;
+    }
+    const parsed = assignTierFormSchema.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400).send('invalid tierId or days');
+      return;
+    }
+    const { tierId, days } = parsed.data;
+    const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
+
+    // Ensure sub exists (legacy users registered pre-trial fix or wiped).
+    if (!findSubscription(userId)) ensureTrialFor(userId);
+    const before = findSubscription(userId);
+
+    try {
+      if (tierId === 'vip') {
+        setPlan(userId, 'vip', adminEmail, `assigned tier=vip via /admin`);
+      } else if (before?.plan === 'vip') {
+        // Demote billing plan first so subsequent adminExtend can shift status.
+        setPlan(userId, 'standard', adminEmail, `tier change to ${tierId} via /admin`);
+      }
+      await assignTier(userId, tierId, { reason: 'operator_override' });
+      if (tierId !== 'vip') {
+        adminExtend(userId, days, adminEmail, `assigned tier=${tierId} +${days}d via /admin`);
+      }
+      const after = findSubscription(userId);
+      recordAdminAction({
+        adminEmail,
+        targetUserId: userId,
+        action: 'assign_tier',
+        before: before
+          ? { plan: before.plan, status: before.status, tier_id: before.tier_id, access_until: before.access_until }
+          : null,
+        after: after
+          ? { plan: after.plan, status: after.status, tier_id: after.tier_id, access_until: after.access_until }
+          : null,
+        note: `tierId=${tierId} days=${tierId === 'vip' ? 'permanent' : days}`,
+        ip: req.ip,
+      });
+      logger.info(
+        { user_id: userId, tierId, days, by: adminEmail },
+        'admin: tier assigned',
+      );
+    } catch (err) {
+      logger.error({ err, user_id: userId, tierId }, 'admin: assign-tier failed');
+      reply.code(500).send('failed to assign tier');
+      return;
+    }
+    reply.code(303).header('location', '/admin').send();
+  });
+
   // ---------------- POST /admin/users/:id/delete ----------------
   // Hard-delete the user. Cascades through user_tier_history →
   // user_strategies → user_api_keys → user_subscriptions → decisions
@@ -682,6 +750,11 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
 
 const extendFormSchema = z.object({
   days: z.coerce.number().int().min(1).max(3650),
+});
+
+const assignTierFormSchema = z.object({
+  tierId: z.enum(TIER_ORDER as [TierId, ...TierId[]]),
+  days: z.coerce.number().int().min(1).max(3650).default(30),
 });
 
 /**
