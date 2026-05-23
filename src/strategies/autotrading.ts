@@ -33,7 +33,6 @@ import {
   computeTierTradeSize,
   MIN_AUTOTRADING_DEPOSIT_USDT,
 } from './tier-config.js';
-import { countAllClosedShadowTrades, earliestShadowTradeAt } from './live-stats.js';
 
 type Lang = 'ru' | 'en';
 
@@ -156,38 +155,6 @@ function renderPage(
 }
 
 function renderHero(lang: Lang): string {
-  // Social-proof badge — three live counters pulled at request time from
-  // the shadow-trade ledger. Numbers move on their own as new trades close
-  // so the operator never has to touch the hero copy. Hidden entirely
-  // when the system is too young to have meaningful stats (<10 trades),
-  // because « 0 сделок отработано » would read as «nothing's happening».
-  const closedTotal = countAllClosedShadowTrades();
-  const firstAt = earliestShadowTradeAt();
-  const activeStrats = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled).length;
-  const showProof = closedTotal >= 10 && firstAt !== null;
-  const monthLabels = lang === 'en'
-    ? ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    : ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-  const sinceLabel = firstAt
-    ? `${monthLabels[new Date(firstAt).getUTCMonth()]} ${new Date(firstAt).getUTCFullYear()}`
-    : null;
-  const proofBadge = showProof
-    ? (lang === 'en'
-        ? `<div class="at-hero-proof">
-             <span class="at-hero-proof-item">${ico('📈')}<b>${closedTotal.toLocaleString()}</b> live trades closed</span>
-             <span class="at-hero-proof-sep">·</span>
-             <span class="at-hero-proof-item">${ico('🕐')}running since <b>${sinceLabel}</b></span>
-             <span class="at-hero-proof-sep">·</span>
-             <span class="at-hero-proof-item">${ico('🎯')}<b>${activeStrats}</b> live strategies</span>
-           </div>`
-        : `<div class="at-hero-proof">
-             <span class="at-hero-proof-item">${ico('📈')}<b>${closedTotal.toLocaleString()}</b> сделок отработано</span>
-             <span class="at-hero-proof-sep">·</span>
-             <span class="at-hero-proof-item">${ico('🕐')}работает с <b>${sinceLabel}</b></span>
-             <span class="at-hero-proof-sep">·</span>
-             <span class="at-hero-proof-item">${ico('🎯')}<b>${activeStrats}</b> стратегий в живой торговле</span>
-           </div>`)
-    : '';
   if (lang === 'en') {
     return `
     <section class="at-hero">
@@ -199,7 +166,6 @@ function renderHero(lang: Lang): string {
         Our system runs vetted strategies on your own Bybit account. <b>Not a fund, not a pyramid</b> —
         we never accept deposits, your money stays on the exchange the whole time.
       </p>
-      ${proofBadge}
       <div class="at-hero-cta">
         <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Sign up</a>
         <span class="at-hero-cta-or">or</span>
@@ -229,7 +195,6 @@ function renderHero(lang: Lang): string {
         Система торгует за вас на вашем счёте Bybit по проверенным стратегиям. <b>Не фонд и не пирамида</b> —
         мы не принимаем депозиты, ваши деньги всегда на бирже под вашим контролем.
       </p>
-      ${proofBadge}
       <div class="at-hero-cta">
         <a href="/strategies?from=autotrading" class="at-btn-primary at-btn-large">${ico('🚀')}Регистрация</a>
         <span class="at-hero-cta-or">или</span>
@@ -1920,26 +1885,6 @@ function styles(): string {
     box-shadow: 0 6px 20px -10px rgba(243, 210, 102, 0.45);
   }
   .at-hero-trial b { color: #fff; font-weight: 700; }
-  /* Social-proof line between sub and CTA. Subtle — not louder than
-     the H1 above or the gold trial pill below. Reads as «look, we
-     already have a real footprint» without screaming. */
-  .at-hero-proof {
-    display: inline-flex; flex-wrap: wrap; justify-content: center;
-    align-items: center; gap: 6px 12px;
-    margin: 0 auto 22px; padding: 10px 18px;
-    background: rgba(74, 217, 145, 0.05);
-    border: 1px solid rgba(74, 217, 145, 0.22);
-    border-radius: 999px;
-    font-size: 13px; color: #9aa5b1;
-    max-width: fit-content;
-  }
-  .at-hero-proof-item { display: inline-flex; align-items: center; gap: 4px; }
-  .at-hero-proof-item b { color: #4ad991; font-weight: 700; }
-  .at-hero-proof-sep { color: #2a323d; }
-  @media (max-width: 640px) {
-    .at-hero-proof { font-size: 12px; padding: 8px 14px; gap: 4px 10px; }
-    .at-hero-proof-sep { display: none; }
-  }
   .at-hero-pills {
     display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
     margin-top: 28px;
