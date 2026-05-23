@@ -1495,23 +1495,14 @@ function renderFaq(lang: Lang): string {
  * the reader has already seen the technical proof and is ready for the
  * «who's behind this» moment.
  *
- * Photo source: currently an SVG placeholder with the founder's
- * initials — swap the `<img src>` to a real headshot URL once we wire
- * @fastify/static or host the photo on a CDN. The bio copy itself was
- * dictated by the founder and lightly edited for flow.
+ * Photo: served from /static/founder.jpg via @fastify/static. The file
+ * lives at `public/founder.jpg` in the repo, committed alongside this
+ * code so deploys ship the photo with the build. Object-position is
+ * `top` because the source crop has the subject's head near the top
+ * third of the frame.
  */
 function renderAboutFounder(lang: Lang): string {
-  // SVG avatar placeholder — dark green circle with «ДБ» monogram.
-  // Looks like a real profile photo at thumbnail size; rendered crisp at
-  // any resolution because it's a vector. Inline data URI so the page
-  // ships without needing a separate static-file route.
-  const avatarSvg =
-    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'>` +
-    `<circle cx='100' cy='100' r='100' fill='%231d2530'/>` +
-    `<text x='100' y='118' font-family='-apple-system,system-ui,sans-serif' ` +
-    `font-size='70' font-weight='600' fill='%234ad991' text-anchor='middle'>` +
-    `${lang === 'en' ? 'DB' : 'ДБ'}</text></svg>`;
-  const avatarSrc = `data:image/svg+xml,${avatarSvg}`;
+  const avatarSrc = '/static/founder.jpg';
 
   if (lang === 'en') {
     return `
@@ -2769,7 +2760,13 @@ function styles(): string {
     border: 3px solid rgba(74, 217, 145, 0.30);
     box-shadow: 0 6px 24px -8px rgba(74, 217, 145, 0.25);
   }
-  .at-founder-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* object-position biases the crop towards the founder's face (source
+     image is wide-format with the subject in the right third). Tweak
+     this if the photo is ever replaced. */
+  .at-founder-avatar img {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+    object-position: 62% 30%;
+  }
   .at-founder-body { color: #cfd6dd; font-size: 14.5px; line-height: 1.7; }
   .at-founder-body p { margin: 0 0 14px 0; }
   .at-founder-body p:last-of-type { margin-bottom: 18px; }

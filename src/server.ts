@@ -2,6 +2,9 @@ import Fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import fastifyFormbody from '@fastify/formbody';
 import fastifyRateLimit from '@fastify/rate-limit';
+import fastifyStatic from '@fastify/static';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { logger } from './lib/logger.js';
 import { luxalgoRoute } from './webhooks/luxalgo.route.js';
@@ -88,6 +91,28 @@ async function main(): Promise<void> {
   // (VIP toggle, subscription extend) and the /account/strategies form.
   // Without this plugin Fastify leaves req.body undefined for form data.
   await app.register(fastifyFormbody);
+
+  // Static assets — founder photo, future OG images, downloadable
+  // setup guides, etc. Served at /static/<filename>. The directory
+  // sits at the repo root (`public/`) and is committed to git so
+  // deploys ship the assets alongside the code.
+  //
+  // We resolve the path off `import.meta.url` (the compiled file in
+  // `dist/`) and step UP one level to the repo root — Node's ESM
+  // doesn't expose __dirname, hence the conversion. `decorateReply:
+  // false` keeps the plugin from monkey-patching every reply with
+  // `.sendFile`, which we don't use anywhere.
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const publicDir = join(moduleDir, '..', 'public');
+  await app.register(fastifyStatic, {
+    root: publicDir,
+    prefix: '/static/',
+    decorateReply: false,
+    // 7-day cache; founder photo and OG images don't change often,
+    // and a hard reload still bypasses cache for the operator.
+    maxAge: '7d',
+    immutable: false,
+  });
 
   // Audit H-NEW-2/3 — global rate-limit plugin in OPT-IN mode.
   // `global: false` means routes without `config.rateLimit` are not
