@@ -31,7 +31,6 @@ import { pageShell, formatSinceDate } from '../strategies/landing.js';
 import {
   findSubscription,
   setPlan,
-  cancelSubscription,
   ensureTrialFor,
   adminExtend,
   type SubscriptionRow,
@@ -295,18 +294,6 @@ function renderDashboard(csrfToken: string): string {
                 </select>
                 <button class="adm-btn adm-btn-secondary" type="submit" title="Продлить срок без смены тарифа">⏱ Продлить</button>
               </form>`;
-          // Audit H6 — cancel button. Hidden for already-cancelled
-          // and expired rows (no point cancelling an already-dead sub).
-          // VIPs can be cancelled too — operator may want to wind one
-          // down before re-issuing under different terms.
-          const cancelForm =
-            status === 'cancelled' || status === 'expired'
-              ? ''
-              : `<form method="POST" action="/admin/users/${r.id}/cancel" style="display:inline; margin-left:4px"
-                       onsubmit="return confirm('Отменить подписку для ${escapeHtml(name)}? Доступ к торговле будет заблокирован, открытые позиции НЕ закрываются автоматически.');">
-                   ${csrfField}
-                   <button class="adm-btn adm-btn-danger" type="submit">Отменить</button>
-                 </form>`;
           // Hard-delete — wipes user_tier_history → user_strategies →
           // user_api_keys → user_subscriptions → decisions →
           // verification_attempts → registrations, after best-effort
@@ -318,7 +305,7 @@ function renderDashboard(csrfToken: string): string {
                 ${csrfField}
                 <button class="adm-btn adm-btn-danger" type="submit" title="Удалить пользователя и все его данные">🗑 Удалить</button>
               </form>`;
-          const toggle = `<div class="adm-actions">${assignForm}${extendOnlyForm}${cancelForm}${deleteForm}</div>`;
+          const toggle = `<div class="adm-actions">${assignForm}${extendOnlyForm}${deleteForm}</div>`;
           // Days-left badge for the План column when on standard.
           const daysLeftBadge = sub && plan === 'standard' && status !== 'cancelled'
             ? `<div class="plan-days">${daysLeftLabel(sub.access_until)}</div>`
@@ -599,49 +586,6 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     reply.code(303).header('location', '/admin').send();
   });
 
-  // ---------------- POST /admin/users/:id/cancel ----------------
-  // Audit H6 — explicit cancel state, distinct from natural expiry.
-  // Used when a user requests cancellation by Telegram before their
-  // paid period ends, or for fraud/abuse. Status → 'cancelled', which
-  // gates listEligibleTargets and shows different cabinet copy.
-  app.post('/admin/users/:id/cancel', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
-    if (!checkAuth(req, reply)) return;
-    const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
-    if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;
-    const userId = Number((req.params as { id?: string }).id);
-    if (!Number.isFinite(userId) || userId <= 0) {
-      reply.code(400).send('bad user id');
-      return;
-    }
-    const before = findSubscription(userId);
-    if (!before) {
-      reply.code(404).send('no subscription');
-      return;
-    }
-    const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
-    const note = typeof (req.body as { reason?: unknown })?.reason === 'string'
-      ? String((req.body as { reason: string }).reason).slice(0, 200)
-      : 'cancelled via /admin';
-    try {
-      cancelSubscription(userId, adminEmail, note);
-      const after = findSubscription(userId);
-      recordAdminAction({
-        adminEmail,
-        targetUserId: userId,
-        action: 'cancel_subscription',
-        before: { status: before.status, access_until: before.access_until },
-        after: after ? { status: after.status, access_until: after.access_until } : null,
-        note,
-        ip: req.ip,
-      });
-      logger.info({ user_id: userId, by: adminEmail, note }, 'admin: subscription cancelled');
-    } catch (err) {
-      logger.error({ err, user_id: userId }, 'admin: cancel failed');
-      reply.code(500).send('failed to cancel subscription');
-      return;
-    }
-    reply.code(303).header('location', '/admin').send();
-  });
 
   // ---------------- POST /admin/users/:id/assign-tier ----------------
   // Atomic «assign tier + set period» from the admin row form. Supersedes
