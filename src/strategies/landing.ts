@@ -11,6 +11,7 @@ import {
 } from './track-c-config.js';
 import { recomputeBacktestStats, enrichTrades, type RecomputedStats } from './backtest-recompute.js';
 import { isAuthed, getAuthedUser } from '../auth/routes.js';
+import { TIER_CONFIGS, computeTierTradeSize } from './tier-config.js';
 import {
   getStrategyLiveStats,
   getStrategyRecentTrades,
@@ -1063,6 +1064,12 @@ const STYLE = `
     font-size: 12px; color: var(--text-dim); margin-top: 2px;
   }
   .row-stat-cagr .stat-tag { background: transparent; padding: 1px 5px; }
+  /* SL row — calmer than backtest/live, since it's a risk parameter not
+     a performance result. Tag in muted-red to associate with «стоп». */
+  .stat-tag-sl {
+    color: rgba(239, 91, 107, 0.85);
+    background: rgba(239, 91, 107, 0.10);
+  }
 
   /* Status pills */
   .pill.running { background: var(--accent-soft); color: var(--accent); }
@@ -2838,6 +2845,35 @@ function renderStrategyIndex(
           </div>`
         : '';
 
+    // SL row — shows BOTH numbers that matter:
+    //   1) Strategy's slPct (price distance) — what gets sent to Bybit
+    //   2) Real worst-case loss as % of deposit for a reference tier
+    //      (Standard, min-depo $800) — the number that actually hits
+    //      the user's wallet. Tier-margin makes wide-SL strategies safe
+    //      because notional shrinks: e.g. UNI 30% SL × $20 notional =
+    //      $6 = 0.75% of $800 deposit, even though the SL distance
+    //      looks scary.
+    const slPctStr = (s.slPct * 100).toFixed(1);
+    const refTier = TIER_CONFIGS.standard;
+    const refSize = computeTierTradeSize('standard', s.id);
+    const slRow = refSize
+      ? (() => {
+          const worstUsd = s.slPct * refSize.notionalUsd;
+          const pctOfMinDepo = (worstUsd / refTier.minBalanceUsdt) * 100;
+          const pctCls = pctOfMinDepo <= 2 ? 'pos' : 'dim';
+          return `<div class="row-stat-line">
+            <span class="stat-tag stat-tag-sl">SL</span>
+            <span><b>−${slPctStr}%</b> <span class="dim">от цены</span></span>
+            <span class="dim">·</span>
+            <span class="${pctCls}">≈ <b>${pctOfMinDepo.toFixed(2)}%</b> депо</span>
+            <span class="dim" title="Расчёт на минимальном депо тарифа Standard ($800). Чем ниже тариф — тем меньше notional и тем меньше потеря в долларах при том же SL.">за SL на Standard ($800)</span>
+          </div>`;
+        })()
+      : `<div class="row-stat-line">
+          <span class="stat-tag stat-tag-sl">SL</span>
+          <span><b>−${slPctStr}%</b> <span class="dim">от цены</span></span>
+        </div>`;
+
     return `
       <a href="/strategies/${escapeHtml(s.code)}" class="strat-row">
         <div class="strat-row-head">
@@ -2851,6 +2887,7 @@ function renderStrategyIndex(
         <div class="strat-row-desc">${escapeHtml(s.name ?? s.description.split('|')[0]?.trim() ?? s.id)}</div>
         ${btRow}
         ${liveRow}
+        ${slRow}
       </a>`;
   };
 
