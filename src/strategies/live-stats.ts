@@ -365,6 +365,128 @@ export function getAllClosedShadowTrades(
   return out;
 }
 
+/* =====================================================================
+ *  USER feed — per-user equivalents of getAll*ShadowTrades, used by the
+ *  /account/trades page. The shape mirrors the shadow feed so the
+ *  renderer can use the exact same table layout, but row notional comes
+ *  from the user's own fill (bybit_qty × bybit_avg_price) instead of the
+ *  constant shadow notional. PnL USD is recomputed from pnl_pct × that
+ *  notional so display matches the user's actual wallet movement.
+ * ===================================================================== */
+
+export type UserActiveFeedRow = ActiveTradeFeedRow & { notionalUsd: number | null };
+export type UserClosedFeedRow = LiveTradeFeedRow & { notionalUsd: number | null };
+
+type UserActiveDbRow = ActiveRow & {
+  strategy_id: string;
+  bybit_qty: number | null;
+  bybit_avg_price: number | null;
+};
+
+const userActiveTradesStmt = db.prepare<[number], UserActiveDbRow>(`
+  SELECT id, strategy_id, strategy_trade_num, side, entry, sl,
+         filled_at, created_at, bybit_qty, bybit_avg_price
+  FROM decisions
+  WHERE track = 'strategy' AND user_id = ? AND strategy_id IS NOT NULL
+    AND status IN ('active', 'pending')
+  ORDER BY COALESCE(filled_at, created_at) DESC
+`);
+
+export function getUserActiveTrades(userId: number): UserActiveFeedRow[] {
+  const rows = userActiveTradesStmt.all(userId);
+  const out: UserActiveFeedRow[] = [];
+  for (const r of rows) {
+    if (r.side !== 'long' && r.side !== 'short') continue;
+    if (r.entry === null) continue;
+    const notional =
+      r.bybit_qty !== null && r.bybit_avg_price !== null
+        ? r.bybit_qty * r.bybit_avg_price
+        : null;
+    out.push({
+      id: r.id,
+      strategyId: r.strategy_id,
+      strategyTradeNum: r.strategy_trade_num,
+      side: r.side,
+      entryAt: r.filled_at ?? r.created_at,
+      entryPrice: r.entry,
+      sl: r.sl,
+      notionalUsd: notional,
+    });
+  }
+  return out;
+}
+
+const userClosedCountStmt = db.prepare<[number], { n: number }>(`
+  SELECT COUNT(*) AS n FROM decisions
+  WHERE track = 'strategy' AND user_id = ? AND strategy_id IS NOT NULL
+    AND status = 'closed' AND pnl_pct IS NOT NULL
+`);
+export function countUserClosedTrades(userId: number): number {
+  return userClosedCountStmt.get(userId)?.n ?? 0;
+}
+
+type UserClosedDbRow = TradeRow & {
+  strategy_id: string;
+  bybit_qty: number | null;
+  bybit_avg_price: number | null;
+};
+
+const userClosedPageStmts: Record<FeedSort, ReturnType<typeof db.prepare<[number, number, number], UserClosedDbRow>>> =
+  Object.fromEntries(
+    (Object.entries(FEED_ORDER_BY) as [FeedSort, string][]).map(([key, orderBy]) => [
+      key,
+      db.prepare<[number, number, number], UserClosedDbRow>(`
+        SELECT id, strategy_id, strategy_trade_num, side, entry, close_price, pnl_pct,
+               close_reason, force_close_reason, filled_at, created_at, closed_at,
+               bybit_qty, bybit_avg_price
+        FROM decisions
+        WHERE track = 'strategy' AND user_id = ? AND strategy_id IS NOT NULL
+          AND status = 'closed' AND pnl_pct IS NOT NULL
+        ORDER BY ${orderBy}
+        LIMIT ? OFFSET ?
+      `),
+    ]),
+  ) as Record<FeedSort, ReturnType<typeof db.prepare<[number, number, number], UserClosedDbRow>>>;
+
+export function getUserClosedTrades(
+  userId: number,
+  limit: number,
+  offset: number,
+  sort: FeedSort = 'close_desc',
+): UserClosedFeedRow[] {
+  const stmt = userClosedPageStmts[sort] ?? userClosedPageStmts.close_desc;
+  const rows = stmt.all(userId, limit, offset);
+  const out: UserClosedFeedRow[] = [];
+  for (const r of rows) {
+    if (!r.side || (r.side !== 'long' && r.side !== 'short')) continue;
+    if (r.entry === null || r.close_price === null) continue;
+    if (r.closed_at === null || r.pnl_pct === null) continue;
+    const notional =
+      r.bybit_qty !== null && r.bybit_avg_price !== null
+        ? r.bybit_qty * r.bybit_avg_price
+        : null;
+    out.push({
+      id: r.id,
+      strategyId: r.strategy_id,
+      strategyTradeNum: r.strategy_trade_num,
+      side: r.side,
+      entryAt: r.filled_at ?? r.created_at,
+      entryPrice: r.entry,
+      exitAt: r.closed_at,
+      exitPrice: r.close_price,
+      pnlPct: r.pnl_pct,
+      // PnL USD on a user trade is anchored to the user's real notional,
+      // not the $1000 shadow constant. Falls back to the shadow constant
+      // for legacy rows that pre-date bybit_qty / bybit_avg_price columns.
+      pnlUsd: (r.pnl_pct / 100) * (notional ?? TRACK_C_NOTIONAL_USD),
+      closeReason: r.close_reason,
+      forceCloseReason: r.force_close_reason,
+      notionalUsd: notional,
+    });
+  }
+  return out;
+}
+
 /** Most recent N closed trades for the landing-page "Recent live trades"
  *  table. Includes only fully-closed decisions with a recorded pnl_pct. */
 export function getStrategyRecentTrades(strategyId: string, limit = 50): LiveTradeRow[] {

@@ -48,7 +48,13 @@ import { computeMarginState } from './margin.js';
 import { renderStrategiesPage } from './strategies.js';
 import { renderApiKeyPage } from './api-key.js';
 import { issueCsrfToken, requireCsrf } from '../auth/csrf.js';
-import { renderTradesPage, type UserTradeRow } from './trades.js';
+import { renderTradesPage } from './trades.js';
+import {
+  getUserActiveTrades,
+  getUserClosedTrades,
+  countUserClosedTrades,
+  type FeedSort,
+} from '../strategies/live-stats.js';
 import { renderSubscriptionPage } from './subscription.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
@@ -62,31 +68,11 @@ const userOpenPositionsCount = db.prepare<[number], { c: number }>(
     WHERE user_id = ? AND status = 'active' AND track = 'strategy'`,
 );
 
-const userActiveTradesStmt = db.prepare<[number], UserTradeRow>(
-  `SELECT id, created_at, closed_at, status, symbol, side, entry, sl,
-          close_price, close_reason, pnl_pct, pnl_r, strategy_id,
-          strategy_trade_num, exchange_order_id, bybit_qty, bybit_avg_price,
-          bybit_close_avg_price, order_error
-     FROM decisions
-    WHERE user_id = ? AND status = 'active' AND track = 'strategy'
-    ORDER BY created_at DESC`,
-);
-
-const userClosedTradesStmt = db.prepare<[number, number, number], UserTradeRow>(
-  `SELECT id, created_at, closed_at, status, symbol, side, entry, sl,
-          close_price, close_reason, pnl_pct, pnl_r, strategy_id,
-          strategy_trade_num, exchange_order_id, bybit_qty, bybit_avg_price,
-          bybit_close_avg_price, order_error
-     FROM decisions
-    WHERE user_id = ? AND status = 'closed' AND track = 'strategy'
-    ORDER BY closed_at DESC, created_at DESC
-    LIMIT ? OFFSET ?`,
-);
-
-const userClosedTradesTotalStmt = db.prepare<[number], { c: number }>(
-  `SELECT COUNT(*) AS c FROM decisions
-    WHERE user_id = ? AND status = 'closed' AND track = 'strategy'`,
-);
+// TRACK D /account/trades: per-user active+closed feed lives in
+// src/strategies/live-stats.ts (getUserActiveTrades / getUserClosedTrades
+// / countUserClosedTrades) so the cabinet and the public /strategies
+// feed share the same DB-query layer and stay in sync if the schema
+// ever changes.
 
 const userClosedPnlAgg = db.prepare<[number], { net: number | null }>(
   `SELECT SUM(pnl_pct) AS net FROM decisions
@@ -785,22 +771,33 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
   });
 
   // -------- GET /account/trades --------
+  // Combined active+closed feed in the same layout as the public
+  // /strategies feed: sort selector + paginated closed trades with
+  // reason pills. Page size aligned with the landing's 20-row pages.
   app.get('/account/trades', async (req, reply) => {
     const user = getAuthedUser(req);
     if (!user) {
       reply.redirect('/strategies');
       return;
     }
-    // Pagination: 50 closed trades per page. Active positions always
-    // shown in full (rare for a user to have >50 open at once).
-    const PAGE_SIZE = 50;
-    const queryParams = (req.query ?? {}) as { page?: string };
-    const pageRaw = Number(queryParams.page ?? '1');
+    const PAGE_SIZE = 20;
+    const queryParams = (req.query ?? {}) as { p?: string; page?: string; sort?: string };
+    // Accept both ?p= (landing convention) and ?page= (legacy /account
+    // bookmark) so old bookmarks don't 404 onto page 1 silently.
+    const pageRaw = Number(queryParams.p ?? queryParams.page ?? '1');
     const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.floor(pageRaw) : 1;
-    const offset = (page - 1) * PAGE_SIZE;
-    const active = userActiveTradesStmt.all(user.userId);
-    const closed = userClosedTradesStmt.all(user.userId, PAGE_SIZE, offset);
-    const closedTotal = userClosedTradesTotalStmt.get(user.userId)?.c ?? 0;
+    // Whitelist of sort keys — anything else falls back to close_desc.
+    const VALID_SORTS: ReadonlySet<FeedSort> = new Set([
+      'close_desc', 'close_asc', 'entry_desc', 'entry_asc', 'pnl_desc', 'pnl_asc',
+    ]);
+    const sortParam = (queryParams.sort ?? 'close_desc') as FeedSort;
+    const sort: FeedSort = VALID_SORTS.has(sortParam) ? sortParam : 'close_desc';
+    const closedTotal = countUserClosedTrades(user.userId);
+    const totalPages = Math.max(1, Math.ceil(closedTotal / PAGE_SIZE));
+    const safePage = Math.min(page, totalPages);
+    const offset = (safePage - 1) * PAGE_SIZE;
+    const active = getUserActiveTrades(user.userId);
+    const closed = getUserClosedTrades(user.userId, PAGE_SIZE, offset, sort);
     const apiKey = findActiveKey(user.userId);
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'private, no-store');
@@ -810,9 +807,10 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         activeTrades: active,
         closedTrades: closed,
         hasApiKey: !!apiKey && apiKey.last_verified_at !== null,
-        page,
+        page: safePage,
         pageSize: PAGE_SIZE,
         closedTotal,
+        sort,
       }),
     );
   });
