@@ -2251,55 +2251,69 @@ export function pageShell(
   // stays everywhere so non-techy visitors notice the carousel can move.
   const carouselBlock = `
 <style>
+  /* Wrapper allows arrows to sit OUTSIDE the scroll track (in the
+     section's side padding zone) instead of floating over the first
+     and last visible card. */
   [data-carousel="true"] {
     position: relative;
   }
+  /* Edge fade — narrower (40px instead of 56px) and starts from a
+     softer alpha so there's no hard vertical line over the card edge. */
   [data-carousel="true"]::before,
   [data-carousel="true"]::after {
     content: '';
     position: absolute; top: 0; bottom: 14px;
-    width: 56px;
+    width: 40px;
     pointer-events: none;
     z-index: 2;
     transition: opacity 200ms;
   }
   [data-carousel="true"]::before {
     left: 0;
-    background: linear-gradient(90deg, #0b0e13 0%, rgba(11,14,19,0.7) 40%, rgba(11,14,19,0) 100%);
+    background: linear-gradient(90deg, rgba(11,14,19,0.85) 0%, rgba(11,14,19,0.55) 50%, rgba(11,14,19,0) 100%);
   }
   [data-carousel="true"]::after {
     right: 0;
-    background: linear-gradient(270deg, #0b0e13 0%, rgba(11,14,19,0.7) 40%, rgba(11,14,19,0) 100%);
+    background: linear-gradient(270deg, rgba(11,14,19,0.85) 0%, rgba(11,14,19,0.55) 50%, rgba(11,14,19,0) 100%);
   }
   [data-carousel="true"].rc-at-start::before { opacity: 0; }
   [data-carousel="true"].rc-at-end::after    { opacity: 0; }
   .rc-carousel-arrow {
     position: absolute; top: 50%; transform: translateY(-50%);
-    width: 40px; height: 40px;
-    background: rgba(20, 24, 31, 0.92);
+    width: 42px; height: 42px;
+    background: #14181f;
     border: 1px solid #2a323d;
     border-radius: 50%;
     color: #e8edf2;
     font-size: 22px; font-weight: 400;
     cursor: pointer;
-    z-index: 3;
+    z-index: 4;
     display: flex; align-items: center; justify-content: center;
     line-height: 1;
-    transition: background 150ms, border-color 150ms, opacity 200ms;
+    transition: background 150ms, border-color 150ms, opacity 200ms, transform 150ms;
     padding: 0;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
   }
   .rc-carousel-arrow:hover {
     background: rgba(74, 217, 145, 0.18);
     border-color: rgba(74, 217, 145, 0.55);
     color: #4ad991;
+    transform: translateY(-50%) scale(1.05);
   }
-  .rc-carousel-arrow:disabled { opacity: 0.25; cursor: default; }
-  .rc-carousel-arrow-prev { left: -8px; }
-  .rc-carousel-arrow-next { right: -8px; }
+  .rc-carousel-arrow:disabled { opacity: 0.18; cursor: default; transform: translateY(-50%); }
+  /* Arrows sit fully OUTSIDE the carousel content (–28px). Section has
+     enough side padding for them to land in clear space without
+     overlapping the first/last card. */
+  .rc-carousel-arrow-prev { left: -28px; }
+  .rc-carousel-arrow-next { right: -28px; }
+  @media (max-width: 900px) {
+    .rc-carousel-arrow-prev { left: -16px; }
+    .rc-carousel-arrow-next { right: -16px; }
+  }
   @media (max-width: 640px) {
-    .rc-carousel-arrow { width: 34px; height: 34px; font-size: 19px; }
-    .rc-carousel-arrow-prev { left: 2px; }
-    .rc-carousel-arrow-next { right: 2px; }
+    .rc-carousel-arrow { width: 36px; height: 36px; font-size: 19px; }
+    .rc-carousel-arrow-prev { left: -4px; }
+    .rc-carousel-arrow-next { right: -4px; }
   }
   @media (hover: none) and (pointer: coarse) {
     .rc-carousel-arrow { display: none; }
