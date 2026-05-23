@@ -41,6 +41,7 @@ import { adminCsrfToken, requireAdminCsrf } from '../auth/csrf.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { TIER_CONFIGS, TIER_ORDER, computeTierTradeSize, type TierId } from '../strategies/tier-config.js';
+import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
 import { listRecentTransitions } from '../db/repos/user-tier-history.js';
 
 function escapeHtml(s: string): string {
@@ -699,6 +700,58 @@ function computeTierLiveStats(windowMs: number): TierLiveStats[] {
   });
 }
 
+/**
+ * Backtest-based forecast per tier. For each strategy in the tier:
+ *   - look up its STRATEGY_CONFIGS.backtest snapshot
+ *   - scale netPnlUsd from backtest notional to tier notional
+ *   - normalise to per-month (× 30 / periodDays) and per-year (× 365 / periodDays)
+ *   - count trades / wins / losses scaled to the same per-month rate
+ *
+ * Returns the same shape as the live stats so the same table renderer
+ * can show both side-by-side. `trades` / `wins` / `losses` are rounded
+ * to whole numbers (we are not going to write "23.7 trades").
+ */
+type TierForecastStats = TierLiveStats;
+
+function computeTierForecastStats(): TierForecastStats[] {
+  return TIER_ORDER.map((tierId) => {
+    const tier = TIER_CONFIGS[tierId];
+    let tradesPerMonth = 0;
+    let winsPerMonth = 0;
+    let lossesPerMonth = 0;
+    let monthlyGrossUsd = 0;
+    for (const sid of tier.strategyIds) {
+      const strat = STRATEGY_CONFIGS[sid];
+      const bt = strat?.backtest;
+      if (!bt || bt.periodDays <= 0 || bt.notionalUsd <= 0) continue;
+      const size = computeTierTradeSize(tierId, sid);
+      if (!size) continue;
+      const scale = size.notionalUsd / bt.notionalUsd;
+      const monthlyFactor = 30 / bt.periodDays;
+      tradesPerMonth += bt.totalTrades * monthlyFactor;
+      winsPerMonth += bt.wins * monthlyFactor;
+      lossesPerMonth += bt.losses * monthlyFactor;
+      monthlyGrossUsd += bt.netPnlUsd * scale * monthlyFactor;
+    }
+    const trades = Math.round(tradesPerMonth);
+    const wins = Math.round(winsPerMonth);
+    const losses = Math.round(lossesPerMonth);
+    const grossRounded = Math.round(monthlyGrossUsd * 100) / 100;
+    const minDepo = tier.minBalanceUsdt;
+    const monthlyPct = minDepo > 0 ? (grossRounded / minDepo) * 100 : 0;
+    return {
+      tierId,
+      trades,
+      wins,
+      losses,
+      winRatePct: trades === 0 ? null : (winsPerMonth / tradesPerMonth) * 100,
+      grossUsd: grossRounded,
+      pctOfMinDepoMonthly: Math.round(monthlyPct * 100) / 100,
+      pctOfMinDepoAnnual: Math.round(monthlyPct * 12 * 10) / 10,
+    };
+  });
+}
+
 function renderTiersDashboard(): string {
   const dist = new Map<string, number>();
   for (const row of tierDistStmt.all()) dist.set(row.tier_id, row.n);
@@ -728,12 +781,12 @@ function renderTiersDashboard(): string {
     return 'adm-wr-bad';
   };
 
-  const renderLiveTierTable = (
-    windowMs: number,
+  const renderTierStatsTable = (
+    stats: TierLiveStats[],
     kind: 'month' | 'year',
     emptyLabel: string,
+    tradesHeader: string = 'Сделок',
   ): string => {
-    const stats = computeTierLiveStats(windowMs);
     const totalTrades = stats.reduce((acc, s) => acc + s.trades, 0);
     if (totalTrades === 0) {
       return `<p class="adm-empty">${escapeHtml(emptyLabel)}</p>`;
@@ -744,7 +797,7 @@ function renderTiersDashboard(): string {
           <tr>
             <th>Tier</th>
             <th>Стратегий</th>
-            <th>Сделок</th>
+            <th>${escapeHtml(tradesHeader)}</th>
             <th>Wins</th>
             <th>Losses</th>
             <th>Win-rate</th>
@@ -797,16 +850,37 @@ function renderTiersDashboard(): string {
     `;
   };
 
-  const liveStatsTable30d = renderLiveTierTable(
-    30 * 24 * 60 * 60 * 1000,
+  const liveStatsTable30d = renderTierStatsTable(
+    computeTierLiveStats(30 * 24 * 60 * 60 * 1000),
     'month',
     'За последние 30 дней не было закрытых сделок.',
   );
-  const liveStatsTable365d = renderLiveTierTable(
-    365 * 24 * 60 * 60 * 1000,
+  const liveStatsTable365d = renderTierStatsTable(
+    computeTierLiveStats(365 * 24 * 60 * 60 * 1000),
     'year',
     'За последние 365 дней не было закрытых сделок.',
   );
+  const forecastTable = renderTierStatsTable(
+    computeTierForecastStats(),
+    'month',
+    'Бектесты не настроены ни для одной стратегии тарифов.',
+    'Сделок/мес',
+  );
+  const forecastNote = `
+    <p class="adm-tier-note">
+      Прогноз: для каждой стратегии тарифа берётся снимок бектеста
+      (<code>STRATEGY_CONFIGS[id].backtest</code>) — total trades, wins, losses,
+      netPnlUsd, periodDays. Notional пересчитан в размер тарифа, цифры
+      нормализованы к месяцу (<code>× 30 / periodDays</code>). Это <b>математическое
+      ожидание</b> на исторических данных, не гарантия будущих результатов:
+      реальный live-PnL зависит от текущего рыночного режима, slippage'а
+      и того, продолжают ли условия сетапа повторяться так же часто.
+      <br><br>
+      Сравните блок «прогноз» с «последние 30 дней» — если live стабильно ниже
+      бектеста, значит рынок «остыл» к этой стратегии (понижается частота
+      сделок или win-rate). Если выше — текущая волатильность играет в пользу.
+    </p>
+  `;
   const liveStatsNote = `
     <p class="adm-tier-note">
       Симуляция: для каждой закрытой shadow-сделки (operator-уровень, <code>user_id IS NULL</code>)
@@ -900,6 +974,12 @@ function renderTiersDashboard(): string {
       <section class="adm-section">
         <h2>📊 Распределение по тарифам</h2>
         ${distTable}
+      </section>
+
+      <section class="adm-section">
+        <h2>🔮 Прогнозируемая доходность по бектестам</h2>
+        ${forecastTable}
+        ${forecastNote}
       </section>
 
       <section class="adm-section">
