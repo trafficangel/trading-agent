@@ -1769,6 +1769,8 @@ const STYLE = `
     scrollbar-width: none;
     -ms-overflow-style: none;
     -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
+    overscroll-behavior-x: contain;
   }
   /* Hide the native horizontal scrollbar entirely — arrows + edge-fade
      do the affordance, and the bright-green scrollbar was reading as a

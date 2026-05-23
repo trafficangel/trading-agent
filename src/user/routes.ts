@@ -1046,25 +1046,35 @@ function renderTierPicker(p: {
     const featuresHtml = isProf
       ? `
         <ul class="tp-card-features">
-          <li><span class="tp-card-feature-emoji">🎯</span><span class="tp-card-feature-label">${t.strategyIds.length} стратегий:</span> ${escapeHtmlMin(coinsStr)}</li>
-          <li><span class="tp-card-feature-emoji">⚙️</span><span class="tp-card-feature-label">Управление:</span> margin + плечо по каждой стратегии</li>
-          <li><span class="tp-card-feature-emoji">⚡</span><span class="tp-card-feature-label">Сделок одновременно:</span> до ${t.maxConcurrentPositions}</li>
-          <li><span class="tp-card-feature-emoji">🚫</span><span class="tp-card-feature-label">Платформа НЕ:</span> контролирует баланс, переключает тариф, ограничивает плечо</li>
+          <li><span class="tp-card-feature-emoji">🎯</span><span class="tp-card-feature-label">${t.strategyIds.length} стратегий:</span><span class="tp-card-feature-val">${escapeHtmlMin(coinsStr)}</span></li>
+          <li><span class="tp-card-feature-emoji">⚙️</span><span class="tp-card-feature-label">Управление:</span><span class="tp-card-feature-val">margin + плечо по каждой стратегии</span></li>
+          <li><span class="tp-card-feature-emoji">⚡</span><span class="tp-card-feature-label">Сделок одновременно:</span><span class="tp-card-feature-val">до ${t.maxConcurrentPositions}</span></li>
+          <li><span class="tp-card-feature-emoji">🚫</span><span class="tp-card-feature-label">Платформа НЕ:</span><span class="tp-card-feature-val">контролирует баланс, переключает тариф, ограничивает плечо</span></li>
         </ul>
       `
       : `
         <ul class="tp-card-features">
-          <li><span class="tp-card-feature-emoji">💰</span><span class="tp-card-feature-label">Заработок:</span> ~$${subRange.low}–$${subRange.high}/мес</li>
-          <li><span class="tp-card-feature-emoji">🎯</span><span class="tp-card-feature-label">${t.strategyIds.length} стратегий:</span> ${escapeHtmlMin(coinsStr)}</li>
-          <li><span class="tp-card-feature-emoji">⚡</span><span class="tp-card-feature-label">Сделок одновременно:</span> до ${t.maxConcurrentPositions}</li>
-          <li><span class="tp-card-feature-emoji">💎</span><span class="tp-card-feature-label">Бесплатно:</span> 14 дней теста</li>
+          <li><span class="tp-card-feature-emoji">💰</span><span class="tp-card-feature-label">Заработок:</span><span class="tp-card-feature-val">~$${subRange.low}–$${subRange.high}/мес</span></li>
+          <li><span class="tp-card-feature-emoji">🎯</span><span class="tp-card-feature-label">${t.strategyIds.length} стратегий:</span><span class="tp-card-feature-val">${escapeHtmlMin(coinsStr)}</span></li>
+          <li><span class="tp-card-feature-emoji">⚡</span><span class="tp-card-feature-label">Сделок одновременно:</span><span class="tp-card-feature-val">до ${t.maxConcurrentPositions}</span></li>
+          <li><span class="tp-card-feature-emoji">💎</span><span class="tp-card-feature-label">Бесплатно:</span><span class="tp-card-feature-val">14 дней теста</span></li>
         </ul>
       `;
 
+    // Tier emoji — same mapping as the autotrading landing's tierEmoji() so
+    // the same medal/cup icon appears in the picker card title + decorative
+    // backdrop. Hardcoded here to keep routes.ts free of the helper import.
+    const tierEmojiMap: Record<string, string> = {
+      starter: '🥉', standard: '🥈', plus: '🥇', pro: '🏆', vip: '👑', prof: '💼',
+    };
+    const tierEmoji = tierEmojiMap[t.id] ?? '🎯';
+
     return `
-      <div class="tp-card ${cardCls}">
+      <div class="tp-card ${cardCls}" data-tier="${t.id}">
+        <div class="tp-card-glow"></div>
+        <div class="tp-card-deco" aria-hidden="true">${tierEmoji}</div>
         <div class="tp-card-badges">${badges.join('')}</div>
-        <div class="tp-card-name">${escapeHtmlMin(t.name)}</div>
+        <div class="tp-card-name">${tierEmoji} ${escapeHtmlMin(t.name)}</div>
         <div class="tp-card-depo">Депозит ${isProf ? `$${t.minBalanceUsdt}+ (минимум)` : `$${t.minBalanceUsdt.toLocaleString()}–${maxStr}`}</div>
         <div class="tp-card-price">
           <span class="tp-card-price-num">$${t.monthlyPriceUsd}</span>
@@ -1138,23 +1148,70 @@ function renderTierPicker(p: {
         scrollbar-color: #2a323d transparent;
         scrollbar-width: thin;
         -webkit-overflow-scrolling: touch;
+        touch-action: pan-x pan-y;
+        overscroll-behavior-x: contain;
       }
       .tp-carousel::-webkit-scrollbar { height: 8px; }
       .tp-carousel::-webkit-scrollbar-track { background: transparent; }
       .tp-carousel::-webkit-scrollbar-thumb { background: #2a323d; border-radius: 4px; }
-      .tp-card { background: #11161d; border: 1px solid #1f2630; border-radius: 16px;
-        padding: 24px 22px 20px;
+      /* Per-tier accent palette — same identity as the /autotrading
+       * pricing carousel so the cabinet feels like the same product. */
+      .tp-card {
+        --tier-accent: #4ad991;
+        --tier-accent-soft: rgba(74,217,145,0.10);
+        background: linear-gradient(180deg, #161c25 0%, #11161d 70%);
+        border: 1px solid #1f2630; border-radius: 18px;
+        padding: 26px 22px 22px;
         display: flex; flex-direction: column; position: relative;
+        overflow: hidden;
         flex: 0 0 380px; min-width: 0;
         scroll-snap-align: center;
         box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+        transition: transform 220ms cubic-bezier(0.2, 0, 0, 1),
+                    box-shadow 220ms, border-color 220ms;
       }
+      .tp-card[data-tier="starter"]  { --tier-accent: #5db5ff; --tier-accent-soft: rgba(93,181,255,0.10); }
+      .tp-card[data-tier="standard"] { --tier-accent: #4ad991; --tier-accent-soft: rgba(74,217,145,0.10); }
+      .tp-card[data-tier="plus"]     { --tier-accent: #b08cff; --tier-accent-soft: rgba(176,140,255,0.10); }
+      .tp-card[data-tier="pro"]      { --tier-accent: #ff9c54; --tier-accent-soft: rgba(255,156,84,0.10); }
+      .tp-card[data-tier="vip"]      { --tier-accent: #ff77c4; --tier-accent-soft: rgba(255,119,196,0.10); }
+      .tp-card[data-tier="prof"]     { --tier-accent: #ff6363; --tier-accent-soft: rgba(255,99,99,0.10); }
+      .tp-card-glow {
+        position: absolute; top: 0; left: 0; right: 0; height: 100px;
+        pointer-events: none;
+        background: radial-gradient(ellipse 80% 100% at 50% 0%, var(--tier-accent-soft) 0%, transparent 70%);
+        opacity: 0.85;
+      }
+      .tp-card-deco {
+        position: absolute; top: -18px; right: -14px;
+        font-size: 120px; line-height: 1;
+        opacity: 0.07; pointer-events: none;
+        filter: grayscale(0.3);
+        transition: opacity 320ms, transform 320ms;
+      }
+      .tp-card > :not(.tp-card-glow):not(.tp-card-deco) { position: relative; z-index: 1; }
+      .tp-card:hover {
+        transform: translateY(-4px);
+        border-color: color-mix(in srgb, var(--tier-accent) 45%, #1f2630);
+        box-shadow: 0 16px 40px rgba(0,0,0,0.40),
+                    0 0 0 1px color-mix(in srgb, var(--tier-accent) 25%, transparent);
+      }
+      .tp-card:hover .tp-card-deco { opacity: 0.12; transform: scale(1.04) rotate(-3deg); }
       [data-carousel="focus"] .tp-card.rc-card-active {
-        box-shadow: 0 14px 40px rgba(0,0,0,0.45);
+        border-color: color-mix(in srgb, var(--tier-accent) 60%, #1f2630);
+        box-shadow: 0 18px 48px rgba(0,0,0,0.50),
+                    0 0 0 1px color-mix(in srgb, var(--tier-accent) 40%, transparent),
+                    0 0 36px -6px color-mix(in srgb, var(--tier-accent) 35%, transparent);
       }
+      [data-carousel="focus"] .tp-card.rc-card-active .tp-card-deco { opacity: 0.12; }
       @media (max-width: 640px) {
-        .tp-card { flex: 0 0 86vw; }
-        .tp-carousel { padding-left: 7vw; padding-right: 7vw; }
+        .tp-card {
+          flex: 0 0 86vw; padding: 22px 18px 18px;
+          border-radius: 16px;
+        }
+        .tp-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
+        .tp-card-deco { font-size: 88px; top: -10px; right: -8px; }
+        .tp-card-glow { height: 72px; }
       }
       .tp-scroll-hint {
         text-align: center; font-size: 11.5px; color: #6b7480;
@@ -1214,25 +1271,70 @@ function renderTierPicker(p: {
         border: 1px solid rgba(239,91,107,0.45);
       }
       .tp-btn-prof:hover { background: rgba(239,91,107,0.30); }
-      .tp-card-name { font-size: 16px; font-weight: 600; color: #e8edf2; margin-bottom: 4px; }
-      .tp-card-depo { font-size: 11.5px; color: #8590a0; margin-bottom: 10px; }
-      .tp-card-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 12px; }
-      .tp-card-price-num { font-size: 24px; font-weight: 700; color: #4ad991; }
-      .tp-card-price-period { font-size: 12px; color: #8590a0; }
+      .tp-card-name {
+        font-size: 18px; font-weight: 700; color: #e8edf2;
+        margin-bottom: 4px; letter-spacing: -0.01em;
+      }
+      .tp-card-depo {
+        font-size: 11.5px; color: #8590a0; margin-bottom: 14px;
+        text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500;
+      }
+      .tp-card-price {
+        display: flex; align-items: baseline; gap: 6px;
+        margin-bottom: 14px; padding-bottom: 14px;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+      }
+      .tp-card-price-num {
+        font-size: 32px; font-weight: 800;
+        color: var(--tier-accent);
+        background: linear-gradient(135deg,
+          var(--tier-accent) 0%,
+          color-mix(in srgb, var(--tier-accent) 70%, #fff) 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        letter-spacing: -0.02em; line-height: 1;
+      }
+      @supports not (color: color-mix(in srgb, red, blue)) {
+        .tp-card-price-num { -webkit-text-fill-color: var(--tier-accent); }
+      }
+      .tp-card-price-period { font-size: 13px; color: #8590a0; }
       .tp-card-pitch {
-        font-size: 12.5px; color: #cfd6dd; line-height: 1.55;
-        margin: 0 0 14px; padding-bottom: 12px;
-        border-bottom: 1px dashed #1a1f27;
+        font-size: 13px; color: #cfd6dd; line-height: 1.6;
+        margin: 0 0 14px;
       }
       .tp-card-features {
         list-style: none; padding: 0; margin: 0 0 14px; flex: 1;
-        font-size: 12.5px; color: #cfd6dd; line-height: 1.5;
+        font-size: 13px; color: #cfd6dd; line-height: 1.5;
       }
       .tp-card-features li {
-        padding: 6px 0; display: flex; align-items: flex-start; gap: 6px;
+        padding: 8px 0; display: flex; align-items: flex-start; gap: 10px;
+        border-top: 1px dashed rgba(255,255,255,0.04);
       }
-      .tp-card-feature-emoji { flex-shrink: 0; font-size: 13px; line-height: 1.5; }
-      .tp-card-feature-label { color: #8590a0; }
+      .tp-card-features li:first-child { border-top: none; padding-top: 4px; }
+      .tp-card-feature-emoji {
+        flex-shrink: 0; font-size: 13px; line-height: 1;
+        width: 26px; height: 26px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border-radius: 50%;
+        background: var(--tier-accent-soft);
+        border: 1px solid color-mix(in srgb, var(--tier-accent) 25%, transparent);
+      }
+      @supports not (color: color-mix(in srgb, red, blue)) {
+        .tp-card-feature-emoji { border-color: rgba(255,255,255,0.06); }
+      }
+      .tp-card-feature-label {
+        color: #8590a0; white-space: nowrap; flex-shrink: 0; font-weight: 500;
+      }
+      .tp-card-feature-val {
+        flex: 1; min-width: 0; color: #cfd6dd;
+        word-wrap: break-word; overflow-wrap: anywhere;
+      }
+      @media (max-width: 640px) {
+        .tp-card-features { font-size: 12.5px; }
+        .tp-card-features li { gap: 8px; padding: 7px 0; }
+        .tp-card-feature-emoji { width: 24px; height: 24px; font-size: 12px; }
+      }
       .tp-card-action { margin-top: auto; }
       .tp-btn { display: block; width: 100%; box-sizing: border-box; padding: 10px 12px;
         border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none;

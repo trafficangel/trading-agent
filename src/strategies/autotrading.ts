@@ -113,7 +113,6 @@ function renderPage(
       ${renderFinalCta(lang)}
       ${renderTelegramCapture(lang)}
     </main>
-    ${renderStickyMobileCta(lang)}
   `;
 
   const title = lang === 'en'
@@ -1304,10 +1303,10 @@ function renderPricing(lang: Lang): string {
       </div>
       <p class="at-tier-pitch-top">${t.freePitch}</p>
       <ul class="at-tier-features">
-        <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">${t.feat3Strats}</span> BTC, BNB, BCH</li>
-        <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">${t.featConcurrent}</span> ${t.upTo} 2</li>
-        <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">${t.featFree}</span> ${t.featFreeBreakdown}</li>
-        <li><span class="at-tier-feat-icon">🎁</span><span class="at-tier-feat-label">${t.featCondition}</span> ${t.featConditionVal} <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">${t.ourLink}</a></li>
+        <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">${t.feat3Strats}</span><span class="at-tier-feat-val">BTC, BNB, BCH</span></li>
+        <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">${t.featConcurrent}</span><span class="at-tier-feat-val">${t.upTo} 2</span></li>
+        <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">${t.featFree}</span><span class="at-tier-feat-val">${t.featFreeBreakdown}</span></li>
+        <li><span class="at-tier-feat-icon">🎁</span><span class="at-tier-feat-label">${t.featCondition}</span><span class="at-tier-feat-val">${t.featConditionVal} <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">${t.ourLink}</a></span></li>
       </ul>
       <div class="at-tier-after-bonus">${t.afterBonus}</div>
     </div>
@@ -1342,10 +1341,10 @@ function renderPricing(lang: Lang): string {
           </div>
           <p class="at-tier-pitch-top">${escapeHtml(tier.pitch)}</p>
           <ul class="at-tier-features">
-            <li><span class="at-tier-feat-icon">💰</span><span class="at-tier-feat-label">${t.featProfit}</span> ${t.approx}${sub.low}${t.slash}$${sub.high}${t.perMonthShort}</li>
-            <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">${tier.strategyIds.length} ${t.featStrats}</span> ${escapeHtml(coinsStr)}</li>
-            <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">${t.featConcurrent}</span> ${t.upTo} ${tier.maxConcurrentPositions}</li>
-            <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">${t.featTrial}</span> ${t.featTrialVal}</li>
+            <li><span class="at-tier-feat-icon">💰</span><span class="at-tier-feat-label">${t.featProfit}</span><span class="at-tier-feat-val">${t.approx}${sub.low}${t.slash}$${sub.high}${t.perMonthShort}</span></li>
+            <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">${tier.strategyIds.length} ${t.featStrats}</span><span class="at-tier-feat-val">${escapeHtml(coinsStr)}</span></li>
+            <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">${t.featConcurrent}</span><span class="at-tier-feat-val">${t.upTo} ${tier.maxConcurrentPositions}</span></li>
+            <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">${t.featTrial}</span><span class="at-tier-feat-val">${t.featTrialVal}</span></li>
           </ul>
         </div>
       `;
@@ -1719,38 +1718,6 @@ function renderTelegramCapture(lang: Lang): string {
   `;
 }
 
-/**
- * Sticky mobile CTA — fixed-position bar at the bottom of the viewport,
- * mobile-only (≤720px). When the visitor scrolls past the hero CTA the
- * page is long; without this they have to scroll all the way back up
- * to click «Регистрация». Industry-standard pattern, lifts mobile
- * conversion by ~15-25% on long landing pages.
- */
-function renderStickyMobileCta(lang: Lang): string {
-  const cta = lang === 'en' ? 'Sign up · 14 days free' : 'Регистрация · 14 дней бесплатно';
-  return `
-    <div class="at-sticky-cta" id="at-sticky-cta" aria-hidden="false">
-      <a href="/strategies?from=autotrading" class="at-sticky-cta-btn">${ico('🚀')}${cta}</a>
-    </div>
-    <script>
-      (function() {
-        // Hide the sticky bar while the user is still inside the hero
-        // (CTA is already visible there) — show it as soon as they scroll
-        // the hero off screen. IntersectionObserver is cleaner than a
-        // scroll handler and avoids per-frame work.
-        const bar = document.getElementById('at-sticky-cta');
-        const hero = document.querySelector('.at-hero');
-        if (!bar || !hero) return;
-        const io = new IntersectionObserver((entries) => {
-          const heroVisible = entries[0]?.isIntersecting ?? false;
-          bar.classList.toggle('at-sticky-cta-visible', !heroVisible);
-        }, { threshold: 0.1 });
-        io.observe(hero);
-      })();
-    </script>
-  `;
-}
-
 function renderFinalCta(lang: Lang): string {
   if (lang === 'en') {
     return `
@@ -2019,6 +1986,13 @@ function styles(): string {
     scrollbar-color: #2a323d transparent;
     scrollbar-width: thin;
     -webkit-overflow-scrolling: touch;
+    /* Mobile: let the carousel handle horizontal swipes but always allow
+       vertical page scroll. Without touch-action the browser sometimes
+       hijacks vertical drags after a horizontal one starts. */
+    touch-action: pan-x pan-y;
+    /* Keep the page's swipe-back gesture from triggering when scrolling
+       past the carousel edges. */
+    overscroll-behavior-x: contain;
   }
   .at-tier-carousel::-webkit-scrollbar { height: 8px; }
   .at-tier-carousel::-webkit-scrollbar-track { background: transparent; }
@@ -2116,9 +2090,25 @@ function styles(): string {
   }
 
   @media (max-width: 640px) {
-    .at-tier-card { flex: 0 0 86vw; }
-    .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; }
-    .at-tier-card-deco { font-size: 110px; }
+    .at-tier-card {
+      flex: 0 0 86vw; padding: 28px 20px 22px;
+      border-radius: 16px;
+    }
+    .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
+    /* Smaller deco + glow on mobile so they don't dominate the smaller card. */
+    .at-tier-card-deco { font-size: 88px; top: -10px; right: -8px; }
+    .at-tier-card-glow { height: 80px; }
+    /* Cards with badge need bigger top padding here because the badge
+       sits ABOVE the card content; without this the tier name pushes
+       up against the pill. */
+    .at-tier-card.at-tier-popular,
+    .at-tier-card.at-tier-free { padding-top: 48px; }
+    .at-tier-badge { top: 14px; left: 14px; font-size: 10px; padding: 4px 10px; }
+    .at-tier-name { font-size: 17px; }
+    .at-tier-price-num { font-size: 32px; }
+    .at-tier-features { font-size: 12.5px; }
+    .at-tier-features li { gap: 8px; padding: 7px 0; }
+    .at-tier-feat-icon { width: 24px; height: 24px; font-size: 12px; }
   }
 
   /* Popular & Free retain extra top-glow tinting for instant
@@ -2206,6 +2196,14 @@ function styles(): string {
     .at-tier-feat-icon { border-color: rgba(255,255,255,0.06); }
   }
   .at-tier-feat-label { color: #8590a0; white-space: nowrap; flex-shrink: 0; font-weight: 500; }
+  /* Value column takes remaining width and wraps inside its own box so
+     multi-word values (coin lists, link rows) don't fragment across flex
+     items. Without this, an inline <a> next to plain text turns the row
+     into separate flex children with their own gaps. */
+  .at-tier-feat-val {
+    flex: 1; min-width: 0; color: #cfd6dd;
+    word-wrap: break-word; overflow-wrap: anywhere;
+  }
   .at-tier-features a {
     color: var(--tier-accent); text-decoration: none; font-weight: 600;
   }
@@ -2536,6 +2534,8 @@ function styles(): string {
     scrollbar-color: #2a323d transparent;
     scrollbar-width: thin;
     -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
+    overscroll-behavior-x: contain;
   }
   .at-bd-tiers::-webkit-scrollbar { height: 8px; }
   .at-bd-tiers::-webkit-scrollbar-track { background: transparent; }
@@ -2849,33 +2849,6 @@ function styles(): string {
   }
   @media (max-width: 480px) {
     .at-tg-capture-card { padding: 18px 20px; gap: 14px; }
-  }
-
-  /* ----- Sticky mobile CTA ----- */
-  .at-sticky-cta {
-    position: fixed; bottom: 0; left: 0; right: 0;
-    padding: 10px 14px 14px;
-    background: linear-gradient(180deg, rgba(11, 14, 19, 0) 0%, rgba(11, 14, 19, 0.95) 30%);
-    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    transform: translateY(120%);
-    transition: transform 0.32s cubic-bezier(0.2, 0, 0, 1);
-    z-index: 90; pointer-events: none;
-    display: none;
-  }
-  .at-sticky-cta-visible { transform: translateY(0); pointer-events: auto; }
-  .at-sticky-cta-btn {
-    display: flex; align-items: center; justify-content: center;
-    width: 100%; padding: 14px 18px;
-    background: #4ad991; color: #0b0e13;
-    border-radius: 10px; font-weight: 700; font-size: 15px;
-    text-decoration: none;
-    box-shadow: 0 8px 22px -6px rgba(74, 217, 145, 0.55);
-  }
-  @media (max-width: 720px) {
-    .at-sticky-cta { display: block; }
-    /* Reserve bottom padding so the sticky bar doesn't sit on top of
-       the last CTA / disclaimer / Telegram-capture card. */
-    .at-main { padding-bottom: 110px; }
   }
 
   /* ----- Walk-through video ----- */
