@@ -1072,12 +1072,61 @@ const STYLE = `
     letter-spacing: 0.04em;
   }
   .strat-row-num-total { color: var(--text-faint); font-weight: 500; }
+
+  /* Top-3 medals — gold/silver/bronze accent on the badge AND a thin
+     coloured edge-strip on the left of the card so the medals stand
+     out even when the card is dimmed in the carousel periphery. */
+  .strat-row-num-gold .strat-row-num {
+    color: #f5d970;
+    background: rgba(243, 210, 102, 0.14);
+    border-color: rgba(243, 210, 102, 0.40);
+  }
+  .strat-row-num-silver .strat-row-num {
+    color: #cfd6dd;
+    background: rgba(207, 214, 221, 0.12);
+    border-color: rgba(207, 214, 221, 0.35);
+  }
+  .strat-row-num-bronze .strat-row-num {
+    color: #d49566;
+    background: rgba(212, 149, 102, 0.14);
+    border-color: rgba(212, 149, 102, 0.40);
+  }
+  .strat-row-num-gold,
+  .strat-row-num-silver,
+  .strat-row-num-bronze {
+    /* Thin coloured left strip via box-shadow inset — survives the
+       carousel dimming (opacity 0.45) much better than a left border
+       would, and doesn't shift content. */
+    position: relative;
+  }
+  .strat-row-num-gold   { box-shadow: inset 3px 0 0 rgba(243, 210, 102, 0.45), 0 6px 18px rgba(0,0,0,0.20); }
+  .strat-row-num-silver { box-shadow: inset 3px 0 0 rgba(207, 214, 221, 0.40), 0 6px 18px rgba(0,0,0,0.20); }
+  .strat-row-num-bronze { box-shadow: inset 3px 0 0 rgba(212, 149, 102, 0.45), 0 6px 18px rgba(0,0,0,0.20); }
+
   /* Active card in focus carousel — full opacity (others dim per the
      global focus-mode rule), tier-colour-ish accent border. */
   [data-carousel="focus"] .strat-row.rc-card-active {
     border-color: rgba(74, 217, 145, 0.45);
     box-shadow: 0 10px 28px rgba(0,0,0,0.35),
                 0 0 0 1px rgba(74, 217, 145, 0.20);
+  }
+  /* Asymmetric dimming inside the strategy carousels: cards on the LEFT
+     of the active card are dimmer than ones on the RIGHT. Rationale:
+     reading flow is left-to-right; the right neighbour is «what's
+     coming next» (visitor's attention pulls there naturally), the left
+     neighbour is «already past». Using ~ sibling combinator: only
+     siblings AFTER .rc-card-active match, so we override their opacity
+     UP from the default. */
+  .strat-row-carousel.rc-carousel-track > .rc-card-active ~ .strat-row {
+    opacity: 0.7;
+  }
+  /* Override the base focus-mode rule for default-dim (cards before
+     active) to be even darker. */
+  [data-carousel="focus"] .strat-row-carousel.rc-carousel-track > .strat-row {
+    opacity: 0.35;
+  }
+  [data-carousel="focus"] .strat-row-carousel.rc-carousel-track > .rc-card-active {
+    opacity: 1;
   }
   @media (max-width: 640px) {
     .strat-row {
@@ -3386,9 +3435,18 @@ function renderStrategyIndex(
           <span><b>−${slPctStr}%</b> <span class="dim">от цены</span></span>
         </div>`;
 
+    // Top-3 medal: 🥇 #1, 🥈 #2, 🥉 #3. Adds class tier-specific accent
+    // colour to the badge so the eye picks them out instantly.
+    const medal = posInGroup === 1
+      ? { emoji: '🥇', cls: 'strat-row-num-gold' }
+      : posInGroup === 2
+        ? { emoji: '🥈', cls: 'strat-row-num-silver' }
+        : posInGroup === 3
+          ? { emoji: '🥉', cls: 'strat-row-num-bronze' }
+          : { emoji: '', cls: '' };
     return `
-      <a href="/strategies/${escapeHtml(s.code)}" class="strat-row">
-        <span class="strat-row-num" title="Позиция в таймфрейме">№${posInGroup}<span class="strat-row-num-total"> / ${groupSize}</span></span>
+      <a href="/strategies/${escapeHtml(s.code)}" class="strat-row${medal.cls ? ' ' + medal.cls : ''}">
+        <span class="strat-row-num" title="Позиция в таймфрейме${medal.emoji ? ' (ТОП-3 по реальной прибыли)' : ''}">${medal.emoji ? medal.emoji + ' ' : ''}№${posInGroup}<span class="strat-row-num-total"> / ${groupSize}</span></span>
         <div class="strat-row-head">
           <div class="strat-row-id">
             <span class="strat-code-mini">STRAT-${escapeHtml(s.code)}</span>
