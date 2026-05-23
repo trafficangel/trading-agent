@@ -82,6 +82,7 @@ function renderPage(
     <main class="at-main">
       ${renderHero(lang)}
       ${renderHowItWorks(lang)}
+      ${renderWalkthroughVideo(lang)}
       ${renderForecastTable(lang)}
       ${renderSafety(lang)}
       ${renderCalculator(lang)}
@@ -463,6 +464,64 @@ function renderBybitBonus(lang: Lang): string {
           <a class="at-btn-secondary" href="${SUPPORT_TG}" target="_blank" rel="noopener">
             Спросить оператора
           </a>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+/**
+ * Walk-through video — narrated screen-capture of the actual signup +
+ * Bybit API-key setup flow. Sits right after the 4-step text guide so
+ * the visitor can either read the steps or watch them; the «1 minute»
+ * label sets expectations so people don't bounce on «another long
+ * tutorial».
+ *
+ * The video file is served via @fastify/static from public/. We don't
+ * autoplay — autoplay-with-sound is blocked by browsers, and silent
+ * autoplay distracts from the rest of the page. preload="metadata"
+ * fetches only the few-hundred-byte header so the visitor sees the
+ * poster and play-button without paying the 17MB download until they
+ * click. Native <video controls> handles the rest.
+ */
+function renderWalkthroughVideo(lang: Lang): string {
+  const videoSrc = '/static/setup-walkthrough.mp4?v=1';
+  const t = lang === 'en'
+    ? {
+        title: 'See it in action — 1-minute walk-through',
+        sub: 'Same 4 steps you just read, recorded end-to-end: phone-OTP signup, picking a tier, creating the Bybit API key with the correct permissions, and the first balance check. No edits, no skips.',
+        cap1: 'Phone-OTP signup',
+        cap2: 'Pick a tier',
+        cap3: 'Bybit API key',
+        cap4: 'First balance check',
+      }
+    : {
+        title: 'Видео-инструкция · 1 минута',
+        sub: 'Те же 4 шага, что вы прочитали выше — записано целиком от начала до конца: регистрация по телефону, выбор тарифа, создание ключа на Bybit с правильными правами, первая проверка баланса. Без склейки, без пропусков.',
+        cap1: 'Вход по телефону',
+        cap2: 'Выбор тарифа',
+        cap3: 'Ключ на Bybit',
+        cap4: 'Проверка баланса',
+      };
+  return `
+    <section class="at-section at-walkthrough">
+      <h2 class="at-section-title">${ico('🎬')}${t.title}</h2>
+      <p class="at-section-sub">${t.sub}</p>
+      <div class="at-walkthrough-wrap">
+        <video class="at-walkthrough-video"
+               src="${videoSrc}"
+               controls
+               preload="metadata"
+               playsinline
+               muted
+               aria-label="${t.title}">
+          Your browser does not support the video tag.
+        </video>
+        <div class="at-walkthrough-chips">
+          <span class="at-walkthrough-chip"><b>1</b> ${t.cap1}</span>
+          <span class="at-walkthrough-chip"><b>2</b> ${t.cap2}</span>
+          <span class="at-walkthrough-chip"><b>3</b> ${t.cap3}</span>
+          <span class="at-walkthrough-chip"><b>4</b> ${t.cap4}</span>
         </div>
       </div>
     </section>
@@ -2710,6 +2769,42 @@ function styles(): string {
     /* Reserve bottom padding so the sticky bar doesn't sit on top of
        the last CTA / disclaimer / Telegram-capture card. */
     .at-main { padding-bottom: 110px; }
+  }
+
+  /* ----- Walk-through video ----- */
+  .at-walkthrough { margin-top: 30px; }
+  .at-walkthrough-wrap {
+    max-width: 880px; margin: 0 auto;
+    background: #11161d; border: 1px solid #1f2630;
+    border-radius: 14px; padding: 18px;
+    box-shadow: 0 12px 36px -16px rgba(0, 0, 0, 0.55);
+  }
+  .at-walkthrough-video {
+    display: block; width: 100%; height: auto;
+    border-radius: 10px;
+    background: #000;
+    aspect-ratio: 16 / 9;
+    object-fit: contain;
+  }
+  .at-walkthrough-chips {
+    display: flex; flex-wrap: wrap; justify-content: center;
+    gap: 8px; margin-top: 14px;
+  }
+  .at-walkthrough-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 999px;
+    background: #0e131a; border: 1px solid #1f2630;
+    color: #9aa5b1; font-size: 12px;
+  }
+  .at-walkthrough-chip b {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%;
+    font-size: 11px; font-weight: 700;
+    background: rgba(74, 217, 145, 0.15); color: #4ad991;
+  }
+  @media (max-width: 560px) {
+    .at-walkthrough-wrap { padding: 12px; border-radius: 12px; }
+    .at-walkthrough-chip { font-size: 11px; padding: 5px 10px; }
   }
 
   /* Carousel arrows + edge fade — defined globally in pageShell so every

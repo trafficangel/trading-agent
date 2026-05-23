@@ -280,6 +280,22 @@ function renderGuide(): string {
       </ul>
     </div>
 
+    <div class="key-video">
+      <div class="key-video-head">
+        <span class="key-video-eyebrow">${ico('🎬')}Видео-инструкция · 1 минута</span>
+        <span class="key-video-sub">Целиком: вход, выбор тарифа, создание ключа на Bybit, первая проверка баланса.</span>
+      </div>
+      <video class="key-video-player"
+             src="/static/setup-walkthrough.mp4?v=1"
+             controls
+             preload="metadata"
+             playsinline
+             muted
+             aria-label="Видео-инструкция: регистрация и подключение API-ключа">
+        Ваш браузер не поддерживает видео-тег.
+      </video>
+    </div>
+
     <div class="key-guide">
       <h2 class="key-guide-title">${ico('📖')}Пошаговая инструкция</h2>
       <ol class="key-guide-steps">
@@ -581,6 +597,23 @@ function styles(): string {
     padding: 1px 6px;
     border-radius: 4px;
     font-size: 12px;
+  }
+  .key-video {
+    background: #0e131a; border: 1px solid #1a1f27; border-radius: 12px;
+    padding: 18px; margin: 24px 0;
+  }
+  .key-video-head { margin-bottom: 12px; }
+  .key-video-eyebrow {
+    display: inline-block; font-size: 13.5px; font-weight: 600;
+    color: #e8edf2; margin-right: 8px;
+  }
+  .key-video-sub {
+    font-size: 12.5px; color: #9aa5b1; line-height: 1.55;
+  }
+  .key-video-player {
+    display: block; width: 100%; height: auto;
+    border-radius: 9px; background: #000;
+    aspect-ratio: 16 / 9; object-fit: contain;
   }
   .key-guide {
     background: #0e131a; border: 1px solid #1a1f27; border-radius: 12px;
