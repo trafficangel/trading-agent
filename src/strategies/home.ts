@@ -3,6 +3,7 @@ import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 import { getStrategyLiveStats } from './live-stats.js';
 import { pageShell, loadBacktestTrades, formatSinceDate, getLang } from './landing.js';
 import { getAuthedUser } from '../auth/routes.js';
+import { renderFounderBlock } from './founder-block.js';
 
 function authedFromReq(req: import('fastify').FastifyRequest): { displayName: string | null; phone: string | null } | null {
   const u = getAuthedUser(req);
@@ -1381,6 +1382,7 @@ function renderHome(
     ${signalPreviewHtml}
     ${strategiesPreviewHtml}
     ${roadmapHtml}
+    ${renderFounderBlock(lang)}
     ${faqHtml}
     ${ctaHtml}
     ${homeEffectsScript()}

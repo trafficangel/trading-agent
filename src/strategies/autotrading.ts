@@ -91,7 +91,6 @@ function renderPage(
       ${renderDepositBreakdown(lang)}
       ${renderLeverageEducation(lang)}
       ${renderStrategyPipeline(lang)}
-      ${renderAboutFounder(lang)}
 
       <section class="at-section at-strat-details">
         <details class="at-strat-details-toggle">
@@ -1454,107 +1453,6 @@ function renderFaq(lang: Lang): string {
 }
 
 /**
- * About founder — first-person story block. Builds authority through
- * personal history (15 years in crypto + MtGOX scar + LuxAlgo deep-dive
- * + Claude Code as the unlock). Placed AFTER the strategy pipeline so
- * the reader has already seen the technical proof and is ready for the
- * «who's behind this» moment.
- *
- * Photo: served from /static/founder.jpg via @fastify/static. The file
- * lives at `public/founder.jpg` in the repo, committed alongside this
- * code so deploys ship the photo with the build. Object-position is
- * `top` because the source crop has the subject's head near the top
- * third of the frame.
- */
-function renderAboutFounder(lang: Lang): string {
-  // Cache-bust query string — first deploy of /static/* hit a stale
-  // Cloudflare cache-miss saved before @fastify/static was wired up,
-  // and CF holds 404s for 4 hours. Bumping the `v=` integer forces a
-  // fresh origin fetch. Increment whenever the photo file is replaced.
-  const avatarSrc = '/static/founder.jpg?v=1';
-
-  if (lang === 'en') {
-    return `
-    <section class="at-section at-founder">
-      <h2 class="at-section-title">${ico('👋')}Who's behind this</h2>
-      <div class="at-founder-card">
-        <div class="at-founder-avatar">
-          <img src="${avatarSrc}" alt="Dmitry Boyko" />
-        </div>
-        <div class="at-founder-body">
-          <div class="at-founder-name">Dmitry Boyko <span class="at-founder-meta">· founder, Sevastopol · in crypto since 2010</span></div>
-          <p>
-            I lost my first 10 bitcoins in 2014 when <b>MtGOX</b> collapsed — back then that was a huge scandal.
-            That didn't push me out of the industry, it pulled me deeper into it. I went through the ICO boom,
-            DeFi summer, the NFT mania. Self-taught the whole way — manual trading, designing my own strategies,
-            constantly getting humbled by the market.
-          </p>
-          <p>
-            Three years ago I found <b>LuxAlgo</b>, an algorithmic platform for trading signals. I spent
-            evenings after my day job learning it. Yet another attempt to systematize trading — with mixed
-            results, because building it solo to production quality was beyond what I could ship.
-          </p>
-          <p>
-            In <b>2026</b> tools like <b>Claude Code</b> finally made it possible for one person to ship a
-            production-grade trading service end-to-end. I quit my day job and built <b>Robot Claude</b> — not
-            another «guru prediction», but a working system for people who, like me, have lost years to manual
-            trading and emotional decisions.
-          </p>
-          <p>
-            I'm building this for myself, and for everyone who cares about this industry too. The whole system
-            is transparent — every trade is public, every line of risk math is visible. Try it for 14 days
-            before you pay anything. If it doesn't fit you — walk away in one click.
-          </p>
-          <div class="at-founder-cta">
-            <a href="${SUPPORT_TG}" target="_blank" rel="noopener" class="at-btn-secondary">${ico('💬')}Message me on Telegram</a>
-          </div>
-        </div>
-      </div>
-    </section>
-  `;
-  }
-  return `
-    <section class="at-section at-founder">
-      <h2 class="at-section-title">${ico('👋')}Кто стоит за проектом</h2>
-      <div class="at-founder-card">
-        <div class="at-founder-avatar">
-          <img src="${avatarSrc}" alt="Дмитрий Бойко" />
-        </div>
-        <div class="at-founder-body">
-          <div class="at-founder-name">Дмитрий Бойко <span class="at-founder-meta">· основатель, Севастополь · в крипте с 2010</span></div>
-          <p>
-            Свои первые 10 биткоинов потерял в 2014, когда обанкротилась биржа <b>MtGOX</b> —
-            тогда это был громкий скандал. После этого из индустрии не уходил: пережил бум ICO,
-            DeFi-лето, NFT-волну. Учился сам — все эти годы пробовал торговать руками, изобретал
-            свои стратегии, систематизировал, ловил подъёмы и проседания.
-          </p>
-          <p>
-            Три года назад наткнулся на <b>LuxAlgo</b> — алгоритмическую платформу для построения
-            торговых сигналов. После работы вечерами разбирался в её механиках. Ещё одна попытка
-            систематизировать торговлю — с переменным успехом: собрать продакшн-сервис в одиночку
-            не получалось.
-          </p>
-          <p>
-            В <b>2026 году</b> появились такие инструменты как <b>Claude Code</b>. С их помощью
-            можно собрать продакшн-сервис в одиночку. Я уволился с основной работы и взялся за
-            <b>Robot Claude</b> — не очередной «прогноз гуру», а рабочая торговая система
-            для тех, кто, как я, потерял годы на ручной торговле и эмоциональных решениях.
-          </p>
-          <p>
-            Делаю это и для себя, и для всех, кому небезразлична эта индустрия. Вся система
-            прозрачна — каждая сделка публична, вся математика риска видна. Попробуйте 14 дней
-            до того как платить. Не подойдёт — отказ в один клик.
-          </p>
-          <div class="at-founder-cta">
-            <a href="${SUPPORT_TG}" target="_blank" rel="noopener" class="at-btn-secondary">${ico('💬')}Написать в Telegram</a>
-          </div>
-        </div>
-      </div>
-    </section>
-  `;
-}
-
-/**
  * Interactive calculator — user enters their planned deposit, sees their
  * specific tier + expected monthly profit + net-after-subscription number.
  *
@@ -2693,50 +2591,6 @@ function styles(): string {
     .at-cmp-tbl td.at-cmp-feat { font-size: 12px; }
     .at-cmp-tbl td { font-size: 16px; padding: 10px 8px; }
     .at-cmp-tbl th { font-size: 10.5px; padding: 10px 6px; }
-  }
-
-  /* ----- About founder ----- */
-  .at-founder { margin-top: 60px; }
-  .at-founder-card {
-    display: grid; grid-template-columns: 180px 1fr; gap: 32px;
-    align-items: start; max-width: 920px; margin: 0 auto;
-    background: linear-gradient(180deg, #11161d 0%, #0e131a 100%);
-    border: 1px solid #1f2630; border-radius: 14px; padding: 32px;
-  }
-  .at-founder-avatar {
-    width: 180px; height: 180px; border-radius: 50%;
-    overflow: hidden;
-    border: 3px solid rgba(74, 217, 145, 0.30);
-    box-shadow: 0 6px 24px -8px rgba(74, 217, 145, 0.25);
-  }
-  /* object-position biases the crop towards the founder's face (source
-     image is wide-format with the subject in the right third). Tweak
-     this if the photo is ever replaced. */
-  .at-founder-avatar img {
-    width: 100%; height: 100%; object-fit: cover; display: block;
-    object-position: 62% 30%;
-  }
-  .at-founder-body { color: #cfd6dd; font-size: 14.5px; line-height: 1.7; }
-  .at-founder-body p { margin: 0 0 14px 0; }
-  .at-founder-body p:last-of-type { margin-bottom: 18px; }
-  .at-founder-body b { color: #e8edf2; font-weight: 600; }
-  .at-founder-name {
-    font-size: 20px; font-weight: 600; color: #e8edf2;
-    margin-bottom: 14px; line-height: 1.35;
-  }
-  .at-founder-meta {
-    font-size: 13px; color: #8590a0; font-weight: 400; display: block;
-    margin-top: 2px;
-  }
-  .at-founder-cta { margin-top: 6px; }
-  @media (max-width: 720px) {
-    .at-founder-card {
-      grid-template-columns: 1fr; gap: 22px;
-      padding: 24px 20px; text-align: left;
-    }
-    .at-founder-avatar { width: 140px; height: 140px; margin: 0 auto; }
-    .at-founder-name { text-align: center; font-size: 18px; }
-    .at-founder-cta { text-align: center; }
   }
 
   /* ----- Calculator ----- */
