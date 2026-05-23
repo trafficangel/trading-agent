@@ -856,27 +856,33 @@ function renderTiersDashboard(): string {
     </main>
 
     <style>
-      .adm-main { max-width: 1100px; margin: 0 auto; padding: 24px; color: #cfd6dd; font-family: ui-sans-serif, system-ui, sans-serif; }
+      /* Force a dark base and bright default text on every element. Some
+         browsers do not cascade color from .adm-main into table cells, so
+         we set it on html/body and re-assert on each td. */
+      html, body { background: #0b0e13; color: #e8edf2; }
+      .adm-main { max-width: 1100px; margin: 0 auto; padding: 24px; color: #e8edf2; font-family: ui-sans-serif, system-ui, sans-serif; }
       .adm-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; padding-bottom: 16px; border-bottom: 1px solid #1f2630; }
-      .adm-header h1 { font-size: 22px; margin: 0; color: #e8edf2; }
+      .adm-header h1 { font-size: 22px; margin: 0; color: #ffffff; font-weight: 600; }
       .adm-header nav a { color: #4ad991; text-decoration: none; font-size: 13px; }
       .adm-section { margin-bottom: 36px; }
-      .adm-section h2 { font-size: 15px; color: #cfd6dd; margin: 0 0 14px 0; font-weight: 600; }
-      .adm-tier-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #11161d; border-radius: 8px; overflow: hidden; }
+      .adm-section h2 { font-size: 15px; color: #ffffff; margin: 0 0 14px 0; font-weight: 600; }
+      .adm-tier-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #11161d; border-radius: 8px; overflow: hidden; color: #e8edf2; }
       .adm-tier-table thead { background: #0e131a; }
-      .adm-tier-table th { text-align: left; padding: 10px 14px; color: #8590a0; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
-      .adm-tier-table td { padding: 10px 14px; border-top: 1px solid #1a1f27; }
+      .adm-tier-table th { text-align: left; padding: 10px 14px; color: #98a2b3; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+      .adm-tier-table td { padding: 10px 14px; border-top: 1px solid #1a1f27; color: #e8edf2; }
+      .adm-tier-table td b { color: #ffffff; font-weight: 600; }
       .adm-tier-table tr:first-child td { border-top: none; }
       .adm-tier-total { background: #0e131a; font-weight: 600; }
-      .adm-tier-id { color: #6b7480; font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
-      .adm-dt { color: #8590a0; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
-      .adm-mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
-      .adm-empty { color: #6b7480; font-style: italic; padding: 12px 0; }
-      .adm-pnl-pos { color: #4ad991; font-weight: 600; }
-      .adm-pnl-neg { color: #ff8b8b; font-weight: 600; }
-      .adm-tier-note { font-size: 12px; color: #8590a0; line-height: 1.5; margin: 12px 2px 0; }
-      .adm-tier-note code { background: #0e131a; padding: 1px 5px; border-radius: 4px; font-size: 11px; color: #cfd6dd; font-family: ui-monospace, Menlo, monospace; }
-      body { background: #0b0e13; }
+      .adm-tier-total td { color: #ffffff; }
+      .adm-tier-id { color: #8590a0; font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+      .adm-dt { color: #98a2b3; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+      .adm-mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #e8edf2; }
+      .adm-empty { color: #98a2b3; font-style: italic; padding: 12px 0; }
+      .adm-pnl-pos { color: #4ad991; font-weight: 700; }
+      .adm-pnl-neg { color: #ff8b8b; font-weight: 700; }
+      .adm-tier-note { font-size: 12px; color: #98a2b3; line-height: 1.55; margin: 12px 2px 0; }
+      .adm-tier-note code { background: #0e131a; padding: 1px 5px; border-radius: 4px; font-size: 11px; color: #e8edf2; font-family: ui-monospace, Menlo, monospace; }
+      .adm-tier-note b { color: #e8edf2; }
     </style>
   `;
   return body;
