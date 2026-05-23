@@ -230,8 +230,32 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         errors.push(`${cfg.code}: плечо должно быть от 1 до 100`);
         continue;
       }
+      // Phase N — optional SL override. Field is always present on the
+      // form, but if user blanks it or types the strategy default we
+      // store NULL so the row tracks STRATEGY_CONFIGS automatically.
+      const slPctRaw = body[`sl_pct_${sid}`]?.trim() ?? '';
+      let slPctOverride: number | null = null;
+      if (slPctRaw !== '') {
+        const slPercent = Number.parseFloat(slPctRaw.replace(',', '.'));
+        if (!Number.isFinite(slPercent) || slPercent < 0.5 || slPercent > 25) {
+          errors.push(`${cfg.code}: стоп-лосс должен быть от 0.5% до 25%`);
+          continue;
+        }
+        const decimal = slPercent / 100;
+        // Treat «equal to platform default» as no override (null) so we
+        // don't lock the row to a value that may change later.
+        if (Math.abs(decimal - cfg.slPct) > 0.0001) {
+          slPctOverride = decimal;
+        }
+      }
       try {
-        enableUserStrategy({ userId: user.userId, strategyId: sid, notionalUsd: notional, leverage });
+        enableUserStrategy({
+          userId: user.userId,
+          strategyId: sid,
+          notionalUsd: notional,
+          leverage,
+          slPctOverride,
+        });
         updated++;
       } catch (err) {
         errors.push(`${cfg.code}: ${(err as Error).message}`);

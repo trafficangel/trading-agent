@@ -160,6 +160,25 @@ export async function fanOutEntry(args: FanOutEntryArgs): Promise<{
 }
 
 async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promise<boolean> {
+  // Phase N — per-user SL override (Prof tier).
+  //   - If user set sl_pct_override on this strategy, recompute the SL from
+  //     args.entry + args.side using their value (independent of the shadow
+  //     SL in args.sl, which was computed using STRATEGY_CONFIGS default).
+  //   - Otherwise use args.sl as-is.
+  //   The user's own SL flows into placeMarketOrder + verifyOrAttachSL +
+  //   insertDecision so tpsl-monitor / dashboards see their value.
+  const userSl = (() => {
+    const override = t.sl_pct_override;
+    if (override == null || !Number.isFinite(override) || override <= 0) {
+      return args.sl;
+    }
+    const dist = args.entry * override;
+    const raw = args.side === 'long' ? args.entry - dist : args.entry + dist;
+    // Round to 4 decimals to match strategy-trader.ts. Bybit accepts the
+    // price as long as it's a valid tick — instruments-info would be more
+    // precise, but 4-decimal works for all symbols we currently trade.
+    return Math.round(raw * 1e4) / 1e4;
+  })();
   // Margin pre-flight. The balance-monitor cron sets insufficient_balance_at
   // (and listEligibleTargets filters those out) every 5 minutes — but a
   // signal might fire seconds after a position closes when the cron hasn't
@@ -320,7 +339,7 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
     symbol: args.symbol,
     side: args.side,
     qty,
-    stopLoss: args.sl,
+    stopLoss: userSl,
     clientOrderId,
   });
   if (!orderRes.ok) {
@@ -353,7 +372,7 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
       symbol: args.symbol,
       side: args.side,
       entry: args.entry,
-      sl: args.sl,
+      sl: userSl,
       reasoningShort: `🚫 fanOutEntry failed: ${label}`,
       reasoningFull: `Order rejected by Bybit (retCode=${orderRes.code}): ${orderRes.msg}`,
       rawResponse: args.rawWebhook,
@@ -427,7 +446,7 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
   // If still missing, EMERGENCY-CLOSE the position with a reduceOnly
   // market order — better to take a tiny slippage loss than to leave
   // a user position open and unprotected.
-  const slOk = await verifyOrAttachSL(creds, args.symbol, args.sl, t.user_id);
+  const slOk = await verifyOrAttachSL(creds, args.symbol, userSl, t.user_id);
   if (!slOk) {
     // Position is open without SL after all retries failed. Emergency
     // close. We do this with a reduceOnly market order in the opposite
@@ -449,7 +468,7 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
       symbol: args.symbol,
       side: args.side,
       entry: avgPrice,
-      sl: args.sl,
+      sl: userSl,
       reasoningShort: `🚨 SL verify failed, position emergency-closed`,
       reasoningFull:
         `Order ${orderRes.orderId} filled @${avgPrice} qty=${filledQty} but ` +
@@ -468,17 +487,20 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
   }
 
   // 4. Persist the user row.
+  const slLabel = t.sl_pct_override != null
+    ? `${userSl} (Prof custom ${(t.sl_pct_override * 100).toFixed(2)}%, attached atomically)`
+    : `${userSl} (attached atomically)`;
   insertDecision({
     symbol: args.symbol,
     side: args.side,
     entry: avgPrice,
-    sl: args.sl,
+    sl: userSl,
     reasoningShort: `Track D user fan-out · ${args.symbol} ${args.side} @${avgPrice}`,
     reasoningFull:
       `Strategy ${args.strategyId} → user_id=${t.user_id}\n` +
       `Notional: $${t.notional_usd} · Leverage: ${t.leverage}×\n` +
       `Qty: ${filledQty} · Avg price: ${avgPrice}\n` +
-      `SL: ${args.sl} (attached atomically)\n` +
+      `SL: ${slLabel}\n` +
       `Order ID: ${orderRes.orderId}`,
     rawResponse: args.rawWebhook,
     strategyId: args.strategyId,

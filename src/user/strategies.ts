@@ -386,7 +386,13 @@ function renderProEditableForm(args: RenderArgs): string {
     const isEnabled = !!existing && existing.enabled === 1;
     const notional = existing?.notional_usd ?? Math.round((cfg.maxSafeLeverage ?? 5) * 20);
     const leverage = existing?.leverage ?? cfg.maxSafeLeverage ?? 5;
-    const slPctStr = (cfg.slPct * 100).toFixed(1);
+    const defaultSlPctStr = (cfg.slPct * 100).toFixed(2);
+    // Phase N — pre-fill the SL field with the user's saved override or
+    // the strategy default. Stored as decimal in DB, shown as percent
+    // in the UI to match how users think about it.
+    const slPctValue = existing?.sl_pct_override != null
+      ? (existing.sl_pct_override * 100).toFixed(2)
+      : defaultSlPctStr;
     const symbolLabel = cfg.symbol ?? 'ANY';
     const name = cfg.name ?? `${symbolLabel} ${cfg.timeframe}m`;
     const maxLev = cfg.maxSafeLeverage ?? 10;
@@ -400,7 +406,7 @@ function renderProEditableForm(args: RenderArgs): string {
           <div class="prof-row-title">STRAT-${escapeHtml(cfg.code)} · ${escapeHtml(name)}</div>
           <div class="prof-row-meta">
             ${escapeHtml(symbolLabel)} · ${escapeHtml(cfg.timeframe)}m ·
-            SL <b>${slPctStr}%</b> ·
+            SL по умолчанию <b>${defaultSlPctStr}%</b> ·
             max плечо <b>${maxLev}×</b>
           </div>
         </div>
@@ -414,6 +420,13 @@ function renderProEditableForm(args: RenderArgs): string {
           <input type="number" min="1" max="100" step="1" name="leverage_${escapeHtml(cfg.id)}"
                  value="${leverage}" inputmode="numeric"/>
         </div>
+        <div class="prof-row-input">
+          <label class="prof-row-input-label" title="Стоп-лосс в процентах от цены входа. Пусто = значение по умолчанию (${defaultSlPctStr}%).">
+            SL (%)
+          </label>
+          <input type="number" min="0.5" max="25" step="0.1" name="sl_pct_${escapeHtml(cfg.id)}"
+                 value="${slPctValue}" inputmode="decimal"/>
+        </div>
       </div>
     `;
   }).join('');
@@ -425,6 +438,10 @@ function renderProEditableForm(args: RenderArgs): string {
       привести к ликвидации позиции. Помните: <b>worst-case потеря = SL% × notional</b>.
       Безопасное плечо стратегии (max) рассчитано так чтобы наш SL срабатывал раньше ликвидации;
       превышение этого лимита — на ваш страх и риск.
+      <br><br>
+      <b>SL (%)</b> — стоп-лосс в процентах от цены входа. Можно ужесточить (например с 5% до 2%),
+      чтобы быстрее срезать убытки, или наоборот ослабить если стратегия часто выбивается шумом.
+      Допустимый диапазон: <b>0.5%–25%</b>.
     </div>
     <form method="POST" action="/account/strategies" class="prof-form">
       ${csrfInput(args.csrfToken)}
@@ -590,8 +607,8 @@ function styles(): string {
   .prof-list { display: flex; flex-direction: column; gap: 10px; }
   .prof-row {
     display: grid;
-    grid-template-columns: auto 1fr 140px 110px;
-    gap: 14px; align-items: center;
+    grid-template-columns: auto 1fr 120px 95px 95px;
+    gap: 12px; align-items: center;
     padding: 14px 16px; border-radius: 10px;
     background: #11161d; border: 1px solid #1f2630;
   }

@@ -16,6 +16,10 @@ export type UserStrategyRow = {
   enabled: 0 | 1;
   notional_usd: number;
   leverage: number;
+  /** Phase N — Prof-tier override for STRATEGY_CONFIGS[sid].slPct.
+   *  NULL = use platform default. Stored as decimal (0.025 = 2.5%).
+   *  UI clamps to [0.005, 0.25] = 0.5%–25%. */
+  sl_pct_override: number | null;
   enabled_at: number;
   disabled_at: number | null;
   created_at: number;
@@ -24,12 +28,14 @@ export type UserStrategyRow = {
 
 const upsertStmt = db.prepare(`
   INSERT INTO user_strategies
-    (user_id, strategy_id, enabled, notional_usd, leverage, enabled_at, created_at, updated_at)
-  VALUES (?, ?, 1, ?, ?, ?, ?, ?)
+    (user_id, strategy_id, enabled, notional_usd, leverage, sl_pct_override,
+     enabled_at, created_at, updated_at)
+  VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(user_id, strategy_id) DO UPDATE SET
     enabled = 1,
     notional_usd = excluded.notional_usd,
     leverage = excluded.leverage,
+    sl_pct_override = excluded.sl_pct_override,
     enabled_at = excluded.enabled_at,
     disabled_at = NULL,
     updated_at = excluded.updated_at
@@ -53,12 +59,16 @@ const findOneStmt = db.prepare<[number, string], UserStrategyRow>(`
   SELECT * FROM user_strategies WHERE user_id = ? AND strategy_id = ? LIMIT 1
 `);
 
-/** Enable a strategy for a user (or update notional/leverage if already enabled). */
+/** Enable a strategy for a user (or update notional/leverage/sl if already enabled).
+ *  `slPctOverride` is Prof-tier-only — pass undefined (or null) to use the
+ *  platform default from STRATEGY_CONFIGS. Validation here is generous;
+ *  the UI and POST handler narrow further. */
 export function enableUserStrategy(input: {
   userId: number;
   strategyId: string;
   notionalUsd: number;
   leverage: number;
+  slPctOverride?: number | null;
 }): void {
   if (input.notionalUsd < 10) {
     throw new Error('notional must be >= 10 USDT');
@@ -66,12 +76,18 @@ export function enableUserStrategy(input: {
   if (input.leverage < 1 || input.leverage > 100) {
     throw new Error('leverage must be in [1, 100]');
   }
+  if (input.slPctOverride != null) {
+    if (!Number.isFinite(input.slPctOverride) || input.slPctOverride <= 0 || input.slPctOverride > 0.25) {
+      throw new Error('sl_pct_override must be in (0, 0.25]');
+    }
+  }
   const now = Date.now();
   upsertStmt.run(
     input.userId,
     input.strategyId,
     input.notionalUsd,
     input.leverage,
+    input.slPctOverride ?? null,
     now,
     now,
     now,
@@ -115,10 +131,12 @@ const findEligibleStmt = db.prepare<
     strategy_id: string;
     notional_usd: number;
     leverage: number;
+    sl_pct_override: number | null;
     api_key_id: number;
   }
 >(`
-  SELECT us.user_id, us.strategy_id, us.notional_usd, us.leverage, k.id AS api_key_id
+  SELECT us.user_id, us.strategy_id, us.notional_usd, us.leverage,
+         us.sl_pct_override, k.id AS api_key_id
     FROM user_strategies us
     JOIN user_subscriptions s ON s.user_id = us.user_id
     JOIN user_api_keys k ON k.user_id = us.user_id AND k.exchange = 'bybit'
@@ -137,6 +155,8 @@ export type EligibleTarget = {
   strategy_id: string;
   notional_usd: number;
   leverage: number;
+  /** Phase N — Prof per-strategy SL override. NULL = use STRATEGY_CONFIGS default. */
+  sl_pct_override: number | null;
   api_key_id: number;
 };
 
