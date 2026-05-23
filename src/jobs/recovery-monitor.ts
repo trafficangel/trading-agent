@@ -46,10 +46,33 @@ const listActiveKeysStmt = db.prepare<[], ApiKeyRow>(`
      AND k.last_verified_at IS NOT NULL
 `);
 
+// Phase O — dedup alerts per orphan position so the operator doesn't get
+// "ORPHAN POSITION DETECTED" every 10 minutes for the same manual trade.
+//   - Map<fingerprint, last_alerted_ms>
+//   - Fingerprint = user_id|symbol|side|qty_rounded — stable across ticks
+//   - Alert at most once per 12 hours per fingerprint
+//   - In-memory only: on server restart everyone gets one fresh alert
+//     (acceptable; the operator wants to know after a restart anyway)
+const ALERT_DEDUP_WINDOW_MS = 12 * 60 * 60 * 1000;
+const alertedOrphans = new Map<string, number>();
+function orphanFingerprint(
+  userId: number,
+  pos: { symbol: string; side: string | null; size: number },
+): string {
+  return `${userId}|${pos.symbol}|${pos.side ?? '?'}|${pos.size.toFixed(4)}`;
+}
+// Periodic cleanup so the map doesn't grow unbounded over months.
+function pruneExpiredAlertCache(now: number): void {
+  for (const [fp, ts] of alertedOrphans) {
+    if (now - ts > ALERT_DEDUP_WINDOW_MS) alertedOrphans.delete(fp);
+  }
+}
+
 async function tick(): Promise<void> {
   if (running) return;
   running = true;
   try {
+    pruneExpiredAlertCache(Date.now());
     const keys = listActiveKeysStmt.all();
     if (keys.length === 0) return;
     await Promise.allSettled(keys.map((k) => limit(() => processOne(k))));
@@ -93,21 +116,41 @@ async function processOne(key: ApiKeyRow): Promise<void> {
   }
 
   if (orphans.length === 0) return;
-  const summary = orphans
+
+  // Dedup: only keep orphans we haven't alerted about in the last 12 hours.
+  const now = Date.now();
+  const newOrphans = orphans.filter((p) => {
+    const fp = orphanFingerprint(key.user_id, p);
+    const last = alertedOrphans.get(fp);
+    if (last && now - last < ALERT_DEDUP_WINDOW_MS) return false;
+    alertedOrphans.set(fp, now);
+    return true;
+  });
+  if (newOrphans.length === 0) {
+    // All orphans already alerted in this window — silent and log only.
+    logger.info(
+      { userId: key.user_id, suppressedCount: orphans.length },
+      'recovery: orphans still present but alerts suppressed (dedup window)',
+    );
+    return;
+  }
+  const summary = newOrphans
     .map((p) => `${p.symbol} ${p.side ?? '?'} ${p.size} @${p.avgPrice} (SL=${p.stopLoss || 'none'})`)
     .join('; ');
   logger.error({ userId: key.user_id, orphans: summary }, 'recovery: orphan positions detected');
   // Critical alert — operator must investigate. NOT routed through the
   // batch queue: orphans usually mean an OS-crash incident, operator
-  // must see it immediately.
+  // must see it immediately. Subsequent ticks within ALERT_DEDUP_WINDOW_MS
+  // for the same fingerprint are suppressed.
   await sendMessage({
     channel: 'logs',
     text:
       `🚨 <b>ORPHAN POSITION DETECTED</b>\n` +
-      `user_id=${key.user_id} has ${orphans.length} open position(s) on Bybit with NO matching ` +
+      `user_id=${key.user_id} has ${newOrphans.length} open position(s) on Bybit with NO matching ` +
       `active decision row:\n<code>${summary}</code>\n\n` +
       `<i>Likely cause: server crashed between placeMarketOrder and insertDecision, or user opened the ` +
-      `position manually on Bybit. Investigate before closing — may be intentional.</i>`,
+      `position manually on Bybit. Investigate before closing — may be intentional. ` +
+      `Re-alert suppressed for 12 hours.</i>`,
     disable_notification: false,
   }).catch((err) => {
     logger.error({ err }, 'recovery: alert send failed');
