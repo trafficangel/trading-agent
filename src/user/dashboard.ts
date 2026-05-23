@@ -251,12 +251,24 @@ function renderSubscriptionCard(sub: SubscriptionRow | null): string {
     `;
   }
   // VIP short-circuits all lifecycle states. No countdown, no expiry.
+  // Still surface the user's active TIER (which determines strategy set
+  // and lot sizes) — VIP-access is a separate billing flag from the
+  // tier itself; user wants to see and switch the tier independently.
   if (sub.plan === 'vip' && sub.status !== 'cancelled') {
+    const tierId = sub.tier_id as TierId | null;
+    const tier = tierId ? TIER_CONFIGS[tierId] : null;
+    const tierLine = tier
+      ? `<br/><span class="cabinet-card-tier-line">Текущий тариф: <b>${tierEmoji(tierId!)} ${escapeHtml(tier.name)}</b></span>
+         <br/><a class="cabinet-card-tier-link" href="/account/subscription/select-tier">Сменить тариф →</a>`
+      : `<br/><a class="cabinet-card-tier-link" href="/account/subscription/select-tier">Выбрать тариф →</a>`;
     return `
       <div class="stat-card cabinet-card cabinet-card-vip">
         <div class="stat-card-label">${ico('👑')}VIP-доступ</div>
         <div class="stat-card-value">Активна</div>
-        <div class="stat-card-sub">постоянная подписка · без ограничений</div>
+        <div class="stat-card-sub">
+          постоянная подписка · без ограничений
+          ${tierLine}
+        </div>
       </div>
     `;
   }
@@ -1087,6 +1099,18 @@ function cabinetStyles(): string {
     background: linear-gradient(180deg, #1a1611 0%, #11161d 70%);
   }
   .cabinet-card-vip .stat-card-value { color: #f3d266; }
+  /* Tier line shown inside the VIP-access card */
+  .cabinet-card-tier-line {
+    display: inline-block; margin-top: 6px;
+    color: #cfd6dd; font-size: 12.5px;
+  }
+  .cabinet-card-tier-line b { color: #f5d970; font-weight: 600; }
+  .cabinet-card-tier-link {
+    display: inline-block; margin-top: 4px;
+    color: #8590a0; font-size: 11.5px;
+    text-decoration: underline;
+  }
+  .cabinet-card-tier-link:hover { color: #4ad991; }
   .cabinet-card .stat-card-label {
     font-size: 11px;
     text-transform: uppercase;
