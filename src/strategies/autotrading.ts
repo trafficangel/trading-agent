@@ -2101,26 +2101,24 @@ function styles(): string {
     .at-tier-card {
       flex: 0 0 86vw; padding: 28px 20px 22px;
       border-radius: 16px;
-      /* Lighter drop shadow on mobile — the desktop 0 18px 48px was
-         strong enough to visually compete with the active-card border,
-         making the outline read as «only top is gold». */
+      /* All mobile cards get a uniform 2px border. Dim by default,
+         tier-accent when active. Uniform width = no layout shift between
+         states; iOS Safari renders all four sides identically because
+         every card has the same border on every state. */
+      border-width: 2px;
       box-shadow: 0 4px 16px rgba(0,0,0,0.30);
     }
-    /* Active card on mobile: real 2px border in the tier accent colour.
-       Both inset box-shadow and outline tried first — both rendered
-       inconsistently on iOS Safari around the carousel's overflow + scroll-
-       snap interactions. A real border is the most reliable; we offset
-       the +1px width change with a -1px margin so layout stays stable
-       and the card stays exactly aligned with its siblings in the strip. */
     [data-carousel="focus"] .at-tier-card.rc-card-active {
-      border-width: 2px;
       border-color: var(--tier-accent);
-      margin: -1px;
       box-shadow: 0 6px 20px rgba(0,0,0,0.40);
     }
     .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; gap: 16px; }
     /* Smaller deco + glow on mobile so they don't dominate the smaller card. */
-    .at-tier-card-deco { font-size: 92px; top: 6px; right: 6px; }
+    /* Pull the deco emoji further from the right edge on mobile so its
+       glyph bounding box can't visually interfere with the right
+       border (especially with iOS Safari's emoji rendering, which
+       sometimes adds invisible padding to the right of the glyph). */
+    .at-tier-card-deco { font-size: 80px; top: 10px; right: 16px; }
     .at-tier-card-glow { height: 80px; }
     .at-tier-badge { font-size: 9.5px; padding: 3px 9px; margin-bottom: 12px; }
     .at-tier-name { font-size: 17px; }
