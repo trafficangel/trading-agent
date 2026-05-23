@@ -2037,12 +2037,13 @@ function styles(): string {
   [data-tier="prof"]     { --tier-accent: #ff6363; --tier-accent-soft: rgba(255,99,99,0.10); }
 
   /* Soft glow strip pinned to the top edge — tier-coloured. Cheap visual
-     identity that doesn't compete with the card content. */
+     identity that doesn't compete with the card content. Sized small so
+     it doesn't create a wide horizontal «pill» feel behind the badge. */
   .at-tier-card-glow {
-    position: absolute; top: 0; left: 0; right: 0; height: 110px;
+    position: absolute; top: 0; left: 0; right: 0; height: 70px;
     pointer-events: none;
-    background: radial-gradient(ellipse 80% 100% at 50% 0%, var(--tier-accent-soft) 0%, transparent 70%);
-    opacity: 0.85;
+    background: radial-gradient(ellipse 60% 100% at 50% 0%, var(--tier-accent-soft) 0%, transparent 75%);
+    opacity: 0.55;
   }
   /* Huge dimmed tier emoji floating behind the content — adds personality
      without sacrificing legibility. Pinned to the BOTTOM-RIGHT corner so
@@ -2076,7 +2077,7 @@ function styles(): string {
    * the «🎁 Бонус» / «⭐ Популярный» pill overlaps the tier name below. */
   .at-tier-card.at-tier-popular,
   .at-tier-card.at-tier-free {
-    padding-top: 46px;
+    padding-top: 58px;
   }
   /* Active card lifts more + accent border + soft tier-coloured shadow. */
   [data-carousel="focus"] .at-tier-card.rc-card-active {
@@ -2105,8 +2106,8 @@ function styles(): string {
        sits ABOVE the card content; without this the tier name pushes
        up against the pill. */
     .at-tier-card.at-tier-popular,
-    .at-tier-card.at-tier-free { padding-top: 48px; }
-    .at-tier-badge { top: 14px; left: 14px; font-size: 10px; padding: 4px 10px; }
+    .at-tier-card.at-tier-free { padding-top: 54px; }
+    .at-tier-badge { top: 13px; left: 14px; font-size: 9.5px; padding: 3px 9px; }
     .at-tier-name { font-size: 17px; }
     .at-tier-price-num { font-size: 32px; }
     .at-tier-features { font-size: 12.5px; }
@@ -2124,23 +2125,24 @@ function styles(): string {
   }
 
   .at-tier-badge {
-    /* Badge sits inside the card padding (top: 12px) so the carousel
-     * overflow-x doesn't clip it. Cards with a badge get extra padding-top
-     * (.at-tier-popular / .at-tier-free) to reserve room — see above. */
-    position: absolute; top: 12px; left: 16px; z-index: 2;
-    background: rgba(243, 210, 102, 0.18);
+    /* Compact pill in the upper-left corner. No halo box-shadow — it
+     * read as a wider bar combined with the top glow strip, making the
+     * pill look stretched. With padding-top:58px on the parent card,
+     * the badge sits clear above the tier name. */
+    position: absolute; top: 14px; left: 16px; z-index: 2;
+    display: inline-flex; align-items: center;
+    background: rgba(243, 210, 102, 0.20);
     color: #f3d266;
-    padding: 4px 12px; border-radius: 999px;
+    padding: 4px 10px; border-radius: 999px;
     font-size: 10.5px; font-weight: 700;
-    border: 1px solid rgba(243, 210, 102, 0.4);
-    letter-spacing: 0.06em; text-transform: uppercase;
-    box-shadow: 0 4px 12px -4px rgba(243, 210, 102, 0.40);
+    border: 1px solid rgba(243, 210, 102, 0.50);
+    letter-spacing: 0.05em; text-transform: uppercase;
+    line-height: 1.2;
   }
   .at-tier-badge-popular {
-    background: rgba(74, 217, 145, 0.18);
+    background: rgba(74, 217, 145, 0.20);
     color: #4ad991;
-    border-color: rgba(74, 217, 145, 0.45);
-    box-shadow: 0 4px 12px -4px rgba(74, 217, 145, 0.40);
+    border-color: rgba(74, 217, 145, 0.55);
   }
   .at-tier-name {
     font-size: 18px; font-weight: 700; color: #e8edf2;
