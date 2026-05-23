@@ -1292,7 +1292,9 @@ function renderPricing(lang: Lang): string {
 
   // Virtual Free card — not in TIER_CONFIGS. Conditional on Bybit referral signup.
   const freeCard = `
-    <div class="at-tier-card at-tier-free">
+    <div class="at-tier-card at-tier-free" data-tier="free">
+      <div class="at-tier-card-glow"></div>
+      <div class="at-tier-card-deco" aria-hidden="true">🎁</div>
       <div class="at-tier-badge">${ico('🎁')}${t.bonus}</div>
       <div class="at-tier-name">${t.freeName}</div>
       <div class="at-tier-depo">${t.freeDepo}</div>
@@ -1326,10 +1328,13 @@ function renderPricing(lang: Lang): string {
       // Tier `pitch` is RU-only in tier-config; for EN we still render it (untranslated)
       // because most tier pitches are coin names + numbers anyway and translation would
       // be its own task. For now we keep the source string.
+      const emoji = tierEmoji(tier.id);
       return `
-        <div class="at-tier-card ${isPopular ? 'at-tier-popular' : ''}" data-tier-index="${i + 1}">
+        <div class="at-tier-card ${isPopular ? 'at-tier-popular' : ''}" data-tier="${tier.id}" data-tier-index="${i + 1}">
+          <div class="at-tier-card-glow"></div>
+          <div class="at-tier-card-deco" aria-hidden="true">${emoji}</div>
           ${badge}
-          <div class="at-tier-name">${tierEmoji(tier.id)} ${escapeHtml(tier.name)}</div>
+          <div class="at-tier-name">${emoji} ${escapeHtml(tier.name)}</div>
           <div class="at-tier-depo">${t.deposit} $${tier.minBalanceUsdt.toLocaleString()}${t.slash}${maxStr}</div>
           <div class="at-tier-price">
             <span class="at-tier-price-num">$${tier.monthlyPriceUsd}</span>
@@ -2022,87 +2027,193 @@ function styles(): string {
     text-align: center; font-size: 11.5px; color: #6b7480;
     margin: 6px 0 18px; letter-spacing: 0.02em;
   }
+  /* =============================================================
+   *  TIER CARDS — visual identity per tier
+   *
+   *  Each card carries data-tier="<id>" and inherits two CSS vars
+   *  from the matching selector below:
+   *     --tier-accent     primary colour (used by glow, border-hover, price)
+   *     --tier-accent-soft same colour at low alpha (subtle background)
+   *  The base .at-tier-card rule reads both vars; per-tier overrides
+   *  redefine them without touching layout. New tiers added later just
+   *  need a [data-tier="X"] block here — no markup changes needed. */
   .at-tier-card {
+    --tier-accent: #4ad991;
+    --tier-accent-soft: rgba(74,217,145,0.10);
     background: linear-gradient(180deg, #161c25 0%, #11161d 70%);
-    border: 1px solid #1f2630; border-radius: 16px;
-    padding: 32px 24px 24px;
+    border: 1px solid #1f2630; border-radius: 18px;
+    padding: 32px 26px 26px;
     display: flex; flex-direction: column;
-    position: relative;
+    position: relative; overflow: hidden;
     /* Bigger cards now that focus mode shows one at a time. 380px lets
        all features breathe; on mobile we keep 86vw so swipe feels natural. */
     flex: 0 0 380px;
     min-width: 0;
     box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    transition: transform 220ms cubic-bezier(0.2, 0, 0, 1),
+                box-shadow 220ms, border-color 220ms;
   }
+  /* Per-tier accent palette. */
+  [data-tier="free"]     { --tier-accent: #f3d266; --tier-accent-soft: rgba(243,210,102,0.10); }
+  [data-tier="starter"]  { --tier-accent: #5db5ff; --tier-accent-soft: rgba(93,181,255,0.10); }
+  [data-tier="standard"] { --tier-accent: #4ad991; --tier-accent-soft: rgba(74,217,145,0.10); }
+  [data-tier="plus"]     { --tier-accent: #b08cff; --tier-accent-soft: rgba(176,140,255,0.10); }
+  [data-tier="pro"]      { --tier-accent: #ff9c54; --tier-accent-soft: rgba(255,156,84,0.10); }
+  [data-tier="vip"]      { --tier-accent: #ff77c4; --tier-accent-soft: rgba(255,119,196,0.10); }
+  [data-tier="prof"]     { --tier-accent: #ff6363; --tier-accent-soft: rgba(255,99,99,0.10); }
+
+  /* Soft glow strip pinned to the top edge — tier-coloured. Cheap visual
+     identity that doesn't compete with the card content. */
+  .at-tier-card-glow {
+    position: absolute; top: 0; left: 0; right: 0; height: 110px;
+    pointer-events: none;
+    background: radial-gradient(ellipse 80% 100% at 50% 0%, var(--tier-accent-soft) 0%, transparent 70%);
+    opacity: 0.85;
+  }
+  /* Huge dimmed tier emoji floating behind the content — adds personality
+     without sacrificing legibility (z-index keeps text on top). */
+  .at-tier-card-deco {
+    position: absolute; top: -20px; right: -16px;
+    font-size: 132px; line-height: 1;
+    opacity: 0.07; pointer-events: none;
+    filter: grayscale(0.3);
+    transition: opacity 320ms, transform 320ms;
+  }
+  /* Content elements sit above the deco emoji and glow. */
+  .at-tier-card > :not(.at-tier-card-glow):not(.at-tier-card-deco) {
+    position: relative; z-index: 1;
+  }
+
+  /* Hover on non-active card: subtle lift + tier-coloured ring. */
+  .at-tier-card:hover {
+    transform: translateY(-4px);
+    border-color: color-mix(in srgb, var(--tier-accent) 45%, #1f2630);
+    box-shadow: 0 16px 40px rgba(0,0,0,0.40),
+                0 0 0 1px color-mix(in srgb, var(--tier-accent) 25%, transparent);
+  }
+  .at-tier-card:hover .at-tier-card-deco {
+    opacity: 0.12; transform: scale(1.04) rotate(-3deg);
+  }
+
   /* Cards with a badge need extra top padding to clear it. Without this
    * the «🎁 Бонус» / «⭐ Популярный» pill overlaps the tier name below. */
   .at-tier-card.at-tier-popular,
   .at-tier-card.at-tier-free {
     padding-top: 46px;
   }
-  /* Active card lifts more, others fade harder in focus mode. */
+  /* Active card lifts more + accent border + soft tier-coloured shadow. */
   [data-carousel="focus"] .at-tier-card.rc-card-active {
-    box-shadow: 0 14px 40px rgba(0,0,0,0.45);
+    border-color: color-mix(in srgb, var(--tier-accent) 60%, #1f2630);
+    box-shadow: 0 18px 48px rgba(0,0,0,0.50),
+                0 0 0 1px color-mix(in srgb, var(--tier-accent) 40%, transparent),
+                0 0 36px -6px color-mix(in srgb, var(--tier-accent) 35%, transparent);
   }
+  [data-carousel="focus"] .at-tier-card.rc-card-active .at-tier-card-glow {
+    opacity: 1;
+  }
+  [data-carousel="focus"] .at-tier-card.rc-card-active .at-tier-card-deco {
+    opacity: 0.12;
+  }
+
   @media (max-width: 640px) {
     .at-tier-card { flex: 0 0 86vw; }
     .at-tier-carousel { padding-left: 7vw; padding-right: 7vw; }
+    .at-tier-card-deco { font-size: 110px; }
   }
+
+  /* Popular & Free retain extra top-glow tinting for instant
+     recognisability even before hover. */
   .at-tier-card.at-tier-popular {
-    border-color: rgba(74, 217, 145, 0.55);
     background: linear-gradient(180deg, rgba(74,217,145,0.06) 0%, #11161d 70%);
   }
   .at-tier-card.at-tier-free {
-    border-color: rgba(243, 210, 102, 0.55);
     background: linear-gradient(180deg, rgba(243,210,102,0.05) 0%, #11161d 70%);
   }
+
   .at-tier-badge {
-    /* Badge sits inside the card padding (top: 10px) so the carousel
+    /* Badge sits inside the card padding (top: 12px) so the carousel
      * overflow-x doesn't clip it. Cards with a badge get extra padding-top
      * (.at-tier-popular / .at-tier-free) to reserve room — see above. */
-    position: absolute; top: 10px; left: 14px;
+    position: absolute; top: 12px; left: 16px; z-index: 2;
     background: rgba(243, 210, 102, 0.18);
     color: #f3d266;
-    padding: 3px 10px; border-radius: 999px;
-    font-size: 10.5px; font-weight: 600;
+    padding: 4px 12px; border-radius: 999px;
+    font-size: 10.5px; font-weight: 700;
     border: 1px solid rgba(243, 210, 102, 0.4);
-    letter-spacing: 0.04em;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    box-shadow: 0 4px 12px -4px rgba(243, 210, 102, 0.40);
   }
   .at-tier-badge-popular {
     background: rgba(74, 217, 145, 0.18);
     color: #4ad991;
     border-color: rgba(74, 217, 145, 0.45);
+    box-shadow: 0 4px 12px -4px rgba(74, 217, 145, 0.40);
   }
   .at-tier-name {
-    font-size: 16px; font-weight: 600; color: #e8edf2; margin-bottom: 4px;
+    font-size: 18px; font-weight: 700; color: #e8edf2;
+    margin-bottom: 4px; letter-spacing: -0.01em;
   }
-  .at-tier-depo { font-size: 11.5px; color: #8590a0; margin-bottom: 12px; }
-  .at-tier-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 14px; }
-  .at-tier-price-num { font-size: 28px; font-weight: 700; color: #4ad991; }
-  .at-tier-free .at-tier-price-num { color: #f3d266; }
-  .at-tier-price-period { font-size: 12px; color: #8590a0; }
+  .at-tier-depo {
+    font-size: 11.5px; color: #8590a0; margin-bottom: 14px;
+    text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500;
+  }
+  .at-tier-price {
+    display: flex; align-items: baseline; gap: 6px; margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .at-tier-price-num {
+    font-size: 36px; font-weight: 800;
+    color: var(--tier-accent);
+    background: linear-gradient(135deg,
+      var(--tier-accent) 0%,
+      color-mix(in srgb, var(--tier-accent) 70%, #fff) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.02em; line-height: 1;
+  }
+  /* Fallback for browsers without color-mix — solid colour stays readable. */
+  @supports not (color: color-mix(in srgb, red, blue)) {
+    .at-tier-price-num { -webkit-text-fill-color: var(--tier-accent); }
+  }
+  .at-tier-price-period { font-size: 13px; color: #8590a0; }
   .at-tier-pitch-top {
-    font-size: 12.5px; color: #cfd6dd; line-height: 1.55;
-    margin: 0 0 12px; padding-bottom: 10px;
-    border-bottom: 1px dashed #1a1f27;
+    font-size: 13px; color: #cfd6dd; line-height: 1.6;
+    margin: 0 0 14px;
   }
   .at-tier-features {
     list-style: none; padding: 0; margin: 0 0 12px 0;
-    font-size: 12.5px; color: #cfd6dd; line-height: 1.5;
+    font-size: 13px; color: #cfd6dd; line-height: 1.5;
     flex: 1;
   }
   .at-tier-features li {
-    padding: 6px 0; display: flex; align-items: flex-start; gap: 6px;
+    padding: 8px 0; display: flex; align-items: flex-start; gap: 10px;
+    border-top: 1px dashed rgba(255,255,255,0.04);
   }
-  .at-tier-feat-icon { flex-shrink: 0; font-size: 13px; line-height: 1.5; }
-  .at-tier-feat-label { color: #8590a0; white-space: nowrap; flex-shrink: 0; }
+  .at-tier-features li:first-child { border-top: none; padding-top: 4px; }
+  /* Feature icon in a soft circular badge — gives the row a clear visual
+     anchor and lets the per-tier accent peek through subtly. */
+  .at-tier-feat-icon {
+    flex-shrink: 0; font-size: 13px; line-height: 1;
+    width: 26px; height: 26px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+    background: var(--tier-accent-soft);
+    border: 1px solid color-mix(in srgb, var(--tier-accent) 25%, transparent);
+  }
+  @supports not (color: color-mix(in srgb, red, blue)) {
+    .at-tier-feat-icon { border-color: rgba(255,255,255,0.06); }
+  }
+  .at-tier-feat-label { color: #8590a0; white-space: nowrap; flex-shrink: 0; font-weight: 500; }
   .at-tier-features a {
-    color: #4ad991; text-decoration: none;
+    color: var(--tier-accent); text-decoration: none; font-weight: 600;
   }
   .at-tier-features a:hover { text-decoration: underline; }
   .at-tier-after-bonus {
     font-size: 11.5px; color: #8590a0; line-height: 1.5;
-    margin-top: auto; padding-top: 10px; border-top: 1px solid #1a1f27;
+    margin-top: auto; padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,0.05);
   }
   /* Legacy pitch class kept in case other layouts still use it. */
   .at-tier-pitch { font-size: 11.5px; color: #8590a0; line-height: 1.5; margin-top: auto; padding-top: 10px; border-top: 1px solid #1a1f27; }
