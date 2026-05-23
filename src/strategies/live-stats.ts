@@ -304,17 +304,44 @@ export function countAllClosedShadowTrades(): number {
   return allClosedCountStmt.get()?.n ?? 0;
 }
 
-const allClosedPageStmt = db.prepare<[number, number], TradeRow & { strategy_id: string }>(`
-  SELECT id, strategy_id, strategy_trade_num, side, entry, close_price, pnl_pct,
-         close_reason, force_close_reason, filled_at, created_at, closed_at
-  FROM decisions
-  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id IS NOT NULL
-    AND status = 'closed' AND pnl_pct IS NOT NULL
-  ORDER BY closed_at DESC
-  LIMIT ? OFFSET ?
-`);
-export function getAllClosedShadowTrades(limit: number, offset: number): LiveTradeFeedRow[] {
-  const rows = allClosedPageStmt.all(limit, offset);
+/** Sort modes for the /strategies live feed. Default `close_desc` =
+ *  newest closed at top (matches what most users expect). */
+export type FeedSort = 'close_desc' | 'close_asc' | 'entry_desc' | 'entry_asc' | 'pnl_desc' | 'pnl_asc';
+
+const FEED_ORDER_BY: Record<FeedSort, string> = {
+  close_desc: 'closed_at DESC',
+  close_asc:  'closed_at ASC',
+  entry_desc: 'COALESCE(filled_at, created_at) DESC',
+  entry_asc:  'COALESCE(filled_at, created_at) ASC',
+  pnl_desc:   'pnl_pct DESC',
+  pnl_asc:    'pnl_pct ASC',
+};
+
+// Pre-prepared statements per sort key — better-sqlite3 needs the
+// ORDER BY clause at prepare-time so we build them once at module load.
+const allClosedPageStmts: Record<FeedSort, ReturnType<typeof db.prepare<[number, number], TradeRow & { strategy_id: string }>>> =
+  Object.fromEntries(
+    (Object.entries(FEED_ORDER_BY) as [FeedSort, string][]).map(([key, orderBy]) => [
+      key,
+      db.prepare<[number, number], TradeRow & { strategy_id: string }>(`
+        SELECT id, strategy_id, strategy_trade_num, side, entry, close_price, pnl_pct,
+               close_reason, force_close_reason, filled_at, created_at, closed_at
+        FROM decisions
+        WHERE track = 'strategy' AND user_id IS NULL AND strategy_id IS NOT NULL
+          AND status = 'closed' AND pnl_pct IS NOT NULL
+        ORDER BY ${orderBy}
+        LIMIT ? OFFSET ?
+      `),
+    ]),
+  ) as Record<FeedSort, ReturnType<typeof db.prepare<[number, number], TradeRow & { strategy_id: string }>>>;
+
+export function getAllClosedShadowTrades(
+  limit: number,
+  offset: number,
+  sort: FeedSort = 'close_desc',
+): LiveTradeFeedRow[] {
+  const stmt = allClosedPageStmts[sort] ?? allClosedPageStmts.close_desc;
+  const rows = stmt.all(limit, offset);
   const out: LiveTradeFeedRow[] = [];
   for (const r of rows) {
     if (!r.side || (r.side !== 'long' && r.side !== 'short')) continue;

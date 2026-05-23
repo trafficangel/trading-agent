@@ -23,6 +23,7 @@ import {
   type ActiveTradeRow,
   type LiveTradeFeedRow,
   type ActiveTradeFeedRow,
+  type FeedSort,
 } from './live-stats.js';
 
 // (SUPPORT_URL placeholder removed — never referenced in the rendered
@@ -846,6 +847,29 @@ const STYLE = `
     font-size: 11.5px; color: var(--text-dim);
   }
   .feed-time-exit-empty { font-style: italic; opacity: 0.7; }
+  /* Sort selector — sits beside the «Закрытые» subsection title. */
+  .feed-sort-form {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-left: auto;
+  }
+  .feed-subsection-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .feed-sort-label {
+    font-size: 11px; color: var(--text-faint);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .feed-sort-select {
+    background: var(--bg-card); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 10px; border-radius: 6px;
+    font-size: 12px; font-family: inherit; cursor: pointer;
+    transition: border-color 120ms;
+  }
+  .feed-sort-select:hover  { border-color: var(--accent); }
+  .feed-sort-select:focus  { outline: none; border-color: var(--accent); }
+  .feed-sort-apply {
+    background: var(--accent); color: var(--bg); border: none;
+    padding: 5px 12px; border-radius: 6px; font-size: 12px;
+    font-weight: 600; cursor: pointer;
+  }
   /* Legend below the table — explains each reason-pill colour. */
   .feed-reason-legend {
     font-size: 12px; color: var(--text-dim);
@@ -2448,13 +2472,21 @@ function tfLabel(tf: string): string {
  *  to give visitors a single timeline of what shadow trading is doing.
  *  Active trades pinned at top, closed trades below with pagination. */
 const FEED_PAGE_SIZE = 20;
-function renderAllStrategiesFeed(page: number): string {
+const FEED_SORT_OPTIONS: ReadonlyArray<{ value: FeedSort; label: string }> = [
+  { value: 'close_desc', label: 'Закрытие: сначала новые' },
+  { value: 'close_asc',  label: 'Закрытие: сначала старые' },
+  { value: 'entry_desc', label: 'Вход: сначала новые' },
+  { value: 'entry_asc',  label: 'Вход: сначала старые' },
+  { value: 'pnl_desc',   label: 'PnL: лучшие сверху' },
+  { value: 'pnl_asc',    label: 'PnL: худшие сверху' },
+];
+function renderAllStrategiesFeed(page: number, sort: FeedSort = 'close_desc'): string {
   const active = getAllActiveShadowTrades();
   const totalClosed = countAllClosedShadowTrades();
   const totalPages = Math.max(1, Math.ceil(totalClosed / FEED_PAGE_SIZE));
   const safePage = Math.min(Math.max(1, page), totalPages);
   const offset = (safePage - 1) * FEED_PAGE_SIZE;
-  const closed = getAllClosedShadowTrades(FEED_PAGE_SIZE, offset);
+  const closed = getAllClosedShadowTrades(FEED_PAGE_SIZE, offset, sort);
 
   if (active.length === 0 && totalClosed === 0) {
     return `
@@ -2583,11 +2615,12 @@ function renderAllStrategiesFeed(page: number): string {
   }).join('');
 
   // Pagination — show first/prev/next/last + current page indicator.
-  // Generates plain ?p=N links so it works without JS.
+  // Generates plain ?p=N&sort=… links so sort persists across pages.
+  const sortQs = sort && sort !== 'close_desc' ? `&sort=${encodeURIComponent(sort)}` : '';
   const pageLink = (n: number, label: string, disabled: boolean, current = false): string => {
     if (disabled) return `<span class="feed-page-link feed-page-disabled">${label}</span>`;
     if (current) return `<span class="feed-page-link feed-page-current">${label}</span>`;
-    return `<a class="feed-page-link" href="?p=${n}">${label}</a>`;
+    return `<a class="feed-page-link" href="?p=${n}${sortQs}#feed">${label}</a>`;
   };
   const paginationHtml = totalClosed > FEED_PAGE_SIZE
     ? `
@@ -2615,12 +2648,31 @@ function renderAllStrategiesFeed(page: number): string {
     `
     : '';
 
+  // Inline sort selector — auto-submits on change. Plain GET form so it
+  // works without JS; preserves the current page via hidden ?p=. JS hook
+  // wires the «onchange → submit» behaviour for snappier UX.
+  const sortOptionsHtml = FEED_SORT_OPTIONS.map((o) =>
+    `<option value="${o.value}"${o.value === sort ? ' selected' : ''}>${escapeHtml(o.label)}</option>`,
+  ).join('');
+  const sortFormHtml = `
+    <form method="GET" action="/strategies#feed" class="feed-sort-form">
+      <label for="feed-sort-select" class="feed-sort-label">Сортировка</label>
+      <select id="feed-sort-select" name="sort" class="feed-sort-select"
+              onchange="this.form.submit()">
+        ${sortOptionsHtml}
+      </select>
+      <input type="hidden" name="p" value="1"/>
+      <noscript><button class="feed-sort-apply" type="submit">Применить</button></noscript>
+    </form>
+  `;
+
   const closedBlock = closed.length > 0
     ? `
       <div class="feed-subsection">
         <div class="feed-subsection-title">
           Закрытые · показано ${closed.length} из ${totalClosed}
         </div>
+        ${sortFormHtml}
       </div>
     `
     : '';
@@ -2672,6 +2724,7 @@ function renderStrategyIndex(
   strategies: StrategyConfig[],
   authed: { displayName: string | null; phone: string | null } | null = null,
   page = 1,
+  sort: FeedSort = 'close_desc',
 ): string {
   // ---------- Portfolio aggregate ----------
   let totalClosed = 0;
@@ -2903,7 +2956,7 @@ function renderStrategyIndex(
     ${groupsHtml}
     ${empty}
 
-    ${renderAllStrategiesFeed(page)}
+    ${renderAllStrategiesFeed(page, sort)}
     `,
     { autoRefreshSec: 60, authed },
   );
@@ -3431,12 +3484,17 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
   // see the real dashboard.
   app.get('/strategies', async (req, reply) => {
     const enabled = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
-    const q = (req.query ?? {}) as { from?: string; login?: string; p?: string };
+    const q = (req.query ?? {}) as { from?: string; login?: string; p?: string; sort?: string };
     const fromAutotrading = q.from === 'autotrading';
     const loginMode = q.login === '1';
     // Feed pagination — clamped 1..N inside renderAllStrategiesFeed.
     const page = Number.parseInt(q.p ?? '1', 10);
     const safePage = Number.isFinite(page) && page > 0 ? page : 1;
+    // Feed sort selector — whitelist against the known FeedSort union.
+    const validSorts: FeedSort[] = ['close_desc', 'close_asc', 'entry_desc', 'entry_asc', 'pnl_desc', 'pnl_asc'];
+    const safeSort: FeedSort = validSorts.includes(q.sort as FeedSort)
+      ? (q.sort as FeedSort)
+      : 'close_desc';
     reply.type('text/html; charset=utf-8');
     // Authed users who came from an autotrading CTA or a login CTA
     // shouldn't see the strategies list — bounce them to /account.
@@ -3447,13 +3505,13 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
     if (!isAuthed(req)) {
       // No-cache on the gated stub so re-visits after auth get fresh HTML.
       reply.header('Cache-Control', 'private, no-store');
-      return renderGatedPreview('index', renderStrategyIndex(enabled, null, safePage), { fromAutotrading, loginMode, lang: getLang(req) });
+      return renderGatedPreview('index', renderStrategyIndex(enabled, null, safePage, safeSort), { fromAutotrading, loginMode, lang: getLang(req) });
     }
     // Personalised header for authed users — must NOT be public-cached.
     reply.header('Cache-Control', 'private, no-store');
     const u = getAuthedUser(req);
     const authed = u ? { displayName: u.displayName, phone: u.phone } : null;
-    return renderStrategyIndex(enabled, authed, safePage);
+    return renderStrategyIndex(enabled, authed, safePage, safeSort);
   });
 
   // Detail by code (e.g. /strategies/001) — same gating.
