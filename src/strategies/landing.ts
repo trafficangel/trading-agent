@@ -3786,7 +3786,7 @@ function renderStrategyIndex(
     ${groupsHtml.length > 0 ? `
     <details class="tf-explainer">
       <summary>
-        <span class="tf-explainer-icon">${ico('🕐')}</span>
+        <span class="tf-explainer-icon">🕐</span>
         <span class="tf-explainer-title">Что значат «5&nbsp;минут», «15&nbsp;минут», «1&nbsp;час»?</span>
         <span class="tf-explainer-hint">подробнее ↓</span>
       </summary>
