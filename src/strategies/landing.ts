@@ -1145,6 +1145,20 @@ const STYLE = `
     border-radius: 0 6px 6px 0;
     font-size: 13px;
   }
+  /* Screenshot inside the «как стратегии выглядят на графике» explainer.
+     Caps height so a tall TradingView capture doesn't dominate the page,
+     keeps a soft border + radius so it reads as a framed example, not a
+     bleed-into-page raw image. */
+  .tf-explainer-screenshot {
+    display: block; width: 100%; max-width: 920px;
+    margin: 6px auto 8px; height: auto;
+    border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .tf-explainer-shot-caption {
+    text-align: center; font-size: 12px; color: var(--text-faint);
+    margin: 0 0 10px; line-height: 1.5;
+  }
   @media (max-width: 640px) {
     .tf-explainer > summary { padding: 10px 14px; font-size: 13px; gap: 8px; }
     .tf-explainer-hint { font-size: 10.5px; }
@@ -3784,6 +3798,38 @@ function renderStrategyIndex(
     ${portfolioDashboard}
 
     ${groupsHtml.length > 0 ? `
+    <details class="tf-explainer">
+      <summary>
+        <span class="tf-explainer-icon">📊</span>
+        <span class="tf-explainer-title">Как стратегии выглядят на графике?</span>
+        <span class="tf-explainer-hint">пример ↓</span>
+      </summary>
+      <div class="tf-explainer-body">
+        <p>
+          На графике TradingView стратегия читает <b>несколько слоёв индикаторов
+          LuxAlgo одновременно</b> — тренд, импульс, объём, ключевые ценовые
+          уровни. Когда условия совпадают, рисуется стрелка вход/выход и
+          одновременно срабатывает webhook, который наш сервис принимает и
+          открывает позицию на Bybit.
+        </p>
+        <img src="/static/luxalgo-chart-example.jpg?v=1"
+             alt="Пример графика TradingView с индикаторами LuxAlgo и сигналами Backtester"
+             class="tf-explainer-screenshot"
+             loading="lazy"/>
+        <div class="tf-explainer-shot-caption">
+          BTC/USDT 1H · видны зоны премии/дисконта (Premium/Discount),
+          сигналы Scripted Long/Short, отметки выхода Scripted Exit,
+          осциллятор настроения внизу.
+        </div>
+        <p class="tf-explainer-note">
+          Вам этот график видеть не обязательно — это «под капотом». Сделки
+          приходят в кабинет автоматически. Если хотите перепроверить, какой
+          сигнал сработал — можно открыть страницу стратегии, там есть
+          полный лог.
+        </p>
+      </div>
+    </details>
+
     <details class="tf-explainer">
       <summary>
         <span class="tf-explainer-icon">🕐</span>
