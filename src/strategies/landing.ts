@@ -1002,7 +1002,90 @@ const STYLE = `
   .dash-sub { font-size: 12px; color: var(--text-dim); margin-top: 6px; }
 
   /* ---------- Timeframe groups ---------- */
-  .tf-group { margin-bottom: 28px; }
+  .tf-group { margin-bottom: 40px; }
+
+  /* Group-header card — clearly delineates each timeframe as its own
+     section with: TF chip, human name, strategy count, optional
+     «since DATE», then a row of aggregated stats (LIVE or BACKTEST). */
+  .tf-group-card {
+    background: linear-gradient(180deg, rgba(74,217,145,0.04) 0%, var(--bg-card) 100%);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 12px;
+  }
+  .tf-group-card-top {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .tf-group-tf-chip {
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 13px;
+    font-weight: 700; color: var(--accent); letter-spacing: 0.04em;
+    background: var(--accent-soft); padding: 4px 10px; border-radius: 5px;
+    text-transform: uppercase;
+  }
+  .tf-group-tf-name {
+    font-size: 17px; font-weight: 600; color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .tf-group-count-pill {
+    font-size: 11.5px; color: var(--text-dim);
+    background: var(--bg); padding: 3px 9px; border-radius: 999px;
+    border: 1px solid var(--border);
+  }
+  .tf-group-since {
+    margin-left: auto; font-size: 11.5px; color: var(--text-faint);
+  }
+  .tf-group-card-stats {
+    display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap;
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px dashed var(--border);
+  }
+  .tf-stat {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 13px; color: var(--text-dim);
+    padding: 2px 0;
+  }
+  .tf-stat b { color: var(--text); font-weight: 700; }
+  .tf-stat b.pos { color: var(--accent); }
+  .tf-stat b.neg { color: var(--danger); }
+  .tf-stat-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text-faint);
+  }
+  .tf-stat-live {
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 10.5px;
+    font-weight: 700; letter-spacing: 0.08em; color: var(--accent);
+    background: var(--accent-soft); padding: 3px 8px 3px 6px;
+    border-radius: 4px; border: 1px solid rgba(74,217,145,0.30);
+  }
+  .tf-stat-live .tf-stat-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+    margin-right: 4px;
+    animation: pulse-green 1.6s ease-out infinite;
+  }
+  .tf-stat-bt {
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 10.5px;
+    font-weight: 700; letter-spacing: 0.08em; color: var(--text-dim);
+    background: var(--bg); padding: 3px 8px; border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .tf-stat-open {
+    color: var(--accent); font-weight: 600;
+    margin-left: auto;
+  }
+  .tf-stat-await {
+    color: var(--text-faint); font-style: italic; font-size: 12px;
+    margin-left: auto;
+  }
+  @media (max-width: 640px) {
+    .tf-group-card { padding: 12px 14px; }
+    .tf-group-tf-name { font-size: 15px; }
+    .tf-group-since { display: none; }
+    .tf-stat { font-size: 12px; }
+    .tf-stat-label { font-size: 10px; }
+  }
+  /* Legacy header — kept in case the old DOM is in flight elsewhere. */
   .tf-group-header {
     display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
     padding: 0 4px;
@@ -3000,6 +3083,23 @@ function tfLabel(tf: string): string {
   return `${m / 10080}W`;
 }
 
+/** Human-readable Russian timeframe name for the group-header card.
+ *  «5m» → «5 минут», «1H» → «1 час», «4H» → «4 часа», «1D» → «День». */
+function tfHumanRu(tf: string): string {
+  const m = tfMinutes(tf);
+  if (m < 60) return `${m} ${pluralRu(m, 'минута', 'минуты', 'минут')}`;
+  if (m < 1440) {
+    const h = m / 60;
+    return `${h} ${pluralRu(h, 'час', 'часа', 'часов')}`;
+  }
+  if (m < 10080) {
+    const d = m / 1440;
+    return `${d} ${pluralRu(d, 'день', 'дня', 'дней')}`;
+  }
+  const w = m / 10080;
+  return `${w} ${pluralRu(w, 'неделя', 'недели', 'недель')}`;
+}
+
 /** Combined live-trades feed across ALL strategies — used on /strategies
  *  to give visitors a single timeline of what shadow trading is doing.
  *  Active trades pinned at top, closed trades below with pagination. */
@@ -3443,24 +3543,92 @@ function renderStrategyIndex(
       const cardsHtml = rows
         .map((row, i) => renderRow(row, i + 1, groupSize))
         .join('\n');
+
+      // ----- Per-timeframe aggregates -----
+      // Sum across all strategies in this group so the header card can
+      // show «here's how the 5m strategies are doing AS A GROUP» — useful
+      // when 1 strategy is dragging the others and the group-level number
+      // tells the real story.
+      let grpClosed = 0, grpWins = 0, grpLosses = 0, grpOpen = 0;
+      let grpPnlUsd = 0;
+      let grpEarliestAt: number | null = null;
+      // Backtest aggregates — only count strategies that have a backtest.
+      let btTradeSum = 0, btWeightedWr = 0, btWrDenom = 0;
+      for (const { s, live } of rows) {
+        grpClosed += live.closed;
+        grpWins += live.wins;
+        grpLosses += live.losses;
+        grpOpen += live.open;
+        grpPnlUsd += live.netPnlUsd;
+        if (live.firstTradeAt && (!grpEarliestAt || live.firstTradeAt < grpEarliestAt)) {
+          grpEarliestAt = live.firstTradeAt;
+        }
+        const bt = s.backtest;
+        if (bt && bt.totalTrades > 0) {
+          btTradeSum += bt.totalTrades;
+          // Weight WR by trade count so high-volume strategies dominate
+          // the avg (mirrors how a true portfolio-level WR is computed).
+          btWeightedWr += bt.winRate * bt.totalTrades;
+          btWrDenom += bt.totalTrades;
+        }
+      }
+      const grpLiveWr = (grpWins + grpLosses) > 0
+        ? Math.round((grpWins / (grpWins + grpLosses)) * 100)
+        : null;
+      const grpPnlCls = classForValue(grpPnlUsd);
+      const grpBtAvgWr = btWrDenom > 0
+        ? Math.round((btWeightedWr / btWrDenom) * 100)
+        : null;
+      const grpSinceLabel = formatSinceDate(grpEarliestAt, 'ru');
+
+      // ----- Stats chips for the header -----
+      // Only show LIVE chips when there's actual live history; only show
+      // BACKTEST chips when at least one strategy has a backtest. Empty
+      // groups get a softer «нет данных» row.
+      const chips: string[] = [];
+      if (grpClosed > 0) {
+        chips.push(`<span class="tf-stat tf-stat-live"><span class="tf-stat-dot"></span>LIVE</span>`);
+        chips.push(`<span class="tf-stat"><span class="tf-stat-label">сделок</span><b>${grpClosed}</b></span>`);
+        if (grpLiveWr !== null) {
+          const wrCls = grpLiveWr >= 50 ? 'pos' : 'neg';
+          chips.push(`<span class="tf-stat"><span class="tf-stat-label">побед</span><b class="${wrCls}">${grpLiveWr}%</b></span>`);
+        }
+        chips.push(`<span class="tf-stat"><span class="tf-stat-label">PnL</span><b class="${grpPnlCls}">${fmtUsd(grpPnlUsd, true)}</b></span>`);
+        if (grpOpen > 0) {
+          chips.push(`<span class="tf-stat tf-stat-open">🟢 ${grpOpen} в работе</span>`);
+        }
+      } else if (btTradeSum > 0) {
+        chips.push(`<span class="tf-stat tf-stat-bt">БЭКТЕСТ</span>`);
+        chips.push(`<span class="tf-stat"><span class="tf-stat-label">сделок</span><b>${btTradeSum}</b></span>`);
+        if (grpBtAvgWr !== null) {
+          chips.push(`<span class="tf-stat"><span class="tf-stat-label">побед в среднем</span><b>${grpBtAvgWr}%</b></span>`);
+        }
+        chips.push(`<span class="tf-stat tf-stat-await">ждём первый сигнал</span>`);
+      }
+
+      const headerCard = `
+        <div class="tf-group-card">
+          <div class="tf-group-card-top">
+            <span class="tf-group-tf-chip">${tfLabel(String(tf))}</span>
+            <span class="tf-group-tf-name">${tfHumanRu(String(tf))}</span>
+            <span class="tf-group-count-pill">${groupSize} ${pluralRu(groupSize, 'стратегия', 'стратегии', 'стратегий')}</span>
+            ${grpSinceLabel && grpClosed > 0 ? `<span class="tf-group-since">${grpSinceLabel}</span>` : ''}
+          </div>
+          ${chips.length > 0 ? `<div class="tf-group-card-stats">${chips.join('')}</div>` : ''}
+        </div>`;
+
       // Single-card groups skip the carousel chrome (arrows/snap make
       // no sense with 1 item) and render as a plain centred card.
       if (groupSize === 1) {
         return `
           <div class="tf-group">
-            <div class="tf-group-header">
-              <span class="tf-group-label">${tfLabel(String(tf))}</span>
-              <span class="tf-group-count">${groupSize} ${pluralRu(groupSize, 'стратегия', 'стратегии', 'стратегий')}</span>
-            </div>
+            ${headerCard}
             <div class="strat-row-single">${cardsHtml}</div>
           </div>`;
       }
       return `
         <div class="tf-group">
-          <div class="tf-group-header">
-            <span class="tf-group-label">${tfLabel(String(tf))}</span>
-            <span class="tf-group-count">${groupSize} ${pluralRu(groupSize, 'стратегия', 'стратегии', 'стратегий')}</span>
-          </div>
+          ${headerCard}
           <div class="strat-row-carousel-wrap" data-carousel="focus">
             <button class="rc-carousel-arrow rc-carousel-arrow-prev" data-rc-prev aria-label="prev">‹</button>
             <div class="strat-row-carousel rc-carousel-track" role="region" aria-label="Стратегии ${tfLabel(String(tf))}">
