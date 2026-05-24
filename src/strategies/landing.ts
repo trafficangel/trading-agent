@@ -1085,6 +1085,74 @@ const STYLE = `
     .tf-stat { font-size: 12px; }
     .tf-stat-label { font-size: 10px; }
   }
+  /* ----- Timeframe explainer (collapsible) -----
+     Sits above the timeframe-group list. Closed by default — visitors
+     who already know what 5m/15m/1H means skip it; newcomers tap the
+     summary to expand a short, plain-language definition of each TF. */
+  .tf-explainer {
+    margin: 0 0 22px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .tf-explainer > summary {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; cursor: pointer;
+    list-style: none;
+    font-size: 14px; color: var(--text);
+    transition: background 120ms;
+  }
+  .tf-explainer > summary::-webkit-details-marker { display: none; }
+  .tf-explainer > summary:hover { background: var(--bg-card-hover); }
+  .tf-explainer-icon { font-size: 18px; }
+  .tf-explainer-title { flex: 1; font-weight: 500; }
+  .tf-explainer-hint {
+    font-size: 11.5px; color: var(--text-faint);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .tf-explainer[open] .tf-explainer-hint::after { content: ''; }
+  .tf-explainer[open] > summary { border-bottom: 1px solid var(--border); }
+  .tf-explainer-body {
+    padding: 16px 18px 18px;
+    font-size: 13.5px; line-height: 1.6; color: var(--text-dim);
+  }
+  .tf-explainer-body p { margin: 0 0 12px; }
+  .tf-explainer-body b { color: var(--text); font-weight: 600; }
+  .tf-explainer-grid {
+    display: flex; flex-direction: column; gap: 10px;
+    margin-bottom: 14px;
+  }
+  .tf-explainer-row {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 10px 12px;
+    background: var(--bg); border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .tf-explainer-chip {
+    flex-shrink: 0;
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 12px;
+    font-weight: 700; color: var(--accent); letter-spacing: 0.04em;
+    background: var(--accent-soft); padding: 4px 10px; border-radius: 4px;
+    text-transform: uppercase;
+    min-width: 44px; text-align: center;
+  }
+  .tf-explainer-note {
+    margin-top: 14px !important;
+    padding: 10px 14px;
+    background: rgba(74, 217, 145, 0.05);
+    border-left: 2px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+  }
+  @media (max-width: 640px) {
+    .tf-explainer > summary { padding: 10px 14px; font-size: 13px; gap: 8px; }
+    .tf-explainer-hint { font-size: 10.5px; }
+    .tf-explainer-body { padding: 14px 14px 14px; font-size: 12.5px; }
+    .tf-explainer-row { padding: 8px 10px; gap: 10px; }
+    .tf-explainer-chip { font-size: 11px; min-width: 38px; }
+  }
+
   /* Legacy header — kept in case the old DOM is in flight elsewhere. */
   .tf-group-header {
     display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
@@ -3714,6 +3782,50 @@ function renderStrategyIndex(
     </div>
 
     ${portfolioDashboard}
+
+    ${groupsHtml.length > 0 ? `
+    <details class="tf-explainer">
+      <summary>
+        <span class="tf-explainer-icon">${ico('🕐')}</span>
+        <span class="tf-explainer-title">Что значат «5&nbsp;минут», «15&nbsp;минут», «1&nbsp;час»?</span>
+        <span class="tf-explainer-hint">подробнее ↓</span>
+      </summary>
+      <div class="tf-explainer-body">
+        <p>
+          Это <b>таймфрейм</b> — на каких свечах графика стратегия ищет сигнал.
+          У каждой стратегии свой ритм:
+        </p>
+        <div class="tf-explainer-grid">
+          <div class="tf-explainer-row">
+            <span class="tf-explainer-chip">5m</span>
+            <div>
+              <b>Скальпинг.</b> Сигнал на свечах по 5 минут. Сделки часто,
+              быстро открываются и закрываются (обычно от 10 минут до пары часов).
+            </div>
+          </div>
+          <div class="tf-explainer-row">
+            <span class="tf-explainer-chip">15m</span>
+            <div>
+              <b>Внутри-дневная торговля.</b> Свечи по 15 минут. Сделок меньше,
+              чем на 5m, но дольше живут — от часа до суток.
+            </div>
+          </div>
+          <div class="tf-explainer-row">
+            <span class="tf-explainer-chip">1H</span>
+            <div>
+              <b>Свинг-трейдинг.</b> Свечи по часу. Сигналов мало, но сделки
+              могут идти днями и приносить больше за раз.
+            </div>
+          </div>
+        </div>
+        <p class="tf-explainer-note">
+          На какой таймфрейм идти — решает <b>сама стратегия</b>, не вы.
+          Мы её предварительно проверяем на истории и подбираем оптимальный ритм.
+          Внутри тарифа вам ничего настраивать не нужно.
+        </p>
+      </div>
+    </details>
+    ` : ''}
 
     ${groupsHtml}
     ${empty}
