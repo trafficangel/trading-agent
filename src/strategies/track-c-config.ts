@@ -820,6 +820,52 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     },
   },
 
+  'eth-ob-tsr-mf50': {
+    id: 'eth-ob-tsr-mf50',
+    code: '009',
+    // Found via LuxAlgo Strategy Hunter on May 19, 2026. Backtest:
+    // PF 2.23, WR 51.82%, DD 7.29%, 110 trades, net +3070 USDT on
+    // $1000 notional. Balanced profile — not curve-fit (DD reasonable,
+    // WR near 50%, profit large enough to be statistically real).
+    // ETH is the most liquid alt after BTC; fills clean, slippage low.
+    //
+    // slPct 0.07 (7%) — conservative starting point chosen by analogy
+    // with BNB 15m (7.5% SL). Will tighten/loosen after 10-20 live
+    // trades once we see the actual avg_loss distribution. Backtest
+    // DD 7.29% suggests individual losses cluster around 3-5%; 7% SL
+    // gives buffer for outliers without sitting too close to liquidation.
+    //
+    // riskBand 'low' — DD <8% on a major alt fits the BNB/BTC band.
+    // tierEligible true → eligible for ALL tiers (including Starter)
+    // since ETH is a portfolio cornerstone for any tier.
+    //
+    // Enabled FALSE on commit — operator turns it on once LuxAlgo
+    // alerts are configured with this strategy_id.
+    riskBand: 'low',
+    tierEligible: true,
+    maxSafeLeverage: 7,
+    description:
+      'ETH 15m | LONG: OB Exit Bear + TS Ranging + MF<50 | SHORT: OB Exit Bull + TS Ranging + MF>50 | EXIT: Built-in',
+    longDescription:
+      'Контр-трендовая стратегия на 15-минутном ETH с фильтрами по структуре рынка. ' +
+      'Вход срабатывает при выходе цены из зоны Order Block в боковом тренде (Trend Strength: Ranging) с подтверждением по Money Flow. ' +
+      'LONG — после bearish-выхода из OB + MF ниже 50 (исчерпание продавцов). SHORT — зеркально. ' +
+      'Выход полностью на встроенных Builtin Exits стратегии. Safety SL 7% — буфер выше типичной просадки 3-5% из бэктеста (DD 7.29%); срабатывает только в катастрофическом случае.',
+    symbol: 'ETHUSDT',
+    timeframe: '15',
+    enabled: false,
+    slPct: 0.07,
+    launchedAt: Date.parse('2026-05-25T00:00:00Z'),
+    alertName: 'ETHUSDT|15|LONG=OBExBr&TSRng&MFb50|SHORT=OBExBl&TSRng&MFa50|EXIT=BltExt',
+    sourceUrl: 'https://www.luxalgo.com/chat/beksft9pr261tps21uhtq9wl',
+    name: 'ETH OB Exited',
+    // backtest: omitted until operator provides full numbers from LuxAlgo
+    // (need avgWin / avgLoss / largestWin / largestLoss / period dates
+    // and long/short split). Live stats will start populating immediately
+    // and the landing-page «BACKTEST» row will simply not render until
+    // we fill the snapshot in.
+  },
+
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
