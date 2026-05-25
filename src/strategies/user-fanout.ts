@@ -69,6 +69,11 @@ import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 import { computeMarginState } from '../user/margin.js';
 import { resolveUserTierParams } from '../user/tier-assignment.js';
 import { TIER_CONFIGS } from './tier-config.js';
+import {
+  computeSlippageBps,
+  computeExitSlippageBps,
+  SLIPPAGE_ALERT_BPS,
+} from '../lib/slippage.js';
 
 const PARALLEL_LIMIT = 10; // well below Bybit's 50 req/s global cap
 const limit = pLimit(PARALLEL_LIMIT);
@@ -392,6 +397,36 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
     await sleep(250);
   }
 
+  // 3-1. Slippage check — compare what we got vs the signal price.
+  //      Bigger than threshold = thin book, wide spread, fast candle.
+  //      Operator gets a heads-up; the trade proceeds as normal.
+  const slipBps = computeSlippageBps({
+    side: args.side,
+    signalPrice: args.entry,
+    fillPrice: avgPrice,
+  });
+  if (Math.abs(slipBps) >= SLIPPAGE_ALERT_BPS) {
+    const sign = slipBps > 0 ? '+' : '';
+    const direction = slipBps > 0 ? 'against us' : 'in our favour';
+    alertOperator(
+      `📏 Track D entry slippage · user_id=${t.user_id} · ${args.symbol} ${args.side} · ` +
+        `signal $${args.entry.toFixed(4)} → fill $${avgPrice.toFixed(4)} = ${sign}${slipBps} bps (${direction})`,
+    );
+  }
+
+  // 3-2. Partial fill detection. Market orders on liquid USDT-perps
+  //      almost always fully fill, but a fast-moving candle or thin
+  //      book can leave us with less than asked. We don't change
+  //      behaviour (SL was already attached to whatever filled), just
+  //      flag the operator so we can spot pairs/timings that suffer.
+  if (filledQty < qty * 0.95) {
+    const filledPct = (filledQty / qty) * 100;
+    alertOperator(
+      `⚠️ Track D partial fill · user_id=${t.user_id} · ${args.symbol} ${args.side} · ` +
+        `asked ${qty}, got ${filledQty} (${filledPct.toFixed(1)}%). Position opened at reduced size.`,
+    );
+  }
+
   // 3a. Audit C-NEW-1 — post-order trading-active re-check.
   //     The pre-flight on :211 covered access lapse BEFORE we placed
   //     the order. But the order itself takes ~500-1000ms (place +
@@ -528,6 +563,10 @@ export type FanOutExitArgs = {
   strategyId: string;
   symbol: string;
   forceReason: 'strategy_exit' | 'reverse_signal';
+  /** Close price from the strategy_exit webhook payload — used to
+   *  compute exit slippage (signal price vs actual fill). Optional
+   *  because old call-sites might not have it yet. */
+  signalPrice?: number;
 };
 
 /**
@@ -623,6 +662,27 @@ async function executeUserExit(
       break;
     }
     await sleep(250);
+  }
+
+  // Exit-slippage check against the strategy's signal close price.
+  // Same threshold as entry; this catches cases where the user's
+  // exit landed materially worse than the LuxAlgo bar close (e.g.
+  // strategy fires on bar-close at 1.3500, our market exit fills
+  // at 1.3460 → 30 bps against us on a SHORT exit).
+  if (args.signalPrice && args.signalPrice > 0 && closeAvgPrice && row.side) {
+    const exitSlipBps = computeExitSlippageBps({
+      side: row.side as 'long' | 'short',
+      signalPrice: args.signalPrice,
+      fillPrice: closeAvgPrice,
+    });
+    if (Math.abs(exitSlipBps) >= SLIPPAGE_ALERT_BPS) {
+      const sign = exitSlipBps > 0 ? '+' : '';
+      const direction = exitSlipBps > 0 ? 'against us' : 'in our favour';
+      alertOperator(
+        `📏 Track D exit slippage · user_id=${row.user_id} · ${row.symbol} ${row.side} · ` +
+          `signal $${args.signalPrice.toFixed(4)} → fill $${closeAvgPrice.toFixed(4)} = ${sign}${exitSlipBps} bps (${direction})`,
+      );
+    }
   }
 
   // PnL math — reuse calcPnl which knows about side + entry direction.

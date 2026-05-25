@@ -289,6 +289,7 @@ async function handleStrategyEntry(
           strategyId: p.strategy_id,
           symbol: p.symbol,
           forceReason: 'reverse_signal',
+          signalPrice: p.price,
         }).catch((err) =>
           logger.error({ err, strategyId: p.strategy_id }, 'fanOutExit (reverse) threw'),
         );
@@ -526,6 +527,7 @@ async function handleStrategyExit(
     strategyId: p.strategy_id,
     symbol: p.symbol,
     forceReason: 'strategy_exit',
+    signalPrice: p.price,
   }).catch((err) =>
     logger.error({ err, strategyId: p.strategy_id }, 'fanOutExit threw'),
   );
