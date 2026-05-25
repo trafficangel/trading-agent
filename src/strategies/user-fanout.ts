@@ -299,23 +299,54 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
   //     isolated margin, a position only has its dedicated margin as
   //     buffer to liquidation, so a fast wick can liquidate BEFORE our
   //     safety SL fires — defeating the whole point of the SL.
-  //     Idempotent (110025 → ok). Failure is logged but doesn't block
-  //     the entry: we'd rather take a trade in isolated mode than skip
-  //     it entirely, and the operator gets a heads-up.
+  //
+  //     HARD GATE: if we can't confirm cross margin (Bybit refused the
+  //     switch for any reason other than 110025 = already cross), we
+  //     SKIP the entry entirely. Operator decision: «торгуем только
+  //     в кросс». Better to miss a signal than open a position whose
+  //     liquidation math doesn't match our SL math.
   const mmRes = await setCrossMargin(creds);
   if (!mmRes.ok) {
     logger.warn(
       { userId: t.user_id, code: mmRes.code, msg: mmRes.msg },
-      'fanOutEntry: setCrossMargin failed (continuing with whatever Bybit has)',
+      'fanOutEntry: setCrossMargin failed — refusing to open the trade',
     );
+    const label = bybitErrorLabel(mmRes.code);
     if (mmRes.code === 110024) {
       // Open positions blocking the switch — common when user has
       // manual positions we shouldn't touch.
       alertOperator(
-        `⚠️ Track D: user_id=${t.user_id} has open positions blocking the cross-margin switch. ` +
-          `Trade proceeding in current mode; ask user to close manual positions and reconnect.`,
+        `🛑 Track D entry skipped · user_id=${t.user_id} · ${args.symbol} ${args.side} · ` +
+          `cannot switch to cross margin (${label}): user has open positions blocking the change. ` +
+          `Ask them to close manual positions on Bybit and reconnect.`,
+      );
+    } else {
+      alertOperator(
+        `🛑 Track D entry skipped · user_id=${t.user_id} · ${args.symbol} ${args.side} · ` +
+          `cross margin switch failed (${label}): ${mmRes.msg}. ` +
+          `Trade refused — our risk model needs cross margin to be safe.`,
       );
     }
+    // Record the skipped attempt so the user sees it in their history
+    // with a clear reason — better than the trade silently disappearing.
+    insertDecision({
+      symbol: args.symbol,
+      side: args.side,
+      entry: args.entry,
+      sl: userSl,
+      reasoningShort: `🛑 Skipped: cross margin required`,
+      reasoningFull:
+        `Cross-margin (REGULAR_MARGIN) switch failed with retCode=${mmRes.code}: ${mmRes.msg}. ` +
+        `Our risk model assumes cross margin (full account balance backs each position). ` +
+        `In isolated mode a fast wick can liquidate the position BEFORE our safety SL fires. ` +
+        `Trade refused. Resolve the underlying Bybit account state and the next signal will go through.`,
+      rawResponse: args.rawWebhook,
+      strategyId: args.strategyId,
+      userId: t.user_id,
+      parentDecisionId: args.shadowDecisionId,
+      orderError: `cross_margin_required: ${label}`,
+    });
+    return false;
   }
 
   // 1. Set leverage. Idempotent — already at this value → ok.
