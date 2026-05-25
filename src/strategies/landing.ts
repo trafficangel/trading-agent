@@ -3343,11 +3343,12 @@ function renderAllStrategiesFeed(
     let pnlCell: string;
     if (live) {
       const cls = live.pnlUsd >= 0 ? 'pos' : 'neg';
-      const sign = live.pnlUsd >= 0 ? '+' : '';
+      const sign = live.pnlUsd >= 0 ? '+' : '−';
+      const pctSign = live.pnlPct >= 0 ? '+' : '−';
       pnlCell =
         `<span class="feed-pnl-live" data-trade-id="${escapeHtml(tradeIdKey!)}">` +
-          `<span class="mono ${cls}" data-pnl-usd>${sign}$${live.pnlUsd.toFixed(2)}</span>` +
-          ` <span class="feed-pnl-pct ${cls}" data-pnl-pct>(${sign}${live.pnlPct.toFixed(2)}%)</span>` +
+          `<span class="mono ${cls}" data-pnl-usd>${sign}$${Math.abs(live.pnlUsd).toFixed(2)}</span>` +
+          ` <span class="feed-pnl-pct ${cls}" data-pnl-pct>(${pctSign}${Math.abs(live.pnlPct).toFixed(2)}%)</span>` +
           `<span class="feed-pnl-live-meta">сейчас <span class="mono" data-current-price>${live.currentPrice.toFixed(4)}</span></span>` +
         `</span>`;
     } else {
@@ -3373,7 +3374,8 @@ function renderAllStrategiesFeed(
     const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
     const r = reasonLabel(t);
     const dur = fmtDuration(t.exitAt - t.entryAt);
-    const pnlSign = t.pnlUsd >= 0 ? '+' : '';
+    const pnlSign = t.pnlUsd >= 0 ? '+' : '−';
+    const pctSign = t.pnlPct >= 0 ? '+' : '−';
     return `
       <tr>
         <td>${stratCellHtml(t.strategyId, t.strategyTradeNum, t.id)}</td>
@@ -3383,7 +3385,7 @@ function renderAllStrategiesFeed(
         <td class="right mono">${notionalStr}</td>
         <td class="right mono">${t.entryPrice.toFixed(4)}</td>
         <td class="right mono">${t.exitPrice.toFixed(4)}</td>
-        <td class="right mono ${cls}">${pnlSign}$${t.pnlUsd.toFixed(2)} <span class="feed-pnl-pct ${cls}">(${pnlSign}${t.pnlPct.toFixed(2)}%)</span></td>
+        <td class="right mono ${cls}">${pnlSign}$${Math.abs(t.pnlUsd).toFixed(2)} <span class="feed-pnl-pct ${cls}">(${pctSign}${Math.abs(t.pnlPct).toFixed(2)}%)</span></td>
         <td><span class="reason-pill ${r.cls}" title="${escapeHtml(r.title)}">${r.label}</span></td>
       </tr>
     `;
@@ -3968,7 +3970,7 @@ function renderStrategyIndex(
           }
           if (pctEl) {
             pctEl.className = 'feed-pnl-pct ' + cls;
-            pctEl.textContent = '(' + (v.pnlPct >= 0 ? '+' : '') + v.pnlPct.toFixed(2) + '%)';
+            pctEl.textContent = '(' + (v.pnlPct >= 0 ? '+' : '−') + Math.abs(v.pnlPct).toFixed(2) + '%)';
           }
           if (pxEl) pxEl.textContent = v.currentPrice.toFixed(4);
         });
