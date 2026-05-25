@@ -147,7 +147,12 @@ const findEligibleStmt = db.prepare<
      AND s.trading_paused_at IS NULL
      AND k.revoked_at IS NULL
      AND k.last_verified_at IS NOT NULL
-     AND k.insufficient_balance_at IS NULL
+     /* Operator decision: «продолжать торговать пока биржа разрешает»  —
+        balance dropping below tier min is no longer a blocking state.
+        The per-entry margin pre-flight in user-fanout still cleanly
+        skips trades that won't fit; this filter used to hide the user
+        for 5 minutes after the first margin-miss, which was overkill.
+        Removed: AND k.insufficient_balance_at IS NULL */
 `);
 
 export type EligibleTarget = {

@@ -179,33 +179,23 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
     // precise, but 4-decimal works for all symbols we currently trade.
     return Math.round(raw * 1e4) / 1e4;
   })();
-  // Margin pre-flight. The balance-monitor cron sets insufficient_balance_at
-  // (and listEligibleTargets filters those out) every 5 minutes — but a
-  // signal might fire seconds after a position closes when the cron hasn't
-  // re-evaluated yet. Belt-and-braces: also check the computed deficit
-  // RIGHT BEFORE sending the order. If balance is known and free margin
-  // can't cover the new trade, skip + flip the flag immediately so the
-  // user sees the banner on their next page load.
+  // Margin pre-flight — per-trade safety only. If free margin can't
+  // cover THIS specific entry we skip it cleanly (Bybit would reject
+  // anyway). Each signal is evaluated independently — we no longer
+  // flag the user as «insufficient» globally, because the operator
+  // decision is to keep trying every signal regardless of overall
+  // balance. The minimum-balance requirement is only a gate for
+  // activation, not an ongoing constraint.
   const margin = computeMarginState(t.user_id);
   if (margin.balanceUsdt !== null) {
     const free = margin.freeUsdt ?? 0;
     const needed = t.notional_usd / Math.max(1, t.leverage);
     const buffered = needed * 1.05; // 5% buffer for fees/slippage
     if (free < buffered) {
-      logger.warn(
+      logger.info(
         { userId: t.user_id, free, needed, balance: margin.balanceUsdt, used: margin.usedUsdt },
-        'fanOutEntry: pre-flight margin check failed, skipping',
+        'fanOutEntry: pre-flight margin shortfall on this signal — skipping (next signal evaluated fresh)',
       );
-      // Flag the user so they see the banner. The cron clears it once
-      // they top up.
-      const keyRow = findActiveKey(t.user_id);
-      if (keyRow && !keyRow.insufficient_balance_at) {
-        setInsufficientBalance(keyRow.id, Date.now());
-        alertOperator(
-          `💸 Track D pre-flight: user_id=${t.user_id} margin shortfall on ${args.symbol}. ` +
-            `Free $${free.toFixed(2)} < needed $${buffered.toFixed(2)} (with buffer). Order skipped.`,
-        );
-      }
       return false;
     }
   }

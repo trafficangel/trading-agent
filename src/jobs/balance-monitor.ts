@@ -81,18 +81,14 @@ async function processOne(key: ApiKeyRow): Promise<void> {
   const balance = balRes.totalUsdt;
   recordBalance(key.id, balance);
 
-  // TRACK E — evaluate tier transition. Auto-downgrade after 72h
-  // continuous below current tier min. Upgrade tracked but not
-  // auto-applied (Phase A: prompt only, Phase B: prorated billing).
-  try {
-    const transition = await evaluateTierTransition(key.user_id, balance);
-    if (transition.action === 'downgrade' && transition.fromTier !== transition.toTier) {
-      // Already applied inside evaluateTierTransition if grace elapsed.
-      // No further action here — log the decision is included there.
-    }
-  } catch (err) {
-    logger.error({ err, userId: key.user_id }, 'balance-monitor: tier transition eval failed');
-  }
+  // Operator decision: minimum-balance is only a gate at activation, not
+  // an ongoing constraint. Tier transitions (auto-downgrade after grace
+  // period when balance falls below tier min) are disabled — the user
+  // stays on whatever tier they picked, and the per-entry margin pre-
+  // flight handles any signal that's literally too big to fit. Users
+  // can manually pick a smaller tier in /account/subscription/select-tier
+  // if they want to fit more strategies into a smaller balance.
+  void evaluateTierTransition; // kept import for backwards compat / re-enable
 
   // Recovery: ONLY clear the flag if Bybit explicitly set it (via a real
   // rejection or per-trade pre-flight). Use the LARGEST single-trade

@@ -850,24 +850,24 @@ function renderMarginBanner(args: {
   const freeStr = m.freeUsdt !== null ? `$${m.freeUsdt.toFixed(2)}` : '—';
 
   if (flagged) {
-    // Hard block. Bybit said "no" (or our per-trade pre-flight did).
+    // Informational — last entry was skipped due to margin shortfall.
+    // Trading itself is NOT paused: every next signal is evaluated
+    // fresh against current margin, and any one that fits will open.
+    // Operator decision: «торгуем пока биржа разрешает», so the banner
+    // tone is informing, not alarming.
     return `
-      <div class="cabinet-banner-bad">
-        <div class="cabinet-banner-icon">${ico('💸')}</div>
+      <div class="cabinet-banner-amber">
+        <div class="cabinet-banner-icon">${ico('💡')}</div>
         <div class="cabinet-banner-body">
-          <div class="cabinet-banner-title">Торговля приостановлена — недостаточно средств</div>
+          <div class="cabinet-banner-title-amber">Последний сигнал не открылся — не хватило маржи</div>
           <div class="cabinet-banner-text">
-            Bybit отклонил последнюю попытку открыть сделку из-за нехватки обеспечения.
             Баланс: <b>${balanceStr}</b>${m.usedUsdt > 0 ? ` · В позициях: <b>${usedStr}</b>` : ''} · Свободно: <b>${freeStr}</b>.
-            <br/>
-            <b>Новые сделки система не открывает</b> пока баланс не вырастет. Уже открытые позиции продолжают работать.
-            <br/>
-            Пополните <b>Unified Trading Account (единый торговый аккаунт)</b> в Bybit (или переведите USDT из Funding-кошелька) —
-            в течение 5 минут мы проверим баланс и снова включим вас в сигналы.
+            Каждый следующий сигнал проверяется заново — те что помещаются в свободную маржу,
+            открываются как обычно. Если хотите чтоб открывались все — пополните счёт.
           </div>
           <div class="cabinet-banner-actions">
-            <a class="cabinet-banner-btn" href="/account/api-key">Проверить связь →</a>
-            <a class="cabinet-banner-btn cabinet-banner-btn-secondary" href="/account/strategies">Изменить стратегии</a>
+            <a class="cabinet-banner-btn cabinet-banner-btn-secondary" href="/account/api-key">Проверить баланс</a>
+            <a class="cabinet-banner-btn cabinet-banner-btn-secondary" href="/account/subscription/select-tier">Сменить тариф</a>
           </div>
         </div>
       </div>
