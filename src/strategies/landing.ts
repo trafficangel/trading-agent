@@ -11,6 +11,7 @@ import {
 } from './track-c-config.js';
 import { recomputeBacktestStats, enrichTrades, type RecomputedStats } from './backtest-recompute.js';
 import { isAuthed, getAuthedUser } from '../auth/routes.js';
+import { logger } from '../lib/logger.js';
 import { TIER_CONFIGS, computeTierTradeSize } from './tier-config.js';
 import {
   getStrategyLiveStats,
@@ -846,6 +847,14 @@ const STYLE = `
     font-size: 10.5px; color: var(--text-faint);
     margin-left: 2px;
   }
+  /* Live P&L cell for active rows in the trades feed — stacks the
+     current price below the $ / % so it doesn't push the table wider. */
+  .feed-pnl-live { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; line-height: 1.3; }
+  .feed-pnl-live-meta {
+    font-size: 10px; color: var(--text-faint); font-weight: 400;
+    letter-spacing: 0.01em;
+  }
+  .feed-pnl-live-meta .mono { color: var(--text-dim); margin-left: 3px; }
   /* Two-line entry+exit cell — saves a whole column in narrow viewports. */
   .feed-time-cell {
     display: flex; flex-direction: column; gap: 2px;
@@ -3211,7 +3220,14 @@ const FEED_SORT_OPTIONS: ReadonlyArray<{ value: FeedSort; label: string }> = [
   { value: 'pnl_desc',   label: 'PnL: лучшие сверху' },
   { value: 'pnl_asc',    label: 'PnL: худшие сверху' },
 ];
-function renderAllStrategiesFeed(page: number, sort: FeedSort = 'close_desc'): string {
+function renderAllStrategiesFeed(
+  page: number,
+  sort: FeedSort = 'close_desc',
+  /** Live-PnL views from /api/active-positions cache. Keyed by tradeId
+   *  (e.g. «BNB#001») internally. Optional — feed degrades to «—» when
+   *  the price feed is unreachable. */
+  activeViews: import('../api/active-positions.js').ActivePositionView[] = [],
+): string {
   const active = getAllActiveShadowTrades();
   const totalClosed = countAllClosedShadowTrades();
   const totalPages = Math.max(1, Math.ceil(totalClosed / FEED_PAGE_SIZE));
@@ -3299,6 +3315,11 @@ function renderAllStrategiesFeed(page: number, sort: FeedSort = 'close_desc'): s
     );
   };
 
+  // Build trade-id → live view map so each active row can render
+  // its current P&L (updated server-side every 8s via the cache).
+  const liveByTradeId = new Map<string, import('../api/active-positions.js').ActivePositionView>();
+  for (const v of activeViews) liveByTradeId.set(v.tradeId, v);
+
   const activeRows = active.map((t: ActiveTradeFeedRow) => {
     const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
     const ageMs = Date.now() - t.entryAt;
@@ -3309,6 +3330,29 @@ function renderAllStrategiesFeed(page: number, sort: FeedSort = 'close_desc'): s
     const slCell = t.sl !== null
       ? `${t.sl.toFixed(4)} <span class="feed-sl-pct">(−${slDistPct!.toFixed(2)}%)</span>`
       : '—';
+    // Look up live P&L by formatted trade-id (e.g. «BNB#001»). The
+    // active-positions cache and the feed both use formatStrategyTradeId,
+    // so the keys match deterministically.
+    const cfg = STRATEGY_CONFIGS[t.strategyId];
+    const tradeIdKey = cfg ? formatStrategyTradeId(cfg, t.strategyTradeNum ?? t.id) : null;
+    const live = tradeIdKey ? liveByTradeId.get(tradeIdKey) : undefined;
+    // Live cell: show «текущая цена + PnL в USD + %». Falls back to
+    // «—» if the ticker fetch failed (cache miss / network glitch).
+    // data-trade-id attribute lets a future client-side poller patch
+    // these in place without a full re-render.
+    let pnlCell: string;
+    if (live) {
+      const cls = live.pnlUsd >= 0 ? 'pos' : 'neg';
+      const sign = live.pnlUsd >= 0 ? '+' : '';
+      pnlCell =
+        `<span class="feed-pnl-live" data-trade-id="${escapeHtml(tradeIdKey!)}">` +
+          `<span class="mono ${cls}" data-pnl-usd>${sign}$${live.pnlUsd.toFixed(2)}</span>` +
+          ` <span class="feed-pnl-pct ${cls}" data-pnl-pct>(${sign}${live.pnlPct.toFixed(2)}%)</span>` +
+          `<span class="feed-pnl-live-meta">сейчас <span class="mono" data-current-price>${live.currentPrice.toFixed(4)}</span></span>` +
+        `</span>`;
+    } else {
+      pnlCell = `<span class="dim" data-trade-id="${tradeIdKey ? escapeHtml(tradeIdKey) : ''}">—</span>`;
+    }
     return `
       <tr class="feed-row-active">
         <td>${stratCellHtml(t.strategyId, t.strategyTradeNum, t.id)}</td>
@@ -3318,7 +3362,7 @@ function renderAllStrategiesFeed(page: number, sort: FeedSort = 'close_desc'): s
         <td class="right mono">${notionalStr}</td>
         <td class="right mono">${t.entryPrice.toFixed(4)}</td>
         <td class="right mono">${slCell}</td>
-        <td class="right">—</td>
+        <td class="right">${pnlCell}</td>
         <td><span class="reason-pill reason-active" title="Позиция сейчас открыта, ждём сигнал выхода или SL">🟢 В работе</span></td>
       </tr>
     `;
@@ -3456,6 +3500,7 @@ function renderStrategyIndex(
   authed: { displayName: string | null; phone: string | null } | null = null,
   page = 1,
   sort: FeedSort = 'close_desc',
+  activeViews: import('../api/active-positions.js').ActivePositionView[] = [],
 ): string {
   // ---------- Portfolio aggregate ----------
   let totalClosed = 0;
@@ -3893,7 +3938,53 @@ function renderStrategyIndex(
     ${groupsHtml}
     ${empty}
 
-    ${renderAllStrategiesFeed(page, sort)}
+    ${renderAllStrategiesFeed(page, sort, activeViews)}
+
+    <script>
+    // Live P&L polling for active rows in the trades feed.
+    // Same /api/active-positions endpoint the home page uses (8s cache).
+    // We poll every 12s — slightly slower than home (10s) because this
+    // page has more body to keep light.
+    (function() {
+      var POLL_MS = 12000;
+      function fmt(v, signed) {
+        var sign = signed && v >= 0 ? '+' : (v < 0 ? '−' : '');
+        return sign + Math.abs(v).toFixed(2);
+      }
+      function patch(views) {
+        var byId = {};
+        for (var i = 0; i < views.length; i++) byId[views[i].tradeId] = views[i];
+        document.querySelectorAll('.feed-pnl-live').forEach(function(el) {
+          var tid = el.getAttribute('data-trade-id');
+          var v = byId[tid];
+          if (!v) return;
+          var cls = v.pnlUsd >= 0 ? 'pos' : 'neg';
+          var usdEl = el.querySelector('[data-pnl-usd]');
+          var pctEl = el.querySelector('[data-pnl-pct]');
+          var pxEl = el.querySelector('[data-current-price]');
+          if (usdEl) {
+            usdEl.className = 'mono ' + cls;
+            usdEl.textContent = (v.pnlUsd >= 0 ? '+' : '−') + '$' + Math.abs(v.pnlUsd).toFixed(2);
+          }
+          if (pctEl) {
+            pctEl.className = 'feed-pnl-pct ' + cls;
+            pctEl.textContent = '(' + (v.pnlPct >= 0 ? '+' : '') + v.pnlPct.toFixed(2) + '%)';
+          }
+          if (pxEl) pxEl.textContent = v.currentPrice.toFixed(4);
+        });
+      }
+      function poll() {
+        if (document.hidden) return;
+        fetch('/api/active-positions', { headers: { 'accept': 'application/json' } })
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(j) { if (j && j.positions) patch(j.positions); })
+          .catch(function() {});
+      }
+      if (document.querySelectorAll('.feed-pnl-live').length > 0) {
+        setInterval(poll, POLL_MS);
+      }
+    })();
+    </script>
     `,
     { autoRefreshSec: 60, authed },
   );
@@ -4439,16 +4530,26 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
       reply.redirect('/account');
       return;
     }
+    // Fetch live in-flight P&L (8s cached) so the feed's active rows
+    // show real-time PnL instead of «—». Best-effort: degrades to no
+    // live data if Bybit ticker is unreachable.
+    const { getActivePositionsCached } = await import('../api/active-positions.js');
+    let activeViews: import('../api/active-positions.js').ActivePositionView[] = [];
+    try {
+      activeViews = await getActivePositionsCached();
+    } catch (err) {
+      logger.warn({ err }, 'strategies-index: getActivePositionsCached failed');
+    }
     if (!isAuthed(req)) {
       // No-cache on the gated stub so re-visits after auth get fresh HTML.
       reply.header('Cache-Control', 'private, no-store');
-      return renderGatedPreview('index', renderStrategyIndex(enabled, null, safePage, safeSort), { fromAutotrading, loginMode, lang: getLang(req) });
+      return renderGatedPreview('index', renderStrategyIndex(enabled, null, safePage, safeSort, activeViews), { fromAutotrading, loginMode, lang: getLang(req) });
     }
     // Personalised header for authed users — must NOT be public-cached.
     reply.header('Cache-Control', 'private, no-store');
     const u = getAuthedUser(req);
     const authed = u ? { displayName: u.displayName, phone: u.phone } : null;
-    return renderStrategyIndex(enabled, authed, safePage, safeSort);
+    return renderStrategyIndex(enabled, authed, safePage, safeSort, activeViews);
   });
 
   // Detail by code (e.g. /strategies/001) — same gating.
