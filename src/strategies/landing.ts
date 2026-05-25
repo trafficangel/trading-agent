@@ -1269,6 +1269,23 @@ const STYLE = `
     }
     .strat-row-carousel { padding-left: 10vw; padding-right: 10vw; gap: 12px; }
     .strat-row-num { top: 8px; right: 10px; font-size: 10.5px; padding: 2px 7px; }
+    /* On mobile the card is ~290px wide — 56px right reserve was for desktop
+       wide cards. Drop it; the badge is now small enough that the status
+       pill won't collide unless the pill text gets very long. */
+    .strat-row-head { padding-right: 44px; gap: 8px; }
+    .strat-row-symbol { font-size: 15.5px; }
+    /* Avoid hard ellipsis on narrow cards — wrap to 2 lines instead. */
+    .strat-row-desc {
+      white-space: normal !important;
+      display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      font-size: 12.5px;
+      line-height: 1.4;
+    }
+    /* Stat-tags + values: tighter spacing so a line fits more. */
+    .row-stat-line { font-size: 12.5px; gap: 6px; }
+    .stat-tag { min-width: 32px; font-size: 9.5px; }
   }
   .strat-row-head {
     display: flex; align-items: center; justify-content: space-between;
@@ -4855,7 +4872,11 @@ function renderGatedPreview(
 ${faviconLink}
 ${metrikaScript}
 <style>${inlineStyle}
-  /* Gate overlay */
+  /* Gate overlay. transform: scale(1.02) adds depth behind the modal
+     but on mobile it ALSO makes the page 2% wider than the viewport,
+     creating 17-50px of horizontal scroll. Wrap in a fixed-size clipper
+     so the scale stays purely visual and doesn't extend the document. */
+  .gated-blur-clip { overflow: hidden; width: 100%; }
   .gated-blur {
     filter: blur(8px); pointer-events: none; user-select: none;
     transform: scale(1.02); transform-origin: top center;
@@ -5027,7 +5048,7 @@ ${metrikaScript}
 </style>
 </head>
 <body>
-<div class="gated-blur" aria-hidden="true">${bodyInner}</div>
+<div class="gated-blur-clip" aria-hidden="true"><div class="gated-blur">${bodyInner}</div></div>
 ${formHtml}
 ${script}
 </body>
