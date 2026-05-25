@@ -1228,7 +1228,7 @@ function renderPricing(lang: Lang): string {
         freeDepo: '$300+ Bybit deposit',
         perMonthDays: `/mo × ${BYBIT_REF_BONUS_DAYS} days`,
         freePitch: `Bonus for new users who sign up to Bybit via our link — ${BYBIT_REF_BONUS_DAYS} days of Starter free, on top of the standard 14-day trial.`,
-        feat3Strats: '3 strategies:',
+        feat3Strats: '4 strategies:',
         featConcurrent: 'Concurrent trades:',
         upTo: 'up to',
         featFree: 'Free:',
@@ -1261,7 +1261,7 @@ function renderPricing(lang: Lang): string {
         freeDepo: '$300+ депозит на Bybit',
         perMonthDays: `/мес × ${BYBIT_REF_BONUS_DAYS} дней`,
         freePitch: `Бонус для тех, кто регистрирует Bybit по нашей ссылке — ${BYBIT_REF_BONUS_DAYS} дней Starter бесплатно сверх стандартного 14-дневного теста.`,
-        feat3Strats: '3 стратегии:',
+        feat3Strats: '4 стратегии:',
         featConcurrent: 'Сделок одновременно:',
         upTo: 'до',
         featFree: 'Бесплатно:',
@@ -1303,7 +1303,7 @@ function renderPricing(lang: Lang): string {
       </div>
       <p class="at-tier-pitch-top">${t.freePitch}</p>
       <ul class="at-tier-features">
-        <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">${t.feat3Strats}</span><span class="at-tier-feat-val">BTC, BNB, BCH</span></li>
+        <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">${t.feat3Strats}</span><span class="at-tier-feat-val">BTC, BNB, BCH, ETH</span></li>
         <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">${t.featConcurrent}</span><span class="at-tier-feat-val">${t.upTo} 2</span></li>
         <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">${t.featFree}</span><span class="at-tier-feat-val">${t.featFreeBreakdown}</span></li>
         <li><span class="at-tier-feat-icon">🎁</span><span class="at-tier-feat-label">${t.featCondition}</span><span class="at-tier-feat-val">${t.featConditionVal} <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">${t.ourLink}</a></span></li>

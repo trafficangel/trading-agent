@@ -134,7 +134,7 @@ const largestSingleTradeStmt = db.prepare<[number], { max_margin: number | null 
 
 /** Per-trade margin needed for the SINGLE biggest enabled strategy.
  *  This is the realistic "could the next signal fire" threshold, vs
- *  the scary worst-case sum (which assumes all 8 strategies fire at
+ *  the scary worst-case sum (which assumes all 9 strategies fire at
  *  the exact same tick — practically impossible across different
  *  symbols + timeframes). */
 function getLargestSingleTradeMargin(userId: number): number {

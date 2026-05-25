@@ -54,7 +54,7 @@ export type SubscriptionRow = {
 };
 
 // TRACK E — trial users get tier_id='standard' for a better first
-// impression (4 strategies, larger margin pool than starter). If they
+// impression (5 strategies, larger margin pool than starter). If they
 // connect a key with low balance, balance-monitor's evaluateTierTransition
 // will downgrade them within 72h as normal.
 const insertStmt = db.prepare(`

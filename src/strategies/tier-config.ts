@@ -80,8 +80,13 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     minBalanceUsdt: 300,
     maxBalanceUsdt: 799,
     monthlyPriceUsd: 12,
-    // 3 low-band strategies (tight SL, safe leverage).
-    strategyIds: ['bnb-cntr-tt-mf50', 'btc-cfm-strong-tst', 'bch-cntr-cfm-tc'],
+    // 4 low-band strategies (tight SL, safe leverage). ETH joined May 25, 2026.
+    strategyIds: [
+      'bnb-cntr-tt-mf50',
+      'btc-cfm-strong-tst',
+      'bch-cntr-cfm-tc',
+      'eth-ob-tsr-mf50',
+    ],
     // Pool 12% of min-depo $500 ≈ $60. Conservative for newcomers.
     marginPoolUsd: 60,
     maxConcurrentPositions: 2,
@@ -95,8 +100,14 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     minBalanceUsdt: 800,
     maxBalanceUsdt: 2499,
     monthlyPriceUsd: 35,
-    // +XRP (high band, but worth it).
-    strategyIds: ['bnb-cntr-tt-mf50', 'btc-cfm-strong-tst', 'bch-cntr-cfm-tc', 'xrp-cntr-tc-mf50'],
+    // +XRP (high band, but worth it). 5 strategies total (ETH joined May 2026).
+    strategyIds: [
+      'bnb-cntr-tt-mf50',
+      'btc-cfm-strong-tst',
+      'bch-cntr-cfm-tc',
+      'eth-ob-tsr-mf50',
+      'xrp-cntr-tc-mf50',
+    ],
     // Pool 20% of min-depo $1000 = $200.
     marginPoolUsd: 200,
     maxConcurrentPositions: 3,
@@ -110,11 +121,12 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     minBalanceUsdt: 2500,
     maxBalanceUsdt: 5999,
     monthlyPriceUsd: 90,
-    // +TRX (5th strategy).
+    // +TRX. 6 strategies total (ETH joined May 2026).
     strategyIds: [
       'bnb-cntr-tt-mf50',
       'btc-cfm-strong-tst',
       'bch-cntr-cfm-tc',
+      'eth-ob-tsr-mf50',
       'xrp-cntr-tc-mf50',
       'trx-cfm-tt-wc',
     ],
@@ -131,17 +143,18 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     minBalanceUsdt: 6000,
     maxBalanceUsdt: 14999,
     monthlyPriceUsd: 235,
-    // Same 5 strategies as Plus, larger margin pool.
+    // Same 6 strategies as Plus, larger margin pool.
     strategyIds: [
       'bnb-cntr-tt-mf50',
       'btc-cfm-strong-tst',
       'bch-cntr-cfm-tc',
+      'eth-ob-tsr-mf50',
       'xrp-cntr-tc-mf50',
       'trx-cfm-tt-wc',
     ],
     // Pool 20% of $8000 = $1600.
     marginPoolUsd: 1600,
-    maxConcurrentPositions: 5,
+    maxConcurrentPositions: 6,
     expectedMonthlyPnlRangeUsd: { low: 1000, high: 1500 },
     expectedMaxDdPct: 18,
     pitch: 'Тот же портфель монет, но сделки больше — пропорционально вашему депозиту растёт и заработок.',
@@ -152,24 +165,25 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     minBalanceUsdt: 15000,
     maxBalanceUsdt: Number.POSITIVE_INFINITY,
     monthlyPriceUsd: 580,
-    // Default: same 5 strategies. VIP users can override to include
+    // Default: same 6 strategies. VIP users can override to include
     // TON/UNI/HBAR via tier_override_strategies (operator decides).
     strategyIds: [
       'bnb-cntr-tt-mf50',
       'btc-cfm-strong-tst',
       'bch-cntr-cfm-tc',
+      'eth-ob-tsr-mf50',
       'xrp-cntr-tc-mf50',
       'trx-cfm-tt-wc',
     ],
     // Pool 20% of $20000 = $4000.
     marginPoolUsd: 4000,
-    maxConcurrentPositions: 5,
+    maxConcurrentPositions: 6,
     expectedMonthlyPnlRangeUsd: { low: 2500, high: 4000 },
     expectedMaxDdPct: 18,
     pitch: 'Премиум: персональная настройка через оператора, гибкие условия (success-fee вместо фиксированной подписки).',
   },
   // Phase K — Pro Manual («Prof»). Special tier for experienced users who
-  // want full control. ALL 8 strategies eligible (including the wide-SL
+  // want full control. ALL 9 strategies eligible (including the wide-SL
   // ones: UNI/TON/HBAR). marginPoolUsd here is a SUGGESTED starting point;
   // each user_strategies row's notional+leverage is user-editable on
   // /account/strategies. Balance gate + auto-downgrade are bypassed —
@@ -191,6 +205,7 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
       'uni-cfm-tc-tst',
       'ton-cntr-cfm-neo',
       'hbar-cntr-tsr-scfl',
+      'eth-ob-tsr-mf50',
     ],
     // Suggested pool — user can override per-strategy notional after activation.
     marginPoolUsd: 200,
@@ -198,7 +213,7 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     // No PnL estimate — depends entirely on user's chosen sizes.
     expectedMonthlyPnlRangeUsd: { low: 0, high: 0 },
     expectedMaxDdPct: 100, // sentinel: «no platform-promised cap, user owns risk»
-    pitch: 'Для опытных трейдеров. Все 8 стратегий доступны, размер позиции и плечо настраиваете вручную. Платформа не контролирует ваш баланс и не предлагает down/upgrade — вы сами принимаете риски.',
+    pitch: 'Для опытных трейдеров. Все 9 стратегий доступны, размер позиции и плечо настраиваете вручную. Платформа не контролирует ваш баланс и не предлагает down/upgrade — вы сами принимаете риски.',
   },
 };
 

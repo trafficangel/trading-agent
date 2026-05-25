@@ -377,7 +377,7 @@ function tierEmoji(tierId: TierId): string {
  *   ☑ enabled checkbox · Strategy name+symbol · notional input · leverage input · margin readout
  * Inputs are flat-named (enabled_<sid>, notional_<sid>, leverage_<sid>) to
  * work with fastify-formbody's default URL-encoded parser (no nested bracket
- * support). All 8 strategies are listed — including the wide-SL ones
+ * support). All 9 strategies are listed — including the wide-SL ones
  * (UNI/TON/HBAR) that regular tiers exclude.
  */
 function renderProEditableForm(args: RenderArgs): string {
