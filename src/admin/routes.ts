@@ -314,7 +314,7 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
           return `
             <tr>
               <td class="dt">${fmtDateTime(r.created_at)}</td>
-              <td>${escapeHtml(name)}</td>
+              <td>${escapeHtml(name)} <span class="adm-uid" title="user_id (используется во всех TG-алертах и логах)">#${r.id}</span></td>
               <td class="mono">${escapeHtml(phone)}</td>
               <td>${badge}</td>
               <td>${apiCell}</td>
@@ -465,6 +465,22 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
       .tier-badge-pro      { background: rgba(255,193,107,0.14); color: #ffc16b; border: 1px solid rgba(255,193,107,0.50); }
       .tier-badge-vip      { background: rgba(212,175,55,0.16);  color: #f3d266; border: 1px solid rgba(212,175,55,0.55); }
       .tier-badge-prof     { background: rgba(180,120,255,0.14); color: #c599ff; border: 1px solid rgba(180,120,255,0.50); }
+      /* user_id chip — small mono badge next to the user's display
+         name. Same id that appears in every TG alert + log line, so the
+         operator can match a notification to a row in one glance. */
+      .adm-uid {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 6px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-family: 'SF Mono', 'Menlo', monospace;
+        font-size: 10.5px;
+        color: var(--text-faint);
+        font-weight: 600;
+        vertical-align: middle;
+      }
       .adm-btn {
         background: #1a2129;
         border: 1px solid #2a323d;
