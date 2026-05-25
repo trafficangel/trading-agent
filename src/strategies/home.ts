@@ -186,16 +186,16 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           when: 'СЕЙЧАС',
-          done: true,
-          title: '🚀 Запущен автотрейдинг — клиенты подключают свой Bybit-аккаунт через API-ключ и наши стратегии торгуют автоматически за них. Бета-тестирование с первыми пользователями.',
-        },
-        {
-          when: 'ИЮНЬ 2026',
           done: false,
-          title: 'Открытие подписки для всех желающих после успешного завершения beta. Автоматическая оплата через Stripe / ЮKassa.',
+          title: '🧪 Beta с первыми пользователями. Добавляем новые стратегии в портфель, шлифуем риск-параметры по реальным сделкам, доводим интерфейс кабинета.',
         },
         {
           when: 'ЛЕТО 2026',
+          done: false,
+          title: 'Открытие подписки для всех желающих после успешного завершения beta.',
+        },
+        {
+          when: 'ОСЕНЬ 2026',
           done: false,
           title: 'Hyperliquid Vault — параллельный канал для тех кто хочет копировать через смарт-контракт без выдачи API-ключа.',
         },
@@ -405,16 +405,16 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           when: 'NOW',
-          done: true,
-          title: '🚀 Auto-trading launched — clients connect their Bybit account via API key and our strategies trade automatically on their behalf. Beta-testing with first users.',
-        },
-        {
-          when: 'JUNE 2026',
           done: false,
-          title: 'Public subscription open after beta completes. Automated payments via Stripe.',
+          title: '🧪 Beta with first users. Adding new strategies to the portfolio, tuning risk parameters from real trades, polishing the cabinet UX.',
         },
         {
           when: 'SUMMER 2026',
+          done: false,
+          title: 'Public subscription open after beta completes.',
+        },
+        {
+          when: 'FALL 2026',
           done: false,
           title: 'Hyperliquid Vault — on-chain channel for those who prefer smart-contract copy trading over API keys.',
         },
