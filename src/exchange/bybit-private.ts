@@ -259,6 +259,41 @@ export async function switchToOneWayMode(
   return { ok: true };
 }
 
+/**
+ * Force cross-margin (REGULAR_MARGIN in UTA terminology) for the user's
+ * USDT-perp account. With isolated margin our SL-distance + leverage
+ * formula can leave the position too close to Bybit's liquidation price
+ * (isolated positions only have their dedicated margin as buffer, not
+ * the whole account balance), so a fast wick can liquidate BEFORE our
+ * safety SL fires. Cross margin lets the full account balance back every
+ * position, which matches the assumption baked into our risk model.
+ *
+ * Bybit V5 endpoint /v5/account/set-margin-mode accepts:
+ *   - REGULAR_MARGIN   = cross margin (what we want)
+ *   - ISOLATED_MARGIN  = per-position margin
+ *   - PORTFOLIO_MARGIN = options-aware portfolio (not for us)
+ *
+ * Idempotent on Bybit's side — if already cross, code 110025 returns
+ * which we treat as success.
+ */
+export async function setCrossMargin(
+  creds: Creds,
+): Promise<{ ok: true } | { ok: false; code: number; msg: string }> {
+  const r = await signedPost<unknown>(creds, '/v5/account/set-margin-mode', {
+    setMarginMode: 'REGULAR_MARGIN',
+  });
+  if (!r.ok) {
+    // 110025: «margin mode not modified» — already cross, idempotent OK.
+    // 110024: «margin mode change not allowed» — account has open
+    // positions or pending orders, can't switch right now. Caller should
+    // log + continue (most likely user has manual positions we shouldn't
+    // touch; cross margin will apply on next clean state).
+    if (r.code === 110025) return { ok: true };
+    return r;
+  }
+  return { ok: true };
+}
+
 export async function setLeverage(
   creds: Creds,
   symbol: string,

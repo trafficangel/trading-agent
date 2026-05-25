@@ -62,6 +62,7 @@ import {
   fetchPosition,
   setPositionSL,
   switchToOneWayMode,
+  setCrossMargin,
   bybitErrorLabel,
 } from '../exchange/bybit-private.js';
 import { roundQtyToStep } from '../exchange/bybit-public.js';
@@ -291,6 +292,30 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
       recordVerifyResult(keyRow.id, false, `switchMode: ${bybitErrorLabel(modeRes.code)}`);
     }
     return false;
+  }
+
+  // 0a. Force cross-margin (REGULAR_MARGIN in UTA terminology). Our risk
+  //     model assumes the full account balance backs every position. With
+  //     isolated margin, a position only has its dedicated margin as
+  //     buffer to liquidation, so a fast wick can liquidate BEFORE our
+  //     safety SL fires — defeating the whole point of the SL.
+  //     Idempotent (110025 → ok). Failure is logged but doesn't block
+  //     the entry: we'd rather take a trade in isolated mode than skip
+  //     it entirely, and the operator gets a heads-up.
+  const mmRes = await setCrossMargin(creds);
+  if (!mmRes.ok) {
+    logger.warn(
+      { userId: t.user_id, code: mmRes.code, msg: mmRes.msg },
+      'fanOutEntry: setCrossMargin failed (continuing with whatever Bybit has)',
+    );
+    if (mmRes.code === 110024) {
+      // Open positions blocking the switch — common when user has
+      // manual positions we shouldn't touch.
+      alertOperator(
+        `⚠️ Track D: user_id=${t.user_id} has open positions blocking the cross-margin switch. ` +
+          `Trade proceeding in current mode; ask user to close manual positions and reconnect.`,
+      );
+    }
   }
 
   // 1. Set leverage. Idempotent — already at this value → ok.

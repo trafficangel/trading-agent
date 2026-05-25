@@ -26,7 +26,7 @@ import {
   setInsufficientBalance,
   getDecryptedCreds,
 } from '../db/repos/user-api-keys.js';
-import { fetchBalanceUsdt, bybitErrorLabel, switchToOneWayMode } from '../exchange/bybit-private.js';
+import { fetchBalanceUsdt, bybitErrorLabel, switchToOneWayMode, setCrossMargin } from '../exchange/bybit-private.js';
 import { listUserStrategies, enableUserStrategy, disableUserStrategy } from '../db/repos/user-strategies.js';
 import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
 import { closeAllUserPositions } from '../strategies/user-fanout.js';
@@ -578,6 +578,32 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
         ? `Не удалось переключить аккаунт в One-Way режим (${label}): у вас уже есть открытая позиция в Hedge mode на Bybit. Закройте её вручную на бирже и попробуйте ещё раз.`
         : `Не удалось переключить аккаунт в One-Way режим (${label}): ${modeRes.msg}.`;
       return renderApiKeyWithFlash(req, reply, user, { ok: false, message: msg });
+    }
+    // Force CROSS margin (REGULAR_MARGIN in UTA terminology). With
+    // isolated, a position only has its dedicated margin backing it,
+    // so a fast wick can liquidate BEFORE our safety SL fires. Our risk
+    // model assumes cross — set it here so the first signal lands in
+    // the right state. Idempotent (110025 = already cross → ok).
+    // Failure is non-fatal: if 110024 (open positions blocking switch),
+    // we surface a clear instruction; otherwise log + continue (the
+    // user can still trade in isolated, just with higher liquidation
+    // risk on fast moves).
+    const marginRes = await setCrossMargin({ apiKey, apiSecret });
+    if (!marginRes.ok) {
+      const label = bybitErrorLabel(marginRes.code);
+      logger.warn({ userId: user.userId, code: marginRes.code, label }, 'api-key setCrossMargin failed');
+      if (marginRes.code === 110024) {
+        return renderApiKeyWithFlash(req, reply, user, {
+          ok: false,
+          message:
+            `Не удалось переключить маржу в cross-режим (${label}): на счёте есть открытые позиции, ` +
+            `которые мешают смене. Закройте их вручную на Bybit и нажмите «Проверить связь» — ` +
+            `это нужно потому что наша система рассчитывает риск исходя из cross-маржи, в isolated ` +
+            `режиме позиция может ликвидироваться раньше нашего safety SL.`,
+        });
+      }
+      // Other failures (e.g. PORTFOLIO_MARGIN locked, sub-account
+      // restrictions) — note but don't block onboarding.
     }
     try {
       upsertApiKey({
