@@ -1,3 +1,5 @@
+import type { TierId } from './tier-config.js';
+
 /**
  * Track C — LuxAlgo AI Strategy Builder per-strategy configuration.
  *
@@ -13,9 +15,18 @@
  *   1. Configure the strategy in LuxAlgo AI Builder.
  *   2. Share the backtest stats with the operator.
  *   3. Operator picks slPct (typically avg-loss × 1.3-1.5 buffer).
- *   4. Add the StrategyConfig row here, set enabled=true, commit.
- *   5. Configure entry+exit webhooks in LuxAlgo with matching strategy_id.
- *   6. Deploy.
+ *   4. Operator picks `minTier` — controls which paying tiers see it:
+ *        - 'starter': low-band flagship (BNB/BTC/BCH/ETH-class)
+ *        - 'standard'/'plus': validated medium-band
+ *        - 'prof': extreme-band OR untested (manual users only)
+ *        - null: never in any tier (operator-only)
+ *      Adding to a tier propagates automatically — NO tier-config edits.
+ *   5. Add the StrategyConfig row here, set enabled=true, commit.
+ *   6. Configure entry+exit webhooks in LuxAlgo with matching strategy_id.
+ *   7. Deploy.
+ *
+ * After deploy: `pnpm tsx scripts/announce-strategy.ts <code>` to push
+ * an entry post to the @luxalgosignal channel.
  *
  * **Position sizing** is unified at $1000 notional per Track C trade
  * (matches the POSITION_NOTIONAL_USD constant used in daily-wrap for
@@ -134,6 +145,24 @@ export type StrategyConfig = {
    *  (operator hand-picks for whale users). Default true. Used to
    *  exclude TON/UNI/HBAR (large SL = scary marketing) from tiers. */
   tierEligible?: boolean;
+  /** TRACK E (May 25, 2026) — minimum tier where this strategy auto-
+   *  appears. Strategy is included in this tier AND all higher tiers
+   *  (TIER_ORDER ranks: starter < standard < plus < pro < vip < prof).
+   *  Null = never in any tier (operator-only — webhook still works for
+   *  testing, but tier-assignment skips this strategy).
+   *
+   *  When adding a new strategy, pick by risk band:
+   *    - low band (DD ≤ 8%): 'starter' — flagship coin, all paying tiers
+   *    - medium band (DD 8-15%): 'standard' or 'plus' depending on quality
+   *    - high band (DD 15-25%): 'plus' or 'prof'
+   *    - extreme band (DD > 25%): 'prof' — manual users only
+   *    - any untested / experimental: 'prof' until ≥10 live trades validate
+   *    - null: NEVER in any tier (testing / disabled / operator-only)
+   *
+   *  ONE field controls tier composition. Adding `minTier: 'standard'` to
+   *  a new strategy makes it auto-appear in Standard/Plus/Pro/VIP/Prof
+   *  next deploy — no tier-config edits, no copy updates needed. */
+  minTier: TierId | null;
   /** TRACK E — maximum leverage that keeps the safety SL firing BEFORE
    *  Bybit-side liquidation. Computed once from slPct using:
    *    floor((1 - 0.30) / (slPct + 0.02))
@@ -224,6 +253,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     // Standard+ tiers. maxSafeLeverage 4× keeps liquidation buffer.
     riskBand: 'high',
     tierEligible: true,
+    minTier: 'standard',
     maxSafeLeverage: 4,
     description:
       'XRP 15m | LONG: CONT Any Bl + TC Br + MF>50 | SHORT: CONT Any Br + TC Bl + MF<50 | EXIT: reverse signal',
@@ -313,6 +343,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     // public tiers, available only via VIP operator override.
     riskBand: 'extreme',
     tierEligible: false,
+    minTier: 'prof',
     maxSafeLeverage: 2,
     description:
       'UNI 1h | LONG: CFM Any Bl + TC Br + TST Trending | SHORT: CFM Any Br + TC Bl + TST Trending | EXIT: CFM Built-in',
@@ -406,6 +437,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     code: '004',
     riskBand: 'high',
     tierEligible: true,
+    minTier: 'plus',
     maxSafeLeverage: 4,
     description:
       'TRX 1h | LONG: CFM Any Bl + TT Bullish + Weak Br Confluence | SHORT: CFM Any Br + TT Bearish + Weak Bl Confluence | EXIT: CFM Built-in',
@@ -490,6 +522,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     // TRACK E — extreme band (SL 25%), VIP override only.
     riskBand: 'extreme',
     tierEligible: false,
+    minTier: 'prof',
     maxSafeLeverage: 2,
     description:
       'TON 1h | LONG: CNTR Normal Bl + CFM Downtrend + Neo Cloud Br | SHORT: CNTR Normal Br + CFM Uptrend + Neo Cloud Bl | EXIT: CNTR Built-in',
@@ -575,6 +608,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     // TRACK E — extreme band (DD 36%, SL 28%), VIP override only.
     riskBand: 'extreme',
     tierEligible: false,
+    minTier: 'prof',
     maxSafeLeverage: 2,
     description:
       'HBAR 1h | LONG: CNTR Normal Br + TS Ranging + Strong Bl Cfl | SHORT: CNTR Normal Bl + TS Ranging + Strong Br Cfl | EXIT: CNTR Built-in',
@@ -670,6 +704,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     // median loss only −0.41%, worst −2.99%, p95 −2.98% → 3.5% buffer = comfortable.
     riskBand: 'low',
     tierEligible: true,
+    minTier: 'starter',
     maxSafeLeverage: 12,
     description:
       'BCH 5m | LONG: CNTR Normal Bl + CFM Downtrend + TC Bl | SHORT: CNTR Normal Br + CFM Uptrend + TC Br | EXIT: CNTR Built-in',
@@ -767,6 +802,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     // 4% gives ~17% buffer over worst — comfortable.
     riskBand: 'low',
     tierEligible: true,
+    minTier: 'starter',
     maxSafeLeverage: 11,
     description:
       'BTC 5m | LONG: CFM Strong Br + TST Trending | SHORT: CFM Strong Bl + TST Trending | EXIT: CFM Built-in',
@@ -843,6 +879,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     // alerts are configured with this strategy_id.
     riskBand: 'low',
     tierEligible: true,
+    minTier: 'starter',
     maxSafeLeverage: 7,
     description:
       'ETH 15m | LONG: OB Exit Bear + TS Ranging + MF<50 | SHORT: OB Exit Bull + TS Ranging + MF>50 | EXIT: Built-in',
@@ -905,6 +942,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     // SL 7.5% → 7× safe lev.
     riskBand: 'low',
     tierEligible: true,
+    minTier: 'starter',
     maxSafeLeverage: 7,
     description:
       'BNB 15m | LONG: CONT Any Br + TT Br + MF>50 | SHORT: CONT Any Bl + TT Bl + MF<50 | EXIT: CONT Built-in',

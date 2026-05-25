@@ -32,6 +32,7 @@ import {
   getTierMarketingNumbers,
   computeTierTradeSize,
   MIN_AUTOTRADING_DEPOSIT_USDT,
+  TIER_CONFIGS,
 } from './tier-config.js';
 
 type Lang = 'ru' | 'en';
@@ -1289,7 +1290,11 @@ function renderPricing(lang: Lang): string {
         slash: '–',
       };
 
-  // Virtual Free card — not in TIER_CONFIGS. Conditional on Bybit referral signup.
+  // Virtual Free card — not in TIER_CONFIGS. Conditional on Bybit referral
+  // signup. Strategy list mirrors the Starter tier (auto-derived).
+  const freeStarterCoins = tierCoinTickers('starter').join(', ');
+  const freeStarterCount = TIER_CONFIGS.starter.strategyIds.length;
+  const freeStratsLabel = lang === 'en' ? `${freeStarterCount} strategies:` : `${freeStarterCount} стратегии:`;
   const freeCard = `
     <div class="at-tier-card at-tier-free" data-tier="free">
       <div class="at-tier-card-glow"></div>
@@ -1303,7 +1308,7 @@ function renderPricing(lang: Lang): string {
       </div>
       <p class="at-tier-pitch-top">${t.freePitch}</p>
       <ul class="at-tier-features">
-        <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">${t.feat3Strats}</span><span class="at-tier-feat-val">BTC, BNB, BCH, ETH</span></li>
+        <li><span class="at-tier-feat-icon">🎯</span><span class="at-tier-feat-label">${freeStratsLabel}</span><span class="at-tier-feat-val">${freeStarterCoins}</span></li>
         <li><span class="at-tier-feat-icon">⚡</span><span class="at-tier-feat-label">${t.featConcurrent}</span><span class="at-tier-feat-val">${t.upTo} 2</span></li>
         <li><span class="at-tier-feat-icon">💎</span><span class="at-tier-feat-label">${t.featFree}</span><span class="at-tier-feat-val">${t.featFreeBreakdown}</span></li>
         <li><span class="at-tier-feat-icon">🎁</span><span class="at-tier-feat-label">${t.featCondition}</span><span class="at-tier-feat-val">${t.featConditionVal} <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">${t.ourLink}</a></span></li>

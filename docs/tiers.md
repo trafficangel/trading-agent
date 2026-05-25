@@ -43,6 +43,12 @@ Robot Claude — сервис автотрейдинга на вашем Bybit-�
 | STRAT-002 XRP Contrarian | XRPUSDT | 15m | 15% | 4× | Standard+ |
 | STRAT-004 TRX Confluence | TRXUSDT | 1h | 15% | 4× | Plus+ |
 
+> **Операторская заметка:** состав тарифов вычисляется автоматически из поля
+> `minTier` каждой стратегии в `src/strategies/track-c-config.ts`. Добавляешь
+> новую стратегию → ставишь `minTier: 'starter'` (или нужный уровень) → она
+> сама появляется во всех тарифах ≥ этого уровня. См. функцию
+> `computeTierStrategyIds()` в `tier-config.ts`.
+
 Стратегии STRAT-003 (UNI, SL 30%), STRAT-005 (TON, SL 25%), STRAT-006 (HBAR, SL 28%) **не входят** в общедоступные тарифы — слишком широкий стоп-лосс для маркетинговой коммуникации новичкам. Доступны только VIP-клиентам через индивидуальный override оператора.
 
 ## Что такое margin, leverage и notional

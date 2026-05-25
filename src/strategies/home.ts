@@ -169,7 +169,7 @@ const CONTENT: Record<Lang, Content> = {
       title: 'ТОП-3 стратегии по доходности',
       subtitle:
         'Три лучшие стратегии по реальной прибыли на нашем shadow-счёте. Полная статистика, бэктесты, сделки и графики по каждой — на странице стратегии. Числа пересчитаны на позицию $1000 с реальной комиссией Bybit.',
-      seeAll: 'Все 9 стратегий →',
+      seeAll: 'Все {count} стратегий →',
     },
     roadmap: {
       title: 'Roadmap',
@@ -388,7 +388,7 @@ const CONTENT: Record<Lang, Content> = {
       title: 'Top 3 strategies by return',
       subtitle:
         'Three best strategies by real PnL on our shadow account. Full stats, backtests, trades and charts for every strategy — on its individual page. Numbers are recomputed for our $1000 position size with real Bybit commission.',
-      seeAll: 'All 9 strategies →',
+      seeAll: 'All {count} strategies →',
     },
     roadmap: {
       title: 'Roadmap',
@@ -1230,7 +1230,7 @@ function renderHome(
         ${previewItems || `<div class="empty-state">${lang === 'en' ? 'No active strategies yet.' : 'Активных стратегий пока нет.'}</div>`}
       </div>
       <div style="margin-top: 14px;">
-        <a class="btn btn-ghost" href="/strategies">${escapeHtml(c.strategiesPreview.seeAll)}</a>
+        <a class="btn btn-ghost" href="/strategies">${escapeHtml(c.strategiesPreview.seeAll.replace('{count}', String(Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled).length)))}</a>
       </div>
     </div>
   `;
