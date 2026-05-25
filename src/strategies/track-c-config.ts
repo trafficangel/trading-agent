@@ -853,17 +853,49 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Выход полностью на встроенных Builtin Exits стратегии. Safety SL 7% — буфер выше типичной просадки 3-5% из бэктеста (DD 7.29%); срабатывает только в катастрофическом случае.',
     symbol: 'ETHUSDT',
     timeframe: '15',
-    enabled: false,
+    enabled: true,
     slPct: 0.07,
     launchedAt: Date.parse('2026-05-25T00:00:00Z'),
     alertName: 'ETHUSDT|15|LONG=OBExBr&TSRng&MFb50|SHORT=OBExBl&TSRng&MFa50|EXIT=BltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/beksft9pr261tps21uhtq9wl',
     name: 'ETH OB Exited',
-    // backtest: omitted until operator provides full numbers from LuxAlgo
-    // (need avgWin / avgLoss / largestWin / largestLoss / period dates
-    // and long/short split). Live stats will start populating immediately
-    // and the landing-page «BACKTEST» row will simply not render until
-    // we fill the snapshot in.
+    backtest: {
+      // Source: LuxAlgo Strategy Builder backtest, Oct 23 2025 → May 17 2026
+      // (207 days, 110 trades). Raw LuxAlgo numbers were generated on a
+      // 1-ETH-per-trade sizing (~$2700 avg notional). All USD values below
+      // are normalised to our live $1000 fixed notional (scale = 1000/2700
+      // ≈ 0.37). Ratio-based fields (WR, PF, DD%, win/loss %) are notional-
+      // invariant and used as-is. cagrPct is simple-annualised:
+      // netPnlPct × (365 / periodDays), matching the HBAR convention.
+      // Source LuxAlgo readout: Net +3070 USDT, PF 2.23, WR 51.82%,
+      // DD 7.29% ($971), CAGR 61.19% — verifiable at the sourceUrl.
+      periodLabel: 'Oct 23, 2025 — May 17, 2026',
+      periodDays: 207,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 1135.79,
+      netPnlPct: 113.58,
+      cagrPct: 200.27,
+      totalTrades: 110,
+      wins: 57,
+      losses: 53,
+      winRate: 0.5182,
+      profitFactor: 2.23,
+      commissionPaidUsd: 121.00,
+      maxDrawdownPct: 7.29,
+      maxDrawdownUsd: 359.39,
+      avgWinUsd: 36.19,
+      avgWinPct: 3.62,
+      avgLossUsd: -17.49,
+      avgLossPct: -1.75,
+      largestWinUsd: 275.97,
+      largestLossUsd: -108.76,
+      longTrades: 55,
+      longPnlPct: 25.88,
+      shortTrades: 55,
+      shortPnlPct: 87.70,
+    },
   },
 
   'bnb-cntr-tt-mf50': {
