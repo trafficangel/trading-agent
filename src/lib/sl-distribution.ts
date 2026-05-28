@@ -52,12 +52,31 @@ export type AnalyzableTrade = {
   side: 'long' | 'short';
   entryPrice: number;
   exitPrice: number;
+  /** Maximum Adverse Excursion — worst drawdown from entry during trade
+   *  lifetime, as a positive % magnitude. Populated by
+   *  `scripts/backfill-mae.ts` from Bybit kline data.
+   *
+   *  When present, this is the CORRECT input for SL-distribution analysis
+   *  (would the SL have force-closed this trade at any point during its
+   *  life?). When absent, we fall back to realized loss — which
+   *  UNDERESTIMATES the cut rate because trades that drew down then
+   *  recovered look like small losers. */
+  maePct?: number;
 };
 
 export type SlDistribution = {
+  /** Which loss metric we used. 'mae' = max adverse excursion (worst
+   *  drawdown during trade life, the right answer). 'realized' = exit
+   *  loss only (underestimates because recovered trades hide their
+   *  drawdown). */
+  source: 'mae' | 'realized' | 'mixed';
+  /** Coverage of MAE data when source != 'mae' — what fraction of
+   *  trades had MAE; the rest fell back to realized loss. */
+  maeCoverage: number;
   /** Total trades in the log (winners + losers + breakeven). */
   totalTrades: number;
-  /** How many of those were net losers. */
+  /** How many of those went underwater at any point (with MAE) or
+   *  closed in the red (with realized). */
   lossCount: number;
   /** Loss percentiles in % (positive magnitudes). */
   percentiles: {
@@ -68,9 +87,8 @@ export type SlDistribution = {
     p99: number;
     worst: number;
   };
-  /** For each cap value (in %), what fraction of historical losses
-   *  would be force-closed by an SL at that cap. Key = cap as %
-   *  (e.g. `5` for 5%), value = ratio 0..1. */
+  /** For each cap value (in %), what fraction of underwater trades
+   *  would be force-closed by an SL at that cap. */
   cutRates: Record<number, number>;
   /** Operator-facing recommendation. `null` if the strategy doesn't
    *  fit the global cap (incompatible). */
@@ -112,23 +130,42 @@ export function analyzeSlDistribution(
   const targetCutRate = opts.targetCutRate ?? 0.10;
   const capsToReport = opts.capsToReport ?? [3, 5, 7, 10, 15];
 
-  // Per-trade % loss against entry price. Sign-correct for long vs short.
-  const allPnl = trades.map((t) => {
-    const sign = t.side === 'long' ? 1 : -1;
-    return (sign * (t.exitPrice - t.entryPrice) / t.entryPrice) * 100;
-  });
-  // Take losses, convert to positive magnitudes, sort ascending.
-  const losses = allPnl.filter((p) => p < 0).map((p) => -p).sort((a, b) => a - b);
+  // Per-trade adverse-excursion %. Prefer MAE (worst price during trade
+  // life) when available — it's the only honest input for «would the SL
+  // have force-closed?». Fall back to realized loss when MAE is missing
+  // (older imports without backfill).
+  const adverseExcursions: number[] = [];
+  let maeUsed = 0;
+  let realizedUsed = 0;
+  for (const t of trades) {
+    if (typeof t.maePct === 'number' && Number.isFinite(t.maePct)) {
+      if (t.maePct > 0) adverseExcursions.push(t.maePct);
+      maeUsed++;
+    } else {
+      const sign = t.side === 'long' ? 1 : -1;
+      const realized = (sign * (t.exitPrice - t.entryPrice) / t.entryPrice) * 100;
+      if (realized < 0) adverseExcursions.push(-realized);
+      realizedUsed++;
+    }
+  }
+  const losses = adverseExcursions.sort((a, b) => a - b);
+  const source: SlDistribution['source'] =
+    maeUsed === trades.length ? 'mae' :
+    maeUsed === 0 ? 'realized' :
+    'mixed';
+  const maeCoverage = trades.length > 0 ? maeUsed / trades.length : 0;
 
   if (losses.length === 0) {
     return {
+      source,
+      maeCoverage,
       totalTrades: trades.length,
       lossCount: 0,
       percentiles: { p50: 0, p75: 0, p90: 0, p95: 0, p99: 0, worst: 0 },
       cutRates: Object.fromEntries(capsToReport.map((c) => [c, 0])),
       recommendedSlPct: null,
       verdict: 'incompatible',
-      reasoning: 'No losses in the trade log — cannot calibrate SL. Need at least 10 historical losses for reliable analysis.',
+      reasoning: 'No losses / adverse excursions in the trade log — cannot calibrate SL. Need at least 10 historical samples for reliable analysis.',
     };
   }
 
@@ -185,6 +222,8 @@ export function analyzeSlDistribution(
   }
 
   return {
+    source,
+    maeCoverage,
     totalTrades: trades.length,
     lossCount: losses.length,
     percentiles: { p50, p75, p90, p95, p99, worst },
@@ -197,23 +236,31 @@ export function analyzeSlDistribution(
 
 /** Format a SlDistribution as a stdout-friendly report. */
 export function formatSlDistribution(d: SlDistribution): string {
-  const { percentiles, cutRates, totalTrades, lossCount, verdict, reasoning } = d;
+  const { percentiles, cutRates, totalTrades, lossCount, verdict, reasoning, source, maeCoverage } = d;
   const verdictBadge = verdict === 'compatible' ? '✅ COMPATIBLE'
     : verdict === 'borderline' ? '⚠ BORDERLINE'
     : '❌ INCOMPATIBLE';
   const recStr = d.recommendedSlPct == null
     ? '— (disable strategy)'
     : `${(d.recommendedSlPct * 100).toFixed(1)}%`;
+  const sourceLabel =
+    source === 'mae'
+      ? 'MAE (max adverse excursion — accurate)'
+      : source === 'realized'
+        ? '⚠ realized loss only — UNDERESTIMATES cut rates; run scripts/backfill-mae.ts first'
+        : `mixed (${(maeCoverage * 100).toFixed(0)}% MAE, rest realized)`;
+  const lossLabel = source === 'realized' ? 'losing' : 'underwater at some point';
   const cutLines = Object.entries(cutRates)
-    .map(([cap, rate]) => `  ${cap.padStart(2, ' ')}% SL → cuts ${(rate * 100).toFixed(1).padStart(5, ' ')}% of losses`)
+    .map(([cap, rate]) => `  ${cap.padStart(2, ' ')}% SL → cuts ${(rate * 100).toFixed(1).padStart(5, ' ')}% of ${lossLabel} trades`)
     .join('\n');
   return (
     `\n` +
     `${verdictBadge}  recommended slPct = ${recStr}\n` +
     `\n` +
-    `${totalTrades} trades total, ${lossCount} losing\n` +
+    `Data source: ${sourceLabel}\n` +
+    `${totalTrades} trades total, ${lossCount} ${lossLabel}\n` +
     `\n` +
-    `Loss percentiles (% from entry):\n` +
+    `Adverse-excursion percentiles (% from entry):\n` +
     `  p50   = ${percentiles.p50.toFixed(2)}%\n` +
     `  p75   = ${percentiles.p75.toFixed(2)}%\n` +
     `  p90   = ${percentiles.p90.toFixed(2)}%\n` +

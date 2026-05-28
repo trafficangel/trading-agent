@@ -131,7 +131,11 @@
       "exitAt": 1761054300000,
       "exitPrice": 1072.97,
       "netPnlUsdt": 9.15,
-      "cumulativePnlUsdt": 9.15
+      "cumulativePnlUsdt": 9.15,
+      "maePct": 5.59,
+      "maePrice": 1142.6,
+      "maeAt": 1760941200000,
+      "realizedPct": 0.85
     },
     {
       "num": 2,
@@ -141,7 +145,11 @@
       "exitAt": 1761078600000,
       "exitPrice": 1082.5,
       "netPnlUsdt": -2.77,
-      "cumulativePnlUsdt": 6.38
+      "cumulativePnlUsdt": 6.38,
+      "maePct": 0.7,
+      "maePrice": 1077.7,
+      "maeAt": 1761077700000,
+      "realizedPct": -0.26
     },
     {
       "num": 3,
@@ -151,7 +159,11 @@
       "exitAt": 1761132600000,
       "exitPrice": 1071.91,
       "netPnlUsdt": 10.59,
-      "cumulativePnlUsdt": 16.97
+      "cumulativePnlUsdt": 16.97,
+      "maePct": 0.22,
+      "maePrice": 1084.9,
+      "maeAt": 1761079200000,
+      "realizedPct": 0.98
     },
     {
       "num": 4,
@@ -161,7 +173,11 @@
       "exitAt": 1761255900000,
       "exitPrice": 1114.76,
       "netPnlUsdt": 42.85,
-      "cumulativePnlUsdt": 59.82
+      "cumulativePnlUsdt": 59.82,
+      "maePct": 1.86,
+      "maePrice": 1052,
+      "maeAt": 1761168600000,
+      "realizedPct": 4
     },
     {
       "num": 5,
@@ -171,7 +187,11 @@
       "exitAt": 1761362100000,
       "exitPrice": 1115.565,
       "netPnlUsdt": 3.19,
-      "cumulativePnlUsdt": 63.02
+      "cumulativePnlUsdt": 63.02,
+      "maePct": 0.19,
+      "maePrice": 1120.9,
+      "maeAt": 1761314100000,
+      "realizedPct": 0.29
     },
     {
       "num": 6,
@@ -181,7 +201,11 @@
       "exitAt": 1761498000000,
       "exitPrice": 1125.185,
       "netPnlUsdt": 9.62,
-      "cumulativePnlUsdt": 72.64
+      "cumulativePnlUsdt": 72.64,
+      "maePct": 0.96,
+      "maePrice": 1104.8,
+      "maeAt": 1761404700000,
+      "realizedPct": 0.86
     },
     {
       "num": 7,
@@ -191,7 +215,11 @@
       "exitAt": 1761656400000,
       "exitPrice": 1140.41,
       "netPnlUsdt": -15.22,
-      "cumulativePnlUsdt": 57.41
+      "cumulativePnlUsdt": 57.41,
+      "maePct": 5.09,
+      "maePrice": 1182.5,
+      "maeAt": 1761566400000,
+      "realizedPct": -1.35
     },
     {
       "num": 8,
@@ -201,7 +229,11 @@
       "exitAt": 1761763500000,
       "exitPrice": 1090.81,
       "netPnlUsdt": -49.6,
-      "cumulativePnlUsdt": 7.81
+      "cumulativePnlUsdt": 7.81,
+      "maePct": 6.03,
+      "maePrice": 1071.7,
+      "maeAt": 1761684600000,
+      "realizedPct": -4.35
     },
     {
       "num": 9,
@@ -211,7 +243,11 @@
       "exitAt": 1761873300000,
       "exitPrice": 1086.62,
       "netPnlUsdt": 4.19,
-      "cumulativePnlUsdt": 12
+      "cumulativePnlUsdt": 12,
+      "maePct": 3.57,
+      "maePrice": 1129.8,
+      "maeAt": 1761819600000,
+      "realizedPct": 0.38
     },
     {
       "num": 10,
@@ -221,7 +257,11 @@
       "exitAt": 1761930000000,
       "exitPrice": 1074.06,
       "netPnlUsdt": -12.56,
-      "cumulativePnlUsdt": -0.56
+      "cumulativePnlUsdt": -0.56,
+      "maePct": 1.43,
+      "maePrice": 1071.1,
+      "maeAt": 1761930000000,
+      "realizedPct": -1.16
     },
     {
       "num": 11,
@@ -231,7 +271,11 @@
       "exitAt": 1762340400000,
       "exitPrice": 937.45,
       "netPnlUsdt": 136.61,
-      "cumulativePnlUsdt": 136.05
+      "cumulativePnlUsdt": 136.05,
+      "maePct": 2.09,
+      "maePrice": 1096.5,
+      "maeAt": 1762029000000,
+      "realizedPct": 12.72
     },
     {
       "num": 12,
@@ -241,7 +285,11 @@
       "exitAt": 1762407900000,
       "exitPrice": 951.115,
       "netPnlUsdt": 0.76,
-      "cumulativePnlUsdt": 136.81
+      "cumulativePnlUsdt": 136.81,
+      "maePct": 1.37,
+      "maePrice": 964.9,
+      "maeAt": 1762401900000,
+      "realizedPct": 0.08
     },
     {
       "num": 13,
@@ -251,7 +299,11 @@
       "exitAt": 1762815600000,
       "exitPrice": 994.99,
       "netPnlUsdt": -46.6,
-      "cumulativePnlUsdt": 90.2
+      "cumulativePnlUsdt": 90.2,
+      "maePct": 7.46,
+      "maePrice": 1019.1,
+      "maeAt": 1762735800000,
+      "realizedPct": -4.91
     },
     {
       "num": 14,
@@ -261,7 +313,11 @@
       "exitAt": 1762837200000,
       "exitPrice": 988.74,
       "netPnlUsdt": -6.25,
-      "cumulativePnlUsdt": 83.95
+      "cumulativePnlUsdt": 83.95,
+      "maePct": 1.13,
+      "maePrice": 983.7,
+      "maeAt": 1762837500000,
+      "realizedPct": -0.63
     },
     {
       "num": 15,
@@ -271,7 +327,11 @@
       "exitAt": 1762937100000,
       "exitPrice": 962.7,
       "netPnlUsdt": 26.04,
-      "cumulativePnlUsdt": 109.99
+      "cumulativePnlUsdt": 109.99,
+      "maePct": 0.06,
+      "maePrice": 989.3,
+      "maeAt": 1762836900000,
+      "realizedPct": 2.63
     },
     {
       "num": 16,
@@ -281,7 +341,11 @@
       "exitAt": 1763385300000,
       "exitPrice": 925.595,
       "netPnlUsdt": -36.17,
-      "cumulativePnlUsdt": 73.82
+      "cumulativePnlUsdt": 73.82,
+      "maePct": 7.73,
+      "maePrice": 887.4,
+      "maeAt": 1763124000000,
+      "realizedPct": -3.76
     },
     {
       "num": 17,
@@ -291,7 +355,11 @@
       "exitAt": 1763434800000,
       "exitPrice": 903.265,
       "netPnlUsdt": 22.33,
-      "cumulativePnlUsdt": 96.15
+      "cumulativePnlUsdt": 96.15,
+      "maePct": 0.89,
+      "maePrice": 933.8,
+      "maeAt": 1763390100000,
+      "realizedPct": 2.41
     },
     {
       "num": 18,
@@ -301,7 +369,11 @@
       "exitAt": 1763526600000,
       "exitPrice": 929.185,
       "netPnlUsdt": 12.91,
-      "cumulativePnlUsdt": 109.06
+      "cumulativePnlUsdt": 109.06,
+      "maePct": 0.65,
+      "maePrice": 910.3,
+      "maeAt": 1763472900000,
+      "realizedPct": 1.41
     },
     {
       "num": 19,
@@ -311,7 +383,11 @@
       "exitAt": 1763643600000,
       "exitPrice": 903.445,
       "netPnlUsdt": 25.74,
-      "cumulativePnlUsdt": 134.81
+      "cumulativePnlUsdt": 134.81,
+      "maePct": 0.51,
+      "maePrice": 933.9,
+      "maeAt": 1763539500000,
+      "realizedPct": 2.77
     },
     {
       "num": 20,
@@ -321,7 +397,11 @@
       "exitAt": 1764057600000,
       "exitPrice": 855.815,
       "netPnlUsdt": 16.54,
-      "cumulativePnlUsdt": 151.34
+      "cumulativePnlUsdt": 151.34,
+      "maePct": 3.09,
+      "maePrice": 813.3,
+      "maeAt": 1763803200000,
+      "realizedPct": 1.97
     },
     {
       "num": 21,
@@ -331,7 +411,11 @@
       "exitAt": 1764088200000,
       "exitPrice": 853.605,
       "netPnlUsdt": 2.21,
-      "cumulativePnlUsdt": 153.56
+      "cumulativePnlUsdt": 153.56,
+      "maePct": 0.4,
+      "maePrice": 859.2,
+      "maeAt": 1764058800000,
+      "realizedPct": 0.26
     },
     {
       "num": 22,
@@ -341,7 +425,11 @@
       "exitAt": 1764248400000,
       "exitPrice": 885.315,
       "netPnlUsdt": 17.89,
-      "cumulativePnlUsdt": 171.45
+      "cumulativePnlUsdt": 171.45,
+      "maePct": 1.88,
+      "maePrice": 851.1,
+      "maeAt": 1764159300000,
+      "realizedPct": 2.06
     },
     {
       "num": 23,
@@ -351,7 +439,11 @@
       "exitAt": 1764320400000,
       "exitPrice": 892.515,
       "netPnlUsdt": -7.2,
-      "cumulativePnlUsdt": 164.25
+      "cumulativePnlUsdt": 164.25,
+      "maePct": 1.57,
+      "maePrice": 899.2,
+      "maeAt": 1764291600000,
+      "realizedPct": -0.81
     },
     {
       "num": 24,
@@ -361,7 +453,11 @@
       "exitAt": 1764539100000,
       "exitPrice": 887.45,
       "netPnlUsdt": -5.07,
-      "cumulativePnlUsdt": 159.19
+      "cumulativePnlUsdt": 159.19,
+      "maePct": 2.8,
+      "maePrice": 867.5,
+      "maeAt": 1764441000000,
+      "realizedPct": -0.57
     },
     {
       "num": 25,
@@ -371,7 +467,11 @@
       "exitAt": 1764612900000,
       "exitPrice": 817.205,
       "netPnlUsdt": 70.25,
-      "cumulativePnlUsdt": 229.43
+      "cumulativePnlUsdt": 229.43,
+      "maePct": 0.24,
+      "maePrice": 889.6,
+      "maeAt": 1764540600000,
+      "realizedPct": 7.92
     },
     {
       "num": 26,
@@ -381,7 +481,11 @@
       "exitAt": 1764773100000,
       "exitPrice": 904.365,
       "netPnlUsdt": 78.57,
-      "cumulativePnlUsdt": 308
+      "cumulativePnlUsdt": 308,
+      "maePct": 0.73,
+      "maePrice": 819.8,
+      "maeAt": 1764645900000,
+      "realizedPct": 9.51
     },
     {
       "num": 27,
@@ -391,7 +495,11 @@
       "exitAt": 1764869400000,
       "exitPrice": 904.55,
       "netPnlUsdt": 2.14,
-      "cumulativePnlUsdt": 310.14
+      "cumulativePnlUsdt": 310.14,
+      "maePct": 1.02,
+      "maePrice": 915.9,
+      "maeAt": 1764862500000,
+      "realizedPct": 0.24
     },
     {
       "num": 28,
@@ -401,7 +509,11 @@
       "exitAt": 1764947700000,
       "exitPrice": 895.035,
       "netPnlUsdt": 7.35,
-      "cumulativePnlUsdt": 317.49
+      "cumulativePnlUsdt": 317.49,
+      "maePct": 0.57,
+      "maePrice": 907.5,
+      "maeAt": 1764918300000,
+      "realizedPct": 0.81
     },
     {
       "num": 29,
@@ -411,7 +523,11 @@
       "exitAt": 1765093500000,
       "exitPrice": 891.435,
       "netPnlUsdt": -3.6,
-      "cumulativePnlUsdt": 313.89
+      "cumulativePnlUsdt": 313.89,
+      "maePct": 2.82,
+      "maePrice": 869.8,
+      "maeAt": 1764952800000,
+      "realizedPct": -0.4
     },
     {
       "num": 30,
@@ -421,7 +537,11 @@
       "exitAt": 1765231200000,
       "exitPrice": 904.305,
       "netPnlUsdt": -12.87,
-      "cumulativePnlUsdt": 301.02
+      "cumulativePnlUsdt": 301.02,
+      "maePct": 2.4,
+      "maePrice": 912.8,
+      "maeAt": 1765204200000,
+      "realizedPct": -1.44
     },
     {
       "num": 31,
@@ -431,7 +551,11 @@
       "exitAt": 1765553400000,
       "exitPrice": 881.925,
       "netPnlUsdt": -22.38,
-      "cumulativePnlUsdt": 278.64
+      "cumulativePnlUsdt": 278.64,
+      "maePct": 5.04,
+      "maePrice": 858.7,
+      "maeAt": 1765464900000,
+      "realizedPct": -2.47
     },
     {
       "num": 32,
@@ -441,7 +565,11 @@
       "exitAt": 1765865700000,
       "exitPrice": 860.385,
       "netPnlUsdt": 21.54,
-      "cumulativePnlUsdt": 300.18
+      "cumulativePnlUsdt": 300.18,
+      "maePct": 2.53,
+      "maePrice": 904.2,
+      "maeAt": 1765642200000,
+      "realizedPct": 2.44
     },
     {
       "num": 33,
@@ -451,7 +579,11 @@
       "exitAt": 1765937700000,
       "exitPrice": 867.44,
       "netPnlUsdt": 7.05,
-      "cumulativePnlUsdt": 307.24
+      "cumulativePnlUsdt": 307.24,
+      "maePct": 0.45,
+      "maePrice": 856.5,
+      "maeAt": 1765874100000,
+      "realizedPct": 0.82
     },
     {
       "num": 34,
@@ -461,7 +593,11 @@
       "exitAt": 1765962000000,
       "exitPrice": 862.6,
       "netPnlUsdt": 4.84,
-      "cumulativePnlUsdt": 312.07
+      "cumulativePnlUsdt": 312.07,
+      "maePct": 0.38,
+      "maePrice": 870.7,
+      "maeAt": 1765957200000,
+      "realizedPct": 0.56
     },
     {
       "num": 35,
@@ -471,7 +607,11 @@
       "exitAt": 1766226600000,
       "exitPrice": 851.355,
       "netPnlUsdt": -17.9,
-      "cumulativePnlUsdt": 294.18
+      "cumulativePnlUsdt": 294.18,
+      "maePct": 5.94,
+      "maePrice": 817.6,
+      "maeAt": 1766087400000,
+      "realizedPct": -2.06
     },
     {
       "num": 36,
@@ -481,7 +621,11 @@
       "exitAt": 1766508300000,
       "exitPrice": 848.12,
       "netPnlUsdt": 3.23,
-      "cumulativePnlUsdt": 297.41
+      "cumulativePnlUsdt": 297.41,
+      "maePct": 2.28,
+      "maePrice": 870.8,
+      "maeAt": 1766406600000,
+      "realizedPct": 0.38
     },
     {
       "num": 37,
@@ -491,7 +635,11 @@
       "exitAt": 1766716200000,
       "exitPrice": 840.995,
       "netPnlUsdt": 2.6,
-      "cumulativePnlUsdt": 300.01
+      "cumulativePnlUsdt": 300.01,
+      "maePct": 0.07,
+      "maePrice": 844.2,
+      "maeAt": 1766677500000,
+      "realizedPct": 0.31
     },
     {
       "num": 38,
@@ -501,7 +649,11 @@
       "exitAt": 1766761200000,
       "exitPrice": 830.225,
       "netPnlUsdt": -10.77,
-      "cumulativePnlUsdt": 289.24
+      "cumulativePnlUsdt": 289.24,
+      "maePct": 2.44,
+      "maePrice": 820.5,
+      "maeAt": 1766761200000,
+      "realizedPct": -1.28
     },
     {
       "num": 39,
@@ -511,7 +663,11 @@
       "exitAt": 1766782800000,
       "exitPrice": 836.455,
       "netPnlUsdt": -6.23,
-      "cumulativePnlUsdt": 283.01
+      "cumulativePnlUsdt": 283.01,
+      "maePct": 0.9,
+      "maePrice": 837.7,
+      "maeAt": 1766781900000,
+      "realizedPct": -0.75
     },
     {
       "num": 40,
@@ -521,7 +677,11 @@
       "exitAt": 1766885400000,
       "exitPrice": 841.835,
       "netPnlUsdt": 5.38,
-      "cumulativePnlUsdt": 288.39
+      "cumulativePnlUsdt": 288.39,
+      "maePct": 0.37,
+      "maePrice": 833.4,
+      "maeAt": 1766787000000,
+      "realizedPct": 0.64
     },
     {
       "num": 41,
@@ -531,7 +691,11 @@
       "exitAt": 1767157200000,
       "exitPrice": 861.225,
       "netPnlUsdt": 6.63,
-      "cumulativePnlUsdt": 295.02
+      "cumulativePnlUsdt": 295.02,
+      "maePct": 0.26,
+      "maePrice": 852.4,
+      "maeAt": 1767078000000,
+      "realizedPct": 0.78
     },
     {
       "num": 42,
@@ -541,7 +705,11 @@
       "exitAt": 1767302100000,
       "exitPrice": 862.295,
       "netPnlUsdt": 2.35,
-      "cumulativePnlUsdt": 297.37
+      "cumulativePnlUsdt": 297.37,
+      "maePct": 1.14,
+      "maePrice": 874.5,
+      "maeAt": 1767233100000,
+      "realizedPct": 0.27
     },
     {
       "num": 43,
@@ -551,7 +719,11 @@
       "exitAt": 1767322800000,
       "exitPrice": 863.18,
       "netPnlUsdt": 0.89,
-      "cumulativePnlUsdt": 298.25
+      "cumulativePnlUsdt": 298.25,
+      "maePct": 0.39,
+      "maePrice": 858.9,
+      "maeAt": 1767320700000,
+      "realizedPct": 0.1
     },
     {
       "num": 44,
@@ -561,7 +733,11 @@
       "exitAt": 1767587400000,
       "exitPrice": 892.195,
       "netPnlUsdt": 27.65,
-      "cumulativePnlUsdt": 325.9
+      "cumulativePnlUsdt": 325.9,
+      "maePct": 0.22,
+      "maePrice": 862.6,
+      "maeAt": 1767323400000,
+      "realizedPct": 3.2
     },
     {
       "num": 45,
@@ -571,7 +747,11 @@
       "exitAt": 1767608100000,
       "exitPrice": 901.865,
       "netPnlUsdt": -9.67,
-      "cumulativePnlUsdt": 316.23
+      "cumulativePnlUsdt": 316.23,
+      "maePct": 1.19,
+      "maePrice": 902.8,
+      "maeAt": 1767608400000,
+      "realizedPct": -1.08
     },
     {
       "num": 46,
@@ -581,7 +761,11 @@
       "exitAt": 1767663000000,
       "exitPrice": 911,
       "netPnlUsdt": 9.13,
-      "cumulativePnlUsdt": 325.37
+      "cumulativePnlUsdt": 325.37,
+      "maePct": 0.25,
+      "maePrice": 899.6,
+      "maeAt": 1767607800000,
+      "realizedPct": 1.01
     },
     {
       "num": 47,
@@ -591,7 +775,11 @@
       "exitAt": 1767839400000,
       "exitPrice": 896.99,
       "netPnlUsdt": 13.19,
-      "cumulativePnlUsdt": 338.56
+      "cumulativePnlUsdt": 338.56,
+      "maePct": 0.29,
+      "maePrice": 912.8,
+      "maeAt": 1767784200000,
+      "realizedPct": 1.45
     },
     {
       "num": 48,
@@ -601,7 +789,11 @@
       "exitAt": 1767946500000,
       "exitPrice": 893.195,
       "netPnlUsdt": 3.05,
-      "cumulativePnlUsdt": 341.61
+      "cumulativePnlUsdt": 341.61,
+      "maePct": 0.62,
+      "maePrice": 884.6,
+      "maeAt": 1767903900000,
+      "realizedPct": 0.34
     },
     {
       "num": 49,
@@ -611,7 +803,11 @@
       "exitAt": 1768371300000,
       "exitPrice": 939.305,
       "netPnlUsdt": 26.09,
-      "cumulativePnlUsdt": 367.7
+      "cumulativePnlUsdt": 367.7,
+      "maePct": 2.2,
+      "maePrice": 893.1,
+      "maeAt": 1768227600000,
+      "realizedPct": 2.86
     },
     {
       "num": 50,
@@ -621,7 +817,11 @@
       "exitAt": 1768467600000,
       "exitPrice": 942.69,
       "netPnlUsdt": -3.38,
-      "cumulativePnlUsdt": 364.32
+      "cumulativePnlUsdt": 364.32,
+      "maePct": 1.11,
+      "maePrice": 949.7,
+      "maeAt": 1768434600000,
+      "realizedPct": -0.36
     },
     {
       "num": 51,
@@ -631,7 +831,11 @@
       "exitAt": 1768690800000,
       "exitPrice": 946.69,
       "netPnlUsdt": 4,
-      "cumulativePnlUsdt": 368.32
+      "cumulativePnlUsdt": 368.32,
+      "maePct": 2.14,
+      "maePrice": 922.5,
+      "maeAt": 1768578300000,
+      "realizedPct": 0.42
     },
     {
       "num": 52,
@@ -641,7 +845,11 @@
       "exitAt": 1769001300000,
       "exitPrice": 874.89,
       "netPnlUsdt": 71.8,
-      "cumulativePnlUsdt": 440.12
+      "cumulativePnlUsdt": 440.12,
+      "maePct": 0.68,
+      "maePrice": 953.1,
+      "maeAt": 1768768200000,
+      "realizedPct": 7.58
     },
     {
       "num": 53,
@@ -651,7 +859,11 @@
       "exitAt": 1769132700000,
       "exitPrice": 891.1,
       "netPnlUsdt": 4.13,
-      "cumulativePnlUsdt": 444.24
+      "cumulativePnlUsdt": 444.24,
+      "maePct": 1.07,
+      "maePrice": 877.5,
+      "maeAt": 1769095500000,
+      "realizedPct": 0.47
     },
     {
       "num": 54,
@@ -661,7 +873,11 @@
       "exitAt": 1769442300000,
       "exitPrice": 870.29,
       "netPnlUsdt": 19.89,
-      "cumulativePnlUsdt": 464.13
+      "cumulativePnlUsdt": 464.13,
+      "maePct": 0.41,
+      "maePrice": 893.8,
+      "maeAt": 1769225100000,
+      "realizedPct": 2.23
     },
     {
       "num": 55,
@@ -671,7 +887,11 @@
       "exitAt": 1769799600000,
       "exitPrice": 850.35,
       "netPnlUsdt": 47.9,
-      "cumulativePnlUsdt": 512.03
+      "cumulativePnlUsdt": 512.03,
+      "maePct": 0.99,
+      "maePrice": 907.1,
+      "maeAt": 1769631900000,
+      "realizedPct": 5.33
     },
     {
       "num": 56,
@@ -681,7 +901,11 @@
       "exitAt": 1769845500000,
       "exitPrice": 847.09,
       "netPnlUsdt": -6.79,
-      "cumulativePnlUsdt": 505.24
+      "cumulativePnlUsdt": 505.24,
+      "maePct": 1.03,
+      "maePrice": 845.1,
+      "maeAt": 1769844900000,
+      "realizedPct": -0.8
     },
     {
       "num": 57,
@@ -691,7 +915,11 @@
       "exitAt": 1769992200000,
       "exitPrice": 768.1,
       "netPnlUsdt": 78.99,
-      "cumulativePnlUsdt": 584.23
+      "cumulativePnlUsdt": 584.23,
+      "maePct": 0.06,
+      "maePrice": 847.6,
+      "maeAt": 1769845500000,
+      "realizedPct": 9.32
     },
     {
       "num": 58,
@@ -701,7 +929,11 @@
       "exitAt": 1770084900000,
       "exitPrice": 769.72,
       "netPnlUsdt": 1.62,
-      "cumulativePnlUsdt": 585.85
+      "cumulativePnlUsdt": 585.85,
+      "maePct": 5.22,
+      "maePrice": 728,
+      "maeAt": 1770003300000,
+      "realizedPct": 0.21
     },
     {
       "num": 59,
@@ -711,7 +943,11 @@
       "exitAt": 1770162300000,
       "exitPrice": 756.39,
       "netPnlUsdt": 7.85,
-      "cumulativePnlUsdt": 593.7
+      "cumulativePnlUsdt": 593.7,
+      "maePct": 2.49,
+      "maePrice": 783.3,
+      "maeAt": 1770104700000,
+      "realizedPct": 1.03
     },
     {
       "num": 60,
@@ -721,7 +957,11 @@
       "exitAt": 1770543900000,
       "exitPrice": 640.845,
       "netPnlUsdt": 108.31,
-      "cumulativePnlUsdt": 702.01
+      "cumulativePnlUsdt": 702.01,
+      "maePct": 0.51,
+      "maePrice": 753,
+      "maeAt": 1770204900000,
+      "realizedPct": 14.46
     },
     {
       "num": 61,
@@ -731,7 +971,11 @@
       "exitAt": 1770694200000,
       "exitPrice": 633.29,
       "netPnlUsdt": 0.1,
-      "cumulativePnlUsdt": 702.12
+      "cumulativePnlUsdt": 702.12,
+      "maePct": 0.83,
+      "maePrice": 627.9,
+      "maeAt": 1770655200000,
+      "realizedPct": 0.02
     },
     {
       "num": 62,
@@ -741,7 +985,11 @@
       "exitAt": 1770779700000,
       "exitPrice": 618.05,
       "netPnlUsdt": 15.24,
-      "cumulativePnlUsdt": 717.36
+      "cumulativePnlUsdt": 717.36,
+      "maePct": 0.92,
+      "maePrice": 639.1,
+      "maeAt": 1770701700000,
+      "realizedPct": 2.41
     },
     {
       "num": 63,
@@ -751,7 +999,11 @@
       "exitAt": 1770994800000,
       "exitPrice": 602.63,
       "netPnlUsdt": 4.54,
-      "cumulativePnlUsdt": 721.89
+      "cumulativePnlUsdt": 721.89,
+      "maePct": 0.12,
+      "maePrice": 607.9,
+      "maeAt": 1770956700000,
+      "realizedPct": 0.75
     },
     {
       "num": 64,
@@ -761,7 +1013,11 @@
       "exitAt": 1771094700000,
       "exitPrice": 631.305,
       "netPnlUsdt": 28.68,
-      "cumulativePnlUsdt": 750.57
+      "cumulativePnlUsdt": 750.57,
+      "maePct": 0.4,
+      "maePrice": 600.2,
+      "maeAt": 1770995100000,
+      "realizedPct": 4.76
     },
     {
       "num": 65,
@@ -771,7 +1027,11 @@
       "exitAt": 1771233300000,
       "exitPrice": 616.65,
       "netPnlUsdt": 13.45,
-      "cumulativePnlUsdt": 764.02
+      "cumulativePnlUsdt": 764.02,
+      "maePct": 1.9,
+      "maePrice": 642.1,
+      "maeAt": 1771140900000,
+      "realizedPct": 2.13
     },
     {
       "num": 66,
@@ -781,7 +1041,11 @@
       "exitAt": 1771346700000,
       "exitPrice": 620.34,
       "netPnlUsdt": 3.69,
-      "cumulativePnlUsdt": 767.71
+      "cumulativePnlUsdt": 767.71,
+      "maePct": 2.05,
+      "maePrice": 604,
+      "maeAt": 1771256100000,
+      "realizedPct": 0.6
     },
     {
       "num": 67,
@@ -791,7 +1055,11 @@
       "exitAt": 1771413300000,
       "exitPrice": 615.675,
       "netPnlUsdt": -6.81,
-      "cumulativePnlUsdt": 760.9
+      "cumulativePnlUsdt": 760.9,
+      "maePct": 1.56,
+      "maePrice": 612.8,
+      "maeAt": 1771378200000,
+      "realizedPct": -1.09
     },
     {
       "num": 68,
@@ -801,7 +1069,11 @@
       "exitAt": 1771587900000,
       "exitPrice": 608.83,
       "netPnlUsdt": 6.84,
-      "cumulativePnlUsdt": 767.75
+      "cumulativePnlUsdt": 767.75,
+      "maePct": 1.14,
+      "maePrice": 622.7,
+      "maeAt": 1771429200000,
+      "realizedPct": 1.11
     },
     {
       "num": 69,
@@ -811,7 +1083,11 @@
       "exitAt": 1771764300000,
       "exitPrice": 620.83,
       "netPnlUsdt": 1.26,
-      "cumulativePnlUsdt": 769.01
+      "cumulativePnlUsdt": 769.01,
+      "maePct": 0.43,
+      "maePrice": 624.8,
+      "maeAt": 1771761300000,
+      "realizedPct": 0.2
     },
     {
       "num": 70,
@@ -821,7 +1097,11 @@
       "exitAt": 1771958700000,
       "exitPrice": 588.57,
       "netPnlUsdt": 7.53,
-      "cumulativePnlUsdt": 776.54
+      "cumulativePnlUsdt": 776.54,
+      "maePct": 1.06,
+      "maePrice": 602.4,
+      "maeAt": 1771894500000,
+      "realizedPct": 1.26
     },
     {
       "num": 71,
@@ -831,7 +1111,11 @@
       "exitAt": 1772159400000,
       "exitPrice": 628.52,
       "netPnlUsdt": -8.03,
-      "cumulativePnlUsdt": 768.51
+      "cumulativePnlUsdt": 768.51,
+      "maePct": 1.55,
+      "maePrice": 630.1,
+      "maeAt": 1772159700000,
+      "realizedPct": -1.29
     },
     {
       "num": 72,
@@ -841,7 +1125,11 @@
       "exitAt": 1772186400000,
       "exitPrice": 624.32,
       "netPnlUsdt": -4.2,
-      "cumulativePnlUsdt": 764.31
+      "cumulativePnlUsdt": 764.31,
+      "maePct": 1.05,
+      "maePrice": 621.9,
+      "maeAt": 1772186700000,
+      "realizedPct": -0.67
     },
     {
       "num": 73,
@@ -851,7 +1139,11 @@
       "exitAt": 1772287200000,
       "exitPrice": 603.2,
       "netPnlUsdt": 21.12,
-      "cumulativePnlUsdt": 785.43
+      "cumulativePnlUsdt": 785.43,
+      "maePct": 0.09,
+      "maePrice": 624.9,
+      "maeAt": 1772186100000,
+      "realizedPct": 3.38
     },
     {
       "num": 74,
@@ -861,7 +1153,11 @@
       "exitAt": 1772359200000,
       "exitPrice": 620.02,
       "netPnlUsdt": 16.82,
-      "cumulativePnlUsdt": 802.25
+      "cumulativePnlUsdt": 802.25,
+      "maePct": 0.9,
+      "maePrice": 597.8,
+      "maeAt": 1772291400000,
+      "realizedPct": 2.79
     },
     {
       "num": 75,
@@ -871,7 +1167,11 @@
       "exitAt": 1772675100000,
       "exitPrice": 654.71,
       "netPnlUsdt": 19.32,
-      "cumulativePnlUsdt": 821.57
+      "cumulativePnlUsdt": 821.57,
+      "maePct": 0.28,
+      "maePrice": 633.6,
+      "maeAt": 1772607300000,
+      "realizedPct": 3.04
     },
     {
       "num": 76,
@@ -881,7 +1181,11 @@
       "exitAt": 1772876700000,
       "exitPrice": 629.88,
       "netPnlUsdt": 24.83,
-      "cumulativePnlUsdt": 846.4
+      "cumulativePnlUsdt": 846.4,
+      "maePct": 1.57,
+      "maePrice": 665,
+      "maeAt": 1772707800000,
+      "realizedPct": 3.79
     },
     {
       "num": 77,
@@ -891,7 +1195,11 @@
       "exitAt": 1773115200000,
       "exitPrice": 639.77,
       "netPnlUsdt": 9.89,
-      "cumulativePnlUsdt": 856.29
+      "cumulativePnlUsdt": 856.29,
+      "maePct": 3.57,
+      "maePrice": 607.4,
+      "maeAt": 1773007500000,
+      "realizedPct": 1.57
     },
     {
       "num": 78,
@@ -901,7 +1209,11 @@
       "exitAt": 1773688500000,
       "exitPrice": 680.18,
       "netPnlUsdt": -38.54,
-      "cumulativePnlUsdt": 817.75
+      "cumulativePnlUsdt": 817.75,
+      "maePct": 7.13,
+      "maePrice": 687.4,
+      "maeAt": 1773636900000,
+      "realizedPct": -6.01
     },
     {
       "num": 79,
@@ -911,7 +1223,11 @@
       "exitAt": 1774492200000,
       "exitPrice": 644.79,
       "netPnlUsdt": -35.39,
-      "cumulativePnlUsdt": 782.36
+      "cumulativePnlUsdt": 782.36,
+      "maePct": 8.89,
+      "maePrice": 619.7,
+      "maeAt": 1774249500000,
+      "realizedPct": -5.2
     },
     {
       "num": 80,
@@ -921,7 +1237,11 @@
       "exitAt": 1774556100000,
       "exitPrice": 630.015,
       "netPnlUsdt": 14.78,
-      "cumulativePnlUsdt": 797.14
+      "cumulativePnlUsdt": 797.14,
+      "maePct": 0,
+      "maePrice": 644.79,
+      "maeAt": 1774492200000,
+      "realizedPct": 2.29
     },
     {
       "num": 81,
@@ -931,7 +1251,11 @@
       "exitAt": 1774764900000,
       "exitPrice": 614.595,
       "netPnlUsdt": 0.65,
-      "cumulativePnlUsdt": 797.78
+      "cumulativePnlUsdt": 797.78,
+      "maePct": 0.74,
+      "maePrice": 609.4,
+      "maeAt": 1774743600000,
+      "realizedPct": 0.11
     },
     {
       "num": 82,
@@ -941,7 +1265,11 @@
       "exitAt": 1774818000000,
       "exitPrice": 609.47,
       "netPnlUsdt": 1.03,
-      "cumulativePnlUsdt": 798.82
+      "cumulativePnlUsdt": 798.82,
+      "maePct": 0.24,
+      "maePrice": 612,
+      "maeAt": 1774793400000,
+      "realizedPct": 0.17
     },
     {
       "num": 83,
@@ -951,7 +1279,11 @@
       "exitAt": 1774920600000,
       "exitPrice": 615.72,
       "netPnlUsdt": -1.9,
-      "cumulativePnlUsdt": 796.92
+      "cumulativePnlUsdt": 796.92,
+      "maePct": 0.89,
+      "maePrice": 619.3,
+      "maeAt": 1774920600000,
+      "realizedPct": -0.31
     },
     {
       "num": 84,
@@ -961,7 +1293,11 @@
       "exitAt": 1775029500000,
       "exitPrice": 617.41,
       "netPnlUsdt": 1.69,
-      "cumulativePnlUsdt": 798.61
+      "cumulativePnlUsdt": 798.61,
+      "maePct": 2.8,
+      "maePrice": 598.5,
+      "maeAt": 1774950900000,
+      "realizedPct": 0.27
     },
     {
       "num": 85,
@@ -971,7 +1307,11 @@
       "exitAt": 1775361600000,
       "exitPrice": 593.42,
       "netPnlUsdt": 17.79,
-      "cumulativePnlUsdt": 816.4
+      "cumulativePnlUsdt": 816.4,
+      "maePct": 1.32,
+      "maePrice": 619.3,
+      "maeAt": 1775062800000,
+      "realizedPct": 2.91
     },
     {
       "num": 86,
@@ -981,7 +1321,11 @@
       "exitAt": 1775749500000,
       "exitPrice": 604.94,
       "netPnlUsdt": -16.24,
-      "cumulativePnlUsdt": 800.16
+      "cumulativePnlUsdt": 800.16,
+      "maePct": 6.13,
+      "maePrice": 624.8,
+      "maeAt": 1775604600000,
+      "realizedPct": -2.76
     },
     {
       "num": 87,
@@ -991,7 +1335,11 @@
       "exitAt": 1775862900000,
       "exitPrice": 605.95,
       "netPnlUsdt": 1.01,
-      "cumulativePnlUsdt": 801.17
+      "cumulativePnlUsdt": 801.17,
+      "maePct": 1.33,
+      "maePrice": 596.9,
+      "maeAt": 1775808000000,
+      "realizedPct": 0.17
     },
     {
       "num": 88,
@@ -1001,7 +1349,11 @@
       "exitAt": 1776026700000,
       "exitPrice": 595.84,
       "netPnlUsdt": 8.69,
-      "cumulativePnlUsdt": 809.86
+      "cumulativePnlUsdt": 809.86,
+      "maePct": 1.53,
+      "maePrice": 613.8,
+      "maeAt": 1775935800000,
+      "realizedPct": 1.44
     },
     {
       "num": 89,
@@ -1011,7 +1363,11 @@
       "exitAt": 1776188700000,
       "exitPrice": 617.12,
       "netPnlUsdt": 21.28,
-      "cumulativePnlUsdt": 831.14
+      "cumulativePnlUsdt": 831.14,
+      "maePct": 0.88,
+      "maePrice": 590.6,
+      "maeAt": 1776033000000,
+      "realizedPct": 3.57
     },
     {
       "num": 90,
@@ -1021,7 +1377,11 @@
       "exitAt": 1776218400000,
       "exitPrice": 619.45,
       "netPnlUsdt": -2.33,
-      "cumulativePnlUsdt": 828.81
+      "cumulativePnlUsdt": 828.81,
+      "maePct": 0.42,
+      "maePrice": 619.7,
+      "maeAt": 1776217800000,
+      "realizedPct": -0.38
     },
     {
       "num": 91,
@@ -1031,7 +1391,11 @@
       "exitAt": 1776326400000,
       "exitPrice": 622.69,
       "netPnlUsdt": 3.24,
-      "cumulativePnlUsdt": 832.05
+      "cumulativePnlUsdt": 832.05,
+      "maePct": 1.51,
+      "maePrice": 610.1,
+      "maeAt": 1776240300000,
+      "realizedPct": 0.52
     },
     {
       "num": 92,
@@ -1041,7 +1405,11 @@
       "exitAt": 1776352500000,
       "exitPrice": 621.97,
       "netPnlUsdt": 0.72,
-      "cumulativePnlUsdt": 832.77
+      "cumulativePnlUsdt": 832.77,
+      "maePct": 0.16,
+      "maePrice": 623.7,
+      "maeAt": 1776345900000,
+      "realizedPct": 0.12
     },
     {
       "num": 93,
@@ -1051,7 +1419,11 @@
       "exitAt": 1776605400000,
       "exitPrice": 625.26,
       "netPnlUsdt": 12.79,
-      "cumulativePnlUsdt": 845.55
+      "cumulativePnlUsdt": 845.55,
+      "maePct": 0.1,
+      "maePrice": 638.7,
+      "maeAt": 1776500700000,
+      "realizedPct": 2
     },
     {
       "num": 94,
@@ -1061,7 +1433,11 @@
       "exitAt": 1776877200000,
       "exitPrice": 644.4,
       "netPnlUsdt": 19.14,
-      "cumulativePnlUsdt": 864.69
+      "cumulativePnlUsdt": 864.69,
+      "maePct": 1.82,
+      "maePrice": 613.9,
+      "maeAt": 1776637200000,
+      "realizedPct": 3.06
     },
     {
       "num": 95,
@@ -1071,7 +1447,11 @@
       "exitAt": 1777179600000,
       "exitPrice": 630.09,
       "netPnlUsdt": 5.81,
-      "cumulativePnlUsdt": 870.5
+      "cumulativePnlUsdt": 870.5,
+      "maePct": 0.36,
+      "maePrice": 638.2,
+      "maeAt": 1777109700000,
+      "realizedPct": 0.91
     },
     {
       "num": 96,
@@ -1081,7 +1461,11 @@
       "exitAt": 1777266900000,
       "exitPrice": 633.57,
       "netPnlUsdt": 3.48,
-      "cumulativePnlUsdt": 873.98
+      "cumulativePnlUsdt": 873.98,
+      "maePct": 0.22,
+      "maePrice": 628.7,
+      "maeAt": 1777267200000,
+      "realizedPct": 0.55
     },
     {
       "num": 97,
@@ -1091,7 +1475,11 @@
       "exitAt": 1777324500000,
       "exitPrice": 623.99,
       "netPnlUsdt": 9.58,
-      "cumulativePnlUsdt": 883.56
+      "cumulativePnlUsdt": 883.56,
+      "maePct": 0.1,
+      "maePrice": 634.2,
+      "maeAt": 1777266600000,
+      "realizedPct": 1.51
     },
     {
       "num": 98,
@@ -1101,7 +1489,11 @@
       "exitAt": 1777462200000,
       "exitPrice": 626.5,
       "netPnlUsdt": 0.24,
-      "cumulativePnlUsdt": 883.8
+      "cumulativePnlUsdt": 883.8,
+      "maePct": 1.22,
+      "maePrice": 618.6,
+      "maeAt": 1777386900000,
+      "realizedPct": 0.04
     },
     {
       "num": 99,
@@ -1111,7 +1503,11 @@
       "exitAt": 1777517100000,
       "exitPrice": 616.7,
       "netPnlUsdt": 6.97,
-      "cumulativePnlUsdt": 890.77
+      "cumulativePnlUsdt": 890.77,
+      "maePct": 0.17,
+      "maePrice": 624.7,
+      "maeAt": 1777464600000,
+      "realizedPct": 1.12
     },
     {
       "num": 100,
@@ -1121,7 +1517,11 @@
       "exitAt": 1778372100000,
       "exitPrice": 649.7,
       "netPnlUsdt": -34.41,
-      "cumulativePnlUsdt": 856.36
+      "cumulativePnlUsdt": 856.36,
+      "maePct": 7.9,
+      "maePrice": 663.9,
+      "maeAt": 1778070900000,
+      "realizedPct": -5.59
     },
     {
       "num": 101,
@@ -1131,7 +1531,11 @@
       "exitAt": 1778461200000,
       "exitPrice": 657.82,
       "netPnlUsdt": 8.12,
-      "cumulativePnlUsdt": 864.48
+      "cumulativePnlUsdt": 864.48,
+      "maePct": 0.83,
+      "maePrice": 644.3,
+      "maeAt": 1778376300000,
+      "realizedPct": 1.25
     },
     {
       "num": 102,
@@ -1141,7 +1545,11 @@
       "exitAt": 1778550300000,
       "exitPrice": 661.905,
       "netPnlUsdt": 3.23,
-      "cumulativePnlUsdt": 867.71
+      "cumulativePnlUsdt": 867.71,
+      "maePct": 0.38,
+      "maePrice": 656.2,
+      "maeAt": 1778512200000,
+      "realizedPct": 0.49
     },
     {
       "num": 103,
@@ -1151,7 +1559,11 @@
       "exitAt": 1778592600000,
       "exitPrice": 660.67,
       "netPnlUsdt": 1.24,
-      "cumulativePnlUsdt": 868.94
+      "cumulativePnlUsdt": 868.94,
+      "maePct": 0.42,
+      "maePrice": 664.7,
+      "maeAt": 1778551500000,
+      "realizedPct": 0.19
     },
     {
       "num": 104,
@@ -1161,7 +1573,11 @@
       "exitAt": 1778719500000,
       "exitPrice": 676.865,
       "netPnlUsdt": -4.29,
-      "cumulativePnlUsdt": 864.65
+      "cumulativePnlUsdt": 864.65,
+      "maePct": 0.67,
+      "maePrice": 677.1,
+      "maeAt": 1778718900000,
+      "realizedPct": -0.64
     }
   ],
   "totalTradesInStrategy": 104,

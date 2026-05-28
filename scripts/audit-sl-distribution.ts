@@ -46,13 +46,18 @@ function parseArgs(argv: string[]): { id: string | null; capPct: number } {
 function loadTrades(strategyId: string): AnalyzableTrade[] | null {
   const path = resolve('src/strategies/data', `${strategyId}.json`);
   if (!existsSync(path)) return null;
-  const raw = JSON.parse(readFileSync(path, 'utf8')) as { tradesLog?: AnalyzableTrade[] };
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as {
+    tradesLog?: Array<AnalyzableTrade & { maePct?: number }>
+  };
   if (!raw.tradesLog || !Array.isArray(raw.tradesLog)) return null;
-  return raw.tradesLog.map((t) => ({
-    side: t.side,
-    entryPrice: Number(t.entryPrice),
-    exitPrice: Number(t.exitPrice),
-  })).filter((t) => Number.isFinite(t.entryPrice) && Number.isFinite(t.exitPrice));
+  return raw.tradesLog
+    .map((t) => ({
+      side: t.side,
+      entryPrice: Number(t.entryPrice),
+      exitPrice: Number(t.exitPrice),
+      maePct: typeof t.maePct === 'number' ? t.maePct : undefined,
+    }))
+    .filter((t) => Number.isFinite(t.entryPrice) && Number.isFinite(t.exitPrice));
 }
 
 function listAvailableStrategies(): string[] {
