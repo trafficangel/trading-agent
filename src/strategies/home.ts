@@ -792,7 +792,7 @@ function homeEffectsScript(): string {
         var prevCount = parseInt(section.getAttribute('data-position-count') || '0', 10);
         var nextCount = positions.length;
         section.setAttribute('data-position-count', String(nextCount));
-        if (nextCount >= 4) {
+        if (nextCount >= 3) {
           grid.classList.remove('live-pos-grid');
           grid.classList.add('live-pos-carousel');
           grid.setAttribute('data-mode', 'carousel');
@@ -821,7 +821,7 @@ function homeEffectsScript(): string {
         }
         // Toggle the carousel-hint banner that lives just below the grid.
         var hint = section.querySelector('.live-pos-scroll-hint');
-        if (nextCount >= 4 && !hint) {
+        if (nextCount >= 3 && !hint) {
           hint = document.createElement('div');
           hint.className = 'live-pos-scroll-hint';
           hint.textContent = document.documentElement.lang !== 'en'
@@ -955,12 +955,12 @@ function renderHome(
     `;
   };
   // Layout selector — always cards. For 1-3 positions we use a responsive
-  // grid (live-pos-grid). For 4+ positions we switch to a horizontal
+  // grid (live-pos-grid). For 3+ positions we switch to a horizontal
   // scroll-snap carousel (live-pos-carousel) so the section never
   // dominates the page vertically — users swipe left/right to browse.
-  // The JS poller toggles the class when count crosses the 3↔4 boundary;
+  // The JS poller toggles the class when count crosses the 2↔3 boundary;
   // no full re-render needed because the inner card markup is identical.
-  const CAROUSEL_THRESHOLD = 4;
+  const CAROUSEL_THRESHOLD = 3;
   const useCarousel = activePositions.length >= CAROUSEL_THRESHOLD;
   const gridClass = useCarousel ? 'live-pos-carousel' : 'live-pos-grid';
   // Wrap with carousel-arrow shell when in carousel mode — adds the
