@@ -3345,13 +3345,6 @@ function renderAllStrategiesFeed(
   const activeRows = active.map((t: ActiveTradeFeedRow) => {
     const sideCls = t.side === 'long' ? 'side-long' : 'side-short';
     const ageMs = Date.now() - t.entryAt;
-    // SL distance in % — gives a sense of how much risk the trade is taking.
-    const slDistPct = t.sl !== null
-      ? (Math.abs(t.entryPrice - t.sl) / t.entryPrice) * 100
-      : null;
-    const slCell = t.sl !== null
-      ? `${t.sl.toFixed(4)} <span class="feed-sl-pct">(−${slDistPct!.toFixed(2)}%)</span>`
-      : '—';
     // Look up live P&L by formatted trade-id (e.g. «BNB#001»). The
     // active-positions cache and the feed both use formatStrategyTradeId,
     // so the keys match deterministically.
@@ -3384,7 +3377,7 @@ function renderAllStrategiesFeed(
         <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
         <td class="right mono">${notionalStr}</td>
         <td class="right mono">${t.entryPrice.toFixed(4)}</td>
-        <td class="right mono">${slCell}</td>
+        <td class="right dim">—</td>
         <td class="right">${pnlCell}</td>
         <td><span class="reason-pill reason-active" title="Позиция сейчас открыта, ждём сигнал выхода или SL">🟢 В работе</span></td>
       </tr>
@@ -3496,7 +3489,7 @@ function renderAllStrategiesFeed(
               <th>Сторона</th>
               <th class="right" title="Размер shadow-сделки — фиксированный $1000 на каждую">Объём</th>
               <th class="right">Entry</th>
-              <th class="right" title="Цена выхода для закрытых, safety SL (и расстояние в %) для активных">Exit / SL</th>
+              <th class="right" title="Цена выхода (только для закрытых сделок)">Exit</th>
               <th class="right">P&amp;L</th>
               <th>Причина выхода</th>
             </tr>
