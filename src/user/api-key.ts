@@ -107,6 +107,7 @@ export function renderApiKeyPage(args: {
 
       ${flashHtml}
       ${balanceBanner}
+      ${showGuide ? renderPreface() : ''}
       ${main}
       ${showGuide ? renderGuide() : ''}
 
@@ -262,7 +263,13 @@ function renderInputs(csrfToken: string): string {
   `;
 }
 
-function renderGuide(): string {
+/**
+ * Preface block — bonus banner + 2FA/password warning + walkthrough
+ * video. Surfaced ABOVE the form (Phase O) so users see the prerequisites
+ * and the 1-minute video before they click anything; previously this
+ * block sat below the step-by-step instructions, which was easy to miss.
+ */
+function renderPreface(): string {
   return `
     <div class="key-bonus-banner">
       ${ico('🎁')}<b>Нет аккаунта на Bybit?</b>
@@ -286,7 +293,7 @@ function renderGuide(): string {
         <span class="key-video-sub">Целиком: вход, выбор тарифа, создание ключа на Bybit, первая проверка баланса.</span>
       </div>
       <video class="key-video-player"
-             src="/static/setup-walkthrough.mp4?v=1"
+             src="/static/setup-walkthrough.mp4?v=2"
              controls
              preload="metadata"
              playsinline
@@ -295,7 +302,11 @@ function renderGuide(): string {
         Ваш браузер не поддерживает видео-тег.
       </video>
     </div>
+  `;
+}
 
+function renderGuide(): string {
+  return `
     <div class="key-guide">
       <h2 class="key-guide-title">${ico('📖')}Пошаговая инструкция</h2>
       <ol class="key-guide-steps">
