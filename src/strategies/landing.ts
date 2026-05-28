@@ -4227,7 +4227,6 @@ function activeTradesTable(trades: ActiveTradeRow[], cfg: StrategyConfig): strin
         <td class="dt">${fmtDuration(ageMs)}</td>
         <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
         <td class="right mono">${t.entryPrice.toFixed(4)}</td>
-        <td class="right mono">${t.sl !== null ? t.sl.toFixed(4) : '—'}</td>
         <td><span class="reason-pill reason-active">🟢 В работе</span></td>
       </tr>`;
     })
@@ -4242,7 +4241,6 @@ function activeTradesTable(trades: ActiveTradeRow[], cfg: StrategyConfig): strin
             <th>В работе</th>
             <th>Side</th>
             <th class="right">Entry</th>
-            <th class="right">Safety SL</th>
             <th>Статус</th>
           </tr>
         </thead>
