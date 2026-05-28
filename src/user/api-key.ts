@@ -14,7 +14,6 @@
 
 import { pageShell } from '../strategies/landing.js';
 import type { ApiKeySummary } from '../db/repos/user-api-keys.js';
-import { BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from '../strategies/track-c-config.js';
 import { csrfInput } from '../auth/csrf.js';
 
 function escapeHtml(s: string): string {
@@ -107,7 +106,6 @@ export function renderApiKeyPage(args: {
 
       ${flashHtml}
       ${balanceBanner}
-      ${showGuide ? renderPreface() : ''}
       ${main}
       ${showGuide ? renderGuide() : ''}
 
@@ -260,48 +258,6 @@ function renderInputs(csrfToken: string): string {
         });
       })();
     </script>
-  `;
-}
-
-/**
- * Preface block — bonus banner + 2FA/password warning + walkthrough
- * video. Surfaced ABOVE the form (Phase O) so users see the prerequisites
- * and the 1-minute video before they click anything; previously this
- * block sat below the step-by-step instructions, which was easy to miss.
- */
-function renderPreface(): string {
-  return `
-    <div class="key-bonus-banner">
-      ${ico('🎁')}<b>Нет аккаунта на Bybit?</b>
-      <a href="${BYBIT_REF_URL}" target="_blank" rel="noopener">Зарегистрируйтесь по нашей ссылке</a> —
-      получите <b>+${BYBIT_REF_BONUS_DAYS} дней автотрейдинга бесплатно</b>.
-      После регистрации пришлите ваш Bybit UID оператору
-      <a href="https://t.me/dboykod" target="_blank" rel="noopener">@dboykod</a>.
-    </div>
-
-    <div class="key-warn-block">
-      ${ico('⚠️')}<b>Прежде чем начать:</b>
-      <ul class="key-warn-list">
-        <li>Убедитесь что на Bybit у вас <b>включена двухфакторная защита</b> (Google Authenticator + SMS). Без неё создать ключ нельзя — Bybit спросит код подтверждения на финальном шаге.</li>
-        <li><b>Подготовьте текстовый файл или менеджер паролей</b> (Bitwarden, 1Password, Заметки на телефоне). API Secret покажется <b>только один раз</b> — потерял = надо создавать ключ заново.</li>
-      </ul>
-    </div>
-
-    <div class="key-video">
-      <div class="key-video-head">
-        <span class="key-video-eyebrow">${ico('🎬')}Видео-инструкция · 1 минута</span>
-        <span class="key-video-sub">Целиком: вход, выбор тарифа, создание ключа на Bybit, первая проверка баланса.</span>
-      </div>
-      <video class="key-video-player"
-             src="/static/setup-walkthrough.mp4?v=2"
-             controls
-             preload="metadata"
-             playsinline
-             muted
-             aria-label="Видео-инструкция: регистрация и подключение API-ключа">
-        Ваш браузер не поддерживает видео-тег.
-      </video>
-    </div>
   `;
 }
 
