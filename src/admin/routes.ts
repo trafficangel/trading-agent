@@ -27,7 +27,7 @@ import {
   getRegistrationStats,
   type RegistrationListRow,
 } from '../auth/session.js';
-import { pageShell, formatSinceDate } from '../strategies/landing.js';
+import { pageShell } from '../strategies/landing.js';
 import {
   findSubscription,
   setPlan,
@@ -626,7 +626,21 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     if (!checkAuth(req, reply)) return;
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'private, no-store');
-    return renderTiersDashboard();
+    // Parse from/to date range (YYYY-MM-DD). Defaults to last 30 days.
+    const q = (req.query ?? {}) as { from?: string; to?: string };
+    const parseDate = (s: string | undefined, fallback: number): number => {
+      if (!s) return fallback;
+      const ms = Date.parse(s + 'T00:00:00Z');
+      return Number.isFinite(ms) ? ms : fallback;
+    };
+    const now = Date.now();
+    const defaultFrom = now - 30 * 86_400_000;
+    let fromMs = parseDate(q.from, defaultFrom);
+    // «to» is inclusive of the whole day → push to end-of-day.
+    let toMs = parseDate(q.to, now);
+    toMs = Math.min(now, toMs + 86_400_000 - 1); // end of selected day, capped at now
+    if (fromMs > toMs) [fromMs, toMs] = [toMs - 30 * 86_400_000, toMs];
+    return renderTiersDashboard(fromMs, toMs);
   });
 
   // ---------------- POST /admin/users/:id/plan ----------------
@@ -1024,8 +1038,8 @@ const vipOverrideListStmt = db.prepare<[], {
  * misleading picture for the other 5 tiers (no data) while shadow
  * replay shows the actual signal-history performance at tier sizes.
  */
-const shadowClosedRecentStmt = db.prepare<
-  [number],
+const shadowClosedRangeStmt = db.prepare<
+  [number, number],
   { strategy_id: string; pnl_pct: number }
 >(`
   SELECT strategy_id, pnl_pct
@@ -1036,6 +1050,7 @@ const shadowClosedRecentStmt = db.prepare<
      AND closed_at IS NOT NULL
      AND pnl_pct IS NOT NULL
      AND closed_at >= ?
+     AND closed_at <= ?
 `);
 
 /** Earliest CLOSED shadow decision's close timestamp. Used to label
@@ -1069,11 +1084,19 @@ type TierLiveStats = {
   pctOfMinDepoAnnual: number;
 };
 
-function computeTierLiveStats(windowMs: number): TierLiveStats[] {
-  const sinceMs = Date.now() - windowMs;
-  const rows = shadowClosedRecentStmt.all(sinceMs);
+// Tiers shown in the live-stats table. Prof is EXCLUDED (operator
+// request) — it's the manual-control tier with no fixed notional, so
+// its shadow-replay PnL is meaningless for tier-comparison purposes.
+const LIVE_STATS_TIERS = TIER_ORDER.filter((t) => t !== 'prof');
 
-  return TIER_ORDER.map((tierId) => {
+function computeTierLiveStats(fromMs: number, toMs: number): TierLiveStats[] {
+  const rows = shadowClosedRangeStmt.all(fromMs, toMs);
+  // Normalise to monthly/annual based on the ACTUAL selected range
+  // length (not a fixed 30/365 window) so arbitrary date ranges produce
+  // honest per-month / per-year extrapolations.
+  const rangeDays = Math.max(1, (toMs - fromMs) / 86_400_000);
+
+  return LIVE_STATS_TIERS.map((tierId) => {
     const tier = TIER_CONFIGS[tierId];
     let trades = 0;
     let wins = 0;
@@ -1090,7 +1113,9 @@ function computeTierLiveStats(windowMs: number): TierLiveStats[] {
     }
     const grossRounded = Math.round(grossUsd * 100) / 100;
     const minDepo = tier.minBalanceUsdt;
-    const monthlyPct = minDepo > 0 ? (grossRounded / minDepo) * 100 : 0;
+    const rangePct = minDepo > 0 ? (grossRounded / minDepo) * 100 : 0;
+    const monthlyPct = rangePct * 30 / rangeDays;
+    const annualPct = rangePct * 365 / rangeDays;
     return {
       tierId,
       trades,
@@ -1099,7 +1124,7 @@ function computeTierLiveStats(windowMs: number): TierLiveStats[] {
       winRatePct: trades === 0 ? null : (wins / trades) * 100,
       grossUsd: grossRounded,
       pctOfMinDepoMonthly: Math.round(monthlyPct * 100) / 100,
-      pctOfMinDepoAnnual: Math.round(monthlyPct * 12 * 10) / 10,
+      pctOfMinDepoAnnual: Math.round(annualPct * 10) / 10,
     };
   });
 }
@@ -1118,7 +1143,7 @@ function computeTierLiveStats(windowMs: number): TierLiveStats[] {
 type TierForecastStats = TierLiveStats;
 
 function computeTierForecastStats(): TierForecastStats[] {
-  return TIER_ORDER.map((tierId) => {
+  return LIVE_STATS_TIERS.map((tierId) => {
     const tier = TIER_CONFIGS[tierId];
     let tradesPerMonth = 0;
     let winsPerMonth = 0;
@@ -1156,7 +1181,7 @@ function computeTierForecastStats(): TierForecastStats[] {
   });
 }
 
-function renderTiersDashboard(): string {
+function renderTiersDashboard(fromMs: number, toMs: number): string {
   const dist = new Map<string, number>();
   for (const row of tierDistStmt.all()) dist.set(row.tier_id, row.n);
 
@@ -1254,25 +1279,31 @@ function renderTiersDashboard(): string {
     `;
   };
 
-  const liveStatsTable30d = renderTierStatsTable(
-    computeTierLiveStats(30 * 24 * 60 * 60 * 1000),
+  // Single range-selectable live table (Prof excluded). The range
+  // comes from the from/to query params (defaults: last 30 days).
+  const rangeDays = Math.max(1, Math.round((toMs - fromMs) / 86_400_000));
+  const liveStatsTableRange = renderTierStatsTable(
+    computeTierLiveStats(fromMs, toMs),
     'month',
-    'За последние 30 дней не было закрытых сделок.',
+    `За выбранный период (${rangeDays} дн.) не было закрытых сделок.`,
   );
-  const liveStatsTable365d = renderTierStatsTable(
-    computeTierLiveStats(365 * 24 * 60 * 60 * 1000),
-    'year',
-    'За последние 365 дней не было закрытых сделок.',
-  );
-  // Honest label for the "year" block: if the system has been running
-  // < 365 days, show «с DD month YYYY» (the first closed shadow trade)
-  // so the operator sees this is a cumulative-since-launch view, not
-  // a true year-on-year figure.
-  const earliestClosedMs = earliestClosedShadowStmt.get()?.ts ?? null;
-  const yearCutoffMs = Date.now() - 365 * 24 * 60 * 60 * 1000;
-  const yearBlockLabel = earliestClosedMs && earliestClosedMs > yearCutoffMs
-    ? formatSinceDate(earliestClosedMs, 'ru')         // e.g. «с 14 марта 2026»
-    : 'последние 365 дней';
+  // Date-range form. Native <input type=date> in YYYY-MM-DD; submits
+  // GET so the range lives in the URL (bookmarkable).
+  const toISODate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const earliestClosedMs2 = earliestClosedShadowStmt.get()?.ts ?? null;
+  const rangeForm = `
+    <form method="GET" action="/admin/tiers" class="adm-range-form">
+      <label>С <input type="date" name="from" value="${toISODate(fromMs)}" ${earliestClosedMs2 ? `min="${toISODate(earliestClosedMs2)}"` : ''} max="${toISODate(Date.now())}"></label>
+      <label>По <input type="date" name="to" value="${toISODate(toMs)}" max="${toISODate(Date.now())}"></label>
+      <button type="submit">Показать</button>
+      <span class="adm-range-presets">
+        <a href="/admin/tiers?from=${toISODate(Date.now() - 7 * 86400000)}&to=${toISODate(Date.now())}">7д</a>
+        <a href="/admin/tiers?from=${toISODate(Date.now() - 30 * 86400000)}&to=${toISODate(Date.now())}">30д</a>
+        <a href="/admin/tiers?from=${toISODate(Date.now() - 90 * 86400000)}&to=${toISODate(Date.now())}">90д</a>
+        ${earliestClosedMs2 ? `<a href="/admin/tiers?from=${toISODate(earliestClosedMs2)}&to=${toISODate(Date.now())}">всё</a>` : ''}
+      </span>
+    </form>
+  `;
   const forecastTable = renderTierStatsTable(
     computeTierForecastStats(),
     'month',
@@ -1302,10 +1333,11 @@ function renderTiersDashboard(): string {
       «что бы тариф заработал на актуальной истории сигналов».
       <br><br>
       <b>% капитала</b> рассчитан от <i>минимального</i> депозита тарифа (Starter $300,
-      Standard $800, Plus $2 500, Pro $6 000, VIP $15 000, Prof $300). Юзер с большим
-      балансом увидит меньший процент при той же долларовой PnL. В блоке за 30 дней годовая
-      цифра — грубая экстраполяция «× 12»; в блоке за год она реальная, а помесячная
-      выводится делением «÷ 12».
+      Standard $800, Plus $2 500, Pro $6 000, VIP $15 000). Юзер с большим
+      балансом увидит меньший процент при той же долларовой PnL. Месячная и годовая
+      цифры нормализованы к длине выбранного периода (<code>× 30/дней</code> и
+      <code>× 365/дней</code>). <b>Prof исключён</b> — ручной тариф без фиксированного
+      notional, его shadow-PnL не сопоставим с остальными.
     </p>
   `;
 
@@ -1396,13 +1428,9 @@ function renderTiersDashboard(): string {
       </section>
 
       <section class="adm-section">
-        <h2>💹 Live-результаты по тарифам — последние 30 дней</h2>
-        ${liveStatsTable30d}
-      </section>
-
-      <section class="adm-section">
-        <h2>📅 Live-результаты по тарифам — ${escapeHtml(yearBlockLabel)}</h2>
-        ${liveStatsTable365d}
+        <h2>💹 Live-результаты по тарифам</h2>
+        ${rangeForm}
+        ${liveStatsTableRange}
         ${liveStatsNote}
       </section>
 
@@ -1486,6 +1514,29 @@ function renderTiersDashboard(): string {
       }
 
       .adm-tier-note { font-size: 12px; color: #98a2b3; line-height: 1.55; margin: 12px 2px 0; }
+      .adm-range-form {
+        display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+        margin: 0 0 16px; font-size: 13px; color: #c7d0dc;
+      }
+      .adm-range-form label { display: inline-flex; align-items: center; gap: 6px; }
+      .adm-range-form input[type=date] {
+        background: #11161d; border: 1px solid #2a323d; color: #e8edf2;
+        border-radius: 7px; padding: 6px 9px; font-family: inherit; font-size: 13px;
+        color-scheme: dark;
+      }
+      .adm-range-form button {
+        background: #4ad991; color: #07120c; border: none; border-radius: 7px;
+        padding: 7px 16px; font-weight: 600; font-size: 13px; cursor: pointer;
+        font-family: inherit;
+      }
+      .adm-range-form button:hover { background: #3fc983; }
+      .adm-range-presets { display: inline-flex; gap: 4px; margin-left: auto; }
+      .adm-range-presets a {
+        color: #8590a0; text-decoration: none; font-size: 12px;
+        padding: 5px 10px; border: 1px solid #2a323d; border-radius: 999px;
+        transition: all 0.15s;
+      }
+      .adm-range-presets a:hover { color: #4ad991; border-color: #4ad991; }
       .adm-tier-note code { background: #0e131a; padding: 1px 5px; border-radius: 4px; font-size: 11px; color: #e8edf2; font-family: ui-monospace, Menlo, monospace; }
       .adm-tier-note b { color: #e8edf2; }
       .adm-tier-note i { color: #cfd6dd; font-style: normal; font-weight: 500; }
