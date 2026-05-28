@@ -66,7 +66,7 @@ import {
   bybitErrorLabel,
 } from '../exchange/bybit-private.js';
 import { roundQtyToStep } from '../exchange/bybit-public.js';
-import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD } from './track-c-config.js';
+import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD, MAX_SAFE_SL_PCT } from './track-c-config.js';
 import { computeMarginState } from '../user/margin.js';
 import { resolveUserTierParams } from '../user/tier-assignment.js';
 import { TIER_CONFIGS } from './tier-config.js';
@@ -208,16 +208,59 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
   // TRACK E — max concurrent positions per tier. Even if margin
   // would allow more, the tier promises a cap (e.g. Plus = 4 max).
   // This stops accidental over-concentration during multi-symbol bursts.
+  //
+  // Phase Q (May 28, 2026) — PROF tier is exempt from the hard block.
+  // Prof = manual-control tier; the operator explicitly owns risk and
+  // wants to manage exposure themselves, not have the system silently
+  // skip signals. For prof we WARN (Telegram) when concurrency or
+  // cross-liquidation exposure crosses a safety line, but still open
+  // the position. Non-prof tiers keep the hard cap for protection.
   const tierParams = resolveUserTierParams(t.user_id);
-  if (tierParams) {
+  const activeRows = findActiveByUser(t.user_id);
+  const activeCount = activeRows.length;
+  const isProf = tierParams?.tierId === 'prof';
+  if (tierParams && !isProf) {
     const tierMaxConcurrent = TIER_CONFIGS[tierParams.tierId].maxConcurrentPositions;
-    const activeCount = findActiveByUser(t.user_id).length;
     if (activeCount >= tierMaxConcurrent) {
       logger.info(
         { userId: t.user_id, tier: tierParams.tierId, activeCount, max: tierMaxConcurrent },
         'fanOutEntry: tier max-concurrent reached, skipping',
       );
       return false;
+    }
+  }
+  // Cross-liquidation exposure check — WARN ONLY (never blocks).
+  // In cross-margin, liquidation is governed by Σ(open notional) / equity,
+  // not per-position leverage. Safe ceiling: Σ notional ≤ equity ×
+  // (0.70 / maxSlPct). Above that, a coordinated adverse move could
+  // liquidate the whole account BEFORE the per-strategy safety SL fires.
+  // We surface this to the operator but let them manage it (Prof tier
+  // request: «чтоб система сама не блокировала вход, может предупреждала»).
+  {
+    const eq = margin.balanceUsdt;
+    if (eq !== null && eq > 0) {
+      // Σ existing notional from open rows (qty × avg price) + this entry.
+      let existingNotional = 0;
+      for (const r of activeRows) {
+        if (r.bybit_qty && r.bybit_avg_price) existingNotional += r.bybit_qty * r.bybit_avg_price;
+      }
+      const totalNotional = existingNotional + t.notional_usd;
+      const effLeverage = totalNotional / eq;
+      const safeCeiling = 0.70 / MAX_SAFE_SL_PCT; // e.g. 8.75× at 8% cap
+      if (effLeverage > safeCeiling) {
+        const liqMovePct = (1 / effLeverage) * 100;
+        enqueueOperatorLog(
+          `⚠️ Cross-liq риск · user_id=${t.user_id} · ${args.symbol} ${args.side}\n` +
+          `Σ notional $${totalNotional.toFixed(0)} / эквити $${eq.toFixed(0)} = ${effLeverage.toFixed(1)}× ` +
+          `(порог ${safeCeiling.toFixed(1)}×)\n` +
+          `Ликвидация при среднем движении −${liqMovePct.toFixed(1)}% — это РАНЬШЕ safety SL. ` +
+          `Позиция открыта (prof = ручной контроль), но рекомендую долить депозит или закрыть часть.`,
+        );
+        logger.warn(
+          { userId: t.user_id, totalNotional, equity: eq, effLeverage, safeCeiling },
+          'fanOutEntry: cross-liquidation exposure above safe ceiling (warn-only, position still opened)',
+        );
+      }
     }
   }
 
