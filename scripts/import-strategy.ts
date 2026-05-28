@@ -24,6 +24,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Page } from 'playwright';
 import { getLuxAlgoContext, closeLuxAlgoBrowser } from '../src/browser/luxalgo.js';
+import { analyzeSlDistribution, formatSlDistribution } from '../src/lib/sl-distribution.js';
 
 // ---------- Types ----------
 
@@ -593,34 +594,31 @@ async function scrapeTradesLog(
 
 // ---------- Main ----------
 
-function deriveSlPctFromTrades(trades: TradeRow[]): { suggestion: number; rationale: string } {
-  // Pick the 90th percentile of losing-trade % drawdown (entryPrice basis)
-  // and add a small buffer. Conservative — preempts the worst 10% of losses.
-  if (trades.length === 0) {
-    return { suggestion: 0.025, rationale: 'no trades — defaulting to 2.5%' };
-  }
-  const lossPcts = trades
-    .filter((t) => t.netPnlUsdt < 0)
-    .map((t) => {
-      // Approximate loss as % of entry price (notional-normalized).
-      // For a $1000 notional position, netPnlUsdt is also the % × 10.
-      // Better: use entry vs exit price directly.
-      const sign = t.side === 'long' ? -1 : 1;
-      return sign * ((t.exitPrice - t.entryPrice) / t.entryPrice) * 100;
-    })
-    .filter((p) => p > 0 && Number.isFinite(p))
-    .sort((a, b) => b - a);
-  if (lossPcts.length === 0) {
-    return { suggestion: 0.025, rationale: 'no parseable losses — defaulting to 2.5%' };
-  }
-  // 90th percentile = top 10% worst
-  const idx = Math.max(0, Math.floor(lossPcts.length * 0.1) - 1);
-  const p90 = lossPcts[idx]!;
-  // Round to nearest 0.5%
-  const suggestionPct = Math.round((p90 * 1.2) * 2) / 2;
+function deriveSlPctFromTrades(trades: TradeRow[]): {
+  suggestion: number;
+  rationale: string;
+  verdict: 'compatible' | 'borderline' | 'incompatible';
+  report: string;
+} {
+  // Phase P (May 28, 2026) — delegated to shared lib/sl-distribution.ts.
+  // Single source of truth for the SL methodology: percentile-based
+  // recommendation + verdict against the platform-wide 5% cap.
+  //
+  // The importer's old logic was a subset of this (p90 × 1.2 buffer),
+  // but didn't enforce the cap or surface a compatibility verdict.
+  const analyzable = trades.map((t) => ({
+    side: t.side,
+    entryPrice: t.entryPrice,
+    exitPrice: t.exitPrice,
+  }));
+  const dist = analyzeSlDistribution(analyzable);
+  const fallbackSlPct = 0.025;
+  const suggestion = dist.recommendedSlPct ?? fallbackSlPct;
   return {
-    suggestion: suggestionPct / 100,
-    rationale: `90th-percentile loss = ${p90.toFixed(2)}%, × 1.2 buffer → suggested SL ${suggestionPct.toFixed(2)}%`,
+    suggestion,
+    rationale: dist.reasoning,
+    verdict: dist.verdict,
+    report: formatSlDistribution(dist),
   };
 }
 
@@ -768,7 +766,26 @@ async function main(): Promise<void> {
     console.error(`  collected ${tradesLog.length} trades${capped ? ` (capped from ${totalTrades})` : ''}`);
 
     const sl = deriveSlPctFromTrades(tradesLog);
-    console.error(`→ ${sl.rationale}`);
+    // Print the full SL distribution report to stderr so the operator
+    // sees the verdict (compatible/borderline/incompatible) BEFORE
+    // committing the new strategy. Stdout is reserved for the paste-
+    // ready config block.
+    console.error(sl.report);
+    if (sl.verdict === 'incompatible') {
+      console.error(
+        `\n⛔  This strategy is INCOMPATIBLE with the 5% safety-SL cap.\n` +
+        `    Recommended action: do NOT enable. Find a tighter variant\n` +
+        `    on LuxAlgo (different timeframe, different conditions), or\n` +
+        `    skip this strategy. The config block below has slPct=2.5%\n` +
+        `    as a placeholder — DO NOT just paste it and turn it on.\n`,
+      );
+    } else if (sl.verdict === 'borderline') {
+      console.error(
+        `\n⚠  This strategy is BORDERLINE — running it under the 5% cap\n` +
+        `   will clip 10-25% of historical losses. Backtest stats are\n` +
+        `   no longer 1:1 representative. Consider a small live trial.\n`,
+      );
+    }
 
     const out: ScrapeResult = {
       url,
