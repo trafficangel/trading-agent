@@ -94,6 +94,34 @@ function userStrategyMap(userId: number): Map<string, UserStrategyRow> {
 }
 
 export async function userRoute(app: FastifyInstance): Promise<void> {
+  // -------- GET /api/account/margin (JSON) --------
+  // Powers the dashboard's live margin-card poller (every 20s). Cheap:
+  // computeMarginState reads DB + STRATEGY_CONFIGS, no Bybit call. The
+  // last_balance_usdt comes from balance-monitor cron (every 5 min).
+  app.get('/api/account/margin', async (req: FastifyRequest, reply: FastifyReply) => {
+    const user = getAuthedUser(req);
+    if (!user) {
+      reply.code(401).send({ error: 'unauthenticated' });
+      return;
+    }
+    const margin = computeMarginState(user.userId);
+    const free = margin.freeUsdt ?? 0;
+    const worstCaseFits = free >= margin.requiredUsdt;
+    const flagged = margin.insufficientBalanceAt !== null;
+    reply.header('cache-control', 'private, no-store');
+    reply.send({
+      margin: {
+        balanceUsdt: margin.balanceUsdt,
+        requiredUsdt: margin.requiredUsdt,
+        usedUsdt: margin.usedUsdt,
+        freeUsdt: free,
+        worstCaseFits,
+        flagged,
+      },
+      fetchedAt: Date.now(),
+    });
+  });
+
   // -------- /account --------
   app.get('/account', async (req: FastifyRequest, reply: FastifyReply) => {
     const user = getAuthedUser(req);

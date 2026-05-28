@@ -223,6 +223,48 @@ export function renderDashboard(args: {
       ${quickLinks}
       ${tradingControl}
     </main>
+    <script>
+    // Live-poll the margin card every 20s. Patches "Обеспечение" numbers
+    // (free / balance / used) without a page reload — used USDT updates
+    // when positions open/close so the operator's «hatает на все
+    // стратегии» banner stays honest.
+    (function() {
+      var POLL_MS = 20000;
+      function fmt(n) { return '$' + Number(n).toFixed(2); }
+      function patch(m) {
+        if (!m) return;
+        var card = document.querySelector('[data-margin-card]');
+        if (!card) return;
+        var statusEmoji = m.flagged ? '⚠️' : m.worstCaseFits ? '✅' : '💡';
+        var statusText = m.flagged ? 'Заблокировано Bybit\\'ом'
+          : m.worstCaseFits ? 'Хватает на все стратегии одновременно'
+          : 'Хватает на одиночные сделки';
+        var freeLine = card.querySelector('[data-margin-free-line]');
+        var statusEl = card.querySelector('[data-margin-status-text]');
+        var detailEl = card.querySelector('[data-margin-detail]');
+        if (freeLine) freeLine.textContent = statusEmoji + ' ' + fmt(m.freeUsdt);
+        if (statusEl) statusEl.textContent = statusText;
+        if (detailEl) {
+          var parts = ['баланс ' + fmt(m.balanceUsdt), 'нужно макс ' + fmt(m.requiredUsdt)];
+          if (m.usedUsdt > 0) parts.push('в позициях ' + fmt(m.usedUsdt));
+          detailEl.textContent = parts.join(' · ');
+        }
+        // Re-class for status colour
+        card.classList.remove('cabinet-card-ok','cabinet-card-warn','cabinet-card-bad');
+        card.classList.add(m.flagged ? 'cabinet-card-bad' : m.worstCaseFits ? 'cabinet-card-ok' : 'cabinet-card-warn');
+      }
+      function poll() {
+        if (document.hidden) return;
+        fetch('/api/account/margin', { headers: { accept: 'application/json' } })
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(j) { if (j && j.margin) patch(j.margin); })
+          .catch(function() {});
+      }
+      if (document.querySelector('[data-margin-card]')) {
+        setInterval(poll, POLL_MS);
+      }
+    })();
+    </script>
   `;
 
   return pageShell('Личный кабинет · Robot Claude', body, {
@@ -1074,14 +1116,17 @@ function renderMarginCard(m: MarginState, enabledCount: number): string {
     : worstCaseFits
       ? `Хватает на все стратегии одновременно`
       : `Хватает на одиночные сделки`;
+  // data-margin-card markers let the dashboard poller patch the numbers
+  // every 20s without a full page reload — see live-margin polling JS
+  // injected by renderDashboard.
   return `
-    <div class="stat-card cabinet-card ${cls}">
+    <div class="stat-card cabinet-card ${cls}" data-margin-card data-status="${flagged ? 'flagged' : worstCaseFits ? 'ok' : 'tight'}">
       <div class="stat-card-label">${ico('💵')}Обеспечение</div>
-      <div class="stat-card-value">${statusEmoji} $${free.toFixed(2)}</div>
+      <div class="stat-card-value" data-margin-free-line>${statusEmoji} $${free.toFixed(2)}</div>
       <div class="stat-card-sub">
-        ${statusText}
+        <span data-margin-status-text>${statusText}</span>
         <br/>
-        <span style="opacity:0.7">баланс $${m.balanceUsdt.toFixed(2)} · нужно макс $${m.requiredUsdt.toFixed(2)}${m.usedUsdt > 0 ? ` · в позициях $${m.usedUsdt.toFixed(2)}` : ''}</span>
+        <span style="opacity:0.7" data-margin-detail>баланс $${m.balanceUsdt.toFixed(2)} · нужно макс $${m.requiredUsdt.toFixed(2)}${m.usedUsdt > 0 ? ` · в позициях $${m.usedUsdt.toFixed(2)}` : ''}</span>
       </div>
     </div>
   `;
