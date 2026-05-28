@@ -1,51 +1,50 @@
 /**
- * SL distribution analysis — the math behind «can this strategy fit a
- * 5% safety stop without breaking?».
+ * SL distribution analysis — the math behind «what's the right safety SL
+ * for this strategy?».
+ *
+ * Phase Q (May 28, 2026) replaces a flawed cut-rate verdict with PnL
+ * simulation. The old method counted what fraction of historical losses
+ * exceeded the cap — but losses that exceeded the cap weren't all
+ * equally damaging. Many would have recovered to small wins or smaller
+ * losses than the cap, so «cutting» them HURT EV. Other losses would
+ * have grown to −20% naturally, so the cap SAVED us. The cut-rate
+ * conflated the two.
+ *
+ * The new method directly simulates the strategy's net PnL across a
+ * range of SL caps using MAE data (max adverse excursion per trade).
+ * For each candidate cap, for each trade:
+ *   - if MAE >= cap → trade force-closed at −cap (we hit SL during life)
+ *   - else          → trade exits naturally (realized PnL)
+ * Sum across all trades. Compare to the no-cap baseline.
+ *
+ * The cap that maximises sim PnL within the operator's risk envelope
+ * is the winner. Strategy is COMPATIBLE if sim PnL is positive and
+ * close to the no-cap PnL. BORDERLINE if cap costs significant PnL but
+ * strategy still profitable. INCOMPATIBLE if sim PnL goes negative.
  *
  * Used by:
  *   - scripts/import-strategy.ts — auto-suggest slPct on new imports
  *   - scripts/audit-sl-distribution.ts — re-audit existing strategies
  *   - src/strategies/track-c-config.ts (validator) — startup sanity check
  *
- * # Methodology
+ * # Inputs
  *
- * For each historical losing trade we compute the % loss against entry
- * price (not against $1000 notional — that scales but the SHAPE of the
- * distribution is what matters):
+ * For each trade: side (long/short), entryPrice, exitPrice, maePct
+ * (positive magnitude of worst adverse excursion). Without maePct the
+ * analysis falls back to realized loss, which under-counts cut rates.
  *
- *   loss_pct = sideSign × (exitPrice − entryPrice) / entryPrice × 100
- *              (negate for losses so values are positive magnitudes)
+ * # Decision rule (new)
  *
- * Then we sort and compute percentiles. The **percentile X** answers
- * the question: «what % loss is bigger than X% of observed losses?»
+ * Compute pnl_no_cap and pnl_at_cap for candidate caps in {3, 4, 5, 6,
+ * 7, 8, 10, 15} %. Recommend the cap that maximises pnl_at_cap subject
+ * to cap ≤ maxSlPct (operator's hard ceiling).
  *
- *   p50 = median loss
- *   p90 = «typical bad day» — only 10% of losses are worse
- *   p95 = «rare bad day» — only 5% of losses are worse
- *   p99 = «black swan» — only 1% of losses are worse
- *   worst = the actual worst loss in the data
- *
- * The «cut@cap» numbers tell us: if we'd placed a safety SL at `cap`,
- * how many of the historical losses would have been force-closed by
- * our SL instead of letting the strategy exit naturally?
- *
- *   cut@cap = count(losses where loss > cap) / count(all losses)
- *
- * # Decision rule
- *
- * - **compatible**: the strategy's natural loss distribution sits
- *   comfortably under the cap. Default rule: p90 ≤ cap AND cut@cap ≤ 10%.
- *   Recommend slPct = p90 × 1.2 (rounded), capped by maxSlPct.
- *
- * - **borderline**: the strategy *can* run under the cap, but it'll
- *   clip more than 10% of natural losses → some EV will be lost. Rule:
- *   10% < cut@cap ≤ 25%. Recommend slPct = maxSlPct itself, with a
- *   warning that backtest stats no longer apply.
- *
- * - **incompatible**: the strategy's natural loss space lives mostly
- *   ABOVE the cap. Tightening would break the strategy. Rule:
- *   cut@cap > 25%. Recommend disabling — pick a different LuxAlgo
- *   variant or different timeframe instead.
+ * Verdict:
+ *   - COMPATIBLE: pnl_at_recommended > 0 AND ≥ 80% of pnl_no_cap
+ *   - BORDERLINE: pnl_at_recommended > 0 AND 50-80% of pnl_no_cap
+ *     (cap costs significant EV; strategy still profitable)
+ *   - INCOMPATIBLE: pnl_at_recommended ≤ 0
+ *     (cap kills the strategy — either find a tighter variant or skip)
  */
 
 export type AnalyzableTrade = {
@@ -62,6 +61,25 @@ export type AnalyzableTrade = {
    *  UNDERESTIMATES the cut rate because trades that drew down then
    *  recovered look like small losers. */
   maePct?: number;
+};
+
+export type SimulationResult = {
+  /** Simulated net PnL in % of $1000 notional. */
+  netPnlPct: number;
+  /** Simulated profit factor. */
+  profitFactor: number;
+  /** Simulated win rate (0..1). */
+  winRate: number;
+  /** Max equity drawdown in %. */
+  maxDrawdownPct: number;
+  /** Worst single-trade PnL %. */
+  worstTradePct: number;
+  /** Trades force-closed by SL. */
+  stoppedOut: number;
+  /** Stop-outs that killed a would-be winner. */
+  killedWinners: number;
+  /** Stop-outs that saved us from a worse natural loss. */
+  savedFromLargerLoss: number;
 };
 
 export type SlDistribution = {
@@ -88,10 +106,14 @@ export type SlDistribution = {
     worst: number;
   };
   /** For each cap value (in %), what fraction of underwater trades
-   *  would be force-closed by an SL at that cap. */
+   *  would be force-closed by an SL at that cap. Informational. */
   cutRates: Record<number, number>;
-  /** Operator-facing recommendation. `null` if the strategy doesn't
-   *  fit the global cap (incompatible). */
+  /** Phase Q — full PnL simulation for each candidate cap. */
+  simulations: Record<number, SimulationResult>;
+  /** Same as simulations but for no-cap (∞) — the baseline. */
+  noCapSimulation: SimulationResult;
+  /** Operator-facing recommendation. `null` if no positive PnL cap
+   *  exists within maxSlPct. */
   recommendedSlPct: number | null;
   /** Verdict for the operator. */
   verdict: 'compatible' | 'borderline' | 'incompatible';
@@ -101,14 +123,74 @@ export type SlDistribution = {
 
 type AnalyzeOptions = {
   /** Hard ceiling — strategy's recommended SL won't exceed this.
-   *  Defaults to 0.05 (matches MAX_SAFE_SL_PCT in track-c-config.ts). */
+   *  Defaults to 0.08 (matches MAX_SAFE_SL_PCT in track-c-config.ts). */
   maxSlPct?: number;
-  /** Acceptable cut rate at the recommended SL (0..1). At 0.10 we tolerate
-   *  10% of historical losses being clipped. */
-  targetCutRate?: number;
-  /** Caps to report cut% for (in percent units). */
+  /** Caps to report cut%+simulation for (in percent units). */
   capsToReport?: number[];
 };
+
+/** Bybit USDT-perp taker commission used in simulation. */
+const COMMISSION_PER_SIDE = 0.00055;
+
+/**
+ * Simulate strategy net PnL assuming a safety SL fires at `capPct`
+ * (fraction, e.g. 0.05 for 5%) whenever MAE meets/exceeds the cap.
+ * Per-trade pnl is calculated in % of entry price; commission is paid
+ * on both sides.
+ */
+export function simulateAtCap(trades: AnalyzableTrade[], capPct: number): SimulationResult {
+  let totalPnlPct = 0;
+  let cumulativePnl = 0;
+  let peakEquity = 0;
+  let maxDrawdownPct = 0;
+  let stoppedOut = 0;
+  let killedWinners = 0;
+  let savedFromLargerLoss = 0;
+  let worstTradePct = 0;
+  let wins = 0;
+  let losses = 0;
+  let grossWin = 0;
+  let grossLoss = 0;
+
+  for (const t of trades) {
+    const sideSign = t.side === 'long' ? 1 : -1;
+    const realizedPct = sideSign * (t.exitPrice - t.entryPrice) / t.entryPrice;
+    const maePct = t.maePct != null ? t.maePct / 100 : Math.max(0, -realizedPct);
+
+    let effectivePct: number;
+    if (capPct < 1 && maePct >= capPct) {
+      effectivePct = -capPct;
+      stoppedOut++;
+      if (realizedPct > 0) killedWinners++;
+      else if (realizedPct < -capPct) savedFromLargerLoss++;
+    } else {
+      effectivePct = realizedPct;
+    }
+
+    // Subtract commission both sides
+    const commissionPct = COMMISSION_PER_SIDE * 2;
+    const netPct = effectivePct - commissionPct;
+    totalPnlPct += netPct;
+    cumulativePnl += netPct;
+    if (cumulativePnl > peakEquity) peakEquity = cumulativePnl;
+    const dd = peakEquity - cumulativePnl;
+    if (dd > maxDrawdownPct) maxDrawdownPct = dd;
+    if (effectivePct < worstTradePct) worstTradePct = effectivePct;
+    if (netPct > 0) { wins++; grossWin += netPct; }
+    else if (netPct < 0) { losses++; grossLoss += -netPct; }
+  }
+
+  return {
+    netPnlPct: Math.round(totalPnlPct * 10000) / 100,
+    profitFactor: grossLoss > 0 ? Math.round((grossWin / grossLoss) * 100) / 100 : Infinity,
+    winRate: wins + losses > 0 ? wins / (wins + losses) : 0,
+    maxDrawdownPct: Math.round(maxDrawdownPct * 10000) / 100,
+    worstTradePct: Math.round(worstTradePct * 10000) / 100,
+    stoppedOut,
+    killedWinners,
+    savedFromLargerLoss,
+  };
+}
 
 function percentile(sorted: number[], q: number): number {
   if (sorted.length === 0) return 0;
@@ -116,19 +198,13 @@ function percentile(sorted: number[], q: number): number {
   return sorted[idx]!;
 }
 
-/** Round UP to the nearest 0.5% (e.g. 3.21 → 3.5, 3.51 → 4.0).
- *  «Up» because we'd rather over-buffer than clip an extra loser. */
-function roundUpHalfPct(pct: number): number {
-  return Math.ceil(pct * 2) / 2;
-}
 
 export function analyzeSlDistribution(
   trades: AnalyzableTrade[],
   opts: AnalyzeOptions = {},
 ): SlDistribution {
-  const maxSlPct = opts.maxSlPct ?? 0.05;
-  const targetCutRate = opts.targetCutRate ?? 0.10;
-  const capsToReport = opts.capsToReport ?? [3, 5, 7, 10, 15];
+  const maxSlPct = opts.maxSlPct ?? 0.08;
+  const capsToReport = opts.capsToReport ?? [3, 4, 5, 6, 7, 8, 10, 15];
 
   // Per-trade adverse-excursion %. Prefer MAE (worst price during trade
   // life) when available — it's the only honest input for «would the SL
@@ -136,7 +212,6 @@ export function analyzeSlDistribution(
   // (older imports without backfill).
   const adverseExcursions: number[] = [];
   let maeUsed = 0;
-  let realizedUsed = 0;
   for (const t of trades) {
     if (typeof t.maePct === 'number' && Number.isFinite(t.maePct)) {
       if (t.maePct > 0) adverseExcursions.push(t.maePct);
@@ -145,7 +220,6 @@ export function analyzeSlDistribution(
       const sign = t.side === 'long' ? 1 : -1;
       const realized = (sign * (t.exitPrice - t.entryPrice) / t.entryPrice) * 100;
       if (realized < 0) adverseExcursions.push(-realized);
-      realizedUsed++;
     }
   }
   const losses = adverseExcursions.sort((a, b) => a - b);
@@ -163,6 +237,8 @@ export function analyzeSlDistribution(
       lossCount: 0,
       percentiles: { p50: 0, p75: 0, p90: 0, p95: 0, p99: 0, worst: 0 },
       cutRates: Object.fromEntries(capsToReport.map((c) => [c, 0])),
+      simulations: {},
+      noCapSimulation: simulateAtCap(trades, 1.0),
       recommendedSlPct: null,
       verdict: 'incompatible',
       reasoning: 'No losses / adverse excursions in the trade log — cannot calibrate SL. Need at least 10 historical samples for reliable analysis.',
@@ -181,44 +257,64 @@ export function analyzeSlDistribution(
     cutRates[cap] = losses.filter((l) => l > cap).length / losses.length;
   }
 
-  const maxCapPct = maxSlPct * 100;
-  const cutAtMaxCap = losses.filter((l) => l > maxCapPct).length / losses.length;
+  // Phase Q: run PnL simulation for each candidate cap.
+  const simulations: Record<number, SimulationResult> = {};
+  for (const cap of capsToReport) {
+    simulations[cap] = simulateAtCap(trades, cap / 100);
+  }
+  const noCapSimulation = simulateAtCap(trades, 1.0); // "no cap" baseline
 
-  let recommendedSlPct: number | null;
-  let verdict: SlDistribution['verdict'];
+  // Pick the cap in [3..maxSlPct] that maximises sim net PnL.
+  const eligibleCaps = capsToReport.filter((c) => c <= maxSlPct * 100);
+  let bestCap: number | null = null;
+  let bestPnl = -Infinity;
+  for (const cap of eligibleCaps) {
+    if (simulations[cap]!.netPnlPct > bestPnl) {
+      bestPnl = simulations[cap]!.netPnlPct;
+      bestCap = cap;
+    }
+  }
+
+  let recommendedSlPct: number | null = null;
+  let verdict: SlDistribution['verdict'] = 'incompatible';
   let reasoning: string;
 
-  if (p90 <= maxCapPct && cutAtMaxCap <= targetCutRate) {
-    // Compatible: p90 fits AND the cap clips few enough losses.
-    // Recommend p90 × 1.2 buffer, rounded up to 0.5%, capped at max.
-    const suggested = Math.min(roundUpHalfPct(p90 * 1.2), maxCapPct);
-    recommendedSlPct = suggested / 100;
-    verdict = 'compatible';
-    reasoning =
-      `COMPATIBLE. p90 loss ${p90.toFixed(2)}% sits under cap ${maxCapPct.toFixed(0)}%. ` +
-      `At ${maxCapPct.toFixed(0)}% SL only ${(cutAtMaxCap * 100).toFixed(1)}% of historical losses would be clipped. ` +
-      `Recommended slPct = ${suggested.toFixed(1)}% (p90 × 1.2 buffer, rounded up to 0.5%).`;
-  } else if (cutAtMaxCap <= 0.25) {
-    // Borderline: max cap clips 10-25% of historical losses. The strategy
-    // will lose some EV — backtest stats will no longer apply 1:1.
-    recommendedSlPct = maxSlPct;
-    verdict = 'borderline';
-    reasoning =
-      `BORDERLINE. p90 loss ${p90.toFixed(2)}% exceeds cap ${maxCapPct.toFixed(0)}%. ` +
-      `Forcing slPct=${maxCapPct.toFixed(0)}% would clip ${(cutAtMaxCap * 100).toFixed(1)}% of historical losses ` +
-      `— above the ${(targetCutRate * 100).toFixed(0)}% target. ` +
-      `Strategy can still run, but expect realized PnL to differ from backtest (some natural losses become forced stops). ` +
-      `Consider running a small live-trial first.`;
-  } else {
-    // Incompatible: cap would clip > 25% of losses → strategy is
-    // fundamentally a wide-SL strategy. Don't enable under the cap.
-    recommendedSlPct = null;
+  const noCapPnl = noCapSimulation.netPnlPct;
+  const bestSim = bestCap != null ? simulations[bestCap]! : null;
+  const maxCapPct = maxSlPct * 100;
+
+  if (bestSim == null || bestSim.netPnlPct <= 0) {
     verdict = 'incompatible';
     reasoning =
-      `INCOMPATIBLE. ${(cutAtMaxCap * 100).toFixed(0)}% of historical losses exceed ${maxCapPct.toFixed(0)}%. ` +
-      `Tightening to fit the cap would chop the strategy in half. ` +
-      `Either find a different LuxAlgo variant with a tighter exit, ` +
-      `pick a smaller timeframe, or skip this strategy entirely.`;
+      `❌ INCOMPATIBLE. Best simulated PnL within ${maxCapPct.toFixed(0)}% cap is ${bestSim?.netPnlPct.toFixed(1) ?? '—'}% ` +
+      `(needs to be > 0). Strategy needs SL wider than ${maxCapPct.toFixed(0)}% to be profitable. ` +
+      `Either lift the global cap (MAX_SAFE_SL_PCT), find a tighter LuxAlgo variant, or skip.`;
+  } else {
+    recommendedSlPct = bestCap! / 100;
+    const ratio = noCapPnl > 0 ? bestSim.netPnlPct / noCapPnl : 1;
+    if (ratio >= 0.80 || noCapPnl <= 0) {
+      verdict = 'compatible';
+      reasoning =
+        `✅ COMPATIBLE. Recommended slPct ${bestCap}% → simulated PnL +${bestSim.netPnlPct.toFixed(1)}% ` +
+        `(PF ${bestSim.profitFactor.toFixed(2)}, max DD ${bestSim.maxDrawdownPct.toFixed(1)}%, worst trade ${bestSim.worstTradePct.toFixed(1)}%). ` +
+        `${ratio >= 1 ? 'Cap IMPROVES results vs no-cap (saves from worst excursions).'
+          : `Captures ${(ratio * 100).toFixed(0)}% of no-cap PnL (${noCapPnl.toFixed(1)}%).`}`;
+    } else if (ratio >= 0.50) {
+      verdict = 'borderline';
+      reasoning =
+        `⚠ BORDERLINE. Recommended slPct ${bestCap}% → PnL +${bestSim.netPnlPct.toFixed(1)}% ` +
+        `(${(ratio * 100).toFixed(0)}% of no-cap PnL ${noCapPnl.toFixed(1)}%). ` +
+        `Cap costs significant EV but strategy still profitable. ` +
+        `PF ${bestSim.profitFactor.toFixed(2)}, max DD ${bestSim.maxDrawdownPct.toFixed(1)}%, worst trade ${bestSim.worstTradePct.toFixed(1)}%. ` +
+        `Consider live-trial before promoting to paying tiers.`;
+    } else {
+      verdict = 'incompatible';
+      reasoning =
+        `❌ INCOMPATIBLE. Recommended slPct ${bestCap}% delivers only ${(ratio * 100).toFixed(0)}% ` +
+        `of the natural PnL (${bestSim.netPnlPct.toFixed(1)}% of ${noCapPnl.toFixed(1)}%). ` +
+        `The cap is too tight for this strategy — natural noise eats too much edge.`;
+      recommendedSlPct = null;
+    }
   }
 
   return {
@@ -228,6 +324,8 @@ export function analyzeSlDistribution(
     lossCount: losses.length,
     percentiles: { p50, p75, p90, p95, p99, worst },
     cutRates,
+    simulations,
+    noCapSimulation,
     recommendedSlPct,
     verdict,
     reasoning,
@@ -236,7 +334,7 @@ export function analyzeSlDistribution(
 
 /** Format a SlDistribution as a stdout-friendly report. */
 export function formatSlDistribution(d: SlDistribution): string {
-  const { percentiles, cutRates, totalTrades, lossCount, verdict, reasoning, source, maeCoverage } = d;
+  const { percentiles, totalTrades, lossCount, verdict, reasoning, source, maeCoverage, simulations, noCapSimulation } = d;
   const verdictBadge = verdict === 'compatible' ? '✅ COMPATIBLE'
     : verdict === 'borderline' ? '⚠ BORDERLINE'
     : '❌ INCOMPATIBLE';
@@ -247,29 +345,41 @@ export function formatSlDistribution(d: SlDistribution): string {
     source === 'mae'
       ? 'MAE (max adverse excursion — accurate)'
       : source === 'realized'
-        ? '⚠ realized loss only — UNDERESTIMATES cut rates; run scripts/backfill-mae.ts first'
+        ? '⚠ realized loss only — UNDERESTIMATES; run scripts/backfill-mae.ts first'
         : `mixed (${(maeCoverage * 100).toFixed(0)}% MAE, rest realized)`;
-  const lossLabel = source === 'realized' ? 'losing' : 'underwater at some point';
-  const cutLines = Object.entries(cutRates)
-    .map(([cap, rate]) => `  ${cap.padStart(2, ' ')}% SL → cuts ${(rate * 100).toFixed(1).padStart(5, ' ')}% of ${lossLabel} trades`)
-    .join('\n');
+
+  // PnL simulation table — Phase Q primary output
+  let simTable = `\nPnL simulation at candidate SL caps (% of $1000 notional, after commissions):\n`;
+  simTable += `  cap  | net_PnL  |   PF   |  WR   | max_DD | worst  | stop | killW | savL\n`;
+  simTable += `  -----|----------|--------|-------|--------|--------|------|-------|------\n`;
+  for (const [cap, s] of Object.entries(simulations)) {
+    const capStr = `${cap}%`.padStart(4);
+    const pnl = `+${s.netPnlPct.toFixed(1)}%`.padStart(8);
+    const pf = (s.profitFactor === Infinity ? '∞' : s.profitFactor.toFixed(2)).padStart(6);
+    const wr = `${(s.winRate * 100).toFixed(1)}%`.padStart(5);
+    const dd = `${s.maxDrawdownPct.toFixed(1)}%`.padStart(6);
+    const worst = `${s.worstTradePct.toFixed(1)}%`.padStart(6);
+    simTable += `  ${capStr} | ${pnl} | ${pf} | ${wr} | ${dd} | ${worst} | ${String(s.stoppedOut).padStart(4)} | ${String(s.killedWinners).padStart(5)} | ${String(s.savedFromLargerLoss).padStart(4)}\n`;
+  }
+  const ncpnl = `+${noCapSimulation.netPnlPct.toFixed(1)}%`.padStart(8);
+  const ncpf = (noCapSimulation.profitFactor === Infinity ? '∞' : noCapSimulation.profitFactor.toFixed(2)).padStart(6);
+  const ncwr = `${(noCapSimulation.winRate * 100).toFixed(1)}%`.padStart(5);
+  const ncdd = `${noCapSimulation.maxDrawdownPct.toFixed(1)}%`.padStart(6);
+  const ncworst = `${noCapSimulation.worstTradePct.toFixed(1)}%`.padStart(6);
+  simTable += `   ∞%  | ${ncpnl} | ${ncpf} | ${ncwr} | ${ncdd} | ${ncworst} | (no cap baseline)\n`;
+
   return (
     `\n` +
     `${verdictBadge}  recommended slPct = ${recStr}\n` +
     `\n` +
     `Data source: ${sourceLabel}\n` +
-    `${totalTrades} trades total, ${lossCount} ${lossLabel}\n` +
+    `${totalTrades} trades, ${lossCount} underwater at some point\n` +
     `\n` +
-    `Adverse-excursion percentiles (% from entry):\n` +
-    `  p50   = ${percentiles.p50.toFixed(2)}%\n` +
-    `  p75   = ${percentiles.p75.toFixed(2)}%\n` +
-    `  p90   = ${percentiles.p90.toFixed(2)}%\n` +
-    `  p95   = ${percentiles.p95.toFixed(2)}%\n` +
-    `  p99   = ${percentiles.p99.toFixed(2)}%\n` +
-    `  worst = ${percentiles.worst.toFixed(2)}%\n` +
-    `\n` +
-    `Cut rates at candidate SL caps:\n` +
-    cutLines + `\n` +
+    `MAE percentiles (% from entry):\n` +
+    `  p50=${percentiles.p50.toFixed(2)}%  p75=${percentiles.p75.toFixed(2)}%  ` +
+    `p90=${percentiles.p90.toFixed(2)}%  p95=${percentiles.p95.toFixed(2)}%  ` +
+    `worst=${percentiles.worst.toFixed(2)}%\n` +
+    simTable +
     `\n` +
     reasoning + `\n`
   );

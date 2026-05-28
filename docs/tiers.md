@@ -36,18 +36,24 @@ Robot Claude — сервис автотрейдинга на вашем Bybit-�
 
 | Стратегия | Символ | TF | SL | Плечо | Доступна в |
 |---|---|---|---|---|---|
-| STRAT-001 BNB Contrarian | BNBUSDT | 15m | 5% | 10× | Starter+ |
-| STRAT-007 BCH Contrarian Scalper | BCHUSDT | 5m | **3.5%** | **12×** | Starter+ |
-| STRAT-008 BTC Confirmation Strong | BTCUSDT | 5m | 4% | 11× | Starter+ |
-| STRAT-009 ETH OB Exited | ETHUSDT | 15m | 5% | 10× | Starter+ |
-| STRAT-002 XRP Contrarian | XRPUSDT | 15m | 5% | 10× | Standard+ |
+| STRAT-001 BNB Contrarian | BNBUSDT | 15m | 8% | 7× | Starter+ |
+| STRAT-007 BCH Contrarian Scalper | BCHUSDT | 5m | 7% | 8× | Starter+ |
+| STRAT-008 BTC Confirmation Strong | BTCUSDT | 5m | 7% | 8× | Starter+ |
+| STRAT-009 ETH OB Exited | ETHUSDT | 15m | 7% | 8× | Starter+ |
+| STRAT-002 XRP Contrarian | XRPUSDT | 15m | 8% | 7× | Standard+ |
+| STRAT-004 TRX Confluence | TRXUSDT | 1h | 5% | 10× | Plus+ |
+| STRAT-005 TON Contrarian Neo | TONUSDT | 1h | 7% | 8× | Prof |
+| STRAT-006 HBAR Contrarian Ranging | HBARUSDT | 1h | 6% | 9× | Prof |
+| STRAT-003 UNI Trend Strength | UNIUSDT | 1h | 7% | 8× | Prof |
 
-> **Phase P (28 мая 2026): жёсткий потолок SL ≤ 5%.** Хотим чтобы максимальная
-> просадка на одну сделку оставалась визуально приемлемой. Стратегии,
-> у которых нормальные убытки превышают 5% (UNI/TON/HBAR/TRX), отключены
-> до тех пор пока не найдётся вариант с более тугой логикой выхода. Лимит
-> энфорсится через `MAX_SAFE_SL_PCT` в `track-c-config.ts` — сервис не
-> стартует если включённая стратегия его нарушает.
+> **Phase Q (28 мая 2026): потолок SL ≤ 8%, методология PnL-симуляции.**
+> Phase P (5% cap) была переоценена через cut-rate, что приводило к
+> необоснованному отключению wide-SL стратегий. Phase Q использует
+> прямое моделирование PnL: для каждого кэпа симулируется чистая
+> доходность стратегии (force-close при MAE ≥ cap, иначе natural exit).
+> Выбирается кэп с максимальным PnL ≤ 8%. Лимит энфорсится через
+> `MAX_SAFE_SL_PCT` в `track-c-config.ts` — сервис не стартует если
+> включённая стратегия его нарушает.
 >
 > **Операторская заметка:** состав тарифов вычисляется автоматически из поля
 > `minTier` каждой стратегии. Добавляешь новую стратегию → ставишь

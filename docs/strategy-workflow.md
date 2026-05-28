@@ -1,9 +1,13 @@
 # Workflow: adding a new strategy
 
 This is the canonical process for evaluating and adding a Track C
-strategy. The hard rule (Phase P, May 28, 2026): **safety SL ≤ 5%**.
-Strategies whose natural loss distribution doesn't fit the cap are
-rejected at the audit stage.
+strategy. The hard rule (Phase Q, May 28, 2026): **safety SL ≤ 8%**.
+Strategies that can't be made profitable under an 8% cap are rejected.
+
+The verdict is based on **PnL simulation**, not cut rate. We simulate
+the strategy's net PnL at each candidate cap using MAE data (worst
+intra-trade excursion). The cap that maximises sim PnL within the 8%
+ceiling becomes the recommended slPct.
 
 ## Step 1 — Find a candidate in LuxAlgo
 
@@ -20,60 +24,84 @@ pnpm tsx scripts/import-strategy.ts <chat-url> --code 0XX --slug <slug>
 The importer:
 1. Scrapes Performance, Trades Analysis, and the full Trades Log.
 2. Saves the raw data to `src/strategies/data/<slug>.json`.
-3. Runs the SL-distribution audit on the trades log
-   (`src/lib/sl-distribution.ts`).
-4. Prints to stderr a verdict — **COMPATIBLE**, **BORDERLINE**, or
-   **INCOMPATIBLE**.
-5. Prints to stdout a ready-to-paste `StrategyConfig` block with
-   `slPct` already set to the recommendation.
+3. Prints to stdout a ready-to-paste `StrategyConfig` block (no MAE
+   yet — slPct will need refinement after Step 3).
 
-## Step 3 — Read the verdict
+## Step 2.5 — Backfill MAE (max adverse excursion)
+
+```bash
+pnpm tsx scripts/backfill-mae.ts <slug>
+```
+
+Fetches 5-minute Bybit klines for every trade's entry-to-exit window
+and computes the worst price against the position. Saves `maePct` per
+trade back into the JSON. Required for accurate SL simulation —
+without MAE, the audit falls back to realized loss (under-counts).
+
+## Step 3 — Audit + simulation
+
+```bash
+pnpm tsx scripts/audit-sl-distribution.ts <slug>
+```
+
+The auditor:
+1. Reads MAE-enriched trades log.
+2. Simulates net PnL at every candidate cap (3, 4, 5, 6, 7, 8, 10, 15%).
+3. Picks the cap that maximises sim PnL ≤ MAX_SAFE_SL_PCT (8%).
+4. Prints the full simulation table (PnL, PF, win rate, max DD,
+   worst trade, stop-outs, killed-winners, saved-from-loss per cap).
+5. Outputs the verdict — **COMPATIBLE**, **BORDERLINE**, or
+   **INCOMPATIBLE** — plus recommended slPct.
+
+## Step 4 — Read the verdict
 
 | Verdict | Meaning | Action |
 |---|---|---|
-| ✅ **COMPATIBLE** | p90 loss fits under 5%; cap clips ≤ 10% of historical losses. | Safe to enable. Paste the config, set `enabled: true`, deploy. |
-| ⚠ **BORDERLINE** | Cap clips 10–25% of historical losses. Backtest stats won't be 1:1 in live. | Acceptable, but run a small live trial (≥ 20 trades) before promoting to paying tiers. Either keep `enabled: false` until validated, or set `minTier: 'prof'` so only manual users see it. |
-| ❌ **INCOMPATIBLE** | Cap clips > 25% of historical losses — strategy needs wide SL by design. | **Do NOT enable.** Look for a tighter variant on LuxAlgo (different timeframe / different exit conditions), or skip this strategy. |
+| ✅ **COMPATIBLE** | Sim PnL at recommended cap ≥ 80% of no-cap PnL. Cap costs little or actually helps. | Safe to enable in any tier per `minTier`. |
+| ⚠ **BORDERLINE** | Sim PnL 50-80% of no-cap PnL. Cap saves from catastrophe but costs significant EV. | Acceptable. Set `minTier: 'prof'` (manual users only) until ≥ 20 live trades validate. |
+| ❌ **INCOMPATIBLE** | Sim PnL ≤ 0 OR < 50% of no-cap. The cap is too tight for this strategy. | **Do NOT enable.** Find a tighter variant on LuxAlgo or skip. |
 
-## Step 4 — Re-audit at any time
+## Step 5 — Re-audit at any time
 
 ```bash
-pnpm tsx scripts/audit-sl-distribution.ts                    # all strategies
-pnpm tsx scripts/audit-sl-distribution.ts <strategy-id>      # one
-pnpm tsx scripts/audit-sl-distribution.ts --cap 7            # explore a different cap
+pnpm tsx scripts/audit-sl-distribution.ts                # all strategies
+pnpm tsx scripts/audit-sl-distribution.ts <strategy-id>  # one
+pnpm tsx scripts/audit-sl-distribution.ts --cap 10       # explore a different cap
 ```
 
-Use this when:
+Use when:
 - The trades log has grown (LuxAlgo accumulated more history).
-- You want to see whether raising the global cap would unlock more
-  strategies (run with `--cap 7` or `--cap 10`).
 - You suspect a live-vs-backtest divergence in an existing strategy.
+- You want to see whether raising the global cap would change the
+  picture for a borderline strategy.
 
 ## The math (one paragraph)
 
-For each historical losing trade we compute `(exitPrice − entryPrice) /
-entryPrice × sideSign`, take the absolute value (a positive %
-magnitude), sort ascending, and compute percentiles. The **percentile
-X** is the loss magnitude that's bigger than X% of observed losses
-(`p90 = 3.7%` means «only 10% of losses were bigger than 3.7%»). The
-**cut@cap** is the fraction of historical losses that would have been
-force-closed by a safety SL at `cap` instead of letting the strategy
-exit naturally. The recommendation is `p90 × 1.2` (rounded up to
-0.5%, clamped at the global cap). Buffer factor 1.2 absorbs minor
-slippage and execution noise. Compatibility verdict is purely a
-function of `cut@cap` vs. the operator's tolerance threshold (default
-10%).
+For each historical trade we compute `mae = max adverse excursion %`
+(worst price against the position during the trade's life, sourced
+from Bybit 5-min klines). For each candidate cap, we simulate: if
+`mae ≥ cap` the trade is force-closed at `−cap`; else exits at its
+natural realized PnL. Sum across trades minus 0.11% commission (Bybit
+taker × 2 sides) = simulated net PnL. Compare to the no-cap baseline:
+ratio ≥ 80% → compatible, 50-80% → borderline, < 50% or negative →
+incompatible. The recommended `slPct` is the cap that maximises net
+PnL within MAX_SAFE_SL_PCT.
 
 ## Why a hard cap?
 
-UNI#002 once sat at −10.96% unrealized P&L for several days. Even
-though the strategy was statistically «inside its natural range»
-(p90 = 17%, worst observed = 24%), the visible drawdown was
-psychologically unacceptable for both operator and subscribers.
-Phase P enforces: no enabled strategy may have slPct > 5%
-(`MAX_SAFE_SL_PCT` in `src/strategies/track-c-config.ts`). The
-validator runs at server startup — a violation kills the service
-before it can open a position.
+UNI#002 once sat at −10.96% unrealized P&L for several days, even
+though that was statistically «inside the strategy's natural range»
+(p90 MAE 17%, worst observed 24%). The visible drawdown was
+psychologically unacceptable. Phase Q enforces: no enabled strategy
+may have slPct > 8% (`MAX_SAFE_SL_PCT` in
+`src/strategies/track-c-config.ts`). The validator runs at server
+startup — a violation kills the service before it accepts a webhook.
+
+The cap is **8%** (not 5% like Phase P) because the PnL-simulation
+analysis showed that 5% caps cost too much EV on the higher-volatility
+strategies: HBAR, TON, UNI, XRP all hit their best PnL at 6-8%.
+Operator's stated tolerance was «до 7-8%» — 8% picked as the
+ceiling.
 
 ## Files
 

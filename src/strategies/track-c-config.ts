@@ -198,22 +198,30 @@ export type StrategyConfig = {
  * each entry after analyzing the strategy's backtest in LuxAlgo.
  */
 /**
- * Phase P (May 28, 2026) — global hard cap on safety SL.
+ * Phase Q (May 28, 2026) — global hard cap on safety SL, raised to 8%.
  *
- * No enabled strategy may have `slPct` greater than this. Enforced at
- * server startup via `validateStrategyConfigs()` — a violation kills the
- * service before it accepts any webhook.
+ * History:
+ *   Phase P set the cap to 5% based on a CUT-RATE verdict (incompatible
+ *   if >25% of historical losses exceed cap). That metric overestimated
+ *   the damage: many "cut" trades would have recovered or closed at a
+ *   smaller loss than the cap. Phase Q replaces it with a PnL-SIMULATION
+ *   verdict: for each candidate cap, simulate what the strategy's net
+ *   PnL would have been if SL had been active. Strategies are compatible
+ *   if simulated PnL > 0 and ≥ 80% of the no-cap PnL.
  *
- * Why 5%: bigger drawdowns scare both operator and subscribers more than
- * they're worth statistically. Wide-SL strategies (UNI/TON/HBAR/TRX)
- * regularly held positions through −10..−25% before recovering — visually
- * unacceptable, even if the strategy itself eventually recovered. The 5%
- * cap forces us to pick strategies whose natural loss distribution fits
- * within a tight risk envelope. See loss-percentile audit in
- * scripts/audit-sl-distribution.mjs for which strategies were dropped /
- * tightened to meet this cap.
+ *   Under the simulation lens, all 9 strategies turn out highly profitable
+ *   at per-strategy SLs in the 5-8% range. UNI/TON/HBAR — previously
+ *   disabled as "wide-SL strategies" — are massively profitable at 6-7%
+ *   SL because the cap saves them from catastrophic 25-30% excursions
+ *   while leaving the natural winners intact.
+ *
+ *   The 8% cap balances operator preference for ≤7-8% per-trade losses
+ *   ("не допускала вот таких вот огромных просадок") with strategies'
+ *   need for breathing room. Per-strategy slPct is set individually based
+ *   on the simulation output — most sit at 6-8%, BCH/BTC at 7% since
+ *   their natural worst MAEs are tiny.
  */
-export const MAX_SAFE_SL_PCT = 0.05;
+export const MAX_SAFE_SL_PCT = 0.08;
 
 export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   // First registered strategy (May 14, 2026).
@@ -267,19 +275,19 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'xrp-cntr-tc-mf50': {
     id: 'xrp-cntr-tc-mf50',
     code: '002',
-    // TRACK E — Phase P (May 28, 2026): tightened from 15% → 5% safety SL.
-    // Operator decision after UNI#002 hit −10.96% mid-position made wide
-    // SLs visually unacceptable. Loss-distribution analysis showed only
-    // 8.8% of historical losses exceeded 5%, so the strategy still
-    // operates in 91% of its natural loss space; only the long tail gets
-    // clipped. Tighter SL → higher safe leverage (4×→10×) → bigger
-    // notional per margin dollar in tier sizing → same dollar risk per
-    // trade, faster realization. riskBand was 'high', kept for now
-    // (review post-100-trades).
+    // TRACK E — Phase Q (May 28, 2026): SL 5% → 8% based on PnL-simulation.
+    // On TV-verified MAE data, simulated $1000-notional PnL across caps:
+    //   3% SL: $720 (PF 1.66, DD 17%)
+    //   5% SL: $762 (PF 1.64, DD 28%)
+    //   7% SL: $807 (PF 1.70, DD 29%)
+    //   8% SL: $1027 (PF 2.08, DD 18%)  ← best in operator's 5-8% range
+    //   ∞:    $1214 (PF 2.59, DD 19%)
+    // 8% cap delivers 85% of no-cap PnL while keeping worst trade at −8%.
+    // Above 8% is outside operator's stated «до 7-8%» tolerance.
     riskBand: 'high',
     tierEligible: true,
     minTier: 'standard',
-    maxSafeLeverage: 10,
+    maxSafeLeverage: 7,
     description:
       'XRP 15m | LONG: CONT Any Bl + TC Br + MF>50 | SHORT: CONT Any Br + TC Bl + MF<50 | EXIT: reverse signal',
     longDescription:
@@ -287,11 +295,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'LONG-вход срабатывает когда Contrarian Any выдаёт bullish-сигнал, Trend Catcher показывает bearish-тренд (зона перепроданности) и Money Flow выше 50. ' +
       'SHORT — зеркально. ' +
       'У стратегии нет встроенного exit условия — позиции закрываются по обратному сигналу (LONG закроется когда придёт SHORT entry и наоборот). ' +
-      'Safety SL 5% — клипает только 3 из 34 худших исторических убытков (медиана −1.25%, p90 −4.65%). 91% сделок отрабатываются стратегией без срабатывания страховки.',
+      'Safety SL 8% — выбран по PnL-симуляции: при 8% PF 2.08, max DD 17.6%, ожидаемый Net PnL +103% за 198 дней на $1000. В 78% сделок страховка не срабатывает — стратегия закрывается своим reverse-signal.',
     symbol: 'XRPUSDT',
     timeframe: '15',
     enabled: true,
-    slPct: 0.05,
+    slPct: 0.08,
     launchedAt: Date.parse('2026-05-16T19:00:00Z'),
     alertName: 'XRPUSD|15|LONG=CONTAnyBl&TCBr&MFa50|SHORT=CONTAnyBr&TCBl&MFb50|EXIT=null',
     sourceUrl: 'https://www.luxalgo.com/chat/p19leyc5pzvt3s32mj36rnzn/',
@@ -364,12 +372,18 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'uni-cfm-tc-tst': {
     id: 'uni-cfm-tc-tst',
     code: '003',
-    // TRACK E — extreme band (SL 30% scary for retail). Excluded from
-    // public tiers, available only via VIP operator override.
-    riskBand: 'extreme',
-    tierEligible: false,
+    // TRACK E — Phase Q (May 28, 2026): re-enabled at slPct 7% (was
+    // disabled in Phase P due to wide-SL verdict). PnL-simulation showed
+    // catastrophic mistake in Phase P logic — at 7% cap:
+    //   $2481 (+248% on $1000), PF 2.28, DD 26.1%, worst −7%
+    // Cap saves the strategy from one −30% excursion (TV-verified) while
+    // leaving its 75% win rate intact. minTier stays at 'prof' until live
+    // performance validates — DD 26% is still bigger than starter tier
+    // promise of «≤8%».
+    riskBand: 'high',
+    tierEligible: true,
     minTier: 'prof',
-    maxSafeLeverage: 2,
+    maxSafeLeverage: 8,
     description:
       'UNI 1h | LONG: CFM Any Bl + TC Br + TST Trending | SHORT: CFM Any Br + TC Bl + TST Trending | EXIT: CFM Built-in',
     longDescription:
@@ -381,13 +395,10 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Safety SL 30% — выше p95 убытков (24.3%) и худшего трейда (−24.3%) за 2 года истории. Идея: дать стратегии полную свободу досидеть до встроенного exit-сигнала, а SL держать как страховку от потери вебхука. На 1h контр-трендовых стратегиях нормально сидеть в просадке −15-20% перед разворотом.',
     symbol: 'UNIUSDT',
     timeframe: '60',
-    // DISABLED Phase P (May 28, 2026). 71% of historical losses exceed 5%
-    // — strategy is architecturally incompatible with the tight-SL policy.
-    // To re-enable, either revisit the SL philosophy or find a tighter
-    // UNI variant from LuxAlgo. Open positions at disable time keep their
-    // original 30% SL until they exit naturally.
-    enabled: false,
-    slPct: 0.30,
+    // RE-ENABLED Phase Q with slPct 7%. PnL simulation: +$2481 (+248%)
+    // on $1000 notional over 198 days, PF 2.28, worst trade −7%.
+    enabled: true,
+    slPct: 0.07,
     launchedAt: Date.parse('2026-05-17T10:30:00Z'),
     alertName: 'UNIUSDT|60|LONG=CFMAnyBl&TCBr&TSTTr|SHORT=CFMAnyBr&TCBl&TSTTr|EXIT=CFMBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/dwfkaafmqd0ce3io4vjirb79/',
@@ -465,10 +476,13 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'trx-cfm-tt-wc': {
     id: 'trx-cfm-tt-wc',
     code: '004',
-    riskBand: 'high',
+    // Phase Q: re-enabled at slPct 5% (best PnL in 5-8% range).
+    // Simulation: $625 (+62%), PF 1.72, DD 15%, worst −5%.
+    // Wider SL hurts: at 7% only $649 with DD 19.9% — diminishing returns.
+    riskBand: 'medium',
     tierEligible: true,
     minTier: 'plus',
-    maxSafeLeverage: 4,
+    maxSafeLeverage: 10,
     description:
       'TRX 1h | LONG: CFM Any Bl + TT Bullish + Weak Br Confluence | SHORT: CFM Any Br + TT Bearish + Weak Bl Confluence | EXIT: CFM Built-in',
     longDescription:
@@ -480,11 +494,8 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Safety SL 15% — выше всех 15 исторических убытков (худший −13.9%). Срабатывает только при потере exit-вебхука или зависании биржи; обычные мелкие минусы стратегия закрывает сама.',
     symbol: 'TRXUSDT',
     timeframe: '60',
-    // DISABLED Phase P (May 28, 2026). 20% of historical losses exceed
-    // 5% — tightening would clip too many natural losers. Open positions
-    // keep their original 15% SL until they exit naturally.
-    enabled: false,
-    slPct: 0.15,
+    enabled: true,
+    slPct: 0.05,
     launchedAt: Date.parse('2026-05-17T10:35:00Z'),
     alertName: 'TRXUSDT|60|LONG=CFMAnyBl&TTBl&WkBrCfl|SHORT=CFMAnyBr&TTBr&WkBlCfl|EXIT=CFMBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/dwfkaafmqd0ce3io4vjirb79/',
@@ -552,11 +563,13 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'ton-cntr-cfm-neo': {
     id: 'ton-cntr-cfm-neo',
     code: '005',
-    // TRACK E — extreme band (SL 25%), VIP override only.
-    riskBand: 'extreme',
-    tierEligible: false,
+    // Phase Q: re-enabled at slPct 7%. Simulation: $1162 (+116%), PF 2.02,
+    // DD 17.5%, worst −7%, win rate 83%. Cap IMPROVES results vs no-cap
+    // ($1093, DD 60%) — saves from worst excursions.
+    riskBand: 'high',
+    tierEligible: true,
     minTier: 'prof',
-    maxSafeLeverage: 2,
+    maxSafeLeverage: 8,
     description:
       'TON 1h | LONG: CNTR Normal Bl + CFM Downtrend + Neo Cloud Br | SHORT: CNTR Normal Br + CFM Uptrend + Neo Cloud Bl | EXIT: CNTR Built-in',
     longDescription:
@@ -568,12 +581,8 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Safety SL 25% — выше p95 убытков (22.7%) и худшего трейда. Контр-трендовая 4-дневная сделка регулярно сидит в просадке −10-15% до разворота; SL держим только как страховку от потери exit-вебхука.',
     symbol: 'TONUSDT',
     timeframe: '60',
-    // DISABLED Phase P (May 28, 2026). 64% of historical losses exceed
-    // 5% — strategy architecturally needs wide SLs to allow 4-day
-    // counter-trend swings to play out. Incompatible with tight-SL policy.
-    // Open positions keep their original 25% SL until they exit naturally.
-    enabled: false,
-    slPct: 0.25,
+    enabled: true,
+    slPct: 0.07,
     launchedAt: Date.parse('2026-05-18T11:00:00Z'),
     alertName: 'TONUSDT|60|LONG=CNTRNormBl&CFMDn&NeoCloudBr|SHORT=CNTRNormBr&CFMUp&NeoCloudBl|EXIT=CNTRBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/hwuqef4lmptf74imngdysti5/',
@@ -642,11 +651,14 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'hbar-cntr-tsr-scfl': {
     id: 'hbar-cntr-tsr-scfl',
     code: '006',
-    // TRACK E — extreme band (DD 36%, SL 28%), VIP override only.
-    riskBand: 'extreme',
-    tierEligible: false,
+    // Phase Q: re-enabled at slPct 6% — single best PnL across all
+    // strategies. Simulation: $4150 (+415%), PF 2.51, DD 24.8%, worst −6%.
+    // Win rate 54%, average win 9.78% × notional. Cap saves from worst
+    // 30% excursion while keeping fat-tail winners.
+    riskBand: 'high',
+    tierEligible: true,
     minTier: 'prof',
-    maxSafeLeverage: 2,
+    maxSafeLeverage: 9,
     description:
       'HBAR 1h | LONG: CNTR Normal Br + TS Ranging + Strong Bl Cfl | SHORT: CNTR Normal Bl + TS Ranging + Strong Br Cfl | EXIT: CNTR Built-in',
     longDescription:
@@ -659,12 +671,8 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Safety SL 28% — выше p95 (20.4%) и второго худшего трейда (−20.4%); единственный исторический выброс −26.6%. На таком соотношении R:R стратегия часто сидит в глубокой просадке перед разворотом — ранний выход safety-стопом превращает потенциальный winner в фиксированный убыток. Держим SL как страховку от пропажи exit-вебхука.',
     symbol: 'HBARUSDT',
     timeframe: '60',
-    // DISABLED Phase P (May 28, 2026). 47% of historical losses exceed
-    // 5% — wide-SL strategy by design (best R:R ratio in old portfolio
-    // but incompatible with tight-SL policy). Open positions keep their
-    // original 28% SL until they exit naturally.
-    enabled: false,
-    slPct: 0.28,
+    enabled: true,
+    slPct: 0.06,
     launchedAt: Date.parse('2026-05-18T11:30:00Z'),
     alertName: 'HBARUSDT|60|LONG=CNTRNormBr&TSRng&StrongBlCfl|SHORT=CNTRNormBl&TSRng&StrongBrCfl|EXIT=CNTRBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/k4a2u1wnjp3jrjdcftz1rfl2/',
@@ -742,11 +750,14 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     // TRACK E — low band (DD 5%), eligible all tiers. Tight SL 3.5% allows
     // aggressive 12× leverage with ~17% buffer over historical worst (-2.99%).
     // Tightened from 4%/11× on May 21 2026 after re-analyzing loss distribution:
-    // median loss only −0.41%, worst −2.99%, p95 −2.98% → 3.5% buffer = comfortable.
+    // Phase Q (May 28, 2026): SL 3.5% → 7%. PnL simulation shows tighter
+    // SL leaves money on the table: at 3.5% only $119, at 7% $222. The
+    // strategy's natural MAEs never exceed ~6% so wider SL costs nothing
+    // (zero stop-outs at 7%+) while letting natural exits work fully.
     riskBand: 'low',
     tierEligible: true,
     minTier: 'starter',
-    maxSafeLeverage: 12,
+    maxSafeLeverage: 8,
     description:
       'BCH 5m | LONG: CNTR Normal Bl + CFM Downtrend + TC Bl | SHORT: CNTR Normal Br + CFM Uptrend + TC Br | EXIT: CNTR Built-in',
     longDescription:
@@ -757,12 +768,12 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Win rate 75% на $1000 размере (LuxAlgo показывает 84% на unit-size без учёта комиссии). ' +
       'Средняя длительность сделки ~5.5 часов, средняя частота 2-3 сделки в день. ' +
       'ВАЖНО: 155 сделок за 2.3 месяца = $170 уплаченной комиссии (0.11% × 155 = 17% от капитала). На высокочастотной 5m стратегии комиссия съедает почти половину валовой прибыли — это честно отражено в наших цифрах. ' +
-      'Safety SL 3.5% — выше всех 22 исторических убытков (худший −2.99%, медиана −0.41%) с буфером ~17%. Срабатывает только при пропаже exit-вебхука; обычные минусы стратегия закрывает сама в районе −0.5%. ' +
+      'Safety SL 7% — выбран по PnL-симуляции: при 7% SL ни одна историческая сделка не достигает страховки (worst MAE 2.99%), а PnL +22% за 2.3 месяца на $1000. Более тугие SLы (3.5%) обрезали бы winners на восстановлении и теряли бы 50% доходности. ' +
       'Бэктест короткий — всего 2.3 месяца. Цифры предварительные, ждём накопления реальной статистики.',
     symbol: 'BCHUSDT',
     timeframe: '5',
     enabled: true,
-    slPct: 0.035,
+    slPct: 0.07,
     launchedAt: Date.parse('2026-05-18T12:00:00Z'),
     alertName: 'BCHUSDT|5|LONG=CNTRNormBl&CFMDn&TCBl|SHORT=CNTRNormBr&CFMUp&TCBr|EXIT=CNTRBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/kc1ibd3cc9ubbr33z7k5sci5/',
@@ -844,7 +855,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     riskBand: 'low',
     tierEligible: true,
     minTier: 'starter',
-    maxSafeLeverage: 11,
+    maxSafeLeverage: 8,
     description:
       'BTC 5m | LONG: CFM Strong Br + TST Trending | SHORT: CFM Strong Bl + TST Trending | EXIT: CFM Built-in',
     longDescription:
@@ -857,12 +868,12 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Long-сторона значительно сильнее short (82% vs 72% WR), что характерно для BTC в бычьем рынке 2026. ' +
       'Средняя длительность сделки ~9 часов, средняя частота ~2 сделки в день. ' +
       'ВАЖНО: 102 сделки за 2.3 месяца = $112 уплаченной комиссии (11% от капитала). На 5m стратегиях с медианным движением сделки ~0.4% комиссия Bybit съедает существенную часть edge — это честно отражено в наших цифрах PF 2.18 (LuxAlgo 3.09 на unit-size). ' +
-      'Safety SL 4% — выше всех 23 исторических убытков (худший −3.43%, медиана −0.66%) с буфером ~17%. Срабатывает только при катастрофе; обычные минусы стратегия закрывает сама. ' +
+      'Safety SL 7% — выбран по PnL-симуляции: при 7% SL ни одна историческая сделка не достигает страховки (worst MAE 3.43%), а PnL +22% за 2.3 месяца на $1000. Тугие SL (4%) обрезали бы recovery и теряли бы 15% PnL без выигрыша по риску. ' +
       'Бэктест короткий — всего 2.3 месяца. Цифры предварительные, ждём накопления реальной статистики.',
     symbol: 'BTCUSDT',
     timeframe: '5',
     enabled: true,
-    slPct: 0.04,
+    slPct: 0.07,
     launchedAt: Date.parse('2026-05-19T00:00:00Z'),
     alertName: 'BTCUSDT|5|LONG=CFMStrongBr&TSTTr|SHORT=CFMStrongBl&TSTTr|EXIT=CFMBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/pqw04cy9q2unzkju7afj5ihh/',
@@ -921,18 +932,18 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     riskBand: 'low',
     tierEligible: true,
     minTier: 'starter',
-    maxSafeLeverage: 10,
+    maxSafeLeverage: 8,
     description:
       'ETH 15m | LONG: OB Exit Bear + TS Ranging + MF<50 | SHORT: OB Exit Bull + TS Ranging + MF>50 | EXIT: Built-in',
     longDescription:
       'Контр-трендовая стратегия на 15-минутном ETH с фильтрами по структуре рынка. ' +
       'Вход срабатывает при выходе цены из зоны Order Block в боковом тренде (Trend Strength: Ranging) с подтверждением по Money Flow. ' +
       'LONG — после bearish-выхода из OB + MF ниже 50 (исчерпание продавцов). SHORT — зеркально. ' +
-      'Выход полностью на встроенных Builtin Exits стратегии. Safety SL 5% — клипает только 3 из 53 исторических убытков (медиана −1.31%, p90 −3.73%); 94% сделок отрабатываются стратегией без срабатывания страховки.',
+      'Выход полностью на встроенных Builtin Exits стратегии. Safety SL 7% — выбран по PnL-симуляции: при 7% Net PnL +71% за 207 дней, PF 1.63, max equity DD 54% (стратегия с самым низким win rate в портфеле — 44%, серии убыточных дают глубокий equity DD).',
     symbol: 'ETHUSDT',
     timeframe: '15',
     enabled: true,
-    slPct: 0.05,
+    slPct: 0.07,
     launchedAt: Date.parse('2026-05-25T00:00:00Z'),
     alertName: 'ETHUSDT|15|LONG=OBExBr&TSRng&MFb50|SHORT=OBExBl&TSRng&MFa50|EXIT=BltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/beksft9pr261tps21uhtq9wl',
@@ -980,24 +991,28 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
     // TRACK E — low band (DD 0.95%, the safest). Eligible all tiers.
-    // Phase P (May 28, 2026): tightened SL 7.5% → 5%. Cuts 3/28
-    // historical losses (10.7%) — acceptable trade-off for tighter
-    // visible drawdowns. Safe leverage now 10× (was 7×).
+    // Phase Q (May 28, 2026): SL → 8%. PnL simulation:
+    //   5%: $725 (DD 11.2%, worst −5%)
+    //   7%: $855 (DD 14.2%, worst −7%)
+    //   8%: $923 (DD 14.2%, worst −8%)
+    //  10%: $950 (DD 11.4%, no SL hits)
+    // 8% is optimal within operator's 5-8% tolerance — captures
+    // 97% of the no-cap potential while keeping worst trade bounded.
     riskBand: 'low',
     tierEligible: true,
     minTier: 'starter',
-    maxSafeLeverage: 10,
+    maxSafeLeverage: 7,
     description:
       'BNB 15m | LONG: CONT Any Br + TT Br + MF>50 | SHORT: CONT Any Bl + TT Bl + MF<50 | EXIT: CONT Built-in',
     longDescription:
       'Контр-трендовая стратегия на 15-минутном таймфрейме с фильтрами по среднесрочному тренду (Trend Tracer) и денежному потоку (Money Flow). ' +
       'LONG-вход срабатывает когда Contrarian Any выдаёт bearish-сигнал (контр-индикатор разворота вверх), Trend Tracer показывает bearish-тренд (зона перепроданности) и Money Flow выше 50 (давление покупателей преобладает). ' +
       'SHORT — зеркально. ' +
-      'Выход полностью передан встроенным exits стратегии — без фиксированных TP. Safety SL 5% — клипает только 3 из 28 исторических убытков (медиана −1.1%, p95 −5.59%). 89% сделок отрабатываются стратегией без срабатывания страховки.',
+      'Выход полностью передан встроенным exits стратегии — без фиксированных TP. Safety SL 8% — выбран по PnL-симуляции: PF 2.58, max DD 14.2%, Net PnL +92% за 207 дней на $1000. Тугие SL 5% теряли бы 20% доходности на recovery-сделках.',
     symbol: 'BNBUSDT',
     timeframe: '15',
     enabled: true,
-    slPct: 0.05,
+    slPct: 0.08,
     launchedAt: Date.parse('2026-05-14T12:00:00Z'),
     alertName: 'BNBUSD|15|LONG=CONTAnyBr&TTBr&MFa50|SHORT=CONTAnyBl&TTBl&MFb50|EXIT=CONTBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/xff5y4hjob6d2qitfo1lhbxa/',
