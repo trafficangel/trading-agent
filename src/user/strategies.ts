@@ -28,6 +28,8 @@ import {
 } from '../strategies/tier-config.js';
 import type { UserStrategyRow } from '../db/repos/user-strategies.js';
 import { csrfInput } from '../auth/csrf.js';
+import { getStrategyPnlEstimates } from '../lib/strategy-pnl.js';
+import { MAX_SAFE_SL_PCT } from '../strategies/track-c-config.js';
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({
@@ -121,9 +123,80 @@ function renderBody(args: RenderArgs): string {
       ${flashHtml}
       ${banners}
       ${tierCard}
+      ${args.isProf ? renderProfCalculator() : ''}
       ${strategiesGrid}
       ${pauseControl}
     </main>
+  `;
+}
+
+/**
+ * Prof-cabinet target-profit calculator. Pure client-side: we embed
+ * each enabled strategy's SL-capped monthly PnL per $1000 notional,
+ * and a small script solves для целевого профита → notional на стратегию
+ * + рекомендуемый депозит (по cross-liq safe ceiling) + диапазон ±30%.
+ */
+function renderProfCalculator(): string {
+  const estimates = getStrategyPnlEstimates();
+  const totalPer1000 = estimates.reduce((acc, s) => acc + s.monthlyPnlPer1000, 0);
+  const safeCeiling = 0.70 / MAX_SAFE_SL_PCT; // Σ notional ≤ equity × this
+  // Embed the per-strategy numbers for the live calc.
+  const dataJson = JSON.stringify({
+    strategies: estimates.map((s) => ({ coin: s.coin, lev: s.leverage, per1000: s.monthlyPnlPer1000 })),
+    totalPer1000: Math.round(totalPer1000 * 100) / 100,
+    safeCeiling: Math.round(safeCeiling * 100) / 100,
+    count: estimates.length,
+  });
+  return `
+    <div class="prof-calc cabinet-card" data-prof-calc='${dataJson.replace(/'/g, '&#39;')}'>
+      <div class="prof-calc-title">${ico('🎯')}Калькулятор целевого профита</div>
+      <p class="prof-calc-sub">
+        Введите желаемую прибыль в месяц — посчитаем размер позиции на каждую стратегию
+        и рекомендуемый депозит. Расчёт по backtest-симуляции под текущими SL —
+        <b>не гарантия</b>, фактический результат варьируется.
+      </p>
+      <div class="prof-calc-input-row">
+        <label for="prof-calc-target">Целевой профит, $/мес</label>
+        <input type="number" id="prof-calc-target" min="50" max="100000" step="50" value="1500" inputmode="numeric">
+      </div>
+      <div class="prof-calc-results" id="prof-calc-results"></div>
+      <div class="prof-calc-note" id="prof-calc-note"></div>
+    </div>
+    <script>
+    (function() {
+      var root = document.querySelector('[data-prof-calc]');
+      if (!root) return;
+      var data;
+      try { data = JSON.parse(root.getAttribute('data-prof-calc')); } catch (e) { return; }
+      var input = document.getElementById('prof-calc-target');
+      var resultsEl = document.getElementById('prof-calc-results');
+      var noteEl = document.getElementById('prof-calc-note');
+      function fmt(n) { return '$' + Math.round(n).toLocaleString('ru'); }
+      function recalc() {
+        var target = parseFloat(input.value);
+        if (!isFinite(target) || target <= 0) { resultsEl.innerHTML = ''; noteEl.textContent = ''; return; }
+        if (data.totalPer1000 <= 0) { resultsEl.innerHTML = '<div class="prof-calc-warn">Недостаточно данных для расчёта.</div>'; return; }
+        // Uniform notional N across all strategies: target = N/1000 × Σper1000
+        var notional = target / data.totalPer1000 * 1000;
+        var sumNotional = notional * data.count;
+        var minEquity = sumNotional / data.safeCeiling;
+        var recDeposit = minEquity * 1.3;
+        var lo = Math.round(target * 0.7);
+        var hi = Math.round(target * 1.3);
+        resultsEl.innerHTML =
+          '<div class="prof-calc-stat"><span>Размер позиции на стратегию</span><b>' + fmt(notional) + '</b></div>' +
+          '<div class="prof-calc-stat"><span>Стратегий в работе</span><b>' + data.count + '</b></div>' +
+          '<div class="prof-calc-stat"><span>Суммарный объём (если все открыты)</span><b>' + fmt(sumNotional) + '</b></div>' +
+          '<div class="prof-calc-stat prof-calc-stat-hl"><span>Рекомендуемый депозит</span><b>' + fmt(recDeposit) + '</b></div>' +
+          '<div class="prof-calc-stat"><span>Ожидаемый диапазон прибыли</span><b>' + fmt(lo) + ' – ' + fmt(hi) + '/мес</b></div>';
+        noteEl.innerHTML = 'Минимальный безопасный депозит под этот объём — ' + fmt(minEquity) +
+          ' (порог cross-ликвидации ' + data.safeCeiling.toFixed(1) + '×). Рекомендуемый включает буфер +30% на funding и просадку. ' +
+          'Диапазон ±30% отражает разброс live vs backtest.';
+      }
+      input.addEventListener('input', recalc);
+      recalc();
+    })();
+    </script>
   `;
 }
 
@@ -606,6 +679,36 @@ function styles(): string {
   .prof-warning b { color: #ff8b8b; }
   .prof-form { margin: 18px 0; }
   .prof-list { display: flex; flex-direction: column; gap: 10px; }
+  /* Prof target-profit calculator */
+  .prof-calc { padding: 20px 22px; margin-bottom: 20px; }
+  .prof-calc-title { font-size: 16px; font-weight: 600; color: #e8edf2; margin-bottom: 6px; }
+  .prof-calc-sub { font-size: 13px; color: #98a2b3; line-height: 1.5; margin: 0 0 16px; }
+  .prof-calc-sub b { color: #c7d0dc; }
+  .prof-calc-input-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .prof-calc-input-row label { font-size: 13px; color: #c7d0dc; }
+  .prof-calc-input-row input {
+    background: #0b0e13; border: 1px solid #2a323d; color: #e8edf2;
+    border-radius: 8px; padding: 10px 14px; font-size: 18px; font-weight: 600;
+    width: 160px; font-family: inherit;
+  }
+  .prof-calc-input-row input:focus { outline: none; border-color: #4ad991; }
+  .prof-calc-results { display: flex; flex-direction: column; gap: 8px; }
+  .prof-calc-stat {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 9px 12px; border-radius: 8px; background: #11161d;
+    font-size: 13.5px;
+  }
+  .prof-calc-stat span { color: #98a2b3; }
+  .prof-calc-stat b { color: #e8edf2; font-size: 15px; }
+  .prof-calc-stat-hl { background: rgba(74,217,145,0.10); border: 1px solid rgba(74,217,145,0.25); }
+  .prof-calc-stat-hl b { color: #4ad991; }
+  .prof-calc-warn { color: #f5b14d; font-size: 13px; padding: 10px; }
+  .prof-calc-note { font-size: 11.5px; color: #6b7480; line-height: 1.5; margin-top: 12px; }
+  @media (max-width: 640px) {
+    .prof-calc { padding: 16px; }
+    .prof-calc-stat { flex-direction: column; align-items: flex-start; gap: 2px; }
+  }
+
   .prof-row {
     display: grid;
     grid-template-columns: auto 1fr 120px 95px 95px;
