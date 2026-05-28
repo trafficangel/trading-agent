@@ -230,35 +230,48 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
     }
   }
   // Cross-liquidation exposure check — WARN ONLY (never blocks).
-  // In cross-margin, liquidation is governed by Σ(open notional) / equity,
-  // not per-position leverage. Safe ceiling: Σ notional ≤ equity ×
-  // (0.70 / maxSlPct). Above that, a coordinated adverse move could
-  // liquidate the whole account BEFORE the per-strategy safety SL fires.
-  // We surface this to the operator but let them manage it (Prof tier
-  // request: «чтоб система сама не блокировала вход, может предупреждала»).
+  // In cross-margin a market-wide crash liquidates the account when
+  // equity falls below total maintenance margin. The thing that moves
+  // equity in a CORRELATED move is the NET directional exposure
+  // |Σ long − Σ short|, NOT the gross notional: a −X% market move loses
+  // on longs but GAINS on shorts, so a balanced book barely moves.
+  // (Operator point: «позиции не всегда в одном направлении, движение
+  //  −5.6% в одном направлении это плюс в другом».)
+  //
+  // Idiosyncratic single-coin spikes are bounded by that one position's
+  // own safety SL, so they're not the cross-liquidation concern — the
+  // net-directional measure is the right first-order risk metric. (It
+  // still slightly overstates risk since different coins aren't perfectly
+  // correlated, which is fine for a soft warning.)
   {
     const eq = margin.balanceUsdt;
     if (eq !== null && eq > 0) {
-      // Σ existing notional from open rows (qty × avg price) + this entry.
-      let existingNotional = 0;
+      let longNotional = 0;
+      let shortNotional = 0;
       for (const r of activeRows) {
-        if (r.bybit_qty && r.bybit_avg_price) existingNotional += r.bybit_qty * r.bybit_avg_price;
+        if (!r.bybit_qty || !r.bybit_avg_price) continue;
+        const n = r.bybit_qty * r.bybit_avg_price;
+        if (r.side === 'short') shortNotional += n; else longNotional += n;
       }
-      const totalNotional = existingNotional + t.notional_usd;
-      const effLeverage = totalNotional / eq;
+      // Include this pending entry on its own side.
+      if (args.side === 'short') shortNotional += t.notional_usd; else longNotional += t.notional_usd;
+      const netNotional = Math.abs(longNotional - shortNotional);
+      const grossNotional = longNotional + shortNotional;
+      const netLeverage = netNotional / eq;
       const safeCeiling = 0.70 / MAX_SAFE_SL_PCT; // e.g. 8.75× at 8% cap
-      if (effLeverage > safeCeiling) {
-        const liqMovePct = (1 / effLeverage) * 100;
+      if (netLeverage > safeCeiling) {
+        const liqMovePct = (1 / netLeverage) * 100;
+        const dir = longNotional >= shortNotional ? 'LONG' : 'SHORT';
         enqueueOperatorLog(
           `⚠️ Cross-liq риск · user_id=${t.user_id} · ${args.symbol} ${args.side}\n` +
-          `Σ notional $${totalNotional.toFixed(0)} / эквити $${eq.toFixed(0)} = ${effLeverage.toFixed(1)}× ` +
-          `(порог ${safeCeiling.toFixed(1)}×)\n` +
-          `Ликвидация при среднем движении −${liqMovePct.toFixed(1)}% — это РАНЬШЕ safety SL. ` +
-          `Позиция открыта (prof = ручной контроль), но рекомендую долить депозит или закрыть часть.`,
+          `Нетто-экспозиция ${dir} $${netNotional.toFixed(0)} / эквити $${eq.toFixed(0)} = ${netLeverage.toFixed(1)}× ` +
+          `(порог ${safeCeiling.toFixed(1)}×; gross $${grossNotional.toFixed(0)})\n` +
+          `Коррелированное движение против ${dir} на −${liqMovePct.toFixed(1)}% грозит ликвидацией раньше SL. ` +
+          `Позиция открыта (prof = ручной контроль), рекомендую долить депозит, закрыть часть ${dir} или добрать встречную сторону.`,
         );
         logger.warn(
-          { userId: t.user_id, totalNotional, equity: eq, effLeverage, safeCeiling },
-          'fanOutEntry: cross-liquidation exposure above safe ceiling (warn-only, position still opened)',
+          { userId: t.user_id, longNotional, shortNotional, netNotional, equity: eq, netLeverage, safeCeiling },
+          'fanOutEntry: net-directional cross-liq exposure above safe ceiling (warn-only, position still opened)',
         );
       }
     }
