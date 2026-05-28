@@ -1222,7 +1222,7 @@ const STYLE = `
   .strat-row-single .strat-row { max-width: 600px; width: 100%; }
 
   /* ---------- Collapsible TF group (replaces carousel) ---------- */
-  .tf-group-details { margin-bottom: 40px; }
+  .tf-group-details { margin-bottom: 20px; }
   .tf-group-details > summary.tf-group-summary {
     list-style: none; cursor: pointer; position: relative;
     display: block;
@@ -1252,7 +1252,7 @@ const STYLE = `
      single-card layout, with comfortable gap between cards. */
   .tf-group-list {
     display: flex; flex-direction: column; align-items: center;
-    gap: 12px; padding: 14px 4px 4px;
+    gap: 8px; padding: 10px 4px 2px;
   }
   .tf-group-list .strat-row {
     flex: 0 0 auto; width: 100%; max-width: 600px;
@@ -1266,13 +1266,13 @@ const STYLE = `
   }
 
   .strat-row {
-    display: flex; flex-direction: column; gap: 4px;
+    display: flex; flex-direction: column; gap: 2px;
     text-decoration: none; color: inherit; position: relative;
     background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 12px; padding: 16px 18px 14px;
+    border-radius: 10px; padding: 11px 14px 10px;
     flex: 0 0 360px; min-width: 0;
     scroll-snap-align: center;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.20);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.18);
     transition: border-color 180ms;
   }
   .strat-row:hover {
@@ -1282,10 +1282,10 @@ const STYLE = `
   /* Position-in-group badge — small chip in the upper-right corner with
      the strategy's rank inside this timeframe (1 / 5, 2 / 5, …). */
   .strat-row-num {
-    position: absolute; top: 10px; right: 14px;
-    font-family: 'SF Mono', 'Menlo', monospace; font-size: 11px;
+    position: absolute; top: 8px; right: 10px;
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 10px;
     font-weight: 700; color: var(--text-dim);
-    padding: 2px 8px; border-radius: 999px;
+    padding: 1px 6px; border-radius: 999px;
     background: var(--bg); border: 1px solid var(--border);
     letter-spacing: 0.04em;
   }
@@ -1342,10 +1342,10 @@ const STYLE = `
   }
   .strat-row-head {
     display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 6px; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 3px; gap: 10px; flex-wrap: wrap;
     /* Reserve room on the right for the absolute-positioned number
        badge so the status pill doesn't run into it. */
-    padding-right: 56px;
+    padding-right: 50px;
   }
   .strat-row-id { display: flex; align-items: baseline; gap: 8px; }
   .strat-code-mini {
@@ -1353,29 +1353,29 @@ const STYLE = `
     color: var(--text-faint); letter-spacing: 0.08em; font-weight: 600;
   }
   .strat-row-symbol {
-    font-size: 17px; font-weight: 600; color: var(--text);
+    font-size: 15px; font-weight: 600; color: var(--text);
     letter-spacing: -0.01em;
   }
   .strat-row-tf {
-    font-family: 'SF Mono', 'Menlo', monospace; font-size: 12px;
-    color: var(--text-dim); padding: 2px 6px;
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 11px;
+    color: var(--text-dim); padding: 1px 5px;
     background: var(--bg); border-radius: 3px;
   }
   .strat-row-desc {
-    font-size: 13px; color: var(--text-dim); margin-bottom: 8px;
+    font-size: 12px; color: var(--text-dim); margin-bottom: 4px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .row-stat-line {
-    display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
-    font-size: 13px; margin-top: 4px;
+    display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap;
+    font-size: 12px; margin-top: 2px;
   }
   .row-stat-line.dim { color: var(--text-faint); font-style: italic; }
   .stat-tag {
-    font-family: 'SF Mono', 'Menlo', monospace; font-size: 10px;
-    font-weight: 700; letter-spacing: 0.06em;
-    color: var(--text-faint); padding: 2px 6px;
-    background: var(--bg); border-radius: 3px; min-width: 36px;
-    text-align: center; margin-right: 4px;
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 9.5px;
+    font-weight: 700; letter-spacing: 0.05em;
+    color: var(--text-faint); padding: 1px 5px;
+    background: var(--bg); border-radius: 3px; min-width: 32px;
+    text-align: center; margin-right: 3px;
   }
   .row-stat-line .pos { color: var(--accent); }
   .row-stat-line .neg { color: var(--danger); }
@@ -1384,7 +1384,7 @@ const STYLE = `
    *  derived/projected. Smaller font, dimmer color, but the value
    *  itself keeps the green/red accent. */
   .row-stat-cagr {
-    font-size: 12px; color: var(--text-dim); margin-top: 2px;
+    font-size: 11.5px; color: var(--text-dim); margin-top: 1px;
   }
   .row-stat-cagr .stat-tag { background: transparent; padding: 1px 5px; }
   /* SL row — calmer than backtest/live, since it's a risk parameter not
