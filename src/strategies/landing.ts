@@ -1221,6 +1221,50 @@ const STYLE = `
   }
   .strat-row-single .strat-row { max-width: 600px; width: 100%; }
 
+  /* ---------- Collapsible TF group (replaces carousel) ---------- */
+  .tf-group-details { margin-bottom: 40px; }
+  .tf-group-details > summary.tf-group-summary {
+    list-style: none; cursor: pointer; position: relative;
+    display: block;
+  }
+  .tf-group-details > summary::-webkit-details-marker { display: none; }
+  .tf-group-summary:focus-visible {
+    outline: 2px solid rgba(74, 217, 145, 0.4); outline-offset: 4px;
+    border-radius: 12px;
+  }
+  /* Chevron — sits inside summary, rotates when details opens. */
+  .tf-group-chevron {
+    position: absolute; top: 50%; right: 18px;
+    transform: translateY(-50%); font-size: 18px; line-height: 1;
+    color: var(--text-faint); transition: transform 200ms ease;
+    pointer-events: none;
+  }
+  details[open] > summary .tf-group-chevron { transform: translateY(-50%) rotate(180deg); }
+  /* The header card inside summary doesn't need its own click handler. */
+  .tf-group-summary .tf-group-card {
+    transition: background 180ms;
+    padding-right: 50px; /* reserve room for chevron */
+  }
+  .tf-group-summary:hover .tf-group-card {
+    background: linear-gradient(180deg, rgba(74,217,145,0.06) 0%, var(--bg-card-hover) 100%);
+  }
+  /* Vertical list of strategies. Centred, capped width matching the
+     single-card layout, with comfortable gap between cards. */
+  .tf-group-list {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 12px; padding: 14px 4px 4px;
+  }
+  .tf-group-list .strat-row {
+    flex: 0 0 auto; width: 100%; max-width: 600px;
+    scroll-snap-align: none;
+    opacity: 1 !important;
+  }
+  @media (max-width: 640px) {
+    .tf-group-list { gap: 10px; padding: 10px 0 0; }
+    .tf-group-list .strat-row { width: 100%; max-width: 100%; padding: 14px 16px 12px; }
+    .tf-group-chevron { right: 12px; font-size: 16px; }
+  }
+
   .strat-row {
     display: flex; flex-direction: column; gap: 4px;
     text-decoration: none; color: inherit; position: relative;
@@ -3763,26 +3807,23 @@ function renderStrategyIndex(
           ${chips.length > 0 ? `<div class="tf-group-card-stats">${chips.join('')}</div>` : ''}
         </div>`;
 
-      // Single-card groups skip the carousel chrome (arrows/snap make
-      // no sense with 1 item) and render as a plain centred card.
-      if (groupSize === 1) {
-        return `
-          <div class="tf-group">
-            ${headerCard}
-            <div class="strat-row-single">${cardsHtml}</div>
-          </div>`;
-      }
+      // Collapsible per-TF list — replaces the old horizontal carousel.
+      // Operator: «уберем слайдер, лучше сделаем раскрывающийся список».
+      // The <details>/<summary> pair gives the toggle for free with no JS;
+      // the summary IS the headerCard (clicking anywhere on it expands).
+      // open attribute on the first (smallest TF) group so visitors see
+      // SOMETHING expanded without having to click.
+      const openByDefault = tf === sortedTfs[0];
       return `
-        <div class="tf-group">
-          ${headerCard}
-          <div class="strat-row-carousel-wrap" data-carousel="focus">
-            <button class="rc-carousel-arrow rc-carousel-arrow-prev" data-rc-prev aria-label="prev">‹</button>
-            <div class="strat-row-carousel rc-carousel-track" role="region" aria-label="Стратегии ${tfLabel(String(tf))}">
-              ${cardsHtml}
-            </div>
-            <button class="rc-carousel-arrow rc-carousel-arrow-next" data-rc-next aria-label="next">›</button>
+        <details class="tf-group tf-group-details" ${openByDefault ? 'open' : ''}>
+          <summary class="tf-group-summary">
+            ${headerCard}
+            <span class="tf-group-chevron" aria-hidden="true">▾</span>
+          </summary>
+          <div class="tf-group-list" role="region" aria-label="Стратегии ${tfLabel(String(tf))}">
+            ${cardsHtml}
           </div>
-        </div>`;
+        </details>`;
     })
     .join('\n');
 
