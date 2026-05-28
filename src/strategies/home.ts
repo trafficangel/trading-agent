@@ -287,7 +287,7 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           q: 'Что если стратегия в просадке?',
-          a: 'Просадка — это нормально, любая торговая система проходит через периоды убытков. У каждой стратегии есть Safety SL (защитный стоп выше исторических убытков), который ограничивает максимальную потерю. В автотрейдинге можете в любой момент отключить конкретную стратегию или весь автотрейдинг — открытые позиции продолжат жить до естественного выхода.',
+          a: 'Просадка — это нормально, любая торговая система проходит через периоды убытков. У каждой стратегии есть Safety SL (не более 8% от цены входа), который ограничивает максимальную потерю на одной сделке заранее известной величиной. В автотрейдинге можете в любой момент отключить весь автотрейдинг — открытые позиции закрываются по рынку.',
         },
         {
           q: 'Безопасны ли мои деньги в автотрейдинге?',
@@ -494,7 +494,7 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           q: 'How is risk controlled?',
-          a: 'Each strategy has a protective stop-loss (typically 4-30% from entry price depending on strategy type and timeframe). It\'s an insurance against losing the exit signal — the strategy itself does the main exit. In auto-trading you set position size and leverage per strategy. Max one position per symbol × strategy at any time.',
+          a: 'Each strategy has an individual protective stop-loss that never exceeds 8% of the entry price (the exact value is tuned per strategy via profit simulation). It\'s insurance against losing the exit signal — the strategy itself does the main exit. The shadow-account position size is fixed at $1000 per trade. Max one position per symbol × strategy at any time.',
         },
         {
           q: 'Where can I see results?',
@@ -506,7 +506,7 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           q: 'What if a strategy is in drawdown?',
-          a: 'Drawdown is normal — any trading system goes through losing periods. Each strategy has a Safety SL (protective stop above historical losses) that caps the maximum loss. In auto-trading you can disable any single strategy or turn the whole thing off at any time — open positions continue to their natural exit.',
+          a: 'Drawdown is normal — any trading system goes through losing periods. Each strategy has a Safety SL (no more than 8% from entry) that caps the worst-case per-trade loss at a known amount. In auto-trading you can turn the whole thing off at any time — open positions are closed at market.',
         },
         {
           q: 'Are my funds safe in auto-trading?',

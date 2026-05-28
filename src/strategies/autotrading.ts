@@ -1238,7 +1238,11 @@ const FAQ_ITEMS_RU: Array<{ q: string; a: string }> = [
     },
     {
       q: 'Как назначается тариф? Я могу выбрать сам?',
-      a: 'Тариф выбираете вы сами при подключении Bybit-аккаунта. Мы только проверяем, что ваш баланс достаточен для выбранного тарифа: $300+ для Starter, $800+ для Standard, $2 500+ для Plus и т.д. Если выбрали Plus, а на счёте $500 — попросим пополнить или выбрать тариф попроще. Если депозит вырастет — подскажем перейти на тариф выше с пересчётом подписки. Если депозит сильно упадёт — автоматически переключим на меньший тариф через 72 часа, открытые позиции не трогаются.',
+      a: 'Тариф выбираете вы сами при подключении Bybit-аккаунта. Мы только проверяем, что ваш баланс достаточен для выбранного тарифа: $300+ для Starter, $800+ для Standard, $2 500+ для Plus и т.д. Если выбрали Plus, а на счёте $500 — попросим пополнить или выбрать тариф попроще. Баланс проверяется только в момент подключения — дальше мы за ним не следим и тариф автоматически не переключаем. Сменить тариф можно вручную в кабинете в любой момент.',
+    },
+    {
+      q: 'Какие настройки счёта Bybit нужны?',
+      a: 'Единый торговый счёт (UTA) в режиме <b>Cross margin</b> и <b>One-Way</b> (без хеджа). При подключении ключа мы проверяем и при необходимости сами переключаем счёт в этот режим — наш расчёт риска и safety-стоп рассчитаны именно на cross. Если на счёте уже есть открытые позиции в isolated или hedge — закройте их перед подключением, иначе Bybit не даст сменить настройки.',
     },
     {
       q: 'Сколько дней автотрейдинга бесплатно?',
@@ -1289,7 +1293,11 @@ const FAQ_ITEMS_EN: Array<{ q: string; a: string }> = [
   },
   {
     q: 'How is my tier assigned? Can I pick it myself?',
-    a: 'You pick the tier yourself when you connect your Bybit account. All we do is check that your balance is enough for the selected tier: $300+ for Starter, $800+ for Standard, $2,500+ for Plus and so on. If you picked Plus with only $500 on the account, we\'ll ask you to top up or choose a smaller tier. If your deposit grows we\'ll suggest moving up with a pro-rated subscription. If the deposit drops significantly we\'ll switch you down to a smaller tier automatically after 72 hours — open positions are not touched.',
+    a: 'You pick the tier yourself when you connect your Bybit account. All we do is check that your balance is enough for the selected tier: $300+ for Starter, $800+ for Standard, $2,500+ for Plus and so on. If you picked Plus with only $500 on the account, we\'ll ask you to top up or choose a smaller tier. Balance is only checked at connection time — after that we don\'t monitor it or switch your tier automatically. You can change tier manually anytime in your account.',
+  },
+  {
+    q: 'What Bybit account settings do I need?',
+    a: 'A Unified Trading Account (UTA) in <b>Cross margin</b> and <b>One-Way</b> mode (no hedge). When you connect the key we check and, if needed, switch the account into this mode automatically — our risk math and safety stop are built for cross. If you already have open positions in isolated or hedge mode, close them before connecting, otherwise Bybit won\'t let us change the settings.',
   },
   {
     q: 'How many days of auto-trading do I get for free?',
@@ -2351,6 +2359,16 @@ function styles(): string {
     .at-section { margin: 40px 0; }
     .at-section-title { font-size: 19px; }
     .at-cta-title { font-size: 24px; }
+    /* Trial banner: the long text wrapped inside a 999px pill turned into
+       a huge rounded blob that competed with the CTA. On mobile drop the
+       pill shape, shrink padding/font, and let it read as a compact note
+       under the button rather than a second hero element. */
+    .at-hero-trial {
+      display: block; border-radius: 10px;
+      margin: 12px 4px 4px; padding: 9px 14px;
+      font-size: 12.5px; line-height: 1.4; text-align: center;
+      box-shadow: none;
+    }
   }
   @media (max-width: 480px) {
     .at-price-num { font-size: 38px; }
