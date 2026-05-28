@@ -1194,32 +1194,8 @@ const STYLE = `
      Same pattern as the /autotrading pricing slider. Each timeframe
      group is a track of cards, snap-centred, with a focused (full-
      opacity) middle card and dimmed peeking neighbours. */
-  .strat-row-carousel-wrap {
-    position: relative; margin: 0 -4px 4px;
-  }
-  .strat-row-carousel {
-    display: flex; gap: 16px;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    /* Side-padding = (viewport_half − card_half) so first/last cards
-       can snap to centre. Card 360px → padding = 50% - 180px on wide
-       viewports, clamped at 20px minimum. */
-    padding: 14px max(20px, calc(50% - 190px)) 16px;
-    scrollbar-color: #2a323d transparent;
-    scrollbar-width: thin;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-x pan-y;
-    overscroll-behavior-x: contain;
-  }
-  .strat-row-carousel::-webkit-scrollbar { height: 8px; }
-  .strat-row-carousel::-webkit-scrollbar-track { background: transparent; }
-  .strat-row-carousel::-webkit-scrollbar-thumb { background: #2a323d; border-radius: 4px; }
-  /* Single-strategy timeframe groups skip the carousel chrome and just
-     render the card centred at its desktop width. */
-  .strat-row-single {
-    display: flex; justify-content: center; padding: 8px 4px 4px;
-  }
-  .strat-row-single .strat-row { max-width: 600px; width: 100%; }
+  /* (Strategy-row carousel CSS removed Phase Q — replaced by the
+     collapsible <details> .tf-group-list layout below.) */
 
   /* ---------- Collapsible TF group (replaces carousel) ---------- */
   .tf-group-details { margin-bottom: 20px; }
@@ -1278,31 +1254,6 @@ const STYLE = `
   .strat-row:hover {
     background: var(--bg-card-hover); border-color: var(--text-faint);
     text-decoration: none;
-  }
-  /* Active card in focus carousel — full opacity (others dim per the
-     global focus-mode rule), tier-colour-ish accent border. */
-  [data-carousel="focus"] .strat-row.rc-card-active {
-    border-color: rgba(74, 217, 145, 0.45);
-    box-shadow: 0 10px 28px rgba(0,0,0,0.35),
-                0 0 0 1px rgba(74, 217, 145, 0.20);
-  }
-  /* Asymmetric dimming inside the strategy carousels: cards on the LEFT
-     of the active card are dimmer than ones on the RIGHT. Rationale:
-     reading flow is left-to-right; the right neighbour is «what's
-     coming next» (visitor's attention pulls there naturally), the left
-     neighbour is «already past». Using ~ sibling combinator: only
-     siblings AFTER .rc-card-active match, so we override their opacity
-     UP from the default. */
-  .strat-row-carousel.rc-carousel-track > .rc-card-active ~ .strat-row {
-    opacity: 0.7;
-  }
-  /* Override the base focus-mode rule for default-dim (cards before
-     active) to be even darker. */
-  [data-carousel="focus"] .strat-row-carousel.rc-carousel-track > .strat-row {
-    opacity: 0.35;
-  }
-  [data-carousel="focus"] .strat-row-carousel.rc-carousel-track > .rc-card-active {
-    opacity: 1;
   }
   @media (max-width: 640px) {
     .strat-row-head { gap: 6px; margin-bottom: 2px; }

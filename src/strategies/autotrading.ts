@@ -775,6 +775,23 @@ function renderSafety(lang: Lang): string {
  * мейнстримных «гуру» которые говорят «плечо = смерть».
  */
 function renderLeverageEducation(lang: Lang): string {
+  // Dynamic BCH-on-Plus example so the worked numbers never go stale
+  // when SLs / leverage / margin pools change (Phase Q audit finding).
+  const bchCfg = STRATEGY_CONFIGS['bch-cntr-cfm-tc'];
+  const btcCfg = STRATEGY_CONFIGS['btc-cfm-strong-tst'];
+  const ex = computeTierTradeSize('plus', 'bch-cntr-cfm-tc');
+  const plusDepo = 3000; // Plus tier illustrative deposit (min $2 500, use round 3k)
+  const exMargin = ex ? ex.marginUsd : 100;
+  const exLev = ex ? ex.leverage : (bchCfg?.maxSafeLeverage ?? 8);
+  const exNotional = ex ? ex.notionalUsd : exMargin * exLev;
+  const exSlPct = (bchCfg?.slPct ?? 0.07);
+  const exWorstLoss = exSlPct * exNotional;
+  const exWorstPctOfDepo = (exWorstLoss / plusDepo) * 100;
+  const bchSlStr = ((bchCfg?.slPct ?? 0.07) * 100).toFixed(1).replace(/\.0$/, '');
+  const bchLevStr = String(bchCfg?.maxSafeLeverage ?? 8);
+  const btcSlStr = ((btcCfg?.slPct ?? 0.07) * 100).toFixed(1).replace(/\.0$/, '');
+  const btcLevStr = String(btcCfg?.maxSafeLeverage ?? 8);
+  const marginPctOfDepo = ((exMargin / plusDepo) * 100).toFixed(1).replace(/\.0$/, '');
   if (lang === 'en') {
     return `
     <section class="at-section at-leverage">
@@ -800,9 +817,9 @@ function renderLeverageEducation(lang: Lang): string {
           <ol class="at-lev-list">
             <li><b>Leverage is sized to match the stop-loss</b> of each strategy — set individually per pair</li>
             <li><b>Formula</b>: <code>leverage = floor(0.7 / (slPct + 0.02))</code> — 30% buffer to liquidation</li>
-            <li>Example: BCH with a 3.5% SL → 12× leverage (not 50×). BTC with a 4% SL → 11× leverage</li>
+            <li>Example: BCH with a ${bchSlStr}% SL → ${bchLevStr}× leverage (not 50×). BTC with a ${btcSlStr}% SL → ${btcLevStr}× leverage</li>
             <li>When price moves against the trade our stop-loss fires first (taking a known loss), <b>the exchange never gets to liquidate</b></li>
-            <li>Maximum loss per trade — <b>1.5-2.5%</b> of your deposit</li>
+            <li>Maximum loss per trade — <b>~2%</b> of your deposit</li>
           </ol>
         </div>
       </div>
@@ -811,23 +828,23 @@ function renderLeverageEducation(lang: Lang): string {
         <div class="at-lev-example-grid">
           <div class="at-lev-stat">
             <div class="at-lev-stat-label">Your deposit</div>
-            <div class="at-lev-stat-val">$3,000</div>
+            <div class="at-lev-stat-val">$${plusDepo.toLocaleString()}</div>
           </div>
           <div class="at-lev-stat">
             <div class="at-lev-stat-label">Margin (locked)</div>
-            <div class="at-lev-stat-val">$120 <span class="at-lev-pct">(4%)</span></div>
+            <div class="at-lev-stat-val">$${exMargin.toFixed(0)} <span class="at-lev-pct">(${marginPctOfDepo}%)</span></div>
           </div>
           <div class="at-lev-stat">
             <div class="at-lev-stat-label">Leverage</div>
-            <div class="at-lev-stat-val">12×</div>
+            <div class="at-lev-stat-val">${exLev}×</div>
           </div>
           <div class="at-lev-stat">
             <div class="at-lev-stat-label">Position size</div>
-            <div class="at-lev-stat-val">$1,440</div>
+            <div class="at-lev-stat-val">$${exNotional.toFixed(0)}</div>
           </div>
           <div class="at-lev-stat at-lev-stat-bad">
             <div class="at-lev-stat-label">Worst-case loss (SL hit)</div>
-            <div class="at-lev-stat-val">$50.40 <span class="at-lev-pct">(1.7%)</span></div>
+            <div class="at-lev-stat-val">$${exWorstLoss.toFixed(2)} <span class="at-lev-pct">(${exWorstPctOfDepo.toFixed(1)}%)</span></div>
           </div>
           <div class="at-lev-stat at-lev-stat-ok">
             <div class="at-lev-stat-label">Liquidation</div>
@@ -867,9 +884,9 @@ function renderLeverageEducation(lang: Lang): string {
           <ol class="at-lev-list">
             <li><b>Плечо подбирается под стоп</b> каждой стратегии индивидуально</li>
             <li>Формула простая: оставляем 30% запас до ликвидационной цены биржи</li>
-            <li>Например BCH со стопом 3.5% → плечо 12× (а не 50×). BTC со стопом 4% → плечо 11×</li>
+            <li>Например BCH со стопом ${bchSlStr}% → плечо ${bchLevStr}× (а не 50×). BTC со стопом ${btcSlStr}% → плечо ${btcLevStr}×</li>
             <li>Если цена идёт против — сначала срабатывает наш защитный стоп (фиксируем известный убыток), <b>биржа не успевает ликвидировать</b></li>
-            <li>Максимальная потеря на одной сделке — <b>1.5-2.5%</b> от вашего депозита</li>
+            <li>Максимальная потеря на одной сделке — <b>~2%</b> от вашего депозита</li>
           </ol>
         </div>
       </div>
@@ -878,23 +895,23 @@ function renderLeverageEducation(lang: Lang): string {
         <div class="at-lev-example-grid">
           <div class="at-lev-stat">
             <div class="at-lev-stat-label">Ваш депозит</div>
-            <div class="at-lev-stat-val">$3 000</div>
+            <div class="at-lev-stat-val">$${plusDepo.toLocaleString('ru')}</div>
           </div>
           <div class="at-lev-stat">
             <div class="at-lev-stat-label">Залог (заморозка)</div>
-            <div class="at-lev-stat-val">$120 <span class="at-lev-pct">(4%)</span></div>
+            <div class="at-lev-stat-val">$${exMargin.toFixed(0)} <span class="at-lev-pct">(${marginPctOfDepo}%)</span></div>
           </div>
           <div class="at-lev-stat">
             <div class="at-lev-stat-label">Плечо</div>
-            <div class="at-lev-stat-val">12×</div>
+            <div class="at-lev-stat-val">${exLev}×</div>
           </div>
           <div class="at-lev-stat">
             <div class="at-lev-stat-label">Размер сделки</div>
-            <div class="at-lev-stat-val">$1 440</div>
+            <div class="at-lev-stat-val">$${exNotional.toFixed(0)}</div>
           </div>
           <div class="at-lev-stat at-lev-stat-bad">
             <div class="at-lev-stat-label">Потеря при срабатывании стопа</div>
-            <div class="at-lev-stat-val">$50.40 <span class="at-lev-pct">(1.7%)</span></div>
+            <div class="at-lev-stat-val">$${exWorstLoss.toFixed(2)} <span class="at-lev-pct">(${exWorstPctOfDepo.toFixed(1)}%)</span></div>
           </div>
           <div class="at-lev-stat at-lev-stat-ok">
             <div class="at-lev-stat-label">Ликвидация</div>
@@ -1237,7 +1254,7 @@ const FAQ_ITEMS_RU: Array<{ q: string; a: string }> = [
     },
     {
       q: 'Зачем тогда плечо если оно опасно?',
-      a: 'Без плеча торговать криптофьючерсами в режиме автотрейдинга экономически бессмысленно: на депозите $1 000 при размере сделки $200 ожидаемая прибыль ~$2.7/мес — меньше подписки. С плечом 12× (безопасно подобранным под наш стоп) тот же депозит торгует размером $2 400, и ожидаемая прибыль становится ~$32/мес. Главное — защитный стоп срабатывает раньше ликвидации, поэтому максимальный убыток в сделке известен заранее. Это математика, а не казино.',
+      a: 'Без плеча торговать криптофьючерсами в режиме автотрейдинга экономически бессмысленно: на депозите $1 000 при размере сделки $200 ожидаемая прибыль ~$2.7/мес — меньше подписки. С плечом 8-10× (безопасно подобранным под стоп каждой стратегии) тот же депозит торгует размером ~$2 000, и ожидаемая прибыль становится в разы выше. Главное — защитный стоп срабатывает раньше ликвидации, поэтому максимальный убыток в сделке известен заранее. Это математика, а не казино.',
     },
     {
       q: 'Какие биржи поддерживаются? Будут ли другие?',
@@ -1245,7 +1262,7 @@ const FAQ_ITEMS_RU: Array<{ q: string; a: string }> = [
     },
     {
       q: 'Что если стратегия в минусе?',
-      a: 'Каждая стратегия имеет защитный стоп. Просадки бывают — это нормально для любой торговой системы. У тарифа есть обещание максимальной просадки (Starter ≤8%, Standard ≤15%, Plus/Pro/VIP ≤18%). Если просадка превышает обещанное — мы пересматриваем тариф или исключаем стратегию.',
+      a: 'Каждая стратегия имеет защитный стоп. Просадки бывают — это нормально для любой торговой системы. Ожидаемая максимальная просадка по тарифу показана на его карточке (рассчитывается по худшей исторической просадке стратегий тарифа): Starter ~8%, Standard ~20%, Plus/Pro/VIP ~25%. Если в live просадка устойчиво превышает историческую — мы пересматриваем тариф или исключаем стратегию.',
     },
     {
       q: 'Можно ли вручную закрыть позицию или поторговать самому?',
@@ -1288,7 +1305,7 @@ const FAQ_ITEMS_EN: Array<{ q: string; a: string }> = [
   },
   {
     q: 'Then why use leverage at all if it\'s dangerous?',
-    a: 'Auto-trading crypto futures without leverage is economically pointless: on a $1,000 deposit with a $200 position the expected profit is ~$2.7/mo — less than the subscription. With 12× leverage (safely sized to our SL) the same deposit trades $2,400 of size, and the expected profit becomes ~$32/mo. The key is that the stop-loss fires before liquidation, so the worst-case per-trade loss is known in advance. This is math, not a casino.',
+    a: 'Auto-trading crypto futures without leverage is economically pointless: on a $1,000 deposit with a $200 position the expected profit is ~$2.7/mo — less than the subscription. With 8-10× leverage (safely sized to each strategy\'s SL) the same deposit trades ~$2,000 of size, and the expected profit is several times higher. The key is that the stop-loss fires before liquidation, so the worst-case per-trade loss is known in advance. This is math, not a casino.',
   },
   {
     q: 'Which exchanges are supported? Will there be more?',
@@ -1296,7 +1313,7 @@ const FAQ_ITEMS_EN: Array<{ q: string; a: string }> = [
   },
   {
     q: 'What if a strategy goes into the red?',
-    a: 'Every strategy has a protective stop-loss. Drawdowns happen — that\'s normal for any trading system. Each tier comes with a max-drawdown commitment (Starter ≤8%, Standard ≤15%, Plus/Pro/VIP ≤18%). If the drawdown exceeds what we promised, we revisit the tier or remove the strategy.',
+    a: 'Every strategy has a protective stop-loss. Drawdowns happen — that\'s normal for any trading system. The expected max drawdown is shown on each tier card (derived from the worst historical drawdown of the tier\'s strategies): Starter ~8%, Standard ~20%, Plus/Pro/VIP ~25%. If live drawdown persistently exceeds the historical figure, we revisit the tier or remove the strategy.',
   },
   {
     q: 'Can I close a position manually or trade on my own?',

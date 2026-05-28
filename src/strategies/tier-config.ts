@@ -142,7 +142,7 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     marginPoolUsd: 200,
     maxConcurrentPositions: 3,
     expectedMonthlyPnlRangeUsd: { low: 150, high: 240 },
-    expectedMaxDdPct: 15,
+    expectedMaxDdPct: 20,
     pitch: 'Самый популярный выбор. Больше монет в работе, больше сделок, заметный доход в месяц.',
   },
   plus: {
@@ -158,7 +158,7 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     marginPoolUsd: 600,
     maxConcurrentPositions: 4,
     expectedMonthlyPnlRangeUsd: { low: 390, high: 580 },
-    expectedMaxDdPct: 18,
+    expectedMaxDdPct: 25,
     pitch: 'Полный портфель монет в работе. Хороший выбор когда депозит уже серьёзный, а время — нет.',
   },
   pro: {
@@ -173,7 +173,7 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     marginPoolUsd: 1600,
     maxConcurrentPositions: 6,
     expectedMonthlyPnlRangeUsd: { low: 1000, high: 1500 },
-    expectedMaxDdPct: 18,
+    expectedMaxDdPct: 25,
     pitch: 'Тот же портфель монет, но сделки больше — пропорционально вашему депозиту растёт и заработок.',
   },
   vip: {
@@ -189,7 +189,7 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     marginPoolUsd: 4000,
     maxConcurrentPositions: 6,
     expectedMonthlyPnlRangeUsd: { low: 2500, high: 4000 },
-    expectedMaxDdPct: 18,
+    expectedMaxDdPct: 25,
     pitch: 'Премиум: персональная настройка через оператора, гибкие условия (success-fee вместо фиксированной подписки).',
   },
   // Phase K — Pro Manual («Prof»). Special tier for experienced users who
