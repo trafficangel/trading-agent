@@ -1,0 +1,11 @@
+-- Phase S (May 28, 2026) — separate «comp» (free lifetime access) status
+-- from the VIP *tier*.
+--
+-- Before: plan='vip' was overloaded to mean «permanent free access»,
+-- which collided with the VIP tier (a normal $580/mo paid tier).
+-- After: plan='comp' = complimentary lifetime access (operator/partners),
+-- grantable on top of ANY tier. The VIP tier becomes a regular paid tier.
+--
+-- The `plan` column is plain TEXT (no CHECK constraint), so a straight
+-- UPDATE is enough.
+UPDATE user_subscriptions SET plan = 'comp' WHERE plan = 'vip';

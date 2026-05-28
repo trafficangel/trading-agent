@@ -242,7 +242,7 @@ export async function authRoute(app: FastifyInstance): Promise<void> {
     if (phone && isVipPhone(phone)) {
       const sub = findSubscription(userId);
       if (sub && sub.plan === 'standard') {
-        setPlan(userId, 'vip', 'system', 'auto-promoted via VIP_PHONES allowlist');
+        setPlan(userId, 'comp', 'system', 'auto-granted comp via VIP_PHONES allowlist');
         logger.info({ user_id: userId, phone: maskPhone(phone) }, 'auth: VIP auto-promote');
       }
     }

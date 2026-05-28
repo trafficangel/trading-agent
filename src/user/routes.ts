@@ -185,7 +185,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     // TRACK E — tier-based read-only view. Manual strategy form removed.
     // Phase K — re-enabled in editable mode for «prof» tier only.
     const tierId = sub?.tier_id as import('../strategies/tier-config.js').TierId | undefined;
-    const isVip = sub?.plan === 'vip';
+    const isVip = sub?.plan === 'comp';
     const isProf = tierId === 'prof';
     const flash = (req.query as { saved?: string; err?: string } | undefined);
     return reply.send(
@@ -379,7 +379,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     const user = getAuthedUser(req);
     if (!user) { reply.redirect('/strategies'); return; }
     const sub = findSubscription(user.userId);
-    if (sub?.plan === 'vip') { reply.redirect('/account'); return; }
+    if (sub?.plan === 'comp') { reply.redirect('/account'); return; }
     const key = findActiveKey(user.userId);
     const balance = key?.last_balance_usdt ?? null;
     const matched = balance != null ? matchTier(balance) : null;
@@ -420,7 +420,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       return;
     }
     const sub = findSubscription(user.userId);
-    if (sub?.plan === 'vip') {
+    if (sub?.plan === 'comp') {
       reply.code(303).header('location', '/account').send();
       return;
     }
@@ -657,7 +657,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     // the user to /account/subscription/select-tier where they pick a tier
     // they can afford. VIP users (operator + Eldar) keep their override.
     const sub = findSubscription(user.userId);
-    if (sub?.plan === 'vip') {
+    if (sub?.plan === 'comp') {
       // VIP — no tier picker, they keep override settings.
       return renderApiKeyWithFlash(req, reply, user, {
         ok: true,
@@ -733,7 +733,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
     const subRow = findSubscription(user.userId);
     const pickedTier = listUserStrategies(user.userId).length > 0;
     const selectedTier = subRow?.selected_tier_id as TierId | null | undefined;
-    if (subRow?.plan !== 'vip' && !pickedTier && selectedTier && selectedTier !== 'vip') {
+    if (subRow?.plan !== 'comp' && !pickedTier && selectedTier && selectedTier !== 'vip') {
       const tier = getTier(selectedTier);
       if (verifyRes.totalUsdt >= tier.minBalanceUsdt) {
         try {
@@ -776,7 +776,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       return;
     }
     if (
-      subRow?.plan !== 'vip' &&
+      subRow?.plan !== 'comp' &&
       !pickedTier &&
       !selectedTier &&
       verifyRes.totalUsdt >= MIN_AUTOTRADING_DEPOSIT_USDT
@@ -784,7 +784,7 @@ export async function userRoute(app: FastifyInstance): Promise<void> {
       reply.code(303).header('location', '/account/subscription/select-tier?from=verify').send();
       return;
     }
-    const tail = !pickedTier && subRow?.plan !== 'vip' && !selectedTier
+    const tail = !pickedTier && subRow?.plan !== 'comp' && !selectedTier
       ? ` Минимум для запуска — $${MIN_AUTOTRADING_DEPOSIT_USDT}. Пополните счёт и проверьте снова.`
       : selectedTier && !pickedTier
         ? ` Для тарифа ${getTier(selectedTier).name} нужно $${getTier(selectedTier).minBalanceUsdt}+ — пополните счёт.`

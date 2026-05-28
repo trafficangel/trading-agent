@@ -10,12 +10,16 @@ import { db } from '../client.js';
 import { config } from '../../config.js';
 
 export type SubscriptionStatus = 'trial' | 'active' | 'expired' | 'cancelled';
-export type SubscriptionPlan = 'standard' | 'vip';
+/** 'standard' = pays per tier. 'comp' = complimentary lifetime free
+ *  access (operator / partners) — grantable on top of ANY tier,
+ *  independent of the VIP *tier* (which is just a paid $580/mo tier). */
+export type SubscriptionPlan = 'standard' | 'comp';
 
-/** When promoting to VIP we set access_until to far future (year 2099)
- *  so the column stays meaningful + sortable; hasActiveAccess() also
- *  short-circuits on plan='vip' so the date is just a backstop. */
-export const VIP_ACCESS_UNTIL = Date.UTC(2099, 11, 31, 23, 59, 59);
+/** When granting comp (free lifetime) access we set access_until to far
+ *  future (year 2099) so the column stays meaningful + sortable;
+ *  hasActiveAccess() also short-circuits on plan='comp' so the date is
+ *  just a backstop. */
+export const COMP_ACCESS_UNTIL = Date.UTC(2099, 11, 31, 23, 59, 59);
 
 export type SubscriptionRow = {
   id: number;
@@ -120,7 +124,7 @@ export function findSubscription(userId: number): SubscriptionRow | null {
 export function hasActiveAccess(userId: number, now = Date.now()): boolean {
   const sub = findByUserStmt.get(userId);
   if (!sub) return false;
-  if (sub.plan === 'vip') return sub.status !== 'cancelled';
+  if (sub.plan === 'comp') return sub.status !== 'cancelled';
   if (sub.status === 'expired' || sub.status === 'cancelled') return false;
   return sub.access_until > now;
 }
@@ -331,10 +335,10 @@ const setPlanStmt = db.prepare(`
  * overwritten on every change so the operator can trace who flipped
  * the plan and why.
  *
- * Promoting to VIP: status forced to 'active', access_until pushed to
- * VIP_ACCESS_UNTIL (year 2099). Demoting to standard: status forced
- * to 'expired' and access_until set to now() — the operator should
- * then manually extend if they want the demoted user to keep access.
+ * Granting comp (free lifetime): status forced to 'active', access_until
+ * pushed to COMP_ACCESS_UNTIL (year 2099). Revoking to standard: status
+ * forced to 'expired' and access_until set to now() — the operator should
+ * then manually extend if they want the user to keep paid access.
  */
 export function setPlan(
   userId: number,
@@ -345,8 +349,8 @@ export function setPlan(
   const sub = findByUserStmt.get(userId);
   if (!sub) throw new Error(`setPlan: no subscription for user_id=${userId}`);
   const now = Date.now();
-  const nextStatus: SubscriptionStatus = plan === 'vip' ? 'active' : 'expired';
-  const nextAccess = plan === 'vip' ? VIP_ACCESS_UNTIL : now;
+  const nextStatus: SubscriptionStatus = plan === 'comp' ? 'active' : 'expired';
+  const nextAccess = plan === 'comp' ? COMP_ACCESS_UNTIL : now;
   setPlanStmt.run(plan, nextStatus, nextAccess, byAdmin, note, now, userId);
   const updated = findByUserStmt.get(userId);
   if (!updated) throw new Error('setPlan: row vanished');

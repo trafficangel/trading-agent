@@ -1,10 +1,10 @@
 /**
- * Track D — VIP phone allowlist.
+ * Track D — comp (Спецдоступ) phone allowlist.
  *
- * Phones listed here are auto-promoted to plan='vip' the FIRST time
- * they complete phone-OTP registration. After promotion the allowlist
- * is no longer consulted for that user — admin can demote / re-promote
- * via /admin manually.
+ * Phones listed here are auto-promoted to plan='comp' (permanent free
+ * access) the FIRST time they complete phone-OTP registration. After
+ * promotion the allowlist is no longer consulted for that user — admin
+ * can grant / revoke Спецдоступ via /admin manually.
  *
  * Format: E.164 strings (e.g. '+994515545888'). Trim and use
  * matchPhone() to compare — anything else (spaces, dashes, parens)

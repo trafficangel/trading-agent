@@ -127,9 +127,10 @@ function renderMissingBlock(): string {
 }
 
 function renderSubBlock(sub: SubscriptionRow): string {
-  // VIP — perpetual, status doesn't matter (unless cancelled).
-  if (sub.plan === 'vip' && sub.status !== 'cancelled') {
-    return renderVipBlock(sub);
+  // Comp (Спецдоступ) — perpetual free access, status doesn't matter
+  // (unless cancelled).
+  if (sub.plan === 'comp' && sub.status !== 'cancelled') {
+    return renderCompBlock(sub);
   }
   if (sub.status === 'cancelled') return renderCancelledBlock(sub);
   if (sub.status === 'expired' || sub.access_until <= Date.now()) {
@@ -139,29 +140,28 @@ function renderSubBlock(sub: SubscriptionRow): string {
   return renderActiveBlock(sub);
 }
 
-function renderVipBlock(sub: SubscriptionRow): string {
+function renderCompBlock(sub: SubscriptionRow): string {
   return `
     <div class="sub-card sub-card-vip">
-      <div class="sub-badge sub-badge-vip">${ico('👑')}VIP</div>
+      <div class="sub-badge sub-badge-vip">${ico('🎖')}Спецдоступ</div>
       <div class="sub-card-title">Постоянный доступ</div>
       <div class="sub-meta-grid">
         <div>
-          <div class="sub-meta-label">План</div>
-          <div class="sub-meta-value">VIP</div>
+          <div class="sub-meta-label">Статус</div>
+          <div class="sub-meta-value">Спецдоступ</div>
         </div>
         <div>
           <div class="sub-meta-label">Срок действия</div>
           <div class="sub-meta-value">Бессрочно</div>
         </div>
         <div>
-          <div class="sub-meta-label">Подписка с</div>
+          <div class="sub-meta-label">Доступ с</div>
           <div class="sub-meta-value">${fmtDate(sub.created_at)}</div>
         </div>
       </div>
       <div class="sub-card-body">
-        Вы пользуетесь автотрейдингом на правах VIP — без оплаты и без
-        ограничений по сроку. Спасибо за участие в бета-тестировании
-        и обратную связь.
+        Вам предоставлен полный доступ к автотрейдингу без оплаты и без
+        ограничений по сроку. Спасибо за участие и обратную связь.
       </div>
     </div>
   `;
@@ -283,7 +283,7 @@ function renderExpiredBlock(sub: SubscriptionRow): string {
         </div>
         <div>
           <div class="sub-meta-label">Был план</div>
-          <div class="sub-meta-value">${sub.plan === 'vip' ? 'VIP' : escapeHtml(tierName)}</div>
+          <div class="sub-meta-value">${sub.plan === 'comp' ? 'Спецдоступ' : escapeHtml(tierName)}</div>
         </div>
       </div>
 

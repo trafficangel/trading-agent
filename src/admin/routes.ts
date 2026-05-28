@@ -118,15 +118,15 @@ function fmtDateTime(ts: number): string {
 
 
 /** Access cell — what the operator wants to see at a glance: is this
- *  user on a TRIAL, on a paid ACTIVE plan, expired, cancelled, or VIP
- *  (permanent), and how many days remain. Replaces the «last activity»
- *  column. */
+ *  user on a TRIAL, on a paid ACTIVE plan, expired, cancelled, or has
+ *  COMP (permanent free access), and how many days remain. Replaces the
+ *  «last activity» column. */
 function accessCell(sub: SubscriptionRow | undefined): string {
   if (!sub) {
     return `<span class="acc-cell-empty">— нет подписки</span>`;
   }
-  if (sub.plan === 'vip') {
-    return `<span class="acc-cell-vip">👑 VIP · бессрочно</span>`;
+  if (sub.plan === 'comp') {
+    return `<span class="acc-cell-vip">🎖 Спецдоступ · бессрочно</span>`;
   }
   if (sub.status === 'cancelled') {
     return `<span class="acc-cell-bad">⏹ отменён</span>`;
@@ -171,10 +171,10 @@ const adminListStrategyCountsStmt = db.prepare<[], { user_id: number; n: number 
     GROUP BY user_id`,
 );
 
-/** Visible name of the tier the user is on. VIP-status (the «free
- *  access forever» billing flag, plan='vip') is NOT shown here — the
- *  Доступ column already says «👑 VIP · бессрочно» when applicable,
- *  no need to duplicate. */
+/** Visible name of the tier the user is on. Comp-status (the «free
+ *  access forever» billing flag, plan='comp') is NOT shown here — the
+ *  Доступ column already says «🎖 Спецдоступ · бессрочно» when
+ *  applicable, no need to duplicate. */
 function tierBadge(tierId: TierId | null): string {
   if (!tierId) {
     return `<span class="plan-badge plan-bad">— нет тарифа</span>`;
@@ -215,7 +215,7 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
     const hasKey = !!k && k.revoked === null && k.verified !== null;
     const stratN = stratCounts.get(r.id) ?? 0;
     const sub = subs.get(r.id);
-    const hasAccess = !!sub && (sub.plan === 'vip' || (sub.access_until > now && (sub.status === 'trial' || sub.status === 'active')));
+    const hasAccess = !!sub && (sub.plan === 'comp' || (sub.access_until > now && (sub.status === 'trial' || sub.status === 'active')));
     if (hasKey) cKey++;
     if (stratN > 0) cStrats++;
     if (hasKey && stratN > 0 && hasAccess) cFullActive++;
@@ -229,11 +229,11 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
           const name = r.display_name ?? '—';
           const sub = subs.get(r.id);
           const plan = sub?.plan ?? 'standard';
-          // План column — tier name ONLY. VIP-status («бессрочный
-          // бесплатный доступ») is already conveyed by «👑 VIP ·
+          // План column — tier name ONLY. Comp-status («бессрочный
+          // бесплатный доступ») is already conveyed by «🎖 Спецдоступ ·
           // бессрочно» in the «Доступ» column, no need to dup it here.
           // `plan` itself is still needed below for the «Продлить»
-          // button visibility (hidden for VIP).
+          // button visibility (hidden for comp — already permanent).
           const tier = (sub?.tier_id as TierId | null | undefined) ?? null;
           const badge = sub
             ? tierBadge(tier)
@@ -250,18 +250,16 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
               : k.verified
                 ? `<span class="plan-badge plan-active">✓ подключён</span>`
                 : `<span class="plan-badge plan-trial">⚠ не верифиц.</span>`;
-          // Combined «Назначить тариф + срок» form replaces the two
-          // legacy buttons (VIP-toggle + Extend). One submit does
-          // everything: sets billing plan, reassigns tier, refreshes
-          // user_strategies, bumps access_until. For VIP the days
-          // dropdown is ignored server-side (access goes far-future).
+          // Combined «Назначить тариф + срок» form. One submit does
+          // everything: reassigns tier, refreshes user_strategies, bumps
+          // access_until. VIP is now a normal paid tier ($580/мес) — the
+          // days dropdown applies to it like any other. Permanent free
+          // access is a SEPARATE «Спецдоступ» toggle, see below.
           const csrfField = `<input type="hidden" name="_csrf" value="${csrfToken}">`;
           const currentTier = (sub?.tier_id as TierId | undefined) ?? 'standard';
           const tierOptionsHtml = TIER_ORDER.map((tid) => {
             const t = TIER_CONFIGS[tid];
-            const label = tid === 'vip'
-              ? `${t.name} (бессрочно)`
-              : `${t.name} ($${t.monthlyPriceUsd}/мес)`;
+            const label = `${t.name} ($${t.monthlyPriceUsd}/мес)`;
             return `<option value="${tid}"${tid === currentTier ? ' selected' : ''}>${escapeHtml(label)}</option>`;
           }).join('');
           const assignForm = `
@@ -269,7 +267,7 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
                   onsubmit="return confirm('Назначить тариф для ${escapeHtml(name)}? Текущие настройки стратегий будут пересоздать.');">
               ${csrfField}
               <select name="tierId" class="adm-select" title="Тариф">${tierOptionsHtml}</select>
-              <select name="days" class="adm-select" title="Срок действия (игнорируется для VIP)">
+              <select name="days" class="adm-select" title="Срок действия">
                 <option value="7">+7 дней</option>
                 <option value="30" selected>+30 дней</option>
                 <option value="60">+60 дней</option>
@@ -282,9 +280,9 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
           `;
           // «Продлить» — pure access_until bump WITHOUT re-running
           // assignTier. Crucial for Prof users so their custom notional /
-          // leverage / sl_pct_override survives a renewal. Hidden for VIP
-          // because their access is already permanent.
-          const extendOnlyForm = plan === 'vip'
+          // leverage / sl_pct_override survives a renewal. Hidden for comp
+          // (Спецдоступ) because their access is already permanent.
+          const extendOnlyForm = plan === 'comp'
             ? ''
             : `<form method="POST" action="/admin/users/${r.id}/extend" style="display:inline; margin-left:4px"
                      onsubmit="return confirm('Продлить срок без смены тарифа для ${escapeHtml(name)}?');">
@@ -299,6 +297,23 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
                 </select>
                 <button class="adm-btn adm-btn-secondary" type="submit" title="Продлить срок без смены тарифа">⏱ Продлить</button>
               </form>`;
+          // Спецдоступ (comp) — permanent free access, INDEPENDENT of tier.
+          // Toggling it on sets plan='comp' (access far-future); toggling
+          // off reverts plan='standard' (access governed by access_until).
+          // The tier itself is untouched — a comp user can sit on any tier.
+          const compForm = plan === 'comp'
+            ? `<form method="POST" action="/admin/users/${r.id}/comp" style="display:inline; margin-left:4px"
+                     onsubmit="return confirm('Снять Спецдоступ (бессрочный бесплатный доступ) у ${escapeHtml(name)}? Доступ станет платным по тарифу.');">
+                ${csrfField}
+                <input type="hidden" name="grant" value="0">
+                <button class="adm-btn adm-btn-secondary" type="submit" title="Снять бессрочный бесплатный доступ">🎖 Снять спецдоступ</button>
+              </form>`
+            : `<form method="POST" action="/admin/users/${r.id}/comp" style="display:inline; margin-left:4px"
+                     onsubmit="return confirm('Выдать Спецдоступ (бессрочный бесплатный доступ) для ${escapeHtml(name)}?');">
+                ${csrfField}
+                <input type="hidden" name="grant" value="1">
+                <button class="adm-btn adm-btn-vip" type="submit" title="Выдать бессрочный бесплатный доступ">🎖 Спецдоступ</button>
+              </form>`;
           // Hard-delete — wipes user_tier_history → user_strategies →
           // user_api_keys → user_subscriptions → decisions →
           // verification_attempts → registrations, after best-effort
@@ -310,7 +325,7 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
                 ${csrfField}
                 <button class="adm-btn adm-btn-danger" type="submit" title="Удалить пользователя и все его данные">🗑 Удалить</button>
               </form>`;
-          const toggle = `<div class="adm-actions">${assignForm}${extendOnlyForm}${deleteForm}</div>`;
+          const toggle = `<div class="adm-actions">${assignForm}${extendOnlyForm}${compForm}${deleteForm}</div>`;
           return `
             <tr>
               <td class="dt">${fmtDateTime(r.created_at)}</td>
@@ -559,7 +574,7 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
       td.dt .dt-date { display: block; }
       td.dt .dt-time { display: block; color: #8590a0; font-size: 11.5px; }
       /* Access cell — replaces «last activity». Two-line: kind on top
-         («Триал»/«Активна»/«VIP»/«истёк»), days-left below. */
+         («Триал»/«Активна»/«Спецдоступ»/«истёк»), days-left below. */
       td.acc-cell { white-space: nowrap; line-height: 1.35; }
       td.acc-cell > span { display: block; }
       .acc-cell-trial  { color: #88e1b4; font-weight: 600; }
@@ -599,8 +614,11 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
   return pageShell('Admin — Регистрации', body, { robots: 'noindex, nofollow' });
 }
 
-const planFormSchema = z.object({
-  plan: z.enum(['standard', 'vip']),
+// Спецдоступ (comp) toggle form. grant='1' → permanent free access
+// (plan='comp'); grant='0' → revert to paid (plan='standard'). This is
+// independent of the user's tier — a comp user can sit on any tier.
+const compFormSchema = z.object({
+  grant: z.enum(['0', '1']),
 });
 
 export async function adminRoute(app: FastifyInstance): Promise<void> {
@@ -643,12 +661,12 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     return renderTiersDashboard(fromMs, toMs);
   });
 
-  // ---------------- POST /admin/users/:id/plan ----------------
-  // Toggle a user's plan between 'standard' and 'vip'. Form-encoded
-  // body (the admin table renders bare <form method=POST>). After
-  // the flip we redirect back to /admin so the table refreshes
-  // without the operator seeing a JSON blob.
-  app.post('/admin/users/:id/plan', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
+  // ---------------- POST /admin/users/:id/comp ----------------
+  // Grant or revoke «Спецдоступ» — permanent free access (plan='comp'),
+  // INDEPENDENT of the user's tier. grant='1' sets plan='comp'; grant='0'
+  // reverts to plan='standard' (access then governed by access_until).
+  // Form-encoded body; redirects back to /admin so the table refreshes.
+  app.post('/admin/users/:id/comp', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
     if (!checkAuth(req, reply)) return;
     const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
     if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;
@@ -659,43 +677,44 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     }
     // @fastify/formbody parses both JSON and x-www-form-urlencoded into
     // a plain object on req.body — same shape for both content types.
-    const parsed = planFormSchema.safeParse(req.body);
+    const parsed = compFormSchema.safeParse(req.body);
     if (!parsed.success) {
-      reply.code(400).send('plan field required (standard|vip)');
+      reply.code(400).send('grant field required (0|1)');
       return;
     }
-    const plan = parsed.data.plan;
+    const plan = parsed.data.grant === '1' ? 'comp' : 'standard';
 
     // Ensure a subscription row exists (handles the edge case where an
-    // admin promotes a user that registered before Track D shipped and
-    // never went through /auth/verify since the auto-create landed).
+    // admin grants comp to a user that registered before Track D shipped
+    // and never went through /auth/verify since the auto-create landed).
     if (!findSubscription(userId)) ensureTrialFor(userId);
 
     const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
     const before = findSubscription(userId);
     try {
-      const after = setPlan(userId, plan, adminEmail, `set via /admin at ${new Date().toISOString()}`);
+      const after = setPlan(userId, plan, adminEmail, `comp ${parsed.data.grant === '1' ? 'granted' : 'revoked'} via /admin at ${new Date().toISOString()}`);
       recordAdminAction({
         adminEmail,
         targetUserId: userId,
         action: 'set_plan',
         before: before ? { plan: before.plan, status: before.status, access_until: before.access_until } : null,
         after: { plan: after.plan, status: after.status, access_until: after.access_until },
+        note: parsed.data.grant === '1' ? 'grant comp' : 'revoke comp',
         ip: req.ip,
       });
-      logger.info({ user_id: userId, plan, by: adminEmail }, 'admin: plan changed');
+      logger.info({ user_id: userId, plan, by: adminEmail }, 'admin: comp toggled');
     } catch (err) {
-      logger.error({ err, user_id: userId }, 'admin: setPlan failed');
-      reply.code(500).send('failed to update plan');
+      logger.error({ err, user_id: userId }, 'admin: comp toggle failed');
+      reply.code(500).send('failed to update access');
       return;
     }
     reply.code(303).header('location', '/admin').send();
   });
 
   // ---------------- POST /admin/users/:id/extend ----------------
-  // Bump access_until forward by N days for non-VIP users. Useful for
-  // manually onboarding paying customers before automated billing is
-  // wired. Rejected for VIP users (their access is already permanent).
+  // Bump access_until forward by N days. Useful for manually onboarding
+  // paying customers before automated billing is wired. Rejected for
+  // comp (Спецдоступ) users — their access is already permanent.
   app.post('/admin/users/:id/extend', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
     if (!checkAuth(req, reply)) return;
     const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
@@ -716,8 +735,8 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
       // Auto-create then extend — handles users that registered before
       // Track D shipped.
       ensureTrialFor(userId);
-    } else if (existing.plan === 'vip') {
-      reply.code(400).send('cannot extend VIP — already permanent');
+    } else if (existing.plan === 'comp') {
+      reply.code(400).send('cannot extend Спецдоступ — already permanent');
       return;
     }
     const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
@@ -744,18 +763,21 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
 
 
   // ---------------- POST /admin/users/:id/assign-tier ----------------
-  // Atomic «assign tier + set period» from the admin row form. Supersedes
-  // the legacy «Сделать VIP» + «Продлить» buttons.
+  // Atomic «assign tier + set period» from the admin row form.
   //
-  // Body: tierId in TIER_ORDER, days in [1, 3650] (ignored for VIP).
+  // Body: tierId in TIER_ORDER, days in [1, 3650].
+  //
+  // VIP is now a NORMAL paid tier ($580/мес) — handled like any other.
+  // Permanent free access is the SEPARATE «Спецдоступ» (comp) toggle and
+  // is NOT touched here, so a comp user keeps free access across tier
+  // changes.
   //
   // Sequence:
   //   1. Ensure a subscription exists (auto-create trial if needed).
-  //   2. If target is VIP    → setPlan('vip')   (access_until → far future)
-  //      If target is non-VIP and current is VIP → demote billing to 'standard'
-  //      In both cases also call assignTier() which refreshes user_strategies
-  //      with the new tier's defaults (CAVEAT for Prof users — see UI confirm).
-  //   3. For non-VIP, bump access_until by N days via adminExtend.
+  //   2. assignTier() refreshes user_strategies with the new tier's
+  //      defaults (CAVEAT for Prof users — see UI confirm).
+  //   3. Unless the user is on comp (permanent), bump access_until by N
+  //      days via adminExtend.
   //   4. Audit log entry + admin_audit_log row.
   app.post('/admin/users/:id/assign-tier', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
     if (!checkAuth(req, reply)) return;
@@ -779,14 +801,10 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     const before = findSubscription(userId);
 
     try {
-      if (tierId === 'vip') {
-        setPlan(userId, 'vip', adminEmail, `assigned tier=vip via /admin`);
-      } else if (before?.plan === 'vip') {
-        // Demote billing plan first so subsequent adminExtend can shift status.
-        setPlan(userId, 'standard', adminEmail, `tier change to ${tierId} via /admin`);
-      }
       await assignTier(userId, tierId, { reason: 'operator_override' });
-      if (tierId !== 'vip') {
+      // comp users have permanent access — don't touch access_until.
+      // Everyone else (including VIP, now a normal paid tier) gets +N days.
+      if (before?.plan !== 'comp') {
         adminExtend(userId, days, adminEmail, `assigned tier=${tierId} +${days}d via /admin`);
       }
       const after = findSubscription(userId);
@@ -800,7 +818,7 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
         after: after
           ? { plan: after.plan, status: after.status, tier_id: after.tier_id, access_until: after.access_until }
           : null,
-        note: `tierId=${tierId} days=${tierId === 'vip' ? 'permanent' : days}`,
+        note: `tierId=${tierId} days=${before?.plan === 'comp' ? 'permanent (comp)' : days}`,
         ip: req.ip,
       });
       logger.info(
@@ -995,9 +1013,9 @@ const assignTierFormSchema = z.object({
  * TRACK E Phase B — /admin/tiers stats dashboard.
  *
  * Shows operator: backtest forecast per tier, range-selectable live
- * results, recent transitions feed (last 30), and VIP-override users.
- * (The «tier distribution / MRR» table was removed — not relevant
- * while the user base is tiny.)
+ * results, recent transitions feed (last 30), and Спецдоступ (comp)
+ * users with override. (The «tier distribution / MRR» table was removed
+ * — not relevant while the user base is tiny.)
  *
  * Pure SQL read — no mutations, no CSRF needed.
  */
@@ -1013,7 +1031,7 @@ const vipOverrideListStmt = db.prepare<[], {
          s.tier_override_strategies, s.tier_override_margin
     FROM user_subscriptions s
     JOIN registrations r ON r.id = s.user_id
-   WHERE s.plan = 'vip'
+   WHERE s.plan = 'comp'
    ORDER BY s.user_id
 `);
 
@@ -1344,7 +1362,7 @@ function renderTiersDashboard(fromMs: number, toMs: number): string {
     `;
 
   const vipTable = vipUsers.length === 0
-    ? '<p class="adm-empty">VIP-пользователей нет.</p>'
+    ? '<p class="adm-empty">Пользователей со Спецдоступом нет.</p>'
     : `
       <table class="adm-tier-table">
         <thead>
@@ -1395,7 +1413,7 @@ function renderTiersDashboard(fromMs: number, toMs: number): string {
       </section>
 
       <section class="adm-section">
-        <h2>👑 VIP с override (${vipUsers.length})</h2>
+        <h2>🎖 Спецдоступ с override (${vipUsers.length})</h2>
         ${vipTable}
       </section>
     </main>

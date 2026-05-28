@@ -326,7 +326,7 @@ export async function evaluateTierTransition(userId: number, balanceUsdt: number
 }> {
   const sub = findSubscriptionStmt.get(userId);
   if (!sub) return { action: 'none' };
-  if (sub.plan === 'vip') return { action: 'none' };
+  if (sub.plan === 'comp') return { action: 'none' };
   // Phase K — «prof» (Pro Manual) is opt-in self-managed; user controls
   // their own notional/leverage. Balance monitor never auto-downgrades
   // or suggests upgrade for prof — the whole point of the tier is that

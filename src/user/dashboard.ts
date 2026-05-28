@@ -112,9 +112,9 @@ export function renderDashboard(args: {
   // Before that, render a "Тариф не выбран" prompt — the default
   // tier_id='standard' inserted by ensureTrialFor is misleading otherwise
   // (user sees Standard before connecting Bybit or picking anything).
-  const isVip = sub?.plan === 'vip';
+  const isComp = sub?.plan === 'comp';
   let strategiesBlock: string;
-  if (isVip) {
+  if (isComp) {
     strategiesBlock = renderStrategiesCard({
       enabled: args.enabledStrategiesCount,
       available: args.totalStrategiesAvailable,
@@ -205,9 +205,9 @@ export function renderDashboard(args: {
 
   // Trading-control panel — visible only when tier is actually active
   // (user_strategies rows exist). Shows either "Stop" or "Resume" button
-  // depending on trading_paused_at state. Skip for VIP override users —
+  // depending on trading_paused_at state. Skip for comp override users —
   // they have a different control path through the operator.
-  const tradingControl = !isVip && args.enabledStrategiesCount > 0
+  const tradingControl = !isComp && args.enabledStrategiesCount > 0
     ? renderTradingControl(sub, args.csrfToken)
     : '';
 
@@ -296,7 +296,7 @@ function renderSubscriptionCard(sub: SubscriptionRow | null): string {
   // Still surface the user's active TIER (which determines strategy set
   // and lot sizes) — VIP-access is a separate billing flag from the
   // tier itself; user wants to see and switch the tier independently.
-  if (sub.plan === 'vip' && sub.status !== 'cancelled') {
+  if (sub.plan === 'comp' && sub.status !== 'cancelled') {
     const tierId = sub.tier_id as TierId | null;
     const tier = tierId ? TIER_CONFIGS[tierId] : null;
     const tierLine = tier
@@ -305,10 +305,10 @@ function renderSubscriptionCard(sub: SubscriptionRow | null): string {
       : `<br/><a class="cabinet-card-tier-link" href="/account/subscription/select-tier">Выбрать тариф →</a>`;
     return `
       <div class="stat-card cabinet-card cabinet-card-vip">
-        <div class="stat-card-label">${ico('👑')}VIP-доступ</div>
-        <div class="stat-card-value">Активна</div>
+        <div class="stat-card-label">${ico('🎖')}Спецдоступ</div>
+        <div class="stat-card-value">Активен</div>
         <div class="stat-card-sub">
-          постоянная подписка · без ограничений
+          бесплатный доступ · бессрочно
           ${tierLine}
         </div>
       </div>
@@ -585,7 +585,7 @@ function renderOnboardingChecklist(args: {
 }): string {
   const sub = args.subscription;
   if (!sub) return '';
-  if (sub.plan === 'vip') return ''; // VIP override = bypass onboarding
+  if (sub.plan === 'comp') return ''; // VIP override = bypass onboarding
 
   // Compute checkpoint statuses.
   const keyConnected = !!(args.apiKey && args.apiKey.last_verified_at && !args.apiKey.revoked_at);
@@ -788,7 +788,7 @@ function renderUpgradePromo(args: {
   csrfToken?: string;
 }): string {
   const sub = args.subscription;
-  if (!sub || sub.plan === 'vip') return '';
+  if (!sub || sub.plan === 'comp') return '';
   const targetTier = sub.tier_transition_target_id as TierId | null;
   if (!targetTier) return '';
   const currentTier = sub.tier_id as TierId;

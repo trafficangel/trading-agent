@@ -27,10 +27,10 @@
  *      - downgrade: auto after 72h continuous below
  *      - upgrade: prompt user, manual confirmation + prorated billing
  *
- * VIP override: plan='vip' users can bypass tier logic entirely via
- * tier_override_strategies / tier_override_margin / tier_override_leverage
- * columns. Operator (me) + Eldar are seeded into VIP with their current
- * manual settings preserved.
+ * Comp override: plan='comp' (Спецдоступ) users can bypass tier logic
+ * entirely via tier_override_strategies / tier_override_margin /
+ * tier_override_leverage columns. VIP is a NORMAL paid tier ($580/мес),
+ * NOT to be confused with comp (permanent free access).
  */
 
 import { STRATEGY_CONFIGS } from './track-c-config.js';
@@ -182,8 +182,9 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     minBalanceUsdt: 15000,
     maxBalanceUsdt: Number.POSITIVE_INFINITY,
     monthlyPriceUsd: 580,
-    // Default: same as Pro (no minTier='vip' strategies). VIP users can
-    // override per-user via tier_override_strategies (operator decides).
+    // Default: same as Pro (no minTier='vip' strategies). Per-user
+    // overrides (tier_override_strategies) are reserved for comp
+    // (Спецдоступ) users, not the paid VIP tier itself.
     strategyIds: computeTierStrategyIds('vip'),
     // Pool 20% of $20000 = $4000.
     marginPoolUsd: 4000,
