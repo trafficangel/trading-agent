@@ -994,19 +994,13 @@ const assignTierFormSchema = z.object({
 /**
  * TRACK E Phase B — /admin/tiers stats dashboard.
  *
- * Shows operator: distribution of users across tiers, monthly recurring
- * revenue (sum of subscription prices for active users), recent
- * transitions feed (last 30), and a list of VIP-override users.
+ * Shows operator: backtest forecast per tier, range-selectable live
+ * results, recent transitions feed (last 30), and VIP-override users.
+ * (The «tier distribution / MRR» table was removed — not relevant
+ * while the user base is tiny.)
  *
  * Pure SQL read — no mutations, no CSRF needed.
  */
-const tierDistStmt = db.prepare<[], { tier_id: string; n: number }>(`
-  SELECT tier_id, COUNT(*) AS n
-    FROM user_subscriptions
-   WHERE status IN ('trial', 'active')
-   GROUP BY tier_id
-   ORDER BY tier_id
-`);
 
 const vipOverrideListStmt = db.prepare<[], {
   user_id: number;
@@ -1182,19 +1176,6 @@ function computeTierForecastStats(): TierForecastStats[] {
 }
 
 function renderTiersDashboard(fromMs: number, toMs: number): string {
-  const dist = new Map<string, number>();
-  for (const row of tierDistStmt.all()) dist.set(row.tier_id, row.n);
-
-  // Build distribution rows: every tier shown, even if zero users.
-  const distRows = TIER_ORDER.map((id) => {
-    const tier = TIER_CONFIGS[id];
-    const n = dist.get(id) ?? 0;
-    const mrr = n * tier.monthlyPriceUsd;
-    return { id, name: tier.name, n, price: tier.monthlyPriceUsd, mrr };
-  });
-  const totalUsers = distRows.reduce((acc, r) => acc + r.n, 0);
-  const totalMrr = distRows.reduce((acc, r) => acc + r.mrr, 0);
-
   const recentTransitions = listRecentTransitions(30);
   const vipUsers = vipOverrideListStmt.all();
 
@@ -1341,27 +1322,6 @@ function renderTiersDashboard(fromMs: number, toMs: number): string {
     </p>
   `;
 
-  const distTable = `
-    <table class="adm-tier-table">
-      <thead>
-        <tr><th>Tier</th><th>Юзеров</th><th>Подписка/мес</th><th>MRR вклад</th></tr>
-      </thead>
-      <tbody>
-        ${distRows.map((r) => `
-          <tr>
-            <td><b>${escapeHtml(r.name)}</b> <span class="adm-tier-id">(${r.id})</span></td>
-            <td>${r.n}</td>
-            <td>$${r.price}</td>
-            <td>$${r.mrr}</td>
-          </tr>
-        `).join('')}
-        <tr class="adm-tier-total">
-          <td>Всего</td><td>${totalUsers}</td><td>—</td><td>$${totalMrr}/мес</td>
-        </tr>
-      </tbody>
-    </table>
-  `;
-
   const transitionsTable = recentTransitions.length === 0
     ? '<p class="adm-empty">Переходов ещё не было.</p>'
     : `
@@ -1415,11 +1375,6 @@ function renderTiersDashboard(fromMs: number, toMs: number): string {
         <h1>Tier статистика</h1>
         <nav><a href="/admin">← К списку юзеров</a></nav>
       </header>
-
-      <section class="adm-section">
-        <h2>📊 Распределение по тарифам</h2>
-        ${distTable}
-      </section>
 
       <section class="adm-section">
         <h2>🔮 Прогнозируемая доходность по бектестам</h2>
