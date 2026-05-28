@@ -197,6 +197,24 @@ export type StrategyConfig = {
  * Registry of Track C strategies. Empty at start — operator populates
  * each entry after analyzing the strategy's backtest in LuxAlgo.
  */
+/**
+ * Phase P (May 28, 2026) — global hard cap on safety SL.
+ *
+ * No enabled strategy may have `slPct` greater than this. Enforced at
+ * server startup via `validateStrategyConfigs()` — a violation kills the
+ * service before it accepts any webhook.
+ *
+ * Why 5%: bigger drawdowns scare both operator and subscribers more than
+ * they're worth statistically. Wide-SL strategies (UNI/TON/HBAR/TRX)
+ * regularly held positions through −10..−25% before recovering — visually
+ * unacceptable, even if the strategy itself eventually recovered. The 5%
+ * cap forces us to pick strategies whose natural loss distribution fits
+ * within a tight risk envelope. See loss-percentile audit in
+ * scripts/audit-sl-distribution.mjs for which strategies were dropped /
+ * tightened to meet this cap.
+ */
+export const MAX_SAFE_SL_PCT = 0.05;
+
 export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   // First registered strategy (May 14, 2026).
   // Backtest data scraped from LuxAlgo AI Strategy Builder via
@@ -249,12 +267,19 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'xrp-cntr-tc-mf50': {
     id: 'xrp-cntr-tc-mf50',
     code: '002',
-    // TRACK E — high band (DD 19% > 15% medium ceiling), eligible for
-    // Standard+ tiers. maxSafeLeverage 4× keeps liquidation buffer.
+    // TRACK E — Phase P (May 28, 2026): tightened from 15% → 5% safety SL.
+    // Operator decision after UNI#002 hit −10.96% mid-position made wide
+    // SLs visually unacceptable. Loss-distribution analysis showed only
+    // 8.8% of historical losses exceeded 5%, so the strategy still
+    // operates in 91% of its natural loss space; only the long tail gets
+    // clipped. Tighter SL → higher safe leverage (4×→10×) → bigger
+    // notional per margin dollar in tier sizing → same dollar risk per
+    // trade, faster realization. riskBand was 'high', kept for now
+    // (review post-100-trades).
     riskBand: 'high',
     tierEligible: true,
     minTier: 'standard',
-    maxSafeLeverage: 4,
+    maxSafeLeverage: 10,
     description:
       'XRP 15m | LONG: CONT Any Bl + TC Br + MF>50 | SHORT: CONT Any Br + TC Bl + MF<50 | EXIT: reverse signal',
     longDescription:
@@ -262,11 +287,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'LONG-вход срабатывает когда Contrarian Any выдаёт bullish-сигнал, Trend Catcher показывает bearish-тренд (зона перепроданности) и Money Flow выше 50. ' +
       'SHORT — зеркально. ' +
       'У стратегии нет встроенного exit условия — позиции закрываются по обратному сигналу (LONG закроется когда придёт SHORT entry и наоборот). ' +
-      'Safety SL 15% — выше всех 34 исторических убытков (худший −13.8%, остальные ≤ −5.5%). Срабатывает только если пропадёт reverse-signal или биржа застрянет, в живой торговле почти всегда «спящий».',
+      'Safety SL 5% — клипает только 3 из 34 худших исторических убытков (медиана −1.25%, p90 −4.65%). 91% сделок отрабатываются стратегией без срабатывания страховки.',
     symbol: 'XRPUSDT',
     timeframe: '15',
     enabled: true,
-    slPct: 0.15,
+    slPct: 0.05,
     launchedAt: Date.parse('2026-05-16T19:00:00Z'),
     alertName: 'XRPUSD|15|LONG=CONTAnyBl&TCBr&MFa50|SHORT=CONTAnyBr&TCBl&MFb50|EXIT=null',
     sourceUrl: 'https://www.luxalgo.com/chat/p19leyc5pzvt3s32mj36rnzn/',
@@ -356,7 +381,12 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Safety SL 30% — выше p95 убытков (24.3%) и худшего трейда (−24.3%) за 2 года истории. Идея: дать стратегии полную свободу досидеть до встроенного exit-сигнала, а SL держать как страховку от потери вебхука. На 1h контр-трендовых стратегиях нормально сидеть в просадке −15-20% перед разворотом.',
     symbol: 'UNIUSDT',
     timeframe: '60',
-    enabled: true,
+    // DISABLED Phase P (May 28, 2026). 71% of historical losses exceed 5%
+    // — strategy is architecturally incompatible with the tight-SL policy.
+    // To re-enable, either revisit the SL philosophy or find a tighter
+    // UNI variant from LuxAlgo. Open positions at disable time keep their
+    // original 30% SL until they exit naturally.
+    enabled: false,
     slPct: 0.30,
     launchedAt: Date.parse('2026-05-17T10:30:00Z'),
     alertName: 'UNIUSDT|60|LONG=CFMAnyBl&TCBr&TSTTr|SHORT=CFMAnyBr&TCBl&TSTTr|EXIT=CFMBltExt',
@@ -450,7 +480,10 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Safety SL 15% — выше всех 15 исторических убытков (худший −13.9%). Срабатывает только при потере exit-вебхука или зависании биржи; обычные мелкие минусы стратегия закрывает сама.',
     symbol: 'TRXUSDT',
     timeframe: '60',
-    enabled: true,
+    // DISABLED Phase P (May 28, 2026). 20% of historical losses exceed
+    // 5% — tightening would clip too many natural losers. Open positions
+    // keep their original 15% SL until they exit naturally.
+    enabled: false,
     slPct: 0.15,
     launchedAt: Date.parse('2026-05-17T10:35:00Z'),
     alertName: 'TRXUSDT|60|LONG=CFMAnyBl&TTBl&WkBrCfl|SHORT=CFMAnyBr&TTBr&WkBlCfl|EXIT=CFMBltExt',
@@ -535,7 +568,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Safety SL 25% — выше p95 убытков (22.7%) и худшего трейда. Контр-трендовая 4-дневная сделка регулярно сидит в просадке −10-15% до разворота; SL держим только как страховку от потери exit-вебхука.',
     symbol: 'TONUSDT',
     timeframe: '60',
-    enabled: true,
+    // DISABLED Phase P (May 28, 2026). 64% of historical losses exceed
+    // 5% — strategy architecturally needs wide SLs to allow 4-day
+    // counter-trend swings to play out. Incompatible with tight-SL policy.
+    // Open positions keep their original 25% SL until they exit naturally.
+    enabled: false,
     slPct: 0.25,
     launchedAt: Date.parse('2026-05-18T11:00:00Z'),
     alertName: 'TONUSDT|60|LONG=CNTRNormBl&CFMDn&NeoCloudBr|SHORT=CNTRNormBr&CFMUp&NeoCloudBl|EXIT=CNTRBltExt',
@@ -622,7 +659,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Safety SL 28% — выше p95 (20.4%) и второго худшего трейда (−20.4%); единственный исторический выброс −26.6%. На таком соотношении R:R стратегия часто сидит в глубокой просадке перед разворотом — ранний выход safety-стопом превращает потенциальный winner в фиксированный убыток. Держим SL как страховку от пропажи exit-вебхука.',
     symbol: 'HBARUSDT',
     timeframe: '60',
-    enabled: true,
+    // DISABLED Phase P (May 28, 2026). 47% of historical losses exceed
+    // 5% — wide-SL strategy by design (best R:R ratio in old portfolio
+    // but incompatible with tight-SL policy). Open positions keep their
+    // original 28% SL until they exit naturally.
+    enabled: false,
     slPct: 0.28,
     launchedAt: Date.parse('2026-05-18T11:30:00Z'),
     alertName: 'HBARUSDT|60|LONG=CNTRNormBr&TSRng&StrongBlCfl|SHORT=CNTRNormBl&TSRng&StrongBrCfl|EXIT=CNTRBltExt',
@@ -880,18 +921,18 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     riskBand: 'low',
     tierEligible: true,
     minTier: 'starter',
-    maxSafeLeverage: 7,
+    maxSafeLeverage: 10,
     description:
       'ETH 15m | LONG: OB Exit Bear + TS Ranging + MF<50 | SHORT: OB Exit Bull + TS Ranging + MF>50 | EXIT: Built-in',
     longDescription:
       'Контр-трендовая стратегия на 15-минутном ETH с фильтрами по структуре рынка. ' +
       'Вход срабатывает при выходе цены из зоны Order Block в боковом тренде (Trend Strength: Ranging) с подтверждением по Money Flow. ' +
       'LONG — после bearish-выхода из OB + MF ниже 50 (исчерпание продавцов). SHORT — зеркально. ' +
-      'Выход полностью на встроенных Builtin Exits стратегии. Safety SL 7% — буфер выше типичной просадки 3-5% из бэктеста (DD 7.29%); срабатывает только в катастрофическом случае.',
+      'Выход полностью на встроенных Builtin Exits стратегии. Safety SL 5% — клипает только 3 из 53 исторических убытков (медиана −1.31%, p90 −3.73%); 94% сделок отрабатываются стратегией без срабатывания страховки.',
     symbol: 'ETHUSDT',
     timeframe: '15',
     enabled: true,
-    slPct: 0.07,
+    slPct: 0.05,
     launchedAt: Date.parse('2026-05-25T00:00:00Z'),
     alertName: 'ETHUSDT|15|LONG=OBExBr&TSRng&MFb50|SHORT=OBExBl&TSRng&MFa50|EXIT=BltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/beksft9pr261tps21uhtq9wl',
@@ -939,22 +980,24 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
     // TRACK E — low band (DD 0.95%, the safest). Eligible all tiers.
-    // SL 7.5% → 7× safe lev.
+    // Phase P (May 28, 2026): tightened SL 7.5% → 5%. Cuts 3/28
+    // historical losses (10.7%) — acceptable trade-off for tighter
+    // visible drawdowns. Safe leverage now 10× (was 7×).
     riskBand: 'low',
     tierEligible: true,
     minTier: 'starter',
-    maxSafeLeverage: 7,
+    maxSafeLeverage: 10,
     description:
       'BNB 15m | LONG: CONT Any Br + TT Br + MF>50 | SHORT: CONT Any Bl + TT Bl + MF<50 | EXIT: CONT Built-in',
     longDescription:
       'Контр-трендовая стратегия на 15-минутном таймфрейме с фильтрами по среднесрочному тренду (Trend Tracer) и денежному потоку (Money Flow). ' +
       'LONG-вход срабатывает когда Contrarian Any выдаёт bearish-сигнал (контр-индикатор разворота вверх), Trend Tracer показывает bearish-тренд (зона перепроданности) и Money Flow выше 50 (давление покупателей преобладает). ' +
       'SHORT — зеркально. ' +
-      'Выход полностью передан встроенным exits стратегии — без фиксированных TP. Safety SL 7.5% — выше всех 28 исторических убытков (худший −6.0%, медиана −1.1%). Срабатывает только в катастрофическом случае (потеря exit-вебхука / зависание биржи); обычные минусы стратегия закрывает сама.',
+      'Выход полностью передан встроенным exits стратегии — без фиксированных TP. Safety SL 5% — клипает только 3 из 28 исторических убытков (медиана −1.1%, p95 −5.59%). 89% сделок отрабатываются стратегией без срабатывания страховки.',
     symbol: 'BNBUSDT',
     timeframe: '15',
     enabled: true,
-    slPct: 0.075,
+    slPct: 0.05,
     launchedAt: Date.parse('2026-05-14T12:00:00Z'),
     alertName: 'BNBUSD|15|LONG=CONTAnyBr&TTBr&MFa50|SHORT=CONTAnyBl&TTBl&MFb50|EXIT=CONTBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/xff5y4hjob6d2qitfo1lhbxa/',
@@ -1044,18 +1087,22 @@ export function validateStrategyConfigs(): void {
 
     if (typeof cfg.slPct !== 'number' || !Number.isFinite(cfg.slPct) || cfg.slPct <= 0) {
       errors.push(`STRAT-${cfg.code} (${id}): slPct must be a finite positive number, got ${String(cfg.slPct)}`);
-    } else if (cfg.slPct > 0.35) {
-      // >35% SL means an order this far from entry is no longer a
-      // "safety net" — almost certainly a typo (e.g. wrote 0.4 meaning
-      // 0.04). Fail loud rather than silently take 40% losses.
+    } else if (cfg.slPct > MAX_SAFE_SL_PCT) {
+      // Phase P (May 28, 2026) — hard cap at 5% for all enabled strategies.
+      // Operator decision after UNI#002 hit −10.96% mid-position made wide
+      // SLs visually unacceptable. Strategies whose loss distribution
+      // doesn't fit a 5% cap must be analyzed (loss-percentile audit) and
+      // either tightened or disabled. See src/strategies/track-c-config.ts
+      // header docs for the workflow.
       //
-      // Cap raised from 20% to 35% on 2026-05-18 after re-analyzing
-      // 1h contrarian strategies (UNI/TON/HBAR) — they regularly hold
-      // through 20-26% adverse excursions before reversing. A 20% cap
-      // would force-close winning trades at the worst possible moment.
-      // The safety SL should sit ABOVE the historical p95 loss, not
-      // inside the strategy's natural noise band.
-      errors.push(`STRAT-${cfg.code} (${id}): slPct ${cfg.slPct} exceeds 35% — probable typo (did you mean ${(cfg.slPct / 10).toFixed(3)}?)`);
+      // To disable a strategy that doesn't fit: set `enabled: false`.
+      // To raise this cap globally: change MAX_SAFE_SL_PCT — but this
+      // would re-enable wide drawdowns, contradicting the operator policy.
+      errors.push(
+        `STRAT-${cfg.code} (${id}): slPct ${cfg.slPct} exceeds the platform-wide ` +
+        `cap of ${MAX_SAFE_SL_PCT * 100}%. Either tighten the SL, or set ` +
+        `enabled:false on this strategy.`,
+      );
     }
     if (!cfg.code || !/^\d+$/.test(cfg.code)) {
       errors.push(`STRAT-${cfg.code} (${id}): code must be a numeric string like "001"`);

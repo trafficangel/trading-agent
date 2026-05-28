@@ -214,7 +214,7 @@ export const TIER_CONFIGS: Record<TierId, TierConfig> = {
     // No PnL estimate — depends entirely on user's chosen sizes.
     expectedMonthlyPnlRangeUsd: { low: 0, high: 0 },
     expectedMaxDdPct: 100, // sentinel: «no platform-promised cap, user owns risk»
-    pitch: 'Для опытных трейдеров. Доступны все стратегии включая wide-SL (UNI/TON/HBAR), размер позиции и плечо настраиваете вручную. Платформа не контролирует ваш баланс и не предлагает down/upgrade — вы сами принимаете риски.',
+    pitch: 'Для опытных трейдеров. Размер позиции и плечо настраиваете вручную для каждой стратегии. Платформа не контролирует ваш баланс и не предлагает down/upgrade — вы сами принимаете риски. По запросу оператор может включить эксклюзивные стратегии с wide-SL.',
   },
 };
 
