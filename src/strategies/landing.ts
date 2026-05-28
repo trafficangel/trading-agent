@@ -1260,8 +1260,8 @@ const STYLE = `
     opacity: 1 !important;
   }
   @media (max-width: 640px) {
-    .tf-group-list { gap: 10px; padding: 10px 0 0; }
-    .tf-group-list .strat-row { width: 100%; max-width: 100%; padding: 14px 16px 12px; }
+    .tf-group-list { gap: 8px; padding: 8px 0 0; }
+    .tf-group-list .strat-row { width: 100%; max-width: 100%; padding: 10px 12px 9px; }
     .tf-group-chevron { right: 12px; font-size: 16px; }
   }
 
@@ -1305,25 +1305,21 @@ const STYLE = `
     opacity: 1;
   }
   @media (max-width: 640px) {
-    .strat-row {
-      flex: 0 0 80vw; padding: 10px 12px 9px;
-    }
-    .strat-row-carousel { padding-left: 10vw; padding-right: 10vw; gap: 12px; }
-    .strat-row-head { padding-right: 0; gap: 6px; margin-bottom: 2px; }
+    .strat-row-head { gap: 6px; margin-bottom: 2px; }
     .strat-row-symbol { font-size: 14px; }
     .strat-code-mini { font-size: 10px; }
-    /* Avoid hard ellipsis on narrow cards — wrap to 2 lines instead. */
+    /* Multi-line wrap with 2-line clamp for description (was nowrap/ellipsis). */
     .strat-row-desc {
       white-space: normal !important;
       display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
-      font-size: 12.5px;
+      font-size: 11.5px;
       line-height: 1.4;
     }
-    /* Stat-tags + values: tighter spacing so a line fits more. */
-    .row-stat-line { font-size: 12.5px; gap: 6px; }
-    .stat-tag { min-width: 32px; font-size: 9.5px; }
+    .row-stat-line { font-size: 11.5px; gap: 5px; }
+    .stat-tag { min-width: 28px; font-size: 9px; padding: 1px 4px; }
+    .row-stat-cagr { font-size: 10.5px; }
   }
   .strat-row-head {
     display: flex; align-items: center; justify-content: space-between;
