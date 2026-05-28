@@ -1279,18 +1279,6 @@ const STYLE = `
     background: var(--bg-card-hover); border-color: var(--text-faint);
     text-decoration: none;
   }
-  /* Position-in-group badge — small chip in the upper-right corner with
-     the strategy's rank inside this timeframe (1 / 5, 2 / 5, …). */
-  .strat-row-num {
-    position: absolute; top: 8px; right: 10px;
-    font-family: 'SF Mono', 'Menlo', monospace; font-size: 10px;
-    font-weight: 700; color: var(--text-dim);
-    padding: 1px 6px; border-radius: 999px;
-    background: var(--bg); border: 1px solid var(--border);
-    letter-spacing: 0.04em;
-  }
-  .strat-row-num-total { color: var(--text-faint); font-weight: 500; }
-
   /* Active card in focus carousel — full opacity (others dim per the
      global focus-mode rule), tier-colour-ish accent border. */
   [data-carousel="focus"] .strat-row.rc-card-active {
@@ -1318,15 +1306,12 @@ const STYLE = `
   }
   @media (max-width: 640px) {
     .strat-row {
-      flex: 0 0 80vw; padding: 14px 16px 12px;
+      flex: 0 0 80vw; padding: 10px 12px 9px;
     }
     .strat-row-carousel { padding-left: 10vw; padding-right: 10vw; gap: 12px; }
-    .strat-row-num { top: 8px; right: 10px; font-size: 10.5px; padding: 2px 7px; }
-    /* On mobile the card is ~290px wide — 56px right reserve was for desktop
-       wide cards. Drop it; the badge is now small enough that the status
-       pill won't collide unless the pill text gets very long. */
-    .strat-row-head { padding-right: 44px; gap: 8px; }
-    .strat-row-symbol { font-size: 15.5px; }
+    .strat-row-head { padding-right: 0; gap: 6px; margin-bottom: 2px; }
+    .strat-row-symbol { font-size: 14px; }
+    .strat-code-mini { font-size: 10px; }
     /* Avoid hard ellipsis on narrow cards — wrap to 2 lines instead. */
     .strat-row-desc {
       white-space: normal !important;
@@ -1343,9 +1328,6 @@ const STYLE = `
   .strat-row-head {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 3px; gap: 10px; flex-wrap: wrap;
-    /* Reserve room on the right for the absolute-positioned number
-       badge so the status pill doesn't run into it. */
-    padding-right: 50px;
   }
   .strat-row-id { display: flex; align-items: baseline; gap: 8px; }
   .strat-code-mini {
@@ -3695,9 +3677,9 @@ function renderStrategyIndex(
           <span><b>−${slPctStr}%</b> <span class="dim">от цены</span></span>
         </div>`;
 
+    void posInGroup; void groupSize;
     return `
       <a href="/strategies/${escapeHtml(s.code)}" class="strat-row">
-        <span class="strat-row-num" title="Позиция в таймфрейме">№${posInGroup}<span class="strat-row-num-total"> / ${groupSize}</span></span>
         <div class="strat-row-head">
           <div class="strat-row-id">
             <span class="strat-code-mini">STRAT-${escapeHtml(s.code)}</span>
