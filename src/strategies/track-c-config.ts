@@ -191,6 +191,12 @@ export type StrategyConfig = {
    *  reverse-direction signal is NOT meant to close the prior position
    *  (almost no real strategy works that way). */
   exitOnReverseSignal?: boolean;
+
+  /** How the strategy exits — purely cosmetic, used by the announce post.
+   *  'builtin' (default) = strategy has its own Builtin Exits.
+   *  'reverse' = no builtin exit; position closes on the opposite signal
+   *  (our reverse_signal flip). Does NOT change trading logic. */
+  exitMode?: 'builtin' | 'reverse';
 };
 
 /**
@@ -1019,6 +1025,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     symbol: 'SOLUSDT',
     timeframe: '5',
     enabled: true,
+    exitMode: 'reverse',
     slPct: 0.05,
     launchedAt: Date.parse('2026-05-29T00:00:00Z'),
     alertName: 'SOLUSDT|5|LONG=LGBl&MFb50|SHORT=LGBr&MFa50|EXIT=Reverse',

@@ -108,7 +108,11 @@ function buildPost(code: string): { text: string; detailUrl: string } | null {
   lines.push(`🛡 <b>Управление риском:</b>`);
   lines.push(`  • Позиция: ${b?.notionalUsd ?? 1000} USDT на сделку`);
   lines.push(`  • Safety stop-loss: ${(cfg.slPct * 100).toFixed(2)}% от entry`);
-  lines.push(`  • Выходы: полностью на стратегии (Builtin Exits)`);
+  lines.push(
+    cfg.exitMode === 'reverse'
+      ? `  • Выходы: по встречному сигналу (разворотная, без builtin-exit)`
+      : `  • Выходы: полностью на стратегии (Builtin Exits)`,
+  );
 
   lines.push(``);
   lines.push(`🔗 <b>Детальная статистика + live-результаты:</b>`);
