@@ -453,25 +453,40 @@ function tierEmoji(tierId: TierId): string {
  * support). All 9 strategies are listed — including the wide-SL ones
  * (UNI/TON/HBAR) that regular tiers exclude.
  */
-function renderProEditableForm(args: RenderArgs): string {
-  const allStrategies = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
-  const rowsHtml = allStrategies.map((cfg) => {
-    const existing = args.userStrategies.get(cfg.id);
-    const isEnabled = !!existing && existing.enabled === 1;
-    const notional = existing?.notional_usd ?? Math.round((cfg.maxSafeLeverage ?? 5) * 20);
-    const leverage = existing?.leverage ?? cfg.maxSafeLeverage ?? 5;
-    const defaultSlPctStr = (cfg.slPct * 100).toFixed(2);
-    // Phase N — pre-fill the SL field with the user's saved override or
-    // the strategy default. Stored as decimal in DB, shown as percent
-    // in the UI to match how users think about it.
-    const slPctValue = existing?.sl_pct_override != null
-      ? (existing.sl_pct_override * 100).toFixed(2)
-      : defaultSlPctStr;
-    const symbolLabel = cfg.symbol ?? 'ANY';
-    const name = cfg.name ?? `${symbolLabel} ${cfg.timeframe}m`;
-    const maxLev = cfg.maxSafeLeverage ?? 10;
-    return `
-      <div class="prof-row ${isEnabled ? 'prof-row-on' : 'prof-row-off'}">
+/** Human label for a timeframe bucket. Numeric minutes → trading-style
+ *  name; falls back to `${tf}m` for anything unmapped. */
+function tfGroupLabel(tf: string): string {
+  const n = Number(tf);
+  if (!Number.isFinite(n)) return `${tf}`;
+  if (n < 15) return `Скальпинг · ${n} мин`;
+  if (n < 60) return `Интрадей · ${n} мин`;
+  if (n === 60) return `Часовой · 1ч`;
+  if (n < 240) return `${n / 60}ч`;
+  if (n === 240) return `Свинг · 4ч`;
+  if (n % 60 === 0) return `${n / 60}ч`;
+  return `${n} мин`;
+}
+
+/** Render one editable strategy row. Field names stay flat
+ *  (enabled_<id> / notional_<id> / leverage_<id> / sl_pct_<id>) so the
+ *  POST handler is unaffected by the timeframe grouping. */
+function renderProRow(cfg: StrategyConfig, args: RenderArgs): string {
+  const existing = args.userStrategies.get(cfg.id);
+  const isEnabled = !!existing && existing.enabled === 1;
+  const notional = existing?.notional_usd ?? Math.round((cfg.maxSafeLeverage ?? 5) * 20);
+  const leverage = existing?.leverage ?? cfg.maxSafeLeverage ?? 5;
+  const defaultSlPctStr = (cfg.slPct * 100).toFixed(2);
+  // Phase N — pre-fill the SL field with the user's saved override or
+  // the strategy default. Stored as decimal in DB, shown as percent
+  // in the UI to match how users think about it.
+  const slPctValue = existing?.sl_pct_override != null
+    ? (existing.sl_pct_override * 100).toFixed(2)
+    : defaultSlPctStr;
+  const symbolLabel = cfg.symbol ?? 'ANY';
+  const name = cfg.name ?? `${symbolLabel} ${cfg.timeframe}m`;
+  const maxLev = cfg.maxSafeLeverage ?? 10;
+  return `
+      <div class="prof-row ${isEnabled ? 'prof-row-on' : 'prof-row-off'}" data-tf-group="${escapeHtml(cfg.timeframe)}">
         <label class="prof-row-toggle">
           <input type="checkbox" name="enabled_${escapeHtml(cfg.id)}" ${isEnabled ? 'checked' : ''}/>
           <span class="prof-row-toggle-vis"></span>
@@ -503,6 +518,46 @@ function renderProEditableForm(args: RenderArgs): string {
         </div>
       </div>
     `;
+}
+
+function renderProEditableForm(args: RenderArgs): string {
+  const allStrategies = Object.values(STRATEGY_CONFIGS).filter((s) => s.enabled);
+
+  // Group strategies by timeframe so the operator can run e.g. only 5m
+  // strategies on one Bybit account (= one cabinet) and only the higher
+  // timeframes on another. Buckets sorted ascending by minutes.
+  const byTf = new Map<string, StrategyConfig[]>();
+  for (const cfg of allStrategies) {
+    const arr = byTf.get(cfg.timeframe) ?? [];
+    arr.push(cfg);
+    byTf.set(cfg.timeframe, arr);
+  }
+  const tfKeys = [...byTf.keys()].sort((a, b) => {
+    const na = Number(a);
+    const nb = Number(b);
+    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+    return a.localeCompare(b);
+  });
+
+  const groupsHtml = tfKeys.map((tf) => {
+    const rows = byTf.get(tf)!;
+    const enabledInGroup = rows.filter((c) => args.userStrategies.get(c.id)?.enabled === 1).length;
+    const rowsHtml = rows.map((cfg) => renderProRow(cfg, args)).join('');
+    return `
+      <section class="prof-tf-group" data-tf-section="${escapeHtml(tf)}">
+        <header class="prof-tf-head">
+          <div class="prof-tf-headline">
+            <span class="prof-tf-name">${escapeHtml(tfGroupLabel(tf))}</span>
+            <span class="prof-tf-count" data-tf-count="${escapeHtml(tf)}">${enabledInGroup} / ${rows.length} вкл.</span>
+          </div>
+          <div class="prof-tf-actions">
+            <button type="button" class="prof-tf-act" data-tf-toggle="on" data-tf="${escapeHtml(tf)}">Включить все</button>
+            <button type="button" class="prof-tf-act" data-tf-toggle="off" data-tf="${escapeHtml(tf)}">Снять все</button>
+          </div>
+        </header>
+        <div class="prof-list">${rowsHtml}</div>
+      </section>
+    `;
   }).join('');
 
   return `
@@ -516,15 +571,60 @@ function renderProEditableForm(args: RenderArgs): string {
       <b>SL (%)</b> — стоп-лосс в процентах от цены входа. Можно ужесточить (например с 5% до 2%),
       чтобы быстрее срезать убытки, или наоборот ослабить если стратегия часто выбивается шумом.
       Допустимый диапазон: <b>0.5%–25%</b>.
+      <br><br>
+      💡 Стратегии сгруппированы по <b>таймфрейму</b>. Можно использовать на разных Bybit-аккаунтах
+      разные таймфреймы — заведите отдельный кабинет на каждый аккаунт и включите в нём только нужную группу
+      (например только скальпинг 5м, а большие таймфреймы — на другом аккаунте).
     </div>
     <form method="POST" action="/account/strategies" class="prof-form">
       ${csrfInput(args.csrfToken)}
-      <div class="prof-list">${rowsHtml}</div>
+      <div class="prof-tf-groups">${groupsHtml}</div>
       <div class="prof-form-actions">
         <button type="submit" class="prof-save-btn">💾 Сохранить настройки стратегий</button>
         <span class="prof-form-hint">Изменения применяются к новым сделкам. Открытые позиции продолжают работать по своим параметрам.</span>
       </div>
     </form>
+    <script>
+    (function () {
+      var form = document.querySelector('.prof-form');
+      if (!form) return;
+      function rowCheckbox(row) { return row.querySelector('input[type="checkbox"]'); }
+      function syncRow(row) {
+        var cb = rowCheckbox(row);
+        if (!cb) return;
+        row.classList.toggle('prof-row-on', cb.checked);
+        row.classList.toggle('prof-row-off', !cb.checked);
+      }
+      function syncCount(tf) {
+        var rows = form.querySelectorAll('.prof-row[data-tf-group="' + (window.CSS && CSS.escape ? CSS.escape(tf) : tf) + '"]');
+        var on = 0;
+        rows.forEach(function (r) { var c = rowCheckbox(r); if (c && c.checked) on++; });
+        var badge = form.querySelector('[data-tf-count="' + (window.CSS && CSS.escape ? CSS.escape(tf) : tf) + '"]');
+        if (badge) badge.textContent = on + ' / ' + rows.length + ' вкл.';
+      }
+      // Keep row visual + group counter in sync on any manual toggle.
+      form.addEventListener('change', function (e) {
+        var t = e.target;
+        if (t && t.type === 'checkbox') {
+          var row = t.closest('.prof-row');
+          if (row) { syncRow(row); syncCount(row.getAttribute('data-tf-group')); }
+        }
+      });
+      // Group bulk toggle buttons.
+      form.querySelectorAll('.prof-tf-act').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var tf = btn.getAttribute('data-tf');
+          var on = btn.getAttribute('data-tf-toggle') === 'on';
+          var sel = window.CSS && CSS.escape ? CSS.escape(tf) : tf;
+          form.querySelectorAll('.prof-row[data-tf-group="' + sel + '"]').forEach(function (row) {
+            var cb = rowCheckbox(row);
+            if (cb) { cb.checked = on; syncRow(row); }
+          });
+          syncCount(tf);
+        });
+      });
+    })();
+    </script>
   `;
 }
 
@@ -679,6 +779,29 @@ function styles(): string {
   .prof-warning b { color: #ff8b8b; }
   .prof-form { margin: 18px 0; }
   .prof-list { display: flex; flex-direction: column; gap: 10px; }
+  /* Timeframe groups (Prof editable form) */
+  .prof-tf-groups { display: flex; flex-direction: column; gap: 20px; }
+  .prof-tf-group {
+    border: 1px solid #1f2630; border-radius: 12px;
+    padding: 14px 14px 16px; background: rgba(17,22,29,0.45);
+  }
+  .prof-tf-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+  }
+  .prof-tf-headline { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .prof-tf-name {
+    font-size: 14px; font-weight: 600; color: #e8edf2;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .prof-tf-count { font-size: 12px; color: #8590a0; }
+  .prof-tf-actions { display: flex; gap: 8px; }
+  .prof-tf-act {
+    background: #161c24; border: 1px solid #2a323d; color: #c7d0dc;
+    border-radius: 8px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+    font-family: inherit; transition: border-color 0.15s, color 0.15s;
+  }
+  .prof-tf-act:hover { border-color: #4ad991; color: #4ad991; }
   /* Prof target-profit calculator */
   .prof-calc { padding: 20px 22px; margin-bottom: 20px; }
   .prof-calc-title { font-size: 16px; font-weight: 600; color: #e8edf2; margin-bottom: 6px; }
