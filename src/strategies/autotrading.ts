@@ -25,7 +25,7 @@
 import type { FastifyInstance } from 'fastify';
 import { pageShell, jsonLdService, jsonLdFaqPage, getLang } from './landing.js';
 import { getAuthedUser } from '../auth/routes.js';
-import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS, MAX_SAFE_SL_PCT } from './track-c-config.js';
+import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
 import {
   listTiers,
   tierCoinTickers,
@@ -33,7 +33,6 @@ import {
   computeTierTradeSize,
   TIER_CONFIGS,
 } from './tier-config.js';
-import { getStrategyPnlEstimates } from '../lib/strategy-pnl.js';
 
 type Lang = 'ru' | 'en';
 
@@ -86,7 +85,6 @@ function renderPage(
       ${renderWalkthroughVideo(lang)}
       ${renderForecastTable(lang)}
       ${renderSafety(lang)}
-      ${renderCalculator(lang)}
       ${renderPricing(lang)}
       ${renderBybitBonus(lang)}
       ${renderComparison(lang)}
@@ -1363,156 +1361,6 @@ function renderFaq(lang: Lang): string {
 }
 
 /**
- * Interactive target-profit calculator — the visitor enters the monthly
- * profit they WANT, and we solve backwards for the position size per
- * strategy and the recommended deposit. This is the same calculator the
- * Prof cabinet uses (renderProfCalculator in user/strategies.ts), ported
- * to the public landing in place of the old deposit→tier calculator.
- *
- * Data flow: each enabled strategy's SL-capped monthly PnL per $1000
- * notional is summed server-side (getStrategyPnlEstimates), baked into a
- * JSON blob, and a tiny vanilla-JS handler solves для целевого профита on
- * every input change. No external libs.
- *
- * Placed between Safety and Pricing — anchoring desire («here's the
- * deposit for YOUR dream income») right before the price table.
- */
-function renderCalculator(lang: Lang): string {
-  const estimates = getStrategyPnlEstimates();
-  const totalPer1000 = estimates.reduce((acc, s) => acc + s.monthlyPnlPer1000, 0);
-  const safeCeiling = 0.70 / MAX_SAFE_SL_PCT; // Σ notional ≤ equity × this
-  const calcData = {
-    totalPer1000: Math.round(totalPer1000 * 100) / 100,
-    safeCeiling: Math.round(safeCeiling * 100) / 100,
-    count: estimates.length,
-  };
-
-  const t = lang === 'en'
-    ? {
-        title: 'Calculate your number',
-        sub: 'Enter the monthly profit you want — we\'ll compute the position size per strategy and the deposit you need for it. Same backtest-based math the system uses to size your trades. Not a guarantee — live results vary.',
-        inputLabel: 'Target profit, $/mo',
-        outNotional: 'Position size per strategy',
-        outCount: 'Strategies running',
-        outSum: 'Total volume (all open)',
-        outDeposit: 'Recommended deposit',
-        outRange: 'Expected profit range',
-        perMo: '/mo',
-        noteTpl: (minEq: string, ceil: string) =>
-          `Minimum safe deposit for this volume — ${minEq} (cross-liquidation ceiling ${ceil}×). The recommended figure adds a +30% buffer for funding and drawdown. The ±30% range reflects the live-vs-backtest spread.`,
-        nodata: 'Not enough data to calculate.',
-        disclaimer: 'Past results do not guarantee future returns. Live PnL may fluctuate ±30% around the forecast in any given month.',
-        locale: 'en-US',
-      }
-    : {
-        title: 'Посчитайте свою цифру',
-        sub: 'Введите желаемую прибыль в месяц — посчитаем размер позиции на каждую стратегию и рекомендуемый депозит. Та же backtest-математика, по которой система рассчитывает ваши сделки. Не гарантия — фактический результат варьируется.',
-        inputLabel: 'Желаемая прибыль, $/мес',
-        outNotional: 'Размер позиции на стратегию',
-        outCount: 'Стратегий в работе',
-        outSum: 'Суммарный объём (если все открыты)',
-        outDeposit: 'Рекомендуемый депозит',
-        outRange: 'Ожидаемый диапазон прибыли',
-        perMo: '/мес',
-        noteTpl: (minEq: string, ceil: string) =>
-          `Минимальный безопасный депозит под этот объём — ${minEq} (порог cross-ликвидации ${ceil}×). Рекомендуемый включает буфер +30% на funding и просадку. Диапазон ±30% отражает разброс live vs backtest.`,
-        nodata: 'Недостаточно данных для расчёта.',
-        disclaimer: 'Прошлые результаты не гарантируют будущих. Реальная доходность может отклоняться ±30% от прогноза в любой отдельный месяц.',
-        locale: 'ru',
-      };
-
-  // Default target so the calculator is never empty on first render.
-  const defaultTarget = 1500;
-  const dataJson = JSON.stringify(calcData);
-  // noteTpl is a function — drop it from the embedded T blob and rebuild
-  // the note string in JS from its localized parts instead.
-  const tJson = JSON.stringify({
-    outNotional: t.outNotional,
-    outCount: t.outCount,
-    outSum: t.outSum,
-    outDeposit: t.outDeposit,
-    outRange: t.outRange,
-    perMo: t.perMo,
-    nodata: t.nodata,
-    locale: t.locale,
-    note: t.noteTpl('__MINEQ__', '__CEIL__'),
-  });
-
-  return `
-    <section class="at-section at-calc" id="calc">
-      <h2 class="at-section-title">${ico('🎯')}${t.title}</h2>
-      <p class="at-section-sub">${t.sub}</p>
-      <div class="at-calc-wrap">
-        <div class="at-calc-input-row">
-          <label for="at-calc-input" class="at-calc-label">${t.inputLabel}</label>
-          <div class="at-calc-input-box">
-            <span class="at-calc-input-prefix">$</span>
-            <input id="at-calc-input" type="number" inputmode="numeric" min="50" max="100000" step="50"
-                   value="${defaultTarget}" class="at-calc-input"/>
-          </div>
-        </div>
-        <div id="at-calc-output" class="at-calc-output">
-          <!-- populated by inline script below -->
-        </div>
-        <p id="at-calc-note" class="at-calc-disclaimer"></p>
-        <p class="at-calc-disclaimer">${t.disclaimer}</p>
-      </div>
-    </section>
-    <script>
-      (function() {
-        const D = ${dataJson};
-        const T = ${tJson};
-        const fmtUsd = (n) => '$' + Math.round(n).toLocaleString(T.locale);
-        const input = document.getElementById('at-calc-input');
-        const out = document.getElementById('at-calc-output');
-        const note = document.getElementById('at-calc-note');
-        if (!input || !out || !note) return;
-        function render() {
-          const target = Number(input.value) || 0;
-          if (target <= 0 || D.totalPer1000 <= 0) {
-            out.style.display = 'none';
-            note.textContent = target > 0 ? T.nodata : '';
-            return;
-          }
-          // Uniform notional N across all strategies: target = N/1000 × Σper1000
-          const notional = target / D.totalPer1000 * 1000;
-          const sumNotional = notional * D.count;
-          const minEquity = sumNotional / D.safeCeiling;
-          const recDeposit = minEquity * 1.3;
-          const lo = target * 0.7;
-          const hi = target * 1.3;
-          out.style.display = 'grid';
-          out.innerHTML =
-            '<div class="at-calc-card">' +
-              '<div class="at-calc-card-label">' + T.outNotional + '</div>' +
-              '<div class="at-calc-card-value">' + fmtUsd(notional) + '</div>' +
-              '<div class="at-calc-card-sub">' + T.outCount + ': ' + D.count + '</div>' +
-            '</div>' +
-            '<div class="at-calc-card">' +
-              '<div class="at-calc-card-label">' + T.outSum + '</div>' +
-              '<div class="at-calc-card-value">' + fmtUsd(sumNotional) + '</div>' +
-            '</div>' +
-            '<div class="at-calc-card at-calc-card-profit">' +
-              '<div class="at-calc-card-label">' + T.outDeposit + '</div>' +
-              '<div class="at-calc-card-value">' + fmtUsd(recDeposit) + '</div>' +
-            '</div>' +
-            '<div class="at-calc-card at-calc-card-ratio">' +
-              '<div class="at-calc-card-label">' + T.outRange + '</div>' +
-              '<div class="at-calc-card-value">' + fmtUsd(lo) + '–' + fmtUsd(hi) +
-                '<span class="at-calc-card-suffix">' + T.perMo + '</span></div>' +
-            '</div>';
-          note.textContent = T.note
-            .replace('__MINEQ__', fmtUsd(minEquity))
-            .replace('__CEIL__', D.safeCeiling.toFixed(1));
-        }
-        input.addEventListener('input', render);
-        render();
-      })();
-    </script>
-  `;
-}
-
-/**
  * Telegram-channel capture block — placed AFTER the final CTA. For
  * visitors who scrolled all the way down but aren't ready to sign up,
  * we offer a low-commitment way to stay in touch: follow the public
@@ -2473,119 +2321,6 @@ function styles(): string {
     .at-cmp-tbl td.at-cmp-feat { font-size: 12px; }
     .at-cmp-tbl td { font-size: 16px; padding: 10px 8px; }
     .at-cmp-tbl th { font-size: 10.5px; padding: 10px 6px; }
-  }
-
-  /* ----- Calculator ----- */
-  .at-calc { margin-top: 50px; }
-  .at-calc-wrap {
-    max-width: 860px; margin: 0 auto;
-    background: #11161d; border: 1px solid #1f2630;
-    border-radius: 14px; padding: 28px 28px 22px;
-  }
-  .at-calc-input-row { margin-bottom: 22px; }
-  .at-calc-label {
-    display: block; font-size: 12px; text-transform: uppercase;
-    letter-spacing: 0.08em; color: #8590a0;
-    margin-bottom: 10px; font-weight: 600;
-  }
-  .at-calc-input-box {
-    display: flex; align-items: stretch;
-    background: #0b0e13; border: 1px solid #2a323d;
-    border-radius: 9px; overflow: hidden;
-    transition: border-color 0.15s;
-  }
-  .at-calc-input-box:focus-within { border-color: #4ad991; }
-  .at-calc-input-prefix {
-    display: flex; align-items: center; padding: 0 14px 0 16px;
-    font-size: 22px; color: #4ad991; font-weight: 600;
-  }
-  .at-calc-input {
-    flex: 1; background: transparent; border: none; outline: none;
-    color: #e8edf2; font-size: 22px; font-weight: 600;
-    font-family: 'SF Mono', Menlo, monospace;
-    padding: 14px 16px 14px 0;
-  }
-  .at-calc-input::-webkit-outer-spin-button,
-  .at-calc-input::-webkit-inner-spin-button {
-    -webkit-appearance: none; margin: 0;
-  }
-  .at-calc-output {
-    display: grid; gap: 12px;
-    /* Wider min-column (200px) + responsive scaling: 2-col on tablet,
-     * 1-col on phone. Avoids the squeezed-2nd-column where /мес got
-     * pushed onto a new line. */
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-  @media (max-width: 880px) {
-    .at-calc-output { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
-  @media (max-width: 480px) {
-    .at-calc-output { grid-template-columns: 1fr; }
-  }
-  .at-calc-card {
-    padding: 16px 18px;
-    background: #0e131a; border: 1px solid #1f2630;
-    border-radius: 10px; min-height: 110px;
-    display: flex; flex-direction: column; gap: 4px;
-    min-width: 0; /* allow flex/grid item to shrink with long content */
-  }
-  .at-calc-card-label {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
-    color: #8590a0; font-weight: 600;
-    line-height: 1.35; min-height: 30px;
-  }
-  .at-calc-card-value {
-    font-size: 20px; font-weight: 700; color: #e8edf2;
-    line-height: 1.15;
-    /* Force numeric values like «+$337–$626» onto a single line. The
-     * en-dash is a default break opportunity for the browser, so
-     * without nowrap «$337–» and «$626» land on separate lines. */
-    white-space: nowrap;
-    /* Hide overflow at extreme narrow widths instead of breaking — the
-     * mobile media query drops the font enough that this shouldn't
-     * trigger in practice. */
-    overflow: hidden; text-overflow: ellipsis;
-  }
-  /* Period suffix («/мес», «×12»). Smaller font + dimmed colour. The
-   * leading space character keeps the suffix from glueing to the value. */
-  .at-calc-card-suffix {
-    font-size: 13px; font-weight: 600; color: #8590a0;
-    margin-left: 2px; letter-spacing: 0;
-    white-space: nowrap;
-  }
-  .at-calc-card-sub {
-    font-size: 12px; color: #8590a0; margin-top: auto;
-    line-height: 1.4;
-  }
-  .at-calc-card-tier .at-calc-card-value { color: #e8edf2; }
-  .at-calc-card-profit .at-calc-card-value { color: #4ad991; }
-  .at-calc-card-year .at-calc-card-value { color: #4ad991; }
-  .at-calc-card-ratio .at-calc-card-value { color: #f5b14d; }
-  /* Font scales down as columns get narrower so the nowrap value
-     always fits without ellipsis. Card columns go 4 → 2 → 1 across
-     the breakpoints above. */
-  @media (max-width: 1080px) {
-    .at-calc-card-value { font-size: 18px; }
-    .at-calc-card-suffix { font-size: 12px; }
-  }
-  @media (max-width: 880px) {
-    /* 2 columns = wider cards again. */
-    .at-calc-card-value { font-size: 20px; }
-    .at-calc-card-suffix { font-size: 13px; }
-  }
-  @media (max-width: 480px) {
-    /* Single column, full width. */
-    .at-calc-card-value { font-size: 22px; }
-  }
-  .at-calc-toolow {
-    padding: 14px 16px; border-radius: 9px;
-    background: rgba(245, 177, 77, 0.08);
-    border: 1px solid rgba(245, 177, 77, 0.30);
-    color: #f5b14d; font-size: 13.5px; line-height: 1.55;
-  }
-  .at-calc-disclaimer {
-    margin: 18px 0 0; font-size: 12px; color: #8590a0;
-    line-height: 1.55; text-align: center;
   }
 
   /* ----- Telegram capture ----- */

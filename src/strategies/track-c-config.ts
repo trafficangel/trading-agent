@@ -747,17 +747,17 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'bch-cntr-cfm-tc': {
     id: 'bch-cntr-cfm-tc',
     code: '007',
-    // TRACK E — low band (DD 5%), eligible all tiers. Tight SL 3.5% allows
-    // aggressive 12× leverage with ~17% buffer over historical worst (-2.99%).
-    // Tightened from 4%/11× on May 21 2026 after re-analyzing loss distribution:
-    // Phase Q (May 28, 2026): SL 3.5% → 7%. PnL simulation shows tighter
-    // SL leaves money on the table: at 3.5% only $119, at 7% $222. The
-    // strategy's natural MAEs never exceed ~6% so wider SL costs nothing
-    // (zero stop-outs at 7%+) while letting natural exits work fully.
+    // TRACK E — low band, eligible all tiers.
+    // Phase R (May 29, 2026): SL 7% → 5%, leverage 8× → 10×. MAE audit
+    // (155 trades) shows worst intra-trade excursion 6.43%, p95 3.78%.
+    // 5% is the TIGHTEST cap that kills ZERO winners (4% starts cutting).
+    // In the margin-based tier model PnL-per-margin = PnL%notional × lev:
+    // 5%/10× (19.6% × 10 = 1.96) beats 7%/8× (22.2% × 8 = 1.78) by ~10%,
+    // with slightly LOWER worst-case per-trade loss (5%×10=0.50 vs 7%×8=0.56 margin).
     riskBand: 'low',
     tierEligible: true,
     minTier: 'starter',
-    maxSafeLeverage: 8,
+    maxSafeLeverage: 10,
     description:
       'BCH 5m | LONG: CNTR Normal Bl + CFM Downtrend + TC Bl | SHORT: CNTR Normal Br + CFM Uptrend + TC Br | EXIT: CNTR Built-in',
     longDescription:
@@ -768,12 +768,12 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Win rate 75% на $1000 размере (LuxAlgo показывает 84% на unit-size без учёта комиссии). ' +
       'Средняя длительность сделки ~5.5 часов, средняя частота 2-3 сделки в день. ' +
       'ВАЖНО: 155 сделок за 2.3 месяца = $170 уплаченной комиссии (0.11% × 155 = 17% от капитала). На высокочастотной 5m стратегии комиссия съедает почти половину валовой прибыли — это честно отражено в наших цифрах. ' +
-      'Safety SL 7% — выбран по PnL-симуляции: при 7% SL ни одна историческая сделка не достигает страховки (worst MAE 2.99%), а PnL +22% за 2.3 месяца на $1000. Более тугие SLы (3.5%) обрезали бы winners на восстановлении и теряли бы 50% доходности. ' +
+      'Safety SL 5% при плече 10× — выбран по MAE-аудиту: 5% это самый тугой стоп, который не режет ни одного прибыльного трейда (worst MAE 6.43%, p95 3.78%). В margin-модели 5%/10× даёт больше прибыли на единицу маржи, чем широкий 7%/8×, при чуть меньшем риске на сделку. ' +
       'Бэктест короткий — всего 2.3 месяца. Цифры предварительные, ждём накопления реальной статистики.',
     symbol: 'BCHUSDT',
     timeframe: '5',
     enabled: true,
-    slPct: 0.07,
+    slPct: 0.05,
     launchedAt: Date.parse('2026-05-18T12:00:00Z'),
     alertName: 'BCHUSDT|5|LONG=CNTRNormBl&CFMDn&TCBl|SHORT=CNTRNormBr&CFMUp&TCBr|EXIT=CNTRBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/kc1ibd3cc9ubbr33z7k5sci5/',
@@ -849,13 +849,17 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
   'btc-cfm-strong-tst': {
     id: 'btc-cfm-strong-tst',
     code: '008',
-    // TRACK E — low band (DD 4%), eligible all tiers. SL 4% → 11× safe lev.
-    // Tightened from 5%/10× on May 21 2026: historical worst -3.43%, median -0.66%,
-    // 4% gives ~17% buffer over worst — comfortable.
+    // TRACK E — low band, eligible all tiers.
+    // Phase R (May 29, 2026): SL 7% → 5%, leverage 8× → 10×. MAE audit
+    // (102 trades) shows worst intra-trade excursion 6.18%, p95 4.27%.
+    // 5% is the TIGHTEST cap that kills ZERO winners (4% starts cutting 2).
+    // In the margin-based tier model PnL-per-margin = PnL%notional × lev:
+    // 5%/10× (19.0% × 10 = 1.90) beats 7%/8× (22.3% × 8 = 1.78) by ~7%,
+    // with slightly LOWER worst-case per-trade loss (5%×10=0.50 vs 7%×8=0.56 margin).
     riskBand: 'low',
     tierEligible: true,
     minTier: 'starter',
-    maxSafeLeverage: 8,
+    maxSafeLeverage: 10,
     description:
       'BTC 5m | LONG: CFM Strong Br + TST Trending | SHORT: CFM Strong Bl + TST Trending | EXIT: CFM Built-in',
     longDescription:
@@ -868,12 +872,12 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Long-сторона значительно сильнее short (82% vs 72% WR), что характерно для BTC в бычьем рынке 2026. ' +
       'Средняя длительность сделки ~9 часов, средняя частота ~2 сделки в день. ' +
       'ВАЖНО: 102 сделки за 2.3 месяца = $112 уплаченной комиссии (11% от капитала). На 5m стратегиях с медианным движением сделки ~0.4% комиссия Bybit съедает существенную часть edge — это честно отражено в наших цифрах PF 2.18 (LuxAlgo 3.09 на unit-size). ' +
-      'Safety SL 7% — выбран по PnL-симуляции: при 7% SL ни одна историческая сделка не достигает страховки (worst MAE 3.43%), а PnL +22% за 2.3 месяца на $1000. Тугие SL (4%) обрезали бы recovery и теряли бы 15% PnL без выигрыша по риску. ' +
+      'Safety SL 5% при плече 10× — выбран по MAE-аудиту: 5% это самый тугой стоп, который не режет ни одного прибыльного трейда (worst MAE 6.18%, p95 4.27%). В margin-модели 5%/10× даёт больше прибыли на единицу маржи, чем широкий 7%/8×, при чуть меньшем риске на сделку. ' +
       'Бэктест короткий — всего 2.3 месяца. Цифры предварительные, ждём накопления реальной статистики.',
     symbol: 'BTCUSDT',
     timeframe: '5',
     enabled: true,
-    slPct: 0.07,
+    slPct: 0.05,
     launchedAt: Date.parse('2026-05-19T00:00:00Z'),
     alertName: 'BTCUSDT|5|LONG=CFMStrongBr&TSTTr|SHORT=CFMStrongBl&TSTTr|EXIT=CFMBltExt',
     sourceUrl: 'https://www.luxalgo.com/chat/pqw04cy9q2unzkju7afj5ihh/',
