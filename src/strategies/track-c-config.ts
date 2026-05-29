@@ -991,6 +991,73 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     },
   },
 
+  'sol-lg-mf50': {
+    id: 'sol-lg-mf50',
+    code: '010',
+    // Imported from LuxAlgo May 29 2026 ("Liquidity Grab — Money Flow
+    // Below 50", SOL 5m). No-exit reversal: closes on the OPPOSITE signal
+    // (our reverse_signal flip handles this — entry long / entry short
+    // webhooks, NO exit webhook). Always in market.
+    //
+    // MAE audit (148 trades, Mar 18 – May 25 2026): p95 4.33%, worst 6.09%.
+    // SL 5% = the tightest cap with ZERO killed winners (4%/3% kill 2 each
+    // + heavy whipsaw: 11/16 stops). Among killW=0 options 5% is also the
+    // per-margin optimum: 51.3% × 10× = 5.13 (vs 6%→4.61, 7%→4.22).
+    // Matches our other 5m strategies (BCH/BTC at 5%/10×).
+    riskBand: 'low',
+    tierEligible: true,
+    minTier: 'starter',
+    maxSafeLeverage: 10,
+    description:
+      'SOL 5m | Liquidity Grab + Money Flow 50 | LONG: LG Bull + MF<50 | SHORT: LG Bear + MF>50 | EXIT: reverse signal (no builtin exit)',
+    longDescription:
+      'Разворотная стратегия на SOLUSDT 5m: ловит захват ликвидности (Liquidity Grab) с фильтром по Money Flow относительно 50. ' +
+      'LONG — bullish liquidity grab при Money Flow ниже 50 (исчерпание продавцов). SHORT — зеркально. ' +
+      'Своего exit-условия нет — позиция закрывается встречным сигналом (наш reverse_signal флип), стратегия всегда в рынке. ' +
+      'Safety SL 5% при плече 10× — выбран по MAE-аудиту (148 сделок): 5% это самый тугой стоп, не режущий ни одного прибыльного трейда (worst MAE 6.09%, p95 4.33%), и максимум прибыли на единицу маржи. ' +
+      'Бэктест ~2.3 месяца (18 мар — 25 мая 2026). Цифры предварительные, ждём накопления реальной статистики.',
+    symbol: 'SOLUSDT',
+    timeframe: '5',
+    enabled: true,
+    slPct: 0.05,
+    launchedAt: Date.parse('2026-05-29T00:00:00Z'),
+    alertName: 'SOLUSDT|5|LONG=LGBl&MFb50|SHORT=LGBr&MFa50|EXIT=Reverse',
+    sourceUrl: 'https://www.luxalgo.com/chat/lqik6f9n2d4itg3ta21gqomd',
+    name: 'SOL Liquidity Grab',
+    backtest: {
+      // Recomputed from the scraped LuxAlgo Trades Log on our standard
+      // $1000 fixed notional + 0.055%/side commission (native strategy
+      // exits, no safety SL — the safety SL is our overlay). Verifiable
+      // at sourceUrl. cagrPct = netPnlPct × 365 / periodDays.
+      periodLabel: 'Mar 18, 2026 — May 25, 2026',
+      periodDays: 68,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 528.17,
+      netPnlPct: 52.82,
+      cagrPct: 283.50,
+      totalTrades: 148,
+      wins: 96,
+      losses: 52,
+      winRate: 0.6486,
+      profitFactor: 1.77,
+      commissionPaidUsd: 162.80,
+      maxDrawdownPct: 14.45,
+      maxDrawdownUsd: 144.51,
+      avgWinUsd: 12.69,
+      avgWinPct: 1.27,
+      avgLossUsd: -13.26,
+      avgLossPct: -1.33,
+      largestWinUsd: 71.49,
+      largestLossUsd: -50.14,
+      longTrades: 74,
+      longPnlPct: 22.93,
+      shortTrades: 74,
+      shortPnlPct: 29.89,
+    },
+  },
+
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
