@@ -25,15 +25,15 @@
 import type { FastifyInstance } from 'fastify';
 import { pageShell, jsonLdService, jsonLdFaqPage, getLang } from './landing.js';
 import { getAuthedUser } from '../auth/routes.js';
-import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
+import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS, MAX_SAFE_SL_PCT } from './track-c-config.js';
 import {
   listTiers,
   tierCoinTickers,
   getTierMarketingNumbers,
   computeTierTradeSize,
-  MIN_AUTOTRADING_DEPOSIT_USDT,
   TIER_CONFIGS,
 } from './tier-config.js';
+import { getStrategyPnlEstimates } from '../lib/strategy-pnl.js';
 
 type Lang = 'ru' | 'en';
 
@@ -1363,169 +1363,147 @@ function renderFaq(lang: Lang): string {
 }
 
 /**
- * Interactive calculator — user enters their planned deposit, sees their
- * specific tier + expected monthly profit + net-after-subscription number.
+ * Interactive target-profit calculator — the visitor enters the monthly
+ * profit they WANT, and we solve backwards for the position size per
+ * strategy and the recommended deposit. This is the same calculator the
+ * Prof cabinet uses (renderProfCalculator in user/strategies.ts), ported
+ * to the public landing in place of the old deposit→tier calculator.
  *
- * Data flow: tier ranges + price + expected PnL are baked into a JSON
- * blob server-side and injected into a `<script>` tag, then a tiny
- * vanilla-JS handler reads it on every input change. No external libs,
- * works without any framework.
+ * Data flow: each enabled strategy's SL-capped monthly PnL per $1000
+ * notional is summed server-side (getStrategyPnlEstimates), baked into a
+ * JSON blob, and a tiny vanilla-JS handler solves для целевого профита on
+ * every input change. No external libs.
  *
- * Placed between Safety and Pricing — by this point the visitor trusts
- * us; the calculator turns abstract numbers («Plus tier $X-Y/mo») into
- * THEIR exact number, anchoring desire right before they see the price.
+ * Placed between Safety and Pricing — anchoring desire («here's the
+ * deposit for YOUR dream income») right before the price table.
  */
 function renderCalculator(lang: Lang): string {
-  const tiers = listTiers().filter((t) => t.id !== 'prof');
-  // Trim tier data to only what JS needs — keeps the inline blob small.
-  // Each tier carries its name, emoji, min/max balance, monthly price,
-  // and the freshly-computed marketing PnL range (so if a strategy is
-  // added to a tier later, the calculator updates with no code change).
-  const tierData = tiers.map((tier) => {
-    const m = getTierMarketingNumbers(tier.id);
-    return {
-      id: tier.id,
-      name: tier.name,
-      emoji: tierEmoji(tier.id),
-      minBalance: tier.minBalanceUsdt,
-      maxBalance: tier.maxBalanceUsdt === Infinity ? 999_999_999 : tier.maxBalanceUsdt,
-      priceUsd: tier.monthlyPriceUsd,
-      monthlyLow: m.rangeLow,
-      monthlyHigh: m.rangeHigh,
-    };
-  });
+  const estimates = getStrategyPnlEstimates();
+  const totalPer1000 = estimates.reduce((acc, s) => acc + s.monthlyPnlPer1000, 0);
+  const safeCeiling = 0.70 / MAX_SAFE_SL_PCT; // Σ notional ≤ equity × this
+  const calcData = {
+    totalPer1000: Math.round(totalPer1000 * 100) / 100,
+    safeCeiling: Math.round(safeCeiling * 100) / 100,
+    count: estimates.length,
+  };
 
   const t = lang === 'en'
     ? {
-        title: 'Calculate your specific number',
-        sub: 'Enter the deposit you plan to allocate — we\'ll tell you which plan fits you and roughly how much you should expect to make. The exact same math we use internally to size your trades.',
-        inputLabel: 'Your planned deposit, USDT',
-        belowMin: `Below $${MIN_AUTOTRADING_DEPOSIT_USDT} — auto-trading is not available. Minimum to qualify for any plan: $${MIN_AUTOTRADING_DEPOSIT_USDT}.`,
-        outTier: 'Your plan',
-        outProfitMo: 'Expected profit',
-        outProfitYr: 'Per year (×12)',
-        outNet: 'Net after subscription',
-        outSubscription: 'Subscription cost',
+        title: 'Calculate your number',
+        sub: 'Enter the monthly profit you want — we\'ll compute the position size per strategy and the deposit you need for it. Same backtest-based math the system uses to size your trades. Not a guarantee — live results vary.',
+        inputLabel: 'Target profit, $/mo',
+        outNotional: 'Position size per strategy',
+        outCount: 'Strategies running',
+        outSum: 'Total volume (all open)',
+        outDeposit: 'Recommended deposit',
+        outRange: 'Expected profit range',
         perMo: '/mo',
-        ofDepo: 'of deposit',
-        ratio: 'paid subscription : expected profit',
-        cta: 'Sign up',
+        noteTpl: (minEq: string, ceil: string) =>
+          `Minimum safe deposit for this volume — ${minEq} (cross-liquidation ceiling ${ceil}×). The recommended figure adds a +30% buffer for funding and drawdown. The ±30% range reflects the live-vs-backtest spread.`,
+        nodata: 'Not enough data to calculate.',
         disclaimer: 'Past results do not guarantee future returns. Live PnL may fluctuate ±30% around the forecast in any given month.',
+        locale: 'en-US',
       }
     : {
         title: 'Посчитайте свою цифру',
-        sub: 'Введите депозит, который планируете выделить — мы покажем подходящий тариф и сколько примерно будете зарабатывать. Та же математика, по которой система рассчитывает ваши сделки.',
-        inputLabel: 'Ваш планируемый депозит, USDT',
-        belowMin: `Ниже $${MIN_AUTOTRADING_DEPOSIT_USDT} — автотрейдинг недоступен. Минимум для любого тарифа — $${MIN_AUTOTRADING_DEPOSIT_USDT}.`,
-        outTier: 'Ваш тариф',
-        outProfitMo: 'Ожидаемая прибыль',
-        outProfitYr: 'За год (×12)',
-        outNet: 'Чистыми после подписки',
-        outSubscription: 'Стоимость подписки',
+        sub: 'Введите желаемую прибыль в месяц — посчитаем размер позиции на каждую стратегию и рекомендуемый депозит. Та же backtest-математика, по которой система рассчитывает ваши сделки. Не гарантия — фактический результат варьируется.',
+        inputLabel: 'Желаемая прибыль, $/мес',
+        outNotional: 'Размер позиции на стратегию',
+        outCount: 'Стратегий в работе',
+        outSum: 'Суммарный объём (если все открыты)',
+        outDeposit: 'Рекомендуемый депозит',
+        outRange: 'Ожидаемый диапазон прибыли',
         perMo: '/мес',
-        ofDepo: 'от депозита',
-        ratio: 'подписка к ожидаемой прибыли',
-        cta: 'Зарегистрироваться',
+        noteTpl: (minEq: string, ceil: string) =>
+          `Минимальный безопасный депозит под этот объём — ${minEq} (порог cross-ликвидации ${ceil}×). Рекомендуемый включает буфер +30% на funding и просадку. Диапазон ±30% отражает разброс live vs backtest.`,
+        nodata: 'Недостаточно данных для расчёта.',
         disclaimer: 'Прошлые результаты не гарантируют будущих. Реальная доходность может отклоняться ±30% от прогноза в любой отдельный месяц.',
+        locale: 'ru',
       };
 
-  // Default to Standard mid-range so the calculator is never empty on
-  // first render — it shows a realistic starting state before the user
-  // touches anything.
-  const defaultDeposit = 1500;
-  // JSON-stringify tier data for the embedded JS. JSON.stringify is safe
-  // inside a <script> because we never put a literal "</" in the values.
-  const tierDataJson = JSON.stringify(tierData);
+  // Default target so the calculator is never empty on first render.
+  const defaultTarget = 1500;
+  const dataJson = JSON.stringify(calcData);
+  // noteTpl is a function — drop it from the embedded T blob and rebuild
+  // the note string in JS from its localized parts instead.
+  const tJson = JSON.stringify({
+    outNotional: t.outNotional,
+    outCount: t.outCount,
+    outSum: t.outSum,
+    outDeposit: t.outDeposit,
+    outRange: t.outRange,
+    perMo: t.perMo,
+    nodata: t.nodata,
+    locale: t.locale,
+    note: t.noteTpl('__MINEQ__', '__CEIL__'),
+  });
 
   return `
     <section class="at-section at-calc" id="calc">
-      <h2 class="at-section-title">${ico('🧮')}${t.title}</h2>
+      <h2 class="at-section-title">${ico('🎯')}${t.title}</h2>
       <p class="at-section-sub">${t.sub}</p>
       <div class="at-calc-wrap">
         <div class="at-calc-input-row">
           <label for="at-calc-input" class="at-calc-label">${t.inputLabel}</label>
           <div class="at-calc-input-box">
             <span class="at-calc-input-prefix">$</span>
-            <input id="at-calc-input" type="number" inputmode="numeric" min="0" step="100"
-                   value="${defaultDeposit}" class="at-calc-input"/>
+            <input id="at-calc-input" type="number" inputmode="numeric" min="50" max="100000" step="50"
+                   value="${defaultTarget}" class="at-calc-input"/>
           </div>
         </div>
         <div id="at-calc-output" class="at-calc-output">
           <!-- populated by inline script below -->
         </div>
-        <div id="at-calc-toolow" class="at-calc-toolow" style="display:none;">
-          ${ico('⚠')}${t.belowMin}
-        </div>
+        <p id="at-calc-note" class="at-calc-disclaimer"></p>
         <p class="at-calc-disclaimer">${t.disclaimer}</p>
       </div>
     </section>
     <script>
       (function() {
-        const TIERS = ${tierDataJson};
-        const T = ${JSON.stringify(t)};
-        const fmtUsd = (n) => '$' + Math.round(n).toLocaleString('en-US');
+        const D = ${dataJson};
+        const T = ${tJson};
+        const fmtUsd = (n) => '$' + Math.round(n).toLocaleString(T.locale);
         const input = document.getElementById('at-calc-input');
         const out = document.getElementById('at-calc-output');
-        const low = document.getElementById('at-calc-toolow');
-        if (!input || !out || !low) return;
-        function pickTier(depo) {
-          for (const tier of TIERS) {
-            if (depo >= tier.minBalance && depo <= tier.maxBalance) return tier;
-          }
-          return TIERS[TIERS.length - 1] || null;
-        }
+        const note = document.getElementById('at-calc-note');
+        if (!input || !out || !note) return;
         function render() {
-          const depo = Number(input.value) || 0;
-          if (depo < ${MIN_AUTOTRADING_DEPOSIT_USDT}) {
+          const target = Number(input.value) || 0;
+          if (target <= 0 || D.totalPer1000 <= 0) {
             out.style.display = 'none';
-            low.style.display = 'block';
+            note.textContent = target > 0 ? T.nodata : '';
             return;
           }
-          const tier = pickTier(depo);
-          if (!tier) { out.style.display = 'none'; return; }
-          low.style.display = 'none';
+          // Uniform notional N across all strategies: target = N/1000 × Σper1000
+          const notional = target / D.totalPer1000 * 1000;
+          const sumNotional = notional * D.count;
+          const minEquity = sumNotional / D.safeCeiling;
+          const recDeposit = minEquity * 1.3;
+          const lo = target * 0.7;
+          const hi = target * 1.3;
           out.style.display = 'grid';
-          // Use the band midpoint as the «typical» expected number, but
-          // also surface the full range so users see both the floor and
-          // the ceiling. Past-performance disclaimer below the table.
-          const monthlyMid = Math.round((tier.monthlyLow + tier.monthlyHigh) / 2);
-          const yearMid = monthlyMid * 12;
-          const net = monthlyMid - tier.priceUsd;
-          const yearNet = net * 12;
-          const pctMo = depo > 0 ? (monthlyMid / depo * 100) : 0;
-          // Guard against divide-by-zero AND infinite ratio: if monthlyMid
-          // is 0 (e.g. a tier whose backtests collapse to zero forecast)
-          // we can\\'t express the ratio meaningfully — show 0%.
-          const ratio = tier.priceUsd > 0 && monthlyMid > 0
-            ? (tier.priceUsd / monthlyMid * 100)
-            : 0;
-          // Suffix («/мес», « от депозита», « ×12») rendered as a separate
-          // <span class="at-calc-card-suffix"> so it can wrap to a new line
-          // OR sit beside the value with smaller font. Keeps the headline
-          // number on one line at small widths.
           out.innerHTML =
-            '<div class="at-calc-card at-calc-card-tier">' +
-              '<div class="at-calc-card-label">' + T.outTier + '</div>' +
-              '<div class="at-calc-card-value">' + tier.emoji + ' ' + tier.name + '</div>' +
-              '<div class="at-calc-card-sub">$' + tier.priceUsd + T.perMo + ' · ' + T.outSubscription.toLowerCase() + '</div>' +
+            '<div class="at-calc-card">' +
+              '<div class="at-calc-card-label">' + T.outNotional + '</div>' +
+              '<div class="at-calc-card-value">' + fmtUsd(notional) + '</div>' +
+              '<div class="at-calc-card-sub">' + T.outCount + ': ' + D.count + '</div>' +
+            '</div>' +
+            '<div class="at-calc-card">' +
+              '<div class="at-calc-card-label">' + T.outSum + '</div>' +
+              '<div class="at-calc-card-value">' + fmtUsd(sumNotional) + '</div>' +
             '</div>' +
             '<div class="at-calc-card at-calc-card-profit">' +
-              '<div class="at-calc-card-label">' + T.outProfitMo + '</div>' +
-              '<div class="at-calc-card-value">+' + fmtUsd(tier.monthlyLow) + '–' + fmtUsd(tier.monthlyHigh) +
-                '<span class="at-calc-card-suffix">' + T.perMo + '</span></div>' +
-              '<div class="at-calc-card-sub">≈ ' + pctMo.toFixed(1) + '% ' + T.ofDepo + '</div>' +
-            '</div>' +
-            '<div class="at-calc-card at-calc-card-year">' +
-              '<div class="at-calc-card-label">' + T.outProfitYr + '</div>' +
-              '<div class="at-calc-card-value">≈ +' + fmtUsd(yearMid) + '</div>' +
-              '<div class="at-calc-card-sub">' + T.outNet + ': +' + fmtUsd(yearNet) + '</div>' +
+              '<div class="at-calc-card-label">' + T.outDeposit + '</div>' +
+              '<div class="at-calc-card-value">' + fmtUsd(recDeposit) + '</div>' +
             '</div>' +
             '<div class="at-calc-card at-calc-card-ratio">' +
-              '<div class="at-calc-card-label">' + T.ratio + '</div>' +
-              '<div class="at-calc-card-value">' + ratio.toFixed(0) + '%</div>' +
-              '<div class="at-calc-card-sub">' + T.outNet + ': ' + (net >= 0 ? '+' : '') + fmtUsd(net) +
-                '<span class="at-calc-card-suffix"> ' + T.perMo + '</span></div>' +
+              '<div class="at-calc-card-label">' + T.outRange + '</div>' +
+              '<div class="at-calc-card-value">' + fmtUsd(lo) + '–' + fmtUsd(hi) +
+                '<span class="at-calc-card-suffix">' + T.perMo + '</span></div>' +
             '</div>';
+          note.textContent = T.note
+            .replace('__MINEQ__', fmtUsd(minEquity))
+            .replace('__CEIL__', D.safeCeiling.toFixed(1));
         }
         input.addEventListener('input', render);
         render();
