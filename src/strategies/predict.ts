@@ -112,6 +112,8 @@ type RecentRound = {
   pnl: number;
   win: boolean;
   _strategy?: string; // подпись стратегии (для общего списка)
+  _live?: boolean; // открытая (текущая) сделка — исход ещё не известен
+  _secLeft?: number; // секунд до закрытия (для лайв-строки)
 };
 
 type PredictStatus = {
@@ -252,40 +254,57 @@ function statCard(label: string, value: string, accent?: 'pos' | 'neg' | 'muted'
   return `<div class="pd-stat${cls}"><div class="pd-stat-val">${value}</div><div class="pd-stat-lbl">${esc(label)}</div></div>`;
 }
 
+const mmss = (s: number): string => `${Math.floor(s / 60)}:${('0' + (Math.max(0, s) % 60)).slice(-2)}`;
+
 function recentRoundsTable(
   rounds: RecentRound[],
-  opts: { title?: string; showStrategy?: boolean; showMetric?: boolean } = {},
+  opts: { title?: string; showStrategy?: boolean; showMetric?: boolean; page?: number; totalPages?: number; baseHref?: string } = {},
 ): string {
   if (rounds.length === 0) return '';
   const title = opts.title ?? 'Последние раунды';
   const showStrategy = opts.showStrategy ?? false;
   const showMetric = opts.showMetric !== false;
-  // Адаптивные колонки: оценка/недооценка (prob), коэф входа, время входа.
+  // Адаптивные колонки: оценка (prob), коэф входа, время входа.
   const hasEdge = showMetric && rounds.some((r) => r.edge != null);
   const hasCoef = showMetric && rounds.some((r) => r.coef != null);
   const hasEntry = showMetric && rounds.some((r) => r.entrySecLeft != null);
   const right = 'style="text-align:right"';
-  const mmss = (s: number): string => `${Math.floor(s / 60)}:${('0' + (s % 60)).slice(-2)}`;
   const head =
     `<tr>` +
     (showStrategy ? `<th>Стратегия</th>` : '') +
     `<th>Сторона</th><th ${right}>Ставка</th>` +
     (hasEdge ? `<th ${right}>Оценка</th>` : '') +
     (hasCoef ? `<th ${right}>Коэф.</th>` : '') +
-    (hasEntry ? `<th ${right}>Вход за</th>` : '') +
+    (hasEntry ? `<th ${right}>До закрытия</th>` : '') +
     `<th>Исход</th><th ${right}>PnL</th><th ${right}>Когда</th></tr>`;
   const rows = rounds
     .map((r) => {
-      const when = r.t ? agoText(r.t) : '—';
       const side = r.side ?? '—';
       const sideCls = r.side === 'UP' ? 'pd-up' : r.side === 'DOWN' ? 'pd-down' : '';
-      const resCls = r.win ? 'pd-pos' : 'pd-neg';
       const stratCell = showStrategy ? `<td class="pd-muted-td">${esc(r._strategy ?? '')}</td>` : '';
       const edgeCells = hasEdge ? `<td ${right}>${r.prob != null ? r.prob + '%' : '—'}</td>` : '';
       const coefCell = hasCoef ? `<td class="pd-muted-td" ${right}>${r.coef != null ? r.coef.toFixed(2) : '—'}</td>` : '';
       const entryCell = hasEntry
         ? `<td class="pd-muted-td" ${right}>${r.entrySecLeft != null ? mmss(r.entrySecLeft) : '—'}</td>`
         : '';
+      // Лайв-строка (открытая сделка): исход ещё не известен.
+      if (r._live) {
+        const when = r._secLeft != null ? `ещё ${mmss(r._secLeft)}` : 'идёт';
+        return (
+          `<tr class="pd-liverow">` +
+          stratCell +
+          `<td class="${sideCls}">${esc(side)}</td>` +
+          `<td ${right}>${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>` +
+          edgeCells +
+          coefCell +
+          (hasEntry ? `<td class="pd-muted-td" ${right}>—</td>` : '') +
+          `<td style="color:#e5b461">🟢 в работе</td>` +
+          `<td class="pd-muted-td" ${right}>—</td>` +
+          `<td class="pd-muted-td" ${right}>${esc(when)}</td></tr>`
+        );
+      }
+      const when = r.t ? agoText(r.t) : '—';
+      const resCls = r.win ? 'pd-pos' : 'pd-neg';
       return (
         `<tr>` +
         stratCell +
@@ -300,9 +319,22 @@ function recentRoundsTable(
       );
     })
     .join('');
+  // Футер пагинации.
+  let pager = '';
+  if (opts.totalPages && opts.totalPages > 1 && opts.baseHref) {
+    const page = opts.page ?? 1;
+    const link = (p: number, label: string, on: boolean) =>
+      on ? `<a class="pd-page" href="${opts.baseHref}?page=${p}">${label}</a>` : `<span class="pd-page pd-page-off">${label}</span>`;
+    pager =
+      `<div class="pd-pager">` +
+      link(page - 1, '← Назад', page > 1) +
+      `<span class="pd-page-info">стр. ${page} из ${opts.totalPages}</span>` +
+      link(page + 1, 'Вперёд →', page < opts.totalPages) +
+      `</div>`;
+  }
   return (
     `<div class="pd-card"><h2>${esc(title)}</h2>` +
-    `<table class="pd-table"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`
+    `<table class="pd-table"><thead>${head}</thead><tbody>${rows}</tbody></table>${pager}</div>`
   );
 }
 
@@ -347,6 +379,12 @@ const STYLES = `<style>
   .pd-scard .row div{font-size:13px;color:#9aa4b2}
   .pd-scard .row b{display:block;font-size:18px;color:#fff;font-weight:700;margin-bottom:2px}
   .pd-arrow{color:#4ad991;font-size:13px;margin-top:14px;display:inline-block}
+  .pd-pager{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:14px;font-size:13px}
+  .pd-page{color:#4ad991;text-decoration:none;padding:4px 10px;border:1px solid #1e2530;border-radius:8px}
+  .pd-page:hover{border-color:#33414f}
+  .pd-page-off{color:#3a424d;border-color:#161b22;pointer-events:none}
+  .pd-page-info{color:#8b95a4}
+  .pd-liverow{background:rgba(229,180,97,0.06)}
   .pd-live h2{display:flex;align-items:center;gap:10px}
   .pl-timer{margin-left:auto;font-size:13px;font-weight:700;color:#e5b461;letter-spacing:.02em;text-transform:none}
   .pl-sides{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
@@ -390,36 +428,32 @@ function strategyCard(s: StrategyDef, st: PredictStatus | null): string {
   );
 }
 
-/** Лайв «сейчас в работе» по всем стратегиям (клиентский опрос live.json каждой). */
-function livePositionsPanel(): string {
-  const liveStrats = STRATEGIES.filter((s) => s.hasLive);
-  const list = liveStrats.map((s) => ({ slug: s.slug, title: s.title }));
-  const rows = liveStrats.map(
-    (s) =>
-      `<div class="pl2-row"><span class="pl2-name">${esc(s.title)}</span>` +
-      `<span class="pl2-pos" id="pl2-${s.slug}-pos">—</span>` +
-      `<span class="pl2-timer" id="pl2-${s.slug}-t">—</span></div>`,
-  ).join('');
-  return (
-    `<div class="pd-card"><h2>Сейчас в работе</h2><div class="pl2">${rows}</div></div>` +
-    `<script>(function(){var L=${JSON.stringify(list)};var ends={};var starts={};` +
-    `function fmt(ms){if(ms<0)ms=0;var s=Math.floor(ms/1000);return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2);}` +
-    `function tick(){L.forEach(function(x){var e=document.getElementById('pl2-'+x.slug+'-t');if(!e)return;var ss=starts[x.slug],se=ends[x.slug];if(!se){e.textContent='';return;}var now=Date.now();if(ss&&now<ss)e.textContent='⏳ старт '+fmt(ss-now);else if(now<se)e.textContent='⏳ '+fmt(se-now);else e.textContent='';});}` +
-    `function poll(){L.forEach(function(x){fetch('/predict/'+x.slug+'/live.json',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(d){var pe=document.getElementById('pl2-'+x.slug+'-pos');if(!pe)return;if(d){starts[x.slug]=d.slotStartMs;ends[x.slug]=d.slotEndMs;var p=d.position;pe.innerHTML=p?('🟢 <b class=\"'+(p.side==='UP'?'pd-up':'pd-down')+'\">'+p.side+'</b> · $'+(p.stake!=null?p.stake.toFixed(2):'—')+' · коэф '+(p.entryCoef||'—')):'⚪ нет позиции';}else{pe.textContent='нет данных';}}).catch(function(){});});}` +
-    `poll();setInterval(poll,2000);setInterval(tick,1000);tick();})();</script>`
-  );
-}
-
-/** Общий список последних сделок по всем стратегиям. */
+/** Общий список сделок по всем стратегиям: открытые (лайв) сверху, затем завершённые. */
 function globalFeed(): string {
-  const all: RecentRound[] = [];
+  // Открытые сейчас сделки (из live.json) — в начало.
+  const liveRows: RecentRound[] = [];
+  for (const s of STRATEGIES) {
+    if (!s.hasLive) continue;
+    const live = readLive(s) as { position?: { side?: string; stake?: number; entryCoef?: number }; slotEndMs?: number } | null;
+    const pos = live?.position;
+    if (pos && (pos.side === 'UP' || pos.side === 'DOWN')) {
+      const secLeft = typeof live?.slotEndMs === 'number' ? Math.round((live.slotEndMs - Date.now()) / 1000) : undefined;
+      liveRows.push({
+        t: Date.now(), side: pos.side, stake: pos.stake ?? null, coef: pos.entryCoef ?? null,
+        pnl: 0, win: false, _strategy: s.title, _live: true, _secLeft: secLeft,
+      });
+    }
+  }
+  // Завершённые сделки всех стратегий, новые первыми.
+  const done: RecentRound[] = [];
   for (const s of STRATEGIES) {
     const st = readStatus(s);
-    if (st?.recentRounds) for (const r of st.recentRounds) all.push({ ...r, _strategy: s.title });
+    if (st?.recentRounds) for (const r of st.recentRounds) done.push({ ...r, _strategy: s.title });
   }
-  all.sort((a, b) => (b.t ?? 0) - (a.t ?? 0));
-  return recentRoundsTable(all.slice(0, 15), {
-    title: 'Последние сделки · все стратегии',
+  done.sort((a, b) => (b.t ?? 0) - (a.t ?? 0));
+  const rows = [...liveRows, ...done.slice(0, 15)];
+  return recentRoundsTable(rows, {
+    title: 'Сделки · все стратегии',
     showStrategy: true,
     showMetric: false,
   });
@@ -434,14 +468,13 @@ function renderOverview(): string {
     `<p class="pd-sub">Экспериментальные стратегии на prediction-маркете Polymarket (BTC Up/Down, 5 мин). ` +
     `Каждая стратегия — отдельная гипотеза со своей честной статистикой (убытки тоже показываем). ` +
     `Всё в paper-режиме и изолировано от основного бота — это только просмотр.</p>` +
-    livePositionsPanel() +
     `<div class="pd-cards">${cards}</div>` +
     globalFeed() +
     `</div>`
   );
 }
 
-function renderStrategy(s: StrategyDef): string {
+function renderStrategy(s: StrategyDef, page = 1): string {
   const st = readStatus(s);
   const back = `<a class="pd-back" href="/predict">← все стратегии</a>`;
   const descCard = `<div class="pd-card"><h2>Как работает</h2><div class="pd-desc">${s.description.map((p) => `<p>${esc(p)}</p>`).join('')}</div></div>`;
@@ -480,6 +513,19 @@ function renderStrategy(s: StrategyDef): string {
   const avgStakeCard =
     st.avgStake != null ? statCard('Ср. ставка', `$${st.avgStake.toFixed(2)}`, 'muted') : statCard('Max drawdown', `$${st.maxDrawdown.toFixed(2)}`, 'muted');
 
+  // Пагинация таблицы раундов: 20 на страницу, новые первыми.
+  const PAGE_SIZE = 20;
+  const allRounds = st.recentRounds ?? [];
+  const totalPages = Math.max(1, Math.ceil(allRounds.length / PAGE_SIZE));
+  const p = Math.min(Math.max(1, page), totalPages);
+  const pageRounds = allRounds.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
+  const roundsTable = recentRoundsTable(pageRounds, {
+    title: `Раунды (${allRounds.length})`,
+    page: p,
+    totalPages,
+    baseHref: `/predict/${s.slug}`,
+  });
+
   return (
     STYLES +
     `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` +
@@ -496,7 +542,7 @@ function renderStrategy(s: StrategyDef): string {
     `<div class="pd-card"><h2>Кривая накопленного PnL</h2>${equitySvg(st.equityCurve)}` +
     `<div class="pd-foot">Выигрышей: ${st.wins} · Проигрышей: ${st.losses} · ` +
     `Исходы рынка ↑${st.marketOutcomes.up}/↓${st.marketOutcomes.down}</div></div>` +
-    recentRoundsTable(st.recentRounds ?? []) +
+    roundsTable +
     PAPER_NOTE +
     `<p class="pd-foot">Обновлено: ${esc(updated)} UTC</p>` +
     `</div>`
@@ -522,10 +568,12 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
   });
 
   for (const s of STRATEGIES) {
-    app.get(`/predict/${s.slug}`, async (_req, reply) => {
+    app.get(`/predict/${s.slug}`, async (req, reply) => {
       reply.header('content-type', 'text/html; charset=utf-8');
       reply.header('Cache-Control', 'public, max-age=30');
-      return pageShell(`${s.title} — /predict`, renderStrategy(s), { lang: 'ru', autoRefreshSec: 60 });
+      const pageRaw = (req.query as { page?: string } | undefined)?.page;
+      const page = Math.max(1, parseInt(pageRaw ?? '1', 10) || 1);
+      return pageShell(`${s.title} — /predict`, renderStrategy(s, page), { lang: 'ru', autoRefreshSec: 60 });
     });
     app.get(`/predict/${s.slug}/status.json`, async (_req, reply) => {
       const st = readStatus(s);
