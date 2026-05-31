@@ -401,9 +401,10 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Safety SL 7% — выбран по PnL-симуляции (Phase Q): +248% за 827 дней на $1000, PF 2.28, max DD 26%. Cap спасает от худших 25-30% экскурсий, оставляя 75% win-rate нетронутым.',
     symbol: 'UNIUSDT',
     timeframe: '60',
-    // RE-ENABLED Phase Q with slPct 7%. PnL simulation: +$2481 (+248%)
-    // on $1000 notional over 198 days, PF 2.28, worst trade −7%.
-    enabled: true,
+    // Phase R (May 29 2026): DISABLED — operator removed all 1h strategies
+    // from the product. Config kept (history/landing detail still resolve);
+    // enabled:false hides it from tiers, landing list and fan-out.
+    enabled: false,
     slPct: 0.07,
     launchedAt: Date.parse('2026-05-17T10:30:00Z'),
     alertName: 'UNIUSDT|60|LONG=CFMAnyBl&TCBr&TSTTr|SHORT=CFMAnyBr&TCBl&TSTTr|EXIT=CFMBltExt',
@@ -500,7 +501,8 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Safety SL 5% — выбран по PnL-симуляции (Phase Q): +63% на $1000, PF 1.72, max DD 15%, худшая сделка −5%. Тугой стоп оптимален для TRX — широкий SL не добавляет доходности.',
     symbol: 'TRXUSDT',
     timeframe: '60',
-    enabled: true,
+    // Phase R (May 29 2026): DISABLED — 1h strategies removed from product.
+    enabled: false,
     slPct: 0.05,
     launchedAt: Date.parse('2026-05-17T10:35:00Z'),
     alertName: 'TRXUSDT|60|LONG=CFMAnyBl&TTBl&WkBrCfl|SHORT=CFMAnyBr&TTBr&WkBlCfl|EXIT=CFMBltExt',
@@ -587,7 +589,8 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Safety SL 7% — выбран по PnL-симуляции (Phase Q): +116% на $1000, PF 2.02, max DD 17.5%, win-rate 83%. Cap при 7% даже улучшает результат vs без стопа (срезает катастрофические экскурсии).',
     symbol: 'TONUSDT',
     timeframe: '60',
-    enabled: true,
+    // Phase R (May 29 2026): DISABLED — 1h strategies removed from product.
+    enabled: false,
     slPct: 0.07,
     launchedAt: Date.parse('2026-05-18T11:00:00Z'),
     alertName: 'TONUSDT|60|LONG=CNTRNormBl&CFMDn&NeoCloudBr|SHORT=CNTRNormBr&CFMUp&NeoCloudBl|EXIT=CNTRBltExt',
@@ -677,7 +680,8 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Safety SL 6% — выбран по PnL-симуляции (Phase Q): самая доходная стратегия портфеля — +415% за 831 день на $1000, PF 2.51, max DD 25%, худшая сделка −6%. Cap сохраняет fat-tail winners, отрезая катастрофы.',
     symbol: 'HBARUSDT',
     timeframe: '60',
-    enabled: true,
+    // Phase R (May 29 2026): DISABLED — 1h strategies removed from product.
+    enabled: false,
     slPct: 0.06,
     launchedAt: Date.parse('2026-05-18T11:30:00Z'),
     alertName: 'HBARUSDT|60|LONG=CNTRNormBr&TSRng&StrongBlCfl|SHORT=CNTRNormBl&TSRng&StrongBrCfl|EXIT=CNTRBltExt',
