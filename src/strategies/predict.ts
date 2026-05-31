@@ -40,15 +40,15 @@ const STRATEGIES: StrategyDef[] = [
   {
     slug: 'prob',
     title: 'Probability Engine',
-    tagline: 'Оценка вероятности и эдж против ордербука',
+    tagline: 'Покупаем недооценённую сторону по своей оценке вероятности',
     statusEnv: 'PREDICT_STATUS_PATH',
     statusFile: 'predict-status.json',
     liveFile: 'predict-live-prob.json',
     showStakeCol: true,
     description: [
       'Каждые полсекунды стратегия смотрит на три вещи: насколько цена BTC ушла от референса (цены-цели на момент открытия 5-минутного окна), её краткосрочный моментум и сколько времени осталось до закрытия. Из этого считается оценка вероятности исхода.',
-      'Если наша оценка вероятности заметно выше цены стороны в ордербуке (есть «эдж» ≥ 8%), покупаем эту сторону — пока книга тонкого рынка не успела переоцениться. Размер ставки растёт с величиной эджа, потолок $25 на рынок. Позиция держится до конца окна.',
-      'Суть: зарабатываем на скорости и лаге ордербука, а не на угадывании направления BTC. Поэтому входим редко — только когда эдж действительно есть.',
+      'Если наша оценка вероятности заметно выше цены стороны на рынке (минимум на 8% — то есть сторона недооценена), покупаем её, пока тонкий рынок не успел поднять цену. Чем больше недооценка, тем больше ставим (потолок $25 на рынок). Позиция держится до конца окна.',
+      'Суть: зарабатываем на скорости — ловим момент, когда цена рынка отстала от реальной ситуации, — а не на угадывании направления BTC. Поэтому входим редко: только когда сторона действительно недооценена.',
     ],
   },
   {
@@ -62,7 +62,7 @@ const STRATEGIES: StrategyDef[] = [
     description: [
       'Стратегия ждёт момент в раунде, когда коэффициент одной из сторон попадает в диапазон 3.0–3.5 (цена 0.286–0.333) — рынок оценивает её как аутсайдера с шансом ~30%. Ставим на эту сторону, выбирая коэффициент ближе к 3 (там выше вероятность выигрыша). Если аутсайдер ушёл глубже 3.5 — раунд пропускаем. Ровно 3.00 поймать нельзя: цены идут тиками по 0.01, ближайшее — 0.33 (коэф 3.03).',
       'Размер ставки — система Фибоначчи от $1: 1, 1, 2, 3, 5, 8, 13, 21, 34… После проигрыша делаем следующий шаг последовательности, после выигрыша возвращаемся к $1. Потолок серии — 20 шагов.',
-      'Честно: ставка на аутсайдера выигрывает примерно 1 раз из 3 — проигрышей по природе больше, чем выигрышей. Идея в том, что выплата ~3:1 на выигрышах вместе с прогрессией покрывает серии проигрышей. С учётом спреда встроенного эджа нет — накопленная статистика покажет правду.',
+      'Честно: ставка на аутсайдера выигрывает примерно 1 раз из 3 — проигрышей по природе больше, чем выигрышей. Идея в том, что выплата ~3:1 на выигрышах вместе с прогрессией покрывает серии проигрышей. С учётом спреда устойчивого перевеса у такой ставки нет — накопленная статистика покажет правду.',
     ],
   },
 ];
@@ -139,15 +139,15 @@ function livePanel(s: StrategyDef): string {
     `<div id="pl-pos" class="pl-pos">—</div>` +
     `</div>` +
     `<script>(function(){` +
-    `var slug=${slug};var slotEnd=null;var lastUpd=0;` +
+    `var slug=${slug};var slotStart=null;var slotEnd=null;var lastUpd=0;` +
     `function $(i){return document.getElementById(i);}` +
     `function set(i,v){var e=$(i);if(e)e.textContent=v;}` +
     `function fmt(ms){if(ms<0)ms=0;var s=Math.floor(ms/1000);return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2);}` +
     `function cents(p){return p!=null?Math.round(p*100)+'¢':'—';}` +
     `function coef(p){return p?'×'+(1/p).toFixed(2):'—';}` +
     `function usd(n){return n!=null?'$'+n.toLocaleString('ru-RU',{maximumFractionDigits:2}):'—';}` +
-    `function tick(){var t=$('pl-timer');if(!t)return;if(slotEnd&&Date.now()-lastUpd<25000){t.textContent=Date.now()<slotEnd?fmt(slotEnd-Date.now()):'раунд закрыт';}else{t.textContent='ожидание данных';}}` +
-    `async function poll(){try{var r=await fetch('/predict/'+slug+'/live.json',{cache:'no-store'});if(!r.ok)return;var d=await r.json();lastUpd=Date.now();slotEnd=d.slotEndMs;` +
+    `function tick(){var t=$('pl-timer');if(!t)return;if(!slotEnd||Date.now()-lastUpd>25000){t.textContent='ожидание данных';return;}var now=Date.now();if(slotStart&&now<slotStart)t.textContent='старт через '+fmt(slotStart-now);else if(now<slotEnd)t.textContent=fmt(slotEnd-now)+' до закрытия';else t.textContent='раунд закрыт';}` +
+    `async function poll(){try{var r=await fetch('/predict/'+slug+'/live.json',{cache:'no-store'});if(!r.ok)return;var d=await r.json();lastUpd=Date.now();slotStart=d.slotStartMs;slotEnd=d.slotEndMs;` +
     `set('pl-up',cents(d.up&&d.up.ask));set('pl-up-k',coef(d.up&&d.up.ask));set('pl-down',cents(d.down&&d.down.ask));set('pl-down-k',coef(d.down&&d.down.ask));` +
     `set('pl-btc',usd(d.btc));set('pl-target',usd(d.target));var g=(d.btc!=null&&d.target!=null)?d.btc-d.target:null;set('pl-gap',g!=null?(g>=0?'+':'−')+'$'+Math.abs(g).toFixed(2):'—');` +
     `var p=d.position;$('pl-pos').innerHTML=p?('🟢 В сделке: <b class=\"'+(p.side==='UP'?'pd-up':'pd-down')+'\">'+p.side+'</b> · ставка '+usd(p.stake)+' · коэф '+(p.entryCoef||'—')):'⚪ Открытой позиции нет — ждём сигнал';` +
@@ -343,7 +343,7 @@ const STYLES = `<style>
 
 const PAPER_NOTE =
   `<div class="pd-note">⚠ Paper-режим (симуляция). Это валидация гипотезы, а не доказанная прибыльность: ` +
-  `эдж считается реальным только после статистической проверки на большой выборке с учётом проскальзывания. ` +
+  `перевес считается реальным только после статистической проверки на большой выборке с учётом проскальзывания. ` +
   `Параметры стратегии не публикуются.</div>`;
 
 function strategyCard(s: StrategyDef, st: PredictStatus | null): string {
@@ -374,10 +374,10 @@ function livePositionsPanel(): string {
   ).join('');
   return (
     `<div class="pd-card"><h2>Сейчас в работе</h2><div class="pl2">${rows}</div></div>` +
-    `<script>(function(){var L=${JSON.stringify(list)};var ends={};` +
+    `<script>(function(){var L=${JSON.stringify(list)};var ends={};var starts={};` +
     `function fmt(ms){if(ms<0)ms=0;var s=Math.floor(ms/1000);return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2);}` +
-    `function tick(){L.forEach(function(x){var e=document.getElementById('pl2-'+x.slug+'-t');if(!e)return;var se=ends[x.slug];e.textContent=(se&&Date.now()<se)?'⏳ '+fmt(se-Date.now()):'';});}` +
-    `function poll(){L.forEach(function(x){fetch('/predict/'+x.slug+'/live.json',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(d){var pe=document.getElementById('pl2-'+x.slug+'-pos');if(!pe)return;if(d){ends[x.slug]=d.slotEndMs;var p=d.position;pe.innerHTML=p?('🟢 <b class=\"'+(p.side==='UP'?'pd-up':'pd-down')+'\">'+p.side+'</b> · $'+(p.stake!=null?p.stake.toFixed(2):'—')+' · коэф '+(p.entryCoef||'—')):'⚪ нет позиции';}else{pe.textContent='нет данных';}}).catch(function(){});});}` +
+    `function tick(){L.forEach(function(x){var e=document.getElementById('pl2-'+x.slug+'-t');if(!e)return;var ss=starts[x.slug],se=ends[x.slug];if(!se){e.textContent='';return;}var now=Date.now();if(ss&&now<ss)e.textContent='⏳ старт '+fmt(ss-now);else if(now<se)e.textContent='⏳ '+fmt(se-now);else e.textContent='';});}` +
+    `function poll(){L.forEach(function(x){fetch('/predict/'+x.slug+'/live.json',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(d){var pe=document.getElementById('pl2-'+x.slug+'-pos');if(!pe)return;if(d){starts[x.slug]=d.slotStartMs;ends[x.slug]=d.slotEndMs;var p=d.position;pe.innerHTML=p?('🟢 <b class=\"'+(p.side==='UP'?'pd-up':'pd-down')+'\">'+p.side+'</b> · $'+(p.stake!=null?p.stake.toFixed(2):'—')+' · коэф '+(p.entryCoef||'—')):'⚪ нет позиции';}else{pe.textContent='нет данных';}}).catch(function(){});});}` +
     `poll();setInterval(poll,2000);setInterval(tick,1000);tick();})();</script>`
   );
 }
