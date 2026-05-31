@@ -244,9 +244,12 @@ function recentRoundsTable(
       const sideCls = r.side === 'UP' ? 'pd-up' : r.side === 'DOWN' ? 'pd-down' : '';
       const resCls = r.win ? 'pd-pos' : 'pd-neg';
       const stratCell = showStrategy ? `<td class="pd-muted-td">${esc(r._strategy ?? '')}</td>` : '';
+      // Недооценка в % = на сколько цена входа ниже справедливой (нашей оценки).
+      // (prob − price)/price = edge_пп × коэф. Понятнее, чем проц. пункты.
+      const undervalPct = r.edge != null && r.coef != null ? Math.round(r.edge * r.coef) : null;
       const edgeCells = hasEdge
         ? `<td ${right}>${r.prob != null ? r.prob + '%' : '—'}</td>` +
-          `<td class="pd-pos" ${right}>${r.edge != null ? '+' + r.edge + ' п.п.' : '—'}</td>`
+          `<td class="pd-pos" ${right}>${undervalPct != null ? undervalPct + '%' : '—'}</td>`
         : '';
       const coefCell = hasCoef ? `<td class="pd-muted-td" ${right}>${r.coef != null ? r.coef.toFixed(2) : '—'}</td>` : '';
       return (
