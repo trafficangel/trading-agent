@@ -35,6 +35,7 @@ type StrategyDef = {
   description: string[]; // plain-language paragraphs (HTML-escaped on render)
   showStakeCol: boolean; // show stake/coef columns in recent-rounds table
   hasLive?: boolean; // публикует ли движок лайв-снимок (live.json)
+  retired?: boolean; // стратегия остановлена (гипотеза не подтвердилась)
 };
 
 const STRATEGIES: StrategyDef[] = [
@@ -46,7 +47,8 @@ const STRATEGIES: StrategyDef[] = [
     statusFile: 'predict-status.json',
     liveFile: 'predict-live-prob.json',
     showStakeCol: true,
-    hasLive: true,
+    hasLive: false,
+    retired: true,
     description: [
       'Каждые полсекунды стратегия смотрит на три вещи: насколько цена BTC ушла от референса (цены-цели на момент открытия 5-минутного окна), её краткосрочный моментум и сколько времени осталось до закрытия. Из этого считается оценка вероятности исхода.',
       'Если наша оценка вероятности выше цены стороны на рынке на 8–13% (сторона недооценена) — покупаем её фиксированной ставкой, пока тонкий рынок не успел поднять цену. Слишком большой перевес (>13%) пропускаем: на практике это почти всегда ошибка модели, а не реальная возможность. Позиция держится до конца окна.',
@@ -61,7 +63,8 @@ const STRATEGIES: StrategyDef[] = [
     statusFile: 'predict-scalp-status.json',
     liveFile: 'predict-live-scalp.json',
     showStakeCol: true,
-    hasLive: true,
+    hasLive: false,
+    retired: true,
     description: [
       'Вход тот же, что у Probability Engine (недооценённая сторона, перевес 8–13%, фиксированная ставка). Отличается ВЫХОД: вместо удержания до конца раунда мы ловим переоценку ордербука.',
       'Как только рынок подтягивает цену вверх к нашей оценке — продаём по take-profit (+15¢) и фиксируем прибыль, не дожидаясь бинарного исхода. Если цена пошла против (−8¢) — режем по стопу. За 20 секунд до конца выходим по рынку в любом случае.',
@@ -385,6 +388,9 @@ const STYLES = `<style>
   .pd-page-off{color:#3a424d;border-color:#161b22;pointer-events:none}
   .pd-page-info{color:#8b95a4}
   .pd-liverow{background:rgba(229,180,97,0.06)}
+  .pd-retired{font-size:11px;font-weight:600;color:#8b95a4;background:#1e2530;border-radius:6px;padding:2px 8px;margin-left:8px;vertical-align:middle}
+  .pd-scard-off{opacity:.62}
+  .pd-retired-banner{background:rgba(229,97,108,0.08);border:1px solid rgba(229,97,108,0.25);border-radius:12px;padding:14px 16px;color:#cdb4b6;font-size:14px;line-height:1.5;margin-bottom:20px}
   .pd-live h2{display:flex;align-items:center;gap:10px}
   .pl-timer{margin-left:auto;font-size:13px;font-weight:700;color:#e5b461;letter-spacing:.02em;text-transform:none}
   .pl-sides{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
@@ -419,9 +425,10 @@ function strategyCard(s: StrategyDef, st: PredictStatus | null): string {
       `<div><b style="color:${st.netPnl >= 0 ? '#4ad991' : '#e5616c'}">${fmtUsd(st.netPnl)}</b>net PnL</div>` +
       `</div>`
     : `<div class="row"><div style="color:#6b7484">данных пока нет</div></div>`;
+  const retiredBadge = s.retired ? `<span class="pd-retired">остановлена</span>` : '';
   return (
-    `<a class="pd-scard" href="/predict/${s.slug}">` +
-    `<h3>${esc(s.title)}</h3>` +
+    `<a class="pd-scard${s.retired ? ' pd-scard-off' : ''}" href="/predict/${s.slug}">` +
+    `<h3>${esc(s.title)}${retiredBadge}</h3>` +
     `<div class="tag">${esc(s.tagline)}</div>` +
     stat +
     `<span class="pd-arrow">Подробнее →</span></a>`
@@ -478,6 +485,11 @@ function renderStrategy(s: StrategyDef, page = 1): string {
   const st = readStatus(s);
   const back = `<a class="pd-back" href="/predict">← все стратегии</a>`;
   const descCard = `<div class="pd-card"><h2>Как работает</h2><div class="pd-desc">${s.description.map((p) => `<p>${esc(p)}</p>`).join('')}</div></div>`;
+  const retiredBanner = s.retired
+    ? `<div class="pd-retired-banner">⏹ Стратегия остановлена — гипотеза не подтвердилась. ` +
+      `На выборке оказался отрицательный перевес (угадывание стороны хуже подброса монеты), поэтому торговля прекращена. ` +
+      `Итоговые цифры ниже заморожены и оставлены честно, как есть.</div>`
+    : '';
 
   if (!st) {
     return (
@@ -529,6 +541,7 @@ function renderStrategy(s: StrategyDef, page = 1): string {
   return (
     STYLES +
     `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` +
+    retiredBanner +
     (s.hasLive ? livePanel(s) : '') +
     descCard +
     `<div class="pd-grid">` +
