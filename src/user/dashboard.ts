@@ -714,7 +714,7 @@ function renderOnboardingChecklist(args: {
           : 'Шаг завершится, как только стратегия откроет первую сделку.',
       ctas: tradingStarted || !balanceOk || !tierActivated
         ? undefined
-        : [{ kind: 'link', label: 'Telegram-канал ↗', href: 'https://t.me/luxalgosignal', primary: false }],
+        : [{ kind: 'link', label: 'Telegram-канал ↗', href: 'https://t.me/robotclaude', primary: false }],
     },
   ];
 

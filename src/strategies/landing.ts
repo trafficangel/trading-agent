@@ -2476,7 +2476,7 @@ export function pageShell(
       <a href="/">${labels.home}</a>
       <a href="/autotrading">${labels.autotrading}</a>
       <a href="/strategies">${labels.strategies}</a>
-      <a href="https://t.me/luxalgosignal" target="_blank" rel="noopener">${labels.channel}</a>
+      <a href="https://t.me/robotclaude" target="_blank" rel="noopener">${labels.channel}</a>
       <a href="https://t.me/dboykod" target="_blank" rel="noopener">${labels.support}</a>
   `;
 
@@ -3018,7 +3018,7 @@ export function jsonLdOrganization(): string {
     url: PUBLIC_ORIGIN,
     logo: `${PUBLIC_ORIGIN}/og-default.png`,
     description: 'SaaS-сервис автоматизации криптотрейдинга на Bybit',
-    sameAs: ['https://t.me/luxalgosignal', 'https://t.me/dboykod'],
+    sameAs: ['https://t.me/robotclaude', 'https://t.me/dboykod'],
     contactPoint: {
       '@type': 'ContactPoint',
       contactType: 'customer support',
@@ -4464,7 +4464,7 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
       '',
       '## Contact',
       '',
-      '- Telegram signals channel: https://t.me/luxalgosignal',
+      '- Telegram signals channel: https://t.me/robotclaude',
       '- Operator support: https://t.me/dboykod',
       '',
     ].join('\n');
