@@ -72,6 +72,7 @@ type RecentRound = {
   side: 'UP' | 'DOWN' | null;
   stake?: number | null;
   coef?: number | null;
+  entrySecLeft?: number | null; // секунд до закрытия на момент входа
   prob?: number | null; // наша оценка вероятности, %
   edge?: number | null; // недооценка (наша оценка − цена), проц. пункты
   distanceBp?: number | null;
@@ -226,16 +227,19 @@ function recentRoundsTable(
   const title = opts.title ?? 'Последние раунды';
   const showStrategy = opts.showStrategy ?? false;
   const showMetric = opts.showMetric !== false;
-  // Адаптивные колонки: для prob-engine — оценка/недооценка, для martingale — коэф.
+  // Адаптивные колонки: оценка/недооценка (prob), коэф входа, время входа.
   const hasEdge = showMetric && rounds.some((r) => r.edge != null);
-  const hasCoef = showMetric && !hasEdge && rounds.some((r) => r.coef != null);
+  const hasCoef = showMetric && rounds.some((r) => r.coef != null);
+  const hasEntry = showMetric && rounds.some((r) => r.entrySecLeft != null);
   const right = 'style="text-align:right"';
+  const mmss = (s: number): string => `${Math.floor(s / 60)}:${('0' + (s % 60)).slice(-2)}`;
   const head =
     `<tr>` +
     (showStrategy ? `<th>Стратегия</th>` : '') +
     `<th>Сторона</th><th ${right}>Ставка</th>` +
     (hasEdge ? `<th ${right}>Оценка</th><th ${right}>Недооценка</th>` : '') +
     (hasCoef ? `<th ${right}>Коэф.</th>` : '') +
+    (hasEntry ? `<th ${right}>Вход за</th>` : '') +
     `<th>Исход</th><th ${right}>PnL</th><th ${right}>Когда</th></tr>`;
   const rows = rounds
     .map((r) => {
@@ -252,6 +256,9 @@ function recentRoundsTable(
           `<td class="pd-pos" ${right}>${undervalPct != null ? undervalPct + '%' : '—'}</td>`
         : '';
       const coefCell = hasCoef ? `<td class="pd-muted-td" ${right}>${r.coef != null ? r.coef.toFixed(2) : '—'}</td>` : '';
+      const entryCell = hasEntry
+        ? `<td class="pd-muted-td" ${right}>${r.entrySecLeft != null ? mmss(r.entrySecLeft) : '—'}</td>`
+        : '';
       return (
         `<tr>` +
         stratCell +
@@ -259,6 +266,7 @@ function recentRoundsTable(
         `<td ${right}>${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>` +
         edgeCells +
         coefCell +
+        entryCell +
         `<td class="${resCls}">${r.win ? 'выигрыш' : 'проигрыш'}</td>` +
         `<td class="${resCls}" ${right}>${fmtUsd(r.pnl)}</td>` +
         `<td class="pd-muted-td" ${right}>${esc(when)}</td></tr>`
