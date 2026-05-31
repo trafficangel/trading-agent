@@ -31,6 +31,7 @@ type StrategyDef = {
   tagline: string;
   statusEnv: string; // env override for the JSON path
   statusFile: string; // default filename under data/
+  liveFile: string; // real-time snapshot filename under data/ (written by engine)
   description: string[]; // plain-language paragraphs (HTML-escaped on render)
   showStakeCol: boolean; // show stake/coef columns in recent-rounds table
 };
@@ -42,6 +43,7 @@ const STRATEGIES: StrategyDef[] = [
     tagline: 'Оценка вероятности и эдж против ордербука',
     statusEnv: 'PREDICT_STATUS_PATH',
     statusFile: 'predict-status.json',
+    liveFile: 'predict-live-prob.json',
     showStakeCol: true,
     description: [
       'Каждые полсекунды стратегия смотрит на три вещи: насколько цена BTC ушла от референса (цены-цели на момент открытия 5-минутного окна), её краткосрочный моментум и сколько времени осталось до закрытия. Из этого считается оценка вероятности исхода.',
@@ -55,6 +57,7 @@ const STRATEGIES: StrategyDef[] = [
     tagline: 'Ставка на аутсайдера при коэф. 3.0–3.5 + прогрессия Фибоначчи',
     statusEnv: 'PREDICT_MART_STATUS_PATH',
     statusFile: 'predict-mart-status.json',
+    liveFile: 'predict-live-martingale.json',
     showStakeCol: true,
     description: [
       'Стратегия ждёт момент в раунде, когда коэффициент одной из сторон попадает в диапазон 3.0–3.5 (цена 0.286–0.333) — рынок оценивает её как аутсайдера с шансом ~30%. Ставим на эту сторону, выбирая коэффициент ближе к 3 (там выше вероятность выигрыша). Если аутсайдер ушёл глубже 3.5 — раунд пропускаем. Ровно 3.00 поймать нельзя: цены идут тиками по 0.01, ближайшее — 0.33 (коэф 3.03).',
@@ -105,6 +108,48 @@ function readStatus(s: StrategyDef): PredictStatus | null {
   } catch {
     return null;
   }
+}
+
+function readLive(s: StrategyDef): unknown | null {
+  try {
+    const p = join(dataDir, s.liveFile);
+    if (!existsSync(p)) return null;
+    return JSON.parse(readFileSync(p, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** Лайв-панель: рынок + наша сделка + таймер. Обновляется клиентским опросом. */
+function livePanel(s: StrategyDef): string {
+  const slug = JSON.stringify(s.slug);
+  return (
+    `<div class="pd-card pd-live">` +
+    `<h2>Лайв · текущий раунд <span id="pl-timer" class="pl-timer">—</span></h2>` +
+    `<div class="pl-sides">` +
+    `<div class="pl-side pl-side-up"><span class="pl-side-lbl">UP</span><span id="pl-up" class="pl-price">—</span><span id="pl-up-k" class="pl-k">—</span></div>` +
+    `<div class="pl-side pl-side-down"><span class="pl-side-lbl">DOWN</span><span id="pl-down" class="pl-price">—</span><span id="pl-down-k" class="pl-k">—</span></div>` +
+    `</div>` +
+    `<div class="pl-meta">BTC <span id="pl-btc">—</span> · цель <span id="pl-target">—</span> · отрыв <span id="pl-gap">—</span></div>` +
+    `<div id="pl-pos" class="pl-pos">—</div>` +
+    `</div>` +
+    `<script>(function(){` +
+    `var slug=${slug};var slotEnd=null;var lastUpd=0;` +
+    `function $(i){return document.getElementById(i);}` +
+    `function set(i,v){var e=$(i);if(e)e.textContent=v;}` +
+    `function fmt(ms){if(ms<0)ms=0;var s=Math.floor(ms/1000);return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2);}` +
+    `function cents(p){return p!=null?Math.round(p*100)+'¢':'—';}` +
+    `function coef(p){return p?'×'+(1/p).toFixed(2):'—';}` +
+    `function usd(n){return n!=null?'$'+n.toLocaleString('ru-RU',{maximumFractionDigits:2}):'—';}` +
+    `function tick(){var t=$('pl-timer');if(!t)return;if(slotEnd&&Date.now()-lastUpd<25000){t.textContent=Date.now()<slotEnd?fmt(slotEnd-Date.now()):'раунд закрыт';}else{t.textContent='ожидание данных';}}` +
+    `async function poll(){try{var r=await fetch('/predict/'+slug+'/live.json',{cache:'no-store'});if(!r.ok)return;var d=await r.json();lastUpd=Date.now();slotEnd=d.slotEndMs;` +
+    `set('pl-up',cents(d.up&&d.up.ask));set('pl-up-k',coef(d.up&&d.up.ask));set('pl-down',cents(d.down&&d.down.ask));set('pl-down-k',coef(d.down&&d.down.ask));` +
+    `set('pl-btc',usd(d.btc));set('pl-target',usd(d.target));var g=(d.btc!=null&&d.target!=null)?d.btc-d.target:null;set('pl-gap',g!=null?(g>=0?'+':'−')+'$'+Math.abs(g).toFixed(2):'—');` +
+    `var p=d.position;$('pl-pos').innerHTML=p?('🟢 В сделке: <b class=\"'+(p.side==='UP'?'pd-up':'pd-down')+'\">'+p.side+'</b> · ставка '+usd(p.stake)+' · коэф '+(p.entryCoef||'—')):'⚪ Открытой позиции нет — ждём сигнал';` +
+    `}catch(e){}}` +
+    `poll();setInterval(poll,2000);setInterval(tick,1000);tick();` +
+    `})();</script>`
+  );
 }
 
 function esc(s: string): string {
@@ -242,6 +287,19 @@ const STYLES = `<style>
   .pd-scard .row div{font-size:13px;color:#9aa4b2}
   .pd-scard .row b{display:block;font-size:18px;color:#fff;font-weight:700;margin-bottom:2px}
   .pd-arrow{color:#4ad991;font-size:13px;margin-top:14px;display:inline-block}
+  .pd-live h2{display:flex;align-items:center;gap:10px}
+  .pl-timer{margin-left:auto;font-size:13px;font-weight:700;color:#e5b461;letter-spacing:.02em;text-transform:none}
+  .pl-sides{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+  .pl-side{display:flex;align-items:baseline;gap:10px;padding:14px 16px;border-radius:10px}
+  .pl-side-up{background:rgba(74,217,145,0.10);border:1px solid rgba(74,217,145,0.25)}
+  .pl-side-down{background:rgba(229,97,108,0.10);border:1px solid rgba(229,97,108,0.25)}
+  .pl-side-lbl{font-size:13px;font-weight:700;color:#cfd6e0}
+  .pl-side-up .pl-side-lbl{color:#4ad991}.pl-side-down .pl-side-lbl{color:#e5616c}
+  .pl-price{font-size:24px;font-weight:700;color:#fff}
+  .pl-k{font-size:13px;color:#8b95a4;margin-left:auto}
+  .pl-meta{color:#9aa4b2;font-size:13.5px;margin-bottom:10px}
+  .pl-meta span{color:#cfd6e0;font-weight:600}
+  .pl-pos{font-size:14px;color:#cfd6e0;padding-top:10px;border-top:1px solid #1e2530}
 </style>`;
 
 const PAPER_NOTE =
@@ -303,7 +361,9 @@ function renderStrategy(s: StrategyDef): string {
   if (st.rounds === 0) {
     return (
       STYLES +
-      `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>${descCard}` +
+      `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` +
+      livePanel(s) +
+      descCard +
       `<div class="pd-empty"><b style="color:#cfd6e0">Накапливаем статистику.</b><br>` +
       `Движок работает в paper-режиме. Завершённые раунды и кривая PnL появятся здесь по мере накопления.</div>` +
       PAPER_NOTE +
@@ -320,6 +380,7 @@ function renderStrategy(s: StrategyDef): string {
   return (
     STYLES +
     `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` +
+    livePanel(s) +
     descCard +
     `<div class="pd-grid">` +
     statCard('Раундов', String(st.rounds)) +
@@ -371,6 +432,15 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
         return { ok: false, error: 'no_data_yet' };
       }
       return st;
+    });
+    app.get(`/predict/${s.slug}/live.json`, async (_req, reply) => {
+      const live = readLive(s);
+      reply.header('Cache-Control', 'no-store');
+      if (!live) {
+        reply.code(503);
+        return { ok: false, error: 'no_live_yet' };
+      }
+      return live;
     });
   }
 }
