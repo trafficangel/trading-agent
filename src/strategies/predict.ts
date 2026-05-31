@@ -72,8 +72,12 @@ type RecentRound = {
   side: 'UP' | 'DOWN' | null;
   stake?: number | null;
   coef?: number | null;
+  prob?: number | null; // наша оценка вероятности, %
+  edge?: number | null; // недооценка (наша оценка − цена), проц. пункты
+  distanceBp?: number | null;
   pnl: number;
   win: boolean;
+  _strategy?: string; // подпись стратегии (для общего списка)
 };
 
 type PredictStatus = {
@@ -214,34 +218,52 @@ function statCard(label: string, value: string, accent?: 'pos' | 'neg' | 'muted'
   return `<div class="pd-stat${cls}"><div class="pd-stat-val">${value}</div><div class="pd-stat-lbl">${esc(label)}</div></div>`;
 }
 
-function recentRoundsTable(rounds: RecentRound[], showStake: boolean): string {
+function recentRoundsTable(
+  rounds: RecentRound[],
+  opts: { title?: string; showStrategy?: boolean; showMetric?: boolean } = {},
+): string {
   if (rounds.length === 0) return '';
+  const title = opts.title ?? 'Последние раунды';
+  const showStrategy = opts.showStrategy ?? false;
+  const showMetric = opts.showMetric !== false;
+  // Адаптивные колонки: для prob-engine — оценка/недооценка, для martingale — коэф.
+  const hasEdge = showMetric && rounds.some((r) => r.edge != null);
+  const hasCoef = showMetric && !hasEdge && rounds.some((r) => r.coef != null);
+  const right = 'style="text-align:right"';
   const head =
-    `<tr><th>Сторона</th>` +
-    (showStake ? `<th style="text-align:right">Ставка</th><th style="text-align:right">Коэф.</th>` : '') +
-    `<th>Исход</th><th style="text-align:right">PnL</th><th style="text-align:right">Когда</th></tr>`;
+    `<tr>` +
+    (showStrategy ? `<th>Стратегия</th>` : '') +
+    `<th>Сторона</th><th ${right}>Ставка</th>` +
+    (hasEdge ? `<th ${right}>Оценка</th><th ${right}>Недооценка</th>` : '') +
+    (hasCoef ? `<th ${right}>Коэф.</th>` : '') +
+    `<th>Исход</th><th ${right}>PnL</th><th ${right}>Когда</th></tr>`;
   const rows = rounds
     .map((r) => {
       const when = r.t ? agoText(r.t) : '—';
       const side = r.side ?? '—';
       const sideCls = r.side === 'UP' ? 'pd-up' : r.side === 'DOWN' ? 'pd-down' : '';
-      const res = r.win ? 'выигрыш' : 'проигрыш';
       const resCls = r.win ? 'pd-pos' : 'pd-neg';
-      const stakeCells = showStake
-        ? `<td style="text-align:right">${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>` +
-          `<td class="pd-muted-td" style="text-align:right">${r.coef != null ? r.coef.toFixed(2) : '—'}</td>`
+      const stratCell = showStrategy ? `<td class="pd-muted-td">${esc(r._strategy ?? '')}</td>` : '';
+      const edgeCells = hasEdge
+        ? `<td ${right}>${r.prob != null ? r.prob + '%' : '—'}</td>` +
+          `<td class="pd-pos" ${right}>${r.edge != null ? '+' + r.edge + ' п.п.' : '—'}</td>`
         : '';
+      const coefCell = hasCoef ? `<td class="pd-muted-td" ${right}>${r.coef != null ? r.coef.toFixed(2) : '—'}</td>` : '';
       return (
-        `<tr><td class="${sideCls}">${esc(side)}</td>` +
-        stakeCells +
-        `<td class="${resCls}">${res}</td>` +
-        `<td class="${resCls}" style="text-align:right">${fmtUsd(r.pnl)}</td>` +
-        `<td class="pd-muted-td" style="text-align:right">${esc(when)}</td></tr>`
+        `<tr>` +
+        stratCell +
+        `<td class="${sideCls}">${esc(side)}</td>` +
+        `<td ${right}>${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>` +
+        edgeCells +
+        coefCell +
+        `<td class="${resCls}">${r.win ? 'выигрыш' : 'проигрыш'}</td>` +
+        `<td class="${resCls}" ${right}>${fmtUsd(r.pnl)}</td>` +
+        `<td class="pd-muted-td" ${right}>${esc(when)}</td></tr>`
       );
     })
     .join('');
   return (
-    `<div class="pd-card"><h2>Последние раунды</h2>` +
+    `<div class="pd-card"><h2>${esc(title)}</h2>` +
     `<table class="pd-table"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`
   );
 }
@@ -300,6 +322,12 @@ const STYLES = `<style>
   .pl-meta{color:#9aa4b2;font-size:13.5px;margin-bottom:10px}
   .pl-meta span{color:#cfd6e0;font-weight:600}
   .pl-pos{font-size:14px;color:#cfd6e0;padding-top:10px;border-top:1px solid #1e2530}
+  .pl2{display:flex;flex-direction:column;gap:8px}
+  .pl2-row{display:flex;align-items:center;gap:12px;font-size:14px;padding:8px 0;border-bottom:1px solid #161b22}
+  .pl2-row:last-child{border-bottom:none}
+  .pl2-name{color:#cfd6e0;font-weight:600;min-width:170px}
+  .pl2-pos{color:#9aa4b2;flex:1}
+  .pl2-timer{color:#e5b461;font-weight:600;font-size:13px}
 </style>`;
 
 const PAPER_NOTE =
@@ -324,6 +352,40 @@ function strategyCard(s: StrategyDef, st: PredictStatus | null): string {
   );
 }
 
+/** Лайв «сейчас в работе» по всем стратегиям (клиентский опрос live.json каждой). */
+function livePositionsPanel(): string {
+  const list = STRATEGIES.map((s) => ({ slug: s.slug, title: s.title }));
+  const rows = STRATEGIES.map(
+    (s) =>
+      `<div class="pl2-row"><span class="pl2-name">${esc(s.title)}</span>` +
+      `<span class="pl2-pos" id="pl2-${s.slug}-pos">—</span>` +
+      `<span class="pl2-timer" id="pl2-${s.slug}-t">—</span></div>`,
+  ).join('');
+  return (
+    `<div class="pd-card"><h2>Сейчас в работе</h2><div class="pl2">${rows}</div></div>` +
+    `<script>(function(){var L=${JSON.stringify(list)};var ends={};` +
+    `function fmt(ms){if(ms<0)ms=0;var s=Math.floor(ms/1000);return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2);}` +
+    `function tick(){L.forEach(function(x){var e=document.getElementById('pl2-'+x.slug+'-t');if(!e)return;var se=ends[x.slug];e.textContent=(se&&Date.now()<se)?'⏳ '+fmt(se-Date.now()):'';});}` +
+    `function poll(){L.forEach(function(x){fetch('/predict/'+x.slug+'/live.json',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(d){var pe=document.getElementById('pl2-'+x.slug+'-pos');if(!pe)return;if(d){ends[x.slug]=d.slotEndMs;var p=d.position;pe.innerHTML=p?('🟢 <b class=\"'+(p.side==='UP'?'pd-up':'pd-down')+'\">'+p.side+'</b> · $'+(p.stake!=null?p.stake.toFixed(2):'—')+' · коэф '+(p.entryCoef||'—')):'⚪ нет позиции';}else{pe.textContent='нет данных';}}).catch(function(){});});}` +
+    `poll();setInterval(poll,2000);setInterval(tick,1000);tick();})();</script>`
+  );
+}
+
+/** Общий список последних сделок по всем стратегиям. */
+function globalFeed(): string {
+  const all: RecentRound[] = [];
+  for (const s of STRATEGIES) {
+    const st = readStatus(s);
+    if (st?.recentRounds) for (const r of st.recentRounds) all.push({ ...r, _strategy: s.title });
+  }
+  all.sort((a, b) => (b.t ?? 0) - (a.t ?? 0));
+  return recentRoundsTable(all.slice(0, 15), {
+    title: 'Последние сделки · все стратегии',
+    showStrategy: true,
+    showMetric: false,
+  });
+}
+
 function renderOverview(): string {
   const cards = STRATEGIES.map((s) => strategyCard(s, readStatus(s))).join('');
   return (
@@ -333,7 +395,9 @@ function renderOverview(): string {
     `<p class="pd-sub">Экспериментальные стратегии на prediction-маркете Polymarket (BTC Up/Down, 5 мин). ` +
     `Каждая стратегия — отдельная гипотеза со своей честной статистикой (убытки тоже показываем). ` +
     `Всё в paper-режиме и изолировано от основного бота — это только просмотр.</p>` +
+    livePositionsPanel() +
     `<div class="pd-cards">${cards}</div>` +
+    globalFeed() +
     `</div>`
   );
 }
@@ -393,7 +457,7 @@ function renderStrategy(s: StrategyDef): string {
     `<div class="pd-card"><h2>Кривая накопленного PnL</h2>${equitySvg(st.equityCurve)}` +
     `<div class="pd-foot">Выигрышей: ${st.wins} · Проигрышей: ${st.losses} · ` +
     `Исходы рынка ↑${st.marketOutcomes.up}/↓${st.marketOutcomes.down}</div></div>` +
-    recentRoundsTable(st.recentRounds ?? [], s.showStakeCol) +
+    recentRoundsTable(st.recentRounds ?? []) +
     PAPER_NOTE +
     `<p class="pd-foot">Обновлено: ${esc(updated)} UTC</p>` +
     `</div>`
