@@ -25,6 +25,7 @@ const DEFAULT_STATUS_PATH = join(moduleDir, '..', '..', 'data', 'predict-status.
 const STATUS_PATH = process.env.PREDICT_STATUS_PATH ?? DEFAULT_STATUS_PATH;
 
 type EquityPoint = { t: number | null; slug: string; pnl: number; cumulative: number };
+type RecentRound = { t: number | null; side: 'UP' | 'DOWN' | null; pnl: number; win: boolean };
 
 type PredictStatus = {
   updatedAt: string;
@@ -40,6 +41,8 @@ type PredictStatus = {
   profitFactor: number | null;
   maxDrawdown: number;
   marketOutcomes: { up: number; down: number };
+  lastRoundAt?: number | null;
+  recentRounds?: RecentRound[];
   equityCurve: EquityPoint[];
 };
 
@@ -98,12 +101,58 @@ function statCard(label: string, value: string, accent?: 'pos' | 'neg' | 'muted'
   return `<div class="pd-stat${cls}"><div class="pd-stat-val">${value}</div><div class="pd-stat-lbl">${esc(label)}</div></div>`;
 }
 
+function agoText(ms: number): string {
+  const sec = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (sec < 90) return `${sec} сек назад`;
+  const min = Math.round(sec / 60);
+  if (min < 90) return `${min} мин назад`;
+  return `${Math.round(min / 60)} ч назад`;
+}
+
+/** Pill: онлайн (данные свежие, < 10 мин) / устаревшие. */
+function freshnessPill(updatedAt: string): string {
+  const ts = Date.parse(updatedAt);
+  const fresh = Number.isFinite(ts) && Date.now() - ts < 10 * 60 * 1000;
+  const cls = fresh ? 'pd-fresh-ok' : 'pd-fresh-stale';
+  const label = fresh ? `онлайн · обновлено ${agoText(ts)}` : `данные устарели · ${agoText(ts)}`;
+  return `<span class="pd-fresh ${cls}"><span class="pd-dot"></span>${esc(label)}</span>`;
+}
+
+function recentRoundsTable(rounds: RecentRound[]): string {
+  if (rounds.length === 0) return '';
+  const rows = rounds
+    .map((r) => {
+      const when = r.t ? agoText(r.t) : '—';
+      const side = r.side ?? '—';
+      const sideCls = r.side === 'UP' ? 'pd-up' : r.side === 'DOWN' ? 'pd-down' : '';
+      const res = r.win ? 'выигрыш' : 'проигрыш';
+      const resCls = r.win ? 'pd-pos' : 'pd-neg';
+      return (
+        `<tr><td class="${sideCls}">${esc(side)}</td>` +
+        `<td class="${resCls}">${res}</td>` +
+        `<td class="${resCls}" style="text-align:right">${fmtUsd(r.pnl)}</td>` +
+        `<td class="pd-muted-td" style="text-align:right">${esc(when)}</td></tr>`
+      );
+    })
+    .join('');
+  return (
+    `<div class="pd-card"><h2>Последние раунды</h2>` +
+    `<table class="pd-table"><thead><tr><th>Сторона</th><th>Исход</th>` +
+    `<th style="text-align:right">PnL</th><th style="text-align:right">Когда</th></tr></thead>` +
+    `<tbody>${rows}</tbody></table></div>`
+  );
+}
+
 function renderBody(s: PredictStatus | null): string {
   const styles = `<style>
     .pd-wrap{max-width:860px;margin:0 auto;padding:32px 20px 64px;color:#e6e9ef}
     .pd-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
     .pd-head h1{font-size:28px;margin:0;color:#fff}
     .pd-badge{font-size:13px;font-weight:600;padding:4px 10px;border-radius:999px;background:rgba(74,217,145,0.15);color:#4ad991;border:1px solid rgba(74,217,145,0.3)}
+    .pd-fresh{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:3px 9px;border-radius:999px}
+    .pd-fresh-ok{background:rgba(74,217,145,0.12);color:#4ad991}
+    .pd-fresh-stale{background:rgba(229,180,97,0.14);color:#e5b461}
+    .pd-dot{width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
     .pd-sub{color:#9aa4b2;font-size:15px;line-height:1.55;margin:0 0 24px}
     .pd-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:24px}
     .pd-stat{background:#11151c;border:1px solid #1e2530;border-radius:12px;padding:16px}
@@ -118,16 +167,51 @@ function renderBody(s: PredictStatus | null): string {
     .pd-empty-chart{color:#8b95a4;text-align:center;padding:32px 0}
     .pd-foot{color:#6b7484;font-size:13px;margin-top:8px}
     .pd-note{background:rgba(74,217,145,0.06);border:1px solid rgba(74,217,145,0.18);border-radius:12px;padding:14px 16px;color:#9aa4b2;font-size:13.5px;line-height:1.5}
-    .pd-empty{text-align:center;padding:48px 0;color:#9aa4b2}
+    .pd-empty{text-align:center;padding:40px 16px;color:#9aa4b2;line-height:1.6}
+    .pd-table{width:100%;border-collapse:collapse;font-size:14px}
+    .pd-table th{text-align:left;color:#8b95a4;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em;padding:6px 8px;border-bottom:1px solid #1e2530}
+    .pd-table td{padding:8px;border-bottom:1px solid #161b22}
+    .pd-pos{color:#4ad991}.pd-neg{color:#e5616c}.pd-up{color:#4ad991}.pd-down{color:#e5616c}.pd-muted-td{color:#6b7484}
   </style>`;
 
+  // Шапка с pill фазы и индикатором свежести данных.
+  const header = (status: PredictStatus | null): string =>
+    `<div class="pd-head"><h1>/predict</h1>` +
+    (status ? `<span class="pd-badge">Фаза ${status.phase.number} · ${esc(status.phase.label)}</span>` : '') +
+    (status ? freshnessPill(status.updatedAt) : '') +
+    `</div>`;
+
+  const intro =
+    `<p class="pd-sub">Эксперимент по prediction-market стратегиям на Polymarket (BTC Up/Down 5m). ` +
+    `Эдж — в скорости, не в предсказании. Честный публичный лог: убытки тоже показываем. ` +
+    `Изолировано от основного бота — это только просмотр.</p>`;
+
+  const paperNote =
+    `<div class="pd-note">⚠ Paper-режим (симуляция). Это валидация гипотезы, а не доказанная прибыльность: ` +
+    `эдж считается реальным только после статистической проверки на большой выборке с учётом проскальзывания. ` +
+    `Параметры стратегии не публикуются.</div>`;
+
+  // Нет файла статуса вообще — трек ещё не публикует данные.
   if (!s) {
     return (
       styles +
-      `<div class="pd-wrap">` +
-      `<div class="pd-head"><h1>/predict</h1></div>` +
-      `<p class="pd-sub">Экспериментальный трек prediction-market стратегий на Polymarket (BTC Up/Down 5m).</p>` +
-      `<div class="pd-empty">Данных пока нет — трек на ранней фазе. Загляните позже.</div>` +
+      `<div class="pd-wrap">${header(null)}${intro}` +
+      `<div class="pd-empty">Данные ещё не публикуются — трек на ранней фазе. Загляните позже.</div>` +
+      `</div>`
+    );
+  }
+
+  // Движок работает, но завершённых раундов ещё нет — честный empty-state
+  // вместо сетки нулей.
+  if (s.rounds === 0) {
+    return (
+      styles +
+      `<div class="pd-wrap">${header(s)}${intro}` +
+      `<div class="pd-empty"><b style="color:#cfd6e0">Накапливаем статистику.</b><br>` +
+      `Движок работает в paper-режиме и оценивает каждый 5-минутный рынок BTC. ` +
+      `Входит редко — только когда оценка вероятности заметно выше цены ордербука. ` +
+      `Завершённые раунды и кривая PnL появятся здесь по мере накопления.</div>` +
+      paperNote +
       `</div>`
     );
   }
@@ -138,12 +222,7 @@ function renderBody(s: PredictStatus | null): string {
 
   return (
     styles +
-    `<div class="pd-wrap">` +
-    `<div class="pd-head"><h1>/predict</h1>` +
-    `<span class="pd-badge">Фаза ${s.phase.number} · ${esc(s.phase.label)}</span></div>` +
-    `<p class="pd-sub">Эксперимент по prediction-market стратегиям на Polymarket (BTC Up/Down 5m). ` +
-    `Эдж — в скорости, не в предсказании. Честный публичный лог: убытки тоже показываем. ` +
-    `Изолировано от основного бота — это только просмотр.</p>` +
+    `<div class="pd-wrap">${header(s)}${intro}` +
     `<div class="pd-grid">` +
     statCard('Раундов', String(s.rounds)) +
     statCard('Win rate', `${s.winRate}%`) +
@@ -155,9 +234,8 @@ function renderBody(s: PredictStatus | null): string {
     `<div class="pd-card"><h2>Кривая накопленного PnL</h2>${equitySvg(s.equityCurve)}` +
     `<div class="pd-foot">Выигрышей: ${s.wins} · Проигрышей: ${s.losses} · ` +
     `Исходы рынка ↑${s.marketOutcomes.up}/↓${s.marketOutcomes.down}</div></div>` +
-    `<div class="pd-note">⚠ Paper-режим (симуляция). Это валидация гипотезы, а не доказанная прибыльность: ` +
-    `эдж считается реальным только после статистической проверки на большой выборке с учётом проскальзывания. ` +
-    `Параметры стратегии не публикуются.</div>` +
+    recentRoundsTable(s.recentRounds ?? []) +
+    paperNote +
     `<p class="pd-foot">Обновлено: ${esc(updated)} UTC</p>` +
     `</div>`
   );
