@@ -26,7 +26,7 @@ import type { TierId } from './tier-config.js';
  *   7. Deploy.
  *
  * After deploy: `pnpm tsx scripts/announce-strategy.ts <code>` to push
- * an entry post to the @luxalgosignal channel.
+ * an entry post to the @robotclaude channel.
  *
  * **Position sizing** is unified at $1000 notional per Track C trade
  * (matches the POSITION_NOTIONAL_USD constant used in daily-wrap for

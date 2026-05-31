@@ -113,7 +113,7 @@ const CONTENT: Record<Lang, Content> = {
       title: 'Что доступно',
       items: [
         '📊 Полная статистика по каждой стратегии — бэктест, live-сделки, графики (открыто всем)',
-        '📡 Сигналы в Telegram канале @luxalgosignal — вход, выход, стоп (бесплатно)',
+        '📡 Сигналы в Telegram канале @robotclaude — вход, выход, стоп (бесплатно)',
         '💼 Прозрачный учёт — каждая сделка публична с уникальным ID и проверяема',
         '🤖 Автотрейдинг по подписке — наши стратегии торгуют автоматически на вашем счёте Bybit',
         '🔑 Ваши деньги остаются у вас — API-ключ без права на вывод, мы только исполняем сделки',
@@ -152,7 +152,7 @@ const CONTENT: Record<Lang, Content> = {
           step: 'ШАГ 03',
           title: 'Бесплатные сигналы в Telegram',
           body:
-            'Каждый сигнал — вход, выход, стоп — публикуется в [@luxalgosignal](https://t.me/luxalgosignal) сразу как срабатывает. ' +
+            'Каждый сигнал — вход, выход, стоп — публикуется в [@robotclaude](https://t.me/robotclaude) сразу как срабатывает. ' +
             'Можете повторять вручную на своём счёте, или просто следить за результатами. Никакой оплаты за сигналы.',
         },
         {
@@ -177,7 +177,7 @@ const CONTENT: Record<Lang, Content> = {
         {
           when: 'АПРЕЛЬ 2026',
           done: true,
-          title: '✅ Запущен сайт с публичной статистикой по стратегиям + Telegram-канал @luxalgosignal с сигналами в реальном времени.',
+          title: '✅ Запущен сайт с публичной статистикой по стратегиям + Telegram-канал @robotclaude с сигналами в реальном времени.',
         },
         {
           when: 'МАЙ 2026',
@@ -214,7 +214,7 @@ const CONTENT: Record<Lang, Content> = {
           a:
             '**Бесплатно:**\n' +
             '- Сайт и вся статистика по стратегиям — открыто для всех\n' +
-            '- Telegram-канал [@luxalgosignal](https://t.me/luxalgosignal) с сигналами в реальном времени\n' +
+            '- Telegram-канал [@robotclaude](https://t.me/robotclaude) с сигналами в реальном времени\n' +
             '- Личный кабинет, бэктесты, история сделок shadow-аккаунта\n\n' +
             '**Платно — только автотрейдинг:**\n' +
             '- Тарифы от **$12/мес** (Starter, депозит $300+) до **$580/мес** (VIP, депозит $15 000+) — выбираете сами по размеру депозита\n' +
@@ -226,7 +226,7 @@ const CONTENT: Record<Lang, Content> = {
           a:
             'Очень коротко — система делает три вещи:\n\n' +
             '**1.** Мы собираем торговые стратегии в специальном инструменте от LuxAlgo (см. вопрос ниже), отбираем те что показывают хорошие результаты на истории, и публикуем их на сайте.\n\n' +
-            '**2.** Каждая стратегия торгует круглосуточно на нашем «теневом» счёте — это и есть публичный трек-рекорд. Когда стратегия открывает или закрывает сделку, информация о ней появляется и на сайте, и в [Telegram-канале](https://t.me/luxalgosignal). Это бесплатно и видно всем.\n\n' +
+            '**2.** Каждая стратегия торгует круглосуточно на нашем «теневом» счёте — это и есть публичный трек-рекорд. Когда стратегия открывает или закрывает сделку, информация о ней появляется и на сайте, и в [Telegram-канале](https://t.me/robotclaude). Это бесплатно и видно всем.\n\n' +
             '**3.** Если вы хотите чтобы те же самые сделки выполнялись на вашем счёте — подключаете свой Bybit-аккаунт через API-ключ. Наша система делает на вашем счёте те же сделки что и на нашем — автоматически, без вашего участия. Это уже платно: тарифы от $12 до $580/мес по размеру депозита. **30 дней бесплатно** если регистрируетесь на Bybit через нас.\n\n' +
             'Никакой магии: всё что вы видите в Telegram-канале — это именно то, что система сделает на вашем счёте. Деньги остаются у вас, мы не имеем права на вывод.',
         },
@@ -283,7 +283,7 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           q: 'Сигналы в Telegram-канале платные?',
-          a: 'Нет. Канал [@luxalgosignal](https://t.me/luxalgosignal) бесплатный, каждое открытие и закрытие сделки приходит автоматически с ценой, размером и причиной выхода. Можете повторять за нами вручную или подключить автотрейдинг, чтобы не отвлекаться.',
+          a: 'Нет. Канал [@robotclaude](https://t.me/robotclaude) бесплатный, каждое открытие и закрытие сделки приходит автоматически с ценой, размером и причиной выхода. Можете повторять за нами вручную или подключить автотрейдинг, чтобы не отвлекаться.',
         },
         {
           q: 'Что если стратегия в просадке?',
@@ -306,7 +306,7 @@ const CONTENT: Record<Lang, Content> = {
       telegram: 'Telegram канал',
       strategies: 'Все стратегии',
     },
-    telegramUrl: 'https://t.me/luxalgosignal',
+    telegramUrl: 'https://t.me/robotclaude',
   },
   en: {
     htmlTitle: 'Robot Claude — verified strategies for crypto trading',
@@ -332,7 +332,7 @@ const CONTENT: Record<Lang, Content> = {
       title: 'What\'s available',
       items: [
         '📊 Full stats on every strategy — backtest, live trades, charts (open to all)',
-        '📡 Signals in our Telegram channel @luxalgosignal — entry, exit, stop (free)',
+        '📡 Signals in our Telegram channel @robotclaude — entry, exit, stop (free)',
         '💼 Transparent accounting — every trade public with a unique ID and verifiable',
         '🤖 Auto-trading by subscription — our strategies trade automatically on your Bybit account',
         '🔑 Your funds stay with you — API key without withdrawal rights, we only execute trades',
@@ -371,7 +371,7 @@ const CONTENT: Record<Lang, Content> = {
           step: 'STEP 03',
           title: 'Free Telegram signals',
           body:
-            'Every signal — entry, exit, stop — is posted to [@luxalgosignal](https://t.me/luxalgosignal) the moment it fires. ' +
+            'Every signal — entry, exit, stop — is posted to [@robotclaude](https://t.me/robotclaude) the moment it fires. ' +
             'Copy manually on your own account, or just observe the results. No fee for signals.',
         },
         {
@@ -396,7 +396,7 @@ const CONTENT: Record<Lang, Content> = {
         {
           when: 'APR 2026',
           done: true,
-          title: '✅ Site with public per-strategy stats + @luxalgosignal Telegram channel with real-time signals.',
+          title: '✅ Site with public per-strategy stats + @robotclaude Telegram channel with real-time signals.',
         },
         {
           when: 'MAY 2026',
@@ -433,7 +433,7 @@ const CONTENT: Record<Lang, Content> = {
           a:
             '**Free:**\n' +
             '- The site and all per-strategy stats — open to everyone\n' +
-            '- [@luxalgosignal](https://t.me/luxalgosignal) Telegram channel with real-time signals\n' +
+            '- [@robotclaude](https://t.me/robotclaude) Telegram channel with real-time signals\n' +
             '- Account dashboard, backtests, shadow-account trade history\n\n' +
             '**Paid — only auto-trading:**\n' +
             '- Tiers from **$12/mo** (Starter, $300+ deposit) to **$580/mo** (VIP, $15,000+ deposit) — pick by your deposit size\n' +
@@ -445,7 +445,7 @@ const CONTENT: Record<Lang, Content> = {
           a:
             'The system does three things:\n\n' +
             '**1.** We build trading strategies in a LuxAlgo tool (see the next FAQ), pick the ones with solid historical results, and publish them on the site.\n\n' +
-            '**2.** Each strategy trades 24/7 on our shadow account — that\'s the public track record. Every open/close is mirrored to the site AND to the [Telegram channel](https://t.me/luxalgosignal). Free and visible to anyone.\n\n' +
+            '**2.** Each strategy trades 24/7 on our shadow account — that\'s the public track record. Every open/close is mirrored to the site AND to the [Telegram channel](https://t.me/robotclaude). Free and visible to anyone.\n\n' +
             '**3.** If you want those same trades on your account — connect your Bybit via an API key. Our system places identical orders on your account automatically. This is the paid part: tiers from $12 to $580/mo by deposit size. **30 days free** if you sign up Bybit via our referral.\n\n' +
             'No magic: what you see in the channel is exactly what the system does on your account. Your funds stay with you; we have no withdraw rights.',
         },
@@ -502,7 +502,7 @@ const CONTENT: Record<Lang, Content> = {
         },
         {
           q: 'Are signals in the Telegram channel paid?',
-          a: 'No. The [@luxalgosignal](https://t.me/luxalgosignal) channel is free; every open and close arrives automatically with price, size, and exit reason. Copy manually or enable auto-trading to stay hands-off.',
+          a: 'No. The [@robotclaude](https://t.me/robotclaude) channel is free; every open and close arrives automatically with price, size, and exit reason. Copy manually or enable auto-trading to stay hands-off.',
         },
         {
           q: 'What if a strategy is in drawdown?',
@@ -525,7 +525,7 @@ const CONTENT: Record<Lang, Content> = {
       telegram: 'Telegram channel',
       strategies: 'All strategies',
     },
-    telegramUrl: 'https://t.me/luxalgosignal',
+    telegramUrl: 'https://t.me/robotclaude',
   },
 };
 
@@ -1150,7 +1150,7 @@ function renderHome(
             <div class="tg-avatar">🟢</div>
             <div class="tg-channel-info">
               <div class="tg-channel-name">LuxAlgo | Claude | Signals</div>
-              <div class="tg-channel-sub">@luxalgosignal · ${escapeHtml(sp.entryLabel)}</div>
+              <div class="tg-channel-sub">@robotclaude · ${escapeHtml(sp.entryLabel)}</div>
             </div>
           </div>
           <div class="tg-mockup-body">
@@ -1174,7 +1174,7 @@ function renderHome(
             <div class="tg-avatar">💰</div>
             <div class="tg-channel-info">
               <div class="tg-channel-name">LuxAlgo | Claude | Signals</div>
-              <div class="tg-channel-sub">@luxalgosignal · ${escapeHtml(sp.closeLabel)}</div>
+              <div class="tg-channel-sub">@robotclaude · ${escapeHtml(sp.closeLabel)}</div>
             </div>
           </div>
           <div class="tg-mockup-body">
@@ -1336,13 +1336,13 @@ function renderHome(
     ? [
         { icon: '🧮', title: 'LuxAlgo', body: 'Strategy fires a signal based on indicator conditions (e.g. "Contrarian + Trend Catcher + Money Flow"). Sent as a webhook to our server.' },
         { icon: '🤖', title: 'Our server', body: 'Receives the webhook, executes the trade on the SHADOW account, records it in the public DB. <50ms.' },
-        { icon: '📡', title: 'Telegram channel', body: 'Trade is mirrored to @luxalgosignal with entry/exit price, size, and trade ID. Free for everyone.' },
+        { icon: '📡', title: 'Telegram channel', body: 'Trade is mirrored to @robotclaude with entry/exit price, size, and trade ID. Free for everyone.' },
         { icon: '💼', title: 'Your Bybit account', body: 'If you have auto-trading enabled — our server places the IDENTICAL trade on your account via your API key. Same time, same price, same direction.' },
       ]
     : [
         { icon: '🧮', title: 'LuxAlgo', body: 'Стратегия выдаёт сигнал по условиям индикаторов (например «Contrarian + Trend Catcher + Money Flow»). Отправляется вебхуком на наш сервер.' },
         { icon: '🤖', title: 'Наш сервер', body: 'Получает вебхук, открывает позицию на SHADOW-счёте, записывает в публичную БД. <50мс.' },
-        { icon: '📡', title: 'Telegram канал', body: 'Сделка дублируется в @luxalgosignal с ценой входа/выхода, размером и ID сделки. Бесплатно для всех.' },
+        { icon: '📡', title: 'Telegram канал', body: 'Сделка дублируется в @robotclaude с ценой входа/выхода, размером и ID сделки. Бесплатно для всех.' },
         { icon: '💼', title: 'Ваш счёт Bybit', body: 'Если у вас включён автотрейдинг — наш сервер делает ТАКУЮ ЖЕ сделку на вашем счёте через ваш API-ключ. То же время, та же цена, то же направление.' },
       ];
   const flowDiagramHtml = `

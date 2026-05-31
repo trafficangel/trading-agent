@@ -1380,7 +1380,7 @@ function renderTelegramCapture(lang: Lang): string {
             Follow for free and see for yourself before you commit.
           </div>
         </div>
-        <a href="https://t.me/luxalgosignal" target="_blank" rel="noopener" class="at-btn-secondary">
+        <a href="https://t.me/robotclaude" target="_blank" rel="noopener" class="at-btn-secondary">
           ${ico('📣')}Open the channel
         </a>
       </div>
@@ -1398,7 +1398,7 @@ function renderTelegramCapture(lang: Lang): string {
             Подписывайтесь бесплатно и понаблюдайте, прежде чем решаться.
           </div>
         </div>
-        <a href="https://t.me/luxalgosignal" target="_blank" rel="noopener" class="at-btn-secondary">
+        <a href="https://t.me/robotclaude" target="_blank" rel="noopener" class="at-btn-secondary">
           ${ico('📣')}Открыть канал
         </a>
       </div>
