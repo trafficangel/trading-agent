@@ -34,6 +34,7 @@ type StrategyDef = {
   liveFile: string; // real-time snapshot filename under data/ (written by engine)
   description: string[]; // plain-language paragraphs (HTML-escaped on render)
   showStakeCol: boolean; // show stake/coef columns in recent-rounds table
+  hasLive?: boolean; // публикует ли движок лайв-снимок (live.json)
 };
 
 const STRATEGIES: StrategyDef[] = [
@@ -45,9 +46,10 @@ const STRATEGIES: StrategyDef[] = [
     statusFile: 'predict-status.json',
     liveFile: 'predict-live-prob.json',
     showStakeCol: true,
+    hasLive: true,
     description: [
       'Каждые полсекунды стратегия смотрит на три вещи: насколько цена BTC ушла от референса (цены-цели на момент открытия 5-минутного окна), её краткосрочный моментум и сколько времени осталось до закрытия. Из этого считается оценка вероятности исхода.',
-      'Если наша оценка вероятности заметно выше цены стороны на рынке (минимум на 8% — то есть сторона недооценена), покупаем её, пока тонкий рынок не успел поднять цену. Чем больше недооценка, тем больше ставим (потолок $25 на рынок). Позиция держится до конца окна.',
+      'Если наша оценка вероятности выше цены стороны на рынке на 8–13% (сторона недооценена) — покупаем её фиксированной ставкой, пока тонкий рынок не успел поднять цену. Слишком большой перевес (>13%) пропускаем: на практике это почти всегда ошибка модели, а не реальная возможность. Позиция держится до конца окна.',
       'Суть: зарабатываем на скорости — ловим момент, когда цена рынка отстала от реальной ситуации, — а не на угадывании направления BTC. Поэтому входим редко: только когда сторона действительно недооценена.',
     ],
   },
@@ -59,10 +61,26 @@ const STRATEGIES: StrategyDef[] = [
     statusFile: 'predict-mart-status.json',
     liveFile: 'predict-live-martingale.json',
     showStakeCol: true,
+    hasLive: true,
     description: [
       'Стратегия ждёт момент в раунде, когда коэффициент одной из сторон попадает в диапазон 3.0–3.5 (цена 0.286–0.333) — рынок оценивает её как аутсайдера с шансом ~30%. Ставим на эту сторону, выбирая коэффициент ближе к 3 (там выше вероятность выигрыша). Если аутсайдер ушёл глубже 3.5 — раунд пропускаем. Ровно 3.00 поймать нельзя: цены идут тиками по 0.01, ближайшее — 0.33 (коэф 3.03).',
       'Размер ставки — система Фибоначчи от $1: 1, 1, 2, 3, 5, 8, 13, 21, 34… После проигрыша делаем следующий шаг последовательности, после выигрыша возвращаемся к $1. Потолок серии — 20 шагов.',
       'Честно: ставка на аутсайдера выигрывает примерно 1 раз из 3 — проигрышей по природе больше, чем выигрышей. Идея в том, что выплата ~3:1 на выигрышах вместе с прогрессией покрывает серии проигрышей. С учётом спреда устойчивого перевеса у такой ставки нет — накопленная статистика покажет правду.',
+    ],
+  },
+  {
+    slug: 'late',
+    title: 'Late Entry (готовая)',
+    tagline: 'Готовая стратегия движка на индикаторах — для сравнения',
+    statusEnv: 'PREDICT_LATE_STATUS_PATH',
+    statusFile: 'predict-late-status.json',
+    liveFile: 'predict-live-late.json',
+    showStakeCol: true,
+    hasLive: false,
+    description: [
+      'Это встроенная стратегия открытого движка (не наша) — запущена как ориентир для честного сравнения с нашими разработками.',
+      'Она не считает вероятность, а ждёт срабатывания технических индикаторов (волатильность ATR, разрыв цены от цели, расхождение источников цены) и входит ближе к концу окна, когда сигнал подтверждён. Есть стоп-лосс на случай разворота.',
+      'Мы её не дорабатывали — берём как есть, чтобы понять, обыгрывает ли «готовое решение» наши стратегии на тех же рынках. «Готовая» не значит «прибыльная» — проверяем так же, как остальные.',
     ],
   },
 ];
@@ -359,8 +377,9 @@ function strategyCard(s: StrategyDef, st: PredictStatus | null): string {
 
 /** Лайв «сейчас в работе» по всем стратегиям (клиентский опрос live.json каждой). */
 function livePositionsPanel(): string {
-  const list = STRATEGIES.map((s) => ({ slug: s.slug, title: s.title }));
-  const rows = STRATEGIES.map(
+  const liveStrats = STRATEGIES.filter((s) => s.hasLive);
+  const list = liveStrats.map((s) => ({ slug: s.slug, title: s.title }));
+  const rows = liveStrats.map(
     (s) =>
       `<div class="pl2-row"><span class="pl2-name">${esc(s.title)}</span>` +
       `<span class="pl2-pos" id="pl2-${s.slug}-pos">—</span>` +
@@ -431,7 +450,7 @@ function renderStrategy(s: StrategyDef): string {
     return (
       STYLES +
       `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` +
-      livePanel(s) +
+      (s.hasLive ? livePanel(s) : '') +
       descCard +
       `<div class="pd-empty"><b style="color:#cfd6e0">Накапливаем статистику.</b><br>` +
       `Движок работает в paper-режиме. Завершённые раунды и кривая PnL появятся здесь по мере накопления.</div>` +
@@ -449,7 +468,7 @@ function renderStrategy(s: StrategyDef): string {
   return (
     STYLES +
     `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` +
-    livePanel(s) +
+    (s.hasLive ? livePanel(s) : '') +
     descCard +
     `<div class="pd-grid">` +
     statCard('Раундов', String(st.rounds)) +
