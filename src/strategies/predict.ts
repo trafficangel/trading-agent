@@ -38,6 +38,7 @@ type StrategyDef = {
   showStakeCol: boolean; // show stake/coef columns in recent-rounds table
   hasLive?: boolean; // публикует ли движок лайв-снимок (live.json)
   retired?: boolean; // стратегия остановлена (гипотеза не подтвердилась)
+  isTrap?: boolean; // dual-leg ловушка: особый рендер «сторона» (🔒 / однобоко)
 };
 
 const STRATEGIES: StrategyDef[] = [
@@ -103,6 +104,7 @@ const STRATEGIES: StrategyDef[] = [
     liveFile: 'predict-trap-live.json',
     showStakeCol: false,
     hasLive: true,
+    isTrap: true,
     description: [
       'В бинарном рынке стороны UP и DOWN всегда стоят в сумме около $1 (ровно одна выплатит $1). Купить обе одновременно — гарантированный минус (платишь больше $1 из-за спреда). Но эта стратегия покупает стороны НЕ одновременно, а по очереди — ловит каждую, когда она временно дешёвая (цена качнулась против неё).',
       'Например: цена качнулась вниз → UP подешевел, покупаем UP по 0.40. Позже цена качнулась вверх → DOWN подешевел, покупаем DOWN по 0.40. Суммарно вложено 0.80, а на резолюции придёт ровно $1 — прибыль +0.20 на акцию заперта, независимо от исхода. «Ловушка захлопнулась». Вторую ногу берём, только если суммарная цена входа ≤ 0.90 (гарантированный плюс ≥10¢ на акцию).',
@@ -137,9 +139,11 @@ type RecentRound = {
   distanceBp?: number | null;
   pnl: number;
   win: boolean;
+  bothLegs?: boolean; // dual-leg-trap: захлопнулась ли ловушка (обе ноги)
   _strategy?: string; // подпись стратегии (для общего списка)
   _live?: boolean; // открытая (текущая) сделка — исход ещё не известен
   _secLeft?: number; // секунд до закрытия (для лайв-строки)
+  _isTrap?: boolean; // строка стратегии-ловушки (особый рендер «сторона»)
 };
 
 type PredictStatus = {
@@ -156,6 +160,8 @@ type PredictStatus = {
   profitFactor: number | null;
   maxDrawdown: number;
   avgStake?: number | null;
+  trapClosed?: number; // dual-leg-trap: раундов с захлопнутой ловушкой
+  oneLegged?: number; // dual-leg-trap: раундов с одной ногой
   marketOutcomes: { up: number; down: number };
   lastRoundAt?: number | null;
   recentRounds?: RecentRound[];
@@ -284,9 +290,20 @@ const mmss = (s: number): string => `${Math.floor(s / 60)}:${('0' + (Math.max(0,
 
 function recentRoundsTable(
   rounds: RecentRound[],
-  opts: { title?: string; showStrategy?: boolean; showMetric?: boolean; page?: number; totalPages?: number; baseHref?: string } = {},
+  opts: { title?: string; showStrategy?: boolean; showMetric?: boolean; page?: number; totalPages?: number; baseHref?: string; isTrap?: boolean } = {},
 ): string {
   if (rounds.length === 0) return '';
+  // Ловушка (dual-leg): «сторона» бессмысленна (две ноги). Показываем,
+  // захлопнулась ли ловушка (обе ноги) или осталась однобокой.
+  const sideCell = (r: RecentRound): string => {
+    if (opts.isTrap || r._isTrap) {
+      if (r.bothLegs) return `<td class="pd-pos">🔒 захлопнулась</td>`;
+      const sc = r.side === 'UP' ? 'pd-up' : r.side === 'DOWN' ? 'pd-down' : '';
+      return `<td class="${sc}">однобоко ${esc(r.side ?? '—')}</td>`;
+    }
+    const sc = r.side === 'UP' ? 'pd-up' : r.side === 'DOWN' ? 'pd-down' : '';
+    return `<td class="${sc}">${esc(r.side ?? '—')}</td>`;
+  };
   const title = opts.title ?? 'Последние раунды';
   const showStrategy = opts.showStrategy ?? false;
   const showMetric = opts.showMetric !== false;
@@ -305,8 +322,6 @@ function recentRoundsTable(
     `<th>Исход</th><th ${right}>PnL</th><th ${right}>Когда</th></tr>`;
   const rows = rounds
     .map((r) => {
-      const side = r.side ?? '—';
-      const sideCls = r.side === 'UP' ? 'pd-up' : r.side === 'DOWN' ? 'pd-down' : '';
       const stratCell = showStrategy ? `<td class="pd-muted-td">${esc(r._strategy ?? '')}</td>` : '';
       const edgeCells = hasEdge ? `<td ${right}>${r.prob != null ? r.prob + '%' : '—'}</td>` : '';
       const coefCell = hasCoef ? `<td class="pd-muted-td" ${right}>${r.coef != null ? r.coef.toFixed(2) : '—'}</td>` : '';
@@ -319,7 +334,7 @@ function recentRoundsTable(
         return (
           `<tr class="pd-liverow">` +
           stratCell +
-          `<td class="${sideCls}">${esc(side)}</td>` +
+          sideCell(r) +
           `<td ${right}>${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>` +
           edgeCells +
           coefCell +
@@ -334,7 +349,7 @@ function recentRoundsTable(
       return (
         `<tr>` +
         stratCell +
-        `<td class="${sideCls}">${esc(side)}</td>` +
+        sideCell(r) +
         `<td ${right}>${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>` +
         edgeCells +
         coefCell +
@@ -478,7 +493,7 @@ function globalFeed(): string {
   const done: RecentRound[] = [];
   for (const s of STRATEGIES) {
     const st = readStatus(s);
-    if (st?.recentRounds) for (const r of st.recentRounds) done.push({ ...r, _strategy: s.title });
+    if (st?.recentRounds) for (const r of st.recentRounds) done.push({ ...r, _strategy: s.title, _isTrap: s.isTrap });
   }
   done.sort((a, b) => (b.t ?? 0) - (a.t ?? 0));
   const rows = [...liveRows, ...done.slice(0, 15)];
@@ -559,7 +574,13 @@ function renderStrategy(s: StrategyDef, page = 1): string {
     page: p,
     totalPages,
     baseHref: `/predict/${s.slug}`,
+    isTrap: s.isTrap,
   });
+  // Для ловушки — счётчик «захлопнулось / однобоких» (ключ к пониманию статистики).
+  const trapCard =
+    s.isTrap && st.trapClosed != null
+      ? statCard('Захлопнулось / однобоко', `${st.trapClosed} / ${st.oneLegged ?? 0}`, 'muted')
+      : '';
 
   return (
     STYLES +
@@ -573,6 +594,7 @@ function renderStrategy(s: StrategyDef, page = 1): string {
     statCard('Profit factor', pf) +
     statCard('Net PnL', fmtUsd(st.netPnl), netAccent) +
     avgStakeCard +
+    trapCard +
     statCard('Режим', st.mode === 'paper' ? 'Paper' : esc(st.mode), 'muted') +
     `</div>` +
     `<div class="pd-card"><h2>Кривая накопленного PnL</h2>${equitySvg(st.equityCurve)}` +
