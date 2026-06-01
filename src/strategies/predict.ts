@@ -645,6 +645,7 @@ const REAL_TRADING_NOTE =
 // в data/predict-real.key (chmod 600, в .gitignore через data/, не отдаётся роутами).
 type RealConfig = {
   selectedStrategy: string | null; // slug выбранной стратегии
+  stakeUsd: number | null; // фикс. ставка на сделку, USD
   funderAddress: string | null; // публичный адрес funder/proxy (НЕ ключ)
   keyMask: string | null; // «••••1234» — последние 4 символа сохранённого ключа
   keySavedAt: string | null;
@@ -658,7 +659,7 @@ function readRealConfig(): RealConfig {
   } catch {
     /* битый файл — дефолт */
   }
-  return { selectedStrategy: null, funderAddress: null, keyMask: null, keySavedAt: null, updatedAt: null };
+  return { selectedStrategy: null, stakeUsd: null, funderAddress: null, keyMask: null, keySavedAt: null, updatedAt: null };
 }
 function writeRealConfig(cfg: RealConfig): void {
   writeFileSync(REAL_CONFIG_FILE, JSON.stringify({ ...cfg, updatedAt: new Date().toISOString() }, null, 2));
@@ -704,7 +705,12 @@ function renderRealTrading(cfg: RealConfig): string {
     `</div>` +
     `<form method="POST" action="/predict/real/save" autocomplete="off">` +
     `<div class="pd-card"><h2>1. Выбор стратегии</h2>${stratOptions}</div>` +
-    `<div class="pd-card"><h2>2. Подключение кошелька</h2>` +
+    `<div class="pd-card"><h2>2. Фикс. ставка</h2>` +
+    `<label style="display:block">Размер ставки на сделку, USD (как в симуляции — фиксированная сумма):<br>` +
+    `<input type="text" name="stake" value="${cfg.stakeUsd != null ? String(cfg.stakeUsd) : ''}" placeholder="напр. 1" style="${fieldStyle}"></label>` +
+    `<p class="pd-foot">Это сумма каждой ставки. Общий риск ограничивай балансом кошелька.</p>` +
+    `</div>` +
+    `<div class="pd-card"><h2>3. Подключение кошелька</h2>` +
     `<label style="display:block;margin-bottom:12px">Приватный ключ кошелька (хранится на сервере в защищённом файле, обратно не показывается):<br>` +
     `<input type="password" name="privkey" value="" placeholder="${cfg.keyMask ? 'оставь пустым, чтобы не менять' : '0x… приватный ключ'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
     `<div style="margin:6px 0 14px">Статус ключа: ${keyStatus}</div>` +
@@ -767,6 +773,8 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     const b = (req.body ?? {}) as Record<string, unknown>;
     const slugs = new Set(STRATEGIES.map((s) => s.slug));
     const strat = typeof b.strategy === 'string' && slugs.has(b.strategy) ? b.strategy : null;
+    const stakeN = Number(b.stake);
+    const stakeUsd = Number.isFinite(stakeN) && stakeN > 0 ? Math.round(stakeN * 100) / 100 : null;
     const funderRaw = typeof b.funder === 'string' ? b.funder.trim() : '';
     const funder = /^0x[a-fA-F0-9]{40}$/.test(funderRaw) ? funderRaw : funderRaw === '' ? null : funderRaw.slice(0, 64);
     const prev = readRealConfig();
@@ -779,7 +787,7 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       keyMask = saveRealKey(rawKey);
       keySavedAt = new Date().toISOString();
     }
-    writeRealConfig({ selectedStrategy: strat, funderAddress: funder, keyMask, keySavedAt, updatedAt: null });
+    writeRealConfig({ selectedStrategy: strat, stakeUsd, funderAddress: funder, keyMask, keySavedAt, updatedAt: null });
     reply.code(303).header('location', '/predict/real').send();
   });
 
