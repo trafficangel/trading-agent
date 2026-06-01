@@ -49,6 +49,10 @@ type RegistrationRow = {
   last_seen_at: number;
   ip_first: string | null;
   user_agent_first: string | null;
+  /** Доступ к закрытому разделу /predict. Выдаётся вручную админом
+   *  (migration 034). 0 = нет доступа, 1 = есть. Не связан с подпиской
+   *  на автоторговлю — это отдельный гейт. */
+  predict_access: number;
 };
 
 const findBySessionStmt = db.prepare<[string], RegistrationRow>(
@@ -73,6 +77,15 @@ const updateDisplayNameStmt = db.prepare(`
 const updatePhoneStmt = db.prepare(
   `UPDATE registrations SET phone = ? WHERE id = ? AND phone IS NULL`,
 );
+
+const setPredictAccessStmt = db.prepare(
+  `UPDATE registrations SET predict_access = ? WHERE id = ?`,
+);
+
+/** Выдать/снять доступ к разделу /predict (вызывается из админки). */
+export function setPredictAccess(userId: number, granted: boolean): void {
+  setPredictAccessStmt.run(granted ? 1 : 0, userId);
+}
 
 const updateLastSeenStmt = db.prepare(`
   UPDATE registrations SET last_seen_at = ? WHERE session_id = ?
@@ -183,11 +196,12 @@ export type RegistrationListRow = {
   last_seen_at: number;
   ip_first: string | null;
   user_agent_first: string | null;
+  predict_access: number;
 };
 
 const listAllStmt = db.prepare<[number], RegistrationListRow>(`
   SELECT id, phone, display_name, phone_hash, tg_user_id, created_at, last_seen_at,
-         ip_first, user_agent_first
+         ip_first, user_agent_first, predict_access
   FROM registrations
   ORDER BY created_at DESC
   LIMIT ?
