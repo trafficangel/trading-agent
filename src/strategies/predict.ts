@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { timingSafeEqual } from 'node:crypto';
+import { config } from '../config.js';
 import { pageShell } from './landing.js';
 
 /**
@@ -86,6 +88,21 @@ const STRATEGIES: StrategyDef[] = [
       'Полная противоположность мартингейлу. Мартингейл ставит на аутсайдера (большой коэффициент), а здесь — на фаворита: сторону с высокой ценой 0.60–0.85 (коэффициент 1.18–1.67), то есть с высокой вероятностью выигрыша. Ставка плоская, держим до резолюции.',
       'Это проверка известного смещения «фаворит-аутсайдер»: на многих рынках ставок люди переплачивают за «лотерейные билеты» (большие коэффициенты) и недооценивают фаворитов. Если это смещение есть и на 5-минутных рынках BTC, у фаворита будет положительное матожидание.',
       'Не лезем в почти решённые рынки (цена выше 0.85 — мало места для прибыли) и в монетку (ниже 0.60 — уже не фаворит). Честно: гипотеза о смещении может и не подтвердиться на этом рынке — для того и тест.',
+    ],
+  },
+  {
+    slug: 'lux',
+    title: 'LuxAlgo сигналы',
+    tagline: 'Решение по вебхукам индикаторов LuxAlgo (1m): входим по направлению свежих сигналов',
+    statusEnv: 'PREDICT_LUX_STATUS_PATH',
+    statusFile: 'predict-lux-status.json',
+    liveFile: 'predict-lux-live.json',
+    showStakeCol: true,
+    hasLive: true,
+    description: [
+      'Эта стратегия принимает решения по сигналам индикаторов LuxAlgo с минутного графика BTC. Алерты из TradingView приходят на наш сервер вебхуком, мы складываем последние сигналы и считаем «направленный перевес»: подтверждения Buy/Sell (и усиленные Buy+/Sell+) как триггеры, тренд Smart Trail и Money Flow как фон.',
+      'Когда свежий перевес уверенный и направлен в одну сторону, входим в эту сторону — но только если рынок ещё не задрал её цену выше 0.65 (иначе книга уже согласилась и платить будет мало). Идея — поймать лаг тонкого 5-минутного рынка: LuxAlgo увидел движение раньше, чем переоценился ордербук. Держим до конца раунда.',
+      'Честно: сигналы LuxAlgo — это технические индикаторы, они запаздывают и могут перерисовываться; плюсовое матожидание на 5m BTC не гарантировано. Проверяем строго по статистике, как и остальные стратегии. Параметры сигналов и веса не публикуем.',
     ],
   },
 ];
@@ -594,4 +611,75 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       return live;
     });
   }
+
+  // ── LuxAlgo webhook receiver для /predict (ИЗОЛИРОВАН от боевого Track C) ──
+  // TradingView LuxAlgo-алерт шлёт сюда POST с маленьким JSON {ind,sig,tf,price,time}.
+  // Мы НЕ торгуем по нему здесь — только записываем последний сигнал + кольцо
+  // последних в data/predict-lux-signal.json. Его читает изолированный движок
+  // predict-lux (своя стратегия luxalgo-signal). Секрет — общий WEBHOOK_SECRET
+  // в пути (как у боевого роута), сверка constant-time.
+  const LUX_SIGNAL_FILE = join(dataDir, 'predict-lux-signal.json');
+  const SIG_DIR: Record<string, 1 | -1> = {
+    buy: 1, 'buy+': 1, bull: 1, bullish: 1, long: 1, up: 1,
+    sell: -1, 'sell+': -1, bear: -1, bearish: -1, short: -1, down: -1,
+  };
+  app.post<{ Params: { secret: string }; Body: unknown }>(
+    '/predict/lux/:secret',
+    { bodyLimit: 8 * 1024, config: { rateLimit: { max: 120, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const a = Buffer.from(req.params.secret);
+      const b = Buffer.from(config.WEBHOOK_SECRET);
+      if (a.length !== b.length || !timingSafeEqual(a, b)) {
+        return reply.code(401).send({ ok: false, error: 'unauthorized' });
+      }
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const ind = String(body.ind ?? '').toLowerCase().slice(0, 16);
+      const sigRaw = String(body.sig ?? '').toLowerCase().slice(0, 16);
+      const dir = SIG_DIR[sigRaw];
+      if (!ind || dir === undefined) {
+        return reply.code(400).send({ ok: false, error: 'bad_signal', got: { ind, sig: sigRaw } });
+      }
+      const tf = String(body.tf ?? '').slice(0, 8);
+      const price = Number(body.price);
+      const ev = {
+        ts: Date.now(),
+        ind,
+        sig: sigRaw,
+        dir,
+        tf,
+        price: Number.isFinite(price) ? price : null,
+      };
+      // read-modify-write кольца последних 40 (переживает рестарт сайта).
+      let recent: unknown[] = [];
+      try {
+        if (existsSync(LUX_SIGNAL_FILE)) {
+          const prev = JSON.parse(readFileSync(LUX_SIGNAL_FILE, 'utf8')) as { recent?: unknown[] };
+          if (Array.isArray(prev.recent)) recent = prev.recent;
+        }
+      } catch {
+        /* битый файл — начинаем кольцо заново */
+      }
+      recent.push(ev);
+      if (recent.length > 40) recent = recent.slice(-40);
+      try {
+        writeFileSync(LUX_SIGNAL_FILE, JSON.stringify({ updatedAt: ev.ts, last: ev, recent }));
+      } catch {
+        reply.code(500);
+        return { ok: false, error: 'write_failed' };
+      }
+      return { ok: true, stored: ev };
+    },
+  );
+
+  // Диагностика: что движок прочитает (без секрета — публично безопасно).
+  app.get('/predict/lux/feed.json', async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    try {
+      if (existsSync(LUX_SIGNAL_FILE)) return JSON.parse(readFileSync(LUX_SIGNAL_FILE, 'utf8'));
+    } catch {
+      /* ignore */
+    }
+    reply.code(503);
+    return { ok: false, error: 'no_signals_yet' };
+  });
 }
