@@ -113,6 +113,36 @@ const STRATEGIES: StrategyDef[] = [
       'Честно. Сигналы LuxAlgo — это технические индикаторы: они запаздывают (приходят на закрытии бара) и могут перерисовываться; плюсовое матожидание на 5-минутном BTC не гарантировано. Идея стратегии — поймать лаг тонкого рынка: индикатор заметил движение раньше, чем переоценился ордербук. Подтвердит или опровергнет это только статистика — оцениваем так же строго, как остальные стратегии.',
     ],
   },
+  {
+    slug: 'trap',
+    title: 'Ценовая ловушка',
+    tagline: 'Набираем обе стороны дёшево по очереди; если сумма входа < $1 — прибыль заперта',
+    statusEnv: 'PREDICT_TRAP_STATUS_PATH',
+    statusFile: 'predict-trap-status.json',
+    liveFile: 'predict-trap-live.json',
+    showStakeCol: false,
+    hasLive: true,
+    description: [
+      'В бинарном рынке стороны UP и DOWN всегда стоят в сумме около $1 (ровно одна выплатит $1). Купить обе одновременно — гарантированный минус (платишь больше $1 из-за спреда). Но эта стратегия покупает стороны НЕ одновременно, а по очереди — ловит каждую, когда она временно дешёвая (цена качнулась против неё).',
+      'Например: цена качнулась вниз → UP подешевел, покупаем UP по 0.40. Позже цена качнулась вверх → DOWN подешевел, покупаем DOWN по 0.40. Суммарно вложено 0.80, а на резолюции придёт ровно $1 — прибыль +0.20 на акцию заперта, независимо от исхода. «Ловушка захлопнулась». Вторую ногу берём, только если суммарная цена входа ≤ 0.90 (гарантированный плюс ≥10¢ на акцию).',
+      'Честный риск: ловушка захлопывается только если цена в раунде ходит в ОБЕ стороны. Если рынок трендит в одну сторону — дешевеет лишь проигрывающая сторона, мы добираем только её и остаёмся с одной проигрышной ногой (убыток). По сути это ставка на разворот/боковик против тренда. Прибыльна ли она — зависит от того, как часто 5-минутный рынок ходит в диапазоне, а не трендит. Проверяем статистикой; плюс не гарантирован.',
+    ],
+  },
+  {
+    slug: 'leadlag',
+    title: 'Lead-Lag BTC→ETH',
+    tagline: 'BTC ведёт, ETH следом: ловим лаг ETH-рынка после резкого движения BTC',
+    statusEnv: 'PREDICT_LEADLAG_STATUS_PATH',
+    statusFile: 'predict-leadlag-status.json',
+    liveFile: 'predict-leadlag-live.json',
+    showStakeCol: true,
+    hasLive: true,
+    description: [
+      'Эта стратегия торгует на рынке ETH (а не BTC). BTC и ETH скоррелированы на ~85–90%, и на коротком горизонте BTC обычно двигается первым, а ETH повторяет его с задержкой. Идея: когда BTC делает резкий рывок, ETH-рынок ещё не успевает переоцениться — покупаем сторону ETH по направлению движения BTC, пока ордербук ETH отстаёт.',
+      'Механика: следим за живой ценой BTC (отдельный поток с биржи) и за ценой ETH. Если за последние ~8 секунд BTC прошёл заметное расстояние (≥0.05%), а ETH отыграл меньше 60% этого движения (то есть отстаёт) — входим в ETH-сторону по направлению BTC, если её цена ещё не задрана (в полосе 0.40–0.75). Держим до конца раунда.',
+      'Это не предсказание направления, а реакция на уже случившееся движение лидера — тот же принцип «эдж = скорость», что и у эндшпиля. Честные оговорки: лидерство BTC→ETH не абсолютно (иногда ведёт ETH, иногда корреляция рвётся внутри 5 минут), а задержка доставки данных может съесть преимущество. Поэтому всё логируем (рывок BTC против реакции ETH) — статистика покажет, есть ли лаг на самом деле. Плюс не гарантирован.',
+    ],
+  },
 ];
 
 type RecentRound = {
@@ -185,7 +215,7 @@ function livePanel(s: StrategyDef): string {
     `<div class="pl-side pl-side-up"><span class="pl-side-lbl">UP</span><span id="pl-up" class="pl-price">—</span><span id="pl-up-k" class="pl-k">—</span></div>` +
     `<div class="pl-side pl-side-down"><span class="pl-side-lbl">DOWN</span><span id="pl-down" class="pl-price">—</span><span id="pl-down-k" class="pl-k">—</span></div>` +
     `</div>` +
-    `<div class="pl-meta">BTC <span id="pl-btc">—</span> · цель <span id="pl-target">—</span> · отрыв <span id="pl-gap">—</span></div>` +
+    `<div class="pl-meta"><span id="pl-asset">BTC</span> <span id="pl-px">—</span> · цель <span id="pl-target">—</span> · отрыв <span id="pl-gap">—</span><span id="pl-lead"></span></div>` +
     `<div id="pl-pos" class="pl-pos">—</div>` +
     `</div>` +
     `<script>(function(){` +
@@ -199,8 +229,8 @@ function livePanel(s: StrategyDef): string {
     `function tick(){var t=$('pl-timer');if(!t)return;if(!slotEnd||Date.now()-lastUpd>25000){t.textContent='ожидание данных';return;}var now=Date.now();if(slotStart&&now<slotStart)t.textContent='старт через '+fmt(slotStart-now);else if(now<slotEnd)t.textContent=fmt(slotEnd-now)+' до закрытия';else t.textContent='раунд закрыт';}` +
     `async function poll(){try{var r=await fetch('/predict/'+slug+'/live.json',{cache:'no-store'});if(!r.ok)return;var d=await r.json();lastUpd=Date.now();slotStart=d.slotStartMs;slotEnd=d.slotEndMs;` +
     `set('pl-up',cents(d.up&&d.up.ask));set('pl-up-k',coef(d.up&&d.up.ask));set('pl-down',cents(d.down&&d.down.ask));set('pl-down-k',coef(d.down&&d.down.ask));` +
-    `set('pl-btc',usd(d.btc));set('pl-target',usd(d.target));var g=(d.btc!=null&&d.target!=null)?d.btc-d.target:null;set('pl-gap',g!=null?(g>=0?'+':'−')+'$'+Math.abs(g).toFixed(2):'—');` +
-    `var p=d.position;$('pl-pos').innerHTML=p?('🟢 В сделке: <b class=\"'+(p.side==='UP'?'pd-up':'pd-down')+'\">'+p.side+'</b> · ставка '+usd(p.stake)+' · коэф '+(p.entryCoef||'—')):'⚪ Открытой позиции нет — ждём сигнал';` +
+    `var asset=d.asset||'BTC';set('pl-asset',asset);var px=(asset==='ETH')?d.eth:d.btc;set('pl-px',usd(px));set('pl-target',usd(d.target));var g=(px!=null&&d.target!=null)?px-d.target:null;set('pl-gap',g!=null?(g>=0?'+':'−')+'$'+Math.abs(g).toFixed(2):'—');var le=$('pl-lead');if(le)le.textContent=(d.btc!=null&&asset!=='BTC')?(' · BTC-лидер '+usd(d.btc)):'';` +
+    `var p=d.position;if(!p){$('pl-pos').innerHTML='⚪ Открытой позиции нет — ждём сигнал';}else if(p.side==='BOTH'){$('pl-pos').innerHTML='🟢 Ловушка: обе ноги набраны · вложено '+usd(p.stake)+(d.lockedProfit!=null?(' · заперта прибыль +$'+d.lockedProfit+'/акция'):'');}else{$('pl-pos').innerHTML='🟢 В сделке: <b class=\"'+(p.side==='UP'?'pd-up':'pd-down')+'\">'+p.side+'</b> · ставка '+usd(p.stake)+(p.entryCoef?(' · коэф '+p.entryCoef):'');}` +
     `}catch(e){}}` +
     `poll();setInterval(poll,2000);setInterval(tick,1000);tick();` +
     `})();</script>`
