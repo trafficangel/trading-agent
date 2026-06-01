@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
 import { config } from '../config.js';
 import { pageShell } from './landing.js';
+import { getAuthedUser } from '../auth/routes.js';
 
 /**
  * Public read-only pages for the /predict track (robotclaude.biz/predict).
@@ -603,44 +604,95 @@ function renderStrategy(s: StrategyDef, page = 1): string {
   );
 }
 
-export async function predictRoute(app: FastifyInstance): Promise<void> {
-  app.get('/predict', async (_req, reply) => {
-    reply.header('content-type', 'text/html; charset=utf-8');
-    reply.header('Cache-Control', 'public, max-age=30');
-    return pageShell('/predict — Robot Claude', renderOverview(), { lang: 'ru', autoRefreshSec: 60 });
-  });
+// Страница «доступ только через поддержку» — для незалогиненных и для
+// залогиненных без выданного доступа. Раздел виден, но закрыт.
+function renderNoAccess(authed: boolean): string {
+  const support = 'https://t.me/robotclaude_support';
+  const cta = authed
+    ? `<p class="pd-sub">Ваш аккаунт авторизован, но доступ к этому разделу ещё не выдан. Доступ открывается <b>вручную через поддержку</b>.</p>`
+    : `<p class="pd-sub">Раздел доступен только зарегистрированным пользователям с выданным доступом. Сначала войдите, затем запросите доступ <b>через поддержку</b>.</p>`;
+  return (
+    STYLES +
+    `<div class="pd-wrap">` +
+    `<div class="pd-head"><h1>/predict</h1><span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>закрытый раздел</span></div>` +
+    `<div class="pd-card">` +
+    `<h2>🔒 Доступ по запросу</h2>` +
+    cta +
+    `<p class="pd-sub">Здесь — экспериментальные стратегии на prediction-маркете (BTC/ETH Up/Down, 5 мин) и подготовка к подключению реальной торговли. ` +
+    `Из-за рисков доступ выдаётся индивидуально.</p>` +
+    `<p style="margin-top:18px"><a class="pd-back" style="font-size:15px" href="${support}">→ Написать в поддержку для доступа</a></p>` +
+    (authed ? '' : `<p style="margin-top:8px"><a class="pd-back" href="/strategies">→ Войти / зарегистрироваться</a></p>`) +
+    `</div></div>`
+  );
+}
 
-  // Back-compat: /predict/status.json = первая стратегия (prob).
-  app.get('/predict/status.json', async (_req, reply) => {
-    const st = readStatus(STRATEGIES[0]!);
-    reply.header('Cache-Control', 'public, max-age=30');
-    if (!st) {
-      reply.code(503);
-      return { ok: false, error: 'no_data_yet' };
+// Баннер для пользователей С доступом: реальная торговля пока в подготовке.
+const REAL_TRADING_NOTE =
+  `<div class="pd-card" style="border-color:#2e3a2e">` +
+  `<h2>⚙️ Подключение реальной торговли — в подготовке</h2>` +
+  `<p class="pd-sub">Сейчас раздел работает в режиме симуляции (paper). Подключение собственного кошелька и запуск реальной торговли откроется <b>после того, как у стратегии подтвердится устойчивый эдж на большой выборке</b> — мы не запускаем реальные деньги на недоказанных гипотезах. Следите за статистикой ниже.</p>` +
+  `</div>`;
+
+export async function predictRoute(app: FastifyInstance): Promise<void> {
+  // Гейт раздела: только залогиненные пользователи с выданным админом доступом.
+  // Возвращает user при доступе, либо null (вызывающий показывает «через поддержку»).
+  const gate = (req: Parameters<typeof getAuthedUser>[0]) => {
+    const u = getAuthedUser(req);
+    return u && u.predictAccess ? u : null;
+  };
+
+  app.get('/predict', async (req, reply) => {
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('Cache-Control', 'private, no-store');
+    const u = gate(req);
+    if (!u) {
+      return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow' });
     }
-    return st;
+    return pageShell('/predict — Robot Claude', REAL_TRADING_NOTE + renderOverview(), {
+      lang: 'ru',
+      autoRefreshSec: 60,
+      robots: 'noindex, nofollow',
+      authed: { displayName: u.displayName, phone: u.phone },
+    });
   });
 
   for (const s of STRATEGIES) {
     app.get(`/predict/${s.slug}`, async (req, reply) => {
       reply.header('content-type', 'text/html; charset=utf-8');
-      reply.header('Cache-Control', 'public, max-age=30');
+      reply.header('Cache-Control', 'private, no-store');
+      const u = gate(req);
+      if (!u) {
+        return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow' });
+      }
       const pageRaw = (req.query as { page?: string } | undefined)?.page;
       const page = Math.max(1, parseInt(pageRaw ?? '1', 10) || 1);
-      return pageShell(`${s.title} — /predict`, renderStrategy(s, page), { lang: 'ru', autoRefreshSec: 60 });
+      return pageShell(`${s.title} — /predict`, renderStrategy(s, page), {
+        lang: 'ru',
+        autoRefreshSec: 60,
+        robots: 'noindex, nofollow',
+        authed: { displayName: u.displayName, phone: u.phone },
+      });
     });
-    app.get(`/predict/${s.slug}/status.json`, async (_req, reply) => {
+    app.get(`/predict/${s.slug}/status.json`, async (req, reply) => {
+      reply.header('Cache-Control', 'private, no-store');
+      if (!gate(req)) {
+        reply.code(403);
+        return { ok: false, error: 'forbidden' };
+      }
       const st = readStatus(s);
-      reply.header('Cache-Control', 'public, max-age=30');
       if (!st) {
         reply.code(503);
         return { ok: false, error: 'no_data_yet' };
       }
       return st;
     });
-    app.get(`/predict/${s.slug}/live.json`, async (_req, reply) => {
-      const live = readLive(s);
+    app.get(`/predict/${s.slug}/live.json`, async (req, reply) => {
       reply.header('Cache-Control', 'no-store');
+      if (!gate(req)) {
+        reply.code(403);
+        return { ok: false, error: 'forbidden' };
+      }
+      const live = readLive(s);
       if (!live) {
         reply.code(503);
         return { ok: false, error: 'no_live_yet' };
@@ -708,9 +760,13 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // Диагностика: что движок прочитает (без секрета — публично безопасно).
-  app.get('/predict/lux/feed.json', async (_req, reply) => {
+  // Диагностика: что движок прочитает. Закрыта тем же гейтом, что и раздел.
+  app.get('/predict/lux/feed.json', async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
+    if (!gate(req)) {
+      reply.code(403);
+      return { ok: false, error: 'forbidden' };
+    }
     try {
       if (existsSync(LUX_SIGNAL_FILE)) return JSON.parse(readFileSync(LUX_SIGNAL_FILE, 'utf8'));
     } catch {

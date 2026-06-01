@@ -337,6 +337,7 @@ export function getAuthedUser(req: FastifyRequest): {
   displayName: string | null;
   createdAt: number;
   lastSeenAt: number;
+  predictAccess: boolean;
 } | null {
   const sid = req.cookies?.[SESSION_COOKIE];
   if (!sid) return null;
@@ -349,5 +350,6 @@ export function getAuthedUser(req: FastifyRequest): {
     displayName: sess.display_name ?? null,
     createdAt: sess.created_at,
     lastSeenAt: sess.last_seen_at,
+    predictAccess: !!sess.predict_access,
   };
 }

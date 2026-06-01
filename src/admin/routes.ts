@@ -25,6 +25,7 @@ import { z } from 'zod';
 import {
   listRegistrations,
   getRegistrationStats,
+  setPredictAccess,
   type RegistrationListRow,
 } from '../auth/session.js';
 import { pageShell } from '../strategies/landing.js';
@@ -319,13 +320,27 @@ function renderDashboard(csrfToken: string, query: Record<string, string | undef
           // verification_attempts → registrations, after best-effort
           // closing any open Bybit positions. Triple-typed confirm so
           // an accidental click can't nuke a real account.
+          // Доступ к закрытому разделу /predict — отдельный гейт (не подписка).
+          const predictForm = r.predict_access
+            ? `<form method="POST" action="/admin/users/${r.id}/predict-access" style="display:inline; margin-left:4px"
+                     onsubmit="return confirm('Снять доступ к разделу /predict у ${escapeHtml(name)}?');">
+                ${csrfField}
+                <input type="hidden" name="grant" value="0">
+                <button class="adm-btn adm-btn-secondary" type="submit" title="Снять доступ к разделу /predict">📈 Снять /predict</button>
+              </form>`
+            : `<form method="POST" action="/admin/users/${r.id}/predict-access" style="display:inline; margin-left:4px"
+                     onsubmit="return confirm('Выдать доступ к разделу /predict для ${escapeHtml(name)}?');">
+                ${csrfField}
+                <input type="hidden" name="grant" value="1">
+                <button class="adm-btn adm-btn-vip" type="submit" title="Выдать доступ к закрытому разделу /predict">📈 Доступ /predict</button>
+              </form>`;
           const deleteForm =
             `<form method="POST" action="/admin/users/${r.id}/delete" style="display:inline; margin-left:4px"
                    onsubmit="var ans = prompt('УДАЛИТЬ пользователя ${escapeHtml(name)} (${escapeHtml(phone)}) безвозвратно?\\n\\nЭто закроет открытые позиции на Bybit и сотрёт ВСЕ его данные: ключи, подписку, стратегии, историю сделок.\\n\\nВведите УДАЛИТЬ заглавными чтобы подтвердить:'); return ans === 'УДАЛИТЬ';">
                 ${csrfField}
                 <button class="adm-btn adm-btn-danger" type="submit" title="Удалить пользователя и все его данные">🗑 Удалить</button>
               </form>`;
-          const toggle = `<div class="adm-actions">${assignForm}${extendOnlyForm}${compForm}${deleteForm}</div>`;
+          const toggle = `<div class="adm-actions">${assignForm}${extendOnlyForm}${compForm}${predictForm}${deleteForm}</div>`;
           return `
             <tr>
               <td class="dt">${fmtDateTime(r.created_at)}</td>
@@ -706,6 +721,45 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     } catch (err) {
       logger.error({ err, user_id: userId }, 'admin: comp toggle failed');
       reply.code(500).send('failed to update access');
+      return;
+    }
+    reply.code(303).header('location', '/admin').send();
+  });
+
+  // ---------------- POST /admin/users/:id/predict-access ----------------
+  // Выдать/снять доступ к закрытому разделу /predict. Отдельный гейт от
+  // подписки на автоторговлю. «Доступ только через поддержку» — вручную.
+  app.post('/admin/users/:id/predict-access', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
+    if (!checkAuth(req, reply)) return;
+    const adminEmailForCsrf = process.env.ADMIN_EMAIL ?? 'admin';
+    if (!requireAdminCsrf(req, reply, adminEmailForCsrf)) return;
+    const userId = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      reply.code(400).send('bad user id');
+      return;
+    }
+    const parsed = compFormSchema.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400).send('grant field required (0|1)');
+      return;
+    }
+    const grant = parsed.data.grant === '1';
+    const adminEmail = process.env.ADMIN_EMAIL ?? 'admin';
+    try {
+      setPredictAccess(userId, grant);
+      recordAdminAction({
+        adminEmail,
+        targetUserId: userId,
+        action: 'set_predict_access',
+        before: null,
+        after: { predict_access: grant ? 1 : 0 },
+        note: grant ? 'grant /predict access' : 'revoke /predict access',
+        ip: req.ip,
+      });
+      logger.info({ user_id: userId, grant, by: adminEmail }, 'admin: predict-access toggled');
+    } catch (err) {
+      logger.error({ err, user_id: userId }, 'admin: predict-access toggle failed');
+      reply.code(500).send('failed to update predict access');
       return;
     }
     reply.code(303).header('location', '/admin').send();
