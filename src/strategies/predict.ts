@@ -664,6 +664,33 @@ function readRealConfig(): RealConfig {
 function writeRealConfig(cfg: RealConfig): void {
   writeFileSync(REAL_CONFIG_FILE, JSON.stringify({ ...cfg, updatedAt: new Date().toISOString() }, null, 2));
 }
+// Желаемое состояние боевых стратегий (кнопки Запустить/Остановить пишут сюда,
+// супервайзер-сервис читает и поднимает/гасит реальные движки). Веб НЕ трогает
+// ни systemd, ни ключ — только этот файл намерений.
+type RealControl = { running: Record<string, { since: string }> };
+const REAL_CONTROL_FILE = join(dataDir, 'predict-real-control.json');
+function readRealControl(): RealControl {
+  try {
+    if (existsSync(REAL_CONTROL_FILE)) return JSON.parse(readFileSync(REAL_CONTROL_FILE, 'utf8')) as RealControl;
+  } catch {
+    /* дефолт */
+  }
+  return { running: {} };
+}
+function writeRealControl(c: RealControl): void {
+  writeFileSync(REAL_CONTROL_FILE, JSON.stringify(c, null, 2));
+}
+/** Личная (боевая) статистика стратегии — пишется боевым инстансом, если запущен. */
+function readRealStatus(slug: string): PredictStatus | null {
+  try {
+    const p = join(dataDir, `predict-real-${slug}-status.json`);
+    if (existsSync(p)) return JSON.parse(readFileSync(p, 'utf8')) as PredictStatus;
+  } catch {
+    /* нет данных */
+  }
+  return null;
+}
+
 /** Сохранить приватный ключ в защищённый файл (chmod 600). Возвращает маску. */
 function saveRealKey(rawKey: string): string {
   const key = rawKey.trim();
@@ -677,8 +704,32 @@ function saveRealKey(rawKey: string): string {
   return `••••${tail}`;
 }
 
-function renderRealTrading(cfg: RealConfig): string {
+function renderRealTrading(cfg: RealConfig, ctrl: RealControl): string {
   const back = `<a class="pd-back" href="/predict">← раздел /predict</a>`;
+  const keyReady = !!cfg.keyMask;
+  // Панель запуска/остановки + личная статистика по каждой стратегии.
+  const controlRows = STRATEGIES.map((s) => {
+    const running = !!ctrl.running[s.slug];
+    const rst = readRealStatus(s.slug);
+    const statLine = rst
+      ? `${rst.rounds} сделок · win ${rst.winRate}% · PnL <b class="${rst.netPnl >= 0 ? 'pd-pos' : 'pd-neg'}">${fmtUsd(rst.netPnl)}</b>`
+      : '<span class="pd-muted-td">боевых сделок ещё нет</span>';
+    const curve = rst && rst.equityCurve && rst.equityCurve.length > 1 ? equitySvg(rst.equityCurve) : '';
+    const badge = running
+      ? `<span class="pd-fresh pd-fresh-ok"><span class="pd-dot"></span>🟢 запущена</span>`
+      : `<span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>⏸ остановлена</span>`;
+    const btn = running
+      ? `<form method="POST" action="/predict/real/stop" style="display:inline"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-back" style="background:#3a1f1f;border:1px solid #5a2e2e;padding:8px 14px;border-radius:8px;cursor:pointer">⏹ Остановить</button></form>`
+      : `<form method="POST" action="/predict/real/start" style="display:inline" onsubmit="return confirm('Запустить РЕАЛЬНУЮ торговлю стратегией ${esc(s.title)}? Пойдут настоящие деньги с твоего кошелька.');"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" ${keyReady ? '' : 'disabled title="Сначала сохрани ключ кошелька"'} class="pd-back" style="background:#16321f;border:1px solid #2e5a3a;padding:8px 14px;border-radius:8px;cursor:${keyReady ? 'pointer' : 'not-allowed'};opacity:${keyReady ? '1' : '0.5'}">▶ Запустить</button></form>`;
+    return (
+      `<div style="padding:12px;border:1px solid #1e2530;border-radius:8px;margin-bottom:10px">` +
+      `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">` +
+      `<div><b>${esc(s.title)}</b> ${badge}<br><span style="font-size:13px">${statLine}</span></div>` +
+      `<div>${btn}</div></div>` +
+      (curve ? `<div style="margin-top:10px">${curve}</div>` : '') +
+      `</div>`
+    );
+  }).join('');
   const stratOptions = STRATEGIES.map((s) => {
     const st = readStatus(s);
     const stat = st ? `paper: ${st.rounds} р., win ${st.winRate}%, PnL ${fmtUsd(st.netPnl)}` : 'нет данных';
@@ -722,6 +773,11 @@ function renderRealTrading(cfg: RealConfig): string {
     `<p class="pd-foot" style="margin-top:10px">Сохранение НЕ запускает торговлю — только готовит подключение. Боевой запуск включается отдельно и осознанно.</p>` +
     `<p class="pd-foot">Обновлено: ${esc(updated)}</p></div>` +
     `</form>` +
+    `<div class="pd-card"><h2>Запуск и личная статистика</h2>` +
+    `<p class="pd-sub">Запуск/остановка боевой торговли по каждой стратегии и её личный PnL. Кнопка запуска активна только когда сохранён ключ кошелька.</p>` +
+    controlRows +
+    `<p class="pd-foot">⚙️ Кнопка ставит «запущена/остановлена»; реальное исполнение поднимает супервайзер на сервере. Боевые сделки идут на твои деньги — эджа пока нет, вероятен минус.</p>` +
+    `</div>` +
     `</div>`
   );
 }
@@ -758,11 +814,42 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     if (!u) {
       return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow' });
     }
-    return pageShell('Реальная торговля — /predict', renderRealTrading(readRealConfig()), {
+    return pageShell('Реальная торговля — /predict', renderRealTrading(readRealConfig(), readRealControl()), {
       lang: 'ru',
       robots: 'noindex, nofollow',
       authed: { displayName: u.displayName, phone: u.phone },
     });
+  });
+
+  // Запуск/остановка боевой стратегии — пишет ТОЛЬКО желаемое состояние (намерение).
+  // Реальное исполнение делает супервайзер на сервере; веб systemd/ключ не трогает.
+  app.post('/predict/real/start', async (req, reply) => {
+    if (!gate(req)) {
+      reply.code(403);
+      return { ok: false, error: 'forbidden' };
+    }
+    const slug = String((req.body as { slug?: string } | undefined)?.slug ?? '');
+    const cfg = readRealConfig();
+    if (STRATEGIES.some((s) => s.slug === slug) && cfg.keyMask) {
+      const c = readRealControl();
+      c.running[slug] = { since: new Date().toISOString() };
+      writeRealControl(c);
+    }
+    reply.code(303).header('location', '/predict/real').send();
+  });
+
+  app.post('/predict/real/stop', async (req, reply) => {
+    if (!gate(req)) {
+      reply.code(403);
+      return { ok: false, error: 'forbidden' };
+    }
+    const slug = String((req.body as { slug?: string } | undefined)?.slug ?? '');
+    const c = readRealControl();
+    if (c.running[slug]) {
+      delete c.running[slug];
+      writeRealControl(c);
+    }
+    reply.code(303).header('location', '/predict/real').send();
   });
 
   app.post('/predict/real/save', async (req, reply) => {
