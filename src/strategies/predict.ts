@@ -632,12 +632,80 @@ function renderNoAccess(authed: boolean): string {
   );
 }
 
-// Баннер для пользователей С доступом: реальная торговля пока в подготовке.
+// Баннер для пользователей С доступом — ведёт на страницу реальной торговли.
 const REAL_TRADING_NOTE =
   `<div class="pd-card" style="border-color:#2e3a2e">` +
-  `<h2>⚙️ Подключение реальной торговли — в подготовке</h2>` +
-  `<p class="pd-sub">Сейчас раздел работает в режиме симуляции (paper). Подключение собственного кошелька и запуск реальной торговли откроется <b>после того, как у стратегии подтвердится устойчивый эдж на большой выборке</b> — мы не запускаем реальные деньги на недоказанных гипотезах. Следите за статистикой ниже.</p>` +
+  `<h2>⚙️ Реальная торговля</h2>` +
+  `<p class="pd-sub">Сейчас всё в режиме симуляции (paper). Когда будешь готов — настрой подключение и выбери стратегию для боевого режима на отдельной странице.</p>` +
+  `<p style="margin-top:12px"><a class="pd-back" style="font-size:15px" href="/predict/real">→ Перейти к настройке реальной торговли</a></p>` +
   `</div>`;
+
+// ── Конфиг реальной торговли (оператор-онли). Хранится в data/predict-real-config.json.
+// НИКАКОГО приватного ключа здесь нет (ключ — отдельно, в .env.secret на сервере).
+type RealConfig = {
+  selectedStrategy: string | null; // slug выбранной стратегии
+  depositUsd: number | null;
+  maxStakeUsd: number | null;
+  maxSessionLossUsd: number | null;
+  funderAddress: string | null; // публичный адрес funder/proxy (НЕ ключ)
+  updatedAt: string | null;
+};
+const REAL_CONFIG_FILE = join(dataDir, 'predict-real-config.json');
+function readRealConfig(): RealConfig {
+  try {
+    if (existsSync(REAL_CONFIG_FILE)) return JSON.parse(readFileSync(REAL_CONFIG_FILE, 'utf8')) as RealConfig;
+  } catch {
+    /* битый файл — дефолт */
+  }
+  return { selectedStrategy: null, depositUsd: null, maxStakeUsd: null, maxSessionLossUsd: null, funderAddress: null, updatedAt: null };
+}
+function writeRealConfig(cfg: RealConfig): void {
+  writeFileSync(REAL_CONFIG_FILE, JSON.stringify({ ...cfg, updatedAt: new Date().toISOString() }, null, 2));
+}
+
+function renderRealTrading(cfg: RealConfig): string {
+  const back = `<a class="pd-back" href="/predict">← раздел /predict</a>`;
+  const num = (v: number | null) => (v != null ? String(v) : '');
+  const stratOptions = STRATEGIES.map((s) => {
+    const st = readStatus(s);
+    const stat = st ? `paper: ${st.rounds} р., win ${st.winRate}%, PnL ${fmtUsd(st.netPnl)}` : 'нет данных';
+    const checked = cfg.selectedStrategy === s.slug ? 'checked' : '';
+    return (
+      `<label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid #1e2530;border-radius:8px;margin-bottom:8px;cursor:pointer">` +
+      `<input type="radio" name="strategy" value="${esc(s.slug)}" ${checked} style="margin-top:3px">` +
+      `<span><b>${esc(s.title)}</b> <span class="pd-muted-td" style="font-size:13px">— ${esc(s.tagline)}</span><br>` +
+      `<span class="pd-muted-td" style="font-size:12px">${esc(stat)}</span></span></label>`
+    );
+  }).join('');
+  const inp = (name: string, label: string, val: string, ph: string) =>
+    `<label style="display:block;margin-bottom:10px">${esc(label)}<br>` +
+    `<input type="text" name="${name}" value="${esc(val)}" placeholder="${esc(ph)}" ` +
+    `style="margin-top:4px;width:260px;max-width:100%;padding:8px 10px;background:#0b0e13;border:1px solid #2a313c;border-radius:7px;color:#e6e9ef"></label>`;
+  const updated = cfg.updatedAt ? new Date(cfg.updatedAt).toLocaleString('ru-RU', { timeZone: 'UTC' }) + ' UTC' : '—';
+  return (
+    STYLES +
+    `<div class="pd-wrap">${back}` +
+    `<div class="pd-head"><h1>Реальная торговля</h1>` +
+    `<span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>⏸ не активна (симуляция)</span></div>` +
+    `<div class="pd-card" style="border-color:#3a2e2e">` +
+    `<p class="pd-sub">⚠️ Реальная торговля <b>пока не запущена</b>. Здесь ты заранее выбираешь стратегию и параметры. Запуск с реальными деньгами включается отдельно на сервере (двойной предохранитель), и только когда ты сам решишь. Приватный ключ <b>в эту форму не вводится</b> — он подключается безопасно отдельным файлом на сервере.</p>` +
+    `</div>` +
+    `<form method="POST" action="/predict/real/save">` +
+    `<div class="pd-card"><h2>1. Выбор стратегии</h2>${stratOptions}</div>` +
+    `<div class="pd-card"><h2>2. Параметры риска</h2>` +
+    inp('deposit', 'Депозит, USD (старт малый, напр. 30):', num(cfg.depositUsd), '30') +
+    inp('maxStake', 'Макс. ставка на сделку, USD:', num(cfg.maxStakeUsd), '5') +
+    inp('maxSessionLoss', 'Стоп по убытку сессии, USD:', num(cfg.maxSessionLossUsd), '20') +
+    inp('funder', 'Адрес funder/proxy (публичный, 0x…):', cfg.funderAddress ?? '', '0x…') +
+    `<p class="pd-foot">Адрес funder — публичный, не ключ. Хранится для настройки инстанса.</p>` +
+    `</div>` +
+    `<div class="pd-card"><button type="submit" class="pd-back" style="font-size:15px;background:#16321f;border:1px solid #2e5a3a;padding:10px 16px;border-radius:8px;cursor:pointer">💾 Сохранить выбор</button>` +
+    `<p class="pd-foot" style="margin-top:10px">Сохранение НЕ запускает торговлю — только фиксирует твой выбор. Запуск боевого режима делается отдельно и осознанно.</p>` +
+    `<p class="pd-foot">Обновлено: ${esc(updated)}</p></div>` +
+    `</form>` +
+    `</div>`
+  );
+}
 
 export async function predictRoute(app: FastifyInstance): Promise<void> {
   // Гейт раздела: только залогиненные пользователи с выданным админом доступом.
@@ -660,6 +728,47 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       robots: 'noindex, nofollow',
       authed: { displayName: u.displayName, phone: u.phone },
     });
+  });
+
+  // Страница реальной торговли (оператор-онли, гейт). Пока НИЧЕГО не исполняет —
+  // только выбор стратегии и параметров. Ключ сюда не вводится.
+  app.get('/predict/real', async (req, reply) => {
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('Cache-Control', 'private, no-store');
+    const u = gate(req);
+    if (!u) {
+      return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow' });
+    }
+    return pageShell('Реальная торговля — /predict', renderRealTrading(readRealConfig()), {
+      lang: 'ru',
+      robots: 'noindex, nofollow',
+      authed: { displayName: u.displayName, phone: u.phone },
+    });
+  });
+
+  app.post('/predict/real/save', async (req, reply) => {
+    if (!gate(req)) {
+      reply.code(403);
+      return { ok: false, error: 'forbidden' };
+    }
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const slugs = new Set(STRATEGIES.map((s) => s.slug));
+    const strat = typeof b.strategy === 'string' && slugs.has(b.strategy) ? b.strategy : null;
+    const numOrNull = (v: unknown): number | null => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
+    };
+    const funderRaw = typeof b.funder === 'string' ? b.funder.trim() : '';
+    const funder = /^0x[a-fA-F0-9]{40}$/.test(funderRaw) ? funderRaw : funderRaw === '' ? null : funderRaw.slice(0, 64);
+    writeRealConfig({
+      selectedStrategy: strat,
+      depositUsd: numOrNull(b.deposit),
+      maxStakeUsd: numOrNull(b.maxStake),
+      maxSessionLossUsd: numOrNull(b.maxSessionLoss),
+      funderAddress: funder,
+      updatedAt: null,
+    });
+    reply.code(303).header('location', '/predict/real').send();
   });
 
   for (const s of STRATEGIES) {
