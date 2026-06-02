@@ -795,9 +795,19 @@ function saveRealKey(rawKey: string): string {
   return `••••${tail}`;
 }
 
-function renderRealTrading(cfg: RealConfig, ctrl: RealControl): string {
+function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): string {
   const back = `<a class="pd-back" href="/predict">← раздел /predict</a>`;
   const keyReady = !!cfg.keyMask;
+  const funderOk = !!cfg.funderAddress && /^0x[a-fA-F0-9]{40}$/.test(cfg.funderAddress);
+  const funderStatus = cfg.funderAddress
+    ? funderOk
+      ? '<span class="pd-pos">✓ адрес корректен</span>'
+      : '<span class="pd-neg">✗ адрес НЕвалиден — нужен формат 0x + 40 hex-символов (без лишних суффиксов)</span>'
+    : '<span class="pd-muted-td">не задан</span>';
+  const errBanner =
+    err === 'funder'
+      ? `<div class="pd-card" style="border-color:#5a2e2e;background:rgba(229,97,108,0.08)"><b class="pd-neg">Адрес funder не сохранён:</b> введён неверный формат. Нужен ровно <code>0x</code> + 40 hex-символов (например 0xb985…36b), без дефисов, пробелов и суффиксов. Скопируй адрес со страницы пополнения USDC в Polymarket.</div>`
+      : '';
   const stakeInputStyle = 'width:80px;padding:7px 9px;background:#0b0e13;border:1px solid #2a313c;border-radius:7px;color:#e6e9ef';
   // Панель запуска/остановки: по каждой стратегии — СВОЯ фикс. ставка + кнопки + личный PnL.
   const controlRows = STRATEGIES.map((s) => {
@@ -819,7 +829,7 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl): string {
       : `<form method="POST" action="/predict/real/start" style="display:flex;gap:8px;align-items:center" onsubmit="return confirm('Запустить РЕАЛЬНУЮ торговлю «${esc(s.title)}»? Пойдут настоящие деньги с твоего кошелька.');">` +
         `<input type="hidden" name="slug" value="${esc(s.slug)}">` +
         `<input type="text" name="stake" value="${esc(stakeVal)}" placeholder="ставка $" title="Фикс. ставка на сделку, USD" style="${stakeInputStyle}">` +
-        `<button type="submit" ${keyReady ? '' : 'disabled title="Сначала сохрани ключ кошелька"'} class="pd-back" style="background:#16321f;border:1px solid #2e5a3a;padding:8px 14px;border-radius:8px;cursor:${keyReady ? 'pointer' : 'not-allowed'};opacity:${keyReady ? '1' : '0.5'}">▶ Запустить</button></form>`;
+        `<button type="submit" ${keyReady && funderOk ? '' : `disabled title="${keyReady ? 'Сначала введи корректный funder-адрес' : 'Сначала сохрани ключ кошелька'}"`} class="pd-back" style="background:#16321f;border:1px solid #2e5a3a;padding:8px 14px;border-radius:8px;cursor:${keyReady && funderOk ? 'pointer' : 'not-allowed'};opacity:${keyReady && funderOk ? '1' : '0.5'}">▶ Запустить</button></form>`;
     return (
       `<div style="padding:12px;border:1px solid #1e2530;border-radius:8px;margin-bottom:10px">` +
       `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">` +
@@ -842,13 +852,15 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl): string {
     `<div class="pd-card" style="border-color:#3a2e2e">` +
     `<p class="pd-sub">⚠️ Реальная торговля <b>пока не запущена</b> — сохранение тут только готовит подключение. Риск ограничивай <b>суммой на кошельке</b>: заведи отдельный кошелёк и держи на нём только то, что готов потерять. Преимущества пока нет — на старте вероятен минус.</p>` +
     `</div>` +
+    errBanner +
     `<form method="POST" action="/predict/real/save" autocomplete="off">` +
     `<div class="pd-card"><h2>Подключение кошелька</h2>` +
     `<label style="display:block;margin-bottom:12px">Приватный ключ кошелька (хранится на сервере в защищённом файле, обратно не показывается):<br>` +
     `<input type="password" name="privkey" value="" placeholder="${cfg.keyMask ? 'оставь пустым, чтобы не менять' : '0x… приватный ключ'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
     `<div style="margin:6px 0 14px">Статус ключа: ${keyStatus}</div>` +
     `<label style="display:block;margin-bottom:8px">Адрес funder / proxy (публичный, 0x…):<br>` +
-    `<input type="text" name="funder" value="${esc(cfg.funderAddress ?? '')}" placeholder="0x…" style="${fieldStyle}"></label>` +
+    `<input type="text" name="funder" value="${esc(cfg.funderAddress ?? '')}" placeholder="0x… (ровно 0x + 40 hex)" style="${fieldStyle}"></label>` +
+    `<div style="margin:6px 0 14px">Статус адреса: ${funderStatus}</div>` +
     `<p class="pd-foot">🔒 Ключ передаётся по HTTPS, кладётся в файл с правами 600, в логи/в git не попадает и обратно не отображается. Это твой ключ на твоём сервере — для надёжности используй отдельный кошелёк с малым балансом.</p>` +
     `</div>` +
     `<div class="pd-card"><button type="submit" class="pd-back" style="font-size:15px;background:#16321f;border:1px solid #2e5a3a;padding:10px 16px;border-radius:8px;cursor:pointer">💾 Сохранить</button>` +
@@ -896,7 +908,8 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     if (!u) {
       return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow' });
     }
-    return pageShell('Реальная торговля — /predict', renderRealTrading(readRealConfig(), readRealControl()), {
+    const err = (req.query as { err?: string } | undefined)?.err;
+    return pageShell('Реальная торговля — /predict', renderRealTrading(readRealConfig(), readRealControl(), err), {
       lang: 'ru',
       robots: 'noindex, nofollow',
       authed: { displayName: u.displayName, phone: u.phone },
@@ -913,6 +926,12 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     const b = (req.body ?? {}) as Record<string, unknown>;
     const slug = String(b.slug ?? '');
     const cfg = readRealConfig();
+    const funderOk = !!cfg.funderAddress && /^0x[a-fA-F0-9]{40}$/.test(cfg.funderAddress);
+    if (!funderOk) {
+      // Нельзя запускать боевую торговлю без валидного funder-адреса.
+      reply.code(303).header('location', '/predict/real?err=funder').send();
+      return;
+    }
     if (STRATEGIES.some((s) => s.slug === slug) && cfg.keyMask) {
       // Сохраняем фикс. ставку этой стратегии (если задана), затем запускаем.
       const stakeN = Number(b.stake);
@@ -948,7 +967,11 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     }
     const b = (req.body ?? {}) as Record<string, unknown>;
     const funderRaw = typeof b.funder === 'string' ? b.funder.trim() : '';
-    const funder = /^0x[a-fA-F0-9]{40}$/.test(funderRaw) ? funderRaw : funderRaw === '' ? null : funderRaw.slice(0, 64);
+    const funderValid = /^0x[a-fA-F0-9]{40}$/.test(funderRaw);
+    // Строго: валидный адрес храним; пусто = очистить; невалидное НЕ сохраняем
+    // (раньше клали мусор через slice — так в конфиг попал «xb985…36b-<timestamp>»).
+    const funder = funderValid ? funderRaw : null;
+    const funderBad = funderRaw !== '' && !funderValid;
     const prev = readRealConfig();
     // Ключ: если поле непустое — сохраняем в защищённый файл и обновляем маску.
     // Пустое поле = не менять существующий ключ. НЕ логируем сам ключ.
@@ -960,7 +983,7 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       keySavedAt = new Date().toISOString();
     }
     writeRealConfig({ stakes: prev.stakes, funderAddress: funder, keyMask, keySavedAt, updatedAt: null });
-    reply.code(303).header('location', '/predict/real').send();
+    reply.code(303).header('location', funderBad ? '/predict/real?err=funder' : '/predict/real').send();
   });
 
   for (const s of STRATEGIES) {
