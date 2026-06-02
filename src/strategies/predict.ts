@@ -740,10 +740,16 @@ type RealConfig = {
   funderAddress: string | null; // публичный адрес funder/proxy (НЕ ключ)
   keyMask: string | null; // «••••1234» — последние 4 символа сохранённого ключа
   keySavedAt: string | null;
+  builderMask?: string | null; // маска relayer/builder API-ключа (key/secret/passphrase сохранены)
+  builderSavedAt?: string | null;
   updatedAt: string | null;
 };
 const REAL_CONFIG_FILE = join(dataDir, 'predict-real-config.json');
 const REAL_KEY_FILE = join(dataDir, 'predict-real.key');
+// Relayer/builder API-креды Polymarket (BUILDER_KEY/SECRET/PASSPHRASE) — движок
+// требует их для боевого режима. Храним в защищённом env-файле (chmod 600),
+// который systemd-юнит боевого движка подхватывает через EnvironmentFile.
+const REAL_BUILDER_ENV_FILE = join(dataDir, 'predict-real-builder.env');
 function readRealConfig(): RealConfig {
   try {
     if (existsSync(REAL_CONFIG_FILE)) return JSON.parse(readFileSync(REAL_CONFIG_FILE, 'utf8')) as RealConfig;
@@ -793,6 +799,18 @@ function saveRealKey(rawKey: string): string {
   }
   const tail = key.replace(/^0x/, '').slice(-4);
   return `••••${tail}`;
+}
+
+/** Сохранить relayer/builder креды в защищённый env-файл (chmod 600). Возвращает маску. */
+function saveBuilderCreds(key: string, secret: string, passphrase: string): string {
+  const body = `BUILDER_KEY=${key.trim()}\nBUILDER_SECRET=${secret.trim()}\nBUILDER_PASSPHRASE=${passphrase.trim()}\n`;
+  writeFileSync(REAL_BUILDER_ENV_FILE, body, { mode: 0o600 });
+  try {
+    chmodSync(REAL_BUILDER_ENV_FILE, 0o600);
+  } catch {
+    /* best-effort */
+  }
+  return `••••${key.trim().slice(-4)}`;
 }
 
 function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): string {
@@ -861,7 +879,13 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     `<label style="display:block;margin-bottom:8px">Адрес funder / proxy (публичный, 0x…):<br>` +
     `<input type="text" name="funder" value="${esc(cfg.funderAddress ?? '')}" placeholder="0x… (ровно 0x + 40 hex)" style="${fieldStyle}"></label>` +
     `<div style="margin:6px 0 14px">Статус адреса: ${funderStatus}</div>` +
-    `<p class="pd-foot">🔒 Ключ передаётся по HTTPS, кладётся в файл с правами 600, в логи/в git не попадает и обратно не отображается. Это твой ключ на твоём сервере — для надёжности используй отдельный кошелёк с малым балансом.</p>` +
+    `<hr style="border:none;border-top:1px solid #1e2530;margin:16px 0">` +
+    `<p class="pd-foot" style="margin-bottom:10px">Relayer/builder API-креды Polymarket (из раздела «API-ключи релеера» в профиле Polymarket). Нужны движку для боевого режима. Оставь все три пустыми, чтобы не менять.</p>` +
+    `<label style="display:block;margin-bottom:8px">BUILDER_KEY:<br><input type="password" name="builder_key" value="" placeholder="${cfg.builderMask ? 'оставь пустым, чтобы не менять' : 'API key релеера'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
+    `<label style="display:block;margin-bottom:8px">BUILDER_SECRET:<br><input type="password" name="builder_secret" value="" placeholder="${cfg.builderMask ? 'оставь пустым' : 'API secret'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
+    `<label style="display:block;margin-bottom:8px">BUILDER_PASSPHRASE:<br><input type="password" name="builder_passphrase" value="" placeholder="${cfg.builderMask ? 'оставь пустым' : 'API passphrase'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
+    `<div style="margin:6px 0 14px">Статус relayer-кредов: ${cfg.builderMask ? `<span class="pd-pos">✓ сохранены (${esc(cfg.builderMask)})</span>` : '<span class="pd-neg">✗ не сохранены</span>'}</div>` +
+    `<p class="pd-foot">🔒 Ключ и relayer-креды передаются по HTTPS, кладутся в файлы с правами 600, в логи/в git не попадают и обратно не отображаются. Это твои креды на твоём сервере — для надёжности используй отдельный кошелёк с малым балансом.</p>` +
     `</div>` +
     `<div class="pd-card"><button type="submit" class="pd-back" style="font-size:15px;background:#16321f;border:1px solid #2e5a3a;padding:10px 16px;border-radius:8px;cursor:pointer">💾 Сохранить</button>` +
     `<p class="pd-foot" style="margin-top:10px">Сохранение НЕ запускает торговлю — только готовит подключение. Боевой запуск включается отдельно и осознанно.</p>` +
@@ -982,7 +1006,17 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       keyMask = saveRealKey(rawKey);
       keySavedAt = new Date().toISOString();
     }
-    writeRealConfig({ stakes: prev.stakes, funderAddress: funder, keyMask, keySavedAt, updatedAt: null });
+    // Relayer/builder креды: сохраняем только если ВСЕ ТРИ непустые.
+    let builderMask = prev.builderMask ?? null;
+    let builderSavedAt = prev.builderSavedAt ?? null;
+    const bk = typeof b.builder_key === 'string' ? b.builder_key.trim() : '';
+    const bs = typeof b.builder_secret === 'string' ? b.builder_secret.trim() : '';
+    const bp = typeof b.builder_passphrase === 'string' ? b.builder_passphrase.trim() : '';
+    if (bk && bs && bp) {
+      builderMask = saveBuilderCreds(bk, bs, bp);
+      builderSavedAt = new Date().toISOString();
+    }
+    writeRealConfig({ stakes: prev.stakes, funderAddress: funder, keyMask, keySavedAt, builderMask, builderSavedAt, updatedAt: null });
     reply.code(303).header('location', funderBad ? '/predict/real?err=funder' : '/predict/real').send();
   });
 
