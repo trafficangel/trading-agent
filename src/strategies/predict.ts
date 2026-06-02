@@ -613,8 +613,7 @@ const REAL_TRADING_NOTE =
 // БЕЗ приватного ключа (только slug, публичный funder, маска ключа). Сам ключ —
 // в data/predict-real.key (chmod 600, в .gitignore через data/, не отдаётся роутами).
 type RealConfig = {
-  selectedStrategy: string | null; // slug выбранной стратегии
-  stakeUsd: number | null; // фикс. ставка на сделку, USD
+  stakes: Record<string, number>; // фикс. ставка на сделку по каждой стратегии (slug → USD)
   funderAddress: string | null; // публичный адрес funder/proxy (НЕ ключ)
   keyMask: string | null; // «••••1234» — последние 4 символа сохранённого ключа
   keySavedAt: string | null;
@@ -628,7 +627,7 @@ function readRealConfig(): RealConfig {
   } catch {
     /* битый файл — дефолт */
   }
-  return { selectedStrategy: null, stakeUsd: null, funderAddress: null, keyMask: null, keySavedAt: null, updatedAt: null };
+  return { stakes: {}, funderAddress: null, keyMask: null, keySavedAt: null, updatedAt: null };
 }
 function writeRealConfig(cfg: RealConfig): void {
   writeFileSync(REAL_CONFIG_FILE, JSON.stringify({ ...cfg, updatedAt: new Date().toISOString() }, null, 2));
@@ -676,38 +675,35 @@ function saveRealKey(rawKey: string): string {
 function renderRealTrading(cfg: RealConfig, ctrl: RealControl): string {
   const back = `<a class="pd-back" href="/predict">← раздел /predict</a>`;
   const keyReady = !!cfg.keyMask;
-  // Панель запуска/остановки + личная статистика по каждой стратегии.
+  const stakeInputStyle = 'width:80px;padding:7px 9px;background:#0b0e13;border:1px solid #2a313c;border-radius:7px;color:#e6e9ef';
+  // Панель запуска/остановки: по каждой стратегии — СВОЯ фикс. ставка + кнопки + личный PnL.
   const controlRows = STRATEGIES.map((s) => {
     const running = !!ctrl.running[s.slug];
+    const stake = cfg.stakes?.[s.slug];
+    const stakeVal = stake != null ? String(stake) : '';
+    const paper = readStatus(s);
+    const paperLine = paper ? `paper: win ${paper.winRate}%, PnL ${fmtUsd(paper.netPnl)}` : 'paper: нет данных';
     const rst = readRealStatus(s.slug);
     const statLine = rst
-      ? `${rst.rounds} сделок · win ${rst.winRate}% · PnL <b class="${rst.netPnl >= 0 ? 'pd-pos' : 'pd-neg'}">${fmtUsd(rst.netPnl)}</b>`
+      ? `боевой: ${rst.rounds} сделок · win ${rst.winRate}% · PnL <b class="${rst.netPnl >= 0 ? 'pd-pos' : 'pd-neg'}">${fmtUsd(rst.netPnl)}</b>`
       : '<span class="pd-muted-td">боевых сделок ещё нет</span>';
     const curve = rst && rst.equityCurve && rst.equityCurve.length > 1 ? equitySvg(rst.equityCurve) : '';
     const badge = running
-      ? `<span class="pd-fresh pd-fresh-ok"><span class="pd-dot"></span>🟢 запущена</span>`
+      ? `<span class="pd-fresh pd-fresh-ok"><span class="pd-dot"></span>🟢 запущена · ставка $${stakeVal || '?'}</span>`
       : `<span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>⏸ остановлена</span>`;
-    const btn = running
+    const control = running
       ? `<form method="POST" action="/predict/real/stop" style="display:inline"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-back" style="background:#3a1f1f;border:1px solid #5a2e2e;padding:8px 14px;border-radius:8px;cursor:pointer">⏹ Остановить</button></form>`
-      : `<form method="POST" action="/predict/real/start" style="display:inline" onsubmit="return confirm('Запустить РЕАЛЬНУЮ торговлю стратегией ${esc(s.title)}? Пойдут настоящие деньги с твоего кошелька.');"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" ${keyReady ? '' : 'disabled title="Сначала сохрани ключ кошелька"'} class="pd-back" style="background:#16321f;border:1px solid #2e5a3a;padding:8px 14px;border-radius:8px;cursor:${keyReady ? 'pointer' : 'not-allowed'};opacity:${keyReady ? '1' : '0.5'}">▶ Запустить</button></form>`;
+      : `<form method="POST" action="/predict/real/start" style="display:flex;gap:8px;align-items:center" onsubmit="return confirm('Запустить РЕАЛЬНУЮ торговлю «${esc(s.title)}»? Пойдут настоящие деньги с твоего кошелька.');">` +
+        `<input type="hidden" name="slug" value="${esc(s.slug)}">` +
+        `<input type="text" name="stake" value="${esc(stakeVal)}" placeholder="ставка $" title="Фикс. ставка на сделку, USD" style="${stakeInputStyle}">` +
+        `<button type="submit" ${keyReady ? '' : 'disabled title="Сначала сохрани ключ кошелька"'} class="pd-back" style="background:#16321f;border:1px solid #2e5a3a;padding:8px 14px;border-radius:8px;cursor:${keyReady ? 'pointer' : 'not-allowed'};opacity:${keyReady ? '1' : '0.5'}">▶ Запустить</button></form>`;
     return (
       `<div style="padding:12px;border:1px solid #1e2530;border-radius:8px;margin-bottom:10px">` +
       `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">` +
-      `<div><b>${esc(s.title)}</b> ${badge}<br><span style="font-size:13px">${statLine}</span></div>` +
-      `<div>${btn}</div></div>` +
+      `<div><b>${esc(s.title)}</b> ${badge}<br><span class="pd-muted-td" style="font-size:12px">${esc(paperLine)}</span> · <span style="font-size:13px">${statLine}</span></div>` +
+      `<div>${control}</div></div>` +
       (curve ? `<div style="margin-top:10px">${curve}</div>` : '') +
       `</div>`
-    );
-  }).join('');
-  const stratOptions = STRATEGIES.map((s) => {
-    const st = readStatus(s);
-    const stat = st ? `paper: ${st.rounds} р., win ${st.winRate}%, PnL ${fmtUsd(st.netPnl)}` : 'нет данных';
-    const checked = cfg.selectedStrategy === s.slug ? 'checked' : '';
-    return (
-      `<label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid #1e2530;border-radius:8px;margin-bottom:8px;cursor:pointer">` +
-      `<input type="radio" name="strategy" value="${esc(s.slug)}" ${checked} style="margin-top:3px">` +
-      `<span><b>${esc(s.title)}</b> <span class="pd-muted-td" style="font-size:13px">— ${esc(s.tagline)}</span><br>` +
-      `<span class="pd-muted-td" style="font-size:12px">${esc(stat)}</span></span></label>`
     );
   }).join('');
   const fieldStyle = 'margin-top:4px;width:360px;max-width:100%;padding:8px 10px;background:#0b0e13;border:1px solid #2a313c;border-radius:7px;color:#e6e9ef';
@@ -724,13 +720,7 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl): string {
     `<p class="pd-sub">⚠️ Реальная торговля <b>пока не запущена</b> — сохранение тут только готовит подключение. Риск ограничивай <b>суммой на кошельке</b>: заведи отдельный кошелёк и держи на нём только то, что готов потерять. Эджа пока нет — на старте вероятен минус.</p>` +
     `</div>` +
     `<form method="POST" action="/predict/real/save" autocomplete="off">` +
-    `<div class="pd-card"><h2>1. Выбор стратегии</h2>${stratOptions}</div>` +
-    `<div class="pd-card"><h2>2. Фикс. ставка</h2>` +
-    `<label style="display:block">Размер ставки на сделку, USD (как в симуляции — фиксированная сумма):<br>` +
-    `<input type="text" name="stake" value="${cfg.stakeUsd != null ? String(cfg.stakeUsd) : ''}" placeholder="напр. 1" style="${fieldStyle}"></label>` +
-    `<p class="pd-foot">Это сумма каждой ставки. Общий риск ограничивай балансом кошелька.</p>` +
-    `</div>` +
-    `<div class="pd-card"><h2>3. Подключение кошелька</h2>` +
+    `<div class="pd-card"><h2>Подключение кошелька</h2>` +
     `<label style="display:block;margin-bottom:12px">Приватный ключ кошелька (хранится на сервере в защищённом файле, обратно не показывается):<br>` +
     `<input type="password" name="privkey" value="" placeholder="${cfg.keyMask ? 'оставь пустым, чтобы не менять' : '0x… приватный ключ'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
     `<div style="margin:6px 0 14px">Статус ключа: ${keyStatus}</div>` +
@@ -743,7 +733,7 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl): string {
     `<p class="pd-foot">Обновлено: ${esc(updated)}</p></div>` +
     `</form>` +
     `<div class="pd-card"><h2>Запуск и личная статистика</h2>` +
-    `<p class="pd-sub">Запуск/остановка боевой торговли по каждой стратегии и её личный PnL. Кнопка запуска активна только когда сохранён ключ кошелька.</p>` +
+    `<p class="pd-sub">По каждой стратегии задай <b>свою фикс. ставку</b> и запусти. Кнопка запуска активна только когда сохранён ключ кошелька. Здесь же — личный боевой PnL каждой стратегии.</p>` +
     controlRows +
     `<p class="pd-foot">⚙️ Кнопка ставит «запущена/остановлена»; реальное исполнение поднимает супервайзер на сервере. Боевые сделки идут на твои деньги — эджа пока нет, вероятен минус.</p>` +
     `</div>` +
@@ -797,9 +787,16 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       reply.code(403);
       return { ok: false, error: 'forbidden' };
     }
-    const slug = String((req.body as { slug?: string } | undefined)?.slug ?? '');
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const slug = String(b.slug ?? '');
     const cfg = readRealConfig();
     if (STRATEGIES.some((s) => s.slug === slug) && cfg.keyMask) {
+      // Сохраняем фикс. ставку этой стратегии (если задана), затем запускаем.
+      const stakeN = Number(b.stake);
+      if (Number.isFinite(stakeN) && stakeN > 0) {
+        cfg.stakes = { ...cfg.stakes, [slug]: Math.round(stakeN * 100) / 100 };
+        writeRealConfig(cfg);
+      }
       const c = readRealControl();
       c.running[slug] = { since: new Date().toISOString() };
       writeRealControl(c);
@@ -827,10 +824,6 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       return { ok: false, error: 'forbidden' };
     }
     const b = (req.body ?? {}) as Record<string, unknown>;
-    const slugs = new Set(STRATEGIES.map((s) => s.slug));
-    const strat = typeof b.strategy === 'string' && slugs.has(b.strategy) ? b.strategy : null;
-    const stakeN = Number(b.stake);
-    const stakeUsd = Number.isFinite(stakeN) && stakeN > 0 ? Math.round(stakeN * 100) / 100 : null;
     const funderRaw = typeof b.funder === 'string' ? b.funder.trim() : '';
     const funder = /^0x[a-fA-F0-9]{40}$/.test(funderRaw) ? funderRaw : funderRaw === '' ? null : funderRaw.slice(0, 64);
     const prev = readRealConfig();
@@ -843,7 +836,7 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       keyMask = saveRealKey(rawKey);
       keySavedAt = new Date().toISOString();
     }
-    writeRealConfig({ selectedStrategy: strat, stakeUsd, funderAddress: funder, keyMask, keySavedAt, updatedAt: null });
+    writeRealConfig({ stakes: prev.stakes, funderAddress: funder, keyMask, keySavedAt, updatedAt: null });
     reply.code(303).header('location', '/predict/real').send();
   });
 
