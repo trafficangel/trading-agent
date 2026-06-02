@@ -149,7 +149,8 @@ const STRATEGIES: StrategyDef[] = [
       'Принципиально иной подход: не угадываем направление, а ПРЕДОСТАВЛЯЕМ ликвидность. Вместо покупки по рынку (где мы платим спред) ставим резящие лимит-заявки на обе стороны (UP и DOWN) чуть ниже их середины — то есть покупаем дешевле и сами зарабатываем спред, когда наши заявки выкупают.',
       'Если рынок колеблется и наливаются ОБЕ ноги — мы держим обе до конца: их суммарная цена входа меньше $1, значит прибыль заперта независимо от исхода. Если рынок трендит и налилась только одна нога — перед закрытием выходим из неё (флэт), чтобы не нести направленный риск.',
       'Главный доход мейкера на 15-минутных crypto-рынках — мейкер-ребейты (часть taker-комиссии ~1.56%, которую платят те, кто выкупает наши заявки) плюс награды за ликвидность. Поэтому стратегия работает на 15m. Честно: в режиме симуляции видна только торговая часть (спред против неблагоприятного отбора) — сами ребейты начисляются Polymarket вне стакана и в paper не отражаются. Их измеряем отдельно. Это самый перспективный из наших подходов к стабильному доходу, но подтвердить его можно только реальной проверкой.',
-      'Как читать таблицу раундов: «🔒 обе стороны» — за раунд выкупили ОБЕ наши заявки (UP и DOWN), позиция сбалансирована и прибыль заперта; «1 сторона: UP/DOWN» — выкупили только одну из двух заявок (вторую цена не достала), её итог в колонке PnL. Счётчик «обе стороны / одна» вверху показывает, как часто получается замок.',
+      'Откуда именно берётся PnL (по таблице). Колонка «Что» показывает, чем кончился раунд, а «Куплено / продано» — как сложилась прибыль: 🔒 Замок — выкупили ОБЕ заявки, например UP @0.06 + DOWN @0.90 = 0.96; платим $0.96 за пару, на закрытии победившая нога гасится в $1.00 → разница $0.04 на акцию заперта независимо от исхода (≈ +$0.80 на 20 акций). ✂️ Срез — налилась одна нога (например DOWN @0.95), но до закрытия наш же бид по ней подрос, и мы продали дороже (@0.99) → прибыль $0.04 на акцию со спреда, направленный риск не несём. 📥 Одна нога (до конца) — налилась одна заявка и доведена до резолюции; тут исход уже зависит от направления (может быть и минус). PnL каждого раунда — в своей колонке.',
+      'Важно про масштаб и честность. Прибыль с торговой части крошечная (центы со спреда на сделку) и копится медленно — на 15m рынках сделок мало. Это НОРМАЛЬНО: основной доход мейкера — ребейты и награды за ликвидность, которых в симуляции НЕТ (они начисляются вне стакана). Поэтому здесь мы лишь проверяем, что торговая часть не уходит в минус (её и должны перекрыть ребейты на реале). Плюс на этой странице — это ещё не доказанная доходность.',
     ],
   },
 ];
@@ -166,6 +167,12 @@ type RecentRound = {
   pnl: number;
   win: boolean;
   bothLegs?: boolean; // dual-leg-trap: захлопнулась ли ловушка (обе ноги)
+  // Маркет-мейкинг (mm): факты по ногам — чтобы таблица показывала, что куплено
+  // и как сформировался PnL (замок обеих ног / срез одной), а не одну ногу как «сторону».
+  mmKind?: 'lock' | 'flatten' | null; // 'lock'=обе ноги, 'flatten'=одна нога срезана; null=одна нога до резолюции
+  legUp?: { p: number; n: number } | null; // нога UP: цена входа p, объём n
+  legDown?: { p: number; n: number } | null; // нога DOWN
+  sell?: { side: 'UP' | 'DOWN'; price: number } | null; // цена среза (флэт)
   _strategy?: string; // подпись стратегии (для общего списка)
   _live?: boolean; // открытая (текущая) сделка — исход ещё не известен
   _secLeft?: number; // секунд до закрытия (для лайв-строки)
@@ -321,15 +328,49 @@ function recentRoundsTable(
   if (rounds.length === 0) return '';
   // Ловушка (dual-leg): «сторона» бессмысленна (две ноги). Показываем,
   // захлопнулась ли ловушка (обе ноги) или осталась однобокой.
+  // Тип раунда мейкера: 'lock'=обе ноги (прибыль заперта), 'flatten'=одна нога
+  // срезана перед закрытием, 'hold'=одна нога доведена до резолюции.
+  const mmKindOf = (r: RecentRound): 'lock' | 'flatten' | 'hold' => {
+    if (r.mmKind === 'lock' || r.bothLegs) return 'lock';
+    if (r.mmKind === 'flatten' || r.sell) return 'flatten';
+    return 'hold';
+  };
+  // Колонка «Что произошло» (мейкер) / «Сторона» (обычные стратегии).
   const sideCell = (r: RecentRound): string => {
     if (opts.isTrap || r._isTrap) {
-      // Двусторонний мейкинг: выкупили обе наши заявки (замок) или только одну.
-      if (r.bothLegs) return `<td class="pd-pos">🔒 обе стороны</td>`;
-      const sc = r.side === 'UP' ? 'pd-up' : r.side === 'DOWN' ? 'pd-down' : '';
-      return `<td class="${sc}">1 сторона: ${esc(r.side ?? '—')}</td>`;
+      const k = mmKindOf(r);
+      if (k === 'lock') return `<td class="pd-pos">🔒 Замок (обе ноги)</td>`;
+      if (k === 'flatten') return `<td style="color:#e5b461">✂️ Срез (одна нога)</td>`;
+      return `<td class="pd-muted-td">📥 Одна нога (до конца)</td>`;
     }
     const sc = r.side === 'UP' ? 'pd-up' : r.side === 'DOWN' ? 'pd-down' : '';
     return `<td class="${sc}">${esc(r.side ?? '—')}</td>`;
+  };
+  // Колонка «Куплено / продано» (мейкер): обе ноги с ценами + как сформировался PnL.
+  const fmtP = (p: number): string => p.toFixed(2);
+  const boughtCell = (r: RecentRound): string => {
+    const k = mmKindOf(r);
+    if (k === 'lock' && r.legUp && r.legDown) {
+      const sum = r.legUp.p + r.legDown.p;
+      const lockSpan = (1 - sum) * Math.min(r.legUp.n, r.legDown.n);
+      return (
+        `<td class="pd-muted-td"><span class="pd-up">UP</span> @${fmtP(r.legUp.p)} + <span class="pd-down">DOWN</span> @${fmtP(r.legDown.p)} ` +
+        `= <b style="color:#cfd6e0">${fmtP(sum)}</b> &lt; 1.00 → заперто ${fmtUsd(lockSpan)}</td>`
+      );
+    }
+    if (k === 'flatten') {
+      const leg = r.legUp ?? r.legDown;
+      const legSide = r.legUp ? 'UP' : 'DOWN';
+      const sc = legSide === 'UP' ? 'pd-up' : 'pd-down';
+      const buyTxt = leg ? `@${fmtP(leg.p)}` : '';
+      const sellTxt = r.sell ? ` → продано @${fmtP(r.sell.price)}` : '';
+      return `<td class="pd-muted-td"><span class="${sc}">${legSide}</span> ${buyTxt}${sellTxt} (спред)</td>`;
+    }
+    // hold: одна нога доведена до резолюции
+    const leg = r.legUp ?? r.legDown;
+    const legSide = r.legUp ? 'UP' : 'DOWN';
+    const sc = legSide === 'UP' ? 'pd-up' : 'pd-down';
+    return `<td class="pd-muted-td"><span class="${sc}">${legSide}</span> ${leg ? '@' + fmtP(leg.p) : ''} (до резолюции)</td>`;
   };
   const title = opts.title ?? 'Последние раунды';
   const showStrategy = opts.showStrategy ?? false;
@@ -339,13 +380,15 @@ function recentRoundsTable(
   const hasCoef = showMetric && !opts.isTrap && rounds.some((r) => r.coef != null); // у MM/ловушки коэф одной ноги бессмыслен
   const hasEntry = showMetric && rounds.some((r) => r.entrySecLeft != null);
   const right = 'style="text-align:right"';
+  // Для мейкера (две ноги) колонки «Сторона/Ставка» бессмысленны — показываем
+  // «Что произошло» (замок/срез/одна нога) и «Куплено / продано» (обе ноги + цены).
   const head =
     `<tr>` +
     (showStrategy ? `<th>Стратегия</th>` : '') +
-    `<th>Сторона</th><th ${right}>Ставка</th>` +
+    (opts.isTrap ? `<th>Что</th><th>Куплено / продано</th>` : `<th>Сторона</th><th ${right}>Ставка</th>`) +
     (hasEdge ? `<th ${right}>Оценка</th>` : '') +
     (hasCoef ? `<th ${right}>Коэф.</th>` : '') +
-    (hasEntry ? `<th ${right}>До закрытия</th>` : '') +
+    (hasEntry ? `<th ${right}>Вход</th>` : '') +
     `<th>Исход</th><th ${right}>PnL</th><th ${right}>Когда</th></tr>`;
   const rows = rounds
     .map((r) => {
@@ -362,7 +405,9 @@ function recentRoundsTable(
           `<tr class="pd-liverow">` +
           stratCell +
           sideCell(r) +
-          `<td ${right}>${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>` +
+          (opts.isTrap
+            ? `<td class="pd-muted-td">котировки выставлены</td>`
+            : `<td ${right}>${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>`) +
           edgeCells +
           coefCell +
           (hasEntry ? `<td class="pd-muted-td" ${right}>—</td>` : '') +
@@ -377,7 +422,7 @@ function recentRoundsTable(
         `<tr>` +
         stratCell +
         sideCell(r) +
-        `<td ${right}>${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>` +
+        (opts.isTrap ? boughtCell(r) : `<td ${right}>${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>`) +
         edgeCells +
         coefCell +
         entryCell +
@@ -606,7 +651,7 @@ function renderStrategy(s: StrategyDef, page = 1): string {
   // Для мейкинга — счётчик «обе стороны / одна сторона» (ключ к пониманию статистики).
   const trapCard =
     s.isTrap && st.trapClosed != null
-      ? statCard('Обе стороны / одна', `${st.trapClosed} / ${st.oneLegged ?? 0}`, 'muted')
+      ? statCard('Замков / одна нога', `${st.trapClosed} / ${st.oneLegged ?? 0}`, 'muted')
       : '';
 
   return (
@@ -625,8 +670,9 @@ function renderStrategy(s: StrategyDef, page = 1): string {
     statCard('Режим', st.mode === 'paper' ? 'Paper' : esc(st.mode), 'muted') +
     `</div>` +
     `<div class="pd-card"><h2>Кривая накопленного PnL</h2>${equitySvg(st.equityCurve)}` +
-    `<div class="pd-foot">Выигрышей: ${st.wins} · Проигрышей: ${st.losses} · ` +
-    `Исходы рынка ↑${st.marketOutcomes.up}/↓${st.marketOutcomes.down}</div></div>` +
+    `<div class="pd-foot">Выигрышей: ${st.wins} · Проигрышей: ${st.losses}` +
+    (s.isTrap && st.trapClosed != null ? ` · 🔒 замков: ${st.trapClosed} · одна нога: ${st.oneLegged ?? 0}` : '') +
+    ` · Исходы рынка ↑${st.marketOutcomes.up}/↓${st.marketOutcomes.down}</div></div>` +
     roundsTable +
     PAPER_NOTE +
     `<p class="pd-foot">Обновлено: ${esc(updated)} UTC</p>` +
