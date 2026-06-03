@@ -250,6 +250,9 @@ type PredictStatus = {
   profitFactor: number | null;
   maxDrawdown: number;
   avgStake?: number | null;
+  maxLossStreak?: number; // макс. серия проигрышей подряд (риск для прогрессий)
+  maxWinStreak?: number; // макс. серия выигрышей подряд
+  avgCoef?: number | null; // средний коэффициент входа (1/цена)
   trapClosed?: number; // dual-leg-trap: раундов с захлопнутой ловушкой
   oneLegged?: number; // dual-leg-trap: раундов с одной ногой
   marketOutcomes: { up: number; down: number };
@@ -590,6 +593,8 @@ function strategyCard(s: StrategyDef, st: PredictStatus | null): string {
       `<div><b>${st.rounds}</b>раундов</div>` +
       `<div><b>${st.winRate}%</b>win rate</div>` +
       `<div><b style="color:${st.netPnl >= 0 ? '#4ad991' : '#e5616c'}">${fmtUsd(st.netPnl)}</b>net PnL</div>` +
+      (st.maxLossStreak != null ? `<div><b>${st.maxLossStreak}</b>серия −</div>` : '') +
+      (st.avgCoef != null ? `<div><b>${st.avgCoef.toFixed(2)}</b>ср. коэф.</div>` : '') +
       `</div>`
     : `<div class="row"><div style="color:#6b7484">данных пока нет</div></div>`;
   const retiredBadge = s.retired ? `<span class="pd-retired">остановлена</span>` : '';
@@ -689,8 +694,12 @@ function renderStrategy(s: StrategyDef, page = 1): string {
   const pf = st.profitFactor === null ? '—' : st.profitFactor.toFixed(2);
   const updated = new Date(st.updatedAt).toLocaleString('ru-RU', { timeZone: 'UTC' });
   const netAccent = st.netPnl > 0 ? 'pos' : st.netPnl < 0 ? 'neg' : 'muted';
-  const avgStakeCard =
-    st.avgStake != null ? statCard('Ср. ставка', `$${st.avgStake.toFixed(2)}`, 'muted') : statCard('Max drawdown', `$${st.maxDrawdown.toFixed(2)}`, 'muted');
+  // Ключевые метрики для money-management: просадка, серии подряд, средний коэф.
+  const ddCard = statCard('Max drawdown', `$${st.maxDrawdown.toFixed(2)}`, 'muted');
+  const lossStreakCard = st.maxLossStreak != null ? statCard('Макс. серия −', String(st.maxLossStreak), 'muted') : '';
+  const winStreakCard = st.maxWinStreak != null ? statCard('Макс. серия +', String(st.maxWinStreak), 'muted') : '';
+  const coefCard = st.avgCoef != null ? statCard('Ср. коэф.', st.avgCoef.toFixed(2), 'muted') : '';
+  const stakeCard = st.avgStake != null ? statCard('Ср. ставка', `$${st.avgStake.toFixed(2)}`, 'muted') : '';
 
   // Пагинация таблицы раундов: 20 на страницу, новые первыми.
   const PAGE_SIZE = 20;
@@ -722,7 +731,11 @@ function renderStrategy(s: StrategyDef, page = 1): string {
     statCard('Win rate', `${st.winRate}%`) +
     statCard('Profit factor', pf) +
     statCard('Net PnL', fmtUsd(st.netPnl), netAccent) +
-    avgStakeCard +
+    ddCard +
+    lossStreakCard +
+    winStreakCard +
+    coefCard +
+    stakeCard +
     trapCard +
     statCard('Режим', st.mode === 'paper' ? 'Paper' : esc(st.mode), 'muted') +
     `</div>` +
