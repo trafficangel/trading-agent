@@ -925,48 +925,7 @@ function saveBuilderCreds(key: string, secret: string, passphrase: string): stri
 
 function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): string {
   const back = `<a class="pd-back" href="/predict">← раздел /predict</a>`;
-  const keyReady = !!cfg.keyMask;
-  const funderOk = !!cfg.funderAddress && /^0x[a-fA-F0-9]{40}$/.test(cfg.funderAddress);
-  const funderStatus = cfg.funderAddress
-    ? funderOk
-      ? '<span class="pd-pos">✓ адрес корректен</span>'
-      : '<span class="pd-neg">✗ адрес НЕвалиден — нужен формат 0x + 40 hex-символов (без лишних суффиксов)</span>'
-    : '<span class="pd-muted-td">не задан</span>';
-  const errBanner =
-    err === 'funder'
-      ? `<div class="pd-card" style="border-color:#5a2e2e;background:rgba(229,97,108,0.08)"><b class="pd-neg">Адрес funder не сохранён:</b> введён неверный формат. Нужен ровно <code>0x</code> + 40 hex-символов (например 0xb985…36b), без дефисов, пробелов и суффиксов. Скопируй адрес со страницы пополнения USDC в Polymarket.</div>`
-      : '';
-  const stakeInputStyle = 'width:80px;padding:7px 9px;background:#0b0e13;border:1px solid #2a313c;border-radius:7px;color:#e6e9ef';
-  // Панель запуска/остановки: по каждой стратегии — СВОЯ фикс. ставка + кнопки + личный PnL.
-  const controlRows = STRATEGIES.map((s) => {
-    const running = !!ctrl.running[s.slug];
-    const stake = cfg.stakes?.[s.slug];
-    const stakeVal = stake != null ? String(stake) : '';
-    const paper = readStatus(s);
-    const paperLine = paper ? `paper: win ${paper.winRate}%, PnL ${fmtUsd(paper.netPnl)}` : 'paper: нет данных';
-    const rst = readRealStatus(s.slug);
-    const statLine = rst
-      ? `боевой: ${rst.rounds} сделок · win ${rst.winRate}% · PnL <b class="${rst.netPnl >= 0 ? 'pd-pos' : 'pd-neg'}">${fmtUsd(rst.netPnl)}</b>`
-      : '<span class="pd-muted-td">боевых сделок ещё нет</span>';
-    const curve = rst && rst.equityCurve && rst.equityCurve.length > 1 ? equitySvg(rst.equityCurve) : '';
-    const badge = running
-      ? `<span class="pd-fresh pd-fresh-ok"><span class="pd-dot"></span>🟢 запущена · ставка $${stakeVal || '?'}</span>`
-      : `<span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>⏸ остановлена</span>`;
-    const control = running
-      ? `<form method="POST" action="/predict/real/stop" style="display:inline"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-back" style="background:#3a1f1f;border:1px solid #5a2e2e;padding:8px 14px;border-radius:8px;cursor:pointer">⏹ Остановить</button></form>`
-      : `<form method="POST" action="/predict/real/start" style="display:flex;gap:8px;align-items:center" onsubmit="return confirm('Запустить РЕАЛЬНУЮ торговлю «${esc(s.title)}»? Пойдут настоящие деньги с твоего кошелька.');">` +
-        `<input type="hidden" name="slug" value="${esc(s.slug)}">` +
-        `<input type="text" name="stake" value="${esc(stakeVal)}" placeholder="ставка $" title="Фикс. ставка на сделку, USD" style="${stakeInputStyle}">` +
-        `<button type="submit" ${keyReady && funderOk ? '' : `disabled title="${keyReady ? 'Сначала введи корректный funder-адрес' : 'Сначала сохрани ключ кошелька'}"`} class="pd-back" style="background:#16321f;border:1px solid #2e5a3a;padding:8px 14px;border-radius:8px;cursor:${keyReady && funderOk ? 'pointer' : 'not-allowed'};opacity:${keyReady && funderOk ? '1' : '0.5'}">▶ Запустить</button></form>`;
-    return (
-      `<div style="padding:12px;border:1px solid #1e2530;border-radius:8px;margin-bottom:10px">` +
-      `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">` +
-      `<div><b>${esc(s.title)}</b> ${badge}<br><span class="pd-muted-td" style="font-size:12px">${esc(paperLine)}</span> · <span style="font-size:13px">${statLine}</span></div>` +
-      `<div>${control}</div></div>` +
-      (curve ? `<div style="margin-top:10px">${curve}</div>` : '') +
-      `</div>`
-    );
-  }).join('');
+  void ctrl; void err; // форма временно упрощена до одного поля (EOA, Путь A)
   const fieldStyle = 'margin-top:4px;width:360px;max-width:100%;padding:8px 10px;background:#0b0e13;border:1px solid #2a313c;border-radius:7px;color:#e6e9ef';
   const keyStatus = cfg.keyMask
     ? `<span class="pd-pos">✓ ключ сохранён (${esc(cfg.keyMask)})</span>`
@@ -978,34 +937,18 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     `<div class="pd-head"><h1>Реальная торговля</h1>` +
     `<span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>⏸ не активна</span></div>` +
     `<div class="pd-card" style="border-color:#3a2e2e">` +
-    `<p class="pd-sub">⚠️ Реальная торговля <b>пока не запущена</b> — сохранение тут только готовит подключение. Риск ограничивай <b>суммой на кошельке</b>: заведи отдельный кошелёк и держи на нём только то, что готов потерять. Преимущества пока нет — на старте вероятен минус.</p>` +
+    `<p class="pd-sub">⚠️ Сохранение тут только передаёт ключ на сервер — торговля НЕ запускается. Используй отдельный кошелёк, держи на нём только то, что готов потерять.</p>` +
     `</div>` +
-    errBanner +
     `<form method="POST" action="/predict/real/save" autocomplete="off">` +
     `<div class="pd-card"><h2>Подключение кошелька</h2>` +
     `<label style="display:block;margin-bottom:12px">Приватный ключ кошелька (хранится на сервере в защищённом файле, обратно не показывается):<br>` +
     `<input type="password" name="privkey" value="" placeholder="${cfg.keyMask ? 'оставь пустым, чтобы не менять' : '0x… приватный ключ'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
     `<div style="margin:6px 0 14px">Статус ключа: ${keyStatus}</div>` +
-    `<label style="display:block;margin-bottom:8px">Адрес funder / proxy (публичный, 0x…):<br>` +
-    `<input type="text" name="funder" value="${esc(cfg.funderAddress ?? '')}" placeholder="0x… (ровно 0x + 40 hex)" style="${fieldStyle}"></label>` +
-    `<div style="margin:6px 0 14px">Статус адреса: ${funderStatus}</div>` +
-    `<hr style="border:none;border-top:1px solid #1e2530;margin:16px 0">` +
-    `<p class="pd-foot" style="margin-bottom:10px">Relayer/builder API-креды Polymarket (из раздела «API-ключи релеера» в профиле Polymarket). Нужны движку для боевого режима. Оставь все три пустыми, чтобы не менять.</p>` +
-    `<label style="display:block;margin-bottom:8px">BUILDER_KEY:<br><input type="password" name="builder_key" value="" placeholder="${cfg.builderMask ? 'оставь пустым, чтобы не менять' : 'API key релеера'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
-    `<label style="display:block;margin-bottom:8px">BUILDER_SECRET:<br><input type="password" name="builder_secret" value="" placeholder="${cfg.builderMask ? 'оставь пустым' : 'API secret'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
-    `<label style="display:block;margin-bottom:8px">BUILDER_PASSPHRASE:<br><input type="password" name="builder_passphrase" value="" placeholder="${cfg.builderMask ? 'оставь пустым' : 'API passphrase'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
-    `<div style="margin:6px 0 14px">Статус relayer-кредов: ${cfg.builderMask ? `<span class="pd-pos">✓ сохранены (${esc(cfg.builderMask)})</span>` : '<span class="pd-neg">✗ не сохранены</span>'}</div>` +
-    `<p class="pd-foot">🔒 Ключ и relayer-креды передаются по HTTPS, кладутся в файлы с правами 600, в логи/в git не попадают и обратно не отображаются. Это твои креды на твоём сервере — для надёжности используй отдельный кошелёк с малым балансом.</p>` +
+    `<p class="pd-foot">🔒 Ключ передаётся по HTTPS, кладётся в файл с правами 600, в логи/в git не попадает и обратно не показывается.</p>` +
     `</div>` +
-    `<div class="pd-card"><button type="submit" class="pd-back" style="font-size:15px;background:#16321f;border:1px solid #2e5a3a;padding:10px 16px;border-radius:8px;cursor:pointer">💾 Сохранить</button>` +
-    `<p class="pd-foot" style="margin-top:10px">Сохранение НЕ запускает торговлю — только готовит подключение. Боевой запуск включается отдельно и осознанно.</p>` +
-    `<p class="pd-foot">Обновлено: ${esc(updated)}</p></div>` +
+    `<div class="pd-card"><button type="submit" class="pd-back" style="font-size:15px;background:#16321f;border:1px solid #2e5a3a;padding:10px 16px;border-radius:8px;cursor:pointer">💾 Сохранить ключ</button>` +
+    `<p class="pd-foot" style="margin-top:10px">Обновлено: ${esc(updated)}</p></div>` +
     `</form>` +
-    `<div class="pd-card"><h2>Запуск и личная статистика</h2>` +
-    `<p class="pd-sub">По каждой стратегии задай <b>свою фикс. ставку</b> и запусти. Кнопка запуска активна только когда сохранён ключ кошелька. Здесь же — личный боевой PnL каждой стратегии.</p>` +
-    controlRows +
-    `<p class="pd-foot">⚙️ Кнопка ставит «запущена/остановлена»; реальное исполнение поднимает супервайзер на сервере. Боевые сделки идут на твои деньги — преимущества пока нет, вероятен минус.</p>` +
-    `</div>` +
     `</div>`
   );
 }
