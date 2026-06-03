@@ -657,7 +657,7 @@ function renderOverview(): string {
 type HealthReport = {
   updatedAt: string;
   strategies: {
-    slug: string; title: string; rounds: number;
+    slug: string; title: string; rounds: number; evaluated?: number;
     winRate?: number; breakeven?: number | null; edge?: number | null; avgCoef?: number | null;
     maxLossStreak?: number; netPnl?: number; maxDrawdown?: number;
     calib?: { predicted: number; actual: number; gap: number } | null;
@@ -684,7 +684,11 @@ function renderReport(): string {
     e == null ? '<td class="pd-muted-td" style="text-align:right">—</td>' : `<td ${right} class="${e >= 2 ? 'pd-pos' : e <= -2 ? 'pd-neg' : 'pd-muted-td'}">${e >= 0 ? '+' : ''}${e}пп</td>`;
   const rows = r.strategies
     .map((s) => {
-      if (!s.rounds) return `<tr><td>${esc(s.title)}</td><td class="pd-muted-td" colspan="8">нет данных</td></tr>`;
+      if (!s.rounds) {
+        const v = s.verdict ?? 'нет данных';
+        const cls = v.includes('НЕ ВХОДИТ') ? 'pd-neg' : '';
+        return `<tr><td>${esc(s.title)}</td><td style="text-align:right" class="pd-muted-td">0</td><td class="${cls}" colspan="8" style="font-size:12.5px">${esc(v)}${s.flag ? ` · ${esc(s.flag)}` : ''}</td></tr>`;
+      }
       const calib = s.calib ? `${s.calib.predicted}%→${s.calib.actual}%${s.calib.gap > 10 ? ' ⚠️' : ''}` : '—';
       const vClass = (s.verdict ?? '').includes('✅') ? 'pd-pos' : (s.verdict ?? '').includes('⚠️') ? 'pd-neg' : '';
       return (
