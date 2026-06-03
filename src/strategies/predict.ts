@@ -911,9 +911,10 @@ function saveRealKey(rawKey: string): string {
   return `••••${tail}`;
 }
 
-/** Сохранить relayer/builder креды в защищённый env-файл (chmod 600). Возвращает маску. */
+/** Сохранить торговый API-ключ аккаунта (раздел «Разработчики» Polymarket) в
+ * защищённый env-файл (chmod 600). Пишем POLY_API_* — движок берёт их как L2-креды. */
 function saveBuilderCreds(key: string, secret: string, passphrase: string): string {
-  const body = `BUILDER_KEY=${key.trim()}\nBUILDER_SECRET=${secret.trim()}\nBUILDER_PASSPHRASE=${passphrase.trim()}\n`;
+  const body = `POLY_API_KEY=${key.trim()}\nPOLY_API_SECRET=${secret.trim()}\nPOLY_API_PASSPHRASE=${passphrase.trim()}\n`;
   writeFileSync(REAL_BUILDER_ENV_FILE, body, { mode: 0o600 });
   try {
     chmodSync(REAL_BUILDER_ENV_FILE, 0o600);
@@ -946,7 +947,14 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     `<div style="margin:6px 0 14px">Статус ключа: ${keyStatus}</div>` +
     `<p class="pd-foot">🔒 Ключ передаётся по HTTPS, кладётся в файл с правами 600, в логи/в git не попадает и обратно не показывается.</p>` +
     `</div>` +
-    `<div class="pd-card"><button type="submit" class="pd-back" style="font-size:15px;background:#16321f;border:1px solid #2e5a3a;padding:10px 16px;border-radius:8px;cursor:pointer">💾 Сохранить ключ</button>` +
+    `<div class="pd-card"><h2>Торговый API-ключ (Polymarket → «Разработчики»)</h2>` +
+    `<p class="pd-foot" style="margin-bottom:10px">Сгенерируй ключ в профиле Polymarket, раздел <b>«Разработчики»</b>, и вставь сюда key / secret / passphrase. Оставь все три пустыми, чтобы не менять.</p>` +
+    `<label style="display:block;margin-bottom:8px">API key:<br><input type="password" name="builder_key" value="" placeholder="${cfg.builderMask ? 'оставь пустым, чтобы не менять' : 'API key'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
+    `<label style="display:block;margin-bottom:8px">API secret:<br><input type="password" name="builder_secret" value="" placeholder="${cfg.builderMask ? 'оставь пустым' : 'API secret'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
+    `<label style="display:block;margin-bottom:8px">API passphrase:<br><input type="password" name="builder_passphrase" value="" placeholder="${cfg.builderMask ? 'оставь пустым' : 'API passphrase'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
+    `<div style="margin:6px 0 4px">Статус API-ключа: ${cfg.builderMask ? `<span class="pd-pos">✓ сохранён (${esc(cfg.builderMask)})</span>` : '<span class="pd-neg">✗ не сохранён</span>'}</div>` +
+    `</div>` +
+    `<div class="pd-card"><button type="submit" class="pd-back" style="font-size:15px;background:#16321f;border:1px solid #2e5a3a;padding:10px 16px;border-radius:8px;cursor:pointer">💾 Сохранить</button>` +
     `<p class="pd-foot" style="margin-top:10px">Обновлено: ${esc(updated)}</p></div>` +
     `</form>` +
     `</div>`
