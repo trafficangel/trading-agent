@@ -647,9 +647,73 @@ function renderOverview(): string {
     `<p class="pd-sub">Экспериментальные стратегии на prediction-маркете Polymarket (BTC Up/Down, 5 мин). ` +
     `Каждая стратегия — отдельная гипотеза со своей честной статистикой (убытки тоже показываем). ` +
     `Всё в paper-режиме и изолировано от основного бота — это только просмотр.</p>` +
+    `<p style="margin:-8px 0 20px"><a class="pd-arrow" href="/predict/report">📊 Авто-отчёт здоровья стратегий →</a></p>` +
     `<div class="pd-cards">${cards}</div>` +
     globalFeed() +
     `</div>`
+  );
+}
+
+type HealthReport = {
+  updatedAt: string;
+  strategies: {
+    slug: string; title: string; rounds: number;
+    winRate?: number; breakeven?: number | null; edge?: number | null; avgCoef?: number | null;
+    maxLossStreak?: number; netPnl?: number; maxDrawdown?: number;
+    calib?: { predicted: number; actual: number; gap: number } | null;
+    verdict?: string; flag?: string;
+  }[];
+};
+function readReport(): HealthReport | null {
+  try {
+    const p = join(dataDir, 'predict-report.json');
+    if (existsSync(p)) return JSON.parse(readFileSync(p, 'utf8')) as HealthReport;
+  } catch {
+    /* нет отчёта */
+  }
+  return null;
+}
+function renderReport(): string {
+  const r = readReport();
+  const back = `<a class="pd-back" href="/predict">← раздел /predict</a>`;
+  if (!r) {
+    return STYLES + `<div class="pd-wrap">${back}<div class="pd-head"><h1>Авто-отчёт</h1></div><p class="pd-sub">Отчёт ещё не сформирован — обновляется автоматически каждые 3 часа.</p></div>`;
+  }
+  const right = 'style="text-align:right"';
+  const edgeCell = (e?: number | null) =>
+    e == null ? '<td class="pd-muted-td" style="text-align:right">—</td>' : `<td ${right} class="${e >= 2 ? 'pd-pos' : e <= -2 ? 'pd-neg' : 'pd-muted-td'}">${e >= 0 ? '+' : ''}${e}пп</td>`;
+  const rows = r.strategies
+    .map((s) => {
+      if (!s.rounds) return `<tr><td>${esc(s.title)}</td><td class="pd-muted-td" colspan="8">нет данных</td></tr>`;
+      const calib = s.calib ? `${s.calib.predicted}%→${s.calib.actual}%${s.calib.gap > 10 ? ' ⚠️' : ''}` : '—';
+      const vClass = (s.verdict ?? '').includes('✅') ? 'pd-pos' : (s.verdict ?? '').includes('⚠️') ? 'pd-neg' : '';
+      return (
+        `<tr>` +
+        `<td><a href="/predict/${esc(s.slug)}" style="color:#cfd6e0;text-decoration:none">${esc(s.title)}</a></td>` +
+        `<td ${right}>${s.rounds}</td>` +
+        `<td ${right}>${s.winRate}%</td>` +
+        edgeCell(s.edge) +
+        `<td ${right}>${s.maxLossStreak}</td>` +
+        `<td ${right}>${s.avgCoef ?? '—'}</td>` +
+        `<td ${right} class="${(s.netPnl ?? 0) >= 0 ? 'pd-pos' : 'pd-neg'}">${fmtUsd(s.netPnl ?? 0)}</td>` +
+        `<td ${right}>$${(s.maxDrawdown ?? 0).toFixed(2)}</td>` +
+        `<td class="pd-muted-td" style="font-size:12px">${esc(calib)}</td>` +
+        `<td class="${vClass}" style="font-size:12.5px">${esc(s.verdict ?? '')}${s.flag ? ` · ${esc(s.flag)}` : ''}</td>` +
+        `</tr>`
+      );
+    })
+    .join('');
+  const updated = new Date(r.updatedAt).toLocaleString('ru-RU', { timeZone: 'UTC' });
+  return (
+    STYLES +
+    `<div class="pd-wrap">${back}` +
+    `<div class="pd-head"><h1>Авто-отчёт здоровья</h1></div>` +
+    `<p class="pd-sub">Автоматический разбор всех стратегий каждые 3 часа: реальное преимущество (winrate − точка безубытка), серии проигрышей, калибровка оценки вероятности, просадка и вердикт. Цель — подтверждать стабильность или ловить, что улучшить. Ничего не меняет автоматически — только сигналит.</p>` +
+    `<div class="pd-card"><table class="pd-table"><thead><tr>` +
+    `<th>Стратегия</th><th ${right}>n</th><th ${right}>Win%</th><th ${right}>Край</th><th ${right}>Серия−</th><th ${right}>Коэф</th><th ${right}>Net PnL</th><th ${right}>Max DD</th><th>Калибровка</th><th>Вердикт</th>` +
+    `</tr></thead><tbody>${rows}</tbody></table></div>` +
+    `<p class="pd-foot">«Край» = реальный % выигрышей минус точка безубытка (= средняя цена входа). Положительный край = система в плюсе на дистанции. «Калибровка» предсказано→реально: разрыв >10пп (⚠️) = модель самоуверенна.</p>` +
+    `<p class="pd-foot">Обновлено: ${esc(updated)} UTC</p></div>`
   );
 }
 
@@ -972,6 +1036,22 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     return pageShell('/predict — Robot Claude', REAL_TRADING_NOTE + renderOverview(), {
       lang: 'ru',
       autoRefreshSec: 60,
+      robots: 'noindex, nofollow',
+      authed: { displayName: u.displayName, phone: u.phone },
+    });
+  });
+
+  // Авто-отчёт здоровья стратегий (обновляется systemd-таймером predict-report каждые 3ч).
+  app.get('/predict/report', async (req, reply) => {
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('Cache-Control', 'private, no-store');
+    const u = gate(req);
+    if (!u) {
+      return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow' });
+    }
+    return pageShell('Авто-отчёт — /predict', renderReport(), {
+      lang: 'ru',
+      autoRefreshSec: 300,
       robots: 'noindex, nofollow',
       authed: { displayName: u.displayName, phone: u.phone },
     });
