@@ -947,12 +947,10 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     `<div style="margin:6px 0 14px">Статус ключа: ${keyStatus}</div>` +
     `<p class="pd-foot">🔒 Ключ передаётся по HTTPS, кладётся в файл с правами 600, в логи/в git не попадает и обратно не показывается.</p>` +
     `</div>` +
-    `<div class="pd-card"><h2>Торговый API-ключ (Polymarket → «Разработчики»)</h2>` +
-    `<p class="pd-foot" style="margin-bottom:10px">Сгенерируй ключ в профиле Polymarket, раздел <b>«Разработчики»</b>, и вставь сюда key / secret / passphrase. Оставь все три пустыми, чтобы не менять.</p>` +
-    `<label style="display:block;margin-bottom:8px">API key:<br><input type="password" name="builder_key" value="" placeholder="${cfg.builderMask ? 'оставь пустым, чтобы не менять' : 'API key'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
-    `<label style="display:block;margin-bottom:8px">API secret:<br><input type="password" name="builder_secret" value="" placeholder="${cfg.builderMask ? 'оставь пустым' : 'API secret'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
-    `<label style="display:block;margin-bottom:8px">API passphrase:<br><input type="password" name="builder_passphrase" value="" placeholder="${cfg.builderMask ? 'оставь пустым' : 'API passphrase'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
-    `<div style="margin:6px 0 4px">Статус API-ключа: ${cfg.builderMask ? `<span class="pd-pos">✓ сохранён (${esc(cfg.builderMask)})</span>` : '<span class="pd-neg">✗ не сохранён</span>'}</div>` +
+    `<div class="pd-card"><h2>Адрес депозит-кошелька Polymarket</h2>` +
+    `<p class="pd-foot" style="margin-bottom:10px">В профиле Polymarket это строка <b>«Адрес … только для использования API»</b> (0x…). Скопируй её сюда. <b>API-ключ вводить НЕ нужно</b> — он создаётся автоматически из приватного ключа и привязывается к этому депозит-кошельку.</p>` +
+    `<label style="display:block;margin-bottom:8px">Адрес депозит-кошелька (0x…):<br><input type="text" name="funder" value="${esc(cfg.funderAddress ?? '')}" placeholder="0x… (ровно 0x + 40 hex)" style="${fieldStyle}"></label>` +
+    `<div style="margin:6px 0 4px">Статус адреса: ${cfg.funderAddress && /^0x[a-fA-F0-9]{40}$/.test(cfg.funderAddress) ? `<span class="pd-pos">✓ адрес сохранён (${esc(cfg.funderAddress.slice(0, 6))}…${esc(cfg.funderAddress.slice(-4))})</span>` : '<span class="pd-neg">✗ адрес не задан</span>'}</div>` +
     `</div>` +
     `<div class="pd-card"><button type="submit" class="pd-back" style="font-size:15px;background:#16321f;border:1px solid #2e5a3a;padding:10px 16px;border-radius:8px;cursor:pointer">💾 Сохранить</button>` +
     `<p class="pd-foot" style="margin-top:10px">Обновлено: ${esc(updated)}</p></div>` +
