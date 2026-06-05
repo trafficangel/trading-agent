@@ -30,6 +30,8 @@ const dataDir = join(moduleDir, '..', '..', 'data');
 
 type StrategyDef = {
   slug: string; // URL segment
+  engine?: string; // имя стратегии в реестре движка (--strategy) — для реальной торговли
+  realEligible?: boolean; // можно выбрать для реальной торговли (по умолчанию — да, если есть engine)
   title: string;
   tagline: string;
   statusEnv: string; // env override for the JSON path
@@ -45,6 +47,8 @@ type StrategyDef = {
 const STRATEGIES: StrategyDef[] = [
   {
     slug: 'eglate',
+    engine: 'endgame-late',
+    realEligible: true,
     title: 'Эндшпиль · Келли (60с)',
     tagline: 'Тот же эндшпиль, но входим только в последние 60 секунд раунда',
     statusEnv: 'PREDICT_EGLATE_STATUS_PATH',
@@ -61,6 +65,8 @@ const STRATEGIES: StrategyDef[] = [
   },
   {
     slug: 'egsnap',
+    engine: 'endgame-snap',
+    realEligible: true,
     title: 'Эндшпиль · Келли (45с)',
     tagline: 'Эндшпиль с входом только в последние 45 секунд — там, где сидит весь плюс',
     statusEnv: 'PREDICT_EGSNAP_STATUS_PATH',
@@ -76,23 +82,9 @@ const STRATEGIES: StrategyDef[] = [
     ],
   },
   {
-    slug: 'egsharp',
-    title: 'Эндшпиль · Келли (заточенный)',
-    tagline: 'Тот же эндшпиль, но входим только на сильнейших сигналах — ради ровной кривой',
-    statusEnv: 'PREDICT_EGSHARP_STATUS_PATH',
-    statusFile: 'predict-egsharp-status.json',
-    liveFile: 'predict-egsharp-live.json',
-    showStakeCol: true,
-    hasLive: true,
-    description: [
-      'Это вариант egsnap (то же прайм-окно 45 секунд), но с более строгим фильтром входа: выше требуемая уверенность (z) и больший требуемый дисконт рынка. Логика та же — в последние секунды покупаем недооценённую почти решённую сторону, — но входим РЕЖЕ и только на самых сильных сигналах. Параметры не публикуем.',
-      'Идея: меньше, но более качественных входов → выше доля выигрышей и ровнее кривая. Прямое сравнение с egsnap на тех же рынках: даёт ли дополнительная строгость более стабильный результат, или это лишний отсев. (Фильтр держим заметно строже egsnap, но не настолько, чтобы душить вход — иначе выборка не наберётся.)',
-      'Честно: это вариация той же гипотезы (лаг тонкого рынка против уже складывающегося исхода). Преимущество не гарантировано — судим по статистике на достаточной выборке. Параметры не публикуем.',
-      'Размер ставки — дробный Келли (1/4): ставка = ¼ · f · банк (старт банка $100), где f = p − (1−p)/b, b — коэффициент входа. Ключевое: p — это НЕ оценка модели, а ФАКТИЧЕСКИЙ процент выигрышей самой стратегии (само-калибровка: после 20 сделок берём wins/total, до этого — осторожный приор 0.74). Потолок ставки — доля банка (~30%), а не фикс-сумма, поэтому ставка реально компаундит вместе с банком и меняется от сигнала к сигналу (дешевле фаворит и больше запас — больше ставка; нет перевеса f≤0 — минимум). Келли не создаёт преимущества, лишь превращает уже имеющееся в плавный рост и страхует от разорения.',
-    ],
-  },
-  {
     slug: 'egprog',
+    engine: 'endgame-prog',
+    realEligible: true,
     title: 'Эндшпиль · Келли (90с)',
     tagline: 'Эндшпиль + размер ставки по дробному Келли (1/4) от банка $100 — плавный рост без разгона',
     statusEnv: 'PREDICT_EGPROG_STATUS_PATH',
@@ -108,25 +100,47 @@ const STRATEGIES: StrategyDef[] = [
     ],
   },
   {
-    slug: 'eglock',
-    title: 'Эндшпиль · Келли (замок)',
-    tagline: 'Снайп почти-решённого исхода: в последние секунды берём победителя с дисконтом',
-    statusEnv: 'PREDICT_EGLOCK_STATUS_PATH',
-    statusFile: 'predict-eglock-status.json',
-    liveFile: 'predict-eglock-live.json',
+    slug: 'egz2',
+    engine: 'endgame-z2',
+    realEligible: true,
+    title: 'Эндшпиль · Келли (сильный сигнал z≥2)',
+    tagline: 'egprog, но вход только при сильном сигнале (z≥2) — концентрируем преимущество',
+    statusEnv: 'PREDICT_EGZ2_STATUS_PATH',
+    statusFile: 'predict-egz2-status.json',
+    liveFile: 'predict-egz2-live.json',
     showStakeCol: true,
     hasLive: true,
     description: [
-      'Это самый «жёсткий» вариант эндшпиля и наш отдельный тест на положительное матожидание. Идея простая: вход — только в самые последние секунды раунда, когда исход уже практически решён. Мы считаем z-оценку (насколько далеко цена ушла от цели относительно её типичных колебаний за оставшееся время); входим только при очень большом z — то есть когда вероятность, что лидирующая сторона удержится до закрытия, близка к 100%.',
-      'Ключевое условие: при этом цена победившей-почти-наверняка стороны всё ещё ниже 0.97. Тонкий 5-минутный стакан часто не успевает переоценить уже решённый исход — и тогда мы покупаем то, что почти гарантированно гасится в 1.00, забирая разницу (1−цена)/цена как практически безрисковую прибыль. Это и есть кандидат с положительным матожиданием: не предсказание направления, а сбор лага книги на решённом исходе.',
-      'Честно о пределах. «Положительное матожидание» здесь держится ровно до тех пор, пока книга запаздывает с переоценкой. Если другие боты переоценивают исход мгновенно — цена сразу прыгает к 1.00, наше условие «дешевле 0.97» не выполняется, и стратегия просто НЕ входит (нулевая активность лучше, чем убыток). Гарантированной +EV-системы на эффективном рынке для частника не существует; это самый сильный кандидат, и мы проверяем его строго по статистике в симуляции. Параметры не публикуем.',
-      'Размер ставки — дробный Келли (1/4): ставка = ¼ · f · банк (старт $100), p — ФАКТИЧЕСКИЙ винрейт самой стратегии (само-калибровка), потолок = ~30% банка (компаундинг, не фикс-сумма). Особенность «замка»: вход по высокой цене (0.90+), где f часто ≤0 (нет запаса прибыли) — тогда Келли сам ставит минимум; крупная ставка только когда цена пониже и есть запас. Келли не создаёт преимущества — лишь превращает уже имеющееся в плавный рост и страхует от разорения.',
+      'Прямая копия «Эндшпиль · Келли (90с)» с одним изменением: входим ТОЛЬКО при сильном сигнале z ≥ 2.0 (обычный egprog входит уже при z ≥ 1.0). Окно 90с, Kelly, банк $100 — идентичны.',
+      'Откуда гипотеза. Разбор 213 входов egprog по корзинам: при слабом сигнале (z<1.5, 150 входов) край около нуля/минус; при сильном (z≥2, 25 входов) винрейт ~88% при средней цене 65–70 → край +18–23пп. Когда наш сигнал говорит «исход почти решён», а цена ещё не поднялась — это лаг тонкого стакана, наша точка преимущества.',
+      'Что проверяем: держит ли фильтр z≥2 это преимущество ВНЕ прошлой выборки (чтобы не было подгонки под историю). Меньше входов (~12% слотов), но выше качество. Подтвердится край — кандидат №1 на реальный запуск. Paper, банк $100.',
+      'Размер ставки — дробный Келли (1/4) от банка $100, p — фактический винрейт стратегии (само-калибровка), потолок 30% банка.',
+    ],
+  },
+  {
+    slug: 'egsess',
+    engine: 'endgame-sess',
+    realEligible: true,
+    title: 'Эндшпиль · Келли (Азия+Европа)',
+    tagline: 'egprog, но торгуем только в прибыльные сессии (00–13 UTC), без US-сессии',
+    statusEnv: 'PREDICT_EGSESS_STATUS_PATH',
+    statusFile: 'predict-egsess-status.json',
+    liveFile: 'predict-egsess-live.json',
+    showStakeCol: true,
+    hasLive: true,
+    description: [
+      'Прямая копия «Эндшпиль · Келли (90с)» с одним фильтром: торгуем ТОЛЬКО в 00:00–13:00 UTC (азиатская и европейская сессии). US-сессию (13:00–21:00) и вечер пропускаем.',
+      'Откуда гипотеза. Разбор 225 входов egprog по часам: Азия (00–07) дала край +12пп, Европа (07–13) +6пп (+$92 вместе), а US-сессия (13–21) — край −11пп (−$13). Вероятная причина: US — пик активности Polymarket, быстрые боты мгновенно переоценивают цену → наш «лаг тонкого стакана» исчезает, плюс выше волатильность. В Азию/Европу стакан тоньше и медленнее — лаг работает.',
+      'Что проверяем: держится ли сессионный перевес ВНЕ исходной выборки (на новых данных, чтобы не было подгонки под историю). Если да — это самый сильный из найденных рычагов, и его можно совмещать с фильтром по силе сигнала (z≥2). Paper, банк $100, размер по Kelly.',
     ],
   },
   {
     slug: 'favprog',
+    engine: 'favorite-prog',
+    realEligible: false,
+    retired: true,
     title: 'Фаворит · компаундинг',
-    tagline: 'Ставка на фаворита + пропорциональная доля банка — рост без разгона ставки',
+    tagline: 'Ставка на фаворита + самокалибрующийся дробный Келли — защита банка при отсутствии преимущества',
     statusEnv: 'PREDICT_FAVPROG_STATUS_PATH',
     statusFile: 'predict-favprog-status.json',
     liveFile: 'predict-favprog-live.json',
@@ -134,12 +148,48 @@ const STRATEGIES: StrategyDef[] = [
     hasLive: true,
     description: [
       'Вход — ставка на фаворита: каждый раунд покупаем сторону, чей ask в полосе 0.60–0.85 (фаворит, но не почти-решённый), и держим до конца. Раньше поверх стоял «догон» (повышали ставку при просадке, до $100) — убрали: догон раздувает риск и ничего не чинит.',
-      'Как считается ставка теперь. Ставим небольшую долю (≈4%) от ТЕКУЩЕГО банка (банк = старт + накопленный PnL), с жёстким потолком. Банк растёт — ставка плавно растёт (капитал компаундит); банк падает — ставка САМА уменьшается. Никакого разгона на проигрышах. У фаворита своей оценки вероятности нет, поэтому здесь просто фикс-доля банка (без Келли-взвешивания).',
-      'Честно о математике. Это правильный способ растить капитал — но он растит ТОЛЬКО при положительном преимуществе входа. А у ставки на фаворита процент выигрышей ≈ подразумеваемой ценой вероятности, то есть преимущества нет (EV ≈ 0 минус комиссия). Значит капитал тут, скорее всего, будет просто топтаться на месте — но без разгона и без крупных просадок догона. Это контрольный эксперимент: показывает, что пропорция честно НЕ создаёт рост из ничего. Paper; вывод — по статистике.',
+      'Как считается ставка теперь — дробный Келли (1/4), как у эндшпильных стратегий. Ставка = ¼ · f · банк, где f = p − (1−p)/b, b — коэффициент входа. Ключевое: p — это ФАКТИЧЕСКИЙ процент выигрышей самой стратегии (само-калибровка: после 20 сделок берём wins/total, до этого — осторожный приор), а не «книжная» оценка. Потолок — доля банка (~30%), минимум — $1. Раньше тут стояла плоская доля банка (4%), которая теряла на каждом проигрыше при отрицательном преимуществе фаворита.',
+      'Честно о математике. У ставки на фаворита процент выигрышей ≈ подразумеваемой ценой вероятности — преимущества нет (EV ≈ 0 минус комиссия), а на свежей выборке край даже отрицательный. Именно поэтому Келли тут уместен как ЗАЩИТА: когда f ≤ 0 (преимущества нет), формула сама удерживает ставку на минимуме — стратегия перестаёт «топить» банк, в отличие от прежней плоской доли. Келли не создаёт преимущества из ничего; он лишь страхует капитал и компаундит рост ТОЛЬКО при реально положительном крае. Paper; вывод — по статистике.',
+    ],
+  },
+  {
+    slug: 'egfav',
+    engine: 'favorite-strong',
+    realEligible: true,
+    title: 'Сильный фаворит (0.82–0.92) + Kelly',
+    tagline: 'Чистый тест: покупаем только сильного фаворита, ставку адаптирует Kelly',
+    statusEnv: 'PREDICT_EGFAV_STATUS_PATH',
+    statusFile: 'predict-egfav-status.json',
+    liveFile: 'predict-egfav-live.json',
+    showStakeCol: true,
+    hasLive: true,
+    description: [
+      'Самая простая гипотеза без z-сигнала: каждый раунд покупаем сторону-фаворита, чья цена в узкой полосе 0.82–0.92 (сильный, но не «почти 1.0»), и держим до конца. Размер ставки полностью отдан дробному Kelly от банка $100.',
+      'Зачем. На рынках ставок есть известный перекос favorite-longshot: сильных фаворитов толпа слегка НЕ-дооценивает, и они выигрывают чуть чаще своей цены. Намёк в наших данных: входы egprog по 0.80–0.90 давали винрейт 88% при цене 80 → край +8пп. Здесь проверяем это ЧИСТО, без сигнала.',
+      'Как это сочетается с Kelly. Если перекос реален (фактический винрейт > цены) — после 20 сделок Kelly начнёт увеличивать ставку и капитал пойдёт в рост. Если винрейт ≈ цене (перекоса нет) — Kelly честно держит минимум, кривая стоит на месте. То есть это одновременно тест гипотезы и проверка идеи «коэффициент + Kelly». Paper, банк $100.',
+    ],
+  },
+  {
+    slug: 'egfavs',
+    engine: 'favorite-strong-sess',
+    realEligible: true,
+    title: 'Сильный фаворит · Азия+Европа',
+    tagline: 'Комбо: сильный фаворит (0.82–0.92) + только прибыльные сессии (00–13 UTC) + Kelly',
+    statusEnv: 'PREDICT_EGFAVS_STATUS_PATH',
+    statusFile: 'predict-egfavs-status.json',
+    liveFile: 'predict-egfavs-live.json',
+    showStakeCol: true,
+    hasLive: true,
+    description: [
+      'Комбинация двух наших гипотез сразу: покупаем только сильного фаворита 0.82–0.92 (возможный favorite-longshot bias) И только в азиатскую/европейскую сессию 00:00–13:00 UTC (где у эндшпиля жил +край), размер — дробный Kelly.',
+      'Идея: если оба перекоса реальны, их сложение должно дать более чистый и устойчивый рост, чем каждый по отдельности. Это самый «нагруженный» фильтрами тест.',
+      'Честно: это стекинг ДВУХ пока неподтверждённых фильтров — есть риск подгонки под прошлое. Поэтому смотрим его в связке с «чистыми» одиночными тестами (egfav — только фаворит, egsess — только сессия): если комбо растёт, а одиночные нет, к выводам относимся осторожно. Paper, банк $100.',
     ],
   },
   {
     slug: 'egparlay',
+    engine: 'endgame-parlay',
+    realEligible: true,
     title: 'Эндшпиль · парлей',
     tagline: 'Анти-мартингейл: растём на сериях выигрышей, проигрыш стоит мало',
     statusEnv: 'PREDICT_EGPARLAY_STATUS_PATH',
@@ -154,22 +204,9 @@ const STRATEGIES: StrategyDef[] = [
     ],
   },
   {
-    slug: 'egmart',
-    title: 'Эндшпиль · мартингейл (кап)',
-    tagline: 'Догон с жёстким капом 3 шага: 1-2-4-8, сброс на выигрыше',
-    statusEnv: 'PREDICT_EGMART_STATUS_PATH',
-    statusFile: 'predict-egmart-status.json',
-    liveFile: 'predict-egmart-live.json',
-    showStakeCol: true,
-    hasLive: true,
-    description: [
-      'Вход — эндшпиль в прайм-окне (последние 45с, где по отчёту живёт преимущество). Система ставки — классический мартингейл, но с ЖЁСТКИМ капом: после проигрыша удваиваем ($1→$2→$4→$8), максимум 3 шага, дальше не растём; на выигрыше — сброс к базе $1.',
-      'Идея проверки: при высоком проценте выигрышей эндшпиля (~80%) серия из 3 проигрышей подряд — это ~0.8% случаев, поэтому почти всегда отыгрываемся быстро, а кап не даёт ставке разогнаться. Сравниваем с парлеем и пропорцией — что даёт более ровную безопасную кривую.',
-      'Честно: мартингейл НЕ меняет матожидание — кап лишь ограничивает редкую крупную просадку. Это эксперимент с управлением риском, не источник дохода сам по себе. Paper, база $1, потолок $8.',
-    ],
-  },
-  {
     slug: 'egoscar',
+    engine: 'endgame-oscar',
+    realEligible: true,
     title: 'Эндшпиль · Oscar’s Grind',
     tagline: 'Классика: цель +$1 за серию, ставку поднимаем только после выигрыша',
     statusEnv: 'PREDICT_EGOSCAR_STATUS_PATH',
@@ -179,23 +216,8 @@ const STRATEGIES: StrategyDef[] = [
     hasLive: true,
     description: [
       'Вход — эндшпиль в прайм-окне (последние 45с, где по отчёту живёт преимущество). Система ставки — Oscar’s Grind (известная низковолатильная прогрессия). Цель — заработать +$1 за «серию». Ставку повышаем (+$1) ТОЛЬКО после выигрыша; после проигрыша оставляем как есть (не догоняем). Как только серия вышла в +$1 — сброс к базе $1.',
-      'Смысл: «медленно затягиваем» прибыль по чуть-чуть, не разгоняя ставку на проигрышах. Это одна из самых аккуратных классических систем по соотношению ровности и риска. Потолок ставки $6.',
+      'Смысл: «медленно затягиваем» прибыль по чуть-чуть, не разгоняя ставку на проигрышах. Это одна из самых аккуратных классических систем по соотношению ровности и риска. Жёсткий потолок ставки снят — рост естественно ограничивается сбросом при достижении цели +$1.',
       'Честно: матожидание система не меняет — она сглаживает кривую. Стабильный рост на дистанции возможен только при реальном преимуществе входа. Paper, база $1.',
-    ],
-  },
-  {
-    slug: 'egdalembert',
-    title: 'Эндшпиль · d’Alembert',
-    tagline: 'Мягкая прогрессия: +1 уровень после проигрыша, −1 после выигрыша',
-    statusEnv: 'PREDICT_EGDALEMBERT_STATUS_PATH',
-    statusFile: 'predict-egdalembert-status.json',
-    liveFile: 'predict-egdalembert-live.json',
-    showStakeCol: true,
-    hasLive: true,
-    description: [
-      'Вход — эндшпиль в прайм-окне (последние 45с, где по отчёту живёт преимущество). Система ставки — d’Alembert: уровень ставки растёт на +1 единицу после проигрыша и падает на −1 после выигрыша (минимум 1). Рост ЛИНЕЙНЫЙ ($1, $2, $3…), а не геометрический — поэтому намного мягче и безопаснее мартингейла. Кап уровня — 6 (потолок $6).',
-      'Идея: на серии проигрышей ставка растёт медленно и ограниченно, на выигрышах так же плавно снижается — кривая ровная, риск разгона минимальный.',
-      'Честно: как и все прогрессии, d’Alembert не создаёт преимущества — только форму кривой. Рост на дистанции — только при реальном преимуществе входа. Paper, база $1.',
     ],
   },
 ];
@@ -209,6 +231,7 @@ type RecentRound = {
   prob?: number | null; // наша оценка вероятности, %
   edge?: number | null; // недооценка (наша оценка − цена), проц. пункты
   distanceBp?: number | null;
+  stakeReason?: string | null; // расчёт ставки (почему именно столько)
   pnl: number;
   win: boolean;
   bothLegs?: boolean; // dual-leg-trap: захлопнулась ли ловушка (обе ноги)
@@ -433,7 +456,7 @@ function recentRoundsTable(
   const head =
     `<tr>` +
     (showStrategy ? `<th>Стратегия</th>` : '') +
-    (opts.isTrap ? `<th>Что</th><th>Куплено / продано</th>` : `<th>Сторона</th><th ${right}>Ставка</th>`) +
+    (opts.isTrap ? `<th>Что</th><th>Куплено / продано</th>` : `<th>Сторона</th><th>Ставка</th>`) +
     (hasEdge ? `<th ${right}>Оценка</th>` : '') +
     (hasCoef ? `<th ${right}>Коэф.</th>` : '') +
     (hasEntry ? `<th ${right}>Вход</th>` : '') +
@@ -455,7 +478,7 @@ function recentRoundsTable(
           sideCell(r) +
           (opts.isTrap
             ? `<td class="pd-muted-td">котировки выставлены</td>`
-            : `<td ${right}>${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>`) +
+            : `<td>${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>`) +
           edgeCells +
           coefCell +
           (hasEntry ? `<td class="pd-muted-td" ${right}>—</td>` : '') +
@@ -470,7 +493,11 @@ function recentRoundsTable(
         `<tr>` +
         stratCell +
         sideCell(r) +
-        (opts.isTrap ? boughtCell(r) : `<td ${right}>${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}</td>`) +
+        (opts.isTrap
+          ? boughtCell(r)
+          : `<td style="text-align:left">${r.stake != null ? '$' + r.stake.toFixed(2) : '—'}` +
+            (r.stakeReason ? `<div class="pd-muted-td" style="font-size:10px;font-weight:400;white-space:normal;line-height:1.3;max-width:190px;margin:2px auto 0 0">${esc(r.stakeReason)}</div>` : '') +
+            `</td>`) +
         edgeCells +
         coefCell +
         entryCell +
@@ -626,6 +653,204 @@ function globalFeed(): string {
   });
 }
 
+// Публичный лендинг раздела /predict: WebGL-шейдер в hero + описание что делаем и
+// планируем. Шейдер портирован из React-компонента в чистый WebGL (GLSL лежит в
+// <script type="x-shader">, инициализация — ванильный JS, без React/Tailwind).
+const SHADER_VS = `
+    attribute vec4 aVertexPosition;
+    void main() {
+      gl_Position = aVertexPosition;
+    }
+`;
+const SHADER_FS = `
+    precision highp float;
+    uniform vec2 iResolution;
+    uniform float iTime;
+
+    const float overallSpeed = 0.2;
+    const float gridSmoothWidth = 0.015;
+    const float axisWidth = 0.05;
+    const float majorLineWidth = 0.025;
+    const float minorLineWidth = 0.0125;
+    const float majorLineFrequency = 5.0;
+    const float minorLineFrequency = 1.0;
+    const vec4 gridColor = vec4(0.5);
+    const float scale = 5.0;
+    const vec4 lineColor = vec4(0.4, 0.2, 0.8, 1.0);
+    const float minLineWidth = 0.01;
+    const float maxLineWidth = 0.2;
+    const float lineSpeed = 1.0 * overallSpeed;
+    const float lineAmplitude = 1.0;
+    const float lineFrequency = 0.2;
+    const float warpSpeed = 0.2 * overallSpeed;
+    const float warpFrequency = 0.5;
+    const float warpAmplitude = 1.0;
+    const float offsetFrequency = 0.5;
+    const float offsetSpeed = 1.33 * overallSpeed;
+    const float minOffsetSpread = 0.6;
+    const float maxOffsetSpread = 2.0;
+    const int linesPerGroup = 16;
+
+    #define drawCircle(pos, radius, coord) smoothstep(radius + gridSmoothWidth, radius, length(coord - (pos)))
+    #define drawSmoothLine(pos, halfWidth, t) smoothstep(halfWidth, 0.0, abs(pos - (t)))
+    #define drawCrispLine(pos, halfWidth, t) smoothstep(halfWidth + gridSmoothWidth, halfWidth, abs(pos - (t)))
+    #define drawPeriodicLine(freq, width, t) drawCrispLine(freq / 2.0, width, abs(mod(t, freq) - (freq) / 2.0))
+
+    float drawGridLines(float axis) {
+      return drawCrispLine(0.0, axisWidth, axis)
+            + drawPeriodicLine(majorLineFrequency, majorLineWidth, axis)
+            + drawPeriodicLine(minorLineFrequency, minorLineWidth, axis);
+    }
+
+    float drawGrid(vec2 space) {
+      return min(1.0, drawGridLines(space.x) + drawGridLines(space.y));
+    }
+
+    float random(float t) {
+      return (cos(t) + cos(t * 1.3 + 1.3) + cos(t * 1.4 + 1.4)) / 3.0;
+    }
+
+    float getPlasmaY(float x, float horizontalFade, float offset) {
+      return random(x * lineFrequency + iTime * lineSpeed) * horizontalFade * lineAmplitude + offset;
+    }
+
+    void main() {
+      vec2 fragCoord = gl_FragCoord.xy;
+      vec4 fragColor;
+      vec2 uv = fragCoord.xy / iResolution.xy;
+      vec2 space = (fragCoord - iResolution.xy / 2.0) / iResolution.x * 2.0 * scale;
+
+      float horizontalFade = 1.0 - (cos(uv.x * 6.28) * 0.5 + 0.5);
+      float verticalFade = 1.0 - (cos(uv.y * 6.28) * 0.5 + 0.5);
+
+      space.y += random(space.x * warpFrequency + iTime * warpSpeed) * warpAmplitude * (0.5 + horizontalFade);
+      space.x += random(space.y * warpFrequency + iTime * warpSpeed + 2.0) * warpAmplitude * horizontalFade;
+
+      vec4 lines = vec4(0.0);
+      vec4 bgColor1 = vec4(0.1, 0.1, 0.3, 1.0);
+      vec4 bgColor2 = vec4(0.3, 0.1, 0.5, 1.0);
+
+      for(int l = 0; l < linesPerGroup; l++) {
+        float normalizedLineIndex = float(l) / float(linesPerGroup);
+        float offsetTime = iTime * offsetSpeed;
+        float offsetPosition = float(l) + space.x * offsetFrequency;
+        float rand = random(offsetPosition + offsetTime) * 0.5 + 0.5;
+        float halfWidth = mix(minLineWidth, maxLineWidth, rand * horizontalFade) / 2.0;
+        float offset = random(offsetPosition + offsetTime * (1.0 + normalizedLineIndex)) * mix(minOffsetSpread, maxOffsetSpread, horizontalFade);
+        float linePosition = getPlasmaY(space.x, horizontalFade, offset);
+        float line = drawSmoothLine(linePosition, halfWidth, space.y) / 2.0 + drawCrispLine(linePosition, halfWidth * 0.15, space.y);
+
+        float circleX = mod(float(l) + iTime * lineSpeed, 25.0) - 12.0;
+        vec2 circlePosition = vec2(circleX, getPlasmaY(circleX, horizontalFade, offset));
+        float circle = drawCircle(circlePosition, 0.01, space) * 4.0;
+
+        line = line + circle;
+        lines += line * lineColor * rand;
+      }
+
+      fragColor = mix(bgColor1, bgColor2, uv.x);
+      fragColor *= verticalFade;
+      fragColor.a = 1.0;
+      fragColor += lines;
+
+      gl_FragColor = fragColor;
+    }
+`;
+// Инициализация WebGL без шаблонных строк (чтобы не конфликтовать с внешним литералом).
+const SHADER_INIT = [
+  '(function(){',
+  "  var c=document.getElementById('predict-shader'); if(!c) return;",
+  "  var gl=c.getContext('webgl')||c.getContext('experimental-webgl');",
+  "  if(!gl){ c.style.background='linear-gradient(120deg,#15123a,#3a1560)'; return; }",
+  "  function sh(t,src){var s=gl.createShader(t);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){console.error(gl.getShaderInfoLog(s));return null;}return s;}",
+  "  var p=gl.createProgram();",
+  "  gl.attachShader(p,sh(gl.VERTEX_SHADER,document.getElementById('predict-vs').textContent));",
+  "  gl.attachShader(p,sh(gl.FRAGMENT_SHADER,document.getElementById('predict-fs').textContent));",
+  '  gl.linkProgram(p);',
+  '  if(!gl.getProgramParameter(p,gl.LINK_STATUS)){console.error(gl.getProgramInfoLog(p));return;}',
+  '  var b=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,b);',
+  '  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);',
+  "  var pos=gl.getAttribLocation(p,'aVertexPosition');",
+  "  var rl=gl.getUniformLocation(p,'iResolution'), tl=gl.getUniformLocation(p,'iTime');",
+  '  function rs(){var r=c.getBoundingClientRect();var d=Math.min(window.devicePixelRatio||1,2);c.width=Math.max(1,Math.floor(r.width*d));c.height=Math.max(1,Math.floor(r.height*d));gl.viewport(0,0,c.width,c.height);}',
+  "  window.addEventListener('resize',rs); rs();",
+  '  var t0=Date.now();',
+  '  function frame(){var t=(Date.now()-t0)/1000;gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(p);gl.uniform2f(rl,c.width,c.height);gl.uniform1f(tl,t);gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.vertexAttribPointer(pos,2,gl.FLOAT,false,0,0);gl.enableVertexAttribArray(pos);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);requestAnimationFrame(frame);}',
+  '  requestAnimationFrame(frame);',
+  '})();',
+].join('\n');
+
+function renderAbout(): string {
+  const paStyle = `<style>
+    html{overflow-x:clip}
+    .pa-hero{position:relative;width:100vw;margin-left:calc(50% - 50vw);margin-top:calc(-1 * clamp(20px,4vw,32px));min-height:88vh;min-height:calc(100svh - 52px);display:flex;align-items:center;justify-content:center;overflow:hidden;background:#0b0e13}
+    #predict-shader{position:absolute;inset:0;width:100%;height:100%;display:block}
+    .pa-hero::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(11,14,19,.14) 0%,rgba(11,14,19,.40) 48%,rgba(11,14,19,.80) 80%,#0b0e13 100%);z-index:1}
+    .pa-hero::before{content:'';position:absolute;inset:0;z-index:1;background:radial-gradient(82% 68% at 50% 44%,rgba(5,7,11,.78) 0%,rgba(5,7,11,.58) 30%,rgba(5,7,11,.30) 56%,rgba(5,7,11,0) 84%)}
+    .pa-hero-inner{position:relative;z-index:2;text-align:center;padding:54px 30px;max-width:760px}
+    .pa-kicker{display:inline-block;font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;color:#b9a7ff;border:1px solid #4a3a7a;background:rgba(40,28,80,.4);padding:5px 12px;border-radius:999px;margin-bottom:18px}
+    .pa-hero h1{font-size:clamp(40px,8vw,76px);line-height:1.02;margin:0 0 16px;font-weight:800;background:linear-gradient(180deg,#fff,#e6dcff);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 2px 6px rgba(0,0,0,.9)) drop-shadow(0 4px 22px rgba(0,0,0,.75))}
+    .pa-lead{font-size:clamp(16px,2.4vw,20px);color:#fbfaff;font-weight:500;line-height:1.55;margin:0 auto 26px;max-width:620px;text-shadow:0 1px 2px rgba(0,0,0,.95),0 2px 10px rgba(0,0,0,.85)}
+    .pa-kicker{text-shadow:0 1px 6px rgba(0,0,0,.6)}
+    .pa-cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+    .pa-btn{font-size:15px;padding:11px 20px;border-radius:10px;text-decoration:none;font-weight:600;display:inline-block}
+    .pa-btn-p{background:linear-gradient(120deg,#6d3bff,#9a52ff);color:#fff;border:1px solid #8a5cff}
+    .pa-btn-s{background:rgba(255,255,255,.06);color:#e6e9ef;border:1px solid #3a3550}
+    .pa-sec{max-width:920px;margin:46px auto 0;padding:0 20px}
+    .pa-sec h2{font-size:23px;margin:0 0 8px}
+    .pa-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:18px}
+    .pa-tile{background:#11141b;border:1px solid #232a36;border-radius:14px;padding:18px}
+    .pa-tile .pa-ico{font-size:22px;margin-bottom:8px}
+    .pa-tile h3{margin:0 0 6px;font-size:16px;color:#eef1f6}
+    .pa-tile p{margin:0;font-size:13.5px;color:#aab2c0;line-height:1.6}
+    .pa-steps{margin:16px 0 0;padding:0;list-style:none;counter-reset:s}
+    .pa-steps li{position:relative;padding:12px 0 12px 44px;border-top:1px solid #1d232e;color:#c3c9d4;line-height:1.6;font-size:14.5px}
+    .pa-steps li::before{counter-increment:s;content:counter(s);position:absolute;left:0;top:11px;width:28px;height:28px;border-radius:50%;background:rgba(109,59,255,.18);border:1px solid #5a44a0;color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+    .pa-note{max-width:920px;margin:30px auto 8px;padding:16px 20px;background:rgba(40,28,80,.18);border:1px solid #2e2750;border-radius:12px;color:#bdb6d6;font-size:13.5px;line-height:1.65}
+  </style>`;
+
+  const hero =
+    `<div class="pa-hero">` +
+    `<canvas id="predict-shader" aria-hidden="true"></canvas>` +
+    `<div class="pa-hero-inner">` +
+    `<span class="pa-kicker">Robot Claude · раздел Predict</span>` +
+    `<h1>Predict</h1>` +
+    `<p class="pa-lead">Будет ли биткоин через 5 минут дороже или дешевле? На Polymarket на это делают ставки — а наши программы делают их <b>автоматически</b> и аккуратно, показывая всё честно.</p>` +
+    `<div class="pa-cta">` +
+    `<a class="pa-btn pa-btn-p" href="/predict">Открыть дашборд →</a>` +
+    `</div></div></div>`;
+
+  const whatWeDo =
+    `<div class="pa-sec"><h2>Коротко о главном</h2>` +
+    `<div class="pa-grid">` +
+    `<div class="pa-tile"><div class="pa-ico">🎯</div><h3>Вход в последний момент</h3><p>Ставим в последние секунды, когда исход почти ясен.</p></div>` +
+    `<div class="pa-tile"><div class="pa-ico">📐</div><h3>Умный размер ставки</h3><p>В основе — проверенные математические модели управления деньгами (те же, что у профи). Больше — где есть перевес, минимум — где нет. Так капитал под защитой.</p></div>` +
+    `<div class="pa-tile"><div class="pa-ico">🧪</div><h3>Сначала без денег</h3><p>Каждая идея сперва торгует виртуально. Отчёт честно показывает, кто в плюсе.</p></div>` +
+    `<div class="pa-tile"><div class="pa-ico">🔒</div><h3>Реал — осторожно</h3><p>Настоящие деньги — только вручную, с лимитами и кнопкой «стоп».</p></div>` +
+    `</div></div>`;
+
+  const next =
+    `<div class="pa-sec"><h2>Что дальше</h2>` +
+    `<p class="pd-sub">Оставляем только то, что стабильно в плюсе на бумаге, и аккуратно переходим на небольшие реальные суммы. Цель — спокойный дополнительный доход для семьи, а не быстрые деньги.</p></div>`;
+
+  const note =
+    `<p class="pa-note">⚠️ Честно: лёгких гарантированных денег на бирже не бывает. Это эксперимент, а не финансовый совет.</p>`;
+
+  const shaderTags =
+    `<script type="x-shader/x-vertex" id="predict-vs">${SHADER_VS}</script>` +
+    `<script type="x-shader/x-fragment" id="predict-fs">${SHADER_FS}</script>` +
+    `<script>${SHADER_INIT}</script>`;
+
+  return (
+    STYLES + paStyle +
+    hero +
+    `<div class="pd-wrap" style="max-width:1000px">` +
+    whatWeDo + next + note +
+    `<p style="text-align:center;margin:34px 0 10px"><a class="pa-btn pa-btn-p" href="/predict">Перейти в раздел /predict →</a></p>` +
+    `</div>` + shaderTags
+  );
+}
+
 function renderOverview(): string {
   const cards = STRATEGIES.map((s) => strategyCard(s, readStatus(s))).join('');
   return (
@@ -635,7 +860,7 @@ function renderOverview(): string {
     `<p class="pd-sub">Экспериментальные стратегии на prediction-маркете Polymarket (BTC Up/Down, 5 мин). ` +
     `Каждая стратегия — отдельная гипотеза со своей честной статистикой (убытки тоже показываем). ` +
     `Всё в paper-режиме и изолировано от основного бота — это только просмотр.</p>` +
-    `<p style="margin:-8px 0 20px"><a class="pd-arrow" href="/predict/report">📊 Авто-отчёт здоровья стратегий →</a></p>` +
+    `<p style="margin:-8px 0 20px"><a class="pd-arrow" href="/predict/report">📊 Авто-отчёт здоровья стратегий →</a>&nbsp;&nbsp;<a class="pd-arrow" href="/predict/about">✨ О разделе →</a></p>` +
     `<div class="pd-cards">${cards}</div>` +
     globalFeed() +
     `</div>`
@@ -649,6 +874,7 @@ type HealthReport = {
     winRate?: number; breakeven?: number | null; edge?: number | null; avgCoef?: number | null;
     maxLossStreak?: number; netPnl?: number; maxDrawdown?: number;
     calib?: { predicted: number; actual: number; gap: number } | null;
+    recent?: { rounds: number; winRate?: number; edge?: number | null; calib?: { predicted: number; actual: number; gap: number } | null } | null;
     verdict?: string; flag?: string;
   }[];
 };
@@ -677,19 +903,30 @@ function renderReport(): string {
         const cls = v.includes('НЕ ВХОДИТ') ? 'pd-neg' : '';
         return `<tr><td>${esc(s.title)}</td><td style="text-align:right" class="pd-muted-td">0</td><td class="${cls}" colspan="8" style="font-size:12.5px">${esc(v)}${s.flag ? ` · ${esc(s.flag)}` : ''}</td></tr>`;
       }
-      const calib = s.calib ? `${s.calib.predicted}%→${s.calib.actual}%${s.calib.gap > 10 ? ' ⚠️' : ''}` : '—';
+      // «Калибровка» — актуальная (свежее окно), с исторической мелким шрифтом.
+      const rc = s.recent?.calib ?? null;
+      const calib = rc
+        ? `${rc.actual}% факт<span class="pd-muted-td"> · модель ${rc.predicted}%${rc.gap > 10 ? ' ⚠️' : ''}</span>`
+        : s.calib
+          ? `${s.calib.actual}% факт<span class="pd-muted-td"> · модель ${s.calib.predicted}%</span>`
+          : '—';
+      // Win%: за всё время + «сейчас» (свежее окно), если оно отличается.
+      const recW = s.recent && s.recent.rounds >= 10 && typeof s.recent.winRate === 'number' ? s.recent.winRate : null;
+      const winCell = recW != null && recW !== s.winRate
+        ? `${s.winRate}%<span class="pd-muted-td" style="font-size:11px"> · сейчас ${recW}%</span>`
+        : `${s.winRate}%`;
       const vClass = (s.verdict ?? '').includes('✅') ? 'pd-pos' : (s.verdict ?? '').includes('⚠️') ? 'pd-neg' : '';
       return (
         `<tr>` +
         `<td><a href="/predict/${esc(s.slug)}" style="color:#cfd6e0;text-decoration:none">${esc(s.title)}</a></td>` +
         `<td ${right}>${s.rounds}</td>` +
-        `<td ${right}>${s.winRate}%</td>` +
+        `<td ${right}>${winCell}</td>` +
         edgeCell(s.edge) +
         `<td ${right}>${s.maxLossStreak}</td>` +
         `<td ${right}>${s.avgCoef ?? '—'}</td>` +
         `<td ${right} class="${(s.netPnl ?? 0) >= 0 ? 'pd-pos' : 'pd-neg'}">${fmtUsd(s.netPnl ?? 0)}</td>` +
         `<td ${right}>$${(s.maxDrawdown ?? 0).toFixed(2)}</td>` +
-        `<td class="pd-muted-td" style="font-size:12px">${esc(calib)}</td>` +
+        `<td class="pd-muted-td" style="font-size:12px">${calib}</td>` +
         `<td class="${vClass}" style="font-size:12.5px">${esc(s.verdict ?? '')}${s.flag ? ` · ${esc(s.flag)}` : ''}</td>` +
         `</tr>`
       );
@@ -704,7 +941,7 @@ function renderReport(): string {
     `<div class="pd-card"><table class="pd-table"><thead><tr>` +
     `<th>Стратегия</th><th ${right}>n</th><th ${right}>Win%</th><th ${right}>Край</th><th ${right}>Серия−</th><th ${right}>Коэф</th><th ${right}>Net PnL</th><th ${right}>Max DD</th><th>Калибровка</th><th>Вердикт</th>` +
     `</tr></thead><tbody>${rows}</tbody></table></div>` +
-    `<p class="pd-foot">«Край» = реальный % выигрышей минус точка безубытка (= средняя цена входа). Положительный край = система в плюсе на дистанции. «Калибровка» предсказано→реально: разрыв >10пп (⚠️) = модель самоуверенна.</p>` +
+    `<p class="pd-foot">«Win%» — за всё время, «сейчас» — по свежему окну последних ${40} сделок (актуальная вероятность). «Край» = реальный % выигрышей минус точка безубытка (= средняя цена входа); положительный край = система в плюсе на дистанции. «Калибровка»: <b>«% факт»</b> — реальная вероятность, по которой система и считает ставку (само-калибрующийся Келли); «модель N%» — внутренняя z-оценка (только отбор сделок). Если модель оптимистичнее факта на >10пп — ⚠️, но на размер ставки это не влияет.</p>` +
     `<p class="pd-foot">Обновлено: ${esc(updated)} UTC</p></div>`
   );
 }
@@ -808,28 +1045,28 @@ function renderStrategy(s: StrategyDef, page = 1): string {
 
 // Страница «доступ только через поддержку» — для незалогиненных и для
 // залогиненных без выданного доступа. Раздел виден, но закрыт.
+// Гейт ТОЛЬКО для реальной торговли (дашборд /predict открыт всем).
 function renderNoAccess(authed: boolean): string {
-  const support = 'https://t.me/robotclaude_support';
+  const support = 'https://t.me/dboykod';
   const cta = authed
-    ? `<p class="pd-sub">Ваш аккаунт авторизован, но доступ к этому разделу ещё не выдан. Доступ открывается <b>вручную через поддержку</b>.</p>`
-    : `<p class="pd-sub">Раздел доступен только зарегистрированным пользователям с выданным доступом. Сначала войдите, затем запросите доступ <b>через поддержку</b>.</p>`;
+    ? `<p class="pd-sub">Ваш аккаунт авторизован, но доступ к <b>реальной торговле</b> ещё не выдан. Он открывается <b>вручную через поддержку</b> после короткого знакомства.</p>`
+    : `<p class="pd-sub">Реальная торговля доступна зарегистрированным пользователям с выданным доступом. Сначала войдите, затем запросите доступ <b>через поддержку</b>.</p>`;
   return (
     STYLES +
     `<div class="pd-wrap">` +
-    `<div class="pd-head"><h1>/predict</h1><span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>закрытый раздел</span></div>` +
+    `<div class="pd-head"><h1>Реальная торговля</h1><span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>доступ по запросу</span></div>` +
     `<div class="pd-card">` +
-    `<h2>🔒 Доступ по запросу</h2>` +
+    `<h2>🔒 Реальная торговля — по запросу</h2>` +
     cta +
-    `<p class="pd-sub" style="margin-bottom:6px">Что в разделе:</p>` +
+    `<p class="pd-sub" style="margin-bottom:6px">Почему так:</p>` +
     `<ul class="pd-desc" style="margin:0 0 14px; padding-left:20px; line-height:1.7">` +
-    `<li>Экспериментальные торговые стратегии на prediction-маркете Polymarket (BTC/ETH «вверх/вниз», окно 5 минут).</li>` +
-    `<li>Честная живая статистика по каждой стратегии: винрейт, PnL, кривая доходности, история сделок — с убытками, без прикрас.</li>` +
-    `<li>Лайв-панель текущего раунда: цены сторон, наша позиция, таймер до закрытия.</li>` +
-    `<li>В перспективе — подключение собственного кошелька и реальная торговля (откроется только после того, как у стратегии подтвердится устойчивое преимущество).</li>` +
+    `<li>Здесь подключается ВАШ кошелёк и идут сделки на РЕАЛЬНЫЕ деньги — поэтому доступ выдаём индивидуально.</li>` +
+    `<li>Сам дашборд со всей живой статистикой стратегий <b>открыт всем</b> — смотрите без доступа.</li>` +
+    `<li>Реальную торговлю стоит включать только после того, как стратегия подтвердит устойчивый плюс на бумаге.</li>` +
     `</ul>` +
-    `<p class="pd-sub">Это в первую очередь исследовательский раздел: показываем как удачные, так и неудачные гипотезы. Из-за рисков доступ выдаётся индивидуально.</p>` +
-    `<p style="margin-top:18px"><a class="pd-back" style="font-size:15px" href="${support}">→ Написать в поддержку для доступа</a></p>` +
-    (authed ? '' : `<p style="margin-top:8px"><a class="pd-back" href="/strategies">→ Войти / зарегистрироваться</a></p>`) +
+    `<p style="margin-top:14px"><a class="pd-back" style="font-size:15px;background:#16321f;border:1px solid #2e5a3a;padding:9px 16px;border-radius:8px" href="/predict">📊 Открыть дашборд (бесплатно)</a></p>` +
+    `<p style="margin-top:10px"><a class="pd-back" style="font-size:15px" href="${support}">→ Запросить доступ к реальной торговле</a></p>` +
+    (authed ? '' : `<p style="margin-top:8px"><a class="pd-back" href="/strategies?login=1&next=/predict">→ Войти / зарегистрироваться</a></p>`) +
     `</div></div>`
   );
 }
@@ -887,6 +1124,21 @@ function readRealControl(): RealControl {
 function writeRealControl(c: RealControl): void {
   writeFileSync(REAL_CONTROL_FILE, JSON.stringify(c, null, 2));
 }
+// Живой статус боевой сессии — пишет супервайзер (predict-real-status.json).
+type RealRunStatus = {
+  strategy: string; slug?: string; state: string; fills: number; cap: number; pnl: number;
+  maxLoss?: number; stakeCap?: number; lastTrade?: string | null; reason?: string | null;
+  since?: string | null; updatedAt?: string;
+};
+const REAL_STATUS_FILE = join(dataDir, 'predict-real-status.json');
+function readRealRunStatus(): RealRunStatus | null {
+  try {
+    if (existsSync(REAL_STATUS_FILE)) return JSON.parse(readFileSync(REAL_STATUS_FILE, 'utf8')) as RealRunStatus;
+  } catch {
+    /* нет статуса */
+  }
+  return null;
+}
 /** Личная (боевая) статистика стратегии — пишется боевым инстансом, если запущен. */
 function readRealStatus(slug: string): PredictStatus | null {
   try {
@@ -924,22 +1176,116 @@ function saveBuilderCreds(key: string, secret: string, passphrase: string): stri
   return `••••${key.trim().slice(-4)}`;
 }
 
-function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): string {
+// Стратегии, доступные для реальной торговли (есть engine + не отключены).
+function realEligibleStrategies(): StrategyDef[] {
+  return STRATEGIES.filter((s) => s.engine && s.realEligible !== false);
+}
+function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string, page = 1): string {
   const back = `<a class="pd-back" href="/predict">← раздел /predict</a>`;
-  void ctrl; void err; // форма временно упрощена до одного поля (EOA, Путь A)
   const fieldStyle = 'margin-top:4px;width:360px;max-width:100%;padding:8px 10px;background:#0b0e13;border:1px solid #2a313c;border-radius:7px;color:#e6e9ef';
   const keyStatus = cfg.keyMask
     ? `<span class="pd-pos">✓ ключ сохранён (${esc(cfg.keyMask)})</span>`
     : `<span class="pd-neg">✗ ключ не сохранён</span>`;
   const updated = cfg.updatedAt ? new Date(cfg.updatedAt).toLocaleString('ru-RU', { timeZone: 'UTC' }) + ' UTC' : '—';
-  return (
-    STYLES +
-    `<div class="pd-wrap">${back}` +
-    `<div class="pd-head"><h1>Реальная торговля</h1>` +
-    `<span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>⏸ не активна</span></div>` +
-    `<div class="pd-card" style="border-color:#3a2e2e">` +
-    `<p class="pd-sub">⚠️ Сохранение тут только передаёт ключ на сервер — торговля НЕ запускается. Используй отдельный кошелёк, держи на нём только то, что готов потерять.</p>` +
-    `</div>` +
+
+  // ── Состояние боевой сессии (одна стратегия за раз) ──────────────────────
+  const funderOk = !!cfg.funderAddress && /^0x[a-fA-F0-9]{40}$/.test(cfg.funderAddress);
+  const canRun = !!cfg.keyMask && funderOk;
+  const run = readRealRunStatus();
+  const eligible = realEligibleStrategies();
+  const runningSlug = Object.keys(ctrl.running ?? {})[0] ?? null; // ровно одна активная
+  const active = !!runningSlug || run?.state === 'running' || run?.state === 'starting';
+  const focusSlug = runningSlug ?? run?.slug ?? null; // чью статистику/статус показываем
+  const titleOf = (slug: string | null) => (slug ? STRATEGIES.find((s) => s.slug === slug)?.title ?? slug : '—');
+  const badge = active
+    ? `<span class="pd-fresh"><span class="pd-dot"></span>● активна: ${esc(titleOf(focusSlug))}</span>`
+    : `<span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>⏸ не активна</span>`;
+  const errNote = err === 'funder'
+    ? `<div class="pd-card" style="border-color:#5a2e2e"><p class="pd-sub" style="color:#ff9b9b">✗ Сначала сохрани корректный адрес депозит-кошелька — без него запуск невозможен.</p></div>`
+    : err === 'busy'
+      ? `<div class="pd-card" style="border-color:#5a2e2e"><p class="pd-sub" style="color:#ff9b9b">✗ Уже работает стратегия. Правило: один аккаунт — одна стратегия. Остановите текущую перед запуском другой.</p></div>`
+      : '';
+
+  const fills = run?.fills ?? 0;
+  const cap = run?.cap ?? 0; // 0 → авто-стопов нет
+  const fillsLabel = cap > 0 ? `${fills} / ${cap}` : String(fills);
+  const stateRu: Record<string, string> = { running: 'идёт торговля', starting: 'запуск…', idle: 'остановлена', done: 'остановлена', error: 'ошибка', low_deposit: '⚠ мало средств' };
+  const pnlCls = (run?.pnl ?? 0) >= 0 ? 'pd-pos' : 'pd-neg';
+  const startBtnStyle = `font-size:15px;background:${canRun ? '#16321f' : '#2a2a2a'};border:1px solid ${canRun ? '#2e5a3a' : '#3a3a3a'};padding:10px 16px;border-radius:8px;cursor:${canRun ? 'pointer' : 'not-allowed'};color:${canRun ? '#e6e9ef' : '#888'}`;
+
+  let launchCard: string;
+  if (active) {
+    // Идёт сессия → статус активной стратегии + только «Остановить» (селектор скрыт).
+    const statusLines =
+      `<div style="margin:6px 0">Состояние: <b>${esc(stateRu[run?.state ?? ''] ?? run?.state ?? '—')}</b>${run?.reason ? ` <span class="pd-muted-td">· ${esc(run.reason)}</span>` : ''}</div>` +
+      `<div style="margin:6px 0">Сделок: <b>${fillsLabel}</b> · PnL сессии: <b class="${pnlCls}">${fmtUsd(run?.pnl ?? 0)}</b></div>` +
+      (run?.lastTrade ? `<div class="pd-foot">Последняя: ${esc(run.lastTrade)}</div>` : '') +
+      (run?.since ? `<div class="pd-foot">Старт: ${esc(new Date(run.since).toLocaleString('ru-RU', { timeZone: 'UTC' }))} UTC</div>` : '');
+    const lowDepNote = run?.state === 'low_deposit'
+      ? `<div class="pd-card" style="border-color:#5a4a2e;background:rgba(90,74,46,.18);margin:10px 0 0"><p class="pd-sub" style="color:#e5c061;margin:0">💰 ${esc(run.reason ?? 'Депозит мал для безопасной минимальной ставки $1 — пополните кошелёк до ~$4+.')}</p></div>`
+      : '';
+    launchCard =
+      `<div class="pd-card" style="border-color:${run?.state === 'low_deposit' ? '#5a4a2e' : '#2e5a3a'}">` +
+      `<h2>Реальная торговля</h2>` +
+      `<p class="pd-sub">Активная стратегия: <b>${esc(titleOf(focusSlug))}</b> [${esc(focusSlug ?? '')}]. Правило: <b>одна стратегия за раз</b>. Работает <b>до ручной остановки</b> (авто-стопов нет). Размер ставки — Kelly от твоего реального депозита.</p>` +
+      lowDepNote +
+      statusLines +
+      `<form method="POST" action="/predict/real/stop" style="margin-top:14px"><input type="hidden" name="slug" value="${esc(runningSlug ?? focusSlug ?? '')}"><button type="submit" class="pd-back" style="font-size:15px;background:#3a1f1f;border:1px solid #5a2e2e;padding:10px 16px;border-radius:8px;cursor:pointer;color:#ffd9d9">⏸ Остановить</button></form>` +
+      `</div>`;
+  } else {
+    // Свободно → селектор стратегии (radio) + «Запустить».
+    const opts = eligible
+      .map((s, i) =>
+        `<label style="display:flex;align-items:center;gap:9px;padding:8px 0;border-top:${i ? '1px solid #1d232e' : 'none'};cursor:pointer">` +
+        `<input type="radio" name="slug" value="${esc(s.slug)}"${i === 0 ? ' checked' : ''} style="accent-color:#4ad991">` +
+        `<span><b style="color:#e6e9ef">${esc(s.title)}</b> <span class="pd-muted-td" style="font-size:12px">[${esc(s.slug)}]</span></span></label>`)
+      .join('');
+    const lastNote = run
+      ? `<div class="pd-foot" style="margin:2px 0 12px">Прошлая сессия: <b>${esc(titleOf(focusSlug))}</b> — ${esc(stateRu[run.state] ?? run.state)}, сделок ${fills}, PnL ${fmtUsd(run.pnl ?? 0)}.</div>`
+      : '';
+    launchCard =
+      `<div class="pd-card">` +
+      `<h2>Запуск стратегии (реальные деньги)</h2>` +
+      `<p class="pd-sub">Выбери ОДНУ стратегию. Правило: <b>один аккаунт — одна стратегия за раз</b>. ⚠️ <b>Авто-стопов нет</b> — работает до ручной остановки. Размер ставки — <b>Kelly от твоего реального депозита</b> (нужно ≥ ~$4 на кошельке).</p>` +
+      lastNote +
+      `<form method="POST" action="/predict/real/start">` +
+      `<div style="margin:8px 0 16px">${opts}</div>` +
+      `<button type="submit" class="pd-back" style="${startBtnStyle}"${canRun ? '' : ' disabled'}>▶ Запустить выбранную (реал)</button>` +
+      `</form>` +
+      (canRun ? '' : `<p class="pd-foot" style="margin-top:10px;color:#caa">Кнопка станет активной после сохранения ключа и адреса депозит-кошелька ниже.</p>`) +
+      `</div>`;
+  }
+
+  // ── Статистика реальных сделок выбранной стратегии (окно 20 + пагинация). ──
+  const ts = focusSlug ? readRealStatus(focusSlug) : null;
+  const allRounds = ts?.recentRounds ?? [];
+  let tradesCard =
+    `<div class="pd-card"><h2>Статистика реальных сделок</h2>` +
+    `<p class="pd-foot">Завершённых реальных сделок пока нет — появятся здесь после первых закрытых раундов. Окно — 20 сделок на страницу.</p></div>`;
+  if (allRounds.length > 0) {
+    const PAGE_SIZE = 20;
+    const totalPages = Math.max(1, Math.ceil(allRounds.length / PAGE_SIZE));
+    const pg = Math.min(Math.max(1, page), totalPages);
+    const pageRounds = allRounds.slice((pg - 1) * PAGE_SIZE, pg * PAGE_SIZE);
+    const table = recentRoundsTable(pageRounds, {
+      title: `Сделки — ${titleOf(focusSlug)} (${allRounds.length})`,
+      page: pg,
+      totalPages,
+      baseHref: '/predict/real',
+    });
+    const np = ts?.netPnl ?? 0;
+    tradesCard =
+      `<div class="pd-card"><h2>Статистика реальных сделок — ${esc(titleOf(focusSlug))}</h2>` +
+      `<div class="pd-grid">` +
+      statCard('Сделок', String(ts?.rounds ?? allRounds.length)) +
+      statCard('Win rate', `${ts?.winRate ?? 0}%`) +
+      statCard('Net PnL', fmtUsd(np), np > 0 ? 'pos' : np < 0 ? 'neg' : 'muted') +
+      (ts?.avgStake != null ? statCard('Ср. ставка', `$${ts.avgStake.toFixed(2)}`, 'muted') : '') +
+      (ts?.maxDrawdown != null ? statCard('Max drawdown', `$${ts.maxDrawdown.toFixed(2)}`, 'muted') : '') +
+      `</div>` + table + `</div>`;
+  }
+
+  const walletForm =
     `<form method="POST" action="/predict/real/save" autocomplete="off">` +
     `<div class="pd-card"><h2>Подключение кошелька</h2>` +
     `<label style="display:block;margin-bottom:12px">Приватный ключ кошелька (хранится на сервере в защищённом файле, обратно не показывается):<br>` +
@@ -954,7 +1300,19 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     `</div>` +
     `<div class="pd-card"><button type="submit" class="pd-back" style="font-size:15px;background:#16321f;border:1px solid #2e5a3a;padding:10px 16px;border-radius:8px;cursor:pointer">💾 Сохранить</button>` +
     `<p class="pd-foot" style="margin-top:10px">Обновлено: ${esc(updated)}</p></div>` +
-    `</form>` +
+    `</form>`;
+
+  return (
+    STYLES +
+    `<div class="pd-wrap">${back}` +
+    `<div class="pd-head"><h1>Реальная торговля</h1>${badge}</div>` +
+    `<div class="pd-card" style="border-color:#3a2e2e">` +
+    `<p class="pd-sub">⚠️ Реальные деньги. Используй отдельный кошелёк, держи на нём только то, что готов потерять. <b>Авто-стопов нет</b> — стратегия работает до ручной остановки кнопкой «Остановить».</p>` +
+    `</div>` +
+    errNote +
+    walletForm +
+    launchCard +
+    tradesCard +
     `</div>`
   );
 }
@@ -967,34 +1325,55 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     return u && u.predictAccess ? u : null;
   };
 
-  app.get('/predict', async (req, reply) => {
+  // Карта slug→engine доступных для реала стратегий — читает супервайзер на VPS.
+  // Пишется при старте сайта, поэтому новые стратегии подхватываются автоматически.
+  try {
+    const list = realEligibleStrategies().map((s) => ({ slug: s.slug, engine: s.engine, title: s.title }));
+    writeFileSync(join(dataDir, 'predict-real-strategies.json'), JSON.stringify({ updatedAt: new Date().toISOString(), strategies: list }, null, 2));
+    // Полный манифест (все активные, не-retired) — единый источник правды для анализатора отчёта.
+    const all = STRATEGIES.filter((s) => s.engine && !s.retired).map((s) => ({ slug: s.slug, engine: s.engine, title: s.title, dir: 'predict-' + s.slug }));
+    writeFileSync(join(dataDir, 'predict-strategies-all.json'), JSON.stringify({ updatedAt: new Date().toISOString(), strategies: all }, null, 2));
+  } catch {
+    /* не критично — супервайзер использует встроенный дефолт */
+  }
+
+  // Публичный лендинг раздела (описание + hero-шейдер). Без гейта — индексируется.
+  app.get('/predict/about', async (req, reply) => {
     reply.header('content-type', 'text/html; charset=utf-8');
-    reply.header('Cache-Control', 'private, no-store');
-    const u = gate(req);
-    if (!u) {
-      return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow' });
-    }
-    return pageShell('/predict — Robot Claude', REAL_TRADING_NOTE + renderOverview(), {
+    const u = getAuthedUser(req);
+    return pageShell('Predict — что это и зачем · Robot Claude', renderAbout(), {
       lang: 'ru',
-      autoRefreshSec: 60,
-      robots: 'noindex, nofollow',
-      authed: { displayName: u.displayName, phone: u.phone },
+      robots: 'index, follow',
+      loginNext: '/predict',
+      authed: u ? { displayName: u.displayName, phone: u.phone } : undefined,
     });
   });
 
-  // Авто-отчёт здоровья стратегий (обновляется systemd-таймером predict-report каждые 3ч).
+  // Дашборд /predict — ПУБЛИЧНЫЙ (открыт всем). Реальная торговля остаётся за доступом.
+  app.get('/predict', async (req, reply) => {
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('Cache-Control', 'no-store');
+    const u = getAuthedUser(req);
+    return pageShell('/predict — Robot Claude', REAL_TRADING_NOTE + renderOverview(), {
+      lang: 'ru',
+      autoRefreshSec: 60,
+      robots: 'index, follow',
+      loginNext: '/predict',
+      authed: u ? { displayName: u.displayName, phone: u.phone } : undefined,
+    });
+  });
+
+  // Авто-отчёт здоровья стратегий — ПУБЛИЧНЫЙ (обновляется systemd-таймером каждые 3ч).
   app.get('/predict/report', async (req, reply) => {
     reply.header('content-type', 'text/html; charset=utf-8');
-    reply.header('Cache-Control', 'private, no-store');
-    const u = gate(req);
-    if (!u) {
-      return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow' });
-    }
+    reply.header('Cache-Control', 'no-store');
+    const u = getAuthedUser(req);
     return pageShell('Авто-отчёт — /predict', renderReport(), {
       lang: 'ru',
       autoRefreshSec: 300,
-      robots: 'noindex, nofollow',
-      authed: { displayName: u.displayName, phone: u.phone },
+      robots: 'index, follow',
+      loginNext: '/predict',
+      authed: u ? { displayName: u.displayName, phone: u.phone } : undefined,
     });
   });
 
@@ -1005,10 +1384,11 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     reply.header('Cache-Control', 'private, no-store');
     const u = gate(req);
     if (!u) {
-      return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow' });
+      return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow', loginNext: '/predict' });
     }
-    const err = (req.query as { err?: string } | undefined)?.err;
-    return pageShell('Реальная торговля — /predict', renderRealTrading(readRealConfig(), readRealControl(), err), {
+    const q = (req.query as { err?: string; page?: string } | undefined) ?? {};
+    const page = Math.max(1, parseInt(String(q.page ?? '1'), 10) || 1);
+    return pageShell('Реальная торговля — /predict', renderRealTrading(readRealConfig(), readRealControl(), q.err, page), {
       lang: 'ru',
       robots: 'noindex, nofollow',
       authed: { displayName: u.displayName, phone: u.phone },
@@ -1026,22 +1406,25 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     const slug = String(b.slug ?? '');
     const cfg = readRealConfig();
     const funderOk = !!cfg.funderAddress && /^0x[a-fA-F0-9]{40}$/.test(cfg.funderAddress);
-    if (!funderOk) {
-      // Нельзя запускать боевую торговлю без валидного funder-адреса.
+    if (!funderOk || !cfg.keyMask) {
       reply.code(303).header('location', '/predict/real?err=funder').send();
       return;
     }
-    if (STRATEGIES.some((s) => s.slug === slug) && cfg.keyMask) {
-      // Сохраняем фикс. ставку этой стратегии (если задана), затем запускаем.
-      const stakeN = Number(b.stake);
-      if (Number.isFinite(stakeN) && stakeN > 0) {
-        cfg.stakes = { ...cfg.stakes, [slug]: Math.round(stakeN * 100) / 100 };
-        writeRealConfig(cfg);
-      }
-      const c = readRealControl();
-      c.running[slug] = { since: new Date().toISOString() };
-      writeRealControl(c);
+    // Только eligible-стратегия.
+    const elig = STRATEGIES.find((s) => s.slug === slug && s.engine && s.realEligible !== false);
+    if (!elig) {
+      reply.code(303).header('location', '/predict/real').send();
+      return;
     }
+    const c = readRealControl();
+    // ПРАВИЛО: одна стратегия за раз. Если уже что-то запущено — не стартуем вторую.
+    const already = Object.keys(c.running ?? {});
+    if (already.length > 0 && !already.includes(slug)) {
+      reply.code(303).header('location', '/predict/real?err=busy').send();
+      return;
+    }
+    c.running = { [slug]: { since: new Date().toISOString() } }; // ровно одна
+    writeRealControl(c);
     reply.code(303).header('location', '/predict/real').send();
   });
 
@@ -1098,26 +1481,20 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
   for (const s of STRATEGIES) {
     app.get(`/predict/${s.slug}`, async (req, reply) => {
       reply.header('content-type', 'text/html; charset=utf-8');
-      reply.header('Cache-Control', 'private, no-store');
-      const u = gate(req);
-      if (!u) {
-        return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow' });
-      }
+      reply.header('Cache-Control', 'no-store');
+      const u = getAuthedUser(req);
       const pageRaw = (req.query as { page?: string } | undefined)?.page;
       const page = Math.max(1, parseInt(pageRaw ?? '1', 10) || 1);
       return pageShell(`${s.title} — /predict`, renderStrategy(s, page), {
         lang: 'ru',
         autoRefreshSec: 60,
-        robots: 'noindex, nofollow',
-        authed: { displayName: u.displayName, phone: u.phone },
+        robots: 'index, follow',
+      loginNext: '/predict',
+        authed: u ? { displayName: u.displayName, phone: u.phone } : undefined,
       });
     });
     app.get(`/predict/${s.slug}/status.json`, async (req, reply) => {
-      reply.header('Cache-Control', 'private, no-store');
-      if (!gate(req)) {
-        reply.code(403);
-        return { ok: false, error: 'forbidden' };
-      }
+      reply.header('Cache-Control', 'no-store');
       const st = readStatus(s);
       if (!st) {
         reply.code(503);
@@ -1127,10 +1504,6 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     });
     app.get(`/predict/${s.slug}/live.json`, async (req, reply) => {
       reply.header('Cache-Control', 'no-store');
-      if (!gate(req)) {
-        reply.code(403);
-        return { ok: false, error: 'forbidden' };
-      }
       const live = readLive(s);
       if (!live) {
         reply.code(503);
@@ -1199,13 +1572,9 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // Диагностика: что движок прочитает. Закрыта тем же гейтом, что и раздел.
+  // Диагностика: что движок прочитает. Публично (read-only данные сигналов).
   app.get('/predict/lux/feed.json', async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
-    if (!gate(req)) {
-      reply.code(403);
-      return { ok: false, error: 'forbidden' };
-    }
     try {
       if (existsSync(LUX_SIGNAL_FILE)) return JSON.parse(readFileSync(LUX_SIGNAL_FILE, 'utf8'));
     } catch {
