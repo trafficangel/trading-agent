@@ -887,11 +887,15 @@ function renderOverview(): string {
   return (
     STYLES +
     `<div class="pd-wrap">` +
-    `<div class="pd-head"><h1>/predict</h1></div>` +
-    `<p class="pd-sub">Экспериментальные стратегии на prediction-маркете Polymarket (BTC Up/Down, 5 мин). ` +
-    `Каждая стратегия — отдельная гипотеза со своей честной статистикой (убытки тоже показываем). ` +
-    `Всё в paper-режиме и изолировано от основного бота — это только просмотр.</p>` +
-    `<p style="margin:-8px 0 20px"><a class="pd-arrow" href="/predict/report">📊 Авто-отчёт здоровья стратегий →</a>&nbsp;&nbsp;<a class="pd-arrow" href="/predict/about">✨ О разделе →</a></p>` +
+    `<div class="pd-head"><h1>Песочница стратегий</h1><span class="pd-fresh pd-fresh-stale" style="font-size:13px;padding:3px 10px">📄 Бумажная торговля</span></div>` +
+    `<p class="pd-sub">Здесь мы тестируем торговые гипотезы на реальных рынках Polymarket (BTC Up/Down, 5 мин) без реальных денег. ` +
+    `Каждая стратегия — отдельная идея со своей честной статистикой: показываем всё как есть, включая убытки. ` +
+    `Стратегии, которые подтверждают преимущество на бумаге, переводим в реальную торговлю.</p>` +
+    `<p style="margin:-8px 0 20px">` +
+    `<a class="pd-arrow" href="/predict/report">📊 Авто-отчёт здоровья стратегий →</a>&nbsp;&nbsp;` +
+    `<a class="pd-arrow" href="/predict/about">✨ О разделе →</a>&nbsp;&nbsp;` +
+    `<a class="pd-arrow" href="https://t.me/dboykod" target="_blank" rel="noopener">💡 Предложить идею или стратегию →</a>` +
+    `</p>` +
     `<div class="pd-cards">${cards}</div>` +
     globalFeed() +
     `</div>`
