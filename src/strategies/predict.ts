@@ -367,6 +367,16 @@ function equitySvg(points: PredictStatus['equityCurve']): string {
   );
 }
 
+/** Кривая накопленного PnL из списка раундов (реальный экспорт не пишет equityCurve). */
+function equityFromRounds(rounds: RecentRound[], slug: string): PredictStatus['equityCurve'] {
+  const asc = [...rounds].sort((a, b) => (a.t ?? 0) - (b.t ?? 0));
+  let cum = 0;
+  return asc.map((r) => {
+    cum += r.pnl ?? 0;
+    return { t: r.t ?? null, slug, pnl: r.pnl ?? 0, cumulative: Math.round(cum * 100) / 100 };
+  });
+}
+
 function statCard(label: string, value: string, accent?: 'pos' | 'neg' | 'muted'): string {
   const cls = accent ? ` pd-stat-${accent}` : '';
   return `<div class="pd-stat${cls}"><div class="pd-stat-val">${value}</div><div class="pd-stat-lbl">${esc(label)}</div></div>`;
@@ -1157,6 +1167,17 @@ function readRealStatus(slug: string): PredictStatus | null {
   }
   return null;
 }
+/** Открытая боевая позиция стратегии (live) — пишет движок в PREDICT_LIVE_PATH. */
+type RealLive = { position?: { side?: string; stake?: number; entryCoef?: number }; slotEndMs?: number };
+function readRealLive(slug: string): RealLive | null {
+  try {
+    const p = join(dataDir, `predict-real-${slug}-live.json`);
+    if (existsSync(p)) return JSON.parse(readFileSync(p, 'utf8')) as RealLive;
+  } catch {
+    /* нет открытой позиции */
+  }
+  return null;
+}
 
 /** Сохранить приватный ключ в защищённый файл (chmod 600). Возвращает маску. */
 function saveRealKey(rawKey: string): string {
@@ -1222,10 +1243,11 @@ function realCard(s: StrategyDef, ses: RealSession | null, ts: PredictStatus | n
       : `<button class="pd-rbtn pd-rbtn-off" disabled title="Сначала сохрани ключ и адрес депозита">▶ Запустить</button>`;
   return (
     `<div class="pd-rcard ${isActive ? 'pd-rcard-on' : 'pd-rcard-off'}">` +
-    `<h3><a href="/predict/${s.slug}">${esc(s.title)}</a>${stateBadge}</h3>` +
+    `<h3><a href="/predict/real/${s.slug}">${esc(s.title)}</a>${stateBadge}</h3>` +
     `<div class="tag">${esc(s.tagline)}</div>` +
     live +
     tradeRow +
+    `<a class="pd-arrow" href="/predict/real/${s.slug}" style="margin:0 0 8px">Подробная статистика и сделки →</a>` +
     btn +
     `</div>`
   );
@@ -1255,6 +1277,18 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     ? `<div class="pd-card" style="border-color:#5a2e2e"><p class="pd-sub" style="color:#ff9b9b">✗ Сначала сохрани корректный адрес депозит-кошелька — без него запуск невозможен.</p></div>`
     : '';
 
+  // Сводные реальные метрики + накопительная кривая по всем стратегиям.
+  let totalRealPnl = 0, totalRealTrades = 0;
+  const allRealRounds: RecentRound[] = [];
+  for (const s of eligible) {
+    const ts = readRealStatus(s.slug);
+    if (!ts) continue;
+    totalRealPnl += ts.netPnl ?? 0;
+    totalRealTrades += ts.rounds ?? 0;
+    for (const r of ts.recentRounds ?? []) allRealRounds.push({ ...r, _strategy: s.title });
+  }
+  totalRealPnl = Math.round(totalRealPnl * 100) / 100;
+
   // Карточки: активные сверху, неактивные (приглушённые) снизу.
   const cards = [...eligible]
     .sort((a, b) => (activeSet.has(b.slug) ? 1 : 0) - (activeSet.has(a.slug) ? 1 : 0))
@@ -1267,6 +1301,15 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
       ? `<p class="pd-foot" style="margin:0 0 14px">Активна одна стратегия — банк Kelly = весь депозит $${deposit.toFixed(2)}.</p>`
       : `<p class="pd-foot" style="margin:0 0 14px">Запускай любое число стратегий. Банк Kelly делится поровну между активными (депозит ÷ число активных) — суммарные ставки не превысят кошелёк. На каждую активную нужно ≥ ~$3.34.</p>`;
 
+  // Сводка по депозиту/результату — вверху страницы.
+  const summaryCard =
+    `<div class="pd-card"><div class="pd-grid">` +
+    statCard('Депозит', deposit != null ? `$${deposit.toFixed(2)}` : '—', deposit != null ? undefined : 'muted') +
+    statCard('Активных стратегий', String(activeCount)) +
+    statCard('Реальный PnL (всего)', fmtUsd(totalRealPnl), totalRealPnl > 0 ? 'pos' : totalRealPnl < 0 ? 'neg' : 'muted') +
+    statCard('Сделок (всего)', String(totalRealTrades)) +
+    `</div></div>`;
+
   const launchCard =
     `<div class="pd-card">` +
     `<h2>Стратегии — реальная торговля</h2>` +
@@ -1276,21 +1319,47 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     (canRun ? '' : `<p class="pd-foot" style="margin-top:14px;color:#caa">Кнопки «Запустить» станут активными после сохранения ключа и адреса депозит-кошелька ниже.</p>`) +
     `</div>`;
 
+  // Общая кривая накопленного PnL (все реальные сделки всех стратегий).
+  const overallChart = allRealRounds.length >= 2
+    ? `<div class="pd-card"><h2>Кривая накопленного PnL — все стратегии</h2>${equitySvg(equityFromRounds(allRealRounds, 'real'))}` +
+      `<div class="pd-foot">Все реальные сделки по всем стратегиям, накопительно.</div></div>`
+    : '';
+
+  // Открытые сделки сейчас — по всем активным стратегиям.
+  const liveRows: RecentRound[] = [];
+  for (const slug of activeSet) {
+    const live = readRealLive(slug);
+    const pos = live?.position;
+    if (pos && (pos.side === 'UP' || pos.side === 'DOWN')) {
+      const secLeft = typeof live?.slotEndMs === 'number' ? Math.round((live.slotEndMs - Date.now()) / 1000) : undefined;
+      const title = STRATEGIES.find((x) => x.slug === slug)?.title ?? slug;
+      liveRows.push({ t: Date.now(), side: pos.side, stake: pos.stake ?? null, coef: pos.entryCoef ?? null, pnl: 0, win: false, _strategy: title, _live: true, _secLeft: secLeft });
+    }
+  }
+  const openCard = activeCount === 0
+    ? ''
+    : liveRows.length > 0
+      ? recentRoundsTable(liveRows, { title: `Открытые сделки сейчас (${liveRows.length})`, showStrategy: true })
+      : `<div class="pd-card"><h2>Открытые сделки сейчас</h2><p class="pd-foot">Открытых позиций нет — активные стратегии ждут подходящий раунд (вход за 45–90с до закрытия).</p></div>`;
+
+  // Подключение к бирже — сворачиваемый блок (свёрнут, если ключ и адрес уже сохранены).
   const walletForm =
     `<form method="POST" action="/predict/real/save" autocomplete="off">` +
-    `<div class="pd-card"><h2>Подключение кошелька</h2>` +
-    `<label style="display:block;margin-bottom:12px">Приватный ключ кошелька (хранится на сервере в защищённом файле, обратно не показывается):<br>` +
+    `<details class="pd-card"${canRun ? '' : ' open'}>` +
+    `<summary style="cursor:pointer;font-weight:700;color:#e6e9ef;font-size:16px">⚙ Подключение к бирже ${canRun ? '<span class="pd-pos" style="font-size:13px;font-weight:600">✓ настроено — нажми, чтобы изменить</span>' : '<span class="pd-neg" style="font-size:13px;font-weight:600">— требуется настройка</span>'}</summary>` +
+    `<div style="margin-top:18px">` +
+    `<h3 style="margin:0 0 8px;color:#fff;font-size:16px">Приватный ключ кошелька</h3>` +
+    `<label style="display:block;margin-bottom:12px">Хранится на сервере в защищённом файле, обратно не показывается:<br>` +
     `<input type="password" name="privkey" value="" placeholder="${cfg.keyMask ? 'оставь пустым, чтобы не менять' : '0x… приватный ключ'}" autocomplete="new-password" style="${fieldStyle}"></label>` +
-    `<div style="margin:6px 0 14px">Статус ключа: ${keyStatus}</div>` +
-    `<p class="pd-foot">🔒 Ключ передаётся по HTTPS, кладётся в файл с правами 600, в логи/в git не попадает и обратно не показывается.</p>` +
-    `</div>` +
-    `<div class="pd-card"><h2>Адрес депозит-кошелька Polymarket</h2>` +
-    `<p class="pd-foot" style="margin-bottom:10px">В профиле Polymarket это строка <b>«Адрес … только для использования API»</b> (0x…). Скопируй её сюда. <b>API-ключ вводить НЕ нужно</b> — он создаётся автоматически из приватного ключа и привязывается к этому депозит-кошельку.</p>` +
-    `<label style="display:block;margin-bottom:8px">Адрес депозит-кошелька (0x…):<br><input type="text" name="funder" value="${esc(cfg.funderAddress ?? '')}" placeholder="0x… (ровно 0x + 40 hex)" style="${fieldStyle}"></label>` +
-    `<div style="margin:6px 0 4px">Статус адреса: ${cfg.funderAddress && /^0x[a-fA-F0-9]{40}$/.test(cfg.funderAddress) ? `<span class="pd-pos">✓ адрес сохранён (${esc(cfg.funderAddress.slice(0, 6))}…${esc(cfg.funderAddress.slice(-4))})</span>` : '<span class="pd-neg">✗ адрес не задан</span>'}</div>` +
-    `</div>` +
-    `<div class="pd-card"><button type="submit" class="pd-back" style="font-size:15px;background:#16321f;border:1px solid #2e5a3a;padding:10px 16px;border-radius:8px;cursor:pointer">💾 Сохранить</button>` +
-    `<p class="pd-foot" style="margin-top:10px">Обновлено: ${esc(updated)}</p></div>` +
+    `<div style="margin:6px 0 12px">Статус ключа: ${keyStatus}</div>` +
+    `<p class="pd-foot" style="margin-bottom:20px">🔒 Ключ передаётся по HTTPS, кладётся в файл с правами 600, в логи/в git не попадает.</p>` +
+    `<h3 style="margin:0 0 8px;color:#fff;font-size:16px">Адрес депозит-кошелька Polymarket</h3>` +
+    `<p class="pd-foot" style="margin-bottom:10px">В профиле Polymarket это строка <b>«Адрес … только для использования API»</b> (0x…). <b>API-ключ вводить НЕ нужно</b> — он создаётся автоматически из приватного ключа.</p>` +
+    `<label style="display:block;margin-bottom:8px"><input type="text" name="funder" value="${esc(cfg.funderAddress ?? '')}" placeholder="0x… (ровно 0x + 40 hex)" style="${fieldStyle}"></label>` +
+    `<div style="margin:6px 0 16px">Статус адреса: ${cfg.funderAddress && /^0x[a-fA-F0-9]{40}$/.test(cfg.funderAddress) ? `<span class="pd-pos">✓ адрес сохранён (${esc(cfg.funderAddress.slice(0, 6))}…${esc(cfg.funderAddress.slice(-4))})</span>` : '<span class="pd-neg">✗ адрес не задан</span>'}</div>` +
+    `<button type="submit" class="pd-back" style="font-size:15px;background:#16321f;border:1px solid #2e5a3a;padding:10px 16px;border-radius:8px;cursor:pointer">💾 Сохранить</button>` +
+    `<p class="pd-foot" style="margin-top:10px">Обновлено: ${esc(updated)}</p>` +
+    `</div></details>` +
     `</form>`;
 
   return (
@@ -1298,11 +1367,68 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     `<div class="pd-wrap">${back}` +
     `<div class="pd-head"><h1>Реальная торговля</h1>${badge}</div>` +
     `<div class="pd-card" style="border-color:#3a2e2e">` +
-    `<p class="pd-sub">⚠️ Реальные деньги. Используй отдельный кошелёк, держи на нём только то, что готов потерять. <b>Авто-стопов нет</b> — стратегия работает до ручной остановки кнопкой «Остановить».</p>` +
+    `<p class="pd-sub">⚠️ Реальные деньги. Используй отдельный кошелёк, держи на нём только то, что готов потерять. <b>Авто-стопов нет</b> — стратегии работают до ручной остановки кнопкой «Остановить».</p>` +
     `</div>` +
+    summaryCard +
     errNote +
-    walletForm +
     launchCard +
+    overallChart +
+    openCard +
+    walletForm +
+    `</div>`
+  );
+}
+
+// Страница реальной статистики одной стратегии: живая сессия + агрегаты + кривая + все сделки.
+function renderRealStrategy(s: StrategyDef, st: PredictStatus | null, ses: RealSession | null, page: number): string {
+  const back = `<a class="pd-back" href="/predict/real">← реальная торговля</a>`;
+  const isActive = ses != null;
+  const stateBadge = isActive
+    ? `<span class="pd-fresh"><span class="pd-dot"></span>● ${esc(REAL_STATE_RU[ses.state] ?? ses.state)}</span>`
+    : `<span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>⏸ не запущена</span>`;
+  const header = `<div class="pd-head"><h1>${esc(s.title)}</h1>${stateBadge}</div>`;
+  const sessionCard = isActive
+    ? `<div class="pd-card" style="border-color:${ses.state === 'low_deposit' ? '#5a4a2e' : '#2e5a3a'}"><h2>Текущая сессия</h2>` +
+      `<div style="margin:6px 0">Сделок: <b>${ses.fills ?? 0}</b> · PnL сессии: <b class="${(ses.pnl ?? 0) >= 0 ? 'pd-pos' : 'pd-neg'}">${fmtUsd(ses.pnl ?? 0)}</b>` +
+      (ses.bank != null ? ` · банк: <b>$${ses.bank.toFixed(2)}</b>` : '') + `</div>` +
+      (ses.since ? `<div class="pd-foot">Старт: ${esc(new Date(ses.since).toLocaleString('ru-RU', { timeZone: 'UTC' }))} UTC</div>` : '') +
+      (ses.state === 'low_deposit' && ses.reason ? `<div style="color:#e5c061;margin-top:8px">💰 ${esc(ses.reason)}</div>` : '') +
+      `<form method="POST" action="/predict/real/stop" style="margin-top:14px"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-rbtn pd-rbtn-stop" style="width:auto;display:inline-block;padding:9px 20px">⏸ Остановить</button></form>` +
+      `</div>`
+    : `<div class="pd-card"><p class="pd-sub">Стратегия сейчас не запущена в реале. ${st && (st.rounds ?? 0) > 0 ? 'Ниже — статистика прошлых реальных сделок.' : 'Реальных сделок пока не было.'}</p>` +
+      `<form method="POST" action="/predict/real/start"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-rbtn pd-rbtn-go" style="width:auto;display:inline-block;padding:9px 20px">▶ Запустить</button></form></div>`;
+
+  if (!st || (st.rounds ?? 0) === 0) {
+    return STYLES + `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` + sessionCard +
+      `<div class="pd-card"><p class="pd-foot">Завершённых реальных сделок пока нет — появятся здесь после первых закрытых раундов.</p></div></div>`;
+  }
+
+  const netAccent = st.netPnl > 0 ? 'pos' : st.netPnl < 0 ? 'neg' : 'muted';
+  const PAGE_SIZE = 20;
+  const allRounds = st.recentRounds ?? [];
+  const totalPages = Math.max(1, Math.ceil(allRounds.length / PAGE_SIZE));
+  const p = Math.min(Math.max(1, page), totalPages);
+  const pageRounds = allRounds.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
+  const roundsTable = recentRoundsTable(pageRounds, { title: `Реальные сделки (${allRounds.length})`, page: p, totalPages, baseHref: `/predict/real/${s.slug}` });
+  const updated = st.updatedAt ? new Date(st.updatedAt).toLocaleString('ru-RU', { timeZone: 'UTC' }) : '—';
+
+  return (
+    STYLES +
+    `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` +
+    sessionCard +
+    `<div class="pd-grid">` +
+    statCard('Сделок', String(st.rounds)) +
+    statCard('Win rate', `${st.winRate}%`) +
+    statCard('Net PnL', fmtUsd(st.netPnl), netAccent) +
+    (st.profitFactor != null ? statCard('Profit factor', st.profitFactor.toFixed(2), 'muted') : '') +
+    statCard('Max drawdown', `$${st.maxDrawdown.toFixed(2)}`, 'muted') +
+    (st.maxLossStreak != null ? statCard('Макс. серия −', String(st.maxLossStreak), 'muted') : '') +
+    (st.avgStake != null ? statCard('Ср. ставка', `$${st.avgStake.toFixed(2)}`, 'muted') : '') +
+    (st.avgCoef != null ? statCard('Ср. коэф.', st.avgCoef.toFixed(2), 'muted') : '') +
+    `</div>` +
+    `<div class="pd-card"><h2>Кривая накопленного PnL</h2>${equitySvg(equityFromRounds(allRounds, s.slug))}</div>` +
+    roundsTable +
+    `<p class="pd-foot">Обновлено: ${esc(updated)} UTC · реальные деньги</p>` +
     `</div>`
   );
 }
@@ -1380,6 +1506,32 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     return pageShell('Реальная торговля — /predict', renderRealTrading(readRealConfig(), readRealControl(), q.err), {
       lang: 'ru',
       robots: 'noindex, nofollow',
+      autoRefreshSec: 30,
+      authed: { displayName: u.displayName, phone: u.phone },
+    });
+  });
+
+  // Страница реальной статистики одной стратегии (живая сессия + агрегаты + кривая + сделки).
+  app.get('/predict/real/:slug', async (req, reply) => {
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('Cache-Control', 'private, no-store');
+    const u = gate(req);
+    if (!u) {
+      return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow', loginNext: '/predict' });
+    }
+    const slug = String((req.params as { slug?: string }).slug ?? '');
+    const s = STRATEGIES.find((x) => x.slug === slug && x.engine && x.realEligible !== false);
+    if (!s) {
+      reply.code(303).header('location', '/predict/real').send();
+      return;
+    }
+    const pageRaw = (req.query as { page?: string } | undefined)?.page;
+    const page = Math.max(1, parseInt(pageRaw ?? '1', 10) || 1);
+    const ses = readRealSessions().sessions[slug] ?? null;
+    return pageShell(`${s.title} — реальная торговля`, renderRealStrategy(s, readRealStatus(slug), ses, page), {
+      lang: 'ru',
+      robots: 'noindex, nofollow',
+      autoRefreshSec: 30,
       authed: { displayName: u.displayName, phone: u.phone },
     });
   });
