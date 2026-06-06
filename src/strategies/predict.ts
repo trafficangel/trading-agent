@@ -557,6 +557,26 @@ const STYLES = `<style>
   .pd-liverow{background:rgba(229,180,97,0.06)}
   .pd-retired{font-size:11px;font-weight:600;color:#8b95a4;background:#1e2530;border-radius:6px;padding:2px 8px;margin-left:8px;vertical-align:middle}
   .pd-scard-off{opacity:.62}
+  .pd-rcard{background:#11151c;border:1px solid #1e2530;border-radius:14px;padding:18px;transition:opacity .15s,filter .15s,border-color .15s}
+  .pd-rcard h3{margin:0 0 4px;color:#fff;font-size:17px}
+  .pd-rcard h3 a{color:#fff;text-decoration:none}
+  .pd-rcard h3 a:hover{color:#4ad991}
+  .pd-rcard .tag{color:#8b95a4;font-size:12.5px;line-height:1.4;margin-bottom:12px}
+  .pd-rcard .row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px}
+  .pd-rcard .row div{font-size:12.5px;color:#9aa4b2}
+  .pd-rcard .row b{display:block;font-size:16px;color:#fff;font-weight:700;margin-bottom:2px}
+  .pd-rcard-on{border-color:#2e5a3a;box-shadow:0 0 0 1px rgba(74,217,145,.12)}
+  .pd-rcard-off{opacity:.5;filter:grayscale(.55) blur(.5px)}
+  .pd-rcard-off:hover{opacity:1;filter:none}
+  .pd-rbtn{display:inline-block;width:100%;text-align:center;font-size:14px;padding:9px 14px;border-radius:8px;cursor:pointer;margin-top:6px}
+  .pd-rbtn-go{background:#16321f;border:1px solid #2e5a3a;color:#e6e9ef}
+  .pd-rbtn-go:hover{background:#1b3d27}
+  .pd-rbtn-stop{background:#3a1f1f;border:1px solid #5a2e2e;color:#ffd9d9}
+  .pd-rbtn-stop:hover{background:#491f1f}
+  .pd-rbtn-off{background:#23262c;border:1px solid #33373f;color:#888;cursor:not-allowed}
+  .pd-rstate{font-size:12px;font-weight:600;border-radius:6px;padding:2px 8px;margin-left:6px;vertical-align:middle}
+  .pd-rstate-on{color:#4ad991;background:rgba(74,217,145,.12)}
+  .pd-rstate-low{color:#e5c061;background:rgba(229,192,97,.12)}
   .pd-retired-banner{background:rgba(229,97,108,0.08);border:1px solid rgba(229,97,108,0.25);border-radius:12px;padding:14px 16px;color:#cdb4b6;font-size:14px;line-height:1.5;margin-bottom:20px}
   .pd-live h2{display:flex;align-items:center;gap:10px}
   .pl-timer{margin-left:auto;font-size:13px;font-weight:700;color:#e5b461;letter-spacing:.02em;text-transform:none}
@@ -1106,20 +1126,26 @@ function readRealControl(): RealControl {
 function writeRealControl(c: RealControl): void {
   writeFileSync(REAL_CONTROL_FILE, JSON.stringify(c, null, 2));
 }
-// Живой статус боевой сессии — пишет супервайзер (predict-real-status.json).
-type RealRunStatus = {
-  strategy: string; slug?: string; state: string; fills: number; cap: number; pnl: number;
-  maxLoss?: number; stakeCap?: number; lastTrade?: string | null; reason?: string | null;
-  since?: string | null; updatedAt?: string;
+// Карта живых боевых сессий (несколько одновременно) — пишет супервайзер.
+type RealSession = {
+  state: string; fills: number; pnl: number; bank?: number;
+  since?: string | null; reason?: string | null; lastTrade?: string | null;
 };
-const REAL_STATUS_FILE = join(dataDir, 'predict-real-status.json');
-function readRealRunStatus(): RealRunStatus | null {
+type RealSessions = {
+  updatedAt?: string; deposit?: number; perShare?: number; activeCount?: number;
+  sessions: Record<string, RealSession>;
+};
+const REAL_SESSIONS_FILE = join(dataDir, 'predict-real-sessions.json');
+function readRealSessions(): RealSessions {
   try {
-    if (existsSync(REAL_STATUS_FILE)) return JSON.parse(readFileSync(REAL_STATUS_FILE, 'utf8')) as RealRunStatus;
+    if (existsSync(REAL_SESSIONS_FILE)) {
+      const j = JSON.parse(readFileSync(REAL_SESSIONS_FILE, 'utf8')) as RealSessions;
+      if (j && typeof j === 'object') return { ...j, sessions: j.sessions ?? {} };
+    }
   } catch {
-    /* нет статуса */
+    /* нет данных */
   }
-  return null;
+  return { sessions: {} };
 }
 /** Личная (боевая) статистика стратегии — пишется боевым инстансом, если запущен. */
 function readRealStatus(slug: string): PredictStatus | null {
@@ -1162,7 +1188,49 @@ function saveBuilderCreds(key: string, secret: string, passphrase: string): stri
 function realEligibleStrategies(): StrategyDef[] {
   return STRATEGIES.filter((s) => s.engine && s.realEligible !== false);
 }
-function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string, page = 1): string {
+
+// Карточка стратегии в боевой панели: результат + кнопка Запуск/Стоп.
+// Активные — с зелёной рамкой и живым статусом; неактивные — приглушённые (блюр).
+const REAL_STATE_RU: Record<string, string> = { running: 'идёт торговля', starting: 'запуск…', low_deposit: 'ждёт пополнения', error: 'ошибка', idle: 'остановлена', done: 'остановлена' };
+function realCard(s: StrategyDef, ses: RealSession | null, ts: PredictStatus | null, isActive: boolean, canRun: boolean): string {
+  const np = ts?.netPnl ?? 0;
+  const tradeRow = ts && (ts.rounds ?? 0) > 0
+    ? `<div class="row">` +
+      `<div><b>${ts.rounds}</b>сделок</div>` +
+      `<div><b>${ts.winRate}%</b>win rate</div>` +
+      `<div><b style="color:${np >= 0 ? '#4ad991' : '#e5616c'}">${fmtUsd(np)}</b>net PnL</div>` +
+      (ts.avgStake != null ? `<div><b>$${ts.avgStake.toFixed(2)}</b>ср. ставка</div>` : '') +
+      `</div>`
+    : `<div class="row"><div style="color:#6b7484">реальных сделок пока нет</div></div>`;
+  let live = '';
+  let stateBadge = '';
+  if (isActive && ses) {
+    const low = ses.state === 'low_deposit';
+    stateBadge = `<span class="pd-rstate ${low ? 'pd-rstate-low' : 'pd-rstate-on'}">${low ? '⚠ ' : '● '}${esc(REAL_STATE_RU[ses.state] ?? ses.state)}</span>`;
+    const pnlCol = (ses.pnl ?? 0) >= 0 ? '#4ad991' : '#e5616c';
+    live =
+      `<div style="font-size:12.5px;color:#9aa4b2;margin-bottom:8px">` +
+      `Сессия: сделок <b style="color:#e6e9ef">${ses.fills ?? 0}</b> · PnL <b style="color:${pnlCol}">${fmtUsd(ses.pnl ?? 0)}</b>` +
+      (ses.bank != null ? ` · банк <b style="color:#e6e9ef">$${ses.bank.toFixed(2)}</b>` : '') +
+      `</div>` +
+      (low && ses.reason ? `<div style="font-size:12px;color:#e5c061;margin-bottom:8px">💰 ${esc(ses.reason)}</div>` : '');
+  }
+  const btn = isActive
+    ? `<form method="POST" action="/predict/real/stop"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-rbtn pd-rbtn-stop">⏸ Остановить</button></form>`
+    : canRun
+      ? `<form method="POST" action="/predict/real/start"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-rbtn pd-rbtn-go">▶ Запустить</button></form>`
+      : `<button class="pd-rbtn pd-rbtn-off" disabled title="Сначала сохрани ключ и адрес депозита">▶ Запустить</button>`;
+  return (
+    `<div class="pd-rcard ${isActive ? 'pd-rcard-on' : 'pd-rcard-off'}">` +
+    `<h3><a href="/predict/${s.slug}">${esc(s.title)}</a>${stateBadge}</h3>` +
+    `<div class="tag">${esc(s.tagline)}</div>` +
+    live +
+    tradeRow +
+    btn +
+    `</div>`
+  );
+}
+function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): string {
   const back = `<a class="pd-back" href="/predict">← раздел /predict</a>`;
   const fieldStyle = 'margin-top:4px;width:360px;max-width:100%;padding:8px 10px;background:#0b0e13;border:1px solid #2a313c;border-radius:7px;color:#e6e9ef';
   const keyStatus = cfg.keyMask
@@ -1170,102 +1238,43 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string, pag
     : `<span class="pd-neg">✗ ключ не сохранён</span>`;
   const updated = cfg.updatedAt ? new Date(cfg.updatedAt).toLocaleString('ru-RU', { timeZone: 'UTC' }) + ' UTC' : '—';
 
-  // ── Состояние боевой сессии (одна стратегия за раз) ──────────────────────
+  // ── Боевые сессии (несколько стратегий одновременно, банк делится поровну) ──
   const funderOk = !!cfg.funderAddress && /^0x[a-fA-F0-9]{40}$/.test(cfg.funderAddress);
   const canRun = !!cfg.keyMask && funderOk;
-  const run = readRealRunStatus();
   const eligible = realEligibleStrategies();
-  const runningSlug = Object.keys(ctrl.running ?? {})[0] ?? null; // ровно одна активная
-  const active = !!runningSlug || run?.state === 'running' || run?.state === 'starting';
-  const focusSlug = runningSlug ?? run?.slug ?? null; // чью статистику/статус показываем
-  const titleOf = (slug: string | null) => (slug ? STRATEGIES.find((s) => s.slug === slug)?.title ?? slug : '—');
-  const badge = active
-    ? `<span class="pd-fresh"><span class="pd-dot"></span>● активна: ${esc(titleOf(focusSlug))}</span>`
-    : `<span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>⏸ не активна</span>`;
+  const activeSet = new Set(Object.keys(ctrl.running ?? {}));
+  const sess = readRealSessions();
+  const activeCount = activeSet.size;
+  const deposit = sess.deposit;
+  const perShare = sess.perShare;
+
+  const badge = activeCount > 0
+    ? `<span class="pd-fresh"><span class="pd-dot"></span>● активно стратегий: ${activeCount}</span>`
+    : `<span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>⏸ ничего не запущено</span>`;
   const errNote = err === 'funder'
     ? `<div class="pd-card" style="border-color:#5a2e2e"><p class="pd-sub" style="color:#ff9b9b">✗ Сначала сохрани корректный адрес депозит-кошелька — без него запуск невозможен.</p></div>`
-    : err === 'busy'
-      ? `<div class="pd-card" style="border-color:#5a2e2e"><p class="pd-sub" style="color:#ff9b9b">✗ Уже работает стратегия. Правило: один аккаунт — одна стратегия. Остановите текущую перед запуском другой.</p></div>`
-      : '';
+    : '';
 
-  const fills = run?.fills ?? 0;
-  const cap = run?.cap ?? 0; // 0 → авто-стопов нет
-  const fillsLabel = cap > 0 ? `${fills} / ${cap}` : String(fills);
-  const stateRu: Record<string, string> = { running: 'идёт торговля', starting: 'запуск…', idle: 'остановлена', done: 'остановлена', error: 'ошибка', low_deposit: '⚠ мало средств' };
-  const pnlCls = (run?.pnl ?? 0) >= 0 ? 'pd-pos' : 'pd-neg';
-  const startBtnStyle = `font-size:15px;background:${canRun ? '#16321f' : '#2a2a2a'};border:1px solid ${canRun ? '#2e5a3a' : '#3a3a3a'};padding:10px 16px;border-radius:8px;cursor:${canRun ? 'pointer' : 'not-allowed'};color:${canRun ? '#e6e9ef' : '#888'}`;
+  // Карточки: активные сверху, неактивные (приглушённые) снизу.
+  const cards = [...eligible]
+    .sort((a, b) => (activeSet.has(b.slug) ? 1 : 0) - (activeSet.has(a.slug) ? 1 : 0))
+    .map((s) => realCard(s, sess.sessions[s.slug] ?? null, readRealStatus(s.slug), activeSet.has(s.slug), canRun))
+    .join('');
 
-  let launchCard: string;
-  if (active) {
-    // Идёт сессия → статус активной стратегии + только «Остановить» (селектор скрыт).
-    const statusLines =
-      `<div style="margin:6px 0">Состояние: <b>${esc(stateRu[run?.state ?? ''] ?? run?.state ?? '—')}</b>${run?.reason ? ` <span class="pd-muted-td">· ${esc(run.reason)}</span>` : ''}</div>` +
-      `<div style="margin:6px 0">Сделок: <b>${fillsLabel}</b> · PnL сессии: <b class="${pnlCls}">${fmtUsd(run?.pnl ?? 0)}</b></div>` +
-      (run?.lastTrade ? `<div class="pd-foot">Последняя: ${esc(run.lastTrade)}</div>` : '') +
-      (run?.since ? `<div class="pd-foot">Старт: ${esc(new Date(run.since).toLocaleString('ru-RU', { timeZone: 'UTC' }))} UTC</div>` : '');
-    const lowDepNote = run?.state === 'low_deposit'
-      ? `<div class="pd-card" style="border-color:#5a4a2e;background:rgba(90,74,46,.18);margin:10px 0 0"><p class="pd-sub" style="color:#e5c061;margin:0">💰 ${esc(run.reason ?? 'Депозит мал для безопасной минимальной ставки $1 — пополните кошелёк до ~$4+.')}</p></div>`
-      : '';
-    launchCard =
-      `<div class="pd-card" style="border-color:${run?.state === 'low_deposit' ? '#5a4a2e' : '#2e5a3a'}">` +
-      `<h2>Реальная торговля</h2>` +
-      `<p class="pd-sub">Активная стратегия: <b>${esc(titleOf(focusSlug))}</b> [${esc(focusSlug ?? '')}]. Правило: <b>одна стратегия за раз</b>. Работает <b>до ручной остановки</b> (авто-стопов нет). Размер ставки — Kelly от твоего реального депозита.</p>` +
-      lowDepNote +
-      statusLines +
-      `<form method="POST" action="/predict/real/stop" style="margin-top:14px"><input type="hidden" name="slug" value="${esc(runningSlug ?? focusSlug ?? '')}"><button type="submit" class="pd-back" style="font-size:15px;background:#3a1f1f;border:1px solid #5a2e2e;padding:10px 16px;border-radius:8px;cursor:pointer;color:#ffd9d9">⏸ Остановить</button></form>` +
-      `</div>`;
-  } else {
-    // Свободно → селектор стратегии (radio) + «Запустить».
-    const opts = eligible
-      .map((s, i) =>
-        `<label style="display:flex;align-items:center;gap:9px;padding:8px 0;border-top:${i ? '1px solid #1d232e' : 'none'};cursor:pointer">` +
-        `<input type="radio" name="slug" value="${esc(s.slug)}"${i === 0 ? ' checked' : ''} style="accent-color:#4ad991">` +
-        `<span><b style="color:#e6e9ef">${esc(s.title)}</b> <span class="pd-muted-td" style="font-size:12px">[${esc(s.slug)}]</span></span></label>`)
-      .join('');
-    const lastNote = run
-      ? `<div class="pd-foot" style="margin:2px 0 12px">Прошлая сессия: <b>${esc(titleOf(focusSlug))}</b> — ${esc(stateRu[run.state] ?? run.state)}, сделок ${fills}, PnL ${fmtUsd(run.pnl ?? 0)}.</div>`
-      : '';
-    launchCard =
-      `<div class="pd-card">` +
-      `<h2>Запуск стратегии (реальные деньги)</h2>` +
-      `<p class="pd-sub">Выбери ОДНУ стратегию. Правило: <b>один аккаунт — одна стратегия за раз</b>. ⚠️ <b>Авто-стопов нет</b> — работает до ручной остановки. Размер ставки — <b>Kelly от твоего реального депозита</b> (нужно ≥ ~$4 на кошельке).</p>` +
-      lastNote +
-      `<form method="POST" action="/predict/real/start">` +
-      `<div style="margin:8px 0 16px">${opts}</div>` +
-      `<button type="submit" class="pd-back" style="${startBtnStyle}"${canRun ? '' : ' disabled'}>▶ Запустить выбранную (реал)</button>` +
-      `</form>` +
-      (canRun ? '' : `<p class="pd-foot" style="margin-top:10px;color:#caa">Кнопка станет активной после сохранения ключа и адреса депозит-кошелька ниже.</p>`) +
-      `</div>`;
-  }
+  const splitNote = activeCount > 1 && deposit != null && perShare != null
+    ? `<p class="pd-foot" style="margin:0 0 14px">Банк делится поровну: депозит $${deposit.toFixed(2)} ÷ ${activeCount} = <b>$${perShare.toFixed(2)}</b> на стратегию. Суммарный риск не превышает кошелёк.</p>`
+    : activeCount === 1 && deposit != null
+      ? `<p class="pd-foot" style="margin:0 0 14px">Активна одна стратегия — банк Kelly = весь депозит $${deposit.toFixed(2)}.</p>`
+      : `<p class="pd-foot" style="margin:0 0 14px">Запускай любое число стратегий. Банк Kelly делится поровну между активными (депозит ÷ число активных) — суммарные ставки не превысят кошелёк. На каждую активную нужно ≥ ~$3.34.</p>`;
 
-  // ── Статистика реальных сделок выбранной стратегии (окно 20 + пагинация). ──
-  const ts = focusSlug ? readRealStatus(focusSlug) : null;
-  const allRounds = ts?.recentRounds ?? [];
-  let tradesCard =
-    `<div class="pd-card"><h2>Статистика реальных сделок</h2>` +
-    `<p class="pd-foot">Завершённых реальных сделок пока нет — появятся здесь после первых закрытых раундов. Окно — 20 сделок на страницу.</p></div>`;
-  if (allRounds.length > 0) {
-    const PAGE_SIZE = 20;
-    const totalPages = Math.max(1, Math.ceil(allRounds.length / PAGE_SIZE));
-    const pg = Math.min(Math.max(1, page), totalPages);
-    const pageRounds = allRounds.slice((pg - 1) * PAGE_SIZE, pg * PAGE_SIZE);
-    const table = recentRoundsTable(pageRounds, {
-      title: `Сделки — ${titleOf(focusSlug)} (${allRounds.length})`,
-      page: pg,
-      totalPages,
-      baseHref: '/predict/real',
-    });
-    const np = ts?.netPnl ?? 0;
-    tradesCard =
-      `<div class="pd-card"><h2>Статистика реальных сделок — ${esc(titleOf(focusSlug))}</h2>` +
-      `<div class="pd-grid">` +
-      statCard('Сделок', String(ts?.rounds ?? allRounds.length)) +
-      statCard('Win rate', `${ts?.winRate ?? 0}%`) +
-      statCard('Net PnL', fmtUsd(np), np > 0 ? 'pos' : np < 0 ? 'neg' : 'muted') +
-      (ts?.avgStake != null ? statCard('Ср. ставка', `$${ts.avgStake.toFixed(2)}`, 'muted') : '') +
-      (ts?.maxDrawdown != null ? statCard('Max drawdown', `$${ts.maxDrawdown.toFixed(2)}`, 'muted') : '') +
-      `</div>` + table + `</div>`;
-  }
+  const launchCard =
+    `<div class="pd-card">` +
+    `<h2>Стратегии — реальная торговля</h2>` +
+    `<p class="pd-sub">Запускай и останавливай стратегии по отдельности. ⚠️ <b>Авто-стопов нет</b> — каждая работает до ручной остановки. Размер ставки — <b>Kelly от доли депозита</b>.</p>` +
+    splitNote +
+    `<div class="pd-cards" style="margin-bottom:0">${cards}</div>` +
+    (canRun ? '' : `<p class="pd-foot" style="margin-top:14px;color:#caa">Кнопки «Запустить» станут активными после сохранения ключа и адреса депозит-кошелька ниже.</p>`) +
+    `</div>`;
 
   const walletForm =
     `<form method="POST" action="/predict/real/save" autocomplete="off">` +
@@ -1294,7 +1303,6 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string, pag
     errNote +
     walletForm +
     launchCard +
-    tradesCard +
     `</div>`
   );
 }
@@ -1369,8 +1377,7 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       return pageShell('/predict — закрытый раздел', renderNoAccess(!!getAuthedUser(req)), { lang: 'ru', robots: 'noindex, nofollow', loginNext: '/predict' });
     }
     const q = (req.query as { err?: string; page?: string } | undefined) ?? {};
-    const page = Math.max(1, parseInt(String(q.page ?? '1'), 10) || 1);
-    return pageShell('Реальная торговля — /predict', renderRealTrading(readRealConfig(), readRealControl(), q.err, page), {
+    return pageShell('Реальная торговля — /predict', renderRealTrading(readRealConfig(), readRealControl(), q.err), {
       lang: 'ru',
       robots: 'noindex, nofollow',
       authed: { displayName: u.displayName, phone: u.phone },
@@ -1399,13 +1406,9 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       return;
     }
     const c = readRealControl();
-    // ПРАВИЛО: одна стратегия за раз. Если уже что-то запущено — не стартуем вторую.
-    const already = Object.keys(c.running ?? {});
-    if (already.length > 0 && !already.includes(slug)) {
-      reply.code(303).header('location', '/predict/real?err=busy').send();
-      return;
-    }
-    c.running = { [slug]: { since: new Date().toISOString() } }; // ровно одна
+    // Несколько стратегий одновременно: добавляем slug в карту (банк делит супервайзер).
+    if (!c.running) c.running = {};
+    if (!c.running[slug]) c.running[slug] = { since: new Date().toISOString() };
     writeRealControl(c);
     reply.code(303).header('location', '/predict/real').send();
   });
