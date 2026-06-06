@@ -42,6 +42,7 @@ type StrategyDef = {
   hasLive?: boolean; // публикует ли движок лайв-снимок (live.json)
   retired?: boolean; // стратегия остановлена (гипотеза не подтвердилась)
   isTrap?: boolean; // dual-leg ловушка: особый рендер «сторона» (🔒 / однобоко)
+  minDeposit?: number; // рекомендуемый минимальный банк (доля депозита) под стратегию, $
 };
 
 const STRATEGIES: StrategyDef[] = [
@@ -1210,10 +1211,23 @@ function realEligibleStrategies(): StrategyDef[] {
   return STRATEGIES.filter((s) => s.engine && s.realEligible !== false);
 }
 
+// Рекомендуемый минимальный банк (доля депозита) под стратегию, чтобы Kelly работал
+// нормально. Причина: минимальная заявка Polymarket ≈ 5 акций ≈ 5×цена ($3–4.5). Чтобы
+// этот пол был малой долей банка (а не упирался и не отклонялся), нужен запас. Прогрессии
+// и дорогие фавориты требуют чуть больше. Новые стратегии — дефолт $20.
+const MIN_DEPOSIT_BY_SLUG: Record<string, number> = {
+  eglate: 20, egprog: 20, egsnap: 20, egz2: 20, egsess: 20,
+  egparlay: 25, egoscar: 25, egfav: 25, egfavs: 25,
+};
+function minDepositOf(s: StrategyDef): number {
+  return s.minDeposit ?? MIN_DEPOSIT_BY_SLUG[s.slug] ?? 20;
+}
+
 // Карточка стратегии в боевой панели: результат + кнопка Запуск/Стоп.
 // Активные — с зелёной рамкой и живым статусом; неактивные — приглушённые (блюр).
 const REAL_STATE_RU: Record<string, string> = { running: 'идёт торговля', starting: 'запуск…', low_deposit: 'ждёт пополнения', error: 'ошибка', idle: 'остановлена', done: 'остановлена' };
 function realCard(s: StrategyDef, ses: RealSession | null, ts: PredictStatus | null, isActive: boolean, canRun: boolean): string {
+  const minDep = minDepositOf(s);
   const np = ts?.netPnl ?? 0;
   const tradeRow = ts && (ts.rounds ?? 0) > 0
     ? `<div class="row">` +
@@ -1247,6 +1261,7 @@ function realCard(s: StrategyDef, ses: RealSession | null, ts: PredictStatus | n
     `<div class="tag">${esc(s.tagline)}</div>` +
     live +
     tradeRow +
+    `<div class="pd-foot" style="margin:6px 0 2px">Рекоменд. минимум под стратегию: <b style="color:#9aa4b2">$${minDep}</b>${isActive && ses?.bank != null && ses.bank < minDep ? ` · <span style="color:#e5c061">доля $${ses.bank.toFixed(2)} ниже минимума</span>` : ''}</div>` +
     `<a class="pd-arrow" href="/predict/real/${s.slug}" style="margin:0 0 8px">Подробная статистика и сделки →</a>` +
     btn +
     `</div>`
@@ -1295,20 +1310,29 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     .map((s) => realCard(s, sess.sessions[s.slug] ?? null, readRealStatus(s.slug), activeSet.has(s.slug), canRun))
     .join('');
 
+  // Рекомендуемый депозит под активный набор: при равном делёже каждой нужна её доля ≥ минимума,
+  // значит депозит ≥ N × (наибольший минимум среди активных).
+  const activeStrats = eligible.filter((s) => activeSet.has(s.slug));
+  const recDeposit = activeStrats.length > 0 ? activeStrats.length * Math.max(...activeStrats.map(minDepositOf)) : null;
+  const depositLow = deposit != null && recDeposit != null && deposit < recDeposit;
+
   const splitNote = activeCount > 1 && deposit != null && perShare != null
     ? `<p class="pd-foot" style="margin:0 0 14px">Банк делится поровну: депозит $${deposit.toFixed(2)} ÷ ${activeCount} = <b>$${perShare.toFixed(2)}</b> на стратегию. Суммарный риск не превышает кошелёк.</p>`
     : activeCount === 1 && deposit != null
       ? `<p class="pd-foot" style="margin:0 0 14px">Активна одна стратегия — банк Kelly = весь депозит $${deposit.toFixed(2)}.</p>`
-      : `<p class="pd-foot" style="margin:0 0 14px">Запускай любое число стратегий. Банк Kelly делится поровну между активными (депозит ÷ число активных) — суммарные ставки не превысят кошелёк. На каждую активную нужно ≥ ~$3.34.</p>`;
+      : `<p class="pd-foot" style="margin:0 0 14px">Запускай любое число стратегий. Банк Kelly делится поровну между активными (депозит ÷ число активных) — суммарные ставки не превысят кошелёк. У каждой стратегии свой рекомендуемый минимум (см. карточку): ниже него она ждёт пополнения.</p>`;
 
   // Сводка по депозиту/результату — вверху страницы.
   const summaryCard =
     `<div class="pd-card"><div class="pd-grid">` +
-    statCard('Депозит', deposit != null ? `$${deposit.toFixed(2)}` : '—', deposit != null ? undefined : 'muted') +
+    statCard('Депозит', deposit != null ? `$${deposit.toFixed(2)}` : '—', deposit != null ? (depositLow ? 'neg' : undefined) : 'muted') +
     statCard('Активных стратегий', String(activeCount)) +
+    (recDeposit != null ? statCard('Реком. депозит', `$${recDeposit}`, depositLow ? 'neg' : 'muted') : '') +
     statCard('Реальный PnL (всего)', fmtUsd(totalRealPnl), totalRealPnl > 0 ? 'pos' : totalRealPnl < 0 ? 'neg' : 'muted') +
     statCard('Сделок (всего)', String(totalRealTrades)) +
-    `</div></div>`;
+    `</div>` +
+    (depositLow ? `<p class="pd-foot" style="margin:12px 0 0;color:#e5c061">⚠ Депозит $${deposit!.toFixed(2)} ниже рекомендуемого $${recDeposit} для ${activeCount} активных. Стратегии с долей ниже их минимума будут ждать пополнения (иначе заявки упираются в минимум Polymarket 5 акций).</p>` : '') +
+    `</div>`;
 
   const launchCard =
     `<div class="pd-card">` +
@@ -1387,6 +1411,9 @@ function renderRealStrategy(s: StrategyDef, st: PredictStatus | null, ses: RealS
     ? `<span class="pd-fresh"><span class="pd-dot"></span>● ${esc(REAL_STATE_RU[ses.state] ?? ses.state)}</span>`
     : `<span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>⏸ не запущена</span>`;
   const header = `<div class="pd-head"><h1>${esc(s.title)}</h1>${stateBadge}</div>`;
+  const minDep = minDepositOf(s);
+  const belowMin = isActive && ses?.bank != null && ses.bank < minDep;
+  const minLine = `<p class="pd-foot" style="margin:-6px 0 14px">Рекомендуемый минимальный банк: <b style="color:${belowMin ? '#e5c061' : '#9aa4b2'}">$${minDep}</b>${belowMin ? ` · сейчас доля $${ses!.bank!.toFixed(2)} — ниже минимума` : ''}. Ниже него Kelly упирается в минимальную заявку Polymarket (5 акций) и ставки не масштабируются.</p>`;
   const sessionCard = isActive
     ? `<div class="pd-card" style="border-color:${ses.state === 'low_deposit' ? '#5a4a2e' : '#2e5a3a'}"><h2>Текущая сессия</h2>` +
       `<div style="margin:6px 0">Сделок: <b>${ses.fills ?? 0}</b> · PnL сессии: <b class="${(ses.pnl ?? 0) >= 0 ? 'pd-pos' : 'pd-neg'}">${fmtUsd(ses.pnl ?? 0)}</b>` +
@@ -1399,7 +1426,7 @@ function renderRealStrategy(s: StrategyDef, st: PredictStatus | null, ses: RealS
       `<form method="POST" action="/predict/real/start"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-rbtn pd-rbtn-go" style="width:auto;display:inline-block;padding:9px 20px">▶ Запустить</button></form></div>`;
 
   if (!st || (st.rounds ?? 0) === 0) {
-    return STYLES + `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` + sessionCard +
+    return STYLES + `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` + minLine + sessionCard +
       `<div class="pd-card"><p class="pd-foot">Завершённых реальных сделок пока нет — появятся здесь после первых закрытых раундов.</p></div></div>`;
   }
 
@@ -1415,8 +1442,10 @@ function renderRealStrategy(s: StrategyDef, st: PredictStatus | null, ses: RealS
   return (
     STYLES +
     `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` +
+    minLine +
     sessionCard +
     `<div class="pd-grid">` +
+    statCard('Реком. минимум', `$${minDep}`, belowMin ? 'neg' : 'muted') +
     statCard('Сделок', String(st.rounds)) +
     statCard('Win rate', `${st.winRate}%`) +
     statCard('Net PnL', fmtUsd(st.netPnl), netAccent) +
@@ -1444,7 +1473,7 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
   // Карта slug→engine доступных для реала стратегий — читает супервайзер на VPS.
   // Пишется при старте сайта, поэтому новые стратегии подхватываются автоматически.
   try {
-    const list = realEligibleStrategies().map((s) => ({ slug: s.slug, engine: s.engine, title: s.title }));
+    const list = realEligibleStrategies().map((s) => ({ slug: s.slug, engine: s.engine, title: s.title, minDeposit: minDepositOf(s) }));
     writeFileSync(join(dataDir, 'predict-real-strategies.json'), JSON.stringify({ updatedAt: new Date().toISOString(), strategies: list }, null, 2));
     // Полный манифест (все активные, не-retired) — единый источник правды для анализатора отчёта.
     const all = STRATEGIES.filter((s) => s.engine && !s.retired).map((s) => ({ slug: s.slug, engine: s.engine, title: s.title, dir: 'predict-' + s.slug }));
