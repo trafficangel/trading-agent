@@ -65,6 +65,24 @@ const STRATEGIES: StrategyDef[] = [
     ],
   },
   {
+    slug: 'egedge',
+    engine: 'endgame-edge',
+    realEligible: true,
+    title: 'Эндшпиль · только перевес (f>0)',
+    tagline: 'Тот же эндшпиль (60с), но входим ТОЛЬКО когда есть математический перевес (f>0)',
+    statusEnv: 'PREDICT_EGEDGE_STATUS_PATH',
+    statusFile: 'predict-egedge-status.json',
+    liveFile: 'predict-egedge-live.json',
+    showStakeCol: true,
+    hasLive: true,
+    description: [
+      'Это копия «Эндшпиль · Келли (60с)» с одним жёстким фильтром: входим ТОЛЬКО когда у сделки положительный математический перевес — дробь Келли f > 0. f = p − (1−p)/b, где p — ФАКТИЧЕСКИЙ винрейт стратегии (после 20 сделок wins/total, до этого приор 0.74), b — коэффициент входа. Условие f > 0 равносильно p > цена, то есть «наш винрейт выше подразумеваемой ценой вероятности» — это и есть реальный край.',
+      'Зачем. Обычный эндшпиль на низких коэффициентах (дорогой фаворит, цена 0.75–0.80) всё равно входил минимальной ставкой, даже когда перевеса нет (f≤0). А там «ловушка фаворита»: выигрыш +20–25¢, проигрыш −75–80¢ — нужен винрейт >77%, которого нет, и стратегия медленно теряла. Здесь такие входы ПРОПУСКАЕМ полностью.',
+      'Что проверяем. Сделок станет заметно меньше (только раунды с реальным перевесом — коэффициенты повыше), зато у каждой положительное ожидание, и PnL не должен проседать на бесперевесных входах. Прямой A/B к обычному «60с» на тех же рынках: одинаковая механика, разница только в фильтре перевеса. Честно: это всё ещё гипотеза лага тонкого стакана; судим по статистике на достаточной выборке.',
+      'Размер ставки — дробный Келли (1/4) от банка: ставка = ¼ · f · банк. Само-калибровка по фактическому винрейту, потолок — доля банка (~30%), минимум — $1. На реале минимальная заявка Polymarket ≈ 5 акций, поэтому нужен депозит с запасом (см. рекомендуемый минимум).',
+    ],
+  },
+  {
     slug: 'egsnap',
     engine: 'endgame-snap',
     realEligible: true,
@@ -1216,7 +1234,7 @@ function realEligibleStrategies(): StrategyDef[] {
 // этот пол был малой долей банка (а не упирался и не отклонялся), нужен запас. Прогрессии
 // и дорогие фавориты требуют чуть больше. Новые стратегии — дефолт $20.
 const MIN_DEPOSIT_BY_SLUG: Record<string, number> = {
-  eglate: 20, egprog: 20, egsnap: 20, egz2: 20, egsess: 20,
+  eglate: 20, egedge: 20, egprog: 20, egsnap: 20, egz2: 20, egsess: 20,
   egparlay: 25, egoscar: 25, egfav: 25, egfavs: 25,
 };
 function minDepositOf(s: StrategyDef): number {
@@ -1425,9 +1443,16 @@ function renderRealStrategy(s: StrategyDef, st: PredictStatus | null, ses: RealS
     : `<div class="pd-card"><p class="pd-sub">Стратегия сейчас не запущена в реале. ${st && (st.rounds ?? 0) > 0 ? 'Ниже — статистика прошлых реальных сделок.' : 'Реальных сделок пока не было.'}</p>` +
       `<form method="POST" action="/predict/real/start"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-rbtn pd-rbtn-go" style="width:auto;display:inline-block;padding:9px 20px">▶ Запустить</button></form></div>`;
 
+  // Очистка статистики — намерение пишет сайт, обнуляет супервайзер.
+  const clearForm =
+    `<div class="pd-card" style="border-color:#4a2e2e"><h2>Очистка статистики</h2>` +
+    `<p class="pd-foot" style="margin-bottom:12px">Обнулить накопленную статистику этой стратегии (сделки, кривую, винрейт), чтобы начать заново. ${isActive ? '<b>Стратегия запущена</b> — она перезапустится с чистого банка.' : 'Историю сделок не вернуть.'}</p>` +
+    `<form method="POST" action="/predict/real/clear" onsubmit="return confirm('Очистить всю статистику этой стратегии? Историю сделок не вернуть.')"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-rbtn pd-rbtn-stop" style="width:auto;display:inline-block;padding:9px 18px">🗑 Очистить статистику</button></form>` +
+    `</div>`;
+
   if (!st || (st.rounds ?? 0) === 0) {
     return STYLES + `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` + minLine + sessionCard +
-      `<div class="pd-card"><p class="pd-foot">Завершённых реальных сделок пока нет — появятся здесь после первых закрытых раундов.</p></div></div>`;
+      `<div class="pd-card"><p class="pd-foot">Завершённых реальных сделок пока нет — появятся здесь после первых закрытых раундов.</p></div>` + clearForm + `</div>`;
   }
 
   const netAccent = st.netPnl > 0 ? 'pos' : st.netPnl < 0 ? 'neg' : 'muted';
@@ -1457,6 +1482,7 @@ function renderRealStrategy(s: StrategyDef, st: PredictStatus | null, ses: RealS
     `</div>` +
     `<div class="pd-card"><h2>Кривая накопленного PnL</h2>${equitySvg(equityFromRounds(allRounds, s.slug))}</div>` +
     roundsTable +
+    clearForm +
     `<p class="pd-foot">Обновлено: ${esc(updated)} UTC · реальные деньги</p>` +
     `</div>`
   );
@@ -1606,6 +1632,30 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       writeRealControl(c);
     }
     reply.code(303).header('location', '/predict/real').send();
+  });
+
+  // Очистка статистики стратегии: пишем намерение в predict-real-clear.json.
+  // Супервайзер обнулит логи/статус/стейт (и перезапустит сессию, если она идёт),
+  // чтобы статистика накапливалась заново. Веб сам файлы движка не трогает.
+  app.post('/predict/real/clear', async (req, reply) => {
+    if (!gate(req)) {
+      reply.code(403);
+      return { ok: false, error: 'forbidden' };
+    }
+    const slug = String((req.body as { slug?: string } | undefined)?.slug ?? '');
+    const elig = STRATEGIES.find((s) => s.slug === slug && s.engine && s.realEligible !== false);
+    if (elig) {
+      const f = join(dataDir, 'predict-real-clear.json');
+      let cur: Record<string, string> = {};
+      try {
+        if (existsSync(f)) cur = JSON.parse(readFileSync(f, 'utf8')) as Record<string, string>;
+      } catch {
+        cur = {};
+      }
+      cur[slug] = new Date().toISOString();
+      writeFileSync(f, JSON.stringify(cur));
+    }
+    reply.code(303).header('location', `/predict/real/${slug}`).send();
   });
 
   app.post('/predict/real/save', async (req, reply) => {
