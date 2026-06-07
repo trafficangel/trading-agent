@@ -1264,7 +1264,7 @@ function minDepositOf(s: StrategyDef): number {
 
 // Карточка стратегии в боевой панели: результат + кнопка Запуск/Стоп.
 // Активные — с зелёной рамкой и живым статусом; неактивные — приглушённые (блюр).
-const REAL_STATE_RU: Record<string, string> = { running: 'идёт торговля', starting: 'запуск…', low_deposit: 'ждёт пополнения', error: 'ошибка', idle: 'остановлена', done: 'остановлена' };
+const REAL_STATE_RU: Record<string, string> = { running: 'идёт торговля', starting: 'запуск…', low_deposit: 'ждёт пополнения', drawdown_stop: 'стоп по просадке', error: 'ошибка', idle: 'остановлена', done: 'остановлена' };
 function realCard(s: StrategyDef, ses: RealSession | null, ts: PredictStatus | null, isActive: boolean, canRun: boolean): string {
   const minDep = minDepositOf(s);
   const np = ts?.netPnl ?? 0;
@@ -1280,14 +1280,16 @@ function realCard(s: StrategyDef, ses: RealSession | null, ts: PredictStatus | n
   let stateBadge = '';
   if (isActive && ses) {
     const low = ses.state === 'low_deposit';
-    stateBadge = `<span class="pd-rstate ${low ? 'pd-rstate-low' : 'pd-rstate-on'}">${low ? '⚠ ' : '● '}${esc(REAL_STATE_RU[ses.state] ?? ses.state)}</span>`;
+    const dd = ses.state === 'drawdown_stop';
+    const warn = low || dd;
+    stateBadge = `<span class="pd-rstate ${warn ? 'pd-rstate-low' : 'pd-rstate-on'}">${dd ? '🛑 ' : low ? '⚠ ' : '● '}${esc(REAL_STATE_RU[ses.state] ?? ses.state)}</span>`;
     const pnlCol = (ses.pnl ?? 0) >= 0 ? '#4ad991' : '#e5616c';
     live =
       `<div style="font-size:12.5px;color:#9aa4b2;margin-bottom:8px">` +
       `Сессия: сделок <b style="color:#e6e9ef">${ses.fills ?? 0}</b> · PnL <b style="color:${pnlCol}">${fmtUsd(ses.pnl ?? 0)}</b>` +
       (ses.bank != null ? ` · банк <b style="color:#e6e9ef">$${ses.bank.toFixed(2)}</b>` : '') +
       `</div>` +
-      (low && ses.reason ? `<div style="font-size:12px;color:#e5c061;margin-bottom:8px">💰 ${esc(ses.reason)}</div>` : '');
+      (warn && ses.reason ? `<div style="font-size:12px;color:${dd ? '#ff9b9b' : '#e5c061'};margin-bottom:8px">${dd ? '🛑' : '💰'} ${esc(ses.reason)}</div>` : '');
   }
   const btn = isActive
     ? `<form method="POST" action="/predict/real/stop"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-rbtn pd-rbtn-stop">⏸ Остановить</button></form>`
@@ -1453,11 +1455,13 @@ function renderRealStrategy(s: StrategyDef, st: PredictStatus | null, ses: RealS
   const minDep = minDepositOf(s);
   const belowMin = isActive && ses?.bank != null && ses.bank < minDep;
   const minLine = `<p class="pd-foot" style="margin:-6px 0 14px">Рекомендуемый минимальный банк: <b style="color:${belowMin ? '#e5c061' : '#9aa4b2'}">$${minDep}</b>${belowMin ? ` · сейчас доля $${ses!.bank!.toFixed(2)} — ниже минимума` : ''}. Ниже него Kelly упирается в минимальную заявку Polymarket (5 акций) и ставки не масштабируются.</p>`;
+  const ddStop = isActive && ses.state === 'drawdown_stop';
   const sessionCard = isActive
-    ? `<div class="pd-card" style="border-color:${ses.state === 'low_deposit' ? '#5a4a2e' : '#2e5a3a'}"><h2>Текущая сессия</h2>` +
+    ? `<div class="pd-card" style="border-color:${ddStop ? '#5a2e2e' : ses.state === 'low_deposit' ? '#5a4a2e' : '#2e5a3a'}"><h2>Текущая сессия</h2>` +
       `<div style="margin:6px 0">Сделок: <b>${ses.fills ?? 0}</b> · PnL сессии: <b class="${(ses.pnl ?? 0) >= 0 ? 'pd-pos' : 'pd-neg'}">${fmtUsd(ses.pnl ?? 0)}</b>` +
       (ses.bank != null ? ` · банк: <b>$${ses.bank.toFixed(2)}</b>` : '') + `</div>` +
       (ses.since ? `<div class="pd-foot">Старт: ${esc(new Date(ses.since).toLocaleString('ru-RU', { timeZone: 'UTC' }))} UTC</div>` : '') +
+      (ddStop && ses.reason ? `<div style="color:#ff9b9b;margin-top:8px">🛑 ${esc(ses.reason)}</div>` : '') +
       (ses.state === 'low_deposit' && ses.reason ? `<div style="color:#e5c061;margin-top:8px">💰 ${esc(ses.reason)}</div>` : '') +
       `<form method="POST" action="/predict/real/stop" style="margin-top:14px"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-rbtn pd-rbtn-stop" style="width:auto;display:inline-block;padding:9px 20px">⏸ Остановить</button></form>` +
       `</div>`
