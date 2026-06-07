@@ -83,6 +83,23 @@ const STRATEGIES: StrategyDef[] = [
     ],
   },
   {
+    slug: 'egcombo',
+    engine: 'endgame-combo',
+    realEligible: true,
+    title: 'Эндшпиль · комбо (лучшие условия)',
+    tagline: 'Три фильтра из данных: цена ≤0.65 + z≥1.5 + Азия/Европа (00–13 UTC)',
+    statusEnv: 'PREDICT_EGCOMBO_STATUS_PATH',
+    statusFile: 'predict-egcombo-status.json',
+    liveFile: 'predict-egcombo-live.json',
+    showStakeCol: true,
+    hasLive: true,
+    description: [
+      'Стратегия собрана из трёх условий, каждое из которых подтверждено данными 400+ входов eglate: (1) цена ≤ 0.65 — только когда нужный breakeven WR ≤ 65%, а не 77%; (2) z-оценка ≥ 1.5 — достаточно сильный сигнал P(hold) ≥ 93%; (3) сессия 00–13 UTC — только Азия и Европа, где рынок тоньше и наш «лаг ордербука» работает (+12пп и +6пп соответственно). US-сессия (13–21 UTC) давала –11пп и полностью исключена.',
+      'Почему именно так. Разбивка 417 входов eglate по ценовым бакетам показала: 51% входов были при цене 0.76–0.80, где breakeven WR = 77.6%, а наш WR 74.4% — каждая такая сделка убыточна. Только 12% входов были при цене ≤ 0.65, где edge +6–44пп. Фильтр цены ≤ 0.65 убирает убыточную зону и оставляет только те входы, где асимметрия выплат в нашу пользу.',
+      'Ожидания. Сделок будет мало — примерно 1–3 в день вместо 4–5. Зато каждая — с реальным краем, и PnL должен расти системно, а не шумно балансировать. Плюс финальный фильтр f > 0 (эмпирический Kelly): даже если рынок изменится — автоматически остановимся. Честно: это гипотеза, судим по выборке.',
+    ],
+  },
+  {
     slug: 'egsnap',
     engine: 'endgame-snap',
     realEligible: true,
@@ -1238,7 +1255,7 @@ function realEligibleStrategies(): StrategyDef[] {
 // этот пол был малой долей банка (а не упирался и не отклонялся), нужен запас. Прогрессии
 // и дорогие фавориты требуют чуть больше. Новые стратегии — дефолт $20.
 const MIN_DEPOSIT_BY_SLUG: Record<string, number> = {
-  eglate: 20, egedge: 20, egprog: 20, egsnap: 20, egz2: 20, egsess: 20,
+  eglate: 20, egedge: 20, egcombo: 20, egprog: 20, egsnap: 20, egz2: 20, egsess: 20,
   egparlay: 25, egoscar: 25, egfav: 25, egfavs: 25,
 };
 function minDepositOf(s: StrategyDef): number {
