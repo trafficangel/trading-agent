@@ -1169,6 +1169,14 @@ type ChangeEntry = { date: string; title: string; items: string[] };
 const CHANGELOG: ChangeEntry[] = [
   {
     date: '2026-06-07',
+    title: 'Реал без жёсткого минимума депозита + явная вероятность в расчёте ставки',
+    items: [
+      'Убрали жёсткий минимум депозита в реальной торговле: стратегия теперь работает при ЛЮБОМ депозите. При малом банке она сама пропускает входы, которые не может оплатить (минимум заявки Polymarket — 5 акций), а не блокируется целиком. Ниже рекомендуемого бюджета — просто предупреждаем (нужно ~$200 для нормального роста по Kelly), но не мешаем торговать.',
+      'В основании каждой ставки сделали ВЕРОЯТНОСТЬ явной: было «винрейт W%», стало «вероятность W% (наш винрейт)». Плюс добавили цену входа и саму формулу Kelly: f = p−(1−p)/b. Теперь видно всё, что участвует в расчёте: вероятность, цена/коэф, дробь Kelly f, банк, и итоговая/фактическая ставка.',
+    ],
+  },
+  {
+    date: '2026-06-07',
     title: 'Аудит кода: исправили 2 бага реальной торговли',
     items: [
       'Провели аудит торгового кода. Нашли и исправили две проблемы, важные для реальной торговли (на бумаге не влияли).',
@@ -1265,15 +1273,16 @@ function realCard(s: StrategyDef, ses: RealSession | null, ts: PredictStatus | n
   if (isActive && ses) {
     const low = ses.state === 'low_deposit';
     const dd = ses.state === 'drawdown_stop';
-    const warn = low || dd;
-    stateBadge = `<span class="pd-rstate ${warn ? 'pd-rstate-low' : 'pd-rstate-on'}">${dd ? '🛑 ' : low ? '⚠ ' : '● '}${esc(REAL_STATE_RU[ses.state] ?? ses.state)}</span>`;
+    const badgeWarn = low || dd; // бейдж жёлтый/красный; «running с предупреждением» остаётся зелёным
+    stateBadge = `<span class="pd-rstate ${badgeWarn ? 'pd-rstate-low' : 'pd-rstate-on'}">${dd ? '🛑 ' : low ? '⚠ ' : '● '}${esc(REAL_STATE_RU[ses.state] ?? ses.state)}</span>`;
     const pnlCol = (ses.pnl ?? 0) >= 0 ? '#4ad991' : '#e5616c';
     live =
       `<div style="font-size:12.5px;color:#9aa4b2;margin-bottom:8px">` +
       `Сессия: сделок <b style="color:#e6e9ef">${ses.fills ?? 0}</b> · PnL <b style="color:${pnlCol}">${fmtUsd(ses.pnl ?? 0)}</b>` +
       (ses.bank != null ? ` · банк <b style="color:#e6e9ef">$${ses.bank.toFixed(2)}</b>` : '') +
       `</div>` +
-      (warn && ses.reason ? `<div style="font-size:12px;color:${dd ? '#ff9b9b' : '#e5c061'};margin-bottom:8px">${dd ? '🛑' : '💰'} ${esc(ses.reason)}</div>` : '');
+      // предупреждение показываем всегда, когда оно есть (в т.ч. «работает, но банк ниже рекомендуемого»)
+      (ses.reason ? `<div style="font-size:12px;color:${dd ? '#ff9b9b' : '#e5c061'};margin-bottom:8px">${dd ? '🛑' : '⚠'} ${esc(ses.reason)}</div>` : '');
   }
   const btn = isActive
     ? `<form method="POST" action="/predict/real/stop"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-rbtn pd-rbtn-stop">⏸ Остановить</button></form>`
@@ -1286,7 +1295,7 @@ function realCard(s: StrategyDef, ses: RealSession | null, ts: PredictStatus | n
     `<div class="tag">${esc(s.tagline)}</div>` +
     live +
     tradeRow +
-    `<div class="pd-foot" style="margin:6px 0 2px">Рекоменд. минимум под стратегию: <b style="color:#9aa4b2">$${minDep}</b>${isActive && ses?.bank != null && ses.bank < minDep ? ` · <span style="color:#e5c061">доля $${ses.bank.toFixed(2)} ниже минимума</span>` : ''}</div>` +
+    `<div class="pd-foot" style="margin:6px 0 2px">Комфортный минимум: <b style="color:#9aa4b2">$${minDep}</b> (ниже — торгует, но пропускает дорогие входы)${isActive && ses?.bank != null && ses.bank < minDep ? ` · <span style="color:#e5c061">доля $${ses.bank.toFixed(2)} ниже</span>` : ''}</div>` +
     `<a class="pd-arrow" href="/predict/real/${s.slug}" style="margin:0 0 8px">Подробная статистика и сделки →</a>` +
     btn +
     `</div>`
@@ -1335,23 +1344,23 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     .map((s) => realCard(s, sess.sessions[s.slug] ?? null, readRealStatus(s.slug), activeSet.has(s.slug), canRun))
     .join('');
 
-  // Два порога: МИНИМУМ для запуска (per-strategy, жёсткий гейт) и РЕКОМЕНДУЕМЫЙ БЮДЖЕТ для роста.
+  // Порог теперь информационный (не блокирует): «комфортный минимум» на стратегию и РЕКОМЕНДУЕМЫЙ бюджет для роста.
   const activeStrats = eligible.filter((s) => activeSet.has(s.slug));
-  const minToRun = activeStrats.length > 0 ? activeStrats.length * Math.max(...activeStrats.map(minDepositOf)) : null;
-  const belowMin = deposit != null && minToRun != null && deposit < minToRun;
+  const minComfort = activeStrats.length > 0 ? activeStrats.length * Math.max(...activeStrats.map(minDepositOf)) : null;
+  const belowMin = deposit != null && minComfort != null && deposit < minComfort;
   const belowRec = deposit != null && deposit < RECOMMENDED_BUDGET;
 
   const splitNote = activeCount > 1 && deposit != null && perShare != null
     ? `<p class="pd-foot" style="margin:0 0 14px">Банк делится поровну: депозит $${deposit.toFixed(2)} ÷ ${activeCount} = <b>$${perShare.toFixed(2)}</b> на стратегию. Суммарный риск не превышает кошелёк.</p>`
     : activeCount === 1 && deposit != null
       ? `<p class="pd-foot" style="margin:0 0 14px">Активна одна стратегия — банк Kelly = весь депозит $${deposit.toFixed(2)}.</p>`
-      : `<p class="pd-foot" style="margin:0 0 14px">Запускай любое число стратегий. Банк делится поровну между активными. Минимум для запуска — $${Math.max(...eligible.map(minDepositOf))} на стратегию; для реального роста рекомендуется бюджет ~$${RECOMMENDED_BUDGET}.</p>`;
+      : `<p class="pd-foot" style="margin:0 0 14px">Запускай любое число стратегий при любом депозите — нет жёсткого минимума. При малом банке стратегия сама пропускает входы, которые не может оплатить. Комфортный минимум — ~$${Math.max(...eligible.map(minDepositOf))} на стратегию; для роста по Kelly рекомендуется ~$${RECOMMENDED_BUDGET}.</p>`;
 
-  // Сводка по депозиту/результату — вверху страницы.
+  // Сводка по депозиту/результату — вверху страницы. Депозит ниже рекомендуемого — НЕ блок, а предупреждение.
   const budgetNote = belowMin
-    ? `<p class="pd-foot" style="margin:12px 0 0;color:#e5c061">⚠ Депозит $${deposit!.toFixed(2)} ниже минимума для запуска ($${minToRun} на ${activeCount} активных). Стратегии с долей ниже минимума ждут пополнения — иначе заявки упираются в минимум Polymarket (5 акций).</p>`
+    ? `<p class="pd-foot" style="margin:12px 0 0;color:#e5c061">⚠ Депозит $${deposit!.toFixed(2)} мал для ${activeCount} активных (комфортно ~$${minComfort}). Стратегии торгуют, но при малом банке пропускают входы дороже риск-лимита (минимум биржи — 5 акций). Для нормальной работы пополните до ~$${RECOMMENDED_BUDGET}.</p>`
     : belowRec
-      ? `<p class="pd-foot" style="margin:12px 0 0;color:#9aa4b2">ℹ Депозита хватает для запуска. Для <b>реального роста</b> рекомендуется бюджет <b>~$${RECOMMENDED_BUDGET}</b>: при нём ставка по Kelly перестаёт упираться в минимум биржи и начинает компаундировать. Сейчас рост ограничен размером банка — доход капается малыми суммами, это нормально.</p>`
+      ? `<p class="pd-foot" style="margin:12px 0 0;color:#9aa4b2">ℹ Стратегии торгуют. Для <b>реального роста</b> рекомендуется бюджет <b>~$${RECOMMENDED_BUDGET}</b>: при нём ставка по Kelly перестаёт упираться в минимум биржи и начинает компаундировать. Сейчас рост ограничен размером банка — доход капается малыми суммами, это нормально.</p>`
       : `<p class="pd-foot" style="margin:12px 0 0;color:#4ad991">✓ Депозит в рекомендуемом диапазоне — Kelly может компаундировать в полную силу.</p>`;
   const summaryCard =
     `<div class="pd-card"><div class="pd-grid">` +
@@ -1443,7 +1452,7 @@ function renderRealStrategy(s: StrategyDef, st: PredictStatus | null, ses: RealS
   const header = `<div class="pd-head"><h1>${esc(s.title)}</h1>${stateBadge}</div>`;
   const minDep = minDepositOf(s);
   const belowMin = isActive && ses?.bank != null && ses.bank < minDep;
-  const minLine = `<p class="pd-foot" style="margin:-6px 0 14px">Рекомендуемый минимальный банк: <b style="color:${belowMin ? '#e5c061' : '#9aa4b2'}">$${minDep}</b>${belowMin ? ` · сейчас доля $${ses!.bank!.toFixed(2)} — ниже минимума` : ''}. Ниже него Kelly упирается в минимальную заявку Polymarket (5 акций) и ставки не масштабируются.</p>`;
+  const minLine = `<p class="pd-foot" style="margin:-6px 0 14px">Комфортный минимум банка: <b style="color:${belowMin ? '#e5c061' : '#9aa4b2'}">$${minDep}</b>${belowMin ? ` · сейчас доля $${ses!.bank!.toFixed(2)} — ниже` : ''}. Жёсткого минимума нет: ниже стратегия торгует, но пропускает входы дороже риск-лимита (минимум заявки Polymarket — 5 акций). Для роста по Kelly — бюджет ~$${RECOMMENDED_BUDGET}.</p>`;
   const ddStop = isActive && ses.state === 'drawdown_stop';
   const sessionCard = isActive
     ? `<div class="pd-card" style="border-color:${ddStop ? '#5a2e2e' : ses.state === 'low_deposit' ? '#5a4a2e' : '#2e5a3a'}"><h2>Текущая сессия</h2>` +
