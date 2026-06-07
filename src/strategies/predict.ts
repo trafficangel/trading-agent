@@ -910,6 +910,7 @@ function renderOverview(): string {
     `Стратегии, которые подтверждают преимущество на бумаге, переводим в реальную торговлю.</p>` +
     `<p style="margin:-8px 0 20px">` +
     `<a class="pd-arrow" href="/predict/report">📊 Авто-отчёт здоровья стратегий →</a>&nbsp;&nbsp;` +
+    `<a class="pd-arrow" href="/predict/changelog">📝 Журнал изменений →</a>&nbsp;&nbsp;` +
     `<a class="pd-arrow" href="/predict/about">✨ О разделе →</a>&nbsp;&nbsp;` +
     `<a class="pd-arrow" href="https://t.me/dboykod" target="_blank" rel="noopener">💡 Предложить идею или стратегию →</a>` +
     `</p>` +
@@ -1262,6 +1263,46 @@ function minDepositOf(s: StrategyDef): number {
   return s.minDeposit ?? MIN_DEPOSIT_BY_SLUG[s.slug] ?? 20;
 }
 
+// Рекомендуемый бюджет, при котором дробный Kelly начинает реально компаундировать:
+// при нём минимальная заявка Polymarket (5 акций ≈ $3-4) становится ~2% банка, и ставки
+// перестают упираться в пол. Ниже — только защита от слива, не рост. Подтверждено Монте-Карло.
+const RECOMMENDED_BUDGET = 200;
+
+// Журнал изменений раздела — хронология, что и зачем меняли (новые сверху).
+type ChangeEntry = { date: string; title: string; items: string[] };
+const CHANGELOG: ChangeEntry[] = [
+  {
+    date: '2026-06-07',
+    title: 'Серьёзная работа с мани-менеджментом + стратегия egcombo',
+    items: [
+      'Провели глубокое исследование систем ставок (Kelly, Мартингейл, анти-Мартингейл, Оскар) + Монте-Карло на наших реальных числах. Вывод: мини-Мартингейл при наших коэффициентах ведёт к разорению (37% на симуляции), а постоянный рост даёт только дробный Kelly при реальном крае.',
+      'Добавили стратегию «Эндшпиль · комбо»: вход только при цене ≤0.65 + сильном сигнале z≥1.5 + в сессии Азия/Европа (00–13 UTC) + положительном крае f>0. Меньше сделок, но каждая с математическим перевесом.',
+      'Добавили аварийный тормоз по просадке: если стратегия теряет −30% своего банка — авто-стоп для защиты бюджета (это не Мартингейл, а защита).',
+      'Перевели бумажную торговлю на рекомендуемый бюджет $' + RECOMMENDED_BUDGET + ', чтобы видеть, как Kelly компаундирует при достаточном банке.',
+    ],
+  },
+  {
+    date: '2026-06-06',
+    title: 'Несколько стратегий сразу, карточки, очистка статистики',
+    items: [
+      'Разрешили запускать несколько стратегий одновременно на одном кошельке — банк делится поровну, суммарный риск не превышает депозит.',
+      'Выбор стратегий переделали в карточки с кнопками Запуск/Стоп: активные сверху, неактивные приглушены, результат прямо в карточке.',
+      'Добавили рекомендуемый минимальный депозит под каждую стратегию (минимум $20) — ниже него стратегия ждёт пополнения, чтобы заявки не упирались в минимум биржи (5 акций).',
+      'Добавили кнопку «Очистить статистику» и страницу реальной статистики каждой стратегии (график PnL, все сделки).',
+      'Стратегия egedge: вход только при положительном крае (f>0), без бесперевесных входов.',
+    ],
+  },
+  {
+    date: '2026-06-05',
+    title: 'Запуск реальной торговли + расчёт ставки по Kelly от депозита',
+    items: [
+      'Реализовали панель реальной торговли: ставка считается дробным Kelly от реального депозита, без авто-стопов (до ручной остановки).',
+      'В статистике показали честное основание каждой ставки: винрейт, коэффициент, дробь Kelly и фактический размер.',
+      'Убрали стратегию favprog (гипотеза «ставка на фаворита» не подтвердилась — край ≈ 0).',
+    ],
+  },
+];
+
 // Карточка стратегии в боевой панели: результат + кнопка Запуск/Стоп.
 // Активные — с зелёной рамкой и живым статусом; неактивные — приглушённые (блюр).
 const REAL_STATE_RU: Record<string, string> = { running: 'идёт торговля', starting: 'запуск…', low_deposit: 'ждёт пополнения', drawdown_stop: 'стоп по просадке', error: 'ошибка', idle: 'остановлена', done: 'остановлена' };
@@ -1351,28 +1392,33 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     .map((s) => realCard(s, sess.sessions[s.slug] ?? null, readRealStatus(s.slug), activeSet.has(s.slug), canRun))
     .join('');
 
-  // Рекомендуемый депозит под активный набор: при равном делёже каждой нужна её доля ≥ минимума,
-  // значит депозит ≥ N × (наибольший минимум среди активных).
+  // Два порога: МИНИМУМ для запуска (per-strategy, жёсткий гейт) и РЕКОМЕНДУЕМЫЙ БЮДЖЕТ для роста.
   const activeStrats = eligible.filter((s) => activeSet.has(s.slug));
-  const recDeposit = activeStrats.length > 0 ? activeStrats.length * Math.max(...activeStrats.map(minDepositOf)) : null;
-  const depositLow = deposit != null && recDeposit != null && deposit < recDeposit;
+  const minToRun = activeStrats.length > 0 ? activeStrats.length * Math.max(...activeStrats.map(minDepositOf)) : null;
+  const belowMin = deposit != null && minToRun != null && deposit < minToRun;
+  const belowRec = deposit != null && deposit < RECOMMENDED_BUDGET;
 
   const splitNote = activeCount > 1 && deposit != null && perShare != null
     ? `<p class="pd-foot" style="margin:0 0 14px">Банк делится поровну: депозит $${deposit.toFixed(2)} ÷ ${activeCount} = <b>$${perShare.toFixed(2)}</b> на стратегию. Суммарный риск не превышает кошелёк.</p>`
     : activeCount === 1 && deposit != null
       ? `<p class="pd-foot" style="margin:0 0 14px">Активна одна стратегия — банк Kelly = весь депозит $${deposit.toFixed(2)}.</p>`
-      : `<p class="pd-foot" style="margin:0 0 14px">Запускай любое число стратегий. Банк Kelly делится поровну между активными (депозит ÷ число активных) — суммарные ставки не превысят кошелёк. У каждой стратегии свой рекомендуемый минимум (см. карточку): ниже него она ждёт пополнения.</p>`;
+      : `<p class="pd-foot" style="margin:0 0 14px">Запускай любое число стратегий. Банк делится поровну между активными. Минимум для запуска — $${Math.max(...eligible.map(minDepositOf))} на стратегию; для реального роста рекомендуется бюджет ~$${RECOMMENDED_BUDGET}.</p>`;
 
   // Сводка по депозиту/результату — вверху страницы.
+  const budgetNote = belowMin
+    ? `<p class="pd-foot" style="margin:12px 0 0;color:#e5c061">⚠ Депозит $${deposit!.toFixed(2)} ниже минимума для запуска ($${minToRun} на ${activeCount} активных). Стратегии с долей ниже минимума ждут пополнения — иначе заявки упираются в минимум Polymarket (5 акций).</p>`
+    : belowRec
+      ? `<p class="pd-foot" style="margin:12px 0 0;color:#9aa4b2">ℹ Депозита хватает для запуска. Для <b>реального роста</b> рекомендуется бюджет <b>~$${RECOMMENDED_BUDGET}</b>: при нём ставка по Kelly перестаёт упираться в минимум биржи и начинает компаундировать. Сейчас рост ограничен размером банка — доход капается малыми суммами, это нормально.</p>`
+      : `<p class="pd-foot" style="margin:12px 0 0;color:#4ad991">✓ Депозит в рекомендуемом диапазоне — Kelly может компаундировать в полную силу.</p>`;
   const summaryCard =
     `<div class="pd-card"><div class="pd-grid">` +
-    statCard('Депозит', deposit != null ? `$${deposit.toFixed(2)}` : '—', deposit != null ? (depositLow ? 'neg' : undefined) : 'muted') +
+    statCard('Депозит', deposit != null ? `$${deposit.toFixed(2)}` : '—', deposit != null ? (belowMin ? 'neg' : belowRec ? 'muted' : 'pos') : 'muted') +
     statCard('Активных стратегий', String(activeCount)) +
-    (recDeposit != null ? statCard('Реком. депозит', `$${recDeposit}`, depositLow ? 'neg' : 'muted') : '') +
+    statCard('Реком. бюджет', `$${RECOMMENDED_BUDGET}`, deposit != null && !belowRec ? 'pos' : 'muted') +
     statCard('Реальный PnL (всего)', fmtUsd(totalRealPnl), totalRealPnl > 0 ? 'pos' : totalRealPnl < 0 ? 'neg' : 'muted') +
     statCard('Сделок (всего)', String(totalRealTrades)) +
     `</div>` +
-    (depositLow ? `<p class="pd-foot" style="margin:12px 0 0;color:#e5c061">⚠ Депозит $${deposit!.toFixed(2)} ниже рекомендуемого $${recDeposit} для ${activeCount} активных. Стратегии с долей ниже их минимума будут ждать пополнения (иначе заявки упираются в минимум Polymarket 5 акций).</p>` : '') +
+    (deposit != null ? budgetNote : '') +
     `</div>`;
 
   const launchCard =
@@ -1513,6 +1559,29 @@ function renderRealStrategy(s: StrategyDef, st: PredictStatus | null, ses: RealS
   );
 }
 
+// Журнал изменений — публичная страница с хронологией того, что и зачем меняли.
+function renderChangelog(): string {
+  const back = `<a class="pd-back" href="/predict">← песочница стратегий</a>`;
+  const entries = CHANGELOG.map((e) =>
+    `<div class="pd-card">` +
+    `<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px">` +
+    `<span style="font-size:13px;color:#4ad991;font-weight:700;font-variant-numeric:tabular-nums">${esc(e.date)}</span>` +
+    `<h2 style="margin:0;font-size:18px">${esc(e.title)}</h2></div>` +
+    `<ul style="margin:0;padding-left:20px;color:#cdd3dc;font-size:14px;line-height:1.6">` +
+    e.items.map((it) => `<li style="margin-bottom:6px">${esc(it)}</li>`).join('') +
+    `</ul></div>`
+  ).join('');
+  return (
+    STYLES +
+    `<div class="pd-wrap">${back}` +
+    `<div class="pd-head"><h1>Журнал изменений</h1></div>` +
+    `<p class="pd-sub">Что и зачем мы меняем в стратегиях и системе — честная хронология. Новые изменения сверху.</p>` +
+    entries +
+    `<p class="pd-foot" style="margin-top:8px">Это раздел в активной разработке — стратегии и правила управления капиталом улучшаются по мере накопления данных.</p>` +
+    `</div>`
+  );
+}
+
 export async function predictRoute(app: FastifyInstance): Promise<void> {
   // Гейт раздела: только залогиненные пользователи с выданным админом доступом.
   // Возвращает user при доступе, либо null (вызывающий показывает «через поддержку»).
@@ -1538,6 +1607,18 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     reply.header('content-type', 'text/html; charset=utf-8');
     const u = getAuthedUser(req);
     return pageShell('Predict — что это и зачем · Robot Claude', renderAbout(), {
+      lang: 'ru',
+      robots: 'index, follow',
+      loginNext: '/predict',
+      authed: u ? { displayName: u.displayName, phone: u.phone } : undefined,
+    });
+  });
+
+  // Журнал изменений — ПУБЛИЧНЫЙ (хронология правок раздела).
+  app.get('/predict/changelog', async (req, reply) => {
+    reply.header('content-type', 'text/html; charset=utf-8');
+    const u = getAuthedUser(req);
+    return pageShell('Журнал изменений — /predict', renderChangelog(), {
       lang: 'ru',
       robots: 'index, follow',
       loginNext: '/predict',
