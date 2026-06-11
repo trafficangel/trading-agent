@@ -47,6 +47,24 @@ type StrategyDef = {
 
 const STRATEGIES: StrategyDef[] = [
   {
+    slug: 'dynprob',
+    engine: 'dynprob-paper',
+    realEligible: false,
+    title: 'DYNPROB · расхождения (бумага) 🧪',
+    tagline: 'Единственный сигнал, прошедший Фазу 0 и контроль скептика: входим только когда модель и рынок расходятся ≥5пп на T−60. Тейкер-учёт с комиссиями, фикс $1, форвард-проверка.',
+    statusEnv: 'PREDICT_DYNPROB_PAPER_STATUS_PATH',
+    statusFile: 'predict-dynprob-paper-status.json',
+    liveFile: 'predict-dynprob-paper-live.json', // заглушка: лайв-снимка нет (hasLive: false)
+    showStakeCol: true,
+    hasLive: false,
+    description: [
+      'ОТКУДА СИГНАЛ. Офлайн Фаза 0 на наших раундах: модель на индикаторах (RSI/EMA/momentum/VWAP из Binance) в среднем ПРОИГРЫВАЕТ рынку по точности (Brier) — рынок калиброваннее. Но бакеты, где модель и рынок расходятся на ≥5пп, дали плюс ПОСЛЕ комиссий, устойчиво на обеих половинах выборки; адверсариальная проверка скептика утечек не нашла. Торгуем не «модель умнее рынка», а узкий случай расхождения.',
+      'ПРАВИЛА ВХОДА (зафиксированы из Фазы 0, не меняются). На T−60 (за минуту до закрытия раунда) сравниваем P(UP) модели с ценой рынка. Если |расхождение| ≥ 5пп — входим на сторону модели (UP, если модель выше рынка, иначе DOWN). Ставка фикс $1 (unit-stake): сайзинг не смешиваем с проверкой края. Один вход на раунд.',
+      'УЧЁТ — КОНСЕРВАТИВНО, ТЕЙКЕРОМ. Главный PnL считается по входу рыночным ордером (по ask своей стороны) с комиссией 3% от валовой выплаты при цене входа 0.40–0.60 и 1.5% вне этой зоны — худший разумный сценарий издержек. Параллельно справочно считаем мейкер-вариант (вход по bid, комиссия 0) — поле makerPnl.',
+      '🧪 ПЛАНКА ПЕРЕД ЛЮБЫМ РЕАЛОМ: плюс после комиссий на 150+ НЕЗАВИСИМЫХ форвард-раундах, причём в обеих половинах форвард-выборки. Честные оговорки: профиль лонгшотный (частые мелкие минусы, редкие крупные плюсы — длинные серии проигрышей нормальны), а офлайн-результат статистически НЕ значим (t≈1.8) — мог быть удачей. Форвард и существует, чтобы это проверить. Реальных денег нет и не будет до планки.',
+    ],
+  },
+  {
     slug: 'egtwo',
     engine: 'endgame-even',
     realEligible: false,
@@ -110,10 +128,10 @@ type PredictStatus = {
   avgCoef?: number | null; // средний коэффициент входа (1/цена)
   trapClosed?: number; // dual-leg-trap: раундов с захлопнутой ловушкой
   oneLegged?: number; // dual-leg-trap: раундов с одной ногой
-  marketOutcomes: { up: number; down: number };
+  marketOutcomes?: { up: number; down: number }; // опционально: упрощённые экспортеры (dynprob) его не пишут
   lastRoundAt?: number | null;
   recentRounds?: RecentRound[];
-  equityCurve: { t: number | null; slug: string; pnl: number; cumulative: number }[];
+  equityCurve?: { t: number | null; slug: string; pnl: number; cumulative: number }[]; // опционально: если нет — строим из recentRounds
 };
 
 function statusPath(s: StrategyDef): string {
@@ -200,7 +218,7 @@ function freshnessPill(updatedAt: string): string {
 }
 
 /** Inline SVG equity curve — no external chart lib (CSP blocks third-party). */
-function equitySvg(points: PredictStatus['equityCurve']): string {
+function equitySvg(points: NonNullable<PredictStatus['equityCurve']>): string {
   if (points.length < 2) {
     return `<div class="pd-empty-chart">Недостаточно данных для кривой (нужно ≥2 раунда).</div>`;
   }
@@ -230,7 +248,7 @@ function equitySvg(points: PredictStatus['equityCurve']): string {
 }
 
 /** Кривая накопленного PnL из списка раундов (реальный экспорт не пишет equityCurve). */
-function equityFromRounds(rounds: RecentRound[], slug: string): PredictStatus['equityCurve'] {
+function equityFromRounds(rounds: RecentRound[], slug: string): NonNullable<PredictStatus['equityCurve']> {
   const asc = [...rounds].sort((a, b) => (a.t ?? 0) - (b.t ?? 0));
   let cum = 0;
   return asc.map((r) => {
@@ -966,10 +984,11 @@ function renderStrategy(s: StrategyDef, page = 1): string {
     trapCard +
     statCard('Режим', st.mode === 'paper' ? 'Paper' : esc(st.mode), 'muted') +
     `</div>` +
-    `<div class="pd-card"><h2>Кривая накопленного PnL</h2>${equitySvg(st.equityCurve)}` +
+    `<div class="pd-card"><h2>Кривая накопленного PnL</h2>${equitySvg(st.equityCurve ?? equityFromRounds(allRounds, s.slug))}` +
     `<div class="pd-foot">Выигрышей: ${st.wins} · Проигрышей: ${st.losses}` +
     (s.isTrap && st.trapClosed != null ? ` · 🔒 замков: ${st.trapClosed} · одна нога: ${st.oneLegged ?? 0}` : '') +
-    ` · Исходы рынка ↑${st.marketOutcomes.up}/↓${st.marketOutcomes.down}</div></div>` +
+    (st.marketOutcomes ? ` · Исходы рынка ↑${st.marketOutcomes.up}/↓${st.marketOutcomes.down}` : '') +
+    `</div></div>` +
     roundsTable +
     PAPER_NOTE +
     `<p class="pd-foot">Обновлено: ${esc(updated)} UTC</p>` +
@@ -1150,6 +1169,14 @@ const RECOMMENDED_BUDGET = 30;
 // Журнал изменений раздела — хронология, что и зачем меняли (новые сверху).
 type ChangeEntry = { date: string; title: string; items: string[] };
 const CHANGELOG: ChangeEntry[] = [
+  {
+    date: '2026-06-11',
+    title: 'DYNPROB вышел в форвард: живой логгер расхождений + бумажные сделки на сайте',
+    items: [
+      'Сигнал DYNPROB — единственный, прошедший Фазу 0 и контроль скептика, — переведён в форвард-проверку: на сервере живой логгер на каждом раунде в T−60 фиксирует P(UP) модели против цены рынка, а бумажный движок по зафиксированным правилам (расхождение ≥5пп → сторона модели, фикс $1, тейкер-учёт с комиссиями 3%/1.5%, справочный мейкер-вариант) публикует сделки в новую карточку на дашборде.',
+      'Правила и планка зафиксированы ДО старта: любой разговор о реале — только после плюса ПОСЛЕ комиссий на 150+ независимых форвард-раундах в обеих половинах выборки. Оговорки честно в карточке: лонгшот-профиль и статистическая незначимость офлайн-результата (t≈1.8). Реальных денег нет.',
+    ],
+  },
   {
     date: '2026-06-11',
     title: 'Дашборд очищен: остался решающий тест + исследования Фазы 0',
