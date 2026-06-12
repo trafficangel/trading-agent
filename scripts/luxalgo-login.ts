@@ -88,6 +88,20 @@ const TIMEOUT_MS = 10 * 60_000;
       })();
       const onAuthSection = urlPath !== '/' && urlPath !== '';
 
+      // DOM cross-check — the DEFINITIVE signal. Authenticated pages do NOT
+      // render the top-right "Log In" / "Sign Up" buttons. The cookie+URL
+      // heuristic can fire mid-OAuth-redirect (a brief non-root URL) BEFORE
+      // the session cookie is fully written, producing a truncated, useless
+      // storage state. Requiring these buttons to be GONE guarantees we only
+      // save a fully-authenticated session.
+      const authButtons = await page
+        .locator(
+          'button:has-text("Log In"), button:has-text("Sign Up"), a:has-text("Log In"), a:has-text("Sign Up")',
+        )
+        .count()
+        .catch(() => 1);
+      if (authButtons > 0) return false;
+
       return Boolean(sessionish) && !onSignin && onLuxalgo && onAuthSection;
     } catch {
       return false;
