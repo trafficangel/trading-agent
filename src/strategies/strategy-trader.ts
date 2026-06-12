@@ -21,6 +21,7 @@ import {
   type StrategyConfig,
 } from './track-c-config.js';
 import { fanOutEntry, fanOutExit } from './user-fanout.js';
+import { evaluateEntryRisk, alertRiskBlock } from './risk-control.js';
 
 /**
  * Track C — LuxAlgo AI Strategy Builder webhook trader.
@@ -131,6 +132,9 @@ export function formatStrategyWebhookLog(
       unknown_or_disabled_strategy: 'неизвестная или отключённая стратегия',
       symbol_mismatch: 'символ не совпадает с конфигом',
       track_c_disabled: 'Track C отключён глобально',
+      risk_blocked_circuit_breaker: '⛔️ вход заблокирован: circuit breaker (коррелированные SL-хиты)',
+      risk_blocked_sl_cooldown: '🧊 вход заблокирован: cool-down после SL-хита',
+      risk_blocked_probation: '🚧 вход заблокирован: probation (просадка за последние 10 сделок)',
     };
     statusText = map[result.reason ?? ''] ?? result.reason ?? '';
   }
@@ -221,6 +225,17 @@ async function handleStrategyEntry(
     return { ok: false, reason: 'no_price' };
   }
 
+  // Phase T — risk-control verdict (portfolio circuit breaker / per-strategy
+  // SL cool-down / probation). Computed ONCE up-front; enforced at the two
+  // open-points below. Exits are NEVER blocked: in the reverse branch the
+  // close of the prior position always proceeds — only the re-open is
+  // suppressed when blocked.
+  const risk = evaluateEntryRisk({
+    strategyId: p.strategy_id,
+    symbol: p.symbol,
+    timeframe: p.timeframe,
+  });
+
   // Single-position-per-(symbol, strategy_id) guard, with reverse-signal
   // override for strategies that express "exit + flip" as a fresh entry
   // on the opposite side (EXIT=null strategies — see cfg.exitOnReverseSignal).
@@ -301,6 +316,12 @@ async function handleStrategyEntry(
           'strategy-trader: reverse signal — prior position already closed elsewhere',
         );
       }
+      // Phase T — the close above always proceeds (it's an exit), but the
+      // re-open half of the flip is subject to risk-control.
+      if (!risk.allowed) {
+        alertRiskBlock({ strategyId: p.strategy_id, symbol: p.symbol, verdict: risk });
+        return { ok: true, reason: `risk_blocked_${risk.rule}` };
+      }
       // Fall through to open the new position.
     } else {
       logger.warn(
@@ -319,6 +340,12 @@ async function handleStrategyEntry(
       }).catch(() => {});
       return { ok: true, reason: 'already_open', decisionId: occupied.id };
     }
+  }
+
+  // Phase T — plain (non-flip) entry path risk gate.
+  if (!risk.allowed) {
+    alertRiskBlock({ strategyId: p.strategy_id, symbol: p.symbol, verdict: risk });
+    return { ok: true, reason: `risk_blocked_${risk.rule}` };
   }
 
   // Safety SL = entry ± entry × slPct. validateStrategyConfigs() at

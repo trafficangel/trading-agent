@@ -1,5 +1,5 @@
 import { db } from '../db/client.js';
-import { TRACK_C_NOTIONAL_USD } from './track-c-config.js';
+import { TRACK_C_NOTIONAL_USD, TRACK_C_COMMISSION_RT_PCT } from './track-c-config.js';
 
 /**
  * Live performance stats for a single Track C strategy, computed from
@@ -116,8 +116,12 @@ export function getStrategyLiveStats(strategyId: string): StrategyLiveStats {
     }
   }
 
-  stats.netPnlPct = Math.round(sumPnlPct * 100) / 100;
-  stats.netPnlUsd = Math.round((sumPnlPct / 100) * TRACK_C_NOTIONAL_USD * 100) / 100;
+  // Phase T — pnl_pct rows are GROSS (price move only). Aggregates we
+  // surface are NET of the 0.11% round-trip taker commission per closed
+  // trade, matching what a real account actually keeps.
+  const netSumPct = sumPnlPct - stats.closed * TRACK_C_COMMISSION_RT_PCT;
+  stats.netPnlPct = Math.round(netSumPct * 100) / 100;
+  stats.netPnlUsd = Math.round((netSumPct / 100) * TRACK_C_NOTIONAL_USD * 100) / 100;
   stats.largestWinUsd = Math.round(maxWinUsd * 100) / 100;
   stats.largestLossUsd = Math.round(maxLossUsd * 100) / 100;
   if (stats.closed > 0) stats.winRate = stats.wins / stats.closed;
@@ -257,8 +261,10 @@ export function getStrategyDailyStats(strategyId: string, dayStartMs: number): S
     if (r.close_reason === 'sl_hit') stats.exitsSafetySL++;
     else if (r.force_close_reason === 'strategy_exit') stats.exitsStrategy++;
   }
-  stats.netPnlPct = Math.round(sumPct * 100) / 100;
-  stats.netPnlUsd = Math.round((sumPct / 100) * TRACK_C_NOTIONAL_USD * 100) / 100;
+  // Phase T — net of round-trip commission, see getStrategyLiveStats.
+  const netSum = sumPct - stats.closed * TRACK_C_COMMISSION_RT_PCT;
+  stats.netPnlPct = Math.round(netSum * 100) / 100;
+  stats.netPnlUsd = Math.round((netSum / 100) * TRACK_C_NOTIONAL_USD * 100) / 100;
   return stats;
 }
 

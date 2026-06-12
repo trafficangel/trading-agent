@@ -667,6 +667,9 @@ function renderConfigBlock(
     symbol: '${perf.symbol}',
     timeframe: '${perf.timeframe}',
     enabled: true,
+    // Phase T gate — shadow-only until 15-20 live shadow trades close
+    // net-positive (incl. 0.11% commission). Then flip to true + deploy.
+    fanOut: false,
     slPct: ${slPct},
     launchedAt: Date.parse('${new Date().toISOString()}'),
     // TODO: set the TradingView alert identifier you use in posts, e.g.

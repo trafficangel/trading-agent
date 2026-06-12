@@ -47,7 +47,7 @@ import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { TIER_CONFIGS, TIER_ORDER, computeTierTradeSize, type TierId } from '../strategies/tier-config.js';
 import { assignTier } from '../user/tier-assignment.js';
-import { STRATEGY_CONFIGS } from '../strategies/track-c-config.js';
+import { STRATEGY_CONFIGS, TRACK_C_COMMISSION_RT_PCT } from '../strategies/track-c-config.js';
 import { listRecentTransitions } from '../db/repos/user-tier-history.js';
 
 function escapeHtml(s: string): string {
@@ -1175,7 +1175,10 @@ function computeTierLiveStats(fromMs: number, toMs: number): TierLiveStats[] {
       trades++;
       if (row.pnl_pct > 0) wins++;
       else if (row.pnl_pct < 0) losses++;
-      grossUsd += (row.pnl_pct / 100) * size.notionalUsd;
+      // Phase T — pnl_pct is gross; subtract the round-trip taker
+      // commission on this tier's notional so the simulated tier PnL
+      // matches what a real account would keep.
+      grossUsd += ((row.pnl_pct - TRACK_C_COMMISSION_RT_PCT) / 100) * size.notionalUsd;
     }
     const grossRounded = Math.round(grossUsd * 100) / 100;
     const minDepo = tier.minBalanceUsdt;
@@ -1381,7 +1384,8 @@ function renderTiersDashboard(fromMs: number, toMs: number): string {
   const liveStatsNote = `
     <p class="adm-tier-note">
       Симуляция: для каждой закрытой shadow-сделки (operator-уровень, <code>user_id IS NULL</code>)
-      PnL пересчитан в USD на notional соответствующего тарифа.
+      PnL пересчитан в USD на notional соответствующего тарифа,
+      за вычетом комиссии Bybit 0.11% (round-trip) на каждую сделку.
       Это <b>не реальный</b> PnL юзеров (у них могут быть свои overrides), а оценка
       «что бы тариф заработал на актуальной истории сигналов».
       <br><br>

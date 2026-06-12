@@ -133,6 +133,18 @@ export async function fanOutEntry(args: FanOutEntryArgs): Promise<{
     logger.warn({ strategyId: args.strategyId }, 'fanOutEntry: unknown strategy_id');
     return { attempted: 0, succeeded: 0, failed: 0 };
   }
+  // Phase T — live-validation gate. fanOut:false = shadow-only: the
+  // strategy builds its public track record but does NOT touch user
+  // accounts until the operator validates 15-20 live shadow trades and
+  // flips the flag. fanOutExit is intentionally NOT gated, so flipping
+  // true→false with open user rows still closes them cleanly.
+  if (cfg.fanOut !== true) {
+    logger.info(
+      { strategyId: args.strategyId, symbol: args.symbol },
+      'fanOutEntry: strategy is shadow-only (fanOut=false) — skipping user accounts',
+    );
+    return { attempted: 0, succeeded: 0, failed: 0 };
+  }
   const targets = listEligibleTargets(args.strategyId);
   if (targets.length === 0) {
     logger.info({ strategyId: args.strategyId }, 'fanOutEntry: no eligible users');

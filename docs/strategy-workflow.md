@@ -61,6 +61,33 @@ The auditor:
 | ⚠ **BORDERLINE** | Sim PnL 50-80% of no-cap PnL. Cap saves from catastrophe but costs significant EV. | Acceptable. Set `minTier: 'prof'` (manual users only) until ≥ 20 live trades validate. |
 | ❌ **INCOMPATIBLE** | Sim PnL ≤ 0 OR < 50% of no-cap. The cap is too tight for this strategy. | **Do NOT enable.** Find a tighter variant on LuxAlgo or skip. |
 
+## Step 4.5 — Live-validation gate + risk layer (Phase T, Jun 2026)
+
+Every new strategy is added with **`fanOut: false`** (the importer emits
+it by default): it trades the public **shadow track only** and does NOT
+touch user Bybit accounts. After **15–20 closed shadow trades** with
+**positive net PnL (incl. 0.11% round-trip commission)** the operator
+flips `fanOut: true` and deploys. `fanOutExit` is never gated, so
+flipping back with open user rows still closes them.
+
+Independent of the gate, three mechanical risk rules guard ALL entries
+(shadow and fan-out; exits are never blocked) — see
+`src/strategies/risk-control.ts`:
+
+1. **Portfolio circuit breaker** — 2 safety-SL hits on different symbols
+   within 24h => all entries blocked for 48h after the latest hit.
+2. **Per-strategy SL cool-down** — after a safety-SL hit: 24h (5m TF) /
+   48h (15m+) without new entries for that strategy.
+3. **Probation** — last 10 closed shadow trades net < -5% => entries
+   paused; one probe entry allowed after 72h idle.
+
+Check current state any time:
+
+```bash
+pnpm tsx scripts/risk-status.ts                         # now
+pnpm tsx scripts/risk-status.ts --at 2026-06-02T12:00   # replay a past moment
+```
+
 ## Step 5 — Re-audit at any time
 
 ```bash

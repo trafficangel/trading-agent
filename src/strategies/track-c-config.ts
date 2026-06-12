@@ -192,6 +192,14 @@ export type StrategyConfig = {
    *  (almost no real strategy works that way). */
   exitOnReverseSignal?: boolean;
 
+  /** Phase T — live-validation gate. `false` = shadow-only: the strategy
+   *  trades the public shadow track but does NOT fan out to user Bybit
+   *  accounts. New strategies MUST start at `false`; flip to `true` only
+   *  after 15–20 closed shadow trades with positive net (incl. 0.11%
+   *  commission). Exits/closes are never gated — flipping true→false
+   *  with open user rows still lets fanOutExit close them. */
+  fanOut: boolean;
+
   /** How the strategy exits — purely cosmetic, used by the announce post.
    *  'builtin' (default) = strategy has its own Builtin Exits.
    *  'reverse' = no builtin exit; position closes on the opposite signal
@@ -305,6 +313,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     symbol: 'XRPUSDT',
     timeframe: '15',
     enabled: true,
+    fanOut: true,
     slPct: 0.08,
     launchedAt: Date.parse('2026-05-16T19:00:00Z'),
     alertName: 'XRPUSD|15|LONG=CONTAnyBl&TCBr&MFa50|SHORT=CONTAnyBr&TCBl&MFb50|EXIT=null',
@@ -405,6 +414,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     // from the product. Config kept (history/landing detail still resolve);
     // enabled:false hides it from tiers, landing list and fan-out.
     enabled: false,
+    fanOut: false,
     slPct: 0.07,
     launchedAt: Date.parse('2026-05-17T10:30:00Z'),
     alertName: 'UNIUSDT|60|LONG=CFMAnyBl&TCBr&TSTTr|SHORT=CFMAnyBr&TCBl&TSTTr|EXIT=CFMBltExt',
@@ -503,6 +513,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     timeframe: '60',
     // Phase R (May 29 2026): DISABLED — 1h strategies removed from product.
     enabled: false,
+    fanOut: false,
     slPct: 0.05,
     launchedAt: Date.parse('2026-05-17T10:35:00Z'),
     alertName: 'TRXUSDT|60|LONG=CFMAnyBl&TTBl&WkBrCfl|SHORT=CFMAnyBr&TTBr&WkBlCfl|EXIT=CFMBltExt',
@@ -591,6 +602,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     timeframe: '60',
     // Phase R (May 29 2026): DISABLED — 1h strategies removed from product.
     enabled: false,
+    fanOut: false,
     slPct: 0.07,
     launchedAt: Date.parse('2026-05-18T11:00:00Z'),
     alertName: 'TONUSDT|60|LONG=CNTRNormBl&CFMDn&NeoCloudBr|SHORT=CNTRNormBr&CFMUp&NeoCloudBl|EXIT=CNTRBltExt',
@@ -682,6 +694,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     timeframe: '60',
     // Phase R (May 29 2026): DISABLED — 1h strategies removed from product.
     enabled: false,
+    fanOut: false,
     slPct: 0.06,
     launchedAt: Date.parse('2026-05-18T11:30:00Z'),
     alertName: 'HBARUSDT|60|LONG=CNTRNormBr&TSRng&StrongBlCfl|SHORT=CNTRNormBl&TSRng&StrongBrCfl|EXIT=CNTRBltExt',
@@ -783,6 +796,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     symbol: 'BCHUSDT',
     timeframe: '5',
     enabled: true,
+    fanOut: true,
     slPct: 0.05,
     launchedAt: Date.parse('2026-05-18T12:00:00Z'),
     alertName: 'BCHUSDT|5|LONG=CNTRNormBl&CFMDn&TCBl|SHORT=CNTRNormBr&CFMUp&TCBr|EXIT=CNTRBltExt',
@@ -887,6 +901,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     symbol: 'BTCUSDT',
     timeframe: '5',
     enabled: true,
+    fanOut: true,
     slPct: 0.05,
     launchedAt: Date.parse('2026-05-19T00:00:00Z'),
     alertName: 'BTCUSDT|5|LONG=CFMStrongBr&TSTTr|SHORT=CFMStrongBl&TSTTr|EXIT=CFMBltExt',
@@ -957,6 +972,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     symbol: 'ETHUSDT',
     timeframe: '15',
     enabled: true,
+    fanOut: true,
     slPct: 0.07,
     launchedAt: Date.parse('2026-05-25T00:00:00Z'),
     alertName: 'ETHUSDT|15|LONG=OBExBr&TSRng&MFb50|SHORT=OBExBl&TSRng&MFa50|EXIT=BltExt',
@@ -1029,6 +1045,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     symbol: 'SOLUSDT',
     timeframe: '5',
     enabled: true,
+    fanOut: true,
     exitMode: 'reverse',
     slPct: 0.05,
     launchedAt: Date.parse('2026-05-29T00:00:00Z'),
@@ -1094,6 +1111,7 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     symbol: 'BNBUSDT',
     timeframe: '15',
     enabled: true,
+    fanOut: true,
     slPct: 0.08,
     launchedAt: Date.parse('2026-05-14T12:00:00Z'),
     alertName: 'BNBUSD|15|LONG=CONTAnyBr&TTBr&MFa50|SHORT=CONTAnyBl&TTBl&MFb50|EXIT=CONTBltExt',
@@ -1224,6 +1242,11 @@ export function validateStrategyConfigs(): void {
 /** Notional position size for ALL Track C trades, in USD. Mirrors
  *  POSITION_NOTIONAL_USD in daily-wrap so PnL display is consistent. */
 export const TRACK_C_NOTIONAL_USD = 1000;
+
+/** Round-trip Bybit taker commission as % of notional (0.055% × 2).
+ *  Shadow pnl_pct rows are GROSS (price-move only) — every aggregate we
+ *  show or analyse must subtract this per closed trade. Phase T. */
+export const TRACK_C_COMMISSION_RT_PCT = 0.11;
 
 /** Public landing-page base URL. Surfaced in Telegram posts (entry +
  *  exit) as the deep link `${base}/strategies/${cfg.code}`. Override

@@ -729,6 +729,7 @@ function renderAbout(): string {
 }
 
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped status-JSON blobs written by the predict research jobs; shape varies per track
 function readDataJson(name: string): any | null {
   try {
     const p = join(dataDir, name);

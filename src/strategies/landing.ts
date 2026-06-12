@@ -2331,6 +2331,11 @@ export type PageShellOpts = {
    *  «Кабинет» link instead of the «Войти» link. Pass `null` (or
    *  omit) to render the anonymous header. */
   authed?: { displayName: string | null; phone: string | null } | null;
+  /** Where to send the user back after login. Appended to the header
+   *  «Войти» link as `&next=<path>`. NOTE: the login gate does not yet
+   *  consume `next` — the param is accepted and inert until the auth
+   *  redirect lands (introduced by the /predict pages, Jun 2026). */
+  loginNext?: string;
 };
 
 /** Public-facing origin used to build absolute URLs for SEO tags
@@ -2470,7 +2475,7 @@ export function pageShell(
         `<span class="header-auth-name">${escapeHtml(authedUser.displayName ?? authedUser.phone ?? labels.cabinet)}</span>` +
         `<span class="header-auth-arrow" aria-hidden="true">›</span>` +
       `</a>`
-    : `<a class="header-auth header-auth-out" href="/strategies?login=1">${labels.login}</a>`;
+    : `<a class="header-auth header-auth-out" href="/strategies?login=1${opts.loginNext ? `&next=${encodeURIComponent(opts.loginNext)}` : ''}">${labels.login}</a>`;
 
   const navLinksHtml = `
       <a href="/">${labels.home}</a>
@@ -3586,6 +3591,7 @@ function renderStrategyIndex(
             <span class="dim">·</span>
             <span class="dim">${live.wins} прибыльных / ${live.losses} убыточных</span>
             ${sinceLabel ? `<span class="dim">·</span><span class="dim">${sinceLabel}</span>` : ''}
+            <span class="dim">·</span><span class="dim" title="PnL за вычетом комиссии Bybit 0.11% за круг на каждую сделку">после комиссии</span>
           </div>`
         : '';
 
