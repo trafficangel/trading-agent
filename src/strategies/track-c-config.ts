@@ -1086,6 +1086,198 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     },
   },
 
+  'doge-fvgm-st-tc': {
+    id: 'doge-fvgm-st-tc',
+    code: '011',
+    // Phase T batch (Jun 12, 2026). Free coin — no symbol collision.
+    // MAE audit (114 trades): p95 4.65%, worst 12.89%. SL 5% = tightest
+    // killW=0 cap and the per-margin optimum (47.3% × 10× = 4.73 vs
+    // 6%/8× = 3.69). DD 9.4% → low band.
+    // SHADOW-VALIDATION: fanOut=false + minTier=null until 15-20 closed
+    // shadow trades net-positive (Step 4.5 of the workflow), then flip
+    // fanOut:true + set minTier.
+    riskBand: 'low',
+    tierEligible: true,
+    minTier: null,
+    maxSafeLeverage: 10,
+    description:
+      'DOGE 5m | FVG Mitigated + Smart Trail + Trend Catcher | LONG: Bear FVG Mit + Bear ST + TC Bull | SHORT: зеркально | EXIT: reverse signal',
+    longDescription:
+      'Разворотная стратегия на DOGEUSDT 5m: вход на отработке (mitigation) Fair Value Gap против текущего Smart Trail с подтверждением разворота по Trend Catcher. ' +
+      'LONG — медвежий FVG отработан + Smart Trail ещё медвежий + Trend Catcher уже развернулся вверх (ловим самое начало разворота). SHORT — зеркально. ' +
+      'Своего exit-условия нет — позиция закрывается встречным сигналом (reverse_signal флип), стратегия всегда в рынке. ' +
+      'Safety SL 5% при плече 10× — по MAE-аудиту (114 сделок): самый тугой кап без потери прибыльных трейдов (p95 MAE 4.65%), максимум прибыли на маржу. ' +
+      'Бэктест ~2.3 месяца. Стратегия в shadow-обкатке: торгует публичный трек, на счета пользователей подключится после валидации 15-20 живых сделок.',
+    symbol: 'DOGEUSDT',
+    timeframe: '5',
+    enabled: true,
+    fanOut: false,
+    exitMode: 'reverse',
+    slPct: 0.05,
+    launchedAt: Date.parse('2026-06-12T00:00:00Z'),
+    alertName: 'DOGEUSDT|5|LONG=FVGMitBr&STBr&TCBl|SHORT=FVGMitBl&STBl&TCBr|EXIT=Reverse',
+    sourceUrl: 'https://www.luxalgo.com/chat/lc2u647lwn3b4e6wcdq1pvmp',
+    name: 'DOGE FVG Reversal',
+    backtest: {
+      // Recomputed from the scraped LuxAlgo Trades Log on $1000 fixed
+      // notional + 0.055%/side commission (native exits, no safety SL).
+      periodLabel: 'Mar 17, 2026 — May 26, 2026',
+      periodDays: 69,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 523.97,
+      netPnlPct: 52.40,
+      cagrPct: 277.18,
+      totalTrades: 114,
+      wins: 63,
+      losses: 51,
+      winRate: 0.5526,
+      profitFactor: 1.93,
+      commissionPaidUsd: 125.40,
+      maxDrawdownPct: 9.11,
+      maxDrawdownUsd: 91.06,
+      avgWinUsd: 17.31,
+      avgWinPct: 1.73,
+      avgLossUsd: -11.10,
+      avgLossPct: -1.11,
+      largestWinUsd: 72.48,
+      largestLossUsd: -42.65,
+      longTrades: 57,
+      longPnlPct: 27.40,
+      shortTrades: 57,
+      shortPnlPct: 25.00,
+    },
+  },
+
+  'avax-nfvg-tc-hw': {
+    id: 'avax-nfvg-tc-hw',
+    code: '012',
+    // Phase T batch (Jun 12, 2026). Free coin — no symbol collision.
+    // MAE audit (142 trades): p95 4.57%, worst 5.64%. SL 5% = tightest
+    // killW=0 cap, per-margin optimum (50.7% × 10× = 5.07 vs 6%/8× 4.45).
+    // DD ~20% at 5% cap → medium band (deepest DD of the batch).
+    // SHADOW-VALIDATION: fanOut=false + minTier=null until validated.
+    riskBand: 'medium',
+    tierEligible: true,
+    minTier: null,
+    maxSafeLeverage: 10,
+    description:
+      'AVAX 5m | New FVG + Trend Catcher + HyperWave 50 | LONG: New Bear FVG + TC Bull + HW<50 | SHORT: зеркально | EXIT: reverse signal',
+    longDescription:
+      'Разворотная стратегия на AVAXUSDT 5m: вход на появлении нового Fair Value Gap против направления Trend Catcher с фильтром по HyperWave относительно 50. ' +
+      'LONG — новый медвежий FVG + Trend Catcher бычий + HyperWave ниже 50 (перепроданность). SHORT — зеркально. ' +
+      'Своего exit-условия нет — позиция закрывается встречным сигналом (reverse_signal флип), стратегия всегда в рынке. ' +
+      'Safety SL 5% при плече 10× — по MAE-аудиту (142 сделок): самый тугой кап без потери прибыльных трейдов (worst MAE 5.64%). ' +
+      'Win rate ниже 50% — стратегия зарабатывает асимметрией (средний выигрыш вдвое больше среднего проигрыша), просадки глубже остальных (до ~17-20%). ' +
+      'Бэктест ~2.3 месяца. Стратегия в shadow-обкатке: торгует публичный трек, на счета пользователей подключится после валидации 15-20 живых сделок.',
+    symbol: 'AVAXUSDT',
+    timeframe: '5',
+    enabled: true,
+    fanOut: false,
+    exitMode: 'reverse',
+    slPct: 0.05,
+    launchedAt: Date.parse('2026-06-12T00:00:00Z'),
+    alertName: 'AVAXUSDT|5|LONG=NFVGBr&TCBl&HWb50|SHORT=NFVGBl&TCBr&HWa50|EXIT=Reverse',
+    sourceUrl: 'https://www.luxalgo.com/chat/vvda1ck85nd4pc15og9rxtea',
+    name: 'AVAX FVG HyperWave',
+    backtest: {
+      // Recomputed from the scraped LuxAlgo Trades Log on $1000 fixed
+      // notional + 0.055%/side commission (native exits, no safety SL).
+      periodLabel: 'Mar 17, 2026 — May 26, 2026',
+      periodDays: 69,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 555.84,
+      netPnlPct: 55.58,
+      cagrPct: 294.03,
+      totalTrades: 142,
+      wins: 68,
+      losses: 74,
+      winRate: 0.4789,
+      profitFactor: 1.81,
+      commissionPaidUsd: 156.20,
+      maxDrawdownPct: 17.26,
+      maxDrawdownUsd: 172.57,
+      avgWinUsd: 18.26,
+      avgWinPct: 1.83,
+      avgLossUsd: -9.27,
+      avgLossPct: -0.93,
+      largestWinUsd: 88.28,
+      largestLossUsd: -43.87,
+      longTrades: 71,
+      longPnlPct: 23.88,
+      shortTrades: 71,
+      shortPnlPct: 31.70,
+    },
+  },
+
+  'eth-cntr-st': {
+    id: 'eth-cntr-st',
+    code: '013',
+    // Phase T batch (Jun 12, 2026). CHALLENGER to STRAT-009 (ETH 15m,
+    // live WR 22% over 9 trades vs backtest 52%). Same coin — but
+    // shadow-only strategies don't touch the exchange, so no One-Way
+    // collision while fanOut=false. The swap decision happens after both
+    // have comparable live samples; the two must NEVER fan out together.
+    // MAE audit (144 trades): p95 2.85%, worst 9.13%. SL 4% = tightest
+    // killW=0 cap with buffer over p95; captures 99% of no-cap PnL.
+    // SHADOW-VALIDATION: fanOut=false + minTier=null.
+    riskBand: 'low',
+    tierEligible: true,
+    minTier: null,
+    maxSafeLeverage: 11,
+    description:
+      'ETH 5m | Contrarian Any + Smart Trail | LONG: CNTR Any Bull + ST | SHORT: зеркально | EXIT: reverse signal',
+    longDescription:
+      'Контр-трендовая разворотная стратегия на ETHUSDT 5m: сигналы Contrarian Any с фильтром по Smart Trail. ' +
+      'Своего exit-условия нет — позиция закрывается встречным сигналом (reverse_signal флип), стратегия всегда в рынке. ' +
+      'Safety SL 4% при плече 11× — по MAE-аудиту (144 сделок): самый тугой кап без потери прибыльных трейдов (p95 MAE 2.85%), захватывает 99% бескапового PnL. ' +
+      'Кандидат на замену STRAT-009 (ETH 15m), чей live-результат разошёлся с бэктестом. Решение о замене — после сравнимой live-выборки обеих. ' +
+      'Бэктест ~2.3 месяца. Стратегия в shadow-обкатке: торгует публичный трек, на счета пользователей не подключена.',
+    symbol: 'ETHUSDT',
+    timeframe: '5',
+    enabled: true,
+    fanOut: false,
+    exitMode: 'reverse',
+    slPct: 0.04,
+    launchedAt: Date.parse('2026-06-12T00:00:00Z'),
+    alertName: 'ETHUSDT|5|LONG=CNTRAnyBl&ST|SHORT=CNTRAnyBr&ST|EXIT=Reverse',
+    sourceUrl: 'https://www.luxalgo.com/chat/qo10jwvcgj845xjyrv5k0vr3',
+    name: 'ETH Contrarian ST',
+    backtest: {
+      // Recomputed from the scraped LuxAlgo Trades Log on $1000 fixed
+      // notional + 0.055%/side commission (native exits, no safety SL).
+      periodLabel: 'Mar 15, 2026 — May 22, 2026',
+      periodDays: 68,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 263.85,
+      netPnlPct: 26.38,
+      cagrPct: 141.63,
+      totalTrades: 144,
+      wins: 92,
+      losses: 52,
+      winRate: 0.6389,
+      profitFactor: 1.67,
+      commissionPaidUsd: 158.40,
+      maxDrawdownPct: 8.37,
+      maxDrawdownUsd: 83.67,
+      avgWinUsd: 7.15,
+      avgWinPct: 0.71,
+      avgLossUsd: -7.57,
+      avgLossPct: -0.76,
+      largestWinUsd: 67.93,
+      largestLossUsd: -47.69,
+      longTrades: 69,
+      longPnlPct: 15.91,
+      shortTrades: 75,
+      shortPnlPct: 10.48,
+    },
+  },
+
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
