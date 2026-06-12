@@ -2331,11 +2331,7 @@ export type PageShellOpts = {
    *  «Кабинет» link instead of the «Войти» link. Pass `null` (or
    *  omit) to render the anonymous header. */
   authed?: { displayName: string | null; phone: string | null } | null;
-  /** Where to send the user back after login. Appended to the header
-   *  «Войти» link as `&next=<path>`. NOTE: the login gate does not yet
-   *  consume `next` — the param is accepted and inert until the auth
-   *  redirect lands (introduced by the /predict pages, Jun 2026). */
-  loginNext?: string;
+  loginNext?: string; // куда вернуть после входа (относительный путь). Кнопка «Войти» добавит ?next=
 };
 
 /** Public-facing origin used to build absolute URLs for SEO tags
@@ -2475,13 +2471,13 @@ export function pageShell(
         `<span class="header-auth-name">${escapeHtml(authedUser.displayName ?? authedUser.phone ?? labels.cabinet)}</span>` +
         `<span class="header-auth-arrow" aria-hidden="true">›</span>` +
       `</a>`
-    : `<a class="header-auth header-auth-out" href="/strategies?login=1${opts.loginNext ? `&next=${encodeURIComponent(opts.loginNext)}` : ''}">${labels.login}</a>`;
+    : `<a class="header-auth header-auth-out" href="/strategies?login=1${opts.loginNext ? '&next=' + encodeURIComponent(opts.loginNext) : ''}">${labels.login}</a>`;
 
   const navLinksHtml = `
       <a href="/">${labels.home}</a>
       <a href="/autotrading">${labels.autotrading}</a>
       <a href="/strategies">${labels.strategies}</a>
-      <a href="/predict">${labels.predict}</a>
+      <a href="/predict/about">${labels.predict}</a>
       <a href="https://t.me/robotclaude" target="_blank" rel="noopener">${labels.channel}</a>
       <a href="https://t.me/dboykod" target="_blank" rel="noopener">${labels.support}</a>
   `;
@@ -4417,6 +4413,8 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
       { loc: '/en', priority: '0.8', changefreq: 'daily' },
       { loc: '/autotrading', priority: '0.9', changefreq: 'weekly' },
       { loc: '/strategies', priority: '0.7', changefreq: 'daily' },
+      { loc: '/predict/about', priority: '0.7', changefreq: 'weekly' },
+      { loc: '/predict', priority: '0.6', changefreq: 'daily' },
     ];
     for (const s of enabled) {
       urls.push({ loc: `/strategies/${s.code}`, priority: '0.6', changefreq: 'daily' });
@@ -4893,7 +4891,11 @@ function renderGatedPreview(
                 try { ym(109255043, 'reachGoal', 'registration'); } catch (e) {}
               }
               setMsg(${JSON.stringify(t.jsAccessGranted)});
-              setTimeout(function() { window.location.reload(); }, 800);
+              setTimeout(function() {
+                var nx = new URLSearchParams(location.search).get('next');
+                if (nx && /^\\/[^/]/.test(nx)) { window.location.href = nx; }
+                else { window.location.reload(); }
+              }, 800);
               return;
             }
             setMsg(${JSON.stringify(t.jsWrongCode)}, true);

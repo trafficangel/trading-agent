@@ -1373,6 +1373,21 @@ function renderHome(
 
   // Top-right nav is now handled by site-header in pageShell.
 
+  // ---------- Приём идей стратегий (тестируем + автоматизируем) ----------
+  const ideas = lang === 'en'
+    ? { title: 'Got a strategy idea?', sub: 'We welcome your ideas and hypotheses — we test them on historical and live data, and turn the working ones into fully automated trading. Share yours and we will explore it.', cta: 'Suggest an idea', dash: 'Open the dashboard' }
+    : { title: 'Есть идея стратегии?', sub: 'Мы принимаем ваши идеи и гипотезы по стратегиям — проверяем их на истории и на живых данных, а удачные превращаем в автоматическую торговлю. Поделитесь идеей — разберём вместе.', cta: 'Предложить идею', dash: 'Открыть дашборд' };
+  const strategyIdeasHtml = `
+    <div class="home-section">
+      <h2 class="home-section-title">💡 ${escapeHtml(ideas.title)}</h2>
+      <p class="home-section-sub">${escapeHtml(ideas.sub)}</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+        <a class="btn btn-primary" href="https://t.me/dboykod" target="_blank" rel="noopener">${escapeHtml(ideas.cta)}</a>
+        <a class="btn btn-ghost" href="/predict">${escapeHtml(ideas.dash)}</a>
+      </div>
+    </div>
+  `;
+
   const body = `
     ${heroHtml}
     ${livePositionsHtml}
@@ -1381,6 +1396,7 @@ function renderHome(
     ${howHtml}
     ${signalPreviewHtml}
     ${strategiesPreviewHtml}
+    ${strategyIdeasHtml}
     ${roadmapHtml}
     ${renderFounderBlock(lang)}
     ${faqHtml}
