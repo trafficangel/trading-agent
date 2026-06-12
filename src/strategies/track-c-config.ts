@@ -1278,6 +1278,73 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     },
   },
 
+  'bnb-cntrn-hw-wc': {
+    id: 'bnb-cntrn-hw-wc',
+    code: '014',
+    // Phase T batch (Jun 12, 2026). CHALLENGER to STRAT-001 (BNB 15m,
+    // live -8.3pp over 7 trades, WR 29%). Shadow-only => no One-Way
+    // collision while fanOut=false; swap decided on comparable live
+    // samples; the two must NEVER fan out together.
+    // MAE audit (117 trades): p95 2.94%, worst 4.44%. SL 4% = killW=0
+    // with ~36% buffer over p95; per-margin 25.8% × 11× = 2.84.
+    // Beat the alternative BNB 5m candidate (CFM Downtrend variant,
+    // PF 1.61) on every axis — that one was discarded.
+    // SHADOW-VALIDATION: fanOut=false + minTier=null.
+    riskBand: 'low',
+    tierEligible: true,
+    minTier: null,
+    maxSafeLeverage: 11,
+    description:
+      'BNB 5m | Contrarian Normal + HyperWave 50 + Weak Confluence | LONG: CNTR Norm Bull + HW<50 + WC | SHORT: зеркально | EXIT: reverse signal',
+    longDescription:
+      'Контр-трендовая разворотная стратегия на BNBUSDT 5m: сигналы Contrarian Normal с фильтром по HyperWave относительно 50 и слабой конфлюэнции. ' +
+      'LONG — Contrarian Normal Bullish + HyperWave ниже 50 (перепроданность). SHORT — зеркально. ' +
+      'Своего exit-условия нет — позиция закрывается встречным сигналом (reverse_signal флип), стратегия всегда в рынке. ' +
+      'Safety SL 4% при плече 11× — по MAE-аудиту (117 сделок): худшая внутрисделочная просадка за всю историю 4.44%, p95 2.94% — стоп с запасом, не режет прибыльные трейды. ' +
+      'Кандидат на замену STRAT-001 (BNB 15m), чей live-результат слабый. Решение о замене — после сравнимой live-выборки обеих. ' +
+      'Бэктест ~2.3 месяца. Стратегия в shadow-обкатке: торгует публичный трек, на счета пользователей не подключена.',
+    symbol: 'BNBUSDT',
+    timeframe: '5',
+    enabled: true,
+    fanOut: false,
+    exitMode: 'reverse',
+    slPct: 0.04,
+    launchedAt: Date.parse('2026-06-12T00:00:00Z'),
+    alertName: 'BNBUSDT|5|LONG=CNTRNormBl&HWb50&WC|SHORT=CNTRNormBr&HWa50&WC|EXIT=Reverse',
+    sourceUrl: 'https://www.luxalgo.com/chat/ic4ta3rizktlyaea9bz9dby9',
+    name: 'BNB Contrarian HyperWave',
+    backtest: {
+      // Recomputed from the scraped LuxAlgo Trades Log on $1000 fixed
+      // notional + 0.055%/side commission (native exits, no safety SL).
+      periodLabel: 'Mar 17, 2026 — May 26, 2026',
+      periodDays: 69,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 266.44,
+      netPnlPct: 26.64,
+      cagrPct: 140.94,
+      totalTrades: 117,
+      wins: 69,
+      losses: 48,
+      winRate: 0.5897,
+      profitFactor: 1.91,
+      commissionPaidUsd: 128.70,
+      maxDrawdownPct: 7.53,
+      maxDrawdownUsd: 75.34,
+      avgWinUsd: 8.08,
+      avgWinPct: 0.81,
+      avgLossUsd: -6.07,
+      avgLossPct: -0.61,
+      largestWinUsd: 50.98,
+      largestLossUsd: -32.83,
+      longTrades: 58,
+      longPnlPct: 12.86,
+      shortTrades: 59,
+      shortPnlPct: 13.78,
+    },
+  },
+
   'bnb-cntr-tt-mf50': {
     id: 'bnb-cntr-tt-mf50',
     code: '001',
