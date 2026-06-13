@@ -143,9 +143,15 @@ type Feat = { up: boolean; atrRel: number; ext: number } | null;
     process.stderr.write(`  ${sym}: 1h=${h1.length} 4h=${h4.length}\n`);
   }
 
+  // --closed: use only the PRIOR fully-closed candle (shift lookup back one
+  // interval) to eliminate any intra-candle look-ahead. 1h interval = 3600s,
+  // 4h = 14400s.
+  const CLOSED = process.argv.includes('--closed');
+  const LAG1 = CLOSED ? 3600_000 : 0;
+  const LAG4 = CLOSED ? 4 * 3600_000 : 0;
   function featAt(t: Trade): Feat {
     const f = feat.get(t.symbol); if (!f) return null;
-    const i1 = idxAt(t.entryAt, f.t1); const i4 = idxAt(t.entryAt, f.t4);
+    const i1 = idxAt(t.entryAt - LAG1, f.t1); const i4 = idxAt(t.entryAt - LAG4, f.t4);
     if (i1 < 0 || i4 < 50) return null;
     return { up: f.up4[i4]!, atrRel: f.atrRel1[i1]!, ext: f.ext4[i4]! };
   }
