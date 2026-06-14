@@ -34,6 +34,7 @@
  */
 
 import { STRATEGY_CONFIGS } from './track-c-config.js';
+import { computeWeights } from './kelly-allocator.js';
 
 export type TierId = 'starter' | 'standard' | 'plus' | 'pro' | 'vip' | 'prof';
 
@@ -272,7 +273,10 @@ export function computeTierTradeSize(
   if (!tier.strategyIds.includes(strategyId)) return null;
   const strategy = STRATEGY_CONFIGS[strategyId];
   if (!strategy?.maxSafeLeverage) return null;
-  const marginUsd = tier.marginPoolUsd / tier.strategyIds.length;
+  // Phase V — Kelly-tilt: distribute the pool by live-validated edge
+  // (bounded 0.4×–1.8× of equal), not flat. Equal until data engages.
+  const weight = computeWeights(tier.strategyIds).get(strategyId) ?? 1 / tier.strategyIds.length;
+  const marginUsd = tier.marginPoolUsd * weight;
   const leverage = strategy.maxSafeLeverage;
   const notionalUsd = marginUsd * leverage;
   return { marginUsd, leverage, notionalUsd };
