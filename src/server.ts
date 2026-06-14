@@ -16,6 +16,7 @@ import { activePositionsRoute } from './api/active-positions.js';
 import { userRoute } from './user/routes.js';
 import { autotradingRoute } from './strategies/autotrading.js';
 import { predictRoute } from './strategies/predict.js';
+import { labRoute } from './strategies/lab.js';
 import { startTpslMonitorJob } from './jobs/tpsl-monitor.js';
 import { startHeartbeatJob } from './jobs/heartbeat.js';
 import { startDailyWrapJob } from './jobs/daily-wrap.js';
@@ -23,6 +24,7 @@ import { startHealthJob } from './jobs/health.js';
 import { startSubscriptionSweeperJob } from './jobs/subscription-sweeper.js';
 import { startBalanceMonitorJob } from './jobs/balance-monitor.js';
 import { startRecoveryMonitorJob } from './jobs/recovery-monitor.js';
+import { startCustomRunner } from './jobs/custom-runner.js';
 // Phase G — money-back guarantee disabled, see start-job line below.
 // import { startPnlGuaranteeMonthlyJob } from './jobs/pnl-guarantee-monthly.js';
 import { sendMessage } from './telegram/bot.js';
@@ -195,6 +197,7 @@ async function main(): Promise<void> {
   await userRoute(app);
   await autotradingRoute(app);
   await predictRoute(app);
+  await labRoute(app);
   await landingRoute(app);
   await homeRoute(app);
 
@@ -209,6 +212,10 @@ async function main(): Promise<void> {
   startSubscriptionSweeperJob();
   startBalanceMonitorJob();
   startRecoveryMonitorJob();
+  // THE LAB — paper-trade in-house engine strategies (track='lab',
+  // isolated from the live book). Drives /lab. VPS-only (needs Bybit
+  // klines); no-ops locally where Bybit is unreachable.
+  startCustomRunner();
   // Phase G — money-back guarantee disabled per operator decision.
   // Cron registration commented out, DB columns + repo helpers preserved
   // so it can be re-enabled later without re-migrating. UI mentions

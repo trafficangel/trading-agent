@@ -2458,9 +2458,9 @@ export function pageShell(
     `<a href="/set-lang/ru" class="${lang === 'ru' ? 'active' : ''}" aria-label="Русский">RU</a>` +
     `<a href="/set-lang/en" class="${lang === 'en' ? 'active' : ''}" aria-label="English">EN</a>`;
   const labels = lang === 'en'
-    ? { home: 'Home', strategies: 'Strategies', autotrading: 'Auto-trading', predict: 'Predict', channel: 'Channel', support: 'Support', menu: 'Menu', close: 'Close',
+    ? { home: 'Home', strategies: 'Strategies', lab: 'Lab', autotrading: 'Auto-trading', predict: 'Predict', channel: 'Channel', support: 'Support', menu: 'Menu', close: 'Close',
         cabinet: 'Cabinet', login: 'Log in', greeting: 'Hi' }
-    : { home: 'Главная', strategies: 'Стратегии', autotrading: 'Автотрейдинг', predict: 'Predict', channel: 'Канал', support: 'Поддержка', menu: 'Меню', close: 'Закрыть',
+    : { home: 'Главная', strategies: 'Стратегии', lab: 'Лаборатория', autotrading: 'Автотрейдинг', predict: 'Predict', channel: 'Канал', support: 'Поддержка', menu: 'Меню', close: 'Закрыть',
         cabinet: 'Кабинет', login: 'Войти', greeting: 'Привет' };
 
   // Auth pill in the header — either:
@@ -2479,6 +2479,7 @@ export function pageShell(
       <a href="/">${labels.home}</a>
       <a href="/autotrading">${labels.autotrading}</a>
       <a href="/strategies">${labels.strategies}</a>
+      <a href="/lab">${labels.lab}</a>
       <a href="/predict/about">${labels.predict}</a>
       <a href="https://t.me/robotclaude" target="_blank" rel="noopener">${labels.channel}</a>
       <a href="https://t.me/dboykod" target="_blank" rel="noopener">${labels.support}</a>
@@ -4260,7 +4261,7 @@ function liveEquityCurveSvg(equityUsd: number[]): string {
  * "backtest said X, live did Y" at a glance. Everything is net of the
  * 0.11% round-trip commission. Caller must ensure ex.closed > 0.
  */
-function renderLiveStatsBlock(live: StrategyLiveStats, ex: StrategyEquityExtras): string {
+export function renderLiveStatsBlock(live: StrategyLiveStats, ex: StrategyEquityExtras): string {
   const pnlClass = classForValue(live.netPnlPct);
   const longClass = classForValue(ex.longNetPct);
   const shortClass = classForValue(ex.shortNetPct);

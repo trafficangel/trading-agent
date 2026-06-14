@@ -47,22 +47,25 @@ type Row = {
   closed_at: number | null;
 };
 
-const stmt = db.prepare<[string], Row>(`
+const stmt = db.prepare<[string, string], Row>(`
   SELECT status, pnl_pct, close_reason, force_close_reason,
          created_at, filled_at, closed_at
   FROM decisions
-  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id = ?
+  WHERE track = ? AND user_id IS NULL AND strategy_id = ?
 `);
 
-const firstAtStmt = db.prepare<[string], { created_at: number }>(`
+const firstAtStmt = db.prepare<[string, string], { created_at: number }>(`
   SELECT MIN(created_at) AS created_at
   FROM decisions
-  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id = ?
+  WHERE track = ? AND user_id IS NULL AND strategy_id = ?
 `);
 
-export function getStrategyLiveStats(strategyId: string): StrategyLiveStats {
-  const rows = stmt.all(strategyId);
-  const first = firstAtStmt.get(strategyId);
+/** `track` selects the book: 'strategy' = live LuxAlgo shadow (default,
+ *  keeps every existing caller working), 'lab' = the in-house paper
+ *  lab. Same stats machinery, isolated data. */
+export function getStrategyLiveStats(strategyId: string, track = 'strategy'): StrategyLiveStats {
+  const rows = stmt.all(track, strategyId);
+  const first = firstAtStmt.get(track, strategyId);
 
   const stats: StrategyLiveStats = {
     firstTradeAt: first?.created_at ?? null,
@@ -167,16 +170,16 @@ export type StrategyEquityExtras = {
   commissionPaidUsd: number;
 };
 
-const equityRowsStmt = db.prepare<[string], { pnl_pct: number; side: string | null }>(`
+const equityRowsStmt = db.prepare<[string, string], { pnl_pct: number; side: string | null }>(`
   SELECT pnl_pct, side
   FROM decisions
-  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id = ?
+  WHERE track = ? AND user_id IS NULL AND strategy_id = ?
     AND status = 'closed' AND pnl_pct IS NOT NULL
   ORDER BY closed_at ASC
 `);
 
-export function getStrategyEquityExtras(strategyId: string): StrategyEquityExtras {
-  const rows = equityRowsStmt.all(strategyId);
+export function getStrategyEquityExtras(strategyId: string, track = 'strategy'): StrategyEquityExtras {
+  const rows = equityRowsStmt.all(track, strategyId);
   const C = TRACK_C_COMMISSION_RT_PCT;
 
   const out: StrategyEquityExtras = {
@@ -261,11 +264,11 @@ type TradeRow = {
   closed_at: number | null;
 };
 
-const recentTradesStmt = db.prepare<[string, number], TradeRow>(`
+const recentTradesStmt = db.prepare<[string, string, number], TradeRow>(`
   SELECT id, strategy_trade_num, side, entry, close_price, pnl_pct, close_reason,
          force_close_reason, filled_at, created_at, closed_at
   FROM decisions
-  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id = ?
+  WHERE track = ? AND user_id IS NULL AND strategy_id = ?
     AND status = 'closed' AND pnl_pct IS NOT NULL
   ORDER BY closed_at DESC
   LIMIT ?
@@ -294,16 +297,16 @@ type ActiveRow = {
   created_at: number;
 };
 
-const activeTradesStmt = db.prepare<[string], ActiveRow>(`
+const activeTradesStmt = db.prepare<[string, string], ActiveRow>(`
   SELECT id, strategy_trade_num, side, entry, sl, filled_at, created_at
   FROM decisions
-  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id = ?
+  WHERE track = ? AND user_id IS NULL AND strategy_id = ?
     AND status IN ('active', 'pending')
   ORDER BY created_at DESC
 `);
 
-export function getStrategyActiveTrades(strategyId: string): ActiveTradeRow[] {
-  const rows = activeTradesStmt.all(strategyId);
+export function getStrategyActiveTrades(strategyId: string, track = 'strategy'): ActiveTradeRow[] {
+  const rows = activeTradesStmt.all(track, strategyId);
   const out: ActiveTradeRow[] = [];
   for (const r of rows) {
     if (r.side !== 'long' && r.side !== 'short') continue;
@@ -607,8 +610,8 @@ export function getUserClosedTrades(
 
 /** Most recent N closed trades for the landing-page "Recent live trades"
  *  table. Includes only fully-closed decisions with a recorded pnl_pct. */
-export function getStrategyRecentTrades(strategyId: string, limit = 50): LiveTradeRow[] {
-  const rows = recentTradesStmt.all(strategyId, limit);
+export function getStrategyRecentTrades(strategyId: string, limit = 50, track = 'strategy'): LiveTradeRow[] {
+  const rows = recentTradesStmt.all(track, strategyId, limit);
   const out: LiveTradeRow[] = [];
   for (const r of rows) {
     if (!r.side || (r.side !== 'long' && r.side !== 'short')) continue;

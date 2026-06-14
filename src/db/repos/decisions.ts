@@ -156,6 +156,12 @@ export type InsertDecisionInput = {
   /** Idempotency key for the inbound webhook. Only the shadow row
    *  (user_id=null) carries this; user-fanout rows have it NULL. */
   webhookDedupKey?: string | null;
+  /** Execution track. Defaults to 'strategy' (LuxAlgo shadow + fan-out).
+   *  The in-house paper-trading lab passes 'lab' so its experimental
+   *  strategies are FULLY isolated from the live book: lab rows never
+   *  enter the live aggregates, the risk circuit-breaker, the public
+   *  /strategies list, or fan-out — they only show in /lab. */
+  track?: string;
 };
 
 export function insertDecision(input: InsertDecisionInput): number {
@@ -214,7 +220,7 @@ export function insertDecision(input: InsertDecisionInput): number {
     input.features ? JSON.stringify(input.features) : null,
     null, // pending_until — Track C is market-entry only
     null, // filled_at — set later when limit fills (n/a Track C)
-    'strategy',
+    input.track ?? 'strategy',
     input.sl, // original_sl — frozen at open time
     null, // tp1_price
     input.strategyId,
