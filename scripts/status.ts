@@ -50,7 +50,7 @@ const enabled = Object.values(STRATEGY_CONFIGS).filter((c) => c.enabled);
 const weights = computeWeights(TIER_CONFIGS['plus'].strategyIds);
 const eq = 1 / TIER_CONFIGS['plus'].strategyIds.length;
 console.log(`\nSTRATEGIES (enabled)`);
-console.log(`  code sym       tf   fanOut  net%    WR   N   open  weight  risk`);
+console.log(`  code sym       tf   fanOut  net$    WR   N   open  weight  risk`);
 for (const cfg of enabled.sort((a, b) => a.code.localeCompare(b.code))) {
   const live = getStrategyLiveStats(cfg.id);
   const cd = decideCooldown(getLastSlHitForStrategy(cfg.id), cfg.timeframe, now);
