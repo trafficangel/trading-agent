@@ -84,11 +84,12 @@ const LAB_CSS = `
   .lab-fam{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin:18px 0 6px}
 `;
 
-/** Family grouping for the list, by strategy-id convention. */
+/** Family grouping for the list, by strategy description. */
 function familyOf(s: LabStrategy): string {
-  if (s.id.includes('rsi')) return 'Mean-reversion (RSI + тренд-фильтр)';
-  if (s.id.includes('sma-trend')) return 'Trend-following (SMA)';
-  if (s.id.includes('donchian')) return 'Breakout (Donchian)';
+  const d = s.description;
+  if (d.includes('Bollinger') || d.includes('RSI')) return 'Mean-reversion (откуп от средней, в сторону тренда)';
+  if (d.includes('Donchian')) return 'Breakout (пробой канала)';
+  if (d.includes('SMA') || d.includes('EMA') && d.includes('cross') || d.includes('ROC')) return 'Trend-following (следование тренду)';
   return 'Прочее';
 }
 

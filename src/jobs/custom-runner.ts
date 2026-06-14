@@ -18,7 +18,7 @@
  */
 
 import cron from 'node-cron';
-import { getKlines } from '../backtest/klines.js';
+import { getKlines, intervalStepMs } from '../backtest/klines.js';
 import { LAB_STRATEGIES, LAB_TRACK, type LabStrategy } from '../strategies/lab-registry.js';
 import { insertDecision, forceClose, type CloseReason } from '../db/repos/decisions.js';
 import { db } from '../db/client.js';
@@ -66,7 +66,7 @@ function closeLab(pos: LabPos, closePrice: number, closeReason: CloseReason, for
 }
 
 async function step(s: LabStrategy, nowMs: number): Promise<void> {
-  const stepMs = Number(s.timeframe) * 60_000;
+  const stepMs = intervalStepMs(s.timeframe); // supports 'D'/'W' too, not just numeric minutes
   // Fetch enough history for warmup (EMA200 etc.) plus a buffer.
   const lookback = (s.warmup + 60) * stepMs;
   let candles;

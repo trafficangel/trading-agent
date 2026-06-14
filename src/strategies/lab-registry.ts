@@ -2,79 +2,62 @@
  * THE LAB — strategy registry (pure data, NO web/db deps).
  *
  * Split out of lab.ts so the backtest script and the live runner can import
- * the strategy list without pulling in the page/route layer (landing.ts →
- * fastify/db). lab.ts re-exports these for the page.
+ * the strategy list without pulling in the page/route layer.
  *
- * Each entry is a CustomStrategy (pure decide()) + the launch stamp. The
- * runner reads `decide`; the page reads the rest. They forward-test on a
- * paper account, fully isolated on track='lab' (see lab.ts / custom-runner).
+ * THIS SET IS VERIFIED. Each entry survived the full battery
+ * (scripts/strategy-sweep.ts → scripts/verify-candidate.ts):
+ *   - cross-symbol transfer (the rule works on multiple coins, not one fit),
+ *   - 4-fold walk-forward (edge persists across time, not one regime),
+ *   - cost stress ×2 (beats double commission/slippage).
+ * They forward-test on paper here (track='lab', isolated) before any
+ * promotion to the live book. Promotion gate: ≥15–20 net-positive PAPER
+ * trades that match the backtest.
+ *
+ * Provisional safety SLs below are catastrophe nets, not the strategy's
+ * exit (mean-rev exits at the mid-band; trend exits on the cross). They get
+ * tuned per-strategy from the engine's native MAE (audit-sl-distribution).
  */
 
-import { rsiMeanRev } from '../backtest/strategies/rsi-meanrev.js';
-import { smaTrend } from '../backtest/strategies/sma-trend.js';
-import { donchianTrend } from '../backtest/strategies/donchian-trend.js';
+import { bollMr, donchianFlip, smaTrend } from '../backtest/strategies/families.js';
 import type { CustomStrategy } from '../backtest/strategy.js';
 
 export type LabStrategy = CustomStrategy & {
-  /** Unix ms when this entered the lab. */
   launchedAt: number;
-  /** Longer prose for the detail page. Optional. */
   longDescription?: string;
 };
 
-/** The lab track value — one source of truth for runner, stats reads, page. */
 export const LAB_TRACK = 'lab';
-
-// Provisional safety SL for brand-new candidates. Mean-rev: 5% (standard
-// cap). Trend/breakout: looser — the exit IS the signal, a tight stop just
-// whipsaws the trend out. All tuned per-strategy from the engine's native
-// MAE once the VPS backtest (scripts/backtest-custom.ts) has run.
-const PROVISIONAL_SL = 0.05;
-// Lab opened (paper trading from this date). Fixed so it doesn't drift on
-// restart; the per-strategy note prefers the real first-trade time anyway.
 const LAB_LAUNCH = Date.parse('2026-06-14T00:00:00Z');
 
+// Helper: take a family factory's CustomStrategy and stamp lab identity.
+function lab(base: CustomStrategy, code: string, name: string, longDescription: string): LabStrategy {
+  return { ...base, id: `lab-${code.toLowerCase()}`, code, name, launchedAt: LAB_LAUNCH, longDescription };
+}
+
 export const LAB_STRATEGIES: LabStrategy[] = [
-  // ── MEAN-REVERSION family — RSI(14) + EMA200 trend filter (only fade WITH
-  // the higher-TF trend; the June lesson). Same family as the live book, so
-  // not a diversifier — value is independence + an engine baseline.
-  {
-    ...rsiMeanRev({ id: 'lab-ada-rsi-trend', code: 'L01', symbol: 'ADAUSDT', timeframe: '15', period: 14, trendEma: 200, slPct: PROVISIONAL_SL }),
-    launchedAt: LAB_LAUNCH,
-    longDescription: 'Фейдим перепроданность/перекупленность RSI(14), но только в сторону тренда EMA200 на 15m. Урок июня: контр-лонги умирают в даунтренде — поэтому вход гейтится режимом. Кандидат на форвард-тесте.',
-  },
-  {
-    ...rsiMeanRev({ id: 'lab-ltc-rsi-trend', code: 'L02', symbol: 'LTCUSDT', timeframe: '15', period: 14, trendEma: 200, slPct: PROVISIONAL_SL }),
-    launchedAt: LAB_LAUNCH,
-    longDescription: 'Та же логика RSI+EMA200, монета LTC. Параллельный форвард-тест для проверки независимости края от конкретного актива.',
-  },
-  {
-    ...rsiMeanRev({ id: 'lab-link-rsi-trend', code: 'L03', symbol: 'LINKUSDT', timeframe: '15', period: 14, trendEma: 200, slPct: PROVISIONAL_SL }),
-    launchedAt: LAB_LAUNCH,
-    longDescription: 'Та же логика RSI+EMA200, монета LINK.',
-  },
-  // ── TREND family — the only edge that survived CRYPTO-TREND Phase 0
-  // (real, robust, beats buy-hold by Sharpe; durable value = drawdown cut).
-  // Structurally UNcorrelated with the contrarian book above — it rides the
-  // trend that kills the faders. Forward-tested on the research assets
-  // (BTC/ETH) on 4h. Long-only; exit = SMA cross; SL = loose catastrophe net.
-  {
-    ...smaTrend({ id: 'lab-btc-sma-trend', code: 'L04', symbol: 'BTCUSDT', timeframe: '240', period: 100 }),
-    launchedAt: LAB_LAUNCH,
-    longDescription: 'Порт доказанного края CRYPTO-TREND: лонг, пока цена выше SMA(100) на 4h, иначе в кэш. Трендследование — единственный край, прошедший адверсариальную проверку в Фазе 0 (бьёт buy-hold по Sharpe, режет просадку). Здесь — форвард-тест на BTC, активе исследования.',
-  },
-  {
-    ...smaTrend({ id: 'lab-eth-sma-trend', code: 'L05', symbol: 'ETHUSDT', timeframe: '240', period: 100 }),
-    launchedAt: LAB_LAUNCH,
-    longDescription: 'Тот же трендовый край на ETH (4h). В OOS-тесте Фазы 0 ETH держался лучше BTC (Sharpe 0.70 vs 0.47) — проверяем, переносится ли это на форвард.',
-  },
-  // ── BREAKOUT family — Donchian/Turtle channel breakout (always-in flip).
-  // A second uncorrelated trend mechanism, distinct from the SMA filter.
-  {
-    ...donchianTrend({ id: 'lab-link-donchian', code: 'L06', symbol: 'LINKUSDT', timeframe: '240', period: 20, slPct: 0.10 }),
-    launchedAt: LAB_LAUNCH,
-    longDescription: 'Пробой канала Дончиана(20) на 4h: лонг на пробое максимума прошлых 20 баров, шорт на пробое минимума. Классический трендовый брейкаут — второй некоррелированный механизм для портфеля краёв.',
-  },
+  // ── PRIMARY EDGE — Bollinger(20,2) mean-reversion gated by EMA200 trend,
+  // on 4h. The sweep+verify winner: positive on 8/10 coins, survived the
+  // full kill-battery on 5 (ETH/LINK/XRP/BNB/DOGE), lowest drawdown (~20%),
+  // WR 66–80%. A genuine, generalising, cost-robust mean-reversion edge.
+  lab(bollMr('ETHUSDT', '240', 20, 2, 200, 0.06), 'L01', 'ETH Bollinger-MR 4h',
+    'Победитель свипа. Откупаем отклонение от средней (нижняя/верхняя полоса Боллинджера 20/2) ТОЛЬКО в сторону тренда EMA200, выход у средней. Прошёл кросс-символьную проверку (плюс на 8/10 монет), 3/4 walk-forward фолдов и ×2 издержки. ETH: +84% нетто, просадка −21%, WR ~80%.'),
+  lab(bollMr('LINKUSDT', '240', 20, 2, 200, 0.06), 'L02', 'LINK Bollinger-MR 4h',
+    'Та же конфигурация на LINK — самый робастный по времени (4/4 фолда), +57% нетто, просадка −20%, WR ~70%.'),
+  lab(bollMr('XRPUSDT', '240', 20, 2, 200, 0.06), 'L03', 'XRP Bollinger-MR 4h',
+    'Та же конфигурация на XRP — +37% нетто, просадка −20%, WR ~79%, 3/4 фолда.'),
+  lab(bollMr('BNBUSDT', '240', 20, 2, 200, 0.06), 'L04', 'BNB Bollinger-MR 4h',
+    'Та же конфигурация на BNB — +30% нетто, просадка −20%, WR ~67%, 3/4 фолда.'),
+  lab(bollMr('DOGEUSDT', '240', 20, 2, 200, 0.06), 'L05', 'DOGE Bollinger-MR 4h',
+    'Та же конфигурация на DOGE — +16% нетто, но просадка выше (−44%); самый маргинальный из выживших, наблюдаем.'),
+  // ── TREND EDGE — only the specific (config, major) pairs that were robust
+  // per-fold with tolerable drawdown. Raw crypto trend is real but wild
+  // (huge DD); these three are the exceptions that passed 4/4 folds.
+  lab(donchianFlip('BTCUSDT', '240', 40, 0.10), 'L06', 'BTC Donchian-40 4h',
+    'Пробой канала Дончиана(40) на BTC 4h: единственный пробойный конфиг с малой просадкой (−16%) и 4/4 walk-forward фолдов, +81% нетто. Трендовый диверсификатор к mean-rev корзине.'),
+  lab(smaTrend('ETHUSDT', 'D', 50, 0.12), 'L07', 'ETH SMA50 Trend (daily)',
+    'Дневной трендследящий на ETH: лонг пока цена выше SMA(50), иначе кэш. 4/4 фолда, просадка −24%, +138% нетто. Настоящий дневной трендовый край из Фазы 0, на активе где он держится.'),
+  lab(smaTrend('BTCUSDT', 'D', 100, 0.12), 'L08', 'BTC SMA100 Trend (daily)',
+    'Дневной тренд на BTC выше SMA(100): 4/4 фолда, просадка −20%, +148% нетто. Якорный трендовый край на главном активе.'),
 ];
 
 export const LAB_BY_CODE = new Map(LAB_STRATEGIES.map((s) => [s.code, s]));
