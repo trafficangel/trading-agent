@@ -16,9 +16,11 @@
  * graduates: we add a real STRATEGY_CONFIGS entry and promote it. Until
  * then it lives only at /lab, labelled «эксперимент».
  *
- * The page reuses the exact rich stats block from the live detail page
- * (renderLiveStatsBlock) — the stats functions are parameterised by track,
- * so backtest == live == lab presentation, zero divergence.
+ * The registry lives in lab-registry.ts (no web deps, shared with the
+ * backtest script + runner). This file is the page + route only. It reuses
+ * the exact rich stats block from the live detail page (renderLiveStatsBlock)
+ * — the stats functions are parameterised by track, so backtest == live ==
+ * lab presentation, zero divergence.
  */
 
 import type { FastifyInstance } from 'fastify';
@@ -30,56 +32,7 @@ import {
   getStrategyActiveTrades,
 } from './live-stats.js';
 import { TRACK_C_NOTIONAL_USD } from './track-c-config.js';
-import { rsiMeanRev } from '../backtest/strategies/rsi-meanrev.js';
-import type { CustomStrategy } from '../backtest/strategy.js';
-
-/** A lab strategy = a CustomStrategy (pure decide()) + the launch stamp.
- *  The runner reads `decide`; the page reads everything else. */
-export type LabStrategy = CustomStrategy & {
-  /** Unix ms when this entered the lab. Scopes the "paper since" note. */
-  launchedAt: number;
-  /** Longer prose for the detail page. Optional. */
-  longDescription?: string;
-};
-
-/** The lab track value — keep in one place so the runner, the stats reads
- *  and the page can't drift apart. */
-export const LAB_TRACK = 'lab';
-
-// Provisional safety SL for brand-new candidates: 5% (the standard cap for
-// new strategies). Tuned per-strategy from the engine's native MAE once the
-// VPS backtest has produced enough paper/historical trades.
-const PROVISIONAL_SL = 0.05;
-// Lab opened (paper trading from this date). Fixed so it doesn't drift on
-// restart; the per-strategy note prefers the real first-trade time anyway.
-const LAB_LAUNCH = Date.parse('2026-06-14T00:00:00Z');
-
-/**
- * The lab registry. Candidates are RSI(14) mean-reversion + EMA200 trend
- * filter (the June lesson: only fade WITH the higher-TF trend) on FREE
- * coins that don't collide with the live book. These are NOT yet validated
- * — that's the whole point of paper-trading them here.
- */
-export const LAB_STRATEGIES: LabStrategy[] = [
-  {
-    ...rsiMeanRev({ id: 'lab-ada-rsi-trend', code: 'L01', symbol: 'ADAUSDT', timeframe: '15', period: 14, trendEma: 200, slPct: PROVISIONAL_SL }),
-    launchedAt: LAB_LAUNCH,
-    longDescription: 'Фейдим перепроданность/перекупленность RSI(14), но только в сторону тренда EMA200 на 15m. Урок июня: контр-лонги умирают в даунтренде — поэтому вход гейтится режимом. Кандидат на форвард-тесте.',
-  },
-  {
-    ...rsiMeanRev({ id: 'lab-ltc-rsi-trend', code: 'L02', symbol: 'LTCUSDT', timeframe: '15', period: 14, trendEma: 200, slPct: PROVISIONAL_SL }),
-    launchedAt: LAB_LAUNCH,
-    longDescription: 'Та же логика RSI+EMA200, монета LTC. Параллельный форвард-тест для проверки независимости края от конкретного актива.',
-  },
-  {
-    ...rsiMeanRev({ id: 'lab-link-rsi-trend', code: 'L03', symbol: 'LINKUSDT', timeframe: '15', period: 14, trendEma: 200, slPct: PROVISIONAL_SL }),
-    launchedAt: LAB_LAUNCH,
-    longDescription: 'Та же логика RSI+EMA200, монета LINK.',
-  },
-];
-
-export const LAB_BY_CODE = new Map(LAB_STRATEGIES.map((s) => [s.code, s]));
-export const LAB_BY_ID = new Map(LAB_STRATEGIES.map((s) => [s.id, s]));
+import { LAB_STRATEGIES, LAB_BY_CODE, LAB_BY_ID, LAB_TRACK, type LabStrategy } from './lab-registry.js';
 
 // ── tiny self-contained formatters (avoid coupling to landing internals) ──
 function esc(s: string): string {
@@ -128,7 +81,16 @@ const LAB_CSS = `
   .lab-status.work{color:var(--accent);border-color:var(--accent-soft);background:var(--accent-soft)}
   .lab-status.wait{color:var(--text-faint)}
   .lab-empty{color:var(--text-faint);font-size:13px;padding:20px 0;text-align:center}
+  .lab-fam{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin:18px 0 6px}
 `;
+
+/** Family grouping for the list, by strategy-id convention. */
+function familyOf(s: LabStrategy): string {
+  if (s.id.includes('rsi')) return 'Mean-reversion (RSI + тренд-фильтр)';
+  if (s.id.includes('sma-trend')) return 'Trend-following (SMA)';
+  if (s.id.includes('donchian')) return 'Breakout (Donchian)';
+  return 'Прочее';
+}
 
 /** Compact summary row for the /lab list. */
 function labRow(s: LabStrategy): string {
@@ -147,7 +109,7 @@ function labRow(s: LabStrategy): string {
         <div><span class="lab-row-code">[${esc(s.code)}]</span><span class="lab-row-name">${esc(s.name)}</span></div>
         ${statusPill}
       </div>
-      <div class="lab-row-sym">${esc(s.symbol)} · ${esc(s.timeframe)}m · ${esc(s.description.split('|').slice(1, 2).join('').trim() || 'custom engine')}</div>
+      <div class="lab-row-sym">${esc(s.symbol)} · ${esc(s.timeframe)}m · SL ${(s.slPct * 100).toFixed(0)}% (предв.)</div>
       <div class="lab-row-stats">
         <span><span class="k">Net</span>${netCell}</span>
         <span><span class="k">WR</span>${wrCell}</span>
@@ -158,7 +120,17 @@ function labRow(s: LabStrategy): string {
 }
 
 function renderLabList(): string {
-  const rows = LAB_STRATEGIES.map(labRow).join('');
+  // Group rows by family for readability.
+  const fams = new Map<string, LabStrategy[]>();
+  for (const s of LAB_STRATEGIES) {
+    const f = familyOf(s);
+    (fams.get(f) ?? fams.set(f, []).get(f)!).push(s);
+  }
+  const body = LAB_STRATEGIES.length === 0
+    ? '<div class="lab-empty">Пока нет стратегий в лаборатории.</div>'
+    : [...fams.entries()].map(([fam, list]) =>
+        `<div class="lab-fam">${esc(fam)}</div><div class="lab-list">${list.map(labRow).join('')}</div>`,
+      ).join('');
   return pageShell(
     'Лаборатория — R&D стратегии (бумага)',
     `
@@ -169,7 +141,7 @@ function renderLabList(): string {
     </div>
     <style>${LAB_CSS}</style>
     ${LAB_BANNER}
-    <div class="lab-list">${rows || '<div class="lab-empty">Пока нет стратегий в лаборатории.</div>'}</div>
+    ${body}
     `,
     { autoRefreshSec: 60 },
   );

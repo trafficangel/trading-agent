@@ -17,26 +17,17 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getKlines } from '../src/backtest/klines.js';
 import { runBacktest, type BtTrade } from '../src/backtest/engine.js';
-import { donchianTrend } from '../src/backtest/strategies/donchian-trend.js';
-import { rsiMeanRev } from '../src/backtest/strategies/rsi-meanrev.js';
+import { LAB_STRATEGIES } from '../src/strategies/lab-registry.js';
 import { TRACK_C_COMMISSION_RT_PCT } from '../src/strategies/track-c-config.js';
 
-const DAYS = 365;
+const DAYS = 540; // ~1.5y — more cycle for the 4h trend strategies; plenty of trades for 15m
 const COMM = TRACK_C_COMMISSION_RT_PCT; // percent points per trade
 
-// Registry — custom strategies on FREE coins (no live collision later).
-const STRATS = [
-  // Iteration 2 — RSI mean-reversion + EMA200 trend filter (the June lesson:
-  // only fade WITH the higher-TF trend). Compare directly to the naive ones.
-  rsiMeanRev({ id: 'ada-rsi-trend', code: 'C05', symbol: 'ADAUSDT', timeframe: '15', period: 14, trendEma: 200 }),
-  rsiMeanRev({ id: 'ltc-rsi-trend', code: 'C06', symbol: 'LTCUSDT', timeframe: '15', period: 14, trendEma: 200 }),
-  rsiMeanRev({ id: 'sol-rsi-trend', code: 'C07', symbol: 'SOLUSDT', timeframe: '15', period: 14, trendEma: 200 }),
-  rsiMeanRev({ id: 'link-rsi-trend', code: 'C08', symbol: 'LINKUSDT', timeframe: '15', period: 14, trendEma: 200 }),
-  // tighter thresholds (25/75) — only deeper extremes, fewer/cleaner trades
-  rsiMeanRev({ id: 'ada-rsi-trend-2575', code: 'C09', symbol: 'ADAUSDT', timeframe: '15', period: 14, oversold: 25, overbought: 75, trendEma: 200 }),
-  rsiMeanRev({ id: 'ltc-rsi-trend-2575', code: 'C10', symbol: 'LTCUSDT', timeframe: '15', period: 14, oversold: 25, overbought: 75, trendEma: 200 }),
-];
-void donchianTrend; // kept available; naive trend rejected in iteration 1
+// Registry = the LAB strategies (single source of truth in lab-registry.ts).
+// Backtesting them here writes trade logs to src/strategies/data/<id>.json
+// and the SL audit keys on the SAME ids the paper runner uses → one unified
+// pipeline: backtest → audit SL → paper-trade → (graduate).
+const STRATS = LAB_STRATEGIES;
 
 function netPct(trades: BtTrade[]): number {
   return trades.reduce((a, t) => a + t.realizedPct, 0) - COMM * trades.length;

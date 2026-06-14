@@ -19,7 +19,7 @@
 
 import cron from 'node-cron';
 import { getKlines } from '../backtest/klines.js';
-import { LAB_STRATEGIES, LAB_TRACK, type LabStrategy } from '../strategies/lab.js';
+import { LAB_STRATEGIES, LAB_TRACK, type LabStrategy } from '../strategies/lab-registry.js';
 import { insertDecision, forceClose, type CloseReason } from '../db/repos/decisions.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
