@@ -135,7 +135,10 @@
       "maePct": 1.15,
       "maePrice": 2085.32,
       "maeAt": 1773581700000,
-      "realizedPct": 6.9
+      "realizedPct": 6.9,
+      "mfePct": 8.49,
+      "mfePrice": 2288.53,
+      "mfeAt": 1773640500000
     },
     {
       "num": 2,
@@ -149,7 +152,10 @@
       "maePct": 3.83,
       "maePrice": 2385,
       "maeAt": 1773698700000,
-      "realizedPct": -0.81
+      "realizedPct": -0.81,
+      "mfePct": 0.24,
+      "mfePrice": 2291.54,
+      "mfeAt": 1773680100000
     },
     {
       "num": 3,
@@ -163,7 +169,10 @@
       "maePct": 0.61,
       "maePrice": 2301.59,
       "maeAt": 1773742500000,
-      "realizedPct": 0.07
+      "realizedPct": 0.07,
+      "mfePct": 0.82,
+      "mfePrice": 2334.64,
+      "mfeAt": 1773750000000
     },
     {
       "num": 4,
@@ -177,7 +186,10 @@
       "maePct": 0.89,
       "maePrice": 2305.31,
       "maeAt": 1773794400000,
-      "realizedPct": 0.28
+      "realizedPct": 0.28,
+      "mfePct": 0.99,
+      "mfePrice": 2349.2,
+      "mfeAt": 1773804900000
     },
     {
       "num": 5,
@@ -191,7 +203,10 @@
       "maePct": 0.73,
       "maePrice": 2310.05,
       "maeAt": 1773819600000,
-      "realizedPct": 0.03
+      "realizedPct": 0.03,
+      "mfePct": 0.16,
+      "mfePrice": 2330.65,
+      "mfeAt": 1773810600000
     },
     {
       "num": 6,
@@ -205,7 +220,10 @@
       "maePct": 0.21,
       "maePrice": 2332.74,
       "maeAt": 1773826500000,
-      "realizedPct": 5.69
+      "realizedPct": 5.69,
+      "mfePct": 6.99,
+      "mfePrice": 2165.08,
+      "mfeAt": 1773851100000
     },
     {
       "num": 7,
@@ -219,7 +237,10 @@
       "maePct": 1.68,
       "maePrice": 2234.02,
       "maeAt": 1773890700000,
-      "realizedPct": -0.26
+      "realizedPct": -0.26,
+      "mfePct": 0.54,
+      "mfePrice": 2185.1,
+      "mfeAt": 1773883200000
     },
     {
       "num": 8,
@@ -233,7 +254,10 @@
       "maePct": 2.79,
       "maePrice": 2141.35,
       "maeAt": 1773904800000,
-      "realizedPct": -1.05
+      "realizedPct": -1.05,
+      "mfePct": 0.29,
+      "mfePrice": 2209.25,
+      "mfeAt": 1773893100000
     },
     {
       "num": 9,
@@ -247,7 +271,10 @@
       "maePct": 0.54,
       "maePrice": 2191.42,
       "maeAt": 1773914400000,
-      "realizedPct": 0.57
+      "realizedPct": 0.57,
+      "mfePct": 0.7,
+      "mfePrice": 2164.39,
+      "mfeAt": 1773920400000
     },
     {
       "num": 10,
@@ -261,7 +288,10 @@
       "maePct": 0.29,
       "maePrice": 2131.39,
       "maeAt": 1773959700000,
-      "realizedPct": 0.4
+      "realizedPct": 0.4,
+      "mfePct": 0.44,
+      "mfePrice": 2147.07,
+      "mfeAt": 1773961500000
     },
     {
       "num": 11,
@@ -275,7 +305,10 @@
       "maePct": 0.18,
       "maePrice": 2158.22,
       "maeAt": 1773979500000,
-      "realizedPct": 0.49
+      "realizedPct": 0.49,
+      "mfePct": 0.75,
+      "mfePrice": 2138.2,
+      "mfeAt": 1773981600000
     },
     {
       "num": 12,
@@ -289,7 +322,10 @@
       "maePct": 0.09,
       "maePrice": 2146.85,
       "maeAt": 1774017300000,
-      "realizedPct": 0.86
+      "realizedPct": 0.86,
+      "mfePct": 1.09,
+      "mfePrice": 2121.59,
+      "mfeAt": 1774018800000
     },
     {
       "num": 13,
@@ -303,7 +339,10 @@
       "maePct": 0.32,
       "maePrice": 2118.47,
       "maeAt": 1774028100000,
-      "realizedPct": 0.53
+      "realizedPct": 0.53,
+      "mfePct": 0.64,
+      "mfePrice": 2139,
+      "mfeAt": 1774029300000
     },
     {
       "num": 14,
@@ -317,7 +356,10 @@
       "maePct": 1.65,
       "maePrice": 2168,
       "maeAt": 1774044000000,
-      "realizedPct": -0.96
+      "realizedPct": -0.96,
+      "mfePct": 0.49,
+      "mfePrice": 2122.39,
+      "mfeAt": 1774038600000
     },
     {
       "num": 15,
@@ -331,7 +373,10 @@
       "maePct": 0.23,
       "maePrice": 2148.32,
       "maeAt": 1774081800000,
-      "realizedPct": 0.2
+      "realizedPct": 0.2,
+      "mfePct": 0.2,
+      "mfePrice": 2157.55,
+      "mfeAt": 1774083900000
     },
     {
       "num": 16,
@@ -345,7 +390,10 @@
       "maePct": 0.07,
       "maePrice": 2153.7,
       "maeAt": 1774100400000,
-      "realizedPct": 0.11
+      "realizedPct": 0.11,
+      "mfePct": 0.56,
+      "mfePrice": 2167.33,
+      "mfeAt": 1774102200000
     },
     {
       "num": 17,
@@ -359,7 +407,10 @@
       "maePct": 0,
       "maePrice": 2155.04,
       "maeAt": 1774118700000,
-      "realizedPct": 0.22
+      "realizedPct": 0.22,
+      "mfePct": 0.32,
+      "mfePrice": 2148.08,
+      "mfeAt": 1774121700000
     },
     {
       "num": 18,
@@ -373,7 +424,10 @@
       "maePct": 0.32,
       "maePrice": 2069.8,
       "maeAt": 1774188000000,
-      "realizedPct": 0.26
+      "realizedPct": 0.26,
+      "mfePct": 0.39,
+      "mfePrice": 2084.48,
+      "mfeAt": 1774189200000
     },
     {
       "num": 19,
@@ -387,7 +441,10 @@
       "maePct": 2.54,
       "maePrice": 2024.02,
       "maeAt": 1774214400000,
-      "realizedPct": -0.82
+      "realizedPct": -0.82,
+      "mfePct": 0.13,
+      "mfePrice": 2079.46,
+      "mfeAt": 1774203000000
     },
     {
       "num": 20,
@@ -401,7 +458,10 @@
       "maePct": 0.72,
       "maePrice": 2074.49,
       "maeAt": 1774221000000,
-      "realizedPct": 0.65
+      "realizedPct": 0.65,
+      "mfePct": 1.26,
+      "mfePrice": 2033.83,
+      "mfeAt": 1774226400000
     },
     {
       "num": 21,
@@ -415,7 +475,10 @@
       "maePct": 1.74,
       "maePrice": 2021.78,
       "maeAt": 1774249500000,
-      "realizedPct": 4.63
+      "realizedPct": 4.63,
+      "mfePct": 6.84,
+      "mfePrice": 2198.21,
+      "mfeAt": 1774264200000
     },
     {
       "num": 22,
@@ -429,7 +492,10 @@
       "maePct": 1.24,
       "maePrice": 2122.67,
       "maeAt": 1774316400000,
-      "realizedPct": -0.14
+      "realizedPct": -0.14,
+      "mfePct": 0.44,
+      "mfePrice": 2158.75,
+      "mfeAt": 1774303200000
     },
     {
       "num": 23,
@@ -443,7 +509,10 @@
       "maePct": 1.33,
       "maePrice": 2175,
       "maeAt": 1774352400000,
-      "realizedPct": -0.26
+      "realizedPct": -0.26,
+      "mfePct": 0.89,
+      "mfePrice": 2127.23,
+      "mfeAt": 1774328700000
     },
     {
       "num": 24,
@@ -457,7 +526,10 @@
       "maePct": 2.32,
       "maePrice": 2102,
       "maeAt": 1774374000000,
-      "realizedPct": 0.12
+      "realizedPct": 0.12,
+      "mfePct": 0.77,
+      "mfePrice": 2168.47,
+      "mfeAt": 1774399200000
     },
     {
       "num": 25,
@@ -471,7 +543,10 @@
       "maePct": 0.29,
       "maePrice": 2145.48,
       "maeAt": 1774408500000,
-      "realizedPct": 0.33
+      "realizedPct": 0.33,
+      "mfePct": 0.41,
+      "mfePrice": 2160.75,
+      "mfeAt": 1774410900000
     },
     {
       "num": 26,
@@ -485,7 +560,10 @@
       "maePct": 0.39,
       "maePrice": 2157.95,
       "maeAt": 1774424700000,
-      "realizedPct": 0.77
+      "realizedPct": 0.77,
+      "mfePct": 1.47,
+      "mfePrice": 2198.21,
+      "mfeAt": 1774438200000
     },
     {
       "num": 27,
@@ -499,7 +577,10 @@
       "maePct": 0.66,
       "maePrice": 2197.81,
       "maeAt": 1774445700000,
-      "realizedPct": 0.99
+      "realizedPct": 0.99,
+      "mfePct": 1.71,
+      "mfePrice": 2146.07,
+      "mfeAt": 1774451700000
     },
     {
       "num": 28,
@@ -513,7 +594,10 @@
       "maePct": 0.35,
       "maePrice": 2182.57,
       "maeAt": 1774478400000,
-      "realizedPct": 4.86
+      "realizedPct": 4.86,
+      "mfePct": 5.74,
+      "mfePrice": 2050,
+      "mfeAt": 1774538100000
     },
     {
       "num": 29,
@@ -527,7 +611,10 @@
       "maePct": 0.77,
       "maePrice": 2009.59,
       "maeAt": 1774625700000,
-      "realizedPct": 0.54
+      "realizedPct": 0.54,
+      "mfePct": 0.76,
+      "mfePrice": 1979,
+      "mfeAt": 1774629300000
     },
     {
       "num": 30,
@@ -541,7 +628,10 @@
       "maePct": 0.2,
       "maePrice": 1973.03,
       "maeAt": 1774635900000,
-      "realizedPct": 0.54
+      "realizedPct": 0.54,
+      "mfePct": 0.66,
+      "mfePrice": 1990,
+      "mfeAt": 1774639500000
     },
     {
       "num": 31,
@@ -555,7 +645,10 @@
       "maePct": 0.1,
       "maePrice": 1997.01,
       "maeAt": 1774639800000,
-      "realizedPct": 0.23
+      "realizedPct": 0.23,
+      "mfePct": 0.91,
+      "mfePrice": 1976.87,
+      "mfeAt": 1774643100000
     },
     {
       "num": 32,
@@ -569,7 +662,10 @@
       "maePct": 0.2,
       "maePrice": 1994.48,
       "maeAt": 1774658100000,
-      "realizedPct": 0.05
+      "realizedPct": 0.05,
+      "mfePct": 0.47,
+      "mfePrice": 1981.21,
+      "mfeAt": 1774665000000
     },
     {
       "num": 33,
@@ -583,7 +679,10 @@
       "maePct": 2.85,
       "maePrice": 2048.03,
       "maeAt": 1774705200000,
-      "realizedPct": 0.08
+      "realizedPct": 0.08,
+      "mfePct": 0.46,
+      "mfePrice": 1982.24,
+      "mfeAt": 1774789500000
     },
     {
       "num": 34,
@@ -597,7 +696,10 @@
       "maePct": 0.17,
       "maePrice": 1986.37,
       "maeAt": 1774804800000,
-      "realizedPct": 0.35
+      "realizedPct": 0.35,
+      "mfePct": 0.33,
+      "mfePrice": 1996.36,
+      "mfeAt": 1774806000000
     },
     {
       "num": 35,
@@ -611,7 +713,10 @@
       "maePct": 2.15,
       "maePrice": 2011.62,
       "maeAt": 1774898700000,
-      "realizedPct": -0.84
+      "realizedPct": -0.84,
+      "mfePct": 0.18,
+      "mfePrice": 2059.55,
+      "mfeAt": 1774890900000
     },
     {
       "num": 36,
@@ -625,7 +730,10 @@
       "maePct": 0.47,
       "maePrice": 2048.18,
       "maeAt": 1774905600000,
-      "realizedPct": 0.47
+      "realizedPct": 0.47,
+      "mfePct": 1.27,
+      "mfePrice": 2012.7,
+      "mfeAt": 1774911900000
     },
     {
       "num": 37,
@@ -639,7 +747,10 @@
       "maePct": 4.33,
       "maePrice": 2125.46,
       "maeAt": 1774977600000,
-      "realizedPct": -2.65
+      "realizedPct": -2.65,
+      "mfePct": 0.32,
+      "mfePrice": 2030.75,
+      "mfeAt": 1774955700000
     },
     {
       "num": 38,
@@ -653,7 +764,10 @@
       "maePct": 0.28,
       "maePrice": 2085.48,
       "maeAt": 1774996200000,
-      "realizedPct": 0.38
+      "realizedPct": 0.38,
+      "mfePct": 0.67,
+      "mfePrice": 2105.28,
+      "mfeAt": 1774998900000
     },
     {
       "num": 39,
@@ -667,7 +781,10 @@
       "maePct": 0.72,
       "maePrice": 2081.06,
       "maeAt": 1775010300000,
-      "realizedPct": 2.19
+      "realizedPct": 2.19,
+      "mfePct": 2.85,
+      "mfePrice": 2155.91,
+      "mfeAt": 1775027100000
     },
     {
       "num": 40,
@@ -681,7 +798,10 @@
       "maePct": 0.37,
       "maePrice": 2150,
       "maeAt": 1775047200000,
-      "realizedPct": 1
+      "realizedPct": 1,
+      "mfePct": 1.41,
+      "mfePrice": 2112,
+      "mfeAt": 1775048700000
     },
     {
       "num": 41,
@@ -695,7 +815,10 @@
       "maePct": 0.78,
       "maePrice": 2164.99,
       "maeAt": 1775080500000,
-      "realizedPct": 5.49
+      "realizedPct": 5.49,
+      "mfePct": 6.2,
+      "mfePrice": 2015.1,
+      "mfeAt": 1775136900000
     },
     {
       "num": 42,
@@ -709,7 +832,10 @@
       "maePct": 0.9,
       "maePrice": 2040.09,
       "maeAt": 1775221800000,
-      "realizedPct": -0.26
+      "realizedPct": -0.26,
+      "mfePct": 0.15,
+      "mfePrice": 2061.7,
+      "mfeAt": 1775219700000
     },
     {
       "num": 43,
@@ -723,7 +849,10 @@
       "maePct": 0.33,
       "maePrice": 2059.98,
       "maeAt": 1775250600000,
-      "realizedPct": 0.12
+      "realizedPct": 0.12,
+      "mfePct": 0.31,
+      "mfePrice": 2046.87,
+      "mfeAt": 1775269500000
     },
     {
       "num": 44,
@@ -737,7 +866,10 @@
       "maePct": 0.24,
       "maePrice": 2057.04,
       "maeAt": 1775285400000,
-      "realizedPct": 0.01
+      "realizedPct": 0.01,
+      "mfePct": 0.22,
+      "mfePrice": 2047.58,
+      "mfeAt": 1775292600000
     },
     {
       "num": 45,
@@ -751,7 +883,10 @@
       "maePct": 0.29,
       "maePrice": 2045.97,
       "maeAt": 1775297400000,
-      "realizedPct": 0.03
+      "realizedPct": 0.03,
+      "mfePct": 0.1,
+      "mfePrice": 2053.9,
+      "mfeAt": 1775299800000
     },
     {
       "num": 46,
@@ -765,7 +900,10 @@
       "maePct": 0.08,
       "maePrice": 2054.15,
       "maeAt": 1775300400000,
-      "realizedPct": 0.11
+      "realizedPct": 0.11,
+      "mfePct": 0.2,
+      "mfePrice": 2048.37,
+      "mfeAt": 1775304600000
     },
     {
       "num": 47,
@@ -779,7 +917,10 @@
       "maePct": 1.51,
       "maePrice": 2083.72,
       "maeAt": 1775330100000,
-      "realizedPct": -0.11
+      "realizedPct": -0.11,
+      "mfePct": 1.6,
+      "mfePrice": 2020.01,
+      "mfeAt": 1775392800000
     },
     {
       "num": 48,
@@ -793,7 +934,10 @@
       "maePct": 0.32,
       "maePrice": 2048.51,
       "maeAt": 1775427000000,
-      "realizedPct": 0.74
+      "realizedPct": 0.74,
+      "mfePct": 1.26,
+      "mfePrice": 2081,
+      "mfeAt": 1775429400000
     },
     {
       "num": 49,
@@ -807,7 +951,10 @@
       "maePct": 3.68,
       "maePrice": 2146.41,
       "maeAt": 1775441400000,
-      "realizedPct": -2.47
+      "realizedPct": -2.47,
+      "mfePct": 0.55,
+      "mfePrice": 2058.91,
+      "mfeAt": 1775428800000
     },
     {
       "num": 50,
@@ -821,7 +968,10 @@
       "maePct": 0.11,
       "maePrice": 2119.26,
       "maeAt": 1775457000000,
-      "realizedPct": 0.41
+      "realizedPct": 0.41,
+      "mfePct": 0.69,
+      "mfePrice": 2136.07,
+      "mfeAt": 1775460300000
     },
     {
       "num": 51,
@@ -835,7 +985,10 @@
       "maePct": 2.19,
       "maePrice": 2058.64,
       "maeAt": 1775570700000,
-      "realizedPct": -1
+      "realizedPct": -1,
+      "mfePct": 1.36,
+      "mfePrice": 2133.21,
+      "mfeAt": 1775553000000
     },
     {
       "num": 52,
@@ -849,7 +1002,10 @@
       "maePct": 9.13,
       "maePrice": 2273.72,
       "maeAt": 1775604600000,
-      "realizedPct": -4.51
+      "realizedPct": -4.51,
+      "mfePct": 0.35,
+      "mfePrice": 2076.36,
+      "mfeAt": 1775578200000
     },
     {
       "num": 53,
@@ -863,7 +1019,10 @@
       "maePct": 0.16,
       "maePrice": 2174.11,
       "maeAt": 1775716200000,
-      "realizedPct": 0.35
+      "realizedPct": 0.35,
+      "mfePct": 0.34,
+      "mfePrice": 2185.01,
+      "mfeAt": 1775718000000
     },
     {
       "num": 54,
@@ -877,7 +1036,10 @@
       "maePct": 0.11,
       "maePrice": 2175.45,
       "maeAt": 1775722500000,
-      "realizedPct": 0.25
+      "realizedPct": 0.25,
+      "mfePct": 0.5,
+      "mfePrice": 2188.63,
+      "mfeAt": 1775724000000
     },
     {
       "num": 55,
@@ -891,7 +1053,10 @@
       "maePct": 1.27,
       "maePrice": 2156.14,
       "maeAt": 1775744700000,
-      "realizedPct": 1.31
+      "realizedPct": 1.31,
+      "mfePct": 2.86,
+      "mfePrice": 2246.43,
+      "mfeAt": 1775772900000
     },
     {
       "num": 56,
@@ -905,7 +1070,10 @@
       "maePct": 1.52,
       "maePrice": 2173.28,
       "maeAt": 1775784000000,
-      "realizedPct": 1.76
+      "realizedPct": 1.76,
+      "mfePct": 2.31,
+      "mfePrice": 2257.79,
+      "mfeAt": 1775854500000
     },
     {
       "num": 57,
@@ -919,7 +1087,10 @@
       "maePct": 0.27,
       "maePrice": 2251.69,
       "maeAt": 1775874600000,
-      "realizedPct": 0.3
+      "realizedPct": 0.3,
+      "mfePct": 0.83,
+      "mfePrice": 2226.97,
+      "mfeAt": 1775884500000
     },
     {
       "num": 58,
@@ -933,7 +1104,10 @@
       "maePct": 0.36,
       "maePrice": 2232.01,
       "maeAt": 1775913000000,
-      "realizedPct": 0.17
+      "realizedPct": 0.17,
+      "mfePct": 0.76,
+      "mfePrice": 2257.08,
+      "mfeAt": 1775920500000
     },
     {
       "num": 59,
@@ -947,7 +1121,10 @@
       "maePct": 0.38,
       "maePrice": 2208.71,
       "maeAt": 1776042600000,
-      "realizedPct": 0.27
+      "realizedPct": 0.27,
+      "mfePct": 0.42,
+      "mfePrice": 2191,
+      "mfeAt": 1776046200000
     },
     {
       "num": 60,
@@ -961,7 +1138,10 @@
       "maePct": 0.15,
       "maePrice": 2191,
       "maeAt": 1776046200000,
-      "realizedPct": 0.33
+      "realizedPct": 0.33,
+      "mfePct": 0.38,
+      "mfePrice": 2202.72,
+      "mfeAt": 1776047100000
     },
     {
       "num": 61,
@@ -975,7 +1155,10 @@
       "maePct": 0.1,
       "maePrice": 2194.83,
       "maeAt": 1776070800000,
-      "realizedPct": 0.25
+      "realizedPct": 0.25,
+      "mfePct": 0.4,
+      "mfePrice": 2183.82,
+      "mfeAt": 1776075000000
     },
     {
       "num": 62,
@@ -989,7 +1172,10 @@
       "maePct": 0.16,
       "maePrice": 2353.65,
       "maeAt": 1776146100000,
-      "realizedPct": 0.28
+      "realizedPct": 0.28,
+      "mfePct": 0.39,
+      "mfePrice": 2366.49,
+      "mfeAt": 1776147900000
     },
     {
       "num": 63,
@@ -1003,7 +1189,10 @@
       "maePct": 0.44,
       "maePrice": 2315.61,
       "maeAt": 1776221100000,
-      "realizedPct": 0.3
+      "realizedPct": 0.3,
+      "mfePct": 0.33,
+      "mfePrice": 2333.54,
+      "mfeAt": 1776225600000
     },
     {
       "num": 64,
@@ -1017,7 +1206,10 @@
       "maePct": 0.18,
       "maePrice": 2337,
       "maeAt": 1776229200000,
-      "realizedPct": 0.35
+      "realizedPct": 0.35,
+      "mfePct": 0.72,
+      "mfePrice": 2316.15,
+      "mfeAt": 1776231000000
     },
     {
       "num": 65,
@@ -1031,7 +1223,10 @@
       "maePct": 0.79,
       "maePrice": 2306.17,
       "maeAt": 1776237300000,
-      "realizedPct": 0.08
+      "realizedPct": 0.08,
+      "mfePct": 0.34,
+      "mfePrice": 2332.39,
+      "mfeAt": 1776241800000
     },
     {
       "num": 66,
@@ -1045,7 +1240,10 @@
       "maePct": 0.54,
       "maePrice": 2339,
       "maeAt": 1776253500000,
-      "realizedPct": -0.06
+      "realizedPct": -0.06,
+      "mfePct": 0.46,
+      "mfePrice": 2315.65,
+      "mfeAt": 1776260400000
     },
     {
       "num": 67,
@@ -1059,7 +1257,10 @@
       "maePct": 0.53,
       "maePrice": 2315.65,
       "maeAt": 1776260400000,
-      "realizedPct": 0.28
+      "realizedPct": 0.28,
+      "mfePct": 0.73,
+      "mfePrice": 2345,
+      "mfeAt": 1776263100000
     },
     {
       "num": 68,
@@ -1073,7 +1274,10 @@
       "maePct": 2.2,
       "maePrice": 2385.71,
       "maeAt": 1776281700000,
-      "realizedPct": -1
+      "realizedPct": -1,
+      "mfePct": 0.66,
+      "mfePrice": 2318.92,
+      "mfeAt": 1776267000000
     },
     {
       "num": 69,
@@ -1087,7 +1291,10 @@
       "maePct": 0.63,
       "maePrice": 2342.95,
       "maeAt": 1776301500000,
-      "realizedPct": 0.13
+      "realizedPct": 0.13,
+      "mfePct": 0.46,
+      "mfePrice": 2368.5,
+      "mfeAt": 1776307200000
     },
     {
       "num": 70,
@@ -1101,7 +1308,10 @@
       "maePct": 0.33,
       "maePrice": 2368.5,
       "maeAt": 1776307200000,
-      "realizedPct": 0.06
+      "realizedPct": 0.06,
+      "mfePct": 0.6,
+      "mfePrice": 2346.57,
+      "mfeAt": 1776314700000
     },
     {
       "num": 71,
@@ -1115,7 +1325,10 @@
       "maePct": 0.46,
       "maePrice": 2351.18,
       "maeAt": 1776345900000,
-      "realizedPct": 1.13
+      "realizedPct": 1.13,
+      "mfePct": 2.53,
+      "mfePrice": 2281.22,
+      "mfeAt": 1776349200000
     },
     {
       "num": 72,
@@ -1129,7 +1342,10 @@
       "maePct": 0.42,
       "maePrice": 2373.68,
       "maeAt": 1776529200000,
-      "realizedPct": 0.13
+      "realizedPct": 0.13,
+      "mfePct": 0.58,
+      "mfePrice": 2350.01,
+      "mfeAt": 1776532200000
     },
     {
       "num": 73,
@@ -1143,7 +1359,10 @@
       "maePct": 0.9,
       "maePrice": 2336.7,
       "maeAt": 1776537600000,
-      "realizedPct": -0.08
+      "realizedPct": -0.08,
+      "mfePct": 0.23,
+      "mfePrice": 2363.31,
+      "mfeAt": 1776534600000
     },
     {
       "num": 74,
@@ -1157,7 +1376,10 @@
       "maePct": 0.22,
       "maePrice": 2361.16,
       "maeAt": 1776553500000,
-      "realizedPct": 0.18
+      "realizedPct": 0.18,
+      "mfePct": 0.25,
+      "mfePrice": 2350.19,
+      "mfeAt": 1776555300000
     },
     {
       "num": 75,
@@ -1171,7 +1393,10 @@
       "maePct": 0.19,
       "maePrice": 2346.26,
       "maeAt": 1776557700000,
-      "realizedPct": 0.19
+      "realizedPct": 0.19,
+      "mfePct": 0.15,
+      "mfePrice": 2354.23,
+      "mfeAt": 1776557400000
     },
     {
       "num": 76,
@@ -1185,7 +1410,10 @@
       "maePct": 1.25,
       "maePrice": 2348.76,
       "maeAt": 1776604800000,
-      "realizedPct": -0.25
+      "realizedPct": -0.25,
+      "mfePct": 0.24,
+      "mfePrice": 2314,
+      "mfeAt": 1776612900000
     },
     {
       "num": 77,
@@ -1199,7 +1427,10 @@
       "maePct": 3.23,
       "maePrice": 2250.37,
       "maeAt": 1776636000000,
-      "realizedPct": -1.93
+      "realizedPct": -1.93,
+      "mfePct": 0.4,
+      "mfePrice": 2334.78,
+      "mfeAt": 1776612600000
     },
     {
       "num": 78,
@@ -1213,7 +1444,10 @@
       "maePct": 2.85,
       "maePrice": 2345.61,
       "maeAt": 1776719100000,
-      "realizedPct": -1.95
+      "realizedPct": -1.95,
+      "mfePct": 0.85,
+      "mfePrice": 2261.4,
+      "mfeAt": 1776663900000
     },
     {
       "num": 79,
@@ -1227,7 +1461,10 @@
       "maePct": 0.87,
       "maePrice": 2305,
       "maeAt": 1776727500000,
-      "realizedPct": -0.08
+      "realizedPct": -0.08,
+      "mfePct": 0.3,
+      "mfePrice": 2332.28,
+      "mfeAt": 1776719400000
     },
     {
       "num": 80,
@@ -1241,7 +1478,10 @@
       "maePct": 0.09,
       "maePrice": 2325.63,
       "maeAt": 1776733500000,
-      "realizedPct": 0.35
+      "realizedPct": 0.35,
+      "mfePct": 0.66,
+      "mfePrice": 2308.01,
+      "mfeAt": 1776736800000
     },
     {
       "num": 81,
@@ -1255,7 +1495,10 @@
       "maePct": 0.22,
       "maePrice": 2319.61,
       "maeAt": 1776747900000,
-      "realizedPct": 0.25
+      "realizedPct": 0.25,
+      "mfePct": 0.36,
+      "mfePrice": 2306.2,
+      "mfeAt": 1776752400000
     },
     {
       "num": 82,
@@ -1269,7 +1512,10 @@
       "maePct": 0.51,
       "maePrice": 2326.72,
       "maeAt": 1776782400000,
-      "realizedPct": 0.33
+      "realizedPct": 0.33,
+      "mfePct": 1.16,
+      "mfePrice": 2288.18,
+      "mfeAt": 1776783600000
     },
     {
       "num": 83,
@@ -1283,7 +1529,10 @@
       "maePct": 0.86,
       "maePrice": 2281,
       "maeAt": 1776792000000,
-      "realizedPct": 0.6
+      "realizedPct": 0.6,
+      "mfePct": 0.79,
+      "mfePrice": 2319,
+      "mfeAt": 1776793200000
     },
     {
       "num": 84,
@@ -1297,7 +1546,10 @@
       "maePct": 0.19,
       "maePrice": 2319,
       "maeAt": 1776793200000,
-      "realizedPct": 0.52
+      "realizedPct": 0.52,
+      "mfePct": 0.72,
+      "mfePrice": 2298.05,
+      "mfeAt": 1776795300000
     },
     {
       "num": 85,
@@ -1311,7 +1563,10 @@
       "maePct": 0.07,
       "maePrice": 2325,
       "maeAt": 1776803400000,
-      "realizedPct": 0.57
+      "realizedPct": 0.57,
+      "mfePct": 0.67,
+      "mfePrice": 2307.82,
+      "mfeAt": 1776805800000
     },
     {
       "num": 86,
@@ -1325,7 +1580,10 @@
       "maePct": 0.25,
       "maePrice": 2329.68,
       "maeAt": 1776816300000,
-      "realizedPct": 0.41
+      "realizedPct": 0.41,
+      "mfePct": 0.53,
+      "mfePrice": 2311.42,
+      "mfeAt": 1776821400000
     },
     {
       "num": 87,
@@ -1339,7 +1597,10 @@
       "maePct": 0.12,
       "maePrice": 2311.42,
       "maeAt": 1776821400000,
-      "realizedPct": 0.35
+      "realizedPct": 0.35,
+      "mfePct": 0.45,
+      "mfePrice": 2324.71,
+      "mfeAt": 1776822600000
     },
     {
       "num": 88,
@@ -1353,7 +1614,10 @@
       "maePct": 0.02,
       "maePrice": 2406.27,
       "maeAt": 1776885900000,
-      "realizedPct": 0.36
+      "realizedPct": 0.36,
+      "mfePct": 0.66,
+      "mfePrice": 2389.93,
+      "mfeAt": 1776886500000
     },
     {
       "num": 89,
@@ -1367,7 +1631,10 @@
       "maePct": 0.03,
       "maePrice": 2404.8,
       "maeAt": 1776894000000,
-      "realizedPct": 0.24
+      "realizedPct": 0.24,
+      "mfePct": 0.42,
+      "mfePrice": 2394.09,
+      "mfeAt": 1776897000000
     },
     {
       "num": 90,
@@ -1381,7 +1648,10 @@
       "maePct": 0.62,
       "maePrice": 2337.6,
       "maeAt": 1776982800000,
-      "realizedPct": -0.09
+      "realizedPct": -0.09,
+      "mfePct": 0.49,
+      "mfePrice": 2311.66,
+      "mfeAt": 1776974400000
     },
     {
       "num": 91,
@@ -1395,7 +1665,10 @@
       "maePct": 1.19,
       "maePrice": 2297.47,
       "maeAt": 1777005300000,
-      "realizedPct": -0.45
+      "realizedPct": -0.45,
+      "mfePct": 0.42,
+      "mfePrice": 2334.81,
+      "mfeAt": 1776996000000
     },
     {
       "num": 92,
@@ -1409,7 +1682,10 @@
       "maePct": 0.08,
       "maePrice": 2316.58,
       "maeAt": 1777010100000,
-      "realizedPct": 0.27
+      "realizedPct": 0.27,
+      "mfePct": 0.37,
+      "mfePrice": 2306.2,
+      "mfeAt": 1777018200000
     },
     {
       "num": 93,
@@ -1423,7 +1699,10 @@
       "maePct": 0.18,
       "maePrice": 2322.03,
       "maeAt": 1777018800000,
-      "realizedPct": 0.19
+      "realizedPct": 0.19,
+      "mfePct": 0.69,
+      "mfePrice": 2302.01,
+      "mfeAt": 1777021500000
     },
     {
       "num": 94,
@@ -1437,7 +1716,10 @@
       "maePct": 0.63,
       "maePrice": 2331.6,
       "maeAt": 1777030200000,
-      "realizedPct": 0.16
+      "realizedPct": 0.16,
+      "mfePct": 0.75,
+      "mfePrice": 2299.71,
+      "mfeAt": 1777043100000
     },
     {
       "num": 95,
@@ -1451,7 +1733,10 @@
       "maePct": 0.15,
       "maePrice": 2307.01,
       "maeAt": 1777051800000,
-      "realizedPct": 0.39
+      "realizedPct": 0.39,
+      "mfePct": 0.45,
+      "mfePrice": 2320.93,
+      "mfeAt": 1777053000000
     },
     {
       "num": 96,
@@ -1465,7 +1750,10 @@
       "maePct": 0.09,
       "maePrice": 2320.25,
       "maeAt": 1777081500000,
-      "realizedPct": 0.1
+      "realizedPct": 0.1,
+      "mfePct": 0.27,
+      "mfePrice": 2311.89,
+      "mfeAt": 1777094100000
     },
     {
       "num": 97,
@@ -1479,7 +1767,10 @@
       "maePct": 0.15,
       "maePrice": 2322.11,
       "maeAt": 1777110600000,
-      "realizedPct": 0.06
+      "realizedPct": 0.06,
+      "mfePct": 0.15,
+      "mfePrice": 2315,
+      "mfeAt": 1777115100000
     },
     {
       "num": 98,
@@ -1493,7 +1784,10 @@
       "maePct": 0.78,
       "maePrice": 2299.03,
       "maeAt": 1777134900000,
-      "realizedPct": 0.03
+      "realizedPct": 0.03,
+      "mfePct": 0.11,
+      "mfePrice": 2319.82,
+      "mfeAt": 1777156200000
     },
     {
       "num": 99,
@@ -1507,7 +1801,10 @@
       "maePct": 0,
       "maePrice": 2317.87,
       "maeAt": 1777169700000,
-      "realizedPct": 0.1
+      "realizedPct": 0.1,
+      "mfePct": 0.21,
+      "mfePrice": 2313.11,
+      "mfeAt": 1777171500000
     },
     {
       "num": 100,
@@ -1521,7 +1818,10 @@
       "maePct": 0.31,
       "maePrice": 2323.32,
       "maeAt": 1777207500000,
-      "realizedPct": 1.45
+      "realizedPct": 1.45,
+      "mfePct": 1.93,
+      "mfePrice": 2375.51,
+      "mfeAt": 1777230900000
     },
     {
       "num": 101,
@@ -1535,7 +1835,10 @@
       "maePct": 1.67,
       "maePrice": 2403.84,
       "maeAt": 1777251600000,
-      "realizedPct": 2.12
+      "realizedPct": 2.12,
+      "mfePct": 2.72,
+      "mfePrice": 2300.01,
+      "mfeAt": 1777297500000
     },
     {
       "num": 102,
@@ -1549,7 +1852,10 @@
       "maePct": 0.09,
       "maePrice": 2296.51,
       "maeAt": 1777353900000,
-      "realizedPct": 0.25
+      "realizedPct": 0.25,
+      "mfePct": 0.41,
+      "mfePrice": 2285.1,
+      "mfeAt": 1777354800000
     },
     {
       "num": 103,
@@ -1563,7 +1869,10 @@
       "maePct": 1,
       "maePrice": 2256.41,
       "maeAt": 1777381800000,
-      "realizedPct": 0.07
+      "realizedPct": 0.07,
+      "mfePct": 0.33,
+      "mfePrice": 2286.55,
+      "mfeAt": 1777383900000
     },
     {
       "num": 104,
@@ -1577,7 +1886,10 @@
       "maePct": 0.26,
       "maePrice": 2286.55,
       "maeAt": 1777383900000,
-      "realizedPct": 0.56
+      "realizedPct": 0.56,
+      "mfePct": 0.81,
+      "mfePrice": 2262.23,
+      "mfeAt": 1777386300000
     },
     {
       "num": 105,
@@ -1591,7 +1903,10 @@
       "maePct": 2.35,
       "maePrice": 2346.75,
       "maeAt": 1777457700000,
-      "realizedPct": 2
+      "realizedPct": 2,
+      "mfePct": 3.22,
+      "mfePrice": 2219.08,
+      "mfeAt": 1777487400000
     },
     {
       "num": 106,
@@ -1605,7 +1920,10 @@
       "maePct": 0.74,
       "maePrice": 2273.35,
       "maeAt": 1777547400000,
-      "realizedPct": 0.08
+      "realizedPct": 0.08,
+      "mfePct": 0.56,
+      "mfePrice": 2244,
+      "mfeAt": 1777558500000
     },
     {
       "num": 107,
@@ -1619,7 +1937,10 @@
       "maePct": 0.49,
       "maePrice": 2244,
       "maeAt": 1777558500000,
-      "realizedPct": 0.49
+      "realizedPct": 0.49,
+      "mfePct": 0.55,
+      "mfePrice": 2267.38,
+      "mfeAt": 1777560600000
     },
     {
       "num": 108,
@@ -1633,7 +1954,10 @@
       "maePct": 0.33,
       "maePrice": 2248.5,
       "maeAt": 1777569300000,
-      "realizedPct": 0.28
+      "realizedPct": 0.28,
+      "mfePct": 0.38,
+      "mfePrice": 2264.55,
+      "mfeAt": 1777575000000
     },
     {
       "num": 109,
@@ -1647,7 +1971,10 @@
       "maePct": 0.38,
       "maePrice": 2251.11,
       "maeAt": 1777589700000,
-      "realizedPct": 5.28
+      "realizedPct": 5.28,
+      "mfePct": 6.25,
+      "mfePrice": 2400.85,
+      "mfeAt": 1777987200000
     },
     {
       "num": 110,
@@ -1661,7 +1988,10 @@
       "maePct": 2.37,
       "maePrice": 2311.11,
       "maeAt": 1778115900000,
-      "realizedPct": -1.51
+      "realizedPct": -1.51,
+      "mfePct": 2.37,
+      "mfePrice": 2423.38,
+      "mfeAt": 1778066400000
     },
     {
       "num": 111,
@@ -1675,7 +2005,10 @@
       "maePct": 0.06,
       "maePrice": 2332.99,
       "maeAt": 1778131800000,
-      "realizedPct": 0.23
+      "realizedPct": 0.23,
+      "mfePct": 0.53,
+      "mfePrice": 2319.11,
+      "mfeAt": 1778134500000
     },
     {
       "num": 112,
@@ -1689,7 +2022,10 @@
       "maePct": 1.94,
       "maePrice": 2337.61,
       "maeAt": 1778351100000,
-      "realizedPct": -1.5
+      "realizedPct": -1.5,
+      "mfePct": 1.28,
+      "mfePrice": 2263.77,
+      "mfeAt": 1778209500000
     },
     {
       "num": 113,
@@ -1703,7 +2039,10 @@
       "maePct": 0.81,
       "maePrice": 2308.55,
       "maeAt": 1778445900000,
-      "realizedPct": 1.2
+      "realizedPct": 1.2,
+      "mfePct": 2,
+      "mfePrice": 2373.97,
+      "mfeAt": 1778452200000
     },
     {
       "num": 114,
@@ -1717,7 +2056,10 @@
       "maePct": 1.14,
       "maePrice": 2382.13,
       "maeAt": 1778454000000,
-      "realizedPct": 0.83
+      "realizedPct": 0.83,
+      "mfePct": 1.55,
+      "mfePrice": 2318.75,
+      "mfeAt": 1778470500000
     },
     {
       "num": 115,
@@ -1731,7 +2073,10 @@
       "maePct": 0,
       "maePrice": 2338.23,
       "maeAt": 1778502300000,
-      "realizedPct": 0.22
+      "realizedPct": 0.22,
+      "mfePct": 0.47,
+      "mfePrice": 2327.35,
+      "mfeAt": 1778503800000
     },
     {
       "num": 116,
@@ -1745,7 +2090,10 @@
       "maePct": 0.12,
       "maePrice": 2333.47,
       "maeAt": 1778541900000,
-      "realizedPct": 0.19
+      "realizedPct": 0.19,
+      "mfePct": 0.2,
+      "mfePrice": 2341.05,
+      "mfeAt": 1778542800000
     },
     {
       "num": 117,
@@ -1759,7 +2107,10 @@
       "maePct": 2.5,
       "maePrice": 2275.67,
       "maeAt": 1778583900000,
-      "realizedPct": -1.76
+      "realizedPct": -1.76,
+      "mfePct": 0.12,
+      "mfePrice": 2336.8,
+      "mfeAt": 1778545200000
     },
     {
       "num": 118,
@@ -1773,7 +2124,10 @@
       "maePct": 0.02,
       "maePrice": 2293.37,
       "maeAt": 1778589300000,
-      "realizedPct": 0.39
+      "realizedPct": 0.39,
+      "mfePct": 0.54,
+      "mfePrice": 2280.52,
+      "mfeAt": 1778592000000
     },
     {
       "num": 119,
@@ -1787,7 +2141,10 @@
       "maePct": 2.08,
       "maePrice": 2322.67,
       "maeAt": 1778664900000,
-      "realizedPct": 0.74
+      "realizedPct": 0.74,
+      "mfePct": 1.86,
+      "mfePrice": 2232.89,
+      "mfeAt": 1778687700000
     },
     {
       "num": 120,
@@ -1801,7 +2158,10 @@
       "maePct": 0.03,
       "maePrice": 2260.88,
       "maeAt": 1778714700000,
-      "realizedPct": 0.19
+      "realizedPct": 0.19,
+      "mfePct": 0.3,
+      "mfePrice": 2253.27,
+      "mfeAt": 1778715000000
     },
     {
       "num": 121,
@@ -1815,7 +2175,10 @@
       "maePct": 0.31,
       "maePrice": 2268.77,
       "maeAt": 1778719500000,
-      "realizedPct": 0.04
+      "realizedPct": 0.04,
+      "mfePct": 0.71,
+      "mfePrice": 2245.66,
+      "mfeAt": 1778727000000
     },
     {
       "num": 122,
@@ -1829,7 +2192,10 @@
       "maePct": 1.05,
       "maePrice": 2237.16,
       "maeAt": 1778730900000,
-      "realizedPct": 0.03
+      "realizedPct": 0.03,
+      "mfePct": 0.6,
+      "mfePrice": 2274.54,
+      "mfeAt": 1778738700000
     },
     {
       "num": 123,
@@ -1843,7 +2209,10 @@
       "maePct": 0.38,
       "maePrice": 2244.67,
       "maeAt": 1778767500000,
-      "realizedPct": 0.52
+      "realizedPct": 0.52,
+      "mfePct": 0.65,
+      "mfePrice": 2267.97,
+      "mfeAt": 1778768700000
     },
     {
       "num": 124,
@@ -1857,7 +2226,10 @@
       "maePct": 2.37,
       "maePrice": 2318.71,
       "maeAt": 1778778000000,
-      "realizedPct": -1.26
+      "realizedPct": -1.26,
+      "mfePct": 0.46,
+      "mfePrice": 2254.56,
+      "mfeAt": 1778768100000
     },
     {
       "num": 125,
@@ -1871,7 +2243,10 @@
       "maePct": 0.26,
       "maePrice": 2287.5,
       "maeAt": 1778791200000,
-      "realizedPct": 0.29
+      "realizedPct": 0.29,
+      "mfePct": 0.26,
+      "mfePrice": 2299.44,
+      "mfeAt": 1778794500000
     },
     {
       "num": 126,
@@ -1885,7 +2260,10 @@
       "maePct": 0.17,
       "maePrice": 2270.44,
       "maeAt": 1778829900000,
-      "realizedPct": 0.56
+      "realizedPct": 0.56,
+      "mfePct": 0.82,
+      "mfePrice": 2248.07,
+      "mfeAt": 1778833800000
     },
     {
       "num": 127,
@@ -1899,7 +2277,10 @@
       "maePct": 0.32,
       "maePrice": 2230.99,
       "maeAt": 1778891100000,
-      "realizedPct": -0.1
+      "realizedPct": -0.1,
+      "mfePct": 0.11,
+      "mfePrice": 2221.45,
+      "mfeAt": 1778886900000
     },
     {
       "num": 128,
@@ -1913,7 +2294,10 @@
       "maePct": 6.45,
       "maePrice": 2082.46,
       "maeAt": 1779061200000,
-      "realizedPct": -4.66
+      "realizedPct": -4.66,
+      "mfePct": 0.04,
+      "mfePrice": 2226.97,
+      "mfeAt": 1778904600000
     },
     {
       "num": 129,
@@ -1927,7 +2311,10 @@
       "maePct": 0.03,
       "maePrice": 2122.99,
       "maeAt": 1779089400000,
-      "realizedPct": 0.29
+      "realizedPct": 0.29,
+      "mfePct": 0.38,
+      "mfePrice": 2114.25,
+      "mfeAt": 1779090000000
     },
     {
       "num": 130,
@@ -1941,7 +2328,10 @@
       "maePct": 1.88,
       "maePrice": 2147.82,
       "maeAt": 1779150000000,
-      "realizedPct": -0.94
+      "realizedPct": -0.94,
+      "mfePct": 1.41,
+      "mfePrice": 2078.28,
+      "mfeAt": 1779130800000
     },
     {
       "num": 131,
@@ -1955,7 +2345,10 @@
       "maePct": 0.46,
       "maePrice": 2118.13,
       "maeAt": 1779156000000,
-      "realizedPct": 0.35
+      "realizedPct": 0.35,
+      "mfePct": 0.38,
+      "mfePrice": 2136,
+      "mfeAt": 1779163800000
     },
     {
       "num": 132,
@@ -1969,7 +2362,10 @@
       "maePct": 0.13,
       "maePrice": 2122.22,
       "maeAt": 1779168000000,
-      "realizedPct": 0.45
+      "realizedPct": 0.45,
+      "mfePct": 0.55,
+      "mfePrice": 2136.79,
+      "mfeAt": 1779169500000
     },
     {
       "num": 133,
@@ -1983,7 +2379,10 @@
       "maePct": 0.27,
       "maePrice": 2127.07,
       "maeAt": 1779197700000,
-      "realizedPct": 0.52
+      "realizedPct": 0.52,
+      "mfePct": 1.15,
+      "mfePrice": 2097.09,
+      "mfeAt": 1779200400000
     },
     {
       "num": 134,
@@ -1997,7 +2396,10 @@
       "maePct": 0.14,
       "maePrice": 2102.08,
       "maeAt": 1779236100000,
-      "realizedPct": 0.3
+      "realizedPct": 0.3,
+      "mfePct": 0.47,
+      "mfePrice": 2114.9,
+      "mfeAt": 1779237000000
     },
     {
       "num": 135,
@@ -2011,7 +2413,10 @@
       "maePct": 0.1,
       "maePrice": 2101.81,
       "maeAt": 1779240300000,
-      "realizedPct": 0.32
+      "realizedPct": 0.32,
+      "mfePct": 0.7,
+      "mfePrice": 2118.51,
+      "mfeAt": 1779241800000
     },
     {
       "num": 136,
@@ -2025,7 +2430,10 @@
       "maePct": 0.23,
       "maePrice": 2123.23,
       "maeAt": 1779277800000,
-      "realizedPct": 0.24
+      "realizedPct": 0.24,
+      "mfePct": 0.21,
+      "mfePrice": 2132.64,
+      "mfeAt": 1779280200000
     },
     {
       "num": 137,
@@ -2039,7 +2447,10 @@
       "maePct": 0.67,
       "maePrice": 2112.41,
       "maeAt": 1779286200000,
-      "realizedPct": 0.58
+      "realizedPct": 0.58,
+      "mfePct": 1.05,
+      "mfePrice": 2149.12,
+      "mfeAt": 1779290100000
     },
     {
       "num": 138,
@@ -2053,7 +2464,10 @@
       "maePct": 0.23,
       "maePrice": 2128,
       "maeAt": 1779303900000,
-      "realizedPct": 0.29
+      "realizedPct": 0.29,
+      "mfePct": 0.37,
+      "mfePrice": 2140.94,
+      "mfeAt": 1779305700000
     },
     {
       "num": 139,
@@ -2067,7 +2481,10 @@
       "maePct": 0.45,
       "maePrice": 2117.26,
       "maeAt": 1779315300000,
-      "realizedPct": 0.27
+      "realizedPct": 0.27,
+      "mfePct": 0.35,
+      "mfePrice": 2134.16,
+      "mfeAt": 1779322500000
     },
     {
       "num": 140,
@@ -2081,7 +2498,10 @@
       "maePct": 1.19,
       "maePrice": 2157.97,
       "maeAt": 1779326100000,
-      "realizedPct": -0.16
+      "realizedPct": -0.16,
+      "mfePct": 0.13,
+      "mfePrice": 2129.79,
+      "mfeAt": 1779322500000
     },
     {
       "num": 141,
@@ -2095,7 +2515,10 @@
       "maePct": 1.51,
       "maePrice": 2103.8,
       "maeAt": 1779370800000,
-      "realizedPct": -0.72
+      "realizedPct": -0.72,
+      "mfePct": 0.56,
+      "mfePrice": 2147.81,
+      "mfeAt": 1779351300000
     },
     {
       "num": 142,
@@ -2109,7 +2532,10 @@
       "maePct": 1.57,
       "maePrice": 2153.8,
       "maeAt": 1779386100000,
-      "realizedPct": -0.24
+      "realizedPct": -0.24,
+      "mfePct": 0.51,
+      "mfePrice": 2109.68,
+      "mfeAt": 1779373200000
     },
     {
       "num": 143,
@@ -2123,7 +2549,10 @@
       "maePct": 0.37,
       "maePrice": 2117.79,
       "maeAt": 1779441300000,
-      "realizedPct": 0.1
+      "realizedPct": 0.1,
+      "mfePct": 0.21,
+      "mfePrice": 2130,
+      "mfeAt": 1779450300000
     },
     {
       "num": 144,
@@ -2137,7 +2566,10 @@
       "maePct": 0.47,
       "maePrice": 2137.64,
       "maeAt": 1779452100000,
-      "realizedPct": 0.29
+      "realizedPct": 0.29,
+      "mfePct": 0.78,
+      "mfePrice": 2111,
+      "mfeAt": 1779463500000
     }
   ],
   "totalTradesInStrategy": 144,
