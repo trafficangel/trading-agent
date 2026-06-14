@@ -971,8 +971,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Выход полностью на встроенных Builtin Exits стратегии. Safety SL 7% — выбран по PnL-симуляции: при 7% Net PnL +71% за 207 дней, PF 1.63, max equity DD 54% (стратегия с самым низким win rate в портфеле — 44%, серии убыточных дают глубокий equity DD).',
     symbol: 'ETHUSDT',
     timeframe: '15',
-    enabled: true,
-    fanOut: true,
+    // Phase V (Jun 14 2026): DISABLED — live WR 22% (backtest said 52%),
+    // net −111 over 9 trades. Worst performer. Challenger eth-cntr-st (5m)
+    // is in shadow. Config kept for history.
+    enabled: false,
+    fanOut: false,
     slPct: 0.07,
     launchedAt: Date.parse('2026-05-25T00:00:00Z'),
     alertName: 'ETHUSDT|15|LONG=OBExBr&TSRng&MFb50|SHORT=OBExBl&TSRng&MFa50|EXIT=BltExt',
@@ -1369,8 +1372,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Выход полностью передан встроенным exits стратегии — без фиксированных TP. Safety SL 8% — выбран по PnL-симуляции: PF 2.58, max DD 14.2%, Net PnL +92% за 207 дней на $1000. Тугие SL 5% теряли бы 20% доходности на recovery-сделках.',
     symbol: 'BNBUSDT',
     timeframe: '15',
-    enabled: true,
-    fanOut: true,
+    // Phase V (Jun 14 2026): DISABLED — live WR 29% (backtest said 75%),
+    // net −90 over 7 trades. Challenger bnb-cntrn-hw-wc (5m) is in shadow.
+    // Config kept for history.
+    enabled: false,
+    fanOut: false,
     slPct: 0.08,
     launchedAt: Date.parse('2026-05-14T12:00:00Z'),
     alertName: 'BNBUSD|15|LONG=CONTAnyBr&TTBr&MFa50|SHORT=CONTAnyBl&TTBl&MFb50|EXIT=CONTBltExt',
