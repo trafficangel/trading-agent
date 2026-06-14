@@ -4176,6 +4176,7 @@ function activeTradesTable(trades: ActiveTradeRow[], cfg: StrategyConfig): strin
         <td class="dt">${fmtDuration(ageMs)}</td>
         <td><span class="${sideCls}">${t.side.toUpperCase()}</span></td>
         <td class="right mono">${t.entryPrice.toFixed(4)}</td>
+        <td class="right mono">${fmtUsd(TRACK_C_NOTIONAL_USD)}</td>
         <td><span class="reason-pill reason-active">🟢 В работе</span></td>
       </tr>`;
     })
@@ -4190,6 +4191,7 @@ function activeTradesTable(trades: ActiveTradeRow[], cfg: StrategyConfig): strin
             <th>В работе</th>
             <th>Side</th>
             <th class="right">Entry</th>
+            <th class="right">Размер</th>
             <th>Статус</th>
           </tr>
         </thead>
@@ -4276,7 +4278,7 @@ function renderLiveStatsBlock(live: StrategyLiveStats, ex: StrategyEquityExtras)
 
   return `
   <div class="section">
-    <div class="section-title">Статистика live · нетто после комиссии 0.11%</div>
+    <div class="section-title">Статистика live · на ${fmtUsd(TRACK_C_NOTIONAL_USD)} номинала · нетто после комиссии 0.11%</div>
     ${equityBlock}
 
     <div class="charts-grid" style="margin-bottom: 16px;">
@@ -4297,6 +4299,11 @@ function renderLiveStatsBlock(live: StrategyLiveStats, ex: StrategyEquityExtras)
         <div class="stat-label">Net P&amp;L</div>
         <div class="stat-value ${pnlClass}">${fmtPct(live.netPnlPct, true)}</div>
         <div class="stat-sub ${pnlClass}">${fmtUsd(live.netPnlUsd, true)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Размер позиции</div>
+        <div class="stat-value">${fmtUsd(TRACK_C_NOTIONAL_USD)}</div>
+        <div class="stat-sub">номинал на сделку (shadow)</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Win Rate</div>
