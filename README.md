@@ -1,33 +1,36 @@
-# trading-agent
+# Robot Claude (trading-agent)
 
-LuxAlgo (TradingView) → Confluence → Claude vision → Bybit USDT-perp → Telegram.
+Crypto **copytrading SaaS** on Bybit USDT-perps. Subscribers connect a
+trade-only API key; we replay validated strategies on their account.
+Strategies come from LuxAlgo AI Strategy Builder webhooks (each passed through
+our own MAE/SL validation) plus an in-house backtest engine for custom
+strategies. Auth via Telegram phone-OTP; public site at robotclaude.biz.
 
-## Stages
+> **Agents/operators: read [CLAUDE.md](CLAUDE.md) first** — it's the live map
+> (architecture, strategy lifecycle, risk layer, operator scripts, deploy
+> procedure, and the gotchas).
 
-- **Stage 1 — Telemetry only** *(current)*: webhook receiver + SQLite + Telegram (raw to Logs, summaries to Signals). No LLM, no orders.
-- Stage 2 — Confluence + LLM in shadow mode (Claude decides, no orders).
-- Stage 3 — Paper trading on Bybit testnet.
-- Stage 4 — Semi-auto on mainnet (manual Approve in Telegram).
-- Stage 5 — Full auto.
-
-## Quick start (local dev)
+## Commands
 
 ```bash
-pnpm install
-cp .env.example .env
-# fill TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_*, WEBHOOK_SECRET
-pnpm migrate
-pnpm dev
-# in another shell:
-curl -X POST http://localhost:3000/webhook/luxalgo/$WEBHOOK_SECRET \
-  -H 'Content-Type: application/json' \
-  -d @tests/fixtures/sample-signal.json
+pnpm dev                  # local dev server
+pnpm typecheck && pnpm lint && pnpm test && pnpm build   # validate
+pnpm migrate              # apply DB migrations
+pnpm status               # one-glance operator dashboard (run on VPS)
+pnpm risk                 # circuit-breaker / cooldown / probation state
+pnpm deploy "msg"         # validate → push → VPS pull/build/restart/verify
 ```
 
-## TradingView alerts
+## Stack & layout
 
-See [docs/tradingview-alerts.md](docs/tradingview-alerts.md) for the full alert list and copy-paste JSON message templates.
+Node 20 · TypeScript · Fastify · better-sqlite3. Prod on a VPS (systemd
+`trading-agent`, behind Caddy). Source map and per-directory responsibilities
+are in [CLAUDE.md](CLAUDE.md). Deep docs in [`docs/`](docs/) (tiers, strategy
+workflow, Bybit setup, deployment, consensus-engine spec).
 
-## Deployment
+## Strategy pipeline (short)
 
-Production runs on a Hetzner-class VPS behind Caddy. See [docs/deployment.md](docs/deployment.md).
+import (LuxAlgo) → backfill MAE → audit (SL verdict) → add to `STRATEGY_CONFIGS`
+with `fanOut:false` (shadow-only) → 15–20 net-positive shadow trades →
+`fanOut:true`. Risk layer (circuit breaker / cooldown / probation) guards all
+entries. See [docs/strategy-workflow.md](docs/strategy-workflow.md).

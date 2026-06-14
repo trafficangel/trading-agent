@@ -17,7 +17,12 @@
     "format": "prettier --write \"src/**/*.{ts,json}\" \"tests/**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "migrate": "tsx scripts/migrate.ts"
+    "migrate": "tsx scripts/migrate.ts",
+    "status": "tsx scripts/status.ts",
+    "risk": "tsx scripts/risk-status.ts",
+    "audit": "tsx scripts/audit-sl-distribution.ts",
+    "backtest": "tsx scripts/backtest-custom.ts",
+    "deploy": "bash scripts/deploy.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
