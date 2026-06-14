@@ -58,13 +58,20 @@ async function fetchPage(symbol: string, interval: string, start: number, end: n
  * Return candles covering [fromMs, toMs], using cache where possible and
  * fetching only the missing tail/head. Always returns ascending, deduped.
  */
+/** Bybit non-numeric kline intervals → minutes. Numeric intervals
+ *  ('5','15','60','240'…) pass through. Enables daily/weekly backtests. */
+const INTERVAL_MIN: Record<string, number> = { D: 1440, W: 10080, M: 43200 };
+export function intervalStepMs(interval: string): number {
+  return (INTERVAL_MIN[interval] ?? Number(interval)) * 60_000;
+}
+
 export async function getKlines(
   symbol: string,
   interval: string,
   fromMs: number,
   toMs: number,
 ): Promise<Candle[]> {
-  const stepMs = Number(interval) * 60_000;
+  const stepMs = intervalStepMs(interval);
   const cache = loadCache(symbol, interval);
   const have = new Map<number, Candle>();
   for (const c of cache) have.set(c.t, c);
