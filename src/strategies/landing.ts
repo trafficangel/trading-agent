@@ -4261,7 +4261,7 @@ function liveEquityCurveSvg(equityUsd: number[]): string {
  * "backtest said X, live did Y" at a glance. Everything is net of the
  * 0.11% round-trip commission. Caller must ensure ex.closed > 0.
  */
-export function renderLiveStatsBlock(live: StrategyLiveStats, ex: StrategyEquityExtras): string {
+export function renderLiveStatsBlock(live: StrategyLiveStats, ex: StrategyEquityExtras, commLabel = '0.11%'): string {
   const pnlClass = classForValue(live.netPnlPct);
   const longClass = classForValue(ex.longNetPct);
   const shortClass = classForValue(ex.shortNetPct);
@@ -4279,7 +4279,7 @@ export function renderLiveStatsBlock(live: StrategyLiveStats, ex: StrategyEquity
 
   return `
   <div class="section">
-    <div class="section-title">Статистика live · на ${fmtUsd(TRACK_C_NOTIONAL_USD)} номинала · нетто после комиссии 0.11%</div>
+    <div class="section-title">Статистика live · на ${fmtUsd(TRACK_C_NOTIONAL_USD)} номинала · нетто после комиссии ${commLabel}</div>
     ${equityBlock}
 
     <div class="charts-grid" style="margin-bottom: 16px;">

@@ -160,6 +160,11 @@ async function tick(): Promise<void> {
         userPositions.push(p);
         continue;
       }
+      // THE LAB (track='lab' / 'lab-maker') is managed entirely by its own
+      // runners (custom-runner / maker-runner): they enforce the safety SL
+      // and the strategy exit, and lab trades must NOT post to the public
+      // Signals channel. Skip them here to avoid double-management.
+      if (p.track === 'lab' || p.track === 'lab-maker') continue;
       try {
         await checkPosition(p);
       } catch (err) {

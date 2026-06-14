@@ -7,7 +7,7 @@
  */
 
 import { ema, sma, atr, rsi, rollingStd, type Candle } from '../indicators.js';
-import type { CustomStrategy, Signal } from '../strategy.js';
+import type { CustomStrategy, Signal, MakerQuote } from '../strategy.js';
 
 /** Internal Bar Strength: (close-low)/(high-low). Low IBS = close near the
  *  low = oversold bounce; high IBS = close near the high = pullback. */
@@ -39,7 +39,11 @@ export function zscoreMr(symbol: string, tf: string, period = 50, zThr = 2, tren
   return { id: `z${period}_${zThr}t${trendEma}-${symbol}-${tf}`, code: 'zscore', name: `${symbol} Z-score`, symbol, timeframe: tf, slPct: 0.05, warmup: Math.max(period + 1, trendEma + 1), description: `Z-score(${period}) reversion ±${zThr}σ${trendEma ? ` +EMA${trendEma}` : ''}`,
     decide(c, i, pos): Signal { ens(c); const s = sd[i]!; if (!(s > 0)) return null; const z = (c[i]!.c - m[i]!) / s; const up = trendEma > 0 ? c[i]!.c > t[i]! : true; const dn = trendEma > 0 ? c[i]!.c < t[i]! : true;
       if (pos === null) { if (z < -zThr && up) return 'long'; if (z > zThr && dn) return 'short'; return null; }
-      if (pos === 'long') return z >= 0 ? 'flat' : null; return z <= 0 ? 'flat' : null; } };
+      if (pos === 'long') return z >= 0 ? 'flat' : null; return z <= 0 ? 'flat' : null; },
+    quote(c, i, pos): MakerQuote { ens(c); const s = sd[i]!; if (!(s > 0)) return null;
+      if (pos === null) { const cl = c[i]!.c; const up = trendEma > 0 ? cl > t[i]! : true; const dn = trendEma > 0 ? cl < t[i]! : true;
+        if (up) return { kind: 'entry', side: 'long', limit: m[i]! - zThr * s }; if (dn) return { kind: 'entry', side: 'short', limit: m[i]! + zThr * s }; return null; }
+      return { kind: 'exit', limit: m[i]! }; } };
 }
 
 /** N consecutive down closes → oversold bounce (long); N up closes → short.
@@ -62,5 +66,9 @@ export function keltnerMr(symbol: string, tf: string, emaP = 20, atrP = 10, mult
   return { id: `kelt${emaP}_${atrP}_${mult}t${trendEma}-${symbol}-${tf}`, code: 'keltner', name: `${symbol} Keltner`, symbol, timeframe: tf, slPct: 0.05, warmup: Math.max(emaP, atrP, trendEma) + 1, description: `Keltner(${emaP},${atrP},${mult}) reversion${trendEma ? ` +EMA${trendEma}` : ''}`,
     decide(c, i, pos): Signal { ens(c); const upB = mid[i]! + mult * a[i]!; const dnB = mid[i]! - mult * a[i]!; const cl = c[i]!.c; const tu = trendEma > 0 ? cl > t[i]! : true; const td = trendEma > 0 ? cl < t[i]! : true;
       if (pos === null) { if (cl < dnB && tu) return 'long'; if (cl > upB && td) return 'short'; return null; }
-      if (pos === 'long') return cl >= mid[i]! ? 'flat' : null; return cl <= mid[i]! ? 'flat' : null; } };
+      if (pos === 'long') return cl >= mid[i]! ? 'flat' : null; return cl <= mid[i]! ? 'flat' : null; },
+    quote(c, i, pos): MakerQuote { ens(c); const m = mid[i]!; const band = mult * a[i]!;
+      if (pos === null) { const cl = c[i]!.c; const tu = trendEma > 0 ? cl > t[i]! : true; const td = trendEma > 0 ? cl < t[i]! : true;
+        if (tu) return { kind: 'entry', side: 'long', limit: m - band }; if (td) return { kind: 'entry', side: 'short', limit: m + band }; return null; }
+      return { kind: 'exit', limit: m }; } };
 }

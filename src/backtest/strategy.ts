@@ -22,6 +22,21 @@ import type { Candle } from './indicators.js';
 
 export type Signal = 'long' | 'short' | 'flat' | null;
 
+/**
+ * Maker (limit) execution intent — used ONLY by the live maker-runner, not
+ * the backtest engine. A mean-reversion strategy rests a limit at the band
+ * instead of crossing the spread:
+ *   - flat → {kind:'entry', side, limit} = rest an entry limit at `limit`.
+ *   - in position → {kind:'exit', limit} = rest an exit limit at the mean.
+ *   - null = no resting order (cancel any pending / hold).
+ * The runner fills only when a bar's range touches `limit`, and pays maker
+ * fees. This is what turns the (taker-negative) low-TF MR edges positive.
+ */
+export type MakerQuote =
+  | { kind: 'entry'; side: 'long' | 'short'; limit: number }
+  | { kind: 'exit'; limit: number }
+  | null;
+
 export type CustomStrategy = {
   /** Stable id — also the trades-log filename and STRATEGY_CONFIGS key. */
   id: string;
@@ -42,6 +57,10 @@ export type CustomStrategy = {
    *  so stateful logic (enter oversold, exit at mean) works identically
    *  in backtest and live. */
   decide: (candles: Candle[], i: number, pos: 'long' | 'short' | null) => Signal;
+  /** OPTIONAL — maker (limit) execution intent for the live maker-runner.
+   *  Strategies that implement it can be run as maker (rest a limit at the
+   *  band) instead of market. The backtest engine ignores this. */
+  quote?: (candles: Candle[], i: number, pos: 'long' | 'short' | null) => MakerQuote;
 };
 
 export type { Candle } from './indicators.js';

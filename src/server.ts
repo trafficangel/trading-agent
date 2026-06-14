@@ -25,6 +25,7 @@ import { startSubscriptionSweeperJob } from './jobs/subscription-sweeper.js';
 import { startBalanceMonitorJob } from './jobs/balance-monitor.js';
 import { startRecoveryMonitorJob } from './jobs/recovery-monitor.js';
 import { startCustomRunner } from './jobs/custom-runner.js';
+import { startMakerRunner } from './jobs/maker-runner.js';
 // Phase G — money-back guarantee disabled, see start-job line below.
 // import { startPnlGuaranteeMonthlyJob } from './jobs/pnl-guarantee-monthly.js';
 import { sendMessage } from './telegram/bot.js';
@@ -216,6 +217,9 @@ async function main(): Promise<void> {
   // isolated from the live book). Drives /lab. VPS-only (needs Bybit
   // klines); no-ops locally where Bybit is unreachable.
   startCustomRunner();
+  // THE LAB — maker book (track='lab-maker'): rests limits at the band,
+  // fills on touch, maker fees. Forward-tests the low-TF MR edges.
+  startMakerRunner();
   // Phase G — money-back guarantee disabled per operator decision.
   // Cron registration commented out, DB columns + repo helpers preserved
   // so it can be re-enabled later without re-migrating. UI mentions

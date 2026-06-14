@@ -32,7 +32,9 @@ import {
   getStrategyActiveTrades,
 } from './live-stats.js';
 import { TRACK_C_NOTIONAL_USD } from './track-c-config.js';
-import { LAB_STRATEGIES, LAB_BY_CODE, LAB_BY_ID, LAB_TRACK, type LabStrategy } from './lab-registry.js';
+import { ALL_LAB_STRATEGIES, LAB_BY_CODE, LAB_BY_ID, LAB_TRACK, LAB_MAKER_TRACK, type LabStrategy } from './lab-registry.js';
+
+const trackOf = (s: LabStrategy): string => s.track ?? LAB_TRACK;
 
 // ── tiny self-contained formatters (avoid coupling to landing internals) ──
 function esc(s: string): string {
@@ -89,15 +91,17 @@ const LAB_CSS = `
 /** Family grouping for the list, by strategy description. */
 function familyOf(s: LabStrategy): string {
   const d = s.description;
+  if (s.track === LAB_MAKER_TRACK || d.includes('Keltner') || d.includes('Z-score')) return 'Mean-reversion · maker (лимитки, низкий TF)';
   if (d.includes('Bollinger') || d.includes('RSI')) return 'Mean-reversion (откуп от средней, в сторону тренда)';
   if (d.includes('Donchian')) return 'Breakout (пробой канала)';
-  if (d.includes('SMA') || d.includes('EMA') && d.includes('cross') || d.includes('ROC')) return 'Trend-following (следование тренду)';
+  if (d.includes('SMA') || (d.includes('EMA') && d.includes('cross')) || d.includes('ROC')) return 'Trend-following (следование тренду)';
   return 'Прочее';
 }
 
 /** Compact summary row for the /lab list. */
 function labRow(s: LabStrategy): string {
-  const live = getStrategyLiveStats(s.id, LAB_TRACK);
+  const live = getStrategyLiveStats(s.id, trackOf(s));
+  const makerTag = s.track === LAB_MAKER_TRACK ? ' · <b>maker</b>' : '';
   const working = live.open > 0;
   const statusPill = working
     ? '<span class="lab-status work">🟢 в работе</span>'
@@ -112,7 +116,7 @@ function labRow(s: LabStrategy): string {
         <div><span class="lab-row-code">[${esc(s.code)}]</span><span class="lab-row-name">${esc(s.name)}</span></div>
         ${statusPill}
       </div>
-      <div class="lab-row-sym">${esc(s.symbol)} · ${esc(s.timeframe)}m · SL ${(s.slPct * 100).toFixed(0)}% (предв.)</div>
+      <div class="lab-row-sym">${esc(s.symbol)} · ${esc(s.timeframe)}m · SL ${(s.slPct * 100).toFixed(0)}%${makerTag}</div>
       <div class="lab-row-stats">
         <span><span class="k">Net</span>${netCell}</span>
         <span><span class="k">WR</span>${wrCell}</span>
@@ -125,11 +129,11 @@ function labRow(s: LabStrategy): string {
 function renderLabList(): string {
   // Group rows by family for readability.
   const fams = new Map<string, LabStrategy[]>();
-  for (const s of LAB_STRATEGIES) {
+  for (const s of ALL_LAB_STRATEGIES) {
     const f = familyOf(s);
     (fams.get(f) ?? fams.set(f, []).get(f)!).push(s);
   }
-  const body = LAB_STRATEGIES.length === 0
+  const body = ALL_LAB_STRATEGIES.length === 0
     ? '<div class="lab-empty">Пока нет стратегий в лаборатории.</div>'
     : [...fams.entries()].map(([fam, list]) => {
         const note = fam.startsWith('Mean-reversion') && list.length > 1
@@ -155,8 +159,8 @@ function renderLabList(): string {
 
 /** Recent paper trades — compact lab table (own renderer; not coupled to
  *  the live page's cfg-based table). */
-function labTradesTable(strategyId: string): string {
-  const trades = getStrategyRecentTrades(strategyId, 30, LAB_TRACK);
+function labTradesTable(strategyId: string, track: string): string {
+  const trades = getStrategyRecentTrades(strategyId, 30, track);
   if (trades.length === 0) return '';
   const rows = trades.map((t) => {
     const c = cls(t.pnlPct);
@@ -187,9 +191,11 @@ function labTradesTable(strategyId: string): string {
 }
 
 function renderLabDetail(s: LabStrategy): string {
-  const live = getStrategyLiveStats(s.id, LAB_TRACK);
-  const ex = getStrategyEquityExtras(s.id, LAB_TRACK);
-  const active = getStrategyActiveTrades(s.id, LAB_TRACK);
+  const track = trackOf(s);
+  const isMaker = s.track === LAB_MAKER_TRACK;
+  const live = getStrategyLiveStats(s.id, track);
+  const ex = getStrategyEquityExtras(s.id, track);
+  const active = getStrategyActiveTrades(s.id, track);
 
   const activeBlock = active.length > 0
     ? `<div class="section"><div class="section-subtitle">Сейчас открыто: ${active.length}</div>
@@ -207,9 +213,9 @@ function renderLabDetail(s: LabStrategy): string {
     : '';
 
   const statsBlock = ex.closed > 0
-    ? renderLiveStatsBlock(live, ex)
+    ? renderLiveStatsBlock(live, ex, isMaker ? '0.04% maker (HL)' : '0.11%')
     : `<div class="card"><div class="card-body"><div class="empty-state" style="padding:24px 0;">
-         ⏳ Бумажная торговля запущена, ждём первого сигнала стратегии.<br/>
+         ⏳ Бумажная торговля запущена, ждём ${isMaker ? 'заполнения лимитки' : 'первого сигнала стратегии'}.<br/>
          <span style="font-size:12px;color:var(--text-faint);">Движок проверяет рынок на каждом закрытии бара (${esc(s.timeframe)}m). Обновляется автоматически.</span>
        </div></div></div>`;
 
@@ -235,14 +241,14 @@ function renderLabDetail(s: LabStrategy): string {
       <div class="card"><div class="card-body"><div class="info-grid">
         <div class="info-item"><div class="lbl">Размер позиции</div><div class="val">$${TRACK_C_NOTIONAL_USD.toFixed(0)} номинал</div></div>
         <div class="info-item"><div class="lbl">Safety SL</div><div class="val">${(s.slPct * 100).toFixed(1)}% (предварит.)</div></div>
-        <div class="info-item"><div class="lbl">Вход</div><div class="val">market на закрытии бара</div></div>
-        <div class="info-item"><div class="lbl">Выход</div><div class="val">сигнал движка / safety SL</div></div>
+        <div class="info-item"><div class="lbl">Вход</div><div class="val">${isMaker ? 'лимит у полосы (maker)' : 'market на закрытии бара'}</div></div>
+        <div class="info-item"><div class="lbl">Выход</div><div class="val">${isMaker ? 'лимит у средней / safety SL' : 'сигнал движка / safety SL'}</div></div>
       </div></div></div>
     </div>
 
     ${statsBlock}
     ${activeBlock}
-    ${labTradesTable(s.id)}
+    ${labTradesTable(s.id, track)}
     `,
     { autoRefreshSec: 60 },
   );

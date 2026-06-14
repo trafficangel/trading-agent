@@ -1,5 +1,12 @@
 import { db } from '../db/client.js';
 import { TRACK_C_NOTIONAL_USD, TRACK_C_COMMISSION_RT_PCT } from './track-c-config.js';
+import { LAB_MAKER_TRACK, LAB_MAKER_COMMISSION_RT_PCT } from './lab-registry.js';
+
+/** Round-trip commission to net out, per execution track. The maker lab
+ *  book pays maker fees (~0.04% RT), not the Bybit taker 0.11%. */
+function commissionForTrack(track: string): number {
+  return track === LAB_MAKER_TRACK ? LAB_MAKER_COMMISSION_RT_PCT : TRACK_C_COMMISSION_RT_PCT;
+}
 
 /**
  * Live performance stats for a single Track C strategy, computed from
@@ -120,9 +127,10 @@ export function getStrategyLiveStats(strategyId: string, track = 'strategy'): St
   }
 
   // Phase T — pnl_pct rows are GROSS (price move only). Aggregates we
-  // surface are NET of the 0.11% round-trip taker commission per closed
-  // trade, matching what a real account actually keeps.
-  const netSumPct = sumPnlPct - stats.closed * TRACK_C_COMMISSION_RT_PCT;
+  // surface are NET of the round-trip commission per closed trade (taker for
+  // the live/market books, maker for the lab-maker book), matching what a
+  // real account actually keeps.
+  const netSumPct = sumPnlPct - stats.closed * commissionForTrack(track);
   stats.netPnlPct = Math.round(netSumPct * 100) / 100;
   stats.netPnlUsd = Math.round((netSumPct / 100) * TRACK_C_NOTIONAL_USD * 100) / 100;
   stats.largestWinUsd = Math.round(maxWinUsd * 100) / 100;
@@ -180,7 +188,7 @@ const equityRowsStmt = db.prepare<[string, string], { pnl_pct: number; side: str
 
 export function getStrategyEquityExtras(strategyId: string, track = 'strategy'): StrategyEquityExtras {
   const rows = equityRowsStmt.all(track, strategyId);
-  const C = TRACK_C_COMMISSION_RT_PCT;
+  const C = commissionForTrack(track);
 
   const out: StrategyEquityExtras = {
     closed: 0, wins: 0, losses: 0, winRate: null,
