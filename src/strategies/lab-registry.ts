@@ -80,6 +80,18 @@ export const LAB_STRATEGIES: LabStrategy[] = [
     'Дневной трендследящий на ETH: лонг пока цена выше SMA(50), иначе кэш. 1600д/37 сделок, +138% нетто, 4/4 фолда. SL 8% — MAE-аудит (BORDERLINE: ловит 71% эджа, PF 1.82). Просадка эквити −46% — дневной тренд волатилен. Торгует редко.'),
   lab(smaTrend('BTCUSDT', 'D', 100, 0.08), 'L08', 'BTC SMA100 Trend (daily)',
     'Дневной тренд на BTC выше SMA(100). ВОССТАНОВЛЕНА после переаудита: 1600д/29 сделок → ✅ COMPATIBLE при SL 8% (PF 2.85, просадка −22%, +141% нетто, ловит 95% эджа). Ранний вердикт INCOMPATIBLE был артефактом малой выборки (8 сделок на 540д). Лучший дневной тренд набора.'),
+  // ── 1h BREAKOUT — Donchian(40) on 1h. Maker/HL-fee sweep + cross-symbol
+  // verification: GENERALISES across 5 majors (survives ×2 fee + ≥3/4 folds
+  // on ETH/DOGE/BNB/BTC/AVAX), and works even at Bybit taker fees. Taker by
+  // nature (chases the breakout) → the market-order runner tests it
+  // faithfully. Added the low-DD survivors (ETH/BTC/BNB). SLs provisional
+  // 8% pending MAE audit (matches the 4h Donchian).
+  lab(donchianFlip('ETHUSDT', '60', 40, 0.08), 'L09', 'ETH Donchian-40 1h',
+    'Пробой канала Дончиана(40) на 1h. Свип+верификация: лучший из 1h-пробоев — +121% нетто, 4/4 walk-forward фолда, выживает ×2 издержки, работает даже на Bybit-taker. Просадка −31%. Кросс-символьно обобщается (5 мейджоров).'),
+  lab(donchianFlip('BTCUSDT', '60', 40, 0.08), 'L10', 'BTC Donchian-40 1h',
+    'Тот же 1h-пробой на BTC: +22% нетто, 3/4 фолда, выживает ×2, просадка −32%. Часть обобщающегося края 1h-Donchian.'),
+  lab(donchianFlip('BNBUSDT', '60', 40, 0.08), 'L11', 'BNB Donchian-40 1h',
+    'Тот же 1h-пробой на BNB: +32% нетто, 3/4 фолда, выживает ×2, просадка −32%.'),
 ];
 
 export const LAB_BY_CODE = new Map(LAB_STRATEGIES.map((s) => [s.code, s]));
