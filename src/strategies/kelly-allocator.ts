@@ -21,6 +21,7 @@
 
 import { db } from '../db/client.js';
 import { TRACK_C_COMMISSION_RT_PCT } from './track-c-config.js';
+import { tiltWeights } from '../lib/kelly-math.js';
 
 const COMM = TRACK_C_COMMISSION_RT_PCT / 100;
 const MIN_SAMPLE = 15;
@@ -57,37 +58,11 @@ export function computeWeights(strategyIds: string[], now = Date.now()): Map<str
   const key = ids.slice().sort().join('|');
   if (cache && cache.key === key && now - cache.at < CACHE_MS) return cache.map;
 
-  const n = ids.length;
-  const equal = n > 0 ? 1 / n : 0;
-  const scores = new Map<string, number | null>();
-  for (const id of ids) scores.set(id, strategyScore(id));
-
-  const qualified = ids.map((id) => scores.get(id)).filter((s): s is number => s !== null);
+  const scores = ids.map((id) => strategyScore(id));
+  // tilt-factor weights: t∈[FLOOR,CAP] from edge, weight = t/Σt. Always
+  // sums to 1, always bounded; null (no data) → neutral, ≤0 → floored.
+  const weights = tiltWeights(scores, FLOOR, CAP);
   const map = new Map<string, number>();
-
-  if (qualified.length === 0) {
-    // nobody has enough data yet → equal split.
-    for (const id of ids) map.set(id, equal);
-    cache = { key, at: now, map };
-    return map;
-  }
-
-  // Strategies without enough sample get the MEDIAN qualified score
-  // (neutral — neither favoured nor punished).
-  const sortedQ = [...qualified].sort((a, b) => a - b);
-  const neutral = sortedQ[sortedQ.length >> 1]!;
-  const raw: number[] = ids.map((id) => {
-    const s = scores.get(id);
-    return s == null ? neutral : s; // == null catches null AND undefined
-  });
-  const sumRaw = raw.reduce((a, b) => a + b, 0) || 1;
-
-  // normalize, clamp to [FLOOR,CAP]×equal, renormalize once.
-  let weights = raw.map((r) => r / sumRaw);
-  weights = weights.map((w) => Math.min(CAP * equal, Math.max(FLOOR * equal, w)));
-  const sumW = weights.reduce((a, b) => a + b, 0) || 1;
-  weights = weights.map((w) => w / sumW);
-
   ids.forEach((id, i) => map.set(id, weights[i]!));
   cache = { key, at: now, map };
   return map;
