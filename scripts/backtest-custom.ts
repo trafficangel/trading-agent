@@ -26,11 +26,17 @@ const COMM = TRACK_C_COMMISSION_RT_PCT; // percent points per trade
 
 // Registry — custom strategies on FREE coins (no live collision later).
 const STRATS = [
-  donchianTrend({ id: 'link-donchian-trend', code: 'C01', symbol: 'LINKUSDT', timeframe: '60', period: 20 }),
-  donchianTrend({ id: 'dot-donchian-trend', code: 'C02', symbol: 'DOTUSDT', timeframe: '60', period: 20 }),
-  rsiMeanRev({ id: 'ada-rsi-meanrev', code: 'C03', symbol: 'ADAUSDT', timeframe: '15', period: 14 }),
-  rsiMeanRev({ id: 'ltc-rsi-meanrev', code: 'C04', symbol: 'LTCUSDT', timeframe: '15', period: 14 }),
+  // Iteration 2 — RSI mean-reversion + EMA200 trend filter (the June lesson:
+  // only fade WITH the higher-TF trend). Compare directly to the naive ones.
+  rsiMeanRev({ id: 'ada-rsi-trend', code: 'C05', symbol: 'ADAUSDT', timeframe: '15', period: 14, trendEma: 200 }),
+  rsiMeanRev({ id: 'ltc-rsi-trend', code: 'C06', symbol: 'LTCUSDT', timeframe: '15', period: 14, trendEma: 200 }),
+  rsiMeanRev({ id: 'sol-rsi-trend', code: 'C07', symbol: 'SOLUSDT', timeframe: '15', period: 14, trendEma: 200 }),
+  rsiMeanRev({ id: 'link-rsi-trend', code: 'C08', symbol: 'LINKUSDT', timeframe: '15', period: 14, trendEma: 200 }),
+  // tighter thresholds (25/75) — only deeper extremes, fewer/cleaner trades
+  rsiMeanRev({ id: 'ada-rsi-trend-2575', code: 'C09', symbol: 'ADAUSDT', timeframe: '15', period: 14, oversold: 25, overbought: 75, trendEma: 200 }),
+  rsiMeanRev({ id: 'ltc-rsi-trend-2575', code: 'C10', symbol: 'LTCUSDT', timeframe: '15', period: 14, oversold: 25, overbought: 75, trendEma: 200 }),
 ];
+void donchianTrend; // kept available; naive trend rejected in iteration 1
 
 function netPct(trades: BtTrade[]): number {
   return trades.reduce((a, t) => a + t.realizedPct, 0) - COMM * trades.length;
