@@ -47,6 +47,10 @@ type Trade = {
   maePct?: number;   // % drawdown from entry (positive magnitude)
   maePrice?: number; // worst price during trade life
   maeAt?: number;    // when the worst price occurred
+  // Max FAVOURABLE excursion — symmetric to MAE; needed for TP simulation.
+  mfePct?: number;   // % best move in-favour from entry (positive magnitude)
+  mfePrice?: number; // best price during trade life
+  mfeAt?: number;    // when the best price occurred
   // realized loss (signed), cached for convenience
   realizedPct?: number;
 };
@@ -139,6 +143,21 @@ function computeMae(trade: Trade, klines: Kline[]): { mae: number; price: number
   }
 }
 
+/** Max favourable excursion — symmetric to computeMae.
+ *  long  → MFE = (maxHigh − entry) / entry × 100
+ *  short → MFE = (entry − minLow) / entry × 100  */
+function computeMfe(trade: Trade, klines: Kline[]): { mfe: number; price: number; at: number } {
+  if (klines.length === 0) return { mfe: 0, price: trade.entryPrice, at: trade.entryAt };
+  let bestPrice = trade.entryPrice;
+  let bestAt = trade.entryAt;
+  if (trade.side === 'long') {
+    for (const k of klines) if (k.high > bestPrice) { bestPrice = k.high; bestAt = k.start; }
+    return { mfe: ((bestPrice - trade.entryPrice) / trade.entryPrice) * 100, price: bestPrice, at: bestAt };
+  }
+  for (const k of klines) if (k.low < bestPrice) { bestPrice = k.low; bestAt = k.start; }
+  return { mfe: ((trade.entryPrice - bestPrice) / trade.entryPrice) * 100, price: bestPrice, at: bestAt };
+}
+
 async function backfillStrategy(strategyId: string, symbol: string, force: boolean): Promise<void> {
   const path = resolve('src/strategies/data', `${strategyId}.json`);
   if (!existsSync(path)) {
@@ -152,13 +171,13 @@ async function backfillStrategy(strategyId: string, symbol: string, force: boole
     return;
   }
 
-  const todo = trades.filter((t) => force || typeof t.maePct !== 'number');
+  const todo = trades.filter((t) => force || typeof t.maePct !== 'number' || typeof t.mfePct !== 'number');
   console.log(`  ${strategyId} (${symbol}): ${todo.length}/${trades.length} trades to backfill`);
   if (todo.length === 0) return;
 
   let done = 0;
   for (const t of trades) {
-    if (!force && typeof t.maePct === 'number') continue;
+    if (!force && typeof t.maePct === 'number' && typeof t.mfePct === 'number') continue;
     try {
       // Pad the range by one interval on each side so we don't miss the
       // exact entry/exit bar.
@@ -169,6 +188,10 @@ async function backfillStrategy(strategyId: string, symbol: string, force: boole
       t.maePct = Math.round(mae * 100) / 100;
       t.maePrice = price;
       t.maeAt = at;
+      const mfeRes = computeMfe(t, klines);
+      t.mfePct = Math.round(mfeRes.mfe * 100) / 100;
+      t.mfePrice = mfeRes.price;
+      t.mfeAt = mfeRes.at;
       // Cache realized loss for convenience
       const sign = t.side === 'long' ? 1 : -1;
       t.realizedPct = Math.round(sign * ((t.exitPrice - t.entryPrice) / t.entryPrice) * 10000) / 100;
