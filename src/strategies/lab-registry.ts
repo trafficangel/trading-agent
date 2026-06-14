@@ -71,15 +71,15 @@ export const LAB_STRATEGIES: LabStrategy[] = [
   // ── TREND EDGE — only configs robust per-fold with tolerable drawdown.
   lab(donchianFlip('BTCUSDT', '240', 40, 0.08), 'L06', 'BTC Donchian-40 4h',
     'Пробой канала Дончиана(40) на BTC 4h: 4/4 walk-forward фолдов, +81% нетто. SL 8% — BORDERLINE по аудиту (стоп стоит части EV, но +32%, PF 1.4). Единственный пробойный конфиг с тугим стопом; трендовый диверсификатор к mean-rev корзине.'),
-  // ── DAILY TREND — real edge (verified 4/4 folds on 1600d), but raw trend
-  // needs to ride deep pullbacks. SL is a catastrophe net only (above its
-  // worst observed single-trade MAE), NOT a tight stop — daily trend exits
-  // on the SMA cross. SL audit ran on too few trades (540d → 8 trades);
-  // re-audit on a 1600d daily window before trusting the SL precisely.
-  // (BTC SMA100 daily was dropped — MAE audit found it INCOMPATIBLE with an
-  //  8% cap: daily trend on BTC needs >8% room or it turns net-negative.)
-  lab(smaTrend('ETHUSDT', 'D', 50, 0.10), 'L07', 'ETH SMA50 Trend (daily)',
-    'Дневной трендследящий на ETH: лонг пока цена выше SMA(50), иначе кэш. 4/4 фолда на 1600д, +138% нетто. SL 10% — катастрофный (выше worst single-trade MAE 9.7%), тренд должен «дышать». Дневной край из Фазы 0, торгует редко — данные копятся медленно.'),
+  // ── DAILY TREND — real edge (verified 4/4 folds on 1600d). SLs are now
+  // MAE-audited on the FULL 1600d sample (37 / 29 trades, scripts/backtest-
+  // daily.ts), correcting the earlier 540d audit that ran on only ~8 trades
+  // and mis-flagged L08 as INCOMPATIBLE. Daily trend is volatile (deep equity
+  // DD) but the per-trade MAE fits an 8% stop on these two majors.
+  lab(smaTrend('ETHUSDT', 'D', 50, 0.08), 'L07', 'ETH SMA50 Trend (daily)',
+    'Дневной трендследящий на ETH: лонг пока цена выше SMA(50), иначе кэш. 1600д/37 сделок, +138% нетто, 4/4 фолда. SL 8% — MAE-аудит (BORDERLINE: ловит 71% эджа, PF 1.82). Просадка эквити −46% — дневной тренд волатилен. Торгует редко.'),
+  lab(smaTrend('BTCUSDT', 'D', 100, 0.08), 'L08', 'BTC SMA100 Trend (daily)',
+    'Дневной тренд на BTC выше SMA(100). ВОССТАНОВЛЕНА после переаудита: 1600д/29 сделок → ✅ COMPATIBLE при SL 8% (PF 2.85, просадка −22%, +141% нетто, ловит 95% эджа). Ранний вердикт INCOMPATIBLE был артефактом малой выборки (8 сделок на 540д). Лучший дневной тренд набора.'),
 ];
 
 export const LAB_BY_CODE = new Map(LAB_STRATEGIES.map((s) => [s.code, s]));
