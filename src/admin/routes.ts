@@ -48,6 +48,7 @@ import { logger } from '../lib/logger.js';
 import { TIER_CONFIGS, TIER_ORDER, computeTierTradeSize, type TierId } from '../strategies/tier-config.js';
 import { assignTier } from '../user/tier-assignment.js';
 import { STRATEGY_CONFIGS, TRACK_C_COMMISSION_RT_PCT } from '../strategies/track-c-config.js';
+import { getStrategyLiveStats } from '../strategies/live-stats.js';
 import { listRecentTransitions } from '../db/repos/user-tier-history.js';
 
 function escapeHtml(s: string): string {
@@ -636,6 +637,154 @@ const compFormSchema = z.object({
   grant: z.enum(['0', '1']),
 });
 
+// ---- Operator portfolio results (shadow track) ----------------------------
+
+const portfolioClosedStmt = db.prepare<[], {
+  strategy_id: string; side: string | null; pnl_pct: number; closed_at: number;
+}>(`
+  SELECT strategy_id, side, pnl_pct, closed_at
+    FROM decisions
+   WHERE user_id IS NULL AND track = 'strategy' AND status = 'closed'
+     AND strategy_id IS NOT NULL AND pnl_pct IS NOT NULL AND closed_at IS NOT NULL
+   ORDER BY closed_at
+`);
+
+const portfolioOpenStmt = db.prepare<[], {
+  strategy_id: string; symbol: string; side: string | null; entry: number | null; created_at: number;
+}>(`
+  SELECT strategy_id, symbol, side, entry, created_at
+    FROM decisions
+   WHERE user_id IS NULL AND track = 'strategy' AND status IN ('active','pending')
+     AND strategy_id IS NOT NULL
+   ORDER BY created_at DESC
+`);
+
+/** Operator results dashboard. All PnL is NET of the 0.11% round-trip
+ *  commission, matching what a real account keeps. */
+function renderPortfolioDashboard(): string {
+  const closed = portfolioClosedStmt.all();
+  const open = portfolioOpenStmt.all();
+  const C = TRACK_C_COMMISSION_RT_PCT;
+
+  // Aggregate + equity curve (cumulative net %).
+  let cum = 0;
+  let peak = 0;
+  let maxDd = 0;
+  const curve: { t: number; v: number }[] = [];
+  let wins = 0;
+  let best = -Infinity;
+  let worst = Infinity;
+  let longNet = 0; let longN = 0; let shortNet = 0; let shortN = 0;
+  for (const r of closed) {
+    const net = r.pnl_pct - C;
+    cum += net;
+    if (cum > peak) peak = cum;
+    if (peak - cum > maxDd) maxDd = peak - cum;
+    curve.push({ t: r.closed_at, v: cum });
+    if (net > 0) wins++;
+    if (net > best) best = net;
+    if (net < worst) worst = net;
+    if (r.side === 'short') { shortNet += net; shortN++; } else { longNet += net; longN++; }
+  }
+  const n = closed.length;
+  const totalNet = cum;
+  const wr = n ? (wins / n) * 100 : 0;
+
+  // Per-strategy via live-stats (already commission-net).
+  const perStrat = Object.values(STRATEGY_CONFIGS)
+    .map((cfg) => ({ cfg, live: getStrategyLiveStats(cfg.id) }))
+    .filter((x) => x.live.closed > 0 || x.live.open > 0)
+    .sort((a, b) => a.live.netPnlUsd - b.live.netPnlUsd);
+
+  // Equity-curve SVG polyline (normalised).
+  const W = 760; const H = 160; const pad = 8;
+  let curveSvg = '<div class="pf-empty">Нет закрытых сделок.</div>';
+  if (curve.length > 1) {
+    const vs = curve.map((p) => p.v);
+    const lo = Math.min(0, ...vs); const hi = Math.max(0, ...vs);
+    const span = hi - lo || 1;
+    const x = (i: number) => pad + (i / (curve.length - 1)) * (W - 2 * pad);
+    const y = (v: number) => pad + (1 - (v - lo) / span) * (H - 2 * pad);
+    const pts = curve.map((p, i) => `${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+    const zeroY = y(0).toFixed(1);
+    const last = curve[curve.length - 1]!.v;
+    curveSvg =
+      `<svg viewBox="0 0 ${W} ${H}" class="pf-svg" preserveAspectRatio="none">` +
+      `<line x1="${pad}" y1="${zeroY}" x2="${W - pad}" y2="${zeroY}" stroke="#2a323d" stroke-width="1" stroke-dasharray="3 3"/>` +
+      `<polyline points="${pts}" fill="none" stroke="${last >= 0 ? '#4ad991' : '#ef5b6b'}" stroke-width="2"/>` +
+      `</svg>`;
+  }
+
+  const cls = (v: number) => (v >= 0 ? 'pf-pos' : 'pf-neg');
+  const sign = (v: number) => (v >= 0 ? '+' : '');
+
+  const stratRows = perStrat.map(({ cfg, live }) => `
+    <tr>
+      <td>STRAT-${escapeHtml(cfg.code)}</td>
+      <td>${escapeHtml(cfg.symbol ?? '')} <span class="pf-dim">${escapeHtml(cfg.timeframe)}m</span></td>
+      <td>${cfg.enabled ? (cfg.fanOut ? '<span class="pf-on">live</span>' : '<span class="pf-dim">shadow</span>') : '<span class="pf-neg">off</span>'}</td>
+      <td class="pf-r ${cls(live.netPnlUsd)}">${sign(live.netPnlUsd)}${live.netPnlUsd.toFixed(1)}</td>
+      <td class="pf-r">${live.closed}</td>
+      <td class="pf-r">${live.winRate !== null ? (live.winRate * 100).toFixed(0) + '%' : '—'}</td>
+      <td class="pf-r">${live.open}</td>
+    </tr>`).join('');
+
+  const openRows = open.length === 0
+    ? '<div class="pf-empty">Открытых позиций нет.</div>'
+    : `<table class="pf-tbl"><thead><tr><th>Стратегия</th><th>Символ</th><th>Сторона</th><th>Вход</th><th>Открыта</th></tr></thead><tbody>` +
+      open.map((o) => `<tr><td>${escapeHtml(o.strategy_id)}</td><td>${escapeHtml(o.symbol)}</td><td>${o.side === 'short' ? '🔴 short' : '🟢 long'}</td><td>${o.entry ?? '—'}</td><td class="pf-dim">${new Date(o.created_at).toISOString().slice(0, 16).replace('T', ' ')}</td></tr>`).join('') +
+      '</tbody></table>';
+
+  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Портфель — результаты</title>
+<style>
+  html,body{background:#0b0e13;color:#e8edf2;font-family:ui-sans-serif,system-ui,sans-serif;margin:0}
+  .pf{max-width:860px;margin:0 auto;padding:24px}
+  .pf h1{font-size:22px;margin:0 0 4px}
+  .pf-nav a{color:#4ad991;text-decoration:none;font-size:13px;margin-right:14px}
+  .pf-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}
+  @media(max-width:640px){.pf-cards{grid-template-columns:repeat(2,1fr)}}
+  .pf-card{background:#11161d;border:1px solid #1f2630;border-radius:10px;padding:14px}
+  .pf-card-l{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#8590a0}
+  .pf-card-v{font-size:22px;font-weight:700;margin-top:6px}
+  .pf-pos{color:#4ad991}.pf-neg{color:#ef5b6b}.pf-on{color:#4ad991}.pf-dim{color:#8590a0}
+  .pf-sec{background:#11161d;border:1px solid #1f2630;border-radius:12px;padding:18px;margin:16px 0}
+  .pf-sec h2{font-size:15px;margin:0 0 12px}
+  .pf-svg{width:100%;height:160px;display:block}
+  .pf-tbl{width:100%;border-collapse:collapse;font-size:13px}
+  .pf-tbl th{text-align:left;color:#8590a0;font-weight:600;padding:6px 8px;border-bottom:1px solid #1f2630}
+  .pf-tbl td{padding:7px 8px;border-bottom:1px solid #161c24}
+  .pf-r{text-align:right;font-variant-numeric:tabular-nums}
+  .pf-empty{color:#8590a0;font-size:13px;padding:8px}
+  .pf-ls{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+</style></head><body><div class="pf">
+  <div class="pf-nav"><a href="/admin">← Юзеры</a><a href="/admin/tiers">Тарифы</a></div>
+  <h1>Портфель — результаты (shadow)</h1>
+  <div class="pf-dim" style="font-size:12.5px">Весь PnL — нетто после комиссии Bybit 0.11%/круг. ${n} закрытых сделок.</div>
+
+  <div class="pf-cards">
+    <div class="pf-card"><div class="pf-card-l">Чистый PnL</div><div class="pf-card-v ${cls(totalNet)}">${sign(totalNet)}${totalNet.toFixed(1)}%</div></div>
+    <div class="pf-card"><div class="pf-card-l">Win rate</div><div class="pf-card-v">${wr.toFixed(0)}%</div></div>
+    <div class="pf-card"><div class="pf-card-l">Max DD</div><div class="pf-card-v pf-neg">−${maxDd.toFixed(1)}%</div></div>
+    <div class="pf-card"><div class="pf-card-l">Лучшая / худшая</div><div class="pf-card-v" style="font-size:15px"><span class="pf-pos">+${Number.isFinite(best) ? best.toFixed(1) : '0'}</span> / <span class="pf-neg">${Number.isFinite(worst) ? worst.toFixed(1) : '0'}</span></div></div>
+  </div>
+
+  <div class="pf-sec"><h2>Equity-кривая (накопленный нетто %)</h2>${curveSvg}</div>
+
+  <div class="pf-sec"><h2>Long vs Short</h2>
+    <div class="pf-ls">
+      <div class="pf-card"><div class="pf-card-l">🟢 Long · ${longN} сделок</div><div class="pf-card-v ${cls(longNet)}">${sign(longNet)}${longNet.toFixed(1)}%</div></div>
+      <div class="pf-card"><div class="pf-card-l">🔴 Short · ${shortN} сделок</div><div class="pf-card-v ${cls(shortNet)}">${sign(shortNet)}${shortNet.toFixed(1)}%</div></div>
+    </div>
+  </div>
+
+  <div class="pf-sec"><h2>По стратегиям</h2>
+    <table class="pf-tbl"><thead><tr><th>Код</th><th>Символ</th><th>Статус</th><th class="pf-r">Нетто%</th><th class="pf-r">Сделок</th><th class="pf-r">WR</th><th class="pf-r">Откр.</th></tr></thead><tbody>${stratRows}</tbody></table>
+  </div>
+
+  <div class="pf-sec"><h2>Открытые позиции (${open.length})</h2>${openRows}</div>
+</div></body></html>`;
+}
+
 export async function adminRoute(app: FastifyInstance): Promise<void> {
   // Audit H-NEW-3 — rate-limit on each /admin/* route.
   // Basic-Auth secret is constant-time compared, but without throttle
@@ -674,6 +823,17 @@ export async function adminRoute(app: FastifyInstance): Promise<void> {
     toMs = Math.min(now, toMs + 86_400_000 - 1); // end of selected day, capped at now
     if (fromMs > toMs) [fromMs, toMs] = [toMs - 30 * 86_400_000, toMs];
     return renderTiersDashboard(fromMs, toMs);
+  });
+
+  // ---------------- GET /admin/portfolio (operator results dashboard) ----
+  // Shadow-track aggregate: net (after commission), equity curve, per-
+  // strategy, long/short split, open positions. Operator-internal until
+  // the track is green. Pure read.
+  app.get('/admin/portfolio', { config: { rateLimit: adminRateLimit } }, async (req, reply) => {
+    if (!checkAuth(req, reply)) return;
+    reply.type('text/html; charset=utf-8');
+    reply.header('Cache-Control', 'private, no-store');
+    return renderPortfolioDashboard();
   });
 
   // ---------------- POST /admin/users/:id/comp ----------------
@@ -1449,7 +1609,7 @@ function renderTiersDashboard(fromMs: number, toMs: number): string {
     <main class="adm-main">
       <header class="adm-header">
         <h1>Tier статистика</h1>
-        <nav><a href="/admin">← К списку юзеров</a></nav>
+        <nav><a href="/admin">← К списку юзеров</a> · <a href="/admin/portfolio">Портфель</a></nav>
       </header>
 
       <section class="adm-section">
