@@ -17,8 +17,9 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getKlines } from '../src/backtest/klines.js';
 import { runBacktest } from '../src/backtest/engine.js';
-import { ema, sma, rsi, donchian, rollingStd, type Candle } from '../src/backtest/indicators.js';
-import type { CustomStrategy, Signal } from '../src/backtest/strategy.js';
+import { type Candle } from '../src/backtest/indicators.js';
+import type { CustomStrategy } from '../src/backtest/strategy.js';
+import { smaTrend, emaCross, donchianFlip, momentumRoc, rsiMr, bollMr } from '../src/backtest/strategies/families.js';
 import { TRACK_C_COMMISSION_RT_PCT } from '../src/strategies/track-c-config.js';
 
 const COMM = TRACK_C_COMMISSION_RT_PCT;
@@ -26,61 +27,20 @@ const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT
 // Fetch window per timeframe (days). Higher TFs reach further back.
 const WINDOW_DAYS: Record<string, number> = { '15': 270, '60': 400, '240': 720, D: 1600 };
 
-// ── strategy factories (each returns a look-ahead-safe CustomStrategy) ──
-function smaTrend(id: string, symbol: string, tf: string, period: number): CustomStrategy {
-  let key: Candle[] | null = null; let s: number[] = [];
-  const ens = (c: Candle[]) => { if (key !== c) { s = sma(c.map((x) => x.c), period); key = c; } };
-  return { id, code: id, name: id, symbol, timeframe: tf, slPct: 0.12, warmup: period + 1, description: id,
-    decide(c, i, pos): Signal { ens(c); const up = c[i]!.c > s[i]!; if (pos === null) return up ? 'long' : null; if (pos === 'long') return up ? null : 'flat'; return null; } };
-}
-function emaCross(id: string, symbol: string, tf: string, fast: number, slow: number): CustomStrategy {
-  let key: Candle[] | null = null; let f: number[] = []; let sl: number[] = [];
-  const ens = (c: Candle[]) => { if (key !== c) { const cl = c.map((x) => x.c); f = ema(cl, fast); sl = ema(cl, slow); key = c; } };
-  return { id, code: id, name: id, symbol, timeframe: tf, slPct: 0.12, warmup: slow + 1, description: id,
-    decide(c, i, pos): Signal { ens(c); const up = f[i]! > sl[i]!; if (pos === null) return up ? 'long' : null; if (pos === 'long') return up ? null : 'flat'; return null; } };
-}
-function donchianFlip(id: string, symbol: string, tf: string, period: number): CustomStrategy {
-  let key: Candle[] | null = null; let up: number[] = []; let lo: number[] = [];
-  const ens = (c: Candle[]) => { if (key !== c) { const d = donchian(c, period); up = d.upper; lo = d.lower; key = c; } };
-  return { id, code: id, name: id, symbol, timeframe: tf, slPct: 0.10, warmup: period + 1, description: id,
-    decide(c, i): Signal { ens(c); const x = c[i]!.c; if (x > up[i]!) return 'long'; if (x < lo[i]!) return 'short'; return null; } };
-}
-function momentumRoc(id: string, symbol: string, tf: string, look: number): CustomStrategy {
-  return { id, code: id, name: id, symbol, timeframe: tf, slPct: 0.12, warmup: look + 1, description: id,
-    decide(c, i, pos): Signal { const up = c[i]!.c > c[i - look]!.c; if (pos === null) return up ? 'long' : null; if (pos === 'long') return up ? null : 'flat'; return null; } };
-}
-function rsiMr(id: string, symbol: string, tf: string, os: number, ob: number, trendEma: number): CustomStrategy {
-  let key: Candle[] | null = null; let r: number[] = []; let t: number[] = [];
-  const ens = (c: Candle[]) => { if (key !== c) { r = rsi(c, 14); t = trendEma > 0 ? ema(c.map((x) => x.c), trendEma) : []; key = c; } };
-  return { id, code: id, name: id, symbol, timeframe: tf, slPct: 0.05, warmup: Math.max(42, trendEma + 1), description: id,
-    decide(c, i, pos): Signal { ens(c); const v = r[i]!; const cl = c[i]!.c; const up = trendEma > 0 ? cl > t[i]! : true; const dn = trendEma > 0 ? cl < t[i]! : true;
-      if (pos === null) { if (v < os && up) return 'long'; if (v > ob && dn) return 'short'; return null; }
-      if (pos === 'long') return v >= 50 ? 'flat' : null; return v <= 50 ? 'flat' : null; } };
-}
-function bollMr(id: string, symbol: string, tf: string, period: number, k: number, trendEma: number): CustomStrategy {
-  let key: Candle[] | null = null; let mid: number[] = []; let sd: number[] = []; let t: number[] = [];
-  const ens = (c: Candle[]) => { if (key !== c) { const cl = c.map((x) => x.c); mid = sma(cl, period); sd = rollingStd(cl, period); t = trendEma > 0 ? ema(cl, trendEma) : []; key = c; } };
-  return { id, code: id, name: id, symbol, timeframe: tf, slPct: 0.05, warmup: Math.max(period + 1, trendEma + 1), description: id,
-    decide(c, i, pos): Signal { ens(c); const cl = c[i]!.c; const m = mid[i]!; const up = m + k * sd[i]!; const dn = m - k * sd[i]!;
-      const tu = trendEma > 0 ? cl > t[i]! : true; const td = trendEma > 0 ? cl < t[i]! : true;
-      if (pos === null) { if (cl < dn && tu) return 'long'; if (cl > up && td) return 'short'; return null; }
-      if (pos === 'long') return cl >= m ? 'flat' : null; return cl <= m ? 'flat' : null; } };
-}
-
 type Spec = { fam: string; tf: string; build: (sym: string) => CustomStrategy };
 function specsForSymbol(): Spec[] {
   const out: Spec[] = [];
   const trendTFs = ['60', '240', 'D'];
   const mrTFs = ['15', '60', '240'];
   for (const tf of trendTFs) {
-    for (const p of [50, 100, 150, 200]) out.push({ fam: 'sma-trend', tf, build: (s) => smaTrend(`sma${p}-${s}-${tf}`, s, tf, p) });
-    for (const [f, sl] of [[10, 30], [20, 50], [50, 200]] as const) out.push({ fam: 'ema-cross', tf, build: (s) => emaCross(`ema${f}x${sl}-${s}-${tf}`, s, tf, f, sl) });
-    for (const p of [20, 40, 55]) out.push({ fam: 'donchian', tf, build: (s) => donchianFlip(`donch${p}-${s}-${tf}`, s, tf, p) });
-    for (const l of [20, 50, 100]) out.push({ fam: 'momentum', tf, build: (s) => momentumRoc(`mom${l}-${s}-${tf}`, s, tf, l) });
+    for (const p of [50, 100, 150, 200]) out.push({ fam: 'sma-trend', tf, build: (s) => smaTrend(s, tf, p) });
+    for (const [f, sl] of [[10, 30], [20, 50], [50, 200]] as const) out.push({ fam: 'ema-cross', tf, build: (s) => emaCross(s, tf, f, sl) });
+    for (const p of [20, 40, 55]) out.push({ fam: 'donchian', tf, build: (s) => donchianFlip(s, tf, p) });
+    for (const l of [20, 50, 100]) out.push({ fam: 'momentum', tf, build: (s) => momentumRoc(s, tf, l) });
   }
   for (const tf of mrTFs) {
-    for (const [os, ob, te] of [[30, 70, 0], [30, 70, 200], [25, 75, 200]] as const) out.push({ fam: 'rsi-mr', tf, build: (s) => rsiMr(`rsi${os}_${ob}t${te}-${s}-${tf}`, s, tf, os, ob, te) });
-    for (const [p, k, te] of [[20, 2, 0], [20, 2.5, 0], [20, 2, 200]] as const) out.push({ fam: 'boll-mr', tf, build: (s) => bollMr(`boll${p}_${k}t${te}-${s}-${tf}`, s, tf, p, k, te) });
+    for (const [os, ob, te] of [[30, 70, 0], [30, 70, 200], [25, 75, 200]] as const) out.push({ fam: 'rsi-mr', tf, build: (s) => rsiMr(s, tf, os, ob, te) });
+    for (const [p, k, te] of [[20, 2, 0], [20, 2.5, 0], [20, 2, 200]] as const) out.push({ fam: 'boll-mr', tf, build: (s) => bollMr(s, tf, p, k, te) });
   }
   return out;
 }
