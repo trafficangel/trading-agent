@@ -130,6 +130,106 @@ export function getStrategyLiveStats(strategyId: string): StrategyLiveStats {
   return stats;
 }
 
+/**
+ * Extended per-strategy live metrics for the strategy-detail page — the
+ * money stats `getStrategyLiveStats` doesn't carry (profit factor, max
+ * drawdown, expectancy, avg win/loss, long/short split) plus the
+ * chronological equity series for the curve. EVERYTHING here is NET of
+ * the round-trip commission per trade, so the final equity point equals
+ * getStrategyLiveStats().netPnlUsd and the whole block reads "after
+ * commission" consistently with the rest of the site.
+ *
+ * Win/loss here is classified on NET pnl (a gross-positive trade eaten by
+ * commission counts as a loss) — this can differ by a trade or two from
+ * getStrategyLiveStats (which buckets on gross). The detail block drives
+ * its W/L counts and donut from THIS function so the page is internally
+ * consistent.
+ */
+export type StrategyEquityExtras = {
+  closed: number;
+  wins: number;            // net pnl > 0
+  losses: number;          // net pnl < 0
+  winRate: number | null;
+  /** Chronological cumulative NET USD after each closed trade. */
+  equityUsd: number[];
+  /** gross profit / gross loss (abs). null when there are no losing trades. */
+  profitFactor: number | null;
+  /** Net USD per closed trade (mean). */
+  expectancyUsd: number;
+  avgWinUsd: number;       // mean of winners (0 if none)
+  avgLossUsd: number;      // mean of losers, negative (0 if none)
+  maxDrawdownUsd: number;  // largest peak→trough on the equity curve, >= 0
+  maxDrawdownPct: number;  // as % of notional
+  bestUsd: number;         // best single net trade
+  worstUsd: number;        // worst single net trade
+  longNetUsd: number;  longNetPct: number;  longCount: number;
+  shortNetUsd: number; shortNetPct: number; shortCount: number;
+  commissionPaidUsd: number;
+};
+
+const equityRowsStmt = db.prepare<[string], { pnl_pct: number; side: string | null }>(`
+  SELECT pnl_pct, side
+  FROM decisions
+  WHERE track = 'strategy' AND user_id IS NULL AND strategy_id = ?
+    AND status = 'closed' AND pnl_pct IS NOT NULL
+  ORDER BY closed_at ASC
+`);
+
+export function getStrategyEquityExtras(strategyId: string): StrategyEquityExtras {
+  const rows = equityRowsStmt.all(strategyId);
+  const C = TRACK_C_COMMISSION_RT_PCT;
+
+  const out: StrategyEquityExtras = {
+    closed: 0, wins: 0, losses: 0, winRate: null,
+    equityUsd: [], profitFactor: null, expectancyUsd: 0,
+    avgWinUsd: 0, avgLossUsd: 0, maxDrawdownUsd: 0, maxDrawdownPct: 0,
+    bestUsd: 0, worstUsd: 0,
+    longNetUsd: 0, longNetPct: 0, longCount: 0,
+    shortNetUsd: 0, shortNetPct: 0, shortCount: 0,
+    commissionPaidUsd: 0,
+  };
+  if (rows.length === 0) return out;
+
+  let cum = 0, peak = 0, maxDd = 0;
+  let grossWin = 0, grossLoss = 0; // grossLoss accumulates as a positive magnitude
+  let winSum = 0, lossSum = 0;
+  let best = -Infinity, worst = Infinity;
+
+  for (const r of rows) {
+    const netPct = r.pnl_pct - C;
+    const usd = (netPct / 100) * TRACK_C_NOTIONAL_USD;
+    out.closed++;
+    cum += usd;
+    if (cum > peak) peak = cum;
+    if (peak - cum > maxDd) maxDd = peak - cum;
+    out.equityUsd.push(Math.round(cum * 100) / 100);
+
+    if (usd > 0) { out.wins++; grossWin += usd; winSum += usd; }
+    else if (usd < 0) { out.losses++; grossLoss += -usd; lossSum += usd; }
+
+    if (usd > best) best = usd;
+    if (usd < worst) worst = usd;
+
+    if (r.side === 'short') { out.shortNetUsd += usd; out.shortNetPct += netPct; out.shortCount++; }
+    else { out.longNetUsd += usd; out.longNetPct += netPct; out.longCount++; }
+  }
+
+  const r2 = (x: number) => Math.round(x * 100) / 100;
+  out.winRate = out.closed > 0 ? out.wins / out.closed : null;
+  out.profitFactor = grossLoss > 0 ? r2(grossWin / grossLoss) : null;
+  out.expectancyUsd = r2(cum / out.closed);
+  out.avgWinUsd = out.wins > 0 ? r2(winSum / out.wins) : 0;
+  out.avgLossUsd = out.losses > 0 ? r2(lossSum / out.losses) : 0;
+  out.maxDrawdownUsd = r2(maxDd);
+  out.maxDrawdownPct = r2((maxDd / TRACK_C_NOTIONAL_USD) * 100);
+  out.bestUsd = Number.isFinite(best) ? r2(best) : 0;
+  out.worstUsd = Number.isFinite(worst) ? r2(worst) : 0;
+  out.longNetUsd = r2(out.longNetUsd); out.longNetPct = r2(out.longNetPct);
+  out.shortNetUsd = r2(out.shortNetUsd); out.shortNetPct = r2(out.shortNetPct);
+  out.commissionPaidUsd = r2(out.closed * (C / 100) * TRACK_C_NOTIONAL_USD);
+  return out;
+}
+
 /** A closed Track C trade ready for landing-page rendering. */
 export type LiveTradeRow = {
   id: number;

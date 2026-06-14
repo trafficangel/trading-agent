@@ -15,12 +15,14 @@ import { logger } from '../lib/logger.js';
 import { TIER_CONFIGS, computeTierTradeSize } from './tier-config.js';
 import {
   getStrategyLiveStats,
+  getStrategyEquityExtras,
   getStrategyRecentTrades,
   getStrategyActiveTrades,
   getAllActiveShadowTrades,
   getAllClosedShadowTrades,
   countAllClosedShadowTrades,
   type StrategyLiveStats,
+  type StrategyEquityExtras,
   type LiveTradeRow,
   type ActiveTradeRow,
   type LiveTradeFeedRow,
@@ -4197,6 +4199,171 @@ function activeTradesTable(trades: ActiveTradeRow[], cfg: StrategyConfig): strin
   `;
 }
 
+/**
+ * Equity curve for LIVE closed trades. Mirrors equityCurveSvg() but takes
+ * a bare cumulative-NET-USD series, uses its own gradient id (so it can
+ * coexist with the backtest chart on the same page), and colours the line
+ * by final sign — green when up, red when the live track is underwater
+ * (honest: several strategies are net-negative live).
+ */
+function liveEquityCurveSvg(equityUsd: number[]): string {
+  const w = 760, h = 200, padX = 30, padTop = 12, padBot = 28;
+  const innerW = w - 2 * padX;
+  const innerH = h - padTop - padBot;
+  const yMin = Math.min(0, ...equityUsd);
+  const yMax = Math.max(0, ...equityUsd);
+  const yRange = yMax - yMin || 1;
+  const xStep = innerW / Math.max(equityUsd.length - 1, 1);
+  const yZero = padTop + ((yMax - 0) / yRange) * innerH;
+  const pts = equityUsd.map((v, i) => ({
+    x: padX + i * xStep,
+    y: padTop + ((yMax - v) / yRange) * innerH,
+  }));
+  const linePath = pts
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+    .join(' ');
+  const areaPath = `${linePath} L${pts[pts.length - 1]!.x.toFixed(1)},${yZero.toFixed(1)} L${pts[0]!.x.toFixed(1)},${yZero.toFixed(1)} Z`;
+  const last = equityUsd[equityUsd.length - 1]!;
+  const col = last >= 0 ? 'var(--accent)' : 'var(--danger)';
+  const yTicks = [
+    { v: yMax, y: padTop },
+    ...(yMin < 0 ? [{ v: 0, y: yZero }] : []),
+    { v: yMin, y: padTop + innerH },
+  ];
+  const sgn = last >= 0 ? '+' : '−';
+  return `
+  <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img"
+       aria-label="Накопленный live-PnL за ${equityUsd.length} ${pluralRu(equityUsd.length, 'сделку', 'сделки', 'сделок')}">
+    <defs>
+      <linearGradient id="eqGradLive" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${col}" stop-opacity="0.30"/>
+        <stop offset="100%" stop-color="${col}" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    ${yMin < 0 ? `<line x1="${padX}" y1="${yZero.toFixed(1)}" x2="${(padX + innerW).toFixed(1)}" y2="${yZero.toFixed(1)}" stroke="var(--border)" stroke-dasharray="3,4"/>` : ''}
+    <path d="${areaPath}" fill="url(#eqGradLive)"/>
+    <path d="${linePath}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+    ${yTicks.map((t) => `<text x="${padX - 4}" y="${(t.y + 3).toFixed(1)}" font-size="10" fill="var(--text-faint)" text-anchor="end">${t.v >= 0 ? '+' : ''}${Math.round(t.v)}</text>`).join('')}
+    <text x="${padX}" y="${h - 8}" font-size="10" fill="var(--text-faint)">Сделка №1</text>
+    <text x="${(padX + innerW).toFixed(1)}" y="${h - 8}" font-size="10" fill="var(--text-faint)" text-anchor="end">Сделка №${equityUsd.length} · итог ${sgn}${Math.abs(last).toFixed(0)} USDT</text>
+  </svg>
+  `;
+}
+
+/**
+ * Detailed live-performance block for the strategy-detail page — the
+ * analogue of renderBacktestSection but computed from REAL closed shadow
+ * trades. Same visual vocabulary (equity curve + donut + diverging bar +
+ * win/loss spectrum + stat-cards + breakdown) so a visitor can read
+ * "backtest said X, live did Y" at a glance. Everything is net of the
+ * 0.11% round-trip commission. Caller must ensure ex.closed > 0.
+ */
+function renderLiveStatsBlock(live: StrategyLiveStats, ex: StrategyEquityExtras): string {
+  const pnlClass = classForValue(live.netPnlPct);
+  const longClass = classForValue(ex.longNetPct);
+  const shortClass = classForValue(ex.shortNetPct);
+  const pfStr = ex.profitFactor === null ? '∞' : ex.profitFactor.toFixed(2);
+  const wrPct = (ex.winRate ?? 0) * 100;
+  const durStr = live.avgDurationMin !== null ? fmtDuration(live.avgDurationMin * 60000) : '—';
+  const exitsTotal = live.exitsStrategy + live.exitsSafetySL + live.exitsTimeGuard;
+
+  const equityBlock = ex.equityUsd.length >= 2
+    ? `<div class="equity-card" style="margin-bottom: 16px;">
+         <div class="chart-title" style="margin-bottom: 8px;">Накопленный live-PnL · ${ex.closed} ${pluralRu(ex.closed, 'сделка', 'сделки', 'сделок')} · нетто</div>
+         ${liveEquityCurveSvg(ex.equityUsd)}
+       </div>`
+    : '';
+
+  return `
+  <div class="section">
+    <div class="section-title">Статистика live · нетто после комиссии 0.11%</div>
+    ${equityBlock}
+
+    <div class="charts-grid" style="margin-bottom: 16px;">
+      <div class="chart-card">
+        <div class="chart-title">Win / Loss ratio</div>
+        <div class="donut-wrap">${donutChart(wrPct, ex.losses, ex.wins)}</div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Long vs Short P&amp;L (нетто %)</div>
+        ${divergingBar('LONG', ex.longNetPct, 'SHORT', ex.shortNetPct)}
+        <div class="chart-title" style="margin-top: 8px;">Средняя vs крупнейшая (USDT)</div>
+        ${winLossSpectrum(ex.avgWinUsd, ex.avgLossUsd, live.largestWinUsd, live.largestLossUsd)}
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Net P&amp;L</div>
+        <div class="stat-value ${pnlClass}">${fmtPct(live.netPnlPct, true)}</div>
+        <div class="stat-sub ${pnlClass}">${fmtUsd(live.netPnlUsd, true)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Win Rate</div>
+        <div class="stat-value">${wrPct.toFixed(1)}%</div>
+        <div class="stat-sub">${ex.wins}W / ${ex.losses}L · ${ex.closed} ${pluralRu(ex.closed, 'сделка', 'сделки', 'сделок')}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Profit Factor</div>
+        <div class="stat-value">${pfStr}</div>
+        <div class="stat-sub">вал. прибыль / убыток</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Max Drawdown</div>
+        <div class="stat-value neg">−${ex.maxDrawdownPct.toFixed(2)}%</div>
+        <div class="stat-sub neg">${fmtUsd(-ex.maxDrawdownUsd)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Средняя сделка</div>
+        <div class="stat-value ${classForValue(ex.expectancyUsd)}">${fmtUsd(ex.expectancyUsd, true)}</div>
+        <div class="stat-sub">матожидание · нетто</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Комиссия уплачено</div>
+        <div class="stat-value">${fmtUsd(ex.commissionPaidUsd)}</div>
+        <div class="stat-sub">0.110% round-trip × ${ex.closed}</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Breakdown</div>
+      <div class="card">
+        <table>
+          <thead>
+            <tr><th>Метрика</th><th class="right">All</th><th class="right">Long</th><th class="right">Short</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Сделок</td><td class="right">${ex.closed}</td><td class="right">${ex.longCount}</td><td class="right">${ex.shortCount}</td></tr>
+            <tr><td>Net P&amp;L %</td>
+              <td class="right"><span class="${pnlClass}">${fmtPct(live.netPnlPct, true)}</span></td>
+              <td class="right"><span class="${longClass}">${fmtPct(ex.longNetPct, true)}</span></td>
+              <td class="right"><span class="${shortClass}">${fmtPct(ex.shortNetPct, true)}</span></td></tr>
+            <tr><td>Net P&amp;L $</td>
+              <td class="right"><span class="${pnlClass}">${fmtUsd(live.netPnlUsd, true)}</span></td>
+              <td class="right"><span class="${longClass}">${fmtUsd(ex.longNetUsd, true)}</span></td>
+              <td class="right"><span class="${shortClass}">${fmtUsd(ex.shortNetUsd, true)}</span></td></tr>
+            <tr><td>Средний выигрыш</td><td class="right pos">${fmtUsd(ex.avgWinUsd, true)}</td><td class="right">—</td><td class="right">—</td></tr>
+            <tr><td>Средний проигрыш</td><td class="right neg">${fmtUsd(ex.avgLossUsd, true)}</td><td class="right">—</td><td class="right">—</td></tr>
+            <tr><td>Лучшая</td><td class="right pos">${fmtUsd(ex.bestUsd, true)}</td><td class="right">—</td><td class="right">—</td></tr>
+            <tr><td>Худшая</td><td class="right neg">${fmtUsd(ex.worstUsd, true)}</td><td class="right">—</td><td class="right">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 12px;"><div class="card-body">
+      <div class="info-grid">
+        <div class="info-item"><div class="lbl">Средняя длительность</div><div class="val">${durStr}</div></div>
+        <div class="info-item"><div class="lbl">Выход по стратегии</div><div class="val">${live.exitsStrategy}</div></div>
+        <div class="info-item"><div class="lbl">Safety-SL</div><div class="val">${live.exitsSafetySL}</div></div>
+        <div class="info-item"><div class="lbl">Time-guard</div><div class="val">${live.exitsTimeGuard}</div></div>
+      </div>
+      ${exitsTotal === 0 ? '' : `<div class="desc" style="margin-top: 8px; font-size: 12px; color: var(--text-faint);">Как закрывались сделки: по сигналу стратегии — штатный выход; safety-SL — сработал страховочный стоп; time-guard — закрыто по тайм-ауту (exit-сигнал не пришёл).</div>`}
+    </div></div>
+  </div>
+  `;
+}
+
 function renderLiveSection(live: StrategyLiveStats, _launchedAt: number, cfg: StrategyConfig): string {
   // Two stacked sub-tables (when relevant):
   //  - ACTIVE: currently-open positions, with pulsing-green status badge
@@ -4206,6 +4373,10 @@ function renderLiveSection(live: StrategyLiveStats, _launchedAt: number, cfg: St
   // when nothing's open.
   const active = getStrategyActiveTrades(cfg.id);
   const closed = getStrategyRecentTrades(cfg.id, 50);
+  // Detailed live performance (equity curve + stat-cards + breakdown),
+  // rendered only once there's at least one closed trade to summarise.
+  const ex = getStrategyEquityExtras(cfg.id);
+  const statsBlock = ex.closed > 0 ? renderLiveStatsBlock(live, ex) : '';
   // Phase N — explicit «live started on DATE» note so the visitor sees
   // the sample period. Empty string when no live trades yet.
   const liveSince = formatSinceDate(live.firstTradeAt, 'ru');
@@ -4250,6 +4421,7 @@ function renderLiveSection(live: StrategyLiveStats, _launchedAt: number, cfg: St
     ${liveSince
       ? `<div class="live-since-note">Live-торговля на shadow-счёте ведётся <b>${liveSince}</b>. Все цифры ниже — реальные сделки, не симуляция.</div>`
       : ''}
+    ${statsBlock}
     ${activeBlock}
     ${closedBlock}
   </div>
