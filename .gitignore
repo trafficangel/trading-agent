@@ -34,3 +34,4 @@ yarn-error.log*
 playwright-report/
 test-results/
 .cache/
+data/klines/
