@@ -82,6 +82,8 @@ const LAB_CSS = `
   .lab-status.wait{color:var(--text-faint)}
   .lab-empty{color:var(--text-faint);font-size:13px;padding:20px 0;text-align:center}
   .lab-fam{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin:18px 0 6px}
+  .lab-fam-note{font-size:12px;color:var(--text-faint);margin:-2px 0 9px;line-height:1.45}
+  .lab-fam-note b{color:var(--text-dim)}
 `;
 
 /** Family grouping for the list, by strategy description. */
@@ -129,9 +131,12 @@ function renderLabList(): string {
   }
   const body = LAB_STRATEGIES.length === 0
     ? '<div class="lab-empty">Пока нет стратегий в лаборатории.</div>'
-    : [...fams.entries()].map(([fam, list]) =>
-        `<div class="lab-fam">${esc(fam)}</div><div class="lab-list">${list.map(labRow).join('')}</div>`,
-      ).join('');
+    : [...fams.entries()].map(([fam, list]) => {
+        const note = fam.startsWith('Mean-reversion') && list.length > 1
+          ? `<div class="lab-fam-note">⚠ Это одна логика на ${list.length} монетах = <b>коррелированная ставка</b>, а не ${list.length} независимых. При промоуте лимитируются как единый кластер (общий лимит риска), иначе широкая просадка альтов откроет все разом.</div>`
+          : '';
+        return `<div class="lab-fam">${esc(fam)}</div>${note}<div class="lab-list">${list.map(labRow).join('')}</div>`;
+      }).join('');
   return pageShell(
     'Лаборатория — R&D стратегии (бумага)',
     `

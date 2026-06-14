@@ -34,30 +34,52 @@ function lab(base: CustomStrategy, code: string, name: string, longDescription: 
   return { ...base, id: `lab-${code.toLowerCase()}`, code, name, launchedAt: LAB_LAUNCH, longDescription };
 }
 
+// Safety SLs below are MAE-OPTIMAL (scripts/audit-sl-distribution.ts on the
+// native-exit trade logs) — the SL that catches the catastrophic adverse-
+// excursion tail without clipping normal mean-reversion noise. They differ
+// per coin because the MAE distribution does (XRP worst −42%, BNB −29% vs
+// ETH −13%). Audit confirmed mean-reversion IS SL-compatible here (5–8%
+// even improves results by cutting the fat tail).
+//
+// MONEY MANAGEMENT (applies at promotion to the live book, not on paper):
+//   - sizing = risk-parity. maxSafeLeverage=floor(0.70/(slPct+0.02)) makes
+//     $-risk/trade ≈ 0.5–0.6×margin regardless of SL width (tighter stop →
+//     more leverage → same risk). So margin pool splits give ~equal risk.
+//   - CLUSTER CAP: L01–L05 are the SAME rule on 5 alts = ONE correlated bet
+//     (alt mean-reversion), NOT 5 independent edges. At promotion they must
+//     share a combined concurrent-risk cap, else a broad alt dip fires all
+//     five at once = 5× the intended risk. maxConcurrentPositions bounds it
+//     coarsely; a per-cluster cap is the right refinement.
+//   - Kelly tilt (kelly-allocator) weights by realised forward edge once
+//     each has MIN_SAMPLE=15 paper/live trades.
 export const LAB_STRATEGIES: LabStrategy[] = [
   // ── PRIMARY EDGE — Bollinger(20,2) mean-reversion gated by EMA200 trend,
   // on 4h. The sweep+verify winner: positive on 8/10 coins, survived the
   // full kill-battery on 5 (ETH/LINK/XRP/BNB/DOGE), lowest drawdown (~20%),
   // WR 66–80%. A genuine, generalising, cost-robust mean-reversion edge.
-  lab(bollMr('ETHUSDT', '240', 20, 2, 200, 0.06), 'L01', 'ETH Bollinger-MR 4h',
-    'Победитель свипа. Откупаем отклонение от средней (нижняя/верхняя полоса Боллинджера 20/2) ТОЛЬКО в сторону тренда EMA200, выход у средней. Прошёл кросс-символьную проверку (плюс на 8/10 монет), 3/4 walk-forward фолдов и ×2 издержки. ETH: +84% нетто, просадка −21%, WR ~80%.'),
-  lab(bollMr('LINKUSDT', '240', 20, 2, 200, 0.06), 'L02', 'LINK Bollinger-MR 4h',
-    'Та же конфигурация на LINK — самый робастный по времени (4/4 фолда), +57% нетто, просадка −20%, WR ~70%.'),
-  lab(bollMr('XRPUSDT', '240', 20, 2, 200, 0.06), 'L03', 'XRP Bollinger-MR 4h',
-    'Та же конфигурация на XRP — +37% нетто, просадка −20%, WR ~79%, 3/4 фолда.'),
-  lab(bollMr('BNBUSDT', '240', 20, 2, 200, 0.06), 'L04', 'BNB Bollinger-MR 4h',
-    'Та же конфигурация на BNB — +30% нетто, просадка −20%, WR ~67%, 3/4 фолда.'),
-  lab(bollMr('DOGEUSDT', '240', 20, 2, 200, 0.06), 'L05', 'DOGE Bollinger-MR 4h',
-    'Та же конфигурация на DOGE — +16% нетто, но просадка выше (−44%); самый маргинальный из выживших, наблюдаем.'),
-  // ── TREND EDGE — only the specific (config, major) pairs that were robust
-  // per-fold with tolerable drawdown. Raw crypto trend is real but wild
-  // (huge DD); these three are the exceptions that passed 4/4 folds.
-  lab(donchianFlip('BTCUSDT', '240', 40, 0.10), 'L06', 'BTC Donchian-40 4h',
-    'Пробой канала Дончиана(40) на BTC 4h: единственный пробойный конфиг с малой просадкой (−16%) и 4/4 walk-forward фолдов, +81% нетто. Трендовый диверсификатор к mean-rev корзине.'),
-  lab(smaTrend('ETHUSDT', 'D', 50, 0.12), 'L07', 'ETH SMA50 Trend (daily)',
-    'Дневной трендследящий на ETH: лонг пока цена выше SMA(50), иначе кэш. 4/4 фолда, просадка −24%, +138% нетто. Настоящий дневной трендовый край из Фазы 0, на активе где он держится.'),
-  lab(smaTrend('BTCUSDT', 'D', 100, 0.12), 'L08', 'BTC SMA100 Trend (daily)',
-    'Дневной тренд на BTC выше SMA(100): 4/4 фолда, просадка −20%, +148% нетто. Якорный трендовый край на главном активе.'),
+  // SLs are MAE-audit-optimal per coin.
+  lab(bollMr('ETHUSDT', '240', 20, 2, 200, 0.07), 'L01', 'ETH Bollinger-MR 4h',
+    'Победитель свипа. Откупаем отклонение от средней (полосы Боллинджера 20/2) ТОЛЬКО в сторону тренда EMA200, выход у средней. Прошёл кросс-символьную проверку (плюс на 8/10 монет), 3/4 walk-forward фолдов, ×2 издержки. SL 7% — MAE-аудит-оптимум (PF 3.4, DD 14%, ловит 96% эджа).'),
+  lab(bollMr('LINKUSDT', '240', 20, 2, 200, 0.08), 'L02', 'LINK Bollinger-MR 4h',
+    'Та же конфигурация на LINK — самый робастный по времени (4/4 фолда), +60% нетто, WR ~70%. SL 8% (MAE-оптимум, ловит 97% эджа).'),
+  lab(bollMr('XRPUSDT', '240', 20, 2, 200, 0.05), 'L03', 'XRP Bollinger-MR 4h',
+    'Та же конфигурация на XRP — WR ~79%, 3/4 фолда, но маргинальна (PF 1.16). SL 5% — у XRP толстый хвост (worst MAE −42%), стоп срезает катастрофу и УЛУЧШАЕТ результат.'),
+  lab(bollMr('BNBUSDT', '240', 20, 2, 200, 0.05), 'L04', 'BNB Bollinger-MR 4h',
+    'Та же конфигурация на BNB — +20% нетто, PF 1.9, WR ~67%, 3/4 фолда. SL 5% (MAE-оптимум, DD всего 5%).'),
+  lab(bollMr('DOGEUSDT', '240', 20, 2, 200, 0.08), 'L05', 'DOGE Bollinger-MR 4h',
+    'Та же конфигурация на DOGE — +45% нетто, PF 1.7. SL 8% (MAE-оптимум; DOGE шире остальных).'),
+  // ── TREND EDGE — only configs robust per-fold with tolerable drawdown.
+  lab(donchianFlip('BTCUSDT', '240', 40, 0.08), 'L06', 'BTC Donchian-40 4h',
+    'Пробой канала Дончиана(40) на BTC 4h: 4/4 walk-forward фолдов, +81% нетто. SL 8% — BORDERLINE по аудиту (стоп стоит части EV, но +32%, PF 1.4). Единственный пробойный конфиг с тугим стопом; трендовый диверсификатор к mean-rev корзине.'),
+  // ── DAILY TREND — real edge (verified 4/4 folds on 1600d), but raw trend
+  // needs to ride deep pullbacks. SL is a catastrophe net only (above its
+  // worst observed single-trade MAE), NOT a tight stop — daily trend exits
+  // on the SMA cross. SL audit ran on too few trades (540d → 8 trades);
+  // re-audit on a 1600d daily window before trusting the SL precisely.
+  // (BTC SMA100 daily was dropped — MAE audit found it INCOMPATIBLE with an
+  //  8% cap: daily trend on BTC needs >8% room or it turns net-negative.)
+  lab(smaTrend('ETHUSDT', 'D', 50, 0.10), 'L07', 'ETH SMA50 Trend (daily)',
+    'Дневной трендследящий на ETH: лонг пока цена выше SMA(50), иначе кэш. 4/4 фолда на 1600д, +138% нетто. SL 10% — катастрофный (выше worst single-trade MAE 9.7%), тренд должен «дышать». Дневной край из Фазы 0, торгует редко — данные копятся медленно.'),
 ];
 
 export const LAB_BY_CODE = new Map(LAB_STRATEGIES.map((s) => [s.code, s]));
