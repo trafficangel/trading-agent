@@ -32,7 +32,8 @@ import {
   getStrategyActiveTrades,
 } from './live-stats.js';
 import { TRACK_C_NOTIONAL_USD } from './track-c-config.js';
-import { ALL_LAB_STRATEGIES, LAB_BY_CODE, LAB_BY_ID, LAB_TRACK, LAB_MAKER_TRACK, type LabStrategy } from './lab-registry.js';
+import { ALL_LAB_STRATEGIES, LAB_BY_CODE, LAB_BY_ID, LAB_TRACK, LAB_MAKER_TRACK, BT_NET_PCT_PER_TRADE, type LabStrategy } from './lab-registry.js';
+import { labGateVerdict } from '../lib/lab-gate.js';
 
 const trackOf = (s: LabStrategy): string => s.track ?? LAB_TRACK;
 
@@ -86,6 +87,12 @@ const LAB_CSS = `
   .lab-fam{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin:18px 0 6px}
   .lab-fam-note{font-size:12px;color:var(--text-faint);margin:-2px 0 9px;line-height:1.45}
   .lab-fam-note b{color:var(--text-dim)}
+  .lab-gate{margin-top:8px;font-size:12px;color:var(--text-faint)}
+  .lab-gate.gate-ready{color:var(--accent);font-weight:600}
+  .lab-gate.gate-underperforming{color:var(--danger)}
+  .lab-gate.gate-diverging{color:#e0a23a}
+  .lab-gate.gate-confirming{color:var(--text-dim)}
+  .gate-banner{border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin:0 0 16px;font-size:13px}
 `;
 
 /** Family grouping for the list, by strategy description. */
@@ -102,6 +109,7 @@ function familyOf(s: LabStrategy): string {
 function labRow(s: LabStrategy): string {
   const live = getStrategyLiveStats(s.id, trackOf(s));
   const makerTag = s.track === LAB_MAKER_TRACK ? ' · <b>maker</b>' : '';
+  const gate = labGateVerdict({ closed: live.closed, netPct: live.netPnlPct, winRate: live.winRate, btNetPctPerTrade: BT_NET_PCT_PER_TRADE[s.code] });
   const working = live.open > 0;
   const statusPill = working
     ? '<span class="lab-status work">🟢 в работе</span>'
@@ -123,6 +131,7 @@ function labRow(s: LabStrategy): string {
         <span><span class="k">Сделок</span>${live.closed}</span>
         <span><span class="k">Открыто</span>${live.open}</span>
       </div>
+      <div class="lab-gate gate-${gate.status}">${gate.emoji} ${gate.label}</div>
     </a>`;
 }
 
@@ -196,6 +205,7 @@ function renderLabDetail(s: LabStrategy): string {
   const live = getStrategyLiveStats(s.id, track);
   const ex = getStrategyEquityExtras(s.id, track);
   const active = getStrategyActiveTrades(s.id, track);
+  const gate = labGateVerdict({ closed: live.closed, netPct: live.netPnlPct, winRate: live.winRate, btNetPctPerTrade: BT_NET_PCT_PER_TRADE[s.code] });
 
   const activeBlock = active.length > 0
     ? `<div class="section"><div class="section-subtitle">Сейчас открыто: ${active.length}</div>
@@ -229,6 +239,8 @@ function renderLabDetail(s: LabStrategy): string {
     </div>
     <style>${LAB_CSS}</style>
     ${LAB_BANNER}
+
+    <div class="gate-banner gate-${gate.status}">Форвард-гейт: ${gate.emoji} ${gate.label}${BT_NET_PCT_PER_TRADE[s.code] != null ? ` · бэктест ≈ ${BT_NET_PCT_PER_TRADE[s.code]!.toFixed(2)}%/сделку` : ''}</div>
 
     <div class="alert-id-card">
       <span class="alert-id-label">Логика</span>

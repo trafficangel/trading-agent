@@ -127,6 +127,14 @@ export const MAKER_LAB_STRATEGIES: LabStrategy[] = [
     'Z-score-MR на BNB — 3/4 фолда, PF 1.33, просадка −10%.'),
 ];
 
+/** Backtest reference: net %/trade per strategy (from the sweeps/audits).
+ *  The forward-gate (lib/lab-gate.ts) compares live paper expectancy to this
+ *  to flag a decaying edge. Approximate — a yardstick, not a contract. */
+export const BT_NET_PCT_PER_TRADE: Record<string, number> = {
+  L01: 1.95, L02: 1.54, L03: 0.23, L04: 0.65, L05: 1.18, L06: 0.94, L07: 2.65, L08: 4.86, L09: 0.71,
+  M01: 0.14, M02: 0.07, M03: 0.07, M04: 0.04, M05: 0.12, M06: 0.14, M07: 0.10, M08: 0.06,
+};
+
 export const ALL_LAB_STRATEGIES: LabStrategy[] = [...LAB_STRATEGIES, ...MAKER_LAB_STRATEGIES];
 export const LAB_BY_CODE = new Map(ALL_LAB_STRATEGIES.map((s) => [s.code, s]));
 export const LAB_BY_ID = new Map(ALL_LAB_STRATEGIES.map((s) => [s.id, s]));

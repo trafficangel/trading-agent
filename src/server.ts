@@ -26,6 +26,7 @@ import { startBalanceMonitorJob } from './jobs/balance-monitor.js';
 import { startRecoveryMonitorJob } from './jobs/recovery-monitor.js';
 import { startCustomRunner } from './jobs/custom-runner.js';
 import { startMakerRunner } from './jobs/maker-runner.js';
+import { startWebhookWatchdog } from './jobs/webhook-watchdog.js';
 // Phase G — money-back guarantee disabled, see start-job line below.
 // import { startPnlGuaranteeMonthlyJob } from './jobs/pnl-guarantee-monthly.js';
 import { sendMessage } from './telegram/bot.js';
@@ -220,6 +221,9 @@ async function main(): Promise<void> {
   // THE LAB — maker book (track='lab-maker'): rests limits at the band,
   // fills on touch, maker fees. Forward-tests the low-TF MR edges.
   startMakerRunner();
+  // Watchdog: alert if LuxAlgo webhooks go silent (>18h) — catches an
+  // upstream outage in an hour instead of days.
+  startWebhookWatchdog();
   // Phase G — money-back guarantee disabled per operator decision.
   // Cron registration commented out, DB columns + repo helpers preserved
   // so it can be re-enabled later without re-migrating. UI mentions
