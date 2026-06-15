@@ -24,7 +24,13 @@ import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 
 const TTL_BARS = 20;       // cancel a resting entry limit if unfilled this long
-const MAX_HOLD_BARS = 96;  // backstop: force-close a position held this many bars
+// Time stop = 48 bars. The SL-mode audit (scripts/sl-mode-audit.ts) found the
+// price stop barely matters for these 5m MR edges (5%≈8%≈no-SL) and ATR stops
+// HURT — but a ~48-bar time stop improves OOS robustness + cuts drawdown (MR
+// thesis: if it hasn't reverted to the mean in 4h, it failed → exit). Paired
+// with the wide 8% catastrophe price stop on the strategies.
+const MAX_HOLD_BARS = 48;
+
 
 type OpenRow = { id: number; status: string; side: string; entry: number; sl: number; created_at: number; filled_at: number | null; features_json: string | null };
 

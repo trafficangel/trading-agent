@@ -109,21 +109,21 @@ export const LAB_STRATEGIES: LabStrategy[] = [
 // majors), low DD (5-10%), WR ~70%. Driven by the maker-runner (rests a limit
 // at the band, fills on touch), track='lab-maker', net of maker commission.
 export const MAKER_LAB_STRATEGIES: LabStrategy[] = [
-  labMaker(keltnerMr('ADAUSDT', '5', 20, 10, 2, 200), 'M01', 'ADA Keltner-MR 5m (maker)',
+  labMaker(keltnerMr('ADAUSDT', '5', 20, 10, 2, 200, 0.08), 'M01', 'ADA Keltner-MR 5m (maker)',
     'Откуп от канала Кельтнера (EMA20±2·ATR10) по тренду EMA200 на 5m, выход у средней — лимитками. Найдена в свипе новых семейств, прошла кросс-символьную проверку (8/10 монет), PF 1.74, просадка −6%, WR 72%. Реализуется ТОЛЬКО maker (на taker ≈ ноль).'),
-  labMaker(keltnerMr('LTCUSDT', '5', 20, 10, 2, 200), 'M02', 'LTC Keltner-MR 5m (maker)',
+  labMaker(keltnerMr('LTCUSDT', '5', 20, 10, 2, 200, 0.08), 'M02', 'LTC Keltner-MR 5m (maker)',
     'Тот же Keltner-MR на LTC — 4/4 walk-forward фолда, просадка −8%. Часть обобщающегося 5m maker-края.'),
-  labMaker(keltnerMr('SOLUSDT', '5', 20, 10, 2, 200), 'M03', 'SOL Keltner-MR 5m (maker)',
+  labMaker(keltnerMr('SOLUSDT', '5', 20, 10, 2, 200, 0.08), 'M03', 'SOL Keltner-MR 5m (maker)',
     'Keltner-MR на SOL — 3/4 фолда, просадка −5%.'),
-  labMaker(keltnerMr('XRPUSDT', '5', 20, 10, 2, 200), 'M04', 'XRP Keltner-MR 5m (maker)',
+  labMaker(keltnerMr('XRPUSDT', '5', 20, 10, 2, 200, 0.08), 'M04', 'XRP Keltner-MR 5m (maker)',
     'Keltner-MR на XRP — 4/4 фолда, просадка −5%.'),
-  labMaker(zscoreMr('ETHUSDT', '5', 50, 2, 200), 'M05', 'ETH Z-score-MR 5m (maker)',
+  labMaker(zscoreMr('ETHUSDT', '5', 50, 2, 200, 0.08), 'M05', 'ETH Z-score-MR 5m (maker)',
     'Возврат к средней по z-score(50) ±2σ по тренду EMA200 на 5m, лимитками. Кросс-символьно чист на мейджорах: 4/4 фолда, PF 1.55, просадка −5%, WR 77%.'),
-  labMaker(zscoreMr('LTCUSDT', '5', 50, 2, 200), 'M06', 'LTC Z-score-MR 5m (maker)',
+  labMaker(zscoreMr('LTCUSDT', '5', 50, 2, 200, 0.08), 'M06', 'LTC Z-score-MR 5m (maker)',
     'Z-score-MR на LTC — 4/4 фолда, PF 1.84, просадка всего −3.7%, WR 77%. Самый чистый профиль набора.'),
-  labMaker(zscoreMr('BTCUSDT', '5', 50, 2, 200), 'M07', 'BTC Z-score-MR 5m (maker)',
+  labMaker(zscoreMr('BTCUSDT', '5', 50, 2, 200, 0.08), 'M07', 'BTC Z-score-MR 5m (maker)',
     'Z-score-MR на BTC — 4/4 фолда, PF 1.64, просадка −4.6%.'),
-  labMaker(zscoreMr('BNBUSDT', '5', 50, 2, 200), 'M08', 'BNB Z-score-MR 5m (maker)',
+  labMaker(zscoreMr('BNBUSDT', '5', 50, 2, 200, 0.08), 'M08', 'BNB Z-score-MR 5m (maker)',
     'Z-score-MR на BNB — 3/4 фолда, PF 1.33, просадка −10%.'),
 ];
 
