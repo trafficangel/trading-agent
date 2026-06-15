@@ -135,6 +135,13 @@ export const BT_NET_PCT_PER_TRADE: Record<string, number> = {
   M01: 0.14, M02: 0.07, M03: 0.07, M04: 0.04, M05: 0.12, M06: 0.14, M07: 0.10, M08: 0.06,
 };
 
+/** Backtest max-drawdown % per strategy — the risk measure for risk-parity
+ *  sizing (lower DD → more capital). Reference numbers from the audits/sweeps. */
+export const BT_MAXDD_PCT: Record<string, number> = {
+  L01: 14, L02: 15, L03: 16, L04: 5, L05: 16, L06: 17, L07: 46, L08: 22, L09: 37,
+  M01: 6, M02: 8, M03: 5, M04: 5, M05: 5, M06: 4, M07: 5, M08: 10,
+};
+
 export const ALL_LAB_STRATEGIES: LabStrategy[] = [...LAB_STRATEGIES, ...MAKER_LAB_STRATEGIES];
 export const LAB_BY_CODE = new Map(ALL_LAB_STRATEGIES.map((s) => [s.code, s]));
 export const LAB_BY_ID = new Map(ALL_LAB_STRATEGIES.map((s) => [s.id, s]));

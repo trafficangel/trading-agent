@@ -32,8 +32,9 @@ import {
   getStrategyActiveTrades,
 } from './live-stats.js';
 import { TRACK_C_NOTIONAL_USD } from './track-c-config.js';
-import { ALL_LAB_STRATEGIES, LAB_BY_CODE, LAB_BY_ID, LAB_TRACK, LAB_MAKER_TRACK, BT_NET_PCT_PER_TRADE, type LabStrategy } from './lab-registry.js';
+import { ALL_LAB_STRATEGIES, LAB_BY_CODE, LAB_BY_ID, LAB_TRACK, LAB_MAKER_TRACK, BT_NET_PCT_PER_TRADE, BT_MAXDD_PCT, type LabStrategy } from './lab-registry.js';
 import { labGateVerdict } from '../lib/lab-gate.js';
+import { allocatePortfolio, portfolioSummary } from '../lib/portfolio.js';
 
 const trackOf = (s: LabStrategy): string => s.track ?? LAB_TRACK;
 
@@ -160,6 +161,7 @@ function renderLabList(): string {
     </div>
     <style>${LAB_CSS}</style>
     ${LAB_BANNER}
+    <div style="margin:0 0 16px"><a class="lab-row" style="display:inline-block;padding:10px 14px" href="/lab/portfolio">💼 План сайзинга портфеля (риск-паритет + кластер-кэп) →</a></div>
     ${body}
     `,
     { autoRefreshSec: 60 },
@@ -266,7 +268,84 @@ function renderLabDetail(s: LabStrategy): string {
   );
 }
 
+const PORTFOLIO_CAP = 10_000; // reference deployable capital for the $ column
+
+/** Portfolio sizing plan: risk-parity (1/DD) + cluster cap, over all lab
+ *  candidates. Real deployment would include only forward-confirmed
+ *  (gate=ready) strategies — flagged below. */
+function renderLabPortfolio(): string {
+  const clusterOf = (s: LabStrategy): string => familyOf(s);
+  const items = ALL_LAB_STRATEGIES.map((s) => ({ id: s.code, cluster: clusterOf(s), riskPct: BT_MAXDD_PCT[s.code] ?? 20 }));
+  const alloc = allocatePortfolio(items, { clusterCap: 0.35 });
+  const wById = new Map(alloc.map((a) => [a.id, a.weight]));
+  const stats: Record<string, { expectancyPct: number; riskPct: number }> = {};
+  for (const s of ALL_LAB_STRATEGIES) stats[s.code] = { expectancyPct: BT_NET_PCT_PER_TRADE[s.code] ?? 0, riskPct: BT_MAXDD_PCT[s.code] ?? 20 };
+  const sum = portfolioSummary(alloc, stats);
+
+  const fams = new Map<string, LabStrategy[]>();
+  for (const s of ALL_LAB_STRATEGIES) { const c = clusterOf(s); (fams.get(c) ?? fams.set(c, []).get(c)!).push(s); }
+
+  const blocks = [...fams.entries()].map(([c, list]) => {
+    const cw = list.reduce((a, s) => a + (wById.get(s.code) ?? 0), 0);
+    const head = `<tr class="pf-cl"><td colspan="5"><b>${esc(c)}</b> — ${(cw * 100).toFixed(0)}% · ${usd(cw * PORTFOLIO_CAP)} <span style="color:var(--text-faint);font-weight:400">(кэп кластера 35%)</span></td></tr>`;
+    const rows = list.map((s) => {
+      const w = wById.get(s.code) ?? 0;
+      const g = labGateVerdict({ closed: getStrategyLiveStats(s.id, trackOf(s)).closed, netPct: getStrategyLiveStats(s.id, trackOf(s)).netPnlPct, winRate: null, btNetPctPerTrade: BT_NET_PCT_PER_TRADE[s.code] });
+      return `<tr>
+        <td><a href="/lab/${esc(s.code)}" style="color:var(--text)">${esc(s.code)} ${esc(s.name)}</a> ${g.emoji}</td>
+        <td class="right">−${BT_MAXDD_PCT[s.code] ?? '?'}%</td>
+        <td class="right">${(BT_NET_PCT_PER_TRADE[s.code] ?? 0).toFixed(2)}%</td>
+        <td class="right"><b>${(w * 100).toFixed(1)}%</b></td>
+        <td class="right">${usd(w * PORTFOLIO_CAP)}</td>
+      </tr>`;
+    }).join('');
+    return head + rows;
+  }).join('');
+
+  return pageShell(
+    'Портфель — план сайзинга',
+    `
+    <div class="header">
+      <span class="strat-code">MONEY MANAGEMENT · ПЛАН ПО БЭКТЕСТУ</span>
+      <h1 class="title">Портфель / сайзинг</h1>
+      <p class="subtitle">Риск-паритет (вес ∝ 1/просадка) + кэп кластера 35% · <a href="/lab">← в лабораторию</a></p>
+    </div>
+    <style>${LAB_CSS}
+      .pf-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+      .pf-tbl th{text-align:left;color:var(--text-faint);font-weight:600;padding:7px 8px;border-bottom:1px solid var(--border)}
+      .pf-tbl td{padding:7px 8px;border-bottom:1px solid var(--border)}
+      .pf-tbl td.right,.pf-tbl th.right{text-align:right;font-variant-numeric:tabular-nums}
+      .pf-tbl tr.pf-cl td{background:var(--accent-soft);border-top:1px solid var(--border)}
+      .pf-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0}
+      @media(max-width:560px){.pf-cards{grid-template-columns:1fr}}
+    </style>
+    <div class="lab-banner">
+      <span class="lab-pill">💼 ПЛАН</span>
+      Как распределить капитал по найденным краям: <b>равный риск</b> (тугая стратегия → больше денег, дикая → меньше)
+      и <b>лимит на кластер 35%</b> (коррелированные края = одна ставка, не N). Числа — по бэктесту;
+      в реальный запуск идут только <b>подтверждённые форвардом</b> (✅ в гейте). Капитал-пример: ${usd(PORTFOLIO_CAP)}.
+    </div>
+    <div class="pf-cards">
+      <div class="stat-card"><div class="stat-label">Кластеров (диверсификация)</div><div class="stat-value">${sum.clusters}</div></div>
+      <div class="stat-card"><div class="stat-label">Средневзв. просадка</div><div class="stat-value neg">−${sum.weightedRiskPct}%</div></div>
+      <div class="stat-card"><div class="stat-label">Средневзв. эдж</div><div class="stat-value pos">${sum.weightedExpectancyPct.toFixed(2)}%/сделку</div></div>
+    </div>
+    <div class="card table-wrap"><table class="pf-tbl">
+      <thead><tr><th>Стратегия</th><th class="right">Просадка</th><th class="right">Эдж/сд</th><th class="right">Вес</th><th class="right">$ из ${usd(PORTFOLIO_CAP)}</th></tr></thead>
+      <tbody>${blocks}</tbody>
+    </table></div>
+    `,
+    {},
+  );
+}
+
 export async function labRoute(app: FastifyInstance): Promise<void> {
+  app.get('/lab/portfolio', async (_req, reply) => {
+    reply.type('text/html; charset=utf-8');
+    reply.header('Cache-Control', 'public, max-age=60');
+    return renderLabPortfolio();
+  });
+
   app.get('/lab', async (_req, reply) => {
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'public, max-age=30');
