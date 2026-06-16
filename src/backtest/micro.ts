@@ -27,25 +27,29 @@ export type MicroAligned = {
   imb: (number | null)[];
   /** total liquidation volume in the bar (base units) */
   liq: (number | null)[];
+  /** aggressive BUY volume in the bar (taker buys) */
+  buyVol: (number | null)[];
+  /** aggressive SELL volume in the bar (taker sells) */
+  sellVol: (number | null)[];
   /** fraction of candles that have ANY micro data */
   coverage: number;
   /** count of candles with micro data */
   withData: number;
 };
 
-type MicroRow = { ts: number; cvd_delta: number; oi: number | null; funding: number | null; book_imb: number | null; liq_vol: number | null };
+type MicroRow = { ts: number; cvd_delta: number; buy_vol: number | null; sell_vol: number | null; oi: number | null; funding: number | null; book_imb: number | null; liq_vol: number | null };
 
 /** Load + aggregate hl_micro for `coin` (HL bare name, e.g. 'BTC'), aligned to
  *  `candles` (whose .t is the bar-open ms) at timeframe `tf` minutes. */
 export function loadMicroAligned(coin: string, tf: string, candles: Candle[]): MicroAligned {
   const n = candles.length;
-  const out: MicroAligned = { cvd: Array(n).fill(null), cvdCum: Array(n).fill(null), oi: Array(n).fill(null), dOi: Array(n).fill(null), funding: Array(n).fill(null), imb: Array(n).fill(null), liq: Array(n).fill(null), coverage: 0, withData: 0 };
+  const out: MicroAligned = { cvd: Array(n).fill(null), cvdCum: Array(n).fill(null), oi: Array(n).fill(null), dOi: Array(n).fill(null), funding: Array(n).fill(null), imb: Array(n).fill(null), liq: Array(n).fill(null), buyVol: Array(n).fill(null), sellVol: Array(n).fill(null), coverage: 0, withData: 0 };
   if (n === 0) return out;
   const tfMs = Number(tf) * 60_000;
   const from = candles[0]!.t;
   const to = candles[n - 1]!.t + tfMs;
   const rows = db.prepare<[string, number, number], MicroRow>(
-    `SELECT ts, cvd_delta, oi, funding, book_imb, liq_vol FROM hl_micro WHERE coin = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
+    `SELECT ts, cvd_delta, buy_vol, sell_vol, oi, funding, book_imb, liq_vol FROM hl_micro WHERE coin = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
   ).all(coin, from, to);
   if (rows.length === 0) return out;
 
@@ -54,11 +58,13 @@ export function loadMicroAligned(coin: string, tf: string, candles: Candle[]): M
   let cum = 0; let cumStarted = false; let prevOi: number | null = null;
   for (let i = 0; i < n; i++) {
     const start = candles[i]!.t; const end = start + tfMs;
-    let cvdSum = 0; let imbSum = 0; let imbCnt = 0; let liqSum = 0; let lastOi: number | null = null; let lastFund: number | null = null; let any = false;
+    let cvdSum = 0; let imbSum = 0; let imbCnt = 0; let liqSum = 0; let buyVSum = 0; let sellVSum = 0; let flowAny = false; let lastOi: number | null = null; let lastFund: number | null = null; let any = false;
     while (ri < rows.length && rows[ri]!.ts < start) ri++; // skip rows before this bar (gaps)
     while (ri < rows.length && rows[ri]!.ts < end) {
       const r = rows[ri]!;
       cvdSum += r.cvd_delta; any = true;
+      if (r.buy_vol != null) { buyVSum += r.buy_vol; flowAny = true; }
+      if (r.sell_vol != null) { sellVSum += r.sell_vol; flowAny = true; }
       if (r.oi != null) lastOi = r.oi;
       if (r.funding != null) lastFund = r.funding;
       if (r.book_imb != null) { imbSum += r.book_imb; imbCnt++; }
@@ -68,6 +74,8 @@ export function loadMicroAligned(coin: string, tf: string, candles: Candle[]): M
     if (!any) continue;
     out.withData++;
     out.liq[i] = Math.round(liqSum * 1e4) / 1e4;
+    out.buyVol[i] = flowAny ? Math.round(buyVSum * 1e4) / 1e4 : null;
+    out.sellVol[i] = flowAny ? Math.round(sellVSum * 1e4) / 1e4 : null;
     out.cvd[i] = Math.round(cvdSum * 1e4) / 1e4;
     cum += cvdSum; cumStarted = true; out.cvdCum[i] = Math.round(cum * 1e4) / 1e4;
     out.oi[i] = lastOi;
