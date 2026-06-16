@@ -48,7 +48,7 @@ function runPrint(c: Candle[], cvd: (number | null)[], buyV: (number | null)[], 
   let i = 250;
   while (i < n - 1) {
     const cv = cvd[i]; const aa = absAvg[i];
-    if (cv == null || !(aa > 0) || Math.abs(cv) < cfg.cvdK * aa) { i++; continue; }   // not a CVD climax
+    if (cv == null || !(aa! > 0) || Math.abs(cv) < cfg.cvdK * aa!) { i++; continue; }   // not a CVD climax
     const bv = buyV[i]; const sv = sellV[i];
     if (bv == null || sv == null || bv + sv <= 0) { i++; continue; }
     const sellFrac = sv / (bv + sv);
