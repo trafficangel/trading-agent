@@ -25,7 +25,7 @@ COINSET = set(COINS)
 BUCKET, REGION, DB = "hydromancer-reservoir", "ap-northeast-1", "data/trading.sqlite"
 TMPDIR = "data/_tmp_reservoir"
 MIN = 60_000
-WORKERS = 8
+WORKERS = 3
 MODE = "all"
 
 _s3 = _pa = _pq = _pc = _coinarr = None
@@ -65,7 +65,7 @@ def process_day(date):
             parts = []
             try:
                 pf = pq.ParquetFile(tf.name)
-                for batch in pf.iter_batches(columns=["coin", "side", "size", "timestamp", "crossed"], batch_size=2_000_000):
+                for batch in pf.iter_batches(columns=["coin", "side", "size", "timestamp", "crossed"], batch_size=400_000):
                     bt = pa.Table.from_batches([batch])
                     mask = pc.and_(pc.is_in(bt["coin"], value_set=_coinarr), pc.fill_null(bt["crossed"], False))
                     parts.append(bt.filter(mask))

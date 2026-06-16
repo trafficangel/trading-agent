@@ -126,3 +126,42 @@ export function bookImbalance(symbol: string, tf: string, micro: MicroAligned, i
     },
   };
 }
+
+/**
+ * CVD-EXHAUSTION LIQUIDATION-CLIMAX FADE (1m event-driven). The prior taker
+ * liqCascadeFade died OOS because it fired on EVERY liq spike — including
+ * cascades still FEEDING. The fix is a SEQUENTIAL two-minute pattern bars can't
+ * express: a CLIMAX minute k (liq ≫ avg AND |CVD| ≫ avg) followed within
+ * `lookback` minutes by an EXHAUSTION minute i (liq back to normal AND |CVD|
+ * collapsed AND no new price extreme) = the forced flow is DONE → fade it.
+ * Rare + multi-R → taker cost negligible. Run at tf='1' on liq+cvd (both in the
+ * loader). Exit via the engine time/atr+time stop.
+ */
+export function cvdExhaustionFade(symbol: string, tf: string, micro: MicroAligned, liqK = 5, cvdK = 4, W = 240, exhLiqK = 1.5, exhCvdFrac = 0.5, lookback = 3, slPct = 0.08): CustomStrategy {
+  const liqAvg = rollMean(micro.liq, W);
+  const cvdAbsAvg = rollMean(micro.cvd.map((v) => (v == null ? null : Math.abs(v))), W);
+  return {
+    id: `cvdexh${liqK}_${cvdK}_${Math.round(exhCvdFrac * 100)}-${symbol}-${tf}`, code: 'cvdexh', name: `${symbol} CVD-Exhaustion Fade`, symbol, timeframe: tf, slPct, warmup: W + lookback + 1,
+    description: `Fade a liq+CVD climax (${liqK}×/${cvdK}×) confirmed by an exhaustion minute (liq<${exhLiqK}×, |CVD|<${exhCvdFrac}× climax), no new extreme — time-stop exit`,
+    decide(c, i, pos): Signal {
+      if (pos !== null) return null;
+      const cvI = micro.cvd[i]; const lqI = micro.liq[i];
+      if (cvI == null || lqI == null || liqAvg[i] == null) return null;
+      for (let k = i - 1; k >= i - lookback; k--) {                          // look back for the CLIMAX minute
+        const cvK = micro.cvd[k]; const lqK = micro.liq[k];
+        if (cvK == null || lqK == null || cvdAbsAvg[k] == null || liqAvg[k] == null) continue;
+        const climax = lqK >= liqK * liqAvg[k]! && Math.abs(cvK) >= cvdK * cvdAbsAvg[k]!;
+        if (!climax) continue;
+        const exhausted = lqI < exhLiqK * liqAvg[i]! && Math.abs(cvI) < exhCvdFrac * Math.abs(cvK);
+        if (!exhausted) continue;
+        if (cvK < 0) {                                                        // down-cascade (forced selling)
+          if (c[i]!.l < c[k]!.l) continue;                                    // still making new lows → not done
+          return 'long';
+        }
+        if (c[i]!.h > c[k]!.h) continue;                                      // up-cascade still extending
+        return 'short';
+      }
+      return null;
+    },
+  };
+}
