@@ -27,6 +27,7 @@ import { startRecoveryMonitorJob } from './jobs/recovery-monitor.js';
 import { startCustomRunner } from './jobs/custom-runner.js';
 import { startMakerRunner } from './jobs/maker-runner.js';
 import { startWebhookWatchdog } from './jobs/webhook-watchdog.js';
+import { startHlCollector } from './jobs/hl-collector.js';
 // Phase G — money-back guarantee disabled, see start-job line below.
 // import { startPnlGuaranteeMonthlyJob } from './jobs/pnl-guarantee-monthly.js';
 import { sendMessage } from './telegram/bot.js';
@@ -224,6 +225,10 @@ async function main(): Promise<void> {
   // Watchdog: alert if LuxAlgo webhooks go silent (>18h) — catches an
   // upstream outage in an hour instead of days.
   startWebhookWatchdog();
+  // Hyperliquid microstructure collector: WS trades→CVD + per-min OI/funding/
+  // book → hl_micro. Forward-collects the data the order-flow strategies need
+  // (no REST history on HL). Isolated; no orders, no Telegram.
+  startHlCollector();
   // Phase G — money-back guarantee disabled per operator decision.
   // Cron registration commented out, DB columns + repo helpers preserved
   // so it can be re-enabled later without re-migrating. UI mentions
