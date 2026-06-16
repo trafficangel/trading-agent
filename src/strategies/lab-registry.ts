@@ -115,29 +115,13 @@ export const LAB_STRATEGIES: LabStrategy[] = [
     'Та же конфигурация Боллинджер-MR(20,2)+EMA200 на BTC 4h. Добавлена после HL-пересвипа: семейство переподтвердилось на 7/10 монет, BTC — чистый новый выживший (3/4 walk-forward фолда, +33% нетто, просадка 14.6%, баланс IS/OOS). На 4h комиссия почти не влияет → market-раннер. SL 6% предварительный (BTC наименее волатилен из мейджоров), требует MAE-аудита перед промоушеном.'),
 ];
 
-// ── MAKER book — low-TF (5m) mean-reversion edges that are net-negative at
-// taker but positive at maker fees. Found via the new-family sweep + verified
-// cross-symbol (Keltner +EMA200 @5m survived 8/10 coins; z-score(50) @5m on 4
-// majors), low DD (5-10%), WR ~70%. Driven by the maker-runner (rests a limit
-// at the band, fills on touch), track='lab-maker', net of maker commission.
+// ── MAKER book. The 5m MR book (former M01–M08, Keltner/z-score @5m) was CULLED
+// (Jun 16): it backtested 8/10 coins but FORWARD-PAPER it bled (~67 closed — SOL
+// 1/9 WR −10%, ADA −7, XRP −6.3, broadly net-negative). The bar-touch fill model
+// overstated 5m maker fills; the edge didn't materialize live. Kept the 1h maker
+// below (slower → far less fill-fragile). track='lab-maker', net of maker commission.
 export const MAKER_LAB_STRATEGIES: LabStrategy[] = [
-  labMaker(keltnerMr('ADAUSDT', '5', 20, 10, 2, 200, 0.08), 'M01', 'ADA Keltner-MR 5m (maker)',
-    'Откуп от канала Кельтнера (EMA20±2·ATR10) по тренду EMA200 на 5m, выход у средней — лимитками. Найдена в свипе новых семейств, прошла кросс-символьную проверку (8/10 монет), PF 1.74, просадка −6%, WR 72%. Реализуется ТОЛЬКО maker (на taker ≈ ноль).'),
-  labMaker(keltnerMr('LTCUSDT', '5', 20, 10, 2, 200, 0.08), 'M02', 'LTC Keltner-MR 5m (maker)',
-    'Тот же Keltner-MR на LTC — 4/4 walk-forward фолда, просадка −8%. Часть обобщающегося 5m maker-края.'),
-  labMaker(keltnerMr('SOLUSDT', '5', 20, 10, 2, 200, 0.08), 'M03', 'SOL Keltner-MR 5m (maker)',
-    'Keltner-MR на SOL — 3/4 фолда, просадка −5%.'),
-  labMaker(keltnerMr('XRPUSDT', '5', 20, 10, 2, 200, 0.08), 'M04', 'XRP Keltner-MR 5m (maker)',
-    'Keltner-MR на XRP — 4/4 фолда, просадка −5%.'),
-  labMaker(zscoreMr('ETHUSDT', '5', 50, 2, 200, 0.08), 'M05', 'ETH Z-score-MR 5m (maker)',
-    'Возврат к средней по z-score(50) ±2σ по тренду EMA200 на 5m, лимитками. Кросс-символьно чист на мейджорах: 4/4 фолда, PF 1.55, просадка −5%, WR 77%.'),
-  labMaker(zscoreMr('LTCUSDT', '5', 50, 2, 200, 0.08), 'M06', 'LTC Z-score-MR 5m (maker)',
-    'Z-score-MR на LTC — 4/4 фолда, PF 1.84, просадка всего −3.7%, WR 77%. Самый чистый профиль набора.'),
-  labMaker(zscoreMr('BTCUSDT', '5', 50, 2, 200, 0.08), 'M07', 'BTC Z-score-MR 5m (maker)',
-    'Z-score-MR на BTC — 4/4 фолда, PF 1.64, просадка −4.6%.'),
-  labMaker(zscoreMr('BNBUSDT', '5', 50, 2, 200, 0.08), 'M08', 'BNB Z-score-MR 5m (maker)',
-    'Z-score-MR на BNB — 3/4 фолда, PF 1.33, просадка −10%.'),
-  // ── 1h MAKER MR — the HL re-sweep's best NEW edge (Jun 15). Same Keltner /
+  // ── 1h MAKER MR — the HL re-sweep's best NEW edge (Jun 15). Keltner /
   // z-score reversion as M01-M08 but on 1h, not 5m — far more practical (fewer
   // trades, less noise, much less fill-model risk than 5m). Cross-symbol
   // walk-forward at HL maker: Keltner-1h ROBUST 5/10, z-score-1h 4/10. Only the
