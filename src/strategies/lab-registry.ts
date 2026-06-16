@@ -36,6 +36,10 @@ export const LAB_MAKER_TRACK = 'lab-maker';
 /** Maker round-trip commission used for the maker book's net PnL — HL maker
  *  ×2 as an honest cushion for fill-risk (real maker ≈ 0.02% RT). */
 export const LAB_MAKER_COMMISSION_RT_PCT = 0.04;
+/** Taker round-trip commission for the MARKET lab book (custom-runner places
+ *  market orders). HL taker ≈ 0.07% RT — the lab is HL-oriented, so it nets at
+ *  HL fees, NOT the Bybit 0.11% the live copytrading product pays. */
+export const LAB_COMMISSION_RT_PCT = 0.07;
 const LAB_LAUNCH = Date.parse('2026-06-14T00:00:00Z');
 
 // Helper: take a family factory's CustomStrategy and stamp lab identity.

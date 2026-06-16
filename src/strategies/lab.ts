@@ -225,7 +225,7 @@ function renderLabDetail(s: LabStrategy): string {
     : '';
 
   const statsBlock = ex.closed > 0
-    ? renderLiveStatsBlock(live, ex, isMaker ? '0.04% maker (HL)' : '0.11%')
+    ? renderLiveStatsBlock(live, ex, isMaker ? '0.04% maker (HL)' : '0.07% taker (HL)')
     : `<div class="card"><div class="card-body"><div class="empty-state" style="padding:24px 0;">
          ⏳ Бумажная торговля запущена, ждём ${isMaker ? 'заполнения лимитки' : 'первого сигнала стратегии'}.<br/>
          <span style="font-size:12px;color:var(--text-faint);">Движок проверяет рынок на каждом закрытии бара (${esc(s.timeframe)}m). Обновляется автоматически.</span>

@@ -1,11 +1,14 @@
 import { db } from '../db/client.js';
 import { TRACK_C_NOTIONAL_USD, TRACK_C_COMMISSION_RT_PCT } from './track-c-config.js';
-import { LAB_MAKER_TRACK, LAB_MAKER_COMMISSION_RT_PCT } from './lab-registry.js';
+import { LAB_TRACK, LAB_MAKER_TRACK, LAB_MAKER_COMMISSION_RT_PCT, LAB_COMMISSION_RT_PCT } from './lab-registry.js';
 
-/** Round-trip commission to net out, per execution track. The maker lab
- *  book pays maker fees (~0.04% RT), not the Bybit taker 0.11%. */
+/** Round-trip commission to net out, per execution track. The lab is
+ *  HL-oriented → HL fees: maker book ~0.04% RT, market book ~0.07% taker.
+ *  The live copytrading product (track 'strategy') pays Bybit 0.11%. */
 function commissionForTrack(track: string): number {
-  return track === LAB_MAKER_TRACK ? LAB_MAKER_COMMISSION_RT_PCT : TRACK_C_COMMISSION_RT_PCT;
+  if (track === LAB_MAKER_TRACK) return LAB_MAKER_COMMISSION_RT_PCT;
+  if (track === LAB_TRACK) return LAB_COMMISSION_RT_PCT;
+  return TRACK_C_COMMISSION_RT_PCT;
 }
 
 /**
@@ -176,6 +179,9 @@ export type StrategyEquityExtras = {
   longNetUsd: number;  longNetPct: number;  longCount: number;
   shortNetUsd: number; shortNetPct: number; shortCount: number;
   commissionPaidUsd: number;
+  /** Round-trip commission % actually netted out (track-aware): HL maker 0.04 /
+   *  HL taker 0.07 / Bybit 0.11. Drives the honest commission-card label. */
+  commissionRtPct: number;
 };
 
 const equityRowsStmt = db.prepare<[string, string], { pnl_pct: number; side: string | null }>(`
@@ -198,6 +204,7 @@ export function getStrategyEquityExtras(strategyId: string, track = 'strategy'):
     longNetUsd: 0, longNetPct: 0, longCount: 0,
     shortNetUsd: 0, shortNetPct: 0, shortCount: 0,
     commissionPaidUsd: 0,
+    commissionRtPct: C,
   };
   if (rows.length === 0) return out;
 

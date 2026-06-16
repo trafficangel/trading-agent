@@ -4329,7 +4329,7 @@ export function renderLiveStatsBlock(live: StrategyLiveStats, ex: StrategyEquity
       <div class="stat-card">
         <div class="stat-label">Комиссия уплачено</div>
         <div class="stat-value">${fmtUsd(ex.commissionPaidUsd)}</div>
-        <div class="stat-sub">0.110% round-trip × ${ex.closed}</div>
+        <div class="stat-sub">${ex.commissionRtPct.toFixed(3)}% round-trip × ${ex.closed}</div>
       </div>
     </div>
 
