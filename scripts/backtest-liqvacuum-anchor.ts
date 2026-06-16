@@ -38,12 +38,13 @@ function rollMean(a: (number | null)[], W: number): number[] {
 
 type Cfg = { sig: string; core: string; mode: 'fixed' | 'anchor'; liqK: number; d: number; tgt: number; capTgt: number; minTgt: number; sl: number; ttl: number; hold: number; velBars: number; velThr: number };
 const CFGS: Cfg[] = [];
-// baseline (fixed tgt) — reproduces backtest-liqvacuum.ts
-for (const liqK of [4, 6]) for (const d of [0.002, 0.004]) for (const tgt of [0.004, 0.006]) for (const velThr of [0.005, 0.008])
+// baseline (fixed tgt) — WIDE grid incl. big targets {0.4,0.6,1.0,1.4%} to disentangle
+// "anchor mechanism" from "we just never tried a big enough fixed target".
+for (const liqK of [4, 6]) for (const d of [0.002, 0.004]) for (const tgt of [0.004, 0.006, 0.010, 0.014]) for (const velThr of [0.005, 0.008])
   CFGS.push({ sig: `FIX_K${liqK}d${d}t${tgt}v${velThr}`, core: `K${liqK}d${d}v${velThr}`, mode: 'fixed', liqK, d, tgt, capTgt: 0, minTgt: 0, sl: 0.015, ttl: 10, hold: 30, velBars: 3, velThr });
-// anchor (pre-cascade mid) — tgt ignored
-for (const liqK of [4, 6]) for (const d of [0.002, 0.004]) for (const velThr of [0.005, 0.008]) for (const capTgt of [0.008, 0.012]) for (const minTgt of [0.002, 0.003])
-  CFGS.push({ sig: `ANC_K${liqK}d${d}v${velThr}c${capTgt}m${minTgt}`, core: `K${liqK}d${d}v${velThr}`, mode: 'anchor', liqK, d, tgt: 0, capTgt, minTgt, sl: 0.015, ttl: 10, hold: 30, velBars: 3, velThr });
+// anchor (pre-cascade mid, capped) — tgt ignored
+for (const liqK of [4, 6]) for (const d of [0.002, 0.004]) for (const velThr of [0.005, 0.008]) for (const capTgt of [0.008, 0.012, 0.016])
+  CFGS.push({ sig: `ANC_K${liqK}d${d}v${velThr}c${capTgt}`, core: `K${liqK}d${d}v${velThr}`, mode: 'anchor', liqK, d, tgt: 0, capTgt, minTgt: 0.002, sl: 0.015, ttl: 10, hold: 30, velBars: 3, velThr });
 
 /** realized NET % per trade (maker model; fixed or anchored exit). */
 function runVacuum(c: Candle[], liq: (number | null)[], cfg: Cfg): number[] {
@@ -124,22 +125,29 @@ type Row = { sig: string; mode: string; coin: string; n: number; net: number; ne
   }
   writeFileSync('data/liqvacuum-anchor-results.json', JSON.stringify(rows, null, 2));
 
-  const line = (r: Row) => `${r.green ? '✅' : '  '} ${r.coin.padEnd(5)} N${String(r.n).padStart(4)} net ${String(r.net).padStart(6)} +cost ${String(r.net2).padStart(6)} PF ${String(r.pf).padStart(5)} WR ${String(r.wr).padStart(2)}% DD-${String(r.dd).padStart(5)} f${r.folds}/4 IS/OOS ${r.isN}/${r.oosN}`;
-  const robustBy = (mode: string) => { const m = new Map<string, Row[]>(); for (const r of rows.filter((x) => x.mode === mode)) { const a = m.get(r.sig) ?? []; a.push(r); m.set(r.sig, a); } return [...m.entries()].map(([sig, rs]) => ({ sig, greens: rs.filter((r) => r.green).map((r) => r.coin).sort(), rs })).filter((x) => x.greens.length >= 4).sort((a, b) => b.greens.length - a.greens.length); };
-
-  const fixR = robustBy('fixed'); const ancR = robustBy('anchor');
-  const fixBest = fixR[0]?.greens.length ?? 0; const fixCoins = new Set(fixR.flatMap((x) => x.greens));
-  console.log('===== A/B: ANCHORED EXIT vs FIXED-tgt baseline =====');
-  console.log(`  fixed baseline: best robust ${fixBest}/10 ${fixR[0] ? `(${fixR[0].sig} {${fixR[0].greens.join(',')}})` : '— none robust —'}`);
-  console.log(`  anchor: ${ancR.length} robust configs (green>=4):`);
-  if (!ancR.length) console.log('    — none robust —');
-  for (const x of ancR.slice(0, 6)) { const added = x.greens.filter((c) => !fixCoins.has(c)); console.log(`    ${x.sig.padEnd(30)} {${x.greens.join(',')}}${added.length ? ` +[${added.join(',')}]` : ''}`); }
+  // PER-COIN best-of: does anchor beat the BEST fixed target (incl. the wide 1.0/1.4%)?
+  const coins = [...new Set(rows.map((r) => r.coin))].sort();
+  const best = (rs: Row[]) => { const g = rs.filter((r) => r.green); const pool = g.length ? g : rs; return pool.sort((a, b) => b.net2 - a.net2)[0]; }; // max +cost
+  console.log('===== PER-COIN best-of: FIXED (incl. wide tgt) vs ANCHOR =====');
+  console.log('  coin   | fixed  best: net/+cost (cfg)               | anchor best: net/+cost (cfg)');
+  let fixGreen = 0, ancGreen = 0; const ancRescues: string[] = []; const fixWideGreen: string[] = [];
+  for (const coin of coins) {
+    const bf = best(rows.filter((r) => r.mode === 'fixed' && r.coin === coin));
+    const ba = best(rows.filter((r) => r.mode === 'anchor' && r.coin === coin));
+    if (bf?.green) { fixGreen++; fixWideGreen.push(coin); }
+    if (ba?.green) ancGreen++;
+    if (ba?.green && !bf?.green) ancRescues.push(coin); // anchor green where NO fixed target (any width) is green
+    const f = bf ? `${bf.green ? '✅' : '  '} ${String(bf.net).padStart(6)}/${String(bf.net2).padStart(6)} N${bf.n} (${bf.sig.replace('FIX_', '')})` : '—';
+    const a = ba ? `${ba.green ? '✅' : '  '} ${String(ba.net).padStart(6)}/${String(ba.net2).padStart(6)} N${ba.n} (${ba.sig.replace('ANC_', '')})` : '—';
+    console.log(`  ${coin.padEnd(6)} | ${f.padEnd(44)} | ${a}`);
+  }
   console.log('\n===== VERDICT =====');
-  const beats = ancR.find((x) => x.greens.length > fixBest || x.greens.some((c) => !fixCoins.has(c)));
-  if (beats) { const added = beats.greens.filter((c) => !fixCoins.has(c)); console.log(`  ✓ CANDIDATE PASS (this window) — ${beats.sig}: ${beats.greens.length}/10 {${beats.greens.join(',')}}${added.length ? `, adds [${added.join(',')}] vs fixed` : `, beats fixed count ${fixBest}`}.`); console.log('  → confirm on the second window before believing it.'); }
-  else console.log(`  ✗ KILL — anchored exit does NOT beat fixed-tgt on survivor count or add a new coin (best anchor ${ancR[0]?.greens.length ?? 0} vs fixed ${fixBest}).`);
+  console.log(`  green coins — best-fixed (wide grid incl. 1.0/1.4%): ${fixGreen}/10 {${fixWideGreen.join(',')}}  |  anchor: ${ancGreen}/10`);
+  if (ancRescues.length) console.log(`  anchor uniquely rescues (green where NO fixed target is): {${ancRescues.join(',')}} → anchor MECHANISM adds value beyond a bigger target.`);
+  else console.log(`  anchor rescues NO coin that a wide fixed target doesn't already get → the rescue is "bigger target", NOT the anchor mechanism. Prefer the simpler fixed-tgt.`);
+  console.log(`  cross-symbol bar = >=4 green coins. ${Math.max(fixGreen, ancGreen) >= 4 ? '✓ REACHED' : `✗ NOT reached (best ${Math.max(fixGreen, ancGreen)}/10) — narrow edge.`}`);
 
-  console.log('\n===== green rows (detail) =====');
-  for (const mode of ['fixed', 'anchor']) { const gr = rows.filter((r) => r.mode === mode && r.green); if (gr.length) { console.log(`\n  ◆ ${mode} → ${gr.length} green`); console.log(gr.sort((a, b) => b.net - a.net).slice(0, 12).map(line).join('\n')); } }
+  console.log('\n===== green rows (detail, dedup by coin+net) =====');
+  for (const mode of ['fixed', 'anchor']) { const gr = rows.filter((r) => r.mode === mode && r.green); const seen = new Set<string>(); const uniq = gr.filter((r) => { const k = `${r.coin}:${r.net}`; if (seen.has(k)) return false; seen.add(k); return true; }); if (uniq.length) { console.log(`\n  ◆ ${mode} → ${uniq.length} unique green`); console.log(uniq.sort((a, b) => b.net2 - a.net2).map((r) => `${r.green ? '✅' : '  '} ${r.coin.padEnd(5)} ${r.sig.replace(/^(FIX|ANC)_/, '').padEnd(22)} N${String(r.n).padStart(4)} net ${String(r.net).padStart(6)} +cost ${String(r.net2).padStart(6)} PF ${String(r.pf).padStart(5)} WR ${String(r.wr).padStart(2)}% DD-${String(r.dd).padStart(5)} f${r.folds}/4 IS/OOS ${r.isN}/${r.oosN}`).join('\n')); } }
   console.log('\n(+cost = survives an EXTRA maker+taker RT.) Full → data/liqvacuum-anchor-results.json');
 })().catch((e) => { console.error(e); process.exit(1); });
