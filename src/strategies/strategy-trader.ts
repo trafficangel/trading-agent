@@ -22,6 +22,7 @@ import {
 } from './track-c-config.js';
 import { fanOutEntry, fanOutExit } from './user-fanout.js';
 import { evaluateEntryRisk, alertRiskBlock } from './risk-control.js';
+import { setRuntimeConfig } from '../db/repos/runtime-config.js';
 
 /**
  * Track C — LuxAlgo AI Strategy Builder webhook trader.
@@ -194,6 +195,17 @@ async function handleStrategyEntry(
   if (side !== 'long' && side !== 'short') {
     logger.warn({ strategy_id: p.strategy_id, derivedSide }, 'strategy-trader: missing side on entry');
     return { ok: false, reason: 'missing_side' };
+  }
+
+  // Silence-watchdog heartbeat: record that an entry webhook for an enabled
+  // strategy ARRIVED — BEFORE the dedup/risk gate. A risk-blocked entry writes
+  // no shadow decision, so without this marker the watchdog can't tell "LuxAlgo
+  // went dark" from "our circuit-breaker/probation is suppressing entries".
+  // Must never break the trading path → swallow any write error.
+  try {
+    setRuntimeConfig('last_strategy_entry_seen', String(Date.now()), 'webhook-watchdog heartbeat');
+  } catch (err) {
+    logger.warn({ err }, 'strategy-trader: webhook heartbeat write failed');
   }
 
   // Webhook idempotency. TradingView retries on network glitch / our
