@@ -21,8 +21,19 @@
  * Leverage 2x is the conservative START (portfolio-sim safe ceiling ~3x @ DD≤20%).
  */
 import { logger } from '../lib/logger.js';
+import { config } from '../config.js';
 import { allocatePortfolio } from '../lib/portfolio.js';
 import { BT_MAXDD_PCT, type LabStrategy } from './lab-registry.js';
+import { placeMarketOrder, setLeverage, fetchPosition, type Creds } from '../exchange/bybit-private.js';
+import { roundQtyToStep, getInstrumentInfo } from '../exchange/bybit-public.js';
+
+/** Operator's own Bybit creds for the bridge (endpoint follows BYBIT_USE_TESTNET).
+ *  Null if not configured → testnet/live modes refuse to place. */
+function operatorCreds(): Creds | null {
+  const apiKey = config.BYBIT_OPERATOR_API_KEY;
+  const apiSecret = config.BYBIT_OPERATOR_API_SECRET;
+  return apiKey && apiSecret ? { apiKey, apiSecret } : null;
+}
 
 export type LabLiveMode = 'off' | 'dryrun' | 'testnet' | 'live';
 
@@ -65,27 +76,46 @@ function sizeFor(code: string, price: number): { notional: number; qty: number; 
   return { notional, qty: notional / price, weight };
 }
 
-export async function labLiveOnOpen(s: LabStrategy, side: 'long' | 'short', entry: number): Promise<void> {
+export async function labLiveOnOpen(s: LabStrategy, side: 'long' | 'short', entry: number, barTime: number): Promise<void> {
   if (!isLabLive(s.code)) return;
-  const { notional, qty, weight } = sizeFor(s.code, entry);
+  const { notional, qty: rawQty, weight } = sizeFor(s.code, entry);
   const sl = side === 'long' ? entry * (1 - s.slPct) : entry * (1 + s.slPct);
   if (LAB_LIVE.mode === 'dryrun') {
     logger.warn(
-      { code: s.code, symbol: s.symbol, side, entry: +entry.toFixed(6), sl: +sl.toFixed(6), notional: +notional.toFixed(2), qty: +qty.toFixed(6), weight: +weight.toFixed(3), lev: LAB_LIVE.leverage },
+      { code: s.code, symbol: s.symbol, side, entry: +entry.toFixed(6), sl: +sl.toFixed(6), notional: +notional.toFixed(2), qty: +rawQty.toFixed(6), weight: +weight.toFixed(3), lev: LAB_LIVE.leverage },
       'LAB-LIVE [dryrun] WOULD OPEN — no order placed',
     );
     return;
   }
-  throw new Error(`LAB-LIVE mode '${LAB_LIVE.mode}' not wired (stage 2) — refusing to place a real order for ${s.code}`);
+  // testnet/live — place a REAL market order with the safety SL attached ATOMICALLY.
+  const creds = operatorCreds();
+  if (!creds) { logger.error({ code: s.code }, '🛑 LAB-LIVE: BYBIT_OPERATOR_API_KEY/SECRET missing — cannot place order'); return; }
+  const qty = await roundQtyToStep(rawQty, s.symbol);
+  const info = await getInstrumentInfo(s.symbol);
+  if (qty <= 0 || (info && qty < info.minOrderQty)) { logger.warn({ code: s.code, qty, min: info?.minOrderQty }, 'LAB-LIVE: qty below min order — skip'); return; }
+  const lev = await setLeverage(creds, s.symbol, LAB_LIVE.leverage);
+  if (!lev.ok) logger.warn({ code: s.code, errCode: lev.code, msg: lev.msg }, 'LAB-LIVE: setLeverage failed (continuing with account default)');
+  const slPx = Number(sl.toPrecision(6));
+  const res = await placeMarketOrder(creds, { symbol: s.symbol, side, qty, stopLoss: slPx, clientOrderId: `lab-${s.code}-${barTime}` });
+  if (!res.ok) { logger.error({ code: s.code, symbol: s.symbol, side, qty, errCode: res.code, msg: res.msg }, '🛑 LAB-LIVE: OPEN order FAILED'); return; }
+  logger.warn({ code: s.code, symbol: s.symbol, side, qty, sl: slPx, notional: +notional.toFixed(0), orderId: res.orderId, mode: LAB_LIVE.mode }, '✅ LAB-LIVE: OPENED real order');
 }
 
-export async function labLiveOnClose(s: LabStrategy, exitPrice: number): Promise<void> {
+export async function labLiveOnClose(s: LabStrategy, exitPrice: number, barTime: number): Promise<void> {
   if (!isLabLive(s.code)) return;
   if (LAB_LIVE.mode === 'dryrun') {
     logger.warn({ code: s.code, symbol: s.symbol, exit: +exitPrice.toFixed(6) }, 'LAB-LIVE [dryrun] WOULD CLOSE — no order placed');
     return;
   }
-  throw new Error(`LAB-LIVE mode '${LAB_LIVE.mode}' not wired (stage 2) — refusing to close a real position for ${s.code}`);
+  const creds = operatorCreds();
+  if (!creds) { logger.error({ code: s.code }, '🛑 LAB-LIVE: creds missing — cannot close'); return; }
+  const p = await fetchPosition(creds, s.symbol);
+  if (!p.ok) { logger.error({ code: s.code, errCode: p.code, msg: p.msg }, '🛑 LAB-LIVE: fetchPosition failed on close'); return; }
+  if (!p.position) { logger.info({ code: s.code }, 'LAB-LIVE: no live position to close (already closed by exchange SL?)'); return; }
+  const closeSide = p.position.side === 'long' ? 'short' : 'long';
+  const res = await placeMarketOrder(creds, { symbol: s.symbol, side: closeSide, qty: p.position.size, reduceOnly: true, clientOrderId: `lab-${s.code}-x-${barTime}` });
+  if (!res.ok) { logger.error({ code: s.code, errCode: res.code, msg: res.msg }, '🛑 LAB-LIVE: CLOSE order FAILED'); return; }
+  logger.warn({ code: s.code, symbol: s.symbol, size: p.position.size, orderId: res.orderId }, '✅ LAB-LIVE: CLOSED real position');
 }
 
 /** Boot summary — logs the deployed set + intended capital split so the sizing is

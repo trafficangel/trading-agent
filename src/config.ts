@@ -75,6 +75,12 @@ const Schema = z.object({
    *  selection lives in src/exchange/bybit-private.ts. */
   BYBIT_USE_TESTNET: envBool(true),
 
+  /** Operator's OWN Bybit key for the lab→live bridge (src/strategies/lab-live.ts).
+   *  Separate from the subscriber fan-out (user_api_keys). Optional — only needed
+   *  when LAB_LIVE.mode is 'testnet'/'live'. Endpoint follows BYBIT_USE_TESTNET. */
+  BYBIT_OPERATOR_API_KEY: z.string().optional(),
+  BYBIT_OPERATOR_API_SECRET: z.string().optional(),
+
   /**
    * Track C — LuxAlgo AI Strategy Builder webhook trader.
    * When true, webhooks with `"kind":"strategy"` get dispatched to

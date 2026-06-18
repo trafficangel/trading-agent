@@ -91,7 +91,7 @@ async function step(s: LabStrategy, nowMs: number): Promise<void> {
     if (slHit) {
       const slPrice = pos.sl;
       closeLab(pos, slPrice, 'sl_hit', 'safety_sl', s.slPct);
-      await labLiveOnClose(s, slPrice); // mirror to the live book (no-op unless deployed + mode!=off)
+      await labLiveOnClose(s, slPrice, bar.t); // mirror to the live book (no-op unless deployed + mode!=off)
       pos = null;
     }
   }
@@ -103,12 +103,12 @@ async function step(s: LabStrategy, nowMs: number): Promise<void> {
     if (sig === 'flat' || (sig !== null && sig !== pos.side)) {
       const flip = sig !== 'flat';
       closeLab(pos, bar.c, 'manual', flip ? 'reverse_signal' : 'strategy_exit', s.slPct);
-      await labLiveOnClose(s, bar.c);
-      if (flip && (sig === 'long' || sig === 'short')) { openLab(s, sig, bar.c, bar.t); await labLiveOnOpen(s, sig, bar.c); }
+      await labLiveOnClose(s, bar.c, bar.t);
+      if (flip && (sig === 'long' || sig === 'short')) { openLab(s, sig, bar.c, bar.t); await labLiveOnOpen(s, sig, bar.c, bar.t); }
     }
   } else if (sig === 'long' || sig === 'short') {
     openLab(s, sig, bar.c, bar.t);
-    await labLiveOnOpen(s, sig, bar.c);
+    await labLiveOnOpen(s, sig, bar.c, bar.t);
   }
 }
 
