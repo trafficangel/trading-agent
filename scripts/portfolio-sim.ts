@@ -38,8 +38,6 @@ const DAY_MS = 86_400_000;
 const clusterOf = (code: string): string =>
   /^M/i.test(code) ? 'mr-1h-maker' : (['L06', 'L07', 'L08', 'L09'].includes(code) ? 'trend' : 'mr-4h');
 
-type Strat = { code: string; cluster: string; dayNet: Map<number, number>; n: number };
-
 function maxDD(equity: number[]): number {
   let peak = equity[0] ?? 1, dd = 0;
   for (const e of equity) { if (e > peak) peak = e; const d = (peak - e) / peak; if (d > dd) dd = d; }
@@ -61,8 +59,11 @@ function corr(a: number[], b: number[]): number {
 }
 
 (async () => {
-  console.log(`Portfolio combined-equity sim · ${ALL_LAB_STRATEGIES.length} lab strategies · ${DAYS}d · TAKER ${FEE_RT}% RT (conservative) · target DD ${TARGET_DD}%\n`);
-  const strats: Strat[] = [];
+  console.log(`Portfolio combined-equity sim (MARK-TO-MARKET) · ${ALL_LAB_STRATEGIES.length} lab strategies · ${DAYS}d · TAKER ${FEE_RT}% RT (conservative) · target DD ${TARGET_DD}%\n`);
+  // Per strategy: daily MARK-TO-MARKET return series (includes UNREALIZED drawdown
+  // of open positions — the realized-only model massively understated DD).
+  type St = { code: string; cluster: string; n: number; dailyRet: Map<number, number> };
+  const strats: St[] = [];
   let minDay = Infinity, maxDay = -Infinity;
   const klCache = new Map<string, Awaited<ReturnType<typeof getKlines>>>();
   for (const s of ALL_LAB_STRATEGIES) {
@@ -71,13 +72,27 @@ function corr(a: number[], b: number[]): number {
     if (!candles) { try { candles = await getKlines(s.symbol, s.timeframe, NOW - DAYS * DAY_MS, NOW); klCache.set(key, candles); } catch (e) { process.stderr.write(`${s.code} ${s.symbol}: ${(e as Error).message}\n`); continue; } }
     if (candles.length < 100) continue;
     const res = runBacktest(s, candles, { kind: 'static', pct: s.slPct });
-    const dayNet = new Map<number, number>();
-    for (const t of res.tradesLog) {
-      const d = Math.floor(t.exitAt / DAY_MS);
-      dayNet.set(d, (dayNet.get(d) ?? 0) + (t.realizedPct - FEE_RT)); // net % on that exit day
-      if (d < minDay) minDay = d; if (d > maxDay) maxDay = d;
+    if (!res.tradesLog.length) continue;
+    // daily close (last candle of each day), forward-filled across the strategy's span
+    const dayClose = new Map<number, number>();
+    for (const c of candles) dayClose.set(Math.floor(c.t / DAY_MS), c.c);
+    const sMin = Math.floor(candles[0]!.t / DAY_MS), sMax = Math.floor(candles[candles.length - 1]!.t / DAY_MS);
+    let last = candles[0]!.c; const closeOf: number[] = [];
+    for (let d = sMin; d <= sMax; d++) { last = dayClose.get(d) ?? last; closeOf[d - sMin] = last; }
+    // mark-to-market cumulative equity (%) per day: realized locked at exit + unrealized of the open trade
+    const trades = res.tradesLog.map((t) => ({ eD: Math.floor(t.entryAt / DAY_MS), xD: Math.floor(t.exitAt / DAY_MS), ep: t.entryPrice, sgn: t.side === 'long' ? 1 : -1, net: t.realizedPct - FEE_RT }));
+    const markEq: number[] = new Array(sMax - sMin + 1).fill(0);
+    let cumReal = 0, ti = 0;
+    for (let d = sMin; d <= sMax; d++) {
+      while (ti < trades.length && trades[ti]!.xD === d) { cumReal += trades[ti]!.net; ti++; } // lock realized at exit
+      const open = trades.find((t) => t.eD <= d && d < t.xD); // single-position strategies → at most one
+      const unreal = open ? ((closeOf[d - sMin]! - open.ep) / open.ep) * open.sgn * 100 : 0;
+      markEq[d - sMin] = cumReal + unreal;
     }
-    strats.push({ code: s.code, cluster: clusterOf(s.code), dayNet, n: res.tradesLog.length });
+    const dailyRet = new Map<number, number>();
+    for (let d = sMin + 1; d <= sMax; d++) dailyRet.set(d, (markEq[d - sMin]! - markEq[d - sMin - 1]!) / 100); // fraction
+    if (sMin < minDay) minDay = sMin; if (sMax > maxDay) maxDay = sMax;
+    strats.push({ code: s.code, cluster: clusterOf(s.code), n: res.tradesLog.length, dailyRet });
   }
   if (!strats.length || !isFinite(minDay)) { console.log('no trades — abort'); return; }
 
@@ -86,14 +101,14 @@ function corr(a: number[], b: number[]): number {
   const w = new Map(alloc.map((a) => [a.id, a.weight]));
   const days = maxDay - minDay + 1;
 
-  // Per-day weighted book return (fraction): r_d = Σ_i w_i · net_i(d)/100
+  // Per-day weighted book return (fraction, mark-to-market).
   const bookDaily: number[] = new Array(days).fill(0);
-  for (const s of strats) { const wi = w.get(s.code) ?? 0; for (const [d, net] of s.dayNet) bookDaily[d - minDay]! += wi * net / 100; }
+  for (const s of strats) { const wi = w.get(s.code) ?? 0; for (const [d, r] of s.dailyRet) bookDaily[d - minDay]! += wi * r; }
   // Per-cluster daily (equal-weight members) for the correlation check.
   const clusterDaily = new Map<string, number[]>();
   for (const cl of new Set(strats.map((s) => s.cluster))) {
     const members = strats.filter((s) => s.cluster === cl); const arr = new Array(days).fill(0);
-    for (const s of members) for (const [d, net] of s.dayNet) arr[d - minDay]! += (net / 100) / members.length;
+    for (const s of members) for (const [d, r] of s.dailyRet) arr[d - minDay]! += r / members.length;
     clusterDaily.set(cl, arr);
   }
 
