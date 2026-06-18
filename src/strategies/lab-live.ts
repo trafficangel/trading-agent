@@ -40,7 +40,20 @@ const _alloc = allocatePortfolio(
   LAB_LIVE.deployed.map((c) => ({ id: c, cluster: clusterOf(c), riskPct: BT_MAXDD_PCT[c] ?? 20 })),
   { clusterCap: 0.5 },
 );
+// Per-strategy cap: risk-parity (1/DD) over-concentrates on the lowest-DD leg
+// (BNB's DD=5 grabs ~38%) — a possibly-underestimated DD shouldn't dominate the book.
+// Clamp each ≤ MAX_PER_STRAT and waterfill the excess to the rest, then it's renormalized.
+const MAX_PER_STRAT = 0.20;
 const WEIGHT = new Map(_alloc.map((a) => [a.id, a.weight]));
+for (let iter = 0; iter < 8; iter++) {
+  const over = [...WEIGHT].filter(([, w]) => w > MAX_PER_STRAT + 1e-9);
+  if (!over.length) break;
+  let excess = 0;
+  for (const [id, w] of over) { excess += w - MAX_PER_STRAT; WEIGHT.set(id, MAX_PER_STRAT); }
+  const under = [...WEIGHT].filter(([, w]) => w < MAX_PER_STRAT - 1e-9);
+  const underSum = under.reduce((a, [, w]) => a + w, 0) || 1;
+  for (const [id, w] of under) WEIGHT.set(id, w + excess * (w / underSum));
+}
 
 export function isLabLive(code: string): boolean {
   return LAB_LIVE.mode !== 'off' && LAB_LIVE.deployed.includes(code);
