@@ -21,6 +21,7 @@ import cron from 'node-cron';
 import { getKlines, intervalStepMs } from '../backtest/klines.js';
 import { LAB_STRATEGIES, LAB_TRACK, type LabStrategy } from '../strategies/lab-registry.js';
 import { insertDecision, forceClose, type CloseReason } from '../db/repos/decisions.js';
+import { labLiveOnOpen, labLiveOnClose, logLabLivePlan } from '../strategies/lab-live.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 
@@ -88,7 +89,9 @@ async function step(s: LabStrategy, nowMs: number): Promise<void> {
   if (pos) {
     const slHit = pos.side === 'long' ? bar.l <= pos.sl : bar.h >= pos.sl;
     if (slHit) {
-      closeLab(pos, pos.sl, 'sl_hit', 'safety_sl', s.slPct);
+      const slPrice = pos.sl;
+      closeLab(pos, slPrice, 'sl_hit', 'safety_sl', s.slPct);
+      await labLiveOnClose(s, slPrice); // mirror to the live book (no-op unless deployed + mode!=off)
       pos = null;
     }
   }
@@ -100,10 +103,12 @@ async function step(s: LabStrategy, nowMs: number): Promise<void> {
     if (sig === 'flat' || (sig !== null && sig !== pos.side)) {
       const flip = sig !== 'flat';
       closeLab(pos, bar.c, 'manual', flip ? 'reverse_signal' : 'strategy_exit', s.slPct);
-      if (flip && (sig === 'long' || sig === 'short')) openLab(s, sig, bar.c, bar.t);
+      await labLiveOnClose(s, bar.c);
+      if (flip && (sig === 'long' || sig === 'short')) { openLab(s, sig, bar.c, bar.t); await labLiveOnOpen(s, sig, bar.c); }
     }
   } else if (sig === 'long' || sig === 'short') {
     openLab(s, sig, bar.c, bar.t);
+    await labLiveOnOpen(s, sig, bar.c);
   }
 }
 
@@ -130,4 +135,5 @@ export function startCustomRunner(): void {
     });
   });
   logger.info({ n: LAB_STRATEGIES.length }, 'lab-runner scheduled (every 1m, paper/track=lab)');
+  logLabLivePlan(); // logs the live-deploy plan + sizing if LAB_LIVE.mode != 'off'
 }
