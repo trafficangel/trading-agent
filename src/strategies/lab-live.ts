@@ -21,19 +21,12 @@
  * Leverage 2x is the conservative START (portfolio-sim safe ceiling ~3x @ DD≤20%).
  */
 import { logger } from '../lib/logger.js';
-import { config } from '../config.js';
 import { allocatePortfolio } from '../lib/portfolio.js';
 import { BT_MAXDD_PCT, type LabStrategy } from './lab-registry.js';
-import { placeMarketOrder, setLeverage, fetchPosition, type Creds } from '../exchange/bybit-private.js';
-import { roundQtyToStep, getInstrumentInfo } from '../exchange/bybit-public.js';
+import { hlSetLeverage, hlMarketOrder, hlClosePosition, hlConfigured } from '../exchange/hyperliquid-private.js';
 
-/** Operator's own Bybit creds for the bridge (endpoint follows BYBIT_USE_TESTNET).
- *  Null if not configured → testnet/live modes refuse to place. */
-function operatorCreds(): Creds | null {
-  const apiKey = config.BYBIT_OPERATOR_API_KEY;
-  const apiSecret = config.BYBIT_OPERATOR_API_SECRET;
-  return apiKey && apiSecret ? { apiKey, apiSecret } : null;
-}
+/** Lab symbols are 'ETHUSDT' etc.; HL uses bare coin names. */
+const hlCoin = (symbol: string): string => symbol.replace('USDT', '');
 
 export type LabLiveMode = 'off' | 'dryrun' | 'testnet' | 'live';
 
@@ -87,35 +80,30 @@ export async function labLiveOnOpen(s: LabStrategy, side: 'long' | 'short', entr
     );
     return;
   }
-  // testnet/live — place a REAL market order with the safety SL attached ATOMICALLY.
-  const creds = operatorCreds();
-  if (!creds) { logger.error({ code: s.code }, '🛑 LAB-LIVE: BYBIT_OPERATOR_API_KEY/SECRET missing — cannot place order'); return; }
-  const qty = await roundQtyToStep(rawQty, s.symbol);
-  const info = await getInstrumentInfo(s.symbol);
-  if (qty <= 0 || (info && qty < info.minOrderQty)) { logger.warn({ code: s.code, qty, min: info?.minOrderQty }, 'LAB-LIVE: qty below min order — skip'); return; }
-  const lev = await setLeverage(creds, s.symbol, LAB_LIVE.leverage);
-  if (!lev.ok) logger.warn({ code: s.code, errCode: lev.code, msg: lev.msg }, 'LAB-LIVE: setLeverage failed (continuing with account default)');
-  const slPx = Number(sl.toPrecision(6));
-  const res = await placeMarketOrder(creds, { symbol: s.symbol, side, qty, stopLoss: slPx, clientOrderId: `lab-${s.code}-${barTime}` });
-  if (!res.ok) { logger.error({ code: s.code, symbol: s.symbol, side, qty, errCode: res.code, msg: res.msg }, '🛑 LAB-LIVE: OPEN order FAILED'); return; }
-  logger.warn({ code: s.code, symbol: s.symbol, side, qty, sl: slPx, notional: +notional.toFixed(0), orderId: res.orderId, mode: LAB_LIVE.mode }, '✅ LAB-LIVE: OPENED real order');
+  // testnet/live — place a REAL order on HYPERLIQUID (Bybit blocks our region) with
+  // the safety SL attached atomically (grouping normalTpsl). Size formatted by the SDK.
+  void barTime;
+  if (!hlConfigured()) { logger.error({ code: s.code }, '🛑 LAB-LIVE: HL_API_WALLET_KEY missing — cannot place order'); return; }
+  const coin = hlCoin(s.symbol);
+  const lev = await hlSetLeverage(coin, LAB_LIVE.leverage);
+  if (!lev.ok) logger.warn({ code: s.code, msg: lev.msg }, 'LAB-LIVE: HL setLeverage failed (continuing with account default)');
+  const res = await hlMarketOrder({ coin, side, qty: rawQty, stopLoss: sl });
+  if (!res.ok) { logger.error({ code: s.code, coin, side, qty: +rawQty.toFixed(6), msg: res.msg }, '🛑 LAB-LIVE: HL OPEN order FAILED'); return; }
+  logger.warn({ code: s.code, coin, side, qty: +rawQty.toFixed(6), sl: +sl.toFixed(6), notional: +notional.toFixed(0), mode: LAB_LIVE.mode }, '✅ LAB-LIVE: HL OPENED real order');
 }
 
 export async function labLiveOnClose(s: LabStrategy, exitPrice: number, barTime: number): Promise<void> {
   if (!isLabLive(s.code)) return;
+  void barTime;
   if (LAB_LIVE.mode === 'dryrun') {
     logger.warn({ code: s.code, symbol: s.symbol, exit: +exitPrice.toFixed(6) }, 'LAB-LIVE [dryrun] WOULD CLOSE — no order placed');
     return;
   }
-  const creds = operatorCreds();
-  if (!creds) { logger.error({ code: s.code }, '🛑 LAB-LIVE: creds missing — cannot close'); return; }
-  const p = await fetchPosition(creds, s.symbol);
-  if (!p.ok) { logger.error({ code: s.code, errCode: p.code, msg: p.msg }, '🛑 LAB-LIVE: fetchPosition failed on close'); return; }
-  if (!p.position) { logger.info({ code: s.code }, 'LAB-LIVE: no live position to close (already closed by exchange SL?)'); return; }
-  const closeSide = p.position.side === 'long' ? 'short' : 'long';
-  const res = await placeMarketOrder(creds, { symbol: s.symbol, side: closeSide, qty: p.position.size, reduceOnly: true, clientOrderId: `lab-${s.code}-x-${barTime}` });
-  if (!res.ok) { logger.error({ code: s.code, errCode: res.code, msg: res.msg }, '🛑 LAB-LIVE: CLOSE order FAILED'); return; }
-  logger.warn({ code: s.code, symbol: s.symbol, size: p.position.size, orderId: res.orderId }, '✅ LAB-LIVE: CLOSED real position');
+  if (!hlConfigured()) { logger.error({ code: s.code }, '🛑 LAB-LIVE: HL_API_WALLET_KEY missing — cannot close'); return; }
+  const coin = hlCoin(s.symbol);
+  const res = await hlClosePosition(coin);
+  if (!res.ok) { logger.error({ code: s.code, coin, msg: res.msg }, '🛑 LAB-LIVE: HL CLOSE order FAILED'); return; }
+  logger.warn({ code: s.code, coin }, '✅ LAB-LIVE: HL CLOSED real position (or already flat)');
 }
 
 /** Boot summary — logs the deployed set + intended capital split so the sizing is

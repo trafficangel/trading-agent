@@ -81,6 +81,16 @@ const Schema = z.object({
   BYBIT_OPERATOR_API_KEY: z.string().optional(),
   BYBIT_OPERATOR_API_SECRET: z.string().optional(),
 
+  /** Hyperliquid execution for the lab→live bridge (Bybit blocks derivatives for
+   *  the operator's region — code 10024). HL is permissionless / not geo-blocked.
+   *  HL_API_WALLET_KEY = private key that SIGNS (an HL agent/API wallet is safest —
+   *  it can trade but NOT withdraw; never the main wallet if avoidable). Only needed
+   *  when LAB_LIVE.mode is 'testnet'/'live'. HL_ACCOUNT_ADDRESS = the MAIN account
+   *  to query/attribute (defaults to the signer's own address for a non-agent key). */
+  HL_API_WALLET_KEY: z.string().optional(),
+  HL_ACCOUNT_ADDRESS: z.string().optional(),
+  HL_USE_TESTNET: envBool(true),
+
   /**
    * Track C — LuxAlgo AI Strategy Builder webhook trader.
    * When true, webhooks with `"kind":"strategy"` get dispatched to
