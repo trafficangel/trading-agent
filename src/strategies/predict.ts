@@ -43,45 +43,206 @@ type StrategyDef = {
   retired?: boolean; // стратегия остановлена (гипотеза не подтвердилась)
   isTrap?: boolean; // dual-leg ловушка: особый рендер «сторона» (🔒 / однобоко)
   minDeposit?: number; // рекомендуемый минимальный банк (доля депозита) под стратегию, $
+  recommendedReal?: number; // рекомендуемый банк ($) для перехода в реальную торговлю — показываем на карточке
+  recommendedRealNote?: string; // пояснение к рекомендуемой сумме (сайзинг/капы)
+  standalone?: boolean; // живой движок-сервис (не engine): сам читает namерение running.<slug>, оператор флипает кнопкой
+  lossPatternFile?: string; // отчёт фонового майнера паттернов проигрыша (data/) — рендерим карточку
 };
 
 const STRATEGIES: StrategyDef[] = [
   {
-    slug: 'dynprob',
-    engine: 'dynprob-paper',
+    slug: 'm15live',
     realEligible: false,
-    title: 'DYNPROB · Келли (бумага) 🧪',
-    tagline: 'Вход на расхождениях модель-vs-рынок ≥5пп (T−60), размер ¼-Келли от банка $100, тейкер-учёт с комиссиями; юнит-$1 контроль для честной валидации.',
-    statusEnv: 'PREDICT_DYNPROB_PAPER_STATUS_PATH',
-    statusFile: 'predict-dynprob-paper-status.json',
-    liveFile: 'predict-dynprob-paper-live.json', // заглушка: лайв-снимка нет (hasLive: false)
+    title: '🔵 5M→15M · ЭТАЛОН (заморожена) — контроль',
+    tagline: 'ЭТАЛОН: модель обучена ОДИН раз на ранних раундах и заморожена — больше не меняется. Держим её как точку отсчёта: на её фоне видно, помогает ли непрерывное обучение (см. обучающиеся версии). На 111 сделках края нет — монетка (−1пп). Механика входа та же (T-600, ≥8пп, плоско $5).',
+    statusEnv: 'PREDICT_M15LIVE_STATUS',
+    statusFile: 'predict-m15live-status.json',
+    liveFile: '',
     showStakeCol: true,
     hasLive: false,
+    recommendedReal: 100,
+    recommendedRealNote: 'плоская ставка $5 на сделку (без Кейли). Авто-стоп −$15, до ~12 ордеров за сессию',
+    standalone: true,
     description: [
-      'ОТКУДА СИГНАЛ. Офлайн Фаза 0 на наших раундах: модель на индикаторах (RSI/EMA/momentum/VWAP из Binance) в среднем ПРОИГРЫВАЕТ рынку по точности (Brier) — рынок калиброваннее. Но бакеты, где модель и рынок расходятся на ≥5пп, дали плюс ПОСЛЕ комиссий, устойчиво на обеих половинах выборки; адверсариальная проверка скептика утечек не нашла. Торгуем не «модель умнее рынка», а узкий случай расхождения.',
-      'ПРАВИЛА ВХОДА (зафиксированы из Фазы 0, не меняются). На T−60 (за минуту до закрытия раунда) сравниваем P(UP) модели с ценой рынка. Если |расхождение| ≥ 5пп — входим на сторону модели (UP, если модель выше рынка, иначе DOWN). Один вход на раунд.',
-      'РАЗМЕР СТАВКИ — ¼-КЕЛЛИ ОТ БАНКА $100. Формула Келли по НАШЕЙ вероятности: f = p − (1−p)/b, где p — вероятность модели за выбранную сторону, b — нетто-коэффициент после комиссии (выплата на $1 ставки по тейкер-цене входа минус комиссия). Ставим четверть от полного Келли: ¼·f·банк, с потолком 10% банка на сделку и минимумом $1; если f ≤ 0 — минимальный $1. Банк стартует со $100 и пересчитывается хронологически по закрытым сделкам.',
-      'ПОЧЕМУ ДВА ТРЕКА. Келли-кривая показывает, КАК растёт (или тает) банк, если край реальный — это вопрос сайзинга. А юнит-трек $1 на каждую сделку — это то, ЧЕМ мы доказываем сам край: одинаковые ставки нельзя «накачать» удачным таймингом размеров. Урок фантомных «+29пп»: смешение стейкинга с проверкой края однажды уже нарисовало нам несуществующее преимущество. Больше не смешиваем.',
-      'УЧЁТ — КОНСЕРВАТИВНО, ТЕЙКЕРОМ. Главный PnL считается по входу рыночным ордером (по ask своей стороны) с комиссией 3% от валовой выплаты при цене входа 0.40–0.60 и 1.5% вне этой зоны — худший разумный сценарий издержек. Параллельно справочно считаем мейкер-вариант (вход по bid, комиссия 0) — поле makerPnl.',
-      '🧪 ПЛАНКА К МИКРО-РЕАЛУ — ПО ЮНИТ-ТРЕКУ, не по Келли-кривой: плюс ПОСЛЕ комиссий на 150+ НЕЗАВИСИМЫХ форвард-раундах, причём в обеих половинах форвард-выборки. Честная оговорка: сигнал взят из Фазы 0, где результат статистически НЕ значим (t≈1.8), а профиль лонгшотный (частые мелкие минусы, редкие крупные плюсы — длинные серии проигрышей нормальны). Мог быть удачей — решает форвард. Реальных денег нет и не будет до планки.',
+      'НА ЧЁМ ИГРАЕМ (простыми словами). На Polymarket есть рынок «Будет ли биткоин через 15 минут выше, чем сейчас?». Можно купить «UP» (вырастет) или «DOWN» (упадёт). Цена доли = оценка вероятности рынком: доля UP за $0.55 значит «рынок считает рост на 55%». Угадал — доля гасится за $1 (то есть $0.55 → $1, прибыль ~82%); не угадал — доля сгорает в $0. Раунды идут каждые 15 минут, круглые сутки.',
+      'ЧТО ДЕЛАЕТ НАША МОДЕЛЬ. Это формула, обученная на прошлых раундах. За 10 минут до конца раунда она смотрит, как биткоин двигался в последние минуты (на 15-минутном и 5-минутном графиках: скорость, размах, насколько ушёл от стартовой цены) и выдаёт СВОЮ оценку вероятности, что раунд закроется ростом. По сути — «второе мнение» против цены рынка.',
+      'КОГДА СТАВИМ. Сравниваем нашу оценку с ценой рынка. Совпадают — пропускаем (преимущества нет, играть не на чем). Если модель считает какую-то сторону заметно вероятнее, чем заложено в цене (расхождение ≥8 процентных пунктов), — покупаем именно её: рынок её «недооценил». То есть ставим только тогда, когда думаем, что рынок ошибается.',
+      'КОГДА ВХОДИМ. Ровно за 10 минут до закрытия раунда (колонка «Вход (до конца)» показывает «за 10:00»). Это компромисс: ещё не поздно — исход не предрешён; и уже не рано — свежее поведение цены успело о чём-то сказать.',
+      'СКОЛЬКО СТАВИМ — ПЛОСКАЯ СТАВКА. Каждая сделка — фиксированные $5 (без Кейли). Просто и предсказуемо: серия из N проигрышей = N × $5, без раздувания. «Баланс» на карточке показывает накопленный результат, но на размер ставки не влияет.',
+      'ЧТО ЗНАЧИТ SHADOW (сейчас именно он). Движок принимает все решения вживую и записывает «я бы поставил столько-то», но РЕАЛЬНЫЙ ОРДЕР НЕ ОТПРАВЛЯЕТ — денег ноль. Это репетиция, которая считает ровно то же, что считала бы реальная торговля: тот же код, те же ставки, тот же банк. Поэтому цифры здесь — 1:1 с реалом, и при переводе в реал ничего не «съедет». Лента наполняется только вперёд, по мере прохождения новых раундов.',
+      'ЗАЧЕМ ОНА ЗАМОРОЖЕНА (это ЭТАЛОН, а не боевой кандидат). Мы нарочно держим эту модель неизменной — как измерительную линейку. Сравнивая её с обучающимися версиями, видно, помогает ли непрерывное обучение. На 111 сделках замороженная даёт −1пп (монетка). Поэтому в реал смотрим на обучающиеся версии, а не на этот эталон; в реал вообще переводим только то, что устойчиво выше безубытка (~53%), и только руками оператора с жёсткими капами и авто-стопом −$15.',
     ],
   },
   {
-    slug: 'dynfix5',
-    engine: 'dynprob-paper-fix5',
+    slug: 'm15band',
     realEligible: false,
-    title: 'DYNPROB · фикс $5 (бумага) 🧪',
-    tagline: 'Те же входы, что у DYNPROB · Келли (расхождение модель-vs-рынок ≥5пп на T−60), но ставка всегда фиксированная $5 — сравнение сайзингов на идентичных сделках.',
-    statusEnv: 'PREDICT_DYNFIX5_STATUS_PATH',
-    statusFile: 'predict-dynprob-fix5-status.json',
-    liveFile: 'predict-dynprob-fix5-live.json', // заглушка: лайв-снимка нет (hasLive: false)
+    title: '🟢 5M→15M · ОБУЧАЕТСЯ + полоса 3–6пп',
+    tagline: 'Обучающаяся модель с фильтром: входит при расхождении с рынком 3–6пп — умеренные сигналы (калиброванная модель редко расходится сильнее). Тест: есть ли край в среднем диапазоне уверенности.',
+    statusEnv: 'PREDICT_M15BAND_STATUS',
+    statusFile: 'predict-m15band-status.json',
+    liveFile: '',
     showStakeCol: true,
     hasLive: false,
+    recommendedReal: 100,
+    recommendedRealNote: 'плоская ставка $5 на сделку (без Кейли). Авто-стоп −$15, до ~12 ордеров за сессию',
+    standalone: true,
     description: [
-      'ЧТО ЭТО. Контрольный двойник стратегии «DYNPROB · Келли»: входы, сделки и исходы — ИДЕНТИЧНЫ (один и тот же сигнал расхождения ≥5пп на T−60, тот же тейкер-учёт с комиссиями). Единственное отличие — размер ставки: всегда фиксированные $5, без Келли.',
-      'ЗАЧЕМ. Наглядное сравнение манименеджмента на одной и той же серии сделок: Келли масштабирует ставку от банка и уверенности модели, фикс ставит ровно. Матожидание у обоих одинаковое по знаку (сайзинг не создаёт край — доказано в проекте), различается ФОРМА кривой: просадки, волатильность, темп роста.',
-      'ПРОФИЛЬ — ЛОНГШОТЫ. Винрейт ~18–25% при ценах входа 3–16¢ — это норма: частые мелкие минусы (−$5), редкие крупные плюсы (выплата 6–30×). Длинные серии проигрышей (10–16 подряд) здесь не поломка, а свойство профиля — смотри maxLossStreak.',
-      '🧪 Бумага. Валидация края — по юнит-треку карточки «DYNPROB · Келли» (планка: плюс после комиссий на 150+ раундах в обеих половинах). Эта карточка — про сравнение стейкинга, не про отдельный сигнал.',
+      'КОРОТКО. Тот же живой движок и обучающаяся модель (как у m15e4 и охотников; полная механика на карточке m15live — 15-минутный рынок «вверх/вниз», вход за 10 минут до конца, плоская ставка $5). Отличие ОДНО: фильтр на то, НАСКОЛЬКО модель расходится с рынком.',
+      'ИДЕЯ ПРОСТЫМИ СЛОВАМИ. Калиброванная модель обычно расходится с рынком на ~3–4 пункта. Этот движок берёт умеренные расхождения 3–6пп: отсекает и совсем мелкие (≈шум, рынок прав), и редкие крупные. Проверяем, есть ли край именно в среднем диапазоне.',
+      'ЧЕМ ПОЛЕЗНО. Честная проверка: если преимущество живёт именно в умеренных расхождениях, у этой полосы винрейт будет выше, чем у m15e4 (та же модель, мягкий порог ≥4пп без верхней границы). Если разницы нет — значит срезать верх диапазона не помогает. Всё считается тем же кодом, что реал (1:1), лента — только вперёд.',
+      'Деньги: ноль (shadow). Один из набора живых кандидатов; включается в реал кнопкой оператора (с капами и авто-стопом), если докажет винрейт выше безубытка.',
+    ],
+  },
+  {
+    slug: 'm15e4',
+    realEligible: false,
+    title: '🟢 5M→15M · ОБУЧАЕТСЯ + порог ≥4пп',
+    tagline: 'Обучающаяся модель с более МЯГКИМ порогом входа: ставим уже при расхождении с рынком ≥4пп (а не ≥8пп). Сделок больше — проверяем, не размывает ли это край. Ставка — плоско $5.',
+    statusEnv: 'PREDICT_M15E4_STATUS',
+    statusFile: 'predict-m15e4-status.json',
+    liveFile: '',
+    showStakeCol: true,
+    hasLive: false,
+    recommendedReal: 100,
+    recommendedRealNote: 'плоская ставка $5 на сделку (без Кейли). Авто-стоп −$15, до ~12 ордеров за сессию',
+    standalone: true,
+    description: [
+      'КОРОТКО. Тот же живой движок и обучающаяся модель (полная механика на карточке m15live — 15-минутный рынок «вверх/вниз», вход за 10 минут до конца, плоско $5). Особенность: самый МЯГКИЙ порог входа — ставим уже при расхождении модели с рынком от 4 пунктов (у полос/охотников пороги другие). Поэтому входов много — это активная обучающаяся версия.',
+      'ЗАЧЕМ. Мягкий порог даёт БОЛЬШЕ сделок (быстрее копятся данные), но может разбавлять край более слабыми сигналами. Сравнение с полосами (3–6, 2–4) и охотниками покажет, где баланс «активность vs качество» лучше.',
+      'ЧЕМ ПОЛЕЗНО. Это часть «лесенки порогов»: ≥4пп (этот) / полосы 3–6 и 2–4 / охотники. Все на одной обучающейся модели — сравнивая их живой PnL, увидим оптимальную настройку отбора. Деньги: ноль (shadow), флипается в реал кнопкой оператора при доказанном крае.',
+    ],
+  },
+  {
+    slug: 'h5m',
+    realEligible: false,
+    title: '🟣 5-МИНУТНЫЙ рынок · ОХОТНИК',
+    tagline: 'Охотник на БЫСТРОМ 5-минутном рынке (не 15-минутном). Своя модель на 5m-раундах. ВПЕРВЫЕ модель обогнала рынок на свежих данных (+2пп) — самый интересный кандидат. Вход по расхождению, коэф 1.5–5, плоско $5 на сделку.',
+    statusEnv: 'PREDICT_H5M_STATUS',
+    statusFile: 'predict-h5m-status.json',
+    liveFile: '',
+    showStakeCol: true,
+    hasLive: false,
+    recommendedReal: 100,
+    recommendedRealNote: 'плоская ставка $5 на сделку. Минимум $1. Авто-стоп −$15, до ~12 ордеров за сессию',
+    standalone: true,
+    description: [
+      'ЧЕМ ОТЛИЧАЕТСЯ. Все остальные стратегии — на 15-минутном рынке. Этот — на 5-МИНУТНОМ (раунд каждые 5 минут, втрое чаще). Своя отдельная модель, обученная на 5m-раундах (2100+ раундов, снимки со всего раунда). Охотится: входит в любой момент 5-минутки, когда видит расхождение цены со своей оценкой.',
+      'ПОЧЕМУ ИНТЕРЕСНЫЙ. Это ПЕРВАЯ модель, которая на свежих (не виденных) раундах обогнала рынок: 72.3% против 70.3% (+2пп) на большой выборке. На 15m модели были на уровне рынка или ниже. Похоже, на коротком горизонте помогает дисбаланс стакана (кого больше — покупателей или продавцов). И 5m даёт втрое больше данных.',
+      'ЧЕСТНО. +2пп точности над рынком — лучшее, что мы видели, но это ещё НЕ доказанная прибыль: чтобы зарабатывать, надо перебить спред и комиссии (на быстром рынке они кусачее). Живой замер в shadow покажет реальный PnL. Деньги: ноль. Если PnL устойчиво плюсовой на дистанции — это первый реальный кандидат в реал.',
+    ],
+  },
+  {
+    slug: 'h5m8',
+    realEligible: true, // ЕДИНСТВЕННЫЙ кандидат в реал: боевой движок m15live(real)+шлюз ликвидности через systemd-юнит predict-h5m8real (старт по кнопке оператора). Остальные — realEligible:false.
+    title: '🔴 5m · ОХОТНИК ≥8пп (крупное расхождение)',
+    tagline: 'Тот же 5-минутный охотник, но входит ТОЛЬКО когда расхождение модели и рынка ≥8 проц. пунктов (а не ≥4, как h5m). Гипотеза: чем сильнее модель не согласна с рынком, тем надёжнее сигнал. Один вход за раунд, коэф 1.5–5, плоско $5.',
+    statusEnv: 'PREDICT_H5M8_STATUS',
+    statusFile: 'predict-h5m8-status.json',
+    liveFile: '',
+    showStakeCol: true,
+    hasLive: false,
+    recommendedReal: 100,
+    recommendedRealNote: 'плоская ставка $5 на сделку. Один вход за раунд. Авто-стоп −$15, до ~12 ордеров за сессию',
+    standalone: true,
+    description: [
+      'ЧЕМ ОТЛИЧАЕТСЯ. Это та же 5-минутная модель и тот же охотник, что у h5m, с ОДНИМ изменением: порог входа поднят с ≥4пп до ≥8пп. То есть мы входим, только когда наша оценка расходится с ценой рынка минимум на 8 процентных пунктов. Один вход за раунд — как только в окне появляется расхождение ≥8пп, заходим.',
+      'ЗАЧЕМ. Проверяем простую гипотезу: «большое расхождение модели и рынка = более сильный сигнал». Если рынок ошибается, то чем дальше его цена от честной оценки — тем больше мы должны зарабатывать. Лесенка — чистое сравнение «порог против порога»: все три (≥4пп h5m, ≥8пп этот, ≥12пп h5m12) входят по одному разу за раунд, отличается только порог. Сравним их винрейт и край.',
+      'ЧЕСТНО. На 5-минутном рынке модель калибрована и редко расходится с рынком СИЛЬНО — поэтому входов тут будет МАЛО (возможно, единицы за часы, или почти ноль). Это и есть смысл теста: посмотреть, бывают ли вообще такие расхождения и угадывает ли модель, когда они есть. Может оказаться, что ≥8пп — это уже «шум модели», а не реальная ошибка рынка. Деньги: ноль (shadow).',
+    ],
+  },
+  {
+    slug: 'h5m12',
+    realEligible: true, // h5m12 — ВТОРОЙ боевой кандидат (2026-06-22): свой реал-движок predict-h5m12real (EDGE>=12пп, $1, стоп -$15), стат /predict/h5m12real.
+    title: '🔴 5m · ОХОТНИК ≥12пп (очень крупное расхождение)',
+    tagline: 'Самый строгий порог: входим, только когда расхождение модели и рынка ≥12 проц. пунктов. Самые редкие, но самые «уверенные» сигналы. Один вход за раунд, коэф 1.5–5, плоско $5. Проверяем, есть ли край на экстремальных расхождениях.',
+    statusEnv: 'PREDICT_H5M12_STATUS',
+    statusFile: 'predict-h5m12-status.json',
+    liveFile: '',
+    showStakeCol: true,
+    hasLive: false,
+    recommendedReal: 100,
+    recommendedRealNote: 'плоская ставка $5 на сделку. Один вход за раунд. Авто-стоп −$15, до ~12 ордеров за сессию',
+    standalone: true,
+    description: [
+      'ЧЕМ ОТЛИЧАЕТСЯ. Та же 5-минутная модель и охотник, но порог входа ещё выше — ≥12пп. Берём только случаи, когда модель ОЧЕНЬ сильно не согласна с ценой рынка. Один вход за раунд, коэф 1.5–5, ставка $5.',
+      'ЗАЧЕМ. Верхняя ступень лесенки порогов ≥4 / ≥8 / ≥12. Если у большого расхождения есть край — он должен быть виден здесь ярче всего (либо его нет вообще). Это прямой тест «крайних» сигналов модели.',
+      'ЧЕСТНО. Тут входов будет ЕЩЁ МЕНЬШЕ, чем у ≥8пп — возможно, за смену не наберётся ни одного. Большое расхождение на калиброванной 5m-модели чаще означает «модель переуверена на этом раунде», чем «рынок ошибся». Поэтому вполне реальный исход — ноль сделок или минус. Это честная проверка, а не обещание. Деньги: ноль (shadow).',
+    ],
+  },
+  {
+    slug: 'h5m20',
+    realEligible: false,
+    title: '🔴 5m · ОХОТНИК ≥20пп (экстремальное расхождение)',
+    tagline: 'Вершина лесенки порогов: входим, только когда расхождение модели и рынка ≥20 проц. пунктов — самые редкие, экстремальные случаи несогласия. Один вход за раунд, коэф 1.5–5, плоско $5. Крайний тест: есть ли вообще край на таких больших расхождениях.',
+    statusEnv: 'PREDICT_H5M20_STATUS',
+    statusFile: 'predict-h5m20-status.json',
+    liveFile: '',
+    showStakeCol: true,
+    hasLive: false,
+    recommendedReal: 100,
+    recommendedRealNote: 'плоская ставка $5 на сделку. Один вход за раунд. Авто-стоп −$15, до ~12 ордеров за сессию',
+    standalone: true,
+    description: [
+      'ЧЕМ ОТЛИЧАЕТСЯ. Та же 5-минутная модель и охотник, что у h5m/h5m8/h5m12, но порог поднят до самого верха — ≥20пп. Берём ТОЛЬКО случаи, когда модель крайне сильно не согласна с ценой рынка. Один вход за раунд, коэф 1.5–5, ставка $5.',
+      'ЗАЧЕМ. Достраиваем лесенку порогов ≥4 / ≥8 / ≥12 / ≥20. На предыдущих ступенях винрейт рос с порогом (49% → 52% → 56%). Вопрос: продолжается ли рост на экстремальных расхождениях, или там уже один шум? Это самый строгий тест гипотезы «больше расхождение = надёжнее».',
+      'ЧЕСТНО. Входов тут будет совсем мало — расхождение ≥20пп редкое даже у самоуверенной 5m-модели. Чем крупнее разрыв, тем выше шанс, что это просто «модель сильно переоценила свою уверенность на этом раунде», а не реальная грубая ошибка рынка. Поэтому вполне реальный исход — единицы сделок и/или минус. Это честная проверка края, а не обещание. Деньги: ноль (shadow).',
+    ],
+  },
+  {
+    slug: 'h15m8',
+    realEligible: false,
+    title: '🔵 15m · ОХОТНИК ≥8пп (крупное расхождение)',
+    tagline: 'Тот же 15-минутный охотник, что и m15hunter, но входит ТОЛЬКО когда расхождение модели и рынка ≥8 проц. пунктов. Достраиваем лесенку порогов и на 15-минутном рынке — параллельно 5m-лесенке. Один вход за раунд, коэф 1.5–5, плоско $5.',
+    statusEnv: 'PREDICT_H15M8_STATUS',
+    statusFile: 'predict-h15m8-status.json',
+    liveFile: '',
+    showStakeCol: true,
+    hasLive: false,
+    recommendedReal: 100,
+    recommendedRealNote: 'плоская ставка $5 на сделку. Один вход за раунд. Авто-стоп −$15, до ~12 ордеров за сессию',
+    standalone: true,
+    description: [
+      'ЧЕМ ОТЛИЧАЕТСЯ. Это та же 15-минутная модель-охотник, что у m15hunter (вход в любой момент раунда по расхождению цены с оценкой), с ОДНИМ изменением: порог входа поднят до ≥8пп. То есть заходим, только когда наша оценка расходится с ценой рынка минимум на 8 процентных пунктов. Один вход за раунд.',
+      'ЗАЧЕМ. Достраиваем лесенку порогов и на 15-минутном рынке — параллельно 5m-лесенке (≥8 / ≥12 / ≥20пп). Проверяем ту же гипотезу: помогает ли требование БОЛЬШЕГО расхождения модели с рынком. Чистое сравнение «порог против порога»: у всех трёх 15m-ступеней отличается только порог входа.',
+      'ЧЕСТНО. 15-минутный рынок исторически ЭФФЕКТИВНЕЕ: наша 15m-модель-охотник по точности ≈ рынок, отдельного края не показывала. Поэтому ожидания тут СКРОМНЕЕ, чем у 5m-лесенки. Чем выше порог — тем меньше входов. Вполне реальный исход — мало сделок и/или минус. Деньги: ноль (shadow). Это честная проверка, а не обещание прибыли.',
+    ],
+  },
+  {
+    slug: 'h15m12',
+    realEligible: false,
+    title: '🔵 15m · ОХОТНИК ≥12пп (очень крупное расхождение)',
+    tagline: 'Та же 15-минутная модель-охотник (m15hunter), но порог входа выше — ≥12пп. Более редкие, более «уверенные» сигналы. Один вход за раунд, коэф 1.5–5, плоско $5. Средняя ступень 15m-лесенки порогов.',
+    statusEnv: 'PREDICT_H15M12_STATUS',
+    statusFile: 'predict-h15m12-status.json',
+    liveFile: '',
+    showStakeCol: true,
+    hasLive: false,
+    recommendedReal: 100,
+    recommendedRealNote: 'плоская ставка $5 на сделку. Один вход за раунд. Авто-стоп −$15, до ~12 ордеров за сессию',
+    standalone: true,
+    description: [
+      'ЧЕМ ОТЛИЧАЕТСЯ. Та же 15-минутная модель-охотник, что у m15hunter, но порог входа ещё выше — ≥12пп. Берём только случаи, когда модель сильно не согласна с ценой рынка. Один вход за раунд, коэф 1.5–5, ставка $5.',
+      'ЗАЧЕМ. Средняя ступень 15m-лесенки порогов (≥8 / ≥12 / ≥20пп), которую мы строим параллельно 5m-лесенке. Проверяем, помогает ли требование БОЛЬШЕГО расхождения модели с рынком именно на 15-минутном рынке — там, где он исторически крепче.',
+      'ЧЕСТНО. 15-минутный рынок исторически ЭФФЕКТИВНЕЕ, и наша 15m-модель-охотник по точности ≈ рынок (отдельного края не показывала). Чем выше порог — тем меньше входов: тут их будет ещё меньше, чем у ≥8пп. Вполне реальный исход — мало сделок и/или минус. Деньги: ноль (shadow). Это честная проверка, а не обещание прибыли.',
+    ],
+  },
+  {
+    slug: 'h15m20',
+    realEligible: false,
+    title: '🔵 15m · ОХОТНИК ≥20пп (экстремальное расхождение)',
+    tagline: 'Вершина 15m-лесенки порогов: входим, только когда расхождение модели и рынка ≥20 проц. пунктов — самые редкие, экстремальные случаи несогласия. Один вход за раунд, коэф 1.5–5, плоско $5. Крайний тест края на 15-минутном рынке.',
+    statusEnv: 'PREDICT_H15M20_STATUS',
+    statusFile: 'predict-h15m20-status.json',
+    liveFile: '',
+    showStakeCol: true,
+    hasLive: false,
+    recommendedReal: 100,
+    recommendedRealNote: 'плоская ставка $5 на сделку. Один вход за раунд. Авто-стоп −$15, до ~12 ордеров за сессию',
+    standalone: true,
+    description: [
+      'ЧЕМ ОТЛИЧАЕТСЯ. Та же 15-минутная модель-охотник, что у m15hunter/h15m8/h15m12, но порог поднят до самого верха — ≥20пп. Берём ТОЛЬКО случаи, когда модель крайне сильно не согласна с ценой рынка. Один вход за раунд, коэф 1.5–5, ставка $5.',
+      'ЗАЧЕМ. Вершина 15m-лесенки порогов (≥8 / ≥12 / ≥20пп), достраиваемой параллельно 5m-лесенке. Если у большого расхождения есть край — на 15-минутном рынке он должен быть виден здесь ярче всего (либо его нет вообще). Прямой тест «экстремальных» сигналов модели.',
+      'ЧЕСТНО. 15-минутный рынок исторически ЭФФЕКТИВНЕЕ, чем 5-минутный, а наша 15m-модель-охотник по точности ≈ рынок — отдельного края не показывала. Расхождение ≥20пп тут совсем редкое: за смену может не набраться ни одной сделки. Чем крупнее разрыв, тем выше шанс, что это «модель переуверена на этом раунде», а не ошибка рынка. Вполне реальный исход — мало сделок и/или минус. Деньги: ноль (shadow). Это честная проверка, а не обещание прибыли.',
     ],
   },
 ];
@@ -125,12 +286,30 @@ type PredictStatus = {
   profitFactor: number | null;
   maxDrawdown: number;
   avgStake?: number | null;
+  sizing?: string; // 'kelly' для живых движков — размер по дробному Келли (не плоская ставка)
+  bank?: number | null; // текущий компаундящий банк Келли ($)
+  bank0?: number | null; // стартовый банк Келли ($)
+  kellyFrac?: number | null; // доля Келли (0.125 = ⅛)
   maxLossStreak?: number; // макс. серия проигрышей подряд (риск для прогрессий)
   maxWinStreak?: number; // макс. серия выигрышей подряд
   avgCoef?: number | null; // средний коэффициент входа (1/цена)
   trapClosed?: number; // dual-leg-trap: раундов с захлопнутой ловушкой
   oneLegged?: number; // dual-leg-trap: раундов с одной ногой
   marketOutcomes?: { up: number; down: number }; // опционально: упрощённые экспортеры (dynprob) его не пишут
+  modelOnline?: boolean; // m15online: модель непрерывно дообучается (walk-forward)
+  modelTrainN?: number | null; // на скольких сыгранных раундах обучена текущая модель
+  modelTrainedAt?: string | null; // когда модель последний раз дообучена
+  // Боевой контур (m15live в режиме real) — поля статуса реальной торговли:
+  engineMode?: string; // 'real' для боевого движка
+  allowReal?: boolean; // боевые ордера разрешены
+  flatStake?: number | null; // фикс. ставка боевого движка ($)
+  maxLossUsd?: number | null; // авто-стоп: лимит убытка ($) — боевой кап
+  maxOrders?: number | null; // авто-стоп: лимит ордеров за сессию
+  maxSlip?: number | null; // шлюз ликвидности: макс. допустимое проскальзывание цены (доли)
+  skipped?: number | null; // ШЛЮЗ ЛИКВИДНОСТИ: входов, отменённых из-за тонкого стакана (НЕ сделки)
+  openCount?: number | null; // открытых позиций сейчас
+  evaluated?: number | null; // сколько раундов движок перебрал (для UX «работает, но фильтр не совпал»)
+  coefBuckets?: { range: string; n: number; winRate: number | null; breakeven: number | null }[]; // винрейт по диапазонам коэф входа
   lastRoundAt?: number | null;
   recentRounds?: RecentRound[];
   equityCurve?: { t: number | null; slug: string; pnl: number; cumulative: number }[]; // опционально: если нет — строим из recentRounds
@@ -185,7 +364,7 @@ function livePanel(s: StrategyDef): string {
     `async function poll(){try{var r=await fetch('/predict/'+slug+'/live.json',{cache:'no-store'});if(!r.ok)return;var d=await r.json();lastUpd=Date.now();slotStart=d.slotStartMs;slotEnd=d.slotEndMs;` +
     `set('pl-up',cents(d.up&&d.up.ask));set('pl-up-k',coef(d.up&&d.up.ask));set('pl-down',cents(d.down&&d.down.ask));set('pl-down-k',coef(d.down&&d.down.ask));` +
     `var asset=d.asset||'BTC';set('pl-asset',asset);var px=(asset==='ETH')?d.eth:d.btc;set('pl-px',usd(px));set('pl-target',usd(d.target));var g=(px!=null&&d.target!=null)?px-d.target:null;set('pl-gap',g!=null?(g>=0?'+':'−')+'$'+Math.abs(g).toFixed(2):'—');var le=$('pl-lead');if(le)le.textContent=(d.btc!=null&&asset!=='BTC')?(' · BTC-лидер '+usd(d.btc)):'';` +
-    `var p=d.position;if(!p){$('pl-pos').innerHTML='⚪ Открытой позиции нет — ждём сигнал';}else if(p.side==='BOTH'){$('pl-pos').innerHTML='🟢 Ловушка: обе ноги набраны · вложено '+usd(p.stake)+(d.lockedProfit!=null?(' · заперта прибыль +$'+d.lockedProfit+'/акция'):'');}else{$('pl-pos').innerHTML='🟢 В сделке: <b class=\"'+(p.side==='UP'?'pd-up':'pd-down')+'\">'+p.side+'</b> · ставка '+usd(p.stake)+(p.entryCoef?(' · коэф '+p.entryCoef):'');}` +
+    `var p=d.position;if(!p){$('pl-pos').innerHTML=d.note?('⏭ '+d.note):'⚪ Открытой позиции нет — ждём сигнал';}else if(p.side==='BOTH'){$('pl-pos').innerHTML='🟢 Ловушка: обе ноги набраны · вложено '+usd(p.stake)+(d.lockedProfit!=null?(' · заперта прибыль +$'+d.lockedProfit+'/акция'):'');}else{$('pl-pos').innerHTML='🟢 В сделке: <b class=\"'+(p.side==='UP'?'pd-up':'pd-down')+'\">'+p.side+'</b> · ставка '+usd(p.stake)+(p.entryCoef?(' · коэф '+p.entryCoef):'');}` +
     `}catch(e){}}` +
     `poll();setInterval(poll,2000);setInterval(tick,1000);tick();` +
     `})();</script>`
@@ -203,6 +382,11 @@ function fmtUsd(n: number): string {
   return `${sign}$${Math.abs(n).toFixed(2)}`;
 }
 
+// Время ОТКРЫТИЯ позиции по Москве (UTC+3), ЧЧ:ММ — «на какой минуте вошли».
+function mskHHMM(ms: number): string {
+  const d = new Date(ms + 3 * 3600_000);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
 function agoText(ms: number): string {
   const sec = Math.max(0, Math.round((Date.now() - ms) / 1000));
   if (sec < 90) return `${sec} сек назад`;
@@ -220,6 +404,33 @@ function freshnessPill(updatedAt: string): string {
 }
 
 /** Inline SVG equity curve — no external chart lib (CSP blocks third-party). */
+// Спарклайн скользящего КРАЯ (винрейт − безубыток) по окну сделок — тренд эффективности стратегии.
+function edgeSparkline(rounds: RecentRound[]): string {
+  const tr = rounds.filter((r) => !r._live && r.coef != null && (r.coef ?? 0) > 0 && r.t != null).sort((a, b) => a.t! - b.t!);
+  const WIN = 10;
+  if (tr.length < WIN + 3) return '';
+  const series: number[] = [];
+  for (let i = WIN - 1; i < tr.length; i++) {
+    const w = tr.slice(i - WIN + 1, i + 1);
+    const winrate = (w.filter((r) => r.win).length / WIN) * 100;
+    const be = (w.reduce((a, r) => a + 1 / (r.coef ?? 1), 0) / WIN) * 100;
+    series.push(winrate - be);
+  }
+  const W = 700, H = 90, PAD = 24;
+  const min = Math.min(-5, ...series), max = Math.max(5, ...series), span = max - min || 1;
+  const x = (i: number) => PAD + (i / (series.length - 1)) * (W - 2 * PAD);
+  const y = (v: number) => H - PAD - ((v - min) / span) * (H - 2 * PAD);
+  const last = series[series.length - 1]!;
+  const color = last >= 0 ? '#4ad991' : '#e5616c';
+  const pts = series.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  return (
+    `<div class="pd-card"><h2>Тренд края (окно ${WIN} сделок)</h2>` +
+    `<svg viewBox="0 0 ${W} ${H}" class="pd-chart"><line x1="${PAD}" y1="${y(0).toFixed(1)}" x2="${W - PAD}" y2="${y(0).toFixed(1)}" stroke="#2a313c" stroke-dasharray="4 4"/>` +
+    `<polyline fill="none" stroke="${color}" stroke-width="2" points="${pts}"/></svg>` +
+    `<div class="pd-foot">Скользящий край (винрейт − безубыток) по последним ${WIN} сделкам. Выше нуля = в плюсе на отрезке; вверх = край появляется, вниз = тает.</div></div>`
+  );
+}
+
 function equitySvg(points: NonNullable<PredictStatus['equityCurve']>): string {
   if (points.length < 2) {
     return `<div class="pd-empty-chart">Недостаточно данных для кривой (нужно ≥2 раунда).</div>`;
@@ -321,7 +532,7 @@ function recentRoundsTable(
   const showStrategy = opts.showStrategy ?? false;
   const showMetric = opts.showMetric !== false;
   // Адаптивные колонки: оценка (prob), коэф входа, время входа.
-  const hasEdge = showMetric && rounds.some((r) => r.edge != null);
+  const hasEdge = showMetric && rounds.some((r) => r.prob != null); // гейт по тому же полю, что рендерим в ячейке (prob), а не по edge
   const hasCoef = showMetric && !opts.isTrap && rounds.some((r) => r.coef != null); // у MM/ловушки коэф одной ноги бессмыслен
   const hasEntry = showMetric && rounds.some((r) => r.entrySecLeft != null);
   const right = 'style="text-align:right"';
@@ -333,15 +544,17 @@ function recentRoundsTable(
     (opts.isTrap ? `<th>Что</th><th>Куплено / продано</th>` : `<th>Сторона</th><th>Ставка</th>`) +
     (hasEdge ? `<th ${right}>Оценка</th>` : '') +
     (hasCoef ? `<th ${right}>Коэф.</th>` : '') +
-    (hasEntry ? `<th ${right}>Вход</th>` : '') +
+    (hasEntry ? `<th ${right}>Вход (до конца)</th>` : '') +
     `<th>Исход</th><th ${right}>PnL</th><th ${right}>Когда</th></tr>`;
   const rows = rounds
     .map((r) => {
       const stratCell = showStrategy ? `<td class="pd-muted-td">${esc(r._strategy ?? '')}</td>` : '';
       const edgeCells = hasEdge ? `<td ${right}>${r.prob != null ? r.prob + '%' : '—'}</td>` : '';
       const coefCell = hasCoef ? `<td class="pd-muted-td" ${right}>${r.coef != null ? r.coef.toFixed(2) : '—'}</td>` : '';
+      // «Вход (до конца)» = за сколько минут:секунд ДО закрытия раунда мы вошли в сделку
+      // (для m15 это всегда T-600 = 10:00 до конца). Берём entrySecLeft, а не часы по МСК.
       const entryCell = hasEntry
-        ? `<td class="pd-muted-td" ${right}>${r.entrySecLeft != null ? mmss(r.entrySecLeft) : '—'}</td>`
+        ? `<td class="pd-muted-td" ${right}>${r.entrySecLeft != null ? 'за ' + mmss(r.entrySecLeft) : '—'}</td>`
         : '';
       // Лайв-строка (открытая сделка): исход ещё не известен.
       if (r._live) {
@@ -510,9 +723,13 @@ function strategyCard(s: StrategyDef, st: PredictStatus | null): string {
       `</div>`
     : `<div class="row"><div style="color:#6b7484">данных пока нет</div></div>`;
   const retiredBadge = s.retired ? `<span class="pd-retired">остановлена</span>` : '';
+  // Боевой мини-тест (h5m12): красный бейдж «реальные деньги» прямо в обзоре.
+  const realBadge = s.standalone && s.realEligible === true
+    ? `<span style="display:inline-block;margin-left:8px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(216,58,58,0.15);color:#ff6b6b;border:1px solid rgba(216,58,58,0.45)">🔴 реальные деньги</span>`
+    : '';
   return (
     `<a class="pd-scard${s.retired ? ' pd-scard-off' : ''}" href="/predict/${s.slug}">` +
-    `<h3>${esc(s.title)}${retiredBadge}</h3>` +
+    `<h3>${esc(s.title)}${retiredBadge}${realBadge}</h3>` +
     `<div class="tag">${esc(s.tagline)}</div>` +
     stat +
     `<span class="pd-arrow">Подробнее →</span></a>`
@@ -749,7 +966,6 @@ function renderAbout(): string {
 }
 
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped status-JSON blobs written by the predict research jobs; shape varies per track
 function readDataJson(name: string): any | null {
   try {
     const p = join(dataDir, name);
@@ -758,11 +974,138 @@ function readDataJson(name: string): any | null {
   } catch { return null; }
 }
 
-// 🔬 Фаза 0 — исследовательские треки (сбор данных, без ставок): NRSCAN + DYNPROB.
+// Карточка фонового майнера паттернов проигрыша (OOS-валидация). Read-only отчёт, ставки не меняет.
+function lossPatternCard(file: string): string {
+  const d = readDataJson(file);
+  if (!d || !d.base) return '';
+  const b = d.base;
+  const pct = (x: number | null) => (x != null ? (x * 100).toFixed(1) + '%' : '—');
+  const rowsHtml = (d.patterns ?? [])
+    .map((r: any) =>
+      `<tr>` +
+      `<td style="text-align:left">${r.survivesOOS ? '✅ ' : ''}${esc(r.feature)}</td>` +
+      `<td style="text-align:right" class="pd-muted-td">${pct(r.lossRateTrain)} → ${pct(r.lossRateTest)}</td>` +
+      `<td style="text-align:right" class="pd-muted-td">${r.nTrain}/${r.nTest}</td>` +
+      `<td style="text-align:right" class="${(r.skipGainTestPnl ?? 0) > 0 ? 'pd-pos' : 'pd-muted-td'}">${r.skipGainTestPnl != null ? '$' + r.skipGainTestPnl.toFixed(2) : '—'}</td>` +
+      `</tr>`,
+    )
+    .join('');
+  const verdictColor = (d.survivors?.length ?? 0) > 0 ? '#e5b461' : '#7fd49b';
+  return (
+    `<div class="pd-card" style="border-color:#33384a">` +
+    `<h2>🔬 Паттерны проигрыша · фон (OOS)</h2>` +
+    `<p class="pd-sub" style="margin-top:-4px">Майнер ищет условия повышенного проигрыша и проверяет каждое вне выборки (ранние 60% → поздние 40%). Ставки не меняет — только отчёт. «Выжившим» считается лишь паттерн, повышающий проигрыш на ОБЕИХ половинах и улучшающий PnL поздней — защита от подгонки под шум.</p>` +
+    `<div class="pd-foot" style="margin:6px 0 10px">Входов: ${b.n} · проигрышей: ${Math.round((b.lossRate ?? 0) * b.n)} · базовая доля: ${pct(b.lossRate)} · flat-PnL: ${fmtUsd(b.flatPnl)} · проверено гипотез: ${d.testsRun}</div>` +
+    (d.independence
+      ? `<div class="pd-foot" style="margin:0 0 8px"><b style="color:#cfd6e0">Кластеризуются ли проигрыши:</b> база ${pct(d.independence.baseLoss)} · после проигрыша ${pct(d.independence.pLoseAfterLoss)} (n=${d.independence.nAfterLoss}) · после выигрыша ${pct(d.independence.pLoseAfterWin)} (n=${d.independence.nAfterWin})<br>${esc(d.independence.verdict ?? '')}</div>`
+      : '') +
+    (d.sequencing
+      ? `<div class="pd-foot" style="margin:0 0 10px"><b style="color:#cfd6e0">Пропуск после проигрыша (вне выборки, flat $1):</b> Δ PnL ${fmtUsd(d.sequencing.skipAfterLossDelta)} · пропуск после 2 подряд: Δ ${fmtUsd(d.sequencing.skipAfter2LossDelta)} <span style="opacity:.7">(>0 — помогло бы, ≤0 — нет)</span></div>`
+      : '') +
+    `<table class="pd-table"><thead><tr><th>Условие</th><th style="text-align:right">Проигрыш train→test</th><th style="text-align:right">n</th><th style="text-align:right">Δ test-PnL</th></tr></thead><tbody>${rowsHtml}</tbody></table>` +
+    `<div class="pd-foot" style="margin-top:10px;color:${verdictColor}">${esc(d.verdict ?? '')}</div>` +
+    (d.multipleTestingNote ? `<div class="pd-foot" style="margin-top:6px">${esc(d.multipleTestingNote)}</div>` : '') +
+    `</div>`
+  );
+}
+
+// 🎯 Сводный дашборд вилок: нормализует находки всех арб-сканеров в одну таблицу.
+function arbPct(x: number): string {
+  const v = x * 100;
+  const col = v > 0 ? '#2ecc71' : '#e0556b';
+  return `<span style="color:${col};font-variant-numeric:tabular-nums;font-weight:600">${v >= 0 ? '+' : ''}${v.toFixed(2)}%</span>`;
+}
+
+function renderArb(): string {
+  const nr = readDataJson('predict-nrscan-status.json');
+  const pk = readDataJson('predict-pmkx-status.json');
+  const lx = readDataJson('predict-pmlx-status.json');
+  const po = readDataJson('predict-pmopt-status.json');
+  const sim = readDataJson('predict-arb-sim.json');
+
+  type ARow = { scanner: string; venue: string; label: string; gross: number; net: number; depth: number | null; live: boolean; ts: number };
+  const rows: ARow[] = [];
+  const recOf = (d: any): any[] => (d && Array.isArray(d.recent)) ? d.recent : [];
+  for (const r of recOf(nr)) rows.push({ scanner: 'NRSCAN', venue: 'внутри Polymarket', label: String(r.slug ?? ''), gross: Math.max(r.rawBuy ?? -1, r.rawSell ?? -1), net: r.netBuy ?? 0, depth: r.depthUsd ?? null, live: !!r.persisted, ts: r.ts ?? 0 });
+  for (const r of recOf(pk)) rows.push({ scanner: 'PMKX', venue: 'PM ↔ Kalshi', label: String(r.pm ?? r.kx ?? ''), gross: r.raw ?? 0, net: r.net ?? 0, depth: r.depthUsd ?? null, live: !!r.persisted, ts: r.ts ?? 0 });
+  for (const r of recOf(lx)) rows.push({ scanner: 'PMLX', venue: 'PM ↔ Limitless', label: String(r.pm ?? r.lx ?? ''), gross: r.raw ?? 0, net: r.net ?? 0, depth: r.depthUsd ?? null, live: !!r.persisted, ts: r.ts ?? 0 });
+  for (const r of recOf(po)) rows.push({ scanner: 'PMOPT', venue: 'PM vs опционы', label: String(r.q ?? ''), gross: r.div ?? 0, net: r.net ?? 0, depth: null, live: !!r.candidate, ts: r.ts ?? 0 });
+
+  rows.sort((a, b) => b.net - a.net);
+  const top = rows.slice(0, 30);
+  const now = Date.now();
+
+  const trs = top.map((r) => {
+    const am = r.ts ? Math.max(0, Math.round((now - r.ts) / 60000)) : null;
+    return `<tr style="border-top:1px solid rgba(255,255,255,0.06)">` +
+      `<td style="padding:7px 10px;white-space:nowrap"><b>${r.scanner}</b><br><span style="color:#6b7484;font-size:11px">${r.venue}</span></td>` +
+      `<td style="padding:7px 10px">${esc(r.label).slice(0, 80)}</td>` +
+      `<td style="padding:7px 10px;text-align:right;color:#9aa3b0;font-variant-numeric:tabular-nums">${(r.gross * 100).toFixed(1)}%</td>` +
+      `<td style="padding:7px 10px;text-align:right">${arbPct(r.net)}</td>` +
+      `<td style="padding:7px 10px;text-align:right;color:#9aa3b0">${r.depth != null ? '$' + Math.round(r.depth) : '—'}</td>` +
+      `<td style="padding:7px 10px;text-align:center">${r.live ? '<span style="color:#2ecc71">✓</span>' : '<span style="color:#6b7484">·</span>'}</td>` +
+      `<td style="padding:7px 10px;text-align:right;color:#6b7484;white-space:nowrap">${am != null ? am + ' мин' : '—'}</td>` +
+      `</tr>`;
+  }).join('');
+
+  const sumCard = (name: string, venue: string, d: any, qkey: string, qlabel: string, watch: string) =>
+    !d ? '' :
+    `<div class="pd-card" style="margin:0;flex:1;min-width:190px">` +
+    `<h3 style="margin:0 0 2px;font-size:15px">${name}</h3>` +
+    `<p class="pd-sub" style="margin:0 0 8px;font-size:12px">${venue}</p>` +
+    `<div class="row" style="font-size:13px">` +
+    `<div><b>${d.daysCollected ?? 0}/${d.daysTarget ?? 21}</b>дней</div>` +
+    `<div><b>${d.runs ?? 0}</b>сканов</div>` +
+    (watch && d[watch] != null ? `<div><b>${d[watch]}</b>${watch === 'pairsUnderWatch' ? 'пар' : watch === 'marketsTracked' ? 'рынков' : 'событий'}</div>` : '') +
+    `<div><b style="color:${(d[qkey] ?? 0) > 0 ? '#2ecc71' : 'inherit'}">${d[qkey] ?? 0}</b>${qlabel}</div>` +
+    `</div></div>`;
+
+  return STYLES +
+    `<div class="pd-wrap">` +
+    `<div class="pd-head"><h1>🎯 Вилки и расхождения</h1><span class="pd-fresh pd-fresh-stale" style="font-size:13px;padding:3px 10px">Фаза 0 · только наблюдение</span></div>` +
+    `<p class="pd-sub">Живой свод по всем арбитраж-сканерам. Строки ниже — <b>наблюдаемые</b> расхождения цен, НЕ гарантированная прибыль. ` +
+    `Единственная значимая колонка — <b>НЕТТО</b> (после комиссий обеих площадок); валовая щель обманчива. Колонка <b>✓</b> = щель прожила ≥60с. ` +
+    `Даже зачётная щель упирается в глубину стакана, задержку исполнения, leg-risk и (для Kalshi) KYC — поэтому ставок здесь нет.</p>` +
+    `<p style="margin:-6px 0 18px"><a class="pd-arrow" href="/predict">← к стратегиям</a></p>` +
+    (sim
+      ? `<div class="pd-card" style="margin-bottom:20px;border:1px solid rgba(74,217,145,0.3)">` +
+        `<h3 style="margin:0 0 8px">💰 Прибыль, если бы мы брали ВСЕ исполнимые вилки</h3>` +
+        `<div class="row" style="font-size:14px">` +
+        `<div><b style="color:${(sim.totalProfitUsd ?? 0) > 0 ? '#2ecc71' : 'inherit'};font-size:22px">$${sim.totalProfitUsd ?? 0}</b>за ${sim.daysCollected ?? 0} дней</div>` +
+        `<div><b style="font-size:18px">≈$${sim.perMonthUsd ?? 0}</b>в месяц (прогноз)</div>` +
+        `<div><b style="font-size:18px">${sim.totalTrades ?? 0}</b>исполнимых вилок всего</div>` +
+        `</div>` +
+        `<p class="pd-sub" style="margin:10px 0 0">⚠️ Это ОПТИМИСТИЧНАЯ верхняя граница: ${esc(String(sim.assumptions ?? ''))}, мгновенный фил обеих ног по котировке. В реале ещё ниже — щель исчезает за секунды (задержка исполнения) и есть leg-risk (одна нога налилась, вторая нет). Если цифра около нуля — значит исполнимых вилок почти нет, комиссии съедают щели.</p>` +
+        `</div>`
+      : '') +
+    `<div class="pd-grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr));margin-bottom:22px">` +
+    sumCard('NRSCAN', 'внутри Polymarket (NegRisk)', nr, 'qualifying', 'зачётных', 'eventsScanned') +
+    sumCard('PMKX', 'Polymarket ↔ Kalshi', pk, 'qualifying', 'зачётных', 'pairsUnderWatch') +
+    sumCard('PMLX', 'Polymarket ↔ Limitless', lx, 'qualifying', 'зачётных', 'pairsUnderWatch') +
+    sumCard('PMOPT', 'PM vs опционы Deribit', po, 'candidates', 'кандидатов', 'marketsTracked') +
+    `</div>` +
+    `<h2 style="margin:0 0 10px">Лучшие наблюдения сейчас (по нетто-краю)</h2>` +
+    (top.length
+      ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">` +
+        `<thead><tr style="color:#6b7484;text-align:left;font-size:11px;text-transform:uppercase">` +
+        `<th style="padding:6px 10px">Сканер</th><th style="padding:6px 10px">Рынок</th>` +
+        `<th style="padding:6px 10px;text-align:right">Валовая</th><th style="padding:6px 10px;text-align:right">Нетто</th>` +
+        `<th style="padding:6px 10px;text-align:right">Глубина</th><th style="padding:6px 10px;text-align:center">Жив 60с</th>` +
+        `<th style="padding:6px 10px;text-align:right">Возраст</th></tr></thead><tbody>${trs}</tbody></table></div>`
+      : `<p class="pd-sub">Свежих наблюдений пока нет — сканеры собирают данные.</p>`) +
+    `<p class="pd-sub" style="margin-top:16px">Критерий Фазы 0 (зафиксирован до данных): по каждой ноге ≥7–10 зачётных за 21 день (нетто ≥2–3% после комиссий, сторона ≥$50, жизнь ≥60с) — иначе нога закрывается. ` +
+    `Честный ранний итог: щели находятся, но тонкие комиссии съедают почти все в минус — большинство ног тянет к нулю зачётных.</p>` +
+    `</div>`;
+}
+
+// 🔬 Фаза 0 — исследовательские треки (сбор данных, без ставок): NRSCAN + PMKX + PMLX + PMOPT + DYNPROB.
 function researchSection(): string {
   const nr = readDataJson('predict-nrscan-status.json');
+  const pk = readDataJson('predict-pmkx-status.json');
+  const lx = readDataJson('predict-pmlx-status.json');
+  const po = readDataJson('predict-pmopt-status.json');
   const dp = readDataJson('predict-dynprob-status.json');
-  if (!nr && !dp) return '';
+  if (!nr && !pk && !lx && !po && !dp) return '';
   let html =
     `<h2 style="margin:30px 0 6px">🔬 Исследования — Фаза 0 (сбор данных, ставок нет)</h2>` +
     `<p class="pd-sub" style="margin-bottom:14px">Гипотезы сначала доказывают себя на данных — критерии зафиксированы заранее, и только потом получают право стать бумажной стратегией.</p>`;
@@ -780,6 +1123,55 @@ function researchSection(): string {
       `<div><b>${nr.findingsRaw ?? 0}</b>перекосов ≥0.5%</div>` +
       `<div><b>${nr.candidates2pct ?? 0}</b>кандидатов ≥2%</div>` +
       `<div><b style="color:${q > 0 ? 'var(--up,#2ecc71)' : 'inherit'}">${q}/10</b>зачётных (критерий)</div>` +
+      `</div></div>`;
+  }
+  if (pk) {
+    const q = pk.qualifying ?? 0;
+    html +=
+      `<div class="pd-card" style="margin-bottom:12px">` +
+      `<h3 style="margin:0 0 6px">PMKX · вилки Polymarket ↔ Kalshi</h3>` +
+      `<p class="pd-sub" style="margin:0 0 10px">Каждые 10 минут сравниваем цены эквивалентных рынков двух площадок (консервативный автомэтчинг: крипто-пороги, месячные reach/dip, решения ФРС): купить YES дешевле + NO на другой — связка платит $1. ` +
+      `Критерий (зафиксирован): ≥10 находок/мес с нетто ≥2% после комиссий обеих площадок, стороной ≥$50 и жизнью ≥60с — иначе направление закрывается.</p>` +
+      `<div class="row">` +
+      `<div><b>${pk.daysCollected ?? 0}/${pk.daysTarget ?? 21}</b>дней сбора</div>` +
+      `<div><b>${pk.pairsUnderWatch ?? 0}</b>пар под наблюдением</div>` +
+      `<div><b>${pk.runs ?? 0}</b>сканов</div>` +
+      `<div><b>${pk.findingsRaw ?? 0}</b>перекосов ≥0.5%</div>` +
+      `<div><b>${pk.candidates1pct ?? 0}</b>кандидатов ≥1%</div>` +
+      `<div><b style="color:${q > 0 ? 'var(--up,#2ecc71)' : 'inherit'}">${q}/10</b>зачётных (критерий)</div>` +
+      `</div></div>`;
+  }
+  if (lx) {
+    const q = lx.qualifying ?? 0;
+    html +=
+      `<div class="pd-card" style="margin-bottom:12px">` +
+      `<h3 style="margin:0 0 6px">PMLX · вилки Polymarket ↔ Limitless</h3>` +
+      `<p class="pd-sub" style="margin:0 0 10px">Каждые 10 минут сравниваем цены эквивалентных рынков Polymarket и Limitless (Base): консервативный автомэтчинг Up/Down-окон (часовые и дневные, BTC/ETH/SOL/XRP/DOGE) — окна должны совпадать с точностью до минут, расхождения правил (Pyth vs Binance, tie-правила) зафиксированы в реестре пар. ` +
+      `Критерий (зафиксирован до первого скана): ≥10 находок/мес с нетто ≥2% после комиссий обеих площадок, стороной ≥$50 и жизнью ≥60с — иначе нога закрывается.</p>` +
+      `<div class="row">` +
+      `<div><b>${lx.daysCollected ?? 0}/${lx.daysTarget ?? 21}</b>дней сбора</div>` +
+      `<div><b>${lx.pairsUnderWatch ?? 0}</b>пар под наблюдением</div>` +
+      `<div><b>${lx.runs ?? 0}</b>сканов</div>` +
+      `<div><b>${lx.findingsRaw ?? 0}</b>перекосов ≥0.5%</div>` +
+      `<div><b>${lx.candidates1pct ?? 0}</b>кандидатов ≥1%</div>` +
+      `<div><b style="color:${q > 0 ? 'var(--up,#2ecc71)' : 'inherit'}">${q}/10</b>зачётных (критерий)</div>` +
+      `</div></div>`;
+  }
+  if (po) {
+    const q = po.candidates ?? 0;
+    html +=
+      `<div class="pd-card" style="margin-bottom:12px">` +
+      `<h3 style="margin:0 0 6px">PMOPT · цены Polymarket против опционного fair (Deribit)</h3>` +
+      `<p class="pd-sub" style="margin:0 0 10px">Это не вилка, а монитор misprice: для месячных и годовых рынков «достигнет/упадёт» (BTC/ETH) считаем честную вероятность из опционов Deribit (digital через колл-спред, mid-цены, поправка на касание ×2) и сравниваем с ценой Polymarket. ` +
+      `Гипотеза края: хвосты на prediction-рынках систематически переоценены против опционного рынка; сигнал торговался бы мейкером на PM (комиссия 0). ` +
+      `Критерий (зафиксирован до первого скана): ≥10 кандидатов/мес с расхождением ≥5пп нетто (после тейкер-фи и полуспреда — двойной консерватизм) при узком опционном спреде (≤8пп) и жизни ≥60с — иначе ветка закрывается.</p>` +
+      `<div class="row">` +
+      `<div><b>${po.daysCollected ?? 0}/${po.daysTarget ?? 21}</b>дней сбора</div>` +
+      `<div><b>${po.marketsTracked ?? 0}</b>рынков под наблюдением</div>` +
+      `<div><b>${po.runs ?? 0}</b>сканов</div>` +
+      `<div><b>${po.measurements ?? 0}</b>замеров fair-vs-PM</div>` +
+      `<div><b>${po.meanAbsDivLastRun != null ? (po.meanAbsDivLastRun * 100).toFixed(1) + 'пп' : '—'}</b>среднее |расхождение|</div>` +
+      `<div><b style="color:${q > 0 ? 'var(--up,#2ecc71)' : 'inherit'}">${q}/10</b>кандидатов (критерий)</div>` +
       `</div></div>`;
   }
   if (dp) {
@@ -800,7 +1192,145 @@ function researchSection(): string {
         : '') +
       `</div>`;
   }
+  const ff = readDataJson('predict-5m15m-status.json');
+  if (ff) {
+    const r15 = Number(ff.resolved15m ?? 0);
+    const tgt = Number(ff.targetRounds ?? 670);
+    const pct = Math.min(100, Math.round((r15 / tgt) * 100));
+    html +=
+      `<div class="pd-card" style="margin-bottom:12px">` +
+      `<h3 style="margin:0 0 6px">5M→15M · датчик (сбор данных, Фаза 0)</h3>` +
+      `<p class="pd-sub" style="margin:0 0 10px">Read-only сбор синхронных стаканов 5m+15m BTC Up/Down (без торговли, без денег). ` +
+      `Проверяем: добавляет ли микроструктура 5m информацию к честной вероятности 15m-исхода ПОВЕРХ самой цены 15m-книги. Критерий зафиксирован до данных.</p>` +
+      `<div class="row">` +
+      `<div><b>${ff.daysCollected ?? 0}</b>дней сбора</div>` +
+      `<div><b style="color:${pct >= 100 ? '#4ad991' : 'inherit'}">${r15}/${tgt}</b>раундов 15m (${pct}%)</div>` +
+      `<div><b>${(Number(ff.samples ?? 0) / 1000).toFixed(0)}k</b>снапшотов</div>` +
+      `<div><b style="color:${ff.feedHealthy ? '#4ad991' : '#e5a13b'}">${ff.feedHealthy ? '✓ живой' : 'переподключение'}</b>фид</div>` +
+      `<div><b>$${ff.btc != null ? Math.round(Number(ff.btc)).toLocaleString('en-US') : '—'}</b>BTC</div>` +
+      `</div>` +
+      `<p class="pd-sub" style="margin:10px 0 0">Первый анализ — при наборе ~${tgt} раундов (≈неделя). Приор сдержанный: те же боты котируют 15m, вопрос — менее ли эффективна 15m-книга. Решат данные.</p>` +
+      `</div>`;
+    if (ff.ofiSamples != null) {
+      const ofiN = Number(ff.ofiRounds ?? 0);
+      const tgt5 = Number(ff.targetRounds5m ?? 600);
+      const pct5 = Math.min(100, Math.round((ofiN / tgt5) * 100));
+      const ofiLive = Number(ff.ofiSamples ?? 0) > 0 && ff.feedHealthy;
+      html +=
+        `<div class="pd-card" style="margin-bottom:12px">` +
+        `<h3 style="margin:0 0 6px">5M-OFI · дисбаланс стакана спота (Фаза 0)</h3>` +
+        `<p class="pd-sub" style="margin:0 0 10px">Read-only. Гипотеза: перевес объёма в стакане Binance (order-flow imbalance) предсказывает 5m-исход лучше цены 5m-книги Polymarket — проверяем строго ДОБАВОЧНО к цене. Приор низкий (OFI — территория HFT, цену уже ставят боты), решат данные.</p>` +
+        `<div class="row">` +
+        `<div><b style="color:${pct5 >= 100 ? '#4ad991' : 'inherit'}">${ofiN}/${tgt5}</b>5m-раундов (${pct5}%)</div>` +
+        `<div><b style="color:${ofiLive ? '#4ad991' : '#e5a13b'}">${ofiLive ? '✓ идёт' : 'ожидание'}</b>поток OFI</div>` +
+        `<div><b>${(Number(ff.ofiSamples ?? 0) / 1000).toFixed(0)}k</b>замеров с OFI</div>` +
+        `</div>` +
+        `<p class="pd-sub" style="margin:10px 0 0">Анализ при ~${tgt5} раундах (≈2–3 дня — 5m идут быстро).</p>` +
+        `</div>`;
+    }
+  }
   return html;
+}
+
+// Дашборд «Обучение»: учится ли модель (точность на свежих раундах vs рынок) + вердикт по стратегиям.
+function renderLearning(): string {
+  const MODEL = process.env.PREDICT_M15_MODEL ?? '/home/trader/apps/predict-tools/data/predict-m15-model-online.json';
+  const HIST = process.env.PREDICT_M15_HISTORY ?? '/home/trader/apps/predict-tools/data/predict-m15-model-online-history.jsonl';
+  let m: { trainN?: number; valHit?: number | null; mktHit?: number | null; valN?: number; conf?: number } | null = null;
+  try { m = JSON.parse(readFileSync(MODEL, 'utf8')); } catch {}
+  let hist: { valHit?: number | null; mktHit?: number | null }[] = [];
+  try { hist = readFileSync(HIST, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch {}
+  const back = `<a class="pd-back" href="/predict">← Все стратегии</a>`;
+  if (!m) return STYLES + `<div class="pd-wrap">${back}<h1>Обучение модели</h1><div class="pd-empty">Модель ещё не обучена.</div></div>`;
+  const lead = m.valHit != null && m.mktHit != null ? m.valHit - m.mktHit : null;
+  let verdict = '⏳ копим данные';
+  if ((m.valN ?? 0) >= 50 && lead != null) verdict = lead >= 1.5 ? `📈 модель умнее рынка (+${lead.toFixed(1)}пп)` : lead <= -1 ? `📉 хуже рынка (${lead.toFixed(1)}пп)` : '➡️ вровень с рынком (перевес ~0)';
+  const vh = hist.filter((h) => h.valHit != null) as { valHit: number; mktHit?: number | null }[];
+  let trend = '';
+  if (vh.length >= 6) {
+    const a = vh.slice(0, 3).reduce((s, h) => s + h.valHit, 0) / 3, b = vh.slice(-3).reduce((s, h) => s + h.valHit, 0) / 3;
+    trend = b > a + 0.5 ? `📈 точность растёт (${a.toFixed(1)}→${b.toFixed(1)}%)` : b < a - 0.5 ? `📉 точность падает (${a.toFixed(1)}→${b.toFixed(1)}%)` : `➡️ точность стабильна (~${b.toFixed(1)}%)`;
+  }
+  const chart = (() => {
+    if (vh.length < 2) return `<div class="pd-empty-chart">Кривая появится после нескольких дообучений (сейчас ${vh.length}).</div>`;
+    const W = 720, H = 200, PAD = 30;
+    const ys = vh.flatMap((p) => [p.valHit, p.mktHit ?? p.valHit]);
+    const min = Math.min(...ys, 48), max = Math.max(...ys, 52), span = max - min || 1;
+    const x = (i: number) => PAD + (i / (vh.length - 1)) * (W - 2 * PAD);
+    const y = (v: number) => H - PAD - ((v - min) / span) * (H - 2 * PAD);
+    const poly = (key: 'valHit' | 'mktHit', color: string) => `<polyline fill="none" stroke="${color}" stroke-width="2.5" points="${vh.map((p, i) => `${x(i).toFixed(1)},${y((p[key] ?? p.valHit) as number).toFixed(1)}`).join(' ')}"/>`;
+    return `<svg viewBox="0 0 ${W} ${H}" class="pd-chart"><line x1="${PAD}" y1="${y(50).toFixed(1)}" x2="${W - PAD}" y2="${y(50).toFixed(1)}" stroke="#2a313c" stroke-dasharray="4 4"/>${poly('mktHit', '#7d8794')}${poly('valHit', '#4ad991')}</svg>`;
+  })();
+  const rows = STRATEGIES.filter((s) => s.standalone).map((s) => {
+    const st = readStatus(s); const rounds = st?.rounds ?? 0; const wr = st?.winRate ?? 0;
+    const netPnl = st?.netPnl ?? 0;
+    let be: number | null = null;
+    if (st?.coefBuckets) { let sn = 0, sb = 0; for (const b of st.coefBuckets) if (b.n > 0 && b.breakeven != null) { sn += b.n; sb += b.breakeven * b.n; } be = sn > 0 ? sb / sn : null; }
+    const edge = be != null && rounds > 0 ? wr - be : null;
+    let v = `⏳ мало данных (${rounds})`;   // вердикт по ДЕНЬГАМ (netPnl), не по краю — деньги главнее
+    if (rounds >= 30) v = netPnl > 0 && (edge == null || edge > 0) ? `📈 в плюсе (${fmtUsd(netPnl)})` : netPnl < 0 ? `📉 в минусе (${fmtUsd(netPnl)})` : '➡️ около нуля';
+    const pnlCls = netPnl > 0 ? 'pd-pos' : netPnl < 0 ? 'pd-neg' : 'pd-muted-td';
+    return `<tr><td><a href="/predict/${s.slug}" style="color:#cfd6e0;text-decoration:none">${esc(s.title)}</a></td><td class="pd-muted-td" style="text-align:right">${rounds}</td><td style="text-align:right">${rounds > 0 ? wr + '%' : '—'}</td><td class="pd-muted-td" style="text-align:right">${be != null ? be.toFixed(0) + '%' : '—'}</td><td style="text-align:right">${edge != null ? (edge > 0 ? '+' : '') + edge.toFixed(1) + 'пп' : '—'}</td><td class="${pnlCls}" style="text-align:right">${fmtUsd(netPnl)}</td><td>${v}</td></tr>`;
+  }).join('');
+  return STYLES + `<div class="pd-wrap">${back}` +
+    `<div class="pd-head"><h1>🧠 Обучение модели</h1><span class="pd-badge">${verdict}</span></div>` +
+    `<p class="pd-sub">Одна обучающаяся модель кормит все стратегии-фильтры. Здесь видно, учится ли она и бьёт ли рынок. Дообучается каждые 30 мин на всех сыгранных раундах.</p>` +
+    `<div class="pd-grid">` +
+    statCard('Обучена на', `${m.trainN ?? '—'}`) +
+    statCard('Точность (свежие)', m.valHit != null ? `${m.valHit}%` : '—', 'pos') +
+    statCard('Точность рынка', m.mktHit != null ? `${m.mktHit}%` : '—', 'muted') +
+    statCard('Перевес модели', lead != null ? `${lead > 0 ? '+' : ''}${lead.toFixed(1)}пп` : '—', lead != null ? (lead > 0 ? 'pos' : 'neg') : 'muted') +
+    statCard('Уверенность', m.conf != null ? `${(m.conf * 100).toFixed(0)}пп` : '—', 'muted') +
+    `</div>` +
+    `<div class="pd-card"><h2>Точность модели vs рынка во времени</h2>${chart}` +
+    `<div class="pd-foot"><span style="color:#4ad991">━ модель</span> &nbsp; <span style="color:#7d8794">━ рынок</span> · % верных предсказаний направления на свежих раундах (которые модель НЕ видела). Зелёная выше серой = модель умнее рынка. ${trend}</div></div>` +
+    `<div class="pd-card"><h2>Эффективность по стратегиям</h2>` +
+    `<table class="pd-table"><thead><tr><th>Стратегия</th><th style="text-align:right">Сделок</th><th style="text-align:right">Винрейт</th><th style="text-align:right">Безубыток</th><th style="text-align:right">Край</th><th style="text-align:right">PnL</th><th>Вердикт</th></tr></thead><tbody>${rows}</tbody></table>` +
+    `<div class="pd-foot"><b>PnL = реальные деньги</b> (главное). Край — направленный сигнал, может расходиться с PnL (на разных коэффициентах разный размер payoff). Вердикт по деньгам; нужно ≥30 сделок для вывода.</div></div>` +
+    PAPER_NOTE + `</div>`;
+}
+
+// Таблица кандидатов («система поощрения»): ранжируем живые движки по КРАЮ (винрейт − безубыток).
+// Кто устойчиво обгоняет безубыток на достаточной выборке — лидер 🏆, он и идёт в реал.
+function leaderboard(): string {
+  const MIN_SAMPLE = 30;
+  const rows = STRATEGIES.filter((s) => s.standalone).map((s) => {
+    const st = readStatus(s);
+    const rounds = st?.rounds ?? 0;
+    const winRate = st?.winRate ?? 0;
+    let be: number | null = null;
+    if (st?.coefBuckets) {
+      let sn = 0, sb = 0;
+      for (const b of st.coefBuckets) if (b.n > 0 && b.breakeven != null) { sn += b.n; sb += b.breakeven * b.n; }
+      be = sn > 0 ? sb / sn : null;
+    }
+    const edge = be != null && rounds > 0 ? winRate - be : null;
+    const netPnl = st?.netPnl ?? 0;
+    return { s, rounds, winRate, be, edge, netPnl };
+  });
+  // ранжируем строго по netPnl (кто впереди по деньгам), при равенстве — по числу сделок.
+  rows.sort((a, b) => (b.netPnl - a.netPnl) || (b.rounds - a.rounds));
+  const body = rows
+    .map((r) => {
+      // 🏆 только если в плюсе по деньгам И есть положительный край И набрана выборка.
+      const leader = r.netPnl > 0 && r.edge != null && r.edge > 0 && r.rounds >= MIN_SAMPLE;
+      const edgeCls = r.edge == null ? 'pd-muted-td' : r.edge > 0 ? 'pd-pos' : 'pd-neg';
+      const pnlCls = r.netPnl > 0 ? 'pd-pos' : r.netPnl < 0 ? 'pd-neg' : 'pd-muted-td';
+      return (
+        `<tr><td>${leader ? '🏆 ' : ''}<a href="/predict/${r.s.slug}" style="color:#cfd6e0;text-decoration:none">${esc(r.s.title)}</a></td>` +
+        `<td class="pd-muted-td" style="text-align:right">${r.rounds}</td>` +
+        `<td style="text-align:right">${r.rounds > 0 ? r.winRate + '%' : '—'}</td>` +
+        `<td class="pd-muted-td" style="text-align:right">${r.be != null ? r.be.toFixed(1) + '%' : '—'}</td>` +
+        `<td class="${edgeCls}" style="text-align:right">${r.edge != null ? (r.edge > 0 ? '+' : '') + r.edge.toFixed(1) + 'пп' : '—'}</td>` +
+        `<td class="${pnlCls}" style="text-align:right">${fmtUsd(r.netPnl)}</td></tr>`
+      );
+    })
+    .join('');
+  return (
+    `<div class="pd-card" style="border-color:#3a5a2e"><h2>🏁 Таблица кандидатов — кто впереди</h2>` +
+    `<table class="pd-table"><thead><tr><th>Стратегия</th><th style="text-align:right">Сделок</th><th style="text-align:right">Винрейт</th><th style="text-align:right">Безубыток</th><th style="text-align:right">Край</th><th style="text-align:right">PnL</th></tr></thead><tbody>${body}</tbody></table>` +
+    `<div class="pd-foot"><b>PnL</b> = накопленный shadow-результат (плоско $5 на сделку). Безубыток ≈ средняя цена входа (порог, выше которого винрейт даёт плюс). Край (винрейт − безубыток) — направленный сигнал. 🏆 = лидер: в плюсе по деньгам, с положительным краем И ≥${MIN_SAMPLE} сделок. Пока сделок мало — это шум.</div></div>`
+  );
 }
 
 function renderOverview(): string {
@@ -811,15 +1341,17 @@ function renderOverview(): string {
     `<div class="pd-head"><h1>Песочница стратегий</h1><span class="pd-fresh pd-fresh-stale" style="font-size:13px;padding:3px 10px">📄 Бумажная торговля</span></div>` +
     `<p class="pd-sub">Здесь мы тестируем торговые гипотезы на реальных рынках Polymarket (BTC Up/Down, 5 мин) без реальных денег. ` +
     `Каждая стратегия — отдельная идея со своей честной статистикой: показываем всё как есть, включая убытки. ` +
-    `Стратегии, которые подтверждают преимущество на бумаге, переводим в реальную торговлю.</p>` +
+    `После ригорной проверки восьми гипотез осталась одна с доказанным на истории краем — <b>PMOPT</b> (переоценка хвостов крипто-страйков). Она проходит форвард-подтверждение ниже. Реальных денег нет до подтверждения.</p>` +
     `<p style="margin:-8px 0 20px">` +
+    `<a class="pd-arrow" href="/predict/arb">🎯 Вилки и расхождения →</a>&nbsp;&nbsp;` +
+    `<a class="pd-arrow" href="/predict/learning">🧠 Обучение модели (учится ли) →</a>&nbsp;&nbsp;` +
     `<a class="pd-arrow" href="/predict/report">📊 Авто-отчёт здоровья стратегий →</a>&nbsp;&nbsp;` +
     `<a class="pd-arrow" href="/predict/changelog">📝 Журнал изменений →</a>&nbsp;&nbsp;` +
     `<a class="pd-arrow" href="/predict/about">✨ О разделе →</a>&nbsp;&nbsp;` +
     `<a class="pd-arrow" href="https://t.me/dboykod" target="_blank" rel="noopener">💡 Предложить идею или стратегию →</a>` +
     `</p>` +
+    leaderboard() +
     `<div class="pd-cards">${cards}</div>` +
-    researchSection() +
     globalFeed() +
     `</div>`
   );
@@ -904,7 +1436,7 @@ function renderReport(): string {
   );
 }
 
-function renderStrategy(s: StrategyDef, page = 1): string {
+function renderStrategy(s: StrategyDef, page = 1, opControl = ''): string {
   const st = readStatus(s);
   const back = `<a class="pd-back" href="/predict">← все стратегии</a>`;
   const descCard = `<div class="pd-card"><h2>Как работает</h2><div class="pd-desc">${s.description.map((p) => `<p>${esc(p)}</p>`).join('')}</div></div>`;
@@ -925,32 +1457,50 @@ function renderStrategy(s: StrategyDef, page = 1): string {
 
   const header =
     `<div class="pd-head"><h1>${esc(s.title)}</h1>` +
-    `<span class="pd-badge">Фаза ${st.phase.number} · ${esc(st.phase.label)}</span>` +
+    (st.phase ? `<span class="pd-badge">Фаза ${st.phase.number} · ${esc(st.phase.label)}</span>` : '') +
     freshnessPill(st.updatedAt) +
     `</div>`;
 
-  if (st.rounds === 0) {
-    return (
-      STYLES +
-      `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` +
-      (s.hasLive ? livePanel(s) : '') +
-      descCard +
-      `<div class="pd-empty"><b style="color:#cfd6e0">Накапливаем статистику.</b><br>` +
-      `Движок работает в paper-режиме. Завершённые раунды и кривая PnL появятся здесь по мере накопления.</div>` +
-      PAPER_NOTE +
-      `</div>`
-    );
-  }
-
+  // Раньше тут был ранний return для rounds===0 (куцая заглушка без кнопки оператора/банка/объяснения).
+  // Убран: основной рендер ниже NaN-безопасен при 0 раундов (pf='—', график→«недостаточно данных»,
+  // пустая таблица) и показывает полный вид + баннер «движок работает, ждёт подходящий раунд».
   const pf = st.profitFactor === null ? '—' : st.profitFactor.toFixed(2);
   const updated = new Date(st.updatedAt).toLocaleString('ru-RU', { timeZone: 'UTC' });
   const netAccent = st.netPnl > 0 ? 'pos' : st.netPnl < 0 ? 'neg' : 'muted';
   // Ключевые метрики для money-management: просадка, серии подряд, средний коэф.
-  const ddCard = statCard('Max drawdown', `$${st.maxDrawdown.toFixed(2)}`, 'muted');
+  const ddPctVal = (st as { maxDrawdownPct?: number }).maxDrawdownPct; // у компаунд-стратегий (Кейли) $-просадка несопоставима — показываем и %
+  const ddCard = statCard('Max drawdown', `$${st.maxDrawdown.toFixed(2)}${ddPctVal != null ? ` (${ddPctVal}%)` : ''}`, 'muted');
   const lossStreakCard = st.maxLossStreak != null ? statCard('Макс. серия −', String(st.maxLossStreak), 'muted') : '';
   const winStreakCard = st.maxWinStreak != null ? statCard('Макс. серия +', String(st.maxWinStreak), 'muted') : '';
   const coefCard = st.avgCoef != null ? statCard('Ср. коэф.', st.avgCoef.toFixed(2), 'muted') : '';
   const stakeCard = st.avgStake != null ? statCard('Ср. ставка', `$${st.avgStake.toFixed(2)}`, 'muted') : '';
+  const bankCard =
+    st.bank != null
+      ? statCard(
+          'Баланс',
+          `$${st.bank.toFixed(2)}`,
+          st.bank0 != null ? (st.bank > st.bank0 ? 'pos' : st.bank < st.bank0 ? 'neg' : 'muted') : 'muted',
+        )
+      : '';
+
+  // Винрейт по диапазонам коэффициента входа — видно, на каких коэф модель реально угадывает.
+  const coefBucketsCard = (st.coefBuckets && st.coefBuckets.some((b) => b.n > 0))
+    ? `<div class="pd-card"><h2>Винрейт по коэффициентам</h2>` +
+      `<table class="pd-table"><thead><tr><th>Коэф.</th><th style="text-align:right">Сделок</th><th style="text-align:right">Винрейт</th><th style="text-align:right">Безубыток</th></tr></thead><tbody>` +
+      st.coefBuckets
+        .map((b) => {
+          const edge = b.winRate != null && b.breakeven != null ? b.winRate - b.breakeven : null;
+          const cls = b.n === 0 || edge == null ? 'pd-muted-td' : edge > 0 ? 'pd-pos' : 'pd-neg';
+          return (
+            `<tr><td>${esc(b.range)}</td>` +
+            `<td class="pd-muted-td" style="text-align:right">${b.n}</td>` +
+            `<td class="${cls}" style="text-align:right">${b.winRate != null ? b.winRate + '%' : '—'}</td>` +
+            `<td class="pd-muted-td" style="text-align:right">${b.breakeven != null ? b.breakeven + '%' : '—'}</td></tr>`
+          );
+        })
+        .join('') +
+      `</tbody></table><div class="pd-foot">Зелёный = винрейт выше безубытка (на этом коэффициенте есть край), красный = ниже. Безубыток ≈ средняя цена входа в диапазоне.</div></div>`
+    : '';
 
   // Пагинация таблицы раундов: 20 на страницу, новые первыми.
   const PAGE_SIZE = 20;
@@ -975,6 +1525,28 @@ function renderStrategy(s: StrategyDef, page = 1): string {
     STYLES +
     `<div class="pd-wrap">${back}${header}<p class="pd-sub">${esc(s.tagline)}</p>` +
     retiredBanner +
+    (s.standalone && s.realEligible === true
+      ? `<div class="pd-card" style="border:2px solid #d83a3a;background:rgba(216,58,58,0.07)">` +
+        `<h2 style="color:#ff6b6b;margin-top:0">🔴 Идёт мини-тест на РЕАЛЬНЫЕ ДЕНЬГИ</h2>` +
+        `<p class="pd-sub" style="margin:0 0 12px">Эта страница — <b>бумажная (shadow)</b> статистика. Параллельно идёт боевой мини-тест на реальный депозит с жёсткими капами (ставка $1 · авто-стоп −$8) и шлюзом ликвидности (вход только если стакан реально наливает ставку). Его отдельная статистика — на красной странице ниже.</p>` +
+        `<a class="pd-back" style="font-size:15px;background:#3a1518;border:1px solid #d83a3a;color:#ff8a8a;padding:9px 16px;border-radius:8px;text-decoration:none" href="/predict/${esc(s.slug)}real">🔴 Реальная торговля — статистика →</a>` +
+        `</div>`
+      : '') +
+    (s.recommendedReal
+      ? `<div class="pd-card" style="border-color:#3a5a2e"><h2>💰 Рекомендуемый банк для реала: $${s.recommendedReal}</h2>` +
+        `<p class="pd-sub" style="margin:0">${esc(s.recommendedRealNote ?? '')}. Это сумма, которую нужно положить на кошелёк перед включением реала; авто-стоп ограничивает убыток.</p></div>`
+      : '') +
+    (st.modelOnline
+      ? `<div class="pd-card" style="border-color:#2e5a4a"><h2>🧠 Модель учится непрерывно</h2>` +
+        `<p class="pd-sub" style="margin:0">Сейчас обучена на <b>${st.modelTrainN ?? '?'}</b> сыгранных раундах` +
+        (st.modelTrainedAt ? ` · обновлена ${esc(new Date(st.modelTrainedAt).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }))} МСК` : '') +
+        `. Дообучается каждые 30 мин на всех завершённых раундах, ставит только на новые (walk-forward — без заглядывания в будущее). Чем больше число — тем меньше переобучение.</p></div>`
+      : '') +
+    (s.standalone && st.rounds === 0
+      ? `<div class="pd-card" style="border-color:#3a4a5e"><h2>ℹ️ Движок работает — ждёт подходящий раунд</h2>` +
+        `<p class="pd-sub" style="margin:0">Сделок пока <b>0</b>, и это НЕ поломка. Движок живой и уже перебрал <b>${st.evaluated ?? 0}</b> раундов, но ни один не попал под условие входа этой стратегии: фильтр срабатывает не каждый раунд (узкая полоса расхождения модель↔рынок ловит сигнал реже — модель часто расходится сильнее, чем диапазон полосы). Первая сделка появится, как только расхождение попадёт в нужный диапазон. Статус обновляется каждую секунду.</p></div>`
+      : '') +
+    opControl +
     (s.hasLive ? livePanel(s) : '') +
     descCard +
     `<div class="pd-grid">` +
@@ -987,6 +1559,7 @@ function renderStrategy(s: StrategyDef, page = 1): string {
     winStreakCard +
     coefCard +
     stakeCard +
+    bankCard +
     trapCard +
     statCard('Режим', st.mode === 'paper' ? 'Paper' : esc(st.mode), 'muted') +
     `</div>` +
@@ -995,7 +1568,10 @@ function renderStrategy(s: StrategyDef, page = 1): string {
     (s.isTrap && st.trapClosed != null ? ` · 🔒 замков: ${st.trapClosed} · одна нога: ${st.oneLegged ?? 0}` : '') +
     (st.marketOutcomes ? ` · Исходы рынка ↑${st.marketOutcomes.up}/↓${st.marketOutcomes.down}` : '') +
     `</div></div>` +
+    coefBucketsCard +
+    edgeSparkline(allRounds) +
     roundsTable +
+    (s.lossPatternFile ? lossPatternCard(s.lossPatternFile) : '') +
     PAPER_NOTE +
     `<p class="pd-foot">Обновлено: ${esc(updated)} UTC</p>` +
     `</div>`
@@ -1106,11 +1682,15 @@ function readRealSessions(): RealSessions {
 }
 /** Личная (боевая) статистика стратегии — пишется боевым инстансом, если запущен. */
 function readRealStatus(slug: string): PredictStatus | null {
-  try {
-    const p = join(dataDir, `predict-real-${slug}-status.json`);
-    if (existsSync(p)) return JSON.parse(readFileSync(p, 'utf8')) as PredictStatus;
-  } catch {
-    /* нет данных */
+  // Два контура: Kelly-сессии пишут predict-real-<slug>-status.json; standalone-боевой движок m15live
+  // (h5m8real) пишет predict-<slug>real-status.json. Пробуем оба, чтобы обзор видел реал-PnL/капы обоих.
+  for (const name of [`predict-real-${slug}-status.json`, `predict-${slug}real-status.json`]) {
+    try {
+      const p = join(dataDir, name);
+      if (existsSync(p)) return JSON.parse(readFileSync(p, 'utf8')) as PredictStatus;
+    } catch {
+      /* нет данных — пробуем следующий */
+    }
   }
   return null;
 }
@@ -1124,6 +1704,29 @@ function readRealLive(slug: string): RealLive | null {
     /* нет открытой позиции */
   }
   return null;
+}
+
+// Баланс боевого депозит-кошелька (USDC) — серверный fetch к локальному движку.
+// Только ЧТЕНИЕ: движок отдаёт {ok,usdc}. Падение/таймаут → null (страница покажет «—»).
+const REAL_BALANCE_URL = process.env.PREDICT_BALANCE_URL ?? 'http://127.0.0.1:8731/balance';
+async function fetchRealBalance(): Promise<number | null> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3000);
+    let usdc: number | null = null;
+    try {
+      const r = await fetch(REAL_BALANCE_URL, { signal: ctrl.signal });
+      if (r.ok) {
+        const j = (await r.json()) as { ok?: boolean; usdc?: number };
+        if (j && j.ok && typeof j.usdc === 'number' && Number.isFinite(j.usdc)) usdc = j.usdc;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    return usdc;
+  } catch {
+    return null; // сеть недоступна / таймаут — graceful «—»
+  }
 }
 
 /** Сохранить приватный ключ в защищённый файл (chmod 600). Возвращает маску. */
@@ -1175,6 +1778,14 @@ const RECOMMENDED_BUDGET = 30;
 // Журнал изменений раздела — хронология, что и зачем меняли (новые сверху).
 type ChangeEntry = { date: string; title: string; items: string[] };
 const CHANGELOG: ChangeEntry[] = [
+  {
+    date: '2026-06-13',
+    title: 'Расчистка: оставлен единственный верифицированный край (PMOPT)',
+    items: [
+      'Остановлены и удалены все стратегии/сканеры без доказанного края: DYNPROB (вердикт KILL, юнит −$39 на 311 раундах) и его технический фид egtwo, NRSCAN (0 зачётных за 369 сканов), PMKX и PMLX (нулевая исполнимая прибыль после комиссий). Данные сохранены в архив как датасеты.',
+      'Остаётся PMOPT — единственная гипотеза, прошедшая офлайн-бэктест (favorite-longshot bias на крипто-страйках: фейд глубоких лонгшотов +4.6пп, кластерный CI [3.3,5.8], робастно по обоим направлениям и BTC/ETH/SOL). Идёт форвард-подтверждение на живых рынках. Реальных денег нет.',
+    ],
+  },
   {
     date: '2026-06-12',
     title: 'Карточка «DYNPROB · фикс $5» — контроль без Келли',
@@ -1528,6 +2139,25 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     (canRun ? '' : `<p class="pd-foot" style="margin-top:14px;color:#caa">Кнопки «Запустить» станут активными после сохранения ключа и адреса депозит-кошелька ниже.</p>`) +
     `</div>`;
 
+  // Standalone-кандидаты в реал (живой движок m15live, НЕ Kelly-движок выше). Сейчас это только
+  // h5m8: мини-тест боевого пути с жёсткими капами + шлюзом ликвидности. Управление — на его странице
+  // /predict/<slug> («⚙️ Реальная торговля (оператор)»), чтобы не смешивать с Kelly-сессиями выше.
+  const standaloneReal = STRATEGIES.filter((s) => s.standalone && s.realEligible === true && !s.engine);
+  const standaloneCard = standaloneReal.length === 0 ? '' :
+    `<div class="pd-card" style="border-color:#5a2e2e"><h2>Боевой кандидат — мини-тест (отдельный движок)</h2>` +
+    `<p class="pd-sub">Эти стратегии запускают <b>боевой движок m15live</b> с зашитыми мини-капами и шлюзом ликвидности (не Kelly-делёж банка). Управление — на странице самой стратегии.</p>` +
+    standaloneReal.map((s) => {
+      const on = activeSet.has(s.slug);
+      const st = readRealStatus(s.slug);
+      const pnl = st?.netPnl != null ? fmtUsd(st.netPnl) : '—';
+      const cStake = st?.flatStake ?? 1;
+      const cLoss = st?.maxLossUsd ?? 8;
+      return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid #1e2530">` +
+        `<div><b>${esc(s.title)}</b><div class="pd-foot" style="margin-top:2px">Капы: ставка $${cStake.toFixed(0)} · авто-стоп −$${cLoss.toFixed(0)} · шлюз ликвидности · ${on ? '<span class="pd-pos">● активна</span>' : '⏸ не запущена'} · реал-PnL ${pnl}</div></div>` +
+        `<a class="pd-rbtn pd-rbtn-go" style="width:auto;display:inline-block;padding:9px 18px;text-decoration:none" href="/predict/${esc(s.slug)}real">Открыть статистику реала →</a></div>`;
+    }).join('') +
+    `</div>`;
+
   // Общая кривая накопленного PnL (все реальные сделки всех стратегий).
   const overallChart = allRealRounds.length >= 2
     ? `<div class="pd-card"><h2>Кривая накопленного PnL — все стратегии</h2>${equitySvg(equityFromRounds(allRealRounds, 'real'))}` +
@@ -1581,6 +2211,7 @@ function renderRealTrading(cfg: RealConfig, ctrl: RealControl, err?: string): st
     summaryCard +
     errNote +
     launchCard +
+    standaloneCard +
     overallChart +
     openCard +
     walletForm +
@@ -1657,6 +2288,139 @@ function renderRealStrategy(s: StrategyDef, st: PredictStatus | null, ses: RealS
   );
 }
 
+// ── Боевой мини-тест (h5m8): ОТДЕЛЬНАЯ страница статистики РЕАЛЬНОЙ торговли ──
+// ТОЛЬКО отображение готовых данных (status JSON + баланс кошелька). Ничего не
+// армит, не шлёт ордера, деньги не трогает. Красный/боевой акцент, явная пометка
+// «РЕАЛЬНЫЕ ДЕНЬГИ» — чтобы не спутать с бумажной (shadow) статистикой стратегии.
+// Обобщена под любой realEligible-кандидат (сейчас h5m8): капы/порог берутся из статуса/slug.
+function renderH5m12Real(
+  s: StrategyDef,
+  st: PredictStatus | null,
+  balance: number | null,
+  armed: boolean,
+  page: number,
+): string {
+  const back = `<a class="pd-back" href="/predict/${esc(s.slug)}">← бумажная (shadow) статистика ${esc(s.slug)}</a>`;
+  const balStr = balance != null ? `$${balance.toFixed(2)}` : '—';
+  const rounds = st?.rounds ?? 0;
+
+  // Капы боевого движка (зашиты в юнит, отражаются в статусе): ставка/стоп/лимит ордеров + шлюз.
+  const capStake = st?.flatStake ?? 1;
+  const capLoss = st?.maxLossUsd ?? 8;
+  const capSlip = st?.maxSlip ?? 0.02;
+  const skipped = st?.skipped ?? 0;
+  const openCount = st?.openCount ?? 0;
+  // Порог расхождения из slug (h5m8 → ≥8пп): для текста «ждём сигнал».
+  const thrMatch = /(\d+)$/.exec(s.slug);
+  const thrPp = thrMatch ? thrMatch[1] : '8';
+
+  // Заголовок: красный боевой акцент.
+  const header =
+    `<div class="pd-head"><h1 style="color:#ff6b6b">🔴 Реальная торговля — ${esc(s.slug)} (мини-тест на реальные деньги)</h1>` +
+    (st ? freshnessPill(st.updatedAt) : `<span class="pd-fresh pd-fresh-stale"><span class="pd-dot"></span>статус недоступен</span>`) +
+    `</div>`;
+
+  // Громкий красный баннер: РЕАЛЬНЫЕ ДЕНЬГИ.
+  const realMoneyBanner =
+    `<div class="pd-card" style="border:2px solid #d83a3a;background:rgba(216,58,58,0.08)">` +
+    `<h2 style="color:#ff6b6b;margin-top:0">⚠️ РЕАЛЬНЫЕ ДЕНЬГИ — это НЕ бумажная статистика</h2>` +
+    `<p class="pd-sub" style="margin:0">Здесь показаны <b style="color:#ff8a8a">боевые сделки на реальный депозит</b> (USDC на Polygon). ` +
+    `Это изолированный мини-тест стратегии ${esc(s.slug)} с жёсткими капами и шлюзом ликвидности (вход только если стакан реально наливает ставку). Бумажная (shadow) статистика той же стратегии — на ` +
+    `<a class="pd-back" style="font-size:inherit;display:inline" href="/predict/${esc(s.slug)}">отдельной странице</a> и сюда не смешивается. ` +
+    `Эта страница — только просмотр; ничего не запускает и денег не двигает.</p></div>`;
+
+  // Верхний блок состояния: баланс кошелька, статус (армлен/боевой), капы.
+  const engineReal = st?.engineMode === 'real' || st?.allowReal === true;
+  const statusLabel = armed
+    ? (engineReal ? '🟢 Армлен · боевой движок (real)' : '🟢 Армлен')
+    : '⏸ Не армлен';
+  const statusAccent: 'pos' | 'neg' | 'muted' = armed ? 'pos' : 'muted';
+  const stateCard =
+    `<div class="pd-card" style="border-color:#5a2e2e"><h2>Состояние боевого контура</h2>` +
+    `<div class="pd-grid" style="margin-bottom:8px">` +
+    statCard('Баланс кошелька', balStr, balance != null ? (balance > 0 ? 'pos' : 'neg') : 'muted') +
+    statCard('Статус движка', statusLabel, statusAccent) +
+    statCard('Открытых сейчас', String(openCount), openCount > 0 ? 'neg' : 'muted') +
+    statCard('Пропущено (тонкий стакан)', String(skipped), 'muted') +
+    `</div>` +
+    `<div class="pd-foot" style="margin:0">Капы (зашиты в боевой движок): ставка <b style="color:#ff8a8a">$${capStake.toFixed(0)}</b> · авто-стоп <b style="color:#ff8a8a">−$${capLoss.toFixed(0)}</b> · постоянно. ` +
+    `Шлюз ликвидности: вход только если стакан наливает ставку по цене не хуже котировки на <b style="color:#ff8a8a">${(capSlip * 100).toFixed(0)}¢</b>; иначе пропуск (учтён в «Пропущено», в PnL не идёт).` +
+    (balance == null ? ' Баланс кошелька временно недоступен (показан «—») — это не влияет на работу движка.' : '') +
+    `</div></div>`;
+
+  if (!st) {
+    // Статус-файл недоступен — всё равно показываем баланс/капы и честную заглушку.
+    return (
+      STYLES +
+      `<div class="pd-wrap">${back}${header}` +
+      `<p class="pd-sub">${esc(s.tagline)}</p>` +
+      realMoneyBanner +
+      stateCard +
+      `<div class="pd-card"><p class="pd-foot">Боевой статус-файл пока не опубликован — данные появятся, как только боевой движок запишет первый снимок.</p></div>` +
+      `</div>`
+    );
+  }
+
+  // Пустое состояние: реальных сделок ещё нет.
+  const emptyBanner = rounds === 0
+    ? `<div class="pd-card" style="border-color:#5a4a2e"><h2>⏳ Реальных сделок пока нет</h2>` +
+      `<p class="pd-sub" style="margin:0">Движок активен и ждёт первый сигнал <b>≥${thrPp}пп</b> (расхождение модели с рынком), который при этом реально наливается на стакане. ` +
+      `Баланс кошелька <b style="color:#ffd27a">${balStr}</b>. Как появится подходящее расхождение с ликвидностью — поставит реальный <b>$${capStake.toFixed(0)}</b>. ` +
+      `Движок уже перебрал <b>${st.evaluated ?? 0}</b> раундов, из них пропустил по тонкому стакану <b>${skipped}</b>; подходящие сигналы редки, поэтому пауза — это норма, а не поломка.</p></div>`
+    : '';
+
+  const pf = st.profitFactor == null ? '—' : st.profitFactor.toFixed(2);
+  const netAccent = st.netPnl > 0 ? 'pos' : st.netPnl < 0 ? 'neg' : 'muted';
+  const updated = new Date(st.updatedAt).toLocaleString('ru-RU', { timeZone: 'UTC' });
+
+  // Сетка метрик — как у shadow, но РЕАЛ.
+  const metrics =
+    `<div class="pd-grid">` +
+    statCard('Реал-сделок', String(st.rounds)) +
+    statCard('Win rate', `${st.winRate}%`) +
+    statCard('Реальный PnL', fmtUsd(st.netPnl), netAccent) +
+    statCard('Profit factor', pf, 'muted') +
+    statCard('Max drawdown', `$${st.maxDrawdown.toFixed(2)}`, 'muted') +
+    statCard('Пропущено (тонкий стакан)', String(skipped), 'muted') +
+    (st.maxLossStreak != null ? statCard('Макс. серия −', String(st.maxLossStreak), 'muted') : '') +
+    (st.maxWinStreak != null ? statCard('Макс. серия +', String(st.maxWinStreak), 'muted') : '') +
+    (st.avgCoef != null ? statCard('Ср. коэф.', st.avgCoef.toFixed(2), 'muted') : '') +
+    (st.avgStake != null ? statCard('Ср. ставка', `$${st.avgStake.toFixed(2)}`, 'muted') : '') +
+    `</div>`;
+
+  // График: кривая накопленного РЕАЛЬНОГО PnL.
+  const allRounds = st.recentRounds ?? [];
+  const equityChart =
+    `<div class="pd-card"><h2>Кривая накопленного РЕАЛЬНОГО PnL</h2>` +
+    equitySvg(st.equityCurve && st.equityCurve.length >= 2 ? st.equityCurve : equityFromRounds(allRounds, s.slug)) +
+    `<div class="pd-foot">Выигрышей: ${st.wins} · Проигрышей: ${st.losses} · реальные деньги.</div></div>`;
+
+  // Таблица реальных сделок (пагинация 20/стр).
+  const PAGE_SIZE = 20;
+  const totalPages = Math.max(1, Math.ceil(allRounds.length / PAGE_SIZE));
+  const p = Math.min(Math.max(1, page), totalPages);
+  const pageRounds = allRounds.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
+  const roundsTable = recentRoundsTable(pageRounds, {
+    title: `Реальные сделки (${allRounds.length})`,
+    page: p,
+    totalPages,
+    baseHref: `/predict/${s.slug}real`,
+  });
+
+  return (
+    STYLES +
+    `<div class="pd-wrap">${back}${header}` +
+    `<p class="pd-sub">${esc(s.tagline)}</p>` +
+    realMoneyBanner +
+    stateCard +
+    emptyBanner +
+    metrics +
+    (rounds > 0 ? equityChart + roundsTable : '') +
+    `<p class="pd-foot">Обновлено: ${esc(updated)} UTC · 🔴 реальные деньги · только отображение</p>` +
+    `</div>`
+  );
+}
+
 // Журнал изменений — публичная страница с хронологией того, что и зачем меняли.
 function renderChangelog(): string {
   const back = `<a class="pd-back" href="/predict">← песочница стратегий</a>`;
@@ -1724,6 +2488,19 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     });
   });
 
+  app.get('/predict/arb', async (req, reply) => {
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('Cache-Control', 'no-store');
+    const u = getAuthedUser(req);
+    return pageShell('Вилки и расхождения — /predict', renderArb(), {
+      lang: 'ru',
+      autoRefreshSec: 60,
+      robots: 'noindex, nofollow',
+      loginNext: '/predict',
+      authed: u ? { displayName: u.displayName, phone: u.phone } : undefined,
+    });
+  });
+
   // Дашборд /predict — ПУБЛИЧНЫЙ (открыт всем). Реальная торговля остаётся за доступом.
   app.get('/predict', async (req, reply) => {
     reply.header('content-type', 'text/html; charset=utf-8');
@@ -1739,6 +2516,19 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
   });
 
   // Авто-отчёт здоровья стратегий — ПУБЛИЧНЫЙ (обновляется systemd-таймером каждые 3ч).
+  app.get('/predict/learning', async (req, reply) => {
+    reply.header('content-type', 'text/html; charset=utf-8');
+    reply.header('Cache-Control', 'no-store');
+    const u = getAuthedUser(req);
+    return pageShell('Обучение модели — /predict', renderLearning(), {
+      lang: 'ru',
+      autoRefreshSec: 300,
+      robots: 'noindex, nofollow',
+      loginNext: '/predict',
+      authed: u ? { displayName: u.displayName, phone: u.phone } : undefined,
+    });
+  });
+
   app.get('/predict/report', async (req, reply) => {
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('Cache-Control', 'no-store');
@@ -1810,8 +2600,10 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       reply.code(303).header('location', '/predict/real?err=funder').send();
       return;
     }
-    // Только eligible-стратегия.
-    const elig = STRATEGIES.find((s) => s.slug === slug && s.engine && s.realEligible !== false);
+    // Только eligible-стратегия: engine-движок ИЛИ standalone живой движок, явно помеченный realEligible.
+    // Гард сужен под инвариант «в реал идёт только h5m12»: standalone-стратегия без realEligible:true
+    // (11 shadow-кандидатов) НЕ может записать намерение running.<slug> — реал-путь для неё закрыт.
+    const elig = STRATEGIES.find((s) => s.slug === slug && ((s.engine && s.realEligible !== false) || (s.standalone && s.realEligible === true)));
     if (!elig) {
       reply.code(303).header('location', '/predict/real').send();
       return;
@@ -1898,6 +2690,31 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
     reply.code(303).header('location', funderBad ? '/predict/real?err=funder' : '/predict/real').send();
   });
 
+  // ── Боевая статистика мини-теста h5m12 (РЕАЛЬНЫЕ ДЕНЬГИ) — только отображение ──
+  // Публичная страница (как и shadow-страница /predict/h5m12): читает готовый боевой
+  // статус-файл + баланс кошелька (серверный fetch). Не армит, ордеров не шлёт, деньги
+  // не трогает. Зарегистрирована для standalone-стратегии, помеченной realEligible (h5m12).
+  for (const s of STRATEGIES.filter((x) => x.standalone && x.realEligible === true && !x.engine)) {
+    app.get(`/predict/${s.slug}real`, async (req, reply) => {
+      reply.header('content-type', 'text/html; charset=utf-8');
+      reply.header('Cache-Control', 'no-store');
+      const u = getAuthedUser(req);
+      const pageRaw = (req.query as { page?: string } | undefined)?.page;
+      const page = Math.max(1, parseInt(pageRaw ?? '1', 10) || 1);
+      // Боевой статус движка m15live(real): data/predict-<slug>real-status.json.
+      const realStatus = readDataJson(`predict-${s.slug}real-status.json`) as PredictStatus | null;
+      const armed = !!readRealControl().running?.[s.slug];
+      const balance = await fetchRealBalance(); // серверный fetch к localhost:8731 — graceful null
+      return pageShell(`🔴 ${s.title} — реальная торговля`, renderH5m12Real(s, realStatus, balance, armed, page), {
+        lang: 'ru',
+        autoRefreshSec: 30,
+        robots: 'noindex, nofollow', // боевой контур — не индексируем
+        loginNext: `/predict/${s.slug}real`,
+        authed: u ? { displayName: u.displayName, phone: u.phone } : undefined,
+      });
+    });
+  }
+
   for (const s of STRATEGIES) {
     app.get(`/predict/${s.slug}`, async (req, reply) => {
       reply.header('content-type', 'text/html; charset=utf-8');
@@ -1905,7 +2722,28 @@ export async function predictRoute(app: FastifyInstance): Promise<void> {
       const u = getAuthedUser(req);
       const pageRaw = (req.query as { page?: string } | undefined)?.page;
       const page = Math.max(1, parseInt(pageRaw ?? '1', 10) || 1);
-      return pageShell(`${s.title} — /predict`, renderStrategy(s, page), {
+      let opControl = '';
+      // Операторский блок реал-кнопки — ТОЛЬКО для standalone-стратегии, явно помеченной realEligible
+      // (сейчас это только h5m8). Остальные shadow-кандидаты реал-кнопки не показывают: их движки
+      // в MODE=shadow ордеров не шлют, а намерение running.<slug> для них теперь и не принимается роутом.
+      if (s.standalone && s.realEligible === true && gate(req)) {
+        const running = !!readRealControl().running?.[s.slug];
+        const wr = (readDataJson(s.statusFile) as { winRate?: number } | null)?.winRate;
+        const warn = wr != null ? `Живой винрейт сейчас ${wr}% — ${wr > 53 ? 'выше безубытка' : 'НИЖЕ безубытка, ожидаемый минус'}. ` : '';
+        // h5m8 — ЕДИНСТВЕННЫЙ реал-кандидат: боевой движок m15live(real)+шлюз ликвидности с МИНИ-капами
+        // (ставка $1, авто-стоп −$8) поднимает супервайзер по этой кнопке (predict-h5m8real.service).
+        // Деньги двигает оператор сам (пополнение депозит-кошелька USDC на Polygon).
+        const opMsg = `${warn}🔴 МИНИ-ТЕСТ РЕАЛА. Капы (зашиты в боевой движок): ставка <b>$1</b>, авто-стоп <b>−$8</b>, постоянно. Шлюз ликвидности: входим только если стакан реально наливает ставку (иначе пропуск, в PnL не идёт) — так реал не проскальзывает по плохой цене. Перед запуском пополни депозит-кошелёк (USDC на сети Polygon) — без баланса ордера просто пропускаются. Кнопка ставит намерение; супервайзер поднимет боевой движок (m15live в режиме real). «Остановить» — глушит его.`;
+        opControl =
+          `<div class="pd-card" style="border-color:#5a2e2e"><h2>⚙️ Реальная торговля (оператор)</h2>` +
+          `<p class="pd-sub">${opMsg}</p>` +
+          (running
+            ? `<form method="POST" action="/predict/real/stop"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-rbtn pd-rbtn-stop" style="width:auto;display:inline-block;padding:9px 20px">⏸ Остановить реал</button></form>`
+            : `<form method="POST" action="/predict/real/start"><input type="hidden" name="slug" value="${esc(s.slug)}"><button type="submit" class="pd-rbtn pd-rbtn-go" style="width:auto;display:inline-block;padding:9px 20px">▶ Запустить в реал</button></form>`) +
+          `<p style="margin-top:14px"><a class="pd-back" style="font-size:15px;background:#3a1518;border:1px solid #d83a3a;color:#ff8a8a;padding:9px 16px;border-radius:8px" href="/predict/${esc(s.slug)}real">🔴 Статистика реальной торговли →</a></p>` +
+          `</div>`;
+      }
+      return pageShell(`${s.title} — /predict`, renderStrategy(s, page, opControl), {
         lang: 'ru',
         autoRefreshSec: 60,
         robots: 'index, follow',
