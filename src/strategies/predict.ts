@@ -2332,7 +2332,7 @@ function renderH5m12Real(
   // Верхний блок состояния: баланс кошелька, статус (армлен/боевой), капы.
   const engineReal = st?.engineMode === 'real' || st?.allowReal === true;
   const statusLabel = armed
-    ? (engineReal ? '🟢 Армлен · боевой движок (real)' : '🟢 Армлен')
+    ? (engineReal ? '🟢 Реал активен' : '🟢 Армлен')
     : '⏸ Не армлен';
   const statusAccent: 'pos' | 'neg' | 'muted' = armed ? 'pos' : 'muted';
   const stateCard =
@@ -2341,10 +2341,9 @@ function renderH5m12Real(
     statCard('Баланс кошелька', balStr, balance != null ? (balance > 0 ? 'pos' : 'neg') : 'muted') +
     statCard('Статус движка', statusLabel, statusAccent) +
     statCard('Открытых сейчас', String(openCount), openCount > 0 ? 'neg' : 'muted') +
-    statCard('Пропущено (тонкий стакан)', String(skipped), 'muted') +
     `</div>` +
     `<div class="pd-foot" style="margin:0">Капы (зашиты в боевой движок): ставка <b style="color:#ff8a8a">$${capStake.toFixed(0)}</b> · авто-стоп <b style="color:#ff8a8a">−$${capLoss.toFixed(0)}</b> · постоянно. ` +
-    `Шлюз ликвидности: вход только если стакан наливает ставку по цене не хуже котировки на <b style="color:#ff8a8a">${(capSlip * 100).toFixed(0)}¢</b>; иначе пропуск (учтён в «Пропущено», в PnL не идёт).` +
+    `Шлюз ликвидности: вход только если стакан наливает ставку по цене не хуже котировки на <b style="color:#ff8a8a">${(capSlip * 100).toFixed(0)}¢</b>; иначе пропуск (в PnL не идёт; счётчик «Пропущено» — в метриках ниже).` +
     (balance == null ? ' Баланс кошелька временно недоступен (показан «—») — это не влияет на работу движка.' : '') +
     `</div></div>`;
 
