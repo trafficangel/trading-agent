@@ -1436,6 +1436,32 @@ function renderReport(): string {
   );
 }
 
+// Блок «Бумага ↔ Реал» — только для realEligible-стратегий (h5m8/h5m12/h5m20). Показывает рядом
+// ключевые цифры shadow и real ОДНОЙ стратегии, чтобы видеть сходимость исполнения. Read-only.
+function renderCompareBlock(s: StrategyDef): string {
+  if (!(s.standalone && s.realEligible === true)) return '';
+  const sh = readDataJson(s.statusFile) as PredictStatus | null;                         // бумага (shadow)
+  const re = readDataJson(`predict-${s.slug}real-status.json`) as PredictStatus | null;  // реал
+  if (!sh && !re) return '';
+  const row = (label: string, st: PredictStatus | null): string => {
+    if (!st) return `<tr><td>${label}</td><td colspan="5" class="pd-muted-td" style="text-align:center">нет данных</td></tr>`;
+    const pf = st.profitFactor == null ? '—' : st.profitFactor.toFixed(2);
+    const acc = st.netPnl > 0 ? 'pd-pos' : st.netPnl < 0 ? 'pd-neg' : 'pd-muted-td';
+    return `<tr><td>${label}</td>` +
+      `<td style="text-align:right">${st.rounds}</td>` +
+      `<td style="text-align:right">${st.winRate}%</td>` +
+      `<td class="${acc}" style="text-align:right">${fmtUsd(st.netPnl)}</td>` +
+      `<td class="pd-muted-td" style="text-align:right">${pf}</td>` +
+      `<td class="pd-muted-td" style="text-align:right">${st.avgCoef != null ? st.avgCoef.toFixed(2) : '—'}</td></tr>`;
+  };
+  return `<div class="pd-card" style="border-color:#2e4a5a"><h2>Бумага ↔ Реал — сходимость исполнения</h2>` +
+    `<table class="pd-table"><thead><tr><th></th><th style="text-align:right">Сделок</th><th style="text-align:right">Win</th><th style="text-align:right">PnL</th><th style="text-align:right">PF</th><th style="text-align:right">Ср.коэф</th></tr></thead><tbody>` +
+    row('🟡 Бумага (shadow)', sh) +
+    row('🔴 Реал', re) +
+    `</tbody></table>` +
+    `<div class="pd-foot">Одна стратегия и один сигнал — расхождение = разница ИСПОЛНЕНИЯ (реал наливается по факту стакана, бумага — по котировке). С лимитными ордерами ($5, с 2026-06-23) должны сходиться; статистика сброшена для чистого замера.</div></div>`;
+}
+
 function renderStrategy(s: StrategyDef, page = 1, opControl = ''): string {
   const st = readStatus(s);
   const back = `<a class="pd-back" href="/predict">← все стратегии</a>`;
@@ -1569,6 +1595,7 @@ function renderStrategy(s: StrategyDef, page = 1, opControl = ''): string {
     (st.marketOutcomes ? ` · Исходы рынка ↑${st.marketOutcomes.up}/↓${st.marketOutcomes.down}` : '') +
     `</div></div>` +
     coefBucketsCard +
+    renderCompareBlock(s) +
     edgeSparkline(allRounds) +
     roundsTable +
     (s.lossPatternFile ? lossPatternCard(s.lossPatternFile) : '') +
@@ -2414,6 +2441,7 @@ function renderH5m12Real(
     stateCard +
     emptyBanner +
     metrics +
+    renderCompareBlock(s) +
     (rounds > 0 ? equityChart + roundsTable : '') +
     `<p class="pd-foot">Обновлено: ${esc(updated)} UTC · 🔴 реальные деньги · только отображение</p>` +
     `</div>`
