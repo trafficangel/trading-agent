@@ -72,17 +72,15 @@ function simEquity(trades: { t: number; pct: number }[], f: number, cap0: number
     const months = (trades[trades.length - 1]!.t - trades[0]!.t) / (30 * 86_400_000);
     const wins = trades.filter((t) => t.pct > 0).length;
     const meanPct = trades.reduce((s, t) => s + t.pct, 0) / trades.length;
-    console.log(`========== ${name.toUpperCase()} {${coins.join(',')}} ==========`);
-    console.log(`  trades ${trades.length} over ${months.toFixed(1)}mo (${(trades.length / months).toFixed(1)}/mo) · win ${Math.round(wins / trades.length * 100)}% · mean net ${meanPct.toFixed(2)}%/trade`);
-    for (const f of [0.2, 0.4]) {
-      const lev = f === 0.2 ? '~1x' : '~2x';
-      for (const cap of [1000, 3000]) {
-        const { end, maxdd } = simEquity(trades, f, cap);
-        const totalRet = (end / cap - 1) * 100;
-        const perMo = (end - cap) / months;
-        const moRate = (Math.pow(end / cap, 1 / months) - 1) * 100;
-        console.log(`  f=${f} (${lev}) cap $${cap} -> end $${end.toFixed(0)} | total ${totalRet.toFixed(0)}% | ~$${perMo.toFixed(0)}/mo (${moRate.toFixed(1)}%/mo compounded) | maxDD ${(maxdd * 100).toFixed(0)}%`);
-      }
+    const worst = Math.min(...trades.map((t) => t.pct));
+    console.log(`========== ${name.toUpperCase()} {${coins.join(',')}} · $500 capital ==========`);
+    console.log(`  trades ${trades.length} over ${months.toFixed(1)}mo (${(trades.length / months).toFixed(1)}/mo) · win ${Math.round(wins / trades.length * 100)}% · mean net ${meanPct.toFixed(2)}%/trade · worst single trade ${worst.toFixed(1)}% (time-stop, no tight SL)`);
+    for (const L of [1, 2, 3, 5, 8]) {
+      const f = L / coins.length; // gross leverage L spread across the coin set
+      const { end, maxdd } = simEquity(trades, f, 500);
+      const totalRet = (end / 500 - 1) * 100;
+      const perMo = (end - 500) / months;
+      console.log(`  ${L}x gross  $500 -> end $${end.toFixed(0)} | total ${totalRet.toFixed(0)}% | ~$${perMo.toFixed(0)}/mo | maxDD ${(maxdd * 100).toFixed(0)}%`);
     }
     console.log('');
   }
