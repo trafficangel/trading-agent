@@ -23,8 +23,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { pageShell, jsonLdService, jsonLdFaqPage, getLang } from './landing.js';
-import { getAuthedUser } from '../auth/routes.js';
+import { pageShell, jsonLdService, jsonLdFaqPage } from './landing.js';
 import { STRATEGY_CONFIGS, BYBIT_REF_URL, BYBIT_REF_BONUS_DAYS } from './track-c-config.js';
 import {
   listTiers,
@@ -2388,15 +2387,11 @@ function styles(): string {
 }
 
 export async function autotradingRoute(app: FastifyInstance): Promise<void> {
-  app.get('/autotrading', async (req, reply) => {
-    const lang = getLang(req);
-    reply.header('content-type', 'text/html; charset=utf-8');
-    // Vary on Cookie: the page content differs by `rclang` cookie, and any
-    // upstream cache (CDN, browser) must keep one variant per cookie value
-    // — otherwise an EN visitor could get an RU-cached page or vice versa.
-    reply.header('vary', 'Cookie');
-    const u = getAuthedUser(req);
-    const authed = u ? { displayName: u.displayName, phone: u.phone } : null;
-    return reply.send(renderPage(lang, authed));
+  app.get('/autotrading', async (_req, reply) => {
+    // LuxAlgo copytrading retired (Jun 2026) — the site centers on THE LAB now.
+    // Redirect to /lab. renderPage is kept (unlinked) for easy revival if the
+    // copytrading product comes back.
+    void renderPage;
+    reply.redirect('/lab');
   });
 }

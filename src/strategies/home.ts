@@ -92,15 +92,15 @@ const CONTENT: Record<Lang, Content> = {
   ru: {
     htmlTitle: 'Robot Claude — автоматический криптотрейдинг на вашем Bybit',
     hero: {
-      eyebrow: '🤖 АВТОТРЕЙДИНГ · 💰 ВАШИ ДЕНЬГИ НА BYBIT · 📊 ОТКРЫТАЯ СТАТИСТИКА',
-      title1: 'Пассивный доход на ',
-      titleAccent: 'криптотрейдинге',
-      title2: ' — без вашего участия',
+      eyebrow: '🔬 ОТКРЫТАЯ ЛАБОРАТОРИЯ · 📊 ЧЕСТНЫЙ ФОРВАРД-ТЕСТ · 💡 ИЩЕМ РАБОЧИЙ ЭДЖ',
+      title1: 'Открытая лаборатория ',
+      titleAccent: 'торговых стратегий',
+      title2: '',
       subtitle:
-        'Наша система автоматически торгует на вашем счёте Bybit по проверенным стратегиям. '
-        + 'Деньги остаются у вас на бирже — это не фонд и не пирамида. '
-        + 'Все сделки видны в реальном времени. Тариф подбирается под ваш депозит автоматически.',
-      ctaPrimary: 'Как начать →',
+        'Мы открыто тестируем торговые подходы на реальных данных и форвардом — и честно показываем, '
+        + 'что работает, а что нет. Никаких обещаний доходности и «пассивного дохода»: '
+        + 'только проверяемые результаты в реальном времени.',
+      ctaPrimary: 'Открыть лабораторию →',
       ctaSecondary: 'Live-сделки ↓',
     },
     liveStrip: {
@@ -311,16 +311,16 @@ const CONTENT: Record<Lang, Content> = {
   en: {
     htmlTitle: 'Robot Claude — verified strategies for crypto trading',
     hero: {
-      eyebrow: '📊 OPEN STATS · 📡 TELEGRAM SIGNALS · 🤖 AUTO-TRADING',
-      title1: 'Verified ',
-      titleAccent: 'strategies & signals',
-      title2: ' for crypto trading',
+      eyebrow: '🔬 OPEN LAB · 📊 HONEST FORWARD-TESTING · 💡 HUNTING FOR A REAL EDGE',
+      title1: 'An open lab for ',
+      titleAccent: 'trading strategies',
+      title2: '',
       subtitle:
-        'Each strategy is rigorously vetted against 200+ days of historical data and recomputed for real Bybit commissions. '
-        + 'Watch live trades on the site, catch signals in Telegram for free — '
-        + 'or enable auto-trading and let our strategies trade your Bybit account automatically.',
-      ctaPrimary: 'View strategies →',
-      ctaSecondary: 'Telegram channel ↗',
+        'We test trading approaches out in the open — on real data and forward — and show honestly '
+        + 'what works and what doesn\'t. No yield promises, no "passive income": '
+        + 'only verifiable, real-time results.',
+      ctaPrimary: 'Open the lab →',
+      ctaSecondary: 'Live trades ↓',
     },
     liveStrip: {
       strategies: 'Strategies',
@@ -1107,7 +1107,7 @@ function renderHome(
         </h1>
         <p class="hero-subtitle">${escapeHtml(c.hero.subtitle)}</p>
         <div class="hero-cta">
-          <a class="btn btn-primary" href="/autotrading">${escapeHtml(c.hero.ctaPrimary)}</a>
+          <a class="btn btn-primary" href="/lab">${escapeHtml(c.hero.ctaPrimary)}</a>
           <a class="btn btn-ghost" href="#live-positions">
             ${escapeHtml(c.hero.ctaSecondary)}
           </a>
@@ -1316,7 +1316,7 @@ function renderHome(
         <div class="funnel-card funnel-card-accent">
           <div class="funnel-card-title">${escapeHtml(cta3Title)}</div>
           <div class="funnel-card-body">${escapeHtml(cta3Body)}</div>
-          <a class="btn btn-primary" href="/autotrading">${escapeHtml(cta3Btn)}</a>
+          <a class="btn btn-primary" href="/lab">${escapeHtml(cta3Btn)}</a>
         </div>
       </div>
     </div>

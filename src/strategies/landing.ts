@@ -2475,10 +2475,12 @@ export function pageShell(
       `</a>`
     : `<a class="header-auth header-auth-out" href="/strategies?login=1${opts.loginNext ? '&next=' + encodeURIComponent(opts.loginNext) : ''}">${labels.login}</a>`;
 
+  // LuxAlgo copytrading retired (Jun 2026): the contrarian book was net-negative.
+  // The site now centers on THE LAB — open, honest forward-testing of approaches.
+  // /autotrading + bare /strategies redirect to /lab; /strategies still hosts the
+  // login gate (?login=1) and strategy detail pages, so it's kept (just unlinked).
   const navLinksHtml = `
       <a href="/">${labels.home}</a>
-      <a href="/autotrading">${labels.autotrading}</a>
-      <a href="/strategies">${labels.strategies}</a>
       <a href="/lab">${labels.lab}</a>
       <a href="/predict/about">${labels.predict}</a>
       <a href="https://t.me/robotclaude" target="_blank" rel="noopener">${labels.channel}</a>
@@ -4663,6 +4665,10 @@ export async function landingRoute(app: FastifyInstance): Promise<void> {
     const q = (req.query ?? {}) as { from?: string; login?: string; p?: string; sort?: string };
     const fromAutotrading = q.from === 'autotrading';
     const loginMode = q.login === '1';
+    // LuxAlgo book retired (Jun 2026) → the public site centers on /lab. Bounce the
+    // bare strategies index to the lab, but KEEP this route for the login gate
+    // (?login=1, still the auth host) and the /strategies/:code detail pages.
+    if (!loginMode && !fromAutotrading) { reply.redirect('/lab'); return; }
     // Feed pagination — clamped 1..N inside renderAllStrategiesFeed.
     const page = Number.parseInt(q.p ?? '1', 10);
     const safePage = Number.isFinite(page) && page > 0 ? page : 1;
