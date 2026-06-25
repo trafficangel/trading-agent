@@ -33,7 +33,10 @@ export type LabLiveMode = 'off' | 'dryrun' | 'testnet' | 'live';
 export const LAB_LIVE: { mode: LabLiveMode; capitalUsd: number; leverage: number; deployed: string[] } = {
   mode: 'dryrun',
   capitalUsd: 2000,
-  leverage: 2,
+  // Conservative forward-test start = 1.0x (NO leverage). portfolio-sim cross-window:
+  // 540d safe ≤3x but recent 180d had a NEGATIVE walk-forward fold (safe <1x) — the edge
+  // is thin/regime-dependent, so prove the book UNLEVERED live first, raise only if it holds.
+  leverage: 1.0,
   deployed: ['L01', 'L02', 'L03', 'L04', 'L05', 'L10'], // 4h Bollinger-MR cluster
 };
 
