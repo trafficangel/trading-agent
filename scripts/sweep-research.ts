@@ -12,13 +12,13 @@ import { getKlines } from '../src/backtest/klines.js';
 import { runBacktest, type SlMode } from '../src/backtest/engine.js';
 import { type Candle } from '../src/backtest/indicators.js';
 import type { CustomStrategy } from '../src/backtest/strategy.js';
-import { sessionMomentum, cascadeFade } from '../src/backtest/strategies/families-research.js';
+import { sessionMomentum, cascadeFade, absorptionFailRetest } from '../src/backtest/strategies/families-research.js';
 
 const HL_TAKER = 0.07;
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LTCUSDT', 'LINKUSDT', 'DOGEUSDT', 'AVAXUSDT'];
 const NOW = Date.now();
 
-type Combo = { fam: 'session' | 'cascade'; sig: string; tf: string; days: number; build: (s: string) => CustomStrategy; slMode: SlMode };
+type Combo = { fam: 'session' | 'cascade' | 'absorp'; sig: string; tf: string; days: number; build: (s: string) => CustomStrategy; slMode: SlMode };
 
 const combos: Combo[] = [];
 // #1 session-momentum (taker; ATR slMode = crash guard, day-roll 'flat' = real exit)
@@ -30,6 +30,9 @@ for (const tf of ['15', '30']) {
   for (const vb of [3, 5]) for (const vm of [1.5, 2.0]) for (const vk of [2.5, 3]) for (const ig of [false, true]) for (const sm of ['time', 'at'] as const)
     combos.push({ fam: 'cascade', sig: `vb${vb}vm${vm}vk${vk}${ig ? 'i' : ''}${sm === 'time' ? 'T' : 'AT'}-${tf}`, tf, days, build: (s) => cascadeFade(s, tf, vb, vm, vk, 20, ig, 'both'), slMode: sm === 'time' ? { kind: 'time', bars: H } : { kind: 'atr+time', mult: 6, period: 14, bars: H } });
 }
+// #3 absorption-fail-retest (volume-climax wick rejection; pure time-stop exit) — the design-sweep survivor
+for (const tf of ['15', '30']) for (const vk of [2.5, 3, 4]) for (const vl of [20, 30]) for (const wf of [0.5, 0.6]) for (const ib of [[0.35, 0.65], [0.45, 0.55]] as const) for (const tb of [4, 6, 8])
+  combos.push({ fam: 'absorp', sig: `vk${vk}vl${vl}w${Math.round(wf * 100)}i${Math.round(ib[0] * 100)}b${tb}-${tf}`, tf, days: 400, build: (s) => absorptionFailRetest(s, tf, vk, vl, wf, ib[0], ib[1]), slMode: { kind: 'time', bars: tb } });
 
 function net(r: number[], fee: number) { let s = 0; for (const x of r) s += x - fee; return Math.round(s * 10) / 10; }
 function pf(r: number[], fee: number) { let gp = 0, gl = 0; for (const x of r) { const y = x - fee; if (y >= 0) gp += y; else gl += -y; } return gl === 0 ? (gp > 0 ? 99 : 0) : Math.round((gp / gl) * 100) / 100; }
@@ -66,7 +69,7 @@ type Row = { fam: string; sig: string; coin: string; tf: string; n: number; net:
   writeFileSync('data/sweep-research-results.json', JSON.stringify(rows, null, 2));
 
   const line = (r: Row) => `${r.green ? '✅' : '  '} ${r.coin.padEnd(9)} ${r.tf.padEnd(3)} N${String(r.n).padStart(4)} net ${String(r.net).padStart(7)} ×2 ${String(r.net2).padStart(7)} ×3 ${String(r.net3).padStart(7)} PF ${String(r.pf).padStart(5)} WR ${String(r.wr).padStart(2)}% DD-${String(r.dd).padStart(6)} folds ${r.folds}/4 IS/OOS ${r.isN}/${r.oosN}`;
-  for (const fam of ['session', 'cascade']) {
+  for (const fam of ['session', 'cascade', 'absorp']) {
     const fr = rows.filter((r) => r.fam === fam);
     // cross-symbol robustness: signatures green on >=4 coins
     const bySig = new Map<string, Row[]>();

@@ -96,3 +96,49 @@ export function cascadeFade(symbol: string, tf: string, velBars = 3, velMult = 1
     },
   };
 }
+
+/**
+ * #3 ABSORPTION-FAIL RETEST (volume-climax wick-rejection — the design-sweep's
+ * lone adversarial survivor). A two-bar SINGLE climax event: bar k=i-1 is a
+ * volume climax (v ≥ volK·SMA(vol)) that prints a long REJECTION wick and a poor
+ * close (IBS) — aggressors hit resting liquidity and got absorbed. Bar i CONFIRMS
+ * the absorption held: price did NOT extend past the climax extreme and closed
+ * adversely → fade. The "no new high/low vs the climax bar" is the microstructure
+ * proof (resting liquidity won), which is what makes it distinct from cascadeFade
+ * (ATR-velocity displacement) and from band-MR (no level/mean reference at all).
+ * Exit is the engine TIME-stop only; decide() never counter-closes.
+ *
+ * @param volK   climax volume multiple vs SMA(vol, volLook) measured BEFORE the bar
+ * @param wickFrac rejection wick ≥ this fraction of the climax bar's range
+ * @param ibsLo  up-climax requires IBS ≤ ibsLo (poor close near the low)
+ * @param ibsHi  down-climax requires IBS ≥ ibsHi (strong close near the high)
+ */
+export function absorptionFailRetest(symbol: string, tf: string, volK = 3, volLook = 20, wickFrac = 0.5, ibsLo = 0.4, ibsHi = 0.6, slPct = 0.08): CustomStrategy {
+  let key: Candle[] | null = null;
+  let vSma: number[] = [];
+  const ens = (c: Candle[]) => { if (key !== c) { vSma = sma(c.map((x) => x.v), volLook); key = c; } };
+  return {
+    id: `absorp${volK}_${volLook}w${Math.round(wickFrac * 100)}i${Math.round(ibsLo * 100)}-${symbol}-${tf}`,
+    code: 'absorp', name: `${symbol} Absorption-Fail`, symbol, timeframe: tf, slPct,
+    warmup: volLook + 3,
+    description: `Volume-climax wick-rejection absorption fade: fade a ${volK}× volume climax with a ≥${Math.round(wickFrac * 100)}% rejection wick once the next bar fails to extend, time-stop exit`,
+    decide(c, i, pos): Signal {
+      ens(c);
+      if (pos !== null) return null; // time-stop owns the exit; never counter-close
+      const k = i - 1;
+      const kb = c[k]; const b = c[i];
+      if (!kb || !b) return null;
+      if (!(vSma[k - 1]! > 0) || kb.v < volK * vSma[k - 1]!) return null; // volume climax at k (vs avg BEFORE it)
+      const rng = kb.h - kb.l;
+      if (!(rng > 0)) return null;
+      const ibsK = (kb.c - kb.l) / rng;
+      const upperWick = (kb.h - Math.max(kb.o, kb.c)) / rng;
+      const lowerWick = (Math.min(kb.o, kb.c) - kb.l) / rng;
+      // up-climax (big upper wick + poor close): short if bar i failed to make a new high and closed lower
+      if (upperWick >= wickFrac && ibsK <= ibsLo && b.h < kb.h && b.c < kb.c) return 'short';
+      // down-climax (big lower wick + strong close): long if bar i failed to make a new low and closed higher
+      if (lowerWick >= wickFrac && ibsK >= ibsHi && b.l > kb.l && b.c > kb.c) return 'long';
+      return null;
+    },
+  };
+}
