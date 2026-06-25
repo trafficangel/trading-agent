@@ -90,7 +90,8 @@ type Row = { strat: string; sig: string; coin: string; n: number; net: number; n
     const coin = sym.replace('USDT', '');
     try {
       const c = await getKlines(sym, '60', NOW - DAYS * 86_400_000, NOW);
-      const f = loadMicroAligned(coin, '60', c).funding; // funding now read from hl_micro (backfilled), no live API
+      let f = loadMicroAligned(coin, '60', c).funding; // funding now read from hl_micro (backfilled), no live API
+      if (process.env.PLACEBO === '1') { const sh = Math.floor(f.length / 2) + 137; f = f.map((_, i) => f[(i + sh) % f.length]!); } // decorrelate funding from price → must kill the edge if funding is load-bearing
       const cov = Math.round((f.filter((x) => x != null).length / c.length) * 100);
       data.set(sym, { c, f, cov });
       process.stderr.write(`  ${coin}: ${c.length} bars, funding cov ${cov}%\n`);
