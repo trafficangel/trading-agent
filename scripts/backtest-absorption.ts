@@ -133,6 +133,19 @@ type Row = { sig: string; core: string; maker: boolean; coin: string; n: number;
 
   console.log('\n===== green rows (top by +cost) =====');
   const gr = rows.filter((r) => r.green); console.log(gr.length ? gr.sort((a, b) => b.net2 - a.net2).slice(0, 16).map(line).join('\n') : '  — none green —');
+
+  // PORTFOLIO: pool ALL coins per config (the honest deployable metric — a rotating edge is
+  // traded as an all-coins basket, not cherry-picked). Equal-weight: sum per-coin net across coins.
+  console.log('\n===== ALL-COINS PORTFOLIO per config (top by pooled +cost; nCoins = coins with >=20 trades) =====');
+  const byCfg = new Map<string, Row[]>();
+  for (const r of rows) { const a = byCfg.get(r.sig) ?? []; a.push(r); byCfg.set(r.sig, a); }
+  const port = [...byCfg.entries()].map(([sig, rs]) => {
+    const pooledNet = Math.round(rs.reduce((s, r) => s + r.net, 0) * 10) / 10;
+    const pooledCost = Math.round(rs.reduce((s, r) => s + r.net2, 0) * 10) / 10;
+    const posCoins = rs.filter((r) => r.net2 > 0).length;
+    return { sig, maker: rs[0]!.maker, nCoins: rs.length, posCoins, pooledNet, pooledCost };
+  }).filter((p) => p.maker && p.nCoins >= 6).sort((a, b) => b.pooledCost - a.pooledCost);
+  for (const p of port.slice(0, 10)) console.log(`  ${p.sig.padEnd(20)} ${p.nCoins} coins, ${p.posCoins} +cost-pos · pooled net ${String(p.pooledNet).padStart(7)} +cost ${String(p.pooledCost).padStart(7)}`);
   console.log('\n(+cost = survives an EXTRA maker+taker RT = adverse-selection cushion.) Full → data/absorption-results.json');
 })().catch((e) => { console.error(e); process.exit(1); });
 
