@@ -31,8 +31,8 @@ const hlCoin = (symbol: string): string => symbol.replace('USDT', '');
 export type LabLiveMode = 'off' | 'dryrun' | 'testnet' | 'live';
 
 export const LAB_LIVE: { mode: LabLiveMode; capitalUsd: number; leverage: number; deployed: string[] } = {
-  mode: 'dryrun',
-  capitalUsd: 2000,
+  mode: 'testnet', // probe passed; HL testnet forward-validation. (mainnet = a deliberate flip later)
+  capitalUsd: 800, // fits the 1000 mock-USDC testnet balance at 1x; set to real capital for mainnet
   // Conservative forward-test start = 1.0x (NO leverage). portfolio-sim cross-window:
   // 540d safe ≤3x but recent 180d had a NEGATIVE walk-forward fold (safe <1x) — the edge
   // is thin/regime-dependent, so prove the book UNLEVERED live first, raise only if it holds.
