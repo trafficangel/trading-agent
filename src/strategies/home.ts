@@ -90,7 +90,7 @@ type Content = {
 
 const CONTENT: Record<Lang, Content> = {
   ru: {
-    htmlTitle: 'Robot Claude — автоматический криптотрейдинг на вашем Bybit',
+    htmlTitle: 'Robot Claude — открытая лаборатория торговых стратегий',
     hero: {
       eyebrow: '🔬 ОТКРЫТАЯ ЛАБОРАТОРИЯ · 📊 ЧЕСТНЫЙ ФОРВАРД-ТЕСТ · 💡 ИЩЕМ РАБОЧИЙ ЭДЖ',
       title1: 'Открытая лаборатория ',
@@ -309,7 +309,7 @@ const CONTENT: Record<Lang, Content> = {
     telegramUrl: 'https://t.me/robotclaude',
   },
   en: {
-    htmlTitle: 'Robot Claude — verified strategies for crypto trading',
+    htmlTitle: 'Robot Claude — an open lab for trading strategies',
     hero: {
       eyebrow: '🔬 OPEN LAB · 📊 HONEST FORWARD-TESTING · 💡 HUNTING FOR A REAL EDGE',
       title1: 'An open lab for ',
@@ -1388,19 +1388,117 @@ function renderHome(
     </div>
   `;
 
+  // ── OPEN-LAB landing (Jun 2026). The LuxAlgo copytrading body was retired; the
+  // site now presents the honest research lab. The old copytrading section consts
+  // are kept (void'd) for easy revival but no longer rendered.
+  void livePositionsHtml; void flowDiagramHtml; void whatYouGetHtml; void howHtml;
+  void signalPreviewHtml; void strategiesPreviewHtml; void roadmapHtml; void faqHtml; void ctaHtml;
+
+  // What the lab is.
+  const whatLabHtml = `
+    <div class="home-section what-you-get">
+      <h2 class="home-section-title">${isRu ? 'Что такое THE LAB' : 'What THE LAB is'}</h2>
+      <p class="home-section-sub">${isRu
+        ? 'Открытая исследовательская лаборатория торговых стратегий. Мы прогоняем гипотезы через жёсткую честную проверку и показываем результаты в реальном времени — включая те, что НЕ сработали. Это не копитрейдинг и не обещание доходности.'
+        : 'An open research lab for trading strategies. We run hypotheses through a strict, honest gauntlet and show the results in real time — including the ones that DON\'T work. This is not copytrading and not a yield promise.'}</p>
+      <div class="benefit-grid">
+        <div class="benefit-item">${isRu ? '📊 Каждый результат публичен и проверяем — бэктест + форвард на реальных данных, нетто комиссии' : '📊 Every result is public and verifiable — backtest + forward on real data, net of fees'}</div>
+        <div class="benefit-item">${isRu ? '🧪 Жёсткая отбраковка: кросс-символьно + walk-forward + стресс ×2/×3 по комиссии — выживает <5% идей' : '🧪 A brutal kill-battery: cross-symbol + walk-forward + 2x/3x cost-stress — under 5% of ideas survive'}</div>
+        <div class="benefit-item">${isRu ? '🟢 Торгуем на Hyperliquid — ончейн-прозрачность, низкие комиссии, без региональных блоков' : '🟢 We trade on Hyperliquid — on-chain transparency, low fees, no regional blocks'}</div>
+        <div class="benefit-item">${isRu ? '🚫 Без «пассивного дохода» и тарифов — только честный поиск рабочего эджа и проверяемые факты' : '🚫 No "passive income", no tiers — just an honest hunt for a real edge and verifiable facts'}</div>
+      </div>
+    </div>
+  `;
+
+  // The honest pipeline (replaces the LuxAlgo→Bybit flow + how-it-works).
+  const pipeSteps = isRu
+    ? [
+        { n: '1', t: 'Свип', b: 'Прогоняем сотни конфигураций стратегий на истории по многим монетам и таймфреймам — нетто реальной комиссии.' },
+        { n: '2', t: 'Kill-батарея', b: 'Кросс-символьная проверка + 4-fold walk-forward + стресс ×2/×3 по комиссии. Здесь умирает большинство идей — это и есть честность.' },
+        { n: '3', t: 'Форвард в лабе', b: 'Выжившие торгуются на бумаге в реальном времени на /lab — с вердиктом по каждой (копит / подтверждается / расходится).' },
+        { n: '4', t: 'Живой запуск', b: 'Подтвердилось вживую → малый реальный размер на Hyperliquid, консервативное плечо. Не подтвердилось — честно закрываем.' },
+      ]
+    : [
+        { n: '1', t: 'Sweep', b: 'Run hundreds of strategy configs over history across many coins and timeframes — net of real commission.' },
+        { n: '2', t: 'Kill-battery', b: 'Cross-symbol transfer + 4-fold walk-forward + 2x/3x cost-stress. Most ideas die here — that is the honesty.' },
+        { n: '3', t: 'Forward in the lab', b: 'Survivors paper-trade in real time on /lab — each with a verdict (collecting / confirming / diverging).' },
+        { n: '4', t: 'Go live', b: 'Confirmed live → small real size on Hyperliquid, conservative leverage. Not confirmed — we close it honestly.' },
+      ];
+  const pipelineHtml = `
+    <div class="home-section">
+      <h2 class="home-section-title">${isRu ? 'Как мы ищем эдж' : 'How we hunt for an edge'}</h2>
+      <p class="home-section-sub">${isRu ? 'Честный конвейер. Большинство идей не доходит до конца — и это нормально.' : 'An honest pipeline. Most ideas never make it through — and that\'s the point.'}</p>
+      <div class="how-grid">
+        ${pipeSteps.map((s) => `
+          <div class="how-card">
+            <div class="how-step">${s.n}</div>
+            <h3 class="how-title">${escapeHtml(s.t)}</h3>
+            <div class="how-body">${escapeHtml(s.b)}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+  `;
+
+  // Why Hyperliquid.
+  const onHyperliquidHtml = `
+    <div class="home-section">
+      <h2 class="home-section-title">${isRu ? '🟢 Почему Hyperliquid' : '🟢 Why Hyperliquid'}</h2>
+      <p class="home-section-sub">${isRu
+        ? 'Исполняемся на Hyperliquid — децентрализованной бирже бессрочных контрактов. Ончейн-прозрачность (виден весь поток — стакан, позиции, ликвидации), низкие комиссии (мейкер ~0.04% / тейкер ~0.07% RT), без KYC и региональных ограничений. Bybit отказал по региону — Hyperliquid работает.'
+        : 'We execute on Hyperliquid — a decentralized perpetuals exchange. On-chain transparency (the whole flow is visible — book, positions, liquidations), low fees (maker ~0.04% / taker ~0.07% RT), no KYC or regional limits. Bybit blocked our region — Hyperliquid doesn\'t.'}</p>
+    </div>
+  `;
+
+  // Open-lab FAQ (replaces the copytrading FAQ).
+  const labFaq = isRu
+    ? [
+        { q: 'Это копитрейдинг?', a: 'Нет. Это открытая лаборатория: мы честно тестируем подходы и показываем, что работает, а что нет. Реальные деньги пока только наши — малым размером, на Hyperliquid.' },
+        { q: 'Можно подключить мой счёт?', a: 'Пока нет. Сначала эдж должен доказать себя вживую. Если/когда — это будет на Hyperliquid, отдельно объявим.' },
+        { q: 'Где смотреть результаты?', a: 'На странице <a href="/lab">/lab</a> — форвард-тест в реальном времени с вердиктом по каждой стратегии. Публикуем и провалы тоже.' },
+        { q: 'Почему Hyperliquid, а не Bybit?', a: 'Hyperliquid не блокируется по региону, даёт ончейн-прозрачность и низкие комиссии. Bybit отклонил торговлю деривативами для нашего региона.' },
+        { q: 'Вы обещаете доходность?', a: 'Нет. Прошлые результаты не гарантируют будущих, криптотрейдинг сопряжён с риском полной потери капитала. Мы показываем проверяемые факты, а не обещания.' },
+      ]
+    : [
+        { q: 'Is this copytrading?', a: 'No. It\'s an open lab: we honestly test approaches and show what works and what fails. Real money so far is only ours — small size, on Hyperliquid.' },
+        { q: 'Can I connect my account?', a: 'Not yet. An edge has to prove itself live first. If/when it does, it\'ll be on Hyperliquid — we\'ll announce it.' },
+        { q: 'Where do I see results?', a: 'On <a href="/lab">/lab</a> — real-time forward-testing with a verdict per strategy. We publish the failures too.' },
+        { q: 'Why Hyperliquid, not Bybit?', a: 'Hyperliquid has no regional block, on-chain transparency, and low fees. Bybit refused derivatives trading for our region.' },
+        { q: 'Do you promise returns?', a: 'No. Past results don\'t guarantee future ones; crypto trading risks total loss of capital. We show verifiable facts, not promises.' },
+      ];
+  const faqHtmlNew = `
+    <div class="home-section">
+      <h2 class="home-section-title">FAQ</h2>
+      <div class="faq-list">
+        ${labFaq.map((f) => `
+          <details class="faq-item">
+            <summary>${escapeHtml(f.q)}</summary>
+            <div class="faq-answer">${f.a}</div>
+          </details>`).join('')}
+      </div>
+    </div>
+  `;
+
+  // Final CTA → the lab.
+  const labCtaHtml = `
+    <div class="home-section">
+      <h2 class="home-section-title">${isRu ? 'Смотрите лабораторию вживую' : 'See the lab live'}</h2>
+      <p class="home-section-sub">${isRu ? 'Реальные форвард-результаты, обновляются автоматически. Честно — с провалами и со всеми издержками.' : 'Real forward results, updated automatically. Honest — failures and full costs included.'}</p>
+      <div class="hero-cta" style="margin-top:14px">
+        <a class="btn btn-primary" href="/lab">${isRu ? 'Открыть лабораторию →' : 'Open the lab →'}</a>
+        <a class="btn btn-ghost" href="${escapeHtml(c.telegramUrl)}" target="_blank" rel="noopener">${isRu ? 'Канал в Telegram ↗' : 'Telegram channel ↗'}</a>
+      </div>
+    </div>
+  `;
+
   const body = `
     ${heroHtml}
-    ${livePositionsHtml}
-    ${flowDiagramHtml}
-    ${whatYouGetHtml}
-    ${howHtml}
-    ${signalPreviewHtml}
-    ${strategiesPreviewHtml}
+    ${whatLabHtml}
+    ${pipelineHtml}
+    ${onHyperliquidHtml}
     ${strategyIdeasHtml}
-    ${roadmapHtml}
     ${renderFounderBlock(lang)}
-    ${faqHtml}
-    ${ctaHtml}
+    ${faqHtmlNew}
+    ${labCtaHtml}
     ${homeEffectsScript()}
   `;
 
@@ -1410,8 +1508,8 @@ function renderHome(
 
   const canonicalPath = lang === 'en' ? '/en' : '/';
   const description = lang === 'en'
-    ? 'Robot Claude — automated crypto trading on your own Bybit account. Verified strategies, open live stats, withdraw-disabled API key. Tiers from $12/mo.'
-    : 'Robot Claude — автоматический криптотрейдинг на вашем Bybit-аккаунте. Проверенные стратегии, прозрачная live-статистика, ключ без права на вывод. Тарифы от $12/мес.';
+    ? 'Robot Claude — an open lab for crypto trading strategies. We forward-test approaches honestly on real data and trade survivors on Hyperliquid. No yield promises — verifiable, real-time results.'
+    : 'Robot Claude — открытая лаборатория торговых стратегий. Честно форвард-тестируем подходы на реальных данных и торгуем выжившие на Hyperliquid. Без обещаний доходности — проверяемые результаты в реальном времени.';
   return pageShell(c.htmlTitle, body, {
     lang,
     showLangToggle: true,
