@@ -31,7 +31,7 @@ const hlCoin = (symbol: string): string => symbol.replace('USDT', '');
 export type LabLiveMode = 'off' | 'dryrun' | 'testnet' | 'live';
 
 export const LAB_LIVE: { mode: LabLiveMode; capitalUsd: number; leverage: number; deployed: string[] } = {
-  mode: 'testnet', // probe passed; HL testnet forward-validation. (mainnet = a deliberate flip later)
+  mode: 'off', // slow MR book retired per operator (Jun 25) — pivoting to fast strategies. No live/testnet orders.
   capitalUsd: 800, // fits the 1000 mock-USDC testnet balance at 1x; set to real capital for mainnet
   // Conservative forward-test start = 1.0x (NO leverage). portfolio-sim cross-window:
   // 540d safe ≤3x but recent 180d had a NEGATIVE walk-forward fold (safe <1x) — the edge

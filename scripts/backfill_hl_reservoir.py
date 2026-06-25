@@ -25,7 +25,7 @@ COINSET = set(COINS)
 BUCKET, REGION, DB = "hydromancer-reservoir", "ap-northeast-1", "data/trading.sqlite"
 TMPDIR = "data/_tmp_reservoir"
 MIN = 60_000
-WORKERS = 3
+WORKERS = int(os.environ.get("HL_WORKERS", "3"))  # HL_WORKERS=1 → RAM-safe serial (one 248MB day at a time)
 MODE = "all"
 
 _s3 = _pa = _pq = _pc = _coinarr = None
