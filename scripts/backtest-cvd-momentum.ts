@@ -26,7 +26,8 @@ import { loadMicroAligned } from '../src/backtest/micro.js';
 import { type Candle } from '../src/backtest/indicators.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LTCUSDT', 'LINKUSDT', 'DOGEUSDT', 'AVAXUSDT'];
-const NOW = Date.now();
+const END_OFFSET = Number(process.argv[3] ?? 0); // days-ago to END the window (0 = now). Lets us isolate the 2025 CVD cluster.
+const NOW = Date.now() - END_OFFSET * 86_400_000;
 const DAYS = Number(process.argv[2] ?? 20);
 const MK = 0.02, TK = 0.045; // HL maker / taker per side %
 
