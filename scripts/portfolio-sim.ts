@@ -31,6 +31,7 @@ import { allocatePortfolio } from '../src/lib/portfolio.js';
 
 const NOW = Date.now();
 const DAYS = Number(process.argv[2] ?? 540);
+const CLUSTERS = (process.argv[3] ?? 'all'); // 'all' | 'mr' (drop the deep-DD trend cluster)
 const FEE_RT = 0.07;          // HL taker RT % — conservative (maker-as-taker)
 const TARGET_DD = 20;         // % combined max-DD ceiling for "safe leverage"
 const DAY_MS = 86_400_000;
@@ -67,6 +68,7 @@ function corr(a: number[], b: number[]): number {
   let minDay = Infinity, maxDay = -Infinity;
   const klCache = new Map<string, Awaited<ReturnType<typeof getKlines>>>();
   for (const s of ALL_LAB_STRATEGIES) {
+    if (CLUSTERS === 'mr' && clusterOf(s.code) === 'trend') continue; // drop deep-DD trend legs
     const key = `${s.symbol}:${s.timeframe}`;
     let candles = klCache.get(key);
     if (!candles) { try { candles = await getKlines(s.symbol, s.timeframe, NOW - DAYS * DAY_MS, NOW); klCache.set(key, candles); } catch (e) { process.stderr.write(`${s.code} ${s.symbol}: ${(e as Error).message}\n`); continue; } }
