@@ -13,18 +13,20 @@ import { getKlines } from '../src/backtest/klines.js';
 import { runBacktest, type SlMode } from '../src/backtest/engine.js';
 import type { Candle } from '../src/backtest/indicators.js';
 import type { CustomStrategy } from '../src/backtest/strategy.js';
-import { keltnerMr, zscoreMr } from '../src/backtest/strategies/families-lowtf.js';
+import { bollMr } from '../src/backtest/strategies/families.js';
 
-const COMM = 0.04; // maker round-trip (these are maker strategies)
-const WINDOW_DAYS = 180;
+const COMM = 0.07; // HL taker round-trip (the 4h MR market book)
+const WINDOW_DAYS = 540;
 
+// The deployed 4h Bollinger-MR cluster (L01-L05, L10) — testing whether a TIME-stop
+// helps it (lower DD / comfort) vs the rarely-firing wide static SL.
 const STRATS: { label: string; build: () => CustomStrategy }[] = [
-  { label: 'Keltner ADA 5m', build: () => keltnerMr('ADAUSDT', '5', 20, 10, 2, 200) },
-  { label: 'Keltner LTC 5m', build: () => keltnerMr('LTCUSDT', '5', 20, 10, 2, 200) },
-  { label: 'Keltner SOL 5m', build: () => keltnerMr('SOLUSDT', '5', 20, 10, 2, 200) },
-  { label: 'Z-score ETH 5m', build: () => zscoreMr('ETHUSDT', '5', 50, 2, 200) },
-  { label: 'Z-score LTC 5m', build: () => zscoreMr('LTCUSDT', '5', 50, 2, 200) },
-  { label: 'Z-score BTC 5m', build: () => zscoreMr('BTCUSDT', '5', 50, 2, 200) },
+  { label: 'BollMR ETH 4h (L01)', build: () => bollMr('ETHUSDT', '240', 20, 2, 200, 0.07) },
+  { label: 'BollMR LINK 4h (L02)', build: () => bollMr('LINKUSDT', '240', 20, 2, 200, 0.08) },
+  { label: 'BollMR XRP 4h (L03)', build: () => bollMr('XRPUSDT', '240', 20, 2, 200, 0.05) },
+  { label: 'BollMR BNB 4h (L04)', build: () => bollMr('BNBUSDT', '240', 20, 2, 200, 0.05) },
+  { label: 'BollMR DOGE 4h (L05)', build: () => bollMr('DOGEUSDT', '240', 20, 2, 200, 0.08) },
+  { label: 'BollMR BTC 4h (L10)', build: () => bollMr('BTCUSDT', '240', 20, 2, 200, 0.06) },
 ];
 
 const MODES: { label: string; mode: SlMode }[] = [
