@@ -14,6 +14,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { getKlines } from '../src/backtest/klines.js';
+import { loadMicroAligned } from '../src/backtest/micro.js';
 import { type Candle } from '../src/backtest/indicators.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LTCUSDT', 'LINKUSDT', 'DOGEUSDT', 'AVAXUSDT'];
@@ -21,36 +22,6 @@ const END_OFFSET = Number(process.argv[3] ?? 0); // days-ago to END the window (
 const NOW = Date.now() - END_OFFSET * 86_400_000;
 const DAYS = Number(process.argv[2] ?? 320);
 const HL_TAKER = 0.07;
-const INFO = 'https://api.hyperliquid.xyz/info';
-
-async function fundingHistory(coin: string, startMs: number, endMs: number): Promise<{ t: number; f: number }[]> {
-  const out: { t: number; f: number }[] = [];
-  let cursor = startMs; let guard = 0;
-  while (cursor < endMs && guard++ < 200) {
-    const res = await fetch(INFO, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'fundingHistory', coin, startTime: cursor, endTime: endMs }) });
-    if (!res.ok) throw new Error(`HL funding ${coin}: ${res.status}`);
-    const arr = (await res.json()) as { time: number; fundingRate: string }[];
-    if (!arr.length) break;
-    for (const r of arr) out.push({ t: r.time, f: Number(r.fundingRate) });
-    const last = arr[arr.length - 1]!.time;
-    if (last <= cursor) break;
-    cursor = last + 1;
-    await new Promise((r) => setTimeout(r, 250)); // HL rate-limit courtesy
-    if (arr.length < 400) break; // last page
-  }
-  return out;
-}
-
-/** Build funding aligned to candles: forward-fill the latest hourly funding onto each bar. */
-function alignFunding(candles: Candle[], fh: { t: number; f: number }[]): (number | null)[] {
-  const out = new Array<number | null>(candles.length).fill(null);
-  let j = 0; let cur: number | null = null;
-  for (let i = 0; i < candles.length; i++) {
-    while (j < fh.length && fh[j]!.t <= candles[i]!.t) { cur = fh[j]!.f; j++; }
-    out[i] = cur;
-  }
-  return out;
-}
 
 function rollMeanStd(a: (number | null)[], i: number, W: number): { m: number; sd: number; n: number } {
   let s = 0, ss = 0, n = 0;
@@ -119,13 +90,11 @@ type Row = { strat: string; sig: string; coin: string; n: number; net: number; n
     const coin = sym.replace('USDT', '');
     try {
       const c = await getKlines(sym, '60', NOW - DAYS * 86_400_000, NOW);
-      const fh = await fundingHistory(coin, NOW - DAYS * 86_400_000, NOW);
-      const f = alignFunding(c, fh);
+      const f = loadMicroAligned(coin, '60', c).funding; // funding now read from hl_micro (backfilled), no live API
       const cov = Math.round((f.filter((x) => x != null).length / c.length) * 100);
       data.set(sym, { c, f, cov });
-      process.stderr.write(`  ${coin}: ${c.length} bars, ${fh.length} funding pts, cov ${cov}%\n`);
+      process.stderr.write(`  ${coin}: ${c.length} bars, funding cov ${cov}%\n`);
     } catch (e) { process.stderr.write(`${sym}: ${(e as Error).message}\n`); }
-    await new Promise((r) => setTimeout(r, 600)); // space out coins to avoid HL 429
   }
   console.log('funding coverage: ' + [...data.entries()].map(([s, d]) => `${s.replace('USDT', '')}:${d.cov}`).join(' ') + '\n');
 
