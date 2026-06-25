@@ -17,7 +17,8 @@ import { getKlines } from '../src/backtest/klines.js';
 import { type Candle } from '../src/backtest/indicators.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LTCUSDT', 'LINKUSDT', 'DOGEUSDT', 'AVAXUSDT'];
-const NOW = Date.now();
+const END_OFFSET = Number(process.argv[3] ?? 0); // days-ago to END the window (0=now); isolate an older OOS regime
+const NOW = Date.now() - END_OFFSET * 86_400_000;
 const DAYS = Number(process.argv[2] ?? 320);
 const HL_TAKER = 0.07;
 const INFO = 'https://api.hyperliquid.xyz/info';
@@ -34,6 +35,7 @@ async function fundingHistory(coin: string, startMs: number, endMs: number): Pro
     const last = arr[arr.length - 1]!.time;
     if (last <= cursor) break;
     cursor = last + 1;
+    await new Promise((r) => setTimeout(r, 250)); // HL rate-limit courtesy
     if (arr.length < 400) break; // last page
   }
   return out;
@@ -123,6 +125,7 @@ type Row = { strat: string; sig: string; coin: string; n: number; net: number; n
       data.set(sym, { c, f, cov });
       process.stderr.write(`  ${coin}: ${c.length} bars, ${fh.length} funding pts, cov ${cov}%\n`);
     } catch (e) { process.stderr.write(`${sym}: ${(e as Error).message}\n`); }
+    await new Promise((r) => setTimeout(r, 600)); // space out coins to avoid HL 429
   }
   console.log('funding coverage: ' + [...data.entries()].map(([s, d]) => `${s.replace('USDT', '')}:${d.cov}`).join(' ') + '\n');
 
