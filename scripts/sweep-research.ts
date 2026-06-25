@@ -12,13 +12,13 @@ import { getKlines } from '../src/backtest/klines.js';
 import { runBacktest, type SlMode } from '../src/backtest/engine.js';
 import { type Candle } from '../src/backtest/indicators.js';
 import type { CustomStrategy } from '../src/backtest/strategy.js';
-import { sessionMomentum, cascadeFade, absorptionFailRetest } from '../src/backtest/strategies/families-research.js';
+import { sessionMomentum, cascadeFade, absorptionFailRetest, nrSqueezeExpansion, bbwSqueezePctRank, insideBarCoil } from '../src/backtest/strategies/families-research.js';
 
 const HL_TAKER = 0.07;
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LTCUSDT', 'LINKUSDT', 'DOGEUSDT', 'AVAXUSDT'];
 const NOW = Date.now();
 
-type Combo = { fam: 'session' | 'cascade' | 'absorp'; sig: string; tf: string; days: number; build: (s: string) => CustomStrategy; slMode: SlMode };
+type Combo = { fam: 'session' | 'cascade' | 'absorp' | 'volcomp'; sig: string; tf: string; days: number; build: (s: string) => CustomStrategy; slMode: SlMode };
 
 const combos: Combo[] = [];
 // #1 session-momentum (taker; ATR slMode = crash guard, day-roll 'flat' = real exit)
@@ -33,6 +33,17 @@ for (const tf of ['15', '30']) {
 // #3 absorption-fail-retest (volume-climax wick rejection; pure time-stop exit) — the design-sweep survivor
 for (const tf of ['15', '30']) for (const vk of [2.5, 3, 4]) for (const vl of [20, 30]) for (const wf of [0.5, 0.6]) for (const ib of [[0.35, 0.65], [0.45, 0.55]] as const) for (const tb of [4, 6, 8])
   combos.push({ fam: 'absorp', sig: `vk${vk}vl${vl}w${Math.round(wf * 100)}i${Math.round(ib[0] * 100)}b${tb}-${tf}`, tf, days: 400, build: (s) => absorptionFailRetest(s, tf, vk, vl, wf, ib[0], ib[1]), slMode: { kind: 'time', bars: tb } });
+// #4-6 vol-compression family (squeeze → directional expansion breakout; SlMode time vs atr+time exit)
+for (const tf of ['15', '30']) {
+  const H = tf === '15' ? 8 : 6; const days = tf === '15' ? 320 : 440;
+  const sl = (sm: 'time' | 'at'): SlMode => sm === 'time' ? { kind: 'time', bars: H } : { kind: 'atr+time', mult: 3, period: 14, bars: H };
+  for (const nr of [4, 7]) for (const xk of [1.2, 1.5]) for (const sm of ['time', 'at'] as const)
+    combos.push({ fam: 'volcomp', sig: `nr${nr}x${Math.round(xk * 100)}${sm === 'time' ? 'T' : 'AT'}-${tf}`, tf, days, build: (s) => nrSqueezeExpansion(s, tf, nr, xk), slMode: sl(sm) });
+  for (const rl of [50, 100]) for (const pc of [0.2, 0.3]) for (const sm of ['time', 'at'] as const)
+    combos.push({ fam: 'volcomp', sig: `bbw20r${rl}p${Math.round(pc * 100)}${sm === 'time' ? 'T' : 'AT'}-${tf}`, tf, days, build: (s) => bbwSqueezePctRank(s, tf, 20, rl, pc), slMode: sl(sm) });
+  for (const mi of [1, 2, 3]) for (const sm of ['time', 'at'] as const)
+    combos.push({ fam: 'volcomp', sig: `coil${mi}${sm === 'time' ? 'T' : 'AT'}-${tf}`, tf, days, build: (s) => insideBarCoil(s, tf, mi), slMode: sl(sm) });
+}
 
 function net(r: number[], fee: number) { let s = 0; for (const x of r) s += x - fee; return Math.round(s * 10) / 10; }
 function pf(r: number[], fee: number) { let gp = 0, gl = 0; for (const x of r) { const y = x - fee; if (y >= 0) gp += y; else gl += -y; } return gl === 0 ? (gp > 0 ? 99 : 0) : Math.round((gp / gl) * 100) / 100; }
@@ -69,7 +80,7 @@ type Row = { fam: string; sig: string; coin: string; tf: string; n: number; net:
   writeFileSync('data/sweep-research-results.json', JSON.stringify(rows, null, 2));
 
   const line = (r: Row) => `${r.green ? '✅' : '  '} ${r.coin.padEnd(9)} ${r.tf.padEnd(3)} N${String(r.n).padStart(4)} net ${String(r.net).padStart(7)} ×2 ${String(r.net2).padStart(7)} ×3 ${String(r.net3).padStart(7)} PF ${String(r.pf).padStart(5)} WR ${String(r.wr).padStart(2)}% DD-${String(r.dd).padStart(6)} folds ${r.folds}/4 IS/OOS ${r.isN}/${r.oosN}`;
-  for (const fam of ['session', 'cascade', 'absorp']) {
+  for (const fam of ['session', 'cascade', 'absorp', 'volcomp']) {
     const fr = rows.filter((r) => r.fam === fam);
     // cross-symbol robustness: signatures green on >=4 coins
     const bySig = new Map<string, Row[]>();

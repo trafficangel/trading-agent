@@ -7,7 +7,7 @@
  * cost-stress), shadow-only until they earn it.
  */
 
-import { sma, atr, type Candle } from '../indicators.js';
+import { sma, atr, rollingStd, donchian, type Candle } from '../indicators.js';
 import type { CustomStrategy, Signal } from '../strategy.js';
 
 /**
@@ -138,6 +138,101 @@ export function absorptionFailRetest(symbol: string, tf: string, volK = 3, volLo
       if (upperWick >= wickFrac && ibsK <= ibsLo && b.h < kb.h && b.c < kb.c) return 'short';
       // down-climax (big lower wick + strong close): long if bar i failed to make a new low and closed higher
       if (lowerWick >= wickFrac && ibsK >= ibsHi && b.l > kb.l && b.c > kb.c) return 'long';
+      return null;
+    },
+  };
+}
+
+/* ── VOL-COMPRESSION family ── squeeze (low realized vol) → directional EXPANSION breakout.
+ * Thesis: intraday volatility clusters; a tight compression resolves with a directional
+ * thrust. All three are pure breakout entries (signal only when FLAT; the engine SlMode —
+ * time or atr+time — owns the exit, like cascadeFade), and strictly causal: the breakout
+ * level comes from bars < i and the trigger is candle[i]'s close (known at close). Distinct
+ * from Donchian trend-breakout (which is unconditional) by the COMPRESSION precondition.    */
+
+/**
+ * #4 NR-SQUEEZE EXPANSION. The setup bar k=i-1 has the narrowest range in the last `nrLook`
+ * bars (a volatility squeeze); bar i then makes a range ≥ `expandK`× that squeeze range AND
+ * closes beyond the squeeze bar's extreme → ride the expansion in the break direction.
+ */
+export function nrSqueezeExpansion(symbol: string, tf: string, nrLook = 7, expandK = 1.5, slPct = 0.08): CustomStrategy {
+  const rng = (x: Candle) => x.h - x.l;
+  return {
+    id: `nrsq${nrLook}x${Math.round(expandK * 100)}-${symbol}-${tf}`,
+    code: 'volcomp', name: `${symbol} NR-Squeeze Expansion`, symbol, timeframe: tf, slPct,
+    warmup: nrLook + 2,
+    description: `Narrow-range(${nrLook}) squeeze → directional expansion breakout (≥${expandK}× the squeeze range), SlMode exit`,
+    decide(c, i, pos): Signal {
+      if (pos !== null) return null; // SlMode owns the exit; pure breakout entry
+      const k = i - 1; const kb = c[k]; const b = c[i];
+      if (!kb || !b || k - nrLook + 1 < 0) return null;
+      const setupRng = rng(kb);
+      if (!(setupRng > 0)) return null;
+      for (let j = k - nrLook + 1; j < k; j++) if (rng(c[j]!) <= setupRng) return null; // k must be the strict NR bar
+      if (rng(b) < expandK * setupRng) return null;                                     // require a real expansion
+      if (b.c > kb.h) return 'long';
+      if (b.c < kb.l) return 'short';
+      return null;
+    },
+  };
+}
+
+/**
+ * #5 BBW-SQUEEZE PERCENTILE-RANK BREAKOUT. Bollinger band-width bbw=2·std/mid; when bbw[i]
+ * sits in its lowest `pctile` over the last `rankLook` bars (a regime-relative squeeze, à la
+ * TTM) and the close breaks the prior Donchian(`bbLook`) range → trade the breakout.
+ */
+export function bbwSqueezePctRank(symbol: string, tf: string, bbLook = 20, rankLook = 100, pctile = 0.2, slPct = 0.08): CustomStrategy {
+  let key: Candle[] | null = null;
+  let bbw: number[] = []; let dUp: number[] = []; let dLo: number[] = [];
+  const ens = (c: Candle[]) => {
+    if (key === c) return;
+    const close = c.map((x) => x.c);
+    const mid = sma(close, bbLook); const sd = rollingStd(close, bbLook);
+    bbw = sd.map((s, j) => (mid[j]! > 0 ? (2 * s) / mid[j]! : Number.POSITIVE_INFINITY));
+    const d = donchian(c, bbLook); dUp = d.upper; dLo = d.lower;
+    key = c;
+  };
+  return {
+    id: `bbwsq${bbLook}r${rankLook}p${Math.round(pctile * 100)}-${symbol}-${tf}`,
+    code: 'volcomp', name: `${symbol} BBW-Squeeze Breakout`, symbol, timeframe: tf, slPct,
+    warmup: bbLook + rankLook + 2,
+    description: `Bollinger band-width in its lowest ${Math.round(pctile * 100)}th pct over ${rankLook} bars (squeeze) → Donchian(${bbLook}) breakout, SlMode exit`,
+    decide(c, i, pos): Signal {
+      ens(c);
+      if (pos !== null) return null;
+      const b = c[i]; if (!b || i - rankLook < 0) return null;
+      const cur = bbw[i]!;
+      if (!(cur > 0) || !(cur < Number.POSITIVE_INFINITY)) return null;
+      let below = 0; let cnt = 0;
+      for (let j = i - rankLook; j < i; j++) { const v = bbw[j]!; if (v < Number.POSITIVE_INFINITY) { cnt++; if (v <= cur) below++; } }
+      if (cnt < rankLook / 2 || below / cnt > pctile) return null; // not a (regime-relative) squeeze
+      if (b.c > dUp[i]!) return 'long';                            // break the prior bbLook-bar high
+      if (b.c < dLo[i]!) return 'short';
+      return null;
+    },
+  };
+}
+
+/**
+ * #6 INSIDE-BAR COIL. `minInside` consecutive inside bars (each h≤prev.h & l≥prev.l) = a
+ * volatility coil; the break of the mother bar's range (the bar before the coil) is the
+ * release. Close beyond the mother's high/low → trade the break.
+ */
+export function insideBarCoil(symbol: string, tf: string, minInside = 2, slPct = 0.08): CustomStrategy {
+  return {
+    id: `coil${minInside}-${symbol}-${tf}`,
+    code: 'volcomp', name: `${symbol} Inside-Bar Coil`, symbol, timeframe: tf, slPct,
+    warmup: minInside + 3,
+    description: `${minInside}+ consecutive inside bars (volatility coil) → break of the mother-bar range, SlMode exit`,
+    decide(c, i, pos): Signal {
+      if (pos !== null) return null;
+      const b = c[i]; const motherIdx = i - minInside - 1;
+      if (!b || motherIdx < 0) return null;
+      for (let m = 1; m <= minInside; m++) { const cur = c[i - m]!; const prev = c[i - m - 1]!; if (!(cur.h <= prev.h && cur.l >= prev.l)) return null; }
+      const mother = c[motherIdx]!;
+      if (b.c > mother.h) return 'long';
+      if (b.c < mother.l) return 'short';
       return null;
     },
   };
