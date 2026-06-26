@@ -144,7 +144,7 @@ function renderLabList(): string {
     (fams.get(f) ?? fams.set(f, []).get(f)!).push(s);
   }
   const body = ALL_LAB_STRATEGIES.length === 0
-    ? '<div class="lab-empty">Пока нет стратегий в лаборатории.</div>'
+    ? '<div class="lab-empty"><b>Лаборатория обновляется.</b><br>Старый набор медленных стратегий снят с форвард-теста. Сейчас в разработке — быстрые стратегии на событийных сигналах (ликвидации, фандинг, order-flow). Появятся здесь после прохождения kill-батареи и форвард-валидации.</div>'
     : [...fams.entries()].map(([fam, list]) => {
         const note = fam.startsWith('Mean-reversion') && list.length > 1
           ? `<div class="lab-fam-note">⚠ Это одна логика на ${list.length} монетах = <b>коррелированная ставка</b>, а не ${list.length} независимых. При промоуте лимитируются как единый кластер (общий лимит риска), иначе широкая просадка альтов откроет все разом.</div>`
