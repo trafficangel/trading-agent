@@ -41,7 +41,7 @@ function run(c: Candle[], liq: (number | null)[], base: number[], cfg: Cfg): num
   const out: number[] = []; const n = c.length; let guard = -1;
   for (let k = 250; k < n - 2; k++) {
     if (k <= guard) continue;
-    const lq = liq[k]; const bk = base[k];
+    const lq = liq[k]; const bk = base[k]!;
     if (lq == null || !(bk > 0) || lq < cfg.liqK * bk) continue;       // not a liq climax
     const ref = c[k - cfg.velBars]; if (!ref) continue;
     const ret = (c[k]!.c - ref.c) / ref.c;
