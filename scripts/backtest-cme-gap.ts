@@ -14,7 +14,8 @@ import { getKlines } from '../src/backtest/klines.js';
 import { type Candle } from '../src/backtest/indicators.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT'];
-const NOW = Date.now();
+const END_OFFSET = Number(process.argv[3] ?? 0);
+const NOW = Date.now() - END_OFFSET * 86_400_000;
 const DAYS = Number(process.argv[2] ?? 700);
 const TK = 0.07; // HL taker RT %
 const PLACEBO = process.env.PLACEBO === '1';
