@@ -7,7 +7,12 @@
  * sweep-funding's rollMeanStd + flip branch verbatim, and — like the backtest's `i < n-1` loop — the
  * signal is evaluated ONLY on the last CLOSED hour (the in-progress hour is dropped). Per coin: rolling
  * z over W hours; funding was EXTREME (|z|>=zThr) within the last fw hours then FLIPS SIGN → enter the
- * snap-back AWAY from the wiped side; pure 24h TIME-STOP exit. ETH+ADA core.
+ * snap-back AWAY from the wiped side; pure 24h TIME-STOP exit.
+ *
+ * OI-BUILD-UP GATE (added Jun 27 2026): the flip fires ONLY if Bybit open interest ROSE over the prior
+ * oiRocHours into the funding extreme (fresh leverage on the doomed side → stronger snap-back). Validated
+ * by a 60-shuffle empirical null (z>2.2, ~3× per-trade expectancy) — see [[hl-micro-layer]] /
+ * [[multishuffle-null-vs-single-placebo]]. Coins: ETH+ADA cross-window core + XRP/AVAX/BTC (gate-green).
  *
  * SAFE / reconciled (post-review): the EXCHANGE is the source of truth (hlFetchPosition) — every tick
  * reconciles funding_flip_pos against it BEFORE deciding (crash between order & DB-write can't double-
@@ -20,15 +25,18 @@ import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
 import { hlConfigured, hlSetLeverage, hlMarketOrder, hlClosePosition, hlFetchPosition, hlAccountValue, hlMid } from '../exchange/hyperliquid-private.js';
+import { getBybitOiRoc } from '../exchange/bybit-public.js';
 
 type FfMode = 'off' | 'testnet' | 'live';
-export const FF_CONFIG: { mode: FfMode; coins: string[]; W: number; zThr: number; fw: number; holdHours: number; capitalUsd: number; leverage: number } = {
-  mode: 'testnet',        // operator chose HL testnet
-  coins: ['ETH', 'ADA'],  // the cross-window-robust core (green in both 320d windows)
-  W: 360, zThr: 2, fw: 6, // verified config W360 z2 fw6
-  holdHours: 24,          // pure time-stop — matches the backtest exit
-  capitalUsd: 800,        // testnet balance; per-coin margin = capitalUsd / coins.length
-  leverage: 2,            // ~7% backtest maxDD at 2x on the core
+export const FF_CONFIG: { mode: FfMode; coins: string[]; W: number; zThr: number; fw: number; holdHours: number; capitalUsd: number; leverage: number; oiGate: boolean; oiRocHours: number } = {
+  mode: 'testnet',                                  // operator chose HL testnet
+  coins: ['ETH', 'ADA', 'XRP', 'AVAX', 'BTC'],      // ETH+ADA cross-window core + XRP/AVAX/BTC (OI-gate green, null-tested)
+  W: 360, zThr: 2, fw: 6,                           // verified flip config W360 z2 fw6
+  holdHours: 24,                                    // pure time-stop — matches the backtest exit
+  capitalUsd: 800,                                  // testnet balance; per-coin margin = capitalUsd / coins.length
+  leverage: 2,                                      // ~7% backtest maxDD at 2x on the core
+  oiGate: true,                                     // OI-BUILD-UP gate: enter only if Bybit OI rose into the flip
+  oiRocHours: 12,                                   // ...measured over the prior 12h (null-tested z>2.2, ~3× expectancy)
 };
 const HL_TAKER = 0.07;
 const HR = 3_600_000;
@@ -166,6 +174,20 @@ async function stepCoin(coin: string): Promise<void> {
   if (!sig) return;
   const lastHr = lastSigHrStmt.get(coin)?.hr;
   if (lastHr != null && fs.sigHr <= lastHr) return; // one entry per flip-hour (mirrors the backtest's guard)
+
+  // ── OI-BUILD-UP GATE ──────────────────────────────────────────────────────
+  // Take the flip ONLY if Bybit open interest ROSE over the prior `oiRocHours` into the funding
+  // extreme (fresh leverage piling on the doomed side → bigger flush → stronger snap-back). Null-
+  // tested (60-shuffle empirical null, z>2.2; ~3× per-trade expectancy). The window is pinned to the
+  // signal hour so the gate is deterministic per flip (no within-hour flip-flop). Bybit reachable on
+  // the VPS; any read failure → skip (conservative — miss a trade, never enter unverified).
+  if (FF_CONFIG.oiGate) {
+    const roc = await getBybitOiRoc(`${coin}USDT`, FF_CONFIG.oiRocHours, (fs.sigHr + 1) * HR);
+    if (roc == null) { logger.warn({ coin, sigHr: fs.sigHr }, 'funding-flip: OI-gate could not read Bybit OI — skip (conservative)'); return; }
+    if (roc <= 0) { logger.warn({ coin, side: sig.side, oiRoc: +roc.toFixed(4), sigHr: fs.sigHr }, '⏸ funding-flip: OI-gate BLOCKED flip (OI did not build into the extreme)'); return; }
+    logger.info({ coin, oiRoc: +roc.toFixed(4) }, 'funding-flip: OI-gate passed (OI built into the flip)');
+  }
+
   const reqMargin = FF_CONFIG.capitalUsd / FF_CONFIG.coins.length;
   const av = await hlAccountValue(); // known to mis-read 0 sometimes → only enforce on a sane positive value
   if (av.ok && av.data > 0 && av.data < reqMargin) { logger.warn({ coin, balance: av.data, reqMargin }, 'funding-flip: balance < required margin — skip'); return; }

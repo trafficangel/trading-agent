@@ -125,6 +125,32 @@ async function fetchOiSeries(
   }
 }
 
+/**
+ * Bybit OI rate-of-change over `hours` at 1h granularity: (OI_end − OI_{hours before end}) / OI_{…}.
+ * Powers the funding-flip OI-BUILD-UP gate (a positive value = open interest rose into the funding
+ * extreme = fresh leverage piled on the doomed side → stronger snap-back; null-tested z>2.2). Pass
+ * `endMs` to PIN the window to a specific bar (the flip hour) so the gate is deterministic per flip
+ * and can't flip-flop within the hour; omit for "now". Returns null on any failure (caller skips).
+ */
+export async function getBybitOiRoc(symbol: string, hours: number, endMs?: number): Promise<number | null> {
+  try {
+    const endParam = endMs != null ? `&endTime=${endMs}` : '';
+    const res = await request(
+      `${BASE}/v5/market/open-interest?category=linear&symbol=${symbol}&intervalTime=1h&limit=${hours + 2}${endParam}`,
+      { method: 'GET', headersTimeout: 5_000, bodyTimeout: 5_000 },
+    );
+    const body = (await res.body.json()) as OiHistoryResp;
+    if (body.retCode !== 0 || !body.result?.list || body.result.list.length < hours + 1) return null;
+    const list = body.result.list; // newest-first
+    const now = Number(list[0]!.openInterest);
+    const past = Number(list[hours]!.openInterest);
+    if (!Number.isFinite(now) || !Number.isFinite(past) || past <= 0) return null;
+    return (now - past) / past;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchLsRatio(symbol: string): Promise<number | null> {
   try {
     const res = await request(
