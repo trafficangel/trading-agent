@@ -30,7 +30,7 @@ import { getBybitOiRoc } from '../exchange/bybit-public.js';
 type FfMode = 'off' | 'testnet' | 'live';
 export const FF_CONFIG: { mode: FfMode; coins: string[]; W: number; zThr: number; fw: number; holdHours: number; capitalUsd: number; leverage: number; oiGate: boolean; oiRocHours: number } = {
   mode: 'testnet',                                  // operator chose HL testnet
-  coins: ['ETH', 'ADA', 'XRP', 'AVAX', 'BTC'],      // ETH+ADA cross-window core + XRP/AVAX/BTC (OI-gate green, null-tested)
+  coins: ['ETH', 'ADA', 'XRP', 'AVAX'],             // ETH+ADA cross-window core + XRP/AVAX (strong gated); BTC DROPPED (gated exp 0.12, Sharpe 0.05, no cross-window validation)
   W: 360, zThr: 2, fw: 6,                           // verified flip config W360 z2 fw6
   holdHours: 24,                                    // pure time-stop — matches the backtest exit
   capitalUsd: 800,                                  // testnet balance; per-coin margin = capitalUsd / coins.length
