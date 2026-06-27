@@ -88,3 +88,49 @@ export function loadMicroAligned(coin: string, tf: string, candles: Candle[]): M
   out.coverage = Math.round((out.withData / n) * 1000) / 1000;
   return out;
 }
+
+export type BybitAligned = {
+  /** Bybit OI snapshot inside bar i (base contracts; use RELATIVE — percentile/z — not absolute). */
+  oi: (number | null)[];
+  /** Bybit 8h funding rate forward-filled: the last settled 8h stamp with ts <= bar-open (constant
+   *  within its window). null until the first stamp. */
+  funding: (number | null)[];
+  /** fraction of bars with an OI value */
+  oiCov: number;
+  /** fraction of bars with a (forward-filled) funding value */
+  fndCov: number;
+};
+
+/** Load + align bybit_micro (cross-venue OI 1h + funding 8h) to `candles`, INDEX-ALIGNED, causal.
+ *  OI[i]  = last OI snapshot inside bar i's [t, t+tf) window (Bybit OI is hourly at the bar open).
+ *  fnd[i] = last settled 8h funding stamp with ts <= bar OPEN, forward-filled (the rate in effect
+ *           during the bar; known by close[i]). Both read only ts <= decision time → no look-ahead. */
+export function loadBybitAligned(coin: string, tf: string, candles: Candle[]): BybitAligned {
+  const n = candles.length;
+  const out: BybitAligned = { oi: Array(n).fill(null), funding: Array(n).fill(null), oiCov: 0, fndCov: 0 };
+  if (n === 0) return out;
+  const tfMs = Number(tf) * 60_000;
+  const from = candles[0]!.t;
+  const to = candles[n - 1]!.t + tfMs;
+  const seed = from - 8 * 3_600_000; // pull one 8h window earlier to seed the funding forward-fill
+  const rows = db.prepare<[string, number, number], { ts: number; oi: number | null; funding: number | null }>(
+    `SELECT ts, oi, funding FROM bybit_micro WHERE coin = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
+  ).all(coin, seed, to);
+  if (rows.length === 0) return out;
+
+  let fi = 0; let lastFund: number | null = null; let oiN = 0; let fndN = 0; let oiRi = 0;
+  for (let i = 0; i < n; i++) {
+    const start = candles[i]!.t; const end = start + tfMs;
+    // forward-fill funding: consume every row with ts <= bar open, keeping the latest settled stamp
+    while (fi < rows.length && rows[fi]!.ts <= start) { if (rows[fi]!.funding != null) lastFund = rows[fi]!.funding; fi++; }
+    out.funding[i] = lastFund; if (lastFund != null) fndN++;
+    // OI: last non-null oi inside [start, end) (does NOT advance the shared pointer past the bar)
+    while (oiRi < rows.length && rows[oiRi]!.ts < start) oiRi++;
+    let lastOi: number | null = null;
+    for (let j = oiRi; j < rows.length && rows[j]!.ts < end; j++) { if (rows[j]!.oi != null) lastOi = rows[j]!.oi; }
+    out.oi[i] = lastOi; if (lastOi != null) oiN++;
+  }
+  out.oiCov = Math.round((oiN / n) * 1000) / 1000;
+  out.fndCov = Math.round((fndN / n) * 1000) / 1000;
+  return out;
+}
