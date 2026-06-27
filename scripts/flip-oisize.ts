@@ -32,7 +32,7 @@ const sd = (r: number[]) => { if (r.length < 2) return 0; const m = mean(r); ret
 const sharpe = (r: number[]) => { const s = sd(r); return s > 0 ? mean(r) / s : 0; };
 function maxDD(r: number[]) { let eq = 0, peak = 0, dd = 0; for (const x of r) { eq += x; peak = Math.max(peak, eq); dd = Math.min(dd, eq - peak); } return Math.round(dd * 10) / 10; }
 
-type Trade = { coin: string; ret: number; oiRoc: number };
+type Trade = { coin: string; ret: number; oiRoc: number; rank: number };
 /** flips with the 24h overlap guard (no concurrent positions), each tagged with OI-ROC(OI_K). */
 function tradesFor(coin: string, c: Candle[], hlF: (number | null)[], oi: (number | null)[]): Trade[] {
   const out: Trade[] = []; const n = c.length; let guard = -1;
@@ -48,7 +48,7 @@ function tradesFor(coin: string, c: Candle[], hlF: (number | null)[], oi: (numbe
     if (side === 0) continue;
     const roc = relChange(oi, i, OI_K); if (roc == null) continue; // need OI to size
     const e = c[i]!.c, x = c[Math.min(n - 1, i + FLIP.hold)]!.c;
-    out.push({ coin, ret: (side === 1 ? (x - e) / e : (e - x) / e) * 100 - HL_TAKER, oiRoc: roc });
+    out.push({ coin, ret: (side === 1 ? (x - e) / e : (e - x) / e) * 100 - HL_TAKER, oiRoc: roc, rank: 0 });
     guard = i + FLIP.hold;
   }
   return out;
@@ -60,6 +60,8 @@ const SCHEMES: { name: string; size: (t: Trade, med: number) => number }[] = [
   { name: 'binary gate oiRoc>0', size: (t) => (t.oiRoc > 0 ? 1 : 0) },
   { name: 'linear tilt (clip 0..2)', size: (t) => Math.max(0, Math.min(2, 1 + t.oiRoc / Math.max(1e-9, 0.04))) }, // ~+4% OI ⇒ 2x, 0 ⇒ 1x, neg ⇒ <1..0
   { name: 'step tilt {0,1,2}', size: (t, med) => (t.oiRoc <= 0 ? 0 : t.oiRoc >= med ? 2 : 1) },
+  { name: 'gated-linear (cut neg)', size: (t) => (t.oiRoc <= 0 ? 0 : Math.min(2.5, Math.max(0.5, 1 + t.oiRoc / 0.04))) },
+  { name: 'gated rank-tilt (scalefree)', size: (t) => (t.oiRoc <= 0 ? 0 : 0.5 + 2 * t.rank) }, // scale-free: no fitted constant
 ];
 
 (async () => {
@@ -70,6 +72,9 @@ const SCHEMES: { name: string; size: (t: Trade, med: number) => number }[] = [
     const hlF = loadMicroAligned(coin, '60', c).funding;
     const oi = loadBybitAligned(coin, '60', c).oi;
     const t = tradesFor(coin, c, hlF, oi);
+    // within-coin OI-ROC percentile rank (scale-free; for the rank-based tilt scheme)
+    const order = [...t].sort((a, b) => a.oiRoc - b.oiRoc);
+    order.forEach((tr, idx) => { tr.rank = t.length > 1 ? idx / (t.length - 1) : 0.5; });
     byCoin.set(coin, t); all.push(...t);
   }
   console.log(`pooled trades (OI-tagged, 24h-guarded): ${all.length}\n`);
@@ -110,7 +115,7 @@ const SCHEMES: { name: string; size: (t: Trade, med: number) => number }[] = [
     for (let sh = 0; sh < K; sh++) {
       // shuffle oiRoc labels within each coin (varied offset), recompute
       const shuffled: Trade[] = [];
-      for (const [coin, ts] of byCoin) { const rocs = ts.map((t) => t.oiRoc); const off = (sh * 7 + 13) % Math.max(1, rocs.length); const rot = rocs.map((_, i) => rocs[(i + off) % rocs.length]!); ts.forEach((t, i) => shuffled.push({ coin, ret: t.ret, oiRoc: rot[i]! })); }
+      for (const [coin, ts] of byCoin) { const off = (sh * 7 + 13) % Math.max(1, ts.length); ts.forEach((t, i) => { const src = ts[(i + off) % ts.length]!; shuffled.push({ coin, ret: t.ret, oiRoc: src.oiRoc, rank: src.rank }); }); } // rotate the (oiRoc,rank) conditioning pair away from ret
       const sized = shuffled.map((t) => s.size(t, med) * t.ret);
       nullAdv.push(sharpe(sized) - flatShValue);
     }
