@@ -22,7 +22,8 @@ const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT
 const TF = String(process.argv[2] ?? '5');
 const DAYS = Number(process.argv[3] ?? 365);
 const K = Number(process.argv[4] ?? 40);
-const NOW = Date.now();
+const END_OFFSET = Number(process.argv[5] ?? 0); // days-ago to END the window — isolate an independent OOS regime
+const NOW = Date.now() - END_OFFSET * 86_400_000;
 const COST = 0.07; // real HL taker RT (NOT stressed — the recalibrated lens uses real cost)
 const SIGMA_W = 50;
 
