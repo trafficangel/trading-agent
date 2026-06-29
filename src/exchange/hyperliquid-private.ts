@@ -94,6 +94,54 @@ export async function hlMarketOrder(args: { coin: string; side: 'long' | 'short'
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }
 
+/** RESTING limit order for the wick-fade runner. Default tif 'Alo' = post-only (add-liquidity-only):
+ *  guarantees MAKER and HL REJECTS it if it would cross the book — so a deep limit can never
+ *  accidentally take. Returns the resting oid (to track/cancel), or filled=true if it somehow took. */
+export async function hlLimitOrder(args: { coin: string; side: 'long' | 'short'; qty: number; price: number; reduceOnly?: boolean; gtc?: boolean }): Promise<HlResult<{ oid: number | null; filled: boolean }>> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  try {
+    const m = await assetMeta(c.info, args.coin);
+    if (!m) return { ok: false, msg: `unknown HL coin ${args.coin}` };
+    const isBuy = args.side === 'long';
+    const p = formatPrice(args.price, m.szDecimals, 'perp');
+    const s = formatSize(args.qty, m.szDecimals);
+    if (Number(s) <= 0) return { ok: false, msg: `size rounds to 0 (qty ${args.qty}, szDecimals ${m.szDecimals})` };
+    const tif: 'Alo' | 'Gtc' = args.gtc ? 'Gtc' : 'Alo';
+    const res = await c.ex.order({ orders: [{ a: m.idx, b: isBuy, p, s, r: args.reduceOnly ?? false, t: { limit: { tif } } }], grouping: 'na' });
+    const st = ((res?.response?.data?.statuses ?? []) as unknown[])[0] as Record<string, unknown> | undefined;
+    if (st && typeof st === 'object' && 'error' in st) return { ok: false, msg: String((st as { error: unknown }).error) };
+    const resting = st && 'resting' in st ? (st as { resting: { oid: number } }).resting : null;
+    return { ok: true, data: { oid: resting ? resting.oid : null, filled: !!(st && 'filled' in st) } };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
+
+/** Cancel a resting order by oid (idempotent-ish: a stale oid just errors, caller treats as gone). */
+export async function hlCancelOrder(coin: string, oid: number): Promise<HlResult> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  try {
+    const m = await assetMeta(c.info, coin);
+    if (!m) return { ok: false, msg: `unknown HL coin ${coin}` };
+    await c.ex.cancel({ cancels: [{ a: m.idx, o: oid }] });
+    return { ok: true, data: null };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
+
+export type HlOpenOrder = { coin: string; oid: number; side: 'long' | 'short'; px: number; sz: number };
+/** Resting (open) orders, optionally filtered to one coin. side normalized B/A → long/short. */
+export async function hlOpenOrders(coin?: string): Promise<HlResult<HlOpenOrder[]>> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  try {
+    const oo = await c.info.openOrders({ user: c.addr });
+    const list = oo
+      .filter((o) => !coin || o.coin === coin)
+      .map((o) => ({ coin: o.coin, oid: o.oid, side: (o.side === 'B' ? 'long' : 'short') as 'long' | 'short', px: Number(o.limitPx), sz: Number(o.sz) }));
+    return { ok: true, data: list };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
+
 export async function hlFetchPosition(coin: string): Promise<HlResult<HlPosition | null>> {
   const c = clients();
   if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
