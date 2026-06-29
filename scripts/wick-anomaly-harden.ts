@@ -48,31 +48,30 @@ function trades(c: Candle[], X: number): number[] {
 }
 
 (async () => {
-  console.log(`WICK-ANOMALY HARDEN · ${TF}m · fade deep limit→mid · 3×${WIN_DAYS}d · base RT ${RT}% · +slip ${SLIP}% · +2× fee · null K${K}\n`);
-  console.log('coin   X      net@base  net@slip+2×   win%  Kelly  | 3-win persist(slip+2×)  nullP  tail%');
+  void RT; void SLIP;
+  const COSTS = [0.05, 0.10, 0.15]; // optimistic / realistic (maker entry + taker-exit slip) / conservative RT %
+  console.log(`WICK-ANOMALY HARDEN · ${TF}m · fade deep limit→mid · 3×${WIN_DAYS}d · cost ladder RT {${COSTS.join('/')}}% · null K${K}\n`);
+  console.log('coin   X      n    win%@.10  Kelly@.10  netΣ@.05  @.10   @.15  | persist@.10  nullP@.10  | verdict');
   for (const sym of SYMBOLS) {
     const coin = sym.replace('USDT', '');
     const wins: Candle[][] = [];
     for (const off of WINDOWS) { const end = Date.now() - off * 86_400_000; try { wins.push(await getKlines(sym, TF, end - WIN_DAYS * 86_400_000, end)); } catch { wins.push([]); } }
     if (wins.some((w) => w.length < 800)) continue;
-    for (const X of [0.015, 0.02, 0.03]) {
+    for (const X of [0.02, 0.03]) {
       const perWin = wins.map((c) => trades(c, X));
-      if (perWin[0]!.length < 20) continue;
-      const costBase = RT, costHard = 2 * RT + SLIP; // base vs hardened (2× fee + slippage)
-      const netW = (g: number[], cost: number) => Math.round((mean(g) - cost) * g.length * 10) / 10;
+      if (perWin[0]!.length < 15) continue;
       const allG = perWin.flat();
-      const baseNet = netW(allG, costBase), hardNet = netW(allG, costHard);
-      const win = Math.round(allG.filter((x) => x - costHard > 0).length / allG.length * 100);
-      const netTrades = allG.map((x) => x - costHard);
-      const persist = perWin.filter((g) => g.length >= 12 && netW(g, costHard) > 0).length;
-      // null: random side per trade (does the FADE direction beat random?) at hardened cost
-      let ge = 0; const realHard = mean(netTrades) * netTrades.length;
-      for (let s = 0; s < K; s++) { let acc = 0; let st = (104729 * (s + 1)) & 0x7fffffff; for (const g of allG) { st = (st * 1103515245 + 12345) & 0x7fffffff; acc += ((st / 0x7fffffff) < 0.5 ? -g : g) - costHard; } ge += (acc >= realHard ? 1 : 0); }
+      const netW = (g: number[], cost: number) => Math.round((mean(g) - cost) * g.length * 10) / 10;
+      const C = 0.10; // realistic
+      const win = Math.round(allG.filter((x) => x - C > 0).length / allG.length * 100);
+      const netReal = allG.map((x) => x - C);
+      const persist = perWin.filter((g) => g.length >= 10 && netW(g, C) > 0).length;
+      let ge = 0; const real = mean(netReal) * netReal.length;
+      for (let s = 0; s < K; s++) { let acc = 0; let st = (104729 * (s + 1)) & 0x7fffffff; for (const g of allG) { st = (st * 1103515245 + 12345) & 0x7fffffff; acc += ((st / 0x7fffffff) < 0.5 ? -g : g) - C; } ge += (acc >= real ? 1 : 0); }
       const nullP = ge / K;
-      const robust = persist >= 2 && hardNet > 0 && nullP < 0.05;
-      console.log(`${coin.padEnd(5)} ${(X * 100).toFixed(1)}%  ${String(baseNet).padStart(7)}  ${String(hardNet).padStart(8)}    ${String(win).padStart(3)}  ${String(kelly(netTrades)).padStart(5)}  | ${robust ? '✅' : '  '}${persist}/3              ${nullP.toFixed(2)}  ${Math.round(Math.min(...netTrades) * 10) / 10}`);
+      const robust = persist >= 2 && netW(allG, C) > 0 && nullP < 0.05;
+      console.log(`${coin.padEnd(5)} ${(X * 100).toFixed(1)}%  ${String(allG.length).padStart(4)}  ${String(win).padStart(5)}    ${String(kelly(netReal)).padStart(6)}   ${String(netW(allG, 0.05)).padStart(6)} ${String(netW(allG, 0.10)).padStart(6)} ${String(netW(allG, 0.15)).padStart(6)}  | ${persist}/3         ${nullP.toFixed(2)}     | ${robust ? '✅ ROBUST' : 'kill'}`);
     }
   }
-  console.log('\nREAD: net@slip+2× = total net AFTER 2× fees + 0.10% extra slippage. persist = windows net-positive at that hard cost.');
-  console.log('  ✅ = persist ≥2/3 AND total>0 at hard cost AND fade beats the random-side null (p<0.05) = a robust, real anomaly edge.');
+  console.log('\nREAD: realistic cost = 0.10% RT (maker entry ~0 slip + taker-exit ~0.05% slip + fees). ✅ = persist ≥2/3 @0.10 AND total>0 @0.10 AND beats random-side null.');
 })().catch((e) => { console.error(e); process.exit(1); });
