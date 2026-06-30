@@ -21,7 +21,10 @@ import { config } from '../config.js';
 export type HlResult<T = unknown> = { ok: true; data: T } | { ok: false; msg: string };
 export type HlPosition = { coin: string; side: 'long' | 'short'; size: number; entryPx: number };
 
-type Clients = { ex: ExchangeClient; info: InfoClient; addr: `0x${string}` };
+// readUser = whose positions/orders to query (the VAULT if trading one, else the main account).
+// vopts = order-execution options carrying vaultAddress (so writes act ON BEHALF OF the vault); undefined
+// for main-account trading. When HL_VAULT_ADDRESS is unset, both collapse to the legacy main-account path.
+type Clients = { ex: ExchangeClient; info: InfoClient; addr: `0x${string}`; readUser: `0x${string}`; vopts: { vaultAddress: `0x${string}` } | undefined };
 let _clients: Clients | null = null;
 let _meta: { universe: { name: string; szDecimals: number }[] } | null = null;
 
@@ -33,7 +36,8 @@ function clients(): Clients | null {
     const ex = new ExchangeClient({ transport, wallet });
     const info = new InfoClient({ transport });
     const addr = (config.HL_ACCOUNT_ADDRESS ?? wallet.address) as `0x${string}`;
-    _clients = { ex, info, addr };
+    const vault = config.HL_VAULT_ADDRESS as `0x${string}` | undefined;
+    _clients = { ex, info, addr, readUser: vault ?? addr, vopts: vault ? { vaultAddress: vault } : undefined };
   }
   return _clients;
 }
@@ -55,7 +59,7 @@ export async function hlSetLeverage(coin: string, leverage: number): Promise<HlR
   try {
     const m = await assetMeta(c.info, coin);
     if (!m) return { ok: false, msg: `unknown HL coin ${coin}` };
-    await c.ex.updateLeverage({ asset: m.idx, isCross: true, leverage: Math.max(1, Math.floor(leverage)) });
+    await c.ex.updateLeverage({ asset: m.idx, isCross: true, leverage: Math.max(1, Math.floor(leverage)) }, c.vopts);
     return { ok: true, data: null };
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }
@@ -85,7 +89,7 @@ export async function hlMarketOrder(args: { coin: string; side: 'long' | 'short'
       orders.push({ a: m.idx, b: !isBuy, p: slPx, s, r: true, t: { trigger: { isMarket: true, triggerPx: slPx, tpsl: 'sl' } } });
       grouping = 'normalTpsl';
     }
-    const res = await c.ex.order({ orders, grouping });
+    const res = await c.ex.order({ orders, grouping }, c.vopts);
     // HL can return a per-order {error} inside an otherwise-ok response — check defensively.
     const statuses = (res?.response?.data?.statuses ?? []) as unknown[];
     const errStatus = statuses.find((st) => st !== null && typeof st === 'object' && 'error' in st && typeof (st as { error: unknown }).error === 'string');
@@ -108,7 +112,7 @@ export async function hlLimitOrder(args: { coin: string; side: 'long' | 'short';
     const s = formatSize(args.qty, m.szDecimals);
     if (Number(s) <= 0) return { ok: false, msg: `size rounds to 0 (qty ${args.qty}, szDecimals ${m.szDecimals})` };
     const tif: 'Alo' | 'Gtc' = args.gtc ? 'Gtc' : 'Alo';
-    const res = await c.ex.order({ orders: [{ a: m.idx, b: isBuy, p, s, r: args.reduceOnly ?? false, t: { limit: { tif } } }], grouping: 'na' });
+    const res = await c.ex.order({ orders: [{ a: m.idx, b: isBuy, p, s, r: args.reduceOnly ?? false, t: { limit: { tif } } }], grouping: 'na' }, c.vopts);
     const st = ((res?.response?.data?.statuses ?? []) as unknown[])[0] as Record<string, unknown> | undefined;
     if (st && typeof st === 'object' && 'error' in st) return { ok: false, msg: String((st as { error: unknown }).error) };
     const resting = st && 'resting' in st ? (st as { resting: { oid: number } }).resting : null;
@@ -123,7 +127,7 @@ export async function hlCancelOrder(coin: string, oid: number): Promise<HlResult
   try {
     const m = await assetMeta(c.info, coin);
     if (!m) return { ok: false, msg: `unknown HL coin ${coin}` };
-    await c.ex.cancel({ cancels: [{ a: m.idx, o: oid }] });
+    await c.ex.cancel({ cancels: [{ a: m.idx, o: oid }] }, c.vopts);
     return { ok: true, data: null };
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }
@@ -134,7 +138,7 @@ export async function hlOpenOrders(coin?: string): Promise<HlResult<HlOpenOrder[
   const c = clients();
   if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
   try {
-    const oo = await c.info.openOrders({ user: c.addr });
+    const oo = await c.info.openOrders({ user: c.readUser });
     const list = oo
       .filter((o) => !coin || o.coin === coin)
       .map((o) => ({ coin: o.coin, oid: o.oid, side: (o.side === 'B' ? 'long' : 'short') as 'long' | 'short', px: Number(o.limitPx), sz: Number(o.sz) }));
@@ -146,7 +150,7 @@ export async function hlFetchPosition(coin: string): Promise<HlResult<HlPosition
   const c = clients();
   if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
   try {
-    const cs = await c.info.clearinghouseState({ user: c.addr });
+    const cs = await c.info.clearinghouseState({ user: c.readUser });
     const ap = cs.assetPositions.find((a) => a.position.coin === coin);
     const szi = ap ? Number(ap.position.szi) : 0;
     if (!ap || szi === 0) return { ok: true, data: null };
@@ -172,7 +176,7 @@ export async function hlAccountValue(): Promise<HlResult<number>> {
   const c = clients();
   if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
   try {
-    const cs = await c.info.clearinghouseState({ user: c.addr });
+    const cs = await c.info.clearinghouseState({ user: c.readUser });
     return { ok: true, data: Number(cs.marginSummary.accountValue) };
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }

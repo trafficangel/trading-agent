@@ -90,6 +90,10 @@ const Schema = z.object({
   HL_API_WALLET_KEY: z.string().optional(),
   HL_ACCOUNT_ADDRESS: z.string().optional(),
   HL_USE_TESTNET: envBool(true),
+  /* HL_VAULT_ADDRESS = if set, runners trade ON BEHALF OF this vault (orders carry vaultAddress, reads
+   *  query the vault's positions/orders) instead of the main account. The path to scaling capital:
+   *  our own deposit + depositors, with a public on-chain track. Inert if unset → main-account trading. */
+  HL_VAULT_ADDRESS: z.string().optional(),
 
   /**
    * Track C — LuxAlgo AI Strategy Builder webhook trader.
