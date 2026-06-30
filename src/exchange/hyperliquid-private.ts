@@ -158,11 +158,17 @@ export async function hlFetchPosition(coin: string): Promise<HlResult<HlPosition
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }
 
-export async function hlClosePosition(coin: string): Promise<HlResult> {
+/** Close via reduceOnly IOC. Returns the REAL exit fill avgPx (for honest live PnL booking, not mid). */
+export async function hlClosePosition(coin: string): Promise<HlResult<{ avgPx: number | null }>> {
   const p = await hlFetchPosition(coin);
   if (!p.ok) return p;
-  if (!p.data) return { ok: true, data: 'flat' };
-  return hlMarketOrder({ coin, side: p.data.side === 'long' ? 'short' : 'long', qty: p.data.size, reduceOnly: true });
+  if (!p.data) return { ok: true, data: { avgPx: null } };
+  const res = await hlMarketOrder({ coin, side: p.data.side === 'long' ? 'short' : 'long', qty: p.data.size, reduceOnly: true });
+  if (!res.ok) return res;
+  const statuses = ((res.data as { response?: { data?: { statuses?: unknown[] } } })?.response?.data?.statuses ?? []);
+  let avgPx: number | null = null;
+  for (const st of statuses) { if (st && typeof st === 'object' && 'filled' in st) { const v = Number((st as { filled: { avgPx: string } }).filled.avgPx); if (Number.isFinite(v)) avgPx = v; } }
+  return { ok: true, data: { avgPx } };
 }
 
 export async function hlMid(coin: string): Promise<number | null> {

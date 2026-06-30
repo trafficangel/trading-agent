@@ -21,20 +21,21 @@ import { config } from '../config.js';
 import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
 
 type WfMode = 'off' | 'testnet' | 'live';
-// per-coin depth X (validated sweet spot): 2% for TON, 3% for the rest. ALL HL-listed.
-// NB: coins MUST be DISJOINT from funding-flip's {ETH,ADA,XRP,AVAX} — one strategy per symbol on a shared
-// account, else each runner adopts/closes the other's position (CLAUDE.md One-Way rule). XRP dropped for this.
-const COIN_X: Record<string, number> = { TON: 0.02, DOGE: 0.03, ICP: 0.03, NEAR: 0.03, ATOM: 0.03, CRV: 0.03, ENA: 0.03, TIA: 0.03, kPEPE: 0.03 };
-export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; requoteDrift: number } = {
-  mode: 'testnet',        // operator chose HL testnet
+// per-coin depth X (validated sweet spot): 3% on liquid retail alts. Small set for the $300 live shakeout
+// (resting-order margin fits). NB: coins MUST be DISJOINT from funding-flip's {ETH,ADA,XRP,AVAX} — one
+// strategy per symbol on a shared account (CLAUDE.md One-Way rule). All on HL mainnet AND testnet.
+const COIN_X: Record<string, number> = { DOGE: 0.03, NEAR: 0.03, ICP: 0.03, TIA: 0.03, ATOM: 0.03 };
+export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; requoteDrift: number; dailyLossPct: number } = {
+  mode: 'testnet',        // flip to 'live' ONLY after the mainnet account is funded + HL_USE_TESTNET=false
   coins: Object.keys(COIN_X),
-  capitalUsd: 150,        // testnet; per-coin margin = capitalUsd/coins.length (small — resting orders reserve margin, account is shared with funding-flip)
-  leverage: 2,
+  capitalUsd: 120,        // SIZING basis (≤ account equity); below the $300 account so 2-sided resting-order margin fits with buffer. per-quote notional = capitalUsd/coins × leverage
+  leverage: 2,            // fractional-Kelly (backtest Kelly 2-5 ⇒ full = 2-5×; 2× is the conservative smoothness choice)
   holdMins: 60,           // time-stop (backtest exitH=12×5m bars)
   stopPct: 0.03,          // catastrophe stop beyond entry (backtest STOP=3%)
-  requoteDrift: 0.01,     // re-quote a resting level only when it drifts >1% off the desired (anti-churn; deep limits don't need tight tracking)
+  requoteDrift: 0.01,     // re-quote a resting level only when it drifts >1% off the desired (anti-churn)
+  dailyLossPct: 0.05,     // DAILY-LOSS KILL: if today's realized loss exceeds 5% of capital → pull all quotes + no new entries until the day rolls (open positions still exit). The correlated-tail safeguard.
 };
-const COST_RT = 0.10;     // CONSERVATIVE round-trip booking: maker entry (Alo) + taker exit IOC crosses thin alt books worse than mid (the strong coins survived 0.15% in backtest; book pessimistically so the promotion gate isn't optimistically biased)
+const COST_RT = 0.05;     // RT FEES only (maker entry ~0.01% + taker exit ~0.035%): real exit slippage is now captured by booking at the actual close avgPx, and the maker entry fills AT the limit price (no entry slippage)
 const MIN_NOTIONAL = 11;  // HL min order ≈ $10
 const HR = 3_600_000;
 
@@ -59,7 +60,17 @@ async function cancelAll(coin: string, orders: HlOpenOrder[]): Promise<boolean> 
   return allOk;
 }
 
-async function stepCoin(coin: string): Promise<void> {
+const dayPnlStmt = db.prepare<[number], { s: number | null }>(`SELECT SUM(pnl_pct) AS s FROM wick_fade_log WHERE closed_at >= ? AND pnl_pct IS NOT NULL`);
+/** DAILY-LOSS KILL: today's realized loss as a fraction of capital ≈ (Σ today's pnl_pct/100) × (lev/coins)
+ *  [each position ≈ capital/coins × lev notional]. True once it exceeds dailyLossPct → pull quotes, no new entries. */
+function dailyKilled(): boolean {
+  const startOfDay = Math.floor(Date.now() / 86_400_000) * 86_400_000;
+  const sumPct = dayPnlStmt.get(startOfDay)?.s ?? 0;
+  const dayLossFrac = (sumPct / 100) * (WF_CONFIG.leverage / Math.max(1, WF_CONFIG.coins.length));
+  return dayLossFrac <= -WF_CONFIG.dailyLossPct;
+}
+
+async function stepCoin(coin: string, killed: boolean): Promise<void> {
   const x = COIN_X[coin]; if (x == null) return;
   const nowMs = Date.now();
   const dbPos = getPos.get(coin);
@@ -100,10 +111,11 @@ async function stepCoin(coin: string): Promise<void> {
     const recheck = await hlFetchPosition(coin);
     if (!recheck.ok) { logger.warn({ coin }, 'wick-fade: post-close fetch failed — defer to reconcile'); return; }
     if (recheck.data) { logger.warn({ coin, remaining: recheck.data.size }, 'wick-fade: close did not fully fill — retry'); return; }
-    const gross = dbPos.side === 'long' ? (mid - dbPos.entry_px) / dbPos.entry_px * 100 : (dbPos.entry_px - mid) / dbPos.entry_px * 100;
+    const exitPx = close.data.avgPx ?? mid; // REAL exit fill (honest live PnL); fall back to mid only if unavailable
+    const gross = dbPos.side === 'long' ? (exitPx - dbPos.entry_px) / dbPos.entry_px * 100 : (dbPos.entry_px - exitPx) / dbPos.entry_px * 100;
     const pnl = +(gross - COST_RT).toFixed(3);
-    closeTxn(mid, nowMs, pnl, reason, coin);
-    logger.warn({ coin, side: dbPos.side, entry: dbPos.entry_px, exit: mid, pnlPct: pnl, reason }, '✅ wick-fade: CLOSED');
+    closeTxn(exitPx, nowMs, pnl, reason, coin);
+    logger.warn({ coin, side: dbPos.side, entry: dbPos.entry_px, exit: exitPx, pnlPct: pnl, reason }, '✅ wick-fade: CLOSED');
     return;
   }
 
@@ -111,6 +123,7 @@ async function stepCoin(coin: string): Promise<void> {
   // Guard: if we could NOT read open orders, do NOT place quotes — we'd risk duplicating an unseen
   // resting order. (Position reconcile/exit above don't need exOrders, so they already ran safely.)
   if (!ooRes.ok) { logger.warn({ coin, msg: ooRes.msg }, 'wick-fade: openOrders read failed — skip quoting this tick'); return; }
+  if (killed) { if (exOrders.length) await cancelAll(coin, exOrders); return; } // DAILY-LOSS KILL: pull quotes, no new entries (open positions still exit via the branches above)
   const mid = await hlMid(coin); if (mid == null || !(mid > 0)) return;
   const margin = WF_CONFIG.capitalUsd / WF_CONFIG.coins.length;
   for (const side of ['long', 'short'] as const) {
@@ -133,20 +146,22 @@ async function stepCoin(coin: string): Promise<void> {
 let running = false;
 export function startWickFadeRunner(): void {
   if (WF_CONFIG.mode === 'off') { logger.info('wick-fade runner: mode=off (idle)'); return; }
-  if (WF_CONFIG.mode === 'live') throw new Error('wick-fade: live mode not enabled — prove out on testnet first');
-  // SAFETY: mode=testnet must route to the testnet endpoint (config.HL_USE_TESTNET), else a prod .env flip
-  // could send REAL orders. Assert they agree; idle (not throw) if not.
+  // SAFETY: mode must match the endpoint (config.HL_USE_TESTNET) so a stale .env can't cross-route money.
+  // mode='live' is ENABLED but requires HL_USE_TESTNET=false (real account); testnet requires =true.
   if (WF_CONFIG.mode === 'testnet' && !config.HL_USE_TESTNET) { logger.error('🛑 wick-fade: mode=testnet but HL_USE_TESTNET=false — REFUSING to route to mainnet; runner idle'); return; }
+  if (WF_CONFIG.mode === 'live' && config.HL_USE_TESTNET) { logger.error('🛑 wick-fade: mode=live but HL_USE_TESTNET=true — REFUSING (would trade testnet as if live); runner idle'); return; }
   void HR;
   cron.schedule('* * * * *', () => { // every 1 min — wicks are fast
     if (running) return;
     running = true;
     void (async () => {
+      const killed = dailyKilled();
+      if (killed) logger.warn('⏸ wick-fade: DAILY-LOSS KILL active — pulling quotes, no new entries until the day rolls');
       for (const coin of WF_CONFIG.coins) {
-        try { await stepCoin(coin); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
+        try { await stepCoin(coin, killed); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
       }
     })().finally(() => { running = false; });
   });
-  logger.warn({ mode: WF_CONFIG.mode, coins: WF_CONFIG.coins.length, lev: WF_CONFIG.leverage, hold: `${WF_CONFIG.holdMins}m`, stop: `${WF_CONFIG.stopPct * 100}%` }, '✅ wick-fade runner scheduled (every 1m, HL testnet, post-only deep limits, exchange-reconciled)');
+  logger.warn({ mode: WF_CONFIG.mode, endpoint: config.HL_USE_TESTNET ? 'testnet' : 'MAINNET', vault: config.HL_VAULT_ADDRESS ? 'yes' : 'no', coins: WF_CONFIG.coins.length, lev: WF_CONFIG.leverage, capital: WF_CONFIG.capitalUsd, dailyKill: `${WF_CONFIG.dailyLossPct * 100}%` }, '✅ wick-fade runner scheduled (every 1m, post-only deep limits, exchange-reconciled, daily-loss kill)');
   if (!hlConfigured()) logger.error('wick-fade: HL_API_WALLET_KEY missing — runner idles until configured');
 }
