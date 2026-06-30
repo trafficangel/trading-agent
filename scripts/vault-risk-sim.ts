@@ -17,7 +17,7 @@ const WICK = [{ c: 'DOGE', x: 0.03 }, { c: 'ICP', x: 0.03 }, { c: 'NEAR', x: 0.0
 const FLIP = ['ETH', 'ADA', 'XRP', 'AVAX'];
 const DAYS = Number(process.argv[2] ?? 360);
 const NOW = Date.now();
-const TGT_VOL = 0.15; // annualized vol budget all schemes are scaled to
+const TGT_VOL = 15; // annualized vol budget (%-points) all schemes are scaled to — daily pnl is in %-points
 const DAYMS = 86_400_000;
 const mean = (a: number[]) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
 const std = (a: number[]) => { if (a.length < 2) return 0; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) * (x - m), 0) / (a.length - 1)); };
