@@ -29,6 +29,7 @@ import { startMakerRunner } from './jobs/maker-runner.js';
 import { startWebhookWatchdog } from './jobs/webhook-watchdog.js';
 import { startHlCollector } from './jobs/hl-collector.js';
 import { startFundingFlipRunner } from './jobs/funding-flip-runner.js';
+import { startWickFadeRunner } from './jobs/wick-fade-runner.js';
 // Phase G — money-back guarantee disabled, see start-job line below.
 // import { startPnlGuaranteeMonthlyJob } from './jobs/pnl-guarantee-monthly.js';
 import { sendMessage } from './telegram/bot.js';
@@ -234,6 +235,10 @@ async function main(): Promise<void> {
   // launched in HL TESTNET (fake money) on the ETH+ADA core to accumulate live
   // out-of-sample evidence. mode='testnet' const; idles if HL key missing.
   startFundingFlipRunner();
+  // WICK-FADE test runner — the SECOND validated edge (deep-dislocation anomaly
+  // fade, broad on retail alts). HL TESTNET, post-only deep limits → fade the
+  // snap-back. mode='testnet' const; idles if HL key missing / endpoint mismatch.
+  startWickFadeRunner();
   // Phase G — money-back guarantee disabled per operator decision.
   // Cron registration commented out, DB columns + repo helpers preserved
   // so it can be re-enabled later without re-migrating. UI mentions
