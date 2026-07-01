@@ -18,7 +18,7 @@ import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
-import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
+import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
 
 type WfMode = 'off' | 'testnet' | 'live';
 // per-coin depth X (validated sweet spot): 2% for TON, 3% for the rest — MAX coverage of the full validated
@@ -33,7 +33,7 @@ export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; lev
   holdMins: 60,           // time-stop (backtest exitH=12×5m bars)
   stopPct: 0.03,          // catastrophe stop beyond entry (backtest STOP=3%)
   requoteDrift: 0.01,     // re-quote a resting level only when it drifts >1% off the desired (anti-churn)
-  dailyLossPct: 0.05,     // DAILY-LOSS KILL: if today's realized loss exceeds 5% of capital → pull all quotes + no new entries until the day rolls (open positions still exit). The correlated-tail safeguard.
+  dailyLossPct: 0.05,     // DAILY-LOSS KILL: if account EQUITY drops >5% below start-of-day (incl. UNREALIZED open drawdown) → pull all quotes + no new entries until the day rolls (open positions still exit). The correlated-tail circuit-breaker.
 };
 const COST_RT = 0.05;     // RT FEES only (maker entry ~0.01% + taker exit ~0.035%): real exit slippage is now captured by booking at the actual close avgPx, and the maker entry fills AT the limit price (no entry slippage)
 const MIN_NOTIONAL = 11;  // HL min order ≈ $10
@@ -60,14 +60,17 @@ async function cancelAll(coin: string, orders: HlOpenOrder[]): Promise<boolean> 
   return allOk;
 }
 
-const dayPnlStmt = db.prepare<[number], { s: number | null }>(`SELECT SUM(pnl_pct) AS s FROM wick_fade_log WHERE closed_at >= ? AND pnl_pct IS NOT NULL`);
-/** DAILY-LOSS KILL: today's realized loss as a fraction of capital ≈ (Σ today's pnl_pct/100) × (lev/coins)
- *  [each position ≈ capital/coins × lev notional]. True once it exceeds dailyLossPct → pull quotes, no new entries. */
-function dailyKilled(): boolean {
-  const startOfDay = Math.floor(Date.now() / 86_400_000) * 86_400_000;
-  const sumPct = dayPnlStmt.get(startOfDay)?.s ?? 0;
-  const dayLossFrac = (sumPct / 100) * (WF_CONFIG.leverage / Math.max(1, WF_CONFIG.coins.length));
-  return dayLossFrac <= -WF_CONFIG.dailyLossPct;
+// DAILY-LOSS KILL via ACCOUNT EQUITY (exact: includes UNREALIZED open-position drawdown AND every exit path —
+// liquidation, manual, reconciled-flat — none of which a realized-pnl sum would see). Snapshots start-of-day
+// equity; kills when equity drops > dailyLossPct below it. In-memory snapshot resets on restart (accepted at
+// this symbolic size). Fails OPEN (no kill) if equity can't be read, so a transient blip doesn't halt trading.
+let sodEquity = 0, sodDay = -1;
+async function dailyKilled(): Promise<boolean> {
+  const av = await hlAccountValue();
+  if (!av.ok || !(av.data > 0)) return false;
+  const day = Math.floor(Date.now() / 86_400_000);
+  if (day !== sodDay) { sodDay = day; sodEquity = av.data; return false; } // new day (or first tick) → snapshot
+  return (av.data - sodEquity) / sodEquity <= -WF_CONFIG.dailyLossPct;
 }
 
 async function stepCoin(coin: string, killed: boolean): Promise<void> {
@@ -155,8 +158,8 @@ export function startWickFadeRunner(): void {
     if (running) return;
     running = true;
     void (async () => {
-      const killed = dailyKilled();
-      if (killed) logger.warn('⏸ wick-fade: DAILY-LOSS KILL active — pulling quotes, no new entries until the day rolls');
+      const killed = await dailyKilled();
+      if (killed) logger.warn('⏸ wick-fade: DAILY-LOSS KILL active (equity −5% intraday) — pulling quotes, no new entries until the day rolls');
       for (const coin of WF_CONFIG.coins) {
         try { await stepCoin(coin, killed); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
       }

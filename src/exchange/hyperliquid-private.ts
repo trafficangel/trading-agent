@@ -76,7 +76,11 @@ export async function hlMarketOrder(args: { coin: string; side: 'long' | 'short'
     const mid = Number(mids[args.coin]);
     if (!(mid > 0)) return { ok: false, msg: `no mid for ${args.coin}` };
     const isBuy = args.side === 'long';
-    const limitPx = isBuy ? mid * 1.05 : mid * 0.95; // 5% slippage ceiling so the IOC crosses
+    // slippage ceiling so the IOC crosses. reduceOnly CLOSES get a WIDE (20%) ceiling — during a flush the
+    // book can gap far past 5% and a tight ceiling would MISS, leaving the position riding unprotected; when
+    // exiting (esp. a catastrophe stop) getting flat matters more than price. Entries keep the tight 5%.
+    const cap = args.reduceOnly ? 0.20 : 0.05;
+    const limitPx = isBuy ? mid * (1 + cap) : mid * (1 - cap);
     const p = formatPrice(limitPx, m.szDecimals, 'perp');
     const s = formatSize(args.qty, m.szDecimals);
     if (Number(s) <= 0) return { ok: false, msg: `size rounds to 0 (qty ${args.qty}, szDecimals ${m.szDecimals})` };
