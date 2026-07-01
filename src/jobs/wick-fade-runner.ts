@@ -69,7 +69,7 @@ async function dailyKilled(): Promise<boolean> {
   const av = await hlAccountValue();
   if (!av.ok || !(av.data > 0)) return false;
   const day = Math.floor(Date.now() / 86_400_000);
-  if (day !== sodDay) { sodDay = day; sodEquity = av.data; return false; } // new day (or first tick) → snapshot
+  if (day !== sodDay) { sodDay = day; sodEquity = av.data; logger.info({ sodEquity: +av.data.toFixed(2) }, 'wick-fade: daily-kill equity snapshot (start of day)'); return false; }
   return (av.data - sodEquity) / sodEquity <= -WF_CONFIG.dailyLossPct;
 }
 

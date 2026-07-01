@@ -182,11 +182,24 @@ export async function hlMid(coin: string): Promise<number | null> {
   catch { return null; }
 }
 
+/** TRUE account equity. With a UNIFIED account (spot+perp share ONE collateral pool — HL's default now) the
+ *  perp clearinghouse `accountValue` reflects only the perp-allocated SLICE; the free spot USDC (total − hold)
+ *  also backs trading and absorbs PnL. So real equity = perp accountValue + free spot USDC — which equals the
+ *  UI's "Total Equity", and algebraically = spot_USDC_total + perp_uPnL (the `hold` term cancels, so it's robust
+ *  to how HL computes it). For a non-unified / all-perp account spot USDC ≈ 0 and this collapses to the perp
+ *  value. The spot read is best-effort: on any failure we fall back to perp-only (never throws on the addend). */
 export async function hlAccountValue(): Promise<HlResult<number>> {
   const c = clients();
   if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
   try {
     const cs = await c.info.clearinghouseState({ user: c.readUser });
-    return { ok: true, data: Number(cs.marginSummary.accountValue) };
+    const perp = Number(cs.marginSummary.accountValue);
+    let spotFree = 0;
+    try {
+      const ss = await c.info.spotClearinghouseState({ user: c.readUser });
+      const usdc = ss.balances.find((b) => b.coin === 'USDC');
+      if (usdc) spotFree = Math.max(0, Number(usdc.total) - Number(usdc.hold));
+    } catch { /* best-effort: fall back to perp-only equity */ }
+    return { ok: true, data: perp + spotFree };
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }
