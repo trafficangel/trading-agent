@@ -18,7 +18,7 @@ import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
-import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
+import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, hlPlaceStop, hlCancelTriggers, hlExitAvgSince, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
 
 type WfMode = 'off' | 'testnet' | 'live';
 // per-coin depth X (validated sweet spot): 2% for TON, 3% for the rest — MAX coverage of the full validated
@@ -52,6 +52,20 @@ const insLog = db.prepare(`INSERT INTO wick_fade_log (coin,side,entry_px,qty,x,o
 // close the ACTIVE log row (closed_at IS NULL) — sets close fields, NEVER touches the immutable entry `reason`.
 const updLog = db.prepare(`UPDATE wick_fade_log SET exit_px=?,closed_at=?,pnl_pct=?,close_reason=? WHERE id=(SELECT id FROM wick_fade_log WHERE coin=? AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1)`);
 const closeTxn = db.transaction((exitPx: number, closedAt: number, pnl: number, reason: string, coin: string) => { updLog.run(exitPx, closedAt, pnl, reason, coin); delPos.run(coin); });
+// reconcile-flat: close the log row + drop the pos row ATOMICALLY (a restart between the two would otherwise
+// re-run reconcile and close the WRONG active row). exitPx/pnl may be NULL if unrecoverable from userFills.
+const reconcileFlatTxn = db.transaction((exitPx: number | null, closedAt: number, pnl: number | null, coin: string) => { updLog.run(exitPx, closedAt, pnl, 'reconciled-flat', coin); delPos.run(coin); });
+
+// PERSISTED start-of-day equity (survives the external restart cadence — an in-memory snapshot re-based to
+// post-drawdown equity on every restart, disarming the -5% kill). Stored in the runtime_config kv (no migration).
+const SOD_KEY = 'wick_fade_sod';
+const getKv = db.prepare<[string], { value: string }>(`SELECT value FROM runtime_config WHERE key = ?`);
+const updKv = db.prepare(`UPDATE runtime_config SET value=?, updated_at=?, reason=? WHERE key=?`);
+const insKv = db.prepare(`INSERT INTO runtime_config (key,value,updated_at,reason) VALUES (?,?,?,?)`);
+function saveSod(day: number, equity: number): void {
+  const v = JSON.stringify({ day, equity });
+  if (updKv.run(v, Date.now(), 'wick-fade start-of-day equity', SOD_KEY).changes === 0) insKv.run(SOD_KEY, v, Date.now(), 'wick-fade start-of-day equity');
+}
 
 const targetPx = (side: 'long' | 'short', entry: number, x: number) => (side === 'long' ? entry / (1 - x) : entry / (1 + x));
 const stopAbs = (side: 'long' | 'short', entry: number) => (side === 'long' ? entry * (1 - WF_CONFIG.stopPct) : entry * (1 + WF_CONFIG.stopPct));
@@ -65,17 +79,23 @@ async function cancelAll(coin: string, orders: HlOpenOrder[]): Promise<boolean> 
   return allOk;
 }
 
-// DAILY-LOSS KILL via ACCOUNT EQUITY (exact: includes UNREALIZED open-position drawdown AND every exit path —
-// liquidation, manual, reconciled-flat — none of which a realized-pnl sum would see). Snapshots start-of-day
-// equity; kills when equity drops > dailyLossPct below it. In-memory snapshot resets on restart (accepted at
-// this symbolic size). Fails OPEN (no kill) if equity can't be read, so a transient blip doesn't halt trading.
-let sodEquity = 0, sodDay = -1;
+// DAILY-LOSS KILL via ACCOUNT EQUITY (exact: includes UNREALIZED open-position drawdown AND every exit path).
+// Baseline PERSISTS in the DB keyed by UTC day → a restart re-reads the SAME morning snapshot instead of
+// re-basing to the (already-drawn-down) current equity, so the -5% kill survives the external restart cadence.
+// Fails OPEN (no kill) if equity can't be read, so a transient blip doesn't halt trading.
 async function dailyKilled(): Promise<boolean> {
   const av = await hlAccountValue();
   if (!av.ok || !(av.data > 0)) return false;
   const day = Math.floor(Date.now() / 86_400_000);
-  if (day !== sodDay) { sodDay = day; sodEquity = av.data; logger.info({ sodEquity: +av.data.toFixed(2) }, 'wick-fade: daily-kill equity snapshot (start of day)'); return false; }
-  return (av.data - sodEquity) / sodEquity <= -WF_CONFIG.dailyLossPct;
+  let sod: { day: number; equity: number } | null = null;
+  const raw = getKv.get(SOD_KEY);
+  if (raw) { try { sod = JSON.parse(raw.value) as { day: number; equity: number }; } catch { sod = null; } }
+  if (!sod || sod.day !== day) { // new UTC day (or first ever) → snapshot ONCE (first of the day wins, persists across restarts)
+    saveSod(day, av.data);
+    logger.info({ sodEquity: +av.data.toFixed(2), day }, 'wick-fade: daily-kill equity snapshot (start of day, persisted)');
+    return false;
+  }
+  return (av.data - sod.equity) / sod.equity <= -WF_CONFIG.dailyLossPct;
 }
 
 async function stepCoin(coin: string, killed: boolean): Promise<void> {
@@ -94,17 +114,38 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
     await cancelAll(coin, exOrders);
     insPos.run(coin, exPos.side, exPos.entryPx, exPos.size, x, nowMs, 'fill');
     insLog.run(coin, exPos.side, exPos.entryPx, exPos.size, x, nowMs, 'fill', WF_CONFIG.mode);
-    logger.warn({ coin, side: exPos.side, entry: exPos.entryPx, target: +targetPx(exPos.side, exPos.entryPx, x).toFixed(6) }, '✅ wick-fade: FILLED (deep wick) — managing exit');
+    // EXCHANGE-RESIDENT catastrophe stop: guards the position through process downtime / restart gaps (the
+    // poll is only a backup). reduceOnly stop-market at the 3% level; a trigger, so it won't show in openOrders.
+    const stpPx = stopAbs(exPos.side, exPos.entryPx);
+    const sres = await hlPlaceStop({ coin, posSide: exPos.side, qty: exPos.size, triggerPx: stpPx });
+    if (!sres.ok) logger.error({ coin, msg: sres.msg }, '🛑 wick-fade: EXCHANGE STOP place failed — 1-min poll is the ONLY protection this hold');
+    logger.warn({ coin, side: exPos.side, entry: exPos.entryPx, stop: +stpPx.toFixed(6), exStop: sres.ok, target: +targetPx(exPos.side, exPos.entryPx, x).toFixed(6) }, '✅ wick-fade: FILLED (deep wick) — managing exit');
     return;
   }
-  // ── DB-open but exchange-flat (closed out-of-band) → reconcile, do NOT fabricate PnL ──
+  // ── DB-open but exchange-flat (closed out-of-band — usually the EXCHANGE STOP fired between polls) →
+  //    recover the REAL exit from userFills for honest PnL (not NULL), clear any orphan stop, book ATOMICALLY ──
   if (!exPos && dbPos) {
-    updLog.run(null, nowMs, null, 'reconciled-flat', coin); delPos.run(coin);
-    logger.warn({ coin }, 'wick-fade: DB-open but exchange-flat → reconciled + cleared (PnL unknown)');
+    await hlCancelTriggers(coin); // remove the now-orphan protective stop
+    const ex = await hlExitAvgSince(coin, dbPos.opened_at);
+    let exitPx: number | null = null, pnl: number | null = null;
+    if (ex.ok && ex.data.avgPx && ex.data.avgPx > 0) {
+      exitPx = ex.data.avgPx;
+      const gross = dbPos.side === 'long' ? (exitPx - dbPos.entry_px) / dbPos.entry_px * 100 : (dbPos.entry_px - exitPx) / dbPos.entry_px * 100;
+      pnl = +(gross - COST_RT).toFixed(3);
+    }
+    reconcileFlatTxn(exitPx, nowMs, pnl, coin);
+    logger.warn({ coin, exit: exitPx, pnlPct: pnl }, pnl == null ? 'wick-fade: exchange-flat → reconciled (exit PnL unrecoverable from fills)' : 'wick-fade: exchange-flat → reconciled with RECOVERED exit PnL (exchange stop / OOB close)');
     return;
   }
   // ── IN POSITION → manage exit (target revert / time-stop / catastrophe) ──
   if (exPos && dbPos) {
+    // exchange is truth — if the live side DIVERGED from our DB row (a surviving opposite quote filled during
+    // downtime and netted/flipped us), do NOT manage/book off the stale row: flatten, reconcile-flat books it next tick.
+    if (exPos.side !== dbPos.side) {
+      logger.error({ coin, dbSide: dbPos.side, exSide: exPos.side }, '🛑 wick-fade: live side DIVERGED from DB (netting/flip) — flattening to reconcile');
+      await hlCancelTriggers(coin); await hlClosePosition(coin);
+      return;
+    }
     if (!ooRes.ok) { logger.warn({ coin }, 'wick-fade: in-position but openOrders read failed — defer (a surviving opposite order could fill)'); return; }
     if (exOrders.length) await cancelAll(coin, exOrders); // defensive: no resting orders while holding
     const mid = await hlMid(coin); if (mid == null || !(mid > 0)) { logger.warn({ coin }, 'wick-fade: no mid — retry'); return; }
@@ -119,6 +160,7 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
     const recheck = await hlFetchPosition(coin);
     if (!recheck.ok) { logger.warn({ coin }, 'wick-fade: post-close fetch failed — defer to reconcile'); return; }
     if (recheck.data) { logger.warn({ coin, remaining: recheck.data.size }, 'wick-fade: close did not fully fill — retry'); return; }
+    await hlCancelTriggers(coin); // position flat → remove the now-redundant exchange stop before booking
     const exitPx = close.data.avgPx ?? mid; // REAL exit fill (honest live PnL); fall back to mid only if unavailable
     const gross = dbPos.side === 'long' ? (exitPx - dbPos.entry_px) / dbPos.entry_px * 100 : (dbPos.entry_px - exitPx) / dbPos.entry_px * 100;
     const pnl = +(gross - COST_RT).toFixed(3);

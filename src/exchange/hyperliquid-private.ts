@@ -203,3 +203,59 @@ export async function hlAccountValue(): Promise<HlResult<number>> {
     return { ok: true, data: perp + spotFree };
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }
+
+/** Place a reduceOnly STOP-MARKET trigger to guard an OPEN position ON THE EXCHANGE — it survives process
+ *  downtime / restarts (unlike a poll-based stop). posSide = the side currently HELD; the stop closes it at
+ *  market when mark crosses triggerPx. It's a TRIGGER order → lives in frontendOpenOrders, NOT in openOrders
+ *  (so hlOpenOrders/cancelAll never touch it while we hold). */
+export async function hlPlaceStop(args: { coin: string; posSide: 'long' | 'short'; qty: number; triggerPx: number }): Promise<HlResult<{ oid: number | null }>> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  try {
+    const m = await assetMeta(c.info, args.coin);
+    if (!m) return { ok: false, msg: `unknown HL coin ${args.coin}` };
+    const isBuy = args.posSide === 'short'; // closing a short buys; closing a long sells
+    const px = formatPrice(args.triggerPx, m.szDecimals, 'perp');
+    const s = formatSize(args.qty, m.szDecimals);
+    if (Number(s) <= 0) return { ok: false, msg: `size rounds to 0 (qty ${args.qty})` };
+    const res = await c.ex.order({ orders: [{ a: m.idx, b: isBuy, p: px, s, r: true, t: { trigger: { isMarket: true, triggerPx: px, tpsl: 'sl' } } }], grouping: 'na' }, c.vopts);
+    const st = ((res?.response?.data?.statuses ?? []) as unknown[])[0] as Record<string, unknown> | undefined;
+    if (st && typeof st === 'object' && 'error' in st) return { ok: false, msg: String((st as { error: unknown }).error) };
+    const resting = st && 'resting' in st ? (st as { resting: { oid: number } }).resting : null;
+    return { ok: true, data: { oid: resting ? resting.oid : null } };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
+
+/** Cancel any resting TRIGGER (stop/tp) orders for a coin — protective stops live in frontendOpenOrders,
+ *  invisible to hlOpenOrders. Best-effort; returns the count cancelled. Call on close / reconcile-flat. */
+export async function hlCancelTriggers(coin: string): Promise<HlResult<number>> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  try {
+    const m = await assetMeta(c.info, coin);
+    if (!m) return { ok: false, msg: `unknown HL coin ${coin}` };
+    const fo = await c.info.frontendOpenOrders({ user: c.readUser });
+    const trigs = fo.filter((o) => o.coin === coin && o.isTrigger);
+    for (const o of trigs) { try { await c.ex.cancel({ cancels: [{ a: m.idx, o: o.oid }] }, c.vopts); } catch { /* stale oid → already gone */ } }
+    return { ok: true, data: trigs.length };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
+
+/** Size-weighted average EXIT price for a coin from userFills since `sinceMs` (closing fills only). Used to
+ *  recover honest PnL when a position closed OUT OF BAND (e.g. the exchange stop fired between polls) instead
+ *  of booking NULL. Returns avgPx=null if no closing fills are found in the recent window. */
+export async function hlExitAvgSince(coin: string, sinceMs: number): Promise<HlResult<{ avgPx: number | null }>> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  try {
+    const fills = await c.info.userFills({ user: c.readUser });
+    let notional = 0, qty = 0;
+    for (const f of fills) {
+      if (f.coin !== coin || Number(f.time) < sinceMs) continue;
+      if (!String(f.dir).toLowerCase().includes('close')) continue; // only the closing side, not the entry
+      const px = Number(f.px), sz = Number(f.sz);
+      if (px > 0 && sz > 0) { notional += px * sz; qty += sz; }
+    }
+    return { ok: true, data: { avgPx: qty > 0 ? notional / qty : null } };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
