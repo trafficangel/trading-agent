@@ -24,11 +24,16 @@ type WfMode = 'off' | 'testnet' | 'live';
 // per-coin depth X (validated sweet spot): 2% for TON, 3% for the rest — MAX coverage of the full validated
 // set. NB: coins MUST be DISJOINT from funding-flip's {ETH,ADA,XRP,AVAX} — one strategy per symbol on a
 // shared account (CLAUDE.md One-Way rule). All on HL mainnet; on testnet TON is halted + CRV/ENA absent → no-op.
-const COIN_X: Record<string, number> = { DOGE: 0.03, ICP: 0.03, NEAR: 0.03, ATOM: 0.03, TON: 0.02, CRV: 0.03, ENA: 0.03, TIA: 0.03, kPEPE: 0.03 };
+const COIN_X: Record<string, number> = {
+  // batch-1 (live since Jul 1): X=0.03 except TON (grandfathered 0.02)
+  DOGE: 0.03, ICP: 0.03, NEAR: 0.03, ATOM: 0.03, TON: 0.02, CRV: 0.03, ENA: 0.03, TIA: 0.03, kPEPE: 0.03,
+  // batch-2 (added Jul 1): survived K100 null + net>0 at conservative 0.15%, on HL, disjoint. All X=0.03 (2% died at 0.15%).
+  RENDER: 0.03, POPCAT: 0.03, JUP: 0.03, AR: 0.03, BLUR: 0.03, LTC: 0.03, GOAT: 0.03, EIGEN: 0.03, MANTA: 0.03,
+};
 export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; requoteDrift: number; dailyLossPct: number } = {
   mode: 'live',           // LIVE on mainnet — the guard IDLES this runner until .env HL_USE_TESTNET=false
   coins: Object.keys(COIN_X),
-  capitalUsd: 60,         // SIZING basis for a ~$150 account: per-quote notional = capitalUsd/coins × lev ≈ $13 (near HL min, clears $10). 9 coins × 2 sides × ~$6.7 margin ≈ $120 reserved, ~$30 buffer on $150. TINY positions, MAX coverage — a validation run, size is symbolic
+  capitalUsd: 120,        // SIZING basis: per-quote notional = capitalUsd/coins × lev ≈ $13 (18 coins → 120/18×2 = $13.3, clears HL $10 min). Total reserved ≈ capitalUsd (HL nets opposing same-coin orders) → ~$120 of $159.60, ~$40 buffer (operator chose max coverage over buffer; downside bounded: worst all-fill-all-stop ≈ −$8 = daily-kill, far from liquidation)
   leverage: 2,            // fractional-Kelly (backtest Kelly 2-5 ⇒ full = 2-5×; 2× is the conservative smoothness choice)
   holdMins: 60,           // time-stop (backtest exitH=12×5m bars)
   stopPct: 0.03,          // catastrophe stop beyond entry (backtest STOP=3%)
