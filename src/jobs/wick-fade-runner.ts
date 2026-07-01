@@ -26,7 +26,7 @@ type WfMode = 'off' | 'testnet' | 'live';
 // shared account (CLAUDE.md One-Way rule). All on HL mainnet; on testnet TON is halted + CRV/ENA absent → no-op.
 const COIN_X: Record<string, number> = { DOGE: 0.03, ICP: 0.03, NEAR: 0.03, ATOM: 0.03, TON: 0.02, CRV: 0.03, ENA: 0.03, TIA: 0.03, kPEPE: 0.03 };
 export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; requoteDrift: number; dailyLossPct: number } = {
-  mode: 'testnet',        // flip to 'live' ONLY after the mainnet account is funded + HL_USE_TESTNET=false
+  mode: 'live',           // LIVE on mainnet — the guard IDLES this runner until .env HL_USE_TESTNET=false
   coins: Object.keys(COIN_X),
   capitalUsd: 60,         // SIZING basis for a ~$150 account: per-quote notional = capitalUsd/coins × lev ≈ $13 (near HL min, clears $10). 9 coins × 2 sides × ~$6.7 margin ≈ $120 reserved, ~$30 buffer on $150. TINY positions, MAX coverage — a validation run, size is symbolic
   leverage: 2,            // fractional-Kelly (backtest Kelly 2-5 ⇒ full = 2-5×; 2× is the conservative smoothness choice)
