@@ -21,14 +21,14 @@ import { config } from '../config.js';
 import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
 
 type WfMode = 'off' | 'testnet' | 'live';
-// per-coin depth X (validated sweet spot): 3% on liquid retail alts. Small set for the $300 live shakeout
-// (resting-order margin fits). NB: coins MUST be DISJOINT from funding-flip's {ETH,ADA,XRP,AVAX} — one
-// strategy per symbol on a shared account (CLAUDE.md One-Way rule). All on HL mainnet AND testnet.
-const COIN_X: Record<string, number> = { DOGE: 0.03, NEAR: 0.03, ICP: 0.03, TIA: 0.03, ATOM: 0.03 };
+// per-coin depth X (validated sweet spot): 2% for TON, 3% for the rest — MAX coverage of the full validated
+// set. NB: coins MUST be DISJOINT from funding-flip's {ETH,ADA,XRP,AVAX} — one strategy per symbol on a
+// shared account (CLAUDE.md One-Way rule). All on HL mainnet; on testnet TON is halted + CRV/ENA absent → no-op.
+const COIN_X: Record<string, number> = { DOGE: 0.03, ICP: 0.03, NEAR: 0.03, ATOM: 0.03, TON: 0.02, CRV: 0.03, ENA: 0.03, TIA: 0.03, kPEPE: 0.03 };
 export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; requoteDrift: number; dailyLossPct: number } = {
   mode: 'testnet',        // flip to 'live' ONLY after the mainnet account is funded + HL_USE_TESTNET=false
   coins: Object.keys(COIN_X),
-  capitalUsd: 120,        // SIZING basis (≤ account equity); below the $300 account so 2-sided resting-order margin fits with buffer. per-quote notional = capitalUsd/coins × leverage
+  capitalUsd: 60,         // SIZING basis for a ~$150 account: per-quote notional = capitalUsd/coins × lev ≈ $13 (near HL min, clears $10). 9 coins × 2 sides × ~$6.7 margin ≈ $120 reserved, ~$30 buffer on $150. TINY positions, MAX coverage — a validation run, size is symbolic
   leverage: 2,            // fractional-Kelly (backtest Kelly 2-5 ⇒ full = 2-5×; 2× is the conservative smoothness choice)
   holdMins: 60,           // time-stop (backtest exitH=12×5m bars)
   stopPct: 0.03,          // catastrophe stop beyond entry (backtest STOP=3%)
