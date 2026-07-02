@@ -28,6 +28,7 @@ import { startCustomRunner } from './jobs/custom-runner.js';
 import { startMakerRunner } from './jobs/maker-runner.js';
 import { startWebhookWatchdog } from './jobs/webhook-watchdog.js';
 import { startHlCollector } from './jobs/hl-collector.js';
+import { startHlCandleCollector } from './jobs/hl-candle-collector.js';
 import { startFundingFlipRunner } from './jobs/funding-flip-runner.js';
 import { startWickFadeRunner } from './jobs/wick-fade-runner.js';
 // Phase G — money-back guarantee disabled, see start-job line below.
@@ -231,6 +232,7 @@ async function main(): Promise<void> {
   // book → hl_micro. Forward-collects the data the order-flow strategies need
   // (no REST history on HL). Isolated; no orders, no Telegram.
   startHlCollector();
+  startHlCandleCollector();
   // FUNDING-FLIP test runner — the kill-battery + placebo-verified HL edge,
   // launched in HL TESTNET (fake money) on the ETH+ADA core to accumulate live
   // out-of-sample evidence. mode='testnet' const; idles if HL key missing.

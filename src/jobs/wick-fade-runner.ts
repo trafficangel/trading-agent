@@ -83,8 +83,8 @@ const SOD_KEY = 'wick_fade_sod';
 const getKv = db.prepare<[string], { value: string }>(`SELECT value FROM runtime_config WHERE key = ?`);
 const updKv = db.prepare(`UPDATE runtime_config SET value=?, updated_at=?, reason=? WHERE key=?`);
 const insKv = db.prepare(`INSERT INTO runtime_config (key,value,updated_at,reason) VALUES (?,?,?,?)`);
-function saveSod(day: number, equity: number): void {
-  const v = JSON.stringify({ day, equity });
+function saveSod(state: { day: number; equity: number; killedDay?: number }): void {
+  const v = JSON.stringify(state);
   if (updKv.run(v, Date.now(), 'wick-fade start-of-day equity', SOD_KEY).changes === 0) insKv.run(SOD_KEY, v, Date.now(), 'wick-fade start-of-day equity');
 }
 
@@ -103,20 +103,59 @@ async function cancelAll(coin: string, orders: HlOpenOrder[]): Promise<boolean> 
 // DAILY-LOSS KILL via ACCOUNT EQUITY (exact: includes UNREALIZED open-position drawdown AND every exit path).
 // Baseline PERSISTS in the DB keyed by UTC day → a restart re-reads the SAME morning snapshot instead of
 // re-basing to the (already-drawn-down) current equity, so the -5% kill survives the external restart cadence.
-// Fails OPEN (no kill) if equity can't be read, so a transient blip doesn't halt trading.
-async function dailyKilled(): Promise<boolean> {
-  const av = await hlAccountValue();
-  if (!av.ok || !(av.data > 0)) return false;
-  const day = Math.floor(Date.now() / 86_400_000);
-  let sod: { day: number; equity: number } | null = null;
+// The loss-kill is LATCHED for the rest of the UTC day (persisted killedDay): equity bouncing back above −5%
+// does NOT re-arm the book mid-day — a flip-flop around the threshold would re-quote 26 coins straight into the
+// correlated tail the kill exists to escape. FAIL-CLOSED on sustained blindness measured by WALL-CLOCK (not
+// ticks — a hanging API stretches a tick to minutes): unreadable OR degraded (spot leg failed → under-read on a
+// unified account) equity for ≥5 min → pull quotes rather than quote blind; outages and flushes correlate. A
+// short blip keeps the previous state (no flapping). NB a mid-day DEPOSIT inflates equity vs the baseline and
+// can mask a real loss — on any deposit, delete the wick_fade_sod kv row (ops procedure; see memory).
+const BLIND_AFTER_MS = 5 * 60_000;
+let blindSince: number | null = null;
+let killed = false;
+let killReason: 'loss' | 'blind' | null = null;
+type SodState = { day: number; equity: number; killedDay?: number };
+function loadSod(): SodState | null {
   const raw = getKv.get(SOD_KEY);
-  if (raw) { try { sod = JSON.parse(raw.value) as { day: number; equity: number }; } catch { sod = null; } }
+  if (!raw) return null;
+  try { return JSON.parse(raw.value) as SodState; } catch { return null; }
+}
+async function dailyKilled(): Promise<boolean> {
+  const nowMs = Date.now();
+  const av = await hlAccountValue();
+  // bad read = error, non-positive (hlAccountValue is known to mis-read 0 — treat as blind, NOT as a wipe:
+  // a false wipe would latch a day-long kill on a glitch), or degraded (spot leg failed → understated).
+  if (!av.ok || !(av.data > 0) || av.degraded) {
+    blindSince ??= nowMs;
+    const blindMs = nowMs - blindSince;
+    if (blindMs >= BLIND_AFTER_MS && killReason == null) {
+      logger.error({ blindMins: Math.round(blindMs / 60_000) }, '🛑 wick-fade: equity unreadable/degraded ≥5 min (wall-clock) — FAIL-CLOSED until reads recover');
+      notify('⚠️ <b>wick-fade</b>: биржа ≥5 мин не отдаёт эквити — fail-closed: сниму котировки, как только API ответит; новых входов нет. Открытые позиции ведём к выходу как обычно.');
+    }
+    if (blindMs >= BLIND_AFTER_MS) { killed = true; if (killReason !== 'loss') killReason = 'blind'; }
+    return killed; // below the threshold: keep the previous state — a transient blip must not flap the book
+  }
+  blindSince = null;
+  if (killReason === 'blind') { killed = false; killReason = null; notify('▶️ <b>wick-fade</b>: связь с биржей восстановлена — проверяю дневной лимит'); }
+  const day = Math.floor(nowMs / 86_400_000);
+  let sod = loadSod();
   if (!sod || sod.day !== day) { // new UTC day (or first ever) → snapshot ONCE (first of the day wins, persists across restarts)
-    saveSod(day, av.data);
+    sod = { day, equity: av.data };
+    saveSod(sod);
     logger.info({ sodEquity: +av.data.toFixed(2), day }, 'wick-fade: daily-kill equity snapshot (start of day, persisted)');
+    if (killReason === 'loss') notify('▶️ <b>wick-fade</b>: новый день — daily-kill снят, котировки возвращаются');
+    killed = false; killReason = null;
     return false;
   }
-  return (av.data - sod.equity) / sod.equity <= -WF_CONFIG.dailyLossPct;
+  if (sod.killedDay === day) { killed = true; killReason = 'loss'; return true; } // latched (incl. across restarts — silently, no re-notify)
+  if ((av.data - sod.equity) / sod.equity <= -WF_CONFIG.dailyLossPct) {
+    saveSod({ ...sod, killedDay: day }); // LATCH for the rest of the UTC day, restart-proof
+    notify('⛔ <b>wick-fade DAILY-KILL</b>: эквити −5% за день — котировки сняты, новых входов нет до следующего дня (открытые позиции доведём до выхода)');
+    killed = true; killReason = 'loss';
+    return true;
+  }
+  killed = false; killReason = null;
+  return false;
 }
 
 async function stepCoin(coin: string, killed: boolean): Promise<void> {
@@ -226,7 +265,6 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
 }
 
 let running = false;
-let lastKilled = false;
 export function startWickFadeRunner(): void {
   if (WF_CONFIG.mode === 'off') { logger.info('wick-fade runner: mode=off (idle)'); return; }
   // SAFETY: mode must match the endpoint (config.HL_USE_TESTNET) so a stale .env can't cross-route money.
@@ -238,16 +276,11 @@ export function startWickFadeRunner(): void {
     if (running) return;
     running = true;
     void (async () => {
-      const killed = await dailyKilled();
-      if (killed) logger.warn('⏸ wick-fade: DAILY-LOSS KILL active (equity −5% intraday) — pulling quotes, no new entries until the day rolls');
-      if (killed !== lastKilled) { // notify on TRANSITION only (the cron re-evaluates every minute)
-        notify(killed
-          ? '⛔ <b>wick-fade DAILY-KILL</b>: эквити −5% за день — котировки сняты, новых входов нет до начала следующего дня (открытые позиции доведём до выхода)'
-          : '▶️ <b>wick-fade</b>: daily-kill снят (новый день) — котировки возвращаются');
-        lastKilled = killed;
-      }
+      let isKilled = killed; // on an unexpected throw keep the previous state (same no-flap philosophy)
+      try { isKilled = await dailyKilled(); } catch (err) { logger.error({ err }, 'wick-fade: dailyKilled threw — keeping previous kill state'); }
+      if (isKilled) logger.warn(`⏸ wick-fade: KILL active (${killReason}) — quotes pulled, no new entries (open positions still exit)`);
       for (const coin of WF_CONFIG.coins) {
-        try { await stepCoin(coin, killed); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
+        try { await stepCoin(coin, isKilled); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
       }
     })().finally(() => { running = false; });
   });

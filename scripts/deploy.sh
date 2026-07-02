@@ -36,6 +36,7 @@ echo "▶ deploying on VPS (as trader)…"
 ssh -o ServerAliveInterval=20 "$VPS" "cd $APP \
   && sudo -u trader git pull \
   && sudo -u trader pnpm build \
+  && sudo -u trader pnpm migrate \
   && sudo systemctl restart trading-agent \
   && sleep 3 \
   && echo -n 'service: ' && sudo systemctl is-active trading-agent"

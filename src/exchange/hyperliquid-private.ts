@@ -188,19 +188,20 @@ export async function hlMid(coin: string): Promise<number | null> {
  *  UI's "Total Equity", and algebraically = spot_USDC_total + perp_uPnL (the `hold` term cancels, so it's robust
  *  to how HL computes it). For a non-unified / all-perp account spot USDC ≈ 0 and this collapses to the perp
  *  value. The spot read is best-effort: on any failure we fall back to perp-only (never throws on the addend). */
-export async function hlAccountValue(): Promise<HlResult<number>> {
+export async function hlAccountValue(): Promise<{ ok: true; data: number; degraded: boolean } | { ok: false; msg: string }> {
   const c = clients();
   if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
   try {
     const cs = await c.info.clearinghouseState({ user: c.readUser });
     const perp = Number(cs.marginSummary.accountValue);
-    let spotFree = 0;
+    let spotFree = 0, degraded = false;
     try {
       const ss = await c.info.spotClearinghouseState({ user: c.readUser });
       const usdc = ss.balances.find((b) => b.coin === 'USDC');
       if (usdc) spotFree = Math.max(0, Number(usdc.total) - Number(usdc.hold));
-    } catch { /* best-effort: fall back to perp-only equity */ }
-    return { ok: true, data: perp + spotFree };
+    } catch { degraded = true; } // spot leg failed → perp-only UNDER-reads a unified account; flag it so
+    // risk gates (daily-kill) treat this as a bad read instead of flipping state on an understated number.
+    return { ok: true, data: perp + spotFree, degraded };
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }
 
