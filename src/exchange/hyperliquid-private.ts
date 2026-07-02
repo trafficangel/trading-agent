@@ -241,6 +241,25 @@ export async function hlCancelTriggers(coin: string): Promise<HlResult<number>> 
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }
 
+/** When did the CURRENT position start? Scans userFills newest→oldest for the fill that opened it from FLAT
+ *  (startPosition ≈ 0 + an 'Open' dir). Used at adopt so the time-stop clock measures from the REAL fill, not
+ *  from the adopt tick — otherwise every restart resets the 60-min clock and a position can be held open-ended
+ *  across a restart-churny day (EOD-audit finding #3). Returns null if not found (caller falls back to now). */
+export async function hlPositionStartTime(coin: string): Promise<HlResult<{ timeMs: number | null }>> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  try {
+    const fills = await c.info.userFills({ user: c.readUser });
+    for (const f of fills) { // userFills returns newest-first
+      if (f.coin !== coin) continue;
+      if (Math.abs(Number(f.startPosition)) < 1e-12 && String(f.dir).toLowerCase().includes('open')) {
+        return { ok: true, data: { timeMs: Number(f.time) } };
+      }
+    }
+    return { ok: true, data: { timeMs: null } };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
+
 /** Size-weighted average EXIT price for a coin from userFills since `sinceMs` (closing fills only). Used to
  *  recover honest PnL when a position closed OUT OF BAND (e.g. the exchange stop fired between polls) instead
  *  of booking NULL. Returns avgPx=null if no closing fills are found in the recent window. */

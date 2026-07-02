@@ -18,7 +18,15 @@ import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
-import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, hlPlaceStop, hlCancelTriggers, hlExitAvgSince, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
+import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, hlPlaceStop, hlCancelTriggers, hlExitAvgSince, hlPositionStartTime, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
+import { sendMessage } from '../telegram/bot.js';
+
+/** Operator notification (Telegram logs channel) — fire-and-forget: sendMessage never throws, and `void`
+ *  keeps the trading path from ever blocking/failing on Telegram. Only live-mode events notify. */
+function notify(text: string, silent = false): void {
+  if (WF_CONFIG.mode !== 'live') return;
+  void sendMessage({ channel: 'logs', text, disable_notification: silent });
+}
 
 type WfMode = 'off' | 'testnet' | 'live';
 // per-coin depth X (validated sweet spot): 2% for TON, 3% for the rest — MAX coverage of the full validated
@@ -120,14 +128,19 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
   if (exPos && !dbPos) {
     if (!ooRes.ok) { logger.warn({ coin }, 'wick-fade: fill detected but openOrders read failed — defer adopt (must clear the other side first)'); return; }
     await cancelAll(coin, exOrders);
-    insPos.run(coin, exPos.side, exPos.entryPx, exPos.size, x, nowMs, 'fill');
-    insLog.run(coin, exPos.side, exPos.entryPx, exPos.size, x, nowMs, 'fill', WF_CONFIG.mode);
+    // opened_at = the REAL fill time from userFills (not the adopt tick) — otherwise every restart resets the
+    // 60-min time-stop clock and a position rides open-ended across a restart-churny day (EOD-audit #3).
+    const st = await hlPositionStartTime(coin);
+    const openedAt = st.ok && st.data.timeMs != null && st.data.timeMs <= nowMs ? st.data.timeMs : nowMs;
+    insPos.run(coin, exPos.side, exPos.entryPx, exPos.size, x, openedAt, 'fill');
+    insLog.run(coin, exPos.side, exPos.entryPx, exPos.size, x, openedAt, 'fill', WF_CONFIG.mode);
     // EXCHANGE-RESIDENT catastrophe stop: guards the position through process downtime / restart gaps (the
     // poll is only a backup). reduceOnly stop-market at the 3% level; a trigger, so it won't show in openOrders.
     const stpPx = stopAbs(exPos.side, exPos.entryPx);
     const sres = await hlPlaceStop({ coin, posSide: exPos.side, qty: exPos.size, triggerPx: stpPx });
     if (!sres.ok) logger.error({ coin, msg: sres.msg }, '🛑 wick-fade: EXCHANGE STOP place failed — 1-min poll is the ONLY protection this hold');
-    logger.warn({ coin, side: exPos.side, entry: exPos.entryPx, stop: +stpPx.toFixed(6), exStop: sres.ok, target: +targetPx(exPos.side, exPos.entryPx, x).toFixed(6) }, '✅ wick-fade: FILLED (deep wick) — managing exit');
+    logger.warn({ coin, side: exPos.side, entry: exPos.entryPx, stop: +stpPx.toFixed(6), exStop: sres.ok, openedAt, target: +targetPx(exPos.side, exPos.entryPx, x).toFixed(6) }, '✅ wick-fade: FILLED (deep wick) — managing exit');
+    notify(`🪝 <b>wick-fade FILLED</b>: ${coin} ${exPos.side} @${exPos.entryPx}\nцель ${targetPx(exPos.side, exPos.entryPx, x).toFixed(6)} · стоп ${stpPx.toFixed(6)} ${sres.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · $${(exPos.size * exPos.entryPx).toFixed(0)}`);
     return;
   }
   // ── DB-open but exchange-flat (closed out-of-band — usually the EXCHANGE STOP fired between polls) →
@@ -143,6 +156,9 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
     }
     reconcileFlatTxn(exitPx, nowMs, pnl, coin);
     logger.warn({ coin, exit: exitPx, pnlPct: pnl }, pnl == null ? 'wick-fade: exchange-flat → reconciled (exit PnL unrecoverable from fills)' : 'wick-fade: exchange-flat → reconciled with RECOVERED exit PnL (exchange stop / OOB close)');
+    notify(pnl == null
+      ? `♻️ <b>wick-fade CLOSED</b> (вне бота): ${coin} ${dbPos.side} — PnL не восстановлен`
+      : `${pnl >= 0 ? '🟢' : '🔴'} <b>wick-fade CLOSED</b> (биржевой стоп/вне бота): ${coin} ${dbPos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b>\n${dbPos.entry_px} → ${exitPx?.toFixed(6)}`);
     return;
   }
   // ── IN POSITION → manage exit (target revert / time-stop / catastrophe) ──
@@ -174,6 +190,8 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
     const pnl = +(gross - COST_RT).toFixed(3);
     closeTxn(exitPx, nowMs, pnl, reason, coin);
     logger.warn({ coin, side: dbPos.side, entry: dbPos.entry_px, exit: exitPx, pnlPct: pnl, reason }, '✅ wick-fade: CLOSED');
+    const rlabel = reason === 'target' ? 'цель 🎯' : reason === 'time-stop' ? 'тайм-стоп ⏱' : 'катастроф-стоп 🛑';
+    notify(`${pnl >= 0 ? '🟢' : '🔴'} <b>wick-fade CLOSED</b>: ${coin} ${dbPos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${rlabel})\n${dbPos.entry_px} → ${exitPx.toFixed(6)} · держали ${Math.round((nowMs - dbPos.opened_at) / 60_000)}м`);
     return;
   }
 
@@ -202,6 +220,7 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
 }
 
 let running = false;
+let lastKilled = false;
 export function startWickFadeRunner(): void {
   if (WF_CONFIG.mode === 'off') { logger.info('wick-fade runner: mode=off (idle)'); return; }
   // SAFETY: mode must match the endpoint (config.HL_USE_TESTNET) so a stale .env can't cross-route money.
@@ -215,6 +234,12 @@ export function startWickFadeRunner(): void {
     void (async () => {
       const killed = await dailyKilled();
       if (killed) logger.warn('⏸ wick-fade: DAILY-LOSS KILL active (equity −5% intraday) — pulling quotes, no new entries until the day rolls');
+      if (killed !== lastKilled) { // notify on TRANSITION only (the cron re-evaluates every minute)
+        notify(killed
+          ? '⛔ <b>wick-fade DAILY-KILL</b>: эквити −5% за день — котировки сняты, новых входов нет до начала следующего дня (открытые позиции доведём до выхода)'
+          : '▶️ <b>wick-fade</b>: daily-kill снят (новый день) — котировки возвращаются');
+        lastKilled = killed;
+      }
       for (const coin of WF_CONFIG.coins) {
         try { await stepCoin(coin, killed); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
       }
