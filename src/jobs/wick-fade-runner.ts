@@ -25,10 +25,12 @@ type WfMode = 'off' | 'testnet' | 'live';
 // set. NB: coins MUST be DISJOINT from funding-flip's {ETH,ADA,XRP,AVAX} — one strategy per symbol on a
 // shared account (CLAUDE.md One-Way rule). All on HL mainnet; on testnet TON is halted + CRV/ENA absent → no-op.
 const COIN_X: Record<string, number> = {
-  // batch-1 (live since Jul 1): X=0.03 except TON (grandfathered 0.02)
-  DOGE: 0.03, ICP: 0.03, NEAR: 0.03, ATOM: 0.03, TON: 0.02, CRV: 0.03, ENA: 0.03, TIA: 0.03, kPEPE: 0.03,
-  // batch-2 (added Jul 1): survived K100 null + net>0 at conservative 0.15%, on HL, disjoint. All X=0.03 (2% died at 0.15%).
-  RENDER: 0.03, POPCAT: 0.03, JUP: 0.03, AR: 0.03, BLUR: 0.03, LTC: 0.03, GOAT: 0.03, EIGEN: 0.03, MANTA: 0.03,
+  // Depth per coin = the TIGHTEST level that still passed the full battery (K100 null + net>0 at a
+  // CONSERVATIVE 0.15% cost + persist≥2). Tighter = ~1.5-2× more fills (operator wants frequency);
+  // 2.5% validated Jul 2 for 8 coins (POPCAT/DOGE/NEAR/TIA/ENA Kelly 1.7-4 + ICP/BLUR/JUP); the rest
+  // FAILED 2.5% (kPEPE/ATOM/LTC/EIGEN/MANTA/CRV/AR/GOAT/RENDER) and stay at 3%. TON grandfathered 2%.
+  DOGE: 0.025, ICP: 0.025, NEAR: 0.025, ATOM: 0.03, TON: 0.02, CRV: 0.03, ENA: 0.025, TIA: 0.025, kPEPE: 0.03,
+  RENDER: 0.03, POPCAT: 0.025, JUP: 0.025, AR: 0.03, BLUR: 0.025, LTC: 0.03, GOAT: 0.03, EIGEN: 0.03, MANTA: 0.03,
 };
 export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; requoteDrift: number; dailyLossPct: number } = {
   mode: 'live',           // LIVE on mainnet — the guard IDLES this runner until .env HL_USE_TESTNET=false
