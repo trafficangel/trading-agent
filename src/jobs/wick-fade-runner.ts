@@ -31,11 +31,17 @@ const COIN_X: Record<string, number> = {
   // FAILED 2.5% (kPEPE/ATOM/LTC/EIGEN/MANTA/CRV/AR/GOAT/RENDER) and stay at 3%. TON grandfathered 2%.
   DOGE: 0.025, ICP: 0.025, NEAR: 0.025, ATOM: 0.03, TON: 0.02, CRV: 0.03, ENA: 0.025, TIA: 0.025, kPEPE: 0.03,
   RENDER: 0.03, POPCAT: 0.025, JUP: 0.025, AR: 0.03, BLUR: 0.025, LTC: 0.03, GOAT: 0.03, EIGEN: 0.03, MANTA: 0.03,
+  // batch-3 (Jul 2, operator topped up → ~$250): XRP-2% = the strongest unadded name (K100 STRONG, Kelly 3.14;
+  // free on the LIVE account — funding-flip holds XRP only on testnet and idles on mainnet; re-resolve if it
+  // ever goes live here). Tier-B at 3% (pass the kill-lens at REAL cost + K100 null; fail only the extra
+  // 0.15%-margin bar): JTO/SNX/APE/ZRO/W Kelly 0.8-1.0, ALT/PNUT 0.4-0.5 (operator's hook-bar: take any
+  // genuine positive-expectancy hook at viable sizing).
+  XRP: 0.02, JTO: 0.03, SNX: 0.03, APE: 0.03, ZRO: 0.03, W: 0.03, ALT: 0.03, PNUT: 0.03,
 };
 export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; requoteDrift: number; dailyLossPct: number } = {
   mode: 'live',           // LIVE on mainnet — the guard IDLES this runner until .env HL_USE_TESTNET=false
   coins: Object.keys(COIN_X),
-  capitalUsd: 120,        // SIZING basis: per-quote notional = capitalUsd/coins × lev ≈ $13 (18 coins → 120/18×2 = $13.3, clears HL $10 min). Total reserved ≈ capitalUsd (HL nets opposing same-coin orders) → ~$120 of $159.60, ~$40 buffer (operator chose max coverage over buffer; downside bounded: worst all-fill-all-stop ≈ −$8 = daily-kill, far from liquidation)
+  capitalUsd: 173,        // SIZING basis: per-quote notional = capitalUsd/coins × lev ≈ $13.3 (26 coins → 173/26×2, clears HL $10 min). Total reserved ≈ capitalUsd (HL nets opposing same-coin orders) → ~$173 of ~$250 (operator topped up +$90 for batch-3), buffer ~$77 (~31%). DO NOT deploy this sizing before the top-up lands — reserve would exceed equity
   leverage: 2,            // fractional-Kelly (backtest Kelly 2-5 ⇒ full = 2-5×; 2× is the conservative smoothness choice)
   holdMins: 60,           // time-stop (backtest exitH=12×5m bars)
   stopPct: 0.03,          // catastrophe stop beyond entry (backtest STOP=3%)
