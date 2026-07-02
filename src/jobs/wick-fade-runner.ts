@@ -46,6 +46,11 @@ const COIN_X: Record<string, number> = {
   // genuine positive-expectancy hook at viable sizing).
   XRP: 0.02, JTO: 0.03, SNX: 0.03, APE: 0.03, ZRO: 0.03, W: 0.03, ALT: 0.03, PNUT: 0.03,
 };
+// Side-split (Jul 2, scripts/wick-fade-sides.ts, K100): these sides are consistently NEGATIVE at BOTH real
+// costs (0.05/0.10) with n≥100 and worse-than-random nullP → don't quote them (ballast: pays costs on noise).
+// Weak-but-POSITIVE sides stay (pre-registered bar — dropping a weak positive side loses money). The quoting
+// loop also CANCELS any resting order on a disabled side, so this self-heals on deploy.
+const DISABLED_SIDE: Record<string, 'long' | 'short'> = { ATOM: 'short', LTC: 'short', ALT: 'long' };
 export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; requoteDrift: number; dailyLossPct: number } = {
   mode: 'live',           // LIVE on mainnet — the guard IDLES this runner until .env HL_USE_TESTNET=false
   coins: Object.keys(COIN_X),
@@ -203,8 +208,9 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
   const mid = await hlMid(coin); if (mid == null || !(mid > 0)) return;
   const margin = WF_CONFIG.capitalUsd / WF_CONFIG.coins.length;
   for (const side of ['long', 'short'] as const) {
-    const desired = side === 'long' ? mid * (1 - x) : mid * (1 + x);
     const existing = exOrders.filter((o) => o.side === side);
+    if (DISABLED_SIDE[coin] === side) { if (existing.length) await cancelAll(coin, existing); continue; }
+    const desired = side === 'long' ? mid * (1 - x) : mid * (1 + x);
     const good = existing.length === 1 && Math.abs(existing[0]!.px - desired) / desired < WF_CONFIG.requoteDrift;
     if (good) continue;
     // clear stale/duplicate first; if a cancel FAILED, do NOT place a fresh quote (would duplicate) — defer
