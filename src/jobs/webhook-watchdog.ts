@@ -12,7 +12,7 @@
  */
 
 import cron from 'node-cron';
-import { sendMessage } from '../telegram/bot.js';
+import { sendLegacyMessage } from '../telegram/bot.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { getRuntimeConfig } from '../db/repos/runtime-config.js';
@@ -51,7 +51,7 @@ async function check(): Promise<void> {
     if (alerting) {
       alerting = false;
       lastAlertAt = 0;
-      await sendMessage({ channel: 'logs', text: `✅ Вебхуки LuxAlgo возобновились (последний исполненный сигнал ${fmt(lastExecuted)}).` })
+      await sendLegacyMessage({ channel: 'logs', text: `✅ Вебхуки LuxAlgo возобновились (последний исполненный сигнал ${fmt(lastExecuted)}).` })
         .catch((err) => logger.error({ err }, 'webhook-watchdog: telegram send failed'));
       logger.info('webhook-watchdog: webhooks resumed');
     } else {
@@ -73,7 +73,7 @@ async function check(): Promise<void> {
     : `⚠️ <b>Вебхуки LuxAlgo молчат ${execH.toFixed(0)}ч</b>\n` +
       `Вебхуки не приходят вовсе (последний ${fmt(lastSeen)}). Последний сигнал: ${fmt(lastExecuted)}.\n` +
       `Норма — сигнал каждые ~3ч. Проверь панель алертов LuxAlgo (активны/не истекли) и доставку. Наша сторона принимает вебхуки штатно — обрыв на стороне источника.`;
-  await sendMessage({ channel: 'logs', text }).catch((err) => logger.error({ err }, 'webhook-watchdog: telegram send failed'));
+  await sendLegacyMessage({ channel: 'logs', text }).catch((err) => logger.error({ err }, 'webhook-watchdog: telegram send failed'));
   logger.warn(
     { execH: +execH.toFixed(1), seenH: seenH === Infinity ? null : +seenH.toFixed(1), blockedNotSilent, lastExecuted, lastSeen },
     'webhook-watchdog: SILENCE alert sent',

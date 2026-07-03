@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { sendMessage } from '../telegram/bot.js';
+import { sendLegacyMessage } from '../telegram/bot.js';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -237,7 +237,7 @@ async function tick(now: Date = new Date()): Promise<void> {
   lines.push(`<i>⚠ Прошлые результаты не гарантируют будущих.</i>`);
 
   const text = lines.join('\n');
-  await sendMessage({
+  await sendLegacyMessage({
     channel: 'signals',
     text,
     disable_web_page_preview: true,

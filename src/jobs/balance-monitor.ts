@@ -28,7 +28,7 @@
 import cron from 'node-cron';
 import pLimit from 'p-limit';
 import { logger } from '../lib/logger.js';
-import { sendMessage } from '../telegram/bot.js';
+import { sendLegacyMessage } from '../telegram/bot.js';
 import { db } from '../db/client.js';
 import {
   getDecryptedCreds,
@@ -114,7 +114,7 @@ async function processOne(key: ApiKeyRow): Promise<void> {
       { userId: key.user_id, balance, free, largestTrade, buffered },
       'balance-monitor: cleared insufficient flag — user recovered',
     );
-    await sendMessage({
+    await sendLegacyMessage({
       channel: 'logs',
       text:
         `✅ Track D balance: user_id=${key.user_id} recovered. ` +

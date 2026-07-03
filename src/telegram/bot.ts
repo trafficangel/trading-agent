@@ -21,6 +21,15 @@ type SendOpts = {
   disable_web_page_preview?: boolean;
 };
 
+/** LEGACY-track notifier (Bybit SaaS / LuxAlgo era). The operator now runs the HL live book, whose
+ *  notifications must not drown in the old tracks' noise (hourly webhook-watchdog silence alerts, daily
+ *  wraps, balance/tpsl/subscription alerts, restart banners) — so legacy senders route through here and are
+ *  DROPPED unless LEGACY_NOTIFY=true. The jobs themselves keep running (DB bookkeeping unaffected). */
+export async function sendLegacyMessage(opts: SendOpts): Promise<{ message_id: number } | null> {
+  if (!config.LEGACY_NOTIFY) return null;
+  return sendMessage(opts);
+}
+
 export async function sendMessage(opts: SendOpts): Promise<{ message_id: number } | null> {
   const chat_id = chatId(opts.channel);
 

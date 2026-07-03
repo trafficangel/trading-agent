@@ -27,7 +27,7 @@
 import cron from 'node-cron';
 import pLimit from 'p-limit';
 import { logger } from '../lib/logger.js';
-import { sendMessage } from '../telegram/bot.js';
+import { sendLegacyMessage } from '../telegram/bot.js';
 import { db } from '../db/client.js';
 import {
   getDecryptedCreds,
@@ -157,7 +157,7 @@ async function processOne(key: ApiKeyRow): Promise<void> {
   // batch queue: orphans usually mean an OS-crash incident, operator
   // must see it immediately. Subsequent ticks within ALERT_DEDUP_WINDOW_MS
   // for the same fingerprint are suppressed.
-  await sendMessage({
+  await sendLegacyMessage({
     channel: 'logs',
     text:
       `🚨 <b>ORPHAN POSITION DETECTED</b>\n` +

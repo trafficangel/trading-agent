@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { sendMessage } from '../telegram/bot.js';
+import { sendLegacyMessage } from '../telegram/bot.js';
 import { db } from '../db/client.js';
 import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
@@ -44,7 +44,7 @@ async function tick(): Promise<void> {
     `Track C/24ч: открыто <b>${opened}</b>, закрыто <b>${closed}</b>  ·  ` +
     `mode: <code>${config.MODE}</code>`;
 
-  await sendMessage({ channel: 'logs', text, disable_notification: true });
+  await sendLegacyMessage({ channel: 'logs', text, disable_notification: true });
   logger.info({ active, opened, closed }, 'heartbeat sent');
 }
 

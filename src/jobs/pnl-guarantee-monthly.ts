@@ -25,7 +25,7 @@
 import cron from 'node-cron';
 import { logger } from '../lib/logger.js';
 import { db } from '../db/client.js';
-import { sendMessage } from '../telegram/bot.js';
+import { sendLegacyMessage } from '../telegram/bot.js';
 import {
   applyPnlGuarantee,
   listPnlGuaranteeCandidates,
@@ -104,7 +104,7 @@ async function evaluateMonth(now = new Date()): Promise<void> {
       `В плюсе: ${counters.positive}`,
       `Без сделок / 0 PnL: ${counters.neutral}`,
     ];
-    void sendMessage({ channel: 'logs', text: lines.join('\n') }).catch(() => {});
+    void sendLegacyMessage({ channel: 'logs', text: lines.join('\n') }).catch(() => {});
   } finally {
     running = false;
   }
@@ -130,7 +130,7 @@ async function evaluateUser(
     `user_id=<code>${sub.user_id}</code> · месяц ${bounds.yyyymm}\n` +
     `PnL за месяц: $${pnlUsd.toFixed(2)} (${trades} сделок)\n` +
     `access_until продлён на 30 дней.`;
-  void sendMessage({ channel: 'logs', text }).catch(() => {});
+  void sendLegacyMessage({ channel: 'logs', text }).catch(() => {});
   return 'granted';
 }
 

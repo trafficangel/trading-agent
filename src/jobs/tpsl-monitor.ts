@@ -20,7 +20,7 @@ import {
   setPositionSL,
 } from '../exchange/bybit-private.js';
 import { findActiveKey, getDecryptedCreds } from '../db/repos/user-api-keys.js';
-import { sendMessage, sendPhoto } from '../telegram/bot.js';
+import { sendLegacyMessage, sendPhoto } from '../telegram/bot.js';
 import { resultPost } from '../telegram/result-template.js';
 import { markTick } from '../lib/health-tracker.js';
 
@@ -135,9 +135,9 @@ async function postCloseMessage(
   });
   if (p.screenshot_path && existsSync(p.screenshot_path)) {
     const sent = await sendPhoto({ channel: 'signals', photoPath: p.screenshot_path, caption: text });
-    if (!sent) await sendMessage({ channel: 'signals', text });
+    if (!sent) await sendLegacyMessage({ channel: 'signals', text });
   } else {
-    await sendMessage({ channel: 'signals', text });
+    await sendLegacyMessage({ channel: 'signals', text });
   }
   // Close posts (SL hit, TP hit, time guard) go ONLY to Signals — Logs
   // is reserved for system/webhook monitoring. Operator follows trades
@@ -251,7 +251,7 @@ async function reconcileUserPosition(p: DecisionRow): Promise<void> {
       // Operator notification — silent so it doesn't ping every minute.
       // First-detection only — subsequent reconciles won't re-fire
       // because the qty diff will now be ≤ tolerance.
-      void sendMessage({
+      void sendLegacyMessage({
         channel: 'logs',
         text:
           `📉 Track D: user_id=${p.user_id} закрыл часть позиции вручную на Bybit · ` +
@@ -426,7 +426,7 @@ async function reconcileUserPosition(p: DecisionRow): Promise<void> {
       : forceReason === 'bybit_sl_hit'
         ? '🛑 сработал SL'
         : '🔄 закрыто (sync)';
-  void sendMessage({
+  void sendLegacyMessage({
     channel: 'logs',
     text:
       `${reasonLabel} · user_id=${p.user_id} · ${p.symbol} ${p.side} · ` +

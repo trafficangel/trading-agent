@@ -95,6 +95,12 @@ const Schema = z.object({
    *  our own deposit + depositors, with a public on-chain track. Inert if unset → main-account trading. */
   HL_VAULT_ADDRESS: z.string().optional(),
 
+  /** Telegram notifications from the LEGACY Bybit/LuxAlgo tracks (hourly webhook-watchdog silence alerts,
+   *  daily wrap, balance/tpsl/subscription alerts, restart banner). Default OFF since Jul 3 2026 — the
+   *  operator runs the HL live book and its trade notifications must not drown in dead-track noise.
+   *  The legacy JOBS keep running (DB bookkeeping unaffected); only their Telegram sends are dropped. */
+  LEGACY_NOTIFY: envBool(false),
+
   /**
    * Track C — LuxAlgo AI Strategy Builder webhook trader.
    * When true, webhooks with `"kind":"strategy"` get dispatched to

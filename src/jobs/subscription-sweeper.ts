@@ -18,7 +18,7 @@
 
 import cron from 'node-cron';
 import { logger } from '../lib/logger.js';
-import { sendMessage } from '../telegram/bot.js';
+import { sendLegacyMessage } from '../telegram/bot.js';
 import { db } from '../db/client.js';
 import { listOverdue, setStatus } from '../db/repos/user-subscriptions.js';
 import type { SubscriptionRow } from '../db/repos/user-subscriptions.js';
@@ -99,7 +99,7 @@ async function notifyExpiringSoon(): Promise<void> {
       `Истечёт: ${new Date(r.access_until).toISOString()}\n` +
       `<i>Напомните оператору связаться для продления.</i>`;
     try {
-      await sendMessage({ channel: 'logs', text, disable_notification: false });
+      await sendLegacyMessage({ channel: 'logs', text, disable_notification: false });
       markNotifiedStmt.run(Date.now(), Date.now(), r.user_id);
       logger.info({ user_id: r.user_id }, 'sub-sweeper: expiry notice sent');
     } catch (err) {

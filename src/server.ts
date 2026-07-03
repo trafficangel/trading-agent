@@ -33,7 +33,7 @@ import { startFundingFlipRunner } from './jobs/funding-flip-runner.js';
 import { startWickFadeRunner } from './jobs/wick-fade-runner.js';
 // Phase G — money-back guarantee disabled, see start-job line below.
 // import { startPnlGuaranteeMonthlyJob } from './jobs/pnl-guarantee-monthly.js';
-import { sendMessage } from './telegram/bot.js';
+import { sendLegacyMessage } from './telegram/bot.js';
 import { startupBanner, statusReply } from './telegram/templates.js';
 import { countSignalsSince } from './db/repos/signals.js';
 import { closeDb } from './db/client.js';
@@ -250,7 +250,7 @@ async function main(): Promise<void> {
   await app.listen({ host: '0.0.0.0', port: config.PORT });
   logger.info({ port: config.PORT, mode: config.MODE }, 'server listening');
 
-  sendMessage({ channel: 'logs', text: startupBanner(config.MODE, config.PORT), disable_notification: true })
+  sendLegacyMessage({ channel: 'logs', text: startupBanner(config.MODE, config.PORT), disable_notification: true })
     .catch((err) => logger.error({ err }, 'telegram startup banner failed'));
 
   // Graceful shutdown order matters:
