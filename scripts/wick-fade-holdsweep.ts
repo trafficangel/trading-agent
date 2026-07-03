@@ -29,7 +29,7 @@ const LIVE: Row[] = [
 const TF = String(process.argv[2] ?? '5');
 const WIN_DAYS = 180, WINDOWS = [0, 180, 360], K = 200;
 const Hfill = 6, STOP = 0.03, SLIP = 0.0025, COST = 0.05;
-const HOLDS = [6, 12, 18, 24, 36]; // bars of 5m = 30/60/90/120/180 min
+const HOLDS = [3, 4, 5, 6, 8, 12]; // FINE grid: 15/20/25/30/40/60 min — is 30m a peak or a slope-edge?
 
 const mean = (a: number[]) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
 const sd = (a: number[]) => { if (a.length < 2) return 0; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) * (x - m), 0) / (a.length - 1)); };
