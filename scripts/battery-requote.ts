@@ -49,7 +49,7 @@ function pFixed(g: number[], cost: number): number {
 }
 
 type T = { g: number; kind: 'target' | 'time' | 'cat'; age: number };
-function simRequote(c: Candle[], r: Row, exitH: number, stop: number, cdBars: number): T[] {
+function simRequote(c: Candle[], r: Row, exitH: number, stop: number, cdBars: number, tgtTouch = true, sbHarsh = true): T[] {
   const n = c.length; const out: T[] = [];
   let anchor = 0, anchorBar = 0, cdUntil = -1;
   let pos: { side: 1 | -1; entry: number; anchorMid: number; entryBar: number; age: number } | null = null;
@@ -61,7 +61,8 @@ function simRequote(c: Candle[], r: Row, exitH: number, stop: number, cdBars: nu
       const stopFill = pos.side === 1 ? stopPx * (1 - SLIP) : stopPx * (1 + SLIP);
       let exit: number | null = null, kind: T['kind'] = 'time';
       if (pos.side === 1 ? bar.l <= stopPx : bar.h >= stopPx) { exit = stopFill; kind = 'cat'; }
-      else if (pos.side === 1 ? bar.h >= target : bar.l <= target) { exit = target; kind = 'target'; }
+      else if (tgtTouch && (pos.side === 1 ? bar.h >= target : bar.l <= target)) { exit = target; kind = 'target'; }
+      else if (!tgtTouch && (pos.side === 1 ? bar.c >= target : bar.c <= target)) { exit = bar.c; kind = 'target'; } // close-mode: the 1-min MID poll sees the level only at bar close (pessimistic bound); exit at market ≈ close
       else if (i - pos.entryBar >= exitH) { exit = bar.c; kind = 'time'; }
       if (exit != null) {
         out.push({ g: (pos.side === 1 ? (exit - pos.entry) / pos.entry : (pos.entry - exit) / pos.entry) * 100, kind, age: pos.age });
@@ -85,7 +86,7 @@ function simRequote(c: Candle[], r: Row, exitH: number, stop: number, cdBars: nu
     if (filled) {
       const age = i - anchorBar;
       const stopPx = filled.side === 1 ? filled.entry * (1 - stop) : filled.entry * (1 + stop);
-      if (filled.side === 1 ? bar.l <= stopPx : bar.h >= stopPx) {
+      if (sbHarsh && (filled.side === 1 ? bar.l <= stopPx : bar.h >= stopPx)) {
         const stopFill = filled.side === 1 ? stopPx * (1 - SLIP) : stopPx * (1 + SLIP);
         out.push({ g: (filled.side === 1 ? (stopFill - filled.entry) / filled.entry : (filled.entry - stopFill) / filled.entry) * 100, kind: 'cat', age });
         cdUntil = i + cdBars;
@@ -142,5 +143,25 @@ function verdictLine(label: string, perWin: T[][], showMix = true): void {
   });
   verdictLine('FAST (≤10m)', fast);
   verdictLine('SLOW (stale)', slow);
+  console.log('\n── 4. FIDELITY BRACKETS (live truth is inside) + resting-TP economics ──');
+  const combos: [string, boolean, boolean][] = [
+    ['tgtTouch+sbHarsh (ruler)*', true, true],
+    ['tgtClose+sbHarsh (pess)', false, true],
+    ['tgtTouch+sbSoft (opt)', true, false],
+    ['tgtClose+sbSoft', false, false],
+  ];
+  for (const [label, tt, sb] of combos) {
+    for (const tpMaker of [false, true]) {
+      if (tpMaker && !tt) continue; // the resting TP is exactly what MAKES touch-mode true live
+      const perWin: T[][] = [[], [], []];
+      for (const { row, wins } of data) wins.forEach((c, wi) => { if (c.length) perWin[wi]!.push(...simRequote(c, row, 6, 0.04, 6, tt, sb)); });
+      const all = perWin.flat();
+      const costOf = (t: T) => (tpMaker && t.kind === 'target' ? 0.03 : COST);
+      const gn = all.map((t) => t.g - costOf(t));
+      const net = Math.round(mean(gn) * gn.length * 10) / 10;
+      const wN = perWin.map((w) => Math.round(w.reduce((s2, t) => s2 + t.g - costOf(t), 0) * 10) / 10);
+      console.log(`${(label + (tpMaker ? ' +TP' : '')).padEnd(28)} n=${String(all.length).padStart(5)}  avgNet ${mean(gn).toFixed(3).padStart(7)}  TOTAL ${String(net).padStart(8)}  w ${wN.join('/')}`);
+    }
+  }
   console.log('\nkeep-bar: net>0@0.05 · pK200<0.05 · Kelly>0 · persist≥2/3. FAST-vs-SLOW predicts live per-fill quality.');
 })().catch((e) => { console.error(e); process.exit(1); });
