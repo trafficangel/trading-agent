@@ -85,7 +85,11 @@ export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; lev
   coins: Object.keys(COIN_X),
   capitalUsd: 140,        // SIZING basis: per-RUNG margin = capitalUsd/coins ≈ $6.67 → notional $13.3 (clears HL $10 min). 21 coins post-audit-cut; reserve ≈ 19×6.67 + DOGE/ATOM ladder 2×13.3 ≈ $153 of ~$249 → buffer ~$96 (~39%) — deliberately wider after the battery audit (weak-but-positive coins stay only because sizes are tiny)
   leverage: 2,            // fractional-Kelly (backtest Kelly 2-5 ⇒ full = 2-5×; 2× is the conservative smoothness choice)
-  holdMins: 60,           // time-stop (backtest exitH=12×5m bars)
+  holdMins: 30,           // time-stop. Was 60 (fixed by construction, never swept); the Jul 3 hold-sweep on the
+                          // honest battery found a 25-40m PLATEAU dominating 60m in ALL 3×180d windows (total net
+                          // +1127 vs +931, Kelly 1.83 vs 1.20, catastrophes 12% vs 18%) — reversion happens fast or
+                          // not at all; extra hold time mostly lets losers reach the stop and freezes the coin. 30m
+                          // = plateau CENTER (not the edge max — anti-overfit). scripts/wick-fade-holdsweep.ts
   stopPct: 0.03,          // catastrophe stop beyond entry (backtest STOP=3%)
   requoteDrift: 0.01,     // re-quote a resting level only when it drifts >1% off the desired (anti-churn)
   dailyLossPct: 0.05,     // DAILY-LOSS KILL: if account EQUITY drops >5% below start-of-day (incl. UNREALIZED open drawdown) → pull all quotes + no new entries until the day rolls (open positions still exit). The correlated-tail circuit-breaker.
