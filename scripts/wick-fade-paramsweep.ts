@@ -105,5 +105,8 @@ function sim(c: Candle[], X: number, sides: (1 | -1)[], stop: number, frac: numb
   for (const frac of [0.6, 0.8, 1.0]) runCfg(`frac ${frac.toFixed(1)}${frac === BASE.frac ? '*' : ''}`, BASE.stop, frac, BASE.cd);
   console.log('── C. POST-STOP COOLDOWN (stop=3%, frac=1.0) ──');
   for (const cd of [0, 6, 12, 24]) runCfg(`cd ${String(cd * 5).padStart(3)}m${cd === BASE.cd ? '*' : ''}`, BASE.stop, BASE.frac, cd);
+  console.log('── D. COMBINED candidates (joint effect — A and C were only tested separately) ──');
+  runCfg('4% + cd30m', 0.04, 1.0, 6);
+  runCfg('4% + cd60m', 0.04, 1.0, 12);
   console.log('\n(* = live baseline. Move only on a coherent plateau better in ALL 3 windows — the time-stop bar.)');
 })().catch((e) => { console.error(e); process.exit(1); });
