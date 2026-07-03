@@ -42,7 +42,9 @@ const LIVE: Row[] = [
 ];
 const TF = String(process.argv[2] ?? '5');
 const WIN_DAYS = 180, WINDOWS = [0, 180, 360], K = 200;
-const Hfill = 6, exitH = 12, STOP = 0.03, SLIP = 0.005;
+const Hfill = 6, exitH = 12, STOP = 0.03;
+const SLIP = Number(process.argv[3] ?? 0.005);   // stop slippage past the level (0.005 = poll-era worst case; ~0.0025 = exchange-stop realistic)
+const COST_BAR = Number(process.argv[4] ?? 0.10); // verdict cost: 0.10 when slippage is implicit; 0.05 (real fees) when slippage is explicit in the sim
 
 const mean = (a: number[]) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
 const sd = (a: number[]) => { if (a.length < 2) return 0; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) * (x - m), 0) / (a.length - 1)); };
@@ -122,7 +124,7 @@ function pValue(g: number[], cost: number, fixed: boolean): number {
 }
 
 (async () => {
-  console.log(`BATTERY-HONEST · ${TF}m · corrected null (Math.imul) + one-position lock + same-bar stop-through + ${SLIP * 100}% stop slippage · K${K}\n`);
+  console.log(`BATTERY-HONEST · ${TF}m · corrected null + one-position lock + same-bar stop-through + ${SLIP * 100}% stop slippage · verdict@${COST_BAR} · K${K}\n`);
   console.log('coin       X    tag    nOld  nHon   avgOld  avgHon  net@.05  net@.10   cat%  Kelly  pBrk pFix  verdict');
   for (const r of LIVE) {
     const wins: Candle[][] = [];
@@ -134,8 +136,8 @@ function pValue(g: number[], cost: number, fixed: boolean): number {
     if (g.length < 20) { console.log(`${r.coin.padEnd(9)} ${(r.x * 100).toFixed(1).padStart(4)}% ${r.tag.padEnd(5)} n=${g.length} — too few`); continue; }
     const net = (cost: number) => Math.round((mean(g) - cost) * g.length * 10) / 10;
     const catPct = Math.round(hon.filter((t) => t.cat).length / hon.length * 1000) / 10;
-    const pB = pValue(g, 0.10, false), pF = pValue(g, 0.10, true);
-    const keep = net(0.10) > 0 && pF < 0.05 && kelly(g.map((x) => x - 0.10)) > 0;
+    const pB = pValue(g, COST_BAR, false), pF = pValue(g, COST_BAR, true);
+    const keep = net(COST_BAR) > 0 && pF < 0.05 && kelly(g.map((x) => x - COST_BAR)) > 0;
     console.log(`${r.coin.padEnd(9)} ${(r.x * 100).toFixed(1).padStart(4)}% ${r.tag.padEnd(5)} ${String(old.length).padStart(5)} ${String(g.length).padStart(5)}  ${mean(old).toFixed(3).padStart(7)} ${mean(g).toFixed(3).padStart(7)} ${String(net(0.05)).padStart(8)} ${String(net(0.10)).padStart(8)}  ${String(catPct).padStart(5)}  ${String(kelly(g.map((x) => x - 0.10))).padStart(5)}  ${pB.toFixed(2)} ${pF.toFixed(2)}  ${r.tag === 'CTRL' ? (keep ? '🚩 CTRL LIT' : 'dead ✓') : keep ? '✅ keep' : '❌ FAILS honest'}`);
   }
   console.log('\nverdict = net>0 @0.10 AND pFixed<0.05 AND Kelly>0 on the HONEST series. CTRL must stay dead.');
