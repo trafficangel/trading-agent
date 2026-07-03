@@ -32,7 +32,7 @@ type WfMode = 'off' | 'testnet' | 'live';
 // per-coin depth X (validated sweet spot): 2% for TON, 3% for the rest — MAX coverage of the full validated
 // set. NB: coins MUST be DISJOINT from funding-flip's {ETH,ADA,XRP,AVAX} — one strategy per symbol on a
 // shared account (CLAUDE.md One-Way rule). All on HL mainnet; on testnet TON is halted + CRV/ENA absent → no-op.
-const COIN_X: Record<string, number> = {
+export const COIN_X: Record<string, number> = {
   // Depth per coin = the TIGHTEST level that still passed the full battery (K100 null + net>0 at a
   // CONSERVATIVE 0.15% cost + persist≥2). Tighter = ~1.5-2× more fills (operator wants frequency);
   // 2.5% validated Jul 2 for 8 coins (POPCAT/DOGE/NEAR/TIA/ENA Kelly 1.7-4 + ICP/BLUR/JUP); the rest
@@ -50,14 +50,14 @@ const COIN_X: Record<string, number> = {
 // costs (0.05/0.10) with n≥100 and worse-than-random nullP → don't quote them (ballast: pays costs on noise).
 // Weak-but-POSITIVE sides stay (pre-registered bar — dropping a weak positive side loses money). The quoting
 // loop also CANCELS any resting order on a disabled side, so this self-heals on deploy.
-const DISABLED_SIDE: Record<string, 'long' | 'short'> = { ATOM: 'short', LTC: 'short', ALT: 'long' };
+export const DISABLED_SIDE: Record<string, 'long' | 'short'> = { ATOM: 'short', LTC: 'short', ALT: 'long' };
 // LADDER — a second, DEEPER rung where the rung passed the HONEST battery (battery-honest.ts): ATOM@3.5
 // (strict pass both slippage scenarios, Kelly 6.3-7.5) + DOGE@3.5 (net-positive both scenarios, p marginal).
 // ICP@3.5 became the BASE depth instead (its 2.5 was honest-negative). Both rungs rest while flat; a deep
 // flush can fill both within a tick (adopt reads the merged avg entry). Applies to ENABLED sides only. Each
 // rung reserves its own ~$6.65 margin. On adopt the FILLED rung's depth is inferred so the stored x — and
 // thus target = the rung's own anchor mid — stays faithful to what was validated (see inferFilledX).
-const LADDER: Record<string, number> = { DOGE: 0.035, ATOM: 0.035 };
+export const LADDER: Record<string, number> = { DOGE: 0.035, ATOM: 0.035 };
 
 /** Which rung filled? Same-side rungs share the quote anchor, so entry÷survivor-price classifies the fill:
  *  for a long, ratio<1 = the fill sat DEEPER than the surviving rung. Partial fills leave the filled order

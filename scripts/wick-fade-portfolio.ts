@@ -31,10 +31,12 @@ const WIN_DAYS = 180, WINDOWS = [0, 180, 360];
 const Hfill = 6, EXITH = 6, STOP = 0.04, SLIP = 0.0025, CD_BARS = 6;
 const NOTIONAL = 13.3, EQUITY0 = 249, FEE_RT = 0.05; // % round-trip on notional
 const CAPS = [Infinity, 8, 5, 3];
+const ANCHOR = String(process.argv[3] ?? 'requote'); // 'bar' = prev-close anchor | 'requote' = trailing anchor, re-anchors on >1% drift (live-faithful; 5m granularity still OVERcounts vs the 1-min live requote)
+const DRIFT = 0.01;
 const STEP = Number(TF) * 60_000;
 
 type Pos = { side: 1 | -1; entry: number; anchorMid: number; entryBar: number };
-type CoinState = { pos: Pos | null; cdUntil: number };
+type CoinState = { pos: Pos | null; cdUntil: number; anchor: number };
 
 function simPortfolio(candles: Map<string, Candle[]>, rows: Row[], cap: number): { daily: Map<number, number>; trades: number; maxConc: number; concSum: number; concN: number } {
   // align: per coin, map ts→index; iterate the union timeline
@@ -47,7 +49,7 @@ function simPortfolio(candles: Map<string, Candle[]>, rows: Row[], cap: number):
     if (c.length) { t0 = Math.min(t0, c[0]!.t); t1 = Math.max(t1, c[c.length - 1]!.t); }
   }
   const st = new Map<string, CoinState>();
-  for (const r of rows) st.set(r.coin, { pos: null, cdUntil: -1 });
+  for (const r of rows) st.set(r.coin, { pos: null, cdUntil: -1, anchor: 0 });
   const daily = new Map<number, number>();
   const addPnl = (ts: number, usd: number) => { const d = Math.floor(ts / 86_400_000); daily.set(d, (daily.get(d) ?? 0) + usd); };
   let trades = 0, maxConc = 0, concSum = 0, concN = 0;
@@ -85,7 +87,12 @@ function simPortfolio(candles: Map<string, Candle[]>, rows: Row[], cap: number):
       if (conc >= cap) continue;
       if (ts < s.cdUntil) continue;
       if (i < 1) continue;
-      const anchor = c[i - 1]!.c; // anchor = prev bar close (quotes placed at prior tick)
+      let anchor: number;
+      if (ANCHOR === 'bar') anchor = c[i - 1]!.c; // static prev-close anchor
+      else { // 'requote': trailing anchor — follows price like the live runner (re-anchor on >1% drift or fresh after a close)
+        if (s.anchor <= 0) s.anchor = c[i - 1]!.c;
+        anchor = s.anchor;
+      }
       let filled: { side: 1 | -1; entry: number } | null = null;
       for (const side of r.sides) {
         const depths = r.deep != null ? [r.x, r.deep] : [r.x];
@@ -96,7 +103,9 @@ function simPortfolio(candles: Map<string, Candle[]>, rows: Row[], cap: number):
           }
         }
       }
+      if (ANCHOR === 'requote' && (Math.abs(bar.c - anchor) / anchor > DRIFT)) s.anchor = bar.c; // re-quote follows the drift
       if (filled) {
+        if (ANCHOR === 'requote') s.anchor = 0; // after this trade resolves, quotes re-place at a fresh anchor
         // same-bar stop-through (honest)
         const stopPx = filled.side === 1 ? filled.entry * (1 - STOP) : filled.entry * (1 + STOP);
         if (filled.side === 1 ? bar.l <= stopPx : bar.h >= stopPx) {
@@ -132,7 +141,7 @@ function stats(daily: Map<number, number>): { net: number; maxDD: number; worstD
 }
 
 (async () => {
-  console.log(`WICK-FADE PORTFOLIO SIM · ${TF}m · JOINT 21-coin book · live config (30m hold, 4% stop, cd30m, ladder) · $${NOTIONAL}/rung on $${EQUITY0}\n`);
+  console.log(`WICK-FADE PORTFOLIO SIM [anchor=${ANCHOR}] · ${TF}m · JOINT 21-coin book · live config (30m hold, 4% stop, cd30m, ladder) · $${NOTIONAL}/rung on $${EQUITY0}\n`);
   // load per window
   const perWin: Map<string, Candle[]>[] = [];
   for (const off of WINDOWS) {
