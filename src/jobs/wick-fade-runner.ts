@@ -37,24 +37,53 @@ const COIN_X: Record<string, number> = {
   // CONSERVATIVE 0.15% cost + persist≥2). Tighter = ~1.5-2× more fills (operator wants frequency);
   // 2.5% validated Jul 2 for 8 coins (POPCAT/DOGE/NEAR/TIA/ENA Kelly 1.7-4 + ICP/BLUR/JUP); the rest
   // FAILED 2.5% (kPEPE/ATOM/LTC/EIGEN/MANTA/CRV/AR/GOAT/RENDER) and stay at 3%. TON grandfathered 2%.
-  DOGE: 0.025, ICP: 0.025, NEAR: 0.025, ATOM: 0.03, TON: 0.02, CRV: 0.03, ENA: 0.025, TIA: 0.025, kPEPE: 0.03,
-  RENDER: 0.03, POPCAT: 0.025, JUP: 0.025, AR: 0.03, BLUR: 0.025, LTC: 0.03, GOAT: 0.03, EIGEN: 0.03, MANTA: 0.03,
-  // batch-3 (Jul 2, operator topped up → ~$250): XRP-2% = the strongest unadded name (K100 STRONG, Kelly 3.14;
-  // free on the LIVE account — funding-flip holds XRP only on testnet and idles on mainnet; re-resolve if it
-  // ever goes live here). Tier-B at 3% (pass the kill-lens at REAL cost + K100 null; fail only the extra
-  // 0.15%-margin bar): JTO/SNX/APE/ZRO/W Kelly 0.8-1.0, ALT/PNUT 0.4-0.5 (operator's hook-bar: take any
-  // genuine positive-expectancy hook at viable sizing).
-  XRP: 0.02, JTO: 0.03, SNX: 0.03, APE: 0.03, ZRO: 0.03, W: 0.03, ALT: 0.03, PNUT: 0.03,
+  // BATTERY-AUDIT Jul 2 (scripts/battery-honest.ts — corrected null + one-position lock + same-bar stop-through
+  // + stop slippage): CUT the coins robustly NEGATIVE at real cost in BOTH slippage scenarios — GOAT, SNX, APE,
+  // ZRO, W (the tier-B margin-of-safety concern materialized). ICP: 2.5% was a mis-tighten (honest-negative);
+  // its DEEP levels are strong (@3.5 honest +49.5, Kelly 1.08) → base depth moved to 3.5%. Weak-but-positive
+  // stay (JTO/ALT/PNUT/kPEPE/EIGEN/AR/XRP — tiny sizes; the live run measures the real slippage that decides them).
+  DOGE: 0.025, ICP: 0.035, NEAR: 0.025, ATOM: 0.03, TON: 0.02, CRV: 0.03, ENA: 0.025, TIA: 0.025, kPEPE: 0.03,
+  RENDER: 0.03, POPCAT: 0.025, JUP: 0.025, AR: 0.03, BLUR: 0.025, LTC: 0.03, EIGEN: 0.03, MANTA: 0.03,
+  XRP: 0.02, JTO: 0.03, ALT: 0.03, PNUT: 0.03,
 };
 // Side-split (Jul 2, scripts/wick-fade-sides.ts, K100): these sides are consistently NEGATIVE at BOTH real
 // costs (0.05/0.10) with n≥100 and worse-than-random nullP → don't quote them (ballast: pays costs on noise).
 // Weak-but-POSITIVE sides stay (pre-registered bar — dropping a weak positive side loses money). The quoting
 // loop also CANCELS any resting order on a disabled side, so this self-heals on deploy.
 const DISABLED_SIDE: Record<string, 'long' | 'short'> = { ATOM: 'short', LTC: 'short', ALT: 'long' };
+// LADDER — a second, DEEPER rung where the rung passed the HONEST battery (battery-honest.ts): ATOM@3.5
+// (strict pass both slippage scenarios, Kelly 6.3-7.5) + DOGE@3.5 (net-positive both scenarios, p marginal).
+// ICP@3.5 became the BASE depth instead (its 2.5 was honest-negative). Both rungs rest while flat; a deep
+// flush can fill both within a tick (adopt reads the merged avg entry). Applies to ENABLED sides only. Each
+// rung reserves its own ~$6.65 margin. On adopt the FILLED rung's depth is inferred so the stored x — and
+// thus target = the rung's own anchor mid — stays faithful to what was validated (see inferFilledX).
+const LADDER: Record<string, number> = { DOGE: 0.035, ATOM: 0.035 };
+
+/** Which rung filled? Same-side rungs share the quote anchor, so entry÷survivor-price classifies the fill:
+ *  for a long, ratio<1 = the fill sat DEEPER than the surviving rung. Partial fills leave the filled order
+ *  resting (matched by px). Fallbacks (both rungs filled → no survivor; ambiguous ratio): the rungs' average
+ *  depth — a merged avg entry sits between the rungs, so the middle is the honest estimate. */
+function inferFilledX(coin: string, side: 'long' | 'short', entryPx: number, preCancelOrders: HlOpenOrder[]): number {
+  const base = COIN_X[coin]!;
+  const deep = LADDER[coin];
+  if (deep == null) return base;
+  const surv = preCancelOrders.filter((o) => o.side === side);
+  const partial = surv.find((o) => Math.abs(o.px - entryPx) / entryPx < 0.001); // partially-filled rung still rests at the fill px
+  if (partial && surv.length === 2) {
+    const pxs = surv.map((o) => o.px).sort((a, b) => a - b);
+    return (side === 'long' ? partial.px === pxs[0] : partial.px === pxs[1]) ? deep : base;
+  }
+  if (surv.length === 1) {
+    const r = entryPx / surv[0]!.px;
+    if (Math.abs(r - 1) < 0.003) return (base + deep) / 2; // too close to classify (mixed partials) → middle
+    return (side === 'long' ? r < 1 : r > 1) ? deep : base;
+  }
+  return (base + deep) / 2; // no same-side survivor: both rungs filled → merged entry between the rungs
+}
 export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; requoteDrift: number; dailyLossPct: number } = {
   mode: 'live',           // LIVE on mainnet — the guard IDLES this runner until .env HL_USE_TESTNET=false
   coins: Object.keys(COIN_X),
-  capitalUsd: 173,        // SIZING basis: per-quote notional = capitalUsd/coins × lev ≈ $13.3 (26 coins → 173/26×2, clears HL $10 min). Total reserved ≈ capitalUsd (HL nets opposing same-coin orders) → ~$173 of ~$250 (operator topped up +$90 for batch-3), buffer ~$77 (~31%). DO NOT deploy this sizing before the top-up lands — reserve would exceed equity
+  capitalUsd: 140,        // SIZING basis: per-RUNG margin = capitalUsd/coins ≈ $6.67 → notional $13.3 (clears HL $10 min). 21 coins post-audit-cut; reserve ≈ 19×6.67 + DOGE/ATOM ladder 2×13.3 ≈ $153 of ~$249 → buffer ~$96 (~39%) — deliberately wider after the battery audit (weak-but-positive coins stay only because sizes are tiny)
   leverage: 2,            // fractional-Kelly (backtest Kelly 2-5 ⇒ full = 2-5×; 2× is the conservative smoothness choice)
   holdMins: 60,           // time-stop (backtest exitH=12×5m bars)
   stopPct: 0.03,          // catastrophe stop beyond entry (backtest STOP=3%)
@@ -171,20 +200,21 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
   // ── RECONCILE: a deep quote FILLED (exchange position, no DB row) → adopt + clear the other side ──
   if (exPos && !dbPos) {
     if (!ooRes.ok) { logger.warn({ coin }, 'wick-fade: fill detected but openOrders read failed — defer adopt (must clear the other side first)'); return; }
+    const xf = inferFilledX(coin, exPos.side, exPos.entryPx, exOrders); // BEFORE cancel conceptually — exOrders is the pre-cancel snapshot
     await cancelAll(coin, exOrders);
     // opened_at = the REAL fill time from userFills (not the adopt tick) — otherwise every restart resets the
     // 60-min time-stop clock and a position rides open-ended across a restart-churny day (EOD-audit #3).
     const st = await hlPositionStartTime(coin);
     const openedAt = st.ok && st.data.timeMs != null && st.data.timeMs <= nowMs ? st.data.timeMs : nowMs;
-    insPos.run(coin, exPos.side, exPos.entryPx, exPos.size, x, openedAt, 'fill');
-    insLog.run(coin, exPos.side, exPos.entryPx, exPos.size, x, openedAt, 'fill', WF_CONFIG.mode);
+    insPos.run(coin, exPos.side, exPos.entryPx, exPos.size, xf, openedAt, 'fill');
+    insLog.run(coin, exPos.side, exPos.entryPx, exPos.size, xf, openedAt, 'fill', WF_CONFIG.mode);
     // EXCHANGE-RESIDENT catastrophe stop: guards the position through process downtime / restart gaps (the
     // poll is only a backup). reduceOnly stop-market at the 3% level; a trigger, so it won't show in openOrders.
     const stpPx = stopAbs(exPos.side, exPos.entryPx);
     const sres = await hlPlaceStop({ coin, posSide: exPos.side, qty: exPos.size, triggerPx: stpPx });
     if (!sres.ok) logger.error({ coin, msg: sres.msg }, '🛑 wick-fade: EXCHANGE STOP place failed — 1-min poll is the ONLY protection this hold');
-    logger.warn({ coin, side: exPos.side, entry: exPos.entryPx, stop: +stpPx.toFixed(6), exStop: sres.ok, openedAt, target: +targetPx(exPos.side, exPos.entryPx, x).toFixed(6) }, '✅ wick-fade: FILLED (deep wick) — managing exit');
-    notify(`🪝 <b>wick-fade FILLED</b>: ${coin} ${exPos.side} @${exPos.entryPx}\nцель ${targetPx(exPos.side, exPos.entryPx, x).toFixed(6)} · стоп ${stpPx.toFixed(6)} ${sres.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · $${(exPos.size * exPos.entryPx).toFixed(0)}`);
+    logger.warn({ coin, side: exPos.side, entry: exPos.entryPx, x: xf, stop: +stpPx.toFixed(6), exStop: sres.ok, openedAt, target: +targetPx(exPos.side, exPos.entryPx, xf).toFixed(6) }, '✅ wick-fade: FILLED (deep wick) — managing exit');
+    notify(`🪝 <b>wick-fade FILLED</b>: ${coin} ${exPos.side} @${exPos.entryPx}\nцель ${targetPx(exPos.side, exPos.entryPx, xf).toFixed(6)} · стоп ${stpPx.toFixed(6)} ${sres.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · $${(exPos.size * exPos.entryPx).toFixed(0)}`);
     return;
   }
   // ── DB-open but exchange-flat (closed out-of-band — usually the EXCHANGE STOP fired between polls) →
@@ -249,18 +279,25 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
   for (const side of ['long', 'short'] as const) {
     const existing = exOrders.filter((o) => o.side === side);
     if (DISABLED_SIDE[coin] === side) { if (existing.length) await cancelAll(coin, existing); continue; }
-    const desired = side === 'long' ? mid * (1 - x) : mid * (1 + x);
-    const good = existing.length === 1 && Math.abs(existing[0]!.px - desired) / desired < WF_CONFIG.requoteDrift;
+    const depths = LADDER[coin] != null ? [x, LADDER[coin]!] : [x];
+    const desireds = depths.map((d) => (side === 'long' ? mid * (1 - d) : mid * (1 + d)));
+    // bijective good-check: right ORDER COUNT and every desired rung has a resting order within drift (and
+    // vice versa) — otherwise clear the side and re-place all rungs together (shared anchor keeps inference sane)
+    const good = existing.length === desireds.length
+      && desireds.every((dp) => existing.some((o) => Math.abs(o.px - dp) / dp < WF_CONFIG.requoteDrift))
+      && existing.every((o) => desireds.some((dp) => Math.abs(o.px - dp) / dp < WF_CONFIG.requoteDrift));
     if (good) continue;
     // clear stale/duplicate first; if a cancel FAILED, do NOT place a fresh quote (would duplicate) — defer
     if (existing.length) { const cleared = await cancelAll(coin, existing); if (!cleared) { logger.warn({ coin, side }, 'wick-fade: stale cancel failed — defer re-quote (avoid duplicate)'); continue; } }
-    const qty = (margin * WF_CONFIG.leverage) / desired;
-    if (qty * desired < MIN_NOTIONAL) { logger.warn({ coin, side, notional: +(qty * desired).toFixed(1) }, 'wick-fade: notional below min — skip side'); continue; }
-    // set leverage BEFORE placing; if it fails, skip the quote (never rest at unknown/default leverage)
+    // set leverage BEFORE placing; if it fails, skip the side (never rest at unknown/default leverage)
     if (!levSet.has(coin)) { const lev = await hlSetLeverage(coin, WF_CONFIG.leverage); if (!lev.ok) { logger.warn({ coin, msg: lev.msg }, 'wick-fade: setLeverage failed — skip quote'); continue; } levSet.add(coin); }
-    const r = await hlLimitOrder({ coin, side, qty, price: desired });
-    if (!r.ok) { logger.warn({ coin, side, price: +desired.toFixed(6), msg: r.msg }, 'wick-fade: quote place failed'); continue; }
-    if (r.data.filled) logger.warn({ coin, side }, 'wick-fade: deep quote filled IMMEDIATELY (unexpected) — reconcile will adopt');
+    for (const desired of desireds) {
+      const qty = (margin * WF_CONFIG.leverage) / desired;
+      if (qty * desired < MIN_NOTIONAL) { logger.warn({ coin, side, notional: +(qty * desired).toFixed(1) }, 'wick-fade: notional below min — skip rung'); continue; }
+      const r = await hlLimitOrder({ coin, side, qty, price: desired });
+      if (!r.ok) { logger.warn({ coin, side, price: +desired.toFixed(6), msg: r.msg }, 'wick-fade: quote place failed'); continue; }
+      if (r.data.filled) logger.warn({ coin, side }, 'wick-fade: deep quote filled IMMEDIATELY (unexpected) — reconcile will adopt');
+    }
   }
 }
 
