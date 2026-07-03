@@ -52,7 +52,7 @@ type T = { g: number; kind: 'target' | 'time' | 'cat'; age: number };
 function simRequote(c: Candle[], r: Row, exitH: number, stop: number, cdBars: number): T[] {
   const n = c.length; const out: T[] = [];
   let anchor = 0, anchorBar = 0, cdUntil = -1;
-  let pos: { side: 1 | -1; entry: number; anchorMid: number; entryBar: number } | null = null;
+  let pos: { side: 1 | -1; entry: number; anchorMid: number; entryBar: number; age: number } | null = null;
   for (let i = 1; i < n; i++) {
     const bar = c[i]!;
     if (pos) {
@@ -64,9 +64,7 @@ function simRequote(c: Candle[], r: Row, exitH: number, stop: number, cdBars: nu
       else if (pos.side === 1 ? bar.h >= target : bar.l <= target) { exit = target; kind = 'target'; }
       else if (i - pos.entryBar >= exitH) { exit = bar.c; kind = 'time'; }
       if (exit != null) {
-        out.push({ g: (pos.side === 1 ? (exit - pos.entry) / pos.entry : (pos.entry - exit) / pos.entry) * 100, kind, age: 0 });
-        // age recorded at entry; patch the just-pushed trade below via entryAge
-        out[out.length - 1]!.age = (pos as unknown as { age: number }).age ?? 0;
+        out.push({ g: (pos.side === 1 ? (exit - pos.entry) / pos.entry : (pos.entry - exit) / pos.entry) * 100, kind, age: pos.age });
         if (kind === 'cat') cdUntil = i + cdBars;
         pos = null; anchor = 0;
       }
@@ -93,7 +91,7 @@ function simRequote(c: Candle[], r: Row, exitH: number, stop: number, cdBars: nu
         cdUntil = i + cdBars;
         anchor = 0;
       } else {
-        pos = Object.assign({ side: filled.side, entry: filled.entry, anchorMid: anchor, entryBar: i }, { age }) as typeof pos;
+        pos = { side: filled.side, entry: filled.entry, anchorMid: anchor, entryBar: i, age };
         anchor = 0;
       }
       continue;
