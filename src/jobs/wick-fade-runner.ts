@@ -80,7 +80,7 @@ function inferFilledX(coin: string, side: 'long' | 'short', entryPx: number, pre
   }
   return (base + deep) / 2; // no same-side survivor: both rungs filled → merged entry between the rungs
 }
-export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; requoteDrift: number; dailyLossPct: number } = {
+export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; postStopCooldownMins: number; requoteDrift: number; dailyLossPct: number } = {
   mode: 'live',           // LIVE on mainnet — the guard IDLES this runner until .env HL_USE_TESTNET=false
   coins: Object.keys(COIN_X),
   capitalUsd: 140,        // SIZING basis: per-RUNG margin = capitalUsd/coins ≈ $6.67 → notional $13.3 (clears HL $10 min). 21 coins post-audit-cut; reserve ≈ 19×6.67 + DOGE/ATOM ladder 2×13.3 ≈ $153 of ~$249 → buffer ~$96 (~39%) — deliberately wider after the battery audit (weak-but-positive coins stay only because sizes are tiny)
@@ -90,7 +90,14 @@ export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; lev
                           // +1127 vs +931, Kelly 1.83 vs 1.20, catastrophes 12% vs 18%) — reversion happens fast or
                           // not at all; extra hold time mostly lets losers reach the stop and freezes the coin. 30m
                           // = plateau CENTER (not the edge max — anti-overfit). scripts/wick-fade-holdsweep.ts
-  stopPct: 0.03,          // catastrophe stop beyond entry (backtest STOP=3%)
+  stopPct: 0.04,          // catastrophe stop beyond entry. Was 3% (fixed by construction); the Jul 3 param sweep
+                          // (honest battery): 4% dominates 3% in ALL 3×180d windows (+1357 vs +1119, cat% 12→7,
+                          // Kelly 2.08) — a 3%-deep flush that runs another 3% usually keeps running, but many
+                          // 3.0-3.9% excursions still revert; 5% fails one window (grid edge). Combined with the
+                          // post-stop cooldown below: +1644 total, Kelly 2.79. scripts/wick-fade-paramsweep.ts
+  postStopCooldownMins: 30, // after a CATASTROPHE exit, do NOT re-quote the coin for this long — the flush that
+                          // blew through the stop is often still running; re-filling into it was a repeat loser
+                          // (the cooldown's edge is concentrated in cascade regimes = cheap insurance; sweep D)
   requoteDrift: 0.01,     // re-quote a resting level only when it drifts >1% off the desired (anti-churn)
   dailyLossPct: 0.05,     // DAILY-LOSS KILL: if account EQUITY drops >5% below start-of-day (incl. UNREALIZED open drawdown) → pull all quotes + no new entries until the day rolls (open positions still exit). The correlated-tail circuit-breaker.
 };
@@ -102,6 +109,12 @@ type PosRow = { coin: string; side: 'long' | 'short'; entry_px: number; qty: num
 const getPos = db.prepare<[string], PosRow>(`SELECT * FROM wick_fade_pos WHERE coin = ?`);
 const insPos = db.prepare(`INSERT OR REPLACE INTO wick_fade_pos (coin,side,entry_px,qty,x,opened_at,reason) VALUES (?,?,?,?,?,?,?)`);
 const delPos = db.prepare(`DELETE FROM wick_fade_pos WHERE coin = ?`);
+// last CATASTROPHE-like close per coin — drives the post-stop cooldown. Matches: explicit catastrophe;
+// reconciled-flat with deep loss (exchange stop fired between polls, exit recovered); reconciled-flat with
+// NULL pnl (exchange stop fired, exit UNrecoverable — SQLite NULL<=-2 is NULL, so it needs its own arm: the
+// review caught that the naive predicate silently skipped the cooldown's headline scenario). Ordinary deep
+// TIME-STOP losers do NOT cool down — the sweep validated post-catastrophe cooldowns only.
+const lastCatStmt = db.prepare<[string, string], { t: number | null }>(`SELECT MAX(closed_at) AS t FROM wick_fade_log WHERE coin = ? AND mode = ? AND (close_reason = 'catastrophe' OR (close_reason = 'reconciled-flat' AND (pnl_pct <= -2 OR pnl_pct IS NULL)))`);
 const insLog = db.prepare(`INSERT INTO wick_fade_log (coin,side,entry_px,qty,x,opened_at,reason,mode) VALUES (?,?,?,?,?,?,?,?)`);
 // close the ACTIVE log row (closed_at IS NULL) — sets close fields, NEVER touches the immutable entry `reason`.
 const updLog = db.prepare(`UPDATE wick_fade_log SET exit_px=?,closed_at=?,pnl_pct=?,close_reason=? WHERE id=(SELECT id FROM wick_fade_log WHERE coin=? AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1)`);
@@ -213,7 +226,7 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
     insPos.run(coin, exPos.side, exPos.entryPx, exPos.size, xf, openedAt, 'fill');
     insLog.run(coin, exPos.side, exPos.entryPx, exPos.size, xf, openedAt, 'fill', WF_CONFIG.mode);
     // EXCHANGE-RESIDENT catastrophe stop: guards the position through process downtime / restart gaps (the
-    // poll is only a backup). reduceOnly stop-market at the 3% level; a trigger, so it won't show in openOrders.
+    // poll is only a backup). reduceOnly stop-market at the stopPct level; a trigger, so it won't show in openOrders.
     const stpPx = stopAbs(exPos.side, exPos.entryPx);
     const sres = await hlPlaceStop({ coin, posSide: exPos.side, qty: exPos.size, triggerPx: stpPx });
     if (!sres.ok) logger.error({ coin, msg: sres.msg }, '🛑 wick-fade: EXCHANGE STOP place failed — 1-min poll is the ONLY protection this hold');
@@ -278,6 +291,10 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
   // resting order. (Position reconcile/exit above don't need exOrders, so they already ran safely.)
   if (!ooRes.ok) { logger.warn({ coin, msg: ooRes.msg }, 'wick-fade: openOrders read failed — skip quoting this tick'); return; }
   if (killed) { if (exOrders.length) await cancelAll(coin, exOrders); return; } // DAILY-LOSS KILL: pull quotes, no new entries (open positions still exit via the branches above)
+  // POST-STOP COOLDOWN: after a catastrophe the flush is often STILL RUNNING — re-quoting immediately meant
+  // re-filling into the same cascade (a repeat loser; validated in the Jul 3 param sweep, section C/D).
+  const lastCat = lastCatStmt.get(coin, WF_CONFIG.mode)?.t ?? null;
+  if (lastCat != null && nowMs - lastCat < WF_CONFIG.postStopCooldownMins * 60_000) { if (exOrders.length) await cancelAll(coin, exOrders); return; }
   const mid = await hlMid(coin); if (mid == null || !(mid > 0)) return;
   const margin = WF_CONFIG.capitalUsd / WF_CONFIG.coins.length;
   for (const side of ['long', 'short'] as const) {
