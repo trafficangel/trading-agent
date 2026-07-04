@@ -6,8 +6,8 @@
  *  1. PER-COIN keep verdicts at the live config (hold 30m, stop 4%, cd 30m, ladder, disabled sides).
  *  2. POOLED re-check of the three recent parameter decisions under the new lens: hold {30,60} × stop {3,4}
  *     × cooldown {0,30m} — do they still hold with live fill mechanics?
- *  3. FILL-SPEED split (fresh anchor ≤2 bars vs stale): are the FAST fills (the only ones live really takes,
- *     given its 1-min requote is stricter than this 5m approximation) better or worse than the slow ones?
+ *  3. FILL-SPEED split (fresh anchor ≤2 bars vs stale) — a fill-QUALITY diagnostic (fast > slow by ~0.07pp).
+ *     NB (audit Jul 4): with 1-min quote cadence live takes the fast-leaning mix; POOLED = 5-min-cadence read.
  * Honest exits (same-bar stop-through, 0.25% stop slip), verdict at real 0.05% RT, Math.imul null K200.
  * Bybit cache (RUN ON VPS).
  *   pnpm tsx scripts/battery-requote.ts [tf]
@@ -143,7 +143,9 @@ function verdictLine(label: string, perWin: T[][], showMix = true): void {
   });
   verdictLine('FAST (≤10m)', fast);
   verdictLine('SLOW (stale)', slow);
-  console.log('\n── 4. FIDELITY BRACKETS (live truth is inside) + resting-TP economics ──');
+  console.log('\n── 4. FIDELITY BRACKETS + resting-TP economics ──');
+  console.log('   (audit Jul 4: labels empirically INVERTED vs intuition — tgtTouch is net-PESSIMISTIC (caps overshoot');
+  console.log('    live books past target), sbHarsh pessimistic; ruler = harshest corner; live interior ≈ −0.02..−0.05%/trade)');
   const combos: [string, boolean, boolean][] = [
     ['tgtTouch+sbHarsh (ruler)*', true, true],
     ['tgtClose+sbHarsh (pess)', false, true],

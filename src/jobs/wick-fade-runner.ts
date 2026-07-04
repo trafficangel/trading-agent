@@ -402,7 +402,11 @@ export function startWickFadeRunner(): void {
       try { isKilled = await dailyKilled(); } catch (err) { logger.error({ err }, 'wick-fade: dailyKilled threw — keeping previous kill state'); }
       if (isKilled) logger.warn(`⏸ wick-fade: KILL active (${killReason}) — quotes pulled, no new entries (open positions still exit)`);
       tickN++;
-      const quoteTick = tickN % 5 === 1; // quote maintenance every 5 min — HL action-budget economy (exits stay 1-min)
+      // Quote maintenance every tick again (was %5 during the Jul-4 action-budget incident): BATCHING made the
+      // throttle obsolete — a tick with no drift spends 0 actions, so cost tracks drift EVENTS, not cadence.
+      // The ruler audit showed the 5-min cadence admits SLOW (stale-anchor) fills that are ~0.07pp/trade worse
+      // than the fast-only mix the 1-min requote takes. Watch 'Too many cumulative' if volume stays low.
+      const quoteTick = true;
       const cancels: { coin: string; oid: number }[] = [];
       const places: BatchPlaceSpec[] = [];
       for (const coin of WF_CONFIG.coins) {
