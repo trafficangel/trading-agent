@@ -305,6 +305,26 @@ export async function hlCancelTriggers(coin: string): Promise<HlResult<number>> 
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }
 
+/** Net EXTERNAL USDC flows (deposits − withdrawals) since `sinceMs`, from the account ledger. Used to make
+ *  the daily-loss kill TRANSFER-AWARE: a mid-day withdrawal must not read as a crash (false kill) and a
+ *  deposit must not mask a real drawdown. Only 'deposit'/'withdraw' deltas are counted — the flows the
+ *  operator actually uses; internal spot↔perp transfers don't change total equity. */
+export async function hlNetTransfersSince(sinceMs: number): Promise<HlResult<number>> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  try {
+    const ups = await c.info.userNonFundingLedgerUpdates({ user: c.readUser, startTime: sinceMs });
+    let net = 0;
+    for (const u of ups) {
+      if (Number(u.time) <= sinceMs) continue;
+      const d = u.delta as { type: string; usdc?: string };
+      if (d.type === 'deposit') net += Number(d.usdc ?? 0);
+      else if (d.type === 'withdraw') net -= Number(d.usdc ?? 0);
+    }
+    return { ok: true, data: net };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
+
 /** When did the CURRENT position start? Scans userFills newest→oldest for the fill that opened it from FLAT
  *  (startPosition ≈ 0 + an 'Open' dir). Used at adopt so the time-stop clock measures from the REAL fill, not
  *  from the adopt tick — otherwise every restart resets the 60-min clock and a position can be held open-ended

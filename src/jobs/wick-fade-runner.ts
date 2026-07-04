@@ -18,7 +18,7 @@ import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
-import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, hlPlaceStop, hlCancelTriggers, hlExitAvgSince, hlPositionStartTime, hlBatchPlace, hlBatchCancel, type HlOpenOrder, type BatchPlaceSpec } from '../exchange/hyperliquid-private.js';
+import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, hlPlaceStop, hlCancelTriggers, hlExitAvgSince, hlPositionStartTime, hlBatchPlace, hlBatchCancel, hlNetTransfersSince, type HlOpenOrder, type BatchPlaceSpec } from '../exchange/hyperliquid-private.js';
 import { sendMessage } from '../telegram/bot.js';
 
 /** Operator notification (Telegram logs channel) — fire-and-forget: sendMessage never throws, and `void`
@@ -160,7 +160,7 @@ const BLIND_AFTER_MS = 5 * 60_000;
 let blindSince: number | null = null;
 let killed = false;
 let killReason: 'loss' | 'blind' | null = null;
-type SodState = { day: number; equity: number; killedDay?: number };
+type SodState = { day: number; equity: number; ts?: number; killedDay?: number };
 function loadSod(): SodState | null {
   const raw = getKv.get(SOD_KEY);
   if (!raw) return null;
@@ -186,7 +186,7 @@ async function dailyKilled(): Promise<boolean> {
   const day = Math.floor(nowMs / 86_400_000);
   let sod = loadSod();
   if (!sod || sod.day !== day) { // new UTC day (or first ever) → snapshot ONCE (first of the day wins, persists across restarts)
-    sod = { day, equity: av.data };
+    sod = { day, equity: av.data, ts: nowMs };
     saveSod(sod);
     logger.info({ sodEquity: +av.data.toFixed(2), day }, 'wick-fade: daily-kill equity snapshot (start of day, persisted)');
     if (killReason === 'loss') notify('▶️ <b>wick-fade</b>: новый день — daily-kill снят, котировки возвращаются');
@@ -194,7 +194,15 @@ async function dailyKilled(): Promise<boolean> {
     return false;
   }
   if (sod.killedDay === day) { killed = true; killReason = 'loss'; return true; } // latched (incl. across restarts — silently, no re-notify)
-  if ((av.data - sod.equity) / sod.equity <= -WF_CONFIG.dailyLossPct) {
+  // TRANSFER-AWARE baseline: deposits/withdrawals since the snapshot shift the reference, so a mid-day
+  // withdrawal doesn't read as a crash (false kill) and a deposit doesn't mask a real drawdown. Fail-open
+  // to the raw baseline if the ledger read fails (previous behavior; a withdrawal would then false-kill —
+  // safe direction — and the manual kv reset still works as the fallback).
+  let baseline = sod.equity;
+  const flows = await hlNetTransfersSince(sod.ts ?? day * 86_400_000);
+  if (flows.ok && flows.data !== 0) baseline = sod.equity + flows.data;
+  if (baseline <= 0) return false;
+  if ((av.data - baseline) / baseline <= -WF_CONFIG.dailyLossPct) {
     saveSod({ ...sod, killedDay: day }); // LATCH for the rest of the UTC day, restart-proof
     notify('⛔ <b>wick-fade DAILY-KILL</b>: эквити −5% за день — котировки сняты, новых входов нет до следующего дня (открытые позиции доведём до выхода)');
     killed = true; killReason = 'loss';
