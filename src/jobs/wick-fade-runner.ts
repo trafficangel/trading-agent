@@ -204,7 +204,7 @@ async function dailyKilled(): Promise<boolean> {
   return false;
 }
 
-async function stepCoin(coin: string, killed: boolean): Promise<void> {
+async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Promise<void> {
   const x = COIN_X[coin]; if (x == null) return;
   const nowMs = Date.now();
   const dbPos = getPos.get(coin);
@@ -290,6 +290,11 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
   // Guard: if we could NOT read open orders, do NOT place quotes — we'd risk duplicating an unseen
   // resting order. (Position reconcile/exit above don't need exOrders, so they already ran safely.)
   if (!ooRes.ok) { logger.warn({ coin, msg: ooRes.msg }, 'wick-fade: openOrders read failed — skip quoting this tick'); return; }
+  // HL ADDRESS ACTION BUDGET (learned live Jul 4): every order/cancel costs 1 action from a budget of
+  // 10k + $1-of-volume-traded each. Per-minute re-quoting across 21+ coins burned ~11.4k actions on $186
+  // volume in 3 days → placements started getting REJECTED. Quote maintenance now runs every 5th tick
+  // (exits above stay 1-min; adopt-cancels stay immediate). Next: batched placement (all coins = 1 action).
+  if (!quoteTick) return;
   if (killed) { if (exOrders.length) await cancelAll(coin, exOrders); return; } // DAILY-LOSS KILL: pull quotes, no new entries (open positions still exit via the branches above)
   // POST-STOP COOLDOWN: after a catastrophe the flush is often STILL RUNNING — re-quoting immediately meant
   // re-filling into the same cascade (a repeat loser; validated in the Jul 3 param sweep, section C/D).
@@ -323,6 +328,7 @@ async function stepCoin(coin: string, killed: boolean): Promise<void> {
 }
 
 let running = false;
+let tickN = 0;
 export function startWickFadeRunner(): void {
   if (WF_CONFIG.mode === 'off') { logger.info('wick-fade runner: mode=off (idle)'); return; }
   // SAFETY: mode must match the endpoint (config.HL_USE_TESTNET) so a stale .env can't cross-route money.
@@ -337,8 +343,10 @@ export function startWickFadeRunner(): void {
       let isKilled = killed; // on an unexpected throw keep the previous state (same no-flap philosophy)
       try { isKilled = await dailyKilled(); } catch (err) { logger.error({ err }, 'wick-fade: dailyKilled threw — keeping previous kill state'); }
       if (isKilled) logger.warn(`⏸ wick-fade: KILL active (${killReason}) — quotes pulled, no new entries (open positions still exit)`);
+      tickN++;
+      const quoteTick = tickN % 5 === 1; // quote maintenance every 5 min — HL action-budget economy (exits stay 1-min)
       for (const coin of WF_CONFIG.coins) {
-        try { await stepCoin(coin, isKilled); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
+        try { await stepCoin(coin, isKilled, quoteTick); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
       }
     })().finally(() => { running = false; });
   });
