@@ -18,7 +18,7 @@ import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
-import { hlConfigured, hlSetLeverage, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, hlPlaceStop, hlCancelTriggers, hlExitAvgSince, hlPositionStartTime, hlBatchPlace, hlBatchCancel, type HlOpenOrder, type BatchPlaceSpec } from '../exchange/hyperliquid-private.js';
+import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, hlPlaceStop, hlCancelTriggers, hlExitAvgSince, hlPositionStartTime, hlBatchPlace, hlBatchCancel, type HlOpenOrder, type BatchPlaceSpec } from '../exchange/hyperliquid-private.js';
 import { sendMessage } from '../telegram/bot.js';
 
 /** Operator notification (Telegram logs channel) — fire-and-forget: sendMessage never throws, and `void`
@@ -207,6 +207,10 @@ async function dailyKilled(): Promise<boolean> {
 // Quote intentions collected per coin and executed as TWO batched actions per quote-tick (cancel-batch +
 // place-batch) — the HL action-budget economy (1 action per batch regardless of order count).
 type QuoteActions = { cancels: { coin: string; oid: number }[]; places: BatchPlaceSpec[] };
+// HL can HALT trading per asset (TON has been halted for days) — a halted order errors and, worse, can fail
+// a whole batch. Back off quoting a halted coin for an hour per detection instead of burning an action every
+// quote-tick; it self-resumes when HL lifts the halt.
+const haltedUntil = new Map<string, number>();
 const NO_ACTIONS: QuoteActions = { cancels: [], places: [] };
 async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Promise<QuoteActions> {
   const x = COIN_X[coin]; if (x == null) return NO_ACTIONS;
@@ -299,6 +303,7 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
   // volume in 3 days → placements started getting REJECTED. Quote maintenance now runs every 5th tick
   // (exits above stay 1-min; adopt-cancels stay immediate). Next: batched placement (all coins = 1 action).
   if (!quoteTick) return NO_ACTIONS;
+  if ((haltedUntil.get(coin) ?? 0) > nowMs) return NO_ACTIONS; // per-asset halt backoff
   if (killed) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] }; // DAILY-LOSS KILL: pull quotes, no new entries (open positions still exit via the branches above)
   // POST-STOP COOLDOWN: after a catastrophe the flush is often STILL RUNNING — re-quoting immediately meant
   // re-filling into the same cascade (a repeat loser; validated in the Jul 3 param sweep, section C/D).
@@ -346,11 +351,28 @@ async function executeQuoteBatch(cancels: { coin: string; oid: number }[], place
   }
   const toPlace = places.filter((pl) => !failedCoins.has(pl.coin));
   if (!toPlace.length) return;
+  const markHalt = (coin: string, msg: string): boolean => {
+    if (!/halted/i.test(msg)) return false;
+    haltedUntil.set(coin, Date.now() + 60 * 60_000);
+    logger.warn({ coin }, 'wick-fade: asset HALTED by HL — backing off quoting for 1h (self-resumes)');
+    return true;
+  };
   const pr = await hlBatchPlace(toPlace);
-  if (!pr.ok) { logger.warn({ n: toPlace.length, msg: pr.msg }, 'wick-fade: batch place FAILED'); return; }
+  if (!pr.ok) {
+    // one bad order (e.g. a HALTED asset) can fail the whole multi-coin batch — do NOT let it hold the other
+    // coins hostage (their cancels already went through): fall back to INDIVIDUAL placement per order.
+    logger.warn({ n: toPlace.length, msg: pr.msg }, 'wick-fade: batch place failed — falling back to individual placement');
+    for (const pl of toPlace) {
+      if ((haltedUntil.get(pl.coin) ?? 0) > Date.now()) continue;
+      const r = await hlLimitOrder({ coin: pl.coin, side: pl.side, qty: pl.qty, price: pl.price });
+      if (!r.ok) { if (!markHalt(pl.coin, r.msg)) logger.warn({ coin: pl.coin, side: pl.side, price: +pl.price.toFixed(6), msg: r.msg }, 'wick-fade: quote place failed'); continue; }
+      if (r.data.filled) logger.warn({ coin: pl.coin, side: pl.side }, 'wick-fade: deep quote filled IMMEDIATELY (unexpected) — reconcile will adopt');
+    }
+    return;
+  }
   pr.data.forEach((st, i) => {
     const pl = toPlace[i]!;
-    if ('error' in st) logger.warn({ coin: pl.coin, side: pl.side, price: +pl.price.toFixed(6), msg: st.error }, 'wick-fade: quote place failed');
+    if ('error' in st) { if (!markHalt(pl.coin, st.error)) logger.warn({ coin: pl.coin, side: pl.side, price: +pl.price.toFixed(6), msg: st.error }, 'wick-fade: quote place failed'); }
     else if (st.filled) logger.warn({ coin: pl.coin, side: pl.side }, 'wick-fade: deep quote filled IMMEDIATELY (unexpected) — reconcile will adopt');
   });
 }
