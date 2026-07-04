@@ -18,7 +18,7 @@ import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
-import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, hlPlaceStop, hlCancelTriggers, hlExitAvgSince, hlPositionStartTime, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
+import { hlConfigured, hlSetLeverage, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, hlPlaceStop, hlCancelTriggers, hlExitAvgSince, hlPositionStartTime, hlBatchPlace, hlBatchCancel, type HlOpenOrder, type BatchPlaceSpec } from '../exchange/hyperliquid-private.js';
 import { sendMessage } from '../telegram/bot.js';
 
 /** Operator notification (Telegram logs channel) — fire-and-forget: sendMessage never throws, and `void`
@@ -204,19 +204,23 @@ async function dailyKilled(): Promise<boolean> {
   return false;
 }
 
-async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Promise<void> {
-  const x = COIN_X[coin]; if (x == null) return;
+// Quote intentions collected per coin and executed as TWO batched actions per quote-tick (cancel-batch +
+// place-batch) — the HL action-budget economy (1 action per batch regardless of order count).
+type QuoteActions = { cancels: { coin: string; oid: number }[]; places: BatchPlaceSpec[] };
+const NO_ACTIONS: QuoteActions = { cancels: [], places: [] };
+async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Promise<QuoteActions> {
+  const x = COIN_X[coin]; if (x == null) return NO_ACTIONS;
   const nowMs = Date.now();
   const dbPos = getPos.get(coin);
   const exRes = await hlFetchPosition(coin);
-  if (!exRes.ok) { logger.warn({ coin, msg: exRes.msg }, 'wick-fade: position fetch failed — skip tick'); return; }
+  if (!exRes.ok) { logger.warn({ coin, msg: exRes.msg }, 'wick-fade: position fetch failed — skip tick'); return NO_ACTIONS; }
   const exPos = exRes.data;
   const ooRes = await hlOpenOrders(coin);
   const exOrders = ooRes.ok ? ooRes.data : [];
 
   // ── RECONCILE: a deep quote FILLED (exchange position, no DB row) → adopt + clear the other side ──
   if (exPos && !dbPos) {
-    if (!ooRes.ok) { logger.warn({ coin }, 'wick-fade: fill detected but openOrders read failed — defer adopt (must clear the other side first)'); return; }
+    if (!ooRes.ok) { logger.warn({ coin }, 'wick-fade: fill detected but openOrders read failed — defer adopt (must clear the other side first)'); return NO_ACTIONS; }
     const xf = inferFilledX(coin, exPos.side, exPos.entryPx, exOrders); // BEFORE cancel conceptually — exOrders is the pre-cancel snapshot
     await cancelAll(coin, exOrders);
     // opened_at = the REAL fill time from userFills (not the adopt tick) — otherwise every restart resets the
@@ -232,7 +236,7 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
     if (!sres.ok) logger.error({ coin, msg: sres.msg }, '🛑 wick-fade: EXCHANGE STOP place failed — 1-min poll is the ONLY protection this hold');
     logger.warn({ coin, side: exPos.side, entry: exPos.entryPx, x: xf, stop: +stpPx.toFixed(6), exStop: sres.ok, openedAt, target: +targetPx(exPos.side, exPos.entryPx, xf).toFixed(6) }, '✅ wick-fade: FILLED (deep wick) — managing exit');
     notify(`🪝 <b>wick-fade FILLED</b>: ${coin} ${exPos.side} @${exPos.entryPx}\nцель ${targetPx(exPos.side, exPos.entryPx, xf).toFixed(6)} · стоп ${stpPx.toFixed(6)} ${sres.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · $${(exPos.size * exPos.entryPx).toFixed(0)}`);
-    return;
+    return NO_ACTIONS;
   }
   // ── DB-open but exchange-flat (closed out-of-band — usually the EXCHANGE STOP fired between polls) →
   //    recover the REAL exit from userFills for honest PnL (not NULL), clear any orphan stop, book ATOMICALLY ──
@@ -250,7 +254,7 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
     notify(pnl == null
       ? `♻️ <b>wick-fade CLOSED</b> (вне бота): ${coin} ${dbPos.side} — PnL не восстановлен`
       : `${pnl >= 0 ? '🟢' : '🔴'} <b>wick-fade CLOSED</b> (биржевой стоп/вне бота): ${coin} ${dbPos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b>\n${dbPos.entry_px} → ${exitPx?.toFixed(6)}`);
-    return;
+    return NO_ACTIONS;
   }
   // ── IN POSITION → manage exit (target revert / time-stop / catastrophe) ──
   if (exPos && dbPos) {
@@ -259,22 +263,22 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
     if (exPos.side !== dbPos.side) {
       logger.error({ coin, dbSide: dbPos.side, exSide: exPos.side }, '🛑 wick-fade: live side DIVERGED from DB (netting/flip) — flattening to reconcile');
       await hlCancelTriggers(coin); await hlClosePosition(coin);
-      return;
+      return NO_ACTIONS;
     }
-    if (!ooRes.ok) { logger.warn({ coin }, 'wick-fade: in-position but openOrders read failed — defer (a surviving opposite order could fill)'); return; }
+    if (!ooRes.ok) { logger.warn({ coin }, 'wick-fade: in-position but openOrders read failed — defer (a surviving opposite order could fill)'); return NO_ACTIONS; }
     if (exOrders.length) await cancelAll(coin, exOrders); // defensive: no resting orders while holding
-    const mid = await hlMid(coin); if (mid == null || !(mid > 0)) { logger.warn({ coin }, 'wick-fade: no mid — retry'); return; }
+    const mid = await hlMid(coin); if (mid == null || !(mid > 0)) { logger.warn({ coin }, 'wick-fade: no mid — retry'); return NO_ACTIONS; }
     const tgt = targetPx(dbPos.side, dbPos.entry_px, dbPos.x), stp = stopAbs(dbPos.side, dbPos.entry_px);
     const hitTarget = dbPos.side === 'long' ? mid >= tgt : mid <= tgt;
     const timeStop = nowMs - dbPos.opened_at >= WF_CONFIG.holdMins * 60_000;
     const catastrophe = dbPos.side === 'long' ? mid <= stp : mid >= stp;
-    if (!hitTarget && !timeStop && !catastrophe) return;
+    if (!hitTarget && !timeStop && !catastrophe) return NO_ACTIONS;
     const reason = hitTarget ? 'target' : timeStop ? 'time-stop' : 'catastrophe';
     const close = await hlClosePosition(coin);
-    if (!close.ok) { logger.error({ coin, msg: close.msg }, '🛑 wick-fade: close FAILED — retry next tick'); return; }
+    if (!close.ok) { logger.error({ coin, msg: close.msg }, '🛑 wick-fade: close FAILED — retry next tick'); return NO_ACTIONS; }
     const recheck = await hlFetchPosition(coin);
-    if (!recheck.ok) { logger.warn({ coin }, 'wick-fade: post-close fetch failed — defer to reconcile'); return; }
-    if (recheck.data) { logger.warn({ coin, remaining: recheck.data.size }, 'wick-fade: close did not fully fill — retry'); return; }
+    if (!recheck.ok) { logger.warn({ coin }, 'wick-fade: post-close fetch failed — defer to reconcile'); return NO_ACTIONS; }
+    if (recheck.data) { logger.warn({ coin, remaining: recheck.data.size }, 'wick-fade: close did not fully fill — retry'); return NO_ACTIONS; }
     await hlCancelTriggers(coin); // position flat → remove the now-redundant exchange stop before booking
     const exitPx = close.data.avgPx ?? mid; // REAL exit fill (honest live PnL); fall back to mid only if unavailable
     const gross = dbPos.side === 'long' ? (exitPx - dbPos.entry_px) / dbPos.entry_px * 100 : (dbPos.entry_px - exitPx) / dbPos.entry_px * 100;
@@ -283,28 +287,29 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
     logger.warn({ coin, side: dbPos.side, entry: dbPos.entry_px, exit: exitPx, pnlPct: pnl, reason }, '✅ wick-fade: CLOSED');
     const rlabel = reason === 'target' ? 'цель 🎯' : reason === 'time-stop' ? 'тайм-стоп ⏱' : 'катастроф-стоп 🛑';
     notify(`${pnl >= 0 ? '🟢' : '🔴'} <b>wick-fade CLOSED</b>: ${coin} ${dbPos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${rlabel})\n${dbPos.entry_px} → ${exitPx.toFixed(6)} · держали ${Math.round((nowMs - dbPos.opened_at) / 60_000)}м`);
-    return;
+    return NO_ACTIONS;
   }
 
   // ── FLAT → maintain deep post-only quotes on both sides ──
   // Guard: if we could NOT read open orders, do NOT place quotes — we'd risk duplicating an unseen
   // resting order. (Position reconcile/exit above don't need exOrders, so they already ran safely.)
-  if (!ooRes.ok) { logger.warn({ coin, msg: ooRes.msg }, 'wick-fade: openOrders read failed — skip quoting this tick'); return; }
+  if (!ooRes.ok) { logger.warn({ coin, msg: ooRes.msg }, 'wick-fade: openOrders read failed — skip quoting this tick'); return NO_ACTIONS; }
   // HL ADDRESS ACTION BUDGET (learned live Jul 4): every order/cancel costs 1 action from a budget of
   // 10k + $1-of-volume-traded each. Per-minute re-quoting across 21+ coins burned ~11.4k actions on $186
   // volume in 3 days → placements started getting REJECTED. Quote maintenance now runs every 5th tick
   // (exits above stay 1-min; adopt-cancels stay immediate). Next: batched placement (all coins = 1 action).
-  if (!quoteTick) return;
-  if (killed) { if (exOrders.length) await cancelAll(coin, exOrders); return; } // DAILY-LOSS KILL: pull quotes, no new entries (open positions still exit via the branches above)
+  if (!quoteTick) return NO_ACTIONS;
+  if (killed) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] }; // DAILY-LOSS KILL: pull quotes, no new entries (open positions still exit via the branches above)
   // POST-STOP COOLDOWN: after a catastrophe the flush is often STILL RUNNING — re-quoting immediately meant
   // re-filling into the same cascade (a repeat loser; validated in the Jul 3 param sweep, section C/D).
   const lastCat = lastCatStmt.get(coin, WF_CONFIG.mode)?.t ?? null;
-  if (lastCat != null && nowMs - lastCat < WF_CONFIG.postStopCooldownMins * 60_000) { if (exOrders.length) await cancelAll(coin, exOrders); return; }
-  const mid = await hlMid(coin); if (mid == null || !(mid > 0)) return;
+  if (lastCat != null && nowMs - lastCat < WF_CONFIG.postStopCooldownMins * 60_000) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
+  const mid = await hlMid(coin); if (mid == null || !(mid > 0)) return NO_ACTIONS;
   const margin = WF_CONFIG.capitalUsd / WF_CONFIG.coins.length;
+  const acts: QuoteActions = { cancels: [], places: [] };
   for (const side of ['long', 'short'] as const) {
     const existing = exOrders.filter((o) => o.side === side);
-    if (DISABLED_SIDE[coin] === side) { if (existing.length) await cancelAll(coin, existing); continue; }
+    if (DISABLED_SIDE[coin] === side) { for (const o of existing) acts.cancels.push({ coin, oid: o.oid }); continue; }
     const depths = LADDER[coin] != null ? [x, LADDER[coin]!] : [x];
     const desireds = depths.map((d) => (side === 'long' ? mid * (1 - d) : mid * (1 + d)));
     // bijective good-check: right ORDER COUNT and every desired rung has a resting order within drift (and
@@ -313,18 +318,41 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
       && desireds.every((dp) => existing.some((o) => Math.abs(o.px - dp) / dp < WF_CONFIG.requoteDrift))
       && existing.every((o) => desireds.some((dp) => Math.abs(o.px - dp) / dp < WF_CONFIG.requoteDrift));
     if (good) continue;
-    // clear stale/duplicate first; if a cancel FAILED, do NOT place a fresh quote (would duplicate) — defer
-    if (existing.length) { const cleared = await cancelAll(coin, existing); if (!cleared) { logger.warn({ coin, side }, 'wick-fade: stale cancel failed — defer re-quote (avoid duplicate)'); continue; } }
-    // set leverage BEFORE placing; if it fails, skip the side (never rest at unknown/default leverage)
+    // set leverage BEFORE enqueueing placement; if it fails, skip the side (never rest at unknown leverage)
     if (!levSet.has(coin)) { const lev = await hlSetLeverage(coin, WF_CONFIG.leverage); if (!lev.ok) { logger.warn({ coin, msg: lev.msg }, 'wick-fade: setLeverage failed — skip quote'); continue; } levSet.add(coin); }
+    for (const o of existing) acts.cancels.push({ coin, oid: o.oid });
     for (const desired of desireds) {
       const qty = (margin * WF_CONFIG.leverage) / desired;
       if (qty * desired < MIN_NOTIONAL) { logger.warn({ coin, side, notional: +(qty * desired).toFixed(1) }, 'wick-fade: notional below min — skip rung'); continue; }
-      const r = await hlLimitOrder({ coin, side, qty, price: desired });
-      if (!r.ok) { logger.warn({ coin, side, price: +desired.toFixed(6), msg: r.msg }, 'wick-fade: quote place failed'); continue; }
-      if (r.data.filled) logger.warn({ coin, side }, 'wick-fade: deep quote filled IMMEDIATELY (unexpected) — reconcile will adopt');
+      acts.places.push({ coin, side, qty, price: desired });
     }
   }
+  return acts;
+}
+
+/** Execute the tick's collected quote intentions as (at most) TWO exchange actions: one batched cancel,
+ *  one batched place. Preserves the old per-coin all-or-nothing guard: if ANY cancel for a coin failed,
+ *  that coin's placements are DROPPED this tick (an order still rests — placing would duplicate). */
+async function executeQuoteBatch(cancels: { coin: string; oid: number }[], places: BatchPlaceSpec[]): Promise<void> {
+  const failedCoins = new Set<string>();
+  if (cancels.length) {
+    const cr = await hlBatchCancel(cancels);
+    if (!cr.ok) {
+      for (const cx of cancels) failedCoins.add(cx.coin);
+      logger.warn({ n: cancels.length, msg: cr.msg }, 'wick-fade: batch cancel FAILED — deferring all affected re-quotes');
+    } else {
+      cr.data.forEach((okItem, i) => { if (!okItem) { failedCoins.add(cancels[i]!.coin); logger.warn({ coin: cancels[i]!.coin, oid: cancels[i]!.oid }, 'wick-fade: cancel failed — defer re-quote (avoid duplicate)'); } });
+    }
+  }
+  const toPlace = places.filter((pl) => !failedCoins.has(pl.coin));
+  if (!toPlace.length) return;
+  const pr = await hlBatchPlace(toPlace);
+  if (!pr.ok) { logger.warn({ n: toPlace.length, msg: pr.msg }, 'wick-fade: batch place FAILED'); return; }
+  pr.data.forEach((st, i) => {
+    const pl = toPlace[i]!;
+    if ('error' in st) logger.warn({ coin: pl.coin, side: pl.side, price: +pl.price.toFixed(6), msg: st.error }, 'wick-fade: quote place failed');
+    else if (st.filled) logger.warn({ coin: pl.coin, side: pl.side }, 'wick-fade: deep quote filled IMMEDIATELY (unexpected) — reconcile will adopt');
+  });
 }
 
 let running = false;
@@ -345,8 +373,13 @@ export function startWickFadeRunner(): void {
       if (isKilled) logger.warn(`⏸ wick-fade: KILL active (${killReason}) — quotes pulled, no new entries (open positions still exit)`);
       tickN++;
       const quoteTick = tickN % 5 === 1; // quote maintenance every 5 min — HL action-budget economy (exits stay 1-min)
+      const cancels: { coin: string; oid: number }[] = [];
+      const places: BatchPlaceSpec[] = [];
       for (const coin of WF_CONFIG.coins) {
-        try { await stepCoin(coin, isKilled, quoteTick); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
+        try { const a = await stepCoin(coin, isKilled, quoteTick); cancels.push(...a.cancels); places.push(...a.places); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
+      }
+      if (cancels.length || places.length) {
+        try { await executeQuoteBatch(cancels, places); } catch (err) { logger.error({ err }, 'wick-fade: quote batch failed'); }
       }
     })().finally(() => { running = false; });
   });

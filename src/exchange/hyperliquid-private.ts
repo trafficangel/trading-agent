@@ -124,6 +124,69 @@ export async function hlLimitOrder(args: { coin: string; side: 'long' | 'short';
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }
 
+/** BATCHED post-only placement — MANY orders across coins in ONE exchange action. Motivation: HL's address
+ *  action budget (10k + $1-of-volume each) made per-order placement unsustainable for a 40-quote maker book
+ *  (learned live Jul 4: budget exhausted in 3 days). One batch = 1 action regardless of order count.
+ *  Returns per-order results INDEX-ALIGNED with the input (size-rounds-to-0 becomes a synthetic error). */
+export type BatchPlaceSpec = { coin: string; side: 'long' | 'short'; qty: number; price: number };
+export type BatchPlaceResult = { oid: number | null; filled: boolean } | { error: string };
+export async function hlBatchPlace(specs: BatchPlaceSpec[]): Promise<HlResult<BatchPlaceResult[]>> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  if (!specs.length) return { ok: true, data: [] };
+  try {
+    const results: BatchPlaceResult[] = new Array(specs.length);
+    const orders: Parameters<ExchangeClient['order']>[0]['orders'] = [];
+    const sendIdx: number[] = [];
+    for (let i = 0; i < specs.length; i++) {
+      const sp = specs[i]!;
+      const m = await assetMeta(c.info, sp.coin);
+      if (!m) { results[i] = { error: `unknown HL coin ${sp.coin}` }; continue; }
+      const pStr = formatPrice(sp.price, m.szDecimals, 'perp');
+      const sStr = formatSize(sp.qty, m.szDecimals);
+      if (Number(sStr) <= 0) { results[i] = { error: `size rounds to 0 (qty ${sp.qty})` }; continue; }
+      orders.push({ a: m.idx, b: sp.side === 'long', p: pStr, s: sStr, r: false, t: { limit: { tif: 'Alo' } } });
+      sendIdx.push(i);
+    }
+    if (orders.length) {
+      const res = await c.ex.order({ orders, grouping: 'na' }, c.vopts);
+      const statuses = (res?.response?.data?.statuses ?? []) as unknown[];
+      for (let k = 0; k < sendIdx.length; k++) {
+        const st = statuses[k] as Record<string, unknown> | undefined;
+        if (st && typeof st === 'object' && 'error' in st) results[sendIdx[k]!] = { error: String((st as { error: unknown }).error) };
+        else if (st && 'resting' in st) results[sendIdx[k]!] = { oid: (st as { resting: { oid: number } }).resting.oid, filled: false };
+        else if (st && 'filled' in st) results[sendIdx[k]!] = { oid: null, filled: true };
+        else results[sendIdx[k]!] = { error: 'no status returned' };
+      }
+    }
+    return { ok: true, data: results };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
+
+/** BATCHED cancel — many (coin, oid) in ONE action. Returns per-item ok, index-aligned. */
+export async function hlBatchCancel(items: { coin: string; oid: number }[]): Promise<HlResult<boolean[]>> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  if (!items.length) return { ok: true, data: [] };
+  try {
+    const oks: boolean[] = new Array(items.length).fill(false);
+    const cancels: { a: number; o: number }[] = [];
+    const sendIdx: number[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const m = await assetMeta(c.info, items[i]!.coin);
+      if (!m) continue; // unknown coin → stays false
+      cancels.push({ a: m.idx, o: items[i]!.oid });
+      sendIdx.push(i);
+    }
+    if (cancels.length) {
+      const res = await c.ex.cancel({ cancels }, c.vopts) as unknown as { response?: { data?: { statuses?: unknown[] } } };
+      const statuses = (res?.response?.data?.statuses ?? []) as unknown[];
+      for (let k = 0; k < sendIdx.length; k++) oks[sendIdx[k]!] = statuses[k] === 'success';
+    }
+    return { ok: true, data: oks };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
+
 /** Cancel a resting order by oid (idempotent-ish: a stale oid just errors, caller treats as gone). */
 export async function hlCancelOrder(coin: string, oid: number): Promise<HlResult> {
   const c = clients();
