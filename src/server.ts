@@ -17,6 +17,7 @@ import { userRoute } from './user/routes.js';
 import { autotradingRoute } from './strategies/autotrading.js';
 import { predictRoute } from './strategies/predict.js';
 import { labRoute } from './strategies/lab.js';
+import { labTrackRoute } from './strategies/lab-track.js';
 import { startTpslMonitorJob } from './jobs/tpsl-monitor.js';
 import { startHeartbeatJob } from './jobs/heartbeat.js';
 import { startDailyWrapJob } from './jobs/daily-wrap.js';
@@ -204,6 +205,7 @@ async function main(): Promise<void> {
   await autotradingRoute(app);
   await predictRoute(app);
   await labRoute(app);
+  await labTrackRoute(app);
   await landingRoute(app);
   await homeRoute(app);
 
