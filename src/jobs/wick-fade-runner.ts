@@ -81,7 +81,10 @@ function inferFilledX(coin: string, side: 'long' | 'short', entryPx: number, pre
   return (base + deep) / 2; // no same-side survivor: both rungs filled → merged entry between the rungs
 }
 export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; postStopCooldownMins: number; requoteDrift: number; dailyLossPct: number } = {
-  mode: 'off',            // STOPPED Jul 5 (operator: 'останови HL, давай байбит пробовать') — HL action-budget friction at $200 scale; evaluating a Bybit port. Flip back to 'live' to resume (config/env unchanged).
+  mode: 'live',           // RESUMED Jul 5 (operator: 'перезапускай все'). Account is UNIFIED (spot USDC is
+                          // tradeable collateral — no spot→perp transfer needed; hlAccountValue sums perp+spot).
+                          // Runs on 2% requoteDrift + 30-min cadence (budget-sustainable). If the ~14k action
+                          // deficit is still open, the breaker idles quoting until volume clears it.
   coins: Object.keys(COIN_X),
   capitalUsd: 140,        // SIZING basis: per-RUNG margin = capitalUsd/coins ≈ $6.67 → notional $13.3 (clears HL $10 min). 21 coins post-audit-cut; reserve ≈ 19×6.67 + DOGE/ATOM ladder 2×13.3 ≈ $153 of ~$249 → buffer ~$96 (~39%) — deliberately wider after the battery audit (weak-but-positive coins stay only because sizes are tiny)
   leverage: 2,            // fractional-Kelly (backtest Kelly 2-5 ⇒ full = 2-5×; 2× is the conservative smoothness choice)
