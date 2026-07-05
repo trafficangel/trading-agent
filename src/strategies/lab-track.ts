@@ -14,7 +14,7 @@
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { pageShell } from './landing.js';
-import { WF_CONFIG } from '../jobs/wick-fade-runner.js';
+import { WF_CONFIG, COIN_X } from '../jobs/wick-fade-runner.js';
 
 // ── real-money log rows ──
 type WfRow = {
@@ -42,6 +42,16 @@ function fmtDt(ms: number | null): string {
 }
 const notionalOf = (r: WfRow): number => r.qty * r.entry_px;
 const usdOf = (r: WfRow): number => ((r.pnl_pct ?? 0) / 100) * notionalOf(r);
+/** Format a computed price (target/stop) at the same decimal precision as the entry, so it lines up. */
+function fmtPx(n: number, ref: number): string {
+  const dp = Math.min(8, Math.max(2, (String(ref).split('.')[1] ?? '').length));
+  return n.toFixed(dp);
+}
+/** Held duration since open, human-readable. */
+function heldStr(openedMs: number, nowMs: number): string {
+  const m = Math.max(0, Math.round((nowMs - openedMs) / 60_000));
+  return m >= 60 ? `${Math.floor(m / 60)}ч ${m % 60}м` : `${m}м`;
+}
 
 // ── aggregate stats over the real closed track ──
 type TrackStats = {
@@ -157,6 +167,7 @@ const TRACK_CSS = `
   .rp{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--border);color:var(--text-dim);white-space:nowrap}
   .rp.target{color:var(--accent);border-color:var(--accent-soft);background:var(--accent-soft)}
   .rp.cat{color:var(--danger);border-color:var(--danger-soft);background:var(--danger-soft)}
+  .rp.open{color:var(--accent);border-color:var(--accent-soft);background:var(--accent-soft)}
   .rm{position:relative;margin:6px 0 0;padding:0}
   .rm-item{position:relative;padding:0 0 22px 30px}
   .rm-item::before{content:'';position:absolute;left:8px;top:20px;bottom:-2px;width:2px;background:var(--border)}
@@ -199,6 +210,38 @@ function tradesTable(rows: WfRow[]): string {
       <th class="r">Вход</th><th class="r">Выход</th><th class="r">Результат</th><th class="r">P&amp;L $</th>
       <th>Как закрыли</th><th>Открыта (UTC)</th>
     </tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/** Currently-OPEN positions (closed_at IS NULL) — live entries the Telegram alert fires on, which the closed
+ *  table can't show yet. Entry/target/stop derived exactly like the runner: target = pre-wick mid = entry/(1±x),
+ *  stop = entry·(1±stopPct). DB-only (no exchange call) so the public page can't hang on an HL request. */
+function openPositionsSection(nowMs: number): string {
+  const open = openStmt.all();
+  if (open.length === 0) return '';
+  const stopPct = WF_CONFIG.stopPct;
+  const body = open.map((r) => {
+    const x = r.x ?? COIN_X[r.coin] ?? 0.03;
+    const short = r.side === 'short';
+    const target = short ? r.entry_px / (1 + x) : r.entry_px / (1 - x);
+    const stop = short ? r.entry_px * (1 + stopPct) : r.entry_px * (1 - stopPct);
+    return `<tr>
+      <td>#${r.id}</td>
+      <td><b>${esc(r.coin)}</b></td>
+      <td><span class="sd ${short ? 'short' : 'long'}">${r.side.toUpperCase()}</span></td>
+      <td class="r mono">${r.entry_px}</td>
+      <td class="r mono pos">${fmtPx(target, r.entry_px)}</td>
+      <td class="r mono neg">${fmtPx(stop, r.entry_px)}</td>
+      <td class="r">${usd(notionalOf(r))}</td>
+      <td class="dt">${heldStr(r.opened_at, nowMs)}</td>
+      <td><span class="rp open">🟢 в работе</span></td>
+    </tr>`;
+  }).join('');
+  return `<div class="section">
+    <div class="section-title">Открыто сейчас · ${open.length}</div>
+    <div class="card table-wrap"><table class="lt-tbl">
+      <thead><tr><th>#</th><th>Монета</th><th>Сторона</th><th class="r">Вход</th>
+        <th class="r">Цель 🎯</th><th class="r">Стоп 🛑</th><th class="r">Размер</th><th>В работе</th><th>Статус</th></tr></thead>
+      <tbody>${body}</tbody></table></div></div>`;
 }
 
 export function renderLiveTrack(): string {
@@ -264,7 +307,8 @@ export function renderLiveTrack(): string {
 
     ${hasData ? cards : ''}
     ${hasData ? `<div class="section"><div class="section-title">Кривая результата (накопленный %, net комиссий)</div>${equityCurve(st.cum)}</div>` : ''}
-    ${hasData ? `<div class="section"><div class="section-title">Реальные сделки · все ${st.closed}</div>${tradesTable(rows)}</div>` : emptyState}
+    ${openPositionsSection(Date.now())}
+    ${hasData ? `<div class="section"><div class="section-title">Закрытые сделки · все ${st.closed}</div>${tradesTable(rows)}</div>` : emptyState}
 
     <div class="section">
       <div class="section-title">Дорожная карта — к публичному вульту</div>
