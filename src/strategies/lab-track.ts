@@ -14,6 +14,7 @@
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { pageShell } from './landing.js';
+import { WF_CONFIG } from '../jobs/wick-fade-runner.js';
 
 // ── real-money log rows ──
 type WfRow = {
@@ -205,20 +206,22 @@ export function renderLiveTrack(): string {
   const openRows = openStmt.all();
   const st = computeStats(rows, openRows.length);
   const hasData = st.closed > 0;
+  const universe = WF_CONFIG.coins.length;                 // book breadth (single source of truth)
+  const distinctTraded = new Set(rows.map((r) => r.coin)).size; // how many of the book have fired so far
 
   const statCard = (l: string, v: string, vc = '', s = '', sc = ''): string =>
     `<div class="lt-stat"><div class="l">${l}</div><div class="v ${vc}">${v}</div>${s ? `<div class="s ${sc}">${s}</div>` : ''}</div>`;
 
   const cards = hasData ? `
     <div class="lt-cards">
+      ${statCard('Монет в работе', String(universe), '', st.open > 0 ? `${st.open} сейчас открыто` : `${distinctTraded} уже дали сделки`)}
       ${statCard('Накопл. результат', pct(st.netPct), cls(st.netPct), `${usd(st.netUsd, true)} · net комиссий`, cls(st.netUsd))}
-      ${statCard('Закрытых сделок', String(st.closed), '', st.open > 0 ? `${st.open} сейчас в работе` : `за ${st.daysLive} дн.`)}
+      ${statCard('Закрытых сделок', String(st.closed), '', `за ${st.daysLive} дн.`)}
       ${statCard('Винрейт', st.winRate != null ? `${(st.winRate * 100).toFixed(0)}%` : '—', '', `${st.wins} прибыльных · ${st.losses} убыточных`)}
       ${statCard('Профит-фактор', st.profitFactor != null ? st.profitFactor.toFixed(2) : '—', st.profitFactor != null && st.profitFactor >= 1 ? 'pos' : st.profitFactor != null ? 'neg' : '', 'прибыль / убыток')}
       ${statCard('Лучшая сделка', pct(st.best), 'pos', esc(rows.find((r) => (r.pnl_pct ?? 0) === st.best)?.coin ?? ''))}
       ${statCard('Худшая сделка', pct(st.worst), 'neg', esc(rows.find((r) => (r.pnl_pct ?? 0) === st.worst)?.coin ?? ''))}
       ${statCard('Средняя / сделку', pct(st.avgPct), cls(st.avgPct), 'net комиссий')}
-      ${statCard('В работе', `${st.daysLive} дн.`, '', `с ${fmtDt(Math.min(...rows.map((r) => r.opened_at))).slice(0, 10)}`)}
     </div>` : '';
 
   const stages = roadmap(st).map((s) => `
@@ -244,8 +247,9 @@ export function renderLiveTrack(): string {
     <style>${TRACK_CSS}</style>
 
     <div class="lt-intro">
-      <b>Robot Claude</b> — систематическая торговая система на бирже Hyperliquid. Алгоритм отслеживает
-      краткосрочные ценовые аномалии на ликвидном крипто-рынке и зарабатывает на возврате цены к норме.
+      <b>Robot Claude</b> — систематическая торговая система на бирже Hyperliquid. Алгоритм одновременно ведёт
+      книгу из <b>${universe} ликвидных монет</b> (лонг и шорт), отслеживает краткосрочные ценовые аномалии и
+      зарабатывает на возврате цены к норме.
       Работает 24/7 без ручного управления: вход, выход и защита от резких движений — полностью автоматические.
       <b>Никаких обещаний</b> — только реальный трек ниже, каждая сделка с настоящей точкой входа и результатом
       после комиссий.
@@ -291,6 +295,7 @@ export function liveTrackHero(): string {
       </div>
       <div class="lt-hero-r">
         <div class="lt-hero-stat"><div class="v ${cls(st.netPct)}">${pct(st.netPct)}</div><div class="k">накопл.</div></div>
+        <div class="lt-hero-stat"><div class="v">${WF_CONFIG.coins.length}</div><div class="k">монет</div></div>
         <div class="lt-hero-stat"><div class="v">${st.closed}</div><div class="k">сделок</div></div>
         <div class="lt-hero-stat"><div class="v">${st.winRate != null ? `${(st.winRate * 100).toFixed(0)}%` : '—'}</div><div class="k">винрейт</div></div>
       </div>
