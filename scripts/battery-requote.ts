@@ -32,7 +32,7 @@ const LIVE: Row[] = [
 ];
 const TF = String(process.argv[2] ?? '5');
 const WIN_DAYS = 180, WINDOWS = [0, 180, 360], K = 200;
-const SLIP = 0.0025, COST = 0.05, DRIFT = 0.01;
+const SLIP = 0.0025, COST = 0.05, DRIFT = Number(process.argv[3] ?? 0.01); // argv[3] = requote drift (live is now 0.02)
 
 const mean = (a: number[]) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
 const sd = (a: number[]) => { if (a.length < 2) return 0; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) * (x - m), 0) / (a.length - 1)); };
