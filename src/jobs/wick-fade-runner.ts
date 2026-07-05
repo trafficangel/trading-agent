@@ -219,6 +219,18 @@ type QuoteActions = { cancels: { coin: string; oid: number }[]; places: BatchPla
 // a whole batch. Back off quoting a halted coin for an hour per detection instead of burning an action every
 // quote-tick; it self-resumes when HL lifts the halt.
 const haltedUntil = new Map<string, number>();
+// ACTION-BUDGET BREAKER: when HL rejects with 'Too many cumulative', STOP quote maintenance for an hour
+// instead of retrying every tick — each rejected attempt still increments the counter (the Jul-5 death
+// spiral: 12k+ rejects in 6h dug the deficit 1.3k → 14.4k). Exits/stops are unaffected (they ride the
+// over-budget trickle of ~1 action/10s). Self-resumes; re-trips if still blocked.
+let budgetBlockedUntil = 0;
+function tripBudgetBreaker(msg: string): void {
+  if (Date.now() < budgetBlockedUntil) return; // already tripped — don't spam
+  budgetBlockedUntil = Date.now() + 60 * 60_000;
+  logger.error({ msg }, '🛑 wick-fade: HL action budget EXHAUSTED — quote maintenance paused 1h (exits unaffected, trickle serves them)');
+  notify('⛔ <b>wick-fade</b>: бюджет действий HL исчерпан — перестановка ловушек на паузе 1ч (выходы/стопы работают через «струйку»). Объём от сделок постепенно погашает дефицит.');
+}
+const isBudgetErr = (m: string): boolean => /Too many cumulative/i.test(m);
 const NO_ACTIONS: QuoteActions = { cancels: [], places: [] };
 async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Promise<QuoteActions> {
   const x = COIN_X[coin]; if (x == null) return NO_ACTIONS;
@@ -352,6 +364,7 @@ async function executeQuoteBatch(cancels: { coin: string; oid: number }[], place
     const cr = await hlBatchCancel(cancels);
     if (!cr.ok) {
       for (const cx of cancels) failedCoins.add(cx.coin);
+      if (isBudgetErr(cr.msg)) { tripBudgetBreaker(cr.msg); return; }
       logger.warn({ n: cancels.length, msg: cr.msg }, 'wick-fade: batch cancel FAILED — deferring all affected re-quotes');
     } else {
       cr.data.forEach((okItem, i) => { if (!okItem) { failedCoins.add(cancels[i]!.coin); logger.warn({ coin: cancels[i]!.coin, oid: cancels[i]!.oid }, 'wick-fade: cancel failed — defer re-quote (avoid duplicate)'); } });
@@ -367,20 +380,22 @@ async function executeQuoteBatch(cancels: { coin: string; oid: number }[], place
   };
   const pr = await hlBatchPlace(toPlace);
   if (!pr.ok) {
+    // BUDGET rejection → breaker, and NO individual fallback (each rejected retry still burns the counter)
+    if (isBudgetErr(pr.msg)) { tripBudgetBreaker(pr.msg); return; }
     // one bad order (e.g. a HALTED asset) can fail the whole multi-coin batch — do NOT let it hold the other
     // coins hostage (their cancels already went through): fall back to INDIVIDUAL placement per order.
     logger.warn({ n: toPlace.length, msg: pr.msg }, 'wick-fade: batch place failed — falling back to individual placement');
     for (const pl of toPlace) {
       if ((haltedUntil.get(pl.coin) ?? 0) > Date.now()) continue;
       const r = await hlLimitOrder({ coin: pl.coin, side: pl.side, qty: pl.qty, price: pl.price });
-      if (!r.ok) { if (!markHalt(pl.coin, r.msg)) logger.warn({ coin: pl.coin, side: pl.side, price: +pl.price.toFixed(6), msg: r.msg }, 'wick-fade: quote place failed'); continue; }
+      if (!r.ok) { if (isBudgetErr(r.msg)) { tripBudgetBreaker(r.msg); return; } if (!markHalt(pl.coin, r.msg)) logger.warn({ coin: pl.coin, side: pl.side, price: +pl.price.toFixed(6), msg: r.msg }, 'wick-fade: quote place failed'); continue; }
       if (r.data.filled) logger.warn({ coin: pl.coin, side: pl.side }, 'wick-fade: deep quote filled IMMEDIATELY (unexpected) — reconcile will adopt');
     }
     return;
   }
   pr.data.forEach((st, i) => {
     const pl = toPlace[i]!;
-    if ('error' in st) { if (!markHalt(pl.coin, st.error)) logger.warn({ coin: pl.coin, side: pl.side, price: +pl.price.toFixed(6), msg: st.error }, 'wick-fade: quote place failed'); }
+    if ('error' in st) { if (isBudgetErr(st.error)) tripBudgetBreaker(st.error); else if (!markHalt(pl.coin, st.error)) logger.warn({ coin: pl.coin, side: pl.side, price: +pl.price.toFixed(6), msg: st.error }, 'wick-fade: quote place failed'); }
     else if (st.filled) logger.warn({ coin: pl.coin, side: pl.side }, 'wick-fade: deep quote filled IMMEDIATELY (unexpected) — reconcile will adopt');
   });
 }
@@ -402,11 +417,12 @@ export function startWickFadeRunner(): void {
       try { isKilled = await dailyKilled(); } catch (err) { logger.error({ err }, 'wick-fade: dailyKilled threw — keeping previous kill state'); }
       if (isKilled) logger.warn(`⏸ wick-fade: KILL active (${killReason}) — quotes pulled, no new entries (open positions still exit)`);
       tickN++;
-      // Quote maintenance every tick again (was %5 during the Jul-4 action-budget incident): BATCHING made the
-      // throttle obsolete — a tick with no drift spends 0 actions, so cost tracks drift EVENTS, not cadence.
-      // The ruler audit showed the 5-min cadence admits SLOW (stale-anchor) fills that are ~0.07pp/trade worse
-      // than the fast-only mix the 1-min requote takes. Watch 'Too many cumulative' if volume stays low.
-      const quoteTick = true;
+      // Quote maintenance every 30 MIN — the budget-sustainable cadence at this account size. Hard-learned
+      // (Jul 5): earned volume ≈ fills/day × $27 ≈ $100/day = ~100 actions/day allowance; 1-min cadence burned
+      // ~2 actions/min (some coin always drifts >1%) → deficit death-spiral (rejects also count). The audit's
+      // fill-mix argument for faster requoting stands, but is UNAFFORDABLE until capital (→volume) grows:
+      // ~$2k acct sustains 5-min, ~$10k sustains 1-min. Exits stay 1-min (cheap, occasional).
+      const quoteTick = tickN % 30 === 1 && Date.now() >= budgetBlockedUntil;
       const cancels: { coin: string; oid: number }[] = [];
       const places: BatchPlaceSpec[] = [];
       for (const coin of WF_CONFIG.coins) {
