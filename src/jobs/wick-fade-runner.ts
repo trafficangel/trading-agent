@@ -98,7 +98,16 @@ export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; lev
   postStopCooldownMins: 30, // after a CATASTROPHE exit, do NOT re-quote the coin for this long — the flush that
                           // blew through the stop is often still running; re-filling into it was a repeat loser
                           // (the cooldown's edge is concentrated in cascade regimes = cheap insurance; sweep D)
-  requoteDrift: 0.01,     // re-quote a resting level only when it drifts >1% off the desired (anti-churn)
+  requoteDrift: 0.02,     // re-quote a resting level only when it drifts >2% off the desired. Was 1% — but
+                          // scripts/hl-budget-economics.ts (Jul 5, real 45d data) showed 1% drift re-anchors
+                          // ~186 coin-events/day pooled → ~700-1500 HL actions/day, dwarfing the ~75/day the
+                          // book EARNS from real fills (~2.8/day × $27 volume). 1% is the setting that drained
+                          // the action budget in ~2 weeks. 2% cuts re-anchors ~5× (→ ~37 events/day) — the
+                          // biggest free lever. TRADEOFF: a resting rung can now sit up to 2% staler before we
+                          // fix it, so on an adverse 2% mid-drift the effective depth erodes (worst case X−2%);
+                          // the 30-min re-check bounds how long that lasts. Tighter coins (X=2%: TON/XRP) are
+                          // most exposed — refine per-coin if live fills show shallow/noise entries. True fix
+                          // for the budget squeeze is capital (~$2k+): earned volume scales, cost stays flat.
   dailyLossPct: 0.05,     // DAILY-LOSS KILL: if account EQUITY drops >5% below start-of-day (incl. UNREALIZED open drawdown) → pull all quotes + no new entries until the day rolls (open positions still exit). The correlated-tail circuit-breaker.
 };
 const COST_RT = 0.05;     // RT FEES only (maker entry ~0.01% + taker exit ~0.035%): real exit slippage is now captured by booking at the actual close avgPx, and the maker entry fills AT the limit price (no entry slippage)
