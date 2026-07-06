@@ -43,7 +43,9 @@ export const COIN_X: Record<string, number> = {
   // its DEEP levels are strong (@3.5 honest +49.5, Kelly 1.08) → base depth moved to 3.5%. Weak-but-positive
   // stay (JTO/ALT/PNUT/kPEPE/EIGEN/AR/XRP — tiny sizes; the live run measures the real slippage that decides them).
   DOGE: 0.025, ICP: 0.035, NEAR: 0.025, ATOM: 0.03, TON: 0.02, CRV: 0.03, ENA: 0.025, TIA: 0.025, kPEPE: 0.03,
-  RENDER: 0.03, POPCAT: 0.025, JUP: 0.025, AR: 0.03, BLUR: 0.025, LTC: 0.03, EIGEN: 0.03, MANTA: 0.03,
+  RENDER: 0.03, POPCAT: 0.025, JUP: 0.025, AR: 0.03, LTC: 0.03, EIGEN: 0.03, MANTA: 0.03, // BLUR CUT Jul 6:
+  // real stop slippage ~2% (8× the 0.25% model) on its low liquidity — a genuine drain the backtest understates.
+
   XRP: 0.02, JTO: 0.03, ALT: 0.03, PNUT: 0.03,
 };
 // Side-split (Jul 2, scripts/wick-fade-sides.ts, K100): these sides are consistently NEGATIVE at BOTH real
@@ -158,6 +160,7 @@ function depthFactor(coin: string): number {
 
 type PosRow = { coin: string; side: 'long' | 'short'; entry_px: number; qty: number; x: number; opened_at: number; reason: string };
 const getPos = db.prepare<[string], PosRow>(`SELECT * FROM wick_fade_pos WHERE coin = ?`);
+const allOpenPosCoins = db.prepare<[], { coin: string }>(`SELECT DISTINCT coin FROM wick_fade_pos`); // to wind down positions on CUT coins
 const insPos = db.prepare(`INSERT OR REPLACE INTO wick_fade_pos (coin,side,entry_px,qty,x,opened_at,reason) VALUES (?,?,?,?,?,?,?)`);
 const delPos = db.prepare(`DELETE FROM wick_fade_pos WHERE coin = ?`);
 // last CATASTROPHE-like close per coin — drives the post-stop cooldown. Matches: explicit catastrophe;
@@ -284,7 +287,7 @@ function tripBudgetBreaker(msg: string): void {
 const isBudgetErr = (m: string): boolean => /Too many cumulative/i.test(m);
 const NO_ACTIONS: QuoteActions = { cancels: [], places: [] };
 async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Promise<QuoteActions> {
-  const x = COIN_X[coin]; if (x == null) return NO_ACTIONS;
+  const x = COIN_X[coin]; // undefined = a CUT coin — the exit branches below still WIND DOWN its open position; the quote branch places no new quotes and cancels any resting ones (guard before quoting).
   const nowMs = Date.now();
   const dbPos = getPos.get(coin);
   const exRes = await hlFetchPosition(coin);
@@ -294,7 +297,7 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
   const exOrders = ooRes.ok ? ooRes.data : [];
 
   // ── RECONCILE: a deep quote FILLED (exchange position, no DB row) → adopt + clear the other side ──
-  if (exPos && !dbPos) {
+  if (exPos && !dbPos && x != null) { // a CUT coin (x==null) never adopts a NEW fill (its quotes are cancelled)
     if (!ooRes.ok) { logger.warn({ coin }, 'wick-fade: fill detected but openOrders read failed — defer adopt (must clear the other side first)'); return NO_ACTIONS; }
     const xf = inferFilledX(coin, exPos.side, exPos.entryPx, exOrders); // BEFORE cancel conceptually — exOrders is the pre-cancel snapshot
     await cancelAll(coin, exOrders);
@@ -381,6 +384,7 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
   // volume in 3 days → placements started getting REJECTED. Quote maintenance now runs every 5th tick
   // (exits above stay 1-min; adopt-cancels stay immediate). Next: batched placement (all coins = 1 action).
   if (!quoteTick) return NO_ACTIONS;
+  if (x == null) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] }; // CUT coin: cancel any resting quotes, never place new (its open position already wound down via the exit branches above)
   if ((haltedUntil.get(coin) ?? 0) > nowMs) return NO_ACTIONS; // per-asset halt backoff
   if (killed) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] }; // DAILY-LOSS KILL: pull quotes, no new entries (open positions are FORCE-FLATTENED on loss-kill in the in-position branch above)
   // POST-STOP COOLDOWN: after a catastrophe the flush is often STILL RUNNING — re-quoting immediately meant
@@ -484,7 +488,10 @@ export function startWickFadeRunner(): void {
       const quoteTick = tickN % 30 === 1 && Date.now() >= budgetBlockedUntil;
       const cancels: { coin: string; oid: number }[] = [];
       const places: BatchPlaceSpec[] = [];
-      for (const coin of WF_CONFIG.coins) {
+      // book coins ∪ any coin with a still-open position that is NOT in the book (a CUT coin winding down)
+      let stepCoins = WF_CONFIG.coins;
+      try { const extra = allOpenPosCoins.all().map((r) => r.coin).filter((c) => COIN_X[c] == null); if (extra.length) stepCoins = [...WF_CONFIG.coins, ...extra]; } catch { /* keep book coins */ }
+      for (const coin of stepCoins) {
         try { const a = await stepCoin(coin, isKilled, quoteTick); cancels.push(...a.cancels); places.push(...a.places); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
       }
       if (cancels.length || places.length) {
