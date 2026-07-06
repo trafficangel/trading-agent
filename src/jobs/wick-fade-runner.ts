@@ -111,7 +111,7 @@ export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; lev
                           // the 30-min re-check bounds how long that lasts. Tighter coins (X=2%: TON/XRP) are
                           // most exposed — refine per-coin if live fills show shallow/noise entries. True fix
                           // for the budget squeeze is capital (~$2k+): earned volume scales, cost stays flat.
-  dailyLossPct: 0.05,     // DAILY-LOSS KILL: if account EQUITY drops >5% below start-of-day (incl. UNREALIZED open drawdown) → pull all quotes + no new entries until the day rolls (open positions still exit). The correlated-tail circuit-breaker.
+  dailyLossPct: 0.05,     // DAILY-LOSS KILL / СТОПКРАН: if account EQUITY drops >5% below start-of-day (incl. UNREALIZED open drawdown) → pull all quotes, FORCE-CLOSE all open positions, no new entries until the day rolls. A HARD −5% daily floor (Jul 6, operator: 'каскадные минусы не нужны') — validated to cap worst day −13%→−5%, maxDD 33%→25% at ~flat NET (scripts/wick-fade-breaker.ts). The correlated-cascade circuit-breaker.
 };
 const COST_RT = 0.05;     // RT FEES only (maker entry ~0.01% + taker exit ~0.035%): real exit slippage is now captured by booking at the actual close avgPx, and the maker entry fills AT the limit price (no entry slippage)
 const MIN_NOTIONAL = 11;  // HL min order ≈ $10
@@ -308,8 +308,15 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
     const hitTarget = dbPos.side === 'long' ? mid >= tgt : mid <= tgt;
     const timeStop = nowMs - dbPos.opened_at >= WF_CONFIG.holdMins * 60_000;
     const catastrophe = dbPos.side === 'long' ? mid <= stp : mid >= stp;
-    if (!hitTarget && !timeStop && !catastrophe) return NO_ACTIONS;
-    const reason = hitTarget ? 'target' : timeStop ? 'time-stop' : 'catastrophe';
+    // DAILY-LOSS FLATTEN (the "стопкран"): on a confirmed −5% daily-equity kill, FORCE-CLOSE the open position
+    // too — not just pull quotes — so a continuing cascade cannot drag equity past −5%. The real daily floor
+    // (validated scripts/wick-fade-breaker.ts: worst day −13%→−5%, maxDD 33%→25%, NET ~flat). ONLY on
+    // killReason='loss' (a real drawdown); NEVER on 'blind' (unreadable equity must not force blind exits).
+    // Now that a loss-kill closes positions, the TRANSFER-AWARE daily baseline is what stops a money-move from
+    // false-tripping it (a false kill would now realize small losses, not just pause).
+    const dailyFlatten = killed && killReason === 'loss';
+    if (!hitTarget && !timeStop && !catastrophe && !dailyFlatten) return NO_ACTIONS;
+    const reason = dailyFlatten ? 'daily-kill' : hitTarget ? 'target' : timeStop ? 'time-stop' : 'catastrophe';
     const close = await hlClosePosition(coin);
     if (!close.ok) { logger.error({ coin, msg: close.msg }, '🛑 wick-fade: close FAILED — retry next tick'); return NO_ACTIONS; }
     const recheck = await hlFetchPosition(coin);
@@ -321,7 +328,7 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
     const pnl = +(gross - COST_RT).toFixed(3);
     closeTxn(exitPx, nowMs, pnl, reason, coin);
     logger.warn({ coin, side: dbPos.side, entry: dbPos.entry_px, exit: exitPx, pnlPct: pnl, reason }, '✅ wick-fade: CLOSED');
-    const rlabel = reason === 'target' ? 'цель 🎯' : reason === 'time-stop' ? 'тайм-стоп ⏱' : 'катастроф-стоп 🛑';
+    const rlabel = reason === 'target' ? 'цель 🎯' : reason === 'time-stop' ? 'тайм-стоп ⏱' : reason === 'daily-kill' ? 'дневной −5% СТОПКРАН 🚨' : 'катастроф-стоп 🛑';
     notify(`${pnl >= 0 ? '🟢' : '🔴'} <b>wick-fade CLOSED</b>: ${coin} ${dbPos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${rlabel})\n${dbPos.entry_px} → ${exitPx.toFixed(6)} · держали ${Math.round((nowMs - dbPos.opened_at) / 60_000)}м`);
     return NO_ACTIONS;
   }
@@ -336,7 +343,7 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
   // (exits above stay 1-min; adopt-cancels stay immediate). Next: batched placement (all coins = 1 action).
   if (!quoteTick) return NO_ACTIONS;
   if ((haltedUntil.get(coin) ?? 0) > nowMs) return NO_ACTIONS; // per-asset halt backoff
-  if (killed) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] }; // DAILY-LOSS KILL: pull quotes, no new entries (open positions still exit via the branches above)
+  if (killed) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] }; // DAILY-LOSS KILL: pull quotes, no new entries (open positions are FORCE-FLATTENED on loss-kill in the in-position branch above)
   // POST-STOP COOLDOWN: after a catastrophe the flush is often STILL RUNNING — re-quoting immediately meant
   // re-filling into the same cascade (a repeat loser; validated in the Jul 3 param sweep, section C/D).
   const lastCat = lastCatStmt.get(coin, WF_CONFIG.mode)?.t ?? null;
