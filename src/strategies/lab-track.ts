@@ -216,12 +216,21 @@ const TRACK_CSS = `
   .lt-day .s{font-size:11px;color:var(--text-dim);margin-top:4px;white-space:nowrap}
   .lt-day.today{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   .lt-day.today .d{color:var(--accent)}
+  .lt-pager{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:14px;font-size:13px;flex-wrap:wrap}
+  .lt-pager a{color:var(--accent);text-decoration:none;padding:6px 14px;border:1px solid var(--border);border-radius:8px;transition:border-color .15s}
+  .lt-pager a:hover{border-color:var(--accent)}
+  .lt-pager .off{color:var(--text-faint);padding:6px 14px;border:1px solid var(--border);border-radius:8px;opacity:.45}
+  .lt-pager .pg{color:var(--text-dim);font-variant-numeric:tabular-nums}
 `;
 
-function tradesTable(rows: WfRow[]): string {
-  // newest first for the table
+const PER_PAGE = 50;
+function tradesTable(rows: WfRow[], page: number): string {
+  // newest first, paginated server-side via ?page=N — survives the page auto-refresh, needs no JS
   const ordered = [...rows].sort((a, b) => (b.closed_at ?? 0) - (a.closed_at ?? 0));
-  const body = ordered.map((r) => {
+  const pages = Math.max(1, Math.ceil(ordered.length / PER_PAGE));
+  const p = Math.min(Math.max(1, page), pages);
+  const from = (p - 1) * PER_PAGE;
+  const body = ordered.slice(from, from + PER_PAGE).map((r) => {
     const p = r.pnl_pct ?? 0;
     const reasonCls = r.close_reason === 'target' ? 'target' : r.close_reason === 'catastrophe' ? 'cat' : '';
     const reasonLbl = r.close_reason === 'target' ? '🎯 цель' : r.close_reason === 'time-stop' ? '⏱ тайм-стоп' : r.close_reason === 'catastrophe' ? '🛑 стоп' : (r.close_reason ?? '—');
@@ -244,7 +253,12 @@ function tradesTable(rows: WfRow[]): string {
       <th>#</th><th>Монета</th><th>Сторона</th>
       <th class="r">Вход</th><th class="r">Выход</th><th class="r">Глубина</th><th class="r">Результат</th><th class="r">P&amp;L $</th>
       <th class="r">Комиссия</th><th>Как закрыли</th><th>Открыта (UTC)</th>
-    </tr></thead><tbody>${body}</tbody></table></div>`;
+    </tr></thead><tbody>${body}</tbody></table></div>${(() => {
+    if (pages <= 1) return '';
+    const shown = Math.min(PER_PAGE, ordered.length - from);
+    const link = (n: number, label: string): string => (n >= 1 && n <= pages) ? `<a href="/lab/live?page=${n}#trades">${label}</a>` : `<span class="off">${label}</span>`;
+    return `<div class="lt-pager">${link(p - 1, '← Назад')}<span class="pg">Стр. ${p} из ${pages} · ${from + 1}–${from + shown} из ${ordered.length}</span>${link(p + 1, 'Вперёд →')}</div>`;
+  })()}`;
 }
 
 /** Currently-OPEN positions (closed_at IS NULL) — live entries the Telegram alert fires on, which the closed
@@ -379,7 +393,7 @@ function dailyStrip(rows: WfRow[]): string {
   return `<div class="section"><div class="section-title">Результат по дням (net комиссий · листайте →)</div><div class="lt-days">${chips}</div></div>`;
 }
 
-export function renderLiveTrack(): string {
+export function renderLiveTrack(page = 1): string {
   const rows = closedStmt.all();
   const openRows = openStmt.all();
   const st = computeStats(rows, openRows.length);
@@ -454,7 +468,7 @@ export function renderLiveTrack(): string {
     ${hasData ? dailyStrip(rows) : ''}
     ${strategyDetail(universe)}
     ${openPositionsSection(Date.now())}
-    ${hasData ? `<div class="section"><div class="section-title">Закрытые сделки · все ${st.closed}</div>${tradesTable(rows)}</div>` : emptyState}
+    ${hasData ? `<div class="section" id="trades"><div class="section-title">Закрытые сделки · все ${st.closed}</div>${tradesTable(rows, page)}</div>` : emptyState}
 
     <div class="section">
       <div class="section-title">Дорожная карта — к публичному вульту</div>
@@ -510,9 +524,10 @@ export const LIVE_TRACK_HERO_CSS = `
 `;
 
 export async function labTrackRoute(app: FastifyInstance): Promise<void> {
-  app.get('/lab/live', async (_req, reply) => {
+  app.get<{ Querystring: { page?: string } }>('/lab/live', async (req, reply) => {
+    const page = Math.max(1, parseInt(req.query.page ?? '1', 10) || 1);
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'public, max-age=30');
-    return renderLiveTrack();
+    return renderLiveTrack(page);
   });
 }
