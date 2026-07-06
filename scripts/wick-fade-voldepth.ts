@@ -30,6 +30,8 @@ const CONTROLS: Row[] = [ // efficient majors — the artifact detector. A REAL 
   { coin: 'BTC', sym: 'BTC', x: 0.03, sides: BOTH, ctrl: true }, { coin: 'ETH', sym: 'ETH', x: 0.03, sides: BOTH, ctrl: true },
   { coin: 'SOL', sym: 'SOL', x: 0.03, sides: BOTH, ctrl: true }, { coin: 'LINK', sym: 'LINK', x: 0.03, sides: BOTH, ctrl: true },
 ];
+// argv[4]: extra control coins (comma-sep) to expand the artifact detector, e.g. AVAX,BNB,DOT,ADA
+for (const c of String(process.argv[4] ?? '').split(',').map((s) => s.trim()).filter(Boolean)) CONTROLS.push({ coin: c, sym: c, x: 0.03, sides: BOTH, ctrl: true });
 const ALL = [...LIVE, ...CONTROLS];
 const TF = String(process.argv[2] ?? '5');
 const VOL_W = Number(process.argv[3] ?? 48); // rolling-vol window in bars (48×5m = 4h)
