@@ -219,8 +219,10 @@ function tradesTable(rows: WfRow[]): string {
       <td><span class="sd ${r.side === 'long' ? 'long' : 'short'}">${r.side.toUpperCase()}</span></td>
       <td class="r mono">${r.entry_px}</td>
       <td class="r mono">${r.exit_px ?? '—'}</td>
+      <td class="r mono">${r.x != null ? (r.x * 100).toFixed(1) + '%' : '—'}</td>
       <td class="r mono ${cls(p)}">${pct(p, 2)}</td>
       <td class="r ${cls(usdOf(r))}">${usd(usdOf(r), true)}</td>
+      <td class="r mono" style="color:var(--text-faint)">${usd(notionalOf(r) * 0.05 / 100)}</td>
       <td><span class="rp ${reasonCls}">${reasonLbl}</span></td>
       <td class="dt">${fmtDt(r.opened_at)}</td>
     </tr>`;
@@ -228,8 +230,8 @@ function tradesTable(rows: WfRow[]): string {
   return `<div class="card table-wrap"><table class="lt-tbl">
     <thead><tr>
       <th>#</th><th>Монета</th><th>Сторона</th>
-      <th class="r">Вход</th><th class="r">Выход</th><th class="r">Результат</th><th class="r">P&amp;L $</th>
-      <th>Как закрыли</th><th>Открыта (UTC)</th>
+      <th class="r">Вход</th><th class="r">Выход</th><th class="r">Глубина</th><th class="r">Результат</th><th class="r">P&amp;L $</th>
+      <th class="r">Комиссия</th><th>Как закрыли</th><th>Открыта (UTC)</th>
     </tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -250,6 +252,7 @@ function openPositionsSection(nowMs: number): string {
       <td><b>${esc(r.coin)}</b></td>
       <td><span class="sd ${short ? 'short' : 'long'}">${r.side.toUpperCase()}</span></td>
       <td class="r mono">${r.entry_px}</td>
+      <td class="r mono">${(x * 100).toFixed(1)}%</td>
       <td class="r mono pos">${fmtPx(target, r.entry_px)}</td>
       <td class="r mono neg">${fmtPx(stop, r.entry_px)}</td>
       <td class="r">${usd(notionalOf(r))}</td>
@@ -260,7 +263,7 @@ function openPositionsSection(nowMs: number): string {
   return `<div class="section">
     <div class="section-title">Открыто сейчас · ${open.length}</div>
     <div class="card table-wrap"><table class="lt-tbl">
-      <thead><tr><th>#</th><th>Монета</th><th>Сторона</th><th class="r">Вход</th>
+      <thead><tr><th>#</th><th>Монета</th><th>Сторона</th><th class="r">Вход</th><th class="r">Глубина</th>
         <th class="r">Цель 🎯</th><th class="r">Стоп 🛑</th><th class="r">Размер</th><th>В работе</th><th>Статус</th></tr></thead>
       <tbody>${body}</tbody></table></div></div>`;
 }
@@ -352,6 +355,9 @@ export function renderLiveTrack(): string {
   const todayRows = rows.filter((r) => (r.closed_at ?? 0) >= dayStart);
   const todayPct = todayRows.reduce((s, r) => s + (r.pnl_pct ?? 0), 0);
   const todayUsd = todayRows.reduce((s, r) => s + usdOf(r), 0);
+  // Commissions already netted out of pnl (COST_RT≈0.05%): maker entry ~0.015% + taker exit ~0.035%.
+  const feeEntry = rows.reduce((s, r) => s + notionalOf(r) * 0.015 / 100, 0);
+  const feeExit = rows.reduce((s, r) => s + notionalOf(r) * 0.035 / 100, 0);
 
   const statCard = (l: string, v: string, vc = '', s = '', sc = ''): string =>
     `<div class="lt-stat"><div class="l">${l}</div><div class="v ${vc}">${v}</div>${s ? `<div class="s ${sc}">${s}</div>` : ''}</div>`;
@@ -367,6 +373,7 @@ export function renderLiveTrack(): string {
       ${statCard('Лучшая сделка', pct(st.best), 'pos', esc(rows.find((r) => (r.pnl_pct ?? 0) === st.best)?.coin ?? ''))}
       ${statCard('Худшая сделка', pct(st.worst), 'neg', esc(rows.find((r) => (r.pnl_pct ?? 0) === st.worst)?.coin ?? ''))}
       ${statCard('Средняя / сделку', pct(st.avgPct), cls(st.avgPct), 'net комиссий')}
+      ${statCard('Комиссии уплачено', usd(feeEntry + feeExit), '', `вход ${usd(feeEntry)} (maker) · выход ${usd(feeExit)} (taker)`)}
     </div>` : '';
 
   const stages = roadmap(st).map((s) => `
