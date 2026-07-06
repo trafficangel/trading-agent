@@ -279,14 +279,26 @@ export async function hlPlaceStop(args: { coin: string; posSide: 'long' | 'short
     const m = await assetMeta(c.info, args.coin);
     if (!m) return { ok: false, msg: `unknown HL coin ${args.coin}` };
     const isBuy = args.posSide === 'short'; // closing a short buys; closing a long sells
+    // MARKET trigger: `p` is the resulting order's limit/slippage bound and MUST be AGGRESSIVE in the fill
+    // direction (a sell-stop fills DOWN, a buy-stop fills UP) or HL silently fails to REST the trigger. The old
+    // code set p = triggerPx (non-aggressive) → the stop never actually rested (found live Jul 6: exStop logged
+    // true, but 0 triggers on the exchange for 11 open positions). 10% past the trigger guarantees the
+    // catastrophe backstop actually closes; the trigger price gates it, so it still rests (no early fill).
     const px = formatPrice(args.triggerPx, m.szDecimals, 'perp');
+    const limitPx = formatPrice(isBuy ? args.triggerPx * 1.10 : args.triggerPx * 0.90, m.szDecimals, 'perp');
     const s = formatSize(args.qty, m.szDecimals);
     if (Number(s) <= 0) return { ok: false, msg: `size rounds to 0 (qty ${args.qty})` };
-    const res = await c.ex.order({ orders: [{ a: m.idx, b: isBuy, p: px, s, r: true, t: { trigger: { isMarket: true, triggerPx: px, tpsl: 'sl' } } }], grouping: 'na' }, c.vopts);
+    const res = await c.ex.order({ orders: [{ a: m.idx, b: isBuy, p: limitPx, s, r: true, t: { trigger: { isMarket: true, triggerPx: px, tpsl: 'sl' } } }], grouping: 'na' }, c.vopts);
     const st = ((res?.response?.data?.statuses ?? []) as unknown[])[0] as Record<string, unknown> | undefined;
     if (st && typeof st === 'object' && 'error' in st) return { ok: false, msg: String((st as { error: unknown }).error) };
-    const resting = st && 'resting' in st ? (st as { resting: { oid: number } }).resting : null;
-    return { ok: true, data: { oid: resting ? resting.oid : null } };
+    const oid = st && 'resting' in st ? (st as { resting: { oid: number } }).resting.oid : null;
+    // VERIFY the trigger actually RESTS on the exchange — a non-error ack is NOT proof (the Jul-6 bug: ok but
+    // no resting order). Confirm against frontendOpenOrders so the caller's exStop flag reflects REALITY, and
+    // surface the raw status on failure to diagnose. The 1-min poll stays the backup whenever this returns !ok.
+    let rests = false;
+    try { const fo = await c.info.frontendOpenOrders({ user: c.readUser }); rests = fo.some((o) => o.coin === args.coin && o.isTrigger === true); } catch { rests = oid != null; }
+    if (!rests) return { ok: false, msg: `stop did not rest (status=${st ? Object.keys(st).join('|') : JSON.stringify(res).slice(0, 140)})` };
+    return { ok: true, data: { oid } };
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }
 
