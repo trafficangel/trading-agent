@@ -70,7 +70,7 @@ function sim(candles: Map<string, Candle[]>, rows: Row[], breakerPct: number | n
   for (let ts = t0; ts <= t1; ts += STEP) {
     const day = Math.floor(ts / 86_400_000);
     if (day !== curDay) { curDay = day; dayRealized = 0; } // new UTC day → reset intraday realized + breaker latch clears
-    const barOf = (coin: string): Candle | null => { const i = idx.get(coin)!.get(ts); return i == null ? candles.get(coin)![i as number] ?? null : candles.get(coin)![i]!; };
+    const barOf = (coin: string): Candle | null => { const i = idx.get(coin)!.get(ts); return i == null ? null : candles.get(coin)![i]!; };
 
     // ── BREAKER: intraday equity = realized-this-day + unrealised open MTM; trip once/day ──
     if (breakerPct != null && breakerKilledDay !== day) {
