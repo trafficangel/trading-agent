@@ -117,10 +117,13 @@ function verdict(label: string, perWin: number[][]): { net: number; fills: numbe
     wins.forEach((c, wi) => {
       if (!c.length) return;
       const vol = volArr(c, VOL_W);
-      const validVol = vol.filter((v) => v > 0); const mv = mean(validVol) || 1;
-      const m = row.x / mv; // calibrate: mean(m·vol) ≈ fixed x
+      // CAUSAL calibration (no in-sample look-ahead): depth_t = fixedX × vol_t / EWMA(vol)_t — the depth is the
+      // fixed % scaled by how CURRENT vol compares to its own TRAILING mean (α=0.01 ≈ 100-bar memory). Uses only
+      // PAST vol, so it's exactly what live could do. Warmup (vol not yet defined) → fixed x.
+      const ew = new Array(c.length).fill(0); let e = 0, seed = false;
+      for (let k = 0; k < c.length; k++) { const v = vol[k]!; if (v > 0) { if (!seed) { e = v; seed = true; } else { e = e + 0.01 * (v - e); } } ew[k] = e; }
       const fixT = sim(c, row.sides, () => row.x);
-      const volT = sim(c, row.sides, (i) => Math.min(DMAX, Math.max(DMIN, m * (vol[i] || mv))));
+      const volT = sim(c, row.sides, (i) => { const v = vol[i]!, b = ew[i]!; return (v > 0 && b > 0) ? Math.min(DMAX, Math.max(DMIN, row.x * v / b)) : row.x; });
       fixW[wi]!.push(...fixT.map((t) => t.g)); volW[wi]!.push(...volT.map((t) => t.g));
       (row.ctrl ? poolFixCtrl : poolFixLive).forEach((p, k) => p.push(...(k === wi ? fixT.map((t) => t.g) : [])));
       (row.ctrl ? poolVolCtrl : poolVolLive).forEach((p, k) => p.push(...(k === wi ? volT.map((t) => t.g) : [])));
