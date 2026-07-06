@@ -204,6 +204,18 @@ const TRACK_CSS = `
   .sd-block li::before{content:'';position:absolute;left:2px;top:7px;width:5px;height:5px;border-radius:50%;background:var(--accent)}
   .sd-block.risk li::before{background:var(--danger)}
   .sd-block b{color:var(--text)}
+  .lt-days{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 12px;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity}
+  .lt-days::-webkit-scrollbar{height:8px}
+  .lt-days::-webkit-scrollbar-track{background:transparent}
+  .lt-days::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .lt-days{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+  .lt-day{flex:0 0 auto;min-width:112px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;scroll-snap-align:start}
+  .lt-day .d{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}
+  .lt-day .v{font-size:19px;font-weight:650;margin-top:7px;font-variant-numeric:tabular-nums;line-height:1.1}
+  .lt-day .v.pos{color:var(--accent)}.lt-day .v.neg{color:var(--danger)}
+  .lt-day .s{font-size:11px;color:var(--text-dim);margin-top:4px;white-space:nowrap}
+  .lt-day.today{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .lt-day.today .d{color:var(--accent)}
 `;
 
 function tradesTable(rows: WfRow[]): string {
@@ -344,6 +356,29 @@ function strategyDetail(universe: number): string {
   </div>`;
 }
 
+const RU_MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+const fmtDay = (dayMs: number): string => { const d = new Date(dayMs); return `${d.getUTCDate()} ${RU_MON[d.getUTCMonth()]}`; };
+
+/** Scrollable per-UTC-day result tape — one chip per day (net %, $, trade count), newest first, today highlit. */
+function dailyStrip(rows: WfRow[]): string {
+  const byDay = new Map<number, { pct: number; usd: number; n: number }>();
+  for (const r of rows) {
+    if (r.closed_at == null) continue;
+    const day = Math.floor(r.closed_at / 86_400_000) * 86_400_000;
+    const e = byDay.get(day) ?? { pct: 0, usd: 0, n: 0 };
+    e.pct += r.pnl_pct ?? 0; e.usd += usdOf(r); e.n++; byDay.set(day, e);
+  }
+  if (byDay.size === 0) return '';
+  const today = Math.floor(Date.now() / 86_400_000) * 86_400_000;
+  const chips = [...byDay.entries()].sort((a, b) => b[0] - a[0]).map(([day, e]) => `
+    <div class="lt-day${day === today ? ' today' : ''}">
+      <div class="d">${fmtDay(day)}${day === today ? ' · сегодня' : ''}</div>
+      <div class="v ${cls(e.pct)}">${pct(e.pct)}</div>
+      <div class="s">${usd(e.usd, true)} · ${e.n} сд.</div>
+    </div>`).join('');
+  return `<div class="section"><div class="section-title">Результат по дням (net комиссий · листайте →)</div><div class="lt-days">${chips}</div></div>`;
+}
+
 export function renderLiveTrack(): string {
   const rows = closedStmt.all();
   const openRows = openStmt.all();
@@ -416,6 +451,7 @@ export function renderLiveTrack(): string {
 
     ${hasData ? cards : ''}
     ${hasData ? `<div class="section"><div class="section-title">Кривая результата (накопленный %, net комиссий)</div>${equityCurve(st.cum)}</div>` : ''}
+    ${hasData ? dailyStrip(rows) : ''}
     ${strategyDetail(universe)}
     ${openPositionsSection(Date.now())}
     ${hasData ? `<div class="section"><div class="section-title">Закрытые сделки · все ${st.closed}</div>${tradesTable(rows)}</div>` : emptyState}
