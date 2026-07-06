@@ -348,6 +348,10 @@ export function renderLiveTrack(): string {
   const hasData = st.closed > 0;
   const universe = WF_CONFIG.coins.length;                 // book breadth (single source of truth)
   const distinctTraded = new Set(rows.map((r) => r.coin)).size; // how many of the book have fired so far
+  const dayStart = Math.floor(Date.now() / 86_400_000) * 86_400_000; // current UTC day start
+  const todayRows = rows.filter((r) => (r.closed_at ?? 0) >= dayStart);
+  const todayPct = todayRows.reduce((s, r) => s + (r.pnl_pct ?? 0), 0);
+  const todayUsd = todayRows.reduce((s, r) => s + usdOf(r), 0);
 
   const statCard = (l: string, v: string, vc = '', s = '', sc = ''): string =>
     `<div class="lt-stat"><div class="l">${l}</div><div class="v ${vc}">${v}</div>${s ? `<div class="s ${sc}">${s}</div>` : ''}</div>`;
@@ -356,6 +360,7 @@ export function renderLiveTrack(): string {
     <div class="lt-cards">
       ${statCard('Монет в работе', String(universe), '', st.open > 0 ? `${st.open} сейчас открыто` : `${distinctTraded} уже дали сделки`)}
       ${statCard('Накопл. результат', pct(st.netPct), cls(st.netPct), `${usd(st.netUsd, true)} · net комиссий`, cls(st.netUsd))}
+      ${statCard('Результат за день', todayRows.length ? pct(todayPct) : '—', cls(todayPct), todayRows.length ? `${usd(todayUsd, true)} · ${todayRows.length} сделок (UTC)` : 'сегодня сделок нет', cls(todayUsd))}
       ${statCard('Закрытых сделок', String(st.closed), '', `за ${st.daysLive} дн.`)}
       ${statCard('Винрейт', st.winRate != null ? `${(st.winRate * 100).toFixed(0)}%` : '—', '', `${st.wins} прибыльных · ${st.losses} убыточных`)}
       ${statCard('Профит-фактор', st.profitFactor != null ? st.profitFactor.toFixed(2) : '—', st.profitFactor != null && st.profitFactor >= 1 ? 'pos' : st.profitFactor != null ? 'neg' : '', 'прибыль / убыток')}
