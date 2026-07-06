@@ -64,8 +64,12 @@ export const LADDER: Record<string, number> = { DOGE: 0.035, ATOM: 0.035 };
  *  resting (matched by px). Fallbacks (both rungs filled → no survivor; ambiguous ratio): the rungs' average
  *  depth — a merged avg entry sits between the rungs, so the middle is the honest estimate. */
 function inferFilledX(coin: string, side: 'long' | 'short', entryPx: number, preCancelOrders: HlOpenOrder[]): number {
-  const base = COIN_X[coin]!;
-  const deep = LADDER[coin];
+  // Scale both rungs by the SAME live vol factor as placement — so the stored x matches the depth we actually
+  // quoted at, and target = entry/(1∓x) lands on the true pre-wick mid. The ratio logic below is unaffected
+  // (both rungs scale together). Factor ≈ placement's (vol drifts slowly over the ≤30m to fill); residual tiny.
+  const f = depthFactor(coin);
+  const base = clampDepth(COIN_X[coin]! * f);
+  const deep = LADDER[coin] != null ? clampDepth(LADDER[coin]! * f) : null;
   if (deep == null) return base;
   const surv = preCancelOrders.filter((o) => o.side === side);
   const partial = surv.find((o) => Math.abs(o.px - entryPx) / entryPx < 0.001); // partially-filled rung still rests at the fill px
@@ -80,7 +84,7 @@ function inferFilledX(coin: string, side: 'long' | 'short', entryPx: number, pre
   }
   return (base + deep) / 2; // no same-side survivor: both rungs filled → merged entry between the rungs
 }
-export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; postStopCooldownMins: number; requoteDrift: number; dailyLossPct: number } = {
+export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; leverage: number; holdMins: number; stopPct: number; postStopCooldownMins: number; requoteDrift: number; dailyLossPct: number; dynamicDepth: boolean; volWindow: number } = {
   mode: 'live',           // RESUMED Jul 5 (operator: 'перезапускай все'). Account is UNIFIED (spot USDC is
                           // tradeable collateral — no spot→perp transfer needed; hlAccountValue sums perp+spot).
                           // Runs on 2% requoteDrift + 30-min cadence (budget-sustainable). If the ~14k action
@@ -112,10 +116,45 @@ export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; lev
                           // most exposed — refine per-coin if live fills show shallow/noise entries. True fix
                           // for the budget squeeze is capital (~$2k+): earned volume scales, cost stays flat.
   dailyLossPct: 0.05,     // DAILY-LOSS KILL / СТОПКРАН: if account EQUITY drops >5% below start-of-day (incl. UNREALIZED open drawdown) → pull all quotes, FORCE-CLOSE all open positions, no new entries until the day rolls. A HARD −5% daily floor (Jul 6, operator: 'каскадные минусы не нужны') — validated to cap worst day −13%→−5%, maxDD 33%→25% at ~flat NET (scripts/wick-fade-breaker.ts). The correlated-cascade circuit-breaker.
+  dynamicDepth: true,     // VOL-SCALED entry depth (Jul 6, operator idea, validated scripts/wick-fade-voldepth.ts):
+                          // the entry depth = COIN_X × (currentVol / trailing-EWMA-vol) instead of a fixed %, so we
+                          // fade GENUINE over-extensions (N sigmas) not a fixed move (noise in a wild coin, a rare
+                          // event in a calm one). CAUSAL A/B on 3×180d flipped the pooled book −341→+414 net at real
+                          // cost, all 3 windows positive, perm-null p=0.00, Kelly 2.2 — while the efficient-major
+                          // CONTROLS (BTC/ETH/SOL/LINK) stayed dead (p=0.16, not a KEEP) ⇒ real structure, not a
+                          // vol-fitting artifact. Live vol from the native HL 5m archive (hl_candles). Set false to revert.
+  volWindow: 48,          // rolling-vol window in 5m bars (4h). Depth factor bounded [0.4,2.0], final depth clamped [0.8%,6%].
 };
 const COST_RT = 0.05;     // RT FEES only (maker entry ~0.01% + taker exit ~0.035%): real exit slippage is now captured by booking at the actual close avgPx, and the maker entry fills AT the limit price (no entry slippage)
 const MIN_NOTIONAL = 11;  // HL min order ≈ $10
 const HR = 3_600_000;
+
+// ── VOL-SCALED DEPTH (WF_CONFIG.dynamicDepth): live volatility read from the native HL 5m archive (hl_candles,
+//    jobs/hl-candle-collector.ts). Entry depth = COIN_X × depthFactor, where depthFactor = currentVol /
+//    trailing-EWMA(vol) — CAUSAL (only past bars), matching scripts/wick-fade-voldepth.ts. ──
+const VOL_LOOKBACK = 550;                    // bars pulled to build a stable causal EWMA of the rolling-vol series
+const DEPTH_MIN = 0.008, DEPTH_MAX = 0.06;   // hard safety clamp on the final entry depth
+const FACTOR_MIN = 0.4, FACTOR_MAX = 2.0;    // bound the vol multiplier (keeps the two ladder rungs proportional)
+const recentClosesStmt = db.prepare<[string, number], { c: number }>(`SELECT c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
+const clampDepth = (d: number): number => Math.min(DEPTH_MAX, Math.max(DEPTH_MIN, d));
+/** Depth multiplier = currentVol / trailing-EWMA(vol) from hl_candles (rolling std of log-returns over volWindow,
+ *  EWMA α=0.01). Returns 1 (⇒ fixed COIN_X) when dynamicDepth is off or the archive lacks enough history — a safe
+ *  fall-back that never throws, so a missing/short archive degrades gracefully to the proven fixed book. */
+function depthFactor(coin: string): number {
+  if (!WF_CONFIG.dynamicDepth) return 1;
+  let closes: number[];
+  try { closes = recentClosesStmt.all(coin, VOL_LOOKBACK).map((r) => r.c).reverse(); } catch { return 1; }
+  const W = WF_CONFIG.volWindow;
+  if (closes.length < W + 80) return 1; // insufficient archive → fixed depth
+  const rets: number[] = [];
+  for (let i = 1; i < closes.length; i++) rets.push(closes[i]! > 0 && closes[i - 1]! > 0 ? Math.log(closes[i]! / closes[i - 1]!) : 0);
+  const volAt = (end: number): number => { let m = 0; for (let j = end - W; j < end; j++) m += rets[j]!; m /= W; let v = 0; for (let j = end - W; j < end; j++) { const d = rets[j]! - m; v += d * d; } return Math.sqrt(v / (W - 1)); };
+  let e = 0, seeded = false;
+  for (let end = W; end <= rets.length; end++) { const v = volAt(end); if (!(v > 0)) continue; if (!seeded) { e = v; seeded = true; } else e = e + 0.01 * (v - e); }
+  const cur = volAt(rets.length);
+  if (!(cur > 0) || !(e > 0)) return 1;
+  return Math.min(FACTOR_MAX, Math.max(FACTOR_MIN, cur / e));
+}
 
 type PosRow = { coin: string; side: 'long' | 'short'; entry_px: number; qty: number; x: number; opened_at: number; reason: string };
 const getPos = db.prepare<[string], PosRow>(`SELECT * FROM wick_fade_pos WHERE coin = ?`);
@@ -350,11 +389,12 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
   if (lastCat != null && nowMs - lastCat < WF_CONFIG.postStopCooldownMins * 60_000) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
   const mid = await hlMid(coin); if (mid == null || !(mid > 0)) return NO_ACTIONS;
   const margin = WF_CONFIG.capitalUsd / WF_CONFIG.coins.length;
+  const factor = depthFactor(coin); // live vol multiplier (1 = fixed depth); computed once per coin per quote tick
   const acts: QuoteActions = { cancels: [], places: [] };
   for (const side of ['long', 'short'] as const) {
     const existing = exOrders.filter((o) => o.side === side);
     if (DISABLED_SIDE[coin] === side) { for (const o of existing) acts.cancels.push({ coin, oid: o.oid }); continue; }
-    const depths = LADDER[coin] != null ? [x, LADDER[coin]!] : [x];
+    const depths = LADDER[coin] != null ? [clampDepth(x * factor), clampDepth(LADDER[coin]! * factor)] : [clampDepth(x * factor)];
     const desireds = depths.map((d) => (side === 'long' ? mid * (1 - d) : mid * (1 + d)));
     // bijective good-check: right ORDER COUNT and every desired rung has a resting order within drift (and
     // vice versa) — otherwise clear the side and re-place all rungs together (shared anchor keeps inference sane)
@@ -452,6 +492,6 @@ export function startWickFadeRunner(): void {
       }
     })().finally(() => { running = false; });
   });
-  logger.warn({ mode: WF_CONFIG.mode, endpoint: config.HL_USE_TESTNET ? 'testnet' : 'MAINNET', vault: config.HL_VAULT_ADDRESS ? 'yes' : 'no', coins: WF_CONFIG.coins.length, lev: WF_CONFIG.leverage, capital: WF_CONFIG.capitalUsd, dailyKill: `${WF_CONFIG.dailyLossPct * 100}%` }, '✅ wick-fade runner scheduled (every 1m, post-only deep limits, exchange-reconciled, daily-loss kill)');
+  logger.warn({ mode: WF_CONFIG.mode, endpoint: config.HL_USE_TESTNET ? 'testnet' : 'MAINNET', vault: config.HL_VAULT_ADDRESS ? 'yes' : 'no', coins: WF_CONFIG.coins.length, lev: WF_CONFIG.leverage, capital: WF_CONFIG.capitalUsd, dailyKill: `${WF_CONFIG.dailyLossPct * 100}%`, dynDepth: WF_CONFIG.dynamicDepth ? `vol×W${WF_CONFIG.volWindow}` : 'fixed' }, '✅ wick-fade runner scheduled (every 1m, post-only deep limits, exchange-reconciled, daily-loss kill)');
   if (!hlConfigured()) logger.error('wick-fade: HL_API_WALLET_KEY missing — runner idles until configured');
 }
