@@ -183,6 +183,27 @@ const TRACK_CSS = `
   .rm-desc{font-size:13.5px;color:var(--text-dim);line-height:1.55;margin-top:5px;max-width:640px}
   .lt-note{font-size:12px;color:var(--text-faint);line-height:1.55;margin:20px 0 0}
   .lt-back{display:inline-block;margin-bottom:6px;font-size:13px}
+  .sd-lead{color:var(--text-dim);font-size:14px;line-height:1.6;margin:0 0 14px;max-width:780px}
+  .sd-lead b{color:var(--text)}
+  .sd-diag{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:16px 14px 12px}
+  .sd-svg{width:100%;height:auto;display:block}
+  .sd-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:14px 0 22px}
+  @media(max-width:760px){.sd-steps{grid-template-columns:1fr}}
+  .sd-step{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:13px 15px}
+  .sd-step .n{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--bg);font-weight:700;font-size:12px;margin-bottom:8px}
+  .sd-step.cat .n{background:var(--danger)}
+  .sd-step h5{margin:0 0 5px;font-size:14px;color:var(--text)}
+  .sd-step p{margin:0;font-size:12.5px;color:var(--text-dim);line-height:1.5}
+  .sd-blocks{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.sd-blocks{grid-template-columns:1fr}}
+  .sd-block{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:16px 18px}
+  .sd-block h4{margin:0 0 11px;font-size:14px;color:var(--text)}
+  .sd-block ul{margin:0;padding:0;list-style:none}
+  .sd-block li{position:relative;padding:0 0 9px 18px;font-size:13px;color:var(--text-dim);line-height:1.5}
+  .sd-block li:last-child{padding-bottom:0}
+  .sd-block li::before{content:'';position:absolute;left:2px;top:7px;width:5px;height:5px;border-radius:50%;background:var(--accent)}
+  .sd-block.risk li::before{background:var(--danger)}
+  .sd-block b{color:var(--text)}
 `;
 
 function tradesTable(rows: WfRow[]): string {
@@ -242,6 +263,81 @@ function openPositionsSection(nowMs: number): string {
       <thead><tr><th>#</th><th>Монета</th><th>Сторона</th><th class="r">Вход</th>
         <th class="r">Цель 🎯</th><th class="r">Стоп 🛑</th><th class="r">Размер</th><th>В работе</th><th>Статус</th></tr></thead>
       <tbody>${body}</tbody></table></div></div>`;
+}
+
+/** Detailed strategy explainer — a schematic SVG of the wick-fade mechanic + what it's based on, the data
+ *  analysed, and the layered stops. Static (no data) — the credibility/depth surface for the vault pitch. */
+function strategyDetail(universe: number): string {
+  // Schematic (LONG / buy-the-dip): price rests at the mid, a flash wick pierces our deep bid (①), price
+  // reverts to the mid = exit at target (②); if the flush CONTINUES it hits the 4% stop instead (③).
+  const diagram = `
+  <div class="sd-diag">
+    <svg viewBox="0 0 720 260" class="sd-svg" role="img" aria-label="Схема стратегии: лимитка ловит резкий провал, затем возврат к средней">
+      <!-- reference levels -->
+      <line x1="120" y1="70" x2="612" y2="70" stroke="var(--border)" stroke-dasharray="4,4"/>
+      <line x1="120" y1="142" x2="612" y2="142" stroke="var(--accent)" stroke-opacity="0.55" stroke-dasharray="6,4"/>
+      <line x1="120" y1="212" x2="612" y2="212" stroke="var(--danger)" stroke-opacity="0.55" stroke-dasharray="6,4"/>
+      <text x="12" y="74" fill="var(--text-faint)" font-size="11">средняя</text>
+      <text x="12" y="146" fill="var(--accent)" font-size="11">лимит ±3%</text>
+      <text x="12" y="216" fill="var(--danger)" font-size="11">стоп −4%</text>
+      <!-- catastrophe branch (flush continues → stop) -->
+      <path d="M 326,172 L 400,212" fill="none" stroke="var(--danger)" stroke-width="1.6" stroke-dasharray="5,4" stroke-opacity="0.85"/>
+      <!-- price path (flash down, revert to mid) -->
+      <path d="M 128,70 L 250,70 L 314,165 L 326,172 L 415,102 L 470,70 L 606,70" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+      <!-- markers -->
+      <circle cx="299" cy="142" r="11" fill="var(--accent)"/><text x="299" y="146" text-anchor="middle" fill="var(--bg)" font-size="12" font-weight="700">1</text>
+      <circle cx="470" cy="70" r="11" fill="var(--accent)"/><text x="470" y="74" text-anchor="middle" fill="var(--bg)" font-size="12" font-weight="700">2</text>
+      <circle cx="400" cy="212" r="11" fill="var(--danger)"/><text x="400" y="216" text-anchor="middle" fill="var(--bg)" font-size="12" font-weight="700">3</text>
+      <text x="606" y="240" text-anchor="end" fill="var(--text-faint)" font-size="11">время →</text>
+    </svg>
+  </div>
+  <div class="sd-steps">
+    <div class="sd-step"><span class="n">1</span><h5>Ловим шип лимиткой</h5><p>На каждой монете держим глубокую лимитную заявку на <b>−2…3.5%</b> от средней. Резкий провал — флэш, каскад ликвидаций, паника — на секунды прокалывает наш уровень, и заявка исполняется как <b>мейкер</b> (без тейкерской комиссии).</p></div>
+    <div class="sd-step"><span class="n">2</span><h5>Ставим на возврат</h5><p>Резкие переспужения на розничных альтах статистически краткосрочны. Цель — <b>возврат к средней</b> (доцене шипа). На откате фиксируем прибыль.</p></div>
+    <div class="sd-step cat"><span class="n">3</span><h5>Защита, если не откатило</h5><p>Если это был настоящий тренд, а не шип — закрываемся по <b>4%-стопу</b>. Плюс <b>30-мин тайм-стоп</b>: разворот быстрый или его нет.</p></div>
+  </div>
+  <div class="sd-blocks">
+    <div class="sd-block">
+      <h4>🧠 На чём основана</h4>
+      <ul>
+        <li>Устойчивая рыночная микроструктура: на розничных альткоинах резкие шипы и каскады ликвидаций <b>систематически переспужают и быстро откатывают</b>.</li>
+        <li><b>Доказательство, что эффект реальный, а не подгонка</b> — контрольная группа: на эффективных мейджорах (BTC, ETH, SOL, LINK) эффекта НЕТ. Случайный шум реагировал бы на всё одинаково; то, что алгоритм отличает розничные альты от эффективных мейджоров, доказывает реальную структуру рынка.</li>
+      </ul>
+    </div>
+    <div class="sd-block">
+      <h4>📊 Что мы проанализировали</h4>
+      <ul>
+        <li><b>Данные:</b> месяцы 5-минутных свечей по ${universe} монетам, <b>3 независимых окна по 180 дней</b>, ~15&nbsp;000+ смоделированных сделок.</li>
+        <li><b>Перестановочный тест (K=200):</b> реальный результат против 200 случайных перестановок направления — отличаем край от везения.</li>
+        <li><b>Кросс-оконный walk-forward:</b> результат обязан держаться в разных режимах рынка, а не в одном удачном.</li>
+        <li><b>MAE-анализ</b> распределения внутрисделочных просадок по каждой монете — так подобраны стопы, что режут катастрофический хвост, но не срезают нормальный шум разворота.</li>
+      </ul>
+    </div>
+    <div class="sd-block risk">
+      <h4>🛡 Стопы и защита (многоуровневая)</h4>
+      <ul>
+        <li><b>Цель</b> — возврат цены к средней (выход в прибыль).</li>
+        <li><b>Тайм-стоп 30 мин</b> — если не вернулось, выходим по рынку.</li>
+        <li><b>Катастроф-стоп 4%</b> — биржевой стоп-ордер (живёт на бирже, переживает сбои процесса), если движение оказалось трендом.</li>
+        <li><b>Дневной −5% СТОПКРАН</b> — при −5% за день (включая плавающую просадку) закрываются ВСЕ позиции + пауза до следующего дня. Жёсткий пол против коррелированных каскадов.</li>
+        <li><b>Авто-предохранители:</b> пауза после каскада, контроль лимитов биржи, fail-closed при потере связи с биржей.</li>
+      </ul>
+    </div>
+    <div class="sd-block">
+      <h4>⚙️ Как исполняется</h4>
+      <ul>
+        <li>Только <b>ликвидные монеты</b>, вход — <b>мейкер-лимитками</b>, 24/7 без ручного управления.</li>
+        <li><b>Одна позиция на монету</b>, диверсификация по ${universe} монетам — коррелированный флэш ловится по многим сразу.</li>
+        <li>Всё автоматически: вход, выход, стопы, перестановка заявок, риск-контроль.</li>
+        <li>Каждая сделка публикуется ниже — с реальной точкой входа и результатом <b>после комиссий</b>.</li>
+      </ul>
+    </div>
+  </div>`;
+  return `<div class="section">
+    <div class="section-title">Как устроена стратегия</div>
+    <p class="sd-lead">Систематический <b>маркет-мейкинг с возвратом к среднему</b> на ${universe} ликвидных монетах. Ниже — как это работает, на чём основано и как защищено. Схема на примере <b>лонга</b> (откуп резкого провала); для шорта всё зеркально (продажа резкого выброса вверх).</p>
+    ${diagram}
+  </div>`;
 }
 
 export function renderLiveTrack(): string {
@@ -307,6 +403,7 @@ export function renderLiveTrack(): string {
 
     ${hasData ? cards : ''}
     ${hasData ? `<div class="section"><div class="section-title">Кривая результата (накопленный %, net комиссий)</div>${equityCurve(st.cum)}</div>` : ''}
+    ${strategyDetail(universe)}
     ${openPositionsSection(Date.now())}
     ${hasData ? `<div class="section"><div class="section-title">Закрытые сделки · все ${st.closed}</div>${tradesTable(rows)}</div>` : emptyState}
 
