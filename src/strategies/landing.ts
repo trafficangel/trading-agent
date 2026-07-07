@@ -2483,7 +2483,6 @@ export function pageShell(
       <a href="/">${labels.home}</a>
       <a href="/lab">${labels.lab}</a>
       <a href="/predict/about">${labels.predict}</a>
-      <a href="https://t.me/robotclaude" target="_blank" rel="noopener">${labels.channel}</a>
       <a href="https://t.me/dboykod" target="_blank" rel="noopener">${labels.support}</a>
   `;
 
