@@ -464,14 +464,14 @@ function strategyDetail(universe: number, lang: Lang): string {
         <li>${t(lang, '<b>Тайм-стоп 30 мин</b> — если не вернулось, выходим по рынку.', '<b>30-min time-stop</b> — if it hasn’t reverted, we exit at market.')}</li>
         <li>${t(lang, '<b>Катастроф-стоп 4%</b> — биржевой стоп-ордер (живёт на бирже, переживает сбои процесса), если движение оказалось трендом.', '<b>4% catastrophe stop</b> — an exchange-resident stop order (lives on the exchange, survives process downtime), if the move turned out to be a trend.')}</li>
         <li>${t(lang, '<b>Дневной −5% СТОПКРАН</b> — при −5% за день (включая плавающую просадку) закрываются ВСЕ позиции + пауза до следующего дня. Жёсткий пол против коррелированных каскадов.', '<b>Daily −5% CIRCUIT-BREAKER</b> — at −5% on the day (including open unrealized drawdown) ALL positions close + trading pauses until the next day. A hard floor against correlated cascades.')}</li>
-        <li>${t(lang, '<b>Авто-предохранители:</b> пауза после каскада, контроль лимитов биржи, fail-closed при потере связи с биржей.', '<b>Auto-safeguards:</b> post-cascade cooldown, exchange rate-limit control, fail-closed if the exchange connection drops.')}</li>
+        <li>${t(lang, '<b>Авто-предохранители:</b> снятие лимиток во время широкого рыночного каскада, пауза после стопа по конкретной монете, контроль лимитов биржи, fail-closed при потере связи с биржей.', '<b>Auto-safeguards:</b> resting limits are pulled during broad market cascades, a coin pauses after its stop, exchange rate-limit control, fail-closed if the exchange connection drops.')}</li>
       </ul>
     </div>
     <div class="sd-block">
       <h4>⚙️ ${t(lang, 'Как исполняется', 'How it executes')}</h4>
       <ul>
         <li>${t(lang, 'Только <b>ликвидные монеты</b>, вход — <b>мейкер-лимитками</b>, 24/7 без ручного управления.', 'Liquid coins only, entries via <b>maker limits</b>, 24/7 with no manual intervention.')}</li>
-        <li>${t(lang, `<b>Одна позиция на монету</b>, диверсификация по ${universe} монетам — коррелированный флэш ловится по многим сразу.`, `<b>One position per coin</b>, diversified across ${universe} coins — a correlated flush is caught on many at once.`)}</li>
+        <li>${t(lang, `<b>Одна позиция на монету</b>, диверсификация по ${universe} монетам: изолированные шипы ловятся по разным монетам, а широкие рыночные каскады отсекаются защитой.`, `<b>One position per coin</b>, diversified across ${universe} coins: isolated wicks are caught across different coins, while broad market cascades are filtered out by protection.`)}</li>
         <li>${t(lang, 'Всё автоматически: вход, выход, стопы, перестановка заявок, риск-контроль.', 'Everything automatic: entry, exit, stops, quote re-placement, risk control.')}</li>
         <li>${t(lang, 'Каждая сделка публикуется ниже — с реальной точкой входа и результатом <b>после комиссий</b>.', 'Every trade is published below — with a real entry point and the result <b>net of fees</b>.')}</li>
       </ul>
