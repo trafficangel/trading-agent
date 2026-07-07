@@ -345,6 +345,41 @@ function logLiquidityBlock(coin: string, reason: string, nowMs: number): void {
   liquidityLogAt.set(coin, nowMs);
   logger.warn({ coin, reason }, 'wick-fade: LIQUIDITY-GATE active - cancel coin quotes, no new entries');
 }
+// MARKET-CASCADE GATE: wick-fade wants isolated over-extensions, not a broad market flush/rip.
+// If many traded alts move the same way over the last ~15m, pull flat resting traps within 1 minute.
+const CASCADE_LOOKBACK_BARS = 3;
+const CASCADE_MOVE_PCT = 1.5;
+const CASCADE_MIN_COINS = 8;
+const CASCADE_MIN_SAMPLE = 12;
+const CASCADE_STALE_MS = 30 * 60_000;
+const CASCADE_LOG_COOLDOWN_MS = 10 * 60_000;
+let cascadeLogAt = 0;
+const cascadeCandlesStmt = db.prepare<[string, number], { t: number; c: number }>(`SELECT t, c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
+function marketCascadeBlockReason(nowMs: number): string | null {
+  let up = 0, down = 0, seen = 0;
+  for (const coin of WF_CONFIG.coins) {
+    let rows: { t: number; c: number }[];
+    try { rows = cascadeCandlesStmt.all(coin, CASCADE_LOOKBACK_BARS + 1); } catch { continue; }
+    if (rows.length < CASCADE_LOOKBACK_BARS + 1) continue;
+    const latest = rows[0]!, base = rows[CASCADE_LOOKBACK_BARS]!;
+    if (nowMs - latest.t > CASCADE_STALE_MS || !(base.c > 0)) continue;
+    const ret = ((latest.c - base.c) / base.c) * 100;
+    if (ret >= CASCADE_MOVE_PCT) up++;
+    else if (ret <= -CASCADE_MOVE_PCT) down++;
+    seen++;
+  }
+  if (seen < CASCADE_MIN_SAMPLE) return null;
+  const n = Math.max(up, down);
+  if (n < CASCADE_MIN_COINS) return null;
+  const dir = up >= down ? 'up' : 'down';
+  return `${dir} cascade: ${n}/${seen} coins moved >=${CASCADE_MOVE_PCT}% over ~${CASCADE_LOOKBACK_BARS * 5}m`;
+}
+function logMarketCascadeBlock(reason: string, nowMs: number): void {
+  if (nowMs - cascadeLogAt < CASCADE_LOG_COOLDOWN_MS) return;
+  cascadeLogAt = nowMs;
+  logger.warn({ reason }, 'wick-fade: MARKET-CASCADE active - cancel all flat quotes, no new entries');
+  notify(`⛔ <b>wick-fade market-cascade</b>: ${reason}. Снимаю входные ловушки; открытые позиции выходят штатно.`, true);
+}
 // ACTION-BUDGET BREAKER: when HL rejects with 'Too many cumulative', STOP quote maintenance for an hour
 // instead of retrying every tick — each rejected attempt still increments the counter (the Jul-5 death
 // spiral: 12k+ rejects in 6h dug the deficit 1.3k → 14.4k). Exits/stops are unaffected (they ride the
@@ -358,7 +393,7 @@ function tripBudgetBreaker(msg: string): void {
 }
 const isBudgetErr = (m: string): boolean => /Too many cumulative/i.test(m);
 const NO_ACTIONS: QuoteActions = { cancels: [], places: [] };
-async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Promise<QuoteActions> {
+async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marketBlockReason: string | null): Promise<QuoteActions> {
   const x = COIN_X[coin]; // undefined = a CUT coin — the exit branches below still WIND DOWN its open position; the quote branch places no new quotes and cancels any resting ones (guard before quoting).
   const nowMs = Date.now();
   const dbPos = getPos.get(coin);
@@ -451,6 +486,7 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
   // Guard: if we could NOT read open orders, do NOT place quotes — we'd risk duplicating an unseen
   // resting order. (Position reconcile/exit above don't need exOrders, so they already ran safely.)
   if (!ooRes.ok) { logger.warn({ coin, msg: ooRes.msg }, 'wick-fade: openOrders read failed — skip quoting this tick'); return NO_ACTIONS; }
+  if (marketBlockReason) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
   // HL ADDRESS ACTION BUDGET (learned live Jul 4): every order/cancel costs 1 action from a budget of
   // 10k + $1-of-volume-traded each. Per-minute re-quoting across 21+ coins burned ~11.4k actions on $186
   // volume in 3 days → placements started getting REJECTED. Quote maintenance now runs every 5th tick
@@ -567,14 +603,18 @@ export function startWickFadeRunner(): void {
       // ~2 actions/min (some coin always drifts >1%) → deficit death-spiral (rejects also count). The audit's
       // fill-mix argument for faster requoting stands, but is UNAFFORDABLE until capital (→volume) grows:
       // ~$2k acct sustains 5-min, ~$10k sustains 1-min. Exits stay 1-min (cheap, occasional).
-      const quoteTick = tickN % 30 === 1 && Date.now() >= budgetBlockedUntil;
+      const nowMs = Date.now();
+      const quoteTick = tickN % 30 === 1 && nowMs >= budgetBlockedUntil;
+      let marketBlockReason: string | null = null;
+      try { marketBlockReason = marketCascadeBlockReason(nowMs); } catch (err) { logger.warn({ err }, 'wick-fade: marketCascadeBlockReason failed - fail open'); }
+      if (marketBlockReason) logMarketCascadeBlock(marketBlockReason, nowMs);
       const cancels: { coin: string; oid: number }[] = [];
       const places: BatchPlaceSpec[] = [];
       // book coins ∪ any coin with a still-open position that is NOT in the book (a CUT coin winding down)
       let stepCoins = WF_CONFIG.coins;
       try { const extra = allOpenPosCoins.all().map((r) => r.coin).filter((c) => COIN_X[c] == null); if (extra.length) stepCoins = [...WF_CONFIG.coins, ...extra]; } catch { /* keep book coins */ }
       for (const coin of stepCoins) {
-        try { const a = await stepCoin(coin, isKilled, quoteTick); cancels.push(...a.cancels); places.push(...a.places); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
+        try { const a = await stepCoin(coin, isKilled, quoteTick, marketBlockReason); cancels.push(...a.cancels); places.push(...a.places); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
       }
       if (cancels.length || places.length) {
         try { await executeQuoteBatch(cancels, places); } catch (err) { logger.error({ err }, 'wick-fade: quote batch failed'); }
