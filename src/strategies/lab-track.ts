@@ -14,7 +14,9 @@
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { pageShell, getLang } from './landing.js';
-import { WF_CONFIG, COIN_X } from '../jobs/wick-fade-runner.js';
+import { WF_CONFIG, COIN_X, LADDER } from '../jobs/wick-fade-runner.js';
+import { hlOpenOrders, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
+import { metaAndAssetCtxs } from '../exchange/hyperliquid.js';
 
 type Lang = 'ru' | 'en';
 /** tiny picker: t(lang, ru, en) */
@@ -27,6 +29,7 @@ type WfRow = {
 };
 const closedStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode='live' AND closed_at IS NOT NULL ORDER BY closed_at ASC`);
 const openStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode='live' AND closed_at IS NULL ORDER BY opened_at DESC`);
+const limitVolClosesStmt = db.prepare<[string, number], { t: number; c: number }>(`SELECT t, c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
 
 // ── formatters (self-contained; matches lab.ts style) ──
 function esc(s: string): string {
@@ -55,6 +58,51 @@ function fmtPx(n: number, ref: number): string {
 function heldStr(openedMs: number, nowMs: number, lang: Lang): string {
   const m = Math.max(0, Math.round((nowMs - openedMs) / 60_000));
   return m >= 60 ? `${Math.floor(m / 60)}${t(lang, 'ч', 'h')} ${m % 60}${t(lang, 'м', 'm')}` : `${m}${t(lang, 'м', 'm')}`;
+}
+
+type LimitVol = { volPct4h: number; factor: number };
+function limitVolState(coin: string): LimitVol | null {
+  const W = WF_CONFIG.volWindow;
+  let rows: { c: number }[];
+  try { rows = limitVolClosesStmt.all(coin, 550); } catch { return null; }
+  const closes = rows.map((r) => r.c).reverse();
+  if (closes.length < W + 80) return null;
+  const rets: number[] = [];
+  for (let i = 1; i < closes.length; i++) rets.push(closes[i]! > 0 && closes[i - 1]! > 0 ? Math.log(closes[i]! / closes[i - 1]!) : 0);
+  const volAt = (end: number): number => {
+    let m = 0;
+    for (let j = end - W; j < end; j++) m += rets[j]!;
+    m /= W;
+    let v = 0;
+    for (let j = end - W; j < end; j++) { const d = rets[j]! - m; v += d * d; }
+    return Math.sqrt(v / (W - 1));
+  };
+  let e = 0, seeded = false;
+  for (let end = W; end <= rets.length; end++) {
+    const v = volAt(end);
+    if (!(v > 0)) continue;
+    if (!seeded) { e = v; seeded = true; }
+    else e = e + 0.01 * (v - e);
+  }
+  const cur = volAt(rets.length);
+  if (!(cur > 0)) return null;
+  const rawFactor = e > 0 ? cur / e : 1;
+  return { volPct4h: cur * Math.sqrt(W) * 100, factor: Math.min(2, Math.max(0.4, rawFactor)) };
+}
+
+async function liveMids(): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  try {
+    const [meta, ctxs] = await metaAndAssetCtxs();
+    meta.universe.forEach((u, i) => {
+      const ctx = ctxs[i];
+      const mid = Number(ctx?.midPx ?? 0) || Number(ctx?.markPx ?? 0) || Number(ctx?.oraclePx ?? 0);
+      if (mid > 0) out.set(u.name, mid);
+    });
+  } catch {
+    // Informative only: the table still renders raw exchange orders without current mids.
+  }
+  return out;
 }
 
 // ── aggregate stats over the real closed track ──
@@ -163,6 +211,17 @@ const TRACK_CSS = `
   .lt-tbl .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
   .lt-tbl .dt{color:var(--text-faint);font-size:12px;white-space:nowrap}
   .lt-tbl tr:hover td{background:var(--bg-card-hover)}
+  .limit-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:10px}
+  .limit-head .section-title{margin:0}
+  .limit-meta{font-size:12px;color:var(--text-faint);font-variant-numeric:tabular-nums}
+  .limit-note{font-size:12px;color:var(--text-faint);line-height:1.5;margin:10px 0 0}
+  .limit-corridor{display:inline-flex;align-items:center;font-weight:650}
+  .limit-corridor.long{color:var(--accent)}
+  .limit-corridor.short{color:var(--danger)}
+  .limit-vol{display:flex;flex-direction:column;gap:2px;align-items:flex-end;line-height:1.15}
+  .limit-vol b{color:var(--text);font-weight:650}
+  .limit-vol span{font-size:11px;color:var(--text-faint)}
+  .limit-warn{background:var(--danger-soft);color:var(--danger);border:1px solid var(--danger-soft);border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.5}
   .sd{font-weight:650;font-size:11px;padding:1px 7px;border-radius:5px}
   .sd.long{color:var(--accent);background:var(--accent-soft)}
   .sd.short{color:var(--danger);background:var(--danger-soft)}
@@ -296,6 +355,59 @@ function openPositionsSection(nowMs: number, lang: Lang): string {
       <tbody>${body}</tbody></table></div></div>`;
 }
 
+
+function limitRungLabel(o: HlOpenOrder, distancePct: number | null, vol: LimitVol | null, lang: Lang): string {
+  const base = COIN_X[o.coin];
+  if (base == null || distancePct == null) return '—';
+  const factor = WF_CONFIG.dynamicDepth ? (vol?.factor ?? 1) : 1;
+  const baseDepth = base * factor * 100;
+  const deepDepth = LADDER[o.coin] != null ? LADDER[o.coin]! * factor * 100 : null;
+  if (deepDepth == null) return t(lang, 'базовая', 'base');
+  return distancePct >= (baseDepth + deepDepth) / 2 ? t(lang, 'глубокая', 'deep') : t(lang, 'базовая', 'base');
+}
+
+async function openLimitsSection(lang: Lang): Promise<string> {
+  const res = await hlOpenOrders();
+  if (!res.ok) {
+    return `<div class="section"><div class="limit-head"><div class="section-title">${t(lang, 'Выставленные лимитки', 'Resting limit orders')}</div></div><div class="limit-warn">${t(lang, 'Не удалось прочитать лимитки с Hyperliquid:', 'Could not read Hyperliquid limit orders:')} ${esc(res.msg)}</div></div>`;
+  }
+  const mids = await liveMids();
+  const orders = res.data
+    .filter((o) => WF_CONFIG.coins.includes(o.coin))
+    .sort((a, b) => a.coin.localeCompare(b.coin) || (a.side === b.side ? a.px - b.px : a.side === 'long' ? -1 : 1));
+  const now = new Date();
+  if (orders.length === 0) {
+    return `<div class="section"><div class="limit-head"><div class="section-title">${t(lang, 'Выставленные лимитки', 'Resting limit orders')} · 0</div><div class="limit-meta">${t(lang, 'обновлено', 'updated')} ${now.toISOString().slice(11, 19)} UTC</div></div><div class="card"><div class="card-body"><div class="empty-state" style="padding:20px 0;text-align:center;">${t(lang, 'Сейчас входных лимиток нет: книга снята защитой, бюджетом действий или открытыми позициями.', 'No entry limits right now: the book is pulled by protection, action budget, or open positions.')}</div></div></div></div>`;
+  }
+  const body = orders.map((o) => {
+    const mid = mids.get(o.coin) ?? null;
+    const distancePct = mid != null ? (o.side === 'long' ? (mid - o.px) / mid : (o.px - mid) / mid) * 100 : null;
+    const vol = limitVolState(o.coin);
+    const notional = o.px * o.sz;
+    const distText = distancePct == null ? '—' : `${distancePct.toFixed(2)}%`;
+    const volText = vol ? `${vol.volPct4h.toFixed(2)}%` : '—';
+    const factorText = vol ? `×${vol.factor.toFixed(2)} ${t(lang, 'к норме', 'vs norm')}` : t(lang, 'нет свечей', 'no candles');
+    return `<tr>
+      <td><b>${esc(o.coin)}</b></td>
+      <td><span class="sd ${o.side === 'long' ? 'long' : 'short'}">${o.side.toUpperCase()}</span></td>
+      <td class="r mono">${fmtPx(o.px, o.px)}</td>
+      <td class="r mono">${mid != null ? fmtPx(mid, o.px) : '—'}</td>
+      <td class="r mono"><span class="limit-corridor ${o.side === 'long' ? 'long' : 'short'}">${distText}</span></td>
+      <td>${limitRungLabel(o, distancePct, vol, lang)}</td>
+      <td class="r mono">${o.sz.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}</td>
+      <td class="r mono">${usd(notional)}</td>
+      <td class="r"><div class="limit-vol"><b>${volText}</b><span>${factorText}</span></div></td>
+      <td class="r mono" style="color:var(--text-faint)">#${o.oid}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="section" id="limits">
+    <div class="limit-head"><div class="section-title">${t(lang, 'Выставленные лимитки', 'Resting limit orders')} · ${orders.length}</div><div class="limit-meta">${t(lang, 'обновлено', 'updated')} ${now.toISOString().slice(11, 19)} UTC · ${t(lang, 'автообновление 60 сек', 'auto-refresh 60s')}</div></div>
+    <div class="card table-wrap"><table class="lt-tbl"><thead><tr>
+      <th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Лимит', 'Limit')}</th><th class="r">${t(lang, 'Сейчас', 'Now')}</th><th class="r">${t(lang, 'Коридор от цены', 'Distance')}</th><th>${t(lang, 'Уровень', 'Rung')}</th><th class="r">${t(lang, 'Кол-во', 'Qty')}</th><th class="r">${t(lang, 'Номинал', 'Notional')}</th><th class="r">${t(lang, 'Волатильность 4ч', '4h volatility')}</th><th class="r">OID</th>
+    </tr></thead><tbody>${body}</tbody></table></div>
+    <p class="limit-note">${t(lang, 'Коридор показывает, на сколько процентов лимитка стоит дальше текущей цены. Волатильность считается по 5-минутным свечам за последние 4 часа; множитель показывает, насколько текущий режим шире или тише обычного.', 'Distance shows how far the limit is from current price. Volatility is computed from 5-minute candles over the last 4 hours; the multiplier shows how much wider or calmer the current regime is versus normal.')}</p>
+  </div>`;
+}
 /** Detailed strategy explainer — a schematic SVG of the wick-fade mechanic + what it's based on, the data
  *  analysed, and the layered stops. Static (no data) — the credibility/depth surface for the live track. */
 function strategyDetail(universe: number, lang: Lang): string {
@@ -396,7 +508,7 @@ function dailyStrip(rows: WfRow[], lang: Lang): string {
   return `<div class="section"><div class="section-title">${t(lang, 'Результат по дням (net комиссий · листайте →)', 'Daily result (net of fees · scroll →)')}</div><div class="lt-days">${chips}</div></div>`;
 }
 
-export function renderLiveTrack(page = 1, lang: Lang = 'ru'): string {
+export async function renderLiveTrack(page = 1, lang: Lang = 'ru'): Promise<string> {
   const rows = closedStmt.all();
   const openRows = openStmt.all();
   const st = computeStats(rows, openRows.length);
@@ -410,6 +522,7 @@ export function renderLiveTrack(page = 1, lang: Lang = 'ru'): string {
   // Commissions already netted out of pnl (COST_RT≈0.05%): maker entry ~0.015% + taker exit ~0.035%.
   const feeEntry = rows.reduce((s, r) => s + notionalOf(r) * 0.015 / 100, 0);
   const feeExit = rows.reduce((s, r) => s + notionalOf(r) * 0.035 / 100, 0);
+  const limitsSection = await openLimitsSection(lang);
 
   const statCard = (l: string, v: string, vc = '', s = '', sc = ''): string =>
     `<div class="lt-stat"><div class="l">${l}</div><div class="v ${vc}">${v}</div>${s ? `<div class="s ${sc}">${s}</div>` : ''}</div>`;
@@ -477,6 +590,7 @@ export function renderLiveTrack(page = 1, lang: Lang = 'ru'): string {
     ${hasData ? `<div class="section"><div class="section-title">${t(lang, 'Кривая результата (накопленный %, net комиссий)', 'Result curve (cumulative %, net of fees)')}</div>${equityCurve(st.cum, lang)}</div>` : ''}
     ${hasData ? dailyStrip(rows, lang) : ''}
     ${strategyDetail(universe, lang)}
+    ${limitsSection}
     ${openPositionsSection(Date.now(), lang)}
     ${hasData ? `<div class="section" id="trades"><div class="section-title">${t(lang, `Закрытые сделки · все ${st.closed}`, `Closed trades · all ${st.closed}`)}</div>${tradesTable(rows, page, lang)}</div>` : emptyState}
 
