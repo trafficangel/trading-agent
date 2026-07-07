@@ -1359,50 +1359,11 @@ function renderFaq(lang: Lang): string {
   `;
 }
 
-/**
- * Telegram-channel capture block — placed AFTER the final CTA. For
- * visitors who scrolled all the way down but aren't ready to sign up,
- * we offer a low-commitment way to stay in touch: follow the public
- * signals channel. They get value (live trade alerts) without payment,
- * and we stay top-of-mind for when they're ready.
- */
-function renderTelegramCapture(lang: Lang): string {
-  if (lang === 'en') {
-    return `
-    <section class="at-section at-tg-capture">
-      <div class="at-tg-capture-card">
-        <div class="at-tg-capture-icon">${ico('📡')}</div>
-        <div class="at-tg-capture-body">
-          <div class="at-tg-capture-title">Not ready yet? Stay in the loop.</div>
-          <div class="at-tg-capture-sub">
-            Every trade Robot Claude opens is also broadcast in our public Telegram channel — live, no edits.
-            Follow for free and see for yourself before you commit.
-          </div>
-        </div>
-        <a href="https://t.me/robotclaude" target="_blank" rel="noopener" class="at-btn-secondary">
-          ${ico('📣')}Open the channel
-        </a>
-      </div>
-    </section>
-  `;
-  }
-  return `
-    <section class="at-section at-tg-capture">
-      <div class="at-tg-capture-card">
-        <div class="at-tg-capture-icon">${ico('📡')}</div>
-        <div class="at-tg-capture-body">
-          <div class="at-tg-capture-title">Не готовы сейчас? Останьтесь рядом.</div>
-          <div class="at-tg-capture-sub">
-            Каждая сделка Robot Claude транслируется в публичный Telegram-канал — в режиме реального времени, без правок постфактум.
-            Подписывайтесь бесплатно и понаблюдайте, прежде чем решаться.
-          </div>
-        </div>
-        <a href="https://t.me/robotclaude" target="_blank" rel="noopener" class="at-btn-secondary">
-          ${ico('📣')}Открыть канал
-        </a>
-      </div>
-    </section>
-  `;
+// Telegram-channel capture block removed — the site no longer promotes the
+// public channel (operator pivot to the vault). Kept as a no-op so call sites
+// stay stable.
+function renderTelegramCapture(_lang: Lang): string {
+  return '';
 }
 
 function renderFinalCta(lang: Lang): string {

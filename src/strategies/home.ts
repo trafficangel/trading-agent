@@ -1192,11 +1192,6 @@ function renderHome(
           </div>
         </div>
       </div>
-      <div style="margin-top: 20px; text-align: center;">
-        <a class="btn btn-primary" href="${escapeHtml(c.telegramUrl)}" target="_blank" rel="noopener">
-          ${escapeHtml(sp.cta)}
-        </a>
-      </div>
     </div>
   `;
 
@@ -1485,7 +1480,6 @@ function renderHome(
       <p class="home-section-sub">${isRu ? 'Реальные форвард-результаты, обновляются автоматически. Честно — с провалами и со всеми издержками.' : 'Real forward results, updated automatically. Honest — failures and full costs included.'}</p>
       <div class="hero-cta" style="margin-top:14px">
         <a class="btn btn-primary" href="/lab">${isRu ? 'Открыть лабораторию →' : 'Open the lab →'}</a>
-        <a class="btn btn-ghost" href="${escapeHtml(c.telegramUrl)}" target="_blank" rel="noopener">${isRu ? 'Канал в Telegram ↗' : 'Telegram channel ↗'}</a>
       </div>
     </div>
   `;
