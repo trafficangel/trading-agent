@@ -19,6 +19,7 @@ import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
 import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, hlPlaceStop, hlCancelTriggers, hlExitAvgSince, hlPositionStartTime, hlBatchPlace, hlBatchCancel, hlNetTransfersSince, type HlOpenOrder, type BatchPlaceSpec } from '../exchange/hyperliquid-private.js';
+import { l2Book } from '../exchange/hyperliquid.js';
 import { sendMessage } from '../telegram/bot.js';
 
 /** Operator notification (Telegram logs channel) — fire-and-forget: sendMessage never throws, and `void`
@@ -175,6 +176,35 @@ const delPos = db.prepare(`DELETE FROM wick_fade_pos WHERE coin = ?`);
 // review caught that the naive predicate silently skipped the cooldown's headline scenario). Ordinary deep
 // TIME-STOP losers do NOT cool down — the sweep validated post-catastrophe cooldowns only.
 const lastCatStmt = db.prepare<[string, string], { t: number | null }>(`SELECT MAX(closed_at) AS t FROM wick_fade_log WHERE coin = ? AND mode = ? AND (close_reason = 'catastrophe' OR (close_reason = 'reconciled-flat' AND (pnl_pct <= -2 OR pnl_pct IS NULL)))`);
+
+// LIVE-QUARANTINE: real fills are the final judge. If a coin or side starts losing in live
+// execution, stop placing NEW traps. Open positions still wind down through the normal exit path.
+const LIVE_QUARANTINE_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
+const SIDE_QUARANTINE_MIN_TRADES = 5;
+const SIDE_QUARANTINE_SUM_PNL_PCT = -2;
+const COIN_QUARANTINE_MAX_CATS = 2;
+const QUARANTINE_LOG_COOLDOWN_MS = 6 * 60 * 60_000;
+const sidePerfStmt = db.prepare<[string, string, string, number], { n: number; sum_pnl: number | null }>(`SELECT COUNT(*) AS n, SUM(pnl_pct) AS sum_pnl FROM wick_fade_log WHERE coin = ? AND side = ? AND mode = ? AND closed_at IS NOT NULL AND closed_at >= ?`);
+const coinCatStmt = db.prepare<[string, string, number], { n: number }>(`SELECT COUNT(*) AS n FROM wick_fade_log WHERE coin = ? AND mode = ? AND closed_at IS NOT NULL AND closed_at >= ? AND (close_reason = 'catastrophe' OR (close_reason = 'reconciled-flat' AND (pnl_pct <= -2 OR pnl_pct IS NULL)))`);
+const quarantineLogAt = new Map<string, number>();
+function liveQuarantineReason(coin: string, side: 'long' | 'short', nowMs: number): string | null {
+  const since = nowMs - LIVE_QUARANTINE_LOOKBACK_MS;
+  const cats = coinCatStmt.get(coin, WF_CONFIG.mode, since)?.n ?? 0;
+  if (cats >= COIN_QUARANTINE_MAX_CATS) return `coin ${cats} catastrophe-like exits in 7d`;
+  const perf = sidePerfStmt.get(coin, side, WF_CONFIG.mode, since);
+  const n = perf?.n ?? 0;
+  const sum = perf?.sum_pnl ?? 0;
+  if (n >= SIDE_QUARANTINE_MIN_TRADES && sum <= SIDE_QUARANTINE_SUM_PNL_PCT) return `${side} ${n} trades / ${sum.toFixed(3)}% in 7d`;
+  return null;
+}
+function logLiveQuarantine(coin: string, side: 'long' | 'short', reason: string, nowMs: number): void {
+  const key = `${coin}:${side}:${reason}`;
+  const last = quarantineLogAt.get(key) ?? 0;
+  if (nowMs - last < QUARANTINE_LOG_COOLDOWN_MS) return;
+  quarantineLogAt.set(key, nowMs);
+  logger.warn({ coin, side, reason }, 'wick-fade: LIVE-QUARANTINE active - cancel side quotes, no new entries');
+  notify(`Wick-fade quarantine: ${coin} ${side} - ${reason}. New traps paused; open positions still exit normally.`, true);
+}
 const insLog = db.prepare(`INSERT INTO wick_fade_log (coin,side,entry_px,qty,x,opened_at,reason,mode) VALUES (?,?,?,?,?,?,?,?)`);
 // close the ACTIVE log row (closed_at IS NULL) — sets close fields, NEVER touches the immutable entry `reason`.
 const updLog = db.prepare(`UPDATE wick_fade_log SET exit_px=?,closed_at=?,pnl_pct=?,close_reason=? WHERE id=(SELECT id FROM wick_fade_log WHERE coin=? AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1)`);
@@ -279,6 +309,42 @@ type QuoteActions = { cancels: { coin: string; oid: number }[]; places: BatchPla
 // a whole batch. Back off quoting a halted coin for an hour per detection instead of burning an action every
 // quote-tick; it self-resumes when HL lifts the halt.
 const haltedUntil = new Map<string, number>();
+
+// LIQUIDITY GATE: the edge dies when live execution is thin. If the current book is too wide or shallow,
+// pull resting traps for that coin until the next quote tick. This avoids BLUR-style stop slippage regimes.
+const MAX_QUOTE_SPREAD_PCT = 0.35;
+const MIN_TOP5_NOTIONAL_USD = 150;
+const LIQUIDITY_LOG_COOLDOWN_MS = 30 * 60_000;
+const liquidityLogAt = new Map<string, number>();
+function sumTopNotional(levels: { px: string; sz: string }[], n = 5): number {
+  let out = 0;
+  for (const l of levels.slice(0, n)) {
+    const px = Number(l.px), sz = Number(l.sz);
+    if (px > 0 && sz > 0) out += px * sz;
+  }
+  return out;
+}
+async function quoteLiquidityBlockReason(coin: string, nowMs: number): Promise<string | null> {
+  void nowMs;
+  let book;
+  try { book = await l2Book(coin); } catch (err) { logger.warn({ coin, msg: (err as Error).message }, 'wick-fade: l2Book read failed - keep current quotes, skip liquidity gate'); return null; }
+  const bids = book.levels[0], asks = book.levels[1];
+  const bid = Number(bids[0]?.px ?? 0), ask = Number(asks[0]?.px ?? 0);
+  if (!(bid > 0) || !(ask > bid)) return 'empty/invalid l2 book';
+  const mid = (bid + ask) / 2;
+  const spreadPct = ((ask - bid) / mid) * 100;
+  const bidTop5 = sumTopNotional(bids);
+  const askTop5 = sumTopNotional(asks);
+  if (spreadPct > MAX_QUOTE_SPREAD_PCT) return `spread ${spreadPct.toFixed(3)}% > ${MAX_QUOTE_SPREAD_PCT}%`;
+  if (Math.min(bidTop5, askTop5) < MIN_TOP5_NOTIONAL_USD) return `top5 depth $${Math.min(bidTop5, askTop5).toFixed(0)} < $${MIN_TOP5_NOTIONAL_USD}`;
+  return null;
+}
+function logLiquidityBlock(coin: string, reason: string, nowMs: number): void {
+  const last = liquidityLogAt.get(coin) ?? 0;
+  if (nowMs - last < LIQUIDITY_LOG_COOLDOWN_MS) return;
+  liquidityLogAt.set(coin, nowMs);
+  logger.warn({ coin, reason }, 'wick-fade: LIQUIDITY-GATE active - cancel coin quotes, no new entries');
+}
 // ACTION-BUDGET BREAKER: when HL rejects with 'Too many cumulative', STOP quote maintenance for an hour
 // instead of retrying every tick — each rejected attempt still increments the counter (the Jul-5 death
 // spiral: 12k+ rejects in 6h dug the deficit 1.3k → 14.4k). Exits/stops are unaffected (they ride the
@@ -398,12 +464,16 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
   const lastCat = lastCatStmt.get(coin, WF_CONFIG.mode)?.t ?? null;
   if (lastCat != null && nowMs - lastCat < WF_CONFIG.postStopCooldownMins * 60_000) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
   const mid = await hlMid(coin); if (mid == null || !(mid > 0)) return NO_ACTIONS;
+  const liquidityReason = await quoteLiquidityBlockReason(coin, nowMs);
+  if (liquidityReason) { logLiquidityBlock(coin, liquidityReason, nowMs); return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] }; }
   const margin = WF_CONFIG.capitalUsd / WF_CONFIG.coins.length;
   const factor = depthFactor(coin); // live vol multiplier (1 = fixed depth); computed once per coin per quote tick
   const acts: QuoteActions = { cancels: [], places: [] };
   for (const side of ['long', 'short'] as const) {
     const existing = exOrders.filter((o) => o.side === side);
     if (DISABLED_SIDE[coin] === side) { for (const o of existing) acts.cancels.push({ coin, oid: o.oid }); continue; }
+    const quarantineReason = liveQuarantineReason(coin, side, nowMs);
+    if (quarantineReason) { for (const o of existing) acts.cancels.push({ coin, oid: o.oid }); logLiveQuarantine(coin, side, quarantineReason, nowMs); continue; }
     const depths = LADDER[coin] != null ? [clampDepth(x * factor), clampDepth(LADDER[coin]! * factor)] : [clampDepth(x * factor)];
     const desireds = depths.map((d) => {
       const price = side === 'long' ? mid * (1 - d) : mid * (1 + d);
