@@ -92,15 +92,12 @@ export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; lev
                           // Runs on 2% requoteDrift + 30-min cadence (budget-sustainable). If the ~14k action
                           // deficit is still open, the breaker idles quoting until volume clears it.
   coins: Object.keys(COIN_X),
-  capitalUsd: 140,        // SIZING: per-RUNG margin = capitalUsd/coins = 140/20 = $7 → notional $14 @2x (clears HL $11 min).
-                          // Reserve per rung = capitalUsd/coins REGARDLESS of leverage (margin = notional/lev).
-                          // ⚠ REAL MARGIN (measured LIVE Jul 7 via scripts/wf-margin-check.ts): 20 coins, 38 resting rungs
-                          // (both sides + DOGE/ATOM ladders, − 3 disabled sides, − halted TON) reserve GROSS — HL does
-                          // NOT net opposing same-coin rungs (the old "netted ≈ one side" assumption was WRONG). Reserved
-                          // ≈ 38×$7 ≈ $266 of ~$284 equity ⇒ withdrawable ≈ $1.46 = ~99% UTILIZED, not the ~39% buffer the
-                          // old comment claimed. Safe while FLAT (resting orders don't liquidate), but leaves ~no cushion
-                          // in a broad multi-fill cascade — the strategy's worst tail. To restore a buffer: lower capitalUsd
-                          // (→ smaller rungs; notional must stay > MIN_NOTIONAL $11, so ≥~$120) or add capital.
+  capitalUsd: 120,        // SIZING: per-RUNG margin = capitalUsd/coins = 120/20 = $6 -> notional $12 @2x (clears HL $11 min).
+                          // Reserve per rung = capitalUsd/coins regardless of leverage. HL reserves GROSS for every
+                          // resting rung (both sides + ladders), not netted by opposite quotes. With 38 active rungs
+                          // this targets about $228 reserved on the current ~$284 account, restoring a modest buffer
+                          // while keeping every rung above MIN_NOTIONAL. Existing larger quotes are resized by the
+                          // size-aware good-check below on the next quote tick.
   leverage: 2,            // fractional-Kelly (backtest Kelly 2-5 ⇒ full = 2-5×; 2× is the conservative smoothness choice)
   holdMins: 30,           // time-stop. Was 60 (fixed by construction, never swept); the Jul 3 hold-sweep on the
                           // honest battery found a 25-40m PLATEAU dominating 60m in ALL 3×180d windows (total net
@@ -137,6 +134,7 @@ export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; lev
 };
 const COST_RT = 0.05;     // RT FEES only (maker entry ~0.01% + taker exit ~0.035%): real exit slippage is now captured by booking at the actual close avgPx, and the maker entry fills AT the limit price (no entry slippage)
 const MIN_NOTIONAL = 11;  // HL min order ≈ $10
+const SIZE_REQUOTE_DRIFT = 0.05; // replace resting quotes when size drifts >5% (e.g. capitalUsd changes)
 const HR = 3_600_000;
 
 // ── VOL-SCALED DEPTH (WF_CONFIG.dynamicDepth): live volatility read from the native HL 5m archive (hl_candles,
@@ -407,20 +405,26 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean): Prom
     const existing = exOrders.filter((o) => o.side === side);
     if (DISABLED_SIDE[coin] === side) { for (const o of existing) acts.cancels.push({ coin, oid: o.oid }); continue; }
     const depths = LADDER[coin] != null ? [clampDepth(x * factor), clampDepth(LADDER[coin]! * factor)] : [clampDepth(x * factor)];
-    const desireds = depths.map((d) => (side === 'long' ? mid * (1 - d) : mid * (1 + d)));
-    // bijective good-check: right ORDER COUNT and every desired rung has a resting order within drift (and
-    // vice versa) — otherwise clear the side and re-place all rungs together (shared anchor keeps inference sane)
+    const desireds = depths.map((d) => {
+      const price = side === 'long' ? mid * (1 - d) : mid * (1 + d);
+      return { price, qty: (margin * WF_CONFIG.leverage) / price };
+    });
+    // bijective good-check: right ORDER COUNT and every desired rung has a resting order within price+size drift
+    // (and vice versa) — otherwise clear the side and re-place all rungs together (shared anchor keeps inference sane).
+    // Size matters because lowering capitalUsd should shrink already-resting quotes, not wait for price drift.
+    const matchesDesired = (o: HlOpenOrder, d: { price: number; qty: number }): boolean =>
+      Math.abs(o.px - d.price) / d.price < WF_CONFIG.requoteDrift
+      && Math.abs(o.sz - d.qty) / d.qty < SIZE_REQUOTE_DRIFT;
     const good = existing.length === desireds.length
-      && desireds.every((dp) => existing.some((o) => Math.abs(o.px - dp) / dp < WF_CONFIG.requoteDrift))
-      && existing.every((o) => desireds.some((dp) => Math.abs(o.px - dp) / dp < WF_CONFIG.requoteDrift));
+      && desireds.every((d) => existing.some((o) => matchesDesired(o, d)))
+      && existing.every((o) => desireds.some((d) => matchesDesired(o, d)));
     if (good) continue;
     // set leverage BEFORE enqueueing placement; if it fails, skip the side (never rest at unknown leverage)
     if (!levSet.has(coin)) { const lev = await hlSetLeverage(coin, WF_CONFIG.leverage); if (!lev.ok) { logger.warn({ coin, msg: lev.msg }, 'wick-fade: setLeverage failed — skip quote'); continue; } levSet.add(coin); }
     for (const o of existing) acts.cancels.push({ coin, oid: o.oid });
     for (const desired of desireds) {
-      const qty = (margin * WF_CONFIG.leverage) / desired;
-      if (qty * desired < MIN_NOTIONAL) { logger.warn({ coin, side, notional: +(qty * desired).toFixed(1) }, 'wick-fade: notional below min — skip rung'); continue; }
-      acts.places.push({ coin, side, qty, price: desired });
+      if (desired.qty * desired.price < MIN_NOTIONAL) { logger.warn({ coin, side, notional: +(desired.qty * desired.price).toFixed(1) }, 'wick-fade: notional below min — skip rung'); continue; }
+      acts.places.push({ coin, side, qty: desired.qty, price: desired.price });
     }
   }
   return acts;
