@@ -92,7 +92,15 @@ export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; lev
                           // Runs on 2% requoteDrift + 30-min cadence (budget-sustainable). If the ~14k action
                           // deficit is still open, the breaker idles quoting until volume clears it.
   coins: Object.keys(COIN_X),
-  capitalUsd: 140,        // SIZING basis: per-RUNG margin = capitalUsd/coins ≈ $6.67 → notional $13.3 (clears HL $10 min). 21 coins post-audit-cut; reserve ≈ 19×6.67 + DOGE/ATOM ladder 2×13.3 ≈ $153 of ~$249 → buffer ~$96 (~39%) — deliberately wider after the battery audit (weak-but-positive coins stay only because sizes are tiny)
+  capitalUsd: 140,        // SIZING: per-RUNG margin = capitalUsd/coins = 140/20 = $7 → notional $14 @2x (clears HL $11 min).
+                          // Reserve per rung = capitalUsd/coins REGARDLESS of leverage (margin = notional/lev).
+                          // ⚠ REAL MARGIN (measured LIVE Jul 7 via scripts/wf-margin-check.ts): 20 coins, 38 resting rungs
+                          // (both sides + DOGE/ATOM ladders, − 3 disabled sides, − halted TON) reserve GROSS — HL does
+                          // NOT net opposing same-coin rungs (the old "netted ≈ one side" assumption was WRONG). Reserved
+                          // ≈ 38×$7 ≈ $266 of ~$284 equity ⇒ withdrawable ≈ $1.46 = ~99% UTILIZED, not the ~39% buffer the
+                          // old comment claimed. Safe while FLAT (resting orders don't liquidate), but leaves ~no cushion
+                          // in a broad multi-fill cascade — the strategy's worst tail. To restore a buffer: lower capitalUsd
+                          // (→ smaller rungs; notional must stay > MIN_NOTIONAL $11, so ≥~$120) or add capital.
   leverage: 2,            // fractional-Kelly (backtest Kelly 2-5 ⇒ full = 2-5×; 2× is the conservative smoothness choice)
   holdMins: 30,           // time-stop. Was 60 (fixed by construction, never swept); the Jul 3 hold-sweep on the
                           // honest battery found a 25-40m PLATEAU dominating 60m in ALL 3×180d windows (total net
@@ -204,7 +212,7 @@ async function cancelAll(coin: string, orders: HlOpenOrder[]): Promise<boolean> 
 // Baseline PERSISTS in the DB keyed by UTC day → a restart re-reads the SAME morning snapshot instead of
 // re-basing to the (already-drawn-down) current equity, so the -5% kill survives the external restart cadence.
 // The loss-kill is LATCHED for the rest of the UTC day (persisted killedDay): equity bouncing back above −5%
-// does NOT re-arm the book mid-day — a flip-flop around the threshold would re-quote 26 coins straight into the
+// does NOT re-arm the book mid-day — a flip-flop around the threshold would re-quote the whole book straight into the
 // correlated tail the kill exists to escape. FAIL-CLOSED on sustained blindness measured by WALL-CLOCK (not
 // ticks — a hanging API stretches a tick to minutes): unreadable OR degraded (spot leg failed → under-read on a
 // unified account) equity for ≥5 min → pull quotes rather than quote blind; outages and flushes correlate. A

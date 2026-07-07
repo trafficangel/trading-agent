@@ -295,8 +295,16 @@ export async function hlPlaceStop(args: { coin: string; posSide: 'long' | 'short
     // VERIFY the trigger actually RESTS on the exchange — a non-error ack is NOT proof (the Jul-6 bug: ok but
     // no resting order). Confirm against frontendOpenOrders so the caller's exStop flag reflects REALITY, and
     // surface the raw status on failure to diagnose. The 1-min poll stays the backup whenever this returns !ok.
-    let rests = false;
-    try { const fo = await c.info.frontendOpenOrders({ user: c.readUser }); rests = fo.some((o) => o.coin === args.coin && o.isTrigger === true); } catch { rests = oid != null; }
+    // If the verification READ itself fails we CANNOT confirm the trigger rests — do NOT fall back to trusting
+    // the ack (`oid != null`), that re-admits the exact Jul-6 false-positive (ok status, no resting order).
+    // Report UNVERIFIED so the caller keeps exStop=false and the 1-min poll stays the protection. Safe: the stop
+    // is placed once at adopt (never re-tried in a loop → no duplicate spin), and hlCancelTriggers on close
+    // clears any trigger that did silently rest. A false-negative (poll + a real stop) beats a false-positive
+    // (thinking we're covered when only the poll runs).
+    let fo;
+    try { fo = await c.info.frontendOpenOrders({ user: c.readUser }); }
+    catch (e) { return { ok: false, msg: `stop placed but UNVERIFIED — frontendOpenOrders read failed (${(e as Error).message}); poll is the backstop` }; }
+    const rests = fo.some((o) => o.coin === args.coin && o.isTrigger === true);
     if (!rests) return { ok: false, msg: `stop did not rest (status=${st ? Object.keys(st).join('|') : JSON.stringify(res).slice(0, 140)})` };
     return { ok: true, data: { oid } };
   } catch (e) { return { ok: false, msg: (e as Error).message }; }

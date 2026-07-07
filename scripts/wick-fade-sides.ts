@@ -56,7 +56,9 @@ function row(coin: string, X: number, label: string, perWin: number[][], pooled:
   const netReal = g.map((x) => x - 0.10);
   const persist = perWin.filter((w) => w.length >= 8 && (mean(w) - 0.10) * w.length > 0).length;
   let ge = 0; const real = mean(netReal) * netReal.length;
-  for (let s = 0; s < K; s++) { let acc = 0; let st = (2654435761 * (s + 1)) & 0x7fffffff; for (const x of g) { st = (st * 1103515245 + 12345) & 0x7fffffff; acc += ((st / 0x7fffffff) < 0.5 ? -x : x) - 0.10; } ge += (acc >= real ? 1 : 0); }
+  // FIXED PRNG (Jul 7): Math.imul keeps the LCG in exact int32 — the old `st*1103515245` overflowed 2^53 before
+  // the mask → float corruption (cycles as short as 220). Matches scripts/battery-honest.ts pValue(fixed=true).
+  for (let s = 0; s < K; s++) { let acc = 0; let st = (Math.imul(2654435761, s + 1) >>> 4) & 0x7fffffff; for (const x of g) { st = (Math.imul(st, 1103515245) + 12345) & 0x7fffffff; acc += ((st / 0x7fffffff) < 0.5 ? -x : x) - 0.10; } ge += (acc >= real ? 1 : 0); }
   const drop = net(0.05) < 0 && net(0.10) < 0 && g.length >= 100;
   console.log(`${coin.padEnd(9)} ${(X * 100).toFixed(1).padStart(4)}% ${label.padEnd(6)} ${String(g.length).padStart(5)}  ${String(net(0.05)).padStart(7)} ${String(net(0.10)).padStart(7)} ${String(net(0.15)).padStart(7)}  ${String(kelly(netReal)).padStart(6)}  ${persist}/${perWin.filter((w) => w.length > 0).length}  ${(ge / K).toFixed(2)}  ${drop ? '❌ DROP?' : ''}`);
 }
