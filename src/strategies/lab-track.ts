@@ -13,8 +13,12 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
-import { pageShell } from './landing.js';
+import { pageShell, getLang } from './landing.js';
 import { WF_CONFIG, COIN_X } from '../jobs/wick-fade-runner.js';
+
+type Lang = 'ru' | 'en';
+/** tiny picker: t(lang, ru, en) */
+const t = (lang: Lang, ru: string, en: string): string => (lang === 'en' ? en : ru);
 
 // ── real-money log rows ──
 type WfRow = {
@@ -48,9 +52,9 @@ function fmtPx(n: number, ref: number): string {
   return n.toFixed(dp);
 }
 /** Held duration since open, human-readable. */
-function heldStr(openedMs: number, nowMs: number): string {
+function heldStr(openedMs: number, nowMs: number, lang: Lang): string {
   const m = Math.max(0, Math.round((nowMs - openedMs) / 60_000));
-  return m >= 60 ? `${Math.floor(m / 60)}ч ${m % 60}м` : `${m}м`;
+  return m >= 60 ? `${Math.floor(m / 60)}${t(lang, 'ч', 'h')} ${m % 60}${t(lang, 'м', 'm')}` : `${m}${t(lang, 'м', 'm')}`;
 }
 
 // ── aggregate stats over the real closed track ──
@@ -86,7 +90,7 @@ function computeStats(rows: WfRow[], open: number): TrackStats {
 }
 
 // ── compact cumulative-% equity curve (self-contained SVG) ──
-function equityCurve(cum: number[]): string {
+function equityCurve(cum: number[], lang: Lang): string {
   if (cum.length < 2) return '';
   const W = 680, H = 180, padX = 12, padT = 16, padB = 20;
   const pts = [0, ...cum]; // start at 0
@@ -105,7 +109,7 @@ function equityCurve(cum: number[]): string {
   const dots = pts.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="2.2" fill="${stroke}"/>`).join('');
   return `
   <div class="eq-wrap">
-    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="eq-svg" role="img" aria-label="Кривая накопленного результата, %">
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="eq-svg" role="img" aria-label="${t(lang, 'Кривая накопленного результата, %', 'Cumulative result curve, %')}">
       <defs>
         <linearGradient id="eqPos" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity="0.28"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/></linearGradient>
         <linearGradient id="eqNeg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--danger)" stop-opacity="0.24"/><stop offset="100%" stop-color="var(--danger)" stop-opacity="0"/></linearGradient>
@@ -115,24 +119,24 @@ function equityCurve(cum: number[]): string {
       <path d="${line}" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
       ${dots}
     </svg>
-    <div class="eq-cap"><span>старт 0%</span><span class="${cls(last)}">${pct(last)} накопл.</span></div>
+    <div class="eq-cap"><span>${t(lang, 'старт 0%', 'start 0%')}</span><span class="${cls(last)}">${pct(last)} ${t(lang, 'накопл.', 'total')}</span></div>
   </div>`;
 }
 
 // ── the vault roadmap (toward a public Hyperliquid vault) ──
 type Stage = { status: 'done' | 'now' | 'next'; title: string; desc: string; meta?: string };
-function roadmap(st: TrackStats): Stage[] {
+function roadmap(st: TrackStats, lang: Lang): Stage[] {
   return [
-    { status: 'done', title: 'Механика построена', meta: 'готово',
-      desc: 'Движок исполнения на бирже, стопы прямо на бирже (не в коде), пакетные заявки, риск-контроль, автоматические предохранители при аномалиях и просадке.' },
-    { status: 'now', title: 'Живая валидация', meta: `${st.closed} / ~100 сделок`,
-      desc: 'Реальные деньги на малом капитале. Цель этой фазы — не прибыль, а честная статистика на настоящих комиссиях и проскальзывании. Каждая сделка ниже — из этого этапа.' },
-    { status: 'next', title: 'Зелёный трек', meta: 'критерий выхода',
-      desc: 'Устойчивый положительный результат на реальных издержках — на достаточной выборке и в разных рыночных режимах, а не на одном удачном окне.' },
-    { status: 'next', title: 'Масштаб капитала', meta: '',
-      desc: 'Увеличение депозита снимает лимиты биржи и даёт стратегии работать в полную силу — больше монет, более свежие котировки, выше частота.' },
-    { status: 'next', title: 'Публичный вульт · Hyperliquid', meta: 'цель',
-      desc: 'Вкладчики депонируют средства в ончейн-вульт, стратегия копируется автоматически и прозрачно. Управляющий держит собственную долю в вульте; комиссия берётся только с прибыли вкладчиков.' },
+    { status: 'done', title: t(lang, 'Механика построена', 'Mechanics built'), meta: t(lang, 'готово', 'done'),
+      desc: t(lang, 'Движок исполнения на бирже, стопы прямо на бирже (не в коде), пакетные заявки, риск-контроль, автоматические предохранители при аномалиях и просадке.', 'Exchange-native execution engine, stops resting on the exchange (not in code), batched orders, risk controls, automatic breakers on anomalies and drawdown.') },
+    { status: 'now', title: t(lang, 'Живая валидация', 'Live validation'), meta: t(lang, `${st.closed} / ~100 сделок`, `${st.closed} / ~100 trades`),
+      desc: t(lang, 'Реальные деньги на малом капитале. Цель этой фазы — не прибыль, а честная статистика на настоящих комиссиях и проскальзывании. Каждая сделка ниже — из этого этапа.', 'Real money at small size. The goal of this phase is not profit but honest statistics on real fees and slippage. Every trade below is from this stage.') },
+    { status: 'next', title: t(lang, 'Зелёный трек', 'Green track'), meta: t(lang, 'критерий выхода', 'exit criterion'),
+      desc: t(lang, 'Устойчивый положительный результат на реальных издержках — на достаточной выборке и в разных рыночных режимах, а не на одном удачном окне.', 'A sustained positive result at real costs — on a sufficient sample and across market regimes, not one lucky window.') },
+    { status: 'next', title: t(lang, 'Масштаб капитала', 'Capital scale'), meta: '',
+      desc: t(lang, 'Увеличение депозита снимает лимиты биржи и даёт стратегии работать в полную силу — больше монет, более свежие котировки, выше частота.', 'A larger deposit lifts exchange limits and lets the strategy run at full strength — more coins, fresher quotes, higher frequency.') },
+    { status: 'next', title: t(lang, 'Публичный вульт · Hyperliquid', 'Public vault · Hyperliquid'), meta: t(lang, 'цель', 'goal'),
+      desc: t(lang, 'Вкладчики депонируют средства в ончейн-вульт, стратегия копируется автоматически и прозрачно. Управляющий держит собственную долю в вульте; комиссия берётся только с прибыли вкладчиков.', 'Depositors fund an on-chain vault; the strategy is copied automatically and transparently. The manager holds a personal stake; the fee is charged only on depositor profits.') },
   ];
 }
 
@@ -224,7 +228,7 @@ const TRACK_CSS = `
 `;
 
 const PER_PAGE = 50;
-function tradesTable(rows: WfRow[], page: number): string {
+function tradesTable(rows: WfRow[], page: number, lang: Lang): string {
   // newest first, paginated server-side via ?page=N — survives the page auto-refresh, needs no JS
   const ordered = [...rows].sort((a, b) => (b.closed_at ?? 0) - (a.closed_at ?? 0));
   const pages = Math.max(1, Math.ceil(ordered.length / PER_PAGE));
@@ -233,7 +237,7 @@ function tradesTable(rows: WfRow[], page: number): string {
   const body = ordered.slice(from, from + PER_PAGE).map((r) => {
     const p = r.pnl_pct ?? 0;
     const reasonCls = r.close_reason === 'target' ? 'target' : r.close_reason === 'catastrophe' ? 'cat' : '';
-    const reasonLbl = r.close_reason === 'target' ? '🎯 цель' : r.close_reason === 'time-stop' ? '⏱ тайм-стоп' : r.close_reason === 'catastrophe' ? '🛑 стоп' : (r.close_reason ?? '—');
+    const reasonLbl = r.close_reason === 'target' ? t(lang, '🎯 цель', '🎯 target') : r.close_reason === 'time-stop' ? t(lang, '⏱ тайм-стоп', '⏱ time-stop') : r.close_reason === 'catastrophe' ? t(lang, '🛑 стоп', '🛑 stop') : (r.close_reason ?? '—');
     return `<tr>
       <td>#${r.id}</td>
       <td><b>${esc(r.coin)}</b></td>
@@ -250,21 +254,21 @@ function tradesTable(rows: WfRow[], page: number): string {
   }).join('');
   return `<div class="card table-wrap"><table class="lt-tbl">
     <thead><tr>
-      <th>#</th><th>Монета</th><th>Сторона</th>
-      <th class="r">Вход</th><th class="r">Выход</th><th class="r">Глубина</th><th class="r">Результат</th><th class="r">P&amp;L $</th>
-      <th class="r">Комиссия</th><th>Как закрыли</th><th>Открыта (UTC)</th>
+      <th>#</th><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th>
+      <th class="r">${t(lang, 'Вход', 'Entry')}</th><th class="r">${t(lang, 'Выход', 'Exit')}</th><th class="r">${t(lang, 'Глубина', 'Depth')}</th><th class="r">${t(lang, 'Результат', 'Result')}</th><th class="r">P&amp;L $</th>
+      <th class="r">${t(lang, 'Комиссия', 'Fee')}</th><th>${t(lang, 'Как закрыли', 'Exit')}</th><th>${t(lang, 'Открыта (UTC)', 'Opened (UTC)')}</th>
     </tr></thead><tbody>${body}</tbody></table></div>${(() => {
     if (pages <= 1) return '';
     const shown = Math.min(PER_PAGE, ordered.length - from);
     const link = (n: number, label: string): string => (n >= 1 && n <= pages) ? `<a href="/lab/live?page=${n}#trades">${label}</a>` : `<span class="off">${label}</span>`;
-    return `<div class="lt-pager">${link(p - 1, '← Назад')}<span class="pg">Стр. ${p} из ${pages} · ${from + 1}–${from + shown} из ${ordered.length}</span>${link(p + 1, 'Вперёд →')}</div>`;
+    return `<div class="lt-pager">${link(p - 1, t(lang, '← Назад', '← Back'))}<span class="pg">${t(lang, 'Стр.', 'Page')} ${p} ${t(lang, 'из', 'of')} ${pages} · ${from + 1}–${from + shown} ${t(lang, 'из', 'of')} ${ordered.length}</span>${link(p + 1, t(lang, 'Вперёд →', 'Next →'))}</div>`;
   })()}`;
 }
 
 /** Currently-OPEN positions (closed_at IS NULL) — live entries the Telegram alert fires on, which the closed
  *  table can't show yet. Entry/target/stop derived exactly like the runner: target = pre-wick mid = entry/(1±x),
  *  stop = entry·(1±stopPct). DB-only (no exchange call) so the public page can't hang on an HL request. */
-function openPositionsSection(nowMs: number): string {
+function openPositionsSection(nowMs: number, lang: Lang): string {
   const open = openStmt.all();
   if (open.length === 0) return '';
   const stopPct = WF_CONFIG.stopPct;
@@ -282,33 +286,33 @@ function openPositionsSection(nowMs: number): string {
       <td class="r mono pos">${fmtPx(target, r.entry_px)}</td>
       <td class="r mono neg">${fmtPx(stop, r.entry_px)}</td>
       <td class="r">${usd(notionalOf(r))}</td>
-      <td class="dt">${heldStr(r.opened_at, nowMs)}</td>
-      <td><span class="rp open">🟢 в работе</span></td>
+      <td class="dt">${heldStr(r.opened_at, nowMs, lang)}</td>
+      <td><span class="rp open">🟢 ${t(lang, 'в работе', 'open')}</span></td>
     </tr>`;
   }).join('');
   return `<div class="section">
-    <div class="section-title">Открыто сейчас · ${open.length}</div>
+    <div class="section-title">${t(lang, 'Открыто сейчас', 'Open now')} · ${open.length}</div>
     <div class="card table-wrap"><table class="lt-tbl">
-      <thead><tr><th>#</th><th>Монета</th><th>Сторона</th><th class="r">Вход</th><th class="r">Глубина</th>
-        <th class="r">Цель 🎯</th><th class="r">Стоп 🛑</th><th class="r">Размер</th><th>В работе</th><th>Статус</th></tr></thead>
+      <thead><tr><th>#</th><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th><th class="r">${t(lang, 'Глубина', 'Depth')}</th>
+        <th class="r">${t(lang, 'Цель', 'Target')} 🎯</th><th class="r">${t(lang, 'Стоп', 'Stop')} 🛑</th><th class="r">${t(lang, 'Размер', 'Size')}</th><th>${t(lang, 'В работе', 'Held')}</th><th>${t(lang, 'Статус', 'Status')}</th></tr></thead>
       <tbody>${body}</tbody></table></div></div>`;
 }
 
 /** Detailed strategy explainer — a schematic SVG of the wick-fade mechanic + what it's based on, the data
  *  analysed, and the layered stops. Static (no data) — the credibility/depth surface for the vault pitch. */
-function strategyDetail(universe: number): string {
+function strategyDetail(universe: number, lang: Lang): string {
   // Schematic (LONG / buy-the-dip): price rests at the mid, a flash wick pierces our deep bid (①), price
   // reverts to the mid = exit at target (②); if the flush CONTINUES it hits the 4% stop instead (③).
   const diagram = `
   <div class="sd-diag">
-    <svg viewBox="0 0 720 260" class="sd-svg" role="img" aria-label="Схема стратегии: лимитка ловит резкий провал, затем возврат к средней">
+    <svg viewBox="0 0 720 260" class="sd-svg" role="img" aria-label="${t(lang, 'Схема стратегии: лимитка ловит резкий провал, затем возврат к средней', 'Strategy schematic: a limit order catches a sharp dip, then price reverts to the mean')}">
       <!-- reference levels -->
       <line x1="120" y1="70" x2="612" y2="70" stroke="var(--border)" stroke-dasharray="4,4"/>
       <line x1="120" y1="142" x2="612" y2="142" stroke="var(--accent)" stroke-opacity="0.55" stroke-dasharray="6,4"/>
       <line x1="120" y1="212" x2="612" y2="212" stroke="var(--danger)" stroke-opacity="0.55" stroke-dasharray="6,4"/>
-      <text x="12" y="74" fill="var(--text-faint)" font-size="11">средняя</text>
-      <text x="12" y="146" fill="var(--accent)" font-size="11">лимит (адаптивный)</text>
-      <text x="12" y="216" fill="var(--danger)" font-size="11">стоп −4%</text>
+      <text x="12" y="74" fill="var(--text-faint)" font-size="11">${t(lang, 'средняя', 'mean')}</text>
+      <text x="12" y="146" fill="var(--accent)" font-size="11">${t(lang, 'лимит (адаптивный)', 'limit (adaptive)')}</text>
+      <text x="12" y="216" fill="var(--danger)" font-size="11">${t(lang, 'стоп −4%', 'stop −4%')}</text>
       <!-- catastrophe branch (flush continues → stop) -->
       <path d="M 326,172 L 400,212" fill="none" stroke="var(--danger)" stroke-width="1.6" stroke-dasharray="5,4" stroke-opacity="0.85"/>
       <!-- price path (flash down, revert to mid) -->
@@ -317,64 +321,65 @@ function strategyDetail(universe: number): string {
       <circle cx="299" cy="142" r="11" fill="var(--accent)"/><text x="299" y="146" text-anchor="middle" fill="var(--bg)" font-size="12" font-weight="700">1</text>
       <circle cx="470" cy="70" r="11" fill="var(--accent)"/><text x="470" y="74" text-anchor="middle" fill="var(--bg)" font-size="12" font-weight="700">2</text>
       <circle cx="400" cy="212" r="11" fill="var(--danger)"/><text x="400" y="216" text-anchor="middle" fill="var(--bg)" font-size="12" font-weight="700">3</text>
-      <text x="606" y="240" text-anchor="end" fill="var(--text-faint)" font-size="11">время →</text>
+      <text x="606" y="240" text-anchor="end" fill="var(--text-faint)" font-size="11">${t(lang, 'время →', 'time →')}</text>
     </svg>
   </div>
   <div class="sd-steps">
-    <div class="sd-step"><span class="n">1</span><h5>Ловим шип лимиткой</h5><p>На каждой монете держим глубокую лимитную заявку. Глубина <b>адаптивная — подстраивается под волатильность</b>: ставится на «N сигм» от средней, а не на фиксированный %. Так ловим <b>настоящие</b> переотклонения, а не обычный шум. Резкий провал прокалывает уровень — заявка исполняется как <b>мейкер</b> (без тейкерской комиссии).</p></div>
-    <div class="sd-step"><span class="n">2</span><h5>Ставим на возврат</h5><p>Резкие выбросы цены на розничных альтах статистически краткосрочны. Цель — <b>возврат к средней</b> (к цене до шипа). На откате фиксируем прибыль.</p></div>
-    <div class="sd-step cat"><span class="n">3</span><h5>Защита, если не откатило</h5><p>Если это был настоящий тренд, а не шип — закрываемся по <b>4%-стопу</b>. Плюс <b>30-мин тайм-стоп</b>: разворот быстрый или его нет.</p></div>
+    <div class="sd-step"><span class="n">1</span><h5>${t(lang, 'Ловим шип лимиткой', 'Catch the spike with a limit')}</h5><p>${t(lang, 'На каждой монете держим глубокую лимитную заявку. Глубина <b>адаптивная — подстраивается под волатильность</b>: ставится на «N сигм» от средней, а не на фиксированный %. Так ловим <b>настоящие</b> переотклонения, а не обычный шум. Резкий провал прокалывает уровень — заявка исполняется как <b>мейкер</b> (без тейкерской комиссии).', 'On each coin we rest a deep limit order. The depth is <b>adaptive — it scales with volatility</b>: placed at “N sigmas” from the mean, not a fixed %. That catches <b>genuine</b> over-extensions, not ordinary noise. A sharp dip pierces the level — the order fills as a <b>maker</b> (no taker fee).')}</p></div>
+    <div class="sd-step"><span class="n">2</span><h5>${t(lang, 'Ставим на возврат', 'Bet on the reversion')}</h5><p>${t(lang, 'Резкие выбросы цены на розничных альтах статистически краткосрочны. Цель — <b>возврат к средней</b> (к цене до шипа). На откате фиксируем прибыль.', 'Sharp price spikes on retail alts are statistically short-lived. The target is a <b>return to the mean</b> (the pre-spike price). We book profit on the snap-back.')}</p></div>
+    <div class="sd-step cat"><span class="n">3</span><h5>${t(lang, 'Защита, если не откатило', 'Protection if it doesn’t revert')}</h5><p>${t(lang, 'Если это был настоящий тренд, а не шип — закрываемся по <b>4%-стопу</b>. Плюс <b>30-мин тайм-стоп</b>: разворот быстрый или его нет.', 'If it was a real trend, not a spike — we exit at the <b>4% stop</b>. Plus a <b>30-min time-stop</b>: the reversion is fast or it isn’t coming.')}</p></div>
   </div>
   <div class="sd-blocks">
     <div class="sd-block">
-      <h4>🧠 На чём основана</h4>
+      <h4>🧠 ${t(lang, 'На чём основана', 'What it’s based on')}</h4>
       <ul>
-        <li>Устойчивая рыночная микроструктура: на розничных альткоинах резкие шипы и каскады ликвидаций <b>систематически уводят цену слишком далеко от нормы, и она быстро откатывает назад</b>.</li>
-        <li><b>Доказательство, что эффект реальный, а не подгонка</b> — контрольная группа: на эффективных мейджорах (BTC, ETH, SOL, LINK) эффекта НЕТ. Случайный шум реагировал бы на всё одинаково; то, что алгоритм отличает розничные альты от эффективных мейджоров, доказывает реальную структуру рынка.</li>
+        <li>${t(lang, 'Устойчивая рыночная микроструктура: на розничных альткоинах резкие шипы и каскады ликвидаций <b>систематически уводят цену слишком далеко от нормы, и она быстро откатывает назад</b>.', 'A robust market-microstructure fact: on retail altcoins, sharp spikes and liquidation cascades <b>systematically push price too far from fair, and it snaps back quickly</b>.')}</li>
+        <li>${t(lang, '<b>Доказательство, что эффект реальный, а не подгонка</b> — контрольная группа: на эффективных мейджорах (BTC, ETH, SOL, LINK) эффекта НЕТ. Случайный шум реагировал бы на всё одинаково; то, что алгоритм отличает розничные альты от эффективных мейджоров, доказывает реальную структуру рынка.', '<b>Proof it’s real, not curve-fitting</b> — a control group: on efficient majors (BTC, ETH, SOL, LINK) the effect is ABSENT. Random noise would react to everything the same; the fact that the algorithm tells retail alts apart from efficient majors proves genuine market structure.')}</li>
       </ul>
     </div>
     <div class="sd-block">
-      <h4>📊 Что мы проанализировали</h4>
+      <h4>📊 ${t(lang, 'Что мы проанализировали', 'What we analysed')}</h4>
       <ul>
-        <li><b>Данные:</b> месяцы 5-минутных свечей по ${universe} монетам, <b>3 независимых окна по 180 дней</b>, ~15&nbsp;000+ смоделированных сделок.</li>
-        <li><b>Перестановочный тест (K=200):</b> реальный результат против 200 случайных перестановок направления — отличаем край от везения.</li>
-        <li><b>Кросс-оконный walk-forward:</b> результат обязан держаться в разных режимах рынка, а не в одном удачном.</li>
-        <li><b>MAE-анализ</b> распределения внутрисделочных просадок по каждой монете — так подобраны стопы, что режут катастрофический хвост, но не срезают нормальный шум разворота.</li>
-        <li><b>Адаптивная глубина</b> (∝ волатильности): на честном causal A/B (3 окна, перестановочный тест) устойчиво <b>бьёт фиксированный %</b>, при этом контроли (BTC/ETH/SOL/LINK) остаются мёртвыми — значит это реальная структура, а не подгонка под волатильность.</li>
+        <li>${t(lang, `<b>Данные:</b> месяцы 5-минутных свечей по ${universe} монетам, <b>3 независимых окна по 180 дней</b>, ~15&nbsp;000+ смоделированных сделок.`, `<b>Data:</b> months of 5-minute candles across ${universe} coins, <b>3 independent 180-day windows</b>, ~15,000+ simulated trades.`)}</li>
+        <li>${t(lang, '<b>Перестановочный тест (K=200):</b> реальный результат против 200 случайных перестановок направления — отличаем край от везения.', '<b>Permutation test (K=200):</b> the real result vs 200 random direction shuffles — separating edge from luck.')}</li>
+        <li>${t(lang, '<b>Кросс-оконный walk-forward:</b> результат обязан держаться в разных режимах рынка, а не в одном удачном.', '<b>Cross-window walk-forward:</b> the result must hold across market regimes, not one lucky window.')}</li>
+        <li>${t(lang, '<b>MAE-анализ</b> распределения внутрисделочных просадок по каждой монете — так подобраны стопы, что режут катастрофический хвост, но не срезают нормальный шум разворота.', '<b>MAE analysis</b> of the in-trade drawdown distribution per coin — so the stops cut the catastrophic tail without clipping normal reversion noise.')}</li>
+        <li>${t(lang, '<b>Адаптивная глубина</b> (∝ волатильности): на честном causal A/B (3 окна, перестановочный тест) устойчиво <b>бьёт фиксированный %</b>, при этом контроли (BTC/ETH/SOL/LINK) остаются мёртвыми — значит это реальная структура, а не подгонка под волатильность.', '<b>Adaptive depth</b> (∝ volatility): in an honest causal A/B (3 windows, permutation test) it robustly <b>beats a fixed %</b> while the controls (BTC/ETH/SOL/LINK) stay dead — genuine structure, not vol-fitting.')}</li>
       </ul>
     </div>
     <div class="sd-block risk">
-      <h4>🛡 Стопы и защита (многоуровневая)</h4>
+      <h4>🛡 ${t(lang, 'Стопы и защита (многоуровневая)', 'Stops & protection (layered)')}</h4>
       <ul>
-        <li><b>Цель</b> — возврат цены к средней (выход в прибыль).</li>
-        <li><b>Тайм-стоп 30 мин</b> — если не вернулось, выходим по рынку.</li>
-        <li><b>Катастроф-стоп 4%</b> — биржевой стоп-ордер (живёт на бирже, переживает сбои процесса), если движение оказалось трендом.</li>
-        <li><b>Дневной −5% СТОПКРАН</b> — при −5% за день (включая плавающую просадку) закрываются ВСЕ позиции + пауза до следующего дня. Жёсткий пол против коррелированных каскадов.</li>
-        <li><b>Авто-предохранители:</b> пауза после каскада, контроль лимитов биржи, fail-closed при потере связи с биржей.</li>
+        <li>${t(lang, '<b>Цель</b> — возврат цены к средней (выход в прибыль).', '<b>Target</b> — price reverts to the mean (exit in profit).')}</li>
+        <li>${t(lang, '<b>Тайм-стоп 30 мин</b> — если не вернулось, выходим по рынку.', '<b>30-min time-stop</b> — if it hasn’t reverted, we exit at market.')}</li>
+        <li>${t(lang, '<b>Катастроф-стоп 4%</b> — биржевой стоп-ордер (живёт на бирже, переживает сбои процесса), если движение оказалось трендом.', '<b>4% catastrophe stop</b> — an exchange-resident stop order (lives on the exchange, survives process downtime), if the move turned out to be a trend.')}</li>
+        <li>${t(lang, '<b>Дневной −5% СТОПКРАН</b> — при −5% за день (включая плавающую просадку) закрываются ВСЕ позиции + пауза до следующего дня. Жёсткий пол против коррелированных каскадов.', '<b>Daily −5% CIRCUIT-BREAKER</b> — at −5% on the day (including open unrealized drawdown) ALL positions close + trading pauses until the next day. A hard floor against correlated cascades.')}</li>
+        <li>${t(lang, '<b>Авто-предохранители:</b> пауза после каскада, контроль лимитов биржи, fail-closed при потере связи с биржей.', '<b>Auto-safeguards:</b> post-cascade cooldown, exchange rate-limit control, fail-closed if the exchange connection drops.')}</li>
       </ul>
     </div>
     <div class="sd-block">
-      <h4>⚙️ Как исполняется</h4>
+      <h4>⚙️ ${t(lang, 'Как исполняется', 'How it executes')}</h4>
       <ul>
-        <li>Только <b>ликвидные монеты</b>, вход — <b>мейкер-лимитками</b>, 24/7 без ручного управления.</li>
-        <li><b>Одна позиция на монету</b>, диверсификация по ${universe} монетам — коррелированный флэш ловится по многим сразу.</li>
-        <li>Всё автоматически: вход, выход, стопы, перестановка заявок, риск-контроль.</li>
-        <li>Каждая сделка публикуется ниже — с реальной точкой входа и результатом <b>после комиссий</b>.</li>
+        <li>${t(lang, 'Только <b>ликвидные монеты</b>, вход — <b>мейкер-лимитками</b>, 24/7 без ручного управления.', 'Liquid coins only, entries via <b>maker limits</b>, 24/7 with no manual intervention.')}</li>
+        <li>${t(lang, `<b>Одна позиция на монету</b>, диверсификация по ${universe} монетам — коррелированный флэш ловится по многим сразу.`, `<b>One position per coin</b>, diversified across ${universe} coins — a correlated flush is caught on many at once.`)}</li>
+        <li>${t(lang, 'Всё автоматически: вход, выход, стопы, перестановка заявок, риск-контроль.', 'Everything automatic: entry, exit, stops, quote re-placement, risk control.')}</li>
+        <li>${t(lang, 'Каждая сделка публикуется ниже — с реальной точкой входа и результатом <b>после комиссий</b>.', 'Every trade is published below — with a real entry point and the result <b>net of fees</b>.')}</li>
       </ul>
     </div>
   </div>`;
   return `<div class="section">
-    <div class="section-title">Как устроена стратегия</div>
-    <p class="sd-lead">Систематический <b>маркет-мейкинг с возвратом к среднему</b> на ${universe} ликвидных монетах. Ниже — как это работает, на чём основано и как защищено. Схема на примере <b>лонга</b> (откуп резкого провала); для шорта всё зеркально (продажа резкого выброса вверх).</p>
+    <div class="section-title">${t(lang, 'Как устроена стратегия', 'How the strategy works')}</div>
+    <p class="sd-lead">${t(lang, `Систематический <b>маркет-мейкинг с возвратом к среднему</b> на ${universe} ликвидных монетах. Ниже — как это работает, на чём основано и как защищено. Схема на примере <b>лонга</b> (откуп резкого провала); для шорта всё зеркально (продажа резкого выброса вверх).`, `Systematic <b>mean-reversion market-making</b> across ${universe} liquid coins. Below — how it works, what it’s based on, and how it’s protected. The schematic shows a <b>long</b> (buying a sharp dip); shorts are mirror-image (selling a sharp spike up).`)}</p>
     ${diagram}
   </div>`;
 }
 
 const RU_MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-const fmtDay = (dayMs: number): string => { const d = new Date(dayMs); return `${d.getUTCDate()} ${RU_MON[d.getUTCMonth()]}`; };
+const EN_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fmtDay = (dayMs: number, lang: Lang): string => { const d = new Date(dayMs); return lang === 'en' ? `${EN_MON[d.getUTCMonth()]} ${d.getUTCDate()}` : `${d.getUTCDate()} ${RU_MON[d.getUTCMonth()]}`; };
 
 /** Scrollable per-UTC-day result tape — one chip per day (net %, $, trade count), newest first, today highlit. */
-function dailyStrip(rows: WfRow[]): string {
+function dailyStrip(rows: WfRow[], lang: Lang): string {
   const byDay = new Map<number, { pct: number; usd: number; n: number }>();
   for (const r of rows) {
     if (r.closed_at == null) continue;
@@ -386,14 +391,14 @@ function dailyStrip(rows: WfRow[]): string {
   const today = Math.floor(Date.now() / 86_400_000) * 86_400_000;
   const chips = [...byDay.entries()].sort((a, b) => b[0] - a[0]).map(([day, e]) => `
     <div class="lt-day${day === today ? ' today' : ''}">
-      <div class="d">${fmtDay(day)}${day === today ? ' · сегодня' : ''}</div>
+      <div class="d">${fmtDay(day, lang)}${day === today ? t(lang, ' · сегодня', ' · today') : ''}</div>
       <div class="v ${cls(e.pct)}">${pct(e.pct)}</div>
-      <div class="s">${usd(e.usd, true)} · ${e.n} сд.</div>
+      <div class="s">${usd(e.usd, true)} · ${e.n} ${t(lang, 'сд.', 'tr.')}</div>
     </div>`).join('');
-  return `<div class="section"><div class="section-title">Результат по дням (net комиссий · листайте →)</div><div class="lt-days">${chips}</div></div>`;
+  return `<div class="section"><div class="section-title">${t(lang, 'Результат по дням (net комиссий · листайте →)', 'Daily result (net of fees · scroll →)')}</div><div class="lt-days">${chips}</div></div>`;
 }
 
-export function renderLiveTrack(page = 1): string {
+export function renderLiveTrack(page = 1, lang: Lang = 'ru'): string {
   const rows = closedStmt.all();
   const openRows = openStmt.all();
   const st = computeStats(rows, openRows.length);
@@ -413,19 +418,19 @@ export function renderLiveTrack(page = 1): string {
 
   const cards = hasData ? `
     <div class="lt-cards">
-      ${statCard('Монет в работе', String(universe), '', st.open > 0 ? `${st.open} сейчас открыто` : `${distinctTraded} уже дали сделки`)}
-      ${statCard('Накопл. результат', pct(st.netPct), cls(st.netPct), `${usd(st.netUsd, true)} · net комиссий`, cls(st.netUsd))}
-      ${statCard('Результат за день', todayRows.length ? pct(todayPct) : '—', cls(todayPct), todayRows.length ? `${usd(todayUsd, true)} · ${todayRows.length} сделок (UTC)` : 'сегодня сделок нет', cls(todayUsd))}
-      ${statCard('Закрытых сделок', String(st.closed), '', `за ${st.daysLive} дн.`)}
-      ${statCard('Винрейт', st.winRate != null ? `${(st.winRate * 100).toFixed(0)}%` : '—', '', `${st.wins} прибыльных · ${st.losses} убыточных`)}
-      ${statCard('Профит-фактор', st.profitFactor != null ? st.profitFactor.toFixed(2) : '—', st.profitFactor != null && st.profitFactor >= 1 ? 'pos' : st.profitFactor != null ? 'neg' : '', 'прибыль / убыток')}
-      ${statCard('Лучшая сделка', pct(st.best), 'pos', esc(rows.find((r) => (r.pnl_pct ?? 0) === st.best)?.coin ?? ''))}
-      ${statCard('Худшая сделка', pct(st.worst), 'neg', esc(rows.find((r) => (r.pnl_pct ?? 0) === st.worst)?.coin ?? ''))}
-      ${statCard('Средняя / сделку', pct(st.avgPct), cls(st.avgPct), 'net комиссий')}
-      ${statCard('Комиссии уплачено', usd(feeEntry + feeExit), '', `вход ${usd(feeEntry)} (maker) · выход ${usd(feeExit)} (taker)`)}
+      ${statCard(t(lang, 'Монет в работе', 'Coins traded'), String(universe), '', st.open > 0 ? t(lang, `${st.open} сейчас открыто`, `${st.open} open now`) : t(lang, `${distinctTraded} уже дали сделки`, `${distinctTraded} have traded`))}
+      ${statCard(t(lang, 'Накопл. результат', 'Cumulative result'), pct(st.netPct), cls(st.netPct), `${usd(st.netUsd, true)} · ${t(lang, 'net комиссий', 'net of fees')}`, cls(st.netUsd))}
+      ${statCard(t(lang, 'Результат за день', 'Result today'), todayRows.length ? pct(todayPct) : '—', cls(todayPct), todayRows.length ? t(lang, `${usd(todayUsd, true)} · ${todayRows.length} сделок (UTC)`, `${usd(todayUsd, true)} · ${todayRows.length} trades (UTC)`) : t(lang, 'сегодня сделок нет', 'no trades today'), cls(todayUsd))}
+      ${statCard(t(lang, 'Закрытых сделок', 'Closed trades'), String(st.closed), '', t(lang, `за ${st.daysLive} дн.`, `in ${st.daysLive}d`))}
+      ${statCard(t(lang, 'Винрейт', 'Win rate'), st.winRate != null ? `${(st.winRate * 100).toFixed(0)}%` : '—', '', t(lang, `${st.wins} прибыльных · ${st.losses} убыточных`, `${st.wins} winners · ${st.losses} losers`))}
+      ${statCard(t(lang, 'Профит-фактор', 'Profit factor'), st.profitFactor != null ? st.profitFactor.toFixed(2) : '—', st.profitFactor != null && st.profitFactor >= 1 ? 'pos' : st.profitFactor != null ? 'neg' : '', t(lang, 'прибыль / убыток', 'profit / loss'))}
+      ${statCard(t(lang, 'Лучшая сделка', 'Best trade'), pct(st.best), 'pos', esc(rows.find((r) => (r.pnl_pct ?? 0) === st.best)?.coin ?? ''))}
+      ${statCard(t(lang, 'Худшая сделка', 'Worst trade'), pct(st.worst), 'neg', esc(rows.find((r) => (r.pnl_pct ?? 0) === st.worst)?.coin ?? ''))}
+      ${statCard(t(lang, 'Средняя / сделку', 'Avg / trade'), pct(st.avgPct), cls(st.avgPct), t(lang, 'net комиссий', 'net of fees'))}
+      ${statCard(t(lang, 'Комиссии уплачено', 'Fees paid'), usd(feeEntry + feeExit), '', t(lang, `вход ${usd(feeEntry)} (maker) · выход ${usd(feeExit)} (taker)`, `entry ${usd(feeEntry)} (maker) · exit ${usd(feeExit)} (taker)`))}
     </div>` : '';
 
-  const stages = roadmap(st).map((s) => `
+  const stages = roadmap(st, lang).map((s) => `
     <div class="rm-item ${s.status}">
       <div class="rm-dot"></div>
       <div class="rm-head"><span class="rm-title">${esc(s.title)}</span>${s.meta ? `<span class="rm-meta">${esc(s.meta)}</span>` : ''}</div>
@@ -433,55 +438,64 @@ export function renderLiveTrack(page = 1): string {
     </div>`).join('');
 
   const emptyState = `<div class="card"><div class="card-body"><div class="empty-state" style="padding:26px 0;text-align:center;">
-      ⏳ Боевой трек на паузе — копим статистику. Данные появятся здесь автоматически, как только пойдут сделки.
+      ⏳ ${t(lang, 'Боевой трек на паузе — копим статистику. Данные появятся здесь автоматически, как только пойдут сделки.', 'Live track paused — accumulating statistics. Data will appear here automatically once trades resume.')}
     </div></div></div>`;
 
   return pageShell(
-    'Боевой трек — реальные результаты · Robot Claude',
+    t(lang, 'Боевой трек — реальные результаты · Robot Claude', 'Live Track — real results · Robot Claude'),
     `
     <div class="header">
-      <a class="lt-back" href="/lab">← в лабораторию</a>
-      <span class="strat-code">LIVE · HYPERLIQUID · РЕАЛЬНЫЕ ДЕНЬГИ</span>
-      <h1 class="title">Боевой трек</h1>
-      <p class="subtitle">Что мы делаем, реальная статистика и к чему идём. Всё ниже — живые данные, net комиссий.</p>
+      <a class="lt-back" href="/lab">${t(lang, '← в лабораторию', '← to the lab')}</a>
+      <span class="strat-code">${t(lang, 'LIVE · HYPERLIQUID · РЕАЛЬНЫЕ ДЕНЬГИ', 'LIVE · HYPERLIQUID · REAL MONEY')}</span>
+      <h1 class="title">${t(lang, 'Боевой трек', 'Live Track')}</h1>
+      <p class="subtitle">${t(lang, 'Что мы делаем, реальная статистика и к чему идём. Всё ниже — живые данные, net комиссий.', 'What we do, real statistics, and where we’re headed. Everything below is live data, net of fees.')}</p>
     </div>
     <style>${TRACK_CSS}</style>
 
     <div class="lt-intro">
-      <b>Robot Claude</b> — систематическая торговая система на бирже Hyperliquid. Алгоритм одновременно ведёт
+      ${t(lang, `<b>Robot Claude</b> — систематическая торговая система на бирже Hyperliquid. Алгоритм одновременно ведёт
       книгу из <b>${universe} ликвидных монет</b> (лонг и шорт), отслеживает краткосрочные ценовые аномалии и
       зарабатывает на возврате цены к норме.
       Работает 24/7 без ручного управления: вход, выход и защита от резких движений — полностью автоматические.
       <b>Никаких обещаний</b> — только реальный трек ниже, каждая сделка с настоящей точкой входа и результатом
-      после комиссий.
+      после комиссий.`, `<b>Robot Claude</b> is a systematic trading system on Hyperliquid. The algorithm runs a book of
+      <b>${universe} liquid coins</b> (long and short) simultaneously, watches for short-term price anomalies and
+      earns on the reversion back to fair value.
+      It runs 24/7 with no manual intervention: entry, exit and protection against sharp moves are fully automatic.
+      <b>No promises</b> — only the real track record below, every trade with a genuine entry point and result
+      net of fees.`)}
     </div>
 
     <div class="lt-phase">
       <span class="dot"></span>
-      <div><b>Сейчас: фаза живой валидации.</b> Система торгует реальными деньгами на небольшом капитале.
+      <div>${t(lang, `<b>Сейчас: фаза живой валидации.</b> Система торгует реальными деньгами на небольшом капитале.
       Задача этого этапа — не максимальная прибыль, а <b>честная статистика</b> на настоящих издержках. Именно
-      этот проверенный трек станет фундаментом публичного вульта (см. дорожную карту внизу).</div>
+      этот проверенный трек станет фундаментом публичного вульта (см. дорожную карту внизу).`, `<b>Now: the live-validation phase.</b> The system trades real money at small size.
+      The goal of this stage is not maximum profit but <b>honest statistics</b> on real costs. This proven
+      track record is exactly what will become the foundation of a public vault (see the roadmap below).`)}</div>
     </div>
 
     ${hasData ? cards : ''}
-    ${hasData ? `<div class="section"><div class="section-title">Кривая результата (накопленный %, net комиссий)</div>${equityCurve(st.cum)}</div>` : ''}
-    ${hasData ? dailyStrip(rows) : ''}
-    ${strategyDetail(universe)}
-    ${openPositionsSection(Date.now())}
-    ${hasData ? `<div class="section" id="trades"><div class="section-title">Закрытые сделки · все ${st.closed}</div>${tradesTable(rows, page)}</div>` : emptyState}
+    ${hasData ? `<div class="section"><div class="section-title">${t(lang, 'Кривая результата (накопленный %, net комиссий)', 'Result curve (cumulative %, net of fees)')}</div>${equityCurve(st.cum, lang)}</div>` : ''}
+    ${hasData ? dailyStrip(rows, lang) : ''}
+    ${strategyDetail(universe, lang)}
+    ${openPositionsSection(Date.now(), lang)}
+    ${hasData ? `<div class="section" id="trades"><div class="section-title">${t(lang, `Закрытые сделки · все ${st.closed}`, `Closed trades · all ${st.closed}`)}</div>${tradesTable(rows, page, lang)}</div>` : emptyState}
 
     <div class="section">
-      <div class="section-title">Дорожная карта — к публичному вульту</div>
+      <div class="section-title">${t(lang, 'Дорожная карта — к публичному вульту', 'Roadmap — toward a public vault')}</div>
       <div class="rm">${stages}</div>
     </div>
 
     <p class="lt-note">
-      Данные обновляются автоматически из журнала сделок системы — страница не может расходиться с реальностью.
+      ${t(lang, `Данные обновляются автоматически из журнала сделок системы — страница не может расходиться с реальностью.
       Результаты указаны за вычетом комиссий (≈0.05% на сделку). Прошлые результаты не гарантируют будущих;
-      это не инвестиционная рекомендация. Малый размер сумм в долларах — следствие тестового капитала на фазе валидации.
+      это не инвестиционная рекомендация. Малый размер сумм в долларах — следствие тестового капитала на фазе валидации.`, `Data updates automatically from the system’s trade log — the page cannot diverge from reality.
+      Results are shown net of fees (≈0.05% per trade). Past results do not guarantee future ones;
+      this is not investment advice. The small dollar amounts are a consequence of the test capital in the validation phase.`)}
     </p>
     `,
-    { autoRefreshSec: 60 },
+    { autoRefreshSec: 60, lang },
   );
 }
 
@@ -528,6 +542,6 @@ export async function labTrackRoute(app: FastifyInstance): Promise<void> {
     const page = Math.max(1, parseInt(req.query.page ?? '1', 10) || 1);
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'public, max-age=30');
-    return renderLiveTrack(page);
+    return renderLiveTrack(page, getLang(req));
   });
 }
