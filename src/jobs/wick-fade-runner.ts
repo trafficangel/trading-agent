@@ -186,8 +186,11 @@ const COIN_QUARANTINE_MAX_CATS = 2;
 const QUARANTINE_LOG_COOLDOWN_MS = 6 * 60 * 60_000;
 const sidePerfStmt = db.prepare<[string, string, string, number], { n: number; sum_pnl: number | null }>(`SELECT COUNT(*) AS n, SUM(pnl_pct) AS sum_pnl FROM wick_fade_log WHERE coin = ? AND side = ? AND mode = ? AND closed_at IS NOT NULL AND closed_at >= ?`);
 const coinCatStmt = db.prepare<[string, string, number], { n: number }>(`SELECT COUNT(*) AS n FROM wick_fade_log WHERE coin = ? AND mode = ? AND closed_at IS NOT NULL AND closed_at >= ? AND (close_reason = 'catastrophe' OR (close_reason = 'reconciled-flat' AND (pnl_pct <= -2 OR pnl_pct IS NULL)))`);
+const doctorPauseStmt = db.prepare<[string, string, number], { paused_until: number; reason: string }>(`SELECT paused_until, reason FROM wick_fade_doctor_pause WHERE coin = ? AND side = ? AND paused_until > ?`);
 const quarantineLogAt = new Map<string, number>();
 function liveQuarantineReason(coin: string, side: 'long' | 'short', nowMs: number): string | null {
+  const doctorPause = doctorPauseStmt.get(coin, side, nowMs);
+  if (doctorPause) return `doctor pause until ${new Date(doctorPause.paused_until).toISOString()} — ${doctorPause.reason}`;
   const since = nowMs - LIVE_QUARANTINE_LOOKBACK_MS;
   const cats = coinCatStmt.get(coin, WF_CONFIG.mode, since)?.n ?? 0;
   if (cats >= COIN_QUARANTINE_MAX_CATS) return `coin ${cats} catastrophe-like exits in 7d`;
