@@ -73,7 +73,7 @@ function labMaker(base: CustomStrategy, code: string, name: string, longDescript
 //     coarsely; a per-cluster cap is the right refinement.
 //   - Kelly tilt (kelly-allocator) weights by realised forward edge once
 //     each has MIN_SAMPLE=15 paper/live trades.
-export const LAB_STRATEGIES: LabStrategy[] = [
+const LAB_STRATEGIES_ARCHIVED: LabStrategy[] = [
   // ── PRIMARY EDGE — Bollinger(20,2) mean-reversion gated by EMA200 trend,
   // on 4h. The sweep+verify winner: positive on 8/10 coins, survived the
   // full kill-battery on 5 (ETH/LINK/XRP/BNB/DOGE), lowest drawdown (~20%),
@@ -125,7 +125,7 @@ export const LAB_STRATEGIES: LabStrategy[] = [
 // 1/9 WR −10%, ADA −7, XRP −6.3, broadly net-negative). The bar-touch fill model
 // overstated 5m maker fills; the edge didn't materialize live. Kept the 1h maker
 // below (slower → far less fill-fragile). track='lab-maker', net of maker commission.
-export const MAKER_LAB_STRATEGIES: LabStrategy[] = [
+const MAKER_LAB_STRATEGIES_ARCHIVED: LabStrategy[] = [
   // ── 1h MAKER MR — the HL re-sweep's best NEW edge (Jun 15). Keltner /
   // z-score reversion as M01-M08 but on 1h, not 5m — far more practical (fewer
   // trades, less noise, much less fill-model risk than 5m). Cross-symbol
@@ -163,6 +163,17 @@ export const BT_MAXDD_PCT: Record<string, number> = {
   L01: 14, L02: 15, L03: 16, L04: 5, L05: 16, L06: 17, L07: 46, L08: 22, L09: 37, L10: 15,
   M09: 11, M10: 10, M11: 11, M12: 7, M13: 10, M14: 12,
 };
+
+// ── PAPER LAB CLEARED Jul 7 2026 ──────────────────────────────────────────────
+// Operator cleared /lab ahead of the AltFade (wick-fade) vault launch: the paper
+// Bybit MR/trend book (L01–L10 + M09–M14) distracted from the HL live track and
+// carried only tiny samples. Every definition is preserved above as *_ARCHIVED —
+// flip LAB_PAPER_ENABLED back to true to revive the entire book in one line.
+// While empty: the custom-runner idles (it guards on LAB_STRATEGIES.length===0)
+// and /lab renders its "under construction" empty state. No open paper positions.
+const LAB_PAPER_ENABLED: boolean = false;
+export const LAB_STRATEGIES: LabStrategy[] = LAB_PAPER_ENABLED ? LAB_STRATEGIES_ARCHIVED : [];
+export const MAKER_LAB_STRATEGIES: LabStrategy[] = LAB_PAPER_ENABLED ? MAKER_LAB_STRATEGIES_ARCHIVED : [];
 
 export const ALL_LAB_STRATEGIES: LabStrategy[] = [...LAB_STRATEGIES, ...MAKER_LAB_STRATEGIES];
 export const LAB_BY_CODE = new Map(ALL_LAB_STRATEGIES.map((s) => [s.code, s]));

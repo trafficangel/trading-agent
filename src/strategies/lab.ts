@@ -24,7 +24,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { pageShell, renderLiveStatsBlock } from './landing.js';
+import { pageShell, renderLiveStatsBlock, getLang } from './landing.js';
 import {
   getStrategyLiveStats,
   getStrategyEquityExtras,
@@ -38,6 +38,9 @@ import { allocatePortfolio, portfolioSummary } from '../lib/portfolio.js';
 import { liveTrackHero, LIVE_TRACK_HERO_CSS } from './lab-track.js';
 
 const trackOf = (s: LabStrategy): string => s.track ?? LAB_TRACK;
+
+type Lang = 'ru' | 'en';
+const t = (lang: Lang, ru: string, en: string): string => (lang === 'en' ? en : ru);
 
 // ── tiny self-contained formatters (avoid coupling to landing internals) ──
 function esc(s: string): string {
@@ -58,12 +61,16 @@ function fmtDt(ms: number | null): string {
   return new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
 }
 
-const LAB_BANNER = `
+const labBanner = (lang: Lang): string => `
   <div class="lab-banner">
-    <span class="lab-pill">🧪 ЭКСПЕРИМЕНТ · R&amp;D</span>
-    Это <b>лаборатория</b>: собственные (кодовые) стратегии на <b>бумажной</b> торговле.
-    Они НЕ входят в боевые тарифы, не торгуют на счетах подписчиков и проходят форвард-тест,
-    прежде чем (если) стать боевыми. Прошлые и бумажные результаты не гарантируют будущих.
+    <span class="lab-pill">🧪 ${t(lang, 'ЭКСПЕРИМЕНТ · R&amp;D', 'EXPERIMENT · R&amp;D')}</span>
+    ${t(lang,
+      'Это <b>лаборатория</b>: собственные (кодовые) стратегии на <b>бумажной</b> торговле. ' +
+      'Они НЕ входят в боевые тарифы, не торгуют на счетах подписчиков и проходят форвард-тест, ' +
+      'прежде чем (если) стать боевыми. Прошлые и бумажные результаты не гарантируют будущих.',
+      'This is the <b>lab</b>: in-house (code-defined) strategies on a <b>paper</b> account. ' +
+      'They are NOT part of any live tier, never trade on subscriber accounts, and go through ' +
+      'forward-testing before (if ever) going live. Past and paper results do not guarantee future ones.')}
   </div>`;
 
 const LAB_CSS = `
@@ -137,7 +144,7 @@ function labRow(s: LabStrategy): string {
     </a>`;
 }
 
-function renderLabList(): string {
+function renderLabList(lang: Lang): string {
   // Group rows by family for readability.
   const fams = new Map<string, LabStrategy[]>();
   for (const s of ALL_LAB_STRATEGIES) {
@@ -145,28 +152,35 @@ function renderLabList(): string {
     (fams.get(f) ?? fams.set(f, []).get(f)!).push(s);
   }
   const body = ALL_LAB_STRATEGIES.length === 0
-    ? '<div class="lab-empty"><b>Лаборатория обновляется.</b><br>Старый набор медленных стратегий снят с форвард-теста. Сейчас в разработке — быстрые стратегии на событийных сигналах (ликвидации, фандинг, order-flow). Появятся здесь после прохождения kill-батареи и форвард-валидации.</div>'
+    ? `<div class="lab-empty">${t(lang,
+        '<b>Лаборатория обновляется.</b><br>Старый набор медленных стратегий снят с форвард-теста. Сейчас в разработке — быстрые стратегии на событийных сигналах (ликвидации, фандинг, order-flow). Появятся здесь после прохождения kill-батареи и форвард-валидации.',
+        '<b>The lab is being retooled.</b><br>The old set of slow strategies has been pulled from forward-testing. In the works now — fast strategies on event-driven signals (liquidations, funding, order-flow). They will appear here once they pass the kill-battery and forward-validation.')}</div>`
     : [...fams.entries()].map(([fam, list]) => {
         const note = fam.startsWith('Mean-reversion') && list.length > 1
-          ? `<div class="lab-fam-note">⚠ Это одна логика на ${list.length} монетах = <b>коррелированная ставка</b>, а не ${list.length} независимых. При промоуте лимитируются как единый кластер (общий лимит риска), иначе широкая просадка альтов откроет все разом.</div>`
+          ? `<div class="lab-fam-note">${t(lang,
+              `⚠ Это одна логика на ${list.length} монетах = <b>коррелированная ставка</b>, а не ${list.length} независимых. При промоуте лимитируются как единый кластер (общий лимит риска), иначе широкая просадка альтов откроет все разом.`,
+              `⚠ This is one logic across ${list.length} coins = <b>a correlated bet</b>, not ${list.length} independent ones. On promotion they are capped as a single cluster (shared risk limit), otherwise a broad alt drawdown would open them all at once.`)}</div>`
           : '';
         return `<div class="lab-fam">${esc(fam)}</div>${note}<div class="lab-list">${list.map(labRow).join('')}</div>`;
       }).join('');
+  const portfolioLink = ALL_LAB_STRATEGIES.length === 0
+    ? ''
+    : `<div style="margin:0 0 16px"><a class="lab-row" style="display:inline-block;padding:10px 14px" href="/lab/portfolio">💼 ${t(lang, 'План сайзинга портфеля (риск-паритет + кластер-кэп) →', 'Portfolio sizing plan (risk-parity + cluster cap) →')}</a></div>`;
   return pageShell(
-    'Лаборатория — R&D стратегии (бумага)',
+    t(lang, 'Лаборатория — R&D стратегии (бумага)', 'Lab — R&D strategies (paper)'),
     `
     <div class="header">
       <span class="strat-code">IN-HOUSE ENGINE · PAPER</span>
-      <h1 class="title">Лаборатория</h1>
-      <p class="subtitle">Собственные стратегии на форвард-тесте. Движок бэктеста == движок бумаги — никакого расхождения.</p>
+      <h1 class="title">${t(lang, 'Лаборатория', 'The Lab')}</h1>
+      <p class="subtitle">${t(lang, 'Собственные стратегии на форвард-тесте. Движок бэктеста == движок бумаги — никакого расхождения.', 'In-house strategies under forward-testing. The backtest engine == the paper engine — zero divergence.')}</p>
     </div>
     <style>${LAB_CSS}${LIVE_TRACK_HERO_CSS}</style>
-    ${liveTrackHero()}
-    ${LAB_BANNER}
-    <div style="margin:0 0 16px"><a class="lab-row" style="display:inline-block;padding:10px 14px" href="/lab/portfolio">💼 План сайзинга портфеля (риск-паритет + кластер-кэп) →</a></div>
+    ${liveTrackHero(lang)}
+    ${labBanner(lang)}
+    ${portfolioLink}
     ${body}
     `,
-    { autoRefreshSec: 60 },
+    { autoRefreshSec: 60, lang },
   );
 }
 
@@ -242,7 +256,7 @@ function renderLabDetail(s: LabStrategy): string {
       <p class="subtitle">Лаборатория · бумажная торговля · <a href="/lab">все эксперименты</a></p>
     </div>
     <style>${LAB_CSS}</style>
-    ${LAB_BANNER}
+    ${labBanner('ru')}
 
     <div class="gate-banner gate-${gate.status}">Форвард-гейт: ${gate.emoji} ${gate.label}${BT_NET_PCT_PER_TRADE[s.code] != null ? ` · бэктест ≈ ${BT_NET_PCT_PER_TRADE[s.code]!.toFixed(2)}%/сделку` : ''}</div>
 
@@ -343,24 +357,28 @@ function renderLabPortfolio(): string {
 
 export async function labRoute(app: FastifyInstance): Promise<void> {
   app.get('/lab/portfolio', async (_req, reply) => {
+    // The sizing plan is only meaningful with lab strategies present. While the
+    // paper book is cleared, send visitors back to the lab index.
+    if (ALL_LAB_STRATEGIES.length === 0) { reply.redirect('/lab'); return; }
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'public, max-age=60');
     return renderLabPortfolio();
   });
 
-  app.get('/lab', async (_req, reply) => {
+  app.get('/lab', async (req, reply) => {
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'public, max-age=30');
-    return renderLabList();
+    return renderLabList(getLang(req));
   });
 
   app.get<{ Params: { code: string } }>('/lab/:code', async (req, reply) => {
     const s = LAB_BY_CODE.get(req.params.code) ?? LAB_BY_ID.get(req.params.code);
+    const lang = getLang(req);
     reply.type('text/html; charset=utf-8');
     if (!s) {
       reply.code(404);
-      return pageShell('Not found', `<div class="header"><h1 class="title">404</h1></div>
-        <div class="empty-state">Эксперимент не найден. <a href="/lab">Все эксперименты</a></div>`);
+      return pageShell(t(lang, 'Не найдено', 'Not found'), `<div class="header"><h1 class="title">404</h1></div>
+        <div class="empty-state">${t(lang, 'Эксперимент не найден. <a href="/lab">Все эксперименты</a>', 'Experiment not found. <a href="/lab">All experiments</a>')}</div>`, { lang });
     }
     reply.header('Cache-Control', 'public, max-age=30');
     return renderLabDetail(s);

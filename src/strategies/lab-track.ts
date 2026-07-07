@@ -500,22 +500,22 @@ export function renderLiveTrack(page = 1, lang: Lang = 'ru'): string {
 }
 
 /** Compact live-track summary for the hero card at the top of /lab. */
-export function liveTrackHero(): string {
+export function liveTrackHero(lang: Lang = 'ru'): string {
   const rows = closedStmt.all();
   if (rows.length === 0) return '';
   const st = computeStats(rows, openStmt.all().length);
   return `
     <a class="lt-hero" href="/lab/live">
       <div class="lt-hero-l">
-        <span class="lt-hero-badge">🟢 LIVE · Hyperliquid · реальные деньги</span>
-        <div class="lt-hero-title">Боевой трек — реальные результаты</div>
-        <div class="lt-hero-sub">Что мы делаем, честная статистика и дорожная карта к вульту →</div>
+        <span class="lt-hero-badge">🟢 LIVE · Hyperliquid · ${t(lang, 'реальные деньги', 'real money')}</span>
+        <div class="lt-hero-title">${t(lang, 'Боевой трек — реальные результаты', 'Live track — real results')}</div>
+        <div class="lt-hero-sub">${t(lang, 'Что мы делаем, честная статистика и дорожная карта к вульту →', 'What we do, honest stats, and the roadmap to the vault →')}</div>
       </div>
       <div class="lt-hero-r">
-        <div class="lt-hero-stat"><div class="v ${cls(st.netPct)}">${pct(st.netPct)}</div><div class="k">накопл.</div></div>
-        <div class="lt-hero-stat"><div class="v">${WF_CONFIG.coins.length}</div><div class="k">монет</div></div>
-        <div class="lt-hero-stat"><div class="v">${st.closed}</div><div class="k">сделок</div></div>
-        <div class="lt-hero-stat"><div class="v">${st.winRate != null ? `${(st.winRate * 100).toFixed(0)}%` : '—'}</div><div class="k">винрейт</div></div>
+        <div class="lt-hero-stat"><div class="v ${cls(st.netPct)}">${pct(st.netPct)}</div><div class="k">${t(lang, 'накопл.', 'cumul.')}</div></div>
+        <div class="lt-hero-stat"><div class="v">${WF_CONFIG.coins.length}</div><div class="k">${t(lang, 'монет', 'coins')}</div></div>
+        <div class="lt-hero-stat"><div class="v">${st.closed}</div><div class="k">${t(lang, 'сделок', 'trades')}</div></div>
+        <div class="lt-hero-stat"><div class="v">${st.winRate != null ? `${(st.winRate * 100).toFixed(0)}%` : '—'}</div><div class="k">${t(lang, 'винрейт', 'win rate')}</div></div>
       </div>
     </a>`;
 }
