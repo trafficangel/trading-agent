@@ -5,7 +5,7 @@
  * operator-requested questions, in order:
  *   1. что мы делаем   — what we do (general terms; NO strategy internals)
  *   2. реальные данные — real trades with entry points + result metrics, live from wick_fade_log
- *   3. к чему идём      — the vault roadmap (toward a public Hyperliquid vault)
+ *   3. к чему идём      — the roadmap (build → live-validation → green track → capital scale)
  *
  * Data is queried DIRECTLY from wick_fade_log (mode='live') at render time — the
  * same table the live runner writes to, so the page can never diverge from reality.
@@ -123,7 +123,7 @@ function equityCurve(cum: number[], lang: Lang): string {
   </div>`;
 }
 
-// ── the vault roadmap (toward a public Hyperliquid vault) ──
+// ── the roadmap (build → live-validation → green track → capital scale) ──
 type Stage = { status: 'done' | 'now' | 'next'; title: string; desc: string; meta?: string };
 function roadmap(st: TrackStats, lang: Lang): Stage[] {
   return [
@@ -133,10 +133,8 @@ function roadmap(st: TrackStats, lang: Lang): Stage[] {
       desc: t(lang, 'Реальные деньги на малом капитале. Цель этой фазы — не прибыль, а честная статистика на настоящих комиссиях и проскальзывании. Каждая сделка ниже — из этого этапа.', 'Real money at small size. The goal of this phase is not profit but honest statistics on real fees and slippage. Every trade below is from this stage.') },
     { status: 'next', title: t(lang, 'Зелёный трек', 'Green track'), meta: t(lang, 'критерий выхода', 'exit criterion'),
       desc: t(lang, 'Устойчивый положительный результат на реальных издержках — на достаточной выборке и в разных рыночных режимах, а не на одном удачном окне.', 'A sustained positive result at real costs — on a sufficient sample and across market regimes, not one lucky window.') },
-    { status: 'next', title: t(lang, 'Масштаб капитала', 'Capital scale'), meta: '',
+    { status: 'next', title: t(lang, 'Масштаб капитала', 'Capital scale'), meta: t(lang, 'цель', 'goal'),
       desc: t(lang, 'Увеличение депозита снимает лимиты биржи и даёт стратегии работать в полную силу — больше монет, более свежие котировки, выше частота.', 'A larger deposit lifts exchange limits and lets the strategy run at full strength — more coins, fresher quotes, higher frequency.') },
-    { status: 'next', title: t(lang, 'Публичный вульт · Hyperliquid', 'Public vault · Hyperliquid'), meta: t(lang, 'цель', 'goal'),
-      desc: t(lang, 'Вкладчики депонируют средства в ончейн-вульт, стратегия копируется автоматически и прозрачно. Управляющий держит собственную долю в вульте; комиссия берётся только с прибыли вкладчиков.', 'Depositors fund an on-chain vault; the strategy is copied automatically and transparently. The manager holds a personal stake; the fee is charged only on depositor profits.') },
   ];
 }
 
@@ -299,7 +297,7 @@ function openPositionsSection(nowMs: number, lang: Lang): string {
 }
 
 /** Detailed strategy explainer — a schematic SVG of the wick-fade mechanic + what it's based on, the data
- *  analysed, and the layered stops. Static (no data) — the credibility/depth surface for the vault pitch. */
+ *  analysed, and the layered stops. Static (no data) — the credibility/depth surface for the live track. */
 function strategyDetail(universe: number, lang: Lang): string {
   // Schematic (LONG / buy-the-dip): price rests at the mid, a flash wick pierces our deep bid (①), price
   // reverts to the mid = exit at target (②); if the flush CONTINUES it hits the 4% stop instead (③).
@@ -470,9 +468,9 @@ export function renderLiveTrack(page = 1, lang: Lang = 'ru'): string {
       <span class="dot"></span>
       <div>${t(lang, `<b>Сейчас: фаза живой валидации.</b> Система торгует реальными деньгами на небольшом капитале.
       Задача этого этапа — не максимальная прибыль, а <b>честная статистика</b> на настоящих издержках. Именно
-      этот проверенный трек станет фундаментом публичного вульта (см. дорожную карту внизу).`, `<b>Now: the live-validation phase.</b> The system trades real money at small size.
+      этот проверенный трек — фундамент, на котором мы масштабируемся (см. дорожную карту внизу).`, `<b>Now: the live-validation phase.</b> The system trades real money at small size.
       The goal of this stage is not maximum profit but <b>honest statistics</b> on real costs. This proven
-      track record is exactly what will become the foundation of a public vault (see the roadmap below).`)}</div>
+      track record is the foundation we scale from (see the roadmap below).`)}</div>
     </div>
 
     ${hasData ? cards : ''}
@@ -483,7 +481,7 @@ export function renderLiveTrack(page = 1, lang: Lang = 'ru'): string {
     ${hasData ? `<div class="section" id="trades"><div class="section-title">${t(lang, `Закрытые сделки · все ${st.closed}`, `Closed trades · all ${st.closed}`)}</div>${tradesTable(rows, page, lang)}</div>` : emptyState}
 
     <div class="section">
-      <div class="section-title">${t(lang, 'Дорожная карта — к публичному вульту', 'Roadmap — toward a public vault')}</div>
+      <div class="section-title">${t(lang, 'Дорожная карта', 'Roadmap')}</div>
       <div class="rm">${stages}</div>
     </div>
 
@@ -509,7 +507,7 @@ export function liveTrackHero(lang: Lang = 'ru'): string {
       <div class="lt-hero-l">
         <span class="lt-hero-badge">🟢 LIVE · Hyperliquid · ${t(lang, 'реальные деньги', 'real money')}</span>
         <div class="lt-hero-title">${t(lang, 'Боевой трек — реальные результаты', 'Live track — real results')}</div>
-        <div class="lt-hero-sub">${t(lang, 'Что мы делаем, честная статистика и дорожная карта к вульту →', 'What we do, honest stats, and the roadmap to the vault →')}</div>
+        <div class="lt-hero-sub">${t(lang, 'Что мы делаем, честная статистика и дорожная карта →', 'What we do, honest stats, and the roadmap →')}</div>
       </div>
       <div class="lt-hero-r">
         <div class="lt-hero-stat"><div class="v ${cls(st.netPct)}">${pct(st.netPct)}</div><div class="k">${t(lang, 'накопл.', 'cumul.')}</div></div>

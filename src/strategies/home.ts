@@ -195,11 +195,6 @@ const CONTENT: Record<Lang, Content> = {
           title: 'Открытие подписки для всех желающих после успешного завершения beta.',
         },
         {
-          when: 'ОСЕНЬ 2026',
-          done: false,
-          title: 'Hyperliquid Vault — параллельный канал для тех кто хочет копировать через смарт-контракт без выдачи API-ключа.',
-        },
-        {
           when: 'Q4 2026',
           done: false,
           title: 'Расширение списка бирж: Binance, OKX. Пользователь сможет выбрать на какой бирже торговать.',
@@ -412,11 +407,6 @@ const CONTENT: Record<Lang, Content> = {
           when: 'SUMMER 2026',
           done: false,
           title: 'Public subscription open after beta completes.',
-        },
-        {
-          when: 'FALL 2026',
-          done: false,
-          title: 'Hyperliquid Vault — on-chain channel for those who prefer smart-contract copy trading over API keys.',
         },
         {
           when: 'Q4 2026',
