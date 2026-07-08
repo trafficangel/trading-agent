@@ -38,7 +38,8 @@ const momOpenStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_pos O
 const momShadowClosedStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_shadow_log WHERE closed_at IS NOT NULL ORDER BY closed_at ASC`);
 const momShadowOpenStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_shadow_pos ORDER BY opened_at DESC`);
 const limitVolClosesStmt = db.prepare<[string, number], { t: number; c: number }>(`SELECT t, c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
-const MOMENTUM_PUBLIC_START_MS = Date.UTC(2026, 6, 8, 18, 14, 0);
+const runtimeConfigStmt = db.prepare<[string], { value: string }>(`SELECT value FROM runtime_config WHERE key = ?`);
+const MOMENTUM_PUBLIC_START_FALLBACK_MS = Date.UTC(2026, 6, 8, 18, 14, 0);
 
 // ── formatters (self-contained; matches lab.ts style) ──
 function esc(s: string): string {
@@ -72,11 +73,24 @@ function heldStr(openedMs: number, nowMs: number, lang: Lang): string {
 }
 
 function momentumPublicRows(rows: MomRow[]): MomRow[] {
-  return rows.filter((r) => r.opened_at >= MOMENTUM_PUBLIC_START_MS);
+  const startMs = momentumPublicStartMs();
+  return rows.filter((r) => r.opened_at >= startMs);
+}
+
+function momentumPublicStartMs(): number {
+  const raw = Number(runtimeConfigStmt.get('hl_momentum_public_start_ms')?.value ?? MOMENTUM_PUBLIC_START_FALLBACK_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : MOMENTUM_PUBLIC_START_FALLBACK_MS;
 }
 
 function momentumPublicStartText(lang: Lang): string {
-  return t(lang, '8 июля 2026, 18:14 UTC', 'July 8, 2026, 18:14 UTC');
+  const d = new Date(momentumPublicStartMs());
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  const monthsRu = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  const monthsEn = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  return lang === 'en'
+    ? `${monthsEn[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}, ${hh}:${mm} UTC`
+    : `${d.getUTCDate()} ${monthsRu[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${hh}:${mm} UTC`;
 }
 
 type LimitVol = { volPct4h: number; factor: number; ageMs: number | null };
