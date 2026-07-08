@@ -36,8 +36,12 @@ const LIVE_LEVERAGE = 1;
 const LIVE_DAILY_STOP_PCT = -2.5;
 const COST_RT_PCT = 0.07; // shadow assumes taker entry + taker exit, conservative vs maker wick-fade
 const HOLD_MS = 30 * 60_000;
+const TRAIL_HOLD_MS = 60 * 60_000;
 const STOP_PCT = 0.012;
-const TARGET_PCT = 0.018;
+const TARGET_PCT = 0.016;
+const TRAIL_ACTIVATE_PCT = TARGET_PCT;
+const TRAIL_GIVEBACK_PCT = 0.007;
+const TRAIL_MIN_LOCK_PCT = 0.004;
 const IMPULSE_3BAR_PCT = 1.2;
 const VOL_RATIO_MIN = 1.8;
 const TREND_1H_PCT = 0.6;
@@ -178,8 +182,20 @@ function stopPx(side: Side, entry: number): number {
   return side === 'long' ? entry * (1 - STOP_PCT) : entry * (1 + STOP_PCT);
 }
 
-function targetPx(side: Side, entry: number): number {
-  return side === 'long' ? entry * (1 + TARGET_PCT) : entry * (1 - TARGET_PCT);
+function trailingState(pos: Pos, cs: Candle[]): { active: boolean; bestPx: number; movePct: number; trailPx: number | null } | null {
+  const bars = cs.filter((c) => c.t > pos.opened_at);
+  if (bars.length === 0) return null;
+  const bestPx = pos.side === 'long'
+    ? Math.max(...bars.map((c) => c.h))
+    : Math.min(...bars.map((c) => c.l));
+  const move = pos.side === 'long'
+    ? (bestPx - pos.entry_px) / pos.entry_px
+    : (pos.entry_px - bestPx) / pos.entry_px;
+  if (move < TRAIL_ACTIVATE_PCT) return { active: false, bestPx, movePct: move * 100, trailPx: null };
+  const trailPx = pos.side === 'long'
+    ? Math.max(pos.entry_px * (1 + TRAIL_MIN_LOCK_PCT), bestPx * (1 - TRAIL_GIVEBACK_PCT))
+    : Math.min(pos.entry_px * (1 - TRAIL_MIN_LOCK_PCT), bestPx * (1 + TRAIL_GIVEBACK_PCT));
+  return { active: true, bestPx, movePct: move * 100, trailPx };
 }
 
 function liveLock(coin: string, reason: string): void {
@@ -217,19 +233,19 @@ function managePosition(pos: Pos, cs: Candle[]): boolean {
   if (!last || last.t <= pos.opened_at) return false;
 
   const stop = pos.side === 'long' ? pos.entry_px * (1 - STOP_PCT) : pos.entry_px * (1 + STOP_PCT);
-  const target = pos.side === 'long' ? pos.entry_px * (1 + TARGET_PCT) : pos.entry_px * (1 - TARGET_PCT);
+  const trail = trailingState(pos, cs);
   const stopHit = pos.side === 'long' ? last.l <= stop : last.h >= stop;
-  const targetHit = pos.side === 'long' ? last.h >= target : last.l <= target;
-  const timed = last.t - pos.opened_at >= HOLD_MS;
+  const trailHit = trail?.active && trail.trailPx != null ? (pos.side === 'long' ? last.l <= trail.trailPx : last.h >= trail.trailPx) : false;
+  const timed = last.t - pos.opened_at >= (trail?.active ? TRAIL_HOLD_MS : HOLD_MS);
 
-  if (!stopHit && !targetHit && !timed) return false;
+  if (!stopHit && !trailHit && !timed) return false;
 
-  // Conservative same-bar ordering: stop before target.
-  const reason = stopHit ? 'stop' : targetHit ? 'target' : 'time-stop';
-  const exit = stopHit ? stop : targetHit ? target : last.c;
+  // Conservative same-bar ordering: hard stop before profit trail.
+  const reason = stopHit ? 'stop' : trailHit ? 'trailing-stop' : 'time-stop';
+  const exit = stopHit ? stop : trailHit && trail?.trailPx != null ? trail.trailPx : last.c;
   const pnl = pnlPct(pos.side, pos.entry_px, exit);
   closeTxn(pos.coin, exit, last.t, Math.round(pnl * 1000) / 1000, reason);
-  logger.info({ coin: pos.coin, side: pos.side, pnl: +pnl.toFixed(3), reason }, 'hl-momentum-shadow: closed paper position');
+  logger.info({ coin: pos.coin, side: pos.side, pnl: +pnl.toFixed(3), reason, trail }, 'hl-momentum-shadow: closed paper position');
   return true;
 }
 
@@ -242,6 +258,14 @@ async function cancelCoinOrders(coin: string): Promise<boolean> {
     if (!c.ok) { ok = false; logger.warn({ coin, oid: o.oid, msg: c.msg }, 'hl-momentum-live: cancel resting order failed'); }
   }
   return ok;
+}
+
+async function refreshLiveStop(pos: Pos, qty: number, triggerPx: number, label: string): Promise<void> {
+  const cancel = await hlCancelTriggers(pos.coin);
+  if (!cancel.ok) { logger.warn({ coin: pos.coin, msg: cancel.msg, label }, 'hl-momentum-live: trigger cancel failed before stop refresh'); return; }
+  const st = await hlPlaceStop({ coin: pos.coin, posSide: pos.side, qty, triggerPx });
+  if (!st.ok) logger.error({ coin: pos.coin, triggerPx, msg: st.msg, label }, 'hl-momentum-live: stop refresh failed - poll is backup');
+  else logger.info({ coin: pos.coin, triggerPx, cancelled: cancel.data, label }, 'hl-momentum-live: exchange stop refreshed');
 }
 
 async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
@@ -266,13 +290,16 @@ async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
   const last = cs.at(-1);
   if (!last || last.t <= pos.opened_at) return;
   const stop = stopPx(pos.side, pos.entry_px);
-  const target = targetPx(pos.side, pos.entry_px);
+  const trail = trailingState(pos, cs);
   const stopHit = pos.side === 'long' ? last.l <= stop : last.h >= stop;
-  const targetHit = pos.side === 'long' ? last.h >= target : last.l <= target;
-  const timed = last.t - pos.opened_at >= HOLD_MS;
-  if (!stopHit && !targetHit && !timed) return;
+  const trailHit = trail?.active && trail.trailPx != null ? (pos.side === 'long' ? last.l <= trail.trailPx : last.h >= trail.trailPx) : false;
+  const timed = last.t - pos.opened_at >= (trail?.active ? TRAIL_HOLD_MS : HOLD_MS);
+  if (!stopHit && !trailHit && !timed) {
+    if (trail?.active && trail.trailPx != null) await refreshLiveStop(pos, ex.data.size, trail.trailPx, 'trail');
+    return;
+  }
 
-  const reason = stopHit ? 'stop' : targetHit ? 'target' : 'time-stop';
+  const reason = stopHit ? 'stop' : trailHit ? 'trailing-stop' : 'time-stop';
   const close = await hlClosePosition(pos.coin);
   if (!close.ok) { logger.error({ coin: pos.coin, msg: close.msg }, 'hl-momentum-live: close failed'); return; }
   const check = await hlFetchPosition(pos.coin);
@@ -281,10 +308,10 @@ async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
   const exit = close.data.avgPx ?? last.c;
   const pnl = Math.round(pnlPct(pos.side, pos.entry_px, exit) * 1000) / 1000;
   liveCloseTxn(pos.coin, exit, Date.now(), pnl, reason);
-  logger.warn({ coin: pos.coin, side: pos.side, exit, pnl, reason }, 'hl-momentum-live: CLOSED');
+  logger.warn({ coin: pos.coin, side: pos.side, exit, pnl, reason, trail }, 'hl-momentum-live: CLOSED');
   void sendMessage({
     channel: 'logs',
-    text: `${pnl >= 0 ? '🟢' : '🔴'} <b>momentum-live CLOSED</b>: ${pos.coin} ${pos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${reason})\n${pos.entry_px} → ${exit.toFixed(6)}`,
+    text: `${pnl >= 0 ? '🟢' : '🔴'} <b>momentum-live CLOSED</b>: ${pos.coin} ${pos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${reason})\n${pos.entry_px} → ${exit.toFixed(6)}${trail?.active ? `\ntrail best ${trail.bestPx.toFixed(6)} · protected ${trail.trailPx?.toFixed(6)}` : ''}`,
   });
 }
 
@@ -325,7 +352,7 @@ async function liveMaybeOpen(coin: string, sig: { side: Side; signal: string }, 
   logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, stop, exStop: st.ok, signal: sig.signal }, 'hl-momentum-live: OPENED real position');
   void sendMessage({
     channel: 'logs',
-    text: `🧭 <b>momentum-live OPENED</b>: ${coin} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · ~$${LIVE_NOTIONAL_USD} · ${sig.signal}`,
+    text: `🧭 <b>momentum-live OPENED</b>: ${coin} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trailing after ${(TRAIL_ACTIVATE_PCT * 100).toFixed(1)}% · ~$${LIVE_NOTIONAL_USD} · ${sig.signal}`,
   });
 }
 
