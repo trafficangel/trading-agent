@@ -343,6 +343,10 @@ function runtimeNum(key: string, fallback: number, lo: number, hi: number): numb
   return Number.isFinite(raw) ? clamp(raw, lo, hi) : fallback;
 }
 
+function liveMaxOpen(): number {
+  return Math.round(runtimeNum('hl_momentum_live_max_open', LIVE_MAX_OPEN, 1, 20));
+}
+
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -1066,7 +1070,8 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
     if (dayPnl <= dailyStopPct) { recordSignal(sig, 'skip', `daily stop ${dayPnl.toFixed(2)} <= ${dailyStopPct}`); return; }
   }
   if (liveGetPosStmt.get(coin)) { recordSignal(sig, 'skip', 'live position already open'); return; }
-  if (liveAllPosStmt.all().length >= LIVE_MAX_OPEN) { recordSignal(sig, 'skip', `max live open ${LIVE_MAX_OPEN}`); return; }
+  const maxOpen = liveMaxOpen();
+  if (liveAllPosStmt.all().length >= maxOpen) { recordSignal(sig, 'skip', `max live open ${maxOpen}`); return; }
   if (wickOpenPosStmt.get(coin)) { recordSignal(sig, 'skip', 'wick-fade has coin'); return; }
   const gate = preTradeGate(sig, params);
   if (gate) { recordSignal(sig, 'skip', gate, { ref: last.c, signal: last.c }); return; }
@@ -1282,5 +1287,5 @@ export function startHlMomentumShadowJob(): void {
   setTimeout(() => { void fastRadarTick(); }, 10_000).unref();
   const t = setTimeout(() => { void tick(); }, 75_000);
   t.unref();
-  logger.info({ live: LIVE_ENABLED, liveNotionalMin: LIVE_MIN_NOTIONAL_USD, liveNotionalMax: LIVE_MAX_NOTIONAL_USD, liveLeverage: LIVE_LEVERAGE, liveMaxOpen: LIVE_MAX_OPEN, fastMidsPollMs: FAST_MIDS_POLL_MS }, 'hl-momentum scheduled (2s allMids radar + score/EV/Kelly sizing + filtered live micro)');
+  logger.info({ live: LIVE_ENABLED, liveNotionalMin: LIVE_MIN_NOTIONAL_USD, liveNotionalMax: LIVE_MAX_NOTIONAL_USD, liveLeverage: LIVE_LEVERAGE, liveMaxOpen: liveMaxOpen(), fastMidsPollMs: FAST_MIDS_POLL_MS }, 'hl-momentum scheduled (2s allMids radar + score/EV/Kelly sizing + filtered live micro)');
 }

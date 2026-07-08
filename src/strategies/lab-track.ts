@@ -652,6 +652,7 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
   const sessionStart = runtimeNum('hl_momentum_live_day_reset_ms', todayStartUtcMs());
   const session = momSessionPnlStmt.get(sessionStart) ?? { closed: 0, pct: 0, usd: 0 };
   const engineOpen = momEngineOpenStmt.get() ?? { open: 0, notional: 0 };
+  const maxOpen = runtimeNum('hl_momentum_live_max_open', 4);
   const minNotional = runtimeNum('hl_momentum_min_notional_usd', 11);
   const maxNotional = runtimeNum('hl_momentum_max_notional_usd', 24);
   const minProb = runtimeNum('hl_momentum_min_calibrated_prob', 0.49);
@@ -670,7 +671,7 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
       ${metric(t(lang, 'Рынок', 'Market'), `${universe.fresh ?? 0} / ${universe.coins}`, t(lang, `свежих монет из архива · свечи обновлены ${ageText(universe.newest, lang)}`, `fresh coins from archive · candles updated ${ageText(universe.newest, lang)}`))}
       ${metric(t(lang, 'Радар', 'Radar'), '2s', t(lang, 'allMids по всему рынку + 5m подтверждающий слой раз в минуту', 'allMids across the market + 5m confirmation layer every minute'))}
       ${metric(t(lang, 'Сигналы', 'Signals'), String(sig.total), t(lang, `${sig.skipped ?? 0} отфильтрованы защитой · ${sig.live_open ?? 0} новых live-входов`, `${sig.skipped ?? 0} filtered by protection · ${sig.live_open ?? 0} new live entries`))}
-      ${metric(t(lang, 'Позиции', 'Positions'), `${liveOpenPublic} / 4`, t(lang, `${engineOpen.open} сейчас под управлением движка · публичный трек показывает новые после reset`, `${engineOpen.open} currently managed by engine · public track shows new ones after reset`))}
+      ${metric(t(lang, 'Позиции', 'Positions'), `${liveOpenPublic} / ${maxOpen}`, t(lang, `${engineOpen.open} сейчас под управлением движка · публичный трек показывает новые после reset`, `${engineOpen.open} currently managed by engine · public track shows new ones after reset`))}
       ${metric(t(lang, 'Качество входа', 'Entry quality'), `score ≥ ${minScore}`, t(lang, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · средний score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · avg score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`))}
       ${metric(t(lang, 'Kelly размер', 'Kelly sizing'), `$${minNotional.toFixed(0)}–${maxNotional.toFixed(0)}`, t(lang, `${kellyOn ? 'включён' : 'выключен'} · средний размер сигнала ${sig.avg_notional != null ? usd(sig.avg_notional) : '—'}`, `${kellyOn ? 'enabled' : 'disabled'} · avg signal size ${sig.avg_notional != null ? usd(sig.avg_notional) : '—'}`))}
       ${metric(t(lang, 'Dollar-stop', 'Dollar stop'), usd(stopUsd, true), t(lang, `сессия ${usd(usedUsd, true)} · до стопа ${usd(stopLeft)}`, `session ${usd(usedUsd, true)} · to stop ${usd(stopLeft)}`), usedUsd < 0 ? 'neg' : '')}
