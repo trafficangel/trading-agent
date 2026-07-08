@@ -27,8 +27,14 @@ type WfRow = {
   id: number; coin: string; side: string; entry_px: number; qty: number; x: number | null;
   opened_at: number; exit_px: number | null; closed_at: number | null; pnl_pct: number | null; close_reason: string | null;
 };
+type MomRow = {
+  id: number; coin: string; side: string; entry_px: number; qty: number; opened_at: number; signal: string;
+  exit_px: number | null; closed_at: number | null; pnl_pct: number | null; close_reason: string | null;
+};
 const closedStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode='live' AND closed_at IS NOT NULL ORDER BY closed_at ASC`);
 const openStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode='live' AND closed_at IS NULL ORDER BY opened_at DESC`);
+const momClosedStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_log WHERE closed_at IS NOT NULL ORDER BY closed_at ASC`);
+const momOpenStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_pos ORDER BY opened_at DESC`);
 const limitVolClosesStmt = db.prepare<[string, number], { t: number; c: number }>(`SELECT t, c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
 
 // ── formatters (self-contained; matches lab.ts style) ──
@@ -49,6 +55,8 @@ function fmtDt(ms: number | null): string {
 }
 const notionalOf = (r: WfRow): number => r.qty * r.entry_px;
 const usdOf = (r: WfRow): number => ((r.pnl_pct ?? 0) / 100) * notionalOf(r);
+const momNotionalOf = (r: MomRow): number => r.qty * r.entry_px;
+const momUsdOf = (r: MomRow): number => ((r.pnl_pct ?? 0) / 100) * momNotionalOf(r);
 /** Format a computed price (target/stop) at the same decimal precision as the entry, so it lines up. */
 function fmtPx(n: number, ref: number): string {
   const dp = Math.min(8, Math.max(2, (String(ref).split('.')[1] ?? '').length));
@@ -60,11 +68,12 @@ function heldStr(openedMs: number, nowMs: number, lang: Lang): string {
   return m >= 60 ? `${Math.floor(m / 60)}${t(lang, 'ч', 'h')} ${m % 60}${t(lang, 'м', 'm')}` : `${m}${t(lang, 'м', 'm')}`;
 }
 
-type LimitVol = { volPct4h: number; factor: number };
+type LimitVol = { volPct4h: number; factor: number; ageMs: number | null };
 function limitVolState(coin: string): LimitVol | null {
   const W = WF_CONFIG.volWindow;
-  let rows: { c: number }[];
+  let rows: { t: number; c: number }[];
   try { rows = limitVolClosesStmt.all(coin, 550); } catch { return null; }
+  const newestT = rows[0]?.t ?? null;
   const closes = rows.map((r) => r.c).reverse();
   if (closes.length < W + 80) return null;
   const rets: number[] = [];
@@ -87,7 +96,11 @@ function limitVolState(coin: string): LimitVol | null {
   const cur = volAt(rets.length);
   if (!(cur > 0)) return null;
   const rawFactor = e > 0 ? cur / e : 1;
-  return { volPct4h: cur * Math.sqrt(W) * 100, factor: Math.min(2, Math.max(0.4, rawFactor)) };
+  return {
+    volPct4h: cur * Math.sqrt(W) * 100,
+    factor: Math.min(2, Math.max(0.4, rawFactor)),
+    ageMs: newestT == null ? null : Date.now() - newestT,
+  };
 }
 
 async function liveMids(): Promise<Map<string, number>> {
@@ -100,7 +113,7 @@ async function liveMids(): Promise<Map<string, number>> {
       if (mid > 0) out.set(u.name, mid);
     });
   } catch {
-    // Informative only: the table still renders raw exchange orders without current mids.
+    // Public market snapshot is informative only; the table still renders raw exchange orders without it.
   }
   return out;
 }
@@ -215,7 +228,7 @@ const TRACK_CSS = `
   .limit-head .section-title{margin:0}
   .limit-meta{font-size:12px;color:var(--text-faint);font-variant-numeric:tabular-nums}
   .limit-note{font-size:12px;color:var(--text-faint);line-height:1.5;margin:10px 0 0}
-  .limit-corridor{display:inline-flex;align-items:center;font-weight:650}
+  .limit-corridor{display:inline-flex;align-items:center;gap:6px;font-weight:650}
   .limit-corridor.long{color:var(--accent)}
   .limit-corridor.short{color:var(--danger)}
   .limit-vol{display:flex;flex-direction:column;gap:2px;align-items:flex-end;line-height:1.15}
@@ -355,6 +368,53 @@ function openPositionsSection(nowMs: number, lang: Lang): string {
       <tbody>${body}</tbody></table></div></div>`;
 }
 
+function momentumLiveSection(nowMs: number, lang: Lang): string {
+  const closed = momClosedStmt.all();
+  const open = momOpenStmt.all();
+  const pnls = closed.map((r) => r.pnl_pct ?? 0);
+  const net = pnls.reduce((s, p) => s + p, 0);
+  const wins = pnls.filter((p) => p > 0).length;
+  const losses = pnls.filter((p) => p < 0).length;
+  const netUsd = closed.reduce((s, r) => s + momUsdOf(r), 0);
+  const wr = wins + losses > 0 ? `${((wins / (wins + losses)) * 100).toFixed(0)}%` : '—';
+  const openRows = open.map((r) => `<tr>
+    <td><b>${esc(r.coin)}</b></td>
+    <td><span class="sd ${r.side === 'long' ? 'long' : 'short'}">${r.side.toUpperCase()}</span></td>
+    <td class="r mono">${r.entry_px}</td>
+    <td class="r">${usd(momNotionalOf(r))}</td>
+    <td class="dt">${heldStr(r.opened_at, nowMs, lang)}</td>
+    <td>${esc(r.signal)}</td>
+  </tr>`).join('');
+  const recent = closed.slice().reverse().slice(0, 12).map((r) => {
+    const p = r.pnl_pct ?? 0;
+    return `<tr>
+      <td>#${r.id}</td>
+      <td><b>${esc(r.coin)}</b></td>
+      <td><span class="sd ${r.side === 'long' ? 'long' : 'short'}">${r.side.toUpperCase()}</span></td>
+      <td class="r mono">${r.entry_px}</td>
+      <td class="r mono">${r.exit_px ?? '—'}</td>
+      <td class="r mono ${cls(p)}">${pct(p)}</td>
+      <td class="r ${cls(momUsdOf(r))}">${usd(momUsdOf(r), true)}</td>
+      <td><span class="rp">${esc(r.close_reason ?? '—')}</span></td>
+      <td class="dt">${fmtDt(r.opened_at)}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="section" id="momentum-live">
+    <div class="section-title">${t(lang, 'Вторая live-механика: Momentum Follow', 'Second live mechanic: Momentum Follow')}</div>
+    <p class="sd-lead">${t(lang,
+      'Это противоположность основной wick-fade стратегии. Если wick-fade ловит возврат после шипа, то Momentum Follow входит <b>по направлению импульса</b>, когда движение подтверждено объёмом и удержанием цены. Размер минимальный (~$12), 1x, с биржевым стопом; монета временно блокируется для wick-fade, чтобы стратегии не конфликтовали.',
+      'This is the opposite of the main wick-fade strategy. If wick-fade catches snap-back after a spike, Momentum Follow enters <b>with the impulse</b> when the move is confirmed by volume and price holding. Size is minimal (~$12), 1x, with an exchange stop; the coin is temporarily locked away from wick-fade so the strategies cannot fight each other.')}</p>
+    <div class="lt-cards">
+      <div class="lt-stat"><div class="l">${t(lang, 'Статус', 'Status')}</div><div class="v">${t(lang, 'REAL · малый размер', 'REAL · small size')}</div><div class="s">${t(lang, 'проверяем на деньгах', 'testing with real money')}</div></div>
+      <div class="lt-stat"><div class="l">${t(lang, 'Закрытых', 'Closed')}</div><div class="v">${closed.length}</div><div class="s">${open.length} ${t(lang, 'открыто', 'open')}</div></div>
+      <div class="lt-stat"><div class="l">${t(lang, 'Результат', 'Result')}</div><div class="v ${cls(net)}">${pct(net)}</div><div class="s ${cls(netUsd)}">${usd(netUsd, true)}</div></div>
+      <div class="lt-stat"><div class="l">${t(lang, 'WR', 'WR')}</div><div class="v">${wr}</div><div class="s">${wins}W / ${losses}L</div></div>
+    </div>
+    ${open.length ? `<div class="section-subtitle">${t(lang, 'Momentum открыто сейчас', 'Momentum open now')}</div><div class="card table-wrap"><table class="lt-tbl"><thead><tr><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th><th class="r">${t(lang, 'Размер', 'Size')}</th><th>${t(lang, 'В работе', 'Held')}</th><th>${t(lang, 'Сигнал', 'Signal')}</th></tr></thead><tbody>${openRows}</tbody></table></div>` : ''}
+    ${closed.length ? `<div class="section-subtitle">${t(lang, 'Momentum закрытые сделки', 'Momentum closed trades')}</div><div class="card table-wrap"><table class="lt-tbl"><thead><tr><th>#</th><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th><th class="r">${t(lang, 'Выход', 'Exit')}</th><th class="r">${t(lang, 'Результат', 'Result')}</th><th class="r">P&amp;L $</th><th>${t(lang, 'Как закрыли', 'Exit')}</th><th>${t(lang, 'Открыта (UTC)', 'Opened (UTC)')}</th></tr></thead><tbody>${recent}</tbody></table></div>` : ''}
+  </div>`;
+}
 
 function limitRungLabel(o: HlOpenOrder, distancePct: number | null, vol: LimitVol | null, lang: Lang): string {
   const base = COIN_X[o.coin];
@@ -363,13 +423,17 @@ function limitRungLabel(o: HlOpenOrder, distancePct: number | null, vol: LimitVo
   const baseDepth = base * factor * 100;
   const deepDepth = LADDER[o.coin] != null ? LADDER[o.coin]! * factor * 100 : null;
   if (deepDepth == null) return t(lang, 'базовая', 'base');
-  return distancePct >= (baseDepth + deepDepth) / 2 ? t(lang, 'глубокая', 'deep') : t(lang, 'базовая', 'base');
+  const mid = (baseDepth + deepDepth) / 2;
+  return distancePct >= mid ? t(lang, 'глубокая', 'deep') : t(lang, 'базовая', 'base');
 }
 
 async function openLimitsSection(lang: Lang): Promise<string> {
   const res = await hlOpenOrders();
   if (!res.ok) {
-    return `<div class="section"><div class="limit-head"><div class="section-title">${t(lang, 'Выставленные лимитки', 'Resting limit orders')}</div></div><div class="limit-warn">${t(lang, 'Не удалось прочитать лимитки с Hyperliquid:', 'Could not read Hyperliquid limit orders:')} ${esc(res.msg)}</div></div>`;
+    return `<div class="section">
+      <div class="limit-head"><div class="section-title">${t(lang, 'Выставленные лимитки', 'Resting limit orders')}</div></div>
+      <div class="limit-warn">${t(lang, 'Не удалось прочитать лимитки с Hyperliquid:', 'Could not read Hyperliquid limit orders:')} ${esc(res.msg)}</div>
+    </div>`;
   }
   const mids = await liveMids();
   const orders = res.data
@@ -377,13 +441,20 @@ async function openLimitsSection(lang: Lang): Promise<string> {
     .sort((a, b) => a.coin.localeCompare(b.coin) || (a.side === b.side ? a.px - b.px : a.side === 'long' ? -1 : 1));
   const now = new Date();
   if (orders.length === 0) {
-    return `<div class="section"><div class="limit-head"><div class="section-title">${t(lang, 'Выставленные лимитки', 'Resting limit orders')} · 0</div><div class="limit-meta">${t(lang, 'обновлено', 'updated')} ${now.toISOString().slice(11, 19)} UTC</div></div><div class="card"><div class="card-body"><div class="empty-state" style="padding:20px 0;text-align:center;">${t(lang, 'Сейчас входных лимиток нет: книга снята защитой, бюджетом действий или открытыми позициями.', 'No entry limits right now: the book is pulled by protection, action budget, or open positions.')}</div></div></div></div>`;
+    return `<div class="section">
+      <div class="limit-head">
+        <div class="section-title">${t(lang, 'Выставленные лимитки', 'Resting limit orders')} · 0</div>
+        <div class="limit-meta">${t(lang, 'обновлено', 'updated')} ${now.toISOString().slice(11, 19)} UTC</div>
+      </div>
+      <div class="card"><div class="card-body"><div class="empty-state" style="padding:20px 0;text-align:center;">${t(lang, 'Сейчас входных лимиток нет: книга снята защитой, бюджетом действий или открытыми позициями.', 'No entry limits right now: the book is pulled by protection, action budget, or open positions.')}</div></div></div>
+    </div>`;
   }
   const body = orders.map((o) => {
     const mid = mids.get(o.coin) ?? null;
     const distancePct = mid != null ? (o.side === 'long' ? (mid - o.px) / mid : (o.px - mid) / mid) * 100 : null;
     const vol = limitVolState(o.coin);
     const notional = o.px * o.sz;
+    const corridorCls = o.side === 'long' ? 'long' : 'short';
     const distText = distancePct == null ? '—' : `${distancePct.toFixed(2)}%`;
     const volText = vol ? `${vol.volPct4h.toFixed(2)}%` : '—';
     const factorText = vol ? `×${vol.factor.toFixed(2)} ${t(lang, 'к норме', 'vs norm')}` : t(lang, 'нет свечей', 'no candles');
@@ -392,7 +463,7 @@ async function openLimitsSection(lang: Lang): Promise<string> {
       <td><span class="sd ${o.side === 'long' ? 'long' : 'short'}">${o.side.toUpperCase()}</span></td>
       <td class="r mono">${fmtPx(o.px, o.px)}</td>
       <td class="r mono">${mid != null ? fmtPx(mid, o.px) : '—'}</td>
-      <td class="r mono"><span class="limit-corridor ${o.side === 'long' ? 'long' : 'short'}">${distText}</span></td>
+      <td class="r mono"><span class="limit-corridor ${corridorCls}">${distText}</span></td>
       <td>${limitRungLabel(o, distancePct, vol, lang)}</td>
       <td class="r mono">${o.sz.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}</td>
       <td class="r mono">${usd(notional)}</td>
@@ -401,13 +472,22 @@ async function openLimitsSection(lang: Lang): Promise<string> {
     </tr>`;
   }).join('');
   return `<div class="section" id="limits">
-    <div class="limit-head"><div class="section-title">${t(lang, 'Выставленные лимитки', 'Resting limit orders')} · ${orders.length}</div><div class="limit-meta">${t(lang, 'обновлено', 'updated')} ${now.toISOString().slice(11, 19)} UTC · ${t(lang, 'автообновление 60 сек', 'auto-refresh 60s')}</div></div>
-    <div class="card table-wrap"><table class="lt-tbl"><thead><tr>
-      <th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Лимит', 'Limit')}</th><th class="r">${t(lang, 'Сейчас', 'Now')}</th><th class="r">${t(lang, 'Коридор от цены', 'Distance')}</th><th>${t(lang, 'Уровень', 'Rung')}</th><th class="r">${t(lang, 'Кол-во', 'Qty')}</th><th class="r">${t(lang, 'Номинал', 'Notional')}</th><th class="r">${t(lang, 'Волатильность 4ч', '4h volatility')}</th><th class="r">OID</th>
-    </tr></thead><tbody>${body}</tbody></table></div>
+    <div class="limit-head">
+      <div class="section-title">${t(lang, 'Выставленные лимитки', 'Resting limit orders')} · ${orders.length}</div>
+      <div class="limit-meta">${t(lang, 'обновлено', 'updated')} ${now.toISOString().slice(11, 19)} UTC · ${t(lang, 'автообновление 60 сек', 'auto-refresh 60s')}</div>
+    </div>
+    <div class="card table-wrap"><table class="lt-tbl">
+      <thead><tr>
+        <th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th>
+        <th class="r">${t(lang, 'Лимит', 'Limit')}</th><th class="r">${t(lang, 'Сейчас', 'Now')}</th>
+        <th class="r">${t(lang, 'Коридор от цены', 'Distance')}</th><th>${t(lang, 'Уровень', 'Rung')}</th>
+        <th class="r">${t(lang, 'Кол-во', 'Qty')}</th><th class="r">${t(lang, 'Номинал', 'Notional')}</th>
+        <th class="r">${t(lang, 'Волатильность 4ч', '4h volatility')}</th><th class="r">OID</th>
+      </tr></thead><tbody>${body}</tbody></table></div>
     <p class="limit-note">${t(lang, 'Коридор показывает, на сколько процентов лимитка стоит дальше текущей цены. Волатильность считается по 5-минутным свечам за последние 4 часа; множитель показывает, насколько текущий режим шире или тише обычного.', 'Distance shows how far the limit is from current price. Volatility is computed from 5-minute candles over the last 4 hours; the multiplier shows how much wider or calmer the current regime is versus normal.')}</p>
   </div>`;
 }
+
 /** Detailed strategy explainer — a schematic SVG of the wick-fade mechanic + what it's based on, the data
  *  analysed, and the layered stops. Static (no data) — the credibility/depth surface for the live track. */
 function strategyDetail(universe: number, lang: Lang): string {
@@ -590,6 +670,7 @@ export async function renderLiveTrack(page = 1, lang: Lang = 'ru'): Promise<stri
     ${hasData ? `<div class="section"><div class="section-title">${t(lang, 'Кривая результата (накопленный %, net комиссий)', 'Result curve (cumulative %, net of fees)')}</div>${equityCurve(st.cum, lang)}</div>` : ''}
     ${hasData ? dailyStrip(rows, lang) : ''}
     ${strategyDetail(universe, lang)}
+    ${momentumLiveSection(Date.now(), lang)}
     ${limitsSection}
     ${openPositionsSection(Date.now(), lang)}
     ${hasData ? `<div class="section" id="trades"><div class="section-title">${t(lang, `Закрытые сделки · все ${st.closed}`, `Closed trades · all ${st.closed}`)}</div>${tradesTable(rows, page, lang)}</div>` : emptyState}

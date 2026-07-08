@@ -187,6 +187,7 @@ const QUARANTINE_LOG_COOLDOWN_MS = 6 * 60 * 60_000;
 const sidePerfStmt = db.prepare<[string, string, string, number], { n: number; sum_pnl: number | null }>(`SELECT COUNT(*) AS n, SUM(pnl_pct) AS sum_pnl FROM wick_fade_log WHERE coin = ? AND side = ? AND mode = ? AND closed_at IS NOT NULL AND closed_at >= ?`);
 const coinCatStmt = db.prepare<[string, string, number], { n: number }>(`SELECT COUNT(*) AS n FROM wick_fade_log WHERE coin = ? AND mode = ? AND closed_at IS NOT NULL AND closed_at >= ? AND (close_reason = 'catastrophe' OR (close_reason = 'reconciled-flat' AND (pnl_pct <= -2 OR pnl_pct IS NULL)))`);
 const doctorPauseStmt = db.prepare<[string, string, number], { paused_until: number; reason: string }>(`SELECT paused_until, reason FROM wick_fade_doctor_pause WHERE coin = ? AND side = ? AND paused_until > ?`);
+const momentumLockStmt = db.prepare<[string, number], { locked_until: number; reason: string }>(`SELECT locked_until, reason FROM hl_momentum_live_lock WHERE coin = ? AND locked_until > ?`);
 const quarantineLogAt = new Map<string, number>();
 function liveQuarantineReason(coin: string, side: 'long' | 'short', nowMs: number): string | null {
   const doctorPause = doctorPauseStmt.get(coin, side, nowMs);
@@ -405,6 +406,14 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marke
   const exPos = exRes.data;
   const ooRes = await hlOpenOrders(coin);
   const exOrders = ooRes.ok ? ooRes.data : [];
+  const momentumLock = momentumLockStmt.get(coin, nowMs);
+
+  // Another HL live strategy owns this coin right now. Pull wick-fade traps and
+  // do NOT adopt the exchange position as a wick-fade orphan fill.
+  if (momentumLock && !dbPos) {
+    if (ooRes.ok && exOrders.length) await cancelAll(coin, exOrders);
+    return NO_ACTIONS;
+  }
 
   // ── RECONCILE: a deep quote FILLED (exchange position, no DB row) → adopt + clear the other side ──
   if (exPos && !dbPos && x != null) { // a CUT coin (x==null) never adopts a NEW fill (its quotes are cancelled)
@@ -489,6 +498,7 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marke
   // Guard: if we could NOT read open orders, do NOT place quotes — we'd risk duplicating an unseen
   // resting order. (Position reconcile/exit above don't need exOrders, so they already ran safely.)
   if (!ooRes.ok) { logger.warn({ coin, msg: ooRes.msg }, 'wick-fade: openOrders read failed — skip quoting this tick'); return NO_ACTIONS; }
+  if (momentumLock) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
   if (marketBlockReason) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
   // HL ADDRESS ACTION BUDGET (learned live Jul 4): every order/cancel costs 1 action from a budget of
   // 10k + $1-of-volume-traded each. Per-minute re-quoting across 21+ coins burned ~11.4k actions on $186
