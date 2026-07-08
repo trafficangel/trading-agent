@@ -210,6 +210,13 @@ function runtimePct(key: string, fallback: number): number {
   return Number.isFinite(raw) ? raw : fallback;
 }
 
+function runtimeBool(key: string, fallback: boolean): boolean {
+  const value = getKvStmt.get(key)?.value;
+  if (value == null || value.trim() === '') return fallback;
+  const raw = Number(value);
+  return Number.isFinite(raw) ? raw >= 0.5 : fallback;
+}
+
 function reasonMix(rows: TradeRow[]): string {
   const mix = new Map<string, number>();
   for (const r of rows) mix.set(r.close_reason ?? 'unknown', (mix.get(r.close_reason ?? 'unknown') ?? 0) + 1);
@@ -259,8 +266,9 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
   const decayCandidatePnl = decayCandidates.reduce((acc, x) => acc + x.r.pnl_pct, 0);
   const probLines = probabilityBuckets();
   const actions: string[] = [];
+  const autotuneEnabled = runtimeBool('hl_momentum_doctor_autotune_enabled', true);
 
-  if (best && rows.length >= MIN_SAMPLE_FOR_AUTOTUNE && best.sum >= current.sum + MIN_AUTOTUNE_EDGE_PCT) {
+  if (autotuneEnabled && best && rows.length >= MIN_SAMPLE_FOR_AUTOTUNE && best.sum >= current.sum + MIN_AUTOTUNE_EDGE_PCT) {
     setKvStmt.run('hl_momentum_min_stop_pct', best.minStopPct.toFixed(4), nowMs, 'hl momentum doctor auto-tune stop floor');
     actions.push(`auto-tune stop floor: ${(currentMin * 100).toFixed(2)}% → ${(best.minStopPct * 100).toFixed(2)}%`);
   }
@@ -283,6 +291,7 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
     ...(probLines.length ? probLines.map(esc) : [`• ждём новые сигналы с calibrated_prob`]),
     ``,
     `<b>Автотюнинг</b>`,
+    autotuneEnabled ? `• режим: включён` : `• режим: выключен, только отчёт`,
     actions.length ? actions.map((a) => `• ${esc(a)}`).join('\n') : `• без автоправки: нужно &gt;=${MIN_SAMPLE_FOR_AUTOTUNE} закрытых live-сделок и преимущество &gt;=${MIN_AUTOTUNE_EDGE_PCT}%`,
     ``,
     `<i>Доктор может менять только ограниченные runtime-параметры риска. Размер, плечо и включение новой стратегии не меняются автоматически.</i>`,

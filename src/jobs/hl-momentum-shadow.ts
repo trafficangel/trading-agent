@@ -108,6 +108,9 @@ const FAST_MIDS_HISTORY_MS = 5 * 60_000;
 const FAST_MOVE_VOL_MULT = 1.60;
 const FAST_FROM_LAST_CLOSE_VOL_MULT = 1.05;
 const FAST_MAX_AGAINST_VOL_MULT = 0.35;
+const FAST_STRICT_MULT = 1.0;
+const FAST_BREAKOUT_LOOKBACK = 0;
+const FAST_BREAKOUT_BUFFER_PCT = 0.0;
 const FAST_MAX_CANDIDATES_PER_TICK = 2;
 const FAST_COIN_COOLDOWN_MS = 5 * 60_000;
 const FAST_GLOBAL_ATTEMPT_GAP_MS = 6_000;
@@ -347,6 +350,18 @@ function liveMaxOpen(): number {
   return Math.round(runtimeNum('hl_momentum_live_max_open', LIVE_MAX_OPEN, 1, 20));
 }
 
+function fastStrictMult(): number {
+  return runtimeNum('hl_momentum_fast_strict_mult', FAST_STRICT_MULT, 1, 2);
+}
+
+function fastBreakoutLookback(): number {
+  return Math.round(runtimeNum('hl_momentum_fast_breakout_lookback', FAST_BREAKOUT_LOOKBACK, 0, 8));
+}
+
+function fastBreakoutBufferPct(): number {
+  return runtimeNum('hl_momentum_fast_breakout_buffer_pct', FAST_BREAKOUT_BUFFER_PCT, 0, 0.50);
+}
+
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -527,6 +542,7 @@ type AdaptiveThresholds = {
 
 function adaptiveThresholds(cs: Candle[], atMs: number): AdaptiveThresholds {
   const vol5mPct = volatilityPctAt(cs, atMs) * 100;
+  const strict = fastStrictMult();
   const vols = cs.slice(Math.max(0, cs.length - 97), Math.max(0, cs.length - 1)).map((c) => c.v).filter((v) => v > 0);
   const volAvg = vols.length ? vols.reduce((s, v) => s + v, 0) / vols.length : 0;
   const volQ = quantile(vols, VOLUME_QUANTILE);
@@ -539,15 +555,17 @@ function adaptiveThresholds(cs: Candle[], atMs: number): AdaptiveThresholds {
     volRatioMin,
     longCloseMin: edge,
     shortCloseMax: 1 - edge,
-    fast30Pct: clamp(vol5mPct * Math.sqrt(30 / 300) * FAST_MOVE_VOL_MULT, 0.18, 1.10),
-    fast90Pct: clamp(vol5mPct * Math.sqrt(90 / 300) * FAST_MOVE_VOL_MULT, 0.30, 1.75),
-    fastFromLastPct: clamp(vol5mPct * FAST_FROM_LAST_CLOSE_VOL_MULT, 0.30, 1.80),
+    fast30Pct: clamp(vol5mPct * Math.sqrt(30 / 300) * FAST_MOVE_VOL_MULT * strict, 0.18 * strict, 1.80),
+    fast90Pct: clamp(vol5mPct * Math.sqrt(90 / 300) * FAST_MOVE_VOL_MULT * strict, 0.30 * strict, 2.60),
+    fastFromLastPct: clamp(vol5mPct * FAST_FROM_LAST_CLOSE_VOL_MULT * strict, 0.30 * strict, 2.60),
     fastMaxAgainst1hPct: clamp(vol5mPct * FAST_MAX_AGAINST_VOL_MULT, 0.12, 0.90),
   };
 }
 
 function thSignal(th: AdaptiveThresholds): string {
-  return `thr vol5m=${th.vol5mPct.toFixed(2)} imp3=${th.impulse3Pct.toFixed(2)} tr1h=${th.trend1hPct.toFixed(2)} volx=${th.volRatioMin.toFixed(2)} edge=${th.longCloseMin.toFixed(2)} fast30=${th.fast30Pct.toFixed(2)} fast90=${th.fast90Pct.toFixed(2)} fast5m=${th.fastFromLastPct.toFixed(2)}`;
+  const strict = fastStrictMult();
+  const strictText = strict > 1 ? ` strict=${strict.toFixed(2)}` : '';
+  return `thr vol5m=${th.vol5mPct.toFixed(2)} imp3=${th.impulse3Pct.toFixed(2)} tr1h=${th.trend1hPct.toFixed(2)} volx=${th.volRatioMin.toFixed(2)} edge=${th.longCloseMin.toFixed(2)} fast30=${th.fast30Pct.toFixed(2)} fast90=${th.fast90Pct.toFixed(2)} fast5m=${th.fastFromLastPct.toFixed(2)}${strictText}`;
 }
 
 function coinQualityAdj(coin: string, side: Side): number {
@@ -832,6 +850,22 @@ function pctFromMid(coin: string, mid: number, now: number, ageMs: number): numb
   return prev != null && prev > 0 ? pct(prev, mid) : null;
 }
 
+function fastBreakoutGate(side: Side, mid: number, cs: Candle[]): string | null {
+  const lookback = fastBreakoutLookback();
+  if (lookback <= 0 || cs.length < lookback + 2) return null;
+  const bufferPct = fastBreakoutBufferPct();
+  const prev = cs.slice(Math.max(0, cs.length - lookback - 1), cs.length - 1);
+  if (prev.length < lookback) return null;
+
+  if (side === 'long') {
+    const level = Math.max(...prev.map((c) => c.c)) * (1 + bufferPct / 100);
+    return mid >= level ? null : `fast long no breakout ${mid.toFixed(6)} < prev${lookback} close ${level.toFixed(6)}`;
+  }
+
+  const level = Math.min(...prev.map((c) => c.c)) * (1 - bufferPct / 100);
+  return mid <= level ? null : `fast short no breakdown ${mid.toFixed(6)} > prev${lookback} close ${level.toFixed(6)}`;
+}
+
 function updateMarketRegime(mids: Map<string, number>, now: number): void {
   let up = 0;
   let down = 0;
@@ -868,6 +902,8 @@ function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): Ear
     && fromLast >= th.fastFromLastPct
     && r12 >= -th.fastMaxAgainst1hPct;
   if (up) {
+    const structureBlock = fastBreakoutGate('long', mid, cs);
+    if (structureBlock) return null;
     const scored = scoreSignal({
       coin,
       side: 'long',
@@ -882,6 +918,8 @@ function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): Ear
     && fromLast <= -th.fastFromLastPct
     && r12 <= th.fastMaxAgainst1hPct;
   if (down) {
+    const structureBlock = fastBreakoutGate('short', mid, cs);
+    if (structureBlock) return null;
     const scored = scoreSignal({
       coin,
       side: 'short',
@@ -1287,5 +1325,15 @@ export function startHlMomentumShadowJob(): void {
   setTimeout(() => { void fastRadarTick(); }, 10_000).unref();
   const t = setTimeout(() => { void tick(); }, 75_000);
   t.unref();
-  logger.info({ live: LIVE_ENABLED, liveNotionalMin: LIVE_MIN_NOTIONAL_USD, liveNotionalMax: LIVE_MAX_NOTIONAL_USD, liveLeverage: LIVE_LEVERAGE, liveMaxOpen: liveMaxOpen(), fastMidsPollMs: FAST_MIDS_POLL_MS }, 'hl-momentum scheduled (2s allMids radar + score/EV/Kelly sizing + filtered live micro)');
+  logger.info({
+    live: LIVE_ENABLED,
+    liveNotionalMin: LIVE_MIN_NOTIONAL_USD,
+    liveNotionalMax: LIVE_MAX_NOTIONAL_USD,
+    liveLeverage: LIVE_LEVERAGE,
+    liveMaxOpen: liveMaxOpen(),
+    fastMidsPollMs: FAST_MIDS_POLL_MS,
+    fastStrictMult: fastStrictMult(),
+    fastBreakoutLookback: fastBreakoutLookback(),
+    fastBreakoutBufferPct: fastBreakoutBufferPct(),
+  }, 'hl-momentum scheduled (2s allMids radar + score/EV/Kelly sizing + filtered live micro)');
 }
