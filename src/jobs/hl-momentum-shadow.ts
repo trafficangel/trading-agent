@@ -40,7 +40,7 @@ const LIVE_ENABLED = true;
 const LIVE_NOTIONAL_USD = 12;
 const LIVE_LEVERAGE = 1;
 const LIVE_MAX_OPEN = 4;
-const LIVE_DAILY_STOP_PCT = -2.5;
+const LIVE_DAILY_STOP_PCT = -10;
 const LIVE_MAX_SPREAD_PCT = 0.35;
 const LIVE_MIN_SIDE_DEPTH_USD = 150;
 const LIVE_MAX_NOTIONAL_TO_DEPTH = 0.10;
@@ -206,6 +206,10 @@ function clamp(n: number, lo: number, hi: number): number {
 function runtimePct(key: string, fallback: number, lo: number, hi: number): number {
   const raw = Number(getKvStmt.get(key)?.value ?? fallback);
   return Number.isFinite(raw) ? clamp(raw, lo, hi) : fallback;
+}
+
+function liveDailyStopPct(): number {
+  return runtimePct('hl_momentum_live_daily_stop_pct', LIVE_DAILY_STOP_PCT, -25, -1);
 }
 
 function esc(s: string): string {
@@ -650,7 +654,8 @@ async function liveMaybeOpen(coin: string, sig: { side: Side; signal: string }, 
   if (!LIVE_ENABLED) return;
   if (liveFastClosing.has(coin)) return;
   const dayPnl = liveTodayPnlStmt.get(todayStartUtc(Date.now()))?.pnl ?? 0;
-  if (dayPnl <= LIVE_DAILY_STOP_PCT) return;
+  const dailyStopPct = liveDailyStopPct();
+  if (dayPnl <= dailyStopPct) return;
   if (liveGetPosStmt.get(coin)) return;
   if (liveAllPosStmt.all().length >= LIVE_MAX_OPEN) return;
   if (wickOpenPosStmt.get(coin)) return;
