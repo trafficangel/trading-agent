@@ -47,13 +47,16 @@ export const COIN_X: Record<string, number> = {
   RENDER: 0.03, POPCAT: 0.025, JUP: 0.025, AR: 0.03, LTC: 0.03, EIGEN: 0.03, MANTA: 0.03, // BLUR CUT Jul 6:
   // real stop slippage ~2% (8× the 0.25% model) on its low liquidity — a genuine drain the backtest understates.
 
-  XRP: 0.02, JTO: 0.03, ALT: 0.03, PNUT: 0.03,
+  // JTO CUT Jul 8 live audit: both sides went negative on real fills (long -3.14%, short -2.40%)
+  // and the large loss was not an isolated wick but a continuation through the trap.
+  XRP: 0.02, ALT: 0.03, PNUT: 0.03,
 };
+const RETIRED_COINS = ['BLUR', 'JTO'];
 // Side-split (Jul 2, scripts/wick-fade-sides.ts, K100): these sides are consistently NEGATIVE at BOTH real
 // costs (0.05/0.10) with n≥100 and worse-than-random nullP → don't quote them (ballast: pays costs on noise).
 // Weak-but-POSITIVE sides stay (pre-registered bar — dropping a weak positive side loses money). The quoting
 // loop also CANCELS any resting order on a disabled side, so this self-heals on deploy.
-export const DISABLED_SIDE: Record<string, 'long' | 'short'> = { ATOM: 'short', LTC: 'short', ALT: 'long' };
+export const DISABLED_SIDE: Record<string, 'long' | 'short'> = { ATOM: 'short', LTC: 'short', ALT: 'long', EIGEN: 'short', MANTA: 'long' };
 // LADDER — a second, DEEPER rung where the rung passed the HONEST battery (battery-honest.ts): ATOM@3.5
 // (strict pass both slippage scenarios, Kelly 6.3-7.5) + DOGE@3.5 (net-positive both scenarios, p marginal).
 // ICP@3.5 became the BASE depth instead (its 2.5 was honest-negative). Both rungs rest while flat; a deep
@@ -180,7 +183,7 @@ const lastCatStmt = db.prepare<[string, string], { t: number | null }>(`SELECT M
 // LIVE-QUARANTINE: real fills are the final judge. If a coin or side starts losing in live
 // execution, stop placing NEW traps. Open positions still wind down through the normal exit path.
 const LIVE_QUARANTINE_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
-const SIDE_QUARANTINE_MIN_TRADES = 5;
+const SIDE_QUARANTINE_MIN_TRADES = 3;
 const SIDE_QUARANTINE_SUM_PNL_PCT = -2;
 const COIN_QUARANTINE_MAX_CATS = 2;
 const QUARANTINE_LOG_COOLDOWN_MS = 6 * 60 * 60_000;
@@ -223,6 +226,14 @@ const SOD_KEY = 'wick_fade_sod';
 const getKv = db.prepare<[string], { value: string }>(`SELECT value FROM runtime_config WHERE key = ?`);
 const updKv = db.prepare(`UPDATE runtime_config SET value=?, updated_at=?, reason=? WHERE key=?`);
 const insKv = db.prepare(`INSERT INTO runtime_config (key,value,updated_at,reason) VALUES (?,?,?,?)`);
+const closedDayPnlStmt = db.prepare<[string, number], { pnl: number | null }>(`
+  SELECT SUM(pnl_pct) AS pnl
+    FROM wick_fade_log
+   WHERE mode = ?
+     AND closed_at IS NOT NULL
+     AND pnl_pct IS NOT NULL
+     AND closed_at >= ?
+`);
 function saveSod(state: { day: number; equity: number; killedDay?: number }): void {
   const v = JSON.stringify(state);
   if (updKv.run(v, Date.now(), 'wick-fade start-of-day equity', SOD_KEY).changes === 0) insKv.run(SOD_KEY, v, Date.now(), 'wick-fade start-of-day equity');
@@ -260,6 +271,9 @@ function loadSod(): SodState | null {
   if (!raw) return null;
   try { return JSON.parse(raw.value) as SodState; } catch { return null; }
 }
+function closedDayPnlPct(day: number): number {
+  return closedDayPnlStmt.get(WF_CONFIG.mode, day * 86_400_000)?.pnl ?? 0;
+}
 async function dailyKilled(): Promise<boolean> {
   const nowMs = Date.now();
   const av = await hlAccountValue();
@@ -285,9 +299,23 @@ async function dailyKilled(): Promise<boolean> {
     logger.info({ sodEquity: +av.data.toFixed(2), day }, 'wick-fade: daily-kill equity snapshot (start of day, persisted)');
     if (killReason === 'loss') notify('▶️ <b>wick-fade</b>: новый день — daily-kill снят, котировки возвращаются');
     killed = false; killReason = null;
+    const closedPnl = closedDayPnlPct(day);
+    if (closedPnl <= -(WF_CONFIG.dailyLossPct * 100)) {
+      saveSod({ ...sod, killedDay: day });
+      notify(`⛔ <b>wick-fade DAILY-KILL</b>: закрытый PnL за UTC-день ${closedPnl.toFixed(2)}% — котировки сняты, новых входов нет до следующего дня`);
+      killed = true; killReason = 'loss';
+      return true;
+    }
     return false;
   }
   if (sod.killedDay === day) { killed = true; killReason = 'loss'; return true; } // latched (incl. across restarts — silently, no re-notify)
+  const closedPnl = closedDayPnlPct(day);
+  if (closedPnl <= -(WF_CONFIG.dailyLossPct * 100)) {
+    saveSod({ ...sod, killedDay: day });
+    notify(`⛔ <b>wick-fade DAILY-KILL</b>: закрытый PnL за UTC-день ${closedPnl.toFixed(2)}% — котировки сняты, новых входов нет до следующего дня`);
+    killed = true; killReason = 'loss';
+    return true;
+  }
   // TRANSFER-AWARE baseline: deposits/withdrawals since the snapshot shift the reference, so a mid-day
   // withdrawal doesn't read as a crash (false kill) and a deposit doesn't mask a real drawdown. Fail-open
   // to the raw baseline if the ledger read fails (previous behavior; a withdrawal would then false-kill —
@@ -352,13 +380,14 @@ function logLiquidityBlock(coin: string, reason: string, nowMs: number): void {
 // MARKET-CASCADE GATE: wick-fade wants isolated over-extensions, not a broad market flush/rip.
 // If many traded alts move the same way over the last ~15m, pull flat resting traps within 1 minute.
 const CASCADE_LOOKBACK_BARS = 3;
-const CASCADE_MOVE_PCT = 1.5;
-const CASCADE_MIN_COINS = 8;
+const CASCADE_MOVE_PCT = 1.0;
+const CASCADE_MIN_COINS = 10;
 const CASCADE_MIN_SAMPLE = 12;
 const CASCADE_STALE_MS = 30 * 60_000;
 const CASCADE_LOG_COOLDOWN_MS = 10 * 60_000;
 let cascadeLogAt = 0;
 const cascadeCandlesStmt = db.prepare<[string, number], { t: number; c: number }>(`SELECT t, c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
+const trendCandlesStmt = db.prepare<[string, number], { t: number; c: number }>(`SELECT t, c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
 function marketCascadeBlockReason(nowMs: number): string | null {
   let up = 0, down = 0, seen = 0;
   for (const coin of WF_CONFIG.coins) {
@@ -383,6 +412,24 @@ function logMarketCascadeBlock(reason: string, nowMs: number): void {
   cascadeLogAt = nowMs;
   logger.warn({ reason }, 'wick-fade: MARKET-CASCADE active - cancel all flat quotes, no new entries');
   notify(`⛔ <b>wick-fade market-cascade</b>: ${reason}. Снимаю входные ловушки; открытые позиции выходят штатно.`, true);
+}
+const TREND_GATE_15M_PCT = 1.0;
+const TREND_GATE_1H_PCT = 2.0;
+function sideTrendBlockReason(coin: string, side: 'long' | 'short'): string | null {
+  let rows: { t: number; c: number }[];
+  try { rows = trendCandlesStmt.all(coin, 13); } catch { return null; }
+  if (rows.length < 13) return null;
+  const latest = rows[0]!, b15 = rows[3]!, b1h = rows[12]!;
+  if (!(b15.c > 0) || !(b1h.c > 0)) return null;
+  const r15 = ((latest.c - b15.c) / b15.c) * 100;
+  const r1h = ((latest.c - b1h.c) / b1h.c) * 100;
+  if (side === 'long' && r15 <= -TREND_GATE_15M_PCT && r1h <= -TREND_GATE_1H_PCT) {
+    return `falling-knife gate r15=${r15.toFixed(2)}%, r1h=${r1h.toFixed(2)}%`;
+  }
+  if (side === 'short' && r15 >= TREND_GATE_15M_PCT && r1h >= TREND_GATE_1H_PCT) {
+    return `rocket-short gate r15=${r15.toFixed(2)}%, r1h=${r1h.toFixed(2)}%`;
+  }
+  return null;
 }
 // ACTION-BUDGET BREAKER: when HL rejects with 'Too many cumulative', STOP quote maintenance for an hour
 // instead of retrying every tick — each rejected attempt still increments the counter (the Jul-5 death
@@ -521,6 +568,8 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marke
   for (const side of ['long', 'short'] as const) {
     const existing = exOrders.filter((o) => o.side === side);
     if (DISABLED_SIDE[coin] === side) { for (const o of existing) acts.cancels.push({ coin, oid: o.oid }); continue; }
+    const trendReason = sideTrendBlockReason(coin, side);
+    if (trendReason) { for (const o of existing) acts.cancels.push({ coin, oid: o.oid }); logLiveQuarantine(coin, side, trendReason, nowMs); continue; }
     const quarantineReason = liveQuarantineReason(coin, side, nowMs);
     if (quarantineReason) { for (const o of existing) acts.cancels.push({ coin, oid: o.oid }); logLiveQuarantine(coin, side, quarantineReason, nowMs); continue; }
     const depths = LADDER[coin] != null ? [clampDepth(x * factor), clampDepth(LADDER[coin]! * factor)] : [clampDepth(x * factor)];
@@ -623,9 +672,15 @@ export function startWickFadeRunner(): void {
       if (marketBlockReason) logMarketCascadeBlock(marketBlockReason, nowMs);
       const cancels: { coin: string; oid: number }[] = [];
       const places: BatchPlaceSpec[] = [];
-      // book coins ∪ any coin with a still-open position that is NOT in the book (a CUT coin winding down)
+      // book coins ∪ retired coins with stale resting orders ∪ any coin with a still-open position that is
+      // NOT in the book (a CUT coin winding down). Retired coins get x=null in stepCoin, so they only cancel.
       let stepCoins = WF_CONFIG.coins;
-      try { const extra = allOpenPosCoins.all().map((r) => r.coin).filter((c) => COIN_X[c] == null); if (extra.length) stepCoins = [...WF_CONFIG.coins, ...extra]; } catch { /* keep book coins */ }
+      try {
+        const extra = allOpenPosCoins.all().map((r) => r.coin).filter((c) => COIN_X[c] == null);
+        stepCoins = [...new Set([...WF_CONFIG.coins, ...RETIRED_COINS, ...extra])];
+      } catch {
+        stepCoins = [...new Set([...WF_CONFIG.coins, ...RETIRED_COINS])];
+      }
       for (const coin of stepCoins) {
         try { const a = await stepCoin(coin, isKilled, quoteTick, marketBlockReason); cancels.push(...a.cancels); places.push(...a.places); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
       }

@@ -224,7 +224,7 @@ function sideBuckets(rows: TradeRow[]): SideBucket[] {
 }
 
 function pauseReason(b: SideBucket): string | null {
-  if (b.n >= 5 && b.sum <= -2) return `${b.n} сделок за 7д / ${fmtPct(b.sum)} суммарно`;
+  if (b.n >= 3 && b.sum <= -2) return `${b.n} сделок за 7д / ${fmtPct(b.sum)} суммарно`;
   if (b.timeN >= 3 && b.timeWins === 0 && b.timeSum <= -1.5) {
     return `${b.timeN} тайм-стопа подряд без плюса / ${fmtPct(b.timeSum)} суммарно`;
   }
