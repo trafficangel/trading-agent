@@ -10,7 +10,7 @@ import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { sendMessage } from '../telegram/bot.js';
-import { WF_CONFIG } from './wick-fade-runner.js';
+import { l2Book } from '../exchange/hyperliquid.js';
 import {
   hlCancelOrder,
   hlCancelTriggers,
@@ -28,12 +28,15 @@ type Candle = { t: number; o: number; h: number; l: number; c: number; v: number
 type Pos = { coin: string; side: Side; entry_px: number; qty: number; opened_at: number; signal: string };
 type LogRow = { id: number; coin: string; side: Side; pnl_pct: number; close_reason: string | null; closed_at: number };
 
-const COINS = WF_CONFIG.coins;
 const NOTIONAL_USD = 12;
 const LIVE_ENABLED = true;
 const LIVE_NOTIONAL_USD = 12;
 const LIVE_LEVERAGE = 1;
+const LIVE_MAX_OPEN = 4;
 const LIVE_DAILY_STOP_PCT = -2.5;
+const LIVE_MAX_SPREAD_PCT = 0.35;
+const LIVE_MIN_SIDE_DEPTH_USD = 150;
+const LIVE_MAX_NOTIONAL_TO_DEPTH = 0.10;
 const COST_RT_PCT = 0.07; // shadow assumes taker entry + taker exit, conservative vs maker wick-fade
 const HOLD_MS = 30 * 60_000;
 const TRAIL_HOLD_MS = 60 * 60_000;
@@ -47,12 +50,20 @@ const VOL_RATIO_MIN = 1.8;
 const TREND_1H_PCT = 0.6;
 const REPORT_KEY = 'hl_momentum_shadow_last_report_id';
 const LIVE_REPORT_KEY = 'hl_momentum_live_last_report_id';
+const FRESH_CANDLE_MAX_AGE_MS = 25 * 60_000;
 
 const candlesStmt = db.prepare<[string, number], Candle>(`
   SELECT t, o, h, l, c, v FROM hl_candles
    WHERE coin = ?
    ORDER BY t DESC
    LIMIT ?
+`);
+const freshCoinsStmt = db.prepare<[number], { coin: string }>(`
+  SELECT coin
+    FROM hl_candles
+   GROUP BY coin
+  HAVING COUNT(*) >= 70 AND MAX(t) >= ?
+   ORDER BY coin
 `);
 
 const allPosStmt = db.prepare<[], Pos>('SELECT coin, side, entry_px, qty, opened_at, signal FROM hl_momentum_shadow_pos');
@@ -173,6 +184,10 @@ function getCandles(coin: string, n = 90): Candle[] {
   return candlesStmt.all(coin, n).reverse();
 }
 
+function scanCoins(): string[] {
+  return freshCoinsStmt.all(Date.now() - FRESH_CANDLE_MAX_AGE_MS).map((r) => r.coin);
+}
+
 function todayStartUtc(nowMs: number): number {
   const d = new Date(nowMs);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
@@ -207,6 +222,27 @@ function avgVolume(cs: Candle[], endExclusive: number, n: number): number {
   const slice = cs.slice(from, endExclusive);
   if (slice.length === 0) return 0;
   return slice.reduce((s, c) => s + c.v, 0) / slice.length;
+}
+
+async function liveLiquidityCheck(coin: string, side: Side): Promise<{ ok: true; spreadPct: number; sideDepthUsd: number } | { ok: false; reason: string }> {
+  try {
+    const book = await l2Book(coin);
+    const bids = book.levels[0].slice(0, 3).map((l) => ({ px: Number(l.px), sz: Number(l.sz) })).filter((l) => l.px > 0 && l.sz > 0);
+    const asks = book.levels[1].slice(0, 3).map((l) => ({ px: Number(l.px), sz: Number(l.sz) })).filter((l) => l.px > 0 && l.sz > 0);
+    const bestBid = bids[0]?.px ?? 0;
+    const bestAsk = asks[0]?.px ?? 0;
+    if (!(bestBid > 0) || !(bestAsk > 0) || bestAsk <= bestBid) return { ok: false, reason: 'invalid book' };
+    const mid = (bestBid + bestAsk) / 2;
+    const spreadPct = ((bestAsk - bestBid) / mid) * 100;
+    const sideLevels = side === 'long' ? asks : bids; // long buys asks, short sells bids
+    const sideDepthUsd = sideLevels.reduce((s, l) => s + l.px * l.sz, 0);
+    if (spreadPct > LIVE_MAX_SPREAD_PCT) return { ok: false, reason: `spread ${spreadPct.toFixed(2)}% > ${LIVE_MAX_SPREAD_PCT}%` };
+    if (sideDepthUsd < LIVE_MIN_SIDE_DEPTH_USD) return { ok: false, reason: `top3 depth $${sideDepthUsd.toFixed(0)} < $${LIVE_MIN_SIDE_DEPTH_USD}` };
+    if (LIVE_NOTIONAL_USD / sideDepthUsd > LIVE_MAX_NOTIONAL_TO_DEPTH) return { ok: false, reason: `order/depth ${(LIVE_NOTIONAL_USD / sideDepthUsd * 100).toFixed(1)}% > ${(LIVE_MAX_NOTIONAL_TO_DEPTH * 100).toFixed(0)}%` };
+    return { ok: true, spreadPct, sideDepthUsd };
+  } catch (err) {
+    return { ok: false, reason: `book read failed: ${(err as Error).message}` };
+  }
 }
 
 function decide(coin: string, cs: Candle[]): { side: Side; signal: string } | null {
@@ -320,11 +356,18 @@ async function liveMaybeOpen(coin: string, sig: { side: Side; signal: string }, 
   const dayPnl = liveTodayPnlStmt.get(todayStartUtc(Date.now()))?.pnl ?? 0;
   if (dayPnl <= LIVE_DAILY_STOP_PCT) return;
   if (liveGetPosStmt.get(coin)) return;
+  if (liveAllPosStmt.all().length >= LIVE_MAX_OPEN) return;
   if (wickOpenPosStmt.get(coin)) return;
 
   const ex = await hlFetchPosition(coin);
   if (!ex.ok) { logger.warn({ coin, msg: ex.msg }, 'hl-momentum-live: position read failed before entry'); return; }
   if (ex.data) return; // shared one-way account: never stack on an existing live position
+
+  const liq = await liveLiquidityCheck(coin, sig.side);
+  if (!liq.ok) {
+    logger.info({ coin, side: sig.side, reason: liq.reason, signal: sig.signal }, 'hl-momentum-live: signal skipped by liquidity filter');
+    return;
+  }
 
   liveLock(coin, `momentum-live pending ${sig.side}`);
   const cancelled = await cancelCoinOrders(coin);
@@ -349,10 +392,10 @@ async function liveMaybeOpen(coin: string, sig: { side: Side; signal: string }, 
   if (!st.ok) logger.error({ coin, msg: st.msg }, 'hl-momentum-live: exchange stop failed - poll is backup');
   liveOpenTxn(coin, sig.side, pos.data.entryPx, pos.data.size, openedAt, sig.signal);
   liveLock(coin, `momentum-live ${sig.side}`);
-  logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, stop, exStop: st.ok, signal: sig.signal }, 'hl-momentum-live: OPENED real position');
+  logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, stop, exStop: st.ok, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, signal: sig.signal }, 'hl-momentum-live: OPENED real position');
   void sendMessage({
     channel: 'logs',
-    text: `🧭 <b>momentum-live OPENED</b>: ${coin} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trailing after ${(TRAIL_ACTIVATE_PCT * 100).toFixed(1)}% · ~$${LIVE_NOTIONAL_USD} · ${sig.signal}`,
+    text: `🧭 <b>momentum-live OPENED</b>: ${coin} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trailing after ${(TRAIL_ACTIVATE_PCT * 100).toFixed(1)}% · ~$${LIVE_NOTIONAL_USD}\nliq: spread ${liq.spreadPct.toFixed(2)}%, top3 $${liq.sideDepthUsd.toFixed(0)} · ${sig.signal}`,
   });
 }
 
@@ -392,12 +435,12 @@ function reportText(rows: LogRow[], open: Pos[]): string {
 
   return [
     `🧭 <b>HL Momentum Shadow</b>`,
-    `Статус: бумага, реальных ордеров нет`,
+    `Статус: all-market бумага, реальных ордеров нет`,
     `Последние ${closed}: ${fmtPct(sum)} · WR ${closed ? ((wins / closed) * 100).toFixed(0) : '0'}% · открыто ${open.length}`,
     `Выходы: ${esc(mix)}`,
     leaders.length ? `Сильные: ${esc(leaders.join(', '))}` : `Сильные: мало данных`,
     laggards.length ? `Слабые: ${esc(laggards.join(', '))}` : `Слабые: мало данных`,
-    `<i>Идея: проверяем продолжение импульса с объёмом, как диверсификатор к wick-fade.</i>`,
+    `<i>Идея: сканируем весь свежий HL-рынок и проверяем продолжение импульса с объёмом.</i>`,
   ].join('\n');
 }
 
@@ -409,7 +452,7 @@ function liveReportText(rows: LogRow[], open: Pos[]): string {
   for (const r of rows) mix.set(r.close_reason ?? 'unknown', (mix.get(r.close_reason ?? 'unknown') ?? 0) + 1);
   return [
     `🧭 <b>HL Momentum LIVE</b>`,
-    `Статус: реальные деньги, минимальный размер ~$${LIVE_NOTIONAL_USD}, 1x`,
+    `Статус: реальные деньги, all-market scan → liquidity-filtered live, ~$${LIVE_NOTIONAL_USD}, 1x`,
     `Последние ${closed}: ${fmtPct(sum)} · WR ${closed ? ((wins / closed) * 100).toFixed(0) : '0'}% · открыто ${open.length}`,
     `Выходы: ${[...mix.entries()].map(([k, n]) => `${k} ${n}`).join(', ') || 'нет'}`,
     `<i>Монета блокируется для wick-fade на время momentum-позиции, чтобы стратегии не конфликтовали.</i>`,
@@ -421,7 +464,9 @@ async function tick(): Promise<void> {
   if (running) return;
   running = true;
   try {
-    for (const coin of COINS) await stepCoin(coin);
+    const coins = scanCoins();
+    for (const coin of coins) await stepCoin(coin);
+    logger.info({ coins: coins.length }, 'hl-momentum: scanned fresh all-market universe');
   } catch (err) {
     logger.error({ err }, 'hl-momentum-shadow: tick failed');
   } finally {
@@ -458,5 +503,5 @@ export function startHlMomentumShadowJob(): void {
   });
   const t = setTimeout(() => { void tick(); }, 75_000);
   t.unref();
-  logger.info({ coins: COINS.length, live: LIVE_ENABLED, liveNotional: LIVE_NOTIONAL_USD, liveLeverage: LIVE_LEVERAGE }, 'hl-momentum scheduled (5m, shadow + live micro)');
+  logger.info({ live: LIVE_ENABLED, liveNotional: LIVE_NOTIONAL_USD, liveLeverage: LIVE_LEVERAGE, liveMaxOpen: LIVE_MAX_OPEN }, 'hl-momentum scheduled (5m, all-market shadow + filtered live micro)');
 }

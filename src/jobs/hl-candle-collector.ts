@@ -1,10 +1,8 @@
 /**
  * HL CANDLE COLLECTOR — forward-archive NATIVE Hyperliquid 5m candles into hl_candles. HL serves only the
  * most recent ~5000 bars (~17d of 5m; older ranges return EMPTY, not paginable), so re-validating the
- * wick-fade coins on the venue we actually trade needs our own archive — after a month+ this closes the
- * Bybit-proxy gap honestly. Coins = the live wick-fade book (derived from WF_CONFIG — universe changes
- * often, a stale copy would leave silent 17d-capped holes) + funding-flip set + efficient majors (CONTROLS
- * for the artifact check — a gate that lights up majors is fake, see [[controls-catch-artifacts]]).
+ * wick-fade/momentum coins on the venue we actually trade needs our own archive. Coins = the full current
+ * Hyperliquid perp universe from metaAndAssetCtxs, with a small fallback set if the public meta read fails.
  *
  * Mechanics: every 15 min (offset :07 — off the 1-min trading loop's hot second and the info-API burst),
  * per coin, fetch from the last stored bar (inclusive startTime re-fetches it → finalizes a then-partial
@@ -17,11 +15,12 @@
 import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
+import { metaAndAssetCtxs } from '../exchange/hyperliquid.js';
 import { WF_CONFIG } from './wick-fade-runner.js';
 
 const FUNDING_FLIP_COINS = ['ETH', 'ADA', 'XRP', 'AVAX'];
 const MAJORS_CONTROLS = ['BTC', 'ETH', 'SOL', 'LINK'];
-const COINS = [...new Set([...WF_CONFIG.coins, ...FUNDING_FLIP_COINS, ...MAJORS_CONTROLS])];
+const FALLBACK_COINS = [...new Set([...WF_CONFIG.coins, ...FUNDING_FLIP_COINS, ...MAJORS_CONTROLS])];
 const INTERVAL = '5m';
 const STEP_MS = 5 * 60_000;
 const FIRST_RUN_LOOKBACK_MS = 17 * 86_400_000; // ~4896 bars — under HL's ~5000-bar serving cap
@@ -55,6 +54,17 @@ async function fetchCandles(coin: string, startMs: number, endMs: number): Promi
 
 const finite = (k: HlKline): boolean => k.t > 0 && [k.o, k.h, k.l, k.c, k.v].every((x) => Number.isFinite(+x));
 
+async function coinUniverse(): Promise<string[]> {
+  try {
+    const [meta] = await metaAndAssetCtxs();
+    const coins = meta.universe.map((u) => u.name).filter((c) => /^[A-Za-z0-9]+$/.test(c));
+    return coins.length ? coins : FALLBACK_COINS;
+  } catch (err) {
+    logger.warn({ err: (err as Error).message, fallback: FALLBACK_COINS.length }, 'hl-candle-collector: meta read failed — fallback universe');
+    return FALLBACK_COINS;
+  }
+}
+
 let running = false;
 async function tick(): Promise<void> {
   if (running) return;
@@ -62,8 +72,9 @@ async function tick(): Promise<void> {
   try {
     const s = ensureStmts();
     const now = Date.now();
+    const coins = await coinUniverse();
     let stored = 0, failed = 0;
-    for (const coin of COINS) {
+    for (const coin of coins) {
       const last = s.lastT(coin);
       const start = last != null ? last : now - FIRST_RUN_LOOKBACK_MS; // inclusive → re-fetches the last bar, finalizing it
       const arr = await fetchCandles(coin, start, now);
@@ -76,7 +87,8 @@ async function tick(): Promise<void> {
       if (rows.length) { s.insMany(coin, rows); stored += rows.length; }
       await new Promise((r) => setTimeout(r, 500)); // gentle on the shared-IP info API (~32 req / 15 min)
     }
-    if (failed) logger.warn({ stored, failed, coins: COINS.length }, 'hl-candle-collector: tick done with failures (next tick self-heals)');
+    logger.info({ stored, failed, coins: coins.length }, 'hl-candle-collector: all-market tick done');
+    if (failed) logger.warn({ stored, failed, coins: coins.length }, 'hl-candle-collector: tick done with failures (next tick self-heals)');
   } catch (err) {
     logger.error({ err }, 'hl-candle-collector: tick failed (missing migration 039? run pnpm migrate)'); // never an unhandled rejection — the trading process must not die for an archive
   } finally { running = false; }
@@ -85,5 +97,5 @@ async function tick(): Promise<void> {
 export function startHlCandleCollector(): void {
   cron.schedule('7,22,37,52 * * * *', () => { void tick(); }); // offset :07 — away from the :00 trading-loop burst
   setTimeout(() => { void tick(); }, 20_000); // first pass shortly after boot (backfills ~17d per coin once)
-  logger.info({ coins: COINS.length, interval: INTERVAL }, 'hl-candle-collector scheduled (every 15m → hl_candles; native-venue archive for re-validation)');
+  logger.info({ fallbackCoins: FALLBACK_COINS.length, interval: INTERVAL }, 'hl-candle-collector scheduled (all-market every 15m → hl_candles)');
 }
