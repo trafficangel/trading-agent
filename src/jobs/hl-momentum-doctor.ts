@@ -18,6 +18,7 @@ type TradeRow = {
 type CandleRow = { t: number; h: number; l: number; c: number; v: number };
 type SimOut = { pnl: number; reason: 'stop' | 'trail' | 'decay' | 'time' | 'end' };
 type Metrics = { mfe: number; mae: number; volRatio: number; atrPct: number; closeNearHigh: number };
+type ProbBucket = { bucket: string; n: number; avg_score: number | null; avg_prob: number | null; avg_ev: number | null };
 
 const REPORT_KEY = 'hl_momentum_doctor_last_report_id';
 const COST_RT_PCT = 0.07;
@@ -56,6 +57,22 @@ const setKvStmt = db.prepare<[string, string, number, string], void>(`
   INSERT INTO runtime_config (key, value, updated_at, reason)
   VALUES (?, ?, ?, ?)
   ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, reason = excluded.reason
+`);
+const probBucketStmt = db.prepare<[], ProbBucket>(`
+  SELECT CASE
+           WHEN calibrated_prob < 0.50 THEN '<50%'
+           WHEN calibrated_prob < 0.55 THEN '50-55%'
+           WHEN calibrated_prob < 0.60 THEN '55-60%'
+           ELSE '60%+'
+         END AS bucket,
+         COUNT(*) AS n,
+         AVG(score) AS avg_score,
+         AVG(calibrated_prob) AS avg_prob,
+         AVG(expected_pnl) AS avg_ev
+    FROM hl_momentum_signal_journal
+   WHERE calibrated_prob IS NOT NULL
+   GROUP BY bucket
+   ORDER BY MIN(calibrated_prob)
 `);
 
 function esc(s: string): string {
@@ -212,6 +229,12 @@ function layerMix(rows: TradeRow[]): string {
     .join('; ') || 'нет';
 }
 
+function probabilityBuckets(): string[] {
+  return probBucketStmt.all().map((r) =>
+    `• ${r.bucket}: ${r.n} сигн. · score ${(r.avg_score ?? 0).toFixed(0)} · p ${(((r.avg_prob ?? 0) * 100)).toFixed(1)}% · EV ${fmtPct(r.avg_ev ?? 0)}`,
+  );
+}
+
 export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: boolean; nowMs?: number } = {}): Promise<{ sent: boolean; closed: number; pnl: number }> {
   const nowMs = opts.nowMs ?? Date.now();
   const rows = closedStmt.all(160).reverse();
@@ -234,6 +257,7 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
   const noMfe = metricsRows.filter((x) => x.m.mfe < 1).map((x) => `${x.r.coin} ${fmtPct(x.r.pnl_pct)}`).slice(0, 6);
   const decayCandidates = metricsRows.filter((x) => x.m.mfe < Math.max(0.45, x.m.atrPct * DECAY_MIN_MFE_R) && x.r.pnl_pct < 0);
   const decayCandidatePnl = decayCandidates.reduce((acc, x) => acc + x.r.pnl_pct, 0);
+  const probLines = probabilityBuckets();
   const actions: string[] = [];
 
   if (best && rows.length >= MIN_SAMPLE_FOR_AUTOTUNE && best.sum >= current.sum + MIN_AUTOTUNE_EDGE_PCT) {
@@ -254,6 +278,9 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
     `• close-extreme фильтр: ${entryExtreme.length}/${rows.length} сделок · фактический PnL ${fmtPct(entryExtremePnl)}`,
     `• dead-impulse кандидаты: ${decayCandidates.length}/${rows.length} · фактический PnL ${fmtPct(decayCandidatePnl)}`,
     noMfe.length ? `• слабый MFE (<1%): ${esc(noMfe.join(', '))}` : `• слабый MFE (<1%): нет`,
+    ``,
+    `<b>Калибровка вероятности</b>`,
+    ...(probLines.length ? probLines.map(esc) : [`• ждём новые сигналы с calibrated_prob`]),
     ``,
     `<b>Автотюнинг</b>`,
     actions.length ? actions.map((a) => `• ${esc(a)}`).join('\n') : `• без автоправки: нужно >=${MIN_SAMPLE_FOR_AUTOTUNE} закрытых live-сделок и преимущество >=${MIN_AUTOTUNE_EDGE_PCT}%`,

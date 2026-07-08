@@ -53,6 +53,9 @@ type MomentumSignal = {
   layer: SignalLayer;
   signal: string;
   score: number;
+  modelProb: number;
+  prob: number;
+  probConfidence: number;
   expectedPnl: number;
   metrics: SignalMetrics;
 };
@@ -116,6 +119,8 @@ const REGIME_BREADTH_WARN = 80;
 const KELLY_RISK_SCALE = 0.0015;
 const KELLY_MIN_LIVE_SAMPLE = 30;
 const KELLY_MIN_LAYER_SAMPLE = 12;
+const MODEL_PROB_WEIGHT = 0.35;
+const PROB_PRIOR_N = 18;
 const CLUSTER_WINDOW_MS = 3 * 60_000;
 const MAX_CLUSTER_SAME_SIDE = 2;
 const DECAY_EXIT_MS = 6 * 60_000;
@@ -230,13 +235,14 @@ const liveAllStatsStmt = db.prepare<[], PerfStats>(`
     FROM hl_momentum_live_log
    WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
 `);
-const liveLayerStatsStmt = db.prepare<[string], PerfStats>(`
+const liveLayerStatsStmt = db.prepare<[string, string, string], PerfStats>(`
   SELECT COUNT(*) AS n,
          AVG(pnl_pct) AS avg,
          SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins,
          SUM(pnl_pct) AS sum
     FROM hl_momentum_live_log
-   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL AND signal LIKE ?
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+     AND (signal LIKE ? OR signal LIKE ? OR signal LIKE ?)
 `);
 const liveRecentStatsStmt = db.prepare<[number], PerfStats>(`
   SELECT COUNT(*) AS n,
@@ -255,13 +261,14 @@ const insSignalJournalStmt = db.prepare<[
   number, string, Side, SignalLayer, number, number, string, string,
   number | null, number | null, number | null, number | null, number | null, number | null,
   number | null, number | null, number | null, number | null, number, number, string,
-  number | null, number | null, number | null
+  number | null, number | null, number | null, number | null, number | null, number | null, number | null
 ], void>(`
   INSERT INTO hl_momentum_signal_journal
     (ts, coin, side, layer, score, expected_pnl, decision, reason, ref_px, signal_px,
      r30, r90, r3, r12, from_last, vol_ratio, spread_pct, side_depth_usd,
-     open_total, open_same_side, signal, notional_usd, kelly_fraction, equity_usd)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     open_total, open_same_side, signal, notional_usd, kelly_fraction, equity_usd,
+     model_prob, calibrated_prob, prob_confidence, kelly_confidence)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 const wickOpenPosStmt = db.prepare<[string], { coin: string }>('SELECT coin FROM wick_fade_pos WHERE coin = ?');
 const liveUpsertLockStmt = db.prepare<[string, number, string, number], void>(`
@@ -533,11 +540,51 @@ function recentSideCluster(side: Side, now = Date.now()): number {
   return liveAllPosStmt.all().filter((p) => p.side === side && now - p.opened_at <= CLUSTER_WINDOW_MS).length;
 }
 
-function continuationProb(score: number): number {
+function modelContinuationProb(score: number): number {
   return clamp(0.38 + (score - 50) / 120, 0.18, 0.78);
 }
 
-function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'expectedPnl'>, params: RiskParams): MomentumSignal {
+function layerStats(layer: SignalLayer): PerfStats {
+  const patterns: [string, string, string] = layer === 'fast'
+    ? ['%layer=fast%', '%fast up radar%', '%fast down radar%']
+    : ['%layer=confirm%', '%up impulse%', '%down impulse%'];
+  return liveLayerStatsStmt.get(...patterns) ?? { n: 0, avg: null, wins: null, sum: null };
+}
+
+function posteriorWinProb(st: Pick<PerfStats, 'n' | 'wins'>, priorP = 0.5, priorN = PROB_PRIOR_N): number {
+  return ((st.wins ?? 0) + priorP * priorN) / (st.n + priorN);
+}
+
+function calibratedContinuation(sig: Pick<MomentumSignal, 'coin' | 'side' | 'layer'>, modelProb: number): { prob: number; confidence: number } {
+  const all = liveAllStatsStmt.get() ?? { n: 0, avg: null, wins: null, sum: null };
+  const layer = layerStats(sig.layer);
+  const recent = liveRecentStatsStmt.get(30) ?? { n: 0, avg: null, wins: null, sum: null };
+  const coin = liveCoinSideStatsStmt.get(sig.coin, sig.side) ?? { n: 0, avg: null, wins: null };
+
+  const allW = clamp(all.n / 100, 0, 0.25);
+  const layerW = clamp(layer.n / 60, 0, 0.22);
+  const coinW = coin.n >= 3 ? clamp(coin.n / 30, 0, 0.12) : 0;
+  const empiricalW = allW + layerW + coinW;
+  const modelW = Math.max(0.18, MODEL_PROB_WEIGHT - empiricalW * 0.25);
+  const baseW = Math.max(0, 1 - modelW - empiricalW);
+
+  let p = baseW * 0.5
+    + modelW * modelProb
+    + allW * posteriorWinProb(all)
+    + layerW * posteriorWinProb(layer)
+    + coinW * posteriorWinProb(coin);
+
+  if (all.n >= 12 && (all.avg ?? 0) < 0) p = Math.min(p, 0.58);
+  if (layer.n >= 6 && (layer.avg ?? 0) < 0) p = Math.min(p, 0.56);
+  if (recent.n >= 10 && (recent.avg ?? 0) < 0) p = Math.min(p, 0.55);
+
+  return {
+    prob: Math.round(clamp(p, 0.35, 0.72) * 10000) / 10000,
+    confidence: Math.round(clamp(empiricalW, 0, 0.59) * 1000) / 1000,
+  };
+}
+
+function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'modelProb' | 'prob' | 'probConfidence' | 'expectedPnl'>, params: RiskParams): MomentumSignal {
   const m = sig.metrics;
   const vol5m = Math.max(0.12, m.vol5mPct ?? params.volPct * 100);
   const moveStrength = sig.layer === 'fast'
@@ -552,19 +599,21 @@ function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'expectedPnl'>, params:
   const coinAdj = coinQualityAdj(sig.coin, sig.side);
   const raw = 48 + moveStrength + trendStrength + volumeStrength + edge + coinAdj - extensionPenalty;
   const score = Math.round(clamp(raw, 0, 100));
-  const p = continuationProb(score);
+  const modelProb = Math.round(modelContinuationProb(score) * 10000) / 10000;
+  const calibrated = calibratedContinuation(sig, modelProb);
+  const p = calibrated.prob;
   const winPnl = params.trailMinLockPct * 100;
   const lossPnl = params.stopPct * 100 + COST_RT_PCT;
   const expectedPnl = Math.round((p * winPnl - (1 - p) * lossPnl) * 1000) / 1000;
-  return { ...sig, score, expectedPnl };
+  return { ...sig, score, modelProb, prob: p, probConfidence: calibrated.confidence, expectedPnl };
 }
 
 function appendScoreSignal(signal: string, sig: MomentumSignal): string {
-  return `${signal} [score=${sig.score} ev=${sig.expectedPnl.toFixed(2)} layer=${sig.layer}]`;
+  return `${signal} [score=${sig.score} p=${sig.prob.toFixed(3)} mp=${sig.modelProb.toFixed(3)} pc=${sig.probConfidence.toFixed(2)} ev=${sig.expectedPnl.toFixed(2)} layer=${sig.layer}]`;
 }
 
 function kellyFraction(sig: MomentumSignal, params: RiskParams): number {
-  const p = continuationProb(sig.score);
+  const p = sig.prob;
   const q = 1 - p;
   const winPct = params.trailMinLockPct * 100;
   const lossPct = params.stopPct * 100 + COST_RT_PCT;
@@ -579,7 +628,7 @@ function statWinRate(st: Pick<PerfStats, 'n' | 'wins'>): number {
 
 function liveKellyConfidence(sig: MomentumSignal): { confidence: number; reason: string } {
   const all = liveAllStatsStmt.get() ?? { n: 0, avg: null, wins: null, sum: null };
-  const layer = liveLayerStatsStmt.get(`%layer=${sig.layer}%`) ?? { n: 0, avg: null, wins: null, sum: null };
+  const layer = layerStats(sig.layer);
   const recent = liveRecentStatsStmt.get(30) ?? { n: 0, avg: null, wins: null, sum: null };
   const coin = liveCoinSideStatsStmt.get(sig.coin, sig.side) ?? { n: 0, avg: null, wins: null };
 
@@ -646,6 +695,7 @@ function recordSignal(sig: MomentumSignal, decision: 'paper' | 'live-open' | 'sk
       px.spreadPct ?? null, px.sideDepthUsd ?? null,
       pf.total, pf.sameSide, sig.signal,
       px.sizing?.notionalUsd ?? null, px.sizing?.kellyFraction ?? null, px.sizing?.equityUsd ?? null,
+      sig.modelProb, sig.prob, sig.probConfidence, px.sizing?.confidence ?? null,
     );
   } catch (err) {
     logger.warn({ err: (err as Error).message, coin: sig.coin, decision }, 'hl-momentum: signal journal write failed');
