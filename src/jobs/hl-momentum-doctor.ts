@@ -19,6 +19,15 @@ type CandleRow = { t: number; h: number; l: number; c: number; v: number };
 type SimOut = { pnl: number; reason: 'stop' | 'trail' | 'decay' | 'time' | 'end' };
 type Metrics = { mfe: number; mae: number; volRatio: number; atrPct: number; closeNearHigh: number };
 type ProbBucket = { bucket: string; n: number; avg_score: number | null; avg_prob: number | null; avg_ev: number | null };
+type CalibrationRow = {
+  id: number;
+  pnl_pct: number;
+  signal: string;
+  predicted_prob: number | null;
+  predicted_ev: number | null;
+  layer: string | null;
+  closed_at: number;
+};
 
 const REPORT_KEY = 'hl_momentum_doctor_last_report_id';
 const COST_RT_PCT = 0.07;
@@ -32,6 +41,14 @@ const TRAIL_HOLD_MS = 60 * 60_000;
 const DECAY_EXIT_MS = 6 * 60_000;
 const DECAY_MIN_MFE_R = 0.35;
 const DECAY_LOSS_R = 0.30;
+const ONLINE_CALIBRATION_LOOKBACK = 80;
+const ONLINE_CALIBRATION_MIN_SAMPLE = 10;
+const ONLINE_PROB_BIAS_MIN = -0.12;
+const ONLINE_PROB_BIAS_MAX = 0.08;
+const ONLINE_PROB_BIAS_MAX_STEP = 0.015;
+const ONLINE_EV_BIAS_MIN = -1.25;
+const ONLINE_EV_BIAS_MAX = 0.50;
+const ONLINE_EV_BIAS_MAX_STEP = 0.20;
 
 const closedStmt = db.prepare<[number], TradeRow>(`
   SELECT id, coin, side, entry_px, signal, pnl_pct, close_reason, opened_at, closed_at
@@ -73,6 +90,31 @@ const probBucketStmt = db.prepare<[], ProbBucket>(`
    WHERE calibrated_prob IS NOT NULL
    GROUP BY bucket
    ORDER BY MIN(calibrated_prob)
+`);
+const calibrationRowsStmt = db.prepare<[number], CalibrationRow>(`
+  SELECT l.id,
+         l.pnl_pct,
+         l.signal,
+         l.closed_at,
+         (SELECT j.calibrated_prob
+            FROM hl_momentum_signal_journal j
+           WHERE j.decision = 'live-open' AND j.signal = l.signal
+           ORDER BY j.ts DESC
+           LIMIT 1) AS predicted_prob,
+         (SELECT j.expected_pnl
+            FROM hl_momentum_signal_journal j
+           WHERE j.decision = 'live-open' AND j.signal = l.signal
+           ORDER BY j.ts DESC
+           LIMIT 1) AS predicted_ev,
+         (SELECT j.layer
+            FROM hl_momentum_signal_journal j
+           WHERE j.decision = 'live-open' AND j.signal = l.signal
+           ORDER BY j.ts DESC
+           LIMIT 1) AS layer
+    FROM hl_momentum_live_log l
+   WHERE l.closed_at IS NOT NULL AND l.pnl_pct IS NOT NULL
+   ORDER BY l.closed_at DESC
+   LIMIT ?
 `);
 
 function esc(s: string): string {
@@ -217,6 +259,101 @@ function runtimeBool(key: string, fallback: boolean): boolean {
   return Number.isFinite(raw) ? raw >= 0.5 : fallback;
 }
 
+function runtimeNum(key: string, fallback: number): number {
+  const raw = Number(getKvStmt.get(key)?.value ?? fallback);
+  return Number.isFinite(raw) ? raw : fallback;
+}
+
+function moveToward(current: number, target: number, maxStep: number): number {
+  const delta = clamp(target - current, -maxStep, maxStep);
+  return Math.round((current + delta) * 10_000) / 10_000;
+}
+
+function parseSignalProb(signal: string): number | null {
+  const m = signal.match(/\[score=[^\]]*\sp=([-+]?\d+(?:\.\d+)?)/);
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseSignalEv(signal: string): number | null {
+  const m = signal.match(/\[score=[^\]]*\sev=([-+]?\d+(?:\.\d+)?)/);
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseSignalLayer(signal: string): string {
+  const m = signal.match(/\[score=[^\]]*\slayer=([^\]\s]+)/);
+  if (m?.[1]) return m[1];
+  return layerOf(signal);
+}
+
+function runOnlineCalibration(nowMs: number): string[] {
+  const enabled = runtimeBool('hl_momentum_online_calibration_enabled', true);
+  const raw = calibrationRowsStmt.all(ONLINE_CALIBRATION_LOOKBACK);
+  const rows = raw
+    .map((r) => ({
+      ...r,
+      predictedProb: r.predicted_prob ?? parseSignalProb(r.signal),
+      predictedEv: r.predicted_ev ?? parseSignalEv(r.signal),
+      layer: r.layer ?? parseSignalLayer(r.signal),
+    }))
+    .filter((r): r is CalibrationRow & { predictedProb: number; predictedEv: number; layer: string } =>
+      Number.isFinite(r.predictedProb) && Number.isFinite(r.predictedEv),
+    );
+
+  const n = rows.length;
+  if (n === 0) return ['• нет закрытых сделок с сохранённым прогнозом'];
+
+  const actualWr = avg(rows.map((r) => r.pnl_pct > 0 ? 1 : 0));
+  const avgPredProb = avg(rows.map((r) => r.predictedProb));
+  const avgActualPnl = avg(rows.map((r) => r.pnl_pct));
+  const avgPredEv = avg(rows.map((r) => r.predictedEv));
+  const brier = avg(rows.map((r) => {
+    const y = r.pnl_pct > 0 ? 1 : 0;
+    return (r.predictedProb - y) ** 2;
+  }));
+  const fastRows = rows.filter((r) => r.layer === 'fast');
+  const fastPnl = fastRows.length ? avg(fastRows.map((r) => r.pnl_pct)) : null;
+  const currentProbBias = clamp(runtimeNum('hl_momentum_prob_bias', 0), ONLINE_PROB_BIAS_MIN, ONLINE_PROB_BIAS_MAX);
+  const currentEvBias = clamp(runtimeNum('hl_momentum_ev_bias_pct', 0), ONLINE_EV_BIAS_MIN, ONLINE_EV_BIAS_MAX);
+  const shrink = clamp(n / 40, 0.25, 1);
+  const targetProbBias = clamp(currentProbBias + (actualWr - avgPredProb) * shrink, ONLINE_PROB_BIAS_MIN, ONLINE_PROB_BIAS_MAX);
+  const targetEvBias = clamp(currentEvBias + (avgActualPnl - avgPredEv) * shrink, ONLINE_EV_BIAS_MIN, ONLINE_EV_BIAS_MAX);
+  const nextProbBias = moveToward(currentProbBias, targetProbBias, ONLINE_PROB_BIAS_MAX_STEP);
+  const nextEvBias = moveToward(currentEvBias, targetEvBias, ONLINE_EV_BIAS_MAX_STEP);
+
+  setKvStmt.run('hl_momentum_calibration_sample_n', String(n), nowMs, 'hl momentum online calibration sample size');
+  setKvStmt.run('hl_momentum_calibration_actual_wr', actualWr.toFixed(4), nowMs, 'hl momentum online calibration actual win-rate');
+  setKvStmt.run('hl_momentum_calibration_pred_wr', avgPredProb.toFixed(4), nowMs, 'hl momentum online calibration predicted win-rate');
+  setKvStmt.run('hl_momentum_calibration_brier', brier.toFixed(4), nowMs, 'hl momentum online calibration brier score');
+  setKvStmt.run('hl_momentum_calibration_actual_pnl_pct', avgActualPnl.toFixed(4), nowMs, 'hl momentum online calibration actual avg pnl');
+  setKvStmt.run('hl_momentum_calibration_pred_ev_pct', avgPredEv.toFixed(4), nowMs, 'hl momentum online calibration predicted avg ev');
+  setKvStmt.run('hl_momentum_calibration_last_ms', String(nowMs), nowMs, 'hl momentum online calibration timestamp');
+
+  const lines = [
+    `• выборка ${n}/${ONLINE_CALIBRATION_LOOKBACK}: факт WR ${(actualWr * 100).toFixed(1)}% vs прогноз ${(avgPredProb * 100).toFixed(1)}% · Brier ${brier.toFixed(3)}`,
+    `• PnL факт ${fmtPct(avgActualPnl)} vs EV прогноз ${fmtPct(avgPredEv)}${fastPnl == null ? '' : ` · fast факт ${fmtPct(fastPnl)}`}`,
+  ];
+
+  if (!enabled) {
+    lines.push(`• режим: выключен, только измеряем ошибку`);
+    return lines;
+  }
+  if (n < ONLINE_CALIBRATION_MIN_SAMPLE) {
+    lines.push(`• ждём ${ONLINE_CALIBRATION_MIN_SAMPLE} сделок, bias пока не меняем`);
+    return lines;
+  }
+
+  if (Math.abs(nextProbBias - currentProbBias) > 0.0001) {
+    setKvStmt.run('hl_momentum_prob_bias', nextProbBias.toFixed(4), nowMs, 'hl momentum online calibration probability bias');
+  }
+  if (Math.abs(nextEvBias - currentEvBias) > 0.0001) {
+    setKvStmt.run('hl_momentum_ev_bias_pct', nextEvBias.toFixed(4), nowMs, 'hl momentum online calibration EV bias');
+  }
+  lines.push(`• bias: p ${currentProbBias.toFixed(3)} → ${nextProbBias.toFixed(3)} · EV ${fmtPct(currentEvBias)} → ${fmtPct(nextEvBias)}`);
+  return lines;
+}
+
 function reasonMix(rows: TradeRow[]): string {
   const mix = new Map<string, number>();
   for (const r of rows) mix.set(r.close_reason ?? 'unknown', (mix.get(r.close_reason ?? 'unknown') ?? 0) + 1);
@@ -267,6 +404,7 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
   const probLines = probabilityBuckets();
   const actions: string[] = [];
   const autotuneEnabled = runtimeBool('hl_momentum_doctor_autotune_enabled', true);
+  const onlineCalibrationLines = runOnlineCalibration(nowMs);
 
   if (autotuneEnabled && best && rows.length >= MIN_SAMPLE_FOR_AUTOTUNE && best.sum >= current.sum + MIN_AUTOTUNE_EDGE_PCT) {
     setKvStmt.run('hl_momentum_min_stop_pct', best.minStopPct.toFixed(4), nowMs, 'hl momentum doctor auto-tune stop floor');
@@ -289,6 +427,9 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
     ``,
     `<b>Калибровка вероятности</b>`,
     ...(probLines.length ? probLines.map(esc) : [`• ждём новые сигналы с calibrated_prob`]),
+    ``,
+    `<b>Online calibration: прогноз → факт</b>`,
+    ...onlineCalibrationLines.map(esc),
     ``,
     `<b>Автотюнинг</b>`,
     autotuneEnabled ? `• режим: включён` : `• режим: выключен, только отчёт`,

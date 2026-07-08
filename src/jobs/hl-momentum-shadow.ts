@@ -128,6 +128,8 @@ const KELLY_MIN_LIVE_SAMPLE = 30;
 const KELLY_MIN_LAYER_SAMPLE = 12;
 const MODEL_PROB_WEIGHT = 0.35;
 const PROB_PRIOR_N = 18;
+const PROB_BIAS_DEFAULT = 0;
+const EV_BIAS_PCT_DEFAULT = 0;
 const CLUSTER_WINDOW_MS = 3 * 60_000;
 const MAX_CLUSTER_SAME_SIDE = 2;
 const DECAY_EXIT_MS = 6 * 60_000;
@@ -360,6 +362,14 @@ function fastBreakoutLookback(): number {
 
 function fastBreakoutBufferPct(): number {
   return runtimeNum('hl_momentum_fast_breakout_buffer_pct', FAST_BREAKOUT_BUFFER_PCT, 0, 0.50);
+}
+
+function learnedProbBias(): number {
+  return runtimeNum('hl_momentum_prob_bias', PROB_BIAS_DEFAULT, -0.12, 0.08);
+}
+
+function learnedEvBiasPct(): number {
+  return runtimeNum('hl_momentum_ev_bias_pct', EV_BIAS_PCT_DEFAULT, -1.25, 0.50);
 }
 
 function esc(s: string): string {
@@ -647,10 +657,10 @@ function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'modelProb' | 'prob' | 
   const score = Math.round(clamp(raw, 0, 100));
   const modelProb = Math.round(modelContinuationProb(score) * 10000) / 10000;
   const calibrated = calibratedContinuation(sig, modelProb);
-  const p = calibrated.prob;
+  const p = Math.round(clamp(calibrated.prob + learnedProbBias(), 0.30, 0.72) * 10000) / 10000;
   const winPnl = params.trailMinLockPct * 100;
   const lossPnl = params.stopPct * 100 + COST_RT_PCT;
-  const expectedPnl = Math.round((p * winPnl - (1 - p) * lossPnl) * 1000) / 1000;
+  const expectedPnl = Math.round((p * winPnl - (1 - p) * lossPnl + learnedEvBiasPct()) * 1000) / 1000;
   return { ...sig, score, modelProb, prob: p, probConfidence: calibrated.confidence, expectedPnl };
 }
 

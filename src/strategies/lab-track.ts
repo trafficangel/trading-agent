@@ -658,6 +658,13 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
   const minProb = runtimeNum('hl_momentum_min_calibrated_prob', 0.49);
   const minScore = runtimeNum('hl_momentum_min_live_score', 68);
   const minEv = runtimeNum('hl_momentum_min_expected_pnl_pct', 0.10);
+  const probBias = runtimeNum('hl_momentum_prob_bias', 0);
+  const evBias = runtimeNum('hl_momentum_ev_bias_pct', 0);
+  const calN = runtimeNum('hl_momentum_calibration_sample_n', 0);
+  const calActualWr = runtimeNum('hl_momentum_calibration_actual_wr', 0);
+  const calPredWr = runtimeNum('hl_momentum_calibration_pred_wr', 0);
+  const calActualPnl = runtimeNum('hl_momentum_calibration_actual_pnl_pct', 0);
+  const calPredEv = runtimeNum('hl_momentum_calibration_pred_ev_pct', 0);
   const stopUsd = runtimeNum('hl_momentum_live_daily_stop_usd', -20);
   const usedUsd = session.usd ?? 0;
   const stopLeft = Math.max(0, Math.abs(stopUsd) - Math.max(0, -usedUsd));
@@ -673,6 +680,7 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
       ${metric(t(lang, 'Сигналы', 'Signals'), String(sig.total), t(lang, `${sig.skipped ?? 0} отфильтрованы защитой · ${sig.live_open ?? 0} новых live-входов`, `${sig.skipped ?? 0} filtered by protection · ${sig.live_open ?? 0} new live entries`))}
       ${metric(t(lang, 'Позиции', 'Positions'), `${liveOpenPublic} / ${maxOpen}`, t(lang, `${engineOpen.open} сейчас под управлением движка · публичный трек показывает новые после reset`, `${engineOpen.open} currently managed by engine · public track shows new ones after reset`))}
       ${metric(t(lang, 'Качество входа', 'Entry quality'), `score ≥ ${minScore}`, t(lang, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · средний score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · avg score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`))}
+      ${metric(t(lang, 'Онлайн-калибровка', 'Online calibration'), `p ${probBias >= 0 ? '+' : ''}${(probBias * 100).toFixed(1)}pp · EV ${pct(evBias)}`, t(lang, `${calN.toFixed(0)} сделок · факт WR ${(calActualWr * 100).toFixed(0)}% vs прогноз ${(calPredWr * 100).toFixed(0)}% · PnL ${pct(calActualPnl)} vs EV ${pct(calPredEv)}`, `${calN.toFixed(0)} trades · actual WR ${(calActualWr * 100).toFixed(0)}% vs predicted ${(calPredWr * 100).toFixed(0)}% · PnL ${pct(calActualPnl)} vs EV ${pct(calPredEv)}`), evBias < 0 || probBias < 0 ? 'neg' : '')}
       ${metric(t(lang, 'Kelly размер', 'Kelly sizing'), `$${minNotional.toFixed(0)}–${maxNotional.toFixed(0)}`, t(lang, `${kellyOn ? 'включён' : 'выключен'} · средний размер сигнала ${sig.avg_notional != null ? usd(sig.avg_notional) : '—'}`, `${kellyOn ? 'enabled' : 'disabled'} · avg signal size ${sig.avg_notional != null ? usd(sig.avg_notional) : '—'}`))}
       ${metric(t(lang, 'Dollar-stop', 'Dollar stop'), usd(stopUsd, true), t(lang, `сессия ${usd(usedUsd, true)} · до стопа ${usd(stopLeft)}`, `session ${usd(usedUsd, true)} · to stop ${usd(stopLeft)}`), usedUsd < 0 ? 'neg' : '')}
       ${metric(t(lang, 'Ликвидность', 'Liquidity'), '≤0.35%', t(lang, `макс. спред · top3 стакан ≥ $150 · ордер ≤10% глубины`, `max spread · top3 book ≥ $150 · order ≤10% of depth`))}
