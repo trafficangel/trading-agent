@@ -71,7 +71,7 @@ type PerfStats = { n: number; avg: number | null; wins: number | null; sum: numb
 const NOTIONAL_USD = 12;
 const LIVE_ENABLED = true;
 const LIVE_NOTIONAL_USD = 12;
-const LIVE_MIN_NOTIONAL_USD = 8;
+const LIVE_MIN_NOTIONAL_USD = 10;
 const LIVE_MAX_NOTIONAL_USD = 24;
 const LIVE_LEVERAGE = 1;
 const LIVE_MAX_OPEN = 4;
@@ -109,8 +109,10 @@ const FAST_MAX_AGAINST_VOL_MULT = 0.35;
 const FAST_MAX_CANDIDATES_PER_TICK = 2;
 const FAST_COIN_COOLDOWN_MS = 5 * 60_000;
 const FAST_GLOBAL_ATTEMPT_GAP_MS = 6_000;
+const ENTRY_FAIL_COOLDOWN_MS = 2 * 60_000;
 const MIN_LIVE_SCORE = 68;
 const MIN_EXPECTED_PNL_PCT = 0.10;
+const MIN_CALIBRATED_PROB = 0.49;
 const MAX_EXTENSION_R_MULT = 1.25;
 const MAX_LIVE_SAME_SIDE = 3;
 const HIGH_SCORE_OVERRIDE = 84;
@@ -312,6 +314,13 @@ function runtimePct(key: string, fallback: number, lo: number, hi: number): numb
 
 function liveDailyStopPct(): number {
   return runtimePct('hl_momentum_live_daily_stop_pct', LIVE_DAILY_STOP_PCT, -25, -1);
+}
+
+function liveDailyPnlStart(nowMs: number): number {
+  const utcDayStart = todayStartUtc(nowMs);
+  const resetMs = Number(getKvStmt.get('hl_momentum_live_day_reset_ms')?.value ?? 0);
+  if (Number.isFinite(resetMs) && resetMs > utcDayStart && resetMs <= nowMs + 60_000) return resetMs;
+  return utcDayStart;
 }
 
 function runtimeNum(key: string, fallback: number, lo: number, hi: number): number {
@@ -705,7 +714,9 @@ function recordSignal(sig: MomentumSignal, decision: 'paper' | 'live-open' | 'sk
 function preTradeGate(sig: MomentumSignal, params: RiskParams): string | null {
   const minScore = runtimeNum('hl_momentum_min_live_score', MIN_LIVE_SCORE, 45, 95);
   const minEv = runtimeNum('hl_momentum_min_expected_pnl_pct', MIN_EXPECTED_PNL_PCT, -0.25, 1.5);
+  const minProb = runtimeNum('hl_momentum_min_calibrated_prob', MIN_CALIBRATED_PROB, 0.35, 0.65);
   if (sig.score < minScore) return `score ${sig.score} < ${minScore}`;
+  if (sig.prob < minProb) return `p ${sig.prob.toFixed(3)} < ${minProb.toFixed(3)}`;
   if (sig.expectedPnl < minEv) return `ev ${sig.expectedPnl.toFixed(2)}% < ${minEv.toFixed(2)}%`;
   const extensionR = (sig.metrics.extensionPct ?? 0) / Math.max(0.1, params.stopPct * 100);
   if (extensionR > MAX_EXTENSION_R_MULT && sig.score < HIGH_SCORE_OVERRIDE) return `late extension ${extensionR.toFixed(2)}R`;
@@ -774,6 +785,7 @@ const midHistory = new Map<string, MidPoint[]>();
 const earlyCooldown = new Map<string, number>();
 const liveFastBestPx = new Map<string, number>();
 const liveFastClosing = new Set<string>();
+const liveEntryFailCooldown = new Map<string, number>();
 let lastRegime: { ts: number; up: number; down: number; label: 'risk-on' | 'risk-off' | 'mixed' } = { ts: 0, up: 0, down: 0, label: 'mixed' };
 let fastRadarRunning = false;
 let lastFastAttemptAt = 0;
@@ -1025,7 +1037,10 @@ async function fastManageLivePositions(mids: Map<string, number>): Promise<void>
 async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, params: RiskParams): Promise<void> {
   if (!LIVE_ENABLED) return;
   if (liveFastClosing.has(coin)) return;
-  const dayPnl = liveTodayPnlStmt.get(todayStartUtc(Date.now()))?.pnl ?? 0;
+  const nowMs = Date.now();
+  const cooldownUntil = liveEntryFailCooldown.get(coin) ?? 0;
+  if (cooldownUntil > nowMs) { recordSignal(sig, 'skip', `entry cooldown ${Math.ceil((cooldownUntil - nowMs) / 1000)}s`, { ref: last.c, signal: last.c }); return; }
+  const dayPnl = liveTodayPnlStmt.get(liveDailyPnlStart(nowMs))?.pnl ?? 0;
   const dailyStopPct = liveDailyStopPct();
   if (dayPnl <= dailyStopPct) { recordSignal(sig, 'skip', `daily stop ${dayPnl.toFixed(2)} <= ${dailyStopPct}`); return; }
   if (liveGetPosStmt.get(coin)) { recordSignal(sig, 'skip', 'live position already open'); return; }
@@ -1055,10 +1070,17 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
   if (!lev.ok) { recordSignal(sizedSig, 'skip', `leverage failed: ${lev.msg}`, { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing }); liveDelLockStmt.run(coin); logger.warn({ coin, msg: lev.msg }, 'hl-momentum-live: leverage failed'); return; }
   const qty = sizing.notionalUsd / last.c;
   const order = await hlMarketOrder({ coin, side: sig.side, qty });
-  if (!order.ok) { recordSignal(sizedSig, 'skip', `entry failed: ${order.msg}`, { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing }); liveDelLockStmt.run(coin); logger.error({ coin, side: sig.side, msg: order.msg, notionalUsd: sizing.notionalUsd }, 'hl-momentum-live: entry failed'); return; }
+  if (!order.ok) {
+    liveEntryFailCooldown.set(coin, Date.now() + ENTRY_FAIL_COOLDOWN_MS);
+    recordSignal(sizedSig, 'skip', `entry failed: ${order.msg}`, { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing });
+    liveDelLockStmt.run(coin);
+    logger.error({ coin, side: sig.side, msg: order.msg, notionalUsd: sizing.notionalUsd }, 'hl-momentum-live: entry failed');
+    return;
+  }
 
   const pos = await hlFetchPosition(coin);
   if (!pos.ok || !pos.data || pos.data.side !== sig.side) {
+    liveEntryFailCooldown.set(coin, Date.now() + ENTRY_FAIL_COOLDOWN_MS);
     recordSignal(sizedSig, 'skip', 'entry not confirmed', { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing });
     logger.error({ coin, side: sig.side, pos: pos.ok ? pos.data : pos.msg }, 'hl-momentum-live: entry not confirmed');
     liveDelLockStmt.run(coin);
