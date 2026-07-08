@@ -59,20 +59,18 @@ const MAX_STOP_PCT = 0.018;
 const GIVEBACK_ATR_MULT = 0.35;
 const MIN_TRAIL_GIVEBACK_PCT = 0.002;
 const MAX_TRAIL_GIVEBACK_PCT = 0.0045;
-const IMPULSE_3BAR_PCT = 1.2;
-const VOL_RATIO_MIN = 1.8;
-const TREND_1H_PCT = 0.6;
-const LONG_CLOSE_NEAR_HIGH_MIN = 0.75;
-const SHORT_CLOSE_NEAR_HIGH_MAX = 0.25;
+const IMPULSE_VOL_MULT = 1.25;
+const TREND_VOL_MULT = 0.35;
+const VOLUME_QUANTILE = 0.80;
+const CLOSE_EDGE_BASE = 0.62;
 const REPORT_KEY = 'hl_momentum_shadow_last_report_id';
 const LIVE_REPORT_KEY = 'hl_momentum_live_last_report_id';
 const FRESH_CANDLE_MAX_AGE_MS = 25 * 60_000;
 const FAST_MIDS_POLL_MS = 2_000;
 const FAST_MIDS_HISTORY_MS = 5 * 60_000;
-const FAST_MOVE_30S_PCT = 0.45;
-const FAST_MOVE_90S_PCT = 0.75;
-const FAST_FROM_LAST_CLOSE_PCT = 0.60;
-const FAST_MAX_AGAINST_1H_PCT = 0.30;
+const FAST_MOVE_VOL_MULT = 1.60;
+const FAST_FROM_LAST_CLOSE_VOL_MULT = 1.05;
+const FAST_MAX_AGAINST_VOL_MULT = 0.35;
 const FAST_MAX_CANDIDATES_PER_TICK = 2;
 const FAST_COIN_COOLDOWN_MS = 5 * 60_000;
 const FAST_GLOBAL_ATTEMPT_GAP_MS = 6_000;
@@ -242,6 +240,16 @@ function median(values: number[]): number {
   return xs.length % 2 === 0 ? (xs[mid - 1]! + xs[mid]!) / 2 : xs[mid]!;
 }
 
+function quantile(values: number[], q: number): number {
+  if (values.length === 0) return 0;
+  const xs = [...values].sort((a, b) => a - b);
+  const pos = (xs.length - 1) * clamp(q, 0, 1);
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  if (lo === hi) return xs[lo]!;
+  return xs[lo]! + (xs[hi]! - xs[lo]!) * (pos - lo);
+}
+
 function volatilityPctAt(cs: Candle[], atMs: number): number {
   const end = cs.findIndex((c) => c.t > atMs);
   const endExclusive = end === -1 ? cs.length : end;
@@ -339,6 +347,44 @@ function avgVolume(cs: Candle[], endExclusive: number, n: number): number {
   return slice.reduce((s, c) => s + c.v, 0) / slice.length;
 }
 
+type AdaptiveThresholds = {
+  vol5mPct: number;
+  impulse3Pct: number;
+  trend1hPct: number;
+  volRatioMin: number;
+  longCloseMin: number;
+  shortCloseMax: number;
+  fast30Pct: number;
+  fast90Pct: number;
+  fastFromLastPct: number;
+  fastMaxAgainst1hPct: number;
+};
+
+function adaptiveThresholds(cs: Candle[], atMs: number): AdaptiveThresholds {
+  const vol5mPct = volatilityPctAt(cs, atMs) * 100;
+  const vols = cs.slice(Math.max(0, cs.length - 97), Math.max(0, cs.length - 1)).map((c) => c.v).filter((v) => v > 0);
+  const volAvg = vols.length ? vols.reduce((s, v) => s + v, 0) / vols.length : 0;
+  const volQ = quantile(vols, VOLUME_QUANTILE);
+  const volRatioMin = volAvg > 0 ? clamp(volQ / volAvg, 1.15, 2.60) : 1.60;
+  const edge = clamp(CLOSE_EDGE_BASE + Math.min(0.20, vol5mPct / 12), 0.62, 0.84);
+  return {
+    vol5mPct,
+    impulse3Pct: clamp(vol5mPct * Math.sqrt(3) * IMPULSE_VOL_MULT, 0.70, 2.80),
+    trend1hPct: clamp(vol5mPct * Math.sqrt(12) * TREND_VOL_MULT, 0.20, 1.60),
+    volRatioMin,
+    longCloseMin: edge,
+    shortCloseMax: 1 - edge,
+    fast30Pct: clamp(vol5mPct * Math.sqrt(30 / 300) * FAST_MOVE_VOL_MULT, 0.18, 1.10),
+    fast90Pct: clamp(vol5mPct * Math.sqrt(90 / 300) * FAST_MOVE_VOL_MULT, 0.30, 1.75),
+    fastFromLastPct: clamp(vol5mPct * FAST_FROM_LAST_CLOSE_VOL_MULT, 0.30, 1.80),
+    fastMaxAgainst1hPct: clamp(vol5mPct * FAST_MAX_AGAINST_VOL_MULT, 0.12, 0.90),
+  };
+}
+
+function thSignal(th: AdaptiveThresholds): string {
+  return `thr vol5m=${th.vol5mPct.toFixed(2)} imp3=${th.impulse3Pct.toFixed(2)} tr1h=${th.trend1hPct.toFixed(2)} volx=${th.volRatioMin.toFixed(2)} edge=${th.longCloseMin.toFixed(2)} fast30=${th.fast30Pct.toFixed(2)} fast90=${th.fast90Pct.toFixed(2)} fast5m=${th.fastFromLastPct.toFixed(2)}`;
+}
+
 async function liveLiquidityCheck(coin: string, side: Side): Promise<{ ok: true; spreadPct: number; sideDepthUsd: number } | { ok: false; reason: string }> {
   try {
     const book = await l2Book(coin);
@@ -369,15 +415,13 @@ function decide(coin: string, cs: Candle[]): { side: Side; signal: string } | nu
   const volBase = avgVolume(cs, i, 48);
   const volRatio = volBase > 0 ? last.v / volBase : 0;
   const closeNearHigh = (last.c - last.l) / Math.max(1e-12, last.h - last.l);
+  const th = adaptiveThresholds(cs, last.t);
 
-  const longCloseMin = runtimePct('hl_momentum_long_close_near_high_min', LONG_CLOSE_NEAR_HIGH_MIN, 0.65, 0.9);
-  const shortCloseMax = runtimePct('hl_momentum_short_close_near_high_max', SHORT_CLOSE_NEAR_HIGH_MAX, 0.1, 0.35);
-
-  if (r3 >= IMPULSE_3BAR_PCT && r12 >= TREND_1H_PCT && volRatio >= VOL_RATIO_MIN && closeNearHigh >= longCloseMin) {
-    return { side: 'long', signal: `${coin} up impulse r3=${r3.toFixed(2)} vol=${volRatio.toFixed(1)}x` };
+  if (r3 >= th.impulse3Pct && r12 >= th.trend1hPct && volRatio >= th.volRatioMin && closeNearHigh >= th.longCloseMin) {
+    return { side: 'long', signal: `${coin} up impulse r3=${r3.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} [${thSignal(th)}]` };
   }
-  if (r3 <= -IMPULSE_3BAR_PCT && r12 <= -TREND_1H_PCT && volRatio >= VOL_RATIO_MIN && closeNearHigh <= shortCloseMax) {
-    return { side: 'short', signal: `${coin} down impulse r3=${r3.toFixed(2)} vol=${volRatio.toFixed(1)}x` };
+  if (r3 <= -th.impulse3Pct && r12 <= -th.trend1hPct && volRatio >= th.volRatioMin && closeNearHigh <= th.shortCloseMax) {
+    return { side: 'short', signal: `${coin} down impulse r3=${r3.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} [${thSignal(th)}]` };
   }
   return null;
 }
@@ -424,10 +468,11 @@ function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): Ear
   const r12 = pct(cs[cs.length - 13]!.c, last.c);
   const fromLast = pct(last.c, mid);
   const params = riskParams(cs, now);
-  const up = r30 >= FAST_MOVE_30S_PCT
-    && r90 >= FAST_MOVE_90S_PCT
-    && fromLast >= FAST_FROM_LAST_CLOSE_PCT
-    && r12 >= -FAST_MAX_AGAINST_1H_PCT;
+  const th = adaptiveThresholds(cs, now);
+  const up = r30 >= th.fast30Pct
+    && r90 >= th.fast90Pct
+    && fromLast >= th.fastFromLastPct
+    && r12 >= -th.fastMaxAgainst1hPct;
   if (up) {
     return {
       coin,
@@ -435,13 +480,13 @@ function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): Ear
       score: r90 + fromLast,
       last: { ...last, t: now, h: Math.max(last.h, mid), l: Math.min(last.l, mid), c: mid },
       params,
-      signal: `${coin} fast up radar r30=${r30.toFixed(2)} r90=${r90.toFixed(2)} from5m=${fromLast.toFixed(2)} h1=${r12.toFixed(2)}`,
+      signal: `${coin} fast up radar r30=${r30.toFixed(2)} r90=${r90.toFixed(2)} from5m=${fromLast.toFixed(2)} h1=${r12.toFixed(2)} [${thSignal(th)}]`,
     };
   }
-  const down = r30 <= -FAST_MOVE_30S_PCT
-    && r90 <= -FAST_MOVE_90S_PCT
-    && fromLast <= -FAST_FROM_LAST_CLOSE_PCT
-    && r12 <= FAST_MAX_AGAINST_1H_PCT;
+  const down = r30 <= -th.fast30Pct
+    && r90 <= -th.fast90Pct
+    && fromLast <= -th.fastFromLastPct
+    && r12 <= th.fastMaxAgainst1hPct;
   if (down) {
     return {
       coin,
@@ -449,7 +494,7 @@ function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): Ear
       score: Math.abs(r90) + Math.abs(fromLast),
       last: { ...last, t: now, h: Math.max(last.h, mid), l: Math.min(last.l, mid), c: mid },
       params,
-      signal: `${coin} fast down radar r30=${r30.toFixed(2)} r90=${r90.toFixed(2)} from5m=${fromLast.toFixed(2)} h1=${r12.toFixed(2)}`,
+      signal: `${coin} fast down radar r30=${r30.toFixed(2)} r90=${r90.toFixed(2)} from5m=${fromLast.toFixed(2)} h1=${r12.toFixed(2)} [${thSignal(th)}]`,
     };
   }
   return null;
