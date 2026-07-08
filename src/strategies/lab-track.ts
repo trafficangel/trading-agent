@@ -35,6 +35,8 @@ const closedStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode
 const openStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode='live' AND closed_at IS NULL ORDER BY opened_at DESC`);
 const momClosedStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_log WHERE closed_at IS NOT NULL ORDER BY closed_at ASC`);
 const momOpenStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_pos ORDER BY opened_at DESC`);
+const momShadowClosedStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_shadow_log WHERE closed_at IS NOT NULL ORDER BY closed_at ASC`);
+const momShadowOpenStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_shadow_pos ORDER BY opened_at DESC`);
 const limitVolClosesStmt = db.prepare<[string, number], { t: number; c: number }>(`SELECT t, c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
 
 // ── formatters (self-contained; matches lab.ts style) ──
@@ -295,6 +297,16 @@ const TRACK_CSS = `
   .lt-pager a:hover{border-color:var(--accent)}
   .lt-pager .off{color:var(--text-faint);padding:6px 14px;border:1px solid var(--border);border-radius:8px;opacity:.45}
   .lt-pager .pg{color:var(--text-dim);font-variant-numeric:tabular-nums}
+  .mom-link{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:16px 18px;text-decoration:none;color:var(--text);transition:border-color .15s}
+  .mom-link:hover{border-color:var(--accent)}
+  .mom-link-badge{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.05em;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:3px 9px;margin-bottom:7px}
+  .mom-link-title{font-size:18px;font-weight:650}
+  .mom-link-sub{font-size:13px;color:var(--text-dim);margin-top:3px}
+  .mom-link-stats{display:flex;gap:18px;text-align:right}
+  .mom-link-stats b{display:block;font-size:20px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.1}
+  .mom-link-stats b.pos{color:var(--accent)}.mom-link-stats b.neg{color:var(--danger)}
+  .mom-link-stats small{display:block;font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+  @media(max-width:560px){.mom-link-stats{width:100%;justify-content:space-between;text-align:left}}
 `;
 
 const PER_PAGE = 50;
@@ -414,6 +426,222 @@ function momentumLiveSection(nowMs: number, lang: Lang): string {
     ${open.length ? `<div class="section-subtitle">${t(lang, 'Momentum открыто сейчас', 'Momentum open now')}</div><div class="card table-wrap"><table class="lt-tbl"><thead><tr><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th><th class="r">${t(lang, 'Размер', 'Size')}</th><th>${t(lang, 'В работе', 'Held')}</th><th>${t(lang, 'Сигнал', 'Signal')}</th></tr></thead><tbody>${openRows}</tbody></table></div>` : ''}
     ${closed.length ? `<div class="section-subtitle">${t(lang, 'Momentum закрытые сделки', 'Momentum closed trades')}</div><div class="card table-wrap"><table class="lt-tbl"><thead><tr><th>#</th><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th><th class="r">${t(lang, 'Выход', 'Exit')}</th><th class="r">${t(lang, 'Результат', 'Result')}</th><th class="r">P&amp;L $</th><th>${t(lang, 'Как закрыли', 'Exit')}</th><th>${t(lang, 'Открыта (UTC)', 'Opened (UTC)')}</th></tr></thead><tbody>${recent}</tbody></table></div>` : ''}
   </div>`;
+}
+
+function momentumLinkSection(lang: Lang): string {
+  const liveClosed = momClosedStmt.all();
+  const liveOpen = momOpenStmt.all();
+  const net = liveClosed.reduce((s, r) => s + (r.pnl_pct ?? 0), 0);
+  return `<div class="section">
+    <a class="mom-link" href="/lab/momentum">
+      <div>
+        <span class="mom-link-badge">${t(lang, 'ОТДЕЛЬНАЯ СТРАТЕГИЯ', 'SEPARATE STRATEGY')}</span>
+        <div class="mom-link-title">Momentum Follow</div>
+        <div class="mom-link-sub">${t(lang, 'Трендовая механика по импульсу: описание, live/shadow статистика и сделки →', 'Impulse-following trend mechanic: description, live/shadow stats and trades →')}</div>
+      </div>
+      <div class="mom-link-stats">
+        <span><b class="${cls(net)}">${pct(net)}</b><small>${t(lang, 'live', 'live')}</small></span>
+        <span><b>${liveClosed.length}</b><small>${t(lang, 'закрыто', 'closed')}</small></span>
+        <span><b>${liveOpen.length}</b><small>${t(lang, 'открыто', 'open')}</small></span>
+      </div>
+    </a>
+  </div>`;
+}
+
+type MomStats = {
+  closed: number; open: number; wins: number; losses: number; winRate: number | null;
+  netPct: number; netUsd: number; avgPct: number; best: number; worst: number; profitFactor: number | null; cum: number[];
+};
+function computeMomentumStats(rows: MomRow[], open: number): MomStats {
+  const pnls = rows.map((r) => r.pnl_pct ?? 0);
+  const wins = pnls.filter((p) => p > 0).length;
+  const losses = pnls.filter((p) => p < 0).length;
+  const netPct = pnls.reduce((s, p) => s + p, 0);
+  const netUsd = rows.reduce((s, r) => s + momUsdOf(r), 0);
+  const grossWin = pnls.filter((p) => p > 0).reduce((s, p) => s + p, 0);
+  const grossLoss = -pnls.filter((p) => p < 0).reduce((s, p) => s + p, 0);
+  let cum = 0;
+  const cumSeries: number[] = [];
+  for (const p of pnls) { cum += p; cumSeries.push(cum); }
+  return {
+    closed: rows.length,
+    open,
+    wins,
+    losses,
+    winRate: wins + losses > 0 ? wins / (wins + losses) : null,
+    netPct,
+    netUsd,
+    avgPct: rows.length ? netPct / rows.length : 0,
+    best: pnls.length ? Math.max(...pnls) : 0,
+    worst: pnls.length ? Math.min(...pnls) : 0,
+    profitFactor: grossLoss > 0 ? grossWin / grossLoss : null,
+    cum: cumSeries,
+  };
+}
+
+function momentumOpenTable(rows: MomRow[], nowMs: number, lang: Lang): string {
+  if (rows.length === 0) return `<div class="card"><div class="card-body"><div class="empty-state" style="padding:18px 0;text-align:center;">${t(lang, 'Сейчас открытых Momentum-позиций нет.', 'No Momentum positions are open right now.')}</div></div></div>`;
+  const body = rows.map((r) => `<tr>
+    <td><b>${esc(r.coin)}</b></td>
+    <td><span class="sd ${r.side === 'long' ? 'long' : 'short'}">${r.side.toUpperCase()}</span></td>
+    <td class="r mono">${r.entry_px}</td>
+    <td class="r">${usd(momNotionalOf(r))}</td>
+    <td class="dt">${heldStr(r.opened_at, nowMs, lang)}</td>
+    <td>${esc(r.signal)}</td>
+  </tr>`).join('');
+  return `<div class="card table-wrap"><table class="lt-tbl"><thead><tr>
+    <th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th>
+    <th class="r">${t(lang, 'Размер', 'Size')}</th><th>${t(lang, 'В работе', 'Held')}</th><th>${t(lang, 'Сигнал', 'Signal')}</th>
+  </tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function momentumClosedTable(rows: MomRow[], page: number, baseUrl: string, lang: Lang): string {
+  if (rows.length === 0) return `<div class="card"><div class="card-body"><div class="empty-state" style="padding:18px 0;text-align:center;">${t(lang, 'Закрытых сделок пока нет.', 'No closed trades yet.')}</div></div></div>`;
+  const ordered = [...rows].sort((a, b) => (b.closed_at ?? 0) - (a.closed_at ?? 0));
+  const pages = Math.max(1, Math.ceil(ordered.length / PER_PAGE));
+  const p = Math.min(Math.max(1, page), pages);
+  const from = (p - 1) * PER_PAGE;
+  const body = ordered.slice(from, from + PER_PAGE).map((r) => {
+    const pnl = r.pnl_pct ?? 0;
+    return `<tr>
+      <td>#${r.id}</td>
+      <td><b>${esc(r.coin)}</b></td>
+      <td><span class="sd ${r.side === 'long' ? 'long' : 'short'}">${r.side.toUpperCase()}</span></td>
+      <td class="r mono">${r.entry_px}</td>
+      <td class="r mono">${r.exit_px ?? '—'}</td>
+      <td class="r mono ${cls(pnl)}">${pct(pnl)}</td>
+      <td class="r ${cls(momUsdOf(r))}">${usd(momUsdOf(r), true)}</td>
+      <td><span class="rp">${esc(r.close_reason ?? '—')}</span></td>
+      <td>${esc(r.signal)}</td>
+      <td class="dt">${fmtDt(r.opened_at)}</td>
+    </tr>`;
+  }).join('');
+  const shown = Math.min(PER_PAGE, ordered.length - from);
+  const pager = pages <= 1 ? '' : `<div class="lt-pager">
+    ${p > 1 ? `<a href="${baseUrl}?page=${p - 1}#closed">${t(lang, '← Назад', '← Back')}</a>` : `<span class="off">${t(lang, '← Назад', '← Back')}</span>`}
+    <span class="pg">${t(lang, 'Стр.', 'Page')} ${p} ${t(lang, 'из', 'of')} ${pages} · ${from + 1}–${from + shown} ${t(lang, 'из', 'of')} ${ordered.length}</span>
+    ${p < pages ? `<a href="${baseUrl}?page=${p + 1}#closed">${t(lang, 'Вперёд →', 'Next →')}</a>` : `<span class="off">${t(lang, 'Вперёд →', 'Next →')}</span>`}
+  </div>`;
+  return `<div class="card table-wrap"><table class="lt-tbl"><thead><tr>
+    <th>#</th><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th>
+    <th class="r">${t(lang, 'Выход', 'Exit')}</th><th class="r">${t(lang, 'Результат', 'Result')}</th><th class="r">P&amp;L $</th>
+    <th>${t(lang, 'Как закрыли', 'Exit')}</th><th>${t(lang, 'Сигнал', 'Signal')}</th><th>${t(lang, 'Открыта (UTC)', 'Opened (UTC)')}</th>
+  </tr></thead><tbody>${body}</tbody></table></div>${pager}`;
+}
+
+function momentumDailyStrip(rows: MomRow[], lang: Lang): string {
+  const byDay = new Map<number, { pct: number; usd: number; n: number }>();
+  for (const r of rows) {
+    if (r.closed_at == null) continue;
+    const day = Math.floor(r.closed_at / 86_400_000) * 86_400_000;
+    const e = byDay.get(day) ?? { pct: 0, usd: 0, n: 0 };
+    e.pct += r.pnl_pct ?? 0; e.usd += momUsdOf(r); e.n++; byDay.set(day, e);
+  }
+  if (byDay.size === 0) return '';
+  const today = Math.floor(Date.now() / 86_400_000) * 86_400_000;
+  const chips = [...byDay.entries()].sort((a, b) => b[0] - a[0]).map(([day, e]) => `
+    <div class="lt-day${day === today ? ' today' : ''}">
+      <div class="d">${fmtDay(day, lang)}${day === today ? t(lang, ' · сегодня', ' · today') : ''}</div>
+      <div class="v ${cls(e.pct)}">${pct(e.pct)}</div>
+      <div class="s">${usd(e.usd, true)} · ${e.n} ${t(lang, 'сд.', 'tr.')}</div>
+    </div>`).join('');
+  return `<div class="section"><div class="section-title">${t(lang, 'Momentum по дням', 'Momentum by day')}</div><div class="lt-days">${chips}</div></div>`;
+}
+
+function momentumStrategyDetail(lang: Lang): string {
+  return `<div class="section">
+    <div class="section-title">${t(lang, 'Как устроена Momentum Follow', 'How Momentum Follow works')}</div>
+    <p class="sd-lead">${t(lang,
+      'Momentum Follow — это отдельная трендовая механика на Hyperliquid, противоположная основной wick-fade. Она не ловит откат после шипа, а входит <b>по направлению сильного импульса</b>, если движение подтверждено объёмом, краткосрочным ускорением и часовым направлением.',
+      'Momentum Follow is a separate trend mechanic on Hyperliquid, opposite to the main wick-fade. It does not catch snap-back after a spike; it enters <b>with a strong impulse</b> when the move is confirmed by volume, short-term acceleration and the one-hour direction.')}</p>
+    <div class="sd-steps">
+      <div class="sd-step"><span class="n">1</span><h5>${t(lang, 'Фильтр импульса', 'Impulse filter')}</h5><p>${t(lang, 'Смотрим 5-минутные свечи: движение за 3 бара ≥ 1.2%, объём ≥ 1.8× нормы, часовое направление ≥ 0.6%.', 'Uses 5-minute candles: 3-bar move ≥ 1.2%, volume ≥ 1.8× normal, one-hour direction ≥ 0.6%.')}</p></div>
+      <div class="sd-step"><span class="n">2</span><h5>${t(lang, 'Вход по тренду', 'Trend entry')}</h5><p>${t(lang, 'Если монета свободна и wick-fade не держит позицию, стратегия входит малым рыночным ордером по направлению импульса.', 'If the coin is free and wick-fade has no position, the strategy enters with a small market order in the impulse direction.')}</p></div>
+      <div class="sd-step cat"><span class="n">3</span><h5>${t(lang, 'Жёсткий выход', 'Hard exits')}</h5><p>${t(lang, 'Цель +1.6%, стоп −1.2%, тайм-стоп 30 минут. В live дополнительно стоит дневной стоп −2.5% по этой механике.', 'Target +1.6%, stop −1.2%, 30-minute time-stop. Live also has a −2.5% daily stop for this mechanic.')}</p></div>
+    </div>
+    <div class="sd-blocks">
+      <div class="sd-block">
+        <h4>${t(lang, 'Зачем она нужна', 'Why it exists')}</h4>
+        <ul>
+          <li>${t(lang, 'Wick-fade зарабатывает на возврате к средней; Momentum Follow покрывает режимы, где рынок <b>не возвращается</b>, а продолжает движение.', 'Wick-fade earns on mean reversion; Momentum Follow covers regimes where the market <b>does not revert</b> and continues moving.')}</li>
+          <li>${t(lang, 'Это диверсификация по логике, а не ещё одна копия той же ставки.', 'This is diversification by logic, not another copy of the same bet.')}</li>
+          <li>${t(lang, 'Пока размер специально минимальный: задача — собрать настоящую статистику на деньгах.', 'Size is intentionally minimal for now: the goal is to collect real-money statistics.')}</li>
+        </ul>
+      </div>
+      <div class="sd-block risk">
+        <h4>${t(lang, 'Защита от конфликта', 'Conflict protection')}</h4>
+        <ul>
+          <li>${t(lang, 'Одна монета не может одновременно управляться двумя live-механиками.', 'One coin cannot be managed by two live mechanics at the same time.')}</li>
+          <li>${t(lang, 'При входе Momentum монета блокируется для wick-fade, а его лимитки по этой монете снимаются.', 'When Momentum enters, the coin is locked away from wick-fade and its resting limits on that coin are pulled.')}</li>
+          <li>${t(lang, 'Биржевой стоп ставится сразу после подтверждения позиции; кодовый poll остаётся резервной защитой.', 'An exchange stop is placed immediately after position confirmation; the code poll remains backup protection.')}</li>
+        </ul>
+      </div>
+    </div>
+  </div>`;
+}
+
+export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
+  const liveClosed = momClosedStmt.all();
+  const liveOpen = momOpenStmt.all();
+  const shadowClosed = momShadowClosedStmt.all();
+  const shadowOpen = momShadowOpenStmt.all();
+  const live = computeMomentumStats(liveClosed, liveOpen.length);
+  const shadow = computeMomentumStats(shadowClosed, shadowOpen.length);
+  const statCard = (l: string, v: string, vc = '', s = '', sc = ''): string =>
+    `<div class="lt-stat"><div class="l">${l}</div><div class="v ${vc}">${v}</div>${s ? `<div class="s ${sc}">${s}</div>` : ''}</div>`;
+
+  return pageShell(
+    t(lang, 'Momentum Follow — отдельная live-стратегия · Robot Claude', 'Momentum Follow — separate live strategy · Robot Claude'),
+    `
+    <div class="header">
+      <a class="lt-back" href="/lab">${t(lang, '← в лабораторию', '← to the lab')}</a>
+      <a class="lt-back" href="/lab/live" style="margin-left:12px">${t(lang, '← основной live-трек', '← main live track')}</a>
+      <span class="strat-code">${t(lang, 'LIVE MICRO · HYPERLIQUID · MOMENTUM', 'LIVE MICRO · HYPERLIQUID · MOMENTUM')}</span>
+      <h1 class="title">Momentum Follow</h1>
+      <p class="subtitle">${t(lang, 'Отдельная трендовая стратегия: вход по подтверждённому импульсу, маленький live-размер, отдельная статистика.', 'Separate trend strategy: enters confirmed impulses, small live size, separate statistics.')}</p>
+    </div>
+    <style>${TRACK_CSS}</style>
+
+    <div class="lt-phase">
+      <span class="dot"></span>
+      <div>${t(lang, '<b>Статус: real micro.</b> Стратегия уже включена в боевой процесс, но открывает сделки только при свежем сигнале и свободной монете. Размер около $12, плечо 1x, стоп на бирже.', '<b>Status: real micro.</b> The strategy is enabled in production, but only opens on a fresh signal and a free coin. Size is about $12, leverage 1x, stop on exchange.')}</div>
+    </div>
+
+    <div class="lt-cards">
+      ${statCard(t(lang, 'Live результат', 'Live result'), pct(live.netPct), cls(live.netPct), `${usd(live.netUsd, true)} · ${t(lang, 'реальные деньги', 'real money')}`, cls(live.netUsd))}
+      ${statCard(t(lang, 'Live сделки', 'Live trades'), String(live.closed), '', `${live.open} ${t(lang, 'открыто', 'open')}`)}
+      ${statCard(t(lang, 'Live WR', 'Live WR'), live.winRate != null ? `${(live.winRate * 100).toFixed(0)}%` : '—', '', `${live.wins}W / ${live.losses}L`)}
+      ${statCard(t(lang, 'Live PF', 'Live PF'), live.profitFactor != null ? live.profitFactor.toFixed(2) : '—', live.profitFactor != null && live.profitFactor >= 1 ? 'pos' : live.profitFactor != null ? 'neg' : '', t(lang, 'прибыль / убыток', 'profit / loss'))}
+      ${statCard(t(lang, 'Shadow результат', 'Shadow result'), pct(shadow.netPct), cls(shadow.netPct), `${usd(shadow.netUsd, true)} · ${t(lang, 'бумага', 'paper')}`, cls(shadow.netUsd))}
+      ${statCard(t(lang, 'Shadow сделки', 'Shadow trades'), String(shadow.closed), '', `${shadow.open} ${t(lang, 'открыто', 'open')}`)}
+      ${statCard(t(lang, 'Shadow WR', 'Shadow WR'), shadow.winRate != null ? `${(shadow.winRate * 100).toFixed(0)}%` : '—', '', `${shadow.wins}W / ${shadow.losses}L`)}
+      ${statCard(t(lang, 'Средняя live', 'Live average'), pct(live.avgPct), cls(live.avgPct), t(lang, 'на сделку', 'per trade'))}
+    </div>
+
+    ${live.cum.length >= 2 ? `<div class="section"><div class="section-title">${t(lang, 'Live-кривая результата', 'Live result curve')}</div>${equityCurve(live.cum, lang)}</div>` : ''}
+    ${momentumDailyStrip(liveClosed, lang)}
+    ${momentumStrategyDetail(lang)}
+
+    <div class="section">
+      <div class="section-title">${t(lang, 'Live открыто сейчас', 'Live open now')} · ${liveOpen.length}</div>
+      ${momentumOpenTable(liveOpen, Date.now(), lang)}
+    </div>
+
+    <div class="section" id="closed">
+      <div class="section-title">${t(lang, 'Live закрытые сделки', 'Live closed trades')} · ${liveClosed.length}</div>
+      ${momentumClosedTable(liveClosed, page, '/lab/momentum', lang)}
+    </div>
+
+    <div class="section">
+      <div class="section-title">${t(lang, 'Shadow / бумажная проверка', 'Shadow / paper validation')}</div>
+      <p class="sd-lead">${t(lang, 'Shadow-режим продолжает писать сделки отдельно от live. Он нужен, чтобы видеть, как сигнал ведёт себя шире, даже когда live-вход заблокирован занятостью монеты или защитой.', 'Shadow mode keeps writing trades separately from live. It shows how the signal behaves more broadly, even when live entry is blocked by an occupied coin or protection.')}</p>
+      ${momentumClosedTable(shadowClosed.slice().reverse().slice(0, 20).reverse(), 1, '/lab/momentum', lang)}
+    </div>
+
+    <p class="lt-note">${t(lang, 'Live и shadow считаются отдельно. Live — реальные деньги и реальные исполнения; shadow — модельная проверка сигнала на тех же 5-минутных свечах. Прошлые результаты не гарантируют будущих.', 'Live and shadow are counted separately. Live is real money and real execution; shadow is model validation of the signal on the same 5-minute candles. Past results do not guarantee future results.')}</p>
+    `,
+    { autoRefreshSec: 60, lang },
+  );
 }
 
 function limitRungLabel(o: HlOpenOrder, distancePct: number | null, vol: LimitVol | null, lang: Lang): string {
@@ -670,7 +898,7 @@ export async function renderLiveTrack(page = 1, lang: Lang = 'ru'): Promise<stri
     ${hasData ? `<div class="section"><div class="section-title">${t(lang, 'Кривая результата (накопленный %, net комиссий)', 'Result curve (cumulative %, net of fees)')}</div>${equityCurve(st.cum, lang)}</div>` : ''}
     ${hasData ? dailyStrip(rows, lang) : ''}
     ${strategyDetail(universe, lang)}
-    ${momentumLiveSection(Date.now(), lang)}
+    ${momentumLinkSection(lang)}
     ${limitsSection}
     ${openPositionsSection(Date.now(), lang)}
     ${hasData ? `<div class="section" id="trades"><div class="section-title">${t(lang, `Закрытые сделки · все ${st.closed}`, `Closed trades · all ${st.closed}`)}</div>${tradesTable(rows, page, lang)}</div>` : emptyState}
@@ -695,9 +923,11 @@ export async function renderLiveTrack(page = 1, lang: Lang = 'ru'): Promise<stri
 /** Compact live-track summary for the hero card at the top of /lab. */
 export function liveTrackHero(lang: Lang = 'ru'): string {
   const rows = closedStmt.all();
-  if (rows.length === 0) return '';
   const st = computeStats(rows, openStmt.all().length);
+  const momRows = momClosedStmt.all();
+  const mom = computeMomentumStats(momRows, momOpenStmt.all().length);
   return `
+    <div class="lt-hero-stack">
     <a class="lt-hero" href="/lab/live">
       <div class="lt-hero-l">
         <span class="lt-hero-badge">🟢 LIVE · Hyperliquid · ${t(lang, 'реальные деньги', 'real money')}</span>
@@ -710,13 +940,28 @@ export function liveTrackHero(lang: Lang = 'ru'): string {
         <div class="lt-hero-stat"><div class="v">${st.closed}</div><div class="k">${t(lang, 'сделок', 'trades')}</div></div>
         <div class="lt-hero-stat"><div class="v">${st.winRate != null ? `${(st.winRate * 100).toFixed(0)}%` : '—'}</div><div class="k">${t(lang, 'винрейт', 'win rate')}</div></div>
       </div>
-    </a>`;
+    </a>
+    <a class="lt-hero" href="/lab/momentum">
+      <div class="lt-hero-l">
+        <span class="lt-hero-badge">🧭 MOMENTUM · Hyperliquid · ${t(lang, 'отдельная стратегия', 'separate strategy')}</span>
+        <div class="lt-hero-title">Momentum Follow</div>
+        <div class="lt-hero-sub">${t(lang, 'Трендовая механика по импульсу: описание и отдельная статистика →', 'Impulse-following trend mechanic: description and separate stats →')}</div>
+      </div>
+      <div class="lt-hero-r">
+        <div class="lt-hero-stat"><div class="v ${cls(mom.netPct)}">${pct(mom.netPct)}</div><div class="k">${t(lang, 'live', 'live')}</div></div>
+        <div class="lt-hero-stat"><div class="v">${mom.closed}</div><div class="k">${t(lang, 'сделок', 'trades')}</div></div>
+        <div class="lt-hero-stat"><div class="v">${mom.open}</div><div class="k">${t(lang, 'открыто', 'open')}</div></div>
+        <div class="lt-hero-stat"><div class="v">${mom.winRate != null ? `${(mom.winRate * 100).toFixed(0)}%` : '—'}</div><div class="k">${t(lang, 'винрейт', 'win rate')}</div></div>
+      </div>
+    </a>
+    </div>`;
 }
 
 export const LIVE_TRACK_HERO_CSS = `
+  .lt-hero-stack{display:grid;gap:12px;margin:0 0 22px}
   .lt-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
     background:linear-gradient(135deg,var(--accent-soft),var(--bg-card));border:1px solid var(--accent-soft);
-    border-radius:14px;padding:16px 20px;margin:0 0 22px;text-decoration:none;color:var(--text);transition:border-color .15s}
+    border-radius:14px;padding:16px 20px;text-decoration:none;color:var(--text);transition:border-color .15s}
   .lt-hero:hover{border-color:var(--accent)}
   .lt-hero-badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.03em;color:var(--accent);
     background:var(--accent-soft);border-radius:999px;padding:3px 10px;margin-bottom:8px}
@@ -736,5 +981,12 @@ export async function labTrackRoute(app: FastifyInstance): Promise<void> {
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'public, max-age=30');
     return renderLiveTrack(page, getLang(req));
+  });
+
+  app.get<{ Querystring: { page?: string } }>('/lab/momentum', async (req, reply) => {
+    const page = Math.max(1, parseInt(req.query.page ?? '1', 10) || 1);
+    reply.type('text/html; charset=utf-8');
+    reply.header('Cache-Control', 'public, max-age=30');
+    return renderMomentumTrack(page, getLang(req));
   });
 }
