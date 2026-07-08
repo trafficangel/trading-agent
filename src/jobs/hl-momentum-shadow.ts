@@ -611,11 +611,11 @@ export async function runHlMomentumShadowReport(opts: { force?: boolean; notify?
 }
 
 export function startHlMomentumShadowJob(): void {
-  cron.schedule('*/5 * * * *', () => { void tick(); });
+  cron.schedule('* * * * *', () => { void tick(); });
   cron.schedule('29 */4 * * *', () => {
     void runHlMomentumShadowReport().catch((err) => logger.error({ err }, 'hl-momentum-shadow: report failed'));
   });
   const t = setTimeout(() => { void tick(); }, 75_000);
   t.unref();
-  logger.info({ live: LIVE_ENABLED, liveNotional: LIVE_NOTIONAL_USD, liveLeverage: LIVE_LEVERAGE, liveMaxOpen: LIVE_MAX_OPEN }, 'hl-momentum scheduled (5m, all-market shadow + filtered live micro)');
+  logger.info({ live: LIVE_ENABLED, liveNotional: LIVE_NOTIONAL_USD, liveLeverage: LIVE_LEVERAGE, liveMaxOpen: LIVE_MAX_OPEN }, 'hl-momentum scheduled (1m check, 5m candle signal, all-market shadow + filtered live micro)');
 }

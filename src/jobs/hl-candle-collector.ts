@@ -4,7 +4,7 @@
  * wick-fade/momentum coins on the venue we actually trade needs our own archive. Coins = the full current
  * Hyperliquid perp universe from metaAndAssetCtxs, with a small fallback set if the public meta read fails.
  *
- * Mechanics: every 15 min (offset :07 — off the 1-min trading loop's hot second and the info-API burst),
+ * Mechanics: every 5 min (offset :01 — shortly after a 5m candle closes, off the trading-loop hot second),
  * per coin, fetch from the last stored bar (inclusive startTime re-fetches it → finalizes a then-partial
  * candle; INSERT OR REPLACE dedupes) and store CLOSED bars only (k.T ≤ now — the in-progress bucket never
  * lands in the archive). First run backfills the full ~17d HL still serves. Public MAINNET market data via
@@ -85,7 +85,7 @@ async function tick(): Promise<void> {
         logger.warn({ coin, gapFromMs: last, gapToMs: rows[0]!.t, gapBars: Math.round((rows[0]!.t - last) / STEP_MS) - 1 }, 'hl-candle-collector: GAP in archive (downtime exceeded HL serving window?) — hole is permanent, note for backtests');
       }
       if (rows.length) { s.insMany(coin, rows); stored += rows.length; }
-      await new Promise((r) => setTimeout(r, 500)); // gentle on the shared-IP info API (~32 req / 15 min)
+      await new Promise((r) => setTimeout(r, 500)); // gentle on the shared-IP info API (~176 req / 5 min)
     }
     logger.info({ stored, failed, coins: coins.length }, 'hl-candle-collector: all-market tick done');
     if (failed) logger.warn({ stored, failed, coins: coins.length }, 'hl-candle-collector: tick done with failures (next tick self-heals)');
@@ -95,7 +95,7 @@ async function tick(): Promise<void> {
 }
 
 export function startHlCandleCollector(): void {
-  cron.schedule('7,22,37,52 * * * *', () => { void tick(); }); // offset :07 — away from the :00 trading-loop burst
+  cron.schedule('1,6,11,16,21,26,31,36,41,46,51,56 * * * *', () => { void tick(); }); // shortly after each 5m close
   setTimeout(() => { void tick(); }, 20_000); // first pass shortly after boot (backfills ~17d per coin once)
-  logger.info({ fallbackCoins: FALLBACK_COINS.length, interval: INTERVAL }, 'hl-candle-collector scheduled (all-market every 15m → hl_candles)');
+  logger.info({ fallbackCoins: FALLBACK_COINS.length, interval: INTERVAL }, 'hl-candle-collector scheduled (all-market every 5m → hl_candles)');
 }
