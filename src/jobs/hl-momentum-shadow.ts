@@ -34,6 +34,27 @@ type RiskParams = {
   trailMinLockPct: number;
   volPct: number;
 };
+type SignalLayer = 'fast' | 'confirm';
+type SignalMetrics = {
+  r30?: number;
+  r90?: number;
+  r3?: number;
+  r12?: number;
+  fromLast?: number;
+  volRatio?: number;
+  closeNearHigh?: number;
+  extensionPct?: number;
+  vol5mPct?: number;
+};
+type MomentumSignal = {
+  coin: string;
+  side: Side;
+  layer: SignalLayer;
+  signal: string;
+  score: number;
+  expectedPnl: number;
+  metrics: SignalMetrics;
+};
 
 const NOTIONAL_USD = 12;
 const LIVE_ENABLED = true;
@@ -74,6 +95,13 @@ const FAST_MAX_AGAINST_VOL_MULT = 0.35;
 const FAST_MAX_CANDIDATES_PER_TICK = 2;
 const FAST_COIN_COOLDOWN_MS = 5 * 60_000;
 const FAST_GLOBAL_ATTEMPT_GAP_MS = 6_000;
+const MIN_LIVE_SCORE = 68;
+const MIN_EXPECTED_PNL_PCT = 0.10;
+const MAX_EXTENSION_R_MULT = 1.25;
+const MAX_LIVE_SAME_SIDE = 3;
+const HIGH_SCORE_OVERRIDE = 84;
+const REGIME_MOVE_90S_PCT = 0.20;
+const REGIME_BREADTH_WARN = 80;
 
 const candlesStmt = db.prepare<[string, number], Candle>(`
   SELECT t, o, h, l, c, v FROM hl_candles
@@ -168,6 +196,24 @@ const liveTodayPnlStmt = db.prepare<[number], { pnl: number | null }>(`
   SELECT SUM(pnl_pct) AS pnl FROM hl_momentum_live_log
    WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL AND closed_at >= ?
 `);
+const liveCoinSideStatsStmt = db.prepare<[string, Side], { n: number; avg: number | null; wins: number | null }>(`
+  SELECT COUNT(*) AS n,
+         AVG(pnl_pct) AS avg,
+         SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins
+    FROM hl_momentum_live_log
+   WHERE coin = ? AND side = ? AND closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+`);
+const insSignalJournalStmt = db.prepare<[
+  number, string, Side, SignalLayer, number, number, string, string,
+  number | null, number | null, number | null, number | null, number | null, number | null,
+  number | null, number | null, number | null, number | null, number, number, string
+], void>(`
+  INSERT INTO hl_momentum_signal_journal
+    (ts, coin, side, layer, score, expected_pnl, decision, reason, ref_px, signal_px,
+     r30, r90, r3, r12, from_last, vol_ratio, spread_pct, side_depth_usd,
+     open_total, open_same_side, signal)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
 const wickOpenPosStmt = db.prepare<[string], { coin: string }>('SELECT coin FROM wick_fade_pos WHERE coin = ?');
 const liveUpsertLockStmt = db.prepare<[string, number, string, number], void>(`
   INSERT INTO hl_momentum_live_lock (coin, locked_until, reason, updated_at)
@@ -210,6 +256,11 @@ function runtimePct(key: string, fallback: number, lo: number, hi: number): numb
 
 function liveDailyStopPct(): number {
   return runtimePct('hl_momentum_live_daily_stop_pct', LIVE_DAILY_STOP_PCT, -25, -1);
+}
+
+function runtimeNum(key: string, fallback: number, lo: number, hi: number): number {
+  const raw = Number(getKvStmt.get(key)?.value ?? fallback);
+  return Number.isFinite(raw) ? clamp(raw, lo, hi) : fallback;
 }
 
 function esc(s: string): string {
@@ -389,6 +440,80 @@ function thSignal(th: AdaptiveThresholds): string {
   return `thr vol5m=${th.vol5mPct.toFixed(2)} imp3=${th.impulse3Pct.toFixed(2)} tr1h=${th.trend1hPct.toFixed(2)} volx=${th.volRatioMin.toFixed(2)} edge=${th.longCloseMin.toFixed(2)} fast30=${th.fast30Pct.toFixed(2)} fast90=${th.fast90Pct.toFixed(2)} fast5m=${th.fastFromLastPct.toFixed(2)}`;
 }
 
+function coinQualityAdj(coin: string, side: Side): number {
+  const st = liveCoinSideStatsStmt.get(coin, side);
+  const n = st?.n ?? 0;
+  if (n < 3) return 0;
+  const avgPnl = st?.avg ?? 0;
+  const wr = n > 0 ? (st?.wins ?? 0) / n : 0.5;
+  return clamp(avgPnl * 8 + (wr - 0.5) * 18, -14, 14);
+}
+
+function portfolioState(side: Side): { total: number; sameSide: number } {
+  const open = liveAllPosStmt.all();
+  return { total: open.length, sameSide: open.filter((p) => p.side === side).length };
+}
+
+function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'expectedPnl'>, params: RiskParams): MomentumSignal {
+  const m = sig.metrics;
+  const vol5m = Math.max(0.12, m.vol5mPct ?? params.volPct * 100);
+  const moveStrength = sig.layer === 'fast'
+    ? ((Math.abs(m.r90 ?? 0) / Math.max(0.1, vol5m)) * 16) + ((Math.abs(m.fromLast ?? 0) / Math.max(0.1, vol5m)) * 12)
+    : ((Math.abs(m.r3 ?? 0) / Math.max(0.1, vol5m * Math.sqrt(3))) * 22);
+  const trendStrength = Math.min(14, Math.abs(m.r12 ?? 0) / Math.max(0.1, vol5m) * 5);
+  const volumeStrength = m.volRatio != null ? clamp((m.volRatio - 1) * 10, -4, 16) : 0;
+  const edge = m.closeNearHigh == null ? 0 : sig.side === 'long'
+    ? clamp((m.closeNearHigh - 0.5) * 18, -8, 8)
+    : clamp((0.5 - m.closeNearHigh) * 18, -8, 8);
+  const extensionPenalty = Math.max(0, ((m.extensionPct ?? 0) / Math.max(0.1, params.stopPct * 100) - MAX_EXTENSION_R_MULT) * 16);
+  const coinAdj = coinQualityAdj(sig.coin, sig.side);
+  const raw = 48 + moveStrength + trendStrength + volumeStrength + edge + coinAdj - extensionPenalty;
+  const score = Math.round(clamp(raw, 0, 100));
+  const continuationProb = clamp(0.38 + (score - 50) / 120, 0.18, 0.78);
+  const winPnl = params.trailMinLockPct * 100;
+  const lossPnl = params.stopPct * 100 + COST_RT_PCT;
+  const expectedPnl = Math.round((continuationProb * winPnl - (1 - continuationProb) * lossPnl) * 1000) / 1000;
+  return { ...sig, score, expectedPnl };
+}
+
+function appendScoreSignal(signal: string, sig: MomentumSignal): string {
+  return `${signal} [score=${sig.score} ev=${sig.expectedPnl.toFixed(2)} layer=${sig.layer}]`;
+}
+
+function recordSignal(sig: MomentumSignal, decision: 'paper' | 'live-open' | 'skip', reason: string, px: { ref?: number | null; signal?: number | null; spreadPct?: number | null; sideDepthUsd?: number | null } = {}): void {
+  try {
+    const pf = portfolioState(sig.side);
+    insSignalJournalStmt.run(
+      Date.now(), sig.coin, sig.side, sig.layer, sig.score, sig.expectedPnl, decision, reason,
+      px.ref ?? null, px.signal ?? null,
+      sig.metrics.r30 ?? null, sig.metrics.r90 ?? null, sig.metrics.r3 ?? null, sig.metrics.r12 ?? null,
+      sig.metrics.fromLast ?? null, sig.metrics.volRatio ?? null,
+      px.spreadPct ?? null, px.sideDepthUsd ?? null,
+      pf.total, pf.sameSide, sig.signal,
+    );
+  } catch (err) {
+    logger.warn({ err: (err as Error).message, coin: sig.coin, decision }, 'hl-momentum: signal journal write failed');
+  }
+}
+
+function preTradeGate(sig: MomentumSignal, params: RiskParams): string | null {
+  const minScore = runtimeNum('hl_momentum_min_live_score', MIN_LIVE_SCORE, 45, 95);
+  const minEv = runtimeNum('hl_momentum_min_expected_pnl_pct', MIN_EXPECTED_PNL_PCT, -0.25, 1.5);
+  if (sig.score < minScore) return `score ${sig.score} < ${minScore}`;
+  if (sig.expectedPnl < minEv) return `ev ${sig.expectedPnl.toFixed(2)}% < ${minEv.toFixed(2)}%`;
+  const extensionR = (sig.metrics.extensionPct ?? 0) / Math.max(0.1, params.stopPct * 100);
+  if (extensionR > MAX_EXTENSION_R_MULT && sig.score < HIGH_SCORE_OVERRIDE) return `late extension ${extensionR.toFixed(2)}R`;
+  const pf = portfolioState(sig.side);
+  if (pf.sameSide >= MAX_LIVE_SAME_SIDE && sig.score < HIGH_SCORE_OVERRIDE) return `portfolio crowding ${sig.side} ${pf.sameSide}`;
+  if (Date.now() - lastRegime.ts < 20_000) {
+    if (sig.side === 'long' && lastRegime.label === 'risk-off' && sig.score < HIGH_SCORE_OVERRIDE) return `regime risk-off breadth ${lastRegime.down}`;
+    if (sig.side === 'short' && lastRegime.label === 'risk-on' && sig.score < HIGH_SCORE_OVERRIDE) return `regime risk-on breadth ${lastRegime.up}`;
+    const crowdedWithMarket = (sig.side === 'long' && lastRegime.up >= REGIME_BREADTH_WARN) || (sig.side === 'short' && lastRegime.down >= REGIME_BREADTH_WARN);
+    if (crowdedWithMarket && pf.sameSide >= 2 && sig.score < HIGH_SCORE_OVERRIDE) return `systemic ${sig.side} crowding breadth ${sig.side === 'long' ? lastRegime.up : lastRegime.down}`;
+  }
+  return null;
+}
+
 async function liveLiquidityCheck(coin: string, side: Side): Promise<{ ok: true; spreadPct: number; sideDepthUsd: number } | { ok: false; reason: string }> {
   try {
     const book = await l2Book(coin);
@@ -410,7 +535,7 @@ async function liveLiquidityCheck(coin: string, side: Side): Promise<{ ok: true;
   }
 }
 
-function decide(coin: string, cs: Candle[]): { side: Side; signal: string } | null {
+function decide(coin: string, cs: Candle[]): MomentumSignal | null {
   if (cs.length < 70) return null;
   const i = cs.length - 1;
   const last = cs[i]!;
@@ -420,22 +545,28 @@ function decide(coin: string, cs: Candle[]): { side: Side; signal: string } | nu
   const volRatio = volBase > 0 ? last.v / volBase : 0;
   const closeNearHigh = (last.c - last.l) / Math.max(1e-12, last.h - last.l);
   const th = adaptiveThresholds(cs, last.t);
+  const params = riskParams(cs, last.t);
+  const baseMetrics: SignalMetrics = {
+    r3, r12, volRatio, closeNearHigh, vol5mPct: th.vol5mPct,
+    extensionPct: Math.abs(r3),
+  };
 
   if (r3 >= th.impulse3Pct && r12 >= th.trend1hPct && volRatio >= th.volRatioMin && closeNearHigh >= th.longCloseMin) {
-    return { side: 'long', signal: `${coin} up impulse r3=${r3.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} [${thSignal(th)}]` };
+    return scoreSignal({ coin, side: 'long', layer: 'confirm', metrics: baseMetrics, signal: `${coin} up impulse r3=${r3.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} [${thSignal(th)}]` }, params);
   }
   if (r3 <= -th.impulse3Pct && r12 <= -th.trend1hPct && volRatio >= th.volRatioMin && closeNearHigh <= th.shortCloseMax) {
-    return { side: 'short', signal: `${coin} down impulse r3=${r3.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} [${thSignal(th)}]` };
+    return scoreSignal({ coin, side: 'short', layer: 'confirm', metrics: baseMetrics, signal: `${coin} down impulse r3=${r3.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} [${thSignal(th)}]` }, params);
   }
   return null;
 }
 
 type MidPoint = { t: number; px: number };
-type EarlySignal = { coin: string; side: Side; signal: string; score: number; last: Candle; params: RiskParams };
+type EarlySignal = MomentumSignal & { last: Candle; params: RiskParams };
 const midHistory = new Map<string, MidPoint[]>();
 const earlyCooldown = new Map<string, number>();
 const liveFastBestPx = new Map<string, number>();
 const liveFastClosing = new Set<string>();
+let lastRegime: { ts: number; up: number; down: number; label: 'risk-on' | 'risk-off' | 'mixed' } = { ts: 0, up: 0, down: 0, label: 'mixed' };
 let fastRadarRunning = false;
 let lastFastAttemptAt = 0;
 
@@ -462,6 +593,21 @@ function pctFromMid(coin: string, mid: number, now: number, ageMs: number): numb
   return prev != null && prev > 0 ? pct(prev, mid) : null;
 }
 
+function updateMarketRegime(mids: Map<string, number>, now: number): void {
+  let up = 0;
+  let down = 0;
+  for (const [coin, mid] of mids) {
+    const r90 = pctFromMid(coin, mid, now, 90_000);
+    if (r90 == null) continue;
+    if (r90 >= REGIME_MOVE_90S_PCT) up++;
+    else if (r90 <= -REGIME_MOVE_90S_PCT) down++;
+  }
+  const label = up >= REGIME_BREADTH_WARN && up > down * 1.5 ? 'risk-on'
+    : down >= REGIME_BREADTH_WARN && down > up * 1.5 ? 'risk-off'
+      : 'mixed';
+  lastRegime = { ts: now, up, down, label };
+}
+
 function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): EarlySignal | null {
   if (cs.length < 70) return null;
   const last = cs.at(-1)!;
@@ -473,33 +619,38 @@ function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): Ear
   const fromLast = pct(last.c, mid);
   const params = riskParams(cs, now);
   const th = adaptiveThresholds(cs, now);
+  const fastMetrics = (side: Side): SignalMetrics => ({
+    r30, r90, r12, fromLast, vol5mPct: th.vol5mPct,
+    extensionPct: Math.abs(fromLast) + Math.max(0, Math.abs(r90) - th.fast90Pct),
+    closeNearHigh: side === 'long' ? 1 : 0,
+  });
   const up = r30 >= th.fast30Pct
     && r90 >= th.fast90Pct
     && fromLast >= th.fastFromLastPct
     && r12 >= -th.fastMaxAgainst1hPct;
   if (up) {
-    return {
+    const scored = scoreSignal({
       coin,
       side: 'long',
-      score: r90 + fromLast,
-      last: { ...last, t: now, h: Math.max(last.h, mid), l: Math.min(last.l, mid), c: mid },
-      params,
+      layer: 'fast',
+      metrics: fastMetrics('long'),
       signal: `${coin} fast up radar r30=${r30.toFixed(2)} r90=${r90.toFixed(2)} from5m=${fromLast.toFixed(2)} h1=${r12.toFixed(2)} [${thSignal(th)}]`,
-    };
+    }, params);
+    return { ...scored, last: { ...last, t: now, h: Math.max(last.h, mid), l: Math.min(last.l, mid), c: mid }, params };
   }
   const down = r30 <= -th.fast30Pct
     && r90 <= -th.fast90Pct
     && fromLast <= -th.fastFromLastPct
     && r12 <= th.fastMaxAgainst1hPct;
   if (down) {
-    return {
+    const scored = scoreSignal({
       coin,
       side: 'short',
-      score: Math.abs(r90) + Math.abs(fromLast),
-      last: { ...last, t: now, h: Math.max(last.h, mid), l: Math.min(last.l, mid), c: mid },
-      params,
+      layer: 'fast',
+      metrics: fastMetrics('short'),
       signal: `${coin} fast down radar r30=${r30.toFixed(2)} r90=${r90.toFixed(2)} from5m=${fromLast.toFixed(2)} h1=${r12.toFixed(2)} [${thSignal(th)}]`,
-    };
+    }, params);
+    return { ...scored, last: { ...last, t: now, h: Math.max(last.h, mid), l: Math.min(last.l, mid), c: mid }, params };
   }
   return null;
 }
@@ -650,38 +801,42 @@ async function fastManageLivePositions(mids: Map<string, number>): Promise<void>
   }
 }
 
-async function liveMaybeOpen(coin: string, sig: { side: Side; signal: string }, last: Candle, params: RiskParams): Promise<void> {
+async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, params: RiskParams): Promise<void> {
   if (!LIVE_ENABLED) return;
   if (liveFastClosing.has(coin)) return;
   const dayPnl = liveTodayPnlStmt.get(todayStartUtc(Date.now()))?.pnl ?? 0;
   const dailyStopPct = liveDailyStopPct();
-  if (dayPnl <= dailyStopPct) return;
-  if (liveGetPosStmt.get(coin)) return;
-  if (liveAllPosStmt.all().length >= LIVE_MAX_OPEN) return;
-  if (wickOpenPosStmt.get(coin)) return;
+  if (dayPnl <= dailyStopPct) { recordSignal(sig, 'skip', `daily stop ${dayPnl.toFixed(2)} <= ${dailyStopPct}`); return; }
+  if (liveGetPosStmt.get(coin)) { recordSignal(sig, 'skip', 'live position already open'); return; }
+  if (liveAllPosStmt.all().length >= LIVE_MAX_OPEN) { recordSignal(sig, 'skip', `max live open ${LIVE_MAX_OPEN}`); return; }
+  if (wickOpenPosStmt.get(coin)) { recordSignal(sig, 'skip', 'wick-fade has coin'); return; }
+  const gate = preTradeGate(sig, params);
+  if (gate) { recordSignal(sig, 'skip', gate, { ref: last.c, signal: last.c }); return; }
 
   const ex = await hlFetchPosition(coin);
-  if (!ex.ok) { logger.warn({ coin, msg: ex.msg }, 'hl-momentum-live: position read failed before entry'); return; }
-  if (ex.data) return; // shared one-way account: never stack on an existing live position
+  if (!ex.ok) { recordSignal(sig, 'skip', `position read failed: ${ex.msg}`); logger.warn({ coin, msg: ex.msg }, 'hl-momentum-live: position read failed before entry'); return; }
+  if (ex.data) { recordSignal(sig, 'skip', 'exchange position already open'); return; } // shared one-way account: never stack on an existing live position
 
   const liq = await liveLiquidityCheck(coin, sig.side);
   if (!liq.ok) {
+    recordSignal(sig, 'skip', `liquidity: ${liq.reason}`, { ref: last.c, signal: last.c });
     logger.info({ coin, side: sig.side, reason: liq.reason, signal: sig.signal }, 'hl-momentum-live: signal skipped by liquidity filter');
     return;
   }
 
   liveLock(coin, `momentum-live pending ${sig.side}`);
   const cancelled = await cancelCoinOrders(coin);
-  if (!cancelled) { liveDelLockStmt.run(coin); return; }
+  if (!cancelled) { recordSignal(sig, 'skip', 'cancel resting orders failed', { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd }); liveDelLockStmt.run(coin); return; }
 
   const lev = await hlSetLeverage(coin, LIVE_LEVERAGE);
-  if (!lev.ok) { liveDelLockStmt.run(coin); logger.warn({ coin, msg: lev.msg }, 'hl-momentum-live: leverage failed'); return; }
+  if (!lev.ok) { recordSignal(sig, 'skip', `leverage failed: ${lev.msg}`, { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd }); liveDelLockStmt.run(coin); logger.warn({ coin, msg: lev.msg }, 'hl-momentum-live: leverage failed'); return; }
   const qty = LIVE_NOTIONAL_USD / last.c;
   const order = await hlMarketOrder({ coin, side: sig.side, qty });
-  if (!order.ok) { liveDelLockStmt.run(coin); logger.error({ coin, side: sig.side, msg: order.msg }, 'hl-momentum-live: entry failed'); return; }
+  if (!order.ok) { recordSignal(sig, 'skip', `entry failed: ${order.msg}`, { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd }); liveDelLockStmt.run(coin); logger.error({ coin, side: sig.side, msg: order.msg }, 'hl-momentum-live: entry failed'); return; }
 
   const pos = await hlFetchPosition(coin);
   if (!pos.ok || !pos.data || pos.data.side !== sig.side) {
+    recordSignal(sig, 'skip', 'entry not confirmed', { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd });
     logger.error({ coin, side: sig.side, pos: pos.ok ? pos.data : pos.msg }, 'hl-momentum-live: entry not confirmed');
     liveDelLockStmt.run(coin);
     return;
@@ -693,7 +848,8 @@ async function liveMaybeOpen(coin: string, sig: { side: Side; signal: string }, 
   if (!st.ok) logger.error({ coin, msg: st.msg }, 'hl-momentum-live: exchange stop failed - poll is backup');
   liveOpenTxn(coin, sig.side, pos.data.entryPx, pos.data.size, openedAt, sig.signal);
   liveLock(coin, `momentum-live ${sig.side}`);
-  logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, stop, exStop: st.ok, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, params, signal: sig.signal }, 'hl-momentum-live: OPENED real position');
+  recordSignal(sig, 'live-open', 'opened', { ref: last.c, signal: pos.data.entryPx, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd });
+  logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, stop, exStop: st.ok, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, score: sig.score, expectedPnl: sig.expectedPnl, params, signal: sig.signal }, 'hl-momentum-live: OPENED real position');
   void sendMessage({
     channel: 'logs',
     text: `🧭 <b>momentum-live OPENED</b>: ${coin} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} (${pctNum(params.stopPct)}%) ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trail after ${pctNum(params.trailActivatePct)}%, откат ${pctNum(params.trailGivebackPct)}%, lock ${pctNum(params.trailMinLockPct)}% · R:R ≥ 1:${MIN_RISK_REWARD}\n~$${LIVE_NOTIONAL_USD} · liq: spread ${liq.spreadPct.toFixed(2)}%, top3 $${liq.sideDepthUsd.toFixed(0)} · ${sig.signal}`,
@@ -713,13 +869,14 @@ async function stepCoin(coin: string): Promise<void> {
   if (!sig) return;
   const last = cs.at(-1)!;
   const params = riskParams(cs, last.t);
-  const signal = appendRiskSignal(sig.signal, params);
+  const fullSig: MomentumSignal = { ...sig, signal: appendRiskSignal(appendScoreSignal(sig.signal, sig), params) };
   if (!paperStillOpen && !getPosStmt.get(coin)) {
     const qty = NOTIONAL_USD / last.c;
-    openTxn(coin, sig.side, last.c, qty, last.t, signal);
-    logger.info({ coin, side: sig.side, entry: +last.c.toFixed(6), params, signal }, 'hl-momentum-shadow: opened paper position');
+    openTxn(coin, fullSig.side, last.c, qty, last.t, fullSig.signal);
+    recordSignal(fullSig, 'paper', 'paper-open', { ref: last.c, signal: last.c });
+    logger.info({ coin, side: fullSig.side, entry: +last.c.toFixed(6), score: fullSig.score, expectedPnl: fullSig.expectedPnl, params, signal: fullSig.signal }, 'hl-momentum-shadow: opened paper position');
   }
-  if (!liveGetPosStmt.get(coin)) await liveMaybeOpen(coin, { side: sig.side, signal }, last, params);
+  if (!liveGetPosStmt.get(coin)) await liveMaybeOpen(coin, fullSig, last, params);
 }
 
 function reportText(rows: LogRow[], open: Pos[]): string {
@@ -791,6 +948,7 @@ async function fastRadarTick(): Promise<void> {
       mids.set(coin, px);
       pushMid(coin, px, now);
     }
+    updateMarketRegime(mids, now);
     await fastManageLivePositions(mids);
 
     if (now - lastFastAttemptAt < FAST_GLOBAL_ATTEMPT_GAP_MS) return;
@@ -802,17 +960,18 @@ async function fastRadarTick(): Promise<void> {
       const sig = earlyImpulse(coin, mid, now, cs);
       if (sig) candidates.push(sig);
     }
-    candidates.sort((a, b) => b.score - a.score);
+    candidates.sort((a, b) => (b.score - a.score) || (b.expectedPnl - a.expectedPnl));
     for (const sig of candidates.slice(0, FAST_MAX_CANDIDATES_PER_TICK)) {
       earlyCooldown.set(sig.coin, now + FAST_COIN_COOLDOWN_MS);
       lastFastAttemptAt = Date.now();
-      const signal = appendRiskSignal(sig.signal, sig.params);
+      const fullSig: EarlySignal = { ...sig, signal: appendRiskSignal(appendScoreSignal(sig.signal, sig), sig.params) };
       if (!getPosStmt.get(sig.coin)) {
         const qty = NOTIONAL_USD / sig.last.c;
-        openTxn(sig.coin, sig.side, sig.last.c, qty, now, signal);
-        logger.info({ coin: sig.coin, side: sig.side, entry: +sig.last.c.toFixed(6), params: sig.params, signal }, 'hl-momentum-fast: opened paper position from mids radar');
+        openTxn(fullSig.coin, fullSig.side, fullSig.last.c, qty, now, fullSig.signal);
+        recordSignal(fullSig, 'paper', 'paper-open', { ref: sig.last.c, signal: sig.last.c });
+        logger.info({ coin: fullSig.coin, side: fullSig.side, entry: +fullSig.last.c.toFixed(6), score: fullSig.score, expectedPnl: fullSig.expectedPnl, params: fullSig.params, signal: fullSig.signal }, 'hl-momentum-fast: opened paper position from mids radar');
       }
-      if (!liveGetPosStmt.get(sig.coin)) await liveMaybeOpen(sig.coin, { side: sig.side, signal }, sig.last, sig.params);
+      if (!liveGetPosStmt.get(fullSig.coin)) await liveMaybeOpen(fullSig.coin, fullSig, fullSig.last, fullSig.params);
     }
     if (candidates.length) {
       logger.info({ candidates: candidates.length, tried: Math.min(candidates.length, FAST_MAX_CANDIDATES_PER_TICK), mids: mids.size }, 'hl-momentum-fast: mids radar candidates');
