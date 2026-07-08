@@ -983,7 +983,7 @@ async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
   logger.warn({ coin: pos.coin, side: pos.side, exit, pnl, reason, trail }, 'hl-momentum-live: CLOSED');
   void sendMessage({
     channel: 'logs',
-    text: `${pnl >= 0 ? '🟢' : '🔴'} <b>momentum-live CLOSED</b>: ${pos.coin} ${pos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${reason})\n${pos.entry_px} → ${exit.toFixed(6)}${trail?.active ? `\ntrail best ${trail.bestPx.toFixed(6)} · protected ${trail.trailPx?.toFixed(6)}` : ''}`,
+    text: `${pnl >= 0 ? '🟢' : '🔴'} <b>momentum-live CLOSED</b>: ${esc(pos.coin)} ${pos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${esc(reason)})\n${pos.entry_px} → ${exit.toFixed(6)}${trail?.active ? `\ntrail best ${trail.bestPx.toFixed(6)} · protected ${trail.trailPx?.toFixed(6)}` : ''}`,
   });
 }
 
@@ -1026,7 +1026,7 @@ async function fastCloseLivePosition(pos: Pos, reason: string, mid: number, trai
     logger.warn({ coin: pos.coin, side: pos.side, exit, pnl, reason, trail }, 'hl-momentum-fast: CLOSED intrabar');
     void sendMessage({
       channel: 'logs',
-      text: `${pnl >= 0 ? '🟢' : '🔴'} <b>momentum-fast CLOSED</b>: ${pos.coin} ${pos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${reason})\n${pos.entry_px} → ${exit.toFixed(6)}${trail?.active ? `\nfast trail best ${trail.bestPx.toFixed(6)} · protected ${trail.trailPx?.toFixed(6)}` : ''}`,
+      text: `${pnl >= 0 ? '🟢' : '🔴'} <b>momentum-fast CLOSED</b>: ${esc(pos.coin)} ${pos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${esc(reason)})\n${pos.entry_px} → ${exit.toFixed(6)}${trail?.active ? `\nfast trail best ${trail.bestPx.toFixed(6)} · protected ${trail.trailPx?.toFixed(6)}` : ''}`,
     });
   } finally {
     liveFastClosing.delete(pos.coin);
@@ -1124,7 +1124,7 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
   logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, notionalUsd: sizing.notionalUsd, kellyFraction: sizing.kellyFraction, equityUsd: sizing.equityUsd, stop, exStop: st.ok, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, score: sig.score, expectedPnl: sig.expectedPnl, params, signal: sizedSig.signal }, 'hl-momentum-live: OPENED real position');
   void sendMessage({
     channel: 'logs',
-    text: `🧭 <b>momentum-live OPENED</b>: ${coin} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} (${pctNum(params.stopPct)}%) ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trail after ${pctNum(params.trailActivatePct)}%, откат ${pctNum(params.trailGivebackPct)}%, lock ${pctNum(params.trailMinLockPct)}% · R:R ≥ 1:${MIN_RISK_REWARD}\n~$${sizing.notionalUsd.toFixed(2)} Kelly · k=${sizing.kellyFraction.toFixed(3)} · liq: spread ${liq.spreadPct.toFixed(2)}%, top3 $${liq.sideDepthUsd.toFixed(0)} · ${sizedSig.signal}`,
+    text: `🧭 <b>momentum-live OPENED</b>: ${esc(coin)} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} (${pctNum(params.stopPct)}%) ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trail after ${pctNum(params.trailActivatePct)}%, откат ${pctNum(params.trailGivebackPct)}%, lock ${pctNum(params.trailMinLockPct)}% · R:R ≥ 1:${MIN_RISK_REWARD}\n~$${sizing.notionalUsd.toFixed(2)} Kelly · k=${sizing.kellyFraction.toFixed(3)} · liq: spread ${liq.spreadPct.toFixed(2)}%, top3 $${liq.sideDepthUsd.toFixed(0)} · ${esc(sizedSig.signal)}`,
   });
 }
 
