@@ -188,6 +188,14 @@ function scanCoins(): string[] {
   return freshCoinsStmt.all(Date.now() - FRESH_CANDLE_MAX_AGE_MS).map((r) => r.coin);
 }
 
+function tickCoins(): string[] {
+  return [...new Set([
+    ...scanCoins(),
+    ...liveAllPosStmt.all().map((p) => p.coin),
+    ...allPosStmt.all().map((p) => p.coin),
+  ])];
+}
+
 function todayStartUtc(nowMs: number): number {
   const d = new Date(nowMs);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
@@ -464,9 +472,10 @@ async function tick(): Promise<void> {
   if (running) return;
   running = true;
   try {
-    const coins = scanCoins();
+    const fresh = scanCoins();
+    const coins = tickCoins();
     for (const coin of coins) await stepCoin(coin);
-    logger.info({ coins: coins.length }, 'hl-momentum: scanned fresh all-market universe');
+    logger.info({ coins: coins.length, fresh: fresh.length }, 'hl-momentum: scanned all-market universe + managed open positions');
   } catch (err) {
     logger.error({ err }, 'hl-momentum-shadow: tick failed');
   } finally {
