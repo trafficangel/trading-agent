@@ -54,7 +54,7 @@ const LEGACY_TRAIL_MIN_LOCK_PCT = 0.004;
 const MIN_RISK_REWARD = 2;
 const VOL_LOOKBACK_BARS = 24;
 const STOP_ATR_MULT = 1.15;
-const MIN_STOP_PCT = 0.006;
+const MIN_STOP_PCT = 0.015;
 const MAX_STOP_PCT = 0.018;
 const GIVEBACK_ATR_MULT = 0.35;
 const MIN_TRAIL_GIVEBACK_PCT = 0.002;
@@ -62,6 +62,8 @@ const MAX_TRAIL_GIVEBACK_PCT = 0.0045;
 const IMPULSE_3BAR_PCT = 1.2;
 const VOL_RATIO_MIN = 1.8;
 const TREND_1H_PCT = 0.6;
+const LONG_CLOSE_NEAR_HIGH_MIN = 0.75;
+const SHORT_CLOSE_NEAR_HIGH_MAX = 0.25;
 const REPORT_KEY = 'hl_momentum_shadow_last_report_id';
 const LIVE_REPORT_KEY = 'hl_momentum_live_last_report_id';
 const FRESH_CANDLE_MAX_AGE_MS = 25 * 60_000;
@@ -194,6 +196,11 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
 
+function runtimePct(key: string, fallback: number, lo: number, hi: number): number {
+  const raw = Number(getKvStmt.get(key)?.value ?? fallback);
+  return Number.isFinite(raw) ? clamp(raw, lo, hi) : fallback;
+}
+
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -242,7 +249,9 @@ function volatilityPctAt(cs: Candle[], atMs: number): number {
 
 function riskParams(cs: Candle[], atMs: number): RiskParams {
   const volPct = volatilityPctAt(cs, atMs);
-  const stopPct = clamp(volPct * STOP_ATR_MULT, MIN_STOP_PCT, MAX_STOP_PCT);
+  const minStopPct = runtimePct('hl_momentum_min_stop_pct', MIN_STOP_PCT, 0.012, 0.018);
+  const maxStopPct = runtimePct('hl_momentum_max_stop_pct', MAX_STOP_PCT, minStopPct, 0.02);
+  const stopPct = clamp(volPct * STOP_ATR_MULT, minStopPct, maxStopPct);
   const trailGivebackPct = clamp(volPct * GIVEBACK_ATR_MULT, MIN_TRAIL_GIVEBACK_PCT, MAX_TRAIL_GIVEBACK_PCT);
   const trailMinLockPct = MIN_RISK_REWARD * stopPct + COST_RT_PCT / 100;
   return {
@@ -352,10 +361,13 @@ function decide(coin: string, cs: Candle[]): { side: Side; signal: string } | nu
   const volRatio = volBase > 0 ? last.v / volBase : 0;
   const closeNearHigh = (last.c - last.l) / Math.max(1e-12, last.h - last.l);
 
-  if (r3 >= IMPULSE_3BAR_PCT && r12 >= TREND_1H_PCT && volRatio >= VOL_RATIO_MIN && closeNearHigh >= 0.65) {
+  const longCloseMin = runtimePct('hl_momentum_long_close_near_high_min', LONG_CLOSE_NEAR_HIGH_MIN, 0.65, 0.9);
+  const shortCloseMax = runtimePct('hl_momentum_short_close_near_high_max', SHORT_CLOSE_NEAR_HIGH_MAX, 0.1, 0.35);
+
+  if (r3 >= IMPULSE_3BAR_PCT && r12 >= TREND_1H_PCT && volRatio >= VOL_RATIO_MIN && closeNearHigh >= longCloseMin) {
     return { side: 'long', signal: `${coin} up impulse r3=${r3.toFixed(2)} vol=${volRatio.toFixed(1)}x` };
   }
-  if (r3 <= -IMPULSE_3BAR_PCT && r12 <= -TREND_1H_PCT && volRatio >= VOL_RATIO_MIN && closeNearHigh <= 0.35) {
+  if (r3 <= -IMPULSE_3BAR_PCT && r12 <= -TREND_1H_PCT && volRatio >= VOL_RATIO_MIN && closeNearHigh <= shortCloseMax) {
     return { side: 'short', signal: `${coin} down impulse r3=${r3.toFixed(2)} vol=${volRatio.toFixed(1)}x` };
   }
   return null;
