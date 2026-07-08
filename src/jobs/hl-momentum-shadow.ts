@@ -27,6 +27,13 @@ type Side = 'long' | 'short';
 type Candle = { t: number; o: number; h: number; l: number; c: number; v: number };
 type Pos = { coin: string; side: Side; entry_px: number; qty: number; opened_at: number; signal: string };
 type LogRow = { id: number; coin: string; side: Side; pnl_pct: number; close_reason: string | null; closed_at: number };
+type RiskParams = {
+  stopPct: number;
+  trailActivatePct: number;
+  trailGivebackPct: number;
+  trailMinLockPct: number;
+  volPct: number;
+};
 
 const NOTIONAL_USD = 12;
 const LIVE_ENABLED = true;
@@ -40,11 +47,18 @@ const LIVE_MAX_NOTIONAL_TO_DEPTH = 0.10;
 const COST_RT_PCT = 0.07; // shadow assumes taker entry + taker exit, conservative vs maker wick-fade
 const HOLD_MS = 30 * 60_000;
 const TRAIL_HOLD_MS = 60 * 60_000;
-const STOP_PCT = 0.012;
-const TARGET_PCT = 0.016;
-const TRAIL_ACTIVATE_PCT = TARGET_PCT;
-const TRAIL_GIVEBACK_PCT = 0.0025;
-const TRAIL_MIN_LOCK_PCT = 0.004;
+const LEGACY_STOP_PCT = 0.012;
+const LEGACY_TRAIL_ACTIVATE_PCT = 0.016;
+const LEGACY_TRAIL_GIVEBACK_PCT = 0.0025;
+const LEGACY_TRAIL_MIN_LOCK_PCT = 0.004;
+const MIN_RISK_REWARD = 2;
+const VOL_LOOKBACK_BARS = 24;
+const STOP_ATR_MULT = 1.15;
+const MIN_STOP_PCT = 0.006;
+const MAX_STOP_PCT = 0.018;
+const GIVEBACK_ATR_MULT = 0.35;
+const MIN_TRAIL_GIVEBACK_PCT = 0.002;
+const MAX_TRAIL_GIVEBACK_PCT = 0.0045;
 const IMPULSE_3BAR_PCT = 1.2;
 const VOL_RATIO_MIN = 1.8;
 const TREND_1H_PCT = 0.6;
@@ -176,6 +190,10 @@ function fmtPct(n: number, digits = 2): string {
   return `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`;
 }
 
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, n));
+}
+
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -201,11 +219,82 @@ function todayStartUtc(nowMs: number): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
-function stopPx(side: Side, entry: number): number {
-  return side === 'long' ? entry * (1 - STOP_PCT) : entry * (1 + STOP_PCT);
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const xs = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(xs.length / 2);
+  return xs.length % 2 === 0 ? (xs[mid - 1]! + xs[mid]!) / 2 : xs[mid]!;
 }
 
-function trailingState(pos: Pos, cs: Candle[]): { active: boolean; bestPx: number; movePct: number; trailPx: number | null } | null {
+function volatilityPctAt(cs: Candle[], atMs: number): number {
+  const end = cs.findIndex((c) => c.t > atMs);
+  const endExclusive = end === -1 ? cs.length : end;
+  const from = Math.max(1, endExclusive - VOL_LOOKBACK_BARS);
+  const ranges: number[] = [];
+  for (let i = from; i < endExclusive; i += 1) {
+    const c = cs[i]!;
+    const prev = cs[i - 1]!;
+    const tr = Math.max(c.h - c.l, Math.abs(c.h - prev.c), Math.abs(c.l - prev.c));
+    if (c.c > 0 && Number.isFinite(tr)) ranges.push(tr / c.c);
+  }
+  return median(ranges) || LEGACY_STOP_PCT / STOP_ATR_MULT;
+}
+
+function riskParams(cs: Candle[], atMs: number): RiskParams {
+  const volPct = volatilityPctAt(cs, atMs);
+  const stopPct = clamp(volPct * STOP_ATR_MULT, MIN_STOP_PCT, MAX_STOP_PCT);
+  const trailGivebackPct = clamp(volPct * GIVEBACK_ATR_MULT, MIN_TRAIL_GIVEBACK_PCT, MAX_TRAIL_GIVEBACK_PCT);
+  const trailMinLockPct = MIN_RISK_REWARD * stopPct + COST_RT_PCT / 100;
+  return {
+    stopPct,
+    trailGivebackPct,
+    trailMinLockPct,
+    trailActivatePct: trailMinLockPct + trailGivebackPct,
+    volPct,
+  };
+}
+
+function legacyRiskParams(): RiskParams {
+  return {
+    stopPct: LEGACY_STOP_PCT,
+    trailActivatePct: LEGACY_TRAIL_ACTIVATE_PCT,
+    trailGivebackPct: LEGACY_TRAIL_GIVEBACK_PCT,
+    trailMinLockPct: LEGACY_TRAIL_MIN_LOCK_PCT,
+    volPct: LEGACY_STOP_PCT / STOP_ATR_MULT,
+  };
+}
+
+function pctNum(n: number): string {
+  return (n * 100).toFixed(2);
+}
+
+function appendRiskSignal(signal: string, params: RiskParams): string {
+  return `${signal} [risk stop=${pctNum(params.stopPct)} act=${pctNum(params.trailActivatePct)} gb=${pctNum(params.trailGivebackPct)} lock=${pctNum(params.trailMinLockPct)} vol=${pctNum(params.volPct)} rr=${MIN_RISK_REWARD.toFixed(1)}]`;
+}
+
+function parseRiskSignal(signal: string): RiskParams | null {
+  const m = signal.match(/\[risk stop=([\d.]+) act=([\d.]+) gb=([\d.]+) lock=([\d.]+) vol=([\d.]+) rr=([\d.]+)\]/);
+  if (!m) return null;
+  const nums = m.slice(1, 6).map((v) => Number(v) / 100);
+  if (nums.some((n) => !Number.isFinite(n) || n <= 0)) return null;
+  return {
+    stopPct: nums[0]!,
+    trailActivatePct: nums[1]!,
+    trailGivebackPct: nums[2]!,
+    trailMinLockPct: nums[3]!,
+    volPct: nums[4]!,
+  };
+}
+
+function posRiskParams(pos: Pos): RiskParams {
+  return parseRiskSignal(pos.signal) ?? legacyRiskParams();
+}
+
+function stopPx(side: Side, entry: number, params: RiskParams): number {
+  return side === 'long' ? entry * (1 - params.stopPct) : entry * (1 + params.stopPct);
+}
+
+function trailingState(pos: Pos, cs: Candle[], params: RiskParams): { active: boolean; bestPx: number; movePct: number; trailPx: number | null; params: RiskParams } | null {
   const bars = cs.filter((c) => c.t > pos.opened_at);
   if (bars.length === 0) return null;
   const bestPx = pos.side === 'long'
@@ -214,11 +303,11 @@ function trailingState(pos: Pos, cs: Candle[]): { active: boolean; bestPx: numbe
   const move = pos.side === 'long'
     ? (bestPx - pos.entry_px) / pos.entry_px
     : (pos.entry_px - bestPx) / pos.entry_px;
-  if (move < TRAIL_ACTIVATE_PCT) return { active: false, bestPx, movePct: move * 100, trailPx: null };
+  if (move < params.trailActivatePct) return { active: false, bestPx, movePct: move * 100, trailPx: null, params };
   const trailPx = pos.side === 'long'
-    ? Math.max(pos.entry_px * (1 + TRAIL_MIN_LOCK_PCT), bestPx * (1 - TRAIL_GIVEBACK_PCT))
-    : Math.min(pos.entry_px * (1 - TRAIL_MIN_LOCK_PCT), bestPx * (1 + TRAIL_GIVEBACK_PCT));
-  return { active: true, bestPx, movePct: move * 100, trailPx };
+    ? Math.max(pos.entry_px * (1 + params.trailMinLockPct), bestPx * (1 - params.trailGivebackPct))
+    : Math.min(pos.entry_px * (1 - params.trailMinLockPct), bestPx * (1 + params.trailGivebackPct));
+  return { active: true, bestPx, movePct: move * 100, trailPx, params };
 }
 
 function liveLock(coin: string, reason: string): void {
@@ -276,8 +365,9 @@ function managePosition(pos: Pos, cs: Candle[]): boolean {
   const last = cs.at(-1);
   if (!last || last.t <= pos.opened_at) return false;
 
-  const stop = pos.side === 'long' ? pos.entry_px * (1 - STOP_PCT) : pos.entry_px * (1 + STOP_PCT);
-  const trail = trailingState(pos, cs);
+  const params = posRiskParams(pos);
+  const stop = stopPx(pos.side, pos.entry_px, params);
+  const trail = trailingState(pos, cs, params);
   const stopHit = pos.side === 'long' ? last.l <= stop : last.h >= stop;
   const trailHit = trail?.active && trail.trailPx != null ? (pos.side === 'long' ? last.l <= trail.trailPx : last.h >= trail.trailPx) : false;
   const timed = last.t - pos.opened_at >= (trail?.active ? TRAIL_HOLD_MS : HOLD_MS);
@@ -333,8 +423,9 @@ async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
 
   const last = cs.at(-1);
   if (!last || last.t <= pos.opened_at) return;
-  const stop = stopPx(pos.side, pos.entry_px);
-  const trail = trailingState(pos, cs);
+  const params = posRiskParams(pos);
+  const stop = stopPx(pos.side, pos.entry_px, params);
+  const trail = trailingState(pos, cs, params);
   const stopHit = pos.side === 'long' ? last.l <= stop : last.h >= stop;
   const trailHit = trail?.active && trail.trailPx != null ? (pos.side === 'long' ? last.l <= trail.trailPx : last.h >= trail.trailPx) : false;
   const timed = last.t - pos.opened_at >= (trail?.active ? TRAIL_HOLD_MS : HOLD_MS);
@@ -359,7 +450,7 @@ async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
   });
 }
 
-async function liveMaybeOpen(coin: string, sig: { side: Side; signal: string }, last: Candle): Promise<void> {
+async function liveMaybeOpen(coin: string, sig: { side: Side; signal: string }, last: Candle, params: RiskParams): Promise<void> {
   if (!LIVE_ENABLED) return;
   const dayPnl = liveTodayPnlStmt.get(todayStartUtc(Date.now()))?.pnl ?? 0;
   if (dayPnl <= LIVE_DAILY_STOP_PCT) return;
@@ -395,15 +486,15 @@ async function liveMaybeOpen(coin: string, sig: { side: Side; signal: string }, 
   }
 
   const openedAt = Date.now();
-  const stop = stopPx(sig.side, pos.data.entryPx);
+  const stop = stopPx(sig.side, pos.data.entryPx, params);
   const st = await hlPlaceStop({ coin, posSide: sig.side, qty: pos.data.size, triggerPx: stop });
   if (!st.ok) logger.error({ coin, msg: st.msg }, 'hl-momentum-live: exchange stop failed - poll is backup');
   liveOpenTxn(coin, sig.side, pos.data.entryPx, pos.data.size, openedAt, sig.signal);
   liveLock(coin, `momentum-live ${sig.side}`);
-  logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, stop, exStop: st.ok, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, signal: sig.signal }, 'hl-momentum-live: OPENED real position');
+  logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, stop, exStop: st.ok, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, params, signal: sig.signal }, 'hl-momentum-live: OPENED real position');
   void sendMessage({
     channel: 'logs',
-    text: `🧭 <b>momentum-live OPENED</b>: ${coin} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trailing after ${(TRAIL_ACTIVATE_PCT * 100).toFixed(1)}%, откат ${(TRAIL_GIVEBACK_PCT * 100).toFixed(2)}% · ~$${LIVE_NOTIONAL_USD}\nliq: spread ${liq.spreadPct.toFixed(2)}%, top3 $${liq.sideDepthUsd.toFixed(0)} · ${sig.signal}`,
+    text: `🧭 <b>momentum-live OPENED</b>: ${coin} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} (${pctNum(params.stopPct)}%) ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trail after ${pctNum(params.trailActivatePct)}%, откат ${pctNum(params.trailGivebackPct)}%, lock ${pctNum(params.trailMinLockPct)}% · R:R ≥ 1:${MIN_RISK_REWARD}\n~$${LIVE_NOTIONAL_USD} · liq: spread ${liq.spreadPct.toFixed(2)}%, top3 $${liq.sideDepthUsd.toFixed(0)} · ${sig.signal}`,
   });
 }
 
@@ -419,12 +510,14 @@ async function stepCoin(coin: string): Promise<void> {
   const sig = decide(coin, cs);
   if (!sig) return;
   const last = cs.at(-1)!;
+  const params = riskParams(cs, last.t);
+  const signal = appendRiskSignal(sig.signal, params);
   if (!paperStillOpen && !getPosStmt.get(coin)) {
     const qty = NOTIONAL_USD / last.c;
-    openTxn(coin, sig.side, last.c, qty, last.t, sig.signal);
-    logger.info({ coin, side: sig.side, entry: +last.c.toFixed(6), signal: sig.signal }, 'hl-momentum-shadow: opened paper position');
+    openTxn(coin, sig.side, last.c, qty, last.t, signal);
+    logger.info({ coin, side: sig.side, entry: +last.c.toFixed(6), params, signal }, 'hl-momentum-shadow: opened paper position');
   }
-  if (!liveGetPosStmt.get(coin)) await liveMaybeOpen(coin, sig, last);
+  if (!liveGetPosStmt.get(coin)) await liveMaybeOpen(coin, { side: sig.side, signal }, last, params);
 }
 
 function reportText(rows: LogRow[], open: Pos[]): string {
