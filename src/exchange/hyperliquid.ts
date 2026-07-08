@@ -46,6 +46,10 @@ export function metaAndAssetCtxs(): Promise<HlMetaCtxs> {
   return hlInfo<HlMetaCtxs>({ type: 'metaAndAssetCtxs' });
 }
 
+export function allMids(): Promise<Record<string, string>> {
+  return hlInfo<Record<string, string>>({ type: 'allMids' });
+}
+
 export type HlLevel = { px: string; sz: string; n: number };
 export type HlL2 = { coin: string; time: number; levels: [HlLevel[], HlLevel[]] };
 export function l2Book(coin: string): Promise<HlL2> {

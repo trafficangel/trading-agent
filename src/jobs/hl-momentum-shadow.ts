@@ -10,7 +10,7 @@ import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { sendMessage } from '../telegram/bot.js';
-import { l2Book } from '../exchange/hyperliquid.js';
+import { allMids, l2Book } from '../exchange/hyperliquid.js';
 import {
   hlCancelOrder,
   hlCancelTriggers,
@@ -67,6 +67,15 @@ const SHORT_CLOSE_NEAR_HIGH_MAX = 0.25;
 const REPORT_KEY = 'hl_momentum_shadow_last_report_id';
 const LIVE_REPORT_KEY = 'hl_momentum_live_last_report_id';
 const FRESH_CANDLE_MAX_AGE_MS = 25 * 60_000;
+const FAST_MIDS_POLL_MS = 2_000;
+const FAST_MIDS_HISTORY_MS = 5 * 60_000;
+const FAST_MOVE_30S_PCT = 0.45;
+const FAST_MOVE_90S_PCT = 0.75;
+const FAST_FROM_LAST_CLOSE_PCT = 0.60;
+const FAST_MAX_AGAINST_1H_PCT = 0.30;
+const FAST_MAX_CANDIDATES_PER_TICK = 2;
+const FAST_COIN_COOLDOWN_MS = 5 * 60_000;
+const FAST_GLOBAL_ATTEMPT_GAP_MS = 6_000;
 
 const candlesStmt = db.prepare<[string, number], Candle>(`
   SELECT t, o, h, l, c, v FROM hl_candles
@@ -373,6 +382,79 @@ function decide(coin: string, cs: Candle[]): { side: Side; signal: string } | nu
   return null;
 }
 
+type MidPoint = { t: number; px: number };
+type EarlySignal = { coin: string; side: Side; signal: string; score: number; last: Candle; params: RiskParams };
+const midHistory = new Map<string, MidPoint[]>();
+const earlyCooldown = new Map<string, number>();
+const liveFastBestPx = new Map<string, number>();
+const liveFastClosing = new Set<string>();
+let fastRadarRunning = false;
+let lastFastAttemptAt = 0;
+
+function pushMid(coin: string, px: number, now: number): void {
+  let xs = midHistory.get(coin);
+  if (!xs) { xs = []; midHistory.set(coin, xs); }
+  xs.push({ t: now, px });
+  const cutoff = now - FAST_MIDS_HISTORY_MS;
+  while (xs.length && xs[0]!.t < cutoff) xs.shift();
+}
+
+function midAtOrBefore(coin: string, targetMs: number): number | null {
+  const xs = midHistory.get(coin);
+  if (!xs?.length) return null;
+  for (let i = xs.length - 1; i >= 0; i -= 1) {
+    const p = xs[i]!;
+    if (p.t <= targetMs) return p.px;
+  }
+  return null;
+}
+
+function pctFromMid(coin: string, mid: number, now: number, ageMs: number): number | null {
+  const prev = midAtOrBefore(coin, now - ageMs);
+  return prev != null && prev > 0 ? pct(prev, mid) : null;
+}
+
+function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): EarlySignal | null {
+  if (cs.length < 70) return null;
+  const last = cs.at(-1)!;
+  if (now - last.t > FRESH_CANDLE_MAX_AGE_MS) return null;
+  const r30 = pctFromMid(coin, mid, now, 30_000);
+  const r90 = pctFromMid(coin, mid, now, 90_000);
+  if (r30 == null || r90 == null) return null;
+  const r12 = pct(cs[cs.length - 13]!.c, last.c);
+  const fromLast = pct(last.c, mid);
+  const params = riskParams(cs, now);
+  const up = r30 >= FAST_MOVE_30S_PCT
+    && r90 >= FAST_MOVE_90S_PCT
+    && fromLast >= FAST_FROM_LAST_CLOSE_PCT
+    && r12 >= -FAST_MAX_AGAINST_1H_PCT;
+  if (up) {
+    return {
+      coin,
+      side: 'long',
+      score: r90 + fromLast,
+      last: { ...last, t: now, h: Math.max(last.h, mid), l: Math.min(last.l, mid), c: mid },
+      params,
+      signal: `${coin} fast up radar r30=${r30.toFixed(2)} r90=${r90.toFixed(2)} from5m=${fromLast.toFixed(2)} h1=${r12.toFixed(2)}`,
+    };
+  }
+  const down = r30 <= -FAST_MOVE_30S_PCT
+    && r90 <= -FAST_MOVE_90S_PCT
+    && fromLast <= -FAST_FROM_LAST_CLOSE_PCT
+    && r12 <= FAST_MAX_AGAINST_1H_PCT;
+  if (down) {
+    return {
+      coin,
+      side: 'short',
+      score: Math.abs(r90) + Math.abs(fromLast),
+      last: { ...last, t: now, h: Math.max(last.h, mid), l: Math.min(last.l, mid), c: mid },
+      params,
+      signal: `${coin} fast down radar r30=${r30.toFixed(2)} r90=${r90.toFixed(2)} from5m=${fromLast.toFixed(2)} h1=${r12.toFixed(2)}`,
+    };
+  }
+  return null;
+}
+
 function managePosition(pos: Pos, cs: Candle[]): boolean {
   const last = cs.at(-1);
   if (!last || last.t <= pos.opened_at) return false;
@@ -415,6 +497,7 @@ async function refreshLiveStop(pos: Pos, qty: number, triggerPx: number, label: 
 }
 
 async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
+  if (liveFastClosing.has(pos.coin)) return;
   liveLock(pos.coin, `momentum-live ${pos.side}`);
   const ex = await hlFetchPosition(pos.coin);
   if (!ex.ok) { logger.warn({ coin: pos.coin, msg: ex.msg }, 'hl-momentum-live: position read failed'); return; }
@@ -462,8 +545,65 @@ async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
   });
 }
 
+function fastTrailingState(pos: Pos, mid: number, params: RiskParams): { active: boolean; bestPx: number; movePct: number; trailPx: number | null; params: RiskParams } {
+  const prev = liveFastBestPx.get(pos.coin) ?? pos.entry_px;
+  const bestPx = pos.side === 'long' ? Math.max(prev, mid) : Math.min(prev, mid);
+  liveFastBestPx.set(pos.coin, bestPx);
+  const move = pos.side === 'long'
+    ? (bestPx - pos.entry_px) / pos.entry_px
+    : (pos.entry_px - bestPx) / pos.entry_px;
+  if (move < params.trailActivatePct) return { active: false, bestPx, movePct: move * 100, trailPx: null, params };
+  const trailPx = pos.side === 'long'
+    ? Math.max(pos.entry_px * (1 + params.trailMinLockPct), bestPx * (1 - params.trailGivebackPct))
+    : Math.min(pos.entry_px * (1 - params.trailMinLockPct), bestPx * (1 + params.trailGivebackPct));
+  return { active: true, bestPx, movePct: move * 100, trailPx, params };
+}
+
+async function fastCloseLivePosition(pos: Pos, reason: string, mid: number, trail: ReturnType<typeof fastTrailingState> | null): Promise<void> {
+  if (liveFastClosing.has(pos.coin)) return;
+  liveFastClosing.add(pos.coin);
+  try {
+    const close = await hlClosePosition(pos.coin);
+    if (!close.ok) { logger.error({ coin: pos.coin, msg: close.msg, reason }, 'hl-momentum-fast: close failed'); return; }
+    const check = await hlFetchPosition(pos.coin);
+    if (!check.ok || check.data) { logger.warn({ coin: pos.coin, reason }, 'hl-momentum-fast: close not confirmed flat'); return; }
+    await hlCancelTriggers(pos.coin);
+    const exit = close.data.avgPx ?? mid;
+    const pnl = Math.round(pnlPct(pos.side, pos.entry_px, exit) * 1000) / 1000;
+    liveCloseTxn(pos.coin, exit, Date.now(), pnl, reason);
+    liveFastBestPx.delete(pos.coin);
+    logger.warn({ coin: pos.coin, side: pos.side, exit, pnl, reason, trail }, 'hl-momentum-fast: CLOSED intrabar');
+    void sendMessage({
+      channel: 'logs',
+      text: `${pnl >= 0 ? '🟢' : '🔴'} <b>momentum-fast CLOSED</b>: ${pos.coin} ${pos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${reason})\n${pos.entry_px} → ${exit.toFixed(6)}${trail?.active ? `\nfast trail best ${trail.bestPx.toFixed(6)} · protected ${trail.trailPx?.toFixed(6)}` : ''}`,
+    });
+  } finally {
+    liveFastClosing.delete(pos.coin);
+  }
+}
+
+async function fastManageLivePositions(mids: Map<string, number>): Promise<void> {
+  const open = liveAllPosStmt.all();
+  const openCoins = new Set(open.map((p) => p.coin));
+  for (const coin of [...liveFastBestPx.keys()]) if (!openCoins.has(coin)) liveFastBestPx.delete(coin);
+  for (const pos of open) {
+    const mid = mids.get(pos.coin);
+    if (!(mid != null && mid > 0)) continue;
+    liveLock(pos.coin, `momentum-live ${pos.side}`);
+    const params = posRiskParams(pos);
+    const stop = stopPx(pos.side, pos.entry_px, params);
+    const trail = fastTrailingState(pos, mid, params);
+    const stopHit = pos.side === 'long' ? mid <= stop : mid >= stop;
+    const trailHit = trail.active && trail.trailPx != null ? (pos.side === 'long' ? mid <= trail.trailPx : mid >= trail.trailPx) : false;
+    const timed = Date.now() - pos.opened_at >= (trail.active ? TRAIL_HOLD_MS : HOLD_MS);
+    if (!stopHit && !trailHit && !timed) continue;
+    await fastCloseLivePosition(pos, stopHit ? 'fast-stop' : trailHit ? 'fast-trailing-stop' : 'fast-time-stop', mid, trail);
+  }
+}
+
 async function liveMaybeOpen(coin: string, sig: { side: Side; signal: string }, last: Candle, params: RiskParams): Promise<void> {
   if (!LIVE_ENABLED) return;
+  if (liveFastClosing.has(coin)) return;
   const dayPnl = liveTodayPnlStmt.get(todayStartUtc(Date.now()))?.pnl ?? 0;
   if (dayPnl <= LIVE_DAILY_STOP_PCT) return;
   if (liveGetPosStmt.get(coin)) return;
@@ -588,6 +728,52 @@ async function tick(): Promise<void> {
   }
 }
 
+async function fastRadarTick(): Promise<void> {
+  if (fastRadarRunning) return;
+  fastRadarRunning = true;
+  try {
+    const raw = await allMids();
+    const now = Date.now();
+    const mids = new Map<string, number>();
+    for (const [coin, value] of Object.entries(raw)) {
+      const px = Number(value);
+      if (!(px > 0) || !Number.isFinite(px)) continue;
+      mids.set(coin, px);
+      pushMid(coin, px, now);
+    }
+    await fastManageLivePositions(mids);
+
+    if (now - lastFastAttemptAt < FAST_GLOBAL_ATTEMPT_GAP_MS) return;
+    const candidates: EarlySignal[] = [];
+    for (const [coin, mid] of mids) {
+      if ((earlyCooldown.get(coin) ?? 0) > now) continue;
+      if (liveGetPosStmt.get(coin) || getPosStmt.get(coin)) continue;
+      const cs = getCandles(coin);
+      const sig = earlyImpulse(coin, mid, now, cs);
+      if (sig) candidates.push(sig);
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    for (const sig of candidates.slice(0, FAST_MAX_CANDIDATES_PER_TICK)) {
+      earlyCooldown.set(sig.coin, now + FAST_COIN_COOLDOWN_MS);
+      lastFastAttemptAt = Date.now();
+      const signal = appendRiskSignal(sig.signal, sig.params);
+      if (!getPosStmt.get(sig.coin)) {
+        const qty = NOTIONAL_USD / sig.last.c;
+        openTxn(sig.coin, sig.side, sig.last.c, qty, now, signal);
+        logger.info({ coin: sig.coin, side: sig.side, entry: +sig.last.c.toFixed(6), params: sig.params, signal }, 'hl-momentum-fast: opened paper position from mids radar');
+      }
+      if (!liveGetPosStmt.get(sig.coin)) await liveMaybeOpen(sig.coin, { side: sig.side, signal }, sig.last, sig.params);
+    }
+    if (candidates.length) {
+      logger.info({ candidates: candidates.length, tried: Math.min(candidates.length, FAST_MAX_CANDIDATES_PER_TICK), mids: mids.size }, 'hl-momentum-fast: mids radar candidates');
+    }
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, 'hl-momentum-fast: mids radar failed');
+  } finally {
+    fastRadarRunning = false;
+  }
+}
+
 export async function runHlMomentumShadowReport(opts: { force?: boolean; notify?: boolean } = {}): Promise<{ closed: number; open: number; sent: boolean }> {
   const rows = recentClosedStmt.all(120);
   const open = allPosStmt.all();
@@ -615,7 +801,10 @@ export function startHlMomentumShadowJob(): void {
   cron.schedule('29 */4 * * *', () => {
     void runHlMomentumShadowReport().catch((err) => logger.error({ err }, 'hl-momentum-shadow: report failed'));
   });
+  const fast = setInterval(() => { void fastRadarTick(); }, FAST_MIDS_POLL_MS);
+  fast.unref();
+  setTimeout(() => { void fastRadarTick(); }, 10_000).unref();
   const t = setTimeout(() => { void tick(); }, 75_000);
   t.unref();
-  logger.info({ live: LIVE_ENABLED, liveNotional: LIVE_NOTIONAL_USD, liveLeverage: LIVE_LEVERAGE, liveMaxOpen: LIVE_MAX_OPEN }, 'hl-momentum scheduled (1m check, 5m candle signal, all-market shadow + filtered live micro)');
+  logger.info({ live: LIVE_ENABLED, liveNotional: LIVE_NOTIONAL_USD, liveLeverage: LIVE_LEVERAGE, liveMaxOpen: LIVE_MAX_OPEN, fastMidsPollMs: FAST_MIDS_POLL_MS }, 'hl-momentum scheduled (2s allMids radar + 1m check, 5m candle signal, all-market shadow + filtered live micro)');
 }
