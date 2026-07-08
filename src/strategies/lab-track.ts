@@ -38,7 +38,7 @@ const momOpenStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_pos O
 const momShadowClosedStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_shadow_log WHERE closed_at IS NOT NULL ORDER BY closed_at ASC`);
 const momShadowOpenStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_shadow_pos ORDER BY opened_at DESC`);
 const limitVolClosesStmt = db.prepare<[string, number], { t: number; c: number }>(`SELECT t, c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
-const MOMENTUM_PUBLIC_START_MS = Date.UTC(2026, 6, 8, 17, 28, 0);
+const MOMENTUM_PUBLIC_START_MS = Date.UTC(2026, 6, 8, 18, 14, 0);
 
 // ── formatters (self-contained; matches lab.ts style) ──
 function esc(s: string): string {
@@ -76,7 +76,7 @@ function momentumPublicRows(rows: MomRow[]): MomRow[] {
 }
 
 function momentumPublicStartText(lang: Lang): string {
-  return t(lang, '8 июля 2026, 17:28 UTC', 'July 8, 2026, 17:28 UTC');
+  return t(lang, '8 июля 2026, 18:14 UTC', 'July 8, 2026, 18:14 UTC');
 }
 
 type LimitVol = { volPct4h: number; factor: number; ageMs: number | null };
@@ -404,7 +404,6 @@ function momentumLiveSection(nowMs: number, lang: Lang): string {
     <td class="r mono">${r.entry_px}</td>
     <td class="r">${usd(momNotionalOf(r))}</td>
     <td class="dt">${heldStr(r.opened_at, nowMs, lang)}</td>
-    <td>${esc(r.signal)}</td>
   </tr>`).join('');
   const recent = closed.slice().reverse().slice(0, 12).map((r) => {
     const p = r.pnl_pct ?? 0;
@@ -424,15 +423,15 @@ function momentumLiveSection(nowMs: number, lang: Lang): string {
   return `<div class="section" id="momentum-live">
     <div class="section-title">${t(lang, 'Вторая live-механика: Momentum Follow', 'Second live mechanic: Momentum Follow')}</div>
     <p class="sd-lead">${t(lang,
-      'Это противоположность основной wick-fade стратегии. Если wick-fade ловит возврат после шипа, то Momentum Follow входит <b>по направлению импульса</b>, когда движение подтверждено объёмом и удержанием цены. Размер минимальный (~$12), 1x, с биржевым стопом; монета временно блокируется для wick-fade, чтобы стратегии не конфликтовали.',
-      'This is the opposite of the main wick-fade strategy. If wick-fade catches snap-back after a spike, Momentum Follow enters <b>with the impulse</b> when the move is confirmed by volume and price holding. Size is minimal (~$12), 1x, with an exchange stop; the coin is temporarily locked away from wick-fade so the strategies cannot fight each other.')}</p>
+      'Это противоположность основной wick-fade стратегии. Если wick-fade ловит возврат после шипа, то Momentum Follow входит <b>по направлению импульса</b>, когда движение подтверждено объёмом и удержанием цены. Размер выбирается консервативным Kelly внутри micro-коридора, 1x, с биржевым стопом; монета временно блокируется для wick-fade, чтобы стратегии не конфликтовали.',
+      'This is the opposite of the main wick-fade strategy. If wick-fade catches snap-back after a spike, Momentum Follow enters <b>with the impulse</b> when the move is confirmed by volume and price holding. Size is selected by conservative Kelly inside a micro range, 1x, with an exchange stop; the coin is temporarily locked away from wick-fade so the strategies cannot fight each other.')}</p>
     <div class="lt-cards">
       <div class="lt-stat"><div class="l">${t(lang, 'Статус', 'Status')}</div><div class="v">${t(lang, 'REAL · малый размер', 'REAL · small size')}</div><div class="s">${t(lang, 'проверяем на деньгах', 'testing with real money')}</div></div>
       <div class="lt-stat"><div class="l">${t(lang, 'Закрытых', 'Closed')}</div><div class="v">${closed.length}</div><div class="s">${open.length} ${t(lang, 'открыто', 'open')}</div></div>
       <div class="lt-stat"><div class="l">${t(lang, 'Результат', 'Result')}</div><div class="v ${cls(net)}">${pct(net)}</div><div class="s ${cls(netUsd)}">${usd(netUsd, true)}</div></div>
       <div class="lt-stat"><div class="l">${t(lang, 'WR', 'WR')}</div><div class="v">${wr}</div><div class="s">${wins}W / ${losses}L</div></div>
     </div>
-    ${open.length ? `<div class="section-subtitle">${t(lang, 'Momentum открыто сейчас', 'Momentum open now')}</div><div class="card table-wrap"><table class="lt-tbl"><thead><tr><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th><th class="r">${t(lang, 'Размер', 'Size')}</th><th>${t(lang, 'В работе', 'Held')}</th><th>${t(lang, 'Сигнал', 'Signal')}</th></tr></thead><tbody>${openRows}</tbody></table></div>` : ''}
+    ${open.length ? `<div class="section-subtitle">${t(lang, 'Momentum открыто сейчас', 'Momentum open now')}</div><div class="card table-wrap"><table class="lt-tbl"><thead><tr><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th><th class="r">${t(lang, 'Размер', 'Size')}</th><th>${t(lang, 'В работе', 'Held')}</th></tr></thead><tbody>${openRows}</tbody></table></div>` : ''}
     ${closed.length ? `<div class="section-subtitle">${t(lang, 'Momentum закрытые сделки', 'Momentum closed trades')}</div><div class="card table-wrap"><table class="lt-tbl"><thead><tr><th>#</th><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th><th class="r">${t(lang, 'Выход', 'Exit')}</th><th class="r">${t(lang, 'Результат', 'Result')}</th><th class="r">P&amp;L $</th><th>${t(lang, 'Как закрыли', 'Exit')}</th><th>${t(lang, 'Открыта (UTC)', 'Opened (UTC)')}</th></tr></thead><tbody>${recent}</tbody></table></div>` : ''}
   </div>`;
 }
@@ -496,11 +495,10 @@ function momentumOpenTable(rows: MomRow[], nowMs: number, lang: Lang): string {
     <td class="r mono">${r.entry_px}</td>
     <td class="r">${usd(momNotionalOf(r))}</td>
     <td class="dt">${heldStr(r.opened_at, nowMs, lang)}</td>
-    <td>${esc(r.signal)}</td>
   </tr>`).join('');
   return `<div class="card table-wrap"><table class="lt-tbl"><thead><tr>
     <th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th>
-    <th class="r">${t(lang, 'Размер', 'Size')}</th><th>${t(lang, 'В работе', 'Held')}</th><th>${t(lang, 'Сигнал', 'Signal')}</th>
+    <th class="r">${t(lang, 'Размер', 'Size')}</th><th>${t(lang, 'В работе', 'Held')}</th>
   </tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -521,7 +519,6 @@ function momentumClosedTable(rows: MomRow[], page: number, baseUrl: string, lang
       <td class="r mono ${cls(pnl)}">${pct(pnl)}</td>
       <td class="r ${cls(momUsdOf(r))}">${usd(momUsdOf(r), true)}</td>
       <td><span class="rp">${esc(r.close_reason ?? '—')}</span></td>
-      <td>${esc(r.signal)}</td>
       <td class="dt">${fmtDt(r.opened_at)}</td>
     </tr>`;
   }).join('');
@@ -534,7 +531,7 @@ function momentumClosedTable(rows: MomRow[], page: number, baseUrl: string, lang
   return `<div class="card table-wrap"><table class="lt-tbl"><thead><tr>
     <th>#</th><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th>
     <th class="r">${t(lang, 'Выход', 'Exit')}</th><th class="r">${t(lang, 'Результат', 'Result')}</th><th class="r">P&amp;L $</th>
-    <th>${t(lang, 'Как закрыли', 'Exit')}</th><th>${t(lang, 'Сигнал', 'Signal')}</th><th>${t(lang, 'Открыта (UTC)', 'Opened (UTC)')}</th>
+    <th>${t(lang, 'Как закрыли', 'Exit')}</th><th>${t(lang, 'Открыта (UTC)', 'Opened (UTC)')}</th>
   </tr></thead><tbody>${body}</tbody></table></div>${pager}`;
 }
 
