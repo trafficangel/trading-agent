@@ -9,13 +9,14 @@ type TradeRow = {
   coin: string;
   side: Side;
   entry_px: number;
+  signal: string;
   pnl_pct: number;
   close_reason: string | null;
   opened_at: number;
   closed_at: number;
 };
 type CandleRow = { t: number; h: number; l: number; c: number; v: number };
-type SimOut = { pnl: number; reason: 'stop' | 'trail' | 'time' | 'end' };
+type SimOut = { pnl: number; reason: 'stop' | 'trail' | 'decay' | 'time' | 'end' };
 type Metrics = { mfe: number; mae: number; volRatio: number; atrPct: number; closeNearHigh: number };
 
 const REPORT_KEY = 'hl_momentum_doctor_last_report_id';
@@ -27,9 +28,12 @@ const MAX_STOP_PCT = 0.018;
 const MIN_RR = 2;
 const HOLD_MS = 30 * 60_000;
 const TRAIL_HOLD_MS = 60 * 60_000;
+const DECAY_EXIT_MS = 6 * 60_000;
+const DECAY_MIN_MFE_R = 0.35;
+const DECAY_LOSS_R = 0.30;
 
 const closedStmt = db.prepare<[number], TradeRow>(`
-  SELECT id, coin, side, entry_px, pnl_pct, close_reason, opened_at, closed_at
+  SELECT id, coin, side, entry_px, signal, pnl_pct, close_reason, opened_at, closed_at
    FROM hl_momentum_live_log
   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
    ORDER BY id DESC
@@ -79,6 +83,14 @@ function median(xs: number[]): number {
 
 function pnlPct(side: Side, entry: number, exit: number): number {
   return (side === 'long' ? pct(entry, exit) : pct(exit, entry)) - COST_RT_PCT;
+}
+
+function layerOf(signal: string): 'fast' | 'confirm' | 'unknown' {
+  if (signal.includes('layer=fast')) return 'fast';
+  if (signal.includes('layer=confirm')) return 'confirm';
+  if (signal.includes('fast up radar') || signal.includes('fast down radar')) return 'fast';
+  if (signal.includes('up impulse') || signal.includes('down impulse')) return 'confirm';
+  return 'unknown';
 }
 
 function preCandles(coin: string, t: number, n = 70): CandleRow[] {
@@ -144,6 +156,7 @@ function simulate(t: TradeRow, minStopPct: number): SimOut {
   for (const c of bars) {
     best = t.side === 'long' ? Math.max(best, c.h) : Math.min(best, c.l);
     const move = t.side === 'long' ? (best - t.entry_px) / t.entry_px : (t.entry_px - best) / t.entry_px;
+    const currentMove = t.side === 'long' ? (c.c - t.entry_px) / t.entry_px : (t.entry_px - c.c) / t.entry_px;
     if (move >= activatePct) active = true;
     const stop = t.side === 'long' ? t.entry_px * (1 - stopPct) : t.entry_px * (1 + stopPct);
     const trail = t.side === 'long'
@@ -151,10 +164,11 @@ function simulate(t: TradeRow, minStopPct: number): SimOut {
       : Math.min(t.entry_px * (1 - lockPct), best * (1 + givebackPct));
     const stopHit = t.side === 'long' ? c.l <= stop : c.h >= stop;
     const trailHit = active ? (t.side === 'long' ? c.l <= trail : c.h >= trail) : false;
+    const decayed = c.t - t.opened_at >= DECAY_EXIT_MS && move < stopPct * DECAY_MIN_MFE_R && currentMove <= -stopPct * DECAY_LOSS_R;
     const timed = c.t - t.opened_at >= (active ? TRAIL_HOLD_MS : HOLD_MS);
-    if (stopHit || trailHit || timed) {
+    if (stopHit || trailHit || decayed || timed) {
       const exit = stopHit ? stop : trailHit ? trail : c.c;
-      return { pnl: pnlPct(t.side, t.entry_px, exit), reason: stopHit ? 'stop' : trailHit ? 'trail' : 'time' };
+      return { pnl: pnlPct(t.side, t.entry_px, exit), reason: stopHit ? 'stop' : trailHit ? 'trail' : decayed ? 'decay' : 'time' };
     }
   }
 
@@ -185,6 +199,19 @@ function reasonMix(rows: TradeRow[]): string {
   return [...mix.entries()].map(([k, v]) => `${k} ${v}`).join(', ') || 'нет';
 }
 
+function layerMix(rows: TradeRow[]): string {
+  const byLayer = new Map<string, { n: number; pnl: number; wins: number }>();
+  for (const r of rows) {
+    const k = layerOf(r.signal);
+    const e = byLayer.get(k) ?? { n: 0, pnl: 0, wins: 0 };
+    e.n += 1; e.pnl += r.pnl_pct; if (r.pnl_pct > 0) e.wins += 1;
+    byLayer.set(k, e);
+  }
+  return [...byLayer.entries()]
+    .map(([k, e]) => `${k}: ${e.n} · ${fmtPct(e.pnl)} · WR ${((e.wins / e.n) * 100).toFixed(0)}%`)
+    .join('; ') || 'нет';
+}
+
 export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: boolean; nowMs?: number } = {}): Promise<{ sent: boolean; closed: number; pnl: number }> {
   const nowMs = opts.nowMs ?? Date.now();
   const rows = closedStmt.all(160).reverse();
@@ -205,6 +232,8 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
   const entryExtreme = metricsRows.filter((x) => x.r.side === 'long' ? x.m.closeNearHigh >= 0.75 : x.m.closeNearHigh <= 0.25);
   const entryExtremePnl = entryExtreme.reduce((acc, x) => acc + x.r.pnl_pct, 0);
   const noMfe = metricsRows.filter((x) => x.m.mfe < 1).map((x) => `${x.r.coin} ${fmtPct(x.r.pnl_pct)}`).slice(0, 6);
+  const decayCandidates = metricsRows.filter((x) => x.m.mfe < Math.max(0.45, x.m.atrPct * DECAY_MIN_MFE_R) && x.r.pnl_pct < 0);
+  const decayCandidatePnl = decayCandidates.reduce((acc, x) => acc + x.r.pnl_pct, 0);
   const actions: string[] = [];
 
   if (best && rows.length >= MIN_SAMPLE_FOR_AUTOTUNE && best.sum >= current.sum + MIN_AUTOTUNE_EDGE_PCT) {
@@ -216,12 +245,14 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
     `🧭🩺 <b>Momentum Doctor</b>`,
     `Live sample: <b>${rows.length}</b> closed · ${fmtPct(pnl)} · WR ${rows.length ? ((rows.filter((r) => r.pnl_pct > 0).length / rows.length) * 100).toFixed(0) : '0'}%`,
     `Закрытия: ${esc(reasonMix(rows))}`,
+    `Слои: ${esc(layerMix(rows))}`,
     ``,
     `<b>Стоп-пол: контрфакт</b>`,
     ...scores.map((s) => `• floor ${(s.minStopPct * 100).toFixed(1)}%: ${fmtPct(s.sum)} · WR ${rows.length ? ((s.wins / rows.length) * 100).toFixed(0) : '0'}% · ${esc(s.reasons)}`),
     ``,
     `<b>Качество входа</b>`,
     `• close-extreme фильтр: ${entryExtreme.length}/${rows.length} сделок · фактический PnL ${fmtPct(entryExtremePnl)}`,
+    `• dead-impulse кандидаты: ${decayCandidates.length}/${rows.length} · фактический PnL ${fmtPct(decayCandidatePnl)}`,
     noMfe.length ? `• слабый MFE (<1%): ${esc(noMfe.join(', '))}` : `• слабый MFE (<1%): нет`,
     ``,
     `<b>Автотюнинг</b>`,

@@ -59,9 +59,11 @@ type MomentumSignal = {
 type LiveSizing = {
   notionalUsd: number;
   kellyFraction: number;
+  confidence: number;
   equityUsd: number | null;
   source: 'kelly' | 'fallback';
 };
+type PerfStats = { n: number; avg: number | null; wins: number | null; sum: number | null };
 
 const NOTIONAL_USD = 12;
 const LIVE_ENABLED = true;
@@ -112,6 +114,13 @@ const HIGH_SCORE_OVERRIDE = 84;
 const REGIME_MOVE_90S_PCT = 0.20;
 const REGIME_BREADTH_WARN = 80;
 const KELLY_RISK_SCALE = 0.0015;
+const KELLY_MIN_LIVE_SAMPLE = 30;
+const KELLY_MIN_LAYER_SAMPLE = 12;
+const CLUSTER_WINDOW_MS = 3 * 60_000;
+const MAX_CLUSTER_SAME_SIDE = 2;
+const DECAY_EXIT_MS = 6 * 60_000;
+const DECAY_MIN_MFE_R = 0.35;
+const DECAY_LOSS_R = 0.30;
 
 const candlesStmt = db.prepare<[string, number], Candle>(`
   SELECT t, o, h, l, c, v FROM hl_candles
@@ -212,6 +221,35 @@ const liveCoinSideStatsStmt = db.prepare<[string, Side], { n: number; avg: numbe
          SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins
     FROM hl_momentum_live_log
    WHERE coin = ? AND side = ? AND closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+`);
+const liveAllStatsStmt = db.prepare<[], PerfStats>(`
+  SELECT COUNT(*) AS n,
+         AVG(pnl_pct) AS avg,
+         SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins,
+         SUM(pnl_pct) AS sum
+    FROM hl_momentum_live_log
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+`);
+const liveLayerStatsStmt = db.prepare<[string], PerfStats>(`
+  SELECT COUNT(*) AS n,
+         AVG(pnl_pct) AS avg,
+         SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins,
+         SUM(pnl_pct) AS sum
+    FROM hl_momentum_live_log
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL AND signal LIKE ?
+`);
+const liveRecentStatsStmt = db.prepare<[number], PerfStats>(`
+  SELECT COUNT(*) AS n,
+         AVG(pnl_pct) AS avg,
+         SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins,
+         SUM(pnl_pct) AS sum
+    FROM (
+      SELECT pnl_pct
+        FROM hl_momentum_live_log
+       WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+       ORDER BY closed_at DESC
+       LIMIT ?
+    )
 `);
 const insSignalJournalStmt = db.prepare<[
   number, string, Side, SignalLayer, number, number, string, string,
@@ -402,6 +440,32 @@ function trailingState(pos: Pos, cs: Candle[], params: RiskParams): { active: bo
   return { active: true, bestPx, movePct: move * 100, trailPx, params };
 }
 
+function favorableMove(pos: Pos, px: number): number {
+  return pos.side === 'long'
+    ? (px - pos.entry_px) / pos.entry_px
+    : (pos.entry_px - px) / pos.entry_px;
+}
+
+function decayExit(pos: Pos, currentPx: number, bestMovePct: number, params: RiskParams, nowMs: number): boolean {
+  if (nowMs - pos.opened_at < DECAY_EXIT_MS) return false;
+  if (bestMovePct >= params.stopPct * DECAY_MIN_MFE_R) return false;
+  return favorableMove(pos, currentPx) <= -params.stopPct * DECAY_LOSS_R;
+}
+
+function classifyRecoveredFlat(pos: Pos, exitPx: number | null, cs: Candle[]): string {
+  if (exitPx == null) return 'reconciled-flat';
+  const params = posRiskParams(pos);
+  const stop = stopPx(pos.side, pos.entry_px, params);
+  const trail = trailingState(pos, cs, params);
+  const stopLike = pos.side === 'long' ? exitPx <= stop * 1.002 : exitPx >= stop * 0.998;
+  const trailLike = trail?.active && trail.trailPx != null
+    ? (pos.side === 'long' ? exitPx <= trail.trailPx * 1.002 : exitPx >= trail.trailPx * 0.998)
+    : false;
+  if (stopLike) return 'exchange-stop';
+  if (trailLike) return 'exchange-trailing-stop';
+  return favorableMove(pos, exitPx) >= 0 ? 'external-flat-profit' : 'external-flat-loss';
+}
+
 function liveLock(coin: string, reason: string): void {
   liveUpsertLockStmt.run(coin, Date.now() + HOLD_MS + 20 * 60_000, reason, Date.now());
 }
@@ -465,6 +529,10 @@ function portfolioState(side: Side): { total: number; sameSide: number } {
   return { total: open.length, sameSide: open.filter((p) => p.side === side).length };
 }
 
+function recentSideCluster(side: Side, now = Date.now()): number {
+  return liveAllPosStmt.all().filter((p) => p.side === side && now - p.opened_at <= CLUSTER_WINDOW_MS).length;
+}
+
 function continuationProb(score: number): number {
   return clamp(0.38 + (score - 50) / 120, 0.18, 0.78);
 }
@@ -505,31 +573,66 @@ function kellyFraction(sig: MomentumSignal, params: RiskParams): number {
   return clamp((b * p - q) / b, 0, 1);
 }
 
+function statWinRate(st: Pick<PerfStats, 'n' | 'wins'>): number {
+  return st.n > 0 ? (st.wins ?? 0) / st.n : 0;
+}
+
+function liveKellyConfidence(sig: MomentumSignal): { confidence: number; reason: string } {
+  const all = liveAllStatsStmt.get() ?? { n: 0, avg: null, wins: null, sum: null };
+  const layer = liveLayerStatsStmt.get(`%layer=${sig.layer}%`) ?? { n: 0, avg: null, wins: null, sum: null };
+  const recent = liveRecentStatsStmt.get(30) ?? { n: 0, avg: null, wins: null, sum: null };
+  const coin = liveCoinSideStatsStmt.get(sig.coin, sig.side) ?? { n: 0, avg: null, wins: null };
+
+  const allAvg = all.avg ?? 0;
+  const layerAvg = layer.avg ?? 0;
+  const recentAvg = recent.avg ?? 0;
+  if (all.n < KELLY_MIN_LIVE_SAMPLE) return { confidence: 0, reason: `sample ${all.n}/${KELLY_MIN_LIVE_SAMPLE}` };
+  if (layer.n < KELLY_MIN_LAYER_SAMPLE) return { confidence: 0, reason: `${sig.layer} sample ${layer.n}/${KELLY_MIN_LAYER_SAMPLE}` };
+  if (allAvg <= 0 || layerAvg <= 0 || recentAvg <= 0) {
+    return { confidence: 0, reason: `edge not proven avg=${allAvg.toFixed(2)} layer=${layerAvg.toFixed(2)} recent=${recentAvg.toFixed(2)}` };
+  }
+
+  const sampleConfidence = clamp((all.n - KELLY_MIN_LIVE_SAMPLE) / 70, 0, 1);
+  const layerConfidence = clamp((layer.n - KELLY_MIN_LAYER_SAMPLE) / 40, 0, 1);
+  const quality = clamp(((statWinRate(all) - 0.48) / 0.20 + (allAvg / 0.35)) / 2, 0, 1);
+  const coinPenalty = coin.n >= 3 && (coin.avg ?? 0) < 0 ? 0.55 : 1;
+  const confidence = clamp((0.45 * sampleConfidence + 0.30 * layerConfidence + 0.25 * quality) * coinPenalty, 0, 1);
+  return { confidence, reason: `conf=${confidence.toFixed(2)} n=${all.n} layer=${layer.n}` };
+}
+
 async function liveSizing(sig: MomentumSignal, params: RiskParams): Promise<LiveSizing> {
   const minNotional = runtimeNum('hl_momentum_min_notional_usd', LIVE_MIN_NOTIONAL_USD, 4, LIVE_NOTIONAL_USD);
   const maxNotional = runtimeNum('hl_momentum_max_notional_usd', LIVE_MAX_NOTIONAL_USD, minNotional, 60);
   const baseNotional = runtimeNum('hl_momentum_base_notional_usd', LIVE_NOTIONAL_USD, minNotional, maxNotional);
   const kellyOn = runtimeNum('hl_momentum_kelly_enabled', 1, 0, 1) >= 0.5;
-  if (!kellyOn) return { notionalUsd: baseNotional, kellyFraction: 0, equityUsd: null, source: 'fallback' };
+  if (!kellyOn) return { notionalUsd: baseNotional, kellyFraction: 0, confidence: 0, equityUsd: null, source: 'fallback' };
   const eq = await hlAccountValue();
   if (!eq.ok || eq.degraded || !(eq.data > 0)) {
     logger.warn({ msg: eq.ok ? 'equity read degraded' : eq.msg }, 'hl-momentum-live: Kelly sizing fallback');
-    return { notionalUsd: baseNotional, kellyFraction: 0, equityUsd: eq.ok ? eq.data : null, source: 'fallback' };
+    return { notionalUsd: baseNotional, kellyFraction: 0, confidence: 0, equityUsd: eq.ok ? eq.data : null, source: 'fallback' };
   }
-  const k = kellyFraction(sig, params);
+  const trust = liveKellyConfidence(sig);
+  const k = kellyFraction(sig, params) * trust.confidence;
   const riskScale = runtimeNum('hl_momentum_kelly_risk_scale', KELLY_RISK_SCALE, 0.0001, 0.01);
   const riskUsd = eq.data * k * riskScale;
   const rawNotional = params.stopPct > 0 ? riskUsd / params.stopPct : baseNotional;
+  const trustedMaxNotional = minNotional + (maxNotional - minNotional) * trust.confidence;
+  const fallbackNotional = Math.min(baseNotional, trustedMaxNotional || minNotional);
+  const notionalUsd = k > 0 ? clamp(rawNotional, minNotional, trustedMaxNotional) : fallbackNotional;
+  if (trust.confidence <= 0) {
+    logger.info({ coin: sig.coin, side: sig.side, reason: trust.reason }, 'hl-momentum-live: Kelly held at minimum until edge is proven');
+  }
   return {
-    notionalUsd: Math.round(clamp(rawNotional, minNotional, maxNotional) * 100) / 100,
+    notionalUsd: Math.round(notionalUsd * 100) / 100,
     kellyFraction: Math.round(k * 10000) / 10000,
+    confidence: Math.round(trust.confidence * 1000) / 1000,
     equityUsd: Math.round(eq.data * 100) / 100,
     source: 'kelly',
   };
 }
 
 function appendSizingSignal(signal: string, sizing: LiveSizing): string {
-  return `${signal} [size=${sizing.notionalUsd.toFixed(2)} k=${sizing.kellyFraction.toFixed(3)} eq=${sizing.equityUsd != null ? sizing.equityUsd.toFixed(2) : 'na'} src=${sizing.source}]`;
+  return `${signal} [size=${sizing.notionalUsd.toFixed(2)} k=${sizing.kellyFraction.toFixed(3)} conf=${sizing.confidence.toFixed(2)} eq=${sizing.equityUsd != null ? sizing.equityUsd.toFixed(2) : 'na'} src=${sizing.source}]`;
 }
 
 function recordSignal(sig: MomentumSignal, decision: 'paper' | 'live-open' | 'skip', reason: string, px: { ref?: number | null; signal?: number | null; spreadPct?: number | null; sideDepthUsd?: number | null; sizing?: LiveSizing | null } = {}): void {
@@ -558,6 +661,8 @@ function preTradeGate(sig: MomentumSignal, params: RiskParams): string | null {
   if (extensionR > MAX_EXTENSION_R_MULT && sig.score < HIGH_SCORE_OVERRIDE) return `late extension ${extensionR.toFixed(2)}R`;
   const pf = portfolioState(sig.side);
   if (pf.sameSide >= MAX_LIVE_SAME_SIDE && sig.score < HIGH_SCORE_OVERRIDE) return `portfolio crowding ${sig.side} ${pf.sameSide}`;
+  const clustered = recentSideCluster(sig.side);
+  if (clustered >= MAX_CLUSTER_SAME_SIDE) return `impulse cluster ${sig.side} ${clustered}/${MAX_CLUSTER_SAME_SIDE}`;
   if (Date.now() - lastRegime.ts < 20_000) {
     if (sig.side === 'long' && lastRegime.label === 'risk-off' && sig.score < HIGH_SCORE_OVERRIDE) return `regime risk-off breadth ${lastRegime.down}`;
     if (sig.side === 'short' && lastRegime.label === 'risk-on' && sig.score < HIGH_SCORE_OVERRIDE) return `regime risk-on breadth ${lastRegime.up}`;
@@ -717,12 +822,13 @@ function managePosition(pos: Pos, cs: Candle[]): boolean {
   const trail = trailingState(pos, cs, params);
   const stopHit = pos.side === 'long' ? last.l <= stop : last.h >= stop;
   const trailHit = trail?.active && trail.trailPx != null ? (pos.side === 'long' ? last.l <= trail.trailPx : last.h >= trail.trailPx) : false;
+  const decayed = trail ? decayExit(pos, last.c, trail.movePct / 100, params, last.t) : false;
   const timed = last.t - pos.opened_at >= (trail?.active ? TRAIL_HOLD_MS : HOLD_MS);
 
-  if (!stopHit && !trailHit && !timed) return false;
+  if (!stopHit && !trailHit && !decayed && !timed) return false;
 
   // Conservative same-bar ordering: hard stop before profit trail.
-  const reason = stopHit ? 'stop' : trailHit ? 'trailing-stop' : 'time-stop';
+  const reason = stopHit ? 'stop' : trailHit ? 'trailing-stop' : decayed ? 'momentum-decay' : 'time-stop';
   const exit = stopHit ? stop : trailHit && trail?.trailPx != null ? trail.trailPx : last.c;
   const pnl = pnlPct(pos.side, pos.entry_px, exit);
   closeTxn(pos.coin, exit, last.t, Math.round(pnl * 1000) / 1000, reason);
@@ -759,8 +865,9 @@ async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
     const recovered = await hlExitAvgSince(pos.coin, pos.opened_at);
     const exitPx = recovered.ok ? recovered.data.avgPx : null;
     const pnl = exitPx != null ? Math.round(pnlPct(pos.side, pos.entry_px, exitPx) * 1000) / 1000 : null;
-    liveCloseTxn(pos.coin, exitPx, Date.now(), pnl, 'reconciled-flat');
-    logger.warn({ coin: pos.coin, exitPx, pnl }, 'hl-momentum-live: exchange flat -> reconciled');
+    const reason = classifyRecoveredFlat(pos, exitPx, cs);
+    liveCloseTxn(pos.coin, exitPx, Date.now(), pnl, reason);
+    logger.warn({ coin: pos.coin, exitPx, pnl, reason }, 'hl-momentum-live: exchange flat -> reconciled');
     return;
   }
   if (ex.data.side !== pos.side) {
@@ -776,13 +883,14 @@ async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
   const trail = trailingState(pos, cs, params);
   const stopHit = pos.side === 'long' ? last.l <= stop : last.h >= stop;
   const trailHit = trail?.active && trail.trailPx != null ? (pos.side === 'long' ? last.l <= trail.trailPx : last.h >= trail.trailPx) : false;
+  const decayed = trail ? decayExit(pos, last.c, trail.movePct / 100, params, last.t) : false;
   const timed = last.t - pos.opened_at >= (trail?.active ? TRAIL_HOLD_MS : HOLD_MS);
-  if (!stopHit && !trailHit && !timed) {
+  if (!stopHit && !trailHit && !decayed && !timed) {
     if (trail?.active && trail.trailPx != null) await refreshLiveStop(pos, ex.data.size, trail.trailPx, 'trail');
     return;
   }
 
-  const reason = stopHit ? 'stop' : trailHit ? 'trailing-stop' : 'time-stop';
+  const reason = stopHit ? 'stop' : trailHit ? 'trailing-stop' : decayed ? 'momentum-decay' : 'time-stop';
   const close = await hlClosePosition(pos.coin);
   if (!close.ok) { logger.error({ coin: pos.coin, msg: close.msg }, 'hl-momentum-live: close failed'); return; }
   const check = await hlFetchPosition(pos.coin);
@@ -817,7 +925,16 @@ async function fastCloseLivePosition(pos: Pos, reason: string, mid: number, trai
   liveFastClosing.add(pos.coin);
   try {
     const close = await hlClosePosition(pos.coin);
-    if (!close.ok) { logger.error({ coin: pos.coin, msg: close.msg, reason }, 'hl-momentum-fast: close failed'); return; }
+    if (!close.ok) {
+      const checkFlat = await hlFetchPosition(pos.coin);
+      if (checkFlat.ok && !checkFlat.data) {
+        liveFastBestPx.delete(pos.coin);
+        logger.warn({ coin: pos.coin, msg: close.msg, reason }, 'hl-momentum-fast: close skipped because exchange is already flat');
+        return;
+      }
+      logger.error({ coin: pos.coin, msg: close.msg, reason }, 'hl-momentum-fast: close failed');
+      return;
+    }
     const check = await hlFetchPosition(pos.coin);
     if (!check.ok || check.data) { logger.warn({ coin: pos.coin, reason }, 'hl-momentum-fast: close not confirmed flat'); return; }
     await hlCancelTriggers(pos.coin);
@@ -848,9 +965,10 @@ async function fastManageLivePositions(mids: Map<string, number>): Promise<void>
     const trail = fastTrailingState(pos, mid, params);
     const stopHit = pos.side === 'long' ? mid <= stop : mid >= stop;
     const trailHit = trail.active && trail.trailPx != null ? (pos.side === 'long' ? mid <= trail.trailPx : mid >= trail.trailPx) : false;
+    const decayed = decayExit(pos, mid, trail.movePct / 100, params, Date.now());
     const timed = Date.now() - pos.opened_at >= (trail.active ? TRAIL_HOLD_MS : HOLD_MS);
-    if (!stopHit && !trailHit && !timed) continue;
-    await fastCloseLivePosition(pos, stopHit ? 'fast-stop' : trailHit ? 'fast-trailing-stop' : 'fast-time-stop', mid, trail);
+    if (!stopHit && !trailHit && !decayed && !timed) continue;
+    await fastCloseLivePosition(pos, stopHit ? 'fast-stop' : trailHit ? 'fast-trailing-stop' : decayed ? 'fast-momentum-decay' : 'fast-time-stop', mid, trail);
   }
 }
 
