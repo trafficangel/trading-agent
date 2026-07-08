@@ -76,6 +76,8 @@ const LIVE_MAX_NOTIONAL_USD = 24;
 const LIVE_LEVERAGE = 1;
 const LIVE_MAX_OPEN = 4;
 const LIVE_DAILY_STOP_PCT = -10;
+const LIVE_DAILY_STOP_USD_MIN = -500;
+const LIVE_DAILY_STOP_USD_MAX = -1;
 const LIVE_MAX_SPREAD_PCT = 0.35;
 const LIVE_MIN_SIDE_DEPTH_USD = 150;
 const LIVE_MAX_NOTIONAL_TO_DEPTH = 0.10;
@@ -222,6 +224,10 @@ const liveTodayPnlStmt = db.prepare<[number], { pnl: number | null }>(`
   SELECT SUM(pnl_pct) AS pnl FROM hl_momentum_live_log
    WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL AND closed_at >= ?
 `);
+const liveSessionUsdStmt = db.prepare<[number], { usd: number | null }>(`
+  SELECT SUM((pnl_pct / 100.0) * qty * entry_px) AS usd FROM hl_momentum_live_log
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL AND closed_at >= ?
+`);
 const liveCoinSideStatsStmt = db.prepare<[string, Side], { n: number; avg: number | null; wins: number | null }>(`
   SELECT COUNT(*) AS n,
          AVG(pnl_pct) AS avg,
@@ -314,6 +320,15 @@ function runtimePct(key: string, fallback: number, lo: number, hi: number): numb
 
 function liveDailyStopPct(): number {
   return runtimePct('hl_momentum_live_daily_stop_pct', LIVE_DAILY_STOP_PCT, -25, -1);
+}
+
+function liveDailyStopUsd(): number | null {
+  const value = getKvStmt.get('hl_momentum_live_daily_stop_usd')?.value;
+  if (value == null || value.trim() === '') return null;
+  const raw = Number(value);
+  if (!Number.isFinite(raw) || raw === 0) return null;
+  const negativeStop = raw > 0 ? -raw : raw;
+  return clamp(negativeStop, LIVE_DAILY_STOP_USD_MIN, LIVE_DAILY_STOP_USD_MAX);
 }
 
 function liveDailyPnlStart(nowMs: number): number {
@@ -1040,9 +1055,16 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
   const nowMs = Date.now();
   const cooldownUntil = liveEntryFailCooldown.get(coin) ?? 0;
   if (cooldownUntil > nowMs) { recordSignal(sig, 'skip', `entry cooldown ${Math.ceil((cooldownUntil - nowMs) / 1000)}s`, { ref: last.c, signal: last.c }); return; }
-  const dayPnl = liveTodayPnlStmt.get(liveDailyPnlStart(nowMs))?.pnl ?? 0;
-  const dailyStopPct = liveDailyStopPct();
-  if (dayPnl <= dailyStopPct) { recordSignal(sig, 'skip', `daily stop ${dayPnl.toFixed(2)} <= ${dailyStopPct}`); return; }
+  const pnlStart = liveDailyPnlStart(nowMs);
+  const dailyStopUsd = liveDailyStopUsd();
+  if (dailyStopUsd != null) {
+    const sessionUsd = liveSessionUsdStmt.get(pnlStart)?.usd ?? 0;
+    if (sessionUsd <= dailyStopUsd) { recordSignal(sig, 'skip', `session dollar stop $${sessionUsd.toFixed(2)} <= $${dailyStopUsd.toFixed(2)}`); return; }
+  } else {
+    const dayPnl = liveTodayPnlStmt.get(pnlStart)?.pnl ?? 0;
+    const dailyStopPct = liveDailyStopPct();
+    if (dayPnl <= dailyStopPct) { recordSignal(sig, 'skip', `daily stop ${dayPnl.toFixed(2)} <= ${dailyStopPct}`); return; }
+  }
   if (liveGetPosStmt.get(coin)) { recordSignal(sig, 'skip', 'live position already open'); return; }
   if (liveAllPosStmt.all().length >= LIVE_MAX_OPEN) { recordSignal(sig, 'skip', `max live open ${LIVE_MAX_OPEN}`); return; }
   if (wickOpenPosStmt.get(coin)) { recordSignal(sig, 'skip', 'wick-fade has coin'); return; }
