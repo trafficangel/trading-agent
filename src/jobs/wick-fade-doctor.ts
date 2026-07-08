@@ -166,17 +166,24 @@ function holdCounterfactual(rows: TradeRow[]): string[] {
   if (sample.length < 12) return ['контрфакт тайм-стопа: мало данных'];
 
   let best: { hold: number; total: number } | null = null;
+  const totals = new Map<number, number>();
   for (const hold of HOLD_TESTS) {
     const sims = sample.map((r) => simulateHold(r, hold)).filter((r): r is NonNullable<typeof r> => r != null);
     if (sims.length < Math.max(10, sample.length * 0.7)) continue;
     const total = sims.reduce((acc, r) => acc + r.pnl, 0);
     const wr = (sims.filter((r) => r.pnl > 0).length / sims.length) * 100;
     const cats = sims.filter((r) => r.kind === 'catastrophe').length;
+    totals.set(hold, total);
     if (!best || total > best.total) best = { hold, total };
     lines.push(`${hold}м ${fmtPct(total, 1)} · WR ${wr.toFixed(0)}% · стопов ${cats}`);
   }
 
   if (best) lines.unshift(`лучший быстрый тест: <b>${best.hold}м</b> (${fmtPct(best.total, 1)})`);
+  const h25 = totals.get(25);
+  const h30 = totals.get(30);
+  if (h25 != null && h30 != null && h25 > h30 + 2) {
+    lines.unshift(`рекомендация: <b>25м</b> кандидат вместо 30м, преимущество ${fmtPct(h25 - h30, 1)} на выборке`);
+  }
   return lines.length ? lines : ['контрфакт тайм-стопа: не хватило свечей'];
 }
 

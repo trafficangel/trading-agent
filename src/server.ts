@@ -33,6 +33,7 @@ import { startHlCandleCollector } from './jobs/hl-candle-collector.js';
 import { startFundingFlipRunner } from './jobs/funding-flip-runner.js';
 import { startWickFadeRunner } from './jobs/wick-fade-runner.js';
 import { startWickFadeDoctorJob } from './jobs/wick-fade-doctor.js';
+import { startHlMomentumShadowJob } from './jobs/hl-momentum-shadow.js';
 // Phase G — money-back guarantee disabled, see start-job line below.
 // import { startPnlGuaranteeMonthlyJob } from './jobs/pnl-guarantee-monthly.js';
 import { sendLegacyMessage } from './telegram/bot.js';
@@ -248,6 +249,10 @@ async function main(): Promise<void> {
   // reduce risk automatically by pausing weak coin/sides. It never increases
   // size, leverage, stop distance, or trade frequency on its own.
   startWickFadeDoctorJob();
+  // HL Momentum Shadow — paper-only opposite-regime candidate for the portfolio:
+  // follows confirmed impulse+volume continuation using native HL candles. It
+  // never sends exchange orders; promotion requires forward evidence first.
+  startHlMomentumShadowJob();
   // Phase G — money-back guarantee disabled per operator decision.
   // Cron registration commented out, DB columns + repo helpers preserved
   // so it can be re-enabled later without re-migrating. UI mentions
