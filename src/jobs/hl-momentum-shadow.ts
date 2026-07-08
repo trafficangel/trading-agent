@@ -43,7 +43,7 @@ const TRAIL_HOLD_MS = 60 * 60_000;
 const STOP_PCT = 0.012;
 const TARGET_PCT = 0.016;
 const TRAIL_ACTIVATE_PCT = TARGET_PCT;
-const TRAIL_GIVEBACK_PCT = 0.007;
+const TRAIL_GIVEBACK_PCT = 0.0025;
 const TRAIL_MIN_LOCK_PCT = 0.004;
 const IMPULSE_3BAR_PCT = 1.2;
 const VOL_RATIO_MIN = 1.8;
@@ -403,7 +403,7 @@ async function liveMaybeOpen(coin: string, sig: { side: Side; signal: string }, 
   logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, stop, exStop: st.ok, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, signal: sig.signal }, 'hl-momentum-live: OPENED real position');
   void sendMessage({
     channel: 'logs',
-    text: `🧭 <b>momentum-live OPENED</b>: ${coin} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trailing after ${(TRAIL_ACTIVATE_PCT * 100).toFixed(1)}% · ~$${LIVE_NOTIONAL_USD}\nliq: spread ${liq.spreadPct.toFixed(2)}%, top3 $${liq.sideDepthUsd.toFixed(0)} · ${sig.signal}`,
+    text: `🧭 <b>momentum-live OPENED</b>: ${coin} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trailing after ${(TRAIL_ACTIVATE_PCT * 100).toFixed(1)}%, откат ${(TRAIL_GIVEBACK_PCT * 100).toFixed(2)}% · ~$${LIVE_NOTIONAL_USD}\nliq: spread ${liq.spreadPct.toFixed(2)}%, top3 $${liq.sideDepthUsd.toFixed(0)} · ${sig.signal}`,
   });
 }
 
