@@ -35,8 +35,6 @@ const closedStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode
 const openStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode='live' AND closed_at IS NULL ORDER BY opened_at DESC`);
 const momClosedStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_log WHERE closed_at IS NOT NULL ORDER BY closed_at ASC`);
 const momOpenStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_pos ORDER BY opened_at DESC`);
-const momShadowClosedStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_shadow_log WHERE closed_at IS NOT NULL ORDER BY closed_at ASC`);
-const momShadowOpenStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_shadow_pos ORDER BY opened_at DESC`);
 const limitVolClosesStmt = db.prepare<[string, number], { t: number; c: number }>(`SELECT t, c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
 const runtimeConfigStmt = db.prepare<[string], { value: string }>(`SELECT value FROM runtime_config WHERE key = ?`);
 const MOMENTUM_PUBLIC_START_FALLBACK_MS = Date.UTC(2026, 6, 8, 18, 14, 0);
@@ -459,7 +457,7 @@ function momentumLinkSection(lang: Lang): string {
       <div>
         <span class="mom-link-badge">${t(lang, 'MOMENTUM V2 · НОВЫЙ ОТСЧЁТ', 'MOMENTUM V2 · NEW TRACK')}</span>
         <div class="mom-link-title">Momentum Follow</div>
-        <div class="mom-link-sub">${t(lang, 'Адаптивный 2s-радар по импульсам: описание, live/shadow статистика и сделки →', 'Adaptive 2s impulse radar: description, live/shadow stats and trades →')}</div>
+        <div class="mom-link-sub">${t(lang, 'Адаптивный 2s-радар по импульсам: описание, live-статистика и сделки →', 'Adaptive 2s impulse radar: description, live stats and trades →')}</div>
       </div>
       <div class="mom-link-stats">
         <span><b class="${cls(net)}">${pct(net)}</b><small>${t(lang, 'live', 'live')}</small></span>
@@ -604,10 +602,7 @@ function momentumStrategyDetail(lang: Lang): string {
 export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
   const liveClosed = momentumPublicRows(momClosedStmt.all());
   const liveOpen = momentumPublicRows(momOpenStmt.all());
-  const shadowClosed = momentumPublicRows(momShadowClosedStmt.all());
-  const shadowOpen = momentumPublicRows(momShadowOpenStmt.all());
   const live = computeMomentumStats(liveClosed, liveOpen.length);
-  const shadow = computeMomentumStats(shadowClosed, shadowOpen.length);
   const statCard = (l: string, v: string, vc = '', s = '', sc = ''): string =>
     `<div class="lt-stat"><div class="l">${l}</div><div class="v ${vc}">${v}</div>${s ? `<div class="s ${sc}">${s}</div>` : ''}</div>`;
 
@@ -633,10 +628,9 @@ export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
       ${statCard(t(lang, 'Live сделки', 'Live trades'), String(live.closed), '', `${live.open} ${t(lang, 'открыто', 'open')}`)}
       ${statCard(t(lang, 'Live WR', 'Live WR'), live.winRate != null ? `${(live.winRate * 100).toFixed(0)}%` : '—', '', `${live.wins}W / ${live.losses}L`)}
       ${statCard(t(lang, 'Live PF', 'Live PF'), live.profitFactor != null ? live.profitFactor.toFixed(2) : '—', live.profitFactor != null && live.profitFactor >= 1 ? 'pos' : live.profitFactor != null ? 'neg' : '', t(lang, 'прибыль / убыток', 'profit / loss'))}
-      ${statCard(t(lang, 'Shadow результат', 'Shadow result'), pct(shadow.netPct), cls(shadow.netPct), `${usd(shadow.netUsd, true)} · ${t(lang, 'бумага', 'paper')}`, cls(shadow.netUsd))}
-      ${statCard(t(lang, 'Shadow сделки', 'Shadow trades'), String(shadow.closed), '', `${shadow.open} ${t(lang, 'открыто', 'open')}`)}
-      ${statCard(t(lang, 'Shadow WR', 'Shadow WR'), shadow.winRate != null ? `${(shadow.winRate * 100).toFixed(0)}%` : '—', '', `${shadow.wins}W / ${shadow.losses}L`)}
       ${statCard(t(lang, 'Средняя live', 'Live average'), pct(live.avgPct), cls(live.avgPct), t(lang, 'на сделку', 'per trade'))}
+      ${statCard(t(lang, 'Лучший live', 'Best live'), pct(live.best), cls(live.best), t(lang, 'закрытая сделка', 'closed trade'))}
+      ${statCard(t(lang, 'Худший live', 'Worst live'), pct(live.worst), cls(live.worst), t(lang, 'закрытая сделка', 'closed trade'))}
     </div>
 
     ${live.cum.length >= 2 ? `<div class="section"><div class="section-title">${t(lang, 'Live-кривая результата', 'Live result curve')}</div>${equityCurve(live.cum, lang)}</div>` : ''}
@@ -653,13 +647,7 @@ export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
       ${momentumClosedTable(liveClosed, page, '/lab/momentum', lang)}
     </div>
 
-    <div class="section">
-      <div class="section-title">${t(lang, 'Shadow / бумажная проверка', 'Shadow / paper validation')}</div>
-      <p class="sd-lead">${t(lang, 'Shadow-режим продолжает писать сделки отдельно от live. Он нужен, чтобы видеть, как сигнал ведёт себя шире, даже когда live-вход заблокирован занятостью монеты или защитой.', 'Shadow mode keeps writing trades separately from live. It shows how the signal behaves more broadly, even when live entry is blocked by an occupied coin or protection.')}</p>
-      ${momentumClosedTable(shadowClosed.slice().reverse().slice(0, 20).reverse(), 1, '/lab/momentum', lang)}
-    </div>
-
-    <p class="lt-note">${t(lang, 'Live и shadow считаются отдельно. Live — реальные деньги и реальные исполнения; shadow — модельная проверка сигнала. Публичная статистика Momentum v2 считается с нового старта; старая история сохранена для внутреннего анализа. Прошлые результаты не гарантируют будущих.', 'Live and shadow are counted separately. Live is real money and real execution; shadow is signal validation. Momentum v2 public stats are counted from the new start; older history is kept for internal analysis. Past results do not guarantee future results.')}</p>
+    <p class="lt-note">${t(lang, 'На странице показана только live-статистика Momentum v2: реальные деньги и реальные исполнения. Публичная статистика считается с нового старта; старая история сохранена для внутреннего анализа. Прошлые результаты не гарантируют будущих.', 'This page shows only Momentum v2 live stats: real money and real execution. Public stats are counted from the new start; older history is kept for internal analysis. Past results do not guarantee future results.')}</p>
     `,
     { autoRefreshSec: 60, lang },
   );
