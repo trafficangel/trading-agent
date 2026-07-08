@@ -21,6 +21,7 @@ import {
   hlPlaceStop,
   hlSetLeverage,
   hlExitAvgSince,
+  hlAccountValue,
 } from '../exchange/hyperliquid-private.js';
 
 type Side = 'long' | 'short';
@@ -55,10 +56,18 @@ type MomentumSignal = {
   expectedPnl: number;
   metrics: SignalMetrics;
 };
+type LiveSizing = {
+  notionalUsd: number;
+  kellyFraction: number;
+  equityUsd: number | null;
+  source: 'kelly' | 'fallback';
+};
 
 const NOTIONAL_USD = 12;
 const LIVE_ENABLED = true;
 const LIVE_NOTIONAL_USD = 12;
+const LIVE_MIN_NOTIONAL_USD = 8;
+const LIVE_MAX_NOTIONAL_USD = 24;
 const LIVE_LEVERAGE = 1;
 const LIVE_MAX_OPEN = 4;
 const LIVE_DAILY_STOP_PCT = -10;
@@ -102,6 +111,7 @@ const MAX_LIVE_SAME_SIDE = 3;
 const HIGH_SCORE_OVERRIDE = 84;
 const REGIME_MOVE_90S_PCT = 0.20;
 const REGIME_BREADTH_WARN = 80;
+const KELLY_RISK_SCALE = 0.0015;
 
 const candlesStmt = db.prepare<[string, number], Candle>(`
   SELECT t, o, h, l, c, v FROM hl_candles
@@ -206,13 +216,14 @@ const liveCoinSideStatsStmt = db.prepare<[string, Side], { n: number; avg: numbe
 const insSignalJournalStmt = db.prepare<[
   number, string, Side, SignalLayer, number, number, string, string,
   number | null, number | null, number | null, number | null, number | null, number | null,
-  number | null, number | null, number | null, number | null, number, number, string
+  number | null, number | null, number | null, number | null, number, number, string,
+  number | null, number | null, number | null
 ], void>(`
   INSERT INTO hl_momentum_signal_journal
     (ts, coin, side, layer, score, expected_pnl, decision, reason, ref_px, signal_px,
      r30, r90, r3, r12, from_last, vol_ratio, spread_pct, side_depth_usd,
-     open_total, open_same_side, signal)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     open_total, open_same_side, signal, notional_usd, kelly_fraction, equity_usd)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 const wickOpenPosStmt = db.prepare<[string], { coin: string }>('SELECT coin FROM wick_fade_pos WHERE coin = ?');
 const liveUpsertLockStmt = db.prepare<[string, number, string, number], void>(`
@@ -454,6 +465,10 @@ function portfolioState(side: Side): { total: number; sameSide: number } {
   return { total: open.length, sameSide: open.filter((p) => p.side === side).length };
 }
 
+function continuationProb(score: number): number {
+  return clamp(0.38 + (score - 50) / 120, 0.18, 0.78);
+}
+
 function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'expectedPnl'>, params: RiskParams): MomentumSignal {
   const m = sig.metrics;
   const vol5m = Math.max(0.12, m.vol5mPct ?? params.volPct * 100);
@@ -469,10 +484,10 @@ function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'expectedPnl'>, params:
   const coinAdj = coinQualityAdj(sig.coin, sig.side);
   const raw = 48 + moveStrength + trendStrength + volumeStrength + edge + coinAdj - extensionPenalty;
   const score = Math.round(clamp(raw, 0, 100));
-  const continuationProb = clamp(0.38 + (score - 50) / 120, 0.18, 0.78);
+  const p = continuationProb(score);
   const winPnl = params.trailMinLockPct * 100;
   const lossPnl = params.stopPct * 100 + COST_RT_PCT;
-  const expectedPnl = Math.round((continuationProb * winPnl - (1 - continuationProb) * lossPnl) * 1000) / 1000;
+  const expectedPnl = Math.round((p * winPnl - (1 - p) * lossPnl) * 1000) / 1000;
   return { ...sig, score, expectedPnl };
 }
 
@@ -480,7 +495,44 @@ function appendScoreSignal(signal: string, sig: MomentumSignal): string {
   return `${signal} [score=${sig.score} ev=${sig.expectedPnl.toFixed(2)} layer=${sig.layer}]`;
 }
 
-function recordSignal(sig: MomentumSignal, decision: 'paper' | 'live-open' | 'skip', reason: string, px: { ref?: number | null; signal?: number | null; spreadPct?: number | null; sideDepthUsd?: number | null } = {}): void {
+function kellyFraction(sig: MomentumSignal, params: RiskParams): number {
+  const p = continuationProb(sig.score);
+  const q = 1 - p;
+  const winPct = params.trailMinLockPct * 100;
+  const lossPct = params.stopPct * 100 + COST_RT_PCT;
+  const b = lossPct > 0 ? winPct / lossPct : 0;
+  if (!(b > 0)) return 0;
+  return clamp((b * p - q) / b, 0, 1);
+}
+
+async function liveSizing(sig: MomentumSignal, params: RiskParams): Promise<LiveSizing> {
+  const minNotional = runtimeNum('hl_momentum_min_notional_usd', LIVE_MIN_NOTIONAL_USD, 4, LIVE_NOTIONAL_USD);
+  const maxNotional = runtimeNum('hl_momentum_max_notional_usd', LIVE_MAX_NOTIONAL_USD, minNotional, 60);
+  const baseNotional = runtimeNum('hl_momentum_base_notional_usd', LIVE_NOTIONAL_USD, minNotional, maxNotional);
+  const kellyOn = runtimeNum('hl_momentum_kelly_enabled', 1, 0, 1) >= 0.5;
+  if (!kellyOn) return { notionalUsd: baseNotional, kellyFraction: 0, equityUsd: null, source: 'fallback' };
+  const eq = await hlAccountValue();
+  if (!eq.ok || eq.degraded || !(eq.data > 0)) {
+    logger.warn({ msg: eq.ok ? 'equity read degraded' : eq.msg }, 'hl-momentum-live: Kelly sizing fallback');
+    return { notionalUsd: baseNotional, kellyFraction: 0, equityUsd: eq.ok ? eq.data : null, source: 'fallback' };
+  }
+  const k = kellyFraction(sig, params);
+  const riskScale = runtimeNum('hl_momentum_kelly_risk_scale', KELLY_RISK_SCALE, 0.0001, 0.01);
+  const riskUsd = eq.data * k * riskScale;
+  const rawNotional = params.stopPct > 0 ? riskUsd / params.stopPct : baseNotional;
+  return {
+    notionalUsd: Math.round(clamp(rawNotional, minNotional, maxNotional) * 100) / 100,
+    kellyFraction: Math.round(k * 10000) / 10000,
+    equityUsd: Math.round(eq.data * 100) / 100,
+    source: 'kelly',
+  };
+}
+
+function appendSizingSignal(signal: string, sizing: LiveSizing): string {
+  return `${signal} [size=${sizing.notionalUsd.toFixed(2)} k=${sizing.kellyFraction.toFixed(3)} eq=${sizing.equityUsd != null ? sizing.equityUsd.toFixed(2) : 'na'} src=${sizing.source}]`;
+}
+
+function recordSignal(sig: MomentumSignal, decision: 'paper' | 'live-open' | 'skip', reason: string, px: { ref?: number | null; signal?: number | null; spreadPct?: number | null; sideDepthUsd?: number | null; sizing?: LiveSizing | null } = {}): void {
   try {
     const pf = portfolioState(sig.side);
     insSignalJournalStmt.run(
@@ -490,6 +542,7 @@ function recordSignal(sig: MomentumSignal, decision: 'paper' | 'live-open' | 'sk
       sig.metrics.fromLast ?? null, sig.metrics.volRatio ?? null,
       px.spreadPct ?? null, px.sideDepthUsd ?? null,
       pf.total, pf.sameSide, sig.signal,
+      px.sizing?.notionalUsd ?? null, px.sizing?.kellyFraction ?? null, px.sizing?.equityUsd ?? null,
     );
   } catch (err) {
     logger.warn({ err: (err as Error).message, coin: sig.coin, decision }, 'hl-momentum: signal journal write failed');
@@ -514,7 +567,7 @@ function preTradeGate(sig: MomentumSignal, params: RiskParams): string | null {
   return null;
 }
 
-async function liveLiquidityCheck(coin: string, side: Side): Promise<{ ok: true; spreadPct: number; sideDepthUsd: number } | { ok: false; reason: string }> {
+async function liveLiquidityCheck(coin: string, side: Side, notionalUsd: number): Promise<{ ok: true; spreadPct: number; sideDepthUsd: number } | { ok: false; reason: string }> {
   try {
     const book = await l2Book(coin);
     const bids = book.levels[0].slice(0, 3).map((l) => ({ px: Number(l.px), sz: Number(l.sz) })).filter((l) => l.px > 0 && l.sz > 0);
@@ -528,7 +581,7 @@ async function liveLiquidityCheck(coin: string, side: Side): Promise<{ ok: true;
     const sideDepthUsd = sideLevels.reduce((s, l) => s + l.px * l.sz, 0);
     if (spreadPct > LIVE_MAX_SPREAD_PCT) return { ok: false, reason: `spread ${spreadPct.toFixed(2)}% > ${LIVE_MAX_SPREAD_PCT}%` };
     if (sideDepthUsd < LIVE_MIN_SIDE_DEPTH_USD) return { ok: false, reason: `top3 depth $${sideDepthUsd.toFixed(0)} < $${LIVE_MIN_SIDE_DEPTH_USD}` };
-    if (LIVE_NOTIONAL_USD / sideDepthUsd > LIVE_MAX_NOTIONAL_TO_DEPTH) return { ok: false, reason: `order/depth ${(LIVE_NOTIONAL_USD / sideDepthUsd * 100).toFixed(1)}% > ${(LIVE_MAX_NOTIONAL_TO_DEPTH * 100).toFixed(0)}%` };
+    if (notionalUsd / sideDepthUsd > LIVE_MAX_NOTIONAL_TO_DEPTH) return { ok: false, reason: `order/depth ${(notionalUsd / sideDepthUsd * 100).toFixed(1)}% > ${(LIVE_MAX_NOTIONAL_TO_DEPTH * 100).toFixed(0)}%` };
     return { ok: true, spreadPct, sideDepthUsd };
   } catch (err) {
     return { ok: false, reason: `book read failed: ${(err as Error).message}` };
@@ -817,26 +870,28 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
   if (!ex.ok) { recordSignal(sig, 'skip', `position read failed: ${ex.msg}`); logger.warn({ coin, msg: ex.msg }, 'hl-momentum-live: position read failed before entry'); return; }
   if (ex.data) { recordSignal(sig, 'skip', 'exchange position already open'); return; } // shared one-way account: never stack on an existing live position
 
-  const liq = await liveLiquidityCheck(coin, sig.side);
+  const sizing = await liveSizing(sig, params);
+  const sizedSig: MomentumSignal = { ...sig, signal: appendSizingSignal(sig.signal, sizing) };
+  const liq = await liveLiquidityCheck(coin, sig.side, sizing.notionalUsd);
   if (!liq.ok) {
-    recordSignal(sig, 'skip', `liquidity: ${liq.reason}`, { ref: last.c, signal: last.c });
-    logger.info({ coin, side: sig.side, reason: liq.reason, signal: sig.signal }, 'hl-momentum-live: signal skipped by liquidity filter');
+    recordSignal(sizedSig, 'skip', `liquidity: ${liq.reason}`, { ref: last.c, signal: last.c, sizing });
+    logger.info({ coin, side: sig.side, reason: liq.reason, notionalUsd: sizing.notionalUsd, signal: sizedSig.signal }, 'hl-momentum-live: signal skipped by liquidity filter');
     return;
   }
 
   liveLock(coin, `momentum-live pending ${sig.side}`);
   const cancelled = await cancelCoinOrders(coin);
-  if (!cancelled) { recordSignal(sig, 'skip', 'cancel resting orders failed', { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd }); liveDelLockStmt.run(coin); return; }
+  if (!cancelled) { recordSignal(sizedSig, 'skip', 'cancel resting orders failed', { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing }); liveDelLockStmt.run(coin); return; }
 
   const lev = await hlSetLeverage(coin, LIVE_LEVERAGE);
-  if (!lev.ok) { recordSignal(sig, 'skip', `leverage failed: ${lev.msg}`, { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd }); liveDelLockStmt.run(coin); logger.warn({ coin, msg: lev.msg }, 'hl-momentum-live: leverage failed'); return; }
-  const qty = LIVE_NOTIONAL_USD / last.c;
+  if (!lev.ok) { recordSignal(sizedSig, 'skip', `leverage failed: ${lev.msg}`, { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing }); liveDelLockStmt.run(coin); logger.warn({ coin, msg: lev.msg }, 'hl-momentum-live: leverage failed'); return; }
+  const qty = sizing.notionalUsd / last.c;
   const order = await hlMarketOrder({ coin, side: sig.side, qty });
-  if (!order.ok) { recordSignal(sig, 'skip', `entry failed: ${order.msg}`, { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd }); liveDelLockStmt.run(coin); logger.error({ coin, side: sig.side, msg: order.msg }, 'hl-momentum-live: entry failed'); return; }
+  if (!order.ok) { recordSignal(sizedSig, 'skip', `entry failed: ${order.msg}`, { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing }); liveDelLockStmt.run(coin); logger.error({ coin, side: sig.side, msg: order.msg, notionalUsd: sizing.notionalUsd }, 'hl-momentum-live: entry failed'); return; }
 
   const pos = await hlFetchPosition(coin);
   if (!pos.ok || !pos.data || pos.data.side !== sig.side) {
-    recordSignal(sig, 'skip', 'entry not confirmed', { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd });
+    recordSignal(sizedSig, 'skip', 'entry not confirmed', { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing });
     logger.error({ coin, side: sig.side, pos: pos.ok ? pos.data : pos.msg }, 'hl-momentum-live: entry not confirmed');
     liveDelLockStmt.run(coin);
     return;
@@ -846,13 +901,13 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
   const stop = stopPx(sig.side, pos.data.entryPx, params);
   const st = await hlPlaceStop({ coin, posSide: sig.side, qty: pos.data.size, triggerPx: stop });
   if (!st.ok) logger.error({ coin, msg: st.msg }, 'hl-momentum-live: exchange stop failed - poll is backup');
-  liveOpenTxn(coin, sig.side, pos.data.entryPx, pos.data.size, openedAt, sig.signal);
+  liveOpenTxn(coin, sig.side, pos.data.entryPx, pos.data.size, openedAt, sizedSig.signal);
   liveLock(coin, `momentum-live ${sig.side}`);
-  recordSignal(sig, 'live-open', 'opened', { ref: last.c, signal: pos.data.entryPx, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd });
-  logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, stop, exStop: st.ok, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, score: sig.score, expectedPnl: sig.expectedPnl, params, signal: sig.signal }, 'hl-momentum-live: OPENED real position');
+  recordSignal(sizedSig, 'live-open', 'opened', { ref: last.c, signal: pos.data.entryPx, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing });
+  logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, notionalUsd: sizing.notionalUsd, kellyFraction: sizing.kellyFraction, equityUsd: sizing.equityUsd, stop, exStop: st.ok, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, score: sig.score, expectedPnl: sig.expectedPnl, params, signal: sizedSig.signal }, 'hl-momentum-live: OPENED real position');
   void sendMessage({
     channel: 'logs',
-    text: `🧭 <b>momentum-live OPENED</b>: ${coin} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} (${pctNum(params.stopPct)}%) ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trail after ${pctNum(params.trailActivatePct)}%, откат ${pctNum(params.trailGivebackPct)}%, lock ${pctNum(params.trailMinLockPct)}% · R:R ≥ 1:${MIN_RISK_REWARD}\n~$${LIVE_NOTIONAL_USD} · liq: spread ${liq.spreadPct.toFixed(2)}%, top3 $${liq.sideDepthUsd.toFixed(0)} · ${sig.signal}`,
+    text: `🧭 <b>momentum-live OPENED</b>: ${coin} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} (${pctNum(params.stopPct)}%) ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trail after ${pctNum(params.trailActivatePct)}%, откат ${pctNum(params.trailGivebackPct)}%, lock ${pctNum(params.trailMinLockPct)}% · R:R ≥ 1:${MIN_RISK_REWARD}\n~$${sizing.notionalUsd.toFixed(2)} Kelly · k=${sizing.kellyFraction.toFixed(3)} · liq: spread ${liq.spreadPct.toFixed(2)}%, top3 $${liq.sideDepthUsd.toFixed(0)} · ${sizedSig.signal}`,
   });
 }
 
@@ -912,7 +967,7 @@ function liveReportText(rows: LogRow[], open: Pos[]): string {
   for (const r of rows) mix.set(r.close_reason ?? 'unknown', (mix.get(r.close_reason ?? 'unknown') ?? 0) + 1);
   return [
     `🧭 <b>HL Momentum LIVE</b>`,
-    `Статус: реальные деньги, all-market scan → liquidity-filtered live, ~$${LIVE_NOTIONAL_USD}, 1x`,
+    `Статус: реальные деньги, all-market scan → score/EV/Kelly sizing → liquidity-filtered live, ~$${LIVE_MIN_NOTIONAL_USD}-${LIVE_MAX_NOTIONAL_USD}, 1x`,
     `Последние ${closed}: ${fmtPct(sum)} · WR ${closed ? ((wins / closed) * 100).toFixed(0) : '0'}% · открыто ${open.length}`,
     `Выходы: ${[...mix.entries()].map(([k, n]) => `${k} ${n}`).join(', ') || 'нет'}`,
     `<i>Монета блокируется для wick-fade на время momentum-позиции, чтобы стратегии не конфликтовали.</i>`,
@@ -1015,5 +1070,5 @@ export function startHlMomentumShadowJob(): void {
   setTimeout(() => { void fastRadarTick(); }, 10_000).unref();
   const t = setTimeout(() => { void tick(); }, 75_000);
   t.unref();
-  logger.info({ live: LIVE_ENABLED, liveNotional: LIVE_NOTIONAL_USD, liveLeverage: LIVE_LEVERAGE, liveMaxOpen: LIVE_MAX_OPEN, fastMidsPollMs: FAST_MIDS_POLL_MS }, 'hl-momentum scheduled (2s allMids radar + 1m check, 5m candle signal, all-market shadow + filtered live micro)');
+  logger.info({ live: LIVE_ENABLED, liveNotionalMin: LIVE_MIN_NOTIONAL_USD, liveNotionalMax: LIVE_MAX_NOTIONAL_USD, liveLeverage: LIVE_LEVERAGE, liveMaxOpen: LIVE_MAX_OPEN, fastMidsPollMs: FAST_MIDS_POLL_MS }, 'hl-momentum scheduled (2s allMids radar + score/EV/Kelly sizing + filtered live micro)');
 }
