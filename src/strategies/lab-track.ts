@@ -37,6 +37,47 @@ const momClosedStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_log
 const momOpenStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_pos ORDER BY opened_at DESC`);
 const limitVolClosesStmt = db.prepare<[string, number], { t: number; c: number }>(`SELECT t, c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
 const runtimeConfigStmt = db.prepare<[string], { value: string }>(`SELECT value FROM runtime_config WHERE key = ?`);
+const momUniverseStmt = db.prepare<[number], { coins: number; fresh: number | null; newest: number | null }>(`
+  SELECT COUNT(*) AS coins,
+         SUM(CASE WHEN newest_t >= ? THEN 1 ELSE 0 END) AS fresh,
+         MAX(newest_t) AS newest
+    FROM (
+      SELECT coin, COUNT(*) AS n, MAX(t) AS newest_t
+        FROM hl_candles
+       GROUP BY coin
+      HAVING n >= 70
+    )
+`);
+const momSignalStatsStmt = db.prepare<[number], {
+  total: number; live_open: number | null; skipped: number | null; paper: number | null;
+  avg_score: number | null; avg_ev: number | null; avg_prob: number | null; avg_prob_conf: number | null;
+  avg_kelly_conf: number | null; avg_spread: number | null; avg_depth: number | null; avg_notional: number | null;
+}>(`
+  SELECT COUNT(*) AS total,
+         SUM(CASE WHEN decision = 'live-open' THEN 1 ELSE 0 END) AS live_open,
+         SUM(CASE WHEN decision = 'skip' THEN 1 ELSE 0 END) AS skipped,
+         SUM(CASE WHEN decision = 'paper' THEN 1 ELSE 0 END) AS paper,
+         AVG(score) AS avg_score,
+         AVG(expected_pnl) AS avg_ev,
+         AVG(calibrated_prob) AS avg_prob,
+         AVG(prob_confidence) AS avg_prob_conf,
+         AVG(kelly_confidence) AS avg_kelly_conf,
+         AVG(spread_pct) AS avg_spread,
+         AVG(side_depth_usd) AS avg_depth,
+         AVG(notional_usd) AS avg_notional
+    FROM hl_momentum_signal_journal
+   WHERE ts >= ?
+`);
+const momSessionPnlStmt = db.prepare<[number], { closed: number; pct: number | null; usd: number | null }>(`
+  SELECT COUNT(*) AS closed,
+         SUM(pnl_pct) AS pct,
+         SUM((pnl_pct / 100.0) * qty * entry_px) AS usd
+    FROM hl_momentum_live_log
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL AND closed_at >= ?
+`);
+const momEngineOpenStmt = db.prepare<[], { open: number; notional: number | null }>(`
+  SELECT COUNT(*) AS open, SUM(qty * entry_px) AS notional FROM hl_momentum_live_pos
+`);
 const MOMENTUM_PUBLIC_START_FALLBACK_MS = Date.UTC(2026, 6, 8, 18, 14, 0);
 
 // ── formatters (self-contained; matches lab.ts style) ──
@@ -80,6 +121,16 @@ function momentumPublicStartMs(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : MOMENTUM_PUBLIC_START_FALLBACK_MS;
 }
 
+function runtimeNum(key: string, fallback: number): number {
+  const raw = Number(runtimeConfigStmt.get(key)?.value ?? fallback);
+  return Number.isFinite(raw) ? raw : fallback;
+}
+
+function todayStartUtcMs(nowMs = Date.now()): number {
+  const d = new Date(nowMs);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
 function momentumPublicStartText(lang: Lang): string {
   const d = new Date(momentumPublicStartMs());
   const hh = String(d.getUTCHours()).padStart(2, '0');
@@ -89,6 +140,13 @@ function momentumPublicStartText(lang: Lang): string {
   return lang === 'en'
     ? `${monthsEn[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}, ${hh}:${mm} UTC`
     : `${d.getUTCDate()} ${monthsRu[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${hh}:${mm} UTC`;
+}
+
+function ageText(ms: number | null, lang: Lang): string {
+  if (ms == null) return '—';
+  const mins = Math.max(0, Math.round((Date.now() - ms) / 60_000));
+  if (mins < 60) return `${mins}${t(lang, 'м назад', 'm ago')}`;
+  return `${Math.floor(mins / 60)}${t(lang, 'ч ', 'h ')}${mins % 60}${t(lang, 'м назад', 'm ago')}`;
 }
 
 type LimitVol = { volPct4h: number; factor: number; ageMs: number | null };
@@ -236,6 +294,23 @@ const TRACK_CSS = `
   .lt-stat .v.pos{color:var(--accent)}.lt-stat .v.neg{color:var(--danger)}
   .lt-stat .s{font-size:12px;color:var(--text-dim);margin-top:3px}
   .lt-stat .s.pos{color:var(--accent)}.lt-stat .s.neg{color:var(--danger)}
+  .ops-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 14px}
+  @media(max-width:900px){.ops-grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:560px){.ops-grid{grid-template-columns:1fr}}
+  .ops-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px 15px}
+  .ops-card .k{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-faint)}
+  .ops-card .v{font-size:21px;font-weight:650;line-height:1.15;margin-top:6px;font-variant-numeric:tabular-nums;color:var(--text)}
+  .ops-card .v.pos{color:var(--accent)}.ops-card .v.neg{color:var(--danger)}
+  .ops-card .s{font-size:12px;color:var(--text-dim);line-height:1.45;margin-top:5px}
+  .ops-table{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .ops-row{display:grid;grid-template-columns:190px 1fr;gap:16px;padding:12px 14px;border-bottom:1px solid var(--border)}
+  .ops-row:last-child{border-bottom:none}
+  .ops-row .k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);font-weight:650}
+  .ops-row .v{font-size:13px;color:var(--text-dim);line-height:1.5}
+  .ops-row .v b{color:var(--text)}
+  .ops-tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .ops-tag{display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:999px;padding:3px 8px;font-size:11px;color:var(--text-dim);background:rgba(255,255,255,.02)}
+  @media(max-width:640px){.ops-row{grid-template-columns:1fr;gap:5px}}
   .eq-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px 14px 10px}
   .eq-svg{width:100%;height:180px;display:block}
   .eq-cap{display:flex;justify-content:space-between;font-size:12px;color:var(--text-faint);margin-top:6px;font-variant-numeric:tabular-nums}
@@ -566,6 +641,67 @@ function momentumDailyStrip(rows: MomRow[], lang: Lang): string {
   return `<div class="section"><div class="section-title">${t(lang, 'Momentum по дням', 'Momentum by day')}</div><div class="lt-days">${chips}</div></div>`;
 }
 
+function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
+  const publicStart = momentumPublicStartMs();
+  const universe = momUniverseStmt.get(Date.now() - 25 * 60_000) ?? { coins: 0, fresh: 0, newest: null };
+  const sig = momSignalStatsStmt.get(publicStart) ?? {
+    total: 0, live_open: 0, skipped: 0, paper: 0,
+    avg_score: null, avg_ev: null, avg_prob: null, avg_prob_conf: null,
+    avg_kelly_conf: null, avg_spread: null, avg_depth: null, avg_notional: null,
+  };
+  const sessionStart = runtimeNum('hl_momentum_live_day_reset_ms', todayStartUtcMs());
+  const session = momSessionPnlStmt.get(sessionStart) ?? { closed: 0, pct: 0, usd: 0 };
+  const engineOpen = momEngineOpenStmt.get() ?? { open: 0, notional: 0 };
+  const minNotional = runtimeNum('hl_momentum_min_notional_usd', 11);
+  const maxNotional = runtimeNum('hl_momentum_max_notional_usd', 24);
+  const minProb = runtimeNum('hl_momentum_min_calibrated_prob', 0.49);
+  const minScore = runtimeNum('hl_momentum_min_live_score', 68);
+  const minEv = runtimeNum('hl_momentum_min_expected_pnl_pct', 0.10);
+  const stopUsd = runtimeNum('hl_momentum_live_daily_stop_usd', -20);
+  const usedUsd = session.usd ?? 0;
+  const stopLeft = Math.max(0, Math.abs(stopUsd) - Math.max(0, -usedUsd));
+  const kellyOn = runtimeNum('hl_momentum_kelly_enabled', 1) >= 0.5;
+  const metric = (k: string, v: string, s: string, clsName = ''): string =>
+    `<div class="ops-card"><div class="k">${k}</div><div class="v ${clsName}">${v}</div><div class="s">${s}</div></div>`;
+
+  return `<div class="section">
+    <div class="section-title">${t(lang, 'Боевые метрики системы', 'Live system metrics')}</div>
+    <div class="ops-grid">
+      ${metric(t(lang, 'Рынок', 'Market'), `${universe.fresh ?? 0} / ${universe.coins}`, t(lang, `свежих монет из архива · свечи обновлены ${ageText(universe.newest, lang)}`, `fresh coins from archive · candles updated ${ageText(universe.newest, lang)}`))}
+      ${metric(t(lang, 'Радар', 'Radar'), '2s', t(lang, 'allMids по всему рынку + 5m подтверждающий слой раз в минуту', 'allMids across the market + 5m confirmation layer every minute'))}
+      ${metric(t(lang, 'Сигналы', 'Signals'), String(sig.total), t(lang, `${sig.skipped ?? 0} отфильтрованы защитой · ${sig.live_open ?? 0} новых live-входов`, `${sig.skipped ?? 0} filtered by protection · ${sig.live_open ?? 0} new live entries`))}
+      ${metric(t(lang, 'Позиции', 'Positions'), `${liveOpenPublic} / 4`, t(lang, `${engineOpen.open} сейчас под управлением движка · публичный трек показывает новые после reset`, `${engineOpen.open} currently managed by engine · public track shows new ones after reset`))}
+      ${metric(t(lang, 'Качество входа', 'Entry quality'), `score ≥ ${minScore}`, t(lang, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · средний score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · avg score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`))}
+      ${metric(t(lang, 'Kelly размер', 'Kelly sizing'), `$${minNotional.toFixed(0)}–${maxNotional.toFixed(0)}`, t(lang, `${kellyOn ? 'включён' : 'выключен'} · средний размер сигнала ${sig.avg_notional != null ? usd(sig.avg_notional) : '—'}`, `${kellyOn ? 'enabled' : 'disabled'} · avg signal size ${sig.avg_notional != null ? usd(sig.avg_notional) : '—'}`))}
+      ${metric(t(lang, 'Dollar-stop', 'Dollar stop'), usd(stopUsd, true), t(lang, `сессия ${usd(usedUsd, true)} · до стопа ${usd(stopLeft)}`, `session ${usd(usedUsd, true)} · to stop ${usd(stopLeft)}`), usedUsd < 0 ? 'neg' : '')}
+      ${metric(t(lang, 'Ликвидность', 'Liquidity'), '≤0.35%', t(lang, `макс. спред · top3 стакан ≥ $150 · ордер ≤10% глубины`, `max spread · top3 book ≥ $150 · order ≤10% of depth`))}
+    </div>
+    <div class="ops-table">
+      <div class="ops-row">
+        <div class="k">${t(lang, 'Что считаем всплеском', 'Impulse definition')}</div>
+        <div class="v">${t(lang,
+          'Быстрый слой смотрит сдвиги <b>r30/r90</b> за 30/90 секунд и движение от последней 5m-свечи. Подтверждающий слой смотрит <b>r3</b> за 3 свечи, <b>r12</b> за час, объём, закрытие у нужного края диапазона и не слишком позднее расширение.',
+          'The fast layer watches <b>r30/r90</b> moves over 30/90 seconds and movement from the last 5m close. The confirmation layer watches <b>r3</b> over 3 candles, <b>r12</b> over one hour, volume, close near the correct range edge, and avoids late extension.'
+        )}<div class="ops-tags"><span class="ops-tag">r30 / r90</span><span class="ops-tag">from 5m close</span><span class="ops-tag">r3 / r12</span><span class="ops-tag">volume ratio</span><span class="ops-tag">close edge</span></div></div>
+      </div>
+      <div class="ops-row">
+        <div class="k">${t(lang, 'Фильтры входа', 'Entry filters')}</div>
+        <div class="v">${t(lang,
+          'Перед live-входом проверяем, что монета свободна, wick-fade её не держит, нет перегруза по одной стороне, нет кластерного импульса, стакан достаточно глубокий, а calibrated probability и EV проходят порог.',
+          'Before a live entry we check that the coin is free, wick-fade does not hold it, same-side exposure is not crowded, there is no impulse cluster, the book is deep enough, and calibrated probability plus EV pass the gate.'
+        )}<div class="ops-tags"><span class="ops-tag">free coin</span><span class="ops-tag">no wick-fade conflict</span><span class="ops-tag">portfolio crowding</span><span class="ops-tag">regime breadth</span><span class="ops-tag">spread/depth</span></div></div>
+      </div>
+      <div class="ops-row">
+        <div class="k">${t(lang, 'Риск и выход', 'Risk and exit')}</div>
+        <div class="v">${t(lang,
+          'Стоп строится от волатильности монеты в bounded-коридоре примерно <b>1.5–1.8%</b>. Трейлинг включается только после движения с расчётным R:R не хуже 1:2, откат для fast-менеджера узкий, а если импульс быстро не подтвердился, включается momentum-decay.',
+          'The stop is derived from coin volatility inside a bounded <b>1.5–1.8%</b> range. Trailing only activates after a move with designed R:R at least 1:2, fast giveback is tight, and if impulse does not confirm quickly, momentum-decay can exit.'
+        )}<div class="ops-tags"><span class="ops-tag">exchange stop</span><span class="ops-tag">dynamic trail</span><span class="ops-tag">R:R ≥ 1:2</span><span class="ops-tag">momentum-decay</span><span class="ops-tag">session dollar-stop</span></div></div>
+      </div>
+    </div>
+  </div>`;
+}
+
 function momentumStrategyDetail(lang: Lang): string {
   return `<div class="section">
     <div class="section-title">${t(lang, 'Как устроена Momentum Follow', 'How Momentum Follow works')}</div>
@@ -635,6 +771,7 @@ export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
 
     ${live.cum.length >= 2 ? `<div class="section"><div class="section-title">${t(lang, 'Live-кривая результата', 'Live result curve')}</div>${equityCurve(live.cum, lang)}</div>` : ''}
     ${momentumDailyStrip(liveClosed, lang)}
+    ${momentumOpsMetrics(liveOpen.length, lang)}
     ${momentumStrategyDetail(lang)}
 
     <div class="section">
