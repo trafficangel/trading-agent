@@ -31,6 +31,10 @@ type MomRow = {
   id: number; coin: string; side: string; entry_px: number; qty: number; opened_at: number; signal: string;
   exit_px: number | null; closed_at: number | null; pnl_pct: number | null; close_reason: string | null;
 };
+type MomLearnRow = {
+  id: number; closed_at: number; pnl_pct: number; signal: string;
+  predicted_prob: number | null; predicted_ev: number | null;
+};
 const closedStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode='live' AND closed_at IS NOT NULL ORDER BY closed_at ASC`);
 const openStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode='live' AND closed_at IS NULL ORDER BY opened_at DESC`);
 const momClosedStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_log WHERE closed_at IS NOT NULL ORDER BY closed_at ASC`);
@@ -78,6 +82,25 @@ const momSessionPnlStmt = db.prepare<[number], { closed: number; pct: number | n
 const momEngineOpenStmt = db.prepare<[], { open: number; notional: number | null }>(`
   SELECT COUNT(*) AS open, SUM(qty * entry_px) AS notional FROM hl_momentum_live_pos
 `);
+const momLearningStmt = db.prepare<[], MomLearnRow>(`
+  SELECT l.id,
+         l.closed_at,
+         l.pnl_pct,
+         l.signal,
+         (SELECT j.calibrated_prob
+            FROM hl_momentum_signal_journal j
+           WHERE j.decision = 'live-open' AND j.signal = l.signal
+           ORDER BY j.ts DESC
+           LIMIT 1) AS predicted_prob,
+         (SELECT j.expected_pnl
+            FROM hl_momentum_signal_journal j
+           WHERE j.decision = 'live-open' AND j.signal = l.signal
+           ORDER BY j.ts DESC
+           LIMIT 1) AS predicted_ev
+    FROM hl_momentum_live_log l
+   WHERE l.closed_at IS NOT NULL AND l.pnl_pct IS NOT NULL
+   ORDER BY l.closed_at ASC
+`);
 const MOMENTUM_PUBLIC_START_FALLBACK_MS = Date.UTC(2026, 6, 8, 18, 14, 0);
 
 // ── formatters (self-contained; matches lab.ts style) ──
@@ -124,6 +147,18 @@ function momentumPublicStartMs(): number {
 function runtimeNum(key: string, fallback: number): number {
   const raw = Number(runtimeConfigStmt.get(key)?.value ?? fallback);
   return Number.isFinite(raw) ? raw : fallback;
+}
+
+function parseMomSignalProb(signal: string): number | null {
+  const m = signal.match(/\[score=[^\]]*\sp=([-+]?\d+(?:\.\d+)?)/);
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseMomSignalEv(signal: string): number | null {
+  const m = signal.match(/\[score=[^\]]*\sev=([-+]?\d+(?:\.\d+)?)/);
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) ? n : null;
 }
 
 function todayStartUtcMs(nowMs = Date.now()): number {
@@ -311,6 +346,15 @@ const TRACK_CSS = `
   .ops-tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
   .ops-tag{display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:999px;padding:3px 8px;font-size:11px;color:var(--text-dim);background:rgba(255,255,255,.02)}
   @media(max-width:640px){.ops-row{grid-template-columns:1fr;gap:5px}}
+  .learn-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px}
+  .learn-svg{width:100%;height:280px;display:block}
+  .learn-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:10px}
+  .learn-note{font-size:12px;color:var(--text-faint);line-height:1.45}
+  .learn-legend{display:flex;gap:8px;flex-wrap:wrap}
+  .learn-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:4px 9px;font-size:11px;color:var(--text-dim)}
+  .learn-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .learn-cap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--text-faint);font-variant-numeric:tabular-nums;margin-top:8px}
+  .learn-empty{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:18px;color:var(--text-dim);font-size:13px;line-height:1.5}
   .eq-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px 14px 10px}
   .eq-svg{width:100%;height:180px;display:block}
   .eq-cap{display:flex;justify-content:space-between;font-size:12px;color:var(--text-faint);margin-top:6px;font-variant-numeric:tabular-nums}
@@ -711,6 +755,131 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
   </div>`;
 }
 
+type LearningPoint = {
+  id: number;
+  closedAt: number;
+  predProb: number;
+  predEv: number;
+  actualWin: number;
+  actualPnl: number;
+};
+
+function avgNum(xs: number[]): number {
+  return xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0;
+}
+
+function momentumLearningPoints(): LearningPoint[] {
+  return momLearningStmt.all()
+    .map((r) => {
+      const predProb = r.predicted_prob ?? parseMomSignalProb(r.signal);
+      const predEv = r.predicted_ev ?? parseMomSignalEv(r.signal);
+      if (!(predProb != null && predEv != null && Number.isFinite(predProb) && Number.isFinite(predEv))) return null;
+      return {
+        id: r.id,
+        closedAt: r.closed_at,
+        predProb,
+        predEv,
+        actualWin: r.pnl_pct > 0 ? 1 : 0,
+        actualPnl: r.pnl_pct,
+      };
+    })
+    .filter((p): p is LearningPoint => p != null);
+}
+
+function pathFor(points: number[], x: (i: number) => number, y: (v: number) => number): string {
+  if (points.length === 0) return '';
+  if (points.length === 1) {
+    const xx = x(0).toFixed(1);
+    const yy = y(points[0]!).toFixed(1);
+    return `M${xx},${yy} L${xx},${yy}`;
+  }
+  return points.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+}
+
+function momentumLearningChart(lang: Lang): string {
+  const points = momentumLearningPoints();
+  if (points.length < 2) {
+    return `<div class="section">
+      <div class="section-title">${t(lang, 'Кривые обучения', 'Learning curves')}</div>
+      <div class="learn-empty">${t(lang, 'Для графика нужно хотя бы две закрытые live-сделки с сохранённым прогнозом. Doctor уже пишет прогнозы и будет обновлять калибровку после новых закрытий.', 'The chart needs at least two closed live trades with saved forecasts. Doctor is already storing forecasts and will update calibration after new closes.')}</div>
+    </div>`;
+  }
+
+  const window = Math.min(20, Math.max(4, Math.round(Math.sqrt(points.length) * 2)));
+  const predWr: number[] = [];
+  const actualWr: number[] = [];
+  const predEv: number[] = [];
+  const actualPnl: number[] = [];
+  for (let i = 0; i < points.length; i += 1) {
+    const slice = points.slice(Math.max(0, i - window + 1), i + 1);
+    predWr.push(avgNum(slice.map((p) => p.predProb * 100)));
+    actualWr.push(avgNum(slice.map((p) => p.actualWin * 100)));
+    predEv.push(avgNum(slice.map((p) => p.predEv)));
+    actualPnl.push(avgNum(slice.map((p) => p.actualPnl)));
+  }
+
+  const W = 680;
+  const H = 280;
+  const padX = 28;
+  const topT = 26;
+  const topH = 92;
+  const botT = 158;
+  const botH = 92;
+  const n = points.length;
+  const innerW = W - padX * 2;
+  const x = (i: number): number => padX + (i / Math.max(1, n - 1)) * innerW;
+  const yWr = (v: number): number => topT + (1 - (v / 100)) * topH;
+  const evLo = Math.min(-0.75, 0, ...predEv, ...actualPnl);
+  const evHi = Math.max(0.75, 0, ...predEv, ...actualPnl);
+  const evSpan = evHi - evLo || 1;
+  const yEv = (v: number): number => botT + (1 - (v - evLo) / evSpan) * botH;
+  const last = points.at(-1)!;
+  const lastPredWr = predWr.at(-1)!;
+  const lastActualWr = actualWr.at(-1)!;
+  const lastPredEv = predEv.at(-1)!;
+  const lastActualPnl = actualPnl.at(-1)!;
+  const probBias = runtimeNum('hl_momentum_prob_bias', 0);
+  const evBias = runtimeNum('hl_momentum_ev_bias_pct', 0);
+  const lastLabel = `#${last.id} · ${fmtDt(last.closedAt)}`;
+
+  return `<div class="section">
+    <div class="learn-head">
+      <div>
+        <div class="section-title" style="margin:0">${t(lang, 'Кривые обучения: прогноз → факт', 'Learning curves: forecast → reality')}</div>
+        <div class="learn-note">${t(lang, `скользящее окно ${window} сделок · Doctor проверяет новые закрытия каждую минуту`, `rolling ${window}-trade window · Doctor checks new closes every minute`)}</div>
+      </div>
+      <div class="learn-legend">
+        <span class="learn-chip"><span class="learn-dot" style="background:var(--accent)"></span>${t(lang, 'факт', 'actual')}</span>
+        <span class="learn-chip"><span class="learn-dot" style="background:#8aa0ff"></span>${t(lang, 'прогноз', 'forecast')}</span>
+        <span class="learn-chip"><span class="learn-dot" style="background:var(--danger)"></span>${t(lang, 'bias', 'bias')}</span>
+      </div>
+    </div>
+    <div class="learn-wrap">
+      <svg class="learn-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${t(lang, 'Кривые обучения Momentum', 'Momentum learning curves')}">
+        <line x1="${padX}" y1="${yWr(50).toFixed(1)}" x2="${W - padX}" y2="${yWr(50).toFixed(1)}" stroke="var(--border)" stroke-dasharray="4,5"/>
+        <line x1="${padX}" y1="${yWr(0).toFixed(1)}" x2="${W - padX}" y2="${yWr(0).toFixed(1)}" stroke="var(--border)" opacity=".65"/>
+        <line x1="${padX}" y1="${yWr(100).toFixed(1)}" x2="${W - padX}" y2="${yWr(100).toFixed(1)}" stroke="var(--border)" opacity=".65"/>
+        <text x="${padX}" y="15" fill="var(--text-faint)" font-size="11">${t(lang, 'Win-rate: прогноз vs факт', 'Win-rate: forecast vs actual')}</text>
+        <text x="${W - padX}" y="15" text-anchor="end" fill="var(--text-dim)" font-size="11">${lastActualWr.toFixed(0)}% / ${lastPredWr.toFixed(0)}%</text>
+        <path d="${pathFor(predWr, x, yWr)}" fill="none" stroke="#8aa0ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5,5"/>
+        <path d="${pathFor(actualWr, x, yWr)}" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+
+        <line x1="${padX}" y1="${yEv(0).toFixed(1)}" x2="${W - padX}" y2="${yEv(0).toFixed(1)}" stroke="var(--border)" stroke-dasharray="4,5"/>
+        <line x1="${padX}" y1="${botT}" x2="${W - padX}" y2="${botT}" stroke="var(--border)" opacity=".65"/>
+        <line x1="${padX}" y1="${botT + botH}" x2="${W - padX}" y2="${botT + botH}" stroke="var(--border)" opacity=".65"/>
+        <text x="${padX}" y="${botT - 10}" fill="var(--text-faint)" font-size="11">${t(lang, 'EV/PnL на сделку: прогноз vs факт', 'EV/PnL per trade: forecast vs actual')}</text>
+        <text x="${W - padX}" y="${botT - 10}" text-anchor="end" fill="var(--text-dim)" font-size="11">${pct(lastActualPnl)} / ${pct(lastPredEv)}</text>
+        <path d="${pathFor(predEv, x, yEv)}" fill="none" stroke="#8aa0ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5,5"/>
+        <path d="${pathFor(actualPnl, x, yEv)}" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="learn-cap">
+        <span>${t(lang, 'последняя точка', 'last point')}: ${lastLabel}</span>
+        <span>${t(lang, 'текущая поправка', 'current correction')}: p ${probBias >= 0 ? '+' : ''}${(probBias * 100).toFixed(1)}pp · EV ${pct(evBias)}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
 function momentumStrategyDetail(lang: Lang): string {
   return `<div class="section">
     <div class="section-title">${t(lang, 'Как устроена Momentum Follow', 'How Momentum Follow works')}</div>
@@ -737,7 +906,7 @@ function momentumStrategyDetail(lang: Lang): string {
           <li>${t(lang, 'Одна монета не может одновременно управляться двумя live-механиками.', 'One coin cannot be managed by two live mechanics at the same time.')}</li>
           <li>${t(lang, 'При входе Momentum монета блокируется для wick-fade, а его лимитки по этой монете снимаются.', 'When Momentum enters, the coin is locked away from wick-fade and its resting limits on that coin are pulled.')}</li>
           <li>${t(lang, 'Биржевой стоп ставится сразу после подтверждения позиции; кодовый poll остаётся резервной защитой.', 'An exchange stop is placed immediately after position confirmation; the code poll remains backup protection.')}</li>
-          <li>${t(lang, 'Momentum Doctor регулярно пересчитывает контрфакты по закрытым live-сделкам и может менять только ограниченные параметры риска после достаточной выборки.', 'Momentum Doctor regularly recomputes counterfactuals on closed live trades and can only tune bounded risk parameters after enough sample size.')}</li>
+          <li>${t(lang, 'Momentum Doctor каждую минуту проверяет новые закрытые live-сделки, сравнивает прогноз с фактом и осторожно двигает только ограниченные bias-поправки.', 'Momentum Doctor checks new closed live trades every minute, compares forecast with reality and carefully moves only bounded bias corrections.')}</li>
         </ul>
       </div>
     </div>
@@ -781,6 +950,7 @@ export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
     ${live.cum.length >= 2 ? `<div class="section"><div class="section-title">${t(lang, 'Live-кривая результата', 'Live result curve')}</div>${equityCurve(live.cum, lang)}</div>` : ''}
     ${momentumDailyStrip(liveClosed, lang)}
     ${momentumOpsMetrics(liveOpen.length, lang)}
+    ${momentumLearningChart(lang)}
     ${momentumStrategyDetail(lang)}
 
     <div class="section">

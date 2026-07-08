@@ -303,6 +303,9 @@ function runOnlineCalibration(nowMs: number): string[] {
 
   const n = rows.length;
   if (n === 0) return ['• нет закрытых сделок с сохранённым прогнозом'];
+  const latestClosedId = Math.max(...rows.map((r) => r.id));
+  const lastCalibratedRaw = getKvStmt.get('hl_momentum_calibration_last_closed_id')?.value;
+  const lastCalibratedId = Number(lastCalibratedRaw ?? 0);
 
   const actualWr = avg(rows.map((r) => r.pnl_pct > 0 ? 1 : 0));
   const avgPredProb = avg(rows.map((r) => r.predictedProb));
@@ -339,8 +342,17 @@ function runOnlineCalibration(nowMs: number): string[] {
     lines.push(`• режим: выключен, только измеряем ошибку`);
     return lines;
   }
+  if (lastCalibratedRaw == null && (Math.abs(currentProbBias) > 0.0001 || Math.abs(currentEvBias) > 0.0001)) {
+    setKvStmt.run('hl_momentum_calibration_last_closed_id', String(latestClosedId), nowMs, 'hl momentum online calibration last closed trade bootstrap');
+    lines.push(`• bias уже был применён ранее; привязали состояние к live #${latestClosedId}`);
+    return lines;
+  }
   if (n < ONLINE_CALIBRATION_MIN_SAMPLE) {
     lines.push(`• ждём ${ONLINE_CALIBRATION_MIN_SAMPLE} сделок, bias пока не меняем`);
+    return lines;
+  }
+  if (latestClosedId <= lastCalibratedId) {
+    lines.push(`• bias уже учтён до live #${lastCalibratedId}, ждём новую закрытую сделку`);
     return lines;
   }
 
@@ -350,6 +362,7 @@ function runOnlineCalibration(nowMs: number): string[] {
   if (Math.abs(nextEvBias - currentEvBias) > 0.0001) {
     setKvStmt.run('hl_momentum_ev_bias_pct', nextEvBias.toFixed(4), nowMs, 'hl momentum online calibration EV bias');
   }
+  setKvStmt.run('hl_momentum_calibration_last_closed_id', String(latestClosedId), nowMs, 'hl momentum online calibration last closed trade');
   lines.push(`• bias: p ${currentProbBias.toFixed(3)} → ${nextProbBias.toFixed(3)} · EV ${fmtPct(currentEvBias)} → ${fmtPct(nextEvBias)}`);
   return lines;
 }
@@ -450,6 +463,9 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
 }
 
 export function startHlMomentumDoctorJob(): void {
+  cron.schedule('* * * * *', () => {
+    void runHlMomentumDoctor({ notify: false }).catch((err) => logger.error({ err }, 'hl-momentum doctor online calibration tick failed'));
+  });
   cron.schedule('37 */4 * * *', () => {
     void runHlMomentumDoctor().catch((err) => logger.error({ err }, 'hl-momentum doctor tick failed'));
   });
@@ -457,5 +473,5 @@ export function startHlMomentumDoctorJob(): void {
     void runHlMomentumDoctor().catch((err) => logger.error({ err }, 'hl-momentum doctor startup failed'));
   }, 180_000);
   t.unref();
-  logger.info('hl-momentum doctor cron started (every 4h)');
+  logger.info('hl-momentum doctor cron started (online calibration every 1m, report every 4h)');
 }
