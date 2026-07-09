@@ -31,6 +31,18 @@ type CalibrationRow = {
 type GovernorRow = { side: Side; pnl_pct: number; signal: string; closed_at: number };
 type GovernorSignalWindow = { total: number; live_open: number | null; paper: number | null; skipped: number | null };
 type GovernorStats = { n: number; avg: number; wr: number; sum: number };
+type RejectedSignalRow = {
+  id: number;
+  ts: number;
+  coin: string;
+  side: Side;
+  layer: string;
+  reason: string;
+  ref_px: number | null;
+  signal_px: number | null;
+  signal: string;
+};
+type RejectSimOut = SimOut & { exitPx: number; closedAt: number; mfe: number; mae: number; horizonMin: number };
 
 const REPORT_KEY = 'hl_momentum_doctor_last_report_id';
 const COST_RT_PCT = 0.07;
@@ -54,6 +66,9 @@ const ONLINE_EV_BIAS_MAX = 0.50;
 const ONLINE_EV_BIAS_MAX_STEP = 0.20;
 const GOVERNOR_SHADOW_RECENT_N = 120;
 const GOVERNOR_SIGNAL_WINDOW_MS = 6 * 60 * 60_000;
+const REJECTED_EVAL_MIN_AGE_MS = 35 * 60_000;
+const REJECTED_EVAL_DEFAULT_HORIZON_MIN = 70;
+const REJECTED_EVAL_LIMIT = 180;
 
 const closedStmt = db.prepare<[number], TradeRow>(`
   SELECT id, coin, side, entry_px, signal, pnl_pct, close_reason, opened_at, closed_at
@@ -71,6 +86,11 @@ const preCandlesStmt = db.prepare<[string, number, number], CandleRow>(`
 `);
 const afterCandlesStmt = db.prepare<[string, number, number], CandleRow>(`
   SELECT t, h, l, c, v FROM hl_candles
+   WHERE coin = ? AND t > ? AND t <= ?
+   ORDER BY t ASC
+`);
+const afterMinuteCandlesStmt = db.prepare<[string, number, number], CandleRow>(`
+  SELECT t, h, l, c, v FROM hl_candles_1m
    WHERE coin = ? AND t > ? AND t <= ?
    ORDER BY t ASC
 `);
@@ -149,6 +169,36 @@ const liveOpenCountStmt = db.prepare<[], { n: number; long_n: number | null; sho
          SUM(CASE WHEN side = 'short' THEN 1 ELSE 0 END) AS short_n
     FROM hl_momentum_live_pos
 `);
+const pendingRejectedSignalsStmt = db.prepare<[number, number], RejectedSignalRow>(`
+  SELECT id, ts, coin, side, layer, reason, ref_px, signal_px, signal
+    FROM hl_momentum_signal_journal
+   WHERE decision = 'skip'
+     AND counterfactual_closed_at IS NULL
+     AND ts <= ?
+     AND (signal_px IS NOT NULL OR ref_px IS NOT NULL)
+   ORDER BY ts ASC
+   LIMIT ?
+`);
+const updateRejectedOutcomeStmt = db.prepare<[number, number, number, string, number, number, number, number], void>(`
+  UPDATE hl_momentum_signal_journal
+     SET counterfactual_exit_px = ?,
+         counterfactual_closed_at = ?,
+         counterfactual_pnl_pct = ?,
+         counterfactual_reason = ?,
+         counterfactual_mfe_pct = ?,
+         counterfactual_mae_pct = ?,
+         counterfactual_horizon_min = ?
+   WHERE id = ?
+`);
+const rejectedGovernorRowsStmt = db.prepare<[number], GovernorRow>(`
+  SELECT side, counterfactual_pnl_pct AS pnl_pct, signal, counterfactual_closed_at AS closed_at
+    FROM hl_momentum_signal_journal
+   WHERE decision = 'skip'
+     AND counterfactual_pnl_pct IS NOT NULL
+     AND counterfactual_closed_at IS NOT NULL
+   ORDER BY counterfactual_closed_at DESC
+   LIMIT ?
+`);
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -191,6 +241,13 @@ function preCandles(coin: string, t: number, n = 70): CandleRow[] {
 
 function afterCandles(coin: string, t: number, horizonMin = 90): CandleRow[] {
   return afterCandlesStmt.all(coin, t, t + horizonMin * 60_000);
+}
+
+function afterCounterfactualCandles(coin: string, t: number, horizonMin: number): CandleRow[] {
+  const end = t + horizonMin * 60_000;
+  const one = afterMinuteCandlesStmt.all(coin, t, end);
+  if (one.length >= 2) return one;
+  return afterCandlesStmt.all(coin, t, end);
 }
 
 function avg(xs: number[]): number {
@@ -314,6 +371,123 @@ function parseSignalEv(signal: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function parseRiskSignal(signal: string): { stopPct: number; trailActivatePct: number; trailGivebackPct: number; trailMinLockPct: number } {
+  const m = signal.match(/\[risk stop=([\d.]+) act=([\d.]+) gb=([\d.]+) lock=([\d.]+)/);
+  if (!m) return { stopPct: 0.015, trailActivatePct: 0.0327, trailGivebackPct: 0.002, trailMinLockPct: 0.0307 };
+  const nums = m.slice(1, 5).map((v) => Number(v) / 100);
+  if (nums.some((n) => !Number.isFinite(n) || n <= 0)) return { stopPct: 0.015, trailActivatePct: 0.0327, trailGivebackPct: 0.002, trailMinLockPct: 0.0307 };
+  return {
+    stopPct: nums[0]!,
+    trailActivatePct: nums[1]!,
+    trailGivebackPct: nums[2]!,
+    trailMinLockPct: nums[3]!,
+  };
+}
+
+function simulateRejectedSignal(row: RejectedSignalRow, nowMs: number): RejectSimOut | null {
+  const entry = row.signal_px ?? row.ref_px;
+  if (!(entry != null && entry > 0 && Number.isFinite(entry))) return null;
+  const horizonMin = Math.round(clamp(runtimeNum('hl_momentum_reject_eval_horizon_min', REJECTED_EVAL_DEFAULT_HORIZON_MIN), 35, 120));
+  const bars = afterCounterfactualCandles(row.coin, row.ts, horizonMin);
+  if (bars.length === 0) return null;
+
+  const risk = parseRiskSignal(row.signal);
+  let best = entry;
+  let worst = entry;
+  let active = false;
+  let mfe = 0;
+  let mae = 0;
+
+  for (const c of bars) {
+    if (row.side === 'long') {
+      best = Math.max(best, c.h);
+      worst = Math.min(worst, c.l);
+      mfe = Math.max(mfe, pct(entry, best));
+      mae = Math.min(mae, pct(entry, worst));
+    } else {
+      best = Math.min(best, c.l);
+      worst = Math.max(worst, c.h);
+      mfe = Math.max(mfe, pct(best, entry));
+      mae = Math.min(mae, pct(worst, entry));
+    }
+
+    const move = row.side === 'long' ? (best - entry) / entry : (entry - best) / entry;
+    const currentMove = row.side === 'long' ? (c.c - entry) / entry : (entry - c.c) / entry;
+    if (move >= risk.trailActivatePct) active = true;
+
+    const stop = row.side === 'long' ? entry * (1 - risk.stopPct) : entry * (1 + risk.stopPct);
+    const trail = row.side === 'long'
+      ? Math.max(entry * (1 + risk.trailMinLockPct), best * (1 - risk.trailGivebackPct))
+      : Math.min(entry * (1 - risk.trailMinLockPct), best * (1 + risk.trailGivebackPct));
+    const stopHit = row.side === 'long' ? c.l <= stop : c.h >= stop;
+    const trailHit = active ? (row.side === 'long' ? c.l <= trail : c.h >= trail) : false;
+    const decayed = c.t - row.ts >= DECAY_EXIT_MS && move < risk.stopPct * DECAY_MIN_MFE_R && currentMove <= -risk.stopPct * DECAY_LOSS_R;
+    const timed = c.t - row.ts >= (active ? TRAIL_HOLD_MS : HOLD_MS);
+
+    if (stopHit || trailHit || decayed || timed) {
+      const exitPx = stopHit ? stop : trailHit ? trail : c.c;
+      return {
+        exitPx,
+        closedAt: c.t,
+        pnl: Math.round(pnlPct(row.side, entry, exitPx) * 1000) / 1000,
+        reason: stopHit ? 'stop' : trailHit ? 'trail' : decayed ? 'decay' : 'time',
+        mfe: Math.round(mfe * 1000) / 1000,
+        mae: Math.round(mae * 1000) / 1000,
+        horizonMin,
+      };
+    }
+  }
+
+  const last = bars.at(-1);
+  if (!last || nowMs < row.ts + horizonMin * 60_000) return null;
+  return {
+    exitPx: last.c,
+    closedAt: last.t,
+    pnl: Math.round(pnlPct(row.side, entry, last.c) * 1000) / 1000,
+    reason: 'end',
+    mfe: Math.round(mfe * 1000) / 1000,
+    mae: Math.round(mae * 1000) / 1000,
+    horizonMin,
+  };
+}
+
+function runRejectedSignalLearning(nowMs: number): string[] {
+  if (!runtimeBool('hl_momentum_rejected_learning_enabled', true)) {
+    setKvStmt.run('hl_momentum_rejected_learning_state', 'off', nowMs, 'hl momentum rejected learning disabled');
+    return ['• SKIP learning выключен'];
+  }
+
+  const limit = Math.round(clamp(runtimeNum('hl_momentum_reject_eval_limit', REJECTED_EVAL_LIMIT), 20, 500));
+  const pending = pendingRejectedSignalsStmt.all(nowMs - REJECTED_EVAL_MIN_AGE_MS, limit);
+  let resolved = 0;
+  for (const row of pending) {
+    const sim = simulateRejectedSignal(row, nowMs);
+    if (!sim) continue;
+    updateRejectedOutcomeStmt.run(sim.exitPx, sim.closedAt, sim.pnl, sim.reason, sim.mfe, sim.mae, sim.horizonMin, row.id);
+    resolved += 1;
+  }
+
+  const recentN = Math.round(clamp(runtimeNum('hl_momentum_rejected_recent_n', 120), 30, 300));
+  const rows = rejectedGovernorRowsStmt.all(recentN);
+  const st = statsOf(rows);
+  setKvStmt.run('hl_momentum_rejected_sample_n', String(st.n), nowMs, 'hl momentum rejected counterfactual sample');
+  setKvStmt.run('hl_momentum_rejected_avg_pct', st.avg.toFixed(4), nowMs, 'hl momentum rejected counterfactual avg');
+  setKvStmt.run('hl_momentum_rejected_wr', st.wr.toFixed(4), nowMs, 'hl momentum rejected counterfactual win-rate');
+  setKvStmt.run('hl_momentum_rejected_last_ms', String(nowMs), nowMs, 'hl momentum rejected counterfactual timestamp');
+
+  const verdict = st.n < 20
+    ? 'мало данных'
+    : st.avg > 0.05
+      ? 'фильтр, возможно, слишком строгий'
+      : st.avg < -0.05
+        ? 'фильтр спасает от минуса'
+        : 'фильтр около нейтрали';
+  return [
+    `• resolved ${resolved}/${pending.length} pending SKIP · recent ${st.n}: ${fmtPct(st.avg)} · WR ${(st.wr * 100).toFixed(0)}%`,
+    `• вывод: ${verdict}`,
+  ];
+}
+
 function parseSignalLayer(signal: string): string {
   const m = signal.match(/\[score=[^\]]*\slayer=([^\]\s]+)/);
   if (m?.[1]) return m[1];
@@ -426,11 +600,13 @@ function runActivityGovernor(nowMs: number): string[] {
 
   const shadowN = Math.round(clamp(runtimeNum('hl_momentum_governor_shadow_n', GOVERNOR_SHADOW_RECENT_N), 40, 300));
   const shadowRows = shadowGovernorRowsStmt.all(shadowN);
+  const rejectedRows = rejectedGovernorRowsStmt.all(Math.round(clamp(runtimeNum('hl_momentum_rejected_recent_n', 120), 30, 300)));
   const liveRows = liveGovernorRowsStmt.all(20);
   const signalWindow = signalWindowStmt.get(nowMs - GOVERNOR_SIGNAL_WINDOW_MS) ?? { total: 0, live_open: 0, paper: 0, skipped: 0 };
   const open = liveOpenCountStmt.get() ?? { n: 0, long_n: 0, short_n: 0 };
 
   const shadow = statsOf(shadowRows);
+  const rejected = statsOf(rejectedRows);
   const confirm = statsOf(shadowRows.filter((r) => layerFromSignal(r.signal) === 'confirm'));
   const fast = statsOf(shadowRows.filter((r) => layerFromSignal(r.signal) === 'fast'));
   const confirmLong = statsOf(shadowRows.filter((r) => r.side === 'long' && layerFromSignal(r.signal) === 'confirm'));
@@ -443,12 +619,14 @@ function runActivityGovernor(nowMs: number): string[] {
   const confirmHot = confirm.n >= 20 && confirm.avg >= 0.10 && confirm.wr >= 0.52;
   const noLiveButSignals = (signalWindow.live_open ?? 0) === 0 && (signalWindow.paper ?? 0) >= 20;
   const fastGood = fast.n >= 20 && fast.avg >= 0.05 && fast.wr >= 0.48;
+  const rejectedMissedEdge = rejected.n >= 25 && rejected.avg >= 0.08 && rejected.wr >= 0.52;
+  const rejectedSavedLoss = rejected.n >= 25 && rejected.avg <= -0.08 && rejected.wr <= 0.45;
 
   let state: 'defensive' | 'probe' | 'normal' | 'hot';
-  if (liveBad || (!confirmGood && shadowBad)) state = 'defensive';
+  if (liveBad || (rejectedSavedLoss && !confirmGood) || (!confirmGood && shadowBad)) state = 'defensive';
   else if (confirmHot && !shadowBad && live.n >= 5 && live.avg > 0 && live.wr >= 0.50) state = 'hot';
   else if (confirmGood && !shadowBad && !noLiveButSignals) state = 'normal';
-  else if (confirmGood || noLiveButSignals) state = 'probe';
+  else if (confirmGood || noLiveButSignals || rejectedMissedEdge) state = 'probe';
   else state = 'defensive';
 
   const cfg = state === 'defensive'
@@ -469,6 +647,8 @@ function runActivityGovernor(nowMs: number): string[] {
   setGovernorKv('hl_momentum_governor_fast_wr', fast.wr.toFixed(4), nowMs, reason);
   setGovernorKv('hl_momentum_governor_live_avg_pct', live.avg.toFixed(4), nowMs, reason);
   setGovernorKv('hl_momentum_governor_live_wr', live.wr.toFixed(4), nowMs, reason);
+  setGovernorKv('hl_momentum_governor_rejected_avg_pct', rejected.avg.toFixed(4), nowMs, reason);
+  setGovernorKv('hl_momentum_governor_rejected_wr', rejected.wr.toFixed(4), nowMs, reason);
   setGovernorKv('hl_momentum_governor_last_ms', nowMs, nowMs, reason);
 
   setGovernorKv('hl_momentum_min_calibrated_prob', cfg.minP.toFixed(3), nowMs, reason);
@@ -482,6 +662,7 @@ function runActivityGovernor(nowMs: number): string[] {
   return [
     `• state <b>${state}</b>: p≥${cfg.minP.toFixed(3)} · EV≥${cfg.minEv.toFixed(2)}% · maxOpen ${cfg.maxOpen} · sameSide ${cfg.maxSame} · ir≤${cfg.ir.toFixed(2)} · fast ${cfg.fastLive ? 'on' : 'off'}`,
     `• shadow ${shadow.n}: ${fmtPct(shadow.avg)} · WR ${(shadow.wr * 100).toFixed(0)}%; confirm ${confirm.n}: ${fmtPct(confirm.avg)} · WR ${(confirm.wr * 100).toFixed(0)}%; fast ${fast.n}: ${fmtPct(fast.avg)} · WR ${(fast.wr * 100).toFixed(0)}%`,
+    `• rejected/SKIP ${rejected.n}: ${fmtPct(rejected.avg)} · WR ${(rejected.wr * 100).toFixed(0)}%${rejectedMissedEdge ? ' · missed edge' : rejectedSavedLoss ? ' · saved loss' : ''}`,
     `• live ${live.n}: ${fmtPct(live.avg)} · WR ${(live.wr * 100).toFixed(0)}%; open ${open.n} (${open.long_n ?? 0}L/${open.short_n ?? 0}S); best confirm side ${bestSide}`,
   ];
 }
@@ -513,6 +694,7 @@ function probabilityBuckets(): string[] {
 
 export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: boolean; nowMs?: number } = {}): Promise<{ sent: boolean; closed: number; pnl: number }> {
   const nowMs = opts.nowMs ?? Date.now();
+  const rejectedLearningLines = runRejectedSignalLearning(nowMs);
   const governorLines = runActivityGovernor(nowMs);
   const rows = closedStmt.all(160).reverse();
   const maxId = maxClosedIdStmt.get()?.id ?? 0;
@@ -563,6 +745,9 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
     ``,
     `<b>Online calibration: прогноз → факт</b>`,
     ...onlineCalibrationLines.map(esc),
+    ``,
+    `<b>SKIP learning: отклонённые сигналы → факт</b>`,
+    ...rejectedLearningLines.map(esc),
     ``,
     `<b>Activity governor: дыхание системы</b>`,
     ...governorLines.map(esc),

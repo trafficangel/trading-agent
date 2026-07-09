@@ -38,6 +38,8 @@ type MomSignalRow = {
   open_total: number; open_same_side: number; signal: string;
   notional_usd: number | null; kelly_fraction: number | null; equity_usd: number | null;
   model_prob: number | null; calibrated_prob: number | null; prob_confidence: number | null; kelly_confidence: number | null;
+  counterfactual_exit_px: number | null; counterfactual_closed_at: number | null; counterfactual_pnl_pct: number | null;
+  counterfactual_reason: string | null; counterfactual_mfe_pct: number | null; counterfactual_mae_pct: number | null; counterfactual_horizon_min: number | null;
 };
 type MomTrailCandle = { t: number; h: number; l: number; c: number };
 type MomRisk = { stopPct: number; trailActivatePct: number; trailGivebackPct: number; trailMinLockPct: number; volPct: number };
@@ -132,7 +134,9 @@ const momSignalJournalStmt = db.prepare<[number], MomSignalRow>(`
          ref_px, signal_px, r30, r90, r3, r12, from_last, vol_ratio,
          spread_pct, side_depth_usd, open_total, open_same_side, signal,
          notional_usd, kelly_fraction, equity_usd,
-         model_prob, calibrated_prob, prob_confidence, kelly_confidence
+         model_prob, calibrated_prob, prob_confidence, kelly_confidence,
+         counterfactual_exit_px, counterfactual_closed_at, counterfactual_pnl_pct,
+         counterfactual_reason, counterfactual_mfe_pct, counterfactual_mae_pct, counterfactual_horizon_min
     FROM hl_momentum_signal_journal
    ORDER BY ts DESC, id DESC
    LIMIT ?
@@ -471,7 +475,7 @@ const TRACK_CSS = `
   .signal-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:10px}
   .section-hint{font-size:12px;color:var(--text-faint);line-height:1.45;margin-top:4px}
   .sig-wrap{max-height:560px;overflow:auto}
-  .sig-table{min-width:1900px;font-size:11.5px}
+  .sig-table{min-width:2050px;font-size:11.5px}
   .sig-table th{position:sticky;top:0;background:var(--bg-card);z-index:1;padding:7px 8px;font-size:10px}
   .sig-table td{padding:7px 8px;white-space:nowrap}
   .sig-table .mono{font-size:11px}
@@ -842,6 +846,10 @@ function momentumSignalJournal(lang: Lang): string {
     const kelly = r.notional_usd != null || r.kelly_fraction != null
       ? `${r.notional_usd != null ? usd(r.notional_usd) : '—'} / ${r.kelly_fraction != null ? r.kelly_fraction.toFixed(3) : '—'}`
       : '—';
+    const cf = r.counterfactual_pnl_pct;
+    const cfText = cf == null
+      ? '—'
+      : `${pct(cf)}${r.counterfactual_reason ? ` · ${r.counterfactual_reason}` : ''}`;
     return `<tr>
       <td class="dt">${fmtDt(r.ts).slice(5)}</td>
       <td><b>${esc(r.coin)}</b></td>
@@ -849,6 +857,9 @@ function momentumSignalJournal(lang: Lang): string {
       <td><span class="layer-badge">${esc(r.layer)}</span></td>
       <td><span class="decision ${decisionCls(r.decision)}">${decisionLabel(r.decision, lang)}</span></td>
       <td class="sig-reason" title="${esc(r.reason)}">${esc(shortReason(r.reason))}</td>
+      <td class="r mono ${cf == null ? '' : cls(cf)}" title="${esc(r.counterfactual_reason ?? '')}${r.counterfactual_horizon_min != null ? ` · ${r.counterfactual_horizon_min}m` : ''}">${esc(cfText)}</td>
+      <td class="r mono">${r.counterfactual_mfe_pct != null ? pct(r.counterfactual_mfe_pct) : '—'}</td>
+      <td class="r mono">${r.counterfactual_mae_pct != null ? pct(r.counterfactual_mae_pct) : '—'}</td>
       <td class="r mono">${px != null ? fmtPx(px, px) : '—'}</td>
       <td class="r mono">${r.score.toFixed(0)}</td>
       <td class="r mono ${p != null && p >= 0.49 ? 'pos' : p != null ? 'neg' : ''}">${p != null ? p.toFixed(3) : '—'}</td>
@@ -885,6 +896,7 @@ function momentumSignalJournal(lang: Lang): string {
   </div>
   <div class="card table-wrap sig-wrap"><table class="lt-tbl sig-table"><thead><tr>
     <th>UTC</th><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Стор.', 'Side')}</th><th>${t(lang, 'Слой', 'Layer')}</th><th>${t(lang, 'Реш.', 'Decision')}</th><th>${t(lang, 'Причина', 'Reason')}</th>
+    <th class="r">CF</th><th class="r">MFE</th><th class="r">MAE</th>
     <th class="r">Px</th><th class="r">Score</th><th class="r">p</th><th class="r">EV</th>
     <th class="r">r30</th><th class="r">r90</th><th class="r">r3</th><th class="r">r12</th><th class="r">h1</th><th class="r">from</th>
     <th class="r">IR</th><th class="r">Volx</th><th class="r">Edge</th><th class="r">ImpThr</th><th class="r">TrThr</th>
@@ -947,6 +959,9 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
   const governorShadowAvg = runtimeNum('hl_momentum_governor_shadow_avg_pct', 0);
   const governorConfirmAvg = runtimeNum('hl_momentum_governor_confirm_avg_pct', 0);
   const governorLiveAvg = runtimeNum('hl_momentum_governor_live_avg_pct', 0);
+  const rejectedN = runtimeNum('hl_momentum_rejected_sample_n', 0);
+  const rejectedAvg = runtimeNum('hl_momentum_rejected_avg_pct', 0);
+  const rejectedWr = runtimeNum('hl_momentum_rejected_wr', 0);
   const maxSameSide = runtimeNum('hl_momentum_max_same_side', 2);
   const proof = momShadowProofStmt.get(shadowProofN) ?? { n: 0, avg_pnl: null, sum_pnl: null, wr: null, fast_n: null, fast_avg: null, confirm_n: null, confirm_avg: null };
   const usedUsd = session.usd ?? 0;
@@ -964,6 +979,7 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
       ${metric(t(lang, 'Позиции', 'Positions'), `${liveOpenPublic} / ${maxOpen}`, t(lang, `${engineOpen.open} сейчас под управлением движка · публичный трек показывает новые после reset`, `${engineOpen.open} currently managed by engine · public track shows new ones after reset`))}
       ${metric(t(lang, 'Качество входа', 'Entry quality'), `score ≥ ${minScore}`, t(lang, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · средний score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · avg score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`))}
       ${metric(t(lang, 'Онлайн-калибровка', 'Online calibration'), `p ${probBias >= 0 ? '+' : ''}${(probBias * 100).toFixed(1)}pp · EV ${pct(evBias)}`, t(lang, `${calN.toFixed(0)} сделок · факт WR ${(calActualWr * 100).toFixed(0)}% vs прогноз ${(calPredWr * 100).toFixed(0)}% · PnL ${pct(calActualPnl)} vs EV ${pct(calPredEv)}`, `${calN.toFixed(0)} trades · actual WR ${(calActualWr * 100).toFixed(0)}% vs predicted ${(calPredWr * 100).toFixed(0)}% · PnL ${pct(calActualPnl)} vs EV ${pct(calPredEv)}`), evBias < 0 || probBias < 0 ? 'neg' : '')}
+      ${metric(t(lang, 'SKIP learning', 'SKIP learning'), rejectedN ? pct(rejectedAvg) : '—', t(lang, `${rejectedN.toFixed(0)} отклонённых оценены · WR ${(rejectedWr * 100).toFixed(0)}% · ${rejectedAvg > 0 ? 'могли упустить плюс' : rejectedAvg < 0 ? 'фильтр спасал от минуса' : 'нейтрально'}`, `${rejectedN.toFixed(0)} rejected evaluated · WR ${(rejectedWr * 100).toFixed(0)}% · ${rejectedAvg > 0 ? 'may have missed upside' : rejectedAvg < 0 ? 'filter saved losses' : 'neutral'}`), rejectedAvg > 0 ? 'neg' : rejectedAvg < 0 ? 'pos' : '')}
       ${metric(t(lang, 'Governor режим', 'Governor mode'), governorState, t(lang, `shadow ${pct(governorShadowAvg)} · confirm ${pct(governorConfirmAvg)} · live ${pct(governorLiveAvg)} · same side ≤ ${maxSameSide.toFixed(0)}`, `shadow ${pct(governorShadowAvg)} · confirm ${pct(governorConfirmAvg)} · live ${pct(governorLiveAvg)} · same side ≤ ${maxSameSide.toFixed(0)}`), governorState === 'defensive' ? 'neg' : governorState === 'hot' ? 'pos' : '')}
       ${metric(t(lang, 'Shadow-proof gate', 'Shadow-proof gate'), shadowProofEnabled ? (fastLiveEnabled ? t(lang, 'fast активен', 'fast active') : t(lang, 'fast на паузе', 'fast paused')) : t(lang, 'выключен', 'off'), t(lang, `recent ${proof.n} shadow: ${proof.avg_pnl != null ? pct(proof.avg_pnl) : '—'} · WR ${proof.wr != null ? (proof.wr * 100).toFixed(0) : '—'}% · confirm ir ≤ ${confirmMaxIr.toFixed(2)}`, `recent ${proof.n} shadow: ${proof.avg_pnl != null ? pct(proof.avg_pnl) : '—'} · WR ${proof.wr != null ? (proof.wr * 100).toFixed(0) : '—'}% · confirm ir ≤ ${confirmMaxIr.toFixed(2)}`), proof.avg_pnl != null && proof.avg_pnl < 0 ? 'neg' : '')}
       ${metric(t(lang, 'Kelly размер', 'Kelly sizing'), `$${minNotional.toFixed(0)}–${maxNotional.toFixed(0)}`, t(lang, `${kellyOn ? 'включён' : 'выключен'} · средний размер сигнала ${sig.avg_notional != null ? usd(sig.avg_notional) : '—'}`, `${kellyOn ? 'enabled' : 'disabled'} · avg signal size ${sig.avg_notional != null ? usd(sig.avg_notional) : '—'}`))}
