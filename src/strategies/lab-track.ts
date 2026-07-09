@@ -1,6 +1,6 @@
 /**
  * Lab public tracks. The old wick-fade live track is retained only as historical
- * audit code; /lab/live redirects to the active Momentum Follow page.
+ * audit code; /lab/live redirects to the active Impulse Fade page.
  */
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
@@ -640,53 +640,6 @@ function openPositionsSection(nowMs: number, lang: Lang): string {
       <tbody>${body}</tbody></table></div></div>`;
 }
 
-function momentumLiveSection(nowMs: number, lang: Lang): string {
-  const closed = momentumPublicRows(momClosedStmt.all());
-  const open = momentumPublicRows(momOpenStmt.all());
-  const pnls = closed.map((r) => r.pnl_pct ?? 0);
-  const net = pnls.reduce((s, p) => s + p, 0);
-  const wins = pnls.filter((p) => p > 0).length;
-  const losses = pnls.filter((p) => p < 0).length;
-  const netUsd = closed.reduce((s, r) => s + momUsdOf(r), 0);
-  const wr = wins + losses > 0 ? `${((wins / (wins + losses)) * 100).toFixed(0)}%` : '—';
-  const openRows = open.map((r) => `<tr>
-    <td><b>${esc(r.coin)}</b></td>
-    <td><span class="sd ${r.side === 'long' ? 'long' : 'short'}">${r.side.toUpperCase()}</span></td>
-    <td class="r mono">${r.entry_px}</td>
-    <td class="r">${usd(momNotionalOf(r))}</td>
-    <td class="dt">${heldStr(r.opened_at, nowMs, lang)}</td>
-  </tr>`).join('');
-  const recent = closed.slice().reverse().slice(0, 12).map((r) => {
-    const p = r.pnl_pct ?? 0;
-    return `<tr>
-      <td>#${r.id}</td>
-      <td><b>${esc(r.coin)}</b></td>
-      <td><span class="sd ${r.side === 'long' ? 'long' : 'short'}">${r.side.toUpperCase()}</span></td>
-      <td class="r mono">${r.entry_px}</td>
-      <td class="r mono">${r.exit_px ?? '—'}</td>
-      <td class="r mono ${cls(p)}">${pct(p)}</td>
-      <td class="r ${cls(momUsdOf(r))}">${usd(momUsdOf(r), true)}</td>
-      <td><span class="rp">${esc(r.close_reason ?? '—')}</span></td>
-      <td class="dt">${fmtDt(r.opened_at)}</td>
-    </tr>`;
-  }).join('');
-
-  return `<div class="section" id="momentum-live">
-    <div class="section-title">${t(lang, 'Вторая live-механика: Momentum Follow', 'Second live mechanic: Momentum Follow')}</div>
-    <p class="sd-lead">${t(lang,
-      'Это противоположность основной wick-fade стратегии. Если wick-fade ловит возврат после шипа, то Momentum Follow входит <b>по направлению импульса</b>, когда движение подтверждено объёмом и удержанием цены. Размер выбирается консервативным Kelly внутри micro-коридора, 1x, с биржевым стопом; монета временно блокируется для wick-fade, чтобы стратегии не конфликтовали.',
-      'This is the opposite of the main wick-fade strategy. If wick-fade catches snap-back after a spike, Momentum Follow enters <b>with the impulse</b> when the move is confirmed by volume and price holding. Size is selected by conservative Kelly inside a micro range, 1x, with an exchange stop; the coin is temporarily locked away from wick-fade so the strategies cannot fight each other.')}</p>
-    <div class="lt-cards">
-      <div class="lt-stat"><div class="l">${t(lang, 'Статус', 'Status')}</div><div class="v">${t(lang, 'REAL · малый размер', 'REAL · small size')}</div><div class="s">${t(lang, 'проверяем на деньгах', 'testing with real money')}</div></div>
-      <div class="lt-stat"><div class="l">${t(lang, 'Закрытых', 'Closed')}</div><div class="v">${closed.length}</div><div class="s">${open.length} ${t(lang, 'открыто', 'open')}</div></div>
-      <div class="lt-stat"><div class="l">${t(lang, 'Результат', 'Result')}</div><div class="v ${cls(net)}">${pct(net)}</div><div class="s ${cls(netUsd)}">${usd(netUsd, true)}</div></div>
-      <div class="lt-stat"><div class="l">${t(lang, 'WR', 'WR')}</div><div class="v">${wr}</div><div class="s">${wins}W / ${losses}L</div></div>
-    </div>
-    ${open.length ? `<div class="section-subtitle">${t(lang, 'Momentum открыто сейчас', 'Momentum open now')}</div><div class="card table-wrap"><table class="lt-tbl"><thead><tr><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th><th class="r">${t(lang, 'Размер', 'Size')}</th><th>${t(lang, 'В работе', 'Held')}</th></tr></thead><tbody>${openRows}</tbody></table></div>` : ''}
-    ${closed.length ? `<div class="section-subtitle">${t(lang, 'Momentum закрытые сделки', 'Momentum closed trades')}</div><div class="card table-wrap"><table class="lt-tbl"><thead><tr><th>#</th><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th><th class="r">${t(lang, 'Выход', 'Exit')}</th><th class="r">${t(lang, 'Результат', 'Result')}</th><th class="r">P&amp;L $</th><th>${t(lang, 'Как закрыли', 'Exit')}</th><th>${t(lang, 'Открыта (UTC)', 'Opened (UTC)')}</th></tr></thead><tbody>${recent}</tbody></table></div>` : ''}
-  </div>`;
-}
-
 function momentumLinkSection(lang: Lang): string {
   const liveClosed = momentumPublicRows(momClosedStmt.all());
   const liveOpen = momentumPublicRows(momOpenStmt.all());
@@ -694,9 +647,9 @@ function momentumLinkSection(lang: Lang): string {
   return `<div class="section">
     <a class="mom-link" href="/lab/momentum">
       <div>
-        <span class="mom-link-badge">${t(lang, 'MOMENTUM V2 · НОВЫЙ ОТСЧЁТ', 'MOMENTUM V2 · NEW TRACK')}</span>
-        <div class="mom-link-title">Momentum Follow</div>
-        <div class="mom-link-sub">${t(lang, 'Адаптивный 2s-радар по импульсам: описание, live-статистика и сделки →', 'Adaptive 2s impulse radar: description, live stats and trades →')}</div>
+        <span class="mom-link-badge">${t(lang, 'IMPULSE FADE · НОВЫЙ ОТСЧЁТ', 'IMPULSE FADE · NEW TRACK')}</span>
+        <div class="mom-link-title">Impulse Fade</div>
+        <div class="mom-link-sub">${t(lang, 'Адаптивный 2s-радар: fade поздних импульсов, live-статистика и сделки →', 'Adaptive 2s radar: fading late impulses, live stats and trades →')}</div>
       </div>
       <div class="mom-link-stats">
         <span><b class="${cls(net)}">${pct(net)}</b><small>${t(lang, 'live', 'live')}</small></span>
@@ -974,7 +927,7 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
     <div class="section-title">${t(lang, 'Боевые метрики системы', 'Live system metrics')}</div>
     <div class="ops-grid">
       ${metric(t(lang, 'Рынок', 'Market'), `${universe.ready ?? 0} / ${universe.coins}`, t(lang, `1m готово после прогрева · свежих ${universe.fresh ?? 0} · обновлено ${ageText(universe.newest, lang)}`, `1m ready after warmup · fresh ${universe.fresh ?? 0} · updated ${ageText(universe.newest, lang)}`))}
-      ${metric(t(lang, 'Радар', 'Radar'), '2s / 1m', t(lang, 'allMids по всему рынку + 1m подтверждающий слой; 5m объём остаётся как fallback', 'allMids across the market + 1m confirmation layer; 5m volume remains as fallback'))}
+      ${metric(t(lang, 'Радар', 'Radar'), '2s / 1m', t(lang, 'allMids по всему рынку + 1m слой поиска поздних всплесков; 5m объём остаётся как fallback', 'allMids across the market + 1m late-burst layer; 5m volume remains as fallback'))}
       ${metric(t(lang, 'Сигналы', 'Signals'), String(sig.total), t(lang, `${sig.skipped ?? 0} отфильтрованы защитой · ${sig.live_open ?? 0} новых live-входов`, `${sig.skipped ?? 0} filtered by protection · ${sig.live_open ?? 0} new live entries`))}
       ${metric(t(lang, 'Позиции', 'Positions'), `${liveOpenPublic} / ${maxOpen}`, t(lang, `${engineOpen.open} сейчас под управлением движка · публичный трек показывает новые после reset`, `${engineOpen.open} currently managed by engine · public track shows new ones after reset`))}
       ${metric(t(lang, 'Качество входа', 'Entry quality'), `score ≥ ${minScore}`, t(lang, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · средний score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · avg score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`))}
@@ -988,24 +941,24 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
     </div>
     <div class="ops-table">
       <div class="ops-row">
-        <div class="k">${t(lang, 'Что считаем всплеском', 'Impulse definition')}</div>
+        <div class="k">${t(lang, 'Что считаем fade-сетапом', 'Fade setup')}</div>
         <div class="v">${t(lang,
-          'Быстрый слой смотрит сдвиги <b>r30/r90</b> за 30/90 секунд и движение от последней 1m-свечи. Подтверждающий слой смотрит <b>r3</b> за 3 минуты, <b>r12m</b> за 12 минут, <b>h1</b> как часовой контекст, объём, закрытие у нужного края диапазона и не слишком позднее расширение.',
-          'The fast layer watches <b>r30/r90</b> moves over 30/90 seconds and movement from the last 1m close. The confirmation layer watches <b>r3</b> over 3 minutes, <b>r12m</b> over 12 minutes, <b>h1</b> as one-hour context, volume, close near the correct range edge, and avoids late extension.'
+          'Быстрый слой смотрит сдвиги <b>r30/r90</b> за 30/90 секунд и движение от последней 1m-свечи. Подтверждающий слой ищет поздний всплеск: <b>r3</b> за 3 минуты, <b>r12m</b> за 12 минут, <b>h1</b> как контекст, объём и закрытие у края диапазона. Торговая сторона затем переворачивается: up-impulse → short fade, down-impulse → long fade.',
+          'The fast layer watches <b>r30/r90</b> moves over 30/90 seconds and movement from the last 1m close. The confirmation layer looks for a late burst: <b>r3</b> over 3 minutes, <b>r12m</b> over 12 minutes, <b>h1</b> as context, volume, and close near the range edge. The trade side is then inverted: up-impulse → short fade, down-impulse → long fade.'
         )}<div class="ops-tags"><span class="ops-tag">r30 / r90</span><span class="ops-tag">from 1m close</span><span class="ops-tag">r3m / r12m / h1</span><span class="ops-tag">volume ratio</span><span class="ops-tag">close edge</span></div></div>
       </div>
       <div class="ops-row">
         <div class="k">${t(lang, 'Фильтры входа', 'Entry filters')}</div>
         <div class="v">${t(lang,
-          'Перед live-входом проверяем, что монета свободна, wick-fade её не держит, нет перегруза по одной стороне, нет кластерного импульса, стакан достаточно глубокий, а calibrated probability и EV проходят порог.',
-          'Before a live entry we check that the coin is free, wick-fade does not hold it, same-side exposure is not crowded, there is no impulse cluster, the book is deep enough, and calibrated probability plus EV pass the gate.'
-        )} ${t(lang, 'Activity governor каждую минуту переводит систему между defensive/probe/normal/hot: если сделок нет, но shadow зелёный — ослабляет вход; если live или shadow красные — зажимает maxOpen, сторону, p/EV и ir; если прогнозы и факт сходятся выше 50/50 — расширяет.', 'The activity governor moves the system between defensive/probe/normal/hot every minute: if there are no trades but shadow is green, it loosens; if live or shadow are red, it tightens maxOpen, side exposure, p/EV and ir; if forecasts and reality converge above 50/50, it expands.')}<div class="ops-tags"><span class="ops-tag">free coin</span><span class="ops-tag">shadow-proof</span><span class="ops-tag">governor</span><span class="ops-tag">confirm ir gate</span><span class="ops-tag">spread/depth</span></div></div>
+          'Перед live-входом проверяем, что монета свободна, wick-fade её не держит, нет перегруза по одной стороне, стакан достаточно глубокий, а calibrated probability и EV проходят порог новой fade-модели.',
+          'Before a live entry we check that the coin is free, wick-fade does not hold it, same-side exposure is not crowded, the book is deep enough, and calibrated probability plus EV pass the new fade model gate.'
+        )} ${t(lang, 'Activity governor каждую минуту переводит систему между defensive/probe/normal/hot: если сделок нет, но shadow зелёный — ослабляет вход; если live или shadow красные — зажимает maxOpen, сторону, p/EV и ir; если прогнозы и факт сходятся выше 50/50 — расширяет.', 'The activity governor moves the system between defensive/probe/normal/hot every minute: if there are no trades but shadow is green, it loosens; if live or shadow are red, it tightens maxOpen, side exposure, p/EV and ir; if forecasts and reality converge above 50/50, it expands.')}<div class="ops-tags"><span class="ops-tag">free coin</span><span class="ops-tag">shadow-proof</span><span class="ops-tag">governor</span><span class="ops-tag">fade model</span><span class="ops-tag">spread/depth</span></div></div>
       </div>
       <div class="ops-row">
         <div class="k">${t(lang, 'Риск и выход', 'Risk and exit')}</div>
         <div class="v">${t(lang,
-          'Стоп и откат трейлинга больше не живут в фиксированном %-коридоре: они считаются из распределения текущего true range монеты, свежей волатильности и комиссии. Lock считается по net-математике так, чтобы расчётный R:R после комиссии был не хуже 1:2; если импульс быстро не подтвердился, включается momentum-decay.',
-          'Stop and trailing giveback no longer live in a fixed percentage band: they are derived from the coin’s current true-range distribution, fresh volatility and fees. Lock is computed on net math so designed R:R after fees stays at least 1:2; if impulse does not confirm quickly, momentum-decay can exit.'
+          'Стоп и откат трейлинга считаются из распределения текущего true range монеты, свежей волатильности и комиссии. Lock считается по net-математике так, чтобы расчётный R:R после комиссии был не хуже 1:2; если fade быстро не начинает работать, включается momentum-decay.',
+          'Stop and trailing giveback are derived from the coin’s current true-range distribution, fresh volatility and fees. Lock is computed on net math so designed R:R after fees stays at least 1:2; if the fade does not start working quickly, momentum-decay can exit.'
         )}<div class="ops-tags"><span class="ops-tag">exchange stop</span><span class="ops-tag">dynamic trail</span><span class="ops-tag">R:R ≥ 1:2</span><span class="ops-tag">momentum-decay</span><span class="ops-tag">session dollar-stop</span></div></div>
       </div>
     </div>
@@ -1139,21 +1092,21 @@ function momentumLearningChart(lang: Lang): string {
 
 function momentumStrategyDetail(lang: Lang): string {
   return `<div class="section">
-    <div class="section-title">${t(lang, 'Как устроена Momentum Follow', 'How Momentum Follow works')}</div>
+    <div class="section-title">${t(lang, 'Как устроена Impulse Fade', 'How Impulse Fade works')}</div>
     <p class="sd-lead">${t(lang,
-      'Momentum Follow v2 — основная активная трендовая механика на Hyperliquid. Она пытается войти <b>по направлению резкого импульса</b>, когда движение уже подтверждено. Система смотрит весь рынок лёгким 2-секундным allMids-радаром, собирает 1m-свечи, пересчитывает порог всплеска под волатильность каждой монеты и в real входит только после проверок стакана, спреда, свободной монеты и риск-лимитов.',
-      'Momentum Follow v2 is the primary active trend mechanic on Hyperliquid. It tries to enter <b>with a sharp impulse</b> after the move is confirmed. The system watches the full market with a lightweight 2-second allMids radar, builds 1m candles, recalculates the impulse threshold from each coin’s volatility, and only enters live after book depth, spread, free-coin and risk-limit checks.')}</p>
+      'Impulse Fade — новая активная live-механика на Hyperliquid. Она использует старый Momentum-радар как детектор резкого всплеска, но после аудита торгует <b>против позднего импульса</b>: если монета резко выстрелила вверх, ищем short fade; если резко продавили вниз, ищем long fade. Система смотрит весь рынок лёгким 2-секундным allMids-радаром, собирает 1m-свечи, пересчитывает порог всплеска под волатильность каждой монеты и в real входит только после проверок стакана, спреда, свободной монеты и риск-лимитов.',
+      'Impulse Fade is the new active live mechanic on Hyperliquid. It uses the old Momentum radar as a sharp-burst detector, but after the audit it trades <b>against the late impulse</b>: if a coin spikes up, it looks for a short fade; if it flushes down, it looks for a long fade. The system watches the full market with a lightweight 2-second allMids radar, builds 1m candles, recalculates the burst threshold from each coin’s volatility, and only enters live after book depth, spread, free-coin and risk-limit checks.')}</p>
     <div class="sd-steps">
-      <div class="sd-step"><span class="n">1</span><h5>${t(lang, 'Адаптивный all-market сканер', 'Adaptive all-market scanner')}</h5><p>${t(lang, 'Каждые 2 секунды лёгкий allMids-радар смотрит весь рынок на резкие intrabar-сдвиги и собирает текущие 1m OHLC. Подтверждающий слой теперь проверяет закрытые минутные свечи: 3 минуты импульса, 12 минут продолжения и часовой фон. Порог всплеска не фиксированный: он пересчитывается по текущей волатильности монеты и свежему объёмному профилю.', 'Every 2 seconds a light allMids radar watches the full market for sharp intrabar moves and builds current 1m OHLC. The confirming layer now checks closed minute candles: 3 minutes of impulse, 12 minutes of continuation, and one-hour context. The impulse threshold is not fixed: it is recalculated from the coin’s current volatility and recent volume profile.')}</p></div>
-      <div class="sd-step"><span class="n">2</span><h5>${t(lang, 'Вход по тренду', 'Trend entry')}</h5><p>${t(lang, 'Если монета свободна, спред нормальный и в стакане достаточно глубины, стратегия входит малым рыночным ордером по направлению импульса. Быстрый слой может войти внутри 1m свечи; подтверждающий слой раз в минуту проверяет закрытые свечи, объём и закрытие у правильного края диапазона.', 'If the coin is free, spread is acceptable and the book has enough depth, the strategy enters with a small market order in the impulse direction. The fast layer can enter inside a 1-minute candle; the confirming layer checks closed candles, volume and range-edge close every minute.')}</p></div>
+      <div class="sd-step"><span class="n">1</span><h5>${t(lang, 'Адаптивный all-market сканер', 'Adaptive all-market scanner')}</h5><p>${t(lang, 'Каждые 2 секунды лёгкий allMids-радар смотрит весь рынок на резкие intrabar-сдвиги и собирает текущие 1m OHLC. Подтверждающий слой проверяет закрытые минутные свечи: 3 минуты всплеска, 12 минут контекста и часовой фон. Порог всплеска не фиксированный: он пересчитывается по текущей волатильности монеты и свежему объёмному профилю.', 'Every 2 seconds a light allMids radar watches the full market for sharp intrabar moves and builds current 1m OHLC. The confirmation layer checks closed minute candles: 3 minutes of burst, 12 minutes of context, and one-hour background. The burst threshold is not fixed: it is recalculated from the coin’s current volatility and recent volume profile.')}</p></div>
+      <div class="sd-step"><span class="n">2</span><h5>${t(lang, 'Fade позднего импульса', 'Late-impulse fade')}</h5><p>${t(lang, 'Если монета свободна, спред нормальный и в стакане достаточно глубины, стратегия входит малым рыночным ордером против всплеска: short после чрезмерного up-impulse или long после чрезмерного down-impulse. Fast-слой пока собирает бумажную статистику; реальные входы ограничены governor-режимом и live-гейтами.', 'If the coin is free, spread is acceptable and the book has enough depth, the strategy enters with a small market order against the burst: short after an excessive up-impulse or long after an excessive down-impulse. The fast layer is still collecting paper evidence; real entries are constrained by the governor and live gates.')}</p></div>
       <div class="sd-step cat"><span class="n">3</span><h5>${t(lang, 'Динамический риск, Kelly-размер и быстрый выход', 'Dynamic risk, Kelly sizing and fast exit')}</h5><p>${t(lang, 'На входе считаем распределение true range монеты: медиану, хвостовые квантили и свежий режим. Из этого строятся стоп, зона включения трейлинга и допустимый откат без фиксированного %-коридора. Размер позиции тоже не фиксированный: score/EV сигнала переводится в консервативный fractional Kelly, но остаётся в micro-коридоре. Биржевой стоп ставится сразу; 2-секундный fast-менеджер может закрыть по трейлингу внутри свечи. Модель держит расчётный net risk/reward не хуже 1:2.', 'At entry, the strategy estimates the coin’s true-range distribution: median, tail quantiles and fresh regime. Stop, trailing activation and giveback are derived from that without a fixed percentage band. Position size is not fixed either: signal score/EV is converted into conservative fractional Kelly while staying inside a micro range. An exchange stop is placed immediately; the 2-second fast manager can close on trailing inside the candle. Designed net risk/reward stays at least 1:2.')}</p></div>
     </div>
     <div class="sd-blocks">
       <div class="sd-block">
         <h4>${t(lang, 'Зачем она нужна', 'Why it exists')}</h4>
         <ul>
-          <li>${t(lang, 'Wick-fade зарабатывает на возврате к средней; Momentum Follow покрывает режимы, где рынок <b>не возвращается</b>, а продолжает движение.', 'Wick-fade earns on mean reversion; Momentum Follow covers regimes where the market <b>does not revert</b> and continues moving.')}</li>
-          <li>${t(lang, 'Это диверсификация по логике, а не ещё одна копия той же ставки.', 'This is diversification by logic, not another copy of the same bet.')}</li>
+          <li>${t(lang, 'Аудит Momentum показал: поздние импульсы чаще выдыхались, чем продолжались. Мы не удалили радар — мы перевернули торговую гипотезу.', 'The Momentum audit showed that late impulses were more often fading than continuing. We did not throw away the radar; we inverted the trading hypothesis.')}</li>
+          <li>${t(lang, 'Это отдельная mean-reversion логика поверх all-market импульсного сканера, а не ещё одна копия wick-fade.', 'This is separate mean-reversion logic on top of an all-market impulse scanner, not another copy of wick-fade.')}</li>
           <li>${t(lang, 'Пока размер специально минимальный: задача — собрать настоящую статистику на деньгах.', 'Size is intentionally minimal for now: the goal is to collect real-money statistics.')}</li>
         </ul>
       </div>
@@ -1161,7 +1114,7 @@ function momentumStrategyDetail(lang: Lang): string {
         <h4>${t(lang, 'Защита от конфликта', 'Conflict protection')}</h4>
         <ul>
           <li>${t(lang, 'Одна монета не может одновременно управляться двумя live-механиками.', 'One coin cannot be managed by two live mechanics at the same time.')}</li>
-          <li>${t(lang, 'При входе Momentum монета получает lock, чтобы другая live-механика не открыла конфликтующую позицию.', 'When Momentum enters, the coin receives a lock so another live mechanic cannot open a conflicting position.')}</li>
+          <li>${t(lang, 'При входе Impulse Fade монета получает lock, чтобы другая live-механика не открыла конфликтующую позицию.', 'When Impulse Fade enters, the coin receives a lock so another live mechanic cannot open a conflicting position.')}</li>
           <li>${t(lang, 'Биржевой стоп ставится сразу после подтверждения позиции; кодовый poll остаётся резервной защитой.', 'An exchange stop is placed immediately after position confirmation; the code poll remains backup protection.')}</li>
           <li>${t(lang, 'Momentum Doctor каждую минуту проверяет новые закрытые live-сделки, сравнивает прогноз с фактом и осторожно двигает только ограниченные bias-поправки.', 'Momentum Doctor checks new closed live trades every minute, compares forecast with reality and carefully moves only bounded bias corrections.')}</li>
         </ul>
@@ -1178,19 +1131,19 @@ export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
     `<div class="lt-stat"><div class="l">${l}</div><div class="v ${vc}">${v}</div>${s ? `<div class="s ${sc}">${s}</div>` : ''}</div>`;
 
   return pageShell(
-    t(lang, 'Momentum Follow — отдельная live-стратегия · Robot Claude', 'Momentum Follow — separate live strategy · Robot Claude'),
+    t(lang, 'Impulse Fade — отдельная live-стратегия · Robot Claude', 'Impulse Fade — separate live strategy · Robot Claude'),
     `
     <div class="header">
       <a class="lt-back" href="/lab">${t(lang, '← в лабораторию', '← to the lab')}</a>
-      <span class="strat-code">${t(lang, 'LIVE MICRO · HYPERLIQUID · MOMENTUM V2', 'LIVE MICRO · HYPERLIQUID · MOMENTUM V2')}</span>
-      <h1 class="title">Momentum Follow</h1>
-      <p class="subtitle">${t(lang, 'Адаптивная трендовая стратегия: 2-секундный радар всплесков, score/EV/Kelly-размер, новый публичный отсчёт.', 'Adaptive trend strategy: 2-second impulse radar, score/EV/Kelly sizing, new public track.')}</p>
+      <span class="strat-code">${t(lang, 'LIVE MICRO · HYPERLIQUID · IMPULSE FADE', 'LIVE MICRO · HYPERLIQUID · IMPULSE FADE')}</span>
+      <h1 class="title">Impulse Fade</h1>
+      <p class="subtitle">${t(lang, 'Адаптивная fade-стратегия: 2-секундный радар поздних импульсов, score/EV/Kelly-размер, новый публичный отсчёт.', 'Adaptive fade strategy: 2-second late-impulse radar, score/EV/Kelly sizing, new public track.')}</p>
     </div>
     <style>${TRACK_CSS}</style>
 
     <div class="lt-phase">
       <span class="dot"></span>
-      <div>${t(lang, '<b>Статус: real micro · новый публичный отсчёт.</b> Статистика ниже считается с адаптивной версии стратегии, запущенной ', '<b>Status: real micro · new public track.</b> The stats below are counted from the adaptive version launched at ')}${momentumPublicStartText(lang)}${t(lang, '. Размер выбирается по консервативному Kelly в micro-коридоре, плечо 1x, стоп на бирже; stop/trail теперь считаются из текущего распределения волатильности.', '. Size is selected by conservative Kelly inside a micro range, leverage 1x, stop on exchange; stop/trail are now derived from the current volatility distribution.')}</div>
+      <div>${t(lang, '<b>Статус: real micro · новый публичный отсчёт.</b> Статистика ниже считается с fade-reversal версии, запущенной ', '<b>Status: real micro · new public track.</b> The stats below are counted from the fade-reversal version launched at ')}${momentumPublicStartText(lang)}${t(lang, '. Размер выбирается по консервативному Kelly в micro-коридоре, плечо 1x, стоп на бирже; stop/trail считаются из текущего распределения волатильности.', '. Size is selected by conservative Kelly inside a micro range, leverage 1x, stop on exchange; stop/trail are derived from the current volatility distribution.')}</div>
     </div>
 
     <div class="lt-cards">
@@ -1223,7 +1176,7 @@ export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
       ${momentumClosedTable(liveClosed, page, '/lab/momentum', lang)}
     </div>
 
-    <p class="lt-note">${t(lang, 'На странице показана только live-статистика Momentum v2: реальные деньги и реальные исполнения. Публичная статистика считается с нового старта; старая история сохранена для внутреннего анализа. Прошлые результаты не гарантируют будущих.', 'This page shows only Momentum v2 live stats: real money and real execution. Public stats are counted from the new start; older history is kept for internal analysis. Past results do not guarantee future results.')}</p>
+    <p class="lt-note">${t(lang, 'На странице показана только live-статистика Impulse Fade: реальные деньги и реальные исполнения с нового fade-reversal старта. Старая Momentum Follow история сохранена для внутреннего анализа и не смешивается с публичным треком. Прошлые результаты не гарантируют будущих.', 'This page shows only Impulse Fade live stats: real money and real execution from the new fade-reversal start. The old Momentum Follow history is kept for internal analysis and is not mixed into the public track. Past results do not guarantee future results.')}</p>
     `,
     { autoRefreshSec: 60, lang },
   );
@@ -1514,9 +1467,9 @@ export function liveTrackHero(lang: Lang = 'ru'): string {
     <div class="lt-hero-stack">
     <a class="lt-hero" href="/lab/momentum">
       <div class="lt-hero-l">
-        <span class="lt-hero-badge">🧭 MOMENTUM V2 · Hyperliquid · ${t(lang, 'новый отсчёт', 'new track')}</span>
-        <div class="lt-hero-title">Momentum Follow</div>
-        <div class="lt-hero-sub">${t(lang, 'Адаптивный 2s-радар по импульсам: описание и отдельная статистика →', 'Adaptive 2s impulse radar: description and separate stats →')}</div>
+        <span class="lt-hero-badge">🧭 IMPULSE FADE · Hyperliquid · ${t(lang, 'новый отсчёт', 'new track')}</span>
+        <div class="lt-hero-title">Impulse Fade</div>
+        <div class="lt-hero-sub">${t(lang, 'Адаптивный 2s-радар поздних импульсов: описание и отдельная статистика →', 'Adaptive 2s late-impulse radar: description and separate stats →')}</div>
       </div>
       <div class="lt-hero-r">
         <div class="lt-hero-stat"><div class="v ${cls(mom.netPct)}">${pct(mom.netPct)}</div><div class="k">${t(lang, 'live', 'live')}</div></div>
