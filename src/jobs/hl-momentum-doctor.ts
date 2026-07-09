@@ -114,7 +114,7 @@ const probBucketStmt = db.prepare<[], ProbBucket>(`
    GROUP BY bucket
    ORDER BY MIN(calibrated_prob)
 `);
-const calibrationRowsStmt = db.prepare<[number], CalibrationRow>(`
+const calibrationRowsStmt = db.prepare<[number, number], CalibrationRow>(`
   SELECT l.id,
          l.pnl_pct,
          l.signal,
@@ -135,7 +135,9 @@ const calibrationRowsStmt = db.prepare<[number], CalibrationRow>(`
            ORDER BY j.ts DESC
            LIMIT 1) AS layer
     FROM hl_momentum_live_log l
-   WHERE l.closed_at IS NOT NULL AND l.pnl_pct IS NOT NULL
+   WHERE l.closed_at IS NOT NULL
+     AND l.pnl_pct IS NOT NULL
+     AND l.opened_at >= ?
    ORDER BY l.closed_at DESC
    LIMIT ?
 `);
@@ -534,7 +536,8 @@ function parseSignalLayer(signal: string): string {
 
 function runOnlineCalibration(nowMs: number): string[] {
   const enabled = runtimeBool('hl_momentum_online_calibration_enabled', true);
-  const raw = calibrationRowsStmt.all(ONLINE_CALIBRATION_LOOKBACK);
+  const riskStartMs = runtimeNum('hl_momentum_risk_model_start_ms', 0);
+  const raw = calibrationRowsStmt.all(riskStartMs, ONLINE_CALIBRATION_LOOKBACK);
   const rows = raw
     .map((r) => ({
       ...r,
