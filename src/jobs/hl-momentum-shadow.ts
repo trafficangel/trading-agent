@@ -23,6 +23,10 @@ import {
   hlExitAvgSince,
   hlAccountValue,
 } from '../exchange/hyperliquid-private.js';
+import {
+  DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLDS,
+  isConfidentMomentumSignal,
+} from '../lib/hl-momentum-capacity.js';
 import { upsertHlMinuteCandlesFromMids } from './hl-minute-candle-collector.js';
 
 type Side = 'long' | 'short';
@@ -132,6 +136,8 @@ const ENTRY_FAIL_COOLDOWN_MS = 2 * 60_000;
 const MIN_LIVE_SCORE = 68;
 const MIN_EXPECTED_PNL_PCT = 0.10;
 const MIN_CALIBRATED_PROB = 0.49;
+const CONFIDENT_MAX_OPEN = 4;
+const CONFIDENT_MAX_SAME_SIDE = 2;
 const MAX_EXTENSION_R_MULT = 1.25;
 const MAX_LIVE_SAME_SIDE = 3;
 const HIGH_SCORE_OVERRIDE = 84;
@@ -447,6 +453,22 @@ function signalTimeframeMin(): number {
 
 function liveMaxOpen(): number {
   return Math.round(runtimeNum('hl_momentum_live_max_open', LIVE_MAX_OPEN, 1, 20));
+}
+
+function confidentLiveSignal(sig: MomentumSignal): boolean {
+  return isConfidentMomentumSignal(sig, {
+    minScore: runtimeNum('hl_momentum_confident_min_score', DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLDS.minScore, 80, 100),
+    minProb: runtimeNum('hl_momentum_confident_min_prob', DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLDS.minProb, 0.50, 0.75),
+    minExpectedPnl: runtimeNum('hl_momentum_confident_min_ev_pct', DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLDS.minExpectedPnl, 0.05, 1.5),
+  });
+}
+
+function confidentMaxOpen(baseMaxOpen: number): number {
+  return Math.max(baseMaxOpen, Math.round(runtimeNum('hl_momentum_confident_max_open', CONFIDENT_MAX_OPEN, baseMaxOpen, Math.max(baseMaxOpen, 8))));
+}
+
+function confidentMaxSameSide(baseMaxSameSide: number): number {
+  return Math.max(baseMaxSameSide, Math.round(runtimeNum('hl_momentum_confident_max_same_side', CONFIDENT_MAX_SAME_SIDE, baseMaxSameSide, Math.max(baseMaxSameSide, 4))));
 }
 
 function fastStrictMult(): number {
@@ -1048,7 +1070,7 @@ function recordSignal(sig: MomentumSignal, decision: 'paper' | 'live-open' | 'sk
   }
 }
 
-function preTradeGate(sig: MomentumSignal, params: RiskParams): string | null {
+function preTradeGate(sig: MomentumSignal, params: RiskParams, confident: boolean): string | null {
   const minScore = runtimeNum('hl_momentum_min_live_score', MIN_LIVE_SCORE, 45, 95);
   const minEv = runtimeNum('hl_momentum_min_expected_pnl_pct', MIN_EXPECTED_PNL_PCT, -0.25, 1.5);
   const minProb = runtimeNum('hl_momentum_min_calibrated_prob', MIN_CALIBRATED_PROB, 0.35, 0.65);
@@ -1060,7 +1082,8 @@ function preTradeGate(sig: MomentumSignal, params: RiskParams): string | null {
   const extensionR = (sig.metrics.extensionPct ?? 0) / Math.max(0.1, params.stopPct * 100);
   if (extensionR > MAX_EXTENSION_R_MULT && sig.score < HIGH_SCORE_OVERRIDE) return `late extension ${extensionR.toFixed(2)}R`;
   const pf = portfolioState(sig.side);
-  const maxSameSide = Math.round(runtimeNum('hl_momentum_max_same_side', MAX_LIVE_SAME_SIDE, 1, 10));
+  const baseMaxSameSide = Math.round(runtimeNum('hl_momentum_max_same_side', MAX_LIVE_SAME_SIDE, 1, 10));
+  const maxSameSide = confident ? confidentMaxSameSide(baseMaxSameSide) : baseMaxSameSide;
   if (pf.sameSide >= maxSameSide) return `max same side ${sig.side} ${pf.sameSide}/${maxSameSide}`;
   if (pf.sameSide >= MAX_LIVE_SAME_SIDE && sig.score < HIGH_SCORE_OVERRIDE) return `portfolio crowding ${sig.side} ${pf.sameSide}`;
   const clustered = recentSideCluster(sig.side);
@@ -1437,10 +1460,12 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
     if (dayPnl <= dailyStopPct) { recordSignal(sig, 'skip', `daily stop ${dayPnl.toFixed(2)} <= ${dailyStopPct}`); return; }
   }
   if (liveGetPosStmt.get(coin)) { recordSignal(sig, 'skip', 'live position already open'); return; }
-  const maxOpen = liveMaxOpen();
-  if (liveAllPosStmt.all().length >= maxOpen) { recordSignal(sig, 'skip', `max live open ${maxOpen}`); return; }
+  const confident = confidentLiveSignal(sig);
+  const baseMaxOpen = liveMaxOpen();
+  const maxOpen = confident ? confidentMaxOpen(baseMaxOpen) : baseMaxOpen;
+  if (liveAllPosStmt.all().length >= maxOpen) { recordSignal(sig, 'skip', `max live open ${maxOpen}${confident ? ' confident' : ''}`); return; }
   if (wickOpenPosStmt.get(coin)) { recordSignal(sig, 'skip', 'wick-fade has coin'); return; }
-  const gate = preTradeGate(sig, params);
+  const gate = preTradeGate(sig, params, confident);
   if (gate) { recordSignal(sig, 'skip', gate, { ref: last.c, signal: last.c }); return; }
 
   const ex = await hlFetchPosition(coin);
