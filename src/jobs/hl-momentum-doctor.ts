@@ -28,6 +28,9 @@ type CalibrationRow = {
   layer: string | null;
   closed_at: number;
 };
+type GovernorRow = { side: Side; pnl_pct: number; signal: string; closed_at: number };
+type GovernorSignalWindow = { total: number; live_open: number | null; paper: number | null; skipped: number | null };
+type GovernorStats = { n: number; avg: number; wr: number; sum: number };
 
 const REPORT_KEY = 'hl_momentum_doctor_last_report_id';
 const COST_RT_PCT = 0.07;
@@ -49,6 +52,8 @@ const ONLINE_PROB_BIAS_MAX_STEP = 0.015;
 const ONLINE_EV_BIAS_MIN = -1.25;
 const ONLINE_EV_BIAS_MAX = 0.50;
 const ONLINE_EV_BIAS_MAX_STEP = 0.20;
+const GOVERNOR_SHADOW_RECENT_N = 120;
+const GOVERNOR_SIGNAL_WINDOW_MS = 6 * 60 * 60_000;
 
 const closedStmt = db.prepare<[number], TradeRow>(`
   SELECT id, coin, side, entry_px, signal, pnl_pct, close_reason, opened_at, closed_at
@@ -115,6 +120,34 @@ const calibrationRowsStmt = db.prepare<[number], CalibrationRow>(`
    WHERE l.closed_at IS NOT NULL AND l.pnl_pct IS NOT NULL
    ORDER BY l.closed_at DESC
    LIMIT ?
+`);
+const shadowGovernorRowsStmt = db.prepare<[number], GovernorRow>(`
+  SELECT side, pnl_pct, signal, closed_at
+    FROM hl_momentum_shadow_log
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+   ORDER BY closed_at DESC
+   LIMIT ?
+`);
+const liveGovernorRowsStmt = db.prepare<[number], GovernorRow>(`
+  SELECT side, pnl_pct, signal, closed_at
+    FROM hl_momentum_live_log
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+   ORDER BY closed_at DESC
+   LIMIT ?
+`);
+const signalWindowStmt = db.prepare<[number], GovernorSignalWindow>(`
+  SELECT COUNT(*) AS total,
+         SUM(CASE WHEN decision = 'live-open' THEN 1 ELSE 0 END) AS live_open,
+         SUM(CASE WHEN decision = 'paper' THEN 1 ELSE 0 END) AS paper,
+         SUM(CASE WHEN decision = 'skip' THEN 1 ELSE 0 END) AS skipped
+    FROM hl_momentum_signal_journal
+   WHERE ts >= ?
+`);
+const liveOpenCountStmt = db.prepare<[], { n: number; long_n: number | null; short_n: number | null }>(`
+  SELECT COUNT(*) AS n,
+         SUM(CASE WHEN side = 'long' THEN 1 ELSE 0 END) AS long_n,
+         SUM(CASE WHEN side = 'short' THEN 1 ELSE 0 END) AS short_n
+    FROM hl_momentum_live_pos
 `);
 
 function esc(s: string): string {
@@ -367,6 +400,92 @@ function runOnlineCalibration(nowMs: number): string[] {
   return lines;
 }
 
+function statsOf(rows: Pick<GovernorRow, 'pnl_pct'>[]): GovernorStats {
+  const n = rows.length;
+  if (n === 0) return { n: 0, avg: 0, wr: 0, sum: 0 };
+  const sum = rows.reduce((acc, r) => acc + r.pnl_pct, 0);
+  const wins = rows.filter((r) => r.pnl_pct > 0).length;
+  return { n, avg: sum / n, wr: wins / n, sum };
+}
+
+function layerFromSignal(signal: string): 'fast' | 'confirm' | 'unknown' {
+  if (signal.includes('layer=fast') || signal.includes('fast up radar') || signal.includes('fast down radar')) return 'fast';
+  if (signal.includes('layer=confirm') || signal.includes('up impulse') || signal.includes('down impulse')) return 'confirm';
+  return 'unknown';
+}
+
+function setGovernorKv(key: string, value: string | number, nowMs: number, reason: string): void {
+  setKvStmt.run(key, String(value), nowMs, reason);
+}
+
+function runActivityGovernor(nowMs: number): string[] {
+  if (!runtimeBool('hl_momentum_governor_enabled', true)) {
+    setGovernorKv('hl_momentum_governor_state', 'off', nowMs, 'hl momentum governor disabled');
+    return ['• governor выключен'];
+  }
+
+  const shadowN = Math.round(clamp(runtimeNum('hl_momentum_governor_shadow_n', GOVERNOR_SHADOW_RECENT_N), 40, 300));
+  const shadowRows = shadowGovernorRowsStmt.all(shadowN);
+  const liveRows = liveGovernorRowsStmt.all(20);
+  const signalWindow = signalWindowStmt.get(nowMs - GOVERNOR_SIGNAL_WINDOW_MS) ?? { total: 0, live_open: 0, paper: 0, skipped: 0 };
+  const open = liveOpenCountStmt.get() ?? { n: 0, long_n: 0, short_n: 0 };
+
+  const shadow = statsOf(shadowRows);
+  const confirm = statsOf(shadowRows.filter((r) => layerFromSignal(r.signal) === 'confirm'));
+  const fast = statsOf(shadowRows.filter((r) => layerFromSignal(r.signal) === 'fast'));
+  const confirmLong = statsOf(shadowRows.filter((r) => r.side === 'long' && layerFromSignal(r.signal) === 'confirm'));
+  const confirmShort = statsOf(shadowRows.filter((r) => r.side === 'short' && layerFromSignal(r.signal) === 'confirm'));
+  const live = statsOf(liveRows);
+
+  const liveBad = live.n >= 5 && (live.avg < -0.20 || live.wr < 0.40);
+  const shadowBad = shadow.n >= 60 && shadow.avg < -0.10;
+  const confirmGood = confirm.n >= 12 && confirm.avg > 0 && confirm.wr >= 0.48;
+  const confirmHot = confirm.n >= 20 && confirm.avg >= 0.10 && confirm.wr >= 0.52;
+  const noLiveButSignals = (signalWindow.live_open ?? 0) === 0 && (signalWindow.paper ?? 0) >= 20;
+  const fastGood = fast.n >= 20 && fast.avg >= 0.05 && fast.wr >= 0.48;
+
+  let state: 'defensive' | 'probe' | 'normal' | 'hot';
+  if (liveBad || (!confirmGood && shadowBad)) state = 'defensive';
+  else if (confirmHot && !shadowBad && live.n >= 5 && live.avg > 0 && live.wr >= 0.50) state = 'hot';
+  else if (confirmGood && !shadowBad && !noLiveButSignals) state = 'normal';
+  else if (confirmGood || noLiveButSignals) state = 'probe';
+  else state = 'defensive';
+
+  const cfg = state === 'defensive'
+    ? { minP: 0.49, minEv: 0.35, maxOpen: 2, maxSame: 1, ir: 1.25, fastLive: 0 }
+    : state === 'probe'
+      ? { minP: 0.465, minEv: 0.15, maxOpen: 4, maxSame: 2, ir: 1.30, fastLive: fastGood ? 1 : 0 }
+      : state === 'normal'
+        ? { minP: 0.46, minEv: 0.10, maxOpen: 6, maxSame: 3, ir: 1.42, fastLive: fastGood ? 1 : 0 }
+        : { minP: 0.45, minEv: 0.05, maxOpen: 8, maxSame: 4, ir: 1.50, fastLive: fastGood ? 1 : 0 };
+
+  const reason = `hl momentum governor ${state}`;
+  setGovernorKv('hl_momentum_governor_state', state, nowMs, reason);
+  setGovernorKv('hl_momentum_governor_shadow_avg_pct', shadow.avg.toFixed(4), nowMs, reason);
+  setGovernorKv('hl_momentum_governor_shadow_wr', shadow.wr.toFixed(4), nowMs, reason);
+  setGovernorKv('hl_momentum_governor_confirm_avg_pct', confirm.avg.toFixed(4), nowMs, reason);
+  setGovernorKv('hl_momentum_governor_confirm_wr', confirm.wr.toFixed(4), nowMs, reason);
+  setGovernorKv('hl_momentum_governor_fast_avg_pct', fast.avg.toFixed(4), nowMs, reason);
+  setGovernorKv('hl_momentum_governor_fast_wr', fast.wr.toFixed(4), nowMs, reason);
+  setGovernorKv('hl_momentum_governor_live_avg_pct', live.avg.toFixed(4), nowMs, reason);
+  setGovernorKv('hl_momentum_governor_live_wr', live.wr.toFixed(4), nowMs, reason);
+  setGovernorKv('hl_momentum_governor_last_ms', nowMs, nowMs, reason);
+
+  setGovernorKv('hl_momentum_min_calibrated_prob', cfg.minP.toFixed(3), nowMs, reason);
+  setGovernorKv('hl_momentum_min_expected_pnl_pct', cfg.minEv.toFixed(2), nowMs, reason);
+  setGovernorKv('hl_momentum_live_max_open', cfg.maxOpen, nowMs, reason);
+  setGovernorKv('hl_momentum_max_same_side', cfg.maxSame, nowMs, reason);
+  setGovernorKv('hl_momentum_confirm_max_impulse_ratio', cfg.ir.toFixed(2), nowMs, reason);
+  setGovernorKv('hl_momentum_fast_live_enabled', cfg.fastLive, nowMs, fastGood ? `${reason}: fast proven` : `${reason}: fast not proven`);
+
+  const bestSide = confirmLong.avg >= confirmShort.avg ? `long ${fmtPct(confirmLong.avg)}` : `short ${fmtPct(confirmShort.avg)}`;
+  return [
+    `• state <b>${state}</b>: p≥${cfg.minP.toFixed(3)} · EV≥${cfg.minEv.toFixed(2)}% · maxOpen ${cfg.maxOpen} · sameSide ${cfg.maxSame} · ir≤${cfg.ir.toFixed(2)} · fast ${cfg.fastLive ? 'on' : 'off'}`,
+    `• shadow ${shadow.n}: ${fmtPct(shadow.avg)} · WR ${(shadow.wr * 100).toFixed(0)}%; confirm ${confirm.n}: ${fmtPct(confirm.avg)} · WR ${(confirm.wr * 100).toFixed(0)}%; fast ${fast.n}: ${fmtPct(fast.avg)} · WR ${(fast.wr * 100).toFixed(0)}%`,
+    `• live ${live.n}: ${fmtPct(live.avg)} · WR ${(live.wr * 100).toFixed(0)}%; open ${open.n} (${open.long_n ?? 0}L/${open.short_n ?? 0}S); best confirm side ${bestSide}`,
+  ];
+}
+
 function reasonMix(rows: TradeRow[]): string {
   const mix = new Map<string, number>();
   for (const r of rows) mix.set(r.close_reason ?? 'unknown', (mix.get(r.close_reason ?? 'unknown') ?? 0) + 1);
@@ -394,13 +513,14 @@ function probabilityBuckets(): string[] {
 
 export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: boolean; nowMs?: number } = {}): Promise<{ sent: boolean; closed: number; pnl: number }> {
   const nowMs = opts.nowMs ?? Date.now();
+  const governorLines = runActivityGovernor(nowMs);
   const rows = closedStmt.all(160).reverse();
   const maxId = maxClosedIdStmt.get()?.id ?? 0;
   const lastReported = Number(getKvStmt.get(REPORT_KEY)?.value ?? 0);
   const pnl = rows.reduce((acc, r) => acc + r.pnl_pct, 0);
 
   if (!opts.force && maxId <= lastReported) {
-    logger.info({ maxId }, 'hl-momentum doctor: no new closed trades');
+    logger.info({ maxId, governor: governorLines.join(' | ') }, 'hl-momentum doctor: no new closed trades');
     return { sent: false, closed: rows.length, pnl };
   }
 
@@ -443,6 +563,9 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
     ``,
     `<b>Online calibration: прогноз → факт</b>`,
     ...onlineCalibrationLines.map(esc),
+    ``,
+    `<b>Activity governor: дыхание системы</b>`,
+    ...governorLines.map(esc),
     ``,
     `<b>Автотюнинг</b>`,
     autotuneEnabled ? `• режим: включён` : `• режим: выключен, только отчёт`,

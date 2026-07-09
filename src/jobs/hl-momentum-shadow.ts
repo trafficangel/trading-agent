@@ -839,6 +839,8 @@ function preTradeGate(sig: MomentumSignal, params: RiskParams): string | null {
   const extensionR = (sig.metrics.extensionPct ?? 0) / Math.max(0.1, params.stopPct * 100);
   if (extensionR > MAX_EXTENSION_R_MULT && sig.score < HIGH_SCORE_OVERRIDE) return `late extension ${extensionR.toFixed(2)}R`;
   const pf = portfolioState(sig.side);
+  const maxSameSide = Math.round(runtimeNum('hl_momentum_max_same_side', MAX_LIVE_SAME_SIDE, 1, 10));
+  if (pf.sameSide >= maxSameSide) return `max same side ${sig.side} ${pf.sameSide}/${maxSameSide}`;
   if (pf.sameSide >= MAX_LIVE_SAME_SIDE && sig.score < HIGH_SCORE_OVERRIDE) return `portfolio crowding ${sig.side} ${pf.sameSide}`;
   const clustered = recentSideCluster(sig.side);
   if (clustered >= MAX_CLUSTER_SAME_SIDE) return `impulse cluster ${sig.side} ${clustered}/${MAX_CLUSTER_SAME_SIDE}`;
