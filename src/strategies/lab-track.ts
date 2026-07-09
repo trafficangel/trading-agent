@@ -1,15 +1,6 @@
 /**
- * LIVE TRACK — the public, honest record of the real-money book (wick-fade on
- * Hyperliquid). This is NOT the paper R&D lab (see lab.ts) — every row here is
- * real money on a real exchange, PnL net of commission. The page answers three
- * operator-requested questions, in order:
- *   1. что мы делаем   — what we do (general terms; NO strategy internals)
- *   2. реальные данные — real trades with entry points + result metrics, live from wick_fade_log
- *   3. к чему идём      — the roadmap (build → live-validation → green track → capital scale)
- *
- * Data is queried DIRECTLY from wick_fade_log (mode='live') at render time — the
- * same table the live runner writes to, so the page can never diverge from reality.
- * Route: /lab/live. A hero card at the top of /lab links here.
+ * Lab public tracks. The old wick-fade live track is retained only as historical
+ * audit code; /lab/live redirects to the active Momentum Follow page.
  */
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
@@ -45,15 +36,15 @@ const momClosedStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_log
 const momOpenStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_pos ORDER BY opened_at DESC`);
 const limitVolClosesStmt = db.prepare<[string, number], { t: number; c: number }>(`SELECT t, c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
 const runtimeConfigStmt = db.prepare<[string], { value: string }>(`SELECT value FROM runtime_config WHERE key = ?`);
-const momUniverseStmt = db.prepare<[number], { coins: number; fresh: number | null; newest: number | null }>(`
+const momUniverseStmt = db.prepare<[number, number], { coins: number; fresh: number | null; ready: number | null; newest: number | null }>(`
   SELECT COUNT(*) AS coins,
          SUM(CASE WHEN newest_t >= ? THEN 1 ELSE 0 END) AS fresh,
+         SUM(CASE WHEN n >= 70 AND newest_t >= ? THEN 1 ELSE 0 END) AS ready,
          MAX(newest_t) AS newest
     FROM (
       SELECT coin, COUNT(*) AS n, MAX(t) AS newest_t
-        FROM hl_candles
+        FROM hl_candles_1m
        GROUP BY coin
-      HAVING n >= 70
     )
 `);
 const momSignalStatsStmt = db.prepare<[number], {
@@ -709,7 +700,8 @@ function momentumDailyStrip(rows: MomRow[], lang: Lang): string {
 
 function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
   const publicStart = momentumPublicStartMs();
-  const universe = momUniverseStmt.get(Date.now() - 25 * 60_000) ?? { coins: 0, fresh: 0, newest: null };
+  const oneMinuteFreshAfter = Date.now() - 4 * 60_000;
+  const universe = momUniverseStmt.get(oneMinuteFreshAfter, oneMinuteFreshAfter) ?? { coins: 0, fresh: 0, ready: 0, newest: null };
   const sig = momSignalStatsStmt.get(publicStart) ?? {
     total: 0, live_open: 0, skipped: 0, paper: 0,
     avg_score: null, avg_ev: null, avg_prob: null, avg_prob_conf: null,
@@ -751,8 +743,8 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
   return `<div class="section">
     <div class="section-title">${t(lang, 'Боевые метрики системы', 'Live system metrics')}</div>
     <div class="ops-grid">
-      ${metric(t(lang, 'Рынок', 'Market'), `${universe.fresh ?? 0} / ${universe.coins}`, t(lang, `свежих монет из архива · свечи обновлены ${ageText(universe.newest, lang)}`, `fresh coins from archive · candles updated ${ageText(universe.newest, lang)}`))}
-      ${metric(t(lang, 'Радар', 'Radar'), '2s', t(lang, 'allMids по всему рынку + 5m подтверждающий слой раз в минуту', 'allMids across the market + 5m confirmation layer every minute'))}
+      ${metric(t(lang, 'Рынок', 'Market'), `${universe.ready ?? 0} / ${universe.coins}`, t(lang, `1m готово после прогрева · свежих ${universe.fresh ?? 0} · обновлено ${ageText(universe.newest, lang)}`, `1m ready after warmup · fresh ${universe.fresh ?? 0} · updated ${ageText(universe.newest, lang)}`))}
+      ${metric(t(lang, 'Радар', 'Radar'), '2s / 1m', t(lang, 'allMids по всему рынку + 1m подтверждающий слой; 5m объём остаётся как fallback', 'allMids across the market + 1m confirmation layer; 5m volume remains as fallback'))}
       ${metric(t(lang, 'Сигналы', 'Signals'), String(sig.total), t(lang, `${sig.skipped ?? 0} отфильтрованы защитой · ${sig.live_open ?? 0} новых live-входов`, `${sig.skipped ?? 0} filtered by protection · ${sig.live_open ?? 0} new live entries`))}
       ${metric(t(lang, 'Позиции', 'Positions'), `${liveOpenPublic} / ${maxOpen}`, t(lang, `${engineOpen.open} сейчас под управлением движка · публичный трек показывает новые после reset`, `${engineOpen.open} currently managed by engine · public track shows new ones after reset`))}
       ${metric(t(lang, 'Качество входа', 'Entry quality'), `score ≥ ${minScore}`, t(lang, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · средний score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · avg score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`))}
@@ -767,9 +759,9 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
       <div class="ops-row">
         <div class="k">${t(lang, 'Что считаем всплеском', 'Impulse definition')}</div>
         <div class="v">${t(lang,
-          'Быстрый слой смотрит сдвиги <b>r30/r90</b> за 30/90 секунд и движение от последней 5m-свечи. Подтверждающий слой смотрит <b>r3</b> за 3 свечи, <b>r12</b> за час, объём, закрытие у нужного края диапазона и не слишком позднее расширение.',
-          'The fast layer watches <b>r30/r90</b> moves over 30/90 seconds and movement from the last 5m close. The confirmation layer watches <b>r3</b> over 3 candles, <b>r12</b> over one hour, volume, close near the correct range edge, and avoids late extension.'
-        )}<div class="ops-tags"><span class="ops-tag">r30 / r90</span><span class="ops-tag">from 5m close</span><span class="ops-tag">r3 / r12</span><span class="ops-tag">volume ratio</span><span class="ops-tag">close edge</span></div></div>
+          'Быстрый слой смотрит сдвиги <b>r30/r90</b> за 30/90 секунд и движение от последней 1m-свечи. Подтверждающий слой смотрит <b>r3</b> за 3 минуты, <b>r12m</b> за 12 минут, <b>h1</b> как часовой контекст, объём, закрытие у нужного края диапазона и не слишком позднее расширение.',
+          'The fast layer watches <b>r30/r90</b> moves over 30/90 seconds and movement from the last 1m close. The confirmation layer watches <b>r3</b> over 3 minutes, <b>r12m</b> over 12 minutes, <b>h1</b> as one-hour context, volume, close near the correct range edge, and avoids late extension.'
+        )}<div class="ops-tags"><span class="ops-tag">r30 / r90</span><span class="ops-tag">from 1m close</span><span class="ops-tag">r3m / r12m / h1</span><span class="ops-tag">volume ratio</span><span class="ops-tag">close edge</span></div></div>
       </div>
       <div class="ops-row">
         <div class="k">${t(lang, 'Фильтры входа', 'Entry filters')}</div>
@@ -918,11 +910,11 @@ function momentumStrategyDetail(lang: Lang): string {
   return `<div class="section">
     <div class="section-title">${t(lang, 'Как устроена Momentum Follow', 'How Momentum Follow works')}</div>
     <p class="sd-lead">${t(lang,
-      'Momentum Follow v2 — отдельная трендовая механика на Hyperliquid, противоположная основной wick-fade. Она не ловит откат после шипа, а пытается войти <b>по направлению резкого импульса</b>. Система смотрит весь рынок лёгким 2-секундным allMids-радаром, пересчитывает порог всплеска под волатильность каждой монеты и в real входит только после проверок стакана, спреда, свободной монеты и риск-лимитов.',
-      'Momentum Follow v2 is a separate trend mechanic on Hyperliquid, opposite to the main wick-fade. It does not catch snap-backs after spikes; it tries to enter <b>with a sharp impulse</b>. The system watches the full market with a lightweight 2-second allMids radar, recalculates the impulse threshold from each coin’s volatility, and only enters live after book depth, spread, free-coin and risk-limit checks.')}</p>
+      'Momentum Follow v2 — основная активная трендовая механика на Hyperliquid. Она пытается войти <b>по направлению резкого импульса</b>, когда движение уже подтверждено. Система смотрит весь рынок лёгким 2-секундным allMids-радаром, собирает 1m-свечи, пересчитывает порог всплеска под волатильность каждой монеты и в real входит только после проверок стакана, спреда, свободной монеты и риск-лимитов.',
+      'Momentum Follow v2 is the primary active trend mechanic on Hyperliquid. It tries to enter <b>with a sharp impulse</b> after the move is confirmed. The system watches the full market with a lightweight 2-second allMids radar, builds 1m candles, recalculates the impulse threshold from each coin’s volatility, and only enters live after book depth, spread, free-coin and risk-limit checks.')}</p>
     <div class="sd-steps">
-      <div class="sd-step"><span class="n">1</span><h5>${t(lang, 'Адаптивный all-market сканер', 'Adaptive all-market scanner')}</h5><p>${t(lang, 'Каждые 2 секунды лёгкий allMids-радар смотрит весь рынок на резкие intrabar-сдвиги, а раз в минуту подтверждающий слой проверяет закрытые 5-минутные свечи. Порог всплеска не фиксированный: он пересчитывается по текущей волатильности монеты, свежему объёмному профилю и часовому направлению.', 'Every 2 seconds a light allMids radar watches the full market for sharp intrabar moves, while a confirming layer checks closed 5-minute candles every minute. The impulse threshold is not fixed: it is recalculated from the coin’s current volatility, recent volume profile, and one-hour direction.')}</p></div>
-      <div class="sd-step"><span class="n">2</span><h5>${t(lang, 'Вход по тренду', 'Trend entry')}</h5><p>${t(lang, 'Если монета свободна, wick-fade не держит позицию, спред нормальный и в стакане достаточно глубины, стратегия входит малым рыночным ордером по направлению импульса. Быстрый слой может войти внутри 5m свечи; подтверждающий слой раз в минуту проверяет закрытые свечи, объём и закрытие у правильного края диапазона.', 'If the coin is free, wick-fade has no position, spread is acceptable and the book has enough depth, the strategy enters with a small market order in the impulse direction. The fast layer can enter inside a 5-minute candle; the confirming layer checks closed candles, volume and range-edge close every minute.')}</p></div>
+      <div class="sd-step"><span class="n">1</span><h5>${t(lang, 'Адаптивный all-market сканер', 'Adaptive all-market scanner')}</h5><p>${t(lang, 'Каждые 2 секунды лёгкий allMids-радар смотрит весь рынок на резкие intrabar-сдвиги и собирает текущие 1m OHLC. Подтверждающий слой теперь проверяет закрытые минутные свечи: 3 минуты импульса, 12 минут продолжения и часовой фон. Порог всплеска не фиксированный: он пересчитывается по текущей волатильности монеты и свежему объёмному профилю.', 'Every 2 seconds a light allMids radar watches the full market for sharp intrabar moves and builds current 1m OHLC. The confirming layer now checks closed minute candles: 3 minutes of impulse, 12 minutes of continuation, and one-hour context. The impulse threshold is not fixed: it is recalculated from the coin’s current volatility and recent volume profile.')}</p></div>
+      <div class="sd-step"><span class="n">2</span><h5>${t(lang, 'Вход по тренду', 'Trend entry')}</h5><p>${t(lang, 'Если монета свободна, спред нормальный и в стакане достаточно глубины, стратегия входит малым рыночным ордером по направлению импульса. Быстрый слой может войти внутри 1m свечи; подтверждающий слой раз в минуту проверяет закрытые свечи, объём и закрытие у правильного края диапазона.', 'If the coin is free, spread is acceptable and the book has enough depth, the strategy enters with a small market order in the impulse direction. The fast layer can enter inside a 1-minute candle; the confirming layer checks closed candles, volume and range-edge close every minute.')}</p></div>
       <div class="sd-step cat"><span class="n">3</span><h5>${t(lang, 'Динамический риск, Kelly-размер и быстрый выход', 'Dynamic risk, Kelly sizing and fast exit')}</h5><p>${t(lang, 'На входе считаем волатильность монеты и от неё строим стоп, зону включения трейлинга и допустимый откат. Размер позиции тоже не фиксированный: score/EV сигнала переводится в консервативный fractional Kelly, но остаётся в micro-коридоре. Биржевой стоп ставится сразу; 2-секундный fast-менеджер может закрыть по трейлингу внутри свечи. Модель держит расчётный risk/reward не хуже 1:2.', 'At entry, the strategy estimates coin volatility and derives the stop, trailing activation zone and allowed giveback from it. Position size is not fixed either: signal score/EV is converted into conservative fractional Kelly while staying inside a micro range. An exchange stop is placed immediately; the 2-second fast manager can close on trailing inside the candle. Designed risk/reward stays at least 1:2.')}</p></div>
     </div>
     <div class="sd-blocks">
@@ -938,7 +930,7 @@ function momentumStrategyDetail(lang: Lang): string {
         <h4>${t(lang, 'Защита от конфликта', 'Conflict protection')}</h4>
         <ul>
           <li>${t(lang, 'Одна монета не может одновременно управляться двумя live-механиками.', 'One coin cannot be managed by two live mechanics at the same time.')}</li>
-          <li>${t(lang, 'При входе Momentum монета блокируется для wick-fade, а его лимитки по этой монете снимаются.', 'When Momentum enters, the coin is locked away from wick-fade and its resting limits on that coin are pulled.')}</li>
+          <li>${t(lang, 'При входе Momentum монета получает lock, чтобы другая live-механика не открыла конфликтующую позицию.', 'When Momentum enters, the coin receives a lock so another live mechanic cannot open a conflicting position.')}</li>
           <li>${t(lang, 'Биржевой стоп ставится сразу после подтверждения позиции; кодовый poll остаётся резервной защитой.', 'An exchange stop is placed immediately after position confirmation; the code poll remains backup protection.')}</li>
           <li>${t(lang, 'Momentum Doctor каждую минуту проверяет новые закрытые live-сделки, сравнивает прогноз с фактом и осторожно двигает только ограниченные bias-поправки.', 'Momentum Doctor checks new closed live trades every minute, compares forecast with reality and carefully moves only bounded bias corrections.')}</li>
         </ul>
@@ -959,7 +951,6 @@ export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
     `
     <div class="header">
       <a class="lt-back" href="/lab">${t(lang, '← в лабораторию', '← to the lab')}</a>
-      <a class="lt-back" href="/lab/live" style="margin-left:12px">${t(lang, '← основной live-трек', '← main live track')}</a>
       <span class="strat-code">${t(lang, 'LIVE MICRO · HYPERLIQUID · MOMENTUM V2', 'LIVE MICRO · HYPERLIQUID · MOMENTUM V2')}</span>
       <h1 class="title">Momentum Follow</h1>
       <p class="subtitle">${t(lang, 'Адаптивная трендовая стратегия: 2-секундный радар всплесков, score/EV/Kelly-размер, новый публичный отсчёт.', 'Adaptive trend strategy: 2-second impulse radar, score/EV/Kelly sizing, new public track.')}</p>
@@ -1281,26 +1272,11 @@ export async function renderLiveTrack(page = 1, lang: Lang = 'ru'): Promise<stri
 
 /** Compact live-track summary for the hero card at the top of /lab. */
 export function liveTrackHero(lang: Lang = 'ru'): string {
-  const rows = closedStmt.all();
-  const st = computeStats(rows, openStmt.all().length);
   const momRows = momentumPublicRows(momClosedStmt.all());
   const momOpen = momentumPublicRows(momOpenStmt.all());
   const mom = computeMomentumStats(momRows, momOpen.length);
   return `
     <div class="lt-hero-stack">
-    <a class="lt-hero" href="/lab/live">
-      <div class="lt-hero-l">
-        <span class="lt-hero-badge">🟢 LIVE · Hyperliquid · ${t(lang, 'реальные деньги', 'real money')}</span>
-        <div class="lt-hero-title">${t(lang, 'Боевой трек — реальные результаты', 'Live track — real results')}</div>
-        <div class="lt-hero-sub">${t(lang, 'Что мы делаем, честная статистика и дорожная карта →', 'What we do, honest stats, and the roadmap →')}</div>
-      </div>
-      <div class="lt-hero-r">
-        <div class="lt-hero-stat"><div class="v ${cls(st.netPct)}">${pct(st.netPct)}</div><div class="k">${t(lang, 'накопл.', 'cumul.')}</div></div>
-        <div class="lt-hero-stat"><div class="v">${WF_CONFIG.coins.length}</div><div class="k">${t(lang, 'монет', 'coins')}</div></div>
-        <div class="lt-hero-stat"><div class="v">${st.closed}</div><div class="k">${t(lang, 'сделок', 'trades')}</div></div>
-        <div class="lt-hero-stat"><div class="v">${st.winRate != null ? `${(st.winRate * 100).toFixed(0)}%` : '—'}</div><div class="k">${t(lang, 'винрейт', 'win rate')}</div></div>
-      </div>
-    </a>
     <a class="lt-hero" href="/lab/momentum">
       <div class="lt-hero-l">
         <span class="lt-hero-badge">🧭 MOMENTUM V2 · Hyperliquid · ${t(lang, 'новый отсчёт', 'new track')}</span>
@@ -1336,11 +1312,9 @@ export const LIVE_TRACK_HERO_CSS = `
 `;
 
 export async function labTrackRoute(app: FastifyInstance): Promise<void> {
-  app.get<{ Querystring: { page?: string } }>('/lab/live', async (req, reply) => {
-    const page = Math.max(1, parseInt(req.query.page ?? '1', 10) || 1);
-    reply.type('text/html; charset=utf-8');
+  app.get('/lab/live', async (_req, reply) => {
     reply.header('Cache-Control', 'public, max-age=30');
-    return renderLiveTrack(page, getLang(req));
+    return reply.redirect('/lab/momentum', 302);
   });
 
   app.get<{ Querystring: { page?: string } }>('/lab/momentum', async (req, reply) => {

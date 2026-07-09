@@ -23,6 +23,7 @@ import {
   hlExitAvgSince,
   hlAccountValue,
 } from '../exchange/hyperliquid-private.js';
+import { upsertHlMinuteCandlesFromMids } from './hl-minute-candle-collector.js';
 
 type Side = 'long' | 'short';
 type Candle = { t: number; o: number; h: number; l: number; c: number; v: number };
@@ -110,6 +111,9 @@ const CLOSE_EDGE_BASE = 0.62;
 const REPORT_KEY = 'hl_momentum_shadow_last_report_id';
 const LIVE_REPORT_KEY = 'hl_momentum_live_last_report_id';
 const FRESH_CANDLE_MAX_AGE_MS = 25 * 60_000;
+const FRESH_1M_CANDLE_MAX_AGE_MS = 4 * 60_000;
+const ONE_MINUTE_MS = 60_000;
+const FIVE_MINUTE_MS = 5 * 60_000;
 const FAST_MIDS_POLL_MS = 2_000;
 const FAST_MIDS_HISTORY_MS = 5 * 60_000;
 const FAST_MOVE_VOL_MULT = 1.60;
@@ -154,9 +158,22 @@ const candlesStmt = db.prepare<[string, number], Candle>(`
    ORDER BY t DESC
    LIMIT ?
 `);
+const minuteCandlesStmt = db.prepare<[string, number, number], Candle>(`
+  SELECT t, o, h, l, c, v FROM hl_candles_1m
+   WHERE coin = ? AND t < ?
+   ORDER BY t DESC
+   LIMIT ?
+`);
 const freshCoinsStmt = db.prepare<[number], { coin: string }>(`
   SELECT coin
     FROM hl_candles
+   GROUP BY coin
+  HAVING COUNT(*) >= 70 AND MAX(t) >= ?
+   ORDER BY coin
+`);
+const freshMinuteCoinsStmt = db.prepare<[number], { coin: string }>(`
+  SELECT coin
+    FROM hl_candles_1m
    GROUP BY coin
   HAVING COUNT(*) >= 70 AND MAX(t) >= ?
    ORDER BY coin
@@ -367,6 +384,10 @@ function runtimeNum(key: string, fallback: number, lo: number, hi: number): numb
   return Number.isFinite(raw) ? clamp(raw, lo, hi) : fallback;
 }
 
+function signalTimeframeMin(): number {
+  return Math.round(runtimeNum('hl_momentum_signal_tf_min', 1, 1, 5));
+}
+
 function liveMaxOpen(): number {
   return Math.round(runtimeNum('hl_momentum_live_max_open', LIVE_MAX_OPEN, 1, 20));
 }
@@ -395,11 +416,31 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function getCandles(coin: string, n = 90): Candle[] {
+function minuteBucket(ms: number): number {
+  return Math.floor(ms / ONE_MINUTE_MS) * ONE_MINUTE_MS;
+}
+
+function getFiveMinuteCandles(coin: string, n = 90): Candle[] {
   return candlesStmt.all(coin, n).reverse();
 }
 
+function getMinuteCandles(coin: string, n = 180): Candle[] {
+  return minuteCandlesStmt.all(coin, minuteBucket(Date.now()), n).reverse();
+}
+
+function getMomentumCandles(coin: string): Candle[] {
+  if (signalTimeframeMin() <= 1) {
+    const one = getMinuteCandles(coin);
+    if (one.length >= 70) return one;
+  }
+  return getFiveMinuteCandles(coin);
+}
+
 function scanCoins(): string[] {
+  if (signalTimeframeMin() <= 1) {
+    const one = freshMinuteCoinsStmt.all(Date.now() - FRESH_1M_CANDLE_MAX_AGE_MS).map((r) => r.coin);
+    if (one.length) return one;
+  }
   return freshCoinsStmt.all(Date.now() - FRESH_CANDLE_MAX_AGE_MS).map((r) => r.coin);
 }
 
@@ -433,10 +474,24 @@ function quantile(values: number[], q: number): number {
   return xs[lo]! + (xs[hi]! - xs[lo]!) * (pos - lo);
 }
 
+function candleStepMs(cs: Candle[]): number {
+  const diffs: number[] = [];
+  for (let i = Math.max(1, cs.length - 40); i < cs.length; i += 1) {
+    const d = cs[i]!.t - cs[i - 1]!.t;
+    if (d > 0 && Number.isFinite(d)) diffs.push(d);
+  }
+  const step = median(diffs);
+  if (step >= 30_000 && step <= 10 * 60_000) return step;
+  return FIVE_MINUTE_MS;
+}
+
 function volatilityPctAt(cs: Candle[], atMs: number): number {
   const end = cs.findIndex((c) => c.t > atMs);
   const endExclusive = end === -1 ? cs.length : end;
-  const from = Math.max(1, endExclusive - VOL_LOOKBACK_BARS);
+  const stepMs = candleStepMs(cs);
+  const targetMinutes = runtimeNum('hl_momentum_vol_lookback_minutes', 120, 30, 360);
+  const lookbackBars = Math.max(VOL_LOOKBACK_BARS, Math.round((targetMinutes * 60_000) / stepMs));
+  const from = Math.max(1, endExclusive - lookbackBars);
   const ranges: number[] = [];
   for (let i = from; i < endExclusive; i += 1) {
     const c = cs[i]!;
@@ -571,6 +626,8 @@ type AdaptiveThresholds = {
 
 function adaptiveThresholds(cs: Candle[], atMs: number): AdaptiveThresholds {
   const vol5mPct = volatilityPctAt(cs, atMs) * 100;
+  const stepMs = candleStepMs(cs);
+  const stepSec = Math.max(30, stepMs / 1000);
   const strict = fastStrictMult();
   const vols = cs.slice(Math.max(0, cs.length - 97), Math.max(0, cs.length - 1)).map((c) => c.v).filter((v) => v > 0);
   const volAvg = vols.length ? vols.reduce((s, v) => s + v, 0) / vols.length : 0;
@@ -579,13 +636,13 @@ function adaptiveThresholds(cs: Candle[], atMs: number): AdaptiveThresholds {
   const edge = clamp(CLOSE_EDGE_BASE + Math.min(0.20, vol5mPct / 12), 0.62, 0.84);
   return {
     vol5mPct,
-    impulse3Pct: clamp(vol5mPct * Math.sqrt(3) * IMPULSE_VOL_MULT, 0.70, 2.80),
-    trend1hPct: clamp(vol5mPct * Math.sqrt(12) * TREND_VOL_MULT, 0.20, 1.60),
+    impulse3Pct: clamp(vol5mPct * Math.sqrt(3) * IMPULSE_VOL_MULT, stepMs <= ONE_MINUTE_MS * 1.5 ? 0.22 : 0.70, 2.80),
+    trend1hPct: clamp(vol5mPct * Math.sqrt(12) * TREND_VOL_MULT, stepMs <= ONE_MINUTE_MS * 1.5 ? 0.10 : 0.20, 1.60),
     volRatioMin,
     longCloseMin: edge,
     shortCloseMax: 1 - edge,
-    fast30Pct: clamp(vol5mPct * Math.sqrt(30 / 300) * FAST_MOVE_VOL_MULT * strict, 0.18 * strict, 1.80),
-    fast90Pct: clamp(vol5mPct * Math.sqrt(90 / 300) * FAST_MOVE_VOL_MULT * strict, 0.30 * strict, 2.60),
+    fast30Pct: clamp(vol5mPct * Math.sqrt(30 / stepSec) * FAST_MOVE_VOL_MULT * strict, 0.18 * strict, 1.80),
+    fast90Pct: clamp(vol5mPct * Math.sqrt(90 / stepSec) * FAST_MOVE_VOL_MULT * strict, 0.30 * strict, 2.60),
     fastFromLastPct: clamp(vol5mPct * FAST_FROM_LAST_CLOSE_VOL_MULT * strict, 0.30 * strict, 2.60),
     fastMaxAgainst1hPct: clamp(vol5mPct * FAST_MAX_AGAINST_VOL_MULT, 0.12, 0.90),
   };
@@ -594,7 +651,7 @@ function adaptiveThresholds(cs: Candle[], atMs: number): AdaptiveThresholds {
 function thSignal(th: AdaptiveThresholds): string {
   const strict = fastStrictMult();
   const strictText = strict > 1 ? ` strict=${strict.toFixed(2)}` : '';
-  return `thr vol5m=${th.vol5mPct.toFixed(2)} imp3=${th.impulse3Pct.toFixed(2)} tr1h=${th.trend1hPct.toFixed(2)} volx=${th.volRatioMin.toFixed(2)} edge=${th.longCloseMin.toFixed(2)} fast30=${th.fast30Pct.toFixed(2)} fast90=${th.fast90Pct.toFixed(2)} fast5m=${th.fastFromLastPct.toFixed(2)}${strictText}`;
+  return `thr volBar=${th.vol5mPct.toFixed(2)} imp3=${th.impulse3Pct.toFixed(2)} tr12=${th.trend1hPct.toFixed(2)} volx=${th.volRatioMin.toFixed(2)} edge=${th.longCloseMin.toFixed(2)} fast30=${th.fast30Pct.toFixed(2)} fast90=${th.fast90Pct.toFixed(2)} fastRef=${th.fastFromLastPct.toFixed(2)}${strictText}`;
 }
 
 function coinQualityAdj(coin: string, side: Side): number {
@@ -874,14 +931,28 @@ async function liveLiquidityCheck(coin: string, side: Side, notionalUsd: number)
   }
 }
 
+function signalVolumeRatio(coin: string, cs: Candle[], endExclusive: number): number {
+  const last = cs[endExclusive]!;
+  const volBase = avgVolume(cs, endExclusive, 48);
+  if (last.v > 0 && volBase > 0) return last.v / volBase;
+
+  const five = getFiveMinuteCandles(coin, 60);
+  if (five.length < 12) return 1;
+  const i5 = five.length - 1;
+  const fiveBase = avgVolume(five, i5, 48);
+  return fiveBase > 0 ? five[i5]!.v / fiveBase : 1;
+}
+
 function decide(coin: string, cs: Candle[]): MomentumSignal | null {
   if (cs.length < 70) return null;
   const i = cs.length - 1;
   const last = cs[i]!;
   const r3 = pct(cs[i - 3]!.c, last.c);
   const r12 = pct(cs[i - 12]!.c, last.c);
-  const volBase = avgVolume(cs, i, 48);
-  const volRatio = volBase > 0 ? last.v / volBase : 0;
+  const stepMs = candleStepMs(cs);
+  const contextBars = stepMs <= ONE_MINUTE_MS * 1.5 ? 60 : 12;
+  const h1 = i >= contextBars ? pct(cs[i - contextBars]!.c, last.c) : r12;
+  const volRatio = signalVolumeRatio(coin, cs, i);
   const closeNearHigh = (last.c - last.l) / Math.max(1e-12, last.h - last.l);
   const th = adaptiveThresholds(cs, last.t);
   const params = riskParams(cs, last.t);
@@ -889,14 +960,14 @@ function decide(coin: string, cs: Candle[]): MomentumSignal | null {
     r3, r12, volRatio, closeNearHigh, vol5mPct: th.vol5mPct,
     extensionPct: Math.abs(r3),
     impulseRatio: Math.abs(r3) / Math.max(0.1, th.impulse3Pct),
-    h1Ratio: Math.abs(r12) / Math.max(0.1, th.trend1hPct),
+    h1Ratio: Math.abs(h1) / Math.max(0.1, th.trend1hPct),
   };
 
-  if (r3 >= th.impulse3Pct && r12 >= th.trend1hPct && volRatio >= th.volRatioMin && closeNearHigh >= th.longCloseMin) {
-    return scoreSignal({ coin, side: 'long', layer: 'confirm', metrics: baseMetrics, signal: `${coin} up impulse r3=${r3.toFixed(2)} ir=${baseMetrics.impulseRatio?.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} [${thSignal(th)}]` }, params);
+  if (r3 >= th.impulse3Pct && r12 >= th.trend1hPct && h1 >= -th.fastMaxAgainst1hPct && volRatio >= th.volRatioMin && closeNearHigh >= th.longCloseMin) {
+    return scoreSignal({ coin, side: 'long', layer: 'confirm', metrics: baseMetrics, signal: `${coin} up impulse r3=${r3.toFixed(2)} r12m=${r12.toFixed(2)} h1=${h1.toFixed(2)} ir=${baseMetrics.impulseRatio?.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} tf=${Math.round(stepMs / 60_000)}m [${thSignal(th)}]` }, params);
   }
-  if (r3 <= -th.impulse3Pct && r12 <= -th.trend1hPct && volRatio >= th.volRatioMin && closeNearHigh <= th.shortCloseMax) {
-    return scoreSignal({ coin, side: 'short', layer: 'confirm', metrics: baseMetrics, signal: `${coin} down impulse r3=${r3.toFixed(2)} ir=${baseMetrics.impulseRatio?.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} [${thSignal(th)}]` }, params);
+  if (r3 <= -th.impulse3Pct && r12 <= -th.trend1hPct && h1 <= th.fastMaxAgainst1hPct && volRatio >= th.volRatioMin && closeNearHigh <= th.shortCloseMax) {
+    return scoreSignal({ coin, side: 'short', layer: 'confirm', metrics: baseMetrics, signal: `${coin} down impulse r3=${r3.toFixed(2)} r12m=${r12.toFixed(2)} h1=${h1.toFixed(2)} ir=${baseMetrics.impulseRatio?.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} tf=${Math.round(stepMs / 60_000)}m [${thSignal(th)}]` }, params);
   }
   return null;
 }
@@ -969,27 +1040,32 @@ function updateMarketRegime(mids: Map<string, number>, now: number): void {
 function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): EarlySignal | null {
   if (cs.length < 70) return null;
   const last = cs.at(-1)!;
-  if (now - last.t > FRESH_CANDLE_MAX_AGE_MS) return null;
+  const stepMs = candleStepMs(cs);
+  const maxAge = stepMs <= ONE_MINUTE_MS * 1.5 ? FRESH_1M_CANDLE_MAX_AGE_MS : FRESH_CANDLE_MAX_AGE_MS;
+  if (now - last.t > maxAge) return null;
   const r30 = pctFromMid(coin, mid, now, 30_000);
   const r90 = pctFromMid(coin, mid, now, 90_000);
   if (r30 == null || r90 == null) return null;
   const r12 = pct(cs[cs.length - 13]!.c, last.c);
+  const contextBars = stepMs <= ONE_MINUTE_MS * 1.5 ? 60 : 12;
+  const h1 = cs.length > contextBars ? pct(cs[cs.length - 1 - contextBars]!.c, last.c) : r12;
   const fromLast = pct(last.c, mid);
   const params = riskParams(cs, now);
   const th = adaptiveThresholds(cs, now);
+  const fromLabel = `from${Math.round(stepMs / 60_000)}m`;
   const fastMetrics = (side: Side): SignalMetrics => ({
     r30, r90, r12, fromLast, vol5mPct: th.vol5mPct,
     extensionPct: Math.abs(fromLast) + Math.max(0, Math.abs(r90) - th.fast90Pct),
     fast30Ratio: Math.abs(r30) / Math.max(0.1, th.fast30Pct),
     fast90Ratio: Math.abs(r90) / Math.max(0.1, th.fast90Pct),
     fastFromRatio: Math.abs(fromLast) / Math.max(0.1, th.fastFromLastPct),
-    h1Ratio: Math.abs(r12) / Math.max(0.1, th.trend1hPct),
+    h1Ratio: Math.abs(h1) / Math.max(0.1, th.trend1hPct),
     closeNearHigh: side === 'long' ? 1 : 0,
   });
   const up = r30 >= th.fast30Pct
     && r90 >= th.fast90Pct
     && fromLast >= th.fastFromLastPct
-    && r12 >= -th.fastMaxAgainst1hPct;
+    && h1 >= -th.fastMaxAgainst1hPct;
   if (up) {
     const structureBlock = fastBreakoutGate('long', mid, cs);
     if (structureBlock) return null;
@@ -998,14 +1074,14 @@ function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): Ear
       side: 'long',
       layer: 'fast',
       metrics: fastMetrics('long'),
-      signal: `${coin} fast up radar r30=${r30.toFixed(2)} r90=${r90.toFixed(2)} from5m=${fromLast.toFixed(2)} h1=${r12.toFixed(2)} [${thSignal(th)}]`,
+      signal: `${coin} fast up radar r30=${r30.toFixed(2)} r90=${r90.toFixed(2)} ${fromLabel}=${fromLast.toFixed(2)} h1=${h1.toFixed(2)} [${thSignal(th)}]`,
     }, params);
     return { ...scored, last: { ...last, t: now, h: Math.max(last.h, mid), l: Math.min(last.l, mid), c: mid }, params };
   }
   const down = r30 <= -th.fast30Pct
     && r90 <= -th.fast90Pct
     && fromLast <= -th.fastFromLastPct
-    && r12 <= th.fastMaxAgainst1hPct;
+    && h1 <= th.fastMaxAgainst1hPct;
   if (down) {
     const structureBlock = fastBreakoutGate('short', mid, cs);
     if (structureBlock) return null;
@@ -1014,7 +1090,7 @@ function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): Ear
       side: 'short',
       layer: 'fast',
       metrics: fastMetrics('short'),
-      signal: `${coin} fast down radar r30=${r30.toFixed(2)} r90=${r90.toFixed(2)} from5m=${fromLast.toFixed(2)} h1=${r12.toFixed(2)} [${thSignal(th)}]`,
+      signal: `${coin} fast down radar r30=${r30.toFixed(2)} r90=${r90.toFixed(2)} ${fromLabel}=${fromLast.toFixed(2)} h1=${h1.toFixed(2)} [${thSignal(th)}]`,
     }, params);
     return { ...scored, last: { ...last, t: now, h: Math.max(last.h, mid), l: Math.min(last.l, mid), c: mid }, params };
   }
@@ -1256,7 +1332,7 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
 }
 
 async function stepCoin(coin: string): Promise<void> {
-  const cs = getCandles(coin);
+  const cs = getMomentumCandles(coin);
   if (cs.length < 70) return;
   const livePos = liveGetPosStmt.get(coin);
   if (livePos) await liveManagePosition(livePos, cs);
@@ -1347,6 +1423,7 @@ async function fastRadarTick(): Promise<void> {
       mids.set(coin, px);
       pushMid(coin, px, now);
     }
+    upsertHlMinuteCandlesFromMids(mids, now);
     updateMarketRegime(mids, now);
     await fastManageLivePositions(mids);
 
@@ -1355,7 +1432,7 @@ async function fastRadarTick(): Promise<void> {
     for (const [coin, mid] of mids) {
       if ((earlyCooldown.get(coin) ?? 0) > now) continue;
       if (liveGetPosStmt.get(coin) || getPosStmt.get(coin)) continue;
-      const cs = getCandles(coin);
+      const cs = getMomentumCandles(coin);
       const sig = earlyImpulse(coin, mid, now, cs);
       if (sig) candidates.push(sig);
     }

@@ -30,9 +30,8 @@ import { startMakerRunner } from './jobs/maker-runner.js';
 import { startWebhookWatchdog } from './jobs/webhook-watchdog.js';
 import { startHlCollector } from './jobs/hl-collector.js';
 import { startHlCandleCollector } from './jobs/hl-candle-collector.js';
+import { startHlMinuteCandleCollector } from './jobs/hl-minute-candle-collector.js';
 import { startFundingFlipRunner } from './jobs/funding-flip-runner.js';
-import { startWickFadeRunner } from './jobs/wick-fade-runner.js';
-import { startWickFadeDoctorJob } from './jobs/wick-fade-doctor.js';
 import { startHlMomentumShadowJob } from './jobs/hl-momentum-shadow.js';
 import { startHlMomentumDoctorJob } from './jobs/hl-momentum-doctor.js';
 // Phase G — money-back guarantee disabled, see start-job line below.
@@ -238,21 +237,16 @@ async function main(): Promise<void> {
   // (no REST history on HL). Isolated; no orders, no Telegram.
   startHlCollector();
   startHlCandleCollector();
+  startHlMinuteCandleCollector();
   // FUNDING-FLIP test runner — the kill-battery + placebo-verified HL edge,
   // launched in HL TESTNET (fake money) on the ETH+ADA core to accumulate live
   // out-of-sample evidence. mode='testnet' const; idles if HL key missing.
   startFundingFlipRunner();
-  // WICK-FADE test runner — the SECOND validated edge (deep-dislocation anomaly
-  // fade, broad on retail alts). HL TESTNET, post-only deep limits → fade the
-  // snap-back. mode='testnet' const; idles if HL key missing / endpoint mismatch.
-  startWickFadeRunner();
-  // WICK-FADE doctor — reads live fills, sends an operator report, and may only
-  // reduce risk automatically by pausing weak coin/sides. It never increases
-  // size, leverage, stop distance, or trade frequency on its own.
-  startWickFadeDoctorJob();
+  // Wick-fade (/lab/live) is retired. Keep the historical tables/migrations for
+  // audit, but do not schedule real-money quoting or its doctor.
   // HL Momentum — opposite-regime candidate for the portfolio: follows confirmed
   // impulse+volume continuation using native HL candles. Live mode trades tiny
-  // 1x size with a per-coin lock so it cannot fight wick-fade.
+  // 1x size with bounded risk controls.
   startHlMomentumShadowJob();
   // Momentum doctor — continuously audits live exits/filters and may only tune
   // bounded runtime risk parameters after enough closed real-money samples.
