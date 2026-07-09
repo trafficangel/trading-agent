@@ -98,12 +98,14 @@ const LEGACY_TRAIL_GIVEBACK_PCT = 0.0025;
 const LEGACY_TRAIL_MIN_LOCK_PCT = 0.004;
 const MIN_RISK_REWARD = 2;
 const VOL_LOOKBACK_BARS = 24;
-const STOP_ATR_MULT = 1.15;
-const MIN_STOP_PCT = 0.015;
-const MAX_STOP_PCT = 0.018;
-const GIVEBACK_ATR_MULT = 0.35;
-const MIN_TRAIL_GIVEBACK_PCT = 0.002;
-const MAX_TRAIL_GIVEBACK_PCT = 0.0045;
+const STOP_MEDIAN_MULT = 1.35;
+const STOP_TAIL_MULT = 1.05;
+const STOP_RECENT_MULT = 1.20;
+const GIVEBACK_MEDIAN_MULT = 0.80;
+const GIVEBACK_TAIL_MULT = 0.45;
+const GIVEBACK_RECENT_MULT = 0.55;
+const RISK_SANITY_MIN_PCT = 0.0005;
+const RISK_SANITY_MAX_PCT = 0.08;
 const IMPULSE_VOL_MULT = 1.25;
 const TREND_VOL_MULT = 0.35;
 const VOLUME_QUANTILE = 0.80;
@@ -486,6 +488,10 @@ function candleStepMs(cs: Candle[]): number {
 }
 
 function volatilityPctAt(cs: Candle[], atMs: number): number {
+  return riskVolShapeAt(cs, atMs).median;
+}
+
+function riskVolShapeAt(cs: Candle[], atMs: number): { median: number; q70: number; q85: number; q95: number; recent: number } {
   const end = cs.findIndex((c) => c.t > atMs);
   const endExclusive = end === -1 ? cs.length : end;
   const stepMs = candleStepMs(cs);
@@ -499,22 +505,52 @@ function volatilityPctAt(cs: Candle[], atMs: number): number {
     const tr = Math.max(c.h - c.l, Math.abs(c.h - prev.c), Math.abs(c.l - prev.c));
     if (c.c > 0 && Number.isFinite(tr)) ranges.push(tr / c.c);
   }
-  return median(ranges) || LEGACY_STOP_PCT / STOP_ATR_MULT;
+  const fallback = LEGACY_STOP_PCT / STOP_MEDIAN_MULT;
+  const recentBars = Math.max(4, Math.round(12 * (ONE_MINUTE_MS / stepMs)));
+  const recent = ranges.slice(-recentBars);
+  return {
+    median: median(ranges) || fallback,
+    q70: quantile(ranges, 0.70) || median(ranges) || fallback,
+    q85: quantile(ranges, 0.85) || quantile(ranges, 0.70) || median(ranges) || fallback,
+    q95: quantile(ranges, 0.95) || quantile(ranges, 0.85) || median(ranges) || fallback,
+    recent: median(recent) || quantile(ranges, 0.70) || median(ranges) || fallback,
+  };
+}
+
+function saneRiskPct(n: number, fallback: number): number {
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return clamp(n, RISK_SANITY_MIN_PCT, RISK_SANITY_MAX_PCT);
+}
+
+function minGrossLockPct(stopPct: number): number {
+  const cost = COST_RT_PCT / 100;
+  return MIN_RISK_REWARD * (stopPct + cost) + cost;
 }
 
 function riskParams(cs: Candle[], atMs: number): RiskParams {
-  const volPct = volatilityPctAt(cs, atMs);
-  const minStopPct = runtimePct('hl_momentum_min_stop_pct', MIN_STOP_PCT, 0.012, 0.018);
-  const maxStopPct = runtimePct('hl_momentum_max_stop_pct', MAX_STOP_PCT, minStopPct, 0.02);
-  const stopPct = clamp(volPct * STOP_ATR_MULT, minStopPct, maxStopPct);
-  const trailGivebackPct = clamp(volPct * GIVEBACK_ATR_MULT, MIN_TRAIL_GIVEBACK_PCT, MAX_TRAIL_GIVEBACK_PCT);
-  const trailMinLockPct = MIN_RISK_REWARD * stopPct + COST_RT_PCT / 100;
+  const shape = riskVolShapeAt(cs, atMs);
+  const costFloor = (COST_RT_PCT / 100) * 2.5;
+  const rawStop = Math.max(
+    shape.median * STOP_MEDIAN_MULT,
+    shape.q85 * STOP_TAIL_MULT,
+    shape.recent * STOP_RECENT_MULT,
+    costFloor,
+  );
+  const stopPct = saneRiskPct(rawStop, LEGACY_STOP_PCT);
+  const rawGiveback = Math.max(
+    shape.median * GIVEBACK_MEDIAN_MULT,
+    shape.q70 * GIVEBACK_TAIL_MULT,
+    shape.recent * GIVEBACK_RECENT_MULT,
+    (COST_RT_PCT / 100) * 1.2,
+  );
+  const trailGivebackPct = saneRiskPct(rawGiveback, Math.max(shape.median, (COST_RT_PCT / 100) * 1.2));
+  const trailMinLockPct = saneRiskPct(minGrossLockPct(stopPct), stopPct * MIN_RISK_REWARD);
   return {
     stopPct,
     trailGivebackPct,
     trailMinLockPct,
     trailActivatePct: trailMinLockPct + trailGivebackPct,
-    volPct,
+    volPct: shape.median,
   };
 }
 
@@ -524,7 +560,7 @@ function legacyRiskParams(): RiskParams {
     trailActivatePct: LEGACY_TRAIL_ACTIVATE_PCT,
     trailGivebackPct: LEGACY_TRAIL_GIVEBACK_PCT,
     trailMinLockPct: LEGACY_TRAIL_MIN_LOCK_PCT,
-    volPct: LEGACY_STOP_PCT / STOP_ATR_MULT,
+    volPct: LEGACY_STOP_PCT / STOP_MEDIAN_MULT,
   };
 }
 
@@ -784,7 +820,7 @@ function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'modelProb' | 'prob' | 
   const modelProb = Math.round(modelContinuationProb(score) * 10000) / 10000;
   const calibrated = calibratedContinuation(sig, modelProb);
   const p = Math.round(clamp(calibrated.prob + learnedProbBias(), 0.30, 0.72) * 10000) / 10000;
-  const winPnl = params.trailMinLockPct * 100;
+  const winPnl = (params.trailMinLockPct * 100) - COST_RT_PCT;
   const lossPnl = params.stopPct * 100 + COST_RT_PCT;
   const expectedPnl = Math.round((p * winPnl - (1 - p) * lossPnl + learnedEvBiasPct()) * 1000) / 1000;
   return { ...sig, score, modelProb, prob: p, probConfidence: calibrated.confidence, expectedPnl };
@@ -797,7 +833,7 @@ function appendScoreSignal(signal: string, sig: MomentumSignal): string {
 function kellyFraction(sig: MomentumSignal, params: RiskParams): number {
   const p = sig.prob;
   const q = 1 - p;
-  const winPct = params.trailMinLockPct * 100;
+  const winPct = (params.trailMinLockPct * 100) - COST_RT_PCT;
   const lossPct = params.stopPct * 100 + COST_RT_PCT;
   const b = lossPct > 0 ? winPct / lossPct : 0;
   if (!(b > 0)) return 0;
@@ -846,7 +882,7 @@ async function liveSizing(sig: MomentumSignal, params: RiskParams): Promise<Live
   const k = kellyFraction(sig, params) * trust.confidence;
   const riskScale = runtimeNum('hl_momentum_kelly_risk_scale', KELLY_RISK_SCALE, 0.0001, 0.01);
   const riskUsd = eq.data * k * riskScale;
-  const rawNotional = params.stopPct > 0 ? riskUsd / params.stopPct : baseNotional;
+  const rawNotional = params.stopPct > 0 ? riskUsd / (params.stopPct + COST_RT_PCT / 100) : baseNotional;
   const trustedMaxNotional = minNotional + (maxNotional - minNotional) * trust.confidence;
   const fallbackNotional = Math.min(baseNotional, trustedMaxNotional || minNotional);
   const notionalUsd = k > 0 ? clamp(rawNotional, minNotional, trustedMaxNotional) : fallbackNotional;

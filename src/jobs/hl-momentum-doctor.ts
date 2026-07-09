@@ -46,10 +46,6 @@ type RejectSimOut = SimOut & { exitPx: number; closedAt: number; mfe: number; ma
 
 const REPORT_KEY = 'hl_momentum_doctor_last_report_id';
 const COST_RT_PCT = 0.07;
-const MIN_SAMPLE_FOR_AUTOTUNE = 30;
-const MIN_AUTOTUNE_EDGE_PCT = 2;
-const STOP_CANDIDATES = [0.012, 0.015, 0.018] as const;
-const MAX_STOP_PCT = 0.018;
 const MIN_RR = 2;
 const HOLD_MS = 30 * 60_000;
 const TRAIL_HOLD_MS = 60 * 60_000;
@@ -292,12 +288,12 @@ function metrics(t: TradeRow): Metrics | null {
   };
 }
 
-function simulate(t: TradeRow, minStopPct: number): SimOut {
-  const m = metrics(t);
-  const stopPct = clamp(((m?.atrPct ?? 0) / 100) * 1.15, minStopPct, MAX_STOP_PCT);
-  const givebackPct = clamp(((m?.atrPct ?? 0) / 100) * 0.35, 0.002, 0.0045);
-  const lockPct = MIN_RR * stopPct + COST_RT_PCT / 100;
-  const activatePct = lockPct + givebackPct;
+function simulate(t: TradeRow): SimOut {
+  const risk = parseRiskSignal(t.signal);
+  const stopPct = risk.stopPct;
+  const givebackPct = risk.trailGivebackPct;
+  const lockPct = risk.trailMinLockPct;
+  const activatePct = risk.trailActivatePct;
   const bars = afterCandles(t.coin, t.opened_at, 90);
   let best = t.entry_px;
   let active = false;
@@ -325,12 +321,11 @@ function simulate(t: TradeRow, minStopPct: number): SimOut {
   return { pnl: last ? pnlPct(t.side, t.entry_px, last.c) : t.pnl_pct, reason: 'end' };
 }
 
-function score(rows: TradeRow[], minStopPct: number): { minStopPct: number; sum: number; wins: number; reasons: string } {
-  const sims = rows.map((r) => simulate(r, minStopPct));
+function scoreRiskModel(rows: TradeRow[]): { sum: number; wins: number; reasons: string } {
+  const sims = rows.map((r) => simulate(r));
   const mix = new Map<string, number>();
   for (const s of sims) mix.set(s.reason, (mix.get(s.reason) ?? 0) + 1);
   return {
-    minStopPct,
     sum: sims.reduce((acc, s) => acc + s.pnl, 0),
     wins: sims.filter((s) => s.pnl > 0).length,
     reasons: [...mix.entries()].map(([k, v]) => `${k} ${v}`).join(', '),
@@ -382,6 +377,27 @@ function parseRiskSignal(signal: string): { stopPct: number; trailActivatePct: n
     trailGivebackPct: nums[2]!,
     trailMinLockPct: nums[3]!,
   };
+}
+
+function riskModelLines(rows: TradeRow[]): string[] {
+  const risks = rows.map((r) => parseRiskSignal(r.signal));
+  if (risks.length === 0) return ['• ждём сделки с risk-параметрами в сигнале'];
+  const netRrs = risks.map((r) => {
+    const netWin = r.trailMinLockPct * 100 - COST_RT_PCT;
+    const netLoss = r.stopPct * 100 + COST_RT_PCT;
+    return netLoss > 0 ? netWin / netLoss : 0;
+  }).filter((x) => Number.isFinite(x) && x > 0);
+  const p = (x: number) => `${(x * 100).toFixed(2)}%`;
+  const avgStop = avg(risks.map((r) => r.stopPct));
+  const avgAct = avg(risks.map((r) => r.trailActivatePct));
+  const avgGb = avg(risks.map((r) => r.trailGivebackPct));
+  const avgLock = avg(risks.map((r) => r.trailMinLockPct));
+  const sim = scoreRiskModel(rows);
+  return [
+    `• фактические параметры ${risks.length} сделок: stop ${p(avgStop)} · act ${p(avgAct)} · gb ${p(avgGb)} · lock ${p(avgLock)}`,
+    `• net R:R ≈ 1:${(avg(netRrs) || MIN_RR).toFixed(2)} после комиссии; контрфакт по записанным risk: ${fmtPct(sim.sum)} · WR ${rows.length ? ((sim.wins / rows.length) * 100).toFixed(0) : '0'}% · ${sim.reasons}`,
+    `• fixed stop floor отключён: новые сделки получают stop/giveback из распределения волатильности, а EV/Kelly решают, окупается ли риск`,
+  ];
 }
 
 function simulateRejectedSignal(row: RejectedSignalRow, nowMs: number): RejectSimOut | null {
@@ -706,10 +722,6 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
     return { sent: false, closed: rows.length, pnl };
   }
 
-  const scores = STOP_CANDIDATES.map((s) => score(rows, s)).sort((a, b) => b.sum - a.sum);
-  const currentMin = runtimePct('hl_momentum_min_stop_pct', 0.015);
-  const current = score(rows, currentMin);
-  const best = scores[0];
   const metricsRows = rows.map((r) => ({ r, m: metrics(r) })).filter((x): x is { r: TradeRow; m: Metrics } => x.m != null);
   const entryExtreme = metricsRows.filter((x) => x.r.side === 'long' ? x.m.closeNearHigh >= 0.75 : x.m.closeNearHigh <= 0.25);
   const entryExtremePnl = entryExtreme.reduce((acc, x) => acc + x.r.pnl_pct, 0);
@@ -717,14 +729,8 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
   const decayCandidates = metricsRows.filter((x) => x.m.mfe < Math.max(0.45, x.m.atrPct * DECAY_MIN_MFE_R) && x.r.pnl_pct < 0);
   const decayCandidatePnl = decayCandidates.reduce((acc, x) => acc + x.r.pnl_pct, 0);
   const probLines = probabilityBuckets();
-  const actions: string[] = [];
-  const autotuneEnabled = runtimeBool('hl_momentum_doctor_autotune_enabled', true);
   const onlineCalibrationLines = runOnlineCalibration(nowMs);
-
-  if (autotuneEnabled && best && rows.length >= MIN_SAMPLE_FOR_AUTOTUNE && best.sum >= current.sum + MIN_AUTOTUNE_EDGE_PCT) {
-    setKvStmt.run('hl_momentum_min_stop_pct', best.minStopPct.toFixed(4), nowMs, 'hl momentum doctor auto-tune stop floor');
-    actions.push(`auto-tune stop floor: ${(currentMin * 100).toFixed(2)}% → ${(best.minStopPct * 100).toFixed(2)}%`);
-  }
+  const riskLines = riskModelLines(rows);
 
   const lines = [
     `🧭🩺 <b>Momentum Doctor</b>`,
@@ -732,8 +738,8 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
     `Закрытия: ${esc(reasonMix(rows))}`,
     `Слои: ${esc(layerMix(rows))}`,
     ``,
-    `<b>Стоп-пол: контрфакт</b>`,
-    ...scores.map((s) => `• floor ${(s.minStopPct * 100).toFixed(1)}%: ${fmtPct(s.sum)} · WR ${rows.length ? ((s.wins / rows.length) * 100).toFixed(0) : '0'}% · ${esc(s.reasons)}`),
+    `<b>Риск-модель: stop/trail → EV</b>`,
+    ...riskLines.map(esc),
     ``,
     `<b>Качество входа</b>`,
     `• close-extreme фильтр: ${entryExtreme.length}/${rows.length} сделок · фактический PnL ${fmtPct(entryExtremePnl)}`,
@@ -753,15 +759,14 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
     ...governorLines.map(esc),
     ``,
     `<b>Автотюнинг</b>`,
-    autotuneEnabled ? `• режим: включён` : `• режим: выключен, только отчёт`,
-    actions.length ? actions.map((a) => `• ${esc(a)}`).join('\n') : `• без автоправки: нужно &gt;=${MIN_SAMPLE_FOR_AUTOTUNE} закрытых live-сделок и преимущество &gt;=${MIN_AUTOTUNE_EDGE_PCT}%`,
+    `• floor/max stop больше не тюнятся: риск берётся из рынка, а Doctor калибрует p/EV, SKIP-learning и режим Governor`,
     ``,
     `<i>Доктор может менять только ограниченные runtime-параметры риска. Размер, плечо и включение новой стратегии не меняются автоматически.</i>`,
   ];
 
   let sent = false;
   if (opts.notify ?? true) {
-    await sendMessage({ channel: 'logs', text: lines.join('\n'), disable_notification: actions.length === 0 });
+    await sendMessage({ channel: 'logs', text: lines.join('\n'), disable_notification: true });
     sent = true;
   } else {
     logger.info({ text: lines.join('\n') }, 'hl-momentum doctor report');
