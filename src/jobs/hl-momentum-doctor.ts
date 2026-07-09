@@ -28,7 +28,7 @@ type CalibrationRow = {
   layer: string | null;
   closed_at: number;
 };
-type GovernorRow = { side: Side; pnl_pct: number; signal: string; closed_at: number };
+type GovernorRow = { side: Side; pnl_pct: number; signal: string; closed_at: number; ts?: number };
 type GovernorSignalWindow = { total: number; live_open: number | null; paper: number | null; skipped: number | null };
 type GovernorStats = { n: number; avg: number; wr: number; sum: number };
 type RejectedSignalRow = {
@@ -45,6 +45,7 @@ type RejectedSignalRow = {
 type RejectSimOut = SimOut & { exitPx: number; closedAt: number; mfe: number; mae: number; horizonMin: number };
 
 const REPORT_KEY = 'hl_momentum_doctor_last_report_id';
+const RISK_MODEL_VERSION = 'tr-quantile-v2';
 const COST_RT_PCT = 0.07;
 const MIN_RR = 2;
 const HOLD_MS = 30 * 60_000;
@@ -96,6 +97,7 @@ const setKvStmt = db.prepare<[string, string, number, string], void>(`
   VALUES (?, ?, ?, ?)
   ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, reason = excluded.reason
 `);
+const delKvStmt = db.prepare<[string], void>('DELETE FROM runtime_config WHERE key = ?');
 const probBucketStmt = db.prepare<[], ProbBucket>(`
   SELECT CASE
            WHEN calibrated_prob < 0.50 THEN '<50%'
@@ -186,12 +188,13 @@ const updateRejectedOutcomeStmt = db.prepare<[number, number, number, string, nu
          counterfactual_horizon_min = ?
    WHERE id = ?
 `);
-const rejectedGovernorRowsStmt = db.prepare<[number], GovernorRow>(`
-  SELECT side, counterfactual_pnl_pct AS pnl_pct, signal, counterfactual_closed_at AS closed_at
+const rejectedGovernorRowsStmt = db.prepare<[number, number], GovernorRow>(`
+  SELECT side, counterfactual_pnl_pct AS pnl_pct, signal, counterfactual_closed_at AS closed_at, ts
     FROM hl_momentum_signal_journal
    WHERE decision = 'skip'
      AND counterfactual_pnl_pct IS NOT NULL
      AND counterfactual_closed_at IS NOT NULL
+     AND ts >= ?
    ORDER BY counterfactual_closed_at DESC
    LIMIT ?
 `);
@@ -349,6 +352,29 @@ function runtimeNum(key: string, fallback: number): number {
   return Number.isFinite(raw) ? raw : fallback;
 }
 
+function ensureRiskModelState(nowMs: number): string[] {
+  const currentVersion = getKvStmt.get('hl_momentum_risk_model_version')?.value;
+  const currentStart = Number(getKvStmt.get('hl_momentum_risk_model_start_ms')?.value ?? 0);
+  if (currentVersion === RISK_MODEL_VERSION && currentStart > 0) {
+    return [`• risk model ${RISK_MODEL_VERSION}: активен с ${new Date(currentStart).toISOString()}`];
+  }
+
+  const maxClosedId = maxClosedIdStmt.get()?.id ?? 0;
+  const reason = `hl momentum risk model ${RISK_MODEL_VERSION} reset`;
+  setKvStmt.run('hl_momentum_risk_model_version', RISK_MODEL_VERSION, nowMs, reason);
+  setKvStmt.run('hl_momentum_risk_model_start_ms', String(nowMs), nowMs, reason);
+  setKvStmt.run('hl_momentum_prob_bias', '0.0000', nowMs, `${reason}: reset stale probability bias`);
+  setKvStmt.run('hl_momentum_ev_bias_pct', '0.0000', nowMs, `${reason}: reset stale EV bias`);
+  setKvStmt.run('hl_momentum_calibration_last_closed_id', String(maxClosedId), nowMs, `${reason}: ignore old live calibration`);
+  for (const key of ['hl_momentum_min_stop_pct', 'hl_momentum_max_stop_pct', 'hl_momentum_doctor_autotune_enabled']) {
+    delKvStmt.run(key);
+  }
+  return [
+    `• risk model ${currentVersion ?? 'none'} → ${RISK_MODEL_VERSION}: сброшены stale p/EV bias`,
+    `• old live до #${maxClosedId} оставлен для отчёта, но не калибрует новую risk-модель`,
+  ];
+}
+
 function moveToward(current: number, target: number, maxStep: number): number {
   const delta = clamp(target - current, -maxStep, maxStep);
   return Math.round((current + delta) * 10_000) / 10_000;
@@ -484,7 +510,8 @@ function runRejectedSignalLearning(nowMs: number): string[] {
   }
 
   const recentN = Math.round(clamp(runtimeNum('hl_momentum_rejected_recent_n', 120), 30, 300));
-  const rows = rejectedGovernorRowsStmt.all(recentN);
+  const riskStartMs = runtimeNum('hl_momentum_risk_model_start_ms', 0);
+  const rows = rejectedGovernorRowsStmt.all(riskStartMs, recentN);
   const st = statsOf(rows);
   setKvStmt.run('hl_momentum_rejected_sample_n', String(st.n), nowMs, 'hl momentum rejected counterfactual sample');
   setKvStmt.run('hl_momentum_rejected_avg_pct', st.avg.toFixed(4), nowMs, 'hl momentum rejected counterfactual avg');
@@ -616,30 +643,41 @@ function runActivityGovernor(nowMs: number): string[] {
 
   const shadowN = Math.round(clamp(runtimeNum('hl_momentum_governor_shadow_n', GOVERNOR_SHADOW_RECENT_N), 40, 300));
   const shadowRows = shadowGovernorRowsStmt.all(shadowN);
-  const rejectedRows = rejectedGovernorRowsStmt.all(Math.round(clamp(runtimeNum('hl_momentum_rejected_recent_n', 120), 30, 300)));
   const liveRows = liveGovernorRowsStmt.all(20);
-  const signalWindow = signalWindowStmt.get(nowMs - GOVERNOR_SIGNAL_WINDOW_MS) ?? { total: 0, live_open: 0, paper: 0, skipped: 0 };
+  const riskStartMs = runtimeNum('hl_momentum_risk_model_start_ms', 0);
+  const currentLiveRows = riskStartMs > 0 ? liveRows.filter((r) => r.closed_at >= riskStartMs) : liveRows;
+  const currentShadowRows = riskStartMs > 0 ? shadowRows.filter((r) => r.closed_at >= riskStartMs) : shadowRows;
+  const governorRows = riskStartMs > 0 ? currentShadowRows : shadowRows;
+  const liveGovRows = riskStartMs > 0 ? currentLiveRows : liveRows;
+  const rejectedRows = rejectedGovernorRowsStmt.all(
+    riskStartMs,
+    Math.round(clamp(runtimeNum('hl_momentum_rejected_recent_n', 120), 30, 300)),
+  );
+  const signalSinceMs = riskStartMs > 0 ? Math.max(nowMs - GOVERNOR_SIGNAL_WINDOW_MS, riskStartMs) : nowMs - GOVERNOR_SIGNAL_WINDOW_MS;
+  const signalWindow = signalWindowStmt.get(signalSinceMs) ?? { total: 0, live_open: 0, paper: 0, skipped: 0 };
   const open = liveOpenCountStmt.get() ?? { n: 0, long_n: 0, short_n: 0 };
 
-  const shadow = statsOf(shadowRows);
+  const shadow = statsOf(governorRows);
+  const currentShadow = statsOf(currentShadowRows);
   const rejected = statsOf(rejectedRows);
-  const confirm = statsOf(shadowRows.filter((r) => layerFromSignal(r.signal) === 'confirm'));
-  const fast = statsOf(shadowRows.filter((r) => layerFromSignal(r.signal) === 'fast'));
-  const confirmLong = statsOf(shadowRows.filter((r) => r.side === 'long' && layerFromSignal(r.signal) === 'confirm'));
-  const confirmShort = statsOf(shadowRows.filter((r) => r.side === 'short' && layerFromSignal(r.signal) === 'confirm'));
-  const live = statsOf(liveRows);
+  const confirm = statsOf(governorRows.filter((r) => layerFromSignal(r.signal) === 'confirm'));
+  const fast = statsOf(governorRows.filter((r) => layerFromSignal(r.signal) === 'fast'));
+  const confirmLong = statsOf(governorRows.filter((r) => r.side === 'long' && layerFromSignal(r.signal) === 'confirm'));
+  const confirmShort = statsOf(governorRows.filter((r) => r.side === 'short' && layerFromSignal(r.signal) === 'confirm'));
+  const live = statsOf(liveGovRows);
+  const currentLive = statsOf(currentLiveRows);
 
-  const liveBad = live.n >= 5 && (live.avg < -0.20 || live.wr < 0.40);
-  const shadowBad = shadow.n >= 60 && shadow.avg < -0.10;
   const confirmGood = confirm.n >= 12 && confirm.avg > 0 && confirm.wr >= 0.48;
   const confirmHot = confirm.n >= 20 && confirm.avg >= 0.10 && confirm.wr >= 0.52;
   const noLiveButSignals = (signalWindow.live_open ?? 0) === 0 && (signalWindow.paper ?? 0) >= 20;
   const fastGood = fast.n >= 20 && fast.avg >= 0.05 && fast.wr >= 0.48;
   const rejectedMissedEdge = rejected.n >= 25 && rejected.avg >= 0.08 && rejected.wr >= 0.52;
   const rejectedSavedLoss = rejected.n >= 25 && rejected.avg <= -0.08 && rejected.wr <= 0.45;
+  const liveBad = currentLive.n >= 5 && (currentLive.avg < -0.20 || currentLive.wr < 0.40);
+  const shadowBad = currentShadow.n >= 40 && currentShadow.avg < -0.10;
 
   let state: 'defensive' | 'probe' | 'normal' | 'hot';
-  if (liveBad || (rejectedSavedLoss && !confirmGood) || (!confirmGood && shadowBad)) state = 'defensive';
+  if ((rejectedSavedLoss && !confirmGood) || liveBad || (!confirmGood && shadowBad)) state = 'defensive';
   else if (confirmHot && !shadowBad && live.n >= 5 && live.avg > 0 && live.wr >= 0.50) state = 'hot';
   else if (confirmGood && !shadowBad && !noLiveButSignals) state = 'normal';
   else if (confirmGood || noLiveButSignals || rejectedMissedEdge) state = 'probe';
@@ -648,7 +686,7 @@ function runActivityGovernor(nowMs: number): string[] {
   const cfg = state === 'defensive'
     ? { minP: 0.49, minEv: 0.35, maxOpen: 2, maxSame: 1, ir: 1.25, fastLive: 0 }
     : state === 'probe'
-      ? { minP: 0.465, minEv: 0.15, maxOpen: 4, maxSame: 2, ir: 1.30, fastLive: fastGood ? 1 : 0 }
+      ? { minP: 0.465, minEv: 0.05, maxOpen: 4, maxSame: 2, ir: 1.30, fastLive: fastGood ? 1 : 0 }
       : state === 'normal'
         ? { minP: 0.46, minEv: 0.10, maxOpen: 6, maxSame: 3, ir: 1.42, fastLive: fastGood ? 1 : 0 }
         : { minP: 0.45, minEv: 0.05, maxOpen: 8, maxSame: 4, ir: 1.50, fastLive: fastGood ? 1 : 0 };
@@ -678,6 +716,7 @@ function runActivityGovernor(nowMs: number): string[] {
   return [
     `• state <b>${state}</b>: p≥${cfg.minP.toFixed(3)} · EV≥${cfg.minEv.toFixed(2)}% · maxOpen ${cfg.maxOpen} · sameSide ${cfg.maxSame} · ir≤${cfg.ir.toFixed(2)} · fast ${cfg.fastLive ? 'on' : 'off'}`,
     `• shadow ${shadow.n}: ${fmtPct(shadow.avg)} · WR ${(shadow.wr * 100).toFixed(0)}%; confirm ${confirm.n}: ${fmtPct(confirm.avg)} · WR ${(confirm.wr * 100).toFixed(0)}%; fast ${fast.n}: ${fmtPct(fast.avg)} · WR ${(fast.wr * 100).toFixed(0)}%`,
+    `• current risk sample: live ${currentLive.n}/5 ${fmtPct(currentLive.avg)} · shadow ${currentShadow.n}/40 ${fmtPct(currentShadow.avg)}${currentLive.n < 5 ? ' · old live не блокирует новую модель' : ''}`,
     `• rejected/SKIP ${rejected.n}: ${fmtPct(rejected.avg)} · WR ${(rejected.wr * 100).toFixed(0)}%${rejectedMissedEdge ? ' · missed edge' : rejectedSavedLoss ? ' · saved loss' : ''}`,
     `• live ${live.n}: ${fmtPct(live.avg)} · WR ${(live.wr * 100).toFixed(0)}%; open ${open.n} (${open.long_n ?? 0}L/${open.short_n ?? 0}S); best confirm side ${bestSide}`,
   ];
@@ -710,6 +749,7 @@ function probabilityBuckets(): string[] {
 
 export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: boolean; nowMs?: number } = {}): Promise<{ sent: boolean; closed: number; pnl: number }> {
   const nowMs = opts.nowMs ?? Date.now();
+  const riskStateLines = ensureRiskModelState(nowMs);
   const rejectedLearningLines = runRejectedSignalLearning(nowMs);
   const governorLines = runActivityGovernor(nowMs);
   const rows = closedStmt.all(160).reverse();
@@ -740,6 +780,7 @@ export async function runHlMomentumDoctor(opts: { force?: boolean; notify?: bool
     ``,
     `<b>Риск-модель: stop/trail → EV</b>`,
     ...riskLines.map(esc),
+    ...riskStateLines.map(esc),
     ``,
     `<b>Качество входа</b>`,
     `• close-extreme фильтр: ${entryExtreme.length}/${rows.length} сделок · фактический PnL ${fmtPct(entryExtremePnl)}`,
