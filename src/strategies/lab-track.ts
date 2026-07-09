@@ -30,11 +30,24 @@ type MomShadowProof = {
   n: number; avg_pnl: number | null; sum_pnl: number | null; wr: number | null;
   fast_n: number | null; fast_avg: number | null; confirm_n: number | null; confirm_avg: number | null;
 };
+type MomSignalRow = {
+  id: number; ts: number; coin: string; side: string; layer: string; score: number; expected_pnl: number;
+  decision: string; reason: string; ref_px: number | null; signal_px: number | null;
+  r30: number | null; r90: number | null; r3: number | null; r12: number | null; from_last: number | null;
+  vol_ratio: number | null; spread_pct: number | null; side_depth_usd: number | null;
+  open_total: number; open_same_side: number; signal: string;
+  notional_usd: number | null; kelly_fraction: number | null; equity_usd: number | null;
+  model_prob: number | null; calibrated_prob: number | null; prob_confidence: number | null; kelly_confidence: number | null;
+};
+type MomTrailCandle = { t: number; h: number; l: number; c: number };
+type MomRisk = { stopPct: number; trailActivatePct: number; trailGivebackPct: number; trailMinLockPct: number; volPct: number };
 const closedStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode='live' AND closed_at IS NOT NULL ORDER BY closed_at ASC`);
 const openStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode='live' AND closed_at IS NULL ORDER BY opened_at DESC`);
 const momClosedStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_log WHERE closed_at IS NOT NULL ORDER BY closed_at ASC`);
 const momOpenStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_pos ORDER BY opened_at DESC`);
 const limitVolClosesStmt = db.prepare<[string, number], { t: number; c: number }>(`SELECT t, c FROM hl_candles WHERE coin = ? ORDER BY t DESC LIMIT ?`);
+const momTrail1mStmt = db.prepare<[string, number], MomTrailCandle>(`SELECT t, h, l, c FROM hl_candles_1m WHERE coin = ? AND t >= ? ORDER BY t ASC`);
+const momTrail5mStmt = db.prepare<[string, number], MomTrailCandle>(`SELECT t, h, l, c FROM hl_candles WHERE coin = ? AND t >= ? ORDER BY t ASC`);
 const runtimeConfigStmt = db.prepare<[string], { value: string }>(`SELECT value FROM runtime_config WHERE key = ?`);
 const momUniverseStmt = db.prepare<[number, number], { coins: number; fresh: number | null; ready: number | null; newest: number | null }>(`
   SELECT COUNT(*) AS coins,
@@ -114,6 +127,16 @@ const momLearningStmt = db.prepare<[], MomLearnRow>(`
    WHERE l.closed_at IS NOT NULL AND l.pnl_pct IS NOT NULL
    ORDER BY l.closed_at ASC
 `);
+const momSignalJournalStmt = db.prepare<[number], MomSignalRow>(`
+  SELECT id, ts, coin, side, layer, score, expected_pnl, decision, reason,
+         ref_px, signal_px, r30, r90, r3, r12, from_last, vol_ratio,
+         spread_pct, side_depth_usd, open_total, open_same_side, signal,
+         notional_usd, kelly_fraction, equity_usd,
+         model_prob, calibrated_prob, prob_confidence, kelly_confidence
+    FROM hl_momentum_signal_journal
+   ORDER BY ts DESC, id DESC
+   LIMIT ?
+`);
 const MOMENTUM_PUBLIC_START_FALLBACK_MS = Date.UTC(2026, 6, 8, 18, 14, 0);
 
 // ── formatters (self-contained; matches lab.ts style) ──
@@ -172,6 +195,67 @@ function parseMomSignalEv(signal: string): number | null {
   const m = signal.match(/\[score=[^\]]*\sev=([-+]?\d+(?:\.\d+)?)/);
   const n = m ? Number(m[1]) : NaN;
   return Number.isFinite(n) ? n : null;
+}
+
+function parseNum(signal: string, re: RegExp): number | null {
+  const m = signal.match(re);
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseMomRisk(signal: string): MomRisk | null {
+  const m = signal.match(/\[risk stop=([\d.]+) act=([\d.]+) gb=([\d.]+) lock=([\d.]+) vol=([\d.]+)/);
+  if (!m) return null;
+  const nums = m.slice(1, 6).map((v) => Number(v));
+  if (nums.some((n) => !Number.isFinite(n))) return null;
+  return {
+    stopPct: nums[0]!,
+    trailActivatePct: nums[1]!,
+    trailGivebackPct: nums[2]!,
+    trailMinLockPct: nums[3]!,
+    volPct: nums[4]!,
+  };
+}
+
+function momSignalDiag(signal: string): {
+  h1: number | null; ir: number | null; tf: number | null;
+  thrVol: number | null; thrImp: number | null; thrTrend: number | null;
+  thrVolx: number | null; edge: number | null; fast30: number | null; fast90: number | null; fastRef: number | null;
+  risk: MomRisk | null;
+} {
+  return {
+    h1: parseNum(signal, /\bh1=([-+]?\d+(?:\.\d+)?)/),
+    ir: parseNum(signal, /\bir=([-+]?\d+(?:\.\d+)?)/),
+    tf: parseNum(signal, /\btf=([-+]?\d+(?:\.\d+)?)m/),
+    thrVol: parseNum(signal, /\bvol(?:Bar|5m)=([-+]?\d+(?:\.\d+)?)/),
+    thrImp: parseNum(signal, /\bimp3=([-+]?\d+(?:\.\d+)?)/),
+    thrTrend: parseNum(signal, /\btr(?:12|1h)=([-+]?\d+(?:\.\d+)?)/),
+    thrVolx: parseNum(signal, /\bvolx=([-+]?\d+(?:\.\d+)?)/),
+    edge: parseNum(signal, /\bedge=([-+]?\d+(?:\.\d+)?)/),
+    fast30: parseNum(signal, /\bfast30=([-+]?\d+(?:\.\d+)?)/),
+    fast90: parseNum(signal, /\bfast90=([-+]?\d+(?:\.\d+)?)/),
+    fastRef: parseNum(signal, /\bfast(?:Ref|5m)=([-+]?\d+(?:\.\d+)?)/),
+    risk: parseMomRisk(signal),
+  };
+}
+
+function shortReason(reason: string): string {
+  return reason
+    .replace('fast live paused: shadow fast is unproven', 'fast paused')
+    .replace('live position already open', 'already open')
+    .replace('exchange position already open', 'exch open')
+    .replace('wick-fade has coin', 'coin locked')
+    .replace('paper-open', 'paper')
+    .replace('opened', 'live')
+    .replace('liquidity: ', 'liq: ');
+}
+
+function fmtNum(n: number | null | undefined, dp = 2, dash = '—'): string {
+  return n == null || !Number.isFinite(n) ? dash : n.toFixed(dp);
+}
+
+function fmtSigned(n: number | null | undefined, dp = 2): string {
+  return n == null || !Number.isFinite(n) ? '—' : `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(dp)}`;
 }
 
 function todayStartUtcMs(nowMs = Date.now()): number {
@@ -372,6 +456,7 @@ const TRACK_CSS = `
   .eq-svg{width:100%;height:180px;display:block}
   .eq-cap{display:flex;justify-content:space-between;font-size:12px;color:var(--text-faint);margin-top:6px;font-variant-numeric:tabular-nums}
   .eq-cap .pos{color:var(--accent)}.eq-cap .neg{color:var(--danger)}
+  .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
   .lt-tbl{width:100%;border-collapse:collapse;font-size:13px}
   .lt-tbl th{text-align:left;color:var(--text-faint);font-weight:600;padding:9px 10px;border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
   .lt-tbl td{padding:9px 10px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
@@ -379,6 +464,24 @@ const TRACK_CSS = `
   .lt-tbl .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
   .lt-tbl .dt{color:var(--text-faint);font-size:12px;white-space:nowrap}
   .lt-tbl tr:hover td{background:var(--bg-card-hover)}
+  .trail-cell{line-height:1.1;white-space:nowrap}
+  .trail-cell b{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--text)}
+  .trail-cell span{display:block;font-size:10.5px;color:var(--text-faint);margin-top:2px}
+  .trail-cell.on b,.trail-cell.on span{color:var(--accent)}
+  .signal-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:10px}
+  .section-hint{font-size:12px;color:var(--text-faint);line-height:1.45;margin-top:4px}
+  .sig-wrap{max-height:560px;overflow:auto}
+  .sig-table{min-width:1900px;font-size:11.5px}
+  .sig-table th{position:sticky;top:0;background:var(--bg-card);z-index:1;padding:7px 8px;font-size:10px}
+  .sig-table td{padding:7px 8px;white-space:nowrap}
+  .sig-table .mono{font-size:11px}
+  .sig-reason{max-width:170px;overflow:hidden;text-overflow:ellipsis;color:var(--text-dim)}
+  .sig-liq{min-width:92px}.sig-kelly{min-width:86px}
+  .layer-badge{font-size:10px;color:var(--text-dim);border:1px solid var(--border);border-radius:999px;padding:2px 7px}
+  .decision{font-size:10px;font-weight:700;border-radius:999px;padding:2px 7px;border:1px solid var(--border)}
+  .decision.live{color:var(--accent);background:var(--accent-soft);border-color:var(--accent-soft)}
+  .decision.skip{color:var(--danger);background:var(--danger-soft);border-color:var(--danger-soft)}
+  .decision.paper{color:var(--text-dim);background:rgba(255,255,255,.03)}
   .limit-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:10px}
   .limit-head .section-title{margin:0}
   .limit-meta{font-size:12px;color:var(--text-faint);font-variant-numeric:tabular-nums}
@@ -631,18 +734,50 @@ function computeMomentumStats(rows: MomRow[], open: number): MomStats {
   };
 }
 
+function momTrailCandles(coin: string, openedAt: number): MomTrailCandle[] {
+  const one = momTrail1mStmt.all(coin, openedAt);
+  if (one.length >= 2) return one;
+  return momTrail5mStmt.all(coin, openedAt);
+}
+
+function momentumTrailState(r: MomRow): { active: boolean; bestPx: number | null; movePct: number; trailPx: number | null; activatePx: number | null } {
+  const risk = parseMomRisk(r.signal);
+  if (!risk) return { active: false, bestPx: null, movePct: 0, trailPx: null, activatePx: null };
+  const act = risk.trailActivatePct / 100;
+  const gb = risk.trailGivebackPct / 100;
+  const lock = risk.trailMinLockPct / 100;
+  const activatePx = r.side === 'long' ? r.entry_px * (1 + act) : r.entry_px * (1 - act);
+  const bars = momTrailCandles(r.coin, r.opened_at);
+  if (bars.length === 0) return { active: false, bestPx: null, movePct: 0, trailPx: null, activatePx };
+  const bestPx = r.side === 'long' ? Math.max(...bars.map((c) => c.h)) : Math.min(...bars.map((c) => c.l));
+  const move = r.side === 'long' ? (bestPx - r.entry_px) / r.entry_px : (r.entry_px - bestPx) / r.entry_px;
+  if (move < act) return { active: false, bestPx, movePct: move * 100, trailPx: null, activatePx };
+  const trailPx = r.side === 'long'
+    ? Math.max(r.entry_px * (1 + lock), bestPx * (1 - gb))
+    : Math.min(r.entry_px * (1 - lock), bestPx * (1 + gb));
+  return { active: true, bestPx, movePct: move * 100, trailPx, activatePx };
+}
+
 function momentumOpenTable(rows: MomRow[], nowMs: number, lang: Lang): string {
   if (rows.length === 0) return `<div class="card"><div class="card-body"><div class="empty-state" style="padding:18px 0;text-align:center;">${t(lang, 'Сейчас открытых Momentum-позиций нет.', 'No Momentum positions are open right now.')}</div></div></div>`;
-  const body = rows.map((r) => `<tr>
-    <td><b>${esc(r.coin)}</b></td>
-    <td><span class="sd ${r.side === 'long' ? 'long' : 'short'}">${r.side.toUpperCase()}</span></td>
-    <td class="r mono">${r.entry_px}</td>
-    <td class="r">${usd(momNotionalOf(r))}</td>
-    <td class="dt">${heldStr(r.opened_at, nowMs, lang)}</td>
-  </tr>`).join('');
+  const body = rows.map((r) => {
+    const trail = momentumTrailState(r);
+    const risk = parseMomRisk(r.signal);
+    const trailText = trail.active && trail.trailPx != null
+      ? `<b>${fmtPx(trail.trailPx, r.entry_px)}</b><span>${t(lang, 'активен', 'active')} · ${pct(trail.movePct)}</span>`
+      : `<b>${trail.activatePx != null ? fmtPx(trail.activatePx, r.entry_px) : '—'}</b><span>${t(lang, 'активация', 'activation')}${risk ? ` · gb ${risk.trailGivebackPct.toFixed(2)}%` : ''}</span>`;
+    return `<tr>
+      <td><b>${esc(r.coin)}</b></td>
+      <td><span class="sd ${r.side === 'long' ? 'long' : 'short'}">${r.side.toUpperCase()}</span></td>
+      <td class="r mono">${r.entry_px}</td>
+      <td class="r">${usd(momNotionalOf(r))}</td>
+      <td class="r trail-cell ${trail.active ? 'on' : ''}">${trailText}</td>
+      <td class="dt">${heldStr(r.opened_at, nowMs, lang)}</td>
+    </tr>`;
+  }).join('');
   return `<div class="card table-wrap"><table class="lt-tbl"><thead><tr>
     <th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Сторона', 'Side')}</th><th class="r">${t(lang, 'Вход', 'Entry')}</th>
-    <th class="r">${t(lang, 'Размер', 'Size')}</th><th>${t(lang, 'В работе', 'Held')}</th>
+    <th class="r">${t(lang, 'Размер', 'Size')}</th><th class="r">${t(lang, 'Трейл', 'Trail')}</th><th>${t(lang, 'В работе', 'Held')}</th>
   </tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -677,6 +812,86 @@ function momentumClosedTable(rows: MomRow[], page: number, baseUrl: string, lang
     <th class="r">${t(lang, 'Выход', 'Exit')}</th><th class="r">${t(lang, 'Результат', 'Result')}</th><th class="r">P&amp;L $</th>
     <th>${t(lang, 'Как закрыли', 'Exit')}</th><th>${t(lang, 'Открыта (UTC)', 'Opened (UTC)')}</th>
   </tr></thead><tbody>${body}</tbody></table></div>${pager}`;
+}
+
+function decisionCls(decision: string): string {
+  return decision === 'live-open' ? 'live' : decision === 'skip' ? 'skip' : 'paper';
+}
+
+function decisionLabel(decision: string, lang: Lang): string {
+  if (decision === 'live-open') return t(lang, 'LIVE', 'LIVE');
+  if (decision === 'paper') return t(lang, 'PAPER', 'PAPER');
+  if (decision === 'skip') return t(lang, 'SKIP', 'SKIP');
+  return decision.toUpperCase();
+}
+
+function momentumSignalJournal(lang: Lang): string {
+  const limit = Math.round(Math.max(40, Math.min(180, runtimeNum('hl_momentum_page_signal_rows', 100))));
+  const rows = momSignalJournalStmt.all(limit);
+  if (rows.length === 0) {
+    return `<div class="card"><div class="card-body"><div class="empty-state" style="padding:18px 0;text-align:center;">${t(lang, 'Сигналов пока нет.', 'No signals yet.')}</div></div></div>`;
+  }
+  const body = rows.map((r) => {
+    const d = momSignalDiag(r.signal);
+    const risk = d.risk;
+    const p = r.calibrated_prob ?? parseMomSignalProb(r.signal);
+    const px = r.signal_px ?? r.ref_px;
+    const liq = r.spread_pct != null || r.side_depth_usd != null
+      ? `${r.spread_pct != null ? `${r.spread_pct.toFixed(2)}%` : '—'} / ${r.side_depth_usd != null ? usd(r.side_depth_usd) : '—'}`
+      : '—';
+    const kelly = r.notional_usd != null || r.kelly_fraction != null
+      ? `${r.notional_usd != null ? usd(r.notional_usd) : '—'} / ${r.kelly_fraction != null ? r.kelly_fraction.toFixed(3) : '—'}`
+      : '—';
+    return `<tr>
+      <td class="dt">${fmtDt(r.ts).slice(5)}</td>
+      <td><b>${esc(r.coin)}</b></td>
+      <td><span class="sd ${r.side === 'long' ? 'long' : 'short'}">${r.side.toUpperCase()}</span></td>
+      <td><span class="layer-badge">${esc(r.layer)}</span></td>
+      <td><span class="decision ${decisionCls(r.decision)}">${decisionLabel(r.decision, lang)}</span></td>
+      <td class="sig-reason" title="${esc(r.reason)}">${esc(shortReason(r.reason))}</td>
+      <td class="r mono">${px != null ? fmtPx(px, px) : '—'}</td>
+      <td class="r mono">${r.score.toFixed(0)}</td>
+      <td class="r mono ${p != null && p >= 0.49 ? 'pos' : p != null ? 'neg' : ''}">${p != null ? p.toFixed(3) : '—'}</td>
+      <td class="r mono ${cls(r.expected_pnl)}">${pct(r.expected_pnl)}</td>
+      <td class="r mono">${fmtSigned(r.r30)}</td>
+      <td class="r mono">${fmtSigned(r.r90)}</td>
+      <td class="r mono">${fmtSigned(r.r3)}</td>
+      <td class="r mono">${fmtSigned(r.r12)}</td>
+      <td class="r mono">${fmtSigned(d.h1)}</td>
+      <td class="r mono">${fmtSigned(r.from_last)}</td>
+      <td class="r mono">${fmtNum(d.ir, 2)}</td>
+      <td class="r mono">${fmtNum(r.vol_ratio, 2)}</td>
+      <td class="r mono">${fmtNum(d.edge, 2)}</td>
+      <td class="r mono">${fmtNum(d.thrImp, 2)}</td>
+      <td class="r mono">${fmtNum(d.thrTrend, 2)}</td>
+      <td class="r mono">${fmtNum(d.fast30, 2)}</td>
+      <td class="r mono">${fmtNum(d.fast90, 2)}</td>
+      <td class="r mono">${fmtNum(d.fastRef, 2)}</td>
+      <td class="r mono">${risk ? pct(risk.stopPct) : '—'}</td>
+      <td class="r mono">${risk ? pct(risk.trailActivatePct) : '—'}</td>
+      <td class="r mono">${risk ? pct(risk.trailGivebackPct) : '—'}</td>
+      <td class="r mono">${risk ? pct(risk.trailMinLockPct) : '—'}</td>
+      <td class="r mono">${r.open_total}/${r.open_same_side}</td>
+      <td class="r mono sig-liq">${esc(liq)}</td>
+      <td class="r mono sig-kelly">${esc(kelly)}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="signal-head">
+    <div>
+      <div class="section-title">${t(lang, 'Журнал сигналов', 'Signal journal')} · ${rows.length}</div>
+      <div class="section-hint">${t(lang, 'Последние сигналы: LIVE — ушёл в реал, SKIP — отфильтрован защитой, PAPER — оставлен в бумажной проверке. Полная причина видна при наведении.', 'Recent signals: LIVE entered real trading, SKIP was blocked by protection, PAPER stayed in paper validation. Hover a reason for the full text.')}</div>
+    </div>
+  </div>
+  <div class="card table-wrap sig-wrap"><table class="lt-tbl sig-table"><thead><tr>
+    <th>UTC</th><th>${t(lang, 'Монета', 'Coin')}</th><th>${t(lang, 'Стор.', 'Side')}</th><th>${t(lang, 'Слой', 'Layer')}</th><th>${t(lang, 'Реш.', 'Decision')}</th><th>${t(lang, 'Причина', 'Reason')}</th>
+    <th class="r">Px</th><th class="r">Score</th><th class="r">p</th><th class="r">EV</th>
+    <th class="r">r30</th><th class="r">r90</th><th class="r">r3</th><th class="r">r12</th><th class="r">h1</th><th class="r">from</th>
+    <th class="r">IR</th><th class="r">Volx</th><th class="r">Edge</th><th class="r">ImpThr</th><th class="r">TrThr</th>
+    <th class="r">F30</th><th class="r">F90</th><th class="r">FRef</th>
+    <th class="r">Stop</th><th class="r">Act</th><th class="r">GB</th><th class="r">Lock</th>
+    <th class="r">Open</th><th class="r">Liq</th><th class="r">Kelly</th>
+  </tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function momentumDailyStrip(rows: MomRow[], lang: Lang): string {
@@ -981,6 +1196,10 @@ export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
     <div class="section">
       <div class="section-title">${t(lang, 'Live открыто сейчас', 'Live open now')} · ${liveOpen.length}</div>
       ${momentumOpenTable(liveOpen, Date.now(), lang)}
+    </div>
+
+    <div class="section" id="signals">
+      ${momentumSignalJournal(lang)}
     </div>
 
     <div class="section" id="closed">
