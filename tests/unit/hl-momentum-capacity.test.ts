@@ -5,7 +5,7 @@ describe('HL momentum confidence capacity', () => {
   const strong = {
     layer: 'confirm' as const,
     score: 96,
-    prob: 0.62,
+    prob: 0.60,
     expectedPnl: 0.25,
   };
 
@@ -16,7 +16,7 @@ describe('HL momentum confidence capacity', () => {
   it.each([
     [{ ...strong, layer: 'fast' as const }, 'fast layer'],
     [{ ...strong, score: 95 }, 'low score'],
-    [{ ...strong, prob: 0.619 }, 'low probability'],
+    [{ ...strong, prob: 0.599 }, 'low probability'],
     [{ ...strong, expectedPnl: 0.249 }, 'low expected pnl'],
   ])('rejects %s (%s)', (signal, _reason) => {
     expect(isConfidentMomentumSignal(signal)).toBe(false);

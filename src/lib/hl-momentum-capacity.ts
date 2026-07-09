@@ -13,7 +13,7 @@ export type MomentumConfidenceThresholds = {
 
 export const DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLDS: MomentumConfidenceThresholds = {
   minScore: 96,
-  minProb: 0.62,
+  minProb: 0.60,
   minExpectedPnl: 0.25,
 };
 
