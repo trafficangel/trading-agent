@@ -46,6 +46,11 @@ type SignalMetrics = {
   closeNearHigh?: number;
   extensionPct?: number;
   vol5mPct?: number;
+  impulseRatio?: number;
+  fast30Ratio?: number;
+  fast90Ratio?: number;
+  fastFromRatio?: number;
+  h1Ratio?: number;
 };
 type MomentumSignal = {
   coin: string;
@@ -67,6 +72,8 @@ type LiveSizing = {
   source: 'kelly' | 'fallback';
 };
 type PerfStats = { n: number; avg: number | null; wins: number | null; sum: number | null };
+type ShadowProofRow = { side: Side; pnl_pct: number; close_reason: string | null; signal: string };
+type ProofStats = { n: number; avg: number; wr: number; sum: number };
 
 const NOTIONAL_USD = 12;
 const LIVE_ENABLED = true;
@@ -135,6 +142,11 @@ const MAX_CLUSTER_SAME_SIDE = 2;
 const DECAY_EXIT_MS = 6 * 60_000;
 const DECAY_MIN_MFE_R = 0.35;
 const DECAY_LOSS_R = 0.30;
+const SHADOW_PROOF_RECENT_N = 120;
+const SHADOW_PROOF_MIN_SAMPLE = 20;
+const SHADOW_PROOF_MIN_AVG_PCT = 0;
+const SHADOW_PROOF_MIN_WR = 0.45;
+const CONFIRM_MAX_IMPULSE_RATIO = 1.42;
 
 const candlesStmt = db.prepare<[string, number], Candle>(`
   SELECT t, o, h, l, c, v FROM hl_candles
@@ -175,6 +187,13 @@ const recentClosedStmt = db.prepare<[number], LogRow>(`
   SELECT id, coin, side, pnl_pct, close_reason, closed_at
     FROM hl_momentum_shadow_log
    WHERE closed_at IS NOT NULL
+   ORDER BY closed_at DESC
+   LIMIT ?
+`);
+const shadowProofRowsStmt = db.prepare<[number], ShadowProofRow>(`
+  SELECT side, pnl_pct, close_reason, signal
+    FROM hl_momentum_shadow_log
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
    ORDER BY closed_at DESC
    LIMIT ?
 `);
@@ -607,6 +626,56 @@ function layerStats(layer: SignalLayer): PerfStats {
   return liveLayerStatsStmt.get(...patterns) ?? { n: 0, avg: null, wins: null, sum: null };
 }
 
+function signalLayer(signal: string): SignalLayer | 'unknown' {
+  if (signal.includes('layer=fast') || signal.includes('fast up radar') || signal.includes('fast down radar')) return 'fast';
+  if (signal.includes('layer=confirm') || signal.includes('up impulse') || signal.includes('down impulse')) return 'confirm';
+  return 'unknown';
+}
+
+function proofStats(rows: ShadowProofRow[]): ProofStats {
+  const n = rows.length;
+  if (n === 0) return { n: 0, avg: 0, wr: 0, sum: 0 };
+  const sum = rows.reduce((acc, r) => acc + r.pnl_pct, 0);
+  const wins = rows.filter((r) => r.pnl_pct > 0).length;
+  return { n, avg: sum / n, wr: wins / n, sum };
+}
+
+function shadowProofGate(sig: MomentumSignal): string | null {
+  if (runtimeNum('hl_momentum_shadow_proof_enabled', 1, 0, 1) < 0.5) return null;
+
+  const recentN = Math.round(runtimeNum('hl_momentum_shadow_proof_recent_n', SHADOW_PROOF_RECENT_N, 40, 300));
+  const rows = shadowProofRowsStmt.all(recentN);
+  const family = rows.filter((r) => r.side === sig.side && signalLayer(r.signal) === sig.layer);
+  const familyStats = proofStats(family);
+  const minSample = Math.round(runtimeNum('hl_momentum_shadow_proof_min_sample', SHADOW_PROOF_MIN_SAMPLE, 8, 80));
+  const minAvg = runtimeNum('hl_momentum_shadow_proof_min_avg_pct', SHADOW_PROOF_MIN_AVG_PCT, -0.25, 0.50);
+  const minWr = runtimeNum('hl_momentum_shadow_proof_min_wr', SHADOW_PROOF_MIN_WR, 0.25, 0.70);
+
+  if (sig.layer === 'confirm') {
+    const maxImpulseRatio = runtimeNum('hl_momentum_confirm_max_impulse_ratio', CONFIRM_MAX_IMPULSE_RATIO, 1.05, 2.50);
+    const impulseRatio = sig.metrics.impulseRatio;
+    if (impulseRatio != null && impulseRatio > maxImpulseRatio) {
+      return `confirm overextended ${impulseRatio.toFixed(2)}x > ${maxImpulseRatio.toFixed(2)}x`;
+    }
+    if (familyStats.n >= minSample && familyStats.avg < -0.25 && familyStats.wr < 0.35) {
+      return `confirm family red n=${familyStats.n} avg=${familyStats.avg.toFixed(2)} wr=${(familyStats.wr * 100).toFixed(0)}%`;
+    }
+    return null;
+  }
+
+  const fastLiveEnabled = runtimeNum('hl_momentum_fast_live_enabled', 0, 0, 1) >= 0.5;
+  if (!fastLiveEnabled) {
+    return `fast live paused: shadow fast is unproven`;
+  }
+  if (familyStats.n < minSample) {
+    return `fast shadow sample ${familyStats.n}/${minSample}`;
+  }
+  if (familyStats.avg < minAvg || familyStats.wr < minWr) {
+    return `fast shadow red n=${familyStats.n} avg=${familyStats.avg.toFixed(2)} wr=${(familyStats.wr * 100).toFixed(0)}%`;
+  }
+  return null;
+}
+
 function posteriorWinProb(st: Pick<PerfStats, 'n' | 'wins'>, priorP = 0.5, priorN = PROB_PRIOR_N): number {
   return ((st.wins ?? 0) + priorP * priorN) / (st.n + priorN);
 }
@@ -765,6 +834,8 @@ function preTradeGate(sig: MomentumSignal, params: RiskParams): string | null {
   if (sig.score < minScore) return `score ${sig.score} < ${minScore}`;
   if (sig.prob < minProb) return `p ${sig.prob.toFixed(3)} < ${minProb.toFixed(3)}`;
   if (sig.expectedPnl < minEv) return `ev ${sig.expectedPnl.toFixed(2)}% < ${minEv.toFixed(2)}%`;
+  const shadowGate = shadowProofGate(sig);
+  if (shadowGate) return shadowGate;
   const extensionR = (sig.metrics.extensionPct ?? 0) / Math.max(0.1, params.stopPct * 100);
   if (extensionR > MAX_EXTENSION_R_MULT && sig.score < HIGH_SCORE_OVERRIDE) return `late extension ${extensionR.toFixed(2)}R`;
   const pf = portfolioState(sig.side);
@@ -815,13 +886,15 @@ function decide(coin: string, cs: Candle[]): MomentumSignal | null {
   const baseMetrics: SignalMetrics = {
     r3, r12, volRatio, closeNearHigh, vol5mPct: th.vol5mPct,
     extensionPct: Math.abs(r3),
+    impulseRatio: Math.abs(r3) / Math.max(0.1, th.impulse3Pct),
+    h1Ratio: Math.abs(r12) / Math.max(0.1, th.trend1hPct),
   };
 
   if (r3 >= th.impulse3Pct && r12 >= th.trend1hPct && volRatio >= th.volRatioMin && closeNearHigh >= th.longCloseMin) {
-    return scoreSignal({ coin, side: 'long', layer: 'confirm', metrics: baseMetrics, signal: `${coin} up impulse r3=${r3.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} [${thSignal(th)}]` }, params);
+    return scoreSignal({ coin, side: 'long', layer: 'confirm', metrics: baseMetrics, signal: `${coin} up impulse r3=${r3.toFixed(2)} ir=${baseMetrics.impulseRatio?.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} [${thSignal(th)}]` }, params);
   }
   if (r3 <= -th.impulse3Pct && r12 <= -th.trend1hPct && volRatio >= th.volRatioMin && closeNearHigh <= th.shortCloseMax) {
-    return scoreSignal({ coin, side: 'short', layer: 'confirm', metrics: baseMetrics, signal: `${coin} down impulse r3=${r3.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} [${thSignal(th)}]` }, params);
+    return scoreSignal({ coin, side: 'short', layer: 'confirm', metrics: baseMetrics, signal: `${coin} down impulse r3=${r3.toFixed(2)} ir=${baseMetrics.impulseRatio?.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} [${thSignal(th)}]` }, params);
   }
   return null;
 }
@@ -905,6 +978,10 @@ function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): Ear
   const fastMetrics = (side: Side): SignalMetrics => ({
     r30, r90, r12, fromLast, vol5mPct: th.vol5mPct,
     extensionPct: Math.abs(fromLast) + Math.max(0, Math.abs(r90) - th.fast90Pct),
+    fast30Ratio: Math.abs(r30) / Math.max(0.1, th.fast30Pct),
+    fast90Ratio: Math.abs(r90) / Math.max(0.1, th.fast90Pct),
+    fastFromRatio: Math.abs(fromLast) / Math.max(0.1, th.fastFromLastPct),
+    h1Ratio: Math.abs(r12) / Math.max(0.1, th.trend1hPct),
     closeNearHigh: side === 'long' ? 1 : 0,
   });
   const up = r30 >= th.fast30Pct

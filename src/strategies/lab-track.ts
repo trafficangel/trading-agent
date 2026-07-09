@@ -35,6 +35,10 @@ type MomLearnRow = {
   id: number; closed_at: number; pnl_pct: number; signal: string;
   predicted_prob: number | null; predicted_ev: number | null;
 };
+type MomShadowProof = {
+  n: number; avg_pnl: number | null; sum_pnl: number | null; wr: number | null;
+  fast_n: number | null; fast_avg: number | null; confirm_n: number | null; confirm_avg: number | null;
+};
 const closedStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode='live' AND closed_at IS NOT NULL ORDER BY closed_at ASC`);
 const openStmt = db.prepare<[], WfRow>(`SELECT * FROM wick_fade_log WHERE mode='live' AND closed_at IS NULL ORDER BY opened_at DESC`);
 const momClosedStmt = db.prepare<[], MomRow>(`SELECT * FROM hl_momentum_live_log WHERE closed_at IS NOT NULL ORDER BY closed_at ASC`);
@@ -81,6 +85,24 @@ const momSessionPnlStmt = db.prepare<[number], { closed: number; pct: number | n
 `);
 const momEngineOpenStmt = db.prepare<[], { open: number; notional: number | null }>(`
   SELECT COUNT(*) AS open, SUM(qty * entry_px) AS notional FROM hl_momentum_live_pos
+`);
+const momShadowProofStmt = db.prepare<[number], MomShadowProof>(`
+  WITH recent AS (
+    SELECT pnl_pct, signal
+      FROM hl_momentum_shadow_log
+     WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+     ORDER BY closed_at DESC
+     LIMIT ?
+  )
+  SELECT COUNT(*) AS n,
+         AVG(pnl_pct) AS avg_pnl,
+         SUM(pnl_pct) AS sum_pnl,
+         AVG(CASE WHEN pnl_pct > 0 THEN 1.0 ELSE 0.0 END) AS wr,
+         SUM(CASE WHEN signal LIKE '%layer=fast%' OR signal LIKE '%fast up radar%' OR signal LIKE '%fast down radar%' THEN 1 ELSE 0 END) AS fast_n,
+         AVG(CASE WHEN signal LIKE '%layer=fast%' OR signal LIKE '%fast up radar%' OR signal LIKE '%fast down radar%' THEN pnl_pct END) AS fast_avg,
+         SUM(CASE WHEN signal LIKE '%layer=confirm%' OR signal LIKE '%up impulse%' OR signal LIKE '%down impulse%' THEN 1 ELSE 0 END) AS confirm_n,
+         AVG(CASE WHEN signal LIKE '%layer=confirm%' OR signal LIKE '%up impulse%' OR signal LIKE '%down impulse%' THEN pnl_pct END) AS confirm_avg
+    FROM recent
 `);
 const momLearningStmt = db.prepare<[], MomLearnRow>(`
   SELECT l.id,
@@ -710,6 +732,11 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
   const calActualPnl = runtimeNum('hl_momentum_calibration_actual_pnl_pct', 0);
   const calPredEv = runtimeNum('hl_momentum_calibration_pred_ev_pct', 0);
   const stopUsd = runtimeNum('hl_momentum_live_daily_stop_usd', -20);
+  const shadowProofEnabled = runtimeNum('hl_momentum_shadow_proof_enabled', 1) >= 0.5;
+  const shadowProofN = Math.round(runtimeNum('hl_momentum_shadow_proof_recent_n', 120));
+  const fastLiveEnabled = runtimeNum('hl_momentum_fast_live_enabled', 0) >= 0.5;
+  const confirmMaxIr = runtimeNum('hl_momentum_confirm_max_impulse_ratio', 1.42);
+  const proof = momShadowProofStmt.get(shadowProofN) ?? { n: 0, avg_pnl: null, sum_pnl: null, wr: null, fast_n: null, fast_avg: null, confirm_n: null, confirm_avg: null };
   const usedUsd = session.usd ?? 0;
   const stopLeft = Math.max(0, Math.abs(stopUsd) - Math.max(0, -usedUsd));
   const kellyOn = runtimeNum('hl_momentum_kelly_enabled', 1) >= 0.5;
@@ -725,6 +752,7 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
       ${metric(t(lang, 'Позиции', 'Positions'), `${liveOpenPublic} / ${maxOpen}`, t(lang, `${engineOpen.open} сейчас под управлением движка · публичный трек показывает новые после reset`, `${engineOpen.open} currently managed by engine · public track shows new ones after reset`))}
       ${metric(t(lang, 'Качество входа', 'Entry quality'), `score ≥ ${minScore}`, t(lang, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · средний score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · avg score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`))}
       ${metric(t(lang, 'Онлайн-калибровка', 'Online calibration'), `p ${probBias >= 0 ? '+' : ''}${(probBias * 100).toFixed(1)}pp · EV ${pct(evBias)}`, t(lang, `${calN.toFixed(0)} сделок · факт WR ${(calActualWr * 100).toFixed(0)}% vs прогноз ${(calPredWr * 100).toFixed(0)}% · PnL ${pct(calActualPnl)} vs EV ${pct(calPredEv)}`, `${calN.toFixed(0)} trades · actual WR ${(calActualWr * 100).toFixed(0)}% vs predicted ${(calPredWr * 100).toFixed(0)}% · PnL ${pct(calActualPnl)} vs EV ${pct(calPredEv)}`), evBias < 0 || probBias < 0 ? 'neg' : '')}
+      ${metric(t(lang, 'Shadow-proof gate', 'Shadow-proof gate'), shadowProofEnabled ? (fastLiveEnabled ? t(lang, 'fast активен', 'fast active') : t(lang, 'fast на паузе', 'fast paused')) : t(lang, 'выключен', 'off'), t(lang, `recent ${proof.n} shadow: ${proof.avg_pnl != null ? pct(proof.avg_pnl) : '—'} · WR ${proof.wr != null ? (proof.wr * 100).toFixed(0) : '—'}% · confirm ir ≤ ${confirmMaxIr.toFixed(2)}`, `recent ${proof.n} shadow: ${proof.avg_pnl != null ? pct(proof.avg_pnl) : '—'} · WR ${proof.wr != null ? (proof.wr * 100).toFixed(0) : '—'}% · confirm ir ≤ ${confirmMaxIr.toFixed(2)}`), proof.avg_pnl != null && proof.avg_pnl < 0 ? 'neg' : '')}
       ${metric(t(lang, 'Kelly размер', 'Kelly sizing'), `$${minNotional.toFixed(0)}–${maxNotional.toFixed(0)}`, t(lang, `${kellyOn ? 'включён' : 'выключен'} · средний размер сигнала ${sig.avg_notional != null ? usd(sig.avg_notional) : '—'}`, `${kellyOn ? 'enabled' : 'disabled'} · avg signal size ${sig.avg_notional != null ? usd(sig.avg_notional) : '—'}`))}
       ${metric(t(lang, 'Dollar-stop', 'Dollar stop'), usd(stopUsd, true), t(lang, `сессия ${usd(usedUsd, true)} · до стопа ${usd(stopLeft)}`, `session ${usd(usedUsd, true)} · to stop ${usd(stopLeft)}`), usedUsd < 0 ? 'neg' : '')}
       ${metric(t(lang, 'Ликвидность', 'Liquidity'), '≤0.35%', t(lang, `макс. спред · top3 стакан ≥ $150 · ордер ≤10% глубины`, `max spread · top3 book ≥ $150 · order ≤10% of depth`))}
@@ -742,7 +770,7 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
         <div class="v">${t(lang,
           'Перед live-входом проверяем, что монета свободна, wick-fade её не держит, нет перегруза по одной стороне, нет кластерного импульса, стакан достаточно глубокий, а calibrated probability и EV проходят порог.',
           'Before a live entry we check that the coin is free, wick-fade does not hold it, same-side exposure is not crowded, there is no impulse cluster, the book is deep enough, and calibrated probability plus EV pass the gate.'
-        )}<div class="ops-tags"><span class="ops-tag">free coin</span><span class="ops-tag">no wick-fade conflict</span><span class="ops-tag">portfolio crowding</span><span class="ops-tag">regime breadth</span><span class="ops-tag">spread/depth</span></div></div>
+        )} ${t(lang, 'Новый live-допуск добавляет shadow-proof: fast остаётся на бумаге, пока recent shadow не станет зелёным, а confirm не пускается, если импульс уже слишком перерастянут относительно собственного адаптивного порога.', 'The new live admission adds shadow-proofing: fast stays on paper until recent shadow turns green, and confirm is blocked when the impulse is already too stretched versus its own adaptive threshold.')}<div class="ops-tags"><span class="ops-tag">free coin</span><span class="ops-tag">shadow-proof</span><span class="ops-tag">confirm ir gate</span><span class="ops-tag">portfolio crowding</span><span class="ops-tag">spread/depth</span></div></div>
       </div>
       <div class="ops-row">
         <div class="k">${t(lang, 'Риск и выход', 'Risk and exit')}</div>
