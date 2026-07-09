@@ -37,6 +37,7 @@ type RiskParams = {
   volPct: number;
 };
 type SignalLayer = 'fast' | 'confirm';
+type TradeMode = 'follow' | 'fade';
 type SignalMetrics = {
   r30?: number;
   r90?: number;
@@ -153,6 +154,9 @@ const SHADOW_PROOF_MIN_SAMPLE = 20;
 const SHADOW_PROOF_MIN_AVG_PCT = 0;
 const SHADOW_PROOF_MIN_WR = 0.45;
 const CONFIRM_MAX_IMPULSE_RATIO = 1.42;
+const DEFAULT_TRADE_MODE: TradeMode = 'fade';
+const FADE_PRIOR_WIN_RATE = 0.62;
+const FADE_PRIOR_N = 80;
 
 const candlesStmt = db.prepare<[string, number], Candle>(`
   SELECT t, o, h, l, c, v FROM hl_candles
@@ -308,6 +312,48 @@ const liveRecentStatsStmt = db.prepare<[number], PerfStats>(`
        LIMIT ?
     )
 `);
+const liveModeAllStatsStmt = db.prepare<[string], PerfStats>(`
+  SELECT COUNT(*) AS n,
+         AVG(pnl_pct) AS avg,
+         SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins,
+         SUM(pnl_pct) AS sum
+    FROM hl_momentum_live_log
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+     AND signal LIKE ?
+`);
+const liveModeLayerStatsStmt = db.prepare<[string, string, string, string], PerfStats>(`
+  SELECT COUNT(*) AS n,
+         AVG(pnl_pct) AS avg,
+         SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins,
+         SUM(pnl_pct) AS sum
+    FROM hl_momentum_live_log
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+     AND signal LIKE ?
+     AND (signal LIKE ? OR signal LIKE ? OR signal LIKE ?)
+`);
+const liveModeCoinSideStatsStmt = db.prepare<[string, string, Side], { n: number; avg: number | null; wins: number | null }>(`
+  SELECT COUNT(*) AS n,
+         AVG(pnl_pct) AS avg,
+         SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins
+    FROM hl_momentum_live_log
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+     AND signal LIKE ?
+     AND coin = ? AND side = ?
+`);
+const liveModeRecentStatsStmt = db.prepare<[string, number], PerfStats>(`
+  SELECT COUNT(*) AS n,
+         AVG(pnl_pct) AS avg,
+         SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins,
+         SUM(pnl_pct) AS sum
+    FROM (
+      SELECT pnl_pct
+        FROM hl_momentum_live_log
+       WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+         AND signal LIKE ?
+       ORDER BY closed_at DESC
+       LIMIT ?
+    )
+`);
 const insSignalJournalStmt = db.prepare<[
   number, string, Side, SignalLayer, number, number, string, string,
   number | null, number | null, number | null, number | null, number | null, number | null,
@@ -384,6 +430,15 @@ function liveDailyPnlStart(nowMs: number): number {
 function runtimeNum(key: string, fallback: number, lo: number, hi: number): number {
   const raw = Number(getKvStmt.get(key)?.value ?? fallback);
   return Number.isFinite(raw) ? clamp(raw, lo, hi) : fallback;
+}
+
+function momentumTradeMode(): TradeMode {
+  const raw = (getKvStmt.get('hl_momentum_trade_mode')?.value ?? DEFAULT_TRADE_MODE).trim().toLowerCase();
+  return raw === 'follow' ? 'follow' : 'fade';
+}
+
+function oppositeSide(side: Side): Side {
+  return side === 'long' ? 'short' : 'long';
 }
 
 function signalTimeframeMin(): number {
@@ -691,7 +746,10 @@ function thSignal(th: AdaptiveThresholds): string {
 }
 
 function coinQualityAdj(coin: string, side: Side): number {
-  const st = liveCoinSideStatsStmt.get(coin, side);
+  const mode = momentumTradeMode();
+  const st = mode === 'fade'
+    ? liveModeCoinSideStatsStmt.get(modePattern(mode), coin, side)
+    : liveCoinSideStatsStmt.get(coin, side);
   const n = st?.n ?? 0;
   if (n < 3) return 0;
   const avgPnl = st?.avg ?? 0;
@@ -717,6 +775,17 @@ function layerStats(layer: SignalLayer): PerfStats {
     ? ['%layer=fast%', '%fast up radar%', '%fast down radar%']
     : ['%layer=confirm%', '%up impulse%', '%down impulse%'];
   return liveLayerStatsStmt.get(...patterns) ?? { n: 0, avg: null, wins: null, sum: null };
+}
+
+function modePattern(mode: TradeMode): string {
+  return `%mode=${mode}%`;
+}
+
+function modeLayerStats(mode: TradeMode, layer: SignalLayer): PerfStats {
+  const patterns: [string, string, string] = layer === 'fast'
+    ? ['%layer=fast%', '%fast up radar%', '%fast down radar%']
+    : ['%layer=confirm%', '%up impulse%', '%down impulse%'];
+  return liveModeLayerStatsStmt.get(modePattern(mode), ...patterns) ?? { n: 0, avg: null, wins: null, sum: null };
 }
 
 function signalLayer(signal: string): SignalLayer | 'unknown' {
@@ -774,6 +843,8 @@ function posteriorWinProb(st: Pick<PerfStats, 'n' | 'wins'>, priorP = 0.5, prior
 }
 
 function calibratedContinuation(sig: Pick<MomentumSignal, 'coin' | 'side' | 'layer'>, modelProb: number): { prob: number; confidence: number } {
+  if (momentumTradeMode() === 'fade') return calibratedFade(sig, modelProb);
+
   const all = liveAllStatsStmt.get() ?? { n: 0, avg: null, wins: null, sum: null };
   const layer = layerStats(sig.layer);
   const recent = liveRecentStatsStmt.get(30) ?? { n: 0, avg: null, wins: null, sum: null };
@@ -802,6 +873,39 @@ function calibratedContinuation(sig: Pick<MomentumSignal, 'coin' | 'side' | 'lay
   };
 }
 
+function calibratedFade(sig: Pick<MomentumSignal, 'coin' | 'side' | 'layer'>, modelProb: number): { prob: number; confidence: number } {
+  const mode = 'fade';
+  const all = liveModeAllStatsStmt.get(modePattern(mode)) ?? { n: 0, avg: null, wins: null, sum: null };
+  const layer = modeLayerStats(mode, sig.layer);
+  const recent = liveModeRecentStatsStmt.get(modePattern(mode), 30) ?? { n: 0, avg: null, wins: null, sum: null };
+  const coin = liveModeCoinSideStatsStmt.get(modePattern(mode), sig.coin, sig.side) ?? { n: 0, avg: null, wins: null };
+
+  const allW = clamp(all.n / 80, 0, 0.28);
+  const layerW = clamp(layer.n / 50, 0, 0.24);
+  const recentW = clamp(recent.n / 40, 0, 0.16);
+  const coinW = coin.n >= 3 ? clamp(coin.n / 24, 0, 0.10) : 0;
+  const empiricalW = allW + layerW + recentW + coinW;
+  const modelW = clamp(0.18 - empiricalW * 0.10, 0.08, 0.18);
+  const baseW = Math.max(0, 1 - empiricalW - modelW);
+  const modelFadeP = clamp(0.52 + (modelProb - 0.50) * 0.35, 0.48, 0.62);
+
+  let p = baseW * posteriorWinProb({ n: 0, wins: 0 }, FADE_PRIOR_WIN_RATE, FADE_PRIOR_N)
+    + modelW * modelFadeP
+    + allW * posteriorWinProb(all, FADE_PRIOR_WIN_RATE, 24)
+    + layerW * posteriorWinProb(layer, FADE_PRIOR_WIN_RATE, 18)
+    + recentW * posteriorWinProb(recent, FADE_PRIOR_WIN_RATE, 12)
+    + coinW * posteriorWinProb(coin, FADE_PRIOR_WIN_RATE, 10);
+
+  if (all.n >= 12 && (all.avg ?? 0) < 0) p = Math.min(p, 0.56);
+  if (layer.n >= 8 && (layer.avg ?? 0) < 0) p = Math.min(p, 0.55);
+  if (recent.n >= 8 && (recent.avg ?? 0) < 0) p = Math.min(p, 0.54);
+
+  return {
+    prob: Math.round(clamp(p, 0.42, 0.68) * 10000) / 10000,
+    confidence: Math.round(clamp(empiricalW, 0, 0.68) * 1000) / 1000,
+  };
+}
+
 function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'modelProb' | 'prob' | 'probConfidence' | 'expectedPnl'>, params: RiskParams): MomentumSignal {
   const m = sig.metrics;
   const vol5m = Math.max(0.12, m.vol5mPct ?? params.volPct * 100);
@@ -826,6 +930,23 @@ function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'modelProb' | 'prob' | 
   return { ...sig, score, modelProb, prob: p, probConfidence: calibrated.confidence, expectedPnl };
 }
 
+function buildTradeSignal(
+  sig: Omit<MomentumSignal, 'score' | 'modelProb' | 'prob' | 'probConfidence' | 'expectedPnl'>,
+  params: RiskParams,
+): MomentumSignal {
+  const mode = momentumTradeMode();
+  if (mode === 'follow') return scoreSignal({ ...sig, signal: `${sig.signal} [mode=follow]` }, params);
+
+  const originalSide = sig.side;
+  const fadeSide = oppositeSide(originalSide);
+  const label = originalSide === 'long' ? 'fade short vs up impulse' : 'fade long vs down impulse';
+  return scoreSignal({
+    ...sig,
+    side: fadeSide,
+    signal: `${sig.coin} ${label} original_side=${originalSide} ${sig.signal} [mode=fade]`,
+  }, params);
+}
+
 function appendScoreSignal(signal: string, sig: MomentumSignal): string {
   return `${signal} [score=${sig.score} p=${sig.prob.toFixed(3)} mp=${sig.modelProb.toFixed(3)} pc=${sig.probConfidence.toFixed(2)} ev=${sig.expectedPnl.toFixed(2)} layer=${sig.layer}]`;
 }
@@ -845,10 +966,17 @@ function statWinRate(st: Pick<PerfStats, 'n' | 'wins'>): number {
 }
 
 function liveKellyConfidence(sig: MomentumSignal): { confidence: number; reason: string } {
-  const all = liveAllStatsStmt.get() ?? { n: 0, avg: null, wins: null, sum: null };
-  const layer = layerStats(sig.layer);
-  const recent = liveRecentStatsStmt.get(30) ?? { n: 0, avg: null, wins: null, sum: null };
-  const coin = liveCoinSideStatsStmt.get(sig.coin, sig.side) ?? { n: 0, avg: null, wins: null };
+  const mode = momentumTradeMode();
+  const all = mode === 'fade'
+    ? liveModeAllStatsStmt.get(modePattern(mode)) ?? { n: 0, avg: null, wins: null, sum: null }
+    : liveAllStatsStmt.get() ?? { n: 0, avg: null, wins: null, sum: null };
+  const layer = mode === 'fade' ? modeLayerStats(mode, sig.layer) : layerStats(sig.layer);
+  const recent = mode === 'fade'
+    ? liveModeRecentStatsStmt.get(modePattern(mode), 30) ?? { n: 0, avg: null, wins: null, sum: null }
+    : liveRecentStatsStmt.get(30) ?? { n: 0, avg: null, wins: null, sum: null };
+  const coin = mode === 'fade'
+    ? liveModeCoinSideStatsStmt.get(modePattern(mode), sig.coin, sig.side) ?? { n: 0, avg: null, wins: null }
+    : liveCoinSideStatsStmt.get(sig.coin, sig.side) ?? { n: 0, avg: null, wins: null };
 
   const allAvg = all.avg ?? 0;
   const layerAvg = layer.avg ?? 0;
@@ -1000,10 +1128,10 @@ function decide(coin: string, cs: Candle[]): MomentumSignal | null {
   };
 
   if (r3 >= th.impulse3Pct && r12 >= th.trend1hPct && h1 >= -th.fastMaxAgainst1hPct && volRatio >= th.volRatioMin && closeNearHigh >= th.longCloseMin) {
-    return scoreSignal({ coin, side: 'long', layer: 'confirm', metrics: baseMetrics, signal: `${coin} up impulse r3=${r3.toFixed(2)} r12m=${r12.toFixed(2)} h1=${h1.toFixed(2)} ir=${baseMetrics.impulseRatio?.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} tf=${Math.round(stepMs / 60_000)}m [${thSignal(th)}]` }, params);
+    return buildTradeSignal({ coin, side: 'long', layer: 'confirm', metrics: baseMetrics, signal: `${coin} up impulse r3=${r3.toFixed(2)} r12m=${r12.toFixed(2)} h1=${h1.toFixed(2)} ir=${baseMetrics.impulseRatio?.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} tf=${Math.round(stepMs / 60_000)}m [${thSignal(th)}]` }, params);
   }
   if (r3 <= -th.impulse3Pct && r12 <= -th.trend1hPct && h1 <= th.fastMaxAgainst1hPct && volRatio >= th.volRatioMin && closeNearHigh <= th.shortCloseMax) {
-    return scoreSignal({ coin, side: 'short', layer: 'confirm', metrics: baseMetrics, signal: `${coin} down impulse r3=${r3.toFixed(2)} r12m=${r12.toFixed(2)} h1=${h1.toFixed(2)} ir=${baseMetrics.impulseRatio?.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} tf=${Math.round(stepMs / 60_000)}m [${thSignal(th)}]` }, params);
+    return buildTradeSignal({ coin, side: 'short', layer: 'confirm', metrics: baseMetrics, signal: `${coin} down impulse r3=${r3.toFixed(2)} r12m=${r12.toFixed(2)} h1=${h1.toFixed(2)} ir=${baseMetrics.impulseRatio?.toFixed(2)} vol=${volRatio.toFixed(1)}x close=${closeNearHigh.toFixed(2)} tf=${Math.round(stepMs / 60_000)}m [${thSignal(th)}]` }, params);
   }
   return null;
 }
@@ -1105,7 +1233,7 @@ function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): Ear
   if (up) {
     const structureBlock = fastBreakoutGate('long', mid, cs);
     if (structureBlock) return null;
-    const scored = scoreSignal({
+    const scored = buildTradeSignal({
       coin,
       side: 'long',
       layer: 'fast',
@@ -1121,7 +1249,7 @@ function earlyImpulse(coin: string, mid: number, now: number, cs: Candle[]): Ear
   if (down) {
     const structureBlock = fastBreakoutGate('short', mid, cs);
     if (structureBlock) return null;
-    const scored = scoreSignal({
+    const scored = buildTradeSignal({
       coin,
       side: 'short',
       layer: 'fast',
@@ -1406,7 +1534,7 @@ function reportText(rows: LogRow[], open: Pos[]): string {
 
   return [
     `🧭 <b>HL Momentum Shadow</b>`,
-    `Статус: all-market бумага, реальных ордеров нет`,
+    `Статус: all-market бумага, mode=${esc(momentumTradeMode())}`,
     `Последние ${closed}: ${fmtPct(sum)} · WR ${closed ? ((wins / closed) * 100).toFixed(0) : '0'}% · открыто ${open.length}`,
     `Выходы: ${esc(mix)}`,
     leaders.length ? `Сильные: ${esc(leaders.join(', '))}` : `Сильные: мало данных`,
@@ -1423,7 +1551,7 @@ function liveReportText(rows: LogRow[], open: Pos[]): string {
   for (const r of rows) mix.set(r.close_reason ?? 'unknown', (mix.get(r.close_reason ?? 'unknown') ?? 0) + 1);
   return [
     `🧭 <b>HL Momentum LIVE</b>`,
-    `Статус: реальные деньги, all-market scan → score/EV/Kelly sizing → liquidity-filtered live, ~$${LIVE_MIN_NOTIONAL_USD}-${LIVE_MAX_NOTIONAL_USD}, 1x`,
+    `Статус: реальные деньги, mode=${esc(momentumTradeMode())}, all-market scan → score/EV/Kelly sizing → liquidity-filtered live, ~$${LIVE_MIN_NOTIONAL_USD}-${LIVE_MAX_NOTIONAL_USD}, 1x`,
     `Последние ${closed}: ${fmtPct(sum)} · WR ${closed ? ((wins / closed) * 100).toFixed(0) : '0'}% · открыто ${open.length}`,
     `Выходы: ${[...mix.entries()].map(([k, n]) => `${k} ${n}`).join(', ') || 'нет'}`,
     `<i>Монета блокируется для wick-fade на время momentum-позиции, чтобы стратегии не конфликтовали.</i>`,
@@ -1529,6 +1657,7 @@ export function startHlMomentumShadowJob(): void {
   t.unref();
   logger.info({
     live: LIVE_ENABLED,
+    tradeMode: momentumTradeMode(),
     liveNotionalMin: LIVE_MIN_NOTIONAL_USD,
     liveNotionalMax: LIVE_MAX_NOTIONAL_USD,
     liveLeverage: LIVE_LEVERAGE,

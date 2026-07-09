@@ -45,7 +45,7 @@ type RejectedSignalRow = {
 type RejectSimOut = SimOut & { exitPx: number; closedAt: number; mfe: number; mae: number; horizonMin: number };
 
 const REPORT_KEY = 'hl_momentum_doctor_last_report_id';
-const RISK_MODEL_VERSION = 'tr-quantile-v2';
+const RISK_MODEL_VERSION = 'fade-reversal-v1';
 const COST_RT_PCT = 0.07;
 const MIN_RR = 2;
 const HOLD_MS = 30 * 60_000;
@@ -333,11 +333,6 @@ function scoreRiskModel(rows: TradeRow[]): { sum: number; wins: number; reasons:
     wins: sims.filter((s) => s.pnl > 0).length,
     reasons: [...mix.entries()].map(([k, v]) => `${k} ${v}`).join(', '),
   };
-}
-
-function runtimePct(key: string, fallback: number): number {
-  const raw = Number(getKvStmt.get(key)?.value ?? fallback);
-  return Number.isFinite(raw) ? raw : fallback;
 }
 
 function runtimeBool(key: string, fallback: boolean): boolean {
