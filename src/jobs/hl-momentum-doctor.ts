@@ -681,7 +681,7 @@ function runActivityGovernor(nowMs: number): string[] {
   const riskModel = getKvStmt.get('hl_momentum_risk_model_version')?.value ?? '';
   const fadeReversal = riskModel.startsWith('fade-reversal');
   const cfg = state === 'defensive'
-    ? { minP: 0.49, minEv: fadeReversal ? 0.20 : 0.35, maxOpen: 2, maxSame: 1, ir: fadeReversal ? 1.50 : 1.25, fastLive: 0 }
+    ? { minP: 0.49, minEv: fadeReversal ? 0.20 : 0.35, maxOpen: 2, maxSame: 1, ir: fadeReversal ? 2.50 : 1.25, fastLive: 0 }
     : state === 'probe'
       ? { minP: 0.465, minEv: 0.05, maxOpen: 4, maxSame: 2, ir: 1.30, fastLive: fastGood ? 1 : 0 }
       : state === 'normal'
