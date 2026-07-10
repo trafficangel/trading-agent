@@ -122,6 +122,7 @@ const momPromotionDd = Number(momRuntime('hl_momentum_promotion_max_drawdown_pct
 const momPromotionNext = momRuntime('hl_momentum_promotion_next_stage', 'canary-2');
 const momPromotionNextN = Number(momRuntime('hl_momentum_promotion_next_min_trades', '10'));
 const momPromotionMaxOpen = Number(momRuntime('hl_momentum_confirm_long_canary_max_open', '1'));
+const momConfirmLongMinAbsR3 = Number(momRuntime('hl_momentum_confirm_long_min_abs_r3_pct', '0.50'));
 const reconcileRaw = db.prepare<[string], { value: string }>('SELECT value FROM runtime_config WHERE key = ?').get('hl_momentum_reconcile_state')?.value;
 let reconcile = 'not checked';
 if (reconcileRaw) {
@@ -132,7 +133,7 @@ if (reconcileRaw) {
 }
 console.log(`\nHL MOMENTUM LIVE (public track since ${fmtT(momPublicStart)})`);
 console.log(`  reconcile ${reconcile}`);
-console.log(`  stage ${momPromotionStage} · ${momPromotionN}/${momPromotionNextN || momPromotionN} → ${momPromotionNext} · exact ${momPromotionExactN}/${momPromotionN} · avg ${momPromotionAvg >= 0 ? '+' : ''}${momPromotionAvg.toFixed(3)}% · PF ${momPromotionPf} · maxDD ${momPromotionDd.toFixed(3)}% · maxOpen ${momPromotionMaxOpen}`);
+console.log(`  stage ${momPromotionStage} · |r3|≥${momConfirmLongMinAbsR3.toFixed(2)}% · ${momPromotionN}/${momPromotionNextN || momPromotionN} → ${momPromotionNext} · exact ${momPromotionExactN}/${momPromotionN} · avg ${momPromotionAvg >= 0 ? '+' : ''}${momPromotionAvg.toFixed(3)}% · PF ${momPromotionPf} · maxDD ${momPromotionDd.toFixed(3)}% · maxOpen ${momPromotionMaxOpen}`);
 console.log(`  closed ${mom.closed} · exact ${mom.exact}/${mom.closed} · net ${(mom.net_pct ?? 0) >= 0 ? '+' : ''}${(mom.net_pct ?? 0).toFixed(3)}% / $${(mom.net_usd ?? 0).toFixed(3)} · pending intents ${pendingIntents}`);
 for (const p of momOpen) {
   console.log(`  ${p.coin.padEnd(9)} ${p.side.padEnd(5)} @ ${p.entry_px} · $${(p.entry_px * p.qty).toFixed(2)} · ${fmtT(p.opened_at)}`);

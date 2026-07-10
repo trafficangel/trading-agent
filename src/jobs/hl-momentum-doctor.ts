@@ -688,6 +688,12 @@ function layerFromSignal(signal: string): 'fast' | 'confirm' | 'unknown' {
   return 'unknown';
 }
 
+function r3FromSignal(signal: string): number | null {
+  const match = signal.match(/\br3=([-+]?\d+(?:\.\d+)?)/);
+  const value = match ? Number(match[1]) : NaN;
+  return Number.isFinite(value) ? value : null;
+}
+
 function setGovernorKv(key: string, value: string | number, nowMs: number, reason: string): void {
   setKvStmt.run(key, String(value), nowMs, reason);
 }
@@ -729,12 +735,13 @@ function runActivityGovernor(nowMs: number): string[] {
   const segmentStartMs = Math.max(riskStartMs, calibrationStartMs);
   const segmentRows = segmentSourceRows
     .filter((r) => r.closed_at >= segmentStartMs && r.signal.includes(`cv=${HL_MOMENTUM_CALIBRATION_VERSION}`))
-    .map((r) => ({ side: r.side, layer: layerFromSignal(r.signal), pnlPct: r.pnl_pct }));
+    .map((r) => ({ side: r.side, layer: layerFromSignal(r.signal), pnlPct: r.pnl_pct, r3Pct: r3FromSignal(r.signal) ?? NaN }));
   const confirmLongPolicy = {
     sampleSize: Math.round(clamp(runtimeNum('hl_momentum_confirm_long_sample_n', CONFIRM_LONG_CANARY_POLICY.sampleSize), 20, 100)),
     recentSize: Math.round(clamp(runtimeNum('hl_momentum_confirm_long_recent_n', CONFIRM_LONG_CANARY_POLICY.recentSize), 10, 50)),
     minAveragePct: clamp(runtimeNum('hl_momentum_confirm_long_min_avg_pct', CONFIRM_LONG_CANARY_POLICY.minAveragePct), -0.10, 0.30),
     minRecentAveragePct: clamp(runtimeNum('hl_momentum_confirm_long_min_recent_avg_pct', CONFIRM_LONG_CANARY_POLICY.minRecentAveragePct), -0.10, 0.30),
+    minAbsR3Pct: clamp(runtimeNum('hl_momentum_confirm_long_min_abs_r3_pct', CONFIRM_LONG_CANARY_POLICY.minAbsR3Pct), 0.22, 1.50),
   };
   const confirmLongProof = evaluateMomentumSegment(segmentRows, 'confirm', 'long', confirmLongPolicy);
   const sideAwareEnabled = runtimeBool('hl_momentum_side_aware_enabled', true);
@@ -823,7 +830,7 @@ function runActivityGovernor(nowMs: number): string[] {
     `• state <b>${state}</b>: p≥${cfg.minP.toFixed(3)} · EV≥${cfg.minEv.toFixed(2)}% · maxOpen ${cfg.maxOpen} · sameSide ${cfg.maxSame} · ir≤${cfg.ir.toFixed(2)} · fast ${fastLive ? 'on' : 'off'}`,
     `• shadow ${shadow.n}: ${fmtPct(shadow.avg)} · WR ${(shadow.wr * 100).toFixed(0)}%; confirm ${confirm.n}: ${fmtPct(confirm.avg)} · WR ${(confirm.wr * 100).toFixed(0)}%; fast ${fast.n}: ${fmtPct(fast.avg)} · WR ${(fast.wr * 100).toFixed(0)}%`,
     `• promotion <b>${promotion.stage}</b>: live ${promotion.n} · exact ${promotion.exactN}/${promotion.n} · ${fmtPct(promotion.averagePct)} · PF ${promotion.profitFactor == null ? (promotion.netPnlUsd > 0 ? '∞' : '—') : promotion.profitFactor.toFixed(2)} · maxDD ${promotion.maxDrawdownPct.toFixed(2)}% · maxOpen ${promotion.maxOpen}`,
-    `• confirm-long canary ${confirmLongCanary ? '<b>on</b>' : 'off'}: shadow ${confirmLongProof.sample.n}/${confirmLongPolicy.sampleSize} ${fmtPct(confirmLongProof.sample.averagePct)} · recent ${confirmLongProof.recent.n}/${confirmLongPolicy.recentSize} ${fmtPct(confirmLongProof.recent.averagePct)} · ${promotion.reason}`,
+    `• confirm-long canary ${confirmLongCanary ? '<b>on</b>' : 'off'}: |r3|≥${confirmLongPolicy.minAbsR3Pct.toFixed(2)}% · shadow ${confirmLongProof.sample.n}/${confirmLongPolicy.sampleSize} ${fmtPct(confirmLongProof.sample.averagePct)} · recent ${confirmLongProof.recent.n}/${confirmLongPolicy.recentSize} ${fmtPct(confirmLongProof.recent.averagePct)} · ${promotion.reason}`,
     `• current risk sample: live ${currentLive.n}/5 ${fmtPct(currentLive.avg)} · shadow ${currentShadow.n}/40 ${fmtPct(currentShadow.avg)}${currentLive.n < 5 ? ' · old live не блокирует новую модель' : ''}`,
     `• rejected/SKIP ${rejected.n}: ${fmtPct(rejected.avg)} · WR ${(rejected.wr * 100).toFixed(0)}%${rejectedMissedEdge ? ' · missed edge' : rejectedSavedLoss ? ' · saved loss' : ''}`,
     `• live ${live.n}: ${fmtPct(live.avg)} · WR ${(live.wr * 100).toFixed(0)}%; open ${open.n} (${open.long_n ?? 0}L/${open.short_n ?? 0}S); best confirm side ${bestSide}`,

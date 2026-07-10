@@ -34,6 +34,7 @@ import {
   isConfidentMomentumSignal,
 } from '../lib/hl-momentum-capacity.js';
 import { HL_MOMENTUM_CALIBRATION_VERSION } from '../lib/hl-momentum-calibration.js';
+import { CONFIRM_LONG_CANARY_POLICY } from '../lib/hl-momentum-segment-governor.js';
 import type { HlTradeAccounting } from '../lib/hl-trade-accounting.js';
 import { auditHlPositionOwnership } from '../lib/hl-position-ownership.js';
 import { upsertHlMinuteCandlesFromMids } from './hl-minute-candle-collector.js';
@@ -1278,6 +1279,16 @@ function preTradeGate(sig: MomentumSignal, params: RiskParams, confident: boolea
   if (sig.prob < minProb) return `p ${sig.prob.toFixed(3)} < ${minProb.toFixed(3)}`;
   if (sig.expectedPnl < minEv) return `ev ${sig.expectedPnl.toFixed(2)}% < ${minEv.toFixed(2)}%`;
   if (canary) {
+    const minAbsR3 = runtimeNum(
+      'hl_momentum_confirm_long_min_abs_r3_pct',
+      CONFIRM_LONG_CANARY_POLICY.minAbsR3Pct,
+      0.22,
+      1.50,
+    );
+    const absR3 = Math.abs(sig.metrics.r3 ?? NaN);
+    if (!Number.isFinite(absR3) || absR3 < minAbsR3) {
+      return `confirm-long |r3| ${Number.isFinite(absR3) ? absR3.toFixed(2) : 'na'}% < ${minAbsR3.toFixed(2)}%`;
+    }
     const canaryMaxOpen = Math.round(runtimeNum(
       'hl_momentum_confirm_long_canary_max_open',
       CONFIRM_LONG_CANARY_MAX_OPEN,

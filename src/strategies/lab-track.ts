@@ -915,6 +915,7 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
   const maxNotional = runtimeNum('hl_momentum_max_notional_usd', 24);
   const minProb = runtimeNum('hl_momentum_min_calibrated_prob', 0.49);
   const canaryMinProb = runtimeNum('hl_momentum_confirm_long_canary_min_prob', 0.47);
+  const confirmLongMinAbsR3 = runtimeNum('hl_momentum_confirm_long_min_abs_r3_pct', 0.50);
   const activeMinProb = sideAwareEnabled ? canaryMinProb : minProb;
   const minScore = runtimeNum('hl_momentum_min_live_score', 68);
   const minEv = runtimeNum('hl_momentum_min_expected_pnl_pct', 0.10);
@@ -943,7 +944,7 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
   const stopLeft = Math.max(0, Math.abs(stopUsd) - Math.max(0, -usedUsd));
   const kellyOn = runtimeNum('hl_momentum_kelly_enabled', 1) >= 0.5;
   const promotionTarget = promotionStage === 'canary-1'
-    ? t(lang, 'gate: 10 exact · avg ≥ 0.03% · PF ≥ 1.10 · DD ≤ 1.50%', 'gate: 10 exact · avg ≥ 0.03% · PF ≥ 1.10 · DD ≤ 1.50%')
+    ? t(lang, `|r3| ≥ ${confirmLongMinAbsR3.toFixed(2)}% · gate: 10 exact · avg ≥ 0.03% · PF ≥ 1.10 · DD ≤ 1.50%`, `|r3| ≥ ${confirmLongMinAbsR3.toFixed(2)}% · gate: 10 exact · avg ≥ 0.03% · PF ≥ 1.10 · DD ≤ 1.50%`)
     : promotionStage === 'canary-2'
       ? t(lang, 'gate: 25 exact · avg ≥ 0.05% · PF ≥ 1.20 · DD ≤ 2.00%', 'gate: 25 exact · avg ≥ 0.05% · PF ≥ 1.20 · DD ≤ 2.00%')
       : promotionStage === 'shadow' && promotionRetryAfter > Date.now()
@@ -965,7 +966,7 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
       ${metric(t(lang, 'Сигналы', 'Signals'), String(sig.total), t(lang, `${sig.skipped ?? 0} отфильтрованы защитой · ${sig.live_open ?? 0} новых live-входов`, `${sig.skipped ?? 0} filtered by protection · ${sig.live_open ?? 0} new live entries`))}
       ${metric(t(lang, 'Позиции', 'Positions'), `${liveOpenPublic} / ${positionCap}`, t(lang, `${engineOpen.open} сейчас под управлением движка · лимит задаёт этап ${promotionStage}`, `${engineOpen.open} currently managed by engine · cap is set by ${promotionStage}`))}
       ${metric(t(lang, 'Этап допуска', 'Promotion stage'), promotionStage, `${promotionProgress} · exact ${promotionExactN}/${promotionN} · avg ${pct(promotionAvg)} · PF ${promotionPf} · DD ${promotionMaxDd.toFixed(2)}% · ${promotionTarget}`, promotionStage === 'shadow' ? 'neg' : promotionStage === 'scaled' ? 'pos' : '')}
-      ${metric(t(lang, 'Качество входа', 'Entry quality'), `score ≥ ${minScore}`, t(lang, `p ≥ ${activeMinProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · средний score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`, `p ≥ ${activeMinProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · avg score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`))}
+      ${metric(t(lang, 'Качество входа', 'Entry quality'), `|r3| ≥ ${confirmLongMinAbsR3.toFixed(2)}%`, t(lang, `score ≥ ${minScore} · p ≥ ${activeMinProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · средний score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`, `score ≥ ${minScore} · p ≥ ${activeMinProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · avg score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`))}
       ${metric(t(lang, 'Онлайн-калибровка', 'Online calibration'), `p ${probBias >= 0 ? '+' : ''}${(probBias * 100).toFixed(1)}pp · EV ${pct(evBias)}`, t(lang, `${calN.toFixed(0)} сделок · факт WR ${(calActualWr * 100).toFixed(0)}% vs прогноз ${(calPredWr * 100).toFixed(0)}% · PnL ${pct(calActualPnl)} vs EV ${pct(calPredEv)}`, `${calN.toFixed(0)} trades · actual WR ${(calActualWr * 100).toFixed(0)}% vs predicted ${(calPredWr * 100).toFixed(0)}% · PnL ${pct(calActualPnl)} vs EV ${pct(calPredEv)}`), evBias < 0 || probBias < 0 ? 'neg' : '')}
       ${metric(t(lang, 'SKIP learning', 'SKIP learning'), rejectedN ? pct(rejectedAvg) : '—', t(lang, `${rejectedN.toFixed(0)} отклонённых оценены · WR ${(rejectedWr * 100).toFixed(0)}% · ${rejectedAvg > 0 ? 'могли упустить плюс' : rejectedAvg < 0 ? 'фильтр спасал от минуса' : 'нейтрально'}`, `${rejectedN.toFixed(0)} rejected evaluated · WR ${(rejectedWr * 100).toFixed(0)}% · ${rejectedAvg > 0 ? 'may have missed upside' : rejectedAvg < 0 ? 'filter saved losses' : 'neutral'}`), rejectedAvg > 0 ? 'neg' : rejectedAvg < 0 ? 'pos' : '')}
       ${metric(t(lang, 'Governor режим', 'Governor mode'), governorState, t(lang, `shadow ${pct(governorShadowAvg)} · confirm ${pct(governorConfirmAvg)} · live ${pct(governorLiveAvg)} · same side ≤ ${maxSameSide.toFixed(0)}`, `shadow ${pct(governorShadowAvg)} · confirm ${pct(governorConfirmAvg)} · live ${pct(governorLiveAvg)} · same side ≤ ${maxSameSide.toFixed(0)}`), governorState === 'defensive' ? 'neg' : governorState === 'hot' ? 'pos' : '')}
@@ -985,8 +986,8 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
       <div class="ops-row">
         <div class="k">${t(lang, 'Фильтры входа', 'Entry filters')}</div>
         <div class="v">${t(lang,
-          'Перед live-входом проверяем, что монета свободна, wick-fade её не держит, нет перегруза по одной стороне, стакан достаточно глубокий, а calibrated probability и EV проходят порог новой fade-модели.',
-          'Before a live entry we check that the coin is free, wick-fade does not hold it, same-side exposure is not crowded, the book is deep enough, and calibrated probability plus EV pass the new fade model gate.'
+          'Перед live-входом проверяем, что трёхминутный импульс не слабее 0.50%, монета свободна, wick-fade её не держит, нет перегруза по одной стороне, стакан достаточно глубокий, а calibrated probability и EV проходят порог fade-модели.',
+          'Before a live entry we require at least a 0.50% three-minute impulse, check that the coin is free, wick-fade does not hold it, same-side exposure is not crowded, the book is deep enough, and calibrated probability plus EV pass the fade model gate.'
         )} ${t(lang, 'Activity governor каждую минуту переводит систему между defensive/probe/normal/hot: если сделок нет, но shadow зелёный — ослабляет вход; если live или shadow красные — зажимает maxOpen, сторону, p/EV и ir; если прогнозы и факт сходятся выше 50/50 — расширяет.', 'The activity governor moves the system between defensive/probe/normal/hot every minute: if there are no trades but shadow is green, it loosens; if live or shadow are red, it tightens maxOpen, side exposure, p/EV and ir; if forecasts and reality converge above 50/50, it expands.')}<div class="ops-tags"><span class="ops-tag">free coin</span><span class="ops-tag">shadow-proof</span><span class="ops-tag">governor</span><span class="ops-tag">fade model</span><span class="ops-tag">spread/depth</span></div></div>
       </div>
       <div class="ops-row">

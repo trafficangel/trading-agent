@@ -5,6 +5,7 @@ export type MomentumSegmentRow = {
   side: MomentumSegmentSide;
   layer: MomentumSegmentLayer;
   pnlPct: number;
+  r3Pct: number;
 };
 
 export type MomentumSegmentPolicy = {
@@ -12,6 +13,7 @@ export type MomentumSegmentPolicy = {
   recentSize: number;
   minAveragePct: number;
   minRecentAveragePct: number;
+  minAbsR3Pct: number;
 };
 
 export type MomentumSegmentStats = {
@@ -72,6 +74,7 @@ export const CONFIRM_LONG_CANARY_POLICY: MomentumSegmentPolicy = {
   recentSize: 20,
   minAveragePct: 0.03,
   minRecentAveragePct: 0,
+  minAbsR3Pct: 0.50,
 };
 
 export const MOMENTUM_PROMOTION_POLICY: MomentumPromotionPolicy = {
@@ -98,6 +101,18 @@ function stats(rows: MomentumSegmentRow[]): MomentumSegmentStats {
     winRate: finite.filter((row) => row.pnlPct > 0).length / finite.length,
     sumPct,
   };
+}
+
+function matchesSegment(
+  row: MomentumSegmentRow,
+  layer: MomentumSegmentLayer,
+  side: MomentumSegmentSide,
+  policy: MomentumSegmentPolicy,
+): boolean {
+  return row.layer === layer
+    && row.side === side
+    && Number.isFinite(row.r3Pct)
+    && Math.abs(row.r3Pct) >= policy.minAbsR3Pct;
 }
 
 function meetsPromotionGate(
@@ -214,7 +229,7 @@ export function evaluateMomentumSegment(
   side: MomentumSegmentSide,
   policy: MomentumSegmentPolicy,
 ): MomentumSegmentEvaluation {
-  const family = rowsNewestFirst.filter((row) => row.layer === layer && row.side === side);
+  const family = rowsNewestFirst.filter((row) => matchesSegment(row, layer, side, policy));
   const sampleRows = family.slice(0, policy.sampleSize);
   const recentRows = sampleRows.slice(0, policy.recentSize);
   const sample = stats(sampleRows);
@@ -243,7 +258,7 @@ export function walkForwardMomentumSegment(
   const history: MomentumSegmentRow[] = [];
   for (const row of rowsOldestFirst) {
     const evaluation = evaluateMomentumSegment([...history].reverse(), layer, side, policy);
-    if (row.layer === layer && row.side === side && evaluation.enabled) selected.push(row);
+    if (matchesSegment(row, layer, side, policy) && evaluation.enabled) selected.push(row);
     history.push(row);
   }
   return stats(selected);

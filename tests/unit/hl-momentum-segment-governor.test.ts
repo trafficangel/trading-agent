@@ -9,10 +9,16 @@ import {
   type MomentumSegmentRow,
 } from '../../src/lib/hl-momentum-segment-governor.js';
 
-const row = (pnlPct: number, side: 'long' | 'short' = 'long', layer: 'confirm' | 'fast' = 'confirm'): MomentumSegmentRow => ({
+const row = (
+  pnlPct: number,
+  side: 'long' | 'short' = 'long',
+  layer: 'confirm' | 'fast' = 'confirm',
+  r3Pct = -0.60,
+): MomentumSegmentRow => ({
   side,
   layer,
   pnlPct,
+  r3Pct,
 });
 
 const trade = (pnlPct: number, closedAt: number, exact = true): MomentumPromotionTrade => ({
@@ -61,6 +67,18 @@ describe('HL momentum side-aware governor', () => {
       ...Array.from({ length: 20 }, () => row(0.3)),
     ];
     expect(evaluateMomentumSegment(rows, 'confirm', 'long', CONFIRM_LONG_CANARY_POLICY).enabled).toBe(false);
+  });
+
+  it('does not count weak three-minute moves toward confirm-long proof', () => {
+    const rows = [
+      ...Array.from({ length: 30 }, () => row(0.3, 'long', 'confirm', -0.35)),
+      ...Array.from({ length: 20 }, () => row(0.1)),
+    ];
+    const result = evaluateMomentumSegment(rows, 'confirm', 'long', CONFIRM_LONG_CANARY_POLICY);
+
+    expect(result.sample.n).toBe(20);
+    expect(result.enabled).toBe(false);
+    expect(result.reason).toBe('sample 20/40');
   });
 });
 
