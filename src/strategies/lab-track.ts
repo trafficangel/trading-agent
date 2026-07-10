@@ -908,6 +908,8 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
   const promotionNextStage = runtimeText('hl_momentum_promotion_next_stage', 'canary-2');
   const promotionNextN = Math.round(runtimeNum('hl_momentum_promotion_next_min_trades', 10));
   const promotionRetryAfter = runtimeNum('hl_momentum_promotion_retry_after_ms', 0);
+  const confirmLongShadowN = Math.round(runtimeNum('hl_momentum_confirm_long_shadow_n', 0));
+  const confirmLongShadowTargetN = Math.round(runtimeNum('hl_momentum_confirm_long_sample_n', 40));
   const canaryMaxOpen = Math.round(runtimeNum('hl_momentum_confirm_long_canary_max_open', 1));
   const sideAwareEnabled = runtimeNum('hl_momentum_side_aware_enabled', 1) >= 0.5;
   const positionCap = sideAwareEnabled ? canaryMaxOpen : maxOpen;
@@ -952,9 +954,11 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
         : promotionStage === 'scaled'
           ? t(lang, 'статистический gate пройден; сумма остаётся под ручным контролем', 'statistical gate passed; notional remains operator-controlled')
           : t(lang, 'ждём подтверждения shadow-edge', 'waiting for shadow-edge proof');
-  const promotionProgress = promotionNextN > 0
-    ? `${promotionN}/${promotionNextN} → ${promotionNextStage}`
-    : t(lang, 'gate пройден', 'gate passed');
+  const promotionProgress = promotionStage === 'shadow'
+    ? `shadow proof ${confirmLongShadowN}/${confirmLongShadowTargetN}`
+    : promotionNextN > 0
+      ? `${promotionN}/${promotionNextN} → ${promotionNextStage}`
+      : t(lang, 'gate пройден', 'gate passed');
   const metric = (k: string, v: string, s: string, clsName = ''): string =>
     `<div class="ops-card"><div class="k">${k}</div><div class="v ${clsName}">${v}</div><div class="s">${s}</div></div>`;
 
@@ -1168,7 +1172,13 @@ export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
   const promotionExactN = Math.round(runtimeNum('hl_momentum_promotion_exact_n', promotionN));
   const promotionNextN = Math.round(runtimeNum('hl_momentum_promotion_next_min_trades', 10));
   const promotionMaxOpen = Math.round(runtimeNum('hl_momentum_confirm_long_canary_max_open', 1));
-  const promotionProgress = promotionNextN > 0 ? `${promotionN}/${promotionNextN}` : `${promotionExactN}/${promotionN}`;
+  const confirmLongShadowN = Math.round(runtimeNum('hl_momentum_confirm_long_shadow_n', 0));
+  const confirmLongShadowTargetN = Math.round(runtimeNum('hl_momentum_confirm_long_sample_n', 40));
+  const promotionProgress = promotionStage === 'shadow'
+    ? `shadow proof ${confirmLongShadowN}/${confirmLongShadowTargetN}`
+    : promotionNextN > 0
+      ? `${promotionN}/${promotionNextN}`
+      : `${promotionExactN}/${promotionN}`;
   const statCard = (l: string, v: string, vc = '', s = '', sc = ''): string =>
     `<div class="lt-stat"><div class="l">${l}</div><div class="v ${vc}">${v}</div>${s ? `<div class="s ${sc}">${s}</div>` : ''}</div>`;
 
