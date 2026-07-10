@@ -179,7 +179,6 @@ const longSegmentRowsStmt = db.prepare<[string, number], GovernorRow>(`
    WHERE closed_at IS NOT NULL
      AND pnl_pct IS NOT NULL
      AND side = 'long'
-     AND signal LIKE '%layer=confirm%'
      AND signal LIKE ?
    ORDER BY closed_at DESC
    LIMIT ?
