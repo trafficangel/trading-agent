@@ -1329,6 +1329,8 @@ const liveEntryInFlight = new Set<string>();
 let lastRegime: { ts: number; up: number; down: number; label: 'risk-on' | 'risk-off' | 'mixed' } = { ts: 0, up: 0, down: 0, label: 'mixed' };
 let fastRadarRunning = false;
 let lastFastAttemptAt = 0;
+let fastRadarBlockedUntil = 0;
+let fastRadarRateLimitBackoffMs = 15_000;
 let liveReconcileRunning = false;
 let liveEntriesPausedByReconcile = true;
 let lastReconcileAlertSignature = '';
@@ -1961,9 +1963,11 @@ async function tick(): Promise<void> {
 
 async function fastRadarTick(): Promise<void> {
   if (fastRadarRunning) return;
+  if (Date.now() < fastRadarBlockedUntil) return;
   fastRadarRunning = true;
   try {
     const raw = await allMids();
+    fastRadarRateLimitBackoffMs = 15_000;
     const now = Date.now();
     const mids = new Map<string, number>();
     for (const [coin, value] of Object.entries(raw)) {
@@ -2003,7 +2007,14 @@ async function fastRadarTick(): Promise<void> {
       logger.info({ candidates: candidates.length, tried: Math.min(candidates.length, FAST_MAX_CANDIDATES_PER_TICK), mids: mids.size }, 'hl-momentum-fast: mids radar candidates');
     }
   } catch (err) {
-    logger.warn({ err: (err as Error).message }, 'hl-momentum-fast: mids radar failed');
+    const message = (err as Error).message;
+    if (/\b429\b|too many requests/i.test(message)) {
+      fastRadarBlockedUntil = Date.now() + fastRadarRateLimitBackoffMs;
+      logger.warn({ err: message, retryInMs: fastRadarRateLimitBackoffMs }, 'hl-momentum-fast: rate limited, radar backing off');
+      fastRadarRateLimitBackoffMs = Math.min(120_000, fastRadarRateLimitBackoffMs * 2);
+    } else {
+      logger.warn({ err: message }, 'hl-momentum-fast: mids radar failed');
+    }
   } finally {
     fastRadarRunning = false;
   }

@@ -237,6 +237,7 @@ const pendingAccountingStmt = db.prepare<[number], AccountingRepairRow>(`
    ORDER BY closed_at DESC
    LIMIT ?
 `);
+let accountingRepairBlockedUntil = 0;
 function writeActiveClose(exitPx: number | null, closedAt: number, pnl: number | null, reason: string, coin: string, accounting: HlTradeAccounting | null): void {
   const exact = accounting?.complete ? accounting : null;
   updLog.run(
@@ -300,9 +301,14 @@ async function resolveWickClose(pos: PosRow, fallbackExitPx: number | null, clos
 }
 
 async function repairWickAccounting(limit: number): Promise<void> {
+  if (Date.now() < accountingRepairBlockedUntil) return;
   for (const row of pendingAccountingStmt.all(limit)) {
     const result = await hlTradeAccounting({ coin: row.coin, openedAt: row.opened_at, closedAt: row.closed_at });
-    if (!result.ok || !result.data?.complete) continue;
+    if (!result.ok) {
+      if (/\b429\b|too many requests/i.test(result.msg)) accountingRepairBlockedUntil = Date.now() + 60_000;
+      return;
+    }
+    if (!result.data?.complete) continue;
     persistExactAccounting(row.id, result.data);
     logger.info({ id: row.id, coin: row.coin }, 'wick-fade: repaired fallback accounting from fills');
   }
