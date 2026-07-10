@@ -18,8 +18,9 @@ import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { config } from '../config.js';
-import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, hlPlaceStop, hlCancelTriggers, hlExitAvgSince, hlPositionStartTime, hlBatchPlace, hlBatchCancel, hlNetTransfersSince, type HlOpenOrder, type BatchPlaceSpec } from '../exchange/hyperliquid-private.js';
+import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders, hlFetchPosition, hlClosePosition, hlMid, hlAccountValue, hlPlaceStop, hlCancelTriggers, hlExitAvgSince, hlPositionStartTime, hlBatchPlace, hlBatchCancel, hlNetTransfersSince, hlTradeAccounting, type HlOpenOrder, type BatchPlaceSpec } from '../exchange/hyperliquid-private.js';
 import { l2Book } from '../exchange/hyperliquid.js';
+import type { HlTradeAccounting } from '../lib/hl-trade-accounting.js';
 import { sendMessage } from '../telegram/bot.js';
 
 /** Operator notification (Telegram logs channel) — fire-and-forget: sendMessage never throws, and `void`
@@ -136,7 +137,7 @@ export const WF_CONFIG: { mode: WfMode; coins: string[]; capitalUsd: number; lev
                           // vol-fitting artifact. Live vol from the native HL 5m archive (hl_candles). Set false to revert.
   volWindow: 48,          // rolling-vol window in 5m bars (4h). Depth factor bounded [0.4,2.0], final depth clamped [0.8%,6%].
 };
-const COST_RT = 0.05;     // RT FEES only (maker entry ~0.01% + taker exit ~0.035%): real exit slippage is now captured by booking at the actual close avgPx, and the maker entry fills AT the limit price (no entry slippage)
+const COST_RT = 0.05;     // fallback only; live accounting uses exact exchange fees/funding
 const MIN_NOTIONAL = 11;  // HL min order ≈ $10
 const SIZE_REQUOTE_DRIFT = 0.05; // replace resting quotes when size drifts >5% (e.g. capitalUsd changes)
 const HR = 3_600_000;
@@ -169,6 +170,7 @@ function depthFactor(coin: string): number {
 }
 
 type PosRow = { coin: string; side: 'long' | 'short'; entry_px: number; qty: number; x: number; opened_at: number; reason: string };
+type AccountingRepairRow = { id: number; coin: string; opened_at: number; closed_at: number };
 const getPos = db.prepare<[string], PosRow>(`SELECT * FROM wick_fade_pos WHERE coin = ?`);
 const allOpenPosCoins = db.prepare<[], { coin: string }>(`SELECT DISTINCT coin FROM wick_fade_pos`); // to wind down positions on CUT coins
 const insPos = db.prepare(`INSERT OR REPLACE INTO wick_fade_pos (coin,side,entry_px,qty,x,opened_at,reason) VALUES (?,?,?,?,?,?,?)`);
@@ -214,11 +216,97 @@ function logLiveQuarantine(coin: string, side: 'long' | 'short', reason: string,
 }
 const insLog = db.prepare(`INSERT INTO wick_fade_log (coin,side,entry_px,qty,x,opened_at,reason,mode) VALUES (?,?,?,?,?,?,?,?)`);
 // close the ACTIVE log row (closed_at IS NULL) — sets close fields, NEVER touches the immutable entry `reason`.
-const updLog = db.prepare(`UPDATE wick_fade_log SET exit_px=?,closed_at=?,pnl_pct=?,close_reason=? WHERE id=(SELECT id FROM wick_fade_log WHERE coin=? AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1)`);
-const closeTxn = db.transaction((exitPx: number, closedAt: number, pnl: number, reason: string, coin: string) => { updLog.run(exitPx, closedAt, pnl, reason, coin); delPos.run(coin); });
+const updLog = db.prepare(`
+  UPDATE wick_fade_log
+     SET exit_px=?, closed_at=?, pnl_pct=?, close_reason=?,
+         entry_notional_usd=?, exit_notional_usd=?, gross_pnl_usd=?, fee_usd=?,
+         funding_usd=?, net_pnl_usd=?, accounting_fill_count=?, pnl_source=?
+   WHERE id=(SELECT id FROM wick_fade_log WHERE coin=? AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1)
+`);
+const updateAccountingById = db.prepare(`
+  UPDATE wick_fade_log
+     SET entry_px=?, qty=?, exit_px=?, pnl_pct=?, entry_notional_usd=?, exit_notional_usd=?,
+         gross_pnl_usd=?, fee_usd=?, funding_usd=?, net_pnl_usd=?, accounting_fill_count=?, pnl_source='fills-v1'
+   WHERE id=?
+`);
+const pendingAccountingStmt = db.prepare<[number], AccountingRepairRow>(`
+  SELECT id, coin, opened_at, closed_at
+    FROM wick_fade_log
+   WHERE mode='live' AND closed_at IS NOT NULL
+     AND (pnl_source IS NULL OR pnl_source != 'fills-v1')
+   ORDER BY closed_at DESC
+   LIMIT ?
+`);
+function writeActiveClose(exitPx: number | null, closedAt: number, pnl: number | null, reason: string, coin: string, accounting: HlTradeAccounting | null): void {
+  const exact = accounting?.complete ? accounting : null;
+  updLog.run(
+    exact?.exitAvgPx ?? exitPx,
+    closedAt,
+    exact ? +exact.netPnlPct.toFixed(3) : pnl,
+    reason,
+    exact?.entryNotionalUsd ?? null,
+    exact?.exitNotionalUsd ?? null,
+    exact?.grossPnlUsd ?? null,
+    exact?.feesUsd ?? null,
+    exact?.fundingUsd ?? null,
+    exact?.netPnlUsd ?? null,
+    exact?.fillCount ?? null,
+    exact ? 'fills-v1' : 'estimated-fixed-cost',
+    coin,
+  );
+}
+const closeTxn = db.transaction((exitPx: number, closedAt: number, pnl: number, reason: string, coin: string, accounting: HlTradeAccounting | null = null) => {
+  writeActiveClose(exitPx, closedAt, pnl, reason, coin, accounting);
+  delPos.run(coin);
+});
 // reconcile-flat: close the log row + drop the pos row ATOMICALLY (a restart between the two would otherwise
 // re-run reconcile and close the WRONG active row). exitPx/pnl may be NULL if unrecoverable from userFills.
-const reconcileFlatTxn = db.transaction((exitPx: number | null, closedAt: number, pnl: number | null, coin: string) => { updLog.run(exitPx, closedAt, pnl, 'reconciled-flat', coin); delPos.run(coin); });
+const reconcileFlatTxn = db.transaction((exitPx: number | null, closedAt: number, pnl: number | null, coin: string, accounting: HlTradeAccounting | null = null) => {
+  writeActiveClose(exitPx, closedAt, pnl, 'reconciled-flat', coin, accounting);
+  delPos.run(coin);
+});
+
+function persistExactAccounting(id: number, accounting: HlTradeAccounting): void {
+  updateAccountingById.run(
+    accounting.entryAvgPx,
+    accounting.entryQty,
+    accounting.exitAvgPx,
+    +accounting.netPnlPct.toFixed(3),
+    accounting.entryNotionalUsd,
+    accounting.exitNotionalUsd,
+    accounting.grossPnlUsd,
+    accounting.feesUsd,
+    accounting.fundingUsd,
+    accounting.netPnlUsd,
+    accounting.fillCount,
+    id,
+  );
+}
+
+async function resolveWickClose(pos: PosRow, fallbackExitPx: number | null, closedAt: number): Promise<{
+  exitPx: number | null;
+  pnl: number | null;
+  accounting: HlTradeAccounting | null;
+}> {
+  const result = await hlTradeAccounting({ coin: pos.coin, openedAt: pos.opened_at, closedAt });
+  if (result.ok && result.data?.complete) {
+    return { exitPx: result.data.exitAvgPx, pnl: +result.data.netPnlPct.toFixed(3), accounting: result.data };
+  }
+  if (!result.ok) logger.warn({ coin: pos.coin, msg: result.msg }, 'wick-fade: exact accounting unavailable');
+  const gross = fallbackExitPx == null ? null : pos.side === 'long'
+    ? (fallbackExitPx - pos.entry_px) / pos.entry_px * 100
+    : (pos.entry_px - fallbackExitPx) / pos.entry_px * 100;
+  return { exitPx: fallbackExitPx, pnl: gross == null ? null : +(gross - COST_RT).toFixed(3), accounting: null };
+}
+
+async function repairWickAccounting(limit: number): Promise<void> {
+  for (const row of pendingAccountingStmt.all(limit)) {
+    const result = await hlTradeAccounting({ coin: row.coin, openedAt: row.opened_at, closedAt: row.closed_at });
+    if (!result.ok || !result.data?.complete) continue;
+    persistExactAccounting(row.id, result.data);
+    logger.info({ id: row.id, coin: row.coin }, 'wick-fade: repaired fallback accounting from fills');
+  }
+}
 
 // PERSISTED start-of-day equity (survives the external restart cadence — an in-memory snapshot re-based to
 // post-drawdown equity on every restart, disarming the -5% kill). Stored in the runtime_config kv (no migration).
@@ -237,6 +325,19 @@ const closedDayPnlStmt = db.prepare<[string, number], { pnl: number | null }>(`
 function saveSod(state: { day: number; equity: number; killedDay?: number }): void {
   const v = JSON.stringify(state);
   if (updKv.run(v, Date.now(), 'wick-fade start-of-day equity', SOD_KEY).changes === 0) insKv.run(SOD_KEY, v, Date.now(), 'wick-fade start-of-day equity');
+}
+
+function ownershipBlockReason(nowMs: number): string | null {
+  const raw = getKv.get('hl_account_ownership_state')?.value;
+  if (!raw) return 'account ownership not checked';
+  try {
+    const state = JSON.parse(raw) as { ok?: boolean; checkedAt?: number; issues?: { detail?: string }[] };
+    if (!state.checkedAt || nowMs - state.checkedAt > 5 * 60_000) return 'account ownership audit stale';
+    if (!state.ok) return state.issues?.[0]?.detail ?? 'account ownership mismatch';
+    return null;
+  } catch {
+    return 'account ownership state invalid';
+  }
 }
 
 const targetPx = (side: 'long' | 'short', entry: number, x: number) => (side === 'long' ? entry / (1 - x) : entry / (1 + x));
@@ -487,17 +588,12 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marke
   if (!exPos && dbPos) {
     await hlCancelTriggers(coin); // remove the now-orphan protective stop
     const ex = await hlExitAvgSince(coin, dbPos.opened_at);
-    let exitPx: number | null = null, pnl: number | null = null;
-    if (ex.ok && ex.data.avgPx && ex.data.avgPx > 0) {
-      exitPx = ex.data.avgPx;
-      const gross = dbPos.side === 'long' ? (exitPx - dbPos.entry_px) / dbPos.entry_px * 100 : (dbPos.entry_px - exitPx) / dbPos.entry_px * 100;
-      pnl = +(gross - COST_RT).toFixed(3);
-    }
-    reconcileFlatTxn(exitPx, nowMs, pnl, coin);
-    logger.warn({ coin, exit: exitPx, pnlPct: pnl }, pnl == null ? 'wick-fade: exchange-flat → reconciled (exit PnL unrecoverable from fills)' : 'wick-fade: exchange-flat → reconciled with RECOVERED exit PnL (exchange stop / OOB close)');
-    notify(pnl == null
+    const resolved = await resolveWickClose(dbPos, ex.ok ? ex.data.avgPx : null, nowMs);
+    reconcileFlatTxn(resolved.exitPx, nowMs, resolved.pnl, coin, resolved.accounting);
+    logger.warn({ coin, exit: resolved.exitPx, pnlPct: resolved.pnl, source: resolved.accounting ? 'fills-v1' : 'fallback' }, resolved.pnl == null ? 'wick-fade: exchange-flat → reconciled (exit PnL unrecoverable from fills)' : 'wick-fade: exchange-flat → reconciled with RECOVERED exit PnL (exchange stop / OOB close)');
+    notify(resolved.pnl == null
       ? `♻️ <b>wick-fade CLOSED</b> (вне бота): ${coin} ${dbPos.side} — PnL не восстановлен`
-      : `${pnl >= 0 ? '🟢' : '🔴'} <b>wick-fade CLOSED</b> (биржевой стоп/вне бота): ${coin} ${dbPos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b>\n${dbPos.entry_px} → ${exitPx?.toFixed(6)}`);
+      : `${resolved.pnl >= 0 ? '🟢' : '🔴'} <b>wick-fade CLOSED</b> (биржевой стоп/вне бота): ${coin} ${dbPos.side} <b>${resolved.pnl > 0 ? '+' : ''}${resolved.pnl}%</b>\n${dbPos.entry_px} → ${resolved.exitPx?.toFixed(6)}`);
     return NO_ACTIONS;
   }
   // ── IN POSITION → manage exit (target revert / time-stop / catastrophe) ──
@@ -531,11 +627,12 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marke
     if (!recheck.ok) { logger.warn({ coin }, 'wick-fade: post-close fetch failed — defer to reconcile'); return NO_ACTIONS; }
     if (recheck.data) { logger.warn({ coin, remaining: recheck.data.size }, 'wick-fade: close did not fully fill — retry'); return NO_ACTIONS; }
     await hlCancelTriggers(coin); // position flat → remove the now-redundant exchange stop before booking
-    const exitPx = close.data.avgPx ?? mid; // REAL exit fill (honest live PnL); fall back to mid only if unavailable
-    const gross = dbPos.side === 'long' ? (exitPx - dbPos.entry_px) / dbPos.entry_px * 100 : (dbPos.entry_px - exitPx) / dbPos.entry_px * 100;
-    const pnl = +(gross - COST_RT).toFixed(3);
-    closeTxn(exitPx, nowMs, pnl, reason, coin);
-    logger.warn({ coin, side: dbPos.side, entry: dbPos.entry_px, exit: exitPx, pnlPct: pnl, reason }, '✅ wick-fade: CLOSED');
+    const fallbackExitPx = close.data.avgPx ?? mid;
+    const resolved = await resolveWickClose(dbPos, fallbackExitPx, nowMs);
+    const exitPx = resolved.exitPx ?? fallbackExitPx;
+    const pnl = resolved.pnl ?? 0;
+    closeTxn(exitPx, nowMs, pnl, reason, coin, resolved.accounting);
+    logger.warn({ coin, side: dbPos.side, entry: dbPos.entry_px, exit: exitPx, pnlPct: pnl, reason, source: resolved.accounting ? 'fills-v1' : 'fallback' }, '✅ wick-fade: CLOSED');
     const rlabel = reason === 'target' ? 'цель 🎯' : reason === 'time-stop' ? 'тайм-стоп ⏱' : reason === 'daily-kill' ? 'дневной −5% СТОПКРАН 🚨' : 'катастроф-стоп 🛑';
     notify(`${pnl >= 0 ? '🟢' : '🔴'} <b>wick-fade CLOSED</b>: ${coin} ${dbPos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${rlabel})\n${dbPos.entry_px} → ${exitPx.toFixed(6)} · держали ${Math.round((nowMs - dbPos.opened_at) / 60_000)}м`);
     return NO_ACTIONS;
@@ -546,6 +643,7 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marke
   // resting order. (Position reconcile/exit above don't need exOrders, so they already ran safely.)
   if (!ooRes.ok) { logger.warn({ coin, msg: ooRes.msg }, 'wick-fade: openOrders read failed — skip quoting this tick'); return NO_ACTIONS; }
   if (momentumLock) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
+  if (ownershipBlockReason(nowMs)) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
   if (marketBlockReason) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
   // HL ADDRESS ACTION BUDGET (learned live Jul 4): every order/cancel costs 1 action from a budget of
   // 10k + $1-of-volume-traded each. Per-minute re-quoting across 21+ coins burned ~11.4k actions on $186
@@ -687,6 +785,7 @@ export function startWickFadeRunner(): void {
       if (cancels.length || places.length) {
         try { await executeQuoteBatch(cancels, places); } catch (err) { logger.error({ err }, 'wick-fade: quote batch failed'); }
       }
+      try { await repairWickAccounting(2); } catch (err) { logger.warn({ err }, 'wick-fade: accounting repair failed'); }
     })().finally(() => { running = false; });
   });
   logger.warn({ mode: WF_CONFIG.mode, endpoint: config.HL_USE_TESTNET ? 'testnet' : 'MAINNET', vault: config.HL_VAULT_ADDRESS ? 'yes' : 'no', coins: WF_CONFIG.coins.length, lev: WF_CONFIG.leverage, capital: WF_CONFIG.capitalUsd, dailyKill: `${WF_CONFIG.dailyLossPct * 100}%`, dynDepth: WF_CONFIG.dynamicDepth ? `vol×W${WF_CONFIG.volWindow}` : 'fixed' }, '✅ wick-fade runner scheduled (every 1m, post-only deep limits, exchange-reconciled, daily-loss kill)');

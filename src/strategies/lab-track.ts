@@ -17,6 +17,7 @@ const t = (lang: Lang, ru: string, en: string): string => (lang === 'en' ? en : 
 type WfRow = {
   id: number; coin: string; side: string; entry_px: number; qty: number; x: number | null;
   opened_at: number; exit_px: number | null; closed_at: number | null; pnl_pct: number | null; close_reason: string | null;
+  entry_notional_usd: number | null; net_pnl_usd: number | null; pnl_source: string | null;
 };
 type MomRow = {
   id: number; coin: string; side: string; entry_px: number; qty: number; opened_at: number; signal: string;
@@ -160,8 +161,8 @@ function fmtDt(ms: number | null): string {
   if (!ms) return '—';
   return new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
 }
-const notionalOf = (r: WfRow): number => r.qty * r.entry_px;
-const usdOf = (r: WfRow): number => ((r.pnl_pct ?? 0) / 100) * notionalOf(r);
+const notionalOf = (r: WfRow): number => r.entry_notional_usd ?? r.qty * r.entry_px;
+const usdOf = (r: WfRow): number => r.net_pnl_usd ?? ((r.pnl_pct ?? 0) / 100) * notionalOf(r);
 const momNotionalOf = (r: MomRow): number => r.entry_notional_usd ?? r.qty * r.entry_px;
 const momUsdOf = (r: MomRow): number => r.net_pnl_usd ?? ((r.pnl_pct ?? 0) / 100) * momNotionalOf(r);
 /** Format a computed price (target/stop) at the same decimal precision as the entry, so it lines up. */

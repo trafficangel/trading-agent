@@ -1,0 +1,11 @@
+[Unit]
+Description=Robot Codex SQLite backup every 6 hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:17:00
+Persistent=true
+RandomizedDelaySec=10m
+Unit=trading-agent-backup.service
+
+[Install]
+WantedBy=timers.target

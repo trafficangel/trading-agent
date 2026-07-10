@@ -20,6 +20,8 @@
     "migrate": "tsx scripts/migrate.ts",
     "status": "tsx scripts/status.ts",
     "risk": "tsx scripts/risk-status.ts",
+    "backup": "tsx src/ops/sqlite-backup.ts",
+    "restore:db": "tsx src/ops/sqlite-restore.ts",
     "audit": "tsx scripts/audit-sl-distribution.ts",
     "backtest": "tsx scripts/backtest-custom.ts",
     "deploy": "bash scripts/deploy.sh"

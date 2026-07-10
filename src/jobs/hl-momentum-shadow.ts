@@ -35,6 +35,7 @@ import {
 } from '../lib/hl-momentum-capacity.js';
 import { HL_MOMENTUM_CALIBRATION_VERSION } from '../lib/hl-momentum-calibration.js';
 import type { HlTradeAccounting } from '../lib/hl-trade-accounting.js';
+import { auditHlPositionOwnership } from '../lib/hl-position-ownership.js';
 import { upsertHlMinuteCandlesFromMids } from './hl-minute-candle-collector.js';
 
 type Side = 'long' | 'short';
@@ -1342,6 +1343,15 @@ function setReconcileState(ok: boolean, issues: string[], nowMs: number): void {
   );
 }
 
+function setAccountOwnershipFailure(detail: string, nowMs: number): void {
+  setKvStmt.run(
+    'hl_account_ownership_state',
+    JSON.stringify({ ok: false, issues: [{ kind: 'snapshot-failed', coin: '*', detail }], checkedAt: nowMs }),
+    nowMs,
+    'account-wide Hyperliquid position ownership audit failed',
+  );
+}
+
 function alertReconcileIssues(issues: string[]): void {
   const signature = issues.slice().sort().join('|');
   if (signature === lastReconcileAlertSignature) return;
@@ -1362,6 +1372,7 @@ async function reconcileMomentumLive(): Promise<void> {
     const snapshot = await hlFetchAllPositions();
     if (!snapshot.ok) {
       const issues = [`exchange snapshot failed: ${snapshot.msg}`];
+      setAccountOwnershipFailure(issues[0]!, nowMs);
       setReconcileState(false, issues, nowMs);
       alertReconcileIssues(issues);
       logger.error({ msg: snapshot.msg }, 'hl-momentum-reconcile: snapshot failed, entries paused');
@@ -1457,13 +1468,26 @@ async function reconcileMomentumLive(): Promise<void> {
       logger.info({ id: row.id, coin: row.coin }, 'hl-momentum-reconcile: repaired fallback accounting from fills');
     }
 
-    const healthy = issues.length === 0;
-    setReconcileState(healthy, issues, nowMs);
-    alertReconcileIssues(issues);
+    const owners = [
+      ...liveAllPosStmt.all().map((p) => ({ coin: p.coin, side: p.side, owner: 'hl-momentum' as const })),
+      ...wickAllPosStmt.all().map((p) => ({ coin: p.coin, side: p.side, owner: 'wick-fade' as const })),
+    ];
+    const ownership = auditHlPositionOwnership(snapshot.data, owners);
+    const finalIssues = [...new Set([...issues, ...ownership.issues.map((issue) => issue.detail)])];
+    const healthy = finalIssues.length === 0;
+    setKvStmt.run(
+      'hl_account_ownership_state',
+      JSON.stringify({ ok: ownership.ok, issues: ownership.issues, checkedAt: nowMs }),
+      nowMs,
+      'account-wide Hyperliquid position ownership audit',
+    );
+    setReconcileState(healthy, finalIssues, nowMs);
+    alertReconcileIssues(finalIssues);
     markTick('hl-momentum-reconcile');
-    logger.info({ exchange: snapshot.data.length, db: dbPositions.length, healthy, issues }, 'hl-momentum-reconcile: completed');
+    logger.info({ exchange: snapshot.data.length, db: owners.length, healthy, issues: finalIssues }, 'hl-momentum-reconcile: completed');
   } catch (err) {
     const issues = [`reconcile crashed: ${(err as Error).message}`];
+    setAccountOwnershipFailure(issues[0]!, nowMs);
     setReconcileState(false, issues, nowMs);
     alertReconcileIssues(issues);
     logger.error({ err }, 'hl-momentum-reconcile: failed, entries paused');

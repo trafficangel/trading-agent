@@ -1,4 +1,7 @@
 import cron from 'node-cron';
+import { statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import { getLastTick } from '../lib/health-tracker.js';
 import { sendMessage } from '../telegram/bot.js';
@@ -38,6 +41,8 @@ const CHECKS: HealthCheck[] = [
 
 const MEM_WARN_MB = 1024;
 const MEM_CRITICAL_MB = 2048;
+const BACKUP_MAX_AGE_MS = 9 * 60 * 60_000;
+const BACKUP_MANIFEST = resolve(process.env.DB_BACKUP_DIR ?? join(dirname(resolve(config.DB_PATH)), 'backups'), 'latest.json');
 
 const lastAlertAt = new Map<string, number>();
 const ALERT_COOLDOWN_MS = 30 * 60 * 1000;
@@ -92,6 +97,20 @@ async function check(): Promise<void> {
       key: 'mem-warn',
       text: `RAM ${rssMB.toFixed(0)}MB (повышено, >${MEM_WARN_MB}MB — возможна утечка)`,
     });
+  }
+
+  try {
+    const backupAgeMs = now - statSync(BACKUP_MANIFEST).mtimeMs;
+    if (backupAgeMs > BACKUP_MAX_AGE_MS) {
+      issues.push({
+        key: 'sqlite-backup-stale',
+        text: `SQLite backup: последний успешный снимок ${Math.round(backupAgeMs / 3_600_000)}ч назад (порог 9ч)`,
+      });
+    }
+  } catch {
+    if (process.uptime() > 30 * 60) {
+      issues.push({ key: 'sqlite-backup-missing', text: 'SQLite backup: latest.json отсутствует' });
+    }
   }
 
   if (issues.length === 0) {

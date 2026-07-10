@@ -1,0 +1,23 @@
+[Unit]
+Description=Robot Codex SQLite online backup and restore drill
+After=local-fs.target
+ConditionPathExists=/home/trader/apps/trading-agent/data/trading.sqlite
+
+[Service]
+Type=oneshot
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/trading-agent
+EnvironmentFile=/home/trader/apps/trading-agent/.env
+Environment=DB_BACKUP_DIR=/home/trader/apps/trading-agent/data/backups
+Environment=DB_BACKUP_KEEP=12
+ExecStart=/usr/bin/node --enable-source-maps dist/ops/sqlite-backup.js
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/trading-agent/data
+

@@ -75,6 +75,23 @@ for (const o of open) {
   console.log(`  ${String(o.symbol).padEnd(9)} ${(o.side === 'short' ? 'short' : 'long').padEnd(5)} @ ${o.entry ?? '—'}  ${fmtT(o.created_at)}  ${o.strategy_id}`);
 }
 
+const wick = db.prepare<[], { closed: number; exact: number; net_pct: number | null; net_usd: number | null }>(`
+  SELECT COUNT(*) AS closed,
+         COALESCE(SUM(CASE WHEN pnl_source = 'fills-v1' THEN 1 ELSE 0 END), 0) AS exact,
+         SUM(pnl_pct) AS net_pct,
+         SUM(COALESCE(net_pnl_usd, (pnl_pct / 100.0) * qty * entry_px)) AS net_usd
+    FROM wick_fade_log
+   WHERE mode='live' AND closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+`).get()!;
+const wickOpen = db.prepare<[], { coin: string; side: string; entry_px: number; qty: number; opened_at: number }>(`
+  SELECT coin, side, entry_px, qty, opened_at FROM wick_fade_pos ORDER BY opened_at
+`).all();
+console.log(`\nHL WICK-FADE LIVE`);
+console.log(`  closed ${wick.closed} · exact ${wick.exact}/${wick.closed} · net ${(wick.net_pct ?? 0) >= 0 ? '+' : ''}${(wick.net_pct ?? 0).toFixed(3)}% / $${(wick.net_usd ?? 0).toFixed(3)}`);
+for (const p of wickOpen) {
+  console.log(`  ${p.coin.padEnd(9)} ${p.side.padEnd(5)} @ ${p.entry_px} · $${(p.entry_px * p.qty).toFixed(2)} · ${fmtT(p.opened_at)}`);
+}
+
 // ---- Hyperliquid momentum live ----
 const momPublicStartRaw = Number(db.prepare<[string], { value: string }>('SELECT value FROM runtime_config WHERE key = ?').get('hl_momentum_public_start_ms')?.value ?? Date.UTC(2026, 6, 8, 18, 14, 0));
 const momPublicStart = Number.isFinite(momPublicStartRaw) ? momPublicStartRaw : Date.UTC(2026, 6, 8, 18, 14, 0);
