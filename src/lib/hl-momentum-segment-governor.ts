@@ -77,6 +77,17 @@ export const CONFIRM_LONG_CANARY_POLICY: MomentumSegmentPolicy = {
   minAbsR3Pct: 0.50,
 };
 
+/** Fast fade entries use the 90-second impulse as their proof metric (stored in
+ * r3Pct for the generic evaluator). The stricter 0.80% move isolates the slice
+ * that remained positive across full and recent shadow windows. */
+export const FAST_LONG_CANARY_POLICY: MomentumSegmentPolicy = {
+  sampleSize: 20,
+  recentSize: 10,
+  minAveragePct: 0.15,
+  minRecentAveragePct: 0.05,
+  minAbsR3Pct: 0.80,
+};
+
 export const MOMENTUM_PROMOTION_POLICY: MomentumPromotionPolicy = {
   pauseSampleSize: 3,
   pauseBelowAveragePct: 0,

@@ -34,7 +34,7 @@ import {
   isConfidentMomentumSignal,
 } from '../lib/hl-momentum-capacity.js';
 import { HL_MOMENTUM_CALIBRATION_VERSION } from '../lib/hl-momentum-calibration.js';
-import { CONFIRM_LONG_CANARY_POLICY } from '../lib/hl-momentum-segment-governor.js';
+import { CONFIRM_LONG_CANARY_POLICY, FAST_LONG_CANARY_POLICY } from '../lib/hl-momentum-segment-governor.js';
 import type { HlTradeAccounting } from '../lib/hl-trade-accounting.js';
 import { readHlExternalOwner } from '../lib/hl-external-owner.js';
 import { auditHlPositionOwnership } from '../lib/hl-position-ownership.js';
@@ -192,6 +192,10 @@ const CONFIRM_LONG_CANARY_TAG = 'canary=confirm-long-v1';
 const CONFIRM_LONG_CANARY_MIN_PROB = 0.47;
 const CONFIRM_LONG_CANARY_MAX_OPEN = 1;
 const CONFIRM_LONG_CANARY_DAILY_LOSS_USD = 1;
+const FAST_LONG_CANARY_TAG = 'canary=fast-long-v1';
+const FAST_LONG_CANARY_MIN_PROB = 0.50;
+const FAST_LONG_CANARY_MAX_OPEN = 1;
+const FAST_LONG_CANARY_DAILY_LOSS_USD = 0.50;
 const CONFIRM_MAX_IMPULSE_RATIO = 1.42;
 const DEFAULT_TRADE_MODE: TradeMode = 'fade';
 const FADE_PRIOR_WIN_RATE = 0.62;
@@ -338,6 +342,10 @@ const liveTodayPnlStmt = db.prepare<[number], { pnl: number | null }>(`
 const liveSessionUsdStmt = db.prepare<[number], { usd: number | null }>(`
   SELECT SUM(COALESCE(net_pnl_usd, (pnl_pct / 100.0) * qty * entry_px)) AS usd FROM hl_momentum_live_log
    WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL AND closed_at >= ?
+`);
+const liveCanarySessionUsdStmt = db.prepare<[number, string], { usd: number | null }>(`
+  SELECT SUM(COALESCE(net_pnl_usd, (pnl_pct / 100.0) * qty * entry_px)) AS usd FROM hl_momentum_live_log
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL AND closed_at >= ? AND signal LIKE ?
 `);
 const liveCoinSideStatsStmt = db.prepare<[string, Side], { n: number; avg: number | null; wins: number | null }>(`
   SELECT COUNT(*) AS n,
@@ -605,17 +613,44 @@ function confirmLongCanaryActive(sig: Pick<MomentumSignal, 'layer' | 'side'>): b
     && segmentLiveEnabled(sig);
 }
 
+function fastLongCanaryActive(sig: Pick<MomentumSignal, 'layer' | 'side'>): boolean {
+  return sideAwareLiveEnabled()
+    && sig.layer === 'fast'
+    && sig.side === 'long'
+    && segmentLiveEnabled(sig);
+}
+
 function effectiveDailyStopUsd(sig: Pick<MomentumSignal, 'layer' | 'side'>): number | null {
   const configured = liveDailyStopUsd();
-  if (!confirmLongCanaryActive(sig)) return configured;
-  const canaryLoss = runtimeNum(
-    'hl_momentum_confirm_long_canary_daily_loss_usd',
-    CONFIRM_LONG_CANARY_DAILY_LOSS_USD,
-    0.25,
-    10,
-  );
+  const canaryLoss = confirmLongCanaryActive(sig)
+    ? runtimeNum(
+      'hl_momentum_confirm_long_canary_daily_loss_usd',
+      CONFIRM_LONG_CANARY_DAILY_LOSS_USD,
+      0.25,
+      10,
+    )
+    : fastLongCanaryActive(sig)
+      ? runtimeNum(
+        'hl_momentum_fast_long_canary_daily_loss_usd',
+        FAST_LONG_CANARY_DAILY_LOSS_USD,
+        0.25,
+        10,
+      )
+      : null;
+  if (canaryLoss == null) return configured;
   const canaryStop = -canaryLoss;
   return configured == null ? canaryStop : Math.max(configured, canaryStop);
+}
+
+function sessionUsdForSignal(sig: Pick<MomentumSignal, 'layer' | 'side'>, sinceMs: number): number {
+  const tag = confirmLongCanaryActive(sig)
+    ? CONFIRM_LONG_CANARY_TAG
+    : fastLongCanaryActive(sig)
+      ? FAST_LONG_CANARY_TAG
+      : null;
+  return tag
+    ? liveCanarySessionUsdStmt.get(sinceMs, `%${tag}%`)?.usd ?? 0
+    : liveSessionUsdStmt.get(sinceMs)?.usd ?? 0;
 }
 
 function fastStrictMult(): number {
@@ -1037,6 +1072,10 @@ function shadowProofGate(sig: MomentumSignal): string | null {
   if (!fastLiveEnabled) {
     return `fast live paused: shadow fast is unproven`;
   }
+  // The Doctor already applies a dedicated 20/10 proof window and |r90|
+  // threshold to this canary. The generic mixed-family window would double
+  // gate it with a smaller, less specific sample.
+  if (fastLongCanaryActive(sig)) return null;
   if (familyStats.n < minSample) {
     return `fast shadow sample ${familyStats.n}/${minSample}`;
   }
@@ -1272,15 +1311,18 @@ function recordSignal(sig: MomentumSignal, decision: 'paper' | 'live-open' | 'sk
 function preTradeGate(sig: MomentumSignal, params: RiskParams, confident: boolean): string | null {
   const minScore = runtimeNum('hl_momentum_min_live_score', MIN_LIVE_SCORE, 45, 95);
   const minEv = runtimeNum('hl_momentum_min_expected_pnl_pct', MIN_EXPECTED_PNL_PCT, -0.25, 1.5);
-  const canary = confirmLongCanaryActive(sig);
-  const minProb = canary
+  const confirmCanary = confirmLongCanaryActive(sig);
+  const fastCanary = fastLongCanaryActive(sig);
+  const minProb = confirmCanary
     ? runtimeNum('hl_momentum_confirm_long_canary_min_prob', CONFIRM_LONG_CANARY_MIN_PROB, 0.35, 0.65)
-    : runtimeNum('hl_momentum_min_calibrated_prob', MIN_CALIBRATED_PROB, 0.35, 0.65);
+    : fastCanary
+      ? runtimeNum('hl_momentum_fast_long_canary_min_prob', FAST_LONG_CANARY_MIN_PROB, 0.35, 0.65)
+      : runtimeNum('hl_momentum_min_calibrated_prob', MIN_CALIBRATED_PROB, 0.35, 0.65);
   if (sig.score < minScore) return `score ${sig.score} < ${minScore}`;
   if (!segmentLiveEnabled(sig)) return `${sig.layer}-${sig.side} live paused by side-aware governor`;
   if (sig.prob < minProb) return `p ${sig.prob.toFixed(3)} < ${minProb.toFixed(3)}`;
   if (sig.expectedPnl < minEv) return `ev ${sig.expectedPnl.toFixed(2)}% < ${minEv.toFixed(2)}%`;
-  if (canary) {
+  if (confirmCanary) {
     const minAbsR3 = runtimeNum(
       'hl_momentum_confirm_long_min_abs_r3_pct',
       CONFIRM_LONG_CANARY_POLICY.minAbsR3Pct,
@@ -1299,6 +1341,26 @@ function preTradeGate(sig: MomentumSignal, params: RiskParams, confident: boolea
     ));
     const open = liveAllPosStmt.all().length;
     if (open >= canaryMaxOpen) return `confirm-long canary max open ${open}/${canaryMaxOpen}`;
+  }
+  if (fastCanary) {
+    const minAbsR90 = runtimeNum(
+      'hl_momentum_fast_long_min_abs_r90_pct',
+      FAST_LONG_CANARY_POLICY.minAbsR3Pct,
+      0.45,
+      2.50,
+    );
+    const absR90 = Math.abs(sig.metrics.r90 ?? NaN);
+    if (!Number.isFinite(absR90) || absR90 < minAbsR90) {
+      return `fast-long |r90| ${Number.isFinite(absR90) ? absR90.toFixed(2) : 'na'}% < ${minAbsR90.toFixed(2)}%`;
+    }
+    const canaryMaxOpen = Math.round(runtimeNum(
+      'hl_momentum_fast_long_canary_max_open',
+      FAST_LONG_CANARY_MAX_OPEN,
+      1,
+      2,
+    ));
+    const open = liveAllPosStmt.all().length;
+    if (open >= canaryMaxOpen) return `fast-long canary max open ${open}/${canaryMaxOpen}`;
   }
   const shadowGate = shadowProofGate(sig);
   if (shadowGate) return shadowGate;
@@ -1858,13 +1920,14 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
     return;
   }
   const nowMs = Date.now();
-  const canary = confirmLongCanaryActive(sig);
+  const confirmCanary = confirmLongCanaryActive(sig);
+  const fastCanary = fastLongCanaryActive(sig);
   const cooldownUntil = liveEntryFailCooldown.get(coin) ?? 0;
   if (cooldownUntil > nowMs) { recordSignal(sig, 'skip', `entry cooldown ${Math.ceil((cooldownUntil - nowMs) / 1000)}s`, { ref: last.c, signal: last.c }); return; }
   const pnlStart = liveDailyPnlStart(nowMs);
   const dailyStopUsd = effectiveDailyStopUsd(sig);
   if (dailyStopUsd != null) {
-    const sessionUsd = liveSessionUsdStmt.get(pnlStart)?.usd ?? 0;
+    const sessionUsd = sessionUsdForSignal(sig, pnlStart);
     if (sessionUsd <= dailyStopUsd) { recordSignal(sig, 'skip', `session dollar stop $${sessionUsd.toFixed(2)} <= $${dailyStopUsd.toFixed(2)}`); return; }
   } else {
     const dayPnl = liveTodayPnlStmt.get(pnlStart)?.pnl ?? 0;
@@ -1890,9 +1953,11 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
   if (!ex.ok) { recordSignal(sig, 'skip', `position read failed: ${ex.msg}`); logger.warn({ coin, msg: ex.msg }, 'hl-momentum-live: position read failed before entry'); return; }
   if (ex.data) { recordSignal(sig, 'skip', 'exchange position already open'); return; } // shared one-way account: never stack on an existing live position
 
-  const liveSig: MomentumSignal = canary
+  const liveSig: MomentumSignal = confirmCanary
     ? { ...sig, signal: `${sig.signal} [${CONFIRM_LONG_CANARY_TAG}]` }
-    : sig;
+    : fastCanary
+      ? { ...sig, signal: `${sig.signal} [${FAST_LONG_CANARY_TAG}]` }
+      : sig;
   const sizing = await liveSizing(liveSig, params);
   const sizedSig: MomentumSignal = { ...liveSig, signal: appendSizingSignal(liveSig.signal, sizing) };
   const liq = await liveLiquidityCheck(coin, sig.side, sizing.notionalUsd);

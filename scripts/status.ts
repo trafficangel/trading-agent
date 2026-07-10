@@ -128,6 +128,23 @@ const momConfirmLongShadowTargetN = Number(momRuntime('hl_momentum_confirm_long_
 const momPromotionProgress = momPromotionStage === 'shadow'
   ? `shadow proof ${momConfirmLongShadowN}/${momConfirmLongShadowTargetN}`
   : `${momPromotionN}/${momPromotionNextN || momPromotionN} → ${momPromotionNext}`;
+const momFastStage = momRuntime('hl_momentum_fast_long_promotion_stage', 'shadow');
+const momFastN = Number(momRuntime('hl_momentum_fast_long_canary_live_n', '0'));
+const momFastExactN = Number(momRuntime('hl_momentum_fast_long_promotion_exact_n', String(momFastN)));
+const momFastAvg = Number(momRuntime('hl_momentum_fast_long_canary_live_avg_pct', '0'));
+const momFastPfRaw = momRuntime('hl_momentum_fast_long_promotion_profit_factor', '0');
+const momFastPfNum = Number(momFastPfRaw);
+const momFastPf = momFastPfRaw === 'inf' ? '∞' : Number.isFinite(momFastPfNum) && momFastN ? momFastPfNum.toFixed(2) : '—';
+const momFastDd = Number(momRuntime('hl_momentum_fast_long_promotion_max_drawdown_pct', '0'));
+const momFastNext = momRuntime('hl_momentum_fast_long_promotion_next_stage', 'canary-2');
+const momFastNextN = Number(momRuntime('hl_momentum_fast_long_promotion_next_min_trades', '10'));
+const momFastMaxOpen = Number(momRuntime('hl_momentum_fast_long_canary_max_open', '1'));
+const momFastMinAbsR90 = Number(momRuntime('hl_momentum_fast_long_min_abs_r90_pct', '0.80'));
+const momFastShadowN = Number(momRuntime('hl_momentum_fast_long_shadow_n', '0'));
+const momFastShadowTargetN = Number(momRuntime('hl_momentum_fast_long_sample_n', '20'));
+const momFastProgress = momFastStage === 'shadow'
+  ? `shadow proof ${momFastShadowN}/${momFastShadowTargetN}`
+  : `${momFastN}/${momFastNextN || momFastN} → ${momFastNext}`;
 const reconcileRaw = db.prepare<[string], { value: string }>('SELECT value FROM runtime_config WHERE key = ?').get('hl_momentum_reconcile_state')?.value;
 let reconcile = 'not checked';
 if (reconcileRaw) {
@@ -139,6 +156,7 @@ if (reconcileRaw) {
 console.log(`\nHL MOMENTUM LIVE (public track since ${fmtT(momPublicStart)})`);
 console.log(`  reconcile ${reconcile}`);
 console.log(`  stage ${momPromotionStage} · |r3|≥${momConfirmLongMinAbsR3.toFixed(2)}% · ${momPromotionProgress} · live exact ${momPromotionExactN}/${momPromotionN} · avg ${momPromotionAvg >= 0 ? '+' : ''}${momPromotionAvg.toFixed(3)}% · PF ${momPromotionPf} · maxDD ${momPromotionDd.toFixed(3)}% · maxOpen ${momPromotionMaxOpen}`);
+console.log(`  fast-long ${momFastStage} · |r90|≥${momFastMinAbsR90.toFixed(2)}% · ${momFastProgress} · live exact ${momFastExactN}/${momFastN} · avg ${momFastAvg >= 0 ? '+' : ''}${momFastAvg.toFixed(3)}% · PF ${momFastPf} · maxDD ${momFastDd.toFixed(3)}% · maxOpen ${momFastMaxOpen}`);
 console.log(`  closed ${mom.closed} · exact ${mom.exact}/${mom.closed} · net ${(mom.net_pct ?? 0) >= 0 ? '+' : ''}${(mom.net_pct ?? 0).toFixed(3)}% / $${(mom.net_usd ?? 0).toFixed(3)} · pending intents ${pendingIntents}`);
 for (const p of momOpen) {
   console.log(`  ${p.coin.padEnd(9)} ${p.side.padEnd(5)} @ ${p.entry_px} · $${(p.entry_px * p.qty).toFixed(2)} · ${fmtT(p.opened_at)}`);

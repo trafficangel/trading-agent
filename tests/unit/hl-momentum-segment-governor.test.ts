@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CONFIRM_LONG_CANARY_POLICY,
+  FAST_LONG_CANARY_POLICY,
   MOMENTUM_PROMOTION_POLICY,
   evaluateMomentumSegment,
   evaluateMomentumPromotion,
@@ -79,6 +80,30 @@ describe('HL momentum side-aware governor', () => {
     expect(result.sample.n).toBe(20);
     expect(result.enabled).toBe(false);
     expect(result.reason).toBe('sample 20/40');
+  });
+
+  it('promotes only the strong fast-long slice using the 90-second move metric', () => {
+    const rows = [
+      ...Array.from({ length: 10 }, () => row(0.25, 'long', 'fast', -0.95)),
+      ...Array.from({ length: 10 }, () => row(0.12, 'long', 'fast', -0.85)),
+      ...Array.from({ length: 40 }, () => row(0.40, 'long', 'fast', -0.60)),
+    ];
+    const result = evaluateMomentumSegment(rows, 'fast', 'long', FAST_LONG_CANARY_POLICY);
+
+    expect(result.enabled).toBe(true);
+    expect(result.sample.n).toBe(20);
+    expect(result.sample.averagePct).toBeCloseTo(0.185, 6);
+  });
+
+  it('blocks fast-long when the strong-move sample is incomplete', () => {
+    const rows = [
+      ...Array.from({ length: 10 }, () => row(0.30, 'long', 'fast', -0.90)),
+      ...Array.from({ length: 40 }, () => row(0.30, 'long', 'fast', -0.60)),
+    ];
+    const result = evaluateMomentumSegment(rows, 'fast', 'long', FAST_LONG_CANARY_POLICY);
+
+    expect(result.enabled).toBe(false);
+    expect(result.reason).toBe('sample 10/20');
   });
 });
 
