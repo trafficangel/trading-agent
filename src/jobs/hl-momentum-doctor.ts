@@ -170,6 +170,17 @@ const shadowGovernorRowsStmt = db.prepare<[number], GovernorRow>(`
    ORDER BY closed_at DESC
    LIMIT ?
 `);
+const confirmLongSegmentRowsStmt = db.prepare<[string, number], GovernorRow>(`
+  SELECT side, pnl_pct, signal, closed_at
+    FROM hl_momentum_shadow_log
+   WHERE closed_at IS NOT NULL
+     AND pnl_pct IS NOT NULL
+     AND side = 'long'
+     AND signal LIKE '%layer=confirm%'
+     AND signal LIKE ?
+   ORDER BY closed_at DESC
+   LIMIT ?
+`);
 const liveGovernorRowsStmt = db.prepare<[number], GovernorRow>(`
   SELECT side, pnl_pct, signal, closed_at
     FROM hl_momentum_live_log
@@ -707,7 +718,7 @@ function runActivityGovernor(nowMs: number): string[] {
   const shadowN = Math.round(clamp(runtimeNum('hl_momentum_governor_shadow_n', GOVERNOR_SHADOW_RECENT_N), 40, 300));
   const shadowRows = shadowGovernorRowsStmt.all(shadowN);
   const segmentScanN = Math.round(clamp(runtimeNum('hl_momentum_segment_scan_n', GOVERNOR_SEGMENT_SCAN_N), 120, 600));
-  const segmentSourceRows = shadowGovernorRowsStmt.all(segmentScanN);
+  const segmentSourceRows = confirmLongSegmentRowsStmt.all(`%cv=${HL_MOMENTUM_CALIBRATION_VERSION}%`, segmentScanN);
   const liveRows = liveGovernorRowsStmt.all(20);
   const riskStartMs = runtimeNum('hl_momentum_risk_model_start_ms', 0);
   const calibrationStartMs = runtimeNum('hl_momentum_calibration_start_ms', 0);
@@ -734,7 +745,7 @@ function runActivityGovernor(nowMs: number): string[] {
   const currentLive = statsOf(currentLiveRows);
   const segmentStartMs = Math.max(riskStartMs, calibrationStartMs);
   const segmentRows = segmentSourceRows
-    .filter((r) => r.closed_at >= segmentStartMs && r.signal.includes(`cv=${HL_MOMENTUM_CALIBRATION_VERSION}`))
+    .filter((r) => r.closed_at >= segmentStartMs)
     .map((r) => ({ side: r.side, layer: layerFromSignal(r.signal), pnlPct: r.pnl_pct, r3Pct: r3FromSignal(r.signal) ?? NaN }));
   const confirmLongPolicy = {
     sampleSize: Math.round(clamp(runtimeNum('hl_momentum_confirm_long_sample_n', CONFIRM_LONG_CANARY_POLICY.sampleSize), 20, 100)),
