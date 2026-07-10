@@ -191,6 +191,10 @@ function runtimeNum(key: string, fallback: number): number {
   return Number.isFinite(raw) ? raw : fallback;
 }
 
+function runtimeText(key: string, fallback: string): string {
+  return runtimeConfigStmt.get(key)?.value?.trim() || fallback;
+}
+
 function parseMomSignalProb(signal: string): number | null {
   const m = signal.match(/\[score=[^\]]*\sp=([-+]?\d+(?:\.\d+)?)/);
   const n = m ? Number(m[1]) : NaN;
@@ -893,9 +897,25 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
   const session = momSessionPnlStmt.get(sessionStart) ?? { closed: 0, pct: 0, usd: 0 };
   const engineOpen = momEngineOpenStmt.get() ?? { open: 0, notional: 0 };
   const maxOpen = runtimeNum('hl_momentum_live_max_open', 4);
+  const promotionStage = runtimeText('hl_momentum_promotion_stage', 'canary-1');
+  const promotionN = Math.round(runtimeNum('hl_momentum_confirm_long_canary_live_n', 0));
+  const promotionExactN = Math.round(runtimeNum('hl_momentum_promotion_exact_n', promotionN));
+  const promotionAvg = runtimeNum('hl_momentum_confirm_long_canary_live_avg_pct', 0);
+  const promotionPfRaw = runtimeText('hl_momentum_promotion_profit_factor', '0');
+  const promotionPfNum = Number(promotionPfRaw);
+  const promotionPf = promotionPfRaw === 'inf' ? '∞' : Number.isFinite(promotionPfNum) && promotionN ? promotionPfNum.toFixed(2) : '—';
+  const promotionMaxDd = runtimeNum('hl_momentum_promotion_max_drawdown_pct', 0);
+  const promotionNextStage = runtimeText('hl_momentum_promotion_next_stage', 'canary-2');
+  const promotionNextN = Math.round(runtimeNum('hl_momentum_promotion_next_min_trades', 10));
+  const promotionRetryAfter = runtimeNum('hl_momentum_promotion_retry_after_ms', 0);
+  const canaryMaxOpen = Math.round(runtimeNum('hl_momentum_confirm_long_canary_max_open', 1));
+  const sideAwareEnabled = runtimeNum('hl_momentum_side_aware_enabled', 1) >= 0.5;
+  const positionCap = sideAwareEnabled ? canaryMaxOpen : maxOpen;
   const minNotional = runtimeNum('hl_momentum_min_notional_usd', 11);
   const maxNotional = runtimeNum('hl_momentum_max_notional_usd', 24);
   const minProb = runtimeNum('hl_momentum_min_calibrated_prob', 0.49);
+  const canaryMinProb = runtimeNum('hl_momentum_confirm_long_canary_min_prob', 0.47);
+  const activeMinProb = sideAwareEnabled ? canaryMinProb : minProb;
   const minScore = runtimeNum('hl_momentum_min_live_score', 68);
   const minEv = runtimeNum('hl_momentum_min_expected_pnl_pct', 0.10);
   const probBias = runtimeNum('hl_momentum_prob_bias', 0);
@@ -922,6 +942,18 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
   const usedUsd = session.usd ?? 0;
   const stopLeft = Math.max(0, Math.abs(stopUsd) - Math.max(0, -usedUsd));
   const kellyOn = runtimeNum('hl_momentum_kelly_enabled', 1) >= 0.5;
+  const promotionTarget = promotionStage === 'canary-1'
+    ? t(lang, 'gate: 10 exact · avg ≥ 0.03% · PF ≥ 1.10 · DD ≤ 1.50%', 'gate: 10 exact · avg ≥ 0.03% · PF ≥ 1.10 · DD ≤ 1.50%')
+    : promotionStage === 'canary-2'
+      ? t(lang, 'gate: 25 exact · avg ≥ 0.05% · PF ≥ 1.20 · DD ≤ 2.00%', 'gate: 25 exact · avg ≥ 0.05% · PF ≥ 1.20 · DD ≤ 2.00%')
+      : promotionStage === 'shadow' && promotionRetryAfter > Date.now()
+        ? t(lang, `повторный micro-probe после ${fmtDt(promotionRetryAfter)} UTC`, `micro probe retries after ${fmtDt(promotionRetryAfter)} UTC`)
+        : promotionStage === 'scaled'
+          ? t(lang, 'статистический gate пройден; сумма остаётся под ручным контролем', 'statistical gate passed; notional remains operator-controlled')
+          : t(lang, 'ждём подтверждения shadow-edge', 'waiting for shadow-edge proof');
+  const promotionProgress = promotionNextN > 0
+    ? `${promotionN}/${promotionNextN} → ${promotionNextStage}`
+    : t(lang, 'gate пройден', 'gate passed');
   const metric = (k: string, v: string, s: string, clsName = ''): string =>
     `<div class="ops-card"><div class="k">${k}</div><div class="v ${clsName}">${v}</div><div class="s">${s}</div></div>`;
 
@@ -931,8 +963,9 @@ function momentumOpsMetrics(liveOpenPublic: number, lang: Lang): string {
       ${metric(t(lang, 'Рынок', 'Market'), `${universe.ready ?? 0} / ${universe.coins}`, t(lang, `1m готово после прогрева · свежих ${universe.fresh ?? 0} · обновлено ${ageText(universe.newest, lang)}`, `1m ready after warmup · fresh ${universe.fresh ?? 0} · updated ${ageText(universe.newest, lang)}`))}
       ${metric(t(lang, 'Радар', 'Radar'), '2s / 1m', t(lang, 'allMids по всему рынку + 1m слой поиска поздних всплесков; 5m объём остаётся как fallback', 'allMids across the market + 1m late-burst layer; 5m volume remains as fallback'))}
       ${metric(t(lang, 'Сигналы', 'Signals'), String(sig.total), t(lang, `${sig.skipped ?? 0} отфильтрованы защитой · ${sig.live_open ?? 0} новых live-входов`, `${sig.skipped ?? 0} filtered by protection · ${sig.live_open ?? 0} new live entries`))}
-      ${metric(t(lang, 'Позиции', 'Positions'), `${liveOpenPublic} / ${maxOpen}`, t(lang, `${engineOpen.open} сейчас под управлением движка · публичный трек показывает новые после reset`, `${engineOpen.open} currently managed by engine · public track shows new ones after reset`))}
-      ${metric(t(lang, 'Качество входа', 'Entry quality'), `score ≥ ${minScore}`, t(lang, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · средний score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`, `p ≥ ${minProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · avg score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`))}
+      ${metric(t(lang, 'Позиции', 'Positions'), `${liveOpenPublic} / ${positionCap}`, t(lang, `${engineOpen.open} сейчас под управлением движка · лимит задаёт этап ${promotionStage}`, `${engineOpen.open} currently managed by engine · cap is set by ${promotionStage}`))}
+      ${metric(t(lang, 'Этап допуска', 'Promotion stage'), promotionStage, `${promotionProgress} · exact ${promotionExactN}/${promotionN} · avg ${pct(promotionAvg)} · PF ${promotionPf} · DD ${promotionMaxDd.toFixed(2)}% · ${promotionTarget}`, promotionStage === 'shadow' ? 'neg' : promotionStage === 'scaled' ? 'pos' : '')}
+      ${metric(t(lang, 'Качество входа', 'Entry quality'), `score ≥ ${minScore}`, t(lang, `p ≥ ${activeMinProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · средний score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`, `p ≥ ${activeMinProb.toFixed(2)} · EV ≥ ${minEv.toFixed(2)}% · avg score ${sig.avg_score != null ? sig.avg_score.toFixed(0) : '—'}`))}
       ${metric(t(lang, 'Онлайн-калибровка', 'Online calibration'), `p ${probBias >= 0 ? '+' : ''}${(probBias * 100).toFixed(1)}pp · EV ${pct(evBias)}`, t(lang, `${calN.toFixed(0)} сделок · факт WR ${(calActualWr * 100).toFixed(0)}% vs прогноз ${(calPredWr * 100).toFixed(0)}% · PnL ${pct(calActualPnl)} vs EV ${pct(calPredEv)}`, `${calN.toFixed(0)} trades · actual WR ${(calActualWr * 100).toFixed(0)}% vs predicted ${(calPredWr * 100).toFixed(0)}% · PnL ${pct(calActualPnl)} vs EV ${pct(calPredEv)}`), evBias < 0 || probBias < 0 ? 'neg' : '')}
       ${metric(t(lang, 'SKIP learning', 'SKIP learning'), rejectedN ? pct(rejectedAvg) : '—', t(lang, `${rejectedN.toFixed(0)} отклонённых оценены · WR ${(rejectedWr * 100).toFixed(0)}% · ${rejectedAvg > 0 ? 'могли упустить плюс' : rejectedAvg < 0 ? 'фильтр спасал от минуса' : 'нейтрально'}`, `${rejectedN.toFixed(0)} rejected evaluated · WR ${(rejectedWr * 100).toFixed(0)}% · ${rejectedAvg > 0 ? 'may have missed upside' : rejectedAvg < 0 ? 'filter saved losses' : 'neutral'}`), rejectedAvg > 0 ? 'neg' : rejectedAvg < 0 ? 'pos' : '')}
       ${metric(t(lang, 'Governor режим', 'Governor mode'), governorState, t(lang, `shadow ${pct(governorShadowAvg)} · confirm ${pct(governorConfirmAvg)} · live ${pct(governorLiveAvg)} · same side ≤ ${maxSameSide.toFixed(0)}`, `shadow ${pct(governorShadowAvg)} · confirm ${pct(governorConfirmAvg)} · live ${pct(governorLiveAvg)} · same side ≤ ${maxSameSide.toFixed(0)}`), governorState === 'defensive' ? 'neg' : governorState === 'hot' ? 'pos' : '')}
@@ -1129,6 +1162,12 @@ export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
   const liveClosed = momentumPublicRows(momClosedStmt.all());
   const liveOpen = momentumPublicRows(momOpenStmt.all());
   const live = computeMomentumStats(liveClosed, liveOpen.length);
+  const promotionStage = runtimeText('hl_momentum_promotion_stage', 'canary-1');
+  const promotionN = Math.round(runtimeNum('hl_momentum_confirm_long_canary_live_n', 0));
+  const promotionExactN = Math.round(runtimeNum('hl_momentum_promotion_exact_n', promotionN));
+  const promotionNextN = Math.round(runtimeNum('hl_momentum_promotion_next_min_trades', 10));
+  const promotionMaxOpen = Math.round(runtimeNum('hl_momentum_confirm_long_canary_max_open', 1));
+  const promotionProgress = promotionNextN > 0 ? `${promotionN}/${promotionNextN}` : `${promotionExactN}/${promotionN}`;
   const statCard = (l: string, v: string, vc = '', s = '', sc = ''): string =>
     `<div class="lt-stat"><div class="l">${l}</div><div class="v ${vc}">${v}</div>${s ? `<div class="s ${sc}">${s}</div>` : ''}</div>`;
 
@@ -1145,7 +1184,7 @@ export function renderMomentumTrack(page = 1, lang: Lang = 'ru'): string {
 
     <div class="lt-phase">
       <span class="dot"></span>
-      <div>${t(lang, '<b>Статус: real micro · новый публичный отсчёт.</b> Статистика ниже считается с fade-reversal версии, запущенной ', '<b>Status: real micro · new public track.</b> The stats below are counted from the fade-reversal version launched at ')}${momentumPublicStartText(lang)}${t(lang, '. Размер выбирается по консервативному Kelly в micro-коридоре, плечо 1x, стоп на бирже; stop/trail считаются из текущего распределения волатильности.', '. Size is selected by conservative Kelly inside a micro range, leverage 1x, stop on exchange; stop/trail are derived from the current volatility distribution.')}</div>
+      <div>${t(lang, `<b>Этап: ${promotionStage} · ${promotionProgress} сделок, exact ${promotionExactN}/${promotionN}.</b> Торгуется только доказанный confirm-long, максимум ${promotionMaxOpen} ${promotionMaxOpen === 1 ? 'позиция' : 'позиции'}; повышение суммы не происходит автоматически. Публичный отсчёт fade-reversal запущен `, `<b>Stage: ${promotionStage} · ${promotionProgress} trades, exact ${promotionExactN}/${promotionN}.</b> Only proven confirm-long is traded, with at most ${promotionMaxOpen} open ${promotionMaxOpen === 1 ? 'position' : 'positions'}; notional does not increase automatically. The public fade-reversal track launched at `)}${momentumPublicStartText(lang)}${t(lang, '. Плечо 1x, стоп на бирже; stop/trail считаются из текущего распределения волатильности.', '. Leverage is 1x with an exchange stop; stop/trail are derived from the current volatility distribution.')}</div>
     </div>
 
     <div class="lt-cards">

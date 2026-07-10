@@ -3,6 +3,8 @@ import { db } from '../db/client.js';
 import { HL_MOMENTUM_CALIBRATION_VERSION, robustCalibration } from '../lib/hl-momentum-calibration.js';
 import {
   CONFIRM_LONG_CANARY_POLICY,
+  MOMENTUM_PROMOTION_POLICY,
+  evaluateMomentumPromotion,
   evaluateMomentumSegment,
 } from '../lib/hl-momentum-segment-governor.js';
 import { logger } from '../lib/logger.js';
@@ -33,6 +35,12 @@ type CalibrationRow = {
   closed_at: number;
 };
 type GovernorRow = { side: Side; pnl_pct: number; signal: string; closed_at: number; ts?: number };
+type PromotionRow = {
+  pnl_pct: number;
+  net_pnl_usd: number | null;
+  pnl_source: string | null;
+  closed_at: number;
+};
 type GovernorSignalWindow = { total: number; live_open: number | null; paper: number | null; skipped: number | null };
 type GovernorStats = { n: number; avg: number; wr: number; sum: number };
 type RejectedSignalRow = {
@@ -168,6 +176,14 @@ const liveGovernorRowsStmt = db.prepare<[number], GovernorRow>(`
    WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL
    ORDER BY closed_at DESC
    LIMIT ?
+`);
+const canaryPromotionRowsStmt = db.prepare<[string], PromotionRow>(`
+  SELECT pnl_pct, net_pnl_usd, pnl_source, closed_at
+    FROM hl_momentum_live_log
+   WHERE closed_at IS NOT NULL
+     AND pnl_pct IS NOT NULL
+     AND signal LIKE ?
+   ORDER BY closed_at ASC
 `);
 const signalWindowStmt = db.prepare<[number], GovernorSignalWindow>(`
   SELECT COUNT(*) AS total,
@@ -721,10 +737,20 @@ function runActivityGovernor(nowMs: number): string[] {
     minRecentAveragePct: clamp(runtimeNum('hl_momentum_confirm_long_min_recent_avg_pct', CONFIRM_LONG_CANARY_POLICY.minRecentAveragePct), -0.10, 0.30),
   };
   const confirmLongProof = evaluateMomentumSegment(segmentRows, 'confirm', 'long', confirmLongPolicy);
-  const canaryLive = statsOf(liveGovRows.filter((r) => r.signal.includes(CONFIRM_LONG_CANARY_TAG)));
-  const canaryLiveBad = canaryLive.n >= 3 && canaryLive.avg < 0;
   const sideAwareEnabled = runtimeBool('hl_momentum_side_aware_enabled', true);
-  const confirmLongCanary = sideAwareEnabled && confirmLongProof.enabled && !canaryLiveBad;
+  const canaryTrades = canaryPromotionRowsStmt.all(`%${CONFIRM_LONG_CANARY_TAG}%`).map((row) => ({
+    pnlPct: row.pnl_pct,
+    netPnlUsd: row.net_pnl_usd,
+    exact: row.pnl_source === 'fills-v1',
+    closedAt: row.closed_at,
+  }));
+  const promotion = evaluateMomentumPromotion(
+    canaryTrades,
+    sideAwareEnabled && confirmLongProof.enabled,
+    nowMs,
+    MOMENTUM_PROMOTION_POLICY,
+  );
+  const confirmLongCanary = promotion.liveEnabled;
 
   const confirmGood = confirm.n >= 12 && confirm.avg > 0 && confirm.wr >= 0.48;
   const confirmHot = confirm.n >= 20 && confirm.avg >= 0.10 && confirm.wr >= 0.52;
@@ -773,21 +799,31 @@ function runActivityGovernor(nowMs: number): string[] {
   setGovernorKv('hl_momentum_confirm_max_impulse_ratio', cfg.ir.toFixed(2), nowMs, reason);
   const fastLive = sideAwareEnabled ? 0 : cfg.fastLive;
   setGovernorKv('hl_momentum_fast_live_enabled', fastLive, nowMs, fastGood ? `${reason}: fast proven` : `${reason}: fast not proven`);
-  setGovernorKv('hl_momentum_confirm_long_live_enabled', confirmLongCanary ? 1 : 0, nowMs, `${reason}: ${confirmLongProof.reason}${canaryLiveBad ? '; canary live red' : ''}`);
+  setGovernorKv('hl_momentum_confirm_long_live_enabled', confirmLongCanary ? 1 : 0, nowMs, `${reason}: ${promotion.reason}`);
   setGovernorKv('hl_momentum_confirm_short_live_enabled', 0, nowMs, `${reason}: confirm-short remains shadow-only`);
   setGovernorKv('hl_momentum_fast_long_live_enabled', 0, nowMs, `${reason}: fast-long remains shadow-only`);
   setGovernorKv('hl_momentum_fast_short_live_enabled', 0, nowMs, `${reason}: fast-short remains shadow-only`);
+  setGovernorKv('hl_momentum_confirm_long_canary_max_open', promotion.maxOpen, nowMs, `${reason}: promotion ${promotion.stage}`);
   setGovernorKv('hl_momentum_confirm_long_shadow_n', confirmLongProof.sample.n, nowMs, reason);
   setGovernorKv('hl_momentum_confirm_long_shadow_avg_pct', confirmLongProof.sample.averagePct.toFixed(4), nowMs, reason);
   setGovernorKv('hl_momentum_confirm_long_recent_avg_pct', confirmLongProof.recent.averagePct.toFixed(4), nowMs, reason);
-  setGovernorKv('hl_momentum_confirm_long_canary_live_n', canaryLive.n, nowMs, reason);
-  setGovernorKv('hl_momentum_confirm_long_canary_live_avg_pct', canaryLive.avg.toFixed(4), nowMs, reason);
+  setGovernorKv('hl_momentum_confirm_long_canary_live_n', promotion.n, nowMs, reason);
+  setGovernorKv('hl_momentum_confirm_long_canary_live_avg_pct', promotion.averagePct.toFixed(4), nowMs, reason);
+  setGovernorKv('hl_momentum_promotion_stage', promotion.stage, nowMs, promotion.reason);
+  setGovernorKv('hl_momentum_promotion_exact_n', promotion.exactN, nowMs, promotion.reason);
+  setGovernorKv('hl_momentum_promotion_net_usd', promotion.netPnlUsd.toFixed(6), nowMs, promotion.reason);
+  setGovernorKv('hl_momentum_promotion_profit_factor', promotion.profitFactor == null ? 'inf' : promotion.profitFactor.toFixed(4), nowMs, promotion.reason);
+  setGovernorKv('hl_momentum_promotion_max_drawdown_pct', promotion.maxDrawdownPct.toFixed(4), nowMs, promotion.reason);
+  setGovernorKv('hl_momentum_promotion_next_stage', promotion.nextStage ?? 'complete', nowMs, promotion.reason);
+  setGovernorKv('hl_momentum_promotion_next_min_trades', promotion.nextMinTrades ?? 0, nowMs, promotion.reason);
+  setGovernorKv('hl_momentum_promotion_retry_after_ms', promotion.retryAfter ?? 0, nowMs, promotion.reason);
 
   const bestSide = confirmLong.avg >= confirmShort.avg ? `long ${fmtPct(confirmLong.avg)}` : `short ${fmtPct(confirmShort.avg)}`;
   return [
     `• state <b>${state}</b>: p≥${cfg.minP.toFixed(3)} · EV≥${cfg.minEv.toFixed(2)}% · maxOpen ${cfg.maxOpen} · sameSide ${cfg.maxSame} · ir≤${cfg.ir.toFixed(2)} · fast ${fastLive ? 'on' : 'off'}`,
     `• shadow ${shadow.n}: ${fmtPct(shadow.avg)} · WR ${(shadow.wr * 100).toFixed(0)}%; confirm ${confirm.n}: ${fmtPct(confirm.avg)} · WR ${(confirm.wr * 100).toFixed(0)}%; fast ${fast.n}: ${fmtPct(fast.avg)} · WR ${(fast.wr * 100).toFixed(0)}%`,
-    `• confirm-long canary ${confirmLongCanary ? '<b>on</b>' : 'off'}: ${confirmLongProof.sample.n}/${confirmLongPolicy.sampleSize} ${fmtPct(confirmLongProof.sample.averagePct)} · recent ${confirmLongProof.recent.n}/${confirmLongPolicy.recentSize} ${fmtPct(confirmLongProof.recent.averagePct)} · ${confirmLongProof.reason}${canaryLive.n ? ` · live ${canaryLive.n} ${fmtPct(canaryLive.avg)}` : ''}`,
+    `• promotion <b>${promotion.stage}</b>: live ${promotion.n} · exact ${promotion.exactN}/${promotion.n} · ${fmtPct(promotion.averagePct)} · PF ${promotion.profitFactor == null ? (promotion.netPnlUsd > 0 ? '∞' : '—') : promotion.profitFactor.toFixed(2)} · maxDD ${promotion.maxDrawdownPct.toFixed(2)}% · maxOpen ${promotion.maxOpen}`,
+    `• confirm-long canary ${confirmLongCanary ? '<b>on</b>' : 'off'}: shadow ${confirmLongProof.sample.n}/${confirmLongPolicy.sampleSize} ${fmtPct(confirmLongProof.sample.averagePct)} · recent ${confirmLongProof.recent.n}/${confirmLongPolicy.recentSize} ${fmtPct(confirmLongProof.recent.averagePct)} · ${promotion.reason}`,
     `• current risk sample: live ${currentLive.n}/5 ${fmtPct(currentLive.avg)} · shadow ${currentShadow.n}/40 ${fmtPct(currentShadow.avg)}${currentLive.n < 5 ? ' · old live не блокирует новую модель' : ''}`,
     `• rejected/SKIP ${rejected.n}: ${fmtPct(rejected.avg)} · WR ${(rejected.wr * 100).toFixed(0)}%${rejectedMissedEdge ? ' · missed edge' : rejectedSavedLoss ? ' · saved loss' : ''}`,
     `• live ${live.n}: ${fmtPct(live.avg)} · WR ${(live.wr * 100).toFixed(0)}%; open ${open.n} (${open.long_n ?? 0}L/${open.short_n ?? 0}S); best confirm side ${bestSide}`,

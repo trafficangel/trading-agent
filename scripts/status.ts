@@ -109,6 +109,19 @@ const momOpen = db.prepare<[], { coin: string; side: string; entry_px: number; q
 const pendingIntents = db.prepare<[], { n: number }>(`
   SELECT COUNT(*) AS n FROM hl_momentum_order_intent WHERE status IN ('pending', 'submitted')
 `).get()?.n ?? 0;
+const momRuntimeStmt = db.prepare<[string], { value: string }>('SELECT value FROM runtime_config WHERE key = ?');
+const momRuntime = (key: string, fallback: string): string => momRuntimeStmt.get(key)?.value ?? fallback;
+const momPromotionStage = momRuntime('hl_momentum_promotion_stage', 'canary-1');
+const momPromotionN = Number(momRuntime('hl_momentum_confirm_long_canary_live_n', '0'));
+const momPromotionExactN = Number(momRuntime('hl_momentum_promotion_exact_n', String(momPromotionN)));
+const momPromotionAvg = Number(momRuntime('hl_momentum_confirm_long_canary_live_avg_pct', '0'));
+const momPromotionPfRaw = momRuntime('hl_momentum_promotion_profit_factor', '0');
+const momPromotionPfNum = Number(momPromotionPfRaw);
+const momPromotionPf = momPromotionPfRaw === 'inf' ? '∞' : Number.isFinite(momPromotionPfNum) && momPromotionN ? momPromotionPfNum.toFixed(2) : '—';
+const momPromotionDd = Number(momRuntime('hl_momentum_promotion_max_drawdown_pct', '0'));
+const momPromotionNext = momRuntime('hl_momentum_promotion_next_stage', 'canary-2');
+const momPromotionNextN = Number(momRuntime('hl_momentum_promotion_next_min_trades', '10'));
+const momPromotionMaxOpen = Number(momRuntime('hl_momentum_confirm_long_canary_max_open', '1'));
 const reconcileRaw = db.prepare<[string], { value: string }>('SELECT value FROM runtime_config WHERE key = ?').get('hl_momentum_reconcile_state')?.value;
 let reconcile = 'not checked';
 if (reconcileRaw) {
@@ -119,6 +132,7 @@ if (reconcileRaw) {
 }
 console.log(`\nHL MOMENTUM LIVE (public track since ${fmtT(momPublicStart)})`);
 console.log(`  reconcile ${reconcile}`);
+console.log(`  stage ${momPromotionStage} · ${momPromotionN}/${momPromotionNextN || momPromotionN} → ${momPromotionNext} · exact ${momPromotionExactN}/${momPromotionN} · avg ${momPromotionAvg >= 0 ? '+' : ''}${momPromotionAvg.toFixed(3)}% · PF ${momPromotionPf} · maxDD ${momPromotionDd.toFixed(3)}% · maxOpen ${momPromotionMaxOpen}`);
 console.log(`  closed ${mom.closed} · exact ${mom.exact}/${mom.closed} · net ${(mom.net_pct ?? 0) >= 0 ? '+' : ''}${(mom.net_pct ?? 0).toFixed(3)}% / $${(mom.net_usd ?? 0).toFixed(3)} · pending intents ${pendingIntents}`);
 for (const p of momOpen) {
   console.log(`  ${p.coin.padEnd(9)} ${p.side.padEnd(5)} @ ${p.entry_px} · $${(p.entry_px * p.qty).toFixed(2)} · ${fmtT(p.opened_at)}`);
