@@ -22,6 +22,10 @@ import { hlConfigured, hlSetLeverage, hlLimitOrder, hlCancelOrder, hlOpenOrders,
 import { l2Book } from '../exchange/hyperliquid.js';
 import type { HlTradeAccounting } from '../lib/hl-trade-accounting.js';
 import { sendMessage } from '../telegram/bot.js';
+import {
+  wickFadeDriftBlockReason,
+  WICK_FADE_DRIFT_STATE_KEY,
+} from '../lib/wick-fade-drift-guard.js';
 
 /** Operator notification (Telegram logs channel) — fire-and-forget: sendMessage never throws, and `void`
  *  keeps the trading path from ever blocking/failing on Telegram. Only live-mode events notify. */
@@ -194,6 +198,7 @@ const coinCatStmt = db.prepare<[string, string, number], { n: number }>(`SELECT 
 const doctorPauseStmt = db.prepare<[string, string, number], { paused_until: number; reason: string }>(`SELECT paused_until, reason FROM wick_fade_doctor_pause WHERE coin = ? AND side = ? AND paused_until > ?`);
 const momentumLockStmt = db.prepare<[string, number], { locked_until: number; reason: string }>(`SELECT locked_until, reason FROM hl_momentum_live_lock WHERE coin = ? AND locked_until > ?`);
 const quarantineLogAt = new Map<string, number>();
+let driftGuardLogAt = 0;
 function liveQuarantineReason(coin: string, side: 'long' | 'short', nowMs: number): string | null {
   const doctorPause = doctorPauseStmt.get(coin, side, nowMs);
   if (doctorPause) return `doctor pause until ${new Date(doctorPause.paused_until).toISOString()} — ${doctorPause.reason}`;
@@ -213,6 +218,17 @@ function logLiveQuarantine(coin: string, side: 'long' | 'short', reason: string,
   quarantineLogAt.set(key, nowMs);
   logger.warn({ coin, side, reason }, 'wick-fade: LIVE-QUARANTINE active - cancel side quotes, no new entries');
   notify(`Wick-fade quarantine: ${coin} ${side} - ${reason}. New traps paused; open positions still exit normally.`, true);
+}
+
+function globalDriftBlockReason(nowMs: number): string | null {
+  const raw = getKv.get(WICK_FADE_DRIFT_STATE_KEY)?.value;
+  return wickFadeDriftBlockReason(raw, nowMs);
+}
+
+function logGlobalDriftBlock(reason: string, nowMs: number): void {
+  if (nowMs - driftGuardLogAt < QUARANTINE_LOG_COOLDOWN_MS) return;
+  driftGuardLogAt = nowMs;
+  logger.warn({ reason }, 'wick-fade: GLOBAL DRIFT PAUSE active - cancel all flat quotes, no new entries');
 }
 const insLog = db.prepare(`INSERT INTO wick_fade_log (coin,side,entry_px,qty,x,opened_at,reason,mode) VALUES (?,?,?,?,?,?,?,?)`);
 // close the ACTIVE log row (closed_at IS NULL) — sets close fields, NEVER touches the immutable entry `reason`.
@@ -651,6 +667,11 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marke
   if (momentumLock) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
   if (ownershipBlockReason(nowMs)) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
   if (marketBlockReason) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
+  const driftBlockReason = globalDriftBlockReason(nowMs);
+  if (driftBlockReason) {
+    logGlobalDriftBlock(driftBlockReason, nowMs);
+    return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
+  }
   // HL ADDRESS ACTION BUDGET (learned live Jul 4): every order/cancel costs 1 action from a budget of
   // 10k + $1-of-volume-traded each. Per-minute re-quoting across 21+ coins burned ~11.4k actions on $186
   // volume in 3 days → placements started getting REJECTED. Quote maintenance now runs every 5th tick
@@ -794,6 +815,6 @@ export function startWickFadeRunner(): void {
       try { await repairWickAccounting(2); } catch (err) { logger.warn({ err }, 'wick-fade: accounting repair failed'); }
     })().finally(() => { running = false; });
   });
-  logger.warn({ mode: WF_CONFIG.mode, endpoint: config.HL_USE_TESTNET ? 'testnet' : 'MAINNET', vault: config.HL_VAULT_ADDRESS ? 'yes' : 'no', coins: WF_CONFIG.coins.length, lev: WF_CONFIG.leverage, capital: WF_CONFIG.capitalUsd, dailyKill: `${WF_CONFIG.dailyLossPct * 100}%`, dynDepth: WF_CONFIG.dynamicDepth ? `vol×W${WF_CONFIG.volWindow}` : 'fixed' }, '✅ wick-fade runner scheduled (every 1m, post-only deep limits, exchange-reconciled, daily-loss kill)');
+  logger.warn({ mode: WF_CONFIG.mode, endpoint: config.HL_USE_TESTNET ? 'testnet' : 'MAINNET', vault: config.HL_VAULT_ADDRESS ? 'yes' : 'no', coins: WF_CONFIG.coins.length, lev: WF_CONFIG.leverage, capital: WF_CONFIG.capitalUsd, dailyKill: `${WF_CONFIG.dailyLossPct * 100}%`, driftGuard: 'fail-closed', dynDepth: WF_CONFIG.dynamicDepth ? `vol×W${WF_CONFIG.volWindow}` : 'fixed' }, '✅ wick-fade runner scheduled (every 1m, post-only deep limits, exchange-reconciled, daily-loss kill)');
   if (!hlConfigured()) logger.error('wick-fade: HL_API_WALLET_KEY missing — runner idles until configured');
 }

@@ -2,6 +2,13 @@ import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { sendMessage } from '../telegram/bot.js';
+import {
+  evaluateWickFadeDriftGuard,
+  WICK_FADE_DRIFT_POLICY,
+  WICK_FADE_DRIFT_STATE_KEY,
+  type WickFadeDriftRuntimeState,
+  type WickFadeDriftTrade,
+} from '../lib/wick-fade-drift-guard.js';
 
 type Side = 'long' | 'short';
 
@@ -22,6 +29,7 @@ type TradeRow = {
 type CandleRow = { t: number; h: number; l: number; c: number };
 type PauseRow = { paused_until: number; last_seen_trade_id: number };
 type ActivePauseRow = { coin: string; side: Side; paused_until: number; reason: string };
+type DriftTradeRow = WickFadeDriftTrade & { id: number; closedAt: number };
 
 const MODE = 'live';
 const COST_RT_PCT = 0.05;
@@ -76,6 +84,17 @@ const setKvStmt = db.prepare<[string, string, number, string], void>(`
   INSERT INTO runtime_config (key, value, updated_at, reason)
   VALUES (?, ?, ?, ?)
   ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, reason = excluded.reason
+`);
+
+const driftRowsStmt = db.prepare<[string, number], { id: number; pnl_pct: number; net_pnl_usd: number | null; closed_at: number }>(`
+  SELECT id, pnl_pct, net_pnl_usd, closed_at
+    FROM wick_fade_log
+   WHERE mode = ?
+     AND closed_at IS NOT NULL
+     AND pnl_pct IS NOT NULL
+     AND pnl_source = 'fills-v1'
+   ORDER BY closed_at DESC
+   LIMIT ?
 `);
 
 const getPauseStmt = db.prepare<[string, Side], PauseRow>(`
@@ -262,12 +281,59 @@ function renderPauseLine(p: ActivePauseRow): string {
   return `${p.coin} ${p.side}: до ${new Date(p.paused_until).toISOString().slice(0, 16)} UTC — ${p.reason}`;
 }
 
+function readDriftState(): WickFadeDriftRuntimeState | null {
+  const raw = getKvStmt.get(WICK_FADE_DRIFT_STATE_KEY)?.value;
+  if (!raw) return null;
+  try { return JSON.parse(raw) as WickFadeDriftRuntimeState; } catch { return null; }
+}
+
+function driftPf(value: number | null, sumPct: number): string {
+  return value == null ? (sumPct > 0 ? 'inf' : 'na') : value.toFixed(2);
+}
+
+function renderDriftLine(state: WickFadeDriftRuntimeState): string {
+  return `${state.blocked ? 'PAUSED' : 'LIVE'} · last20 ${fmtPct(state.fast.averagePct, 3)} PF ${driftPf(state.fast.profitFactor, state.fast.sumPct)} · last40 ${fmtPct(state.slow.averagePct, 3)} PF ${driftPf(state.slow.profitFactor, state.slow.sumPct)} · ${state.reason}`;
+}
+
+export function updateWickFadeDriftGuard(opts: { nowMs?: number; notify?: boolean } = {}): WickFadeDriftRuntimeState {
+  const nowMs = opts.nowMs ?? Date.now();
+  const previous = readDriftState();
+  const rows: DriftTradeRow[] = driftRowsStmt.all(MODE, WICK_FADE_DRIFT_POLICY.slowWindow).map((row) => ({
+    id: row.id,
+    pnlPct: row.pnl_pct,
+    netPnlUsd: row.net_pnl_usd,
+    closedAt: row.closed_at,
+  }));
+  const evaluation = evaluateWickFadeDriftGuard(rows, previous?.blocked ?? false);
+  const changed = previous == null || previous.blocked !== evaluation.blocked;
+  const state: WickFadeDriftRuntimeState = {
+    ...evaluation,
+    checkedAt: nowMs,
+    changedAt: changed ? nowMs : previous.changedAt,
+  };
+  setKvStmt.run(WICK_FADE_DRIFT_STATE_KEY, JSON.stringify(state), nowMs, state.reason);
+
+  if (changed) {
+    logger.warn({ state }, state.blocked ? 'wick-fade drift guard: global entry pause' : 'wick-fade drift guard: rolling edge recovered');
+    if (opts.notify ?? true) {
+      void sendMessage({
+        channel: 'logs',
+        text: state.blocked
+          ? `<b>Wick-fade: глобальная пауза входов</b>\n${esc(renderDriftLine(state))}\nОткрытые позиции сохраняют обычные target, time-stop и биржевой стоп.`
+          : `<b>Wick-fade: rolling edge восстановлен</b>\n${esc(renderDriftLine(state))}`,
+      });
+    }
+  }
+  return state;
+}
+
 export type WickFadeDoctorResult = {
   closedToday: number;
   dayPnlPct: number;
   lookbackClosed: number;
   lookbackPnlPct: number;
   pauseActions: string[];
+  driftGuard: WickFadeDriftRuntimeState;
   sent: boolean;
 };
 
@@ -277,6 +343,7 @@ export async function runWickFadeDoctor(opts: { force?: boolean; notify?: boolea
   const lookback = closedSinceStmt.all(MODE, nowMs - LOOKBACK_MS);
   const buckets = sideBuckets(lookback);
   const pauseActions = applyProtectivePauses(buckets, nowMs);
+  const driftGuard = updateWickFadeDriftGuard({ nowMs, notify: opts.notify });
   const maxId = maxClosedIdStmt.get(MODE)?.id ?? 0;
   const lastReported = Number(getKvStmt.get(REPORT_KEY)?.value ?? 0);
 
@@ -286,6 +353,7 @@ export async function runWickFadeDoctor(opts: { force?: boolean; notify?: boolea
     lookbackClosed: lookback.length,
     lookbackPnlPct: sum(lookback),
     pauseActions,
+    driftGuard,
     sent: false,
   };
 
@@ -316,6 +384,7 @@ export async function runWickFadeDoctor(opts: { force?: boolean; notify?: boolea
     ...(leaders.length ? leaders.map((b) => `• ${esc(renderSideLine(b))}`) : ['• мало данных']),
     ``,
     `<b>Автозащита</b>`,
+    `• global drift: ${esc(renderDriftLine(driftGuard))}`,
     ...(pauseActions.length ? pauseActions.map((a) => `• новая: ${esc(a)}`) : ['• новых пауз нет']),
     ...(activePauses.length ? activePauses.map((p) => `• активна: ${esc(renderPauseLine(p))}`) : []),
     ``,
@@ -334,12 +403,15 @@ export async function runWickFadeDoctor(opts: { force?: boolean; notify?: boolea
 }
 
 export function startWickFadeDoctorJob(): void {
+  cron.schedule('* * * * *', () => {
+    try { updateWickFadeDriftGuard(); } catch (err) { logger.error({ err }, 'wick-fade drift guard tick failed'); }
+  });
   cron.schedule('17 */4 * * *', () => {
     void runWickFadeDoctor().catch((err) => logger.error({ err }, 'wick-fade doctor tick failed'));
   });
   const t = setTimeout(() => {
     void runWickFadeDoctor().catch((err) => logger.error({ err }, 'wick-fade doctor startup failed'));
-  }, 90_000);
+  }, 5_000);
   t.unref();
-  logger.info('wick-fade doctor cron started (every 4h)');
+  logger.info('wick-fade doctor started (drift guard every 1m, full report every 4h)');
 }

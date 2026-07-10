@@ -88,6 +88,16 @@ const wickOpen = db.prepare<[], { coin: string; side: string; entry_px: number; 
 `).all();
 console.log(`\nHL WICK-FADE LIVE`);
 console.log(`  closed ${wick.closed} · exact ${wick.exact}/${wick.closed} · net ${(wick.net_pct ?? 0) >= 0 ? '+' : ''}${(wick.net_pct ?? 0).toFixed(3)}% / $${(wick.net_usd ?? 0).toFixed(3)}`);
+const wickDriftRaw = db.prepare<[string], { value: string }>('SELECT value FROM runtime_config WHERE key = ?').get('wick_fade_drift_guard_state')?.value;
+if (wickDriftRaw) {
+  try {
+    const state = JSON.parse(wickDriftRaw) as { blocked?: boolean; checkedAt?: number; reason?: string; fast?: { averagePct?: number; sumPct?: number; profitFactor?: number | null }; slow?: { averagePct?: number; sumPct?: number; profitFactor?: number | null } };
+    const pf = (value: number | null | undefined, sumPct: number | undefined): string => value == null ? ((sumPct ?? 0) > 0 ? 'inf' : 'na') : value.toFixed(2);
+    console.log(`  drift ${state.blocked ? 'PAUSED' : 'LIVE'} @ ${fmtT(state.checkedAt ?? null)} · last20 ${(state.fast?.averagePct ?? 0).toFixed(3)}% PF ${pf(state.fast?.profitFactor, state.fast?.sumPct)} · last40 ${(state.slow?.averagePct ?? 0).toFixed(3)}% PF ${pf(state.slow?.profitFactor, state.slow?.sumPct)} · ${state.reason ?? 'no reason'}`);
+  } catch { console.log(`  drift INVALID — entries fail closed`); }
+} else {
+  console.log(`  drift INITIALIZING — entries fail closed`);
+}
 for (const p of wickOpen) {
   console.log(`  ${p.coin.padEnd(9)} ${p.side.padEnd(5)} @ ${p.entry_px} · $${(p.entry_px * p.qty).toFixed(2)} · ${fmtT(p.opened_at)}`);
 }
