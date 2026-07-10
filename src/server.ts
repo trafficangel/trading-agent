@@ -32,6 +32,8 @@ import { startHlCollector } from './jobs/hl-collector.js';
 import { startHlCandleCollector } from './jobs/hl-candle-collector.js';
 import { startHlMinuteCandleCollector } from './jobs/hl-minute-candle-collector.js';
 import { startFundingFlipRunner } from './jobs/funding-flip-runner.js';
+import { startWickFadeRunner } from './jobs/wick-fade-runner.js';
+import { startWickFadeDoctorJob } from './jobs/wick-fade-doctor.js';
 import { startHlMomentumShadowJob } from './jobs/hl-momentum-shadow.js';
 import { startHlMomentumDoctorJob } from './jobs/hl-momentum-doctor.js';
 // Phase G — money-back guarantee disabled, see start-job line below.
@@ -242,8 +244,10 @@ async function main(): Promise<void> {
   // launched in HL TESTNET (fake money) on the ETH+ADA core to accumulate live
   // out-of-sample evidence. mode='testnet' const; idles if HL key missing.
   startFundingFlipRunner();
-  // Wick-fade (/lab/live) is retired. Keep the historical tables/migrations for
-  // audit, but do not schedule real-money quoting or its doctor.
+  // Wick-fade maintains exits and deep quotes only while its global rolling
+  // guard and per-coin quarantines permit new entries.
+  startWickFadeRunner();
+  startWickFadeDoctorJob();
   // HL Momentum — opposite-regime candidate for the portfolio: follows confirmed
   // impulse+volume continuation using native HL candles. Live mode trades tiny
   // 1x size with bounded risk controls.
