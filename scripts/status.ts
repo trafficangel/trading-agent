@@ -142,6 +142,7 @@ const momFastMaxOpen = Number(momRuntime('hl_momentum_fast_long_canary_max_open'
 const momFastMinAbsR90 = Number(momRuntime('hl_momentum_fast_long_min_abs_r90_pct', '0.80'));
 const momFastShadowN = Number(momRuntime('hl_momentum_fast_long_shadow_n', '0'));
 const momFastShadowTargetN = Number(momRuntime('hl_momentum_fast_long_sample_n', '20'));
+const momFastExecutionVersion = momRuntime('hl_momentum_fast_execution_version', 'fast-intrabar-v2');
 const momFastProgress = momFastStage === 'shadow'
   ? `shadow proof ${momFastShadowN}/${momFastShadowTargetN}`
   : `${momFastN}/${momFastNextN || momFastN} → ${momFastNext}`;
@@ -156,7 +157,7 @@ if (reconcileRaw) {
 console.log(`\nHL MOMENTUM LIVE (public track since ${fmtT(momPublicStart)})`);
 console.log(`  reconcile ${reconcile}`);
 console.log(`  stage ${momPromotionStage} · |r3|≥${momConfirmLongMinAbsR3.toFixed(2)}% · ${momPromotionProgress} · live exact ${momPromotionExactN}/${momPromotionN} · avg ${momPromotionAvg >= 0 ? '+' : ''}${momPromotionAvg.toFixed(3)}% · PF ${momPromotionPf} · maxDD ${momPromotionDd.toFixed(3)}% · maxOpen ${momPromotionMaxOpen}`);
-console.log(`  fast-long ${momFastStage} · |r90|≥${momFastMinAbsR90.toFixed(2)}% · ${momFastProgress} · live exact ${momFastExactN}/${momFastN} · avg ${momFastAvg >= 0 ? '+' : ''}${momFastAvg.toFixed(3)}% · PF ${momFastPf} · maxDD ${momFastDd.toFixed(3)}% · maxOpen ${momFastMaxOpen}`);
+console.log(`  fast-long ${momFastStage} · ${momFastExecutionVersion} · |r90|≥${momFastMinAbsR90.toFixed(2)}% · ${momFastProgress} · live exact ${momFastExactN}/${momFastN} · avg ${momFastAvg >= 0 ? '+' : ''}${momFastAvg.toFixed(3)}% · PF ${momFastPf} · maxDD ${momFastDd.toFixed(3)}% · maxOpen ${momFastMaxOpen}`);
 console.log(`  closed ${mom.closed} · exact ${mom.exact}/${mom.closed} · net ${(mom.net_pct ?? 0) >= 0 ? '+' : ''}${(mom.net_pct ?? 0).toFixed(3)}% / $${(mom.net_usd ?? 0).toFixed(3)} · pending intents ${pendingIntents}`);
 for (const p of momOpen) {
   console.log(`  ${p.coin.padEnd(9)} ${p.side.padEnd(5)} @ ${p.entry_px} · $${(p.entry_px * p.qty).toFixed(2)} · ${fmtT(p.opened_at)}`);

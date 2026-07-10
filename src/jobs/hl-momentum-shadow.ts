@@ -34,6 +34,14 @@ import {
   isConfidentMomentumSignal,
 } from '../lib/hl-momentum-capacity.js';
 import { HL_MOMENTUM_CALIBRATION_VERSION } from '../lib/hl-momentum-calibration.js';
+import {
+  evaluateMomentumIntrabar,
+  HL_MOMENTUM_COST_RT_PCT,
+  HL_MOMENTUM_FAST_EXECUTION_TAG,
+  HL_MOMENTUM_FAST_LONG_CANARY_TAG,
+  momentumNetPnlPct,
+  type MomentumIntrabarTrail,
+} from '../lib/hl-momentum-execution.js';
 import { CONFIRM_LONG_CANARY_POLICY, FAST_LONG_CANARY_POLICY } from '../lib/hl-momentum-segment-governor.js';
 import type { HlTradeAccounting } from '../lib/hl-trade-accounting.js';
 import { readHlExternalOwner } from '../lib/hl-external-owner.js';
@@ -119,7 +127,7 @@ const LIVE_DAILY_STOP_USD_MAX = -1;
 const LIVE_MAX_SPREAD_PCT = 0.35;
 const LIVE_MIN_SIDE_DEPTH_USD = 150;
 const LIVE_MAX_NOTIONAL_TO_DEPTH = 0.10;
-const COST_RT_PCT = 0.09; // current HL account taker rate: 0.045% each side
+const COST_RT_PCT = HL_MOMENTUM_COST_RT_PCT;
 const HOLD_MS = 30 * 60_000;
 const TRAIL_HOLD_MS = 60 * 60_000;
 const LEGACY_STOP_PCT = 0.012;
@@ -192,7 +200,7 @@ const CONFIRM_LONG_CANARY_TAG = 'canary=confirm-long-v1';
 const CONFIRM_LONG_CANARY_MIN_PROB = 0.47;
 const CONFIRM_LONG_CANARY_MAX_OPEN = 1;
 const CONFIRM_LONG_CANARY_DAILY_LOSS_USD = 1;
-const FAST_LONG_CANARY_TAG = 'canary=fast-long-v1';
+const FAST_LONG_CANARY_TAG = HL_MOMENTUM_FAST_LONG_CANARY_TAG;
 const FAST_LONG_CANARY_MIN_PROB = 0.50;
 const FAST_LONG_CANARY_MAX_OPEN = 1;
 const FAST_LONG_CANARY_DAILY_LOSS_USD = 0.50;
@@ -1448,6 +1456,7 @@ type MidPoint = { t: number; px: number };
 type EarlySignal = MomentumSignal & { last: Candle; params: RiskParams };
 const midHistory = new Map<string, MidPoint[]>();
 const earlyCooldown = new Map<string, number>();
+const paperFastBestPx = new Map<string, number>();
 const liveFastBestPx = new Map<string, number>();
 const liveFastClosing = new Set<string>();
 const liveEntryFailCooldown = new Map<string, number>();
@@ -1840,21 +1849,9 @@ async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
   });
 }
 
-function fastTrailingState(pos: Pos, mid: number, params: RiskParams): { active: boolean; bestPx: number; movePct: number; trailPx: number | null; params: RiskParams } {
-  const prev = liveFastBestPx.get(pos.coin) ?? pos.entry_px;
-  const bestPx = pos.side === 'long' ? Math.max(prev, mid) : Math.min(prev, mid);
-  liveFastBestPx.set(pos.coin, bestPx);
-  const move = pos.side === 'long'
-    ? (bestPx - pos.entry_px) / pos.entry_px
-    : (pos.entry_px - bestPx) / pos.entry_px;
-  if (move < params.trailActivatePct) return { active: false, bestPx, movePct: move * 100, trailPx: null, params };
-  const trailPx = pos.side === 'long'
-    ? Math.max(pos.entry_px * (1 + params.trailMinLockPct), bestPx * (1 - params.trailGivebackPct))
-    : Math.min(pos.entry_px * (1 - params.trailMinLockPct), bestPx * (1 + params.trailGivebackPct));
-  return { active: true, bestPx, movePct: move * 100, trailPx, params };
-}
+type FastTrailState = MomentumIntrabarTrail & { params: RiskParams };
 
-async function fastCloseLivePosition(pos: Pos, reason: string, mid: number, trail: ReturnType<typeof fastTrailingState> | null): Promise<void> {
+async function fastCloseLivePosition(pos: Pos, reason: string, mid: number, trail: FastTrailState | null): Promise<void> {
   if (liveFastClosing.has(pos.coin)) return;
   liveFastClosing.add(pos.coin);
   try {
@@ -1892,8 +1889,35 @@ async function fastCloseLivePosition(pos: Pos, reason: string, mid: number, trai
   }
 }
 
+function fastManagePaperPositions(mids: Map<string, number>): void {
+  const open = allPosStmt.all().filter((pos) => signalLayer(pos.signal) === 'fast');
+  const openCoins = new Set(open.map((pos) => pos.coin));
+  for (const coin of [...paperFastBestPx.keys()]) if (!openCoins.has(coin)) paperFastBestPx.delete(coin);
+
+  for (const pos of open) {
+    const mid = mids.get(pos.coin);
+    if (!(mid != null && mid > 0)) continue;
+    const params = posRiskParams(pos);
+    const evaluation = evaluateMomentumIntrabar(
+      { side: pos.side, entryPx: pos.entry_px, openedAt: pos.opened_at },
+      mid,
+      Date.now(),
+      params,
+      paperFastBestPx.get(pos.coin),
+    );
+    paperFastBestPx.set(pos.coin, evaluation.bestPx);
+    if (!evaluation.exitReason) continue;
+    const current = getPosStmt.get(pos.coin);
+    if (!current || current.opened_at !== pos.opened_at) continue;
+    const pnl = Math.round(momentumNetPnlPct(pos.side, pos.entry_px, mid) * 1000) / 1000;
+    closeTxn(pos.coin, mid, Date.now(), pnl, evaluation.exitReason);
+    paperFastBestPx.delete(pos.coin);
+    logger.info({ coin: pos.coin, side: pos.side, exit: mid, pnl, reason: evaluation.exitReason, trail: { ...evaluation.trail, params } }, 'hl-momentum-fast: closed intrabar paper position');
+  }
+}
+
 async function fastManageLivePositions(mids: Map<string, number>): Promise<void> {
-  const open = liveAllPosStmt.all();
+  const open = liveAllPosStmt.all().filter((pos) => signalLayer(pos.signal) === 'fast');
   const openCoins = new Set(open.map((p) => p.coin));
   for (const coin of [...liveFastBestPx.keys()]) if (!openCoins.has(coin)) liveFastBestPx.delete(coin);
   for (const pos of open) {
@@ -1901,14 +1925,16 @@ async function fastManageLivePositions(mids: Map<string, number>): Promise<void>
     if (!(mid != null && mid > 0)) continue;
     liveLock(pos.coin, `momentum-live ${pos.side}`);
     const params = posRiskParams(pos);
-    const stop = stopPx(pos.side, pos.entry_px, params);
-    const trail = fastTrailingState(pos, mid, params);
-    const stopHit = pos.side === 'long' ? mid <= stop : mid >= stop;
-    const trailHit = trail.active && trail.trailPx != null ? (pos.side === 'long' ? mid <= trail.trailPx : mid >= trail.trailPx) : false;
-    const decayed = decayExit(pos, mid, trail.movePct / 100, params, Date.now());
-    const timed = Date.now() - pos.opened_at >= (trail.active ? TRAIL_HOLD_MS : HOLD_MS);
-    if (!stopHit && !trailHit && !decayed && !timed) continue;
-    await fastCloseLivePosition(pos, stopHit ? 'fast-stop' : trailHit ? 'fast-trailing-stop' : decayed ? 'fast-momentum-decay' : 'fast-time-stop', mid, trail);
+    const evaluation = evaluateMomentumIntrabar(
+      { side: pos.side, entryPx: pos.entry_px, openedAt: pos.opened_at },
+      mid,
+      Date.now(),
+      params,
+      liveFastBestPx.get(pos.coin),
+    );
+    liveFastBestPx.set(pos.coin, evaluation.bestPx);
+    if (!evaluation.exitReason) continue;
+    await fastCloseLivePosition(pos, evaluation.exitReason, mid, { ...evaluation.trail, params });
   }
 }
 
@@ -2027,10 +2053,12 @@ async function stepCoin(coin: string): Promise<void> {
   const cs = getMomentumCandles(coin);
   if (cs.length < 70) return;
   const livePos = liveGetPosStmt.get(coin);
-  if (livePos) await liveManagePosition(livePos, cs);
+  if (livePos && signalLayer(livePos.signal) !== 'fast') await liveManagePosition(livePos, cs);
 
   const pos = getPosStmt.get(coin);
-  const paperStillOpen = pos ? !managePosition(pos, cs) : false;
+  const paperStillOpen = pos
+    ? signalLayer(pos.signal) === 'fast' || !managePosition(pos, cs)
+    : false;
 
   const sig = decide(coin, cs);
   if (!sig) return;
@@ -2126,6 +2154,7 @@ async function fastRadarTick(): Promise<void> {
     }
     upsertHlMinuteCandlesFromMids(mids, now);
     updateMarketRegime(mids, now);
+    fastManagePaperPositions(mids);
     await fastManageLivePositions(mids);
     markTick('hl-momentum-fast');
 
@@ -2142,7 +2171,10 @@ async function fastRadarTick(): Promise<void> {
     for (const sig of candidates.slice(0, FAST_MAX_CANDIDATES_PER_TICK)) {
       earlyCooldown.set(sig.coin, now + FAST_COIN_COOLDOWN_MS);
       lastFastAttemptAt = Date.now();
-      const fullSig: EarlySignal = { ...sig, signal: appendRiskSignal(appendScoreSignal(sig.signal, sig), sig.params) };
+      const fullSig: EarlySignal = {
+        ...sig,
+        signal: `${appendRiskSignal(appendScoreSignal(sig.signal, sig), sig.params)} [${HL_MOMENTUM_FAST_EXECUTION_TAG}]`,
+      };
       if (!getPosStmt.get(sig.coin)) {
         const qty = NOTIONAL_USD / sig.last.c;
         openTxn(fullSig.coin, fullSig.side, fullSig.last.c, qty, now, fullSig.signal);
