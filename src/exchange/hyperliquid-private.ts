@@ -17,6 +17,12 @@ import { ExchangeClient, InfoClient, HttpTransport } from '@nktkas/hyperliquid';
 import { formatPrice, formatSize } from '@nktkas/hyperliquid/utils';
 import { privateKeyToAccount } from 'viem/accounts';
 import { config } from '../config.js';
+import {
+  calculateHlTradeAccounting,
+  type HlAccountingFill,
+  type HlAccountingFunding,
+  type HlTradeAccounting,
+} from '../lib/hl-trade-accounting.js';
 
 export type HlResult<T = unknown> = { ok: true; data: T } | { ok: false; msg: string };
 export type HlPosition = { coin: string; side: 'long' | 'short'; size: number; entryPx: number };
@@ -222,6 +228,70 @@ export async function hlFetchPosition(coin: string): Promise<HlResult<HlPosition
     const szi = ap ? Number(ap.position.szi) : 0;
     if (!ap || szi === 0) return { ok: true, data: null };
     return { ok: true, data: { coin, side: szi > 0 ? 'long' : 'short', size: Math.abs(szi), entryPx: Number(ap.position.entryPx) } };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
+
+/** One exchange snapshot for global reconciliation. */
+export async function hlFetchAllPositions(): Promise<HlResult<HlPosition[]>> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  try {
+    const cs = await c.info.clearinghouseState({ user: c.readUser });
+    const positions = cs.assetPositions.flatMap((a) => {
+      const szi = Number(a.position.szi);
+      if (!Number.isFinite(szi) || szi === 0) return [];
+      return [{
+        coin: a.position.coin,
+        side: szi > 0 ? 'long' as const : 'short' as const,
+        size: Math.abs(szi),
+        entryPx: Number(a.position.entryPx),
+      }];
+    });
+    return { ok: true, data: positions };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
+
+/** Whether an exchange-resident protective trigger currently exists for a coin. */
+export async function hlHasTrigger(coin: string): Promise<HlResult<boolean>> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  try {
+    const orders = await c.info.frontendOpenOrders({ user: c.readUser });
+    return { ok: true, data: orders.some((o) => o.coin === coin && o.isTrigger === true) };
+  } catch (e) { return { ok: false, msg: (e as Error).message }; }
+}
+
+/** Exact per-trade accounting from exchange fills and funding ledger entries. */
+export async function hlTradeAccounting(args: {
+  coin: string;
+  openedAt: number;
+  closedAt?: number;
+}): Promise<HlResult<HlTradeAccounting | null>> {
+  const c = clients();
+  if (!c) return { ok: false, msg: 'HL_API_WALLET_KEY not set' };
+  const startTime = Math.max(0, args.openedAt - 60_000);
+  const endTime = Math.min(Date.now(), (args.closedAt ?? Date.now()) + 60_000);
+  try {
+    const [rawFills, rawFunding] = await Promise.all([
+      c.info.userFillsByTime({ user: c.readUser, startTime, endTime, aggregateByTime: true, reversed: false }),
+      c.info.userFunding({ user: c.readUser, startTime, endTime }),
+    ]);
+    const fills: HlAccountingFill[] = rawFills
+      .filter((f) => f.coin === args.coin)
+      .map((f) => ({
+        time: Number(f.time),
+        px: Number(f.px),
+        sz: Number(f.sz),
+        side: f.side,
+        dir: String(f.dir),
+        startPosition: Number(f.startPosition),
+        closedPnl: Number(f.closedPnl),
+        fee: Number(f.fee),
+      }));
+    const funding: HlAccountingFunding[] = rawFunding
+      .filter((f) => f.delta.coin === args.coin)
+      .map((f) => ({ time: Number(f.time), usdc: Number(f.delta.usdc) }));
+    return { ok: true, data: calculateHlTradeAccounting(fills, funding, args.openedAt) };
   } catch (e) { return { ok: false, msg: (e as Error).message }; }
 }
 

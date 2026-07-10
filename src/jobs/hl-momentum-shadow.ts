@@ -7,32 +7,50 @@
  * cannot fight it on the same account.
  */
 import cron from 'node-cron';
+import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
+import { markTick } from '../lib/health-tracker.js';
 import { sendMessage } from '../telegram/bot.js';
 import { allMids, l2Book } from '../exchange/hyperliquid.js';
 import {
   hlCancelOrder,
   hlCancelTriggers,
   hlClosePosition,
+  hlFetchAllPositions,
   hlFetchPosition,
+  hlHasTrigger,
   hlMarketOrder,
   hlOpenOrders,
   hlPlaceStop,
   hlSetLeverage,
   hlExitAvgSince,
   hlAccountValue,
+  hlPositionStartTime,
+  hlTradeAccounting,
 } from '../exchange/hyperliquid-private.js';
 import {
   DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLDS,
   isConfidentMomentumSignal,
 } from '../lib/hl-momentum-capacity.js';
 import { HL_MOMENTUM_CALIBRATION_VERSION } from '../lib/hl-momentum-calibration.js';
+import type { HlTradeAccounting } from '../lib/hl-trade-accounting.js';
 import { upsertHlMinuteCandlesFromMids } from './hl-minute-candle-collector.js';
 
 type Side = 'long' | 'short';
 type Candle = { t: number; o: number; h: number; l: number; c: number; v: number };
 type Pos = { coin: string; side: Side; entry_px: number; qty: number; opened_at: number; signal: string };
+type OrderIntent = {
+  id: string;
+  coin: string;
+  side: Side;
+  status: string;
+  requested_qty: number;
+  requested_notional_usd: number;
+  signal: string;
+  created_at: number;
+};
+type AccountingRepairRow = { id: number; coin: string; opened_at: number; closed_at: number };
 type LogRow = { id: number; coin: string; side: Side; pnl_pct: number; close_reason: string | null; closed_at: number };
 type RiskParams = {
   stopPct: number;
@@ -98,7 +116,7 @@ const LIVE_DAILY_STOP_USD_MAX = -1;
 const LIVE_MAX_SPREAD_PCT = 0.35;
 const LIVE_MIN_SIDE_DEPTH_USD = 150;
 const LIVE_MAX_NOTIONAL_TO_DEPTH = 0.10;
-const COST_RT_PCT = 0.07; // shadow assumes taker entry + taker exit, conservative vs maker wick-fade
+const COST_RT_PCT = 0.09; // current HL account taker rate: 0.045% each side
 const HOLD_MS = 30 * 60_000;
 const TRAIL_HOLD_MS = 60 * 60_000;
 const LEGACY_STOP_PCT = 0.012;
@@ -121,6 +139,7 @@ const VOLUME_QUANTILE = 0.80;
 const CLOSE_EDGE_BASE = 0.62;
 const REPORT_KEY = 'hl_momentum_shadow_last_report_id';
 const LIVE_REPORT_KEY = 'hl_momentum_live_last_report_id';
+const MOMENTUM_PUBLIC_START_FALLBACK_MS = Date.UTC(2026, 6, 8, 18, 14, 0);
 const FRESH_CANDLE_MAX_AGE_MS = 25 * 60_000;
 const FRESH_1M_CANDLE_MAX_AGE_MS = 4 * 60_000;
 const ONE_MINUTE_MS = 60_000;
@@ -137,6 +156,8 @@ const FAST_MAX_CANDIDATES_PER_TICK = 2;
 const FAST_COIN_COOLDOWN_MS = 5 * 60_000;
 const FAST_GLOBAL_ATTEMPT_GAP_MS = 6_000;
 const ENTRY_FAIL_COOLDOWN_MS = 2 * 60_000;
+const RECONCILE_INTERVAL_MS = 2 * 60_000;
+const RECONCILE_INTENT_MAX_AGE_MS = 24 * 60 * 60_000;
 const MIN_LIVE_SCORE = 68;
 const MIN_EXPECTED_PNL_PCT = 0.10;
 const MIN_CALIBRATED_PROB = 0.49;
@@ -259,9 +280,15 @@ const liveInsLogStmt = db.prepare<[string, Side, number, number, number, string]
   INSERT INTO hl_momentum_live_log (coin, side, entry_px, qty, opened_at, signal)
   VALUES (?, ?, ?, ?, ?, ?)
 `);
-const liveCloseLogStmt = db.prepare<[number | null, number, number | null, string, string], void>(`
+const liveCloseLogStmt = db.prepare<[
+  number | null, number, number | null, string,
+  number | null, number | null, number | null, number | null, number | null, number | null,
+  number | null, string, string,
+], void>(`
   UPDATE hl_momentum_live_log
-     SET exit_px = ?, closed_at = ?, pnl_pct = ?, close_reason = ?
+     SET exit_px = ?, closed_at = ?, pnl_pct = ?, close_reason = ?,
+         entry_notional_usd = ?, exit_notional_usd = ?, gross_pnl_usd = ?,
+         fee_usd = ?, funding_usd = ?, net_pnl_usd = ?, accounting_fill_count = ?, pnl_source = ?
    WHERE id = (
      SELECT id FROM hl_momentum_live_log
       WHERE coin = ? AND closed_at IS NULL
@@ -277,12 +304,31 @@ const liveRecentClosedStmt = db.prepare<[number], LogRow>(`
    LIMIT ?
 `);
 const liveMaxClosedIdStmt = db.prepare<[], { id: number | null }>('SELECT MAX(id) AS id FROM hl_momentum_live_log WHERE closed_at IS NOT NULL');
+const liveAccountingRepairStmt = db.prepare<[number, number], AccountingRepairRow>(`
+  SELECT id, coin, opened_at, closed_at
+    FROM hl_momentum_live_log
+   WHERE closed_at IS NOT NULL
+     AND opened_at >= ?
+     AND (pnl_source IS NULL OR pnl_source != 'fills-v1')
+   ORDER BY closed_at DESC
+   LIMIT ?
+`);
+const liveUpdateAccountingStmt = db.prepare<[
+  number, number, number | null, number,
+  number, number, number, number, number, number, number, number,
+], void>(`
+  UPDATE hl_momentum_live_log
+     SET entry_px = ?, qty = ?, exit_px = ?, pnl_pct = ?,
+         entry_notional_usd = ?, exit_notional_usd = ?, gross_pnl_usd = ?,
+         fee_usd = ?, funding_usd = ?, net_pnl_usd = ?, accounting_fill_count = ?, pnl_source = 'fills-v1'
+   WHERE id = ?
+`);
 const liveTodayPnlStmt = db.prepare<[number], { pnl: number | null }>(`
   SELECT SUM(pnl_pct) AS pnl FROM hl_momentum_live_log
    WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL AND closed_at >= ?
 `);
 const liveSessionUsdStmt = db.prepare<[number], { usd: number | null }>(`
-  SELECT SUM((pnl_pct / 100.0) * qty * entry_px) AS usd FROM hl_momentum_live_log
+  SELECT SUM(COALESCE(net_pnl_usd, (pnl_pct / 100.0) * qty * entry_px)) AS usd FROM hl_momentum_live_log
    WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL AND closed_at >= ?
 `);
 const liveCoinSideStatsStmt = db.prepare<[string, Side], { n: number; avg: number | null; wins: number | null }>(`
@@ -380,20 +426,74 @@ const insSignalJournalStmt = db.prepare<[
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 const wickOpenPosStmt = db.prepare<[string], { coin: string }>('SELECT coin FROM wick_fade_pos WHERE coin = ?');
+const wickAllPosStmt = db.prepare<[], { coin: string; side: Side }>('SELECT coin, side FROM wick_fade_pos');
 const liveUpsertLockStmt = db.prepare<[string, number, string, number], void>(`
   INSERT INTO hl_momentum_live_lock (coin, locked_until, reason, updated_at)
   VALUES (?, ?, ?, ?)
   ON CONFLICT(coin) DO UPDATE SET locked_until = excluded.locked_until, reason = excluded.reason, updated_at = excluded.updated_at
 `);
 const liveDelLockStmt = db.prepare<[string], void>('DELETE FROM hl_momentum_live_lock WHERE coin = ?');
+const liveInsIntentStmt = db.prepare<[
+  string, string, Side, string, number, number, string, number, number,
+], void>(`
+  INSERT INTO hl_momentum_order_intent
+    (id, strategy, coin, side, action, status, requested_qty, requested_notional_usd, signal, created_at, updated_at)
+  VALUES (?, 'hl-momentum', ?, ?, 'open', ?, ?, ?, ?, ?, ?)
+`);
+const liveUpdIntentStmt = db.prepare<[string, number, string | null, string], void>(`
+  UPDATE hl_momentum_order_intent
+     SET status = ?, updated_at = ?, error = ?
+   WHERE id = ?
+`);
+const liveRecentIntentsStmt = db.prepare<[number], OrderIntent>(`
+  SELECT id, coin, side, status, requested_qty, requested_notional_usd, signal, created_at
+    FROM hl_momentum_order_intent
+   WHERE strategy = 'hl-momentum'
+     AND action = 'open'
+     AND status IN ('pending', 'submitted')
+     AND created_at >= ?
+   ORDER BY created_at DESC
+`);
+const livePendingIntentForCoinStmt = db.prepare<[string, number], { id: string }>(`
+  SELECT id
+    FROM hl_momentum_order_intent
+   WHERE coin = ?
+     AND status IN ('pending', 'submitted')
+     AND created_at >= ?
+   ORDER BY created_at DESC
+   LIMIT 1
+`);
 
-const liveOpenTxn = db.transaction((coin: string, side: Side, entry: number, qty: number, openedAt: number, signal: string) => {
+const liveOpenTxn = db.transaction((coin: string, side: Side, entry: number, qty: number, openedAt: number, signal: string, intentId?: string) => {
   liveInsPosStmt.run(coin, side, entry, qty, openedAt, signal);
   liveInsLogStmt.run(coin, side, entry, qty, openedAt, signal);
+  if (intentId) liveUpdIntentStmt.run('confirmed', Date.now(), null, intentId);
 });
 
-const liveCloseTxn = db.transaction((coin: string, exitPx: number | null, closedAt: number, pnl: number | null, reason: string) => {
-  liveCloseLogStmt.run(exitPx, closedAt, pnl, reason, coin);
+const liveCloseTxn = db.transaction((
+  coin: string,
+  exitPx: number | null,
+  closedAt: number,
+  pnl: number | null,
+  reason: string,
+  accounting: HlTradeAccounting | null = null,
+) => {
+  const exact = accounting?.complete ? accounting : null;
+  liveCloseLogStmt.run(
+    exact?.exitAvgPx ?? exitPx,
+    closedAt,
+    exact ? Math.round(exact.netPnlPct * 1000) / 1000 : pnl,
+    reason,
+    exact?.entryNotionalUsd ?? null,
+    exact?.exitNotionalUsd ?? null,
+    exact?.grossPnlUsd ?? null,
+    exact?.feesUsd ?? null,
+    exact?.fundingUsd ?? null,
+    exact?.netPnlUsd ?? null,
+    exact?.fillCount ?? null,
+    exact ? 'fills-v1' : 'estimated-fixed-cost',
+    coin,
+  );
   liveDelPosStmt.run(coin);
   liveDelLockStmt.run(coin);
 });
@@ -721,6 +821,45 @@ function classifyRecoveredFlat(pos: Pos, exitPx: number | null, cs: Candle[]): s
 
 function liveLock(coin: string, reason: string): void {
   liveUpsertLockStmt.run(coin, Date.now() + HOLD_MS + 20 * 60_000, reason, Date.now());
+}
+
+async function resolveLiveClose(
+  pos: Pos,
+  fallbackExitPx: number | null,
+  closedAt: number,
+): Promise<{ exitPx: number | null; pnl: number | null; accounting: HlTradeAccounting | null }> {
+  const result = await hlTradeAccounting({ coin: pos.coin, openedAt: pos.opened_at, closedAt });
+  if (result.ok && result.data?.complete) {
+    return {
+      exitPx: result.data.exitAvgPx,
+      pnl: Math.round(result.data.netPnlPct * 1000) / 1000,
+      accounting: result.data,
+    };
+  }
+  if (!result.ok) logger.warn({ coin: pos.coin, msg: result.msg }, 'hl-momentum-live: exact accounting unavailable');
+  else logger.warn({ coin: pos.coin, fills: result.data?.fillCount ?? 0 }, 'hl-momentum-live: exact accounting incomplete');
+  return {
+    exitPx: fallbackExitPx,
+    pnl: fallbackExitPx == null ? null : Math.round(pnlPct(pos.side, pos.entry_px, fallbackExitPx) * 1000) / 1000,
+    accounting: null,
+  };
+}
+
+function persistExactAccounting(id: number, accounting: HlTradeAccounting): void {
+  liveUpdateAccountingStmt.run(
+    accounting.entryAvgPx,
+    accounting.entryQty,
+    accounting.exitAvgPx,
+    Math.round(accounting.netPnlPct * 1000) / 1000,
+    accounting.entryNotionalUsd,
+    accounting.exitNotionalUsd,
+    accounting.grossPnlUsd,
+    accounting.feesUsd,
+    accounting.fundingUsd,
+    accounting.netPnlUsd,
+    accounting.fillCount,
+    id,
+  );
 }
 
 function avgVolume(cs: Candle[], endExclusive: number, n: number): number {
@@ -1185,9 +1324,153 @@ const earlyCooldown = new Map<string, number>();
 const liveFastBestPx = new Map<string, number>();
 const liveFastClosing = new Set<string>();
 const liveEntryFailCooldown = new Map<string, number>();
+const liveEntryInFlight = new Set<string>();
 let lastRegime: { ts: number; up: number; down: number; label: 'risk-on' | 'risk-off' | 'mixed' } = { ts: 0, up: 0, down: 0, label: 'mixed' };
 let fastRadarRunning = false;
 let lastFastAttemptAt = 0;
+let liveReconcileRunning = false;
+let liveEntriesPausedByReconcile = true;
+let lastReconcileAlertSignature = '';
+
+function setReconcileState(ok: boolean, issues: string[], nowMs: number): void {
+  liveEntriesPausedByReconcile = !ok;
+  setKvStmt.run(
+    'hl_momentum_reconcile_state',
+    JSON.stringify({ ok, issues, checkedAt: nowMs }),
+    nowMs,
+    'hl momentum exchange reconciliation state',
+  );
+}
+
+function alertReconcileIssues(issues: string[]): void {
+  const signature = issues.slice().sort().join('|');
+  if (signature === lastReconcileAlertSignature) return;
+  lastReconcileAlertSignature = signature;
+  if (!issues.length) return;
+  void sendMessage({
+    channel: 'logs',
+    text: `⚠️ <b>momentum reconcile: новые входы на паузе</b>\n${issues.map((i) => `• ${esc(i)}`).join('\n')}`,
+  });
+}
+
+async function reconcileMomentumLive(): Promise<void> {
+  if (liveReconcileRunning || liveEntryInFlight.size > 0) return;
+  liveReconcileRunning = true;
+  liveEntriesPausedByReconcile = true;
+  const nowMs = Date.now();
+  try {
+    const snapshot = await hlFetchAllPositions();
+    if (!snapshot.ok) {
+      const issues = [`exchange snapshot failed: ${snapshot.msg}`];
+      setReconcileState(false, issues, nowMs);
+      alertReconcileIssues(issues);
+      logger.error({ msg: snapshot.msg }, 'hl-momentum-reconcile: snapshot failed, entries paused');
+      return;
+    }
+
+    const issues: string[] = [];
+    const dbPositions = liveAllPosStmt.all();
+    const dbByCoin = new Map(dbPositions.map((p) => [p.coin, p]));
+    const exchangeByCoin = new Map(snapshot.data.map((p) => [p.coin, p]));
+    const wickCoins = new Set(wickAllPosStmt.all().map((p) => p.coin));
+    const intents = liveRecentIntentsStmt.all(nowMs - RECONCILE_INTENT_MAX_AGE_MS);
+
+    for (const pos of dbPositions) {
+      const exchange = exchangeByCoin.get(pos.coin);
+      if (!exchange) {
+        await hlCancelTriggers(pos.coin);
+        const recovered = await hlExitAvgSince(pos.coin, pos.opened_at);
+        const fallbackExit = recovered.ok ? recovered.data.avgPx : null;
+        const close = await resolveLiveClose(pos, fallbackExit, nowMs);
+        liveCloseTxn(pos.coin, close.exitPx, nowMs, close.pnl, 'reconciled-flat', close.accounting);
+        liveFastBestPx.delete(pos.coin);
+        logger.warn({ coin: pos.coin, pnl: close.pnl, source: close.accounting ? 'fills-v1' : 'fallback' }, 'hl-momentum-reconcile: DB position was flat on exchange');
+        continue;
+      }
+      if (exchange.side !== pos.side) {
+        issues.push(`${pos.coin}: DB ${pos.side}, exchange ${exchange.side}`);
+        continue;
+      }
+      const trigger = await hlHasTrigger(pos.coin);
+      if (!trigger.ok) {
+        issues.push(`${pos.coin}: stop check failed`);
+      } else if (!trigger.data) {
+        const params = posRiskParams(pos);
+        const placed = await hlPlaceStop({
+          coin: pos.coin,
+          posSide: pos.side,
+          qty: exchange.size,
+          triggerPx: stopPx(pos.side, pos.entry_px, params),
+        });
+        if (!placed.ok) issues.push(`${pos.coin}: stop repair failed`);
+        else logger.warn({ coin: pos.coin }, 'hl-momentum-reconcile: missing exchange stop repaired');
+      }
+      liveLock(pos.coin, `momentum-live ${pos.side}`);
+    }
+
+    for (const exchange of snapshot.data) {
+      if (dbByCoin.has(exchange.coin) || wickCoins.has(exchange.coin)) continue;
+      const intent = intents.find((i) => i.coin === exchange.coin && i.side === exchange.side);
+      if (!intent) {
+        issues.push(`${exchange.coin}: unowned exchange ${exchange.side} position`);
+        continue;
+      }
+      const started = await hlPositionStartTime(exchange.coin);
+      const openedAt = started.ok && started.data.timeMs != null ? started.data.timeMs : intent.created_at;
+      liveOpenTxn(exchange.coin, exchange.side, exchange.entryPx, exchange.size, openedAt, intent.signal, intent.id);
+      const adopted = liveGetPosStmt.get(exchange.coin)!;
+      liveLock(exchange.coin, `momentum-live ${exchange.side}`);
+      const params = posRiskParams(adopted);
+      const placed = await hlPlaceStop({
+        coin: exchange.coin,
+        posSide: exchange.side,
+        qty: exchange.size,
+        triggerPx: stopPx(exchange.side, exchange.entryPx, params),
+      });
+      if (!placed.ok) issues.push(`${exchange.coin}: adopted but stop repair failed`);
+      logger.warn({ coin: exchange.coin, side: exchange.side, intentId: intent.id }, 'hl-momentum-reconcile: adopted position from durable intent');
+    }
+
+    for (const intent of intents) {
+      if (dbByCoin.has(intent.coin) || exchangeByCoin.has(intent.coin) || nowMs - intent.created_at < 60_000) continue;
+      const accounting = await hlTradeAccounting({ coin: intent.coin, openedAt: intent.created_at, closedAt: nowMs });
+      if (accounting.ok && accounting.data?.complete) {
+        const a = accounting.data;
+        liveOpenTxn(intent.coin, intent.side, a.entryAvgPx, a.entryQty, a.entryTime, intent.signal, intent.id);
+        liveCloseTxn(intent.coin, a.exitAvgPx, a.exitTime ?? nowMs, Math.round(a.netPnlPct * 1000) / 1000, 'reconciled-flat', a);
+        liveUpdIntentStmt.run('reconciled-closed', nowMs, null, intent.id);
+        logger.warn({ coin: intent.coin, intentId: intent.id, pnl: a.netPnlPct }, 'hl-momentum-reconcile: recovered fully closed trade from intent');
+      } else if (nowMs - intent.created_at >= 5 * 60_000) {
+        liveUpdIntentStmt.run('no-fill', nowMs, accounting.ok ? 'no exchange fills found' : accounting.msg, intent.id);
+        liveDelLockStmt.run(intent.coin);
+      }
+    }
+
+    const configuredPublicStart = Number(getKvStmt.get('hl_momentum_public_start_ms')?.value ?? MOMENTUM_PUBLIC_START_FALLBACK_MS);
+    const publicStart = Number.isFinite(configuredPublicStart) && configuredPublicStart > 0
+      ? configuredPublicStart
+      : MOMENTUM_PUBLIC_START_FALLBACK_MS;
+    for (const row of liveAccountingRepairStmt.all(publicStart, 5)) {
+      const accounting = await hlTradeAccounting({ coin: row.coin, openedAt: row.opened_at, closedAt: row.closed_at });
+      if (!accounting.ok || !accounting.data?.complete) continue;
+      persistExactAccounting(row.id, accounting.data);
+      logger.info({ id: row.id, coin: row.coin }, 'hl-momentum-reconcile: repaired fallback accounting from fills');
+    }
+
+    const healthy = issues.length === 0;
+    setReconcileState(healthy, issues, nowMs);
+    alertReconcileIssues(issues);
+    markTick('hl-momentum-reconcile');
+    logger.info({ exchange: snapshot.data.length, db: dbPositions.length, healthy, issues }, 'hl-momentum-reconcile: completed');
+  } catch (err) {
+    const issues = [`reconcile crashed: ${(err as Error).message}`];
+    setReconcileState(false, issues, nowMs);
+    alertReconcileIssues(issues);
+    logger.error({ err }, 'hl-momentum-reconcile: failed, entries paused');
+  } finally {
+    liveReconcileRunning = false;
+  }
+}
 
 function pushMid(coin: string, px: number, now: number): void {
   let xs = midHistory.get(coin);
@@ -1353,11 +1636,11 @@ async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
   if (!ex.data) {
     await hlCancelTriggers(pos.coin);
     const recovered = await hlExitAvgSince(pos.coin, pos.opened_at);
-    const exitPx = recovered.ok ? recovered.data.avgPx : null;
-    const pnl = exitPx != null ? Math.round(pnlPct(pos.side, pos.entry_px, exitPx) * 1000) / 1000 : null;
-    const reason = classifyRecoveredFlat(pos, exitPx, cs);
-    liveCloseTxn(pos.coin, exitPx, Date.now(), pnl, reason);
-    logger.warn({ coin: pos.coin, exitPx, pnl, reason }, 'hl-momentum-live: exchange flat -> reconciled');
+    const closedAt = Date.now();
+    const close = await resolveLiveClose(pos, recovered.ok ? recovered.data.avgPx : null, closedAt);
+    const reason = classifyRecoveredFlat(pos, close.exitPx, cs);
+    liveCloseTxn(pos.coin, close.exitPx, closedAt, close.pnl, reason, close.accounting);
+    logger.warn({ coin: pos.coin, exitPx: close.exitPx, pnl: close.pnl, reason, source: close.accounting ? 'fills-v1' : 'fallback' }, 'hl-momentum-live: exchange flat -> reconciled');
     return;
   }
   if (ex.data.side !== pos.side) {
@@ -1386,10 +1669,12 @@ async function liveManagePosition(pos: Pos, cs: Candle[]): Promise<void> {
   const check = await hlFetchPosition(pos.coin);
   if (!check.ok || check.data) { logger.warn({ coin: pos.coin }, 'hl-momentum-live: close not confirmed flat'); return; }
   await hlCancelTriggers(pos.coin);
-  const exit = close.data.avgPx ?? last.c;
-  const pnl = Math.round(pnlPct(pos.side, pos.entry_px, exit) * 1000) / 1000;
-  liveCloseTxn(pos.coin, exit, Date.now(), pnl, reason);
-  logger.warn({ coin: pos.coin, side: pos.side, exit, pnl, reason, trail }, 'hl-momentum-live: CLOSED');
+  const closedAt = Date.now();
+  const resolved = await resolveLiveClose(pos, close.data.avgPx ?? last.c, closedAt);
+  const exit = resolved.exitPx ?? close.data.avgPx ?? last.c;
+  const pnl = resolved.pnl ?? Math.round(pnlPct(pos.side, pos.entry_px, exit) * 1000) / 1000;
+  liveCloseTxn(pos.coin, exit, closedAt, pnl, reason, resolved.accounting);
+  logger.warn({ coin: pos.coin, side: pos.side, exit, pnl, reason, trail, source: resolved.accounting ? 'fills-v1' : 'fallback' }, 'hl-momentum-live: CLOSED');
   void sendMessage({
     channel: 'logs',
     text: `${pnl >= 0 ? '🟢' : '🔴'} <b>momentum-live CLOSED</b>: ${esc(pos.coin)} ${pos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${esc(reason)})\n${pos.entry_px} → ${exit.toFixed(6)}${trail?.active ? `\ntrail best ${trail.bestPx.toFixed(6)} · protected ${trail.trailPx?.toFixed(6)}` : ''}`,
@@ -1418,8 +1703,12 @@ async function fastCloseLivePosition(pos: Pos, reason: string, mid: number, trai
     if (!close.ok) {
       const checkFlat = await hlFetchPosition(pos.coin);
       if (checkFlat.ok && !checkFlat.data) {
+        await hlCancelTriggers(pos.coin);
+        const closedAt = Date.now();
+        const resolved = await resolveLiveClose(pos, mid, closedAt);
+        liveCloseTxn(pos.coin, resolved.exitPx, closedAt, resolved.pnl, reason, resolved.accounting);
         liveFastBestPx.delete(pos.coin);
-        logger.warn({ coin: pos.coin, msg: close.msg, reason }, 'hl-momentum-fast: close skipped because exchange is already flat');
+        logger.warn({ coin: pos.coin, msg: close.msg, reason, pnl: resolved.pnl }, 'hl-momentum-fast: exchange was already flat and has been reconciled');
         return;
       }
       logger.error({ coin: pos.coin, msg: close.msg, reason }, 'hl-momentum-fast: close failed');
@@ -1428,11 +1717,13 @@ async function fastCloseLivePosition(pos: Pos, reason: string, mid: number, trai
     const check = await hlFetchPosition(pos.coin);
     if (!check.ok || check.data) { logger.warn({ coin: pos.coin, reason }, 'hl-momentum-fast: close not confirmed flat'); return; }
     await hlCancelTriggers(pos.coin);
-    const exit = close.data.avgPx ?? mid;
-    const pnl = Math.round(pnlPct(pos.side, pos.entry_px, exit) * 1000) / 1000;
-    liveCloseTxn(pos.coin, exit, Date.now(), pnl, reason);
+    const closedAt = Date.now();
+    const resolved = await resolveLiveClose(pos, close.data.avgPx ?? mid, closedAt);
+    const exit = resolved.exitPx ?? close.data.avgPx ?? mid;
+    const pnl = resolved.pnl ?? Math.round(pnlPct(pos.side, pos.entry_px, exit) * 1000) / 1000;
+    liveCloseTxn(pos.coin, exit, closedAt, pnl, reason, resolved.accounting);
     liveFastBestPx.delete(pos.coin);
-    logger.warn({ coin: pos.coin, side: pos.side, exit, pnl, reason, trail }, 'hl-momentum-fast: CLOSED intrabar');
+    logger.warn({ coin: pos.coin, side: pos.side, exit, pnl, reason, trail, source: resolved.accounting ? 'fills-v1' : 'fallback' }, 'hl-momentum-fast: CLOSED intrabar');
     void sendMessage({
       channel: 'logs',
       text: `${pnl >= 0 ? '🟢' : '🔴'} <b>momentum-fast CLOSED</b>: ${esc(pos.coin)} ${pos.side} <b>${pnl > 0 ? '+' : ''}${pnl}%</b> (${esc(reason)})\n${pos.entry_px} → ${exit.toFixed(6)}${trail?.active ? `\nfast trail best ${trail.bestPx.toFixed(6)} · protected ${trail.trailPx?.toFixed(6)}` : ''}`,
@@ -1465,6 +1756,10 @@ async function fastManageLivePositions(mids: Map<string, number>): Promise<void>
 async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, params: RiskParams): Promise<void> {
   if (!LIVE_ENABLED) return;
   if (liveFastClosing.has(coin)) return;
+  if (liveEntriesPausedByReconcile || liveReconcileRunning) {
+    recordSignal(sig, 'skip', 'exchange reconcile pause', { ref: last.c, signal: last.c });
+    return;
+  }
   const nowMs = Date.now();
   const cooldownUntil = liveEntryFailCooldown.get(coin) ?? 0;
   if (cooldownUntil > nowMs) { recordSignal(sig, 'skip', `entry cooldown ${Math.ceil((cooldownUntil - nowMs) / 1000)}s`, { ref: last.c, signal: last.c }); return; }
@@ -1479,6 +1774,10 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
     if (dayPnl <= dailyStopPct) { recordSignal(sig, 'skip', `daily stop ${dayPnl.toFixed(2)} <= ${dailyStopPct}`); return; }
   }
   if (liveGetPosStmt.get(coin)) { recordSignal(sig, 'skip', 'live position already open'); return; }
+  if (livePendingIntentForCoinStmt.get(coin, nowMs - RECONCILE_INTENT_MAX_AGE_MS)) {
+    recordSignal(sig, 'skip', 'unresolved order intent');
+    return;
+  }
   const confident = confidentLiveSignal(sig);
   const baseMaxOpen = liveMaxOpen();
   const maxOpen = confident ? confidentMaxOpen(baseMaxOpen) : baseMaxOpen;
@@ -1507,36 +1806,53 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
   const lev = await hlSetLeverage(coin, LIVE_LEVERAGE);
   if (!lev.ok) { recordSignal(sizedSig, 'skip', `leverage failed: ${lev.msg}`, { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing }); liveDelLockStmt.run(coin); logger.warn({ coin, msg: lev.msg }, 'hl-momentum-live: leverage failed'); return; }
   const qty = sizing.notionalUsd / last.c;
-  const order = await hlMarketOrder({ coin, side: sig.side, qty });
-  if (!order.ok) {
-    liveEntryFailCooldown.set(coin, Date.now() + ENTRY_FAIL_COOLDOWN_MS);
-    recordSignal(sizedSig, 'skip', `entry failed: ${order.msg}`, { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing });
-    liveDelLockStmt.run(coin);
-    logger.error({ coin, side: sig.side, msg: order.msg, notionalUsd: sizing.notionalUsd }, 'hl-momentum-live: entry failed');
-    return;
-  }
-
-  const pos = await hlFetchPosition(coin);
-  if (!pos.ok || !pos.data || pos.data.side !== sig.side) {
-    liveEntryFailCooldown.set(coin, Date.now() + ENTRY_FAIL_COOLDOWN_MS);
-    recordSignal(sizedSig, 'skip', 'entry not confirmed', { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing });
-    logger.error({ coin, side: sig.side, pos: pos.ok ? pos.data : pos.msg }, 'hl-momentum-live: entry not confirmed');
+  if (liveEntriesPausedByReconcile || liveReconcileRunning) {
+    recordSignal(sizedSig, 'skip', 'exchange reconcile started before order', { ref: last.c, signal: last.c, sizing });
     liveDelLockStmt.run(coin);
     return;
   }
+  const intentId = randomUUID();
+  const intentAt = Date.now();
+  liveEntryInFlight.add(coin);
+  try {
+    liveInsIntentStmt.run(intentId, coin, sig.side, 'pending', qty, sizing.notionalUsd, sizedSig.signal, intentAt, intentAt);
+    const order = await hlMarketOrder({ coin, side: sig.side, qty });
+    if (!order.ok) {
+      liveUpdIntentStmt.run('failed', Date.now(), order.msg, intentId);
+      liveEntryFailCooldown.set(coin, Date.now() + ENTRY_FAIL_COOLDOWN_MS);
+      recordSignal(sizedSig, 'skip', `entry failed: ${order.msg}`, { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing });
+      liveDelLockStmt.run(coin);
+      logger.error({ coin, side: sig.side, msg: order.msg, notionalUsd: sizing.notionalUsd, intentId }, 'hl-momentum-live: entry failed');
+      return;
+    }
+    liveUpdIntentStmt.run('submitted', Date.now(), null, intentId);
 
-  const openedAt = Date.now();
-  const stop = stopPx(sig.side, pos.data.entryPx, params);
-  const st = await hlPlaceStop({ coin, posSide: sig.side, qty: pos.data.size, triggerPx: stop });
-  if (!st.ok) logger.error({ coin, msg: st.msg }, 'hl-momentum-live: exchange stop failed - poll is backup');
-  liveOpenTxn(coin, sig.side, pos.data.entryPx, pos.data.size, openedAt, sizedSig.signal);
-  liveLock(coin, `momentum-live ${sig.side}`);
-  recordSignal(sizedSig, 'live-open', 'opened', { ref: last.c, signal: pos.data.entryPx, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing });
-  logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, notionalUsd: sizing.notionalUsd, kellyFraction: sizing.kellyFraction, equityUsd: sizing.equityUsd, stop, exStop: st.ok, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, score: sig.score, expectedPnl: sig.expectedPnl, params, signal: sizedSig.signal }, 'hl-momentum-live: OPENED real position');
-  void sendMessage({
-    channel: 'logs',
-    text: `🧭 <b>momentum-live OPENED</b>: ${esc(coin)} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} (${pctNum(params.stopPct)}%) ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trail after ${pctNum(params.trailActivatePct)}%, откат ${pctNum(params.trailGivebackPct)}%, lock ${pctNum(params.trailMinLockPct)}% · R:R ≥ 1:${MIN_RISK_REWARD}\n~$${sizing.notionalUsd.toFixed(2)} Kelly · k=${sizing.kellyFraction.toFixed(3)} · liq: spread ${liq.spreadPct.toFixed(2)}%, top3 $${liq.sideDepthUsd.toFixed(0)} · ${esc(sizedSig.signal)}`,
-  });
+    const pos = await hlFetchPosition(coin);
+    if (!pos.ok || !pos.data || pos.data.side !== sig.side) {
+      liveUpdIntentStmt.run('submitted', Date.now(), pos.ok ? 'position not visible after accepted order' : pos.msg, intentId);
+      liveEntryFailCooldown.set(coin, Date.now() + ENTRY_FAIL_COOLDOWN_MS);
+      liveEntriesPausedByReconcile = true;
+      recordSignal(sizedSig, 'skip', 'entry not confirmed; reconcile scheduled', { ref: last.c, signal: last.c, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing });
+      logger.error({ coin, side: sig.side, pos: pos.ok ? pos.data : pos.msg, intentId }, 'hl-momentum-live: entry not confirmed, keeping ownership lock');
+      setTimeout(() => { void reconcileMomentumLive(); }, 250).unref();
+      return;
+    }
+
+    const openedAt = Date.now();
+    const stop = stopPx(sig.side, pos.data.entryPx, params);
+    const st = await hlPlaceStop({ coin, posSide: sig.side, qty: pos.data.size, triggerPx: stop });
+    if (!st.ok) logger.error({ coin, msg: st.msg }, 'hl-momentum-live: exchange stop failed - poll is backup');
+    liveOpenTxn(coin, sig.side, pos.data.entryPx, pos.data.size, openedAt, sizedSig.signal, intentId);
+    liveLock(coin, `momentum-live ${sig.side}`);
+    recordSignal(sizedSig, 'live-open', 'opened', { ref: last.c, signal: pos.data.entryPx, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, sizing });
+    logger.warn({ coin, side: sig.side, entry: pos.data.entryPx, notionalUsd: sizing.notionalUsd, kellyFraction: sizing.kellyFraction, equityUsd: sizing.equityUsd, stop, exStop: st.ok, spreadPct: liq.spreadPct, sideDepthUsd: liq.sideDepthUsd, score: sig.score, expectedPnl: sig.expectedPnl, params, signal: sizedSig.signal, intentId }, 'hl-momentum-live: OPENED real position');
+    void sendMessage({
+      channel: 'logs',
+      text: `🧭 <b>momentum-live OPENED</b>: ${esc(coin)} ${sig.side} @${pos.data.entryPx}\nстоп ${stop.toFixed(6)} (${pctNum(params.stopPct)}%) ${st.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · trail after ${pctNum(params.trailActivatePct)}%, откат ${pctNum(params.trailGivebackPct)}%, lock ${pctNum(params.trailMinLockPct)}% · R:R ≥ 1:${MIN_RISK_REWARD}\n~$${sizing.notionalUsd.toFixed(2)} Kelly · k=${sizing.kellyFraction.toFixed(3)} · liq: spread ${liq.spreadPct.toFixed(2)}%, top3 $${liq.sideDepthUsd.toFixed(0)} · ${esc(sizedSig.signal)}`,
+    });
+  } finally {
+    liveEntryInFlight.delete(coin);
+  }
 }
 
 async function stepCoin(coin: string): Promise<void> {
@@ -1610,6 +1926,7 @@ async function tick(): Promise<void> {
     const fresh = scanCoins();
     const coins = tickCoins();
     for (const coin of coins) await stepCoin(coin);
+    markTick('hl-momentum-scan');
     logger.info({ coins: coins.length, fresh: fresh.length }, 'hl-momentum: scanned all-market universe + managed open positions');
   } catch (err) {
     logger.error({ err }, 'hl-momentum-shadow: tick failed');
@@ -1634,6 +1951,7 @@ async function fastRadarTick(): Promise<void> {
     upsertHlMinuteCandlesFromMids(mids, now);
     updateMarketRegime(mids, now);
     await fastManageLivePositions(mids);
+    markTick('hl-momentum-fast');
 
     if (now - lastFastAttemptAt < FAST_GLOBAL_ATTEMPT_GAP_MS) return;
     const candidates: EarlySignal[] = [];
@@ -1696,6 +2014,9 @@ export function startHlMomentumShadowJob(): void {
   });
   const fast = setInterval(() => { void fastRadarTick(); }, FAST_MIDS_POLL_MS);
   fast.unref();
+  const reconcile = setInterval(() => { void reconcileMomentumLive(); }, RECONCILE_INTERVAL_MS);
+  reconcile.unref();
+  void reconcileMomentumLive();
   setTimeout(() => { void fastRadarTick(); }, 10_000).unref();
   const t = setTimeout(() => { void tick(); }, 75_000);
   t.unref();
@@ -1710,5 +2031,6 @@ export function startHlMomentumShadowJob(): void {
     fastStrictMult: fastStrictMult(),
     fastBreakoutLookback: fastBreakoutLookback(),
     fastBreakoutBufferPct: fastBreakoutBufferPct(),
-  }, 'hl-momentum scheduled (2s allMids radar + score/EV/Kelly sizing + filtered live micro)');
+    reconcileIntervalMs: RECONCILE_INTERVAL_MS,
+  }, 'hl-momentum scheduled (2s allMids radar + durable intents + exchange reconcile + filtered live micro)');
 }

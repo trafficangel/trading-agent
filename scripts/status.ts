@@ -74,4 +74,36 @@ console.log(`\nOPEN (${open.length})`);
 for (const o of open) {
   console.log(`  ${String(o.symbol).padEnd(9)} ${(o.side === 'short' ? 'short' : 'long').padEnd(5)} @ ${o.entry ?? '—'}  ${fmtT(o.created_at)}  ${o.strategy_id}`);
 }
+
+// ---- Hyperliquid momentum live ----
+const momPublicStartRaw = Number(db.prepare<[string], { value: string }>('SELECT value FROM runtime_config WHERE key = ?').get('hl_momentum_public_start_ms')?.value ?? Date.UTC(2026, 6, 8, 18, 14, 0));
+const momPublicStart = Number.isFinite(momPublicStartRaw) ? momPublicStartRaw : Date.UTC(2026, 6, 8, 18, 14, 0);
+const mom = db.prepare<[number], { closed: number; exact: number; net_pct: number | null; net_usd: number | null }>(`
+  SELECT COUNT(*) AS closed,
+         COALESCE(SUM(CASE WHEN pnl_source = 'fills-v1' THEN 1 ELSE 0 END), 0) AS exact,
+         SUM(pnl_pct) AS net_pct,
+         SUM(COALESCE(net_pnl_usd, (pnl_pct / 100.0) * qty * entry_px)) AS net_usd
+    FROM hl_momentum_live_log
+   WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL AND opened_at >= ?
+`).get(momPublicStart)!;
+const momOpen = db.prepare<[], { coin: string; side: string; entry_px: number; qty: number; opened_at: number }>(`
+  SELECT coin, side, entry_px, qty, opened_at FROM hl_momentum_live_pos ORDER BY opened_at
+`).all();
+const pendingIntents = db.prepare<[], { n: number }>(`
+  SELECT COUNT(*) AS n FROM hl_momentum_order_intent WHERE status IN ('pending', 'submitted')
+`).get()?.n ?? 0;
+const reconcileRaw = db.prepare<[string], { value: string }>('SELECT value FROM runtime_config WHERE key = ?').get('hl_momentum_reconcile_state')?.value;
+let reconcile = 'not checked';
+if (reconcileRaw) {
+  try {
+    const state = JSON.parse(reconcileRaw) as { ok?: boolean; issues?: string[]; checkedAt?: number };
+    reconcile = `${state.ok ? '✅ healthy' : '⛔ paused'} @ ${fmtT(state.checkedAt ?? null)}${state.issues?.length ? ` · ${state.issues.join('; ')}` : ''}`;
+  } catch { reconcile = 'invalid state'; }
+}
+console.log(`\nHL MOMENTUM LIVE (public track since ${fmtT(momPublicStart)})`);
+console.log(`  reconcile ${reconcile}`);
+console.log(`  closed ${mom.closed} · exact ${mom.exact}/${mom.closed} · net ${(mom.net_pct ?? 0) >= 0 ? '+' : ''}${(mom.net_pct ?? 0).toFixed(3)}% / $${(mom.net_usd ?? 0).toFixed(3)} · pending intents ${pendingIntents}`);
+for (const p of momOpen) {
+  console.log(`  ${p.coin.padEnd(9)} ${p.side.padEnd(5)} @ ${p.entry_px} · $${(p.entry_px * p.qty).toFixed(2)} · ${fmtT(p.opened_at)}`);
+}
 console.log('');

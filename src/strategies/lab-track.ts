@@ -21,6 +21,7 @@ type WfRow = {
 type MomRow = {
   id: number; coin: string; side: string; entry_px: number; qty: number; opened_at: number; signal: string;
   exit_px: number | null; closed_at: number | null; pnl_pct: number | null; close_reason: string | null;
+  entry_notional_usd: number | null; net_pnl_usd: number | null; pnl_source: string | null;
 };
 type MomLearnRow = {
   id: number; closed_at: number; pnl_pct: number; signal: string;
@@ -85,7 +86,7 @@ const momSignalStatsStmt = db.prepare<[number], {
 const momSessionPnlStmt = db.prepare<[number], { closed: number; pct: number | null; usd: number | null }>(`
   SELECT COUNT(*) AS closed,
          SUM(pnl_pct) AS pct,
-         SUM((pnl_pct / 100.0) * qty * entry_px) AS usd
+         SUM(COALESCE(net_pnl_usd, (pnl_pct / 100.0) * qty * entry_px)) AS usd
     FROM hl_momentum_live_log
    WHERE closed_at IS NOT NULL AND pnl_pct IS NOT NULL AND closed_at >= ?
 `);
@@ -161,8 +162,8 @@ function fmtDt(ms: number | null): string {
 }
 const notionalOf = (r: WfRow): number => r.qty * r.entry_px;
 const usdOf = (r: WfRow): number => ((r.pnl_pct ?? 0) / 100) * notionalOf(r);
-const momNotionalOf = (r: MomRow): number => r.qty * r.entry_px;
-const momUsdOf = (r: MomRow): number => ((r.pnl_pct ?? 0) / 100) * momNotionalOf(r);
+const momNotionalOf = (r: MomRow): number => r.entry_notional_usd ?? r.qty * r.entry_px;
+const momUsdOf = (r: MomRow): number => r.net_pnl_usd ?? ((r.pnl_pct ?? 0) / 100) * momNotionalOf(r);
 /** Format a computed price (target/stop) at the same decimal precision as the entry, so it lines up. */
 function fmtPx(n: number, ref: number): string {
   const dp = Math.min(8, Math.max(2, (String(ref).split('.')[1] ?? '').length));
