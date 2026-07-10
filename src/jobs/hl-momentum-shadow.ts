@@ -27,6 +27,7 @@ import {
   DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLDS,
   isConfidentMomentumSignal,
 } from '../lib/hl-momentum-capacity.js';
+import { HL_MOMENTUM_CALIBRATION_VERSION } from '../lib/hl-momentum-calibration.js';
 import { upsertHlMinuteCandlesFromMids } from './hl-minute-candle-collector.js';
 
 type Side = 'long' | 'short';
@@ -65,9 +66,12 @@ type MomentumSignal = {
   signal: string;
   score: number;
   modelProb: number;
+  rawProb: number;
   prob: number;
   probConfidence: number;
+  rawExpectedPnl: number;
   expectedPnl: number;
+  calibrationVersion: string;
   metrics: SignalMetrics;
 };
 type LiveSizing = {
@@ -364,14 +368,16 @@ const insSignalJournalStmt = db.prepare<[
   number, string, Side, SignalLayer, number, number, string, string,
   number | null, number | null, number | null, number | null, number | null, number | null,
   number | null, number | null, number | null, number | null, number, number, string,
-  number | null, number | null, number | null, number | null, number | null, number | null, number | null
+  number | null, number | null, number | null, number | null, number | null, number | null, number | null,
+  number, number, string
 ], void>(`
   INSERT INTO hl_momentum_signal_journal
     (ts, coin, side, layer, score, expected_pnl, decision, reason, ref_px, signal_px,
      r30, r90, r3, r12, from_last, vol_ratio, spread_pct, side_depth_usd,
      open_total, open_same_side, signal, notional_usd, kelly_fraction, equity_usd,
-     model_prob, calibrated_prob, prob_confidence, kelly_confidence)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     model_prob, calibrated_prob, prob_confidence, kelly_confidence,
+     raw_prob, raw_expected_pnl, calibration_version)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 const wickOpenPosStmt = db.prepare<[string], { coin: string }>('SELECT coin FROM wick_fade_pos WHERE coin = ?');
 const liveUpsertLockStmt = db.prepare<[string, number, string, number], void>(`
@@ -928,7 +934,7 @@ function calibratedFade(sig: Pick<MomentumSignal, 'coin' | 'side' | 'layer'>, mo
   };
 }
 
-function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'modelProb' | 'prob' | 'probConfidence' | 'expectedPnl'>, params: RiskParams): MomentumSignal {
+function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'modelProb' | 'rawProb' | 'prob' | 'probConfidence' | 'rawExpectedPnl' | 'expectedPnl' | 'calibrationVersion'>, params: RiskParams): MomentumSignal {
   const m = sig.metrics;
   const vol5m = Math.max(0.12, m.vol5mPct ?? params.volPct * 100);
   const moveStrength = sig.layer === 'fast'
@@ -945,15 +951,27 @@ function scoreSignal(sig: Omit<MomentumSignal, 'score' | 'modelProb' | 'prob' | 
   const score = Math.round(clamp(raw, 0, 100));
   const modelProb = Math.round(modelContinuationProb(score) * 10000) / 10000;
   const calibrated = calibratedContinuation(sig, modelProb);
-  const p = Math.round(clamp(calibrated.prob + learnedProbBias(), 0.30, 0.72) * 10000) / 10000;
+  const rawProb = calibrated.prob;
+  const p = Math.round(clamp(rawProb + learnedProbBias(), 0.30, 0.72) * 10000) / 10000;
   const winPnl = (params.trailMinLockPct * 100) - COST_RT_PCT;
   const lossPnl = params.stopPct * 100 + COST_RT_PCT;
+  const rawExpectedPnl = Math.round((rawProb * winPnl - (1 - rawProb) * lossPnl) * 1000) / 1000;
   const expectedPnl = Math.round((p * winPnl - (1 - p) * lossPnl + learnedEvBiasPct()) * 1000) / 1000;
-  return { ...sig, score, modelProb, prob: p, probConfidence: calibrated.confidence, expectedPnl };
+  return {
+    ...sig,
+    score,
+    modelProb,
+    rawProb,
+    prob: p,
+    probConfidence: calibrated.confidence,
+    rawExpectedPnl,
+    expectedPnl,
+    calibrationVersion: HL_MOMENTUM_CALIBRATION_VERSION,
+  };
 }
 
 function buildTradeSignal(
-  sig: Omit<MomentumSignal, 'score' | 'modelProb' | 'prob' | 'probConfidence' | 'expectedPnl'>,
+  sig: Omit<MomentumSignal, 'score' | 'modelProb' | 'rawProb' | 'prob' | 'probConfidence' | 'rawExpectedPnl' | 'expectedPnl' | 'calibrationVersion'>,
   params: RiskParams,
 ): MomentumSignal {
   const mode = momentumTradeMode();
@@ -970,7 +988,7 @@ function buildTradeSignal(
 }
 
 function appendScoreSignal(signal: string, sig: MomentumSignal): string {
-  return `${signal} [score=${sig.score} p=${sig.prob.toFixed(3)} mp=${sig.modelProb.toFixed(3)} pc=${sig.probConfidence.toFixed(2)} ev=${sig.expectedPnl.toFixed(2)} layer=${sig.layer}]`;
+  return `${signal} [score=${sig.score} p=${sig.prob.toFixed(3)} rp=${sig.rawProb.toFixed(3)} mp=${sig.modelProb.toFixed(3)} pc=${sig.probConfidence.toFixed(2)} ev=${sig.expectedPnl.toFixed(2)} rev=${sig.rawExpectedPnl.toFixed(2)} cv=${sig.calibrationVersion} layer=${sig.layer}]`;
 }
 
 function kellyFraction(sig: MomentumSignal, params: RiskParams): number {
@@ -1064,6 +1082,7 @@ function recordSignal(sig: MomentumSignal, decision: 'paper' | 'live-open' | 'sk
       pf.total, pf.sameSide, sig.signal,
       px.sizing?.notionalUsd ?? null, px.sizing?.kellyFraction ?? null, px.sizing?.equityUsd ?? null,
       sig.modelProb, sig.prob, sig.probConfidence, px.sizing?.confidence ?? null,
+      sig.rawProb, sig.rawExpectedPnl, sig.calibrationVersion,
     );
   } catch (err) {
     logger.warn({ err: (err as Error).message, coin: sig.coin, decision }, 'hl-momentum: signal journal write failed');
