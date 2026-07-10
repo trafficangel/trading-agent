@@ -1,7 +1,7 @@
 export type HlOwnedPosition = {
   coin: string;
   side: 'long' | 'short';
-  owner: 'hl-momentum' | 'wick-fade';
+  owner: 'hl-momentum' | 'wick-fade' | 'hl-bybit-arb';
 };
 
 export type HlExchangePositionRef = {
@@ -36,9 +36,9 @@ export function auditHlPositionOwnership(
     const owner = list[0]!;
     const position = exchange.get(coin);
     if (!position) {
-      issues.push({ kind: 'missing-exchange', coin, detail: `${coin}: ${owner.owner} DB position missing on exchange` });
+      issues.push({ kind: 'missing-exchange', coin, detail: `${coin}: ${owner.owner} position missing on exchange` });
     } else if (position.side !== owner.side) {
-      issues.push({ kind: 'side-mismatch', coin, detail: `${coin}: ${owner.owner} DB ${owner.side}, exchange ${position.side}` });
+      issues.push({ kind: 'side-mismatch', coin, detail: `${coin}: ${owner.owner} ${owner.side}, exchange ${position.side}` });
     }
   }
 

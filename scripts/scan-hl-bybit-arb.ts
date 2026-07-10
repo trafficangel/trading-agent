@@ -56,7 +56,8 @@ type BybitInstrument = {
 type BybitBook = { ts: number; b: [string, string][]; a: [string, string][] };
 
 export type NumericLevel = { price: number; qty: number };
-type Market = {
+export type ArbDirection = 'LONG HL / SHORT BY' | 'LONG BY / SHORT HL';
+export type ArbMarket = {
   asset: string;
   hlCoin: string;
   bybitSymbol: string;
@@ -71,19 +72,38 @@ type Market = {
   basisMidPct: number;
   funding24Pct: number;
 };
-type Opportunity = Market & {
+export type ArbOpportunity = ArbMarket & {
   bookSkewMs: number;
   grossBasisPct: number;
   basisNetPct: number;
   basisNet8hPct: number;
-  basisDirection: string;
+  basisDirection: ArbDirection;
   fundingNet24Pct: number;
-  fundingDirection: string;
+  fundingDirection: ArbDirection;
   basisCloseCostPct: number;
   basisTotalCostPct: number;
   fundingCloseCostPct: number;
   fundingTotalCostPct: number;
   maxCommonLeverage: number;
+  targetUnderlyingQty: number;
+  hlBuyPx: number;
+  hlSellPx: number;
+  bybitBuyPx: number;
+  bybitSellPx: number;
+};
+
+export type ArbScanResult = {
+  ts: number;
+  notionalUsd: number;
+  minNetPct: number;
+  matchedMarkets: number;
+  checkedBooks: number;
+  requestedBooks: number;
+  durationMs: number;
+  basis: ArbOpportunity[];
+  funding: ArbOpportunity[];
+  qualifiedBasis: ArbOpportunity[];
+  qualifiedFunding: ArbOpportunity[];
 };
 
 function finite(value: unknown): number | null {
@@ -150,14 +170,14 @@ function midFromTicker(ticker: BybitTicker): number | null {
   return bid != null && ask != null && bid > 0 && ask >= bid ? (bid + ask) / 2 : null;
 }
 
-function buildMarkets(meta: HlMeta, tickers: BybitTicker[], instruments: BybitInstrument[]): Market[] {
+function buildMarkets(meta: HlMeta, tickers: BybitTicker[], instruments: BybitInstrument[]): ArbMarket[] {
   const tickerBySymbol = new Map(tickers.map((ticker) => [ticker.symbol, ticker]));
   const instrumentBySymbol = new Map(instruments
     .filter((instrument) => instrument.status === 'Trading'
       && instrument.contractType === 'LinearPerpetual'
       && instrument.settleCoin === 'USDT')
     .map((instrument) => [instrument.symbol, instrument]));
-  const markets: Market[] = [];
+  const markets: ArbMarket[] = [];
 
   for (let index = 0; index < meta[0].universe.length; index += 1) {
     const hlAsset = meta[0].universe[index]!;
@@ -268,7 +288,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return results;
 }
 
-async function evaluateMarket(market: Market, notionalUsd: number): Promise<Opportunity | null> {
+export async function evaluateArbMarket(market: ArbMarket, notionalUsd: number): Promise<ArbOpportunity | null> {
   try {
     const [hlBook, byBook] = await Promise.all([
       hlInfo<HlBook>({ type: 'l2Book', coin: market.hlCoin }),
@@ -338,6 +358,11 @@ async function evaluateMarket(market: Market, notionalUsd: number): Promise<Oppo
       fundingCloseCostPct,
       fundingTotalCostPct,
       maxCommonLeverage: Math.min(market.hlMaxLeverage, market.bybitMaxLeverage),
+      targetUnderlyingQty: underlyingQty,
+      hlBuyPx: hlBuy,
+      hlSellPx: hlSell,
+      bybitBuyPx: byBuy,
+      bybitSellPx: bySell,
     };
   } catch {
     return null;
@@ -348,7 +373,7 @@ function signed(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(3)}%`;
 }
 
-function printOpportunity(opportunity: Opportunity, kind: 'basis' | 'funding'): void {
+function printOpportunity(opportunity: ArbOpportunity, kind: 'basis' | 'funding'): void {
   const net = kind === 'basis' ? opportunity.basisNetPct : opportunity.fundingNet24Pct;
   const direction = kind === 'basis' ? opportunity.basisDirection : opportunity.fundingDirection;
   const cost = kind === 'basis' ? opportunity.basisTotalCostPct : opportunity.fundingTotalCostPct;
@@ -362,7 +387,7 @@ function printOpportunity(opportunity: Opportunity, kind: 'basis' | 'funding'): 
   );
 }
 
-function compact(opportunity: Opportunity): Record<string, string | number> {
+function compact(opportunity: ArbOpportunity): Record<string, string | number> {
   return {
     asset: opportunity.asset,
     basisDirection: opportunity.basisDirection,
@@ -379,11 +404,9 @@ function compact(opportunity: Opportunity): Record<string, string | number> {
   };
 }
 
-export async function runScan(args = process.argv.slice(2)): Promise<void> {
-  const positional = args.filter((arg) => !arg.startsWith('--'));
-  const json = args.includes('--json');
-  const notionalUsd = Math.max(10, Number(positional[0] ?? 1_000));
-  const minNetPct = Math.max(0, Number(positional[1] ?? 1));
+export async function scanArbitrage(notionalUsd = 1_000, minNetPct = 1): Promise<ArbScanResult> {
+  notionalUsd = Math.max(10, notionalUsd);
+  minNetPct = Math.max(0, minNetPct);
   const startedAt = Date.now();
   const [meta, tickers, instruments] = await Promise.all([
     hlInfo<HlMeta>({ type: 'metaAndAssetCtxs' }),
@@ -394,43 +417,63 @@ export async function runScan(args = process.argv.slice(2)): Promise<void> {
   const shortlist = [...markets]
     .sort((a, b) => Math.max(b.basisMidPct, b.funding24Pct) - Math.max(a.basisMidPct, a.funding24Pct))
     .slice(0, BOOK_SHORTLIST);
-  const opportunities = (await mapLimit(shortlist, BOOK_CONCURRENCY, (market) => evaluateMarket(market, notionalUsd)))
-    .filter((opportunity): opportunity is Opportunity => opportunity != null);
+  const opportunities = (await mapLimit(shortlist, BOOK_CONCURRENCY, (market) => evaluateArbMarket(market, notionalUsd)))
+    .filter((opportunity): opportunity is ArbOpportunity => opportunity != null);
   const basis = [...opportunities].sort((a, b) => b.basisNetPct - a.basisNetPct);
   const funding = [...opportunities].sort((a, b) => b.fundingNet24Pct - a.fundingNet24Pct);
   const qualifiedBasis = basis.filter((opportunity) => opportunity.basisNetPct >= minNetPct);
   const qualifiedFunding = funding.filter((opportunity) => opportunity.fundingNet24Pct >= minNetPct);
   const completedAt = Date.now();
 
+  return {
+    ts: completedAt,
+    notionalUsd,
+    minNetPct,
+    matchedMarkets: markets.length,
+    checkedBooks: opportunities.length,
+    requestedBooks: shortlist.length,
+    durationMs: completedAt - startedAt,
+    basis,
+    funding,
+    qualifiedBasis,
+    qualifiedFunding,
+  };
+}
+
+export async function runScan(args = process.argv.slice(2)): Promise<void> {
+  const positional = args.filter((arg) => !arg.startsWith('--'));
+  const json = args.includes('--json');
+  const scan = await scanArbitrage(Number(positional[0] ?? 1_000), Number(positional[1] ?? 1));
+
   if (json) {
     console.log(JSON.stringify({
-      ts: completedAt,
-      notionalUsd,
-      minNetPct,
-      matchedMarkets: markets.length,
-      checkedBooks: opportunities.length,
-      requestedBooks: shortlist.length,
-      durationMs: completedAt - startedAt,
-      topBasis: basis.slice(0, 3).map(compact),
-      topFunding: funding.slice(0, 3).map(compact),
-      qualifiedBasis: qualifiedBasis.map(compact),
-      qualifiedFunding: qualifiedFunding.map(compact),
+      ts: scan.ts,
+      notionalUsd: scan.notionalUsd,
+      minNetPct: scan.minNetPct,
+      matchedMarkets: scan.matchedMarkets,
+      checkedBooks: scan.checkedBooks,
+      requestedBooks: scan.requestedBooks,
+      durationMs: scan.durationMs,
+      topBasis: scan.basis.slice(0, 3).map(compact),
+      topFunding: scan.funding.slice(0, 3).map(compact),
+      qualifiedBasis: scan.qualifiedBasis.map(compact),
+      qualifiedFunding: scan.qualifiedFunding.map(compact),
     }));
     return;
   }
 
-  console.log(`\nHL <-> Bybit perpetual arb scan @ ${new Date(completedAt).toISOString()}`);
+  console.log(`\nHL <-> Bybit perpetual arb scan @ ${new Date(scan.ts).toISOString()}`);
   console.log(
-    `matched ${markets.length} markets · checked ${opportunities.length}/${shortlist.length} books · target $${notionalUsd.toFixed(0)} per leg `
-    + `· fees ${ROUND_TRIP_FEES_PCT.toFixed(3)}% RT · threshold ${minNetPct.toFixed(2)}% net · ${completedAt - startedAt}ms`,
+    `matched ${scan.matchedMarkets} markets · checked ${scan.checkedBooks}/${scan.requestedBooks} books · target $${scan.notionalUsd.toFixed(0)} per leg `
+    + `· fees ${ROUND_TRIP_FEES_PCT.toFixed(3)}% RT · threshold ${scan.minNetPct.toFixed(2)}% net · ${scan.durationMs}ms`,
   );
   console.log('\nBASIS: assumes the cross-venue spread converges; current funding is shown only for an 8h sensitivity.');
-  for (const opportunity of basis.slice(0, 10)) printOpportunity(opportunity, 'basis');
+  for (const opportunity of scan.basis.slice(0, 10)) printOpportunity(opportunity, 'basis');
   console.log('\nFUNDING: 24h projection assumes the current rate differential persists; includes a 0.25% basis-risk buffer.');
-  for (const opportunity of funding.slice(0, 10)) printOpportunity(opportunity, 'funding');
-  console.log(`\nQUALIFIED >= ${minNetPct.toFixed(2)}% net: basis ${qualifiedBasis.length}, funding ${qualifiedFunding.length}`);
-  for (const opportunity of qualifiedBasis) printOpportunity(opportunity, 'basis');
-  for (const opportunity of qualifiedFunding) printOpportunity(opportunity, 'funding');
+  for (const opportunity of scan.funding.slice(0, 10)) printOpportunity(opportunity, 'funding');
+  console.log(`\nQUALIFIED >= ${scan.minNetPct.toFixed(2)}% net: basis ${scan.qualifiedBasis.length}, funding ${scan.qualifiedFunding.length}`);
+  for (const opportunity of scan.qualifiedBasis) printOpportunity(opportunity, 'basis');
+  for (const opportunity of scan.qualifiedFunding) printOpportunity(opportunity, 'funding');
 }
 
 const invokedPath = process.argv[1];

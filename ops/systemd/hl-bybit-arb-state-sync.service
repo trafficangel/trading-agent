@@ -1,0 +1,18 @@
+[Unit]
+Description=Sync Tokyo HL/Bybit arb ownership lease to main VPS
+After=network-online.target hl-bybit-arb-executor.service
+Wants=network-online.target hl-bybit-arb-executor.service
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+Environment=HOME=/home/trader
+Environment=SYNC_STATUS_SOURCE=/home/trader/apps/predict-tools/data/hl-bybit-arb-executor.json
+Environment=SYNC_STATUS_DEST=/home/trader/apps/trading-agent/data/hl-bybit-arb-executor.json
+ExecStart=/home/trader/apps/predict-tools/status-sync.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

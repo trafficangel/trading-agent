@@ -1,0 +1,33 @@
+[Unit]
+Description=Tokyo live Hyperliquid/Bybit basis-arbitrage pilot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/predict-tools/hl-bybit-arb
+EnvironmentFile=/home/trader/apps/predict-tools/config/hl-bybit-arb.env
+Environment=ARB_LIVE=true
+Environment=ARB_NOTIONAL_USD=20
+Environment=ARB_MIN_NET_PCT=1
+Environment=ARB_TAKE_PROFIT_PCT=0.50
+Environment=ARB_STOP_LOSS_PCT=-0.75
+Environment=ARB_MAX_HOLD_HOURS=24
+Environment=ARB_MAX_COMPLETED_TRADES=1
+Environment=ARB_STATE_PATH=/home/trader/apps/predict-tools/data/hl-bybit-arb-executor.json
+Environment=ARB_AUDIT_PATH=/home/trader/apps/predict-tools/data/hl-bybit-arb-trades.ndjson
+Environment=ARB_TELEGRAM_PATH=/home/trader/apps/predict-tools/telegram.conf
+ExecStart=/home/trader/.bun/bin/bun /home/trader/apps/predict-tools/hl-bybit-arb/scripts/execute-hl-bybit-arb.ts
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/predict-tools/data
+
+[Install]
+WantedBy=multi-user.target

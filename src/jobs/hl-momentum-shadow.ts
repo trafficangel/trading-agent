@@ -36,6 +36,7 @@ import {
 import { HL_MOMENTUM_CALIBRATION_VERSION } from '../lib/hl-momentum-calibration.js';
 import { CONFIRM_LONG_CANARY_POLICY } from '../lib/hl-momentum-segment-governor.js';
 import type { HlTradeAccounting } from '../lib/hl-trade-accounting.js';
+import { readHlExternalOwner } from '../lib/hl-external-owner.js';
 import { auditHlPositionOwnership } from '../lib/hl-position-ownership.js';
 import { upsertHlMinuteCandlesFromMids } from './hl-minute-candle-collector.js';
 
@@ -160,6 +161,7 @@ const FAST_GLOBAL_ATTEMPT_GAP_MS = 6_000;
 const ENTRY_FAIL_COOLDOWN_MS = 2 * 60_000;
 const RECONCILE_INTERVAL_MS = 2 * 60_000;
 const RECONCILE_INTENT_MAX_AGE_MS = 24 * 60 * 60_000;
+const HL_ARB_STATE_PATH = process.env.HL_ARB_STATE_PATH ?? './data/hl-bybit-arb-executor.json';
 const MIN_LIVE_SCORE = 68;
 const MIN_EXPECTED_PNL_PCT = 0.10;
 const MIN_CALIBRATED_PROB = 0.49;
@@ -1448,6 +1450,7 @@ async function reconcileMomentumLive(): Promise<void> {
     const dbByCoin = new Map(dbPositions.map((p) => [p.coin, p]));
     const exchangeByCoin = new Map(snapshot.data.map((p) => [p.coin, p]));
     const wickCoins = new Set(wickAllPosStmt.all().map((p) => p.coin));
+    const externalOwner = readHlExternalOwner(HL_ARB_STATE_PATH, nowMs);
     const intents = liveRecentIntentsStmt.all(nowMs - RECONCILE_INTENT_MAX_AGE_MS);
 
     for (const pos of dbPositions) {
@@ -1485,6 +1488,7 @@ async function reconcileMomentumLive(): Promise<void> {
 
     for (const exchange of snapshot.data) {
       if (dbByCoin.has(exchange.coin) || wickCoins.has(exchange.coin)) continue;
+      if (externalOwner?.coin === exchange.coin && externalOwner.side === exchange.side) continue;
       const intent = intents.find((i) => i.coin === exchange.coin && i.side === exchange.side);
       if (!intent) {
         issues.push(`${exchange.coin}: unowned exchange ${exchange.side} position`);
@@ -1532,9 +1536,14 @@ async function reconcileMomentumLive(): Promise<void> {
       logger.info({ id: row.id, coin: row.coin }, 'hl-momentum-reconcile: repaired fallback accounting from fills');
     }
 
+    const externallyOwnedOnExchange = externalOwner
+      && (externalOwner.phase === 'open' || exchangeByCoin.has(externalOwner.coin))
+      ? externalOwner
+      : null;
     const owners = [
       ...liveAllPosStmt.all().map((p) => ({ coin: p.coin, side: p.side, owner: 'hl-momentum' as const })),
       ...wickAllPosStmt.all().map((p) => ({ coin: p.coin, side: p.side, owner: 'wick-fade' as const })),
+      ...(externallyOwnedOnExchange ? [{ coin: externallyOwnedOnExchange.coin, side: externallyOwnedOnExchange.side, owner: 'hl-bybit-arb' as const }] : []),
     ];
     const ownership = auditHlPositionOwnership(snapshot.data, owners);
     const finalIssues = [...new Set([...issues, ...ownership.issues.map((issue) => issue.detail)])];
@@ -1872,6 +1881,8 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
   const maxOpen = confident ? confidentMaxOpen(baseMaxOpen) : baseMaxOpen;
   if (liveAllPosStmt.all().length >= maxOpen) { recordSignal(sig, 'skip', `max live open ${maxOpen}${confident ? ' confident' : ''}`); return; }
   if (wickOpenPosStmt.get(coin)) { recordSignal(sig, 'skip', 'wick-fade has coin'); return; }
+  const externalOwner = readHlExternalOwner(HL_ARB_STATE_PATH, nowMs);
+  if (externalOwner?.coin === coin) { recordSignal(sig, 'skip', 'HL/Bybit arb owns coin'); return; }
   const gate = preTradeGate(sig, params, confident);
   if (gate) { recordSignal(sig, 'skip', gate, { ref: last.c, signal: last.c }); return; }
 
