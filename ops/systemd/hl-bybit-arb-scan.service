@@ -1,0 +1,19 @@
+[Unit]
+Description=Tokyo read-only Hyperliquid/Bybit perpetual arbitrage scan
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=trader
+WorkingDirectory=/home/trader/apps/predict-tools
+ExecStart=/home/trader/.bun/bin/bun /home/trader/apps/predict-tools/scan-hl-bybit-arb.ts 1000 1 --json
+StandardOutput=append:/home/trader/apps/predict-tools/data/hl-bybit-arb.ndjson
+StandardError=journal
+TimeoutStartSec=25
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/predict-tools/data
+
