@@ -86,7 +86,11 @@ async function signedGet<T>(
       // (e.g. CDN error page, 5xx with no body, wrong URL). Surface a
       // clean message so the cabinet doesn't show a JSON parse error.
       logger.error({ path, status: res.statusCode, snippet: text.slice(0, 100) }, 'bybit-private GET: non-JSON');
-      return { ok: false, code: -1, msg: `Bybit вернул ответ без JSON (HTTP ${res.statusCode})` };
+      return {
+        ok: false,
+        code: res.statusCode >= 400 ? res.statusCode : -1,
+        msg: `Bybit вернул ответ без JSON (HTTP ${res.statusCode})`,
+      };
     }
     if (body.retCode !== 0) {
       return { ok: false, code: body.retCode, msg: body.retMsg };
@@ -148,7 +152,11 @@ async function signedPost<T>(
         respBody = JSON.parse(text);
       } catch {
         logger.error({ path, status: res.statusCode, snippet: text.slice(0, 100) }, 'bybit-private POST: non-JSON');
-        return { ok: false, code: -1, msg: `Bybit вернул ответ без JSON (HTTP ${res.statusCode})` };
+        return {
+          ok: false,
+          code: res.statusCode >= 400 ? res.statusCode : -1,
+          msg: `Bybit вернул ответ без JSON (HTTP ${res.statusCode})`,
+        };
       }
       // Retry on rate-limit retCode.
       if (respBody.retCode === 10006 && attempt < RETRY_BACKOFF_MS.length) {
@@ -663,11 +671,15 @@ export function roundContractQty(qty: number, _symbol: string): number {
 export function bybitErrorLabel(code: number): string {
   // Subset of common codes we'll surface to users.
   const map: Record<number, string> = {
+    401: 'invalid_auth',
+    [-2015]: 'api_key_expired',
+    33004: 'api_key_expired',
     10001: 'invalid_param',
     10003: 'invalid_api_key',
     10004: 'invalid_sign',
     10005: 'permission_denied',
     10006: 'rate_limit_exceeded',
+    10007: 'authentication_failed',
     10010: 'unmatched_ip',
     110001: 'order_not_exists',
     110007: 'insufficient_balance',

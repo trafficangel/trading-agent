@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Predict renders schema-less status JSON emitted by independent engines. */
+
 import type { FastifyInstance } from 'fastify';
 import { readFileSync, writeFileSync, existsSync, chmodSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -2022,6 +2024,16 @@ function leaderboard(): string {
     `<div class="pd-foot"><b>PnL</b> = накопленный shadow-результат (плоско $5 на сделку). Безубыток ≈ средняя цена входа (порог, выше которого винрейт даёт плюс). Край (винрейт − безубыток) — направленный сигнал. 🏆 = лидер: в плюсе по деньгам, с положительным краем И ≥${MIN_SAMPLE} сделок. Пока сделок мало — это шум.</div></div>`
   );
 }
+
+// Retained dashboard building blocks for the active Predict workstream. Some
+// variants are currently hidden from routing but are intentionally kept ready.
+void renderBtcOrderbook;
+void renderStrategyMonitor;
+void mskHHMM;
+void strategyCard;
+void globalFeed;
+void researchSection;
+void leaderboard;
 
 type PfArbVenue = 'pm' | 'pf';
 type PfArbLegPlan = {

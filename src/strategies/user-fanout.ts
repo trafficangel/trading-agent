@@ -65,6 +65,7 @@ import {
   setCrossMargin,
   bybitErrorLabel,
 } from '../exchange/bybit-private.js';
+import { isBybitAuthFailure } from '../lib/bybit-auth.js';
 import { roundQtyToStep } from '../exchange/bybit-public.js';
 import { STRATEGY_CONFIGS, TRACK_C_NOTIONAL_USD, MAX_SAFE_SL_PCT } from './track-c-config.js';
 import { computeMarginState } from '../user/margin.js';
@@ -79,18 +80,6 @@ import {
 const PARALLEL_LIMIT = 10; // well below Bybit's 50 req/s global cap
 const limit = pLimit(PARALLEL_LIMIT);
 
-/** Bybit error codes that indicate the API KEY itself is broken
- *  (revoked, wrong IP, missing permission). Other codes (insufficient
- *  balance, qty too small, leverage conflict) are operational and
- *  shouldn't poison the key as verify_failed. */
-const AUTH_CLASS_ERROR_CODES = new Set([
-  10003, // invalid API key
-  10004, // invalid sign
-  10005, // permission denied
-  10010, // unmatched IP
-  10006, // rate limit / abusive — treat as auth issue too
-]);
-
 /** Codes that mean "balance / margin insufficient on the unified
  *  account". When seen, we flip insufficient_balance_at on the key
  *  so subsequent signals are skipped until the user tops up. */
@@ -99,10 +88,6 @@ const INSUFFICIENT_BALANCE_CODES = new Set([
   110012, // insufficient margin
   110045, // insufficient quote (USDT) balance
 ]);
-
-function shouldMarkKeyBroken(code: number): boolean {
-  return AUTH_CLASS_ERROR_CODES.has(code);
-}
 
 function isInsufficientBalance(code: number): boolean {
   return INSUFFICIENT_BALANCE_CODES.has(code);
@@ -356,7 +341,7 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
         `⚠️ Track D: user_id=${t.user_id} has open positions in Hedge mode on Bybit. ` +
           `Auto-switch to One-Way blocked. User must close existing positions manually first.`,
       );
-    } else if (shouldMarkKeyBroken(modeRes.code)) {
+    } else if (isBybitAuthFailure(modeRes.code)) {
       recordVerifyResult(keyRow.id, false, `switchMode: ${bybitErrorLabel(modeRes.code)}`);
     }
     return false;
@@ -425,7 +410,7 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
   if (!levRes.ok) {
     const label = bybitErrorLabel(levRes.code);
     logger.warn({ userId: t.user_id, code: levRes.code, msg: levRes.msg }, 'fanOutEntry: setLeverage failed');
-    if (shouldMarkKeyBroken(levRes.code)) {
+    if (isBybitAuthFailure(levRes.code)) {
       recordVerifyResult(keyRow.id, false, `setLeverage: ${label}`);
     }
     if (levRes.code === 110044) {
@@ -467,7 +452,7 @@ async function executeUserEntry(t: EligibleTarget, args: FanOutEntryArgs): Promi
     // Only mark key broken on auth-class errors. Insufficient balance
     // (110007/110012), invalid qty (170131) etc. are operational and
     // shouldn't make the user re-verify their key.
-    if (shouldMarkKeyBroken(orderRes.code)) {
+    if (isBybitAuthFailure(orderRes.code)) {
       recordVerifyResult(keyRow.id, false, `placeOrder: ${label}`);
     }
     // Insufficient balance: set the flag so the user is skipped from

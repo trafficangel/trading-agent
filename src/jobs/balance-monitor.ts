@@ -33,10 +33,12 @@ import { db } from '../db/client.js';
 import {
   getDecryptedCreds,
   recordBalance,
+  recordVerifyResult,
   setInsufficientBalance,
   type ApiKeyRow,
 } from '../db/repos/user-api-keys.js';
 import { fetchBalanceUsdt } from '../exchange/bybit-private.js';
+import { isBybitAuthFailure } from '../lib/bybit-auth.js';
 import { sumUsedMargin } from '../user/margin.js';
 import { hasActiveAccess } from '../db/repos/user-subscriptions.js';
 import { evaluateTierTransition } from '../user/tier-assignment.js';
@@ -71,6 +73,18 @@ async function processOne(key: ApiKeyRow): Promise<void> {
 
   const balRes = await fetchBalanceUsdt(creds);
   if (!balRes.ok) {
+    if (isBybitAuthFailure(balRes.code)) {
+      recordVerifyResult(
+        key.id,
+        false,
+        `Bybit auth failed (${balRes.code}): ${balRes.msg}`,
+      );
+      logger.error(
+        { userId: key.user_id, keyId: key.id, code: balRes.code, msg: balRes.msg },
+        'balance-monitor: quarantined invalid Bybit key',
+      );
+      return;
+    }
     logger.warn(
       { userId: key.user_id, code: balRes.code, msg: balRes.msg },
       'balance-monitor: fetchBalance failed',
