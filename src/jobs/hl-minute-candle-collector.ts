@@ -9,7 +9,7 @@
 import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
-import { metaAndAssetCtxs } from '../exchange/hyperliquid.js';
+import { activePerpCoinNames, metaAndAssetCtxs } from '../exchange/hyperliquid.js';
 import { WF_CONFIG } from './wick-fade-runner.js';
 
 const FUNDING_FLIP_COINS = ['ETH', 'ADA', 'XRP', 'AVAX'];
@@ -96,7 +96,7 @@ async function fetchCandles(coin: string, startMs: number, endMs: number): Promi
 async function coinUniverse(): Promise<string[]> {
   try {
     const [meta] = await metaAndAssetCtxs();
-    const coins = meta.universe.map((u) => u.name).filter((c) => /^[A-Za-z0-9]+$/.test(c));
+    const coins = activePerpCoinNames(meta.universe);
     return coins.length ? coins : FALLBACK_COINS;
   } catch (err) {
     logger.warn({ err: (err as Error).message, fallback: FALLBACK_COINS.length }, 'hl-minute-candle-collector: meta read failed - fallback universe');

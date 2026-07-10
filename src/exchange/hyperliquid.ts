@@ -41,9 +41,27 @@ export type HlAssetCtx = {
   premium: string;
   midPx: string;
 };
-export type HlMetaCtxs = [{ universe: { name: string }[] }, HlAssetCtx[]];
-export function metaAndAssetCtxs(): Promise<HlMetaCtxs> {
-  return hlInfo<HlMetaCtxs>({ type: 'metaAndAssetCtxs' });
+export type HlMetaAsset = { name: string; isDelisted?: boolean };
+export type HlMetaCtxs = [{ universe: HlMetaAsset[] }, HlAssetCtx[]];
+
+let activePerpCoins: ReadonlySet<string> | null = null;
+
+/** Primary-dex perpetuals that can accept new orders. HIP-3 names contain a
+ * colon and are intentionally outside this strategy's current universe. */
+export function activePerpCoinNames(universe: HlMetaAsset[]): string[] {
+  return universe
+    .filter((asset) => asset.isDelisted !== true && /^[A-Za-z0-9]+$/.test(asset.name))
+    .map((asset) => asset.name);
+}
+
+export function knownActivePerpCoins(): ReadonlySet<string> | null {
+  return activePerpCoins;
+}
+
+export async function metaAndAssetCtxs(): Promise<HlMetaCtxs> {
+  const result = await hlInfo<HlMetaCtxs>({ type: 'metaAndAssetCtxs' });
+  activePerpCoins = new Set(activePerpCoinNames(result[0].universe));
+  return result;
 }
 
 export function allMids(): Promise<Record<string, string>> {

@@ -12,7 +12,7 @@ import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import { markTick } from '../lib/health-tracker.js';
 import { sendMessage } from '../telegram/bot.js';
-import { allMids, l2Book } from '../exchange/hyperliquid.js';
+import { allMids, knownActivePerpCoins, l2Book } from '../exchange/hyperliquid.js';
 import {
   hlCancelOrder,
   hlCancelTriggers,
@@ -1970,7 +1970,13 @@ async function fastRadarTick(): Promise<void> {
     fastRadarRateLimitBackoffMs = 15_000;
     const now = Date.now();
     const mids = new Map<string, number>();
+    const activeCoins = knownActivePerpCoins();
+    const managedCoins = new Set([
+      ...liveAllPosStmt.all().map((position) => position.coin),
+      ...allPosStmt.all().map((position) => position.coin),
+    ]);
     for (const [coin, value] of Object.entries(raw)) {
+      if (activeCoins && !activeCoins.has(coin) && !managedCoins.has(coin)) continue;
       const px = Number(value);
       if (!(px > 0) || !Number.isFinite(px)) continue;
       mids.set(coin, px);
