@@ -185,6 +185,10 @@ const SHADOW_PROOF_RECENT_N = 120;
 const SHADOW_PROOF_MIN_SAMPLE = 20;
 const SHADOW_PROOF_MIN_AVG_PCT = 0;
 const SHADOW_PROOF_MIN_WR = 0.45;
+const CONFIRM_LONG_CANARY_TAG = 'canary=confirm-long-v1';
+const CONFIRM_LONG_CANARY_MIN_PROB = 0.47;
+const CONFIRM_LONG_CANARY_MAX_OPEN = 1;
+const CONFIRM_LONG_CANARY_DAILY_LOSS_USD = 1;
 const CONFIRM_MAX_IMPULSE_RATIO = 1.42;
 const DEFAULT_TRADE_MODE: TradeMode = 'fade';
 const FADE_PRIOR_WIN_RATE = 0.62;
@@ -576,6 +580,39 @@ function confidentMaxOpen(baseMaxOpen: number): number {
 
 function confidentMaxSameSide(baseMaxSameSide: number): number {
   return Math.max(baseMaxSameSide, Math.round(runtimeNum('hl_momentum_confident_max_same_side', CONFIDENT_MAX_SAME_SIDE, baseMaxSameSide, Math.max(baseMaxSameSide, 4))));
+}
+
+function sideAwareLiveEnabled(): boolean {
+  return runtimeNum('hl_momentum_side_aware_enabled', 1, 0, 1) >= 0.5;
+}
+
+function segmentRuntimeKey(sig: Pick<MomentumSignal, 'layer' | 'side'>): string {
+  return `hl_momentum_${sig.layer}_${sig.side}_live_enabled`;
+}
+
+function segmentLiveEnabled(sig: Pick<MomentumSignal, 'layer' | 'side'>): boolean {
+  if (!sideAwareLiveEnabled()) return true;
+  return runtimeNum(segmentRuntimeKey(sig), 0, 0, 1) >= 0.5;
+}
+
+function confirmLongCanaryActive(sig: Pick<MomentumSignal, 'layer' | 'side'>): boolean {
+  return sideAwareLiveEnabled()
+    && sig.layer === 'confirm'
+    && sig.side === 'long'
+    && segmentLiveEnabled(sig);
+}
+
+function effectiveDailyStopUsd(sig: Pick<MomentumSignal, 'layer' | 'side'>): number | null {
+  const configured = liveDailyStopUsd();
+  if (!confirmLongCanaryActive(sig)) return configured;
+  const canaryLoss = runtimeNum(
+    'hl_momentum_confirm_long_canary_daily_loss_usd',
+    CONFIRM_LONG_CANARY_DAILY_LOSS_USD,
+    0.25,
+    10,
+  );
+  const canaryStop = -canaryLoss;
+  return configured == null ? canaryStop : Math.max(configured, canaryStop);
 }
 
 function fastStrictMult(): number {
@@ -1232,10 +1269,24 @@ function recordSignal(sig: MomentumSignal, decision: 'paper' | 'live-open' | 'sk
 function preTradeGate(sig: MomentumSignal, params: RiskParams, confident: boolean): string | null {
   const minScore = runtimeNum('hl_momentum_min_live_score', MIN_LIVE_SCORE, 45, 95);
   const minEv = runtimeNum('hl_momentum_min_expected_pnl_pct', MIN_EXPECTED_PNL_PCT, -0.25, 1.5);
-  const minProb = runtimeNum('hl_momentum_min_calibrated_prob', MIN_CALIBRATED_PROB, 0.35, 0.65);
+  const canary = confirmLongCanaryActive(sig);
+  const minProb = canary
+    ? runtimeNum('hl_momentum_confirm_long_canary_min_prob', CONFIRM_LONG_CANARY_MIN_PROB, 0.35, 0.65)
+    : runtimeNum('hl_momentum_min_calibrated_prob', MIN_CALIBRATED_PROB, 0.35, 0.65);
   if (sig.score < minScore) return `score ${sig.score} < ${minScore}`;
+  if (!segmentLiveEnabled(sig)) return `${sig.layer}-${sig.side} live paused by side-aware governor`;
   if (sig.prob < minProb) return `p ${sig.prob.toFixed(3)} < ${minProb.toFixed(3)}`;
   if (sig.expectedPnl < minEv) return `ev ${sig.expectedPnl.toFixed(2)}% < ${minEv.toFixed(2)}%`;
+  if (canary) {
+    const canaryMaxOpen = Math.round(runtimeNum(
+      'hl_momentum_confirm_long_canary_max_open',
+      CONFIRM_LONG_CANARY_MAX_OPEN,
+      1,
+      2,
+    ));
+    const open = liveAllPosStmt.all().length;
+    if (open >= canaryMaxOpen) return `confirm-long canary max open ${open}/${canaryMaxOpen}`;
+  }
   const shadowGate = shadowProofGate(sig);
   if (shadowGate) return shadowGate;
   const extensionR = (sig.metrics.extensionPct ?? 0) / Math.max(0.1, params.stopPct * 100);
@@ -1787,10 +1838,11 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
     return;
   }
   const nowMs = Date.now();
+  const canary = confirmLongCanaryActive(sig);
   const cooldownUntil = liveEntryFailCooldown.get(coin) ?? 0;
   if (cooldownUntil > nowMs) { recordSignal(sig, 'skip', `entry cooldown ${Math.ceil((cooldownUntil - nowMs) / 1000)}s`, { ref: last.c, signal: last.c }); return; }
   const pnlStart = liveDailyPnlStart(nowMs);
-  const dailyStopUsd = liveDailyStopUsd();
+  const dailyStopUsd = effectiveDailyStopUsd(sig);
   if (dailyStopUsd != null) {
     const sessionUsd = liveSessionUsdStmt.get(pnlStart)?.usd ?? 0;
     if (sessionUsd <= dailyStopUsd) { recordSignal(sig, 'skip', `session dollar stop $${sessionUsd.toFixed(2)} <= $${dailyStopUsd.toFixed(2)}`); return; }
@@ -1816,8 +1868,11 @@ async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, pa
   if (!ex.ok) { recordSignal(sig, 'skip', `position read failed: ${ex.msg}`); logger.warn({ coin, msg: ex.msg }, 'hl-momentum-live: position read failed before entry'); return; }
   if (ex.data) { recordSignal(sig, 'skip', 'exchange position already open'); return; } // shared one-way account: never stack on an existing live position
 
-  const sizing = await liveSizing(sig, params);
-  const sizedSig: MomentumSignal = { ...sig, signal: appendSizingSignal(sig.signal, sizing) };
+  const liveSig: MomentumSignal = canary
+    ? { ...sig, signal: `${sig.signal} [${CONFIRM_LONG_CANARY_TAG}]` }
+    : sig;
+  const sizing = await liveSizing(liveSig, params);
+  const sizedSig: MomentumSignal = { ...liveSig, signal: appendSizingSignal(liveSig.signal, sizing) };
   const liq = await liveLiquidityCheck(coin, sig.side, sizing.notionalUsd);
   if (!liq.ok) {
     recordSignal(sizedSig, 'skip', `liquidity: ${liq.reason}`, { ref: last.c, signal: last.c, sizing });
