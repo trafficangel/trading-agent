@@ -23,6 +23,14 @@ const MARKETS = [
   { coin: 'ETH', symbol: 'ETHUSDT' },
   { coin: 'SOL', symbol: 'SOLUSDT' },
   { coin: 'XRP', symbol: 'XRPUSDT' },
+  // Pre-registered Jul 11: cross-listed HL markets where current spread can
+  // clear a 3bps maker-maker round trip while daily notional remains usable.
+  // Majors above remain the narrow-spread control group.
+  { coin: 'UNI', symbol: 'UNIUSDT' },
+  { coin: 'LIT', symbol: 'LITUSDT' },
+  { coin: 'VIRTUAL', symbol: 'VIRTUALUSDT' },
+  { coin: 'JUP', symbol: 'JUPUSDT' },
+  { coin: 'SAGA', symbol: 'SAGAUSDT' },
 ] as const;
 
 type Venue = 'hl' | 'binance' | 'bybit';

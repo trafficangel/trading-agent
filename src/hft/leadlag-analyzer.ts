@@ -14,6 +14,7 @@ import { createReadStream, existsSync, readFileSync, readdirSync, renameSync, wr
 import { basename, resolve } from 'node:path';
 import { createGunzip } from 'node:zlib';
 import { createInterface } from 'node:readline';
+import { makerFillIndex } from '../lib/hft-maker-fill.js';
 
 const DATA_DIR = resolve(process.argv[2] ?? process.env.HFT_DATA_DIR ?? 'data/hft-leadlag');
 const HOURS = Number(process.argv[3] ?? 24);
@@ -22,12 +23,13 @@ const RESULT_PATH = resolve(DATA_DIR, 'analysis.json');
 const SAMPLE_MS = 250;
 const TAKER_RT_BPS = 9;
 const MAKER_TAKER_BPS = 6;
+const MAKER_RT_BPS = 3;
 const EXTRA_STRESS_BPS = 3;
 const LEAD_THRESHOLDS = [1, 2, 3, 4, 5];
 const LAG_THRESHOLDS = [0.5, 1, 2, 3];
 const HORIZONS_MS = [500, 1_000, 2_000, 5_000];
 const MAKER_TTL_MS = 2_000;
-const COINS = ['BTC', 'ETH', 'SOL', 'XRP'];
+const COINS = ['BTC', 'ETH', 'SOL', 'XRP', 'UNI', 'LIT', 'VIRTUAL', 'JUP', 'SAGA'];
 
 type PackedRow = { v: number; t: number; s: string; h: number[]; b: number[]; y: number[]; f: Array<number | null>; x?: number[] };
 type Point = {
@@ -156,25 +158,33 @@ function evaluate(points: Point[], coin: string): void {
           const makerMetric = delay === 0 ? pairFor(makerKey).now : pairFor(makerKey).delayed;
           makerMetric.signals++;
           const quote = side === 1 ? start.hlBid : start.hlAsk;
-          let queueAhead = side === 1 ? start.hlBidSize : start.hlAskSize;
-          let fillIdx = -1;
-          for (let j = startIdx + 1; j <= Math.min(points.length - horizonSteps - 1, startIdx + ttlSteps); j++) {
-            const p = points[j]!;
-            for (let k = 0; k < p.hlPrints.length; k += 2) {
-              const price = p.hlPrints[k]!; const signedSize = p.hlPrints[k + 1]!;
-              const relevant = side === 1 ? signedSize < 0 && price <= quote : signedSize > 0 && price >= quote;
-              if (!relevant) continue;
-              const tradedThrough = side === 1 ? price < quote : price > quote;
-              if (tradedThrough) { fillIdx = j; break; }
-              queueAhead -= Math.abs(signedSize);
-              if (queueAhead <= 0) { fillIdx = j; break; }
-            }
-            if (fillIdx >= 0) break;
-          }
+          const entryQueue = side === 1 ? start.hlBidSize : start.hlAskSize;
+          const fillIdx = makerFillIndex(points, startIdx + 1, Math.min(points.length - horizonSteps - 1, startIdx + ttlSteps), side, quote, entryQueue);
           if (fillIdx >= 0) {
             const makerExitPoint = points[fillIdx + horizonSteps]!;
             const makerExit = side === 1 ? makerExitPoint.hlBid : makerExitPoint.hlAsk;
             record(makerMetric, coin, points[fillIdx]!.t, makerExitPoint.t, grossBps(side, quote, makerExit) - MAKER_TAKER_BPS);
+
+            // Two-sided maker attempt: after the entry fill, rest the exit at
+            // the opposite BBO observed when the signal fired. If it does not
+            // fill by the horizon, cross out at the real BBO and pay taker.
+            const mmKey = `${baseKey}_MAKER_MM`;
+            const mmMetric = delay === 0 ? pairFor(mmKey).now : pairFor(mmKey).delayed;
+            mmMetric.signals++;
+            const target = side === 1 ? start.hlAsk : start.hlBid;
+            const fillPoint = points[fillIdx]!;
+            const postOnlyValid = side === 1 ? target > fillPoint.hlBid : target < fillPoint.hlAsk;
+            let makerExitIdx = -1;
+            if (postOnlyValid) {
+              const atTop = side === 1 ? target === fillPoint.hlAsk : target === fillPoint.hlBid;
+              const exitQueue = atTop ? (side === 1 ? fillPoint.hlAskSize : fillPoint.hlBidSize) : 0;
+              makerExitIdx = makerFillIndex(points, fillIdx + 1, fillIdx + horizonSteps, side === 1 ? -1 : 1, target, exitQueue);
+            }
+            if (makerExitIdx >= 0) {
+              record(mmMetric, coin, points[fillIdx]!.t, points[makerExitIdx]!.t, grossBps(side, quote, target) - MAKER_RT_BPS);
+            } else {
+              record(mmMetric, coin, points[fillIdx]!.t, makerExitPoint.t, grossBps(side, quote, makerExit) - MAKER_TAKER_BPS);
+            }
           }
         }
       }
@@ -235,11 +245,11 @@ function summarize(key: string, pair: Pair) {
     generatedAt: Date.now(),
     hoursRequested: HOURS,
     files: files.map((path) => basename(path)),
-    costsBps: { takerRoundTrip: TAKER_RT_BPS, makerTaker: MAKER_TAKER_BPS, extraStress: EXTRA_STRESS_BPS },
+    costsBps: { takerRoundTrip: TAKER_RT_BPS, makerTaker: MAKER_TAKER_BPS, makerRoundTrip: MAKER_RT_BPS, extraStress: EXTRA_STRESS_BPS },
     gates: { minFills: 30, minProfitFactor: 1.1, minPositiveDayFraction: 0.6, latencyStressMs: SAMPLE_MS },
     passing: rows.filter((row) => row.passes),
     topTaker: rows.filter((row) => row.key.endsWith('_TAKER') && row.now.fills > 0).slice(0, 20),
-    topMaker: rows.filter((row) => row.key.endsWith('_MAKER') && row.now.fills > 0).slice(0, 20),
+    topMaker: rows.filter((row) => (row.key.endsWith('_MAKER') || row.key.endsWith('_MAKER_MM')) && row.now.fills > 0).slice(0, 20),
     noFillMaker: rows.filter((row) => row.key.endsWith('_MAKER') && row.now.signals > 0 && row.now.fills === 0).slice(0, 20),
   };
   const tmp = `${RESULT_PATH}.tmp`;
