@@ -19,13 +19,42 @@ export const HL_WS_URL = 'wss://api.hyperliquid.xyz/ws';
  *  weren't collected. Forward-collect them now → in 2-4 weeks liquidation-flow research can run on the coins
  *  we actually trade (the honest path to a frequent edge; candle proxies failed twice — controls-catch-artifacts). */
 export const HL_COINS = [
-  'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'LTC', 'LINK', 'DOGE', 'AVAX',
-  'ICP', 'NEAR', 'ATOM', 'TON', 'CRV', 'ENA', 'TIA', 'kPEPE', 'RENDER', 'POPCAT',
-  'JUP', 'AR', 'BLUR', 'EIGEN', 'MANTA', 'JTO', 'ALT', 'PNUT',
+  'BTC',
+  'ETH',
+  'SOL',
+  'BNB',
+  'XRP',
+  'ADA',
+  'LTC',
+  'LINK',
+  'DOGE',
+  'AVAX',
+  'ICP',
+  'NEAR',
+  'ATOM',
+  'TON',
+  'CRV',
+  'ENA',
+  'TIA',
+  'kPEPE',
+  'RENDER',
+  'POPCAT',
+  'JUP',
+  'AR',
+  'BLUR',
+  'EIGEN',
+  'MANTA',
+  'JTO',
+  'ALT',
+  'PNUT',
 ] as const;
 
 export async function hlInfo<T>(body: Record<string, unknown>): Promise<T> {
-  const res = await request(HL_INFO_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const res = await request(HL_INFO_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
   if (res.statusCode >= 300) {
     const t = await res.body.text();
     throw new Error(`HL info ${res.statusCode}: ${t.slice(0, 160)}`);
@@ -77,4 +106,29 @@ export function l2Book(coin: string): Promise<HlL2> {
 export type HlFunding = { coin: string; fundingRate: string; premium: string; time: number };
 export function fundingHistory(coin: string, startTime: number): Promise<HlFunding[]> {
   return hlInfo<HlFunding[]>({ type: 'fundingHistory', coin, startTime });
+}
+
+export type HlCandle = {
+  t: number;
+  T: number;
+  s: string;
+  i: string;
+  o: string;
+  c: string;
+  h: string;
+  l: string;
+  v: string;
+  n: number;
+};
+
+export function candleSnapshot(
+  coin: string,
+  interval: string,
+  startTime: number,
+  endTime: number,
+): Promise<HlCandle[]> {
+  return hlInfo<HlCandle[]>({
+    type: 'candleSnapshot',
+    req: { coin, interval, startTime, endTime },
+  });
 }

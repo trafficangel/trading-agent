@@ -14,13 +14,20 @@ import { existsSync, writeFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { getKlines } from '../src/backtest/klines.js';
 import type { Candle } from '../src/backtest/indicators.js';
-import { fitLogPair, pairResidualZ, pairTradeGrossPct, type PairFit } from '../src/lib/true-pairs.js';
+import {
+  fitLogPair,
+  pairResidualZ,
+  pairTradeGrossPct,
+  TRUE_PAIRS_HOURLY_EPOCH_MS,
+  type PairFit,
+} from '../src/lib/true-pairs.js';
 
 const PROFILE = process.argv[2] === 'hourly' ? 'hourly' : '5m';
 const TF = PROFILE === 'hourly' ? '60' : '5';
 const DAYS = PROFILE === 'hourly' ? 720 : 552;
 const MIN_ALIGNED_BARS = PROFILE === 'hourly' ? 10_000 : 100_000;
-const OUTPUT_PATH = PROFILE === 'hourly' ? 'data/true-pairs-hourly-results.json' : 'data/true-pairs-results.json';
+const OUTPUT_PATH =
+  PROFILE === 'hourly' ? 'data/true-pairs-hourly-results.json' : 'data/true-pairs-results.json';
 const OOS_START_MS = Date.parse('2026-01-12T00:00:00Z');
 const HL_TAKER_RT_PCT = 0.09;
 const BYBIT_TAKER_RT_PCT = 0.11;
@@ -28,7 +35,23 @@ const STRESS_RT_PCT = 0.18;
 const MIN_CORRELATION = 0.6;
 const MIN_BETA = 0.2;
 const MAX_BETA = 2.5;
-const UNIVERSE = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'LTC', 'LINK', 'DOGE', 'AVAX', 'UNI', 'AAVE', 'CRV', 'JUP', 'SUI'];
+const UNIVERSE = [
+  'BTC',
+  'ETH',
+  'SOL',
+  'BNB',
+  'XRP',
+  'ADA',
+  'LTC',
+  'LINK',
+  'DOGE',
+  'AVAX',
+  'UNI',
+  'AAVE',
+  'CRV',
+  'JUP',
+  'SUI',
+];
 
 type Model = {
   id: string;
@@ -43,15 +66,48 @@ type Model = {
 // 5m was frozen before its first run. Hourly was frozen after that family
 // failed and before the first hourly run; hourly results are exploratory and
 // require forward shadow from Jul 12 rather than reusing the seen OOS as proof.
-const MODELS: Model[] = PROFILE === 'hourly'
-  ? [
-      { id: 'H_F60_R14_E2', formationBars: 60 * 24, tradeBars: 14 * 24, entryZ: 2, exitZ: 0.25, stopZ: 4, maxHoldBars: 7 * 24 },
-      { id: 'H_F90_R30_E2.5', formationBars: 90 * 24, tradeBars: 30 * 24, entryZ: 2.5, exitZ: 0.5, stopZ: 4, maxHoldBars: 14 * 24 },
-    ]
-  : [
-      { id: 'F30_R7_E2', formationBars: 30 * 288, tradeBars: 7 * 288, entryZ: 2, exitZ: 0.25, stopZ: 4, maxHoldBars: 3 * 288 },
-      { id: 'F14_R3_E2.5', formationBars: 14 * 288, tradeBars: 3 * 288, entryZ: 2.5, exitZ: 0.5, stopZ: 4, maxHoldBars: 288 },
-    ];
+const MODELS: Model[] =
+  PROFILE === 'hourly'
+    ? [
+        {
+          id: 'H_F60_R14_E2',
+          formationBars: 60 * 24,
+          tradeBars: 14 * 24,
+          entryZ: 2,
+          exitZ: 0.25,
+          stopZ: 4,
+          maxHoldBars: 7 * 24,
+        },
+        {
+          id: 'H_F90_R30_E2.5',
+          formationBars: 90 * 24,
+          tradeBars: 30 * 24,
+          entryZ: 2.5,
+          exitZ: 0.5,
+          stopZ: 4,
+          maxHoldBars: 14 * 24,
+        },
+      ]
+    : [
+        {
+          id: 'F30_R7_E2',
+          formationBars: 30 * 288,
+          tradeBars: 7 * 288,
+          entryZ: 2,
+          exitZ: 0.25,
+          stopZ: 4,
+          maxHoldBars: 3 * 288,
+        },
+        {
+          id: 'F14_R3_E2.5',
+          formationBars: 14 * 288,
+          tradeBars: 3 * 288,
+          entryZ: 2.5,
+          exitZ: 0.5,
+          stopZ: 4,
+          maxHoldBars: 288,
+        },
+      ];
 
 type AlignedBar = { t: number; aO: number; aC: number; bO: number; bC: number };
 type ExitReason = 'mean' | 'z-stop' | 'time' | 'rebalance';
@@ -94,14 +150,18 @@ function loadFunding(): FundingByCoin {
   const result: FundingByCoin = new Map();
   if (!existsSync(path)) return result;
   const db = new Database(path, { readonly: true, fileMustExist: true });
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT coin, hour, funding FROM (
       SELECT coin, (ts / 3600000) * 3600000 AS hour, funding,
              ROW_NUMBER() OVER (PARTITION BY coin, ts / 3600000 ORDER BY ts DESC) AS rank
       FROM hl_micro
       WHERE funding IS NOT NULL
     ) WHERE rank = 1
-  `).all() as Array<{ coin: string; hour: number; funding: number }>;
+  `,
+    )
+    .all() as Array<{ coin: string; hour: number; funding: number }>;
   db.close();
   for (const row of rows) {
     let coin = result.get(row.coin);
@@ -135,7 +195,7 @@ function fundingCarry(args: {
     const bRate = bRates?.get(hour);
     if (aRate == null || bRate == null) continue;
     // A side is direction; B side is the opposite beta-weighted hedge.
-    pct += args.direction * (-aRate + args.beta * bRate) / (1 + args.beta) * 100;
+    pct += ((args.direction * (-aRate + args.beta * bRate)) / (1 + args.beta)) * 100;
     matched++;
   }
   return { pct, matched, expected };
@@ -159,24 +219,41 @@ function align(a: Candle[], b: Candle[]): AlignedBar[] {
 }
 
 function usableFit(fit: PairFit | null, model: Model): fit is PairFit {
-  return fit !== null
-    && fit.beta >= MIN_BETA
-    && fit.beta <= MAX_BETA
-    && fit.returnCorrelation >= MIN_CORRELATION
-    && fit.halfLifeBars >= 6
-    && fit.halfLifeBars <= model.maxHoldBars / 2;
+  return (
+    fit !== null &&
+    fit.beta >= MIN_BETA &&
+    fit.beta <= MAX_BETA &&
+    fit.returnCorrelation >= MIN_CORRELATION &&
+    fit.halfLifeBars >= 6 &&
+    fit.halfLifeBars <= model.maxHoldBars / 2
+  );
 }
 
-function simulate(pair: string, a: string, b: string, rows: AlignedBar[], model: Model, funding: FundingByCoin): PairTrade[] {
+function simulate(
+  pair: string,
+  a: string,
+  b: string,
+  rows: AlignedBar[],
+  model: Model,
+  funding: FundingByCoin,
+): PairTrade[] {
   const trades: PairTrade[] = [];
-  for (let formationStart = 0; formationStart + model.formationBars + 2 < rows.length; formationStart += model.tradeBars) {
+  for (
+    let formationStart = 0;
+    formationStart + model.formationBars + 2 < rows.length;
+    formationStart += model.tradeBars
+  ) {
     const formationEnd = formationStart + model.formationBars;
     const tradeEnd = Math.min(rows.length, formationEnd + model.tradeBars);
     const formation = rows.slice(formationStart, formationEnd);
-    const fit = fitLogPair(formation.map((bar) => bar.aC), formation.map((bar) => bar.bC));
+    const fit = fitLogPair(
+      formation.map((bar) => bar.aC),
+      formation.map((bar) => bar.bC),
+    );
     if (!usableFit(fit, model)) continue;
 
-    let position: { direction: 1 | -1; entryIdx: number; aEntry: number; bEntry: number } | null = null;
+    let position: { direction: 1 | -1; entryIdx: number; aEntry: number; bEntry: number } | null =
+      null;
     const close = (exitIdx: number, reason: ExitReason): void => {
       if (!position) return;
       const exit = rows[exitIdx]!;
@@ -273,9 +350,10 @@ function stats(trades: PairTrade[], period: 'month' | 'quarter'): Stats {
     fundingHours += trade.fundingHours;
     expectedFundingHours += trade.expectedFundingHours;
     const date = new Date(trade.exitAt);
-    const key = period === 'month'
-      ? date.toISOString().slice(0, 7)
-      : `${date.getUTCFullYear()}-Q${Math.floor(date.getUTCMonth() / 3) + 1}`;
+    const key =
+      period === 'month'
+        ? date.toISOString().slice(0, 7)
+        : `${date.getUTCFullYear()}-Q${Math.floor(date.getUTCMonth() / 3) + 1}`;
     buckets.set(key, (buckets.get(key) ?? 0) + trade.stressPct);
   }
   const stressNet = trades.reduce((sum, trade) => sum + trade.stressPct, 0);
@@ -285,8 +363,12 @@ function stats(trades: PairTrade[], period: 'month' | 'quarter'): Stats {
     net: rounded(trades.reduce((sum, trade) => sum + trade.netPct, 0)),
     stressNet: rounded(stressNet),
     profitFactor: rounded(losses > 0 ? gains / losses : gains > 0 ? 99 : 0),
-    stressProfitFactor: rounded(stressLosses > 0 ? stressGains / stressLosses : stressGains > 0 ? 99 : 0),
-    winRate: rounded(trades.length ? trades.filter((trade) => trade.netPct > 0).length / trades.length : 0),
+    stressProfitFactor: rounded(
+      stressLosses > 0 ? stressGains / stressLosses : stressGains > 0 ? 99 : 0,
+    ),
+    winRate: rounded(
+      trades.length ? trades.filter((trade) => trade.netPct > 0).length / trades.length : 0,
+    ),
     maxDrawdown: rounded(maxDrawdown),
     positivePeriods: [...buckets.values()].filter((value) => value > 0).length,
     periods: buckets.size,
@@ -306,9 +388,13 @@ function allPairs(): Array<{ a: string; b: string }> {
 
 async function main(): Promise<void> {
   const now = Date.now();
-  const from = now - DAYS * 86_400_000;
-  console.log(`True pairs ${PROFILE} · ${TF}m · ${UNIVERSE.length} coins · ${allPairs().length} pairs · OOS ${new Date(OOS_START_MS).toISOString()}`);
-  console.log(`next-open both legs · HL taker ${HL_TAKER_RT_PCT}% · Bybit taker ${BYBIT_TAKER_RT_PCT}% · stress ${STRESS_RT_PCT}% gross RT\n`);
+  const from = PROFILE === 'hourly' ? TRUE_PAIRS_HOURLY_EPOCH_MS : now - DAYS * 86_400_000;
+  console.log(
+    `True pairs ${PROFILE} · ${TF}m · ${UNIVERSE.length} coins · ${allPairs().length} pairs · OOS ${new Date(OOS_START_MS).toISOString()}`,
+  );
+  console.log(
+    `next-open both legs · HL taker ${HL_TAKER_RT_PCT}% · Bybit taker ${BYBIT_TAKER_RT_PCT}% · stress ${STRESS_RT_PCT}% gross RT\n`,
+  );
   const candles = new Map<string, Candle[]>();
   const funding = loadFunding();
   console.log(`funding history: ${funding.size} coins loaded`);
@@ -333,41 +419,74 @@ async function main(): Promise<void> {
     if (aligned.length < MIN_ALIGNED_BARS) continue;
     for (const model of MODELS) {
       const trades = simulate(pair, a, b, aligned, model, funding);
-      const discovery = stats(trades.filter((trade) => trade.exitAt < OOS_START_MS), 'quarter');
-      const oos = stats(trades.filter((trade) => trade.entryAt >= OOS_START_MS), 'month');
-      const discoveryPass = discovery.n >= 30
-        && discovery.stressNet > 0
-        && discovery.stressProfitFactor >= 1.15
-        && discovery.positivePeriods >= 3
-        && discovery.stressWithoutBest > 0
-        && discovery.fundingCoverage >= 0.95;
-      const pass = discoveryPass
-        && oos.n >= 12
-        && oos.stressNet > 0
-        && oos.stressProfitFactor >= 1.1
-        && oos.positivePeriods >= 3
-        && oos.stressWithoutBest > 0
-        && oos.fundingCoverage >= 0.95;
-      results.push({ pair, model: model.id, anchored: b === 'BTC', discovery, oos, discoveryPass, pass });
+      const discovery = stats(
+        trades.filter((trade) => trade.exitAt < OOS_START_MS),
+        'quarter',
+      );
+      const oos = stats(
+        trades.filter((trade) => trade.entryAt >= OOS_START_MS),
+        'month',
+      );
+      const discoveryPass =
+        discovery.n >= 30 &&
+        discovery.stressNet > 0 &&
+        discovery.stressProfitFactor >= 1.15 &&
+        discovery.positivePeriods >= 3 &&
+        discovery.stressWithoutBest > 0 &&
+        discovery.fundingCoverage >= 0.95;
+      const pass =
+        discoveryPass &&
+        oos.n >= 12 &&
+        oos.stressNet > 0 &&
+        oos.stressProfitFactor >= 1.1 &&
+        oos.positivePeriods >= 3 &&
+        oos.stressWithoutBest > 0 &&
+        oos.fundingCoverage >= 0.95;
+      results.push({
+        pair,
+        model: model.id,
+        anchored: b === 'BTC',
+        discovery,
+        oos,
+        discoveryPass,
+        pass,
+      });
     }
     process.stderr.write(`  ${pair} done\n`);
   }
 
-  const passing = results.filter((row) => row.pass).sort((a, b) => b.oos.stressNet - a.oos.stressNet);
-  const discoveryCandidates = results.filter((row) => row.discoveryPass).sort((a, b) => b.discovery.stressNet - a.discovery.stressNet);
+  const passing = results
+    .filter((row) => row.pass)
+    .sort((a, b) => b.oos.stressNet - a.oos.stressNet);
+  const discoveryCandidates = results
+    .filter((row) => row.discoveryPass)
+    .sort((a, b) => b.discovery.stressNet - a.discovery.stressNet);
   const output = {
     version: 1,
     profile: PROFILE,
-    validationStatus: PROFILE === 'hourly' ? 'exploratory-requires-forward-shadow-from-2026-07-12' : 'frozen-historical-oos',
+    validationStatus:
+      PROFILE === 'hourly'
+        ? 'exploratory-requires-forward-shadow-from-2026-07-12'
+        : 'frozen-historical-oos',
     generatedAt: new Date().toISOString(),
+    researchStartAt: from,
     oosStartAt: OOS_START_MS,
     universe: UNIVERSE,
     models: MODELS,
-    costsPct: { hlTakerRoundTrip: HL_TAKER_RT_PCT, bybitTakerRoundTrip: BYBIT_TAKER_RT_PCT, stressRoundTrip: STRESS_RT_PCT },
+    costsPct: {
+      hlTakerRoundTrip: HL_TAKER_RT_PCT,
+      bybitTakerRoundTrip: BYBIT_TAKER_RT_PCT,
+      stressRoundTrip: STRESS_RT_PCT,
+    },
     gates: {
       minCorrelation: MIN_CORRELATION,
       beta: [MIN_BETA, MAX_BETA],
-      discovery: { minTrades: 30, minStressPf: 1.15, minPositiveQuarters: 3, positiveWithoutBest: true },
+      discovery: {
+        minTrades: 30,
+        minStressPf: 1.15,
+        minPositiveQuarters: 3,
+        positiveWithoutBest: true,
+      },
       oos: { minTrades: 12, minStressPf: 1.1, minPositiveMonths: 3, positiveWithoutBest: true },
       minFundingCoverage: 0.95,
     },
@@ -377,11 +496,11 @@ async function main(): Promise<void> {
   };
   writeFileSync(OUTPUT_PATH, JSON.stringify(output, null, 2));
 
-  const line = (row: typeof results[number]): string =>
-    `${row.pass ? 'PASS' : '    '} ${row.pair.padEnd(11)} ${row.model.padEnd(12)} `
-    + `D[N${String(row.discovery.n).padStart(3)} stress ${String(row.discovery.stressNet).padStart(7)} PF ${row.discovery.stressProfitFactor.toFixed(2)} q${row.discovery.positivePeriods}/${row.discovery.periods}] `
-    + `OOS[N${String(row.oos.n).padStart(3)} stress ${String(row.oos.stressNet).padStart(7)} PF ${row.oos.stressProfitFactor.toFixed(2)} m${row.oos.positivePeriods}/${row.oos.periods}] `
-    + `fundCov ${Math.round(row.oos.fundingCoverage * 100)}%`;
+  const line = (row: (typeof results)[number]): string =>
+    `${row.pass ? 'PASS' : '    '} ${row.pair.padEnd(11)} ${row.model.padEnd(12)} ` +
+    `D[N${String(row.discovery.n).padStart(3)} stress ${String(row.discovery.stressNet).padStart(7)} PF ${row.discovery.stressProfitFactor.toFixed(2)} q${row.discovery.positivePeriods}/${row.discovery.periods}] ` +
+    `OOS[N${String(row.oos.n).padStart(3)} stress ${String(row.oos.stressNet).padStart(7)} PF ${row.oos.stressProfitFactor.toFixed(2)} m${row.oos.positivePeriods}/${row.oos.periods}] ` +
+    `fundCov ${Math.round(row.oos.fundingCoverage * 100)}%`;
   console.log(`\nDiscovery candidates: ${discoveryCandidates.length}/${results.length}`);
   console.log(discoveryCandidates.slice(0, 20).map(line).join('\n') || '  none');
   console.log(`\nStrict OOS passes: ${passing.length}`);

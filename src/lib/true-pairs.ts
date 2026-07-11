@@ -8,6 +8,9 @@ export type PairFit = {
   returnCorrelation: number;
 };
 
+/** Fixed epoch for hourly research blocks; never roll this with wall-clock time. */
+export const TRUE_PAIRS_HOURLY_EPOCH_MS = Date.parse('2024-07-12T00:00:00Z');
+
 function mean(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
@@ -83,12 +86,18 @@ export function pairTradeGrossPct(args: {
   bEntry: number;
   bExit: number;
 }): number {
-  if (!(args.beta > 0) || !(args.aEntry > 0) || !(args.aExit > 0) || !(args.bEntry > 0) || !(args.bExit > 0)) {
+  if (
+    !(args.beta > 0) ||
+    !(args.aEntry > 0) ||
+    !(args.aExit > 0) ||
+    !(args.bEntry > 0) ||
+    !(args.bExit > 0)
+  ) {
     return Number.NaN;
   }
   const aReturn = args.aExit / args.aEntry - 1;
   const bReturn = args.bExit / args.bEntry - 1;
-  return args.direction * (aReturn - args.beta * bReturn) / (1 + args.beta) * 100;
+  return ((args.direction * (aReturn - args.beta * bReturn)) / (1 + args.beta)) * 100;
 }
 
 export function pairTradeNetPct(
@@ -96,4 +105,37 @@ export function pairTradeNetPct(
   roundTripCostPct: number,
 ): number {
   return pairTradeGrossPct(args) - roundTripCostPct;
+}
+
+export type PairTopOfBook = { bid: number; ask: number };
+
+export function pairEntryPrices(
+  direction: 1 | -1,
+  a: PairTopOfBook,
+  b: PairTopOfBook,
+): { a: number; b: number } {
+  return direction === 1 ? { a: a.ask, b: b.bid } : { a: a.bid, b: b.ask };
+}
+
+export function pairExitPrices(
+  direction: 1 | -1,
+  a: PairTopOfBook,
+  b: PairTopOfBook,
+): { a: number; b: number } {
+  return direction === 1 ? { a: a.bid, b: b.ask } : { a: a.ask, b: b.bid };
+}
+
+/** Funding PnL on total gross exposure. Positive rates are paid by longs. */
+export function pairFundingCarryPct(args: {
+  direction: 1 | -1;
+  beta: number;
+  aRates: number[];
+  bRates: number[];
+}): number {
+  if (!(args.beta > 0) || args.aRates.length !== args.bRates.length) return Number.NaN;
+  let carry = 0;
+  for (let i = 0; i < args.aRates.length; i++) {
+    carry += (args.direction * (-args.aRates[i]! + args.beta * args.bRates[i]!)) / (1 + args.beta);
+  }
+  return carry * 100;
 }

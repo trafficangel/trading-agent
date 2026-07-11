@@ -1,0 +1,21 @@
+[Unit]
+Description=Robot Codex read-only true-pairs forward shadow
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/trading-agent
+EnvironmentFile=/home/trader/apps/trading-agent/data/true-pairs-shadow.env
+Environment=NODE_ENV=production
+Environment=TRUE_PAIRS_SHADOW_STATE=/home/trader/apps/trading-agent/data/true-pairs-shadow.json
+Environment=TRUE_PAIRS_SHADOW_AUDIT=/home/trader/apps/trading-agent/data/true-pairs-shadow-trades.ndjson
+ExecStart=/usr/bin/pnpm exec tsx scripts/run-true-pairs-shadow.ts
+TimeoutStartSec=120
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/trading-agent/data
