@@ -21,14 +21,65 @@ const FEE_RATE = 0.00045;
 const FEE_RT_PCT = 0.09;
 const STATE_PATH = 'data/true-pairs-shadow.json';
 const RESULTS_PATH = 'data/true-pairs-hourly-results.json';
-const ACTIVE_ID = 'DOGE_XRP_H60';
-const PAIR = { a: 'DOGE', b: 'XRP', model: 'H_F60_R14_E2', exitZ: 0.25, stopZ: 4 } as const;
-const MAJOR_MODELS = [
-  ['ETH_BTC_H60_MAJOR', 'ETH / BTC'],
-  ['SOL_BTC_H60_MAJOR', 'SOL / BTC'],
-  ['BNB_BTC_H60_MAJOR', 'BNB / BTC'],
-  ['SOL_ETH_H60_MAJOR', 'SOL / ETH'],
-] as const;
+
+type PairConfig = {
+  id: string;
+  a: string;
+  b: string;
+  model: string;
+  exitZ: number;
+  stopZ: number;
+  sleeve: 'core' | 'majors';
+};
+
+const PAIRS: PairConfig[] = [
+  {
+    id: 'DOGE_XRP_H60',
+    a: 'DOGE',
+    b: 'XRP',
+    model: 'H_F60_R14_E2',
+    exitZ: 0.25,
+    stopZ: 4,
+    sleeve: 'core',
+  },
+  {
+    id: 'ETH_BTC_H60_MAJOR',
+    a: 'ETH',
+    b: 'BTC',
+    model: 'H_F60_R14_E2',
+    exitZ: 0.25,
+    stopZ: 4,
+    sleeve: 'majors',
+  },
+  {
+    id: 'SOL_BTC_H60_MAJOR',
+    a: 'SOL',
+    b: 'BTC',
+    model: 'H_F60_R14_E2',
+    exitZ: 0.25,
+    stopZ: 4,
+    sleeve: 'majors',
+  },
+  {
+    id: 'BNB_BTC_H60_MAJOR',
+    a: 'BNB',
+    b: 'BTC',
+    model: 'H_F60_R14_E2',
+    exitZ: 0.25,
+    stopZ: 4,
+    sleeve: 'majors',
+  },
+  {
+    id: 'SOL_ETH_H60_MAJOR',
+    a: 'SOL',
+    b: 'ETH',
+    model: 'H_F60_R14_E2',
+    exitZ: 0.25,
+    stopZ: 4,
+    sleeve: 'majors',
+  },
+];
+const DEFAULT_PAIR = PAIRS[0]!;
 
 type Lang = 'ru' | 'en';
 type Position = {
@@ -74,6 +125,7 @@ type ResultsFile = {
 type Point = { t: number; actual: number; fair: number; z: number };
 type Period = '30d' | '90d' | '1y' | 'all';
 type PageData = {
+  pair: PairConfig;
   state: ShadowState;
   runtime: Runtime;
   points: Point[];
@@ -153,28 +205,29 @@ function fundingSince(
   );
 }
 
-let cached: { expiresAt: number; promise: Promise<PageData> } | null = null;
+const cached = new Map<string, { expiresAt: number; promise: Promise<PageData> }>();
 
-async function loadPageData(): Promise<PageData> {
+async function loadPageData(pair: PairConfig): Promise<PageData> {
   const now = Date.now();
-  if (cached && cached.expiresAt > now) return cached.promise;
-  const promise = buildPageData(now).catch((error) => {
-    cached = null;
+  const hit = cached.get(pair.id);
+  if (hit && hit.expiresAt > now) return hit.promise;
+  const promise = buildPageData(now, pair).catch((error) => {
+    cached.delete(pair.id);
     throw error;
   });
-  cached = { expiresAt: now + 45_000, promise };
+  cached.set(pair.id, { expiresAt: now + 45_000, promise });
   return promise;
 }
 
-async function buildPageData(now: number): Promise<PageData> {
+async function buildPageData(now: number, pair: PairConfig): Promise<PageData> {
   const state = readJson<ShadowState>(STATE_PATH);
-  const runtime = state?.candidates[ACTIVE_ID];
+  const runtime = state?.candidates[pair.id];
   if (!state || !runtime?.fit) throw new Error('pairs shadow state is not ready');
   const [aCandles, bCandles, aBookRaw, bBookRaw] = await Promise.all([
-    candleSnapshot(PAIR.a, '1h', now - 30 * DAY_MS, now),
-    candleSnapshot(PAIR.b, '1h', now - 30 * DAY_MS, now),
-    l2Book(PAIR.a),
-    l2Book(PAIR.b),
+    candleSnapshot(pair.a, '1h', now - 30 * DAY_MS, now),
+    candleSnapshot(pair.b, '1h', now - 30 * DAY_MS, now),
+    l2Book(pair.a),
+    l2Book(pair.b),
   ]);
   const aBook = topOfBook(aBookRaw.levels);
   const bBook = topOfBook(bBookRaw.levels);
@@ -194,8 +247,8 @@ async function buildPageData(now: number): Promise<PageData> {
     const position = runtime.position;
     const exit = pairExitPrices(position.direction, aBook, bBook);
     const [aFunding, bFunding] = await Promise.all([
-      fundingHistory(PAIR.a, position.entryAt),
-      fundingHistory(PAIR.b, position.entryAt),
+      fundingHistory(pair.a, position.entryAt),
+      fundingHistory(pair.b, position.entryAt),
     ]);
     const funding = fundingSince(position, now, aFunding, bFunding);
     const aReturn = exit.a / position.aEntry - 1;
@@ -207,7 +260,7 @@ async function buildPageData(now: number): Promise<PageData> {
     currentFundingUsd = funding;
     currentNetUsd = currentGrossUsd - currentFeeUsd + currentFundingUsd;
 
-    const targetZ = position.direction === 1 ? -PAIR.exitZ : PAIR.exitZ;
+    const targetZ = position.direction === 1 ? -pair.exitZ : pair.exitZ;
     const targetSpreadMove =
       position.direction * (targetZ - position.zEntry) * runtime.fit.residualStd;
     const targetGrossPct = (targetSpreadMove / (1 + position.beta)) * 100;
@@ -218,7 +271,7 @@ async function buildPageData(now: number): Promise<PageData> {
       -position.direction * 1_000 * (Math.exp(-targetResidualChange / position.beta) - 1);
     targetRangeUsd = [Math.min(aOnly, bOnly) - 1.8, Math.max(aOnly, bOnly) - 1.8];
 
-    const stopZ = position.direction === 1 ? -PAIR.stopZ : PAIR.stopZ;
+    const stopZ = position.direction === 1 ? -pair.stopZ : pair.stopZ;
     const stopSpreadMove = position.direction * (stopZ - position.zEntry) * runtime.fit.residualStd;
     const stopGrossPct = (stopSpreadMove / (1 + position.beta)) * 100;
     stopNetUsd = (stopGrossPct - FEE_RT_PCT) * 20;
@@ -226,13 +279,14 @@ async function buildPageData(now: number): Promise<PageData> {
 
   const results = readJson<ResultsFile>(RESULTS_PATH);
   const historyRow = results?.results.find(
-    (row) => row.pair === `${PAIR.a}/${PAIR.b}` && row.model === PAIR.model,
+    (row) => row.pair === `${pair.a}/${pair.b}` && row.model === pair.model,
   );
   return {
+    pair,
     state,
     runtime,
     points,
-    historicalPoints: results?.featuredDivergence ?? [],
+    historicalPoints: pair.id === DEFAULT_PAIR.id ? (results?.featuredDivergence ?? []) : [],
     currentZ,
     currentNetUsd,
     currentGrossUsd,
@@ -272,7 +326,7 @@ function samplePoints(points: Point[], maxPoints = 900): Point[] {
   return points.filter((_, index) => index % stride === 0 || index === points.length - 1);
 }
 
-function priceChart(points: Point[], lang: Lang, entryAt?: number): string {
+function priceChart(points: Point[], lang: Lang, pair: PairConfig, entryAt?: number): string {
   if (points.length < 2)
     return `<div class="tp-empty">${t(lang, 'Недостаточно данных', 'Not enough data')}</div>`;
   const sampled = samplePoints(points);
@@ -301,7 +355,7 @@ function priceChart(points: Point[], lang: Lang, entryAt?: number): string {
       return `<line x1="0" y1="${y}" x2="${w}" y2="${y}" class="grid"/><text x="-10" y="${y + 4}" text-anchor="end">${label.toFixed(1)}</text>`;
     })
     .join('');
-  return `<svg class="tp-chart" viewBox="-58 -12 980 340" role="img" aria-label="DOGE and fair DOGE chart">
+  return `<svg class="tp-chart" viewBox="-58 -12 980 340" role="img" aria-label="${pair.a} and fair ${pair.a} chart">
     ${grid}
     ${entryX == null ? '' : `<line x1="${entryX}" y1="0" x2="${entryX}" y2="${h}" class="entry"/><text x="${Math.min(w - 48, entryX + 7)}" y="18" class="entry-label">ENTRY</text>`}
     <path d="${path(fair, w, h, yMin, yMax)}" class="fair"/>
@@ -434,17 +488,27 @@ function historyStats(trades: HistoricalTrade[]): {
 }
 
 function renderPage(data: PageData, lang: Lang, period: Period): string {
+  const pair = data.pair;
   const position = data.runtime.position;
   const stats = historyStats(data.history);
   const selectedPoints = periodPoints(data, period);
   const monthSummary = deviationSummary(data.points, position?.zEntry ?? null);
   const months = monthlyExtremes(data.historicalPoints).slice(-12);
   const currentClass = (data.currentNetUsd ?? 0) >= 0 ? 'pos' : 'neg';
-  const majorRows = MAJOR_MODELS.map(([id, pair]) => ({
-    id,
-    pair,
-    runtime: data.state.candidates[id],
-  }));
+  const pairCards = PAIRS.map((config) => {
+    const runtime = data.state.candidates[config.id];
+    const z = runtime?.position?.lastZ ?? runtime?.previousHourlyZ;
+    const ready = Boolean(runtime?.fit);
+    const status = runtime?.position
+      ? t(lang, 'позиция открыта', 'position open')
+      : ready
+        ? t(lang, 'ждём свежее пересечение', 'waiting for fresh crossing')
+        : t(lang, 'модель вне фильтра', 'fit rejected');
+    const content = `<span class="pair-name">${config.a} / ${config.b}</span><b>${z == null ? '—' : z.toFixed(2)}</b><small>${status}</small><dl><div><dt>CORR</dt><dd>${runtime?.fit?.returnCorrelation.toFixed(3) ?? '—'}</dd></div><div><dt>HALF-LIFE</dt><dd>${runtime?.fit ? `${runtime.fit.halfLifeBars.toFixed(0)}h` : '—'}</dd></div></dl><strong>${runtime?.completedTrades ?? 0} ${t(lang, 'сделок', 'trades')} · ${pct(runtime?.cumulativeNetPct ?? 0)}</strong>`;
+    return ready
+      ? `<a class="tp-pair-card ${config.id === pair.id ? 'active' : ''}" href="/lab/pairs?pair=${config.id}">${content}</a>`
+      : `<div class="tp-pair-card disabled" title="${runtime?.invalidReason ?? ''}">${content}</div>`;
+  }).join('');
   const targetRange = data.targetRangeUsd
     ? `$${data.targetRangeUsd[0].toFixed(0)}–$${data.targetRangeUsd[1].toFixed(0)}`
     : '—';
@@ -454,10 +518,10 @@ function renderPage(data: PageData, lang: Lang, period: Period): string {
     ['1y', '1Y'],
     ['all', 'ALL'],
   ];
-  const periodTabs = periodLabels
+  const periodTabs = (pair.id === DEFAULT_PAIR.id ? periodLabels : periodLabels.slice(0, 1))
     .map(
       ([value, label]) =>
-        `<a href="/lab/pairs?period=${value}" class="${period === value ? 'active' : ''}">${label}</a>`,
+        `<a href="/lab/pairs?pair=${pair.id}&period=${value}" class="${period === value ? 'active' : ''}">${label}</a>`,
     )
     .join('');
   const strongerText =
@@ -472,15 +536,17 @@ function renderPage(data: PageData, lang: Lang, period: Period): string {
     <style>${CSS}</style>
     <div class="tp-head">
       <div>
-        <div class="tp-kicker">TRUE PAIRS · HYPERLIQUID · FORWARD SHADOW</div>
-        <h1>DOGE / XRP</h1>
+        <div class="tp-kicker">TRUE PAIRS · HYPERLIQUID · ${pair.sleeve.toUpperCase()} SHADOW</div>
+        <h1>${pair.a} / ${pair.b}</h1>
         <p>${t(lang, 'Торгуем возврат относительной цены к статистической норме, а не направление рынка.', 'Trading the relative price back toward its statistical norm, not market direction.')}</p>
       </div>
       <div class="tp-live"><span></span>${position ? t(lang, 'позиция открыта', 'position open') : t(lang, 'ждём сигнал', 'waiting for signal')}</div>
     </div>
 
+    <div class="tp-pair-cards">${pairCards}</div>
+
     <div class="tp-stats">
-      <div class="tp-stat"><div class="k">Z-SCORE</div><div class="v">${data.currentZ.toFixed(2)}</div><div class="s">entry ${position?.zEntry.toFixed(2) ?? '—'} · target −0.25</div></div>
+      <div class="tp-stat"><div class="k">Z-SCORE</div><div class="v">${data.currentZ.toFixed(2)}</div><div class="s">entry ${position?.zEntry.toFixed(2) ?? '—'} · target ${position?.direction === -1 ? '+' : '−'}${pair.exitZ.toFixed(2)}</div></div>
       <div class="tp-stat"><div class="k">$1000 + $1000 · ${t(lang, 'сейчас', 'now')}</div><div class="v ${currentClass}">${money(data.currentNetUsd)}</div><div class="s">gross ${money(data.currentGrossUsd)} · fee ${money(data.currentFeeUsd == null ? null : -data.currentFeeUsd)}</div></div>
       <div class="tp-stat"><div class="k">${t(lang, 'СЦЕНАРИЙ ДО ЦЕЛИ', 'TARGET SCENARIO')}</div><div class="v pos">${targetRange}</div><div class="s">${t(lang, `beta-оценка ${money(data.targetNetUsd)}`, `beta estimate ${money(data.targetNetUsd)}`)}</div></div>
       <div class="tp-stat"><div class="k">${t(lang, 'СЦЕНАРИЙ ДО СТОПА', 'STOP SCENARIO')}</div><div class="v neg">${money(data.stopNetUsd)}</div><div class="s">z ${position?.direction === 1 ? '−4.00' : '+4.00'} · fee included</div></div>
@@ -494,8 +560,8 @@ function renderPage(data: PageData, lang: Lang, period: Period): string {
     </div>
 
     <section class="tp-panel">
-      <div class="tp-section-head"><div><h2>${t(lang, 'Фактическая и справедливая цена', 'Actual and fair price')}</h2><p>${t(lang, period === '30d' ? 'Нативные Hyperliquid 1h. Зелёная линия — DOGE; жёлтая — справедливая DOGE из XRP и beta.' : 'Исторические 1h-окна с отдельным causal fit для каждого торгового блока.', period === '30d' ? 'Native Hyperliquid 1h. Green is DOGE; yellow is fair DOGE from XRP and beta.' : 'Historical 1h windows with a separate causal fit for each trading block.')}</p></div><div><div class="tp-periods">${periodTabs}</div><div class="legend"><span class="a">DOGE</span><span class="f">FAIR DOGE</span></div></div></div>
-      ${priceChart(selectedPoints, lang, position?.entryBarAt)}
+      <div class="tp-section-head"><div><h2>${t(lang, 'Фактическая и справедливая цена', 'Actual and fair price')}</h2><p>${t(lang, period === '30d' ? `Нативные Hyperliquid 1h. Зелёная линия — ${pair.a}; жёлтая — справедливая ${pair.a} из ${pair.b} и beta.` : 'Исторические 1h-окна с отдельным causal fit для каждого торгового блока.', period === '30d' ? `Native Hyperliquid 1h. Green is ${pair.a}; yellow is fair ${pair.a} from ${pair.b} and beta.` : 'Historical 1h windows with a separate causal fit for each trading block.')}</p></div><div><div class="tp-periods">${periodTabs}</div><div class="legend"><span class="a">${pair.a}</span><span class="f">FAIR ${pair.a}</span></div></div></div>
+      ${priceChart(selectedPoints, lang, pair, position?.entryBarAt)}
     </section>
 
     <section class="tp-panel">
@@ -521,26 +587,9 @@ function renderPage(data: PageData, lang: Lang, period: Period): string {
       }
     </section>
 
-    <section class="tp-history">
-      <div class="tp-section-head"><div><h2>${t(lang, 'Мажорные пары: отдельный forward shadow', 'Major pairs: isolated forward shadow')}</h2><p>${t(lang, 'Текущий режим выглядит сильнее истории, поэтому эти модели наблюдаются отдельно и не конкурируют с DOGE/XRP. Реальных ордеров нет.', 'The current regime looks stronger than its history, so these models are observed separately and do not compete with DOGE/XRP. No real orders are sent.')}</p></div></div>
-      <div class="tp-majors">
-        ${majorRows
-          .map(({ pair, runtime }) => {
-            const z = runtime?.position?.lastZ ?? runtime?.previousHourlyZ;
-            const status = runtime?.position
-              ? t(lang, 'позиция открыта', 'position open')
-              : runtime?.invalidReason
-                ? t(lang, 'модель вне фильтра', 'fit rejected')
-                : t(lang, 'ждём свежее пересечение', 'waiting for fresh crossing');
-            return `<div><span>${pair}</span><b>${z == null ? '—' : z.toFixed(2)}</b><small>${status}</small><strong>${runtime?.completedTrades ?? 0} ${t(lang, 'сделок', 'trades')} · ${pct(runtime?.cumulativeNetPct ?? 0)}</strong></div>`;
-          })
-          .join('')}
-      </div>
-    </section>
-
     <div class="tp-note">${t(lang, 'Важно: большое |z| означает редкое отклонение, а не гарантированную прибыль. Вход возможен только при новом пересечении ±2 изнутри по закрытой 1h-свече; сервис не входит, если запущен уже внутри экстремального расхождения. Открытая позиция и стоп проверяются каждую минуту. Усреднения нет: при |z| = 4 обе ноги закрываются. Все суммы — модель для двух ног по $1000; реальные ордера не отправляются.', 'Important: a large |z| means a rare deviation, not guaranteed profit. Entry requires a fresh crossing of ±2 from inside the band on a closed 1h candle; startup inside an extreme divergence does not trigger a trade. An open position and stop are checked every minute. There is no averaging: both legs close at |z| = 4. Dollar figures model two $1,000 legs; no real orders are sent.')}</div>
   `;
-  return pageShell(`${PAIR.a}/${PAIR.b} pairs shadow · Robot Claude`, body, {
+  return pageShell(`${pair.a}/${pair.b} pairs shadow · Robot Claude`, body, {
     lang,
     autoRefreshSec: 60,
     robots: 'noindex, follow',
@@ -569,14 +618,15 @@ export function truePairsHero(lang: Lang): string {
 }
 
 export async function truePairsRoute(app: FastifyInstance): Promise<void> {
-  app.get<{ Querystring: { period?: string } }>('/lab/pairs', async (req, reply) => {
+  app.get<{ Querystring: { pair?: string; period?: string } }>('/lab/pairs', async (req, reply) => {
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'public, max-age=30');
     try {
+      const pair = PAIRS.find((candidate) => candidate.id === req.query.pair) ?? DEFAULT_PAIR;
       const period: Period = ['30d', '90d', '1y', 'all'].includes(req.query.period ?? '')
         ? (req.query.period as Period)
         : '30d';
-      return renderPage(await loadPageData(), getLang(req), period);
+      return renderPage(await loadPageData(pair), getLang(req), period);
     } catch {
       reply.code(503);
       return pageShell(
@@ -593,6 +643,7 @@ const CSS = `
   .tp-kicker{font-size:11px;font-weight:700;color:var(--accent);letter-spacing:.08em;margin-bottom:8px}
   .tp-head h1{font-size:38px;line-height:1.05;margin:0 0 8px;letter-spacing:0}.tp-head p{margin:0;color:var(--text-dim);max-width:680px}
   .tp-live{font-size:12px;color:var(--text-dim);white-space:nowrap}.tp-live span{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:7px;box-shadow:0 0 0 4px var(--accent-soft)}
+  .tp-pair-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:0 0 18px}.tp-pair-card{display:block;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:12px;color:inherit;text-decoration:none;min-width:0;min-height:178px}.tp-pair-card.active{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}.tp-pair-card.disabled{opacity:.62}.tp-pair-card .pair-name,.tp-pair-card small,.tp-pair-card strong{display:block}.tp-pair-card .pair-name{font-size:10px;font-weight:750;color:var(--text-dim)}.tp-pair-card>b{display:block;font-size:24px;margin:6px 0 2px;font-variant-numeric:tabular-nums}.tp-pair-card small{font-size:9px;color:var(--text-dim);min-height:27px}.tp-pair-card dl{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:8px 0}.tp-pair-card dl div{min-width:0}.tp-pair-card dt{font-size:8px;color:var(--text-faint)}.tp-pair-card dd{font-size:11px;margin:1px 0 0;font-variant-numeric:tabular-nums}.tp-pair-card strong{font-size:9px;color:var(--text-faint);margin-top:6px}
   .tp-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:22px}.tp-stats.history{grid-template-columns:repeat(3,minmax(0,1fr));margin:0}
   .tp-stat{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:14px;min-width:0}.tp-stat .k{font-size:10px;color:var(--text-faint);font-weight:700}.tp-stat .v{font-size:25px;font-weight:650;margin:5px 0 2px;font-variant-numeric:tabular-nums}.tp-stat .s{font-size:11px;color:var(--text-dim);white-space:normal}.pos{color:var(--accent)!important}.neg{color:var(--danger)!important}
   .tp-context{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin:2px 0 18px}.tp-context>div{padding:12px 14px;border-right:1px solid var(--border);min-width:0}.tp-context>div:last-child{border-right:0}.tp-context span,.tp-context small{display:block;font-size:9px;color:var(--text-faint)}.tp-context b{display:block;font-size:18px;margin:3px 0;font-variant-numeric:tabular-nums}.tp-context small{font-size:10px;color:var(--text-dim);white-space:normal}
@@ -601,7 +652,6 @@ const CSS = `
   .tp-chart{display:block;width:100%;height:auto;overflow:visible}.tp-chart text{fill:var(--text-faint);font-size:10px}.tp-chart .grid{stroke:var(--border);stroke-width:1}.tp-chart path{fill:none;stroke-linejoin:round;stroke-linecap:round}.tp-chart .actual{stroke:#4ad991;stroke-width:2.2}.tp-chart .fair{stroke:#f4c95d;stroke-width:2}.tp-chart .entry{stroke:#e36b6b;stroke-width:1.2;stroke-dasharray:5 5}.tp-chart .entry-label{fill:#e36b6b;font-weight:700}.tp-z .zline{stroke:#67a9e8;stroke-width:2}.tp-z .z-0{stroke:var(--text-faint);stroke-width:1}.tp-z .z-2{stroke:#f4c95d;stroke-width:1;stroke-dasharray:5 5}.tp-z .z-4{stroke:#e36b6b;stroke-width:1;stroke-dasharray:5 5}
   .tp-empty{padding:28px 0;color:var(--text-dim);font-size:13px}.tp-note{border-left:3px solid #f4c95d;padding:12px 14px;margin:18px 0;color:var(--text-dim);font-size:12px;background:var(--bg-card)}
   .tp-months{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--border);border-left:1px solid var(--border)}.tp-months>div{display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:9px 10px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);font-size:11px;font-variant-numeric:tabular-nums}.tp-months span{color:var(--text-dim)}.tp-months i{color:var(--text-faint);font-style:normal}.tp-months strong{grid-column:1/-1;color:var(--text-faint);font-size:9px;font-weight:600}
-  .tp-majors{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--border);border-left:1px solid var(--border)}.tp-majors>div{padding:12px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);min-width:0}.tp-majors span,.tp-majors small,.tp-majors strong{display:block}.tp-majors span{font-size:10px;font-weight:700;color:var(--text-dim)}.tp-majors b{display:block;font-size:22px;margin:5px 0;font-variant-numeric:tabular-nums}.tp-majors small{font-size:10px;color:var(--text-dim);min-height:28px}.tp-majors strong{font-size:9px;color:var(--text-faint);margin-top:6px}
-  @media(max-width:800px){.tp-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-stats.history{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-context{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-context>div:nth-child(2){border-right:0}.tp-months,.tp-majors{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-head{align-items:flex-start}.tp-head h1{font-size:32px}}
+  @media(max-width:800px){.tp-pair-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-stats.history{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-context{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-context>div:nth-child(2){border-right:0}.tp-months{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-head{align-items:flex-start}.tp-head h1{font-size:32px}}
   @media(max-width:520px){.tp-head{display:block}.tp-live{margin-top:14px}.tp-stats,.tp-stats.history{grid-template-columns:1fr 1fr}.tp-stat .v{font-size:20px}.tp-section-head{display:block}.legend{margin-top:10px}.tp-chart{min-height:180px}.tp-head h1{font-size:30px}}
 `;
