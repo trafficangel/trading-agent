@@ -8,9 +8,12 @@
  */
 import { db } from '../src/db/client.js';
 
-const COINS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'LTC', 'LINK', 'DOGE', 'AVAX'];
+const DEFAULT_COINS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'LTC', 'LINK', 'DOGE', 'AVAX'];
 const NOW = Date.now();
 const DAYS = Number(process.argv[2] ?? 700);
+const COINS = process.argv[3]
+  ? [...new Set(process.argv[3].split(',').map((coin) => coin.trim().toUpperCase()).filter(Boolean))]
+  : DEFAULT_COINS;
 const INFO = 'https://api.hyperliquid.xyz/info';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
