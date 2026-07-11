@@ -40,6 +40,12 @@ const IMBALANCE_GATES = [-0.1, 0.15];
 const HORIZONS_MS = [500, 1_000, 2_000, 5_000];
 const MAKER_TTL_MS = 2_000;
 const COINS = ['BTC', 'ETH', 'SOL', 'XRP', 'UNI', 'LIT', 'VIRTUAL', 'JUP', 'SAGA'];
+const MM_SHIELDS: Array<{ label: string; lead: number | null; lag: number }> = [
+  { label: 'BASE', lead: null, lag: 0 },
+  { label: 'L1G0.5', lead: 1, lag: 0.5 },
+  { label: 'L3G1', lead: 3, lag: 1 },
+  { label: 'L5G2', lead: 5, lag: 2 },
+];
 
 type PackedRow = {
   v: number;
@@ -293,6 +299,169 @@ function evaluate(points: Point[], coin: string): void {
   console.warn(`leadlag analyzed ${coin}: ${points.length} points`);
 }
 
+type RestingOrder = { price: number; queue: number };
+type Inventory = {
+  side: 1 | -1;
+  entry: number;
+  entryAt: number;
+  entryIdx: number;
+  target: RestingOrder;
+};
+
+function consumeAtPoint(order: RestingOrder, point: Point, orderSide: 1 | -1): boolean {
+  for (let k = 0; k < point.hlPrints.length; k += 2) {
+    const price = point.hlPrints[k]!;
+    const signedSize = point.hlPrints[k + 1]!;
+    const relevant =
+      orderSide === 1
+        ? signedSize < 0 && price <= order.price
+        : signedSize > 0 && price >= order.price;
+    if (!relevant) continue;
+    const tradedThrough = orderSide === 1 ? price < order.price : price > order.price;
+    if (tradedThrough) return true;
+    order.queue -= Math.abs(signedSize);
+    if (order.queue <= 0) return true;
+  }
+  return false;
+}
+
+function refreshOrder(
+  current: RestingOrder | null,
+  enabled: boolean,
+  price: number,
+  queue: number,
+): RestingOrder | null {
+  if (!enabled) return null;
+  if (!current || current.price !== price) return { price, queue };
+  return current;
+}
+
+/**
+ * Continuous two-sided quoting with a lead-lag toxicity shield. Prints in the
+ * current bucket consume orders that were resting after the previous bucket;
+ * only then may the shield cancel/requote. This ordering prevents retroactive
+ * cancels from escaping a fill that already happened.
+ */
+function evaluateMarketMaking(points: Point[], coin: string): void {
+  for (const shield of MM_SHIELDS)
+    for (const holdMs of [2_000, 5_000, 10_000])
+      for (const delay of [0, 1] as const) {
+        const key = `MM_${shield.label}_H${holdMs}`;
+        const m = delay === 0 ? pairFor(key).now : pairFor(key).delayed;
+        const holdSteps = Math.round(holdMs / SAMPLE_MS);
+        let bid: RestingOrder | null = null;
+        let ask: RestingOrder | null = null;
+        let inventory: Inventory | null = null;
+
+        for (let i = 240; i < points.length - holdSteps - 1; i++) {
+          const point = points[i]!;
+          if (inventory) {
+            const targetSide: 1 | -1 = inventory.side === 1 ? -1 : 1;
+            const crossed =
+              inventory.side === 1
+                ? point.hlBid >= inventory.target.price
+                : point.hlAsk <= inventory.target.price;
+            if (crossed || consumeAtPoint(inventory.target, point, targetSide)) {
+              record(
+                m,
+                coin,
+                inventory.entryAt,
+                point.t,
+                grossBps(inventory.side, inventory.entry, inventory.target.price) - MAKER_RT_BPS,
+              );
+              inventory = null;
+            } else if (i - inventory.entryIdx >= holdSteps) {
+              const exit = inventory.side === 1 ? point.hlBid : point.hlAsk;
+              record(
+                m,
+                coin,
+                inventory.entryAt,
+                point.t,
+                grossBps(inventory.side, inventory.entry, exit) - MAKER_TAKER_BPS,
+              );
+              inventory = null;
+            }
+            if (inventory) continue;
+          }
+
+          if (bid && ask) {
+            const bidCopy = { ...bid },
+              askCopy = { ...ask };
+            const bidFilled = consumeAtPoint(bidCopy, point, 1);
+            const askFilled = consumeAtPoint(askCopy, point, -1);
+            if (bidFilled && askFilled) {
+              // Intra-bucket ordering is unknown. Do not award either fill.
+              bid = null;
+              ask = null;
+            } else if (bidFilled) {
+              inventory = {
+                side: 1,
+                entry: bid.price,
+                entryAt: point.t,
+                entryIdx: i,
+                target: { price: point.hlAsk, queue: point.hlAskSize },
+              };
+              bid = null;
+              ask = null;
+              continue;
+            } else if (askFilled) {
+              inventory = {
+                side: -1,
+                entry: ask.price,
+                entryAt: point.t,
+                entryIdx: i,
+                target: { price: point.hlBid, queue: point.hlBidSize },
+              };
+              bid = null;
+              ask = null;
+              continue;
+            } else {
+              bid = bidCopy;
+              ask = askCopy;
+            }
+          } else if (bid) {
+            if (consumeAtPoint(bid, point, 1)) {
+              inventory = {
+                side: 1,
+                entry: bid.price,
+                entryAt: point.t,
+                entryIdx: i,
+                target: { price: point.hlAsk, queue: point.hlAskSize },
+              };
+              bid = null;
+              ask = null;
+              continue;
+            }
+          } else if (ask && consumeAtPoint(ask, point, -1)) {
+            inventory = {
+              side: -1,
+              entry: ask.price,
+              entryAt: point.t,
+              entryIdx: i,
+              target: { price: point.hlBid, queue: point.hlBidSize },
+            };
+            bid = null;
+            ask = null;
+            continue;
+          }
+
+          const observed = points[Math.max(0, i - delay)]!;
+          let keepBid = true,
+            keepAsk = true;
+          if (shield.lead != null && observed.agrees && Math.abs(observed.leadBps) >= shield.lead) {
+            const side: 1 | -1 = observed.leadBps > 0 ? 1 : -1;
+            if (side * observed.lagBps >= shield.lag) {
+              if (side === 1) keepAsk = false;
+              else keepBid = false;
+            }
+          }
+          bid = refreshOrder(bid, keepBid, point.hlBid, point.hlBidSize);
+          ask = refreshOrder(ask, keepAsk, point.hlAsk, point.hlAskSize);
+          m.signals += Number(keepBid) + Number(keepAsk);
+        }
+      }
+}
+
 function summarize(key: string, pair: Pair) {
   const view = (m: Metric) => {
     const positiveDays = [...m.days.values()].filter((x) => x > 0).length;
@@ -352,7 +521,11 @@ function summarize(key: string, pair: Pair) {
     .sort();
   if (!files.length) throw new Error('no completed leadlag segments yet');
 
-  for (const coin of COINS) evaluate(await readCoin(files, coin), coin);
+  for (const coin of COINS) {
+    const points = await readCoin(files, coin);
+    evaluate(points, coin);
+    evaluateMarketMaking(points, coin);
+  }
   const rows = [...pairs.entries()]
     .map(([key, pair]) => summarize(key, pair))
     .sort(
@@ -384,6 +557,7 @@ function summarize(key: string, pair: Pair) {
         (row) => (row.key.endsWith('_MAKER') || row.key.endsWith('_MAKER_MM')) && row.now.fills > 0,
       )
       .slice(0, 20),
+    marketMaking: rows.filter((row) => row.key.startsWith('MM_') && row.now.fills > 0).slice(0, 40),
     noFillMaker: rows
       .filter((row) => row.key.endsWith('_MAKER') && row.now.signals > 0 && row.now.fills === 0)
       .slice(0, 20),
