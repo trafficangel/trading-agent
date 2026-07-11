@@ -28,14 +28,17 @@ import {
 const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 const FEE_RT_PCT = 0.09;
-const MAX_OPEN_PAIRS = 2;
+const MAX_OPEN_PAIRS_PER_SLEEVE = 2;
 const BASKET_ID = 'fixed-epoch-v2-2026-07-11';
 const STATE_PATH = process.env.TRUE_PAIRS_SHADOW_STATE ?? 'data/true-pairs-shadow.json';
 const AUDIT_PATH = process.env.TRUE_PAIRS_SHADOW_AUDIT ?? 'data/true-pairs-shadow-trades.ndjson';
 const NOTIFY = process.env.TRUE_PAIRS_SHADOW_NOTIFY !== 'false';
 
+type Sleeve = 'core' | 'majors';
+
 type Candidate = {
   id: string;
+  sleeve: Sleeve;
   a: string;
   b: string;
   formationBars: number;
@@ -50,6 +53,7 @@ type Candidate = {
 const CANDIDATES: Candidate[] = [
   {
     id: 'LTC_ADA_H90',
+    sleeve: 'core',
     a: 'LTC',
     b: 'ADA',
     formationBars: 90 * 24,
@@ -61,6 +65,7 @@ const CANDIDATES: Candidate[] = [
   },
   {
     id: 'LTC_XRP_H90',
+    sleeve: 'core',
     a: 'LTC',
     b: 'XRP',
     formationBars: 90 * 24,
@@ -72,6 +77,7 @@ const CANDIDATES: Candidate[] = [
   },
   {
     id: 'ADA_XRP_H60',
+    sleeve: 'core',
     a: 'ADA',
     b: 'XRP',
     formationBars: 60 * 24,
@@ -83,6 +89,7 @@ const CANDIDATES: Candidate[] = [
   },
   {
     id: 'DOGE_XRP_H60',
+    sleeve: 'core',
     a: 'DOGE',
     b: 'XRP',
     formationBars: 60 * 24,
@@ -94,6 +101,7 @@ const CANDIDATES: Candidate[] = [
   },
   {
     id: 'LTC_BNB_H60',
+    sleeve: 'core',
     a: 'LTC',
     b: 'BNB',
     formationBars: 60 * 24,
@@ -105,8 +113,57 @@ const CANDIDATES: Candidate[] = [
   },
   {
     id: 'AVAX_SOL_H60',
+    sleeve: 'core',
     a: 'AVAX',
     b: 'SOL',
+    formationBars: 60 * 24,
+    tradeBars: 14 * 24,
+    entryZ: 2,
+    exitZ: 0.25,
+    stopZ: 4,
+    maxHoldBars: 7 * 24,
+  },
+  {
+    id: 'ETH_BTC_H60_MAJOR',
+    sleeve: 'majors',
+    a: 'ETH',
+    b: 'BTC',
+    formationBars: 60 * 24,
+    tradeBars: 14 * 24,
+    entryZ: 2,
+    exitZ: 0.25,
+    stopZ: 4,
+    maxHoldBars: 7 * 24,
+  },
+  {
+    id: 'SOL_BTC_H60_MAJOR',
+    sleeve: 'majors',
+    a: 'SOL',
+    b: 'BTC',
+    formationBars: 60 * 24,
+    tradeBars: 14 * 24,
+    entryZ: 2,
+    exitZ: 0.25,
+    stopZ: 4,
+    maxHoldBars: 7 * 24,
+  },
+  {
+    id: 'BNB_BTC_H60_MAJOR',
+    sleeve: 'majors',
+    a: 'BNB',
+    b: 'BTC',
+    formationBars: 60 * 24,
+    tradeBars: 14 * 24,
+    entryZ: 2,
+    exitZ: 0.25,
+    stopZ: 4,
+    maxHoldBars: 7 * 24,
+  },
+  {
+    id: 'SOL_ETH_H60_MAJOR',
+    sleeve: 'majors',
+    a: 'SOL',
+    b: 'ETH',
     formationBars: 60 * 24,
     tradeBars: 14 * 24,
     entryZ: 2,
@@ -304,9 +361,10 @@ async function fundingCarry(
   return { pct, coverage: hours.length ? matched.length / hours.length : 1 };
 }
 
-function activeAssets(state: ShadowState): Set<string> {
+function activeAssets(state: ShadowState, sleeve: Sleeve): Set<string> {
   const result = new Set<string>();
   for (const candidate of CANDIDATES) {
+    if (candidate.sleeve !== sleeve) continue;
     if (!state.candidates[candidate.id]?.position) continue;
     result.add(candidate.a);
     result.add(candidate.b);
@@ -314,8 +372,11 @@ function activeAssets(state: ShadowState): Set<string> {
   return result;
 }
 
-function openCount(state: ShadowState): number {
-  return CANDIDATES.filter((candidate) => state.candidates[candidate.id]?.position).length;
+function openCount(state: ShadowState, sleeve?: Sleeve): number {
+  return CANDIDATES.filter(
+    (candidate) =>
+      (!sleeve || candidate.sleeve === sleeve) && state.candidates[candidate.id]?.position,
+  ).length;
 }
 
 function liveZ(candidate: Candidate, fit: PairFit, books: Map<string, PairTopOfBook>): number {
@@ -358,6 +419,7 @@ async function closePosition(args: {
     event: 'exit',
     pair: `${args.candidate.a}/${args.candidate.b}`,
     model: args.candidate.id,
+    sleeve: args.candidate.sleeve,
     reason: args.reason,
     direction: position.direction,
     beta: position.beta,
@@ -377,7 +439,7 @@ async function closePosition(args: {
     netPct,
   });
   await notify({
-    text: `<b>PAIRS SHADOW · EXIT</b>\n${escapeHtml(args.candidate.a)}/${escapeHtml(args.candidate.b)} · ${args.reason}\nNet: <b>${netPct >= 0 ? '+' : ''}${netPct.toFixed(3)}%</b> · gross ${grossPct.toFixed(3)}% · funding ${funding.pct.toFixed(3)}%\nZ ${position.zEntry.toFixed(2)} → ${args.z.toFixed(2)} · ${holdHours}h\nСделок: ${args.runtime.completedTrades} · сумма: ${args.runtime.cumulativeNetPct.toFixed(3)}%\n<i>Только shadow, реальных ордеров нет.</i>`,
+    text: `<b>PAIRS SHADOW · EXIT · ${args.candidate.sleeve.toUpperCase()}</b>\n${escapeHtml(args.candidate.a)}/${escapeHtml(args.candidate.b)} · ${args.reason}\nNet: <b>${netPct >= 0 ? '+' : ''}${netPct.toFixed(3)}%</b> · gross ${grossPct.toFixed(3)}% · funding ${funding.pct.toFixed(3)}%\nZ ${position.zEntry.toFixed(2)} → ${args.z.toFixed(2)} · ${holdHours}h\nСделок: ${args.runtime.completedTrades} · сумма: ${args.runtime.cumulativeNetPct.toFixed(3)}%\n<i>Только shadow, реальных ордеров нет.</i>`,
   });
 }
 
@@ -438,6 +500,8 @@ async function main(): Promise<void> {
         at: new Date(now).toISOString(),
         mode: 'minute-monitor',
         openPairs: openCount(state),
+        openCore: openCount(state, 'core'),
+        openMajors: openCount(state, 'majors'),
       }),
     );
     return;
@@ -571,17 +635,22 @@ async function main(): Promise<void> {
   }
 
   proposals.sort((a, b) => b.score - a.score);
-  const usedAssets = activeAssets(state);
+  const usedAssetsBySleeve = new Map<Sleeve, Set<string>>([
+    ['core', activeAssets(state, 'core')],
+    ['majors', activeAssets(state, 'majors')],
+  ]);
   for (const proposal of proposals) {
     const { candidate, runtime, z, barAt } = proposal;
+    const usedAssets = usedAssetsBySleeve.get(candidate.sleeve)!;
     if (
-      openCount(state) >= MAX_OPEN_PAIRS ||
+      openCount(state, candidate.sleeve) >= MAX_OPEN_PAIRS_PER_SLEEVE ||
       usedAssets.has(candidate.a) ||
       usedAssets.has(candidate.b)
     ) {
       audit({
         event: 'entry_blocked_capacity',
         model: candidate.id,
+        sleeve: candidate.sleeve,
         pair: `${candidate.a}/${candidate.b}`,
         z,
       });
@@ -607,6 +676,7 @@ async function main(): Promise<void> {
     audit({
       event: 'entry',
       model: candidate.id,
+      sleeve: candidate.sleeve,
       pair: `${candidate.a}/${candidate.b}`,
       direction,
       beta: runtime.fit!.beta,
@@ -619,14 +689,14 @@ async function main(): Promise<void> {
         ? `LONG ${candidate.a} / SHORT ${candidate.b}`
         : `SHORT ${candidate.a} / LONG ${candidate.b}`;
     await notify({
-      text: `<b>PAIRS SHADOW · ENTRY</b>\n${escapeHtml(candidate.a)}/${escapeHtml(candidate.b)} · ${legs}\nZ: <b>${z.toFixed(2)}</b> · beta ${runtime.fit!.beta.toFixed(3)}\nBBO: ${candidate.a} ${prices.a} · ${candidate.b} ${prices.b}\n<i>Только shadow, реальных ордеров нет.</i>`,
+      text: `<b>PAIRS SHADOW · ENTRY · ${candidate.sleeve.toUpperCase()}</b>\n${escapeHtml(candidate.a)}/${escapeHtml(candidate.b)} · ${legs}\nZ: <b>${z.toFixed(2)}</b> · beta ${runtime.fit!.beta.toFixed(3)}\nBBO: ${candidate.a} ${prices.a} · ${candidate.b} ${prices.b}\n<i>Только shadow, реальных ордеров нет.</i>`,
     });
   }
 
   if (!state.startedNotified) {
     await notify({
       disable_notification: true,
-      text: `<b>TRUE PAIRS FORWARD SHADOW ЗАПУЩЕН</b>\n${CANDIDATES.length} замороженных моделей · 1h · реальные HL BBO и funding\nМаксимум ${MAX_OPEN_PAIRS} пары, общий актив нельзя использовать дважды.\n<i>Контур read-only: приватные ключи и функции ордеров не подключены.</i>`,
+      text: `<b>TRUE PAIRS FORWARD SHADOW ЗАПУЩЕН</b>\n${CANDIDATES.length} замороженных моделей · 1h · реальные HL BBO и funding\nМаксимум ${MAX_OPEN_PAIRS_PER_SLEEVE} пары на контур, общий актив внутри контура нельзя использовать дважды.\n<i>Контур read-only: приватные ключи и функции ордеров не подключены.</i>`,
     });
     state.startedNotified = true;
   }
@@ -637,9 +707,12 @@ async function main(): Promise<void> {
       {
         at: new Date(now).toISOString(),
         openPairs: openCount(state),
+        openCore: openCount(state, 'core'),
+        openMajors: openCount(state, 'majors'),
         proposals: proposals.length,
         candidates: CANDIDATES.map((candidate) => ({
           id: candidate.id,
+          sleeve: candidate.sleeve,
           invalidReason: state.candidates[candidate.id]?.invalidReason,
           position: state.candidates[candidate.id]?.position ?? null,
           completedTrades: state.candidates[candidate.id]?.completedTrades ?? 0,

@@ -23,6 +23,12 @@ const STATE_PATH = 'data/true-pairs-shadow.json';
 const RESULTS_PATH = 'data/true-pairs-hourly-results.json';
 const ACTIVE_ID = 'DOGE_XRP_H60';
 const PAIR = { a: 'DOGE', b: 'XRP', model: 'H_F60_R14_E2', exitZ: 0.25, stopZ: 4 } as const;
+const MAJOR_MODELS = [
+  ['ETH_BTC_H60_MAJOR', 'ETH / BTC'],
+  ['SOL_BTC_H60_MAJOR', 'SOL / BTC'],
+  ['BNB_BTC_H60_MAJOR', 'BNB / BTC'],
+  ['SOL_ETH_H60_MAJOR', 'SOL / ETH'],
+] as const;
 
 type Lang = 'ru' | 'en';
 type Position = {
@@ -40,6 +46,7 @@ type Position = {
 };
 type Runtime = {
   fit?: PairFit;
+  previousHourlyZ?: number;
   position?: Position;
   completedTrades: number;
   cumulativeNetPct: number;
@@ -433,6 +440,11 @@ function renderPage(data: PageData, lang: Lang, period: Period): string {
   const monthSummary = deviationSummary(data.points, position?.zEntry ?? null);
   const months = monthlyExtremes(data.historicalPoints).slice(-12);
   const currentClass = (data.currentNetUsd ?? 0) >= 0 ? 'pos' : 'neg';
+  const majorRows = MAJOR_MODELS.map(([id, pair]) => ({
+    id,
+    pair,
+    runtime: data.state.candidates[id],
+  }));
   const targetRange = data.targetRangeUsd
     ? `$${data.targetRangeUsd[0].toFixed(0)}–$${data.targetRangeUsd[1].toFixed(0)}`
     : '—';
@@ -509,6 +521,23 @@ function renderPage(data: PageData, lang: Lang, period: Period): string {
       }
     </section>
 
+    <section class="tp-history">
+      <div class="tp-section-head"><div><h2>${t(lang, 'Мажорные пары: отдельный forward shadow', 'Major pairs: isolated forward shadow')}</h2><p>${t(lang, 'Текущий режим выглядит сильнее истории, поэтому эти модели наблюдаются отдельно и не конкурируют с DOGE/XRP. Реальных ордеров нет.', 'The current regime looks stronger than its history, so these models are observed separately and do not compete with DOGE/XRP. No real orders are sent.')}</p></div></div>
+      <div class="tp-majors">
+        ${majorRows
+          .map(({ pair, runtime }) => {
+            const z = runtime?.position?.lastZ ?? runtime?.previousHourlyZ;
+            const status = runtime?.position
+              ? t(lang, 'позиция открыта', 'position open')
+              : runtime?.invalidReason
+                ? t(lang, 'модель вне фильтра', 'fit rejected')
+                : t(lang, 'ждём свежее пересечение', 'waiting for fresh crossing');
+            return `<div><span>${pair}</span><b>${z == null ? '—' : z.toFixed(2)}</b><small>${status}</small><strong>${runtime?.completedTrades ?? 0} ${t(lang, 'сделок', 'trades')} · ${pct(runtime?.cumulativeNetPct ?? 0)}</strong></div>`;
+          })
+          .join('')}
+      </div>
+    </section>
+
     <div class="tp-note">${t(lang, 'Важно: большое |z| означает редкое отклонение, а не гарантированную прибыль. Вход возможен только при новом пересечении ±2 изнутри по закрытой 1h-свече; сервис не входит, если запущен уже внутри экстремального расхождения. Открытая позиция и стоп проверяются каждую минуту. Усреднения нет: при |z| = 4 обе ноги закрываются. Все суммы — модель для двух ног по $1000; реальные ордера не отправляются.', 'Important: a large |z| means a rare deviation, not guaranteed profit. Entry requires a fresh crossing of ±2 from inside the band on a closed 1h candle; startup inside an extreme divergence does not trigger a trade. An open position and stop are checked every minute. There is no averaging: both legs close at |z| = 4. Dollar figures model two $1,000 legs; no real orders are sent.')}</div>
   `;
   return pageShell(`${PAIR.a}/${PAIR.b} pairs shadow · Robot Claude`, body, {
@@ -572,6 +601,7 @@ const CSS = `
   .tp-chart{display:block;width:100%;height:auto;overflow:visible}.tp-chart text{fill:var(--text-faint);font-size:10px}.tp-chart .grid{stroke:var(--border);stroke-width:1}.tp-chart path{fill:none;stroke-linejoin:round;stroke-linecap:round}.tp-chart .actual{stroke:#4ad991;stroke-width:2.2}.tp-chart .fair{stroke:#f4c95d;stroke-width:2}.tp-chart .entry{stroke:#e36b6b;stroke-width:1.2;stroke-dasharray:5 5}.tp-chart .entry-label{fill:#e36b6b;font-weight:700}.tp-z .zline{stroke:#67a9e8;stroke-width:2}.tp-z .z-0{stroke:var(--text-faint);stroke-width:1}.tp-z .z-2{stroke:#f4c95d;stroke-width:1;stroke-dasharray:5 5}.tp-z .z-4{stroke:#e36b6b;stroke-width:1;stroke-dasharray:5 5}
   .tp-empty{padding:28px 0;color:var(--text-dim);font-size:13px}.tp-note{border-left:3px solid #f4c95d;padding:12px 14px;margin:18px 0;color:var(--text-dim);font-size:12px;background:var(--bg-card)}
   .tp-months{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--border);border-left:1px solid var(--border)}.tp-months>div{display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:9px 10px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);font-size:11px;font-variant-numeric:tabular-nums}.tp-months span{color:var(--text-dim)}.tp-months i{color:var(--text-faint);font-style:normal}.tp-months strong{grid-column:1/-1;color:var(--text-faint);font-size:9px;font-weight:600}
-  @media(max-width:800px){.tp-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-stats.history{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-context{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-context>div:nth-child(2){border-right:0}.tp-months{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-head{align-items:flex-start}.tp-head h1{font-size:32px}}
+  .tp-majors{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--border);border-left:1px solid var(--border)}.tp-majors>div{padding:12px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);min-width:0}.tp-majors span,.tp-majors small,.tp-majors strong{display:block}.tp-majors span{font-size:10px;font-weight:700;color:var(--text-dim)}.tp-majors b{display:block;font-size:22px;margin:5px 0;font-variant-numeric:tabular-nums}.tp-majors small{font-size:10px;color:var(--text-dim);min-height:28px}.tp-majors strong{font-size:9px;color:var(--text-faint);margin-top:6px}
+  @media(max-width:800px){.tp-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-stats.history{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-context{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-context>div:nth-child(2){border-right:0}.tp-months,.tp-majors{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-head{align-items:flex-start}.tp-head h1{font-size:32px}}
   @media(max-width:520px){.tp-head{display:block}.tp-live{margin-top:14px}.tp-stats,.tp-stats.history{grid-template-columns:1fr 1fr}.tp-stat .v{font-size:20px}.tp-section-head{display:block}.legend{margin-top:10px}.tp-chart{min-height:180px}.tp-head h1{font-size:30px}}
 `;
