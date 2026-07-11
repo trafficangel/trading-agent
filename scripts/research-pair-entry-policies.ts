@@ -1,4 +1,4 @@
-/** Compare bounded DOGE/XRP entry and stop policies on the frozen hourly blocks. */
+/** Compare bounded entry and stop policies for one pair on frozen hourly blocks. */
 
 import { existsSync, writeFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
@@ -20,6 +20,12 @@ const TRADE_BARS = 14 * 24;
 const EXIT_Z = 0.25;
 const HL_COST_PCT = 0.09;
 const STRESS_COST_PCT = 0.18;
+const COIN_A = (process.argv[2] ?? 'DOGE').toUpperCase();
+const COIN_B = (process.argv[3] ?? 'XRP').toUpperCase();
+
+if (!/^[A-Z0-9]+$/.test(COIN_A) || !/^[A-Z0-9]+$/.test(COIN_B) || COIN_A === COIN_B) {
+  throw new Error('usage: research-pair-entry-policies.ts [COIN_A] [COIN_B]');
+}
 
 type Policy = {
   id: string;
@@ -90,7 +96,7 @@ type Trade = {
 };
 type Funding = Map<string, Map<number, number>>;
 
-function loadFunding(): Funding {
+function loadFunding(aCoin: string, bCoin: string): Funding {
   const result: Funding = new Map();
   if (!existsSync('data/trading.sqlite')) return result;
   const db = new Database('data/trading.sqlite', { readonly: true, fileMustExist: true });
@@ -100,10 +106,10 @@ function loadFunding(): Funding {
          SELECT coin, (ts / 3600000) * 3600000 AS hour, funding,
                 ROW_NUMBER() OVER (PARTITION BY coin, ts / 3600000 ORDER BY ts DESC) AS rank
            FROM hl_micro
-          WHERE funding IS NOT NULL AND coin IN ('DOGE','XRP')
+          WHERE funding IS NOT NULL AND coin IN (?, ?)
        ) WHERE rank = 1`,
     )
-    .all() as Array<{ coin: string; hour: number; funding: number }>;
+    .all(aCoin, bCoin) as Array<{ coin: string; hour: number; funding: number }>;
   db.close();
   for (const row of rows) {
     const rates = result.get(row.coin) ?? new Map<number, number>();
@@ -114,6 +120,8 @@ function loadFunding(): Funding {
 }
 
 function fundingCarry(
+  aCoin: string,
+  bCoin: string,
   direction: 1 | -1,
   beta: number,
   entryAt: number,
@@ -124,8 +132,8 @@ function fundingCarry(
   const bRates: number[] = [];
   const first = Math.floor(entryAt / HOUR_MS) * HOUR_MS + HOUR_MS;
   for (let hour = first; hour <= exitAt; hour += HOUR_MS) {
-    const a = funding.get('DOGE')?.get(hour);
-    const b = funding.get('XRP')?.get(hour);
+    const a = funding.get(aCoin)?.get(hour);
+    const b = funding.get(bCoin)?.get(hour);
     if (a == null || b == null) continue;
     aRates.push(a);
     bRates.push(b);
@@ -152,7 +160,13 @@ function usableFit(fit: PairFit | null): fit is PairFit {
   );
 }
 
-function simulate(rows: Aligned[], policy: Policy, funding: Funding): Trade[] {
+function simulate(
+  rows: Aligned[],
+  policy: Policy,
+  funding: Funding,
+  aCoin: string,
+  bCoin: string,
+): Trade[] {
   const trades: Trade[] = [];
   for (
     let formationStart = 0;
@@ -193,6 +207,8 @@ function simulate(rows: Aligned[], policy: Policy, funding: Funding): Trade[] {
           bExit: exit.bO,
         });
         const carry = fundingCarry(
+          aCoin,
+          bCoin,
           position.direction,
           fit.beta,
           rows[tranche.entryIdx]!.t,
@@ -351,14 +367,14 @@ function rounded<T extends Record<string, number>>(row: T): T {
 
 async function main(): Promise<void> {
   const now = Date.now();
-  const [doge, xrp] = await Promise.all([
-    getKlines('DOGEUSDT', '60', TRUE_PAIRS_HOURLY_EPOCH_MS, now),
-    getKlines('XRPUSDT', '60', TRUE_PAIRS_HOURLY_EPOCH_MS, now),
+  const [a, b] = await Promise.all([
+    getKlines(`${COIN_A}USDT`, '60', TRUE_PAIRS_HOURLY_EPOCH_MS, now),
+    getKlines(`${COIN_B}USDT`, '60', TRUE_PAIRS_HOURLY_EPOCH_MS, now),
   ]);
-  const rows = align(doge, xrp);
-  const funding = loadFunding();
+  const rows = align(a, b);
+  const funding = loadFunding(COIN_A, COIN_B);
   const results = POLICIES.map((policy) => {
-    const trades = simulate(rows, policy, funding);
+    const trades = simulate(rows, policy, funding, COIN_A, COIN_B);
     return {
       policy,
       discovery: rounded(stats(trades.filter((trade) => trade.exitAt < OOS_START_MS))),
@@ -368,11 +384,13 @@ async function main(): Promise<void> {
   });
   const output = {
     generatedAt: new Date().toISOString(),
-    pair: 'DOGE/XRP',
+    pair: `${COIN_A}/${COIN_B}`,
     rows: rows.length,
     results,
   };
-  writeFileSync('data/pair-entry-policy-results.json', JSON.stringify(output, null, 2));
+  const outputPath = `data/pair-entry-policy-results-${COIN_A.toLowerCase()}-${COIN_B.toLowerCase()}.json`;
+  writeFileSync(outputPath, JSON.stringify(output, null, 2));
+  console.log(`${output.pair} · ${rows.length} aligned hourly bars · ${outputPath}`);
   console.table(
     results.map((row) => ({
       policy: row.policy.id,
