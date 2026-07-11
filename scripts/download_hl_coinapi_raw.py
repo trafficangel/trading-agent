@@ -27,6 +27,7 @@ EXCHANGE = "HYPERLIQUID"
 KINDS = ("T-TRADES", "T-QUOTES")
 WORKERS = max(1, int(os.environ.get("COINAPI_DOWNLOAD_WORKERS", "4")))
 REQUESTS_PER_MINUTE = max(1, int(os.environ.get("COINAPI_REQUESTS_PER_MINUTE", "36")))
+MAX_NEW_FILES = max(0, int(os.environ.get("COINAPI_MAX_NEW_FILES", "0")))
 _rate_lock = threading.Lock()
 _next_request_at = 0.0
 
@@ -206,7 +207,7 @@ def main():
     s3 = client()
     print(
         f"CoinAPI raw Hyperliquid · {start}..{end} · {','.join(coins)} · "
-        f"workers={WORKERS} · limit={REQUESTS_PER_MINUTE}/min",
+        f"workers={WORKERS} · limit={REQUESTS_PER_MINUTE}/min · max-new-files={MAX_NEW_FILES}",
         flush=True,
     )
     out.mkdir(parents=True, exist_ok=True)
@@ -230,11 +231,29 @@ def main():
         "files": manifest,
     }, indent=2), encoding="utf-8")
 
+    cached_items = [item for item in manifest if not item["missing"] and pathlib.Path(item["path"]).exists()]
+    new_items = [item for item in manifest if not item["missing"] and not pathlib.Path(item["path"]).exists()]
+    if MAX_NEW_FILES == 0:
+        print(
+            "manifest-only safety stop: CoinAPI Flat Files consume spend credits per request. "
+            "Set COINAPI_MAX_NEW_FILES to an explicitly approved cap.",
+            flush=True,
+        )
+        return
+    selected_new = new_items[:MAX_NEW_FILES]
+    skipped_for_cap = len(new_items) - len(selected_new)
+    work_items = cached_items + selected_new
+    print(
+        f"download authorization: cached={len(cached_items)} new={len(selected_new)} "
+        f"skipped-by-cap={skipped_for_cap}",
+        flush=True,
+    )
+
     counts = {"downloaded": 0, "cached": 0, "missing": 0}
     downloaded_bytes = 0
     started = time.monotonic()
     with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        futures = [pool.submit(fetch_one, s3, item) for item in manifest]
+        futures = [pool.submit(fetch_one, s3, item) for item in work_items]
         for index, future in enumerate(concurrent.futures.as_completed(futures), 1):
             status, item = future.result()
             counts[status] += 1
