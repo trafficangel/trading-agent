@@ -42,6 +42,7 @@ type Flow = {
   buyHigh: number | null;
   sellLow: number | null;
   trades: number;
+  prices: Map<number, number>;
 };
 type MarketState = {
   coin: string;
@@ -51,7 +52,7 @@ type MarketState = {
 };
 
 const emptyBook = (): Book => ({ bid: 0, ask: 0, bidSize: 0, askSize: 0, bid5: 0, ask5: 0, exchangeAt: 0, receivedAt: 0 });
-const emptyFlow = (): Flow => ({ buy: 0, sell: 0, buyHigh: null, sellLow: null, trades: 0 });
+const emptyFlow = (): Flow => ({ buy: 0, sell: 0, buyHigh: null, sellLow: null, trades: 0, prices: new Map() });
 const states = new Map<string, MarketState>(MARKETS.map((m) => [m.coin, {
   coin: m.coin,
   symbol: m.symbol,
@@ -105,6 +106,8 @@ function appendFlow(flow: Flow, side: 'buy' | 'sell', price: number, size: numbe
   flow.trades++;
   if (side === 'buy') flow.buyHigh = flow.buyHigh == null ? price : Math.max(flow.buyHigh, price);
   else flow.sellLow = flow.sellLow == null ? price : Math.min(flow.sellLow, price);
+  const signedSize = side === 'buy' ? size : -size;
+  flow.prices.set(price, (flow.prices.get(price) ?? 0) + signedSize);
 }
 
 function resetFlows(state: MarketState): void {
@@ -119,6 +122,10 @@ function bookTuple(book: Book): number[] {
 
 function flowTuple(flow: Flow): Array<number | null> {
   return [flow.buy, flow.sell, flow.buyHigh, flow.sellLow, flow.trades];
+}
+
+function priceFlowTuple(flow: Flow): number[] {
+  return [...flow.prices.entries()].sort((a, b) => a[0] - b[0]).flatMap(([price, signedSize]) => [price, signedSize]);
 }
 
 function sample(): void {
@@ -138,6 +145,7 @@ function sample(): void {
         b: bookTuple(state.books.binance),
         y: bookTuple(state.books.bybit),
         f: [...flowTuple(state.flows.hl), ...flowTuple(state.flows.binance), ...flowTuple(state.flows.bybit)],
+        x: priceFlowTuple(state.flows.hl),
       };
       if (!gzip.write(`${JSON.stringify(row)}\n`)) dropped++;
       rows++;

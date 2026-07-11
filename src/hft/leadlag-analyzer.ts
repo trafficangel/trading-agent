@@ -29,7 +29,7 @@ const HORIZONS_MS = [500, 1_000, 2_000, 5_000];
 const MAKER_TTL_MS = 2_000;
 const COINS = ['BTC', 'ETH', 'SOL', 'XRP'];
 
-type PackedRow = { v: number; t: number; s: string; h: number[]; b: number[]; y: number[]; f: Array<number | null> };
+type PackedRow = { v: number; t: number; s: string; h: number[]; b: number[]; y: number[]; f: Array<number | null>; x?: number[] };
 type Point = {
   t: number;
   hlBid: number;
@@ -40,6 +40,7 @@ type Point = {
   byMid: number;
   hlBuyHigh: number | null;
   hlSellLow: number | null;
+  hlPrints: number[];
   lagBps: number;
   leadBps: number;
   agrees: boolean;
@@ -113,6 +114,7 @@ async function readCoin(files: string[], coin: string): Promise<Point[]> {
       binMid, byMid,
       hlBuyHigh: row.f[2] ?? null,
       hlSellLow: row.f[3] ?? null,
+      hlPrints: row.x ?? [],
       lagBps,
       leadBps: (binRet + byRet) / 2,
       agrees: Math.sign(binRet) === Math.sign(byRet) && Math.sign(binRet) !== 0,
@@ -154,13 +156,20 @@ function evaluate(points: Point[], coin: string): void {
           const makerMetric = delay === 0 ? pairFor(makerKey).now : pairFor(makerKey).delayed;
           makerMetric.signals++;
           const quote = side === 1 ? start.hlBid : start.hlAsk;
+          let queueAhead = side === 1 ? start.hlBidSize : start.hlAskSize;
           let fillIdx = -1;
           for (let j = startIdx + 1; j <= Math.min(points.length - horizonSteps - 1, startIdx + ttlSteps); j++) {
             const p = points[j]!;
-            const tradedThrough = side === 1
-              ? p.hlSellLow != null && p.hlSellLow < quote
-              : p.hlBuyHigh != null && p.hlBuyHigh > quote;
-            if (tradedThrough) { fillIdx = j; break; }
+            for (let k = 0; k < p.hlPrints.length; k += 2) {
+              const price = p.hlPrints[k]!; const signedSize = p.hlPrints[k + 1]!;
+              const relevant = side === 1 ? signedSize < 0 && price <= quote : signedSize > 0 && price >= quote;
+              if (!relevant) continue;
+              const tradedThrough = side === 1 ? price < quote : price > quote;
+              if (tradedThrough) { fillIdx = j; break; }
+              queueAhead -= Math.abs(signedSize);
+              if (queueAhead <= 0) { fillIdx = j; break; }
+            }
+            if (fillIdx >= 0) break;
           }
           if (fillIdx >= 0) {
             const makerExitPoint = points[fillIdx + horizonSteps]!;
