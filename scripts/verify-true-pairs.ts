@@ -15,9 +15,11 @@ import { getKlines } from '../src/backtest/klines.js';
 import type { Candle } from '../src/backtest/indicators.js';
 import { fitLogPair, pairResidualZ, pairTradeGrossPct, type PairFit } from '../src/lib/true-pairs.js';
 
-const TF = '5';
-const BAR_MS = 5 * 60_000;
-const DAYS = 552;
+const PROFILE = process.argv[2] === 'hourly' ? 'hourly' : '5m';
+const TF = PROFILE === 'hourly' ? '60' : '5';
+const DAYS = PROFILE === 'hourly' ? 720 : 552;
+const MIN_ALIGNED_BARS = PROFILE === 'hourly' ? 10_000 : 100_000;
+const OUTPUT_PATH = PROFILE === 'hourly' ? 'data/true-pairs-hourly-results.json' : 'data/true-pairs-results.json';
 const OOS_START_MS = Date.parse('2026-01-12T00:00:00Z');
 const HL_TAKER_RT_PCT = 0.09;
 const BYBIT_TAKER_RT_PCT = 0.11;
@@ -37,11 +39,18 @@ type Model = {
   maxHoldBars: number;
 };
 
-// Frozen before the first true two-leg run on Jul 11, 2026.
-const MODELS: Model[] = [
-  { id: 'F30_R7_E2', formationBars: 30 * 288, tradeBars: 7 * 288, entryZ: 2, exitZ: 0.25, stopZ: 4, maxHoldBars: 3 * 288 },
-  { id: 'F14_R3_E2.5', formationBars: 14 * 288, tradeBars: 3 * 288, entryZ: 2.5, exitZ: 0.5, stopZ: 4, maxHoldBars: 288 },
-];
+// 5m was frozen before its first run. Hourly was frozen after that family
+// failed and before the first hourly run; hourly results are exploratory and
+// require forward shadow from Jul 12 rather than reusing the seen OOS as proof.
+const MODELS: Model[] = PROFILE === 'hourly'
+  ? [
+      { id: 'H_F60_R14_E2', formationBars: 60 * 24, tradeBars: 14 * 24, entryZ: 2, exitZ: 0.25, stopZ: 4, maxHoldBars: 7 * 24 },
+      { id: 'H_F90_R30_E2.5', formationBars: 90 * 24, tradeBars: 30 * 24, entryZ: 2.5, exitZ: 0.5, stopZ: 4, maxHoldBars: 14 * 24 },
+    ]
+  : [
+      { id: 'F30_R7_E2', formationBars: 30 * 288, tradeBars: 7 * 288, entryZ: 2, exitZ: 0.25, stopZ: 4, maxHoldBars: 3 * 288 },
+      { id: 'F14_R3_E2.5', formationBars: 14 * 288, tradeBars: 3 * 288, entryZ: 2.5, exitZ: 0.5, stopZ: 4, maxHoldBars: 288 },
+    ];
 
 type AlignedBar = { t: number; aO: number; aC: number; bO: number; bC: number };
 type ExitReason = 'mean' | 'z-stop' | 'time' | 'rebalance';
@@ -218,7 +227,7 @@ function allPairs(): Array<{ a: string; b: string }> {
 async function main(): Promise<void> {
   const now = Date.now();
   const from = now - DAYS * 86_400_000;
-  console.log(`True pairs · ${TF}m · ${UNIVERSE.length} coins · ${allPairs().length} pairs · OOS ${new Date(OOS_START_MS).toISOString()}`);
+  console.log(`True pairs ${PROFILE} · ${TF}m · ${UNIVERSE.length} coins · ${allPairs().length} pairs · OOS ${new Date(OOS_START_MS).toISOString()}`);
   console.log(`next-open both legs · HL taker ${HL_TAKER_RT_PCT}% · Bybit taker ${BYBIT_TAKER_RT_PCT}% · stress ${STRESS_RT_PCT}% gross RT\n`);
   const candles = new Map<string, Candle[]>();
   for (const coin of UNIVERSE) {
@@ -239,7 +248,7 @@ async function main(): Promise<void> {
   for (const { a, b } of allPairs()) {
     const pair = `${a}/${b}`;
     const aligned = align(candles.get(a) ?? [], candles.get(b) ?? []);
-    if (aligned.length < 100_000) continue;
+    if (aligned.length < MIN_ALIGNED_BARS) continue;
     for (const model of MODELS) {
       const trades = simulate(pair, aligned, model);
       const discovery = stats(trades.filter((trade) => trade.exitAt < OOS_START_MS), 'quarter');
@@ -264,6 +273,8 @@ async function main(): Promise<void> {
   const discoveryCandidates = results.filter((row) => row.discoveryPass).sort((a, b) => b.discovery.stressNet - a.discovery.stressNet);
   const output = {
     version: 1,
+    profile: PROFILE,
+    validationStatus: PROFILE === 'hourly' ? 'exploratory-requires-forward-shadow-from-2026-07-12' : 'frozen-historical-oos',
     generatedAt: new Date().toISOString(),
     oosStartAt: OOS_START_MS,
     universe: UNIVERSE,
@@ -279,7 +290,7 @@ async function main(): Promise<void> {
     passing,
     results,
   };
-  writeFileSync('data/true-pairs-results.json', JSON.stringify(output, null, 2));
+  writeFileSync(OUTPUT_PATH, JSON.stringify(output, null, 2));
 
   const line = (row: typeof results[number]): string =>
     `${row.pass ? 'PASS' : '    '} ${row.pair.padEnd(11)} ${row.model.padEnd(12)} `
@@ -289,7 +300,7 @@ async function main(): Promise<void> {
   console.log(discoveryCandidates.slice(0, 20).map(line).join('\n') || '  none');
   console.log(`\nStrict OOS passes: ${passing.length}`);
   console.log(passing.map(line).join('\n') || '  none');
-  console.log('\nFull audit: data/true-pairs-results.json');
+  console.log(`\nFull audit: ${OUTPUT_PATH}`);
 }
 
 void main().catch((error) => {
