@@ -1,8 +1,8 @@
 [Unit]
-Description=Analyze completed lead-lag segments every 15 minutes
+Description=Analyze the rolling lead-lag window hourly
 
 [Timer]
-OnCalendar=*-*-* *:02,17,32,47:00 UTC
+OnCalendar=*-*-* *:02:00 UTC
 Persistent=true
 RandomizedDelaySec=10
 Unit=hft-leadlag-analyzer.service
