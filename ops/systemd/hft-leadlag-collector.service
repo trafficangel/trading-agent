@@ -10,7 +10,7 @@ WorkingDirectory=/home/trader/apps/hft-leadlag
 Environment=NODE_ENV=production
 Environment=HFT_DATA_DIR=/home/trader/apps/hft-leadlag/data
 Environment=HFT_SAMPLE_MS=250
-ExecStart=/usr/bin/node /home/trader/apps/hft-leadlag/leadlag-collector.js
+ExecStart=/usr/bin/node /home/trader/apps/hft-leadlag/dist/hft/leadlag-collector.js
 Restart=always
 RestartSec=2
 NoNewPrivileges=true
