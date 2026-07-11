@@ -115,7 +115,7 @@ type ShadowProofRow = { side: Side; pnl_pct: number; close_reason: string | null
 type ProofStats = { n: number; avg: number; wr: number; sum: number };
 
 const NOTIONAL_USD = 12;
-const LIVE_ENABLED = true;
+const LIVE_ENABLED_DEFAULT = false;
 const LIVE_NOTIONAL_USD = 12;
 const LIVE_MIN_NOTIONAL_USD = 11;
 const LIVE_MAX_NOTIONAL_USD = 24;
@@ -566,6 +566,10 @@ function liveDailyPnlStart(nowMs: number): number {
 function runtimeNum(key: string, fallback: number, lo: number, hi: number): number {
   const raw = Number(getKvStmt.get(key)?.value ?? fallback);
   return Number.isFinite(raw) ? clamp(raw, lo, hi) : fallback;
+}
+
+function liveTradingEnabled(): boolean {
+  return runtimeNum('hl_momentum_live_enabled', LIVE_ENABLED_DEFAULT ? 1 : 0, 0, 1) >= 0.5;
 }
 
 function momentumTradeMode(): TradeMode {
@@ -1939,7 +1943,7 @@ async function fastManageLivePositions(mids: Map<string, number>): Promise<void>
 }
 
 async function liveMaybeOpen(coin: string, sig: MomentumSignal, last: Candle, params: RiskParams): Promise<void> {
-  if (!LIVE_ENABLED) return;
+  if (!liveTradingEnabled()) return;
   if (liveFastClosing.has(coin)) return;
   if (liveEntriesPausedByReconcile || liveReconcileRunning) {
     recordSignal(sig, 'skip', 'exchange reconcile pause', { ref: last.c, signal: last.c });
@@ -2236,7 +2240,7 @@ export function startHlMomentumShadowJob(): void {
   const t = setTimeout(() => { void tick(); }, 75_000);
   t.unref();
   logger.info({
-    live: LIVE_ENABLED,
+    live: liveTradingEnabled(),
     tradeMode: momentumTradeMode(),
     liveNotionalMin: LIVE_MIN_NOTIONAL_USD,
     liveNotionalMax: LIVE_MAX_NOTIONAL_USD,

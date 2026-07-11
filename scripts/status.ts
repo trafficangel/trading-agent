@@ -144,6 +144,7 @@ const pendingIntents = db.prepare<[], { n: number }>(`
 `).get()?.n ?? 0;
 const momRuntimeStmt = db.prepare<[string], { value: string }>('SELECT value FROM runtime_config WHERE key = ?');
 const momRuntime = (key: string, fallback: string): string => momRuntimeStmt.get(key)?.value ?? fallback;
+const momLiveEnabled = momRuntime('hl_momentum_live_enabled', '0') === '1';
 const momPromotionStage = momRuntime('hl_momentum_promotion_stage', 'canary-1');
 const momPromotionN = Number(momRuntime('hl_momentum_confirm_long_canary_live_n', '0'));
 const momPromotionExactN = Number(momRuntime('hl_momentum_promotion_exact_n', String(momPromotionN)));
@@ -187,7 +188,7 @@ if (reconcileRaw) {
     reconcile = `${state.ok ? '✅ healthy' : '⛔ paused'} @ ${fmtT(state.checkedAt ?? null)}${state.issues?.length ? ` · ${state.issues.join('; ')}` : ''}`;
   } catch { reconcile = 'invalid state'; }
 }
-console.log(`\nHL MOMENTUM LIVE (public track since ${fmtT(momPublicStart)})`);
+console.log(`\nHL MOMENTUM ${momLiveEnabled ? 'LIVE' : 'CLOSED · SHADOW ONLY'} (track since ${fmtT(momPublicStart)})`);
 console.log(`  reconcile ${reconcile}`);
 console.log(`  stage ${momPromotionStage} · |r3|≥${momConfirmLongMinAbsR3.toFixed(2)}% · ${momPromotionProgress} · live exact ${momPromotionExactN}/${momPromotionN} · avg ${momPromotionAvg >= 0 ? '+' : ''}${momPromotionAvg.toFixed(3)}% · PF ${momPromotionPf} · maxDD ${momPromotionDd.toFixed(3)}% · maxOpen ${momPromotionMaxOpen}`);
 console.log(`  fast-long ${momFastStage} · ${momFastExecutionVersion} · |r90|≥${momFastMinAbsR90.toFixed(2)}% · ${momFastProgress} · live exact ${momFastExactN}/${momFastN} · avg ${momFastAvg >= 0 ? '+' : ''}${momFastAvg.toFixed(3)}% · PF ${momFastPf} · maxDD ${momFastDd.toFixed(3)}% · maxOpen ${momFastMaxOpen}`);

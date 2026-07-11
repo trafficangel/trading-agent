@@ -4,7 +4,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
-import { pageShell, getLang } from './landing.js';
+import { pageShell } from './landing.js';
 import { WF_CONFIG, COIN_X, LADDER } from '../jobs/wick-fade-runner.js';
 import { hlOpenOrders, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
 import { metaAndAssetCtxs } from '../exchange/hyperliquid.js';
@@ -648,23 +648,8 @@ function openPositionsSection(nowMs: number, lang: Lang): string {
 }
 
 function momentumLinkSection(lang: Lang): string {
-  const liveClosed = momentumPublicRows(momClosedStmt.all());
-  const liveOpen = momentumPublicRows(momOpenStmt.all());
-  const net = liveClosed.reduce((s, r) => s + (r.pnl_pct ?? 0), 0);
-  return `<div class="section">
-    <a class="mom-link" href="/lab/momentum">
-      <div>
-        <span class="mom-link-badge">${t(lang, 'IMPULSE FADE · НОВЫЙ ОТСЧЁТ', 'IMPULSE FADE · NEW TRACK')}</span>
-        <div class="mom-link-title">Impulse Fade</div>
-        <div class="mom-link-sub">${t(lang, 'Адаптивный 2s-радар: fade поздних импульсов, live-статистика и сделки →', 'Adaptive 2s radar: fading late impulses, live stats and trades →')}</div>
-      </div>
-      <div class="mom-link-stats">
-        <span><b class="${cls(net)}">${pct(net)}</b><small>${t(lang, 'live', 'live')}</small></span>
-        <span><b>${liveClosed.length}</b><small>${t(lang, 'закрыто', 'closed')}</small></span>
-        <span><b>${liveOpen.length}</b><small>${t(lang, 'открыто', 'open')}</small></span>
-      </div>
-    </a>
-  </div>`;
+  void lang;
+  return '';
 }
 
 type MomStats = {
@@ -1513,24 +1498,8 @@ export async function renderLiveTrack(page = 1, lang: Lang = 'ru'): Promise<stri
 
 /** Compact live-track summary for the hero card at the top of /lab. */
 export function liveTrackHero(lang: Lang = 'ru'): string {
-  const momRows = momentumPublicRows(momClosedStmt.all());
-  const momOpen = momentumPublicRows(momOpenStmt.all());
-  const mom = computeMomentumStats(momRows, momOpen.length);
   return `
     <div class="lt-hero-stack">
-    <a class="lt-hero" href="/lab/momentum">
-      <div class="lt-hero-l">
-        <span class="lt-hero-badge">🧭 IMPULSE FADE · Hyperliquid · ${t(lang, 'новый отсчёт', 'new track')}</span>
-        <div class="lt-hero-title">Impulse Fade</div>
-        <div class="lt-hero-sub">${t(lang, 'Адаптивный 2s-радар поздних импульсов: описание и отдельная статистика →', 'Adaptive 2s late-impulse radar: description and separate stats →')}</div>
-      </div>
-      <div class="lt-hero-r">
-        <div class="lt-hero-stat"><div class="v ${cls(mom.netPct)}">${pct(mom.netPct)}</div><div class="k">${t(lang, 'live', 'live')}</div></div>
-        <div class="lt-hero-stat"><div class="v">${mom.closed}</div><div class="k">${t(lang, 'сделок', 'trades')}</div></div>
-        <div class="lt-hero-stat"><div class="v">${mom.open}</div><div class="k">${t(lang, 'открыто', 'open')}</div></div>
-        <div class="lt-hero-stat"><div class="v">${mom.winRate != null ? `${(mom.winRate * 100).toFixed(0)}%` : '—'}</div><div class="k">${t(lang, 'винрейт', 'win rate')}</div></div>
-      </div>
-    </a>
     ${truePairsHero(lang)}
     </div>`;
 }
@@ -1556,13 +1525,11 @@ export const LIVE_TRACK_HERO_CSS = `
 export async function labTrackRoute(app: FastifyInstance): Promise<void> {
   app.get('/lab/live', async (_req, reply) => {
     reply.header('Cache-Control', 'public, max-age=30');
-    return reply.redirect('/lab/momentum', 302);
+    return reply.redirect('/lab/pairs', 302);
   });
 
-  app.get<{ Querystring: { page?: string } }>('/lab/momentum', async (req, reply) => {
-    const page = Math.max(1, parseInt(req.query.page ?? '1', 10) || 1);
-    reply.type('text/html; charset=utf-8');
+  app.get('/lab/momentum', async (_req, reply) => {
     reply.header('Cache-Control', 'public, max-age=30');
-    return renderMomentumTrack(page, getLang(req));
+    return reply.redirect('/lab/pairs', 302);
   });
 }
