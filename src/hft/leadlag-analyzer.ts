@@ -25,6 +25,8 @@ import { makerFillIndex } from '../lib/hft-maker-fill.js';
 
 const DATA_DIR = resolve(process.argv[2] ?? process.env.HFT_DATA_DIR ?? 'data/hft-leadlag');
 const HOURS = Number(process.argv[3] ?? 24);
+const OOS_START_MS = Date.parse('2026-07-11T12:15:00Z');
+const FROZEN_CANDIDATES = new Set(['MM_BASE_D5_H10000', 'MM_L1G0.5_D5_H10000']);
 const STATUS_PATH = resolve(DATA_DIR, 'status.json');
 const RESULT_PATH = resolve(DATA_DIR, 'analysis.json');
 const SAMPLE_MS = 250;
@@ -143,7 +145,7 @@ async function readCoin(files: string[], coin: string): Promise<Point[]> {
     for await (const line of lines) {
       if (!line) continue;
       const row = JSON.parse(line) as PackedRow;
-      if (row.v === 1 && row.s === coin) raw.push(row);
+      if (row.v === 1 && row.s === coin && row.t >= OOS_START_MS) raw.push(row);
     }
   }
   raw.sort((a, b) => a.t - b.t);
@@ -496,9 +498,11 @@ function summarize(key: string, pair: Pair) {
     delayed = view(pair.delayed);
   return {
     key,
+    eligible: FROZEN_CANDIDATES.has(key),
     now,
     delayed,
     passes:
+      FROZEN_CANDIDATES.has(key) &&
       now.fills >= 30 &&
       now.stressNetBps > 0 &&
       delayed.stressNetBps > 0 &&
@@ -548,6 +552,8 @@ function summarize(key: string, pair: Pair) {
   const result = {
     version: 'leadlag-analysis-v1',
     generatedAt: Date.now(),
+    oosStartAt: OOS_START_MS,
+    frozenCandidates: [...FROZEN_CANDIDATES],
     hoursRequested: HOURS,
     files: files.map((path) => basename(path)),
     costsBps: {
