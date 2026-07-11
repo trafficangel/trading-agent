@@ -123,6 +123,10 @@ type Position = {
   aEntry: number;
   bEntry: number;
   zEntry: number;
+  lastZ?: number;
+  minZSeen?: number;
+  maxZSeen?: number;
+  lastCheckedAt?: number;
 };
 
 type CandidateState = {
@@ -312,6 +316,12 @@ function openCount(state: ShadowState): number {
   return CANDIDATES.filter((candidate) => state.candidates[candidate.id]?.position).length;
 }
 
+function liveZ(candidate: Candidate, fit: PairFit, books: Map<string, PairTopOfBook>): number {
+  const a = books.get(candidate.a)!;
+  const b = books.get(candidate.b)!;
+  return pairResidualZ((a.bid + a.ask) / 2, (b.bid + b.ask) / 2, fit);
+}
+
 async function closePosition(args: {
   candidate: Candidate;
   runtime: CandidateState;
@@ -351,6 +361,8 @@ async function closePosition(args: {
     beta: position.beta,
     zEntry: position.zEntry,
     zExit: args.z,
+    minZSeen: position.minZSeen ?? position.zEntry,
+    maxZSeen: position.maxZSeen ?? position.zEntry,
     holdHours,
     aEntry: position.aEntry,
     bEntry: position.bEntry,
@@ -367,9 +379,67 @@ async function closePosition(args: {
   });
 }
 
+async function monitorOpenPosition(
+  candidate: Candidate,
+  runtime: CandidateState,
+  books: Map<string, PairTopOfBook>,
+  now: number,
+): Promise<boolean> {
+  const position = runtime.position;
+  if (!position || !runtime.fit) return false;
+  const z = liveZ(candidate, runtime.fit, books);
+  if (!Number.isFinite(z)) return false;
+  position.lastZ = z;
+  position.minZSeen = Math.min(position.minZSeen ?? position.zEntry, z);
+  position.maxZSeen = Math.max(position.maxZSeen ?? position.zEntry, z);
+  position.lastCheckedAt = now;
+  const adverseStop = position.direction === 1 ? z <= -candidate.stopZ : z >= candidate.stopZ;
+  const reverted = position.direction === 1 ? z >= -candidate.exitZ : z <= candidate.exitZ;
+  const timedOut = now - position.entryAt >= candidate.maxHoldBars * HOUR_MS;
+  const reason: ExitReason | null = adverseStop
+    ? 'z-stop'
+    : reverted
+      ? 'mean'
+      : timedOut
+        ? 'time'
+        : null;
+  if (!reason) return false;
+  await closePosition({ candidate, runtime, books, exitAt: now, exitBarAt: now, z, reason });
+  return true;
+}
+
 async function main(): Promise<void> {
   const now = Date.now();
   const state = loadState();
+  const expectedLastClosedBar = Math.floor(now / HOUR_MS) * HOUR_MS - HOUR_MS;
+  const hourlyRefreshNeeded = CANDIDATES.some(
+    (candidate) => (state.candidates[candidate.id]?.lastBarAt ?? 0) < expectedLastClosedBar,
+  );
+  if (!hourlyRefreshNeeded) {
+    const openCandidates = CANDIDATES.filter(
+      (candidate) => state.candidates[candidate.id]?.position,
+    );
+    const openCoins = [
+      ...new Set(openCandidates.flatMap((candidate) => [candidate.a, candidate.b])),
+    ];
+    const bookRows = await Promise.all(
+      openCoins.map(async (coin) => [coin, topOfBook((await l2Book(coin)).levels)] as const),
+    );
+    const books = new Map(bookRows);
+    for (const candidate of openCandidates) {
+      await monitorOpenPosition(candidate, state.candidates[candidate.id]!, books, now);
+    }
+    state.lastRunAt = now;
+    saveState(state);
+    console.log(
+      JSON.stringify({
+        at: new Date(now).toISOString(),
+        mode: 'minute-monitor',
+        openPairs: openCount(state),
+      }),
+    );
+    return;
+  }
   const coins = [...new Set(CANDIDATES.flatMap((candidate) => [candidate.a, candidate.b]))];
   const historyStart = now - 130 * DAY_MS;
   const candleRows = await Promise.all(
@@ -389,8 +459,11 @@ async function main(): Promise<void> {
     const runtime = state.candidates[candidate.id]!;
     const rows = align(candles.get(candidate.a) ?? [], candles.get(candidate.b) ?? []);
     const latest = rows.at(-1);
-    if (!latest || rows.length < candidate.formationBars + 1 || runtime.lastBarAt === latest.t)
+    if (!latest || rows.length < candidate.formationBars + 1) continue;
+    if (runtime.lastBarAt === latest.t) {
+      await monitorOpenPosition(candidate, runtime, books, now);
       continue;
+    }
     const window = formationWindow(latest.t, candidate);
     if (!window) continue;
 
@@ -401,7 +474,7 @@ async function main(): Promise<void> {
       runtime.nextRefitAt &&
       latest.t >= runtime.nextRefitAt - HOUR_MS
     ) {
-      const oldZ = pairResidualZ(latest.a, latest.b, runtime.fit);
+      const oldZ = liveZ(candidate, runtime.fit, books);
       await closePosition({
         candidate,
         runtime,
@@ -416,7 +489,7 @@ async function main(): Promise<void> {
     const refitDue = runtime.fitAt !== window.end;
     if (refitDue) {
       if (runtime.position) {
-        const oldZ = pairResidualZ(latest.a, latest.b, runtime.fit!);
+        const oldZ = liveZ(candidate, runtime.fit!, books);
         await closePosition({
           candidate,
           runtime,
@@ -470,28 +543,7 @@ async function main(): Promise<void> {
     if (!Number.isFinite(z)) continue;
 
     if (runtime.position && !rebalanced) {
-      const adverseStop =
-        runtime.position.direction === 1 ? z <= -candidate.stopZ : z >= candidate.stopZ;
-      const reverted =
-        runtime.position.direction === 1 ? z >= -candidate.exitZ : z <= candidate.exitZ;
-      const timedOut = latest.t - runtime.position.entryBarAt >= candidate.maxHoldBars * HOUR_MS;
-      const reason: ExitReason | null = adverseStop
-        ? 'z-stop'
-        : reverted
-          ? 'mean'
-          : timedOut
-            ? 'time'
-            : null;
-      if (reason)
-        await closePosition({
-          candidate,
-          runtime,
-          books,
-          exitAt: now,
-          exitBarAt: latest.t,
-          z,
-          reason,
-        });
+      await monitorOpenPosition(candidate, runtime, books, now);
       continue;
     }
 
@@ -540,6 +592,10 @@ async function main(): Promise<void> {
       aEntry: prices.a,
       bEntry: prices.b,
       zEntry: z,
+      lastZ: z,
+      minZSeen: z,
+      maxZSeen: z,
+      lastCheckedAt: now,
     };
     usedAssets.add(candidate.a);
     usedAssets.add(candidate.b);

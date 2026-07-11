@@ -33,6 +33,10 @@ type Position = {
   aEntry: number;
   bEntry: number;
   zEntry: number;
+  lastZ?: number;
+  minZSeen?: number;
+  maxZSeen?: number;
+  lastCheckedAt?: number;
 };
 type Runtime = {
   fit?: PairFit;
@@ -57,13 +61,16 @@ type HistoricalTrade = {
 type ResultsFile = {
   researchStartAt: number;
   generatedAt: string;
+  featuredDivergence?: Point[];
   results: Array<{ pair: string; model: string; trades?: HistoricalTrade[] }>;
 };
 type Point = { t: number; actual: number; fair: number; z: number };
+type Period = '30d' | '90d' | '1y' | 'all';
 type PageData = {
   state: ShadowState;
   runtime: Runtime;
   points: Point[];
+  historicalPoints: Point[];
   currentZ: number;
   currentNetUsd: number | null;
   currentGrossUsd: number | null;
@@ -148,7 +155,7 @@ async function loadPageData(): Promise<PageData> {
     cached = null;
     throw error;
   });
-  cached = { expiresAt: now + 60_000, promise };
+  cached = { expiresAt: now + 45_000, promise };
   return promise;
 }
 
@@ -218,6 +225,7 @@ async function buildPageData(now: number): Promise<PageData> {
     state,
     runtime,
     points,
+    historicalPoints: results?.featuredDivergence ?? [],
     currentZ,
     currentNetUsd,
     currentGrossUsd,
@@ -252,10 +260,15 @@ function path(values: number[], width: number, height: number, min: number, max:
     .join(' ');
 }
 
+function samplePoints(points: Point[], maxPoints = 900): Point[] {
+  const stride = Math.max(1, Math.ceil(points.length / maxPoints));
+  return points.filter((_, index) => index % stride === 0 || index === points.length - 1);
+}
+
 function priceChart(points: Point[], lang: Lang, entryAt?: number): string {
   if (points.length < 2)
     return `<div class="tp-empty">${t(lang, 'Недостаточно данных', 'Not enough data')}</div>`;
-  const sampled = points.filter((_, index) => index % 3 === 0 || index === points.length - 1);
+  const sampled = samplePoints(points);
   const base = sampled[0]!.fair;
   const actual = sampled.map((point) => (point.actual / base) * 100);
   const fair = sampled.map((point) => (point.fair / base) * 100);
@@ -288,11 +301,12 @@ function priceChart(points: Point[], lang: Lang, entryAt?: number): string {
 
 function zChart(points: Point[], entryAt?: number): string {
   if (points.length < 2) return '';
-  const sampled = points.filter((_, index) => index % 3 === 0 || index === points.length - 1);
-  const z = sampled.map((point) => Math.max(-5, Math.min(5, point.z)));
+  const sampled = samplePoints(points);
+  const z = sampled.map((point) => point.z);
+  const bound = Math.max(5, Math.ceil(Math.max(...z.map(Math.abs))));
   const w = 900;
   const h = 180;
-  const y = (value: number): number => h - ((value + 5) / 10) * h;
+  const y = (value: number): number => h - ((value + bound) / (2 * bound)) * h;
   const bands = [-4, -2, 0, 2, 4]
     .map(
       (value) =>
@@ -304,8 +318,66 @@ function zChart(points: Point[], entryAt?: number): string {
   return `<svg class="tp-chart tp-z" viewBox="-58 -10 980 220" role="img" aria-label="spread z-score chart">
     ${bands}
     ${entryX == null ? '' : `<line x1="${entryX}" y1="0" x2="${entryX}" y2="${h}" class="entry"/>`}
-    <path d="${path(z, w, h, -5, 5)}" class="zline"/>
+    <path d="${path(z, w, h, -bound, bound)}" class="zline"/>
   </svg>`;
+}
+
+function periodPoints(data: PageData, period: Period): Point[] {
+  if (period === '30d' || !data.historicalPoints.length) return data.points;
+  const latest = data.historicalPoints.at(-1)?.t ?? data.marketAt;
+  const since =
+    period === '90d' ? latest - 90 * DAY_MS : period === '1y' ? latest - 365 * DAY_MS : 0;
+  return data.historicalPoints.filter((point) => point.t >= since);
+}
+
+function deviationSummary(
+  points: Point[],
+  entryZ: number | null,
+): {
+  min: Point | null;
+  max: Point | null;
+  maxAbs: Point | null;
+  entryPercentile: number | null;
+  beyondEntry: number;
+} {
+  if (!points.length)
+    return { min: null, max: null, maxAbs: null, entryPercentile: null, beyondEntry: 0 };
+  const min = points.reduce((best, point) => (point.z < best.z ? point : best));
+  const max = points.reduce((best, point) => (point.z > best.z ? point : best));
+  const maxAbs = points.reduce((best, point) =>
+    Math.abs(point.z) > Math.abs(best.z) ? point : best,
+  );
+  if (entryZ == null) return { min, max, maxAbs, entryPercentile: null, beyondEntry: 0 };
+  const entryAbs = Math.abs(entryZ);
+  const within = points.filter((point) => Math.abs(point.z) <= entryAbs).length;
+  return {
+    min,
+    max,
+    maxAbs,
+    entryPercentile: (within / points.length) * 100,
+    beyondEntry: points.filter((point) => Math.abs(point.z) >= entryAbs).length,
+  };
+}
+
+function monthlyExtremes(
+  points: Point[],
+): Array<{ month: string; min: number; max: number; maxAbs: number }> {
+  const months = new Map<string, { min: number; max: number }>();
+  for (const point of points) {
+    const month = new Date(point.t).toISOString().slice(0, 7);
+    const row = months.get(month) ?? { min: point.z, max: point.z };
+    row.min = Math.min(row.min, point.z);
+    row.max = Math.max(row.max, point.z);
+    months.set(month, row);
+  }
+  return [...months.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, row]) => ({
+      month,
+      min: row.min,
+      max: row.max,
+      maxAbs: Math.max(Math.abs(row.min), Math.abs(row.max)),
+    }));
 }
 
 function historyStats(trades: HistoricalTrade[]): {
@@ -349,13 +421,36 @@ function historyStats(trades: HistoricalTrade[]): {
   };
 }
 
-function renderPage(data: PageData, lang: Lang): string {
+function renderPage(data: PageData, lang: Lang, period: Period): string {
   const position = data.runtime.position;
   const stats = historyStats(data.history);
+  const selectedPoints = periodPoints(data, period);
+  const monthSummary = deviationSummary(data.points, position?.zEntry ?? null);
+  const months = monthlyExtremes(data.historicalPoints).slice(-12);
   const currentClass = (data.currentNetUsd ?? 0) >= 0 ? 'pos' : 'neg';
   const targetRange = data.targetRangeUsd
     ? `$${data.targetRangeUsd[0].toFixed(0)}–$${data.targetRangeUsd[1].toFixed(0)}`
     : '—';
+  const periodLabels: Array<[Period, string]> = [
+    ['30d', '30D'],
+    ['90d', '90D'],
+    ['1y', '1Y'],
+    ['all', 'ALL'],
+  ];
+  const periodTabs = periodLabels
+    .map(
+      ([value, label]) =>
+        `<a href="/lab/pairs?period=${value}" class="${period === value ? 'active' : ''}">${label}</a>`,
+    )
+    .join('');
+  const strongerText =
+    monthSummary.entryPercentile == null
+      ? '—'
+      : t(
+          lang,
+          `${monthSummary.beyondEntry} из ${data.points.length} часовых точек были сильнее входа`,
+          `${monthSummary.beyondEntry} of ${data.points.length} hourly points exceeded entry`,
+        );
   const body = `
     <style>${CSS}</style>
     <div class="tp-head">
@@ -374,15 +469,24 @@ function renderPage(data: PageData, lang: Lang): string {
       <div class="tp-stat"><div class="k">${t(lang, 'СЦЕНАРИЙ ДО СТОПА', 'STOP SCENARIO')}</div><div class="v neg">${money(data.stopNetUsd)}</div><div class="s">z ${position?.direction === 1 ? '−4.00' : '+4.00'} · fee included</div></div>
     </div>
 
+    <div class="tp-context">
+      <div><span>${t(lang, 'МИНИМУМ Z ЗА 30 ДНЕЙ', '30D MIN Z')}</span><b>${monthSummary.min?.z.toFixed(2) ?? '—'}</b><small>${monthSummary.min ? new Date(monthSummary.min.t).toISOString().slice(0, 10) : ''}</small></div>
+      <div><span>${t(lang, 'МАКСИМУМ Z ЗА 30 ДНЕЙ', '30D MAX Z')}</span><b>${monthSummary.max?.z.toFixed(2) ?? '—'}</b><small>${monthSummary.max ? new Date(monthSummary.max.t).toISOString().slice(0, 10) : ''}</small></div>
+      <div><span>${t(lang, 'ПЕРЦЕНТИЛЬ ВХОДА', 'ENTRY PERCENTILE')}</span><b>${monthSummary.entryPercentile?.toFixed(0) ?? '—'}%</b><small>${strongerText}</small></div>
+      <div><span>${t(lang, 'ХУДШИЙ Z ПОСЛЕ ВХОДА', 'WORST Z SINCE ENTRY')}</span><b>${position ? (position.direction === 1 ? Math.min(position.zEntry, position.minZSeen ?? data.currentZ) : Math.max(position.zEntry, position.maxZSeen ?? data.currentZ)).toFixed(2) : '—'}</b><small>${position?.lastCheckedAt ? new Date(position.lastCheckedAt).toISOString().slice(11, 16) + ' UTC' : t(lang, 'минутный монитор запускается', 'minute monitor starting')}</small></div>
+    </div>
+
     <section class="tp-panel">
-      <div class="tp-section-head"><div><h2>${t(lang, 'Фактическая и справедливая цена', 'Actual and fair price')}</h2><p>${t(lang, 'Индекс, 30 дней. Зелёная линия — DOGE; жёлтая — справедливая DOGE из цены XRP и beta.', 'Indexed over 30 days. Green is DOGE; yellow is fair DOGE derived from XRP and beta.')}</p></div><div class="legend"><span class="a">DOGE</span><span class="f">FAIR DOGE</span></div></div>
-      ${priceChart(data.points, lang, position?.entryBarAt)}
+      <div class="tp-section-head"><div><h2>${t(lang, 'Фактическая и справедливая цена', 'Actual and fair price')}</h2><p>${t(lang, period === '30d' ? 'Нативные Hyperliquid 1h. Зелёная линия — DOGE; жёлтая — справедливая DOGE из XRP и beta.' : 'Исторические 1h-окна с отдельным causal fit для каждого торгового блока.', period === '30d' ? 'Native Hyperliquid 1h. Green is DOGE; yellow is fair DOGE from XRP and beta.' : 'Historical 1h windows with a separate causal fit for each trading block.')}</p></div><div><div class="tp-periods">${periodTabs}</div><div class="legend"><span class="a">DOGE</span><span class="f">FAIR DOGE</span></div></div></div>
+      ${priceChart(selectedPoints, lang, position?.entryBarAt)}
     </section>
 
     <section class="tp-panel">
       <div class="tp-section-head"><div><h2>Z-score</h2><p>${t(lang, 'Ноль — модельное равновесие. Пунктир ±2 — зона входа, ±4 — защитный выход.', 'Zero is model equilibrium. Dashed ±2 marks entry territory; ±4 is the protective exit.')}</p></div></div>
-      ${zChart(data.points, position?.entryBarAt)}
+      ${zChart(selectedPoints, position?.entryBarAt)}
     </section>
+
+    ${months.length ? `<section class="tp-history"><div class="tp-section-head"><div><h2>${t(lang, 'Максимальные расхождения по месяцам', 'Maximum monthly divergences')}</h2><p>${t(lang, 'Минимальный и максимальный z внутри каждого causal торгового блока. Последние 12 месяцев с доступной валидной моделью.', 'Minimum and maximum z inside each causal trading block. Latest 12 months with a valid model.')}</p></div></div><div class="tp-months">${months.map((row) => `<div><span>${row.month}</span><b class="neg">${row.min.toFixed(2)}</b><i>…</i><b class="pos">${row.max.toFixed(2)}</b><strong>|z| ${row.maxAbs.toFixed(2)}</strong></div>`).join('')}</div></section>` : ''}
 
     <section class="tp-history">
       <div class="tp-section-head"><div><h2>${t(lang, 'Исторические расхождения', 'Historical divergences')}</h2><p>${t(lang, 'Часовые окна с фиксированным календарём, next-open исполнением, funding и комиссиями Hyperliquid.', 'Hourly fixed-calendar windows with next-open execution, funding and Hyperliquid fees.')}</p></div></div>
@@ -400,7 +504,7 @@ function renderPage(data: PageData, lang: Lang): string {
       }
     </section>
 
-    <div class="tp-note">${t(lang, 'Важно: большое |z| означает редкое отклонение, а не гарантированную прибыль. Спред может продолжить расходиться. Все суммы — модель для двух ног по $1000; текущий контур не отправляет реальные ордера.', 'Important: a large |z| means a rare deviation, not guaranteed profit. The spread can keep widening. Dollar figures model two $1,000 legs; this process sends no real orders.')}</div>
+    <div class="tp-note">${t(lang, 'Важно: большое |z| означает редкое отклонение, а не гарантированную прибыль. Новые сигналы считаются по закрытой 1h-свече, открытая позиция и стоп проверяются каждую минуту. Усреднения нет: при |z| = 4 обе ноги закрываются. Все суммы — модель для двух ног по $1000; реальные ордера не отправляются.', 'Important: a large |z| means a rare deviation, not guaranteed profit. New signals use closed 1h candles; an open position and stop are checked every minute. There is no averaging: both legs close at |z| = 4. Dollar figures model two $1,000 legs; no real orders are sent.')}</div>
   `;
   return pageShell(`${PAIR.a}/${PAIR.b} pairs shadow · Robot Claude`, body, {
     lang,
@@ -431,11 +535,14 @@ export function truePairsHero(lang: Lang): string {
 }
 
 export async function truePairsRoute(app: FastifyInstance): Promise<void> {
-  app.get('/lab/pairs', async (req, reply) => {
+  app.get<{ Querystring: { period?: string } }>('/lab/pairs', async (req, reply) => {
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'public, max-age=30');
     try {
-      return renderPage(await loadPageData(), getLang(req));
+      const period: Period = ['30d', '90d', '1y', 'all'].includes(req.query.period ?? '')
+        ? (req.query.period as Period)
+        : '30d';
+      return renderPage(await loadPageData(), getLang(req), period);
     } catch {
       reply.code(503);
       return pageShell(
@@ -454,9 +561,12 @@ const CSS = `
   .tp-live{font-size:12px;color:var(--text-dim);white-space:nowrap}.tp-live span{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:7px;box-shadow:0 0 0 4px var(--accent-soft)}
   .tp-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:22px}.tp-stats.history{grid-template-columns:repeat(3,minmax(0,1fr));margin:0}
   .tp-stat{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:14px;min-width:0}.tp-stat .k{font-size:10px;color:var(--text-faint);font-weight:700}.tp-stat .v{font-size:25px;font-weight:650;margin:5px 0 2px;font-variant-numeric:tabular-nums}.tp-stat .s{font-size:11px;color:var(--text-dim);white-space:normal}.pos{color:var(--accent)!important}.neg{color:var(--danger)!important}
+  .tp-context{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin:2px 0 18px}.tp-context>div{padding:12px 14px;border-right:1px solid var(--border);min-width:0}.tp-context>div:last-child{border-right:0}.tp-context span,.tp-context small{display:block;font-size:9px;color:var(--text-faint)}.tp-context b{display:block;font-size:18px;margin:3px 0;font-variant-numeric:tabular-nums}.tp-context small{font-size:10px;color:var(--text-dim);white-space:normal}
   .tp-panel,.tp-history{border-top:1px solid var(--border);padding:25px 0;margin-top:12px}.tp-section-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:14px}.tp-section-head h2{font-size:18px;margin:0 0 4px;letter-spacing:0}.tp-section-head p{font-size:12px;color:var(--text-dim);margin:0}.legend{display:flex;gap:14px;font-size:10px;font-weight:700;white-space:nowrap}.legend span:before{content:'';display:inline-block;width:18px;height:3px;margin-right:6px;vertical-align:middle}.legend .a:before{background:#4ad991}.legend .f:before{background:#f4c95d}
+  .tp-periods{display:flex;border:1px solid var(--border);margin:0 0 10px auto;width:max-content}.tp-periods a{padding:5px 9px;color:var(--text-dim);font-size:10px;font-weight:700;text-decoration:none;border-right:1px solid var(--border)}.tp-periods a:last-child{border-right:0}.tp-periods a.active{background:var(--accent-soft);color:var(--accent)}
   .tp-chart{display:block;width:100%;height:auto;overflow:visible}.tp-chart text{fill:var(--text-faint);font-size:10px}.tp-chart .grid{stroke:var(--border);stroke-width:1}.tp-chart path{fill:none;stroke-linejoin:round;stroke-linecap:round}.tp-chart .actual{stroke:#4ad991;stroke-width:2.2}.tp-chart .fair{stroke:#f4c95d;stroke-width:2}.tp-chart .entry{stroke:#e36b6b;stroke-width:1.2;stroke-dasharray:5 5}.tp-chart .entry-label{fill:#e36b6b;font-weight:700}.tp-z .zline{stroke:#67a9e8;stroke-width:2}.tp-z .z-0{stroke:var(--text-faint);stroke-width:1}.tp-z .z-2{stroke:#f4c95d;stroke-width:1;stroke-dasharray:5 5}.tp-z .z-4{stroke:#e36b6b;stroke-width:1;stroke-dasharray:5 5}
   .tp-empty{padding:28px 0;color:var(--text-dim);font-size:13px}.tp-note{border-left:3px solid #f4c95d;padding:12px 14px;margin:18px 0;color:var(--text-dim);font-size:12px;background:var(--bg-card)}
-  @media(max-width:800px){.tp-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-stats.history{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-head{align-items:flex-start}.tp-head h1{font-size:32px}}
+  .tp-months{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--border);border-left:1px solid var(--border)}.tp-months>div{display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:9px 10px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);font-size:11px;font-variant-numeric:tabular-nums}.tp-months span{color:var(--text-dim)}.tp-months i{color:var(--text-faint);font-style:normal}.tp-months strong{grid-column:1/-1;color:var(--text-faint);font-size:9px;font-weight:600}
+  @media(max-width:800px){.tp-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-stats.history{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-context{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-context>div:nth-child(2){border-right:0}.tp-months{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-head{align-items:flex-start}.tp-head h1{font-size:32px}}
   @media(max-width:520px){.tp-head{display:block}.tp-live{margin-top:14px}.tp-stats,.tp-stats.history{grid-template-columns:1fr 1fr}.tp-stat .v{font-size:20px}.tp-section-head{display:block}.legend{margin-top:10px}.tp-chart{min-height:180px}.tp-head h1{font-size:30px}}
 `;

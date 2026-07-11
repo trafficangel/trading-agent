@@ -110,6 +110,7 @@ const MODELS: Model[] =
       ];
 
 type AlignedBar = { t: number; aO: number; aC: number; bO: number; bC: number };
+type DivergencePoint = { t: number; actual: number; fair: number; z: number };
 type ExitReason = 'mean' | 'z-stop' | 'time' | 'rebalance';
 type PairTrade = {
   pair: string;
@@ -322,6 +323,34 @@ function simulate(
   return trades;
 }
 
+function divergenceSeries(rows: AlignedBar[], model: Model): DivergencePoint[] {
+  const points: DivergencePoint[] = [];
+  for (
+    let formationStart = 0;
+    formationStart + model.formationBars + 2 < rows.length;
+    formationStart += model.tradeBars
+  ) {
+    const formationEnd = formationStart + model.formationBars;
+    const tradeEnd = Math.min(rows.length, formationEnd + model.tradeBars);
+    const formation = rows.slice(formationStart, formationEnd);
+    const fit = fitLogPair(
+      formation.map((bar) => bar.aC),
+      formation.map((bar) => bar.bC),
+    );
+    if (!usableFit(fit, model)) continue;
+    for (let index = formationEnd; index < tradeEnd; index++) {
+      const bar = rows[index]!;
+      points.push({
+        t: bar.t,
+        actual: bar.aC,
+        fair: Math.exp(fit.alpha + fit.beta * Math.log(bar.bC) + fit.residualMean),
+        z: pairResidualZ(bar.aC, bar.bC, fit),
+      });
+    }
+  }
+  return points;
+}
+
 function rounded(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
@@ -414,12 +443,16 @@ async function main(): Promise<void> {
     discoveryPass: boolean;
     pass: boolean;
   }> = [];
+  let featuredDivergence: DivergencePoint[] = [];
   for (const { a, b } of allPairs()) {
     const pair = `${a}/${b}`;
     const aligned = align(candles.get(a) ?? [], candles.get(b) ?? []);
     if (aligned.length < MIN_ALIGNED_BARS) continue;
     for (const model of MODELS) {
       const trades = simulate(pair, a, b, aligned, model, funding);
+      if (PROFILE === 'hourly' && pair === 'DOGE/XRP' && model.id === 'H_F60_R14_E2') {
+        featuredDivergence = divergenceSeries(aligned, model);
+      }
       const discovery = stats(
         trades.filter((trade) => trade.exitAt < OOS_START_MS),
         'quarter',
@@ -492,6 +525,7 @@ async function main(): Promise<void> {
       oos: { minTrades: 12, minStressPf: 1.1, minPositiveMonths: 3, positiveWithoutBest: true },
       minFundingCoverage: 0.95,
     },
+    featuredDivergence,
     discoveryCandidates,
     passing,
     results,
