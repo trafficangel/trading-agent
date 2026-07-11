@@ -410,6 +410,7 @@ async function main(): Promise<void> {
     anchored: boolean;
     discovery: Stats;
     oos: Stats;
+    trades: PairTrade[];
     discoveryPass: boolean;
     pass: boolean;
   }> = [];
@@ -448,6 +449,7 @@ async function main(): Promise<void> {
         anchored: b === 'BTC',
         discovery,
         oos,
+        trades,
         discoveryPass,
         pass,
       });

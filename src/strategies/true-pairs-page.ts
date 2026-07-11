@@ -1,0 +1,462 @@
+import { existsSync, readFileSync } from 'node:fs';
+import type { FastifyInstance } from 'fastify';
+import {
+  candleSnapshot,
+  fundingHistory,
+  l2Book,
+  type HlCandle,
+  type HlFunding,
+} from '../exchange/hyperliquid.js';
+import {
+  pairExitPrices,
+  pairResidualZ,
+  type PairFit,
+  type PairTopOfBook,
+} from '../lib/true-pairs.js';
+import { getLang, pageShell } from './landing.js';
+
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+const FEE_RATE = 0.00045;
+const FEE_RT_PCT = 0.09;
+const STATE_PATH = 'data/true-pairs-shadow.json';
+const RESULTS_PATH = 'data/true-pairs-hourly-results.json';
+const ACTIVE_ID = 'DOGE_XRP_H60';
+const PAIR = { a: 'DOGE', b: 'XRP', model: 'H_F60_R14_E2', exitZ: 0.25, stopZ: 4 } as const;
+
+type Lang = 'ru' | 'en';
+type Position = {
+  direction: 1 | -1;
+  beta: number;
+  entryAt: number;
+  entryBarAt: number;
+  aEntry: number;
+  bEntry: number;
+  zEntry: number;
+};
+type Runtime = {
+  fit?: PairFit;
+  position?: Position;
+  completedTrades: number;
+  cumulativeNetPct: number;
+  invalidReason?: string;
+};
+type ShadowState = {
+  basketId: string;
+  lastRunAt?: number;
+  candidates: Record<string, Runtime>;
+};
+type HistoricalTrade = {
+  entryAt: number;
+  exitAt: number;
+  holdBars: number;
+  netPct: number;
+  stressPct: number;
+  exitReason: 'mean' | 'z-stop' | 'time' | 'rebalance';
+};
+type ResultsFile = {
+  researchStartAt: number;
+  generatedAt: string;
+  results: Array<{ pair: string; model: string; trades?: HistoricalTrade[] }>;
+};
+type Point = { t: number; actual: number; fair: number; z: number };
+type PageData = {
+  state: ShadowState;
+  runtime: Runtime;
+  points: Point[];
+  currentZ: number;
+  currentNetUsd: number | null;
+  currentGrossUsd: number | null;
+  currentFeeUsd: number | null;
+  currentFundingUsd: number | null;
+  targetNetUsd: number | null;
+  targetRangeUsd: [number, number] | null;
+  stopNetUsd: number | null;
+  history: HistoricalTrade[];
+  historyGeneratedAt?: string;
+  marketAt: number;
+};
+
+const t = (lang: Lang, ru: string, en: string): string => (lang === 'en' ? en : ru);
+
+function readJson<T>(path: string): T | null {
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as T;
+  } catch {
+    return null;
+  }
+}
+
+function topOfBook(levels: Awaited<ReturnType<typeof l2Book>>['levels']): PairTopOfBook {
+  const bid = Number(levels[0][0]?.px);
+  const ask = Number(levels[1][0]?.px);
+  if (!(bid > 0) || !(ask > bid)) throw new Error('invalid Hyperliquid top of book');
+  return { bid, ask };
+}
+
+function closed(rows: HlCandle[], now: number): HlCandle[] {
+  return rows.filter((row) => row.T <= now && Number(row.c) > 0).sort((a, b) => a.t - b.t);
+}
+
+function chartPoints(aRows: HlCandle[], bRows: HlCandle[], fit: PairFit): Point[] {
+  const b = new Map(bRows.map((row) => [row.t, Number(row.c)]));
+  return aRows.flatMap((row) => {
+    const aPrice = Number(row.c);
+    const bPrice = b.get(row.t);
+    if (!bPrice) return [];
+    const fair = Math.exp(fit.alpha + fit.beta * Math.log(bPrice) + fit.residualMean);
+    return [{ t: row.t, actual: aPrice, fair, z: pairResidualZ(aPrice, bPrice, fit) }];
+  });
+}
+
+function fundingMap(rows: HlFunding[], after: number, through: number): Map<number, number> {
+  const rates = new Map<number, number>();
+  for (const row of rows) {
+    if (row.time <= after || row.time > through) continue;
+    rates.set(Math.floor(row.time / HOUR_MS) * HOUR_MS, Number(row.fundingRate));
+  }
+  return rates;
+}
+
+function fundingSince(
+  position: Position,
+  exitAt: number,
+  aRows: HlFunding[],
+  bRows: HlFunding[],
+): number {
+  const a = fundingMap(aRows, position.entryAt, exitAt);
+  const b = fundingMap(bRows, position.entryAt, exitAt);
+  const hours: number[] = [];
+  const first = Math.floor(position.entryAt / HOUR_MS) * HOUR_MS + HOUR_MS;
+  const last = Math.floor(exitAt / HOUR_MS) * HOUR_MS;
+  for (let hour = first; hour <= last; hour += HOUR_MS) {
+    if (a.has(hour) && b.has(hour)) hours.push(hour);
+  }
+  return hours.reduce(
+    (sum, hour) => sum + position.direction * (-a.get(hour)! * 1_000 + b.get(hour)! * 1_000),
+    0,
+  );
+}
+
+let cached: { expiresAt: number; promise: Promise<PageData> } | null = null;
+
+async function loadPageData(): Promise<PageData> {
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) return cached.promise;
+  const promise = buildPageData(now).catch((error) => {
+    cached = null;
+    throw error;
+  });
+  cached = { expiresAt: now + 60_000, promise };
+  return promise;
+}
+
+async function buildPageData(now: number): Promise<PageData> {
+  const state = readJson<ShadowState>(STATE_PATH);
+  const runtime = state?.candidates[ACTIVE_ID];
+  if (!state || !runtime?.fit) throw new Error('pairs shadow state is not ready');
+  const [aCandles, bCandles, aBookRaw, bBookRaw] = await Promise.all([
+    candleSnapshot(PAIR.a, '1h', now - 30 * DAY_MS, now),
+    candleSnapshot(PAIR.b, '1h', now - 30 * DAY_MS, now),
+    l2Book(PAIR.a),
+    l2Book(PAIR.b),
+  ]);
+  const aBook = topOfBook(aBookRaw.levels);
+  const bBook = topOfBook(bBookRaw.levels);
+  const midA = (aBook.bid + aBook.ask) / 2;
+  const midB = (bBook.bid + bBook.ask) / 2;
+  const points = chartPoints(closed(aCandles, now), closed(bCandles, now), runtime.fit);
+  const currentZ = pairResidualZ(midA, midB, runtime.fit);
+  let currentNetUsd: number | null = null;
+  let currentGrossUsd: number | null = null;
+  let currentFeeUsd: number | null = null;
+  let currentFundingUsd: number | null = null;
+  let targetNetUsd: number | null = null;
+  let targetRangeUsd: [number, number] | null = null;
+  let stopNetUsd: number | null = null;
+
+  if (runtime.position) {
+    const position = runtime.position;
+    const exit = pairExitPrices(position.direction, aBook, bBook);
+    const [aFunding, bFunding] = await Promise.all([
+      fundingHistory(PAIR.a, position.entryAt),
+      fundingHistory(PAIR.b, position.entryAt),
+    ]);
+    const funding = fundingSince(position, now, aFunding, bFunding);
+    const aReturn = exit.a / position.aEntry - 1;
+    const bReturn = exit.b / position.bEntry - 1;
+    currentGrossUsd = position.direction * (aReturn - bReturn) * 1_000;
+    const aExitNotional = (1_000 / position.aEntry) * exit.a;
+    const bExitNotional = (1_000 / position.bEntry) * exit.b;
+    currentFeeUsd = FEE_RATE * (2_000 + aExitNotional + bExitNotional);
+    currentFundingUsd = funding;
+    currentNetUsd = currentGrossUsd - currentFeeUsd + currentFundingUsd;
+
+    const targetZ = position.direction === 1 ? -PAIR.exitZ : PAIR.exitZ;
+    const targetSpreadMove =
+      position.direction * (targetZ - position.zEntry) * runtime.fit.residualStd;
+    const targetGrossPct = (targetSpreadMove / (1 + position.beta)) * 100;
+    targetNetUsd = (targetGrossPct - FEE_RT_PCT) * 20;
+    const targetResidualChange = (targetZ - position.zEntry) * runtime.fit.residualStd;
+    const aOnly = position.direction * 1_000 * (Math.exp(targetResidualChange) - 1);
+    const bOnly =
+      -position.direction * 1_000 * (Math.exp(-targetResidualChange / position.beta) - 1);
+    targetRangeUsd = [Math.min(aOnly, bOnly) - 1.8, Math.max(aOnly, bOnly) - 1.8];
+
+    const stopZ = position.direction === 1 ? -PAIR.stopZ : PAIR.stopZ;
+    const stopSpreadMove = position.direction * (stopZ - position.zEntry) * runtime.fit.residualStd;
+    const stopGrossPct = (stopSpreadMove / (1 + position.beta)) * 100;
+    stopNetUsd = (stopGrossPct - FEE_RT_PCT) * 20;
+  }
+
+  const results = readJson<ResultsFile>(RESULTS_PATH);
+  const historyRow = results?.results.find(
+    (row) => row.pair === `${PAIR.a}/${PAIR.b}` && row.model === PAIR.model,
+  );
+  return {
+    state,
+    runtime,
+    points,
+    currentZ,
+    currentNetUsd,
+    currentGrossUsd,
+    currentFeeUsd,
+    currentFundingUsd,
+    targetNetUsd,
+    targetRangeUsd,
+    stopNetUsd,
+    history: historyRow?.trades ?? [],
+    historyGeneratedAt: results?.generatedAt,
+    marketAt: now,
+  };
+}
+
+function money(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return `${value >= 0 ? '+' : '−'}$${Math.abs(value).toFixed(2)}`;
+}
+
+function pct(value: number): string {
+  return `${value >= 0 ? '+' : '−'}${Math.abs(value).toFixed(2)}%`;
+}
+
+function path(values: number[], width: number, height: number, min: number, max: number): string {
+  const range = max - min || 1;
+  return values
+    .map((value, index) => {
+      const x = values.length <= 1 ? 0 : (index / (values.length - 1)) * width;
+      const y = height - ((value - min) / range) * height;
+      return `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+}
+
+function priceChart(points: Point[], lang: Lang, entryAt?: number): string {
+  if (points.length < 2)
+    return `<div class="tp-empty">${t(lang, 'Недостаточно данных', 'Not enough data')}</div>`;
+  const sampled = points.filter((_, index) => index % 3 === 0 || index === points.length - 1);
+  const base = sampled[0]!.fair;
+  const actual = sampled.map((point) => (point.actual / base) * 100);
+  const fair = sampled.map((point) => (point.fair / base) * 100);
+  const all = [...actual, ...fair];
+  const min = Math.min(...all);
+  const max = Math.max(...all);
+  const pad = Math.max(0.4, (max - min) * 0.12);
+  const yMin = min - pad;
+  const yMax = max + pad;
+  const w = 900;
+  const h = 290;
+  const entryIndex = entryAt ? sampled.findIndex((point) => point.t >= entryAt) : -1;
+  const entryX = entryIndex >= 0 ? (entryIndex / (sampled.length - 1)) * w : null;
+  const grid = [0, 0.25, 0.5, 0.75, 1]
+    .map((ratio) => {
+      const y = h * ratio;
+      const label = yMax - (yMax - yMin) * ratio;
+      return `<line x1="0" y1="${y}" x2="${w}" y2="${y}" class="grid"/><text x="-10" y="${y + 4}" text-anchor="end">${label.toFixed(1)}</text>`;
+    })
+    .join('');
+  return `<svg class="tp-chart" viewBox="-58 -12 980 340" role="img" aria-label="DOGE and fair DOGE chart">
+    ${grid}
+    ${entryX == null ? '' : `<line x1="${entryX}" y1="0" x2="${entryX}" y2="${h}" class="entry"/><text x="${Math.min(w - 48, entryX + 7)}" y="18" class="entry-label">ENTRY</text>`}
+    <path d="${path(fair, w, h, yMin, yMax)}" class="fair"/>
+    <path d="${path(actual, w, h, yMin, yMax)}" class="actual"/>
+    <text x="0" y="322">${new Date(sampled[0]!.t).toISOString().slice(5, 10)}</text>
+    <text x="${w}" y="322" text-anchor="end">${new Date(sampled.at(-1)!.t).toISOString().slice(5, 10)}</text>
+  </svg>`;
+}
+
+function zChart(points: Point[], entryAt?: number): string {
+  if (points.length < 2) return '';
+  const sampled = points.filter((_, index) => index % 3 === 0 || index === points.length - 1);
+  const z = sampled.map((point) => Math.max(-5, Math.min(5, point.z)));
+  const w = 900;
+  const h = 180;
+  const y = (value: number): number => h - ((value + 5) / 10) * h;
+  const bands = [-4, -2, 0, 2, 4]
+    .map(
+      (value) =>
+        `<line x1="0" y1="${y(value)}" x2="${w}" y2="${y(value)}" class="z-${Math.abs(value)}"/><text x="-10" y="${y(value) + 4}" text-anchor="end">${value}</text>`,
+    )
+    .join('');
+  const entryIndex = entryAt ? sampled.findIndex((point) => point.t >= entryAt) : -1;
+  const entryX = entryIndex >= 0 ? (entryIndex / (sampled.length - 1)) * w : null;
+  return `<svg class="tp-chart tp-z" viewBox="-58 -10 980 220" role="img" aria-label="spread z-score chart">
+    ${bands}
+    ${entryX == null ? '' : `<line x1="${entryX}" y1="0" x2="${entryX}" y2="${h}" class="entry"/>`}
+    <path d="${path(z, w, h, -5, 5)}" class="zline"/>
+  </svg>`;
+}
+
+function historyStats(trades: HistoricalTrade[]): {
+  n: number;
+  perMonth: number;
+  mean: number;
+  stops: number;
+  expiry: number;
+  winners: number;
+  avgHold: number;
+  net: number;
+  stress: number;
+} {
+  if (!trades.length)
+    return {
+      n: 0,
+      perMonth: 0,
+      mean: 0,
+      stops: 0,
+      expiry: 0,
+      winners: 0,
+      avgHold: 0,
+      net: 0,
+      stress: 0,
+    };
+  const first = Math.min(...trades.map((trade) => trade.entryAt));
+  const last = Math.max(...trades.map((trade) => trade.exitAt));
+  const months = Math.max(1, (last - first) / (30.44 * DAY_MS));
+  return {
+    n: trades.length,
+    perMonth: trades.length / months,
+    mean: trades.filter((trade) => trade.exitReason === 'mean').length,
+    stops: trades.filter((trade) => trade.exitReason === 'z-stop').length,
+    expiry: trades.filter(
+      (trade) => trade.exitReason === 'time' || trade.exitReason === 'rebalance',
+    ).length,
+    winners: trades.filter((trade) => trade.netPct > 0).length,
+    avgHold: trades.reduce((sum, trade) => sum + trade.holdBars, 0) / trades.length,
+    net: trades.reduce((sum, trade) => sum + trade.netPct, 0),
+    stress: trades.reduce((sum, trade) => sum + trade.stressPct, 0),
+  };
+}
+
+function renderPage(data: PageData, lang: Lang): string {
+  const position = data.runtime.position;
+  const stats = historyStats(data.history);
+  const currentClass = (data.currentNetUsd ?? 0) >= 0 ? 'pos' : 'neg';
+  const targetRange = data.targetRangeUsd
+    ? `$${data.targetRangeUsd[0].toFixed(0)}–$${data.targetRangeUsd[1].toFixed(0)}`
+    : '—';
+  const body = `
+    <style>${CSS}</style>
+    <div class="tp-head">
+      <div>
+        <div class="tp-kicker">TRUE PAIRS · HYPERLIQUID · FORWARD SHADOW</div>
+        <h1>DOGE / XRP</h1>
+        <p>${t(lang, 'Торгуем возврат относительной цены к статистической норме, а не направление рынка.', 'Trading the relative price back toward its statistical norm, not market direction.')}</p>
+      </div>
+      <div class="tp-live"><span></span>${position ? t(lang, 'позиция открыта', 'position open') : t(lang, 'ждём сигнал', 'waiting for signal')}</div>
+    </div>
+
+    <div class="tp-stats">
+      <div class="tp-stat"><div class="k">Z-SCORE</div><div class="v">${data.currentZ.toFixed(2)}</div><div class="s">entry ${position?.zEntry.toFixed(2) ?? '—'} · target −0.25</div></div>
+      <div class="tp-stat"><div class="k">$1000 + $1000 · ${t(lang, 'сейчас', 'now')}</div><div class="v ${currentClass}">${money(data.currentNetUsd)}</div><div class="s">gross ${money(data.currentGrossUsd)} · fee ${money(data.currentFeeUsd == null ? null : -data.currentFeeUsd)}</div></div>
+      <div class="tp-stat"><div class="k">${t(lang, 'СЦЕНАРИЙ ДО ЦЕЛИ', 'TARGET SCENARIO')}</div><div class="v pos">${targetRange}</div><div class="s">${t(lang, `beta-оценка ${money(data.targetNetUsd)}`, `beta estimate ${money(data.targetNetUsd)}`)}</div></div>
+      <div class="tp-stat"><div class="k">${t(lang, 'СЦЕНАРИЙ ДО СТОПА', 'STOP SCENARIO')}</div><div class="v neg">${money(data.stopNetUsd)}</div><div class="s">z ${position?.direction === 1 ? '−4.00' : '+4.00'} · fee included</div></div>
+    </div>
+
+    <section class="tp-panel">
+      <div class="tp-section-head"><div><h2>${t(lang, 'Фактическая и справедливая цена', 'Actual and fair price')}</h2><p>${t(lang, 'Индекс, 30 дней. Зелёная линия — DOGE; жёлтая — справедливая DOGE из цены XRP и beta.', 'Indexed over 30 days. Green is DOGE; yellow is fair DOGE derived from XRP and beta.')}</p></div><div class="legend"><span class="a">DOGE</span><span class="f">FAIR DOGE</span></div></div>
+      ${priceChart(data.points, lang, position?.entryBarAt)}
+    </section>
+
+    <section class="tp-panel">
+      <div class="tp-section-head"><div><h2>Z-score</h2><p>${t(lang, 'Ноль — модельное равновесие. Пунктир ±2 — зона входа, ±4 — защитный выход.', 'Zero is model equilibrium. Dashed ±2 marks entry territory; ±4 is the protective exit.')}</p></div></div>
+      ${zChart(data.points, position?.entryBarAt)}
+    </section>
+
+    <section class="tp-history">
+      <div class="tp-section-head"><div><h2>${t(lang, 'Исторические расхождения', 'Historical divergences')}</h2><p>${t(lang, 'Часовые окна с фиксированным календарём, next-open исполнением, funding и комиссиями Hyperliquid.', 'Hourly fixed-calendar windows with next-open execution, funding and Hyperliquid fees.')}</p></div></div>
+      ${
+        stats.n
+          ? `<div class="tp-stats history">
+        <div class="tp-stat"><div class="k">${t(lang, 'СИГНАЛОВ', 'SIGNALS')}</div><div class="v">${stats.n}</div><div class="s">${stats.perMonth.toFixed(1)} / ${t(lang, 'месяц', 'month')}</div></div>
+        <div class="tp-stat"><div class="k">${t(lang, 'СХОДИЛИСЬ К СРЕДНЕМУ', 'MEAN EXITS')}</div><div class="v">${stats.mean}</div><div class="s">${((stats.mean / stats.n) * 100).toFixed(0)}%</div></div>
+        <div class="tp-stat"><div class="k">${t(lang, 'РАСХОДИЛИСЬ ДО СТОПА', 'Z-STOPS')}</div><div class="v">${stats.stops}</div><div class="s">${((stats.stops / stats.n) * 100).toFixed(0)}%</div></div>
+        <div class="tp-stat"><div class="k">${t(lang, 'TIME / REFIT', 'TIME / REFIT')}</div><div class="v">${stats.expiry}</div><div class="s">avg ${stats.avgHold.toFixed(0)}h</div></div>
+        <div class="tp-stat"><div class="k">${t(lang, 'ПРИБЫЛЬНЫХ NET', 'NET WINNERS')}</div><div class="v">${stats.winners}</div><div class="s">${((stats.winners / stats.n) * 100).toFixed(0)}%</div></div>
+        <div class="tp-stat"><div class="k">${t(lang, 'СУММА', 'TOTAL')}</div><div class="v ${stats.net >= 0 ? 'pos' : 'neg'}">${pct(stats.net)}</div><div class="s">stress ${pct(stats.stress)}</div></div>
+      </div>`
+          : `<div class="tp-empty">${t(lang, 'Исторический журнал пересчитывается. Forward-график уже работает.', 'Historical trade log is being rebuilt. The forward chart is already live.')}</div>`
+      }
+    </section>
+
+    <div class="tp-note">${t(lang, 'Важно: большое |z| означает редкое отклонение, а не гарантированную прибыль. Спред может продолжить расходиться. Все суммы — модель для двух ног по $1000; текущий контур не отправляет реальные ордера.', 'Important: a large |z| means a rare deviation, not guaranteed profit. The spread can keep widening. Dollar figures model two $1,000 legs; this process sends no real orders.')}</div>
+  `;
+  return pageShell(`${PAIR.a}/${PAIR.b} pairs shadow · Robot Claude`, body, {
+    lang,
+    autoRefreshSec: 60,
+    robots: 'noindex, follow',
+  });
+}
+
+export function truePairsHero(lang: Lang): string {
+  const state = readJson<ShadowState>(STATE_PATH);
+  const open = state
+    ? Object.values(state.candidates).filter((runtime) => runtime.position).length
+    : 0;
+  const closedCount = state
+    ? Object.values(state.candidates).reduce((sum, runtime) => sum + runtime.completedTrades, 0)
+    : 0;
+  return `<a class="lt-hero" href="/lab/pairs">
+    <div class="lt-hero-l">
+      <span class="lt-hero-badge">TRUE PAIRS · Hyperliquid · SHADOW</span>
+      <div class="lt-hero-title">DOGE / XRP</div>
+      <div class="lt-hero-sub">${t(lang, 'Две ноги, живой спред и график схождения', 'Two legs, live spread and convergence chart')}</div>
+    </div>
+    <div class="lt-hero-r">
+      <div class="lt-hero-stat"><div class="v">${open}</div><div class="k">${t(lang, 'открыто', 'open')}</div></div>
+      <div class="lt-hero-stat"><div class="v">${closedCount}</div><div class="k">${t(lang, 'закрыто', 'closed')}</div></div>
+    </div>
+  </a>`;
+}
+
+export async function truePairsRoute(app: FastifyInstance): Promise<void> {
+  app.get('/lab/pairs', async (req, reply) => {
+    reply.type('text/html; charset=utf-8');
+    reply.header('Cache-Control', 'public, max-age=30');
+    try {
+      return renderPage(await loadPageData(), getLang(req));
+    } catch {
+      reply.code(503);
+      return pageShell(
+        'True pairs · Robot Claude',
+        `<div class="header"><h1 class="title">True pairs</h1><p class="subtitle">${t(getLang(req), 'Данные временно обновляются. Страница попробует снова через минуту.', 'Data is refreshing. The page will retry in one minute.')}</p></div>`,
+        { lang: getLang(req), autoRefreshSec: 60, robots: 'noindex, follow' },
+      );
+    }
+  });
+}
+
+const CSS = `
+  .tp-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin:18px 0 26px}
+  .tp-kicker{font-size:11px;font-weight:700;color:var(--accent);letter-spacing:.08em;margin-bottom:8px}
+  .tp-head h1{font-size:38px;line-height:1.05;margin:0 0 8px;letter-spacing:0}.tp-head p{margin:0;color:var(--text-dim);max-width:680px}
+  .tp-live{font-size:12px;color:var(--text-dim);white-space:nowrap}.tp-live span{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:7px;box-shadow:0 0 0 4px var(--accent-soft)}
+  .tp-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:22px}.tp-stats.history{grid-template-columns:repeat(3,minmax(0,1fr));margin:0}
+  .tp-stat{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:14px;min-width:0}.tp-stat .k{font-size:10px;color:var(--text-faint);font-weight:700}.tp-stat .v{font-size:25px;font-weight:650;margin:5px 0 2px;font-variant-numeric:tabular-nums}.tp-stat .s{font-size:11px;color:var(--text-dim);white-space:normal}.pos{color:var(--accent)!important}.neg{color:var(--danger)!important}
+  .tp-panel,.tp-history{border-top:1px solid var(--border);padding:25px 0;margin-top:12px}.tp-section-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:14px}.tp-section-head h2{font-size:18px;margin:0 0 4px;letter-spacing:0}.tp-section-head p{font-size:12px;color:var(--text-dim);margin:0}.legend{display:flex;gap:14px;font-size:10px;font-weight:700;white-space:nowrap}.legend span:before{content:'';display:inline-block;width:18px;height:3px;margin-right:6px;vertical-align:middle}.legend .a:before{background:#4ad991}.legend .f:before{background:#f4c95d}
+  .tp-chart{display:block;width:100%;height:auto;overflow:visible}.tp-chart text{fill:var(--text-faint);font-size:10px}.tp-chart .grid{stroke:var(--border);stroke-width:1}.tp-chart path{fill:none;stroke-linejoin:round;stroke-linecap:round}.tp-chart .actual{stroke:#4ad991;stroke-width:2.2}.tp-chart .fair{stroke:#f4c95d;stroke-width:2}.tp-chart .entry{stroke:#e36b6b;stroke-width:1.2;stroke-dasharray:5 5}.tp-chart .entry-label{fill:#e36b6b;font-weight:700}.tp-z .zline{stroke:#67a9e8;stroke-width:2}.tp-z .z-0{stroke:var(--text-faint);stroke-width:1}.tp-z .z-2{stroke:#f4c95d;stroke-width:1;stroke-dasharray:5 5}.tp-z .z-4{stroke:#e36b6b;stroke-width:1;stroke-dasharray:5 5}
+  .tp-empty{padding:28px 0;color:var(--text-dim);font-size:13px}.tp-note{border-left:3px solid #f4c95d;padding:12px 14px;margin:18px 0;color:var(--text-dim);font-size:12px;background:var(--bg-card)}
+  @media(max-width:800px){.tp-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-stats.history{grid-template-columns:repeat(2,minmax(0,1fr))}.tp-head{align-items:flex-start}.tp-head h1{font-size:32px}}
+  @media(max-width:520px){.tp-head{display:block}.tp-live{margin-top:14px}.tp-stats,.tp-stats.history{grid-template-columns:1fr 1fr}.tp-stat .v{font-size:20px}.tp-section-head{display:block}.legend{margin-top:10px}.tp-chart{min-height:180px}.tp-head h1{font-size:30px}}
+`;

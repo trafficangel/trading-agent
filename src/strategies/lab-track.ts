@@ -8,6 +8,7 @@ import { pageShell, getLang } from './landing.js';
 import { WF_CONFIG, COIN_X, LADDER } from '../jobs/wick-fade-runner.js';
 import { hlOpenOrders, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
 import { metaAndAssetCtxs } from '../exchange/hyperliquid.js';
+import { truePairsHero } from './true-pairs-page.js';
 
 type Lang = 'ru' | 'en';
 /** tiny picker: t(lang, ru, en) */
@@ -1530,6 +1531,7 @@ export function liveTrackHero(lang: Lang = 'ru'): string {
         <div class="lt-hero-stat"><div class="v">${mom.winRate != null ? `${(mom.winRate * 100).toFixed(0)}%` : '—'}</div><div class="k">${t(lang, 'винрейт', 'win rate')}</div></div>
       </div>
     </a>
+    ${truePairsHero(lang)}
     </div>`;
 }
 
