@@ -1,0 +1,24 @@
+[Unit]
+Description=Tokyo read-only Hyperliquid multi-venue lead-lag collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+WorkingDirectory=/home/trader/apps/hft-leadlag
+Environment=NODE_ENV=production
+Environment=HFT_DATA_DIR=/home/trader/apps/hft-leadlag/data
+Environment=HFT_SAMPLE_MS=250
+ExecStart=/usr/bin/node /home/trader/apps/hft-leadlag/leadlag-collector.js
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/hft-leadlag/data
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
