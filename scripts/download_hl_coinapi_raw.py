@@ -18,6 +18,7 @@ import json
 import os
 import pathlib
 import sys
+import threading
 import time
 
 BUCKET = "coinapi"
@@ -25,6 +26,9 @@ ENDPOINT = "https://s3.flatfiles.coinapi.io"
 EXCHANGE = "HYPERLIQUID"
 KINDS = ("T-TRADES", "T-QUOTES")
 WORKERS = max(1, int(os.environ.get("COINAPI_DOWNLOAD_WORKERS", "4")))
+REQUESTS_PER_MINUTE = max(1, int(os.environ.get("COINAPI_REQUESTS_PER_MINUTE", "36")))
+_rate_lock = threading.Lock()
+_next_request_at = 0.0
 
 
 def load_key():
@@ -64,43 +68,86 @@ def client():
         aws_access_key_id=load_key(),
         aws_secret_access_key="coinapi",
         region_name="us-east-1",
-        config=Config(signature_version="s3v4", max_pool_connections=WORKERS * 2, retries={"max_attempts": 4}),
+        config=Config(signature_version="s3v4", max_pool_connections=WORKERS * 2, retries={"max_attempts": 1}),
     )
 
 
-def build_manifest(s3, coins, start, end, out):
+def throttle():
+    global _next_request_at
+    with _rate_lock:
+        now = time.monotonic()
+        slot = max(now, _next_request_at)
+        _next_request_at = slot + 60 / REQUESTS_PER_MINUTE
+    delay = slot - now
+    if delay > 0:
+        time.sleep(delay)
+
+
+def api_call(method, **kwargs):
+    from botocore.exceptions import ClientError
+
+    for attempt in range(8):
+        throttle()
+        try:
+            return method(**kwargs)
+        except ClientError as error:
+            code = error.response.get("Error", {}).get("Code", "")
+            if code != "SlowDown" or attempt == 7:
+                raise
+            time.sleep(60)
+
+
+def previous_files(manifest_path):
+    if not manifest_path.exists():
+        return {}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return {item["key"]: item for item in manifest.get("files", []) if item.get("key")}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def build_manifest(s3, coins, start, end, out, previous):
     wanted = {coin: f"SC-{EXCHANGE}_PERP_{coin}_USDC+" for coin in coins}
     manifest = []
-    prefixes = [(date, hour, kind) for date in dates(start, end) for hour in range(24) for kind in KINDS]
-
-    def list_prefix(spec):
-        date, hour, kind = spec
-        prefix = f"{kind}/D-{date}{hour:02d}/E-{EXCHANGE}/"
-        response = s3.list_objects_v2(Bucket=BUCKET, Prefix=prefix)
-        return date, hour, kind, response.get("Contents", [])
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        listed = list(pool.map(list_prefix, prefixes))
-    for date, hour, kind, objects in listed:
+    filenames = {}
+    reference_bytes = 0
+    for kind in KINDS:
+        prefix = f"{kind}/D-{start}00/E-{EXCHANGE}/"
+        response = api_call(s3.list_objects_v2, Bucket=BUCKET, Prefix=prefix)
+        objects = response.get("Contents", [])
         for coin, marker in wanted.items():
             matches = [obj for obj in objects if marker in obj["Key"]]
             if not matches:
-                manifest.append({"kind": kind, "date": date, "hour": hour, "coin": coin, "missing": True})
                 continue
             obj = matches[0]
-            path = pathlib.Path(out, kind.lower().replace("t-", ""), date, f"{hour:02d}", f"{coin}.csv.gz")
-            manifest.append({
-                "kind": kind,
-                "date": date,
-                "hour": hour,
-                "coin": coin,
-                "key": obj["Key"],
-                "size": int(obj["Size"]),
-                "etag": str(obj.get("ETag", "")).strip('"'),
-                "path": str(path),
-                "missing": False,
-            })
-    return manifest
+            filenames[(kind, coin)] = obj["Key"].rsplit("/", 1)[-1]
+            reference_bytes += int(obj["Size"])
+
+    day_list = list(dates(start, end))
+    for date in day_list:
+        for hour in range(24):
+            for kind in KINDS:
+                for coin in coins:
+                    filename = filenames.get((kind, coin))
+                    if not filename:
+                        manifest.append({"kind": kind, "date": date, "hour": hour, "coin": coin, "missing": True})
+                        continue
+                    key = f"{kind}/D-{date}{hour:02d}/E-{EXCHANGE}/{filename}"
+                    old = previous.get(key, {})
+                    path = pathlib.Path(out, kind.lower().replace("t-", ""), date, f"{hour:02d}", f"{coin}.csv.gz")
+                    manifest.append({
+                        "kind": kind,
+                        "date": date,
+                        "hour": hour,
+                        "coin": coin,
+                        "key": key,
+                        "size": int(old.get("size", 0)),
+                        "etag": old.get("etag", ""),
+                        "path": str(path),
+                        "missing": False,
+                    })
+    return manifest, reference_bytes * 24 * len(day_list)
 
 
 def verify_gzip(path):
@@ -110,17 +157,21 @@ def verify_gzip(path):
 
 
 def fetch_one(s3, item):
+    from botocore.exceptions import ClientError
+
     if item["missing"]:
         return "missing", item
     path = pathlib.Path(item["path"])
-    if path.exists() and path.stat().st_size == item["size"]:
+    if item["size"] > 0 and path.exists() and path.stat().st_size == item["size"]:
         verify_gzip(path)
         return "cached", item
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = pathlib.Path(f"{path}.part")
     temporary.unlink(missing_ok=True)
     try:
-        response = s3.get_object(Bucket=BUCKET, Key=item["key"])
+        response = api_call(s3.get_object, Bucket=BUCKET, Key=item["key"])
+        item["size"] = int(response.get("ContentLength", 0))
+        item["etag"] = str(response.get("ETag", "")).strip('"')
         with open(temporary, "wb") as output:
             while True:
                 chunk = response["Body"].read(1024 * 1024)
@@ -132,6 +183,13 @@ def fetch_one(s3, item):
         verify_gzip(temporary)
         temporary.replace(path)
         return "downloaded", item
+    except ClientError as error:
+        temporary.unlink(missing_ok=True)
+        code = error.response.get("Error", {}).get("Code", "")
+        if code in ("NoSuchKey", "404"):
+            item["missing"] = True
+            return "missing", item
+        raise
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
@@ -146,15 +204,23 @@ def main():
         raise ValueError("coins must be comma-separated alphanumeric symbols")
 
     s3 = client()
-    print(f"CoinAPI raw Hyperliquid · {start}..{end} · {','.join(coins)} · workers={WORKERS}", flush=True)
-    manifest = build_manifest(s3, coins, start, end, out)
-    available = [item for item in manifest if not item["missing"]]
-    total = sum(item["size"] for item in available)
-    missing = len(manifest) - len(available)
-    print(f"manifest: {len(available)}/{len(manifest)} files · {format_bytes(total)} compressed · missing={missing}", flush=True)
-
+    print(
+        f"CoinAPI raw Hyperliquid · {start}..{end} · {','.join(coins)} · "
+        f"workers={WORKERS} · limit={REQUESTS_PER_MINUTE}/min",
+        flush=True,
+    )
     out.mkdir(parents=True, exist_ok=True)
     manifest_path = out / "manifest.json"
+    manifest, estimated_total = build_manifest(s3, coins, start, end, out, previous_files(manifest_path))
+    available = [item for item in manifest if not item["missing"]]
+    known_total = sum(item["size"] for item in available)
+    missing = len(manifest) - len(available)
+    print(
+        f"manifest: {len(available)}/{len(manifest)} files · estimated {format_bytes(estimated_total)} compressed · "
+        f"known {format_bytes(known_total)} · missing={missing}",
+        flush=True,
+    )
+
     manifest_path.write_text(json.dumps({
         "version": 1,
         "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -181,6 +247,14 @@ def main():
                     f"missing={counts['missing']} · {format_bytes(downloaded_bytes)} · {format_bytes(downloaded_bytes / elapsed)}/s",
                     flush=True,
                 )
+    manifest_path.write_text(json.dumps({
+        "version": 1,
+        "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "coins": coins,
+        "start": start,
+        "end": end,
+        "files": manifest,
+    }, indent=2), encoding="utf-8")
     print(f"done · manifest {manifest_path} · dataset {out}", flush=True)
 
 
