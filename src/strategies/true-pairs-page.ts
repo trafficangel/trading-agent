@@ -282,6 +282,11 @@ function priceChart(points: Point[], lang: Lang, entryAt?: number): string {
   const h = 290;
   const entryIndex = entryAt ? sampled.findIndex((point) => point.t >= entryAt) : -1;
   const entryX = entryIndex >= 0 ? (entryIndex / (sampled.length - 1)) * w : null;
+  const span = sampled.at(-1)!.t - sampled[0]!.t;
+  const dateLabel = (timestamp: number): string =>
+    span >= 300 * DAY_MS
+      ? new Date(timestamp).toISOString().slice(0, 7)
+      : new Date(timestamp).toISOString().slice(5, 10);
   const grid = [0, 0.25, 0.5, 0.75, 1]
     .map((ratio) => {
       const y = h * ratio;
@@ -294,8 +299,8 @@ function priceChart(points: Point[], lang: Lang, entryAt?: number): string {
     ${entryX == null ? '' : `<line x1="${entryX}" y1="0" x2="${entryX}" y2="${h}" class="entry"/><text x="${Math.min(w - 48, entryX + 7)}" y="18" class="entry-label">ENTRY</text>`}
     <path d="${path(fair, w, h, yMin, yMax)}" class="fair"/>
     <path d="${path(actual, w, h, yMin, yMax)}" class="actual"/>
-    <text x="0" y="322">${new Date(sampled[0]!.t).toISOString().slice(5, 10)}</text>
-    <text x="${w}" y="322" text-anchor="end">${new Date(sampled.at(-1)!.t).toISOString().slice(5, 10)}</text>
+    <text x="0" y="322">${dateLabel(sampled[0]!.t)}</text>
+    <text x="${w}" y="322" text-anchor="end">${dateLabel(sampled.at(-1)!.t)}</text>
   </svg>`;
 }
 
