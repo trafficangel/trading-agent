@@ -509,7 +509,7 @@ function renderPage(data: PageData, lang: Lang, period: Period): string {
       }
     </section>
 
-    <div class="tp-note">${t(lang, 'Важно: большое |z| означает редкое отклонение, а не гарантированную прибыль. Новые сигналы считаются по закрытой 1h-свече, открытая позиция и стоп проверяются каждую минуту. Усреднения нет: при |z| = 4 обе ноги закрываются. Все суммы — модель для двух ног по $1000; реальные ордера не отправляются.', 'Important: a large |z| means a rare deviation, not guaranteed profit. New signals use closed 1h candles; an open position and stop are checked every minute. There is no averaging: both legs close at |z| = 4. Dollar figures model two $1,000 legs; no real orders are sent.')}</div>
+    <div class="tp-note">${t(lang, 'Важно: большое |z| означает редкое отклонение, а не гарантированную прибыль. Вход возможен только при новом пересечении ±2 изнутри по закрытой 1h-свече; сервис не входит, если запущен уже внутри экстремального расхождения. Открытая позиция и стоп проверяются каждую минуту. Усреднения нет: при |z| = 4 обе ноги закрываются. Все суммы — модель для двух ног по $1000; реальные ордера не отправляются.', 'Important: a large |z| means a rare deviation, not guaranteed profit. Entry requires a fresh crossing of ±2 from inside the band on a closed 1h candle; startup inside an extreme divergence does not trigger a trade. An open position and stop are checked every minute. There is no averaging: both legs close at |z| = 4. Dollar figures model two $1,000 legs; no real orders are sent.')}</div>
   `;
   return pageShell(`${PAIR.a}/${PAIR.b} pairs shadow · Robot Claude`, body, {
     lang,
