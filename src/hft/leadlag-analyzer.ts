@@ -218,7 +218,9 @@ function summarize(key: string, pair: Pair) {
   if (!files.length) throw new Error('no completed leadlag segments yet');
 
   for (const coin of COINS) evaluate(await readCoin(files, coin), coin);
-  const rows = [...pairs.entries()].map(([key, pair]) => summarize(key, pair)).sort((a, b) => b.now.stressNetBps - a.now.stressNetBps);
+  const rows = [...pairs.entries()].map(([key, pair]) => summarize(key, pair)).sort((a, b) =>
+    Number(b.now.fills > 0) - Number(a.now.fills > 0) || b.now.stressNetBps - a.now.stressNetBps,
+  );
   const result = {
     version: 'leadlag-analysis-v1',
     generatedAt: Date.now(),
@@ -227,7 +229,9 @@ function summarize(key: string, pair: Pair) {
     costsBps: { takerRoundTrip: TAKER_RT_BPS, makerTaker: MAKER_TAKER_BPS, extraStress: EXTRA_STRESS_BPS },
     gates: { minFills: 30, minProfitFactor: 1.1, minPositiveDayFraction: 0.6, latencyStressMs: SAMPLE_MS },
     passing: rows.filter((row) => row.passes),
-    top: rows.slice(0, 40),
+    topTaker: rows.filter((row) => row.key.endsWith('_TAKER') && row.now.fills > 0).slice(0, 20),
+    topMaker: rows.filter((row) => row.key.endsWith('_MAKER') && row.now.fills > 0).slice(0, 20),
+    noFillMaker: rows.filter((row) => row.key.endsWith('_MAKER') && row.now.signals > 0 && row.now.fills === 0).slice(0, 20),
   };
   const tmp = `${RESULT_PATH}.tmp`;
   writeFileSync(tmp, JSON.stringify(result, null, 2));
