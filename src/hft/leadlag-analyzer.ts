@@ -46,6 +46,7 @@ const MM_SHIELDS: Array<{ label: string; lead: number | null; lag: number }> = [
   { label: 'L3G1', lead: 3, lag: 1 },
   { label: 'L5G2', lead: 5, lag: 2 },
 ];
+const MM_DEPTH_BPS = [0, 2, 5];
 
 type PackedRow = {
   v: number;
@@ -344,67 +345,96 @@ function refreshOrder(
  */
 function evaluateMarketMaking(points: Point[], coin: string): void {
   for (const shield of MM_SHIELDS)
-    for (const holdMs of [2_000, 5_000, 10_000])
-      for (const delay of [0, 1] as const) {
-        const key = `MM_${shield.label}_H${holdMs}`;
-        const m = delay === 0 ? pairFor(key).now : pairFor(key).delayed;
-        const holdSteps = Math.round(holdMs / SAMPLE_MS);
-        let bid: RestingOrder | null = null;
-        let ask: RestingOrder | null = null;
-        let inventory: Inventory | null = null;
+    for (const depthBps of MM_DEPTH_BPS)
+      for (const holdMs of [2_000, 5_000, 10_000])
+        for (const delay of [0, 1] as const) {
+          const key = `MM_${shield.label}_D${depthBps}_H${holdMs}`;
+          const m = delay === 0 ? pairFor(key).now : pairFor(key).delayed;
+          const holdSteps = Math.round(holdMs / SAMPLE_MS);
+          let bid: RestingOrder | null = null;
+          let ask: RestingOrder | null = null;
+          let inventory: Inventory | null = null;
 
-        for (let i = 240; i < points.length - holdSteps - 1; i++) {
-          const point = points[i]!;
-          if (inventory) {
-            const targetSide: 1 | -1 = inventory.side === 1 ? -1 : 1;
-            const crossed =
-              inventory.side === 1
-                ? point.hlBid >= inventory.target.price
-                : point.hlAsk <= inventory.target.price;
-            if (crossed || consumeAtPoint(inventory.target, point, targetSide)) {
-              record(
-                m,
-                coin,
-                inventory.entryAt,
-                point.t,
-                grossBps(inventory.side, inventory.entry, inventory.target.price) - MAKER_RT_BPS,
-              );
-              inventory = null;
-            } else if (i - inventory.entryIdx >= holdSteps) {
-              const exit = inventory.side === 1 ? point.hlBid : point.hlAsk;
-              record(
-                m,
-                coin,
-                inventory.entryAt,
-                point.t,
-                grossBps(inventory.side, inventory.entry, exit) - MAKER_TAKER_BPS,
-              );
-              inventory = null;
+          for (let i = 240; i < points.length - holdSteps - 1; i++) {
+            const point = points[i]!;
+            if (inventory) {
+              const targetSide: 1 | -1 = inventory.side === 1 ? -1 : 1;
+              const crossed =
+                inventory.side === 1
+                  ? point.hlBid >= inventory.target.price
+                  : point.hlAsk <= inventory.target.price;
+              if (crossed || consumeAtPoint(inventory.target, point, targetSide)) {
+                record(
+                  m,
+                  coin,
+                  inventory.entryAt,
+                  point.t,
+                  grossBps(inventory.side, inventory.entry, inventory.target.price) - MAKER_RT_BPS,
+                );
+                inventory = null;
+              } else if (i - inventory.entryIdx >= holdSteps) {
+                const exit = inventory.side === 1 ? point.hlBid : point.hlAsk;
+                record(
+                  m,
+                  coin,
+                  inventory.entryAt,
+                  point.t,
+                  grossBps(inventory.side, inventory.entry, exit) - MAKER_TAKER_BPS,
+                );
+                inventory = null;
+              }
+              if (inventory) continue;
             }
-            if (inventory) continue;
-          }
 
-          if (bid && ask) {
-            const bidCopy = { ...bid },
-              askCopy = { ...ask };
-            const bidFilled = consumeAtPoint(bidCopy, point, 1);
-            const askFilled = consumeAtPoint(askCopy, point, -1);
-            if (bidFilled && askFilled) {
-              // Intra-bucket ordering is unknown. Do not award either fill.
-              bid = null;
-              ask = null;
-            } else if (bidFilled) {
-              inventory = {
-                side: 1,
-                entry: bid.price,
-                entryAt: point.t,
-                entryIdx: i,
-                target: { price: point.hlAsk, queue: point.hlAskSize },
-              };
-              bid = null;
-              ask = null;
-              continue;
-            } else if (askFilled) {
+            if (bid && ask) {
+              const bidCopy = { ...bid },
+                askCopy = { ...ask };
+              const bidFilled = consumeAtPoint(bidCopy, point, 1);
+              const askFilled = consumeAtPoint(askCopy, point, -1);
+              if (bidFilled && askFilled) {
+                // Intra-bucket ordering is unknown. Do not award either fill.
+                bid = null;
+                ask = null;
+              } else if (bidFilled) {
+                inventory = {
+                  side: 1,
+                  entry: bid.price,
+                  entryAt: point.t,
+                  entryIdx: i,
+                  target: { price: point.hlAsk, queue: point.hlAskSize },
+                };
+                bid = null;
+                ask = null;
+                continue;
+              } else if (askFilled) {
+                inventory = {
+                  side: -1,
+                  entry: ask.price,
+                  entryAt: point.t,
+                  entryIdx: i,
+                  target: { price: point.hlBid, queue: point.hlBidSize },
+                };
+                bid = null;
+                ask = null;
+                continue;
+              } else {
+                bid = bidCopy;
+                ask = askCopy;
+              }
+            } else if (bid) {
+              if (consumeAtPoint(bid, point, 1)) {
+                inventory = {
+                  side: 1,
+                  entry: bid.price,
+                  entryAt: point.t,
+                  entryIdx: i,
+                  target: { price: point.hlAsk, queue: point.hlAskSize },
+                };
+                bid = null;
+                ask = null;
+                continue;
+              }
+            } else if (ask && consumeAtPoint(ask, point, -1)) {
               inventory = {
                 side: -1,
                 entry: ask.price,
@@ -415,51 +445,33 @@ function evaluateMarketMaking(points: Point[], coin: string): void {
               bid = null;
               ask = null;
               continue;
-            } else {
-              bid = bidCopy;
-              ask = askCopy;
             }
-          } else if (bid) {
-            if (consumeAtPoint(bid, point, 1)) {
-              inventory = {
-                side: 1,
-                entry: bid.price,
-                entryAt: point.t,
-                entryIdx: i,
-                target: { price: point.hlAsk, queue: point.hlAskSize },
-              };
-              bid = null;
-              ask = null;
-              continue;
-            }
-          } else if (ask && consumeAtPoint(ask, point, -1)) {
-            inventory = {
-              side: -1,
-              entry: ask.price,
-              entryAt: point.t,
-              entryIdx: i,
-              target: { price: point.hlBid, queue: point.hlBidSize },
-            };
-            bid = null;
-            ask = null;
-            continue;
-          }
 
-          const observed = points[Math.max(0, i - delay)]!;
-          let keepBid = true,
-            keepAsk = true;
-          if (shield.lead != null && observed.agrees && Math.abs(observed.leadBps) >= shield.lead) {
-            const side: 1 | -1 = observed.leadBps > 0 ? 1 : -1;
-            if (side * observed.lagBps >= shield.lag) {
-              if (side === 1) keepAsk = false;
-              else keepBid = false;
+            const observed = points[Math.max(0, i - delay)]!;
+            let keepBid = true,
+              keepAsk = true;
+            if (
+              shield.lead != null &&
+              observed.agrees &&
+              Math.abs(observed.leadBps) >= shield.lead
+            ) {
+              const side: 1 | -1 = observed.leadBps > 0 ? 1 : -1;
+              if (side * observed.lagBps >= shield.lag) {
+                if (side === 1) keepAsk = false;
+                else keepBid = false;
+              }
             }
+            const bidPrice = point.hlBid * (1 - depthBps / 10_000);
+            const askPrice = point.hlAsk * (1 + depthBps / 10_000);
+            // We do not know queue size at an off-BBO synthetic level. Infinite
+            // queue means equality never fills; only a strict trade-through does.
+            const bidQueue = depthBps === 0 ? point.hlBidSize : Number.POSITIVE_INFINITY;
+            const askQueue = depthBps === 0 ? point.hlAskSize : Number.POSITIVE_INFINITY;
+            bid = refreshOrder(bid, keepBid, bidPrice, bidQueue);
+            ask = refreshOrder(ask, keepAsk, askPrice, askQueue);
+            m.signals += Number(keepBid) + Number(keepAsk);
           }
-          bid = refreshOrder(bid, keepBid, point.hlBid, point.hlBidSize);
-          ask = refreshOrder(ask, keepAsk, point.hlAsk, point.hlAskSize);
-          m.signals += Number(keepBid) + Number(keepAsk);
         }
-      }
 }
 
 function summarize(key: string, pair: Pair) {
