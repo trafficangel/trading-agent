@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  crossedPairEntryThreshold,
   fitLogPair,
   pairEntryPrices,
   pairExitPrices,
@@ -10,6 +11,14 @@ import {
 } from '../../src/lib/true-pairs.js';
 
 describe('true two-leg pairs math', () => {
+  it('opens only on a fresh entry-band crossing below the protective stop', () => {
+    expect(crossedPairEntryThreshold(undefined, -3.5, 2, 4)).toBe(false);
+    expect(crossedPairEntryThreshold(-3.5, -3.6, 2, 4)).toBe(false);
+    expect(crossedPairEntryThreshold(-1.9, -2.1, 2, 4)).toBe(true);
+    expect(crossedPairEntryThreshold(1.9, 2.1, 2, 4)).toBe(true);
+    expect(crossedPairEntryThreshold(1.9, 4, 2, 4)).toBe(false);
+  });
+
   it('recovers a log-price hedge ratio and standardizes its residual', () => {
     const b = Array.from({ length: 400 }, (_, i) =>
       Math.exp(5 + i * 0.001 + Math.sin(i / 17) * 0.01),

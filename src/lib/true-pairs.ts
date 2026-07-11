@@ -74,6 +74,23 @@ export function pairResidualZ(aPrice: number, bPrice: number, fit: PairFit): num
   return (residual - fit.residualMean) / fit.residualStd;
 }
 
+/** Enter only when a completed bar newly crosses the entry band from inside it. */
+export function crossedPairEntryThreshold(
+  previousZ: number | undefined,
+  currentZ: number,
+  entryZ: number,
+  stopZ: number,
+): boolean {
+  return (
+    previousZ !== undefined &&
+    Number.isFinite(previousZ) &&
+    Number.isFinite(currentZ) &&
+    Math.abs(previousZ) < entryZ &&
+    Math.abs(currentZ) >= entryZ &&
+    Math.abs(currentZ) < stopZ
+  );
+}
+
 /**
  * Return on total gross exposure. direction=1 means long A / short beta*B;
  * direction=-1 means short A / long beta*B.

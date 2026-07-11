@@ -13,6 +13,7 @@ import {
   type HlFunding,
 } from '../src/exchange/hyperliquid.js';
 import {
+  crossedPairEntryThreshold,
   fitLogPair,
   pairEntryPrices,
   pairExitPrices,
@@ -135,6 +136,7 @@ type CandidateState = {
   nextRefitAt?: number;
   lastBarAt?: number;
   invalidReason?: string;
+  previousHourlyZ?: number;
   position?: Position;
   completedTrades: number;
   cumulativeNetPct: number;
@@ -516,6 +518,7 @@ async function main(): Promise<void> {
       runtime.nextRefitAt = window.next;
       if (formation.length === candidate.formationBars && usableFit(fit, candidate)) {
         runtime.fit = fit;
+        delete runtime.previousHourlyZ;
         delete runtime.invalidReason;
         audit({
           event: 'fit',
@@ -526,6 +529,7 @@ async function main(): Promise<void> {
         });
       } else {
         delete runtime.fit;
+        delete runtime.previousHourlyZ;
         runtime.invalidReason = rejectionReason;
         audit({
           event: 'fit_rejected',
@@ -541,6 +545,8 @@ async function main(): Promise<void> {
     if (!runtime.fit) continue;
     const z = pairResidualZ(latest.a, latest.b, runtime.fit);
     if (!Number.isFinite(z)) continue;
+    const previousHourlyZ = runtime.previousHourlyZ;
+    runtime.previousHourlyZ = z;
 
     if (runtime.position && !rebalanced) {
       await monitorOpenPosition(candidate, runtime, books, now);
@@ -552,8 +558,7 @@ async function main(): Promise<void> {
       !runtime.position &&
       !rebalanced &&
       !finalBlockBar &&
-      Math.abs(z) >= candidate.entryZ &&
-      Math.abs(z) < candidate.stopZ
+      crossedPairEntryThreshold(previousHourlyZ, z, candidate.entryZ, candidate.stopZ)
     ) {
       proposals.push({
         candidate,
