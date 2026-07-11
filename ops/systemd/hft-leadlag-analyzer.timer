@@ -1,0 +1,11 @@
+[Unit]
+Description=Analyze completed lead-lag segments every 15 minutes
+
+[Timer]
+OnCalendar=*-*-* *:02,17,32,47:00 UTC
+Persistent=true
+RandomizedDelaySec=10
+Unit=hft-leadlag-analyzer.service
+
+[Install]
+WantedBy=timers.target

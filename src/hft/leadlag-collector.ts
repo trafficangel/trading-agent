@@ -69,7 +69,7 @@ const connectionState: Record<Venue, { connected: boolean; messages: number; rec
 let rows = 0;
 let dropped = 0;
 let startedAt = Date.now();
-let currentHour = '';
+let currentSegment = '';
 let currentPath = '';
 let gzip: Gzip | null = null;
 let file: WriteStream | null = null;
@@ -80,16 +80,18 @@ function finite(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function hourKey(now: number): string {
-  return new Date(now).toISOString().slice(0, 13).replace(/[-T:]/g, '');
+function segmentKey(now: number): string {
+  const date = new Date(now);
+  date.setUTCMinutes(Math.floor(date.getUTCMinutes() / 15) * 15, 0, 0);
+  return date.toISOString().slice(0, 16).replace(/[-T:]/g, '');
 }
 
 function openHour(now: number): void {
-  const hour = hourKey(now);
-  if (hour === currentHour && gzip) return;
+  const segment = segmentKey(now);
+  if (segment === currentSegment && gzip) return;
   gzip?.end();
-  currentHour = hour;
-  currentPath = resolve(DATA_DIR, `leadlag-${hour}.ndjson.gz`);
+  currentSegment = segment;
+  currentPath = resolve(DATA_DIR, `leadlag-${segment}.ndjson.gz`);
   file = createWriteStream(currentPath, { flags: 'a' });
   gzip = createGzip({ level: 6 });
   gzip.pipe(file);

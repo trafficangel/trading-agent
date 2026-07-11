@@ -1,0 +1,17 @@
+[Unit]
+Description=Tokyo Hyperliquid lead-lag shadow analyzer
+After=hft-leadlag-collector.service
+
+[Service]
+Type=oneshot
+User=trader
+WorkingDirectory=/home/trader/apps/hft-leadlag
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /home/trader/apps/hft-leadlag/leadlag-analyzer.js /home/trader/apps/hft-leadlag/data 72
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/hft-leadlag/data
+MemoryMax=1G
+
