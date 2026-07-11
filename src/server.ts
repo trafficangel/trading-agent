@@ -240,9 +240,8 @@ async function main(): Promise<void> {
   startHlCollector();
   startHlCandleCollector();
   startHlMinuteCandleCollector();
-  // FUNDING-FLIP test runner — the kill-battery + placebo-verified HL edge,
-  // launched in HL TESTNET (fake money) on the ETH+ADA core to accumulate live
-  // out-of-sample evidence. mode='testnet' const; idles if HL key missing.
+  // FUNDING-FLIP shadow runner — mainnet funding/OI/mids, DB-only paper fills.
+  // Broad basket accumulates OOS evidence without routing private orders.
   startFundingFlipRunner();
   // Wick-fade maintains exits and deep quotes only while its global rolling
   // guard and per-coin quarantines permit new entries.

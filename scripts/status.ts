@@ -102,6 +102,29 @@ for (const p of wickOpen) {
   console.log(`  ${p.coin.padEnd(9)} ${p.side.padEnd(5)} @ ${p.entry_px} · $${(p.entry_px * p.qty).toFixed(2)} · ${fmtT(p.opened_at)}`);
 }
 
+// ---- Funding-flip mainnet shadow ----
+const fundingFlip = db.prepare<[], { closed: number; net_pct: number | null; wins: number }>(`
+  SELECT COUNT(*) AS closed, SUM(pnl_pct) AS net_pct,
+         COALESCE(SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END), 0) AS wins
+    FROM funding_flip_log
+   WHERE mode='shadow' AND reason='open' AND closed_at IS NOT NULL AND pnl_pct IS NOT NULL
+`).get()!;
+const fundingFlipOpen = db.prepare<[], { coin: string; side: string; entry_px: number; qty: number; opened_at: number }>(`
+  SELECT p.coin, p.side, p.entry_px, p.qty, p.opened_at
+    FROM funding_flip_pos p
+   WHERE EXISTS (
+     SELECT 1 FROM funding_flip_log l
+      WHERE l.coin=p.coin AND l.mode='shadow' AND l.closed_at IS NULL
+   )
+   ORDER BY p.opened_at
+`).all();
+const fundingNet = fundingFlip.net_pct ?? 0;
+console.log(`\nHL FUNDING-FLIP SHADOW`);
+console.log(`  closed ${fundingFlip.closed}/20 · net ${fundingNet >= 0 ? '+' : ''}${fundingNet.toFixed(3)}% · WR ${fundingFlip.closed ? (fundingFlip.wins / fundingFlip.closed * 100).toFixed(0) : 0}% · open ${fundingFlipOpen.length}`);
+for (const p of fundingFlipOpen) {
+  console.log(`  ${p.coin.padEnd(9)} ${p.side.padEnd(5)} @ ${p.entry_px} · paper $${(p.entry_px * p.qty).toFixed(2)} · ${fmtT(p.opened_at)}`);
+}
+
 // ---- Hyperliquid momentum live ----
 const momPublicStartRaw = Number(db.prepare<[string], { value: string }>('SELECT value FROM runtime_config WHERE key = ?').get('hl_momentum_public_start_ms')?.value ?? Date.UTC(2026, 6, 8, 18, 14, 0));
 const momPublicStart = Number.isFinite(momPublicStartRaw) ? momPublicStartRaw : Date.UTC(2026, 6, 8, 18, 14, 0);

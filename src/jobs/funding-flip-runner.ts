@@ -1,6 +1,6 @@
 /**
- * FUNDING-FLIP TEST RUNNER — launches the one kill-battery + placebo-verified HL edge in HL
- * TESTNET (fake money) to accumulate live out-of-sample evidence (15–20 net-positive → live).
+ * FUNDING-FLIP SHADOW RUNNER — observes the kill-battery + placebo-verified HL
+ * edge on mainnet data without placing orders (15–20 net-positive → canary).
  *
  * Mechanism — BYTE-IDENTICAL to the verified backtest scripts/sweep-funding.ts: the funding series
  * is built the SAME way (getKlines('60') + loadMicroAligned(...).funding), the flip arithmetic copies
@@ -15,7 +15,7 @@
  * Both validated by a 60-shuffle empirical null (gate z>2.2; tilt 97th pct, ~2× pooled net) — see
  * [[hl-micro-layer]] / [[multishuffle-null-vs-single-placebo]]. Coins: ETH+ADA cross-window core +
  * XRP/AVAX (strong gated; BTC dropped — weak gated + no cross-window evidence).
- * LIVE-PROMOTION caveats (testnet-only for now): per-coin margin can scale up to oiSizeMax× the base
+ * LIVE-PROMOTION caveats: per-coin margin can scale up to oiSizeMax× the base
  * allocation, so concurrent high-OI flips across coins could over-request margin — fine on testnet
  * (order just rejects), but live needs a PORTFOLIO margin budget. See docs/funding-flip-live-promotion.md.
  *
@@ -23,7 +23,8 @@
  * reconciles funding_flip_pos against it BEFORE deciding (crash between order & DB-write can't double-
  * enter; a closed/partial position never books fabricated PnL). One-trade-per-flip via signal_hr dedup
  * (mirrors the backtest's guard). Close books PnL only after CONFIRMING the exchange is truly flat.
- * mode is a const: 'off'=idle, 'testnet'=fake money, 'live' THROWS.
+ * mode is a const: 'off'=idle, 'shadow'=mainnet prices/no orders,
+ * 'testnet'=fake money, 'live' THROWS.
  */
 import cron from 'node-cron';
 import { db } from '../db/client.js';
@@ -32,13 +33,16 @@ import { config } from '../config.js';
 import { hlConfigured, hlSetLeverage, hlMarketOrder, hlClosePosition, hlFetchPosition, hlAccountValue, hlMid } from '../exchange/hyperliquid-private.js';
 import { getBybitOiRoc } from '../exchange/bybit-public.js';
 
-type FfMode = 'off' | 'testnet' | 'live';
+type FfMode = 'off' | 'shadow' | 'testnet' | 'live';
 export const FF_CONFIG: { mode: FfMode; coins: string[]; W: number; zThr: number; fw: number; holdHours: number; capitalUsd: number; leverage: number; oiGate: boolean; oiRocHours: number; oiSizeTilt: boolean; oiSizeScale: number; oiSizeMax: number } = {
-  mode: 'testnet',                                  // operator chose HL testnet
-  coins: ['ETH', 'ADA', 'XRP', 'AVAX'],             // ETH+ADA cross-window core + XRP/AVAX (strong gated); BTC DROPPED (gated exp 0.12, Sharpe 0.05, no cross-window validation)
+  mode: 'shadow',                                   // mainnet signals/fills, DB-only: never routes an order
+  // Broad shadow basket measures transfer and raises the OOS event rate. It is
+  // intentionally wider than a future live basket; weak coins are culled only
+  // after the same forward sample, not from another in-sample selection pass.
+  coins: ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'LTC', 'LINK', 'DOGE', 'AVAX'],
   W: 360, zThr: 2, fw: 6,                           // verified flip config W360 z2 fw6
   holdHours: 24,                                    // pure time-stop — matches the backtest exit
-  capitalUsd: 800,                                  // testnet balance; per-coin BASE margin = capitalUsd / coins.length
+  capitalUsd: 800,                                  // paper capital; per-coin BASE margin = capitalUsd / coins.length
   leverage: 2,                                      // ~7% backtest maxDD at 2x on the core
   oiGate: true,                                     // OI-BUILD-UP gate: enter only if Bybit OI rose into the flip
   oiRocHours: 12,                                   // ...measured over the prior 12h (null-tested z>2.2, ~3× expectancy)
@@ -132,6 +136,10 @@ function flipSignal(fund: (number | null)[]): { side: 'long' | 'short'; funding:
 }
 
 async function stepCoin(coin: string): Promise<void> {
+  if (FF_CONFIG.mode === 'shadow') {
+    await stepShadowCoin(coin);
+    return;
+  }
   const nowMs = Date.now();
   const dbPos = getPosStmt.get(coin);
   const exRes = await hlFetchPosition(coin);
@@ -219,6 +227,49 @@ async function stepCoin(coin: string): Promise<void> {
   logger.warn({ coin, side: sig.side, fillPx, qty: +fillQty.toFixed(6), sizeMult: +sizeMult.toFixed(2), notional: +(reqMargin * FF_CONFIG.leverage).toFixed(0), sigHr: fs.sigHr, mode: FF_CONFIG.mode }, '✅ funding-flip: OPENED testnet (flip-capitulation, OI-sized)');
 }
 
+/** Mainnet-price paper execution. This keeps signal timing, OI gating, sizing,
+ * fees and the 24h exit identical to the order runner while never calling a
+ * private exchange endpoint. It can therefore collect OOS evidence alongside
+ * the mainnet wick/momentum books without account or One-Way collisions. */
+async function stepShadowCoin(coin: string): Promise<void> {
+  const nowMs = Date.now();
+  const dbPos = getPosStmt.get(coin);
+
+  if (dbPos) {
+    if (nowMs - dbPos.opened_at < FF_CONFIG.holdHours * HR) return;
+    const exit = await hlMid(coin);
+    if (exit == null || !(exit > 0)) { logger.warn({ coin }, 'funding-flip shadow: no mid at exit — retry next tick'); return; }
+    const gross = dbPos.side === 'long' ? (exit - dbPos.entry_px) / dbPos.entry_px * 100 : (dbPos.entry_px - exit) / dbPos.entry_px * 100;
+    const netPct = +(gross - HL_TAKER).toFixed(3);
+    closeTxn(exit, nowMs, netPct, coin);
+    logger.info({ coin, side: dbPos.side, entry: dbPos.entry_px, exit, pnlPct: netPct }, 'funding-flip shadow: CLOSED (24h time-stop)');
+    return;
+  }
+
+  const fs = await loadFundingSeries(coin);
+  if (!fs) return;
+  const sig = flipSignal(fs.fund);
+  if (!sig) return;
+  const lastHr = lastSigHrStmt.get(coin)?.hr;
+  if (lastHr != null && fs.sigHr <= lastHr) return;
+
+  let sizeMult = 1;
+  if (FF_CONFIG.oiGate) {
+    const roc = await getBybitOiRoc(`${coin}USDT`, FF_CONFIG.oiRocHours, (fs.sigHr + 1) * HR);
+    if (roc == null) { logger.warn({ coin, sigHr: fs.sigHr }, 'funding-flip shadow: OI unavailable — skip'); return; }
+    if (roc <= 0) { logger.info({ coin, side: sig.side, oiRoc: +roc.toFixed(4), sigHr: fs.sigHr }, 'funding-flip shadow: OI-gate blocked'); return; }
+    sizeMult = FF_CONFIG.oiSizeTilt ? Math.min(FF_CONFIG.oiSizeMax, Math.max(1, 1 + roc / FF_CONFIG.oiSizeScale)) : 1;
+  }
+
+  const entry = await hlMid(coin);
+  if (entry == null || !(entry > 0)) { logger.warn({ coin }, 'funding-flip shadow: no mid at entry — skip'); return; }
+  const margin = (FF_CONFIG.capitalUsd / FF_CONFIG.coins.length) * sizeMult;
+  const qty = (margin * FF_CONFIG.leverage) / entry;
+  insPosStmt.run(coin, sig.side, entry, qty, sig.funding, fs.sigHr, nowMs);
+  insLogStmt.run(coin, sig.side, entry, qty, fs.sigHr, nowMs, 'open', FF_CONFIG.mode);
+  logger.info({ coin, side: sig.side, entry, qty: +qty.toFixed(6), sizeMult: +sizeMult.toFixed(2), sigHr: fs.sigHr }, 'funding-flip shadow: OPENED');
+}
+
 let running = false;
 export function startFundingFlipRunner(): void {
   if (FF_CONFIG.mode === 'off') { logger.info('funding-flip runner: mode=off (idle)'); return; }
@@ -235,6 +286,6 @@ export function startFundingFlipRunner(): void {
       }
     })().finally(() => { running = false; });
   });
-  logger.warn({ mode: FF_CONFIG.mode, coins: FF_CONFIG.coins, lev: FF_CONFIG.leverage, cfg: `W${FF_CONFIG.W}z${FF_CONFIG.zThr}fw${FF_CONFIG.fw}h${FF_CONFIG.holdHours}`, oiGate: FF_CONFIG.oiGate, oiTilt: FF_CONFIG.oiSizeTilt ? `≤${FF_CONFIG.oiSizeMax}x` : false }, '✅ funding-flip TEST runner scheduled (every 5m, HL testnet, closed-bar + exchange-reconciled + OI-gate/tilt)');
-  if (!hlConfigured()) logger.error('funding-flip: HL_API_WALLET_KEY missing — runner idles until configured');
+  logger.warn({ mode: FF_CONFIG.mode, coins: FF_CONFIG.coins, lev: FF_CONFIG.leverage, cfg: `W${FF_CONFIG.W}z${FF_CONFIG.zThr}fw${FF_CONFIG.fw}h${FF_CONFIG.holdHours}`, oiGate: FF_CONFIG.oiGate, oiTilt: FF_CONFIG.oiSizeTilt ? `≤${FF_CONFIG.oiSizeMax}x` : false }, 'funding-flip runner scheduled (every 5m, closed-bar + OI-gate/tilt)');
+  if (FF_CONFIG.mode !== 'shadow' && !hlConfigured()) logger.error('funding-flip: HL_API_WALLET_KEY missing — runner idles until configured');
 }
