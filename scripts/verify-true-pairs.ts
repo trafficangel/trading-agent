@@ -22,12 +22,19 @@ import {
   type PairFit,
 } from '../src/lib/true-pairs.js';
 
-const PROFILE = process.argv[2] === 'hourly' ? 'hourly' : '5m';
+type Profile = '5m' | 'hourly' | 'fast';
+const requestedProfile = process.argv[2];
+const PROFILE: Profile =
+  requestedProfile === 'hourly' || requestedProfile === 'fast' ? requestedProfile : '5m';
 const TF = PROFILE === 'hourly' ? '60' : '5';
 const DAYS = PROFILE === 'hourly' ? 720 : 552;
 const MIN_ALIGNED_BARS = PROFILE === 'hourly' ? 10_000 : 100_000;
 const OUTPUT_PATH =
-  PROFILE === 'hourly' ? 'data/true-pairs-hourly-results.json' : 'data/true-pairs-results.json';
+  PROFILE === 'hourly'
+    ? 'data/true-pairs-hourly-results.json'
+    : PROFILE === 'fast'
+      ? 'data/true-pairs-fast-results.json'
+      : 'data/true-pairs-results.json';
 const OOS_START_MS = Date.parse('2026-01-12T00:00:00Z');
 const HL_TAKER_RT_PCT = 0.09;
 const BYBIT_TAKER_RT_PCT = 0.11;
@@ -61,6 +68,7 @@ type Model = {
   exitZ: number;
   stopZ: number;
   maxHoldBars: number;
+  freshCross?: boolean;
 };
 
 // 5m was frozen before its first run. Hourly was frozen after that family
@@ -88,26 +96,59 @@ const MODELS: Model[] =
           maxHoldBars: 14 * 24,
         },
       ]
-    : [
-        {
-          id: 'F30_R7_E2',
-          formationBars: 30 * 288,
-          tradeBars: 7 * 288,
-          entryZ: 2,
-          exitZ: 0.25,
-          stopZ: 4,
-          maxHoldBars: 3 * 288,
-        },
-        {
-          id: 'F14_R3_E2.5',
-          formationBars: 14 * 288,
-          tradeBars: 3 * 288,
-          entryZ: 2.5,
-          exitZ: 0.5,
-          stopZ: 4,
-          maxHoldBars: 288,
-        },
-      ];
+    : PROFILE === 'fast'
+      ? [
+          {
+            id: 'FAST_F7_R1_E2_H8',
+            formationBars: 7 * 288,
+            tradeBars: 288,
+            entryZ: 2,
+            exitZ: 0.25,
+            stopZ: 4,
+            maxHoldBars: 8 * 12,
+            freshCross: true,
+          },
+          {
+            id: 'FAST_F14_R2_E2_H12',
+            formationBars: 14 * 288,
+            tradeBars: 2 * 288,
+            entryZ: 2,
+            exitZ: 0.25,
+            stopZ: 4,
+            maxHoldBars: 12 * 12,
+            freshCross: true,
+          },
+          {
+            id: 'FAST_F30_R3_E2_H24',
+            formationBars: 30 * 288,
+            tradeBars: 3 * 288,
+            entryZ: 2,
+            exitZ: 0.25,
+            stopZ: 4,
+            maxHoldBars: 24 * 12,
+            freshCross: true,
+          },
+        ]
+      : [
+          {
+            id: 'F30_R7_E2',
+            formationBars: 30 * 288,
+            tradeBars: 7 * 288,
+            entryZ: 2,
+            exitZ: 0.25,
+            stopZ: 4,
+            maxHoldBars: 3 * 288,
+          },
+          {
+            id: 'F14_R3_E2.5',
+            formationBars: 14 * 288,
+            tradeBars: 3 * 288,
+            entryZ: 2.5,
+            exitZ: 0.5,
+            stopZ: 4,
+            maxHoldBars: 288,
+          },
+        ];
 
 type AlignedBar = { t: number; aO: number; aC: number; bO: number; bC: number };
 type DivergencePoint = { t: number; actual: number; fair: number; z: number };
@@ -255,6 +296,7 @@ function simulate(
 
     let position: { direction: 1 | -1; entryIdx: number; aEntry: number; bEntry: number } | null =
       null;
+    let previousZ: number | null = null;
     const close = (exitIdx: number, reason: ExitReason): void => {
       if (!position) return;
       const exit = rows[exitIdx]!;
@@ -307,9 +349,17 @@ function simulate(
         if (adverseStop) close(fillIdx, 'z-stop');
         else if (reverted) close(fillIdx, 'mean');
         else if (timedOut) close(fillIdx, 'time');
+        previousZ = z;
         continue;
       }
-      if (Math.abs(z) < model.entryZ || Math.abs(z) >= model.stopZ) continue;
+      const freshCross = previousZ !== null && Math.abs(previousZ) < model.entryZ;
+      previousZ = z;
+      if (
+        Math.abs(z) < model.entryZ ||
+        Math.abs(z) >= model.stopZ ||
+        (model.freshCross && !freshCross)
+      )
+        continue;
       const fill = rows[fillIdx]!;
       position = {
         direction: z < 0 ? 1 : -1,
@@ -502,7 +552,9 @@ async function main(): Promise<void> {
     validationStatus:
       PROFILE === 'hourly'
         ? 'exploratory-requires-forward-shadow-from-2026-07-12'
-        : 'frozen-historical-oos',
+        : PROFILE === 'fast'
+          ? 'exploratory-fast-pairs-frozen-before-first-run'
+          : 'frozen-historical-oos',
     generatedAt: new Date().toISOString(),
     researchStartAt: from,
     oosStartAt: OOS_START_MS,
