@@ -28,6 +28,7 @@ const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 const FEE_RT_PCT = 0.09;
 const MAX_OPEN_PAIRS = 2;
+const BASKET_ID = 'fixed-epoch-v2-2026-07-11';
 const STATE_PATH = process.env.TRUE_PAIRS_SHADOW_STATE ?? 'data/true-pairs-shadow.json';
 const AUDIT_PATH = process.env.TRUE_PAIRS_SHADOW_AUDIT ?? 'data/true-pairs-shadow-trades.ndjson';
 const NOTIFY = process.env.TRUE_PAIRS_SHADOW_NOTIFY !== 'false';
@@ -47,9 +48,31 @@ type Candidate = {
 // Frozen before forward collection. Historical evidence is exploratory, not a live gate.
 const CANDIDATES: Candidate[] = [
   {
-    id: 'XRP_SOL_H60',
-    a: 'XRP',
-    b: 'SOL',
+    id: 'LTC_ADA_H90',
+    a: 'LTC',
+    b: 'ADA',
+    formationBars: 90 * 24,
+    tradeBars: 30 * 24,
+    entryZ: 2.5,
+    exitZ: 0.5,
+    stopZ: 4,
+    maxHoldBars: 14 * 24,
+  },
+  {
+    id: 'LTC_XRP_H90',
+    a: 'LTC',
+    b: 'XRP',
+    formationBars: 90 * 24,
+    tradeBars: 30 * 24,
+    entryZ: 2.5,
+    exitZ: 0.5,
+    stopZ: 4,
+    maxHoldBars: 14 * 24,
+  },
+  {
+    id: 'ADA_XRP_H60',
+    a: 'ADA',
+    b: 'XRP',
     formationBars: 60 * 24,
     tradeBars: 14 * 24,
     entryZ: 2,
@@ -58,31 +81,31 @@ const CANDIDATES: Candidate[] = [
     maxHoldBars: 7 * 24,
   },
   {
-    id: 'LINK_ETH_H90',
-    a: 'LINK',
-    b: 'ETH',
-    formationBars: 90 * 24,
-    tradeBars: 30 * 24,
-    entryZ: 2.5,
-    exitZ: 0.5,
-    stopZ: 4,
-    maxHoldBars: 14 * 24,
-  },
-  {
-    id: 'DOGE_SOL_H90',
+    id: 'DOGE_XRP_H60',
     a: 'DOGE',
-    b: 'SOL',
-    formationBars: 90 * 24,
-    tradeBars: 30 * 24,
-    entryZ: 2.5,
-    exitZ: 0.5,
+    b: 'XRP',
+    formationBars: 60 * 24,
+    tradeBars: 14 * 24,
+    entryZ: 2,
+    exitZ: 0.25,
     stopZ: 4,
-    maxHoldBars: 14 * 24,
+    maxHoldBars: 7 * 24,
   },
   {
-    id: 'AAVE_LINK_H60',
-    a: 'AAVE',
-    b: 'LINK',
+    id: 'LTC_BNB_H60',
+    a: 'LTC',
+    b: 'BNB',
+    formationBars: 60 * 24,
+    tradeBars: 14 * 24,
+    entryZ: 2,
+    exitZ: 0.25,
+    stopZ: 4,
+    maxHoldBars: 7 * 24,
+  },
+  {
+    id: 'AVAX_SOL_H60',
+    a: 'AVAX',
+    b: 'SOL',
     formationBars: 60 * 24,
     tradeBars: 14 * 24,
     entryZ: 2,
@@ -115,6 +138,7 @@ type CandidateState = {
 
 type ShadowState = {
   version: 1;
+  basketId: string;
   startedAt: number;
   startedNotified: boolean;
   lastRunAt?: number;
@@ -146,6 +170,7 @@ function formationWindow(
 function freshState(): ShadowState {
   return {
     version: 1,
+    basketId: BASKET_ID,
     startedAt: Date.now(),
     startedNotified: false,
     candidates: Object.fromEntries(
@@ -159,6 +184,15 @@ function loadState(): ShadowState {
   const state = JSON.parse(readFileSync(STATE_PATH, 'utf8')) as ShadowState;
   if (state.version !== 1 || typeof state.candidates !== 'object')
     throw new Error('unsupported true-pairs shadow state');
+  if (state.basketId !== BASKET_ID) {
+    const hadPosition = Object.values(state.candidates).some((runtime) => runtime.position);
+    if (hadPosition) throw new Error('cannot migrate shadow basket with open positions');
+    state.basketId = BASKET_ID;
+    state.startedAt = Date.now();
+    state.startedNotified = false;
+    state.candidates = {};
+    audit({ event: 'basket_reset', basketId: BASKET_ID });
+  }
   for (const candidate of CANDIDATES) {
     state.candidates[candidate.id] ??= { completedTrades: 0, cumulativeNetPct: 0 };
   }
@@ -531,7 +565,7 @@ async function main(): Promise<void> {
   if (!state.startedNotified) {
     await notify({
       disable_notification: true,
-      text: `<b>TRUE PAIRS FORWARD SHADOW ЗАПУЩЕН</b>\n4 замороженные модели · 1h · реальные HL BBO и funding\nМаксимум ${MAX_OPEN_PAIRS} пары, общий актив нельзя использовать дважды.\n<i>Контур read-only: приватные ключи и функции ордеров не подключены.</i>`,
+      text: `<b>TRUE PAIRS FORWARD SHADOW ЗАПУЩЕН</b>\n${CANDIDATES.length} замороженных моделей · 1h · реальные HL BBO и funding\nМаксимум ${MAX_OPEN_PAIRS} пары, общий актив нельзя использовать дважды.\n<i>Контур read-only: приватные ключи и функции ордеров не подключены.</i>`,
     });
     state.startedNotified = true;
   }
