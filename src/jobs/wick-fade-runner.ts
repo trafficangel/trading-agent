@@ -24,8 +24,20 @@ import type { HlTradeAccounting } from '../lib/hl-trade-accounting.js';
 import { sendMessage } from '../telegram/bot.js';
 import {
   wickFadeDriftBlockReason,
+  WICK_FADE_DRIFT_STALE_MS,
   WICK_FADE_DRIFT_STATE_KEY,
+  type WickFadeDriftRuntimeState,
 } from '../lib/wick-fade-drift-guard.js';
+import {
+  evaluateWickFadeRecoveryCanary,
+  WICK_FADE_RECOVERY_ENABLED_KEY,
+  WICK_FADE_RECOVERY_ENTRY_REASON,
+  WICK_FADE_RECOVERY_POLICY,
+  WICK_FADE_RECOVERY_RESUME_APPROVED_KEY,
+  WICK_FADE_RECOVERY_STATE_KEY,
+  type WickFadeRecoveryRuntimeState,
+  type WickFadeRecoveryTrade,
+} from '../lib/wick-fade-recovery-canary.js';
 
 /** Operator notification (Telegram logs channel) — fire-and-forget: sendMessage never throws, and `void`
  *  keeps the trading path from ever blocking/failing on Telegram. Only live-mode events notify. */
@@ -69,6 +81,15 @@ export const DISABLED_SIDE: Record<string, 'long' | 'short'> = { ATOM: 'short', 
 // rung reserves its own ~$6.65 margin. On adopt the FILLED rung's depth is inferred so the stored x — and
 // thus target = the rung's own anchor mid — stays faithful to what was validated (see inferFilledX).
 export const LADDER: Record<string, number> = { DOGE: 0.035, ATOM: 0.035 };
+
+type RecoveryCandidate = { coin: string; side: 'long' | 'short'; depth: number };
+// Frozen before activation. These are the two honest-battery deep rungs; ATOM short remains disabled.
+// Only one candidate rests at a time, rotating after each exact closed probe.
+export const WICK_FADE_RECOVERY_CANDIDATES: readonly RecoveryCandidate[] = [
+  { coin: 'ATOM', side: 'long', depth: 0.035 },
+  { coin: 'DOGE', side: 'short', depth: 0.035 },
+  { coin: 'DOGE', side: 'long', depth: 0.035 },
+];
 
 /** Which rung filled? Same-side rungs share the quote anchor, so entry÷survivor-price classifies the fill:
  *  for a long, ratio<1 = the fill sat DEEPER than the surviving rung. Partial fills leave the filled order
@@ -175,8 +196,23 @@ function depthFactor(coin: string): number {
 
 type PosRow = { coin: string; side: 'long' | 'short'; entry_px: number; qty: number; x: number; opened_at: number; reason: string };
 type AccountingRepairRow = { id: number; coin: string; opened_at: number; closed_at: number };
+type RecoveryDbRow = {
+  pnl_pct: number;
+  net_pnl_usd: number | null;
+  close_reason: string | null;
+  pnl_source: string | null;
+};
 const getPos = db.prepare<[string], PosRow>(`SELECT * FROM wick_fade_pos WHERE coin = ?`);
 const allOpenPosCoins = db.prepare<[], { coin: string }>(`SELECT DISTINCT coin FROM wick_fade_pos`); // to wind down positions on CUT coins
+const recoveryRowsStmt = db.prepare<[string, string], RecoveryDbRow>(`
+  SELECT pnl_pct, net_pnl_usd, close_reason, pnl_source
+    FROM wick_fade_log
+   WHERE mode = ?
+     AND reason = ?
+     AND closed_at IS NOT NULL
+     AND pnl_pct IS NOT NULL
+   ORDER BY closed_at ASC, id ASC
+`);
 const insPos = db.prepare(`INSERT OR REPLACE INTO wick_fade_pos (coin,side,entry_px,qty,x,opened_at,reason) VALUES (?,?,?,?,?,?,?)`);
 const delPos = db.prepare(`DELETE FROM wick_fade_pos WHERE coin = ?`);
 // last CATASTROPHE-like close per coin — drives the post-stop cooldown. Matches: explicit catastrophe;
@@ -344,9 +380,11 @@ const closedDayPnlStmt = db.prepare<[string, number], { pnl: number | null }>(`
      AND pnl_pct IS NOT NULL
      AND closed_at >= ?
 `);
+function saveRuntimeValue(key: string, value: string, reason: string, nowMs = Date.now()): void {
+  if (updKv.run(value, nowMs, reason, key).changes === 0) insKv.run(key, value, nowMs, reason);
+}
 function saveSod(state: { day: number; equity: number; killedDay?: number }): void {
-  const v = JSON.stringify(state);
-  if (updKv.run(v, Date.now(), 'wick-fade start-of-day equity', SOD_KEY).changes === 0) insKv.run(SOD_KEY, v, Date.now(), 'wick-fade start-of-day equity');
+  saveRuntimeValue(SOD_KEY, JSON.stringify(state), 'wick-fade start-of-day equity');
 }
 
 function ownershipBlockReason(nowMs: number): string | null {
@@ -554,6 +592,91 @@ function sideTrendBlockReason(coin: string, side: 'long' | 'short'): string | nu
   }
   return null;
 }
+
+type RecoveryTick = {
+  enabled: boolean;
+  canaryContext: boolean;
+  driftReason: string | null;
+  evaluation: ReturnType<typeof evaluateWickFadeRecoveryCanary>;
+  expected: RecoveryCandidate | null;
+  candidate: RecoveryCandidate | null;
+};
+
+function readRecoveryRuntimeState(): WickFadeRecoveryRuntimeState | null {
+  const raw = getKv.get(WICK_FADE_RECOVERY_STATE_KEY)?.value;
+  if (!raw) return null;
+  try { return JSON.parse(raw) as WickFadeRecoveryRuntimeState; } catch { return null; }
+}
+
+function driftAllowsRecoveryCanary(nowMs: number): { allowed: boolean; reason: string | null } {
+  const raw = getKv.get(WICK_FADE_DRIFT_STATE_KEY)?.value;
+  const reason = globalDriftBlockReason(nowMs);
+  if (!raw || !reason) return { allowed: false, reason };
+  try {
+    const state = JSON.parse(raw) as WickFadeDriftRuntimeState;
+    const fresh = state.checkedAt > 0 && nowMs - state.checkedAt <= WICK_FADE_DRIFT_STALE_MS;
+    return { allowed: Boolean(state.blocked && fresh && state.slow?.n >= 40), reason };
+  } catch {
+    return { allowed: false, reason };
+  }
+}
+
+function recoveryCanaryTick(nowMs: number): RecoveryTick {
+  const enabled = getKv.get(WICK_FADE_RECOVERY_ENABLED_KEY)?.value === '1';
+  const previous = readRecoveryRuntimeState();
+  const rows: WickFadeRecoveryTrade[] = recoveryRowsStmt
+    .all(WF_CONFIG.mode, WICK_FADE_RECOVERY_ENTRY_REASON)
+    .map((row) => ({
+      pnlPct: row.pnl_pct,
+      netPnlUsd: row.net_pnl_usd,
+      closeReason: row.close_reason,
+      exact: row.pnl_source === 'fills-v1',
+    }));
+  const evaluation = evaluateWickFadeRecoveryCanary(rows);
+  const expected = evaluation.status === 'active'
+    ? WICK_FADE_RECOVERY_CANDIDATES[evaluation.n % WICK_FADE_RECOVERY_CANDIDATES.length] ?? null
+    : null;
+  const drift = driftAllowsRecoveryCanary(nowMs);
+  const fullResumeApproved = getKv.get(WICK_FADE_RECOVERY_RESUME_APPROVED_KEY)?.value === '1';
+  const manualHold = !fullResumeApproved && (previous != null || enabled);
+  const driftReason = drift.reason ?? (manualHold ? `recovery canary ${evaluation.status}; full-book resume requires explicit approval` : null);
+  const noOpenWickPosition = allOpenPosCoins.all().length === 0;
+  const entryAllowed = enabled && drift.allowed && evaluation.allowEntry && noOpenWickPosition;
+  const candidate = entryAllowed ? expected : null;
+  const state: WickFadeRecoveryRuntimeState = {
+    ...evaluation,
+    enabled,
+    checkedAt: nowMs,
+    candidate: expected ? `${expected.coin}:${expected.side}@${(expected.depth * 100).toFixed(1)}%` : null,
+    entryAllowed: candidate != null,
+    driftReason,
+  };
+  saveRuntimeValue(WICK_FADE_RECOVERY_STATE_KEY, JSON.stringify(state), state.reason, nowMs);
+
+  const pf = evaluation.profitFactor == null
+    ? (evaluation.netPnlUsd > 0 ? 'inf' : 'na')
+    : evaluation.profitFactor.toFixed(2);
+  if (enabled && previous?.enabled !== true) {
+    notify(`▶️ <b>Wick-Fade recovery-canary armed</b>\nОдна fixed-deep ловушка · ~$${MIN_NOTIONAL}-${Math.ceil(MIN_NOTIONAL + 1)} notional · без лестницы · stop after ${WICK_FADE_RECOVERY_POLICY.maxConsecutiveStops} consecutive stop-like losses.`);
+  } else if (!enabled && previous?.enabled === true) {
+    notify('⏸ <b>Wick-Fade recovery-canary disabled</b> — resting recovery quotes are being removed.');
+  } else if (enabled && (previous?.status !== evaluation.status || previous.n !== evaluation.n)) {
+    const headline = evaluation.status === 'ready'
+      ? '✅ <b>Wick-Fade recovery-canary ready for manual review</b>'
+      : evaluation.status === 'failed'
+        ? '⛔ <b>Wick-Fade recovery-canary failed</b>'
+        : '🧪 <b>Wick-Fade recovery-canary progress</b>';
+    notify(`${headline}\n${evaluation.n}/${WICK_FADE_RECOVERY_POLICY.maxTrades} exact ${evaluation.exactN}/${evaluation.n} · net ${evaluation.netPct >= 0 ? '+' : ''}${evaluation.netPct.toFixed(3)}% · PF ${pf}\n${evaluation.reason}`);
+  }
+  return {
+    enabled,
+    canaryContext: enabled || previous?.enabled === true,
+    driftReason,
+    evaluation,
+    expected,
+    candidate,
+  };
+}
 // ACTION-BUDGET BREAKER: when HL rejects with 'Too many cumulative', STOP quote maintenance for an hour
 // instead of retrying every tick — each rejected attempt still increments the counter (the Jul-5 death
 // spiral: 12k+ rejects in 6h dug the deficit 1.3k → 14.4k). Exits/stops are unaffected (they ride the
@@ -567,7 +690,13 @@ function tripBudgetBreaker(msg: string): void {
 }
 const isBudgetErr = (m: string): boolean => /Too many cumulative/i.test(m);
 const NO_ACTIONS: QuoteActions = { cancels: [], places: [] };
-async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marketBlockReason: string | null): Promise<QuoteActions> {
+async function stepCoin(
+  coin: string,
+  killed: boolean,
+  quoteTick: boolean,
+  marketBlockReason: string | null,
+  recovery: RecoveryTick,
+): Promise<QuoteActions> {
   const x = COIN_X[coin]; // undefined = a CUT coin — the exit branches below still WIND DOWN its open position; the quote branch places no new quotes and cancels any resting ones (guard before quoting).
   const nowMs = Date.now();
   const dbPos = getPos.get(coin);
@@ -588,21 +717,27 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marke
   // ── RECONCILE: a deep quote FILLED (exchange position, no DB row) → adopt + clear the other side ──
   if (exPos && !dbPos && x != null) { // a CUT coin (x==null) never adopts a NEW fill (its quotes are cancelled)
     if (!ooRes.ok) { logger.warn({ coin }, 'wick-fade: fill detected but openOrders read failed — defer adopt (must clear the other side first)'); return NO_ACTIONS; }
-    const xf = inferFilledX(coin, exPos.side, exPos.entryPx, exOrders); // BEFORE cancel conceptually — exOrders is the pre-cancel snapshot
+    const recoveryFill = recovery.canaryContext
+      && recovery.expected?.coin === coin
+      && recovery.expected.side === exPos.side;
+    const xf = recoveryFill
+      ? recovery.expected!.depth
+      : inferFilledX(coin, exPos.side, exPos.entryPx, exOrders); // BEFORE cancel conceptually — exOrders is the pre-cancel snapshot
+    const entryReason = recoveryFill ? WICK_FADE_RECOVERY_ENTRY_REASON : 'fill';
     await cancelAll(coin, exOrders);
     // opened_at = the REAL fill time from userFills (not the adopt tick) — otherwise every restart resets the
     // 60-min time-stop clock and a position rides open-ended across a restart-churny day (EOD-audit #3).
     const st = await hlPositionStartTime(coin);
     const openedAt = st.ok && st.data.timeMs != null && st.data.timeMs <= nowMs ? st.data.timeMs : nowMs;
-    insPos.run(coin, exPos.side, exPos.entryPx, exPos.size, xf, openedAt, 'fill');
-    insLog.run(coin, exPos.side, exPos.entryPx, exPos.size, xf, openedAt, 'fill', WF_CONFIG.mode);
+    insPos.run(coin, exPos.side, exPos.entryPx, exPos.size, xf, openedAt, entryReason);
+    insLog.run(coin, exPos.side, exPos.entryPx, exPos.size, xf, openedAt, entryReason, WF_CONFIG.mode);
     // EXCHANGE-RESIDENT catastrophe stop: guards the position through process downtime / restart gaps (the
     // poll is only a backup). reduceOnly stop-market at the stopPct level; a trigger, so it won't show in openOrders.
     const stpPx = stopAbs(exPos.side, exPos.entryPx);
     const sres = await hlPlaceStop({ coin, posSide: exPos.side, qty: exPos.size, triggerPx: stpPx });
     if (!sres.ok) logger.error({ coin, msg: sres.msg }, '🛑 wick-fade: EXCHANGE STOP place failed — 1-min poll is the ONLY protection this hold');
-    logger.warn({ coin, side: exPos.side, entry: exPos.entryPx, x: xf, stop: +stpPx.toFixed(6), exStop: sres.ok, openedAt, target: +targetPx(exPos.side, exPos.entryPx, xf).toFixed(6) }, '✅ wick-fade: FILLED (deep wick) — managing exit');
-    notify(`🪝 <b>wick-fade FILLED</b>: ${coin} ${exPos.side} @${exPos.entryPx}\nцель ${targetPx(exPos.side, exPos.entryPx, xf).toFixed(6)} · стоп ${stpPx.toFixed(6)} ${sres.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · $${(exPos.size * exPos.entryPx).toFixed(0)}`);
+    logger.warn({ coin, side: exPos.side, entry: exPos.entryPx, x: xf, recoveryCanary: recoveryFill, stop: +stpPx.toFixed(6), exStop: sres.ok, openedAt, target: +targetPx(exPos.side, exPos.entryPx, xf).toFixed(6) }, '✅ wick-fade: FILLED (deep wick) — managing exit');
+    notify(`🪝 <b>wick-fade${recoveryFill ? ' RECOVERY' : ''} FILLED</b>: ${coin} ${exPos.side} @${exPos.entryPx}\nцель ${targetPx(exPos.side, exPos.entryPx, xf).toFixed(6)} · стоп ${stpPx.toFixed(6)} ${sres.ok ? '(на бирже ✅)' : '(⚠️ только полл!)'} · $${(exPos.size * exPos.entryPx).toFixed(0)}`);
     return NO_ACTIONS;
   }
   // ── DB-open but exchange-flat (closed out-of-band — usually the EXCHANGE STOP fired between polls) →
@@ -667,10 +802,28 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marke
   if (momentumLock) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
   if (ownershipBlockReason(nowMs)) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
   if (marketBlockReason) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
-  const driftBlockReason = globalDriftBlockReason(nowMs);
+  if (killed) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] }; // daily kill pulls quotes immediately, not only on a quote-maintenance tick
+  const driftBlockReason = recovery.driftReason;
+  const recoveryCandidate = driftBlockReason ? recovery.candidate : null;
   if (driftBlockReason) {
     logGlobalDriftBlock(driftBlockReason, nowMs);
-    return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
+    if (!recoveryCandidate || recoveryCandidate.coin !== coin) {
+      return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
+    }
+    const trendReason = sideTrendBlockReason(coin, recoveryCandidate.side);
+    const quarantineReason = liveQuarantineReason(coin, recoveryCandidate.side, nowMs);
+    const lastCat = lastCatStmt.get(coin, WF_CONFIG.mode)?.t ?? null;
+    const coolingDown = lastCat != null && nowMs - lastCat < WF_CONFIG.postStopCooldownMins * 60_000;
+    if (trendReason || quarantineReason || coolingDown || x == null || (haltedUntil.get(coin) ?? 0) > nowMs) {
+      const reason = trendReason ?? quarantineReason;
+      if (reason) logLiveQuarantine(coin, recoveryCandidate.side, reason, nowMs);
+      return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
+    }
+    // A canary has exactly one order. If stale full-book orders survived a restart, remove all of them
+    // before placing the single recovery quote on the next maintenance tick.
+    if (!quoteTick && (exOrders.length > 1 || exOrders.some((order) => order.side !== recoveryCandidate.side))) {
+      return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] };
+    }
   }
   // HL ADDRESS ACTION BUDGET (learned live Jul 4): every order/cancel costs 1 action from a budget of
   // 10k + $1-of-volume-traded each. Per-minute re-quoting across 21+ coins burned ~11.4k actions on $186
@@ -679,7 +832,6 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marke
   if (!quoteTick) return NO_ACTIONS;
   if (x == null) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] }; // CUT coin: cancel any resting quotes, never place new (its open position already wound down via the exit branches above)
   if ((haltedUntil.get(coin) ?? 0) > nowMs) return NO_ACTIONS; // per-asset halt backoff
-  if (killed) return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] }; // DAILY-LOSS KILL: pull quotes, no new entries (open positions are FORCE-FLATTENED on loss-kill in the in-position branch above)
   // POST-STOP COOLDOWN: after a catastrophe the flush is often STILL RUNNING — re-quoting immediately meant
   // re-filling into the same cascade (a repeat loser; validated in the Jul 3 param sweep, section C/D).
   const lastCat = lastCatStmt.get(coin, WF_CONFIG.mode)?.t ?? null;
@@ -688,16 +840,24 @@ async function stepCoin(coin: string, killed: boolean, quoteTick: boolean, marke
   const liquidityReason = await quoteLiquidityBlockReason(coin, nowMs);
   if (liquidityReason) { logLiquidityBlock(coin, liquidityReason, nowMs); return { cancels: exOrders.map((o) => ({ coin, oid: o.oid })), places: [] }; }
   const margin = WF_CONFIG.capitalUsd / WF_CONFIG.coins.length;
-  const factor = depthFactor(coin); // live vol multiplier (1 = fixed depth); computed once per coin per quote tick
+  const factor = recoveryCandidate ? 1 : depthFactor(coin); // recovery uses the fixed, independently validated 3.5% deep rung
   const acts: QuoteActions = { cancels: [], places: [] };
   for (const side of ['long', 'short'] as const) {
     const existing = exOrders.filter((o) => o.side === side);
+    if (recoveryCandidate && side !== recoveryCandidate.side) {
+      for (const o of existing) acts.cancels.push({ coin, oid: o.oid });
+      continue;
+    }
     if (DISABLED_SIDE[coin] === side) { for (const o of existing) acts.cancels.push({ coin, oid: o.oid }); continue; }
     const trendReason = sideTrendBlockReason(coin, side);
     if (trendReason) { for (const o of existing) acts.cancels.push({ coin, oid: o.oid }); logLiveQuarantine(coin, side, trendReason, nowMs); continue; }
     const quarantineReason = liveQuarantineReason(coin, side, nowMs);
     if (quarantineReason) { for (const o of existing) acts.cancels.push({ coin, oid: o.oid }); logLiveQuarantine(coin, side, quarantineReason, nowMs); continue; }
-    const depths = LADDER[coin] != null ? [clampDepth(x * factor), clampDepth(LADDER[coin]! * factor)] : [clampDepth(x * factor)];
+    const depths = recoveryCandidate
+      ? [recoveryCandidate.depth]
+      : LADDER[coin] != null
+        ? [clampDepth(x * factor), clampDepth(LADDER[coin]! * factor)]
+        : [clampDepth(x * factor)];
     const desireds = depths.map((d) => {
       const price = side === 'long' ? mid * (1 - d) : mid * (1 + d);
       return { price, qty: (margin * WF_CONFIG.leverage) / price };
@@ -792,6 +952,20 @@ export function startWickFadeRunner(): void {
       // ~$2k acct sustains 5-min, ~$10k sustains 1-min. Exits stay 1-min (cheap, occasional).
       const nowMs = Date.now();
       const quoteTick = tickN % 30 === 1 && nowMs >= budgetBlockedUntil;
+      let recovery: RecoveryTick;
+      try {
+        recovery = recoveryCanaryTick(nowMs);
+      } catch (err) {
+        logger.error({ err }, 'wick-fade: recovery-canary state failed - fail closed');
+        recovery = {
+          enabled: false,
+          canaryContext: false,
+          driftReason: 'recovery-canary state unavailable',
+          evaluation: evaluateWickFadeRecoveryCanary([]),
+          expected: null,
+          candidate: null,
+        };
+      }
       let marketBlockReason: string | null = null;
       try { marketBlockReason = marketCascadeBlockReason(nowMs); } catch (err) { logger.warn({ err }, 'wick-fade: marketCascadeBlockReason failed - fail open'); }
       if (marketBlockReason) logMarketCascadeBlock(marketBlockReason, nowMs);
@@ -807,7 +981,7 @@ export function startWickFadeRunner(): void {
         stepCoins = [...new Set([...WF_CONFIG.coins, ...RETIRED_COINS])];
       }
       for (const coin of stepCoins) {
-        try { const a = await stepCoin(coin, isKilled, quoteTick, marketBlockReason); cancels.push(...a.cancels); places.push(...a.places); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
+        try { const a = await stepCoin(coin, isKilled, quoteTick, marketBlockReason, recovery); cancels.push(...a.cancels); places.push(...a.places); } catch (err) { logger.error({ err, coin }, 'wick-fade: step failed'); }
       }
       if (cancels.length || places.length) {
         try { await executeQuoteBatch(cancels, places); } catch (err) { logger.error({ err }, 'wick-fade: quote batch failed'); }
@@ -815,6 +989,6 @@ export function startWickFadeRunner(): void {
       try { await repairWickAccounting(2); } catch (err) { logger.warn({ err }, 'wick-fade: accounting repair failed'); }
     })().finally(() => { running = false; });
   });
-  logger.warn({ mode: WF_CONFIG.mode, endpoint: config.HL_USE_TESTNET ? 'testnet' : 'MAINNET', vault: config.HL_VAULT_ADDRESS ? 'yes' : 'no', coins: WF_CONFIG.coins.length, lev: WF_CONFIG.leverage, capital: WF_CONFIG.capitalUsd, dailyKill: `${WF_CONFIG.dailyLossPct * 100}%`, driftGuard: 'fail-closed', dynDepth: WF_CONFIG.dynamicDepth ? `vol×W${WF_CONFIG.volWindow}` : 'fixed' }, '✅ wick-fade runner scheduled (every 1m, post-only deep limits, exchange-reconciled, daily-loss kill)');
+  logger.warn({ mode: WF_CONFIG.mode, endpoint: config.HL_USE_TESTNET ? 'testnet' : 'MAINNET', vault: config.HL_VAULT_ADDRESS ? 'yes' : 'no', coins: WF_CONFIG.coins.length, lev: WF_CONFIG.leverage, capital: WF_CONFIG.capitalUsd, dailyKill: `${WF_CONFIG.dailyLossPct * 100}%`, driftGuard: 'fail-closed', recoveryCanary: 'runtime-gated/off-by-default', dynDepth: WF_CONFIG.dynamicDepth ? `vol×W${WF_CONFIG.volWindow}` : 'fixed' }, '✅ wick-fade runner scheduled (every 1m, post-only deep limits, exchange-reconciled, daily-loss kill)');
   if (!hlConfigured()) logger.error('wick-fade: HL_API_WALLET_KEY missing — runner idles until configured');
 }

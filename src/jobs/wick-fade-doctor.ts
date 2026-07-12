@@ -9,6 +9,12 @@ import {
   type WickFadeDriftRuntimeState,
   type WickFadeDriftTrade,
 } from '../lib/wick-fade-drift-guard.js';
+import {
+  recoveryCanaryHoldsGlobalPause,
+  WICK_FADE_RECOVERY_RESUME_APPROVED_KEY,
+  WICK_FADE_RECOVERY_STATE_KEY,
+  type WickFadeRecoveryRuntimeState,
+} from '../lib/wick-fade-recovery-canary.js';
 
 type Side = 'long' | 'short';
 
@@ -304,7 +310,19 @@ export function updateWickFadeDriftGuard(opts: { nowMs?: number; notify?: boolea
     netPnlUsd: row.net_pnl_usd,
     closedAt: row.closed_at,
   }));
-  const evaluation = evaluateWickFadeDriftGuard(rows, previous?.blocked ?? false);
+  let evaluation = evaluateWickFadeDriftGuard(rows, previous?.blocked ?? false);
+  const recoveryRaw = getKvStmt.get(WICK_FADE_RECOVERY_STATE_KEY)?.value;
+  let recovery: WickFadeRecoveryRuntimeState | null = null;
+  try { recovery = recoveryRaw ? JSON.parse(recoveryRaw) as WickFadeRecoveryRuntimeState : null; } catch { recovery = null; }
+  const fullResumeApproved = getKvStmt.get(WICK_FADE_RECOVERY_RESUME_APPROVED_KEY)?.value === '1';
+  if (recoveryCanaryHoldsGlobalPause(recovery?.status ?? null, fullResumeApproved)) {
+    evaluation = {
+      ...evaluation,
+      blocked: true,
+      stage: 'paused',
+      reason: `recovery canary ${recovery?.status ?? 'unknown'}; full-book resume requires explicit approval`,
+    };
+  }
   const changed = previous == null || previous.blocked !== evaluation.blocked;
   const state: WickFadeDriftRuntimeState = {
     ...evaluation,

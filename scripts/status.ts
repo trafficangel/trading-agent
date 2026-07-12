@@ -17,6 +17,12 @@ import {
   getLastSlHitForStrategy, decideCooldown,
   getLastClosedTrades, decideProbation,
 } from '../src/strategies/risk-control.js';
+import {
+  WICK_FADE_RECOVERY_ENABLED_KEY,
+  WICK_FADE_RECOVERY_RESUME_APPROVED_KEY,
+  WICK_FADE_RECOVERY_STATE_KEY,
+  type WickFadeRecoveryRuntimeState,
+} from '../src/lib/wick-fade-recovery-canary.js';
 
 const C = TRACK_C_COMMISSION_RT_PCT;
 const now = Date.now();
@@ -97,6 +103,19 @@ if (wickDriftRaw) {
   } catch { console.log(`  drift INVALID — entries fail closed`); }
 } else {
   console.log(`  drift INITIALIZING — entries fail closed`);
+}
+const wickRuntimeStmt = db.prepare<[string], { value: string }>('SELECT value FROM runtime_config WHERE key = ?');
+const recoveryEnabled = wickRuntimeStmt.get(WICK_FADE_RECOVERY_ENABLED_KEY)?.value === '1';
+const fullResumeApproved = wickRuntimeStmt.get(WICK_FADE_RECOVERY_RESUME_APPROVED_KEY)?.value === '1';
+const recoveryRaw = wickRuntimeStmt.get(WICK_FADE_RECOVERY_STATE_KEY)?.value;
+if (recoveryRaw) {
+  try {
+    const state = JSON.parse(recoveryRaw) as WickFadeRecoveryRuntimeState;
+    const pf = state.profitFactor == null ? (state.netPnlUsd > 0 ? 'inf' : 'na') : state.profitFactor.toFixed(2);
+    console.log(`  recovery ${recoveryEnabled ? state.status.toUpperCase() : 'OFF'} · ${state.n}/10 exact ${state.exactN}/${state.n} · net ${state.netPct >= 0 ? '+' : ''}${state.netPct.toFixed(3)}% / $${state.netPnlUsd.toFixed(3)} · PF ${pf} · candidate ${state.candidate ?? '—'} · entry ${state.entryAllowed ? 'ARMED' : 'blocked'} · full-resume ${fullResumeApproved ? 'approved' : 'manual'}`);
+  } catch { console.log(`  recovery INVALID — entries fail closed`); }
+} else {
+  console.log(`  recovery ${recoveryEnabled ? 'INITIALIZING' : 'OFF'} — entries fail closed`);
 }
 for (const p of wickOpen) {
   console.log(`  ${p.coin.padEnd(9)} ${p.side.padEnd(5)} @ ${p.entry_px} · $${(p.entry_px * p.qty).toFixed(2)} · ${fmtT(p.opened_at)}`);
