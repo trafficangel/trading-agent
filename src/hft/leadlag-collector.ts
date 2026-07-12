@@ -54,11 +54,13 @@ type Flow = {
   trades: number;
   prices: Map<number, number>;
 };
+type LiquidationFlow = { buyPressureUsd: number; sellPressureUsd: number };
 type MarketState = {
   coin: string;
   symbol: string;
   books: Record<Venue, Book>;
   flows: Record<Venue, Flow>;
+  liquidations: Record<'binance' | 'bybit', LiquidationFlow>;
 };
 
 const emptyBook = (): Book => ({
@@ -79,6 +81,7 @@ const emptyFlow = (): Flow => ({
   trades: 0,
   prices: new Map(),
 });
+const emptyLiquidations = (): LiquidationFlow => ({ buyPressureUsd: 0, sellPressureUsd: 0 });
 const states = new Map<string, MarketState>(
   MARKETS.map((m) => [
     m.coin,
@@ -87,6 +90,7 @@ const states = new Map<string, MarketState>(
       symbol: m.symbol,
       books: { hl: emptyBook(), binance: emptyBook(), bybit: emptyBook() },
       flows: { hl: emptyFlow(), binance: emptyFlow(), bybit: emptyFlow() },
+      liquidations: { binance: emptyLiquidations(), bybit: emptyLiquidations() },
     },
   ]),
 );
@@ -148,10 +152,24 @@ function appendFlow(flow: Flow, side: 'buy' | 'sell', price: number, size: numbe
   flow.prices.set(price, (flow.prices.get(price) ?? 0) + signedSize);
 }
 
+function appendLiquidation(
+  flow: LiquidationFlow,
+  pressure: 'buy' | 'sell',
+  price: number,
+  size: number,
+): void {
+  const notional = price * size;
+  if (!(notional > 0)) return;
+  if (pressure === 'buy') flow.buyPressureUsd += notional;
+  else flow.sellPressureUsd += notional;
+}
+
 function resetFlows(state: MarketState): void {
   state.flows.hl = emptyFlow();
   state.flows.binance = emptyFlow();
   state.flows.bybit = emptyFlow();
+  state.liquidations.binance = emptyLiquidations();
+  state.liquidations.bybit = emptyLiquidations();
 }
 
 function bookTuple(book: Book): number[] {
@@ -199,6 +217,12 @@ function sample(): void {
           ...flowTuple(state.flows.bybit),
         ],
         x: priceFlowTuple(state.flows.hl),
+        l: [
+          state.liquidations.binance.buyPressureUsd,
+          state.liquidations.binance.sellPressureUsd,
+          state.liquidations.bybit.buyPressureUsd,
+          state.liquidations.bybit.sellPressureUsd,
+        ],
       };
       if (!gzip.write(`${JSON.stringify(row)}\n`)) dropped++;
       rows++;
@@ -352,6 +376,7 @@ function startBinance(): void {
   const streams = MARKETS.flatMap(({ symbol }) => [
     `${symbol.toLowerCase()}@bookTicker`,
     `${symbol.toLowerCase()}@aggTrade`,
+    `${symbol.toLowerCase()}@forceOrder`,
   ]);
   connect(
     'binance',
@@ -360,7 +385,14 @@ function startBinance(): void {
     (payload, receivedAt) => {
       const wrapper = payload as { data?: Record<string, unknown> };
       const data = wrapper.data;
-      const symbol = typeof data?.s === 'string' ? data.s : '';
+      const liquidationOrder =
+        data?.e === 'forceOrder' ? (data.o as Record<string, unknown>) : null;
+      const symbol =
+        typeof data?.s === 'string'
+          ? data.s
+          : typeof liquidationOrder?.s === 'string'
+            ? liquidationOrder.s
+            : '';
       const coin = bySymbol.get(symbol);
       const state = coin ? states.get(coin) : null;
       if (!data || !state) return;
@@ -382,6 +414,13 @@ function startBinance(): void {
           finite(data.p),
           finite(data.q),
         );
+      } else if (data.e === 'forceOrder' && liquidationOrder) {
+        appendLiquidation(
+          state.liquidations.binance,
+          liquidationOrder.S === 'BUY' ? 'buy' : 'sell',
+          finite(liquidationOrder.ap) || finite(liquidationOrder.p),
+          finite(liquidationOrder.z) || finite(liquidationOrder.q),
+        );
       }
     },
   );
@@ -395,7 +434,11 @@ function startBybit(): void {
       ws.send(
         JSON.stringify({
           op: 'subscribe',
-          args: MARKETS.flatMap(({ symbol }) => [`orderbook.1.${symbol}`, `publicTrade.${symbol}`]),
+          args: MARKETS.flatMap(({ symbol }) => [
+            `orderbook.1.${symbol}`,
+            `publicTrade.${symbol}`,
+            `allLiquidation.${symbol}`,
+          ]),
         }),
       );
     },
@@ -433,6 +476,24 @@ function startBybit(): void {
               finite(trade.p),
               finite(trade.v),
             );
+        }
+      } else if (message.topic?.startsWith('allLiquidation.') && Array.isArray(message.data)) {
+        for (const liquidation of message.data as Array<{
+          s?: string;
+          S?: string;
+          v?: string;
+          p?: string;
+        }>) {
+          const coin = liquidation.s ? bySymbol.get(liquidation.s) : null;
+          const state = coin ? states.get(coin) : null;
+          if (!state) continue;
+          // Bybit reports position side: Buy means a long was liquidated by forced selling.
+          appendLiquidation(
+            state.liquidations.bybit,
+            liquidation.S === 'Buy' ? 'sell' : 'buy',
+            finite(liquidation.p),
+            finite(liquidation.v),
+          );
         }
       }
     },

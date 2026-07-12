@@ -39,6 +39,8 @@ const FEATURE_NAMES = [
   'hlSpreadBps',
   'hlDepthImbalance',
   'cexDisagreementBps',
+  'cexLiquidationImbalance',
+  'cexLiquidationLogUsd',
 ];
 
 type PackedRow = {
@@ -50,6 +52,7 @@ type PackedRow = {
   y: number[];
   f: Array<number | null>;
   x?: number[];
+  l?: number[];
 };
 
 type Point = {
@@ -126,6 +129,8 @@ async function readCoin(files: string[], coin: string): Promise<Point[]> {
     const [bin250, by250] = cexMoveBps(raw, i, 1);
     const [bin500, by500] = cexMoveBps(raw, i, 2);
     const [bin1s, by1s] = cexMoveBps(raw, i, 4);
+    const liquidationBuy = (row.l?.[0] ?? 0) + (row.l?.[2] ?? 0);
+    const liquidationSell = (row.l?.[1] ?? 0) + (row.l?.[3] ?? 0);
     points.push({
       t: row.t,
       hlBid: row.h[0]!,
@@ -146,6 +151,8 @@ async function readCoin(files: string[], coin: string): Promise<Point[]> {
         ((row.h[1]! - row.h[0]!) / hlMid) * 10_000,
         imbalance(row.h[4]!, row.h[5]!),
         Math.abs(bin1s - by1s),
+        imbalance(liquidationBuy, liquidationSell),
+        Math.log1p(liquidationBuy + liquidationSell),
       ],
     });
     basis = (1 - basisAlpha) * basis + basisAlpha * observedBasis;
