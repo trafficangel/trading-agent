@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the walk-forward HFT feature audit hourly
+
+[Timer]
+OnCalendar=*-*-* *:22:00 UTC
+Persistent=true
+RandomizedDelaySec=10
+Unit=hft-feature-audit.service
+
+[Install]
+WantedBy=timers.target

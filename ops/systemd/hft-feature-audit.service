@@ -1,0 +1,17 @@
+[Unit]
+Description=Tokyo Hyperliquid walk-forward microstructure feature audit
+After=hft-leadlag-analyzer.service
+
+[Service]
+Type=oneshot
+User=trader
+WorkingDirectory=/home/trader/apps/hft-leadlag
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /home/trader/apps/hft-leadlag/dist/hft/feature-audit.js /home/trader/apps/hft-leadlag/data 48
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/hft-leadlag/data
+MemoryMax=700M
+TimeoutStartSec=20min
