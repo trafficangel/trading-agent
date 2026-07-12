@@ -15,7 +15,11 @@ import { fitRidgeLinear, predictLinear, type LinearModel } from '../lib/hft-line
 import { makerFillIndex } from '../lib/hft-maker-fill.js';
 
 const DATA_DIR = resolve(process.argv[2] ?? process.env.HFT_DATA_DIR ?? 'data/hft-leadlag');
-const HOURS = Number(process.argv[3] ?? 48);
+const HOURS_ARG = process.argv[3] ?? '48';
+const HOURS = HOURS_ARG === 'all' ? Number.POSITIVE_INFINITY : Number(HOURS_ARG);
+if (HOURS_ARG !== 'all' && (!(HOURS > 0) || !Number.isFinite(HOURS))) {
+  throw new Error('hours must be a positive number or "all"');
+}
 const STATUS_PATH = resolve(DATA_DIR, 'status.json');
 const RESULT_PATH = resolve(DATA_DIR, 'feature-audit.json');
 const SAMPLE_MS = 250;
@@ -323,7 +327,7 @@ function completedFiles(): string[] {
     ? (JSON.parse(readFileSync(STATUS_PATH, 'utf8')) as { currentPath?: string })
     : {};
   const current = status.currentPath ? basename(status.currentPath) : '';
-  const cutoff = Date.now() - HOURS * 3_600_000;
+  const cutoff = Number.isFinite(HOURS) ? Date.now() - HOURS * 3_600_000 : Number.NEGATIVE_INFINITY;
   return readdirSync(DATA_DIR)
     .filter((name) => /^leadlag-\d{12}\.ndjson\.gz$/.test(name) && name !== current)
     .map((name) => resolve(DATA_DIR, name))
@@ -430,7 +434,7 @@ async function main(): Promise<void> {
   const result = {
     version: 'hft-feature-audit-v1',
     generatedAt: Date.now(),
-    hoursRequested: HOURS,
+    hoursRequested: Number.isFinite(HOURS) ? HOURS : 'all',
     files: files.map((path) => basename(path)),
     featureNames: FEATURE_NAMES,
     split: { train: 0.6, validation: 0.2, test: 0.2 },

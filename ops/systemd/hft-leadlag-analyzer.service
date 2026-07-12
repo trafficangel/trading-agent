@@ -7,6 +7,7 @@ Type=oneshot
 User=trader
 WorkingDirectory=/home/trader/apps/hft-leadlag
 Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=560
 ExecStart=/usr/bin/node /home/trader/apps/hft-leadlag/dist/hft/leadlag-analyzer.js /home/trader/apps/hft-leadlag/data 48
 NoNewPrivileges=true
 PrivateTmp=true
@@ -14,3 +15,4 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/home/trader/apps/hft-leadlag/data
 MemoryMax=700M
+TimeoutStartSec=20min
