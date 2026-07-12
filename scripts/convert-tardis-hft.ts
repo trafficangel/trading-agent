@@ -52,6 +52,7 @@ class EventSource {
     readonly venue: Venue,
     path: string,
     private readonly parser: Parser,
+    private readonly allowEmpty = false,
   ) {
     this.lines = createInterface({ input: createReadStream(path).pipe(createGunzip()), crlfDelay: Infinity });
     this.iterator = this.lines[Symbol.asyncIterator]();
@@ -59,7 +60,10 @@ class EventSource {
 
   async initialize(): Promise<void> {
     const header = await this.iterator.next();
-    if (header.done) throw new Error(`empty Tardis input for ${this.venue}`);
+    if (header.done) {
+      if (this.allowEmpty) return;
+      throw new Error(`empty Tardis input for ${this.venue}`);
+    }
     await this.advance();
   }
 
@@ -151,7 +155,7 @@ async function convertCoin(
     if (venue.key !== 'hl') {
       const liquidations = sourcePath(input, venue, 'liquidations', coin, date);
       if (!existsSync(liquidations)) throw new Error(`missing Tardis liquidations for ${venue.id} ${coin} ${date}`);
-      sources.push(new EventSource(venue.key, liquidations, parseTardisLiquidation));
+      sources.push(new EventSource(venue.key, liquidations, parseTardisLiquidation, true));
     }
   }
   await Promise.all(sources.map((source) => source.initialize()));
