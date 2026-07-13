@@ -204,6 +204,8 @@ async function convertCoin(
           y: bookTuple(books.bybit!),
           f: [...flowTuple(flows.hl), ...flowTuple(flows.binance), ...flowTuple(flows.bybit)],
           x: priceFlowTuple(flows.hl),
+          q: priceFlowTuple(flows.binance),
+          z: priceFlowTuple(flows.bybit),
           l: [
             liquidations.binance.buyUsd,
             liquidations.binance.sellUsd,

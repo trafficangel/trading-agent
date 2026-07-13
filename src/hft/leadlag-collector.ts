@@ -11,6 +11,10 @@
 import { createWriteStream, mkdirSync, renameSync, writeFileSync, type WriteStream } from 'node:fs';
 import { resolve } from 'node:path';
 import { createGzip, type Gzip } from 'node:zlib';
+import {
+  applyBybitDepthUpdate,
+  createBybitDepthBook,
+} from '../lib/bybit-depth-book.js';
 
 const SAMPLE_MS = Number(process.env.HFT_SAMPLE_MS ?? 250);
 const STALE_MS = Number(process.env.HFT_STALE_MS ?? 3_000);
@@ -95,6 +99,9 @@ const states = new Map<string, MarketState>(
   ]),
 );
 const bySymbol = new Map<string, string>(MARKETS.map((m) => [m.symbol, m.coin]));
+const bybitDepth = new Map<string, ReturnType<typeof createBybitDepthBook>>(
+  MARKETS.map((market) => [market.symbol, createBybitDepthBook()]),
+);
 
 const connectionState: Record<
   Venue,
@@ -217,6 +224,8 @@ function sample(): void {
           ...flowTuple(state.flows.bybit),
         ],
         x: priceFlowTuple(state.flows.hl),
+        q: priceFlowTuple(state.flows.binance),
+        z: priceFlowTuple(state.flows.bybit),
         l: [
           state.liquidations.binance.buyPressureUsd,
           state.liquidations.binance.sellPressureUsd,
@@ -435,7 +444,7 @@ function startBybit(): void {
         JSON.stringify({
           op: 'subscribe',
           args: MARKETS.flatMap(({ symbol }) => [
-            `orderbook.1.${symbol}`,
+            `orderbook.50.${symbol}`,
             `publicTrade.${symbol}`,
             `allLiquidation.${symbol}`,
           ]),
@@ -443,20 +452,19 @@ function startBybit(): void {
       );
     },
     (payload, receivedAt) => {
-      const message = payload as { topic?: string; ts?: number; cts?: number; data?: unknown };
-      if (message.topic?.startsWith('orderbook.1.')) {
-        const symbol = message.topic.slice('orderbook.1.'.length);
+      const message = payload as { topic?: string; type?: string; ts?: number; cts?: number; data?: unknown };
+      if (message.topic?.startsWith('orderbook.50.')) {
+        const symbol = message.topic.slice('orderbook.50.'.length);
         const coin = bySymbol.get(symbol);
         const state = coin ? states.get(coin) : null;
-        const data = message.data as { b?: string[][]; a?: string[][]; ts?: number; cts?: number };
-        if (!state || !data.b?.[0] || !data.a?.[0]) return;
+        const depth = bybitDepth.get(symbol);
+        const data = message.data as { b?: string[][]; a?: string[][]; ts?: number; cts?: number; u?: number };
+        const type = message.type === 'snapshot' || data.u === 1 ? 'snapshot' : 'delta';
+        if (!state || !depth) return;
+        const top = applyBybitDepthUpdate(depth, type, data.b ?? [], data.a ?? []);
+        if (!top) return;
         Object.assign(state.books.bybit, {
-          bid: finite(data.b[0][0]),
-          ask: finite(data.a[0][0]),
-          bidSize: finite(data.b[0][1]),
-          askSize: finite(data.a[0][1]),
-          bid5: finite(data.b[0][1]),
-          ask5: finite(data.a[0][1]),
+          ...top,
           exchangeAt: finite(message.cts ?? data.cts ?? message.ts ?? data.ts),
           receivedAt,
         });
