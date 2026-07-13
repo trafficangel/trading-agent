@@ -15,7 +15,7 @@ capital-preserving trading system.
 - Symbols: 20 liquid Bybit USDT perps.
 - Test window: 180 days.
 
-## Latest result
+## Initial full-stop result
 
 VPS Bybit kline replay, 2026-01-14 through 2026-07-13 approximately:
 
@@ -31,6 +31,36 @@ VPS Bybit kline replay, 2026-01-14 through 2026-07-13 approximately:
 Verdict: reject. The Fibonacci progression amplifies a negative-entry edge; it
 does not repair it. This configuration should not be paper-traded or live-traded
 without a different entry edge.
+
+## Variant sweep
+
+I retested the idea with partial stop accounting, lower targets, reclaim entry,
+and breakout-after-pullback entry. Partial stops fixed an overly pessimistic
+assumption in the first replay: invalidation before liquidation should lose only
+the realized margin loss, not necessarily the full stake.
+
+Best 180-day variants:
+
+| Profile | Variant | Net | PF | Max DD | Dead cycles | Read |
+|---|---|---:|---:|---:|---:|---|
+| 3m-L50 | fib300-partial | +716.60 | 1.10 | 2,602.69 | 79 | small positive, large DD |
+| 3m-L30 | fib200-partial | +407.24 | 1.09 | 1,641.75 | 78 | small positive, fragile |
+| 3m-L20 | fib200-partial | +52.51 | 1.02 | 1,099.61 | 78 | near zero |
+| 3m-L20 | breakout150 | -132.70 | 0.92 | 611.13 | 14 | less bad, still negative |
+
+Recent 60-day sanity check:
+
+| Profile | Variant | Net | PF | Max DD | Dead cycles |
+|---|---|---:|---:|---:|---:|
+| 3m-L50 | fib300-partial | -2,377.38 | 0.38 | 2,377.38 | 49 |
+| 3m-L30 | fib200-partial | -1,511.76 | 0.34 | 1,511.76 | 49 |
+| 3m-L20 | fib200-partial | -1,014.07 | 0.34 | 1,014.07 | 49 |
+| 3m-L20 | breakout150 | -548.02 | 0.34 | 548.02 | 11 |
+
+Updated verdict: reject for live and paper. Partial stops make the idea much
+less destructive, but the edge is not stable. The small 180-day positives fail
+the recent-window check and carry drawdowns far too large for a 10 USDT base
+stake.
 
 Run:
 
