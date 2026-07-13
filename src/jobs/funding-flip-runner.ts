@@ -24,7 +24,8 @@
  * enter; a closed/partial position never books fabricated PnL). One-trade-per-flip via signal_hr dedup
  * (mirrors the backtest's guard). Close books PnL only after CONFIRMING the exchange is truly flat.
  * mode is a const: 'off'=idle, 'shadow'=mainnet prices/no orders,
- * 'testnet'=fake money, 'live' THROWS.
+ * 'drain'=close existing paper rows/no entries, 'testnet'=fake money,
+ * 'live' THROWS.
  */
 import cron from 'node-cron';
 import { db } from '../db/client.js';
@@ -33,9 +34,9 @@ import { config } from '../config.js';
 import { hlConfigured, hlSetLeverage, hlMarketOrder, hlClosePosition, hlFetchPosition, hlAccountValue, hlMid } from '../exchange/hyperliquid-private.js';
 import { getBybitOiRoc } from '../exchange/bybit-public.js';
 
-type FfMode = 'off' | 'shadow' | 'testnet' | 'live';
+type FfMode = 'off' | 'shadow' | 'drain' | 'testnet' | 'live';
 export const FF_CONFIG: { mode: FfMode; coins: string[]; W: number; zThr: number; fw: number; holdHours: number; capitalUsd: number; leverage: number; oiGate: boolean; oiRocHours: number; oiSizeTilt: boolean; oiSizeScale: number; oiSizeMax: number } = {
-  mode: 'shadow',                                   // mainnet signals/fills, DB-only: never routes an order
+  mode: 'drain',                                    // track closed: settle existing paper rows, never enter anew
   // Broad shadow basket measures transfer and raises the OOS event rate. It is
   // intentionally wider than a future live basket; weak coins are culled only
   // after the same forward sample, not from another in-sample selection pass.
@@ -136,7 +137,7 @@ function flipSignal(fund: (number | null)[]): { side: 'long' | 'short'; funding:
 }
 
 async function stepCoin(coin: string): Promise<void> {
-  if (FF_CONFIG.mode === 'shadow') {
+  if (FF_CONFIG.mode === 'shadow' || FF_CONFIG.mode === 'drain') {
     await stepShadowCoin(coin);
     return;
   }
@@ -245,6 +246,8 @@ async function stepShadowCoin(coin: string): Promise<void> {
     logger.info({ coin, side: dbPos.side, entry: dbPos.entry_px, exit, pnlPct: netPct }, 'funding-flip shadow: CLOSED (24h time-stop)');
     return;
   }
+
+  if (FF_CONFIG.mode === 'drain') return;
 
   const fs = await loadFundingSeries(coin);
   if (!fs) return;

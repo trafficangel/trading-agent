@@ -92,7 +92,7 @@ const wick = db.prepare<[], { closed: number; exact: number; net_pct: number | n
 const wickOpen = db.prepare<[], { coin: string; side: string; entry_px: number; qty: number; opened_at: number }>(`
   SELECT coin, side, entry_px, qty, opened_at FROM wick_fade_pos ORDER BY opened_at
 `).all();
-console.log(`\nHL WICK-FADE LIVE`);
+console.log(`\nHL TRACK CLOSED · WICK-FADE ARCHIVE`);
 console.log(`  closed ${wick.closed} · exact ${wick.exact}/${wick.closed} · net ${(wick.net_pct ?? 0) >= 0 ? '+' : ''}${(wick.net_pct ?? 0).toFixed(3)}% / $${(wick.net_usd ?? 0).toFixed(3)}`);
 const wickDriftRaw = db.prepare<[string], { value: string }>('SELECT value FROM runtime_config WHERE key = ?').get('wick_fade_drift_guard_state')?.value;
 if (wickDriftRaw) {
@@ -138,7 +138,7 @@ const fundingFlipOpen = db.prepare<[], { coin: string; side: string; entry_px: n
    ORDER BY p.opened_at
 `).all();
 const fundingNet = fundingFlip.net_pct ?? 0;
-console.log(`\nHL FUNDING-FLIP SHADOW`);
+console.log(`\nHL FUNDING-FLIP ${fundingFlipOpen.length ? 'DRAINING PAPER' : 'ARCHIVE'}`);
 console.log(`  closed ${fundingFlip.closed}/20 · net ${fundingNet >= 0 ? '+' : ''}${fundingNet.toFixed(3)}% · WR ${fundingFlip.closed ? (fundingFlip.wins / fundingFlip.closed * 100).toFixed(0) : 0}% · open ${fundingFlipOpen.length}`);
 for (const p of fundingFlipOpen) {
   console.log(`  ${p.coin.padEnd(9)} ${p.side.padEnd(5)} @ ${p.entry_px} · paper $${(p.entry_px * p.qty).toFixed(2)} · ${fmtT(p.opened_at)}`);
@@ -207,7 +207,7 @@ if (reconcileRaw) {
     reconcile = `${state.ok ? '✅ healthy' : '⛔ paused'} @ ${fmtT(state.checkedAt ?? null)}${state.issues?.length ? ` · ${state.issues.join('; ')}` : ''}`;
   } catch { reconcile = 'invalid state'; }
 }
-console.log(`\nHL MOMENTUM ${momLiveEnabled ? 'LIVE' : 'CLOSED · SHADOW ONLY'} (track since ${fmtT(momPublicStart)})`);
+console.log(`\nHL MOMENTUM ARCHIVE${momLiveEnabled ? ' · WARNING: LIVE FLAG ON' : ''} (track since ${fmtT(momPublicStart)})`);
 console.log(`  reconcile ${reconcile}`);
 console.log(`  stage ${momPromotionStage} · |r3|≥${momConfirmLongMinAbsR3.toFixed(2)}% · ${momPromotionProgress} · live exact ${momPromotionExactN}/${momPromotionN} · avg ${momPromotionAvg >= 0 ? '+' : ''}${momPromotionAvg.toFixed(3)}% · PF ${momPromotionPf} · maxDD ${momPromotionDd.toFixed(3)}% · maxOpen ${momPromotionMaxOpen}`);
 console.log(`  fast-long ${momFastStage} · ${momFastExecutionVersion} · |r90|≥${momFastMinAbsR90.toFixed(2)}% · ${momFastProgress} · live exact ${momFastExactN}/${momFastN} · avg ${momFastAvg >= 0 ? '+' : ''}${momFastAvg.toFixed(3)}% · PF ${momFastPf} · maxDD ${momFastDd.toFixed(3)}% · maxOpen ${momFastMaxOpen}`);

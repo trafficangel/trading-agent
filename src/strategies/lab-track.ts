@@ -1,6 +1,6 @@
 /**
- * Lab public tracks. The old wick-fade live track is retained only as historical
- * audit code; /lab/live redirects to the active Impulse Fade page.
+ * Historical Hyperliquid track renderers. The public track is closed; its old
+ * URLs redirect to the general lab while the audit code remains available.
  */
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
@@ -8,7 +8,6 @@ import { pageShell } from './landing.js';
 import { WF_CONFIG, COIN_X, LADDER } from '../jobs/wick-fade-runner.js';
 import { hlOpenOrders, type HlOpenOrder } from '../exchange/hyperliquid-private.js';
 import { metaAndAssetCtxs } from '../exchange/hyperliquid.js';
-import { truePairsHero } from './true-pairs-page.js';
 
 type Lang = 'ru' | 'en';
 /** tiny picker: t(lang, ru, en) */
@@ -1496,40 +1495,12 @@ export async function renderLiveTrack(page = 1, lang: Lang = 'ru'): Promise<stri
   );
 }
 
-/** Compact live-track summary for the hero card at the top of /lab. */
-export function liveTrackHero(lang: Lang = 'ru'): string {
-  return `
-    <div class="lt-hero-stack">
-    ${truePairsHero(lang)}
-    </div>`;
-}
-
-export const LIVE_TRACK_HERO_CSS = `
-  .lt-hero-stack{display:grid;gap:12px;margin:0 0 22px}
-  .lt-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
-    background:linear-gradient(135deg,var(--accent-soft),var(--bg-card));border:1px solid var(--accent-soft);
-    border-radius:14px;padding:16px 20px;text-decoration:none;color:var(--text);transition:border-color .15s}
-  .lt-hero:hover{border-color:var(--accent)}
-  .lt-hero-badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.03em;color:var(--accent);
-    background:var(--accent-soft);border-radius:999px;padding:3px 10px;margin-bottom:8px}
-  .lt-hero-title{font-size:18px;font-weight:650}
-  .lt-hero-sub{font-size:13px;color:var(--text-dim);margin-top:3px}
-  .lt-hero-r{display:flex;gap:22px}
-  .lt-hero-stat{text-align:right}
-  .lt-hero-stat .v{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.1}
-  .lt-hero-stat .v.pos{color:var(--accent)}.lt-hero-stat .v.neg{color:var(--danger)}
-  .lt-hero-stat .k{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
-  @media(max-width:560px){.lt-hero-r{gap:16px}.lt-hero-stat .v{font-size:18px}}
-`;
-
 export async function labTrackRoute(app: FastifyInstance): Promise<void> {
-  app.get('/lab/live', async (_req, reply) => {
-    reply.header('Cache-Control', 'public, max-age=30');
-    return reply.redirect('/lab/pairs', 302);
-  });
-
-  app.get('/lab/momentum', async (_req, reply) => {
-    reply.header('Cache-Control', 'public, max-age=30');
-    return reply.redirect('/lab/pairs', 302);
-  });
+  const closedTrackRedirect = async (_req: unknown, reply: { header: (name: string, value: string) => unknown; redirect: (url: string, code: number) => unknown }): Promise<unknown> => {
+    reply.header('Cache-Control', 'public, max-age=300');
+    return reply.redirect('/lab', 302);
+  };
+  app.get('/lab/live', closedTrackRedirect);
+  app.get('/lab/momentum', closedTrackRedirect);
+  app.get('/lab/pairs', closedTrackRedirect);
 }

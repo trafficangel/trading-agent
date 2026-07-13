@@ -34,9 +34,6 @@ type HealthCheck = {
 
 const CHECKS: HealthCheck[] = [
   { key: 'tpsl', label: 'tpsl-monitor', maxAgeMs: 10 * 60 * 1000 }, // every 1m → 10m grace
-  { key: 'hl-momentum-scan', label: 'hl-momentum minute scan', maxAgeMs: 4 * 60 * 1000 },
-  { key: 'hl-momentum-fast', label: 'hl-momentum fast radar', maxAgeMs: 2 * 60 * 1000 },
-  { key: 'hl-momentum-reconcile', label: 'hl-momentum exchange reconcile', maxAgeMs: 5 * 60 * 1000 },
 ];
 
 const MEM_WARN_MB = 1024;

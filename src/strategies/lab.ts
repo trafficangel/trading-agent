@@ -35,7 +35,6 @@ import { TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 import { ALL_LAB_STRATEGIES, LAB_BY_CODE, LAB_BY_ID, LAB_TRACK, LAB_MAKER_TRACK, BT_NET_PCT_PER_TRADE, BT_MAXDD_PCT, type LabStrategy } from './lab-registry.js';
 import { labGateVerdict } from '../lib/lab-gate.js';
 import { allocatePortfolio, portfolioSummary } from '../lib/portfolio.js';
-import { liveTrackHero, LIVE_TRACK_HERO_CSS } from './lab-track.js';
 
 const trackOf = (s: LabStrategy): string => s.track ?? LAB_TRACK;
 
@@ -174,8 +173,7 @@ function renderLabList(lang: Lang): string {
       <h1 class="title">${t(lang, 'Лаборатория', 'The Lab')}</h1>
       <p class="subtitle">${t(lang, 'Собственные стратегии на форвард-тесте. Движок бэктеста == движок бумаги — никакого расхождения.', 'In-house strategies under forward-testing. The backtest engine == the paper engine — zero divergence.')}</p>
     </div>
-    <style>${LAB_CSS}${LIVE_TRACK_HERO_CSS}</style>
-    ${liveTrackHero(lang)}
+    <style>${LAB_CSS}</style>
     ${labBanner(lang)}
     ${portfolioLink}
     ${body}

@@ -18,7 +18,6 @@ import { autotradingRoute } from './strategies/autotrading.js';
 import { predictRoute } from './strategies/predict.js';
 import { labRoute } from './strategies/lab.js';
 import { labTrackRoute } from './strategies/lab-track.js';
-import { truePairsRoute } from './strategies/true-pairs-page.js';
 import { startTpslMonitorJob } from './jobs/tpsl-monitor.js';
 import { startHeartbeatJob } from './jobs/heartbeat.js';
 import { startDailyWrapJob } from './jobs/daily-wrap.js';
@@ -33,10 +32,6 @@ import { startHlCollector } from './jobs/hl-collector.js';
 import { startHlCandleCollector } from './jobs/hl-candle-collector.js';
 import { startHlMinuteCandleCollector } from './jobs/hl-minute-candle-collector.js';
 import { startFundingFlipRunner } from './jobs/funding-flip-runner.js';
-import { startWickFadeRunner } from './jobs/wick-fade-runner.js';
-import { startWickFadeDoctorJob } from './jobs/wick-fade-doctor.js';
-import { startHlMomentumShadowJob } from './jobs/hl-momentum-shadow.js';
-import { startHlMomentumDoctorJob } from './jobs/hl-momentum-doctor.js';
 // Phase G — money-back guarantee disabled, see start-job line below.
 // import { startPnlGuaranteeMonthlyJob } from './jobs/pnl-guarantee-monthly.js';
 import { sendLegacyMessage } from './telegram/bot.js';
@@ -209,7 +204,6 @@ async function main(): Promise<void> {
   await userRoute(app);
   await autotradingRoute(app);
   await predictRoute(app);
-  await truePairsRoute(app);
   await labRoute(app);
   await labTrackRoute(app);
   await landingRoute(app);
@@ -242,20 +236,10 @@ async function main(): Promise<void> {
   startHlCollector();
   startHlCandleCollector();
   startHlMinuteCandleCollector();
-  // FUNDING-FLIP shadow runner — mainnet funding/OI/mids, DB-only paper fills.
-  // Broad basket accumulates OOS evidence without routing private orders.
+  // The public/trading Hyperliquid track is closed. Keep only read-only market
+  // collectors so historical option value is not lost. Funding Flip runs in
+  // drain mode solely to settle its last paper position; it cannot enter anew.
   startFundingFlipRunner();
-  // Wick-fade maintains exits and deep quotes only while its global rolling
-  // guard and per-coin quarantines permit new entries.
-  startWickFadeRunner();
-  startWickFadeDoctorJob();
-  // HL Momentum — opposite-regime candidate for the portfolio: follows confirmed
-  // impulse+volume continuation using native HL candles. Live mode trades tiny
-  // 1x size with bounded risk controls.
-  startHlMomentumShadowJob();
-  // Momentum doctor — continuously audits live exits/filters and may only tune
-  // bounded runtime risk parameters after enough closed real-money samples.
-  startHlMomentumDoctorJob();
   // Phase G — money-back guarantee disabled per operator decision.
   // Cron registration commented out, DB columns + repo helpers preserved
   // so it can be re-enabled later without re-migrating. UI mentions
