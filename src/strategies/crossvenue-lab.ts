@@ -12,11 +12,15 @@ type Runtime = {
   basis_progress_minutes?: Record<string, number>; basis_ready_symbols?: number;
   primary_trials?: number; primary_rejections?: number; primary_trades?: number;
   shutdown_reason?: string | null;
+  variants?: Record<string, { venues?: string[]; basis_ready_symbols?: number;
+    primary_trials?: number; primary_rejections?: number; primary_trades?: number }>;
 };
+type Variant = { name: string; candidates: Row[]; rejections: Row[]; trades: Row[] };
 type MicroState = { baselineEquity?: number; consecutiveLosses?: number; active?: Row | null; stoppedReason?: string | null };
 type Snapshot = {
   runtime: Runtime | null; state: MicroState | null; candidates: Row[]; approvals: Row[];
   rejections: Row[]; shadows: Row[]; audit: Row[]; equity: number | null;
+  variants: Variant[];
 };
 
 const t = (lang: Lang, ru: string, en: string): string => lang === 'en' ? en : ru;
@@ -48,13 +52,20 @@ async function tailJsonl(name: string, limit = 200, bytes = 512_000): Promise<Ro
 }
 
 async function snapshot(): Promise<Snapshot> {
-  const [runtime, state, candidates, approvals, rejections, shadows, audit, account] = await Promise.all([
+  const variantNames = ['bybit-binance', 'okx-binance', 'bybit-bitget', 'okx-bitget', 'binance-bitget'];
+  const [runtime, state, candidates, approvals, rejections, shadows, audit, account, ...variantRows] = await Promise.all([
     readJson<Runtime>('shadow-runtime.json'), readJson<MicroState>('micro-live-state.json'),
     tailJsonl('candidates.jsonl', 100), tailJsonl('live_entry_approvals.jsonl', 100),
     tailJsonl('execution_rejections.jsonl', 200), tailJsonl('trades.jsonl', 200),
     tailJsonl('micro-live-audit.jsonl', 200), hlAccountValue(),
+    ...variantNames.flatMap((name) => [tailJsonl(`${name}-candidates.jsonl`, 200),
+      tailJsonl(`${name}-execution_rejections.jsonl`, 200), tailJsonl(`${name}-trades.jsonl`, 200)]),
   ]);
-  return { runtime, state, candidates, approvals, rejections, shadows, audit, equity: account.ok && !account.degraded ? account.data : null };
+  const variants = variantNames.map((name, index) => ({ name,
+    candidates: variantRows[index * 3] as Row[], rejections: variantRows[index * 3 + 1] as Row[],
+    trades: variantRows[index * 3 + 2] as Row[] }));
+  return { runtime, state, candidates, approvals, rejections, shadows, audit, variants,
+    equity: account.ok && !account.degraded ? account.data : null };
 }
 
 function fmtUtc(ns: unknown): string {
@@ -86,7 +97,7 @@ export async function crossvenueHero(lang: Lang): Promise<string> {
   return `<a class="cv-hero" href="/lab/crossvenue">
     <div><span class="cv-badge">⚡ CROSS-VENUE · HYPERLIQUID · MICRO LIVE</span>
       <div class="cv-title">External Lead / HL Lag</div>
-      <div class="cv-sub">${t(lang, 'Bybit + OKX · Binance наблюдение · публичный журнал →', 'Bybit + OKX · Binance observation · public ledger →')}</div>
+      <div class="cv-sub">${t(lang, 'Bybit + OKX real gate · Binance и Bitget shadow · публичный журнал →', 'Bybit + OKX real gate · Binance and Bitget shadow · public ledger →')}</div>
     </div>
     <div class="cv-stats">
       <span><b class="${view.live ? 'ok' : 'bad'}">${view.live ? t(lang, 'РАБОТАЕТ', 'LIVE') : 'OFFLINE'}</b><small>${t(lang, 'движок', 'engine')}</small></span>
@@ -124,6 +135,18 @@ async function render(lang: Lang): Promise<string> {
     ? Number(s.runtime?.primary_rejections ?? 0) / Number(s.runtime?.primary_trials ?? 1) * 100 : null;
   const progressPct = Math.max(0, Math.min(100, v.progress / v.required * 100));
   const latestCandidate = s.candidates.at(-1);
+  const control: Variant = { name: 'bybit-okx', candidates: s.candidates, rejections: s.rejections, trades: s.shadows };
+  const comparison = [control, ...s.variants];
+  const comparisonRows = comparison.map((variant) => {
+    const primary = variant.trades.filter((row) => Number(row.latency_ms) === 200);
+    const runtime = variant.name === 'bybit-okx' ? undefined : s.runtime?.variants?.[variant.name];
+    const trials = variant.name === 'bybit-okx' ? Number(s.runtime?.primary_trials ?? 0) : Number(runtime?.primary_trials ?? 0);
+    const rejects = variant.name === 'bybit-okx' ? Number(s.runtime?.primary_rejections ?? 0) : Number(runtime?.primary_rejections ?? 0);
+    const avg = primary.length ? primary.reduce((sum, row) => sum + Number(row.net_bps ?? 0), 0) / primary.length : null;
+    return `<tr><td><b>${esc(variant.name.replace('-', ' + '))}</b></td><td>${variant.name === 'bybit-okx' ? 'REAL GATE' : 'SHADOW'}</td>
+      <td>${variant.candidates.length}</td><td>${primary.length}</td><td>${trials ? `${(rejects / trials * 100).toFixed(1)}%` : '—'}</td>
+      <td>${avg == null ? '—' : bpsPct(avg)}</td><td>${variant.name === 'bybit-okx' ? `${v.ready}/20` : `${Number(runtime?.basis_ready_symbols ?? 0)}/20`}</td></tr>`;
+  }).join('');
   return pageShell(t(lang, 'Cross‑Venue Live — лаборатория', 'Cross‑Venue Live — Lab'), `
     <style>${CROSSVENUE_CSS}</style>
     <div class="cv-wrap">
@@ -143,13 +166,18 @@ async function render(lang: Lang): Promise<string> {
       </div>
       <section class="cv-panel"><div class="cv-panel-head"><h2>${t(lang, 'Прогрев и потоки', 'Warm-up and feeds')}</h2><span>${v.ready}/20 ready · ${v.progress}/${v.required} min</span></div>
         <div class="cv-progress"><i style="width:${progressPct.toFixed(1)}%"></i></div>
-        <div class="cv-feeds">${['hyperliquid', 'bybit', 'okx', 'binance'].map((venue) => `<span><i></i>${venue}<b>${Number(counts[venue] ?? 0).toLocaleString('en-US')}</b></span>`).join('')}</div>
+        <div class="cv-feeds">${['hyperliquid', 'bybit', 'okx', 'binance', 'bitget'].map((venue) => `<span><i></i>${venue}<b>${Number(counts[venue] ?? 0).toLocaleString('en-US')}</b></span>`).join('')}</div>
         <p class="cv-meta">${t(lang, 'Последнее обновление UTC', 'Last update UTC')}: ${fmtUtc(s.runtime?.updated_ns)} · pending ${Number(s.runtime?.pending_executions ?? 0)}${s.runtime?.shutdown_reason ? ` · STOP: ${esc(s.runtime.shutdown_reason)}` : ''}</p>
       </section>
       <section class="cv-panel"><h2>${t(lang, 'Правила эксперимента', 'Experiment rules')}</h2>
         <div class="cv-rules"><span>5s external move ≥ 0.10%</span><span>HL participation ≤ 75%</span><span>basis-adjusted edge ≥ 0.25%</span><span>60 completed minutes</span><span>depth check: $500</span><span>latency: 200 ms</span><span>hold: 15 sec</span><span>fees: 0.045%/side</span><span>book age ≤ 1 sec</span><span>slippage ≤ 0.20%</span></div>
-        <p>${t(lang, 'Реальный ордер — $11 при 1×. Binance собирается как наблюдательный источник; торговый сигнал пока остаётся замороженным Bybit+OKX.', 'The real order is $11 at 1×. Binance is observational; the frozen trading signal remains Bybit+OKX.')}</p>
+        <p>${t(lang, 'Реальный ордер — $11 при 1× и только через контроль Bybit+OKX. Все пары с Binance и Bitget полностью теневые и не могут отправлять заявки.', 'The real order is $11 at 1× and only through the Bybit+OKX control. Every Binance and Bitget pair is shadow-only and cannot route orders.')}</p>
       </section>
+      <section class="cv-panel"><div class="cv-panel-head"><h2>${t(lang, 'Сравнение источников', 'Venue comparison')}</h2><span>${t(lang, 'одинаковые правила · независимые ветки', 'same rules · independent branches')}</span></div>
+        <p>${t(lang, 'Три пары Bybit/OKX/Binance дают честную проверку идеи «любые 2 из 3». Bitget добавлен как ещё один независимый контроль. Масштабировать будем только вариант с достаточным числом исполненных проб и положительным результатом после комиссий.', 'The three Bybit/OKX/Binance pairs test the “any 2 of 3” idea. Bitget adds another independent control. We will scale only a variant with enough executable trials and positive fee-adjusted results.')}</p>
+        <div class="cv-table"><table><thead><tr><th>Pair</th><th>Mode</th><th>Signals</th><th>Trades</th><th>Rejects</th><th>Avg net</th><th>Warm</th></tr></thead><tbody>${comparisonRows}</tbody></table></div>
+      </section>
+      <section class="cv-panel"><h2>Chainlink</h2><p>${t(lang, 'Токен LINK уже входит в набор из 20 монет. Ценовой oracle Chainlink пока не используется как 5‑секундный триггер: обычные on-chain фиды для этого медленнее биржевых стаканов, а Data Streams требует отдельного доступа. Его разумная роль здесь — независимая проверка аномалий, а не источник быстрых входов.', 'LINK is already in the 20-coin universe. Chainlink pricing is not used as a five-second trigger: regular on-chain feeds are slower than exchange books, while Data Streams requires separate access. Its sensible role here is anomaly validation, not fast entries.')}</p></section>
       <section class="cv-panel"><div class="cv-panel-head"><h2>${t(lang, 'Последние сигналы', 'Latest signals')}</h2><span>${latestCandidate ? `${esc(latestCandidate.symbol)} · ${bpsPct(latestCandidate.raw_edge_bps)}` : '—'}</span></div>
         <div class="cv-table">${s.candidates.length ? `<table><thead><tr><th>UTC</th><th>Coin</th><th>Side</th><th>External</th><th>Edge</th><th>Status</th></tr></thead><tbody>${candidateRows(s.candidates, lang)}</tbody></table>` : candidateRows([], lang)}</div>
       </section>
