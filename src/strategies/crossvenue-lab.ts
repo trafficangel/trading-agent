@@ -65,6 +65,10 @@ function number(value: unknown, digits = 2): string {
   const n = Number(value);
   return Number.isFinite(n) ? n.toFixed(digits) : '—';
 }
+function bpsPct(value: unknown, digits = 3): string {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${(n / 100).toFixed(digits)}%` : '—';
+}
 function statusView(s: Snapshot): { live: boolean; progress: number; ready: number; required: number } {
   const updated = Number(s.runtime?.updated_ns ?? 0) / 1e6;
   const live = updated > 0 && Date.now() - updated < 30_000 && !s.runtime?.shutdown_reason;
@@ -97,7 +101,7 @@ function candidateRows(rows: Row[], lang: Lang): string {
   if (!rows.length) return `<div class="cv-empty">${t(lang, 'Сигналов пока нет.', 'No signals yet.')}</div>`;
   return rows.slice(-20).reverse().map((row) => `<tr>
     <td>${fmtUtc(row.received_ns)}</td><td><b>${esc(row.symbol)}</b></td><td>${row.side === 'buy' ? 'LONG' : 'SHORT'}</td>
-    <td>${number(row.external_return_bps, 1)} bps</td><td>${number(row.raw_edge_bps, 1)} bps</td>
+    <td>${bpsPct(row.external_return_bps)}</td><td>${bpsPct(row.raw_edge_bps)}</td>
     <td>${row.rejection ? esc(row.rejection) : '✓ signal'}</td></tr>`).join('');
 }
 
@@ -134,7 +138,7 @@ async function render(lang: Lang): Promise<string> {
         <div class="cv-card"><small>${t(lang, 'Реальный PnL', 'Real PnL')}</small><b class="${realPnl > 0 ? 'pos' : realPnl < 0 ? 'neg' : ''}">${realPnl >= 0 ? '+' : ''}$${realPnl.toFixed(4)}</b><em>${closed.length} ${t(lang, 'закрытых сделок', 'closed trades')}</em></div>
         <div class="cv-card"><small>${t(lang, 'Кандидаты', 'Candidates')}</small><b>${s.candidates.length}</b><em>${s.approvals.length} ${t(lang, 'прошли исполнение', 'execution-approved')}</em></div>
         <div class="cv-card"><small>${t(lang, 'Отказы исполнения', 'Execution rejects')}</small><b>${s.rejections.length}</b><em>${rejectionRate == null ? '—' : `${rejectionRate.toFixed(1)}%`} primary</em></div>
-        <div class="cv-card"><small>${t(lang, 'Shadow 200 ms', 'Shadow 200 ms')}</small><b>${primaryShadows.length}</b><em>${primaryShadows.length ? `${number(primaryShadows.reduce((a, r) => a + Number(r.net_bps ?? 0), 0) / primaryShadows.length, 2)} bps avg` : '—'}</em></div>
+        <div class="cv-card"><small>${t(lang, 'Shadow 200 ms', 'Shadow 200 ms')}</small><b>${primaryShadows.length}</b><em>${primaryShadows.length ? `${bpsPct(primaryShadows.reduce((a, r) => a + Number(r.net_bps ?? 0), 0) / primaryShadows.length)} avg` : '—'}</em></div>
         <div class="cv-card"><small>${t(lang, 'Защита', 'Risk guard')}</small><b>${s.state?.stoppedReason ? 'STOP' : '−$10'}</b><em>1× · $11 · max 1 · ${Number(s.state?.consecutiveLosses ?? 0)}/3 loss streak</em></div>
       </div>
       <section class="cv-panel"><div class="cv-panel-head"><h2>${t(lang, 'Прогрев и потоки', 'Warm-up and feeds')}</h2><span>${v.ready}/20 ready · ${v.progress}/${v.required} min</span></div>
@@ -143,15 +147,15 @@ async function render(lang: Lang): Promise<string> {
         <p class="cv-meta">${t(lang, 'Последнее обновление UTC', 'Last update UTC')}: ${fmtUtc(s.runtime?.updated_ns)} · pending ${Number(s.runtime?.pending_executions ?? 0)}${s.runtime?.shutdown_reason ? ` · STOP: ${esc(s.runtime.shutdown_reason)}` : ''}</p>
       </section>
       <section class="cv-panel"><h2>${t(lang, 'Правила эксперимента', 'Experiment rules')}</h2>
-        <div class="cv-rules"><span>5s external move ≥ 10 bps</span><span>HL participation ≤ 75%</span><span>basis-adjusted edge ≥ 25 bps</span><span>60 completed minutes</span><span>depth check: $500</span><span>latency: 200 ms</span><span>hold: 15 sec</span><span>fees: 4.5 bps/side</span><span>book age ≤ 1 sec</span><span>slippage ≤ 20 bps</span></div>
+        <div class="cv-rules"><span>5s external move ≥ 0.10%</span><span>HL participation ≤ 75%</span><span>basis-adjusted edge ≥ 0.25%</span><span>60 completed minutes</span><span>depth check: $500</span><span>latency: 200 ms</span><span>hold: 15 sec</span><span>fees: 0.045%/side</span><span>book age ≤ 1 sec</span><span>slippage ≤ 0.20%</span></div>
         <p>${t(lang, 'Реальный ордер — $11 при 1×. Binance собирается как наблюдательный источник; торговый сигнал пока остаётся замороженным Bybit+OKX.', 'The real order is $11 at 1×. Binance is observational; the frozen trading signal remains Bybit+OKX.')}</p>
       </section>
-      <section class="cv-panel"><div class="cv-panel-head"><h2>${t(lang, 'Последние сигналы', 'Latest signals')}</h2><span>${latestCandidate ? `${esc(latestCandidate.symbol)} · ${number(latestCandidate.raw_edge_bps, 1)} bps` : '—'}</span></div>
+      <section class="cv-panel"><div class="cv-panel-head"><h2>${t(lang, 'Последние сигналы', 'Latest signals')}</h2><span>${latestCandidate ? `${esc(latestCandidate.symbol)} · ${bpsPct(latestCandidate.raw_edge_bps)}` : '—'}</span></div>
         <div class="cv-table">${s.candidates.length ? `<table><thead><tr><th>UTC</th><th>Coin</th><th>Side</th><th>External</th><th>Edge</th><th>Status</th></tr></thead><tbody>${candidateRows(s.candidates, lang)}</tbody></table>` : candidateRows([], lang)}</div>
       </section>
       <section class="cv-panel"><h2>${t(lang, 'Реальный журнал', 'Real-money ledger')}</h2><div class="cv-table">${closed.length || s.audit.some((row) => row.event === 'opened') ? `<table><thead><tr><th>UTC</th><th>Event</th><th>Coin</th><th>Side</th><th>PnL</th><th>Reason</th></tr></thead><tbody>${auditRows(s.audit, lang)}</tbody></table>` : auditRows([], lang)}</div></section>
       <section class="cv-panel cv-hist"><h2>${t(lang, 'Историческое OOS — контекст, не обещание', 'Historical OOS — context, not a promise')}</h2>
-        <b>166 ${t(lang, 'сделок · июнь–июль 2026', 'trades · June–July 2026')} · +21.33 bps avg net</b>
+        <b>166 ${t(lang, 'сделок · июнь–июль 2026', 'trades · June–July 2026')} · +0.213% avg net</b>
         <p>${t(lang, 'Историческая проверка была положительной после комиссий, но провалила критерии доступности исполнения и концентрации. Микрореал проверяет именно переносимость результата на живой рынок.', 'Historical testing was positive after fees but failed execution availability and concentration gates. The micro-live phase tests whether that result transfers to the live market.')}</p>
       </section>
       <p class="cv-note">${t(lang, 'Это исследовательский эксперимент с реальными деньгами, а не инвестиционная рекомендация. Положительный исторический результат не гарантирует будущую прибыль.', 'This is a real-money research experiment, not investment advice. Positive historical results do not guarantee future profit.')}</p>
