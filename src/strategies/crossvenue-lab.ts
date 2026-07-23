@@ -118,12 +118,53 @@ function candidateRows(rows: Row[], lang: Lang): string {
     <td>${row.rejection ? esc(row.rejection) : t(lang, 'кандидат', 'candidate')}</td></tr>`).join('');
 }
 
+function timestampMs(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Date.parse(String(value ?? ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function auditRows(rows: Row[], lang: Lang): string {
-  const relevant = rows.filter((row) => ['opened', 'closed', 'entry_rejected', 'entry_unconfirmed', 'entry_unprotected_flatten', 'stopped'].includes(String(row.event)));
-  if (!relevant.length) return `<div class="cv-empty">${t(lang, 'Реальных сделок пока нет.', 'No real trades yet.')}</div>`;
-  return relevant.slice(-20).reverse().map((row) => `<tr><td>${esc(row.ts)}</td><td>${esc(row.event)}</td>
-    <td><b>${esc(row.symbol ?? '—')}</b></td><td>${esc(row.side ?? '—')}</td>
-    <td>${row.pnl == null ? '—' : `$${number(row.pnl, 4)}`}</td><td>${esc(row.reason ?? row.message ?? '—')}</td></tr>`).join('');
+  const opened = new Map<string, Row>();
+  const completed: { open: Row; close: Row | null }[] = [];
+  const backfills = new Map(rows.filter((row) => row.event === 'accounting_backfill')
+    .map((row) => [String(row.signalId ?? ''), row]));
+  for (const row of rows) {
+    const key = String(row.signalId ?? '');
+    if (row.event === 'opened') opened.set(key, row);
+    if (row.event === 'closed') {
+      completed.push({ open: opened.get(key) ?? {}, close: { ...row, ...backfills.get(key) } });
+      opened.delete(key);
+    }
+  }
+  for (const open of opened.values()) completed.push({ open, close: null });
+  if (!completed.length) return `<div class="cv-empty">${t(lang, 'Реальных сделок пока нет.', 'No real trades yet.')}</div>`;
+  return completed.slice(-20).reverse().map(({ open, close }) => {
+    const openMs = timestampMs(close?.openedAt ?? open.ts);
+    const closeMs = timestampMs(close?.closedAt ?? close?.ts);
+    const lifetime = Number(close?.lifetimeMs ?? (
+      openMs != null && closeMs != null ? closeMs - openMs : NaN));
+    const notional = Number(close?.notional ?? open.notional);
+    const leverage = Number(close?.leverage ?? (notional <= 20 ? 1 : 10));
+    const entry = close?.entryPx ?? open.fillEntry;
+    const exit = close?.exitPx;
+    const fees = close?.fees;
+    const gross = close?.grossPnl;
+    const net = close?.pnl;
+    return `<tr>
+      <td>${openMs == null ? '—' : fmtUtc(openMs * 1e6)}</td>
+      <td>${closeMs == null ? t(lang, 'открыта', 'open') : fmtUtc(closeMs * 1e6)}</td>
+      <td>${Number.isFinite(lifetime) ? `${(lifetime / 1000).toFixed(1)}s` : '—'}</td>
+      <td><b>${esc(close?.symbol ?? open.symbol ?? '—')}</b></td>
+      <td>${esc(close?.side ?? open.side ?? '—')}</td>
+      <td>${Number.isFinite(notional) ? `$${notional.toFixed(2)}` : '—'} · ${Number.isFinite(leverage) ? `${leverage}×` : '—'}</td>
+      <td>${entry == null ? '—' : number(entry, 6)} → ${exit == null ? '—' : number(exit, 6)}</td>
+      <td>${fees == null ? '—' : `$${number(fees, 5)}`}</td>
+      <td>${gross == null ? '—' : `$${number(gross, 5)}`}</td>
+      <td class="${Number(net) > 0 ? 'pos' : Number(net) < 0 ? 'neg' : ''}">${net == null ? '—' : `$${number(net, 5)}`}</td>
+      <td>${esc(close?.reason ?? t(lang, 'в позиции', 'in position'))}</td>
+    </tr>`;
+  }).join('');
 }
 
 async function render(lang: Lang): Promise<string> {
@@ -185,7 +226,7 @@ async function render(lang: Lang): Promise<string> {
       <section class="cv-panel"><div class="cv-panel-head"><h2>${t(lang, 'Последние сигналы', 'Latest signals')}</h2><span>${latestCandidate ? `${esc(latestCandidate.symbol)} · ${bpsPct(latestCandidate.raw_edge_bps)}` : '—'}</span></div>
         <div class="cv-table">${s.candidates.length ? `<table><thead><tr><th>UTC</th><th>Coin</th><th>Side</th><th>External</th><th>Edge</th><th>Status</th></tr></thead><tbody>${candidateRows(s.candidates, lang)}</tbody></table>` : candidateRows([], lang)}</div>
       </section>
-      <section class="cv-panel"><h2>${t(lang, 'Реальный журнал', 'Real-money ledger')}</h2><div class="cv-table">${closed.length || s.audit.some((row) => row.event === 'opened') ? `<table><thead><tr><th>UTC</th><th>Event</th><th>Coin</th><th>Side</th><th>PnL</th><th>Reason</th></tr></thead><tbody>${auditRows(s.audit, lang)}</tbody></table>` : auditRows([], lang)}</div></section>
+      <section class="cv-panel"><h2>${t(lang, 'Реальный журнал — прибыль после всех издержек', 'Real-money ledger — net after all costs')}</h2><div class="cv-table">${closed.length || s.audit.some((row) => row.event === 'opened') ? `<table><thead><tr><th>${t(lang, 'Открытие UTC', 'Opened UTC')}</th><th>${t(lang, 'Закрытие UTC', 'Closed UTC')}</th><th>${t(lang, 'Жизнь', 'Lifetime')}</th><th>Coin</th><th>Side</th><th>${t(lang, 'Размер', 'Size')}</th><th>${t(lang, 'Вход → выход', 'Entry → exit')}</th><th>${t(lang, 'Комиссия', 'Fees')}</th><th>Gross</th><th>Net PnL</th><th>${t(lang, 'Причина', 'Reason')}</th></tr></thead><tbody>${auditRows(s.audit, lang)}</tbody></table>` : auditRows([], lang)}</div></section>
       <section class="cv-panel cv-hist"><h2>${t(lang, 'Историческое OOS — контекст, не обещание', 'Historical OOS — context, not a promise')}</h2>
         <b>166 ${t(lang, 'сделок · июнь–июль 2026', 'trades · June–July 2026')} · +0.213% avg net</b>
         <p>${t(lang, 'Историческая проверка была положительной после комиссий, но провалила критерии доступности исполнения и концентрации. Микрореал проверяет именно переносимость результата на живой рынок.', 'Historical testing was positive after fees but failed execution availability and concentration gates. The micro-live phase tests whether that result transfers to the live market.')}</p>
@@ -204,5 +245,5 @@ export async function crossvenueLabRoute(app: FastifyInstance): Promise<void> {
 
 export const CROSSVENUE_CSS = `
 .cv-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(80,180,255,.32);border-radius:14px;background:linear-gradient(135deg,rgba(34,126,255,.13),var(--bg-card));color:var(--text);text-decoration:none}.cv-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(34,126,255,.13);color:#62b3ff;font-size:11px;font-weight:750;letter-spacing:.04em}.cv-title{font-size:19px;font-weight:700;margin-top:8px}.cv-sub{font-size:13px;color:var(--text-dim);margin-top:3px}.cv-stats{display:flex;gap:22px}.cv-stats span{display:grid;text-align:right}.cv-stats b{font-size:18px}.cv-stats small{font-size:10px;color:var(--text-faint);text-transform:uppercase}.cv-stats .ok,.cv-card .pos{color:#38d996}.cv-stats .bad,.cv-card .neg{color:#ff6577}
-.cv-wrap{max-width:1120px;margin:0 auto}.cv-back{display:inline-block;margin:4px 0 22px;color:var(--text-dim)}.cv-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.cv-head h1{font-size:34px;margin:12px 0 7px}.cv-head p{max-width:720px;color:var(--text-dim)}.cv-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.cv-engine i,.cv-feeds i{width:8px;height:8px;border-radius:50%;background:#ff6577}.cv-engine.live i,.cv-feeds i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}.cv-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0}.cv-card,.cv-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.cv-card{padding:16px;display:grid;gap:5px}.cv-card small,.cv-card em{color:var(--text-faint);font-size:11px;font-style:normal}.cv-card b{font-size:25px;font-variant-numeric:tabular-nums}.cv-panel{padding:18px;margin:12px 0}.cv-panel h2{font-size:17px;margin:0 0 14px}.cv-panel-head{display:flex;justify-content:space-between;gap:12px}.cv-panel-head span,.cv-meta{font-size:12px;color:var(--text-faint)}.cv-progress{height:7px;border-radius:9px;background:var(--bg);overflow:hidden}.cv-progress i{display:block;height:100%;background:linear-gradient(90deg,#287eff,#38d996)}.cv-feeds{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}.cv-feeds span{display:flex;align-items:center;gap:7px;padding:9px;background:var(--bg);border-radius:9px;text-transform:capitalize;font-size:12px}.cv-feeds b{margin-left:auto;font-variant-numeric:tabular-nums}.cv-rules{display:flex;flex-wrap:wrap;gap:7px}.cv-rules span{padding:6px 9px;border-radius:8px;background:var(--bg);font-size:12px}.cv-panel p{color:var(--text-dim);font-size:13px}.cv-table{overflow:auto}.cv-table table{width:100%;border-collapse:collapse;font-size:12px}.cv-table th,.cv-table td{text-align:left;padding:9px;border-bottom:1px solid var(--border);white-space:nowrap}.cv-table th{color:var(--text-faint);font-size:10px;text-transform:uppercase}.cv-empty{padding:20px;text-align:center;color:var(--text-faint)}.cv-hist b{font-size:18px}.cv-note{font-size:12px;color:var(--text-faint);margin:18px 2px 40px}@media(max-width:760px){.cv-grid{grid-template-columns:repeat(2,1fr)}.cv-feeds{grid-template-columns:repeat(2,1fr)}.cv-head{display:block}.cv-engine{display:inline-flex;margin-top:8px}.cv-stats{width:100%;justify-content:space-between}.cv-stats span{text-align:left}}@media(max-width:460px){.cv-grid{grid-template-columns:1fr}.cv-head h1{font-size:27px}.cv-stats{gap:10px;flex-wrap:wrap}.cv-stats span{min-width:70px}}
+.cv-wrap{max-width:1120px;margin:0 auto}.cv-back{display:inline-block;margin:4px 0 22px;color:var(--text-dim)}.cv-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.cv-head h1{font-size:34px;margin:12px 0 7px}.cv-head p{max-width:720px;color:var(--text-dim)}.cv-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.cv-engine i,.cv-feeds i{width:8px;height:8px;border-radius:50%;background:#ff6577}.cv-engine.live i,.cv-feeds i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}.cv-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0}.cv-card,.cv-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.cv-card{padding:16px;display:grid;gap:5px}.cv-card small,.cv-card em{color:var(--text-faint);font-size:11px;font-style:normal}.cv-card b{font-size:25px;font-variant-numeric:tabular-nums}.cv-panel{padding:18px;margin:12px 0}.cv-panel h2{font-size:17px;margin:0 0 14px}.cv-panel-head{display:flex;justify-content:space-between;gap:12px}.cv-panel-head span,.cv-meta{font-size:12px;color:var(--text-faint)}.cv-progress{height:7px;border-radius:9px;background:var(--bg);overflow:hidden}.cv-progress i{display:block;height:100%;background:linear-gradient(90deg,#287eff,#38d996)}.cv-feeds{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}.cv-feeds span{display:flex;align-items:center;gap:7px;padding:9px;background:var(--bg);border-radius:9px;text-transform:capitalize;font-size:12px}.cv-feeds b{margin-left:auto;font-variant-numeric:tabular-nums}.cv-rules{display:flex;flex-wrap:wrap;gap:7px}.cv-rules span{padding:6px 9px;border-radius:8px;background:var(--bg);font-size:12px}.cv-panel p{color:var(--text-dim);font-size:13px}.cv-table{overflow:auto}.cv-table table{width:100%;border-collapse:collapse;font-size:12px}.cv-table th,.cv-table td{text-align:left;padding:9px;border-bottom:1px solid var(--border);white-space:nowrap}.cv-table th{color:var(--text-faint);font-size:10px;text-transform:uppercase}.cv-table .pos{color:#38d996}.cv-table .neg{color:#ff6577}.cv-empty{padding:20px;text-align:center;color:var(--text-faint)}.cv-hist b{font-size:18px}.cv-note{font-size:12px;color:var(--text-faint);margin:18px 2px 40px}@media(max-width:760px){.cv-grid{grid-template-columns:repeat(2,1fr)}.cv-feeds{grid-template-columns:repeat(2,1fr)}.cv-head{display:block}.cv-engine{display:inline-flex;margin-top:8px}.cv-stats{width:100%;justify-content:space-between}.cv-stats span{text-align:left}}@media(max-width:460px){.cv-grid{grid-template-columns:1fr}.cv-head h1{font-size:27px}.cv-stats{gap:10px;flex-wrap:wrap}.cv-stats span{min-width:70px}}
 `;
