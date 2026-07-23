@@ -9,6 +9,7 @@ type Row = Record<string, unknown>;
 type Runtime = {
   started_ns?: number; updated_ns?: number; counts?: Record<string, number>;
   pending_executions?: number; basis_required_minutes?: number;
+  primary_latency_ms?: number;
   basis_progress_minutes?: Record<string, number>; basis_ready_symbols?: number;
   primary_trials?: number; primary_rejections?: number; primary_trades?: number;
   shutdown_reason?: string | null;
@@ -113,7 +114,7 @@ function candidateRows(rows: Row[], lang: Lang): string {
   return rows.slice(-20).reverse().map((row) => `<tr>
     <td>${fmtUtc(row.received_ns)}</td><td><b>${esc(row.symbol)}</b></td><td>${row.side === 'buy' ? 'LONG' : 'SHORT'}</td>
     <td>${bpsPct(row.external_return_bps)}</td><td>${bpsPct(row.raw_edge_bps)}</td>
-    <td>${row.rejection ? esc(row.rejection) : '✓ signal'}</td></tr>`).join('');
+    <td>${row.rejection ? esc(row.rejection) : t(lang, 'кандидат', 'candidate')}</td></tr>`).join('');
 }
 
 function auditRows(rows: Row[], lang: Lang): string {
@@ -128,8 +129,10 @@ async function render(lang: Lang): Promise<string> {
   const s = await snapshot();
   const v = statusView(s);
   const counts = s.runtime?.counts ?? {};
-  const primaryShadows = s.shadows.filter((row) => Number(row.latency_ms) === 200);
+  const primaryLatency = Number(s.runtime?.primary_latency_ms ?? 500);
+  const primaryShadows = s.shadows.filter((row) => Number(row.latency_ms) === primaryLatency);
   const closed = s.audit.filter((row) => row.event === 'closed');
+  const opened = s.audit.filter((row) => row.event === 'opened');
   const realPnl = closed.reduce((sum, row) => sum + Number(row.pnl ?? 0), 0);
   const rejectionRate = (s.runtime?.primary_trials ?? 0) > 0
     ? Number(s.runtime?.primary_rejections ?? 0) / Number(s.runtime?.primary_trials ?? 1) * 100 : null;
@@ -138,7 +141,7 @@ async function render(lang: Lang): Promise<string> {
   const control: Variant = { name: 'bybit-okx', candidates: s.candidates, rejections: s.rejections, trades: s.shadows };
   const comparison = [control, ...s.variants];
   const comparisonRows = comparison.map((variant) => {
-    const primary = variant.trades.filter((row) => Number(row.latency_ms) === 200);
+    const primary = variant.trades.filter((row) => Number(row.latency_ms) === primaryLatency);
     const runtime = variant.name === 'bybit-okx' ? undefined : s.runtime?.variants?.[variant.name];
     const trials = variant.name === 'bybit-okx' ? Number(s.runtime?.primary_trials ?? 0) : Number(runtime?.primary_trials ?? 0);
     const rejects = variant.name === 'bybit-okx' ? Number(s.runtime?.primary_rejections ?? 0) : Number(runtime?.primary_rejections ?? 0);
@@ -159,9 +162,9 @@ async function render(lang: Lang): Promise<string> {
       <div class="cv-grid">
         <div class="cv-card"><small>${t(lang, 'Текущий баланс', 'Current balance')}</small><b>${s.equity == null ? '—' : `$${s.equity.toFixed(6)}`}</b><em>${t(lang, 'Hyperliquid Unified Account', 'Hyperliquid Unified Account')}</em></div>
         <div class="cv-card"><small>${t(lang, 'Реальный PnL', 'Real PnL')}</small><b class="${realPnl > 0 ? 'pos' : realPnl < 0 ? 'neg' : ''}">${realPnl >= 0 ? '+' : ''}$${realPnl.toFixed(4)}</b><em>${closed.length} ${t(lang, 'закрытых сделок', 'closed trades')}</em></div>
-        <div class="cv-card"><small>${t(lang, 'Кандидаты', 'Candidates')}</small><b>${s.candidates.length}</b><em>${s.approvals.length} ${t(lang, 'прошли исполнение', 'execution-approved')}</em></div>
+        <div class="cv-card"><small>${t(lang, 'Кандидаты', 'Candidates')}</small><b>${s.candidates.length}</b><em>${s.approvals.length} ${t(lang, 'одобрено ·', 'approved ·')} ${opened.length} ${t(lang, 'реальных входов', 'real entries')}</em></div>
         <div class="cv-card"><small>${t(lang, 'Отказы исполнения', 'Execution rejects')}</small><b>${s.rejections.length}</b><em>${rejectionRate == null ? '—' : `${rejectionRate.toFixed(1)}%`} primary</em></div>
-        <div class="cv-card"><small>${t(lang, 'Shadow 200 ms', 'Shadow 200 ms')}</small><b>${primaryShadows.length}</b><em>${primaryShadows.length ? `${bpsPct(primaryShadows.reduce((a, r) => a + Number(r.net_bps ?? 0), 0) / primaryShadows.length)} avg` : '—'}</em></div>
+        <div class="cv-card"><small>Shadow ${primaryLatency} ms</small><b>${primaryShadows.length}</b><em>${primaryShadows.length ? `${bpsPct(primaryShadows.reduce((a, r) => a + Number(r.net_bps ?? 0), 0) / primaryShadows.length)} avg` : '—'}</em></div>
         <div class="cv-card"><small>${t(lang, 'Защита', 'Risk guard')}</small><b>${s.state?.stoppedReason ? 'STOP' : '−$10'}</b><em>1× · $11 · max 1 · ${Number(s.state?.consecutiveLosses ?? 0)}/3 loss streak</em></div>
       </div>
       <section class="cv-panel"><div class="cv-panel-head"><h2>${t(lang, 'Прогрев и потоки', 'Warm-up and feeds')}</h2><span>${v.ready}/20 ready · ${v.progress}/${v.required} min</span></div>
@@ -170,8 +173,8 @@ async function render(lang: Lang): Promise<string> {
         <p class="cv-meta">${t(lang, 'Последнее обновление UTC', 'Last update UTC')}: ${fmtUtc(s.runtime?.updated_ns)} · pending ${Number(s.runtime?.pending_executions ?? 0)}${s.runtime?.shutdown_reason ? ` · STOP: ${esc(s.runtime.shutdown_reason)}` : ''}</p>
       </section>
       <section class="cv-panel"><h2>${t(lang, 'Правила эксперимента', 'Experiment rules')}</h2>
-        <div class="cv-rules"><span>5s external move ≥ 0.10%</span><span>HL participation ≤ 75%</span><span>basis-adjusted edge ≥ 0.25%</span><span>60 completed minutes</span><span>depth check: $500</span><span>latency: 200 ms</span><span>hold: 15 sec</span><span>fees: 0.045%/side</span><span>book age ≤ 1 sec</span><span>slippage ≤ 0.20%</span></div>
-        <p>${t(lang, 'Реальный ордер — $11 при 1× и только через контроль Bybit+OKX. Все пары с Binance и Bitget полностью теневые и не могут отправлять заявки.', 'The real order is $11 at 1× and only through the Bybit+OKX control. Every Binance and Bitget pair is shadow-only and cannot route orders.')}</p>
+        <div class="cv-rules"><span>5s external move ≥ 0.10%</span><span>HL participation ≤ 75%</span><span>basis-adjusted edge ≥ 0.25%</span><span>60 completed minutes</span><span>fresh depth: ≥ $500</span><span>execution: ${primaryLatency} ms</span><span>hold: 15 sec</span><span>fees: 0.045%/side</span><span>snapshot age ≤ 1 sec</span><span>slippage ≤ 0.20%</span></div>
+        <p>${t(lang, `Реальный ордер — $11 при 1× и только через контроль Bybit+OKX. Перед approval запрашивается свежий стакан Hyperliquid; контроль исполнения — ${primaryLatency} мс, глубина не менее $500. Все пары с Binance и Bitget полностью теневые.`, `The real order is $11 at 1× and only through the Bybit+OKX control. A fresh Hyperliquid book is requested before approval; execution control is ${primaryLatency} ms with at least $500 depth. Every Binance and Bitget pair is shadow-only.`)}</p>
       </section>
       <section class="cv-panel"><div class="cv-panel-head"><h2>${t(lang, 'Сравнение источников', 'Venue comparison')}</h2><span>${t(lang, 'одинаковые правила · независимые ветки', 'same rules · independent branches')}</span></div>
         <p>${t(lang, 'Три пары Bybit/OKX/Binance дают честную проверку идеи «любые 2 из 3». Bitget добавлен как ещё один независимый контроль. Масштабировать будем только вариант с достаточным числом исполненных проб и положительным результатом после комиссий.', 'The three Bybit/OKX/Binance pairs test the “any 2 of 3” idea. Bitget adds another independent control. We will scale only a variant with enough executable trials and positive fee-adjusted results.')}</p>
