@@ -81,13 +81,14 @@ function bpsPct(value: unknown, digits = 3): string {
   const n = Number(value);
   return Number.isFinite(n) ? `${(n / 100).toFixed(digits)}%` : '—';
 }
-function statusView(s: Snapshot): { live: boolean; progress: number; ready: number; required: number } {
+function statusView(s: Snapshot): { live: boolean; progress: number; ready: number; required: number; total: number } {
   const updated = Number(s.runtime?.updated_ns ?? 0) / 1e6;
   const live = updated > 0 && Date.now() - updated < 30_000 && !s.runtime?.shutdown_reason;
   const required = Number(s.runtime?.basis_required_minutes ?? 60);
   const values = Object.values(s.runtime?.basis_progress_minutes ?? {});
   const progress = values.length ? Math.min(...values) : 0;
-  return { live, progress, ready: Number(s.runtime?.basis_ready_symbols ?? 0), required };
+  return { live, progress, ready: Number(s.runtime?.basis_ready_symbols ?? 0),
+    required, total: values.length };
 }
 
 export async function crossvenueHero(lang: Lang): Promise<string> {
@@ -102,7 +103,7 @@ export async function crossvenueHero(lang: Lang): Promise<string> {
     </div>
     <div class="cv-stats">
       <span><b class="${view.live ? 'ok' : 'bad'}">${view.live ? t(lang, 'РАБОТАЕТ', 'LIVE') : 'OFFLINE'}</b><small>${t(lang, 'движок', 'engine')}</small></span>
-      <span><b>${view.ready}/20</b><small>${t(lang, 'прогрето', 'warmed')}</small></span>
+      <span><b>${view.ready}/${view.total || '—'}</b><small>${t(lang, 'прогрето', 'warmed')}</small></span>
       <span><b>${s.candidates.length}</b><small>${t(lang, 'сигналов*', 'signals*')}</small></span>
       <span><b class="${pnl > 0 ? 'ok' : pnl < 0 ? 'bad' : ''}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(3)}</b><small>${t(lang, 'real PnL', 'real PnL')}</small></span>
     </div>
@@ -148,7 +149,7 @@ async function render(lang: Lang): Promise<string> {
     const avg = primary.length ? primary.reduce((sum, row) => sum + Number(row.net_bps ?? 0), 0) / primary.length : null;
     return `<tr><td><b>${esc(variant.name.replace('-', ' + '))}</b></td><td>${variant.name === 'bybit-okx' ? 'REAL GATE' : 'SHADOW'}</td>
       <td>${variant.candidates.length}</td><td>${primary.length}</td><td>${trials ? `${(rejects / trials * 100).toFixed(1)}%` : '—'}</td>
-      <td>${avg == null ? '—' : bpsPct(avg)}</td><td>${variant.name === 'bybit-okx' ? `${v.ready}/20` : `${Number(runtime?.basis_ready_symbols ?? 0)}/20`}</td></tr>`;
+      <td>${avg == null ? '—' : bpsPct(avg)}</td><td>${variant.name === 'bybit-okx' ? `${v.ready}/${v.total}` : `${Number(runtime?.basis_ready_symbols ?? 0)}/${v.total}`}</td></tr>`;
   }).join('');
   return pageShell(t(lang, 'Cross‑Venue Live — лаборатория', 'Cross‑Venue Live — Lab'), `
     <style>${CROSSVENUE_CSS}</style>
@@ -167,7 +168,7 @@ async function render(lang: Lang): Promise<string> {
         <div class="cv-card"><small>Shadow ${primaryLatency} ms</small><b>${primaryShadows.length}</b><em>${primaryShadows.length ? `${bpsPct(primaryShadows.reduce((a, r) => a + Number(r.net_bps ?? 0), 0) / primaryShadows.length)} avg` : '—'}</em></div>
         <div class="cv-card"><small>${t(lang, 'Защита', 'Risk guard')}</small><b>${s.state?.stoppedReason ? 'STOP' : '−$10'}</b><em>10× · $100 notional · max 1 · ${Number(s.state?.consecutiveLosses ?? 0)}/3 loss streak</em></div>
       </div>
-      <section class="cv-panel"><div class="cv-panel-head"><h2>${t(lang, 'Прогрев и потоки', 'Warm-up and feeds')}</h2><span>${v.ready}/20 ready · ${v.progress}/${v.required} min</span></div>
+      <section class="cv-panel"><div class="cv-panel-head"><h2>${t(lang, 'Прогрев и потоки', 'Warm-up and feeds')}</h2><span>${v.ready}/${v.total} ready · ${v.progress}/${v.required} min</span></div>
         <div class="cv-progress"><i style="width:${progressPct.toFixed(1)}%"></i></div>
         <div class="cv-feeds">${['hyperliquid', 'bybit', 'okx', 'binance', 'bitget'].map((venue) => `<span><i></i>${venue}<b>${Number(counts[venue] ?? 0).toLocaleString('en-US')}</b></span>`).join('')}</div>
         <p class="cv-meta">${t(lang, 'Последнее обновление UTC', 'Last update UTC')}: ${fmtUtc(s.runtime?.updated_ns)} · pending ${Number(s.runtime?.pending_executions ?? 0)}${s.runtime?.shutdown_reason ? ` · STOP: ${esc(s.runtime.shutdown_reason)}` : ''}</p>
