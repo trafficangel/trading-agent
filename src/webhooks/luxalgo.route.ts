@@ -5,6 +5,7 @@ import { parseLuxAlgoWebhook } from './luxalgo.schema.js';
 import { sendMessage } from '../telegram/bot.js';
 import { logger } from '../lib/logger.js';
 import { handleStrategyWebhook, formatStrategyWebhookLog } from '../strategies/strategy-trader.js';
+import { queueLighterLuxalgoSignal } from '../strategies/lighter-luxalgo-lab.js';
 
 /**
  * Audit H-NEW-2 — constant-time secret comparison. `req.params.secret`
@@ -49,6 +50,9 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
 
       // === TRACK C path — LuxAlgo Strategy Builder webhook ===
       if (parsed.data.kind === 'strategy') {
+        // Independent prospective Lighter shadow. This schedules a read-only
+        // L2 capture at signal+300ms and never delays or changes Track C.
+        queueLighterLuxalgoSignal(parsed.data);
         const r = await handleStrategyWebhook(parsed.data);
         // Mirror every Track C webhook to the Logs channel — operator
         // sees every incoming signal regardless of outcome (accepted,

@@ -32,6 +32,7 @@ import { startHlCollector } from './jobs/hl-collector.js';
 import { startHlCandleCollector } from './jobs/hl-candle-collector.js';
 import { startHlMinuteCandleCollector } from './jobs/hl-minute-candle-collector.js';
 import { startFundingFlipRunner } from './jobs/funding-flip-runner.js';
+import { startLighterLuxalgoShadowFeed } from './strategies/lighter-luxalgo-lab.js';
 // Phase G — money-back guarantee disabled, see start-job line below.
 // import { startPnlGuaranteeMonthlyJob } from './jobs/pnl-guarantee-monthly.js';
 import { sendLegacyMessage } from './telegram/bot.js';
@@ -230,6 +231,10 @@ async function main(): Promise<void> {
   // Watchdog: alert if LuxAlgo webhooks go silent (>18h) — catches an
   // upstream outage in an hour instead of days.
   startWebhookWatchdog();
+  // STRAT-010 prospective Lighter shadow: read-only SOL L2/funding feed.
+  // No API keys and no transaction path; records executable $1000 VWAP at
+  // webhook+300ms for the public /lab card.
+  startLighterLuxalgoShadowFeed();
   // Hyperliquid microstructure collector: WS trades→CVD + per-min OI/funding/
   // book → hl_micro. Forward-collects the data the order-flow strategies need
   // (no REST history on HL). Isolated; no orders, no Telegram.

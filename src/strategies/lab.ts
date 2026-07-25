@@ -36,6 +36,11 @@ import { ALL_LAB_STRATEGIES, LAB_BY_CODE, LAB_BY_ID, LAB_TRACK, LAB_MAKER_TRACK,
 import { labGateVerdict } from '../lib/lab-gate.js';
 import { allocatePortfolio, portfolioSummary } from '../lib/portfolio.js';
 import { crossvenueHero, crossvenueLabRoute, CROSSVENUE_CSS } from './crossvenue-lab.js';
+import {
+  lighterLuxalgoHero,
+  lighterLuxalgoLabRoute,
+  LIGHTER_LUXALGO_CSS,
+} from './lighter-luxalgo-lab.js';
 
 const trackOf = (s: LabStrategy): string => s.track ?? LAB_TRACK;
 
@@ -174,7 +179,8 @@ async function renderLabList(lang: Lang): Promise<string> {
       <h1 class="title">${t(lang, 'Лаборатория', 'The Lab')}</h1>
       <p class="subtitle">${t(lang, 'Собственные стратегии на форвард-тесте. Движок бэктеста == движок бумаги — никакого расхождения.', 'In-house strategies under forward-testing. The backtest engine == the paper engine — zero divergence.')}</p>
     </div>
-    <style>${LAB_CSS}${CROSSVENUE_CSS}</style>
+    <style>${LAB_CSS}${CROSSVENUE_CSS}${LIGHTER_LUXALGO_CSS}</style>
+    ${await lighterLuxalgoHero(lang)}
     ${await crossvenueHero(lang)}
     ${labBanner(lang)}
     ${portfolioLink}
@@ -357,6 +363,7 @@ function renderLabPortfolio(): string {
 
 export async function labRoute(app: FastifyInstance): Promise<void> {
   await crossvenueLabRoute(app);
+  await lighterLuxalgoLabRoute(app);
   app.get('/lab/portfolio', async (_req, reply) => {
     // The sizing plan is only meaningful with lab strategies present. While the
     // paper book is cleared, send visitors back to the lab index.
