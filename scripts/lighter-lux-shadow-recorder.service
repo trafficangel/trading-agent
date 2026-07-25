@@ -1,0 +1,21 @@
+[Unit]
+Description=Read-only Lighter SOL LuxAlgo shadow recorder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/lighter-lux-shadow
+ExecStart=/home/trader/pmtest/bin/python /home/trader/apps/lighter-lux-shadow/lighter-lux-shadow-recorder.py
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/trader/apps/lighter-lux-shadow/data
+
+[Install]
+WantedBy=multi-user.target

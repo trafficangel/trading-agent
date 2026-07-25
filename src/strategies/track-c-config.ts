@@ -779,7 +779,11 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
     // with slightly LOWER worst-case per-trade loss (5%×10=0.50 vs 7%×8=0.56 margin).
     riskBand: 'low',
     tierEligible: true,
-    minTier: 'starter',
+    // Prospective Lighter validation (Jul 25 2026): operator-only shadow.
+    // The historic book is not being restarted on Bybit; fanOut=false is
+    // the hard real-order gate while we measure Lighter's actual 300 ms
+    // executable price, spread, slippage and funding.
+    minTier: null,
     maxSafeLeverage: 10,
     description:
       'BCH 5m | LONG: CNTR Normal Bl + CFM Downtrend + TC Bl | SHORT: CNTR Normal Br + CFM Uptrend + TC Br | EXIT: CNTR Built-in',
@@ -795,8 +799,8 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       'Бэктест короткий — всего 2.3 месяца. Цифры предварительные, ждём накопления реальной статистики.',
     symbol: 'BCHUSDT',
     timeframe: '5',
-    enabled: false,
-    fanOut: true,
+    enabled: true,
+    fanOut: false,
     slPct: 0.05,
     launchedAt: Date.parse('2026-05-18T12:00:00Z'),
     alertName: 'BCHUSDT|5|LONG=CNTRNormBl&CFMDn&TCBl|SHORT=CNTRNormBr&CFMUp&TCBr|EXIT=CNTRBltExt',
