@@ -13,6 +13,9 @@ Environment=LIGHTER_LIVE_ENABLED=true
 Environment=LIGHTER_LIVE_NOTIONAL_USD=100
 Environment=LIGHTER_LIVE_LEVERAGE=10
 Environment=LIGHTER_LIVE_DAILY_LOSS_USD=10
+Environment=LIGHTER_LIVE_MAX_DRAWDOWN_USD=15
+Environment=LIGHTER_LIVE_STRATEGY_PAUSE_SAMPLE=10
+Environment=LIGHTER_LIVE_STRATEGY_GATE_SAMPLE=20
 Environment=LIGHTER_LIVE_MAX_SLIPPAGE=0.003
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/trader/venvs/lighter/bin/python /home/trader/apps/trading-agent/scripts/lighter-lux-live.py

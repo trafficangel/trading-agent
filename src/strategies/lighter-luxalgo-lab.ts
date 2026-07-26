@@ -294,6 +294,12 @@ type LiveStateRow = {
   heartbeat_at: number | null;
   status: string;
   last_error: string | null;
+  cumulative_net_usd: number;
+  equity_peak_usd: number;
+  current_drawdown_usd: number;
+  max_drawdown_usd: number;
+  portfolio_paused_at: number | null;
+  portfolio_pause_reason: string | null;
 };
 
 type LiveTradeRow = {
@@ -321,6 +327,38 @@ type LiveTradeRow = {
   close_reason: string | null;
   status: string;
   error: string | null;
+  entry_reference_source: number | null;
+  entry_reference_l2: number | null;
+  entry_slippage_pct: number | null;
+  entry_book_age_ms: number | null;
+  exit_reference_source: number | null;
+  exit_reference_l2: number | null;
+  exit_slippage_pct: number | null;
+};
+
+type LiveStrategyStateRow = {
+  strategy_id: string;
+  enabled: number;
+  closed_trades: number;
+  net_pnl_usd: number;
+  profit_factor: number | null;
+  first_half_net_usd: number;
+  second_half_net_usd: number;
+  max_drawdown_usd: number;
+  gate_status: 'collecting' | 'watch' | 'passed' | 'paused';
+  paused_at: number | null;
+  pause_reason: string | null;
+  updated_at: number;
+};
+
+type LiveMetrics = {
+  closed: number;
+  wins: number;
+  netUsd: number;
+  profitFactor: number | null;
+  firstHalfUsd: number;
+  secondHalfUsd: number;
+  maxDrawdownUsd: number;
 };
 
 type PnlPoint = {
@@ -878,7 +916,9 @@ function tradeTotal(): number {
 
 function lighterLiveState(): LiveStateRow | null {
   return db.prepare<[], LiveStateRow>(`
-    SELECT enabled,last_signal_id,started_at,heartbeat_at,status,last_error
+    SELECT enabled,last_signal_id,started_at,heartbeat_at,status,last_error,
+           cumulative_net_usd,equity_peak_usd,current_drawdown_usd,
+           max_drawdown_usd,portfolio_paused_at,portfolio_pause_reason
     FROM lighter_lux_live_state WHERE id=1`).get() ?? null;
 }
 
@@ -888,9 +928,60 @@ function recentLiveTrades(limit = 30): LiveTradeRow[] {
            opened_at,closed_at,requested_notional_usd,filled_notional_usd,
            leverage,quantity,entry_price,stop_pct,stop_price,exit_price,
            gross_pnl_usd,funding_pnl_usd,fee_usd,net_pnl_usd,net_pnl_pct,
-           close_reason,status,error
+           close_reason,status,error,entry_reference_source,entry_reference_l2,
+           entry_slippage_pct,entry_book_age_ms,exit_reference_source,
+           exit_reference_l2,exit_slippage_pct
     FROM lighter_lux_live_trades
     ORDER BY opened_at DESC,id DESC LIMIT ?`).all(limit);
+}
+
+function closedLiveTrades(): LiveTradeRow[] {
+  return db.prepare<[], LiveTradeRow>(`
+    SELECT id,strategy_id,symbol,side,entry_signal_id,exit_signal_id,
+           opened_at,closed_at,requested_notional_usd,filled_notional_usd,
+           leverage,quantity,entry_price,stop_pct,stop_price,exit_price,
+           gross_pnl_usd,funding_pnl_usd,fee_usd,net_pnl_usd,net_pnl_pct,
+           close_reason,status,error,entry_reference_source,entry_reference_l2,
+           entry_slippage_pct,entry_book_age_ms,exit_reference_source,
+           exit_reference_l2,exit_slippage_pct
+    FROM lighter_lux_live_trades
+    WHERE status='closed' AND net_pnl_usd IS NOT NULL
+    ORDER BY closed_at,id`).all();
+}
+
+function liveStrategyStates(): LiveStrategyStateRow[] {
+  return db.prepare<[], LiveStrategyStateRow>(`
+    SELECT strategy_id,enabled,closed_trades,net_pnl_usd,profit_factor,
+           first_half_net_usd,second_half_net_usd,max_drawdown_usd,
+           gate_status,paused_at,pause_reason,updated_at
+    FROM lighter_lux_live_strategy_state
+    ORDER BY strategy_id`).all();
+}
+
+function liveMetrics(rows: LiveTradeRow[]): LiveMetrics {
+  const pnl = rows.map((row) => row.net_pnl_usd ?? 0);
+  const grossWin = pnl.filter((value) => value > 0)
+    .reduce((sum, value) => sum + value, 0);
+  const grossLoss = Math.abs(pnl.filter((value) => value < 0)
+    .reduce((sum, value) => sum + value, 0));
+  const split = Math.floor(pnl.length / 2);
+  let equity = 0;
+  let peak = 0;
+  let maxDrawdownUsd = 0;
+  for (const value of pnl) {
+    equity += value;
+    peak = Math.max(peak, equity);
+    maxDrawdownUsd = Math.max(maxDrawdownUsd, peak - equity);
+  }
+  return {
+    closed: pnl.length,
+    wins: pnl.filter((value) => value > 0).length,
+    netUsd: equity,
+    profitFactor: grossLoss > 0 ? grossWin / grossLoss : pnl.length ? Infinity : null,
+    firstHalfUsd: pnl.slice(0, split).reduce((sum, value) => sum + value, 0),
+    secondHalfUsd: pnl.slice(split).reduce((sum, value) => sum + value, 0),
+    maxDrawdownUsd,
+  };
 }
 
 function cumulativePnlSeries(): { shadow: PnlPoint[]; live: PnlPoint[] } {
@@ -1048,7 +1139,8 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-pager{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:11px}.ll-pager>small{color:var(--text-faint);font-size:10px}.ll-pager nav{display:flex;align-items:center;gap:5px}.ll-pager a,.ll-pager nav>span{display:grid;place-items:center;min-width:26px;height:26px;padding:0 6px;border:1px solid var(--border);border-radius:7px;color:var(--text-dim);font-size:10px;text-decoration:none}.ll-pager a:hover{border-color:#bd91ff;color:var(--text)}.ll-pager .active{border-color:rgba(163,106,255,.55);background:rgba(163,106,255,.16);color:#bd91ff;font-weight:700}.ll-pager .disabled{opacity:.35}
 .ll-details{padding:0}.ll-details>summary{cursor:pointer;list-style:none;padding:14px 15px;font-size:15px;font-weight:700}.ll-details>summary::-webkit-details-marker{display:none}.ll-details>summary::after{content:'＋';float:right;color:var(--text-faint)}.ll-details[open]>summary::after{content:'−'}.ll-details[open]>.ll-table{padding:0 15px 14px}
 .ll-chart-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}.ll-chart-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px}.ll-chart-legend span{display:flex;align-items:center;gap:6px;color:var(--text-dim)}.ll-chart-legend i{width:18px;height:3px;border-radius:2px}.ll-chart-legend .shadow i{background:#a36aff}.ll-chart-legend .real i{background:#38d996}.ll-chart-legend b{font-variant-numeric:tabular-nums}.ll-chart{width:100%;margin-top:8px;overflow:hidden}.ll-chart svg{display:block;width:100%;height:auto;min-height:190px}.ll-chart-grid{stroke:rgba(255,255,255,.075);stroke-width:1}.ll-chart-zero{stroke:rgba(255,255,255,.24);stroke-width:1}.ll-chart-axis{fill:var(--text-faint);font-size:10px;font-family:inherit}.ll-chart-shadow{fill:none;stroke:#a36aff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-real{fill:none;stroke:#38d996;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-dot-shadow{fill:#a36aff}.ll-chart-dot-real{fill:#38d996}.ll-chart-empty{display:grid;place-items:center;min-height:170px;color:var(--text-faint);font-size:12px}
-@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}}`;
+.ll-live-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:12px 0}.ll-live-metric{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.015);display:grid;gap:3px}.ll-live-metric small{font-size:9px;color:var(--text-faint);text-transform:uppercase}.ll-live-metric b{font-size:15px;font-variant-numeric:tabular-nums}.ll-live-strategy th:nth-child(1){width:25%}.ll-live-strategy th:nth-child(2){width:11%}.ll-live-strategy th:nth-child(3){width:10%}.ll-live-strategy th:nth-child(4){width:12%}.ll-live-strategy th:nth-child(5){width:12%}.ll-live-strategy th:nth-child(6){width:18%}.ll-live-strategy th:nth-child(7){width:12%}
+@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}}`;
 
 export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
   const s = summary();
@@ -1160,15 +1252,55 @@ function liveTradeRows(rows: LiveTradeRow[], lang: Lang): string {
     const netUsd = row.net_pnl_usd ?? liveNetUsd;
     const netPct = row.net_pnl_pct ?? liveNetPct;
     const isLive = ['opening', 'open', 'closing'].includes(row.status);
+    const entryAudit = row.entry_reference_l2 == null
+      ? ''
+      : `<br><small>Lux ${row.entry_reference_source?.toFixed(5) ?? '—'} · L2 ${row.entry_reference_l2.toFixed(5)} · slip ${row.entry_slippage_pct == null ? '—' : signedPct(row.entry_slippage_pct, 4)}</small>`;
+    const exitAudit = row.exit_reference_l2 == null
+      ? ''
+      : `<br><small>Lux ${row.exit_reference_source?.toFixed(5) ?? '—'} · L2 ${row.exit_reference_l2.toFixed(5)} · slip ${row.exit_slippage_pct == null ? '—' : signedPct(row.exit_slippage_pct, 4)}</small>`;
     return `<tr>
       <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)} · ${esc(row.symbol)}</b><br><small>#R${row.id} · S${row.entry_signal_id}→${row.exit_signal_id ?? '—'}</small></td>
       <td class="num">${utcShort(row.opened_at)} → ${utcShort(row.closed_at)}<br><small>${held(row.opened_at, row.closed_at)}</small></td>
       <td><b>${row.side.toUpperCase()}</b><br><small>$${(row.filled_notional_usd ?? row.requested_notional_usd).toFixed(0)} · ${row.leverage}x</small></td>
-      <td class="num">${row.entry_price?.toFixed(5) ?? '—'}</td>
+      <td class="num">${row.entry_price?.toFixed(5) ?? '—'}${entryAudit}</td>
       <td class="num"><b>${row.stop_pct.toFixed(1)}%</b><br><small>${row.stop_price?.toFixed(5) ?? '—'}</small></td>
-      <td class="num">${row.closed_at == null ? '—' : (row.exit_price?.toFixed(5) ?? '—')}</td>
+      <td class="num">${row.closed_at == null ? '—' : (row.exit_price?.toFixed(5) ?? '—')}${exitAudit}</td>
       <td>${isLive ? '<span class="ll-live">LIVE</span>' : row.status === 'closed' ? t(lang, 'ЗАКРЫТА', 'CLOSED') : `<span class="neg">${t(lang, 'ОШИБКА', 'ERROR')}</span>`}</td>
       <td class="${netUsd == null ? '' : pnlClass(netUsd)}"><b>${netUsd == null || netPct == null ? '—' : `${signedPct(netPct)} · ${signedUsd(netUsd)}`}</b>${isLive && netUsd != null ? '<span class="ll-live">MARK</span>' : ''}<br><small>fee ${signedUsd(-row.fee_usd)} · fund ${signedUsd(row.funding_pnl_usd)}${row.close_reason ? ` · ${esc(row.close_reason)}` : ''}</small>${row.error ? `<br><small class="neg">${esc(row.error)}</small>` : ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+function liveStrategyRows(rows: LiveStrategyStateRow[], lang: Lang): string {
+  const byId = new Map(rows.map((row) => [row.strategy_id, row]));
+  return STRATEGIES.map((spec) => {
+    const row = byId.get(spec.id);
+    if (!row) {
+      return `<tr><td><b>STRAT-${spec.code} · ${spec.asset}</b></td><td class="collect">${t(lang, 'ОЖИДАНИЕ', 'WAITING')}</td><td>0</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>`;
+    }
+    const status = row.gate_status === 'passed'
+      ? t(lang, 'ПРОШЛА', 'PASSED')
+      : row.gate_status === 'paused'
+        ? t(lang, 'ПАУЗА', 'PAUSED')
+        : row.gate_status === 'watch'
+          ? t(lang, 'НАБЛЮДЕНИЕ', 'WATCH')
+          : `${t(lang, 'КОПИМ', 'COLLECTING')} ${row.closed_trades}/20`;
+    const statusClass = row.gate_status === 'passed'
+      ? 'pass'
+      : row.gate_status === 'paused'
+        ? 'fail'
+        : 'collect';
+    const pf = row.profit_factor == null
+      ? row.closed_trades > 0 && row.net_pnl_usd > 0 ? '∞' : '—'
+      : row.profit_factor.toFixed(2);
+    return `<tr>
+      <td><b>STRAT-${spec.code} · ${spec.asset}</b><br><small>${esc(spec.name)}</small></td>
+      <td class="${statusClass}"><b>${status}</b>${row.pause_reason ? `<br><small>${esc(row.pause_reason)}</small>` : ''}</td>
+      <td class="num">${row.closed_trades}</td>
+      <td class="${pnlClass(row.net_pnl_usd)}"><b>${signedUsd(row.net_pnl_usd)}</b></td>
+      <td class="num">${pf}</td>
+      <td class="num">${signedUsd(row.first_half_net_usd)} / ${signedUsd(row.second_half_net_usd)}</td>
+      <td class="num">−${row.max_drawdown_usd.toFixed(2)}</td>
     </tr>`;
   }).join('');
 }
@@ -1287,12 +1419,22 @@ async function render(
   );
   const liveState = lighterLiveState();
   const liveTrades = recentLiveTrades();
+  const allLiveClosed = closedLiveTrades();
+  const liveSummary = liveMetrics(allLiveClosed);
+  const liveStrategies = liveStrategyStates();
+  const livePortfolioPaused = liveState?.portfolio_paused_at != null;
   const liveRunner = liveState?.enabled === 1
     && liveState.status === 'armed'
     && liveState.heartbeat_at != null
     && Date.now() - liveState.heartbeat_at < 15_000;
-  const liveClosed = liveTrades.filter((row) => row.status === 'closed');
-  const liveNetUsd = liveClosed.reduce((sum, row) => sum + (row.net_pnl_usd ?? 0), 0);
+  const liveGatePassed = liveSummary.closed >= 30
+    && liveSummary.netUsd > 0
+    && (liveSummary.profitFactor ?? 0) >= 1.2
+    && liveSummary.secondHalfUsd > 0
+    && liveSummary.maxDrawdownUsd <= 15;
+  const liveWr = liveSummary.closed
+    ? liveSummary.wins / liveSummary.closed * 100
+    : null;
   const wr = s.closed ? s.wins / s.closed * 100 : 0;
   const passed = STRATEGIES.filter((spec) => gate(summary(spec), lang).passed).length;
   return pageShell(
@@ -1337,8 +1479,21 @@ async function render(
       </table></div>
       ${pager({ lang, page: tradesPage, total: tradesTotal, pageSize: TRADE_PAGE_SIZE, signalsPage, tradesPage, target: 'trades' })}</div>
 
-      <div class="ll-panel"><h2>${t(lang, 'Реальная торговля · canary', 'Live trading · canary')}</h2>
-        <p class="ll-note"><b class="${liveRunner ? 'pass' : 'fail'}">${liveRunner ? 'ARMED' : 'OFFLINE'} · $100 · 10x · MAX 1.</b> ${t(lang, `Только новые сигналы после включения. Биржевой reduce-only stop ставится сразу; дневной realised-loss breaker −$10. Закрытых сделок: ${liveClosed.length}, общий net: ${signedUsd(liveNetUsd)}.`, `Only signals received after activation. An exchange-native reduce-only stop is placed immediately; the daily realized-loss breaker is −$10. Closed trades: ${liveClosed.length}, aggregate net: ${signedUsd(liveNetUsd)}.`)}${liveState?.last_error ? ` <span class="neg">${esc(liveState.last_error)}</span>` : ''}</p>
+      <div class="ll-panel"><div class="ll-chart-head"><div><h2>${t(lang, 'Реальная торговля · canary', 'Live trading · canary')}</h2>
+        <p class="ll-note"><b class="${livePortfolioPaused || !liveRunner ? 'fail' : 'pass'}">${livePortfolioPaused ? 'RISK PAUSED' : liveRunner ? 'ARMED' : 'OFFLINE'} · $100 · 10x · MAX 1.</b> ${t(lang, 'Биржевой reduce-only stop ставится сразу. Новые входы блокируются при дневном убытке −$10, совокупной просадке −$15 или индивидуальной паузе стратегии.', 'An exchange-native reduce-only stop is placed immediately. New entries are blocked at a −$10 daily loss, −$15 cumulative drawdown, or an individual strategy pause.')}${liveState?.last_error ? ` <span class="neg">${esc(liveState.last_error)}</span>` : ''}${liveState?.portfolio_pause_reason ? ` <span class="neg">${esc(liveState.portfolio_pause_reason)}</span>` : ''}</p>
+        </div><span class="ll-badge ${liveGatePassed ? 'pass' : 'collect'}">${liveGatePassed ? t(lang, 'LIVE ГЕЙТ ПРОЙДЕН', 'LIVE GATE PASSED') : `${t(lang, 'LIVE ВАЛИДАЦИЯ', 'LIVE VALIDATION')} ${liveSummary.closed}/30`}</span></div>
+        <div class="ll-live-grid">
+          <div class="ll-live-metric"><small>${t(lang, 'Закрыто', 'Closed')}</small><b>${liveSummary.closed}/30</b></div>
+          <div class="ll-live-metric"><small>Net PnL</small><b class="${pnlClass(liveSummary.netUsd)}">${signedUsd(liveSummary.netUsd)}</b></div>
+          <div class="ll-live-metric"><small>WR / PF</small><b>${liveWr == null ? '—' : `${liveWr.toFixed(0)}%`} / ${pfLabel(liveSummary.profitFactor)}</b></div>
+          <div class="ll-live-metric"><small>${t(lang, 'Половины', 'Halves')}</small><b>${signedUsd(liveSummary.firstHalfUsd)} / ${signedUsd(liveSummary.secondHalfUsd)}</b></div>
+          <div class="ll-live-metric"><small>Max drawdown</small><b class="${liveSummary.maxDrawdownUsd > 0 ? 'neg' : ''}">−$${liveSummary.maxDrawdownUsd.toFixed(2)} / $15</b></div>
+          <div class="ll-live-metric"><small>${t(lang, 'Текущая просадка', 'Current drawdown')}</small><b class="${(liveState?.current_drawdown_usd ?? 0) > 0 ? 'neg' : ''}">−$${(liveState?.current_drawdown_usd ?? 0).toFixed(2)}</b></div>
+        </div>
+        <details class="ll-details"><summary>${t(lang, 'Live-статистика по каждой стратегии', 'Per-strategy live statistics')}</summary><div class="ll-table"><table class="ll-live-strategy">
+          <thead><tr><th>Strategy</th><th>Gate</th><th>N</th><th>Net</th><th>PF</th><th>½ / ½</th><th>DD $</th></tr></thead>
+          <tbody>${liveStrategyRows(liveStrategies, lang)}</tbody>
+        </table></div></details>
         <div class="ll-table"><table class="ll-trades">
           <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>${t(lang, 'Цена входа', 'Entry price')}</th><th>${t(lang, 'Стоп-лосс', 'Stop-loss')}</th><th>${t(lang, 'Цена выхода', 'Exit price')}</th><th>${t(lang, 'Статус', 'Status')}</th><th>Net after costs</th></tr></thead>
           <tbody>${liveTradeRows(liveTrades, lang)}</tbody>

@@ -3,7 +3,8 @@
 
 Consumes only captured signals written by the Node webhook process. One global
 position, exchange-native reduce-only stop, $10 daily realized-loss breaker,
-and no replay of signals that predate the first service start.
+$15 cumulative drawdown breaker, per-strategy live gates, and no replay of
+signals that predate the first service start.
 """
 
 from __future__ import annotations
@@ -50,6 +51,15 @@ class LiveRunner:
         self.notional = float(os.getenv("LIGHTER_LIVE_NOTIONAL_USD", "100"))
         self.leverage = int(os.getenv("LIGHTER_LIVE_LEVERAGE", "10"))
         self.daily_loss_usd = float(os.getenv("LIGHTER_LIVE_DAILY_LOSS_USD", "10"))
+        self.max_drawdown_usd = float(
+            os.getenv("LIGHTER_LIVE_MAX_DRAWDOWN_USD", "15")
+        )
+        self.strategy_pause_sample = int(
+            os.getenv("LIGHTER_LIVE_STRATEGY_PAUSE_SAMPLE", "10")
+        )
+        self.strategy_gate_sample = int(
+            os.getenv("LIGHTER_LIVE_STRATEGY_GATE_SAMPLE", "20")
+        )
         self.max_slippage = float(os.getenv("LIGHTER_LIVE_MAX_SLIPPAGE", "0.003"))
         self.db = sqlite3.connect(
             os.getenv(
@@ -253,6 +263,182 @@ class LiveRunner:
         ).fetchone()
         return float(row["net"])
 
+    @staticmethod
+    def pnl_stats(rows: list[sqlite3.Row]) -> dict[str, float | int | None]:
+        pnls = [float(row["net_pnl_usd"] or 0) for row in rows]
+        gross_win = sum(value for value in pnls if value > 0)
+        gross_loss = abs(sum(value for value in pnls if value < 0))
+        split = len(pnls) // 2
+        equity = 0.0
+        peak = 0.0
+        max_drawdown = 0.0
+        for value in pnls:
+            equity += value
+            peak = max(peak, equity)
+            max_drawdown = max(max_drawdown, peak - equity)
+        return {
+            "closed": len(pnls),
+            "net": sum(pnls),
+            "profit_factor": (
+                gross_win / gross_loss
+                if gross_loss > 0
+                else None
+            ),
+            "first_half": sum(pnls[:split]),
+            "second_half": sum(pnls[split:]),
+            "equity_peak": peak,
+            "current_drawdown": peak - equity,
+            "max_drawdown": max_drawdown,
+        }
+
+    def refresh_portfolio_risk(self) -> sqlite3.Row:
+        rows = self.db.execute(
+            """SELECT net_pnl_usd
+               FROM lighter_lux_live_trades
+               WHERE status='closed' AND net_pnl_usd IS NOT NULL
+               ORDER BY closed_at,id"""
+        ).fetchall()
+        stats = self.pnl_stats(rows)
+        state = self.db.execute(
+            "SELECT * FROM lighter_lux_live_state WHERE id=1"
+        ).fetchone()
+        paused_at = state["portfolio_paused_at"]
+        pause_reason = state["portfolio_pause_reason"]
+        if (
+            paused_at is None
+            and float(stats["current_drawdown"] or 0) >= self.max_drawdown_usd
+        ):
+            paused_at = int(time.time() * 1000)
+            pause_reason = (
+                f"cumulative drawdown "
+                f"${float(stats['current_drawdown'] or 0):.2f} "
+                f">= ${self.max_drawdown_usd:.2f}"
+            )
+            self.log("portfolio_paused", reason=pause_reason)
+        self.db.execute(
+            """UPDATE lighter_lux_live_state
+               SET cumulative_net_usd=?,equity_peak_usd=?,
+                   current_drawdown_usd=?,max_drawdown_usd=?,
+                   portfolio_paused_at=?,portfolio_pause_reason=?
+               WHERE id=1""",
+            (
+                stats["net"],
+                stats["equity_peak"],
+                stats["current_drawdown"],
+                stats["max_drawdown"],
+                paused_at,
+                pause_reason,
+            ),
+        )
+        return self.db.execute(
+            "SELECT * FROM lighter_lux_live_state WHERE id=1"
+        ).fetchone()
+
+    def refresh_strategy_stats(self) -> None:
+        now = int(time.time() * 1000)
+        for strategy_id in STRATEGIES:
+            self.db.execute(
+                """INSERT OR IGNORE INTO lighter_lux_live_strategy_state
+                   (strategy_id,updated_at) VALUES (?,?)""",
+                (strategy_id, now),
+            )
+            state = self.db.execute(
+                """SELECT * FROM lighter_lux_live_strategy_state
+                   WHERE strategy_id=?""",
+                (strategy_id,),
+            ).fetchone()
+            rows = self.db.execute(
+                """SELECT net_pnl_usd
+                   FROM lighter_lux_live_trades
+                   WHERE strategy_id=? AND status='closed'
+                     AND net_pnl_usd IS NOT NULL
+                   ORDER BY closed_at,id""",
+                (strategy_id,),
+            ).fetchall()
+            stats = self.pnl_stats(rows)
+            closed = int(stats["closed"] or 0)
+            net = float(stats["net"] or 0)
+            profit_factor = stats["profit_factor"]
+            second_half = float(stats["second_half"] or 0)
+            max_drawdown = float(stats["max_drawdown"] or 0)
+            enabled = int(state["enabled"])
+            paused_at = state["paused_at"]
+            pause_reason = state["pause_reason"]
+
+            weak_after_sample = (
+                closed >= self.strategy_pause_sample
+                and (
+                    net <= 0
+                    or (
+                        profit_factor is not None
+                        and float(profit_factor) < 1.0
+                    )
+                    or second_half <= 0
+                )
+            )
+            passed = (
+                closed >= self.strategy_gate_sample
+                and net > 0
+                and (
+                    profit_factor is None
+                    or float(profit_factor) >= 1.2
+                )
+                and second_half > 0
+                and max_drawdown <= self.max_drawdown_usd
+            )
+            if enabled and weak_after_sample:
+                enabled = 0
+                paused_at = now
+                pause_reason = (
+                    f"live gate failed after {closed}: net ${net:.2f}, "
+                    f"PF {'inf' if profit_factor is None else f'{float(profit_factor):.2f}'}, "
+                    f"second half ${second_half:.2f}"
+                )
+                self.log(
+                    "strategy_paused",
+                    strategy=strategy_id,
+                    reason=pause_reason,
+                )
+            gate_status = (
+                "paused"
+                if not enabled
+                else "passed"
+                if passed
+                else "watch"
+                if closed >= self.strategy_pause_sample
+                else "collecting"
+            )
+            self.db.execute(
+                """UPDATE lighter_lux_live_strategy_state
+                   SET enabled=?,closed_trades=?,net_pnl_usd=?,
+                       profit_factor=?,first_half_net_usd=?,
+                       second_half_net_usd=?,max_drawdown_usd=?,
+                       gate_status=?,paused_at=?,pause_reason=?,updated_at=?
+                   WHERE strategy_id=?""",
+                (
+                    enabled,
+                    closed,
+                    net,
+                    profit_factor,
+                    stats["first_half"],
+                    second_half,
+                    max_drawdown,
+                    gate_status,
+                    paused_at,
+                    pause_reason,
+                    now,
+                    strategy_id,
+                ),
+            )
+
+    def strategy_enabled(self, strategy_id: str) -> bool:
+        row = self.db.execute(
+            """SELECT enabled FROM lighter_lux_live_strategy_state
+               WHERE strategy_id=?""",
+            (strategy_id,),
+        ).fetchone()
+        return row is not None and int(row["enabled"]) == 1
+
     def decide(
         self,
         signal_id: int,
@@ -337,6 +523,12 @@ class LiveRunner:
     ) -> tuple[str, int | None]:
         if self.daily_net() <= -self.daily_loss_usd:
             return "daily loss breaker", None
+        risk_state = self.refresh_portfolio_risk()
+        if risk_state["portfolio_paused_at"] is not None:
+            return str(risk_state["portfolio_pause_reason"]), None
+        self.refresh_strategy_stats()
+        if not self.strategy_enabled(str(signal["strategy_id"])):
+            return "strategy live-paused", None
         account = await self.account()
         if float(account["available_balance"]) < 20:
             return "balance below 20 USDC", None
@@ -395,14 +587,40 @@ class LiveRunner:
                 raise RuntimeError(f"wrong exchange side: {actual_side}")
             quantity = float(position["position"])
             entry_price = float(position["avg_entry_price"])
+            entry_reference_l2 = (
+                signal["buy_vwap_1000"]
+                if side == "long"
+                else signal["sell_vwap_1000"]
+            )
+            entry_slippage_pct = (
+                None
+                if entry_reference_l2 is None
+                else (
+                    (entry_price - float(entry_reference_l2))
+                    / float(entry_reference_l2)
+                    * 100
+                    if side == "long"
+                    else (
+                        float(entry_reference_l2) - entry_price
+                    )
+                    / float(entry_reference_l2)
+                    * 100
+                )
+            )
             self.db.execute(
                 """UPDATE lighter_lux_live_trades
-                   SET quantity=?,entry_price=?,filled_notional_usd=?
+                   SET quantity=?,entry_price=?,filled_notional_usd=?,
+                       entry_reference_source=?,entry_reference_l2=?,
+                       entry_slippage_pct=?,entry_book_age_ms=?
                    WHERE id=?""",
                 (
                     quantity,
                     entry_price,
                     float(position["position_value"]),
+                    signal["source_price"],
+                    entry_reference_l2,
+                    entry_slippage_pct,
+                    signal["book_age_ms"],
                     trade_id,
                 ),
             )
@@ -462,7 +680,7 @@ class LiveRunner:
         trade_id: int,
         reason: str,
         exit_order_id: int,
-        funding: float = 0,
+        funding: float | None = None,
     ) -> None:
         row = self.db.execute(
             "SELECT * FROM lighter_lux_live_trades WHERE id=?", (trade_id,)
@@ -475,14 +693,36 @@ class LiveRunner:
         if realized is None and exit_price is not None:
             realized = side_sign * (exit_price - entry) * quantity
         realized = float(realized or 0)
-        net = realized + funding
+        funding = (
+            float(row["funding_pnl_usd"] or 0)
+            if funding is None
+            else funding
+        )
+        exit_reference_l2 = row["exit_reference_l2"]
+        exit_slippage_pct = (
+            None
+            if exit_price is None or exit_reference_l2 is None
+            else (
+                (float(exit_reference_l2) - exit_price)
+                / float(exit_reference_l2)
+                * 100
+                if row["side"] == "long"
+                else (
+                    exit_price - float(exit_reference_l2)
+                )
+                / float(exit_reference_l2)
+                * 100
+            )
+        )
+        net = realized + float(funding)
         base = float(row["filled_notional_usd"] or row["requested_notional_usd"])
         net_pct = net / base * 100 if base > 0 else 0
         self.db.execute(
             """UPDATE lighter_lux_live_trades
                SET closed_at=?,exit_price=?,gross_pnl_usd=?,
                    funding_pnl_usd=?,fee_usd=0,net_pnl_usd=?,net_pnl_pct=?,
-                   exit_order_index=?,close_reason=?,status='closed'
+                   exit_slippage_pct=?,exit_order_index=?,close_reason=?,
+                   status='closed'
                WHERE id=?""",
             (
                 int(time.time() * 1000),
@@ -491,6 +731,7 @@ class LiveRunner:
                 funding,
                 net,
                 net_pct,
+                exit_slippage_pct,
                 exit_order_id,
                 reason,
                 trade_id,
@@ -503,7 +744,10 @@ class LiveRunner:
             exit=exit_price,
             net_usd=net,
             net_pct=net_pct,
+            exit_slippage_pct=exit_slippage_pct,
         )
+        self.refresh_portfolio_risk()
+        self.refresh_strategy_stats()
 
     async def close(
         self,
@@ -517,13 +761,39 @@ class LiveRunner:
             await self.reconcile_open_trade(trade)
             return True
         funding = -float(position.get("total_funding_paid_out", 0) or 0)
+        exit_signal = (
+            self.db.execute(
+                """SELECT source_price,buy_vwap_1000,sell_vwap_1000
+                   FROM lighter_lux_signals WHERE id=?""",
+                (exit_signal_id,),
+            ).fetchone()
+            if exit_signal_id is not None
+            else None
+        )
+        exit_reference_l2 = (
+            None
+            if exit_signal is None
+            else (
+                exit_signal["sell_vwap_1000"]
+                if trade["side"] == "long"
+                else exit_signal["buy_vwap_1000"]
+            )
+        )
         size_scale, _ = self.scales(strategy.market_id)
         close_id = self.order_id()
         self.db.execute(
             """UPDATE lighter_lux_live_trades
                SET status='closing',exit_signal_id=?,exit_order_index=?,
-                   close_reason=? WHERE id=?""",
-            (exit_signal_id, close_id, reason, trade["id"]),
+                   close_reason=?,exit_reference_source=?,
+                   exit_reference_l2=? WHERE id=?""",
+            (
+                exit_signal_id,
+                close_id,
+                reason,
+                None if exit_signal is None else exit_signal["source_price"],
+                exit_reference_l2,
+                trade["id"],
+            ),
         )
         _, response, error = await self.signer.create_market_order_limited_slippage(
             market_index=strategy.market_id,
@@ -559,6 +829,16 @@ class LiveRunner:
         strategy = STRATEGIES[trade["strategy_id"]]
         position = await self.market_position(strategy.market_id)
         if position is None:
+            if (
+                trade["exit_reference_l2"] is None
+                and trade["stop_order_index"] is not None
+            ):
+                self.db.execute(
+                    """UPDATE lighter_lux_live_trades
+                       SET exit_reference_l2=?
+                       WHERE id=?""",
+                    (trade["stop_price"], trade["id"]),
+                )
             close_id = int(
                 trade["exit_order_index"]
                 or trade["stop_order_index"]
@@ -570,6 +850,14 @@ class LiveRunner:
             )
             await self.finalize(int(trade["id"]), reason, close_id)
             return
+        self.db.execute(
+            """UPDATE lighter_lux_live_trades
+               SET funding_pnl_usd=? WHERE id=?""",
+            (
+                -float(position.get("total_funding_paid_out", 0) or 0),
+                trade["id"],
+            ),
+        )
         expected_side = "long" if int(position["sign"]) > 0 else "short"
         if expected_side != trade["side"]:
             close_id = await self.emergency_close(strategy, position)
@@ -713,12 +1001,15 @@ class LiveRunner:
         elif positions:
             raise RuntimeError("orphan exchange position; refusing to arm")
         self.state("armed")
+        self.refresh_portfolio_risk()
+        self.refresh_strategy_stats()
         self.log(
             "armed",
             enabled=self.enabled,
             notional=self.notional,
             leverage=self.leverage,
             daily_loss=self.daily_loss_usd,
+            max_drawdown=self.max_drawdown_usd,
         )
 
     async def run(self) -> None:
@@ -729,7 +1020,9 @@ class LiveRunner:
                     "SELECT last_signal_id FROM lighter_lux_live_state WHERE id=1"
                 ).fetchone()
                 signal_row = self.db.execute(
-                    """SELECT id,strategy_id,symbol,action,side,capture_status
+                    """SELECT id,strategy_id,symbol,action,side,capture_status,
+                              source_price,buy_vwap_1000,sell_vwap_1000,
+                              book_age_ms
                        FROM lighter_lux_signals
                        WHERE id>? ORDER BY id LIMIT 1""",
                     (int(state["last_signal_id"]),),
