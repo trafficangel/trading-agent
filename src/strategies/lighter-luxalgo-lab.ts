@@ -62,9 +62,10 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // sides PF >2.1 before the stop, every chronological third positive). It is
 // intentionally shadow-only: the independent Python real runner does not list
 // it and must not do so until at least 20 prospective closes pass the gate.
-// A new BNB candidate also passed the numerical gate, but is excluded until
-// LuxAlgo can persist its webhook alert. BCH, DOGE, XLM, TRX, POL, JUP, ADA
-// and SUI candidates remain excluded.
+// STRAT-022 BNB is shadow-only under the same rule; its full 180-trade log
+// stayed positive in both halves and every chronological third after
+// fixed-notional normalization. BCH, DOGE, XLM, TRX, POL, JUP, ADA and SUI
+// candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -219,6 +220,24 @@ const STRATEGIES: readonly StrategySpec[] = [
       profitFactor: 1.983,
       netPct: 45.956,
       maxDrawdownPct: 9.104,
+    },
+  },
+  {
+    id: 'bnb-fvgm-tc-hw',
+    code: '022',
+    name: 'FVG Mitigated · Trend Catcher · HyperWave',
+    symbol: 'BNBUSDT',
+    asset: 'BNB',
+    marketId: 25,
+    stopPct: 5,
+    backtest: {
+      period: '2026-04-07 → 2026-06-15',
+      trades: 180,
+      winRatePct: 53.33,
+      // Fixed $1,000 notional, with the same conservative 5% safety stop.
+      profitFactor: 1.499,
+      netPct: 30.358,
+      maxDrawdownPct: 7.132,
     },
   },
 ] as const;
