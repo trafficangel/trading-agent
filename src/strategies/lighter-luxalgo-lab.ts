@@ -326,6 +326,7 @@ type LiveTradeRow = {
 type PnlPoint = {
   at: number;
   pnlUsd: number;
+  pnlPct: number;
 };
 
 type Summary = {
@@ -906,21 +907,26 @@ function cumulativePnlSeries(): { shadow: PnlPoint[]; live: PnlPoint[] } {
   const liveRows = db.prepare<[], {
     closed_at: number;
     net_pnl_usd: number;
+    net_pnl_pct: number;
   }>(`
-    SELECT closed_at,net_pnl_usd
+    SELECT closed_at,net_pnl_usd,net_pnl_pct
     FROM lighter_lux_live_trades
-    WHERE status='closed' AND closed_at IS NOT NULL AND net_pnl_usd IS NOT NULL
+    WHERE status='closed' AND closed_at IS NOT NULL
+      AND net_pnl_usd IS NOT NULL AND net_pnl_pct IS NOT NULL
     ORDER BY closed_at,id`).all();
 
   const cumulative = <T>(
     rows: T[],
     at: (row: T) => number,
-    pnl: (row: T) => number,
+    pnlUsd: (row: T) => number,
+    pnlPct: (row: T) => number,
   ): PnlPoint[] => {
-    let total = 0;
+    let totalUsd = 0;
+    let totalPct = 0;
     return rows.map((row) => {
-      total += pnl(row);
-      return { at: at(row), pnlUsd: total };
+      totalUsd += pnlUsd(row);
+      totalPct += pnlPct(row);
+      return { at: at(row), pnlUsd: totalUsd, pnlPct: totalPct };
     });
   };
 
@@ -929,8 +935,14 @@ function cumulativePnlSeries(): { shadow: PnlPoint[]; live: PnlPoint[] } {
       shadowRows,
       (row) => row.closed_at,
       (row) => row.net_pnl_pct / 100 * row.notional_usd,
+      (row) => row.net_pnl_pct,
     ),
-    live: cumulative(liveRows, (row) => row.closed_at, (row) => row.net_pnl_usd),
+    live: cumulative(
+      liveRows,
+      (row) => row.closed_at,
+      (row) => row.net_pnl_usd,
+      (row) => row.net_pnl_pct,
+    ),
   };
 }
 
@@ -1185,10 +1197,12 @@ function pnlChart(lang: Lang): string {
   const series = cumulativePnlSeries();
   const all = [...series.shadow, ...series.live];
   const shadowNet = series.shadow.at(-1)?.pnlUsd ?? 0;
+  const shadowNetPct = series.shadow.at(-1)?.pnlPct ?? 0;
   const liveNet = series.live.at(-1)?.pnlUsd ?? 0;
+  const liveNetPct = series.live.at(-1)?.pnlPct ?? 0;
   const legend = `<div class="ll-chart-legend">
-    <span class="shadow"><i></i>Shadow · $1,000 <b class="${pnlClass(shadowNet)}">${signedUsd(shadowNet)}</b></span>
-    <span class="real"><i></i>Real · $100 <b class="${pnlClass(liveNet)}">${signedUsd(liveNet)}</b></span>
+    <span class="shadow"><i></i>Shadow · $1,000 <b class="${pnlClass(shadowNetPct)}">${signedPct(shadowNetPct)} · ${signedUsd(shadowNet)}</b></span>
+    <span class="real"><i></i>Real · $100 <b class="${pnlClass(liveNetPct)}">${signedPct(liveNetPct)} · ${signedUsd(liveNet)}</b></span>
   </div>`;
   if (!all.length) {
     return `<div class="ll-panel"><div class="ll-chart-head"><h2>${t(lang, 'Накопленный PnL', 'Cumulative PnL')}</h2>${legend}</div>
@@ -1206,28 +1220,29 @@ function pnlChart(lang: Lang): string {
   const firstAt = Math.min(...all.map((point) => point.at));
   const lastAt = Math.max(...all.map((point) => point.at));
   const timeSpan = Math.max(1, lastAt - firstAt);
-  const values = [0, ...all.map((point) => point.pnlUsd)];
+  const values = [0, ...all.map((point) => point.pnlPct)];
   const rawMin = Math.min(...values);
   const rawMax = Math.max(...values);
   const padding = Math.max(0.5, (rawMax - rawMin) * 0.12);
-  const minPnl = rawMin - padding;
-  const maxPnl = rawMax + padding;
-  const pnlSpan = Math.max(1, maxPnl - minPnl);
+  const minPnlPct = rawMin - padding;
+  const maxPnlPct = rawMax + padding;
+  const pnlSpan = Math.max(1, maxPnlPct - minPnlPct);
   const x = (at: number): number => left + (at - firstAt) / timeSpan * plotWidth;
-  const y = (pnl: number): number => top + (maxPnl - pnl) / pnlSpan * plotHeight;
+  const y = (pnlPct: number): number =>
+    top + (maxPnlPct - pnlPct) / pnlSpan * plotHeight;
   const path = (points: PnlPoint[]): string => {
     if (!points.length) return '';
     const start = `${left.toFixed(1)},${y(0).toFixed(1)}`;
-    return [start, ...points.map((point) => `${x(point.at).toFixed(1)},${y(point.pnlUsd).toFixed(1)}`)].join(' ');
+    return [start, ...points.map((point) => `${x(point.at).toFixed(1)},${y(point.pnlPct).toFixed(1)}`)].join(' ');
   };
   const circles = (points: PnlPoint[], cls: string): string => points.map((point) =>
-    `<circle class="${cls}" cx="${x(point.at).toFixed(1)}" cy="${y(point.pnlUsd).toFixed(1)}" r="3"><title>${utc(point.at)} · ${signedUsd(point.pnlUsd)}</title></circle>`,
+    `<circle class="${cls}" cx="${x(point.at).toFixed(1)}" cy="${y(point.pnlPct).toFixed(1)}" r="3"><title>${utc(point.at)} · ${signedPct(point.pnlPct)} · ${signedUsd(point.pnlUsd)}</title></circle>`,
   ).join('');
   const yTicks = Array.from({ length: 5 }, (_, index) => {
-    const value = maxPnl - index / 4 * pnlSpan;
+    const value = maxPnlPct - index / 4 * pnlSpan;
     const pos = top + index / 4 * plotHeight;
     return `<line class="${Math.abs(value) < pnlSpan / 100 ? 'll-chart-zero' : 'll-chart-grid'}" x1="${left}" y1="${pos.toFixed(1)}" x2="${width - right}" y2="${pos.toFixed(1)}"/>
-      <text class="ll-chart-axis" x="${left - 8}" y="${(pos + 3).toFixed(1)}" text-anchor="end">${value < 0 ? '−' : ''}$${Math.abs(value).toFixed(1)}</text>`;
+      <text class="ll-chart-axis" x="${left - 8}" y="${(pos + 3).toFixed(1)}" text-anchor="end">${value < 0 ? '−' : ''}${Math.abs(value).toFixed(2)}%</text>`;
   }).join('');
   const xTicks = Array.from({ length: 4 }, (_, index) => {
     const ratio = index / 3;
