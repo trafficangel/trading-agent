@@ -48,8 +48,10 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 
 // Selection frozen on 2026-07-26 from commission-net prospective evidence:
 // SOL +7.58%/30, ETH +0.71%/12 (both halves positive), AVAX +3.66%/13
-// (research-only until its negative second half recovers). BCH, BTC, DOGE,
-// and BNB remain excluded because their prospective samples are net-negative.
+// (research-only until its negative second half recovers). The earlier BTC
+// STRAT-008 remains excluded; STRAT-015 is a different 5m setup that passed
+// a fresh 161-trade fixed-notional robustness audit. BCH, DOGE and BNB remain
+// excluded because their prospective samples are net-negative.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -102,11 +104,30 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 8.37,
     },
   },
+  {
+    id: 'btc-choch-cfm-tc',
+    code: '015',
+    name: 'CHoCH · Confirmation · Trend Catcher',
+    symbol: 'BTCUSDT',
+    asset: 'BTC',
+    marketId: 1,
+    stopPct: 3.5,
+    backtest: {
+      period: '2026-04-07 → 2026-06-15',
+      trades: 161,
+      winRatePct: 67.08,
+      profitFactor: 1.917,
+      netPct: 42.589,
+      maxDrawdownPct: 5.602,
+    },
+  },
 ] as const;
 
 const STRATEGY_BY_ID = new Map(STRATEGIES.map((spec) => [spec.id, spec]));
 const STRATEGY_IDS = STRATEGIES.map((spec) => spec.id);
 const SQL_MARKS = STRATEGIES.map(() => '?').join(', ');
+const ASSET_LABEL = STRATEGIES.map((spec) => spec.asset).join(' · ');
+const CODE_LABEL = STRATEGIES.map((spec) => spec.code).join(' · ');
 
 type FeedState = {
   connected: boolean;
@@ -783,11 +804,11 @@ export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
   const passed = individual.filter((row) => row.gate.passed).length;
   return `<a class="ll-hero" href="/lab/lighter-luxalgo">
     <div><span class="ll-badge">🟣 LUXALGO → LIGHTER · ZERO FEE · SHADOW</span>
-      <div class="ll-title">SOL · AVAX · ETH — единый портфель сигналов</div>
+      <div class="ll-title">${ASSET_LABEL} — единый портфель сигналов</div>
       <div class="ll-sub">${t(lang, 'Одна карточка и одна таблица · $1000 на позицию · индивидуальная и общая статистика →', 'One card and one table · $1,000 per position · individual and aggregate statistics →')}</div>
     </div>
     <div class="ll-stats">
-      <span><b class="${s.feedLive ? 'pos' : 'neg'}">${s.feedLive ? '3/3 LIVE' : 'DEGRADED'}</b><small>Lighter L2</small></span>
+      <span><b class="${s.feedLive ? 'pos' : 'neg'}">${s.feedLive ? `${STRATEGIES.length}/${STRATEGIES.length} LIVE` : 'DEGRADED'}</b><small>Lighter L2</small></span>
       <span><b>${s.signals}</b><small>${t(lang, 'сигналов', 'signals')}</small></span>
       <span><b>${passed}/${STRATEGIES.length}</b><small>${t(lang, 'прошли гейт', 'gates passed')}</small></span>
       <span><b class="${pnlClass(s.netPct)}">${signedPct(s.netPct)}</b><small>net · ${signedUsd(s.netUsd)}</small></span>
@@ -880,13 +901,13 @@ async function render(lang: Lang): Promise<string> {
     t(lang, 'LuxAlgo → Lighter — единый shadow-портфель', 'LuxAlgo → Lighter — unified shadow portfolio'),
     `<style>${LIGHTER_LUXALGO_CSS}</style><div class="ll-wrap">
       <a class="ll-back" href="/lab">${t(lang, '← Лаборатория', '← Lab')}</a>
-      <div class="ll-head"><div><span class="ll-badge">STRAT-010 · 012 · 013 · PROSPECTIVE FORWARD</span>
+      <div class="ll-head"><div><span class="ll-badge">STRAT-${CODE_LABEL} · PROSPECTIVE FORWARD</span>
         <h1>LuxAlgo → Lighter · единый портфель</h1>
-        <p>${t(lang, 'Все подходящие alerts собраны в одной системе и одной таблице. SOL, AVAX и ETH независимо снимают живой L2 Lighter без фиксированной задержки; каждая позиция моделируется на $1000. Комиссия Standard — 0%, spread, $1000 VWAP и funding учтены.', 'All selected alerts share one system and one table. SOL, AVAX, and ETH independently sample live Lighter L2 with no fixed delay; every position is modeled at $1,000. Standard trading fee is 0%, while spread, $1,000 VWAP, and funding are included.')}</p>
-      </div><div class="ll-engine ${s.feedLive ? 'live' : ''}"><i></i>${s.feedLive ? 'Lighter L2 · 3/3 live' : 'Lighter L2 · degraded'}</div></div>
+        <p>${t(lang, `Все подходящие alerts собраны в одной системе и одной таблице. ${ASSET_LABEL} независимо снимают живой L2 Lighter без фиксированной задержки; каждая позиция моделируется на $1000. Комиссия Standard — 0%, spread, $1000 VWAP и funding учтены.`, `All selected alerts share one system and one table. ${ASSET_LABEL} independently sample live Lighter L2 with no fixed delay; every position is modeled at $1,000. Standard trading fee is 0%, while spread, $1,000 VWAP, and funding are included.`)}</p>
+      </div><div class="ll-engine ${s.feedLive ? 'live' : ''}"><i></i>${s.feedLive ? `Lighter L2 · ${STRATEGIES.length}/${STRATEGIES.length} live` : 'Lighter L2 · degraded'}</div></div>
 
       <div class="ll-grid">
-        <div class="ll-card"><small>${t(lang, 'Стратегии / гейт', 'Strategies / gates')}</small><b>${STRATEGIES.length} / ${passed}</b><em>SOL · AVAX · ETH</em></div>
+        <div class="ll-card"><small>${t(lang, 'Стратегии / гейт', 'Strategies / gates')}</small><b>${STRATEGIES.length} / ${passed}</b><em>${ASSET_LABEL}</em></div>
         <div class="ll-card"><small>${t(lang, 'Сигналы / ошибки', 'Signals / errors')}</small><b>${s.signals} / ${s.captureErrors}</b><em>${t(lang, 'все выбранные alerts', 'all selected alerts')}</em></div>
         <div class="ll-card"><small>${t(lang, 'Закрыто / открыто', 'Closed / open')}</small><b>${s.closed} / ${s.open}</b><em>$${NOTIONAL_USD} ${t(lang, 'на позицию', 'per position')}</em></div>
         <div class="ll-card"><small>${t(lang, 'Общий net PnL', 'Aggregate net PnL')}</small><b class="${pnlClass(s.netPct)}">${signedPct(s.netPct)}</b><em>${signedUsd(s.netUsd)} · fee 0%</em></div>
@@ -906,7 +927,7 @@ async function render(lang: Lang): Promise<string> {
         <thead><tr><th>Alert</th><th>Forward N</th><th>Net after fee</th><th>WR</th><th>PF</th><th>${t(lang, 'Решение', 'Decision')}</th></tr></thead>
         <tbody>
           <tr><td>STRAT-007 · BCH</td><td>56</td><td class="neg">−16.10%</td><td>67.9%</td><td>0.55</td><td class="fail">${t(lang, 'не добавлять', 'exclude')}</td></tr>
-          <tr><td>STRAT-008 · BTC</td><td>40</td><td class="neg">−15.12%</td><td>67.5%</td><td>0.41</td><td class="fail">${t(lang, 'не добавлять', 'exclude')}</td></tr>
+          <tr><td>STRAT-008 · BTC · старая схема</td><td>40</td><td class="neg">−15.12%</td><td>67.5%</td><td>0.41</td><td class="fail">${t(lang, 'не добавлять', 'exclude')}</td></tr>
           <tr><td>STRAT-011 · DOGE</td><td>7</td><td class="neg">−11.44%</td><td>0.0%</td><td>0.00</td><td class="fail">${t(lang, 'не добавлять', 'exclude')}</td></tr>
           <tr><td>STRAT-014 · BNB</td><td>14</td><td class="neg">−5.99%</td><td>42.9%</td><td>0.41</td><td class="fail">${t(lang, 'не добавлять', 'exclude')}</td></tr>
         </tbody></table></div></div>
@@ -922,7 +943,7 @@ async function render(lang: Lang): Promise<string> {
       </table></div></div>
 
       <div class="ll-panel"><h2>${t(lang, 'Реальная торговля', 'Live trading')}</h2>
-        <p class="ll-note"><b class="fail">OFF · 0 REAL TRADES.</b> ${t(lang, 'Shadow включён для трёх выбранных стратегий. Каждая получит индивидуальный допуск; плохой результат одной стратегии не будет маскироваться общей прибылью другой. Реальный canary $100 можно включать только отдельно для стратегии, прошедшей собственный гейт.', 'Shadow is enabled for the three selected strategies. Each must earn an individual approval; one weak strategy cannot hide behind another strategy’s profit. A $100 live canary may only be enabled separately for a strategy that passes its own gate.')}</p>
+        <p class="ll-note"><b class="fail">OFF · 0 REAL TRADES.</b> ${t(lang, `Shadow включён для ${STRATEGIES.length} выбранных стратегий. Каждая получит индивидуальный допуск; плохой результат одной стратегии не будет маскироваться общей прибылью другой. Реальный canary $100 можно включать только отдельно для стратегии, прошедшей собственный гейт.`, `Shadow is enabled for ${STRATEGIES.length} selected strategies. Each must earn an individual approval; one weak strategy cannot hide behind another strategy’s profit. A $100 live canary may only be enabled separately for a strategy that passes its own gate.`)}</p>
       </div>
 
       <p class="ll-note">${t(lang, 'Комиссия Lighter Standard — 0%. Spread и slippage уже включены в entry/exit VWAP; funding учитывается отдельно. Расхождение Lux→VWAP измеряется, но не блокирует shadow-вход; значения выше 0.2% подсвечиваются.', 'Lighter Standard trading fee is 0%. Spread and slippage are embedded in entry/exit VWAP; funding is accounted separately. Lux→VWAP deviation is measured but does not block shadow entry; values above 0.2% are highlighted.')}</p>

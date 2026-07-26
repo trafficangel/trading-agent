@@ -1415,6 +1415,77 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       shortPnlPct: 67.03,
     },
   },
+
+  'btc-choch-cfm-tc': {
+    id: 'btc-choch-cfm-tc',
+    code: '015',
+    // Fresh LuxAlgo 5m search on Jul 26 2026. This is NOT the rejected
+    // STRAT-008 BTC setup. All 161 trades were re-normalised to fixed
+    // $1000 notional instead of trusting LuxAlgo's unit-size headline:
+    //   Lighter 0-fee: +42.59%, PF 1.92, WR 67.08%, max DD 5.60%
+    //   halves: +21.15% / +21.43%; thirds: +14.79/+10.50/+17.30%
+    //   long +20.41%, short +22.18%; top five wins = 44% of net.
+    // At Bybit's 0.11% round-trip fee the same trades remain +24.88%
+    // with PF 1.47. Lighter is the intended venue; fanOut=false is the
+    // hard real-order gate while forward L2 execution is validated.
+    //
+    // MAE: p95 3.00%, max 6.56%. A 3.5% safety stop is the tightest
+    // tested cap that kills zero historical winners; the conservative
+    // stop simulation remains +38.16% at zero fees.
+    riskBand: 'low',
+    tierEligible: true,
+    minTier: null,
+    maxSafeLeverage: 12,
+    description:
+      'BTC 5m | CHoCH + Confirmation + Trend Catcher | LONG: Bearish CHoCH + Confirmation Downtrend + TC Bearish | SHORT: зеркально | EXIT: reverse signal',
+    longDescription:
+      'Разворотная стратегия на BTCUSDT 5m. LONG срабатывает на bearish CHoCH при нисходящем Confirmation и bearish Trend Catcher; SHORT — зеркально на bullish CHoCH, Confirmation Uptrend и bullish Trend Catcher. ' +
+      'Своего exit-условия нет: позиция закрывается и переворачивается встречным сигналом. ' +
+      'Все 161 сделки проверены на постоянном номинале $1000: обе половины, все три части периода, long и short положительны. ' +
+      'Safety SL 3.5% — самый тугой проверенный кап, не обрезавший ни одной исторически прибыльной сделки. ' +
+      'Стратегия работает только в Lighter shadow; реальные сделки и пользовательский fan-out отключены до 20 закрытых forward-сделок с положительным net, PF ≥1.20 и обеими положительными половинами.',
+    symbol: 'BTCUSDT',
+    timeframe: '5',
+    enabled: true,
+    fanOut: false,
+    exitMode: 'reverse',
+    slPct: 0.035,
+    launchedAt: Date.parse('2026-07-26T00:00:00Z'),
+    alertName: 'BTCUSDT|5|LONG=CHoCHBr&CFMDown&TCBr|SHORT=CHoCHBl&CFMUp&TCBl|EXIT=Reverse',
+    sourceUrl: 'https://app.luxalgo.com/backtesting/uzoiw34h2tvkagzixav37g9s',
+    name: 'BTC CHoCH Confirmation',
+    backtest: {
+      // Track-C view is deliberately conservative and includes Bybit's
+      // 0.055% taker fee per side. The dedicated Lighter lab shows the
+      // venue-specific zero-fee result and measures spread/funding live.
+      periodLabel: 'Apr 7, 2026 — Jun 15, 2026',
+      periodDays: 69,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 248.79,
+      netPnlPct: 24.88,
+      cagrPct: 131.60,
+      totalTrades: 161,
+      wins: 101,
+      losses: 60,
+      winRate: 0.6273,
+      profitFactor: 1.472,
+      commissionPaidUsd: 177.10,
+      maxDrawdownPct: 6.70,
+      maxDrawdownUsd: 67.02,
+      avgWinUsd: 7.68,
+      avgWinPct: 0.77,
+      avgLossUsd: -8.78,
+      avgLossPct: -0.88,
+      largestWinUsd: 51.17,
+      largestLossUsd: -46.21,
+      longTrades: 81,
+      longPnlPct: 11.50,
+      shortTrades: 80,
+      shortPnlPct: 13.38,
+    },
+  },
 };
 
 /** Look up a strategy by id. Returns null for unknown or unregistered ids. */
