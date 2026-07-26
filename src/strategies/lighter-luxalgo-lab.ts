@@ -39,6 +39,8 @@ type StrategySpec = {
 
 const t = (lang: Lang, ru: string, en: string): string => lang === 'en' ? en : ru;
 const NOTIONAL_USD = 1_000;
+const SIGNAL_PAGE_SIZE = 8;
+const TRADE_PAGE_SIZE = 6;
 const MAX_SOCKET_AGE_MS = 5_000;
 const CAPTURE_RETRY_MS = 100;
 const MAX_CAPTURE_ATTEMPTS = 50;
@@ -821,8 +823,8 @@ function summary(spec?: StrategySpec): Summary {
   };
 }
 
-function recentSignals(limit = 40): SignalRow[] {
-  return db.prepare<[...string[], number], SignalRow>(`
+function recentSignals(limit: number, offset: number): SignalRow[] {
+  return db.prepare<[...string[], number, number], SignalRow>(`
     SELECT id, strategy_id, symbol, received_at, captured_at, action, side,
            source_price, capture_status, capture_error, book_age_ms, bid, ask,
            buy_vwap_1000, sell_vwap_1000, spread_pct, buy_slippage_pct,
@@ -830,10 +832,16 @@ function recentSignals(limit = 40): SignalRow[] {
     FROM lighter_lux_signals
     WHERE strategy_id IN (${SQL_MARKS})
     ORDER BY received_at DESC
-    LIMIT ?`).all(...STRATEGY_IDS, limit);
+    LIMIT ? OFFSET ?`).all(...STRATEGY_IDS, limit, offset);
 }
 
-function recentTrades(limit = 60): TradeRow[] {
+function signalTotal(): number {
+  return db.prepare<string[], { total: number }>(`
+    SELECT COUNT(*) total FROM lighter_lux_signals
+    WHERE strategy_id IN (${SQL_MARKS})`).get(...STRATEGY_IDS)?.total ?? 0;
+}
+
+function recentTrades(limit: number, offset: number): TradeRow[] {
   const rows = db.prepare<string[], TradeRow>(`
     SELECT id, strategy_id, symbol, side, entry_signal_id, exit_signal_id,
            opened_at, closed_at, entry_price, entry_funding_pct_h,
@@ -853,7 +861,13 @@ function recentTrades(limit = 60): TradeRow[] {
     row.cumulative_net_pct = portfolioTotal;
     row.strategy_cumulative_net_pct = strategyTotal;
   }
-  return rows.slice(-limit).reverse();
+  return rows.reverse().slice(offset, offset + limit);
+}
+
+function tradeTotal(): number {
+  return db.prepare<string[], { total: number }>(`
+    SELECT COUNT(*) total FROM lighter_lux_trades
+    WHERE strategy_id IN (${SQL_MARKS})`).get(...STRATEGY_IDS)?.total ?? 0;
 }
 
 function lighterLiveState(): LiveStateRow | null {
@@ -915,6 +929,43 @@ function held(opened: number, closed: number | null): string {
 function pfLabel(value: number | null): string {
   return value == null ? '—' : Number.isFinite(value) ? value.toFixed(2) : '∞';
 }
+function positivePage(value: unknown): number {
+  const page = Number.parseInt(String(value ?? '1'), 10);
+  return Number.isFinite(page) && page > 0 ? page : 1;
+}
+function pager(args: {
+  lang: Lang;
+  page: number;
+  total: number;
+  pageSize: number;
+  signalsPage: number;
+  tradesPage: number;
+  target: 'signals' | 'trades';
+}): string {
+  const pages = Math.max(1, Math.ceil(args.total / args.pageSize));
+  const from = args.total ? (args.page - 1) * args.pageSize + 1 : 0;
+  const to = Math.min(args.total, args.page * args.pageSize);
+  const href = (page: number): string => {
+    const signalsPage = args.target === 'signals' ? page : args.signalsPage;
+    const tradesPage = args.target === 'trades' ? page : args.tradesPage;
+    return `/lab/lighter-luxalgo?signalsPage=${signalsPage}&tradesPage=${tradesPage}#${args.target === 'signals' ? 'signal-history' : 'shadow-trades'}`;
+  };
+  const first = Math.max(1, Math.min(args.page - 2, pages - 4));
+  const last = Math.min(pages, first + 4);
+  const numbers = Array.from({ length: last - first + 1 }, (_, index) => first + index)
+    .map((page) => page === args.page
+      ? `<span class="active">${page}</span>`
+      : `<a href="${href(page)}">${page}</a>`)
+    .join('');
+  return `<div class="ll-pager">
+    <small>${from}–${to} ${t(args.lang, 'из', 'of')} ${args.total}</small>
+    <nav>
+      ${args.page > 1 ? `<a href="${href(args.page - 1)}" aria-label="${t(args.lang, 'Предыдущая страница', 'Previous page')}">←</a>` : '<span class="disabled">←</span>'}
+      ${numbers}
+      ${args.page < pages ? `<a href="${href(args.page + 1)}" aria-label="${t(args.lang, 'Следующая страница', 'Next page')}">→</a>` : '<span class="disabled">→</span>'}
+    </nav>
+  </div>`;
+}
 
 export const LIGHTER_LUXALGO_CSS = `
 .ll-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(163,106,255,.36);border-radius:14px;background:linear-gradient(135deg,rgba(122,71,255,.15),var(--bg-card));color:var(--text);text-decoration:none}
@@ -935,6 +986,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-trades th:nth-child(1){width:13%}.ll-trades th:nth-child(2){width:18%}.ll-trades th:nth-child(3){width:10%}.ll-trades th:nth-child(4){width:12%}.ll-trades th:nth-child(5){width:14%}.ll-trades th:nth-child(6){width:12%}.ll-trades th:nth-child(7){width:8%}.ll-trades th:nth-child(8){width:13%}
 .ll-tech th:nth-child(1){width:20%}.ll-tech th:nth-child(2){width:18%}.ll-tech th:nth-child(3){width:15%}.ll-tech th:nth-child(4){width:18%}.ll-tech th:nth-child(5){width:29%}
 .ll-note{font-size:11px;color:var(--text-faint);line-height:1.45}.ll-empty{padding:18px;text-align:center;color:var(--text-faint)}.collect{color:#bd91ff}.pass{color:#38d996}.fail{color:#ff6577}
+.ll-pager{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:11px}.ll-pager>small{color:var(--text-faint);font-size:10px}.ll-pager nav{display:flex;align-items:center;gap:5px}.ll-pager a,.ll-pager nav>span{display:grid;place-items:center;min-width:26px;height:26px;padding:0 6px;border:1px solid var(--border);border-radius:7px;color:var(--text-dim);font-size:10px;text-decoration:none}.ll-pager a:hover{border-color:#bd91ff;color:var(--text)}.ll-pager .active{border-color:rgba(163,106,255,.55);background:rgba(163,106,255,.16);color:#bd91ff;font-weight:700}.ll-pager .disabled{opacity:.35}
 .ll-details{padding:0}.ll-details>summary{cursor:pointer;list-style:none;padding:14px 15px;font-size:15px;font-weight:700}.ll-details>summary::-webkit-details-marker{display:none}.ll-details>summary::after{content:'＋';float:right;color:var(--text-faint)}.ll-details[open]>summary::after{content:'−'}.ll-details[open]>.ll-table{padding:0 15px 14px}
 @media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}}`;
 
@@ -1081,10 +1133,29 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
   }).join('');
 }
 
-async function render(lang: Lang): Promise<string> {
+async function render(
+  lang: Lang,
+  requested: { signalsPage: number; tradesPage: number },
+): Promise<string> {
   const s = summary();
-  const trades = recentTrades();
-  const signals = recentSignals();
+  const signalsTotal = signalTotal();
+  const tradesTotal = tradeTotal();
+  const signalsPage = Math.min(
+    requested.signalsPage,
+    Math.max(1, Math.ceil(signalsTotal / SIGNAL_PAGE_SIZE)),
+  );
+  const tradesPage = Math.min(
+    requested.tradesPage,
+    Math.max(1, Math.ceil(tradesTotal / TRADE_PAGE_SIZE)),
+  );
+  const signals = recentSignals(
+    SIGNAL_PAGE_SIZE,
+    (signalsPage - 1) * SIGNAL_PAGE_SIZE,
+  );
+  const trades = recentTrades(
+    TRADE_PAGE_SIZE,
+    (tradesPage - 1) * TRADE_PAGE_SIZE,
+  );
   const liveState = lighterLiveState();
   const liveTrades = recentLiveTrades();
   const liveRunner = liveState?.enabled === 1
@@ -1121,17 +1192,19 @@ async function render(lang: Lang): Promise<string> {
       </table></div>
       <p class="ll-note">${t(lang, 'Индивидуальный гейт: ≥20 закрытых Lighter-forward сделок, net > 0%, PF ≥1.20, обе половины >0%. Общий результат — сумма PnL при $1000 на каждую одновременно открытую позицию.', 'Individual gate: ≥20 closed Lighter-forward trades, net > 0%, PF ≥1.20, and both halves >0%. Aggregate PnL sums results assuming $1,000 for every concurrently open position.')}</p></div>
 
-      <div class="ll-panel"><h2>${t(lang, 'История сигналов', 'Signal history')}</h2>
+      <div class="ll-panel" id="signal-history"><h2>${t(lang, 'История сигналов', 'Signal history')}</h2>
         <div class="ll-table"><table class="ll-signal-table">
           <thead><tr><th>Strategy</th><th>${t(lang, 'Время UTC', 'Time UTC')}</th><th>Event</th><th>${t(lang, 'Обработка', 'Processing')}</th><th>Lux → Lighter / spread / Δ</th></tr></thead>
           <tbody>${signalRows(signals, lang)}</tbody>
         </table></div>
+        ${pager({ lang, page: signalsPage, total: signalsTotal, pageSize: SIGNAL_PAGE_SIZE, signalsPage, tradesPage, target: 'signals' })}
       </div>
 
-      <div class="ll-panel"><h2>${t(lang, 'Сделки', 'Trades')}</h2><div class="ll-table"><table class="ll-trades">
+      <div class="ll-panel" id="shadow-trades"><h2>${t(lang, 'Сделки', 'Trades')}</h2><div class="ll-table"><table class="ll-trades">
         <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>${t(lang, 'Цена входа', 'Entry price')}</th><th>${t(lang, 'Стоп-лосс', 'Stop-loss')}</th><th>${t(lang, 'Цена выхода', 'Exit price')}</th><th>${t(lang, 'Статус', 'Status')}</th><th>Net after costs</th></tr></thead>
         <tbody>${tradeRows(trades, lang)}</tbody>
-      </table></div></div>
+      </table></div>
+      ${pager({ lang, page: tradesPage, total: tradesTotal, pageSize: TRADE_PAGE_SIZE, signalsPage, tradesPage, target: 'trades' })}</div>
 
       <div class="ll-panel"><h2>${t(lang, 'Реальная торговля · canary', 'Live trading · canary')}</h2>
         <p class="ll-note"><b class="${liveRunner ? 'pass' : 'fail'}">${liveRunner ? 'ARMED' : 'OFFLINE'} · $100 · 10x · MAX 1.</b> ${t(lang, `Только новые сигналы после включения. Биржевой reduce-only stop ставится сразу; дневной realised-loss breaker −$10. Закрытых сделок: ${liveClosed.length}, общий net: ${signedUsd(liveNetUsd)}.`, `Only signals received after activation. An exchange-native reduce-only stop is placed immediately; the daily realized-loss breaker is −$10. Closed trades: ${liveClosed.length}, aggregate net: ${signedUsd(liveNetUsd)}.`)}${liveState?.last_error ? ` <span class="neg">${esc(liveState.last_error)}</span>` : ''}</p>
@@ -1148,9 +1221,14 @@ async function render(lang: Lang): Promise<string> {
 }
 
 export async function lighterLuxalgoLabRoute(app: FastifyInstance): Promise<void> {
-  app.get('/lab/lighter-luxalgo', async (req, reply) => {
+  app.get<{
+    Querystring: { signalsPage?: string; tradesPage?: string };
+  }>('/lab/lighter-luxalgo', async (req, reply) => {
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'public, max-age=2');
-    return render(getLang(req));
+    return render(getLang(req), {
+      signalsPage: positivePage(req.query.signalsPage),
+      tradesPage: positivePage(req.query.tradesPage),
+    });
   });
 }
