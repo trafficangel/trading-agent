@@ -983,35 +983,10 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
         ? (price - row.source_price) / row.source_price * 100
         : (row.source_price - price) / row.source_price * 100;
     return `<tr>
-      <td>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)} · ${esc(row.symbol)}</td>
-      <td>${utc(row.received_at)}</td><td>${row.action.toUpperCase()} ${row.side.toUpperCase()}</td>
-      <td>${row.capture_status === 'captured' ? `✓ ${latency ?? 0} ms` : esc(row.capture_error ?? row.capture_status)}</td>
+      <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)} · ${esc(row.symbol)}</b><br><small>#${row.id}</small></td>
+      <td>${utc(row.received_at)}</td><td class="${row.side === 'long' ? 'pos' : 'neg'}"><b>${row.action.toUpperCase()} · ${row.side.toUpperCase()}</b></td>
+      <td class="${row.capture_status === 'captured' ? 'pos' : 'neg'}"><b>${row.capture_status === 'captured' ? `✓ ${latency ?? 0} ms` : esc(row.capture_error ?? row.capture_status)}</b></td>
       <td class="num">${row.source_price?.toFixed(5) ?? '—'} → ${price?.toFixed(5) ?? '—'}<br><small>spread ${row.spread_pct == null ? '—' : `${row.spread_pct.toFixed(4)}%`} · Δ <span class="${deviation != null && deviation > 0.2 ? 'neg' : ''}">${deviation == null ? '—' : signedPct(deviation, 4)}</span></small></td>
-    </tr>`;
-  }).join('');
-}
-
-function latestSignalRows(rows: SignalRow[], lang: Lang): string {
-  const latest = new Map<string, SignalRow>();
-  for (const row of rows) {
-    if (!latest.has(row.strategy_id)) latest.set(row.strategy_id, row);
-  }
-  return STRATEGIES.map((spec) => {
-    const row = latest.get(spec.id);
-    if (!row) return `<tr>
-      <td><b>STRAT-${spec.code} · ${spec.asset}</b></td>
-      <td class="ll-signal-time">—</td>
-      <td class="collect"><b>${t(lang, 'ОЖИДАНИЕ', 'WAITING')}</b></td>
-      <td>—</td><td class="collect">${t(lang, 'нет сигнала', 'no signal')}</td>
-    </tr>`;
-    const latency = row.captured_at == null ? null : row.captured_at - row.received_at;
-    const captured = row.capture_status === 'captured';
-    return `<tr>
-      <td><b>STRAT-${spec.code} · ${spec.asset}</b></td>
-      <td class="ll-signal-time">${utcShort(row.received_at)} UTC</td>
-      <td class="${row.side === 'long' ? 'pos' : 'neg'}"><b>${row.action.toUpperCase()} · ${row.side.toUpperCase()}</b></td>
-      <td class="num">${row.source_price?.toFixed(5) ?? '—'}</td>
-      <td class="${captured ? 'pos' : 'neg'}"><b>${captured ? `✓ ${latency ?? 0} ms` : esc(row.capture_error ?? row.capture_status)}</b></td>
     </tr>`;
   }).join('');
 }
@@ -1048,10 +1023,10 @@ async function render(lang: Lang): Promise<string> {
       </table></div>
       <p class="ll-note">${t(lang, 'Индивидуальный гейт: ≥20 закрытых Lighter-forward сделок, net > 0%, PF ≥1.20, обе половины >0%. Общий результат — сумма PnL при $1000 на каждую одновременно открытую позицию.', 'Individual gate: ≥20 closed Lighter-forward trades, net > 0%, PF ≥1.20, and both halves >0%. Aggregate PnL sums results assuming $1,000 for every concurrently open position.')}</p></div>
 
-      <div class="ll-panel"><h2>${t(lang, 'Входящие сигналы стратегий', 'Incoming strategy signals')}</h2>
+      <div class="ll-panel"><h2>${t(lang, 'История сигналов', 'Signal history')}</h2>
         <div class="ll-table"><table class="ll-signal-table">
-          <thead><tr><th>Strategy</th><th>${t(lang, 'Время UTC', 'Time UTC')}</th><th>Event</th><th>Lux price</th><th>Lighter L2</th></tr></thead>
-          <tbody>${latestSignalRows(signals, lang)}</tbody>
+          <thead><tr><th>Strategy</th><th>${t(lang, 'Время UTC', 'Time UTC')}</th><th>Event</th><th>${t(lang, 'Обработка', 'Processing')}</th><th>Lux → Lighter / spread / Δ</th></tr></thead>
+          <tbody>${signalRows(signals, lang)}</tbody>
         </table></div>
       </div>
 
@@ -1059,11 +1034,6 @@ async function render(lang: Lang): Promise<string> {
         <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>${t(lang, 'Цена входа', 'Entry price')}</th><th>${t(lang, 'Стоп-лосс', 'Stop-loss')}</th><th>${t(lang, 'Цена выхода', 'Exit price')}</th><th>${t(lang, 'Статус', 'Status')}</th><th>Net after costs</th></tr></thead>
         <tbody>${tradeRows(trades, lang)}</tbody>
       </table></div></div>
-
-      <details class="ll-panel ll-details"><summary>${t(lang, 'Технические детали сигналов', 'Signal technical details')}</summary><div class="ll-table"><table class="ll-tech">
-        <thead><tr><th>Strategy</th><th>${t(lang, 'Сигнал UTC', 'Signal UTC')}</th><th>Event</th><th>Capture</th><th>Lux → VWAP / spread / Δ</th></tr></thead>
-        <tbody>${signalRows(signals, lang)}</tbody>
-      </table></div></details>
 
       <div class="ll-panel"><h2>${t(lang, 'Реальная торговля', 'Live trading')}</h2>
         <p class="ll-note"><b class="fail">OFF · 0 REAL TRADES.</b> ${t(lang, `Shadow включён для ${STRATEGIES.length} выбранных стратегий. Каждая получит индивидуальный допуск; плохой результат одной стратегии не будет маскироваться общей прибылью другой. Реальный canary $100 можно включать только отдельно для стратегии, прошедшей собственный гейт.`, `Shadow is enabled for ${STRATEGIES.length} selected strategies. Each must earn an individual approval; one weak strategy cannot hide behind another strategy’s profit. A $100 live canary may only be enabled separately for a strategy that passes its own gate.`)}</p>
