@@ -1692,6 +1692,74 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       shortPnlPct: 18.67,
     },
   },
+
+  'hbar-cfm-smart-weak': {
+    id: 'hbar-cfm-smart-weak',
+    code: '019',
+    // Fresh LuxAlgo 5m search on Jul 26 2026. All 184 trades were
+    // re-normalised to fixed $1000 notional:
+    //   Lighter 0-fee: +55.51%, PF 2.15, WR 65.76%, max DD 5.68%
+    //   halves: +22.08% / +33.42%; thirds: +21.98/+10.44/+23.08%
+    //   long +25.18%, short +30.33%; top five wins = 27.0% of net.
+    //
+    // MAE p95 is 3.16%, max 5.62%. The mandatory 5% safety cap
+    // cuts two historical winners but remains +42.94%, PF 1.73.
+    // Live HBAR spread was about 0.10% at onboarding, so forward L2
+    // validation is essential and fanOut=false is a hard gate.
+    riskBand: 'low',
+    tierEligible: true,
+    minTier: null,
+    maxSafeLeverage: 10,
+    description:
+      'HBAR 5m | Confirmation Any + Smart Trail + Weak Confluence | LONG: CFM Bearish + Smart Trail Bullish + Weak Bearish Confluence | SHORT: зеркально | EXIT: Confirmation built-in',
+    longDescription:
+      'Контртрендовая стратегия на HBARUSDT 5m. LONG срабатывает на bearish Confirmation Any при bullish Smart Trail и Weak Bearish Confluence; SHORT — зеркально. ' +
+      'Выход использует встроенный Confirmation exit без фиксированного take-profit. ' +
+      'Все 184 сделки проверены на постоянном номинале $1000: обе половины, все три части периода, long и short положительны; пять лучших сделок дают 27% результата. ' +
+      'Safety SL 5% обрезал две исторически прибыльные сделки, но ограниченная модель остаётся +42.94% и PF 1.73. ' +
+      'Стратегия работает только в Lighter shadow; реальные сделки и пользовательский fan-out отключены до 20 закрытых forward-сделок с положительным net, PF ≥1.20 и обеими положительными половинами.',
+    symbol: 'HBARUSDT',
+    timeframe: '5',
+    enabled: true,
+    fanOut: false,
+    exitMode: 'builtin',
+    slPct: 0.05,
+    launchedAt: Date.parse('2026-07-26T00:00:00Z'),
+    alertName: 'HBARUSDT|5|LONG=CFMAnyBr&SmartTrailBl&WeakConfBr|SHORT=CFMAnyBl&SmartTrailBr&WeakConfBl|EXIT=CFMBuiltIn',
+    sourceUrl: 'https://app.luxalgo.com/backtesting/xgk7g71skjp8l5fal1hiw2xd',
+    name: 'HBAR Confirmation Smart Trail',
+    backtest: {
+      // Track-C view is deliberately conservative and includes Bybit's
+      // 0.055% taker fee per side. The dedicated Lighter lab shows the
+      // venue-specific zero-fee result and measures spread/funding live.
+      periodLabel: 'Apr 7, 2026 — Jun 14, 2026',
+      periodDays: 68,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 352.67,
+      netPnlPct: 35.27,
+      cagrPct: 406.04,
+      totalTrades: 184,
+      wins: 110,
+      losses: 74,
+      winRate: 0.5978,
+      profitFactor: 1.632,
+      commissionPaidUsd: 202.40,
+      maxDrawdownPct: 5.90,
+      maxDrawdownUsd: 59.03,
+      avgWinUsd: 8.28,
+      avgWinPct: 0.83,
+      avgLossUsd: -7.54,
+      avgLossPct: -0.75,
+      largestWinUsd: 47.10,
+      largestLossUsd: -42.35,
+      longTrades: 94,
+      longPnlPct: 14.84,
+      shortTrades: 90,
+      shortPnlPct: 20.43,
+    },
+  },
 };
 
 /** Look up a strategy by id. Returns null for unknown or unregistered ids. */

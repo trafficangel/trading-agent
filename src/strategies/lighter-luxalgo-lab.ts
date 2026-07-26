@@ -52,9 +52,10 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // STRAT-008 remains excluded; STRAT-015 is a different 5m setup that passed
 // a fresh 161-trade fixed-notional robustness audit. STRAT-016 LTC and
 // STRAT-017 UNI passed the same fixed-notional and chronological audit on
-// 181 trades each. STRAT-018 DOT passed on 180 trades, with a borderline
-// but still positive 5% safety-stop simulation. BCH and DOGE remain excluded;
-// fresh BNB and AAVE candidates had near-flat recent segments.
+// 181 trades each. STRAT-018 DOT and STRAT-019 HBAR passed with positive
+// but deliberately conservative 5% safety-stop simulations. BCH and DOGE
+// remain excluded; fresh BNB, AAVE, XLM, TRX, POL, JUP and ADA candidates
+// failed the chronological or profit-factor gate.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -173,6 +174,23 @@ const STRATEGIES: readonly StrategySpec[] = [
       profitFactor: 1.915,
       netPct: 47.657,
       maxDrawdownPct: 12.2,
+    },
+  },
+  {
+    id: 'hbar-cfm-smart-weak',
+    code: '019',
+    name: 'Confirmation · Smart Trail · Weak Confluence',
+    symbol: 'HBARUSDT',
+    asset: 'HBAR',
+    marketId: 59,
+    stopPct: 5,
+    backtest: {
+      period: '2026-04-07 → 2026-06-14',
+      trades: 184,
+      winRatePct: 65.76,
+      profitFactor: 2.151,
+      netPct: 55.507,
+      maxDrawdownPct: 5.683,
     },
   },
 ] as const;
