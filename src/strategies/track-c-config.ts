@@ -1486,6 +1486,75 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       shortPnlPct: 13.38,
     },
   },
+
+  'ltc-tcs-smart-trail': {
+    id: 'ltc-tcs-smart-trail',
+    code: '016',
+    // Fresh LuxAlgo 5m search on Jul 26 2026. All 181 trades were
+    // re-normalised to fixed $1000 notional:
+    //   Lighter 0-fee: +48.86%, PF 2.04, WR 70.17%, max DD 5.32%
+    //   halves: +20.75% / +28.11%; thirds: +11.33/+7.00/+30.52%
+    //   long +17.36%, short +31.50%; top five wins = 27.3% of net.
+    // The conservative Bybit-fee view below remains +28.95%, PF 1.54.
+    //
+    // MAE p95 is 3.78%, max 7.19%. A 5% safety stop killed no
+    // historical winners and retained +43.28%, PF 1.82 at zero fees.
+    // fanOut=false is a hard real-order gate while forward Lighter L2
+    // execution is validated.
+    riskBand: 'low',
+    tierEligible: true,
+    minTier: null,
+    maxSafeLeverage: 10,
+    description:
+      'LTC 5m | Trend Catcher Switch + Smart Trail | LONG: TC Switch Bearish + Smart Trail Bearish | SHORT: зеркально | EXIT: reverse signal',
+    longDescription:
+      'Трендовая стратегия на LTCUSDT 5m. LONG срабатывает на bearish Trend Catcher Switch при bearish Smart Trail; SHORT — зеркально на bullish сигналах. ' +
+      'Своего exit-условия нет: позиция закрывается и переворачивается встречным сигналом. ' +
+      'Все 181 сделки проверены на постоянном номинале $1000: обе половины, все три части периода, long и short положительны; пять лучших сделок дают лишь 27.3% результата. ' +
+      'Safety SL 5% не обрезал ни одной исторически прибыльной сделки и сохраняет PF 1.82 в zero-fee модели. ' +
+      'Стратегия работает только в Lighter shadow; реальные сделки и пользовательский fan-out отключены до 20 закрытых forward-сделок с положительным net, PF ≥1.20 и обеими положительными половинами.',
+    symbol: 'LTCUSDT',
+    timeframe: '5',
+    enabled: true,
+    fanOut: false,
+    exitMode: 'reverse',
+    slPct: 0.05,
+    launchedAt: Date.parse('2026-07-26T00:00:00Z'),
+    alertName: 'LTCUSDT|5|LONG=TCSwitchBr&SmartTrailBr|SHORT=TCSwitchBl&SmartTrailBl|EXIT=Reverse',
+    sourceUrl: 'https://app.luxalgo.com/backtesting/vtailuxj1xluf5hrsq3vw4xj',
+    name: 'LTC Trend Catcher Smart Trail',
+    backtest: {
+      // Track-C view is deliberately conservative and includes Bybit's
+      // 0.055% taker fee per side. The dedicated Lighter lab shows the
+      // venue-specific zero-fee result and measures spread/funding live.
+      periodLabel: 'Apr 7, 2026 — Jun 15, 2026',
+      periodDays: 69,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 289.46,
+      netPnlPct: 28.95,
+      cagrPct: 283.75,
+      totalTrades: 181,
+      wins: 118,
+      losses: 63,
+      winRate: 0.6519,
+      profitFactor: 1.539,
+      commissionPaidUsd: 199.10,
+      maxDrawdownPct: 6.92,
+      maxDrawdownUsd: 69.16,
+      avgWinUsd: 7.01,
+      avgWinPct: 0.70,
+      avgLossUsd: -8.53,
+      avgLossPct: -0.85,
+      largestWinUsd: 28.15,
+      largestLossUsd: -46.89,
+      longTrades: 91,
+      longPnlPct: 7.35,
+      shortTrades: 90,
+      shortPnlPct: 21.60,
+    },
+  },
 };
 
 /** Look up a strategy by id. Returns null for unknown or unregistered ids. */

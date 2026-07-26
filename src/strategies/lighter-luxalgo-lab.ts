@@ -50,8 +50,10 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // SOL +7.58%/30, ETH +0.71%/12 (both halves positive), AVAX +3.66%/13
 // (research-only until its negative second half recovers). The earlier BTC
 // STRAT-008 remains excluded; STRAT-015 is a different 5m setup that passed
-// a fresh 161-trade fixed-notional robustness audit. BCH, DOGE and BNB remain
-// excluded because their prospective samples are net-negative.
+// a fresh 161-trade fixed-notional robustness audit. STRAT-016 LTC passed the
+// same fixed-notional and chronological audit on 181 trades. BCH and DOGE
+// remain excluded; the fresh BNB candidate was positive but had a near-flat
+// middle third (PF 1.05), so it stays outside the package.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -119,6 +121,23 @@ const STRATEGIES: readonly StrategySpec[] = [
       profitFactor: 1.917,
       netPct: 42.589,
       maxDrawdownPct: 5.602,
+    },
+  },
+  {
+    id: 'ltc-tcs-smart-trail',
+    code: '016',
+    name: 'Trend Catcher Switch · Smart Trail',
+    symbol: 'LTCUSDT',
+    asset: 'LTC',
+    marketId: 35,
+    stopPct: 5,
+    backtest: {
+      period: '2026-04-07 → 2026-06-15',
+      trades: 181,
+      winRatePct: 70.17,
+      profitFactor: 2.035,
+      netPct: 48.856,
+      maxDrawdownPct: 5.316,
     },
   },
 ] as const;
