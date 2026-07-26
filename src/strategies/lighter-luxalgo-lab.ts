@@ -41,7 +41,7 @@ const t = (lang: Lang, ru: string, en: string): string => lang === 'en' ? en : r
 const NOTIONAL_USD = 1_000;
 const MAX_SOCKET_AGE_MS = 5_000;
 const CAPTURE_RETRY_MS = 100;
-const MAX_CAPTURE_ATTEMPTS = 20;
+const MAX_CAPTURE_ATTEMPTS = 50;
 const VALIDATION_TARGET = 20;
 const STOP_CHECK_MS = 250;
 const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
@@ -55,7 +55,9 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // 181 trades each. STRAT-018 DOT and STRAT-019 HBAR passed with positive
 // but deliberately conservative 5% safety-stop simulations. BCH and DOGE
 // remain excluded; fresh BNB, AAVE, XLM, TRX, POL, JUP and ADA candidates
-// failed the chronological or profit-factor gate.
+// failed the chronological or profit-factor gate. A fresh SUI candidate
+// advertised PF 1.94 with unit sizing, but fixed-$1,000 normalization exposed
+// PF 0.68 and -2.53%, so it is also excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -272,6 +274,7 @@ type TradeRow = {
   opened_at: number;
   closed_at: number | null;
   entry_price: number;
+  entry_funding_pct_h: number;
   exit_price: number | null;
   gross_pnl_pct: number | null;
   funding_pnl_pct: number | null;
@@ -363,10 +366,6 @@ const stopTrade = db.prepare(`
   SET closed_at = ?, exit_price = ?, exit_funding_pct_h = ?,
       gross_pnl_pct = ?, funding_pnl_pct = ?, net_pnl_pct = ?,
       close_reason = ?
-  WHERE id = ? AND closed_at IS NULL`);
-const abortTrade = db.prepare(`
-  UPDATE lighter_lux_trades
-  SET exit_signal_id = ?, closed_at = ?, close_reason = ?
   WHERE id = ? AND closed_at IS NULL`);
 const entryFunding = db.prepare<[number], { entry_funding_pct_h: number }>(`
   SELECT entry_funding_pct_h FROM lighter_lux_trades WHERE id = ?`);
@@ -651,17 +650,10 @@ function capture(
         return;
       }
       const failedAt = Date.now();
-      db.transaction(() => {
-        markCaptureError.run(failedAt, snap.error, signalId);
-        const open = findOpenTrade.get(spec.id);
-        const logicallyCloses = open && (
-          (action === 'entry' && open.side !== side)
-          || (action === 'exit' && open.side === side)
-        );
-        if (open && logicallyCloses) {
-          abortTrade.run(signalId, failedAt, `capture_error:${snap.error}`, open.id);
-        }
-      })();
+      // A temporary feed problem must never fabricate an incomplete close.
+      // Keep the existing shadow position open and close/reverse it only after
+      // a later signal has a real executable L2 snapshot.
+      markCaptureError.run(failedAt, snap.error, signalId);
       return;
     }
     applyCapturedSignal(spec, signalId, action, side, snap);
@@ -808,7 +800,8 @@ function recentSignals(limit = 40): SignalRow[] {
 function recentTrades(limit = 60): TradeRow[] {
   const rows = db.prepare<string[], TradeRow>(`
     SELECT id, strategy_id, symbol, side, entry_signal_id, exit_signal_id,
-           opened_at, closed_at, entry_price, exit_price, gross_pnl_pct,
+           opened_at, closed_at, entry_price, entry_funding_pct_h,
+           exit_price, gross_pnl_pct,
            funding_pnl_pct, net_pnl_pct, notional_usd, close_reason,
            NULL cumulative_net_pct, NULL strategy_cumulative_net_pct
     FROM lighter_lux_trades
@@ -868,7 +861,7 @@ function pfLabel(value: number | null): string {
 }
 
 export const LIGHTER_LUXALGO_CSS = `
-.ll-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(163,106,255,.36);border-radius:14px;background:linear-gradient(135deg,rgba(122,71,255,.15),var(--bg-card));color:var(--text);text-decoration:none}.ll-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(163,106,255,.15);color:#bd91ff;font-size:11px;font-weight:750;letter-spacing:.04em}.ll-title{font-size:19px;font-weight:700;margin-top:8px}.ll-sub{font-size:13px;color:var(--text-dim);margin-top:3px}.ll-stats{display:flex;gap:22px}.ll-stats span{display:grid;text-align:right}.ll-stats b{font-size:18px}.ll-stats small{font-size:10px;color:var(--text-faint);text-transform:uppercase}.ll-stats .pos,.ll-card .pos,.pos{color:#38d996}.ll-stats .neg,.ll-card .neg,.neg{color:#ff6577}.ll-wrap{max-width:1280px;margin:0 auto}.ll-back{display:inline-block;margin:4px 0 22px;color:var(--text-dim)}.ll-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.ll-head h1{font-size:34px;margin:10px 0 7px}.ll-head p{max-width:860px;color:var(--text-dim)}.ll-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.ll-engine i{width:8px;height:8px;border-radius:50%;background:#ff6577}.ll-engine.live i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}.ll-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}.ll-card,.ll-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.ll-card{padding:16px;display:grid;gap:5px}.ll-card small,.ll-card em{color:var(--text-faint);font-size:11px;font-style:normal}.ll-card b{font-size:23px;font-variant-numeric:tabular-nums}.ll-panel{padding:18px;margin:12px 0}.ll-panel h2{font-size:17px;margin:0 0 14px}.ll-signal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}.ll-signal{padding:14px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.018);display:grid;gap:7px}.ll-signal-head{display:flex;justify-content:space-between;gap:10px;align-items:center}.ll-signal-head b{font-size:13px}.ll-signal-head span{font-size:10px;color:var(--text-faint)}.ll-signal-event{font-size:18px;font-weight:760}.ll-signal-meta{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;font-size:11px}.ll-signal-meta small{color:var(--text-faint)}.ll-table{overflow:auto}.ll-table table{width:100%;border-collapse:collapse;font-size:12px}.ll-table th,.ll-table td{text-align:left;padding:9px;border-bottom:1px solid var(--border);white-space:nowrap}.ll-table th{color:var(--text-faint);font-size:10px;text-transform:uppercase}.ll-note{font-size:12px;color:var(--text-faint);line-height:1.55}.ll-empty{padding:24px;text-align:center;color:var(--text-faint)}.collect{color:#bd91ff}.pass{color:#38d996}.fail{color:#ff6577}@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-grid{grid-template-columns:1fr}}`;
+.ll-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(163,106,255,.36);border-radius:14px;background:linear-gradient(135deg,rgba(122,71,255,.15),var(--bg-card));color:var(--text);text-decoration:none}.ll-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(163,106,255,.15);color:#bd91ff;font-size:11px;font-weight:750;letter-spacing:.04em}.ll-title{font-size:19px;font-weight:700;margin-top:8px}.ll-sub{font-size:13px;color:var(--text-dim);margin-top:3px}.ll-stats{display:flex;gap:22px}.ll-stats span{display:grid;text-align:right}.ll-stats b{font-size:18px}.ll-stats small{font-size:10px;color:var(--text-faint);text-transform:uppercase}.ll-stats .pos,.ll-card .pos,.pos{color:#38d996}.ll-stats .neg,.ll-card .neg,.neg{color:#ff6577}.ll-wrap{max-width:1280px;margin:0 auto}.ll-back{display:inline-block;margin:4px 0 22px;color:var(--text-dim)}.ll-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.ll-head h1{font-size:34px;margin:10px 0 7px}.ll-head p{max-width:860px;color:var(--text-dim)}.ll-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.ll-engine i{width:8px;height:8px;border-radius:50%;background:#ff6577}.ll-engine.live i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}.ll-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}.ll-card,.ll-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.ll-card{padding:16px;display:grid;gap:5px}.ll-card small,.ll-card em{color:var(--text-faint);font-size:11px;font-style:normal}.ll-card b{font-size:23px;font-variant-numeric:tabular-nums}.ll-panel{padding:18px;margin:12px 0}.ll-panel h2{font-size:17px;margin:0 0 14px}.ll-signal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}.ll-signal{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.018);display:grid;gap:4px}.ll-signal-head{display:flex;justify-content:space-between;gap:7px;align-items:center}.ll-signal-head b{font-size:12px}.ll-signal-head span{font-size:9px;color:var(--text-faint)}.ll-signal-event{font-size:14px;font-weight:760}.ll-signal-meta{display:grid;grid-template-columns:auto 1fr;gap:2px 7px;font-size:10px}.ll-signal-meta small{color:var(--text-faint)}.ll-live{display:inline-block;margin-left:5px;padding:2px 5px;border-radius:999px;background:rgba(56,217,150,.12);color:#38d996;font-size:9px;letter-spacing:.04em}.ll-table{overflow:auto}.ll-table table{width:100%;border-collapse:collapse;font-size:12px}.ll-table th,.ll-table td{text-align:left;padding:9px;border-bottom:1px solid var(--border);white-space:nowrap}.ll-table th{color:var(--text-faint);font-size:10px;text-transform:uppercase}.ll-note{font-size:12px;color:var(--text-faint);line-height:1.55}.ll-empty{padding:24px;text-align:center;color:var(--text-faint)}.collect{color:#bd91ff}.pass{color:#38d996}.fail{color:#ff6577}@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}`;
 
 export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
   const s = summary();
@@ -912,22 +905,48 @@ function strategyRows(lang: Lang): string {
   }).join('');
 }
 
+function openTradeMark(row: TradeRow): {
+  exitPrice: number;
+  grossPct: number;
+  fundingPct: number;
+  netPct: number;
+} | null {
+  if (row.closed_at != null) return null;
+  const spec = STRATEGY_BY_ID.get(row.strategy_id);
+  if (!spec) return null;
+  const snap = executionSnapshot(spec);
+  if ('error' in snap) return null;
+  const exitPrice = row.side === 'long' ? snap.sellVwap : snap.buyVwap;
+  const grossPct = pricePnlPct(row.side, row.entry_price, exitPrice);
+  const fundingPct = estimatedFundingPnlPct(
+    row.side,
+    row.entry_funding_pct_h,
+    snap.fundingRatePctH,
+    snap.capturedAt - row.opened_at,
+  );
+  return { exitPrice, grossPct, fundingPct, netPct: grossPct + fundingPct };
+}
+
 function tradeRows(rows: TradeRow[], lang: Lang): string {
   if (!rows.length) return `<div class="ll-empty">${t(lang, 'Lighter-shadow сделок пока нет.', 'No Lighter shadow trades yet.')}</div>`;
   return rows.map((row) => {
     const spec = STRATEGY_BY_ID.get(row.strategy_id);
-    const net = row.net_pnl_pct ?? 0;
+    const mark = openTradeMark(row);
+    const net = row.net_pnl_pct ?? mark?.netPct ?? 0;
+    const gross = row.gross_pnl_pct ?? mark?.grossPct ?? null;
+    const funding = row.funding_pnl_pct ?? mark?.fundingPct ?? null;
+    const exitPrice = row.exit_price ?? mark?.exitPrice ?? null;
     const complete = row.net_pnl_pct != null;
     return `<tr>
       <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)}</b><br><small>${esc(row.symbol)}</small></td>
       <td>#${row.id}<br><small>S${row.entry_signal_id}→${row.exit_signal_id ?? '—'}</small></td>
       <td>${utc(row.opened_at)}</td><td>${utc(row.closed_at)}</td><td>${held(row.opened_at, row.closed_at)}</td>
       <td><b>${row.side.toUpperCase()}</b></td><td>$${row.notional_usd.toFixed(0)}</td>
-      <td>${row.entry_price.toFixed(5)} → ${row.exit_price?.toFixed(5) ?? '—'}</td>
-      <td>${row.gross_pnl_pct == null ? '—' : signedPct(row.gross_pnl_pct)}</td>
+      <td>${row.entry_price.toFixed(5)} → ${exitPrice?.toFixed(5) ?? '—'}${mark ? '<span class="ll-live">LIVE</span>' : ''}</td>
+      <td class="${pnlClass(gross ?? 0)}">${gross == null ? '—' : signedPct(gross)}</td>
       <td>0.0000% · $0.00</td>
-      <td>${row.funding_pnl_pct == null ? '—' : signedPct(row.funding_pnl_pct, 4)}</td>
-      <td class="${pnlClass(net)}"><b>${!complete ? (row.closed_at == null ? t(lang, 'открыта', 'open') : t(lang, 'неполные данные', 'incomplete')) : `${signedPct(net)} · ${signedUsd(net / 100 * row.notional_usd)}`}</b></td>
+      <td class="${pnlClass(funding ?? 0)}">${funding == null ? '—' : signedPct(funding, 4)}</td>
+      <td class="${pnlClass(net)}"><b>${complete || mark ? `${signedPct(net)} · ${signedUsd(net / 100 * row.notional_usd)}${mark ? '<span class="ll-live">LIVE</span>' : ''}` : (row.closed_at == null ? t(lang, 'ожидаем L2', 'waiting for L2') : t(lang, 'неполные данные', 'incomplete'))}</b></td>
       <td class="${pnlClass(row.strategy_cumulative_net_pct ?? 0)}">${row.strategy_cumulative_net_pct == null ? '—' : signedPct(row.strategy_cumulative_net_pct)}</td>
       <td class="${pnlClass(row.cumulative_net_pct ?? 0)}">${row.cumulative_net_pct == null ? '—' : `<b>${signedPct(row.cumulative_net_pct)} · ${signedUsd(row.cumulative_net_pct / 100 * NOTIONAL_USD)}</b>`}</td>
       <td>${esc(row.close_reason ?? (row.closed_at == null ? 'open' : '—'))}</td>
@@ -940,7 +959,6 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
   return rows.map((row) => {
     const spec = STRATEGY_BY_ID.get(row.strategy_id);
     const price = row.side === 'long' ? row.buy_vwap_1000 : row.sell_vwap_1000;
-    const slip = row.side === 'long' ? row.buy_slippage_pct : row.sell_slippage_pct;
     const latency = row.captured_at == null ? null : row.captured_at - row.received_at;
     const deviation = price == null || row.source_price == null
       ? null
@@ -952,13 +970,9 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
       <td>${utc(row.received_at)}</td><td>${row.action.toUpperCase()} ${row.side.toUpperCase()}</td>
       <td>${row.capture_status === 'captured' ? `✓ ${latency ?? 0} ms` : esc(row.capture_error ?? row.capture_status)}</td>
       <td>${row.source_price?.toFixed(5) ?? '—'}</td>
-      <td>${row.bid?.toFixed(5) ?? '—'} / ${row.ask?.toFixed(5) ?? '—'}</td>
       <td>${price?.toFixed(5) ?? '—'}</td>
       <td>${row.spread_pct == null ? '—' : `${row.spread_pct.toFixed(4)}%`}</td>
-      <td>${slip == null ? '—' : `${slip.toFixed(4)}%`}</td>
       <td class="${deviation != null && deviation > 0.2 ? 'neg' : ''}">${deviation == null ? '—' : signedPct(deviation, 4)}</td>
-      <td>${row.book_age_ms == null ? '—' : `${row.book_age_ms} ms`}</td>
-      <td>${row.funding_rate_pct_h == null ? '—' : `${row.funding_rate_pct_h.toFixed(4)}%/h`}</td>
     </tr>`;
   }).join('');
 }
@@ -973,18 +987,15 @@ function latestSignalCards(rows: SignalRow[], lang: Lang): string {
     if (!row) return `<div class="ll-signal">
       <div class="ll-signal-head"><b>STRAT-${spec.code} · ${spec.asset}</b><span>${t(lang, 'нет сигнала', 'no signal')}</span></div>
       <div class="ll-signal-event collect">${t(lang, 'ОЖИДАНИЕ', 'WAITING')}</div>
-      <div class="ll-note">${t(lang, 'Alert активен, webhook ещё не получен.', 'Alert is active; no webhook has arrived yet.')}</div>
     </div>`;
     const latency = row.captured_at == null ? null : row.captured_at - row.received_at;
     const captured = row.capture_status === 'captured';
     return `<div class="ll-signal">
-      <div class="ll-signal-head"><b>STRAT-${spec.code} · ${spec.asset}</b><span>${utc(row.received_at)} UTC</span></div>
+      <div class="ll-signal-head"><b>STRAT-${spec.code} · ${spec.asset}</b><span>${utc(row.received_at).slice(5, 16)} UTC</span></div>
       <div class="ll-signal-event ${row.side === 'long' ? 'pos' : 'neg'}">${row.action.toUpperCase()} · ${row.side.toUpperCase()}</div>
       <div class="ll-signal-meta">
-        <small>Lux price</small><b>${row.source_price?.toFixed(5) ?? '—'}</b>
-        <small>L2 capture</small><b class="${captured ? 'pos' : 'neg'}">${captured ? `✓ ${latency ?? 0} ms` : esc(row.capture_error ?? row.capture_status)}</b>
-        <small>Bid / Ask</small><b>${row.bid?.toFixed(5) ?? '—'} / ${row.ask?.toFixed(5) ?? '—'}</b>
-        <small>Book age</small><b>${row.book_age_ms == null ? '—' : `${row.book_age_ms} ms`}</b>
+        <small>Lux</small><b>${row.source_price?.toFixed(5) ?? '—'}</b>
+        <small>L2</small><b class="${captured ? 'pos' : 'neg'}">${captured ? `✓ ${latency ?? 0} ms` : esc(row.capture_error ?? row.capture_status)}</b>
       </div>
     </div>`;
   }).join('');
@@ -1024,7 +1035,7 @@ async function render(lang: Lang): Promise<string> {
 
       <div class="ll-panel"><h2>${t(lang, 'Входящие сигналы стратегий', 'Incoming strategy signals')}</h2>
         <div class="ll-signal-grid">${latestSignalCards(signals, lang)}</div>
-        <p class="ll-note">${t(lang, 'Каждая карточка показывает последнее отдельное webhook-событие стратегии и результат немедленного снимка Lighter L2. Панель обновляется каждые 30 секунд.', 'Each card shows the strategy’s latest standalone webhook event and the immediate Lighter L2 capture result. The panel refreshes every 30 seconds.')}</p>
+        <p class="ll-note">${t(lang, 'Каждая карточка показывает последнее webhook-событие и результат немедленного снимка Lighter L2. Панель и live PnL открытых сделок обновляются каждые 5 секунд.', 'Each card shows the latest webhook event and its immediate Lighter L2 capture. The panel and open-trade live PnL refresh every 5 seconds.')}</p>
       </div>
 
       <div class="ll-panel"><h2>${t(lang, 'Все сделки — одна таблица', 'All trades — one table')}</h2><div class="ll-table"><table>
@@ -1033,7 +1044,7 @@ async function render(lang: Lang): Promise<string> {
       </table></div></div>
 
       <div class="ll-panel"><h2>${t(lang, 'Технический журнал сигналов', 'Signal execution log')}</h2><div class="ll-table"><table>
-        <thead><tr><th>Strategy</th><th>${t(lang, 'Сигнал UTC', 'Signal UTC')}</th><th>Event</th><th>Capture</th><th>Lux price</th><th>Bid / Ask</th><th>VWAP $1000</th><th>Spread</th><th>Slippage</th><th>${t(lang, 'Расхождение', 'Deviation')}</th><th>L2 age</th><th>Funding</th></tr></thead>
+        <thead><tr><th>Strategy</th><th>${t(lang, 'Сигнал UTC', 'Signal UTC')}</th><th>Event</th><th>Capture</th><th>Lux price</th><th>VWAP $1000</th><th>Spread</th><th>${t(lang, 'Расхождение', 'Deviation')}</th></tr></thead>
         <tbody>${signalRows(signals, lang)}</tbody>
       </table></div></div>
 
@@ -1043,14 +1054,14 @@ async function render(lang: Lang): Promise<string> {
 
       <p class="ll-note">${t(lang, 'Комиссия Lighter Standard — 0%. Spread и slippage уже включены в entry/exit VWAP; funding учитывается отдельно. Расхождение Lux→VWAP измеряется, но не блокирует shadow-вход; значения выше 0.2% подсвечиваются.', 'Lighter Standard trading fee is 0%. Spread and slippage are embedded in entry/exit VWAP; funding is accounted separately. Lux→VWAP deviation is measured but does not block shadow entry; values above 0.2% are highlighted.')}</p>
     </div>`,
-    { autoRefreshSec: 30, lang },
+    { autoRefreshSec: 5, lang },
   );
 }
 
 export async function lighterLuxalgoLabRoute(app: FastifyInstance): Promise<void> {
   app.get('/lab/lighter-luxalgo', async (req, reply) => {
     reply.type('text/html; charset=utf-8');
-    reply.header('Cache-Control', 'public, max-age=15');
+    reply.header('Cache-Control', 'public, max-age=2');
     return render(getLang(req));
   });
 }
