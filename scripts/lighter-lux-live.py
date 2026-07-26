@@ -201,6 +201,72 @@ class LiveRunner:
             10 ** int(meta["price_decimals"]),
         )
 
+    @staticmethod
+    def api_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes"}
+
+    def stop_order_error(
+        self,
+        active: list[dict[str, Any]],
+        client_order_id: int,
+        strategy: Strategy,
+        position_side: str,
+        position_size: float,
+        stop_price: float,
+    ) -> str | None:
+        order = next(
+            (
+                row
+                for row in active
+                if int(row.get("client_order_index", -1)) == client_order_id
+            ),
+            None,
+        )
+        if order is None:
+            return "missing"
+        if int(order.get("market_index", -1)) != strategy.market_id:
+            return "wrong market"
+        if str(order.get("type", "")).lower() != "stop-loss":
+            return f"wrong type {order.get('type')}"
+        if not self.api_bool(order.get("reduce_only")):
+            return "reduce_only=false"
+        expected_is_ask = position_side == "long"
+        if "is_ask" not in order:
+            return "side missing"
+        if self.api_bool(order.get("is_ask")) != expected_is_ask:
+            return "wrong side"
+        if str(order.get("status", "")).lower() not in {"pending", "open"}:
+            return f"wrong status {order.get('status')}"
+
+        size_scale, price_scale = self.scales(strategy.market_id)
+        size_tick = 1 / size_scale
+        price_tick = 1 / price_scale
+        remaining = float(
+            order.get("remaining_base_amount")
+            or order.get("initial_base_amount")
+            or 0
+        )
+        if remaining + size_tick < abs(position_size):
+            return f"under-covered {remaining} < {abs(position_size)}"
+
+        trigger = float(order.get("trigger_price", 0) or 0)
+        if trigger <= 0:
+            return "trigger missing"
+        expected_trigger = round(stop_price * price_scale) / price_scale
+        if abs(trigger - expected_trigger) > price_tick:
+            return f"wrong trigger {trigger} != {expected_trigger}"
+
+        limit_price = float(order.get("price", 0) or 0)
+        if limit_price <= 0:
+            return "limit price missing"
+        if position_side == "long" and limit_price > trigger + price_tick:
+            return f"wrong sell limit {limit_price} > {trigger}"
+        if position_side == "short" and limit_price < trigger - price_tick:
+            return f"wrong buy limit {limit_price} < {trigger}"
+        return None
+
     async def active_orders(self, market_id: int) -> list[dict[str, Any]]:
         response = await lighter.OrderApi(self.api).account_active_orders(
             authorization=await self.auth(),
@@ -558,10 +624,16 @@ class LiveRunner:
             raise RuntimeError(f"stop rejected: {error}")
         await asyncio.sleep(0.6)
         active = await self.active_orders(strategy.market_id)
-        if not any(
-            int(row.get("client_order_index", -1)) == order_id for row in active
-        ):
-            raise RuntimeError("stop accepted but not visible")
+        stop_error = self.stop_order_error(
+            active,
+            order_id,
+            strategy,
+            side,
+            quantity,
+            stop_price,
+        )
+        if stop_error:
+            raise RuntimeError(f"stop accepted but invalid: {stop_error}")
         protected_at = int(time.time() * 1000)
         self.db.execute(
             """UPDATE lighter_lux_live_trades
@@ -1008,37 +1080,84 @@ class LiveRunner:
             return
         active = await self.active_orders(strategy.market_id)
         stop_id = trade["stop_order_index"]
-        stop_visible = stop_id is not None and any(
-            int(row.get("client_order_index", -1)) == int(stop_id)
-            for row in active
+        stop_error = (
+            "missing"
+            if stop_id is None or trade["stop_price"] is None
+            else self.stop_order_error(
+                active,
+                int(stop_id),
+                strategy,
+                trade["side"],
+                float(position["position"]),
+                float(trade["stop_price"]),
+            )
         )
-        if not stop_visible:
+        if stop_error:
             if trade["status"] == "opening" and trade["entry_price"] is not None:
-                await self.place_stop(
-                    int(trade["id"]),
-                    strategy,
-                    trade["side"],
-                    float(position["position"]),
-                    float(position["avg_entry_price"]),
-                )
-                self.db.execute(
-                    "UPDATE lighter_lux_live_trades SET status='open' WHERE id=?",
-                    (trade["id"],),
-                )
-                return
+                if stop_error == "missing":
+                    await self.place_stop(
+                        int(trade["id"]),
+                        strategy,
+                        trade["side"],
+                        float(position["position"]),
+                        float(position["avg_entry_price"]),
+                    )
+                    self.db.execute(
+                        "UPDATE lighter_lux_live_trades SET status='open' WHERE id=?",
+                        (trade["id"],),
+                    )
+                    return
             await asyncio.sleep(0.8)
-            if await self.market_position(strategy.market_id) is None:
+            current_position = await self.market_position(strategy.market_id)
+            if current_position is None:
                 await self.finalize(
                     int(trade["id"]),
                     "safety_stop",
                     int(stop_id or trade["entry_order_index"]),
                 )
                 return
-            close_id = await self.emergency_close(strategy, position)
+            current_active = await self.active_orders(strategy.market_id)
+            current_error = (
+                "missing"
+                if stop_id is None or trade["stop_price"] is None
+                else self.stop_order_error(
+                    current_active,
+                    int(stop_id),
+                    strategy,
+                    trade["side"],
+                    float(current_position["position"]),
+                    float(trade["stop_price"]),
+                )
+            )
+            if current_error is None:
+                return
+            self.db.execute(
+                """UPDATE lighter_lux_live_trades
+                   SET error=? WHERE id=?""",
+                (f"invalid exchange stop: {current_error}", trade["id"]),
+            )
+            if current_error != "missing" and stop_id is not None:
+                _, cancel_response, cancel_error = await self.signer.cancel_order(
+                    market_index=strategy.market_id,
+                    order_index=int(stop_id),
+                    api_key_index=self.key_index,
+                )
+                if not self.response_ok(cancel_response, cancel_error):
+                    self.log(
+                        "invalid_stop_cancel_failed",
+                        trade_id=trade["id"],
+                        stop_order=stop_id,
+                        error=cancel_error,
+                    )
+            close_id = await self.emergency_close(strategy, current_position)
             await self.wait_position(strategy.market_id, False)
             await self.finalize(
                 int(trade["id"]),
-                "missing_stop_emergency_close",
+                (
+                    "missing_stop_emergency_close"
+                    if current_error == "missing"
+                    else "invalid_stop_emergency_close"
+                ),
                 close_id,
             )
 
