@@ -334,6 +334,18 @@ type LiveTradeRow = {
   exit_reference_source: number | null;
   exit_reference_l2: number | null;
   exit_slippage_pct: number | null;
+  entry_signal_received_at: number | null;
+  entry_signal_captured_at: number | null;
+  exit_signal_received_at: number | null;
+  entry_started_at: number | null;
+  entry_order_sent_at: number | null;
+  entry_order_accepted_at: number | null;
+  entry_position_seen_at: number | null;
+  stop_order_sent_at: number | null;
+  protected_at: number | null;
+  exit_order_sent_at: number | null;
+  exit_order_accepted_at: number | null;
+  exit_position_gone_at: number | null;
 };
 
 type LiveStrategyStateRow = {
@@ -366,6 +378,13 @@ type ExecutionComparison = {
   shadowPct: number;
   realPct: number;
   avgGapPct: number | null;
+};
+
+type LatencyMetrics = {
+  measured: number;
+  signalToOrderMs: number | null;
+  orderToPositionMs: number | null;
+  signalToProtectedMs: number | null;
 };
 
 type PnlPoint = {
@@ -931,29 +950,47 @@ function lighterLiveState(): LiveStateRow | null {
 
 function recentLiveTrades(limit = 30): LiveTradeRow[] {
   return db.prepare<[number], LiveTradeRow>(`
-    SELECT id,strategy_id,symbol,side,entry_signal_id,exit_signal_id,
-           opened_at,closed_at,requested_notional_usd,filled_notional_usd,
+    SELECT real.id,real.strategy_id,real.symbol,real.side,real.entry_signal_id,
+           real.exit_signal_id,real.opened_at,real.closed_at,
+           real.requested_notional_usd,real.filled_notional_usd,
            leverage,quantity,entry_price,stop_pct,stop_price,exit_price,
            gross_pnl_usd,funding_pnl_usd,fee_usd,net_pnl_usd,net_pnl_pct,
            close_reason,status,error,entry_reference_source,entry_reference_l2,
            entry_slippage_pct,entry_book_age_ms,exit_reference_source,
-           exit_reference_l2,exit_slippage_pct
-    FROM lighter_lux_live_trades
-    ORDER BY opened_at DESC,id DESC LIMIT ?`).all(limit);
+           exit_reference_l2,exit_slippage_pct,
+           entry_signal.received_at entry_signal_received_at,
+           entry_signal.captured_at entry_signal_captured_at,
+           exit_signal.received_at exit_signal_received_at,
+           entry_started_at,entry_order_sent_at,entry_order_accepted_at,
+           entry_position_seen_at,stop_order_sent_at,protected_at,
+           exit_order_sent_at,exit_order_accepted_at,exit_position_gone_at
+    FROM lighter_lux_live_trades real
+    JOIN lighter_lux_signals entry_signal ON entry_signal.id=real.entry_signal_id
+    LEFT JOIN lighter_lux_signals exit_signal ON exit_signal.id=real.exit_signal_id
+    ORDER BY real.opened_at DESC,real.id DESC LIMIT ?`).all(limit);
 }
 
 function closedLiveTrades(): LiveTradeRow[] {
   return db.prepare<[], LiveTradeRow>(`
-    SELECT id,strategy_id,symbol,side,entry_signal_id,exit_signal_id,
-           opened_at,closed_at,requested_notional_usd,filled_notional_usd,
+    SELECT real.id,real.strategy_id,real.symbol,real.side,real.entry_signal_id,
+           real.exit_signal_id,real.opened_at,real.closed_at,
+           real.requested_notional_usd,real.filled_notional_usd,
            leverage,quantity,entry_price,stop_pct,stop_price,exit_price,
            gross_pnl_usd,funding_pnl_usd,fee_usd,net_pnl_usd,net_pnl_pct,
            close_reason,status,error,entry_reference_source,entry_reference_l2,
            entry_slippage_pct,entry_book_age_ms,exit_reference_source,
-           exit_reference_l2,exit_slippage_pct
-    FROM lighter_lux_live_trades
-    WHERE status='closed' AND net_pnl_usd IS NOT NULL
-    ORDER BY closed_at,id`).all();
+           exit_reference_l2,exit_slippage_pct,
+           entry_signal.received_at entry_signal_received_at,
+           entry_signal.captured_at entry_signal_captured_at,
+           exit_signal.received_at exit_signal_received_at,
+           entry_started_at,entry_order_sent_at,entry_order_accepted_at,
+           entry_position_seen_at,stop_order_sent_at,protected_at,
+           exit_order_sent_at,exit_order_accepted_at,exit_position_gone_at
+    FROM lighter_lux_live_trades real
+    JOIN lighter_lux_signals entry_signal ON entry_signal.id=real.entry_signal_id
+    LEFT JOIN lighter_lux_signals exit_signal ON exit_signal.id=real.exit_signal_id
+    WHERE real.status='closed' AND real.net_pnl_usd IS NOT NULL
+    ORDER BY real.closed_at,real.id`).all();
 }
 
 function liveStrategyStates(): LiveStrategyStateRow[] {
@@ -1010,6 +1047,36 @@ function liveExecutionComparison(): ExecutionComparison {
     shadowPct,
     realPct,
     avgGapPct: rows.length ? (realPct - shadowPct) / rows.length : null,
+  };
+}
+
+function median(values: number[]): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[middle]!
+    : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+
+function liveLatencyMetrics(rows: LiveTradeRow[]): LatencyMetrics {
+  const measured = rows.filter((row) => (
+    row.entry_signal_received_at != null
+    && row.entry_order_sent_at != null
+    && row.entry_position_seen_at != null
+    && row.protected_at != null
+  ));
+  return {
+    measured: measured.length,
+    signalToOrderMs: median(measured.map((row) => (
+      row.entry_order_sent_at! - row.entry_signal_received_at!
+    ))),
+    orderToPositionMs: median(measured.map((row) => (
+      row.entry_position_seen_at! - row.entry_order_sent_at!
+    ))),
+    signalToProtectedMs: median(measured.map((row) => (
+      row.protected_at! - row.entry_signal_received_at!
+    ))),
   };
 }
 
@@ -1104,6 +1171,10 @@ function utcShort(value: number | null): string {
 function held(opened: number, closed: number | null): string {
   const hours = ((closed ?? Date.now()) - opened) / 3_600_000;
   return hours >= 24 ? `${(hours / 24).toFixed(1)}d` : `${hours.toFixed(1)}h`;
+}
+function latency(value: number | null): string {
+  if (value == null || value < 0) return '—';
+  return value < 1_000 ? `${Math.round(value)}ms` : `${(value / 1_000).toFixed(2)}s`;
 }
 function pfLabel(value: number | null): string {
   return value == null ? '—' : Number.isFinite(value) ? value.toFixed(2) : '∞';
@@ -1284,16 +1355,28 @@ function liveTradeRows(rows: LiveTradeRow[], lang: Lang): string {
     const entryAudit = row.entry_reference_l2 == null
       ? ''
       : `<br><small>Lux ${row.entry_reference_source?.toFixed(5) ?? '—'} · L2 ${row.entry_reference_l2.toFixed(5)} · slip ${row.entry_slippage_pct == null ? '—' : signedPct(row.entry_slippage_pct, 4)}</small>`;
+    const entryLatency = (
+      row.entry_signal_received_at != null
+      && row.entry_order_sent_at != null
+    )
+      ? `<br><small>lat L2 ${latency(row.entry_signal_captured_at == null ? null : row.entry_signal_captured_at - row.entry_signal_received_at)} · Q ${latency(row.entry_started_at == null || row.entry_signal_captured_at == null ? null : row.entry_started_at - row.entry_signal_captured_at)} · PRE ${latency(row.entry_started_at == null ? null : row.entry_order_sent_at - row.entry_started_at)} · ACK ${latency(row.entry_order_accepted_at == null ? null : row.entry_order_accepted_at - row.entry_order_sent_at)} · POS ${latency(row.entry_position_seen_at == null ? null : row.entry_position_seen_at - row.entry_order_sent_at)} · SAFE ${latency(row.protected_at == null ? null : row.protected_at - row.entry_signal_received_at)}</small>`
+      : '';
     const exitAudit = row.exit_reference_l2 == null
       ? ''
       : `<br><small>Lux ${row.exit_reference_source?.toFixed(5) ?? '—'} · L2 ${row.exit_reference_l2.toFixed(5)} · slip ${row.exit_slippage_pct == null ? '—' : signedPct(row.exit_slippage_pct, 4)}</small>`;
+    const exitLatency = (
+      row.exit_signal_received_at != null
+      && row.exit_order_sent_at != null
+    )
+      ? `<br><small>lat S→O ${latency(row.exit_order_sent_at - row.exit_signal_received_at)} · ACK ${latency(row.exit_order_accepted_at == null ? null : row.exit_order_accepted_at - row.exit_order_sent_at)} · FLAT ${latency(row.exit_position_gone_at == null ? null : row.exit_position_gone_at - row.exit_order_sent_at)}</small>`
+      : '';
     return `<tr>
       <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)} · ${esc(row.symbol)}</b><br><small>#R${row.id} · S${row.entry_signal_id}→${row.exit_signal_id ?? '—'}</small></td>
       <td class="num">${utcShort(row.opened_at)} → ${utcShort(row.closed_at)}<br><small>${held(row.opened_at, row.closed_at)}</small></td>
       <td><b>${row.side.toUpperCase()}</b><br><small>$${(row.filled_notional_usd ?? row.requested_notional_usd).toFixed(0)} · ${row.leverage}x</small></td>
-      <td class="num">${row.entry_price?.toFixed(5) ?? '—'}${entryAudit}</td>
+      <td class="num">${row.entry_price?.toFixed(5) ?? '—'}${entryAudit}${entryLatency}</td>
       <td class="num"><b>${row.stop_pct.toFixed(1)}%</b><br><small>${row.stop_price?.toFixed(5) ?? '—'}</small></td>
-      <td class="num">${row.closed_at == null ? '—' : (row.exit_price?.toFixed(5) ?? '—')}${exitAudit}</td>
+      <td class="num">${row.closed_at == null ? '—' : (row.exit_price?.toFixed(5) ?? '—')}${exitAudit}${exitLatency}</td>
       <td>${isLive ? '<span class="ll-live">LIVE</span>' : row.status === 'closed' ? t(lang, 'ЗАКРЫТА', 'CLOSED') : `<span class="neg">${t(lang, 'ОШИБКА', 'ERROR')}</span>`}</td>
       <td class="${netUsd == null ? '' : pnlClass(netUsd)}"><b>${netUsd == null || netPct == null ? '—' : `${signedPct(netPct)} · ${signedUsd(netUsd)}`}</b>${isLive && netUsd != null ? '<span class="ll-live">MARK</span>' : ''}<br><small>fee ${signedUsd(-row.fee_usd)} · fund ${signedUsd(row.funding_pnl_usd)}${row.close_reason ? ` · ${esc(row.close_reason)}` : ''}</small>${row.error ? `<br><small class="neg">${esc(row.error)}</small>` : ''}</td>
     </tr>`;
@@ -1451,6 +1534,7 @@ async function render(
   const allLiveClosed = closedLiveTrades();
   const liveSummary = liveMetrics(allLiveClosed);
   const execution = liveExecutionComparison();
+  const latencyMetrics = liveLatencyMetrics(liveTrades);
   const liveStrategies = liveStrategyStates();
   const livePortfolioPaused = liveState?.portfolio_paused_at != null;
   const liveRunner = liveState?.enabled === 1
@@ -1520,6 +1604,7 @@ async function render(
           <div class="ll-live-metric"><small>Max drawdown</small><b class="${liveSummary.maxDrawdownUsd > 0 ? 'neg' : ''}">−$${liveSummary.maxDrawdownUsd.toFixed(2)} / $15</b></div>
           <div class="ll-live-metric"><small>${t(lang, 'Текущая просадка', 'Current drawdown')}</small><b class="${(liveState?.current_drawdown_usd ?? 0) > 0 ? 'neg' : ''}">−$${(liveState?.current_drawdown_usd ?? 0).toFixed(2)}</b></div>
           <div class="ll-live-metric"><small>${t(lang, 'Real − shadow', 'Real − shadow')}</small><b class="${execution.avgGapPct == null ? '' : pnlClass(execution.avgGapPct)}">${execution.avgGapPct == null ? '—' : `${execution.avgGapPct > 0 ? '+' : execution.avgGapPct < 0 ? '−' : ''}${Math.abs(execution.avgGapPct).toFixed(4)} ${t(lang, 'п.п.', 'pp')}`}</b><em>${execution.matched ? `${signedPct(execution.realPct)} vs ${signedPct(execution.shadowPct)} · N ${execution.matched}` : t(lang, 'ждём закрытую пару', 'waiting for a closed pair')}</em></div>
+          <div class="ll-live-metric"><small>Latency P50</small><b>${latency(latencyMetrics.signalToProtectedMs)}</b><em>S→O ${latency(latencyMetrics.signalToOrderMs)} · O→POS ${latency(latencyMetrics.orderToPositionMs)} · N ${latencyMetrics.measured}</em></div>
         </div>
         <details class="ll-details"><summary>${t(lang, 'Live-статистика по каждой стратегии', 'Per-strategy live statistics')}</summary><div class="ll-table"><table class="ll-live-strategy">
           <thead><tr><th>Strategy</th><th>Gate</th><th>N</th><th>Net</th><th>PF</th><th>½ / ½</th><th>DD $</th></tr></thead>

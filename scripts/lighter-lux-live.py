@@ -85,6 +85,7 @@ class LiveRunner:
         self.last_order_id = int(time.time() * 1000)
         self.last_stop_check = 0.0
         self.last_heartbeat = 0.0
+        self.leverage_ready: set[int] = set()
 
     def log(self, event: str, **fields: Any) -> None:
         print(
@@ -130,7 +131,10 @@ class LiveRunner:
         return rows[0]
 
     async def positions(self) -> list[dict[str, Any]]:
-        account = await self.account()
+        return self.positions_from_account(await self.account())
+
+    @staticmethod
+    def positions_from_account(account: dict[str, Any]) -> list[dict[str, Any]]:
         return [
             row
             for row in account.get("positions") or []
@@ -470,6 +474,12 @@ class LiveRunner:
         )
         worst_price = stop_price * (0.99 if side == "long" else 1.01)
         order_id = existing_order_id or self.order_id()
+        sent_at = int(time.time() * 1000)
+        self.db.execute(
+            """UPDATE lighter_lux_live_trades
+               SET stop_order_sent_at=? WHERE id=?""",
+            (sent_at, trade_id),
+        )
         _, response, error = await self.signer.create_sl_order(
             market_index=strategy.market_id,
             client_order_index=order_id,
@@ -488,10 +498,11 @@ class LiveRunner:
             int(row.get("client_order_index", -1)) == order_id for row in active
         ):
             raise RuntimeError("stop accepted but not visible")
+        protected_at = int(time.time() * 1000)
         self.db.execute(
             """UPDATE lighter_lux_live_trades
-               SET stop_order_index=?,stop_price=? WHERE id=?""",
-            (order_id, stop_price, trade_id),
+               SET stop_order_index=?,stop_price=?,protected_at=? WHERE id=?""",
+            (order_id, stop_price, protected_at, trade_id),
         )
         return order_id, stop_price
 
@@ -521,6 +532,7 @@ class LiveRunner:
         strategy: Strategy,
         side: str,
     ) -> tuple[str, int | None]:
+        entry_started_at = int(time.time() * 1000)
         if self.daily_net() <= -self.daily_loss_usd:
             return "daily loss breaker", None
         risk_state = self.refresh_portfolio_risk()
@@ -532,22 +544,24 @@ class LiveRunner:
         account = await self.account()
         if float(account["available_balance"]) < 20:
             return "balance below 20 USDC", None
-        if await self.positions():
+        if self.positions_from_account(account):
             return "exchange already has a position", None
 
         order_id = self.order_id()
         cursor = self.db.execute(
             """INSERT INTO lighter_lux_live_trades
                (strategy_id,symbol,market_id,side,entry_signal_id,opened_at,
-                requested_notional_usd,leverage,stop_pct,entry_order_index,status)
-               VALUES (?,?,?,?,?,?,?,?,?,?, 'opening')""",
+                entry_started_at,requested_notional_usd,leverage,stop_pct,
+                entry_order_index,status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?, 'opening')""",
             (
                 signal["strategy_id"],
                 strategy.asset,
                 strategy.market_id,
                 side,
                 signal["id"],
-                int(time.time() * 1000),
+                entry_started_at,
+                entry_started_at,
                 self.notional,
                 self.leverage,
                 strategy.stop_pct,
@@ -556,15 +570,23 @@ class LiveRunner:
         )
         trade_id = int(cursor.lastrowid)
         try:
-            _, response, error = await self.signer.update_leverage(
-                market_index=strategy.market_id,
-                margin_mode=self.signer.CROSS_MARGIN_MODE,
-                leverage=self.leverage,
-                api_key_index=self.key_index,
-            )
-            if not self.response_ok(response, error):
-                raise RuntimeError(f"leverage rejected: {error}")
+            if strategy.market_id not in self.leverage_ready:
+                _, response, error = await self.signer.update_leverage(
+                    market_index=strategy.market_id,
+                    margin_mode=self.signer.CROSS_MARGIN_MODE,
+                    leverage=self.leverage,
+                    api_key_index=self.key_index,
+                )
+                if not self.response_ok(response, error):
+                    raise RuntimeError(f"leverage rejected: {error}")
+                self.leverage_ready.add(strategy.market_id)
 
+            entry_order_sent_at = int(time.time() * 1000)
+            self.db.execute(
+                """UPDATE lighter_lux_live_trades
+                   SET entry_order_sent_at=? WHERE id=?""",
+                (entry_order_sent_at, trade_id),
+            )
             _, response, error = (
                 await self.signer.create_market_order_quote_amount(
                     market_index=strategy.market_id,
@@ -578,10 +600,17 @@ class LiveRunner:
             )
             if not self.response_ok(response, error):
                 raise RuntimeError(f"entry rejected: {error}")
+            entry_order_accepted_at = int(time.time() * 1000)
+            self.db.execute(
+                """UPDATE lighter_lux_live_trades
+                   SET entry_order_accepted_at=? WHERE id=?""",
+                (entry_order_accepted_at, trade_id),
+            )
 
             position = await self.wait_position(strategy.market_id, True)
             if position is None:
                 raise RuntimeError("entry accepted but position not visible")
+            entry_position_seen_at = int(time.time() * 1000)
             actual_side = "long" if int(position["sign"]) > 0 else "short"
             if actual_side != side:
                 raise RuntimeError(f"wrong exchange side: {actual_side}")
@@ -609,11 +638,14 @@ class LiveRunner:
             )
             self.db.execute(
                 """UPDATE lighter_lux_live_trades
-                   SET quantity=?,entry_price=?,filled_notional_usd=?,
+                   SET opened_at=?,entry_position_seen_at=?,
+                       quantity=?,entry_price=?,filled_notional_usd=?,
                        entry_reference_source=?,entry_reference_l2=?,
                        entry_slippage_pct=?,entry_book_age_ms=?
                    WHERE id=?""",
                 (
+                    entry_position_seen_at,
+                    entry_position_seen_at,
                     quantity,
                     entry_price,
                     float(position["position_value"]),
@@ -644,6 +676,13 @@ class LiveRunner:
                 entry=entry_price,
                 stop=stop_price,
                 stop_order=stop_id,
+                signal_to_order_ms=entry_order_sent_at
+                - int(signal["received_at"]),
+                order_ack_ms=entry_order_accepted_at - entry_order_sent_at,
+                order_to_position_ms=entry_position_seen_at
+                - entry_order_sent_at,
+                signal_to_protected_ms=int(time.time() * 1000)
+                - int(signal["received_at"]),
             )
             return "entered", trade_id
         except Exception as exc:
@@ -717,6 +756,9 @@ class LiveRunner:
         net = realized + float(funding)
         base = float(row["filled_notional_usd"] or row["requested_notional_usd"])
         net_pct = net / base * 100 if base > 0 else 0
+        closed_at = int(
+            row["exit_position_gone_at"] or int(time.time() * 1000)
+        )
         self.db.execute(
             """UPDATE lighter_lux_live_trades
                SET closed_at=?,exit_price=?,gross_pnl_usd=?,
@@ -725,7 +767,7 @@ class LiveRunner:
                    status='closed'
                WHERE id=?""",
             (
-                int(time.time() * 1000),
+                closed_at,
                 exit_price,
                 realized,
                 funding,
@@ -781,17 +823,19 @@ class LiveRunner:
         )
         size_scale, _ = self.scales(strategy.market_id)
         close_id = self.order_id()
+        exit_order_sent_at = int(time.time() * 1000)
         self.db.execute(
             """UPDATE lighter_lux_live_trades
                SET status='closing',exit_signal_id=?,exit_order_index=?,
                    close_reason=?,exit_reference_source=?,
-                   exit_reference_l2=? WHERE id=?""",
+                   exit_reference_l2=?,exit_order_sent_at=? WHERE id=?""",
             (
                 exit_signal_id,
                 close_id,
                 reason,
                 None if exit_signal is None else exit_signal["source_price"],
                 exit_reference_l2,
+                exit_order_sent_at,
                 trade["id"],
             ),
         )
@@ -810,12 +854,24 @@ class LiveRunner:
                 (f"close rejected: {error}", trade["id"]),
             )
             return False
+        exit_order_accepted_at = int(time.time() * 1000)
+        self.db.execute(
+            """UPDATE lighter_lux_live_trades
+               SET exit_order_accepted_at=? WHERE id=?""",
+            (exit_order_accepted_at, trade["id"]),
+        )
         if await self.wait_position(strategy.market_id, False) is not None:
             self.db.execute(
                 "UPDATE lighter_lux_live_trades SET status='open',error=? WHERE id=?",
                 ("close accepted but position remains", trade["id"]),
             )
             return False
+        exit_position_gone_at = int(time.time() * 1000)
+        self.db.execute(
+            """UPDATE lighter_lux_live_trades
+               SET exit_position_gone_at=? WHERE id=?""",
+            (exit_position_gone_at, trade["id"]),
+        )
         if trade["stop_order_index"] is not None:
             await self.signer.cancel_order(
                 market_index=strategy.market_id,
@@ -829,6 +885,7 @@ class LiveRunner:
         strategy = STRATEGIES[trade["strategy_id"]]
         position = await self.market_position(strategy.market_id)
         if position is None:
+            now = int(time.time() * 1000)
             if (
                 trade["exit_reference_l2"] is None
                 and trade["stop_order_index"] is not None
@@ -847,6 +904,12 @@ class LiveRunner:
             reason = (
                 trade["close_reason"]
                 or ("safety_stop" if trade["stop_order_index"] else "external_close")
+            )
+            self.db.execute(
+                """UPDATE lighter_lux_live_trades
+                   SET exit_position_gone_at=COALESCE(exit_position_gone_at,?)
+                   WHERE id=?""",
+                (now, trade["id"]),
             )
             await self.finalize(int(trade["id"]), reason, close_id)
             return
@@ -998,6 +1061,8 @@ class LiveRunner:
         positions = await self.positions()
         if trade is not None:
             await self.reconcile_open_trade(trade)
+            if self.open_trade() is not None:
+                self.leverage_ready.add(int(trade["market_id"]))
         elif positions:
             raise RuntimeError("orphan exchange position; refusing to arm")
         self.state("armed")
@@ -1020,7 +1085,8 @@ class LiveRunner:
                     "SELECT last_signal_id FROM lighter_lux_live_state WHERE id=1"
                 ).fetchone()
                 signal_row = self.db.execute(
-                    """SELECT id,strategy_id,symbol,action,side,capture_status,
+                    """SELECT id,strategy_id,symbol,action,side,received_at,
+                              capture_status,
                               source_price,buy_vwap_1000,sell_vwap_1000,
                               book_age_ms
                        FROM lighter_lux_signals
