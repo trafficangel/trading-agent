@@ -852,6 +852,9 @@ function pnlClass(value: number): string {
 function utc(value: number | null): string {
   return value ? new Date(value).toISOString().slice(0, 19).replace('T', ' ') : '—';
 }
+function utcShort(value: number | null): string {
+  return value ? new Date(value).toISOString().slice(5, 16).replace('T', ' ') : '—';
+}
 function held(opened: number, closed: number | null): string {
   const hours = ((closed ?? Date.now()) - opened) / 3_600_000;
   return hours >= 24 ? `${(hours / 24).toFixed(1)}d` : `${hours.toFixed(1)}h`;
@@ -861,7 +864,26 @@ function pfLabel(value: number | null): string {
 }
 
 export const LIGHTER_LUXALGO_CSS = `
-.ll-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(163,106,255,.36);border-radius:14px;background:linear-gradient(135deg,rgba(122,71,255,.15),var(--bg-card));color:var(--text);text-decoration:none}.ll-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(163,106,255,.15);color:#bd91ff;font-size:11px;font-weight:750;letter-spacing:.04em}.ll-title{font-size:19px;font-weight:700;margin-top:8px}.ll-sub{font-size:13px;color:var(--text-dim);margin-top:3px}.ll-stats{display:flex;gap:22px}.ll-stats span{display:grid;text-align:right}.ll-stats b{font-size:18px}.ll-stats small{font-size:10px;color:var(--text-faint);text-transform:uppercase}.ll-stats .pos,.ll-card .pos,.pos{color:#38d996}.ll-stats .neg,.ll-card .neg,.neg{color:#ff6577}.ll-wrap{max-width:1280px;margin:0 auto}.ll-back{display:inline-block;margin:4px 0 22px;color:var(--text-dim)}.ll-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.ll-head h1{font-size:34px;margin:10px 0 7px}.ll-head p{max-width:860px;color:var(--text-dim)}.ll-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.ll-engine i{width:8px;height:8px;border-radius:50%;background:#ff6577}.ll-engine.live i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}.ll-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}.ll-card,.ll-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.ll-card{padding:16px;display:grid;gap:5px}.ll-card small,.ll-card em{color:var(--text-faint);font-size:11px;font-style:normal}.ll-card b{font-size:23px;font-variant-numeric:tabular-nums}.ll-panel{padding:18px;margin:12px 0}.ll-panel h2{font-size:17px;margin:0 0 14px}.ll-signal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}.ll-signal{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.018);display:grid;gap:4px}.ll-signal-head{display:flex;justify-content:space-between;gap:7px;align-items:center}.ll-signal-head b{font-size:12px}.ll-signal-head span{font-size:9px;color:var(--text-faint)}.ll-signal-event{font-size:14px;font-weight:760}.ll-signal-meta{display:grid;grid-template-columns:auto 1fr;gap:2px 7px;font-size:10px}.ll-signal-meta small{color:var(--text-faint)}.ll-live{display:inline-block;margin-left:5px;padding:2px 5px;border-radius:999px;background:rgba(56,217,150,.12);color:#38d996;font-size:9px;letter-spacing:.04em}.ll-table{overflow:auto}.ll-table table{width:100%;border-collapse:collapse;font-size:12px}.ll-table th,.ll-table td{text-align:left;padding:9px;border-bottom:1px solid var(--border);white-space:nowrap}.ll-table th{color:var(--text-faint);font-size:10px;text-transform:uppercase}.ll-note{font-size:12px;color:var(--text-faint);line-height:1.55}.ll-empty{padding:24px;text-align:center;color:var(--text-faint)}.collect{color:#bd91ff}.pass{color:#38d996}.fail{color:#ff6577}@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}`;
+.ll-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(163,106,255,.36);border-radius:14px;background:linear-gradient(135deg,rgba(122,71,255,.15),var(--bg-card));color:var(--text);text-decoration:none}
+.ll-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(163,106,255,.15);color:#bd91ff;font-size:11px;font-weight:750;letter-spacing:.04em}
+.ll-title{font-size:19px;font-weight:700;margin-top:8px}.ll-sub{font-size:13px;color:var(--text-dim);margin-top:3px}
+.ll-stats{display:flex;gap:22px}.ll-stats span{display:grid;text-align:right}.ll-stats b{font-size:18px}.ll-stats small{font-size:10px;color:var(--text-faint);text-transform:uppercase}
+.ll-stats .pos,.ll-card .pos,.pos{color:#38d996}.ll-stats .neg,.ll-card .neg,.neg{color:#ff6577}
+.ll-wrap{max-width:1280px;margin:0 auto}.ll-back{display:inline-block;margin:4px 0 22px;color:var(--text-dim)}
+.ll-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.ll-head h1{font-size:34px;margin:10px 0 7px}.ll-head p{max-width:860px;color:var(--text-dim)}
+.ll-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.ll-engine i{width:8px;height:8px;border-radius:50%;background:#ff6577}.ll-engine.live i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}
+.ll-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}.ll-card,.ll-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.ll-card{padding:13px 14px;display:grid;gap:4px}.ll-card small,.ll-card em{color:var(--text-faint);font-size:10px;font-style:normal}.ll-card b{font-size:20px;font-variant-numeric:tabular-nums}
+.ll-panel{padding:15px;margin:10px 0}.ll-panel h2{font-size:16px;margin:0 0 11px}
+.ll-signal-list{border:1px solid var(--border);border-radius:10px;overflow:hidden}.ll-signal-row{display:grid;grid-template-columns:minmax(120px,1.1fr) 92px 118px 120px 120px;align-items:center;gap:10px;min-height:38px;padding:6px 10px;border-bottom:1px solid var(--border);font-size:11px}.ll-signal-row:last-child{border-bottom:0}.ll-signal-row:hover{background:rgba(255,255,255,.018)}.ll-signal-labels{min-height:30px;color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.04em}.ll-signal-strategy b{font-size:11px}.ll-signal-time{color:var(--text-faint);font-variant-numeric:tabular-nums}.ll-signal-event{font-weight:760}.ll-signal-value{font-variant-numeric:tabular-nums}
+.ll-live{display:inline-block;margin-left:5px;padding:2px 5px;border-radius:999px;background:rgba(56,217,150,.12);color:#38d996;font-size:9px;letter-spacing:.04em}
+.ll-table{width:100%;overflow:hidden}.ll-table table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:11px}.ll-table th,.ll-table td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border);white-space:normal;overflow-wrap:anywhere;vertical-align:middle}.ll-table th{color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.025em}.ll-table small{color:var(--text-faint);font-size:9px}.ll-table .num{font-variant-numeric:tabular-nums}
+.ll-strategy-table th:nth-child(1){width:22%}.ll-strategy-table th:nth-child(2){width:7%}.ll-strategy-table th:nth-child(3){width:20%}.ll-strategy-table th:nth-child(4){width:14%}.ll-strategy-table th:nth-child(5){width:13%}.ll-strategy-table th:nth-child(6){width:10%}.ll-strategy-table th:nth-child(7){width:14%}
+.ll-signal-table th:nth-child(1){width:22%}.ll-signal-table th:nth-child(2){width:16%}.ll-signal-table th:nth-child(3){width:20%}.ll-signal-table th:nth-child(4){width:18%}.ll-signal-table th:nth-child(5){width:24%}
+.ll-trades th:nth-child(1){width:14%}.ll-trades th:nth-child(2){width:21%}.ll-trades th:nth-child(3){width:12%}.ll-trades th:nth-child(4){width:25%}.ll-trades th:nth-child(5){width:17%}.ll-trades th:nth-child(6){width:11%}
+.ll-tech th:nth-child(1){width:20%}.ll-tech th:nth-child(2){width:18%}.ll-tech th:nth-child(3){width:15%}.ll-tech th:nth-child(4){width:18%}.ll-tech th:nth-child(5){width:29%}
+.ll-note{font-size:11px;color:var(--text-faint);line-height:1.45}.ll-empty{padding:18px;text-align:center;color:var(--text-faint)}.collect{color:#bd91ff}.pass{color:#38d996}.fail{color:#ff6577}
+.ll-details{padding:0}.ll-details>summary{cursor:pointer;list-style:none;padding:14px 15px;font-size:15px;font-weight:700}.ll-details>summary::-webkit-details-marker{display:none}.ll-details>summary::after{content:'＋';float:right;color:var(--text-faint)}.ll-details[open]>summary::after{content:'−'}.ll-details[open]>.ll-table{padding:0 15px 14px}
+@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-trades th:nth-child(4),.ll-trades td:nth-child(4){display:none}}`;
 
 export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
   const s = summary();
@@ -890,16 +912,10 @@ function strategyRows(lang: Lang): string {
     return `<tr>
       <td><b>STRAT-${spec.code} · ${spec.asset}</b><br><small>${esc(spec.name)}</small></td>
       <td class="${'error' in feed ? 'neg' : 'pos'}">${'error' in feed ? 'OFF' : 'LIVE'}</td>
-      <td>${spec.stopPct.toFixed(1)}%</td>
-      <td>${spec.backtest.trades}</td><td>${spec.backtest.winRatePct.toFixed(2)}%</td>
-      <td>${spec.backtest.profitFactor.toFixed(2)}</td>
-      <td class="pos">${signedPct(spec.backtest.netPct)}</td>
-      <td>${s.closed} / ${s.open}</td>
-      <td>${wr == null ? '—' : `${wr.toFixed(1)}%`}</td><td>${pfLabel(s.profitFactor)}</td>
+      <td class="num"><b>${spec.backtest.trades} · ${spec.backtest.winRatePct.toFixed(1)}% · ${spec.backtest.profitFactor.toFixed(2)}</b><br><small>${signedPct(spec.backtest.netPct)} · SL ${spec.stopPct.toFixed(1)}%</small></td>
+      <td class="num"><b>${s.closed} / ${s.open}</b><br><small>WR ${wr == null ? '—' : `${wr.toFixed(0)}%`} · PF ${pfLabel(s.profitFactor)}</small></td>
       <td class="${pnlClass(s.netPct)}"><b>${signedPct(s.netPct)} · ${signedUsd(s.netUsd)}</b></td>
-      <td class="${pnlClass(s.firstHalfPct)}">${signedPct(s.firstHalfPct)}</td>
-      <td class="${pnlClass(s.secondHalfPct)}">${signedPct(s.secondHalfPct)}</td>
-      <td>${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}</td>
+      <td class="num">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}<br><small>½ ${signedPct(s.firstHalfPct)} · ½ ${signedPct(s.secondHalfPct)}</small></td>
       <td class="${g.cls}"><b>${esc(g.label)}</b></td>
     </tr>`;
   }).join('');
@@ -928,7 +944,7 @@ function openTradeMark(row: TradeRow): {
 }
 
 function tradeRows(rows: TradeRow[], lang: Lang): string {
-  if (!rows.length) return `<div class="ll-empty">${t(lang, 'Lighter-shadow сделок пока нет.', 'No Lighter shadow trades yet.')}</div>`;
+  if (!rows.length) return `<tr><td colspan="6" class="ll-empty">${t(lang, 'Lighter-shadow сделок пока нет.', 'No Lighter shadow trades yet.')}</td></tr>`;
   return rows.map((row) => {
     const spec = STRATEGY_BY_ID.get(row.strategy_id);
     const mark = openTradeMark(row);
@@ -938,24 +954,18 @@ function tradeRows(rows: TradeRow[], lang: Lang): string {
     const exitPrice = row.exit_price ?? mark?.exitPrice ?? null;
     const complete = row.net_pnl_pct != null;
     return `<tr>
-      <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)}</b><br><small>${esc(row.symbol)}</small></td>
-      <td>#${row.id}<br><small>S${row.entry_signal_id}→${row.exit_signal_id ?? '—'}</small></td>
-      <td>${utc(row.opened_at)}</td><td>${utc(row.closed_at)}</td><td>${held(row.opened_at, row.closed_at)}</td>
-      <td><b>${row.side.toUpperCase()}</b></td><td>$${row.notional_usd.toFixed(0)}</td>
-      <td>${row.entry_price.toFixed(5)} → ${exitPrice?.toFixed(5) ?? '—'}${mark ? '<span class="ll-live">LIVE</span>' : ''}</td>
-      <td class="${pnlClass(gross ?? 0)}">${gross == null ? '—' : signedPct(gross)}</td>
-      <td>0.0000% · $0.00</td>
-      <td class="${pnlClass(funding ?? 0)}">${funding == null ? '—' : signedPct(funding, 4)}</td>
-      <td class="${pnlClass(net)}"><b>${complete || mark ? `${signedPct(net)} · ${signedUsd(net / 100 * row.notional_usd)}${mark ? '<span class="ll-live">LIVE</span>' : ''}` : (row.closed_at == null ? t(lang, 'ожидаем L2', 'waiting for L2') : t(lang, 'неполные данные', 'incomplete'))}</b></td>
-      <td class="${pnlClass(row.strategy_cumulative_net_pct ?? 0)}">${row.strategy_cumulative_net_pct == null ? '—' : signedPct(row.strategy_cumulative_net_pct)}</td>
-      <td class="${pnlClass(row.cumulative_net_pct ?? 0)}">${row.cumulative_net_pct == null ? '—' : `<b>${signedPct(row.cumulative_net_pct)} · ${signedUsd(row.cumulative_net_pct / 100 * NOTIONAL_USD)}</b>`}</td>
+      <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)} · ${esc(row.symbol)}</b><br><small>#${row.id} · S${row.entry_signal_id}→${row.exit_signal_id ?? '—'}</small></td>
+      <td class="num">${utcShort(row.opened_at)} → ${utcShort(row.closed_at)}<br><small>${held(row.opened_at, row.closed_at)}</small></td>
+      <td><b>${row.side.toUpperCase()}</b><br><small>$${row.notional_usd.toFixed(0)}</small></td>
+      <td class="num">${row.entry_price.toFixed(5)} → ${exitPrice?.toFixed(5) ?? '—'}${mark ? '<span class="ll-live">LIVE</span>' : ''}</td>
+      <td class="${pnlClass(net)}"><b>${complete || mark ? `${signedPct(net)} · ${signedUsd(net / 100 * row.notional_usd)}${mark ? '<span class="ll-live">LIVE</span>' : ''}` : (row.closed_at == null ? t(lang, 'ожидаем L2', 'waiting for L2') : t(lang, 'неполные данные', 'incomplete'))}</b><br><small>fee 0 · fund ${funding == null ? '—' : signedPct(funding, 4)} · price ${gross == null ? '—' : signedPct(gross)}</small></td>
       <td>${esc(row.close_reason ?? (row.closed_at == null ? 'open' : '—'))}</td>
     </tr>`;
   }).join('');
 }
 
 function signalRows(rows: SignalRow[], lang: Lang): string {
-  if (!rows.length) return `<div class="ll-empty">${t(lang, 'Ждём первый alert.', 'Waiting for the first alert.')}</div>`;
+  if (!rows.length) return `<tr><td colspan="5" class="ll-empty">${t(lang, 'Ждём первый alert.', 'Waiting for the first alert.')}</td></tr>`;
   return rows.map((row) => {
     const spec = STRATEGY_BY_ID.get(row.strategy_id);
     const price = row.side === 'long' ? row.buy_vwap_1000 : row.sell_vwap_1000;
@@ -969,35 +979,33 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
       <td>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)} · ${esc(row.symbol)}</td>
       <td>${utc(row.received_at)}</td><td>${row.action.toUpperCase()} ${row.side.toUpperCase()}</td>
       <td>${row.capture_status === 'captured' ? `✓ ${latency ?? 0} ms` : esc(row.capture_error ?? row.capture_status)}</td>
-      <td>${row.source_price?.toFixed(5) ?? '—'}</td>
-      <td>${price?.toFixed(5) ?? '—'}</td>
-      <td>${row.spread_pct == null ? '—' : `${row.spread_pct.toFixed(4)}%`}</td>
-      <td class="${deviation != null && deviation > 0.2 ? 'neg' : ''}">${deviation == null ? '—' : signedPct(deviation, 4)}</td>
+      <td class="num">${row.source_price?.toFixed(5) ?? '—'} → ${price?.toFixed(5) ?? '—'}<br><small>spread ${row.spread_pct == null ? '—' : `${row.spread_pct.toFixed(4)}%`} · Δ <span class="${deviation != null && deviation > 0.2 ? 'neg' : ''}">${deviation == null ? '—' : signedPct(deviation, 4)}</span></small></td>
     </tr>`;
   }).join('');
 }
 
-function latestSignalCards(rows: SignalRow[], lang: Lang): string {
+function latestSignalRows(rows: SignalRow[], lang: Lang): string {
   const latest = new Map<string, SignalRow>();
   for (const row of rows) {
     if (!latest.has(row.strategy_id)) latest.set(row.strategy_id, row);
   }
   return STRATEGIES.map((spec) => {
     const row = latest.get(spec.id);
-    if (!row) return `<div class="ll-signal">
-      <div class="ll-signal-head"><b>STRAT-${spec.code} · ${spec.asset}</b><span>${t(lang, 'нет сигнала', 'no signal')}</span></div>
-      <div class="ll-signal-event collect">${t(lang, 'ОЖИДАНИЕ', 'WAITING')}</div>
-    </div>`;
+    if (!row) return `<tr>
+      <td><b>STRAT-${spec.code} · ${spec.asset}</b></td>
+      <td class="ll-signal-time">—</td>
+      <td class="collect"><b>${t(lang, 'ОЖИДАНИЕ', 'WAITING')}</b></td>
+      <td>—</td><td class="collect">${t(lang, 'нет сигнала', 'no signal')}</td>
+    </tr>`;
     const latency = row.captured_at == null ? null : row.captured_at - row.received_at;
     const captured = row.capture_status === 'captured';
-    return `<div class="ll-signal">
-      <div class="ll-signal-head"><b>STRAT-${spec.code} · ${spec.asset}</b><span>${utc(row.received_at).slice(5, 16)} UTC</span></div>
-      <div class="ll-signal-event ${row.side === 'long' ? 'pos' : 'neg'}">${row.action.toUpperCase()} · ${row.side.toUpperCase()}</div>
-      <div class="ll-signal-meta">
-        <small>Lux</small><b>${row.source_price?.toFixed(5) ?? '—'}</b>
-        <small>L2</small><b class="${captured ? 'pos' : 'neg'}">${captured ? `✓ ${latency ?? 0} ms` : esc(row.capture_error ?? row.capture_status)}</b>
-      </div>
-    </div>`;
+    return `<tr>
+      <td><b>STRAT-${spec.code} · ${spec.asset}</b></td>
+      <td class="ll-signal-time">${utcShort(row.received_at)} UTC</td>
+      <td class="${row.side === 'long' ? 'pos' : 'neg'}"><b>${row.action.toUpperCase()} · ${row.side.toUpperCase()}</b></td>
+      <td class="num">${row.source_price?.toFixed(5) ?? '—'}</td>
+      <td class="${captured ? 'pos' : 'neg'}"><b>${captured ? `✓ ${latency ?? 0} ms` : esc(row.capture_error ?? row.capture_status)}</b></td>
+    </tr>`;
   }).join('');
 }
 
@@ -1027,26 +1035,28 @@ async function render(lang: Lang): Promise<string> {
         <div class="ll-card"><small>${t(lang, 'Средний spread / круг', 'Average spread / round trip')}</small><b>${s.currentSpreadPct == null ? '—' : `${s.currentSpreadPct.toFixed(4)}%`}</b><em>${s.currentRoundTripCostPct == null ? '—' : `≈${s.currentRoundTripCostPct.toFixed(4)}%`}</em></div>
       </div>
 
-      <div class="ll-panel"><h2>${t(lang, 'Индивидуальная статистика стратегий', 'Individual strategy statistics')}</h2><div class="ll-table"><table>
-        <thead><tr><th>Strategy</th><th>L2</th><th>Stop</th><th>BT N</th><th>BT WR</th><th>BT PF</th><th>BT PnL</th><th>Fwd N/open</th><th>Fwd WR</th><th>Fwd PF</th><th>Fwd net</th><th>1/2</th><th>2/2</th><th>Fwd DD</th><th>Gate</th></tr></thead>
+      <div class="ll-panel"><h2>${t(lang, 'Индивидуальная статистика стратегий', 'Individual strategy statistics')}</h2><div class="ll-table"><table class="ll-strategy-table">
+        <thead><tr><th>Strategy</th><th>L2</th><th>Backtest · N / WR / PF</th><th>Forward · closed / open</th><th>Net</th><th>DD / halves</th><th>Gate</th></tr></thead>
         <tbody>${strategyRows(lang)}</tbody>
       </table></div>
       <p class="ll-note">${t(lang, 'Индивидуальный гейт: ≥20 закрытых Lighter-forward сделок, net > 0%, PF ≥1.20, обе половины >0%. Общий результат — сумма PnL при $1000 на каждую одновременно открытую позицию.', 'Individual gate: ≥20 closed Lighter-forward trades, net > 0%, PF ≥1.20, and both halves >0%. Aggregate PnL sums results assuming $1,000 for every concurrently open position.')}</p></div>
 
       <div class="ll-panel"><h2>${t(lang, 'Входящие сигналы стратегий', 'Incoming strategy signals')}</h2>
-        <div class="ll-signal-grid">${latestSignalCards(signals, lang)}</div>
-        <p class="ll-note">${t(lang, 'Каждая карточка показывает последнее webhook-событие и результат немедленного снимка Lighter L2. Панель и live PnL открытых сделок обновляются каждые 5 секунд.', 'Each card shows the latest webhook event and its immediate Lighter L2 capture. The panel and open-trade live PnL refresh every 5 seconds.')}</p>
+        <div class="ll-table"><table class="ll-signal-table">
+          <thead><tr><th>Strategy</th><th>${t(lang, 'Время UTC', 'Time UTC')}</th><th>Event</th><th>Lux price</th><th>Lighter L2</th></tr></thead>
+          <tbody>${latestSignalRows(signals, lang)}</tbody>
+        </table></div>
       </div>
 
-      <div class="ll-panel"><h2>${t(lang, 'Все сделки — одна таблица', 'All trades — one table')}</h2><div class="ll-table"><table>
-        <thead><tr><th>Strategy</th><th>ID / signals</th><th>${t(lang, 'Открыта UTC', 'Opened UTC')}</th><th>${t(lang, 'Закрыта UTC', 'Closed UTC')}</th><th>${t(lang, 'Жизнь', 'Held')}</th><th>Side</th><th>${t(lang, 'Размер', 'Size')}</th><th>Entry → Exit</th><th>Price PnL</th><th>Fee</th><th>Funding</th><th>Net</th><th>${t(lang, 'PnL стратегии', 'Strategy PnL')}</th><th>${t(lang, 'Общий PnL', 'Aggregate PnL')}</th><th>${t(lang, 'Причина выхода', 'Close reason')}</th></tr></thead>
+      <div class="ll-panel"><h2>${t(lang, 'Сделки', 'Trades')}</h2><div class="ll-table"><table class="ll-trades">
+        <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>Entry → Exit</th><th>Net after costs</th><th>${t(lang, 'Выход', 'Exit')}</th></tr></thead>
         <tbody>${tradeRows(trades, lang)}</tbody>
       </table></div></div>
 
-      <div class="ll-panel"><h2>${t(lang, 'Технический журнал сигналов', 'Signal execution log')}</h2><div class="ll-table"><table>
-        <thead><tr><th>Strategy</th><th>${t(lang, 'Сигнал UTC', 'Signal UTC')}</th><th>Event</th><th>Capture</th><th>Lux price</th><th>VWAP $1000</th><th>Spread</th><th>${t(lang, 'Расхождение', 'Deviation')}</th></tr></thead>
+      <details class="ll-panel ll-details"><summary>${t(lang, 'Технические детали сигналов', 'Signal technical details')}</summary><div class="ll-table"><table class="ll-tech">
+        <thead><tr><th>Strategy</th><th>${t(lang, 'Сигнал UTC', 'Signal UTC')}</th><th>Event</th><th>Capture</th><th>Lux → VWAP / spread / Δ</th></tr></thead>
         <tbody>${signalRows(signals, lang)}</tbody>
-      </table></div></div>
+      </table></div></details>
 
       <div class="ll-panel"><h2>${t(lang, 'Реальная торговля', 'Live trading')}</h2>
         <p class="ll-note"><b class="fail">OFF · 0 REAL TRADES.</b> ${t(lang, `Shadow включён для ${STRATEGIES.length} выбранных стратегий. Каждая получит индивидуальный допуск; плохой результат одной стратегии не будет маскироваться общей прибылью другой. Реальный canary $100 можно включать только отдельно для стратегии, прошедшей собственный гейт.`, `Shadow is enabled for ${STRATEGIES.length} selected strategies. Each must earn an individual approval; one weak strategy cannot hide behind another strategy’s profit. A $100 live canary may only be enabled separately for a strategy that passes its own gate.`)}</p>
