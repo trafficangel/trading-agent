@@ -285,6 +285,42 @@ type TradeRow = {
   strategy_cumulative_net_pct: number | null;
 };
 
+type LiveStateRow = {
+  enabled: number;
+  last_signal_id: number | null;
+  started_at: number | null;
+  heartbeat_at: number | null;
+  status: string;
+  last_error: string | null;
+};
+
+type LiveTradeRow = {
+  id: number;
+  strategy_id: string;
+  symbol: string;
+  side: Side;
+  entry_signal_id: number;
+  exit_signal_id: number | null;
+  opened_at: number;
+  closed_at: number | null;
+  requested_notional_usd: number;
+  filled_notional_usd: number | null;
+  leverage: number;
+  quantity: number | null;
+  entry_price: number | null;
+  stop_pct: number;
+  stop_price: number | null;
+  exit_price: number | null;
+  gross_pnl_usd: number | null;
+  funding_pnl_usd: number;
+  fee_usd: number;
+  net_pnl_usd: number | null;
+  net_pnl_pct: number | null;
+  close_reason: string | null;
+  status: string;
+  error: string | null;
+};
+
 type Summary = {
   feedLive: boolean;
   signals: number;
@@ -820,6 +856,23 @@ function recentTrades(limit = 60): TradeRow[] {
   return rows.slice(-limit).reverse();
 }
 
+function lighterLiveState(): LiveStateRow | null {
+  return db.prepare<[], LiveStateRow>(`
+    SELECT enabled,last_signal_id,started_at,heartbeat_at,status,last_error
+    FROM lighter_lux_live_state WHERE id=1`).get() ?? null;
+}
+
+function recentLiveTrades(limit = 30): LiveTradeRow[] {
+  return db.prepare<[number], LiveTradeRow>(`
+    SELECT id,strategy_id,symbol,side,entry_signal_id,exit_signal_id,
+           opened_at,closed_at,requested_notional_usd,filled_notional_usd,
+           leverage,quantity,entry_price,stop_pct,stop_price,exit_price,
+           gross_pnl_usd,funding_pnl_usd,fee_usd,net_pnl_usd,net_pnl_pct,
+           close_reason,status,error
+    FROM lighter_lux_live_trades
+    ORDER BY opened_at DESC,id DESC LIMIT ?`).all(limit);
+}
+
 function gate(s: Summary, lang: Lang): { cls: string; label: string; passed: boolean } {
   if (s.closed < VALIDATION_TARGET) return {
     cls: 'collect',
@@ -971,6 +1024,43 @@ function tradeRows(rows: TradeRow[], lang: Lang): string {
   }).join('');
 }
 
+function liveTradeRows(rows: LiveTradeRow[], lang: Lang): string {
+  if (!rows.length) return `<tr><td colspan="8" class="ll-empty">${t(lang, 'Live-canary вооружён и ждёт следующий новый сигнал.', 'Live canary is armed and waiting for the next new signal.')}</td></tr>`;
+  return rows.map((row) => {
+    const spec = STRATEGY_BY_ID.get(row.strategy_id);
+    let liveNetUsd: number | null = null;
+    let liveNetPct: number | null = null;
+    if (
+      row.status === 'open'
+      && spec
+      && row.entry_price != null
+      && row.quantity != null
+    ) {
+      const snap = executionSnapshot(spec);
+      if (!('error' in snap)) {
+        const mark = row.side === 'long' ? snap.sellVwap : snap.buyVwap;
+        liveNetUsd = (row.side === 'long' ? 1 : -1)
+          * (mark - row.entry_price) * row.quantity;
+        const base = row.filled_notional_usd ?? row.requested_notional_usd;
+        liveNetPct = base > 0 ? liveNetUsd / base * 100 : 0;
+      }
+    }
+    const netUsd = row.net_pnl_usd ?? liveNetUsd;
+    const netPct = row.net_pnl_pct ?? liveNetPct;
+    const isLive = ['opening', 'open', 'closing'].includes(row.status);
+    return `<tr>
+      <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)} · ${esc(row.symbol)}</b><br><small>#R${row.id} · S${row.entry_signal_id}→${row.exit_signal_id ?? '—'}</small></td>
+      <td class="num">${utcShort(row.opened_at)} → ${utcShort(row.closed_at)}<br><small>${held(row.opened_at, row.closed_at)}</small></td>
+      <td><b>${row.side.toUpperCase()}</b><br><small>$${(row.filled_notional_usd ?? row.requested_notional_usd).toFixed(0)} · ${row.leverage}x</small></td>
+      <td class="num">${row.entry_price?.toFixed(5) ?? '—'}</td>
+      <td class="num"><b>${row.stop_pct.toFixed(1)}%</b><br><small>${row.stop_price?.toFixed(5) ?? '—'}</small></td>
+      <td class="num">${row.closed_at == null ? '—' : (row.exit_price?.toFixed(5) ?? '—')}</td>
+      <td>${isLive ? '<span class="ll-live">LIVE</span>' : row.status === 'closed' ? t(lang, 'ЗАКРЫТА', 'CLOSED') : `<span class="neg">${t(lang, 'ОШИБКА', 'ERROR')}</span>`}</td>
+      <td class="${netUsd == null ? '' : pnlClass(netUsd)}"><b>${netUsd == null || netPct == null ? '—' : `${signedPct(netPct)} · ${signedUsd(netUsd)}`}</b>${isLive && netUsd != null ? '<span class="ll-live">MARK</span>' : ''}<br><small>fee ${signedUsd(-row.fee_usd)} · fund ${signedUsd(row.funding_pnl_usd)}${row.close_reason ? ` · ${esc(row.close_reason)}` : ''}</small>${row.error ? `<br><small class="neg">${esc(row.error)}</small>` : ''}</td>
+    </tr>`;
+  }).join('');
+}
+
 function signalRows(rows: SignalRow[], lang: Lang): string {
   if (!rows.length) return `<tr><td colspan="5" class="ll-empty">${t(lang, 'Ждём первый alert.', 'Waiting for the first alert.')}</td></tr>`;
   return rows.map((row) => {
@@ -995,6 +1085,14 @@ async function render(lang: Lang): Promise<string> {
   const s = summary();
   const trades = recentTrades();
   const signals = recentSignals();
+  const liveState = lighterLiveState();
+  const liveTrades = recentLiveTrades();
+  const liveRunner = liveState?.enabled === 1
+    && liveState.status === 'armed'
+    && liveState.heartbeat_at != null
+    && Date.now() - liveState.heartbeat_at < 15_000;
+  const liveClosed = liveTrades.filter((row) => row.status === 'closed');
+  const liveNetUsd = liveClosed.reduce((sum, row) => sum + (row.net_pnl_usd ?? 0), 0);
   const wr = s.closed ? s.wins / s.closed * 100 : 0;
   const passed = STRATEGIES.filter((spec) => gate(summary(spec), lang).passed).length;
   return pageShell(
@@ -1035,8 +1133,12 @@ async function render(lang: Lang): Promise<string> {
         <tbody>${tradeRows(trades, lang)}</tbody>
       </table></div></div>
 
-      <div class="ll-panel"><h2>${t(lang, 'Реальная торговля', 'Live trading')}</h2>
-        <p class="ll-note"><b class="fail">OFF · 0 REAL TRADES.</b> ${t(lang, `Shadow включён для ${STRATEGIES.length} выбранных стратегий. Каждая получит индивидуальный допуск; плохой результат одной стратегии не будет маскироваться общей прибылью другой. Реальный canary $100 можно включать только отдельно для стратегии, прошедшей собственный гейт.`, `Shadow is enabled for ${STRATEGIES.length} selected strategies. Each must earn an individual approval; one weak strategy cannot hide behind another strategy’s profit. A $100 live canary may only be enabled separately for a strategy that passes its own gate.`)}</p>
+      <div class="ll-panel"><h2>${t(lang, 'Реальная торговля · canary', 'Live trading · canary')}</h2>
+        <p class="ll-note"><b class="${liveRunner ? 'pass' : 'fail'}">${liveRunner ? 'ARMED' : 'OFFLINE'} · $100 · 10x · MAX 1.</b> ${t(lang, `Только новые сигналы после включения. Биржевой reduce-only stop ставится сразу; дневной realised-loss breaker −$10. Закрытых сделок: ${liveClosed.length}, общий net: ${signedUsd(liveNetUsd)}.`, `Only signals received after activation. An exchange-native reduce-only stop is placed immediately; the daily realized-loss breaker is −$10. Closed trades: ${liveClosed.length}, aggregate net: ${signedUsd(liveNetUsd)}.`)}${liveState?.last_error ? ` <span class="neg">${esc(liveState.last_error)}</span>` : ''}</p>
+        <div class="ll-table"><table class="ll-trades">
+          <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>${t(lang, 'Цена входа', 'Entry price')}</th><th>${t(lang, 'Стоп-лосс', 'Stop-loss')}</th><th>${t(lang, 'Цена выхода', 'Exit price')}</th><th>${t(lang, 'Статус', 'Status')}</th><th>Net after costs</th></tr></thead>
+          <tbody>${liveTradeRows(liveTrades, lang)}</tbody>
+        </table></div>
       </div>
 
       <p class="ll-note">${t(lang, 'Комиссия Lighter Standard — 0%. Spread и slippage уже включены в entry/exit VWAP; funding учитывается отдельно. Расхождение Lux→VWAP измеряется, но не блокирует shadow-вход; значения выше 0.2% подсвечиваются.', 'Lighter Standard trading fee is 0%. Spread and slippage are embedded in entry/exit VWAP; funding is accounted separately. Lux→VWAP deviation is measured but does not block shadow entry; values above 0.2% are highlighted.')}</p>

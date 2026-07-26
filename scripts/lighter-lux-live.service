@@ -1,0 +1,34 @@
+[Unit]
+Description=Lighter LuxAlgo protected live canary
+After=network-online.target trading-agent.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/trading-agent
+EnvironmentFile=/etc/trading-agent/lighter-live.env
+Environment=LIGHTER_LIVE_ENABLED=true
+Environment=LIGHTER_LIVE_NOTIONAL_USD=100
+Environment=LIGHTER_LIVE_LEVERAGE=10
+Environment=LIGHTER_LIVE_DAILY_LOSS_USD=10
+Environment=LIGHTER_LIVE_MAX_SLIPPAGE=0.003
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/trader/venvs/lighter/bin/python /home/trader/apps/trading-agent/scripts/lighter-lux-live.py
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/trading-agent/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=false
+
+[Install]
+WantedBy=multi-user.target
