@@ -39,6 +39,7 @@ type StrategySpec = {
 
 const t = (lang: Lang, ru: string, en: string): string => lang === 'en' ? en : ru;
 const NOTIONAL_USD = 1_000;
+const LIVE_NOTIONAL_USD = 100;
 const SIGNAL_PAGE_SIZE = 20;
 const TRADE_PAGE_SIZE = 20;
 const MAX_SOCKET_AGE_MS = 5_000;
@@ -1584,8 +1585,8 @@ function pnlChart(lang: Lang): string {
   const liveNet = series.live.at(-1)?.pnlUsd ?? 0;
   const liveNetPct = series.live.at(-1)?.pnlPct ?? 0;
   const legend = `<div class="ll-chart-legend">
-    <span class="shadow"><i></i>Shadow · $1,000 <b class="${pnlClass(shadowNetPct)}">${signedPct(shadowNetPct)} · ${signedUsd(shadowNet)}</b></span>
-    <span class="real"><i></i>Real · $100 <b class="${pnlClass(liveNetPct)}">${signedPct(liveNetPct)} · ${signedUsd(liveNet)}</b></span>
+    <span class="shadow"><i></i>Shadow · $1,000 <b class="${pnlClass(shadowNetPct)}">${signedUsd(shadowNet)} · ${signedPct(shadowNetPct)}</b></span>
+    <span class="real"><i></i>Real · $100 <b class="${pnlClass(liveNetPct)}">${signedUsd(liveNet)} · ${signedPct(liveNetPct)}</b></span>
   </div>`;
   if (!all.length) {
     return `<div class="ll-panel"><div class="ll-chart-head"><h2>${t(lang, 'Накопленный PnL', 'Cumulative PnL')}</h2>${legend}</div>
@@ -1594,7 +1595,7 @@ function pnlChart(lang: Lang): string {
 
   const width = 1120;
   const height = 260;
-  const left = 58;
+  const left = 126;
   const right = 18;
   const top = 18;
   const bottom = 34;
@@ -1624,8 +1625,12 @@ function pnlChart(lang: Lang): string {
   const yTicks = Array.from({ length: 5 }, (_, index) => {
     const value = maxPnlPct - index / 4 * pnlSpan;
     const pos = top + index / 4 * plotHeight;
+    const axisX = left - 8;
+    const pct = `${value < 0 ? '−' : ''}${Math.abs(value).toFixed(2)}%`;
+    const shadowUsd = signedUsd(value / 100 * NOTIONAL_USD);
+    const realUsd = signedUsd(value / 100 * LIVE_NOTIONAL_USD);
     return `<line class="${Math.abs(value) < pnlSpan / 100 ? 'll-chart-zero' : 'll-chart-grid'}" x1="${left}" y1="${pos.toFixed(1)}" x2="${width - right}" y2="${pos.toFixed(1)}"/>
-      <text class="ll-chart-axis" x="${left - 8}" y="${(pos + 3).toFixed(1)}" text-anchor="end">${value < 0 ? '−' : ''}${Math.abs(value).toFixed(2)}%</text>`;
+      <text class="ll-chart-axis" x="${axisX}" y="${(pos - 2).toFixed(1)}" text-anchor="end">${pct}<tspan x="${axisX}" dy="11">S ${shadowUsd} · R ${realUsd}</tspan></text>`;
   }).join('');
   const xTicks = Array.from({ length: 4 }, (_, index) => {
     const ratio = index / 3;
@@ -1688,6 +1693,10 @@ async function render(
   const liveWr = liveSummary.closed
     ? liveSummary.wins / liveSummary.closed * 100
     : null;
+  const liveNetPct = allLiveClosed.reduce(
+    (sum, row) => sum + (row.net_pnl_pct ?? 0),
+    0,
+  );
   const wr = s.closed ? s.wins / s.closed * 100 : 0;
   const passed = STRATEGIES.filter((spec) => gate(summary(spec), lang).passed).length;
   return pageShell(
@@ -1703,9 +1712,9 @@ async function render(
         <div class="ll-card"><small>${t(lang, 'Стратегии / гейт', 'Strategies / gates')}</small><b>${STRATEGIES.length} / ${passed}</b><em>${ASSET_LABEL}</em></div>
         <div class="ll-card"><small>${t(lang, 'Сигналы / ошибки', 'Signals / errors')}</small><b>${s.signals} / ${s.captureErrors}</b><em>${t(lang, 'все выбранные alerts', 'all selected alerts')}</em></div>
         <div class="ll-card"><small>${t(lang, 'Закрыто / открыто', 'Closed / open')}</small><b>${s.closed} / ${s.open}</b><em>$${NOTIONAL_USD} ${t(lang, 'на позицию', 'per position')}</em></div>
-        <div class="ll-card"><small>${t(lang, 'Общий net PnL', 'Aggregate net PnL')}</small><b class="${pnlClass(s.netPct)}">${signedPct(s.netPct)}</b><em>${signedUsd(s.netUsd)} · fee 0%</em></div>
+        <div class="ll-card"><small>Shadow net PnL</small><b class="${pnlClass(s.netUsd)}">${signedUsd(s.netUsd)}</b><em>${signedPct(s.netPct)} · $${NOTIONAL_USD.toLocaleString('en-US')} ${t(lang, 'на сделку', 'per trade')}</em></div>
         <div class="ll-card"><small>${t(lang, 'Общий WR / PF', 'Aggregate WR / PF')}</small><b>${s.closed ? `${wr.toFixed(0)}% / ${pfLabel(s.profitFactor)}` : '—'}</b><em>${t(lang, 'после всех издержек', 'after all costs')}</em></div>
-        <div class="ll-card"><small>${t(lang, 'Средняя сделка', 'Average trade')}</small><b class="${pnlClass(s.avgNetPct)}">${s.closed ? signedPct(s.avgNetPct) : '—'}</b><em>net</em></div>
+        <div class="ll-card"><small>Real net PnL</small><b class="${pnlClass(liveSummary.netUsd)}">${signedUsd(liveSummary.netUsd)}</b><em>${signedPct(liveNetPct)} · $${LIVE_NOTIONAL_USD} ${t(lang, 'на сделку', 'per trade')}</em></div>
         <div class="ll-card"><small>Max drawdown</small><b class="${s.maxDrawdownPct > 0 ? 'neg' : ''}">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}</b><em>${t(lang, 'общая кривая', 'aggregate curve')}</em></div>
         <div class="ll-card"><small>${t(lang, 'Средний spread / круг', 'Average spread / round trip')}</small><b>${s.currentSpreadPct == null ? '—' : `${s.currentSpreadPct.toFixed(4)}%`}</b><em>${s.currentRoundTripCostPct == null ? '—' : `≈${s.currentRoundTripCostPct.toFixed(4)}%`}</em></div>
       </div>
@@ -1737,7 +1746,7 @@ async function render(
         </div><span class="ll-badge ${liveGatePassed ? 'pass' : 'collect'}">${liveGatePassed ? t(lang, 'LIVE ГЕЙТ ПРОЙДЕН', 'LIVE GATE PASSED') : `${t(lang, 'LIVE ВАЛИДАЦИЯ', 'LIVE VALIDATION')} ${liveSummary.closed}/30`}</span></div>
         <div class="ll-live-grid">
           <div class="ll-live-metric"><small>${t(lang, 'Закрыто', 'Closed')}</small><b>${liveSummary.closed}/30</b></div>
-          <div class="ll-live-metric"><small>Net PnL</small><b class="${pnlClass(liveSummary.netUsd)}">${signedUsd(liveSummary.netUsd)}</b></div>
+          <div class="ll-live-metric"><small>Real net PnL</small><b class="${pnlClass(liveSummary.netUsd)}">${signedUsd(liveSummary.netUsd)}</b><em>${signedPct(liveNetPct)}</em></div>
           <div class="ll-live-metric"><small>WR / PF</small><b>${liveWr == null ? '—' : `${liveWr.toFixed(0)}%`} / ${pfLabel(liveSummary.profitFactor)}</b></div>
           <div class="ll-live-metric"><small>${t(lang, 'Половины', 'Halves')}</small><b>${signedUsd(liveSummary.firstHalfUsd)} / ${signedUsd(liveSummary.secondHalfUsd)}</b></div>
           <div class="ll-live-metric"><small>Max drawdown</small><b class="${liveSummary.maxDrawdownUsd > 0 ? 'neg' : ''}">−$${liveSummary.maxDrawdownUsd.toFixed(2)} / $15</b></div>
