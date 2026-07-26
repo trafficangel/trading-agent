@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Protected LuxAlgo -> Lighter live canary.
 
-Consumes only captured signals written by the Node webhook process. One global
-position, exchange-native reduce-only stop, $10 daily realized-loss breaker,
-$15 cumulative drawdown breaker, per-strategy live gates, and no replay of
-signals that predate the first service start.
+Consumes only captured signals written by the Node webhook process. Each
+strategy/market may hold one independent position, every position has an
+exchange-native reduce-only stop, and the portfolio keeps its $10 daily
+realized-loss breaker, $15 cumulative drawdown breaker, per-strategy live
+gates, and no replay of signals that predate the first service start.
 """
 
 from __future__ import annotations
@@ -95,6 +96,7 @@ class LiveRunner:
         self.last_order_id = int(time.time() * 1000)
         self.last_stop_check = 0.0
         self.last_heartbeat = 0.0
+        self.reconcile_cursor = 0
         self.leverage_ready: set[int] = set()
 
     def log(self, event: str, **fields: Any) -> None:
@@ -375,11 +377,20 @@ class LiveRunner:
                 error=str(exc),
             )
 
-    def open_trade(self) -> sqlite3.Row | None:
+    def open_trades(self) -> list[sqlite3.Row]:
         return self.db.execute(
             """SELECT * FROM lighter_lux_live_trades
                WHERE status IN ('opening','open','closing')
-               ORDER BY id DESC LIMIT 1"""
+               ORDER BY id"""
+        ).fetchall()
+
+    def open_trade(self, strategy_id: str) -> sqlite3.Row | None:
+        return self.db.execute(
+            """SELECT * FROM lighter_lux_live_trades
+               WHERE strategy_id=?
+                 AND status IN ('opening','open','closing')
+               ORDER BY id DESC LIMIT 1""",
+            (strategy_id,),
         ).fetchone()
 
     def daily_net(self) -> float:
@@ -680,8 +691,11 @@ class LiveRunner:
         account = await self.account()
         if float(account["available_balance"]) < 20:
             return "balance below 20 USDC", None
-        if self.positions_from_account(account):
-            return "exchange already has a position", None
+        if any(
+            int(position.get("market_id", -1)) == strategy.market_id
+            for position in self.positions_from_account(account)
+        ):
+            return "exchange market already has a position", None
 
         order_id = self.order_id()
         cursor = self.db.execute(
@@ -1234,16 +1248,13 @@ class LiveRunner:
             self.decide(signal_id, "skip", "live runner disabled")
             return
 
-        trade = self.open_trade()
+        trade = self.open_trade(str(signal["strategy_id"]))
         action = signal["action"]
         side = signal["side"]
         if trade is not None:
             if (
-                trade["strategy_id"] == signal["strategy_id"]
-                and (
-                    (action == "exit" and trade["side"] == side)
-                    or (action == "entry" and trade["side"] != side)
-                )
+                (action == "exit" and trade["side"] == side)
+                or (action == "entry" and trade["side"] != side)
             ):
                 reverse = action == "entry" and trade["side"] != side
                 closed = await self.close(
@@ -1268,7 +1279,7 @@ class LiveRunner:
             self.decide(
                 signal_id,
                 "skip",
-                f"global slot occupied by {trade['strategy_id']}",
+                "same strategy already has this side open",
                 int(trade["id"]),
             )
             return
@@ -1315,14 +1326,24 @@ class LiveRunner:
                 (latest, now, 1 if self.enabled else 0, now),
             )
             self.log("cursor_initialized", last_signal_id=latest)
-        trade = self.open_trade()
-        positions = await self.positions()
-        if trade is not None:
+        for trade in self.open_trades():
             await self.reconcile_open_trade(trade)
-            if self.open_trade() is not None:
+        trades = self.open_trades()
+        positions = await self.positions()
+        managed_markets = {int(trade["market_id"]) for trade in trades}
+        orphan_markets = sorted(
+            int(position.get("market_id", -1))
+            for position in positions
+            if int(position.get("market_id", -1)) not in managed_markets
+        )
+        if orphan_markets:
+            raise RuntimeError(
+                f"orphan exchange positions in markets {orphan_markets}; "
+                "refusing to arm"
+            )
+        for trade in trades:
+            if int(trade["market_id"]) in managed_markets:
                 self.leverage_ready.add(int(trade["market_id"]))
-        elif positions:
-            raise RuntimeError("orphan exchange position; refusing to arm")
         self.state("armed")
         self.refresh_portfolio_risk()
         self.refresh_strategy_stats()
@@ -1376,9 +1397,11 @@ class LiveRunner:
                         await asyncio.sleep(1)
                     continue
                 if time.monotonic() - self.last_stop_check >= 1:
-                    trade = self.open_trade()
-                    if trade is not None:
+                    trades = self.open_trades()
+                    if trades:
+                        trade = trades[self.reconcile_cursor % len(trades)]
                         await self.reconcile_open_trade(trade)
+                        self.reconcile_cursor += 1
                     self.last_stop_check = time.monotonic()
                 if time.monotonic() - self.last_heartbeat >= 5:
                     self.state("armed")
