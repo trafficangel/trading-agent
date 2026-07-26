@@ -616,6 +616,9 @@ class LiveRunner:
                 raise RuntimeError(f"wrong exchange side: {actual_side}")
             quantity = float(position["position"])
             entry_price = float(position["avg_entry_price"])
+            # Lighter position_value is mark-based and can move before this
+            # response arrives. Entry notional must remain fill-price × size.
+            filled_notional = abs(quantity) * entry_price
             entry_reference_l2 = (
                 signal["buy_vwap_1000"]
                 if side == "long"
@@ -648,7 +651,7 @@ class LiveRunner:
                     entry_position_seen_at,
                     quantity,
                     entry_price,
-                    float(position["position_value"]),
+                    filled_notional,
                     signal["source_price"],
                     entry_reference_l2,
                     entry_slippage_pct,

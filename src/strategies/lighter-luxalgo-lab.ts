@@ -1373,7 +1373,7 @@ function liveTradeRows(rows: LiveTradeRow[], lang: Lang): string {
     return `<tr>
       <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)} · ${esc(row.symbol)}</b><br><small>#R${row.id} · S${row.entry_signal_id}→${row.exit_signal_id ?? '—'}</small></td>
       <td class="num">${utcShort(row.opened_at)} → ${utcShort(row.closed_at)}<br><small>${held(row.opened_at, row.closed_at)}</small></td>
-      <td><b>${row.side.toUpperCase()}</b><br><small>$${(row.filled_notional_usd ?? row.requested_notional_usd).toFixed(0)} · ${row.leverage}x</small></td>
+      <td><b>${row.side.toUpperCase()}</b><br><small>$${(row.filled_notional_usd ?? row.requested_notional_usd).toFixed(2)} · ${row.leverage}x</small></td>
       <td class="num">${row.entry_price?.toFixed(5) ?? '—'}${entryAudit}${entryLatency}</td>
       <td class="num"><b>${row.stop_pct.toFixed(1)}%</b><br><small>${row.stop_price?.toFixed(5) ?? '—'}</small></td>
       <td class="num">${row.closed_at == null ? '—' : (row.exit_price?.toFixed(5) ?? '—')}${exitAudit}${exitLatency}</td>
