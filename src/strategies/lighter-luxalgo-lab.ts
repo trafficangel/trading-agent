@@ -58,9 +58,13 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // STRAT-016 LTC through STRAT-019 HBAR passed the same chronological audit.
 // STRAT-020 AAVE was admitted only after full trade-log normalization to
 // $1,000 notional; it stayed positive in every chronological third with a
-// conservative 5% stop. A new BNB candidate also passed the numerical gate,
-// but is excluded until LuxAlgo can persist its webhook alert. BCH, DOGE, XLM,
-// TRX, POL, JUP, ADA and SUI candidates remain excluded.
+// conservative 5% stop. STRAT-021 XRP passed the same audit (148 trades, both
+// sides PF >2.1 before the stop, every chronological third positive). It is
+// intentionally shadow-only: the independent Python real runner does not list
+// it and must not do so until at least 20 prospective closes pass the gate.
+// A new BNB candidate also passed the numerical gate, but is excluded until
+// LuxAlgo can persist its webhook alert. BCH, DOGE, XLM, TRX, POL, JUP, ADA
+// and SUI candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -196,6 +200,25 @@ const STRATEGIES: readonly StrategySpec[] = [
       profitFactor: 2.789,
       netPct: 14.843,
       maxDrawdownPct: 5.396,
+    },
+  },
+  {
+    id: 'xrp-choch-mf50',
+    code: '021',
+    name: 'CHoCH · Money Flow 50',
+    symbol: 'XRPUSDT',
+    asset: 'XRP',
+    marketId: 7,
+    stopPct: 5,
+    backtest: {
+      period: '2026-03-18 → 2026-05-25',
+      trades: 148,
+      winRatePct: 65.54,
+      // Fixed $1,000 notional, with a conservative 5% safety stop applied
+      // to the complete LuxAlgo trade log.
+      profitFactor: 1.983,
+      netPct: 45.956,
+      maxDrawdownPct: 9.104,
     },
   },
 ] as const;
