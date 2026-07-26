@@ -23,15 +23,18 @@ const STRATEGY_ID = 'sol-lg-mf50';
 const MARKET_ID = 2;
 const NOTIONAL_USD = 1_000;
 const STANDARD_DELAY_MS = 300;
-const MAX_BOOK_AGE_MS = 1_000;
+const MAX_SOCKET_AGE_MS = 5_000;
 const VALIDATION_TARGET = 20;
 const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 
 type FeedState = {
   connected: boolean;
   connectedAt: number | null;
+  lastSocketAt: number | null;
   lastBookAt: number | null;
   exchangeAt: number | null;
+  bookNonce: number | null;
+  tickerNonce: number | null;
   reconnects: number;
   bids: Map<number, number>;
   asks: Map<number, number>;
@@ -88,8 +91,11 @@ type TradeRow = {
 const feed: FeedState = {
   connected: false,
   connectedAt: null,
+  lastSocketAt: null,
   lastBookAt: null,
   exchangeAt: null,
+  bookNonce: null,
+  tickerNonce: null,
   reconnects: 0,
   bids: new Map(),
   asks: new Map(),
@@ -136,6 +142,10 @@ const closeTrade = db.prepare(`
   SET exit_signal_id = ?, closed_at = ?, exit_price = ?,
       exit_funding_pct_h = ?, gross_pnl_pct = ?, funding_pnl_pct = ?,
       net_pnl_pct = ?, close_reason = 'reverse_signal'
+  WHERE id = ? AND closed_at IS NULL`);
+const abortTrade = db.prepare(`
+  UPDATE lighter_lux_trades
+  SET exit_signal_id = ?, closed_at = ?, close_reason = ?
   WHERE id = ? AND closed_at IS NULL`);
 const entryFunding = db.prepare<[number], { entry_funding_pct_h: number }>(`
   SELECT entry_funding_pct_h FROM lighter_lux_trades WHERE id = ?`);
@@ -188,14 +198,20 @@ function connect(): void {
   ws.on('open', () => {
     feed.connected = true;
     feed.connectedAt = Date.now();
+    feed.lastSocketAt = feed.connectedAt;
+    feed.lastBookAt = null;
+    feed.exchangeAt = null;
+    feed.bookNonce = null;
+    feed.tickerNonce = null;
     feed.bids.clear();
     feed.asks.clear();
     ws?.send(JSON.stringify({ type: 'subscribe', channel: `order_book/${MARKET_ID}` }));
+    ws?.send(JSON.stringify({ type: 'subscribe', channel: `ticker/${MARKET_ID}` }));
     ws?.send(JSON.stringify({ type: 'subscribe', channel: `market_stats/${MARKET_ID}` }));
     if (pingTimer) clearInterval(pingTimer);
     pingTimer = setInterval(() => {
       try { ws?.ping(); } catch { /* reconnect handler owns recovery */ }
-    }, 20_000);
+    }, 2_000);
     pingTimer.unref();
     logger.info({ marketId: MARKET_ID }, 'lighter-lux: read-only feed connected');
   });
@@ -203,26 +219,58 @@ function connect(): void {
     try {
       const message = JSON.parse(rawText(data)) as {
         timestamp?: unknown;
-        order_book?: { bids?: unknown; asks?: unknown };
+        nonce?: unknown;
+        order_book?: {
+          bids?: unknown; asks?: unknown; nonce?: unknown; begin_nonce?: unknown;
+        };
+        ticker?: Record<string, unknown>;
         market_stats?: Record<string, unknown>;
       };
+      feed.lastSocketAt = Date.now();
+      const tickerNonce = message.ticker ? finite(message.nonce) : null;
+      if (tickerNonce != null) feed.tickerNonce = tickerNonce;
       if (message.market_stats) {
         feed.fundingRatePctH = finite(message.market_stats.current_funding_rate) ?? 0;
         feed.indexPrice = finite(message.market_stats.index_price);
         feed.markPrice = finite(message.market_stats.mark_price);
       }
       if (!message.order_book) return;
+      const nonce = finite(message.order_book.nonce);
+      const beginNonce = finite(message.order_book.begin_nonce);
+      if (
+        feed.bookNonce != null
+        && beginNonce != null
+        && beginNonce !== feed.bookNonce
+      ) {
+        logger.warn(
+          { previousNonce: feed.bookNonce, beginNonce, nonce },
+          'lighter-lux: order-book nonce gap; resubscribing',
+        );
+        feed.bids.clear();
+        feed.asks.clear();
+        feed.lastBookAt = null;
+        feed.exchangeAt = null;
+        feed.bookNonce = null;
+        ws?.send(JSON.stringify({ type: 'unsubscribe', channel: `order_book/${MARKET_ID}` }));
+        ws?.send(JSON.stringify({ type: 'subscribe', channel: `order_book/${MARKET_ID}` }));
+        return;
+      }
       updateLevels(feed.bids, message.order_book.bids);
       updateLevels(feed.asks, message.order_book.asks);
       if (!feed.bids.size || !feed.asks.size) return;
       feed.lastBookAt = Date.now();
       feed.exchangeAt = finite(message.timestamp) ?? feed.lastBookAt;
+      if (nonce != null) feed.bookNonce = nonce;
     } catch (error) {
       logger.warn({ error: (error as Error).message }, 'lighter-lux: bad message');
     }
   });
+  ws.on('pong', () => {
+    feed.lastSocketAt = Date.now();
+  });
   ws.on('close', () => {
     feed.connected = false;
+    feed.lastSocketAt = null;
     feed.reconnects += 1;
     if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
     scheduleReconnect();
@@ -246,10 +294,20 @@ export function startLighterLuxalgoShadowFeed(): void {
 
 function executionSnapshot(): ExecutionSnapshot | { error: string } {
   const now = Date.now();
-  if (!feed.connected || feed.lastBookAt == null || feed.exchangeAt == null)
+  if (
+    !feed.connected
+    || feed.lastSocketAt == null
+    || feed.lastBookAt == null
+    || feed.exchangeAt == null
+    || feed.bookNonce == null
+  )
     return { error: 'lighter_feed_offline' };
+  const socketAgeMs = now - feed.lastSocketAt;
+  if (socketAgeMs > MAX_SOCKET_AGE_MS)
+    return { error: `stale_socket_${socketAgeMs}ms` };
+  if (feed.tickerNonce != null && feed.tickerNonce > feed.bookNonce)
+    return { error: `book_behind_ticker_${feed.tickerNonce - feed.bookNonce}` };
   const bookAgeMs = now - feed.lastBookAt;
-  if (bookAgeMs > MAX_BOOK_AGE_MS) return { error: `stale_book_${bookAgeMs}ms` };
 
   const bids = [...feed.bids.entries()].sort((a, b) => b[0] - a[0]) as PriceLevel[];
   const asks = [...feed.asks.entries()].sort((a, b) => a[0] - b[0]) as PriceLevel[];
@@ -321,7 +379,18 @@ function capture(signalId: number, side: Side): void {
   try {
     const snap = executionSnapshot();
     if ('error' in snap) {
-      markCaptureError.run(Date.now(), snap.error, signalId);
+      const failedAt = Date.now();
+      db.transaction(() => {
+        markCaptureError.run(failedAt, snap.error, signalId);
+        // An opposite signal logically closes the prior position even when
+        // executable pricing cannot be measured. Close it as incomplete
+        // (NULL P&L) so one feed incident cannot leave the shadow book on
+        // the wrong side through the next reversal.
+        const open = findOpenTrade.get(STRATEGY_ID);
+        if (open && open.side !== side) {
+          abortTrade.run(signalId, failedAt, `capture_error:${snap.error}`, open.id);
+        }
+      })();
       return;
     }
     applyCapturedSignal(signalId, side, snap);
@@ -421,7 +490,9 @@ function summary(): Summary {
   const trades = db.prepare<[string], {
     net_pnl_pct: number; closed_at: number;
   }>(`SELECT net_pnl_pct, closed_at FROM lighter_lux_trades
-    WHERE strategy_id = ? AND closed_at IS NOT NULL ORDER BY closed_at`).all(STRATEGY_ID);
+    WHERE strategy_id = ? AND closed_at IS NOT NULL
+      AND net_pnl_pct IS NOT NULL
+    ORDER BY closed_at`).all(STRATEGY_ID);
   const open = db.prepare<[string], { count: number }>(`
     SELECT COUNT(*) count FROM lighter_lux_trades
     WHERE strategy_id = ? AND closed_at IS NULL`).get(STRATEGY_ID)?.count ?? 0;
@@ -438,7 +509,7 @@ function summary(): Summary {
   const currentRoundTripCostPct = 'error' in snap ? null
     : snap.spreadPct + snap.buySlippagePct + snap.sellSlippagePct;
   return {
-    feedLive: feed.connected && feed.lastBookAt != null && Date.now() - feed.lastBookAt < 2_000,
+    feedLive: !('error' in snap),
     signals: signalCounts?.total ?? 0,
     captureErrors: signalCounts?.errors ?? 0,
     closed: trades.length,
@@ -518,7 +589,9 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
 async function render(lang: Lang): Promise<string> {
   const s = summary();
   const g = gate(s, lang);
-  const trades = recentTrades().filter((row) => row.closed_at != null);
+  const trades = recentTrades().filter(
+    (row) => row.closed_at != null && row.net_pnl_pct != null,
+  );
   const signals = recentSignals();
   const progress = Math.min(100, s.closed / VALIDATION_TARGET * 100);
   const wr = s.closed ? s.wins / s.closed * 100 : 0;
