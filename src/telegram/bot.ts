@@ -31,6 +31,7 @@ export async function sendLegacyMessage(opts: SendOpts): Promise<{ message_id: n
 }
 
 export async function sendMessage(opts: SendOpts): Promise<{ message_id: number } | null> {
+  if (!config.TELEGRAM_NOTIFY) return null;
   const chat_id = chatId(opts.channel);
 
   try {
@@ -72,6 +73,7 @@ export type SendPhotoOpts = {
 
 /** Send a photo with HTML caption. Caption max 1024 chars. */
 export async function sendPhoto(opts: SendPhotoOpts): Promise<{ message_id: number } | null> {
+  if (!config.TELEGRAM_NOTIFY) return null;
   const buf = await readFile(opts.photoPath).catch((err) => {
     logger.error({ err, path: opts.photoPath }, 'sendPhoto: read failed');
     return null;

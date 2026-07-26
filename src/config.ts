@@ -36,6 +36,9 @@ const Schema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(10),
   TELEGRAM_CHANNEL_SIGNALS: z.string().min(1),
   TELEGRAM_CHANNEL_LOGS: z.string().min(1),
+  /** Master switch for outbound Bot API notifications (signals + operator
+   * logs + photos). Does not disable Telegram Gateway login codes. */
+  TELEGRAM_NOTIFY: envBool(true),
 
   /**
    * Track D — SaaS copytrading.
