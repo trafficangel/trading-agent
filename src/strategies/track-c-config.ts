@@ -1555,6 +1555,143 @@ export const STRATEGY_CONFIGS: Record<string, StrategyConfig> = {
       shortPnlPct: 21.60,
     },
   },
+
+  'uni-cfm-smart-weak': {
+    id: 'uni-cfm-smart-weak',
+    code: '017',
+    // Fresh LuxAlgo 5m search on Jul 26 2026. All 181 trades were
+    // re-normalised to fixed $1000 notional:
+    //   Lighter 0-fee: +60.73%, PF 2.04, WR 75.69%, max DD 10.89%
+    //   halves: +15.63% / +45.11%; thirds: +14.41/+3.15/+43.17%
+    //   long +26.05%, short +34.68%; top five wins = 21.8% of net.
+    // The middle third is weak but positive (PF 1.11), while the latest
+    // third strengthens materially. This makes the setup suitable for
+    // prospective shadow, not live capital.
+    //
+    // MAE p95 is 3.94%, max 10.04%. A 5% safety stop killed no
+    // historical winners and retained +60.27%, PF 2.02 at zero fees.
+    // fanOut=false is a hard real-order gate.
+    riskBand: 'low',
+    tierEligible: true,
+    minTier: null,
+    maxSafeLeverage: 10,
+    description:
+      'UNI 5m | Confirmation Any + Smart Trail + Weak Confluence | LONG: CFM Bullish + Smart Trail Bearish + Weak Bullish Confluence | SHORT: зеркально | EXIT: Confirmation built-in',
+    longDescription:
+      'Контртрендовая стратегия на UNIUSDT 5m. LONG срабатывает на bullish Confirmation Any при bearish Smart Trail и Weak Bullish Confluence; SHORT — зеркально. ' +
+      'Выход использует встроенный Confirmation exit без фиксированного take-profit. ' +
+      'Все 181 сделки проверены на постоянном номинале $1000: обе половины, все три части периода, long и short положительны; пять лучших сделок дают лишь 21.8% результата. ' +
+      'Safety SL 5% не обрезал ни одной исторически прибыльной сделки и сохраняет PF 2.02 в zero-fee модели. ' +
+      'Стратегия работает только в Lighter shadow; реальные сделки и пользовательский fan-out отключены до 20 закрытых forward-сделок с положительным net, PF ≥1.20 и обеими положительными половинами.',
+    symbol: 'UNIUSDT',
+    timeframe: '5',
+    enabled: true,
+    fanOut: false,
+    exitMode: 'builtin',
+    slPct: 0.05,
+    launchedAt: Date.parse('2026-07-26T00:00:00Z'),
+    alertName: 'UNIUSDT|5|LONG=CFMAnyBl&SmartTrailBr&WeakConfBl|SHORT=CFMAnyBr&SmartTrailBl&WeakConfBr|EXIT=CFMBuiltIn',
+    sourceUrl: 'https://app.luxalgo.com/backtesting/p67qbkwbahmvp8ux5tfb302o',
+    name: 'UNI Confirmation Smart Trail',
+    backtest: {
+      // Track-C view is deliberately conservative and includes Bybit's
+      // 0.055% taker fee per side. The dedicated Lighter lab shows the
+      // venue-specific zero-fee result and measures spread/funding live.
+      periodLabel: 'Apr 7, 2026 — Jun 15, 2026',
+      periodDays: 69,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 408.21,
+      netPnlPct: 40.82,
+      cagrPct: 511.54,
+      totalTrades: 181,
+      wins: 130,
+      losses: 51,
+      winRate: 0.7182,
+      profitFactor: 1.640,
+      commissionPaidUsd: 199.10,
+      maxDrawdownPct: 14.35,
+      maxDrawdownUsd: 143.54,
+      avgWinUsd: 8.05,
+      avgWinPct: 0.80,
+      avgLossUsd: -12.51,
+      avgLossPct: -1.25,
+      largestWinUsd: 40.05,
+      largestLossUsd: -81.63,
+      longTrades: 93,
+      longPnlPct: 15.82,
+      shortTrades: 88,
+      shortPnlPct: 25.00,
+    },
+  },
+
+  'dot-cntr-tc-hw': {
+    id: 'dot-cntr-tc-hw',
+    code: '018',
+    // Fresh LuxAlgo 5m search on Jul 26 2026. All 180 trades were
+    // re-normalised to fixed $1000 notional:
+    //   Lighter 0-fee: +47.66%, PF 1.92, WR 75.00%, max DD 12.20%
+    //   halves: +23.51% / +24.14%; thirds: +9.38/+17.16/+21.12%
+    //   long +18.32%, short +29.34%; top five wins = 41.7% of net.
+    //
+    // MAE p95 is 3.92%, max 9.84%. The mandatory 5% safety cap
+    // cuts two historical winners but remains +30.95%, PF 1.47.
+    // This is therefore shadow-only and fanOut=false is a hard gate.
+    riskBand: 'low',
+    tierEligible: true,
+    minTier: null,
+    maxSafeLeverage: 10,
+    description:
+      'DOT 5m | Contrarian Normal + Trend Catcher + HyperWave | LONG: Contrarian Bullish + TC Bullish + HW<50 | SHORT: зеркально | EXIT: Contrarian built-in',
+    longDescription:
+      'Контртрендовая стратегия на DOTUSDT 5m. LONG срабатывает на bullish Contrarian Normal при bullish Trend Catcher и HyperWave ниже 50; SHORT — зеркально с HyperWave выше 50. ' +
+      'Выход использует встроенный Contrarian exit без фиксированного take-profit. ' +
+      'Все 180 сделок проверены на постоянном номинале $1000: обе половины, все три части периода, long и short положительны. ' +
+      'Safety SL 5% обрезал две исторически прибыльные сделки, но ограниченная модель остаётся +30.95% и PF 1.47; поэтому стратегия допускается только в shadow. ' +
+      'Реальные сделки и пользовательский fan-out отключены до 20 закрытых forward-сделок с положительным net, PF ≥1.20 и обеими положительными половинами.',
+    symbol: 'DOTUSDT',
+    timeframe: '5',
+    enabled: true,
+    fanOut: false,
+    exitMode: 'builtin',
+    slPct: 0.05,
+    launchedAt: Date.parse('2026-07-26T00:00:00Z'),
+    alertName: 'DOTUSDT|5|LONG=ContrarianNBl&TCBl&HWb50|SHORT=ContrarianNBr&TCBr&HWa50|EXIT=ContrarianBuiltIn',
+    sourceUrl: 'https://app.luxalgo.com/backtesting/m8juc4gy92aui2i7b1yogsl9',
+    name: 'DOT Contrarian Trend Catcher',
+    backtest: {
+      // Track-C view is deliberately conservative and includes Bybit's
+      // 0.055% taker fee per side. The dedicated Lighter lab shows the
+      // venue-specific zero-fee result and measures spread/funding live.
+      periodLabel: 'Apr 8, 2026 — Jun 15, 2026',
+      periodDays: 68,
+      initialCapital: 1000,
+      notionalUsd: 1000,
+      commissionPctPerSide: 0.00055,
+      netPnlUsd: 278.57,
+      netPnlPct: 27.86,
+      cagrPct: 273.98,
+      totalTrades: 180,
+      wins: 130,
+      losses: 50,
+      winRate: 0.7222,
+      profitFactor: 1.488,
+      commissionPaidUsd: 198.00,
+      maxDrawdownPct: 13.08,
+      maxDrawdownUsd: 130.80,
+      avgWinUsd: 6.54,
+      avgWinPct: 0.65,
+      avgLossUsd: -11.43,
+      avgLossPct: -1.14,
+      largestWinUsd: 46.85,
+      largestLossUsd: -62.71,
+      longTrades: 83,
+      longPnlPct: 9.19,
+      shortTrades: 97,
+      shortPnlPct: 18.67,
+    },
+  },
 };
 
 /** Look up a strategy by id. Returns null for unknown or unregistered ids. */

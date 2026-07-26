@@ -50,10 +50,11 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // SOL +7.58%/30, ETH +0.71%/12 (both halves positive), AVAX +3.66%/13
 // (research-only until its negative second half recovers). The earlier BTC
 // STRAT-008 remains excluded; STRAT-015 is a different 5m setup that passed
-// a fresh 161-trade fixed-notional robustness audit. STRAT-016 LTC passed the
-// same fixed-notional and chronological audit on 181 trades. BCH and DOGE
-// remain excluded; the fresh BNB candidate was positive but had a near-flat
-// middle third (PF 1.05), so it stays outside the package.
+// a fresh 161-trade fixed-notional robustness audit. STRAT-016 LTC and
+// STRAT-017 UNI passed the same fixed-notional and chronological audit on
+// 181 trades each. STRAT-018 DOT passed on 180 trades, with a borderline
+// but still positive 5% safety-stop simulation. BCH and DOGE remain excluded;
+// fresh BNB and AAVE candidates had near-flat recent segments.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -138,6 +139,40 @@ const STRATEGIES: readonly StrategySpec[] = [
       profitFactor: 2.035,
       netPct: 48.856,
       maxDrawdownPct: 5.316,
+    },
+  },
+  {
+    id: 'uni-cfm-smart-weak',
+    code: '017',
+    name: 'Confirmation · Smart Trail · Weak Confluence',
+    symbol: 'UNIUSDT',
+    asset: 'UNI',
+    marketId: 30,
+    stopPct: 5,
+    backtest: {
+      period: '2026-04-07 → 2026-06-15',
+      trades: 181,
+      winRatePct: 75.69,
+      profitFactor: 2.038,
+      netPct: 60.731,
+      maxDrawdownPct: 10.892,
+    },
+  },
+  {
+    id: 'dot-cntr-tc-hw',
+    code: '018',
+    name: 'Contrarian · Trend Catcher · HyperWave',
+    symbol: 'DOTUSDT',
+    asset: 'DOT',
+    marketId: 11,
+    stopPct: 5,
+    backtest: {
+      period: '2026-04-08 → 2026-06-15',
+      trades: 180,
+      winRatePct: 75,
+      profitFactor: 1.915,
+      netPct: 47.657,
+      maxDrawdownPct: 12.2,
     },
   },
 ] as const;
@@ -815,7 +850,7 @@ function pfLabel(value: number | null): string {
 }
 
 export const LIGHTER_LUXALGO_CSS = `
-.ll-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(163,106,255,.36);border-radius:14px;background:linear-gradient(135deg,rgba(122,71,255,.15),var(--bg-card));color:var(--text);text-decoration:none}.ll-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(163,106,255,.15);color:#bd91ff;font-size:11px;font-weight:750;letter-spacing:.04em}.ll-title{font-size:19px;font-weight:700;margin-top:8px}.ll-sub{font-size:13px;color:var(--text-dim);margin-top:3px}.ll-stats{display:flex;gap:22px}.ll-stats span{display:grid;text-align:right}.ll-stats b{font-size:18px}.ll-stats small{font-size:10px;color:var(--text-faint);text-transform:uppercase}.ll-stats .pos,.ll-card .pos,.pos{color:#38d996}.ll-stats .neg,.ll-card .neg,.neg{color:#ff6577}.ll-wrap{max-width:1280px;margin:0 auto}.ll-back{display:inline-block;margin:4px 0 22px;color:var(--text-dim)}.ll-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.ll-head h1{font-size:34px;margin:10px 0 7px}.ll-head p{max-width:860px;color:var(--text-dim)}.ll-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.ll-engine i{width:8px;height:8px;border-radius:50%;background:#ff6577}.ll-engine.live i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}.ll-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}.ll-card,.ll-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.ll-card{padding:16px;display:grid;gap:5px}.ll-card small,.ll-card em{color:var(--text-faint);font-size:11px;font-style:normal}.ll-card b{font-size:23px;font-variant-numeric:tabular-nums}.ll-panel{padding:18px;margin:12px 0}.ll-panel h2{font-size:17px;margin:0 0 14px}.ll-table{overflow:auto}.ll-table table{width:100%;border-collapse:collapse;font-size:12px}.ll-table th,.ll-table td{text-align:left;padding:9px;border-bottom:1px solid var(--border);white-space:nowrap}.ll-table th{color:var(--text-faint);font-size:10px;text-transform:uppercase}.ll-note{font-size:12px;color:var(--text-faint);line-height:1.55}.ll-empty{padding:24px;text-align:center;color:var(--text-faint)}.collect{color:#bd91ff}.pass{color:#38d996}.fail{color:#ff6577}@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}}`;
+.ll-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(163,106,255,.36);border-radius:14px;background:linear-gradient(135deg,rgba(122,71,255,.15),var(--bg-card));color:var(--text);text-decoration:none}.ll-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(163,106,255,.15);color:#bd91ff;font-size:11px;font-weight:750;letter-spacing:.04em}.ll-title{font-size:19px;font-weight:700;margin-top:8px}.ll-sub{font-size:13px;color:var(--text-dim);margin-top:3px}.ll-stats{display:flex;gap:22px}.ll-stats span{display:grid;text-align:right}.ll-stats b{font-size:18px}.ll-stats small{font-size:10px;color:var(--text-faint);text-transform:uppercase}.ll-stats .pos,.ll-card .pos,.pos{color:#38d996}.ll-stats .neg,.ll-card .neg,.neg{color:#ff6577}.ll-wrap{max-width:1280px;margin:0 auto}.ll-back{display:inline-block;margin:4px 0 22px;color:var(--text-dim)}.ll-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.ll-head h1{font-size:34px;margin:10px 0 7px}.ll-head p{max-width:860px;color:var(--text-dim)}.ll-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.ll-engine i{width:8px;height:8px;border-radius:50%;background:#ff6577}.ll-engine.live i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}.ll-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}.ll-card,.ll-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.ll-card{padding:16px;display:grid;gap:5px}.ll-card small,.ll-card em{color:var(--text-faint);font-size:11px;font-style:normal}.ll-card b{font-size:23px;font-variant-numeric:tabular-nums}.ll-panel{padding:18px;margin:12px 0}.ll-panel h2{font-size:17px;margin:0 0 14px}.ll-signal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}.ll-signal{padding:14px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.018);display:grid;gap:7px}.ll-signal-head{display:flex;justify-content:space-between;gap:10px;align-items:center}.ll-signal-head b{font-size:13px}.ll-signal-head span{font-size:10px;color:var(--text-faint)}.ll-signal-event{font-size:18px;font-weight:760}.ll-signal-meta{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;font-size:11px}.ll-signal-meta small{color:var(--text-faint)}.ll-table{overflow:auto}.ll-table table{width:100%;border-collapse:collapse;font-size:12px}.ll-table th,.ll-table td{text-align:left;padding:9px;border-bottom:1px solid var(--border);white-space:nowrap}.ll-table th{color:var(--text-faint);font-size:10px;text-transform:uppercase}.ll-note{font-size:12px;color:var(--text-faint);line-height:1.55}.ll-empty{padding:24px;text-align:center;color:var(--text-faint)}.collect{color:#bd91ff}.pass{color:#38d996}.fail{color:#ff6577}@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-grid{grid-template-columns:1fr}}`;
 
 export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
   const s = summary();
@@ -910,6 +945,33 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
   }).join('');
 }
 
+function latestSignalCards(rows: SignalRow[], lang: Lang): string {
+  const latest = new Map<string, SignalRow>();
+  for (const row of rows) {
+    if (!latest.has(row.strategy_id)) latest.set(row.strategy_id, row);
+  }
+  return STRATEGIES.map((spec) => {
+    const row = latest.get(spec.id);
+    if (!row) return `<div class="ll-signal">
+      <div class="ll-signal-head"><b>STRAT-${spec.code} · ${spec.asset}</b><span>${t(lang, 'нет сигнала', 'no signal')}</span></div>
+      <div class="ll-signal-event collect">${t(lang, 'ОЖИДАНИЕ', 'WAITING')}</div>
+      <div class="ll-note">${t(lang, 'Alert активен, webhook ещё не получен.', 'Alert is active; no webhook has arrived yet.')}</div>
+    </div>`;
+    const latency = row.captured_at == null ? null : row.captured_at - row.received_at;
+    const captured = row.capture_status === 'captured';
+    return `<div class="ll-signal">
+      <div class="ll-signal-head"><b>STRAT-${spec.code} · ${spec.asset}</b><span>${utc(row.received_at)} UTC</span></div>
+      <div class="ll-signal-event ${row.side === 'long' ? 'pos' : 'neg'}">${row.action.toUpperCase()} · ${row.side.toUpperCase()}</div>
+      <div class="ll-signal-meta">
+        <small>Lux price</small><b>${row.source_price?.toFixed(5) ?? '—'}</b>
+        <small>L2 capture</small><b class="${captured ? 'pos' : 'neg'}">${captured ? `✓ ${latency ?? 0} ms` : esc(row.capture_error ?? row.capture_status)}</b>
+        <small>Bid / Ask</small><b>${row.bid?.toFixed(5) ?? '—'} / ${row.ask?.toFixed(5) ?? '—'}</b>
+        <small>Book age</small><b>${row.book_age_ms == null ? '—' : `${row.book_age_ms} ms`}</b>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 async function render(lang: Lang): Promise<string> {
   const s = summary();
   const trades = recentTrades();
@@ -942,21 +1004,17 @@ async function render(lang: Lang): Promise<string> {
       </table></div>
       <p class="ll-note">${t(lang, 'Индивидуальный гейт: ≥20 закрытых Lighter-forward сделок, net > 0%, PF ≥1.20, обе половины >0%. Общий результат — сумма PnL при $1000 на каждую одновременно открытую позицию.', 'Individual gate: ≥20 closed Lighter-forward trades, net > 0%, PF ≥1.20, and both halves >0%. Aggregate PnL sums results assuming $1,000 for every concurrently open position.')}</p></div>
 
-      <div class="ll-panel"><h2>${t(lang, 'Почему остальные активные alerts не добавлены', 'Why the other active alerts were not added')}</h2><div class="ll-table"><table>
-        <thead><tr><th>Alert</th><th>Forward N</th><th>Net after fee</th><th>WR</th><th>PF</th><th>${t(lang, 'Решение', 'Decision')}</th></tr></thead>
-        <tbody>
-          <tr><td>STRAT-007 · BCH</td><td>56</td><td class="neg">−16.10%</td><td>67.9%</td><td>0.55</td><td class="fail">${t(lang, 'не добавлять', 'exclude')}</td></tr>
-          <tr><td>STRAT-008 · BTC · старая схема</td><td>40</td><td class="neg">−15.12%</td><td>67.5%</td><td>0.41</td><td class="fail">${t(lang, 'не добавлять', 'exclude')}</td></tr>
-          <tr><td>STRAT-011 · DOGE</td><td>7</td><td class="neg">−11.44%</td><td>0.0%</td><td>0.00</td><td class="fail">${t(lang, 'не добавлять', 'exclude')}</td></tr>
-          <tr><td>STRAT-014 · BNB</td><td>14</td><td class="neg">−5.99%</td><td>42.9%</td><td>0.41</td><td class="fail">${t(lang, 'не добавлять', 'exclude')}</td></tr>
-        </tbody></table></div></div>
+      <div class="ll-panel"><h2>${t(lang, 'Входящие сигналы стратегий', 'Incoming strategy signals')}</h2>
+        <div class="ll-signal-grid">${latestSignalCards(signals, lang)}</div>
+        <p class="ll-note">${t(lang, 'Каждая карточка показывает последнее отдельное webhook-событие стратегии и результат немедленного снимка Lighter L2. Панель обновляется каждые 30 секунд.', 'Each card shows the strategy’s latest standalone webhook event and the immediate Lighter L2 capture result. The panel refreshes every 30 seconds.')}</p>
+      </div>
 
       <div class="ll-panel"><h2>${t(lang, 'Все сделки — одна таблица', 'All trades — one table')}</h2><div class="ll-table"><table>
         <thead><tr><th>Strategy</th><th>ID / signals</th><th>${t(lang, 'Открыта UTC', 'Opened UTC')}</th><th>${t(lang, 'Закрыта UTC', 'Closed UTC')}</th><th>${t(lang, 'Жизнь', 'Held')}</th><th>Side</th><th>${t(lang, 'Размер', 'Size')}</th><th>Entry → Exit</th><th>Price PnL</th><th>Fee</th><th>Funding</th><th>Net</th><th>${t(lang, 'PnL стратегии', 'Strategy PnL')}</th><th>${t(lang, 'Общий PnL', 'Aggregate PnL')}</th><th>${t(lang, 'Причина выхода', 'Close reason')}</th></tr></thead>
         <tbody>${tradeRows(trades, lang)}</tbody>
       </table></div></div>
 
-      <div class="ll-panel"><h2>${t(lang, 'Все исполнения сигналов', 'All signal executions')}</h2><div class="ll-table"><table>
+      <div class="ll-panel"><h2>${t(lang, 'Технический журнал сигналов', 'Signal execution log')}</h2><div class="ll-table"><table>
         <thead><tr><th>Strategy</th><th>${t(lang, 'Сигнал UTC', 'Signal UTC')}</th><th>Event</th><th>Capture</th><th>Lux price</th><th>Bid / Ask</th><th>VWAP $1000</th><th>Spread</th><th>Slippage</th><th>${t(lang, 'Расхождение', 'Deviation')}</th><th>L2 age</th><th>Funding</th></tr></thead>
         <tbody>${signalRows(signals, lang)}</tbody>
       </table></div></div>
