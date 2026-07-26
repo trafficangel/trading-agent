@@ -53,11 +53,11 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // admission standard. The earlier BTC STRAT-008 remains excluded; STRAT-015
 // is a different 5m setup that passed a fresh 161-trade fixed-notional audit.
 // STRAT-016 LTC through STRAT-019 HBAR passed the same chronological audit.
-// STRAT-020 AAVE and STRAT-021 BNB were admitted only after full trade-log
-// normalization to $1,000 notional. AAVE stayed positive in every chronological
-// third with a conservative 5% stop; BNB stayed positive in all thirds and on
-// both sides, with no historical trade touching the 5% safety stop. BCH, DOGE,
-// XLM, TRX, POL, JUP, ADA and SUI candidates remain excluded.
+// STRAT-020 AAVE was admitted only after full trade-log normalization to
+// $1,000 notional; it stayed positive in every chronological third with a
+// conservative 5% stop. A new BNB candidate also passed the numerical gate,
+// but is excluded until LuxAlgo can persist its webhook alert. BCH, DOGE, XLM,
+// TRX, POL, JUP, ADA and SUI candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -193,23 +193,6 @@ const STRATEGIES: readonly StrategySpec[] = [
       profitFactor: 2.789,
       netPct: 14.843,
       maxDrawdownPct: 5.396,
-    },
-  },
-  {
-    id: 'bnb-fvg-tc-hw50',
-    code: '021',
-    name: 'FVG Mitigated · Trend Catcher · HyperWave 50',
-    symbol: 'BNBUSDT',
-    asset: 'BNB',
-    marketId: 25,
-    stopPct: 5,
-    backtest: {
-      period: '2026-04-07 → 2026-06-15',
-      trades: 180,
-      winRatePct: 53.89,
-      profitFactor: 1.85,
-      netPct: 4.968,
-      maxDrawdownPct: 3.759,
     },
   },
 ] as const;
