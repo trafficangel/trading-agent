@@ -39,8 +39,8 @@ type StrategySpec = {
 
 const t = (lang: Lang, ru: string, en: string): string => lang === 'en' ? en : ru;
 const NOTIONAL_USD = 1_000;
-const SIGNAL_PAGE_SIZE = 8;
-const TRADE_PAGE_SIZE = 6;
+const SIGNAL_PAGE_SIZE = 20;
+const TRADE_PAGE_SIZE = 20;
 const MAX_SOCKET_AGE_MS = 5_000;
 const CAPTURE_RETRY_MS = 100;
 const MAX_CAPTURE_ATTEMPTS = 50;
@@ -257,6 +257,10 @@ type SignalRow = {
   buy_slippage_pct: number | null;
   sell_slippage_pct: number | null;
   funding_rate_pct_h: number | null;
+  shadow_entry_trade_id: number | null;
+  shadow_exit_trade_id: number | null;
+  live_entry_trade_id: number | null;
+  live_exit_trade_id: number | null;
 };
 
 type OpenTradeRow = {
@@ -899,13 +903,23 @@ function summary(spec?: StrategySpec): Summary {
 
 function recentSignals(limit: number, offset: number): SignalRow[] {
   return db.prepare<[...string[], number, number], SignalRow>(`
-    SELECT id, strategy_id, symbol, received_at, captured_at, action, side,
-           source_price, capture_status, capture_error, book_age_ms, bid, ask,
-           buy_vwap_1000, sell_vwap_1000, spread_pct, buy_slippage_pct,
-           sell_slippage_pct, funding_rate_pct_h
-    FROM lighter_lux_signals
-    WHERE strategy_id IN (${SQL_MARKS})
-    ORDER BY received_at DESC
+    SELECT signal.id,signal.strategy_id,signal.symbol,signal.received_at,
+           signal.captured_at,signal.action,signal.side,signal.source_price,
+           signal.capture_status,signal.capture_error,signal.book_age_ms,
+           signal.bid,signal.ask,signal.buy_vwap_1000,signal.sell_vwap_1000,
+           signal.spread_pct,signal.buy_slippage_pct,signal.sell_slippage_pct,
+           signal.funding_rate_pct_h,
+           (SELECT id FROM lighter_lux_trades
+            WHERE entry_signal_id=signal.id LIMIT 1) shadow_entry_trade_id,
+           (SELECT id FROM lighter_lux_trades
+            WHERE exit_signal_id=signal.id ORDER BY id LIMIT 1) shadow_exit_trade_id,
+           (SELECT id FROM lighter_lux_live_trades
+            WHERE entry_signal_id=signal.id LIMIT 1) live_entry_trade_id,
+           (SELECT id FROM lighter_lux_live_trades
+            WHERE exit_signal_id=signal.id ORDER BY id LIMIT 1) live_exit_trade_id
+    FROM lighter_lux_signals signal
+    WHERE signal.strategy_id IN (${SQL_MARKS})
+    ORDER BY signal.received_at DESC
     LIMIT ? OFFSET ?`).all(...STRATEGY_IDS, limit, offset);
 }
 
@@ -1434,8 +1448,20 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
       : row.side === 'long'
         ? (price - row.source_price) / row.source_price * 100
         : (row.source_price - price) / row.source_price * 100;
+    const shadowTrades = [...new Set([
+      row.shadow_exit_trade_id,
+      row.shadow_entry_trade_id,
+    ].filter((id): id is number => id != null))];
+    const liveTrades = [...new Set([
+      row.live_exit_trade_id,
+      row.live_entry_trade_id,
+    ].filter((id): id is number => id != null))];
+    const tradeRefs = [
+      shadowTrades.length ? `Shadow #${shadowTrades.join('/#')}` : 'Shadow —',
+      liveTrades.length ? `Real #R${liveTrades.join('/#R')}` : 'Real —',
+    ].join(' · ');
     return `<tr>
-      <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)} · ${esc(row.symbol)}</b><br><small>#${row.id}</small></td>
+      <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)} · ${esc(row.symbol)}</b><br><small>${t(lang, 'Сигнал', 'Signal')} #${row.id} · ${tradeRefs}</small></td>
       <td>${utc(row.received_at)}</td><td class="${row.side === 'long' ? 'pos' : 'neg'}"><b>${row.action.toUpperCase()} · ${row.side.toUpperCase()}</b></td>
       <td class="${row.capture_status === 'captured' ? 'pos' : 'neg'}"><b>${row.capture_status === 'captured' ? `✓ ${latency ?? 0} ms` : esc(row.capture_error ?? row.capture_status)}</b></td>
       <td class="num">${row.source_price?.toFixed(5) ?? '—'} → ${price?.toFixed(5) ?? '—'}<br><small>spread ${row.spread_pct == null ? '—' : `${row.spread_pct.toFixed(4)}%`} · Δ <span class="${deviation != null && deviation > 0.2 ? 'neg' : ''}">${deviation == null ? '—' : signedPct(deviation, 4)}</span></small></td>
