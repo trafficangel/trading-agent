@@ -361,6 +361,13 @@ type LiveMetrics = {
   maxDrawdownUsd: number;
 };
 
+type ExecutionComparison = {
+  matched: number;
+  shadowPct: number;
+  realPct: number;
+  avgGapPct: number | null;
+};
+
 type PnlPoint = {
   at: number;
   pnlUsd: number;
@@ -984,6 +991,28 @@ function liveMetrics(rows: LiveTradeRow[]): LiveMetrics {
   };
 }
 
+function liveExecutionComparison(): ExecutionComparison {
+  const rows = db.prepare<[], {
+    shadow_pct: number;
+    real_pct: number;
+  }>(`
+    SELECT shadow.net_pnl_pct shadow_pct,real.net_pnl_pct real_pct
+    FROM lighter_lux_live_trades real
+    JOIN lighter_lux_trades shadow
+      ON shadow.entry_signal_id=real.entry_signal_id
+    WHERE real.status='closed' AND real.net_pnl_pct IS NOT NULL
+      AND shadow.closed_at IS NOT NULL AND shadow.net_pnl_pct IS NOT NULL
+    ORDER BY real.closed_at,real.id`).all();
+  const shadowPct = rows.reduce((sum, row) => sum + row.shadow_pct, 0);
+  const realPct = rows.reduce((sum, row) => sum + row.real_pct, 0);
+  return {
+    matched: rows.length,
+    shadowPct,
+    realPct,
+    avgGapPct: rows.length ? (realPct - shadowPct) / rows.length : null,
+  };
+}
+
 function cumulativePnlSeries(): { shadow: PnlPoint[]; live: PnlPoint[] } {
   const shadowRows = db.prepare<string[], {
     closed_at: number;
@@ -1139,7 +1168,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-pager{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:11px}.ll-pager>small{color:var(--text-faint);font-size:10px}.ll-pager nav{display:flex;align-items:center;gap:5px}.ll-pager a,.ll-pager nav>span{display:grid;place-items:center;min-width:26px;height:26px;padding:0 6px;border:1px solid var(--border);border-radius:7px;color:var(--text-dim);font-size:10px;text-decoration:none}.ll-pager a:hover{border-color:#bd91ff;color:var(--text)}.ll-pager .active{border-color:rgba(163,106,255,.55);background:rgba(163,106,255,.16);color:#bd91ff;font-weight:700}.ll-pager .disabled{opacity:.35}
 .ll-details{padding:0}.ll-details>summary{cursor:pointer;list-style:none;padding:14px 15px;font-size:15px;font-weight:700}.ll-details>summary::-webkit-details-marker{display:none}.ll-details>summary::after{content:'＋';float:right;color:var(--text-faint)}.ll-details[open]>summary::after{content:'−'}.ll-details[open]>.ll-table{padding:0 15px 14px}
 .ll-chart-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}.ll-chart-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px}.ll-chart-legend span{display:flex;align-items:center;gap:6px;color:var(--text-dim)}.ll-chart-legend i{width:18px;height:3px;border-radius:2px}.ll-chart-legend .shadow i{background:#a36aff}.ll-chart-legend .real i{background:#38d996}.ll-chart-legend b{font-variant-numeric:tabular-nums}.ll-chart{width:100%;margin-top:8px;overflow:hidden}.ll-chart svg{display:block;width:100%;height:auto;min-height:190px}.ll-chart-grid{stroke:rgba(255,255,255,.075);stroke-width:1}.ll-chart-zero{stroke:rgba(255,255,255,.24);stroke-width:1}.ll-chart-axis{fill:var(--text-faint);font-size:10px;font-family:inherit}.ll-chart-shadow{fill:none;stroke:#a36aff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-real{fill:none;stroke:#38d996;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-dot-shadow{fill:#a36aff}.ll-chart-dot-real{fill:#38d996}.ll-chart-empty{display:grid;place-items:center;min-height:170px;color:var(--text-faint);font-size:12px}
-.ll-live-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:12px 0}.ll-live-metric{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.015);display:grid;gap:3px}.ll-live-metric small{font-size:9px;color:var(--text-faint);text-transform:uppercase}.ll-live-metric b{font-size:15px;font-variant-numeric:tabular-nums}.ll-live-strategy th:nth-child(1){width:25%}.ll-live-strategy th:nth-child(2){width:11%}.ll-live-strategy th:nth-child(3){width:10%}.ll-live-strategy th:nth-child(4){width:12%}.ll-live-strategy th:nth-child(5){width:12%}.ll-live-strategy th:nth-child(6){width:18%}.ll-live-strategy th:nth-child(7){width:12%}
+.ll-live-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px;margin:12px 0}.ll-live-metric{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.015);display:grid;gap:3px}.ll-live-metric small{font-size:9px;color:var(--text-faint);text-transform:uppercase}.ll-live-metric b{font-size:15px;font-variant-numeric:tabular-nums}.ll-live-metric em{font-size:9px;color:var(--text-faint);font-style:normal}.ll-live-strategy th:nth-child(1){width:25%}.ll-live-strategy th:nth-child(2){width:11%}.ll-live-strategy th:nth-child(3){width:10%}.ll-live-strategy th:nth-child(4){width:12%}.ll-live-strategy th:nth-child(5){width:12%}.ll-live-strategy th:nth-child(6){width:18%}.ll-live-strategy th:nth-child(7){width:12%}
 @media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}}`;
 
 export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
@@ -1421,6 +1450,7 @@ async function render(
   const liveTrades = recentLiveTrades();
   const allLiveClosed = closedLiveTrades();
   const liveSummary = liveMetrics(allLiveClosed);
+  const execution = liveExecutionComparison();
   const liveStrategies = liveStrategyStates();
   const livePortfolioPaused = liveState?.portfolio_paused_at != null;
   const liveRunner = liveState?.enabled === 1
@@ -1489,6 +1519,7 @@ async function render(
           <div class="ll-live-metric"><small>${t(lang, 'Половины', 'Halves')}</small><b>${signedUsd(liveSummary.firstHalfUsd)} / ${signedUsd(liveSummary.secondHalfUsd)}</b></div>
           <div class="ll-live-metric"><small>Max drawdown</small><b class="${liveSummary.maxDrawdownUsd > 0 ? 'neg' : ''}">−$${liveSummary.maxDrawdownUsd.toFixed(2)} / $15</b></div>
           <div class="ll-live-metric"><small>${t(lang, 'Текущая просадка', 'Current drawdown')}</small><b class="${(liveState?.current_drawdown_usd ?? 0) > 0 ? 'neg' : ''}">−$${(liveState?.current_drawdown_usd ?? 0).toFixed(2)}</b></div>
+          <div class="ll-live-metric"><small>${t(lang, 'Real − shadow', 'Real − shadow')}</small><b class="${execution.avgGapPct == null ? '' : pnlClass(execution.avgGapPct)}">${execution.avgGapPct == null ? '—' : `${execution.avgGapPct > 0 ? '+' : execution.avgGapPct < 0 ? '−' : ''}${Math.abs(execution.avgGapPct).toFixed(4)} ${t(lang, 'п.п.', 'pp')}`}</b><em>${execution.matched ? `${signedPct(execution.realPct)} vs ${signedPct(execution.shadowPct)} · N ${execution.matched}` : t(lang, 'ждём закрытую пару', 'waiting for a closed pair')}</em></div>
         </div>
         <details class="ll-details"><summary>${t(lang, 'Live-статистика по каждой стратегии', 'Per-strategy live statistics')}</summary><div class="ll-table"><table class="ll-live-strategy">
           <thead><tr><th>Strategy</th><th>Gate</th><th>N</th><th>Net</th><th>PF</th><th>½ / ½</th><th>DD $</th></tr></thead>
