@@ -323,6 +323,11 @@ type LiveTradeRow = {
   error: string | null;
 };
 
+type PnlPoint = {
+  at: number;
+  pnlUsd: number;
+};
+
 type Summary = {
   feedLive: boolean;
   signals: number;
@@ -887,6 +892,48 @@ function recentLiveTrades(limit = 30): LiveTradeRow[] {
     ORDER BY opened_at DESC,id DESC LIMIT ?`).all(limit);
 }
 
+function cumulativePnlSeries(): { shadow: PnlPoint[]; live: PnlPoint[] } {
+  const shadowRows = db.prepare<string[], {
+    closed_at: number;
+    net_pnl_pct: number;
+    notional_usd: number;
+  }>(`
+    SELECT closed_at,net_pnl_pct,notional_usd
+    FROM lighter_lux_trades
+    WHERE strategy_id IN (${SQL_MARKS})
+      AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
+    ORDER BY closed_at,id`).all(...STRATEGY_IDS);
+  const liveRows = db.prepare<[], {
+    closed_at: number;
+    net_pnl_usd: number;
+  }>(`
+    SELECT closed_at,net_pnl_usd
+    FROM lighter_lux_live_trades
+    WHERE status='closed' AND closed_at IS NOT NULL AND net_pnl_usd IS NOT NULL
+    ORDER BY closed_at,id`).all();
+
+  const cumulative = <T>(
+    rows: T[],
+    at: (row: T) => number,
+    pnl: (row: T) => number,
+  ): PnlPoint[] => {
+    let total = 0;
+    return rows.map((row) => {
+      total += pnl(row);
+      return { at: at(row), pnlUsd: total };
+    });
+  };
+
+  return {
+    shadow: cumulative(
+      shadowRows,
+      (row) => row.closed_at,
+      (row) => row.net_pnl_pct / 100 * row.notional_usd,
+    ),
+    live: cumulative(liveRows, (row) => row.closed_at, (row) => row.net_pnl_usd),
+  };
+}
+
 function gate(s: Summary, lang: Lang): { cls: string; label: string; passed: boolean } {
   if (s.closed < VALIDATION_TARGET) return {
     cls: 'collect',
@@ -988,6 +1035,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-note{font-size:11px;color:var(--text-faint);line-height:1.45}.ll-empty{padding:18px;text-align:center;color:var(--text-faint)}.collect{color:#bd91ff}.pass{color:#38d996}.fail{color:#ff6577}
 .ll-pager{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:11px}.ll-pager>small{color:var(--text-faint);font-size:10px}.ll-pager nav{display:flex;align-items:center;gap:5px}.ll-pager a,.ll-pager nav>span{display:grid;place-items:center;min-width:26px;height:26px;padding:0 6px;border:1px solid var(--border);border-radius:7px;color:var(--text-dim);font-size:10px;text-decoration:none}.ll-pager a:hover{border-color:#bd91ff;color:var(--text)}.ll-pager .active{border-color:rgba(163,106,255,.55);background:rgba(163,106,255,.16);color:#bd91ff;font-weight:700}.ll-pager .disabled{opacity:.35}
 .ll-details{padding:0}.ll-details>summary{cursor:pointer;list-style:none;padding:14px 15px;font-size:15px;font-weight:700}.ll-details>summary::-webkit-details-marker{display:none}.ll-details>summary::after{content:'＋';float:right;color:var(--text-faint)}.ll-details[open]>summary::after{content:'−'}.ll-details[open]>.ll-table{padding:0 15px 14px}
+.ll-chart-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}.ll-chart-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px}.ll-chart-legend span{display:flex;align-items:center;gap:6px;color:var(--text-dim)}.ll-chart-legend i{width:18px;height:3px;border-radius:2px}.ll-chart-legend .shadow i{background:#a36aff}.ll-chart-legend .real i{background:#38d996}.ll-chart-legend b{font-variant-numeric:tabular-nums}.ll-chart{width:100%;margin-top:8px;overflow:hidden}.ll-chart svg{display:block;width:100%;height:auto;min-height:190px}.ll-chart-grid{stroke:rgba(255,255,255,.075);stroke-width:1}.ll-chart-zero{stroke:rgba(255,255,255,.24);stroke-width:1}.ll-chart-axis{fill:var(--text-faint);font-size:10px;font-family:inherit}.ll-chart-shadow{fill:none;stroke:#a36aff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-real{fill:none;stroke:#38d996;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-dot-shadow{fill:#a36aff}.ll-chart-dot-real{fill:#38d996}.ll-chart-empty{display:grid;place-items:center;min-height:170px;color:var(--text-faint);font-size:12px}
 @media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}}`;
 
 export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
@@ -1133,6 +1181,72 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
   }).join('');
 }
 
+function pnlChart(lang: Lang): string {
+  const series = cumulativePnlSeries();
+  const all = [...series.shadow, ...series.live];
+  const shadowNet = series.shadow.at(-1)?.pnlUsd ?? 0;
+  const liveNet = series.live.at(-1)?.pnlUsd ?? 0;
+  const legend = `<div class="ll-chart-legend">
+    <span class="shadow"><i></i>Shadow · $1,000 <b class="${pnlClass(shadowNet)}">${signedUsd(shadowNet)}</b></span>
+    <span class="real"><i></i>Real · $100 <b class="${pnlClass(liveNet)}">${signedUsd(liveNet)}</b></span>
+  </div>`;
+  if (!all.length) {
+    return `<div class="ll-panel"><div class="ll-chart-head"><h2>${t(lang, 'Накопленный PnL', 'Cumulative PnL')}</h2>${legend}</div>
+      <div class="ll-chart-empty">${t(lang, 'График появится после первой закрытой сделки.', 'The chart will appear after the first closed trade.')}</div></div>`;
+  }
+
+  const width = 1120;
+  const height = 260;
+  const left = 58;
+  const right = 18;
+  const top = 18;
+  const bottom = 34;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const firstAt = Math.min(...all.map((point) => point.at));
+  const lastAt = Math.max(...all.map((point) => point.at));
+  const timeSpan = Math.max(1, lastAt - firstAt);
+  const values = [0, ...all.map((point) => point.pnlUsd)];
+  const rawMin = Math.min(...values);
+  const rawMax = Math.max(...values);
+  const padding = Math.max(0.5, (rawMax - rawMin) * 0.12);
+  const minPnl = rawMin - padding;
+  const maxPnl = rawMax + padding;
+  const pnlSpan = Math.max(1, maxPnl - minPnl);
+  const x = (at: number): number => left + (at - firstAt) / timeSpan * plotWidth;
+  const y = (pnl: number): number => top + (maxPnl - pnl) / pnlSpan * plotHeight;
+  const path = (points: PnlPoint[]): string => {
+    if (!points.length) return '';
+    const start = `${left.toFixed(1)},${y(0).toFixed(1)}`;
+    return [start, ...points.map((point) => `${x(point.at).toFixed(1)},${y(point.pnlUsd).toFixed(1)}`)].join(' ');
+  };
+  const circles = (points: PnlPoint[], cls: string): string => points.map((point) =>
+    `<circle class="${cls}" cx="${x(point.at).toFixed(1)}" cy="${y(point.pnlUsd).toFixed(1)}" r="3"><title>${utc(point.at)} · ${signedUsd(point.pnlUsd)}</title></circle>`,
+  ).join('');
+  const yTicks = Array.from({ length: 5 }, (_, index) => {
+    const value = maxPnl - index / 4 * pnlSpan;
+    const pos = top + index / 4 * plotHeight;
+    return `<line class="${Math.abs(value) < pnlSpan / 100 ? 'll-chart-zero' : 'll-chart-grid'}" x1="${left}" y1="${pos.toFixed(1)}" x2="${width - right}" y2="${pos.toFixed(1)}"/>
+      <text class="ll-chart-axis" x="${left - 8}" y="${(pos + 3).toFixed(1)}" text-anchor="end">${value < 0 ? '−' : ''}$${Math.abs(value).toFixed(1)}</text>`;
+  }).join('');
+  const xTicks = Array.from({ length: 4 }, (_, index) => {
+    const ratio = index / 3;
+    const at = firstAt + timeSpan * ratio;
+    const pos = left + plotWidth * ratio;
+    const date = new Date(at);
+    const label = `${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')} ${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
+    return `<text class="ll-chart-axis" x="${pos.toFixed(1)}" y="${height - 10}" text-anchor="${index === 0 ? 'start' : index === 3 ? 'end' : 'middle'}">${label}</text>`;
+  }).join('');
+
+  return `<div class="ll-panel"><div class="ll-chart-head"><div><h2>${t(lang, 'Накопленный PnL', 'Cumulative PnL')}</h2>
+      <p class="ll-note">${t(lang, 'Только закрытые сделки; открытый плавающий результат не включён.', 'Closed trades only; unrealized PnL is excluded.')}</p></div>${legend}</div>
+    <div class="ll-chart"><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${t(lang, 'График накопленного PnL', 'Cumulative PnL chart')}">
+      ${yTicks}${xTicks}
+      ${series.shadow.length ? `<polyline class="ll-chart-shadow" points="${path(series.shadow)}"/>${circles(series.shadow, 'll-chart-dot-shadow')}` : ''}
+      ${series.live.length ? `<polyline class="ll-chart-real" points="${path(series.live)}"/>${circles(series.live, 'll-chart-dot-real')}` : ''}
+    </svg></div></div>`;
+}
+
 async function render(
   lang: Lang,
   requested: { signalsPage: number; tradesPage: number },
@@ -1185,6 +1299,8 @@ async function render(
         <div class="ll-card"><small>Max drawdown</small><b class="${s.maxDrawdownPct > 0 ? 'neg' : ''}">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}</b><em>${t(lang, 'общая кривая', 'aggregate curve')}</em></div>
         <div class="ll-card"><small>${t(lang, 'Средний spread / круг', 'Average spread / round trip')}</small><b>${s.currentSpreadPct == null ? '—' : `${s.currentSpreadPct.toFixed(4)}%`}</b><em>${s.currentRoundTripCostPct == null ? '—' : `≈${s.currentRoundTripCostPct.toFixed(4)}%`}</em></div>
       </div>
+
+      ${pnlChart(lang)}
 
       <div class="ll-panel"><h2>${t(lang, 'Индивидуальная статистика стратегий', 'Individual strategy statistics')}</h2><div class="ll-table"><table class="ll-strategy-table">
         <thead><tr><th>Strategy</th><th>L2</th><th>Backtest · N / WR / PF</th><th>Forward · closed / open</th><th>Net</th><th>DD / halves</th><th>Gate</th></tr></thead>
