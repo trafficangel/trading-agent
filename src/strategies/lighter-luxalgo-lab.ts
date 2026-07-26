@@ -346,6 +346,10 @@ type LiveTradeRow = {
   exit_order_sent_at: number | null;
   exit_order_accepted_at: number | null;
   exit_position_gone_at: number | null;
+  entry_fill_at: number | null;
+  entry_fill_count: number | null;
+  exit_fill_at: number | null;
+  exit_fill_count: number | null;
 };
 
 type LiveStrategyStateRow = {
@@ -963,7 +967,8 @@ function recentLiveTrades(limit = 30): LiveTradeRow[] {
            exit_signal.received_at exit_signal_received_at,
            entry_started_at,entry_order_sent_at,entry_order_accepted_at,
            entry_position_seen_at,stop_order_sent_at,protected_at,
-           exit_order_sent_at,exit_order_accepted_at,exit_position_gone_at
+           exit_order_sent_at,exit_order_accepted_at,exit_position_gone_at,
+           entry_fill_at,entry_fill_count,exit_fill_at,exit_fill_count
     FROM lighter_lux_live_trades real
     JOIN lighter_lux_signals entry_signal ON entry_signal.id=real.entry_signal_id
     LEFT JOIN lighter_lux_signals exit_signal ON exit_signal.id=real.exit_signal_id
@@ -985,7 +990,8 @@ function closedLiveTrades(): LiveTradeRow[] {
            exit_signal.received_at exit_signal_received_at,
            entry_started_at,entry_order_sent_at,entry_order_accepted_at,
            entry_position_seen_at,stop_order_sent_at,protected_at,
-           exit_order_sent_at,exit_order_accepted_at,exit_position_gone_at
+           exit_order_sent_at,exit_order_accepted_at,exit_position_gone_at,
+           entry_fill_at,entry_fill_count,exit_fill_at,exit_fill_count
     FROM lighter_lux_live_trades real
     JOIN lighter_lux_signals entry_signal ON entry_signal.id=real.entry_signal_id
     LEFT JOIN lighter_lux_signals exit_signal ON exit_signal.id=real.exit_signal_id
@@ -1359,7 +1365,7 @@ function liveTradeRows(rows: LiveTradeRow[], lang: Lang): string {
       row.entry_signal_received_at != null
       && row.entry_order_sent_at != null
     )
-      ? `<br><small>lat L2 ${latency(row.entry_signal_captured_at == null ? null : row.entry_signal_captured_at - row.entry_signal_received_at)} · Q ${latency(row.entry_started_at == null || row.entry_signal_captured_at == null ? null : row.entry_started_at - row.entry_signal_captured_at)} · PRE ${latency(row.entry_started_at == null ? null : row.entry_order_sent_at - row.entry_started_at)} · ACK ${latency(row.entry_order_accepted_at == null ? null : row.entry_order_accepted_at - row.entry_order_sent_at)} · POS ${latency(row.entry_position_seen_at == null ? null : row.entry_position_seen_at - row.entry_order_sent_at)} · SAFE ${latency(row.protected_at == null ? null : row.protected_at - row.entry_signal_received_at)}</small>`
+      ? `<br><small>lat L2 ${latency(row.entry_signal_captured_at == null ? null : row.entry_signal_captured_at - row.entry_signal_received_at)} · Q ${latency(row.entry_started_at == null || row.entry_signal_captured_at == null ? null : row.entry_started_at - row.entry_signal_captured_at)} · PRE ${latency(row.entry_started_at == null ? null : row.entry_order_sent_at - row.entry_started_at)} · ACK ${latency(row.entry_order_accepted_at == null ? null : row.entry_order_accepted_at - row.entry_order_sent_at)} · FILL ${latency(row.entry_fill_at == null ? null : row.entry_fill_at - row.entry_order_sent_at)} · POS ${latency(row.entry_position_seen_at == null ? null : row.entry_position_seen_at - row.entry_order_sent_at)} · SAFE ${latency(row.protected_at == null ? null : row.protected_at - row.entry_signal_received_at)}</small>`
       : '';
     const exitAudit = row.exit_reference_l2 == null
       ? ''
@@ -1368,7 +1374,7 @@ function liveTradeRows(rows: LiveTradeRow[], lang: Lang): string {
       row.exit_signal_received_at != null
       && row.exit_order_sent_at != null
     )
-      ? `<br><small>lat S→O ${latency(row.exit_order_sent_at - row.exit_signal_received_at)} · ACK ${latency(row.exit_order_accepted_at == null ? null : row.exit_order_accepted_at - row.exit_order_sent_at)} · FLAT ${latency(row.exit_position_gone_at == null ? null : row.exit_position_gone_at - row.exit_order_sent_at)}</small>`
+      ? `<br><small>lat S→O ${latency(row.exit_order_sent_at - row.exit_signal_received_at)} · ACK ${latency(row.exit_order_accepted_at == null ? null : row.exit_order_accepted_at - row.exit_order_sent_at)} · FILL ${latency(row.exit_fill_at == null ? null : row.exit_fill_at - row.exit_order_sent_at)} · FLAT ${latency(row.exit_position_gone_at == null ? null : row.exit_position_gone_at - row.exit_order_sent_at)}</small>`
       : '';
     return `<tr>
       <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)} · ${esc(row.symbol)}</b><br><small>#R${row.id} · S${row.entry_signal_id}→${row.exit_signal_id ?? '—'}</small></td>

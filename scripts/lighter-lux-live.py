@@ -30,6 +30,16 @@ class Strategy:
     stop_pct: float
 
 
+@dataclass(frozen=True)
+class FillSummary:
+    price: float | None
+    pnl: float | None
+    fill_at: int | None
+    count: int
+    size: float
+    notional: float
+
+
 STRATEGIES = {
     "sol-lg-mf50": Strategy(2, "SOLUSDT", "SOL", 5.0),
     "eth-cntr-st": Strategy(0, "ETHUSDT", "ETH", 4.0),
@@ -230,20 +240,74 @@ class LiveRunner:
     def fill_summary(
         rows: list[dict[str, Any]],
         account_index: int,
-    ) -> tuple[float | None, float | None]:
+    ) -> FillSummary:
         size = sum(float(row.get("size", 0) or 0) for row in rows)
         if size <= 0:
-            return None, None
-        price = sum(
+            return FillSummary(None, None, None, 0, 0.0, 0.0)
+        notional = sum(
             float(row["price"]) * float(row["size"]) for row in rows
-        ) / size
+        )
+        price = notional / size
         pnl = 0.0
         for row in rows:
             if int(row.get("ask_account_id", -1)) == account_index:
                 pnl += float(row.get("ask_account_pnl", 0) or 0)
             if int(row.get("bid_account_id", -1)) == account_index:
                 pnl += float(row.get("bid_account_pnl", 0) or 0)
-        return price, pnl
+        fill_at = max(
+            (int(row.get("timestamp", 0) or 0) for row in rows),
+            default=0,
+        ) or None
+        return FillSummary(price, pnl, fill_at, len(rows), size, notional)
+
+    async def record_entry_fill_audit(
+        self,
+        trade_id: int,
+        strategy: Strategy,
+        entry_order_id: int,
+        expected_price: float,
+        expected_size: float,
+    ) -> None:
+        try:
+            fills = await self.fills(strategy.market_id, entry_order_id)
+            summary = self.fill_summary(fills, self.account_index)
+            if summary.price is None or summary.fill_at is None:
+                self.log(
+                    "entry_fill_audit_missing",
+                    trade_id=trade_id,
+                    order_id=entry_order_id,
+                )
+                return
+            size_scale, price_scale = self.scales(strategy.market_id)
+            price_mismatch = abs(summary.price - expected_price) > 1 / price_scale
+            size_mismatch = abs(summary.size - abs(expected_size)) > 1 / size_scale
+            audit_error = (
+                f"entry fill mismatch: position {expected_size}@{expected_price}, "
+                f"fills {summary.size}@{summary.price}"
+                if price_mismatch or size_mismatch
+                else None
+            )
+            self.db.execute(
+                """UPDATE lighter_lux_live_trades
+                   SET opened_at=?,entry_fill_at=?,entry_fill_count=?,
+                       error=COALESCE(?,error)
+                   WHERE id=?""",
+                (
+                    summary.fill_at,
+                    summary.fill_at,
+                    summary.count,
+                    audit_error,
+                    trade_id,
+                ),
+            )
+            if audit_error:
+                self.log("entry_fill_mismatch", trade_id=trade_id, error=audit_error)
+        except Exception as exc:
+            self.log(
+                "entry_fill_audit_error",
+                trade_id=trade_id,
+                error=str(exc),
+            )
 
     def open_trade(self) -> sqlite3.Row | None:
         return self.db.execute(
@@ -465,7 +529,7 @@ class LiveRunner:
         quantity: float,
         entry_price: float,
         existing_order_id: int | None = None,
-    ) -> tuple[int, float]:
+    ) -> tuple[int, float, int]:
         size_scale, price_scale = self.scales(strategy.market_id)
         stop_price = entry_price * (
             1 - strategy.stop_pct / 100
@@ -504,7 +568,7 @@ class LiveRunner:
                SET stop_order_index=?,stop_price=?,protected_at=? WHERE id=?""",
             (order_id, stop_price, protected_at, trade_id),
         )
-        return order_id, stop_price
+        return order_id, stop_price, protected_at
 
     async def emergency_close(
         self,
@@ -659,7 +723,7 @@ class LiveRunner:
                     trade_id,
                 ),
             )
-            stop_id, stop_price = await self.place_stop(
+            stop_id, stop_price, protected_at = await self.place_stop(
                 trade_id,
                 strategy,
                 side,
@@ -669,6 +733,13 @@ class LiveRunner:
             self.db.execute(
                 "UPDATE lighter_lux_live_trades SET status='open' WHERE id=?",
                 (trade_id,),
+            )
+            await self.record_entry_fill_audit(
+                trade_id,
+                strategy,
+                order_id,
+                entry_price,
+                quantity,
             )
             self.log(
                 "position_open",
@@ -684,8 +755,7 @@ class LiveRunner:
                 order_ack_ms=entry_order_accepted_at - entry_order_sent_at,
                 order_to_position_ms=entry_position_seen_at
                 - entry_order_sent_at,
-                signal_to_protected_ms=int(time.time() * 1000)
-                - int(signal["received_at"]),
+                signal_to_protected_ms=protected_at - int(signal["received_at"]),
             )
             return "entered", trade_id
         except Exception as exc:
@@ -728,7 +798,9 @@ class LiveRunner:
             "SELECT * FROM lighter_lux_live_trades WHERE id=?", (trade_id,)
         ).fetchone()
         fills = await self.fills(int(row["market_id"]), exit_order_id)
-        exit_price, realized = self.fill_summary(fills, self.account_index)
+        fill_summary = self.fill_summary(fills, self.account_index)
+        exit_price = fill_summary.price
+        realized = fill_summary.pnl
         entry = float(row["entry_price"] or 0)
         quantity = float(row["quantity"] or 0)
         side_sign = 1 if row["side"] == "long" else -1
@@ -760,14 +832,16 @@ class LiveRunner:
         base = float(row["filled_notional_usd"] or row["requested_notional_usd"])
         net_pct = net / base * 100 if base > 0 else 0
         closed_at = int(
-            row["exit_position_gone_at"] or int(time.time() * 1000)
+            fill_summary.fill_at
+            or row["exit_position_gone_at"]
+            or int(time.time() * 1000)
         )
         self.db.execute(
             """UPDATE lighter_lux_live_trades
                SET closed_at=?,exit_price=?,gross_pnl_usd=?,
                    funding_pnl_usd=?,fee_usd=0,net_pnl_usd=?,net_pnl_pct=?,
                    exit_slippage_pct=?,exit_order_index=?,close_reason=?,
-                   status='closed'
+                   exit_fill_at=?,exit_fill_count=?,status='closed'
                WHERE id=?""",
             (
                 closed_at,
@@ -779,6 +853,8 @@ class LiveRunner:
                 exit_slippage_pct,
                 exit_order_id,
                 reason,
+                fill_summary.fill_at,
+                fill_summary.count,
                 trade_id,
             ),
         )
