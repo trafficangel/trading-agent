@@ -50,8 +50,8 @@ export async function luxalgoRoute(app: FastifyInstance): Promise<void> {
 
       // === TRACK C path — LuxAlgo Strategy Builder webhook ===
       if (parsed.data.kind === 'strategy') {
-        // Independent prospective Lighter shadow. This schedules a read-only
-        // L2 capture at signal+300ms and never delays or changes Track C.
+        // Independent prospective Lighter shadow. It samples the in-memory L2
+        // immediately and never changes Track C decisions.
         queueLighterLuxalgoSignal(parsed.data);
         const r = await handleStrategyWebhook(parsed.data);
         // Mirror every Track C webhook to the Logs channel — operator
