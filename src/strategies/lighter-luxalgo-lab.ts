@@ -47,17 +47,17 @@ const STOP_CHECK_MS = 250;
 const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 
 // Selection frozen on 2026-07-26 from commission-net prospective evidence:
-// SOL +7.58%/30, ETH +0.71%/12 (both halves positive), AVAX +3.66%/13
-// (research-only until its negative second half recovers). The earlier BTC
-// STRAT-008 remains excluded; STRAT-015 is a different 5m setup that passed
-// a fresh 161-trade fixed-notional robustness audit. STRAT-016 LTC and
-// STRAT-017 UNI passed the same fixed-notional and chronological audit on
-// 181 trades each. STRAT-018 DOT and STRAT-019 HBAR passed with positive
-// but deliberately conservative 5% safety-stop simulations. BCH and DOGE
-// remain excluded; fresh BNB, AAVE, XLM, TRX, POL, JUP and ADA candidates
-// failed the chronological or profit-factor gate. A fresh SUI candidate
-// advertised PF 1.94 with unit sizing, but fixed-$1,000 normalization exposed
-// PF 0.68 and -2.53%, so it is also excluded.
+// SOL +7.58%/30 and ETH +0.71%/12 (both halves positive). AVAX STRAT-012
+// was removed on 2026-07-26: its second forward half was negative and its
+// fixed-notional backtest drawdown (17.26%) no longer passed this track's
+// admission standard. The earlier BTC STRAT-008 remains excluded; STRAT-015
+// is a different 5m setup that passed a fresh 161-trade fixed-notional audit.
+// STRAT-016 LTC through STRAT-019 HBAR passed the same chronological audit.
+// STRAT-020 AAVE and STRAT-021 BNB were admitted only after full trade-log
+// normalization to $1,000 notional. AAVE stayed positive in every chronological
+// third with a conservative 5% stop; BNB stayed positive in all thirds and on
+// both sides, with no historical trade touching the 5% safety stop. BCH, DOGE,
+// XLM, TRX, POL, JUP, ADA and SUI candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -74,23 +74,6 @@ const STRATEGIES: readonly StrategySpec[] = [
       profitFactor: 1.714,
       netPct: 54.295,
       maxDrawdownPct: 15.12,
-    },
-  },
-  {
-    id: 'avax-nfvg-tc-hw',
-    code: '012',
-    name: 'New FVG · Trend Catcher · HyperWave',
-    symbol: 'AVAXUSDT',
-    asset: 'AVAX',
-    marketId: 9,
-    stopPct: 5,
-    backtest: {
-      period: '2026-03-17 → 2026-05-26',
-      trades: 142,
-      winRatePct: 47.89,
-      profitFactor: 1.81,
-      netPct: 55.58,
-      maxDrawdownPct: 17.26,
     },
   },
   {
@@ -193,6 +176,40 @@ const STRATEGIES: readonly StrategySpec[] = [
       profitFactor: 2.151,
       netPct: 55.507,
       maxDrawdownPct: 5.683,
+    },
+  },
+  {
+    id: 'aave-cntr-strong',
+    code: '020',
+    name: 'Contrarian Any · Strong Confluence',
+    symbol: 'AAVEUSDT',
+    asset: 'AAVE',
+    marketId: 27,
+    stopPct: 5,
+    backtest: {
+      period: '2026-04-07 → 2026-06-15',
+      trades: 152,
+      winRatePct: 66.45,
+      profitFactor: 2.789,
+      netPct: 14.843,
+      maxDrawdownPct: 5.396,
+    },
+  },
+  {
+    id: 'bnb-fvg-tc-hw50',
+    code: '021',
+    name: 'FVG Mitigated · Trend Catcher · HyperWave 50',
+    symbol: 'BNBUSDT',
+    asset: 'BNB',
+    marketId: 25,
+    stopPct: 5,
+    backtest: {
+      period: '2026-04-07 → 2026-06-15',
+      trades: 180,
+      winRatePct: 53.89,
+      profitFactor: 1.85,
+      netPct: 4.968,
+      maxDrawdownPct: 3.759,
     },
   },
 ] as const;
@@ -550,8 +567,8 @@ function executionSnapshot(spec: StrategySpec): ExecutionSnapshot | { error: str
     return { error: `${spec.asset.toLowerCase()}_stale_socket_${socketAgeMs}ms` };
   // Ticker nonce is engine-global while an individual market's book nonce
   // advances only when that book changes. Comparing them rejects perfectly
-  // healthy, quieter books (AVAX can lag the ticker by thousands of engine
-  // events). Per-book begin_nonce continuity plus socket heartbeat is the
+  // healthy, quieter altcoin books, which can lag the ticker by thousands of
+  // engine events. Per-book begin_nonce continuity plus socket heartbeat is the
   // valid freshness check.
 
   const bids = [...feed.bids.entries()].sort((a, b) => b[0] - a[0]) as PriceLevel[];
