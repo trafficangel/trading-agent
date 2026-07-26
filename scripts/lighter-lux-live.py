@@ -1032,6 +1032,61 @@ class LiveRunner:
         await self.finalize(int(trade["id"]), reason, close_id, funding)
         return True
 
+    async def safety_close(
+        self,
+        trade: sqlite3.Row,
+        strategy: Strategy,
+        position: dict[str, Any],
+        reason: str,
+        error: str,
+        cancel_stop: bool,
+    ) -> None:
+        stop_id = trade["stop_order_index"]
+        sent_at = int(time.time() * 1000)
+        close_id = await self.emergency_close(strategy, position)
+        accepted_at = int(time.time() * 1000)
+        self.db.execute(
+            """UPDATE lighter_lux_live_trades
+               SET status='closing',exit_order_index=?,close_reason=?,error=?,
+                   exit_order_sent_at=?,exit_order_accepted_at=?
+               WHERE id=?""",
+            (
+                close_id,
+                reason,
+                error,
+                sent_at,
+                accepted_at,
+                trade["id"],
+            ),
+        )
+        if cancel_stop and stop_id is not None:
+            _, cancel_response, cancel_error = await self.signer.cancel_order(
+                market_index=strategy.market_id,
+                order_index=int(stop_id),
+                api_key_index=self.key_index,
+            )
+            if not self.response_ok(cancel_response, cancel_error):
+                self.log(
+                    "safety_stop_cancel_failed",
+                    trade_id=trade["id"],
+                    stop_order=stop_id,
+                    error=cancel_error,
+                )
+        if await self.wait_position(strategy.market_id, False) is not None:
+            self.db.execute(
+                """UPDATE lighter_lux_live_trades
+                   SET status='error',error=? WHERE id=?""",
+                (f"{error}; safety close accepted but position remains", trade["id"]),
+            )
+            raise RuntimeError("safety close accepted but position remains")
+        gone_at = int(time.time() * 1000)
+        self.db.execute(
+            """UPDATE lighter_lux_live_trades
+               SET exit_position_gone_at=? WHERE id=?""",
+            (gone_at, trade["id"]),
+        )
+        await self.finalize(int(trade["id"]), reason, close_id)
+
     async def reconcile_open_trade(self, trade: sqlite3.Row) -> None:
         strategy = STRATEGIES[trade["strategy_id"]]
         position = await self.market_position(strategy.market_id)
@@ -1073,10 +1128,32 @@ class LiveRunner:
             ),
         )
         expected_side = "long" if int(position["sign"]) > 0 else "short"
+        size_scale, price_scale = self.scales(strategy.market_id)
+        exchange_size = abs(float(position["position"]))
+        exchange_entry = float(position["avg_entry_price"])
+        mismatches: list[str] = []
         if expected_side != trade["side"]:
-            close_id = await self.emergency_close(strategy, position)
-            await self.wait_position(strategy.market_id, False)
-            await self.finalize(int(trade["id"]), "side_mismatch", close_id)
+            mismatches.append(f"side {expected_side} != {trade['side']}")
+        if (
+            trade["quantity"] is None
+            or abs(exchange_size - abs(float(trade["quantity"]))) > 1 / size_scale
+        ):
+            mismatches.append(f"size {exchange_size} != {trade['quantity']}")
+        if (
+            trade["entry_price"] is None
+            or abs(exchange_entry - float(trade["entry_price"])) > 1 / price_scale
+        ):
+            mismatches.append(f"entry {exchange_entry} != {trade['entry_price']}")
+        if mismatches:
+            error = f"position mismatch: {'; '.join(mismatches)}"
+            await self.safety_close(
+                trade,
+                strategy,
+                position,
+                "position_mismatch",
+                error,
+                cancel_stop=True,
+            )
             return
         active = await self.active_orders(strategy.market_id)
         stop_id = trade["stop_order_index"]
@@ -1131,34 +1208,17 @@ class LiveRunner:
             )
             if current_error is None:
                 return
-            self.db.execute(
-                """UPDATE lighter_lux_live_trades
-                   SET error=? WHERE id=?""",
-                (f"invalid exchange stop: {current_error}", trade["id"]),
-            )
-            if current_error != "missing" and stop_id is not None:
-                _, cancel_response, cancel_error = await self.signer.cancel_order(
-                    market_index=strategy.market_id,
-                    order_index=int(stop_id),
-                    api_key_index=self.key_index,
-                )
-                if not self.response_ok(cancel_response, cancel_error):
-                    self.log(
-                        "invalid_stop_cancel_failed",
-                        trade_id=trade["id"],
-                        stop_order=stop_id,
-                        error=cancel_error,
-                    )
-            close_id = await self.emergency_close(strategy, current_position)
-            await self.wait_position(strategy.market_id, False)
-            await self.finalize(
-                int(trade["id"]),
+            await self.safety_close(
+                trade,
+                strategy,
+                current_position,
                 (
                     "missing_stop_emergency_close"
                     if current_error == "missing"
                     else "invalid_stop_emergency_close"
                 ),
-                close_id,
+                f"invalid exchange stop: {current_error}",
+                cancel_stop=current_error != "missing",
             )
 
     async def process_signal(self, signal: sqlite3.Row) -> None:
