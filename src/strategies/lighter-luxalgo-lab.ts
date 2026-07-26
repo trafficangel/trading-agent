@@ -879,7 +879,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-table{width:100%;overflow:hidden}.ll-table table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:11px}.ll-table th,.ll-table td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border);white-space:normal;overflow-wrap:anywhere;vertical-align:middle}.ll-table th{color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.025em}.ll-table small{color:var(--text-faint);font-size:9px}.ll-table .num{font-variant-numeric:tabular-nums}
 .ll-strategy-table th:nth-child(1){width:22%}.ll-strategy-table th:nth-child(2){width:7%}.ll-strategy-table th:nth-child(3){width:20%}.ll-strategy-table th:nth-child(4){width:14%}.ll-strategy-table th:nth-child(5){width:13%}.ll-strategy-table th:nth-child(6){width:10%}.ll-strategy-table th:nth-child(7){width:14%}
 .ll-signal-table th:nth-child(1){width:22%}.ll-signal-table th:nth-child(2){width:16%}.ll-signal-table th:nth-child(3){width:20%}.ll-signal-table th:nth-child(4){width:18%}.ll-signal-table th:nth-child(5){width:24%}
-.ll-trades th:nth-child(1){width:14%}.ll-trades th:nth-child(2){width:19%}.ll-trades th:nth-child(3){width:11%}.ll-trades th:nth-child(4){width:13%}.ll-trades th:nth-child(5){width:16%}.ll-trades th:nth-child(6){width:13%}.ll-trades th:nth-child(7){width:14%}
+.ll-trades th:nth-child(1){width:13%}.ll-trades th:nth-child(2){width:18%}.ll-trades th:nth-child(3){width:10%}.ll-trades th:nth-child(4){width:12%}.ll-trades th:nth-child(5){width:14%}.ll-trades th:nth-child(6){width:12%}.ll-trades th:nth-child(7){width:8%}.ll-trades th:nth-child(8){width:13%}
 .ll-tech th:nth-child(1){width:20%}.ll-tech th:nth-child(2){width:18%}.ll-tech th:nth-child(3){width:15%}.ll-tech th:nth-child(4){width:18%}.ll-tech th:nth-child(5){width:29%}
 .ll-note{font-size:11px;color:var(--text-faint);line-height:1.45}.ll-empty{padding:18px;text-align:center;color:var(--text-faint)}.collect{color:#bd91ff}.pass{color:#38d996}.fail{color:#ff6577}
 .ll-details{padding:0}.ll-details>summary{cursor:pointer;list-style:none;padding:14px 15px;font-size:15px;font-weight:700}.ll-details>summary::-webkit-details-marker{display:none}.ll-details>summary::after{content:'＋';float:right;color:var(--text-faint)}.ll-details[open]>summary::after{content:'−'}.ll-details[open]>.ll-table{padding:0 15px 14px}
@@ -944,7 +944,7 @@ function openTradeMark(row: TradeRow): {
 }
 
 function tradeRows(rows: TradeRow[], lang: Lang): string {
-  if (!rows.length) return `<tr><td colspan="7" class="ll-empty">${t(lang, 'Lighter-shadow сделок пока нет.', 'No Lighter shadow trades yet.')}</td></tr>`;
+  if (!rows.length) return `<tr><td colspan="8" class="ll-empty">${t(lang, 'Lighter-shadow сделок пока нет.', 'No Lighter shadow trades yet.')}</td></tr>`;
   return rows.map((row) => {
     const spec = STRATEGY_BY_ID.get(row.strategy_id);
     const mark = openTradeMark(row);
@@ -965,7 +965,8 @@ function tradeRows(rows: TradeRow[], lang: Lang): string {
       <td class="num">${row.entry_price.toFixed(5)}</td>
       <td class="num"><b>${stopPct == null ? '—' : `${stopPct.toFixed(1)}%`}</b><br><small>${stopPrice?.toFixed(5) ?? '—'}</small></td>
       <td class="num">${row.closed_at == null ? '—' : (row.exit_price?.toFixed(5) ?? '—')}</td>
-      <td class="${pnlClass(net)}"><b>${complete || mark ? `${signedPct(net)} · ${signedUsd(net / 100 * row.notional_usd)}${mark ? '<span class="ll-live">LIVE</span>' : ''}` : (row.closed_at == null ? t(lang, 'ожидаем L2', 'waiting for L2') : t(lang, 'неполные данные', 'incomplete'))}</b><br><small>fee 0 · fund ${funding == null ? '—' : signedPct(funding, 4)} · price ${gross == null ? '—' : signedPct(gross)}</small></td>
+      <td>${row.closed_at == null ? '<span class="ll-live">LIVE</span>' : `<span>${t(lang, 'ЗАКРЫТА', 'CLOSED')}</span>`}</td>
+      <td class="${pnlClass(net)}"><b>${complete || mark ? `${signedPct(net)} · ${signedUsd(net / 100 * row.notional_usd)}` : (row.closed_at == null ? t(lang, 'ожидаем L2', 'waiting for L2') : t(lang, 'неполные данные', 'incomplete'))}</b><br><small>fee 0 · fund ${funding == null ? '—' : signedPct(funding, 4)} · price ${gross == null ? '—' : signedPct(gross)}</small></td>
     </tr>`;
   }).join('');
 }
@@ -1055,7 +1056,7 @@ async function render(lang: Lang): Promise<string> {
       </div>
 
       <div class="ll-panel"><h2>${t(lang, 'Сделки', 'Trades')}</h2><div class="ll-table"><table class="ll-trades">
-        <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>${t(lang, 'Цена входа', 'Entry price')}</th><th>${t(lang, 'Стоп-лосс', 'Stop-loss')}</th><th>${t(lang, 'Цена выхода', 'Exit price')}</th><th>Net after costs</th></tr></thead>
+        <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>${t(lang, 'Цена входа', 'Entry price')}</th><th>${t(lang, 'Стоп-лосс', 'Stop-loss')}</th><th>${t(lang, 'Цена выхода', 'Exit price')}</th><th>${t(lang, 'Статус', 'Status')}</th><th>Net after costs</th></tr></thead>
         <tbody>${tradeRows(trades, lang)}</tbody>
       </table></div></div>
 
