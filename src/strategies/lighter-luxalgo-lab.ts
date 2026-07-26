@@ -258,9 +258,15 @@ type SignalRow = {
   sell_slippage_pct: number | null;
   funding_rate_pct_h: number | null;
   shadow_entry_trade_id: number | null;
+  shadow_entry_trade_status: 'open' | 'closed' | null;
   shadow_exit_trade_id: number | null;
+  shadow_exit_trade_status: 'open' | 'closed' | null;
   live_entry_trade_id: number | null;
+  live_entry_trade_status: 'opening' | 'open' | 'closing' | 'closed' | 'error' | null;
   live_exit_trade_id: number | null;
+  live_exit_trade_status: 'opening' | 'open' | 'closing' | 'closed' | 'error' | null;
+  live_decision: 'enter' | 'close' | 'skip' | 'error' | null;
+  live_decision_reason: string | null;
 };
 
 type OpenTradeRow = {
@@ -911,13 +917,26 @@ function recentSignals(limit: number, offset: number): SignalRow[] {
            signal.funding_rate_pct_h,
            (SELECT id FROM lighter_lux_trades
             WHERE entry_signal_id=signal.id LIMIT 1) shadow_entry_trade_id,
+           (SELECT CASE WHEN closed_at IS NULL THEN 'open' ELSE 'closed' END
+            FROM lighter_lux_trades
+            WHERE entry_signal_id=signal.id LIMIT 1) shadow_entry_trade_status,
            (SELECT id FROM lighter_lux_trades
             WHERE exit_signal_id=signal.id ORDER BY id LIMIT 1) shadow_exit_trade_id,
+           (SELECT CASE WHEN closed_at IS NULL THEN 'open' ELSE 'closed' END
+            FROM lighter_lux_trades
+            WHERE exit_signal_id=signal.id ORDER BY id LIMIT 1) shadow_exit_trade_status,
            (SELECT id FROM lighter_lux_live_trades
             WHERE entry_signal_id=signal.id LIMIT 1) live_entry_trade_id,
+           (SELECT status FROM lighter_lux_live_trades
+            WHERE entry_signal_id=signal.id LIMIT 1) live_entry_trade_status,
            (SELECT id FROM lighter_lux_live_trades
-            WHERE exit_signal_id=signal.id ORDER BY id LIMIT 1) live_exit_trade_id
+            WHERE exit_signal_id=signal.id ORDER BY id LIMIT 1) live_exit_trade_id,
+           (SELECT status FROM lighter_lux_live_trades
+            WHERE exit_signal_id=signal.id ORDER BY id LIMIT 1) live_exit_trade_status,
+           decision.decision live_decision,
+           decision.reason live_decision_reason
     FROM lighter_lux_signals signal
+    LEFT JOIN lighter_lux_live_decisions decision ON decision.signal_id=signal.id
     WHERE signal.strategy_id IN (${SQL_MARKS})
     ORDER BY signal.received_at DESC
     LIMIT ? OFFSET ?`).all(...STRATEGY_IDS, limit, offset);
@@ -1252,7 +1271,8 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-live{display:inline-block;margin-left:5px;padding:2px 5px;border-radius:999px;background:rgba(56,217,150,.12);color:#38d996;font-size:9px;letter-spacing:.04em}
 .ll-table{width:100%;overflow:hidden}.ll-table table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:11px}.ll-table th,.ll-table td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border);white-space:normal;overflow-wrap:anywhere;vertical-align:middle}.ll-table th{color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.025em}.ll-table small{color:var(--text-faint);font-size:9px}.ll-table .num{font-variant-numeric:tabular-nums}
 .ll-strategy-table th:nth-child(1){width:22%}.ll-strategy-table th:nth-child(2){width:7%}.ll-strategy-table th:nth-child(3){width:20%}.ll-strategy-table th:nth-child(4){width:14%}.ll-strategy-table th:nth-child(5){width:13%}.ll-strategy-table th:nth-child(6){width:10%}.ll-strategy-table th:nth-child(7){width:14%}
-.ll-signal-table th:nth-child(1){width:22%}.ll-signal-table th:nth-child(2){width:16%}.ll-signal-table th:nth-child(3){width:20%}.ll-signal-table th:nth-child(4){width:18%}.ll-signal-table th:nth-child(5){width:24%}
+.ll-signal-table th:nth-child(1){width:12%}.ll-signal-table th:nth-child(2){width:6%}.ll-signal-table th:nth-child(3){width:12%}.ll-signal-table th:nth-child(4){width:11%}.ll-signal-table th:nth-child(5){width:13%}.ll-signal-table th:nth-child(6){width:12%}.ll-signal-table th:nth-child(7){width:17%}.ll-signal-table th:nth-child(8){width:17%}
+.ll-signal-table td:nth-child(2){font-weight:750;font-variant-numeric:tabular-nums}.ll-trade-ref{display:block;white-space:nowrap;font-variant-numeric:tabular-nums}.ll-signal-status{display:inline-block;padding:2px 6px;border-radius:999px;font-size:9px;font-weight:800;letter-spacing:.025em;white-space:nowrap}.ll-signal-status.work{background:rgba(56,217,150,.12);color:#38d996}.ll-signal-status.done{background:rgba(92,163,255,.12);color:#76adff}.ll-signal-status.skip{background:rgba(255,190,92,.12);color:#ffc56e}.ll-signal-status.shadow{background:rgba(163,106,255,.13);color:#bd91ff}.ll-signal-status.error{background:rgba(255,101,119,.12);color:#ff6577}.ll-signal-status.wait{background:rgba(255,255,255,.06);color:var(--text-dim)}
 .ll-trades th:nth-child(1){width:13%}.ll-trades th:nth-child(2){width:18%}.ll-trades th:nth-child(3){width:10%}.ll-trades th:nth-child(4){width:12%}.ll-trades th:nth-child(5){width:14%}.ll-trades th:nth-child(6){width:12%}.ll-trades th:nth-child(7){width:8%}.ll-trades th:nth-child(8){width:13%}
 .ll-tech th:nth-child(1){width:20%}.ll-tech th:nth-child(2){width:18%}.ll-tech th:nth-child(3){width:15%}.ll-tech th:nth-child(4){width:18%}.ll-tech th:nth-child(5){width:29%}
 .ll-note{font-size:11px;color:var(--text-faint);line-height:1.45}.ll-empty{padding:18px;text-align:center;color:var(--text-faint)}.collect{color:#bd91ff}.pass{color:#38d996}.fail{color:#ff6577}
@@ -1260,7 +1280,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-details{padding:0}.ll-details>summary{cursor:pointer;list-style:none;padding:14px 15px;font-size:15px;font-weight:700}.ll-details>summary::-webkit-details-marker{display:none}.ll-details>summary::after{content:'＋';float:right;color:var(--text-faint)}.ll-details[open]>summary::after{content:'−'}.ll-details[open]>.ll-table{padding:0 15px 14px}
 .ll-chart-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}.ll-chart-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px}.ll-chart-legend span{display:flex;align-items:center;gap:6px;color:var(--text-dim)}.ll-chart-legend i{width:18px;height:3px;border-radius:2px}.ll-chart-legend .shadow i{background:#a36aff}.ll-chart-legend .real i{background:#38d996}.ll-chart-legend b{font-variant-numeric:tabular-nums}.ll-chart{width:100%;margin-top:8px;overflow:hidden}.ll-chart svg{display:block;width:100%;height:auto;min-height:190px}.ll-chart-grid{stroke:rgba(255,255,255,.075);stroke-width:1}.ll-chart-zero{stroke:rgba(255,255,255,.24);stroke-width:1}.ll-chart-axis{fill:var(--text-faint);font-size:10px;font-family:inherit}.ll-chart-shadow{fill:none;stroke:#a36aff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-real{fill:none;stroke:#38d996;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-dot-shadow{fill:#a36aff}.ll-chart-dot-real{fill:#38d996}.ll-chart-empty{display:grid;place-items:center;min-height:170px;color:var(--text-faint);font-size:12px}
 .ll-live-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px;margin:12px 0}.ll-live-metric{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.015);display:grid;gap:3px}.ll-live-metric small{font-size:9px;color:var(--text-faint);text-transform:uppercase}.ll-live-metric b{font-size:15px;font-variant-numeric:tabular-nums}.ll-live-metric em{font-size:9px;color:var(--text-faint);font-style:normal}.ll-live-strategy th:nth-child(1){width:25%}.ll-live-strategy th:nth-child(2){width:11%}.ll-live-strategy th:nth-child(3){width:10%}.ll-live-strategy th:nth-child(4){width:12%}.ll-live-strategy th:nth-child(5){width:12%}.ll-live-strategy th:nth-child(6){width:18%}.ll-live-strategy th:nth-child(7){width:12%}
-@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}}`;
+@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-signal-table th:nth-child(3),.ll-signal-table td:nth-child(3),.ll-signal-table th:nth-child(8),.ll-signal-table td:nth-child(8){display:none}.ll-signal-table th:nth-child(1){width:17%}.ll-signal-table th:nth-child(2){width:9%}.ll-signal-table th:nth-child(4){width:17%}.ll-signal-table th:nth-child(5){width:17%}.ll-signal-table th:nth-child(6){width:16%}.ll-signal-table th:nth-child(7){width:24%}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}}`;
 
 export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
   const s = summary();
@@ -1437,8 +1457,86 @@ function liveStrategyRows(rows: LiveStrategyStateRow[], lang: Lang): string {
   }).join('');
 }
 
+function linkedTrade(
+  id: number | null,
+  status: SignalRow['shadow_entry_trade_status'] | SignalRow['live_entry_trade_status'],
+  real: boolean,
+  lang: Lang,
+): string {
+  if (id == null) return '<span class="ll-trade-ref">—</span>';
+  const label = status === 'closed'
+    ? t(lang, 'отработана', 'completed')
+    : status === 'error'
+      ? t(lang, 'ошибка', 'error')
+      : t(lang, 'в работе', 'active');
+  const statusClass = status === 'closed' ? 'done' : status === 'error' ? 'error' : 'work';
+  return `<span class="ll-trade-ref"><b>#${real ? 'R' : ''}${id}</b> · <span class="${statusClass}">${label}</span></span>`;
+}
+
+function skipReason(reason: string | null, lang: Lang): string {
+  if (!reason) return t(lang, 'Real-сделка не создана', 'No real trade created');
+  const occupied = reason.match(/^global slot occupied by (.+)$/);
+  if (occupied) {
+    const spec = STRATEGY_BY_ID.get(occupied[1]!);
+    const owner = spec ? `STRAT-${spec.code} · ${spec.asset}` : occupied[1]!;
+    return t(lang, `Real-слот занят: ${owner}`, `Real slot occupied: ${owner}`);
+  }
+  if (reason === 'live disabled') return t(lang, 'Реальная торговля выключена', 'Live trading is disabled');
+  if (reason === 'strategy exit without open live trade')
+    return t(lang, 'Нет открытой Real-сделки для выхода', 'No open real trade to exit');
+  return reason;
+}
+
+function signalLifecycle(
+  row: SignalRow,
+  latency: number | null,
+  lang: Lang,
+): { label: string; css: string; detail: string } {
+  const liveStatuses = [row.live_entry_trade_status, row.live_exit_trade_status]
+    .filter((status): status is NonNullable<typeof status> => status != null);
+  const detail = latency == null ? '' : `${latency} ms`;
+  if (row.capture_status !== 'captured') {
+    return {
+      label: t(lang, 'ОШИБКА ДАННЫХ', 'DATA ERROR'),
+      css: 'error',
+      detail: row.capture_error ?? row.capture_status,
+    };
+  }
+  if (row.live_decision === 'error' || liveStatuses.includes('error')) {
+    return {
+      label: t(lang, 'ОШИБКА', 'ERROR'),
+      css: 'error',
+      detail: row.live_decision_reason ?? detail,
+    };
+  }
+  if (row.live_decision === 'skip') {
+    return {
+      label: t(lang, 'ПРОПУЩЕН', 'SKIPPED'),
+      css: 'skip',
+      detail: skipReason(row.live_decision_reason, lang),
+    };
+  }
+  if (liveStatuses.some((status) => status === 'opening' || status === 'open' || status === 'closing')) {
+    return { label: t(lang, 'В РАБОТЕ', 'ACTIVE'), css: 'work', detail };
+  }
+  if (liveStatuses.includes('closed')) {
+    return { label: t(lang, 'ОТРАБОТАН', 'COMPLETED'), css: 'done', detail };
+  }
+  if (row.live_decision === 'enter' || row.live_decision === 'close') {
+    return { label: t(lang, 'ОБРАБОТКА', 'PROCESSING'), css: 'wait', detail };
+  }
+  if (row.shadow_entry_trade_id != null || row.shadow_exit_trade_id != null) {
+    return {
+      label: t(lang, 'ТОЛЬКО SHADOW', 'SHADOW ONLY'),
+      css: 'shadow',
+      detail: t(lang, 'Real-runner ещё не обрабатывал', 'Not processed by the real runner'),
+    };
+  }
+  return { label: t(lang, 'БЕЗ СДЕЛКИ', 'NO TRADE'), css: 'wait', detail };
+}
+
 function signalRows(rows: SignalRow[], lang: Lang): string {
-  if (!rows.length) return `<tr><td colspan="5" class="ll-empty">${t(lang, 'Ждём первый alert.', 'Waiting for the first alert.')}</td></tr>`;
+  if (!rows.length) return `<tr><td colspan="8" class="ll-empty">${t(lang, 'Ждём первый alert.', 'Waiting for the first alert.')}</td></tr>`;
   return rows.map((row) => {
     const spec = STRATEGY_BY_ID.get(row.strategy_id);
     const price = row.side === 'long' ? row.buy_vwap_1000 : row.sell_vwap_1000;
@@ -1448,22 +1546,31 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
       : row.side === 'long'
         ? (price - row.source_price) / row.source_price * 100
         : (row.source_price - price) / row.source_price * 100;
-    const shadowTrades = [...new Set([
-      row.shadow_exit_trade_id,
-      row.shadow_entry_trade_id,
-    ].filter((id): id is number => id != null))];
-    const liveTrades = [...new Set([
-      row.live_exit_trade_id,
-      row.live_entry_trade_id,
-    ].filter((id): id is number => id != null))];
-    const tradeRefs = [
-      shadowTrades.length ? `Shadow #${shadowTrades.join('/#')}` : 'Shadow —',
-      liveTrades.length ? `Real #R${liveTrades.join('/#R')}` : 'Real —',
-    ].join(' · ');
+    const shadowRefs = [
+      row.shadow_exit_trade_id != null
+        ? linkedTrade(row.shadow_exit_trade_id, row.shadow_exit_trade_status, false, lang)
+        : '',
+      row.shadow_entry_trade_id != null && row.shadow_entry_trade_id !== row.shadow_exit_trade_id
+        ? linkedTrade(row.shadow_entry_trade_id, row.shadow_entry_trade_status, false, lang)
+        : '',
+    ].filter(Boolean).join('') || '—';
+    const liveRefs = [
+      row.live_exit_trade_id != null
+        ? linkedTrade(row.live_exit_trade_id, row.live_exit_trade_status, true, lang)
+        : '',
+      row.live_entry_trade_id != null && row.live_entry_trade_id !== row.live_exit_trade_id
+        ? linkedTrade(row.live_entry_trade_id, row.live_entry_trade_status, true, lang)
+        : '',
+    ].filter(Boolean).join('') || '—';
+    const lifecycle = signalLifecycle(row, latency, lang);
     return `<tr>
-      <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)} · ${esc(row.symbol)}</b><br><small>${t(lang, 'Сигнал', 'Signal')} #${row.id} · ${tradeRefs}</small></td>
-      <td>${utc(row.received_at)}</td><td class="${row.side === 'long' ? 'pos' : 'neg'}"><b>${row.action.toUpperCase()} · ${row.side.toUpperCase()}</b></td>
-      <td class="${row.capture_status === 'captured' ? 'pos' : 'neg'}"><b>${row.capture_status === 'captured' ? `✓ ${latency ?? 0} ms` : esc(row.capture_error ?? row.capture_status)}</b></td>
+      <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)}</b><br><small>${esc(row.symbol)}</small></td>
+      <td>#${row.id}</td>
+      <td>${utc(row.received_at)}</td>
+      <td class="${row.side === 'long' ? 'pos' : 'neg'}"><b>${row.action.toUpperCase()}<br>${row.side.toUpperCase()}</b></td>
+      <td>${shadowRefs}</td>
+      <td>${liveRefs}</td>
+      <td><span class="ll-signal-status ${lifecycle.css}">${lifecycle.label}</span>${lifecycle.detail ? `<br><small>${esc(lifecycle.detail)}</small>` : ''}</td>
       <td class="num">${row.source_price?.toFixed(5) ?? '—'} → ${price?.toFixed(5) ?? '—'}<br><small>spread ${row.spread_pct == null ? '—' : `${row.spread_pct.toFixed(4)}%`} · Δ <span class="${deviation != null && deviation > 0.2 ? 'neg' : ''}">${deviation == null ? '—' : signedPct(deviation, 4)}</span></small></td>
     </tr>`;
   }).join('');
@@ -1613,7 +1720,7 @@ async function render(
 
       <div class="ll-panel" id="signal-history"><h2>${t(lang, 'История сигналов', 'Signal history')}</h2>
         <div class="ll-table"><table class="ll-signal-table">
-          <thead><tr><th>Strategy</th><th>${t(lang, 'Время UTC', 'Time UTC')}</th><th>Event</th><th>${t(lang, 'Обработка', 'Processing')}</th><th>Lux → Lighter / spread / Δ</th></tr></thead>
+          <thead><tr><th>Strategy</th><th>${t(lang, 'Сигнал №', 'Signal #')}</th><th>${t(lang, 'Время UTC', 'Time UTC')}</th><th>Event</th><th>Shadow-${t(lang, 'сделка', 'trade')}</th><th>Real-${t(lang, 'сделка', 'trade')}</th><th>${t(lang, 'Статус сигнала', 'Signal status')}</th><th>Lux → Lighter / spread / Δ</th></tr></thead>
           <tbody>${signalRows(signals, lang)}</tbody>
         </table></div>
         ${pager({ lang, page: signalsPage, total: signalsTotal, pageSize: SIGNAL_PAGE_SIZE, signalsPage, tradesPage, target: 'signals' })}
