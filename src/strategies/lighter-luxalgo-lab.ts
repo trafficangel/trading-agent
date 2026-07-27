@@ -66,8 +66,12 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // it and must not do so until at least 20 prospective closes pass the gate.
 // STRAT-022 BNB is shadow-only under the same rule; its full 180-trade log
 // stayed positive in both halves and every chronological third after
-// fixed-notional normalization. BCH, DOGE, XLM, TRX, POL, JUP, ADA and SUI
-// candidates remain excluded.
+// fixed-notional normalization. STRAT-023 is an independent two-sided BNB
+// setup. After exact entry/exit-price normalization and a conservative 5%
+// safety stop, its long and short books, both chronological halves and the
+// portfolio without its five best trades all remained profitable. It is also
+// shadow-only and is deliberately absent from the Python real runner. BCH,
+// DOGE, XLM, TRX, POL, JUP, ADA and SUI candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -242,12 +246,29 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 7.132,
     },
   },
+  {
+    id: 'bnb-cntr-hw-weak',
+    code: '023',
+    name: 'Contrarian Normal · HyperWave · Weak Confluence',
+    symbol: 'BNBUSDT',
+    asset: 'BNB',
+    marketId: 25,
+    stopPct: 5,
+    backtest: {
+      period: '2026-03-17 → 2026-06-14',
+      trades: 117,
+      winRatePct: 69.23,
+      profitFactor: 2.604,
+      netPct: 39.514,
+      maxDrawdownPct: 6.327,
+    },
+  },
 ] as const;
 
 const STRATEGY_BY_ID = new Map(STRATEGIES.map((spec) => [spec.id, spec]));
 const STRATEGY_IDS = STRATEGIES.map((spec) => spec.id);
 const SQL_MARKS = STRATEGIES.map(() => '?').join(', ');
-const ASSET_LABEL = STRATEGIES.map((spec) => spec.asset).join(' · ');
+const ASSET_LABEL = [...new Set(STRATEGIES.map((spec) => spec.asset))].join(' · ');
 const CODE_LABEL = STRATEGIES.map((spec) => spec.code).join(' · ');
 
 type FeedState = {
