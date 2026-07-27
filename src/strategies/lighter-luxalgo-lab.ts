@@ -1419,7 +1419,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-live{display:inline-block;margin-left:5px;padding:2px 5px;border-radius:999px;background:rgba(56,217,150,.12);color:#38d996;font-size:9px;letter-spacing:.04em}
 .ll-table{width:100%;overflow:hidden}.ll-table table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:11px}.ll-table th,.ll-table td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border);white-space:normal;overflow-wrap:anywhere;vertical-align:middle}.ll-table th{color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.025em}.ll-table small{color:var(--text-faint);font-size:9px}.ll-table .num{font-variant-numeric:tabular-nums}
 .ll-strategy-table{font-size:10px!important}.ll-strategy-table th,.ll-strategy-table td{padding:9px 6px!important;white-space:nowrap!important;overflow-wrap:normal!important;overflow:hidden;text-overflow:clip}.ll-strategy-table small{display:inline;font-size:8px}.ll-strategy-table th:nth-child(1){width:24%}.ll-strategy-table th:nth-child(2){width:7%}.ll-strategy-table th:nth-child(3){width:20%}.ll-strategy-table th:nth-child(4){width:14%}.ll-strategy-table th:nth-child(5){width:11%}.ll-strategy-table th:nth-child(6){width:12%}.ll-strategy-table th:nth-child(7){width:12%}
-.ll-signal-table{font-size:10px!important}.ll-signal-table th,.ll-signal-table td{padding:9px 6px!important;white-space:nowrap!important;overflow-wrap:normal!important;overflow:hidden;text-overflow:clip}.ll-signal-table small{display:inline;font-size:8px}.ll-signal-table th:nth-child(1){width:14%}.ll-signal-table th:nth-child(2){width:6%}.ll-signal-table th:nth-child(3){width:15%}.ll-signal-table th:nth-child(4){width:11%}.ll-signal-table th:nth-child(5){width:18%}.ll-signal-table th:nth-child(6){width:16%}.ll-signal-table th:nth-child(7){width:20%}.ll-signal-table td:nth-child(5),.ll-signal-table td:nth-child(6),.ll-signal-table td:nth-child(7){white-space:normal!important;overflow:visible;line-height:1.5}.ll-signal-table td:nth-child(2){font-weight:750;font-variant-numeric:tabular-nums}.ll-signal-table .ll-trade-ref{display:block;white-space:nowrap;font-variant-numeric:tabular-nums}.ll-signal-status{display:inline-block;padding:2px 6px;border-radius:999px;font-size:9px;font-weight:800;letter-spacing:.025em;white-space:nowrap}.ll-signal-status.work{background:rgba(56,217,150,.12);color:#38d996}.ll-signal-status.done{background:rgba(92,163,255,.12);color:#76adff}.ll-signal-status.skip{background:rgba(255,190,92,.12);color:#ffc56e}.ll-signal-status.shadow{background:rgba(163,106,255,.13);color:#bd91ff}.ll-signal-status.error{background:rgba(255,101,119,.12);color:#ff6577}.ll-signal-status.wait{background:rgba(255,255,255,.06);color:var(--text-dim)}
+.ll-signal-table{font-size:9px!important}.ll-signal-table th,.ll-signal-table td{padding:7px 6px!important;white-space:nowrap!important;overflow-wrap:normal!important;overflow:hidden;text-overflow:clip}.ll-signal-table small{display:inline;font-size:8px}.ll-signal-table th:nth-child(1){width:14%}.ll-signal-table th:nth-child(2){width:6%}.ll-signal-table th:nth-child(3){width:15%}.ll-signal-table th:nth-child(4){width:11%}.ll-signal-table th:nth-child(5){width:20%}.ll-signal-table th:nth-child(6){width:18%}.ll-signal-table th:nth-child(7){width:16%}.ll-signal-table td:nth-child(7){white-space:normal!important;line-height:1.35}.ll-signal-table td:nth-child(2){font-weight:750;font-variant-numeric:tabular-nums}.ll-signal-table .ll-trade-ref{display:inline;white-space:nowrap;font-variant-numeric:tabular-nums}.ll-signal-status{display:inline-block;padding:2px 6px;border-radius:999px;font-size:9px;font-weight:800;letter-spacing:.025em;white-space:nowrap}.ll-signal-status.work{background:rgba(56,217,150,.12);color:#38d996}.ll-signal-status.done{background:rgba(92,163,255,.12);color:#76adff}.ll-signal-status.skip{background:rgba(255,190,92,.12);color:#ffc56e}.ll-signal-status.shadow{background:rgba(163,106,255,.13);color:#bd91ff}.ll-signal-status.error{background:rgba(255,101,119,.12);color:#ff6577}.ll-signal-status.wait{background:rgba(255,255,255,.06);color:var(--text-dim)}
 .ll-trades th:nth-child(1){width:13%}.ll-trades th:nth-child(2){width:18%}.ll-trades th:nth-child(3){width:10%}.ll-trades th:nth-child(4){width:12%}.ll-trades th:nth-child(5){width:14%}.ll-trades th:nth-child(6){width:12%}.ll-trades th:nth-child(7){width:8%}.ll-trades th:nth-child(8){width:13%}
 .ll-shadow-trades{font-size:10px!important}.ll-shadow-trades th,.ll-shadow-trades td{padding:9px 6px!important;white-space:nowrap!important;overflow-wrap:normal!important;overflow:hidden;text-overflow:clip}.ll-shadow-trades small{display:inline;font-size:8px}.ll-shadow-trades th:nth-child(1){width:15%}.ll-shadow-trades th:nth-child(2){width:17%}.ll-shadow-trades th:nth-child(3){width:8%}.ll-shadow-trades th:nth-child(4){width:11%}.ll-shadow-trades th:nth-child(5){width:13%}.ll-shadow-trades th:nth-child(6){width:10%}.ll-shadow-trades th:nth-child(7){width:7%}.ll-shadow-trades th:nth-child(8){width:19%}
 .ll-tech th:nth-child(1){width:20%}.ll-tech th:nth-child(2){width:18%}.ll-tech th:nth-child(3){width:15%}.ll-tech th:nth-child(4){width:18%}.ll-tech th:nth-child(5){width:29%}
@@ -1671,7 +1671,7 @@ function signalLifecycle(
     return {
       label: t(lang, 'ТОЛЬКО SHADOW', 'SHADOW ONLY'),
       css: 'shadow',
-      detail: t(lang, 'Real-runner ещё не обрабатывал', 'Not processed by the real runner'),
+      detail: '',
     };
   }
   return { label: t(lang, 'БЕЗ СДЕЛКИ', 'NO TRADE'), css: 'wait', detail };
@@ -1688,7 +1688,7 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
       row.shadow_entry_trade_id != null && row.shadow_entry_trade_id !== row.shadow_exit_trade_id
         ? linkedTrade(row.shadow_entry_trade_id, row.shadow_entry_trade_status, false, lang)
         : '',
-    ].filter(Boolean).join('<br>') || '—';
+    ].filter(Boolean).join(' · ') || '—';
     const liveRefs = [
       row.live_exit_trade_id != null
         ? linkedTrade(row.live_exit_trade_id, row.live_exit_trade_status, true, lang)
@@ -1696,7 +1696,7 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
       row.live_entry_trade_id != null && row.live_entry_trade_id !== row.live_exit_trade_id
         ? linkedTrade(row.live_entry_trade_id, row.live_entry_trade_status, true, lang)
         : '',
-    ].filter(Boolean).join('<br>') || '—';
+    ].filter(Boolean).join(' · ') || '—';
     const lifecycle = signalLifecycle(row, lang);
     return `<tr>
       <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)}</b><small> · ${esc(row.symbol)}</small></td>
