@@ -80,13 +80,50 @@ export async function getKlines(
   const cachedMax = cache.length ? cache[cache.length - 1]!.t : -Infinity;
 
   // Decide the ranges to fetch: anything before cachedMin and after cachedMax
-  // that overlaps [fromMs,toMs].
+  // that overlaps [fromMs,toMs], plus internal holes. The old head/tail-only
+  // logic silently preserved a missing middle section forever when an earlier
+  // request had been interrupted.
   const ranges: Array<[number, number]> = [];
   if (fromMs < cachedMin) ranges.push([fromMs, Math.min(toMs, cachedMin - stepMs)]);
   if (toMs > cachedMax) ranges.push([Math.max(fromMs, cachedMax + stepMs), toMs]);
   if (cache.length === 0) ranges.length = 0, ranges.push([fromMs, toMs]);
+  if (cache.length > 0) {
+    const requestedCache = cache.filter((c) => c.t >= fromMs && c.t <= toMs);
+    if (requestedCache.length === 0) {
+      ranges.push([fromMs, toMs]);
+    } else {
+      const firstRequested = requestedCache[0]!;
+      const lastRequested = requestedCache[requestedCache.length - 1]!;
+      if (firstRequested.t - fromMs > stepMs) {
+        ranges.push([fromMs, firstRequested.t - stepMs]);
+      }
+      if (toMs - lastRequested.t > stepMs) {
+        ranges.push([lastRequested.t + stepMs, toMs]);
+      }
+    }
+    for (let index = 1; index < requestedCache.length; index += 1) {
+      const previous = requestedCache[index - 1]!;
+      const current = requestedCache[index]!;
+      if (current.t - previous.t > stepMs) {
+        ranges.push([previous.t + stepMs, current.t - stepMs]);
+      }
+    }
+  }
 
-  for (const [rs, re] of ranges) {
+  // Merge overlapping ranges so a boundary request and an internal-gap
+  // request cannot fetch the same candles twice.
+  ranges.sort((a, b) => a[0] - b[0]);
+  const mergedRanges: Array<[number, number]> = [];
+  for (const range of ranges) {
+    const previous = mergedRanges.at(-1);
+    if (previous && range[0] <= previous[1] + stepMs) {
+      previous[1] = Math.max(previous[1], range[1]);
+    } else {
+      mergedRanges.push([...range]);
+    }
+  }
+
+  for (const [rs, re] of mergedRanges) {
     let cursor = rs;
     while (cursor <= re) {
       const pageEnd = Math.min(re, cursor + 999 * stepMs);

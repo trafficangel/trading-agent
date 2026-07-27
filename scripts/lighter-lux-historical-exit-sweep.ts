@@ -306,6 +306,11 @@ async function main(): Promise<void> {
   }
 
   const usable = trades.filter((trade) => (paths.get(trade.key)?.length ?? 0) > 0);
+  const missingByStrategy = STRATEGIES.map((spec) => {
+    const total = trades.filter((trade) => trade.strategyId === spec.id).length;
+    const present = usable.filter((trade) => trade.strategyId === spec.id).length;
+    return { id: spec.id, total, present };
+  }).filter((row) => row.total !== row.present);
   const allOutcomes = new Map<string, Outcome[]>();
   for (const variant of VARIANTS) {
     allOutcomes.set(
@@ -327,6 +332,12 @@ async function main(): Promise<void> {
     `Execution friction stress: ${EXECUTION_COST_PCT.toFixed(3)}% round-trip; ` +
     `Lighter trading fee 0%. Same-minute ordering is conservative.\n`,
   );
+  if (missingByStrategy.length) {
+    console.log(
+      `Missing candle paths: ${missingByStrategy.map((row) =>
+        `${row.id} ${row.present}/${row.total}`).join(' · ')}\n`,
+    );
+  }
   console.log(
     `${'variant'.padEnd(25)} ${'net'.padStart(10)} ${'Δnative'.padStart(10)} ` +
     `${'avg'.padStart(9)} ${'WR'.padStart(8)} ${'maxDD'.padStart(10)} ` +
@@ -375,6 +386,58 @@ async function main(): Promise<void> {
         `Δ ${fmt(totalDelta).padStart(9)} · halves ` +
         `${fmt(firstDelta).padStart(9)} / ${fmt(secondDelta).padStart(9)} · ` +
         `exits ${metrics(selected).changed}`,
+      );
+    }
+  }
+
+  console.log(
+    '\nStrategy-specific candidates passing: total Δ>0, both halves Δ>0, ' +
+    'all thirds Δ>0, and at least 5 altered exits',
+  );
+  for (const spec of STRATEGIES) {
+    const nativeRows = (allOutcomes.get('native Lux exit') ?? [])
+      .filter((row) => row.strategyId === spec.id);
+    const passing = VARIANTS.filter((variant) => variant.kind !== 'native')
+      .map((variant) => {
+        const rows = (allOutcomes.get(variant.name) ?? [])
+          .filter((row) => row.strategyId === spec.id);
+        const split = Math.floor(rows.length / 2);
+        const totalDelta = metrics(rows).netPct - metrics(nativeRows).netPct;
+        const halves = [
+          metrics(rows.slice(0, split)).netPct - metrics(nativeRows.slice(0, split)).netPct,
+          metrics(rows.slice(split)).netPct - metrics(nativeRows.slice(split)).netPct,
+        ];
+        const thirds = [0, 1, 2].map((third) =>
+          metrics(sliceThird(rows, third)).netPct
+          - metrics(sliceThird(nativeRows, third)).netPct,
+        );
+        return {
+          name: variant.name,
+          totalDelta,
+          halves,
+          thirds,
+          changed: metrics(rows).changed,
+          maxDrawdownDelta: metrics(rows).maxDrawdownPct - metrics(nativeRows).maxDrawdownPct,
+        };
+      })
+      .filter((row) =>
+        row.totalDelta > 0
+        && row.halves.every((value) => value > 0)
+        && row.thirds.every((value) => value > 0)
+        && row.changed >= 5,
+      )
+      .sort((a, b) => b.totalDelta - a.totalDelta);
+    if (!passing.length) {
+      console.log(`  ${spec.id.padEnd(24)} — none`);
+      continue;
+    }
+    for (const row of passing.slice(0, 3)) {
+      console.log(
+        `  ${spec.id.padEnd(24)} ${row.name.padEnd(22)} ` +
+        `Δ ${fmt(row.totalDelta).padStart(9)} · halves ` +
+        `${row.halves.map((value) => fmt(value)).join(' / ')} · thirds ` +
+        `${row.thirds.map((value) => fmt(value)).join(' / ')} · ` +
+        `DDΔ ${fmt(-row.maxDrawdownDelta)} · exits ${row.changed}`,
       );
     }
   }
