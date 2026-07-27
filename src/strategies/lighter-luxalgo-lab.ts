@@ -70,8 +70,12 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // setup. After exact entry/exit-price normalization and a conservative 5%
 // safety stop, its long and short books, both chronological halves and the
 // portfolio without its five best trades all remained profitable. It is also
-// shadow-only and is deliberately absent from the Python real runner. BCH,
-// DOGE, XLM, TRX, POL, JUP, ADA and SUI candidates remain excluded.
+// shadow-only and is deliberately absent from the Python real runner.
+// STRAT-024 DOGE is another independent two-sided shadow-only setup. With the
+// same exact-price normalization and 5% safety stop, its long and short books,
+// both chronological halves and every portfolio third remained profitable;
+// the result also survived removing the five best trades. BCH, XLM, TRX, POL,
+// JUP, ADA and SUI candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -261,6 +265,23 @@ const STRATEGIES: readonly StrategySpec[] = [
       profitFactor: 2.604,
       netPct: 39.514,
       maxDrawdownPct: 6.327,
+    },
+  },
+  {
+    id: 'doge-fvgm-smart-tc',
+    code: '024',
+    name: 'FVG Mitigated · Smart Trail · Trend Catcher',
+    symbol: 'DOGEUSDT',
+    asset: 'DOGE',
+    marketId: 3,
+    stopPct: 5,
+    backtest: {
+      period: '2026-03-17 → 2026-06-14',
+      trades: 114,
+      winRatePct: 57.89,
+      profitFactor: 1.970,
+      netPct: 57.126,
+      maxDrawdownPct: 11.391,
     },
   },
 ] as const;
