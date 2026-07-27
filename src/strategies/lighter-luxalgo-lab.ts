@@ -18,6 +18,8 @@ import { getLang, pageShell } from './landing.js';
 type Lang = 'ru' | 'en';
 type Side = 'long' | 'short';
 type Action = 'entry' | 'exit';
+type PortfolioDataset = 'shadow' | 'real';
+type ChartUnit = 'usd' | 'pct';
 
 type StrategySpec = {
   id: string;
@@ -424,10 +426,24 @@ type LiveMetrics = {
   closed: number;
   wins: number;
   netUsd: number;
+  netPct: number;
   profitFactor: number | null;
   firstHalfUsd: number;
   secondHalfUsd: number;
   maxDrawdownUsd: number;
+  maxDrawdownPct: number;
+};
+
+type LiveTradeCounts = {
+  closed: number;
+  open: number;
+  errors: number;
+};
+
+type LiveDecisionCounts = {
+  total: number;
+  errors: number;
+  skipped: number;
 };
 
 type ExecutionComparison = {
@@ -1097,6 +1113,24 @@ function closedLiveTrades(): LiveTradeRow[] {
     ORDER BY real.closed_at,real.id`).all();
 }
 
+function liveTradeCounts(): LiveTradeCounts {
+  return db.prepare<[], LiveTradeCounts>(`
+    SELECT
+      COALESCE(SUM(CASE WHEN status='closed' THEN 1 ELSE 0 END),0) closed,
+      COALESCE(SUM(CASE WHEN status IN ('opening','open','closing') THEN 1 ELSE 0 END),0) open,
+      COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) errors
+    FROM lighter_lux_live_trades`).get() ?? { closed: 0, open: 0, errors: 0 };
+}
+
+function liveDecisionCounts(): LiveDecisionCounts {
+  return db.prepare<[], LiveDecisionCounts>(`
+    SELECT
+      COUNT(*) total,
+      COALESCE(SUM(CASE WHEN decision='error' THEN 1 ELSE 0 END),0) errors,
+      COALESCE(SUM(CASE WHEN decision='skip' THEN 1 ELSE 0 END),0) skipped
+    FROM lighter_lux_live_decisions`).get() ?? { total: 0, errors: 0, skipped: 0 };
+}
+
 function liveStrategyStates(): LiveStrategyStateRow[] {
   return db.prepare<[], LiveStrategyStateRow>(`
     SELECT strategy_id,enabled,closed_trades,net_pnl_usd,profit_factor,
@@ -1108,6 +1142,7 @@ function liveStrategyStates(): LiveStrategyStateRow[] {
 
 function liveMetrics(rows: LiveTradeRow[]): LiveMetrics {
   const pnl = rows.map((row) => row.net_pnl_usd ?? 0);
+  const pnlPct = rows.map((row) => row.net_pnl_pct ?? 0);
   const grossWin = pnl.filter((value) => value > 0)
     .reduce((sum, value) => sum + value, 0);
   const grossLoss = Math.abs(pnl.filter((value) => value < 0)
@@ -1116,19 +1151,29 @@ function liveMetrics(rows: LiveTradeRow[]): LiveMetrics {
   let equity = 0;
   let peak = 0;
   let maxDrawdownUsd = 0;
+  let equityPct = 0;
+  let peakPct = 0;
+  let maxDrawdownPct = 0;
   for (const value of pnl) {
     equity += value;
     peak = Math.max(peak, equity);
     maxDrawdownUsd = Math.max(maxDrawdownUsd, peak - equity);
   }
+  for (const value of pnlPct) {
+    equityPct += value;
+    peakPct = Math.max(peakPct, equityPct);
+    maxDrawdownPct = Math.max(maxDrawdownPct, peakPct - equityPct);
+  }
   return {
     closed: pnl.length,
     wins: pnl.filter((value) => value > 0).length,
     netUsd: equity,
+    netPct: equityPct,
     profitFactor: grossLoss > 0 ? grossWin / grossLoss : pnl.length ? Infinity : null,
     firstHalfUsd: pnl.slice(0, split).reduce((sum, value) => sum + value, 0),
     secondHalfUsd: pnl.slice(split).reduce((sum, value) => sum + value, 0),
     maxDrawdownUsd,
+    maxDrawdownPct,
   };
 }
 
@@ -1290,6 +1335,29 @@ function positivePage(value: unknown): number {
 function selectedStrategy(value: unknown): StrategySpec | null {
   return STRATEGY_BY_ID.get(String(value ?? '')) ?? null;
 }
+function selectedDataset(value: unknown): PortfolioDataset {
+  return value === 'real' ? 'real' : 'shadow';
+}
+function selectedChartUnit(value: unknown): ChartUnit {
+  return value === 'pct' ? 'pct' : 'usd';
+}
+function labHref(args: {
+  signalsPage: number;
+  tradesPage: number;
+  strategyId: string | null;
+  dataset: PortfolioDataset;
+  chartUnit: ChartUnit;
+  anchor?: string;
+}): string {
+  const params = new URLSearchParams({
+    signalsPage: String(args.signalsPage),
+    tradesPage: String(args.tradesPage),
+    dataset: args.dataset,
+    chart: args.chartUnit,
+  });
+  if (args.strategyId) params.set('strategy', args.strategyId);
+  return `/lab/lighter-luxalgo?${params.toString()}${args.anchor ? `#${args.anchor}` : ''}`;
+}
 function pager(args: {
   lang: Lang;
   page: number;
@@ -1299,6 +1367,8 @@ function pager(args: {
   tradesPage: number;
   target: 'signals' | 'trades';
   strategyId: string | null;
+  dataset: PortfolioDataset;
+  chartUnit: ChartUnit;
 }): string {
   const pages = Math.max(1, Math.ceil(args.total / args.pageSize));
   const from = args.total ? (args.page - 1) * args.pageSize + 1 : 0;
@@ -1306,10 +1376,14 @@ function pager(args: {
   const href = (page: number): string => {
     const signalsPage = args.target === 'signals' ? page : args.signalsPage;
     const tradesPage = args.target === 'trades' ? page : args.tradesPage;
-    const strategy = args.strategyId
-      ? `&strategy=${encodeURIComponent(args.strategyId)}`
-      : '';
-    return `/lab/lighter-luxalgo?signalsPage=${signalsPage}&tradesPage=${tradesPage}${strategy}#${args.target === 'signals' ? 'signal-history' : 'shadow-trades'}`;
+    return labHref({
+      signalsPage,
+      tradesPage,
+      strategyId: args.strategyId,
+      dataset: args.dataset,
+      chartUnit: args.chartUnit,
+      anchor: args.target === 'signals' ? 'signal-history' : 'shadow-trades',
+    });
   };
   const first = Math.max(1, Math.min(args.page - 2, pages - 4));
   const last = Math.min(pages, first + 4);
@@ -1337,6 +1411,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-wrap{max-width:1280px;margin:0 auto}.ll-back{display:inline-block;margin:4px 0 22px;color:var(--text-dim)}
 .ll-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.ll-head h1{font-size:34px;margin:10px 0 7px}.ll-head p{max-width:860px;color:var(--text-dim)}
 .ll-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.ll-engine i{width:8px;height:8px;border-radius:50%;background:#ff6577}.ll-engine.live i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}
+.ll-modebar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:18px 0 0;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-card)}.ll-modebar>div{display:grid;gap:4px}.ll-modebar small{color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.04em}.ll-tabs{display:flex;align-items:center;gap:5px}.ll-tabs a{display:grid;place-items:center;min-width:82px;height:31px;padding:0 11px;border:1px solid var(--border);border-radius:8px;color:var(--text-dim);font-size:10px;font-weight:750;text-decoration:none}.ll-tabs a:hover{border-color:#bd91ff;color:var(--text)}.ll-tabs a.active{border-color:rgba(163,106,255,.58);background:rgba(163,106,255,.16);color:#bd91ff}.ll-tabs a.real.active{border-color:rgba(56,217,150,.5);background:rgba(56,217,150,.12);color:#38d996}
 .ll-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}.ll-card,.ll-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.ll-card{padding:13px 14px;display:grid;gap:4px}.ll-card small,.ll-card em{color:var(--text-faint);font-size:10px;font-style:normal}.ll-card b{font-size:20px;font-variant-numeric:tabular-nums}
 .ll-panel{padding:15px;margin:10px 0}.ll-panel h2{font-size:16px;margin:0 0 11px}
 .ll-filter{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:10px 0;padding:11px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-card)}.ll-filter label{display:grid;gap:5px;color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.04em}.ll-filter select{min-width:285px;height:34px;padding:0 32px 0 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:11px}.ll-filter button{height:34px;padding:0 13px;border:1px solid rgba(163,106,255,.5);border-radius:8px;background:rgba(163,106,255,.14);color:#bd91ff;font:inherit;font-size:10px;font-weight:700;cursor:pointer}.ll-filter small{color:var(--text-faint);font-size:10px}
@@ -1353,7 +1428,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-details{padding:0}.ll-details>summary{cursor:pointer;list-style:none;padding:14px 15px;font-size:15px;font-weight:700}.ll-details>summary::-webkit-details-marker{display:none}.ll-details>summary::after{content:'＋';float:right;color:var(--text-faint)}.ll-details[open]>summary::after{content:'−'}.ll-details[open]>.ll-table{padding:0 15px 14px}
 .ll-chart-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}.ll-chart-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px}.ll-chart-legend span{display:flex;align-items:center;gap:6px;color:var(--text-dim)}.ll-chart-legend i{width:18px;height:3px;border-radius:2px}.ll-chart-legend .shadow i{background:#a36aff}.ll-chart-legend .real i{background:#38d996}.ll-chart-legend b{font-variant-numeric:tabular-nums}.ll-chart{width:100%;margin-top:8px;overflow:hidden}.ll-chart svg{display:block;width:100%;height:auto;min-height:190px}.ll-chart-grid{stroke:rgba(255,255,255,.075);stroke-width:1}.ll-chart-zero{stroke:rgba(255,255,255,.24);stroke-width:1}.ll-chart-axis{fill:var(--text-faint);font-size:10px;font-family:inherit}.ll-chart-shadow{fill:none;stroke:#a36aff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-real{fill:none;stroke:#38d996;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-dot-shadow{fill:#a36aff}.ll-chart-dot-real{fill:#38d996}.ll-chart-empty{display:grid;place-items:center;min-height:170px;color:var(--text-faint);font-size:12px}
 .ll-live-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px;margin:12px 0}.ll-live-metric{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.015);display:grid;gap:3px}.ll-live-metric small{font-size:9px;color:var(--text-faint);text-transform:uppercase}.ll-live-metric b{font-size:15px;font-variant-numeric:tabular-nums}.ll-live-metric em{font-size:9px;color:var(--text-faint);font-style:normal}.ll-live-strategy th:nth-child(1){width:25%}.ll-live-strategy th:nth-child(2){width:11%}.ll-live-strategy th:nth-child(3){width:10%}.ll-live-strategy th:nth-child(4){width:12%}.ll-live-strategy th:nth-child(5){width:12%}.ll-live-strategy th:nth-child(6){width:18%}.ll-live-strategy th:nth-child(7){width:12%}
-@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-filter{align-items:stretch}.ll-filter label,.ll-filter select{width:100%;min-width:0}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-signal-table th:nth-child(3),.ll-signal-table td:nth-child(3),.ll-signal-table th:nth-child(8),.ll-signal-table td:nth-child(8){display:none}.ll-signal-table th:nth-child(1){width:17%}.ll-signal-table th:nth-child(2){width:9%}.ll-signal-table th:nth-child(4){width:17%}.ll-signal-table th:nth-child(5){width:17%}.ll-signal-table th:nth-child(6){width:16%}.ll-signal-table th:nth-child(7){width:24%}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}}`;
+@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-modebar{align-items:stretch}.ll-modebar>div{width:100%}.ll-tabs a{flex:1}.ll-filter{align-items:stretch}.ll-filter label,.ll-filter select{width:100%;min-width:0}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-signal-table th:nth-child(3),.ll-signal-table td:nth-child(3),.ll-signal-table th:nth-child(8),.ll-signal-table td:nth-child(8){display:none}.ll-signal-table th:nth-child(1){width:17%}.ll-signal-table th:nth-child(2){width:9%}.ll-signal-table th:nth-child(4){width:17%}.ll-signal-table th:nth-child(5){width:17%}.ll-signal-table th:nth-child(6){width:16%}.ll-signal-table th:nth-child(7){width:24%}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}}`;
 
 export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
   const s = summary();
@@ -1649,60 +1724,66 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
   }).join('');
 }
 
-function pnlChart(lang: Lang): string {
+function pnlChart(
+  lang: Lang,
+  dataset: PortfolioDataset,
+  unit: ChartUnit,
+): string {
   const series = cumulativePnlSeries();
-  const all = [...series.shadow, ...series.live];
-  const shadowNet = series.shadow.at(-1)?.pnlUsd ?? 0;
-  const shadowNetPct = series.shadow.at(-1)?.pnlPct ?? 0;
-  const liveNet = series.live.at(-1)?.pnlUsd ?? 0;
-  const liveNetPct = series.live.at(-1)?.pnlPct ?? 0;
+  const points = dataset === 'shadow' ? series.shadow : series.live;
+  const netUsd = points.at(-1)?.pnlUsd ?? 0;
+  const netPct = points.at(-1)?.pnlPct ?? 0;
+  const datasetLabel = dataset === 'shadow' ? 'Shadow · $1,000' : 'Real · $100';
+  const unitLabel = unit === 'usd'
+    ? t(lang, 'Деньги, $', 'Money, $')
+    : t(lang, 'Проценты, %', 'Percent, %');
   const legend = `<div class="ll-chart-legend">
-    <span class="shadow"><i></i>Shadow · $1,000 <b class="${pnlClass(shadowNetPct)}">${signedUsd(shadowNet)} · ${signedPct(shadowNetPct)}</b></span>
-    <span class="real"><i></i>Real · $100 <b class="${pnlClass(liveNetPct)}">${signedUsd(liveNet)} · ${signedPct(liveNetPct)}</b></span>
+    <span class="${dataset}"><i></i>${datasetLabel} <b class="${pnlClass(netPct)}">${signedUsd(netUsd)} · ${signedPct(netPct)}</b></span>
   </div>`;
-  if (!all.length) {
-    return `<div class="ll-panel"><div class="ll-chart-head"><h2>${t(lang, 'Накопленный PnL', 'Cumulative PnL')}</h2>${legend}</div>
+  if (!points.length) {
+    return `<div class="ll-panel" id="pnl-chart"><div class="ll-chart-head"><h2>${t(lang, 'Накопленный PnL', 'Cumulative PnL')} · ${datasetLabel} · ${unitLabel}</h2>${legend}</div>
       <div class="ll-chart-empty">${t(lang, 'График появится после первой закрытой сделки.', 'The chart will appear after the first closed trade.')}</div></div>`;
   }
 
   const width = 1120;
   const height = 260;
-  const left = 126;
+  const left = 92;
   const right = 18;
   const top = 18;
   const bottom = 34;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
-  const firstAt = Math.min(...all.map((point) => point.at));
-  const lastAt = Math.max(...all.map((point) => point.at));
+  const firstAt = Math.min(...points.map((point) => point.at));
+  const lastAt = Math.max(...points.map((point) => point.at));
   const timeSpan = Math.max(1, lastAt - firstAt);
-  const values = [0, ...all.map((point) => point.pnlPct)];
+  const pointValue = (point: PnlPoint): number =>
+    unit === 'usd' ? point.pnlUsd : point.pnlPct;
+  const values = [0, ...points.map(pointValue)];
   const rawMin = Math.min(...values);
   const rawMax = Math.max(...values);
-  const padding = Math.max(0.5, (rawMax - rawMin) * 0.12);
-  const minPnlPct = rawMin - padding;
-  const maxPnlPct = rawMax + padding;
-  const pnlSpan = Math.max(1, maxPnlPct - minPnlPct);
+  const padding = Math.max(unit === 'usd' ? 0.5 : 0.1, (rawMax - rawMin) * 0.12);
+  const minPnl = rawMin - padding;
+  const maxPnl = rawMax + padding;
+  const pnlSpan = Math.max(unit === 'usd' ? 1 : 0.2, maxPnl - minPnl);
   const x = (at: number): number => left + (at - firstAt) / timeSpan * plotWidth;
-  const y = (pnlPct: number): number =>
-    top + (maxPnlPct - pnlPct) / pnlSpan * plotHeight;
-  const path = (points: PnlPoint[]): string => {
-    if (!points.length) return '';
+  const y = (value: number): number =>
+    top + (maxPnl - value) / pnlSpan * plotHeight;
+  const path = (): string => {
     const start = `${left.toFixed(1)},${y(0).toFixed(1)}`;
-    return [start, ...points.map((point) => `${x(point.at).toFixed(1)},${y(point.pnlPct).toFixed(1)}`)].join(' ');
+    return [start, ...points.map((point) => `${x(point.at).toFixed(1)},${y(pointValue(point)).toFixed(1)}`)].join(' ');
   };
-  const circles = (points: PnlPoint[], cls: string): string => points.map((point) =>
-    `<circle class="${cls}" cx="${x(point.at).toFixed(1)}" cy="${y(point.pnlPct).toFixed(1)}" r="3"><title>${utc(point.at)} · ${signedPct(point.pnlPct)} · ${signedUsd(point.pnlUsd)}</title></circle>`,
+  const circles = (cls: string): string => points.map((point) =>
+    `<circle class="${cls}" cx="${x(point.at).toFixed(1)}" cy="${y(pointValue(point)).toFixed(1)}" r="3"><title>${utc(point.at)} · ${signedUsd(point.pnlUsd)} · ${signedPct(point.pnlPct)}</title></circle>`,
   ).join('');
   const yTicks = Array.from({ length: 5 }, (_, index) => {
-    const value = maxPnlPct - index / 4 * pnlSpan;
+    const value = maxPnl - index / 4 * pnlSpan;
     const pos = top + index / 4 * plotHeight;
     const axisX = left - 8;
-    const pct = `${value < 0 ? '−' : ''}${Math.abs(value).toFixed(2)}%`;
-    const shadowUsd = signedUsd(value / 100 * NOTIONAL_USD);
-    const realUsd = signedUsd(value / 100 * LIVE_NOTIONAL_USD);
+    const label = unit === 'usd'
+      ? signedUsd(value)
+      : `${value < 0 ? '−' : ''}${Math.abs(value).toFixed(3)}%`;
     return `<line class="${Math.abs(value) < pnlSpan / 100 ? 'll-chart-zero' : 'll-chart-grid'}" x1="${left}" y1="${pos.toFixed(1)}" x2="${width - right}" y2="${pos.toFixed(1)}"/>
-      <text class="ll-chart-axis" x="${axisX}" y="${(pos - 2).toFixed(1)}" text-anchor="end">${pct}<tspan x="${axisX}" dy="11">S ${shadowUsd} · R ${realUsd}</tspan></text>`;
+      <text class="ll-chart-axis" x="${axisX}" y="${(pos + 3).toFixed(1)}" text-anchor="end">${label}</text>`;
   }).join('');
   const xTicks = Array.from({ length: 4 }, (_, index) => {
     const ratio = index / 3;
@@ -1713,12 +1794,13 @@ function pnlChart(lang: Lang): string {
     return `<text class="ll-chart-axis" x="${pos.toFixed(1)}" y="${height - 10}" text-anchor="${index === 0 ? 'start' : index === 3 ? 'end' : 'middle'}">${label}</text>`;
   }).join('');
 
-  return `<div class="ll-panel"><div class="ll-chart-head"><div><h2>${t(lang, 'Накопленный PnL', 'Cumulative PnL')}</h2>
+  const lineClass = dataset === 'shadow' ? 'll-chart-shadow' : 'll-chart-real';
+  const dotClass = dataset === 'shadow' ? 'll-chart-dot-shadow' : 'll-chart-dot-real';
+  return `<div class="ll-panel" id="pnl-chart"><div class="ll-chart-head"><div><h2>${t(lang, 'Накопленный PnL', 'Cumulative PnL')} · ${datasetLabel} · ${unitLabel}</h2>
       <p class="ll-note">${t(lang, 'Только закрытые сделки; открытый плавающий результат не включён.', 'Closed trades only; unrealized PnL is excluded.')}</p></div>${legend}</div>
     <div class="ll-chart"><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${t(lang, 'График накопленного PnL', 'Cumulative PnL chart')}">
       ${yTicks}${xTicks}
-      ${series.shadow.length ? `<polyline class="ll-chart-shadow" points="${path(series.shadow)}"/>${circles(series.shadow, 'll-chart-dot-shadow')}` : ''}
-      ${series.live.length ? `<polyline class="ll-chart-real" points="${path(series.live)}"/>${circles(series.live, 'll-chart-dot-real')}` : ''}
+      <polyline class="${lineClass}" points="${path()}"/>${circles(dotClass)}
     </svg></div></div>`;
 }
 
@@ -1728,6 +1810,8 @@ async function render(
     signalsPage: number;
     tradesPage: number;
     strategy: StrategySpec | null;
+    dataset: PortfolioDataset;
+    chartUnit: ChartUnit;
   },
 ): Promise<string> {
   const s = summary();
@@ -1755,6 +1839,8 @@ async function render(
   const liveState = lighterLiveState();
   const liveTrades = recentLiveTrades(30, strategyId);
   const allLiveClosed = closedLiveTrades();
+  const liveCounts = liveTradeCounts();
+  const liveDecisions = liveDecisionCounts();
   const liveSummary = liveMetrics(allLiveClosed);
   const execution = liveExecutionComparison();
   const latencyMetrics = liveLatencyMetrics(liveTrades);
@@ -1778,6 +1864,50 @@ async function render(
   );
   const wr = s.closed ? s.wins / s.closed * 100 : 0;
   const passed = STRATEGIES.filter((spec) => gate(summary(spec), lang).passed).length;
+  const liveEnabledStrategies = liveStrategies.filter((row) => row.enabled === 1).length;
+  const livePassedStrategies = liveStrategies.filter(
+    (row) => row.gate_status === 'passed',
+  ).length;
+  const datasetHref = (dataset: PortfolioDataset): string => labHref({
+    signalsPage,
+    tradesPage,
+    strategyId,
+    dataset,
+    chartUnit: requested.chartUnit,
+    anchor: 'portfolio-view',
+  });
+  const chartHref = (chartUnit: ChartUnit): string => labHref({
+    signalsPage,
+    tradesPage,
+    strategyId,
+    dataset: requested.dataset,
+    chartUnit,
+    anchor: 'pnl-chart',
+  });
+  const shadowCards = `
+    <div class="ll-card"><small>${t(lang, 'Стратегии / гейт', 'Strategies / gates')}</small><b>${STRATEGIES.length} / ${passed}</b><em>${ASSET_LABEL}</em></div>
+    <div class="ll-card"><small>${t(lang, 'Сигналы / ошибки', 'Signals / errors')}</small><b>${s.signals} / ${s.captureErrors}</b><em>${t(lang, 'все выбранные alerts', 'all selected alerts')}</em></div>
+    <div class="ll-card"><small>${t(lang, 'Закрыто / открыто', 'Closed / open')}</small><b>${s.closed} / ${s.open}</b><em>$${NOTIONAL_USD} ${t(lang, 'на позицию', 'per position')}</em></div>
+    <div class="ll-card"><small>Shadow net PnL</small><b class="${pnlClass(s.netUsd)}">${signedUsd(s.netUsd)}</b><em>${signedPct(s.netPct)} · $${NOTIONAL_USD.toLocaleString('en-US')} ${t(lang, 'на сделку', 'per trade')}</em></div>
+    <div class="ll-card"><small>Shadow WR / PF</small><b>${s.closed ? `${wr.toFixed(0)}% / ${pfLabel(s.profitFactor)}` : '—'}</b><em>${t(lang, 'после всех издержек', 'after all costs')}</em></div>
+    <div class="ll-card"><small>${t(lang, 'Средняя сделка', 'Average trade')}</small><b class="${pnlClass(s.avgNetPct)}">${signedPct(s.avgNetPct)}</b><em>${signedUsd(s.avgNetPct / 100 * NOTIONAL_USD)}</em></div>
+    <div class="ll-card"><small>Shadow max drawdown</small><b class="${s.maxDrawdownPct > 0 ? 'neg' : ''}">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}</b><em>${s.closed ? `−$${(s.maxDrawdownPct / 100 * NOTIONAL_USD).toFixed(2)}` : '—'}</em></div>
+    <div class="ll-card"><small>${t(lang, 'Средний spread / круг', 'Average spread / round trip')}</small><b>${s.currentSpreadPct == null ? '—' : `${s.currentSpreadPct.toFixed(4)}%`}</b><em>${s.currentRoundTripCostPct == null ? '—' : `≈${s.currentRoundTripCostPct.toFixed(4)}%`}</em></div>`;
+  const realAverageUsd = liveSummary.closed
+    ? liveSummary.netUsd / liveSummary.closed
+    : 0;
+  const realAveragePct = liveSummary.closed
+    ? liveSummary.netPct / liveSummary.closed
+    : 0;
+  const realCards = `
+    <div class="ll-card"><small>${t(lang, 'Стратегии Real / гейт', 'Real strategies / gates')}</small><b>${liveEnabledStrategies} / ${livePassedStrategies}</b><em>${liveRunner ? 'ARMED' : 'OFFLINE'}</em></div>
+    <div class="ll-card"><small>${t(lang, 'Решения / ошибки', 'Decisions / errors')}</small><b>${liveDecisions.total} / ${liveDecisions.errors}</b><em>${t(lang, 'пропущено', 'skipped')} ${liveDecisions.skipped}</em></div>
+    <div class="ll-card"><small>${t(lang, 'Закрыто / открыто', 'Closed / open')}</small><b>${liveCounts.closed} / ${liveCounts.open}</b><em>$${LIVE_NOTIONAL_USD} · ${liveCounts.errors} ${t(lang, 'ошибок', 'errors')}</em></div>
+    <div class="ll-card"><small>Real net PnL</small><b class="${pnlClass(liveSummary.netUsd)}">${signedUsd(liveSummary.netUsd)}</b><em>${signedPct(liveSummary.netPct)} · $${LIVE_NOTIONAL_USD} ${t(lang, 'на сделку', 'per trade')}</em></div>
+    <div class="ll-card"><small>Real WR / PF</small><b>${liveWr == null ? '—' : `${liveWr.toFixed(0)}% / ${pfLabel(liveSummary.profitFactor)}`}</b><em>${t(lang, 'после всех издержек', 'after all costs')}</em></div>
+    <div class="ll-card"><small>${t(lang, 'Средняя сделка', 'Average trade')}</small><b class="${pnlClass(realAverageUsd)}">${signedUsd(realAverageUsd)}</b><em>${signedPct(realAveragePct)}</em></div>
+    <div class="ll-card"><small>Real max drawdown</small><b class="${liveSummary.maxDrawdownUsd > 0 ? 'neg' : ''}">−${signedUsd(liveSummary.maxDrawdownUsd).replace('+', '')}</b><em>−${liveSummary.maxDrawdownPct.toFixed(3)}%</em></div>
+    <div class="ll-card"><small>Latency P50</small><b>${latency(latencyMetrics.signalToProtectedMs)}</b><em>S→O ${latency(latencyMetrics.signalToOrderMs)} · N ${latencyMetrics.measured}</em></div>`;
   return pageShell(
     t(lang, 'LuxAlgo → Lighter — единый shadow-портфель', 'LuxAlgo → Lighter — unified shadow portfolio'),
     `<style>${LIGHTER_LUXALGO_CSS}</style><div class="ll-wrap">
@@ -1787,20 +1917,26 @@ async function render(
         <p>${t(lang, `Все подходящие alerts собраны в одной системе и одной таблице. ${ASSET_LABEL} независимо снимают живой L2 Lighter без фиксированной задержки; каждая позиция моделируется на $1000. Комиссия Standard — 0%, spread, $1000 VWAP и funding учтены.`, `All selected alerts share one system and one table. ${ASSET_LABEL} independently sample live Lighter L2 with no fixed delay; every position is modeled at $1,000. Standard trading fee is 0%, while spread, $1,000 VWAP, and funding are included.`)}</p>
       </div><div class="ll-engine ${s.feedLive ? 'live' : ''}"><i></i>${s.feedLive ? `Lighter L2 · ${STRATEGIES.length}/${STRATEGIES.length} live` : 'Lighter L2 · degraded'}</div></div>
 
-      <div class="ll-grid">
-        <div class="ll-card"><small>${t(lang, 'Стратегии / гейт', 'Strategies / gates')}</small><b>${STRATEGIES.length} / ${passed}</b><em>${ASSET_LABEL}</em></div>
-        <div class="ll-card"><small>${t(lang, 'Сигналы / ошибки', 'Signals / errors')}</small><b>${s.signals} / ${s.captureErrors}</b><em>${t(lang, 'все выбранные alerts', 'all selected alerts')}</em></div>
-        <div class="ll-card"><small>${t(lang, 'Закрыто / открыто', 'Closed / open')}</small><b>${s.closed} / ${s.open}</b><em>$${NOTIONAL_USD} ${t(lang, 'на позицию', 'per position')}</em></div>
-        <div class="ll-card"><small>Shadow net PnL</small><b class="${pnlClass(s.netUsd)}">${signedUsd(s.netUsd)}</b><em>${signedPct(s.netPct)} · $${NOTIONAL_USD.toLocaleString('en-US')} ${t(lang, 'на сделку', 'per trade')}</em></div>
-        <div class="ll-card"><small>${t(lang, 'Общий WR / PF', 'Aggregate WR / PF')}</small><b>${s.closed ? `${wr.toFixed(0)}% / ${pfLabel(s.profitFactor)}` : '—'}</b><em>${t(lang, 'после всех издержек', 'after all costs')}</em></div>
-        <div class="ll-card"><small>Real net PnL</small><b class="${pnlClass(liveSummary.netUsd)}">${signedUsd(liveSummary.netUsd)}</b><em>${signedPct(liveNetPct)} · $${LIVE_NOTIONAL_USD} ${t(lang, 'на сделку', 'per trade')}</em></div>
-        <div class="ll-card"><small>Max drawdown</small><b class="${s.maxDrawdownPct > 0 ? 'neg' : ''}">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}</b><em>${t(lang, 'общая кривая', 'aggregate curve')}</em></div>
-        <div class="ll-card"><small>${t(lang, 'Средний spread / круг', 'Average spread / round trip')}</small><b>${s.currentSpreadPct == null ? '—' : `${s.currentSpreadPct.toFixed(4)}%`}</b><em>${s.currentRoundTripCostPct == null ? '—' : `≈${s.currentRoundTripCostPct.toFixed(4)}%`}</em></div>
+      <div class="ll-modebar" id="portfolio-view">
+        <div><small>${t(lang, 'Показатели', 'Dataset')}</small><nav class="ll-tabs">
+          <a href="${datasetHref('shadow')}" class="${requested.dataset === 'shadow' ? 'active' : ''}">Shadow</a>
+          <a href="${datasetHref('real')}" class="real ${requested.dataset === 'real' ? 'active' : ''}">Real</a>
+        </nav></div>
+        <div><small>${t(lang, 'Шкала графика', 'Chart scale')}</small><nav class="ll-tabs">
+          <a href="${chartHref('usd')}" class="${requested.chartUnit === 'usd' ? 'active' : ''}">${t(lang, 'Деньги $', 'Money $')}</a>
+          <a href="${chartHref('pct')}" class="${requested.chartUnit === 'pct' ? 'active' : ''}">${t(lang, 'Проценты %', 'Percent %')}</a>
+        </nav></div>
       </div>
 
-      ${pnlChart(lang)}
+      <div class="ll-grid">
+        ${requested.dataset === 'shadow' ? shadowCards : realCards}
+      </div>
+
+      ${pnlChart(lang, requested.dataset, requested.chartUnit)}
 
       <form class="ll-filter" action="/lab/lighter-luxalgo" method="get">
+        <input type="hidden" name="dataset" value="${requested.dataset}">
+        <input type="hidden" name="chart" value="${requested.chartUnit}">
         <label>${t(lang, 'Фильтр сигналов и сделок', 'Signals and trades filter')}
           <select name="strategy" onchange="this.form.submit()">
             <option value="">${t(lang, 'Все стратегии', 'All strategies')}</option>
@@ -1824,14 +1960,14 @@ async function render(
           <thead><tr><th>Strategy</th><th>${t(lang, 'Сигнал №', 'Signal #')}</th><th>${t(lang, 'Время UTC', 'Time UTC')}</th><th>Event</th><th>Shadow-${t(lang, 'сделка', 'trade')}</th><th>Real-${t(lang, 'сделка', 'trade')}</th><th>${t(lang, 'Статус сигнала', 'Signal status')}</th><th>Lux → Lighter / spread / Δ</th></tr></thead>
           <tbody>${signalRows(signals, lang)}</tbody>
         </table></div>
-        ${pager({ lang, page: signalsPage, total: signalsTotal, pageSize: SIGNAL_PAGE_SIZE, signalsPage, tradesPage, target: 'signals', strategyId })}
+        ${pager({ lang, page: signalsPage, total: signalsTotal, pageSize: SIGNAL_PAGE_SIZE, signalsPage, tradesPage, target: 'signals', strategyId, dataset: requested.dataset, chartUnit: requested.chartUnit })}
       </div>
 
       <div class="ll-panel" id="shadow-trades"><h2>${t(lang, 'Сделки', 'Trades')}</h2><div class="ll-table"><table class="ll-trades">
         <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>${t(lang, 'Цена входа', 'Entry price')}</th><th>${t(lang, 'Стоп-лосс', 'Stop-loss')}</th><th>${t(lang, 'Цена выхода', 'Exit price')}</th><th>${t(lang, 'Статус', 'Status')}</th><th>Net after costs</th></tr></thead>
         <tbody>${tradeRows(trades, lang)}</tbody>
       </table></div>
-      ${pager({ lang, page: tradesPage, total: tradesTotal, pageSize: TRADE_PAGE_SIZE, signalsPage, tradesPage, target: 'trades', strategyId })}</div>
+      ${pager({ lang, page: tradesPage, total: tradesTotal, pageSize: TRADE_PAGE_SIZE, signalsPage, tradesPage, target: 'trades', strategyId, dataset: requested.dataset, chartUnit: requested.chartUnit })}</div>
 
       <div class="ll-panel"><div class="ll-chart-head"><div><h2>${t(lang, 'Реальная торговля · canary', 'Live trading · canary')}</h2>
         <p class="ll-note"><b class="${livePortfolioPaused || !liveRunner ? 'fail' : 'pass'}">${livePortfolioPaused ? 'RISK PAUSED' : liveRunner ? 'ARMED' : 'OFFLINE'} · $100 · 10x · ${t(lang, 'ПО ОДНОЙ НА МОНЕТУ', 'ONE PER MARKET')}.</b> ${t(lang, 'Разные стратегии могут торговаться одновременно. Биржевой reduce-only stop ставится сразу на каждую позицию. Новые входы блокируются при дневном убытке −$10, совокупной просадке −$15 или индивидуальной паузе стратегии.', 'Different strategies may trade concurrently. An exchange-native reduce-only stop is placed immediately on every position. New entries are blocked at a −$10 daily loss, −$15 cumulative drawdown, or an individual strategy pause.')}${liveState?.last_error ? ` <span class="neg">${esc(liveState.last_error)}</span>` : ''}${liveState?.portfolio_pause_reason ? ` <span class="neg">${esc(liveState.portfolio_pause_reason)}</span>` : ''}</p>
@@ -1864,7 +2000,13 @@ async function render(
 
 export async function lighterLuxalgoLabRoute(app: FastifyInstance): Promise<void> {
   app.get<{
-    Querystring: { signalsPage?: string; tradesPage?: string; strategy?: string };
+    Querystring: {
+      signalsPage?: string;
+      tradesPage?: string;
+      strategy?: string;
+      dataset?: string;
+      chart?: string;
+    };
   }>('/lab/lighter-luxalgo', async (req, reply) => {
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'public, max-age=2');
@@ -1872,6 +2014,8 @@ export async function lighterLuxalgoLabRoute(app: FastifyInstance): Promise<void
       signalsPage: positivePage(req.query.signalsPage),
       tradesPage: positivePage(req.query.tradesPage),
       strategy: selectedStrategy(req.query.strategy),
+      dataset: selectedDataset(req.query.dataset),
+      chartUnit: selectedChartUnit(req.query.chart),
     });
   });
 }
