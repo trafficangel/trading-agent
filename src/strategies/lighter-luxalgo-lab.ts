@@ -1418,9 +1418,9 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-signal-list{border:1px solid var(--border);border-radius:10px;overflow:hidden}.ll-signal-row{display:grid;grid-template-columns:minmax(120px,1.1fr) 92px 118px 120px 120px;align-items:center;gap:10px;min-height:38px;padding:6px 10px;border-bottom:1px solid var(--border);font-size:11px}.ll-signal-row:last-child{border-bottom:0}.ll-signal-row:hover{background:rgba(255,255,255,.018)}.ll-signal-labels{min-height:30px;color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.04em}.ll-signal-strategy b{font-size:11px}.ll-signal-time{color:var(--text-faint);font-variant-numeric:tabular-nums}.ll-signal-event{font-weight:760}.ll-signal-value{font-variant-numeric:tabular-nums}
 .ll-live{display:inline-block;margin-left:5px;padding:2px 5px;border-radius:999px;background:rgba(56,217,150,.12);color:#38d996;font-size:9px;letter-spacing:.04em}
 .ll-table{width:100%;overflow:hidden}.ll-table table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:11px}.ll-table th,.ll-table td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border);white-space:normal;overflow-wrap:anywhere;vertical-align:middle}.ll-table th{color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.025em}.ll-table small{color:var(--text-faint);font-size:9px}.ll-table .num{font-variant-numeric:tabular-nums}
-.ll-strategy-table th:nth-child(1){width:22%}.ll-strategy-table th:nth-child(2){width:7%}.ll-strategy-table th:nth-child(3){width:20%}.ll-strategy-table th:nth-child(4){width:14%}.ll-strategy-table th:nth-child(5){width:13%}.ll-strategy-table th:nth-child(6){width:10%}.ll-strategy-table th:nth-child(7){width:14%}
-.ll-signal-table th:nth-child(1){width:12%}.ll-signal-table th:nth-child(2){width:6%}.ll-signal-table th:nth-child(3){width:12%}.ll-signal-table th:nth-child(4){width:11%}.ll-signal-table th:nth-child(5){width:13%}.ll-signal-table th:nth-child(6){width:12%}.ll-signal-table th:nth-child(7){width:17%}.ll-signal-table th:nth-child(8){width:17%}
-.ll-signal-table td:nth-child(2){font-weight:750;font-variant-numeric:tabular-nums}.ll-trade-ref{display:block;white-space:nowrap;font-variant-numeric:tabular-nums}.ll-signal-status{display:inline-block;padding:2px 6px;border-radius:999px;font-size:9px;font-weight:800;letter-spacing:.025em;white-space:nowrap}.ll-signal-status.work{background:rgba(56,217,150,.12);color:#38d996}.ll-signal-status.done{background:rgba(92,163,255,.12);color:#76adff}.ll-signal-status.skip{background:rgba(255,190,92,.12);color:#ffc56e}.ll-signal-status.shadow{background:rgba(163,106,255,.13);color:#bd91ff}.ll-signal-status.error{background:rgba(255,101,119,.12);color:#ff6577}.ll-signal-status.wait{background:rgba(255,255,255,.06);color:var(--text-dim)}
+.ll-strategy-table{font-size:10px!important}.ll-strategy-table th,.ll-strategy-table td{padding:9px 6px!important;white-space:nowrap!important;overflow-wrap:normal!important;overflow:hidden;text-overflow:clip}.ll-strategy-table small{display:inline;font-size:8px}.ll-strategy-table th:nth-child(1){width:24%}.ll-strategy-table th:nth-child(2){width:7%}.ll-strategy-table th:nth-child(3){width:20%}.ll-strategy-table th:nth-child(4){width:14%}.ll-strategy-table th:nth-child(5){width:11%}.ll-strategy-table th:nth-child(6){width:12%}.ll-strategy-table th:nth-child(7){width:12%}
+.ll-signal-table{font-size:10px!important}.ll-signal-table th,.ll-signal-table td{padding:9px 6px!important;white-space:nowrap!important;overflow-wrap:normal!important;overflow:hidden;text-overflow:clip}.ll-signal-table small{display:inline;font-size:8px}.ll-signal-table th:nth-child(1){width:13%}.ll-signal-table th:nth-child(2){width:5%}.ll-signal-table th:nth-child(3){width:14%}.ll-signal-table th:nth-child(4){width:10%}.ll-signal-table th:nth-child(5){width:13%}.ll-signal-table th:nth-child(6){width:12%}.ll-signal-table th:nth-child(7){width:16%}.ll-signal-table th:nth-child(8){width:17%}
+.ll-signal-table td:nth-child(2){font-weight:750;font-variant-numeric:tabular-nums}.ll-trade-ref{display:inline;white-space:nowrap;font-variant-numeric:tabular-nums}.ll-signal-status{display:inline-block;padding:2px 6px;border-radius:999px;font-size:9px;font-weight:800;letter-spacing:.025em;white-space:nowrap}.ll-signal-status.work{background:rgba(56,217,150,.12);color:#38d996}.ll-signal-status.done{background:rgba(92,163,255,.12);color:#76adff}.ll-signal-status.skip{background:rgba(255,190,92,.12);color:#ffc56e}.ll-signal-status.shadow{background:rgba(163,106,255,.13);color:#bd91ff}.ll-signal-status.error{background:rgba(255,101,119,.12);color:#ff6577}.ll-signal-status.wait{background:rgba(255,255,255,.06);color:var(--text-dim)}
 .ll-trades th:nth-child(1){width:13%}.ll-trades th:nth-child(2){width:18%}.ll-trades th:nth-child(3){width:10%}.ll-trades th:nth-child(4){width:12%}.ll-trades th:nth-child(5){width:14%}.ll-trades th:nth-child(6){width:12%}.ll-trades th:nth-child(7){width:8%}.ll-trades th:nth-child(8){width:13%}
 .ll-shadow-trades{font-size:10px!important}.ll-shadow-trades th,.ll-shadow-trades td{padding:9px 6px!important;white-space:nowrap!important;overflow-wrap:normal!important;overflow:hidden;text-overflow:clip}.ll-shadow-trades small{display:inline;font-size:8px}.ll-shadow-trades th:nth-child(1){width:15%}.ll-shadow-trades th:nth-child(2){width:17%}.ll-shadow-trades th:nth-child(3){width:8%}.ll-shadow-trades th:nth-child(4){width:11%}.ll-shadow-trades th:nth-child(5){width:13%}.ll-shadow-trades th:nth-child(6){width:10%}.ll-shadow-trades th:nth-child(7){width:7%}.ll-shadow-trades th:nth-child(8){width:19%}
 .ll-tech th:nth-child(1){width:20%}.ll-tech th:nth-child(2){width:18%}.ll-tech th:nth-child(3){width:15%}.ll-tech th:nth-child(4){width:18%}.ll-tech th:nth-child(5){width:29%}
@@ -1456,12 +1456,12 @@ function strategyRows(lang: Lang): string {
     const wr = s.closed ? s.wins / s.closed * 100 : null;
     const feed = executionSnapshot(spec);
     return `<tr>
-      <td><b>STRAT-${spec.code} · ${spec.asset}</b><br><small>${esc(spec.name)}</small></td>
+      <td><b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small></td>
       <td class="${'error' in feed ? 'neg' : 'pos'}">${'error' in feed ? 'OFF' : 'LIVE'}</td>
-      <td class="num"><b>${spec.backtest.trades} · ${spec.backtest.winRatePct.toFixed(1)}% · ${spec.backtest.profitFactor.toFixed(2)}</b><br><small>${signedPct(spec.backtest.netPct)} · SL ${spec.stopPct.toFixed(1)}%</small></td>
-      <td class="num"><b>${s.closed} / ${s.open}</b><br><small>WR ${wr == null ? '—' : `${wr.toFixed(0)}%`} · PF ${pfLabel(s.profitFactor)}</small></td>
+      <td class="num"><b>${spec.backtest.trades} · ${spec.backtest.winRatePct.toFixed(1)}% · ${spec.backtest.profitFactor.toFixed(2)}</b><small> · ${signedPct(spec.backtest.netPct)} · SL ${spec.stopPct.toFixed(1)}%</small></td>
+      <td class="num"><b>${s.closed} / ${s.open}</b><small> · WR ${wr == null ? '—' : `${wr.toFixed(0)}%`} · PF ${pfLabel(s.profitFactor)}</small></td>
       <td class="${pnlClass(s.netPct)}"><b>${signedPct(s.netPct)} · ${signedUsd(s.netUsd)}</b></td>
-      <td class="num">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}<br><small>½ ${signedPct(s.firstHalfPct)} · ½ ${signedPct(s.secondHalfPct)}</small></td>
+      <td class="num">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}<small> · ½ ${signedPct(s.firstHalfPct)} · ½ ${signedPct(s.secondHalfPct)}</small></td>
       <td class="${g.cls}"><b>${esc(g.label)}</b></td>
     </tr>`;
   }).join('');
@@ -1702,7 +1702,7 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
       row.shadow_entry_trade_id != null && row.shadow_entry_trade_id !== row.shadow_exit_trade_id
         ? linkedTrade(row.shadow_entry_trade_id, row.shadow_entry_trade_status, false, lang)
         : '',
-    ].filter(Boolean).join('') || '—';
+    ].filter(Boolean).join(' · ') || '—';
     const liveRefs = [
       row.live_exit_trade_id != null
         ? linkedTrade(row.live_exit_trade_id, row.live_exit_trade_status, true, lang)
@@ -1710,17 +1710,17 @@ function signalRows(rows: SignalRow[], lang: Lang): string {
       row.live_entry_trade_id != null && row.live_entry_trade_id !== row.live_exit_trade_id
         ? linkedTrade(row.live_entry_trade_id, row.live_entry_trade_status, true, lang)
         : '',
-    ].filter(Boolean).join('') || '—';
+    ].filter(Boolean).join(' · ') || '—';
     const lifecycle = signalLifecycle(row, latency, lang);
     return `<tr>
-      <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)}</b><br><small>${esc(row.symbol)}</small></td>
+      <td><b>${spec ? `STRAT-${spec.code}` : esc(row.strategy_id)}</b><small> · ${esc(row.symbol)}</small></td>
       <td>#${row.id}</td>
       <td>${utc(row.received_at)}</td>
-      <td class="${row.side === 'long' ? 'pos' : 'neg'}"><b>${row.action.toUpperCase()}<br>${row.side.toUpperCase()}</b></td>
+      <td class="${row.side === 'long' ? 'pos' : 'neg'}"><b>${row.action.toUpperCase()} · ${row.side.toUpperCase()}</b></td>
       <td>${shadowRefs}</td>
       <td>${liveRefs}</td>
-      <td><span class="ll-signal-status ${lifecycle.css}">${lifecycle.label}</span>${lifecycle.detail ? `<br><small>${esc(lifecycle.detail)}</small>` : ''}</td>
-      <td class="num">${row.source_price?.toFixed(5) ?? '—'} → ${price?.toFixed(5) ?? '—'}<br><small>spread ${row.spread_pct == null ? '—' : `${row.spread_pct.toFixed(4)}%`} · Δ <span class="${deviation != null && deviation > 0.2 ? 'neg' : ''}">${deviation == null ? '—' : signedPct(deviation, 4)}</span></small></td>
+      <td><span class="ll-signal-status ${lifecycle.css}">${lifecycle.label}</span>${lifecycle.detail ? `<small> · ${esc(lifecycle.detail)}</small>` : ''}</td>
+      <td class="num">${row.source_price?.toFixed(5) ?? '—'} → ${price?.toFixed(5) ?? '—'}<small> · spread ${row.spread_pct == null ? '—' : `${row.spread_pct.toFixed(4)}%`} · Δ <span class="${deviation != null && deviation > 0.2 ? 'neg' : ''}">${deviation == null ? '—' : signedPct(deviation, 4)}</span></small></td>
     </tr>`;
   }).join('');
 }
