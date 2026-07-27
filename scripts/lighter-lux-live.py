@@ -11,6 +11,7 @@ gates, and no replay of signals that predate the first service start.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import signal
@@ -72,6 +73,14 @@ class LiveRunner:
             os.getenv("LIGHTER_LIVE_STRATEGY_GATE_SAMPLE", "20")
         )
         self.max_slippage = float(os.getenv("LIGHTER_LIVE_MAX_SLIPPAGE", "0.003"))
+        self.signal_batch_size = max(
+            1,
+            int(os.getenv("LIGHTER_LIVE_SIGNAL_BATCH_SIZE", "16")),
+        )
+        self.signal_parallelism = max(
+            1,
+            int(os.getenv("LIGHTER_LIVE_SIGNAL_PARALLELISM", "4")),
+        )
         self.db = sqlite3.connect(
             os.getenv(
                 "LIGHTER_DB_PATH",
@@ -98,6 +107,8 @@ class LiveRunner:
         self.last_heartbeat = 0.0
         self.reconcile_cursor = 0
         self.leverage_ready: set[int] = set()
+        self.market_locks: dict[int, asyncio.Lock] = {}
+        self.signal_slots = asyncio.Semaphore(self.signal_parallelism)
 
     def log(self, event: str, **fields: Any) -> None:
         print(
@@ -112,6 +123,13 @@ class LiveRunner:
     def order_id(self) -> int:
         self.last_order_id = max(self.last_order_id + 1, int(time.time() * 1000))
         return self.last_order_id
+
+    def market_lock(self, market_id: int) -> asyncio.Lock:
+        lock = self.market_locks.get(market_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self.market_locks[market_id] = lock
+        return lock
 
     def state(self, status: str, error: str | None = None) -> None:
         now = int(time.time() * 1000)
@@ -1295,6 +1313,85 @@ class LiveRunner:
             trade_id,
         )
 
+    def signal_market_id(self, signal: sqlite3.Row) -> int:
+        strategy = STRATEGIES.get(str(signal["strategy_id"]))
+        if strategy is not None:
+            return strategy.market_id
+        return -int(signal["id"]) - 1
+
+    async def process_signal_group(
+        self,
+        market_id: int,
+        signals: list[sqlite3.Row],
+    ) -> None:
+        async with self.signal_slots:
+            async with self.market_lock(market_id):
+                for signal_row in signals:
+                    try:
+                        await self.process_signal(signal_row)
+                    except Exception as exc:
+                        self.decide(
+                            int(signal_row["id"]),
+                            "error",
+                            f"unexpected runner error: {exc}",
+                        )
+                        self.log(
+                            "signal_error",
+                            signal_id=signal_row["id"],
+                            market_id=market_id,
+                            error=str(exc),
+                        )
+
+    async def process_signal_batch(
+        self,
+        signals: list[sqlite3.Row],
+    ) -> None:
+        groups: dict[int, list[sqlite3.Row]] = {}
+        for signal_row in signals:
+            groups.setdefault(
+                self.signal_market_id(signal_row),
+                [],
+            ).append(signal_row)
+        started = time.monotonic()
+        await asyncio.gather(
+            *(
+                self.process_signal_group(market_id, rows)
+                for market_id, rows in groups.items()
+            )
+        )
+        self.log(
+            "signal_batch_processed",
+            signals=len(signals),
+            markets=len(groups),
+            elapsed_ms=round((time.monotonic() - started) * 1000),
+        )
+
+    async def reconcile_loop(self) -> None:
+        while self.running:
+            started = time.monotonic()
+            try:
+                trades = self.open_trades()
+                if trades:
+                    selected = trades[self.reconcile_cursor % len(trades)]
+                    self.reconcile_cursor += 1
+                    market_id = int(selected["market_id"])
+                    async with self.market_lock(market_id):
+                        trade = self.db.execute(
+                            """SELECT * FROM lighter_lux_live_trades
+                               WHERE id=?
+                                 AND status IN ('opening','open','closing')""",
+                            (selected["id"],),
+                        ).fetchone()
+                        if trade is not None:
+                            await self.reconcile_open_trade(trade)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.state("error", f"reconcile: {exc}")
+                self.log("reconcile_error", error=str(exc))
+            elapsed = time.monotonic() - started
+            await asyncio.sleep(max(0.05, 1.0 - elapsed))
+
     async def initialize(self) -> None:
         await self.load_market_meta()
         error = self.signer.check_client()
@@ -1357,57 +1454,59 @@ class LiveRunner:
         )
 
     async def run(self) -> None:
+        reconcile_task: asyncio.Task[None] | None = None
         try:
             await self.initialize()
+            reconcile_task = asyncio.create_task(
+                self.reconcile_loop(),
+                name="lighter-live-reconcile",
+            )
             while self.running:
                 state = self.db.execute(
                     "SELECT last_signal_id FROM lighter_lux_live_state WHERE id=1"
                 ).fetchone()
-                signal_row = self.db.execute(
+                signal_rows = self.db.execute(
                     """SELECT id,strategy_id,symbol,action,side,received_at,
                               capture_status,
                               source_price,buy_vwap_1000,sell_vwap_1000,
                               book_age_ms
                        FROM lighter_lux_signals
-                       WHERE id>? ORDER BY id LIMIT 1""",
-                    (int(state["last_signal_id"]),),
-                ).fetchone()
-                if signal_row is not None:
+                       WHERE id>? ORDER BY id LIMIT ?""",
+                    (
+                        int(state["last_signal_id"]),
+                        self.signal_batch_size,
+                    ),
+                ).fetchall()
+                ready_rows: list[sqlite3.Row] = []
+                for signal_row in signal_rows:
                     if signal_row["capture_status"] == "pending":
-                        await asyncio.sleep(0.1)
-                        continue
-                    try:
-                        await self.process_signal(signal_row)
-                        self.db.execute(
-                            """UPDATE lighter_lux_live_state
-                               SET last_signal_id=?,heartbeat_at=?,status='armed',
-                                   last_error=NULL WHERE id=1""",
-                            (
-                                signal_row["id"],
-                                int(time.time() * 1000),
-                            ),
-                        )
-                    except Exception as exc:
-                        self.state("error", str(exc))
-                        self.log(
-                            "signal_error",
-                            signal_id=signal_row["id"],
-                            error=str(exc),
-                        )
-                        await asyncio.sleep(1)
+                        break
+                    ready_rows.append(signal_row)
+                if ready_rows:
+                    await self.process_signal_batch(ready_rows)
+                    self.db.execute(
+                        """UPDATE lighter_lux_live_state
+                           SET last_signal_id=?,heartbeat_at=?,status='armed',
+                               last_error=NULL WHERE id=1""",
+                        (
+                            ready_rows[-1]["id"],
+                            int(time.time() * 1000),
+                        ),
+                    )
                     continue
-                if time.monotonic() - self.last_stop_check >= 1:
-                    trades = self.open_trades()
-                    if trades:
-                        trade = trades[self.reconcile_cursor % len(trades)]
-                        await self.reconcile_open_trade(trade)
-                        self.reconcile_cursor += 1
-                    self.last_stop_check = time.monotonic()
+                if signal_rows:
+                    await asyncio.sleep(0.05)
+                    continue
                 if time.monotonic() - self.last_heartbeat >= 5:
                     self.state("armed")
                     self.last_heartbeat = time.monotonic()
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.05)
         finally:
+            self.running = False
+            if reconcile_task is not None:
+                reconcile_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await reconcile_task
             await self.api.close()
             await self.signer.close()
             self.db.close()
