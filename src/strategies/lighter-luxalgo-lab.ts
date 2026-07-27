@@ -74,8 +74,13 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // STRAT-024 DOGE is another independent two-sided shadow-only setup. With the
 // same exact-price normalization and 5% safety stop, its long and short books,
 // both chronological halves and every portfolio third remained profitable;
-// the result also survived removing the five best trades. BCH, XLM, TRX, POL,
-// JUP, ADA and SUI candidates remain excluded.
+// the result also survived removing the five best trades. STRAT-025 and
+// STRAT-026 are independent two-sided ADA setups; both sides and both
+// chronological halves remained profitable after the same 5% stop model.
+// STRAT-026 is explicitly borderline because its first long third was nearly
+// flat (-0.74%), so it remains shadow-only. STRAT-027 POL also kept both sides,
+// both halves and the portfolio excluding its five best trades profitable.
+// BCH, XLM, TRX, JUP and SUI candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -282,6 +287,57 @@ const STRATEGIES: readonly StrategySpec[] = [
       profitFactor: 1.970,
       netPct: 57.126,
       maxDrawdownPct: 11.391,
+    },
+  },
+  {
+    id: 'ada-cntr-mf-hw',
+    code: '025',
+    name: 'Contrarian Normal · Money Flow · HyperWave',
+    symbol: 'ADAUSDT',
+    asset: 'ADA',
+    marketId: 39,
+    stopPct: 5,
+    backtest: {
+      period: '2026-04-07 → 2026-06-14',
+      trades: 120,
+      winRatePct: 70,
+      profitFactor: 1.958,
+      netPct: 54.485,
+      maxDrawdownPct: 10.206,
+    },
+  },
+  {
+    id: 'ada-cfm-cntr-hw',
+    code: '026',
+    name: 'Confirmation Any · Contrarian · HyperWave',
+    symbol: 'ADAUSDT',
+    asset: 'ADA',
+    marketId: 39,
+    stopPct: 5,
+    backtest: {
+      period: '2026-03-17 → 2026-06-14',
+      trades: 122,
+      winRatePct: 60.66,
+      profitFactor: 1.842,
+      netPct: 47.333,
+      maxDrawdownPct: 8.743,
+    },
+  },
+  {
+    id: 'pol-fvgm-neo-tsr',
+    code: '027',
+    name: 'FVG Mitigated · Neo Cloud · Trend Strength Ranging',
+    symbol: 'POLUSDT',
+    asset: 'POL',
+    marketId: 14,
+    stopPct: 5,
+    backtest: {
+      period: '2026-04-07 → 2026-06-14',
+      trades: 120,
+      winRatePct: 66.67,
+      profitFactor: 1.680,
+      netPct: 46.973,
+      maxDrawdownPct: 10,
     },
   },
 ] as const;
