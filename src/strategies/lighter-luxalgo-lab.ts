@@ -950,8 +950,14 @@ function summary(spec?: StrategySpec): Summary {
   };
 }
 
-function recentSignals(limit: number, offset: number): SignalRow[] {
-  return db.prepare<[...string[], number, number], SignalRow>(`
+function recentSignals(
+  limit: number,
+  offset: number,
+  strategyId: string | null = null,
+): SignalRow[] {
+  const where = strategyId ? 'signal.strategy_id = ?' : `signal.strategy_id IN (${SQL_MARKS})`;
+  const strategyParams = strategyId ? [strategyId] : STRATEGY_IDS;
+  return db.prepare<Array<string | number>, SignalRow>(`
     SELECT signal.id,signal.strategy_id,signal.symbol,signal.received_at,
            signal.captured_at,signal.action,signal.side,signal.source_price,
            signal.capture_status,signal.capture_error,signal.book_age_ms,
@@ -980,18 +986,26 @@ function recentSignals(limit: number, offset: number): SignalRow[] {
            decision.reason live_decision_reason
     FROM lighter_lux_signals signal
     LEFT JOIN lighter_lux_live_decisions decision ON decision.signal_id=signal.id
-    WHERE signal.strategy_id IN (${SQL_MARKS})
+    WHERE ${where}
     ORDER BY signal.received_at DESC
-    LIMIT ? OFFSET ?`).all(...STRATEGY_IDS, limit, offset);
+    LIMIT ? OFFSET ?`).all(...strategyParams, limit, offset);
 }
 
-function signalTotal(): number {
+function signalTotal(strategyId: string | null = null): number {
+  const where = strategyId ? 'strategy_id = ?' : `strategy_id IN (${SQL_MARKS})`;
+  const strategyParams = strategyId ? [strategyId] : STRATEGY_IDS;
   return db.prepare<string[], { total: number }>(`
     SELECT COUNT(*) total FROM lighter_lux_signals
-    WHERE strategy_id IN (${SQL_MARKS})`).get(...STRATEGY_IDS)?.total ?? 0;
+    WHERE ${where}`).get(...strategyParams)?.total ?? 0;
 }
 
-function recentTrades(limit: number, offset: number): TradeRow[] {
+function recentTrades(
+  limit: number,
+  offset: number,
+  strategyId: string | null = null,
+): TradeRow[] {
+  const where = strategyId ? 'strategy_id = ?' : `strategy_id IN (${SQL_MARKS})`;
+  const strategyParams = strategyId ? [strategyId] : STRATEGY_IDS;
   const rows = db.prepare<string[], TradeRow>(`
     SELECT id, strategy_id, symbol, side, entry_signal_id, exit_signal_id,
            opened_at, closed_at, entry_price, entry_funding_pct_h,
@@ -999,8 +1013,8 @@ function recentTrades(limit: number, offset: number): TradeRow[] {
            funding_pnl_pct, net_pnl_pct, notional_usd, close_reason,
            NULL cumulative_net_pct, NULL strategy_cumulative_net_pct
     FROM lighter_lux_trades
-    WHERE strategy_id IN (${SQL_MARKS})
-    ORDER BY opened_at, id`).all(...STRATEGY_IDS);
+    WHERE ${where}
+    ORDER BY opened_at, id`).all(...strategyParams);
   let portfolioTotal = 0;
   const strategyTotals = new Map<string, number>();
   for (const row of rows) {
@@ -1014,10 +1028,12 @@ function recentTrades(limit: number, offset: number): TradeRow[] {
   return rows.reverse().slice(offset, offset + limit);
 }
 
-function tradeTotal(): number {
+function tradeTotal(strategyId: string | null = null): number {
+  const where = strategyId ? 'strategy_id = ?' : `strategy_id IN (${SQL_MARKS})`;
+  const strategyParams = strategyId ? [strategyId] : STRATEGY_IDS;
   return db.prepare<string[], { total: number }>(`
     SELECT COUNT(*) total FROM lighter_lux_trades
-    WHERE strategy_id IN (${SQL_MARKS})`).get(...STRATEGY_IDS)?.total ?? 0;
+    WHERE ${where}`).get(...strategyParams)?.total ?? 0;
 }
 
 function lighterLiveState(): LiveStateRow | null {
@@ -1028,8 +1044,13 @@ function lighterLiveState(): LiveStateRow | null {
     FROM lighter_lux_live_state WHERE id=1`).get() ?? null;
 }
 
-function recentLiveTrades(limit = 30): LiveTradeRow[] {
-  return db.prepare<[number], LiveTradeRow>(`
+function recentLiveTrades(
+  limit = 30,
+  strategyId: string | null = null,
+): LiveTradeRow[] {
+  const filter = strategyId ? 'WHERE real.strategy_id = ?' : '';
+  const params: Array<string | number> = strategyId ? [strategyId, limit] : [limit];
+  return db.prepare<Array<string | number>, LiveTradeRow>(`
     SELECT real.id,real.strategy_id,real.symbol,real.side,real.entry_signal_id,
            real.exit_signal_id,real.opened_at,real.closed_at,
            real.requested_notional_usd,real.filled_notional_usd,
@@ -1048,7 +1069,8 @@ function recentLiveTrades(limit = 30): LiveTradeRow[] {
     FROM lighter_lux_live_trades real
     JOIN lighter_lux_signals entry_signal ON entry_signal.id=real.entry_signal_id
     LEFT JOIN lighter_lux_signals exit_signal ON exit_signal.id=real.exit_signal_id
-    ORDER BY real.opened_at DESC,real.id DESC LIMIT ?`).all(limit);
+    ${filter}
+    ORDER BY real.opened_at DESC,real.id DESC LIMIT ?`).all(...params);
 }
 
 function closedLiveTrades(): LiveTradeRow[] {
@@ -1265,6 +1287,9 @@ function positivePage(value: unknown): number {
   const page = Number.parseInt(String(value ?? '1'), 10);
   return Number.isFinite(page) && page > 0 ? page : 1;
 }
+function selectedStrategy(value: unknown): StrategySpec | null {
+  return STRATEGY_BY_ID.get(String(value ?? '')) ?? null;
+}
 function pager(args: {
   lang: Lang;
   page: number;
@@ -1273,6 +1298,7 @@ function pager(args: {
   signalsPage: number;
   tradesPage: number;
   target: 'signals' | 'trades';
+  strategyId: string | null;
 }): string {
   const pages = Math.max(1, Math.ceil(args.total / args.pageSize));
   const from = args.total ? (args.page - 1) * args.pageSize + 1 : 0;
@@ -1280,7 +1306,10 @@ function pager(args: {
   const href = (page: number): string => {
     const signalsPage = args.target === 'signals' ? page : args.signalsPage;
     const tradesPage = args.target === 'trades' ? page : args.tradesPage;
-    return `/lab/lighter-luxalgo?signalsPage=${signalsPage}&tradesPage=${tradesPage}#${args.target === 'signals' ? 'signal-history' : 'shadow-trades'}`;
+    const strategy = args.strategyId
+      ? `&strategy=${encodeURIComponent(args.strategyId)}`
+      : '';
+    return `/lab/lighter-luxalgo?signalsPage=${signalsPage}&tradesPage=${tradesPage}${strategy}#${args.target === 'signals' ? 'signal-history' : 'shadow-trades'}`;
   };
   const first = Math.max(1, Math.min(args.page - 2, pages - 4));
   const last = Math.min(pages, first + 4);
@@ -1310,6 +1339,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.ll-engine i{width:8px;height:8px;border-radius:50%;background:#ff6577}.ll-engine.live i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}
 .ll-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}.ll-card,.ll-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.ll-card{padding:13px 14px;display:grid;gap:4px}.ll-card small,.ll-card em{color:var(--text-faint);font-size:10px;font-style:normal}.ll-card b{font-size:20px;font-variant-numeric:tabular-nums}
 .ll-panel{padding:15px;margin:10px 0}.ll-panel h2{font-size:16px;margin:0 0 11px}
+.ll-filter{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:10px 0;padding:11px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-card)}.ll-filter label{display:grid;gap:5px;color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.04em}.ll-filter select{min-width:285px;height:34px;padding:0 32px 0 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:11px}.ll-filter button{height:34px;padding:0 13px;border:1px solid rgba(163,106,255,.5);border-radius:8px;background:rgba(163,106,255,.14);color:#bd91ff;font:inherit;font-size:10px;font-weight:700;cursor:pointer}.ll-filter small{color:var(--text-faint);font-size:10px}
 .ll-signal-list{border:1px solid var(--border);border-radius:10px;overflow:hidden}.ll-signal-row{display:grid;grid-template-columns:minmax(120px,1.1fr) 92px 118px 120px 120px;align-items:center;gap:10px;min-height:38px;padding:6px 10px;border-bottom:1px solid var(--border);font-size:11px}.ll-signal-row:last-child{border-bottom:0}.ll-signal-row:hover{background:rgba(255,255,255,.018)}.ll-signal-labels{min-height:30px;color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.04em}.ll-signal-strategy b{font-size:11px}.ll-signal-time{color:var(--text-faint);font-variant-numeric:tabular-nums}.ll-signal-event{font-weight:760}.ll-signal-value{font-variant-numeric:tabular-nums}
 .ll-live{display:inline-block;margin-left:5px;padding:2px 5px;border-radius:999px;background:rgba(56,217,150,.12);color:#38d996;font-size:9px;letter-spacing:.04em}
 .ll-table{width:100%;overflow:hidden}.ll-table table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:11px}.ll-table th,.ll-table td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border);white-space:normal;overflow-wrap:anywhere;vertical-align:middle}.ll-table th{color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.025em}.ll-table small{color:var(--text-faint);font-size:9px}.ll-table .num{font-variant-numeric:tabular-nums}
@@ -1323,7 +1353,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-details{padding:0}.ll-details>summary{cursor:pointer;list-style:none;padding:14px 15px;font-size:15px;font-weight:700}.ll-details>summary::-webkit-details-marker{display:none}.ll-details>summary::after{content:'＋';float:right;color:var(--text-faint)}.ll-details[open]>summary::after{content:'−'}.ll-details[open]>.ll-table{padding:0 15px 14px}
 .ll-chart-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}.ll-chart-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px}.ll-chart-legend span{display:flex;align-items:center;gap:6px;color:var(--text-dim)}.ll-chart-legend i{width:18px;height:3px;border-radius:2px}.ll-chart-legend .shadow i{background:#a36aff}.ll-chart-legend .real i{background:#38d996}.ll-chart-legend b{font-variant-numeric:tabular-nums}.ll-chart{width:100%;margin-top:8px;overflow:hidden}.ll-chart svg{display:block;width:100%;height:auto;min-height:190px}.ll-chart-grid{stroke:rgba(255,255,255,.075);stroke-width:1}.ll-chart-zero{stroke:rgba(255,255,255,.24);stroke-width:1}.ll-chart-axis{fill:var(--text-faint);font-size:10px;font-family:inherit}.ll-chart-shadow{fill:none;stroke:#a36aff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-real{fill:none;stroke:#38d996;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-dot-shadow{fill:#a36aff}.ll-chart-dot-real{fill:#38d996}.ll-chart-empty{display:grid;place-items:center;min-height:170px;color:var(--text-faint);font-size:12px}
 .ll-live-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px;margin:12px 0}.ll-live-metric{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.015);display:grid;gap:3px}.ll-live-metric small{font-size:9px;color:var(--text-faint);text-transform:uppercase}.ll-live-metric b{font-size:15px;font-variant-numeric:tabular-nums}.ll-live-metric em{font-size:9px;color:var(--text-faint);font-style:normal}.ll-live-strategy th:nth-child(1){width:25%}.ll-live-strategy th:nth-child(2){width:11%}.ll-live-strategy th:nth-child(3){width:10%}.ll-live-strategy th:nth-child(4){width:12%}.ll-live-strategy th:nth-child(5){width:12%}.ll-live-strategy th:nth-child(6){width:18%}.ll-live-strategy th:nth-child(7){width:12%}
-@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-signal-table th:nth-child(3),.ll-signal-table td:nth-child(3),.ll-signal-table th:nth-child(8),.ll-signal-table td:nth-child(8){display:none}.ll-signal-table th:nth-child(1){width:17%}.ll-signal-table th:nth-child(2){width:9%}.ll-signal-table th:nth-child(4){width:17%}.ll-signal-table th:nth-child(5){width:17%}.ll-signal-table th:nth-child(6){width:16%}.ll-signal-table th:nth-child(7){width:24%}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}}`;
+@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-filter{align-items:stretch}.ll-filter label,.ll-filter select{width:100%;min-width:0}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-signal-table th:nth-child(3),.ll-signal-table td:nth-child(3),.ll-signal-table th:nth-child(8),.ll-signal-table td:nth-child(8){display:none}.ll-signal-table th:nth-child(1){width:17%}.ll-signal-table th:nth-child(2){width:9%}.ll-signal-table th:nth-child(4){width:17%}.ll-signal-table th:nth-child(5){width:17%}.ll-signal-table th:nth-child(6){width:16%}.ll-signal-table th:nth-child(7){width:24%}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}}`;
 
 export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
   const s = summary();
@@ -1694,11 +1724,16 @@ function pnlChart(lang: Lang): string {
 
 async function render(
   lang: Lang,
-  requested: { signalsPage: number; tradesPage: number },
+  requested: {
+    signalsPage: number;
+    tradesPage: number;
+    strategy: StrategySpec | null;
+  },
 ): Promise<string> {
   const s = summary();
-  const signalsTotal = signalTotal();
-  const tradesTotal = tradeTotal();
+  const strategyId = requested.strategy?.id ?? null;
+  const signalsTotal = signalTotal(strategyId);
+  const tradesTotal = tradeTotal(strategyId);
   const signalsPage = Math.min(
     requested.signalsPage,
     Math.max(1, Math.ceil(signalsTotal / SIGNAL_PAGE_SIZE)),
@@ -1710,13 +1745,15 @@ async function render(
   const signals = recentSignals(
     SIGNAL_PAGE_SIZE,
     (signalsPage - 1) * SIGNAL_PAGE_SIZE,
+    strategyId,
   );
   const trades = recentTrades(
     TRADE_PAGE_SIZE,
     (tradesPage - 1) * TRADE_PAGE_SIZE,
+    strategyId,
   );
   const liveState = lighterLiveState();
-  const liveTrades = recentLiveTrades();
+  const liveTrades = recentLiveTrades(30, strategyId);
   const allLiveClosed = closedLiveTrades();
   const liveSummary = liveMetrics(allLiveClosed);
   const execution = liveExecutionComparison();
@@ -1763,6 +1800,19 @@ async function render(
 
       ${pnlChart(lang)}
 
+      <form class="ll-filter" action="/lab/lighter-luxalgo" method="get">
+        <label>${t(lang, 'Фильтр сигналов и сделок', 'Signals and trades filter')}
+          <select name="strategy" onchange="this.form.submit()">
+            <option value="">${t(lang, 'Все стратегии', 'All strategies')}</option>
+            ${STRATEGIES.map((spec) => `<option value="${esc(spec.id)}"${strategyId === spec.id ? ' selected' : ''}>STRAT-${spec.code} · ${spec.asset} · ${esc(spec.name)}</option>`).join('')}
+          </select>
+        </label>
+        <small>${requested.strategy
+          ? `${t(lang, 'Показаны только сигналы, Shadow и Real-сделки', 'Showing only signals, Shadow, and Real trades')} · STRAT-${requested.strategy.code} · ${requested.strategy.asset}`
+          : t(lang, 'Показаны все стратегии портфеля', 'Showing all portfolio strategies')}</small>
+        <button type="submit">${t(lang, 'Показать', 'Apply')}</button>
+      </form>
+
       <div class="ll-panel"><h2>${t(lang, 'Индивидуальная статистика стратегий', 'Individual strategy statistics')}</h2><div class="ll-table"><table class="ll-strategy-table">
         <thead><tr><th>Strategy</th><th>L2</th><th>Backtest · N / WR / PF</th><th>Forward · closed / open</th><th>Net</th><th>DD / halves</th><th>Gate</th></tr></thead>
         <tbody>${strategyRows(lang)}</tbody>
@@ -1774,14 +1824,14 @@ async function render(
           <thead><tr><th>Strategy</th><th>${t(lang, 'Сигнал №', 'Signal #')}</th><th>${t(lang, 'Время UTC', 'Time UTC')}</th><th>Event</th><th>Shadow-${t(lang, 'сделка', 'trade')}</th><th>Real-${t(lang, 'сделка', 'trade')}</th><th>${t(lang, 'Статус сигнала', 'Signal status')}</th><th>Lux → Lighter / spread / Δ</th></tr></thead>
           <tbody>${signalRows(signals, lang)}</tbody>
         </table></div>
-        ${pager({ lang, page: signalsPage, total: signalsTotal, pageSize: SIGNAL_PAGE_SIZE, signalsPage, tradesPage, target: 'signals' })}
+        ${pager({ lang, page: signalsPage, total: signalsTotal, pageSize: SIGNAL_PAGE_SIZE, signalsPage, tradesPage, target: 'signals', strategyId })}
       </div>
 
       <div class="ll-panel" id="shadow-trades"><h2>${t(lang, 'Сделки', 'Trades')}</h2><div class="ll-table"><table class="ll-trades">
         <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>${t(lang, 'Цена входа', 'Entry price')}</th><th>${t(lang, 'Стоп-лосс', 'Stop-loss')}</th><th>${t(lang, 'Цена выхода', 'Exit price')}</th><th>${t(lang, 'Статус', 'Status')}</th><th>Net after costs</th></tr></thead>
         <tbody>${tradeRows(trades, lang)}</tbody>
       </table></div>
-      ${pager({ lang, page: tradesPage, total: tradesTotal, pageSize: TRADE_PAGE_SIZE, signalsPage, tradesPage, target: 'trades' })}</div>
+      ${pager({ lang, page: tradesPage, total: tradesTotal, pageSize: TRADE_PAGE_SIZE, signalsPage, tradesPage, target: 'trades', strategyId })}</div>
 
       <div class="ll-panel"><div class="ll-chart-head"><div><h2>${t(lang, 'Реальная торговля · canary', 'Live trading · canary')}</h2>
         <p class="ll-note"><b class="${livePortfolioPaused || !liveRunner ? 'fail' : 'pass'}">${livePortfolioPaused ? 'RISK PAUSED' : liveRunner ? 'ARMED' : 'OFFLINE'} · $100 · 10x · ${t(lang, 'ПО ОДНОЙ НА МОНЕТУ', 'ONE PER MARKET')}.</b> ${t(lang, 'Разные стратегии могут торговаться одновременно. Биржевой reduce-only stop ставится сразу на каждую позицию. Новые входы блокируются при дневном убытке −$10, совокупной просадке −$15 или индивидуальной паузе стратегии.', 'Different strategies may trade concurrently. An exchange-native reduce-only stop is placed immediately on every position. New entries are blocked at a −$10 daily loss, −$15 cumulative drawdown, or an individual strategy pause.')}${liveState?.last_error ? ` <span class="neg">${esc(liveState.last_error)}</span>` : ''}${liveState?.portfolio_pause_reason ? ` <span class="neg">${esc(liveState.portfolio_pause_reason)}</span>` : ''}</p>
@@ -1814,13 +1864,14 @@ async function render(
 
 export async function lighterLuxalgoLabRoute(app: FastifyInstance): Promise<void> {
   app.get<{
-    Querystring: { signalsPage?: string; tradesPage?: string };
+    Querystring: { signalsPage?: string; tradesPage?: string; strategy?: string };
   }>('/lab/lighter-luxalgo', async (req, reply) => {
     reply.type('text/html; charset=utf-8');
     reply.header('Cache-Control', 'public, max-age=2');
     return render(getLang(req), {
       signalsPage: positivePage(req.query.signalsPage),
       tradesPage: positivePage(req.query.tradesPage),
+      strategy: selectedStrategy(req.query.strategy),
     });
   });
 }
