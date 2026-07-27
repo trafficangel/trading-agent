@@ -1747,6 +1747,16 @@ function signalLifecycle(
       detail: row.live_decision_reason ?? detail,
     };
   }
+  if (
+    row.live_decision === 'skip'
+    && row.live_decision_reason?.trim().toLowerCase() === 'strategy not live-enabled'
+  ) {
+    return {
+      label: t(lang, 'ТОЛЬКО SHADOW', 'SHADOW ONLY'),
+      css: 'shadow',
+      detail: '',
+    };
+  }
   if (row.live_decision === 'skip') {
     return {
       label: t(lang, 'ПРОПУЩЕН', 'SKIPPED'),
