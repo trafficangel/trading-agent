@@ -11,7 +11,7 @@ WorkingDirectory=/home/trader/apps/trading-agent
 EnvironmentFile=/etc/trading-agent/extended-arb.env
 EnvironmentFile=/etc/trading-agent/lighter-live.env
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/trading-agent/data/venue-arb
-Environment=VENUE_ARB_LIVE_ENABLED=false
+Environment=VENUE_ARB_LIVE_ENABLED=true
 Environment=VENUE_ARB_LIVE_EXECUTION=maker-taker
 Environment=VENUE_ARB_LIVE_ROUTE=lighter-extended
 Environment=VENUE_ARB_LIVE_NOTIONAL_USD=100
@@ -35,9 +35,10 @@ Environment=VENUE_ARB_LIVE_MAKER_ORDER_TTL_MS=60000
 Environment=VENUE_ARB_LIVE_MAKER_SAFETY_TICKS=1
 Environment=VENUE_ARB_LIVE_MAKER_SAFETY_BPS=0
 Environment=VENUE_ARB_LIVE_MAKER_RETRY_COOLDOWN_MS=5000
-# One recovered maker fill is retained in the honest journal; allow one
-# additional post-fix completed pair before the canary stops again.
-Environment=VENUE_ARB_LIVE_MAX_TRADES=2
+# Two adverse maker fills are retained in the honest journal. A third and final
+# canary is allowed only after the post-fix shadow completes profitably.
+Environment=VENUE_ARB_LIVE_MAX_TRADES=3
+Environment=VENUE_ARB_LIVE_REQUIRE_MAKER_SHADOW_PASSES=1
 Environment=VENUE_ARB_LIVE_DAILY_LOSS_USD=2
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/trader/venvs/venue-arb-live/bin/python /home/trader/apps/trading-agent/scripts/venue-arb-live.py

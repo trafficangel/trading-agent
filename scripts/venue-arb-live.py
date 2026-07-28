@@ -228,6 +228,13 @@ class Canary:
             float(os.getenv("VENUE_ARB_LIVE_COOLDOWN_SECONDS", "900")) * 1000
         )
         self.max_trades = int(os.getenv("VENUE_ARB_LIVE_MAX_TRADES", "1"))
+        self.required_maker_shadow_passes = int(
+            os.getenv("VENUE_ARB_LIVE_REQUIRE_MAKER_SHADOW_PASSES", "0")
+        )
+        if self.required_maker_shadow_passes < 0:
+            raise RuntimeError(
+                "VENUE_ARB_LIVE_REQUIRE_MAKER_SHADOW_PASSES must be non-negative"
+            )
         self.daily_loss_usd = float(
             os.getenv("VENUE_ARB_LIVE_DAILY_LOSS_USD", "5")
         )
@@ -332,6 +339,8 @@ class Canary:
             "routeId": self.route_id,
             "route": self.route_label,
             "maxTrades": self.max_trades,
+            "makerShadowRequiredPasses": self.required_maker_shadow_passes,
+            "makerShadowObservedPasses": self.maker_shadow_pass_count(),
             "lastRejection": self.last_rejection,
             "reason": None,
             "error": None,
@@ -522,6 +531,25 @@ class Canary:
                 time.gmtime(float(row.get("closedAt", 0) or 0) / 1000),
             )
             == today
+        )
+
+    def maker_shadow_pass_count(self) -> int:
+        if self.execution_mode != "maker-taker":
+            return self.required_maker_shadow_passes
+        status = self.read_json(self.monitor_path, {})
+        recent = (
+            ((status.get("makerShadow") or {}).get("recent") or [])
+            if isinstance(status, dict)
+            else []
+        )
+        accepted_reasons = {"maker_round_trip", "max_hold_taker_exit"}
+        return sum(
+            1
+            for row in recent
+            if isinstance(row, dict)
+            and row.get("passed") is True
+            and row.get("reason") in accepted_reasons
+            and float(row.get("realizedNetBps") or 0) > 0
         )
 
     async def create_extended_client(self) -> None:
@@ -2193,6 +2221,7 @@ class Canary:
         if len(self.completed_mode_trades()) >= self.max_trades:
             self.write_status("completed", reason="max trade count reached")
             return
+        shadow_gate_announced = False
         self.write_status("armed")
         self.log(
             "armed",
@@ -2204,6 +2233,26 @@ class Canary:
             if len(self.completed_mode_trades()) >= self.max_trades:
                 self.write_status("completed", reason="max trade count reached")
                 return
+            observed_shadow_passes = self.maker_shadow_pass_count()
+            if observed_shadow_passes < self.required_maker_shadow_passes:
+                self.last_rejection = (
+                    "ждёт новый прибыльный maker-shadow цикл: "
+                    f"{observed_shadow_passes}/{self.required_maker_shadow_passes}"
+                )
+                if time.monotonic() - self.last_status_write >= 1:
+                    self.write_status(
+                        "armed_waiting_shadow",
+                        makerShadowObservedPasses=observed_shadow_passes,
+                    )
+                await asyncio.sleep(0.2)
+                continue
+            if not shadow_gate_announced and self.required_maker_shadow_passes:
+                shadow_gate_announced = True
+                self.log(
+                    "maker_shadow_gate_open",
+                    observed=observed_shadow_passes,
+                    required=self.required_maker_shadow_passes,
+                )
             candidate = (
                 self.maker_candidate()
                 if self.execution_mode == "maker-taker"
@@ -2287,6 +2336,32 @@ def self_test() -> None:
         },
     ]
     assert len(route_guard.completed_route_trades()) == 1
+    shadow_guard = object.__new__(Canary)
+    shadow_guard.execution_mode = "maker-taker"
+    shadow_guard.required_maker_shadow_passes = 1
+    shadow_guard.monitor_path = Path("/unused")
+    shadow_guard.read_json = lambda *_args, **_kwargs: {
+        "makerShadow": {
+            "recent": [
+                {
+                    "passed": True,
+                    "reason": "post_fill_edge_lost",
+                    "realizedNetBps": 2,
+                },
+                {
+                    "passed": True,
+                    "reason": "maker_round_trip",
+                    "realizedNetBps": 4,
+                },
+                {
+                    "passed": False,
+                    "reason": "maker_round_trip",
+                    "realizedNetBps": -1,
+                },
+            ]
+        }
+    }
+    assert shadow_guard.maker_shadow_pass_count() == 1
     signal_guard = object.__new__(Canary)
     signal_guard.running = True
     signal_guard.shutdown_requested = False

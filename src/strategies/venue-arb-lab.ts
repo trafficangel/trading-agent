@@ -372,6 +372,8 @@ type LiveStatus = {
   exitConfirmations?: number;
   shutdownDeferredWhenOpen?: boolean;
   route?: string;
+  makerShadowRequiredPasses?: number;
+  makerShadowObservedPasses?: number;
   lastRejection?: string | null;
   reason?: string | null;
   error?: string;
@@ -690,6 +692,7 @@ function liveState(status: LiveStatus | null): string {
     dry_run_ready: 'DRY-RUN ГОТОВ',
     preflight: 'ПРОВЕРКА',
     armed: 'ЖДЁТ ВХОД',
+    armed_waiting_shadow: 'ЖДЁТ SHADOW-ПОДТВЕРЖДЕНИЕ',
     opening: 'ОТКРЫТИЕ',
     maker_opening: 'MAKER: ОТПРАВКА',
     maker_waiting: 'MAKER: В СТАКАНЕ',
@@ -1182,7 +1185,7 @@ async function render(lang: Lang): Promise<string> {
           <th>Размер</th><th>Вход Ext / Lighter</th><th>Выход Ext / Lighter</th>
           <th>Жизнь</th><th>Вход / выход</th><th>Комиссии</th><th>Net результат</th>
         </tr></thead><tbody>${liveTradeRows(liveTrades)}</tbody></table></div>
-        ${liveStatus?.lastRejection && liveStatus.state === 'armed' ? `<p class="va-wait">Сейчас: ${esc(liveStatus.lastRejection)}</p>` : ''}
+        ${liveStatus?.lastRejection && (liveStatus.state === 'armed' || liveStatus.state === 'armed_waiting_shadow') ? `<p class="va-wait">Сейчас: ${esc(liveStatus.lastRejection)}</p>` : ''}
         ${liveStatus?.reason ? `<p class="va-wait">Решение: ${esc(liveStatus.reason)}</p>` : ''}
         ${liveStatus?.error ? `<p class="neg">Ошибка: ${esc(liveStatus.error)}</p>` : ''}
       </section>
