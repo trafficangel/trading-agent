@@ -42,6 +42,7 @@ type Venue =
   | 'polymarket'
   | 'extended'
   | 'aster'
+  | 'pacifica'
   | 'binance'
   | 'bybit';
 type VenueClass = 'DEX' | 'CEX';
@@ -319,6 +320,7 @@ const VENUES: readonly Venue[] = [
   'polymarket',
   'extended',
   'aster',
+  'pacifica',
   'binance',
   'bybit',
 ];
@@ -329,6 +331,7 @@ const VENUE_CLASS: Record<Venue, VenueClass> = {
   polymarket: 'DEX',
   extended: 'DEX',
   aster: 'DEX',
+  pacifica: 'DEX',
   binance: 'CEX',
   bybit: 'CEX',
 };
@@ -340,6 +343,8 @@ const FEE_BPS: Record<Venue, number> = {
   polymarket: finiteEnv('VENUE_ARB_FEE_BPS_POLYMARKET', 4),
   extended: finiteEnv('VENUE_ARB_FEE_BPS_EXTENDED', 2.5),
   aster: finiteEnv('VENUE_ARB_FEE_BPS_ASTER', 4),
+  // Pacifica fee level 0 taker rate is 0.040%.
+  pacifica: finiteEnv('VENUE_ARB_FEE_BPS_PACIFICA', 4),
   binance: finiteEnv('VENUE_ARB_FEE_BPS_BINANCE', 5),
   bybit: finiteEnv('VENUE_ARB_FEE_BPS_BYBIT', 5.5),
 };
@@ -384,6 +389,30 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     id: 'paradex-lighter',
     buyVenue: 'paradex',
     sellVenue: 'lighter',
+    primary: false,
+  },
+  {
+    id: 'lighter-pacifica',
+    buyVenue: 'lighter',
+    sellVenue: 'pacifica',
+    primary: false,
+  },
+  {
+    id: 'pacifica-lighter',
+    buyVenue: 'pacifica',
+    sellVenue: 'lighter',
+    primary: false,
+  },
+  {
+    id: 'extended-pacifica',
+    buyVenue: 'extended',
+    sellVenue: 'pacifica',
+    primary: false,
+  },
+  {
+    id: 'pacifica-extended',
+    buyVenue: 'pacifica',
+    sellVenue: 'extended',
     primary: false,
   },
   {
@@ -924,9 +953,16 @@ function updateObjectLevels(target: Map<number, number>, rows: unknown): void {
   if (!Array.isArray(rows)) return;
   for (const raw of rows) {
     if (!raw || typeof raw !== 'object') continue;
-    const row = raw as { px?: unknown; sz?: unknown; price?: unknown; size?: unknown };
-    const price = finite(row.px ?? row.price);
-    const size = finite(row.sz ?? row.size);
+    const row = raw as {
+      px?: unknown;
+      sz?: unknown;
+      price?: unknown;
+      size?: unknown;
+      p?: unknown;
+      a?: unknown;
+    };
+    const price = finite(row.px ?? row.price ?? row.p);
+    const size = finite(row.sz ?? row.size ?? row.a);
     if (!(price > 0) || size < 0) continue;
     if (size === 0) target.delete(price);
     else target.set(price, size);
@@ -1049,6 +1085,46 @@ function startBinance(): void {
       replaceStringLevels(book.bids, data.b);
       replaceStringLevels(book.asks, data.a);
       markBook(book, finite(data.T ?? data.E), receivedAt);
+    },
+  );
+}
+
+function startPacifica(): void {
+  connect(
+    'pacifica',
+    'wss://ws.pacifica.fi/ws',
+    (ws) => {
+      for (const market of MARKETS) {
+        ws.send(JSON.stringify({
+          method: 'subscribe',
+          params: {
+            source: 'book',
+            symbol: market.coin,
+            agg_level: 1,
+          },
+        }));
+      }
+    },
+    (payload, receivedAt) => {
+      const message = payload as {
+        channel?: unknown;
+        data?: {
+          s?: unknown;
+          l?: unknown[];
+          t?: unknown;
+        };
+      };
+      if (
+        message.channel !== 'book'
+        || typeof message.data?.s !== 'string'
+        || !Array.isArray(message.data.l)
+      ) return;
+      const market = byCoin.get(message.data.s);
+      const book = market ? books.get(bookKey('pacifica', market.coin)) : null;
+      if (!book) return;
+      replaceObjectLevels(book.bids, message.data.l[0]);
+      replaceObjectLevels(book.asks, message.data.l[1]);
+      markBook(book, finite(message.data.t), receivedAt);
     },
   );
 }
@@ -1878,6 +1954,7 @@ startParadex();
 startPolymarket();
 startExtended();
 startAster();
+startPacifica();
 startBinance();
 startBybit();
 const evaluationTimer = setInterval(() => {
