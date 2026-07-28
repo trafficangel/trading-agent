@@ -11,7 +11,7 @@ WorkingDirectory=/home/trader/apps/trading-agent
 EnvironmentFile=/etc/trading-agent/extended-arb.env
 EnvironmentFile=/etc/trading-agent/lighter-live.env
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/trading-agent/data/venue-arb
-Environment=VENUE_ARB_LIVE_ENABLED=true
+Environment=VENUE_ARB_LIVE_ENABLED=false
 Environment=VENUE_ARB_LIVE_EXECUTION=maker-taker
 Environment=VENUE_ARB_LIVE_ROUTE=lighter-extended
 Environment=VENUE_ARB_LIVE_NOTIONAL_USD=100
