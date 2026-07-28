@@ -30,6 +30,7 @@ import {
 } from '../lib/venue-arb.js';
 import {
   conservativeLatencyMs,
+  independentSignalRows,
   shadowNetAfterCosts,
   shadowReadiness,
 } from '../lib/venue-arb-shadow.js';
@@ -166,7 +167,8 @@ type ShadowRejectReason =
   | 'stale_book'
   | 'insufficient_depth'
   | 'below_gate'
-  | 'latched';
+  | 'latched'
+  | 'cooldown';
 
 type ShadowRouteTelemetry = {
   freshQuotes: number;
@@ -289,6 +291,10 @@ const SHADOW_EXIT_LATENCY_FLOOR_MS = finiteEnv(
 const SHADOW_EXIT_QUOTE_GRACE_MS = finiteEnv(
   'VENUE_ARB_SHADOW_EXIT_QUOTE_GRACE_MS',
   1_000,
+);
+const SHADOW_INDEPENDENCE_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_INDEPENDENCE_MS',
+  60_000,
 );
 const FEED_STALL_MS = finiteEnv('VENUE_ARB_FEED_STALL_MS', 15_000);
 const RECONNECT_MS = 2_000;
@@ -413,6 +419,7 @@ function emptyShadowRejections(): Record<ShadowRejectReason, number> {
     insufficient_depth: 0,
     below_gate: 0,
     latched: 0,
+    cooldown: 0,
   };
 }
 
@@ -463,6 +470,7 @@ const active = new Map<string, Opportunity>();
 const latchedUntilBelowTrigger = new Set<string>();
 const shadowProbes = new Map<string, ShadowProbe>();
 const shadowLatched = new Set<string>();
+const shadowLastSignalAt = new Map<string, number>();
 let recentClosed: Opportunity[] = [];
 let shadowResults: ShadowResult[] = [];
 let startedAt = Date.now();
@@ -739,6 +747,12 @@ function evaluateShadow(now: number): void {
         currentRejections.latched++;
         continue;
       }
+      const lastSignalAt = shadowLastSignalAt.get(latchKey) ?? 0;
+      if (now - lastSignalAt < SHADOW_INDEPENDENCE_MS) {
+        telemetry.rejections.cooldown++;
+        currentRejections.cooldown++;
+        continue;
+      }
       const latency = shadowLatencyProfile(route);
       const id = `S${now}-${route.id}-${market.coin}-${sequence}`;
       shadowProbes.set(id, {
@@ -770,6 +784,7 @@ function evaluateShadow(now: number): void {
         peakProjectedNetBps: null,
       });
       shadowLatched.add(latchKey);
+      shadowLastSignalAt.set(latchKey, now);
       telemetry.eligibleWindows++;
       telemetry.lastSignalAt = now;
     }
@@ -1510,6 +1525,15 @@ function percentile(values: number[], p: number): number | null {
   return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p))] ?? null;
 }
 
+function independentRows(rows: Opportunity[]): Opportunity[] {
+  return independentSignalRows(
+    rows,
+    SHADOW_INDEPENDENCE_MS,
+    (row) => `${row.buyVenue}→${row.sellVenue}:${row.coin}`,
+    (row) => row.startedAt,
+  );
+}
+
 function summary(rows: Opportunity[]): Record<string, unknown> {
   const closed = rows.filter((row) => (
     row.durationMs != null
@@ -1517,9 +1541,10 @@ function summary(rows: Opportunity[]): Record<string, unknown> {
     && Number.isFinite(row.peakNetBps1000)
   ));
   const viable = closed.filter((row) => row.startNetBps1000 > NET_TRIGGER_BPS);
-  const strictStarts = closed.filter(
+  const strictRawStarts = closed.filter(
     (row) => row.startNetBps1000 >= SHADOW_ENTRY_NET_BPS,
   );
+  const strictStarts = independentRows(strictRawStarts);
   const strictObserved1000 = strictStarts.flatMap((row) => {
     const observed = row.horizons['1000']?.netBps1000;
     const netBps1000 = observed == null ? Number.NaN : Number(observed);
@@ -1547,6 +1572,7 @@ function summary(rows: Opportunity[]): Record<string, unknown> {
     closed: closed.length,
     viable: viable.length,
     viablePct: closed.length ? viable.length / closed.length * 100 : null,
+    strictRawStarts: strictRawStarts.length,
     strictStarts: strictStarts.length,
     strictObserved1000: strictObserved1000.length,
     strictPositive1000: strictObserved1000.filter((value) => value > 0).length,
@@ -1621,6 +1647,7 @@ function executionShadowStatus(): Record<string, unknown> {
       exitNetBps: SHADOW_EXIT_NET_BPS,
       exitConfirmations: SHADOW_EXIT_CONFIRMATIONS,
       freshMs: SHADOW_FRESH_MS,
+      independenceMs: SHADOW_INDEPENDENCE_MS,
       maxHoldMs: SHADOW_MAX_HOLD_MS,
       fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
       executionBufferBps: EXECUTION_BUFFER_BPS,
@@ -1750,6 +1777,13 @@ function loadShadowState(): void {
     shadowResults = tailLines(SHADOW_RESULTS_PATH)
       .slice(-5_000)
       .map((line) => JSON.parse(line) as ShadowResult);
+    for (const row of shadowResults) {
+      const key = `${row.routeId}:${row.coin}`;
+      shadowLastSignalAt.set(
+        key,
+        Math.max(shadowLastSignalAt.get(key) ?? 0, Number(row.signalAt ?? 0)),
+      );
+    }
   } catch (error) {
     console.warn('venue-arb shadow history load', (error as Error).message);
     shadowResults = [];
@@ -1765,6 +1799,11 @@ function loadShadowState(): void {
     for (const row of rows) {
       if (!row?.id || !row.opportunityId || !row.coin || !row.routeId) continue;
       shadowProbes.set(row.id, row);
+      const key = `${row.routeId}:${row.coin}`;
+      shadowLastSignalAt.set(
+        key,
+        Math.max(shadowLastSignalAt.get(key) ?? 0, Number(row.signalAt ?? 0)),
+      );
     }
     const latched = Array.isArray(checkpoint) ? [] : checkpoint.latched ?? [];
     for (const key of latched) shadowLatched.add(key);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   conservativeLatencyMs,
+  independentSignalRows,
   shadowNetAfterCosts,
   shadowReadiness,
 } from '../../src/lib/venue-arb-shadow.js';
@@ -98,5 +99,20 @@ describe('venue arb execution shadow', () => {
       passed: 0,
       ready: false,
     });
+  });
+
+  it('counts clustered crossings once per route and coin', () => {
+    const rows = [
+      { key: 'bybit→binance:HYPE', at: 1_000 },
+      { key: 'bybit→binance:HYPE', at: 12_000 },
+      { key: 'bybit→binance:ETH', at: 15_000 },
+      { key: 'bybit→binance:HYPE', at: 61_000 },
+    ];
+    expect(independentSignalRows(
+      rows,
+      60_000,
+      (row) => row.key,
+      (row) => row.at,
+    )).toEqual([rows[0], rows[2], rows[3]]);
   });
 });

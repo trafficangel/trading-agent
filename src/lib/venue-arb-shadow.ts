@@ -115,3 +115,22 @@ export function conservativeLatencyMs(
   );
   return Math.max(floorMs, valid[p90Index] ?? floorMs);
 }
+
+export function independentSignalRows<T>(
+  rows: readonly T[],
+  minSeparationMs: number,
+  keyOf: (row: T) => string,
+  atOf: (row: T) => number,
+): T[] {
+  const accepted: T[] = [];
+  const lastAt = new Map<string, number>();
+  for (const row of [...rows].sort((a, b) => atOf(a) - atOf(b))) {
+    const key = keyOf(row);
+    const at = atOf(row);
+    const previous = lastAt.get(key) ?? -Infinity;
+    if (at - previous < minSeparationMs) continue;
+    accepted.push(row);
+    lastAt.set(key, at);
+  }
+  return accepted;
+}
