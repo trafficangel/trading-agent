@@ -663,7 +663,10 @@ function summary(rows: Opportunity[]): Record<string, unknown> {
     medianPeakRawBps: percentile(closed.map((row) => row.peakRawBps), 0.5),
     p95PeakRawBps: percentile(closed.map((row) => row.peakRawBps), 0.95),
     medianPeakNetBps: percentile(closed.map((row) => row.peakNetBps), 0.5),
+    medianViablePeakNetBps: percentile(viable.map((row) => row.peakNetBps), 0.5),
+    maxPeakNetBps: percentile(closed.map((row) => row.peakNetBps), 1),
     medianDurationMs: percentile(closed.map((row) => row.durationMs ?? 0), 0.5),
+    medianViableDurationMs: percentile(viable.map((row) => row.durationMs ?? 0), 0.5),
     medianHalfLifeMs: percentile(
       closed.flatMap((row) => row.halfLifeMs == null ? [] : [row.halfLifeMs]),
       0.5,

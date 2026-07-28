@@ -17,7 +17,10 @@ type Summary = {
   medianPeakRawBps?: number | null;
   p95PeakRawBps?: number | null;
   medianPeakNetBps?: number | null;
+  medianViablePeakNetBps?: number | null;
+  maxPeakNetBps?: number | null;
   medianDurationMs?: number | null;
+  medianViableDurationMs?: number | null;
   medianHalfLifeMs?: number | null;
   survival?: Record<string, SurvivalRow>;
 };
@@ -128,12 +131,13 @@ function live(status: Status | null): boolean {
 }
 
 function activeRows(rows: Opportunity[]): string {
-  if (!rows.length) return '<div class="va-empty">Сейчас расхождений выше порога нет.</div>';
+  const profitable = rows.filter((row) => Number(row.currentNetBps ?? row.startNetBps) > 0);
+  if (!profitable.length) return '<div class="va-empty">Сейчас исполнимых расхождений с прибылью после всех комиссий нет.</div>';
   const now = Date.now();
   return `<div class="va-table"><table><thead><tr>
     <th>Монета</th><th>Маршрут</th><th>Купить</th><th>Продать</th>
     <th>Raw</th><th>Net полного цикла</th><th>Пик net</th><th>Жизнь</th><th>$1,000</th>
-  </tr></thead><tbody>${rows.map((row) => `<tr>
+  </tr></thead><tbody>${profitable.map((row) => `<tr>
     <td><b>${esc(row.coin)}</b></td><td><span class="va-route">${esc(row.route)}</span></td>
     <td>${esc(row.buyVenue)}</td><td>${esc(row.sellVenue)}</td>
     <td>${pctFromBps(row.currentRawBps ?? row.startRawBps)}</td>
@@ -146,15 +150,16 @@ function activeRows(rows: Opportunity[]): string {
 
 function routeRows(groups: Record<string, Summary>): string {
   const routeKeys = ['DEX→CEX', 'CEX→DEX', 'DEX→DEX', 'CEX→CEX'];
-  return routeKeys.map((route) => {
+  return routeKeys.flatMap((route) => {
     const summary = groups[`route:${route}`] ?? {};
+    if (Number(summary.viable ?? 0) <= 0) return [];
     const survival = summary.survival ?? {};
     return `<tr>
-      <td><b>${route}</b></td><td>${Number(summary.closed ?? 0)}</td>
+      <td><b>${route}</b></td><td>${Number(summary.viable ?? 0)} / ${Number(summary.closed ?? 0)}</td>
       <td>${pct(summary.viablePct)}</td>
-      <td>${pctFromBps(summary.medianPeakRawBps, false)}</td>
-      <td class="${cls(summary.medianPeakNetBps)}">${pctFromBps(summary.medianPeakNetBps)}</td>
-      <td>${duration(summary.medianDurationMs)}</td>
+      <td class="pos">${pctFromBps(summary.medianViablePeakNetBps)}</td>
+      <td class="pos">${pctFromBps(summary.maxPeakNetBps)}</td>
+      <td>${duration(summary.medianViableDurationMs)}</td>
       <td>${pct(survival['100']?.netPositivePct)}</td>
       <td>${pct(survival['250']?.netPositivePct)}</td>
       <td>${pct(survival['500']?.netPositivePct)}</td>
@@ -165,25 +170,26 @@ function routeRows(groups: Record<string, Summary>): string {
 
 function pairRows(groups: Record<string, Summary>): string {
   return Object.entries(groups)
-    .filter(([key]) => key.startsWith('pair:'))
+    .filter(([key, summary]) => key.startsWith('pair:') && Number(summary.viable ?? 0) > 0)
     .sort((a, b) => Number(b[1].viable ?? 0) - Number(a[1].viable ?? 0)
       || Number(b[1].medianPeakNetBps ?? -Infinity) - Number(a[1].medianPeakNetBps ?? -Infinity))
     .map(([key, summary]) => `<tr>
-      <td><b>${esc(key.slice(5))}</b></td><td>${Number(summary.closed ?? 0)}</td>
-      <td>${Number(summary.viable ?? 0)}</td><td>${pct(summary.viablePct)}</td>
-      <td>${pctFromBps(summary.medianPeakRawBps, false)}</td>
-      <td class="${cls(summary.medianPeakNetBps)}">${pctFromBps(summary.medianPeakNetBps)}</td>
-      <td>${duration(summary.medianDurationMs)}</td>
+      <td><b>${esc(key.slice(5))}</b></td><td>${Number(summary.viable ?? 0)} / ${Number(summary.closed ?? 0)}</td>
+      <td>${pct(summary.viablePct)}</td>
+      <td class="pos">${pctFromBps(summary.medianViablePeakNetBps)}</td>
+      <td class="pos">${pctFromBps(summary.maxPeakNetBps)}</td>
+      <td>${duration(summary.medianViableDurationMs)}</td>
     </tr>`).join('');
 }
 
 function historyRows(rows: Opportunity[]): string {
-  if (!rows.length) return '<div class="va-empty">Закрытых наблюдений пока нет.</div>';
+  const profitable = rows.filter((row) => Number(row.peakNetBps) > 0);
+  if (!profitable.length) return '<div class="va-empty">Завершённых прибыльных расхождений после всех комиссий пока нет.</div>';
   return `<div class="va-table"><table><thead><tr>
     <th>UTC</th><th>Монета</th><th>Маршрут</th><th>Пара</th>
     <th>Raw старт → пик</th><th>Net старт → пик</th><th>Жизнь</th>
     <th>Half-life</th><th>Net через 250 / 500 / 1000 ms</th><th>Финиш</th>
-  </tr></thead><tbody>${rows.slice(0, 100).map((row) => {
+  </tr></thead><tbody>${profitable.slice(0, 100).map((row) => {
     const horizon = row.horizons ?? {};
     return `<tr>
       <td>${utc(row.startedAt)}</td><td><b>${esc(row.coin)}</b></td><td>${esc(row.route)}</td>
@@ -213,6 +219,8 @@ async function render(lang: Lang): Promise<string> {
   const groups = status?.groupedSummaries ?? {};
   const connections = status?.connections ?? {};
   const connected = VENUES.filter((venue) => connections[venue]?.connected).length;
+  const profitableActive = (status?.active ?? [])
+    .filter((row) => Number(row.currentNetBps ?? row.startNetBps) > 0);
   const survival250 = summary.survival?.['250'];
   return pageShell(
     t(lang, 'DEX/CEX Perp Arbitrage Radar', 'DEX/CEX Perp Arbitrage Radar'),
@@ -227,29 +235,29 @@ async function render(lang: Lang): Promise<string> {
 
       <div class="va-cards">
         <div class="va-card"><small>Потоки</small><b>${connected}/${VENUES.length}</b><em>Lighter · Hyperliquid · Paradex · Binance · Bybit</em></div>
-        <div class="va-card"><small>Активно сейчас</small><b>${status?.active?.length ?? 0}</b><em>raw ≥ ${pctFromBps(status?.rawTriggerBps, false)}</em></div>
-        <div class="va-card"><small>Завершено</small><b>${Number(summary.closed ?? 0)}</b><em>компактные lifecycle-записи</em></div>
-        <div class="va-card"><small>Пик net &gt; 0</small><b class="${Number(summary.viable ?? 0) > 0 ? 'pos' : ''}">${Number(summary.viable ?? 0)}</b><em>${pct(summary.viablePct)} наблюдений</em></div>
-        <div class="va-card"><small>Медиана жизни</small><b>${duration(summary.medianDurationMs)}</b><em>half-life ${duration(summary.medianHalfLifeMs)}</em></div>
+        <div class="va-card"><small>Прибыльно сейчас</small><b class="${profitableActive.length ? 'pos' : ''}">${profitableActive.length}</b><em>net &gt; 0% после всех издержек</em></div>
+        <div class="va-card"><small>Прибыльных завершено</small><b class="${Number(summary.viable ?? 0) > 0 ? 'pos' : ''}">${Number(summary.viable ?? 0)}</b><em>из ${Number(summary.closed ?? 0)} наблюдений</em></div>
+        <div class="va-card"><small>Медиана прибыльного net</small><b class="pos">${pctFromBps(summary.medianViablePeakNetBps)}</b><em>лучший ${pctFromBps(summary.maxPeakNetBps)}</em></div>
+        <div class="va-card"><small>Жизнь прибыльного edge</small><b>${duration(summary.medianViableDurationMs)}</b><em>только net-positive</em></div>
         <div class="va-card"><small>Net жив через 250 ms</small><b>${pct(survival250?.netPositivePct)}</b><em>N ${Number(survival250?.sampled ?? 0)}</em></div>
       </div>
 
-      <section class="va-panel"><div class="va-panel-head"><h2>Расхождения сейчас</h2><span>автообновление 5 сек</span></div>
+      <section class="va-panel"><div class="va-panel-head"><h2>Прибыльные расхождения сейчас</h2><span>только net &gt; 0% · автообновление 5 сек</span></div>
         ${activeRows(status?.active ?? [])}
       </section>
 
-      <section class="va-panel"><h2>Жизнеспособность по типу маршрута</h2>
-        <p>Net уже включает вход и выход обеих ног: четыре taker-комиссии плюс ${pctFromBps(status?.executionBufferBps, false)} защитного буфера. Процент survival показывает долю наблюдений, где чистое преимущество всё ещё было положительным на заданной задержке.</p>
-        <div class="va-table"><table><thead><tr><th>Маршрут</th><th>N</th><th>Viable</th><th>Медиана raw peak</th><th>Медиана net peak</th><th>Жизнь</th><th>100 ms</th><th>250 ms</th><th>500 ms</th><th>1000 ms</th></tr></thead>
-          <tbody>${routeRows(groups)}</tbody></table></div>
+      <section class="va-panel"><h2>Прибыльные типы маршрутов</h2>
+        <p>Показываются только маршруты, где хотя бы одно расхождение давало net &gt; 0% после входа и выхода обеих ног: четырёх taker-комиссий, VWAP и ${pctFromBps(status?.executionBufferBps, false)} защитного буфера.</p>
+        <div class="va-table"><table><thead><tr><th>Маршрут</th><th>Net+ / все</th><th>Доля</th><th>Медиана прибыльного net</th><th>Лучший net</th><th>Жизнь</th><th>100 ms</th><th>250 ms</th><th>500 ms</th><th>1000 ms</th></tr></thead>
+          <tbody>${routeRows(groups) || '<tr><td colspan="10">Прибыльных маршрутов пока нет.</td></tr>'}</tbody></table></div>
       </section>
 
-      <section class="va-panel"><h2>Биржевые направления</h2>
-        <div class="va-table"><table><thead><tr><th>Купить → продать</th><th>N</th><th>Net+</th><th>Viable</th><th>Raw peak</th><th>Net peak</th><th>Жизнь</th></tr></thead>
-          <tbody>${pairRows(groups) || '<tr><td colspan="7">Копим наблюдения.</td></tr>'}</tbody></table></div>
+      <section class="va-panel"><h2>Прибыльные биржевые направления</h2>
+        <div class="va-table"><table><thead><tr><th>Купить → продать</th><th>Net+ / все</th><th>Доля</th><th>Медиана прибыльного net</th><th>Лучший net</th><th>Жизнь</th></tr></thead>
+          <tbody>${pairRows(groups) || '<tr><td colspan="6">Прибыльных направлений пока нет.</td></tr>'}</tbody></table></div>
       </section>
 
-      <section class="va-panel"><h2>История расхождений</h2>${historyRows(status?.recentClosed ?? [])}</section>
+      <section class="va-panel"><h2>История прибыльных расхождений</h2>${historyRows(status?.recentClosed ?? [])}</section>
 
       <section class="va-panel"><h2>Свежесть стаканов</h2>
         <div class="va-table"><table><thead><tr><th>Монета</th>${VENUES.map((venue) => `<th>${venue}</th>`).join('')}</tr></thead>
@@ -273,6 +281,8 @@ export async function venueArbHero(lang: Lang): Promise<string> {
   const status = await readStatus();
   const isLive = live(status);
   const summary = status?.summary ?? {};
+  const profitableActive = (status?.active ?? [])
+    .filter((row) => Number(row.currentNetBps ?? row.startNetBps) > 0).length;
   return `<a class="va-hero" href="/lab/venue-arb">
     <div><span class="va-badge">⚡ DEX ↔ CEX · PERP ARBITRAGE · READ-ONLY</span>
       <div class="va-title">Executable Divergence Radar</div>
@@ -280,8 +290,8 @@ export async function venueArbHero(lang: Lang): Promise<string> {
     </div>
     <div class="va-hero-stats">
       <span><b class="${isLive ? 'pos' : 'neg'}">${isLive ? 'LIVE' : 'OFFLINE'}</b><small>engine</small></span>
-      <span><b>${status?.active?.length ?? 0}</b><small>active</small></span>
-      <span><b>${Number(summary.closed ?? 0)}</b><small>closed</small></span>
+      <span><b>${profitableActive}</b><small>net+ live</small></span>
+      <span><b>${Number(summary.viable ?? 0)}</b><small>net+ closed</small></span>
       <span><b class="${Number(summary.viable ?? 0) > 0 ? 'pos' : ''}">${Number(summary.viable ?? 0)}</b><small>net+</small></span>
     </div>
   </a>`;
