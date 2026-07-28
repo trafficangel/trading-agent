@@ -11,7 +11,8 @@ WorkingDirectory=/home/trader/apps/trading-agent
 EnvironmentFile=-/home/trader/apps/trading-agent/.env
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/trading-agent/data/venue-arb
 Environment=VENUE_ARB_SHADOW_NOTIONAL_USD=500
-Environment=VENUE_ARB_SHADOW_ENTRY_NET_BPS=5
+Environment=VENUE_ARB_SHADOW_ENTRY_NET_BPS=10
+Environment=VENUE_ARB_SHADOW_ENTRY_CONFIRMATIONS=3
 Environment=VENUE_ARB_SHADOW_EXIT_NET_BPS=10
 Environment=VENUE_ARB_SHADOW_EXIT_CONFIRMATIONS=3
 Environment=VENUE_ARB_SHADOW_FRESH_MS=150

@@ -163,6 +163,9 @@ type ShadowProbe = {
   entryLatencyMs: number;
   exitLatencyMs: number;
   entryDueAt: number;
+  entryConfirmations: number;
+  lastEntryQuoteVersion: string | null;
+  entryEdgeConfirmedAt: number | null;
   openedAt: number | null;
   entryExtended: number | null;
   entryLighter: number | null;
@@ -188,6 +191,8 @@ type ShadowResult = {
   exitLatencyMs: number;
   holdingMs: number | null;
   entryNetBps: number | null;
+  entryConfirmations: number;
+  entryEdgeConfirmed: boolean;
   guardNetBps: number | null;
   peakProjectedNetBps: number | null;
   realizedNetBps: number | null;
@@ -203,15 +208,19 @@ const STATUS_PATH = resolve(DATA_DIR, 'status.json');
 const EXECUTION_STATUS_PATH = resolve(DATA_DIR, 'execution-status.json');
 const OPPORTUNITIES_PATH = resolve(DATA_DIR, 'opportunities.ndjson');
 const LIVE_TRADES_PATH = resolve(DATA_DIR, 'live-trades.json');
-const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution.ndjson');
-const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active.json');
+const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution-v2.ndjson');
+const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active-v2.json');
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 250);
 const NET_TRIGGER_BPS = finiteEnv('VENUE_ARB_NET_TRIGGER_BPS', 3);
 const EXECUTION_BUFFER_BPS = finiteEnv('VENUE_ARB_EXECUTION_BUFFER_BPS', 2);
 const MAX_LIFETIME_MS = finiteEnv('VENUE_ARB_MAX_LIFETIME_MS', 15 * 60_000);
 const SHADOW_NOTIONAL_USD = finiteEnv('VENUE_ARB_SHADOW_NOTIONAL_USD', 500);
-const SHADOW_ENTRY_NET_BPS = finiteEnv('VENUE_ARB_SHADOW_ENTRY_NET_BPS', 5);
+const SHADOW_ENTRY_NET_BPS = finiteEnv('VENUE_ARB_SHADOW_ENTRY_NET_BPS', 10);
+const SHADOW_ENTRY_CONFIRMATIONS = finiteEnv(
+  'VENUE_ARB_SHADOW_ENTRY_CONFIRMATIONS',
+  3,
+);
 const SHADOW_EXIT_NET_BPS = finiteEnv('VENUE_ARB_SHADOW_EXIT_NET_BPS', 10);
 const SHADOW_EXIT_CONFIRMATIONS = finiteEnv(
   'VENUE_ARB_SHADOW_EXIT_CONFIRMATIONS',
@@ -510,12 +519,16 @@ function completeShadow(
         FEE_BPS.lighter,
         EXECUTION_BUFFER_BPS,
       ),
+    entryConfirmations: probe.entryConfirmations,
+    entryEdgeConfirmed: probe.entryEdgeConfirmedAt != null,
     guardNetBps: probe.guardNetBps,
     peakProjectedNetBps: probe.peakProjectedNetBps,
     realizedNetBps,
     realizedNetUsd: modeled?.netUsd ?? null,
     reachedExitGuard,
-    passed: reachedExitGuard && Number(realizedNetBps) > 0,
+    passed: probe.entryEdgeConfirmedAt != null
+      && reachedExitGuard
+      && Number(realizedNetBps) > 0,
     reason,
     fundingBps: modeled?.fundingBps ?? 0,
   };
@@ -546,6 +559,9 @@ function evaluateShadow(now: number): void {
       entryLatencyMs: latency.entryMs,
       exitLatencyMs: latency.exitMs,
       entryDueAt: now + latency.entryMs,
+      entryConfirmations: 0,
+      lastEntryQuoteVersion: null,
+      entryEdgeConfirmedAt: null,
       openedAt: null,
       entryExtended: null,
       entryLighter: null,
@@ -564,6 +580,17 @@ function evaluateShadow(now: number): void {
   for (const probe of [...shadowProbes.values()]) {
     const quote = shadowQuote(now, probe.coin);
     if (probe.state === 'awaiting_entry') {
+      if (
+        quote
+        && quote.openingNetBps >= SHADOW_ENTRY_NET_BPS
+        && quote.version !== probe.lastEntryQuoteVersion
+      ) {
+        probe.entryConfirmations++;
+        probe.lastEntryQuoteVersion = quote.version;
+      } else if (quote && quote.openingNetBps < SHADOW_ENTRY_NET_BPS) {
+        probe.entryConfirmations = 0;
+        probe.lastEntryQuoteVersion = null;
+      }
       if (now < probe.entryDueAt) continue;
       if (!quote) {
         completeShadow(probe, now, 'stale_at_delayed_entry', null);
@@ -573,6 +600,11 @@ function evaluateShadow(now: number): void {
         completeShadow(probe, now, 'edge_lost_before_entry', quote);
         continue;
       }
+      if (probe.entryConfirmations < SHADOW_ENTRY_CONFIRMATIONS) {
+        completeShadow(probe, now, 'unstable_edge_before_entry', quote);
+        continue;
+      }
+      probe.entryEdgeConfirmedAt = now;
       probe.state = 'open';
       probe.openedAt = now;
       probe.entryExtended = quote.extendedBuyVwap;
@@ -1315,10 +1347,11 @@ function executionShadowStatus(): Record<string, unknown> {
     SHADOW_REQUIRED_PASS_PCT,
   );
   return {
-    version: 'extended-lighter-shadow-v1',
+    version: 'extended-lighter-shadow-v2',
     config: {
       notionalUsd: SHADOW_NOTIONAL_USD,
       entryNetBps: SHADOW_ENTRY_NET_BPS,
+      entryConfirmations: SHADOW_ENTRY_CONFIRMATIONS,
       exitNetBps: SHADOW_EXIT_NET_BPS,
       exitConfirmations: SHADOW_EXIT_CONFIRMATIONS,
       freshMs: SHADOW_FRESH_MS,

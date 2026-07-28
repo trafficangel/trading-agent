@@ -84,6 +84,8 @@ type ExecutionShadowResult = {
   entryAt?: number | null;
   exitAt?: number;
   entryNetBps?: number | null;
+  entryConfirmations?: number;
+  entryEdgeConfirmed?: boolean;
   guardNetBps?: number | null;
   peakProjectedNetBps?: number | null;
   realizedNetBps?: number | null;
@@ -101,6 +103,7 @@ type ExecutionShadowProbe = {
   signalAt?: number;
   signalNetBps?: number;
   openedAt?: number | null;
+  entryConfirmations?: number;
   guardConfirmations?: number;
   guardNetBps?: number | null;
   peakProjectedNetBps?: number | null;
@@ -110,6 +113,7 @@ type ExecutionShadow = {
   config?: {
     notionalUsd?: number;
     entryNetBps?: number;
+    entryConfirmations?: number;
     exitNetBps?: number;
     exitConfirmations?: number;
     freshMs?: number;
@@ -124,6 +128,7 @@ type ExecutionShadow = {
   };
   readiness?: {
     samples?: number;
+    entryEdgeConfirmed?: number;
     reachedExitGuard?: number;
     positiveAfterLatency?: number;
     passed?: number;
@@ -498,6 +503,7 @@ function shadowReason(reason: unknown): string {
     protected_exit: 'защищённый выход',
     edge_lost_before_entry: 'edge исчез до входа',
     stale_at_delayed_entry: 'стакан устарел до входа',
+    unstable_edge_before_entry: 'меньше трёх свежих подтверждений',
     stale_after_exit_latency: 'стакан устарел после exit latency',
     max_hold: 'достигнут max hold',
     invalid_probe_state: 'ошибка состояния',
@@ -518,7 +524,7 @@ function executionShadowRows(shadow: ExecutionShadow | undefined): string {
   const active = shadow?.active ?? [];
   const recent = shadow?.recent ?? [];
   if (!active.length && !recent.length) {
-    return '<tr><td colspan="9">Shadow-аудит запущен и ждёт первое окно Extended → Lighter с net ≥ +0.05%.</td></tr>';
+    return '<tr><td colspan="9">Чистый shadow-gate v2 ждёт первое окно Extended → Lighter с исполнимым net ≥ +0.10%.</td></tr>';
   }
   return [
     ...active.map((row) => `<tr>
@@ -526,7 +532,7 @@ function executionShadowRows(shadow: ExecutionShadow | undefined): string {
       <td><b>${esc(row.coin)}</b></td>
       <td><b>${shadowProbeState(row.state)}</b></td>
       <td class="${cls(row.signalNetBps)}">${pctFromBps(row.signalNetBps)}</td>
-      <td>—</td>
+      <td>${Number(row.entryConfirmations ?? 0)} / ${Number(shadow?.config?.entryConfirmations ?? 3)}</td>
       <td>${Number(row.guardConfirmations ?? 0)} / ${Number(shadow?.config?.exitConfirmations ?? 3)}${row.guardNetBps == null ? '' : ` · ${pctFromBps(row.guardNetBps)}`}</td>
       <td>—</td>
       <td>${duration(Date.now() - Number(row.signalAt ?? Date.now()))}</td>
@@ -537,7 +543,7 @@ function executionShadowRows(shadow: ExecutionShadow | undefined): string {
       <td><b>${esc(row.coin)}</b></td>
       <td class="${row.passed ? 'pos' : 'neg'}"><b>${row.passed ? 'PASS' : 'FAIL'}</b></td>
       <td class="${cls(row.signalNetBps)}">${pctFromBps(row.signalNetBps)}</td>
-      <td class="${cls(row.entryNetBps)}">${row.entryNetBps == null ? '—' : pctFromBps(row.entryNetBps)}</td>
+      <td class="${row.entryEdgeConfirmed ? 'pos' : 'neg'}">${row.entryNetBps == null ? '—' : pctFromBps(row.entryNetBps)} · ${Number(row.entryConfirmations ?? 0)} / ${Number(shadow?.config?.entryConfirmations ?? 3)}</td>
       <td>${row.reachedExitGuard ? `✓ ${pctFromBps(row.guardNetBps)}` : `нет · пик ${row.peakProjectedNetBps == null ? '—' : pctFromBps(row.peakProjectedNetBps)}`}</td>
       <td class="${cls(row.realizedNetBps)}"><b>${row.realizedNetBps == null ? '—' : pctFromBps(row.realizedNetBps)}</b>${row.realizedNetUsd == null ? '' : ` · ${money(row.realizedNetUsd, true)}`}</td>
       <td>${row.holdingMs == null ? '—' : duration(row.holdingMs)}</td>
@@ -706,16 +712,17 @@ async function render(lang: Lang): Promise<string> {
         <div class="va-live-cards">
           <div><small>Выборка / минимум</small><b>${Number(shadowGate?.samples ?? 0)} / ${Number(shadowGate?.requiredSamples ?? 50)}</b></div>
           <div><small>Полный PASS</small><b class="${Number(shadowGate?.passedPct ?? 0) >= Number(shadowGate?.requiredPassPct ?? 90) ? 'pos' : ''}">${Number(shadowGate?.passed ?? 0)} · ${pct(shadowGate?.passedPct)}</b></div>
+          <div><small>Edge подтверждён 3×</small><b>${Number(shadowGate?.entryEdgeConfirmed ?? 0)}</b></div>
           <div><small>Достигли exit guard</small><b>${Number(shadowGate?.reachedExitGuard ?? 0)}</b></div>
           <div><small>Активные probes</small><b>${Number(executionShadow?.active?.length ?? 0)}</b></div>
           <div><small>Модель entry / exit</small><b>${duration(executionShadow?.measuredLatency?.entryMs)} / ${duration(executionShadow?.measuredLatency?.exitMs)}</b></div>
           <div><small>Порог входа / выхода</small><b>${pctFromBps(executionShadow?.config?.entryNetBps)} / ${pctFromBps(executionShadow?.config?.exitNetBps)}</b></div>
         </div>
-        <p>Каждый probe повторяет реальный путь без ордеров: ждёт измеренную задержку входа, фиксирует $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, вычитает четыре taker-комиссии, ${pctFromBps(executionShadow?.config?.executionBufferBps, false)} execution-буфера и funding ${pctFromBps(executionShadow?.config?.fundingBpsPerHour, false)}/час. Выход допускается после ${Number(executionShadow?.config?.exitConfirmations ?? 3)} свежих снимков с net ≥ ${pctFromBps(executionShadow?.config?.exitNetBps)}, затем применяется измеренная exit latency. Gate: минимум ${Number(shadowGate?.requiredSamples ?? 50)} probes и PASS ≥ ${pct(shadowGate?.requiredPassPct)}.</p>
+        <p>Каждый probe начинается только при исполнимом net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)} и требует ${Number(executionShadow?.config?.entryConfirmations ?? 3)} независимых свежих подтверждения в течение измеренной задержки входа. Затем фиксируется $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, вычитаются четыре taker-комиссии, ${pctFromBps(executionShadow?.config?.executionBufferBps, false)} execution-буфера и funding ${pctFromBps(executionShadow?.config?.fundingBpsPerHour, false)}/час. Выход допускается после ${Number(executionShadow?.config?.exitConfirmations ?? 3)} свежих снимков с реальным модельным PnL ≥ ${pctFromBps(executionShadow?.config?.exitNetBps)}, затем применяется измеренная exit latency. Gate: минимум ${Number(shadowGate?.requiredSamples ?? 50)} probes и PASS ≥ ${pct(shadowGate?.requiredPassPct)}.</p>
         ${shadowReasons ? `<p class="va-wait">Причины завершения: ${esc(shadowReasons)}</p>` : ''}
         <div class="va-table" data-va-pager="execution-shadow" data-page-size="20"><table><thead><tr>
           <th>Сигнал UTC</th><th>Монета</th><th>Статус</th><th>Signal net</th>
-          <th>Delayed entry net</th><th>Exit guard</th><th>После exit latency</th>
+          <th>Delayed entry / 3×</th><th>Exit guard</th><th>После exit latency</th>
           <th>Жизнь</th><th>Результат / причина</th>
         </tr></thead><tbody>${executionShadowRows(executionShadow)}</tbody></table></div>
       </section>

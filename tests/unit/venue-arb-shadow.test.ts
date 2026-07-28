@@ -45,17 +45,20 @@ describe('venue arb execution shadow', () => {
 
   it('requires both the protected exit and positive delayed result', () => {
     const passing = Array.from({ length: 45 }, () => ({
+      entryEdgeConfirmed: true,
       reachedExitGuard: true,
       realizedNetBps: 3,
       reason: 'protected_exit',
     }));
     const failures = Array.from({ length: 5 }, () => ({
+      entryEdgeConfirmed: false,
       reachedExitGuard: false,
       realizedNetBps: null,
       reason: 'edge_lost_before_entry',
     }));
     expect(shadowReadiness([...passing, ...failures])).toMatchObject({
       samples: 50,
+      entryEdgeConfirmed: 45,
       passed: 45,
       passedPct: 90,
       ready: true,
@@ -65,6 +68,7 @@ describe('venue arb execution shadow', () => {
       },
     });
     const sixFailures = Array.from({ length: 6 }, () => ({
+      entryEdgeConfirmed: false,
       reachedExitGuard: false,
       realizedNetBps: null,
       reason: 'edge_lost_before_entry',
@@ -81,5 +85,18 @@ describe('venue arb execution shadow', () => {
     expect(conservativeLatencyMs([1009], 1_000)).toBe(1_009);
     expect(conservativeLatencyMs([100, 200, 300, 4_000], 1_000)).toBe(4_000);
     expect(conservativeLatencyMs([], 2_200)).toBe(2_200);
+  });
+
+  it('never passes a result without three-snapshot entry confirmation', () => {
+    expect(shadowReadiness([{
+      entryEdgeConfirmed: false,
+      reachedExitGuard: true,
+      realizedNetBps: 12,
+      reason: 'protected_exit',
+    }], 1, 100)).toMatchObject({
+      entryEdgeConfirmed: 0,
+      passed: 0,
+      ready: false,
+    });
   });
 });
