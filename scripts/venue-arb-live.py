@@ -1052,6 +1052,17 @@ def self_test() -> None:
         estimated_exit_fees=0.074419,
     )
     assert round(reproduced_loss, 6) == -0.237996
+    signal_guard = object.__new__(Canary)
+    signal_guard.running = True
+    signal_guard.shutdown_requested = False
+    signal_guard.trade_open = True
+    signal_guard.log = lambda *_args, **_kwargs: None
+    signal_guard.request_shutdown()
+    assert signal_guard.shutdown_requested is True
+    assert signal_guard.running is True
+    signal_guard.trade_open = False
+    signal_guard.request_shutdown()
+    assert signal_guard.running is False
     print("venue-arb-live self-test ok")
 
 
