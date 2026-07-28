@@ -37,6 +37,7 @@ import {
 } from '../lib/venue-arb-shadow.js';
 import {
   consumeMakerPrint,
+  makerAbortAfterCosts,
   makerEntryEdgeBps,
   makerRoundTripAfterCosts,
   snapMakerPrice,
@@ -325,6 +326,8 @@ type MakerTelemetry = {
   placementStaleRejects: number;
   placementCrossRejects: number;
   placementQueueRejects: number;
+  placementEdgeRejects: number;
+  edgeCancellations: number;
   quoteExpirations: number;
   queueFills: number;
   hedgeTimeouts: number;
@@ -400,6 +403,14 @@ const SHADOW_INDEPENDENCE_MS = finiteEnv(
 );
 const MAKER_NOTIONAL_USD = finiteEnv('VENUE_ARB_MAKER_NOTIONAL_USD', 500);
 const MAKER_ENTRY_EDGE_BPS = finiteEnv('VENUE_ARB_MAKER_ENTRY_EDGE_BPS', 3);
+const MAKER_CANCEL_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_MAKER_CANCEL_EDGE_BPS',
+  MAKER_ENTRY_EDGE_BPS,
+);
+const MAKER_POST_FILL_NET_BPS = finiteEnv(
+  'VENUE_ARB_MAKER_POST_FILL_NET_BPS',
+  MAKER_ENTRY_EDGE_BPS,
+);
 const MAKER_EXIT_NET_BPS = finiteEnv('VENUE_ARB_MAKER_EXIT_NET_BPS', 10);
 const MAKER_QUOTE_LATENCY_MS = finiteEnv(
   'VENUE_ARB_MAKER_QUOTE_LATENCY_MS',
@@ -672,6 +683,8 @@ const makerTelemetry: MakerTelemetry = {
   placementStaleRejects: 0,
   placementCrossRejects: 0,
   placementQueueRejects: 0,
+  placementEdgeRejects: 0,
+  edgeCancellations: 0,
   quoteExpirations: 0,
   queueFills: 0,
   hedgeTimeouts: 0,
@@ -1190,6 +1203,54 @@ function evaluateMakerPending(now: number): void {
   if (pending.stage === 'entry') {
     const extendedSide = pending.side === 'buy' ? 'long' : 'short';
     const quantity = MAKER_NOTIONAL_USD / pending.extendedFill;
+    const entryEdgeBps = makerEntryEdgeBps(
+      pending.side,
+      pending.extendedFill,
+      lighterFill,
+    );
+    const entryNetBps = entryEdgeBps - EXECUTION_BUFFER_BPS;
+    if (entryNetBps < MAKER_POST_FILL_NET_BPS) {
+      const extended = executableBook('extended', pending.coin);
+      if (!extended || !makerBooksFresh(now, extended, lighter)) return;
+      const exitExtended = pending.side === 'buy'
+        ? extended.sellVwap500
+        : extended.buyVwap500;
+      if (exitExtended == null) return;
+      const modeled = makerAbortAfterCosts({
+        extendedSide,
+        notionalUsd: MAKER_NOTIONAL_USD,
+        quantity,
+        entryExtended: pending.extendedFill,
+        exitExtended,
+        extendedExitFeeBps: FEE_BPS.extended,
+        executionBufferBps: EXECUTION_BUFFER_BPS,
+      });
+      appendMakerResult({
+        id: `M${pending.filledAt}-${pending.coin}-${extendedSide}`,
+        coin: pending.coin,
+        extendedSide,
+        openedAt: pending.filledAt,
+        closedAt: now,
+        holdingMs: Math.max(0, now - pending.filledAt),
+        entryExtended: pending.extendedFill,
+        entryLighter: null,
+        exitExtended,
+        exitLighter: null,
+        entryEdgeBps,
+        realizedNetBps: modeled.netBps,
+        realizedNetUsd: modeled.netUsd,
+        exitExtendedMaker: false,
+        passed: modeled.netBps > 0,
+        reason: 'post_fill_edge_lost',
+        fundingBps: 0,
+      });
+      makerPendingHedge = null;
+      makerPair = null;
+      makerQuote = null;
+      makerCooldownUntil = now + MAKER_INDEPENDENCE_MS;
+      writeMakerActive();
+      return;
+    }
     makerPair = {
       id: `M${pending.filledAt}-${pending.coin}-${extendedSide}`,
       coin: pending.coin,
@@ -1198,11 +1259,7 @@ function evaluateMakerPending(now: number): void {
       quantity,
       entryExtended: pending.extendedFill,
       entryLighter: lighterFill,
-      entryEdgeBps: makerEntryEdgeBps(
-        pending.side,
-        pending.extendedFill,
-        lighterFill,
-      ),
+      entryEdgeBps,
     };
     makerPendingHedge = null;
     writeMakerActive();
@@ -1575,7 +1632,33 @@ function activateMakerQuote(now: number): void {
     makerQuote = null;
     return;
   }
+  const projectedNetBps = makerQuoteCurrentProjection(now, quote);
+  const minimumNetBps = quote.stage === 'entry'
+    ? MAKER_CANCEL_EDGE_BPS
+    : MAKER_EXIT_NET_BPS;
+  if (projectedNetBps == null || projectedNetBps < minimumNetBps) {
+    makerTelemetry.placementRejects++;
+    makerTelemetry.placementEdgeRejects++;
+    makerQuote = null;
+    return;
+  }
   quote.activatedAt = now;
+}
+
+function makerQuoteCurrentProjection(
+  now: number,
+  quote: MakerQuote,
+): number | null {
+  const lighter = executableBook('lighter', quote.coin);
+  if (!lighter || !makerBooksFresh(now, lighter)) return null;
+  const lighterFill = makerHedgePrice(quote.side, lighter);
+  if (lighterFill == null) return null;
+  if (quote.stage === 'entry') {
+    return makerEntryEdgeBps(quote.side, quote.price, lighterFill)
+      - EXECUTION_BUFFER_BPS;
+  }
+  if (!makerPair || makerPair.coin !== quote.coin) return null;
+  return makerCloseProjection(now, makerPair, quote.price, lighterFill);
 }
 
 function evaluateMakerShadow(now: number): void {
@@ -1609,6 +1692,19 @@ function evaluateMakerShadow(now: number): void {
     return;
   }
   activateMakerQuote(now);
+  if (
+    makerQuote?.activatedAt != null
+    && makerQuote.firstFillAt == null
+  ) {
+    const projectedNetBps = makerQuoteCurrentProjection(now, makerQuote);
+    const minimumNetBps = makerQuote.stage === 'entry'
+      ? MAKER_CANCEL_EDGE_BPS
+      : MAKER_EXIT_NET_BPS;
+    if (projectedNetBps == null || projectedNetBps < minimumNetBps) {
+      makerTelemetry.edgeCancellations++;
+      makerQuote = null;
+    }
+  }
   if (makerQuote && now >= makerQuote.expiresAt) {
     if (
       makerQuote.firstFillAt != null
@@ -1703,6 +1799,8 @@ function makerShadowStatus(): Record<string, unknown> {
     config: {
       notionalUsd: MAKER_NOTIONAL_USD,
       entryEdgeBps: MAKER_ENTRY_EDGE_BPS,
+      cancelEdgeBps: MAKER_CANCEL_EDGE_BPS,
+      postFillNetBps: MAKER_POST_FILL_NET_BPS,
       exitNetBps: MAKER_EXIT_NET_BPS,
       quoteLatencyMs: MAKER_QUOTE_LATENCY_MS,
       hedgeLatencyMs: MAKER_HEDGE_LATENCY_MS,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   consumeMakerPrint,
+  makerAbortAfterCosts,
   makerEntryEdgeBps,
   makerRoundTripAfterCosts,
   snapMakerPrice,
@@ -67,5 +68,32 @@ describe('venue arb maker shadow math', () => {
       entryLighter: 100,
     });
     expect(shortResult.netUsd).toBeCloseTo(0.8875);
+  });
+
+  it('accounts for the taker fee and buffer when a stale maker fill is aborted', () => {
+    const long = makerAbortAfterCosts({
+      extendedSide: 'long',
+      notionalUsd: 100,
+      quantity: 1,
+      entryExtended: 100,
+      exitExtended: 99.95,
+      extendedExitFeeBps: 2.5,
+      executionBufferBps: 2,
+    });
+    expect(long.grossUsd).toBeCloseTo(-0.05);
+    expect(long.feesUsd).toBeCloseTo(0.0249875);
+    expect(long.netUsd).toBeCloseTo(-0.0949875);
+    expect(long.netBps).toBeCloseTo(-9.49875);
+
+    const short = makerAbortAfterCosts({
+      extendedSide: 'short',
+      notionalUsd: 100,
+      quantity: 1,
+      entryExtended: 100,
+      exitExtended: 100.05,
+      extendedExitFeeBps: 2.5,
+      executionBufferBps: 2,
+    });
+    expect(short.netUsd).toBeCloseTo(-0.0950125);
   });
 });

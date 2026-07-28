@@ -154,6 +154,28 @@ class Canary:
         self.notional = float(os.getenv("VENUE_ARB_LIVE_NOTIONAL_USD", "300"))
         self.leverage = int(os.getenv("VENUE_ARB_LIVE_LEVERAGE", "5"))
         self.entry_net_bps = float(os.getenv("VENUE_ARB_LIVE_ENTRY_NET_BPS", "15"))
+        self.maker_cancel_net_bps = float(
+            os.getenv(
+                "VENUE_ARB_LIVE_MAKER_CANCEL_NET_BPS",
+                str(self.entry_net_bps),
+            )
+        )
+        self.post_fill_net_bps = float(
+            os.getenv(
+                "VENUE_ARB_LIVE_POST_FILL_NET_BPS",
+                str(self.entry_net_bps),
+            )
+        )
+        if not (
+            self.entry_net_bps
+            >= self.maker_cancel_net_bps
+            >= self.post_fill_net_bps
+            >= 0
+        ):
+            raise RuntimeError(
+                "maker thresholds must satisfy "
+                "entry >= cancel >= post-fill >= 0"
+            )
         self.exit_min_profit_bps = float(
             os.getenv("VENUE_ARB_LIVE_EXIT_MIN_PROFIT_BPS", "10")
         )
@@ -301,6 +323,8 @@ class Canary:
             "notionalUsdPerLeg": self.notional,
             "leverage": self.leverage,
             "entryNetPct": self.entry_net_bps / 100,
+            "makerCancelNetPct": self.maker_cancel_net_bps / 100,
+            "postFillNetPct": self.post_fill_net_bps / 100,
             "exitMinProfitPct": self.exit_min_profit_bps / 100,
             "exitConfirmations": self.exit_confirmations,
             "shutdownDeferredWhenOpen": True,
@@ -876,6 +900,9 @@ class Canary:
         coin: str,
         order_id: int,
         deadline_at: int,
+        *,
+        maker_side: str,
+        maker_price: float,
     ) -> MakerFillResult:
         assert self.extended is not None
         market = f"{coin}-USD"
@@ -888,6 +915,7 @@ class Canary:
         }
         finalized = False
         final_row: Any | None = None
+        internal_reason: str | None = None
         while int(time.time() * 1000) < deadline_at:
             row = await self.extended_order_by_id(order_id)
             if row is None:
@@ -902,11 +930,29 @@ class Canary:
                 else:
                     finalized = True
                 break
-            if status not in final_statuses and not row.post_only:
-                await self.cancel_all_extended_orders()
-                raise RuntimeError(
-                    "Extended unfilled maker order lost post-only protection"
+            hedge_price = self.current_lighter_hedge_price(coin, maker_side)
+            current_net_bps = (
+                maker_entry_edge_bps(
+                    maker_side,
+                    maker_price,
+                    hedge_price,
                 )
+                - self.execution_buffer_bps
+                if hedge_price is not None
+                else -math.inf
+            )
+            if current_net_bps < self.maker_cancel_net_bps:
+                internal_reason = "EDGE_CANCELLED"
+                await self.cancel_extended_order(order_id)
+                break
+            if status not in final_statuses and not row.post_only:
+                # Extended can expose post_only=false while the final fill state
+                # is still propagating. Cancel protection immediately, then
+                # settle and inspect fills instead of raising before the fill
+                # becomes visible.
+                internal_reason = "POST_ONLY_FLAG_LOST"
+                await self.cancel_all_extended_orders()
+                break
             if status in final_statuses:
                 finalized = True
                 final_row = row
@@ -983,9 +1029,10 @@ class Canary:
                     else "UNFILLED"
                 ),
                 reason=(
-                    str(getattr(final_row, "status_reason", "") or "") or None
+                    str(getattr(final_row, "status_reason", "") or "")
+                    or internal_reason
                     if final_row is not None
-                    else None
+                    else internal_reason
                 ),
             )
         fill = await self.extended_fill(market, order_id)
@@ -1435,9 +1482,14 @@ class Canary:
             trade["entryAcceptedAt"] - submit_started_at
         )
         trade["entryExtendedOrderId"] = order_id
+        self.write_status("maker_waiting", activeTrade=trade)
         deadline_at = started_at + self.maker_order_ttl_ms
         maker_result = await self.wait_extended_maker_fill(
-            coin, order_id, deadline_at
+            coin,
+            order_id,
+            deadline_at,
+            maker_side=side,
+            maker_price=float(candidate["price"]),
         )
         ext_fill = maker_result.fill
         if ext_fill is None:
@@ -1486,7 +1538,7 @@ class Canary:
                 else None
             ),
         )
-        if post_fill_net_bps < self.entry_net_bps:
+        if post_fill_net_bps < self.post_fill_net_bps:
             position = await self.wait_extended_position(
                 coin, want_open=True, timeout=6
             )

@@ -126,3 +126,39 @@ export function makerRoundTripAfterCosts(input: MakerRoundTripInput): {
     netBps: netUsd / input.notionalUsd * 10_000,
   };
 }
+
+export type MakerAbortInput = {
+  extendedSide: 'long' | 'short';
+  notionalUsd: number;
+  quantity: number;
+  entryExtended: number;
+  exitExtended: number;
+  extendedExitFeeBps: number;
+  executionBufferBps: number;
+};
+
+export function makerAbortAfterCosts(input: MakerAbortInput): {
+  grossUsd: number;
+  feesUsd: number;
+  executionBufferUsd: number;
+  netUsd: number;
+  netBps: number;
+} {
+  const grossUsd = (
+    input.extendedSide === 'long'
+      ? input.exitExtended - input.entryExtended
+      : input.entryExtended - input.exitExtended
+  ) * input.quantity;
+  const feesUsd = input.exitExtended * input.quantity
+    * input.extendedExitFeeBps / 10_000;
+  const executionBufferUsd = input.notionalUsd
+    * input.executionBufferBps / 10_000;
+  const netUsd = grossUsd - feesUsd - executionBufferUsd;
+  return {
+    grossUsd,
+    feesUsd,
+    executionBufferUsd,
+    netUsd,
+    netBps: netUsd / input.notionalUsd * 10_000,
+  };
+}
