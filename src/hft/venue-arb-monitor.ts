@@ -341,6 +341,36 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     sellVenue: 'paradex',
     primary: false,
   },
+  {
+    id: 'bybit-lighter',
+    buyVenue: 'bybit',
+    sellVenue: 'lighter',
+    primary: false,
+  },
+  {
+    id: 'extended-bybit',
+    buyVenue: 'extended',
+    sellVenue: 'bybit',
+    primary: false,
+  },
+  {
+    id: 'bybit-extended',
+    buyVenue: 'bybit',
+    sellVenue: 'extended',
+    primary: false,
+  },
+  {
+    id: 'bybit-hyperliquid',
+    buyVenue: 'bybit',
+    sellVenue: 'hyperliquid',
+    primary: false,
+  },
+  {
+    id: 'bybit-polymarket',
+    buyVenue: 'bybit',
+    sellVenue: 'polymarket',
+    primary: false,
+  },
 ];
 const shadowRouteById = new Map(SHADOW_ROUTES.map((route) => [route.id, route]));
 const shadowRouteTelemetry = new Map<string, ShadowRouteTelemetry>(

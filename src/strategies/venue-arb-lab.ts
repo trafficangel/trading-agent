@@ -547,23 +547,37 @@ function shadowProbeState(state: unknown): string {
   return labels[String(state)] ?? esc(state);
 }
 
+function shadowRouteLabel(
+  row: Pick<ExecutionShadowRoute, 'buyVenue' | 'sellVenue'>,
+): string {
+  return row.buyVenue && row.sellVenue
+    ? `${row.buyVenue} → ${row.sellVenue}`
+    : '—';
+}
+
 function executionShadowRows(
   shadow: ExecutionShadow | undefined,
   routeId = 'extended-lighter',
 ): string {
-  const route = shadow?.routes?.[routeId] ?? shadow;
-  const active = route?.active ?? [];
-  const recent = route?.recent ?? [];
-  const routeLabel = route?.buyVenue && route?.sellVenue
-    ? `${route.buyVenue} → ${route.sellVenue}`
-    : routeId.replace('-', ' → ');
+  const routes = routeId === 'scout'
+    ? Object.values(shadow?.routes ?? {}).filter((route) => !route.primary)
+    : [shadow?.routes?.[routeId] ?? shadow].filter(Boolean) as ExecutionShadowRoute[];
+  const active = routes.flatMap((route) => route.active ?? [])
+    .sort((a, b) => Number(b.signalAt ?? 0) - Number(a.signalAt ?? 0));
+  const recent = routes.flatMap((route) => route.recent ?? [])
+    .sort((a, b) => Number(b.signalAt ?? 0) - Number(a.signalAt ?? 0))
+    .slice(0, 100);
+  const routeLabel = routeId === 'scout'
+    ? 'DEX/CEX scout'
+    : shadowRouteLabel(routes[0] ?? {});
   if (!active.length && !recent.length) {
-    return `<tr><td colspan="9">Shadow-gate ждёт первое окно ${esc(routeLabel)} с исполнимым net ≥ +0.10%.</td></tr>`;
+    return `<tr><td colspan="10">Shadow-gate ждёт первое окно ${esc(routeLabel)} с исполнимым net ≥ +0.10%.</td></tr>`;
   }
   return [
     ...active.map((row) => `<tr>
       <td>${utc(row.signalAt)}</td>
       <td><b>${esc(row.coin)}</b></td>
+      <td>${esc(shadowRouteLabel(row))}</td>
       <td><b>${shadowProbeState(row.state)}</b></td>
       <td class="${cls(row.signalNetBps)}">${pctFromBps(row.signalNetBps)}</td>
       <td>${Number(row.entryConfirmations ?? 0)} / ${Number(shadow?.config?.entryConfirmations ?? 3)}</td>
@@ -575,6 +589,7 @@ function executionShadowRows(
     ...recent.map((row) => `<tr>
       <td>${utc(row.signalAt)}</td>
       <td><b>${esc(row.coin)}</b></td>
+      <td>${esc(shadowRouteLabel(row))}</td>
       <td class="${row.passed ? 'pos' : 'neg'}"><b>${row.passed ? 'PASS' : 'FAIL'}</b></td>
       <td class="${cls(row.signalNetBps)}">${pctFromBps(row.signalNetBps)}</td>
       <td class="${row.entryEdgeConfirmed ? 'pos' : 'neg'}">${row.entryNetBps == null ? '—' : pctFromBps(row.entryNetBps)} · ${Number(row.entryConfirmations ?? 0)} / ${Number(shadow?.config?.entryConfirmations ?? 3)}</td>
@@ -584,6 +599,44 @@ function executionShadowRows(
       <td>${shadowReason(row.reason)}${Number(row.fundingBps ?? 0) > 0 ? ` · funding ${pctFromBps(row.fundingBps)}` : ''}</td>
     </tr>`),
   ].join('');
+}
+
+function scoutRouteRows(shadow: ExecutionShadow | undefined): string {
+  const routes = Object.values(shadow?.routes ?? {})
+    .filter((route) => !route.primary)
+    .sort((a, b) => {
+      const ready = Number(Boolean(b.readiness?.ready))
+        - Number(Boolean(a.readiness?.ready));
+      if (ready) return ready;
+      const eligible = Number(b.telemetry?.eligibleWindows ?? 0)
+        - Number(a.telemetry?.eligibleWindows ?? 0);
+      if (eligible) return eligible;
+      return Number(b.telemetry?.peakOpeningNetBps ?? -Infinity)
+        - Number(a.telemetry?.peakOpeningNetBps ?? -Infinity);
+    });
+  if (!routes.length) {
+    return '<tr><td colspan="9">Scout-маршруты не настроены.</td></tr>';
+  }
+  return routes.map((route) => {
+    const gate = route.readiness;
+    const telemetry = route.telemetry;
+    const status = gate?.ready
+      ? '<b class="pos">GATE PASS</b>'
+      : Number(route.active?.length ?? 0) > 0
+        ? '<b class="pos">В РАБОТЕ</b>'
+        : 'СКАНИРУЕТ';
+    return `<tr>
+      <td><b>${esc(shadowRouteLabel(route))}</b></td>
+      <td>${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 50)}</td>
+      <td class="${cls(gate?.passedPct)}">${Number(gate?.passed ?? 0)} · ${pct(gate?.passedPct)}</td>
+      <td>${Number(telemetry?.eligibleWindows ?? 0)}</td>
+      <td>${esc(telemetry?.currentBestCoin)} · ${pctFromBps(telemetry?.currentBestNetBps)}</td>
+      <td>${esc(telemetry?.peakCoin)} · ${pctFromBps(telemetry?.peakOpeningNetBps)}</td>
+      <td>${Number(telemetry?.freshQuotes ?? 0).toLocaleString('ru-RU')}</td>
+      <td>${duration(route.measuredLatency?.entryMs)} / ${duration(route.measuredLatency?.exitMs)}</td>
+      <td>${status}</td>
+    </tr>`;
+  }).join('');
 }
 
 const VENUE_ARB_PAGINATION_SCRIPT = `<script>
@@ -720,14 +773,7 @@ async function render(lang: Lang): Promise<string> {
   const primaryShadow = executionShadow?.routes?.['extended-lighter']
     ?? executionShadow;
   const shadowGate = primaryShadow?.readiness;
-  const alternativeShadow = executionShadow?.routes?.['bybit-paradex'];
-  const alternativeGate = alternativeShadow?.readiness;
   const shadowReasons = Object.entries(shadowGate?.reasons ?? {})
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
-    .map(([reason, count]) => `${shadowReason(reason)} ${count}`)
-    .join(' · ');
-  const alternativeReasons = Object.entries(alternativeGate?.reasons ?? {})
     .sort((a, b) => b[1] - a[1])
     .slice(0, 4)
     .map(([reason, count]) => `${shadowReason(reason)} ${count}`)
@@ -777,35 +823,27 @@ async function render(lang: Lang): Promise<string> {
         <p>Каждый probe начинается только при исполнимом net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)} и требует ${Number(executionShadow?.config?.entryConfirmations ?? 3)} независимых свежих подтверждения в течение измеренной задержки входа. Затем фиксируется $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, вычитаются четыре taker-комиссии, ${pctFromBps(executionShadow?.config?.executionBufferBps, false)} execution-буфера и funding ${pctFromBps(executionShadow?.config?.fundingBpsPerHour, false)}/час. Выход допускается после ${Number(executionShadow?.config?.exitConfirmations ?? 3)} свежих снимков с реальным модельным PnL ≥ ${pctFromBps(executionShadow?.config?.exitNetBps)}, затем применяется измеренная exit latency. Gate: минимум ${Number(shadowGate?.requiredSamples ?? 50)} probes и PASS ≥ ${pct(shadowGate?.requiredPassPct)}.</p>
         ${shadowReasons ? `<p class="va-wait">Причины завершения: ${esc(shadowReasons)}</p>` : ''}
         <div class="va-table" data-va-pager="execution-shadow" data-page-size="20"><table><thead><tr>
-          <th>Сигнал UTC</th><th>Монета</th><th>Статус</th><th>Signal net</th>
+          <th>Сигнал UTC</th><th>Монета</th><th>Маршрут</th><th>Статус</th><th>Signal net</th>
           <th>Delayed entry / 3×</th><th>Exit guard</th><th>После exit latency</th>
           <th>Жизнь</th><th>Результат / причина</th>
         </tr></thead><tbody>${executionShadowRows(executionShadow)}</tbody></table></div>
       </section>
 
       <section class="va-panel va-shadow-panel">
-        <div class="va-panel-head"><div><span class="va-badge">ALTERNATIVE SHADOW · BYBIT → PARADEX</span><h2>Лучший измеренный DEX/CEX кандидат</h2></div>
-          <span class="${alternativeGate?.ready ? 'pos' : ''}">${alternativeGate?.ready ? 'ПРОШЁЛ SHADOW GATE' : 'ПАРАЛЛЕЛЬНАЯ ПРОВЕРКА'}</span>
+        <div class="va-panel-head"><div><span class="va-badge">DEX/CEX SCOUT · SHADOW ONLY</span><h2>Сравнение альтернативных маршрутов</h2></div>
+          <span>ЕДИНЫЙ GATE · БЕЗ РЕАЛЬНЫХ ОРДЕРОВ</span>
         </div>
-        <div class="va-live-cards">
-          <div><small>Выборка / минимум</small><b>${Number(alternativeGate?.samples ?? 0)} / ${Number(alternativeGate?.requiredSamples ?? 50)}</b></div>
-          <div><small>Полный PASS</small><b class="${Number(alternativeGate?.passedPct ?? 0) >= Number(alternativeGate?.requiredPassPct ?? 90) ? 'pos' : ''}">${Number(alternativeGate?.passed ?? 0)} · ${pct(alternativeGate?.passedPct)}</b></div>
-          <div><small>Edge подтверждён 3×</small><b>${Number(alternativeGate?.entryEdgeConfirmed ?? 0)}</b></div>
-          <div><small>Достигли exit guard</small><b>${Number(alternativeGate?.reachedExitGuard ?? 0)}</b></div>
-          <div><small>Квалифицированные окна</small><b>${Number(alternativeShadow?.telemetry?.eligibleWindows ?? 0)}</b></div>
-          <div><small>Лучший net сейчас</small><b>${esc(alternativeShadow?.telemetry?.currentBestCoin)} · ${pctFromBps(alternativeShadow?.telemetry?.currentBestNetBps)}</b></div>
-          <div><small>Пик с запуска</small><b>${esc(alternativeShadow?.telemetry?.peakCoin)} · ${pctFromBps(alternativeShadow?.telemetry?.peakOpeningNetBps)}</b></div>
-          <div><small>Свежих котировок проверено</small><b>${Number(alternativeShadow?.telemetry?.freshQuotes ?? 0).toLocaleString('ru-RU')}</b></div>
-          <div><small>Активные probes</small><b>${Number(alternativeShadow?.active?.length ?? 0)}</b></div>
-          <div><small>Консервативная entry / exit</small><b>${duration(alternativeShadow?.measuredLatency?.entryMs)} / ${duration(alternativeShadow?.measuredLatency?.exitMs)}</b></div>
-        </div>
-        <p>Этот маршрут не торгует реальными деньгами. Он выбран по накопленной истории: 6 из 6 окон со стартовым net ≥ +0.10% сохраняли уровень через 1 секунду; через 2 секунды — 5 из 6. Пока нет собственных fills Bybit/Paradex, используются консервативные latency floors, поэтому результат остаётся предварительным.</p>
-        ${alternativeReasons ? `<p class="va-wait">Причины завершения: ${esc(alternativeReasons)}</p>` : ''}
-        <div class="va-table" data-va-pager="execution-shadow-alt" data-page-size="20"><table><thead><tr>
-          <th>Сигнал UTC</th><th>Монета</th><th>Статус</th><th>Signal net</th>
+        <p>Все направления проверяются одинаково: $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)}, три свежих подтверждения, все комиссии, funding, execution buffer и консервативная latency. Маршрут не получает преимущества за счёт ослабления фильтра.</p>
+        <div class="va-table" data-va-pager="execution-shadow-scout-routes" data-page-size="20"><table><thead><tr>
+          <th>Маршрут</th><th>Samples</th><th>PASS</th><th>Окна ≥0.10%</th>
+          <th>Лучший сейчас</th><th>Пик</th><th>Fresh quotes</th><th>Entry / exit</th><th>Статус</th>
+        </tr></thead><tbody>${scoutRouteRows(executionShadow)}</tbody></table></div>
+        <h3>История квалифицированных scout-окон</h3>
+        <div class="va-table" data-va-pager="execution-shadow-scout" data-page-size="20"><table><thead><tr>
+          <th>Сигнал UTC</th><th>Монета</th><th>Маршрут</th><th>Статус</th><th>Signal net</th>
           <th>Delayed entry / 3×</th><th>Exit guard</th><th>После exit latency</th>
           <th>Жизнь</th><th>Результат / причина</th>
-        </tr></thead><tbody>${executionShadowRows(executionShadow, 'bybit-paradex')}</tbody></table></div>
+        </tr></thead><tbody>${executionShadowRows(executionShadow, 'scout')}</tbody></table></div>
       </section>
 
       <section class="va-panel va-live-panel">
