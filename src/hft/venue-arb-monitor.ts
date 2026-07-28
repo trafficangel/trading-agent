@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { resolve } from 'node:path';
-import WebSocket, { type RawData } from 'ws';
+import WebSocket, { type ClientOptions, type RawData } from 'ws';
 import { applyBybitDepthUpdate, createBybitDepthBook } from '../lib/bybit-depth-book.js';
 import {
   executableVwap,
@@ -28,7 +28,15 @@ import {
   type PriceLevel,
 } from '../lib/venue-arb.js';
 
-type Venue = 'lighter' | 'hyperliquid' | 'paradex' | 'polymarket' | 'binance' | 'bybit';
+type Venue =
+  | 'lighter'
+  | 'hyperliquid'
+  | 'paradex'
+  | 'polymarket'
+  | 'extended'
+  | 'aster'
+  | 'binance'
+  | 'bybit';
 type VenueClass = 'DEX' | 'CEX';
 type Side = 'bids' | 'asks';
 
@@ -83,10 +91,16 @@ type Opportunity = {
   closeReason: string | null;
   startRawBps: number;
   startNetBps: number;
+  startRawBps1000: number;
+  startNetBps1000: number;
   peakRawBps: number;
   peakNetBps: number;
+  peakRawBps1000: number;
+  peakNetBps1000: number;
   currentRawBps: number;
   currentNetBps: number;
+  currentRawBps1000: number | null;
+  currentNetBps1000: number | null;
   currentExecutable1000: boolean;
   currentBuyVwap500: number;
   currentSellVwap500: number;
@@ -106,6 +120,7 @@ type Opportunity = {
   horizons: Record<string, {
     rawBps: number;
     netBps: number;
+    rawBps1000: number | null;
     netBps1000: number | null;
     executable1000: boolean;
   }>;
@@ -116,7 +131,7 @@ const STATUS_PATH = resolve(DATA_DIR, 'status.json');
 const OPPORTUNITIES_PATH = resolve(DATA_DIR, 'opportunities.ndjson');
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 1_000);
-const NET_TRIGGER_BPS = finiteEnv('VENUE_ARB_NET_TRIGGER_BPS', 0);
+const NET_TRIGGER_BPS = finiteEnv('VENUE_ARB_NET_TRIGGER_BPS', 3);
 const EXECUTION_BUFFER_BPS = finiteEnv('VENUE_ARB_EXECUTION_BUFFER_BPS', 2);
 const MAX_LIFETIME_MS = finiteEnv('VENUE_ARB_MAX_LIFETIME_MS', 15 * 60_000);
 const RECONNECT_MS = 2_000;
@@ -139,6 +154,8 @@ const VENUES: readonly Venue[] = [
   'hyperliquid',
   'paradex',
   'polymarket',
+  'extended',
+  'aster',
   'binance',
   'bybit',
 ];
@@ -147,6 +164,8 @@ const VENUE_CLASS: Record<Venue, VenueClass> = {
   hyperliquid: 'DEX',
   paradex: 'DEX',
   polymarket: 'DEX',
+  extended: 'DEX',
+  aster: 'DEX',
   binance: 'CEX',
   bybit: 'CEX',
 };
@@ -156,6 +175,8 @@ const FEE_BPS: Record<Venue, number> = {
   // API automation is conservatively classified as Paradex Pro 0 taker.
   paradex: finiteEnv('VENUE_ARB_FEE_BPS_PARADEX', 4.5),
   polymarket: finiteEnv('VENUE_ARB_FEE_BPS_POLYMARKET', 4),
+  extended: finiteEnv('VENUE_ARB_FEE_BPS_EXTENDED', 2.5),
+  aster: finiteEnv('VENUE_ARB_FEE_BPS_ASTER', 4),
   binance: finiteEnv('VENUE_ARB_FEE_BPS_BINANCE', 5),
   bybit: finiteEnv('VENUE_ARB_FEE_BPS_BYBIT', 5.5),
 };
@@ -264,9 +285,10 @@ function connect(
   url: string,
   onOpen: (ws: WebSocket) => void,
   onMessage: (payload: unknown, receivedAt: number, ws: WebSocket) => void,
+  options?: ClientOptions,
 ): void {
   if (shuttingDown) return;
-  const ws = new WebSocket(url);
+  const ws = new WebSocket(url, options);
   sockets.add(ws);
   ws.on('open', () => {
     connections[venue].connected = true;
@@ -294,7 +316,12 @@ function connect(
     sockets.delete(ws);
     connections[venue].connected = false;
     connections[venue].reconnects++;
-    if (!shuttingDown) setTimeout(() => connect(venue, url, onOpen, onMessage), RECONNECT_MS).unref();
+    if (!shuttingDown) {
+      setTimeout(
+        () => connect(venue, url, onOpen, onMessage, options),
+        RECONNECT_MS,
+      ).unref();
+    }
   });
 }
 
@@ -535,6 +562,82 @@ function startPolymarket(): void {
   );
 }
 
+function replaceExtendedLevels(target: Map<number, number>, rows: unknown): void {
+  target.clear();
+  updateExtendedLevels(target, rows, false);
+}
+
+function updateExtendedLevels(
+  target: Map<number, number>,
+  rows: unknown,
+  preferCurrent: boolean,
+): void {
+  if (!Array.isArray(rows)) return;
+  for (const raw of rows) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as { p?: unknown; q?: unknown; c?: unknown };
+    const price = finite(row.p);
+    const size = finite(preferCurrent ? row.c ?? row.q : row.q ?? row.c);
+    if (!(price > 0) || size < 0) continue;
+    if (size === 0) target.delete(price);
+    else target.set(price, size);
+  }
+}
+
+function startExtended(): void {
+  connect(
+    'extended',
+    'wss://api.starknet.extended.exchange/stream.extended.exchange/v1/orderbooks',
+    () => {},
+    (payload, receivedAt) => {
+      const message = payload as {
+        type?: unknown;
+        ts?: unknown;
+        data?: { m?: unknown; b?: unknown; a?: unknown };
+      };
+      if (!message.data || typeof message.data.m !== 'string') return;
+      const coin = message.data.m.endsWith('-USD')
+        ? message.data.m.slice(0, -'-USD'.length)
+        : '';
+      const market = byCoin.get(coin);
+      const book = market ? books.get(bookKey('extended', market.coin)) : null;
+      if (!book) return;
+      if (message.type === 'SNAPSHOT') {
+        replaceExtendedLevels(book.bids, message.data.b);
+        replaceExtendedLevels(book.asks, message.data.a);
+      } else if (message.type === 'DELTA') {
+        updateExtendedLevels(book.bids, message.data.b, true);
+        updateExtendedLevels(book.asks, message.data.a, true);
+      } else {
+        return;
+      }
+      markBook(book, finite(message.ts), receivedAt);
+    },
+    {
+      headers: { 'User-Agent': 'RobotClaude-Arb-Monitor/1.0' },
+    },
+  );
+}
+
+function startAster(): void {
+  const streams = MARKETS.map(({ symbol }) => `${symbol.toLowerCase()}@depth20@100ms`);
+  connect(
+    'aster',
+    `wss://fstream.asterdex.com/stream?streams=${streams.join('/')}`,
+    () => {},
+    (payload, receivedAt) => {
+      const wrapper = payload as { data?: Record<string, unknown> };
+      const data = wrapper.data;
+      const market = typeof data?.s === 'string' ? bySymbol.get(data.s) : null;
+      const book = market ? books.get(bookKey('aster', market.coin)) : null;
+      if (!data || !book) return;
+      replaceStringLevels(book.bids, data.b);
+      replaceStringLevels(book.asks, data.a);
+      markBook(book, finite(data.T ?? data.E), receivedAt);
+    },
+  );
+}
+
 function edge(
   now: number,
   coin: string,
@@ -607,10 +710,16 @@ function startOpportunity(
     closeReason: null,
     startRawBps: snapshot.rawBps500,
     startNetBps: snapshot.netBps500,
+    startRawBps1000: snapshot.rawBps1000!,
+    startNetBps1000: snapshot.netBps1000!,
     peakRawBps: snapshot.rawBps500,
     peakNetBps: snapshot.netBps500,
+    peakRawBps1000: snapshot.rawBps1000!,
+    peakNetBps1000: snapshot.netBps1000!,
     currentRawBps: snapshot.rawBps500,
     currentNetBps: snapshot.netBps500,
+    currentRawBps1000: snapshot.rawBps1000,
+    currentNetBps1000: snapshot.netBps1000,
     currentExecutable1000: snapshot.rawBps1000 != null,
     currentBuyVwap500: snapshot.buyVwap500,
     currentSellVwap500: snapshot.sellVwap500,
@@ -640,6 +749,8 @@ function updateOpportunity(opportunity: Opportunity, snapshot: EdgeSnapshot): vo
   opportunity.lastAt = snapshot.at;
   opportunity.currentRawBps = snapshot.rawBps500;
   opportunity.currentNetBps = snapshot.netBps500;
+  opportunity.currentRawBps1000 = snapshot.rawBps1000;
+  opportunity.currentNetBps1000 = snapshot.netBps1000;
   opportunity.currentExecutable1000 = snapshot.rawBps1000 != null;
   opportunity.currentBuyVwap500 = snapshot.buyVwap500;
   opportunity.currentSellVwap500 = snapshot.sellVwap500;
@@ -655,14 +766,29 @@ function updateOpportunity(opportunity: Opportunity, snapshot: EdgeSnapshot): vo
   }
   opportunity.peakNetBps = Math.max(opportunity.peakNetBps, snapshot.netBps500);
   if (
+    snapshot.rawBps1000 != null
+    && snapshot.rawBps1000 > opportunity.peakRawBps1000
+  ) {
+    opportunity.peakRawBps1000 = snapshot.rawBps1000;
+    opportunity.peakAtMs = elapsed;
+  }
+  if (snapshot.netBps1000 != null) {
+    opportunity.peakNetBps1000 = Math.max(
+      opportunity.peakNetBps1000,
+      snapshot.netBps1000,
+    );
+  }
+  if (
     opportunity.halfLifeMs == null
-    && snapshot.netBps500 <= opportunity.startNetBps / 2
+    && (snapshot.netBps1000 == null
+      || snapshot.netBps1000 <= opportunity.startNetBps1000 / 2)
   ) opportunity.halfLifeMs = elapsed;
   for (const horizon of HORIZONS_MS) {
     if (elapsed < horizon || opportunity.horizons[String(horizon)]) continue;
     opportunity.horizons[String(horizon)] = {
       rawBps: snapshot.rawBps500,
       netBps: snapshot.netBps500,
+      rawBps1000: snapshot.rawBps1000,
       netBps1000: snapshot.netBps1000,
       executable1000: snapshot.rawBps1000 != null,
     };
@@ -695,19 +821,25 @@ function evaluate(): void {
         const snapshot = edge(now, market.coin, buyVenue, sellVenue);
         if (!snapshot) continue;
         observed.add(key);
-        if (snapshot.netBps500 <= NET_TRIGGER_BPS) latchedUntilBelowTrigger.delete(key);
+        const net1000 = snapshot.netBps1000;
+        if (net1000 == null || net1000 <= NET_TRIGGER_BPS) {
+          latchedUntilBelowTrigger.delete(key);
+        }
         let opportunity = active.get(key);
         if (
           !opportunity
           && !latchedUntilBelowTrigger.has(key)
-          && snapshot.netBps500 > NET_TRIGGER_BPS
+          && net1000 != null
+          && net1000 > NET_TRIGGER_BPS
         ) {
           opportunity = startOpportunity(market.coin, buyVenue, sellVenue, snapshot);
           active.set(key, opportunity);
         }
         if (!opportunity) continue;
         updateOpportunity(opportunity, snapshot);
-        if (snapshot.netBps500 <= 0) {
+        if (net1000 == null) {
+          closeOpportunity(opportunity, now, 'insufficient_depth');
+        } else if (net1000 <= 0) {
           closeOpportunity(opportunity, now, 'converged');
         } else if (now - opportunity.startedAt >= MAX_LIFETIME_MS) {
           closeOpportunity(opportunity, now, 'max_lifetime');
@@ -732,19 +864,24 @@ function percentile(values: number[], p: number): number | null {
 }
 
 function summary(rows: Opportunity[]): Record<string, unknown> {
-  const closed = rows.filter((row) => row.durationMs != null);
-  const viable = closed.filter((row) => row.startNetBps > NET_TRIGGER_BPS);
+  const closed = rows.filter((row) => (
+    row.durationMs != null
+    && Number.isFinite(row.startNetBps1000)
+    && Number.isFinite(row.peakNetBps1000)
+  ));
+  const viable = closed.filter((row) => row.startNetBps1000 > NET_TRIGGER_BPS);
   const survival = Object.fromEntries(HORIZONS_MS.map((horizon) => {
     const samples = closed
       .map((row) => row.horizons[String(horizon)])
       .filter((sample): sample is NonNullable<typeof sample> => sample != null);
     return [String(horizon), {
-      sampled: samples.length,
-      rawPositivePct: samples.length
-        ? samples.filter((sample) => sample.rawBps > 0).length / samples.length * 100
+      sampled: closed.length,
+      observedAtHorizon: samples.length,
+      rawPositivePct: closed.length
+        ? samples.filter((sample) => Number(sample.rawBps1000) > 0).length / closed.length * 100
         : null,
-      netPositivePct: samples.length
-        ? samples.filter((sample) => sample.netBps > 0).length / samples.length * 100
+      netPositivePct: closed.length
+        ? samples.filter((sample) => Number(sample.netBps1000) > 0).length / closed.length * 100
         : null,
     }];
   }));
@@ -752,11 +889,11 @@ function summary(rows: Opportunity[]): Record<string, unknown> {
     closed: closed.length,
     viable: viable.length,
     viablePct: closed.length ? viable.length / closed.length * 100 : null,
-    medianPeakRawBps: percentile(closed.map((row) => row.peakRawBps), 0.5),
-    p95PeakRawBps: percentile(closed.map((row) => row.peakRawBps), 0.95),
-    medianPeakNetBps: percentile(closed.map((row) => row.peakNetBps), 0.5),
-    medianViablePeakNetBps: percentile(viable.map((row) => row.peakNetBps), 0.5),
-    maxPeakNetBps: percentile(closed.map((row) => row.peakNetBps), 1),
+    medianPeakRawBps: percentile(closed.map((row) => row.peakRawBps1000), 0.5),
+    p95PeakRawBps: percentile(closed.map((row) => row.peakRawBps1000), 0.95),
+    medianPeakNetBps: percentile(closed.map((row) => row.peakNetBps1000), 0.5),
+    medianViablePeakNetBps: percentile(viable.map((row) => row.peakNetBps1000), 0.5),
+    maxPeakNetBps: percentile(closed.map((row) => row.peakNetBps1000), 1),
     medianDurationMs: percentile(closed.map((row) => row.durationMs ?? 0), 0.5),
     medianViableDurationMs: percentile(viable.map((row) => row.durationMs ?? 0), 0.5),
     medianHalfLifeMs: percentile(
@@ -786,7 +923,7 @@ function groupedSummaries(rows: Opportunity[]): Record<string, Record<string, un
 function writeStatus(): void {
   const now = Date.now();
   const status = {
-    version: 'venue-arb-v2-net-windows',
+    version: 'venue-arb-v3-tradeable-1000',
     readOnly: true,
     startedAt,
     updatedAt: now,
@@ -800,7 +937,7 @@ function writeStatus(): void {
     venues: VENUES.map((venue) => ({ venue, class: VENUE_CLASS[venue] })),
     connections,
     evaluations,
-    active: [...active.values()].sort((a, b) => b.peakNetBps - a.peakNetBps),
+    active: [...active.values()].sort((a, b) => b.peakNetBps1000 - a.peakNetBps1000),
     recentClosed: recentClosed.slice(-100).reverse(),
     summary: summary(recentClosed),
     groupedSummaries: groupedSummaries(recentClosed),
@@ -870,6 +1007,8 @@ startLighter();
 startHyperliquid();
 startParadex();
 startPolymarket();
+startExtended();
+startAster();
 startBinance();
 startBybit();
 const evaluationTimer = setInterval(evaluate, SAMPLE_MS);

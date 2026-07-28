@@ -4,9 +4,18 @@ import type { FastifyInstance } from 'fastify';
 import { getLang, pageShell } from './landing.js';
 
 type Lang = 'ru' | 'en';
-type Venue = 'lighter' | 'hyperliquid' | 'paradex' | 'polymarket' | 'binance' | 'bybit';
+type Venue =
+  | 'lighter'
+  | 'hyperliquid'
+  | 'paradex'
+  | 'polymarket'
+  | 'extended'
+  | 'aster'
+  | 'binance'
+  | 'bybit';
 type SurvivalRow = {
   sampled?: number;
+  observedAtHorizon?: number;
   rawPositivePct?: number | null;
   netPositivePct?: number | null;
 };
@@ -36,10 +45,16 @@ type Opportunity = {
   closeReason?: string | null;
   startRawBps?: number;
   startNetBps?: number;
+  startRawBps1000?: number;
+  startNetBps1000?: number;
   peakRawBps?: number;
   peakNetBps?: number;
+  peakRawBps1000?: number;
+  peakNetBps1000?: number;
   currentRawBps?: number;
   currentNetBps?: number;
+  currentRawBps1000?: number | null;
+  currentNetBps1000?: number | null;
   currentExecutable1000?: boolean;
   currentBuyVwap500?: number;
   currentSellVwap500?: number;
@@ -56,6 +71,7 @@ type Opportunity = {
   horizons?: Record<string, {
     rawBps?: number;
     netBps?: number;
+    rawBps1000?: number | null;
     netBps1000?: number | null;
     executable1000?: boolean;
   }>;
@@ -92,6 +108,8 @@ const VENUES: readonly Venue[] = [
   'hyperliquid',
   'paradex',
   'polymarket',
+  'extended',
+  'aster',
   'binance',
   'bybit',
 ];
@@ -150,7 +168,7 @@ function usdDepth(value: unknown): string {
   return `$${Math.floor(number)}`;
 }
 
-function net1000Bps(row: Opportunity): number | null {
+function legacyNet1000Bps(row: Opportunity): number | null {
   const buy = Number(row.currentBuyVwap1000);
   const sell = Number(row.currentSellVwap1000);
   const cost = Number(row.roundTripCostBps);
@@ -158,6 +176,12 @@ function net1000Bps(row: Opportunity): number | null {
     return null;
   }
   return ((sell - buy) / buy) * 10_000 - cost;
+}
+
+function currentNet1000Bps(row: Opportunity): number | null {
+  const value = Number(row.currentNetBps1000);
+  if (Number.isFinite(value)) return value;
+  return legacyNet1000Bps(row);
 }
 
 function utc(value: unknown): string {
@@ -176,15 +200,19 @@ function live(status: Status | null): boolean {
   return VENUES.every((venue) => status.connections?.[venue]?.connected);
 }
 
-function activeRows(rows: Opportunity[]): string {
-  const profitable = rows.filter((row) => Number(row.currentNetBps ?? row.startNetBps) > 0);
-  if (!profitable.length) return '<div class="va-empty">Сейчас исполнимых расхождений с прибылью после всех комиссий нет.</div>';
+function activeRows(rows: Opportunity[], triggerBps: number): string {
+  const profitable = rows.filter((row) => (
+    Number(currentNet1000Bps(row)) > triggerBps
+  ));
+  if (!profitable.length) {
+    return `<div class="va-empty">Сейчас нет расхождений с net не ниже ${pctFromBps(triggerBps)} на объёме $1,000 после всех комиссий.</div>`;
+  }
   const now = Date.now();
   return `<div class="va-table"><table><thead><tr>
-    <th>Монета</th><th>Купить → продать</th><th>Net $500</th><th>Net $1,000</th>
-    <th>VWAP $500</th><th>Доступная глубина</th><th>Возраст стакана</th><th>Net-окно</th>
+    <th>Монета</th><th>Купить → продать</th><th>Net $1,000</th><th>Net $500</th>
+    <th>VWAP $1,000</th><th>Доступная глубина</th><th>Возраст стакана</th><th>Net-окно</th>
   </tr></thead><tbody>${profitable.map((row) => {
-    const net1000 = net1000Bps(row);
+    const net1000 = currentNet1000Bps(row);
     const depth = Math.min(
       Number(row.currentBuyDepthUsd ?? 0),
       Number(row.currentSellDepthUsd ?? 0),
@@ -196,9 +224,9 @@ function activeRows(rows: Opportunity[]): string {
     return `<tr>
       <td><b>${esc(row.coin)}</b><small class="va-route">${esc(row.route)}</small></td>
       <td>${esc(row.buyVenue)} → ${esc(row.sellVenue)}</td>
-      <td class="${cls(row.currentNetBps ?? row.startNetBps)}"><b>${pctFromBps(row.currentNetBps ?? row.startNetBps)}</b></td>
       <td class="${cls(net1000)}"><b>${net1000 == null ? 'нет глубины' : pctFromBps(net1000)}</b></td>
-      <td>${price(row.currentBuyVwap500)} → ${price(row.currentSellVwap500)}</td>
+      <td class="${cls(row.currentNetBps ?? row.startNetBps)}">${pctFromBps(row.currentNetBps ?? row.startNetBps)}</td>
+      <td>${price(row.currentBuyVwap1000)} → ${price(row.currentSellVwap1000)}</td>
       <td>${usdDepth(depth)} <small>min двух ног</small></td>
       <td>${duration(bookAge)}</td>
       <td>${duration(now - Number(row.startedAt ?? now))}</td>
@@ -241,22 +269,22 @@ function pairRows(groups: Record<string, Summary>): string {
 }
 
 function historyRows(rows: Opportunity[]): string {
-  const profitable = rows.filter((row) => Number(row.peakNetBps) > 0);
+  const profitable = rows.filter((row) => Number(row.peakNetBps1000) > 0);
   if (!profitable.length) return '<div class="va-empty">Завершённых прибыльных расхождений после всех комиссий пока нет.</div>';
   return `<div class="va-table"><table><thead><tr>
     <th>UTC</th><th>Монета</th><th>Маршрут</th><th>Пара</th>
-    <th>Raw старт → пик</th><th>Net старт → пик</th><th>Жизнь</th>
-    <th>Half-life</th><th>Net через 250 / 500 / 1000 ms</th><th>Финиш</th>
+    <th>Raw $1k старт → пик</th><th>Net $1k старт → пик</th><th>Жизнь</th>
+    <th>Half-life</th><th>Net $1k через 250 / 500 / 1000 ms</th><th>Финиш</th>
   </tr></thead><tbody>${profitable.slice(0, 100).map((row) => {
     const horizon = row.horizons ?? {};
     return `<tr>
       <td>${utc(row.startedAt)}</td><td><b>${esc(row.coin)}</b></td><td>${esc(row.route)}</td>
       <td>${esc(row.buyVenue)} → ${esc(row.sellVenue)}</td>
-      <td>${pctFromBps(row.startRawBps)} → ${pctFromBps(row.peakRawBps)}</td>
-      <td class="${cls(row.peakNetBps)}">${pctFromBps(row.startNetBps)} → <b>${pctFromBps(row.peakNetBps)}</b></td>
+      <td>${pctFromBps(row.startRawBps1000)} → ${pctFromBps(row.peakRawBps1000)}</td>
+      <td class="${cls(row.peakNetBps1000)}">${pctFromBps(row.startNetBps1000)} → <b>${pctFromBps(row.peakNetBps1000)}</b></td>
       <td>${duration(row.durationMs)}</td><td>${duration(row.halfLifeMs)}</td>
-      <td>${pctFromBps(horizon['250']?.netBps)} / ${pctFromBps(horizon['500']?.netBps)} / ${pctFromBps(horizon['1000']?.netBps)}</td>
-      <td>${row.closeReason === 'converged' ? 'схождение' : row.closeReason === 'max_lifetime' ? '≥ 15 min' : esc(row.closeReason)}</td>
+      <td>${pctFromBps(horizon['250']?.netBps1000)} / ${pctFromBps(horizon['500']?.netBps1000)} / ${pctFromBps(horizon['1000']?.netBps1000)}</td>
+      <td>${row.closeReason === 'converged' ? 'схождение' : row.closeReason === 'insufficient_depth' ? 'нет $1k глубины' : row.closeReason === 'max_lifetime' ? '≥ 15 min' : esc(row.closeReason)}</td>
     </tr>`;
   }).join('')}</tbody></table></div>`;
 }
@@ -277,8 +305,9 @@ async function render(lang: Lang): Promise<string> {
   const groups = status?.groupedSummaries ?? {};
   const connections = status?.connections ?? {};
   const connected = VENUES.filter((venue) => connections[venue]?.connected).length;
+  const triggerBps = Number(status?.netTriggerBps ?? 3);
   const profitableActive = (status?.active ?? [])
-    .filter((row) => Number(row.currentNetBps ?? row.startNetBps) > 0);
+    .filter((row) => Number(currentNet1000Bps(row)) > triggerBps);
   const survival250 = summary.survival?.['250'];
   return pageShell(
     t(lang, 'DEX/CEX Perp Arbitrage Radar', 'DEX/CEX Perp Arbitrage Radar'),
@@ -286,26 +315,26 @@ async function render(lang: Lang): Promise<string> {
     <div class="va-wrap">
       <a class="va-back" href="/lab">← Лаборатория</a>
       <div class="va-head"><div>
-        <span class="va-badge">READ-ONLY · DEX ↔ CEX · $500 / $1,000 VWAP</span>
+        <span class="va-badge">READ-ONLY · DEX ↔ CEX · TRADEABLE $1,000 VWAP</span>
         <h1>Perp Arbitrage Radar</h1>
-        <p>Фиксирует исполнимые расхождения perp-цен. Net-окно начинается только когда VWAP уже положителен после полного цикла из четырёх ордеров, комиссий и защитного буфера, и заканчивается при net ≤ 0%.</p>
+        <p>Фиксирует только расхождения, исполнимые на $1,000. Net-окно начинается при остаточном edge выше ${pctFromBps(triggerBps)} после полного цикла из четырёх taker-ордеров, VWAP и защитного буфера, и заканчивается при net ≤ 0%.</p>
       </div><div class="va-engine ${isLive ? 'live' : ''}"><i></i>${isLive ? 'РАБОТАЕТ' : 'НЕТ СВЕЖИХ ДАННЫХ'}</div></div>
 
       <div class="va-cards">
-        <div class="va-card"><small>Потоки</small><b>${connected}/${VENUES.length}</b><em>Lighter · Hyperliquid · Paradex · Polymarket · Binance · Bybit</em></div>
-        <div class="va-card"><small>Прибыльно сейчас</small><b class="${profitableActive.length ? 'pos' : ''}">${profitableActive.length}</b><em>net &gt; 0% после всех издержек</em></div>
-        <div class="va-card"><small>Прибыльных завершено</small><b class="${Number(summary.viable ?? 0) > 0 ? 'pos' : ''}">${Number(summary.viable ?? 0)}</b><em>из ${Number(summary.closed ?? 0)} наблюдений</em></div>
-        <div class="va-card"><small>Медиана прибыльного net</small><b class="pos">${pctFromBps(summary.medianViablePeakNetBps)}</b><em>лучший ${pctFromBps(summary.maxPeakNetBps)}</em></div>
-        <div class="va-card"><small>Жизнь прибыльного edge</small><b>${duration(summary.medianViableDurationMs)}</b><em>только net-positive</em></div>
-        <div class="va-card"><small>Net жив через 250 ms</small><b>${pct(survival250?.netPositivePct)}</b><em>N ${Number(survival250?.sampled ?? 0)}</em></div>
+        <div class="va-card"><small>Потоки</small><b>${connected}/${VENUES.length}</b><em>Lighter · Hyperliquid · Paradex · Polymarket · Extended · Aster · Binance · Bybit</em></div>
+        <div class="va-card"><small>Допуск сейчас</small><b class="${profitableActive.length ? 'pos' : ''}">${profitableActive.length}</b><em>$1,000 net &gt; ${pctFromBps(triggerBps)}</em></div>
+        <div class="va-card"><small>Tradeable окон завершено</small><b class="${Number(summary.viable ?? 0) > 0 ? 'pos' : ''}">${Number(summary.viable ?? 0)}</b><em>из ${Number(summary.closed ?? 0)} честных окон</em></div>
+        <div class="va-card"><small>Медиана tradeable net</small><b class="pos">${pctFromBps(summary.medianViablePeakNetBps)}</b><em>$1,000 · лучший ${pctFromBps(summary.maxPeakNetBps)}</em></div>
+        <div class="va-card"><small>Жизнь tradeable edge</small><b>${duration(summary.medianViableDurationMs)}</b><em>$1,000 после издержек</em></div>
+        <div class="va-card"><small>Net жив через 250 ms</small><b>${pct(survival250?.netPositivePct)}</b><em>${Number(survival250?.observedAtHorizon ?? 0)} дожили · N ${Number(survival250?.sampled ?? 0)}</em></div>
       </div>
 
-      <section class="va-panel"><div class="va-panel-head"><h2>Прибыльные расхождения сейчас</h2><span>только net &gt; 0% · автообновление 5 сек</span></div>
-        ${activeRows(status?.active ?? [])}
+      <section class="va-panel"><div class="va-panel-head"><h2>Tradeable расхождения сейчас</h2><span>$1,000 net &gt; ${pctFromBps(triggerBps)} · автообновление 5 сек</span></div>
+        ${activeRows(status?.active ?? [], triggerBps)}
       </section>
 
       <section class="va-panel"><h2>Прибыльные типы маршрутов</h2>
-        <p>Показываются только маршруты, где хотя бы одно расхождение давало net &gt; 0% после входа и выхода обеих ног: четырёх taker-комиссий, VWAP и ${pctFromBps(status?.executionBufferBps, false)} защитного буфера.</p>
+        <p>Показываются только маршруты, где $1,000 VWAP на старте давал net выше ${pctFromBps(triggerBps)} после входа и выхода обеих ног: четырёх taker-комиссий и ${pctFromBps(status?.executionBufferBps, false)} защитного буфера.</p>
         <div class="va-table"><table><thead><tr><th>Маршрут</th><th>Net+ / все</th><th>Доля</th><th>Медиана прибыльного net</th><th>Лучший net</th><th>Жизнь</th><th>100 ms</th><th>250 ms</th><th>500 ms</th><th>1000 ms</th></tr></thead>
           <tbody>${routeRows(groups) || '<tr><td colspan="10">Прибыльных маршрутов пока нет.</td></tr>'}</tbody></table></div>
       </section>
@@ -326,7 +355,7 @@ async function render(lang: Lang): Promise<string> {
         <div class="va-rules">
           <span>глубина минимум $500</span><span>контроль $1,000</span><span>шаг 100 ms</span>
           <span>VWAP, не mid-price</span><span>две ноги одновременно</span><span>полный round-trip</span>
-          <span>окно только при net &gt; 0%</span><span>Lighter fee 0%</span><span>никаких ключей и ордеров</span>
+          <span>допуск только при $1k net &gt; ${pctFromBps(triggerBps)}</span><span>Lighter fee 0%</span><span>никаких ключей и ордеров</span>
         </div>
         <p>Сейчас это измеритель, а не торговый робот. Допуск к микрореалу появится только если на достаточной выборке DEX↔CEX или DEX↔DEX маршрут показывает положительный net после 250–500 ms, достаточную глубину и повторяемость на нескольких монетах.</p>
       </section>
@@ -339,12 +368,13 @@ export async function venueArbHero(lang: Lang): Promise<string> {
   const status = await readStatus();
   const isLive = live(status);
   const summary = status?.summary ?? {};
+  const triggerBps = Number(status?.netTriggerBps ?? 3);
   const profitableActive = (status?.active ?? [])
-    .filter((row) => Number(row.currentNetBps ?? row.startNetBps) > 0).length;
+    .filter((row) => Number(currentNet1000Bps(row)) > triggerBps).length;
   return `<a class="va-hero" href="/lab/venue-arb">
     <div><span class="va-badge">⚡ DEX ↔ CEX · PERP ARBITRAGE · READ-ONLY</span>
       <div class="va-title">Executable Divergence Radar</div>
-      <div class="va-sub">${t(lang, 'Lighter + Hyperliquid + Paradex + Polymarket + Binance + Bybit · скорость схождения →', 'Lighter + Hyperliquid + Paradex + Polymarket + Binance + Bybit · convergence speed →')}</div>
+      <div class="va-sub">${t(lang, '8 площадок · $1,000 net после комиссий · скорость схождения →', '8 venues · $1,000 net after fees · convergence speed →')}</div>
     </div>
     <div class="va-hero-stats">
       <span><b class="${isLive ? 'pos' : 'neg'}">${isLive ? 'LIVE' : 'OFFLINE'}</b><small>engine</small></span>
