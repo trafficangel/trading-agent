@@ -191,10 +191,10 @@ class Canary:
             os.getenv("VENUE_ARB_LIVE_MAKER_ORDER_TTL_MS", "60000")
         )
         self.maker_safety_ticks = int(
-            os.getenv("VENUE_ARB_LIVE_MAKER_SAFETY_TICKS", "5")
+            os.getenv("VENUE_ARB_LIVE_MAKER_SAFETY_TICKS", "1")
         )
         self.maker_safety_bps = float(
-            os.getenv("VENUE_ARB_LIVE_MAKER_SAFETY_BPS", "1")
+            os.getenv("VENUE_ARB_LIVE_MAKER_SAFETY_BPS", "0")
         )
         self.execution_buffer_bps = float(
             os.getenv("VENUE_ARB_EXECUTION_BUFFER_BPS", "2")
@@ -1454,6 +1454,8 @@ class Canary:
                 int(time.time() * 1000) + self.maker_retry_cooldown_ms
             )
             self.trade_open = False
+            if self.shutdown_requested:
+                self.running = False
             self.write_status("armed", activeTrade=None, lastTrade=trade)
             self.log("maker_unfilled", **trade)
             return
@@ -1522,6 +1524,8 @@ class Canary:
             )
             self.append_trade(trade)
             self.trade_open = False
+            if self.shutdown_requested:
+                self.running = False
             self.write_status("completed", activeTrade=None, lastTrade=trade)
             self.log("maker_fill_aborted", **trade)
             return
