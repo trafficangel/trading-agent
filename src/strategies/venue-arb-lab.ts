@@ -141,6 +141,7 @@ type ExecutionShadowReadiness = {
 type ShadowRejectReason =
   | 'missing_book'
   | 'stale_book'
+  | 'stale_source'
   | 'insufficient_depth'
   | 'below_gate'
   | 'latched'
@@ -182,6 +183,7 @@ type ExecutionShadow = ExecutionShadowRoute & {
     exitNetBps?: number;
     exitConfirmations?: number;
     freshMs?: number;
+    sourceFreshMs?: number;
     independenceMs?: number;
     maxHoldMs?: number;
     fundingBpsPerHour?: number;
@@ -336,6 +338,7 @@ function shadowBlockers(telemetry: ShadowRouteTelemetry | undefined): string {
   const labels: Record<ShadowRejectReason, string> = {
     missing_book: 'нет стакана',
     stale_book: 'старые данные',
+    stale_source: 'старый timestamp биржи',
     insufficient_depth: 'нет глубины $500',
     below_gate: 'edge ниже +0.10%',
     latched: 'окно уже отслеживается',
@@ -950,7 +953,7 @@ async function render(lang: Lang): Promise<string> {
         <div class="va-panel-head"><div><span class="va-badge">ARB SCOUT · SHADOW ONLY</span><h2>Сравнение альтернативных маршрутов</h2></div>
           <span>ЕДИНЫЙ GATE · БЕЗ РЕАЛЬНЫХ ОРДЕРОВ</span>
         </div>
-        <p>Все направления проверяются одинаково: $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)}, три свежих подтверждения, все комиссии, funding, execution buffer и консервативная latency. Между сигналами одной связки маршрут+монета выдерживается минимум ${duration(executionShadow?.config?.independenceMs ?? 5 * 60_000)}, чтобы одно рыночное событие не считалось несколькими независимыми окнами. Маршрут не получает преимущества за счёт ослабления фильтра.</p>
+        <p>Все направления проверяются одинаково: $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)}, три свежих подтверждения, все комиссии, funding, execution buffer и консервативная latency. Проверяется и время получения пакета ≤ ${duration(executionShadow?.config?.freshMs ?? 150)}, и exchange timestamp ≤ ${duration(executionShadow?.config?.sourceFreshMs ?? 750)} — backlog после reconnect больше не может создать ложный edge. Между сигналами одной связки маршрут+монета выдерживается минимум ${duration(executionShadow?.config?.independenceMs ?? 5 * 60_000)}, чтобы одно рыночное событие не считалось несколькими независимыми окнами. Маршрут не получает преимущества за счёт ослабления фильтра.</p>
         ${capitalRecommendation(executionShadow, groups)}
         <div class="va-table" data-va-pager="execution-shadow-scout-routes" data-page-size="20"><table><thead><tr>
           <th>Маршрут</th><th>Forward samples</th><th>Forward PASS</th><th>История ≥0.10% @ 1s</th><th>Окна ≥0.10% сейчас</th>
@@ -976,7 +979,7 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Extended / Lighter</small><b>${money(liveStatus?.balancesUsd?.extended)} / ${money(liveStatus?.balancesUsd?.lighter)}</b></div>
           <div><small>Текущий статус</small><b>${activeLive ? `${esc(activeLive.coin)} · ${esc(activeLive.status)}` : liveState(liveStatus)}</b></div>
         </div>
-        <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. Исполнитель конфигурируется на одно выбранное направление; сейчас это ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .15)} и свежести обоих стаканов ≤ 150 ms. Обычный выход допускается только после ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .10)}; команда остановки больше не инициирует немедленное закрытие открытой пары.</p>
+        <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. Исполнитель конфигурируется на одно выбранное направление; сейчас это ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .15)}, времени получения стаканов ≤ 150 ms и exchange timestamp ≤ 750 ms. Обычный выход допускается только после ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .10)}; команда остановки больше не инициирует немедленное закрытие открытой пары.</p>
         <div class="va-table" data-va-pager="live-trades" data-page-size="20"><table><thead><tr>
           <th>ID</th><th>Открыта → закрыта UTC</th><th>Монета</th><th>Маршрут</th>
           <th>Размер</th><th>Вход Ext / Lighter</th><th>Выход Ext / Lighter</th>

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   executableVwap,
   netConvergenceEdgeBps,
+  normalizeExchangeTimestampMs,
   rawCrossEdgeBps,
   roundTripCostBps,
 } from '../src/lib/venue-arb.js';
@@ -27,5 +28,17 @@ describe('venue arbitrage math', () => {
     expect(roundTripCostBps(0, 4.5, 2)).toBe(11);
     expect(netConvergenceEdgeBps(20, 0, 4.5, 2)).toBe(9);
     expect(roundTripCostBps(5, 5.5, 2)).toBe(23);
+  });
+
+  it('normalizes venue timestamps without trusting implausible clocks', () => {
+    const receivedAt = 1_785_269_603_837;
+    expect(normalizeExchangeTimestampMs(1_785_269_603, receivedAt))
+      .toBe(1_785_269_603_000);
+    expect(normalizeExchangeTimestampMs(1_785_269_603_496_000, receivedAt))
+      .toBe(1_785_269_603_496);
+    expect(normalizeExchangeTimestampMs(1_785_269_603_496_000_000, receivedAt))
+      .toBe(1_785_269_603_496);
+    expect(normalizeExchangeTimestampMs(1, receivedAt)).toBe(receivedAt);
+    expect(normalizeExchangeTimestampMs(0, receivedAt)).toBe(receivedAt);
   });
 });

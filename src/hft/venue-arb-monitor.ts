@@ -24,6 +24,7 @@ import { applyBybitDepthUpdate, createBybitDepthBook } from '../lib/bybit-depth-
 import {
   executableVwap,
   netConvergenceEdgeBps,
+  normalizeExchangeTimestampMs,
   rawCrossEdgeBps,
   roundTripCostBps,
   type PriceLevel,
@@ -85,9 +86,12 @@ type EdgeSnapshot = {
   sellDepthUsd: number;
   buyBookAgeMs: number;
   sellBookAgeMs: number;
+  buyBookSourceAgeMs: number;
+  sellBookSourceAgeMs: number;
 };
 
 type ExecutableBook = {
+  exchangeAt: number;
   receivedAt: number;
   updates: number;
   buyVwap500: number | null;
@@ -130,6 +134,8 @@ type Opportunity = {
   currentSellDepthUsd: number;
   currentBuyBookAgeMs: number;
   currentSellBookAgeMs: number;
+  currentBuyBookSourceAgeMs: number;
+  currentSellBookSourceAgeMs: number;
   peakAtMs: number;
   halfLifeMs: number | null;
   convergenceMs: number | null;
@@ -166,6 +172,7 @@ type ShadowRouteConfig = {
 type ShadowRejectReason =
   | 'missing_book'
   | 'stale_book'
+  | 'stale_source'
   | 'insufficient_depth'
   | 'below_gate'
   | 'latched'
@@ -246,8 +253,8 @@ const STATUS_PATH = resolve(DATA_DIR, 'status.json');
 const EXECUTION_STATUS_PATH = resolve(DATA_DIR, 'execution-status.json');
 const OPPORTUNITIES_PATH = resolve(DATA_DIR, 'opportunities.ndjson');
 const LIVE_TRADES_PATH = resolve(DATA_DIR, 'live-trades.json');
-const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution-v3.ndjson');
-const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active-v3.json');
+const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution-v4.ndjson');
+const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active-v4.json');
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 250);
 const NET_TRIGGER_BPS = finiteEnv('VENUE_ARB_NET_TRIGGER_BPS', 3);
@@ -265,6 +272,10 @@ const SHADOW_EXIT_CONFIRMATIONS = finiteEnv(
   3,
 );
 const SHADOW_FRESH_MS = finiteEnv('VENUE_ARB_SHADOW_FRESH_MS', 150);
+const SHADOW_SOURCE_FRESH_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_SOURCE_FRESH_MS',
+  750,
+);
 const SHADOW_MAX_HOLD_MS = finiteEnv(
   'VENUE_ARB_SHADOW_MAX_HOLD_MS',
   15 * 60_000,
@@ -463,6 +474,7 @@ function emptyShadowRejections(): Record<ShadowRejectReason, number> {
   return {
     missing_book: 0,
     stale_book: 0,
+    stale_source: 0,
     insufficient_depth: 0,
     below_gate: 0,
     latched: 0,
@@ -579,6 +591,7 @@ function executableBook(venue: Venue, coin: string): ExecutableBook | null {
   const bids = sortedLevels(book, 'bids');
   const prepared: ExecutableBook = {
     receivedAt: book.receivedAt,
+    exchangeAt: book.exchangeAt,
     updates: book.updates,
     buyVwap500: executableVwap(asks, 500)?.price ?? null,
     buyVwap1000: executableVwap(asks, 1_000)?.price ?? null,
@@ -646,6 +659,10 @@ function shadowQuote(
     now - buy.receivedAt > SHADOW_FRESH_MS
     || now - sell.receivedAt > SHADOW_FRESH_MS
   ) return { quote: null, rejection: 'stale_book' };
+  if (
+    now - buy.exchangeAt > SHADOW_SOURCE_FRESH_MS
+    || now - sell.exchangeAt > SHADOW_SOURCE_FRESH_MS
+  ) return { quote: null, rejection: 'stale_source' };
   if (
     buy.buyVwap500 == null
     || sell.sellVwap500 == null
@@ -971,7 +988,7 @@ function updateObjectLevels(target: Map<number, number>, rows: unknown): void {
 
 function markBook(book: BookState, exchangeAt: number, receivedAt: number): void {
   if (!book.bids.size || !book.asks.size) return;
-  book.exchangeAt = exchangeAt || receivedAt;
+  book.exchangeAt = normalizeExchangeTimestampMs(exchangeAt, receivedAt);
   book.receivedAt = receivedAt;
   book.updates++;
 }
@@ -1427,6 +1444,8 @@ function edge(
     || !sellBook
     || now - buyBook.receivedAt > STALE_MS
     || now - sellBook.receivedAt > STALE_MS
+    || now - buyBook.exchangeAt > SHADOW_SOURCE_FRESH_MS
+    || now - sellBook.exchangeAt > SHADOW_SOURCE_FRESH_MS
   ) return null;
   if (buyBook.buyVwap500 == null || sellBook.sellVwap500 == null) return null;
   const rawBps500 = rawCrossEdgeBps(
@@ -1461,6 +1480,8 @@ function edge(
     sellDepthUsd: sellBook.sellDepthUsd,
     buyBookAgeMs: now - buyBook.receivedAt,
     sellBookAgeMs: now - sellBook.receivedAt,
+    buyBookSourceAgeMs: Math.max(0, now - buyBook.exchangeAt),
+    sellBookSourceAgeMs: Math.max(0, now - sellBook.exchangeAt),
   };
 }
 
@@ -1503,6 +1524,8 @@ function startOpportunity(
     currentSellDepthUsd: snapshot.sellDepthUsd,
     currentBuyBookAgeMs: snapshot.buyBookAgeMs,
     currentSellBookAgeMs: snapshot.sellBookAgeMs,
+    currentBuyBookSourceAgeMs: snapshot.buyBookSourceAgeMs,
+    currentSellBookSourceAgeMs: snapshot.sellBookSourceAgeMs,
     peakAtMs: 0,
     halfLifeMs: null,
     convergenceMs: null,
@@ -1534,6 +1557,8 @@ function updateOpportunity(opportunity: Opportunity, snapshot: EdgeSnapshot): vo
   opportunity.currentSellDepthUsd = snapshot.sellDepthUsd;
   opportunity.currentBuyBookAgeMs = snapshot.buyBookAgeMs;
   opportunity.currentSellBookAgeMs = snapshot.sellBookAgeMs;
+  opportunity.currentBuyBookSourceAgeMs = snapshot.buyBookSourceAgeMs;
+  opportunity.currentSellBookSourceAgeMs = snapshot.sellBookSourceAgeMs;
   if (snapshot.rawBps500 > opportunity.peakRawBps) {
     opportunity.peakRawBps = snapshot.rawBps500;
     opportunity.peakAtMs = elapsed;
@@ -1753,7 +1778,7 @@ function executionShadowStatus(): Record<string, unknown> {
   const primaryRoute = SHADOW_ROUTES.find((route) => route.primary);
   const primary = primaryRoute ? routeStatuses[primaryRoute.id] : undefined;
   return {
-    version: 'multi-route-shadow-v3',
+    version: 'multi-route-shadow-v4',
     config: {
       notionalUsd: SHADOW_NOTIONAL_USD,
       entryNetBps: SHADOW_ENTRY_NET_BPS,
@@ -1761,6 +1786,7 @@ function executionShadowStatus(): Record<string, unknown> {
       exitNetBps: SHADOW_EXIT_NET_BPS,
       exitConfirmations: SHADOW_EXIT_CONFIRMATIONS,
       freshMs: SHADOW_FRESH_MS,
+      sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
       independenceMs: SHADOW_INDEPENDENCE_MS,
       maxHoldMs: SHADOW_MAX_HOLD_MS,
       fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
@@ -1801,7 +1827,11 @@ function writeStatus(): void {
       Object.fromEntries(VENUES.map((venue) => [
         venue,
         books.get(bookKey(venue, market.coin))?.receivedAt
-          ? now - (books.get(bookKey(venue, market.coin))?.receivedAt ?? 0)
+          ? Math.max(
+            0,
+            now - (books.get(bookKey(venue, market.coin))?.receivedAt ?? 0),
+            now - (books.get(bookKey(venue, market.coin))?.exchangeAt ?? 0),
+          )
           : null,
       ])),
     ])),
@@ -1831,6 +1861,12 @@ function writeExecutionStatus(): void {
       lighterSellVwap: lighter?.sellVwap500 ?? null,
       extendedBookAgeMs: extended?.receivedAt ? now - extended.receivedAt : null,
       lighterBookAgeMs: lighter?.receivedAt ? now - lighter.receivedAt : null,
+      extendedSourceAgeMs: extended?.exchangeAt
+        ? Math.max(0, now - extended.exchangeAt)
+        : null,
+      lighterSourceAgeMs: lighter?.exchangeAt
+        ? Math.max(0, now - lighter.exchangeAt)
+        : null,
     }];
   }));
   const status = {
@@ -1857,6 +1893,8 @@ function writeExecutionStatus(): void {
         currentSellDepthUsd: row.currentSellDepthUsd,
         currentBuyBookAgeMs: row.currentBuyBookAgeMs,
         currentSellBookAgeMs: row.currentSellBookAgeMs,
+        currentBuyBookSourceAgeMs: row.currentBuyBookSourceAgeMs,
+        currentSellBookSourceAgeMs: row.currentSellBookSourceAgeMs,
       })),
   };
   const tmp = `${EXECUTION_STATUS_PATH}.tmp`;

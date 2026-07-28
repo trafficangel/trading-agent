@@ -6,6 +6,22 @@ export type VwapResult = {
   notionalUsd: number;
 };
 
+export function normalizeExchangeTimestampMs(
+  value: number,
+  receivedAtMs: number,
+): number {
+  if (!Number.isFinite(value) || value <= 0) return receivedAtMs;
+  let timestampMs = value;
+  if (timestampMs < 100_000_000_000) timestampMs *= 1_000;
+  else if (timestampMs > 100_000_000_000_000_000) timestampMs /= 1_000_000;
+  else if (timestampMs > 100_000_000_000_000) timestampMs /= 1_000;
+  if (
+    !Number.isFinite(timestampMs)
+    || Math.abs(timestampMs - receivedAtMs) > 5 * 60_000
+  ) return receivedAtMs;
+  return timestampMs;
+}
+
 export function executableVwap(
   levels: readonly PriceLevel[],
   notionalUsd: number,
@@ -56,4 +72,3 @@ export function netConvergenceEdgeBps(
     executionBufferBps,
   );
 }
-

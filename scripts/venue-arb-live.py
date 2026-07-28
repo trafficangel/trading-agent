@@ -104,6 +104,9 @@ class Canary:
             os.getenv("VENUE_ARB_LIVE_EXTENDED_TAKER_BPS", "2.5")
         )
         self.fresh_ms = int(os.getenv("VENUE_ARB_LIVE_FRESH_MS", "150"))
+        self.source_fresh_ms = int(
+            os.getenv("VENUE_ARB_LIVE_SOURCE_FRESH_MS", "750")
+        )
         self.entry_slippage = float(
             os.getenv("VENUE_ARB_LIVE_ENTRY_SLIPPAGE", "0.0002")
         )
@@ -404,6 +407,10 @@ class Canary:
                 float(row.get("currentBuyBookAgeMs") or math.inf),
                 float(row.get("currentSellBookAgeMs") or math.inf),
             )
+            source_ages = (
+                float(row.get("currentBuyBookSourceAgeMs") or math.inf),
+                float(row.get("currentSellBookSourceAgeMs") or math.inf),
+            )
             depth = min(
                 float(row.get("currentBuyDepthUsd") or 0),
                 float(row.get("currentSellDepthUsd") or 0),
@@ -416,6 +423,7 @@ class Canary:
                 coin in MARKETS
                 and net >= self.entry_net_bps
                 and max(ages) <= self.fresh_ms
+                and max(source_ages) <= self.source_fresh_ms
                 and depth >= max(1000, self.notional * 3)
                 and min(prices) > 0
             ):
@@ -745,6 +753,10 @@ class Canary:
             float(quote.get("extendedBookAgeMs") or math.inf),
             float(quote.get("lighterBookAgeMs") or math.inf),
         )
+        source_ages = (
+            float(quote.get("extendedSourceAgeMs") or math.inf),
+            float(quote.get("lighterSourceAgeMs") or math.inf),
+        )
         if self.buy_venue == "extended":
             ext_exit = float(quote.get("extendedSellVwap") or 0)
             lit_exit = float(quote.get("lighterBuyVwap") or 0)
@@ -759,7 +771,11 @@ class Canary:
             entry_sell = ext_fill.price
             exit_buy = lit_exit
             exit_sell = ext_exit
-        if max(ages) > self.fresh_ms or min(ext_exit, lit_exit) <= 0:
+        if (
+            max(ages) > self.fresh_ms
+            or max(source_ages) > self.source_fresh_ms
+            or min(ext_exit, lit_exit) <= 0
+        ):
             return None
         estimated_exit_fees = (
             ext_exit * quantity * self.extended_taker_bps / 10_000
