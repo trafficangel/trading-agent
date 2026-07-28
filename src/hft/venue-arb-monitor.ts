@@ -362,6 +362,10 @@ const SHADOW_SOURCE_FRESH_MS = finiteEnv(
   'VENUE_ARB_SHADOW_SOURCE_FRESH_MS',
   750,
 );
+const MAKER_BOOK_FRESH_MS = finiteEnv(
+  'VENUE_ARB_MAKER_BOOK_FRESH_MS',
+  SHADOW_SOURCE_FRESH_MS,
+);
 const SHADOW_MAX_HOLD_MS = finiteEnv(
   'VENUE_ARB_SHADOW_MAX_HOLD_MS',
   15 * 60_000,
@@ -1082,7 +1086,7 @@ function evaluateShadow(now: number): void {
 
 function makerBooksFresh(now: number, ...prepared: ExecutableBook[]): boolean {
   return prepared.every((book) => (
-    now - book.receivedAt <= SHADOW_FRESH_MS
+    now - book.receivedAt <= MAKER_BOOK_FRESH_MS
     && now - book.exchangeAt <= SHADOW_SOURCE_FRESH_MS
   ));
 }
@@ -1690,6 +1694,7 @@ function makerShadowStatus(): Record<string, unknown> {
       maxQueueUsd: MAKER_MAX_QUEUE_USD,
       maxHoldMs: MAKER_MAX_HOLD_MS,
       independenceMs: MAKER_INDEPENDENCE_MS,
+      bookFreshMs: MAKER_BOOK_FRESH_MS,
       sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
       executionBufferBps: EXECUTION_BUFFER_BPS,
       extendedMakerFeeBps: 0,

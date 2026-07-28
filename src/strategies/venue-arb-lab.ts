@@ -222,6 +222,7 @@ type MakerShadow = {
     maxQueueUsd?: number;
     maxHoldMs?: number;
     independenceMs?: number;
+    bookFreshMs?: number;
     sourceFreshMs?: number;
     executionBufferBps?: number;
     extendedMakerFeeBps?: number;
