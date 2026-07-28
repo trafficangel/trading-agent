@@ -876,6 +876,10 @@ async function render(lang: Lang): Promise<string> {
     (sum, venue) => sum + Number(connections[venue]?.stalls ?? 0),
     0,
   );
+  const feedReconnects = VENUES.reduce(
+    (sum, venue) => sum + Number(connections[venue]?.reconnects ?? 0),
+    0,
+  );
   const triggerBps = Number(status?.netTriggerBps ?? 3);
   const profitableActive = (status?.active ?? [])
     .filter((row) => Number(currentNet1000Bps(row)) > triggerBps);
@@ -902,7 +906,7 @@ async function render(lang: Lang): Promise<string> {
 
       <div class="va-cards">
         <div class="va-card"><small>Потоки</small><b>${connected}/${VENUES.length}</b><em>Lighter · Hyperliquid · Paradex · Polymarket · Extended · Aster · Pacifica · Binance · Bybit</em></div>
-        <div class="va-card"><small>Максимальный возраст потока</small><b class="${maxFeedAgeMs > 15_000 ? 'neg' : ''}">${duration(maxFeedAgeMs)}</b><em>авто-reconnect зависаний: ${feedStalls}</em></div>
+        <div class="va-card"><small>Максимальный возраст потока</small><b class="${maxFeedAgeMs > 15_000 ? 'neg' : ''}">${duration(maxFeedAgeMs)}</b><em>reconnect: ${feedReconnects} · stalls: ${feedStalls}</em></div>
         <div class="va-card"><small>Допуск сейчас</small><b class="${profitableActive.length ? 'pos' : ''}">${profitableActive.length}</b><em>$1,000 net &gt; ${pctFromBps(triggerBps)}</em></div>
         <div class="va-card"><small>Tradeable окон завершено</small><b class="${Number(summary.viable ?? 0) > 0 ? 'pos' : ''}">${Number(summary.viable ?? 0)}</b><em>из ${Number(summary.closed ?? 0)} честных окон</em></div>
         <div class="va-card"><small>Медиана tradeable net</small><b class="pos">${pctFromBps(summary.medianViablePeakNetBps)}</b><em>$1,000 · лучший ${pctFromBps(summary.maxPeakNetBps)}</em></div>

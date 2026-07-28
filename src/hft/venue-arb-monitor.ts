@@ -1019,9 +1019,10 @@ function connect(
       `venue-arb ${venue} closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
     );
     if (!shuttingDown) {
+      const reconnectDelayMs = code === 1_000 ? 250 : RECONNECT_MS;
       setTimeout(
         () => connect(venue, url, onOpen, onMessage, options),
-        RECONNECT_MS,
+        reconnectDelayMs,
       ).unref();
     }
   });
