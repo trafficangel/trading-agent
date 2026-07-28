@@ -21,6 +21,7 @@ import {
 import { resolve } from 'node:path';
 import WebSocket, { type ClientOptions, type RawData } from 'ws';
 import { applyBybitDepthUpdate, createBybitDepthBook } from '../lib/bybit-depth-book.js';
+import { applyGrvtDepthUpdate, createGrvtDepthBook } from '../lib/grvt-depth-book.js';
 import {
   executableVwap,
   netConvergenceEdgeBps,
@@ -54,6 +55,7 @@ type Venue =
   | 'extended'
   | 'aster'
   | 'pacifica'
+  | 'grvt'
   | 'binance'
   | 'bybit';
 type VenueClass = 'DEX' | 'CEX';
@@ -455,6 +457,7 @@ const VENUES: readonly Venue[] = [
   'extended',
   'aster',
   'pacifica',
+  'grvt',
   'binance',
   'bybit',
 ];
@@ -466,6 +469,7 @@ const VENUE_CLASS: Record<Venue, VenueClass> = {
   extended: 'DEX',
   aster: 'DEX',
   pacifica: 'DEX',
+  grvt: 'DEX',
   binance: 'CEX',
   bybit: 'CEX',
 };
@@ -479,6 +483,8 @@ const FEE_BPS: Record<Venue, number> = {
   aster: finiteEnv('VENUE_ARB_FEE_BPS_ASTER', 4),
   // Pacifica fee level 0 taker rate is 0.040%.
   pacifica: finiteEnv('VENUE_ARB_FEE_BPS_PACIFICA', 4),
+  // GRVT base-tier perps taker fee is 0.045%; maker paths are researched separately.
+  grvt: finiteEnv('VENUE_ARB_FEE_BPS_GRVT', 4.5),
   binance: finiteEnv('VENUE_ARB_FEE_BPS_BINANCE', 5),
   bybit: finiteEnv('VENUE_ARB_FEE_BPS_BYBIT', 5.5),
 };
@@ -657,6 +663,54 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     sellVenue: 'aster',
     primary: false,
   },
+  {
+    id: 'grvt-lighter',
+    buyVenue: 'grvt',
+    sellVenue: 'lighter',
+    primary: false,
+  },
+  {
+    id: 'lighter-grvt',
+    buyVenue: 'lighter',
+    sellVenue: 'grvt',
+    primary: false,
+  },
+  {
+    id: 'grvt-extended',
+    buyVenue: 'grvt',
+    sellVenue: 'extended',
+    primary: false,
+  },
+  {
+    id: 'extended-grvt',
+    buyVenue: 'extended',
+    sellVenue: 'grvt',
+    primary: false,
+  },
+  {
+    id: 'grvt-binance',
+    buyVenue: 'grvt',
+    sellVenue: 'binance',
+    primary: false,
+  },
+  {
+    id: 'binance-grvt',
+    buyVenue: 'binance',
+    sellVenue: 'grvt',
+    primary: false,
+  },
+  {
+    id: 'grvt-bybit',
+    buyVenue: 'grvt',
+    sellVenue: 'bybit',
+    primary: false,
+  },
+  {
+    id: 'bybit-grvt',
+    buyVenue: 'bybit',
+    sellVenue: 'grvt',
+    primary: false,
+  },
 ];
 const shadowRouteById = new Map(SHADOW_ROUTES.map((route) => [route.id, route]));
 function emptyShadowRejections(): Record<ShadowRejectReason, number> {
@@ -702,6 +756,7 @@ const byPolymarketId = new Map(MARKETS.flatMap((market) => (
     : [[market.polymarketInstrumentId, market] as const]
 )));
 const bybitDepth = new Map(MARKETS.map((market) => [market.symbol, createBybitDepthBook()]));
+const grvtDepth = new Map(MARKETS.map((market) => [market.coin, createGrvtDepthBook()]));
 const connections = Object.fromEntries(VENUES.map((venue) => [
   venue,
   {
@@ -2456,6 +2511,65 @@ function startAster(): void {
   );
 }
 
+function startGrvt(): void {
+  connect(
+    'grvt',
+    'wss://market-data.grvt.io/ws/full',
+    (ws) => {
+      ws.send(JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'subscribe',
+        params: {
+          stream: 'v1.book.d',
+          selectors: MARKETS.map(({ coin }) => `${coin}_USDT_Perp@100`),
+        },
+        id: 1,
+      }));
+    },
+    (payload, receivedAt, ws) => {
+      const message = payload as {
+        stream?: unknown;
+        sequence_number?: unknown;
+        prev_sequence_number?: unknown;
+        feed?: {
+          event_time?: unknown;
+          instrument?: unknown;
+          bids?: unknown;
+          asks?: unknown;
+        };
+      };
+      if (
+        message.stream !== 'v1.book.d'
+        || typeof message.feed?.instrument !== 'string'
+      ) return;
+      const suffix = '_USDT_Perp';
+      const coin = message.feed.instrument.endsWith(suffix)
+        ? message.feed.instrument.slice(0, -suffix.length)
+        : '';
+      const market = byCoin.get(coin);
+      const depth = market ? grvtDepth.get(market.coin) : null;
+      const book = market ? books.get(bookKey('grvt', market.coin)) : null;
+      if (!market || !depth || !book) return;
+      const result = applyGrvtDepthUpdate(
+        depth,
+        message.sequence_number,
+        message.prev_sequence_number,
+        message.feed.bids,
+        message.feed.asks,
+      );
+      if (result === 'gap' || result === 'invalid') {
+        console.warn(`venue-arb grvt ${market.coin} depth ${result}; reconnecting`);
+        ws.terminate();
+        return;
+      }
+      if (result === 'duplicate') return;
+      book.bids = new Map(depth.bids);
+      book.asks = new Map(depth.asks);
+      markBook(book, finite(message.feed.event_time), receivedAt);
+    },
+  );
+}
+
 function edge(
   now: number,
   coin: string,
@@ -3111,6 +3225,7 @@ startExtended();
 startExtendedTrades();
 startAster();
 startPacifica();
+startGrvt();
 startBinance();
 startBybit();
 const evaluationTimer = setInterval(() => {

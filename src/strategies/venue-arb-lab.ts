@@ -13,6 +13,7 @@ type Venue =
   | 'extended'
   | 'aster'
   | 'pacifica'
+  | 'grvt'
   | 'binance'
   | 'bybit';
 type SurvivalRow = {
@@ -390,6 +391,7 @@ const VENUES: readonly Venue[] = [
   'extended',
   'aster',
   'pacifica',
+  'grvt',
   'binance',
   'bybit',
 ];
