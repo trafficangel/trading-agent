@@ -934,7 +934,7 @@ async function render(lang: Lang): Promise<string> {
         <div class="va-panel-head"><div><span class="va-badge">ARB SCOUT · SHADOW ONLY</span><h2>Сравнение альтернативных маршрутов</h2></div>
           <span>ЕДИНЫЙ GATE · БЕЗ РЕАЛЬНЫХ ОРДЕРОВ</span>
         </div>
-        <p>Все направления проверяются одинаково: $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)}, три свежих подтверждения, все комиссии, funding, execution buffer и консервативная latency. Между сигналами одной связки маршрут+монета выдерживается минимум ${duration(executionShadow?.config?.independenceMs ?? 60_000)}, чтобы одно рыночное событие не считалось несколькими независимыми окнами. Маршрут не получает преимущества за счёт ослабления фильтра.</p>
+        <p>Все направления проверяются одинаково: $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)}, три свежих подтверждения, все комиссии, funding, execution buffer и консервативная latency. Между сигналами одной связки маршрут+монета выдерживается минимум ${duration(executionShadow?.config?.independenceMs ?? 5 * 60_000)}, чтобы одно рыночное событие не считалось несколькими независимыми окнами. Маршрут не получает преимущества за счёт ослабления фильтра.</p>
         ${capitalRecommendation(executionShadow, groups)}
         <div class="va-table" data-va-pager="execution-shadow-scout-routes" data-page-size="20"><table><thead><tr>
           <th>Маршрут</th><th>Forward samples</th><th>Forward PASS</th><th>История ≥0.10% @ 1s</th><th>Окна ≥0.10% сейчас</th>

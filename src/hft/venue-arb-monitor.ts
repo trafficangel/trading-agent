@@ -294,7 +294,7 @@ const SHADOW_EXIT_QUOTE_GRACE_MS = finiteEnv(
 );
 const SHADOW_INDEPENDENCE_MS = finiteEnv(
   'VENUE_ARB_SHADOW_INDEPENDENCE_MS',
-  60_000,
+  5 * 60_000,
 );
 const FEED_STALL_MS = finiteEnv('VENUE_ARB_FEED_STALL_MS', 15_000);
 const RECONNECT_MS = 2_000;
@@ -351,6 +351,12 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     primary: true,
   },
   {
+    id: 'lighter-extended',
+    buyVenue: 'lighter',
+    sellVenue: 'extended',
+    primary: false,
+  },
+  {
     id: 'bybit-paradex',
     buyVenue: 'bybit',
     sellVenue: 'paradex',
@@ -363,9 +369,21 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     primary: false,
   },
   {
+    id: 'binance-bybit',
+    buyVenue: 'binance',
+    sellVenue: 'bybit',
+    primary: false,
+  },
+  {
     id: 'paradex-bybit',
     buyVenue: 'paradex',
     sellVenue: 'bybit',
+    primary: false,
+  },
+  {
+    id: 'paradex-lighter',
+    buyVenue: 'paradex',
+    sellVenue: 'lighter',
     primary: false,
   },
   {
