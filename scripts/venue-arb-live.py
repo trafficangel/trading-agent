@@ -62,6 +62,51 @@ class Fill:
     filled_at: int | None
 
 
+@dataclass(frozen=True)
+class MakerFillResult:
+    fill: Fill | None
+    status: str
+    reason: str | None
+
+
+def maker_entry_edge_bps(
+    side: str,
+    extended_price: float,
+    lighter_hedge_price: float,
+) -> float:
+    if min(extended_price, lighter_hedge_price) <= 0:
+        return -math.inf
+    if side == "buy":
+        return (lighter_hedge_price / extended_price - 1) * 10_000
+    return (extended_price / lighter_hedge_price - 1) * 10_000
+
+
+def safer_maker_price(
+    *,
+    side: str,
+    candidate_price: float,
+    best_bid: float,
+    best_ask: float,
+    tick: float,
+    safety_ticks: int,
+    safety_bps: float,
+) -> float:
+    if (
+        side not in {"buy", "sell"}
+        or min(candidate_price, best_bid, best_ask, tick) <= 0
+        or best_bid >= best_ask
+    ):
+        return math.nan
+    opposite = best_ask if side == "buy" else best_bid
+    distance = max(
+        max(1, safety_ticks) * tick,
+        opposite * max(0, safety_bps) / 10_000,
+    )
+    if side == "buy":
+        return min(candidate_price, best_ask - distance)
+    return max(candidate_price, best_bid + distance)
+
+
 def projected_net_usd(
     *,
     quantity: float,
@@ -145,6 +190,18 @@ class Canary:
         self.maker_order_ttl_ms = int(
             os.getenv("VENUE_ARB_LIVE_MAKER_ORDER_TTL_MS", "15000")
         )
+        self.maker_safety_ticks = int(
+            os.getenv("VENUE_ARB_LIVE_MAKER_SAFETY_TICKS", "5")
+        )
+        self.maker_safety_bps = float(
+            os.getenv("VENUE_ARB_LIVE_MAKER_SAFETY_BPS", "2")
+        )
+        self.execution_buffer_bps = float(
+            os.getenv("VENUE_ARB_EXECUTION_BUFFER_BPS", "2")
+        )
+        self.maker_retry_cooldown_ms = int(
+            os.getenv("VENUE_ARB_LIVE_MAKER_RETRY_COOLDOWN_MS", "5000")
+        )
         self.cooldown_ms = int(
             float(os.getenv("VENUE_ARB_LIVE_COOLDOWN_SECONDS", "900")) * 1000
         )
@@ -174,6 +231,7 @@ class Canary:
         self.last_order_id = int(time.time() * 1000)
         self.last_status_write = 0.0
         self.last_rejection: str | None = None
+        self.next_maker_attempt_at = 0
         self.extended: RestApiClient | None = None
         self.extended_markets: dict[str, Any] = {}
         self.lighter_url = os.environ["LIGHTER_BASE_URL"]
@@ -512,12 +570,21 @@ class Canary:
         projected_net_bps = float(quote.get("projectedNetBps") or -math.inf)
         expires_at = int(quote.get("expiresAt") or 0)
         freshness = (status.get("closingQuotes") or {}).get(coin) or {}
+        lighter_hedge_price = float(
+            freshness.get(
+                "lighterSellVwap" if quote.get("side") == "buy"
+                else "lighterBuyVwap"
+            )
+            or 0
+        )
         if (
-            quote.get("stage") != "entry"
+            now < self.next_maker_attempt_at
+            or quote.get("stage") != "entry"
             or quote.get("activatedAt") is None
             or coin not in MARKETS
             or quote.get("side") not in {"buy", "sell"}
             or price <= 0
+            or lighter_hedge_price <= 0
             or projected_net_bps < self.entry_net_bps
             or queue_ahead * price > self.maker_max_queue_usd
             or expires_at - now < self.maker_min_ttl_ms
@@ -543,8 +610,84 @@ class Canary:
             "price": price,
             "queueAheadUsd": queue_ahead * price,
             "projectedNetBps": projected_net_bps,
+            "lighterHedgePrice": lighter_hedge_price,
             "expiresAt": expires_at,
             "monitorUpdatedAt": int(status.get("updatedAt") or 0),
+        }
+
+    async def revalidate_maker_candidate(
+        self, candidate: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        assert self.extended is not None
+        coin = str(candidate["coin"])
+        side = str(candidate["side"])
+        response = await self.extended.info.get_market_statistics(
+            market_name=f"{coin}-USD"
+        )
+        if response.error or response.data is None:
+            self.last_rejection = "Extended best bid/ask unavailable"
+            return None
+        fresh = self.maker_candidate()
+        if (
+            fresh is None
+            or fresh["coin"] != coin
+            or fresh["side"] != side
+        ):
+            self.last_rejection = "maker window changed during revalidation"
+            return None
+
+        stats = response.data
+        best_bid = float(stats.bid_price)
+        best_ask = float(stats.ask_price)
+        market = self.extended_markets[f"{coin}-USD"]
+        tick = float(market.trading_config.min_price_change)
+        raw_price = safer_maker_price(
+            side=side,
+            candidate_price=float(fresh["price"]),
+            best_bid=best_bid,
+            best_ask=best_ask,
+            tick=tick,
+            safety_ticks=self.maker_safety_ticks,
+            safety_bps=self.maker_safety_bps,
+        )
+        rounding = ROUND_FLOOR if side == "buy" else ROUND_CEILING
+        if not math.isfinite(raw_price):
+            self.last_rejection = "invalid Extended maker safety price"
+            return None
+        price = float(
+            market.trading_config.round_price(
+                Decimal(str(raw_price)), rounding_direction=rounding
+            )
+        )
+        hedge_price = float(fresh["lighterHedgePrice"])
+        projected_net_bps = (
+            maker_entry_edge_bps(side, price, hedge_price)
+            - self.execution_buffer_bps
+        )
+        if (
+            price <= 0
+            or (side == "buy" and price >= best_ask)
+            or (side == "sell" and price <= best_bid)
+            or projected_net_bps < self.entry_net_bps
+        ):
+            self.last_rejection = (
+                "maker safety price no longer clears the net entry gate"
+            )
+            return None
+        return {
+            **fresh,
+            "price": price,
+            "sourcePrice": float(fresh["price"]),
+            "queueAheadUsd": (
+                float(fresh["queueAheadUsd"])
+                if abs(price - float(fresh["price"])) < tick / 2
+                else 0.0
+            ),
+            "projectedNetBps": projected_net_bps,
+            "extendedBestBid": best_bid,
+            "extendedBestAsk": best_ask,
+            "makerSafetyTicks": self.maker_safety_ticks,
+            "makerSafetyBps": self.maker_safety_bps,
         }
 
     def common_quantity(self, coin: str, price: float) -> Decimal:
@@ -729,7 +872,7 @@ class Canary:
         coin: str,
         order_id: int,
         deadline_at: int,
-    ) -> Fill | None:
+    ) -> MakerFillResult:
         assert self.extended is not None
         market = f"{coin}-USD"
         saw_fill = False
@@ -740,6 +883,7 @@ class Canary:
             OrderStatus.EXPIRED.value,
         }
         finalized = False
+        final_row: Any | None = None
         while int(time.time() * 1000) < deadline_at:
             row = await self.extended_order_by_id(order_id)
             if row is None:
@@ -761,6 +905,7 @@ class Canary:
                 break
             if status in final_statuses:
                 finalized = True
+                final_row = row
                 break
             await asyncio.sleep(0.1)
         else:
@@ -776,6 +921,7 @@ class Canary:
                 saw_fill = True
             if self.order_status_value(row.status) in final_statuses:
                 finalized = True
+                final_row = row
                 break
             await asyncio.sleep(0.1)
         if not finalized:
@@ -810,18 +956,50 @@ class Canary:
                     if int(row.id) == order_id
                 ]
                 if fill is not None:
-                    return fill
+                    return MakerFillResult(
+                        fill=fill,
+                        status="FILLED",
+                        reason=None,
+                    )
                 if not open_response.error and not matching_open:
-                    return None
+                    return MakerFillResult(
+                        fill=None,
+                        status="NOT_FOUND_AFTER_CANCEL",
+                        reason=None,
+                    )
                 raise RuntimeError(
                     "Extended maker remainder cancellation is unconfirmed"
                 )
         if not saw_fill:
-            return None
+            return MakerFillResult(
+                fill=None,
+                status=(
+                    self.order_status_value(final_row.status)
+                    if final_row is not None
+                    else "UNFILLED"
+                ),
+                reason=(
+                    str(getattr(final_row, "status_reason", "") or "") or None
+                    if final_row is not None
+                    else None
+                ),
+            )
         fill = await self.extended_fill(market, order_id)
         if fill is None:
             raise RuntimeError("Extended maker fill is missing from trade history")
-        return fill
+        return MakerFillResult(
+            fill=fill,
+            status=(
+                self.order_status_value(final_row.status)
+                if final_row is not None
+                else "FILLED"
+            ),
+            reason=(
+                str(getattr(final_row, "status_reason", "") or "") or None
+                if final_row is not None
+                else None
+            ),
+        )
 
     async def place_lighter(
         self,
@@ -1161,6 +1339,10 @@ class Canary:
         }
 
     async def execute_maker(self, candidate: dict[str, Any]) -> None:
+        candidate = await self.revalidate_maker_candidate(candidate)
+        if candidate is None:
+            self.log("maker_revalidation_skipped", reason=self.last_rejection)
+            return
         coin = str(candidate["coin"])
         side = str(candidate["side"])
         extended_long = side == "buy"
@@ -1188,29 +1370,50 @@ class Canary:
             "leverage": self.leverage,
             "quantityRequested": float(quantity),
             "makerPrice": float(candidate["price"]),
+            "makerSourcePrice": float(candidate["sourcePrice"]),
+            "extendedBestBid": float(candidate["extendedBestBid"]),
+            "extendedBestAsk": float(candidate["extendedBestAsk"]),
+            "makerSafetyTicks": int(candidate["makerSafetyTicks"]),
+            "makerSafetyBps": float(candidate["makerSafetyBps"]),
         }
         self.trade_open = True
         self.write_status("maker_opening", activeTrade=trade)
         self.log("maker_submit", **trade)
+        submit_started_at = int(time.time() * 1000)
         order_id = await self.place_extended_maker(
             coin, quantity, float(candidate["price"]), ext_side
+        )
+        trade["entrySubmittedAt"] = submit_started_at
+        trade["entryAcceptedAt"] = int(time.time() * 1000)
+        trade["entrySubmitLatencyMs"] = (
+            trade["entryAcceptedAt"] - submit_started_at
         )
         trade["entryExtendedOrderId"] = order_id
         deadline_at = min(
             int(candidate["expiresAt"]),
             started_at + self.maker_order_ttl_ms,
         )
-        ext_fill = await self.wait_extended_maker_fill(
+        maker_result = await self.wait_extended_maker_fill(
             coin, order_id, deadline_at
         )
+        ext_fill = maker_result.fill
         if ext_fill is None:
             trade.update(
-                status="maker_expired_unfilled",
+                status=(
+                    "maker_post_only_rejected"
+                    if maker_result.reason == "POST_ONLY_FAILED"
+                    else "maker_unfilled"
+                ),
+                makerOrderStatus=maker_result.status,
+                makerOrderReason=maker_result.reason,
                 closedAt=int(time.time() * 1000),
                 netPnlUsd=0,
                 netPnlPct=0,
             )
             self.append_trade(trade)
+            self.next_maker_attempt_at = (
+                int(time.time() * 1000) + self.maker_retry_cooldown_ms
+            )
             self.trade_open = False
             self.write_status("armed", activeTrade=None, lastTrade=trade)
             self.log("maker_unfilled", **trade)
@@ -1743,6 +1946,26 @@ def self_test() -> None:
     assert MARKETS["BTC"] == 1
     assert len(MARKETS) == 9
     assert Decimal("1.234") > 0
+    assert round(maker_entry_edge_bps("buy", 100, 101), 8) == 100
+    assert round(maker_entry_edge_bps("sell", 101, 100), 8) == 100
+    assert safer_maker_price(
+        side="buy",
+        candidate_price=100.09,
+        best_bid=100,
+        best_ask=100.1,
+        tick=0.01,
+        safety_ticks=5,
+        safety_bps=2,
+    ) == 100.05
+    assert safer_maker_price(
+        side="sell",
+        candidate_price=100.01,
+        best_bid=100,
+        best_ask=100.1,
+        tick=0.01,
+        safety_ticks=5,
+        safety_bps=2,
+    ) == 100.05
     reproduced_loss = projected_net_usd(
         quantity=0.52,
         entry_buy=572.5,
