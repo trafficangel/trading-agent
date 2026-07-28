@@ -503,6 +503,18 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     primary: false,
   },
   {
+    id: 'lighter-binance',
+    buyVenue: 'lighter',
+    sellVenue: 'binance',
+    primary: false,
+  },
+  {
+    id: 'binance-lighter',
+    buyVenue: 'binance',
+    sellVenue: 'lighter',
+    primary: false,
+  },
+  {
     id: 'paradex-bybit',
     buyVenue: 'paradex',
     sellVenue: 'bybit',
