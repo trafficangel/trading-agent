@@ -247,6 +247,9 @@ type MakerShadow = {
     staleTrades?: number;
     quotes?: number;
     placementRejects?: number;
+    placementStaleRejects?: number;
+    placementCrossRejects?: number;
+    placementQueueRejects?: number;
     quoteExpirations?: number;
     queueFills?: number;
     hedgeTimeouts?: number;
@@ -1090,7 +1093,7 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Средний / худший цикл</small><b>${pctFromBps(makerGate?.meanNetBps)} / ${pctFromBps(makerGate?.minNetBps)}</b></div>
           <div><small>Maker fills / quotes</small><b>${Number(makerTelemetry?.queueFills ?? 0)} / ${Number(makerTelemetry?.quotes ?? 0)}</b></div>
           <div><small>Поток trades</small><b>${Number(makerTelemetry?.trades ?? 0).toLocaleString('ru-RU')}<small>stale отброшено: ${Number(makerTelemetry?.staleTrades ?? 0).toLocaleString('ru-RU')}</small></b></div>
-          <div><small>Отклонено / истекло</small><b>${Number(makerTelemetry?.placementRejects ?? 0)} / ${Number(makerTelemetry?.quoteExpirations ?? 0)}</b></div>
+          <div><small>Отклонено / истекло</small><b>${Number(makerTelemetry?.placementRejects ?? 0)} / ${Number(makerTelemetry?.quoteExpirations ?? 0)}<small>stale ${Number(makerTelemetry?.placementStaleRejects ?? 0)} · cross ${Number(makerTelemetry?.placementCrossRejects ?? 0)} · queue ${Number(makerTelemetry?.placementQueueRejects ?? 0)}</small></b></div>
           <div><small>Котировка</small><b>${makerQuoteLabel(makerShadow)}</b></div>
           <div><small>Открытая пара</small><b>${makerPairLabel(makerShadow)}</b></div>
           <div><small>Хедж</small><b>${makerShadow?.pendingHedge ? `${esc(makerShadow.pendingHedge.coin)} · ${makerShadow.pendingHedge.stage === 'entry' ? 'вход' : 'выход'} ожидает Lighter` : 'нет незахеджированной ноги'}</b></div>

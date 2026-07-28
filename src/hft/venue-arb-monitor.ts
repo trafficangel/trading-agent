@@ -322,6 +322,9 @@ type MakerTelemetry = {
   staleTrades: number;
   quotes: number;
   placementRejects: number;
+  placementStaleRejects: number;
+  placementCrossRejects: number;
+  placementQueueRejects: number;
   quoteExpirations: number;
   queueFills: number;
   hedgeTimeouts: number;
@@ -650,6 +653,9 @@ const makerTelemetry: MakerTelemetry = {
   staleTrades: 0,
   quotes: 0,
   placementRejects: 0,
+  placementStaleRejects: 0,
+  placementCrossRejects: 0,
+  placementQueueRejects: 0,
   quoteExpirations: 0,
   queueFills: 0,
   hedgeTimeouts: 0,
@@ -1512,6 +1518,7 @@ function activateMakerQuote(now: number): void {
   const extended = executableBook('extended', quote.coin);
   if (!rawExtended || !extended || !makerBooksFresh(now, extended)) {
     makerTelemetry.placementRejects++;
+    makerTelemetry.placementStaleRejects++;
     makerQuote = null;
     return;
   }
@@ -1527,6 +1534,7 @@ function activateMakerQuote(now: number): void {
   );
   if (wouldCross) {
     makerTelemetry.placementRejects++;
+    makerTelemetry.placementCrossRejects++;
     makerQuote = null;
     return;
   }
@@ -1543,6 +1551,7 @@ function activateMakerQuote(now: number): void {
     && quote.queue.queueAhead * quote.price > MAKER_MAX_QUEUE_USD
   ) {
     makerTelemetry.placementRejects++;
+    makerTelemetry.placementQueueRejects++;
     makerQuote = null;
     return;
   }
