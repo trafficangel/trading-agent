@@ -295,11 +295,17 @@ async function readLive(): Promise<{
 }
 
 function pctFromBps(value: unknown, signed = true): string {
+  if (value == null || value === '') return '—';
   const number = Number(value);
   if (!Number.isFinite(number)) return '—';
   const pct = number / 100;
   const sign = signed && pct > 0 ? '+' : pct < 0 ? '−' : '';
   return `${sign}${Math.abs(pct).toFixed(3)}%`;
+}
+
+function coinAndBps(coin: unknown, value: unknown): string {
+  if (value == null || !Number.isFinite(Number(value))) return '—';
+  return `${esc(coin)} · ${pctFromBps(value)}`;
 }
 
 function pct(value: unknown): string {
@@ -630,8 +636,8 @@ function scoutRouteRows(shadow: ExecutionShadow | undefined): string {
       <td>${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 50)}</td>
       <td class="${cls(gate?.passedPct)}">${Number(gate?.passed ?? 0)} · ${pct(gate?.passedPct)}</td>
       <td>${Number(telemetry?.eligibleWindows ?? 0)}</td>
-      <td>${esc(telemetry?.currentBestCoin)} · ${pctFromBps(telemetry?.currentBestNetBps)}</td>
-      <td>${esc(telemetry?.peakCoin)} · ${pctFromBps(telemetry?.peakOpeningNetBps)}</td>
+      <td>${coinAndBps(telemetry?.currentBestCoin, telemetry?.currentBestNetBps)}</td>
+      <td>${coinAndBps(telemetry?.peakCoin, telemetry?.peakOpeningNetBps)}</td>
       <td>${Number(telemetry?.freshQuotes ?? 0).toLocaleString('ru-RU')}</td>
       <td>${duration(route.measuredLatency?.entryMs)} / ${duration(route.measuredLatency?.exitMs)}</td>
       <td>${status}</td>
@@ -813,8 +819,8 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Edge подтверждён 3×</small><b>${Number(shadowGate?.entryEdgeConfirmed ?? 0)}</b></div>
           <div><small>Достигли exit guard</small><b>${Number(shadowGate?.reachedExitGuard ?? 0)}</b></div>
           <div><small>Квалифицированные окна</small><b>${Number(primaryShadow?.telemetry?.eligibleWindows ?? 0)}</b></div>
-          <div><small>Лучший net сейчас</small><b>${esc(primaryShadow?.telemetry?.currentBestCoin)} · ${pctFromBps(primaryShadow?.telemetry?.currentBestNetBps)}</b></div>
-          <div><small>Пик с запуска</small><b>${esc(primaryShadow?.telemetry?.peakCoin)} · ${pctFromBps(primaryShadow?.telemetry?.peakOpeningNetBps)}</b></div>
+          <div><small>Лучший net сейчас</small><b>${coinAndBps(primaryShadow?.telemetry?.currentBestCoin, primaryShadow?.telemetry?.currentBestNetBps)}</b></div>
+          <div><small>Пик с запуска</small><b>${coinAndBps(primaryShadow?.telemetry?.peakCoin, primaryShadow?.telemetry?.peakOpeningNetBps)}</b></div>
           <div><small>Свежих котировок проверено</small><b>${Number(primaryShadow?.telemetry?.freshQuotes ?? 0).toLocaleString('ru-RU')}</b></div>
           <div><small>Активные probes</small><b>${Number(primaryShadow?.active?.length ?? 0)}</b></div>
           <div><small>Модель entry / exit</small><b>${duration(primaryShadow?.measuredLatency?.entryMs)} / ${duration(primaryShadow?.measuredLatency?.exitMs)}</b></div>
