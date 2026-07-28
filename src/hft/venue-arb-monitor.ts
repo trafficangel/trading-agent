@@ -276,6 +276,7 @@ type MakerQuote = {
   activatedAt: number | null;
   expiresAt: number;
   projectedNetBps: number;
+  distanceBps: number;
   initialQuantity: number;
   firstFillAt: number | null;
   queue: MakerQueueState;
@@ -1552,20 +1553,24 @@ function makerPriceTick(book: BookState): number | null {
     : null;
 }
 
-function makerEntryQuoteLevel(
+function makerEntryQuoteLevels(
   rawExtended: BookState,
   side: MakerSide,
   lighterFill: number,
-): PriceLevel | null {
+): Array<{
+  price: number;
+  queueAhead: number;
+  distanceBps: number;
+}> {
   const bestBid = sortedLevels(rawExtended, 'bids', 1)[0]?.[0];
   const bestAsk = sortedLevels(rawExtended, 'asks', 1)[0]?.[0];
   const tick = makerPriceTick(rawExtended);
-  if (bestBid == null || bestAsk == null || tick == null) return null;
+  if (bestBid == null || bestAsk == null || tick == null) return [];
   const requiredRawBps = MAKER_ENTRY_EDGE_BPS + EXECUTION_BUFFER_BPS;
-  let quotePrice: number;
+  let syntheticPrice: number;
   if (side === 'buy') {
     const maximumEdgePrice = lighterFill / (1 + requiredRawBps / 10_000);
-    quotePrice = Math.max(
+    syntheticPrice = Math.max(
       bestBid,
       snapMakerPrice(
         Math.min(bestAsk - tick, maximumEdgePrice),
@@ -1573,10 +1578,9 @@ function makerEntryQuoteLevel(
         'floor',
       ),
     );
-    if (quotePrice >= bestAsk) return null;
   } else {
     const minimumEdgePrice = lighterFill * (1 + requiredRawBps / 10_000);
-    quotePrice = Math.min(
+    syntheticPrice = Math.min(
       bestAsk,
       snapMakerPrice(
         Math.max(bestBid + tick, minimumEdgePrice),
@@ -1584,17 +1588,30 @@ function makerEntryQuoteLevel(
         'ceil',
       ),
     );
-    if (quotePrice <= bestBid) return null;
   }
-  const projectedNetBps = makerEntryEdgeBps(side, quotePrice, lighterFill)
-    - EXECUTION_BUFFER_BPS;
-  if (projectedNetBps < MAKER_ENTRY_EDGE_BPS - 1e-8) return null;
   const sameSide = side === 'buy'
     ? rawExtended.bids
     : rawExtended.asks;
-  const queueAhead = sameSide.get(quotePrice) ?? 0;
-  if (queueAhead * quotePrice > MAKER_MAX_QUEUE_USD) return null;
-  return [quotePrice, queueAhead];
+  const displayed = sortedLevels(
+    rawExtended,
+    side === 'buy' ? 'bids' : 'asks',
+    20,
+  ).map(([price]) => price);
+  return [...new Set([syntheticPrice, ...displayed])]
+    .filter((price) => (
+      price > 0
+      && (side === 'buy' ? price < bestAsk : price > bestBid)
+      && makerEntryEdgeBps(side, price, lighterFill)
+        - EXECUTION_BUFFER_BPS >= MAKER_ENTRY_EDGE_BPS - 1e-8
+    ))
+    .flatMap((price) => {
+      const queueAhead = sameSide.get(price) ?? 0;
+      if (queueAhead * price > MAKER_MAX_QUEUE_USD) return [];
+      const distanceBps = side === 'buy'
+        ? Math.max(0, (bestBid / price - 1) * 10_000)
+        : Math.max(0, (price / bestAsk - 1) * 10_000);
+      return [{ price, queueAhead, distanceBps }];
+    });
 }
 
 function makerExitQuoteLevel(
@@ -1672,38 +1689,47 @@ function makerEntryQuoteCandidate(now: number): MakerQuote | null {
     for (const side of ['buy', 'sell'] as const) {
       const lighterFill = makerHedgePrice(side, lighter);
       if (lighterFill == null) continue;
-      const level = makerEntryQuoteLevel(rawExtended, side, lighterFill);
-      if (!level) continue;
-      const [price, queueAhead] = level;
-      if (!(price > 0) || queueAhead < 0) continue;
-      const projectedNetBps = makerEntryEdgeBps(side, price, lighterFill)
-        - EXECUTION_BUFFER_BPS;
-      if (projectedNetBps < MAKER_ENTRY_EDGE_BPS) continue;
-      const quantity = MAKER_NOTIONAL_USD / price;
-      candidates.push({
-        id: `MQ${now}-${market.coin}-entry-${side}`,
-        coin: market.coin,
-        stage: 'entry',
+      for (const level of makerEntryQuoteLevels(
+        rawExtended,
         side,
-        price,
-        createdAt: now,
-        activeAt: now + MAKER_QUOTE_LATENCY_MS,
-        activatedAt: null,
-        expiresAt: now + MAKER_QUOTE_LATENCY_MS + MAKER_QUOTE_TTL_MS,
-        projectedNetBps,
-        initialQuantity: quantity,
-        firstFillAt: null,
-        queue: {
-          queueAhead,
-          remaining: quantity,
-          filled: false,
-        },
-      });
+        lighterFill,
+      )) {
+        if (!(level.price > 0) || level.queueAhead < 0) continue;
+        const projectedNetBps = makerEntryEdgeBps(
+          side,
+          level.price,
+          lighterFill,
+        ) - EXECUTION_BUFFER_BPS;
+        if (projectedNetBps < MAKER_ENTRY_EDGE_BPS) continue;
+        const quantity = MAKER_NOTIONAL_USD / level.price;
+        candidates.push({
+          id: `MQ${now}-${market.coin}-entry-${side}-${level.price}`,
+          coin: market.coin,
+          stage: 'entry',
+          side,
+          price: level.price,
+          createdAt: now,
+          activeAt: now + MAKER_QUOTE_LATENCY_MS,
+          activatedAt: null,
+          expiresAt: now + MAKER_QUOTE_LATENCY_MS + MAKER_QUOTE_TTL_MS,
+          projectedNetBps,
+          distanceBps: level.distanceBps,
+          initialQuantity: quantity,
+          firstFillAt: null,
+          queue: {
+            queueAhead: level.queueAhead,
+            remaining: quantity,
+            filled: false,
+          },
+        });
+      }
     }
   }
   const fillScore = (quote: MakerQuote): number => (
     quote.projectedNetBps / (
-      1 + quote.queue.queueAhead * quote.price / MAKER_NOTIONAL_USD
+      1
+      + quote.queue.queueAhead * quote.price / MAKER_NOTIONAL_USD
+      + quote.distanceBps * 2
     )
   );
   return candidates.sort((a, b) => fillScore(b) - fillScore(a))[0] ?? null;
@@ -1746,6 +1772,7 @@ function makerQuoteCandidate(now: number): MakerQuote | null {
       activatedAt: null,
       expiresAt: now + MAKER_QUOTE_LATENCY_MS + MAKER_QUOTE_TTL_MS,
       projectedNetBps,
+      distanceBps: 0,
       initialQuantity: makerPair.quantity,
       firstFillAt: null,
       queue: {
