@@ -1,0 +1,25 @@
+[Unit]
+Description=Robot Claude read-only DEX/CEX perpetual arbitrage radar
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/trading-agent
+EnvironmentFile=-/home/trader/apps/trading-agent/.env
+Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/trading-agent/data/venue-arb
+ExecStart=/usr/bin/node /home/trader/apps/trading-agent/dist/hft/venue-arb-monitor.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/home/trader/apps/trading-agent/data/venue-arb
+MemoryMax=256M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

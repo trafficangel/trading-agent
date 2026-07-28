@@ -41,6 +41,11 @@ import {
   lighterLuxalgoLabRoute,
   LIGHTER_LUXALGO_CSS,
 } from './lighter-luxalgo-lab.js';
+import {
+  venueArbHero,
+  venueArbLabRoute,
+  VENUE_ARB_CSS,
+} from './venue-arb-lab.js';
 
 const trackOf = (s: LabStrategy): string => s.track ?? LAB_TRACK;
 
@@ -179,7 +184,8 @@ async function renderLabList(lang: Lang): Promise<string> {
       <h1 class="title">${t(lang, 'Лаборатория', 'The Lab')}</h1>
       <p class="subtitle">${t(lang, 'Собственные стратегии на форвард-тесте. Движок бэктеста == движок бумаги — никакого расхождения.', 'In-house strategies under forward-testing. The backtest engine == the paper engine — zero divergence.')}</p>
     </div>
-    <style>${LAB_CSS}${CROSSVENUE_CSS}${LIGHTER_LUXALGO_CSS}</style>
+    <style>${LAB_CSS}${CROSSVENUE_CSS}${LIGHTER_LUXALGO_CSS}${VENUE_ARB_CSS}</style>
+    ${await venueArbHero(lang)}
     ${await lighterLuxalgoHero(lang)}
     ${await crossvenueHero(lang)}
     ${labBanner(lang)}
@@ -364,6 +370,7 @@ function renderLabPortfolio(): string {
 export async function labRoute(app: FastifyInstance): Promise<void> {
   await crossvenueLabRoute(app);
   await lighterLuxalgoLabRoute(app);
+  await venueArbLabRoute(app);
   app.get('/lab/portfolio', async (_req, reply) => {
     // The sizing plan is only meaningful with lab strategies present. While the
     // paper book is cleared, send visitors back to the lab index.

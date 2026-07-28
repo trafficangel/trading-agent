@@ -27,6 +27,7 @@
     "hft:tardis:convert": "tsx scripts/convert-tardis-hft.ts",
     "hft:post-shock": "tsx src/hft/post-shock-analyzer.ts",
     "hft:cascade": "tsx src/hft/cascade-leadlag-analyzer.ts",
+    "hft:venue-arb": "tsx src/hft/venue-arb-monitor.ts",
     "wick:recovery": "tsx scripts/wick-fade-recovery.ts",
     "audit": "tsx scripts/audit-sl-distribution.ts",
     "backtest": "tsx scripts/backtest-custom.ts",
