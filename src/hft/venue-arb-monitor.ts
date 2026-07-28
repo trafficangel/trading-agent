@@ -351,6 +351,12 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     primary: false,
   },
   {
+    id: 'bybit-binance',
+    buyVenue: 'bybit',
+    sellVenue: 'binance',
+    primary: false,
+  },
+  {
     id: 'paradex-bybit',
     buyVenue: 'paradex',
     sellVenue: 'bybit',
@@ -1514,6 +1520,10 @@ function summary(rows: Opportunity[]): Record<string, unknown> {
   const strictStarts = closed.filter(
     (row) => row.startNetBps1000 >= SHADOW_ENTRY_NET_BPS,
   );
+  const strictObserved1000 = strictStarts.flatMap((row) => {
+    const netBps1000 = Number(row.horizons['1000']?.netBps1000);
+    return Number.isFinite(netBps1000) ? [netBps1000] : [];
+  });
   const strictRetained1000 = strictStarts.filter(
     (row) => Number(row.horizons['1000']?.netBps1000) >= SHADOW_ENTRY_NET_BPS,
   );
@@ -1537,10 +1547,17 @@ function summary(rows: Opportunity[]): Record<string, unknown> {
     viable: viable.length,
     viablePct: closed.length ? viable.length / closed.length * 100 : null,
     strictStarts: strictStarts.length,
+    strictObserved1000: strictObserved1000.length,
+    strictPositive1000: strictObserved1000.filter((value) => value > 0).length,
     strictRetained1000: strictRetained1000.length,
     strictRetained1000Pct: strictStarts.length
       ? strictRetained1000.length / strictStarts.length * 100
       : null,
+    strictMean1000NetBps: strictObserved1000.length
+      ? strictObserved1000.reduce((sum, value) => sum + value, 0) / strictObserved1000.length
+      : null,
+    strictMedian1000NetBps: percentile(strictObserved1000, 0.5),
+    strictMin1000NetBps: percentile(strictObserved1000, 0),
     medianPeakRawBps: percentile(closed.map((row) => row.peakRawBps1000), 0.5),
     p95PeakRawBps: percentile(closed.map((row) => row.peakRawBps1000), 0.95),
     medianPeakNetBps: percentile(closed.map((row) => row.peakNetBps1000), 0.5),

@@ -24,8 +24,13 @@ type Summary = {
   viable?: number;
   viablePct?: number | null;
   strictStarts?: number;
+  strictObserved1000?: number;
+  strictPositive1000?: number;
   strictRetained1000?: number;
   strictRetained1000Pct?: number | null;
+  strictMean1000NetBps?: number | null;
+  strictMedian1000NetBps?: number | null;
+  strictMin1000NetBps?: number | null;
   medianPeakRawBps?: number | null;
   p95PeakRawBps?: number | null;
   medianPeakNetBps?: number | null;
@@ -369,7 +374,11 @@ function capitalRecommendation(
     return '<p class="va-wait"><b>КАПИТАЛ: ПОКА НЕ ВНОСИТЬ.</b> Ни один маршрут ещё не имеет даже предварительной выборки с net ≥ +0.10%.</p>';
   }
   const gate = leader.route.readiness;
-  return `<p class="va-wait"><b>КАПИТАЛ: ПОКА НЕ ВНОСИТЬ.</b> Предварительный кандидат — <b>${esc(shadowRouteLabel(leader.route))}</b>: исторически ${Number(leader.summary.strictRetained1000 ?? 0)} из ${Number(leader.summary.strictStarts ?? 0)} окон сохранили net ≥ +0.10% через 1 секунду, но строгий forward сейчас ${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 50)}. После PASS здесь появятся две площадки, а точный размер пополнения будет рассчитан по доступному плечу и запасу маржи.</p>`;
+  const dexCexLeader = ranked.find(({ route }) => shadowRouteClass(route) === 'DEX/CEX');
+  const dexCexNote = dexCexLeader && dexCexLeader.route.id !== leader.route.id
+    ? ` Лучший DEX/CEX-кандидат — <b>${esc(shadowRouteLabel(dexCexLeader.route))}</b>: ${Number(dexCexLeader.summary.strictRetained1000 ?? 0)} / ${Number(dexCexLeader.summary.strictStarts ?? 0)}.`
+    : '';
+  return `<p class="va-wait"><b>КАПИТАЛ: ПОКА НЕ ВНОСИТЬ.</b> Предварительный лидер по числу устойчивых окон — <b>${esc(shadowRouteLabel(leader.route))}</b> (${esc(shadowRouteClass(leader.route))}): исторически ${Number(leader.summary.strictRetained1000 ?? 0)} из ${Number(leader.summary.strictStarts ?? 0)} окон сохранили net ≥ +0.10% через 1 секунду.${dexCexNote} Строгий forward лидера сейчас ${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 50)}. После PASS здесь появятся две площадки, а точный размер пополнения будет рассчитан по доступному плечу и запасу маржи.</p>`;
 }
 
 function pct(value: unknown): string {
@@ -625,6 +634,16 @@ function shadowRouteLabel(
     : '—';
 }
 
+function shadowRouteClass(
+  row: Pick<ExecutionShadowRoute, 'buyVenue' | 'sellVenue'>,
+): string {
+  if (!row.buyVenue || !row.sellVenue) return '—';
+  const venueClass = (venue: Venue) => (
+    venue === 'binance' || venue === 'bybit' ? 'CEX' : 'DEX'
+  );
+  return `${venueClass(row.buyVenue)}/${venueClass(row.sellVenue)}`;
+}
+
 function executionShadowRows(
   shadow: ExecutionShadow | undefined,
   routeId = 'extended-lighter',
@@ -696,7 +715,7 @@ function scoutRouteRows(shadow: ExecutionShadow | undefined): string {
         ? '<b class="pos">В РАБОТЕ</b>'
         : 'СКАНИРУЕТ';
     return `<tr>
-      <td><b>${esc(shadowRouteLabel(route))}</b></td>
+      <td><b>${esc(shadowRouteLabel(route))}</b><small>${esc(shadowRouteClass(route))}</small></td>
       <td>${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 50)}</td>
       <td class="${cls(gate?.passedPct)}">${Number(gate?.passed ?? 0)} · ${pct(gate?.passedPct)}</td>
       <td>${Number(telemetry?.eligibleWindows ?? 0)}</td>
@@ -854,7 +873,7 @@ async function render(lang: Lang): Promise<string> {
     <div class="va-wrap">
       <a class="va-back" href="/lab">← Лаборатория</a>
       <div class="va-head"><div>
-        <span class="va-badge">READ-ONLY · DEX ↔ CEX · TRADEABLE $1,000 VWAP</span>
+        <span class="va-badge">READ-ONLY · PERP ARBITRAGE · TRADEABLE $1,000 VWAP</span>
         <h1>Perp Arbitrage Radar</h1>
         <p>Фиксирует только расхождения, исполнимые на $1,000. Net-окно начинается при остаточном edge выше ${pctFromBps(triggerBps)} после полного цикла из четырёх taker-ордеров, VWAP и защитного буфера, и заканчивается при net ≤ 0%.</p>
       </div><div class="va-engine ${isLive ? 'live' : ''}"><i></i>${isLive ? 'РАБОТАЕТ' : 'НЕТ СВЕЖИХ ДАННЫХ'}</div></div>
@@ -901,7 +920,7 @@ async function render(lang: Lang): Promise<string> {
       </section>
 
       <section class="va-panel va-shadow-panel">
-        <div class="va-panel-head"><div><span class="va-badge">DEX/CEX SCOUT · SHADOW ONLY</span><h2>Сравнение альтернативных маршрутов</h2></div>
+        <div class="va-panel-head"><div><span class="va-badge">ARB SCOUT · SHADOW ONLY</span><h2>Сравнение альтернативных маршрутов</h2></div>
           <span>ЕДИНЫЙ GATE · БЕЗ РЕАЛЬНЫХ ОРДЕРОВ</span>
         </div>
         <p>Все направления проверяются одинаково: $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)}, три свежих подтверждения, все комиссии, funding, execution buffer и консервативная latency. Маршрут не получает преимущества за счёт ослабления фильтра.</p>
