@@ -407,8 +407,33 @@ class Canary:
         slippage: float,
     ) -> int:
         assert self.extended is not None
+        order = self.create_extended_order(
+            coin,
+            quantity,
+            reference,
+            side,
+            reduce_only=reduce_only,
+            slippage=slippage,
+        )
+        response = await self.extended.orders.place_order(order=order)
+        if response.error or response.data is None:
+            message = response.error.message if response.error else "empty response"
+            raise RuntimeError(f"Extended order rejected: {message}")
+        return int(response.data.id)
+
+    def create_extended_order(
+        self,
+        coin: str,
+        quantity: Decimal,
+        reference: float,
+        side: OrderSide,
+        *,
+        reduce_only: bool,
+        slippage: float,
+    ) -> Any:
+        assert self.extended is not None
         market = self.extended_markets[f"{coin}-USD"]
-        order = create_order_object(
+        return create_order_object(
             account=self.extended.stark_account,
             order_type=OrderType.MARKET,
             starknet_domain=self.extended.config.signing.starknet_domain,
@@ -421,11 +446,6 @@ class Canary:
             post_only=False,
             taker_fee=Decimal("0.00025"),
         )
-        response = await self.extended.orders.place_order(order=order)
-        if response.error or response.data is None:
-            message = response.error.message if response.error else "empty response"
-            raise RuntimeError(f"Extended order rejected: {message}")
-        return int(response.data.id)
 
     async def place_lighter(
         self,
@@ -830,6 +850,23 @@ class Canary:
         if self.enabled:
             await self.arm_leverage()
 
+    async def sign_test(self) -> None:
+        await self.preflight()
+        reference = await self.extended_reference("BTC", OrderSide.BUY)
+        quantity = self.common_quantity("BTC", reference)
+        order = self.create_extended_order(
+            "BTC",
+            quantity,
+            reference,
+            OrderSide.BUY,
+            reduce_only=False,
+            slippage=self.entry_slippage,
+        )
+        if not order.settlement or not order.settlement.signature:
+            raise RuntimeError("Extended signature was not created")
+        self.write_status("sign_test_ready")
+        self.log("sign_test_ready", market="BTC-USD", quantity=float(quantity))
+
     async def run(self) -> None:
         self.acquire_lock()
         await self.preflight()
@@ -862,6 +899,7 @@ class Canary:
     async def close(self) -> None:
         if self.extended is not None:
             await self.extended.close()
+        await self.lighter_signer.close()
         await self.lighter_api.close()
 
 
@@ -872,13 +910,17 @@ def self_test() -> None:
     print("venue-arb-live self-test ok")
 
 
-async def main(force_dry_run: bool) -> None:
+async def main(force_dry_run: bool, sign_test: bool) -> None:
     runner = Canary(force_dry_run=force_dry_run)
     loop = asyncio.get_running_loop()
     for name in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(name, setattr, runner, "running", False)
     try:
-        await runner.run()
+        if sign_test:
+            runner.acquire_lock()
+            await runner.sign_test()
+        else:
+            await runner.run()
     except Exception as error:
         runner.log("fatal", error=str(error))
         with contextlib.suppress(Exception):
@@ -907,9 +949,10 @@ async def main(force_dry_run: bool) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--sign-test", action="store_true")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
         self_test()
     else:
-        asyncio.run(main(args.dry_run))
+        asyncio.run(main(args.dry_run, args.sign_test))
