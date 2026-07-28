@@ -117,4 +117,33 @@ describe('GenericMakerShadow', () => {
     expect(status.telemetry.queueFills).toBe(0);
     expect(status.pair).toBeNull();
   });
+
+  it('selects a deeper small-queue level instead of a congested best quote', () => {
+    const engine = new GenericMakerShadow(config);
+    const snapshot: MakerShadowMarket = {
+      coin: 'BNB',
+      maker: {
+        bids: new Map([[99.9, 300]]),
+        asks: new Map([
+          [100.1, 300],
+          [100.2, 1],
+        ]),
+        exchangeAt: 3_000,
+        receivedAt: 3_000,
+      },
+      hedge: {
+        sellVwap: 99,
+        buyVwap: 100,
+        exchangeAt: 3_000,
+        receivedAt: 3_000,
+      },
+    };
+    engine.evaluate(3_000, [snapshot]);
+    const status = engine.status() as {
+      quote?: { side?: string; price?: number; distanceBps?: number } | null;
+    };
+    expect(status.quote?.side).toBe('sell');
+    expect(status.quote?.price).toBe(100.2);
+    expect(status.quote?.distanceBps).toBeGreaterThan(0);
+  });
 });

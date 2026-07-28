@@ -49,6 +49,7 @@ export type GenericMakerQuote = {
   activatedAt: number | null;
   expiresAt: number;
   projectedNetBps: number;
+  distanceBps: number;
   initialQuantity: number;
   firstFillAt: number | null;
   queue: MakerQueueState;
@@ -299,42 +300,59 @@ export class GenericMakerShadow {
       - this.config.hedgeTakerFeeBps;
   }
 
-  private entryLevel(
+  private entryLevels(
     maker: MakerShadowRawBook,
     side: MakerSide,
     hedgeFill: number,
-  ): [number, number] | null {
+  ): Array<{
+    price: number;
+    queueAhead: number;
+    distanceBps: number;
+  }> {
     const bestBid = sortedLevels(maker, 'bids', 1)[0]?.[0];
     const bestAsk = sortedLevels(maker, 'asks', 1)[0]?.[0];
     const tick = priceTick(maker);
-    if (bestBid == null || bestAsk == null || tick == null) return null;
+    if (bestBid == null || bestAsk == null || tick == null) return [];
     const requiredRawBps = this.config.entryEdgeBps
       + this.config.executionBufferBps
       + this.config.makerFeeBps
       + this.config.hedgeTakerFeeBps;
-    let price: number;
+    let syntheticPrice: number;
     if (side === 'buy') {
       const maximum = hedgeFill / (1 + requiredRawBps / 10_000);
-      price = Math.max(
+      syntheticPrice = Math.max(
         bestBid,
         snapMakerPrice(Math.min(bestAsk - tick, maximum), tick, 'floor'),
       );
-      if (price >= bestAsk) return null;
     } else {
       const minimum = hedgeFill * (1 + requiredRawBps / 10_000);
-      price = Math.min(
+      syntheticPrice = Math.min(
         bestAsk,
         snapMakerPrice(Math.max(bestBid + tick, minimum), tick, 'ceil'),
       );
-      if (price <= bestBid) return null;
     }
-    if (
-      this.entryProjection(side, price, hedgeFill)
-      < this.config.entryEdgeBps - 1e-8
-    ) return null;
-    const queueAhead = (side === 'buy' ? maker.bids : maker.asks).get(price) ?? 0;
-    if (queueAhead * price > this.config.maxQueueUsd) return null;
-    return [price, queueAhead];
+    const displayed = sortedLevels(
+      maker,
+      side === 'buy' ? 'bids' : 'asks',
+      20,
+    ).map(([price]) => price);
+    const prices = [...new Set([syntheticPrice, ...displayed])]
+      .filter((price) => (
+        price > 0
+        && (side === 'buy' ? price < bestAsk : price > bestBid)
+        && this.entryProjection(side, price, hedgeFill)
+          >= this.config.entryEdgeBps - 1e-8
+      ));
+    return prices.flatMap((price) => {
+      const queueAhead = (
+        side === 'buy' ? maker.bids : maker.asks
+      ).get(price) ?? 0;
+      if (queueAhead * price > this.config.maxQueueUsd) return [];
+      const distanceBps = side === 'buy'
+        ? Math.max(0, (bestBid / price - 1) * 10_000)
+        : Math.max(0, (price / bestAsk - 1) * 10_000);
+      return [{ price, queueAhead, distanceBps }];
+    });
   }
 
   private closeProjection(
@@ -394,39 +412,47 @@ export class GenericMakerShadow {
             this.telemetry.bestProjectedCoin = market.coin;
           }
         }
-        const level = this.entryLevel(market.maker, side, hedgeFill);
-        if (!level) continue;
-        const [price, queueAhead] = level;
-        const projectedNetBps = this.entryProjection(side, price, hedgeFill);
-        if (
-          this.telemetry.bestProjectedEntryBps == null
-          || projectedNetBps > this.telemetry.bestProjectedEntryBps
-        ) {
-          this.telemetry.bestProjectedEntryBps = projectedNetBps;
-          this.telemetry.bestProjectedCoin = market.coin;
-        }
-        const quantity = this.config.notionalUsd / price;
-        candidates.push({
-          id: `GMQ${now}-${market.coin}-entry-${side}`,
-          coin: market.coin,
-          stage: 'entry',
+        for (const level of this.entryLevels(
+          market.maker,
           side,
-          price,
-          createdAt: now,
-          activeAt: now + this.config.quoteLatencyMs,
-          activatedAt: null,
-          expiresAt: now + this.config.quoteLatencyMs + this.config.quoteTtlMs,
-          projectedNetBps,
-          initialQuantity: quantity,
-          firstFillAt: null,
-          queue: { queueAhead, remaining: quantity, filled: false },
-        });
+          hedgeFill,
+        )) {
+          const projectedNetBps = this.entryProjection(
+            side,
+            level.price,
+            hedgeFill,
+          );
+          const quantity = this.config.notionalUsd / level.price;
+          candidates.push({
+            id: `GMQ${now}-${market.coin}-entry-${side}-${level.price}`,
+            coin: market.coin,
+            stage: 'entry',
+            side,
+            price: level.price,
+            createdAt: now,
+            activeAt: now + this.config.quoteLatencyMs,
+            activatedAt: null,
+            expiresAt: now + this.config.quoteLatencyMs
+              + this.config.quoteTtlMs,
+            projectedNetBps,
+            distanceBps: level.distanceBps,
+            initialQuantity: quantity,
+            firstFillAt: null,
+            queue: {
+              queueAhead: level.queueAhead,
+              remaining: quantity,
+              filled: false,
+            },
+          });
+        }
       }
     }
     const score = (candidate: GenericMakerQuote): number => (
       candidate.projectedNetBps / (
-        1 + candidate.queue.queueAhead * candidate.price
+        1
+        + candidate.queue.queueAhead * candidate.price
           / this.config.notionalUsd
+        + candidate.distanceBps * 2
       )
     );
     return candidates.sort((a, b) => score(b) - score(a))[0] ?? null;
@@ -465,6 +491,7 @@ export class GenericMakerShadow {
       activatedAt: null,
       expiresAt: now + this.config.quoteLatencyMs + this.config.quoteTtlMs,
       projectedNetBps,
+      distanceBps: 0,
       initialQuantity: pair.quantity,
       firstFillAt: null,
       queue: { queueAhead, remaining: pair.quantity, filled: false },
