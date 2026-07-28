@@ -160,6 +160,18 @@ type ShadowRouteConfig = {
   primary: boolean;
 };
 
+type ShadowRouteTelemetry = {
+  freshQuotes: number;
+  staleQuotes: number;
+  eligibleWindows: number;
+  lastSignalAt: number | null;
+  lastEvaluatedAt: number | null;
+  currentBestNetBps: number | null;
+  currentBestCoin: string | null;
+  peakOpeningNetBps: number | null;
+  peakCoin: string | null;
+};
+
 type ShadowProbe = {
   id: string;
   opportunityId: string;
@@ -329,6 +341,19 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
   },
 ];
 const shadowRouteById = new Map(SHADOW_ROUTES.map((route) => [route.id, route]));
+const shadowRouteTelemetry = new Map<string, ShadowRouteTelemetry>(
+  SHADOW_ROUTES.map((route) => [route.id, {
+    freshQuotes: 0,
+    staleQuotes: 0,
+    eligibleWindows: 0,
+    lastSignalAt: null,
+    lastEvaluatedAt: null,
+    currentBestNetBps: null,
+    currentBestCoin: null,
+    peakOpeningNetBps: null,
+    peakCoin: null,
+  }]),
+);
 
 const books = new Map<string, BookState>();
 const executableBooks = new Map<string, ExecutableBook>();
@@ -582,10 +607,31 @@ function completeShadow(
 
 function evaluateShadow(now: number): void {
   for (const route of SHADOW_ROUTES) {
+    const telemetry = shadowRouteTelemetry.get(route.id)!;
+    let currentBestNetBps: number | null = null;
+    let currentBestCoin: string | null = null;
     for (const market of MARKETS) {
       const quote = shadowQuote(now, market.coin, route);
       const latchKey = `${route.id}:${market.coin}`;
-      if (!quote) continue;
+      if (!quote) {
+        telemetry.staleQuotes++;
+        continue;
+      }
+      telemetry.freshQuotes++;
+      if (
+        currentBestNetBps == null
+        || quote.openingNetBps > currentBestNetBps
+      ) {
+        currentBestNetBps = quote.openingNetBps;
+        currentBestCoin = market.coin;
+      }
+      if (
+        telemetry.peakOpeningNetBps == null
+        || quote.openingNetBps > telemetry.peakOpeningNetBps
+      ) {
+        telemetry.peakOpeningNetBps = quote.openingNetBps;
+        telemetry.peakCoin = market.coin;
+      }
       if (quote.openingNetBps < SHADOW_ENTRY_NET_BPS) {
         shadowLatched.delete(latchKey);
         continue;
@@ -622,7 +668,12 @@ function evaluateShadow(now: number): void {
         peakProjectedNetBps: null,
       });
       shadowLatched.add(latchKey);
+      telemetry.eligibleWindows++;
+      telemetry.lastSignalAt = now;
     }
+    telemetry.lastEvaluatedAt = now;
+    telemetry.currentBestNetBps = currentBestNetBps;
+    telemetry.currentBestCoin = currentBestCoin;
   }
 
   for (const probe of [...shadowProbes.values()]) {
@@ -1400,6 +1451,7 @@ function executionShadowStatus(): Record<string, unknown> {
       buyVenue: route.buyVenue,
       sellVenue: route.sellVenue,
       primary: route.primary,
+      telemetry: shadowRouteTelemetry.get(route.id),
       measuredLatency: shadowLatencyProfile(route),
       readiness: shadowReadiness(
         rows,
@@ -1472,6 +1524,7 @@ function writeStatus(): void {
   atomicJson(SHADOW_ACTIVE_PATH, {
     probes: [...shadowProbes.values()],
     latched: [...shadowLatched],
+    telemetry: Object.fromEntries(shadowRouteTelemetry),
   });
 }
 
@@ -1559,6 +1612,7 @@ function loadShadowState(): void {
     const checkpoint = JSON.parse(readFileSync(SHADOW_ACTIVE_PATH, 'utf8')) as {
       probes?: ShadowProbe[];
       latched?: string[];
+      telemetry?: Record<string, ShadowRouteTelemetry>;
     } | ShadowProbe[];
     const rows = Array.isArray(checkpoint) ? checkpoint : checkpoint.probes ?? [];
     for (const row of rows) {
@@ -1567,6 +1621,11 @@ function loadShadowState(): void {
     }
     const latched = Array.isArray(checkpoint) ? [] : checkpoint.latched ?? [];
     for (const key of latched) shadowLatched.add(key);
+    const telemetry = Array.isArray(checkpoint) ? {} : checkpoint.telemetry ?? {};
+    for (const [routeId, row] of Object.entries(telemetry)) {
+      if (!shadowRouteTelemetry.has(routeId) || !row) continue;
+      shadowRouteTelemetry.set(routeId, row);
+    }
   } catch (error) {
     console.warn('venue-arb shadow active load', (error as Error).message);
     shadowProbes.clear();

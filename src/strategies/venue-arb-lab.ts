@@ -131,6 +131,17 @@ type ExecutionShadowRoute = {
   buyVenue?: Venue;
   sellVenue?: Venue;
   primary?: boolean;
+  telemetry?: {
+    freshQuotes?: number;
+    staleQuotes?: number;
+    eligibleWindows?: number;
+    lastSignalAt?: number | null;
+    lastEvaluatedAt?: number | null;
+    currentBestNetBps?: number | null;
+    currentBestCoin?: string | null;
+    peakOpeningNetBps?: number | null;
+    peakCoin?: string | null;
+  };
   measuredLatency?: {
     entryMs?: number;
     exitMs?: number;
@@ -697,7 +708,9 @@ async function render(lang: Lang): Promise<string> {
     .filter((row) => Number(currentNet1000Bps(row)) > triggerBps);
   const survival250 = summary.survival?.['250'];
   const executionShadow = status?.executionShadow;
-  const shadowGate = executionShadow?.readiness;
+  const primaryShadow = executionShadow?.routes?.['extended-lighter']
+    ?? executionShadow;
+  const shadowGate = primaryShadow?.readiness;
   const alternativeShadow = executionShadow?.routes?.['bybit-paradex'];
   const alternativeGate = alternativeShadow?.readiness;
   const shadowReasons = Object.entries(shadowGate?.reasons ?? {})
@@ -743,8 +756,12 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Полный PASS</small><b class="${Number(shadowGate?.passedPct ?? 0) >= Number(shadowGate?.requiredPassPct ?? 90) ? 'pos' : ''}">${Number(shadowGate?.passed ?? 0)} · ${pct(shadowGate?.passedPct)}</b></div>
           <div><small>Edge подтверждён 3×</small><b>${Number(shadowGate?.entryEdgeConfirmed ?? 0)}</b></div>
           <div><small>Достигли exit guard</small><b>${Number(shadowGate?.reachedExitGuard ?? 0)}</b></div>
-          <div><small>Активные probes</small><b>${Number(executionShadow?.active?.length ?? 0)}</b></div>
-          <div><small>Модель entry / exit</small><b>${duration(executionShadow?.measuredLatency?.entryMs)} / ${duration(executionShadow?.measuredLatency?.exitMs)}</b></div>
+          <div><small>Квалифицированные окна</small><b>${Number(primaryShadow?.telemetry?.eligibleWindows ?? 0)}</b></div>
+          <div><small>Лучший net сейчас</small><b>${esc(primaryShadow?.telemetry?.currentBestCoin)} · ${pctFromBps(primaryShadow?.telemetry?.currentBestNetBps)}</b></div>
+          <div><small>Пик с запуска</small><b>${esc(primaryShadow?.telemetry?.peakCoin)} · ${pctFromBps(primaryShadow?.telemetry?.peakOpeningNetBps)}</b></div>
+          <div><small>Свежих котировок проверено</small><b>${Number(primaryShadow?.telemetry?.freshQuotes ?? 0).toLocaleString('ru-RU')}</b></div>
+          <div><small>Активные probes</small><b>${Number(primaryShadow?.active?.length ?? 0)}</b></div>
+          <div><small>Модель entry / exit</small><b>${duration(primaryShadow?.measuredLatency?.entryMs)} / ${duration(primaryShadow?.measuredLatency?.exitMs)}</b></div>
           <div><small>Порог входа / выхода</small><b>${pctFromBps(executionShadow?.config?.entryNetBps)} / ${pctFromBps(executionShadow?.config?.exitNetBps)}</b></div>
         </div>
         <p>Каждый probe начинается только при исполнимом net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)} и требует ${Number(executionShadow?.config?.entryConfirmations ?? 3)} независимых свежих подтверждения в течение измеренной задержки входа. Затем фиксируется $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, вычитаются четыре taker-комиссии, ${pctFromBps(executionShadow?.config?.executionBufferBps, false)} execution-буфера и funding ${pctFromBps(executionShadow?.config?.fundingBpsPerHour, false)}/час. Выход допускается после ${Number(executionShadow?.config?.exitConfirmations ?? 3)} свежих снимков с реальным модельным PnL ≥ ${pctFromBps(executionShadow?.config?.exitNetBps)}, затем применяется измеренная exit latency. Gate: минимум ${Number(shadowGate?.requiredSamples ?? 50)} probes и PASS ≥ ${pct(shadowGate?.requiredPassPct)}.</p>
@@ -765,6 +782,10 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Полный PASS</small><b class="${Number(alternativeGate?.passedPct ?? 0) >= Number(alternativeGate?.requiredPassPct ?? 90) ? 'pos' : ''}">${Number(alternativeGate?.passed ?? 0)} · ${pct(alternativeGate?.passedPct)}</b></div>
           <div><small>Edge подтверждён 3×</small><b>${Number(alternativeGate?.entryEdgeConfirmed ?? 0)}</b></div>
           <div><small>Достигли exit guard</small><b>${Number(alternativeGate?.reachedExitGuard ?? 0)}</b></div>
+          <div><small>Квалифицированные окна</small><b>${Number(alternativeShadow?.telemetry?.eligibleWindows ?? 0)}</b></div>
+          <div><small>Лучший net сейчас</small><b>${esc(alternativeShadow?.telemetry?.currentBestCoin)} · ${pctFromBps(alternativeShadow?.telemetry?.currentBestNetBps)}</b></div>
+          <div><small>Пик с запуска</small><b>${esc(alternativeShadow?.telemetry?.peakCoin)} · ${pctFromBps(alternativeShadow?.telemetry?.peakOpeningNetBps)}</b></div>
+          <div><small>Свежих котировок проверено</small><b>${Number(alternativeShadow?.telemetry?.freshQuotes ?? 0).toLocaleString('ru-RU')}</b></div>
           <div><small>Активные probes</small><b>${Number(alternativeShadow?.active?.length ?? 0)}</b></div>
           <div><small>Консервативная entry / exit</small><b>${duration(alternativeShadow?.measuredLatency?.entryMs)} / ${duration(alternativeShadow?.measuredLatency?.exitMs)}</b></div>
         </div>
