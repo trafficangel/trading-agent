@@ -337,6 +337,7 @@ const LIVE_TRADES_PATH = resolve(DATA_DIR, 'live-trades.json');
 const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution-v4.ndjson');
 const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active-v4.json');
 const MAKER_RESULTS_PATH = resolve(DATA_DIR, 'maker-shadow-v1.ndjson');
+const MAKER_ACTIVE_PATH = resolve(DATA_DIR, 'maker-active-v1.json');
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 250);
 const NET_TRIGGER_BPS = finiteEnv('VENUE_ARB_NET_TRIGGER_BPS', 3);
@@ -1086,6 +1087,15 @@ function appendMakerResult(result: MakerResult): void {
   if (makerResults.length > 5_000) makerResults = makerResults.slice(-5_000);
 }
 
+function writeMakerActive(): void {
+  atomicJson(MAKER_ACTIVE_PATH, {
+    pair: makerPair,
+    pendingHedge: makerPendingHedge,
+    cooldownUntil: makerCooldownUntil,
+    updatedAt: Date.now(),
+  });
+}
+
 function completeMakerFailure(
   pending: MakerPendingHedge,
   now: number,
@@ -1124,6 +1134,7 @@ function completeMakerFailure(
   makerPair = null;
   makerQuote = null;
   makerCooldownUntil = now + MAKER_INDEPENDENCE_MS;
+  writeMakerActive();
 }
 
 function makerHedgePrice(
@@ -1172,6 +1183,7 @@ function evaluateMakerPending(now: number): void {
       ),
     };
     makerPendingHedge = null;
+    writeMakerActive();
     return;
   }
   const pair = makerPair;
@@ -1219,6 +1231,7 @@ function evaluateMakerPending(now: number): void {
   makerPair = null;
   makerQuote = null;
   makerCooldownUntil = now + MAKER_INDEPENDENCE_MS;
+  writeMakerActive();
 }
 
 function makerCloseProjection(
@@ -1489,6 +1502,7 @@ function completeMakerPartialFailure(quote: MakerQuote, now: number): void {
   makerPair = null;
   makerQuote = null;
   makerCooldownUntil = now + MAKER_INDEPENDENCE_MS;
+  writeMakerActive();
 }
 
 function activateMakerQuote(now: number): void {
@@ -1560,6 +1574,7 @@ function evaluateMakerShadow(now: number): void {
           deadlineAt: now + MAKER_HEDGE_LATENCY_MS + MAKER_HEDGE_GRACE_MS,
           extendedMaker: false,
         };
+        writeMakerActive();
       }
     }
     return;
@@ -1643,6 +1658,7 @@ function processMakerTrade(
     extendedMaker: true,
   };
   makerQuote = null;
+  writeMakerActive();
 }
 
 function makerShadowStatus(): Record<string, unknown> {
@@ -2672,6 +2688,7 @@ function writeStatus(): void {
     latched: [...shadowLatched],
     telemetry: Object.fromEntries(shadowRouteTelemetry),
   });
+  writeMakerActive();
 }
 
 function writeExecutionStatus(): void {
@@ -2831,38 +2848,42 @@ function loadMakerState(): void {
     console.warn('venue-arb maker history load', (error as Error).message);
     makerResults = [];
   }
+  try {
+    if (!existsSync(MAKER_ACTIVE_PATH)) return;
+    const checkpoint = JSON.parse(readFileSync(MAKER_ACTIVE_PATH, 'utf8')) as {
+      pair?: MakerPair | null;
+      pendingHedge?: MakerPendingHedge | null;
+      cooldownUntil?: number;
+    };
+    if (
+      checkpoint.pair?.id
+      && checkpoint.pair.coin
+      && checkpoint.pair.quantity > 0
+    ) makerPair = checkpoint.pair;
+    if (
+      checkpoint.pendingHedge?.coin
+      && checkpoint.pendingHedge.extendedFill > 0
+    ) makerPendingHedge = checkpoint.pendingHedge;
+    makerCooldownUntil = Math.max(
+      makerCooldownUntil,
+      Number(checkpoint.cooldownUntil ?? 0),
+    );
+  } catch (error) {
+    console.warn('venue-arb maker active load', (error as Error).message);
+    makerPair = null;
+    makerPendingHedge = null;
+  }
 }
 
-function abortMakerExposure(now: number): void {
-  if (!makerPendingHedge && !makerPair) return;
-  const pending = makerPendingHedge;
-  const pair = makerPair;
-  appendMakerResult({
-    id: pair?.id ?? `M${pending?.filledAt ?? now}-${pending?.coin ?? 'unknown'}`,
-    coin: pair?.coin ?? pending?.coin ?? 'unknown',
-    extendedSide: pair?.extendedSide
-      ?? (pending?.side === 'buy' ? 'long' : pending?.side === 'sell' ? 'short' : null),
-    openedAt: pair?.openedAt ?? null,
-    closedAt: now,
-    holdingMs: pair ? Math.max(0, now - pair.openedAt) : null,
-    entryExtended: pair?.entryExtended
-      ?? (pending?.stage === 'entry' ? pending.extendedFill : null),
-    entryLighter: pair?.entryLighter ?? null,
-    exitExtended: pending?.stage === 'exit' ? pending.extendedFill : null,
-    exitLighter: null,
-    entryEdgeBps: pair?.entryEdgeBps ?? null,
-    realizedNetBps: null,
-    realizedNetUsd: null,
-    exitExtendedMaker: pending?.stage === 'exit'
-      ? pending.extendedMaker
-      : null,
-    passed: false,
-    reason: 'monitor_restart_with_exposure',
-    fundingBps: 0,
-  });
-  makerPendingHedge = null;
-  makerPair = null;
+function prepareMakerShutdown(now: number): void {
+  if (
+    makerQuote?.firstFillAt != null
+    && makerQuote.queue.remaining < makerQuote.initialQuantity
+  ) {
+    completeMakerPartialFailure(makerQuote, now);
+  }
   makerQuote = null;
+  writeMakerActive();
 }
 
 function shutdown(signal: string): void {
@@ -2874,7 +2895,7 @@ function shutdown(signal: string): void {
   // A service restart is not market convergence and must not contaminate the
   // decay distribution with artificial "closed" opportunities.
   active.clear();
-  abortMakerExposure(Date.now());
+  prepareMakerShutdown(Date.now());
   writeStatus();
   writeExecutionStatus();
   for (const ws of sockets) ws.close();
