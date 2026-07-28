@@ -580,6 +580,36 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     primary: false,
   },
   {
+    id: 'aster-bybit',
+    buyVenue: 'aster',
+    sellVenue: 'bybit',
+    primary: false,
+  },
+  {
+    id: 'extended-aster',
+    buyVenue: 'extended',
+    sellVenue: 'aster',
+    primary: false,
+  },
+  {
+    id: 'aster-extended',
+    buyVenue: 'aster',
+    sellVenue: 'extended',
+    primary: false,
+  },
+  {
+    id: 'extended-binance',
+    buyVenue: 'extended',
+    sellVenue: 'binance',
+    primary: false,
+  },
+  {
+    id: 'binance-extended',
+    buyVenue: 'binance',
+    sellVenue: 'extended',
+    primary: false,
+  },
+  {
     id: 'extended-bybit',
     buyVenue: 'extended',
     sellVenue: 'bybit',
@@ -598,9 +628,33 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     primary: false,
   },
   {
+    id: 'hyperliquid-bybit',
+    buyVenue: 'hyperliquid',
+    sellVenue: 'bybit',
+    primary: false,
+  },
+  {
     id: 'bybit-polymarket',
     buyVenue: 'bybit',
     sellVenue: 'polymarket',
+    primary: false,
+  },
+  {
+    id: 'polymarket-bybit',
+    buyVenue: 'polymarket',
+    sellVenue: 'bybit',
+    primary: false,
+  },
+  {
+    id: 'aster-paradex',
+    buyVenue: 'aster',
+    sellVenue: 'paradex',
+    primary: false,
+  },
+  {
+    id: 'paradex-aster',
+    buyVenue: 'paradex',
+    sellVenue: 'aster',
     primary: false,
   },
 ];
