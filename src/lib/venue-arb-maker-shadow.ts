@@ -469,32 +469,55 @@ export class GenericMakerShadow {
     const bestBid = sortedLevels(market.maker, 'bids', 1)[0]?.[0];
     const bestAsk = sortedLevels(market.maker, 'asks', 1)[0]?.[0];
     if (hedgeFill == null || bestBid == null || bestAsk == null) return null;
-    const price = side === 'sell' ? bestAsk : bestBid;
-    const projectedNetBps = this.closeProjection(
-      now,
-      pair,
-      price,
-      hedgeFill,
-    );
-    if (projectedNetBps < this.config.exitNetBps) return null;
-    const queueAhead = (
-      side === 'buy' ? market.maker.bids : market.maker.asks
-    ).get(price) ?? 0;
+    const levels = sortedLevels(
+      market.maker,
+      side === 'buy' ? 'bids' : 'asks',
+      20,
+    ).flatMap(([price, queueAhead]) => {
+      const projectedNetBps = this.closeProjection(
+        now,
+        pair,
+        price,
+        hedgeFill,
+      );
+      if (projectedNetBps < this.config.exitNetBps) return [];
+      const distanceBps = side === 'buy'
+        ? Math.max(0, (bestBid / price - 1) * 10_000)
+        : Math.max(0, (price / bestAsk - 1) * 10_000);
+      const score = projectedNetBps / (
+        1
+        + queueAhead * price / this.config.notionalUsd
+        + distanceBps * 2
+      );
+      return [{
+        price,
+        queueAhead,
+        projectedNetBps,
+        distanceBps,
+        score,
+      }];
+    }).sort((a, b) => b.score - a.score);
+    const selected = levels[0];
+    if (!selected) return null;
     return {
       id: `GMQ${now}-${pair.coin}-exit-${side}`,
       coin: pair.coin,
       stage: 'exit',
       side,
-      price,
+      price: selected.price,
       createdAt: now,
       activeAt: now + this.config.quoteLatencyMs,
       activatedAt: null,
       expiresAt: now + this.config.quoteLatencyMs + this.config.quoteTtlMs,
-      projectedNetBps,
-      distanceBps: 0,
+      projectedNetBps: selected.projectedNetBps,
+      distanceBps: selected.distanceBps,
       initialQuantity: pair.quantity,
       firstFillAt: null,
-      queue: { queueAhead, remaining: pair.quantity, filled: false },
+      queue: {
+        queueAhead: selected.queueAhead,
+        remaining: pair.quantity,
+        filled: false,
+      },
     };
   }
 
