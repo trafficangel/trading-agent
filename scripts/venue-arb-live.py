@@ -75,6 +75,9 @@ class Canary:
         )
         self.min_hold_ms = int(os.getenv("VENUE_ARB_LIVE_MIN_HOLD_MS", "200"))
         self.max_hold_ms = int(os.getenv("VENUE_ARB_LIVE_MAX_HOLD_MS", "60000"))
+        self.max_adverse_bps = float(
+            os.getenv("VENUE_ARB_LIVE_MAX_ADVERSE_BPS", "20")
+        )
         self.cooldown_ms = int(
             float(os.getenv("VENUE_ARB_LIVE_COOLDOWN_SECONDS", "900")) * 1000
         )
@@ -653,13 +656,20 @@ class Canary:
             raise RuntimeError("positions remain after flatten")
         return {key: int(value) for key, value in order_ids.items()}
 
-    def opportunity_alive(self, opportunity_id: str) -> bool:
+    def opportunity_net(self, opportunity_id: str) -> float | None:
         status = self.read_json(self.execution_path, {})
-        return any(
-            row.get("id") == opportunity_id
-            and float(row.get("currentNetBps1000") or -math.inf) > 0
-            for row in status.get("active") or []
+        row = next(
+            (
+                item
+                for item in status.get("active") or []
+                if item.get("id") == opportunity_id
+            ),
+            None,
         )
+        if row is None:
+            return None
+        value = float(row.get("currentNetBps1000") or -math.inf)
+        return value if math.isfinite(value) else None
 
     async def execute(self, candidate: dict[str, Any]) -> None:
         coin = str(candidate["coin"])
@@ -774,12 +784,18 @@ class Canary:
             if now - opened_at >= self.max_hold_ms:
                 close_reason = "max_hold"
                 break
-            if (
-                now - opened_at >= self.min_hold_ms
-                and not self.opportunity_alive(opportunity_id)
-            ):
-                close_reason = "converged"
-                break
+            if now - opened_at >= self.min_hold_ms:
+                current_net = self.opportunity_net(opportunity_id)
+                if current_net is None or current_net <= 0:
+                    close_reason = "converged"
+                    break
+                if (
+                    current_net
+                    >= float(candidate["currentNetBps1000"])
+                    + self.max_adverse_bps
+                ):
+                    close_reason = "adverse_basis"
+                    break
             await asyncio.sleep(0.05)
         else:
             close_reason = "shutdown"
