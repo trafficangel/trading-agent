@@ -891,11 +891,6 @@ class Canary:
                 continue
             filled_qty = float(row.filled_qty or 0)
             status = self.order_status_value(row.status)
-            if status not in final_statuses and not row.post_only:
-                await self.cancel_all_extended_orders()
-                raise RuntimeError(
-                    "Extended active maker order lost post-only protection"
-                )
             if filled_qty > 0:
                 saw_fill = True
                 if status not in final_statuses:
@@ -903,6 +898,11 @@ class Canary:
                 else:
                     finalized = True
                 break
+            if status not in final_statuses and not row.post_only:
+                await self.cancel_all_extended_orders()
+                raise RuntimeError(
+                    "Extended unfilled maker order lost post-only protection"
+                )
             if status in final_statuses:
                 finalized = True
                 final_row = row

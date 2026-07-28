@@ -33,7 +33,9 @@ Environment=VENUE_ARB_LIVE_MAKER_ORDER_TTL_MS=60000
 Environment=VENUE_ARB_LIVE_MAKER_SAFETY_TICKS=1
 Environment=VENUE_ARB_LIVE_MAKER_SAFETY_BPS=0
 Environment=VENUE_ARB_LIVE_MAKER_RETRY_COOLDOWN_MS=5000
-Environment=VENUE_ARB_LIVE_MAX_TRADES=1
+# One recovered maker fill is retained in the honest journal; allow one
+# additional post-fix completed pair before the canary stops again.
+Environment=VENUE_ARB_LIVE_MAX_TRADES=2
 Environment=VENUE_ARB_LIVE_DAILY_LOSS_USD=2
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/trader/venvs/venue-arb-live/bin/python /home/trader/apps/trading-agent/scripts/venue-arb-live.py

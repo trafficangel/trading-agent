@@ -1013,7 +1013,9 @@ async function render(lang: Lang): Promise<string> {
   const [status, liveData] = await Promise.all([readStatus(), readLive()]);
   const liveStatus = liveData.status;
   const liveTrades = liveData.trades ?? [];
-  const closedLive = liveTrades.filter((row) => row.status === 'closed');
+  const closedLive = liveTrades.filter((row) => (
+    row.status === 'closed' || row.status === 'failed_flat'
+  ));
   const liveNet = closedLive.reduce(
     (sum, row) => sum + Number(row.netPnlUsd ?? 0),
     0,
