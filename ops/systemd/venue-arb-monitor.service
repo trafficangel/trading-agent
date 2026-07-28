@@ -23,6 +23,7 @@ Environment=VENUE_ARB_SHADOW_REQUIRED_PASS_PCT=90
 Environment=VENUE_ARB_SHADOW_ENTRY_LATENCY_FLOOR_MS=1000
 Environment=VENUE_ARB_SHADOW_EXIT_LATENCY_FLOOR_MS=2200
 Environment=VENUE_ARB_SHADOW_EXIT_QUOTE_GRACE_MS=1000
+Environment=VENUE_ARB_FEED_STALL_MS=15000
 ExecStart=/usr/bin/node /home/trader/apps/trading-agent/dist/hft/venue-arb-monitor.js
 Restart=always
 RestartSec=3

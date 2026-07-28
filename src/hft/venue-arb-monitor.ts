@@ -65,6 +65,7 @@ type ConnectionState = {
   connected: boolean;
   messages: number;
   reconnects: number;
+  stalls: number;
   lastMessageAt: number;
 };
 
@@ -280,6 +281,7 @@ const SHADOW_EXIT_QUOTE_GRACE_MS = finiteEnv(
   'VENUE_ARB_SHADOW_EXIT_QUOTE_GRACE_MS',
   1_000,
 );
+const FEED_STALL_MS = finiteEnv('VENUE_ARB_FEED_STALL_MS', 15_000);
 const RECONNECT_MS = 2_000;
 const HORIZONS_MS = [100, 250, 500, 1_000, 2_000, 5_000, 10_000] as const;
 
@@ -368,9 +370,16 @@ const byPolymarketId = new Map(MARKETS.flatMap((market) => (
 const bybitDepth = new Map(MARKETS.map((market) => [market.symbol, createBybitDepthBook()]));
 const connections = Object.fromEntries(VENUES.map((venue) => [
   venue,
-  { connected: false, messages: 0, reconnects: 0, lastMessageAt: 0 },
+  {
+    connected: false,
+    messages: 0,
+    reconnects: 0,
+    stalls: 0,
+    lastMessageAt: 0,
+  },
 ])) as Record<Venue, ConnectionState>;
 const sockets = new Set<WebSocket>();
+const venueSockets = new Map<Venue, WebSocket>();
 const active = new Map<string, Opportunity>();
 const latchedUntilBelowTrigger = new Set<string>();
 const shadowProbes = new Map<string, ShadowProbe>();
@@ -814,6 +823,7 @@ function connect(
   if (shuttingDown) return;
   const ws = new WebSocket(url, options);
   sockets.add(ws);
+  venueSockets.set(venue, ws);
   ws.on('open', () => {
     connections[venue].connected = true;
     onOpen(ws);
@@ -838,6 +848,7 @@ function connect(
   });
   ws.on('close', () => {
     sockets.delete(ws);
+    if (venueSockets.get(venue) === ws) venueSockets.delete(venue);
     connections[venue].connected = false;
     connections[venue].reconnects++;
     if (!shuttingDown) {
@@ -847,6 +858,25 @@ function connect(
       ).unref();
     }
   });
+}
+
+function reconnectStalledFeeds(): void {
+  const now = Date.now();
+  for (const venue of VENUES) {
+    const state = connections[venue];
+    if (
+      !state.connected
+      || !state.lastMessageAt
+      || now - state.lastMessageAt <= FEED_STALL_MS
+    ) continue;
+    const ws = venueSockets.get(venue);
+    if (!ws) continue;
+    state.stalls++;
+    console.warn(
+      `venue-arb ${venue} stalled ${now - state.lastMessageAt}ms; reconnecting`,
+    );
+    ws.terminate();
+  }
 }
 
 function startHyperliquid(): void {
@@ -1638,6 +1668,7 @@ function shutdown(signal: string): void {
   shuttingDown = true;
   clearInterval(evaluationTimer);
   clearInterval(statusTimer);
+  clearInterval(feedWatchdogTimer);
   // A service restart is not market convergence and must not contaminate the
   // decay distribution with artificial "closed" opportunities.
   active.clear();
@@ -1668,6 +1699,7 @@ const evaluationTimer = setInterval(() => {
   writeExecutionStatus();
 }, SAMPLE_MS);
 const statusTimer = setInterval(writeStatus, 1_000);
+const feedWatchdogTimer = setInterval(reconnectStalledFeeds, 5_000);
 writeStatus();
 writeExecutionStatus();
 process.on('SIGTERM', () => shutdown('SIGTERM'));
