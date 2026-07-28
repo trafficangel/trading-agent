@@ -250,6 +250,7 @@ class Canary:
         self.running = True
         self.shutdown_requested = False
         self.trade_open = False
+        self.active_trade: dict[str, Any] | None = None
         self.last_order_id = int(time.time() * 1000)
         self.last_status_write = 0.0
         self.last_rejection: str | None = None
@@ -349,6 +350,139 @@ class Canary:
         rows = self.trades()
         rows.append(row)
         self.atomic_json(self.trades_path, rows[-500:])
+
+    async def recover_active_trade(
+        self,
+        error: Exception,
+        exit_orders: dict[str, int],
+    ) -> None:
+        trade = self.active_trade
+        if trade is None or any(
+            row.get("id") == trade.get("id") for row in self.trades()
+        ):
+            self.active_trade = None
+            return
+        coin = str(trade.get("coin") or "")
+        if coin not in MARKETS:
+            return
+        entry_ext_id = trade.get("entryExtendedOrderId")
+        entry_lit_id = trade.get("entryLighterOrderId")
+        exit_ext_id = (
+            trade.get("exitExtendedOrderId")
+            or exit_orders.get("extended")
+        )
+        exit_lit_id = (
+            trade.get("exitLighterOrderId")
+            or exit_orders.get("lighter")
+        )
+        tasks: dict[str, Any] = {}
+        if isinstance(entry_ext_id, int):
+            tasks["entryExtended"] = asyncio.create_task(
+                self.extended_fill(f"{coin}-USD", entry_ext_id)
+            )
+        if isinstance(entry_lit_id, int):
+            tasks["entryLighter"] = asyncio.create_task(
+                self.lighter_fill(coin, entry_lit_id)
+            )
+        if isinstance(exit_ext_id, int):
+            tasks["exitExtended"] = asyncio.create_task(
+                self.extended_fill(f"{coin}-USD", exit_ext_id)
+            )
+        if isinstance(exit_lit_id, int):
+            tasks["exitLighter"] = asyncio.create_task(
+                self.lighter_fill(coin, exit_lit_id)
+            )
+        results = (
+            await asyncio.gather(*tasks.values())
+            if tasks
+            else []
+        )
+        fills = dict(zip(tasks.keys(), results, strict=True))
+        entry_ext = fills.get("entryExtended")
+        entry_lit = fills.get("entryLighter")
+        exit_ext = fills.get("exitExtended")
+        exit_lit = fills.get("exitLighter")
+        if entry_ext is None and entry_lit is None:
+            self.active_trade = None
+            return
+
+        extended_long = str(trade.get("extendedSide")) == "long"
+        gross = 0.0
+        fees = 0.0
+        complete = True
+        if entry_ext is not None:
+            fees += entry_ext.fee
+            if exit_ext is None:
+                complete = False
+            else:
+                quantity = min(entry_ext.quantity, exit_ext.quantity)
+                gross += (
+                    (exit_ext.price - entry_ext.price) * quantity
+                    if extended_long
+                    else (entry_ext.price - exit_ext.price) * quantity
+                )
+                fees += exit_ext.fee
+        if entry_lit is not None:
+            fees += entry_lit.fee
+            if exit_lit is None:
+                complete = False
+            else:
+                quantity = min(entry_lit.quantity, exit_lit.quantity)
+                gross += (
+                    (entry_lit.price - exit_lit.price) * quantity
+                    if extended_long
+                    else (exit_lit.price - entry_lit.price) * quantity
+                )
+                fees += exit_lit.fee
+        net = gross - fees
+        closed_at = max(
+            [
+                int(fill.filled_at or 0)
+                for fill in (exit_ext, exit_lit)
+                if fill is not None
+            ]
+            or [int(time.time() * 1000)]
+        )
+        notional = max(
+            [
+                fill.notional
+                for fill in (entry_ext, entry_lit)
+                if fill is not None
+            ]
+            or [self.notional]
+        )
+        trade.update(
+            status="failed_flat" if complete else "recovery_incomplete",
+            closeReason="fatal_recovery",
+            entryExtended=asdict(entry_ext) if entry_ext else None,
+            entryLighter=asdict(entry_lit) if entry_lit else None,
+            exitExtended=asdict(exit_ext) if exit_ext else None,
+            exitLighter=asdict(exit_lit) if exit_lit else None,
+            exitExtendedOrderId=exit_ext_id,
+            exitLighterOrderId=exit_lit_id,
+            grossPnlUsd=round(gross, 8) if complete else None,
+            feesUsd=round(fees, 8),
+            netPnlUsd=round(net, 8) if complete else None,
+            netPnlPct=(
+                round(net / max(notional, 1e-9) * 100, 8)
+                if complete
+                else None
+            ),
+            closedAt=closed_at,
+            holdingMs=max(
+                0,
+                closed_at
+                - int(
+                    (entry_ext or entry_lit).filled_at
+                    or trade.get("startedAt")
+                    or closed_at
+                ),
+            ),
+            error=str(error),
+        )
+        self.append_trade(trade)
+        self.log("fatal_recovered", **trade)
+        self.active_trade = None
 
     def completed_trades(self) -> list[dict[str, Any]]:
         return [
@@ -1454,6 +1588,7 @@ class Canary:
             "coin": coin,
             "routeId": self.route_id,
             "route": route,
+            "extendedSide": "long" if extended_long else "short",
             "opportunityId": str(candidate["id"]),
             "signalAt": int(candidate.get("monitorUpdatedAt") or started_at),
             "startedAt": started_at,
@@ -1470,6 +1605,7 @@ class Canary:
             "makerSafetyBps": float(candidate["makerSafetyBps"]),
         }
         self.trade_open = True
+        self.active_trade = trade
         self.write_status("maker_opening", activeTrade=trade)
         self.log("maker_submit", **trade)
         submit_started_at = int(time.time() * 1000)
@@ -1510,14 +1646,14 @@ class Canary:
                 int(time.time() * 1000) + self.maker_retry_cooldown_ms
             )
             self.trade_open = False
+            self.active_trade = None
             if self.shutdown_requested:
                 self.running = False
             self.write_status("armed", activeTrade=None, lastTrade=trade)
             self.log("maker_unfilled", **trade)
             return
+        trade["entryExtended"] = asdict(ext_fill)
         if abs(ext_fill.fee) > 1e-9:
-            with contextlib.suppress(Exception):
-                await self.flatten(coin, emergency=True)
             raise RuntimeError(
                 f"Extended maker fill charged a taker fee: {ext_fill.fee}"
             )
@@ -1580,20 +1716,16 @@ class Canary:
             )
             self.append_trade(trade)
             self.trade_open = False
+            self.active_trade = None
             if self.shutdown_requested:
                 self.running = False
             self.write_status("completed", activeTrade=None, lastTrade=trade)
             self.log("maker_fill_aborted", **trade)
             return
 
-        try:
-            hedge_quantity = self.lighter_compatible_quantity(
-                coin, ext_fill.quantity
-            )
-        except Exception:
-            with contextlib.suppress(Exception):
-                await self.flatten(coin, emergency=True)
-            raise
+        hedge_quantity = self.lighter_compatible_quantity(
+            coin, ext_fill.quantity
+        )
         hedge_started = int(time.time() * 1000)
         lit_order = await self.place_lighter(
             coin,
@@ -1602,7 +1734,10 @@ class Canary:
             reduce_only=False,
             slippage=self.entry_slippage,
         )
+        trade["entryLighterOrderId"] = lit_order
+        self.write_status("maker_hedging", activeTrade=trade)
         lit_fill = await self.lighter_fill(coin, lit_order)
+        trade["entryLighter"] = asdict(lit_fill) if lit_fill else None
         positions = await self.wait_positions(coin, want_open=True, timeout=4)
         ext_position, lit_position = positions
         ext_position_side = str(
@@ -1620,20 +1755,7 @@ class Canary:
             or abs(ext_fill.quantity - lit_fill.quantity)
             > max(ext_fill.quantity, lit_fill.quantity) * 0.002
         ):
-            with contextlib.suppress(Exception):
-                await self.flatten(coin, emergency=True)
-            trade.update(
-                status="failed_flat",
-                closedAt=int(time.time() * 1000),
-                error="maker fill hedge did not reconcile",
-                entryExtended=asdict(ext_fill),
-                entryLighter=asdict(lit_fill) if lit_fill else None,
-                netPnlUsd=0,
-            )
-            self.append_trade(trade)
-            self.trade_open = False
-            self.write_status("blocked", activeTrade=None, lastTrade=trade)
-            return
+            raise RuntimeError("maker fill hedge did not reconcile")
 
         opened_at = max(
             ext_fill.filled_at or started_at,
@@ -1712,6 +1834,8 @@ class Canary:
             "closing", activeTrade={**trade, "closeReason": close_reason}
         )
         exit_orders = await self.flatten(coin, emergency=False)
+        trade["exitExtendedOrderId"] = exit_orders.get("extended")
+        trade["exitLighterOrderId"] = exit_orders.get("lighter")
         ext_exit, lit_exit = await asyncio.gather(
             self.extended_fill(
                 f"{coin}-USD", exit_orders["extended"]
@@ -1759,6 +1883,7 @@ class Canary:
         )
         self.append_trade(trade)
         self.trade_open = False
+        self.active_trade = None
         if self.shutdown_requested:
             self.running = False
         self.write_status("completed", activeTrade=None, lastTrade=trade)
@@ -2173,6 +2298,43 @@ def self_test() -> None:
     signal_guard.trade_open = False
     signal_guard.request_shutdown()
     assert signal_guard.running is False
+
+    async def recovery_check() -> None:
+        recovered: list[dict[str, Any]] = []
+        recovery = object.__new__(Canary)
+        recovery.active_trade = {
+            "id": "test-recovery",
+            "coin": "BNB",
+            "extendedSide": "long",
+            "startedAt": 1_000,
+            "entryExtendedOrderId": 1,
+        }
+        recovery.notional = 100
+        recovery.trades = lambda: []
+        recovery.append_trade = recovered.append
+        recovery.log = lambda *_args, **_kwargs: None
+
+        async def extended_fill(
+            _market: str, order_id: int
+        ) -> Fill | None:
+            if order_id == 1:
+                return Fill(569.32, 0.17, 96.7844, 0, 2_000)
+            if order_id == 2:
+                return Fill(568.97, 0.17, 96.7249, 0.024181, 5_020)
+            return None
+
+        recovery.extended_fill = extended_fill
+        recovery.lighter_fill = lambda *_args: None
+        await recovery.recover_active_trade(
+            RuntimeError("simulated fatal"),
+            {"extended": 2},
+        )
+        assert len(recovered) == 1
+        assert recovered[0]["status"] == "failed_flat"
+        assert recovered[0]["netPnlUsd"] == -0.083681
+        assert recovered[0]["holdingMs"] == 3_020
+
+    asyncio.run(recovery_check())
     print("venue-arb-live self-test ok")
 
 
@@ -2189,6 +2351,7 @@ async def main(force_dry_run: bool, sign_test: bool) -> None:
             await runner.run()
     except Exception as error:
         runner.log("fatal", error=str(error))
+        recovery_exit_orders: dict[str, int] = {}
         with contextlib.suppress(Exception):
             if runner.trade_open:
                 if runner.extended is not None:
@@ -2206,9 +2369,21 @@ async def main(force_dry_run: bool, sign_test: bool) -> None:
                         for row in positions[1]
                     )
                 }
+                if (
+                    runner.active_trade is not None
+                    and runner.active_trade.get("coin")
+                ):
+                    coins.add(str(runner.active_trade["coin"]))
                 for coin in coins:
-                    await runner.flatten(coin, emergency=True)
-            runner.write_status("error", error=str(error), activeTrade=None)
+                    orders = await runner.flatten(coin, emergency=True)
+                    if (
+                        runner.active_trade is not None
+                        and coin == runner.active_trade.get("coin")
+                    ):
+                        recovery_exit_orders = orders
+        with contextlib.suppress(Exception):
+            await runner.recover_active_trade(error, recovery_exit_orders)
+        runner.write_status("error", error=str(error), activeTrade=None)
         raise
     finally:
         await runner.close()
