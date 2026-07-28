@@ -128,6 +128,7 @@ type Opportunity = {
 
 const DATA_DIR = resolve(process.env.VENUE_ARB_DATA_DIR ?? 'data/venue-arb');
 const STATUS_PATH = resolve(DATA_DIR, 'status.json');
+const EXECUTION_STATUS_PATH = resolve(DATA_DIR, 'execution-status.json');
 const OPPORTUNITIES_PATH = resolve(DATA_DIR, 'opportunities.ndjson');
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 250);
@@ -956,6 +957,33 @@ function writeStatus(): void {
   renameSync(tmp, STATUS_PATH);
 }
 
+function writeExecutionStatus(): void {
+  const status = {
+    version: 'venue-arb-execution-v1',
+    updatedAt: Date.now(),
+    sampleMs: SAMPLE_MS,
+    active: [...active.values()]
+      .filter((row) => row.buyVenue === 'extended' && row.sellVenue === 'lighter')
+      .map((row) => ({
+        id: row.id,
+        coin: row.coin,
+        buyVenue: row.buyVenue,
+        sellVenue: row.sellVenue,
+        startedAt: row.startedAt,
+        currentNetBps1000: row.currentNetBps1000,
+        currentBuyVwap1000: row.currentBuyVwap1000,
+        currentSellVwap1000: row.currentSellVwap1000,
+        currentBuyDepthUsd: row.currentBuyDepthUsd,
+        currentSellDepthUsd: row.currentSellDepthUsd,
+        currentBuyBookAgeMs: row.currentBuyBookAgeMs,
+        currentSellBookAgeMs: row.currentSellBookAgeMs,
+      })),
+  };
+  const tmp = `${EXECUTION_STATUS_PATH}.tmp`;
+  writeFileSync(tmp, JSON.stringify(status));
+  renameSync(tmp, EXECUTION_STATUS_PATH);
+}
+
 function tailLines(path: string, maxBytes = 4_000_000): string[] {
   if (!existsSync(path)) return [];
   const size = statSync(path).size;
@@ -993,6 +1021,7 @@ function shutdown(signal: string): void {
   // decay distribution with artificial "closed" opportunities.
   active.clear();
   writeStatus();
+  writeExecutionStatus();
   for (const ws of sockets) ws.close();
   console.warn(`venue-arb shutdown ${signal}`);
   setTimeout(() => process.exit(0), 250).unref();
@@ -1011,9 +1040,13 @@ startExtended();
 startAster();
 startBinance();
 startBybit();
-const evaluationTimer = setInterval(evaluate, SAMPLE_MS);
+const evaluationTimer = setInterval(() => {
+  evaluate();
+  writeExecutionStatus();
+}, SAMPLE_MS);
 const statusTimer = setInterval(writeStatus, 1_000);
 writeStatus();
+writeExecutionStatus();
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 console.warn(

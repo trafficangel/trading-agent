@@ -89,6 +89,12 @@ class Canary:
             )
         )
         self.monitor_path = self.data_dir / "status.json"
+        self.execution_path = Path(
+            os.getenv(
+                "VENUE_ARB_EXECUTION_STATUS_PATH",
+                str(self.data_dir / "execution-status.json"),
+            )
+        )
         self.status_path = self.data_dir / "live-status.json"
         self.trades_path = self.data_dir / "live-trades.json"
         self.lock_path = self.data_dir / "live.lock"
@@ -323,9 +329,9 @@ class Canary:
                 )
 
     def candidate(self) -> dict[str, Any] | None:
-        status = self.read_json(self.monitor_path, {})
+        status = self.read_json(self.execution_path, {})
         now = int(time.time() * 1000)
-        if status.get("version") != "venue-arb-v3-tradeable-1000":
+        if status.get("version") != "venue-arb-execution-v1":
             self.last_rejection = "monitor version mismatch"
             return None
         if now - int(status.get("updatedAt", 0) or 0) > self.fresh_ms:
@@ -648,7 +654,7 @@ class Canary:
         return {key: int(value) for key, value in order_ids.items()}
 
     def opportunity_alive(self, opportunity_id: str) -> bool:
-        status = self.read_json(self.monitor_path, {})
+        status = self.read_json(self.execution_path, {})
         return any(
             row.get("id") == opportunity_id
             and float(row.get("currentNetBps1000") or -math.inf) > 0
