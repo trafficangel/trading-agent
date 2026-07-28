@@ -35,6 +35,14 @@ import {
   shadowNetAfterCosts,
   shadowReadiness,
 } from '../lib/venue-arb-shadow.js';
+import {
+  consumeMakerPrint,
+  makerEntryEdgeBps,
+  makerRoundTripAfterCosts,
+  type MakerQueueState,
+  type MakerSide,
+  type TakerSide,
+} from '../lib/venue-arb-maker.js';
 
 type Venue =
   | 'lighter'
@@ -248,6 +256,78 @@ type ShadowResult = {
   fundingBps: number;
 };
 
+type MakerQuote = {
+  id: string;
+  coin: string;
+  stage: 'entry' | 'exit';
+  side: MakerSide;
+  price: number;
+  createdAt: number;
+  activeAt: number;
+  activatedAt: number | null;
+  expiresAt: number;
+  projectedNetBps: number;
+  initialQuantity: number;
+  firstFillAt: number | null;
+  queue: MakerQueueState;
+};
+
+type MakerPair = {
+  id: string;
+  coin: string;
+  extendedSide: 'long' | 'short';
+  openedAt: number;
+  quantity: number;
+  entryExtended: number;
+  entryLighter: number;
+  entryEdgeBps: number;
+};
+
+type MakerPendingHedge = {
+  stage: 'entry' | 'exit';
+  coin: string;
+  side: MakerSide;
+  extendedFill: number;
+  filledAt: number;
+  dueAt: number;
+  deadlineAt: number;
+  extendedMaker: boolean;
+};
+
+type MakerResult = {
+  id: string;
+  coin: string;
+  extendedSide: 'long' | 'short' | null;
+  openedAt: number | null;
+  closedAt: number;
+  holdingMs: number | null;
+  entryExtended: number | null;
+  entryLighter: number | null;
+  exitExtended: number | null;
+  exitLighter: number | null;
+  entryEdgeBps: number | null;
+  realizedNetBps: number | null;
+  realizedNetUsd: number | null;
+  exitExtendedMaker: boolean | null;
+  passed: boolean;
+  reason: string;
+  fundingBps: number;
+};
+
+type MakerTelemetry = {
+  tradeStreamConnected: boolean;
+  tradeReconnects: number;
+  trades: number;
+  staleTrades: number;
+  quotes: number;
+  placementRejects: number;
+  quoteExpirations: number;
+  queueFills: number;
+  hedgeTimeouts: number;
+  lastTradeAt: number | null;
+  lastQuoteAt: number | null;
+};
+
 const DATA_DIR = resolve(process.env.VENUE_ARB_DATA_DIR ?? 'data/venue-arb');
 const STATUS_PATH = resolve(DATA_DIR, 'status.json');
 const EXECUTION_STATUS_PATH = resolve(DATA_DIR, 'execution-status.json');
@@ -255,6 +335,7 @@ const OPPORTUNITIES_PATH = resolve(DATA_DIR, 'opportunities.ndjson');
 const LIVE_TRADES_PATH = resolve(DATA_DIR, 'live-trades.json');
 const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution-v4.ndjson');
 const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active-v4.json');
+const MAKER_RESULTS_PATH = resolve(DATA_DIR, 'maker-shadow-v1.ndjson');
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 250);
 const NET_TRIGGER_BPS = finiteEnv('VENUE_ARB_NET_TRIGGER_BPS', 3);
@@ -306,6 +387,27 @@ const SHADOW_EXIT_QUOTE_GRACE_MS = finiteEnv(
 );
 const SHADOW_INDEPENDENCE_MS = finiteEnv(
   'VENUE_ARB_SHADOW_INDEPENDENCE_MS',
+  5 * 60_000,
+);
+const MAKER_NOTIONAL_USD = finiteEnv('VENUE_ARB_MAKER_NOTIONAL_USD', 500);
+const MAKER_ENTRY_EDGE_BPS = finiteEnv('VENUE_ARB_MAKER_ENTRY_EDGE_BPS', 3);
+const MAKER_EXIT_NET_BPS = finiteEnv('VENUE_ARB_MAKER_EXIT_NET_BPS', 10);
+const MAKER_QUOTE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_MAKER_QUOTE_LATENCY_MS',
+  500,
+);
+const MAKER_HEDGE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_MAKER_HEDGE_LATENCY_MS',
+  500,
+);
+const MAKER_QUOTE_TTL_MS = finiteEnv('VENUE_ARB_MAKER_QUOTE_TTL_MS', 3_000);
+const MAKER_HEDGE_GRACE_MS = finiteEnv('VENUE_ARB_MAKER_HEDGE_GRACE_MS', 2_000);
+const MAKER_MAX_HOLD_MS = finiteEnv(
+  'VENUE_ARB_MAKER_MAX_HOLD_MS',
+  15 * 60_000,
+);
+const MAKER_INDEPENDENCE_MS = finiteEnv(
+  'VENUE_ARB_MAKER_INDEPENDENCE_MS',
   5 * 60_000,
 );
 const FEED_STALL_MS = finiteEnv('VENUE_ARB_FEED_STALL_MS', 15_000);
@@ -532,6 +634,25 @@ const shadowLatched = new Set<string>();
 const shadowLastSignalAt = new Map<string, number>();
 let recentClosed: Opportunity[] = [];
 let shadowResults: ShadowResult[] = [];
+let makerResults: MakerResult[] = [];
+let makerQuote: MakerQuote | null = null;
+let makerPair: MakerPair | null = null;
+let makerPendingHedge: MakerPendingHedge | null = null;
+let makerCooldownUntil = 0;
+const makerTradeIds = new Set<string>();
+const makerTelemetry: MakerTelemetry = {
+  tradeStreamConnected: false,
+  tradeReconnects: 0,
+  trades: 0,
+  staleTrades: 0,
+  quotes: 0,
+  placementRejects: 0,
+  quoteExpirations: 0,
+  queueFills: 0,
+  hedgeTimeouts: 0,
+  lastTradeAt: null,
+  lastQuoteAt: null,
+};
 let startedAt = Date.now();
 let evaluations = 0;
 let sequence = 0;
@@ -948,6 +1069,502 @@ function evaluateShadow(now: number): void {
       probe.exitQuoteDeadlineAt = probe.exitDueAt + SHADOW_EXIT_QUOTE_GRACE_MS;
     }
   }
+}
+
+function makerBooksFresh(now: number, ...prepared: ExecutableBook[]): boolean {
+  return prepared.every((book) => (
+    now - book.receivedAt <= SHADOW_FRESH_MS
+    && now - book.exchangeAt <= SHADOW_SOURCE_FRESH_MS
+  ));
+}
+
+function appendMakerResult(result: MakerResult): void {
+  appendFileSync(MAKER_RESULTS_PATH, `${JSON.stringify(result)}\n`);
+  makerResults.push(result);
+  if (makerResults.length > 5_000) makerResults = makerResults.slice(-5_000);
+}
+
+function completeMakerFailure(
+  pending: MakerPendingHedge,
+  now: number,
+  reason: string,
+): void {
+  appendMakerResult({
+    id: makerPair?.id ?? `M${pending.filledAt}-${pending.coin}`,
+    coin: pending.coin,
+    extendedSide: makerPair?.extendedSide
+      ?? (pending.side === 'buy' ? 'long' : 'short'),
+    openedAt: makerPair?.openedAt
+      ?? (pending.stage === 'entry' ? pending.filledAt : null),
+    closedAt: now,
+    holdingMs: makerPair
+      ? Math.max(0, now - makerPair.openedAt)
+      : pending.stage === 'entry'
+        ? Math.max(0, now - pending.filledAt)
+        : null,
+    entryExtended: makerPair?.entryExtended
+      ?? (pending.stage === 'entry' ? pending.extendedFill : null),
+    entryLighter: makerPair?.entryLighter ?? null,
+    exitExtended: pending.stage === 'exit' ? pending.extendedFill : null,
+    exitLighter: null,
+    entryEdgeBps: makerPair?.entryEdgeBps ?? null,
+    realizedNetBps: null,
+    realizedNetUsd: null,
+    exitExtendedMaker: pending.stage === 'exit'
+      ? pending.extendedMaker
+      : null,
+    passed: false,
+    reason,
+    fundingBps: 0,
+  });
+  makerTelemetry.hedgeTimeouts++;
+  makerPendingHedge = null;
+  makerPair = null;
+  makerQuote = null;
+  makerCooldownUntil = now + MAKER_INDEPENDENCE_MS;
+}
+
+function makerHedgePrice(
+  side: MakerSide,
+  lighter: ExecutableBook,
+): number | null {
+  return side === 'buy' ? lighter.sellVwap500 : lighter.buyVwap500;
+}
+
+function evaluateMakerPending(now: number): void {
+  const pending = makerPendingHedge;
+  if (!pending || now < pending.dueAt) return;
+  if (now > pending.deadlineAt) {
+    completeMakerFailure(pending, now, `${pending.stage}_hedge_timeout`);
+    return;
+  }
+  const lighter = executableBook('lighter', pending.coin);
+  if (!lighter || !makerBooksFresh(now, lighter)) {
+    if (now >= pending.deadlineAt) {
+      completeMakerFailure(pending, now, `${pending.stage}_hedge_stale`);
+    }
+    return;
+  }
+  const lighterFill = makerHedgePrice(pending.side, lighter);
+  if (lighterFill == null) {
+    if (now >= pending.deadlineAt) {
+      completeMakerFailure(pending, now, `${pending.stage}_hedge_depth`);
+    }
+    return;
+  }
+  if (pending.stage === 'entry') {
+    const extendedSide = pending.side === 'buy' ? 'long' : 'short';
+    const quantity = MAKER_NOTIONAL_USD / pending.extendedFill;
+    makerPair = {
+      id: `M${pending.filledAt}-${pending.coin}-${extendedSide}`,
+      coin: pending.coin,
+      extendedSide,
+      openedAt: now,
+      quantity,
+      entryExtended: pending.extendedFill,
+      entryLighter: lighterFill,
+      entryEdgeBps: makerEntryEdgeBps(
+        pending.side,
+        pending.extendedFill,
+        lighterFill,
+      ),
+    };
+    makerPendingHedge = null;
+    return;
+  }
+  const pair = makerPair;
+  if (!pair) {
+    completeMakerFailure(pending, now, 'exit_without_pair');
+    return;
+  }
+  const fundingBps = Math.max(0, now - pair.openedAt)
+    / 3_600_000 * SHADOW_FUNDING_BPS_PER_HOUR;
+  const modeled = makerRoundTripAfterCosts({
+    extendedSide: pair.extendedSide,
+    notionalUsd: MAKER_NOTIONAL_USD,
+    quantity: pair.quantity,
+    entryExtended: pair.entryExtended,
+    entryLighter: pair.entryLighter,
+    exitExtended: pending.extendedFill,
+    exitLighter: lighterFill,
+    extendedEntryFeeBps: 0,
+    extendedExitFeeBps: pending.extendedMaker ? 0 : FEE_BPS.extended,
+    lighterEntryFeeBps: FEE_BPS.lighter,
+    lighterExitFeeBps: FEE_BPS.lighter,
+    executionBufferBps: EXECUTION_BUFFER_BPS,
+    fundingBps,
+  });
+  appendMakerResult({
+    id: pair.id,
+    coin: pair.coin,
+    extendedSide: pair.extendedSide,
+    openedAt: pair.openedAt,
+    closedAt: now,
+    holdingMs: Math.max(0, now - pair.openedAt),
+    entryExtended: pair.entryExtended,
+    entryLighter: pair.entryLighter,
+    exitExtended: pending.extendedFill,
+    exitLighter: lighterFill,
+    entryEdgeBps: pair.entryEdgeBps,
+    realizedNetBps: modeled.netBps,
+    realizedNetUsd: modeled.netUsd,
+    exitExtendedMaker: pending.extendedMaker,
+    passed: modeled.netBps > 0,
+    reason: pending.extendedMaker ? 'maker_round_trip' : 'max_hold_taker_exit',
+    fundingBps,
+  });
+  makerPendingHedge = null;
+  makerPair = null;
+  makerQuote = null;
+  makerCooldownUntil = now + MAKER_INDEPENDENCE_MS;
+}
+
+function makerCloseProjection(
+  now: number,
+  pair: MakerPair,
+  extendedFill: number,
+  lighterFill: number,
+): number {
+  const fundingBps = Math.max(0, now - pair.openedAt)
+    / 3_600_000 * SHADOW_FUNDING_BPS_PER_HOUR;
+  return makerRoundTripAfterCosts({
+    extendedSide: pair.extendedSide,
+    notionalUsd: MAKER_NOTIONAL_USD,
+    quantity: pair.quantity,
+    entryExtended: pair.entryExtended,
+    entryLighter: pair.entryLighter,
+    exitExtended: extendedFill,
+    exitLighter: lighterFill,
+    extendedEntryFeeBps: 0,
+    extendedExitFeeBps: 0,
+    lighterEntryFeeBps: FEE_BPS.lighter,
+    lighterExitFeeBps: FEE_BPS.lighter,
+    executionBufferBps: EXECUTION_BUFFER_BPS,
+    fundingBps,
+  }).netBps;
+}
+
+function makerQuoteCandidate(now: number): MakerQuote | null {
+  if (makerPendingHedge) return null;
+  if (makerPair) {
+    const rawExtended = books.get(bookKey('extended', makerPair.coin));
+    const extended = executableBook('extended', makerPair.coin);
+    const lighter = executableBook('lighter', makerPair.coin);
+    if (!rawExtended || !extended || !lighter) return null;
+    if (!makerBooksFresh(now, extended, lighter)) return null;
+    const side: MakerSide = makerPair.extendedSide === 'long' ? 'sell' : 'buy';
+    const levels = sortedLevels(
+      rawExtended,
+      side === 'buy' ? 'bids' : 'asks',
+      1,
+    );
+    const level = levels[0];
+    if (!level) return null;
+    const [price, queueAhead] = level;
+    if (!(price > 0) || !(queueAhead > 0)) return null;
+    const lighterFill = makerHedgePrice(side, lighter);
+    if (lighterFill == null) return null;
+    const projectedNetBps = makerCloseProjection(
+      now,
+      makerPair,
+      price,
+      lighterFill,
+    );
+    if (projectedNetBps < MAKER_EXIT_NET_BPS) return null;
+    return {
+      id: `MQ${now}-${makerPair.coin}-exit-${side}`,
+      coin: makerPair.coin,
+      stage: 'exit',
+      side,
+      price,
+      createdAt: now,
+      activeAt: now + MAKER_QUOTE_LATENCY_MS,
+      activatedAt: null,
+      expiresAt: now + MAKER_QUOTE_LATENCY_MS + MAKER_QUOTE_TTL_MS,
+      projectedNetBps,
+      initialQuantity: makerPair.quantity,
+      firstFillAt: null,
+      queue: {
+        queueAhead,
+        remaining: makerPair.quantity,
+        filled: false,
+      },
+    };
+  }
+  if (now < makerCooldownUntil) return null;
+  const candidates: MakerQuote[] = [];
+  for (const market of MARKETS) {
+    const rawExtended = books.get(bookKey('extended', market.coin));
+    const extended = executableBook('extended', market.coin);
+    const lighter = executableBook('lighter', market.coin);
+    if (!rawExtended || !extended || !lighter) continue;
+    if (!makerBooksFresh(now, extended, lighter)) continue;
+    for (const side of ['buy', 'sell'] as const) {
+      const levels = sortedLevels(
+        rawExtended,
+        side === 'buy' ? 'bids' : 'asks',
+        1,
+      );
+      const level = levels[0];
+      if (!level) continue;
+      const [price, queueAhead] = level;
+      if (!(price > 0) || !(queueAhead > 0)) continue;
+      const lighterFill = makerHedgePrice(side, lighter);
+      if (lighterFill == null) continue;
+      const projectedNetBps = makerEntryEdgeBps(side, price, lighterFill)
+        - EXECUTION_BUFFER_BPS;
+      if (projectedNetBps < MAKER_ENTRY_EDGE_BPS) continue;
+      const quantity = MAKER_NOTIONAL_USD / price;
+      candidates.push({
+        id: `MQ${now}-${market.coin}-entry-${side}`,
+        coin: market.coin,
+        stage: 'entry',
+        side,
+        price,
+        createdAt: now,
+        activeAt: now + MAKER_QUOTE_LATENCY_MS,
+        activatedAt: null,
+        expiresAt: now + MAKER_QUOTE_LATENCY_MS + MAKER_QUOTE_TTL_MS,
+        projectedNetBps,
+        initialQuantity: quantity,
+        firstFillAt: null,
+        queue: {
+          queueAhead,
+          remaining: quantity,
+          filled: false,
+        },
+      });
+    }
+  }
+  return candidates.sort((a, b) => b.projectedNetBps - a.projectedNetBps)[0]
+    ?? null;
+}
+
+function completeMakerPartialFailure(quote: MakerQuote, now: number): void {
+  appendMakerResult({
+    id: makerPair?.id ?? `M${quote.firstFillAt ?? now}-${quote.coin}`,
+    coin: quote.coin,
+    extendedSide: makerPair?.extendedSide
+      ?? (quote.side === 'buy' ? 'long' : 'short'),
+    openedAt: makerPair?.openedAt ?? null,
+    closedAt: now,
+    holdingMs: makerPair ? Math.max(0, now - makerPair.openedAt) : null,
+    entryExtended: makerPair?.entryExtended
+      ?? (quote.stage === 'entry' ? quote.price : null),
+    entryLighter: makerPair?.entryLighter ?? null,
+    exitExtended: quote.stage === 'exit' ? quote.price : null,
+    exitLighter: null,
+    entryEdgeBps: makerPair?.entryEdgeBps ?? null,
+    realizedNetBps: null,
+    realizedNetUsd: null,
+    exitExtendedMaker: quote.stage === 'exit' ? true : null,
+    passed: false,
+    reason: `${quote.stage}_partial_fill_unhedged`,
+    fundingBps: 0,
+  });
+  makerPair = null;
+  makerQuote = null;
+  makerCooldownUntil = now + MAKER_INDEPENDENCE_MS;
+}
+
+function activateMakerQuote(now: number): void {
+  const quote = makerQuote;
+  if (!quote || quote.activatedAt != null || now < quote.activeAt) return;
+  const rawExtended = books.get(bookKey('extended', quote.coin));
+  const extended = executableBook('extended', quote.coin);
+  if (!rawExtended || !extended || !makerBooksFresh(now, extended)) {
+    makerTelemetry.placementRejects++;
+    makerQuote = null;
+    return;
+  }
+  const bestOpposite = sortedLevels(
+    rawExtended,
+    quote.side === 'buy' ? 'asks' : 'bids',
+    1,
+  )[0]?.[0];
+  const wouldCross = bestOpposite != null && (
+    quote.side === 'buy'
+      ? quote.price >= bestOpposite
+      : quote.price <= bestOpposite
+  );
+  if (wouldCross) {
+    makerTelemetry.placementRejects++;
+    makerQuote = null;
+    return;
+  }
+  const sameSide = quote.side === 'buy'
+    ? rawExtended.bids
+    : rawExtended.asks;
+  quote.queue = {
+    queueAhead: sameSide.get(quote.price) ?? 0,
+    remaining: quote.queue.remaining,
+    filled: false,
+  };
+  quote.activatedAt = now;
+}
+
+function evaluateMakerShadow(now: number): void {
+  evaluateMakerPending(now);
+  if (makerPendingHedge) return;
+  if (
+    makerPair
+    && now - makerPair.openedAt >= MAKER_MAX_HOLD_MS
+    && !makerQuote
+  ) {
+    const extended = executableBook('extended', makerPair.coin);
+    if (extended && makerBooksFresh(now, extended)) {
+      const side: MakerSide = makerPair.extendedSide === 'long' ? 'sell' : 'buy';
+      const extendedFill = side === 'sell'
+        ? extended.sellVwap500
+        : extended.buyVwap500;
+      if (extendedFill != null) {
+        makerPendingHedge = {
+          stage: 'exit',
+          coin: makerPair.coin,
+          side,
+          extendedFill,
+          filledAt: now,
+          dueAt: now + MAKER_HEDGE_LATENCY_MS,
+          deadlineAt: now + MAKER_HEDGE_LATENCY_MS + MAKER_HEDGE_GRACE_MS,
+          extendedMaker: false,
+        };
+      }
+    }
+    return;
+  }
+  activateMakerQuote(now);
+  if (makerQuote && now >= makerQuote.expiresAt) {
+    if (
+      makerQuote.firstFillAt != null
+      && makerQuote.queue.remaining < makerQuote.initialQuantity
+    ) {
+      completeMakerPartialFailure(makerQuote, now);
+      return;
+    }
+    makerTelemetry.quoteExpirations++;
+    makerQuote = null;
+  }
+  if (!makerQuote) {
+    makerQuote = makerQuoteCandidate(now);
+    if (makerQuote) {
+      makerTelemetry.quotes++;
+      makerTelemetry.lastQuoteAt = now;
+    }
+  }
+}
+
+function processMakerTrade(
+  trade: {
+    id: string;
+    coin: string;
+    side: TakerSide;
+    price: number;
+    size: number;
+    tradeAt: number;
+  },
+  receivedAt: number,
+): void {
+  if (makerTradeIds.has(trade.id)) return;
+  makerTradeIds.add(trade.id);
+  if (makerTradeIds.size > 50_000) makerTradeIds.clear();
+  makerTelemetry.trades++;
+  makerTelemetry.lastTradeAt = receivedAt;
+  if (
+    receivedAt - trade.tradeAt > SHADOW_SOURCE_FRESH_MS
+    || trade.tradeAt - receivedAt > 1_000
+  ) {
+    makerTelemetry.staleTrades++;
+    return;
+  }
+  const quote = makerQuote;
+  if (
+    !quote
+    || quote.coin !== trade.coin
+    || quote.activatedAt == null
+    || receivedAt < quote.activatedAt
+    || receivedAt >= quote.expiresAt
+  ) return;
+  const previousRemaining = quote.queue.remaining;
+  quote.queue = consumeMakerPrint(
+    quote.queue,
+    quote.side,
+    quote.price,
+    trade.side,
+    trade.price,
+    trade.size,
+  );
+  if (
+    quote.firstFillAt == null
+    && quote.queue.remaining < previousRemaining
+  ) quote.firstFillAt = receivedAt;
+  if (!quote.queue.filled) return;
+  makerTelemetry.queueFills++;
+  makerPendingHedge = {
+    stage: quote.stage,
+    coin: quote.coin,
+    side: quote.side,
+    extendedFill: quote.price,
+    filledAt: quote.firstFillAt ?? receivedAt,
+    dueAt: (quote.firstFillAt ?? receivedAt) + MAKER_HEDGE_LATENCY_MS,
+    deadlineAt: (quote.firstFillAt ?? receivedAt)
+      + MAKER_HEDGE_LATENCY_MS + MAKER_HEDGE_GRACE_MS,
+    extendedMaker: true,
+  };
+  makerQuote = null;
+}
+
+function makerShadowStatus(): Record<string, unknown> {
+  const completed = makerResults.filter((row) => row.realizedNetBps != null);
+  const passed = makerResults.filter((row) => row.passed).length;
+  const passedPct = makerResults.length
+    ? passed / makerResults.length * 100
+    : null;
+  const netBps = completed.map((row) => Number(row.realizedNetBps));
+  const sumNetBps = netBps.reduce((sum, value) => sum + value, 0);
+  return {
+    version: 'maker-shadow-v1',
+    config: {
+      notionalUsd: MAKER_NOTIONAL_USD,
+      entryEdgeBps: MAKER_ENTRY_EDGE_BPS,
+      exitNetBps: MAKER_EXIT_NET_BPS,
+      quoteLatencyMs: MAKER_QUOTE_LATENCY_MS,
+      hedgeLatencyMs: MAKER_HEDGE_LATENCY_MS,
+      quoteTtlMs: MAKER_QUOTE_TTL_MS,
+      maxHoldMs: MAKER_MAX_HOLD_MS,
+      independenceMs: MAKER_INDEPENDENCE_MS,
+      sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+      executionBufferBps: EXECUTION_BUFFER_BPS,
+      extendedMakerFeeBps: 0,
+      lighterTakerFeeBps: FEE_BPS.lighter,
+    },
+    readiness: {
+      attempts: makerResults.length,
+      samples: completed.length,
+      passed,
+      passedPct,
+      requiredSamples: SHADOW_REQUIRED_SAMPLES,
+      requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+      ready: completed.length >= SHADOW_REQUIRED_SAMPLES
+        && passedPct != null
+        && passedPct >= SHADOW_REQUIRED_PASS_PCT
+        && sumNetBps > 0,
+      sumNetBps,
+      sumNetUsd: completed.reduce(
+        (sum, row) => sum + Number(row.realizedNetUsd ?? 0),
+        0,
+      ),
+      minNetBps: netBps.length ? Math.min(...netBps) : null,
+      meanNetBps: netBps.length
+        ? netBps.reduce((sum, value) => sum + value, 0) / netBps.length
+        : null,
+    },
+    telemetry: makerTelemetry,
+    quote: makerQuote,
+    pair: makerPair,
+    pendingHedge: makerPendingHedge,
+    cooldownUntil: makerCooldownUntil,
+    recent: makerResults.slice(-20).reverse(),
+  };
 }
 
 function replaceStringLevels(target: Map<number, number>, rows: unknown): void {
@@ -1412,6 +2029,83 @@ function startExtended(): void {
   );
 }
 
+function startExtendedTrades(): void {
+  if (shuttingDown) return;
+  const url = 'wss://api.starknet.extended.exchange/stream.extended.exchange/v1/publicTrades';
+  const ws = new WebSocket(url, {
+    headers: { 'User-Agent': 'RobotClaude-Arb-Monitor/1.0' },
+  });
+  sockets.add(ws);
+  ws.on('open', () => {
+    makerTelemetry.tradeStreamConnected = true;
+    console.warn('venue-arb extended public trades connected');
+    const timer = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.ping();
+      else clearInterval(timer);
+    }, 10_000);
+    timer.unref();
+  });
+  ws.on('message', (data) => {
+    const receivedAt = Date.now();
+    try {
+      const message = JSON.parse(rawText(data)) as {
+        data?: Array<{
+          m?: unknown;
+          S?: unknown;
+          T?: unknown;
+          p?: unknown;
+          q?: unknown;
+          i?: unknown;
+        }>;
+      };
+      for (const row of message.data ?? []) {
+        if (typeof row.m !== 'string') continue;
+        const coin = row.m.endsWith('-USD')
+          ? row.m.slice(0, -'-USD'.length)
+          : '';
+        if (!byCoin.has(coin)) continue;
+        const side = row.S === 'BUY' || row.S === 'SELL'
+          ? row.S
+          : null;
+        const price = finite(row.p);
+        const size = finite(row.q);
+        if (!side || !(price > 0) || !(size > 0)) continue;
+        processMakerTrade({
+          id: `${coin}:${String(row.i ?? `${row.T}:${row.p}:${row.q}:${row.S}`)}`,
+          coin,
+          side,
+          price,
+          size,
+          tradeAt: normalizeExchangeTimestampMs(finite(row.T), receivedAt),
+        }, receivedAt);
+      }
+    } catch (error) {
+      console.warn(
+        'venue-arb extended public trades parse',
+        (error as Error).message,
+      );
+    }
+  });
+  ws.on('error', (error) => {
+    makerTelemetry.tradeStreamConnected = false;
+    console.warn('venue-arb extended public trades websocket error', error.message);
+  });
+  ws.on('close', (code, reason) => {
+    sockets.delete(ws);
+    makerTelemetry.tradeStreamConnected = false;
+    makerTelemetry.tradeReconnects++;
+    console.warn(
+      `venue-arb extended public trades closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
+    );
+    if (!shuttingDown) {
+      setTimeout(
+        startExtendedTrades,
+        code === 1_000 ? 250 : RECONNECT_MS,
+      ).unref();
+    }
+  });
+}
+
 function startAster(): void {
   const streams = MARKETS.map(({ symbol }) => `${symbol.toLowerCase()}@depth20@100ms`);
   connect(
@@ -1822,6 +2516,7 @@ function writeStatus(): void {
     summary: summary(recentClosed),
     groupedSummaries: groupedSummaries(recentClosed),
     executionShadow: executionShadowStatus(),
+    makerShadow: makerShadowStatus(),
     freshnessMs: Object.fromEntries(MARKETS.map((market) => [
       market.coin,
       Object.fromEntries(VENUES.map((venue) => [
@@ -1989,6 +2684,54 @@ function loadShadowState(): void {
   }
 }
 
+function loadMakerState(): void {
+  try {
+    makerResults = tailLines(MAKER_RESULTS_PATH)
+      .slice(-5_000)
+      .map((line) => JSON.parse(line) as MakerResult);
+    const latestClosedAt = makerResults.reduce(
+      (latest, row) => Math.max(latest, Number(row.closedAt ?? 0)),
+      0,
+    );
+    makerCooldownUntil = latestClosedAt + MAKER_INDEPENDENCE_MS;
+  } catch (error) {
+    console.warn('venue-arb maker history load', (error as Error).message);
+    makerResults = [];
+  }
+}
+
+function abortMakerExposure(now: number): void {
+  if (!makerPendingHedge && !makerPair) return;
+  const pending = makerPendingHedge;
+  const pair = makerPair;
+  appendMakerResult({
+    id: pair?.id ?? `M${pending?.filledAt ?? now}-${pending?.coin ?? 'unknown'}`,
+    coin: pair?.coin ?? pending?.coin ?? 'unknown',
+    extendedSide: pair?.extendedSide
+      ?? (pending?.side === 'buy' ? 'long' : pending?.side === 'sell' ? 'short' : null),
+    openedAt: pair?.openedAt ?? null,
+    closedAt: now,
+    holdingMs: pair ? Math.max(0, now - pair.openedAt) : null,
+    entryExtended: pair?.entryExtended
+      ?? (pending?.stage === 'entry' ? pending.extendedFill : null),
+    entryLighter: pair?.entryLighter ?? null,
+    exitExtended: pending?.stage === 'exit' ? pending.extendedFill : null,
+    exitLighter: null,
+    entryEdgeBps: pair?.entryEdgeBps ?? null,
+    realizedNetBps: null,
+    realizedNetUsd: null,
+    exitExtendedMaker: pending?.stage === 'exit'
+      ? pending.extendedMaker
+      : null,
+    passed: false,
+    reason: 'monitor_restart_with_exposure',
+    fundingBps: 0,
+  });
+  makerPendingHedge = null;
+  makerPair = null;
+  makerQuote = null;
+}
+
 function shutdown(signal: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -1998,6 +2741,7 @@ function shutdown(signal: string): void {
   // A service restart is not market convergence and must not contaminate the
   // decay distribution with artificial "closed" opportunities.
   active.clear();
+  abortMakerExposure(Date.now());
   writeStatus();
   writeExecutionStatus();
   for (const ws of sockets) ws.close();
@@ -2009,20 +2753,24 @@ mkdirSync(DATA_DIR, { recursive: true });
 // Ensure the journal exists before the first lifecycle closes.
 if (!existsSync(OPPORTUNITIES_PATH)) writeFileSync(OPPORTUNITIES_PATH, '');
 if (!existsSync(SHADOW_RESULTS_PATH)) writeFileSync(SHADOW_RESULTS_PATH, '');
+if (!existsSync(MAKER_RESULTS_PATH)) writeFileSync(MAKER_RESULTS_PATH, '');
 loadHistory();
 loadShadowState();
+loadMakerState();
 startedAt = Date.now();
 startLighter();
 startHyperliquid();
 startParadex();
 startPolymarket();
 startExtended();
+startExtendedTrades();
 startAster();
 startPacifica();
 startBinance();
 startBybit();
 const evaluationTimer = setInterval(() => {
   evaluate();
+  evaluateMakerShadow(Date.now());
   writeExecutionStatus();
 }, SAMPLE_MS);
 const statusTimer = setInterval(writeStatus, 1_000);
