@@ -1,5 +1,5 @@
 [Unit]
-Description=Robot Claude protected Extended to Lighter arbitrage canary
+Description=Robot Claude protected Extended/Lighter arbitrage canary
 After=network-online.target venue-arb-monitor.service
 Wants=network-online.target venue-arb-monitor.service
 
@@ -12,6 +12,7 @@ EnvironmentFile=/etc/trading-agent/extended-arb.env
 EnvironmentFile=/etc/trading-agent/lighter-live.env
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/trading-agent/data/venue-arb
 Environment=VENUE_ARB_LIVE_ENABLED=false
+Environment=VENUE_ARB_LIVE_ROUTE=extended-lighter
 Environment=VENUE_ARB_LIVE_NOTIONAL_USD=300
 Environment=VENUE_ARB_LIVE_LEVERAGE=5
 Environment=VENUE_ARB_LIVE_ENTRY_NET_BPS=15
