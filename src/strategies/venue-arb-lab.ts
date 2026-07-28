@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { getLang, pageShell } from './landing.js';
 
 type Lang = 'ru' | 'en';
-type Venue = 'lighter' | 'hyperliquid' | 'binance' | 'bybit';
+type Venue = 'lighter' | 'hyperliquid' | 'paradex' | 'binance' | 'bybit';
 type SurvivalRow = {
   sampled?: number;
   rawPositivePct?: number | null;
@@ -71,7 +71,7 @@ type Status = {
   freshnessMs?: Record<string, Partial<Record<Venue, number | null>>>;
 };
 
-const VENUES: readonly Venue[] = ['lighter', 'hyperliquid', 'binance', 'bybit'];
+const VENUES: readonly Venue[] = ['lighter', 'hyperliquid', 'paradex', 'binance', 'bybit'];
 const t = (lang: Lang, ru: string, en: string): string => lang === 'en' ? en : ru;
 const dataRoot = (): string => process.env.VENUE_ARB_DATA_DIR
   ?? '/home/trader/apps/trading-agent/data/venue-arb';
@@ -226,7 +226,7 @@ async function render(lang: Lang): Promise<string> {
       </div><div class="va-engine ${isLive ? 'live' : ''}"><i></i>${isLive ? 'РАБОТАЕТ' : 'НЕТ СВЕЖИХ ДАННЫХ'}</div></div>
 
       <div class="va-cards">
-        <div class="va-card"><small>Потоки</small><b>${connected}/${VENUES.length}</b><em>Lighter · Hyperliquid · Binance · Bybit</em></div>
+        <div class="va-card"><small>Потоки</small><b>${connected}/${VENUES.length}</b><em>Lighter · Hyperliquid · Paradex · Binance · Bybit</em></div>
         <div class="va-card"><small>Активно сейчас</small><b>${status?.active?.length ?? 0}</b><em>raw ≥ ${pctFromBps(status?.rawTriggerBps, false)}</em></div>
         <div class="va-card"><small>Завершено</small><b>${Number(summary.closed ?? 0)}</b><em>компактные lifecycle-записи</em></div>
         <div class="va-card"><small>Пик net &gt; 0</small><b class="${Number(summary.viable ?? 0) > 0 ? 'pos' : ''}">${Number(summary.viable ?? 0)}</b><em>${pct(summary.viablePct)} наблюдений</em></div>
@@ -276,7 +276,7 @@ export async function venueArbHero(lang: Lang): Promise<string> {
   return `<a class="va-hero" href="/lab/venue-arb">
     <div><span class="va-badge">⚡ DEX ↔ CEX · PERP ARBITRAGE · READ-ONLY</span>
       <div class="va-title">Executable Divergence Radar</div>
-      <div class="va-sub">${t(lang, 'Lighter + Hyperliquid + Binance + Bybit · скорость схождения →', 'Lighter + Hyperliquid + Binance + Bybit · convergence speed →')}</div>
+      <div class="va-sub">${t(lang, 'Lighter + Hyperliquid + Paradex + Binance + Bybit · скорость схождения →', 'Lighter + Hyperliquid + Paradex + Binance + Bybit · convergence speed →')}</div>
     </div>
     <div class="va-hero-stats">
       <span><b class="${isLive ? 'pos' : 'neg'}">${isLive ? 'LIVE' : 'OFFLINE'}</b><small>engine</small></span>

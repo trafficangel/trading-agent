@@ -28,7 +28,7 @@ import {
   type PriceLevel,
 } from '../lib/venue-arb.js';
 
-type Venue = 'lighter' | 'hyperliquid' | 'binance' | 'bybit';
+type Venue = 'lighter' | 'hyperliquid' | 'paradex' | 'binance' | 'bybit';
 type VenueClass = 'DEX' | 'CEX';
 type Side = 'bids' | 'asks';
 
@@ -116,16 +116,19 @@ const MARKETS: readonly Market[] = [
   { coin: 'LTC', symbol: 'LTCUSDT', lighterMarketId: 35 },
 ] as const;
 
-const VENUES: readonly Venue[] = ['lighter', 'hyperliquid', 'binance', 'bybit'];
+const VENUES: readonly Venue[] = ['lighter', 'hyperliquid', 'paradex', 'binance', 'bybit'];
 const VENUE_CLASS: Record<Venue, VenueClass> = {
   lighter: 'DEX',
   hyperliquid: 'DEX',
+  paradex: 'DEX',
   binance: 'CEX',
   bybit: 'CEX',
 };
 const FEE_BPS: Record<Venue, number> = {
   lighter: finiteEnv('VENUE_ARB_FEE_BPS_LIGHTER', 0),
   hyperliquid: finiteEnv('VENUE_ARB_FEE_BPS_HYPERLIQUID', 4.5),
+  // API automation is conservatively classified as Paradex Pro 0 taker.
+  paradex: finiteEnv('VENUE_ARB_FEE_BPS_PARADEX', 4.5),
   binance: finiteEnv('VENUE_ARB_FEE_BPS_BINANCE', 5),
   bybit: finiteEnv('VENUE_ARB_FEE_BPS_BYBIT', 5.5),
 };
@@ -403,6 +406,60 @@ function startLighter(): void {
       }
       if (nonce > 0) nonces.set(marketId, nonce);
       markBook(book, finite(message.timestamp), receivedAt);
+    },
+  );
+}
+
+function startParadex(): void {
+  connect(
+    'paradex',
+    'wss://ws.api.prod.paradex.trade/v1',
+    (ws) => {
+      for (const market of MARKETS) {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'subscribe',
+          params: {
+            channel: `order_book.${market.coin}-USD-PERP.snapshot@15@50ms`,
+          },
+          id: market.lighterMarketId + 1_000,
+        }));
+      }
+    },
+    (payload, receivedAt) => {
+      const message = payload as {
+        method?: unknown;
+        params?: {
+          data?: {
+            market?: unknown;
+            last_updated_at?: unknown;
+            inserts?: Array<{
+              side?: unknown;
+              price?: unknown;
+              size?: unknown;
+            }>;
+          };
+        };
+      };
+      if (message.method !== 'subscription' || !message.params?.data) return;
+      const data = message.params.data;
+      const marketName = typeof data.market === 'string' ? data.market : '';
+      const coin = marketName.endsWith('-USD-PERP')
+        ? marketName.slice(0, -'-USD-PERP'.length)
+        : '';
+      const market = byCoin.get(coin);
+      const book = market ? books.get(bookKey('paradex', market.coin)) : null;
+      if (!book) return;
+      book.bids.clear();
+      book.asks.clear();
+      for (const level of data.inserts ?? []) {
+        const price = finite(level.price);
+        const size = finite(level.size);
+        if (!(price > 0) || !(size > 0)) continue;
+        if (level.side === 'BUY') book.bids.set(price, size);
+        if (level.side === 'SELL') book.asks.set(price, size);
+      }
+      markBook(book, finite(data.last_updated_at), receivedAt);
     },
   );
 }
@@ -717,6 +774,7 @@ loadHistory();
 startedAt = Date.now();
 startLighter();
 startHyperliquid();
+startParadex();
 startBinance();
 startBybit();
 const evaluationTimer = setInterval(evaluate, SAMPLE_MS);
