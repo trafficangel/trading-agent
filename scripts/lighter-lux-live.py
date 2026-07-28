@@ -1262,10 +1262,6 @@ class LiveRunner:
         if signal["capture_status"] != "captured":
             self.decide(signal_id, "skip", f"capture {signal['capture_status']}")
             return
-        if not self.enabled:
-            self.decide(signal_id, "skip", "live runner disabled")
-            return
-
         trade = self.open_trade(str(signal["strategy_id"]))
         action = signal["action"]
         side = signal["side"]
@@ -1283,7 +1279,7 @@ class LiveRunner:
                 if not closed:
                     self.decide(signal_id, "error", "close failed", int(trade["id"]))
                     return
-                if reverse:
+                if reverse and self.enabled:
                     reason, trade_id = await self.enter(signal, strategy, side)
                     self.decide(
                         signal_id,
@@ -1292,7 +1288,12 @@ class LiveRunner:
                         trade_id,
                     )
                 else:
-                    self.decide(signal_id, "close", "strategy exit", int(trade["id"]))
+                    reason = (
+                        "reverse signal closed; live runner disabled"
+                        if reverse
+                        else "strategy exit"
+                    )
+                    self.decide(signal_id, "close", reason, int(trade["id"]))
                 return
             self.decide(
                 signal_id,
@@ -1304,6 +1305,9 @@ class LiveRunner:
 
         if action == "exit":
             self.decide(signal_id, "skip", "no matching live position")
+            return
+        if not self.enabled:
+            self.decide(signal_id, "skip", "live runner disabled")
             return
         reason, trade_id = await self.enter(signal, strategy, side)
         self.decide(

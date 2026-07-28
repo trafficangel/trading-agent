@@ -9,7 +9,7 @@ User=trader
 Group=trader
 WorkingDirectory=/home/trader/apps/trading-agent
 EnvironmentFile=/etc/trading-agent/lighter-live.env
-Environment=LIGHTER_LIVE_ENABLED=true
+Environment=LIGHTER_LIVE_ENABLED=false
 Environment=LIGHTER_LIVE_NOTIONAL_USD=100
 Environment=LIGHTER_LIVE_LEVERAGE=10
 Environment=LIGHTER_LIVE_DAILY_LOSS_USD=10
