@@ -401,6 +401,7 @@ const MAKER_HEDGE_LATENCY_MS = finiteEnv(
   500,
 );
 const MAKER_QUOTE_TTL_MS = finiteEnv('VENUE_ARB_MAKER_QUOTE_TTL_MS', 15_000);
+const MAKER_MAX_QUEUE_USD = finiteEnv('VENUE_ARB_MAKER_MAX_QUEUE_USD', 25_000);
 const MAKER_HEDGE_GRACE_MS = finiteEnv('VENUE_ARB_MAKER_HEDGE_GRACE_MS', 2_000);
 const MAKER_MAX_HOLD_MS = finiteEnv(
   'VENUE_ARB_MAKER_MAX_HOLD_MS',
@@ -1308,7 +1309,9 @@ function makerEntryQuoteLevel(
   const sameSide = side === 'buy'
     ? rawExtended.bids
     : rawExtended.asks;
-  return [quotePrice, sameSide.get(quotePrice) ?? 0];
+  const queueAhead = sameSide.get(quotePrice) ?? 0;
+  if (queueAhead * quotePrice > MAKER_MAX_QUEUE_USD) return null;
+  return [quotePrice, queueAhead];
 }
 
 function makerExitQuoteLevel(
@@ -1529,6 +1532,14 @@ function activateMakerQuote(now: number): void {
     remaining: quote.queue.remaining,
     filled: false,
   };
+  if (
+    quote.stage === 'entry'
+    && quote.queue.queueAhead * quote.price > MAKER_MAX_QUEUE_USD
+  ) {
+    makerTelemetry.placementRejects++;
+    makerQuote = null;
+    return;
+  }
   quote.activatedAt = now;
 }
 
@@ -1659,6 +1670,7 @@ function makerShadowStatus(): Record<string, unknown> {
       quoteLatencyMs: MAKER_QUOTE_LATENCY_MS,
       hedgeLatencyMs: MAKER_HEDGE_LATENCY_MS,
       quoteTtlMs: MAKER_QUOTE_TTL_MS,
+      maxQueueUsd: MAKER_MAX_QUEUE_USD,
       maxHoldMs: MAKER_MAX_HOLD_MS,
       independenceMs: MAKER_INDEPENDENCE_MS,
       sourceFreshMs: SHADOW_SOURCE_FRESH_MS,

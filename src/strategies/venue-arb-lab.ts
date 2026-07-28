@@ -219,6 +219,7 @@ type MakerShadow = {
     quoteLatencyMs?: number;
     hedgeLatencyMs?: number;
     quoteTtlMs?: number;
+    maxQueueUsd?: number;
     maxHoldMs?: number;
     independenceMs?: number;
     sourceFreshMs?: number;
@@ -1095,7 +1096,7 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Хедж</small><b>${makerShadow?.pendingHedge ? `${esc(makerShadow.pendingHedge.coin)} · ${makerShadow.pendingHedge.stage === 'entry' ? 'вход' : 'выход'} ожидает Lighter` : 'нет незахеджированной ноги'}</b></div>
           <div><small>Placement / hedge latency</small><b>${duration(makerShadow?.config?.quoteLatencyMs)} / ${duration(makerShadow?.config?.hedgeLatencyMs)}</b></div>
         </div>
-        <p>Это отдельная проверка пути без четырёх taker-комиссий: лимитная post-only заявка ставится на Extended, а исполненная нога хеджируется taker-ордером на Lighter. Fill не выдумывается по касанию цены: после задержки размещения фиксируется фактическая очередь перед нами, затем она и наш объём должны быть проторгованы реальными public-trade сообщениями. Backlog и сделки со старым exchange timestamp отбрасываются. После maker fill применяется задержка хеджа ${duration(makerShadow?.config?.hedgeLatencyMs)}, VWAP $${Number(makerShadow?.config?.notionalUsd ?? 500)}, funding и ${pctFromBps(makerShadow?.config?.executionBufferBps, false)} execution-буфера.</p>
+        <p>Это отдельная проверка пути без четырёх taker-комиссий: лимитная post-only заявка ставится на Extended, а исполненная нога хеджируется taker-ордером на Lighter. Fill не выдумывается по касанию цены: после задержки размещения фиксируется фактическая очередь перед нами, затем она и наш объём должны быть проторгованы реальными public-trade сообщениями. Входные котировки с очередью больше ${money(makerShadow?.config?.maxQueueUsd ?? 25_000)} отбрасываются как практически неисполнимые. Backlog и сделки со старым exchange timestamp отбрасываются. После maker fill применяется задержка хеджа ${duration(makerShadow?.config?.hedgeLatencyMs)}, VWAP $${Number(makerShadow?.config?.notionalUsd ?? 500)}, funding и ${pctFromBps(makerShadow?.config?.executionBufferBps, false)} execution-буфера.</p>
         <p class="va-wait"><b>Гейт капитала:</b> минимум ${Number(makerGate?.requiredSamples ?? 20)} независимых завершённых циклов, PASS ≥ ${pct(makerGate?.requiredPassPct)} и положительный суммарный net. До выполнения всех условий реальные maker-ордера не включаются.</p>
         <div class="va-table" data-va-pager="maker-shadow" data-page-size="20"><table><thead><tr>
           <th>UTC</th><th>Монета</th><th>Пара</th><th>Вход Ext / Lighter</th>
