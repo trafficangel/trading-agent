@@ -46,6 +46,11 @@ import {
   type MakerSide,
   type TakerSide,
 } from '../lib/venue-arb-maker.js';
+import {
+  GenericMakerShadow,
+  type GenericMakerCheckpoint,
+  type GenericMakerResult,
+} from '../lib/venue-arb-maker-shadow.js';
 
 type Venue =
   | 'lighter'
@@ -346,6 +351,14 @@ const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution-v4.ndjson');
 const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active-v4.json');
 const MAKER_RESULTS_PATH = resolve(DATA_DIR, 'maker-shadow-v1.ndjson');
 const MAKER_ACTIVE_PATH = resolve(DATA_DIR, 'maker-active-v1.json');
+const GRVT_MAKER_RESULTS_PATH = resolve(
+  DATA_DIR,
+  'grvt-maker-shadow-v1.ndjson',
+);
+const GRVT_MAKER_ACTIVE_PATH = resolve(
+  DATA_DIR,
+  'grvt-maker-active-v1.json',
+);
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 250);
 const NET_TRIGGER_BPS = finiteEnv('VENUE_ARB_NET_TRIGGER_BPS', 3);
@@ -433,6 +446,47 @@ const MAKER_INDEPENDENCE_MS = finiteEnv(
   'VENUE_ARB_MAKER_INDEPENDENCE_MS',
   5 * 60_000,
 );
+const GRVT_MAKER_NOTIONAL_USD = finiteEnv(
+  'VENUE_ARB_GRVT_MAKER_NOTIONAL_USD',
+  100,
+);
+const GRVT_MAKER_ENTRY_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_GRVT_MAKER_ENTRY_EDGE_BPS',
+  8,
+);
+const GRVT_MAKER_CANCEL_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_GRVT_MAKER_CANCEL_EDGE_BPS',
+  5,
+);
+const GRVT_MAKER_POST_FILL_NET_BPS = finiteEnv(
+  'VENUE_ARB_GRVT_MAKER_POST_FILL_NET_BPS',
+  4,
+);
+const GRVT_MAKER_EXIT_NET_BPS = finiteEnv(
+  'VENUE_ARB_GRVT_MAKER_EXIT_NET_BPS',
+  4,
+);
+const GRVT_MAKER_QUOTE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_GRVT_MAKER_QUOTE_LATENCY_MS',
+  1_000,
+);
+const GRVT_MAKER_HEDGE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_GRVT_MAKER_HEDGE_LATENCY_MS',
+  1_000,
+);
+const GRVT_MAKER_QUOTE_TTL_MS = finiteEnv(
+  'VENUE_ARB_GRVT_MAKER_QUOTE_TTL_MS',
+  60_000,
+);
+const GRVT_MAKER_MAX_QUEUE_USD = finiteEnv(
+  'VENUE_ARB_GRVT_MAKER_MAX_QUEUE_USD',
+  5_000,
+);
+const GRVT_MAKER_FEE_BPS = Number.isFinite(
+  Number(process.env.VENUE_ARB_GRVT_MAKER_FEE_BPS),
+)
+  ? Number(process.env.VENUE_ARB_GRVT_MAKER_FEE_BPS)
+  : -0.01;
 const FEED_STALL_MS = finiteEnv('VENUE_ARB_FEED_STALL_MS', 15_000);
 const RECONNECT_MS = 2_000;
 const HORIZONS_MS = [100, 250, 500, 1_000, 2_000, 5_000, 10_000] as const;
@@ -800,6 +854,42 @@ const makerTelemetry: MakerTelemetry = {
   lastTradeAt: null,
   lastQuoteAt: null,
 };
+const grvtMakerShadow = new GenericMakerShadow({
+  routeId: 'grvt-maker-lighter',
+  makerVenue: 'grvt',
+  hedgeVenue: 'lighter',
+  notionalUsd: GRVT_MAKER_NOTIONAL_USD,
+  entryEdgeBps: GRVT_MAKER_ENTRY_EDGE_BPS,
+  cancelEdgeBps: GRVT_MAKER_CANCEL_EDGE_BPS,
+  postFillNetBps: GRVT_MAKER_POST_FILL_NET_BPS,
+  exitNetBps: GRVT_MAKER_EXIT_NET_BPS,
+  quoteLatencyMs: GRVT_MAKER_QUOTE_LATENCY_MS,
+  hedgeLatencyMs: GRVT_MAKER_HEDGE_LATENCY_MS,
+  quoteTtlMs: GRVT_MAKER_QUOTE_TTL_MS,
+  maxQueueUsd: GRVT_MAKER_MAX_QUEUE_USD,
+  hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
+  maxHoldMs: MAKER_MAX_HOLD_MS,
+  independenceMs: MAKER_INDEPENDENCE_MS,
+  bookFreshMs: MAKER_BOOK_FRESH_MS,
+  sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  executionBufferBps: EXECUTION_BUFFER_BPS,
+  makerFeeBps: GRVT_MAKER_FEE_BPS,
+  hedgeTakerFeeBps: FEE_BPS.lighter,
+  makerFallbackTakerFeeBps: FEE_BPS.grvt,
+  fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+  requiredSamples: SHADOW_REQUIRED_SAMPLES,
+  requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+}, {
+  onResult: (result) => {
+    appendFileSync(GRVT_MAKER_RESULTS_PATH, `${JSON.stringify(result)}\n`);
+  },
+  onCheckpoint: (checkpoint) => {
+    atomicJson(GRVT_MAKER_ACTIVE_PATH, {
+      ...checkpoint,
+      updatedAt: Date.now(),
+    });
+  },
+});
 let startedAt = Date.now();
 let evaluations = 0;
 let sequence = 0;
@@ -2028,6 +2118,7 @@ function connect(
   });
   ws.on('error', (error) => {
     connections[venue].connected = false;
+    if (venue === 'grvt') grvtMakerShadow.setTradeStreamConnected(false);
     console.warn(`venue-arb ${venue} websocket error`, error.message);
   });
   ws.on('close', (code, reason) => {
@@ -2035,6 +2126,10 @@ function connect(
     if (venueSockets.get(venue) === ws) venueSockets.delete(venue);
     connections[venue].connected = false;
     connections[venue].reconnects++;
+    if (venue === 'grvt') {
+      grvtMakerShadow.setTradeStreamConnected(false);
+      grvtMakerShadow.recordTradeReconnect();
+    }
     console.warn(
       `venue-arb ${venue} closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
     );
@@ -2516,6 +2611,7 @@ function startGrvt(): void {
     'grvt',
     'wss://market-data.grvt.io/ws/full',
     (ws) => {
+      grvtMakerShadow.setTradeStreamConnected(true);
       ws.send(JSON.stringify({
         jsonrpc: '2.0',
         method: 'subscribe',
@@ -2524,6 +2620,15 @@ function startGrvt(): void {
           selectors: MARKETS.map(({ coin }) => `${coin}_USDT_Perp@100`),
         },
         id: 1,
+      }));
+      ws.send(JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'subscribe',
+        params: {
+          stream: 'v1.trade',
+          selectors: MARKETS.map(({ coin }) => `${coin}_USDT_Perp@50`),
+        },
+        id: 2,
       }));
     },
     (payload, receivedAt, ws) => {
@@ -2536,8 +2641,55 @@ function startGrvt(): void {
           instrument?: unknown;
           bids?: unknown;
           asks?: unknown;
+          is_taker_buyer?: unknown;
+          size?: unknown;
+          price?: unknown;
+          trade_id?: unknown;
+          venue?: unknown;
+          is_rpi?: unknown;
         };
       };
+      if (
+        message.stream === 'v1.trade'
+        && typeof message.feed?.instrument === 'string'
+      ) {
+        const suffix = '_USDT_Perp';
+        const coin = message.feed.instrument.endsWith(suffix)
+          ? message.feed.instrument.slice(0, -suffix.length)
+          : '';
+        const market = byCoin.get(coin);
+        const price = finite(message.feed.price);
+        const size = finite(message.feed.size);
+        const side = message.feed.is_taker_buyer === true
+          ? 'BUY'
+          : message.feed.is_taker_buyer === false
+            ? 'SELL'
+            : null;
+        if (
+          market
+          && side
+          && price > 0
+          && size > 0
+          && message.feed.venue === 'ORDERBOOK'
+          && message.feed.is_rpi !== true
+        ) {
+          grvtMakerShadow.processTrade({
+            id: `${market.coin}:${String(
+              message.feed.trade_id
+                ?? `${message.feed.event_time}:${price}:${size}:${side}`,
+            )}`,
+            coin: market.coin,
+            side,
+            price,
+            size,
+            tradeAt: normalizeExchangeTimestampMs(
+              finite(message.feed.event_time),
+              receivedAt,
+            ),
+          }, receivedAt);
+        }
+        return;
+      }
       if (
         message.stream !== 'v1.book.d'
         || typeof message.feed?.instrument !== 'string'
@@ -2962,6 +3114,7 @@ function writeStatus(): void {
     groupedSummaries: groupedSummaries(recentClosed),
     executionShadow: executionShadowStatus(),
     makerShadow: makerShadowStatus(),
+    grvtMakerShadow: grvtMakerShadow.status(),
     freshnessMs: Object.fromEntries(MARKETS.map((market) => [
       market.coin,
       Object.fromEntries(VENUES.map((venue) => [
@@ -3180,6 +3333,53 @@ function loadMakerState(): void {
   }
 }
 
+function loadGrvtMakerState(): void {
+  let results: GenericMakerResult[] = [];
+  let checkpoint: GenericMakerCheckpoint | null = null;
+  try {
+    results = tailLines(GRVT_MAKER_RESULTS_PATH)
+      .slice(-5_000)
+      .map((line) => JSON.parse(line) as GenericMakerResult);
+  } catch (error) {
+    console.warn(
+      'venue-arb GRVT maker history load',
+      (error as Error).message,
+    );
+  }
+  try {
+    if (existsSync(GRVT_MAKER_ACTIVE_PATH)) {
+      checkpoint = JSON.parse(
+        readFileSync(GRVT_MAKER_ACTIVE_PATH, 'utf8'),
+      ) as GenericMakerCheckpoint;
+    }
+  } catch (error) {
+    console.warn(
+      'venue-arb GRVT maker active load',
+      (error as Error).message,
+    );
+  }
+  grvtMakerShadow.restore(results, checkpoint);
+}
+
+function grvtMakerMarkets() {
+  return MARKETS.map((market) => {
+    const maker = books.get(bookKey('grvt', market.coin)) ?? null;
+    const hedge = executableBook('lighter', market.coin);
+    return {
+      coin: market.coin,
+      maker,
+      hedge: hedge
+        ? {
+          buyVwap: hedge.buyVwap500,
+          sellVwap: hedge.sellVwap500,
+          exchangeAt: hedge.exchangeAt,
+          receivedAt: hedge.receivedAt,
+        }
+        : null,
+    };
+  });
+}
+
 function prepareMakerShutdown(now: number): void {
   if (
     makerQuote?.firstFillAt != null
@@ -3201,6 +3401,7 @@ function shutdown(signal: string): void {
   // decay distribution with artificial "closed" opportunities.
   active.clear();
   prepareMakerShutdown(Date.now());
+  grvtMakerShadow.shutdown(Date.now());
   writeStatus();
   writeExecutionStatus();
   for (const ws of sockets) ws.close();
@@ -3213,9 +3414,13 @@ mkdirSync(DATA_DIR, { recursive: true });
 if (!existsSync(OPPORTUNITIES_PATH)) writeFileSync(OPPORTUNITIES_PATH, '');
 if (!existsSync(SHADOW_RESULTS_PATH)) writeFileSync(SHADOW_RESULTS_PATH, '');
 if (!existsSync(MAKER_RESULTS_PATH)) writeFileSync(MAKER_RESULTS_PATH, '');
+if (!existsSync(GRVT_MAKER_RESULTS_PATH)) {
+  writeFileSync(GRVT_MAKER_RESULTS_PATH, '');
+}
 loadHistory();
 loadShadowState();
 loadMakerState();
+loadGrvtMakerState();
 startedAt = Date.now();
 startLighter();
 startHyperliquid();
@@ -3231,6 +3436,7 @@ startBybit();
 const evaluationTimer = setInterval(() => {
   evaluate();
   evaluateMakerShadow(Date.now());
+  grvtMakerShadow.evaluate(Date.now(), grvtMakerMarkets());
   writeExecutionStatus();
 }, SAMPLE_MS);
 const statusTimer = setInterval(writeStatus, 1_000);
