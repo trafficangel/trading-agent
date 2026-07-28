@@ -23,6 +23,9 @@ type Summary = {
   closed?: number;
   viable?: number;
   viablePct?: number | null;
+  strictStarts?: number;
+  strictRetained1000?: number;
+  strictRetained1000Pct?: number | null;
   medianPeakRawBps?: number | null;
   p95PeakRawBps?: number | null;
   medianPeakNetBps?: number | null;
@@ -336,6 +339,37 @@ function shadowBlockers(telemetry: ShadowRouteTelemetry | undefined): string {
   return rows.length
     ? rows.map((row) => `${labels[row.reason]} · ${row.count}`).join('<br>')
     : 'нет отклонений';
+}
+
+function capitalRecommendation(
+  shadow: ExecutionShadow | undefined,
+  groups: Record<string, Summary>,
+): string {
+  const routes = Object.values(shadow?.routes ?? {}).filter(
+    (route) => route.buyVenue && route.sellVenue,
+  );
+  const ready = routes.find((route) => route.readiness?.ready);
+  if (ready) {
+    return `<p class="va-wait"><b class="pos">КАНДИДАТ ПРОШЁЛ SHADOW-GATE: ${esc(shadowRouteLabel(ready))}.</b> Перед пополнением требуется отдельный preflight балансов, API-прав и допустимого плеча; точную сумму и недостающее подключение оператор получит отдельной командой.</p>`;
+  }
+  const ranked = routes
+    .map((route) => ({
+      route,
+      summary: groups[`pair:${route.buyVenue}→${route.sellVenue}`] ?? {},
+    }))
+    .filter(({ summary }) => Number(summary.strictStarts ?? 0) > 0)
+    .sort((a, b) => (
+      Number(b.summary.strictRetained1000 ?? 0)
+      - Number(a.summary.strictRetained1000 ?? 0)
+      || Number(b.summary.strictStarts ?? 0)
+      - Number(a.summary.strictStarts ?? 0)
+    ));
+  const leader = ranked[0];
+  if (!leader) {
+    return '<p class="va-wait"><b>КАПИТАЛ: ПОКА НЕ ВНОСИТЬ.</b> Ни один маршрут ещё не имеет даже предварительной выборки с net ≥ +0.10%.</p>';
+  }
+  const gate = leader.route.readiness;
+  return `<p class="va-wait"><b>КАПИТАЛ: ПОКА НЕ ВНОСИТЬ.</b> Предварительный кандидат — <b>${esc(shadowRouteLabel(leader.route))}</b>: исторически ${Number(leader.summary.strictRetained1000 ?? 0)} из ${Number(leader.summary.strictStarts ?? 0)} окон сохранили net ≥ +0.10% через 1 секунду, но строгий forward сейчас ${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 50)}. После PASS здесь появятся две площадки, а точный размер пополнения будет рассчитан по доступному плечу и запасу маржи.</p>`;
 }
 
 function pct(value: unknown): string {
@@ -871,6 +905,7 @@ async function render(lang: Lang): Promise<string> {
           <span>ЕДИНЫЙ GATE · БЕЗ РЕАЛЬНЫХ ОРДЕРОВ</span>
         </div>
         <p>Все направления проверяются одинаково: $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)}, три свежих подтверждения, все комиссии, funding, execution buffer и консервативная latency. Маршрут не получает преимущества за счёт ослабления фильтра.</p>
+        ${capitalRecommendation(executionShadow, groups)}
         <div class="va-table" data-va-pager="execution-shadow-scout-routes" data-page-size="20"><table><thead><tr>
           <th>Маршрут</th><th>Samples</th><th>PASS</th><th>Окна ≥0.10%</th>
           <th>Лучший сейчас</th><th>Пик</th><th>Почему нет входа сейчас</th><th>Entry / exit</th><th>Статус</th>

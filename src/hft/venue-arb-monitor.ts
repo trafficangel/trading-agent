@@ -1511,6 +1511,12 @@ function summary(rows: Opportunity[]): Record<string, unknown> {
     && Number.isFinite(row.peakNetBps1000)
   ));
   const viable = closed.filter((row) => row.startNetBps1000 > NET_TRIGGER_BPS);
+  const strictStarts = closed.filter(
+    (row) => row.startNetBps1000 >= SHADOW_ENTRY_NET_BPS,
+  );
+  const strictRetained1000 = strictStarts.filter(
+    (row) => Number(row.horizons['1000']?.netBps1000) >= SHADOW_ENTRY_NET_BPS,
+  );
   const survival = Object.fromEntries(HORIZONS_MS.map((horizon) => {
     const samples = closed
       .map((row) => row.horizons[String(horizon)])
@@ -1530,6 +1536,11 @@ function summary(rows: Opportunity[]): Record<string, unknown> {
     closed: closed.length,
     viable: viable.length,
     viablePct: closed.length ? viable.length / closed.length * 100 : null,
+    strictStarts: strictStarts.length,
+    strictRetained1000: strictRetained1000.length,
+    strictRetained1000Pct: strictStarts.length
+      ? strictRetained1000.length / strictStarts.length * 100
+      : null,
     medianPeakRawBps: percentile(closed.map((row) => row.peakRawBps1000), 0.5),
     p95PeakRawBps: percentile(closed.map((row) => row.peakRawBps1000), 0.95),
     medianPeakNetBps: percentile(closed.map((row) => row.peakNetBps1000), 0.5),
