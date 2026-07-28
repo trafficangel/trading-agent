@@ -641,7 +641,9 @@ function shadowRouteClass(
   const venueClass = (venue: Venue) => (
     venue === 'binance' || venue === 'bybit' ? 'CEX' : 'DEX'
   );
-  return `${venueClass(row.buyVenue)}/${venueClass(row.sellVenue)}`;
+  const buyClass = venueClass(row.buyVenue);
+  const sellClass = venueClass(row.sellVenue);
+  return buyClass === sellClass ? `${buyClass}/${sellClass}` : 'DEX/CEX';
 }
 
 function executionShadowRows(

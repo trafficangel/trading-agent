@@ -1521,7 +1521,8 @@ function summary(rows: Opportunity[]): Record<string, unknown> {
     (row) => row.startNetBps1000 >= SHADOW_ENTRY_NET_BPS,
   );
   const strictObserved1000 = strictStarts.flatMap((row) => {
-    const netBps1000 = Number(row.horizons['1000']?.netBps1000);
+    const observed = row.horizons['1000']?.netBps1000;
+    const netBps1000 = observed == null ? Number.NaN : Number(observed);
     return Number.isFinite(netBps1000) ? [netBps1000] : [];
   });
   const strictRetained1000 = strictStarts.filter(
