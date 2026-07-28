@@ -701,9 +701,9 @@ function shutdown(signal: string): void {
   shuttingDown = true;
   clearInterval(evaluationTimer);
   clearInterval(statusTimer);
-  for (const opportunity of [...active.values()]) {
-    closeOpportunity(opportunity, Date.now(), 'shutdown');
-  }
+  // A service restart is not market convergence and must not contaminate the
+  // decay distribution with artificial "closed" opportunities.
+  active.clear();
   writeStatus();
   for (const ws of sockets) ws.close();
   console.warn(`venue-arb shutdown ${signal}`);
