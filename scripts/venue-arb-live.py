@@ -248,6 +248,18 @@ class Canary:
             if row.get("status") in {"closed", "failed_flat"}
         ]
 
+    def completed_route_trades(self) -> list[dict[str, Any]]:
+        return [
+            row
+            for row in self.completed_trades()
+            if row.get("routeId") == self.route_id
+            or (
+                not row.get("routeId")
+                and str(row.get("route") or "").lower()
+                == self.route_label.lower()
+            )
+        ]
+
     def today_net(self) -> float:
         today = time.strftime("%Y-%m-%d", time.gmtime())
         return sum(
@@ -1075,10 +1087,10 @@ class Canary:
         self.acquire_lock()
         await self.preflight()
         if not self.enabled:
-            self.write_status("dry_run_ready")
+            self.write_status("dry_run_ready", reason=None, error=None)
             self.log("dry_run_ready")
             return
-        if len(self.completed_trades()) >= self.max_trades:
+        if len(self.completed_route_trades()) >= self.max_trades:
             self.write_status("completed", reason="max trade count reached")
             return
         self.write_status("armed")
@@ -1089,7 +1101,7 @@ class Canary:
             threshold_bps=self.entry_net_bps,
         )
         while self.running:
-            if len(self.completed_trades()) >= self.max_trades:
+            if len(self.completed_route_trades()) >= self.max_trades:
                 self.write_status("completed", reason="max trade count reached")
                 return
             candidate = self.candidate()
@@ -1131,6 +1143,21 @@ def self_test() -> None:
         estimated_exit_fees=0.025025,
     )
     assert round(reverse_profit, 6) == 0.149925
+    route_guard = object.__new__(Canary)
+    route_guard.route_id = "lighter-extended"
+    route_guard.route_label = "Lighter → Extended"
+    route_guard.trades = lambda: [
+        {
+            "status": "closed",
+            "route": "Extended → Lighter",
+        },
+        {
+            "status": "closed",
+            "routeId": "lighter-extended",
+            "route": "Lighter → Extended",
+        },
+    ]
+    assert len(route_guard.completed_route_trades()) == 1
     signal_guard = object.__new__(Canary)
     signal_guard.running = True
     signal_guard.shutdown_requested = False
