@@ -12,10 +12,11 @@ EnvironmentFile=/etc/trading-agent/extended-arb.env
 EnvironmentFile=/etc/trading-agent/lighter-live.env
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/trading-agent/data/venue-arb
 Environment=VENUE_ARB_LIVE_ENABLED=false
+Environment=VENUE_ARB_LIVE_EXECUTION=maker-taker
 Environment=VENUE_ARB_LIVE_ROUTE=lighter-extended
-Environment=VENUE_ARB_LIVE_NOTIONAL_USD=300
+Environment=VENUE_ARB_LIVE_NOTIONAL_USD=100
 Environment=VENUE_ARB_LIVE_LEVERAGE=5
-Environment=VENUE_ARB_LIVE_ENTRY_NET_BPS=15
+Environment=VENUE_ARB_LIVE_ENTRY_NET_BPS=10
 Environment=VENUE_ARB_LIVE_EXIT_MIN_PROFIT_BPS=10
 Environment=VENUE_ARB_LIVE_EXIT_CONFIRMATIONS=3
 Environment=VENUE_ARB_LIVE_EXTENDED_TAKER_BPS=2.5
@@ -26,8 +27,11 @@ Environment=VENUE_ARB_LIVE_EXIT_SLIPPAGE=0.001
 Environment=VENUE_ARB_LIVE_EMERGENCY_SLIPPAGE=0.01
 Environment=VENUE_ARB_LIVE_MAX_HOLD_MS=900000
 Environment=VENUE_ARB_LIVE_MAX_ADVERSE_BPS=20
+Environment=VENUE_ARB_LIVE_MAKER_MAX_QUEUE_USD=5000
+Environment=VENUE_ARB_LIVE_MAKER_MIN_TTL_MS=5000
+Environment=VENUE_ARB_LIVE_MAKER_ORDER_TTL_MS=15000
 Environment=VENUE_ARB_LIVE_MAX_TRADES=1
-Environment=VENUE_ARB_LIVE_DAILY_LOSS_USD=5
+Environment=VENUE_ARB_LIVE_DAILY_LOSS_USD=2
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/trader/venvs/venue-arb-live/bin/python /home/trader/apps/trading-agent/scripts/venue-arb-live.py
 Restart=on-failure

@@ -20,6 +20,7 @@ import os
 import signal
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,7 @@ import lighter
 from x10.clients.rest import RestApiClient
 from x10.config import MAINNET_CONFIG
 from x10.core.stark_account import StarkPerpetualAccount
-from x10.models.order import OrderSide, OrderType, TimeInForce
+from x10.models.order import OrderSide, OrderStatus, OrderType, TimeInForce
 from x10.signing.order_object import create_order_object
 
 
@@ -83,14 +84,27 @@ class Canary:
             os.getenv("VENUE_ARB_LIVE_ENABLED", "false").lower() == "true"
             and not force_dry_run
         )
+        self.execution_mode = os.getenv(
+            "VENUE_ARB_LIVE_EXECUTION", "taker-taker"
+        ).strip().lower()
+        if self.execution_mode not in {"taker-taker", "maker-taker"}:
+            raise RuntimeError(
+                f"unsupported VENUE_ARB_LIVE_EXECUTION={self.execution_mode!r}"
+            )
         self.route_id = os.getenv(
             "VENUE_ARB_LIVE_ROUTE", "extended-lighter"
         ).strip().lower()
-        if self.route_id not in ROUTES:
+        if self.execution_mode == "taker-taker" and self.route_id not in ROUTES:
             raise RuntimeError(
                 f"unsupported VENUE_ARB_LIVE_ROUTE={self.route_id!r}"
             )
-        self.buy_venue, self.sell_venue, self.route_label = ROUTES[self.route_id]
+        if self.execution_mode == "maker-taker":
+            self.route_id = "extended-maker-lighter"
+            self.buy_venue = "extended"
+            self.sell_venue = "lighter"
+            self.route_label = "Extended maker ↔ Lighter taker"
+        else:
+            self.buy_venue, self.sell_venue, self.route_label = ROUTES[self.route_id]
         self.notional = float(os.getenv("VENUE_ARB_LIVE_NOTIONAL_USD", "300"))
         self.leverage = int(os.getenv("VENUE_ARB_LIVE_LEVERAGE", "5"))
         self.entry_net_bps = float(os.getenv("VENUE_ARB_LIVE_ENTRY_NET_BPS", "15"))
@@ -120,6 +134,15 @@ class Canary:
         self.max_hold_ms = int(os.getenv("VENUE_ARB_LIVE_MAX_HOLD_MS", "60000"))
         self.max_adverse_bps = float(
             os.getenv("VENUE_ARB_LIVE_MAX_ADVERSE_BPS", "20")
+        )
+        self.maker_max_queue_usd = float(
+            os.getenv("VENUE_ARB_LIVE_MAKER_MAX_QUEUE_USD", "5000")
+        )
+        self.maker_min_ttl_ms = int(
+            os.getenv("VENUE_ARB_LIVE_MAKER_MIN_TTL_MS", "5000")
+        )
+        self.maker_order_ttl_ms = int(
+            os.getenv("VENUE_ARB_LIVE_MAKER_ORDER_TTL_MS", "15000")
         )
         self.cooldown_ms = int(
             float(os.getenv("VENUE_ARB_LIVE_COOLDOWN_SECONDS", "900")) * 1000
@@ -215,6 +238,7 @@ class Canary:
             "updatedAt": now,
             "enabled": self.enabled,
             "state": state,
+            "executionMode": self.execution_mode,
             "notionalUsdPerLeg": self.notional,
             "leverage": self.leverage,
             "entryNetPct": self.entry_net_bps / 100,
@@ -259,6 +283,15 @@ class Canary:
                 == self.route_label.lower()
             )
         ]
+
+    def completed_mode_trades(self) -> list[dict[str, Any]]:
+        if self.execution_mode == "maker-taker":
+            return [
+                row
+                for row in self.completed_trades()
+                if row.get("executionMode") == self.execution_mode
+            ]
+        return self.completed_route_trades()
 
     def today_net(self) -> float:
         today = time.strftime("%Y-%m-%d", time.gmtime())
@@ -348,13 +381,19 @@ class Canary:
         return list(response.data or [])
 
     async def ensure_flat(self) -> None:
-        extended, lighter_rows = await asyncio.gather(
-            self.extended_positions(), self.lighter_positions()
+        assert self.extended is not None
+        extended, lighter_rows, open_orders = await asyncio.gather(
+            self.extended_positions(),
+            self.lighter_positions(),
+            self.extended.account.get_open_orders(),
         )
-        if extended or lighter_rows:
+        if open_orders.error:
+            raise RuntimeError("Extended open orders unavailable")
+        if extended or lighter_rows or list(open_orders.data or []):
             raise RuntimeError(
                 f"pre-existing position: Extended={len(extended)} "
-                f"Lighter={len(lighter_rows)}"
+                f"Lighter={len(lighter_rows)} "
+                f"ExtendedOrders={len(list(open_orders.data or []))}"
             )
 
     async def balances(self) -> tuple[float, float]:
@@ -452,6 +491,54 @@ class Canary:
             key=lambda row: float(row.get("currentNetBps1000") or -math.inf),
         )
 
+    def maker_candidate(self) -> dict[str, Any] | None:
+        status = self.read_json(self.monitor_path, {})
+        now = int(time.time() * 1000)
+        if now - int(status.get("updatedAt", 0) or 0) > self.fresh_ms:
+            self.last_rejection = "maker monitor snapshot stale"
+            return None
+        maker = status.get("makerShadow") or {}
+        quote = maker.get("quote") or {}
+        queue = quote.get("queue") or {}
+        coin = str(quote.get("coin") or "")
+        price = float(quote.get("price") or 0)
+        queue_ahead = float(queue.get("queueAhead") or 0)
+        projected_net_bps = float(quote.get("projectedNetBps") or -math.inf)
+        expires_at = int(quote.get("expiresAt") or 0)
+        freshness = (status.get("freshnessMs") or {}).get(coin) or {}
+        if (
+            quote.get("stage") != "entry"
+            or quote.get("activatedAt") is None
+            or maker.get("pair") is not None
+            or maker.get("pendingHedge") is not None
+            or coin not in MARKETS
+            or quote.get("side") not in {"buy", "sell"}
+            or price <= 0
+            or projected_net_bps < self.entry_net_bps
+            or queue_ahead * price > self.maker_max_queue_usd
+            or expires_at - now < self.maker_min_ttl_ms
+            or float(freshness.get("extended") or math.inf)
+            > self.source_fresh_ms
+            or float(freshness.get("lighter") or math.inf)
+            > self.source_fresh_ms
+        ):
+            self.last_rejection = (
+                f"waiting maker net ≥{self.entry_net_bps:.1f} bps, "
+                f"queue ≤${self.maker_max_queue_usd:.0f}"
+            )
+            return None
+        self.last_rejection = None
+        return {
+            "id": str(quote.get("id")),
+            "coin": coin,
+            "side": str(quote.get("side")),
+            "price": price,
+            "queueAheadUsd": queue_ahead * price,
+            "projectedNetBps": projected_net_bps,
+            "expiresAt": expires_at,
+            "monitorUpdatedAt": int(status.get("updatedAt") or 0),
+        }
+
     def common_quantity(self, coin: str, price: float) -> Decimal:
         market = self.extended_markets[f"{coin}-USD"]
         ext_tick = market.trading_config.min_order_size_change
@@ -469,6 +556,20 @@ class Canary:
         if quantity <= 0 or float(quantity) * price < self.notional * 0.9:
             raise RuntimeError("common order quantity is too small")
         return quantity
+
+    def lighter_compatible_quantity(self, coin: str, quantity: float) -> Decimal:
+        market_id = MARKETS[coin]
+        scale = Decimal(
+            10 ** int(self.lighter_meta[market_id]["size_decimals"])
+        )
+        tick = Decimal(1) / scale
+        raw = Decimal(str(quantity))
+        result = (raw / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
+        if result <= 0:
+            raise RuntimeError("maker fill is below Lighter minimum quantity")
+        if float(raw - result) > max(float(raw) * 0.002, float(tick) / 10):
+            raise RuntimeError("maker partial fill cannot be hedged precisely")
+        return result
 
     def extended_worst_price(
         self, coin: str, reference: float, side: OrderSide, slippage: float
@@ -530,6 +631,144 @@ class Canary:
             post_only=False,
             taker_fee=Decimal("0.00025"),
         )
+
+    def create_extended_maker_order(
+        self,
+        coin: str,
+        quantity: Decimal,
+        price: float,
+        side: OrderSide,
+    ) -> Any:
+        assert self.extended is not None
+        market = self.extended_markets[f"{coin}-USD"]
+        rounding = ROUND_FLOOR if side == OrderSide.BUY else ROUND_CEILING
+        maker_price = market.trading_config.round_price(
+            Decimal(str(price)), rounding_direction=rounding
+        )
+        return create_order_object(
+            account=self.extended.stark_account,
+            order_type=OrderType.LIMIT,
+            starknet_domain=self.extended.config.signing.starknet_domain,
+            market=market,
+            side=side,
+            amount_of_synthetic=quantity,
+            price=maker_price,
+            time_in_force=TimeInForce.GTT,
+            expire_time=datetime.now(timezone.utc)
+            + timedelta(milliseconds=self.maker_order_ttl_ms),
+            reduce_only=False,
+            post_only=True,
+            taker_fee=Decimal("0"),
+        )
+
+    async def place_extended_maker(
+        self,
+        coin: str,
+        quantity: Decimal,
+        price: float,
+        side: OrderSide,
+    ) -> int:
+        assert self.extended is not None
+        order = self.create_extended_maker_order(
+            coin, quantity, price, side
+        )
+        response = await self.extended.orders.place_order(order=order)
+        if response.error or response.data is None:
+            message = response.error.message if response.error else "empty response"
+            raise RuntimeError(f"Extended maker order rejected: {message}")
+        return int(response.data.id)
+
+    @staticmethod
+    def order_status_value(status: Any) -> str:
+        return str(getattr(status, "value", status)).upper()
+
+    async def cancel_extended_order(self, order_id: int) -> None:
+        assert self.extended is not None
+        response = await self.extended.orders.cancel_order(order_id)
+        if response.error:
+            raise RuntimeError(
+                f"Extended cancel rejected: {response.error.message}"
+            )
+
+    async def cancel_all_extended_orders(self) -> None:
+        assert self.extended is not None
+        response = await self.extended.orders.mass_cancel(cancel_all=True)
+        if response.error:
+            raise RuntimeError(
+                f"Extended mass cancel rejected: {response.error.message}"
+            )
+
+    async def wait_extended_maker_fill(
+        self,
+        coin: str,
+        order_id: int,
+        deadline_at: int,
+    ) -> Fill | None:
+        assert self.extended is not None
+        market = f"{coin}-USD"
+        saw_fill = False
+        final_statuses = {
+            OrderStatus.FILLED.value,
+            OrderStatus.CANCELLED.value,
+            OrderStatus.REJECTED.value,
+            OrderStatus.EXPIRED.value,
+        }
+        finalized = False
+        while int(time.time() * 1000) < deadline_at:
+            response = await self.extended.account.get_order_by_id(order_id)
+            if response.error or response.data is None:
+                await asyncio.sleep(0.1)
+                continue
+            row = response.data
+            filled_qty = float(row.filled_qty or 0)
+            status = self.order_status_value(row.status)
+            if filled_qty > 0:
+                saw_fill = True
+                if status not in final_statuses:
+                    await self.cancel_extended_order(order_id)
+                else:
+                    finalized = True
+                break
+            if status in final_statuses:
+                finalized = True
+                break
+            await asyncio.sleep(0.1)
+        else:
+            await self.cancel_extended_order(order_id)
+
+        settle_deadline = time.monotonic() + 3
+        while time.monotonic() < settle_deadline:
+            response = await self.extended.account.get_order_by_id(order_id)
+            if response.error or response.data is None:
+                await asyncio.sleep(0.1)
+                continue
+            row = response.data
+            if float(row.filled_qty or 0) > 0:
+                saw_fill = True
+            if self.order_status_value(row.status) in final_statuses:
+                finalized = True
+                break
+            await asyncio.sleep(0.1)
+        if not finalized:
+            await self.cancel_all_extended_orders()
+            await asyncio.sleep(0.5)
+            response = await self.extended.account.get_order_by_id(order_id)
+            if (
+                response.error
+                or response.data is None
+                or self.order_status_value(response.data.status)
+                not in final_statuses
+            ):
+                raise RuntimeError(
+                    "Extended maker remainder cancellation is unconfirmed"
+                )
+            saw_fill = saw_fill or float(response.data.filled_qty or 0) > 0
+        if not saw_fill:
+            return None
+        fill = await self.extended_fill(market, order_id)
+        if fill is None:
+            raise RuntimeError("Extended maker fill is missing from trade history")
+        return fill
 
     async def place_lighter(
         self,
@@ -810,6 +1049,298 @@ class Canary:
             "quoteAt": float(status.get("updatedAt", 0) or 0),
         }
 
+    def projected_maker_exit(
+        self,
+        coin: str,
+        *,
+        extended_long: bool,
+        ext_fill: Fill,
+        lit_fill: Fill,
+        quantity: float,
+    ) -> dict[str, float] | None:
+        status = self.read_json(self.execution_path, {})
+        now = int(time.time() * 1000)
+        if (
+            status.get("version") != "venue-arb-execution-v2"
+            or now - int(status.get("updatedAt", 0) or 0) > self.fresh_ms
+        ):
+            return None
+        quote = (status.get("closingQuotes") or {}).get(coin) or {}
+        ages = (
+            float(quote.get("extendedBookAgeMs") or math.inf),
+            float(quote.get("lighterBookAgeMs") or math.inf),
+        )
+        source_ages = (
+            float(quote.get("extendedSourceAgeMs") or math.inf),
+            float(quote.get("lighterSourceAgeMs") or math.inf),
+        )
+        if extended_long:
+            ext_exit = float(quote.get("extendedSellVwap") or 0)
+            lit_exit = float(quote.get("lighterBuyVwap") or 0)
+            gross = (
+                (ext_exit - ext_fill.price)
+                + (lit_fill.price - lit_exit)
+            ) * quantity
+        else:
+            ext_exit = float(quote.get("extendedBuyVwap") or 0)
+            lit_exit = float(quote.get("lighterSellVwap") or 0)
+            gross = (
+                (ext_fill.price - ext_exit)
+                + (lit_exit - lit_fill.price)
+            ) * quantity
+        if (
+            max(ages) > self.source_fresh_ms
+            or max(source_ages) > self.source_fresh_ms
+            or min(ext_exit, lit_exit) <= 0
+        ):
+            return None
+        estimated_exit_fees = (
+            ext_exit * quantity * self.extended_taker_bps / 10_000
+        )
+        net = gross - ext_fill.fee - lit_fill.fee - estimated_exit_fees
+        return {
+            "extendedExitVwap": ext_exit,
+            "lighterExitVwap": lit_exit,
+            "estimatedExitFeesUsd": estimated_exit_fees,
+            "netPnlUsd": net,
+            "netPnlPct": net / max(ext_fill.notional, 1e-9) * 100,
+            "quoteAt": float(status.get("updatedAt", 0) or 0),
+        }
+
+    async def execute_maker(self, candidate: dict[str, Any]) -> None:
+        coin = str(candidate["coin"])
+        side = str(candidate["side"])
+        extended_long = side == "buy"
+        ext_side = OrderSide.BUY if extended_long else OrderSide.SELL
+        quantity = self.common_quantity(coin, float(candidate["price"]))
+        started_at = int(time.time() * 1000)
+        route = (
+            "Extended maker long → Lighter short"
+            if extended_long
+            else "Extended maker short → Lighter long"
+        )
+        trade: dict[str, Any] = {
+            "id": f"M{started_at}",
+            "status": "maker_opening",
+            "executionMode": self.execution_mode,
+            "coin": coin,
+            "routeId": self.route_id,
+            "route": route,
+            "opportunityId": str(candidate["id"]),
+            "signalAt": int(candidate.get("monitorUpdatedAt") or started_at),
+            "startedAt": started_at,
+            "entryNetPct": float(candidate["projectedNetBps"]) / 100,
+            "queueAheadUsd": round(float(candidate["queueAheadUsd"]), 4),
+            "notionalUsdPerLeg": self.notional,
+            "leverage": self.leverage,
+            "quantityRequested": float(quantity),
+            "makerPrice": float(candidate["price"]),
+        }
+        self.trade_open = True
+        self.write_status("maker_opening", activeTrade=trade)
+        self.log("maker_submit", **trade)
+        order_id = await self.place_extended_maker(
+            coin, quantity, float(candidate["price"]), ext_side
+        )
+        trade["entryExtendedOrderId"] = order_id
+        deadline_at = min(
+            int(candidate["expiresAt"]),
+            started_at + self.maker_order_ttl_ms,
+        )
+        ext_fill = await self.wait_extended_maker_fill(
+            coin, order_id, deadline_at
+        )
+        if ext_fill is None:
+            trade.update(
+                status="maker_expired_unfilled",
+                closedAt=int(time.time() * 1000),
+                netPnlUsd=0,
+                netPnlPct=0,
+            )
+            self.append_trade(trade)
+            self.trade_open = False
+            self.write_status("armed", activeTrade=None, lastTrade=trade)
+            self.log("maker_unfilled", **trade)
+            return
+
+        try:
+            hedge_quantity = self.lighter_compatible_quantity(
+                coin, ext_fill.quantity
+            )
+        except Exception:
+            with contextlib.suppress(Exception):
+                await self.flatten(coin, emergency=True)
+            raise
+        hedge_started = int(time.time() * 1000)
+        lit_order = await self.place_lighter(
+            coin,
+            hedge_quantity,
+            is_ask=extended_long,
+            reduce_only=False,
+            slippage=self.entry_slippage,
+        )
+        lit_fill = await self.lighter_fill(coin, lit_order)
+        positions = await self.wait_positions(coin, want_open=True, timeout=4)
+        ext_position, lit_position = positions
+        ext_position_side = str(
+            getattr(ext_position, "side", "")
+        ).upper()
+        lit_sign = int((lit_position or {}).get("sign", 0))
+        expected_ext_side = "LONG" if extended_long else "SHORT"
+        expected_lit_sign = -1 if extended_long else 1
+        if (
+            lit_fill is None
+            or ext_position is None
+            or lit_position is None
+            or ext_position_side != expected_ext_side
+            or lit_sign != expected_lit_sign
+            or abs(ext_fill.quantity - lit_fill.quantity)
+            > max(ext_fill.quantity, lit_fill.quantity) * 0.002
+        ):
+            with contextlib.suppress(Exception):
+                await self.flatten(coin, emergency=True)
+            trade.update(
+                status="failed_flat",
+                closedAt=int(time.time() * 1000),
+                error="maker fill hedge did not reconcile",
+                entryExtended=asdict(ext_fill),
+                entryLighter=asdict(lit_fill) if lit_fill else None,
+                netPnlUsd=0,
+            )
+            self.append_trade(trade)
+            self.trade_open = False
+            self.write_status("blocked", activeTrade=None, lastTrade=trade)
+            return
+
+        opened_at = max(
+            ext_fill.filled_at or started_at,
+            lit_fill.filled_at or hedge_started,
+        )
+        trade.update(
+            status="open",
+            openedAt=opened_at,
+            makerToHedgeMs=max(0, hedge_started - (ext_fill.filled_at or started_at)),
+            entryLatencyMs=opened_at - started_at,
+            quantity=float(hedge_quantity),
+            entryExtended=asdict(ext_fill),
+            entryLighter=asdict(lit_fill),
+        )
+        self.write_status("open", activeTrade=trade)
+        self.log("maker_hedged", **trade)
+        profit_confirmations = 0
+        projected: dict[str, float] | None = None
+        last_profit_quote_at = 0.0
+        actual_notional = min(ext_fill.notional, lit_fill.notional)
+        minimum_profit_usd = (
+            actual_notional * self.exit_min_profit_bps / 10_000
+        )
+        maximum_loss_usd = (
+            actual_notional * self.max_adverse_bps / 10_000
+        )
+        while True:
+            now = int(time.time() * 1000)
+            projected = self.projected_maker_exit(
+                coin,
+                extended_long=extended_long,
+                ext_fill=ext_fill,
+                lit_fill=lit_fill,
+                quantity=float(hedge_quantity),
+            )
+            if now - opened_at >= self.max_hold_ms:
+                close_reason = "max_hold"
+                break
+            if (
+                projected is not None
+                and projected["netPnlUsd"] <= -maximum_loss_usd
+            ):
+                close_reason = "adverse_basis"
+                break
+            if (
+                projected is not None
+                and projected["netPnlUsd"] >= minimum_profit_usd
+                and projected["quoteAt"] > last_profit_quote_at
+            ):
+                profit_confirmations += 1
+                last_profit_quote_at = projected["quoteAt"]
+            elif (
+                projected is None
+                or projected["netPnlUsd"] < minimum_profit_usd
+            ):
+                profit_confirmations = 0
+            if profit_confirmations >= self.exit_confirmations:
+                close_reason = "projected_net_profit"
+                break
+            if (
+                self.shutdown_requested
+                and time.monotonic() - self.last_status_write >= 1
+            ):
+                self.write_status(
+                    "shutdown_pending_flatten",
+                    activeTrade={
+                        **trade,
+                        "projectedExit": projected,
+                        "minimumProfitUsd": minimum_profit_usd,
+                    },
+                )
+            await asyncio.sleep(0.05)
+
+        close_started = int(time.time() * 1000)
+        self.write_status(
+            "closing", activeTrade={**trade, "closeReason": close_reason}
+        )
+        exit_orders = await self.flatten(coin, emergency=False)
+        ext_exit, lit_exit = await asyncio.gather(
+            self.extended_fill(
+                f"{coin}-USD", exit_orders["extended"]
+            ),
+            self.lighter_fill(coin, exit_orders["lighter"]),
+        )
+        if ext_exit is None or lit_exit is None:
+            raise RuntimeError("maker exit fills missing after flat confirmation")
+        closed_at = max(
+            ext_exit.filled_at or close_started,
+            lit_exit.filled_at or close_started,
+        )
+        quantity_done = min(
+            ext_fill.quantity,
+            lit_fill.quantity,
+            ext_exit.quantity,
+            lit_exit.quantity,
+        )
+        if extended_long:
+            gross = (
+                (ext_exit.price - ext_fill.price)
+                + (lit_fill.price - lit_exit.price)
+            ) * quantity_done
+        else:
+            gross = (
+                (ext_fill.price - ext_exit.price)
+                + (lit_exit.price - lit_fill.price)
+            ) * quantity_done
+        fees = ext_fill.fee + ext_exit.fee + lit_fill.fee + lit_exit.fee
+        net = gross - fees
+        trade.update(
+            status="closed",
+            closeReason=close_reason,
+            closeStartedAt=close_started,
+            closedAt=closed_at,
+            holdingMs=closed_at - opened_at,
+            exitLatencyMs=closed_at - close_started,
+            projectedExit=projected,
+            exitExtended=asdict(ext_exit),
+            exitLighter=asdict(lit_exit),
+            grossPnlUsd=round(gross, 8),
+            feesUsd=round(fees, 8),
+            netPnlUsd=round(net, 8),
+            netPnlPct=round(net / max(actual_notional, 1e-9) * 100, 8),
+        )
+        self.append_trade(trade)
+        self.trade_open = False
+        if self.shutdown_requested:
+            self.running = False
+        self.write_status("completed", activeTrade=None, lastTrade=trade)
+        self.log("maker_trade_closed", **trade)
+
     async def execute(self, candidate: dict[str, Any]) -> None:
         coin = str(candidate["coin"])
         opportunity_id = str(candidate["id"])
@@ -1070,18 +1601,39 @@ class Canary:
         await self.preflight()
         reference = await self.extended_reference("BTC", OrderSide.BUY)
         quantity = self.common_quantity("BTC", reference)
-        order = self.create_extended_order(
-            "BTC",
-            quantity,
-            reference,
-            OrderSide.BUY,
-            reduce_only=False,
-            slippage=self.entry_slippage,
+        order = (
+            self.create_extended_maker_order(
+                "BTC", quantity, reference * 0.99, OrderSide.BUY
+            )
+            if self.execution_mode == "maker-taker"
+            else self.create_extended_order(
+                "BTC",
+                quantity,
+                reference,
+                OrderSide.BUY,
+                reduce_only=False,
+                slippage=self.entry_slippage,
+            )
         )
         if not order.settlement or not order.settlement.signature:
             raise RuntimeError("Extended signature was not created")
-        self.write_status("sign_test_ready")
-        self.log("sign_test_ready", market="BTC-USD", quantity=float(quantity))
+        self.write_status(
+            "sign_test_ready",
+            signedOrder={
+                "market": "BTC-USD",
+                "type": str(order.type),
+                "postOnly": order.post_only,
+                "timeInForce": str(order.time_in_force),
+                "quantity": float(quantity),
+            },
+        )
+        self.log(
+            "sign_test_ready",
+            market="BTC-USD",
+            quantity=float(quantity),
+            execution_mode=self.execution_mode,
+            post_only=order.post_only,
+        )
 
     async def run(self) -> None:
         self.acquire_lock()
@@ -1090,7 +1642,7 @@ class Canary:
             self.write_status("dry_run_ready", reason=None, error=None)
             self.log("dry_run_ready")
             return
-        if len(self.completed_route_trades()) >= self.max_trades:
+        if len(self.completed_mode_trades()) >= self.max_trades:
             self.write_status("completed", reason="max trade count reached")
             return
         self.write_status("armed")
@@ -1101,13 +1653,22 @@ class Canary:
             threshold_bps=self.entry_net_bps,
         )
         while self.running:
-            if len(self.completed_route_trades()) >= self.max_trades:
+            if len(self.completed_mode_trades()) >= self.max_trades:
                 self.write_status("completed", reason="max trade count reached")
                 return
-            candidate = self.candidate()
+            candidate = (
+                self.maker_candidate()
+                if self.execution_mode == "maker-taker"
+                else self.candidate()
+            )
             if candidate:
-                await self.execute(candidate)
-                return
+                if self.execution_mode == "maker-taker":
+                    await self.execute_maker(candidate)
+                    if len(self.completed_mode_trades()) >= self.max_trades:
+                        return
+                else:
+                    await self.execute(candidate)
+                    return
             if time.monotonic() - self.last_status_write >= 1:
                 self.write_status("armed")
             await asyncio.sleep(0.02)
@@ -1187,6 +1748,8 @@ async def main(force_dry_run: bool, sign_test: bool) -> None:
         runner.log("fatal", error=str(error))
         with contextlib.suppress(Exception):
             if runner.trade_open:
+                if runner.extended is not None:
+                    await runner.cancel_all_extended_orders()
                 positions = await asyncio.gather(
                     runner.extended_positions(), runner.lighter_positions()
                 )
