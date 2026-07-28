@@ -84,6 +84,17 @@ type EdgeSnapshot = {
   sellBookAgeMs: number;
 };
 
+type ExecutableBook = {
+  receivedAt: number;
+  updates: number;
+  buyVwap500: number | null;
+  buyVwap1000: number | null;
+  sellVwap500: number | null;
+  sellVwap1000: number | null;
+  buyDepthUsd: number;
+  sellDepthUsd: number;
+};
+
 type Opportunity = {
   id: string;
   coin: string;
@@ -283,6 +294,7 @@ const FEE_BPS: Record<Venue, number> = {
 };
 
 const books = new Map<string, BookState>();
+const executableBooks = new Map<string, ExecutableBook>();
 const bySymbol = new Map(MARKETS.map((market) => [market.symbol, market]));
 const byCoin = new Map(MARKETS.map((market) => [market.coin, market]));
 const byLighterId = new Map(MARKETS.map((market) => [market.lighterMarketId, market]));
@@ -348,6 +360,32 @@ function sortedLevels(book: BookState, side: Side, limit = 50): PriceLevel[] {
     .slice(0, limit);
 }
 
+function executableBook(venue: Venue, coin: string): ExecutableBook | null {
+  const key = bookKey(venue, coin);
+  const book = books.get(key);
+  if (!book?.receivedAt) return null;
+  const cached = executableBooks.get(key);
+  if (
+    cached
+    && cached.receivedAt === book.receivedAt
+    && cached.updates === book.updates
+  ) return cached;
+  const asks = sortedLevels(book, 'asks');
+  const bids = sortedLevels(book, 'bids');
+  const prepared: ExecutableBook = {
+    receivedAt: book.receivedAt,
+    updates: book.updates,
+    buyVwap500: executableVwap(asks, 500)?.price ?? null,
+    buyVwap1000: executableVwap(asks, 1_000)?.price ?? null,
+    sellVwap500: executableVwap(bids, 500)?.price ?? null,
+    sellVwap1000: executableVwap(bids, 1_000)?.price ?? null,
+    buyDepthUsd: asks.reduce((sum, [price, size]) => sum + price * size, 0),
+    sellDepthUsd: bids.reduce((sum, [price, size]) => sum + price * size, 0),
+  };
+  executableBooks.set(key, prepared);
+  return prepared;
+}
+
 function atomicJson(path: string, data: unknown): void {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, JSON.stringify(data));
@@ -385,40 +423,29 @@ function shadowLatencyProfile(): {
 }
 
 function shadowQuote(now: number, coin: string): ShadowQuote | null {
-  const extended = books.get(bookKey('extended', coin));
-  const lighter = books.get(bookKey('lighter', coin));
+  const extended = executableBook('extended', coin);
+  const lighter = executableBook('lighter', coin);
   if (
     !extended
     || !lighter
     || now - extended.receivedAt > SHADOW_FRESH_MS
     || now - lighter.receivedAt > SHADOW_FRESH_MS
   ) return null;
-  const extendedBuy = executableVwap(
-    sortedLevels(extended, 'asks'),
-    SHADOW_NOTIONAL_USD,
-  );
-  const lighterSell = executableVwap(
-    sortedLevels(lighter, 'bids'),
-    SHADOW_NOTIONAL_USD,
-  );
-  const extendedSell = executableVwap(
-    sortedLevels(extended, 'bids'),
-    SHADOW_NOTIONAL_USD,
-  );
-  const lighterBuy = executableVwap(
-    sortedLevels(lighter, 'asks'),
-    SHADOW_NOTIONAL_USD,
-  );
-  if (!extendedBuy || !lighterSell || !extendedSell || !lighterBuy) return null;
+  if (
+    extended.buyVwap500 == null
+    || lighter.sellVwap500 == null
+    || extended.sellVwap500 == null
+    || lighter.buyVwap500 == null
+  ) return null;
   return {
     at: now,
     version: `${extended.receivedAt}:${lighter.receivedAt}`,
-    extendedBuyVwap: extendedBuy.price,
-    lighterSellVwap: lighterSell.price,
-    extendedSellVwap: extendedSell.price,
-    lighterBuyVwap: lighterBuy.price,
+    extendedBuyVwap: extended.buyVwap500,
+    lighterSellVwap: lighter.sellVwap500,
+    extendedSellVwap: extended.sellVwap500,
+    lighterBuyVwap: lighter.buyVwap500,
     openingNetBps: netConvergenceEdgeBps(
-      rawCrossEdgeBps(extendedBuy.price, lighterSell.price),
+      rawCrossEdgeBps(extended.buyVwap500, lighter.sellVwap500),
       FEE_BPS.extended,
       FEE_BPS.lighter,
       EXECUTION_BUFFER_BPS,
@@ -1005,29 +1032,27 @@ function edge(
   buyVenue: Venue,
   sellVenue: Venue,
 ): EdgeSnapshot | null {
-  const buyBook = books.get(bookKey(buyVenue, coin));
-  const sellBook = books.get(bookKey(sellVenue, coin));
+  const buyBook = executableBook(buyVenue, coin);
+  const sellBook = executableBook(sellVenue, coin);
   if (
     !buyBook
     || !sellBook
     || now - buyBook.receivedAt > STALE_MS
     || now - sellBook.receivedAt > STALE_MS
   ) return null;
-  const buyLevels = sortedLevels(buyBook, 'asks');
-  const sellLevels = sortedLevels(sellBook, 'bids');
-  const buy500 = executableVwap(buyLevels, 500);
-  const sell500 = executableVwap(sellLevels, 500);
-  if (!buy500 || !sell500) return null;
-  const rawBps500 = rawCrossEdgeBps(buy500.price, sell500.price);
+  if (buyBook.buyVwap500 == null || sellBook.sellVwap500 == null) return null;
+  const rawBps500 = rawCrossEdgeBps(
+    buyBook.buyVwap500,
+    sellBook.sellVwap500,
+  );
   const cost = roundTripCostBps(
     FEE_BPS[buyVenue],
     FEE_BPS[sellVenue],
     EXECUTION_BUFFER_BPS,
   );
-  const buy1000 = executableVwap(buyLevels, 1_000);
-  const sell1000 = executableVwap(sellLevels, 1_000);
-  const rawBps1000 = buy1000 && sell1000
-    ? rawCrossEdgeBps(buy1000.price, sell1000.price)
+  const rawBps1000 = buyBook.buyVwap1000 != null
+    && sellBook.sellVwap1000 != null
+    ? rawCrossEdgeBps(buyBook.buyVwap1000, sellBook.sellVwap1000)
     : null;
   return {
     at: now,
@@ -1040,12 +1065,12 @@ function edge(
     ),
     rawBps1000,
     netBps1000: rawBps1000 == null ? null : rawBps1000 - cost,
-    buyVwap500: buy500.price,
-    sellVwap500: sell500.price,
-    buyVwap1000: buy1000?.price ?? null,
-    sellVwap1000: sell1000?.price ?? null,
-    buyDepthUsd: buyLevels.reduce((sum, [price, size]) => sum + price * size, 0),
-    sellDepthUsd: sellLevels.reduce((sum, [price, size]) => sum + price * size, 0),
+    buyVwap500: buyBook.buyVwap500,
+    sellVwap500: sellBook.sellVwap500,
+    buyVwap1000: buyBook.buyVwap1000,
+    sellVwap1000: sellBook.sellVwap1000,
+    buyDepthUsd: buyBook.buyDepthUsd,
+    sellDepthUsd: sellBook.sellDepthUsd,
     buyBookAgeMs: now - buyBook.receivedAt,
     sellBookAgeMs: now - sellBook.receivedAt,
   };
@@ -1349,20 +1374,14 @@ function writeStatus(): void {
 function writeExecutionStatus(): void {
   const now = Date.now();
   const closingQuotes = Object.fromEntries(MARKETS.map((market) => {
-    const extended = books.get(bookKey('extended', market.coin));
-    const lighter = books.get(bookKey('lighter', market.coin));
-    const extendedSell = extended
-      ? executableVwap(sortedLevels(extended, 'bids'), 500)
-      : null;
-    const lighterBuy = lighter
-      ? executableVwap(sortedLevels(lighter, 'asks'), 500)
-      : null;
+    const extended = executableBook('extended', market.coin);
+    const lighter = executableBook('lighter', market.coin);
     return [market.coin, {
       // Conservative for the $300 canary: use $500 executable VWAP rather
       // than top-of-book when estimating whether both closing legs are net+.
       notionalUsd: 500,
-      extendedSellVwap: extendedSell?.price ?? null,
-      lighterBuyVwap: lighterBuy?.price ?? null,
+      extendedSellVwap: extended?.sellVwap500 ?? null,
+      lighterBuyVwap: lighter?.buyVwap500 ?? null,
       extendedBookAgeMs: extended?.receivedAt ? now - extended.receivedAt : null,
       lighterBookAgeMs: lighter?.receivedAt ? now - lighter.receivedAt : null,
     }];
