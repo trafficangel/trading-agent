@@ -400,7 +400,7 @@ const MAKER_HEDGE_LATENCY_MS = finiteEnv(
   'VENUE_ARB_MAKER_HEDGE_LATENCY_MS',
   500,
 );
-const MAKER_QUOTE_TTL_MS = finiteEnv('VENUE_ARB_MAKER_QUOTE_TTL_MS', 3_000);
+const MAKER_QUOTE_TTL_MS = finiteEnv('VENUE_ARB_MAKER_QUOTE_TTL_MS', 15_000);
 const MAKER_HEDGE_GRACE_MS = finiteEnv('VENUE_ARB_MAKER_HEDGE_GRACE_MS', 2_000);
 const MAKER_MAX_HOLD_MS = finiteEnv(
   'VENUE_ARB_MAKER_MAX_HOLD_MS',
@@ -1461,8 +1461,12 @@ function makerQuoteCandidate(now: number): MakerQuote | null {
       });
     }
   }
-  return candidates.sort((a, b) => b.projectedNetBps - a.projectedNetBps)[0]
-    ?? null;
+  const fillScore = (quote: MakerQuote): number => (
+    quote.projectedNetBps / (
+      1 + quote.queue.queueAhead * quote.price / MAKER_NOTIONAL_USD
+    )
+  );
+  return candidates.sort((a, b) => fillScore(b) - fillScore(a))[0] ?? null;
 }
 
 function completeMakerPartialFailure(quote: MakerQuote, now: number): void {
