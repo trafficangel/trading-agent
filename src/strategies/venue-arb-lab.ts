@@ -692,7 +692,10 @@ function executionShadowRows(
   ].join('');
 }
 
-function scoutRouteRows(shadow: ExecutionShadow | undefined): string {
+function scoutRouteRows(
+  shadow: ExecutionShadow | undefined,
+  groups: Record<string, Summary>,
+): string {
   const routes = Object.values(shadow?.routes ?? {})
     .filter((route) => !route.primary)
     .sort((a, b) => {
@@ -706,11 +709,12 @@ function scoutRouteRows(shadow: ExecutionShadow | undefined): string {
         - Number(a.telemetry?.peakOpeningNetBps ?? -Infinity);
     });
   if (!routes.length) {
-    return '<tr><td colspan="9">Scout-маршруты не настроены.</td></tr>';
+    return '<tr><td colspan="10">Scout-маршруты не настроены.</td></tr>';
   }
   return routes.map((route) => {
     const gate = route.readiness;
     const telemetry = route.telemetry;
+    const history = groups[`pair:${route.buyVenue}→${route.sellVenue}`] ?? {};
     const status = gate?.ready
       ? '<b class="pos">GATE PASS</b>'
       : Number(route.active?.length ?? 0) > 0
@@ -720,6 +724,7 @@ function scoutRouteRows(shadow: ExecutionShadow | undefined): string {
       <td><b>${esc(shadowRouteLabel(route))}</b><small>${esc(shadowRouteClass(route))}</small></td>
       <td>${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 50)}</td>
       <td class="${cls(gate?.passedPct)}">${Number(gate?.passed ?? 0)} · ${pct(gate?.passedPct)}</td>
+      <td>${Number(history.strictRetained1000 ?? 0)} / ${Number(history.strictStarts ?? 0)}<small>ср. ${pctFromBps(history.strictMean1000NetBps)} · min ${pctFromBps(history.strictMin1000NetBps)}</small></td>
       <td>${Number(telemetry?.eligibleWindows ?? 0)}</td>
       <td>${coinAndBps(telemetry?.currentBestCoin, telemetry?.currentBestNetBps)}</td>
       <td>${coinAndBps(telemetry?.peakCoin, telemetry?.peakOpeningNetBps)}</td>
@@ -928,9 +933,9 @@ async function render(lang: Lang): Promise<string> {
         <p>Все направления проверяются одинаково: $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)}, три свежих подтверждения, все комиссии, funding, execution buffer и консервативная latency. Маршрут не получает преимущества за счёт ослабления фильтра.</p>
         ${capitalRecommendation(executionShadow, groups)}
         <div class="va-table" data-va-pager="execution-shadow-scout-routes" data-page-size="20"><table><thead><tr>
-          <th>Маршрут</th><th>Samples</th><th>PASS</th><th>Окна ≥0.10%</th>
+          <th>Маршрут</th><th>Forward samples</th><th>Forward PASS</th><th>История ≥0.10% @ 1s</th><th>Окна ≥0.10% сейчас</th>
           <th>Лучший сейчас</th><th>Пик</th><th>Почему нет входа сейчас</th><th>Entry / exit</th><th>Статус</th>
-        </tr></thead><tbody>${scoutRouteRows(executionShadow)}</tbody></table></div>
+        </tr></thead><tbody>${scoutRouteRows(executionShadow, groups)}</tbody></table></div>
         <h3>История квалифицированных scout-окон</h3>
         <div class="va-table" data-va-pager="execution-shadow-scout" data-page-size="20"><table><thead><tr>
           <th>Сигнал UTC</th><th>Монета</th><th>Маршрут</th><th>Статус</th><th>Signal net</th>
