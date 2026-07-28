@@ -12,6 +12,7 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readFileSync,
   readSync,
   renameSync,
   statSync,
@@ -27,6 +28,11 @@ import {
   roundTripCostBps,
   type PriceLevel,
 } from '../lib/venue-arb.js';
+import {
+  conservativeLatencyMs,
+  shadowNetAfterCosts,
+  shadowReadiness,
+} from '../lib/venue-arb-shadow.js';
 
 type Venue =
   | 'lighter'
@@ -126,15 +132,109 @@ type Opportunity = {
   }>;
 };
 
+type ShadowQuote = {
+  at: number;
+  version: string;
+  extendedBuyVwap: number;
+  lighterSellVwap: number;
+  extendedSellVwap: number;
+  lighterBuyVwap: number;
+  openingNetBps: number;
+};
+
+type ShadowProbe = {
+  id: string;
+  opportunityId: string;
+  coin: string;
+  state: 'awaiting_entry' | 'open' | 'awaiting_exit';
+  signalAt: number;
+  signalNetBps: number;
+  entryLatencyMs: number;
+  exitLatencyMs: number;
+  entryDueAt: number;
+  openedAt: number | null;
+  entryExtended: number | null;
+  entryLighter: number | null;
+  quantity: number | null;
+  guardConfirmations: number;
+  lastGuardQuoteVersion: string | null;
+  guardReachedAt: number | null;
+  guardNetBps: number | null;
+  exitDueAt: number | null;
+  exitQuoteDeadlineAt: number | null;
+  peakProjectedNetBps: number | null;
+};
+
+type ShadowResult = {
+  id: string;
+  opportunityId: string;
+  coin: string;
+  signalAt: number;
+  signalNetBps: number;
+  entryAt: number | null;
+  exitAt: number;
+  entryLatencyMs: number;
+  exitLatencyMs: number;
+  holdingMs: number | null;
+  entryNetBps: number | null;
+  guardNetBps: number | null;
+  peakProjectedNetBps: number | null;
+  realizedNetBps: number | null;
+  realizedNetUsd: number | null;
+  reachedExitGuard: boolean;
+  passed: boolean;
+  reason: string;
+  fundingBps: number;
+};
+
 const DATA_DIR = resolve(process.env.VENUE_ARB_DATA_DIR ?? 'data/venue-arb');
 const STATUS_PATH = resolve(DATA_DIR, 'status.json');
 const EXECUTION_STATUS_PATH = resolve(DATA_DIR, 'execution-status.json');
 const OPPORTUNITIES_PATH = resolve(DATA_DIR, 'opportunities.ndjson');
+const LIVE_TRADES_PATH = resolve(DATA_DIR, 'live-trades.json');
+const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution.ndjson');
+const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active.json');
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 250);
 const NET_TRIGGER_BPS = finiteEnv('VENUE_ARB_NET_TRIGGER_BPS', 3);
 const EXECUTION_BUFFER_BPS = finiteEnv('VENUE_ARB_EXECUTION_BUFFER_BPS', 2);
 const MAX_LIFETIME_MS = finiteEnv('VENUE_ARB_MAX_LIFETIME_MS', 15 * 60_000);
+const SHADOW_NOTIONAL_USD = finiteEnv('VENUE_ARB_SHADOW_NOTIONAL_USD', 500);
+const SHADOW_ENTRY_NET_BPS = finiteEnv('VENUE_ARB_SHADOW_ENTRY_NET_BPS', 5);
+const SHADOW_EXIT_NET_BPS = finiteEnv('VENUE_ARB_SHADOW_EXIT_NET_BPS', 10);
+const SHADOW_EXIT_CONFIRMATIONS = finiteEnv(
+  'VENUE_ARB_SHADOW_EXIT_CONFIRMATIONS',
+  3,
+);
+const SHADOW_FRESH_MS = finiteEnv('VENUE_ARB_SHADOW_FRESH_MS', 150);
+const SHADOW_MAX_HOLD_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_MAX_HOLD_MS',
+  15 * 60_000,
+);
+const SHADOW_FUNDING_BPS_PER_HOUR = finiteEnv(
+  'VENUE_ARB_SHADOW_FUNDING_BPS_PER_HOUR',
+  1,
+);
+const SHADOW_REQUIRED_SAMPLES = finiteEnv(
+  'VENUE_ARB_SHADOW_REQUIRED_SAMPLES',
+  50,
+);
+const SHADOW_REQUIRED_PASS_PCT = finiteEnv(
+  'VENUE_ARB_SHADOW_REQUIRED_PASS_PCT',
+  90,
+);
+const SHADOW_ENTRY_LATENCY_FLOOR_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_ENTRY_LATENCY_FLOOR_MS',
+  1_000,
+);
+const SHADOW_EXIT_LATENCY_FLOOR_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_EXIT_LATENCY_FLOOR_MS',
+  2_200,
+);
+const SHADOW_EXIT_QUOTE_GRACE_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_EXIT_QUOTE_GRACE_MS',
+  1_000,
+);
 const RECONNECT_MS = 2_000;
 const HORIZONS_MS = [100, 250, 500, 1_000, 2_000, 5_000, 10_000] as const;
 
@@ -199,7 +299,10 @@ const connections = Object.fromEntries(VENUES.map((venue) => [
 const sockets = new Set<WebSocket>();
 const active = new Map<string, Opportunity>();
 const latchedUntilBelowTrigger = new Set<string>();
+const shadowProbes = new Map<string, ShadowProbe>();
+const shadowSeen = new Set<string>();
 let recentClosed: Opportunity[] = [];
+let shadowResults: ShadowResult[] = [];
 let startedAt = Date.now();
 let evaluations = 0;
 let sequence = 0;
@@ -243,6 +346,263 @@ function sortedLevels(book: BookState, side: Side, limit = 50): PriceLevel[] {
     .filter(([price, size]) => price > 0 && size > 0)
     .sort((a, b) => side === 'bids' ? b[0] - a[0] : a[0] - b[0])
     .slice(0, limit);
+}
+
+function atomicJson(path: string, data: unknown): void {
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, JSON.stringify(data));
+  renameSync(tmp, path);
+}
+
+function shadowLatencyProfile(): {
+  entryMs: number;
+  exitMs: number;
+  measuredTrades: number;
+} {
+  try {
+    const rows = JSON.parse(readFileSync(LIVE_TRADES_PATH, 'utf8')) as Array<{
+      entryLatencyMs?: number;
+      exitLatencyMs?: number;
+    }>;
+    const entry = rows.flatMap((row) => (
+      Number.isFinite(row.entryLatencyMs) ? [Number(row.entryLatencyMs)] : []
+    ));
+    const exit = rows.flatMap((row) => (
+      Number.isFinite(row.exitLatencyMs) ? [Number(row.exitLatencyMs)] : []
+    ));
+    return {
+      entryMs: conservativeLatencyMs(entry, SHADOW_ENTRY_LATENCY_FLOOR_MS),
+      exitMs: conservativeLatencyMs(exit, SHADOW_EXIT_LATENCY_FLOOR_MS),
+      measuredTrades: Math.max(entry.length, exit.length),
+    };
+  } catch {
+    return {
+      entryMs: SHADOW_ENTRY_LATENCY_FLOOR_MS,
+      exitMs: SHADOW_EXIT_LATENCY_FLOOR_MS,
+      measuredTrades: 0,
+    };
+  }
+}
+
+function shadowQuote(now: number, coin: string): ShadowQuote | null {
+  const extended = books.get(bookKey('extended', coin));
+  const lighter = books.get(bookKey('lighter', coin));
+  if (
+    !extended
+    || !lighter
+    || now - extended.receivedAt > SHADOW_FRESH_MS
+    || now - lighter.receivedAt > SHADOW_FRESH_MS
+  ) return null;
+  const extendedBuy = executableVwap(
+    sortedLevels(extended, 'asks'),
+    SHADOW_NOTIONAL_USD,
+  );
+  const lighterSell = executableVwap(
+    sortedLevels(lighter, 'bids'),
+    SHADOW_NOTIONAL_USD,
+  );
+  const extendedSell = executableVwap(
+    sortedLevels(extended, 'bids'),
+    SHADOW_NOTIONAL_USD,
+  );
+  const lighterBuy = executableVwap(
+    sortedLevels(lighter, 'asks'),
+    SHADOW_NOTIONAL_USD,
+  );
+  if (!extendedBuy || !lighterSell || !extendedSell || !lighterBuy) return null;
+  return {
+    at: now,
+    version: `${extended.receivedAt}:${lighter.receivedAt}`,
+    extendedBuyVwap: extendedBuy.price,
+    lighterSellVwap: lighterSell.price,
+    extendedSellVwap: extendedSell.price,
+    lighterBuyVwap: lighterBuy.price,
+    openingNetBps: netConvergenceEdgeBps(
+      rawCrossEdgeBps(extendedBuy.price, lighterSell.price),
+      FEE_BPS.extended,
+      FEE_BPS.lighter,
+      EXECUTION_BUFFER_BPS,
+    ),
+  };
+}
+
+function modeledShadowExit(
+  probe: ShadowProbe,
+  quote: ShadowQuote,
+): ReturnType<typeof shadowNetAfterCosts> & { fundingBps: number } | null {
+  if (
+    probe.openedAt == null
+    || probe.entryExtended == null
+    || probe.entryLighter == null
+    || probe.quantity == null
+  ) return null;
+  const fundingBps = Math.max(0, quote.at - probe.openedAt)
+    / 3_600_000 * SHADOW_FUNDING_BPS_PER_HOUR;
+  return {
+    ...shadowNetAfterCosts({
+      notionalUsd: SHADOW_NOTIONAL_USD,
+      quantity: probe.quantity,
+      entryExtended: probe.entryExtended,
+      entryLighter: probe.entryLighter,
+      exitExtended: quote.extendedSellVwap,
+      exitLighter: quote.lighterBuyVwap,
+      extendedTakerBps: FEE_BPS.extended,
+      lighterTakerBps: FEE_BPS.lighter,
+      executionBufferBps: EXECUTION_BUFFER_BPS,
+      fundingBps,
+    }),
+    fundingBps,
+  };
+}
+
+function completeShadow(
+  probe: ShadowProbe,
+  now: number,
+  reason: string,
+  quote: ShadowQuote | null,
+): void {
+  const modeled = quote ? modeledShadowExit(probe, quote) : null;
+  const reachedExitGuard = probe.guardReachedAt != null;
+  const realizedNetBps = modeled?.netBps ?? null;
+  const result: ShadowResult = {
+    id: probe.id,
+    opportunityId: probe.opportunityId,
+    coin: probe.coin,
+    signalAt: probe.signalAt,
+    signalNetBps: probe.signalNetBps,
+    entryAt: probe.openedAt,
+    exitAt: now,
+    entryLatencyMs: probe.entryLatencyMs,
+    exitLatencyMs: probe.exitLatencyMs,
+    holdingMs: probe.openedAt == null ? null : Math.max(0, now - probe.openedAt),
+    entryNetBps: probe.entryExtended == null || probe.entryLighter == null
+      ? null
+      : netConvergenceEdgeBps(
+        rawCrossEdgeBps(probe.entryExtended, probe.entryLighter),
+        FEE_BPS.extended,
+        FEE_BPS.lighter,
+        EXECUTION_BUFFER_BPS,
+      ),
+    guardNetBps: probe.guardNetBps,
+    peakProjectedNetBps: probe.peakProjectedNetBps,
+    realizedNetBps,
+    realizedNetUsd: modeled?.netUsd ?? null,
+    reachedExitGuard,
+    passed: reachedExitGuard && Number(realizedNetBps) > 0,
+    reason,
+    fundingBps: modeled?.fundingBps ?? 0,
+  };
+  appendFileSync(SHADOW_RESULTS_PATH, `${JSON.stringify(result)}\n`);
+  shadowResults.push(result);
+  if (shadowResults.length > 5_000) shadowResults = shadowResults.slice(-5_000);
+  shadowProbes.delete(probe.id);
+  shadowSeen.add(probe.opportunityId);
+}
+
+function evaluateShadow(now: number): void {
+  for (const opportunity of active.values()) {
+    if (
+      opportunity.buyVenue !== 'extended'
+      || opportunity.sellVenue !== 'lighter'
+      || Number(opportunity.currentNetBps1000) < SHADOW_ENTRY_NET_BPS
+      || shadowSeen.has(opportunity.id)
+    ) continue;
+    const latency = shadowLatencyProfile();
+    const id = `S${now}-${opportunity.coin}-${sequence}`;
+    shadowProbes.set(id, {
+      id,
+      opportunityId: opportunity.id,
+      coin: opportunity.coin,
+      state: 'awaiting_entry',
+      signalAt: now,
+      signalNetBps: Number(opportunity.currentNetBps1000),
+      entryLatencyMs: latency.entryMs,
+      exitLatencyMs: latency.exitMs,
+      entryDueAt: now + latency.entryMs,
+      openedAt: null,
+      entryExtended: null,
+      entryLighter: null,
+      quantity: null,
+      guardConfirmations: 0,
+      lastGuardQuoteVersion: null,
+      guardReachedAt: null,
+      guardNetBps: null,
+      exitDueAt: null,
+      exitQuoteDeadlineAt: null,
+      peakProjectedNetBps: null,
+    });
+    shadowSeen.add(opportunity.id);
+  }
+
+  for (const probe of [...shadowProbes.values()]) {
+    const quote = shadowQuote(now, probe.coin);
+    if (probe.state === 'awaiting_entry') {
+      if (now < probe.entryDueAt) continue;
+      if (!quote) {
+        completeShadow(probe, now, 'stale_at_delayed_entry', null);
+        continue;
+      }
+      if (quote.openingNetBps < SHADOW_ENTRY_NET_BPS) {
+        completeShadow(probe, now, 'edge_lost_before_entry', quote);
+        continue;
+      }
+      probe.state = 'open';
+      probe.openedAt = now;
+      probe.entryExtended = quote.extendedBuyVwap;
+      probe.entryLighter = quote.lighterSellVwap;
+      probe.quantity = SHADOW_NOTIONAL_USD / quote.extendedBuyVwap;
+      continue;
+    }
+    if (probe.openedAt == null) {
+      completeShadow(probe, now, 'invalid_probe_state', quote);
+      continue;
+    }
+    if (now - probe.openedAt >= SHADOW_MAX_HOLD_MS) {
+      completeShadow(probe, now, 'max_hold', quote);
+      continue;
+    }
+    if (probe.state === 'awaiting_exit') {
+      if (probe.exitDueAt == null || now < probe.exitDueAt) continue;
+      if (quote) {
+        completeShadow(probe, now, 'protected_exit', quote);
+      } else if (
+        probe.exitQuoteDeadlineAt != null
+        && now >= probe.exitQuoteDeadlineAt
+      ) {
+        completeShadow(probe, now, 'stale_after_exit_latency', null);
+      }
+      continue;
+    }
+    if (!quote) {
+      probe.guardConfirmations = 0;
+      continue;
+    }
+    const modeled = modeledShadowExit(probe, quote);
+    if (!modeled) {
+      probe.guardConfirmations = 0;
+      continue;
+    }
+    probe.peakProjectedNetBps = Math.max(
+      probe.peakProjectedNetBps ?? -Infinity,
+      modeled.netBps,
+    );
+    if (modeled.netBps >= SHADOW_EXIT_NET_BPS) {
+      if (quote.version !== probe.lastGuardQuoteVersion) {
+        probe.guardConfirmations++;
+        probe.lastGuardQuoteVersion = quote.version;
+      }
+    } else {
+      probe.guardConfirmations = 0;
+      probe.lastGuardQuoteVersion = null;
+    }
+    if (probe.guardConfirmations >= SHADOW_EXIT_CONFIRMATIONS) {
+      probe.state = 'awaiting_exit';
+      probe.guardReachedAt = now;
+      probe.guardNetBps = modeled.netBps;
+      probe.exitDueAt = now + probe.exitLatencyMs;
+      probe.exitQuoteDeadlineAt = probe.exitDueAt + SHADOW_EXIT_QUOTE_GRACE_MS;
+    }
+  }
 }
 
 function replaceStringLevels(target: Map<number, number>, rows: unknown): void {
@@ -856,6 +1216,7 @@ function evaluate(): void {
       closeOpportunity(opportunity, now, 'max_lifetime');
     }
   }
+  evaluateShadow(now);
 }
 
 function percentile(values: number[], p: number): number | null {
@@ -921,6 +1282,32 @@ function groupedSummaries(rows: Opportunity[]): Record<string, Record<string, un
   return Object.fromEntries([...groups.entries()].map(([key, group]) => [key, summary(group)]));
 }
 
+function executionShadowStatus(): Record<string, unknown> {
+  const latency = shadowLatencyProfile();
+  const readiness = shadowReadiness(
+    shadowResults,
+    SHADOW_REQUIRED_SAMPLES,
+    SHADOW_REQUIRED_PASS_PCT,
+  );
+  return {
+    version: 'extended-lighter-shadow-v1',
+    config: {
+      notionalUsd: SHADOW_NOTIONAL_USD,
+      entryNetBps: SHADOW_ENTRY_NET_BPS,
+      exitNetBps: SHADOW_EXIT_NET_BPS,
+      exitConfirmations: SHADOW_EXIT_CONFIRMATIONS,
+      freshMs: SHADOW_FRESH_MS,
+      maxHoldMs: SHADOW_MAX_HOLD_MS,
+      fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+      executionBufferBps: EXECUTION_BUFFER_BPS,
+    },
+    measuredLatency: latency,
+    readiness,
+    active: [...shadowProbes.values()].sort((a, b) => a.signalAt - b.signalAt),
+    recent: shadowResults.slice(-20).reverse(),
+  };
+}
+
 function writeStatus(): void {
   const now = Date.now();
   const status = {
@@ -942,6 +1329,7 @@ function writeStatus(): void {
     recentClosed: recentClosed.slice(-100).reverse(),
     summary: summary(recentClosed),
     groupedSummaries: groupedSummaries(recentClosed),
+    executionShadow: executionShadowStatus(),
     freshnessMs: Object.fromEntries(MARKETS.map((market) => [
       market.coin,
       Object.fromEntries(VENUES.map((venue) => [
@@ -955,6 +1343,7 @@ function writeStatus(): void {
   const tmp = `${STATUS_PATH}.tmp`;
   writeFileSync(tmp, JSON.stringify(status));
   renameSync(tmp, STATUS_PATH);
+  atomicJson(SHADOW_ACTIVE_PATH, [...shadowProbes.values()]);
 }
 
 function writeExecutionStatus(): void {
@@ -1033,6 +1422,30 @@ function loadHistory(): void {
   }
 }
 
+function loadShadowState(): void {
+  try {
+    shadowResults = tailLines(SHADOW_RESULTS_PATH)
+      .slice(-5_000)
+      .map((line) => JSON.parse(line) as ShadowResult);
+    for (const row of shadowResults) shadowSeen.add(row.opportunityId);
+  } catch (error) {
+    console.warn('venue-arb shadow history load', (error as Error).message);
+    shadowResults = [];
+  }
+  try {
+    if (!existsSync(SHADOW_ACTIVE_PATH)) return;
+    const rows = JSON.parse(readFileSync(SHADOW_ACTIVE_PATH, 'utf8')) as ShadowProbe[];
+    for (const row of rows) {
+      if (!row?.id || !row.opportunityId || !row.coin) continue;
+      shadowProbes.set(row.id, row);
+      shadowSeen.add(row.opportunityId);
+    }
+  } catch (error) {
+    console.warn('venue-arb shadow active load', (error as Error).message);
+    shadowProbes.clear();
+  }
+}
+
 function shutdown(signal: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -1051,7 +1464,9 @@ function shutdown(signal: string): void {
 mkdirSync(DATA_DIR, { recursive: true });
 // Ensure the journal exists before the first lifecycle closes.
 if (!existsSync(OPPORTUNITIES_PATH)) writeFileSync(OPPORTUNITIES_PATH, '');
+if (!existsSync(SHADOW_RESULTS_PATH)) writeFileSync(SHADOW_RESULTS_PATH, '');
 loadHistory();
+loadShadowState();
 startedAt = Date.now();
 startLighter();
 startHyperliquid();

@@ -76,6 +76,66 @@ type Opportunity = {
     executable1000?: boolean;
   }>;
 };
+type ExecutionShadowResult = {
+  id?: string;
+  coin?: string;
+  signalAt?: number;
+  signalNetBps?: number;
+  entryAt?: number | null;
+  exitAt?: number;
+  entryNetBps?: number | null;
+  guardNetBps?: number | null;
+  peakProjectedNetBps?: number | null;
+  realizedNetBps?: number | null;
+  realizedNetUsd?: number | null;
+  reachedExitGuard?: boolean;
+  passed?: boolean;
+  reason?: string;
+  holdingMs?: number | null;
+  fundingBps?: number;
+};
+type ExecutionShadowProbe = {
+  id?: string;
+  coin?: string;
+  state?: string;
+  signalAt?: number;
+  signalNetBps?: number;
+  openedAt?: number | null;
+  guardConfirmations?: number;
+  guardNetBps?: number | null;
+  peakProjectedNetBps?: number | null;
+};
+type ExecutionShadow = {
+  version?: string;
+  config?: {
+    notionalUsd?: number;
+    entryNetBps?: number;
+    exitNetBps?: number;
+    exitConfirmations?: number;
+    freshMs?: number;
+    maxHoldMs?: number;
+    fundingBpsPerHour?: number;
+    executionBufferBps?: number;
+  };
+  measuredLatency?: {
+    entryMs?: number;
+    exitMs?: number;
+    measuredTrades?: number;
+  };
+  readiness?: {
+    samples?: number;
+    reachedExitGuard?: number;
+    positiveAfterLatency?: number;
+    passed?: number;
+    passedPct?: number | null;
+    requiredSamples?: number;
+    requiredPassPct?: number;
+    ready?: boolean;
+    reasons?: Record<string, number>;
+  };
+  active?: ExecutionShadowProbe[];
+  recent?: ExecutionShadowResult[];
+};
 type Status = {
   version?: string;
   readOnly?: boolean;
@@ -101,6 +161,7 @@ type Status = {
   summary?: Summary;
   groupedSummaries?: Record<string, Summary>;
   freshnessMs?: Record<string, Partial<Record<Venue, number | null>>>;
+  executionShadow?: ExecutionShadow;
 };
 type LiveFill = {
   price?: number;
@@ -432,6 +493,59 @@ function liveTradeRows(rows: LiveTrade[]): string {
   }).join('');
 }
 
+function shadowReason(reason: unknown): string {
+  const labels: Record<string, string> = {
+    protected_exit: 'защищённый выход',
+    edge_lost_before_entry: 'edge исчез до входа',
+    stale_at_delayed_entry: 'стакан устарел до входа',
+    stale_after_exit_latency: 'стакан устарел после exit latency',
+    max_hold: 'достигнут max hold',
+    invalid_probe_state: 'ошибка состояния',
+  };
+  return labels[String(reason)] ?? esc(reason);
+}
+
+function shadowProbeState(state: unknown): string {
+  const labels: Record<string, string> = {
+    awaiting_entry: 'ЗАДЕРЖКА ВХОДА',
+    open: 'ИЩЕТ NET+ ВЫХОД',
+    awaiting_exit: 'МОДЕЛЬ EXIT LATENCY',
+  };
+  return labels[String(state)] ?? esc(state);
+}
+
+function executionShadowRows(shadow: ExecutionShadow | undefined): string {
+  const active = shadow?.active ?? [];
+  const recent = shadow?.recent ?? [];
+  if (!active.length && !recent.length) {
+    return '<tr><td colspan="9">Shadow-аудит запущен и ждёт первое окно Extended → Lighter с net ≥ +0.05%.</td></tr>';
+  }
+  return [
+    ...active.map((row) => `<tr>
+      <td>${utc(row.signalAt)}</td>
+      <td><b>${esc(row.coin)}</b></td>
+      <td><b>${shadowProbeState(row.state)}</b></td>
+      <td class="${cls(row.signalNetBps)}">${pctFromBps(row.signalNetBps)}</td>
+      <td>—</td>
+      <td>${Number(row.guardConfirmations ?? 0)} / ${Number(shadow?.config?.exitConfirmations ?? 3)}${row.guardNetBps == null ? '' : ` · ${pctFromBps(row.guardNetBps)}`}</td>
+      <td>—</td>
+      <td>${duration(Date.now() - Number(row.signalAt ?? Date.now()))}</td>
+      <td>наблюдение продолжается</td>
+    </tr>`),
+    ...recent.map((row) => `<tr>
+      <td>${utc(row.signalAt)}</td>
+      <td><b>${esc(row.coin)}</b></td>
+      <td class="${row.passed ? 'pos' : 'neg'}"><b>${row.passed ? 'PASS' : 'FAIL'}</b></td>
+      <td class="${cls(row.signalNetBps)}">${pctFromBps(row.signalNetBps)}</td>
+      <td class="${cls(row.entryNetBps)}">${row.entryNetBps == null ? '—' : pctFromBps(row.entryNetBps)}</td>
+      <td>${row.reachedExitGuard ? `✓ ${pctFromBps(row.guardNetBps)}` : `нет · пик ${row.peakProjectedNetBps == null ? '—' : pctFromBps(row.peakProjectedNetBps)}`}</td>
+      <td class="${cls(row.realizedNetBps)}"><b>${row.realizedNetBps == null ? '—' : pctFromBps(row.realizedNetBps)}</b>${row.realizedNetUsd == null ? '' : ` · ${money(row.realizedNetUsd, true)}`}</td>
+      <td>${row.holdingMs == null ? '—' : duration(row.holdingMs)}</td>
+      <td>${shadowReason(row.reason)}${Number(row.fundingBps ?? 0) > 0 ? ` · funding ${pctFromBps(row.fundingBps)}` : ''}</td>
+    </tr>`),
+  ].join('');
+}
+
 const VENUE_ARB_PAGINATION_SCRIPT = `<script>
 (() => {
   const storagePrefix = 'venue-arb-page:';
@@ -554,6 +668,13 @@ async function render(lang: Lang): Promise<string> {
   const profitableActive = (status?.active ?? [])
     .filter((row) => Number(currentNet1000Bps(row)) > triggerBps);
   const survival250 = summary.survival?.['250'];
+  const executionShadow = status?.executionShadow;
+  const shadowGate = executionShadow?.readiness;
+  const shadowReasons = Object.entries(shadowGate?.reasons ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([reason, count]) => `${shadowReason(reason)} ${count}`)
+    .join(' · ');
   return pageShell(
     t(lang, 'DEX/CEX Perp Arbitrage Radar', 'DEX/CEX Perp Arbitrage Radar'),
     `<style>${VENUE_ARB_CSS}</style>
@@ -576,6 +697,27 @@ async function render(lang: Lang): Promise<string> {
 
       <section class="va-panel"><div class="va-panel-head"><h2>Tradeable расхождения сейчас</h2><span>$1,000 net &gt; ${pctFromBps(triggerBps)} · автообновление 5 сек</span></div>
         ${activeRows(status?.active ?? [], triggerBps)}
+      </section>
+
+      <section class="va-panel va-shadow-panel">
+        <div class="va-panel-head"><div><span class="va-badge">EXECUTION SHADOW · EXTENDED → LIGHTER</span><h2>Gate реального исполнения</h2></div>
+          <span class="${shadowGate?.ready ? 'pos' : ''}">${shadowGate?.ready ? 'ГОТОВ К CANARY' : 'СБОР ДОКАЗАТЕЛЬСТВ'}</span>
+        </div>
+        <div class="va-live-cards">
+          <div><small>Выборка / минимум</small><b>${Number(shadowGate?.samples ?? 0)} / ${Number(shadowGate?.requiredSamples ?? 50)}</b></div>
+          <div><small>Полный PASS</small><b class="${Number(shadowGate?.passedPct ?? 0) >= Number(shadowGate?.requiredPassPct ?? 90) ? 'pos' : ''}">${Number(shadowGate?.passed ?? 0)} · ${pct(shadowGate?.passedPct)}</b></div>
+          <div><small>Достигли exit guard</small><b>${Number(shadowGate?.reachedExitGuard ?? 0)}</b></div>
+          <div><small>Активные probes</small><b>${Number(executionShadow?.active?.length ?? 0)}</b></div>
+          <div><small>Модель entry / exit</small><b>${duration(executionShadow?.measuredLatency?.entryMs)} / ${duration(executionShadow?.measuredLatency?.exitMs)}</b></div>
+          <div><small>Порог входа / выхода</small><b>${pctFromBps(executionShadow?.config?.entryNetBps)} / ${pctFromBps(executionShadow?.config?.exitNetBps)}</b></div>
+        </div>
+        <p>Каждый probe повторяет реальный путь без ордеров: ждёт измеренную задержку входа, фиксирует $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, вычитает четыре taker-комиссии, ${pctFromBps(executionShadow?.config?.executionBufferBps, false)} execution-буфера и funding ${pctFromBps(executionShadow?.config?.fundingBpsPerHour, false)}/час. Выход допускается после ${Number(executionShadow?.config?.exitConfirmations ?? 3)} свежих снимков с net ≥ ${pctFromBps(executionShadow?.config?.exitNetBps)}, затем применяется измеренная exit latency. Gate: минимум ${Number(shadowGate?.requiredSamples ?? 50)} probes и PASS ≥ ${pct(shadowGate?.requiredPassPct)}.</p>
+        ${shadowReasons ? `<p class="va-wait">Причины завершения: ${esc(shadowReasons)}</p>` : ''}
+        <div class="va-table" data-va-pager="execution-shadow" data-page-size="20"><table><thead><tr>
+          <th>Сигнал UTC</th><th>Монета</th><th>Статус</th><th>Signal net</th>
+          <th>Delayed entry net</th><th>Exit guard</th><th>После exit latency</th>
+          <th>Жизнь</th><th>Результат / причина</th>
+        </tr></thead><tbody>${executionShadowRows(executionShadow)}</tbody></table></div>
       </section>
 
       <section class="va-panel va-live-panel">
