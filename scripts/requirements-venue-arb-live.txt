@@ -1,0 +1,2 @@
+x10-python-trading-starknet==2.4.1
+lighter-sdk==1.1.2

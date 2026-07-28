@@ -102,6 +102,56 @@ type Status = {
   groupedSummaries?: Record<string, Summary>;
   freshnessMs?: Record<string, Partial<Record<Venue, number | null>>>;
 };
+type LiveFill = {
+  price?: number;
+  quantity?: number;
+  notional?: number;
+  fee?: number;
+  filled_at?: number | null;
+};
+type LiveTrade = {
+  id?: string;
+  status?: string;
+  coin?: string;
+  route?: string;
+  startedAt?: number;
+  openedAt?: number;
+  closedAt?: number;
+  holdingMs?: number;
+  entryLatencyMs?: number;
+  exitLatencyMs?: number;
+  entryNetPct?: number;
+  notionalUsdPerLeg?: number;
+  leverage?: number;
+  closeReason?: string;
+  grossPnlUsd?: number;
+  feesUsd?: number;
+  netPnlUsd?: number;
+  netPnlPct?: number;
+  error?: string;
+  entryExtended?: LiveFill | null;
+  entryLighter?: LiveFill | null;
+  exitExtended?: LiveFill | null;
+  exitLighter?: LiveFill | null;
+};
+type LiveStatus = {
+  version?: string;
+  updatedAt?: number;
+  enabled?: boolean;
+  state?: string;
+  notionalUsdPerLeg?: number;
+  leverage?: number;
+  entryNetPct?: number;
+  route?: string;
+  lastRejection?: string | null;
+  error?: string;
+  balancesUsd?: {
+    extended?: number;
+    lighter?: number;
+  };
+  activeTrade?: LiveTrade | null;
+  lastTrade?: LiveTrade | null;
+};
 
 const VENUES: readonly Venue[] = [
   'lighter',
@@ -128,6 +178,25 @@ async function readStatus(): Promise<Status | null> {
   } catch {
     return null;
   }
+}
+
+async function readLive(): Promise<{
+  status: LiveStatus | null;
+  trades: LiveTrade[];
+}> {
+  const read = async <T>(file: string, fallback: T): Promise<T> => {
+    try {
+      return JSON.parse(
+        await fs.readFile(path.join(dataRoot(), file), 'utf8'),
+      ) as T;
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    status: await read<LiveStatus | null>('live-status.json', null),
+    trades: await read<LiveTrade[]>('live-trades.json', []),
+  };
 }
 
 function pctFromBps(value: unknown, signed = true): string {
@@ -166,6 +235,20 @@ function usdDepth(value: unknown): string {
   if (number >= 1_000_000) return `$${(number / 1_000_000).toFixed(1)}m`;
   if (number >= 1_000) return `$${Math.floor(number / 1_000)}k`;
   return `$${Math.floor(number)}`;
+}
+
+function money(value: unknown, signed = false): string {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+  const sign = signed && number > 0 ? '+' : '';
+  return `${sign}${number < 0 ? '−' : ''}$${Math.abs(number).toFixed(2)}`;
+}
+
+function plainPct(value: unknown, signed = false): string {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+  const sign = signed && number > 0 ? '+' : number < 0 ? '−' : '';
+  return `${sign}${Math.abs(number).toFixed(3)}%`;
 }
 
 function legacyNet1000Bps(row: Opportunity): number | null {
@@ -298,8 +381,68 @@ function feedRows(status: Status): string {
   }).join('')}</tr>`).join('');
 }
 
+function liveState(status: LiveStatus | null): string {
+  const names: Record<string, string> = {
+    dry_run_ready: 'DRY-RUN ГОТОВ',
+    preflight: 'ПРОВЕРКА',
+    armed: 'ЖДЁТ ВХОД',
+    opening: 'ОТКРЫТИЕ',
+    open: 'В ПОЗИЦИИ',
+    closing: 'ЗАКРЫТИЕ',
+    completed: 'CANARY ЗАВЕРШЁН',
+    blocked: 'ОСТАНОВЛЕН',
+    error: 'ОШИБКА',
+  };
+  return names[String(status?.state)] ?? 'НЕ ЗАПУЩЕН';
+}
+
+function liveTradeRows(rows: LiveTrade[]): string {
+  if (!rows.length) {
+    return '<tr><td colspan="11">Реальных арбитражных сделок пока нет — исполнитель ждёт допустимый net-edge.</td></tr>';
+  }
+  return [...rows].reverse().map((row) => {
+    const status = row.status === 'closed'
+      ? 'ЗАКРЫТА'
+      : row.status === 'open'
+        ? 'LIVE'
+        : row.status === 'failed_flat'
+          ? 'ВЫРОВНЕНА'
+          : esc(row.status);
+    const ext = row.entryExtended;
+    const lit = row.entryLighter;
+    const extExit = row.exitExtended;
+    const litExit = row.exitLighter;
+    return `<tr>
+      <td><b>${esc(row.id)}</b></td>
+      <td>${utc(row.openedAt ?? row.startedAt)} → ${row.closedAt ? utc(row.closedAt) : '—'}</td>
+      <td><b>${esc(row.coin)}</b></td>
+      <td>${esc(row.route)}</td>
+      <td>${money(row.notionalUsdPerLeg)} × 2 · ${Number(row.leverage ?? 0)}x</td>
+      <td>${price(ext?.price)} / ${price(lit?.price)}</td>
+      <td>${price(extExit?.price)} / ${price(litExit?.price)}</td>
+      <td>${duration(row.holdingMs)}</td>
+      <td>${duration(row.entryLatencyMs)} / ${duration(row.exitLatencyMs)}</td>
+      <td>${money(row.feesUsd)}</td>
+      <td class="${cls(row.netPnlUsd)}"><b>${money(row.netPnlUsd, true)} · ${plainPct(row.netPnlPct, true)}</b><small>${status}${row.closeReason ? ` · ${esc(row.closeReason)}` : ''}${row.error ? ` · ${esc(row.error)}` : ''}</small></td>
+    </tr>`;
+  }).join('');
+}
+
 async function render(lang: Lang): Promise<string> {
-  const status = await readStatus();
+  const [status, liveData] = await Promise.all([readStatus(), readLive()]);
+  const liveStatus = liveData.status;
+  const liveTrades = liveData.trades ?? [];
+  const closedLive = liveTrades.filter((row) => row.status === 'closed');
+  const liveNet = closedLive.reduce(
+    (sum, row) => sum + Number(row.netPnlUsd ?? 0),
+    0,
+  );
+  const liveFees = closedLive.reduce(
+    (sum, row) => sum + Number(row.feesUsd ?? 0),
+    0,
+  );
+  const liveWins = closedLive.filter((row) => Number(row.netPnlUsd ?? 0) > 0).length;
+  const activeLive = liveStatus?.activeTrade;
   const isLive = live(status);
   const summary = status?.summary ?? {};
   const groups = status?.groupedSummaries ?? {};
@@ -333,6 +476,28 @@ async function render(lang: Lang): Promise<string> {
         ${activeRows(status?.active ?? [], triggerBps)}
       </section>
 
+      <section class="va-panel va-live-panel">
+        <div class="va-panel-head"><div><span class="va-badge">REAL · EXTENDED ↔ LIGHTER</span><h2>Реальная арбитражная торговля</h2></div>
+          <span class="va-live-state ${liveStatus?.state === 'error' || liveStatus?.state === 'blocked' ? 'neg' : liveStatus?.enabled ? 'pos' : ''}">${liveState(liveStatus)}</span>
+        </div>
+        <div class="va-live-cards">
+          <div><small>Реальный net PnL</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b></div>
+          <div><small>Закрыто / прибыльных</small><b>${closedLive.length} / ${liveWins}</b></div>
+          <div><small>Реальные комиссии</small><b>${money(liveFees)}</b></div>
+          <div><small>Размер / плечо</small><b>${money(liveStatus?.notionalUsdPerLeg)} × 2 · ${Number(liveStatus?.leverage ?? 0)}x</b></div>
+          <div><small>Extended / Lighter</small><b>${money(liveStatus?.balancesUsd?.extended)} / ${money(liveStatus?.balancesUsd?.lighter)}</b></div>
+          <div><small>Текущий статус</small><b>${activeLive ? `${esc(activeLive.coin)} · ${esc(activeLive.status)}` : liveState(liveStatus)}</b></div>
+        </div>
+        <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. Вход разрешён только для Extended → Lighter при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .05)} и свежести обоих стаканов ≤ 150 ms.</p>
+        <div class="va-table"><table><thead><tr>
+          <th>ID</th><th>Открыта → закрыта UTC</th><th>Монета</th><th>Маршрут</th>
+          <th>Размер</th><th>Вход Ext / Lighter</th><th>Выход Ext / Lighter</th>
+          <th>Жизнь</th><th>Вход / выход</th><th>Комиссии</th><th>Net результат</th>
+        </tr></thead><tbody>${liveTradeRows(liveTrades)}</tbody></table></div>
+        ${liveStatus?.lastRejection && liveStatus.state === 'armed' ? `<p class="va-wait">Сейчас: ${esc(liveStatus.lastRejection)}</p>` : ''}
+        ${liveStatus?.error ? `<p class="neg">Ошибка: ${esc(liveStatus.error)}</p>` : ''}
+      </section>
+
       <section class="va-panel"><h2>Прибыльные типы маршрутов</h2>
         <p>Показываются только маршруты, где $1,000 VWAP на старте давал net выше ${pctFromBps(triggerBps)} после входа и выхода обеих ног: четырёх taker-комиссий и ${pctFromBps(status?.executionBufferBps, false)} защитного буфера.</p>
         <div class="va-table"><table><thead><tr><th>Маршрут</th><th>Net+ / все</th><th>Доля</th><th>Медиана прибыльного net</th><th>Лучший net</th><th>Жизнь</th><th>100 ms</th><th>250 ms</th><th>500 ms</th><th>1000 ms</th></tr></thead>
@@ -355,9 +520,9 @@ async function render(lang: Lang): Promise<string> {
         <div class="va-rules">
           <span>глубина минимум $500</span><span>контроль $1,000</span><span>шаг 100 ms</span>
           <span>VWAP, не mid-price</span><span>две ноги одновременно</span><span>полный round-trip</span>
-          <span>допуск только при $1k net &gt; ${pctFromBps(triggerBps)}</span><span>Lighter fee 0%</span><span>никаких ключей и ордеров</span>
+          <span>допуск только при $1k net &gt; ${pctFromBps(triggerBps)}</span><span>Lighter fee 0%</span><span>canary: Extended → Lighter</span>
         </div>
-        <p>Сейчас это измеритель, а не торговый робот. Допуск к микрореалу появится только если на достаточной выборке DEX↔CEX или DEX↔DEX маршрут показывает положительный net после 250–500 ms, достаточную глубину и повторяемость на нескольких монетах.</p>
+        <p>Радар продолжает измерять все площадки. Реальный исполнитель отделён от него и допущен только к одной защищённой canary-сделке Extended → Lighter; он параллельно отправляет IOC-ноги и аварийно выравнивает позицию, если одна сторона не исполнилась.</p>
       </section>
     </div>`,
     { autoRefreshSec: 5, lang },
@@ -394,5 +559,5 @@ export async function venueArbLabRoute(app: FastifyInstance): Promise<void> {
 }
 
 export const VENUE_ARB_CSS = `
-.va-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(164,104,255,.38);border-radius:14px;background:linear-gradient(135deg,rgba(137,79,255,.15),var(--bg-card));color:var(--text);text-decoration:none}.va-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(137,79,255,.15);color:#b58aff;font-size:11px;font-weight:750;letter-spacing:.04em}.va-title{font-size:19px;font-weight:700;margin-top:8px}.va-sub{font-size:13px;color:var(--text-dim);margin-top:3px}.va-hero-stats{display:flex;gap:22px}.va-hero-stats span{display:grid;text-align:right}.va-hero-stats b{font-size:18px}.va-hero-stats small{font-size:10px;color:var(--text-faint);text-transform:uppercase}.va-wrap{max-width:1180px;margin:0 auto}.va-back{display:inline-block;margin:4px 0 22px;color:var(--text-dim)}.va-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.va-head h1{font-size:34px;margin:12px 0 7px}.va-head p{max-width:790px;color:var(--text-dim)}.va-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.va-engine i{width:8px;height:8px;border-radius:50%;background:#ff6577}.va-engine.live i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}.va-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0}.va-card,.va-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.va-card{padding:16px;display:grid;gap:5px}.va-card small,.va-card em{color:var(--text-faint);font-size:11px;font-style:normal}.va-card b{font-size:25px;font-variant-numeric:tabular-nums}.va-panel{padding:18px;margin:12px 0}.va-panel h2{font-size:17px;margin:0 0 14px}.va-panel p{color:var(--text-dim);font-size:13px}.va-panel-head{display:flex;justify-content:space-between;gap:12px}.va-panel-head span{font-size:12px;color:var(--text-faint)}.va-table{overflow:auto}.va-table table{width:100%;border-collapse:collapse;font-size:12px}.va-table th,.va-table td{text-align:left;padding:9px;border-bottom:1px solid var(--border);white-space:nowrap}.va-table th{color:var(--text-faint);font-size:10px;text-transform:uppercase}.va-route{padding:3px 7px;border-radius:7px;background:rgba(137,79,255,.13);color:#b58aff}.va-rules{display:flex;flex-wrap:wrap;gap:7px}.va-rules span{padding:6px 9px;border-radius:8px;background:var(--bg);font-size:12px}.va-empty{padding:22px;text-align:center;color:var(--text-faint)}.va-wrap .pos,.va-hero .pos{color:#38d996}.va-wrap .neg,.va-hero .neg{color:#ff6577}@media(max-width:760px){.va-cards{grid-template-columns:repeat(2,1fr)}.va-head{display:block}.va-engine{display:inline-flex;margin-top:8px}.va-hero-stats{width:100%;justify-content:space-between}.va-hero-stats span{text-align:left}}@media(max-width:460px){.va-cards{grid-template-columns:1fr}.va-head h1{font-size:27px}}
+.va-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(164,104,255,.38);border-radius:14px;background:linear-gradient(135deg,rgba(137,79,255,.15),var(--bg-card));color:var(--text);text-decoration:none}.va-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(137,79,255,.15);color:#b58aff;font-size:11px;font-weight:750;letter-spacing:.04em}.va-title{font-size:19px;font-weight:700;margin-top:8px}.va-sub{font-size:13px;color:var(--text-dim);margin-top:3px}.va-hero-stats{display:flex;gap:22px}.va-hero-stats span{display:grid;text-align:right}.va-hero-stats b{font-size:18px}.va-hero-stats small{font-size:10px;color:var(--text-faint);text-transform:uppercase}.va-wrap{max-width:1180px;margin:0 auto}.va-back{display:inline-block;margin:4px 0 22px;color:var(--text-dim)}.va-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.va-head h1{font-size:34px;margin:12px 0 7px}.va-head p{max-width:790px;color:var(--text-dim)}.va-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.va-engine i{width:8px;height:8px;border-radius:50%;background:#ff6577}.va-engine.live i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}.va-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0}.va-card,.va-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.va-card{padding:16px;display:grid;gap:5px}.va-card small,.va-card em{color:var(--text-faint);font-size:11px;font-style:normal}.va-card b{font-size:25px;font-variant-numeric:tabular-nums}.va-panel{padding:18px;margin:12px 0}.va-panel h2{font-size:17px;margin:0 0 14px}.va-panel p{color:var(--text-dim);font-size:13px}.va-panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.va-panel-head span{font-size:12px;color:var(--text-faint)}.va-live-panel{border-color:rgba(56,217,150,.25)}.va-live-state{font-size:12px;font-weight:750}.va-live-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.va-live-cards>div{display:grid;gap:4px;padding:11px;border-radius:10px;background:var(--bg)}.va-live-cards small{color:var(--text-faint);font-size:10px;text-transform:uppercase}.va-live-cards b{font-size:15px}.va-wait{padding:8px 10px;border-radius:8px;background:rgba(137,79,255,.08)}.va-table{overflow:auto}.va-table table{width:100%;border-collapse:collapse;font-size:12px}.va-table th,.va-table td{text-align:left;padding:9px;border-bottom:1px solid var(--border);white-space:nowrap}.va-table td small{display:block;color:var(--text-faint);font-size:10px;margin-top:2px}.va-table th{color:var(--text-faint);font-size:10px;text-transform:uppercase}.va-route{padding:3px 7px;border-radius:7px;background:rgba(137,79,255,.13);color:#b58aff}.va-rules{display:flex;flex-wrap:wrap;gap:7px}.va-rules span{padding:6px 9px;border-radius:8px;background:var(--bg);font-size:12px}.va-empty{padding:22px;text-align:center;color:var(--text-faint)}.va-wrap .pos,.va-hero .pos{color:#38d996}.va-wrap .neg,.va-hero .neg{color:#ff6577}@media(max-width:760px){.va-cards,.va-live-cards{grid-template-columns:repeat(2,1fr)}.va-head{display:block}.va-engine{display:inline-flex;margin-top:8px}.va-hero-stats{width:100%;justify-content:space-between}.va-hero-stats span{text-align:left}}@media(max-width:460px){.va-cards,.va-live-cards{grid-template-columns:1fr}.va-head h1{font-size:27px}}
 `;

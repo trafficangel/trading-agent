@@ -1,0 +1,42 @@
+[Unit]
+Description=Robot Claude protected Extended to Lighter arbitrage canary
+After=network-online.target venue-arb-monitor.service
+Wants=network-online.target venue-arb-monitor.service
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/trading-agent
+EnvironmentFile=/etc/trading-agent/extended-arb.env
+EnvironmentFile=/etc/trading-agent/lighter-live.env
+Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/trading-agent/data/venue-arb
+Environment=VENUE_ARB_LIVE_ENABLED=false
+Environment=VENUE_ARB_LIVE_NOTIONAL_USD=300
+Environment=VENUE_ARB_LIVE_LEVERAGE=5
+Environment=VENUE_ARB_LIVE_ENTRY_NET_BPS=5
+Environment=VENUE_ARB_LIVE_FRESH_MS=150
+Environment=VENUE_ARB_LIVE_ENTRY_SLIPPAGE=0.0002
+Environment=VENUE_ARB_LIVE_EXIT_SLIPPAGE=0.001
+Environment=VENUE_ARB_LIVE_EMERGENCY_SLIPPAGE=0.01
+Environment=VENUE_ARB_LIVE_MAX_HOLD_MS=60000
+Environment=VENUE_ARB_LIVE_MAX_TRADES=1
+Environment=VENUE_ARB_LIVE_DAILY_LOSS_USD=5
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/trader/venvs/venue-arb-live/bin/python /home/trader/apps/trading-agent/scripts/venue-arb-live.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/trading-agent/data/venue-arb
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=false
+
+[Install]
+WantedBy=multi-user.target
