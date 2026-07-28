@@ -161,6 +161,13 @@ type ShadowRouteConfig = {
   primary: boolean;
 };
 
+type ShadowRejectReason =
+  | 'missing_book'
+  | 'stale_book'
+  | 'insufficient_depth'
+  | 'below_gate'
+  | 'latched';
+
 type ShadowRouteTelemetry = {
   freshQuotes: number;
   staleQuotes: number;
@@ -171,6 +178,8 @@ type ShadowRouteTelemetry = {
   currentBestCoin: string | null;
   peakOpeningNetBps: number | null;
   peakCoin: string | null;
+  rejections: Record<ShadowRejectReason, number>;
+  currentRejections: Record<ShadowRejectReason, number>;
 };
 
 type ShadowProbe = {
@@ -391,8 +400,18 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
   },
 ];
 const shadowRouteById = new Map(SHADOW_ROUTES.map((route) => [route.id, route]));
-const shadowRouteTelemetry = new Map<string, ShadowRouteTelemetry>(
-  SHADOW_ROUTES.map((route) => [route.id, {
+function emptyShadowRejections(): Record<ShadowRejectReason, number> {
+  return {
+    missing_book: 0,
+    stale_book: 0,
+    insufficient_depth: 0,
+    below_gate: 0,
+    latched: 0,
+  };
+}
+
+function emptyShadowRouteTelemetry(): ShadowRouteTelemetry {
+  return {
     freshQuotes: 0,
     staleQuotes: 0,
     eligibleWindows: 0,
@@ -402,7 +421,13 @@ const shadowRouteTelemetry = new Map<string, ShadowRouteTelemetry>(
     currentBestCoin: null,
     peakOpeningNetBps: null,
     peakCoin: null,
-  }]),
+    rejections: emptyShadowRejections(),
+    currentRejections: emptyShadowRejections(),
+  };
+}
+
+const shadowRouteTelemetry = new Map<string, ShadowRouteTelemetry>(
+  SHADOW_ROUTES.map((route) => [route.id, emptyShadowRouteTelemetry()]),
 );
 
 const books = new Map<string, BookState>();
@@ -552,34 +577,36 @@ function shadowQuote(
   now: number,
   coin: string,
   route: ShadowRouteConfig,
-): ShadowQuote | null {
+): { quote: ShadowQuote | null; rejection: ShadowRejectReason | null } {
   const buy = executableBook(route.buyVenue, coin);
   const sell = executableBook(route.sellVenue, coin);
+  if (!buy || !sell) return { quote: null, rejection: 'missing_book' };
   if (
-    !buy
-    || !sell
-    || now - buy.receivedAt > SHADOW_FRESH_MS
+    now - buy.receivedAt > SHADOW_FRESH_MS
     || now - sell.receivedAt > SHADOW_FRESH_MS
-  ) return null;
+  ) return { quote: null, rejection: 'stale_book' };
   if (
     buy.buyVwap500 == null
     || sell.sellVwap500 == null
     || buy.sellVwap500 == null
     || sell.buyVwap500 == null
-  ) return null;
+  ) return { quote: null, rejection: 'insufficient_depth' };
   return {
-    at: now,
-    version: `${buy.receivedAt}:${sell.receivedAt}`,
-    buyOpenVwap: buy.buyVwap500,
-    sellOpenVwap: sell.sellVwap500,
-    buyCloseVwap: buy.sellVwap500,
-    sellCloseVwap: sell.buyVwap500,
-    openingNetBps: netConvergenceEdgeBps(
-      rawCrossEdgeBps(buy.buyVwap500, sell.sellVwap500),
-      FEE_BPS[route.buyVenue],
-      FEE_BPS[route.sellVenue],
-      EXECUTION_BUFFER_BPS,
-    ),
+    quote: {
+      at: now,
+      version: `${buy.receivedAt}:${sell.receivedAt}`,
+      buyOpenVwap: buy.buyVwap500,
+      sellOpenVwap: sell.sellVwap500,
+      buyCloseVwap: buy.sellVwap500,
+      sellCloseVwap: sell.buyVwap500,
+      openingNetBps: netConvergenceEdgeBps(
+        rawCrossEdgeBps(buy.buyVwap500, sell.sellVwap500),
+        FEE_BPS[route.buyVenue],
+        FEE_BPS[route.sellVenue],
+        EXECUTION_BUFFER_BPS,
+      ),
+    },
+    rejection: null,
   };
 }
 
@@ -665,13 +692,19 @@ function completeShadow(
 function evaluateShadow(now: number): void {
   for (const route of SHADOW_ROUTES) {
     const telemetry = shadowRouteTelemetry.get(route.id)!;
+    const currentRejections = emptyShadowRejections();
     let currentBestNetBps: number | null = null;
     let currentBestCoin: string | null = null;
     for (const market of MARKETS) {
-      const quote = shadowQuote(now, market.coin, route);
+      const evaluation = shadowQuote(now, market.coin, route);
+      const quote = evaluation.quote;
       const latchKey = `${route.id}:${market.coin}`;
       if (!quote) {
         telemetry.staleQuotes++;
+        if (evaluation.rejection) {
+          telemetry.rejections[evaluation.rejection]++;
+          currentRejections[evaluation.rejection]++;
+        }
         continue;
       }
       telemetry.freshQuotes++;
@@ -690,10 +723,16 @@ function evaluateShadow(now: number): void {
         telemetry.peakCoin = market.coin;
       }
       if (quote.openingNetBps < SHADOW_ENTRY_NET_BPS) {
+        telemetry.rejections.below_gate++;
+        currentRejections.below_gate++;
         shadowLatched.delete(latchKey);
         continue;
       }
-      if (shadowLatched.has(latchKey)) continue;
+      if (shadowLatched.has(latchKey)) {
+        telemetry.rejections.latched++;
+        currentRejections.latched++;
+        continue;
+      }
       const latency = shadowLatencyProfile(route);
       const id = `S${now}-${route.id}-${market.coin}-${sequence}`;
       shadowProbes.set(id, {
@@ -731,6 +770,7 @@ function evaluateShadow(now: number): void {
     telemetry.lastEvaluatedAt = now;
     telemetry.currentBestNetBps = currentBestNetBps;
     telemetry.currentBestCoin = currentBestCoin;
+    telemetry.currentRejections = currentRejections;
   }
 
   for (const probe of [...shadowProbes.values()]) {
@@ -739,7 +779,7 @@ function evaluateShadow(now: number): void {
       completeShadow(probe, now, 'unknown_shadow_route', null);
       continue;
     }
-    const quote = shadowQuote(now, probe.coin, route);
+    const quote = shadowQuote(now, probe.coin, route).quote;
     if (probe.state === 'awaiting_entry') {
       if (
         quote
@@ -1702,7 +1742,19 @@ function loadShadowState(): void {
     const telemetry = Array.isArray(checkpoint) ? {} : checkpoint.telemetry ?? {};
     for (const [routeId, row] of Object.entries(telemetry)) {
       if (!shadowRouteTelemetry.has(routeId) || !row) continue;
-      shadowRouteTelemetry.set(routeId, row);
+      const defaults = emptyShadowRouteTelemetry();
+      shadowRouteTelemetry.set(routeId, {
+        ...defaults,
+        ...row,
+        rejections: {
+          ...defaults.rejections,
+          ...(row.rejections ?? {}),
+        },
+        currentRejections: {
+          ...defaults.currentRejections,
+          ...(row.currentRejections ?? {}),
+        },
+      });
     }
   } catch (error) {
     console.warn('venue-arb shadow active load', (error as Error).message);

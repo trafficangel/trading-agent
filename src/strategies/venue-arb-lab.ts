@@ -126,22 +126,31 @@ type ExecutionShadowReadiness = {
   ready?: boolean;
   reasons?: Record<string, number>;
 };
+type ShadowRejectReason =
+  | 'missing_book'
+  | 'stale_book'
+  | 'insufficient_depth'
+  | 'below_gate'
+  | 'latched';
+type ShadowRouteTelemetry = {
+  freshQuotes?: number;
+  staleQuotes?: number;
+  eligibleWindows?: number;
+  lastSignalAt?: number | null;
+  lastEvaluatedAt?: number | null;
+  currentBestNetBps?: number | null;
+  currentBestCoin?: string | null;
+  peakOpeningNetBps?: number | null;
+  peakCoin?: string | null;
+  rejections?: Partial<Record<ShadowRejectReason, number>>;
+  currentRejections?: Partial<Record<ShadowRejectReason, number>>;
+};
 type ExecutionShadowRoute = {
   id?: string;
   buyVenue?: Venue;
   sellVenue?: Venue;
   primary?: boolean;
-  telemetry?: {
-    freshQuotes?: number;
-    staleQuotes?: number;
-    eligibleWindows?: number;
-    lastSignalAt?: number | null;
-    lastEvaluatedAt?: number | null;
-    currentBestNetBps?: number | null;
-    currentBestCoin?: string | null;
-    peakOpeningNetBps?: number | null;
-    peakCoin?: string | null;
-  };
+  telemetry?: ShadowRouteTelemetry;
   measuredLatency?: {
     entryMs?: number;
     exitMs?: number;
@@ -306,6 +315,27 @@ function pctFromBps(value: unknown, signed = true): string {
 function coinAndBps(coin: unknown, value: unknown): string {
   if (value == null || !Number.isFinite(Number(value))) return '—';
   return `${esc(coin)} · ${pctFromBps(value)}`;
+}
+
+function shadowBlockers(telemetry: ShadowRouteTelemetry | undefined): string {
+  const labels: Record<ShadowRejectReason, string> = {
+    missing_book: 'нет стакана',
+    stale_book: 'старые данные',
+    insufficient_depth: 'нет глубины $500',
+    below_gate: 'edge ниже +0.10%',
+    latched: 'окно уже отслеживается',
+  };
+  const rows = Object.entries(telemetry?.currentRejections ?? {})
+    .map(([reason, count]) => ({
+      reason: reason as ShadowRejectReason,
+      count: Number(count ?? 0),
+    }))
+    .filter((row) => row.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 2);
+  return rows.length
+    ? rows.map((row) => `${labels[row.reason]} · ${row.count}`).join('<br>')
+    : 'нет отклонений';
 }
 
 function pct(value: unknown): string {
@@ -638,7 +668,7 @@ function scoutRouteRows(shadow: ExecutionShadow | undefined): string {
       <td>${Number(telemetry?.eligibleWindows ?? 0)}</td>
       <td>${coinAndBps(telemetry?.currentBestCoin, telemetry?.currentBestNetBps)}</td>
       <td>${coinAndBps(telemetry?.peakCoin, telemetry?.peakOpeningNetBps)}</td>
-      <td>${Number(telemetry?.freshQuotes ?? 0).toLocaleString('ru-RU')}</td>
+      <td>${shadowBlockers(telemetry)}</td>
       <td>${duration(route.measuredLatency?.entryMs)} / ${duration(route.measuredLatency?.exitMs)}</td>
       <td>${status}</td>
     </tr>`;
@@ -822,6 +852,7 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Лучший net сейчас</small><b>${coinAndBps(primaryShadow?.telemetry?.currentBestCoin, primaryShadow?.telemetry?.currentBestNetBps)}</b></div>
           <div><small>Пик с запуска</small><b>${coinAndBps(primaryShadow?.telemetry?.peakCoin, primaryShadow?.telemetry?.peakOpeningNetBps)}</b></div>
           <div><small>Свежих котировок проверено</small><b>${Number(primaryShadow?.telemetry?.freshQuotes ?? 0).toLocaleString('ru-RU')}</b></div>
+          <div><small>Почему нет входа сейчас</small><b>${shadowBlockers(primaryShadow?.telemetry)}</b></div>
           <div><small>Активные probes</small><b>${Number(primaryShadow?.active?.length ?? 0)}</b></div>
           <div><small>Модель entry / exit</small><b>${duration(primaryShadow?.measuredLatency?.entryMs)} / ${duration(primaryShadow?.measuredLatency?.exitMs)}</b></div>
           <div><small>Порог входа / выхода</small><b>${pctFromBps(executionShadow?.config?.entryNetBps)} / ${pctFromBps(executionShadow?.config?.exitNetBps)}</b></div>
@@ -842,7 +873,7 @@ async function render(lang: Lang): Promise<string> {
         <p>Все направления проверяются одинаково: $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)}, три свежих подтверждения, все комиссии, funding, execution buffer и консервативная latency. Маршрут не получает преимущества за счёт ослабления фильтра.</p>
         <div class="va-table" data-va-pager="execution-shadow-scout-routes" data-page-size="20"><table><thead><tr>
           <th>Маршрут</th><th>Samples</th><th>PASS</th><th>Окна ≥0.10%</th>
-          <th>Лучший сейчас</th><th>Пик</th><th>Fresh quotes</th><th>Entry / exit</th><th>Статус</th>
+          <th>Лучший сейчас</th><th>Пик</th><th>Почему нет входа сейчас</th><th>Entry / exit</th><th>Статус</th>
         </tr></thead><tbody>${scoutRouteRows(executionShadow)}</tbody></table></div>
         <h3>История квалифицированных scout-окон</h3>
         <div class="va-table" data-va-pager="execution-shadow-scout" data-page-size="20"><table><thead><tr>
