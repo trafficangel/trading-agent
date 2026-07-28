@@ -30,6 +30,7 @@ import lighter
 from x10.clients.rest import RestApiClient
 from x10.config import MAINNET_CONFIG
 from x10.core.stark_account import StarkPerpetualAccount
+from x10.errors import ApiError
 from x10.models.order import OrderSide, OrderStatus, OrderType, TimeInForce
 from x10.signing.order_object import create_order_object
 
@@ -249,6 +250,8 @@ class Canary:
             "route": self.route_label,
             "maxTrades": self.max_trades,
             "lastRejection": self.last_rejection,
+            "reason": None,
+            "error": None,
             **fields,
         }
         self.atomic_json(self.status_path, payload)
@@ -689,7 +692,13 @@ class Canary:
 
     async def cancel_extended_order(self, order_id: int) -> None:
         assert self.extended is not None
-        response = await self.extended.orders.cancel_order(order_id)
+        try:
+            response = await self.extended.orders.cancel_order(order_id)
+        except ApiError as error:
+            if "code 404" not in str(error):
+                raise
+            await self.cancel_all_extended_orders()
+            return
         if response.error:
             raise RuntimeError(
                 f"Extended cancel rejected: {response.error.message}"
@@ -702,6 +711,18 @@ class Canary:
             raise RuntimeError(
                 f"Extended mass cancel rejected: {response.error.message}"
             )
+
+    async def extended_order_by_id(self, order_id: int) -> Any | None:
+        assert self.extended is not None
+        try:
+            response = await self.extended.account.get_order_by_id(order_id)
+        except ApiError as error:
+            if "code 404" in str(error):
+                return None
+            raise
+        if response.error or response.data is None:
+            return None
+        return response.data
 
     async def wait_extended_maker_fill(
         self,
@@ -720,11 +741,10 @@ class Canary:
         }
         finalized = False
         while int(time.time() * 1000) < deadline_at:
-            response = await self.extended.account.get_order_by_id(order_id)
-            if response.error or response.data is None:
+            row = await self.extended_order_by_id(order_id)
+            if row is None:
                 await asyncio.sleep(0.1)
                 continue
-            row = response.data
             filled_qty = float(row.filled_qty or 0)
             status = self.order_status_value(row.status)
             if status not in final_statuses and not row.post_only:
@@ -748,11 +768,10 @@ class Canary:
 
         settle_deadline = time.monotonic() + 3
         while time.monotonic() < settle_deadline:
-            response = await self.extended.account.get_order_by_id(order_id)
-            if response.error or response.data is None:
+            row = await self.extended_order_by_id(order_id)
+            if row is None:
                 await asyncio.sleep(0.1)
                 continue
-            row = response.data
             if float(row.filled_qty or 0) > 0:
                 saw_fill = True
             if self.order_status_value(row.status) in final_statuses:
@@ -761,18 +780,42 @@ class Canary:
             await asyncio.sleep(0.1)
         if not finalized:
             await self.cancel_all_extended_orders()
-            await asyncio.sleep(0.5)
-            response = await self.extended.account.get_order_by_id(order_id)
+            final_row = None
+            final_deadline = time.monotonic() + 3
+            while time.monotonic() < final_deadline:
+                final_row = await self.extended_order_by_id(order_id)
+                if (
+                    final_row is not None
+                    and self.order_status_value(final_row.status)
+                    in final_statuses
+                ):
+                    break
+                await asyncio.sleep(0.1)
             if (
-                response.error
-                or response.data is None
-                or self.order_status_value(response.data.status)
-                not in final_statuses
+                final_row is not None
+                and self.order_status_value(final_row.status)
+                in final_statuses
             ):
+                saw_fill = (
+                    saw_fill or float(final_row.filled_qty or 0) > 0
+                )
+            else:
+                fill = await self.extended_fill(market, order_id)
+                open_response = await self.extended.account.get_open_orders(
+                    market_names=[market]
+                )
+                matching_open = [
+                    row
+                    for row in (open_response.data or [])
+                    if int(row.id) == order_id
+                ]
+                if fill is not None:
+                    return fill
+                if not open_response.error and not matching_open:
+                    return None
                 raise RuntimeError(
                     "Extended maker remainder cancellation is unconfirmed"
                 )
-            saw_fill = saw_fill or float(response.data.filled_qty or 0) > 0
         if not saw_fill:
             return None
         fill = await self.extended_fill(market, order_id)
