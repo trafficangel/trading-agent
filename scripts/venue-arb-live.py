@@ -512,8 +512,6 @@ class Canary:
         if (
             quote.get("stage") != "entry"
             or quote.get("activatedAt") is None
-            or bool(maker.get("hasPair"))
-            or bool(maker.get("hasPendingHedge"))
             or coin not in MARKETS
             or quote.get("side") not in {"buy", "sell"}
             or price <= 0

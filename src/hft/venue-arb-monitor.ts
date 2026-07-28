@@ -1393,6 +1393,54 @@ function makerExitQuoteLevel(
   return [quotePrice, sameSide.get(quotePrice) ?? 0];
 }
 
+function makerEntryQuoteCandidate(now: number): MakerQuote | null {
+  const candidates: MakerQuote[] = [];
+  for (const market of MARKETS) {
+    const rawExtended = books.get(bookKey('extended', market.coin));
+    const extended = executableBook('extended', market.coin);
+    const lighter = executableBook('lighter', market.coin);
+    if (!rawExtended || !extended || !lighter) continue;
+    if (!makerBooksFresh(now, extended, lighter)) continue;
+    for (const side of ['buy', 'sell'] as const) {
+      const lighterFill = makerHedgePrice(side, lighter);
+      if (lighterFill == null) continue;
+      const level = makerEntryQuoteLevel(rawExtended, side, lighterFill);
+      if (!level) continue;
+      const [price, queueAhead] = level;
+      if (!(price > 0) || queueAhead < 0) continue;
+      const projectedNetBps = makerEntryEdgeBps(side, price, lighterFill)
+        - EXECUTION_BUFFER_BPS;
+      if (projectedNetBps < MAKER_ENTRY_EDGE_BPS) continue;
+      const quantity = MAKER_NOTIONAL_USD / price;
+      candidates.push({
+        id: `MQ${now}-${market.coin}-entry-${side}`,
+        coin: market.coin,
+        stage: 'entry',
+        side,
+        price,
+        createdAt: now,
+        activeAt: now + MAKER_QUOTE_LATENCY_MS,
+        activatedAt: null,
+        expiresAt: now + MAKER_QUOTE_LATENCY_MS + MAKER_QUOTE_TTL_MS,
+        projectedNetBps,
+        initialQuantity: quantity,
+        firstFillAt: null,
+        queue: {
+          queueAhead,
+          remaining: quantity,
+          filled: false,
+        },
+      });
+    }
+  }
+  const fillScore = (quote: MakerQuote): number => (
+    quote.projectedNetBps / (
+      1 + quote.queue.queueAhead * quote.price / MAKER_NOTIONAL_USD
+    )
+  );
+  return candidates.sort((a, b) => fillScore(b) - fillScore(a))[0] ?? null;
+}
+
 function makerQuoteCandidate(now: number): MakerQuote | null {
   if (makerPendingHedge) return null;
   if (makerPair) {
@@ -1440,51 +1488,7 @@ function makerQuoteCandidate(now: number): MakerQuote | null {
     };
   }
   if (now < makerCooldownUntil) return null;
-  const candidates: MakerQuote[] = [];
-  for (const market of MARKETS) {
-    const rawExtended = books.get(bookKey('extended', market.coin));
-    const extended = executableBook('extended', market.coin);
-    const lighter = executableBook('lighter', market.coin);
-    if (!rawExtended || !extended || !lighter) continue;
-    if (!makerBooksFresh(now, extended, lighter)) continue;
-    for (const side of ['buy', 'sell'] as const) {
-      const lighterFill = makerHedgePrice(side, lighter);
-      if (lighterFill == null) continue;
-      const level = makerEntryQuoteLevel(rawExtended, side, lighterFill);
-      if (!level) continue;
-      const [price, queueAhead] = level;
-      if (!(price > 0) || queueAhead < 0) continue;
-      const projectedNetBps = makerEntryEdgeBps(side, price, lighterFill)
-        - EXECUTION_BUFFER_BPS;
-      if (projectedNetBps < MAKER_ENTRY_EDGE_BPS) continue;
-      const quantity = MAKER_NOTIONAL_USD / price;
-      candidates.push({
-        id: `MQ${now}-${market.coin}-entry-${side}`,
-        coin: market.coin,
-        stage: 'entry',
-        side,
-        price,
-        createdAt: now,
-        activeAt: now + MAKER_QUOTE_LATENCY_MS,
-        activatedAt: null,
-        expiresAt: now + MAKER_QUOTE_LATENCY_MS + MAKER_QUOTE_TTL_MS,
-        projectedNetBps,
-        initialQuantity: quantity,
-        firstFillAt: null,
-        queue: {
-          queueAhead,
-          remaining: quantity,
-          filled: false,
-        },
-      });
-    }
-  }
-  const fillScore = (quote: MakerQuote): number => (
-    quote.projectedNetBps / (
-      1 + quote.queue.queueAhead * quote.price / MAKER_NOTIONAL_USD
-    )
-  );
-  return candidates.sort((a, b) => fillScore(b) - fillScore(a))[0] ?? null;
+  return makerEntryQuoteCandidate(now);
 }
 
 function completeMakerPartialFailure(quote: MakerQuote, now: number): void {
@@ -2707,6 +2711,12 @@ function writeStatus(): void {
 
 function writeExecutionStatus(): void {
   const now = Date.now();
+  const liveMakerQuote = makerEntryQuoteCandidate(now);
+  if (liveMakerQuote) {
+    liveMakerQuote.activeAt = now;
+    liveMakerQuote.activatedAt = now;
+    liveMakerQuote.expiresAt = now + MAKER_QUOTE_TTL_MS;
+  }
   const closingQuotes = Object.fromEntries(MARKETS.map((market) => {
     const extended = executableBook('extended', market.coin);
     const lighter = executableBook('lighter', market.coin);
@@ -2734,9 +2744,7 @@ function writeExecutionStatus(): void {
     sampleMs: SAMPLE_MS,
     closingQuotes,
     maker: {
-      quote: makerQuote,
-      hasPair: makerPair != null,
-      hasPendingHedge: makerPendingHedge != null,
+      quote: liveMakerQuote,
     },
     active: [...active.values()]
       .filter((row) => (
