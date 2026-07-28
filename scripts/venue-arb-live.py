@@ -107,6 +107,23 @@ def safer_maker_price(
     return max(candidate_price, best_bid + distance)
 
 
+def preserve_selected_maker_price(
+    side: str,
+    selected_price: float,
+    edge_limit_price: float,
+) -> float:
+    if (
+        side not in {"buy", "sell"}
+        or min(selected_price, edge_limit_price) <= 0
+    ):
+        return math.nan
+    return (
+        min(selected_price, edge_limit_price)
+        if side == "buy"
+        else max(selected_price, edge_limit_price)
+    )
+
+
 def projected_net_usd(
     *,
     quantity: float,
@@ -836,9 +853,15 @@ class Canary:
             if side == "buy"
             else hedge_price * (1 + required_raw_bps / 10_000)
         )
+        selected_price = float(fresh["price"])
+        revalidated_candidate_price = preserve_selected_maker_price(
+            side,
+            selected_price,
+            edge_limit_price,
+        )
         raw_price = safer_maker_price(
             side=side,
-            candidate_price=edge_limit_price,
+            candidate_price=revalidated_candidate_price,
             best_bid=best_bid,
             best_ask=best_ask,
             tick=tick,
@@ -2292,6 +2315,10 @@ def self_test() -> None:
         safety_ticks=5,
         safety_bps=2,
     ) == 100.05
+    assert preserve_selected_maker_price("buy", 99.8, 100.05) == 99.8
+    assert preserve_selected_maker_price("buy", 100.1, 100.05) == 100.05
+    assert preserve_selected_maker_price("sell", 100.2, 100.05) == 100.2
+    assert preserve_selected_maker_price("sell", 100.0, 100.05) == 100.05
     assert safer_maker_price(
         side="sell",
         candidate_price=100.01,
