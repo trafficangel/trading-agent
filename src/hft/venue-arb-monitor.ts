@@ -1824,19 +1824,25 @@ function writeExecutionStatus(): void {
       // Conservative for the $300 canary: use $500 executable VWAP rather
       // than top-of-book when estimating whether both closing legs are net+.
       notionalUsd: 500,
+      extendedBuyVwap: extended?.buyVwap500 ?? null,
       extendedSellVwap: extended?.sellVwap500 ?? null,
       lighterBuyVwap: lighter?.buyVwap500 ?? null,
+      lighterSellVwap: lighter?.sellVwap500 ?? null,
       extendedBookAgeMs: extended?.receivedAt ? now - extended.receivedAt : null,
       lighterBookAgeMs: lighter?.receivedAt ? now - lighter.receivedAt : null,
     }];
   }));
   const status = {
-    version: 'venue-arb-execution-v1',
+    version: 'venue-arb-execution-v2',
     updatedAt: now,
     sampleMs: SAMPLE_MS,
     closingQuotes,
     active: [...active.values()]
-      .filter((row) => row.buyVenue === 'extended' && row.sellVenue === 'lighter')
+      .filter((row) => (
+        row.buyVenue === 'extended' && row.sellVenue === 'lighter'
+      ) || (
+        row.buyVenue === 'lighter' && row.sellVenue === 'extended'
+      ))
       .map((row) => ({
         id: row.id,
         coin: row.coin,

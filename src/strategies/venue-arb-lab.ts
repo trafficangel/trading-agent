@@ -975,7 +975,7 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Extended / Lighter</small><b>${money(liveStatus?.balancesUsd?.extended)} / ${money(liveStatus?.balancesUsd?.lighter)}</b></div>
           <div><small>Текущий статус</small><b>${activeLive ? `${esc(activeLive.coin)} · ${esc(activeLive.status)}` : liveState(liveStatus)}</b></div>
         </div>
-        <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. Вход разрешён только для Extended → Lighter при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .15)} и свежести обоих стаканов ≤ 150 ms. Обычный выход допускается только после ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .10)}; команда остановки больше не инициирует немедленное закрытие открытой пары.</p>
+        <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. Исполнитель конфигурируется на одно выбранное направление; сейчас это ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .15)} и свежести обоих стаканов ≤ 150 ms. Обычный выход допускается только после ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .10)}; команда остановки больше не инициирует немедленное закрытие открытой пары.</p>
         <div class="va-table" data-va-pager="live-trades" data-page-size="20"><table><thead><tr>
           <th>ID</th><th>Открыта → закрыта UTC</th><th>Монета</th><th>Маршрут</th>
           <th>Размер</th><th>Вход Ext / Lighter</th><th>Выход Ext / Lighter</th>
@@ -1007,9 +1007,9 @@ async function render(lang: Lang): Promise<string> {
         <div class="va-rules">
           <span>глубина минимум $500</span><span>контроль $1,000</span><span>шаг 100 ms</span>
           <span>VWAP, не mid-price</span><span>две ноги одновременно</span><span>полный round-trip</span>
-          <span>допуск только при $1k net &gt; ${pctFromBps(triggerBps)}</span><span>Lighter fee 0%</span><span>canary: Extended → Lighter</span>
+          <span>допуск только при $1k net &gt; ${pctFromBps(triggerBps)}</span><span>Lighter fee 0%</span><span>canary: ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')}</span>
         </div>
-        <p>Радар продолжает измерять все площадки. Реальный исполнитель отделён от него и допущен только к одной защищённой canary-сделке Extended → Lighter; он параллельно отправляет IOC-ноги и аварийно выравнивает позицию, если одна сторона не исполнилась.</p>
+        <p>Радар продолжает измерять все площадки. Реальный исполнитель отделён от него и допускается только к одному явно выбранному направлению Extended ↔ Lighter; он параллельно отправляет IOC-ноги и аварийно выравнивает позицию, если одна сторона не исполнилась.</p>
       </section>
     </div>
     ${VENUE_ARB_PAGINATION_SCRIPT}`,
@@ -1027,7 +1027,7 @@ export async function venueArbHero(lang: Lang): Promise<string> {
   return `<a class="va-hero" href="/lab/venue-arb">
     <div><span class="va-badge">⚡ DEX ↔ CEX · PERP ARBITRAGE · READ-ONLY</span>
       <div class="va-title">Executable Divergence Radar</div>
-      <div class="va-sub">${t(lang, '8 площадок · $1,000 net после комиссий · скорость схождения →', '8 venues · $1,000 net after fees · convergence speed →')}</div>
+      <div class="va-sub">${t(lang, '9 площадок · $1,000 net после комиссий · скорость схождения →', '9 venues · $1,000 net after fees · convergence speed →')}</div>
     </div>
     <div class="va-hero-stats">
       <span><b class="${isLive ? 'pos' : 'neg'}">${isLive ? 'LIVE' : 'OFFLINE'}</b><small>engine</small></span>

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Protected one-shot Extended -> Lighter perpetual-arbitrage canary.
+"""Protected one-shot Extended/Lighter perpetual-arbitrage canary.
 
 The process consumes the read-only venue-arb monitor status, waits for a fresh
-tradeable window, submits both IOC legs concurrently, reconciles exchange
-positions, exits on convergence, and flattens immediately on any mismatch.
-It writes a public-safe status and trade journal for /lab/venue-arb.
+tradeable window in the configured direction, submits both IOC legs
+concurrently, reconciles exchange positions, exits on convergence, and
+flattens immediately on any mismatch. It writes a public-safe status and trade
+journal for /lab/venue-arb.
 """
 
 from __future__ import annotations
@@ -44,6 +45,11 @@ MARKETS: dict[str, int] = {
     "LTC": 35,
 }
 
+ROUTES: dict[str, tuple[str, str, str]] = {
+    "extended-lighter": ("extended", "lighter", "Extended → Lighter"),
+    "lighter-extended": ("lighter", "extended", "Lighter → Extended"),
+}
+
 
 @dataclass(frozen=True)
 class Fill:
@@ -57,16 +63,16 @@ class Fill:
 def projected_net_usd(
     *,
     quantity: float,
-    entry_extended: float,
-    entry_lighter: float,
-    exit_extended: float,
-    exit_lighter: float,
+    entry_buy: float,
+    entry_sell: float,
+    exit_buy: float,
+    exit_sell: float,
     known_entry_fees: float,
     estimated_exit_fees: float,
 ) -> float:
     gross = (
-        (exit_extended - entry_extended)
-        + (entry_lighter - exit_lighter)
+        (exit_buy - entry_buy)
+        + (entry_sell - exit_sell)
     ) * quantity
     return gross - known_entry_fees - estimated_exit_fees
 
@@ -77,6 +83,14 @@ class Canary:
             os.getenv("VENUE_ARB_LIVE_ENABLED", "false").lower() == "true"
             and not force_dry_run
         )
+        self.route_id = os.getenv(
+            "VENUE_ARB_LIVE_ROUTE", "extended-lighter"
+        ).strip().lower()
+        if self.route_id not in ROUTES:
+            raise RuntimeError(
+                f"unsupported VENUE_ARB_LIVE_ROUTE={self.route_id!r}"
+            )
+        self.buy_venue, self.sell_venue, self.route_label = ROUTES[self.route_id]
         self.notional = float(os.getenv("VENUE_ARB_LIVE_NOTIONAL_USD", "300"))
         self.leverage = int(os.getenv("VENUE_ARB_LIVE_LEVERAGE", "5"))
         self.entry_net_bps = float(os.getenv("VENUE_ARB_LIVE_ENTRY_NET_BPS", "15"))
@@ -204,7 +218,8 @@ class Canary:
             "exitMinProfitPct": self.exit_min_profit_bps / 100,
             "exitConfirmations": self.exit_confirmations,
             "shutdownDeferredWhenOpen": True,
-            "route": "extended → lighter",
+            "routeId": self.route_id,
+            "route": self.route_label,
             "maxTrades": self.max_trades,
             "lastRejection": self.last_rejection,
             **fields,
@@ -370,7 +385,7 @@ class Canary:
     def candidate(self) -> dict[str, Any] | None:
         status = self.read_json(self.execution_path, {})
         now = int(time.time() * 1000)
-        if status.get("version") != "venue-arb-execution-v1":
+        if status.get("version") != "venue-arb-execution-v2":
             self.last_rejection = "monitor version mismatch"
             return None
         if now - int(status.get("updatedAt", 0) or 0) > self.fresh_ms:
@@ -378,7 +393,10 @@ class Canary:
             return None
         eligible = []
         for row in status.get("active") or []:
-            if row.get("buyVenue") != "extended" or row.get("sellVenue") != "lighter":
+            if (
+                row.get("buyVenue") != self.buy_venue
+                or row.get("sellVenue") != self.sell_venue
+            ):
                 continue
             coin = str(row.get("coin") or "")
             net = float(row.get("currentNetBps1000") or -math.inf)
@@ -404,7 +422,8 @@ class Canary:
                 eligible.append(row)
         if not eligible:
             self.last_rejection = (
-                f"waiting for Extended→Lighter net ≥{self.entry_net_bps:.1f} bps"
+                f"waiting for {self.route_label} net "
+                f"≥{self.entry_net_bps:.1f} bps"
             )
             return None
         self.last_rejection = None
@@ -717,7 +736,7 @@ class Canary:
         status = self.read_json(self.execution_path, {})
         now = int(time.time() * 1000)
         if (
-            status.get("version") != "venue-arb-execution-v1"
+            status.get("version") != "venue-arb-execution-v2"
             or now - int(status.get("updatedAt", 0) or 0) > self.fresh_ms
         ):
             return None
@@ -726,8 +745,20 @@ class Canary:
             float(quote.get("extendedBookAgeMs") or math.inf),
             float(quote.get("lighterBookAgeMs") or math.inf),
         )
-        ext_exit = float(quote.get("extendedSellVwap") or 0)
-        lit_exit = float(quote.get("lighterBuyVwap") or 0)
+        if self.buy_venue == "extended":
+            ext_exit = float(quote.get("extendedSellVwap") or 0)
+            lit_exit = float(quote.get("lighterBuyVwap") or 0)
+            entry_buy = ext_fill.price
+            entry_sell = lit_fill.price
+            exit_buy = ext_exit
+            exit_sell = lit_exit
+        else:
+            ext_exit = float(quote.get("extendedBuyVwap") or 0)
+            lit_exit = float(quote.get("lighterSellVwap") or 0)
+            entry_buy = lit_fill.price
+            entry_sell = ext_fill.price
+            exit_buy = lit_exit
+            exit_sell = ext_exit
         if max(ages) > self.fresh_ms or min(ext_exit, lit_exit) <= 0:
             return None
         estimated_exit_fees = (
@@ -735,10 +766,10 @@ class Canary:
         )
         net = projected_net_usd(
             quantity=quantity,
-            entry_extended=ext_fill.price,
-            entry_lighter=lit_fill.price,
-            exit_extended=ext_exit,
-            exit_lighter=lit_exit,
+            entry_buy=entry_buy,
+            entry_sell=entry_sell,
+            exit_buy=exit_buy,
+            exit_sell=exit_sell,
             known_entry_fees=ext_fill.fee + lit_fill.fee,
             estimated_exit_fees=estimated_exit_fees,
         )
@@ -762,7 +793,8 @@ class Canary:
             "id": f"L{started_at}",
             "status": "opening",
             "coin": coin,
-            "route": "Extended → Lighter",
+            "routeId": self.route_id,
+            "route": self.route_label,
             "opportunityId": opportunity_id,
             "signalAt": int(candidate.get("startedAt") or started_at),
             "startedAt": started_at,
@@ -774,13 +806,20 @@ class Canary:
         self.trade_open = True
         self.write_status("opening", activeTrade=trade)
         self.log("entry_submit", **trade)
+        extended_is_buy = self.buy_venue == "extended"
         entry_tasks = {
             "extended": asyncio.create_task(
                 self.place_extended(
                     coin,
                     quantity,
-                    float(candidate["currentBuyVwap1000"]),
-                    OrderSide.BUY,
+                    float(
+                        candidate[
+                            "currentBuyVwap1000"
+                            if extended_is_buy
+                            else "currentSellVwap1000"
+                        ]
+                    ),
+                    OrderSide.BUY if extended_is_buy else OrderSide.SELL,
                     reduce_only=False,
                     slippage=self.entry_slippage,
                 )
@@ -789,7 +828,7 @@ class Canary:
                 self.place_lighter(
                     coin,
                     quantity,
-                    is_ask=True,
+                    is_ask=self.sell_venue == "lighter",
                     reduce_only=False,
                     slippage=self.entry_slippage,
                 )
@@ -826,10 +865,18 @@ class Canary:
         lit_fill_task = asyncio.create_task(self.lighter_fill(coin, lit_order))
         ext_fill, lit_fill = await asyncio.gather(ext_fill_task, lit_fill_task)
         positions = await self.wait_positions(coin, want_open=True, timeout=4)
+        ext_position, lit_position = positions
+        ext_side = str(getattr(ext_position, "side", "")).upper()
+        lit_sign = int((lit_position or {}).get("sign", 0))
+        expected_ext_side = "LONG" if extended_is_buy else "SHORT"
+        expected_lit_sign = -1 if extended_is_buy else 1
         if (
             ext_fill is None
             or lit_fill is None
-            or any(position is None for position in positions)
+            or ext_position is None
+            or lit_position is None
+            or ext_side != expected_ext_side
+            or lit_sign != expected_lit_sign
             or abs(ext_fill.quantity - lit_fill.quantity)
             > max(ext_fill.quantity, lit_fill.quantity) * 0.002
         ):
@@ -933,10 +980,16 @@ class Canary:
             ext_exit.quantity,
             lit_exit.quantity,
         )
-        gross = (
-            (ext_exit.price - ext_fill.price)
-            + (lit_fill.price - lit_exit.price)
-        ) * quantity_done
+        if extended_is_buy:
+            gross = (
+                (ext_exit.price - ext_fill.price)
+                + (lit_fill.price - lit_exit.price)
+            ) * quantity_done
+        else:
+            gross = (
+                (lit_exit.price - lit_fill.price)
+                + (ext_fill.price - ext_exit.price)
+            ) * quantity_done
         fees = ext_fill.fee + ext_exit.fee + lit_fill.fee + lit_exit.fee
         net = gross - fees
         trade.update(
@@ -1044,14 +1097,24 @@ def self_test() -> None:
     assert Decimal("1.234") > 0
     reproduced_loss = projected_net_usd(
         quantity=0.52,
-        entry_extended=572.5,
-        entry_lighter=573.0972,
-        exit_extended=572.46,
-        exit_lighter=573.2286461538461,
+        entry_buy=572.5,
+        entry_sell=573.0972,
+        exit_buy=572.46,
+        exit_sell=573.2286461538461,
         known_entry_fees=0.074425,
         estimated_exit_fees=0.074419,
     )
     assert round(reproduced_loss, 6) == -0.237996
+    reverse_profit = projected_net_usd(
+        quantity=1,
+        entry_buy=100,
+        entry_sell=100.20,
+        exit_buy=100.10,
+        exit_sell=100.10,
+        known_entry_fees=0.02505,
+        estimated_exit_fees=0.025025,
+    )
+    assert round(reverse_profit, 6) == 0.149925
     signal_guard = object.__new__(Canary)
     signal_guard.running = True
     signal_guard.shutdown_requested = False
