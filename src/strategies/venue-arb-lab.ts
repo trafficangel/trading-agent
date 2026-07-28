@@ -365,11 +365,14 @@ type LiveStatus = {
   notionalUsdPerLeg?: number;
   leverage?: number;
   entryNetPct?: number;
+  makerCancelNetPct?: number;
+  postFillNetPct?: number;
   exitMinProfitPct?: number;
   exitConfirmations?: number;
   shutdownDeferredWhenOpen?: boolean;
   route?: string;
   lastRejection?: string | null;
+  reason?: string | null;
   error?: string;
   balancesUsd?: {
     extended?: number;
@@ -686,11 +689,14 @@ function liveState(status: LiveStatus | null): string {
     preflight: 'ПРОВЕРКА',
     armed: 'ЖДЁТ ВХОД',
     opening: 'ОТКРЫТИЕ',
+    maker_opening: 'MAKER: ОТПРАВКА',
+    maker_waiting: 'MAKER: В СТАКАНЕ',
     open: 'В ПОЗИЦИИ',
     shutdown_pending_profit: 'ОСТАНОВКА: ЖДЁТ NET+',
     closing: 'ЗАКРЫТИЕ',
     completed: 'CANARY ЗАВЕРШЁН',
     blocked: 'ОСТАНОВЛЕН',
+    stopped_after_reconciliation: 'ПАУЗА: ПРОВЕРКА EDGE',
     error: 'ОШИБКА',
   };
   return names[String(status?.state)] ?? 'НЕ ЗАПУЩЕН';
@@ -1158,7 +1164,7 @@ async function render(lang: Lang): Promise<string> {
 
       <section class="va-panel va-live-panel">
         <div class="va-panel-head"><div><span class="va-badge">REAL · EXTENDED ↔ LIGHTER</span><h2>Реальная арбитражная торговля</h2></div>
-          <span class="va-live-state ${liveStatus?.state === 'error' || liveStatus?.state === 'blocked' ? 'neg' : liveStatus?.enabled ? 'pos' : ''}">${liveState(liveStatus)}</span>
+          <span class="va-live-state ${liveStatus?.state === 'error' || liveStatus?.state === 'blocked' || liveStatus?.state === 'stopped_after_reconciliation' ? 'neg' : liveStatus?.enabled ? 'pos' : ''}">${liveState(liveStatus)}</span>
         </div>
         <div class="va-live-cards">
           <div><small>Реальный net PnL</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b></div>
@@ -1168,13 +1174,14 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Extended / Lighter</small><b>${money(liveStatus?.balancesUsd?.extended)} / ${money(liveStatus?.balancesUsd?.lighter)}</b></div>
           <div><small>Текущий статус</small><b>${activeLive ? `${esc(activeLive.coin)} · ${esc(activeLive.status)}` : liveState(liveStatus)}</b></div>
         </div>
-        <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. Исполнитель конфигурируется на одно выбранное направление; сейчас это ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .15)}, времени получения стаканов ≤ 150 ms и exchange timestamp ≤ 750 ms. Обычный выход допускается только после ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .10)}; команда остановки больше не инициирует немедленное закрытие открытой пары.</p>
+        <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. Для ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} maker-заявка ставится при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .15)}, отменяется при снижении ниже ${plainPct(liveStatus?.makerCancelNetPct ?? .12)}, а после фактического fill хедж допускается только при net ≥ ${plainPct(liveStatus?.postFillNetPct ?? .10)}. Обычный выход требует ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .10)}.</p>
         <div class="va-table" data-va-pager="live-trades" data-page-size="20"><table><thead><tr>
           <th>ID</th><th>Открыта → закрыта UTC</th><th>Монета</th><th>Маршрут</th>
           <th>Размер</th><th>Вход Ext / Lighter</th><th>Выход Ext / Lighter</th>
           <th>Жизнь</th><th>Вход / выход</th><th>Комиссии</th><th>Net результат</th>
         </tr></thead><tbody>${liveTradeRows(liveTrades)}</tbody></table></div>
         ${liveStatus?.lastRejection && liveStatus.state === 'armed' ? `<p class="va-wait">Сейчас: ${esc(liveStatus.lastRejection)}</p>` : ''}
+        ${liveStatus?.reason ? `<p class="va-wait">Решение: ${esc(liveStatus.reason)}</p>` : ''}
         ${liveStatus?.error ? `<p class="neg">Ошибка: ${esc(liveStatus.error)}</p>` : ''}
       </section>
 
