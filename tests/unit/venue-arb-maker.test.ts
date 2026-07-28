@@ -3,9 +3,17 @@ import {
   consumeMakerPrint,
   makerEntryEdgeBps,
   makerRoundTripAfterCosts,
+  snapMakerPrice,
 } from '../../src/lib/venue-arb-maker.js';
 
 describe('venue arb maker shadow math', () => {
+  it('snaps floating tick arithmetic to an exchange-valid decimal price', () => {
+    expect(snapMakerPrice(46.369, 0.010000000000005116, 'floor')).toBe(46.36);
+    expect(snapMakerPrice(46.351, 0.010000000000005116, 'ceil')).toBe(46.36);
+    expect(snapMakerPrice(100.26, 0.25, 'floor')).toBe(100.25);
+    expect(snapMakerPrice(100.26, 0.25, 'ceil')).toBe(100.5);
+  });
+
   it('does not invent a maker fill before queue and own size trade', () => {
     let state = { queueAhead: 5, remaining: 1, filled: false };
     state = consumeMakerPrint(state, 'buy', 100, 'SELL', 100, 4);

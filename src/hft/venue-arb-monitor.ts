@@ -39,6 +39,7 @@ import {
   consumeMakerPrint,
   makerEntryEdgeBps,
   makerRoundTripAfterCosts,
+  snapMakerPrice,
   type MakerQueueState,
   type MakerSide,
   type TakerSide,
@@ -1255,18 +1256,9 @@ function makerPriceTick(book: BookState): number | null {
     const difference = prices[index]! - prices[index - 1]!;
     if (difference > 1e-10) tick = Math.min(tick, difference);
   }
-  return Number.isFinite(tick) && tick > 0 ? tick : null;
-}
-
-function snapMakerPrice(
-  value: number,
-  tick: number,
-  mode: 'floor' | 'ceil',
-): number {
-  const units = mode === 'floor'
-    ? Math.floor(value / tick + 1e-9)
-    : Math.ceil(value / tick - 1e-9);
-  return Number((units * tick).toPrecision(14));
+  return Number.isFinite(tick) && tick > 0
+    ? Number(tick.toPrecision(10))
+    : null;
 }
 
 function makerEntryQuoteLevel(

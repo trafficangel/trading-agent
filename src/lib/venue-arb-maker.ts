@@ -7,6 +7,29 @@ export type MakerQueueState = {
   filled: boolean;
 };
 
+function decimalPlaces(value: number): number {
+  const text = value.toString().toLowerCase();
+  const [coefficient = '', exponentText] = text.split('e');
+  const exponent = exponentText == null ? 0 : Number(exponentText);
+  const fractionLength = coefficient.split('.')[1]?.length ?? 0;
+  return Math.max(0, fractionLength - exponent);
+}
+
+export function snapMakerPrice(
+  value: number,
+  tick: number,
+  mode: 'floor' | 'ceil',
+): number {
+  if (!(value > 0) || !(tick > 0)) return Number.NaN;
+  const normalizedTick = Number(tick.toPrecision(10));
+  const scaled = value / normalizedTick;
+  const units = mode === 'floor'
+    ? Math.floor(scaled + 1e-9)
+    : Math.ceil(scaled - 1e-9);
+  const decimals = Math.min(12, decimalPlaces(normalizedTick));
+  return Number((units * normalizedTick).toFixed(decimals));
+}
+
 export function consumeMakerPrint(
   state: MakerQueueState,
   makerSide: MakerSide,
