@@ -385,6 +385,7 @@ type Status = {
   makerShadow?: MakerShadow;
   grvtMakerShadow?: GenericMakerShadowStatus;
   grvtExtendedMakerShadow?: GenericMakerShadowStatus;
+  extendedAsterMakerShadow?: GenericMakerShadowStatus;
 };
 type LiveFill = {
   price?: number;
@@ -1206,6 +1207,7 @@ async function render(lang: Lang): Promise<string> {
   const makerTelemetry = makerShadow?.telemetry;
   const grvtMakerShadow = status?.grvtMakerShadow;
   const grvtExtendedMakerShadow = status?.grvtExtendedMakerShadow;
+  const extendedAsterMakerShadow = status?.extendedAsterMakerShadow;
   const primaryShadow = executionShadow?.routes?.['extended-lighter']
     ?? executionShadow;
   const shadowGate = primaryShadow?.readiness;
@@ -1243,6 +1245,13 @@ async function render(lang: Lang): Promise<string> {
         badge: 'GRVT MAKER → EXTENDED TAKER · SHADOW',
         heading: 'Кандидат с более широким ценовым разрывом',
         pagerId: 'grvt-extended-maker-shadow',
+        strongerCandidate: true,
+      })}
+
+      ${genericMakerPanel(extendedAsterMakerShadow, {
+        badge: 'EXTENDED MAKER → ASTER TAKER · SHADOW',
+        heading: 'Кандидат перед возможным пополнением Aster',
+        pagerId: 'extended-aster-maker-shadow',
         strongerCandidate: true,
       })}
 

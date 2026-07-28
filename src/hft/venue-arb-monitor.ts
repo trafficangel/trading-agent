@@ -369,6 +369,14 @@ const GRVT_EXTENDED_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
   'grvt-extended-maker-active-v1.json',
 );
+const EXTENDED_ASTER_MAKER_RESULTS_PATH = resolve(
+  DATA_DIR,
+  'extended-aster-maker-shadow-v1.ndjson',
+);
+const EXTENDED_ASTER_MAKER_ACTIVE_PATH = resolve(
+  DATA_DIR,
+  'extended-aster-maker-active-v1.json',
+);
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 250);
 const NET_TRIGGER_BPS = finiteEnv('VENUE_ARB_NET_TRIGGER_BPS', 3);
@@ -511,6 +519,22 @@ const GRVT_EXTENDED_MAKER_POST_FILL_NET_BPS = finiteEnv(
 );
 const GRVT_EXTENDED_MAKER_EXIT_NET_BPS = finiteEnv(
   'VENUE_ARB_GRVT_EXTENDED_MAKER_EXIT_NET_BPS',
+  8,
+);
+const EXTENDED_ASTER_MAKER_ENTRY_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_EXTENDED_ASTER_MAKER_ENTRY_EDGE_BPS',
+  12,
+);
+const EXTENDED_ASTER_MAKER_CANCEL_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_EXTENDED_ASTER_MAKER_CANCEL_EDGE_BPS',
+  8,
+);
+const EXTENDED_ASTER_MAKER_POST_FILL_NET_BPS = finiteEnv(
+  'VENUE_ARB_EXTENDED_ASTER_MAKER_POST_FILL_NET_BPS',
+  8,
+);
+const EXTENDED_ASTER_MAKER_EXIT_NET_BPS = finiteEnv(
+  'VENUE_ARB_EXTENDED_ASTER_MAKER_EXIT_NET_BPS',
   8,
 );
 const FEED_STALL_MS = finiteEnv('VENUE_ARB_FEED_STALL_MS', 15_000);
@@ -950,6 +974,45 @@ const grvtExtendedMakerShadow = new GenericMakerShadow({
   },
   onCheckpoint: (checkpoint) => {
     atomicJson(GRVT_EXTENDED_MAKER_ACTIVE_PATH, {
+      ...checkpoint,
+      updatedAt: Date.now(),
+    });
+  },
+});
+const extendedAsterMakerShadow = new GenericMakerShadow({
+  routeId: 'extended-maker-aster',
+  makerVenue: 'extended',
+  hedgeVenue: 'aster',
+  notionalUsd: GRVT_MAKER_NOTIONAL_USD,
+  entryEdgeBps: EXTENDED_ASTER_MAKER_ENTRY_EDGE_BPS,
+  cancelEdgeBps: EXTENDED_ASTER_MAKER_CANCEL_EDGE_BPS,
+  postFillNetBps: EXTENDED_ASTER_MAKER_POST_FILL_NET_BPS,
+  exitNetBps: EXTENDED_ASTER_MAKER_EXIT_NET_BPS,
+  quoteLatencyMs: GRVT_MAKER_QUOTE_LATENCY_MS,
+  hedgeLatencyMs: GRVT_MAKER_HEDGE_LATENCY_MS,
+  quoteTtlMs: GRVT_MAKER_QUOTE_TTL_MS,
+  maxQueueUsd: GRVT_MAKER_MAX_QUEUE_USD,
+  hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
+  maxHoldMs: MAKER_MAX_HOLD_MS,
+  independenceMs: MAKER_INDEPENDENCE_MS,
+  bookFreshMs: MAKER_BOOK_FRESH_MS,
+  sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  executionBufferBps: EXECUTION_BUFFER_BPS,
+  makerFeeBps: 0,
+  hedgeTakerFeeBps: FEE_BPS.aster,
+  makerFallbackTakerFeeBps: FEE_BPS.extended,
+  fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+  requiredSamples: SHADOW_REQUIRED_SAMPLES,
+  requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+}, {
+  onResult: (result) => {
+    appendFileSync(
+      EXTENDED_ASTER_MAKER_RESULTS_PATH,
+      `${JSON.stringify(result)}\n`,
+    );
+  },
+  onCheckpoint: (checkpoint) => {
+    atomicJson(EXTENDED_ASTER_MAKER_ACTIVE_PATH, {
       ...checkpoint,
       updatedAt: Date.now(),
     });
@@ -2615,6 +2678,7 @@ function startExtendedTrades(): void {
   sockets.add(ws);
   ws.on('open', () => {
     makerTelemetry.tradeStreamConnected = true;
+    extendedAsterMakerShadow.setTradeStreamConnected(true);
     console.warn('venue-arb extended public trades connected');
     const timer = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) ws.ping();
@@ -2647,14 +2711,16 @@ function startExtendedTrades(): void {
         const price = finite(row.p);
         const size = finite(row.q);
         if (!side || !(price > 0) || !(size > 0)) continue;
-        processMakerTrade({
+        const trade: MakerShadowTrade = {
           id: `${coin}:${String(row.i ?? `${row.T}:${row.p}:${row.q}:${row.S}`)}`,
           coin,
           side,
           price,
           size,
           tradeAt: normalizeExchangeTimestampMs(finite(row.T), receivedAt),
-        }, receivedAt);
+        };
+        processMakerTrade(trade, receivedAt);
+        extendedAsterMakerShadow.processTrade(trade, receivedAt);
       }
     } catch (error) {
       console.warn(
@@ -2665,12 +2731,15 @@ function startExtendedTrades(): void {
   });
   ws.on('error', (error) => {
     makerTelemetry.tradeStreamConnected = false;
+    extendedAsterMakerShadow.setTradeStreamConnected(false);
     console.warn('venue-arb extended public trades websocket error', error.message);
   });
   ws.on('close', (code, reason) => {
     sockets.delete(ws);
     makerTelemetry.tradeStreamConnected = false;
     makerTelemetry.tradeReconnects++;
+    extendedAsterMakerShadow.setTradeStreamConnected(false);
+    extendedAsterMakerShadow.recordTradeReconnect();
     console.warn(
       `venue-arb extended public trades closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
     );
@@ -3215,6 +3284,7 @@ function writeStatus(): void {
     makerShadow: makerShadowStatus(),
     grvtMakerShadow: grvtMakerShadow.status(),
     grvtExtendedMakerShadow: grvtExtendedMakerShadow.status(),
+    extendedAsterMakerShadow: extendedAsterMakerShadow.status(),
     freshnessMs: Object.fromEntries(MARKETS.map((market) => [
       market.coin,
       Object.fromEntries(VENUES.map((venue) => [
@@ -3466,9 +3536,12 @@ function loadGenericMakerState(
   shadow.restore(results, checkpoint);
 }
 
-function grvtMakerMarkets(hedgeVenue: 'lighter' | 'extended') {
+function genericMakerMarkets(
+  makerVenue: 'grvt' | 'extended',
+  hedgeVenue: 'lighter' | 'extended' | 'aster',
+) {
   return MARKETS.map((market) => {
-    const maker = books.get(bookKey('grvt', market.coin)) ?? null;
+    const maker = books.get(bookKey(makerVenue, market.coin)) ?? null;
     const hedge = executableBook(hedgeVenue, market.coin);
     return {
       coin: market.coin,
@@ -3508,6 +3581,7 @@ function shutdown(signal: string): void {
   prepareMakerShutdown(Date.now());
   grvtMakerShadow.shutdown(Date.now());
   grvtExtendedMakerShadow.shutdown(Date.now());
+  extendedAsterMakerShadow.shutdown(Date.now());
   writeStatus();
   writeExecutionStatus();
   for (const ws of sockets) ws.close();
@@ -3526,6 +3600,9 @@ if (!existsSync(GRVT_MAKER_RESULTS_PATH)) {
 if (!existsSync(GRVT_EXTENDED_MAKER_RESULTS_PATH)) {
   writeFileSync(GRVT_EXTENDED_MAKER_RESULTS_PATH, '');
 }
+if (!existsSync(EXTENDED_ASTER_MAKER_RESULTS_PATH)) {
+  writeFileSync(EXTENDED_ASTER_MAKER_RESULTS_PATH, '');
+}
 loadHistory();
 loadShadowState();
 loadMakerState();
@@ -3540,6 +3617,12 @@ loadGenericMakerState(
   GRVT_EXTENDED_MAKER_RESULTS_PATH,
   GRVT_EXTENDED_MAKER_ACTIVE_PATH,
   'GRVT maker → Extended',
+);
+loadGenericMakerState(
+  extendedAsterMakerShadow,
+  EXTENDED_ASTER_MAKER_RESULTS_PATH,
+  EXTENDED_ASTER_MAKER_ACTIVE_PATH,
+  'Extended maker → Aster',
 );
 startedAt = Date.now();
 startLighter();
@@ -3556,10 +3639,17 @@ startBybit();
 const evaluationTimer = setInterval(() => {
   evaluate();
   evaluateMakerShadow(Date.now());
-  grvtMakerShadow.evaluate(Date.now(), grvtMakerMarkets('lighter'));
+  grvtMakerShadow.evaluate(
+    Date.now(),
+    genericMakerMarkets('grvt', 'lighter'),
+  );
   grvtExtendedMakerShadow.evaluate(
     Date.now(),
-    grvtMakerMarkets('extended'),
+    genericMakerMarkets('grvt', 'extended'),
+  );
+  extendedAsterMakerShadow.evaluate(
+    Date.now(),
+    genericMakerMarkets('extended', 'aster'),
   );
   writeExecutionStatus();
 }, SAMPLE_MS);
