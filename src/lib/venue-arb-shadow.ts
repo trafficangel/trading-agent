@@ -134,3 +134,19 @@ export function independentSignalRows<T>(
   }
   return accepted;
 }
+
+export function wilsonLowerBound(
+  successes: number,
+  trials: number,
+  z = 1.96,
+): number {
+  if (!(trials > 0) || successes < 0 || successes > trials) return 0;
+  const proportion = successes / trials;
+  const zSquared = z * z;
+  const denominator = 1 + zSquared / trials;
+  const centre = proportion + zSquared / (2 * trials);
+  const margin = z * Math.sqrt(
+    (proportion * (1 - proportion) + zSquared / (4 * trials)) / trials,
+  );
+  return (centre - margin) / denominator;
+}

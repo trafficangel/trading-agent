@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import { wilsonLowerBound } from '../lib/venue-arb-shadow.js';
 import { getLang, pageShell } from './landing.js';
 
 type Lang = 'ru' | 'en';
@@ -370,7 +371,15 @@ function capitalRecommendation(
     }))
     .filter(({ summary }) => Number(summary.strictStarts ?? 0) > 0)
     .sort((a, b) => (
-      Number(b.summary.strictRetained1000 ?? 0)
+      wilsonLowerBound(
+        Number(b.summary.strictRetained1000 ?? 0),
+        Number(b.summary.strictStarts ?? 0),
+      )
+      - wilsonLowerBound(
+        Number(a.summary.strictRetained1000 ?? 0),
+        Number(a.summary.strictStarts ?? 0),
+      )
+      || Number(b.summary.strictRetained1000 ?? 0)
       - Number(a.summary.strictRetained1000 ?? 0)
       || Number(b.summary.strictStarts ?? 0)
       - Number(a.summary.strictStarts ?? 0)
@@ -384,7 +393,7 @@ function capitalRecommendation(
   const dexCexNote = dexCexLeader && dexCexLeader.route.id !== leader.route.id
     ? ` Лучший DEX/CEX-кандидат — <b>${esc(shadowRouteLabel(dexCexLeader.route))}</b>: ${Number(dexCexLeader.summary.strictRetained1000 ?? 0)} / ${Number(dexCexLeader.summary.strictStarts ?? 0)}.`
     : '';
-  return `<p class="va-wait"><b>КАПИТАЛ: ПОКА НЕ ВНОСИТЬ.</b> Предварительный лидер по числу устойчивых окон — <b>${esc(shadowRouteLabel(leader.route))}</b> (${esc(shadowRouteClass(leader.route))}): исторически ${Number(leader.summary.strictRetained1000 ?? 0)} из ${Number(leader.summary.strictStarts ?? 0)} окон сохранили net ≥ +0.10% через 1 секунду.${dexCexNote} Строгий forward лидера сейчас ${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 50)}. После PASS здесь появятся две площадки, а точный размер пополнения будет рассчитан по доступному плечу и запасу маржи.</p>`;
+  return `<p class="va-wait"><b>КАПИТАЛ: ПОКА НЕ ВНОСИТЬ.</b> Предварительный лидер по консервативной оценке устойчивости — <b>${esc(shadowRouteLabel(leader.route))}</b> (${esc(shadowRouteClass(leader.route))}): исторически ${Number(leader.summary.strictRetained1000 ?? 0)} из ${Number(leader.summary.strictStarts ?? 0)} окон сохранили net ≥ +0.10% через 1 секунду.${dexCexNote} Строгий forward лидера сейчас ${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 50)}. После PASS здесь появятся две площадки, а точный размер пополнения будет рассчитан по доступному плечу и запасу маржи.</p>`;
 }
 
 function pct(value: unknown): string {

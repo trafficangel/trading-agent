@@ -4,6 +4,7 @@ import {
   independentSignalRows,
   shadowNetAfterCosts,
   shadowReadiness,
+  wilsonLowerBound,
 } from '../../src/lib/venue-arb-shadow.js';
 
 describe('venue arb execution shadow', () => {
@@ -114,5 +115,11 @@ describe('venue arb execution shadow', () => {
       (row) => row.key,
       (row) => row.at,
     )).toEqual([rows[0], rows[2], rows[3]]);
+  });
+
+  it('ranks persistence by conservative confidence, not raw attempt count', () => {
+    expect(wilsonLowerBound(5, 6)).toBeGreaterThan(wilsonLowerBound(2, 2));
+    expect(wilsonLowerBound(2, 2)).toBeGreaterThan(wilsonLowerBound(2, 4));
+    expect(wilsonLowerBound(0, 0)).toBe(0);
   });
 });
