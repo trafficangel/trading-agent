@@ -722,6 +722,11 @@ class Canary:
             row = response.data
             filled_qty = float(row.filled_qty or 0)
             status = self.order_status_value(row.status)
+            if status not in final_statuses and not row.post_only:
+                await self.cancel_all_extended_orders()
+                raise RuntimeError(
+                    "Extended active maker order lost post-only protection"
+                )
             if filled_qty > 0:
                 saw_fill = True
                 if status not in final_statuses:
@@ -1162,6 +1167,12 @@ class Canary:
             self.write_status("armed", activeTrade=None, lastTrade=trade)
             self.log("maker_unfilled", **trade)
             return
+        if abs(ext_fill.fee) > 1e-9:
+            with contextlib.suppress(Exception):
+                await self.flatten(coin, emergency=True)
+            raise RuntimeError(
+                f"Extended maker fill charged a taker fee: {ext_fill.fee}"
+            )
 
         try:
             hedge_quantity = self.lighter_compatible_quantity(
