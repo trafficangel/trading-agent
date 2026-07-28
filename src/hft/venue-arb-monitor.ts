@@ -2733,6 +2733,11 @@ function writeExecutionStatus(): void {
     updatedAt: now,
     sampleMs: SAMPLE_MS,
     closingQuotes,
+    maker: {
+      quote: makerQuote,
+      hasPair: makerPair != null,
+      hasPendingHedge: makerPendingHedge != null,
+    },
     active: [...active.values()]
       .filter((row) => (
         row.buyVenue === 'extended' && row.sellVenue === 'lighter'

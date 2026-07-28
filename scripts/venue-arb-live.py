@@ -492,12 +492,15 @@ class Canary:
         )
 
     def maker_candidate(self) -> dict[str, Any] | None:
-        status = self.read_json(self.monitor_path, {})
+        status = self.read_json(self.execution_path, {})
         now = int(time.time() * 1000)
-        if now - int(status.get("updatedAt", 0) or 0) > self.fresh_ms:
-            self.last_rejection = "maker monitor snapshot stale"
+        if status.get("version") != "venue-arb-execution-v2":
+            self.last_rejection = "maker execution snapshot version mismatch"
             return None
-        maker = status.get("makerShadow") or {}
+        if now - int(status.get("updatedAt", 0) or 0) > self.fresh_ms:
+            self.last_rejection = "maker execution snapshot stale"
+            return None
+        maker = status.get("maker") or {}
         quote = maker.get("quote") or {}
         queue = quote.get("queue") or {}
         coin = str(quote.get("coin") or "")
@@ -505,21 +508,25 @@ class Canary:
         queue_ahead = float(queue.get("queueAhead") or 0)
         projected_net_bps = float(quote.get("projectedNetBps") or -math.inf)
         expires_at = int(quote.get("expiresAt") or 0)
-        freshness = (status.get("freshnessMs") or {}).get(coin) or {}
+        freshness = (status.get("closingQuotes") or {}).get(coin) or {}
         if (
             quote.get("stage") != "entry"
             or quote.get("activatedAt") is None
-            or maker.get("pair") is not None
-            or maker.get("pendingHedge") is not None
+            or bool(maker.get("hasPair"))
+            or bool(maker.get("hasPendingHedge"))
             or coin not in MARKETS
             or quote.get("side") not in {"buy", "sell"}
             or price <= 0
             or projected_net_bps < self.entry_net_bps
             or queue_ahead * price > self.maker_max_queue_usd
             or expires_at - now < self.maker_min_ttl_ms
-            or float(freshness.get("extended") or math.inf)
+            or float(freshness.get("extendedBookAgeMs") or math.inf)
             > self.source_fresh_ms
-            or float(freshness.get("lighter") or math.inf)
+            or float(freshness.get("lighterBookAgeMs") or math.inf)
+            > self.source_fresh_ms
+            or float(freshness.get("extendedSourceAgeMs") or math.inf)
+            > self.source_fresh_ms
+            or float(freshness.get("lighterSourceAgeMs") or math.inf)
             > self.source_fresh_ms
         ):
             self.last_rejection = (
