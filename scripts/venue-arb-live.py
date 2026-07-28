@@ -191,10 +191,10 @@ class Canary:
             os.getenv("VENUE_ARB_LIVE_MAKER_ORDER_TTL_MS", "15000")
         )
         self.maker_safety_ticks = int(
-            os.getenv("VENUE_ARB_LIVE_MAKER_SAFETY_TICKS", "5")
+            os.getenv("VENUE_ARB_LIVE_MAKER_SAFETY_TICKS", "3")
         )
         self.maker_safety_bps = float(
-            os.getenv("VENUE_ARB_LIVE_MAKER_SAFETY_BPS", "1")
+            os.getenv("VENUE_ARB_LIVE_MAKER_SAFETY_BPS", "0.5")
         )
         self.execution_buffer_bps = float(
             os.getenv("VENUE_ARB_EXECUTION_BUFFER_BPS", "2")
