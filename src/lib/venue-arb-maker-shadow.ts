@@ -75,6 +75,7 @@ export type GenericMakerPendingHedge = {
   dueAt: number;
   deadlineAt: number;
   makerOrder: boolean;
+  projectedNetBpsAtFill?: number | null;
 };
 
 export type GenericMakerResult = {
@@ -96,6 +97,8 @@ export type GenericMakerResult = {
   passed: boolean;
   reason: string;
   fundingBps: number;
+  projectedNetBpsAtExitFill?: number | null;
+  hedgeLatencyDeltaBps?: number | null;
 };
 
 export type GenericMakerTelemetry = {
@@ -793,6 +796,10 @@ export class GenericMakerShadow {
       passed: modeled.netBps > 0,
       reason: pending.makerOrder ? 'maker_round_trip' : 'max_hold_taker_exit',
       fundingBps,
+      projectedNetBpsAtExitFill: pending.projectedNetBpsAtFill ?? null,
+      hedgeLatencyDeltaBps: pending.projectedNetBpsAtFill == null
+        ? null
+        : modeled.netBps - pending.projectedNetBpsAtFill,
     });
     this.reset(now);
   }
@@ -827,6 +834,13 @@ export class GenericMakerShadow {
             deadlineAt: now + this.config.hedgeLatencyMs
               + this.config.hedgeGraceMs,
             makerOrder: false,
+            projectedNetBpsAtFill: this.closeProjection(
+              now,
+              this.pair,
+              makerFill,
+              this.hedgePrice(side, market.hedge)!,
+              false,
+            ),
           };
           this.checkpoint();
         }
@@ -934,6 +948,7 @@ export class GenericMakerShadow {
       deadlineAt: (quote.firstFillAt ?? receivedAt)
         + this.config.hedgeLatencyMs + this.config.hedgeGraceMs,
       makerOrder: true,
+      projectedNetBpsAtFill: this.currentProjection(receivedAt, quote),
     };
     this.quote = null;
     this.checkpoint();
