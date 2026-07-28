@@ -384,6 +384,7 @@ type Status = {
   executionShadow?: ExecutionShadow;
   makerShadow?: MakerShadow;
   grvtMakerShadow?: GenericMakerShadowStatus;
+  grvtExtendedMakerShadow?: GenericMakerShadowStatus;
 };
 type LiveFill = {
   price?: number;
@@ -945,13 +946,15 @@ function genericMakerRows(
   shadow: GenericMakerShadowStatus | undefined,
 ): string {
   const rows = shadow?.recent ?? [];
+  const makerVenue = String(shadow?.config?.makerVenue ?? 'maker').toUpperCase();
+  const hedgeVenue = String(shadow?.config?.hedgeVenue ?? 'hedge').toUpperCase();
   if (!rows.length) {
-    return '<tr><td colspan="10">Ждём первое подтверждённое исполнение GRVT maker: исторический trade snapshot и простое касание цены fill не создают.</td></tr>';
+    return `<tr><td colspan="10">Ждём первое подтверждённое исполнение ${esc(makerVenue)} maker: исторический trade snapshot и простое касание цены fill не создают.</td></tr>`;
   }
   return rows.map((row) => `<tr>
     <td>${utc(row.openedAt ?? row.closedAt)}</td>
     <td><b>${esc(row.coin)}</b></td>
-    <td>${row.makerSide === 'long' ? 'LONG GRVT / SHORT Lighter' : row.makerSide === 'short' ? 'SHORT GRVT / LONG Lighter' : '—'}</td>
+    <td>${row.makerSide === 'long' ? `LONG ${esc(makerVenue)} / SHORT ${esc(hedgeVenue)}` : row.makerSide === 'short' ? `SHORT ${esc(makerVenue)} / LONG ${esc(hedgeVenue)}` : '—'}</td>
     <td>${price(row.entryMaker)} / ${price(row.entryHedge)}</td>
     <td>${price(row.exitMaker)} / ${price(row.exitHedge)}</td>
     <td class="${cls(row.entryEdgeBps)}">${pctFromBps(row.entryEdgeBps)}</td>
@@ -967,7 +970,55 @@ function genericMakerPairLabel(
 ): string {
   const pair = shadow?.pair;
   if (!pair) return 'нет открытой пары';
-  return `${esc(pair.coin)} · ${String(pair.makerSide).toUpperCase()} GRVT · ${duration(Date.now() - Number(pair.openedAt ?? Date.now()))}`;
+  const makerVenue = String(shadow?.config?.makerVenue ?? 'maker').toUpperCase();
+  return `${esc(pair.coin)} · ${String(pair.makerSide).toUpperCase()} ${esc(makerVenue)} · ${duration(Date.now() - Number(pair.openedAt ?? Date.now()))}`;
+}
+
+function genericMakerPanel(
+  shadow: GenericMakerShadowStatus | undefined,
+  {
+    badge,
+    heading,
+    pagerId,
+    strongerCandidate = false,
+  }: {
+    badge: string;
+    heading: string;
+    pagerId: string;
+    strongerCandidate?: boolean;
+  },
+): string {
+  const gate = shadow?.readiness;
+  const telemetry = shadow?.telemetry;
+  const makerVenue = String(shadow?.config?.makerVenue ?? 'maker');
+  const hedgeVenue = String(shadow?.config?.hedgeVenue ?? 'hedge');
+  const makerLabel = makerVenue.toUpperCase();
+  const hedgeLabel = hedgeVenue[0]?.toUpperCase() + hedgeVenue.slice(1);
+  return `<section class="va-panel va-maker-panel">
+    <div class="va-panel-head"><div><span class="va-badge">${esc(badge)}</span><h2>${esc(heading)}</h2></div>
+      <span class="${gate?.ready ? 'pos' : ''}">${gate?.ready ? 'ГОТОВ К $100 CANARY' : 'СБОР ИСПОЛНЕНИЙ'}</span>
+    </div>
+    <div class="va-live-cards">
+      <div><small>Публичные сделки ${esc(makerLabel)}</small><b class="${telemetry?.tradeStreamConnected ? 'pos' : 'neg'}">${telemetry?.tradeStreamConnected ? 'LIVE' : 'OFFLINE'}</b></div>
+      <div><small>Циклы / минимум</small><b>${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 20)}</b></div>
+      <div><small>PASS</small><b class="${Number(gate?.passedPct ?? 0) >= Number(gate?.requiredPassPct ?? 90) ? 'pos' : ''}">${Number(gate?.passed ?? 0)} / ${Number(gate?.attempts ?? 0)} · ${pct(gate?.passedPct)}</b></div>
+      <div><small>Накопленный net</small><b class="${cls(gate?.sumNetBps)}">${pctFromBps(gate?.sumNetBps)} · ${money(gate?.sumNetUsd, true)}</b></div>
+      <div><small>Лучший вход сейчас</small><b>${coinAndBps(telemetry?.bestProjectedCoin, telemetry?.bestProjectedEntryBps)}</b></div>
+      <div><small>Maker fills / quotes</small><b>${Number(telemetry?.queueFills ?? 0)} / ${Number(telemetry?.quotes ?? 0)}</b></div>
+      <div><small>Trades / stale отброшено</small><b>${Number(telemetry?.trades ?? 0).toLocaleString('ru-RU')} / ${Number(telemetry?.staleTrades ?? 0).toLocaleString('ru-RU')}</b></div>
+      <div><small>Котировка</small><b>${makerQuoteLabel({ quote: shadow?.quote })}</b></div>
+      <div><small>Открытая пара</small><b>${genericMakerPairLabel(shadow)}</b></div>
+      <div><small>Хедж</small><b>${shadow?.pendingHedge ? `${esc(shadow.pendingHedge.coin)} · ${shadow.pendingHedge.stage === 'entry' ? 'вход' : 'выход'} ожидает ${esc(hedgeLabel)}` : 'нет незахеджированной ноги'}</b></div>
+      <div><small>Порог входа / отмены</small><b>${pctFromBps(shadow?.config?.entryEdgeBps)} / ${pctFromBps((shadow?.config as { cancelEdgeBps?: number } | undefined)?.cancelEdgeBps)}</b></div>
+      <div><small>Maker fee / hedge taker</small><b>${pctFromBps(shadow?.config?.makerFeeBps, false)} / ${pctFromBps(shadow?.config?.hedgeTakerFeeBps, false)}</b></div>
+    </div>
+    <p>${esc(makerLabel)} размещает post-only maker-заявку, ${esc(hedgeLabel)} выполняет taker-хедж. Модель ждёт реальные ORDERBOOK trades, вычитает отображённую очередь, применяет ${duration(shadow?.config?.hedgeLatencyMs)} задержки хеджа, funding и ${pctFromBps(shadow?.config?.executionBufferBps, false)} защитного буфера.${strongerCandidate ? ' Этот маршрут считается независимо от GRVT→Lighter и сейчас проверяет более широкий ценовой разрыв после комиссии Extended.' : ''} Реальный капитал не используется, пока минимум ${Number(gate?.requiredSamples ?? 20)} независимых циклов не дадут положительный суммарный net и PASS ≥ ${pct(gate?.requiredPassPct)}.</p>
+    <div class="va-table" data-va-pager="${esc(pagerId)}" data-page-size="20"><table><thead><tr>
+      <th>UTC</th><th>Монета</th><th>Пара</th><th>Вход ${esc(makerLabel)} / ${esc(hedgeLabel)}</th>
+      <th>Выход ${esc(makerLabel)} / ${esc(hedgeLabel)}</th><th>Entry edge</th><th>Жизнь</th>
+      <th>Выход ${esc(makerLabel)}</th><th>Net</th><th>Результат</th>
+    </tr></thead><tbody>${genericMakerRows(shadow)}</tbody></table></div>
+  </section>`;
 }
 
 function scoutRouteRows(
@@ -1154,8 +1205,7 @@ async function render(lang: Lang): Promise<string> {
   const makerGate = makerShadow?.readiness;
   const makerTelemetry = makerShadow?.telemetry;
   const grvtMakerShadow = status?.grvtMakerShadow;
-  const grvtMakerGate = grvtMakerShadow?.readiness;
-  const grvtMakerTelemetry = grvtMakerShadow?.telemetry;
+  const grvtExtendedMakerShadow = status?.grvtExtendedMakerShadow;
   const primaryShadow = executionShadow?.routes?.['extended-lighter']
     ?? executionShadow;
   const shadowGate = primaryShadow?.readiness;
@@ -1189,31 +1239,18 @@ async function render(lang: Lang): Promise<string> {
         ${activeRows(status?.active ?? [], triggerBps)}
       </section>
 
-      <section class="va-panel va-maker-panel">
-        <div class="va-panel-head"><div><span class="va-badge">GRVT MAKER → LIGHTER TAKER · SHADOW</span><h2>Кандидат с минимальными комиссиями</h2></div>
-          <span class="${grvtMakerGate?.ready ? 'pos' : ''}">${grvtMakerGate?.ready ? 'ГОТОВ К $100 CANARY' : 'СБОР ИСПОЛНЕНИЙ'}</span>
-        </div>
-        <div class="va-live-cards">
-          <div><small>Публичные сделки GRVT</small><b class="${grvtMakerTelemetry?.tradeStreamConnected ? 'pos' : 'neg'}">${grvtMakerTelemetry?.tradeStreamConnected ? 'LIVE' : 'OFFLINE'}</b></div>
-          <div><small>Циклы / минимум</small><b>${Number(grvtMakerGate?.samples ?? 0)} / ${Number(grvtMakerGate?.requiredSamples ?? 20)}</b></div>
-          <div><small>PASS</small><b class="${Number(grvtMakerGate?.passedPct ?? 0) >= Number(grvtMakerGate?.requiredPassPct ?? 90) ? 'pos' : ''}">${Number(grvtMakerGate?.passed ?? 0)} / ${Number(grvtMakerGate?.attempts ?? 0)} · ${pct(grvtMakerGate?.passedPct)}</b></div>
-          <div><small>Накопленный net</small><b class="${cls(grvtMakerGate?.sumNetBps)}">${pctFromBps(grvtMakerGate?.sumNetBps)} · ${money(grvtMakerGate?.sumNetUsd, true)}</b></div>
-          <div><small>Лучший вход сейчас</small><b>${coinAndBps(grvtMakerTelemetry?.bestProjectedCoin, grvtMakerTelemetry?.bestProjectedEntryBps)}</b></div>
-          <div><small>Maker fills / quotes</small><b>${Number(grvtMakerTelemetry?.queueFills ?? 0)} / ${Number(grvtMakerTelemetry?.quotes ?? 0)}</b></div>
-          <div><small>Trades / stale отброшено</small><b>${Number(grvtMakerTelemetry?.trades ?? 0).toLocaleString('ru-RU')} / ${Number(grvtMakerTelemetry?.staleTrades ?? 0).toLocaleString('ru-RU')}</b></div>
-          <div><small>Котировка</small><b>${makerQuoteLabel({ quote: grvtMakerShadow?.quote })}</b></div>
-          <div><small>Открытая пара</small><b>${genericMakerPairLabel(grvtMakerShadow)}</b></div>
-          <div><small>Хедж</small><b>${grvtMakerShadow?.pendingHedge ? `${esc(grvtMakerShadow.pendingHedge.coin)} · ${grvtMakerShadow.pendingHedge.stage === 'entry' ? 'вход' : 'выход'} ожидает Lighter` : 'нет незахеджированной ноги'}</b></div>
-          <div><small>Порог входа / отмены</small><b>${pctFromBps(grvtMakerShadow?.config?.entryEdgeBps)} / ${pctFromBps((grvtMakerShadow?.config as { cancelEdgeBps?: number } | undefined)?.cancelEdgeBps)}</b></div>
-          <div><small>Maker fee / fallback taker</small><b>${pctFromBps(grvtMakerShadow?.config?.makerFeeBps, false)} / ${pctFromBps(grvtMakerShadow?.config?.makerFallbackTakerFeeBps, false)}</b></div>
-        </div>
-        <p>GRVT размещает post-only maker-заявку, Lighter выполняет бесплатный taker-хедж. Модель ждёт реальных ORDERBOOK trades GRVT, вычитает отображённую очередь перед нами, игнорирует старый snapshot и RPI-сделки, затем применяет ${duration(grvtMakerShadow?.config?.hedgeLatencyMs)} задержки хеджа, funding и ${pctFromBps(grvtMakerShadow?.config?.executionBufferBps, false)} защитного буфера. Реальные деньги на GRVT не требуются, пока минимум ${Number(grvtMakerGate?.requiredSamples ?? 20)} независимых циклов не дадут положительный суммарный net и PASS ≥ ${pct(grvtMakerGate?.requiredPassPct)}.</p>
-        <div class="va-table" data-va-pager="grvt-maker-shadow" data-page-size="20"><table><thead><tr>
-          <th>UTC</th><th>Монета</th><th>Пара</th><th>Вход GRVT / Lighter</th>
-          <th>Выход GRVT / Lighter</th><th>Entry edge</th><th>Жизнь</th>
-          <th>Выход GRVT</th><th>Net</th><th>Результат</th>
-        </tr></thead><tbody>${genericMakerRows(grvtMakerShadow)}</tbody></table></div>
-      </section>
+      ${genericMakerPanel(grvtExtendedMakerShadow, {
+        badge: 'GRVT MAKER → EXTENDED TAKER · SHADOW',
+        heading: 'Кандидат с более широким ценовым разрывом',
+        pagerId: 'grvt-extended-maker-shadow',
+        strongerCandidate: true,
+      })}
+
+      ${genericMakerPanel(grvtMakerShadow, {
+        badge: 'GRVT MAKER → LIGHTER TAKER · SHADOW',
+        heading: 'Кандидат с минимальными комиссиями',
+        pagerId: 'grvt-maker-shadow',
+      })}
 
       <section class="va-panel va-maker-panel">
         <div class="va-panel-head"><div><span class="va-badge">MAKER → TAKER · SHADOW ONLY</span><h2>Extended maker → Lighter hedge</h2></div>

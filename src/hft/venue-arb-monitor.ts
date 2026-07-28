@@ -50,6 +50,7 @@ import {
   GenericMakerShadow,
   type GenericMakerCheckpoint,
   type GenericMakerResult,
+  type MakerShadowTrade,
 } from '../lib/venue-arb-maker-shadow.js';
 
 type Venue =
@@ -360,6 +361,14 @@ const GRVT_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
   'grvt-maker-active-v1.json',
 );
+const GRVT_EXTENDED_MAKER_RESULTS_PATH = resolve(
+  DATA_DIR,
+  'grvt-extended-maker-shadow-v1.ndjson',
+);
+const GRVT_EXTENDED_MAKER_ACTIVE_PATH = resolve(
+  DATA_DIR,
+  'grvt-extended-maker-active-v1.json',
+);
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 250);
 const NET_TRIGGER_BPS = finiteEnv('VENUE_ARB_NET_TRIGGER_BPS', 3);
@@ -488,6 +497,22 @@ const GRVT_MAKER_FEE_BPS = Number.isFinite(
 )
   ? Number(process.env.VENUE_ARB_GRVT_MAKER_FEE_BPS)
   : -0.01;
+const GRVT_EXTENDED_MAKER_ENTRY_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_GRVT_EXTENDED_MAKER_ENTRY_EDGE_BPS',
+  12,
+);
+const GRVT_EXTENDED_MAKER_CANCEL_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_GRVT_EXTENDED_MAKER_CANCEL_EDGE_BPS',
+  8,
+);
+const GRVT_EXTENDED_MAKER_POST_FILL_NET_BPS = finiteEnv(
+  'VENUE_ARB_GRVT_EXTENDED_MAKER_POST_FILL_NET_BPS',
+  8,
+);
+const GRVT_EXTENDED_MAKER_EXIT_NET_BPS = finiteEnv(
+  'VENUE_ARB_GRVT_EXTENDED_MAKER_EXIT_NET_BPS',
+  8,
+);
 const FEED_STALL_MS = finiteEnv('VENUE_ARB_FEED_STALL_MS', 15_000);
 const RECONNECT_MS = 2_000;
 const HORIZONS_MS = [100, 250, 500, 1_000, 2_000, 5_000, 10_000] as const;
@@ -886,6 +911,45 @@ const grvtMakerShadow = new GenericMakerShadow({
   },
   onCheckpoint: (checkpoint) => {
     atomicJson(GRVT_MAKER_ACTIVE_PATH, {
+      ...checkpoint,
+      updatedAt: Date.now(),
+    });
+  },
+});
+const grvtExtendedMakerShadow = new GenericMakerShadow({
+  routeId: 'grvt-maker-extended',
+  makerVenue: 'grvt',
+  hedgeVenue: 'extended',
+  notionalUsd: GRVT_MAKER_NOTIONAL_USD,
+  entryEdgeBps: GRVT_EXTENDED_MAKER_ENTRY_EDGE_BPS,
+  cancelEdgeBps: GRVT_EXTENDED_MAKER_CANCEL_EDGE_BPS,
+  postFillNetBps: GRVT_EXTENDED_MAKER_POST_FILL_NET_BPS,
+  exitNetBps: GRVT_EXTENDED_MAKER_EXIT_NET_BPS,
+  quoteLatencyMs: GRVT_MAKER_QUOTE_LATENCY_MS,
+  hedgeLatencyMs: GRVT_MAKER_HEDGE_LATENCY_MS,
+  quoteTtlMs: GRVT_MAKER_QUOTE_TTL_MS,
+  maxQueueUsd: GRVT_MAKER_MAX_QUEUE_USD,
+  hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
+  maxHoldMs: MAKER_MAX_HOLD_MS,
+  independenceMs: MAKER_INDEPENDENCE_MS,
+  bookFreshMs: MAKER_BOOK_FRESH_MS,
+  sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  executionBufferBps: EXECUTION_BUFFER_BPS,
+  makerFeeBps: GRVT_MAKER_FEE_BPS,
+  hedgeTakerFeeBps: FEE_BPS.extended,
+  makerFallbackTakerFeeBps: FEE_BPS.grvt,
+  fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+  requiredSamples: SHADOW_REQUIRED_SAMPLES,
+  requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+}, {
+  onResult: (result) => {
+    appendFileSync(
+      GRVT_EXTENDED_MAKER_RESULTS_PATH,
+      `${JSON.stringify(result)}\n`,
+    );
+  },
+  onCheckpoint: (checkpoint) => {
+    atomicJson(GRVT_EXTENDED_MAKER_ACTIVE_PATH, {
       ...checkpoint,
       updatedAt: Date.now(),
     });
@@ -2145,7 +2209,10 @@ function connect(
   });
   ws.on('error', (error) => {
     connections[venue].connected = false;
-    if (venue === 'grvt') grvtMakerShadow.setTradeStreamConnected(false);
+    if (venue === 'grvt') {
+      grvtMakerShadow.setTradeStreamConnected(false);
+      grvtExtendedMakerShadow.setTradeStreamConnected(false);
+    }
     console.warn(`venue-arb ${venue} websocket error`, error.message);
   });
   ws.on('close', (code, reason) => {
@@ -2156,6 +2223,8 @@ function connect(
     if (venue === 'grvt') {
       grvtMakerShadow.setTradeStreamConnected(false);
       grvtMakerShadow.recordTradeReconnect();
+      grvtExtendedMakerShadow.setTradeStreamConnected(false);
+      grvtExtendedMakerShadow.recordTradeReconnect();
     }
     console.warn(
       `venue-arb ${venue} closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
@@ -2639,6 +2708,7 @@ function startGrvt(): void {
     'wss://market-data.grvt.io/ws/full',
     (ws) => {
       grvtMakerShadow.setTradeStreamConnected(true);
+      grvtExtendedMakerShadow.setTradeStreamConnected(true);
       ws.send(JSON.stringify({
         jsonrpc: '2.0',
         method: 'subscribe',
@@ -2700,7 +2770,7 @@ function startGrvt(): void {
           && message.feed.venue === 'ORDERBOOK'
           && message.feed.is_rpi !== true
         ) {
-          grvtMakerShadow.processTrade({
+          const trade: MakerShadowTrade = {
             id: `${market.coin}:${String(
               message.feed.trade_id
                 ?? `${message.feed.event_time}:${price}:${size}:${side}`,
@@ -2713,7 +2783,9 @@ function startGrvt(): void {
               finite(message.feed.event_time),
               receivedAt,
             ),
-          }, receivedAt);
+          };
+          grvtMakerShadow.processTrade(trade, receivedAt);
+          grvtExtendedMakerShadow.processTrade(trade, receivedAt);
         }
         return;
       }
@@ -3142,6 +3214,7 @@ function writeStatus(): void {
     executionShadow: executionShadowStatus(),
     makerShadow: makerShadowStatus(),
     grvtMakerShadow: grvtMakerShadow.status(),
+    grvtExtendedMakerShadow: grvtExtendedMakerShadow.status(),
     freshnessMs: Object.fromEntries(MARKETS.map((market) => [
       market.coin,
       Object.fromEntries(VENUES.map((venue) => [
@@ -3360,38 +3433,43 @@ function loadMakerState(): void {
   }
 }
 
-function loadGrvtMakerState(): void {
+function loadGenericMakerState(
+  shadow: GenericMakerShadow,
+  resultsPath: string,
+  activePath: string,
+  label: string,
+): void {
   let results: GenericMakerResult[] = [];
   let checkpoint: GenericMakerCheckpoint | null = null;
   try {
-    results = tailLines(GRVT_MAKER_RESULTS_PATH)
+    results = tailLines(resultsPath)
       .slice(-5_000)
       .map((line) => JSON.parse(line) as GenericMakerResult);
   } catch (error) {
     console.warn(
-      'venue-arb GRVT maker history load',
+      `venue-arb ${label} history load`,
       (error as Error).message,
     );
   }
   try {
-    if (existsSync(GRVT_MAKER_ACTIVE_PATH)) {
+    if (existsSync(activePath)) {
       checkpoint = JSON.parse(
-        readFileSync(GRVT_MAKER_ACTIVE_PATH, 'utf8'),
+        readFileSync(activePath, 'utf8'),
       ) as GenericMakerCheckpoint;
     }
   } catch (error) {
     console.warn(
-      'venue-arb GRVT maker active load',
+      `venue-arb ${label} active load`,
       (error as Error).message,
     );
   }
-  grvtMakerShadow.restore(results, checkpoint);
+  shadow.restore(results, checkpoint);
 }
 
-function grvtMakerMarkets() {
+function grvtMakerMarkets(hedgeVenue: 'lighter' | 'extended') {
   return MARKETS.map((market) => {
     const maker = books.get(bookKey('grvt', market.coin)) ?? null;
-    const hedge = executableBook('lighter', market.coin);
+    const hedge = executableBook(hedgeVenue, market.coin);
     return {
       coin: market.coin,
       maker,
@@ -3429,6 +3507,7 @@ function shutdown(signal: string): void {
   active.clear();
   prepareMakerShutdown(Date.now());
   grvtMakerShadow.shutdown(Date.now());
+  grvtExtendedMakerShadow.shutdown(Date.now());
   writeStatus();
   writeExecutionStatus();
   for (const ws of sockets) ws.close();
@@ -3444,10 +3523,24 @@ if (!existsSync(MAKER_RESULTS_PATH)) writeFileSync(MAKER_RESULTS_PATH, '');
 if (!existsSync(GRVT_MAKER_RESULTS_PATH)) {
   writeFileSync(GRVT_MAKER_RESULTS_PATH, '');
 }
+if (!existsSync(GRVT_EXTENDED_MAKER_RESULTS_PATH)) {
+  writeFileSync(GRVT_EXTENDED_MAKER_RESULTS_PATH, '');
+}
 loadHistory();
 loadShadowState();
 loadMakerState();
-loadGrvtMakerState();
+loadGenericMakerState(
+  grvtMakerShadow,
+  GRVT_MAKER_RESULTS_PATH,
+  GRVT_MAKER_ACTIVE_PATH,
+  'GRVT maker → Lighter',
+);
+loadGenericMakerState(
+  grvtExtendedMakerShadow,
+  GRVT_EXTENDED_MAKER_RESULTS_PATH,
+  GRVT_EXTENDED_MAKER_ACTIVE_PATH,
+  'GRVT maker → Extended',
+);
 startedAt = Date.now();
 startLighter();
 startHyperliquid();
@@ -3463,7 +3556,11 @@ startBybit();
 const evaluationTimer = setInterval(() => {
   evaluate();
   evaluateMakerShadow(Date.now());
-  grvtMakerShadow.evaluate(Date.now(), grvtMakerMarkets());
+  grvtMakerShadow.evaluate(Date.now(), grvtMakerMarkets('lighter'));
+  grvtExtendedMakerShadow.evaluate(
+    Date.now(),
+    grvtMakerMarkets('extended'),
+  );
   writeExecutionStatus();
 }, SAMPLE_MS);
 const statusTimer = setInterval(writeStatus, 1_000);
