@@ -146,17 +146,27 @@ type Opportunity = {
 type ShadowQuote = {
   at: number;
   version: string;
-  extendedBuyVwap: number;
-  lighterSellVwap: number;
-  extendedSellVwap: number;
-  lighterBuyVwap: number;
+  buyOpenVwap: number;
+  sellOpenVwap: number;
+  buyCloseVwap: number;
+  sellCloseVwap: number;
   openingNetBps: number;
+};
+
+type ShadowRouteConfig = {
+  id: string;
+  buyVenue: Venue;
+  sellVenue: Venue;
+  primary: boolean;
 };
 
 type ShadowProbe = {
   id: string;
   opportunityId: string;
   coin: string;
+  routeId: string;
+  buyVenue: Venue;
+  sellVenue: Venue;
   state: 'awaiting_entry' | 'open' | 'awaiting_exit';
   signalAt: number;
   signalNetBps: number;
@@ -167,8 +177,8 @@ type ShadowProbe = {
   lastEntryQuoteVersion: string | null;
   entryEdgeConfirmedAt: number | null;
   openedAt: number | null;
-  entryExtended: number | null;
-  entryLighter: number | null;
+  entryBuy: number | null;
+  entrySell: number | null;
   quantity: number | null;
   guardConfirmations: number;
   lastGuardQuoteVersion: string | null;
@@ -183,6 +193,9 @@ type ShadowResult = {
   id: string;
   opportunityId: string;
   coin: string;
+  routeId: string;
+  buyVenue: Venue;
+  sellVenue: Venue;
   signalAt: number;
   signalNetBps: number;
   entryAt: number | null;
@@ -208,8 +221,8 @@ const STATUS_PATH = resolve(DATA_DIR, 'status.json');
 const EXECUTION_STATUS_PATH = resolve(DATA_DIR, 'execution-status.json');
 const OPPORTUNITIES_PATH = resolve(DATA_DIR, 'opportunities.ndjson');
 const LIVE_TRADES_PATH = resolve(DATA_DIR, 'live-trades.json');
-const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution-v2.ndjson');
-const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active-v2.json');
+const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution-v3.ndjson');
+const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active-v3.json');
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 250);
 const NET_TRIGGER_BPS = finiteEnv('VENUE_ARB_NET_TRIGGER_BPS', 3);
@@ -301,6 +314,21 @@ const FEE_BPS: Record<Venue, number> = {
   binance: finiteEnv('VENUE_ARB_FEE_BPS_BINANCE', 5),
   bybit: finiteEnv('VENUE_ARB_FEE_BPS_BYBIT', 5.5),
 };
+const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
+  {
+    id: 'extended-lighter',
+    buyVenue: 'extended',
+    sellVenue: 'lighter',
+    primary: true,
+  },
+  {
+    id: 'bybit-paradex',
+    buyVenue: 'bybit',
+    sellVenue: 'paradex',
+    primary: false,
+  },
+];
+const shadowRouteById = new Map(SHADOW_ROUTES.map((route) => [route.id, route]));
 
 const books = new Map<string, BookState>();
 const executableBooks = new Map<string, ExecutableBook>();
@@ -321,7 +349,7 @@ const sockets = new Set<WebSocket>();
 const active = new Map<string, Opportunity>();
 const latchedUntilBelowTrigger = new Set<string>();
 const shadowProbes = new Map<string, ShadowProbe>();
-const shadowSeen = new Set<string>();
+const shadowLatched = new Set<string>();
 let recentClosed: Opportunity[] = [];
 let shadowResults: ShadowResult[] = [];
 let startedAt = Date.now();
@@ -401,11 +429,18 @@ function atomicJson(path: string, data: unknown): void {
   renameSync(tmp, path);
 }
 
-function shadowLatencyProfile(): {
+function shadowLatencyProfile(route: ShadowRouteConfig): {
   entryMs: number;
   exitMs: number;
   measuredTrades: number;
 } {
+  if (!route.primary) {
+    return {
+      entryMs: SHADOW_ENTRY_LATENCY_FLOOR_MS,
+      exitMs: SHADOW_EXIT_LATENCY_FLOOR_MS,
+      measuredTrades: 0,
+    };
+  }
   try {
     const rows = JSON.parse(readFileSync(LIVE_TRADES_PATH, 'utf8')) as Array<{
       entryLatencyMs?: number;
@@ -431,32 +466,36 @@ function shadowLatencyProfile(): {
   }
 }
 
-function shadowQuote(now: number, coin: string): ShadowQuote | null {
-  const extended = executableBook('extended', coin);
-  const lighter = executableBook('lighter', coin);
+function shadowQuote(
+  now: number,
+  coin: string,
+  route: ShadowRouteConfig,
+): ShadowQuote | null {
+  const buy = executableBook(route.buyVenue, coin);
+  const sell = executableBook(route.sellVenue, coin);
   if (
-    !extended
-    || !lighter
-    || now - extended.receivedAt > SHADOW_FRESH_MS
-    || now - lighter.receivedAt > SHADOW_FRESH_MS
+    !buy
+    || !sell
+    || now - buy.receivedAt > SHADOW_FRESH_MS
+    || now - sell.receivedAt > SHADOW_FRESH_MS
   ) return null;
   if (
-    extended.buyVwap500 == null
-    || lighter.sellVwap500 == null
-    || extended.sellVwap500 == null
-    || lighter.buyVwap500 == null
+    buy.buyVwap500 == null
+    || sell.sellVwap500 == null
+    || buy.sellVwap500 == null
+    || sell.buyVwap500 == null
   ) return null;
   return {
     at: now,
-    version: `${extended.receivedAt}:${lighter.receivedAt}`,
-    extendedBuyVwap: extended.buyVwap500,
-    lighterSellVwap: lighter.sellVwap500,
-    extendedSellVwap: extended.sellVwap500,
-    lighterBuyVwap: lighter.buyVwap500,
+    version: `${buy.receivedAt}:${sell.receivedAt}`,
+    buyOpenVwap: buy.buyVwap500,
+    sellOpenVwap: sell.sellVwap500,
+    buyCloseVwap: buy.sellVwap500,
+    sellCloseVwap: sell.buyVwap500,
     openingNetBps: netConvergenceEdgeBps(
-      rawCrossEdgeBps(extended.buyVwap500, lighter.sellVwap500),
-      FEE_BPS.extended,
-      FEE_BPS.lighter,
+      rawCrossEdgeBps(buy.buyVwap500, sell.sellVwap500),
+      FEE_BPS[route.buyVenue],
+      FEE_BPS[route.sellVenue],
       EXECUTION_BUFFER_BPS,
     ),
   };
@@ -468,8 +507,8 @@ function modeledShadowExit(
 ): ReturnType<typeof shadowNetAfterCosts> & { fundingBps: number } | null {
   if (
     probe.openedAt == null
-    || probe.entryExtended == null
-    || probe.entryLighter == null
+    || probe.entryBuy == null
+    || probe.entrySell == null
     || probe.quantity == null
   ) return null;
   const fundingBps = Math.max(0, quote.at - probe.openedAt)
@@ -478,12 +517,12 @@ function modeledShadowExit(
     ...shadowNetAfterCosts({
       notionalUsd: SHADOW_NOTIONAL_USD,
       quantity: probe.quantity,
-      entryExtended: probe.entryExtended,
-      entryLighter: probe.entryLighter,
-      exitExtended: quote.extendedSellVwap,
-      exitLighter: quote.lighterBuyVwap,
-      extendedTakerBps: FEE_BPS.extended,
-      lighterTakerBps: FEE_BPS.lighter,
+      entryExtended: probe.entryBuy,
+      entryLighter: probe.entrySell,
+      exitExtended: quote.buyCloseVwap,
+      exitLighter: quote.sellCloseVwap,
+      extendedTakerBps: FEE_BPS[probe.buyVenue],
+      lighterTakerBps: FEE_BPS[probe.sellVenue],
       executionBufferBps: EXECUTION_BUFFER_BPS,
       fundingBps,
     }),
@@ -504,6 +543,9 @@ function completeShadow(
     id: probe.id,
     opportunityId: probe.opportunityId,
     coin: probe.coin,
+    routeId: probe.routeId,
+    buyVenue: probe.buyVenue,
+    sellVenue: probe.sellVenue,
     signalAt: probe.signalAt,
     signalNetBps: probe.signalNetBps,
     entryAt: probe.openedAt,
@@ -511,12 +553,12 @@ function completeShadow(
     entryLatencyMs: probe.entryLatencyMs,
     exitLatencyMs: probe.exitLatencyMs,
     holdingMs: probe.openedAt == null ? null : Math.max(0, now - probe.openedAt),
-    entryNetBps: probe.entryExtended == null || probe.entryLighter == null
+    entryNetBps: probe.entryBuy == null || probe.entrySell == null
       ? null
       : netConvergenceEdgeBps(
-        rawCrossEdgeBps(probe.entryExtended, probe.entryLighter),
-        FEE_BPS.extended,
-        FEE_BPS.lighter,
+        rawCrossEdgeBps(probe.entryBuy, probe.entrySell),
+        FEE_BPS[probe.buyVenue],
+        FEE_BPS[probe.sellVenue],
         EXECUTION_BUFFER_BPS,
       ),
     entryConfirmations: probe.entryConfirmations,
@@ -536,49 +578,60 @@ function completeShadow(
   shadowResults.push(result);
   if (shadowResults.length > 5_000) shadowResults = shadowResults.slice(-5_000);
   shadowProbes.delete(probe.id);
-  shadowSeen.add(probe.opportunityId);
 }
 
 function evaluateShadow(now: number): void {
-  for (const opportunity of active.values()) {
-    if (
-      opportunity.buyVenue !== 'extended'
-      || opportunity.sellVenue !== 'lighter'
-      || Number(opportunity.currentNetBps1000) < SHADOW_ENTRY_NET_BPS
-      || shadowSeen.has(opportunity.id)
-    ) continue;
-    const latency = shadowLatencyProfile();
-    const id = `S${now}-${opportunity.coin}-${sequence}`;
-    shadowProbes.set(id, {
-      id,
-      opportunityId: opportunity.id,
-      coin: opportunity.coin,
-      state: 'awaiting_entry',
-      signalAt: now,
-      signalNetBps: Number(opportunity.currentNetBps1000),
-      entryLatencyMs: latency.entryMs,
-      exitLatencyMs: latency.exitMs,
-      entryDueAt: now + latency.entryMs,
-      entryConfirmations: 0,
-      lastEntryQuoteVersion: null,
-      entryEdgeConfirmedAt: null,
-      openedAt: null,
-      entryExtended: null,
-      entryLighter: null,
-      quantity: null,
-      guardConfirmations: 0,
-      lastGuardQuoteVersion: null,
-      guardReachedAt: null,
-      guardNetBps: null,
-      exitDueAt: null,
-      exitQuoteDeadlineAt: null,
-      peakProjectedNetBps: null,
-    });
-    shadowSeen.add(opportunity.id);
+  for (const route of SHADOW_ROUTES) {
+    for (const market of MARKETS) {
+      const quote = shadowQuote(now, market.coin, route);
+      const latchKey = `${route.id}:${market.coin}`;
+      if (!quote) continue;
+      if (quote.openingNetBps < SHADOW_ENTRY_NET_BPS) {
+        shadowLatched.delete(latchKey);
+        continue;
+      }
+      if (shadowLatched.has(latchKey)) continue;
+      const latency = shadowLatencyProfile(route);
+      const id = `S${now}-${route.id}-${market.coin}-${sequence}`;
+      shadowProbes.set(id, {
+        id,
+        opportunityId: `shadow-${now}-${route.id}-${market.coin}`,
+        coin: market.coin,
+        routeId: route.id,
+        buyVenue: route.buyVenue,
+        sellVenue: route.sellVenue,
+        state: 'awaiting_entry',
+        signalAt: now,
+        signalNetBps: quote.openingNetBps,
+        entryLatencyMs: latency.entryMs,
+        exitLatencyMs: latency.exitMs,
+        entryDueAt: now + latency.entryMs,
+        entryConfirmations: 0,
+        lastEntryQuoteVersion: null,
+        entryEdgeConfirmedAt: null,
+        openedAt: null,
+        entryBuy: null,
+        entrySell: null,
+        quantity: null,
+        guardConfirmations: 0,
+        lastGuardQuoteVersion: null,
+        guardReachedAt: null,
+        guardNetBps: null,
+        exitDueAt: null,
+        exitQuoteDeadlineAt: null,
+        peakProjectedNetBps: null,
+      });
+      shadowLatched.add(latchKey);
+    }
   }
 
   for (const probe of [...shadowProbes.values()]) {
-    const quote = shadowQuote(now, probe.coin);
+    const route = shadowRouteById.get(probe.routeId);
+    if (!route) {
+      completeShadow(probe, now, 'unknown_shadow_route', null);
+      continue;
+    }
+    const quote = shadowQuote(now, probe.coin, route);
     if (probe.state === 'awaiting_entry') {
       if (
         quote
@@ -607,9 +660,9 @@ function evaluateShadow(now: number): void {
       probe.entryEdgeConfirmedAt = now;
       probe.state = 'open';
       probe.openedAt = now;
-      probe.entryExtended = quote.extendedBuyVwap;
-      probe.entryLighter = quote.lighterSellVwap;
-      probe.quantity = SHADOW_NOTIONAL_USD / quote.extendedBuyVwap;
+      probe.entryBuy = quote.buyOpenVwap;
+      probe.entrySell = quote.sellOpenVwap;
+      probe.quantity = SHADOW_NOTIONAL_USD / quote.buyOpenVwap;
       continue;
     }
     if (probe.openedAt == null) {
@@ -1340,14 +1393,28 @@ function groupedSummaries(rows: Opportunity[]): Record<string, Record<string, un
 }
 
 function executionShadowStatus(): Record<string, unknown> {
-  const latency = shadowLatencyProfile();
-  const readiness = shadowReadiness(
-    shadowResults,
-    SHADOW_REQUIRED_SAMPLES,
-    SHADOW_REQUIRED_PASS_PCT,
-  );
+  const routeStatuses = Object.fromEntries(SHADOW_ROUTES.map((route) => {
+    const rows = shadowResults.filter((row) => row.routeId === route.id);
+    return [route.id, {
+      id: route.id,
+      buyVenue: route.buyVenue,
+      sellVenue: route.sellVenue,
+      primary: route.primary,
+      measuredLatency: shadowLatencyProfile(route),
+      readiness: shadowReadiness(
+        rows,
+        SHADOW_REQUIRED_SAMPLES,
+        SHADOW_REQUIRED_PASS_PCT,
+      ),
+      active: [...shadowProbes.values()]
+        .filter((probe) => probe.routeId === route.id)
+        .sort((a, b) => a.signalAt - b.signalAt),
+      recent: rows.slice(-20).reverse(),
+    }];
+  }));
+  const primary = routeStatuses['extended-lighter'];
   return {
-    version: 'extended-lighter-shadow-v2',
+    version: 'multi-route-shadow-v3',
     config: {
       notionalUsd: SHADOW_NOTIONAL_USD,
       entryNetBps: SHADOW_ENTRY_NET_BPS,
@@ -1359,10 +1426,11 @@ function executionShadowStatus(): Record<string, unknown> {
       fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
       executionBufferBps: EXECUTION_BUFFER_BPS,
     },
-    measuredLatency: latency,
-    readiness,
-    active: [...shadowProbes.values()].sort((a, b) => a.signalAt - b.signalAt),
-    recent: shadowResults.slice(-20).reverse(),
+    measuredLatency: primary?.measuredLatency,
+    readiness: primary?.readiness,
+    active: primary?.active,
+    recent: primary?.recent,
+    routes: routeStatuses,
   };
 }
 
@@ -1401,7 +1469,10 @@ function writeStatus(): void {
   const tmp = `${STATUS_PATH}.tmp`;
   writeFileSync(tmp, JSON.stringify(status));
   renameSync(tmp, STATUS_PATH);
-  atomicJson(SHADOW_ACTIVE_PATH, [...shadowProbes.values()]);
+  atomicJson(SHADOW_ACTIVE_PATH, {
+    probes: [...shadowProbes.values()],
+    latched: [...shadowLatched],
+  });
 }
 
 function writeExecutionStatus(): void {
@@ -1479,22 +1550,27 @@ function loadShadowState(): void {
     shadowResults = tailLines(SHADOW_RESULTS_PATH)
       .slice(-5_000)
       .map((line) => JSON.parse(line) as ShadowResult);
-    for (const row of shadowResults) shadowSeen.add(row.opportunityId);
   } catch (error) {
     console.warn('venue-arb shadow history load', (error as Error).message);
     shadowResults = [];
   }
   try {
     if (!existsSync(SHADOW_ACTIVE_PATH)) return;
-    const rows = JSON.parse(readFileSync(SHADOW_ACTIVE_PATH, 'utf8')) as ShadowProbe[];
+    const checkpoint = JSON.parse(readFileSync(SHADOW_ACTIVE_PATH, 'utf8')) as {
+      probes?: ShadowProbe[];
+      latched?: string[];
+    } | ShadowProbe[];
+    const rows = Array.isArray(checkpoint) ? checkpoint : checkpoint.probes ?? [];
     for (const row of rows) {
-      if (!row?.id || !row.opportunityId || !row.coin) continue;
+      if (!row?.id || !row.opportunityId || !row.coin || !row.routeId) continue;
       shadowProbes.set(row.id, row);
-      shadowSeen.add(row.opportunityId);
     }
+    const latched = Array.isArray(checkpoint) ? [] : checkpoint.latched ?? [];
+    for (const key of latched) shadowLatched.add(key);
   } catch (error) {
     console.warn('venue-arb shadow active load', (error as Error).message);
     shadowProbes.clear();
+    shadowLatched.clear();
   }
 }
 

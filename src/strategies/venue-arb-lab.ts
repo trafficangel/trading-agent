@@ -79,6 +79,9 @@ type Opportunity = {
 type ExecutionShadowResult = {
   id?: string;
   coin?: string;
+  routeId?: string;
+  buyVenue?: Venue;
+  sellVenue?: Venue;
   signalAt?: number;
   signalNetBps?: number;
   entryAt?: number | null;
@@ -99,6 +102,9 @@ type ExecutionShadowResult = {
 type ExecutionShadowProbe = {
   id?: string;
   coin?: string;
+  routeId?: string;
+  buyVenue?: Venue;
+  sellVenue?: Venue;
   state?: string;
   signalAt?: number;
   signalNetBps?: number;
@@ -108,7 +114,33 @@ type ExecutionShadowProbe = {
   guardNetBps?: number | null;
   peakProjectedNetBps?: number | null;
 };
-type ExecutionShadow = {
+type ExecutionShadowReadiness = {
+  samples?: number;
+  entryEdgeConfirmed?: number;
+  reachedExitGuard?: number;
+  positiveAfterLatency?: number;
+  passed?: number;
+  passedPct?: number | null;
+  requiredSamples?: number;
+  requiredPassPct?: number;
+  ready?: boolean;
+  reasons?: Record<string, number>;
+};
+type ExecutionShadowRoute = {
+  id?: string;
+  buyVenue?: Venue;
+  sellVenue?: Venue;
+  primary?: boolean;
+  measuredLatency?: {
+    entryMs?: number;
+    exitMs?: number;
+    measuredTrades?: number;
+  };
+  readiness?: ExecutionShadowReadiness;
+  active?: ExecutionShadowProbe[];
+  recent?: ExecutionShadowResult[];
+};
+type ExecutionShadow = ExecutionShadowRoute & {
   version?: string;
   config?: {
     notionalUsd?: number;
@@ -121,25 +153,7 @@ type ExecutionShadow = {
     fundingBpsPerHour?: number;
     executionBufferBps?: number;
   };
-  measuredLatency?: {
-    entryMs?: number;
-    exitMs?: number;
-    measuredTrades?: number;
-  };
-  readiness?: {
-    samples?: number;
-    entryEdgeConfirmed?: number;
-    reachedExitGuard?: number;
-    positiveAfterLatency?: number;
-    passed?: number;
-    passedPct?: number | null;
-    requiredSamples?: number;
-    requiredPassPct?: number;
-    ready?: boolean;
-    reasons?: Record<string, number>;
-  };
-  active?: ExecutionShadowProbe[];
-  recent?: ExecutionShadowResult[];
+  routes?: Record<string, ExecutionShadowRoute>;
 };
 type Status = {
   version?: string;
@@ -507,6 +521,7 @@ function shadowReason(reason: unknown): string {
     stale_after_exit_latency: 'стакан устарел после exit latency',
     max_hold: 'достигнут max hold',
     invalid_probe_state: 'ошибка состояния',
+    unknown_shadow_route: 'неизвестный shadow-маршрут',
   };
   return labels[String(reason)] ?? esc(reason);
 }
@@ -520,11 +535,18 @@ function shadowProbeState(state: unknown): string {
   return labels[String(state)] ?? esc(state);
 }
 
-function executionShadowRows(shadow: ExecutionShadow | undefined): string {
-  const active = shadow?.active ?? [];
-  const recent = shadow?.recent ?? [];
+function executionShadowRows(
+  shadow: ExecutionShadow | undefined,
+  routeId = 'extended-lighter',
+): string {
+  const route = shadow?.routes?.[routeId] ?? shadow;
+  const active = route?.active ?? [];
+  const recent = route?.recent ?? [];
+  const routeLabel = route?.buyVenue && route?.sellVenue
+    ? `${route.buyVenue} → ${route.sellVenue}`
+    : routeId.replace('-', ' → ');
   if (!active.length && !recent.length) {
-    return '<tr><td colspan="9">Чистый shadow-gate v2 ждёт первое окно Extended → Lighter с исполнимым net ≥ +0.10%.</td></tr>';
+    return `<tr><td colspan="9">Shadow-gate ждёт первое окно ${esc(routeLabel)} с исполнимым net ≥ +0.10%.</td></tr>`;
   }
   return [
     ...active.map((row) => `<tr>
@@ -676,7 +698,14 @@ async function render(lang: Lang): Promise<string> {
   const survival250 = summary.survival?.['250'];
   const executionShadow = status?.executionShadow;
   const shadowGate = executionShadow?.readiness;
+  const alternativeShadow = executionShadow?.routes?.['bybit-paradex'];
+  const alternativeGate = alternativeShadow?.readiness;
   const shadowReasons = Object.entries(shadowGate?.reasons ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([reason, count]) => `${shadowReason(reason)} ${count}`)
+    .join(' · ');
+  const alternativeReasons = Object.entries(alternativeGate?.reasons ?? {})
     .sort((a, b) => b[1] - a[1])
     .slice(0, 4)
     .map(([reason, count]) => `${shadowReason(reason)} ${count}`)
@@ -725,6 +754,27 @@ async function render(lang: Lang): Promise<string> {
           <th>Delayed entry / 3×</th><th>Exit guard</th><th>После exit latency</th>
           <th>Жизнь</th><th>Результат / причина</th>
         </tr></thead><tbody>${executionShadowRows(executionShadow)}</tbody></table></div>
+      </section>
+
+      <section class="va-panel va-shadow-panel">
+        <div class="va-panel-head"><div><span class="va-badge">ALTERNATIVE SHADOW · BYBIT → PARADEX</span><h2>Лучший измеренный DEX/CEX кандидат</h2></div>
+          <span class="${alternativeGate?.ready ? 'pos' : ''}">${alternativeGate?.ready ? 'ПРОШЁЛ SHADOW GATE' : 'ПАРАЛЛЕЛЬНАЯ ПРОВЕРКА'}</span>
+        </div>
+        <div class="va-live-cards">
+          <div><small>Выборка / минимум</small><b>${Number(alternativeGate?.samples ?? 0)} / ${Number(alternativeGate?.requiredSamples ?? 50)}</b></div>
+          <div><small>Полный PASS</small><b class="${Number(alternativeGate?.passedPct ?? 0) >= Number(alternativeGate?.requiredPassPct ?? 90) ? 'pos' : ''}">${Number(alternativeGate?.passed ?? 0)} · ${pct(alternativeGate?.passedPct)}</b></div>
+          <div><small>Edge подтверждён 3×</small><b>${Number(alternativeGate?.entryEdgeConfirmed ?? 0)}</b></div>
+          <div><small>Достигли exit guard</small><b>${Number(alternativeGate?.reachedExitGuard ?? 0)}</b></div>
+          <div><small>Активные probes</small><b>${Number(alternativeShadow?.active?.length ?? 0)}</b></div>
+          <div><small>Консервативная entry / exit</small><b>${duration(alternativeShadow?.measuredLatency?.entryMs)} / ${duration(alternativeShadow?.measuredLatency?.exitMs)}</b></div>
+        </div>
+        <p>Этот маршрут не торгует реальными деньгами. Он выбран по накопленной истории: 6 из 6 окон со стартовым net ≥ +0.10% сохраняли уровень через 1 секунду; через 2 секунды — 5 из 6. Пока нет собственных fills Bybit/Paradex, используются консервативные latency floors, поэтому результат остаётся предварительным.</p>
+        ${alternativeReasons ? `<p class="va-wait">Причины завершения: ${esc(alternativeReasons)}</p>` : ''}
+        <div class="va-table" data-va-pager="execution-shadow-alt" data-page-size="20"><table><thead><tr>
+          <th>Сигнал UTC</th><th>Монета</th><th>Статус</th><th>Signal net</th>
+          <th>Delayed entry / 3×</th><th>Exit guard</th><th>После exit latency</th>
+          <th>Жизнь</th><th>Результат / причина</th>
+        </tr></thead><tbody>${executionShadowRows(executionShadow, 'bybit-paradex')}</tbody></table></div>
       </section>
 
       <section class="va-panel va-live-panel">
