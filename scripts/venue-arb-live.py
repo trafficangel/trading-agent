@@ -1118,6 +1118,48 @@ class Canary:
             await asyncio.sleep(0.15)
         return last
 
+    async def wait_extended_position(
+        self, coin: str, *, want_open: bool, timeout: float = 6
+    ) -> Any | None:
+        deadline = time.monotonic() + timeout
+        last: Any | None = None
+        while time.monotonic() < deadline:
+            rows = await self.extended_positions()
+            last = next(
+                (row for row in rows if row.market == f"{coin}-USD"),
+                None,
+            )
+            if (last is not None) == want_open:
+                return last
+            await asyncio.sleep(0.1)
+        return last
+
+    def current_lighter_hedge_price(
+        self, coin: str, side: str
+    ) -> float | None:
+        status = self.read_json(self.execution_path, {})
+        now = int(time.time() * 1000)
+        quote = (status.get("closingQuotes") or {}).get(coin) or {}
+        price = float(
+            quote.get(
+                "lighterSellVwap" if side == "buy" else "lighterBuyVwap"
+            )
+            or 0
+        )
+        ages = (
+            now - int(status.get("updatedAt", 0) or 0),
+            float(quote.get("lighterBookAgeMs") or math.inf),
+            float(quote.get("lighterSourceAgeMs") or math.inf),
+        )
+        if (
+            status.get("version") != "venue-arb-execution-v2"
+            or ages[0] > self.fresh_ms
+            or max(ages[1:]) > self.source_fresh_ms
+            or price <= 0
+        ):
+            return None
+        return price
+
     async def extended_reference(self, coin: str, side: OrderSide) -> float:
         assert self.extended is not None
         response = await self.extended.info.get_market_statistics(
@@ -1424,6 +1466,68 @@ class Canary:
             raise RuntimeError(
                 f"Extended maker fill charged a taker fee: {ext_fill.fee}"
             )
+
+        hedge_price = self.current_lighter_hedge_price(coin, side)
+        post_fill_net_bps = (
+            maker_entry_edge_bps(side, ext_fill.price, hedge_price)
+            - self.execution_buffer_bps
+            if hedge_price is not None
+            else -math.inf
+        )
+        trade.update(
+            entryExtended=asdict(ext_fill),
+            postFillLighterHedgePrice=hedge_price,
+            postFillNetBps=(
+                post_fill_net_bps
+                if math.isfinite(post_fill_net_bps)
+                else None
+            ),
+        )
+        if post_fill_net_bps < self.entry_net_bps:
+            position = await self.wait_extended_position(
+                coin, want_open=True, timeout=6
+            )
+            if position is None:
+                raise RuntimeError(
+                    "Extended maker fill position is not visible for abort"
+                )
+            flattened = await self.flatten(coin, emergency=True)
+            exit_order_id = flattened.get("extended")
+            if not isinstance(exit_order_id, int):
+                raise RuntimeError(
+                    "Extended stale maker fill abort has no exit order"
+                )
+            exit_fill = await self.extended_fill(
+                f"{coin}-USD", exit_order_id
+            )
+            if exit_fill is None:
+                raise RuntimeError(
+                    "Extended stale maker fill abort is missing its fill"
+                )
+            gross = (
+                (exit_fill.price - ext_fill.price) * ext_fill.quantity
+                if extended_long
+                else (ext_fill.price - exit_fill.price) * ext_fill.quantity
+            )
+            net = gross - ext_fill.fee - exit_fill.fee
+            trade.update(
+                status="closed",
+                closeReason="post_fill_edge_lost",
+                entryExtendedOrderId=order_id,
+                exitExtendedOrderId=exit_order_id,
+                exitExtended=asdict(exit_fill),
+                quantityExecuted=ext_fill.quantity,
+                grossPnlUsd=gross,
+                feesUsd=ext_fill.fee + exit_fill.fee,
+                netPnlUsd=net,
+                netPnlPct=net / max(ext_fill.notional, 1e-9) * 100,
+                closedAt=int(time.time() * 1000),
+            )
+            self.append_trade(trade)
+            self.trade_open = False
+            self.write_status("completed", activeTrade=None, lastTrade=trade)
+            self.log("maker_fill_aborted", **trade)
+            return
 
         try:
             hedge_quantity = self.lighter_compatible_quantity(
