@@ -1920,10 +1920,21 @@ async function render(
   const latencyMetrics = liveLatencyMetrics(liveTrades);
   const liveStrategies = liveStrategyStates();
   const livePortfolioPaused = liveState?.portfolio_paused_at != null;
-  const liveRunner = liveState?.enabled === 1
-    && liveState.status === 'armed'
+  const liveMonitor = liveState?.status === 'armed'
     && liveState.heartbeat_at != null
     && Date.now() - liveState.heartbeat_at < 15_000;
+  const liveEntryEnabled = liveState?.enabled === 1;
+  const liveRunnerLabel = !liveMonitor
+    ? 'OFFLINE'
+    : livePortfolioPaused
+      ? 'RISK PAUSED'
+      : liveEntryEnabled
+        ? 'ARMED'
+        : t(
+          lang,
+          'REAL НА ПАУЗЕ · ВЫХОДЫ И СТОПЫ АКТИВНЫ',
+          'REAL PAUSED · EXITS AND STOPS ACTIVE',
+        );
   const liveGatePassed = liveSummary.closed >= 30
     && liveSummary.netUsd > 0
     && (liveSummary.profitFactor ?? 0) >= 1.2
@@ -1974,7 +1985,7 @@ async function render(
     ? liveSummary.netPct / liveSummary.closed
     : 0;
   const realCards = `
-    <div class="ll-card"><small>${t(lang, 'Стратегии Real / гейт', 'Real strategies / gates')}</small><b>${liveEnabledStrategies} / ${livePassedStrategies}</b><em>${liveRunner ? 'ARMED' : 'OFFLINE'}</em></div>
+    <div class="ll-card"><small>${t(lang, 'Стратегии Real / гейт', 'Real strategies / gates')}</small><b>${liveEnabledStrategies} / ${livePassedStrategies}</b><em>${liveRunnerLabel}</em></div>
     <div class="ll-card"><small>${t(lang, 'Решения / ошибки', 'Decisions / errors')}</small><b>${liveDecisions.total} / ${liveDecisions.errors}</b><em>${t(lang, 'пропущено', 'skipped')} ${liveDecisions.skipped}</em></div>
     <div class="ll-card"><small>${t(lang, 'Закрыто / открыто', 'Closed / open')}</small><b>${liveCounts.closed} / ${liveCounts.open}</b><em>$${LIVE_NOTIONAL_USD} · ${liveCounts.errors} ${t(lang, 'ошибок', 'errors')}</em></div>
     <div class="ll-card"><small>Real net PnL</small><b class="${pnlClass(liveSummary.netUsd)}">${signedUsd(liveSummary.netUsd)}</b><em>${signedPct(liveSummary.netPct)} · $${LIVE_NOTIONAL_USD} ${t(lang, 'на сделку', 'per trade')}</em></div>
@@ -2044,7 +2055,7 @@ async function render(
       ${pager({ lang, page: tradesPage, total: tradesTotal, pageSize: TRADE_PAGE_SIZE, signalsPage, tradesPage, target: 'trades', strategyId, dataset: requested.dataset, chartUnit: requested.chartUnit })}</div>
 
       <div class="ll-panel"><div class="ll-chart-head"><div><h2>${t(lang, 'Реальная торговля · canary', 'Live trading · canary')}</h2>
-        <p class="ll-note"><b class="${livePortfolioPaused || !liveRunner ? 'fail' : 'pass'}">${livePortfolioPaused ? 'RISK PAUSED' : liveRunner ? 'ARMED' : 'OFFLINE'} · $100 · 10x · ${t(lang, 'ПО ОДНОЙ НА МОНЕТУ', 'ONE PER MARKET')}.</b> ${t(lang, 'Разные стратегии могут торговаться одновременно. Биржевой reduce-only stop ставится сразу на каждую позицию. Новые входы блокируются при дневном убытке −$10, совокупной просадке −$15 или индивидуальной паузе стратегии.', 'Different strategies may trade concurrently. An exchange-native reduce-only stop is placed immediately on every position. New entries are blocked at a −$10 daily loss, −$15 cumulative drawdown, or an individual strategy pause.')}${liveState?.last_error ? ` <span class="neg">${esc(liveState.last_error)}</span>` : ''}${liveState?.portfolio_pause_reason ? ` <span class="neg">${esc(liveState.portfolio_pause_reason)}</span>` : ''}</p>
+        <p class="ll-note"><b class="${livePortfolioPaused || !liveMonitor || !liveEntryEnabled ? 'fail' : 'pass'}">${liveRunnerLabel} · $100 · 10x · ${t(lang, 'ПО ОДНОЙ НА МОНЕТУ', 'ONE PER MARKET')}.</b> ${t(lang, 'Разные стратегии могут торговаться одновременно. Биржевой reduce-only stop ставится сразу на каждую позицию. При ручной паузе новые входы запрещены, но существующие позиции продолжают контролироваться и закрываться. Новые входы также блокируются при дневном убытке −$10, совокупной просадке −$15 или индивидуальной паузе стратегии.', 'Different strategies may trade concurrently. An exchange-native reduce-only stop is placed immediately on every position. During a manual pause, new entries are blocked while existing positions remain monitored and can close. New entries are also blocked at a −$10 daily loss, −$15 cumulative drawdown, or an individual strategy pause.')}${liveState?.last_error ? ` <span class="neg">${esc(liveState.last_error)}</span>` : ''}${liveState?.portfolio_pause_reason ? ` <span class="neg">${esc(liveState.portfolio_pause_reason)}</span>` : ''}</p>
         </div><span class="ll-badge ${liveGatePassed ? 'pass' : 'collect'}">${liveGatePassed ? t(lang, 'LIVE ГЕЙТ ПРОЙДЕН', 'LIVE GATE PASSED') : `${t(lang, 'LIVE ВАЛИДАЦИЯ', 'LIVE VALIDATION')} ${liveSummary.closed}/30`}</span></div>
         <div class="ll-live-grid">
           <div class="ll-live-metric"><small>${t(lang, 'Закрыто', 'Closed')}</small><b>${liveSummary.closed}/30</b></div>
