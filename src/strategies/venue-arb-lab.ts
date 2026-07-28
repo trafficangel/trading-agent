@@ -142,6 +142,9 @@ type LiveStatus = {
   notionalUsdPerLeg?: number;
   leverage?: number;
   entryNetPct?: number;
+  exitMinProfitPct?: number;
+  exitConfirmations?: number;
+  shutdownDeferredWhenOpen?: boolean;
   route?: string;
   lastRejection?: string | null;
   error?: string;
@@ -388,6 +391,7 @@ function liveState(status: LiveStatus | null): string {
     armed: 'ЖДЁТ ВХОД',
     opening: 'ОТКРЫТИЕ',
     open: 'В ПОЗИЦИИ',
+    shutdown_pending_profit: 'ОСТАНОВКА: ЖДЁТ NET+',
     closing: 'ЗАКРЫТИЕ',
     completed: 'CANARY ЗАВЕРШЁН',
     blocked: 'ОСТАНОВЛЕН',
@@ -586,7 +590,7 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Extended / Lighter</small><b>${money(liveStatus?.balancesUsd?.extended)} / ${money(liveStatus?.balancesUsd?.lighter)}</b></div>
           <div><small>Текущий статус</small><b>${activeLive ? `${esc(activeLive.coin)} · ${esc(activeLive.status)}` : liveState(liveStatus)}</b></div>
         </div>
-        <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. Вход разрешён только для Extended → Lighter при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .05)} и свежести обоих стаканов ≤ 150 ms.</p>
+        <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. Вход разрешён только для Extended → Lighter при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .15)} и свежести обоих стаканов ≤ 150 ms. Обычный выход допускается только после ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .10)}; команда остановки больше не инициирует немедленное закрытие открытой пары.</p>
         <div class="va-table" data-va-pager="live-trades" data-page-size="20"><table><thead><tr>
           <th>ID</th><th>Открыта → закрыта UTC</th><th>Монета</th><th>Маршрут</th>
           <th>Размер</th><th>Вход Ext / Lighter</th><th>Выход Ext / Lighter</th>

@@ -54,6 +54,23 @@ class Fill:
     filled_at: int | None
 
 
+def projected_net_usd(
+    *,
+    quantity: float,
+    entry_extended: float,
+    entry_lighter: float,
+    exit_extended: float,
+    exit_lighter: float,
+    known_entry_fees: float,
+    estimated_exit_fees: float,
+) -> float:
+    gross = (
+        (exit_extended - entry_extended)
+        + (entry_lighter - exit_lighter)
+    ) * quantity
+    return gross - known_entry_fees - estimated_exit_fees
+
+
 class Canary:
     def __init__(self, *, force_dry_run: bool = False) -> None:
         self.enabled = (
@@ -62,7 +79,16 @@ class Canary:
         )
         self.notional = float(os.getenv("VENUE_ARB_LIVE_NOTIONAL_USD", "300"))
         self.leverage = int(os.getenv("VENUE_ARB_LIVE_LEVERAGE", "5"))
-        self.entry_net_bps = float(os.getenv("VENUE_ARB_LIVE_ENTRY_NET_BPS", "5"))
+        self.entry_net_bps = float(os.getenv("VENUE_ARB_LIVE_ENTRY_NET_BPS", "15"))
+        self.exit_min_profit_bps = float(
+            os.getenv("VENUE_ARB_LIVE_EXIT_MIN_PROFIT_BPS", "10")
+        )
+        self.exit_confirmations = int(
+            os.getenv("VENUE_ARB_LIVE_EXIT_CONFIRMATIONS", "3")
+        )
+        self.extended_taker_bps = float(
+            os.getenv("VENUE_ARB_LIVE_EXTENDED_TAKER_BPS", "2.5")
+        )
         self.fresh_ms = int(os.getenv("VENUE_ARB_LIVE_FRESH_MS", "150"))
         self.entry_slippage = float(
             os.getenv("VENUE_ARB_LIVE_ENTRY_SLIPPAGE", "0.0002")
@@ -102,6 +128,7 @@ class Canary:
         self.trades_path = self.data_dir / "live-trades.json"
         self.lock_path = self.data_dir / "live.lock"
         self.running = True
+        self.shutdown_requested = False
         self.trade_open = False
         self.last_order_id = int(time.time() * 1000)
         self.last_status_write = 0.0
@@ -174,6 +201,9 @@ class Canary:
             "notionalUsdPerLeg": self.notional,
             "leverage": self.leverage,
             "entryNetPct": self.entry_net_bps / 100,
+            "exitMinProfitPct": self.exit_min_profit_bps / 100,
+            "exitConfirmations": self.exit_confirmations,
+            "shutdownDeferredWhenOpen": True,
             "route": "extended → lighter",
             "maxTrades": self.max_trades,
             "lastRejection": self.last_rejection,
@@ -181,6 +211,12 @@ class Canary:
         }
         self.atomic_json(self.status_path, payload)
         self.last_status_write = time.monotonic()
+
+    def request_shutdown(self) -> None:
+        self.shutdown_requested = True
+        self.log("shutdown_requested", trade_open=self.trade_open)
+        if not self.trade_open:
+            self.running = False
 
     def append_trade(self, row: dict[str, Any]) -> None:
         rows = self.trades()
@@ -671,6 +707,50 @@ class Canary:
         value = float(row.get("currentNetBps1000") or -math.inf)
         return value if math.isfinite(value) else None
 
+    def projected_exit(
+        self,
+        coin: str,
+        ext_fill: Fill,
+        lit_fill: Fill,
+        quantity: float,
+    ) -> dict[str, float] | None:
+        status = self.read_json(self.execution_path, {})
+        now = int(time.time() * 1000)
+        if (
+            status.get("version") != "venue-arb-execution-v1"
+            or now - int(status.get("updatedAt", 0) or 0) > self.fresh_ms
+        ):
+            return None
+        quote = (status.get("closingQuotes") or {}).get(coin) or {}
+        ages = (
+            float(quote.get("extendedBookAgeMs") or math.inf),
+            float(quote.get("lighterBookAgeMs") or math.inf),
+        )
+        ext_exit = float(quote.get("extendedSellVwap") or 0)
+        lit_exit = float(quote.get("lighterBuyVwap") or 0)
+        if max(ages) > self.fresh_ms or min(ext_exit, lit_exit) <= 0:
+            return None
+        estimated_exit_fees = (
+            ext_exit * quantity * self.extended_taker_bps / 10_000
+        )
+        net = projected_net_usd(
+            quantity=quantity,
+            entry_extended=ext_fill.price,
+            entry_lighter=lit_fill.price,
+            exit_extended=ext_exit,
+            exit_lighter=lit_exit,
+            known_entry_fees=ext_fill.fee + lit_fill.fee,
+            estimated_exit_fees=estimated_exit_fees,
+        )
+        return {
+            "extendedExitVwap": ext_exit,
+            "lighterExitVwap": lit_exit,
+            "estimatedExitFeesUsd": estimated_exit_fees,
+            "netPnlUsd": net,
+            "netPnlPct": net / self.notional * 100,
+            "quoteAt": float(status.get("updatedAt", 0) or 0),
+        }
+
     async def execute(self, candidate: dict[str, Any]) -> None:
         coin = str(candidate["coin"])
         opportunity_id = str(candidate["id"])
@@ -779,26 +859,56 @@ class Canary:
         )
         self.write_status("open", activeTrade=trade)
         self.log("entry_filled", **trade)
-        while self.running:
+        profit_confirmations = 0
+        projected: dict[str, float] | None = None
+        last_profit_quote_at = 0.0
+        minimum_profit_usd = self.notional * self.exit_min_profit_bps / 10_000
+        while True:
             now = int(time.time() * 1000)
             if now - opened_at >= self.max_hold_ms:
                 close_reason = "max_hold"
                 break
+            projected = self.projected_exit(
+                coin, ext_fill, lit_fill, quantity=float(quantity)
+            )
+            if (
+                projected is not None
+                and projected["netPnlUsd"] >= minimum_profit_usd
+                and projected["quoteAt"] > last_profit_quote_at
+            ):
+                profit_confirmations += 1
+                last_profit_quote_at = projected["quoteAt"]
+            elif (
+                projected is None
+                or projected["netPnlUsd"] < minimum_profit_usd
+            ):
+                profit_confirmations = 0
+            if profit_confirmations >= self.exit_confirmations:
+                close_reason = "projected_net_profit"
+                break
             if now - opened_at >= self.min_hold_ms:
                 current_net = self.opportunity_net(opportunity_id)
-                if current_net is None or current_net <= 0:
-                    close_reason = "converged"
-                    break
                 if (
-                    current_net
+                    current_net is not None
+                    and current_net
                     >= float(candidate["currentNetBps1000"])
                     + self.max_adverse_bps
                 ):
                     close_reason = "adverse_basis"
                     break
+            if (
+                self.shutdown_requested
+                and time.monotonic() - self.last_status_write >= 1
+            ):
+                self.write_status(
+                    "shutdown_pending_profit",
+                    activeTrade={
+                        **trade,
+                        "projectedExit": projected,
+                        "minimumProfitUsd": minimum_profit_usd,
+                    },
+                )
             await asyncio.sleep(0.05)
-        else:
-            close_reason = "shutdown"
         close_started = int(time.time() * 1000)
         self.write_status(
             "closing", activeTrade={**trade, "closeReason": close_reason}
@@ -836,6 +946,7 @@ class Canary:
             closedAt=closed_at,
             holdingMs=closed_at - opened_at,
             exitLatencyMs=closed_at - close_started,
+            projectedExit=projected,
             exitExtended=asdict(ext_exit),
             exitLighter=asdict(lit_exit),
             grossPnlUsd=round(gross, 8),
@@ -845,6 +956,8 @@ class Canary:
         )
         self.append_trade(trade)
         self.trade_open = False
+        if self.shutdown_requested:
+            self.running = False
         self.write_status("completed", activeTrade=None, lastTrade=trade)
         self.log("trade_closed", **trade)
 
@@ -929,6 +1042,16 @@ def self_test() -> None:
     assert MARKETS["BTC"] == 1
     assert len(MARKETS) == 9
     assert Decimal("1.234") > 0
+    reproduced_loss = projected_net_usd(
+        quantity=0.52,
+        entry_extended=572.5,
+        entry_lighter=573.0972,
+        exit_extended=572.46,
+        exit_lighter=573.2286461538461,
+        known_entry_fees=0.074425,
+        estimated_exit_fees=0.074419,
+    )
+    assert round(reproduced_loss, 6) == -0.237996
     print("venue-arb-live self-test ok")
 
 
@@ -936,7 +1059,7 @@ async def main(force_dry_run: bool, sign_test: bool) -> None:
     runner = Canary(force_dry_run=force_dry_run)
     loop = asyncio.get_running_loop()
     for name in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(name, setattr, runner, "running", False)
+        loop.add_signal_handler(name, runner.request_shutdown)
     try:
         if sign_test:
             runner.acquire_lock()

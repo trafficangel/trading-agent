@@ -958,10 +958,31 @@ function writeStatus(): void {
 }
 
 function writeExecutionStatus(): void {
+  const now = Date.now();
+  const closingQuotes = Object.fromEntries(MARKETS.map((market) => {
+    const extended = books.get(bookKey('extended', market.coin));
+    const lighter = books.get(bookKey('lighter', market.coin));
+    const extendedSell = extended
+      ? executableVwap(sortedLevels(extended, 'bids'), 500)
+      : null;
+    const lighterBuy = lighter
+      ? executableVwap(sortedLevels(lighter, 'asks'), 500)
+      : null;
+    return [market.coin, {
+      // Conservative for the $300 canary: use $500 executable VWAP rather
+      // than top-of-book when estimating whether both closing legs are net+.
+      notionalUsd: 500,
+      extendedSellVwap: extendedSell?.price ?? null,
+      lighterBuyVwap: lighterBuy?.price ?? null,
+      extendedBookAgeMs: extended?.receivedAt ? now - extended.receivedAt : null,
+      lighterBookAgeMs: lighter?.receivedAt ? now - lighter.receivedAt : null,
+    }];
+  }));
   const status = {
     version: 'venue-arb-execution-v1',
-    updatedAt: Date.now(),
+    updatedAt: now,
     sampleMs: SAMPLE_MS,
+    closingQuotes,
     active: [...active.values()]
       .filter((row) => row.buyVenue === 'extended' && row.sellVenue === 'lighter')
       .map((row) => ({
