@@ -641,9 +641,18 @@ class Canary:
         best_ask = float(stats.ask_price)
         market = self.extended_markets[f"{coin}-USD"]
         tick = float(market.trading_config.min_price_change)
+        hedge_price = float(fresh["lighterHedgePrice"])
+        required_raw_bps = (
+            self.entry_net_bps + self.execution_buffer_bps
+        )
+        edge_limit_price = (
+            hedge_price / (1 + required_raw_bps / 10_000)
+            if side == "buy"
+            else hedge_price * (1 + required_raw_bps / 10_000)
+        )
         raw_price = safer_maker_price(
             side=side,
-            candidate_price=float(fresh["price"]),
+            candidate_price=edge_limit_price,
             best_bid=best_bid,
             best_ask=best_ask,
             tick=tick,
@@ -659,7 +668,6 @@ class Canary:
                 Decimal(str(raw_price)), rounding_direction=rounding
             )
         )
-        hedge_price = float(fresh["lighterHedgePrice"])
         projected_net_bps = (
             maker_entry_edge_bps(side, price, hedge_price)
             - self.execution_buffer_bps
@@ -678,11 +686,7 @@ class Canary:
             **fresh,
             "price": price,
             "sourcePrice": float(fresh["price"]),
-            "queueAheadUsd": (
-                float(fresh["queueAheadUsd"])
-                if abs(price - float(fresh["price"])) < tick / 2
-                else 0.0
-            ),
+            "queueAheadUsd": float(fresh["queueAheadUsd"]),
             "projectedNetBps": projected_net_bps,
             "extendedBestBid": best_bid,
             "extendedBestAsk": best_ask,
