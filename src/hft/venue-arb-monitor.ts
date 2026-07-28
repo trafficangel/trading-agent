@@ -1244,6 +1244,137 @@ function makerCloseProjection(
   }).netBps;
 }
 
+function makerPriceTick(book: BookState): number | null {
+  const prices = [
+    ...sortedLevels(book, 'bids', 20).map(([price]) => price),
+    ...sortedLevels(book, 'asks', 20).map(([price]) => price),
+  ].sort((a, b) => a - b);
+  let tick = Infinity;
+  for (let index = 1; index < prices.length; index++) {
+    const difference = prices[index]! - prices[index - 1]!;
+    if (difference > 1e-10) tick = Math.min(tick, difference);
+  }
+  return Number.isFinite(tick) && tick > 0 ? tick : null;
+}
+
+function snapMakerPrice(
+  value: number,
+  tick: number,
+  mode: 'floor' | 'ceil',
+): number {
+  const units = mode === 'floor'
+    ? Math.floor(value / tick + 1e-9)
+    : Math.ceil(value / tick - 1e-9);
+  return Number((units * tick).toPrecision(14));
+}
+
+function makerEntryQuoteLevel(
+  rawExtended: BookState,
+  side: MakerSide,
+  lighterFill: number,
+): PriceLevel | null {
+  const bestBid = sortedLevels(rawExtended, 'bids', 1)[0]?.[0];
+  const bestAsk = sortedLevels(rawExtended, 'asks', 1)[0]?.[0];
+  const tick = makerPriceTick(rawExtended);
+  if (bestBid == null || bestAsk == null || tick == null) return null;
+  const requiredRawBps = MAKER_ENTRY_EDGE_BPS + EXECUTION_BUFFER_BPS;
+  let quotePrice: number;
+  if (side === 'buy') {
+    const maximumEdgePrice = lighterFill / (1 + requiredRawBps / 10_000);
+    quotePrice = Math.max(
+      bestBid,
+      snapMakerPrice(
+        Math.min(bestAsk - tick, maximumEdgePrice),
+        tick,
+        'floor',
+      ),
+    );
+    if (quotePrice >= bestAsk) return null;
+  } else {
+    const minimumEdgePrice = lighterFill * (1 + requiredRawBps / 10_000);
+    quotePrice = Math.min(
+      bestAsk,
+      snapMakerPrice(
+        Math.max(bestBid + tick, minimumEdgePrice),
+        tick,
+        'ceil',
+      ),
+    );
+    if (quotePrice <= bestBid) return null;
+  }
+  const projectedNetBps = makerEntryEdgeBps(side, quotePrice, lighterFill)
+    - EXECUTION_BUFFER_BPS;
+  if (projectedNetBps < MAKER_ENTRY_EDGE_BPS - 1e-8) return null;
+  const sameSide = side === 'buy'
+    ? rawExtended.bids
+    : rawExtended.asks;
+  return [quotePrice, sameSide.get(quotePrice) ?? 0];
+}
+
+function makerExitQuoteLevel(
+  now: number,
+  pair: MakerPair,
+  rawExtended: BookState,
+  lighterFill: number,
+): PriceLevel | null {
+  const bestBid = sortedLevels(rawExtended, 'bids', 1)[0]?.[0];
+  const bestAsk = sortedLevels(rawExtended, 'asks', 1)[0]?.[0];
+  const tick = makerPriceTick(rawExtended);
+  if (bestBid == null || bestAsk == null || tick == null) return null;
+  const side: MakerSide = pair.extendedSide === 'long' ? 'sell' : 'buy';
+  let quotePrice: number;
+  if (side === 'sell') {
+    let low = Math.min(bestAsk, bestBid + tick);
+    let high = bestAsk;
+    if (makerCloseProjection(now, pair, high, lighterFill) < MAKER_EXIT_NET_BPS) {
+      return null;
+    }
+    if (makerCloseProjection(now, pair, low, lighterFill) < MAKER_EXIT_NET_BPS) {
+      for (let iteration = 0; iteration < 24; iteration++) {
+        const middle = (low + high) / 2;
+        if (
+          makerCloseProjection(now, pair, middle, lighterFill)
+          >= MAKER_EXIT_NET_BPS
+        ) high = middle;
+        else low = middle;
+      }
+      quotePrice = snapMakerPrice(high, tick, 'ceil');
+    } else {
+      quotePrice = snapMakerPrice(low, tick, 'ceil');
+    }
+    quotePrice = Math.min(bestAsk, Math.max(bestBid + tick, quotePrice));
+  } else {
+    let low = bestBid;
+    let high = Math.max(bestBid, bestAsk - tick);
+    if (makerCloseProjection(now, pair, low, lighterFill) < MAKER_EXIT_NET_BPS) {
+      return null;
+    }
+    if (makerCloseProjection(now, pair, high, lighterFill) < MAKER_EXIT_NET_BPS) {
+      for (let iteration = 0; iteration < 24; iteration++) {
+        const middle = (low + high) / 2;
+        if (
+          makerCloseProjection(now, pair, middle, lighterFill)
+          >= MAKER_EXIT_NET_BPS
+        ) low = middle;
+        else high = middle;
+      }
+      quotePrice = snapMakerPrice(low, tick, 'floor');
+    } else {
+      quotePrice = snapMakerPrice(high, tick, 'floor');
+    }
+    quotePrice = Math.max(bestBid, Math.min(bestAsk - tick, quotePrice));
+  }
+  if (
+    quotePrice <= 0
+    || quotePrice >= bestAsk && side === 'buy'
+    || quotePrice <= bestBid && side === 'sell'
+  ) return null;
+  const sameSide = side === 'buy'
+    ? rawExtended.bids
+    : rawExtended.asks;
+  return [quotePrice, sameSide.get(quotePrice) ?? 0];
+}
+
 function makerQuoteCandidate(now: number): MakerQuote | null {
   if (makerPendingHedge) return null;
   if (makerPair) {
@@ -1253,17 +1384,16 @@ function makerQuoteCandidate(now: number): MakerQuote | null {
     if (!rawExtended || !extended || !lighter) return null;
     if (!makerBooksFresh(now, extended, lighter)) return null;
     const side: MakerSide = makerPair.extendedSide === 'long' ? 'sell' : 'buy';
-    const levels = sortedLevels(
-      rawExtended,
-      side === 'buy' ? 'bids' : 'asks',
-      1,
-    );
-    const level = levels[0];
-    if (!level) return null;
-    const [price, queueAhead] = level;
-    if (!(price > 0) || !(queueAhead > 0)) return null;
     const lighterFill = makerHedgePrice(side, lighter);
     if (lighterFill == null) return null;
+    const level = makerExitQuoteLevel(
+      now,
+      makerPair,
+      rawExtended,
+      lighterFill,
+    );
+    if (!level) return null;
+    const [price, queueAhead] = level;
     const projectedNetBps = makerCloseProjection(
       now,
       makerPair,
@@ -1300,17 +1430,12 @@ function makerQuoteCandidate(now: number): MakerQuote | null {
     if (!rawExtended || !extended || !lighter) continue;
     if (!makerBooksFresh(now, extended, lighter)) continue;
     for (const side of ['buy', 'sell'] as const) {
-      const levels = sortedLevels(
-        rawExtended,
-        side === 'buy' ? 'bids' : 'asks',
-        1,
-      );
-      const level = levels[0];
-      if (!level) continue;
-      const [price, queueAhead] = level;
-      if (!(price > 0) || !(queueAhead > 0)) continue;
       const lighterFill = makerHedgePrice(side, lighter);
       if (lighterFill == null) continue;
+      const level = makerEntryQuoteLevel(rawExtended, side, lighterFill);
+      if (!level) continue;
+      const [price, queueAhead] = level;
+      if (!(price > 0) || queueAhead < 0) continue;
       const projectedNetBps = makerEntryEdgeBps(side, price, lighterFill)
         - EXECUTION_BUFFER_BPS;
       if (projectedNetBps < MAKER_ENTRY_EDGE_BPS) continue;
