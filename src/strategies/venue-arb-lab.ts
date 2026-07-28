@@ -1101,7 +1101,7 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Placement / hedge latency</small><b>${duration(makerShadow?.config?.quoteLatencyMs)} / ${duration(makerShadow?.config?.hedgeLatencyMs)}</b></div>
         </div>
         <p>Это отдельная проверка пути без четырёх taker-комиссий: лимитная post-only заявка ставится на Extended, а исполненная нога хеджируется taker-ордером на Lighter. Fill не выдумывается по касанию цены: после задержки размещения фиксируется фактическая очередь перед нами, затем она и наш объём должны быть проторгованы реальными public-trade сообщениями. Входные котировки с очередью больше ${money(makerShadow?.config?.maxQueueUsd ?? 25_000)} отбрасываются как практически неисполнимые. Backlog и сделки со старым exchange timestamp отбрасываются. После maker fill применяется задержка хеджа ${duration(makerShadow?.config?.hedgeLatencyMs)}, VWAP $${Number(makerShadow?.config?.notionalUsd ?? 500)}, funding и ${pctFromBps(makerShadow?.config?.executionBufferBps, false)} execution-буфера.</p>
-        <p class="va-wait"><b>Гейт капитала:</b> минимум ${Number(makerGate?.requiredSamples ?? 20)} независимых завершённых циклов, PASS ≥ ${pct(makerGate?.requiredPassPct)} и положительный суммарный net. До выполнения всех условий реальные maker-ордера не включаются.</p>
+        <p class="va-wait"><b>Гейт масштабирования:</b> минимум ${Number(makerGate?.requiredSamples ?? 20)} независимых завершённых shadow-циклов, PASS ≥ ${pct(makerGate?.requiredPassPct)} и положительный суммарный net. Отдельный разрешённый canary ограничен одной реальной парой по $100 на ногу; увеличение капитала до выполнения гейта запрещено.</p>
         <div class="va-table" data-va-pager="maker-shadow" data-page-size="20"><table><thead><tr>
           <th>UTC</th><th>Монета</th><th>Пара</th><th>Вход Ext / Lighter</th>
           <th>Выход Ext / Lighter</th><th>Entry edge</th><th>Жизнь</th>
@@ -1200,7 +1200,7 @@ async function render(lang: Lang): Promise<string> {
           <span>VWAP, не mid-price</span><span>две ноги одновременно</span><span>полный round-trip</span>
           <span>допуск только при $1k net &gt; ${pctFromBps(triggerBps)}</span><span>Lighter fee 0%</span><span>canary: ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')}</span>
         </div>
-        <p>Радар продолжает измерять все площадки. Реальный исполнитель отделён от него и допускается только к одному явно выбранному направлению Extended ↔ Lighter; он параллельно отправляет IOC-ноги и аварийно выравнивает позицию, если одна сторона не исполнилась.</p>
+        <p>Радар продолжает измерять все площадки. Реальный canary отделён от него: он ставит только подтверждённую post-only заявку на Extended, при первом fill отменяет остаток и затем хеджирует фактически исполненный объём taker-ордером на Lighter. Любая потеря post-only, комиссия на maker-fill или несовпадение позиций вызывает аварийное выравнивание и остановку.</p>
       </section>
     </div>
     ${VENUE_ARB_PAGINATION_SCRIPT}`,
