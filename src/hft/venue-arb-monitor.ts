@@ -342,9 +342,27 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     primary: false,
   },
   {
+    id: 'paradex-bybit',
+    buyVenue: 'paradex',
+    sellVenue: 'bybit',
+    primary: false,
+  },
+  {
     id: 'bybit-lighter',
     buyVenue: 'bybit',
     sellVenue: 'lighter',
+    primary: false,
+  },
+  {
+    id: 'lighter-bybit',
+    buyVenue: 'lighter',
+    sellVenue: 'bybit',
+    primary: false,
+  },
+  {
+    id: 'bybit-aster',
+    buyVenue: 'bybit',
+    sellVenue: 'aster',
     primary: false,
   },
   {
