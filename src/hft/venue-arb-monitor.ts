@@ -101,7 +101,7 @@ const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 1_000);
 const RAW_TRIGGER_BPS = finiteEnv('VENUE_ARB_RAW_TRIGGER_BPS', 5);
 const CONVERGED_BPS = finiteEnv('VENUE_ARB_CONVERGED_BPS', 1);
 const EXECUTION_BUFFER_BPS = finiteEnv('VENUE_ARB_EXECUTION_BUFFER_BPS', 2);
-const MAX_LIFETIME_MS = finiteEnv('VENUE_ARB_MAX_LIFETIME_MS', 120_000);
+const MAX_LIFETIME_MS = finiteEnv('VENUE_ARB_MAX_LIFETIME_MS', 15 * 60_000);
 const RECONNECT_MS = 2_000;
 const HORIZONS_MS = [100, 250, 500, 1_000, 2_000, 5_000, 10_000] as const;
 
@@ -141,6 +141,7 @@ const connections = Object.fromEntries(VENUES.map((venue) => [
 ])) as Record<Venue, ConnectionState>;
 const sockets = new Set<WebSocket>();
 const active = new Map<string, Opportunity>();
+const latchedUntilBelowTrigger = new Set<string>();
 let recentClosed: Opportunity[] = [];
 let startedAt = Date.now();
 let evaluations = 0;
@@ -526,6 +527,7 @@ function closeOpportunity(opportunity: Opportunity, at: number, reason: string):
   opportunity.durationMs = Math.max(0, at - opportunity.startedAt);
   opportunity.closeReason = reason;
   if (reason === 'converged') opportunity.convergenceMs = opportunity.durationMs;
+  if (reason === 'max_lifetime') latchedUntilBelowTrigger.add(key);
   active.delete(key);
   appendFileSync(OPPORTUNITIES_PATH, `${JSON.stringify(opportunity)}\n`);
   recentClosed.push(opportunity);
@@ -544,8 +546,13 @@ function evaluate(): void {
         const snapshot = edge(now, market.coin, buyVenue, sellVenue);
         if (!snapshot) continue;
         observed.add(key);
+        if (snapshot.rawBps500 < RAW_TRIGGER_BPS) latchedUntilBelowTrigger.delete(key);
         let opportunity = active.get(key);
-        if (!opportunity && snapshot.rawBps500 >= RAW_TRIGGER_BPS) {
+        if (
+          !opportunity
+          && !latchedUntilBelowTrigger.has(key)
+          && snapshot.rawBps500 >= RAW_TRIGGER_BPS
+        ) {
           opportunity = startOpportunity(market.coin, buyVenue, sellVenue, snapshot);
           active.set(key, opportunity);
         }

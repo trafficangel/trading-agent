@@ -192,7 +192,7 @@ function historyRows(rows: Opportunity[]): string {
       <td class="${cls(row.peakNetBps)}">${pctFromBps(row.startNetBps)} → <b>${pctFromBps(row.peakNetBps)}</b></td>
       <td>${duration(row.durationMs)}</td><td>${duration(row.halfLifeMs)}</td>
       <td>${pctFromBps(horizon['250']?.netBps)} / ${pctFromBps(horizon['500']?.netBps)} / ${pctFromBps(horizon['1000']?.netBps)}</td>
-      <td>${row.closeReason === 'converged' ? 'схождение' : row.closeReason === 'max_lifetime' ? '≥ 2 min' : esc(row.closeReason)}</td>
+      <td>${row.closeReason === 'converged' ? 'схождение' : row.closeReason === 'max_lifetime' ? '≥ 15 min' : esc(row.closeReason)}</td>
     </tr>`;
   }).join('')}</tbody></table></div>`;
 }
