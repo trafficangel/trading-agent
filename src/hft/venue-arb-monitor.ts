@@ -1006,14 +1006,18 @@ function connect(
   ws.on('pong', () => {
     connections[venue].lastMessageAt = Date.now();
   });
-  ws.on('error', () => {
+  ws.on('error', (error) => {
     connections[venue].connected = false;
+    console.warn(`venue-arb ${venue} websocket error`, error.message);
   });
-  ws.on('close', () => {
+  ws.on('close', (code, reason) => {
     sockets.delete(ws);
     if (venueSockets.get(venue) === ws) venueSockets.delete(venue);
     connections[venue].connected = false;
     connections[venue].reconnects++;
+    console.warn(
+      `venue-arb ${venue} closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
+    );
     if (!shuttingDown) {
       setTimeout(
         () => connect(venue, url, onOpen, onMessage, options),
@@ -1104,6 +1108,14 @@ function startPacifica(): void {
           },
         }));
       }
+      const timer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ method: 'ping' }));
+        } else {
+          clearInterval(timer);
+        }
+      }, 30_000);
+      timer.unref();
     },
     (payload, receivedAt) => {
       const message = payload as {
@@ -1345,7 +1357,13 @@ function startExtended(): void {
   connect(
     'extended',
     'wss://api.starknet.extended.exchange/stream.extended.exchange/v1/orderbooks',
-    () => {},
+    (ws) => {
+      const timer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.ping();
+        else clearInterval(timer);
+      }, 10_000);
+      timer.unref();
+    },
     (payload, receivedAt) => {
       const message = payload as {
         type?: unknown;
