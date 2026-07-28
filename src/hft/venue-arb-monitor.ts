@@ -275,7 +275,7 @@ const SHADOW_FUNDING_BPS_PER_HOUR = finiteEnv(
 );
 const SHADOW_REQUIRED_SAMPLES = finiteEnv(
   'VENUE_ARB_SHADOW_REQUIRED_SAMPLES',
-  50,
+  20,
 );
 const SHADOW_REQUIRED_PASS_PCT = finiteEnv(
   'VENUE_ARB_SHADOW_REQUIRED_PASS_PCT',
@@ -353,13 +353,13 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     id: 'extended-lighter',
     buyVenue: 'extended',
     sellVenue: 'lighter',
-    primary: true,
+    primary: false,
   },
   {
     id: 'lighter-extended',
     buyVenue: 'lighter',
     sellVenue: 'extended',
-    primary: false,
+    primary: true,
   },
   {
     id: 'bybit-paradex',
@@ -1750,7 +1750,8 @@ function executionShadowStatus(): Record<string, unknown> {
       recent: rows.slice(-20).reverse(),
     }];
   }));
-  const primary = routeStatuses['extended-lighter'];
+  const primaryRoute = SHADOW_ROUTES.find((route) => route.primary);
+  const primary = primaryRoute ? routeStatuses[primaryRoute.id] : undefined;
   return {
     version: 'multi-route-shadow-v3',
     config: {

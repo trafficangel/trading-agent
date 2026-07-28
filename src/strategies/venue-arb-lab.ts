@@ -126,6 +126,7 @@ type ExecutionShadowProbe = {
   peakProjectedNetBps?: number | null;
 };
 type ExecutionShadowReadiness = {
+  attempts?: number;
   samples?: number;
   entryEdgeConfirmed?: number;
   reachedExitGuard?: number;
@@ -393,7 +394,7 @@ function capitalRecommendation(
   const dexCexNote = dexCexLeader && dexCexLeader.route.id !== leader.route.id
     ? ` Лучший DEX/CEX-кандидат — <b>${esc(shadowRouteLabel(dexCexLeader.route))}</b>: ${Number(dexCexLeader.summary.strictRetained1000 ?? 0)} / ${Number(dexCexLeader.summary.strictStarts ?? 0)}.`
     : '';
-  return `<p class="va-wait"><b>КАПИТАЛ: ПОКА НЕ ВНОСИТЬ.</b> Предварительный лидер по консервативной оценке устойчивости — <b>${esc(shadowRouteLabel(leader.route))}</b> (${esc(shadowRouteClass(leader.route))}): исторически ${Number(leader.summary.strictRetained1000 ?? 0)} из ${Number(leader.summary.strictStarts ?? 0)} окон сохранили net ≥ +0.10% через 1 секунду.${dexCexNote} Строгий forward лидера сейчас ${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 50)}. После PASS здесь появятся две площадки, а точный размер пополнения будет рассчитан по доступному плечу и запасу маржи.</p>`;
+  return `<p class="va-wait"><b>КАПИТАЛ: ПОКА НЕ ВНОСИТЬ.</b> Предварительный лидер по консервативной оценке устойчивости — <b>${esc(shadowRouteLabel(leader.route))}</b> (${esc(shadowRouteClass(leader.route))}): исторически ${Number(leader.summary.strictRetained1000 ?? 0)} из ${Number(leader.summary.strictStarts ?? 0)} окон сохранили net ≥ +0.10% через 1 секунду.${dexCexNote} Строгий forward лидера сейчас ${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 20)} подтверждённых входов. После PASS здесь появятся две площадки, а точный размер пополнения будет рассчитан по доступному плечу и запасу маржи.</p>`;
 }
 
 function pct(value: unknown): string {
@@ -737,7 +738,7 @@ function scoutRouteRows(
         : 'СКАНИРУЕТ';
     return `<tr>
       <td><b>${esc(shadowRouteLabel(route))}</b><small>${esc(shadowRouteClass(route))}</small></td>
-      <td>${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 50)}</td>
+      <td>${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 20)}</td>
       <td class="${cls(gate?.passedPct)}">${Number(gate?.passed ?? 0)} · ${pct(gate?.passedPct)}</td>
       <td>${Number(history.strictRetained1000 ?? 0)} / ${Number(history.strictStarts ?? 0)}<small>ср. ${pctFromBps(history.strictMean1000NetBps)} · min ${pctFromBps(history.strictMin1000NetBps)}</small></td>
       <td>${Number(telemetry?.eligibleWindows ?? 0)}</td>
@@ -923,7 +924,7 @@ async function render(lang: Lang): Promise<string> {
           <span class="${shadowGate?.ready ? 'pos' : ''}">${shadowGate?.ready ? 'ГОТОВ К CANARY' : 'СБОР ДОКАЗАТЕЛЬСТВ'}</span>
         </div>
         <div class="va-live-cards">
-          <div><small>Выборка / минимум</small><b>${Number(shadowGate?.samples ?? 0)} / ${Number(shadowGate?.requiredSamples ?? 50)}</b></div>
+          <div><small>Входы / минимум</small><b>${Number(shadowGate?.samples ?? 0)} / ${Number(shadowGate?.requiredSamples ?? 20)}</b></div>
           <div><small>Полный PASS</small><b class="${Number(shadowGate?.passedPct ?? 0) >= Number(shadowGate?.requiredPassPct ?? 90) ? 'pos' : ''}">${Number(shadowGate?.passed ?? 0)} · ${pct(shadowGate?.passedPct)}</b></div>
           <div><small>Edge подтверждён 3×</small><b>${Number(shadowGate?.entryEdgeConfirmed ?? 0)}</b></div>
           <div><small>Достигли exit guard</small><b>${Number(shadowGate?.reachedExitGuard ?? 0)}</b></div>
@@ -936,7 +937,7 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Модель entry / exit</small><b>${duration(primaryShadow?.measuredLatency?.entryMs)} / ${duration(primaryShadow?.measuredLatency?.exitMs)}</b></div>
           <div><small>Порог входа / выхода</small><b>${pctFromBps(executionShadow?.config?.entryNetBps)} / ${pctFromBps(executionShadow?.config?.exitNetBps)}</b></div>
         </div>
-        <p>Каждый probe начинается только при исполнимом net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)} и требует ${Number(executionShadow?.config?.entryConfirmations ?? 3)} независимых свежих подтверждения в течение измеренной задержки входа. Затем фиксируется $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, вычитаются четыре taker-комиссии, ${pctFromBps(executionShadow?.config?.executionBufferBps, false)} execution-буфера и funding ${pctFromBps(executionShadow?.config?.fundingBpsPerHour, false)}/час. Выход допускается после ${Number(executionShadow?.config?.exitConfirmations ?? 3)} свежих снимков с реальным модельным PnL ≥ ${pctFromBps(executionShadow?.config?.exitNetBps)}, затем применяется измеренная exit latency. Gate: минимум ${Number(shadowGate?.requiredSamples ?? 50)} probes и PASS ≥ ${pct(shadowGate?.requiredPassPct)}.</p>
+        <p>Каждый probe начинается только при исполнимом net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)} и требует ${Number(executionShadow?.config?.entryConfirmations ?? 3)} независимых свежих подтверждения в течение измеренной задержки входа. Затем фиксируется $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, вычитаются четыре taker-комиссии, ${pctFromBps(executionShadow?.config?.executionBufferBps, false)} execution-буфера и funding ${pctFromBps(executionShadow?.config?.fundingBpsPerHour, false)}/час. Выход допускается после ${Number(executionShadow?.config?.exitConfirmations ?? 3)} свежих снимков с реальным модельным PnL ≥ ${pctFromBps(executionShadow?.config?.exitNetBps)}, затем применяется измеренная exit latency. Gate: минимум ${Number(shadowGate?.requiredSamples ?? 20)} подтверждённых модельных входов и PASS ≥ ${pct(shadowGate?.requiredPassPct)}; отклонённые до входа сигналы учитываются отдельно и не изображаются убытками.</p>
         ${shadowReasons ? `<p class="va-wait">Причины завершения: ${esc(shadowReasons)}</p>` : ''}
         <div class="va-table" data-va-pager="execution-shadow" data-page-size="20"><table><thead><tr>
           <th>Сигнал UTC</th><th>Монета</th><th>Маршрут</th><th>Статус</th><th>Signal net</th>

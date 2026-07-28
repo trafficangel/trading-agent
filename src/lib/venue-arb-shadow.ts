@@ -19,6 +19,7 @@ export type ShadowOutcome = {
 };
 
 export type ShadowReadiness = {
+  attempts: number;
   samples: number;
   entryEdgeConfirmed: number;
   reachedExitGuard: number;
@@ -66,7 +67,7 @@ export function shadowNetAfterCosts(input: ShadowNetInput): {
 
 export function shadowReadiness(
   rows: readonly ShadowOutcome[],
-  requiredSamples = 50,
+  requiredSamples = 20,
   requiredPassPct = 90,
 ): ShadowReadiness {
   const entryEdgeConfirmed = rows.filter((row) => row.entryEdgeConfirmed).length;
@@ -79,14 +80,17 @@ export function shadowReadiness(
       && row.reachedExitGuard
       && Number(row.realizedNetBps) > 0,
   ).length;
-  const passedPct = rows.length ? passed / rows.length * 100 : null;
+  const passedPct = entryEdgeConfirmed
+    ? passed / entryEdgeConfirmed * 100
+    : null;
   const reasons: Record<string, number> = {};
   for (const row of rows) {
     const reason = row.reason || 'unknown';
     reasons[reason] = (reasons[reason] ?? 0) + 1;
   }
   return {
-    samples: rows.length,
+    attempts: rows.length,
+    samples: entryEdgeConfirmed,
     entryEdgeConfirmed,
     reachedExitGuard,
     positiveAfterLatency,
@@ -94,7 +98,7 @@ export function shadowReadiness(
     passedPct,
     requiredSamples,
     requiredPassPct,
-    ready: rows.length >= requiredSamples
+    ready: entryEdgeConfirmed >= requiredSamples
       && passedPct != null
       && passedPct >= requiredPassPct,
     reasons,

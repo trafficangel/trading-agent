@@ -52,30 +52,47 @@ describe('venue arb execution shadow', () => {
       realizedNetBps: 3,
       reason: 'protected_exit',
     }));
-    const failures = Array.from({ length: 5 }, () => ({
+    const executionFailures = Array.from({ length: 5 }, () => ({
+      entryEdgeConfirmed: true,
+      reachedExitGuard: false,
+      realizedNetBps: -1,
+      reason: 'max_hold',
+    }));
+    const rejectedSignals = Array.from({ length: 5 }, () => ({
       entryEdgeConfirmed: false,
       reachedExitGuard: false,
       realizedNetBps: null,
       reason: 'edge_lost_before_entry',
     }));
-    expect(shadowReadiness([...passing, ...failures])).toMatchObject({
+    expect(shadowReadiness([
+      ...passing,
+      ...executionFailures,
+      ...rejectedSignals,
+    ], 50, 90)).toMatchObject({
+      attempts: 55,
       samples: 50,
-      entryEdgeConfirmed: 45,
+      entryEdgeConfirmed: 50,
       passed: 45,
       passedPct: 90,
       ready: true,
       reasons: {
         protected_exit: 45,
+        max_hold: 5,
         edge_lost_before_entry: 5,
       },
     });
     const sixFailures = Array.from({ length: 6 }, () => ({
-      entryEdgeConfirmed: false,
+      entryEdgeConfirmed: true,
       reachedExitGuard: false,
-      realizedNetBps: null,
-      reason: 'edge_lost_before_entry',
+      realizedNetBps: -1,
+      reason: 'max_hold',
     }));
-    expect(shadowReadiness([...passing.slice(0, 44), ...sixFailures])).toMatchObject({
+    expect(shadowReadiness([
+      ...passing.slice(0, 44),
+      ...sixFailures,
+      ...rejectedSignals,
+    ], 50, 90)).toMatchObject({
+      attempts: 55,
       samples: 50,
       passed: 44,
       passedPct: 88,
