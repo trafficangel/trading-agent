@@ -17,7 +17,8 @@ type Venue =
   | 'grvt'
   | 'edgex'
   | 'binance'
-  | 'bybit';
+  | 'bybit'
+  | 'coinbase';
 type SurvivalRow = {
   sampled?: number;
   observedAtHorizon?: number;
@@ -417,6 +418,7 @@ type Status = {
   asterPacificaMakerShadow?: GenericMakerShadowStatus;
   asterLighterMakerShadow?: GenericMakerShadowStatus;
   hibachiLighterMakerShadow?: GenericMakerShadowStatus;
+  coinbaseLighterMakerShadow?: GenericMakerShadowStatus;
   extendedLighterMakerShadow?: GenericMakerShadowStatus;
   extendedPacificaMakerShadow?: GenericMakerShadowStatus;
   lighterExtendedMakerShadow?: GenericMakerShadowStatus;
@@ -580,10 +582,12 @@ async function readTargeted(): Promise<{
   candidateStatus: Status | null;
   asterStatus: Status | null;
   hibachiStatus: Status | null;
+  coinbaseStatus: Status | null;
   extendedMakerGate: ProfitGateStatus | null;
   grvtMakerGate: ProfitGateStatus | null;
   asterMakerGate: ProfitGateStatus | null;
   hibachiMakerGate: ProfitGateStatus | null;
+  coinbaseMakerGate: ProfitGateStatus | null;
   extendedLighterTakerGate: ProfitGateStatus | null;
   lighterExtendedTakerGate: ProfitGateStatus | null;
 }> {
@@ -600,6 +604,7 @@ async function readTargeted(): Promise<{
     candidateStatus: await read<Status | null>('cex-dex-status.json', null),
     asterStatus: await read<Status | null>('aster-lighter-status.json', null),
     hibachiStatus: await read<Status | null>('hibachi-lighter-status.json', null),
+    coinbaseStatus: await read<Status | null>('coinbase-lighter-status.json', null),
     extendedMakerGate: await read<ProfitGateStatus | null>(
       'extended-lighter-maker-gate-status.json',
       null,
@@ -614,6 +619,10 @@ async function readTargeted(): Promise<{
     ),
     hibachiMakerGate: await read<ProfitGateStatus | null>(
       'hibachi-lighter-maker-gate-status.json',
+      null,
+    ),
+    coinbaseMakerGate: await read<ProfitGateStatus | null>(
+      'coinbase-lighter-maker-gate-status.json',
       null,
     ),
     extendedLighterTakerGate: await read<ProfitGateStatus | null>(
@@ -1286,11 +1295,13 @@ function candidateRouteRows(
   status: Status | null,
   asterStatus: Status | null,
   hibachiStatus: Status | null,
+  coinbaseStatus: Status | null,
   profitGates: {
     extendedLighterMaker: ProfitGateStatus | null;
     grvtLighterMaker: ProfitGateStatus | null;
     asterLighterMaker: ProfitGateStatus | null;
     hibachiLighterMaker: ProfitGateStatus | null;
+    coinbaseLighterMaker: ProfitGateStatus | null;
   },
 ): string {
   const makerRows = [
@@ -1313,6 +1324,11 @@ function candidateRouteRows(
       label: 'Hibachi maker → Lighter',
       maker: hibachiStatus?.hibachiLighterMakerShadow,
       gate: profitGates.hibachiLighterMaker,
+    },
+    {
+      label: 'Coinbase maker → Lighter',
+      maker: coinbaseStatus?.coinbaseLighterMakerShadow,
+      gate: profitGates.coinbaseLighterMaker,
     },
   ].filter(({ maker }) => maker?.enabled).map(({ label, maker, gate }) => {
     const readiness = maker?.readiness;
@@ -1365,6 +1381,8 @@ function candidateShadowRows(
     asterLighter: GenericMakerShadowStatus | undefined;
     extendedLighter: GenericMakerShadowStatus | undefined;
     grvtLighter: GenericMakerShadowStatus | undefined;
+    hibachiLighter: GenericMakerShadowStatus | undefined;
+    coinbaseLighter: GenericMakerShadowStatus | undefined;
   },
 ): string {
   const rows: Array<{
@@ -1379,6 +1397,8 @@ function candidateShadowRows(
     ['Aster maker → Lighter', makers.asterLighter],
     ['Extended maker → Lighter', makers.extendedLighter],
     ['GRVT maker → Lighter', makers.grvtLighter],
+    ['Hibachi maker → Lighter', makers.hibachiLighter],
+    ['Coinbase maker → Lighter', makers.coinbaseLighter],
   ] as const).filter(([, maker]) => maker?.enabled).forEach(([route, maker]) => {
     if (maker?.pair) {
       rows.push({
@@ -1450,6 +1470,7 @@ async function renderCompact(lang: Lang): Promise<string> {
   const candidateStatus = targeted.candidateStatus;
   const asterStatus = targeted.asterStatus;
   const hibachiStatus = targeted.hibachiStatus;
+  const coinbaseStatus = targeted.coinbaseStatus;
   const liveStatusFresh = Boolean(
     liveStatus?.updatedAt
     && Date.now() - liveStatus.updatedAt < 15_000,
@@ -1469,10 +1490,14 @@ async function renderCompact(lang: Lang): Promise<string> {
     || (
       hibachiStatus?.updatedAt
       && Date.now() - hibachiStatus.updatedAt < 15_000
-    ),
+    )
+    || (
+      coinbaseStatus?.updatedAt
+      && Date.now() - coinbaseStatus.updatedAt < 15_000
+    )
   );
   const candidateVenues = Array.from(new Set(
-    [candidateStatus, asterStatus, hibachiStatus].flatMap((status) => (
+    [candidateStatus, asterStatus, hibachiStatus, coinbaseStatus].flatMap((status) => (
       status?.venues ?? []
     )).filter((row) => row.enabled && row.venue)
       .map((row) => row.venue as Venue),
@@ -1482,6 +1507,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       candidateStatus?.connections?.[venue]?.connected
       || asterStatus?.connections?.[venue]?.connected
       || hibachiStatus?.connections?.[venue]?.connected
+      || coinbaseStatus?.connections?.[venue]?.connected
     ),
   ).length;
   const activeMakers = [
@@ -1500,6 +1526,10 @@ async function renderCompact(lang: Lang): Promise<string> {
     {
       maker: hibachiStatus?.hibachiLighterMakerShadow,
       gate: targeted.hibachiMakerGate,
+    },
+    {
+      maker: coinbaseStatus?.coinbaseLighterMakerShadow,
+      gate: targeted.coinbaseMakerGate,
     },
   ].filter(({ maker }) => maker?.enabled);
   const totalAttempts = activeMakers.reduce(
@@ -1551,11 +1581,12 @@ async function renderCompact(lang: Lang): Promise<string> {
         <div class="va-panel-head"><h2>Безкомиссионные маршруты</h2><span>$100 · maker ≤ 0% · Lighter 0% · только положительный raw edge</span></div>
         <div class="va-table"><table><thead><tr>
           <th>Маршрут</th><th>Net сейчас</th><th>Shadow gate</th><th>Статус</th>
-        </tr></thead><tbody>${candidateRouteRows(candidateStatus, asterStatus, hibachiStatus, {
+        </tr></thead><tbody>${candidateRouteRows(candidateStatus, asterStatus, hibachiStatus, coinbaseStatus, {
           extendedLighterMaker: targeted.extendedMakerGate,
           grvtLighterMaker: targeted.grvtMakerGate,
           asterLighterMaker: targeted.asterMakerGate,
           hibachiLighterMaker: targeted.hibachiMakerGate,
+          coinbaseLighterMaker: targeted.coinbaseMakerGate,
         })}</tbody></table></div>
       </section>
 
@@ -1567,6 +1598,8 @@ async function renderCompact(lang: Lang): Promise<string> {
           asterLighter: asterStatus?.asterLighterMakerShadow,
           extendedLighter: candidateStatus?.extendedLighterMakerShadow,
           grvtLighter: candidateStatus?.grvtMakerShadow,
+          hibachiLighter: hibachiStatus?.hibachiLighterMakerShadow,
+          coinbaseLighter: coinbaseStatus?.coinbaseLighterMakerShadow,
         })}</tbody></table></div>
       </section>
 
@@ -1809,6 +1842,7 @@ export async function venueArbHero(lang: Lang): Promise<string> {
   const targeted = await readTargeted();
   const status = targeted.candidateStatus;
   const hibachiStatus = targeted.hibachiStatus;
+  const coinbaseStatus = targeted.coinbaseStatus;
   const isLive = Boolean(
     (
       status?.updatedAt
@@ -1817,12 +1851,17 @@ export async function venueArbHero(lang: Lang): Promise<string> {
     || (
       hibachiStatus?.updatedAt
       && Date.now() - hibachiStatus.updatedAt < 15_000
+    )
+    || (
+      coinbaseStatus?.updatedAt
+      && Date.now() - coinbaseStatus.updatedAt < 15_000
     ),
   );
   const routeCount = Object.keys(status?.executionShadow?.routes ?? {}).length
     + (status?.extendedLighterMakerShadow?.enabled ? 1 : 0)
     + (status?.grvtMakerShadow?.enabled ? 1 : 0)
-    + (hibachiStatus?.hibachiLighterMakerShadow?.enabled ? 1 : 0);
+    + (hibachiStatus?.hibachiLighterMakerShadow?.enabled ? 1 : 0)
+    + (coinbaseStatus?.coinbaseLighterMakerShadow?.enabled ? 1 : 0);
   const samples = Math.max(
     Number(
       targeted.extendedLighterTakerGate?.metrics?.samples
@@ -1847,6 +1886,11 @@ export async function venueArbHero(lang: Lang): Promise<string> {
     Number(
       targeted.hibachiMakerGate?.metrics?.samples
       ?? hibachiStatus?.hibachiLighterMakerShadow?.readiness?.samples
+      ?? 0,
+    ),
+    Number(
+      targeted.coinbaseMakerGate?.metrics?.samples
+      ?? coinbaseStatus?.coinbaseLighterMakerShadow?.readiness?.samples
       ?? 0,
     ),
   );

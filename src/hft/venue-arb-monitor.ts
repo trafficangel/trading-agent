@@ -22,6 +22,10 @@ import { resolve } from 'node:path';
 import WebSocket, { type ClientOptions, type RawData } from 'ws';
 import { applyBybitDepthUpdate, createBybitDepthBook } from '../lib/bybit-depth-book.js';
 import {
+  applyCoinbaseL2Event,
+  parseCoinbaseMakerTrades,
+} from '../lib/coinbase-market-data.js';
+import {
   applyEdgexDepthUpdate,
   type EdgexDepthState,
 } from '../lib/edgex-depth-book.js';
@@ -84,6 +88,7 @@ type Venue =
   | 'pacifica'
   | 'grvt'
   | 'edgex'
+  | 'coinbase'
   | 'binance'
   | 'bybit';
 type VenueClass = 'DEX' | 'CEX';
@@ -493,6 +498,18 @@ const HIBACHI_LIGHTER_MAKER_ACTIVE_PATH = resolve(
 const HIBACHI_LIGHTER_MAKER_EVENTS_PATH = resolve(
   DATA_DIR,
   'hibachi-lighter-maker-events-v1.ndjson',
+);
+const COINBASE_LIGHTER_MAKER_RESULTS_PATH = resolve(
+  DATA_DIR,
+  'coinbase-lighter-maker-basis-shadow-v1.ndjson',
+);
+const COINBASE_LIGHTER_MAKER_ACTIVE_PATH = resolve(
+  DATA_DIR,
+  'coinbase-lighter-maker-basis-active-v1.json',
+);
+const COINBASE_LIGHTER_MAKER_EVENTS_PATH = resolve(
+  DATA_DIR,
+  'coinbase-lighter-maker-events-v1.ndjson',
 );
 const EXTENDED_LIGHTER_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
@@ -945,6 +962,54 @@ const HIBACHI_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
   'VENUE_ARB_HIBACHI_LIGHTER_MAKER_MAX_TRADE_IDLE_MS',
   10_000,
 );
+const COINBASE_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_COINBASE_LIGHTER_MAKER_SHADOW_ENABLED',
+  false,
+);
+const COINBASE_LIGHTER_MAKER_NOTIONAL_USD = finiteEnv(
+  'VENUE_ARB_COINBASE_LIGHTER_MAKER_NOTIONAL_USD',
+  100,
+);
+const COINBASE_LIGHTER_MAKER_ENTRY_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_COINBASE_LIGHTER_MAKER_ENTRY_EDGE_BPS',
+  1,
+);
+const COINBASE_LIGHTER_MAKER_CANCEL_EDGE_BPS = signedFiniteEnv(
+  'VENUE_ARB_COINBASE_LIGHTER_MAKER_CANCEL_EDGE_BPS',
+  0.5,
+);
+const COINBASE_LIGHTER_MAKER_POST_FILL_NET_BPS = finiteEnv(
+  'VENUE_ARB_COINBASE_LIGHTER_MAKER_POST_FILL_NET_BPS',
+  0.5,
+);
+const COINBASE_LIGHTER_MAKER_EXIT_NET_BPS = finiteEnv(
+  'VENUE_ARB_COINBASE_LIGHTER_MAKER_EXIT_NET_BPS',
+  1,
+);
+const COINBASE_LIGHTER_MAKER_QUOTE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_COINBASE_LIGHTER_MAKER_QUOTE_LATENCY_MS',
+  250,
+);
+const COINBASE_LIGHTER_MAKER_HEDGE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_COINBASE_LIGHTER_MAKER_HEDGE_LATENCY_MS',
+  300,
+);
+const COINBASE_LIGHTER_MAKER_QUOTE_TTL_MS = finiteEnv(
+  'VENUE_ARB_COINBASE_LIGHTER_MAKER_QUOTE_TTL_MS',
+  15_000,
+);
+const COINBASE_LIGHTER_MAKER_MAX_QUEUE_USD = finiteEnv(
+  'VENUE_ARB_COINBASE_LIGHTER_MAKER_MAX_QUEUE_USD',
+  100_000,
+);
+const COINBASE_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS = finiteEnv(
+  'VENUE_ARB_COINBASE_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS',
+  500,
+);
+const COINBASE_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
+  'VENUE_ARB_COINBASE_LIGHTER_MAKER_MAX_TRADE_IDLE_MS',
+  10_000,
+);
 const EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
   'VENUE_ARB_EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED',
   false,
@@ -1229,6 +1294,33 @@ const GRVT_VENUE_COINS = new Set([
 const GRVT_VENUE_MARKETS = ACTIVE_MARKETS.filter(
   (market) => GRVT_VENUE_COINS.has(market.coin),
 );
+const COINBASE_VENUE_COINS = new Set([
+  'BTC',
+  'ETH',
+  'SOL',
+  'HYPE',
+  'XRP',
+  'DOGE',
+  'ADA',
+  'BNB',
+  'SUI',
+  'PAXG',
+  'LTC',
+  'LIT',
+  'NEAR',
+  'CRV',
+  'FARTCOIN',
+  'PUMP',
+  'ZEC',
+  'ENA',
+  'AAVE',
+  'JUP',
+  'UNI',
+  'XPL',
+]);
+const COINBASE_VENUE_MARKETS = ACTIVE_MARKETS.filter(
+  (market) => COINBASE_VENUE_COINS.has(market.coin),
+);
 
 const VENUES: readonly Venue[] = [
   'lighter',
@@ -1241,6 +1333,7 @@ const VENUES: readonly Venue[] = [
   'pacifica',
   'grvt',
   'edgex',
+  'coinbase',
   'binance',
   'bybit',
 ];
@@ -1272,6 +1365,7 @@ const VENUE_CLASS: Record<Venue, VenueClass> = {
   pacifica: 'DEX',
   grvt: 'DEX',
   edgex: 'DEX',
+  coinbase: 'CEX',
   binance: 'CEX',
   bybit: 'CEX',
 };
@@ -1291,6 +1385,9 @@ const FEE_BPS: Record<Venue, number> = {
   grvt: finiteEnv('VENUE_ARB_FEE_BPS_GRVT', 4.5),
   // edgeX base taker rate is 0.038% per fill.
   edgex: finiteEnv('VENUE_ARB_FEE_BPS_EDGEX', 3.8),
+  // Advanced Trade retail perpetuals currently advertise a 0.03% taker
+  // promotion. Maker routes model the separate 0.00% promotional maker rate.
+  coinbase: finiteEnv('VENUE_ARB_FEE_BPS_COINBASE', 3),
   binance: finiteEnv('VENUE_ARB_FEE_BPS_BINANCE', 5),
   bybit: finiteEnv('VENUE_ARB_FEE_BPS_BYBIT', 5.5),
 };
@@ -1329,6 +1426,18 @@ const ALL_SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     id: 'edgex-lighter',
     buyVenue: 'edgex',
     sellVenue: 'lighter',
+    primary: false,
+  },
+  {
+    id: 'coinbase-lighter',
+    buyVenue: 'coinbase',
+    sellVenue: 'lighter',
+    primary: false,
+  },
+  {
+    id: 'lighter-coinbase',
+    buyVenue: 'lighter',
+    sellVenue: 'coinbase',
     primary: false,
   },
   {
@@ -1636,6 +1745,7 @@ const books = new Map<string, BookState>();
 const executableBooks = new Map<string, ExecutableBook>();
 const asterLastTradeAt = new Map<string, number>();
 const hibachiLastTradeAt = new Map<string, number>();
+const coinbaseLastTradeAt = new Map<string, number>();
 const extendedLastTradeAt = new Map<string, number>();
 const lighterLastTradeAt = new Map<string, number>();
 const grvtLastTradeAt = new Map<string, number>();
@@ -2090,6 +2200,66 @@ const hibachiLighterMakerShadow = new GenericMakerShadow({
   onEvent: (event) => {
     appendFileSync(
       HIBACHI_LIGHTER_MAKER_EVENTS_PATH,
+      `${JSON.stringify(event)}\n`,
+    );
+  },
+});
+const coinbaseLighterMakerShadow = new GenericMakerShadow({
+  routeId: 'coinbase-maker-lighter',
+  makerVenue: 'coinbase',
+  hedgeVenue: 'lighter',
+  notionalUsd: COINBASE_LIGHTER_MAKER_NOTIONAL_USD,
+  entryEdgeBps: COINBASE_LIGHTER_MAKER_ENTRY_EDGE_BPS,
+  cancelEdgeBps: COINBASE_LIGHTER_MAKER_CANCEL_EDGE_BPS,
+  postFillNetBps: COINBASE_LIGHTER_MAKER_POST_FILL_NET_BPS,
+  exitNetBps: COINBASE_LIGHTER_MAKER_EXIT_NET_BPS,
+  takerExitNetBps: COINBASE_LIGHTER_MAKER_EXIT_NET_BPS,
+  quoteLatencyMs: COINBASE_LIGHTER_MAKER_QUOTE_LATENCY_MS,
+  hedgeLatencyMs: COINBASE_LIGHTER_MAKER_HEDGE_LATENCY_MS,
+  quoteTtlMs: COINBASE_LIGHTER_MAKER_QUOTE_TTL_MS,
+  maxQueueUsd: COINBASE_LIGHTER_MAKER_MAX_QUEUE_USD,
+  quoteDataGraceMs: COINBASE_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS,
+  hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
+  maxHoldMs: MAKER_MAX_HOLD_MS,
+  independenceMs: MAKER_INDEPENDENCE_MS,
+  bookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  sourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  makerBookFreshMs: SHADOW_EXECUTION_FRESH_MS,
+  makerSourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  hedgeBookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  hedgeSourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  executionBufferBps: EXECUTION_BUFFER_BPS,
+  // This route is valid only for the Advanced Trade retail perpetual promo.
+  // The ordinary Coinbase International public tier pays maker fees.
+  makerFeeBps: 0,
+  hedgeTakerFeeBps: FEE_BPS.lighter,
+  makerFallbackTakerFeeBps: FEE_BPS.coinbase,
+  fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+  requiredSamples: SHADOW_REQUIRED_SAMPLES,
+  requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
+  maxEntryDistanceBps: 3,
+  maxMakerTradeIdleMs: COINBASE_LIGHTER_MAKER_MAX_TRADE_IDLE_MS,
+}, {
+  onResult: (result) => {
+    appendFileSync(
+      COINBASE_LIGHTER_MAKER_RESULTS_PATH,
+      `${JSON.stringify(result)}\n`,
+    );
+  },
+  onCheckpoint: (checkpoint) => {
+    atomicJson(COINBASE_LIGHTER_MAKER_ACTIVE_PATH, {
+      ...checkpoint,
+      updatedAt: Date.now(),
+    });
+  },
+  onEvent: (event) => {
+    appendFileSync(
+      COINBASE_LIGHTER_MAKER_EVENTS_PATH,
       `${JSON.stringify(event)}\n`,
     );
   },
@@ -3982,6 +4152,9 @@ function connect(
     if (venue === 'hibachi' && HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED) {
       hibachiLighterMakerShadow.setTradeStreamConnected(false);
     }
+    if (venue === 'coinbase' && COINBASE_LIGHTER_MAKER_SHADOW_ENABLED) {
+      coinbaseLighterMakerShadow.setTradeStreamConnected(false);
+    }
     console.warn(`venue-arb ${venue} websocket error`, error.message);
   });
   ws.on('close', (code, reason) => {
@@ -4009,6 +4182,10 @@ function connect(
     if (venue === 'hibachi' && HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED) {
       hibachiLighterMakerShadow.setTradeStreamConnected(false);
       hibachiLighterMakerShadow.recordTradeReconnect();
+    }
+    if (venue === 'coinbase' && COINBASE_LIGHTER_MAKER_SHADOW_ENABLED) {
+      coinbaseLighterMakerShadow.setTradeStreamConnected(false);
+      coinbaseLighterMakerShadow.recordTradeReconnect();
     }
     console.warn(
       `venue-arb ${venue} closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
@@ -4068,6 +4245,82 @@ function startHyperliquid(): void {
       replaceObjectLevels(book.bids, message.data.levels?.[0]);
       replaceObjectLevels(book.asks, message.data.levels?.[1]);
       markBook(book, finite(message.data.time), receivedAt);
+    },
+  );
+}
+
+function startCoinbase(): void {
+  if (!COINBASE_VENUE_MARKETS.length) return;
+  const productIds = COINBASE_VENUE_MARKETS.map(
+    ({ coin }) => `${coin}-PERP-INTX`,
+  );
+  connect(
+    'coinbase',
+    'wss://advanced-trade-ws.coinbase.com',
+    (ws) => {
+      for (const channel of ['level2', 'market_trades', 'heartbeats']) {
+        ws.send(JSON.stringify({
+          type: 'subscribe',
+          product_ids: productIds,
+          channel,
+        }));
+      }
+      if (COINBASE_LIGHTER_MAKER_SHADOW_ENABLED) {
+        coinbaseLighterMakerShadow.setTradeStreamConnected(true);
+      }
+    },
+    (payload, receivedAt) => {
+      const message = payload as {
+        channel?: unknown;
+        timestamp?: unknown;
+        events?: unknown;
+      };
+      if (message.channel === 'l2_data' && Array.isArray(message.events)) {
+        for (const rawEvent of message.events) {
+          if (!rawEvent || typeof rawEvent !== 'object') continue;
+          const event = rawEvent as {
+            product_id?: unknown;
+            type?: unknown;
+            updates?: unknown;
+          };
+          if (
+            typeof event.product_id !== 'string'
+            || !event.product_id.endsWith('-PERP-INTX')
+          ) continue;
+          const coin = event.product_id.slice(0, -'-PERP-INTX'.length);
+          if (!COINBASE_VENUE_COINS.has(coin)) continue;
+          const book = books.get(bookKey('coinbase', coin));
+          if (!book) continue;
+          const result = applyCoinbaseL2Event(book, event);
+          if (!result.applied) continue;
+          const envelopeAt = typeof message.timestamp === 'string'
+            ? Date.parse(message.timestamp)
+            : Number.NaN;
+          markBook(
+            book,
+            result.exchangeAt
+              ?? (Number.isFinite(envelopeAt) ? envelopeAt : receivedAt),
+            receivedAt,
+          );
+        }
+        return;
+      }
+      if (
+        message.channel !== 'market_trades'
+        || !COINBASE_LIGHTER_MAKER_SHADOW_ENABLED
+      ) return;
+      for (const trade of parseCoinbaseMakerTrades(payload)) {
+        if (!COINBASE_VENUE_COINS.has(trade.coin)) continue;
+        const activityAt = makerActivityTimestamp(
+          trade.tradeAt,
+          receivedAt,
+          SHADOW_SOURCE_FRESH_MS,
+        );
+        if (activityAt != null) {
+          coinbaseLastTradeAt.set(trade.coin, activityAt);
+        }
+        coinbaseLighterMakerShadow.processTrade(trade, receivedAt);
+      }
     },
   );
 }
@@ -4429,6 +4682,7 @@ function startLighterRestBookPoller(): void {
     const activeCoins = [...new Set([
       asterLighterMakerShadow,
       hibachiLighterMakerShadow,
+      coinbaseLighterMakerShadow,
       extendedLighterMakerShadow,
       lighterExtendedMakerShadow,
       grvtMakerShadow,
@@ -5765,6 +6019,11 @@ function writeStatus(): void {
       ...hibachiLighterMakerShadow.status(),
       enabled: HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED,
     },
+    coinbaseLighterMakerShadow: {
+      ...coinbaseLighterMakerShadow.status(),
+      enabled: COINBASE_LIGHTER_MAKER_SHADOW_ENABLED,
+      feeEligibility: 'advanced_trade_retail_promo_only',
+    },
     extendedLighterMakerShadow: {
       ...extendedLighterMakerShadow.status(),
       enabled: EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED,
@@ -6113,7 +6372,13 @@ function loadGenericMakerState(
 }
 
 function genericMakerMarkets(
-  makerVenue: 'grvt' | 'extended' | 'lighter' | 'aster' | 'hibachi',
+  makerVenue:
+    | 'grvt'
+    | 'extended'
+    | 'lighter'
+    | 'aster'
+    | 'hibachi'
+    | 'coinbase',
   hedgeVenue: 'lighter' | 'extended' | 'aster' | 'pacifica' | 'binance',
   now: number,
   notionalUsd: number,
@@ -6210,6 +6475,8 @@ function genericMakerMarkets(
           ? asterLastTradeAt
           : makerVenue === 'hibachi'
             ? hibachiLastTradeAt
+          : makerVenue === 'coinbase'
+            ? coinbaseLastTradeAt
           : makerVenue === 'extended'
             ? extendedLastTradeAt
             : makerVenue === 'lighter'
@@ -6267,6 +6534,7 @@ function shutdown(signal: string): void {
   asterPacificaMakerShadow.shutdown(Date.now());
   asterLighterMakerShadow.shutdown(Date.now());
   hibachiLighterMakerShadow.shutdown(Date.now());
+  coinbaseLighterMakerShadow.shutdown(Date.now());
   extendedLighterMakerShadow.shutdown(Date.now());
   extendedPacificaMakerShadow.shutdown(Date.now());
   lighterExtendedMakerShadow.shutdown(Date.now());
@@ -6318,6 +6586,12 @@ if (!existsSync(HIBACHI_LIGHTER_MAKER_RESULTS_PATH)) {
 }
 if (!existsSync(HIBACHI_LIGHTER_MAKER_EVENTS_PATH)) {
   writeFileSync(HIBACHI_LIGHTER_MAKER_EVENTS_PATH, '');
+}
+if (!existsSync(COINBASE_LIGHTER_MAKER_RESULTS_PATH)) {
+  writeFileSync(COINBASE_LIGHTER_MAKER_RESULTS_PATH, '');
+}
+if (!existsSync(COINBASE_LIGHTER_MAKER_EVENTS_PATH)) {
+  writeFileSync(COINBASE_LIGHTER_MAKER_EVENTS_PATH, '');
 }
 if (!existsSync(EXTENDED_LIGHTER_MAKER_RESULTS_PATH)) {
   writeFileSync(EXTENDED_LIGHTER_MAKER_RESULTS_PATH, '');
@@ -6391,6 +6665,13 @@ loadGenericMakerState(
   HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED,
 );
 loadGenericMakerState(
+  coinbaseLighterMakerShadow,
+  COINBASE_LIGHTER_MAKER_RESULTS_PATH,
+  COINBASE_LIGHTER_MAKER_ACTIVE_PATH,
+  'Coinbase maker → Lighter',
+  COINBASE_LIGHTER_MAKER_SHADOW_ENABLED,
+);
+loadGenericMakerState(
   extendedLighterMakerShadow,
   EXTENDED_LIGHTER_MAKER_RESULTS_PATH,
   EXTENDED_LIGHTER_MAKER_ACTIVE_PATH,
@@ -6451,6 +6732,7 @@ if (activeVenues.has('hibachi')) startHibachi();
 if (activeVenues.has('pacifica')) startPacifica();
 if (activeVenues.has('grvt')) startGrvt();
 if (activeVenues.has('edgex')) startEdgex();
+if (activeVenues.has('coinbase')) startCoinbase();
 if (activeVenues.has('binance')) startBinance();
 if (activeVenues.has('bybit')) startBybit();
 const evaluationTimer = setInterval(() => {
@@ -6550,6 +6832,21 @@ const evaluationTimer = setInterval(() => {
         'lighter',
         now,
         HIBACHI_LIGHTER_MAKER_NOTIONAL_USD,
+      ),
+    );
+  }
+  if (
+    COINBASE_LIGHTER_MAKER_SHADOW_ENABLED
+    && activeVenues.has('coinbase')
+    && activeVenues.has('lighter')
+  ) {
+    coinbaseLighterMakerShadow.evaluate(
+      now,
+      genericMakerMarkets(
+        'coinbase',
+        'lighter',
+        now,
+        COINBASE_LIGHTER_MAKER_NOTIONAL_USD,
       ),
     );
   }

@@ -5,6 +5,7 @@ source_dir=/home/trader/apps/venue-arb-tokyo/data/candidate-routes
 candidate_dir=/home/trader/apps/venue-arb-tokyo/data/extended-lighter-shadow
 aster_dir=/home/trader/apps/venue-arb-tokyo/data/binance-bybit-shadow
 hibachi_dir=/home/trader/apps/venue-arb-tokyo/data/hibachi-lighter-shadow
+coinbase_dir=/home/trader/apps/venue-arb-tokyo/data/coinbase-lighter-shadow
 destination=trader@144.124.250.47:/home/trader/apps/trading-agent/data/venue-arb/
 sync_key=/home/trader/.ssh/status_sync
 ssh_args="ssh -i ${sync_key} -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=10 -o ControlMaster=auto -o ControlPersist=60 -o ControlPath=/home/trader/.ssh/venue-arb-sync-%C"
@@ -24,6 +25,8 @@ while true; do
     "${aster_dir}/status.json" "${destination}aster-lighter-status.json"
   [[ -f "${hibachi_dir}/status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
     "${hibachi_dir}/status.json" "${destination}hibachi-lighter-status.json"
+  [[ -f "${coinbase_dir}/status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
+    "${coinbase_dir}/status.json" "${destination}coinbase-lighter-status.json"
   for gate_file in \
     extended-lighter-maker-gate-status.json \
     extended-lighter-taker-gate-status.json \
@@ -36,5 +39,7 @@ while true; do
     "${aster_dir}/aster-lighter-maker-gate-status.json" "${destination}aster-lighter-maker-gate-status.json"
   [[ -f "${hibachi_dir}/hibachi-lighter-maker-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
     "${hibachi_dir}/hibachi-lighter-maker-gate-status.json" "${destination}hibachi-lighter-maker-gate-status.json"
+  [[ -f "${coinbase_dir}/coinbase-lighter-maker-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
+    "${coinbase_dir}/coinbase-lighter-maker-gate-status.json" "${destination}coinbase-lighter-maker-gate-status.json"
   sleep 1
 done
