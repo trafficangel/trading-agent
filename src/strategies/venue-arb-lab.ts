@@ -1347,7 +1347,7 @@ function candidateShadowRows(
         status: row.passed ? 'PASS' : 'FAIL',
         netBps: row.realizedNetBps,
         detail: shadowReason(row.reason),
-      })),
+      })).filter((row) => Number.isFinite(row.netBps)),
     ];
   });
   ([
@@ -1371,7 +1371,7 @@ function candidateShadowRows(
       status: row.passed ? 'PASS' : 'FAIL',
       netBps: row.realizedNetBps,
       detail: makerReason(row.reason),
-    })));
+    })).filter((row) => Number.isFinite(row.netBps)));
   });
   rows.sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
   if (!rows.length) {
@@ -1440,7 +1440,10 @@ async function renderCompact(lang: Lang): Promise<string> {
   const healthyFeeds = candidateVenues.filter(
     (venue) => candidateStatus?.connections?.[venue]?.connected,
   ).length;
-  const routes = Object.values(candidateShadow?.routes ?? {});
+  const routes = CANDIDATE_ROUTES.flatMap(([id]) => {
+    const route = candidateShadow?.routes?.[id];
+    return route ? [route] : [];
+  });
   const activeMakers = [
     {
       maker: candidateStatus?.extendedLighterMakerShadow,
@@ -1451,15 +1454,6 @@ async function renderCompact(lang: Lang): Promise<string> {
       gate: null,
     },
   ].filter(({ maker }) => maker?.enabled);
-  const totalSamples = routes.reduce(
-    (sum, route) => sum + Number(route?.readiness?.samples ?? 0),
-    activeMakers.reduce(
-      (sum, { maker, gate }) => sum + Number(
-        gate?.metrics?.samples ?? maker?.readiness?.samples ?? 0,
-      ),
-      0,
-    ),
-  );
   const totalAttempts = routes.reduce(
     (sum, route) => sum + Number(route?.readiness?.attempts ?? 0),
     activeMakers.reduce(
@@ -1467,15 +1461,23 @@ async function renderCompact(lang: Lang): Promise<string> {
       0,
     ),
   );
-  const totalRequired = routes.reduce(
-    (sum, route) => sum + Number(route?.readiness?.requiredSamples ?? 30),
-    activeMakers.reduce(
-      (sum, { maker, gate }) => sum + Number(
-        gate?.requirements?.minSamples ?? maker?.readiness?.requiredSamples ?? 30,
+  const bestGate = [
+    ...routes.map((route) => ({
+      samples: Number(route?.readiness?.samples ?? 0),
+      required: Number(route?.readiness?.requiredSamples ?? 30),
+    })),
+    ...activeMakers.map(({ maker, gate }) => ({
+      samples: Number(gate?.metrics?.samples ?? maker?.readiness?.samples ?? 0),
+      required: Number(
+        gate?.requirements?.minSamples
+        ?? maker?.readiness?.requiredSamples
+        ?? 30,
       ),
-      0,
-    ),
-  );
+    })),
+  ].sort((a, b) => (
+    (b.samples / Math.max(1, b.required))
+    - (a.samples / Math.max(1, a.required))
+  ))[0] ?? { samples: 0, required: 30 };
   const readyRoutes = activeMakers.filter(({ maker, gate }) => (
     gate?.ready ?? maker?.readiness?.ready
   )).length;
@@ -1500,7 +1502,7 @@ async function renderCompact(lang: Lang): Promise<string> {
 
       <div class="va-overview">
         <div><small>Реальный net</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b><span>${closedLive.length} сделок · ${liveWins} прибыльных · комиссии ${money(liveFees)}</span></div>
-        <div><small>Shadow gate</small><b>${totalSamples} / ${totalRequired}</b><span>${totalAttempts} попыток · потоки ${healthyFeeds}/${candidateVenues.length}</span></div>
+        <div><small>Лучший shadow gate</small><b>${bestGate.samples} / ${bestGate.required}</b><span>${totalAttempts} попыток · потоки ${healthyFeeds}/${candidateVenues.length}</span></div>
         <div><small>Решение</small><b class="${canaryReady ? 'pos' : 'neg'}">${canaryReady ? 'CANARY READY' : 'РЕАЛ ЗАПРЕЩЁН'}</b><span>${canaryReady ? `${readyRoutes} маршрут(а) прошли gate` : 'нужен доказанный положительный net'}</span></div>
       </div>
 
@@ -1515,7 +1517,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       </section>
 
       <section class="va-panel">
-        <div class="va-panel-head"><h2>Shadow-сделки</h2><span>после задержки и расходов</span></div>
+        <div class="va-panel-head"><h2>Исполненные shadow-сделки</h2><span>после задержки и расходов</span></div>
         <div class="va-table" data-va-pager="target-shadow" data-page-size="20"><table><thead><tr>
           <th>UTC</th><th>Монета / маршрут</th><th>Статус</th><th>Net</th><th>Причина</th>
         </tr></thead><tbody>${candidateShadowRows(candidateShadow, {
