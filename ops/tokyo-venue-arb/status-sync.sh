@@ -8,7 +8,7 @@ ssh_args="ssh -i ${sync_key} -o BatchMode=yes -o ConnectTimeout=5 -o ServerAlive
 
 while true; do
   files=()
-  for name in live-status.json live-trades.json; do
+  for name in status.json execution-status.json live-status.json live-trades.json; do
     [[ -f "${source_dir}/${name}" ]] && files+=("${source_dir}/${name}")
   done
   if ((${#files[@]})); then
