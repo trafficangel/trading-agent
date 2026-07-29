@@ -224,6 +224,23 @@ def finite_float(value: Any, fallback: float) -> float:
     return number if math.isfinite(number) else fallback
 
 
+def lighter_zero_fee_error(limit_data: dict[str, Any]) -> str | None:
+    tier = str(limit_data.get("user_tier") or "").strip().lower()
+    try:
+        maker_fee_tick = int(limit_data["current_maker_fee_tick"])
+        taker_fee_tick = int(limit_data["current_taker_fee_tick"])
+    except (KeyError, TypeError, ValueError):
+        return "Lighter account limits did not include numeric fee ticks"
+    if tier != "standard":
+        return f"Lighter user tier is {tier or 'missing'}, expected standard"
+    if maker_fee_tick != 0 or taker_fee_tick != 0:
+        return (
+            "Lighter account is not zero-fee: "
+            f"maker_tick={maker_fee_tick}, taker_tick={taker_fee_tick}"
+        )
+    return None
+
+
 def order_book_vwap(
     orders: list[dict[str, Any]],
     notional_usd: float,
@@ -1283,6 +1300,22 @@ class Canary:
         if not rows:
             raise RuntimeError("Lighter account unavailable")
         return rows[0]
+
+    async def ensure_lighter_zero_fees(self) -> None:
+        response = await lighter.AccountApi(self.lighter_api).account_limits(
+            account_index=self.lighter_account_index,
+            authorization=await self.lighter_auth(),
+        )
+        limit_data = response.to_dict()
+        error = lighter_zero_fee_error(limit_data)
+        if error is not None:
+            raise RuntimeError(error)
+        self.log(
+            "lighter_fee_tier_verified",
+            user_tier=str(limit_data.get("user_tier")),
+            maker_fee_tick=int(limit_data["current_maker_fee_tick"]),
+            taker_fee_tick=int(limit_data["current_taker_fee_tick"]),
+        )
 
     async def lighter_positions(self) -> list[dict[str, Any]]:
         account = await self.lighter_account()
@@ -4015,6 +4048,7 @@ class Canary:
         await asyncio.gather(
             self.create_extended_client(), self.load_lighter_meta()
         )
+        await self.ensure_lighter_zero_fees()
         await self.ensure_flat()
         ext_balance, lit_balance = await self.balances()
         required = self.notional / self.leverage + 10
@@ -4334,6 +4368,24 @@ def self_test() -> None:
         funding_bps_per_hour=1,
     ) == 0.0005
     assert finite_float(0, math.inf) == 0
+    assert lighter_zero_fee_error({
+        "user_tier": "standard",
+        "current_maker_fee_tick": 0,
+        "current_taker_fee_tick": 0,
+    }) is None
+    assert "not zero-fee" in str(lighter_zero_fee_error({
+        "user_tier": "standard",
+        "current_maker_fee_tick": 0,
+        "current_taker_fee_tick": 1,
+    }))
+    assert "expected standard" in str(lighter_zero_fee_error({
+        "user_tier": "pro",
+        "current_maker_fee_tick": 0,
+        "current_taker_fee_tick": 0,
+    }))
+    assert "did not include" in str(lighter_zero_fee_error({
+        "user_tier": "standard",
+    }))
     assert candidate_quote_version(
         1_000,
         {

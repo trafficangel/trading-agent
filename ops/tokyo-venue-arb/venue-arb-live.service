@@ -12,9 +12,11 @@ EnvironmentFile=/etc/venue-arb-tokyo/extended.env
 EnvironmentFile=/etc/venue-arb-tokyo/lighter.env
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/candidate-routes
 Environment=VENUE_ARB_LIVE_REGION=Tokyo
-Environment=VENUE_ARB_LIVE_ENABLED=true
-Environment=VENUE_ARB_LIVE_EXECUTION=taker-taker
-Environment=VENUE_ARB_LIVE_ROUTE=both
+# Fail closed. Promotion to real execution requires an explicit operator
+# change after the matching zero-fee maker shadow reaches GO.
+Environment=VENUE_ARB_LIVE_ENABLED=false
+Environment=VENUE_ARB_LIVE_EXECUTION=maker-taker
+Environment=VENUE_ARB_LIVE_ROUTE=extended-lighter
 Environment=VENUE_ARB_LIVE_ALLOWED_COINS=BTC,ETH,SOL,HYPE,XRP,DOGE,ADA,BNB,LTC,LIT,XMR,NEAR,CRV,FARTCOIN,PUMP,WTI,XAU,XAG,ZEC,EUR,ENA,AAVE,JUP,UNI,XPL
 Environment=VENUE_ARB_LIVE_NOTIONAL_USD=100
 Environment=VENUE_ARB_LIVE_LEVERAGE=5
@@ -53,7 +55,7 @@ Environment=VENUE_ARB_LIVE_MAKER_SAFETY_TICKS=1
 Environment=VENUE_ARB_LIVE_MAKER_SAFETY_BPS=0
 Environment=VENUE_ARB_LIVE_MAKER_RETRY_COOLDOWN_MS=5000
 Environment=VENUE_ARB_LIVE_MAX_TRADES=2
-Environment=VENUE_ARB_LIVE_REQUIRE_MAKER_SHADOW_PASSES=0
+Environment=VENUE_ARB_LIVE_REQUIRE_MAKER_SHADOW_PASSES=30
 Environment=VENUE_ARB_LIVE_DAILY_LOSS_USD=2
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/trader/venvs/venue-arb-tokyo/bin/python /home/trader/apps/venue-arb-tokyo/venue-arb-live.py
