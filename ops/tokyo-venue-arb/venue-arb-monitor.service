@@ -38,7 +38,7 @@ Environment=VENUE_ARB_MAKER_HEDGE_LATENCY_MS=60
 Environment=VENUE_ARB_MAKER_QUOTE_TTL_MS=60000
 Environment=VENUE_ARB_MAKER_MAX_QUEUE_USD=5000
 Environment=VENUE_ARB_MAKER_HEDGE_GRACE_MS=500
-Environment=VENUE_ARB_MAKER_MAX_HOLD_MS=900000
+Environment=VENUE_ARB_MAKER_MAX_HOLD_MS=180000
 Environment=VENUE_ARB_MAKER_INDEPENDENCE_MS=300000
 Environment=VENUE_ARB_FEED_STALL_MS=15000
 ExecStart=/usr/bin/node /home/trader/apps/venue-arb-tokyo/dist/hft/venue-arb-monitor.js
