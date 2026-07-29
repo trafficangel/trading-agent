@@ -566,6 +566,23 @@ const VENUES: readonly Venue[] = [
   'binance',
   'bybit',
 ];
+const ACTIVE_VENUES: readonly Venue[] = (() => {
+  const configured = (process.env.VENUE_ARB_ACTIVE_VENUES ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!configured.length) return VENUES;
+  const invalid = configured.filter(
+    (value): value is string => !VENUES.includes(value as Venue),
+  );
+  if (invalid.length) {
+    throw new Error(
+      `invalid VENUE_ARB_ACTIVE_VENUES: ${invalid.join(',')}`,
+    );
+  }
+  return [...new Set(configured as Venue[])];
+})();
+const activeVenues = new Set(ACTIVE_VENUES);
 const VENUE_CLASS: Record<Venue, VenueClass> = {
   lighter: 'DEX',
   hyperliquid: 'DEX',
@@ -2364,7 +2381,7 @@ function connect(
 
 function reconnectStalledFeeds(): void {
   const now = Date.now();
-  for (const venue of VENUES) {
+  for (const venue of ACTIVE_VENUES) {
     const state = connections[venue];
     if (
       !state.connected
@@ -3132,8 +3149,8 @@ function evaluate(): void {
   evaluations++;
   const observed = new Set<string>();
   for (const market of MARKETS) {
-    for (const buyVenue of VENUES) {
-      for (const sellVenue of VENUES) {
+    for (const buyVenue of ACTIVE_VENUES) {
+      for (const sellVenue of ACTIVE_VENUES) {
         if (buyVenue === sellVenue) continue;
         const key = routeKey(market.coin, buyVenue, sellVenue);
         const snapshot = edge(now, market.coin, buyVenue, sellVenue);
@@ -3333,7 +3350,11 @@ function writeStatus(): void {
     notionalsUsd: [500, 1_000],
     feesBpsPerSide: FEE_BPS,
     markets: MARKETS.map((market) => market.coin),
-    venues: VENUES.map((venue) => ({ venue, class: VENUE_CLASS[venue] })),
+    venues: VENUES.map((venue) => ({
+      venue,
+      class: VENUE_CLASS[venue],
+      enabled: activeVenues.has(venue),
+    })),
     connections,
     evaluations,
     active: [...active.values()].sort((a, b) => b.peakNetBps1000 - a.peakNetBps1000),
@@ -3347,7 +3368,7 @@ function writeStatus(): void {
     extendedAsterMakerShadow: extendedAsterMakerShadow.status(),
     freshnessMs: Object.fromEntries(MARKETS.map((market) => [
       market.coin,
-      Object.fromEntries(VENUES.map((venue) => [
+      Object.fromEntries(ACTIVE_VENUES.map((venue) => [
         venue,
         books.get(bookKey(venue, market.coin))?.receivedAt
           ? Math.max(
@@ -3685,32 +3706,43 @@ loadGenericMakerState(
   'Extended maker → Aster',
 );
 startedAt = Date.now();
-startLighter();
-startHyperliquid();
-startParadex();
-startPolymarket();
-startExtended();
-startExtendedTrades();
-startAster();
-startPacifica();
-startGrvt();
-startBinance();
-startBybit();
+if (activeVenues.has('lighter')) startLighter();
+if (activeVenues.has('hyperliquid')) startHyperliquid();
+if (activeVenues.has('paradex')) startParadex();
+if (activeVenues.has('polymarket')) startPolymarket();
+if (activeVenues.has('extended')) {
+  startExtended();
+  startExtendedTrades();
+}
+if (activeVenues.has('aster')) startAster();
+if (activeVenues.has('pacifica')) startPacifica();
+if (activeVenues.has('grvt')) startGrvt();
+if (activeVenues.has('binance')) startBinance();
+if (activeVenues.has('bybit')) startBybit();
 const evaluationTimer = setInterval(() => {
   evaluate();
-  evaluateMakerShadow(Date.now());
-  grvtMakerShadow.evaluate(
-    Date.now(),
-    genericMakerMarkets('grvt', 'lighter'),
-  );
-  grvtExtendedMakerShadow.evaluate(
-    Date.now(),
-    genericMakerMarkets('grvt', 'extended'),
-  );
-  extendedAsterMakerShadow.evaluate(
-    Date.now(),
-    genericMakerMarkets('extended', 'aster'),
-  );
+  const now = Date.now();
+  if (activeVenues.has('extended') && activeVenues.has('lighter')) {
+    evaluateMakerShadow(now);
+  }
+  if (activeVenues.has('grvt') && activeVenues.has('lighter')) {
+    grvtMakerShadow.evaluate(
+      now,
+      genericMakerMarkets('grvt', 'lighter'),
+    );
+  }
+  if (activeVenues.has('grvt') && activeVenues.has('extended')) {
+    grvtExtendedMakerShadow.evaluate(
+      now,
+      genericMakerMarkets('grvt', 'extended'),
+    );
+  }
+  if (activeVenues.has('extended') && activeVenues.has('aster')) {
+    extendedAsterMakerShadow.evaluate(
+      now,
+      genericMakerMarkets('extended', 'aster'),
+    );
+  }
   writeExecutionStatus();
 }, SAMPLE_MS);
 const statusTimer = setInterval(writeStatus, 1_000);
@@ -3720,5 +3752,5 @@ writeExecutionStatus();
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 console.warn(
-  `venue-arb read-only started: ${VENUES.join(',')} · ${MARKETS.map((m) => m.coin).join(',')} @ ${SAMPLE_MS}ms`,
+  `venue-arb read-only started: ${ACTIVE_VENUES.join(',')} · ${MARKETS.map((m) => m.coin).join(',')} @ ${SAMPLE_MS}ms`,
 );
