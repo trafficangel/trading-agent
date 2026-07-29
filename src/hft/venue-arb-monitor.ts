@@ -842,6 +842,10 @@ const ASTER_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS = finiteEnv(
   'VENUE_ARB_ASTER_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS',
   500,
 );
+const ASTER_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
+  'VENUE_ARB_ASTER_LIGHTER_MAKER_MAX_TRADE_IDLE_MS',
+  0,
+);
 const EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
   'VENUE_ARB_EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED',
   false,
@@ -1485,6 +1489,7 @@ let shadowBasisStateDirty = false;
 
 const books = new Map<string, BookState>();
 const executableBooks = new Map<string, ExecutableBook>();
+const asterLastTradeAt = new Map<string, number>();
 const bySymbol = new Map(ACTIVE_MARKETS.map((market) => [market.symbol, market]));
 const byCoin = new Map(ACTIVE_MARKETS.map((market) => [market.coin, market]));
 const byLighterId = new Map(ACTIVE_MARKETS.map((market) => [market.lighterMarketId, market]));
@@ -1827,6 +1832,7 @@ const asterLighterMakerShadow = new GenericMakerShadow({
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
   maxEntryDistanceBps: 3,
+  maxMakerTradeIdleMs: ASTER_LIGHTER_MAKER_MAX_TRADE_IDLE_MS,
 }, {
   onResult: (result) => {
     appendFileSync(
@@ -4611,6 +4617,7 @@ function startAsterTrades(): void {
         size,
         tradeAt: normalizeExchangeTimestampMs(finite(row.T), receivedAt),
       };
+      asterLastTradeAt.set(market.coin, receivedAt);
       asterBinanceMakerShadow.processTrade(trade, receivedAt);
       asterPacificaMakerShadow.processTrade(trade, receivedAt);
       asterLighterMakerShadow.processTrade(trade, receivedAt);
@@ -5768,6 +5775,9 @@ function genericMakerMarkets(
     return {
       coin: market.coin,
       maker,
+      makerLastTradeAt: makerVenue === 'aster'
+        ? asterLastTradeAt.get(market.coin) ?? null
+        : undefined,
       hedge: hedge && hedgeBuyVwap != null && hedgeSellVwap != null
         ? {
           buyVwap: hedgeBuyVwap,

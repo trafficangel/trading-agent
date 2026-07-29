@@ -27,6 +27,7 @@ export type MakerShadowMarket = {
   coin: string;
   maker: MakerShadowRawBook | null;
   hedge: MakerShadowHedgeBook | null;
+  makerLastTradeAt?: number | null;
   basisEntryBaselineBps?: Partial<Record<MakerSide, number>>;
   basisExitBaselineBps?: Partial<Record<MakerSide, number>>;
 };
@@ -200,6 +201,7 @@ export type GenericMakerConfig = {
   basisMinDeviationBps?: number;
   maxEntryDistanceBps?: number;
   quoteDataGraceMs?: number;
+  maxMakerTradeIdleMs?: number;
 };
 
 type GenericMakerHooks = {
@@ -528,6 +530,15 @@ export class GenericMakerShadow {
     for (const market of this.latestMarkets.values()) {
       if (!market.maker || !market.hedge) continue;
       if (!this.fresh(now, market.maker, market.hedge)) continue;
+      const maxMakerTradeIdleMs = this.config.maxMakerTradeIdleMs ?? 0;
+      if (
+        maxMakerTradeIdleMs > 0
+        && (
+          market.makerLastTradeAt == null
+          || now - market.makerLastTradeAt > maxMakerTradeIdleMs
+          || market.makerLastTradeAt > now + 1_000
+        )
+      ) continue;
       for (const side of ['buy', 'sell'] as const) {
         const hedgeFill = this.hedgePrice(side, market.hedge);
         if (hedgeFill == null) continue;

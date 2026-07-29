@@ -64,6 +64,22 @@ function market(
 }
 
 describe('GenericMakerShadow', () => {
+  it('requires recent maker prints when the activity gate is enabled', () => {
+    const engine = new GenericMakerShadow({
+      ...config,
+      maxMakerTradeIdleMs: 1_000,
+    });
+    const stale = market(1_000, 100.2, 100.3);
+    stale.makerLastTradeAt = null;
+    engine.evaluate(1_000, [stale]);
+    expect((engine.status() as { quote?: unknown }).quote).toBeNull();
+
+    const fresh = market(1_001, 100.2, 100.3);
+    fresh.makerLastTradeAt = 1_001;
+    engine.evaluate(1_001, [fresh]);
+    expect((engine.status() as { quote?: unknown }).quote).toBeTruthy();
+  });
+
   it('requires prints through displayed queue and completes a positive cycle', () => {
     const results: GenericMakerResult[] = [];
     const events: GenericMakerEvent[] = [];
