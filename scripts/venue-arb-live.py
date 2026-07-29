@@ -170,6 +170,18 @@ class Canary:
             self.route_label = "Extended maker ↔ Lighter taker"
         else:
             self.buy_venue, self.sell_venue, self.route_label = ROUTES[self.route_id]
+        allowed_coins = {
+            coin.strip().upper()
+            for coin in os.getenv("VENUE_ARB_LIVE_ALLOWED_COINS", "").split(",")
+            if coin.strip()
+        }
+        unknown_coins = allowed_coins - MARKETS.keys()
+        if unknown_coins:
+            raise RuntimeError(
+                "unsupported VENUE_ARB_LIVE_ALLOWED_COINS="
+                + ",".join(sorted(unknown_coins))
+            )
+        self.allowed_coins = allowed_coins or set(MARKETS)
         self.notional = float(os.getenv("VENUE_ARB_LIVE_NOTIONAL_USD", "300"))
         self.leverage = int(os.getenv("VENUE_ARB_LIVE_LEVERAGE", "5"))
         self.entry_net_bps = float(os.getenv("VENUE_ARB_LIVE_ENTRY_NET_BPS", "15"))
@@ -367,6 +379,7 @@ class Canary:
             "shutdownDeferredWhenOpen": True,
             "routeId": self.route_id,
             "route": self.route_label,
+            "allowedCoins": sorted(self.allowed_coins),
             "maxTrades": self.max_trades,
             "makerShadowRequiredPasses": self.required_maker_shadow_passes,
             "makerShadowObservedPasses": self.maker_shadow_pass_count(),
@@ -748,6 +761,7 @@ class Canary:
             )
             if (
                 coin in MARKETS
+                and coin in self.allowed_coins
                 and net >= self.entry_net_bps
                 and max(ages) <= self.fresh_ms
                 and max(source_ages) <= self.source_fresh_ms

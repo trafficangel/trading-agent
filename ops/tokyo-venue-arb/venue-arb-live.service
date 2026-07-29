@@ -10,14 +10,15 @@ Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 EnvironmentFile=/etc/venue-arb-tokyo/extended.env
 EnvironmentFile=/etc/venue-arb-tokyo/lighter.env
-Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data
+Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/candidate-routes
 Environment=VENUE_ARB_LIVE_REGION=Tokyo
 Environment=VENUE_ARB_LIVE_ENABLED=true
 Environment=VENUE_ARB_LIVE_EXECUTION=taker-taker
 Environment=VENUE_ARB_LIVE_ROUTE=extended-lighter
+Environment=VENUE_ARB_LIVE_ALLOWED_COINS=HYPE
 Environment=VENUE_ARB_LIVE_NOTIONAL_USD=100
 Environment=VENUE_ARB_LIVE_LEVERAGE=5
-Environment=VENUE_ARB_LIVE_ENTRY_NET_BPS=5
+Environment=VENUE_ARB_LIVE_ENTRY_NET_BPS=10
 Environment=VENUE_ARB_LIVE_MAKER_CANCEL_NET_BPS=5
 Environment=VENUE_ARB_LIVE_POST_FILL_NET_BPS=5
 Environment=VENUE_ARB_LIVE_EXIT_MIN_PROFIT_BPS=2
@@ -37,7 +38,7 @@ Environment=VENUE_ARB_LIVE_MAKER_ORDER_TTL_MS=60000
 Environment=VENUE_ARB_LIVE_MAKER_SAFETY_TICKS=1
 Environment=VENUE_ARB_LIVE_MAKER_SAFETY_BPS=0
 Environment=VENUE_ARB_LIVE_MAKER_RETRY_COOLDOWN_MS=5000
-Environment=VENUE_ARB_LIVE_MAX_TRADES=5
+Environment=VENUE_ARB_LIVE_MAX_TRADES=1
 Environment=VENUE_ARB_LIVE_REQUIRE_MAKER_SHADOW_PASSES=0
 Environment=VENUE_ARB_LIVE_DAILY_LOSS_USD=2
 Environment=PYTHONUNBUFFERED=1
