@@ -82,6 +82,7 @@ import {
 } from '../lib/venue-arb-basis.js';
 import { parseLighterPublicTrades } from '../lib/lighter-public-trades.js';
 import { parseLighterRestBook } from '../lib/lighter-rest-book.js';
+import { lighterValidationMode } from '../lib/lighter-ws-validation.js';
 
 type Venue =
   | 'lighter'
@@ -122,6 +123,7 @@ type LighterWsMarketTelemetry = {
   tickerMessages: number;
   tickerMatches: number;
   tickerMismatches: number;
+  nonceChainValidations: number;
   nonceGaps: number;
   refreshes: number;
   lastOrderBookAt: number | null;
@@ -1858,6 +1860,7 @@ const lighterWsTelemetry = new Map<number, LighterWsMarketTelemetry>(
     tickerMessages: 0,
     tickerMatches: 0,
     tickerMismatches: 0,
+    nonceChainValidations: 0,
     nonceGaps: 0,
     refreshes: 0,
     lastOrderBookAt: null,
@@ -4973,6 +4976,11 @@ function startLighter(): void {
       const nonce = finite(message.order_book.nonce);
       const beginNonce = finite(message.order_book.begin_nonce);
       const previous = nonces.get(marketId);
+      const validationBefore = lighterBookValidation.get(marketId);
+      const validatedChain = (
+        previous != null
+        && validationBefore?.bookUpdates === book.updates
+      );
       if (previous != null && beginNonce > 0 && beginNonce !== previous) {
         if (telemetry) telemetry.nonceGaps++;
         refreshBook(ws, market, 'nonce_gap');
@@ -4988,15 +4996,30 @@ function startLighter(): void {
       if (nonce > 0) nonces.set(marketId, nonce);
       markBook(book, finite(message.timestamp), receivedAt);
       const ticker = lighterTickerBbo.get(marketId);
-      if (
-        ticker
+      const tickerFresh = (
+        ticker != null
         && receivedAt - ticker.receivedAt <= LIGHTER_VALIDATED_BOOK_FRESH_MS
-        && lighterBboMatches(book, ticker)
-      ) {
+      );
+      const validationMode = lighterValidationMode({
+        tickerFresh,
+        tickerMatches: tickerFresh && lighterBboMatches(book, ticker),
+        validatedChain,
+      });
+      if (validationMode === 'ticker') {
         lighterBookValidation.set(marketId, {
           bookUpdates: book.updates,
-          receivedAt: ticker.receivedAt,
+          receivedAt: ticker!.receivedAt,
         });
+      } else if (validationMode === 'nonce_chain') {
+        // A ticker-confirmed starting state plus a nonce-contiguous absolute
+        // delta remains a valid book. Requiring a second ticker after every
+        // delta creates artificial gaps on quieter markets. A fresh ticker
+        // mismatch or any nonce gap still invalidates the chain immediately.
+        lighterBookValidation.set(marketId, {
+          bookUpdates: book.updates,
+          receivedAt,
+        });
+        if (telemetry) telemetry.nonceChainValidations++;
       } else {
         lighterBookValidation.delete(marketId);
       }
