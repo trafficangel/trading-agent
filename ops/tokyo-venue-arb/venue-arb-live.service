@@ -12,11 +12,11 @@ EnvironmentFile=/etc/venue-arb-tokyo/extended.env
 EnvironmentFile=/etc/venue-arb-tokyo/lighter.env
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data
 Environment=VENUE_ARB_LIVE_ENABLED=true
-Environment=VENUE_ARB_LIVE_EXECUTION=maker-taker
-Environment=VENUE_ARB_LIVE_ROUTE=lighter-extended
+Environment=VENUE_ARB_LIVE_EXECUTION=taker-taker
+Environment=VENUE_ARB_LIVE_ROUTE=extended-lighter
 Environment=VENUE_ARB_LIVE_NOTIONAL_USD=100
 Environment=VENUE_ARB_LIVE_LEVERAGE=5
-Environment=VENUE_ARB_LIVE_ENTRY_NET_BPS=12
+Environment=VENUE_ARB_LIVE_ENTRY_NET_BPS=10
 Environment=VENUE_ARB_LIVE_MAKER_CANCEL_NET_BPS=8
 Environment=VENUE_ARB_LIVE_POST_FILL_NET_BPS=8
 Environment=VENUE_ARB_LIVE_EXIT_MIN_PROFIT_BPS=5
