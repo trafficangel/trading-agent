@@ -117,6 +117,7 @@ export type GenericMakerTelemetry = {
   placementEdgeRejects: number;
   edgeCancellations: number;
   quoteExpirations: number;
+  queueProgressEvents: number;
   queueFills: number;
   hedgeTimeouts: number;
   lastTradeAt: number | null;
@@ -148,6 +149,7 @@ export type GenericMakerEvent = {
     | 'placement_rejected'
     | 'edge_cancelled'
     | 'quote_expired'
+    | 'queue_progress'
     | 'queue_filled';
   quoteId: string;
   coin: string;
@@ -159,6 +161,10 @@ export type GenericMakerEvent = {
   distanceBps: number;
   reason?: string;
   currentProjectionBps?: number | null;
+  queueAheadBeforeUsd?: number;
+  remainingUsd?: number;
+  remainingBeforeUsd?: number;
+  consumedUsd?: number;
 };
 
 export type GenericMakerConfig = {
@@ -240,6 +246,7 @@ export class GenericMakerShadow {
     placementEdgeRejects: 0,
     edgeCancellations: 0,
     quoteExpirations: 0,
+    queueProgressEvents: 0,
     queueFills: 0,
     hedgeTimeouts: 0,
     lastTradeAt: null,
@@ -707,7 +714,12 @@ export class GenericMakerShadow {
     quote: GenericMakerQuote,
     details: Pick<
       GenericMakerEvent,
-      'reason' | 'currentProjectionBps'
+      | 'reason'
+      | 'currentProjectionBps'
+      | 'queueAheadBeforeUsd'
+      | 'remainingUsd'
+      | 'remainingBeforeUsd'
+      | 'consumedUsd'
     > = {},
   ): void {
     this.hooks.onEvent?.({
@@ -1227,6 +1239,7 @@ export class GenericMakerShadow {
       || receivedAt < quote.activatedAt
       || receivedAt >= quote.expiresAt
     ) return;
+    const previousQueueAhead = quote.queue.queueAhead;
     const previousRemaining = quote.queue.remaining;
     quote.queue = consumeMakerPrint(
       quote.queue,
@@ -1236,10 +1249,27 @@ export class GenericMakerShadow {
       trade.price,
       trade.size,
     );
+    const queueMoved = quote.queue.queueAhead < previousQueueAhead;
+    const orderFilledPartially = quote.queue.remaining < previousRemaining;
     if (
       quote.firstFillAt == null
-      && quote.queue.remaining < previousRemaining
+      && orderFilledPartially
     ) quote.firstFillAt = receivedAt;
+    if ((queueMoved || orderFilledPartially) && !quote.queue.filled) {
+      this.telemetry.queueProgressEvents++;
+      this.emitQuoteEvent('queue_progress', receivedAt, quote, {
+        currentProjectionBps: this.currentProjection(receivedAt, quote),
+        queueAheadBeforeUsd: previousQueueAhead * quote.price,
+        remainingUsd: quote.queue.remaining * quote.price,
+        remainingBeforeUsd: previousRemaining * quote.price,
+        consumedUsd: (
+          previousQueueAhead
+          + previousRemaining
+          - quote.queue.queueAhead
+          - quote.queue.remaining
+        ) * quote.price,
+      });
+    }
     if (!quote.queue.filled) return;
     this.telemetry.queueFills++;
     this.emitQuoteEvent('queue_filled', receivedAt, quote, {

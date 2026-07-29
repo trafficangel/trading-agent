@@ -134,6 +134,38 @@ describe('GenericMakerShadow', () => {
     expect(status.pair).toBeNull();
   });
 
+  it('journals queue progress before a maker order fills', () => {
+    const events: GenericMakerEvent[] = [];
+    const engine = new GenericMakerShadow(config, {
+      onEvent: (event) => events.push(event),
+    });
+
+    engine.evaluate(2_500, [market(2_500, 100.2, 100.3)]);
+    engine.evaluate(2_501, [market(2_501, 100.2, 100.3)]);
+    engine.processTrade({
+      id: 'queue-progress-print',
+      coin: 'BNB',
+      side: 'SELL',
+      price: 100,
+      size: 0.5,
+      tradeAt: 2_501,
+    }, 2_501);
+
+    const progress = events.find((event) => event.type === 'queue_progress');
+    expect(progress).toMatchObject({
+      queueAheadBeforeUsd: 100,
+      queueAheadUsd: 50,
+      remainingBeforeUsd: 100,
+      remainingUsd: 100,
+      consumedUsd: 50,
+    });
+    const status = engine.status() as {
+      telemetry: { queueProgressEvents: number; queueFills: number };
+    };
+    expect(status.telemetry.queueProgressEvents).toBe(1);
+    expect(status.telemetry.queueFills).toBe(0);
+  });
+
   it('selects a deeper small-queue level instead of a congested best quote', () => {
     const engine = new GenericMakerShadow(config);
     const snapshot: MakerShadowMarket = {
