@@ -231,6 +231,7 @@ type ShadowProbe = {
   entryLatencyMs: number;
   exitLatencyMs: number;
   entryDueAt: number;
+  entryDeadlineAt?: number;
   entryConfirmations: number;
   lastEntryQuoteVersion: string | null;
   entryEdgeConfirmedAt: number | null;
@@ -405,6 +406,10 @@ const SHADOW_ENTRY_NET_BPS = finiteEnv('VENUE_ARB_SHADOW_ENTRY_NET_BPS', 10);
 const SHADOW_ENTRY_CONFIRMATIONS = finiteEnv(
   'VENUE_ARB_SHADOW_ENTRY_CONFIRMATIONS',
   3,
+);
+const SHADOW_ENTRY_CONFIRMATION_GRACE_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_ENTRY_CONFIRMATION_GRACE_MS',
+  350,
 );
 const SHADOW_EXIT_NET_BPS = finiteEnv('VENUE_ARB_SHADOW_EXIT_NET_BPS', 10);
 const SHADOW_EXIT_CONFIRMATIONS = finiteEnv(
@@ -1545,6 +1550,9 @@ function evaluateShadow(now: number): void {
         entryLatencyMs: latency.entryMs,
         exitLatencyMs: latency.exitMs,
         entryDueAt: now + latency.entryMs,
+        entryDeadlineAt: now
+          + latency.entryMs
+          + SHADOW_ENTRY_CONFIRMATION_GRACE_MS,
         entryConfirmations: 0,
         lastEntryQuoteVersion: null,
         entryEdgeConfirmedAt: null,
@@ -1598,6 +1606,12 @@ function evaluateShadow(now: number): void {
       }
       if (now < probe.entryDueAt) continue;
       if (!quote) {
+        if (
+          now < (
+            probe.entryDeadlineAt
+            ?? probe.entryDueAt + SHADOW_ENTRY_CONFIRMATION_GRACE_MS
+          )
+        ) continue;
         completeShadow(probe, now, 'stale_at_delayed_entry', null);
         continue;
       }
@@ -1606,6 +1620,12 @@ function evaluateShadow(now: number): void {
         continue;
       }
       if (probe.entryConfirmations < SHADOW_ENTRY_CONFIRMATIONS) {
+        if (
+          now < (
+            probe.entryDeadlineAt
+            ?? probe.entryDueAt + SHADOW_ENTRY_CONFIRMATION_GRACE_MS
+          )
+        ) continue;
         completeShadow(probe, now, 'unstable_edge_before_entry', quote);
         continue;
       }
@@ -3760,6 +3780,7 @@ function executionShadowStatus(): Record<string, unknown> {
       notionalUsd: SHADOW_NOTIONAL_USD,
       entryNetBps: SHADOW_ENTRY_NET_BPS,
       entryConfirmations: SHADOW_ENTRY_CONFIRMATIONS,
+      entryConfirmationGraceMs: SHADOW_ENTRY_CONFIRMATION_GRACE_MS,
       exitNetBps: SHADOW_EXIT_NET_BPS,
       exitConfirmations: SHADOW_EXIT_CONFIRMATIONS,
       freshMs: SHADOW_SIGNAL_FRESH_MS,
