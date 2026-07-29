@@ -529,6 +529,15 @@ class Canary:
         self.entry_slippage = float(
             os.getenv("VENUE_ARB_LIVE_ENTRY_SLIPPAGE", "0.0002")
         )
+        self.max_entry_slippage = float(
+            os.getenv("VENUE_ARB_LIVE_MAX_ENTRY_SLIPPAGE", "0.001")
+        )
+        if not (
+            0 <= self.entry_slippage <= self.max_entry_slippage <= 0.01
+        ):
+            raise RuntimeError(
+                "entry slippage must satisfy 0 <= base <= max <= 1%"
+            )
         self.exit_slippage = float(
             os.getenv("VENUE_ARB_LIVE_EXIT_SLIPPAGE", "0.001")
         )
@@ -576,6 +585,19 @@ class Canary:
         self.maker_retry_cooldown_ms = int(
             os.getenv("VENUE_ARB_LIVE_MAKER_RETRY_COOLDOWN_MS", "5000")
         )
+        self.taker_no_fill_cooldown_ms = int(
+            float(
+                os.getenv(
+                    "VENUE_ARB_LIVE_NO_FILL_COOLDOWN_SECONDS",
+                    "15",
+                )
+            )
+            * 1000
+        )
+        if self.taker_no_fill_cooldown_ms < 0:
+            raise RuntimeError(
+                "VENUE_ARB_LIVE_NO_FILL_COOLDOWN_SECONDS must be non-negative"
+            )
         self.cooldown_ms = int(
             float(os.getenv("VENUE_ARB_LIVE_COOLDOWN_SECONDS", "900")) * 1000
         )
@@ -645,6 +667,7 @@ class Canary:
         )
         self.load_basis_samples()
         self.next_maker_attempt_at = 0
+        self.next_taker_attempt_at: dict[str, int] = {}
         self.extended: RestApiClient | None = None
         self.extended_markets: dict[str, Any] = {}
         self.lighter_url = os.environ["LIGHTER_BASE_URL"]
@@ -712,6 +735,8 @@ class Canary:
             "state": state,
             "executionMode": self.execution_mode,
             "executionRegion": self.execution_region or None,
+            "entryDataSource": "live_ws_l2",
+            "restCalibrationEntryEnabled": False,
             "notionalUsdPerLeg": self.notional,
             "leverage": self.leverage,
             "entryNetPct": self.entry_net_bps / 100,
@@ -769,6 +794,9 @@ class Canary:
             "exitMinProfitPct": self.exit_min_profit_bps / 100,
             "exitConfirmations": self.exit_confirmations,
             "executionBufferPct": self.execution_buffer_bps / 100,
+            "entrySlippagePct": self.entry_slippage * 100,
+            "maxEntrySlippagePct": self.max_entry_slippage * 100,
+            "noFillCooldownMs": self.taker_no_fill_cooldown_ms,
             "fundingReservePctPerHour": self.funding_bps_per_hour / 100,
             "maxLossUsd": self.max_loss_usd,
             "shutdownDeferredWhenOpen": True,
@@ -847,8 +875,14 @@ class Canary:
             return
         cutoff = now - self.basis_window_ms
         closing = status.get("closingQuotes") or {}
+        trigger = status.get("triggerQuotes") or {}
         for coin in self.allowed_coins:
             quote = closing.get(coin) or {}
+            if (
+                executable_basis_bps(quote, "extended-lighter") is None
+                or executable_basis_bps(quote, "lighter-extended") is None
+            ):
+                quote = trigger.get(coin) or {}
             ages = (
                 finite_float(quote.get("extendedBookAgeMs"), math.inf),
                 finite_float(quote.get("lighterBookAgeMs"), math.inf),
@@ -1712,7 +1746,46 @@ class Canary:
             **winner,
             "_snapshotAt": snapshot_at,
             "_quoteVersion": candidate_quote_version(snapshot_at, winner),
+            "_candidateSource": "live_ws_l2",
         }
+
+    async def revalidate_live_taker_candidate(
+        self,
+        candidate: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        coin = str(candidate.get("coin") or "")
+        route_id = str(candidate.get("_routeId") or "")
+        if route_id not in ROUTES or coin not in self.allowed_coins:
+            self.last_rejection = "taker candidate route is invalid"
+            return None
+        await asyncio.sleep(0.05)
+        fresh = self.candidate()
+        if (
+            fresh is None
+            or fresh.get("coin") != coin
+            or fresh.get("_routeId") != route_id
+        ):
+            self.last_rejection = (
+                "live L2 edge changed during entry revalidation"
+            )
+            return None
+        expected_net_bps = finite_float(
+            fresh.get("_basisExpectedNetBps"),
+            -math.inf,
+        )
+        deviation_bps = finite_float(
+            fresh.get("_basisDeviationBps"),
+            -math.inf,
+        )
+        if (
+            expected_net_bps < self.entry_net_bps
+            or deviation_bps < self.basis_min_deviation_bps
+        ):
+            self.last_rejection = (
+                "live L2 edge fell below entry gate during revalidation"
+            )
+            return None
+        return fresh
 
     async def revalidate_taker_candidate(
         self,
@@ -2036,6 +2109,23 @@ class Canary:
         return market.trading_config.round_price(
             Decimal(str(reference * multiplier)), rounding_direction=rounding
         )
+
+    def entry_slippage_for_candidate(
+        self,
+        candidate: dict[str, Any],
+    ) -> float:
+        expected_net_bps = finite_float(
+            candidate.get("_basisExpectedNetBps"),
+            self.entry_net_bps,
+        )
+        headroom_bps = max(0.0, expected_net_bps - self.entry_net_bps)
+        base_bps = self.entry_slippage * 10_000
+        max_bps = self.max_entry_slippage * 10_000
+        allowed_bps = min(
+            max_bps,
+            base_bps + headroom_bps / 2,
+        )
+        return allowed_bps / 10_000
 
     async def place_extended(
         self,
@@ -3068,40 +3158,42 @@ class Canary:
     ) -> dict[str, float] | None:
         status = self.read_json(self.execution_path, {})
         now = int(time.time() * 1000)
-        direct_quote = self.latest_rest_quote(coin)
-        if direct_quote is not None:
-            quote = direct_quote
-            quote_at = int(direct_quote.get("at", 0) or 0)
-            ages = (now - quote_at, now - quote_at)
-            source_ages = ages
+        if (
+            status.get("version") != "venue-arb-execution-v2"
+            or now - int(status.get("updatedAt", 0) or 0)
+            > self.fresh_ms
+        ):
+            return None
+        quote = (status.get("closingQuotes") or {}).get(coin) or {}
+        if extended_is_buy:
+            quote_is_executable = min(
+                finite_float(quote.get("extendedSellVwap"), 0),
+                finite_float(quote.get("lighterBuyVwap"), 0),
+            ) > 0
         else:
-            if (
-                status.get("version") != "venue-arb-execution-v2"
-                or now - int(status.get("updatedAt", 0) or 0)
-                > self.fresh_ms
-            ):
-                return None
-            quote = (
-                (status.get("closingQuotes") or {}).get(coin)
-                or {}
-            )
-            quote_at = int(status.get("updatedAt", 0) or 0)
-            ages = (
-                float(
-                    quote.get("extendedBookAgeMs") or math.inf
-                ),
-                float(
-                    quote.get("lighterBookAgeMs") or math.inf
-                ),
-            )
-            source_ages = (
-                float(
-                    quote.get("extendedSourceAgeMs") or math.inf
-                ),
-                float(
-                    quote.get("lighterSourceAgeMs") or math.inf
-                ),
-            )
+            quote_is_executable = min(
+                finite_float(quote.get("extendedBuyVwap"), 0),
+                finite_float(quote.get("lighterSellVwap"), 0),
+            ) > 0
+        if not quote_is_executable:
+            quote = (status.get("triggerQuotes") or {}).get(coin) or {}
+        quote_at = int(status.get("updatedAt", 0) or 0)
+        ages = (
+            float(
+                quote.get("extendedBookAgeMs") or math.inf
+            ),
+            float(
+                quote.get("lighterBookAgeMs") or math.inf
+            ),
+        )
+        source_ages = (
+            float(
+                quote.get("extendedSourceAgeMs") or math.inf
+            ),
+            float(
+                quote.get("lighterSourceAgeMs") or math.inf
+            ),
+        )
         if extended_is_buy:
             ext_exit = float(quote.get("extendedSellVwap") or 0)
             lit_exit = float(quote.get("lighterBuyVwap") or 0)
@@ -3581,6 +3673,7 @@ class Canary:
         buy_venue = str(candidate.get("_buyVenue") or self.buy_venue)
         sell_venue = str(candidate.get("_sellVenue") or self.sell_venue)
         extended_is_buy = buy_venue == "extended"
+        entry_slippage = self.entry_slippage_for_candidate(candidate)
         quantity = self.common_quantity(
             coin, float(candidate["currentBuyVwap1000"])
         )
@@ -3615,6 +3708,10 @@ class Canary:
             "leverage": self.leverage,
             "quantity": float(quantity),
             "extendedSide": "long" if extended_is_buy else "short",
+            "candidateSource": str(
+                candidate.get("_candidateSource") or "unknown"
+            ),
+            "entrySlippagePct": entry_slippage * 100,
         }
         self.trade_open = True
         self.active_trade = trade
@@ -3633,7 +3730,7 @@ class Canary:
                 ),
                 OrderSide.BUY if extended_is_buy else OrderSide.SELL,
                 reduce_only=False,
-                slippage=self.entry_slippage,
+                slippage=entry_slippage,
             )
         except Exception as error:
             trade.update(
@@ -3680,7 +3777,7 @@ class Canary:
                 quantity,
                 is_ask=sell_venue == "lighter",
                 reduce_only=False,
-                slippage=self.entry_slippage,
+                slippage=entry_slippage,
             )
         except Exception as error:
             exit_orders: dict[str, int] = {}
@@ -3987,12 +4084,23 @@ class Canary:
             if self.execution_mode == "maker-taker":
                 candidate = self.maker_candidate()
             else:
-                direct_candidate = self.rest_calibration_candidate()
-                candidate = direct_candidate or self.candidate()
-                if candidate is None and self.direct_rest_wait_reason:
-                    self.last_rejection = self.direct_rest_wait_reason
+                candidate = self.candidate()
             if candidate and self.execution_mode == "taker-taker":
-                candidate = await self.revalidate_taker_candidate(candidate)
+                attempt_key = (
+                    f"{candidate.get('_routeId')}:{candidate.get('coin')}"
+                )
+                retry_at = self.next_taker_attempt_at.get(attempt_key, 0)
+                now_ms = int(time.monotonic() * 1000)
+                if now_ms < retry_at:
+                    self.last_rejection = (
+                        "no-fill cooldown for fresh live L2 "
+                        f"{max(0, retry_at - now_ms) / 1000:.1f}s"
+                    )
+                    candidate = None
+                else:
+                    candidate = await self.revalidate_live_taker_candidate(
+                        candidate
+                    )
             if candidate:
                 if self.execution_mode == "maker-taker":
                     await self.execute_maker(candidate)
@@ -4054,6 +4162,14 @@ class Canary:
                     ):
                         if await self.execute(candidate):
                             return
+                        attempt_key = (
+                            f"{candidate.get('_routeId')}:"
+                            f"{candidate.get('coin')}"
+                        )
+                        self.next_taker_attempt_at[attempt_key] = (
+                            int(time.monotonic() * 1000)
+                            + self.taker_no_fill_cooldown_ms
+                        )
                         pending_candidate_id = None
                         pending_quote_version = None
                         pending_confirmations = 0
@@ -4288,6 +4404,18 @@ def self_test() -> None:
         "extended-lighter",
         "lighter-extended",
     )
+    basis_guard.entry_slippage = 0.0002
+    basis_guard.max_entry_slippage = 0.001
+    basis_guard.entry_net_bps = 15
+    assert basis_guard.entry_slippage_for_candidate(
+        {"_basisExpectedNetBps": 15}
+    ) == 0.0002
+    assert basis_guard.entry_slippage_for_candidate(
+        {"_basisExpectedNetBps": 25}
+    ) == 0.0007
+    assert basis_guard.entry_slippage_for_candidate(
+        {"_basisExpectedNetBps": 100}
+    ) == 0.001
     trigger_rows = basis_guard.trigger_candidate_rows(
         {
             "triggerQuotes": {
@@ -4423,6 +4551,30 @@ def self_test() -> None:
         assert guard.last_rest_revalidation["result"] == "rejected"
 
     asyncio.run(taker_revalidation_check())
+
+    async def live_taker_revalidation_check() -> None:
+        guard = object.__new__(Canary)
+        guard.allowed_coins = {"HYPE"}
+        guard.basis_min_deviation_bps = 10
+        guard.entry_net_bps = 15
+        guard.last_rejection = None
+        fresh = {
+            "coin": "HYPE",
+            "_routeId": "extended-lighter",
+            "_basisExpectedNetBps": 20,
+            "_basisDeviationBps": 18,
+            "_candidateSource": "live_ws_l2",
+        }
+        guard.candidate = lambda: fresh
+        accepted = await guard.revalidate_live_taker_candidate(fresh)
+        assert accepted is fresh
+        fresh["_basisExpectedNetBps"] = 14
+        assert await guard.revalidate_live_taker_candidate(fresh) is None
+        assert guard.last_rejection == (
+            "live L2 edge fell below entry gate during revalidation"
+        )
+
+    asyncio.run(live_taker_revalidation_check())
 
     async def extended_ioc_resolution_check() -> None:
         cancelled = object.__new__(Canary)
