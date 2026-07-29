@@ -228,6 +228,18 @@ def advance_entry_confirmations(
     )
 
 
+def confirmation_grace_expired(
+    *,
+    last_seen_at_ms: int | None,
+    now_ms: int,
+    grace_ms: int,
+) -> bool:
+    return (
+        last_seen_at_ms is None
+        or now_ms - last_seen_at_ms > grace_ms
+    )
+
+
 def calibrated_basis_deviation(
     *,
     samples: list[tuple[int, float]],
@@ -369,6 +381,17 @@ class Canary:
         if self.entry_confirmations < 1:
             raise RuntimeError(
                 "VENUE_ARB_LIVE_ENTRY_CONFIRMATIONS must be positive"
+            )
+        self.entry_confirmation_grace_ms = int(
+            os.getenv(
+                "VENUE_ARB_LIVE_ENTRY_CONFIRMATION_GRACE_MS",
+                "5000",
+            )
+        )
+        if self.entry_confirmation_grace_ms < 0:
+            raise RuntimeError(
+                "VENUE_ARB_LIVE_ENTRY_CONFIRMATION_GRACE_MS "
+                "must be non-negative"
             )
         self.maker_cancel_net_bps = float(
             os.getenv(
@@ -573,6 +596,9 @@ class Canary:
             "leverage": self.leverage,
             "entryNetPct": self.entry_net_bps / 100,
             "entryConfirmations": self.entry_confirmations,
+            "entryConfirmationGraceMs": (
+                self.entry_confirmation_grace_ms
+            ),
             "basisGate": {
                 "enabled": self.basis_gate_enabled,
                 "windowSeconds": self.basis_window_ms / 1000,
@@ -2854,6 +2880,7 @@ class Canary:
         pending_candidate_id: str | None = None
         pending_quote_version: str | None = None
         pending_confirmations = 0
+        pending_candidate_seen_at_ms: int | None = None
         while self.running:
             if len(self.completed_mode_trades()) >= self.max_trades:
                 self.write_status("completed", reason="max trade count reached")
@@ -2904,6 +2931,9 @@ class Canary:
                         pending_quote_version=pending_quote_version,
                         pending_confirmations=pending_confirmations,
                     )
+                    pending_candidate_seen_at_ms = int(
+                        time.monotonic() * 1000
+                    )
                     if pending_confirmations >= self.entry_confirmations:
                         await self.execute(candidate)
                         return
@@ -2911,10 +2941,18 @@ class Canary:
                         "confirming fresh books "
                         f"{pending_confirmations}/{self.entry_confirmations}"
                     )
-            elif self.execution_mode == "taker-taker":
+            elif (
+                self.execution_mode == "taker-taker"
+                and confirmation_grace_expired(
+                    last_seen_at_ms=pending_candidate_seen_at_ms,
+                    now_ms=int(time.monotonic() * 1000),
+                    grace_ms=self.entry_confirmation_grace_ms,
+                )
+            ):
                 pending_candidate_id = None
                 pending_quote_version = None
                 pending_confirmations = 0
+                pending_candidate_seen_at_ms = None
             if time.monotonic() - self.last_status_write >= 1:
                 self.write_status(
                     "armed",
@@ -3031,6 +3069,16 @@ def self_test() -> None:
         "3:3",
         1,
     )
+    assert confirmation_grace_expired(
+        last_seen_at_ms=1_000,
+        now_ms=5_999,
+        grace_ms=5_000,
+    ) is False
+    assert confirmation_grace_expired(
+        last_seen_at_ms=1_000,
+        now_ms=6_001,
+        grace_ms=5_000,
+    ) is True
     basis = calibrated_basis_deviation(
         samples=[(index * 1_000, 20.0) for index in range(1, 181)],
         now=181_000,
