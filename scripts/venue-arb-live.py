@@ -2300,14 +2300,31 @@ class Canary:
 
     async def extended_reference(self, coin: str, side: OrderSide) -> float:
         assert self.extended is not None
-        response = await self.extended.info.get_market_statistics(
+        response = await self.extended.info.get_orderbook_snapshot(
             market_name=f"{coin}-USD"
         )
         if response.error or response.data is None:
-            raise RuntimeError("Extended market statistics unavailable")
-        return float(
-            response.data.ask_price if side == OrderSide.BUY else response.data.bid_price
+            raise RuntimeError("Extended REST order book unavailable")
+        levels = (
+            response.data.ask
+            if side == OrderSide.BUY
+            else response.data.bid
         )
+        price = order_book_vwap(
+            [
+                {
+                    "price": level.price,
+                    "remaining_base_amount": level.qty,
+                }
+                for level in levels
+            ],
+            self.notional,
+        )
+        if price is None:
+            raise RuntimeError(
+                f"Extended {coin} REST depth below ${self.notional:.2f}"
+            )
+        return price
 
     async def lighter_reference(self, coin: str, side: str) -> float:
         if side not in {"buy", "sell"}:
