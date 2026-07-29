@@ -56,7 +56,7 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/home/trader/apps/venue-arb-tokyo/data
 MemoryMax=192M
-CPUQuota=45%
+CPUQuota=65%
 
 [Install]
 WantedBy=multi-user.target
