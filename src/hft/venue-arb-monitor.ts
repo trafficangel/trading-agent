@@ -411,7 +411,14 @@ const SHADOW_EXIT_CONFIRMATIONS = finiteEnv(
   'VENUE_ARB_SHADOW_EXIT_CONFIRMATIONS',
   3,
 );
-const SHADOW_FRESH_MS = finiteEnv('VENUE_ARB_SHADOW_FRESH_MS', 150);
+const SHADOW_SIGNAL_FRESH_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_SIGNAL_FRESH_MS',
+  finiteEnv('VENUE_ARB_SHADOW_FRESH_MS', 150),
+);
+const SHADOW_EXECUTION_FRESH_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_EXECUTION_FRESH_MS',
+  400,
+);
 const SHADOW_SOURCE_FRESH_MS = finiteEnv(
   'VENUE_ARB_SHADOW_SOURCE_FRESH_MS',
   750,
@@ -1356,13 +1363,14 @@ function shadowQuote(
   now: number,
   coin: string,
   route: ShadowRouteConfig,
+  freshMs = SHADOW_SIGNAL_FRESH_MS,
 ): { quote: ShadowQuote | null; rejection: ShadowRejectReason | null } {
   const buy = executableBook(route.buyVenue, coin);
   const sell = executableBook(route.sellVenue, coin);
   if (!buy || !sell) return { quote: null, rejection: 'missing_book' };
   if (
-    now - buy.receivedAt > SHADOW_FRESH_MS
-    || now - sell.receivedAt > SHADOW_FRESH_MS
+    now - buy.receivedAt > freshMs
+    || now - sell.receivedAt > freshMs
   ) return { quote: null, rejection: 'stale_book' };
   if (
     now - buy.exchangeAt > SHADOW_SOURCE_FRESH_MS
@@ -1570,7 +1578,12 @@ function evaluateShadow(now: number): void {
       completeShadow(probe, now, 'unknown_shadow_route', null);
       continue;
     }
-    const quote = shadowQuote(now, probe.coin, route).quote;
+    const quote = shadowQuote(
+      now,
+      probe.coin,
+      route,
+      SHADOW_EXECUTION_FRESH_MS,
+    ).quote;
     if (probe.state === 'awaiting_entry') {
       if (
         quote
@@ -3749,7 +3762,9 @@ function executionShadowStatus(): Record<string, unknown> {
       entryConfirmations: SHADOW_ENTRY_CONFIRMATIONS,
       exitNetBps: SHADOW_EXIT_NET_BPS,
       exitConfirmations: SHADOW_EXIT_CONFIRMATIONS,
-      freshMs: SHADOW_FRESH_MS,
+      freshMs: SHADOW_SIGNAL_FRESH_MS,
+      signalFreshMs: SHADOW_SIGNAL_FRESH_MS,
+      executionFreshMs: SHADOW_EXECUTION_FRESH_MS,
       sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
       independenceMs: SHADOW_INDEPENDENCE_MS,
       maxHoldMs: SHADOW_MAX_HOLD_MS,
