@@ -1419,7 +1419,7 @@ function candidateShadowRows(
 
 function compactLiveRows(rows: LiveTrade[]): string {
   if (!rows.length) {
-    return '<tr><td colspan="7">Реальных арбитражных сделок пока нет.</td></tr>';
+    return '<tr><td colspan="5">Реальных арбитражных сделок пока нет.</td></tr>';
   }
   return [...rows].reverse().map((row) => {
     const closed = row.status === 'closed' || row.status === 'failed_flat';
@@ -1427,10 +1427,8 @@ function compactLiveRows(rows: LiveTrade[]): string {
       <td>${utc(row.openedAt ?? row.startedAt)} → ${row.closedAt ? utc(row.closedAt) : '—'}</td>
       <td><b>${esc(row.coin)}</b><small>${esc(row.route)}</small></td>
       <td>${money(row.notionalUsdPerLeg)} × 2</td>
-      <td>${price(row.entryExtended?.price)} / ${price(row.entryLighter?.price)}</td>
-      <td>${price(row.exitExtended?.price)} / ${price(row.exitLighter?.price)}</td>
-      <td>${money(row.feesUsd)}</td>
-      <td class="${cls(row.netPnlUsd)}"><b>${money(row.netPnlUsd, true)} · ${plainPct(row.netPnlPct, true)}</b><small>${closed ? 'закрыта' : esc(row.status)}${row.closeReason ? ` · ${esc(row.closeReason)}` : ''}</small></td>
+      <td class="${cls(row.netPnlUsd)}"><b>${money(row.netPnlUsd, true)} · ${plainPct(row.netPnlPct, true)}</b></td>
+      <td>${closed ? 'закрыта' : esc(row.status)}${row.closeReason ? `<small>${esc(row.closeReason)}</small>` : ''}</td>
     </tr>`;
   }).join('');
 }
@@ -1562,7 +1560,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       <section class="va-panel va-live-panel">
         <div class="va-panel-head"><h2>Реальные сделки</h2><span class="${realStateClass}">${realPaused ? 'ОСТАНОВЛЕНО' : liveState(liveStatus)}</span></div>
         <div class="va-table" data-va-pager="live-trades" data-page-size="20"><table><thead><tr>
-          <th>Открыта → закрыта UTC</th><th>Монета / маршрут</th><th>Размер</th><th>Вход Ext / Lighter</th><th>Выход Ext / Lighter</th><th>Комиссии</th><th>Net результат</th>
+          <th>Открыта → закрыта UTC</th><th>Монета / маршрут</th><th>Размер</th><th>Net результат</th><th>Статус</th>
         </tr></thead><tbody>${compactLiveRows(liveTrades)}</tbody></table></div>
         ${liveStatus?.reason ? `<p class="va-compact-note">Решение: ${esc(liveStatus.reason)}</p>` : ''}
       </section>
