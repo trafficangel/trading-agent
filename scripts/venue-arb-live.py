@@ -52,6 +52,10 @@ ROUTES: dict[str, tuple[str, str, str]] = {
     "extended-lighter": ("extended", "lighter", "Extended → Lighter"),
     "lighter-extended": ("lighter", "extended", "Lighter → Extended"),
 }
+OPPOSITE_ROUTE: dict[str, str] = {
+    "extended-lighter": "lighter-extended",
+    "lighter-extended": "extended-lighter",
+}
 
 
 @dataclass(frozen=True)
@@ -238,6 +242,23 @@ def calibrated_basis_deviation(
     }
 
 
+def executable_basis_bps(
+    quote: dict[str, Any],
+    route_id: str,
+) -> float | None:
+    if route_id == "extended-lighter":
+        buy = finite_float(quote.get("extendedBuyVwap"), 0)
+        sell = finite_float(quote.get("lighterSellVwap"), 0)
+    elif route_id == "lighter-extended":
+        buy = finite_float(quote.get("lighterBuyVwap"), 0)
+        sell = finite_float(quote.get("extendedSellVwap"), 0)
+    else:
+        return None
+    if min(buy, sell) <= 0:
+        return None
+    return (sell / buy - 1) * 10_000
+
+
 class Canary:
     def __init__(self, *, force_dry_run: bool = False) -> None:
         self.enabled = (
@@ -257,7 +278,10 @@ class Canary:
         self.route_id = os.getenv(
             "VENUE_ARB_LIVE_ROUTE", "extended-lighter"
         ).strip().lower()
-        if self.execution_mode == "taker-taker" and self.route_id not in ROUTES:
+        if (
+            self.execution_mode == "taker-taker"
+            and self.route_id not in {*ROUTES, "both"}
+        ):
             raise RuntimeError(
                 f"unsupported VENUE_ARB_LIVE_ROUTE={self.route_id!r}"
             )
@@ -266,8 +290,15 @@ class Canary:
             self.buy_venue = "extended"
             self.sell_venue = "lighter"
             self.route_label = "Extended maker ↔ Lighter taker"
+            self.live_routes = ("extended-lighter",)
+        elif self.route_id == "both":
+            self.buy_venue = ""
+            self.sell_venue = ""
+            self.route_label = "Extended ↔ Lighter"
+            self.live_routes = tuple(ROUTES)
         else:
             self.buy_venue, self.sell_venue, self.route_label = ROUTES[self.route_id]
+            self.live_routes = (self.route_id,)
         allowed_coins = {
             coin.strip().upper()
             for coin in os.getenv("VENUE_ARB_LIVE_ALLOWED_COINS", "").split(",")
@@ -564,15 +595,22 @@ class Canary:
         checkpoint = self.read_json(self.basis_path, {})
         if not isinstance(checkpoint, dict):
             return
-        if checkpoint.get("routeId") not in {None, self.route_id}:
-            return
         now = int(time.time() * 1000)
         cutoff = now - self.basis_window_ms
         rows = checkpoint.get("samples")
         if not isinstance(rows, dict):
             return
-        for coin, values in rows.items():
-            if coin not in MARKETS or not isinstance(values, list):
+        checkpoint_route = str(
+            checkpoint.get("routeId") or "extended-lighter"
+        )
+        for sample_key, values in rows.items():
+            if not isinstance(values, list):
+                continue
+            if ":" in sample_key:
+                route_id, coin = sample_key.split(":", 1)
+            else:
+                route_id, coin = checkpoint_route, sample_key
+            if route_id not in ROUTES or coin not in MARKETS:
                 continue
             parsed: list[tuple[int, float]] = []
             for value in values:
@@ -583,7 +621,7 @@ class Canary:
                 if at >= cutoff and math.isfinite(basis):
                     parsed.append((at, basis))
             if parsed:
-                self.basis_samples[coin] = sorted(parsed)
+                self.basis_samples[f"{route_id}:{coin}"] = sorted(parsed)
 
     def persist_basis_samples(self, now: int) -> None:
         if now - self.last_basis_write_at < 1000:
@@ -591,7 +629,7 @@ class Canary:
         self.atomic_json(
             self.basis_path,
             {
-                "version": "basis-calibration-v1",
+                "version": "basis-calibration-v2",
                 "updatedAt": now,
                 "routeId": self.route_id,
                 "samples": self.basis_samples,
@@ -611,42 +649,41 @@ class Canary:
         closing = status.get("closingQuotes") or {}
         for coin in self.allowed_coins:
             quote = closing.get(coin) or {}
-            if self.buy_venue == "extended":
-                buy = finite_float(quote.get("extendedBuyVwap"), 0)
-                sell = finite_float(quote.get("lighterSellVwap"), 0)
-            else:
-                buy = finite_float(quote.get("lighterBuyVwap"), 0)
-                sell = finite_float(quote.get("extendedSellVwap"), 0)
-            if min(buy, sell) <= 0:
+            ages = (
+                finite_float(quote.get("extendedBookAgeMs"), math.inf),
+                finite_float(quote.get("lighterBookAgeMs"), math.inf),
+                finite_float(quote.get("extendedSourceAgeMs"), math.inf),
+                finite_float(quote.get("lighterSourceAgeMs"), math.inf),
+            )
+            if max(ages) > self.source_fresh_ms:
                 continue
-            raw_bps = (sell / buy - 1) * 10_000
-            values = self.basis_samples.setdefault(coin, [])
-            values.append((snapshot_at, raw_bps))
-            self.basis_samples[coin] = [
-                value for value in values if value[0] >= cutoff
-            ]
+            for route_id in ROUTES:
+                raw_bps = executable_basis_bps(quote, route_id)
+                if raw_bps is None:
+                    continue
+                sample_key = f"{route_id}:{coin}"
+                values = self.basis_samples.setdefault(sample_key, [])
+                values.append((snapshot_at, raw_bps))
+                self.basis_samples[sample_key] = [
+                    value for value in values if value[0] >= cutoff
+                ]
         self.last_basis_snapshot_at = snapshot_at
         self.persist_basis_samples(now)
 
     def basis_candidate_metrics(
         self,
         *,
+        route_id: str,
         coin: str,
         status: dict[str, Any],
         now: int,
     ) -> dict[str, float] | None:
         quote = (status.get("closingQuotes") or {}).get(coin) or {}
-        if self.buy_venue == "extended":
-            buy = finite_float(quote.get("extendedBuyVwap"), 0)
-            sell = finite_float(quote.get("lighterSellVwap"), 0)
-        else:
-            buy = finite_float(quote.get("lighterBuyVwap"), 0)
-            sell = finite_float(quote.get("extendedSellVwap"), 0)
-        if min(buy, sell) <= 0:
+        current_bps = executable_basis_bps(quote, route_id)
+        if current_bps is None:
             return None
-        current_bps = (sell / buy - 1) * 10_000
-        return calibrated_basis_deviation(
-            samples=self.basis_samples.get(coin, []),
+        entry = calibrated_basis_deviation(
+            samples=self.basis_samples.get(f"{route_id}:{coin}", []),
             now=now,
             current_bps=current_bps,
             window_ms=self.basis_window_ms,
@@ -654,6 +691,34 @@ class Canary:
             min_samples=self.basis_min_samples,
             min_span_ms=self.basis_min_span_ms,
         )
+        opposite_route = OPPOSITE_ROUTE[route_id]
+        exit_basis = executable_basis_bps(quote, opposite_route)
+        if entry is None or exit_basis is None:
+            return None
+        exit_metrics = calibrated_basis_deviation(
+            samples=self.basis_samples.get(
+                f"{opposite_route}:{coin}",
+                [],
+            ),
+            now=now,
+            current_bps=exit_basis,
+            window_ms=self.basis_window_ms,
+            exclude_ms=self.basis_exclude_ms,
+            min_samples=self.basis_min_samples,
+            min_span_ms=self.basis_min_span_ms,
+        )
+        if exit_metrics is None:
+            return None
+        return {
+            **entry,
+            "currentBps": current_bps,
+            "exitBaselineBps": exit_metrics["baselineBps"],
+            "expectedNetBps": (
+                current_bps
+                + exit_metrics["baselineBps"]
+                - self.basis_round_trip_cost_bps()
+            ),
+        }
 
     def basis_round_trip_cost_bps(self) -> float:
         return (
@@ -668,10 +733,7 @@ class Canary:
     ) -> float:
         if metrics is None:
             return -math.inf
-        return (
-            metrics["deviationBps"]
-            - self.basis_round_trip_cost_bps()
-        )
+        return metrics["expectedNetBps"]
 
     def request_shutdown(self) -> None:
         self.shutdown_requested = True
@@ -825,14 +887,24 @@ class Canary:
         ]
 
     def completed_route_trades(self) -> list[dict[str, Any]]:
+        route_ids = (
+            set(self.live_routes)
+            if self.route_id == "both"
+            else {self.route_id}
+        )
+        route_labels = {
+            ROUTES[route_id][2].lower()
+            for route_id in route_ids
+            if route_id in ROUTES
+        }
         return [
             row
             for row in self.completed_trades()
-            if row.get("routeId") == self.route_id
+            if row.get("routeId") in route_ids
             or (
                 not row.get("routeId")
                 and str(row.get("route") or "").lower()
-                == self.route_label.lower()
+                in route_labels
             )
         ]
 
@@ -1018,37 +1090,51 @@ class Canary:
             return None
         self.observe_basis(status, now)
         eligible = []
-        basis_by_coin = {
-            coin: self.basis_candidate_metrics(
+        basis_by_route_coin = {
+            (route_id, coin): self.basis_candidate_metrics(
+                route_id=route_id,
                 coin=coin,
                 status=status,
                 now=now,
             )
+            for route_id in self.live_routes
             for coin in self.allowed_coins
         }
-        basis_ready = sum(
-            metrics is not None for metrics in basis_by_coin.values()
+        basis_ready_coins = sum(
+            all(
+                basis_by_route_coin.get((route_id, coin)) is not None
+                for route_id in self.live_routes
+            )
+            for coin in self.allowed_coins
         )
         best_basis: dict[str, Any] | None = None
-        for coin, metrics in basis_by_coin.items():
+        for (route_id, coin), metrics in basis_by_route_coin.items():
             if metrics is None:
                 continue
             candidate_basis = {
                 "coin": coin,
+                "routeId": route_id,
+                "route": ROUTES[route_id][2],
                 **metrics,
                 "expectedNetBps": self.basis_expected_net_bps(metrics),
             }
             if (
                 best_basis is None
-                or metrics["deviationBps"]
-                > float(best_basis["deviationBps"])
+                or candidate_basis["expectedNetBps"]
+                > float(best_basis["expectedNetBps"])
             ):
                 best_basis = candidate_basis
         for row in status.get("active") or []:
-            if (
-                row.get("buyVenue") != self.buy_venue
-                or row.get("sellVenue") != self.sell_venue
-            ):
+            row_route = next(
+                (
+                    route_id
+                    for route_id in self.live_routes
+                    if row.get("buyVenue") == ROUTES[route_id][0]
+                    and row.get("sellVenue") == ROUTES[route_id][1]
+                ),
+                None,
+            )
+            if row_route is None:
                 continue
             coin = str(row.get("coin") or "")
             net = finite_float(row.get("currentNetBps1000"), -math.inf)
@@ -1074,7 +1160,7 @@ class Canary:
                 finite_float(row.get("currentBuyVwap1000"), 0),
                 finite_float(row.get("currentSellVwap1000"), 0),
             )
-            basis = basis_by_coin.get(coin)
+            basis = basis_by_route_coin.get((row_route, coin))
             basis_expected_net = self.basis_expected_net_bps(basis)
             if (
                 coin in MARKETS
@@ -1104,6 +1190,9 @@ class Canary:
                         "_basisBaselineBps": (
                             basis["baselineBps"] if basis else None
                         ),
+                        "_basisExitBaselineBps": (
+                            basis["exitBaselineBps"] if basis else None
+                        ),
                         "_basisDeviationBps": (
                             basis["deviationBps"] if basis else None
                         ),
@@ -1114,15 +1203,19 @@ class Canary:
                         ),
                         "_basisSamples": basis["samples"] if basis else None,
                         "_basisSpanMs": basis["spanMs"] if basis else None,
+                        "_routeId": row_route,
+                        "_routeLabel": ROUTES[row_route][2],
+                        "_buyVenue": ROUTES[row_route][0],
+                        "_sellVenue": ROUTES[row_route][1],
                     }
                 )
         self.basis_gate_status = {
-            "readyCoins": basis_ready,
+            "readyCoins": basis_ready_coins,
             "requiredCoins": len(self.allowed_coins),
             "best": best_basis,
         }
         if not eligible:
-            if self.basis_gate_enabled and basis_ready == 0:
+            if self.basis_gate_enabled and basis_ready_coins == 0:
                 self.last_rejection = (
                     "calibrating route basis before real entry"
                 )
@@ -1896,6 +1989,8 @@ class Canary:
         ext_fill: Fill,
         lit_fill: Fill,
         quantity: float,
+        *,
+        extended_is_buy: bool,
     ) -> dict[str, float] | None:
         status = self.read_json(self.execution_path, {})
         now = int(time.time() * 1000)
@@ -1913,7 +2008,7 @@ class Canary:
             float(quote.get("extendedSourceAgeMs") or math.inf),
             float(quote.get("lighterSourceAgeMs") or math.inf),
         )
-        if self.buy_venue == "extended":
+        if extended_is_buy:
             ext_exit = float(quote.get("extendedSellVwap") or 0)
             lit_exit = float(quote.get("lighterBuyVwap") or 0)
             entry_buy = ext_fill.price
@@ -2387,6 +2482,11 @@ class Canary:
     async def execute(self, candidate: dict[str, Any]) -> None:
         coin = str(candidate["coin"])
         opportunity_id = str(candidate["id"])
+        route_id = str(candidate.get("_routeId") or self.route_id)
+        route_label = str(candidate.get("_routeLabel") or self.route_label)
+        buy_venue = str(candidate.get("_buyVenue") or self.buy_venue)
+        sell_venue = str(candidate.get("_sellVenue") or self.sell_venue)
+        extended_is_buy = buy_venue == "extended"
         quantity = self.common_quantity(
             coin, float(candidate["currentBuyVwap1000"])
         )
@@ -2395,8 +2495,8 @@ class Canary:
             "id": f"L{started_at}",
             "status": "opening",
             "coin": coin,
-            "routeId": self.route_id,
-            "route": self.route_label,
+            "routeId": route_id,
+            "route": route_label,
             "opportunityId": opportunity_id,
             "signalAt": int(candidate.get("startedAt") or started_at),
             "startedAt": started_at,
@@ -2411,6 +2511,9 @@ class Canary:
             "basisBaselinePct": (
                 finite_float(candidate.get("_basisBaselineBps"), 0) / 100
             ),
+            "basisExitBaselinePct": (
+                finite_float(candidate.get("_basisExitBaselineBps"), 0) / 100
+            ),
             "basisDeviationPct": (
                 finite_float(candidate.get("_basisDeviationBps"), 0) / 100
             ),
@@ -2419,9 +2522,9 @@ class Canary:
             "quantity": float(quantity),
         }
         self.trade_open = True
+        self.active_trade = trade
         self.write_status("opening", activeTrade=trade)
         self.log("entry_submit", **trade)
-        extended_is_buy = self.buy_venue == "extended"
         entry_tasks = {
             "extended": asyncio.create_task(
                 self.place_extended(
@@ -2443,7 +2546,7 @@ class Canary:
                 self.place_lighter(
                     coin,
                     quantity,
-                    is_ask=self.sell_venue == "lighter",
+                    is_ask=sell_venue == "lighter",
                     reduce_only=False,
                     slippage=self.entry_slippage,
                 )
@@ -2470,6 +2573,7 @@ class Canary:
             )
             self.append_trade(trade)
             self.trade_open = False
+            self.active_trade = None
             self.write_status("blocked", activeTrade=None, lastTrade=trade)
             return
         ext_order = int(entry_orders["extended"])
@@ -2507,6 +2611,7 @@ class Canary:
             )
             self.append_trade(trade)
             self.trade_open = False
+            self.active_trade = None
             self.write_status("blocked", activeTrade=None, lastTrade=trade)
             return
         opened_at = max(
@@ -2531,7 +2636,11 @@ class Canary:
                 close_reason = "max_hold"
                 break
             projected = self.projected_exit(
-                coin, ext_fill, lit_fill, quantity=float(quantity)
+                coin,
+                ext_fill,
+                lit_fill,
+                quantity=float(quantity),
+                extended_is_buy=extended_is_buy,
             )
             if (
                 projected is not None
@@ -2640,6 +2749,7 @@ class Canary:
         )
         self.append_trade(trade)
         self.trade_open = False
+        self.active_trade = None
         if self.shutdown_requested:
             self.running = False
         self.write_status("completed", activeTrade=None, lastTrade=trade)
@@ -2931,10 +3041,26 @@ def self_test() -> None:
     assert basis_guard.basis_round_trip_cost_bps() == 7
     assert basis_guard.basis_expected_net_bps({
         "deviationBps": 17,
+        "expectedNetBps": 10,
     }) == 10
+    quote = {
+        "extendedBuyVwap": 100.0,
+        "extendedSellVwap": 99.9,
+        "lighterBuyVwap": 101.1,
+        "lighterSellVwap": 101.0,
+    }
+    assert round(
+        executable_basis_bps(quote, "extended-lighter") or 0,
+        8,
+    ) == 100
+    assert round(
+        executable_basis_bps(quote, "lighter-extended") or 0,
+        8,
+    ) == round((99.9 / 101.1 - 1) * 10_000, 8)
     route_guard = object.__new__(Canary)
     route_guard.route_id = "lighter-extended"
     route_guard.route_label = "Lighter → Extended"
+    route_guard.live_routes = ("lighter-extended",)
     route_guard.trades = lambda: [
         {
             "status": "closed",
@@ -2947,6 +3073,9 @@ def self_test() -> None:
         },
     ]
     assert len(route_guard.completed_route_trades()) == 1
+    route_guard.route_id = "both"
+    route_guard.live_routes = tuple(ROUTES)
+    assert len(route_guard.completed_route_trades()) == 2
     shadow_guard = object.__new__(Canary)
     shadow_guard.execution_mode = "maker-taker"
     shadow_guard.required_maker_shadow_passes = 1

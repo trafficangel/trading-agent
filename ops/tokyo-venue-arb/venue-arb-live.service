@@ -14,7 +14,7 @@ Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/candidate-
 Environment=VENUE_ARB_LIVE_REGION=Tokyo
 Environment=VENUE_ARB_LIVE_ENABLED=true
 Environment=VENUE_ARB_LIVE_EXECUTION=taker-taker
-Environment=VENUE_ARB_LIVE_ROUTE=extended-lighter
+Environment=VENUE_ARB_LIVE_ROUTE=both
 Environment=VENUE_ARB_LIVE_ALLOWED_COINS=BTC,ETH,SOL,HYPE,XRP,DOGE,ADA,BNB,LTC
 Environment=VENUE_ARB_LIVE_NOTIONAL_USD=100
 Environment=VENUE_ARB_LIVE_LEVERAGE=5
