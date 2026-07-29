@@ -1,5 +1,5 @@
 [Unit]
-Description=Robot Claude Tokyo HYPE Extended/Lighter threshold calibration
+Description=Robot Claude Tokyo Extended/Lighter cross-coin threshold calibration
 After=network-online.target
 Wants=network-online.target
 
@@ -8,15 +8,14 @@ Type=simple
 User=trader
 Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
-Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/hype-calibration-5bps
+Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/extended-lighter-3bps
 Environment=VENUE_ARB_ACTIVE_VENUES=extended,lighter
-Environment=VENUE_ARB_ACTIVE_COINS=HYPE
 Environment=VENUE_ARB_SAMPLE_MS=100
 Environment=VENUE_ARB_STALE_MS=250
 Environment=VENUE_ARB_NET_TRIGGER_BPS=1
 Environment=VENUE_ARB_EXECUTION_BUFFER_BPS=2
 Environment=VENUE_ARB_SHADOW_NOTIONAL_USD=100
-Environment=VENUE_ARB_SHADOW_ENTRY_NET_BPS=5
+Environment=VENUE_ARB_SHADOW_ENTRY_NET_BPS=3
 Environment=VENUE_ARB_SHADOW_ENTRY_CONFIRMATIONS=3
 Environment=VENUE_ARB_SHADOW_EXIT_NET_BPS=2
 Environment=VENUE_ARB_SHADOW_EXIT_CONFIRMATIONS=3
@@ -26,7 +25,7 @@ Environment=VENUE_ARB_SHADOW_MAX_HOLD_MS=180000
 Environment=VENUE_ARB_SHADOW_MIN_HOLD_MS=200
 Environment=VENUE_ARB_SHADOW_MAX_LOSS_BPS=5
 Environment=VENUE_ARB_SHADOW_FUNDING_BPS_PER_HOUR=1
-Environment=VENUE_ARB_SHADOW_INDEPENDENCE_MS=120000
+Environment=VENUE_ARB_SHADOW_INDEPENDENCE_MS=60000
 Environment=VENUE_ARB_SHADOW_REQUIRED_SAMPLES=20
 Environment=VENUE_ARB_SHADOW_REQUIRED_PASS_PCT=90
 Environment=VENUE_ARB_LIGHTER_BOOK_REFRESH_MS=30000
