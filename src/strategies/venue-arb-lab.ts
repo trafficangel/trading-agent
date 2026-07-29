@@ -243,6 +243,7 @@ type MakerShadow = {
     bookFreshMs?: number;
     sourceFreshMs?: number;
     executionBufferBps?: number;
+    minRawEntryNetBps?: number;
     extendedMakerFeeBps?: number;
     lighterTakerFeeBps?: number;
   };
@@ -1344,7 +1345,10 @@ function candidateRouteRows(
           ? `${esc(maker.quote.coin)} · заявка в очереди`
           : 'нет maker edge';
     return `<tr>
-      <td><b>${esc(label)}</b><small>maker ≤ 0%</small></td>
+      <td><b>${esc(label)}</b><small>maker ≤ 0% · raw net ≥ ${pctFromBps(
+      maker?.config?.minRawEntryNetBps,
+      false,
+    )}</small></td>
       <td class="${cls(telemetry?.bestProjectedEntryBps)}">${coinAndBps(
       telemetry?.bestProjectedCoin,
       telemetry?.bestProjectedEntryBps,
@@ -1544,7 +1548,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       </div>
 
       <section class="va-panel">
-        <div class="va-panel-head"><h2>Безкомиссионные маршруты</h2><span>$100 · maker ≤ 0% · Lighter 0%</span></div>
+        <div class="va-panel-head"><h2>Безкомиссионные маршруты</h2><span>$100 · maker ≤ 0% · Lighter 0% · только положительный raw edge</span></div>
         <div class="va-table"><table><thead><tr>
           <th>Маршрут</th><th>Net сейчас</th><th>Shadow gate</th><th>Статус</th>
         </tr></thead><tbody>${candidateRouteRows(candidateStatus, asterStatus, hibachiStatus, {
