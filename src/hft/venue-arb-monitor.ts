@@ -445,6 +445,10 @@ const SHADOW_INDEPENDENCE_MS = finiteEnv(
   'VENUE_ARB_SHADOW_INDEPENDENCE_MS',
   5 * 60_000,
 );
+const MAKER_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_MAKER_SHADOW_ENABLED',
+  true,
+);
 const MAKER_NOTIONAL_USD = finiteEnv('VENUE_ARB_MAKER_NOTIONAL_USD', 500);
 const MAKER_ENTRY_EDGE_BPS = finiteEnv('VENUE_ARB_MAKER_ENTRY_EDGE_BPS', 3);
 const MAKER_CANCEL_EDGE_BPS = finiteEnv(
@@ -478,6 +482,10 @@ const MAKER_INDEPENDENCE_MS = finiteEnv(
 const GRVT_MAKER_NOTIONAL_USD = finiteEnv(
   'VENUE_ARB_GRVT_MAKER_NOTIONAL_USD',
   100,
+);
+const GRVT_MAKER_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_GRVT_MAKER_SHADOW_ENABLED',
+  true,
 );
 const GRVT_MAKER_ENTRY_EDGE_BPS = finiteEnv(
   'VENUE_ARB_GRVT_MAKER_ENTRY_EDGE_BPS',
@@ -520,6 +528,10 @@ const GRVT_EXTENDED_MAKER_ENTRY_EDGE_BPS = finiteEnv(
   'VENUE_ARB_GRVT_EXTENDED_MAKER_ENTRY_EDGE_BPS',
   5,
 );
+const GRVT_EXTENDED_MAKER_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_GRVT_EXTENDED_MAKER_SHADOW_ENABLED',
+  true,
+);
 const GRVT_EXTENDED_MAKER_CANCEL_EDGE_BPS = finiteEnv(
   'VENUE_ARB_GRVT_EXTENDED_MAKER_CANCEL_EDGE_BPS',
   3,
@@ -535,6 +547,10 @@ const GRVT_EXTENDED_MAKER_EXIT_NET_BPS = finiteEnv(
 const EXTENDED_ASTER_MAKER_ENTRY_EDGE_BPS = finiteEnv(
   'VENUE_ARB_EXTENDED_ASTER_MAKER_ENTRY_EDGE_BPS',
   5,
+);
+const EXTENDED_ASTER_MAKER_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_EXTENDED_ASTER_MAKER_SHADOW_ENABLED',
+  true,
 );
 const EXTENDED_ASTER_MAKER_CANCEL_EDGE_BPS = finiteEnv(
   'VENUE_ARB_EXTENDED_ASTER_MAKER_CANCEL_EDGE_BPS',
@@ -1069,6 +1085,14 @@ for (const venue of VENUES) {
 function finiteEnv(name: string, fallback: number): number {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function booleanEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (raw == null || raw === '') return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  throw new Error(`invalid ${name}: expected true/false, got ${raw}`);
 }
 
 function finite(value: unknown): number {
@@ -2264,6 +2288,7 @@ function makerShadowStatus(): Record<string, unknown> {
   return {
     version: 'maker-shadow-v1',
     config: {
+      enabled: MAKER_SHADOW_ENABLED,
       notionalUsd: MAKER_NOTIONAL_USD,
       entryEdgeBps: MAKER_ENTRY_EDGE_BPS,
       cancelEdgeBps: MAKER_CANCEL_EDGE_BPS,
@@ -2387,8 +2412,12 @@ function connect(
   ws.on('error', (error) => {
     connections[venue].connected = false;
     if (venue === 'grvt') {
-      grvtMakerShadow.setTradeStreamConnected(false);
-      grvtExtendedMakerShadow.setTradeStreamConnected(false);
+      if (GRVT_MAKER_SHADOW_ENABLED) {
+        grvtMakerShadow.setTradeStreamConnected(false);
+      }
+      if (GRVT_EXTENDED_MAKER_SHADOW_ENABLED) {
+        grvtExtendedMakerShadow.setTradeStreamConnected(false);
+      }
     }
     console.warn(`venue-arb ${venue} websocket error`, error.message);
   });
@@ -2398,10 +2427,14 @@ function connect(
     connections[venue].connected = false;
     connections[venue].reconnects++;
     if (venue === 'grvt') {
-      grvtMakerShadow.setTradeStreamConnected(false);
-      grvtMakerShadow.recordTradeReconnect();
-      grvtExtendedMakerShadow.setTradeStreamConnected(false);
-      grvtExtendedMakerShadow.recordTradeReconnect();
+      if (GRVT_MAKER_SHADOW_ENABLED) {
+        grvtMakerShadow.setTradeStreamConnected(false);
+        grvtMakerShadow.recordTradeReconnect();
+      }
+      if (GRVT_EXTENDED_MAKER_SHADOW_ENABLED) {
+        grvtExtendedMakerShadow.setTradeStreamConnected(false);
+        grvtExtendedMakerShadow.recordTradeReconnect();
+      }
     }
     console.warn(
       `venue-arb ${venue} closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
@@ -2852,7 +2885,9 @@ function startExtendedTrades(): void {
   sockets.add(ws);
   ws.on('open', () => {
     makerTelemetry.tradeStreamConnected = true;
-    extendedAsterMakerShadow.setTradeStreamConnected(true);
+    if (EXTENDED_ASTER_MAKER_SHADOW_ENABLED) {
+      extendedAsterMakerShadow.setTradeStreamConnected(true);
+    }
     console.warn('venue-arb extended public trades connected');
     const timer = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) ws.ping();
@@ -2893,8 +2928,10 @@ function startExtendedTrades(): void {
           size,
           tradeAt: normalizeExchangeTimestampMs(finite(row.T), receivedAt),
         };
-        processMakerTrade(trade, receivedAt);
-        extendedAsterMakerShadow.processTrade(trade, receivedAt);
+        if (MAKER_SHADOW_ENABLED) processMakerTrade(trade, receivedAt);
+        if (EXTENDED_ASTER_MAKER_SHADOW_ENABLED) {
+          extendedAsterMakerShadow.processTrade(trade, receivedAt);
+        }
       }
     } catch (error) {
       console.warn(
@@ -2905,15 +2942,19 @@ function startExtendedTrades(): void {
   });
   ws.on('error', (error) => {
     makerTelemetry.tradeStreamConnected = false;
-    extendedAsterMakerShadow.setTradeStreamConnected(false);
+    if (EXTENDED_ASTER_MAKER_SHADOW_ENABLED) {
+      extendedAsterMakerShadow.setTradeStreamConnected(false);
+    }
     console.warn('venue-arb extended public trades websocket error', error.message);
   });
   ws.on('close', (code, reason) => {
     sockets.delete(ws);
     makerTelemetry.tradeStreamConnected = false;
     makerTelemetry.tradeReconnects++;
-    extendedAsterMakerShadow.setTradeStreamConnected(false);
-    extendedAsterMakerShadow.recordTradeReconnect();
+    if (EXTENDED_ASTER_MAKER_SHADOW_ENABLED) {
+      extendedAsterMakerShadow.setTradeStreamConnected(false);
+      extendedAsterMakerShadow.recordTradeReconnect();
+    }
     console.warn(
       `venue-arb extended public trades closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
     );
@@ -2950,8 +2991,12 @@ function startGrvt(): void {
     'grvt',
     'wss://market-data.grvt.io/ws/full',
     (ws) => {
-      grvtMakerShadow.setTradeStreamConnected(true);
-      grvtExtendedMakerShadow.setTradeStreamConnected(true);
+      if (GRVT_MAKER_SHADOW_ENABLED) {
+        grvtMakerShadow.setTradeStreamConnected(true);
+      }
+      if (GRVT_EXTENDED_MAKER_SHADOW_ENABLED) {
+        grvtExtendedMakerShadow.setTradeStreamConnected(true);
+      }
       ws.send(JSON.stringify({
         jsonrpc: '2.0',
         method: 'subscribe',
@@ -3027,8 +3072,12 @@ function startGrvt(): void {
               receivedAt,
             ),
           };
-          grvtMakerShadow.processTrade(trade, receivedAt);
-          grvtExtendedMakerShadow.processTrade(trade, receivedAt);
+          if (GRVT_MAKER_SHADOW_ENABLED) {
+            grvtMakerShadow.processTrade(trade, receivedAt);
+          }
+          if (GRVT_EXTENDED_MAKER_SHADOW_ENABLED) {
+            grvtExtendedMakerShadow.processTrade(trade, receivedAt);
+          }
         }
         return;
       }
@@ -3462,9 +3511,18 @@ function writeStatus(): void {
     groupedSummaries: groupedSummaries(recentClosed),
     executionShadow: executionShadowStatus(),
     makerShadow: makerShadowStatus(),
-    grvtMakerShadow: grvtMakerShadow.status(),
-    grvtExtendedMakerShadow: grvtExtendedMakerShadow.status(),
-    extendedAsterMakerShadow: extendedAsterMakerShadow.status(),
+    grvtMakerShadow: {
+      ...grvtMakerShadow.status(),
+      enabled: GRVT_MAKER_SHADOW_ENABLED,
+    },
+    grvtExtendedMakerShadow: {
+      ...grvtExtendedMakerShadow.status(),
+      enabled: GRVT_EXTENDED_MAKER_SHADOW_ENABLED,
+    },
+    extendedAsterMakerShadow: {
+      ...extendedAsterMakerShadow.status(),
+      enabled: EXTENDED_ASTER_MAKER_SHADOW_ENABLED,
+    },
     freshnessMs: Object.fromEntries(MARKETS.map((market) => [
       market.coin,
       Object.fromEntries(ACTIVE_VENUES.map((venue) => [
@@ -3492,7 +3550,9 @@ function writeStatus(): void {
 
 function writeExecutionStatus(): void {
   const now = Date.now();
-  const liveMakerQuote = makerEntryQuoteCandidate(now);
+  const liveMakerQuote = MAKER_SHADOW_ENABLED
+    ? makerEntryQuoteCandidate(now)
+    : null;
   if (liveMakerQuote) {
     liveMakerQuote.activeAt = now;
     liveMakerQuote.activatedAt = now;
@@ -3811,7 +3871,9 @@ if (activeVenues.has('paradex')) startParadex();
 if (activeVenues.has('polymarket')) startPolymarket();
 if (activeVenues.has('extended')) {
   startExtended();
-  startExtendedTrades();
+  if (MAKER_SHADOW_ENABLED || EXTENDED_ASTER_MAKER_SHADOW_ENABLED) {
+    startExtendedTrades();
+  }
 }
 if (activeVenues.has('aster')) startAster();
 if (activeVenues.has('pacifica')) startPacifica();
@@ -3821,22 +3883,38 @@ if (activeVenues.has('bybit')) startBybit();
 const evaluationTimer = setInterval(() => {
   evaluate();
   const now = Date.now();
-  if (activeVenues.has('extended') && activeVenues.has('lighter')) {
+  if (
+    MAKER_SHADOW_ENABLED
+    && activeVenues.has('extended')
+    && activeVenues.has('lighter')
+  ) {
     evaluateMakerShadow(now);
   }
-  if (activeVenues.has('grvt') && activeVenues.has('lighter')) {
+  if (
+    GRVT_MAKER_SHADOW_ENABLED
+    && activeVenues.has('grvt')
+    && activeVenues.has('lighter')
+  ) {
     grvtMakerShadow.evaluate(
       now,
       genericMakerMarkets('grvt', 'lighter'),
     );
   }
-  if (activeVenues.has('grvt') && activeVenues.has('extended')) {
+  if (
+    GRVT_EXTENDED_MAKER_SHADOW_ENABLED
+    && activeVenues.has('grvt')
+    && activeVenues.has('extended')
+  ) {
     grvtExtendedMakerShadow.evaluate(
       now,
       genericMakerMarkets('grvt', 'extended'),
     );
   }
-  if (activeVenues.has('extended') && activeVenues.has('aster')) {
+  if (
+    EXTENDED_ASTER_MAKER_SHADOW_ENABLED
+    && activeVenues.has('extended')
+    && activeVenues.has('aster')
+  ) {
     extendedAsterMakerShadow.evaluate(
       now,
       genericMakerMarkets('extended', 'aster'),
