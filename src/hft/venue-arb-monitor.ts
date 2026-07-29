@@ -303,6 +303,7 @@ type MakerPendingHedge = {
   dueAt: number;
   deadlineAt: number;
   extendedMaker: boolean;
+  exitReason?: 'profitable_taker_exit' | 'max_hold_taker_exit';
 };
 
 type MakerResult = {
@@ -1633,7 +1634,9 @@ function evaluateMakerPending(now: number): void {
     realizedNetUsd: modeled.netUsd,
     exitExtendedMaker: pending.extendedMaker,
     passed: modeled.netBps > 0,
-    reason: pending.extendedMaker ? 'maker_round_trip' : 'max_hold_taker_exit',
+    reason: pending.extendedMaker
+      ? 'maker_round_trip'
+      : pending.exitReason ?? 'max_hold_taker_exit',
     fundingBps,
   });
   makerPendingHedge = null;
@@ -1648,6 +1651,7 @@ function makerCloseProjection(
   pair: MakerPair,
   extendedFill: number,
   lighterFill: number,
+  extendedMaker = true,
 ): number {
   const fundingBps = Math.max(0, now - pair.openedAt)
     / 3_600_000 * SHADOW_FUNDING_BPS_PER_HOUR;
@@ -1660,7 +1664,7 @@ function makerCloseProjection(
     exitExtended: extendedFill,
     exitLighter: lighterFill,
     extendedEntryFeeBps: 0,
-    extendedExitFeeBps: 0,
+    extendedExitFeeBps: extendedMaker ? 0 : FEE_BPS.extended,
     lighterEntryFeeBps: FEE_BPS.lighter,
     lighterExitFeeBps: FEE_BPS.lighter,
     executionBufferBps: EXECUTION_BUFFER_BPS,
@@ -2017,14 +2021,66 @@ function makerQuoteCurrentProjection(
   return makerCloseProjection(now, makerPair, quote.price, lighterFill);
 }
 
+function takeProfitableMakerShadowExit(now: number): boolean {
+  const pair = makerPair;
+  if (!pair) return false;
+  if (
+    makerQuote?.firstFillAt != null
+    && makerQuote.queue.remaining < makerQuote.initialQuantity
+  ) return false;
+  const extended = executableBook('extended', pair.coin);
+  const lighter = executableBook('lighter', pair.coin);
+  if (
+    !extended
+    || !lighter
+    || !makerBooksFresh(now, extended, lighter)
+  ) return false;
+  const side: MakerSide = pair.extendedSide === 'long' ? 'sell' : 'buy';
+  const extendedFill = side === 'sell'
+    ? extended.sellVwap500
+    : extended.buyVwap500;
+  const lighterFill = makerHedgePrice(side, lighter);
+  if (extendedFill == null || lighterFill == null) return false;
+  const projectedNetBps = makerCloseProjection(
+    now,
+    pair,
+    extendedFill,
+    lighterFill,
+    false,
+  );
+  if (projectedNetBps < MAKER_EXIT_NET_BPS) return false;
+  makerQuote = null;
+  makerPendingHedge = {
+    stage: 'exit',
+    coin: pair.coin,
+    side,
+    extendedFill,
+    filledAt: now,
+    dueAt: now + MAKER_HEDGE_LATENCY_MS,
+    deadlineAt: now + MAKER_HEDGE_LATENCY_MS + MAKER_HEDGE_GRACE_MS,
+    extendedMaker: false,
+    exitReason: 'profitable_taker_exit',
+  };
+  writeMakerActive();
+  return true;
+}
+
 function evaluateMakerShadow(now: number): void {
   evaluateMakerPending(now);
   if (makerPendingHedge) return;
+  if (takeProfitableMakerShadowExit(now)) return;
   if (
     makerPair
     && now - makerPair.openedAt >= MAKER_MAX_HOLD_MS
-    && !makerQuote
   ) {
+    if (
+      makerQuote?.firstFillAt != null
+      && makerQuote.queue.remaining < makerQuote.initialQuantity
+    ) {
+      completeMakerPartialFailure(makerQuote, now);
+      return;
+    }
+    makerQuote = null;
     const extended = executableBook('extended', makerPair.coin);
     if (extended && makerBooksFresh(now, extended)) {
       const side: MakerSide = makerPair.extendedSide === 'long' ? 'sell' : 'buy';
@@ -2041,6 +2097,7 @@ function evaluateMakerShadow(now: number): void {
           dueAt: now + MAKER_HEDGE_LATENCY_MS,
           deadlineAt: now + MAKER_HEDGE_LATENCY_MS + MAKER_HEDGE_GRACE_MS,
           extendedMaker: false,
+          exitReason: 'max_hold_taker_exit',
         };
         writeMakerActive();
       }
