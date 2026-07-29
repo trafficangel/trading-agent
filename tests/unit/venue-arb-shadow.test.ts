@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   conservativeLatencyMs,
   independentSignalRows,
+  shadowLossGuardReached,
   shadowNetAfterCosts,
   shadowReadiness,
   wilsonLowerBound,
@@ -43,6 +44,33 @@ describe('venue arb execution shadow', () => {
     expect(result.executionBufferUsd).toBeCloseTo(0.10, 8);
     expect(result.fundingUsd).toBeCloseTo(0.0125, 8);
     expect(result.netUsd).toBeCloseTo(0.037475, 8);
+  });
+
+  it('matches the protected real-canary loss gate', () => {
+    expect(shadowLossGuardReached({
+      projectedNetBps: -5,
+      maxLossBps: 5,
+      holdingMs: 200,
+      minHoldMs: 200,
+    })).toBe(true);
+    expect(shadowLossGuardReached({
+      projectedNetBps: -4.99,
+      maxLossBps: 5,
+      holdingMs: 200,
+      minHoldMs: 200,
+    })).toBe(false);
+    expect(shadowLossGuardReached({
+      projectedNetBps: -8,
+      maxLossBps: 5,
+      holdingMs: 199,
+      minHoldMs: 200,
+    })).toBe(false);
+    expect(shadowLossGuardReached({
+      projectedNetBps: -8,
+      maxLossBps: 0,
+      holdingMs: 1_000,
+      minHoldMs: 200,
+    })).toBe(false);
   });
 
   it('requires both the protected exit and positive delayed result', () => {

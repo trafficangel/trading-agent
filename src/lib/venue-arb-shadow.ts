@@ -32,6 +32,20 @@ export type ShadowReadiness = {
   reasons: Record<string, number>;
 };
 
+export function shadowLossGuardReached(input: {
+  projectedNetBps: number;
+  maxLossBps: number;
+  holdingMs: number;
+  minHoldMs: number;
+}): boolean {
+  return (
+    Number.isFinite(input.projectedNetBps)
+    && input.maxLossBps > 0
+    && input.holdingMs >= input.minHoldMs
+    && input.projectedNetBps <= -input.maxLossBps
+  );
+}
+
 export function shadowNetAfterCosts(input: ShadowNetInput): {
   grossUsd: number;
   feesUsd: number;

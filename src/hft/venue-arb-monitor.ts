@@ -33,6 +33,7 @@ import {
 import {
   conservativeLatencyMs,
   independentSignalRows,
+  shadowLossGuardReached,
   shadowNetAfterCosts,
   shadowReadiness,
 } from '../lib/venue-arb-shadow.js';
@@ -236,6 +237,7 @@ type ShadowProbe = {
   guardNetBps: number | null;
   exitDueAt: number | null;
   exitQuoteDeadlineAt: number | null;
+  exitReason: 'protected_exit' | 'protected_loss_exit' | null;
   peakProjectedNetBps: number | null;
 };
 
@@ -406,6 +408,14 @@ const MAKER_BOOK_FRESH_MS = finiteEnv(
 const SHADOW_MAX_HOLD_MS = finiteEnv(
   'VENUE_ARB_SHADOW_MAX_HOLD_MS',
   15 * 60_000,
+);
+const SHADOW_MIN_HOLD_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_MIN_HOLD_MS',
+  200,
+);
+const SHADOW_MAX_LOSS_BPS = finiteEnv(
+  'VENUE_ARB_SHADOW_MAX_LOSS_BPS',
+  0,
 );
 const SHADOW_FUNDING_BPS_PER_HOUR = finiteEnv(
   'VENUE_ARB_SHADOW_FUNDING_BPS_PER_HOUR',
@@ -1360,6 +1370,7 @@ function evaluateShadow(now: number): void {
         guardNetBps: null,
         exitDueAt: null,
         exitQuoteDeadlineAt: null,
+        exitReason: null,
         peakProjectedNetBps: null,
       });
       shadowLatched.add(latchKey);
@@ -1424,7 +1435,12 @@ function evaluateShadow(now: number): void {
     if (probe.state === 'awaiting_exit') {
       if (probe.exitDueAt == null || now < probe.exitDueAt) continue;
       if (quote) {
-        completeShadow(probe, now, 'protected_exit', quote);
+        completeShadow(
+          probe,
+          now,
+          probe.exitReason ?? 'protected_exit',
+          quote,
+        );
       } else if (
         probe.exitQuoteDeadlineAt != null
         && now >= probe.exitQuoteDeadlineAt
@@ -1446,6 +1462,18 @@ function evaluateShadow(now: number): void {
       probe.peakProjectedNetBps ?? -Infinity,
       modeled.netBps,
     );
+    if (shadowLossGuardReached({
+      projectedNetBps: modeled.netBps,
+      maxLossBps: SHADOW_MAX_LOSS_BPS,
+      holdingMs: now - probe.openedAt,
+      minHoldMs: SHADOW_MIN_HOLD_MS,
+    })) {
+      probe.state = 'awaiting_exit';
+      probe.exitReason = 'protected_loss_exit';
+      probe.exitDueAt = now + probe.exitLatencyMs;
+      probe.exitQuoteDeadlineAt = probe.exitDueAt + SHADOW_EXIT_QUOTE_GRACE_MS;
+      continue;
+    }
     if (modeled.netBps >= SHADOW_EXIT_NET_BPS) {
       if (quote.version !== probe.lastGuardQuoteVersion) {
         probe.guardConfirmations++;
@@ -1459,6 +1487,7 @@ function evaluateShadow(now: number): void {
       probe.state = 'awaiting_exit';
       probe.guardReachedAt = now;
       probe.guardNetBps = modeled.netBps;
+      probe.exitReason = 'protected_exit';
       probe.exitDueAt = now + probe.exitLatencyMs;
       probe.exitQuoteDeadlineAt = probe.exitDueAt + SHADOW_EXIT_QUOTE_GRACE_MS;
     }
@@ -3393,6 +3422,8 @@ function executionShadowStatus(): Record<string, unknown> {
       sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
       independenceMs: SHADOW_INDEPENDENCE_MS,
       maxHoldMs: SHADOW_MAX_HOLD_MS,
+      minHoldMs: SHADOW_MIN_HOLD_MS,
+      maxLossBps: SHADOW_MAX_LOSS_BPS,
       fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
       executionBufferBps: EXECUTION_BUFFER_BPS,
     },
