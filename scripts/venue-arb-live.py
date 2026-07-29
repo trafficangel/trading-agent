@@ -627,6 +627,7 @@ class Canary:
         )
         self.status_path = self.data_dir / "live-status.json"
         self.trades_path = self.data_dir / "live-trades.json"
+        self.attempts_path = self.data_dir / "live-attempts.json"
         self.basis_path = self.data_dir / "basis-calibration-v1.json"
         self.rest_calibration_path = (
             self.data_dir / "rest-calibration-v1.ndjson"
@@ -982,6 +983,13 @@ class Canary:
         rows = self.trades()
         rows.append(row)
         self.atomic_json(self.trades_path, rows[-500:])
+
+    def append_attempt(self, row: dict[str, Any]) -> None:
+        rows = self.read_json(self.attempts_path, [])
+        if not isinstance(rows, list):
+            rows = []
+        rows.append(row)
+        self.atomic_json(self.attempts_path, rows[-500:])
 
     async def recover_active_trade(
         self,
@@ -3739,11 +3747,11 @@ class Canary:
                 error=f"Extended entry rejected: {error}",
                 netPnlUsd=0,
             )
-            self.append_trade(trade)
+            self.append_attempt(trade)
             self.trade_open = False
             self.active_trade = None
             self.last_rejection = str(trade["error"])
-            self.write_status("armed", activeTrade=None, lastTrade=trade)
+            self.write_status("armed", activeTrade=None, lastAttempt=trade)
             return False
         trade["entryExtendedOrderId"] = ext_order
         self.write_status("opening", activeTrade=trade)
@@ -3763,11 +3771,11 @@ class Canary:
                 ),
                 netPnlUsd=0,
             )
-            self.append_trade(trade)
+            self.append_attempt(trade)
             self.trade_open = False
             self.active_trade = None
             self.last_rejection = str(trade["error"])
-            self.write_status("armed", activeTrade=None, lastTrade=trade)
+            self.write_status("armed", activeTrade=None, lastAttempt=trade)
             return False
         quantity = self.lighter_compatible_quantity(coin, filled_qty)
         trade["quantity"] = float(quantity)
