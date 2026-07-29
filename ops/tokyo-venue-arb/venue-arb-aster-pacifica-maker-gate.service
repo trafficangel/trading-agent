@@ -1,14 +1,21 @@
 [Unit]
 Description=Evaluate Aster maker/Pacifica taker arbitrage shadow profit gate
-After=network-online.target
-Wants=network-online.target
+After=venue-arb-binance-bybit-shadow.service
 
 [Service]
 Type=oneshot
 User=trader
 Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
-ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-shadow-gate.py --input /home/trader/apps/venue-arb-tokyo/data/binance-bybit-shadow/aster-pacifica-maker-basis-shadow-v1.ndjson --output /home/trader/apps/venue-arb-tokyo/data/binance-bybit-shadow/aster-pacifica-maker-gate-status.json --route aster-maker-pacifica --notional-usd 100 --min-samples 30 --min-profit-factor 1.2 --max-drawdown-bps 50
+Environment=VENUE_ARB_GATE_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/binance-bybit-shadow
+Environment=VENUE_ARB_GATE_INPUT_FILE=aster-pacifica-maker-basis-shadow-v1.ndjson
+Environment=VENUE_ARB_GATE_OUTPUT_FILE=aster-pacifica-maker-gate-status.json
+Environment=VENUE_ARB_GATE_ROUTE=aster-maker-pacifica
+Environment=VENUE_ARB_GATE_NOTIONAL_USD=100
+Environment=VENUE_ARB_GATE_MIN_SAMPLES=30
+Environment=VENUE_ARB_GATE_MIN_PROFIT_FACTOR=1.2
+Environment=VENUE_ARB_GATE_MAX_DRAWDOWN_BPS=50
+ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-shadow-gate.py
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
