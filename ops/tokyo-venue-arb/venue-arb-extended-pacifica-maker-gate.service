@@ -1,0 +1,23 @@
+[Unit]
+Description=Evaluate Extended maker/Pacifica taker arbitrage shadow profit gate
+After=venue-arb-pacifica-extended-shadow.service
+
+[Service]
+Type=oneshot
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/venue-arb-tokyo
+Environment=VENUE_ARB_GATE_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/pacifica-extended-shadow
+Environment=VENUE_ARB_GATE_INPUT_FILE=extended-pacifica-maker-basis-shadow-v1.ndjson
+Environment=VENUE_ARB_GATE_OUTPUT_FILE=extended-pacifica-maker-gate-status.json
+Environment=VENUE_ARB_GATE_ROUTE=extended-maker-pacifica
+Environment=VENUE_ARB_GATE_NOTIONAL_USD=100
+Environment=VENUE_ARB_GATE_MIN_SAMPLES=30
+Environment=VENUE_ARB_GATE_MIN_PROFIT_FACTOR=1.2
+Environment=VENUE_ARB_GATE_MAX_DRAWDOWN_BPS=50
+ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-shadow-gate.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/venue-arb-tokyo/data/pacifica-extended-shadow

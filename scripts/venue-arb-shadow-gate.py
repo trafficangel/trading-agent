@@ -219,6 +219,17 @@ def main() -> None:
         default=os.getenv("VENUE_ARB_GATE_ROUTE", "pacifica-extended"),
     )
     parser.add_argument(
+        "--input-file",
+        default=os.getenv(
+            "VENUE_ARB_GATE_INPUT_FILE",
+            "shadow-execution-v4.ndjson",
+        ),
+    )
+    parser.add_argument(
+        "--output-file",
+        default=os.getenv("VENUE_ARB_GATE_OUTPUT_FILE", "gate-status.json"),
+    )
+    parser.add_argument(
         "--notional",
         type=float,
         default=float(os.getenv("VENUE_ARB_GATE_NOTIONAL_USD", "100")),
@@ -244,14 +255,14 @@ def main() -> None:
         return
     data_dir = Path(args.data_dir)
     result = evaluate(
-        read_rows(data_dir / "shadow-execution-v4.ndjson"),
+        read_rows(data_dir / args.input_file),
         route_id=args.route,
         notional_usd=args.notional,
         min_samples=args.min_samples,
         min_profit_factor=args.min_profit_factor,
         max_drawdown_bps=args.max_drawdown_bps,
     )
-    atomic_json(data_dir / "gate-status.json", result)
+    atomic_json(data_dir / args.output_file, result)
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
 
 
