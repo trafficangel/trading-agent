@@ -747,6 +747,16 @@ const MARKETS: readonly Market[] = [
   { coin: 'CRV', symbol: 'CRVUSDT', lighterMarketId: 36 },
   { coin: 'FARTCOIN', symbol: 'FARTCOINUSDT', lighterMarketId: 21 },
   { coin: 'PUMP', symbol: 'PUMPUSDT', lighterMarketId: 45 },
+  { coin: 'WTI', symbol: 'WTIUSDT', lighterMarketId: 145 },
+  { coin: 'XAU', symbol: 'XAUUSDT', lighterMarketId: 92 },
+  { coin: 'XAG', symbol: 'XAGUSDT', lighterMarketId: 93 },
+  { coin: 'ZEC', symbol: 'ZECUSDT', lighterMarketId: 90 },
+  { coin: 'EUR', symbol: 'EURUSDT', lighterMarketId: 96 },
+  { coin: 'ENA', symbol: 'ENAUSDT', lighterMarketId: 29 },
+  { coin: 'AAVE', symbol: 'AAVEUSDT', lighterMarketId: 27 },
+  { coin: 'JUP', symbol: 'JUPUSDT', lighterMarketId: 26 },
+  { coin: 'UNI', symbol: 'UNIUSDT', lighterMarketId: 30 },
+  { coin: 'XPL', symbol: 'XPLUSDT', lighterMarketId: 71 },
 ] as const;
 const ACTIVE_MARKETS: readonly Market[] = (() => {
   const configured = (process.env.VENUE_ARB_ACTIVE_COINS ?? '')
@@ -3017,11 +3027,13 @@ function reconnectStalledFeeds(): void {
 }
 
 function startHyperliquid(): void {
+  const unsupported = new Set(['WTI', 'XAU', 'XAG', 'EUR']);
   connect(
     'hyperliquid',
     'wss://api.hyperliquid.xyz/ws',
     (ws) => {
       for (const market of ACTIVE_MARKETS) {
+        if (unsupported.has(market.coin)) continue;
         ws.send(JSON.stringify({
           method: 'subscribe',
           subscription: { type: 'l2Book', coin: market.coin },
