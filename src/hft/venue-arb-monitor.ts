@@ -64,6 +64,7 @@ import {
   type VenueArbBasisSample,
 } from '../lib/venue-arb-basis.js';
 import { parseLighterPublicTrades } from '../lib/lighter-public-trades.js';
+import { parseLighterRestBook } from '../lib/lighter-rest-book.js';
 
 type Venue =
   | 'lighter'
@@ -772,6 +773,26 @@ const LIGHTER_BOOK_REFRESH_MS = finiteEnv(
   'VENUE_ARB_LIGHTER_BOOK_REFRESH_MS',
   30_000,
 );
+const LIGHTER_REST_BOOK_ENABLED = booleanEnv(
+  'VENUE_ARB_LIGHTER_REST_BOOK_ENABLED',
+  false,
+);
+const LIGHTER_REST_BOOK_INTERVAL_MS = Math.max(
+  250,
+  finiteEnv('VENUE_ARB_LIGHTER_REST_BOOK_INTERVAL_MS', 500),
+);
+const LIGHTER_REST_BOOK_LIMIT = Math.max(
+  5,
+  Math.min(100, Math.floor(finiteEnv('VENUE_ARB_LIGHTER_REST_BOOK_LIMIT', 50))),
+);
+const LIGHTER_REST_BOOK_TIMEOUT_MS = Math.max(
+  250,
+  finiteEnv('VENUE_ARB_LIGHTER_REST_BOOK_TIMEOUT_MS', 2_000),
+);
+const LIGHTER_REST_BOOK_BASE_URL = (
+  process.env.VENUE_ARB_LIGHTER_REST_BOOK_BASE_URL
+  ?? 'https://mainnet.zklighter.elliot.ai'
+).replace(/\/+$/, '');
 const LIGHTER_BBO_MISMATCH_BPS = finiteEnv(
   'VENUE_ARB_LIGHTER_BBO_MISMATCH_BPS',
   2,
@@ -1206,6 +1227,17 @@ const byCoin = new Map(ACTIVE_MARKETS.map((market) => [market.coin, market]));
 const byLighterId = new Map(ACTIVE_MARKETS.map((market) => [market.lighterMarketId, market]));
 const lighterTickerBbo = new Map<number, LighterTickerBbo>();
 const lighterBookValidation = new Map<number, LighterBookValidation>();
+const lighterRestShadowBookUpdates = new Map<number, number>();
+const lighterRestTelemetry = {
+  requests: 0,
+  updates: 0,
+  errors: 0,
+  ignoredFresherWs: 0,
+  lastRequestAt: null as number | null,
+  lastUpdateAt: null as number | null,
+  lastErrorAt: null as number | null,
+  lastError: null as string | null,
+};
 const byPolymarketId = new Map(ACTIVE_MARKETS.flatMap((market) => (
   market.polymarketInstrumentId == null
     ? []
@@ -1636,11 +1668,16 @@ function validatedExecutableBook(
   coin: string,
   now: number,
   lighterFreshMs: number,
+  allowLighterRestShadow = true,
 ): ExecutableBook | null {
   const book = executableBook(venue, coin);
   if (!book || venue !== 'lighter') return book;
   const market = byCoin.get(coin);
   return market
+    && (
+      allowLighterRestShadow
+      || lighterRestShadowBookUpdates.get(market.lighterMarketId) !== book.updates
+    )
     && lighterBookValidated(
       market.lighterMarketId,
       book,
@@ -3116,6 +3153,14 @@ function markBook(book: BookState, exchangeAt: number, receivedAt: number): void
   book.updates++;
 }
 
+function replacePriceLevels(
+  target: Map<number, number>,
+  levels: readonly PriceLevel[],
+): void {
+  target.clear();
+  for (const [price, size] of levels) target.set(price, size);
+}
+
 function connect(
   venue: Venue,
   url: string,
@@ -3537,6 +3582,77 @@ function startLighter(): void {
       }
     },
   );
+}
+
+function startLighterRestBookPoller(): void {
+  let marketIndex = 0;
+  let running = false;
+  const poll = async (): Promise<void> => {
+    if (shuttingDown || running || !ACTIVE_MARKETS.length) return;
+    const market = ACTIVE_MARKETS[marketIndex % ACTIVE_MARKETS.length];
+    marketIndex++;
+    if (!market) return;
+    running = true;
+    const requestStartedAt = Date.now();
+    lighterRestTelemetry.requests++;
+    lighterRestTelemetry.lastRequestAt = requestStartedAt;
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      LIGHTER_REST_BOOK_TIMEOUT_MS,
+    );
+    try {
+      const query = new URLSearchParams({
+        market_id: String(market.lighterMarketId),
+        limit: String(LIGHTER_REST_BOOK_LIMIT),
+      });
+      const response = await fetch(
+        `${LIGHTER_REST_BOOK_BASE_URL}/api/v1/orderBookOrders?${query}`,
+        {
+          signal: controller.signal,
+          headers: { 'User-Agent': 'RobotClaude-Arb-Shadow/1.0' },
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const parsed = parseLighterRestBook(await response.json());
+      const receivedAt = Date.now();
+      const book = books.get(bookKey('lighter', market.coin));
+      if (!book) return;
+      // A WS depth update received after the request began is fresher than
+      // this REST snapshot and must never be overwritten.
+      if (book.receivedAt > requestStartedAt) {
+        lighterRestTelemetry.ignoredFresherWs++;
+        return;
+      }
+      replacePriceLevels(book.bids, parsed.bids);
+      replacePriceLevels(book.asks, parsed.asks);
+      executableBooks.delete(bookKey('lighter', market.coin));
+      // The response has no source timestamp. Request start is the
+      // conservative lower bound for snapshot freshness and includes RTT.
+      markBook(book, requestStartedAt, receivedAt);
+      lighterBookValidation.set(market.lighterMarketId, {
+        bookUpdates: book.updates,
+        receivedAt,
+      });
+      lighterRestShadowBookUpdates.set(market.lighterMarketId, book.updates);
+      lighterRestTelemetry.updates++;
+      lighterRestTelemetry.lastUpdateAt = receivedAt;
+      lighterRestTelemetry.lastError = null;
+    } catch (error) {
+      const now = Date.now();
+      lighterRestTelemetry.errors++;
+      lighterRestTelemetry.lastErrorAt = now;
+      lighterRestTelemetry.lastError = (error as Error).message.slice(0, 160);
+    } finally {
+      clearTimeout(timeout);
+      running = false;
+    }
+  };
+  void poll();
+  const timer = setInterval(() => void poll(), LIGHTER_REST_BOOK_INTERVAL_MS);
+  timer.unref();
 }
 
 function startParadex(): void {
@@ -4063,18 +4179,21 @@ function edge(
   sellVenue: Venue,
   bookFreshMs = STALE_MS,
   sourceFreshMs = SHADOW_SOURCE_FRESH_MS,
+  allowLighterRestShadow = true,
 ): EdgeSnapshot | null {
   const buyBook = validatedExecutableBook(
     buyVenue,
     coin,
     now,
     sourceFreshMs,
+    allowLighterRestShadow,
   );
   const sellBook = validatedExecutableBook(
     sellVenue,
     coin,
     now,
     sourceFreshMs,
+    allowLighterRestShadow,
   );
   if (
     !buyBook
@@ -4506,6 +4625,13 @@ function writeStatus(): void {
       ...lighterExtendedMakerShadow.status(),
       enabled: LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED,
     },
+    lighterRestBook: {
+      enabled: LIGHTER_REST_BOOK_ENABLED,
+      shadowOnly: true,
+      intervalMs: LIGHTER_REST_BOOK_INTERVAL_MS,
+      markets: ACTIVE_MARKETS.length,
+      ...lighterRestTelemetry,
+    },
     freshnessMs: Object.fromEntries(ACTIVE_MARKETS.map((market) => [
       market.coin,
       Object.fromEntries(ACTIVE_VENUES.map((venue) => [
@@ -4548,6 +4674,7 @@ function writeExecutionStatus(): void {
       market.coin,
       now,
       EXECUTION_CANDIDATE_FRESH_MS,
+      false,
     );
     return [market.coin, {
       // Conservative for the $300 canary: use $500 executable VWAP rather
@@ -4620,6 +4747,7 @@ function writeExecutionStatus(): void {
         route.sellVenue,
         EXECUTION_CANDIDATE_FRESH_MS,
         EXECUTION_CANDIDATE_FRESH_MS,
+        false,
       );
       if (!snapshot) return [];
       return [{
@@ -4991,6 +5119,9 @@ loadGenericMakerState(
 );
 startedAt = Date.now();
 if (activeVenues.has('lighter')) startLighter();
+if (activeVenues.has('lighter') && LIGHTER_REST_BOOK_ENABLED) {
+  startLighterRestBookPoller();
+}
 if (activeVenues.has('hyperliquid')) startHyperliquid();
 if (activeVenues.has('paradex')) startParadex();
 if (activeVenues.has('polymarket')) startPolymarket();
