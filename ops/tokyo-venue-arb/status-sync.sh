@@ -18,7 +18,13 @@ while true; do
   fi
   [[ -f "${candidate_dir}/status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
     "${candidate_dir}/status.json" "${destination}cex-dex-status.json"
-  [[ -f "${candidate_dir}/extended-lighter-maker-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
-    "${candidate_dir}/extended-lighter-maker-gate-status.json" "${destination}extended-lighter-maker-gate-status.json"
+  for gate_file in \
+    extended-lighter-maker-gate-status.json \
+    extended-lighter-taker-gate-status.json \
+    lighter-extended-taker-gate-status.json \
+    grvt-lighter-maker-gate-status.json; do
+    [[ -f "${candidate_dir}/${gate_file}" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
+      "${candidate_dir}/${gate_file}" "${destination}${gate_file}"
+  done
   sleep 1
 done

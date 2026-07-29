@@ -1,5 +1,5 @@
 [Unit]
-Description=Evaluate Extended maker/Lighter taker arbitrage shadow profit gate
+Description=Evaluate Lighter/Extended taker arbitrage shadow profit gate
 After=venue-arb-extended-lighter-shadow.service
 
 [Service]
@@ -8,9 +8,9 @@ User=trader
 Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_GATE_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/extended-lighter-shadow
-Environment=VENUE_ARB_GATE_INPUT_FILE=extended-lighter-maker-basis-shadow-v2.ndjson
-Environment=VENUE_ARB_GATE_OUTPUT_FILE=extended-lighter-maker-gate-status.json
-Environment=VENUE_ARB_GATE_ROUTE=extended-maker-lighter
+Environment=VENUE_ARB_GATE_INPUT_FILE=shadow-execution-v4.ndjson
+Environment=VENUE_ARB_GATE_OUTPUT_FILE=lighter-extended-taker-gate-status.json
+Environment=VENUE_ARB_GATE_ROUTE=lighter-extended
 Environment=VENUE_ARB_GATE_NOTIONAL_USD=100
 Environment=VENUE_ARB_GATE_MIN_SAMPLES=30
 Environment=VENUE_ARB_GATE_MIN_PROFIT_FACTOR=1.2

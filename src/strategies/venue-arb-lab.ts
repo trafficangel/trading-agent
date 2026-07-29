@@ -424,11 +424,13 @@ type ProfitGateStatus = {
   requirements?: { minSamples?: number };
   metrics?: {
     samples?: number;
+    trades?: number;
     positive?: number;
     sumNetBps?: number;
     sumNetUsd?: number;
     mean95PctLowerBps?: number | null;
     profitFactor?: number | null;
+    profitFactorInfinite?: boolean;
     maxDrawdownBps?: number;
   };
 };
@@ -567,6 +569,9 @@ async function readLive(): Promise<{
 async function readTargeted(): Promise<{
   candidateStatus: Status | null;
   extendedMakerGate: ProfitGateStatus | null;
+  grvtMakerGate: ProfitGateStatus | null;
+  extendedLighterTakerGate: ProfitGateStatus | null;
+  lighterExtendedTakerGate: ProfitGateStatus | null;
 }> {
   const read = async <T>(file: string, fallback: T): Promise<T> => {
     try {
@@ -583,6 +588,18 @@ async function readTargeted(): Promise<{
       'extended-lighter-maker-gate-status.json',
       null,
     ),
+    grvtMakerGate: await read<ProfitGateStatus | null>(
+      'grvt-lighter-maker-gate-status.json',
+      null,
+    ),
+    extendedLighterTakerGate: await read<ProfitGateStatus | null>(
+      'extended-lighter-taker-gate-status.json',
+      null,
+    ),
+    lighterExtendedTakerGate: await read<ProfitGateStatus | null>(
+      'lighter-extended-taker-gate-status.json',
+      null,
+    ),
   };
 }
 
@@ -593,6 +610,12 @@ function pctFromBps(value: unknown, signed = true): string {
   const pct = number / 100;
   const sign = signed && pct > 0 ? '+' : pct < 0 ? '−' : '';
   return `${sign}${Math.abs(pct).toFixed(3)}%`;
+}
+
+function gateProfitFactor(gate: ProfitGateStatus | null): string {
+  if (gate?.metrics?.profitFactorInfinite) return '∞';
+  const value = Number(gate?.metrics?.profitFactor);
+  return Number.isFinite(value) ? value.toFixed(2) : '—';
 }
 
 function coinAndBps(coin: unknown, value: unknown): string {
@@ -1242,22 +1265,33 @@ const CANDIDATE_ROUTES = [
 
 function candidateRouteRows(
   status: Status | null,
-  makerProfitGates: {
-    extendedLighter: ProfitGateStatus | null;
-    lighterExtended: ProfitGateStatus | null;
+  profitGates: {
+    extendedLighterTaker: ProfitGateStatus | null;
+    lighterExtendedTaker: ProfitGateStatus | null;
+    extendedLighterMaker: ProfitGateStatus | null;
+    grvtLighterMaker: ProfitGateStatus | null;
   },
 ): string {
   const shadow = status?.executionShadow;
   const takerRows = CANDIDATE_ROUTES.flatMap(([id, label]) => {
     const route = shadow?.routes?.[id];
     if (!route) return [];
-    const gate = route?.readiness;
+    const readiness = route?.readiness;
+    const gate = id === 'extended-lighter'
+      ? profitGates.extendedLighterTaker
+      : profitGates.lighterExtendedTaker;
     const telemetry = route?.telemetry;
-    const samples = Number(gate?.samples ?? 0);
-    const required = Number(gate?.requiredSamples ?? 30);
-    const passed = Number(gate?.passed ?? 0);
-    const state = gate?.ready
-      ? '<b>КАНДИДАТ</b>'
+    const samples = Number(
+      gate?.metrics?.samples ?? readiness?.samples ?? 0,
+    );
+    const required = Number(
+      gate?.requirements?.minSamples ?? readiness?.requiredSamples ?? 30,
+    );
+    const passed = Number(
+      gate?.metrics?.positive ?? readiness?.passed ?? 0,
+    );
+    const state = (gate?.ready ?? readiness?.ready)
+      ? '<b class="pos">ДОПУЩЕН</b>'
       : samples > 0
         ? '<b>НАБЛЮДЕНИЕ</b>'
         : '<b>ЖДЁМ EDGE</b>';
@@ -1267,7 +1301,7 @@ function candidateRouteRows(
     telemetry?.currentBestCoin,
     telemetry?.currentBestNetBps,
   )}</td>
-      <td>${samples} / ${required}<small>PASS ${passed}</small></td>
+      <td>${samples} / ${required}<small>+ ${passed} · PF ${gateProfitFactor(gate)} · LB ${pctFromBps(gate?.metrics?.mean95PctLowerBps)}</small></td>
       <td>${state}<small>${shadowBlockers(telemetry)}</small></td>
     </tr>`];
   }).join('');
@@ -1275,12 +1309,12 @@ function candidateRouteRows(
     {
       label: 'Extended maker → Lighter',
       maker: status?.extendedLighterMakerShadow,
-      gate: makerProfitGates.extendedLighter,
+      gate: profitGates.extendedLighterMaker,
     },
     {
-      label: 'Lighter maker → Extended',
-      maker: status?.lighterExtendedMakerShadow,
-      gate: makerProfitGates.lighterExtended,
+      label: 'GRVT maker → Lighter',
+      maker: status?.grvtMakerShadow,
+      gate: profitGates.grvtLighterMaker,
     },
   ].filter(({ maker }) => maker?.enabled).map(({ label, maker, gate }) => {
     const readiness = maker?.readiness;
@@ -1314,7 +1348,7 @@ function candidateRouteRows(
       telemetry?.bestProjectedCoin,
       telemetry?.bestProjectedEntryBps,
     )}</td>
-      <td>${samples} / ${required}<small>+ ${passed} · PF ${gate?.metrics?.profitFactor == null ? '—' : Number(gate.metrics.profitFactor).toFixed(2)} · LB ${pctFromBps(gate?.metrics?.mean95PctLowerBps)}</small></td>
+      <td>${samples} / ${required}<small>+ ${passed} · PF ${gateProfitFactor(gate)} · LB ${pctFromBps(gate?.metrics?.mean95PctLowerBps)}</small></td>
       <td>${state}<small>${blocker}</small></td>
     </tr>`;
   }).join('');
@@ -1325,7 +1359,7 @@ function candidateShadowRows(
   shadow: ExecutionShadow | undefined,
   makers: {
     extendedLighter: GenericMakerShadowStatus | undefined;
-    lighterExtended: GenericMakerShadowStatus | undefined;
+    grvtLighter: GenericMakerShadowStatus | undefined;
   },
 ): string {
   const labels = new Map<string, string>(CANDIDATE_ROUTES);
@@ -1352,7 +1386,7 @@ function candidateShadowRows(
   });
   ([
     ['Extended maker → Lighter', makers.extendedLighter],
-    ['Lighter maker → Extended', makers.lighterExtended],
+    ['GRVT maker → Lighter', makers.grvtLighter],
   ] as const).filter(([, maker]) => maker?.enabled).forEach(([route, maker]) => {
     if (maker?.pair) {
       rows.push({
@@ -1440,9 +1474,12 @@ async function renderCompact(lang: Lang): Promise<string> {
   const healthyFeeds = candidateVenues.filter(
     (venue) => candidateStatus?.connections?.[venue]?.connected,
   ).length;
-  const routes = CANDIDATE_ROUTES.flatMap(([id]) => {
+  const activeTakers = CANDIDATE_ROUTES.flatMap(([id]) => {
     const route = candidateShadow?.routes?.[id];
-    return route ? [route] : [];
+    const gate = id === 'extended-lighter'
+      ? targeted.extendedLighterTakerGate
+      : targeted.lighterExtendedTakerGate;
+    return route ? [{ route, gate }] : [];
   });
   const activeMakers = [
     {
@@ -1450,21 +1487,25 @@ async function renderCompact(lang: Lang): Promise<string> {
       gate: targeted.extendedMakerGate,
     },
     {
-      maker: candidateStatus?.lighterExtendedMakerShadow,
-      gate: null,
+      maker: candidateStatus?.grvtMakerShadow,
+      gate: targeted.grvtMakerGate,
     },
   ].filter(({ maker }) => maker?.enabled);
-  const totalAttempts = routes.reduce(
-    (sum, route) => sum + Number(route?.readiness?.attempts ?? 0),
+  const totalAttempts = activeTakers.reduce(
+    (sum, { route }) => sum + Number(route?.readiness?.attempts ?? 0),
     activeMakers.reduce(
       (sum, { maker }) => sum + Number(maker?.readiness?.attempts ?? 0),
       0,
     ),
   );
   const bestGate = [
-    ...routes.map((route) => ({
-      samples: Number(route?.readiness?.samples ?? 0),
-      required: Number(route?.readiness?.requiredSamples ?? 30),
+    ...activeTakers.map(({ route, gate }) => ({
+      samples: Number(gate?.metrics?.samples ?? route?.readiness?.samples ?? 0),
+      required: Number(
+        gate?.requirements?.minSamples
+        ?? route?.readiness?.requiredSamples
+        ?? 30,
+      ),
     })),
     ...activeMakers.map(({ maker, gate }) => ({
       samples: Number(gate?.metrics?.samples ?? maker?.readiness?.samples ?? 0),
@@ -1478,7 +1519,9 @@ async function renderCompact(lang: Lang): Promise<string> {
     (b.samples / Math.max(1, b.required))
     - (a.samples / Math.max(1, a.required))
   ))[0] ?? { samples: 0, required: 30 };
-  const readyRoutes = activeMakers.filter(({ maker, gate }) => (
+  const readyRoutes = activeTakers.filter(({ route, gate }) => (
+    gate?.ready ?? route?.readiness?.ready
+  )).length + activeMakers.filter(({ maker, gate }) => (
     gate?.ready ?? maker?.readiness?.ready
   )).length;
   const canaryReady = readyRoutes > 0;
@@ -1511,8 +1554,10 @@ async function renderCompact(lang: Lang): Promise<string> {
         <div class="va-table"><table><thead><tr>
           <th>Маршрут</th><th>Net сейчас</th><th>Shadow gate</th><th>Статус</th>
         </tr></thead><tbody>${candidateRouteRows(candidateStatus, {
-          extendedLighter: targeted.extendedMakerGate,
-          lighterExtended: null,
+          extendedLighterTaker: targeted.extendedLighterTakerGate,
+          lighterExtendedTaker: targeted.lighterExtendedTakerGate,
+          extendedLighterMaker: targeted.extendedMakerGate,
+          grvtLighterMaker: targeted.grvtMakerGate,
         })}</tbody></table></div>
       </section>
 
@@ -1522,7 +1567,7 @@ async function renderCompact(lang: Lang): Promise<string> {
           <th>UTC</th><th>Монета / маршрут</th><th>Статус</th><th>Net</th><th>Причина</th>
         </tr></thead><tbody>${candidateShadowRows(candidateShadow, {
           extendedLighter: candidateStatus?.extendedLighterMakerShadow,
-          lighterExtended: candidateStatus?.lighterExtendedMakerShadow,
+          grvtLighter: candidateStatus?.grvtMakerShadow,
         })}</tbody></table></div>
       </section>
 
@@ -1770,11 +1815,28 @@ export async function venueArbHero(lang: Lang): Promise<string> {
   );
   const routeCount = Object.keys(status?.executionShadow?.routes ?? {}).length
     + (status?.extendedLighterMakerShadow?.enabled ? 1 : 0)
-    + (status?.lighterExtendedMakerShadow?.enabled ? 1 : 0);
-  const samples = Number(
-    targeted.extendedMakerGate?.metrics?.samples
-    ?? status?.extendedLighterMakerShadow?.readiness?.samples
-    ?? 0,
+    + (status?.grvtMakerShadow?.enabled ? 1 : 0);
+  const samples = Math.max(
+    Number(
+      targeted.extendedLighterTakerGate?.metrics?.samples
+      ?? status?.executionShadow?.routes?.['extended-lighter']?.readiness?.samples
+      ?? 0,
+    ),
+    Number(
+      targeted.lighterExtendedTakerGate?.metrics?.samples
+      ?? status?.executionShadow?.routes?.['lighter-extended']?.readiness?.samples
+      ?? 0,
+    ),
+    Number(
+      targeted.extendedMakerGate?.metrics?.samples
+      ?? status?.extendedLighterMakerShadow?.readiness?.samples
+      ?? 0,
+    ),
+    Number(
+      targeted.grvtMakerGate?.metrics?.samples
+      ?? status?.grvtMakerShadow?.readiness?.samples
+      ?? 0,
+    ),
   );
   return `<a class="va-hero" href="/lab/venue-arb">
     <div><span class="va-badge">⚡ EXTENDED ↔ LIGHTER · SHADOW</span>
