@@ -8,7 +8,7 @@ User=trader
 Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_GATE_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/extended-lighter-shadow
-Environment=VENUE_ARB_GATE_INPUT_FILE=extended-lighter-maker-basis-shadow-v2.ndjson
+Environment=VENUE_ARB_GATE_INPUT_FILE=extended-lighter-maker-basis-shadow-v3.ndjson
 Environment=VENUE_ARB_GATE_OUTPUT_FILE=extended-lighter-maker-gate-status.json
 Environment=VENUE_ARB_GATE_ROUTE=extended-maker-lighter
 Environment=VENUE_ARB_GATE_NOTIONAL_USD=100

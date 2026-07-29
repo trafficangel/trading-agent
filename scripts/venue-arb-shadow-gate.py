@@ -127,7 +127,7 @@ def evaluate(
             f"max drawdown {drawdown:.3f} bps > {max_drawdown_bps:.3f}"
         )
     by_coin: dict[str, list[float]] = defaultdict(list)
-    for row, value in zip(eligible, values):
+    for row, value in zip(eligible, trade_values):
         by_coin[str(row.get("coin") or "UNKNOWN")].append(value)
     return {
         "version": "venue-arb-shadow-gate-v1",

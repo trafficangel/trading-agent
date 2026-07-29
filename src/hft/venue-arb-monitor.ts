@@ -478,15 +478,15 @@ const ASTER_LIGHTER_MAKER_EVENTS_PATH = resolve(
 );
 const EXTENDED_LIGHTER_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
-  'extended-lighter-maker-basis-shadow-v2.ndjson',
+  'extended-lighter-maker-basis-shadow-v3.ndjson',
 );
 const EXTENDED_LIGHTER_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
-  'extended-lighter-maker-basis-active-v2.json',
+  'extended-lighter-maker-basis-active-v3.json',
 );
 const EXTENDED_LIGHTER_MAKER_EVENTS_PATH = resolve(
   DATA_DIR,
-  'extended-lighter-maker-events-v1.ndjson',
+  'extended-lighter-maker-events-v2.ndjson',
 );
 const EXTENDED_PACIFICA_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
