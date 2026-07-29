@@ -9,7 +9,7 @@ User=trader
 Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/candidate-routes
-Environment=VENUE_ARB_ACTIVE_VENUES=extended,lighter,binance,aster,grvt
+Environment=VENUE_ARB_ACTIVE_VENUES=extended,lighter,binance,aster,grvt,bybit,hyperliquid,polymarket
 Environment=VENUE_ARB_SAMPLE_MS=100
 Environment=VENUE_ARB_STALE_MS=250
 Environment=VENUE_ARB_EXECUTION_BUFFER_BPS=2
