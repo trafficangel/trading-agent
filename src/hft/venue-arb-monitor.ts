@@ -659,7 +659,7 @@ const FEE_BPS: Record<Venue, number> = {
   binance: finiteEnv('VENUE_ARB_FEE_BPS_BINANCE', 5),
   bybit: finiteEnv('VENUE_ARB_FEE_BPS_BYBIT', 5.5),
 };
-const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
+const ALL_SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
   {
     id: 'extended-lighter',
     buyVenue: 'extended',
@@ -883,6 +883,10 @@ const SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     primary: false,
   },
 ];
+const SHADOW_ROUTES = ALL_SHADOW_ROUTES.filter(
+  (route) => activeVenues.has(route.buyVenue)
+    && activeVenues.has(route.sellVenue),
+);
 const shadowRouteById = new Map(SHADOW_ROUTES.map((route) => [route.id, route]));
 function emptyShadowRejections(): Record<ShadowRejectReason, number> {
   return {
