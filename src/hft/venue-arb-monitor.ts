@@ -1117,6 +1117,8 @@ const MARKETS: readonly Market[] = [
   { coin: 'DOGE', symbol: 'DOGEUSDT', lighterMarketId: 3, edgexContractId: 10_000_067 },
   { coin: 'ADA', symbol: 'ADAUSDT', lighterMarketId: 39, edgexContractId: 10_000_070 },
   { coin: 'BNB', symbol: 'BNBUSDT', lighterMarketId: 25, edgexContractId: 10_000_064 },
+  { coin: 'SUI', symbol: 'SUIUSDT', lighterMarketId: 16 },
+  { coin: 'PAXG', symbol: 'PAXGUSDT', lighterMarketId: 48 },
   { coin: 'LTC', symbol: 'LTCUSDT', lighterMarketId: 35, edgexContractId: 10_000_055 },
   { coin: 'LIT', symbol: 'LITUSDT', lighterMarketId: 120 },
   { coin: 'XMR', symbol: 'XMRUSDT', lighterMarketId: 77 },
@@ -4919,6 +4921,8 @@ const HIBACHI_GRANULARITY: Readonly<Record<string, string>> = {
   HYPE: '0.0001',
   XRP: '0.00001',
   BNB: '0.001',
+  SUI: '0.00001',
+  PAXG: '0.01',
 };
 
 function startHibachi(): void {
