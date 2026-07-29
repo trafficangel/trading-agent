@@ -1113,6 +1113,34 @@ const SECONDARY_VENUE_COINS = new Set([
 const SECONDARY_VENUE_MARKETS = ACTIVE_MARKETS.filter(
   (market) => SECONDARY_VENUE_COINS.has(market.coin),
 );
+const GRVT_VENUE_COINS = new Set([
+  'BTC',
+  'ETH',
+  'SOL',
+  'HYPE',
+  'XRP',
+  'DOGE',
+  'ADA',
+  'BNB',
+  'LTC',
+  'LIT',
+  'XMR',
+  'NEAR',
+  'CRV',
+  'FARTCOIN',
+  'PUMP',
+  'XAU',
+  'XAG',
+  'ZEC',
+  'ENA',
+  'AAVE',
+  'JUP',
+  'UNI',
+  'XPL',
+]);
+const GRVT_VENUE_MARKETS = ACTIVE_MARKETS.filter(
+  (market) => GRVT_VENUE_COINS.has(market.coin),
+);
 
 const VENUES: readonly Venue[] = [
   'lighter',
@@ -4751,7 +4779,7 @@ function startGrvt(): void {
         method: 'subscribe',
         params: {
           stream: 'v1.book.d',
-          selectors: SECONDARY_VENUE_MARKETS.map(
+          selectors: GRVT_VENUE_MARKETS.map(
             ({ coin }) => `${coin}_USDT_Perp@100`,
           ),
         },
@@ -4762,7 +4790,7 @@ function startGrvt(): void {
         method: 'subscribe',
         params: {
           stream: 'v1.trade',
-          selectors: SECONDARY_VENUE_MARKETS.map(
+          selectors: GRVT_VENUE_MARKETS.map(
             ({ coin }) => `${coin}_USDT_Perp@50`,
           ),
         },
