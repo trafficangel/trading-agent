@@ -392,7 +392,7 @@ type Status = {
   notionalsUsd?: number[];
   feesBpsPerSide?: Partial<Record<Venue, number>>;
   markets?: string[];
-  venues?: Array<{ venue?: Venue; class?: string }>;
+  venues?: Array<{ venue?: Venue; class?: string; enabled?: boolean }>;
   connections?: Partial<Record<Venue, {
     connected?: boolean;
     messages?: number;
@@ -1250,6 +1250,8 @@ const CANDIDATE_ROUTES = [
   ['aster-binance', 'Aster → Binance'],
   ['binance-pacifica', 'Binance → Pacifica'],
   ['pacifica-binance', 'Pacifica → Binance'],
+  ['aster-lighter', 'Aster → Lighter'],
+  ['lighter-aster', 'Lighter → Aster'],
 ] as const;
 
 function candidateRouteRows(
@@ -1261,8 +1263,9 @@ function candidateRouteRows(
   },
 ): string {
   const shadow = status?.executionShadow;
-  const takerRows = CANDIDATE_ROUTES.map(([id, label]) => {
+  const takerRows = CANDIDATE_ROUTES.flatMap(([id, label]) => {
     const route = shadow?.routes?.[id];
+    if (!route) return [];
     const gate = route?.readiness;
     const telemetry = route?.telemetry;
     const samples = Number(gate?.samples ?? 0);
@@ -1273,7 +1276,7 @@ function candidateRouteRows(
       : samples > 0
         ? '<b>НАБЛЮДЕНИЕ</b>'
         : '<b>ЖДЁМ EDGE</b>';
-    return `<tr>
+    return [`<tr>
       <td><b>${esc(label)}</b></td>
       <td class="${cls(telemetry?.currentBestNetBps)}">${coinAndBps(
     telemetry?.currentBestCoin,
@@ -1286,7 +1289,7 @@ function candidateRouteRows(
       <td>${samples} / ${required}<small>PASS ${passed}</small></td>
       <td>${state}</td>
       <td>${shadowBlockers(telemetry)}</td>
-    </tr>`;
+    </tr>`];
   }).join('');
   const makerRows = [
     {
@@ -1304,7 +1307,7 @@ function candidateRouteRows(
       maker: status?.asterLighterMakerShadow,
       gate: makerProfitGates.lighter,
     },
-  ].map(({ label, maker, gate }) => {
+  ].filter(({ maker }) => maker?.enabled).map(({ label, maker, gate }) => {
     const readiness = maker?.readiness;
     const telemetry = maker?.telemetry;
     const samples = Number(
@@ -1381,7 +1384,7 @@ function candidateShadowRows(
     ['Aster maker → Binance', makers.binance],
     ['Aster maker → Pacifica', makers.pacifica],
     ['Aster maker → Lighter', makers.lighter],
-  ] as const).forEach(([route, maker]) => {
+  ] as const).filter(([, maker]) => maker?.enabled).forEach(([route, maker]) => {
     if (maker?.pair) {
       rows.push({
         at: maker.pair.openedAt,
@@ -1466,51 +1469,44 @@ async function renderCompact(lang: Lang): Promise<string> {
     candidateStatus?.updatedAt
     && Date.now() - candidateStatus.updatedAt < 15_000,
   );
-  const candidateVenues: Venue[] = [
-    'binance',
-    'aster',
-    'pacifica',
-    'lighter',
-  ];
+  const candidateVenues = (candidateStatus?.venues ?? [])
+    .filter((row) => row.enabled && row.venue)
+    .map((row) => row.venue as Venue);
   const healthyFeeds = candidateVenues.filter(
     (venue) => candidateStatus?.connections?.[venue]?.connected,
   ).length;
-  const routes = CANDIDATE_ROUTES.map(
-    ([id]) => candidateShadow?.routes?.[id],
-  );
-  const makerReadiness = [
-    candidateStatus?.asterBinanceMakerShadow?.readiness,
-    candidateStatus?.asterPacificaMakerShadow?.readiness,
-    candidateStatus?.asterLighterMakerShadow?.readiness,
-  ];
+  const routes = Object.values(candidateShadow?.routes ?? {});
+  const activeMakers = [
+    {
+      maker: candidateStatus?.asterBinanceMakerShadow,
+      gate: targeted.binanceMakerGate,
+    },
+    {
+      maker: candidateStatus?.asterPacificaMakerShadow,
+      gate: targeted.pacificaMakerGate,
+    },
+    {
+      maker: candidateStatus?.asterLighterMakerShadow,
+      gate: targeted.lighterMakerGate,
+    },
+  ].filter(({ maker }) => maker?.enabled);
   const totalSamples = routes.reduce(
     (sum, route) => sum + Number(route?.readiness?.samples ?? 0),
-    Number(
-      targeted.binanceMakerGate?.metrics?.samples
-        ?? makerReadiness[0]?.samples
-        ?? 0,
-    ) + Number(
-      targeted.pacificaMakerGate?.metrics?.samples
-        ?? makerReadiness[1]?.samples
-        ?? 0,
-    ) + Number(
-      targeted.lighterMakerGate?.metrics?.samples
-        ?? makerReadiness[2]?.samples
-        ?? 0,
+    activeMakers.reduce(
+      (sum, { maker, gate }) => sum + Number(
+        gate?.metrics?.samples ?? maker?.readiness?.samples ?? 0,
+      ),
+      0,
     ),
   );
   const totalAttempts = routes.reduce(
     (sum, route) => sum + Number(route?.readiness?.attempts ?? 0),
-    makerReadiness.reduce(
-      (sum, readiness) => sum + Number(readiness?.attempts ?? 0),
+    activeMakers.reduce(
+      (sum, { maker }) => sum + Number(maker?.readiness?.attempts ?? 0),
       0,
     ),
   );
-  const readyRoutes = [
-    targeted.binanceMakerGate,
-    targeted.pacificaMakerGate,
-    targeted.lighterMakerGate,
-  ].filter((gate) => gate?.ready).length;
+  const readyRoutes = activeMakers.filter(({ gate }) => gate?.ready).length;
   const canaryReady = readyRoutes > 0;
   return pageShell(
     t(lang, 'Арбитраж — контроль прибыли', 'Arbitrage profit control'),
@@ -1533,7 +1529,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       <div class="va-cards">
         <div class="va-card"><small>Реальный net</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b><em>${closedLive.length} сделок · ${liveWins} прибыльных · комиссии ${money(liveFees)}</em></div>
         <div class="va-card"><small>Реальная торговля</small><b class="${realStateClass}">${realPaused ? 'ОСТАНОВЛЕНА' : liveState(liveStatus)}</b><em>${realPaused ? 'до доказанного положительного gate' : 'canary активен'}</em></div>
-        <div class="va-card"><small>Shadow</small><b>${totalSamples} сделок</b><em>${totalAttempts} попыток · потоки ${healthyFeeds}/4 · маршрутов ${CANDIDATE_ROUTES.length + 3}</em></div>
+        <div class="va-card"><small>Shadow</small><b>${totalSamples} сделок</b><em>${totalAttempts} попыток · потоки ${healthyFeeds}/${candidateVenues.length} · маршрутов ${routes.length + activeMakers.length}</em></div>
       </div>
 
       <div class="va-summary">
