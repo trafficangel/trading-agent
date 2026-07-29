@@ -195,6 +195,47 @@ describe('GenericMakerShadow', () => {
     expect(status.quote?.distanceBps).toBeGreaterThan(0);
   });
 
+  it('prefers the most aggressive quote that still clears the net gate', () => {
+    const engine = new GenericMakerShadow({
+      ...config,
+      entryEdgeBps: 1,
+    });
+    const snapshot: MakerShadowMarket = {
+      coin: 'BNB',
+      maker: {
+        bids: new Map([
+          [100, 0.1],
+          [99.99, 0.1],
+        ]),
+        asks: new Map([
+          [100.1, 0.1],
+          [100.11, 0.1],
+        ]),
+        exchangeAt: 3_100,
+        receivedAt: 3_100,
+      },
+      hedge: {
+        sellVwap: 100.05,
+        buyVwap: 100.2,
+        exchangeAt: 3_100,
+        receivedAt: 3_100,
+      },
+    };
+
+    engine.evaluate(3_100, [snapshot]);
+
+    const status = engine.status() as {
+      quote?: {
+        side?: string;
+        price?: number;
+        touchDistanceBps?: number;
+      } | null;
+    };
+    expect(status.quote?.side).toBe('buy');
+    expect(status.quote?.price).toBe(100.03);
+    expect(status.quote?.touchDistanceBps).toBeLessThan(10);
+  });
+
   it('forces a taker exit at max hold even while an exit quote is open', () => {
     const engine = new GenericMakerShadow({
       ...config,

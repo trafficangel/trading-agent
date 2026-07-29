@@ -52,6 +52,7 @@ export type GenericMakerQuote = {
   expiresAt: number;
   projectedNetBps: number;
   distanceBps: number;
+  touchDistanceBps: number;
   initialQuantity: number;
   firstFillAt: number | null;
   queue: MakerQueueState;
@@ -159,6 +160,7 @@ export type GenericMakerEvent = {
   projectedNetBps: number;
   queueAheadUsd: number;
   distanceBps: number;
+  touchDistanceBps: number;
   reason?: string;
   currentProjectionBps?: number | null;
   queueAheadBeforeUsd?: number;
@@ -403,6 +405,7 @@ export class GenericMakerShadow {
     price: number;
     queueAhead: number;
     distanceBps: number;
+    touchDistanceBps: number;
   }> {
     const bestBid = sortedLevels(maker, 'bids', 1)[0]?.[0];
     const bestAsk = sortedLevels(maker, 'asks', 1)[0]?.[0];
@@ -478,7 +481,10 @@ export class GenericMakerShadow {
       if (
         distanceBps > (this.config.maxEntryDistanceBps ?? 50)
       ) return [];
-      return [{ price, queueAhead, distanceBps }];
+      const touchDistanceBps = side === 'buy'
+        ? Math.max(0, (bestAsk / price - 1) * 10_000)
+        : Math.max(0, (price / bestBid - 1) * 10_000);
+      return [{ price, queueAhead, distanceBps, touchDistanceBps }];
     });
   }
 
@@ -603,6 +609,7 @@ export class GenericMakerShadow {
               + this.config.quoteTtlMs,
             projectedNetBps,
             distanceBps: level.distanceBps,
+            touchDistanceBps: level.touchDistanceBps,
             initialQuantity: quantity,
             firstFillAt: null,
             queue: {
@@ -614,16 +621,11 @@ export class GenericMakerShadow {
         }
       }
     }
-    const score = (candidate: GenericMakerQuote): number => (
-      candidate.projectedNetBps / (
-        1
-        + candidate.queue.queueAhead * candidate.price
-          / this.config.notionalUsd
-        + candidate.distanceBps * 2
-      )
-    );
-    const selected = candidates.sort((a, b) => score(b) - score(a))[0]
-      ?? null;
+    const selected = candidates.sort((a, b) => (
+      a.touchDistanceBps - b.touchDistanceBps
+      || a.queue.queueAhead * a.price - b.queue.queueAhead * b.price
+      || b.projectedNetBps - a.projectedNetBps
+    ))[0] ?? null;
     if (selected) {
       this.telemetry.bestProjectedEntryBps = selected.projectedNetBps;
       this.telemetry.bestProjectedCoin = selected.coin;
@@ -691,6 +693,9 @@ export class GenericMakerShadow {
       expiresAt: now + this.config.quoteLatencyMs + this.config.quoteTtlMs,
       projectedNetBps: selected.projectedNetBps,
       distanceBps: selected.distanceBps,
+      touchDistanceBps: side === 'buy'
+        ? Math.max(0, (bestAsk / selected.price - 1) * 10_000)
+        : Math.max(0, (selected.price / bestBid - 1) * 10_000),
       initialQuantity: pair.quantity,
       firstFillAt: null,
       queue: {
@@ -734,6 +739,7 @@ export class GenericMakerShadow {
       projectedNetBps: quote.projectedNetBps,
       queueAheadUsd: quote.queue.queueAhead * quote.price,
       distanceBps: quote.distanceBps,
+      touchDistanceBps: quote.touchDistanceBps,
       ...details,
     });
   }
