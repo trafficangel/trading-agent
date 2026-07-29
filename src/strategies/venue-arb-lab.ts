@@ -892,6 +892,7 @@ function executionShadowRows(
 function makerReason(reason: unknown): string {
   const labels: Record<string, string> = {
     maker_round_trip: 'maker-вход и maker-выход',
+    profitable_taker_exit: 'прибыль зафиксирована taker-выходом',
     max_hold_taker_exit: 'аварийный taker-выход по max hold',
     entry_hedge_stale: 'не удалось своевременно хеджировать вход',
     entry_hedge_depth: 'нет глубины для хеджа входа',

@@ -76,6 +76,7 @@ export type GenericMakerPendingHedge = {
   deadlineAt: number;
   makerOrder: boolean;
   projectedNetBpsAtFill?: number | null;
+  exitReason?: 'profitable_taker_exit' | 'max_hold_taker_exit';
 };
 
 export type GenericMakerResult = {
@@ -137,6 +138,7 @@ export type GenericMakerConfig = {
   cancelEdgeBps: number;
   postFillNetBps: number;
   exitNetBps: number;
+  takerExitNetBps: number;
   quoteLatencyMs: number;
   hedgeLatencyMs: number;
   quoteTtlMs: number;
@@ -546,6 +548,52 @@ export class GenericMakerShadow {
     return this.closeProjection(now, this.pair, quote.price, hedgeFill);
   }
 
+  private takeProfitableTakerExit(now: number): boolean {
+    const pair = this.pair;
+    if (!pair) return false;
+    if (
+      this.quote?.firstFillAt != null
+      && this.quote.queue.remaining < this.quote.initialQuantity
+    ) return false;
+    const market = this.latestMarkets.get(pair.coin);
+    if (!market?.maker || !market.hedge) return false;
+    if (!this.fresh(now, market.maker, market.hedge)) return false;
+    const side: MakerSide = pair.makerSide === 'long' ? 'sell' : 'buy';
+    const levels = side === 'sell'
+      ? sortedLevels(market.maker, 'bids')
+      : sortedLevels(market.maker, 'asks');
+    const makerFill = executableVwap(
+      levels,
+      this.config.notionalUsd,
+    )?.price;
+    const hedgeFill = this.hedgePrice(side, market.hedge);
+    if (makerFill == null || hedgeFill == null) return false;
+    const projectedNetBpsAtFill = this.closeProjection(
+      now,
+      pair,
+      makerFill,
+      hedgeFill,
+      false,
+    );
+    if (projectedNetBpsAtFill < this.config.takerExitNetBps) return false;
+    this.quote = null;
+    this.pendingHedge = {
+      stage: 'exit',
+      coin: pair.coin,
+      side,
+      makerFill,
+      filledAt: now,
+      dueAt: now + this.config.hedgeLatencyMs,
+      deadlineAt: now + this.config.hedgeLatencyMs
+        + this.config.hedgeGraceMs,
+      makerOrder: false,
+      projectedNetBpsAtFill,
+      exitReason: 'profitable_taker_exit',
+    };
+    this.checkpoint();
+    return true;
+  }
+
   private activate(now: number): void {
     const quote = this.quote;
     if (!quote || quote.activatedAt != null || now < quote.activeAt) return;
@@ -794,7 +842,9 @@ export class GenericMakerShadow {
       realizedNetUsd: modeled.netUsd,
       exitMakerOrder: pending.makerOrder,
       passed: modeled.netBps > 0,
-      reason: pending.makerOrder ? 'maker_round_trip' : 'max_hold_taker_exit',
+      reason: pending.makerOrder
+        ? 'maker_round_trip'
+        : pending.exitReason ?? 'max_hold_taker_exit',
       fundingBps,
       projectedNetBpsAtExitFill: pending.projectedNetBpsAtFill ?? null,
       hedgeLatencyDeltaBps: pending.projectedNetBpsAtFill == null
@@ -808,6 +858,7 @@ export class GenericMakerShadow {
     this.latestMarkets = new Map(markets.map((market) => [market.coin, market]));
     this.evaluatePending(now);
     if (this.pendingHedge) return;
+    if (this.takeProfitableTakerExit(now)) return;
     if (
       this.pair
       && now - this.pair.openedAt >= this.config.maxHoldMs
@@ -861,6 +912,7 @@ export class GenericMakerShadow {
             deadlineAt: now + this.config.hedgeLatencyMs
               + this.config.hedgeGraceMs,
             makerOrder: false,
+            exitReason: 'max_hold_taker_exit',
             projectedNetBpsAtFill: this.closeProjection(
               now,
               this.pair,

@@ -15,6 +15,7 @@ const config: GenericMakerConfig = {
   cancelEdgeBps: 3,
   postFillNetBps: 3,
   exitNetBps: 1,
+  takerExitNetBps: 1,
   quoteLatencyMs: 0,
   hedgeLatencyMs: 0,
   quoteTtlMs: 60_000,
@@ -92,7 +93,8 @@ describe('GenericMakerShadow', () => {
     engine.evaluate(1_005, [market(1_005, 100.2, 100)]);
 
     expect(results).toHaveLength(1);
-    expect(results[0]?.reason).toBe('maker_round_trip');
+    expect(results[0]?.reason).toBe('profitable_taker_exit');
+    expect(results[0]?.exitMakerOrder).toBe(false);
     expect(results[0]?.passed).toBe(true);
     expect(results[0]?.realizedNetBps).toBeGreaterThan(0);
   });
@@ -151,6 +153,7 @@ describe('GenericMakerShadow', () => {
     const engine = new GenericMakerShadow({
       ...config,
       maxHoldMs: 10,
+      takerExitNetBps: 1_000,
     });
     engine.restore([], {
       pair: {
@@ -180,5 +183,44 @@ describe('GenericMakerShadow', () => {
       stage: 'exit',
       makerOrder: false,
     });
+  });
+
+  it('locks a profitable taker exit instead of waiting for a second maker fill', () => {
+    const engine = new GenericMakerShadow({
+      ...config,
+      takerExitNetBps: 1,
+    });
+    engine.restore([], {
+      pair: {
+        id: 'profitable-pair',
+        coin: 'BNB',
+        makerSide: 'short',
+        openedAt: 100,
+        quantity: 1,
+        entryMaker: 100.2,
+        entryHedge: 100,
+        entryEdgeBps: 20,
+      },
+      pendingHedge: null,
+      cooldownUntil: 0,
+    });
+
+    engine.evaluate(101, [market(101, 100, 100)]);
+    const status = engine.status() as {
+      quote?: unknown;
+      pendingHedge?: {
+        stage?: string;
+        makerOrder?: boolean;
+        projectedNetBpsAtFill?: number;
+      } | null;
+    };
+    expect(status.quote).toBeNull();
+    expect(status.pendingHedge).toMatchObject({
+      stage: 'exit',
+      makerOrder: false,
+    });
+    expect(
+      status.pendingHedge?.projectedNetBpsAtFill,
+    ).toBeGreaterThanOrEqual(1);
   });
 });
