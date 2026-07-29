@@ -724,6 +724,10 @@ const LIGHTER_BBO_MISMATCH_BPS = finiteEnv(
   'VENUE_ARB_LIGHTER_BBO_MISMATCH_BPS',
   2,
 );
+const LIGHTER_VALIDATED_BOOK_FRESH_MS = finiteEnv(
+  'VENUE_ARB_LIGHTER_VALIDATED_BOOK_FRESH_MS',
+  1_500,
+);
 const RECONNECT_MS = 2_000;
 const HORIZONS_MS = [100, 250, 500, 1_000, 2_000, 5_000, 10_000] as const;
 
@@ -1187,8 +1191,8 @@ const grvtMakerShadow = new GenericMakerShadow({
   hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
   maxHoldMs: MAKER_MAX_HOLD_MS,
   independenceMs: MAKER_INDEPENDENCE_MS,
-  bookFreshMs: MAKER_BOOK_FRESH_MS,
-  sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  bookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  sourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
   executionBufferBps: EXECUTION_BUFFER_BPS,
   makerFeeBps: GRVT_MAKER_FEE_BPS,
   hedgeTakerFeeBps: FEE_BPS.lighter,
@@ -1313,8 +1317,8 @@ const extendedLighterMakerShadow = new GenericMakerShadow({
   hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
   maxHoldMs: LIGHTER_EXTENDED_MAKER_MAX_HOLD_MS,
   independenceMs: MAKER_INDEPENDENCE_MS,
-  bookFreshMs: MAKER_BOOK_FRESH_MS,
-  sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  bookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  sourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
   executionBufferBps: EXECUTION_BUFFER_BPS,
   makerFeeBps: 0,
   hedgeTakerFeeBps: FEE_BPS.lighter,
@@ -1356,8 +1360,8 @@ const lighterExtendedMakerShadow = new GenericMakerShadow({
   hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
   maxHoldMs: LIGHTER_EXTENDED_MAKER_MAX_HOLD_MS,
   independenceMs: MAKER_INDEPENDENCE_MS,
-  bookFreshMs: MAKER_BOOK_FRESH_MS,
-  sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  bookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  sourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
   executionBufferBps: EXECUTION_BUFFER_BPS,
   makerFeeBps: FEE_BPS.lighter,
   hedgeTakerFeeBps: FEE_BPS.extended,
