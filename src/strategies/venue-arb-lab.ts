@@ -12,6 +12,7 @@ type Venue =
   | 'polymarket'
   | 'extended'
   | 'aster'
+  | 'hibachi'
   | 'pacifica'
   | 'grvt'
   | 'edgex'
@@ -414,6 +415,7 @@ type Status = {
   asterBinanceMakerShadow?: GenericMakerShadowStatus;
   asterPacificaMakerShadow?: GenericMakerShadowStatus;
   asterLighterMakerShadow?: GenericMakerShadowStatus;
+  hibachiLighterMakerShadow?: GenericMakerShadowStatus;
   extendedLighterMakerShadow?: GenericMakerShadowStatus;
   extendedPacificaMakerShadow?: GenericMakerShadowStatus;
   lighterExtendedMakerShadow?: GenericMakerShadowStatus;
@@ -576,9 +578,11 @@ async function readLive(): Promise<{
 async function readTargeted(): Promise<{
   candidateStatus: Status | null;
   asterStatus: Status | null;
+  hibachiStatus: Status | null;
   extendedMakerGate: ProfitGateStatus | null;
   grvtMakerGate: ProfitGateStatus | null;
   asterMakerGate: ProfitGateStatus | null;
+  hibachiMakerGate: ProfitGateStatus | null;
   extendedLighterTakerGate: ProfitGateStatus | null;
   lighterExtendedTakerGate: ProfitGateStatus | null;
 }> {
@@ -594,6 +598,7 @@ async function readTargeted(): Promise<{
   return {
     candidateStatus: await read<Status | null>('cex-dex-status.json', null),
     asterStatus: await read<Status | null>('aster-lighter-status.json', null),
+    hibachiStatus: await read<Status | null>('hibachi-lighter-status.json', null),
     extendedMakerGate: await read<ProfitGateStatus | null>(
       'extended-lighter-maker-gate-status.json',
       null,
@@ -604,6 +609,10 @@ async function readTargeted(): Promise<{
     ),
     asterMakerGate: await read<ProfitGateStatus | null>(
       'aster-lighter-maker-gate-status.json',
+      null,
+    ),
+    hibachiMakerGate: await read<ProfitGateStatus | null>(
+      'hibachi-lighter-maker-gate-status.json',
       null,
     ),
     extendedLighterTakerGate: await read<ProfitGateStatus | null>(
@@ -1275,10 +1284,12 @@ const VENUE_ARB_PAGINATION_SCRIPT = `<script>
 function candidateRouteRows(
   status: Status | null,
   asterStatus: Status | null,
+  hibachiStatus: Status | null,
   profitGates: {
     extendedLighterMaker: ProfitGateStatus | null;
     grvtLighterMaker: ProfitGateStatus | null;
     asterLighterMaker: ProfitGateStatus | null;
+    hibachiLighterMaker: ProfitGateStatus | null;
   },
 ): string {
   const makerRows = [
@@ -1296,6 +1307,11 @@ function candidateRouteRows(
       label: 'GRVT maker → Lighter',
       maker: status?.grvtMakerShadow,
       gate: profitGates.grvtLighterMaker,
+    },
+    {
+      label: 'Hibachi maker → Lighter',
+      maker: hibachiStatus?.hibachiLighterMakerShadow,
+      gate: profitGates.hibachiLighterMaker,
     },
   ].filter(({ maker }) => maker?.enabled).map(({ label, maker, gate }) => {
     const readiness = maker?.readiness;
@@ -1429,6 +1445,7 @@ async function renderCompact(lang: Lang): Promise<string> {
   ).length;
   const candidateStatus = targeted.candidateStatus;
   const asterStatus = targeted.asterStatus;
+  const hibachiStatus = targeted.hibachiStatus;
   const liveStatusFresh = Boolean(
     liveStatus?.updatedAt
     && Date.now() - liveStatus.updatedAt < 15_000,
@@ -1444,10 +1461,14 @@ async function renderCompact(lang: Lang): Promise<string> {
     || (
       asterStatus?.updatedAt
       && Date.now() - asterStatus.updatedAt < 15_000
+    )
+    || (
+      hibachiStatus?.updatedAt
+      && Date.now() - hibachiStatus.updatedAt < 15_000
     ),
   );
   const candidateVenues = Array.from(new Set(
-    [candidateStatus, asterStatus].flatMap((status) => (
+    [candidateStatus, asterStatus, hibachiStatus].flatMap((status) => (
       status?.venues ?? []
     )).filter((row) => row.enabled && row.venue)
       .map((row) => row.venue as Venue),
@@ -1456,6 +1477,7 @@ async function renderCompact(lang: Lang): Promise<string> {
     (venue) => (
       candidateStatus?.connections?.[venue]?.connected
       || asterStatus?.connections?.[venue]?.connected
+      || hibachiStatus?.connections?.[venue]?.connected
     ),
   ).length;
   const activeMakers = [
@@ -1470,6 +1492,10 @@ async function renderCompact(lang: Lang): Promise<string> {
     {
       maker: candidateStatus?.grvtMakerShadow,
       gate: targeted.grvtMakerGate,
+    },
+    {
+      maker: hibachiStatus?.hibachiLighterMakerShadow,
+      gate: targeted.hibachiMakerGate,
     },
   ].filter(({ maker }) => maker?.enabled);
   const totalAttempts = activeMakers.reduce(
@@ -1521,10 +1547,11 @@ async function renderCompact(lang: Lang): Promise<string> {
         <div class="va-panel-head"><h2>Безкомиссионные маршруты</h2><span>$100 · maker ≤ 0% · Lighter 0%</span></div>
         <div class="va-table"><table><thead><tr>
           <th>Маршрут</th><th>Net сейчас</th><th>Shadow gate</th><th>Статус</th>
-        </tr></thead><tbody>${candidateRouteRows(candidateStatus, asterStatus, {
+        </tr></thead><tbody>${candidateRouteRows(candidateStatus, asterStatus, hibachiStatus, {
           extendedLighterMaker: targeted.extendedMakerGate,
           grvtLighterMaker: targeted.grvtMakerGate,
           asterLighterMaker: targeted.asterMakerGate,
+          hibachiLighterMaker: targeted.hibachiMakerGate,
         })}</tbody></table></div>
       </section>
 
@@ -1777,13 +1804,21 @@ async function render(lang: Lang): Promise<string> {
 export async function venueArbHero(lang: Lang): Promise<string> {
   const targeted = await readTargeted();
   const status = targeted.candidateStatus;
+  const hibachiStatus = targeted.hibachiStatus;
   const isLive = Boolean(
-    status?.updatedAt
-    && Date.now() - status.updatedAt < 15_000,
+    (
+      status?.updatedAt
+      && Date.now() - status.updatedAt < 15_000
+    )
+    || (
+      hibachiStatus?.updatedAt
+      && Date.now() - hibachiStatus.updatedAt < 15_000
+    ),
   );
   const routeCount = Object.keys(status?.executionShadow?.routes ?? {}).length
     + (status?.extendedLighterMakerShadow?.enabled ? 1 : 0)
-    + (status?.grvtMakerShadow?.enabled ? 1 : 0);
+    + (status?.grvtMakerShadow?.enabled ? 1 : 0)
+    + (hibachiStatus?.hibachiLighterMakerShadow?.enabled ? 1 : 0);
   const samples = Math.max(
     Number(
       targeted.extendedLighterTakerGate?.metrics?.samples
@@ -1803,6 +1838,11 @@ export async function venueArbHero(lang: Lang): Promise<string> {
     Number(
       targeted.grvtMakerGate?.metrics?.samples
       ?? status?.grvtMakerShadow?.readiness?.samples
+      ?? 0,
+    ),
+    Number(
+      targeted.hibachiMakerGate?.metrics?.samples
+      ?? hibachiStatus?.hibachiLighterMakerShadow?.readiness?.samples
       ?? 0,
     ),
   );

@@ -16,6 +16,8 @@ ASTER_GATE_TIMER = "venue-arb-aster-lighter-maker-gate.timer"
 COMBINED_SHADOW_SERVICE = "venue-arb-extended-lighter-shadow.service"
 EXTENDED_GATE_TIMER = "venue-arb-extended-lighter-maker-gate.timer"
 GRVT_GATE_TIMER = "venue-arb-grvt-lighter-maker-gate.timer"
+HIBACHI_SHADOW_SERVICE = "venue-arb-hibachi-lighter-shadow.service"
+HIBACHI_GATE_TIMER = "venue-arb-hibachi-lighter-maker-gate.timer"
 
 
 def read_gate(path: Path) -> dict[str, Any] | None:
@@ -40,10 +42,12 @@ def stop_plan(
     aster_gate: dict[str, Any] | None,
     extended_gate: dict[str, Any] | None,
     grvt_gate: dict[str, Any] | None,
+    hibachi_gate: dict[str, Any] | None,
 ) -> dict[str, Any]:
     aster_no_go = is_no_go(aster_gate)
     extended_no_go = is_no_go(extended_gate)
     grvt_no_go = is_no_go(grvt_gate)
+    hibachi_no_go = is_no_go(hibachi_gate)
     stop_units: list[str] = []
     disable_units: list[str] = []
     if aster_no_go:
@@ -56,11 +60,20 @@ def stop_plan(
             EXTENDED_GATE_TIMER,
             GRVT_GATE_TIMER,
         ])
+    if hibachi_no_go:
+        stop_units.append(HIBACHI_SHADOW_SERVICE)
+        disable_units.extend([HIBACHI_SHADOW_SERVICE, HIBACHI_GATE_TIMER])
     return {
         "asterNoGo": aster_no_go,
         "extendedNoGo": extended_no_go,
         "grvtNoGo": grvt_no_go,
-        "allNoGo": aster_no_go and extended_no_go and grvt_no_go,
+        "hibachiNoGo": hibachi_no_go,
+        "allNoGo": (
+            aster_no_go
+            and extended_no_go
+            and grvt_no_go
+            and hibachi_no_go
+        ),
         "stopUnits": stop_units,
         "disableUnits": disable_units,
     }
@@ -103,16 +116,19 @@ def atomic_json(path: Path, payload: dict[str, Any]) -> None:
 def self_test() -> None:
     observe = {"decision": "OBSERVE"}
     no_go = {"decision": "NO_GO"}
-    assert stop_plan(observe, observe, observe)["stopUnits"] == []
-    aster = stop_plan(no_go, observe, observe)
+    assert stop_plan(observe, observe, observe, observe)["stopUnits"] == []
+    aster = stop_plan(no_go, observe, observe, observe)
     assert aster["stopUnits"] == [ASTER_SHADOW_SERVICE]
-    shared = stop_plan(observe, no_go, no_go)
+    shared = stop_plan(observe, no_go, no_go, observe)
     assert shared["stopUnits"] == [COMBINED_SHADOW_SERVICE]
-    all_failed = stop_plan(no_go, no_go, no_go)
+    hibachi = stop_plan(observe, observe, observe, no_go)
+    assert hibachi["stopUnits"] == [HIBACHI_SHADOW_SERVICE]
+    all_failed = stop_plan(no_go, no_go, no_go, no_go)
     assert all_failed["allNoGo"] is True
     assert set(all_failed["stopUnits"]) == {
         ASTER_SHADOW_SERVICE,
         COMBINED_SHADOW_SERVICE,
+        HIBACHI_SHADOW_SERVICE,
     }
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "controller.json"
@@ -150,6 +166,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--hibachi-gate",
+        default=os.getenv(
+            "VENUE_ARB_HIBACHI_GATE",
+            "/home/trader/apps/venue-arb-tokyo/data/hibachi-lighter-shadow/"
+            "hibachi-lighter-maker-gate-status.json",
+        ),
+    )
+    parser.add_argument(
         "--output",
         default=os.getenv(
             "VENUE_ARB_CONTROLLER_OUTPUT",
@@ -166,8 +190,14 @@ def main() -> None:
         "aster": read_gate(Path(args.aster_gate)),
         "extended": read_gate(Path(args.extended_gate)),
         "grvt": read_gate(Path(args.grvt_gate)),
+        "hibachi": read_gate(Path(args.hibachi_gate)),
     }
-    plan = stop_plan(gates["aster"], gates["extended"], gates["grvt"])
+    plan = stop_plan(
+        gates["aster"],
+        gates["extended"],
+        gates["grvt"],
+        gates["hibachi"],
+    )
     actions: list[dict[str, Any]] = []
     for unit in plan["stopUnits"]:
         actions.append(systemctl("stop", unit, args.dry_run))

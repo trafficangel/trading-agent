@@ -3,6 +3,7 @@ Description=Stop fee-free arbitrage shadows after confirmed NO-GO
 After=venue-arb-aster-lighter-maker-gate.service
 After=venue-arb-extended-lighter-maker-gate.service
 After=venue-arb-grvt-lighter-maker-gate.service
+After=venue-arb-hibachi-lighter-maker-gate.service
 
 [Service]
 Type=oneshot
