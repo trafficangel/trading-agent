@@ -1,10 +1,11 @@
 /**
- * Read-only Binance -> Lighter lead-lag execution shadow.
+ * Read-only Binance + Extended -> Lighter lead-lag execution shadow.
  *
- * Binance is used only as the fast public signal. Entries and exits are
- * modeled against the live Lighter BBO after explicit execution latency,
- * top-level capacity checks and a configurable round-trip execution buffer.
- * There are no private clients, keys or order methods in this process.
+ * Binance is used as the fast public signal and Extended must confirm its
+ * direction before an entry is modeled. Entries and exits are modeled against
+ * the live Lighter BBO after explicit execution latency, top-level capacity
+ * checks and a configurable round-trip execution buffer. There are no private
+ * clients, keys or order methods in this process.
  */
 
 import {
@@ -23,6 +24,7 @@ import {
   topLevelDepthUsd,
   type LeadLagSide,
 } from '../lib/lighter-leadlag.js';
+import WebSocket, { type ClientOptions, type RawData } from 'ws';
 
 type Market = {
   coin: string;
@@ -43,6 +45,7 @@ type Quote = {
 type Point = {
   at: number;
   binanceMid: number;
+  extendedMid: number;
   lighterMid: number;
 };
 
@@ -61,6 +64,7 @@ type Probe = {
   state: 'awaiting_entry' | 'open';
   signalAt: number;
   signalLeaderBps: number;
+  signalConfirmBps: number;
   signalResidualBps: number;
   entryDueAt: number;
   openedAt: number | null;
@@ -78,6 +82,7 @@ type Result = {
   openedAt: number | null;
   closedAt: number;
   signalLeaderBps: number;
+  signalConfirmBps: number;
   signalResidualBps: number;
   entryPrice: number | null;
   exitPrice: number | null;
@@ -140,6 +145,7 @@ const EXECUTION_BUFFER_BPS = finiteEnv(
   'LIGHTER_LEADLAG_EXECUTION_BUFFER_BPS',
   1,
 );
+const CONFIRM_RATIO = finiteEnv('LIGHTER_LEADLAG_CONFIRM_RATIO', 0.5);
 const INDEPENDENCE_MS = finiteEnv(
   'LIGHTER_LEADLAG_INDEPENDENCE_MS',
   5_000,
@@ -168,6 +174,7 @@ const CONFIGS: readonly Config[] = LOOKBACKS_MS.flatMap((lookbackMs) => (
 ));
 const configById = new Map(CONFIGS.map((config) => [config.id, config]));
 const bySymbol = new Map(MARKETS.map((market) => [market.symbol, market]));
+const byCoin = new Map(MARKETS.map((market) => [market.coin, market]));
 const byLighterId = new Map(
   MARKETS.map((market) => [market.lighterMarketId, market]),
 );
@@ -177,12 +184,19 @@ const binanceQuotes = new Map(
 const lighterQuotes = new Map(
   MARKETS.map((market) => [market.coin, emptyQuote()]),
 );
+const extendedQuotes = new Map(
+  MARKETS.map((market) => [market.coin, emptyQuote()]),
+);
+const extendedDepth = new Map(MARKETS.map((market) => [
+  market.coin,
+  { bids: new Map<number, number>(), asks: new Map<number, number>() },
+]));
 const history = new Map(
   MARKETS.map((market) => [market.coin, [] as Point[]]),
 );
 const probes = new Map<string, Probe>();
 const lastSignalAt = new Map<string, number>();
-const connections: Record<'binance' | 'lighter', Connection> = {
+const connections: Record<'binance' | 'lighter' | 'extended', Connection> = {
   binance: {
     connected: false,
     messages: 0,
@@ -190,6 +204,12 @@ const connections: Record<'binance' | 'lighter', Connection> = {
     lastMessageAt: 0,
   },
   lighter: {
+    connected: false,
+    messages: 0,
+    reconnects: 0,
+    lastMessageAt: 0,
+  },
+  extended: {
     connected: false,
     messages: 0,
     reconnects: 0,
@@ -254,49 +274,46 @@ function atomicJson(path: string, data: unknown): void {
   renameSync(temporary, path);
 }
 
-function textData(data: unknown): string {
+function textData(data: RawData): string {
   if (typeof data === 'string') return data;
   if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8');
-  if (ArrayBuffer.isView(data)) {
-    return Buffer
-      .from(data.buffer, data.byteOffset, data.byteLength)
-      .toString('utf8');
-  }
-  return String(data);
+  if (Array.isArray(data)) return Buffer.concat(data).toString('utf8');
+  return Buffer.from(data).toString('utf8');
 }
 
 function connect(
-  venue: 'binance' | 'lighter',
+  venue: 'binance' | 'lighter' | 'extended',
   url: string,
   onOpen: (socket: WebSocket) => void,
   onMessage: (payload: unknown, receivedAt: number) => void,
+  options?: ClientOptions,
 ): void {
   if (shuttingDown) return;
-  const socket = new WebSocket(url);
-  socket.addEventListener('open', () => {
+  const socket = new WebSocket(url, options);
+  socket.on('open', () => {
     connections[venue].connected = true;
     onOpen(socket);
     console.warn(`lighter-leadlag ${venue} connected`);
   });
-  socket.addEventListener('message', (event) => {
+  socket.on('message', (data) => {
     const receivedAt = Date.now();
     connections[venue].messages++;
     connections[venue].lastMessageAt = receivedAt;
     try {
-      onMessage(JSON.parse(textData(event.data)), receivedAt);
+      onMessage(JSON.parse(textData(data)), receivedAt);
     } catch (error) {
       console.warn(`lighter-leadlag ${venue} parse`, error);
     }
   });
-  socket.addEventListener('error', () => {
+  socket.on('error', () => {
     connections[venue].connected = false;
   });
-  socket.addEventListener('close', () => {
+  socket.on('close', () => {
     connections[venue].connected = false;
     connections[venue].reconnects++;
     if (!shuttingDown) {
       setTimeout(
-        () => connect(venue, url, onOpen, onMessage),
+        () => connect(venue, url, onOpen, onMessage, options),
         2_000,
       ).unref();
     }
@@ -395,6 +412,83 @@ function startBinance(): void {
   );
 }
 
+function updateExtendedLevels(
+  target: Map<number, number>,
+  rows: unknown,
+  replace: boolean,
+): void {
+  if (replace) target.clear();
+  if (!Array.isArray(rows)) return;
+  for (const raw of rows) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as { p?: unknown; q?: unknown; c?: unknown };
+    const price = finite(row.p);
+    const size = finite(replace ? row.q ?? row.c : row.c ?? row.q);
+    if (!(price > 0) || size < 0) continue;
+    if (size === 0) target.delete(price);
+    else target.set(price, size);
+  }
+}
+
+function startExtended(): void {
+  connect(
+    'extended',
+    'wss://api.starknet.extended.exchange/stream.extended.exchange/v1/orderbooks',
+    (socket) => {
+      const timer = setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) socket.ping();
+        else clearInterval(timer);
+      }, 10_000);
+      timer.unref();
+    },
+    (payload, receivedAt) => {
+      const message = payload as {
+        type?: unknown;
+        ts?: unknown;
+        data?: { m?: unknown; b?: unknown; a?: unknown };
+      };
+      if (!message.data || typeof message.data.m !== 'string') return;
+      const coin = message.data.m.endsWith('-USD')
+        ? message.data.m.slice(0, -'-USD'.length)
+        : '';
+      const market = byCoin.get(coin);
+      const depth = market ? extendedDepth.get(market.coin) : null;
+      const quote = market ? extendedQuotes.get(market.coin) : null;
+      if (!depth || !quote) return;
+      if (message.type === 'SNAPSHOT') {
+        updateExtendedLevels(depth.bids, message.data.b, true);
+        updateExtendedLevels(depth.asks, message.data.a, true);
+      } else if (message.type === 'DELTA') {
+        updateExtendedLevels(depth.bids, message.data.b, false);
+        updateExtendedLevels(depth.asks, message.data.a, false);
+      } else {
+        return;
+      }
+      const bids = [...depth.bids.entries()]
+        .filter(([price, size]) => price > 0 && size > 0)
+        .sort((left, right) => right[0] - left[0]);
+      const asks = [...depth.asks.entries()]
+        .filter(([price, size]) => price > 0 && size > 0)
+        .sort((left, right) => left[0] - right[0]);
+      const bid = bids[0];
+      const ask = asks[0];
+      if (!bid || !ask || !(ask[0] > bid[0])) return;
+      Object.assign(quote, {
+        bid: bid[0],
+        ask: ask[0],
+        bidSize: bid[1],
+        askSize: ask[1],
+        exchangeAt: normalizeTimestamp(message.ts, receivedAt),
+        receivedAt,
+        updates: quote.updates + 1,
+      });
+    },
+    {
+      headers: { 'User-Agent': 'RobotClaude-LighterLeadLag/1.0' },
+    },
+  );
+}
+
 function quoteFresh(quote: Quote, now: number): boolean {
   return (
     quote.bid > 0
@@ -436,6 +530,7 @@ function completeRejected(
     openedAt: probe.openedAt,
     closedAt: now,
     signalLeaderBps: probe.signalLeaderBps,
+    signalConfirmBps: probe.signalConfirmBps,
     signalResidualBps: probe.signalResidualBps,
     entryPrice: probe.entryPrice,
     exitPrice: null,
@@ -452,27 +547,35 @@ function completeRejected(
 function currentResidual(
   probe: Probe,
   now: number,
-): { leaderBps: number; residualBps: number } | null {
+): { leaderBps: number; confirmBps: number; residualBps: number } | null {
   const config = configById.get(probe.configId);
   const points = history.get(probe.coin);
   const binance = binanceQuotes.get(probe.coin);
+  const extended = extendedQuotes.get(probe.coin);
   const lighter = lighterQuotes.get(probe.coin);
-  if (!config || !points || !binance || !lighter) return null;
+  if (!config || !points || !binance || !extended || !lighter) return null;
   const before = pointAt(points, probe.signalAt - config.lookbackMs);
   if (!before) return null;
   const binanceMid = (binance.bid + binance.ask) / 2;
+  const extendedMid = (extended.bid + extended.ask) / 2;
   const lighterMid = (lighter.bid + lighter.ask) / 2;
   const leaderBps = leadLagReturnBps(binanceMid, before.binanceMid);
+  const confirmBps = leadLagReturnBps(extendedMid, before.extendedMid);
   const residualBps = leadLagResidualBps(
     binanceMid,
     before.binanceMid,
     lighterMid,
     before.lighterMid,
   );
-  if (leaderBps == null || residualBps == null || now < probe.signalAt) {
+  if (
+    leaderBps == null
+    || confirmBps == null
+    || residualBps == null
+    || now < probe.signalAt
+  ) {
     return null;
   }
-  return { leaderBps, residualBps };
+  return { leaderBps, confirmBps, residualBps };
 }
 
 function updateProbes(now: number): void {
@@ -480,13 +583,18 @@ function updateProbes(now: number): void {
     const config = configById.get(probe.configId);
     const lighter = lighterQuotes.get(probe.coin);
     const binance = binanceQuotes.get(probe.coin);
-    if (!config || !lighter || !binance) {
+    const extended = extendedQuotes.get(probe.coin);
+    if (!config || !lighter || !binance || !extended) {
       completeRejected(probe, now, 'stale_at_entry');
       continue;
     }
     if (probe.state === 'awaiting_entry') {
       if (now < probe.entryDueAt) continue;
-      if (!quoteFresh(lighter, now) || !quoteFresh(binance, now)) {
+      if (
+        !quoteFresh(lighter, now)
+        || !quoteFresh(binance, now)
+        || !quoteFresh(extended, now)
+      ) {
         completeRejected(probe, now, 'stale_at_entry');
         continue;
       }
@@ -501,9 +609,15 @@ function updateProbes(now: number): void {
         : probe.side === 'long'
           ? residual.leaderBps
           : -residual.leaderBps;
+      const signedConfirm = residual == null
+        ? -Infinity
+        : probe.side === 'long'
+          ? residual.confirmBps
+          : -residual.confirmBps;
       if (
         signedResidual < config.thresholdBps / 2
         || signedLeader < config.thresholdBps / 2
+        || signedConfirm < config.thresholdBps * CONFIRM_RATIO
       ) {
         completeRejected(probe, now, 'signal_decayed');
         continue;
@@ -551,6 +665,7 @@ function updateProbes(now: number): void {
       openedAt: probe.openedAt,
       closedAt: now,
       signalLeaderBps: probe.signalLeaderBps,
+      signalConfirmBps: probe.signalConfirmBps,
       signalResidualBps: probe.signalResidualBps,
       entryPrice: probe.entryPrice,
       exitPrice,
@@ -572,22 +687,30 @@ function evaluateSignals(now: number, market: Market, point: Point): void {
     const before = pointAt(points, now - config.lookbackMs);
     if (!before) continue;
     const leaderBps = leadLagReturnBps(point.binanceMid, before.binanceMid);
+    const confirmBps = leadLagReturnBps(
+      point.extendedMid,
+      before.extendedMid,
+    );
     const residualBps = leadLagResidualBps(
       point.binanceMid,
       before.binanceMid,
       point.lighterMid,
       before.lighterMid,
     );
-    if (leaderBps == null || residualBps == null) continue;
+    if (leaderBps == null || confirmBps == null || residualBps == null) {
+      continue;
+    }
     let side: LeadLagSide | null = null;
     if (
       leaderBps >= config.thresholdBps
       && residualBps >= config.thresholdBps
+      && confirmBps >= config.thresholdBps * CONFIRM_RATIO
     ) {
       side = 'long';
     } else if (
       leaderBps <= -config.thresholdBps
       && residualBps <= -config.thresholdBps
+      && confirmBps <= -config.thresholdBps * CONFIRM_RATIO
     ) {
       side = 'short';
     }
@@ -604,6 +727,7 @@ function evaluateSignals(now: number, market: Market, point: Point): void {
       state: 'awaiting_entry',
       signalAt: now,
       signalLeaderBps: leaderBps,
+      signalConfirmBps: confirmBps,
       signalResidualBps: residualBps,
       entryDueAt: now + ENTRY_LATENCY_MS,
       openedAt: null,
@@ -621,11 +745,19 @@ function sample(): void {
   updateProbes(now);
   for (const market of MARKETS) {
     const binance = binanceQuotes.get(market.coin)!;
+    const extended = extendedQuotes.get(market.coin)!;
     const lighter = lighterQuotes.get(market.coin)!;
-    if (!quoteFresh(binance, now) || !quoteFresh(lighter, now)) continue;
+    if (
+      !quoteFresh(binance, now)
+      || !quoteFresh(extended, now)
+      || !quoteFresh(lighter, now)
+    ) {
+      continue;
+    }
     const point: Point = {
       at: now,
       binanceMid: (binance.bid + binance.ask) / 2,
+      extendedMid: (extended.bid + extended.ask) / 2,
       lighterMid: (lighter.bid + lighter.ask) / 2,
     };
     const points = history.get(market.coin)!;
@@ -673,7 +805,7 @@ function writeStatus(): void {
   const now = Date.now();
   const ranked = statusRows();
   atomicJson(STATUS_PATH, {
-    version: 'lighter-leadlag-shadow-v1',
+    version: 'lighter-leadlag-shadow-v2',
     readOnly: true,
     researchOnly: true,
     startedAt,
@@ -684,6 +816,7 @@ function writeStatus(): void {
       entryLatencyMs: ENTRY_LATENCY_MS,
       notionalUsd: NOTIONAL_USD,
       executionBufferBps: EXECUTION_BUFFER_BPS,
+      confirmRatio: CONFIRM_RATIO,
       independenceMs: INDEPENDENCE_MS,
       lookbacksMs: LOOKBACKS_MS,
       holdsMs: HOLDS_MS,
@@ -706,6 +839,9 @@ function writeStatus(): void {
         lighter: lighterQuotes.get(market.coin)?.receivedAt
           ? now - lighterQuotes.get(market.coin)!.receivedAt
           : null,
+        extended: extendedQuotes.get(market.coin)?.receivedAt
+          ? now - extendedQuotes.get(market.coin)!.receivedAt
+          : null,
       },
     ])),
     recent: results.slice(-50).reverse(),
@@ -726,6 +862,7 @@ mkdirSync(DATA_DIR, { recursive: true });
 startedAt = Date.now();
 startLighter();
 startBinance();
+startExtended();
 const sampleTimer = setInterval(sample, SAMPLE_MS);
 const statusTimer = setInterval(writeStatus, 2_000);
 process.on('SIGTERM', () => shutdown('SIGTERM'));
