@@ -294,6 +294,19 @@ def adaptive_entry_confirmations(
     return base_confirmations
 
 
+def source_entry_confirmations(
+    *,
+    candidate_source: str,
+    adaptive_confirmations: int,
+) -> int:
+    # A direct calibration candidate is already one full two-venue REST
+    # snapshot. The entry path performs a second, independent REST
+    # revalidation before reaching this decision.
+    if candidate_source == "direct_rest_calibration":
+        return 1
+    return adaptive_confirmations
+
+
 def calibrated_basis_deviation(
     *,
     samples: list[tuple[int, float]],
@@ -595,6 +608,10 @@ class Canary:
         self.rest_calibration_path = (
             self.data_dir / "rest-calibration-v1.ndjson"
         )
+        self.rest_calibration_cache_signature: (
+            tuple[int, int] | None
+        ) = None
+        self.rest_calibration_cache_rows: list[dict[str, Any]] = []
         self.lock_path = self.data_dir / "live.lock"
         self.running = True
         self.shutdown_requested = False
@@ -698,6 +715,14 @@ class Canary:
             "entryNetPct": self.entry_net_bps / 100,
             "entryConfirmations": self.entry_confirmations,
             "adaptiveEntryConfirmations": {
+                "directRest": {
+                    "confirmations": 1,
+                    "observations": 2,
+                    "note": (
+                        "calibration snapshot plus independent "
+                        "pre-order REST revalidation"
+                    ),
+                },
                 "fast": {
                     "confirmations": 1,
                     "minExpectedNetPct": self.fast_entry_net_bps / 100,
@@ -1330,14 +1355,23 @@ class Canary:
                 )
         return rows
 
-    def rest_calibration_candidate(self) -> dict[str, Any] | None:
+    def recent_rest_calibration_rows(self) -> list[dict[str, Any]]:
         path = self.rest_calibration_path
         if not path.exists():
-            return None
-        now = int(time.time() * 1000)
-        max_age_ms = max(self.source_fresh_ms, 5_000)
+            return []
         try:
             size = path.stat().st_size
+            signature = (path.stat().st_mtime_ns, size)
+            if signature == getattr(
+                self,
+                "rest_calibration_cache_signature",
+                None,
+            ):
+                return getattr(
+                    self,
+                    "rest_calibration_cache_rows",
+                    [],
+                )
             with path.open("rb") as handle:
                 handle.seek(max(0, size - 256_000))
                 payload = handle.read().decode(
@@ -1345,13 +1379,24 @@ class Canary:
                     errors="ignore",
                 )
         except OSError:
-            return None
+            return []
         rows: list[dict[str, Any]] = []
         for line in payload.splitlines()[-500:]:
             try:
-                row = json.loads(line)
+                parsed = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if isinstance(parsed, dict):
+                rows.append(parsed)
+        self.rest_calibration_cache_signature = signature
+        self.rest_calibration_cache_rows = rows
+        return rows
+
+    def rest_calibration_candidate(self) -> dict[str, Any] | None:
+        now = int(time.time() * 1000)
+        max_age_ms = max(self.source_fresh_ms, 5_000)
+        rows: list[dict[str, Any]] = []
+        for row in self.recent_rest_calibration_rows():
             at = int(row.get("at", 0) or 0)
             route_id = str(row.get("routeId") or "")
             coin = str(row.get("coin") or "")
@@ -1411,6 +1456,32 @@ class Canary:
             "_quoteVersion": f"rest-calibration:{at}",
             "_candidateSource": "direct_rest_calibration",
         }
+
+    def latest_rest_quote(
+        self,
+        coin: str,
+    ) -> dict[str, Any] | None:
+        now = int(time.time() * 1000)
+        max_age_ms = max(self.source_fresh_ms, 5_000)
+        for row in reversed(self.recent_rest_calibration_rows()):
+            at = int(row.get("at", 0) or 0)
+            if at < now - max_age_ms:
+                break
+            if (
+                row.get("coin") == coin
+                and at <= now + 1_000
+                and all(
+                    finite_float(row.get(field), 0) > 0
+                    for field in (
+                        "extendedBuyVwap",
+                        "extendedSellVwap",
+                        "lighterBuyVwap",
+                        "lighterSellVwap",
+                    )
+                )
+            ):
+                return row
+        return None
 
     def candidate(self) -> dict[str, Any] | None:
         status = self.read_json(self.execution_path, {})
@@ -2685,6 +2756,18 @@ class Canary:
                             "routeId": route_id,
                             "route": ROUTES[route_id][2],
                             "notionalUsd": self.notional,
+                            "extendedBuyVwap": quote[
+                                "extendedBuyVwap"
+                            ],
+                            "extendedSellVwap": quote[
+                                "extendedSellVwap"
+                            ],
+                            "lighterBuyVwap": quote[
+                                "lighterBuyVwap"
+                            ],
+                            "lighterSellVwap": quote[
+                                "lighterSellVwap"
+                            ],
                             "currentBps": current_bps,
                             "baselineBps": (
                                 metrics["baselineBps"]
@@ -2909,20 +2992,40 @@ class Canary:
     ) -> dict[str, float] | None:
         status = self.read_json(self.execution_path, {})
         now = int(time.time() * 1000)
-        if (
-            status.get("version") != "venue-arb-execution-v2"
-            or now - int(status.get("updatedAt", 0) or 0) > self.fresh_ms
-        ):
-            return None
-        quote = (status.get("closingQuotes") or {}).get(coin) or {}
-        ages = (
-            float(quote.get("extendedBookAgeMs") or math.inf),
-            float(quote.get("lighterBookAgeMs") or math.inf),
-        )
-        source_ages = (
-            float(quote.get("extendedSourceAgeMs") or math.inf),
-            float(quote.get("lighterSourceAgeMs") or math.inf),
-        )
+        direct_quote = self.latest_rest_quote(coin)
+        if direct_quote is not None:
+            quote = direct_quote
+            quote_at = int(direct_quote.get("at", 0) or 0)
+            ages = (now - quote_at, now - quote_at)
+            source_ages = ages
+        else:
+            if (
+                status.get("version") != "venue-arb-execution-v2"
+                or now - int(status.get("updatedAt", 0) or 0)
+                > self.fresh_ms
+            ):
+                return None
+            quote = (
+                (status.get("closingQuotes") or {}).get(coin)
+                or {}
+            )
+            quote_at = int(status.get("updatedAt", 0) or 0)
+            ages = (
+                float(
+                    quote.get("extendedBookAgeMs") or math.inf
+                ),
+                float(
+                    quote.get("lighterBookAgeMs") or math.inf
+                ),
+            )
+            source_ages = (
+                float(
+                    quote.get("extendedSourceAgeMs") or math.inf
+                ),
+                float(
+                    quote.get("lighterSourceAgeMs") or math.inf
+                ),
+            )
         if extended_is_buy:
             ext_exit = float(quote.get("extendedSellVwap") or 0)
             lit_exit = float(quote.get("lighterBuyVwap") or 0)
@@ -2978,7 +3081,7 @@ class Canary:
             "fundingReserveUsd": funding_reserve_usd,
             "netPnlUsd": net,
             "netPnlPct": net / max(actual_notional, 1e-9) * 100,
-            "quoteAt": float(status.get("updatedAt", 0) or 0),
+            "quoteAt": float(quote_at),
         }
 
     def projected_maker_exit(
@@ -3799,7 +3902,7 @@ class Canary:
                     quote_version = str(
                         candidate.get("_quoteVersion") or ""
                     )
-                    pending_required_confirmations = (
+                    adaptive_confirmations = (
                         adaptive_entry_confirmations(
                             base_confirmations=self.entry_confirmations,
                             expected_net_bps=finite_float(
@@ -3817,6 +3920,16 @@ class Canary:
                             medium_net_bps=self.medium_entry_net_bps,
                             medium_deviation_bps=(
                                 self.medium_entry_deviation_bps
+                            ),
+                        )
+                    )
+                    pending_required_confirmations = (
+                        source_entry_confirmations(
+                            candidate_source=str(
+                                candidate.get("_candidateSource") or ""
+                            ),
+                            adaptive_confirmations=(
+                                adaptive_confirmations
                             ),
                         )
                     )
@@ -3989,6 +4102,14 @@ def self_test() -> None:
         deviation_bps=19,
         **confirmation_args,
     ) == 2
+    assert source_entry_confirmations(
+        candidate_source="direct_rest_calibration",
+        adaptive_confirmations=3,
+    ) == 1
+    assert source_entry_confirmations(
+        candidate_source="local_monitor",
+        adaptive_confirmations=3,
+    ) == 3
     pending_id: str | None = None
     pending_version: str | None = None
     confirmations = 0
@@ -4119,6 +4240,10 @@ def self_test() -> None:
                     "samples": 200,
                     "spanMs": 180_000,
                     "qualified": True,
+                    "extendedBuyVwap": 100.1,
+                    "extendedSellVwap": 100.0,
+                    "lighterBuyVwap": 99.9,
+                    "lighterSellVwap": 99.8,
                 }
             )
             + "\n",
@@ -4133,6 +4258,10 @@ def self_test() -> None:
         assert direct_candidate["_candidateSource"] == (
             "direct_rest_calibration"
         )
+        direct_quote = rest_guard.latest_rest_quote("HYPE")
+        assert direct_quote is not None
+        assert direct_quote["extendedSellVwap"] == 100.0
+        assert direct_quote["lighterBuyVwap"] == 99.9
 
     async def taker_revalidation_check() -> None:
         guard = object.__new__(Canary)
