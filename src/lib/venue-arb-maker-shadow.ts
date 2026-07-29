@@ -811,8 +811,35 @@ export class GenericMakerShadow {
     if (
       this.pair
       && now - this.pair.openedAt >= this.config.maxHoldMs
-      && !this.quote
     ) {
+      if (
+        this.quote?.firstFillAt != null
+        && this.quote.queue.remaining < this.quote.initialQuantity
+      ) {
+        this.append({
+          id: this.pair.id,
+          routeId: this.config.routeId,
+          coin: this.pair.coin,
+          makerSide: this.pair.makerSide,
+          openedAt: this.pair.openedAt,
+          closedAt: now,
+          holdingMs: Math.max(0, now - this.pair.openedAt),
+          entryMaker: this.pair.entryMaker,
+          entryHedge: this.pair.entryHedge,
+          exitMaker: this.quote.price,
+          exitHedge: null,
+          entryEdgeBps: this.pair.entryEdgeBps,
+          realizedNetBps: null,
+          realizedNetUsd: null,
+          exitMakerOrder: true,
+          passed: false,
+          reason: 'exit_partial_fill_unhedged_at_max_hold',
+          fundingBps: 0,
+        });
+        this.reset(now);
+        return;
+      }
+      this.quote = null;
       const market = this.latestMarkets.get(this.pair.coin);
       if (market?.maker && market.hedge && this.fresh(now, market.maker, market.hedge)) {
         const side: MakerSide = this.pair.makerSide === 'long' ? 'sell' : 'buy';

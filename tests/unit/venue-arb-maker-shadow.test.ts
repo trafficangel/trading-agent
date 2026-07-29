@@ -146,4 +146,39 @@ describe('GenericMakerShadow', () => {
     expect(status.quote?.price).toBe(100.2);
     expect(status.quote?.distanceBps).toBeGreaterThan(0);
   });
+
+  it('forces a taker exit at max hold even while an exit quote is open', () => {
+    const engine = new GenericMakerShadow({
+      ...config,
+      maxHoldMs: 10,
+    });
+    engine.restore([], {
+      pair: {
+        id: 'restored-pair',
+        coin: 'BNB',
+        makerSide: 'short',
+        openedAt: 100,
+        quantity: 1,
+        entryMaker: 100.1,
+        entryHedge: 100,
+        entryEdgeBps: 10,
+      },
+      pendingHedge: null,
+      cooldownUntil: 0,
+    });
+
+    engine.evaluate(100, [market(100, 100, 100)]);
+    expect((engine.status() as { quote?: unknown }).quote).toBeTruthy();
+
+    engine.evaluate(111, [market(111, 100, 100)]);
+    const status = engine.status() as {
+      quote?: unknown;
+      pendingHedge?: { stage?: string; makerOrder?: boolean } | null;
+    };
+    expect(status.quote).toBeNull();
+    expect(status.pendingHedge).toMatchObject({
+      stage: 'exit',
+      makerOrder: false,
+    });
+  });
 });
