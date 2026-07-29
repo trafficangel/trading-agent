@@ -411,7 +411,29 @@ type Status = {
   grvtExtendedMakerShadow?: GenericMakerShadowStatus;
   extendedAsterMakerShadow?: GenericMakerShadowStatus;
   extendedLighterMakerShadow?: GenericMakerShadowStatus;
+  extendedPacificaMakerShadow?: GenericMakerShadowStatus;
   lighterExtendedMakerShadow?: GenericMakerShadowStatus;
+};
+type ProfitGateStatus = {
+  updatedAt?: number;
+  routeId?: string;
+  ready?: boolean;
+  reasons?: string[];
+  requirements?: {
+    minSamples?: number;
+    minProfitFactor?: number;
+    maxDrawdownBps?: number;
+  };
+  metrics?: {
+    samples?: number;
+    positive?: number;
+    winRatePct?: number | null;
+    sumNetBps?: number;
+    sumNetUsd?: number;
+    meanNetBps?: number | null;
+    profitFactor?: number | null;
+    maxDrawdownBps?: number;
+  };
 };
 type LiveFill = {
   price?: number;
@@ -542,6 +564,33 @@ async function readLive(): Promise<{
   return {
     status: await read<LiveStatus | null>('live-status.json', null),
     trades: await read<LiveTrade[]>('live-trades.json', []),
+  };
+}
+
+async function readTargeted(): Promise<{
+  status: Status | null;
+  takerGate: ProfitGateStatus | null;
+  makerGate: ProfitGateStatus | null;
+}> {
+  const read = async <T>(file: string, fallback: T): Promise<T> => {
+    try {
+      return JSON.parse(
+        await fs.readFile(path.join(dataRoot(), file), 'utf8'),
+      ) as T;
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    status: await read<Status | null>('pacifica-extended-status.json', null),
+    takerGate: await read<ProfitGateStatus | null>(
+      'pacifica-extended-gate-status.json',
+      null,
+    ),
+    makerGate: await read<ProfitGateStatus | null>(
+      'extended-pacifica-maker-gate-status.json',
+      null,
+    ),
   };
 }
 
@@ -1194,7 +1243,242 @@ const VENUE_ARB_PAGINATION_SCRIPT = `<script>
 })();
 </script>`;
 
-async function render(lang: Lang): Promise<string> {
+function gateState(gate: ProfitGateStatus | null): string {
+  if (!gate) return 'НЕТ ДАННЫХ';
+  return gate.ready ? 'ДОПУСК ПОЛУЧЕН' : 'РЕАЛ ЗАПРЕЩЁН';
+}
+
+function gateReason(gate: ProfitGateStatus | null): string {
+  if (!gate) return 'Ожидаем синхронизацию.';
+  const reasons = gate.reasons ?? [];
+  if (!reasons.length) return 'Все финансовые условия выполнены.';
+  return reasons
+    .slice(0, 3)
+    .map((reason) => reason
+      .replace(/^samples /, 'сделки ')
+      .replace('cumulative net is not positive', 'накопленный net не положительный')
+      .replace('profit factor', 'PF')
+      .replace('95% mean lower bound is not positive', 'статистическая граница прибыли ≤ 0'))
+    .join(' · ');
+}
+
+function compactGate(
+  title: string,
+  subtitle: string,
+  gate: ProfitGateStatus | null,
+  currentCoin: unknown,
+  currentNetBps: unknown,
+  extra: string,
+): string {
+  const metrics = gate?.metrics;
+  const required = Number(gate?.requirements?.minSamples ?? 30);
+  return `<article class="va-test ${gate?.ready ? 'ready' : ''}">
+    <div class="va-test-head"><div><span>${esc(subtitle)}</span><h3>${esc(title)}</h3></div>
+      <b class="${gate?.ready ? 'pos' : 'neg'}">${gateState(gate)}</b>
+    </div>
+    <div class="va-test-metrics">
+      <span><small>Сделки</small><b>${Number(metrics?.samples ?? 0)} / ${required}</b></span>
+      <span><small>Net</small><b class="${cls(metrics?.sumNetBps)}">${pctFromBps(metrics?.sumNetBps)} · ${money(metrics?.sumNetUsd, true)}</b></span>
+      <span><small>PF</small><b>${metrics?.profitFactor == null ? '—' : Number(metrics.profitFactor).toFixed(2)}</b></span>
+      <span><small>Лучший сейчас</small><b>${coinAndBps(currentCoin, currentNetBps)}</b></span>
+      ${extra}
+    </div>
+    <p>${esc(gateReason(gate))}</p>
+  </article>`;
+}
+
+function targetedShadowRows(
+  shadow: ExecutionShadow | undefined,
+  maker: GenericMakerShadowStatus | undefined,
+): string {
+  const takerRoute = shadow?.routes?.['pacifica-extended'];
+  const takerActive = (takerRoute?.active ?? []).map((row) => ({
+    at: row.signalAt,
+    coin: row.coin,
+    route: 'Pacifica → Extended',
+    model: 'taker / taker',
+    status: 'В РАБОТЕ',
+    netBps: row.peakProjectedNetBps ?? row.signalNetBps,
+    detail: shadowProbeState(row.state),
+  }));
+  const takerClosed = (takerRoute?.recent ?? []).map((row) => ({
+    at: row.exitAt ?? row.signalAt,
+    coin: row.coin,
+    route: 'Pacifica → Extended',
+    model: 'taker / taker',
+    status: row.passed ? 'PASS' : 'FAIL',
+    netBps: row.realizedNetBps,
+    detail: shadowReason(row.reason),
+  }));
+  const makerActive = maker?.pair ? [{
+    at: maker.pair.openedAt,
+    coin: maker.pair.coin,
+    route: 'Extended → Pacifica',
+    model: 'maker / taker',
+    status: 'В РАБОТЕ',
+    netBps: maker.pair.entryEdgeBps,
+    detail: 'пара открыта',
+  }] : [];
+  const makerClosed = (maker?.recent ?? []).map((row) => ({
+    at: row.closedAt,
+    coin: row.coin,
+    route: 'Extended → Pacifica',
+    model: 'maker / taker',
+    status: row.passed ? 'PASS' : 'FAIL',
+    netBps: row.realizedNetBps,
+    detail: makerReason(row.reason),
+  }));
+  const rows = [
+    ...takerActive,
+    ...takerClosed,
+    ...makerActive,
+    ...makerClosed,
+  ].sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
+  if (!rows.length) {
+    return '<tr><td colspan="7">Подходящих исполнительно‑реалистичных входов пока не было.</td></tr>';
+  }
+  return rows.map((row) => `<tr>
+    <td>${utc(row.at)}</td><td><b>${esc(row.coin)}</b></td>
+    <td>${esc(row.route)}</td><td>${esc(row.model)}</td>
+    <td class="${row.status === 'PASS' ? 'pos' : row.status === 'FAIL' ? 'neg' : ''}">${esc(row.status)}</td>
+    <td class="${cls(row.netBps)}"><b>${pctFromBps(row.netBps)}</b></td>
+    <td>${esc(row.detail)}</td>
+  </tr>`).join('');
+}
+
+function compactLiveRows(rows: LiveTrade[]): string {
+  if (!rows.length) {
+    return '<tr><td colspan="7">Реальных арбитражных сделок пока нет.</td></tr>';
+  }
+  return [...rows].reverse().map((row) => {
+    const closed = row.status === 'closed' || row.status === 'failed_flat';
+    return `<tr>
+      <td>${utc(row.openedAt ?? row.startedAt)} → ${row.closedAt ? utc(row.closedAt) : '—'}</td>
+      <td><b>${esc(row.coin)}</b><small>${esc(row.route)}</small></td>
+      <td>${money(row.notionalUsdPerLeg)} × 2</td>
+      <td>${price(row.entryExtended?.price)} / ${price(row.entryLighter?.price)}</td>
+      <td>${price(row.exitExtended?.price)} / ${price(row.exitLighter?.price)}</td>
+      <td>${money(row.feesUsd)}</td>
+      <td class="${cls(row.netPnlUsd)}"><b>${money(row.netPnlUsd, true)} · ${plainPct(row.netPnlPct, true)}</b><small>${closed ? 'закрыта' : esc(row.status)}${row.closeReason ? ` · ${esc(row.closeReason)}` : ''}</small></td>
+    </tr>`;
+  }).join('');
+}
+
+async function renderCompact(lang: Lang): Promise<string> {
+  const [liveData, targeted] = await Promise.all([
+    readLive(),
+    readTargeted(),
+  ]);
+  const liveStatus = liveData.status;
+  const liveTrades = liveData.trades ?? [];
+  const closedLive = liveTrades.filter((row) => (
+    row.status === 'closed' || row.status === 'failed_flat'
+  ));
+  const liveNet = closedLive.reduce(
+    (sum, row) => sum + Number(row.netPnlUsd ?? 0),
+    0,
+  );
+  const liveFees = closedLive.reduce(
+    (sum, row) => sum + Number(row.feesUsd ?? 0),
+    0,
+  );
+  const liveWins = closedLive.filter(
+    (row) => Number(row.netPnlUsd ?? 0) > 0,
+  ).length;
+  const targetStatus = targeted.status;
+  const targetFresh = Boolean(
+    targetStatus?.updatedAt
+    && Date.now() - targetStatus.updatedAt < 15_000,
+  );
+  const targetConnected = ['pacifica', 'extended'].filter(
+    (venue) => targetStatus?.connections?.[venue as Venue]?.connected,
+  ).length;
+  const targetShadow = targetStatus?.executionShadow;
+  const takerRoute = targetShadow?.routes?.['pacifica-extended'];
+  const makerShadow = targetStatus?.extendedPacificaMakerShadow;
+  const realPaused = !liveStatus?.enabled;
+  const realStateClass = liveStatus?.enabled ? 'pos' : 'neg';
+  const canaryReady = Boolean(
+    targeted.takerGate?.ready || targeted.makerGate?.ready,
+  );
+  const targetSamples = Number(targeted.takerGate?.metrics?.samples ?? 0)
+    + Number(targeted.makerGate?.metrics?.samples ?? 0);
+  return pageShell(
+    t(lang, 'Арбитраж — контроль прибыли', 'Arbitrage profit control'),
+    `<style>${VENUE_ARB_CSS}
+      .va-compact .va-cards{grid-template-columns:repeat(4,1fr)}
+      .va-decision{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 20px;border:1px solid ${canaryReady ? 'rgba(56,217,150,.45)' : 'rgba(255,101,119,.32)'};border-radius:14px;background:${canaryReady ? 'rgba(56,217,150,.06)' : 'rgba(255,101,119,.05)'}}
+      .va-decision h2{margin:4px 0 5px;font-size:21px}.va-decision p{margin:0;color:var(--text-dim);font-size:13px}.va-decision>b{white-space:nowrap;font-size:14px}
+      .va-test-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}.va-test{padding:17px;border:1px solid var(--border);border-radius:14px;background:var(--bg-card)}.va-test.ready{border-color:rgba(56,217,150,.4)}.va-test-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.va-test-head span{color:var(--text-faint);font-size:10px;letter-spacing:.05em}.va-test-head h3{font-size:16px;margin:5px 0}.va-test-head>b{font-size:11px;white-space:nowrap}.va-test-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:12px 0}.va-test-metrics span{display:grid;gap:3px;padding:9px;background:var(--bg);border-radius:9px}.va-test-metrics small{font-size:9px;color:var(--text-faint);text-transform:uppercase}.va-test-metrics b{font-size:13px}.va-test p{margin:0;color:var(--text-dim);font-size:11px}
+      .va-compact .va-panel{padding:16px}.va-compact .va-panel-head h2{margin:0}.va-compact .va-table td small{display:block}.va-compact-note{margin:10px 0 0;color:var(--text-faint);font-size:11px}
+      @media(max-width:900px){.va-compact .va-cards{grid-template-columns:repeat(2,1fr)}.va-test-grid{grid-template-columns:1fr}.va-test-metrics{grid-template-columns:repeat(2,1fr)}}@media(max-width:520px){.va-compact .va-cards{grid-template-columns:1fr}.va-decision{display:block}.va-decision>b{display:block;margin-top:12px}}
+    </style>
+    <div class="va-wrap va-compact">
+      <a class="va-back" href="/lab">← Лаборатория</a>
+      <div class="va-head"><div>
+        <span class="va-badge">ARBITRAGE CONTROL · NET AFTER COSTS</span>
+        <h1>Арбитраж: только доказанная прибыль</h1>
+        <p>Здесь остались только реальные деньги и два актуальных Pacifica ↔ Extended теста. Старые маршруты и техническая телеметрия продолжают собираться в фоне, но больше не загромождают экран.</p>
+      </div><div class="va-engine ${targetFresh ? 'live' : ''}"><i></i>${targetFresh ? 'МОНИТОР РАБОТАЕТ' : 'НЕТ СВЕЖИХ ДАННЫХ'}</div></div>
+
+      <div class="va-cards">
+        <div class="va-card"><small>Реальный net PnL</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b><em>после ${money(liveFees)} комиссий</em></div>
+        <div class="va-card"><small>Реальная торговля</small><b class="${realStateClass}">${realPaused ? 'ПАУЗА' : liveState(liveStatus)}</b><em>${realPaused ? 'ждёт положительный shadow-gate' : 'canary активен'}</em></div>
+        <div class="va-card"><small>Закрыто / прибыльных</small><b>${closedLive.length} / ${liveWins}</b><em>только фактические fills</em></div>
+        <div class="va-card"><small>Актуальные тесты</small><b>${targetSamples} / 60</b><em>потоки ${targetConnected}/2 · два gate по 30</em></div>
+      </div>
+
+      <div class="va-decision">
+        <div><span class="va-badge">ТЕКУЩЕЕ РЕШЕНИЕ</span>
+          <h2>${canaryReady ? 'Можно готовить одну canary-сделку' : 'Реальные входы запрещены'}</h2>
+          <p>${canaryReady ? 'Хотя бы один маршрут прошёл финансовый допуск.' : 'Ни один маршрут ещё не доказал положительный net на достаточной независимой выборке.'}</p>
+        </div><b class="${canaryReady ? 'pos' : 'neg'}">${canaryReady ? 'GATE PASS' : 'GATE CLOSED'}</b>
+      </div>
+
+      <div class="va-test-grid">
+        ${compactGate(
+    'Pacifica → Extended',
+    'TAKER / TAKER · 250 MS',
+    targeted.takerGate,
+    takerRoute?.telemetry?.currentBestCoin,
+    takerRoute?.telemetry?.currentBestNetBps,
+    `<span><small>Окна</small><b>${Number(takerRoute?.telemetry?.eligibleWindows ?? 0)}</b></span><span><small>Блокер</small><b>${shadowBlockers(takerRoute?.telemetry)}</b></span>`,
+  )}
+        ${compactGate(
+    'Extended → Pacifica',
+    'MAKER 0% / TAKER · 250 MS',
+    targeted.makerGate,
+    makerShadow?.telemetry?.bestObservedTopCoin,
+    makerShadow?.telemetry?.bestObservedTopNetBps,
+    `<span><small>Fills / quotes</small><b>${Number(makerShadow?.telemetry?.queueFills ?? 0)} / ${Number(makerShadow?.telemetry?.quotes ?? 0)}</b></span><span><small>Поток сделок</small><b class="${makerShadow?.telemetry?.tradeStreamConnected ? 'pos' : 'neg'}">${makerShadow?.telemetry?.tradeStreamConnected ? 'LIVE' : 'OFFLINE'}</b></span>`,
+  )}
+      </div>
+
+      <section class="va-panel">
+        <div class="va-panel-head"><h2>Shadow-сделки актуальных тестов</h2><span>автообновление 5 сек</span></div>
+        <div class="va-table" data-va-pager="target-shadow" data-page-size="20"><table><thead><tr>
+          <th>UTC</th><th>Монета</th><th>Маршрут</th><th>Исполнение</th><th>Статус</th><th>Net</th><th>Причина</th>
+        </tr></thead><tbody>${targetedShadowRows(targetShadow, makerShadow)}</tbody></table></div>
+      </section>
+
+      <section class="va-panel va-live-panel">
+        <div class="va-panel-head"><h2>Реальный журнал</h2><span class="${realStateClass}">${realPaused ? 'ТОРГОВЛЯ НА ПАУЗЕ' : liveState(liveStatus)}</span></div>
+        <div class="va-table" data-va-pager="live-trades" data-page-size="20"><table><thead><tr>
+          <th>Открыта → закрыта UTC</th><th>Монета / маршрут</th><th>Размер</th><th>Вход Ext / Lighter</th><th>Выход Ext / Lighter</th><th>Комиссии</th><th>Net результат</th>
+        </tr></thead><tbody>${compactLiveRows(liveTrades)}</tbody></table></div>
+        ${liveStatus?.reason ? `<p class="va-compact-note">Решение: ${esc(liveStatus.reason)}</p>` : ''}
+      </section>
+
+      <section class="va-panel">
+        <div class="va-rules"><span>$100 на ногу</span><span>все комиссии</span><span>VWAP стакана</span><span>задержка Pacifica ≥250 ms</span><span>минимум 30 сделок</span><span>PF ≥1.20</span><span>95% lower bound &gt;0</span><span>реал только после gate</span></div>
+      </section>
+    </div>
+    ${VENUE_ARB_PAGINATION_SCRIPT}`,
+    { autoRefreshSec: 5, lang },
+  );
+}
+
+async function renderLegacy(lang: Lang): Promise<string> {
   const [status, liveData] = await Promise.all([readStatus(), readLive()]);
   const liveStatus = liveData.status;
   const makerLive = liveStatus?.executionMode === 'maker-taker';
@@ -1407,6 +1691,12 @@ async function render(lang: Lang): Promise<string> {
     ${VENUE_ARB_PAGINATION_SCRIPT}`,
     { autoRefreshSec: 5, lang },
   );
+}
+
+async function render(lang: Lang): Promise<string> {
+  return process.env.VENUE_ARB_LEGACY_UI === 'true'
+    ? renderLegacy(lang)
+    : renderCompact(lang);
 }
 
 export async function venueArbHero(lang: Lang): Promise<string> {
