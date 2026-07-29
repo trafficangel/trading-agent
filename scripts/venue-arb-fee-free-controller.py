@@ -22,6 +22,8 @@ COINBASE_SHADOW_SERVICE = "venue-arb-coinbase-lighter-shadow.service"
 COINBASE_GATE_TIMER = "venue-arb-coinbase-lighter-maker-gate.timer"
 ETHEREAL_SHADOW_SERVICE = "venue-arb-ethereal-lighter-shadow.service"
 ETHEREAL_GATE_TIMER = "venue-arb-ethereal-lighter-maker-gate.timer"
+HOTSTUFF_SHADOW_SERVICE = "venue-arb-hotstuff-lighter-shadow.service"
+HOTSTUFF_GATE_TIMER = "venue-arb-hotstuff-lighter-maker-gate.timer"
 
 
 def read_gate(path: Path) -> dict[str, Any] | None:
@@ -49,6 +51,7 @@ def stop_plan(
     hibachi_gate: dict[str, Any] | None,
     coinbase_gate: dict[str, Any] | None,
     ethereal_gate: dict[str, Any] | None,
+    hotstuff_gate: dict[str, Any] | None,
 ) -> dict[str, Any]:
     aster_no_go = is_no_go(aster_gate)
     extended_no_go = is_no_go(extended_gate)
@@ -56,6 +59,7 @@ def stop_plan(
     hibachi_no_go = is_no_go(hibachi_gate)
     coinbase_no_go = is_no_go(coinbase_gate)
     ethereal_no_go = is_no_go(ethereal_gate)
+    hotstuff_no_go = is_no_go(hotstuff_gate)
     stop_units: list[str] = []
     disable_units: list[str] = []
     if aster_no_go:
@@ -77,6 +81,9 @@ def stop_plan(
     if ethereal_no_go:
         stop_units.append(ETHEREAL_SHADOW_SERVICE)
         disable_units.extend([ETHEREAL_SHADOW_SERVICE, ETHEREAL_GATE_TIMER])
+    if hotstuff_no_go:
+        stop_units.append(HOTSTUFF_SHADOW_SERVICE)
+        disable_units.extend([HOTSTUFF_SHADOW_SERVICE, HOTSTUFF_GATE_TIMER])
     return {
         "asterNoGo": aster_no_go,
         "extendedNoGo": extended_no_go,
@@ -84,6 +91,7 @@ def stop_plan(
         "hibachiNoGo": hibachi_no_go,
         "coinbaseNoGo": coinbase_no_go,
         "etherealNoGo": ethereal_no_go,
+        "hotstuffNoGo": hotstuff_no_go,
         "allNoGo": (
             aster_no_go
             and extended_no_go
@@ -91,6 +99,7 @@ def stop_plan(
             and hibachi_no_go
             and coinbase_no_go
             and ethereal_no_go
+            and hotstuff_no_go
         ),
         "stopUnits": stop_units,
         "disableUnits": disable_units,
@@ -135,19 +144,29 @@ def self_test() -> None:
     observe = {"decision": "OBSERVE"}
     no_go = {"decision": "NO_GO"}
     assert stop_plan(
-        observe, observe, observe, observe, observe, observe
+        observe, observe, observe, observe, observe, observe, observe
     )["stopUnits"] == []
-    aster = stop_plan(no_go, observe, observe, observe, observe, observe)
+    aster = stop_plan(no_go, observe, observe, observe, observe, observe, observe)
     assert aster["stopUnits"] == [ASTER_SHADOW_SERVICE]
-    shared = stop_plan(observe, no_go, no_go, observe, observe, observe)
+    shared = stop_plan(observe, no_go, no_go, observe, observe, observe, observe)
     assert shared["stopUnits"] == [COMBINED_SHADOW_SERVICE]
-    hibachi = stop_plan(observe, observe, observe, no_go, observe, observe)
+    hibachi = stop_plan(
+        observe, observe, observe, no_go, observe, observe, observe
+    )
     assert hibachi["stopUnits"] == [HIBACHI_SHADOW_SERVICE]
-    coinbase = stop_plan(observe, observe, observe, observe, no_go, observe)
+    coinbase = stop_plan(
+        observe, observe, observe, observe, no_go, observe, observe
+    )
     assert coinbase["stopUnits"] == [COINBASE_SHADOW_SERVICE]
-    ethereal = stop_plan(observe, observe, observe, observe, observe, no_go)
+    ethereal = stop_plan(
+        observe, observe, observe, observe, observe, no_go, observe
+    )
     assert ethereal["stopUnits"] == [ETHEREAL_SHADOW_SERVICE]
-    all_failed = stop_plan(no_go, no_go, no_go, no_go, no_go, no_go)
+    hotstuff = stop_plan(
+        observe, observe, observe, observe, observe, observe, no_go
+    )
+    assert hotstuff["stopUnits"] == [HOTSTUFF_SHADOW_SERVICE]
+    all_failed = stop_plan(no_go, no_go, no_go, no_go, no_go, no_go, no_go)
     assert all_failed["allNoGo"] is True
     assert set(all_failed["stopUnits"]) == {
         ASTER_SHADOW_SERVICE,
@@ -155,6 +174,7 @@ def self_test() -> None:
         HIBACHI_SHADOW_SERVICE,
         COINBASE_SHADOW_SERVICE,
         ETHEREAL_SHADOW_SERVICE,
+        HOTSTUFF_SHADOW_SERVICE,
     }
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "controller.json"
@@ -216,6 +236,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--hotstuff-gate",
+        default=os.getenv(
+            "VENUE_ARB_HOTSTUFF_GATE",
+            "/home/trader/apps/venue-arb-tokyo/data/hotstuff-lighter-shadow/"
+            "hotstuff-lighter-maker-gate-status.json",
+        ),
+    )
+    parser.add_argument(
         "--output",
         default=os.getenv(
             "VENUE_ARB_CONTROLLER_OUTPUT",
@@ -235,6 +263,7 @@ def main() -> None:
         "hibachi": read_gate(Path(args.hibachi_gate)),
         "coinbase": read_gate(Path(args.coinbase_gate)),
         "ethereal": read_gate(Path(args.ethereal_gate)),
+        "hotstuff": read_gate(Path(args.hotstuff_gate)),
     }
     plan = stop_plan(
         gates["aster"],
@@ -243,6 +272,7 @@ def main() -> None:
         gates["hibachi"],
         gates["coinbase"],
         gates["ethereal"],
+        gates["hotstuff"],
     )
     actions: list[dict[str, Any]] = []
     for unit in plan["stopUnits"]:

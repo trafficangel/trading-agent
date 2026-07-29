@@ -42,6 +42,10 @@ import {
   type HibachiDepthSide,
 } from '../lib/hibachi-depth-book.js';
 import {
+  parseHotstuffBook,
+  parseHotstuffTrade,
+} from '../lib/hotstuff-market-data.js';
+import {
   executableVwap,
   netConvergenceEdgeBps,
   normalizeExchangeTimestampMs,
@@ -97,6 +101,7 @@ type Venue =
   | 'edgex'
   | 'coinbase'
   | 'ethereal'
+  | 'hotstuff'
   | 'binance'
   | 'bybit';
 type VenueClass = 'DEX' | 'CEX';
@@ -531,6 +536,18 @@ const ETHEREAL_LIGHTER_MAKER_ACTIVE_PATH = resolve(
 const ETHEREAL_LIGHTER_MAKER_EVENTS_PATH = resolve(
   DATA_DIR,
   'ethereal-lighter-maker-events-v1.ndjson',
+);
+const HOTSTUFF_LIGHTER_MAKER_RESULTS_PATH = resolve(
+  DATA_DIR,
+  'hotstuff-lighter-maker-basis-shadow-v1.ndjson',
+);
+const HOTSTUFF_LIGHTER_MAKER_ACTIVE_PATH = resolve(
+  DATA_DIR,
+  'hotstuff-lighter-maker-basis-active-v1.json',
+);
+const HOTSTUFF_LIGHTER_MAKER_EVENTS_PATH = resolve(
+  DATA_DIR,
+  'hotstuff-lighter-maker-events-v1.ndjson',
 );
 const EXTENDED_LIGHTER_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
@@ -1083,6 +1100,54 @@ const ETHEREAL_REQUEST_TIMEOUT_MS = Math.max(
   250,
   finiteEnv('VENUE_ARB_ETHEREAL_REQUEST_TIMEOUT_MS', 2_000),
 );
+const HOTSTUFF_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_SHADOW_ENABLED',
+  false,
+);
+const HOTSTUFF_LIGHTER_MAKER_NOTIONAL_USD = finiteEnv(
+  'VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_NOTIONAL_USD',
+  100,
+);
+const HOTSTUFF_LIGHTER_MAKER_ENTRY_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_ENTRY_EDGE_BPS',
+  1,
+);
+const HOTSTUFF_LIGHTER_MAKER_CANCEL_EDGE_BPS = signedFiniteEnv(
+  'VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_CANCEL_EDGE_BPS',
+  0.5,
+);
+const HOTSTUFF_LIGHTER_MAKER_POST_FILL_NET_BPS = finiteEnv(
+  'VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_POST_FILL_NET_BPS',
+  0.5,
+);
+const HOTSTUFF_LIGHTER_MAKER_EXIT_NET_BPS = finiteEnv(
+  'VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_EXIT_NET_BPS',
+  1,
+);
+const HOTSTUFF_LIGHTER_MAKER_QUOTE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_QUOTE_LATENCY_MS',
+  250,
+);
+const HOTSTUFF_LIGHTER_MAKER_HEDGE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_HEDGE_LATENCY_MS',
+  300,
+);
+const HOTSTUFF_LIGHTER_MAKER_QUOTE_TTL_MS = finiteEnv(
+  'VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_QUOTE_TTL_MS',
+  15_000,
+);
+const HOTSTUFF_LIGHTER_MAKER_MAX_QUEUE_USD = finiteEnv(
+  'VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_MAX_QUEUE_USD',
+  100_000,
+);
+const HOTSTUFF_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS = finiteEnv(
+  'VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS',
+  500,
+);
+const HOTSTUFF_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
+  'VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_MAX_TRADE_IDLE_MS',
+  15 * 60_000,
+);
 const EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
   'VENUE_ARB_EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED',
   false,
@@ -1406,6 +1471,18 @@ const ETHEREAL_VENUE_COINS = new Set(
 const ETHEREAL_VENUE_MARKETS = ACTIVE_MARKETS.filter(
   (market) => ETHEREAL_VENUE_COINS.has(market.coin),
 );
+const HOTSTUFF_VENUE_COINS = new Set(
+  (
+    process.env.VENUE_ARB_HOTSTUFF_COINS
+    ?? 'BTC,ETH,HYPE'
+  )
+    .split(',')
+    .map((coin) => coin.trim().toUpperCase())
+    .filter(Boolean),
+);
+const HOTSTUFF_VENUE_MARKETS = ACTIVE_MARKETS.filter(
+  (market) => HOTSTUFF_VENUE_COINS.has(market.coin),
+);
 
 const VENUES: readonly Venue[] = [
   'lighter',
@@ -1420,6 +1497,7 @@ const VENUES: readonly Venue[] = [
   'edgex',
   'coinbase',
   'ethereal',
+  'hotstuff',
   'binance',
   'bybit',
 ];
@@ -1453,6 +1531,7 @@ const VENUE_CLASS: Record<Venue, VenueClass> = {
   edgex: 'DEX',
   coinbase: 'CEX',
   ethereal: 'DEX',
+  hotstuff: 'DEX',
   binance: 'CEX',
   bybit: 'CEX',
 };
@@ -1477,6 +1556,9 @@ const FEE_BPS: Record<Venue, number> = {
   coinbase: finiteEnv('VENUE_ARB_FEE_BPS_COINBASE', 3),
   // Ethereal mainnet product metadata currently reports 0 maker / 3 bps taker.
   ethereal: finiteEnv('VENUE_ARB_FEE_BPS_ETHEREAL', 3),
+  // Hotstuff standard perps taker fee is 0.025%; its negative maker fee is
+  // modelled only in the dedicated maker route.
+  hotstuff: finiteEnv('VENUE_ARB_FEE_BPS_HOTSTUFF', 2.5),
   binance: finiteEnv('VENUE_ARB_FEE_BPS_BINANCE', 5),
   bybit: finiteEnv('VENUE_ARB_FEE_BPS_BYBIT', 5.5),
 };
@@ -1836,6 +1918,7 @@ const asterLastTradeAt = new Map<string, number>();
 const hibachiLastTradeAt = new Map<string, number>();
 const coinbaseLastTradeAt = new Map<string, number>();
 const etherealLastTradeAt = new Map<string, number>();
+const hotstuffLastTradeAt = new Map<string, number>();
 const extendedLastTradeAt = new Map<string, number>();
 const lighterLastTradeAt = new Map<string, number>();
 const grvtLastTradeAt = new Map<string, number>();
@@ -1843,6 +1926,7 @@ const bySymbol = new Map(ACTIVE_MARKETS.map((market) => [market.symbol, market])
 const byCoin = new Map(ACTIVE_MARKETS.map((market) => [market.coin, market]));
 const byLighterId = new Map(ACTIVE_MARKETS.map((market) => [market.lighterMarketId, market]));
 const etherealProductByCoin = new Map<string, EtherealProduct>();
+const hotstuffBookSequence = new Map<string, number>();
 const etherealTelemetry = {
   productRefreshes: 0,
   bookUpdates: 0,
@@ -2419,6 +2503,65 @@ const etherealLighterMakerShadow = new GenericMakerShadow({
   onEvent: (event) => {
     appendFileSync(
       ETHEREAL_LIGHTER_MAKER_EVENTS_PATH,
+      `${JSON.stringify(event)}\n`,
+    );
+  },
+});
+const hotstuffLighterMakerShadow = new GenericMakerShadow({
+  routeId: 'hotstuff-maker-lighter',
+  makerVenue: 'hotstuff',
+  hedgeVenue: 'lighter',
+  notionalUsd: HOTSTUFF_LIGHTER_MAKER_NOTIONAL_USD,
+  entryEdgeBps: HOTSTUFF_LIGHTER_MAKER_ENTRY_EDGE_BPS,
+  cancelEdgeBps: HOTSTUFF_LIGHTER_MAKER_CANCEL_EDGE_BPS,
+  postFillNetBps: HOTSTUFF_LIGHTER_MAKER_POST_FILL_NET_BPS,
+  exitNetBps: HOTSTUFF_LIGHTER_MAKER_EXIT_NET_BPS,
+  takerExitNetBps: HOTSTUFF_LIGHTER_MAKER_EXIT_NET_BPS,
+  quoteLatencyMs: HOTSTUFF_LIGHTER_MAKER_QUOTE_LATENCY_MS,
+  hedgeLatencyMs: HOTSTUFF_LIGHTER_MAKER_HEDGE_LATENCY_MS,
+  quoteTtlMs: HOTSTUFF_LIGHTER_MAKER_QUOTE_TTL_MS,
+  maxQueueUsd: HOTSTUFF_LIGHTER_MAKER_MAX_QUEUE_USD,
+  quoteDataGraceMs: HOTSTUFF_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS,
+  hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
+  maxHoldMs: MAKER_MAX_HOLD_MS,
+  independenceMs: MAKER_INDEPENDENCE_MS,
+  bookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  sourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  makerBookFreshMs: SHADOW_EXECUTION_FRESH_MS,
+  makerSourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  hedgeBookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  hedgeSourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  executionBufferBps: EXECUTION_BUFFER_BPS,
+  // Standard perps tier pays a 0.002% maker rebate.
+  makerFeeBps: -0.2,
+  hedgeTakerFeeBps: FEE_BPS.lighter,
+  makerFallbackTakerFeeBps: FEE_BPS.hotstuff,
+  fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+  requiredSamples: SHADOW_REQUIRED_SAMPLES,
+  requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
+  maxEntryDistanceBps: 3,
+  maxMakerTradeIdleMs: HOTSTUFF_LIGHTER_MAKER_MAX_TRADE_IDLE_MS,
+}, {
+  onResult: (result) => {
+    appendFileSync(
+      HOTSTUFF_LIGHTER_MAKER_RESULTS_PATH,
+      `${JSON.stringify(result)}\n`,
+    );
+  },
+  onCheckpoint: (checkpoint) => {
+    atomicJson(HOTSTUFF_LIGHTER_MAKER_ACTIVE_PATH, {
+      ...checkpoint,
+      updatedAt: Date.now(),
+    });
+  },
+  onEvent: (event) => {
+    appendFileSync(
+      HOTSTUFF_LIGHTER_MAKER_EVENTS_PATH,
       `${JSON.stringify(event)}\n`,
     );
   },
@@ -4317,6 +4460,9 @@ function connect(
     if (venue === 'ethereal' && ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED) {
       etherealLighterMakerShadow.setTradeStreamConnected(false);
     }
+    if (venue === 'hotstuff' && HOTSTUFF_LIGHTER_MAKER_SHADOW_ENABLED) {
+      hotstuffLighterMakerShadow.setTradeStreamConnected(false);
+    }
     console.warn(`venue-arb ${venue} websocket error`, error.message);
   });
   ws.on('close', (code, reason) => {
@@ -4352,6 +4498,10 @@ function connect(
     if (venue === 'ethereal' && ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED) {
       etherealLighterMakerShadow.setTradeStreamConnected(false);
       etherealLighterMakerShadow.recordTradeReconnect();
+    }
+    if (venue === 'hotstuff' && HOTSTUFF_LIGHTER_MAKER_SHADOW_ENABLED) {
+      hotstuffLighterMakerShadow.setTradeStreamConnected(false);
+      hotstuffLighterMakerShadow.recordTradeReconnect();
     }
     console.warn(
       `venue-arb ${venue} closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
@@ -4667,6 +4817,91 @@ function startEthereal(): void {
   };
 
   void initialize();
+}
+
+function startHotstuff(): void {
+  if (!HOTSTUFF_VENUE_MARKETS.length) return;
+  connect(
+    'hotstuff',
+    // The documented /ws endpoint currently redirects; WebSocket upgrades
+    // succeed directly on the canonical trailing-slash endpoint.
+    'wss://api.hotstuff.trade/ws/',
+    (ws) => {
+      if (HOTSTUFF_LIGHTER_MAKER_SHADOW_ENABLED) {
+        hotstuffLighterMakerShadow.setTradeStreamConnected(true);
+      }
+      let id = 0;
+      for (const market of HOTSTUFF_VENUE_MARKETS) {
+        for (const channel of ['orderbook', 'trades']) {
+          ws.send(JSON.stringify({
+            jsonrpc: '2.0',
+            id: ++id,
+            method: 'subscribe',
+            params: {
+              channel,
+              symbol: `${market.coin}-PERP`,
+            },
+          }));
+        }
+      }
+    },
+    (payload, receivedAt, ws) => {
+      const parsedBook = parseHotstuffBook(payload, receivedAt);
+      if (parsedBook) {
+        if (!HOTSTUFF_VENUE_COINS.has(parsedBook.coin)) return;
+        const book = books.get(bookKey('hotstuff', parsedBook.coin));
+        if (!book) return;
+        const previous = hotstuffBookSequence.get(parsedBook.coin);
+        if (
+          !parsedBook.snapshot
+          && (previous == null || parsedBook.sequence !== previous + 1)
+        ) {
+          hotstuffBookSequence.delete(parsedBook.coin);
+          book.bids.clear();
+          book.asks.clear();
+          book.exchangeAt = 0;
+          book.receivedAt = 0;
+          executableBooks.delete(bookKey('hotstuff', parsedBook.coin));
+          ws.terminate();
+          return;
+        }
+        if (parsedBook.snapshot) {
+          replacePriceLevels(book.bids, parsedBook.bids);
+          replacePriceLevels(book.asks, parsedBook.asks);
+        } else {
+          for (const [price, size] of parsedBook.bids) {
+            if (size === 0) book.bids.delete(price);
+            else book.bids.set(price, size);
+          }
+          for (const [price, size] of parsedBook.asks) {
+            if (size === 0) book.asks.delete(price);
+            else book.asks.set(price, size);
+          }
+        }
+        hotstuffBookSequence.set(parsedBook.coin, parsedBook.sequence);
+        markBook(book, parsedBook.exchangeAt, receivedAt);
+        return;
+      }
+      if (!HOTSTUFF_LIGHTER_MAKER_SHADOW_ENABLED) return;
+      const trade = parseHotstuffTrade(payload, receivedAt);
+      if (!trade || !HOTSTUFF_VENUE_COINS.has(trade.coin)) return;
+      const activityAt = makerActivityTimestamp(
+        trade.tradeAt,
+        receivedAt,
+        SHADOW_SOURCE_FRESH_MS,
+      );
+      if (activityAt != null) {
+        hotstuffLastTradeAt.set(trade.coin, activityAt);
+      }
+      hotstuffLighterMakerShadow.processTrade(trade, receivedAt);
+    },
+    {
+      headers: {
+        Origin: 'https://hotstuff.trade',
+        'User-Agent': 'RobotClaude-Arb-Shadow/1.0',
+      },
+    },
+  );
 }
 
 function startBinance(): void {
@@ -6399,6 +6634,11 @@ function writeStatus(): void {
         ...etherealTelemetry,
       },
     },
+    hotstuffLighterMakerShadow: {
+      ...hotstuffLighterMakerShadow.status(),
+      enabled: HOTSTUFF_LIGHTER_MAKER_SHADOW_ENABLED,
+      feeEligibility: 'standard_perps_maker_rebate',
+    },
     extendedLighterMakerShadow: {
       ...extendedLighterMakerShadow.status(),
       enabled: EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED,
@@ -6754,7 +6994,8 @@ function genericMakerMarkets(
     | 'aster'
     | 'hibachi'
     | 'coinbase'
-    | 'ethereal',
+    | 'ethereal'
+    | 'hotstuff',
   hedgeVenue: 'lighter' | 'extended' | 'aster' | 'pacifica' | 'binance',
   now: number,
   notionalUsd: number,
@@ -6855,6 +7096,8 @@ function genericMakerMarkets(
             ? coinbaseLastTradeAt
           : makerVenue === 'ethereal'
             ? etherealLastTradeAt
+          : makerVenue === 'hotstuff'
+            ? hotstuffLastTradeAt
           : makerVenue === 'extended'
             ? extendedLastTradeAt
             : makerVenue === 'lighter'
@@ -6914,6 +7157,7 @@ function shutdown(signal: string): void {
   hibachiLighterMakerShadow.shutdown(Date.now());
   coinbaseLighterMakerShadow.shutdown(Date.now());
   etherealLighterMakerShadow.shutdown(Date.now());
+  hotstuffLighterMakerShadow.shutdown(Date.now());
   extendedLighterMakerShadow.shutdown(Date.now());
   extendedPacificaMakerShadow.shutdown(Date.now());
   lighterExtendedMakerShadow.shutdown(Date.now());
@@ -6977,6 +7221,12 @@ if (!existsSync(ETHEREAL_LIGHTER_MAKER_RESULTS_PATH)) {
 }
 if (!existsSync(ETHEREAL_LIGHTER_MAKER_EVENTS_PATH)) {
   writeFileSync(ETHEREAL_LIGHTER_MAKER_EVENTS_PATH, '');
+}
+if (!existsSync(HOTSTUFF_LIGHTER_MAKER_RESULTS_PATH)) {
+  writeFileSync(HOTSTUFF_LIGHTER_MAKER_RESULTS_PATH, '');
+}
+if (!existsSync(HOTSTUFF_LIGHTER_MAKER_EVENTS_PATH)) {
+  writeFileSync(HOTSTUFF_LIGHTER_MAKER_EVENTS_PATH, '');
 }
 if (!existsSync(EXTENDED_LIGHTER_MAKER_RESULTS_PATH)) {
   writeFileSync(EXTENDED_LIGHTER_MAKER_RESULTS_PATH, '');
@@ -7064,6 +7314,13 @@ loadGenericMakerState(
   ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED,
 );
 loadGenericMakerState(
+  hotstuffLighterMakerShadow,
+  HOTSTUFF_LIGHTER_MAKER_RESULTS_PATH,
+  HOTSTUFF_LIGHTER_MAKER_ACTIVE_PATH,
+  'Hotstuff maker → Lighter',
+  HOTSTUFF_LIGHTER_MAKER_SHADOW_ENABLED,
+);
+loadGenericMakerState(
   extendedLighterMakerShadow,
   EXTENDED_LIGHTER_MAKER_RESULTS_PATH,
   EXTENDED_LIGHTER_MAKER_ACTIVE_PATH,
@@ -7126,6 +7383,7 @@ if (activeVenues.has('grvt')) startGrvt();
 if (activeVenues.has('edgex')) startEdgex();
 if (activeVenues.has('coinbase')) startCoinbase();
 if (activeVenues.has('ethereal')) startEthereal();
+if (activeVenues.has('hotstuff')) startHotstuff();
 if (activeVenues.has('binance')) startBinance();
 if (activeVenues.has('bybit')) startBybit();
 const evaluationTimer = setInterval(() => {
@@ -7257,6 +7515,23 @@ const evaluationTimer = setInterval(() => {
         ETHEREAL_LIGHTER_MAKER_NOTIONAL_USD,
       ).filter(
         (market) => ETHEREAL_VENUE_COINS.has(market.coin),
+      ),
+    );
+  }
+  if (
+    HOTSTUFF_LIGHTER_MAKER_SHADOW_ENABLED
+    && activeVenues.has('hotstuff')
+    && activeVenues.has('lighter')
+  ) {
+    hotstuffLighterMakerShadow.evaluate(
+      now,
+      genericMakerMarkets(
+        'hotstuff',
+        'lighter',
+        now,
+        HOTSTUFF_LIGHTER_MAKER_NOTIONAL_USD,
+      ).filter(
+        (market) => HOTSTUFF_VENUE_COINS.has(market.coin),
       ),
     );
   }

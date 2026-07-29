@@ -19,7 +19,8 @@ type Venue =
   | 'binance'
   | 'bybit'
   | 'coinbase'
-  | 'ethereal';
+  | 'ethereal'
+  | 'hotstuff';
 type SurvivalRow = {
   sampled?: number;
   observedAtHorizon?: number;
@@ -421,6 +422,7 @@ type Status = {
   hibachiLighterMakerShadow?: GenericMakerShadowStatus;
   coinbaseLighterMakerShadow?: GenericMakerShadowStatus;
   etherealLighterMakerShadow?: GenericMakerShadowStatus;
+  hotstuffLighterMakerShadow?: GenericMakerShadowStatus;
   extendedLighterMakerShadow?: GenericMakerShadowStatus;
   extendedPacificaMakerShadow?: GenericMakerShadowStatus;
   lighterExtendedMakerShadow?: GenericMakerShadowStatus;
@@ -586,12 +588,14 @@ async function readTargeted(): Promise<{
   hibachiStatus: Status | null;
   coinbaseStatus: Status | null;
   etherealStatus: Status | null;
+  hotstuffStatus: Status | null;
   extendedMakerGate: ProfitGateStatus | null;
   grvtMakerGate: ProfitGateStatus | null;
   asterMakerGate: ProfitGateStatus | null;
   hibachiMakerGate: ProfitGateStatus | null;
   coinbaseMakerGate: ProfitGateStatus | null;
   etherealMakerGate: ProfitGateStatus | null;
+  hotstuffMakerGate: ProfitGateStatus | null;
   extendedLighterTakerGate: ProfitGateStatus | null;
   lighterExtendedTakerGate: ProfitGateStatus | null;
 }> {
@@ -610,6 +614,7 @@ async function readTargeted(): Promise<{
     hibachiStatus: await read<Status | null>('hibachi-lighter-status.json', null),
     coinbaseStatus: await read<Status | null>('coinbase-lighter-status.json', null),
     etherealStatus: await read<Status | null>('ethereal-lighter-status.json', null),
+    hotstuffStatus: await read<Status | null>('hotstuff-lighter-status.json', null),
     extendedMakerGate: await read<ProfitGateStatus | null>(
       'extended-lighter-maker-gate-status.json',
       null,
@@ -632,6 +637,10 @@ async function readTargeted(): Promise<{
     ),
     etherealMakerGate: await read<ProfitGateStatus | null>(
       'ethereal-lighter-maker-gate-status.json',
+      null,
+    ),
+    hotstuffMakerGate: await read<ProfitGateStatus | null>(
+      'hotstuff-lighter-maker-gate-status.json',
       null,
     ),
     extendedLighterTakerGate: await read<ProfitGateStatus | null>(
@@ -1306,6 +1315,7 @@ function candidateRouteRows(
   hibachiStatus: Status | null,
   coinbaseStatus: Status | null,
   etherealStatus: Status | null,
+  hotstuffStatus: Status | null,
   profitGates: {
     extendedLighterMaker: ProfitGateStatus | null;
     grvtLighterMaker: ProfitGateStatus | null;
@@ -1313,6 +1323,7 @@ function candidateRouteRows(
     hibachiLighterMaker: ProfitGateStatus | null;
     coinbaseLighterMaker: ProfitGateStatus | null;
     etherealLighterMaker: ProfitGateStatus | null;
+    hotstuffLighterMaker: ProfitGateStatus | null;
   },
 ): string {
   const makerRows = [
@@ -1345,6 +1356,11 @@ function candidateRouteRows(
       label: 'Ethereal maker → Lighter',
       maker: etherealStatus?.etherealLighterMakerShadow,
       gate: profitGates.etherealLighterMaker,
+    },
+    {
+      label: 'Hotstuff maker → Lighter',
+      maker: hotstuffStatus?.hotstuffLighterMakerShadow,
+      gate: profitGates.hotstuffLighterMaker,
     },
   ].filter(({ maker }) => maker?.enabled).map(({ label, maker, gate }) => {
     const readiness = maker?.readiness;
@@ -1400,6 +1416,7 @@ function candidateShadowRows(
     hibachiLighter: GenericMakerShadowStatus | undefined;
     coinbaseLighter: GenericMakerShadowStatus | undefined;
     etherealLighter: GenericMakerShadowStatus | undefined;
+    hotstuffLighter: GenericMakerShadowStatus | undefined;
   },
 ): string {
   const rows: Array<{
@@ -1417,6 +1434,7 @@ function candidateShadowRows(
     ['Hibachi maker → Lighter', makers.hibachiLighter],
     ['Coinbase maker → Lighter', makers.coinbaseLighter],
     ['Ethereal maker → Lighter', makers.etherealLighter],
+    ['Hotstuff maker → Lighter', makers.hotstuffLighter],
   ] as const).filter(([, maker]) => maker?.enabled).forEach(([route, maker]) => {
     if (maker?.pair) {
       rows.push({
@@ -1490,6 +1508,7 @@ async function renderCompact(lang: Lang): Promise<string> {
   const hibachiStatus = targeted.hibachiStatus;
   const coinbaseStatus = targeted.coinbaseStatus;
   const etherealStatus = targeted.etherealStatus;
+  const hotstuffStatus = targeted.hotstuffStatus;
   const liveStatusFresh = Boolean(
     liveStatus?.updatedAt
     && Date.now() - liveStatus.updatedAt < 15_000,
@@ -1518,6 +1537,10 @@ async function renderCompact(lang: Lang): Promise<string> {
       etherealStatus?.updatedAt
       && Date.now() - etherealStatus.updatedAt < 15_000
     )
+    || (
+      hotstuffStatus?.updatedAt
+      && Date.now() - hotstuffStatus.updatedAt < 15_000
+    )
   );
   const candidateVenues = Array.from(new Set(
     [
@@ -1526,6 +1549,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       hibachiStatus,
       coinbaseStatus,
       etherealStatus,
+      hotstuffStatus,
     ].flatMap((status) => (
       status?.venues ?? []
     )).filter((row) => row.enabled && row.venue)
@@ -1538,6 +1562,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       || hibachiStatus?.connections?.[venue]?.connected
       || coinbaseStatus?.connections?.[venue]?.connected
       || etherealStatus?.connections?.[venue]?.connected
+      || hotstuffStatus?.connections?.[venue]?.connected
     ),
   ).length;
   const activeMakers = [
@@ -1564,6 +1589,10 @@ async function renderCompact(lang: Lang): Promise<string> {
     {
       maker: etherealStatus?.etherealLighterMakerShadow,
       gate: targeted.etherealMakerGate,
+    },
+    {
+      maker: hotstuffStatus?.hotstuffLighterMakerShadow,
+      gate: targeted.hotstuffMakerGate,
     },
   ].filter(({ maker }) => maker?.enabled);
   const totalAttempts = activeMakers.reduce(
@@ -1615,13 +1644,14 @@ async function renderCompact(lang: Lang): Promise<string> {
         <div class="va-panel-head"><h2>Безкомиссионные маршруты</h2><span>$100 · maker ≤ 0% · Lighter 0% · только положительный raw edge</span></div>
         <div class="va-table"><table><thead><tr>
           <th>Маршрут</th><th>Net сейчас</th><th>Shadow gate</th><th>Статус</th>
-        </tr></thead><tbody>${candidateRouteRows(candidateStatus, asterStatus, hibachiStatus, coinbaseStatus, etherealStatus, {
+        </tr></thead><tbody>${candidateRouteRows(candidateStatus, asterStatus, hibachiStatus, coinbaseStatus, etherealStatus, hotstuffStatus, {
           extendedLighterMaker: targeted.extendedMakerGate,
           grvtLighterMaker: targeted.grvtMakerGate,
           asterLighterMaker: targeted.asterMakerGate,
           hibachiLighterMaker: targeted.hibachiMakerGate,
           coinbaseLighterMaker: targeted.coinbaseMakerGate,
           etherealLighterMaker: targeted.etherealMakerGate,
+          hotstuffLighterMaker: targeted.hotstuffMakerGate,
         })}</tbody></table></div>
       </section>
 
@@ -1636,6 +1666,7 @@ async function renderCompact(lang: Lang): Promise<string> {
           hibachiLighter: hibachiStatus?.hibachiLighterMakerShadow,
           coinbaseLighter: coinbaseStatus?.coinbaseLighterMakerShadow,
           etherealLighter: etherealStatus?.etherealLighterMakerShadow,
+          hotstuffLighter: hotstuffStatus?.hotstuffLighterMakerShadow,
         })}</tbody></table></div>
       </section>
 
@@ -1880,6 +1911,7 @@ export async function venueArbHero(lang: Lang): Promise<string> {
   const hibachiStatus = targeted.hibachiStatus;
   const coinbaseStatus = targeted.coinbaseStatus;
   const etherealStatus = targeted.etherealStatus;
+  const hotstuffStatus = targeted.hotstuffStatus;
   const isLive = Boolean(
     (
       status?.updatedAt
@@ -1897,13 +1929,18 @@ export async function venueArbHero(lang: Lang): Promise<string> {
       etherealStatus?.updatedAt
       && Date.now() - etherealStatus.updatedAt < 15_000
     )
+    || (
+      hotstuffStatus?.updatedAt
+      && Date.now() - hotstuffStatus.updatedAt < 15_000
+    )
   );
   const routeCount = Object.keys(status?.executionShadow?.routes ?? {}).length
     + (status?.extendedLighterMakerShadow?.enabled ? 1 : 0)
     + (status?.grvtMakerShadow?.enabled ? 1 : 0)
     + (hibachiStatus?.hibachiLighterMakerShadow?.enabled ? 1 : 0)
     + (coinbaseStatus?.coinbaseLighterMakerShadow?.enabled ? 1 : 0)
-    + (etherealStatus?.etherealLighterMakerShadow?.enabled ? 1 : 0);
+    + (etherealStatus?.etherealLighterMakerShadow?.enabled ? 1 : 0)
+    + (hotstuffStatus?.hotstuffLighterMakerShadow?.enabled ? 1 : 0);
   const samples = Math.max(
     Number(
       targeted.extendedLighterTakerGate?.metrics?.samples
@@ -1938,6 +1975,11 @@ export async function venueArbHero(lang: Lang): Promise<string> {
     Number(
       targeted.etherealMakerGate?.metrics?.samples
       ?? etherealStatus?.etherealLighterMakerShadow?.readiness?.samples
+      ?? 0,
+    ),
+    Number(
+      targeted.hotstuffMakerGate?.metrics?.samples
+      ?? hotstuffStatus?.hotstuffLighterMakerShadow?.readiness?.samples
       ?? 0,
     ),
   );
