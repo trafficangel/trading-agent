@@ -34,6 +34,7 @@ from x10.clients.rest import RestApiClient
 from x10.config import MAINNET_CONFIG
 from x10.core.stark_account import StarkPerpetualAccount
 from x10.errors import ApiError
+from x10.models.market import MarketModel, MarketTradingHours
 from x10.models.order import OrderSide, OrderStatus, OrderType, TimeInForce
 from x10.signing.order_object import create_order_object
 
@@ -74,6 +75,35 @@ OPPOSITE_ROUTE: dict[str, str] = {
     "extended-lighter": "lighter-extended",
     "lighter-extended": "extended-lighter",
 }
+
+
+def install_extended_sdk_market_hours_compat() -> None:
+    """Accept the venue's new schedule without changing trading decisions.
+
+    Extended introduced ``NO_OVERNIGHT`` before its Python SDK exposed the
+    corresponding enum member.  Trading hours are display metadata for this
+    executor; order construction uses the market's trading and L2 configs.
+    Mapping the unknown schedule to an existing non-continuous value lets the
+    SDK validate the response while ``active``/``is_off_hours`` remain the
+    authoritative availability fields.
+    """
+
+    if getattr(MarketTradingHours, "_robotclaude_compat", False):
+        return
+
+    @classmethod
+    def compatible_missing(
+        cls: type[MarketTradingHours],
+        value: object,
+    ) -> MarketTradingHours | None:
+        if value == "NO_OVERNIGHT":
+            return cls.REGULAR
+        return None
+
+    MarketTradingHours._missing_ = compatible_missing
+    MarketTradingHours._robotclaude_compat = True
+    # Pydantic compiles enum choices when the SDK models are imported.
+    MarketModel.model_rebuild(force=True)
 
 
 @dataclass(frozen=True)
@@ -1194,6 +1224,7 @@ class Canary:
         )
 
     async def create_extended_client(self) -> None:
+        install_extended_sdk_market_hours_compat()
         api_key = os.environ["EXTENDED_API_KEY"]
         public_key = os.getenv("EXTENDED_STARK_PUBLIC_KEY")
         if not public_key:
@@ -4221,6 +4252,9 @@ class Canary:
 
 
 def self_test() -> None:
+    install_extended_sdk_market_hours_compat()
+    assert MarketTradingHours("NO_OVERNIGHT") == MarketTradingHours.REGULAR
+    install_extended_sdk_market_hours_compat()
     assert MARKETS["BTC"] == 1
     assert MARKETS["ZEC"] == 90
     assert MARKETS["XAU"] == 92
