@@ -1,0 +1,33 @@
+[Unit]
+Description=Robot Claude read-only Binance to Lighter lead-lag shadow
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/venue-arb-tokyo
+Environment=LIGHTER_LEADLAG_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/lighter-leadlag
+Environment=LIGHTER_LEADLAG_SAMPLE_MS=50
+Environment=LIGHTER_LEADLAG_FRESH_MS=250
+Environment=LIGHTER_LEADLAG_ENTRY_LATENCY_MS=100
+Environment=LIGHTER_LEADLAG_NOTIONAL_USD=100
+Environment=LIGHTER_LEADLAG_EXECUTION_BUFFER_BPS=1
+Environment=LIGHTER_LEADLAG_INDEPENDENCE_MS=5000
+Environment=LIGHTER_LEADLAG_LOOKBACKS_MS=100,250,500
+Environment=LIGHTER_LEADLAG_HOLDS_MS=100,250,500,1000,2000
+Environment=LIGHTER_LEADLAG_THRESHOLDS_BPS=2,3,5,7,10
+ExecStart=/usr/bin/node /home/trader/apps/venue-arb-tokyo/dist/hft/lighter-leadlag-shadow.js
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/venue-arb-tokyo/data/lighter-leadlag
+MemoryMax=128M
+CPUQuota=30%
+
+[Install]
+WantedBy=multi-user.target
