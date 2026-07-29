@@ -107,21 +107,20 @@ def safer_maker_price(
     return max(candidate_price, best_bid + distance)
 
 
-def preserve_selected_maker_price(
+def competitive_maker_price(
     side: str,
-    selected_price: float,
     edge_limit_price: float,
 ) -> float:
     if (
         side not in {"buy", "sell"}
-        or min(selected_price, edge_limit_price) <= 0
+        or edge_limit_price <= 0
     ):
         return math.nan
-    return (
-        min(selected_price, edge_limit_price)
-        if side == "buy"
-        else max(selected_price, edge_limit_price)
-    )
+    # The public-trade price that activated the monitor quote can already be
+    # several ticks behind by the time the signed order reaches Extended.
+    # Quote at the most competitive price that still preserves the configured
+    # net edge; safer_maker_price() below keeps it strictly post-only.
+    return edge_limit_price
 
 
 def projected_net_usd(
@@ -853,10 +852,8 @@ class Canary:
             if side == "buy"
             else hedge_price * (1 + required_raw_bps / 10_000)
         )
-        selected_price = float(fresh["price"])
-        revalidated_candidate_price = preserve_selected_maker_price(
+        revalidated_candidate_price = competitive_maker_price(
             side,
-            selected_price,
             edge_limit_price,
         )
         raw_price = safer_maker_price(
@@ -2315,10 +2312,10 @@ def self_test() -> None:
         safety_ticks=5,
         safety_bps=2,
     ) == 100.05
-    assert preserve_selected_maker_price("buy", 99.8, 100.05) == 99.8
-    assert preserve_selected_maker_price("buy", 100.1, 100.05) == 100.05
-    assert preserve_selected_maker_price("sell", 100.2, 100.05) == 100.2
-    assert preserve_selected_maker_price("sell", 100.0, 100.05) == 100.05
+    assert competitive_maker_price("buy", 100.05) == 100.05
+    assert competitive_maker_price("sell", 100.05) == 100.05
+    assert math.isnan(competitive_maker_price("buy", 0))
+    assert math.isnan(competitive_maker_price("hold", 100.05))
     assert safer_maker_price(
         side="sell",
         candidate_price=100.01,
