@@ -3,9 +3,10 @@
 
 The process consumes the read-only venue-arb monitor status, waits for a fresh
 tradeable window in the configured direction, submits both IOC legs
-concurrently, reconciles exchange positions, exits on convergence, and
-flattens immediately on any mismatch. It writes a public-safe status and trade
-journal for /lab/venue-arb.
+with the less reliable Extended IOC confirmed before the Lighter hedge,
+reconciles exchange positions, exits on convergence, and flattens immediately
+on any mismatch. It writes a public-safe status and trade journal for
+/lab/venue-arb.
 """
 
 from __future__ import annotations
@@ -2171,6 +2172,49 @@ class Canary:
             return None
         return response.data
 
+    async def wait_extended_ioc_resolution(
+        self,
+        order_id: int,
+        *,
+        expected_quantity: float,
+        timeout: float = 2,
+    ) -> tuple[float, str, str | None]:
+        deadline = time.monotonic() + timeout
+        final_statuses = {
+            OrderStatus.FILLED.value,
+            OrderStatus.CANCELLED.value,
+            OrderStatus.REJECTED.value,
+            OrderStatus.EXPIRED.value,
+        }
+        last_status = "UNKNOWN"
+        last_reason: str | None = None
+        while time.monotonic() < deadline:
+            row = await self.extended_order_by_id(order_id)
+            if row is None:
+                await asyncio.sleep(0.03)
+                continue
+            filled_qty = float(row.filled_qty or 0)
+            last_status = self.order_status_value(row.status)
+            last_reason = (
+                str(getattr(row, "status_reason", "") or "")
+                or None
+            )
+            if (
+                filled_qty >= expected_quantity * 0.998
+                or last_status in final_statuses
+            ):
+                return filled_qty, last_status, last_reason
+            await asyncio.sleep(0.03)
+        await self.cancel_all_extended_orders()
+        row = await self.extended_order_by_id(order_id)
+        if row is not None:
+            return (
+                float(row.filled_qty or 0),
+                self.order_status_value(row.status),
+                str(getattr(row, "status_reason", "") or "") or None,
+            )
+        return 0, last_status, last_reason or "IOC resolution timeout"
+
     async def wait_extended_maker_fill(
         self,
         coin: str,
@@ -3529,7 +3573,7 @@ class Canary:
         self.write_status("completed", activeTrade=None, lastTrade=trade)
         self.log("maker_trade_closed", **trade)
 
-    async def execute(self, candidate: dict[str, Any]) -> None:
+    async def execute(self, candidate: dict[str, Any]) -> bool:
         coin = str(candidate["coin"])
         opportunity_id = str(candidate["id"])
         route_id = str(candidate.get("_routeId") or self.route_id)
@@ -3570,64 +3614,89 @@ class Canary:
             "notionalUsdPerLeg": self.notional,
             "leverage": self.leverage,
             "quantity": float(quantity),
+            "extendedSide": "long" if extended_is_buy else "short",
         }
         self.trade_open = True
         self.active_trade = trade
         self.write_status("opening", activeTrade=trade)
         self.log("entry_submit", **trade)
-        entry_tasks = {
-            "extended": asyncio.create_task(
-                self.place_extended(
-                    coin,
-                    quantity,
-                    float(
-                        candidate[
-                            "currentBuyVwap1000"
-                            if extended_is_buy
-                            else "currentSellVwap1000"
-                        ]
-                    ),
-                    OrderSide.BUY if extended_is_buy else OrderSide.SELL,
-                    reduce_only=False,
-                    slippage=self.entry_slippage,
-                )
-            ),
-            "lighter": asyncio.create_task(
-                self.place_lighter(
-                    coin,
-                    quantity,
-                    is_ask=sell_venue == "lighter",
-                    reduce_only=False,
-                    slippage=self.entry_slippage,
-                )
-            ),
-        }
-        results = await asyncio.gather(
-            *entry_tasks.values(), return_exceptions=True
-        )
-        entry_orders = dict(zip(entry_tasks.keys(), results, strict=True))
-        order_errors = {
-            venue: str(result)
-            for venue, result in entry_orders.items()
-            if isinstance(result, Exception)
-        }
-        if order_errors:
-            await asyncio.sleep(0.5)
-            with contextlib.suppress(Exception):
-                await self.flatten(coin, emergency=True)
+        try:
+            ext_order = await self.place_extended(
+                coin,
+                quantity,
+                float(
+                    candidate[
+                        "currentBuyVwap1000"
+                        if extended_is_buy
+                        else "currentSellVwap1000"
+                    ]
+                ),
+                OrderSide.BUY if extended_is_buy else OrderSide.SELL,
+                reduce_only=False,
+                slippage=self.entry_slippage,
+            )
+        except Exception as error:
             trade.update(
-                status="failed_flat",
+                status="entry_cancelled_flat",
                 closedAt=int(time.time() * 1000),
-                error=f"entry leg rejected: {order_errors}",
+                error=f"Extended entry rejected: {error}",
                 netPnlUsd=0,
             )
             self.append_trade(trade)
             self.trade_open = False
             self.active_trade = None
-            self.write_status("blocked", activeTrade=None, lastTrade=trade)
-            return
-        ext_order = int(entry_orders["extended"])
-        lit_order = int(entry_orders["lighter"])
+            self.last_rejection = str(trade["error"])
+            self.write_status("armed", activeTrade=None, lastTrade=trade)
+            return False
+        trade["entryExtendedOrderId"] = ext_order
+        self.write_status("opening", activeTrade=trade)
+        filled_qty, ext_order_status, ext_order_reason = (
+            await self.wait_extended_ioc_resolution(
+                ext_order,
+                expected_quantity=float(quantity),
+            )
+        )
+        if filled_qty <= 0:
+            trade.update(
+                status="entry_cancelled_flat",
+                closedAt=int(time.time() * 1000),
+                error=(
+                    f"Extended IOC {ext_order_status}: "
+                    f"{ext_order_reason or 'no fill'}"
+                ),
+                netPnlUsd=0,
+            )
+            self.append_trade(trade)
+            self.trade_open = False
+            self.active_trade = None
+            self.last_rejection = str(trade["error"])
+            self.write_status("armed", activeTrade=None, lastTrade=trade)
+            return False
+        quantity = self.lighter_compatible_quantity(coin, filled_qty)
+        trade["quantity"] = float(quantity)
+        try:
+            lit_order = await self.place_lighter(
+                coin,
+                quantity,
+                is_ask=sell_venue == "lighter",
+                reduce_only=False,
+                slippage=self.entry_slippage,
+            )
+        except Exception as error:
+            exit_orders: dict[str, int] = {}
+            with contextlib.suppress(Exception):
+                exit_orders = await self.flatten(coin, emergency=True)
+            await self.recover_active_trade(error, exit_orders)
+            self.trade_open = False
+            last_trade = self.trades()[-1] if self.trades() else trade
+            self.write_status(
+                "blocked",
+                activeTrade=None,
+                lastTrade=last_trade,
+            )
+            return True
+        trade["entryLighterOrderId"] = lit_order
+        self.write_status("opening", activeTrade=trade)
         ext_fill_task = asyncio.create_task(
             self.extended_fill(f"{coin}-USD", ext_order)
         )
@@ -3649,21 +3718,21 @@ class Canary:
             or abs(ext_fill.quantity - lit_fill.quantity)
             > max(ext_fill.quantity, lit_fill.quantity) * 0.002
         ):
-            with contextlib.suppress(Exception):
-                await self.flatten(coin, emergency=True)
-            trade.update(
-                status="failed_flat",
-                closedAt=int(time.time() * 1000),
-                error="entry fills/positions did not reconcile",
-                entryExtended=asdict(ext_fill) if ext_fill else None,
-                entryLighter=asdict(lit_fill) if lit_fill else None,
-                netPnlUsd=0,
+            error = RuntimeError(
+                "entry fills/positions did not reconcile"
             )
-            self.append_trade(trade)
+            exit_orders: dict[str, int] = {}
+            with contextlib.suppress(Exception):
+                exit_orders = await self.flatten(coin, emergency=True)
+            await self.recover_active_trade(error, exit_orders)
             self.trade_open = False
-            self.active_trade = None
-            self.write_status("blocked", activeTrade=None, lastTrade=trade)
-            return
+            last_trade = self.trades()[-1] if self.trades() else trade
+            self.write_status(
+                "blocked",
+                activeTrade=None,
+                lastTrade=last_trade,
+            )
+            return True
         opened_at = max(
             ext_fill.filled_at or started_at, lit_fill.filled_at or started_at
         )
@@ -3804,6 +3873,7 @@ class Canary:
             self.running = False
         self.write_status("completed", activeTrade=None, lastTrade=trade)
         self.log("trade_closed", **trade)
+        return True
 
     async def preflight(self) -> None:
         await asyncio.gather(
@@ -3982,8 +4052,15 @@ class Canary:
                         pending_confirmations
                         >= pending_required_confirmations
                     ):
-                        await self.execute(candidate)
-                        return
+                        if await self.execute(candidate):
+                            return
+                        pending_candidate_id = None
+                        pending_quote_version = None
+                        pending_confirmations = 0
+                        pending_required_confirmations = (
+                            self.entry_confirmations
+                        )
+                        pending_candidate_seen_at_ms = None
                     self.last_rejection = (
                         "confirming fresh books "
                         f"{pending_confirmations}/"
@@ -4346,6 +4423,47 @@ def self_test() -> None:
         assert guard.last_rest_revalidation["result"] == "rejected"
 
     asyncio.run(taker_revalidation_check())
+
+    async def extended_ioc_resolution_check() -> None:
+        cancelled = object.__new__(Canary)
+
+        class CancelledOrder:
+            filled_qty = 0
+            status = OrderStatus.CANCELLED
+            status_reason = "NO_LIQUIDITY"
+
+        async def cancelled_order(_order_id: int) -> Any:
+            return CancelledOrder()
+
+        cancelled.extended_order_by_id = cancelled_order
+        cancelled.cancel_all_extended_orders = (
+            lambda: asyncio.sleep(0)
+        )
+        result = await cancelled.wait_extended_ioc_resolution(
+            1,
+            expected_quantity=44,
+        )
+        assert result == (0, "CANCELLED", "NO_LIQUIDITY")
+
+        filled = object.__new__(Canary)
+
+        class FilledOrder:
+            filled_qty = 44
+            status = OrderStatus.FILLED
+            status_reason = None
+
+        async def filled_order(_order_id: int) -> Any:
+            return FilledOrder()
+
+        filled.extended_order_by_id = filled_order
+        filled.cancel_all_extended_orders = lambda: asyncio.sleep(0)
+        result = await filled.wait_extended_ioc_resolution(
+            2,
+            expected_quantity=44,
+        )
+        assert result == (44, "FILLED", None)
+
+    asyncio.run(extended_ioc_resolution_check())
     quote = {
         "extendedBuyVwap": 100.0,
         "extendedSellVwap": 99.9,
@@ -4451,6 +4569,53 @@ def self_test() -> None:
         assert recovered[0]["status"] == "failed_flat"
         assert recovered[0]["netPnlUsd"] == -0.083681
         assert recovered[0]["holdingMs"] == 3_020
+
+        orphan_rows: list[dict[str, Any]] = []
+        orphan = object.__new__(Canary)
+        orphan.active_trade = {
+            "id": "test-lighter-orphan",
+            "coin": "LIT",
+            "extendedSide": "long",
+            "startedAt": 1_000,
+            "entryLighterOrderId": 11,
+        }
+        orphan.notional = 100
+        orphan.trades = lambda: []
+        orphan.append_trade = orphan_rows.append
+        orphan.log = lambda *_args, **_kwargs: None
+
+        async def no_extended_fill(
+            _market: str,
+            _order_id: int,
+        ) -> Fill | None:
+            return None
+
+        async def lighter_orphan_fill(
+            _coin: str,
+            order_id: int,
+        ) -> Fill | None:
+            if order_id == 11:
+                return Fill(2.263, 44, 99.572, 0, 1_100)
+            if order_id == 12:
+                return Fill(
+                    2.264273454545455,
+                    44,
+                    99.628032,
+                    0,
+                    11_332,
+                )
+            return None
+
+        orphan.extended_fill = no_extended_fill
+        orphan.lighter_fill = lighter_orphan_fill
+        await orphan.recover_active_trade(
+            RuntimeError("Extended IOC NO_LIQUIDITY"),
+            {"lighter": 12},
+        )
+        assert len(orphan_rows) == 1
+        assert orphan_rows[0]["status"] == "failed_flat"
+        assert orphan_rows[0]["netPnlUsd"] == -0.056032
+        assert orphan_rows[0]["holdingMs"] == 10_232
 
     asyncio.run(recovery_check())
     print("venue-arb-live self-test ok")
