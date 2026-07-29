@@ -404,8 +404,8 @@ const STATUS_PATH = resolve(DATA_DIR, 'status.json');
 const EXECUTION_STATUS_PATH = resolve(DATA_DIR, 'execution-status.json');
 const OPPORTUNITIES_PATH = resolve(DATA_DIR, 'opportunities.ndjson');
 const LIVE_TRADES_PATH = resolve(DATA_DIR, 'live-trades.json');
-const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution-v4.ndjson');
-const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active-v4.json');
+const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution-v5.ndjson');
+const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active-v5.json');
 const SHADOW_BASIS_STATE_PATH = resolve(
   DATA_DIR,
   'shadow-basis-calibration-v1.json',

@@ -629,7 +629,7 @@ function shadowBlockers(telemetry: ShadowRouteTelemetry | undefined): string {
     stale_book: 'старые данные',
     stale_source: 'старый timestamp биржи',
     insufficient_depth: 'нет глубины $500',
-    below_gate: 'edge ниже +0.10%',
+    below_gate: 'edge ниже порога',
     basis_calibrating: 'калибровка нормы',
     basis_below_gate: 'нет отклонения от нормы',
     latched: 'окно уже отслеживается',
