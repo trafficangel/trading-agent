@@ -789,6 +789,26 @@ const ACTIVE_MARKETS: readonly Market[] = (() => {
   }
   return [...new Set(configured)].map((coin) => available.get(coin)!);
 })();
+const SECONDARY_VENUE_COINS = new Set([
+  'BTC',
+  'ETH',
+  'SOL',
+  'HYPE',
+  'XRP',
+  'DOGE',
+  'ADA',
+  'BNB',
+  'LTC',
+  'LIT',
+  'XMR',
+  'NEAR',
+  'CRV',
+  'FARTCOIN',
+  'PUMP',
+]);
+const SECONDARY_VENUE_MARKETS = ACTIVE_MARKETS.filter(
+  (market) => SECONDARY_VENUE_COINS.has(market.coin),
+);
 
 const VENUES: readonly Venue[] = [
   'lighter',
@@ -3213,7 +3233,9 @@ function startBybit(): void {
     (ws) => {
       ws.send(JSON.stringify({
         op: 'subscribe',
-        args: ACTIVE_MARKETS.map(({ symbol }) => `orderbook.50.${symbol}`),
+        args: SECONDARY_VENUE_MARKETS.map(
+          ({ symbol }) => `orderbook.50.${symbol}`,
+        ),
       }));
     },
     (payload, receivedAt) => {
@@ -3729,7 +3751,9 @@ function startGrvt(): void {
         method: 'subscribe',
         params: {
           stream: 'v1.book.d',
-          selectors: ACTIVE_MARKETS.map(({ coin }) => `${coin}_USDT_Perp@100`),
+          selectors: SECONDARY_VENUE_MARKETS.map(
+            ({ coin }) => `${coin}_USDT_Perp@100`,
+          ),
         },
         id: 1,
       }));
@@ -3738,7 +3762,9 @@ function startGrvt(): void {
         method: 'subscribe',
         params: {
           stream: 'v1.trade',
-          selectors: ACTIVE_MARKETS.map(({ coin }) => `${coin}_USDT_Perp@50`),
+          selectors: SECONDARY_VENUE_MARKETS.map(
+            ({ coin }) => `${coin}_USDT_Perp@50`,
+          ),
         },
         id: 2,
       }));
