@@ -139,6 +139,28 @@ export type GenericMakerCheckpoint = {
   cooldownUntil: number;
 };
 
+export type GenericMakerEvent = {
+  routeId: string;
+  at: number;
+  type:
+    | 'quote_created'
+    | 'quote_activated'
+    | 'placement_rejected'
+    | 'edge_cancelled'
+    | 'quote_expired'
+    | 'queue_filled';
+  quoteId: string;
+  coin: string;
+  stage: 'entry' | 'exit';
+  side: MakerSide;
+  price: number;
+  projectedNetBps: number;
+  queueAheadUsd: number;
+  distanceBps: number;
+  reason?: string;
+  currentProjectionBps?: number | null;
+};
+
 export type GenericMakerConfig = {
   routeId: string;
   makerVenue: string;
@@ -173,6 +195,7 @@ export type GenericMakerConfig = {
 type GenericMakerHooks = {
   onResult?: (result: GenericMakerResult) => void;
   onCheckpoint?: (checkpoint: GenericMakerCheckpoint) => void;
+  onEvent?: (event: GenericMakerEvent) => void;
 };
 
 function sortedLevels(
@@ -678,6 +701,31 @@ export class GenericMakerShadow {
     return this.entryCandidate(now);
   }
 
+  private emitQuoteEvent(
+    type: GenericMakerEvent['type'],
+    at: number,
+    quote: GenericMakerQuote,
+    details: Pick<
+      GenericMakerEvent,
+      'reason' | 'currentProjectionBps'
+    > = {},
+  ): void {
+    this.hooks.onEvent?.({
+      routeId: this.config.routeId,
+      at,
+      type,
+      quoteId: quote.id,
+      coin: quote.coin,
+      stage: quote.stage,
+      side: quote.side,
+      price: quote.price,
+      projectedNetBps: quote.projectedNetBps,
+      queueAheadUsd: quote.queue.queueAhead * quote.price,
+      distanceBps: quote.distanceBps,
+      ...details,
+    });
+  }
+
   private currentProjection(
     now: number,
     quote: GenericMakerQuote,
@@ -751,6 +799,9 @@ export class GenericMakerShadow {
     if (!market?.maker || !this.fresh(now, market.maker)) {
       this.telemetry.placementRejects++;
       this.telemetry.placementStaleRejects++;
+      this.emitQuoteEvent('placement_rejected', now, quote, {
+        reason: 'stale_maker_book',
+      });
       this.quote = null;
       return;
     }
@@ -767,6 +818,9 @@ export class GenericMakerShadow {
     if (wouldCross) {
       this.telemetry.placementRejects++;
       this.telemetry.placementCrossRejects++;
+      this.emitQuoteEvent('placement_rejected', now, quote, {
+        reason: 'would_cross',
+      });
       this.quote = null;
       return;
     }
@@ -784,6 +838,9 @@ export class GenericMakerShadow {
     ) {
       this.telemetry.placementRejects++;
       this.telemetry.placementQueueRejects++;
+      this.emitQuoteEvent('placement_rejected', now, quote, {
+        reason: 'queue_too_large',
+      });
       this.quote = null;
       return;
     }
@@ -794,10 +851,17 @@ export class GenericMakerShadow {
     if (projection == null || projection < minimum) {
       this.telemetry.placementRejects++;
       this.telemetry.placementEdgeRejects++;
+      this.emitQuoteEvent('placement_rejected', now, quote, {
+        reason: 'edge_lost_before_activation',
+        currentProjectionBps: projection,
+      });
       this.quote = null;
       return;
     }
     quote.activatedAt = now;
+    this.emitQuoteEvent('quote_activated', now, quote, {
+      currentProjectionBps: projection,
+    });
   }
 
   private checkpoint(): void {
@@ -1089,6 +1153,10 @@ export class GenericMakerShadow {
         : this.config.exitNetBps;
       if (projection == null || projection < minimum) {
         this.telemetry.edgeCancellations++;
+        this.emitQuoteEvent('edge_cancelled', now, this.quote, {
+          reason: 'edge_below_cancel_threshold',
+          currentProjectionBps: projection,
+        });
         this.quote = null;
       }
     }
@@ -1125,6 +1193,7 @@ export class GenericMakerShadow {
         return;
       }
       this.telemetry.quoteExpirations++;
+      this.emitQuoteEvent('quote_expired', now, this.quote);
       this.quote = null;
     }
     if (!this.quote) {
@@ -1132,6 +1201,7 @@ export class GenericMakerShadow {
       if (this.quote) {
         this.telemetry.quotes++;
         this.telemetry.lastQuoteAt = now;
+        this.emitQuoteEvent('quote_created', now, this.quote);
       }
     }
   }
@@ -1172,6 +1242,9 @@ export class GenericMakerShadow {
     ) quote.firstFillAt = receivedAt;
     if (!quote.queue.filled) return;
     this.telemetry.queueFills++;
+    this.emitQuoteEvent('queue_filled', receivedAt, quote, {
+      currentProjectionBps: this.currentProjection(receivedAt, quote),
+    });
     this.pendingHedge = {
       stage: quote.stage,
       coin: quote.coin,

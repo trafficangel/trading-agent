@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   GenericMakerShadow,
   type GenericMakerConfig,
+  type GenericMakerEvent,
   type GenericMakerResult,
   type MakerShadowMarket,
 } from '../../src/lib/venue-arb-maker-shadow.js';
@@ -65,8 +66,10 @@ function market(
 describe('GenericMakerShadow', () => {
   it('requires prints through displayed queue and completes a positive cycle', () => {
     const results: GenericMakerResult[] = [];
+    const events: GenericMakerEvent[] = [];
     const engine = new GenericMakerShadow(config, {
       onResult: (result) => results.push(result),
+      onEvent: (event) => events.push(event),
     });
 
     engine.evaluate(1_000, [market(1_000, 100.2, 100.3)]);
@@ -103,6 +106,11 @@ describe('GenericMakerShadow', () => {
     expect(results[0]?.exitMakerOrder).toBe(false);
     expect(results[0]?.passed).toBe(true);
     expect(results[0]?.realizedNetBps).toBeGreaterThan(0);
+    expect(events.map((event) => event.type)).toEqual(expect.arrayContaining([
+      'quote_created',
+      'quote_activated',
+      'queue_filled',
+    ]));
   });
 
   it('rejects stale snapshot trades instead of inventing a fill', () => {
