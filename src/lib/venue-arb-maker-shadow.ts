@@ -125,6 +125,12 @@ export type GenericMakerTelemetry = {
   bestProjectedCoin: string | null;
   peakProjectedEntryBps: number | null;
   peakProjectedCoin: string | null;
+  bestObservedTopNetBps: number | null;
+  bestObservedTopDeviationBps: number | null;
+  bestObservedTopCoin: string | null;
+  peakObservedTopNetBps: number | null;
+  peakObservedTopDeviationBps: number | null;
+  peakObservedTopCoin: string | null;
 };
 
 export type GenericMakerCheckpoint = {
@@ -219,6 +225,12 @@ export class GenericMakerShadow {
     bestProjectedCoin: null,
     peakProjectedEntryBps: null,
     peakProjectedCoin: null,
+    bestObservedTopNetBps: null,
+    bestObservedTopDeviationBps: null,
+    bestObservedTopCoin: null,
+    peakObservedTopNetBps: null,
+    peakObservedTopDeviationBps: null,
+    peakObservedTopCoin: null,
   };
 
   private readonly hooks: GenericMakerHooks;
@@ -316,21 +328,40 @@ export class GenericMakerShadow {
         - this.config.makerFeeBps
         - this.config.hedgeTakerFeeBps;
     }
-    const entryBaselineBps = market?.basisEntryBaselineBps?.[side];
-    const exitBaselineBps = market?.basisExitBaselineBps?.[side];
+    const observed = this.observedBasisProjection(
+      side,
+      makerFill,
+      hedgeFill,
+      market,
+    );
     if (
-      entryBaselineBps == null
-      || exitBaselineBps == null
-      || rawEntryBps - entryBaselineBps
+      observed == null
+      || observed.deviationBps
         < (this.config.basisMinDeviationBps ?? 0)
     ) return -Infinity;
+    return observed.netBps;
+  }
+
+  private observedBasisProjection(
+    side: MakerSide,
+    makerFill: number,
+    hedgeFill: number,
+    market?: MakerShadowMarket,
+  ): { netBps: number; deviationBps: number } | null {
+    const entryBaselineBps = market?.basisEntryBaselineBps?.[side];
+    const exitBaselineBps = market?.basisExitBaselineBps?.[side];
+    if (entryBaselineBps == null || exitBaselineBps == null) return null;
+    const rawEntryBps = makerEntryEdgeBps(side, makerFill, hedgeFill);
     const conservativeRoundTripCostBps = this.config.makerFeeBps
       + this.config.hedgeTakerFeeBps * 2
       + this.config.makerFallbackTakerFeeBps
       + this.config.executionBufferBps;
-    return rawEntryBps
-      + exitBaselineBps
-      - conservativeRoundTripCostBps;
+    return {
+      netBps: rawEntryBps
+        + exitBaselineBps
+        - conservativeRoundTripCostBps,
+      deviationBps: rawEntryBps - entryBaselineBps,
+    };
   }
 
   private entryLevels(
@@ -453,6 +484,9 @@ export class GenericMakerShadow {
     const candidates: GenericMakerQuote[] = [];
     this.telemetry.bestProjectedEntryBps = null;
     this.telemetry.bestProjectedCoin = null;
+    this.telemetry.bestObservedTopNetBps = null;
+    this.telemetry.bestObservedTopDeviationBps = null;
+    this.telemetry.bestObservedTopCoin = null;
     for (const market of this.latestMarkets.values()) {
       if (!market.maker || !market.hedge) continue;
       if (!this.fresh(now, market.maker, market.hedge)) continue;
@@ -465,6 +499,40 @@ export class GenericMakerShadow {
           1,
         )[0]?.[0];
         if (displayedPrice != null) {
+          if (this.config.basisGateEnabled) {
+            const observed = this.observedBasisProjection(
+              side,
+              displayedPrice,
+              hedgeFill,
+              market,
+            );
+            if (
+              observed
+              && (
+                this.telemetry.bestObservedTopNetBps == null
+                || observed.netBps
+                  > this.telemetry.bestObservedTopNetBps
+              )
+            ) {
+              this.telemetry.bestObservedTopNetBps = observed.netBps;
+              this.telemetry.bestObservedTopDeviationBps =
+                observed.deviationBps;
+              this.telemetry.bestObservedTopCoin = market.coin;
+            }
+            if (
+              observed
+              && (
+                this.telemetry.peakObservedTopNetBps == null
+                || observed.netBps
+                  > this.telemetry.peakObservedTopNetBps
+              )
+            ) {
+              this.telemetry.peakObservedTopNetBps = observed.netBps;
+              this.telemetry.peakObservedTopDeviationBps =
+                observed.deviationBps;
+              this.telemetry.peakObservedTopCoin = market.coin;
+            }
+          }
           const displayedProjection = this.entryProjection(
             side,
             displayedPrice,

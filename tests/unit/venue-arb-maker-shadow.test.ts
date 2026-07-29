@@ -246,7 +246,16 @@ describe('GenericMakerShadow', () => {
         exit: { buy: -10 },
       }),
     ]);
-    expect((staticEngine.status() as { quote?: unknown }).quote).toBeNull();
+    const staticStatus = staticEngine.status() as {
+      quote?: unknown;
+      telemetry?: {
+        bestObservedTopDeviationBps?: number | null;
+      };
+    };
+    expect(staticStatus.quote).toBeNull();
+    expect(
+      staticStatus.telemetry?.bestObservedTopDeviationBps,
+    ).toBeLessThan(5);
 
     const dislocatedEngine = new GenericMakerShadow(basisConfig);
     dislocatedEngine.evaluate(4_001, [
@@ -257,6 +266,9 @@ describe('GenericMakerShadow', () => {
     ]);
     const quote = (dislocatedEngine.status() as {
       quote?: { side?: string; projectedNetBps?: number } | null;
+      telemetry?: {
+        bestObservedTopDeviationBps?: number | null;
+      };
     }).quote;
     expect(quote?.side).toBe('buy');
     expect(quote?.projectedNetBps).toBeGreaterThanOrEqual(2);

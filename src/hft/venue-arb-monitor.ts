@@ -404,6 +404,14 @@ const EXTENDED_ASTER_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
   'extended-aster-maker-basis-active-v2.json',
 );
+const EXTENDED_LIGHTER_MAKER_RESULTS_PATH = resolve(
+  DATA_DIR,
+  'extended-lighter-maker-basis-shadow-v2.ndjson',
+);
+const EXTENDED_LIGHTER_MAKER_ACTIVE_PATH = resolve(
+  DATA_DIR,
+  'extended-lighter-maker-basis-active-v2.json',
+);
 const LIGHTER_EXTENDED_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
   'lighter-extended-maker-basis-shadow-v2.ndjson',
@@ -634,6 +642,34 @@ const EXTENDED_ASTER_MAKER_POST_FILL_NET_BPS = finiteEnv(
 const EXTENDED_ASTER_MAKER_EXIT_NET_BPS = finiteEnv(
   'VENUE_ARB_EXTENDED_ASTER_MAKER_EXIT_NET_BPS',
   5,
+);
+const EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED',
+  false,
+);
+const EXTENDED_LIGHTER_MAKER_ENTRY_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_EXTENDED_LIGHTER_MAKER_ENTRY_EDGE_BPS',
+  3,
+);
+const EXTENDED_LIGHTER_MAKER_CANCEL_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_EXTENDED_LIGHTER_MAKER_CANCEL_EDGE_BPS',
+  1,
+);
+const EXTENDED_LIGHTER_MAKER_POST_FILL_NET_BPS = finiteEnv(
+  'VENUE_ARB_EXTENDED_LIGHTER_MAKER_POST_FILL_NET_BPS',
+  1,
+);
+const EXTENDED_LIGHTER_MAKER_EXIT_NET_BPS = finiteEnv(
+  'VENUE_ARB_EXTENDED_LIGHTER_MAKER_EXIT_NET_BPS',
+  2,
+);
+const EXTENDED_LIGHTER_MAKER_QUOTE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_EXTENDED_LIGHTER_MAKER_QUOTE_LATENCY_MS',
+  500,
+);
+const EXTENDED_LIGHTER_MAKER_HEDGE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_EXTENDED_LIGHTER_MAKER_HEDGE_LATENCY_MS',
+  200,
 );
 const LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED = booleanEnv(
   'VENUE_ARB_LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED',
@@ -1245,6 +1281,49 @@ const extendedAsterMakerShadow = new GenericMakerShadow({
   },
   onCheckpoint: (checkpoint) => {
     atomicJson(EXTENDED_ASTER_MAKER_ACTIVE_PATH, {
+      ...checkpoint,
+      updatedAt: Date.now(),
+    });
+  },
+});
+const extendedLighterMakerShadow = new GenericMakerShadow({
+  routeId: 'extended-maker-lighter',
+  makerVenue: 'extended',
+  hedgeVenue: 'lighter',
+  notionalUsd: LIGHTER_EXTENDED_MAKER_NOTIONAL_USD,
+  entryEdgeBps: EXTENDED_LIGHTER_MAKER_ENTRY_EDGE_BPS,
+  cancelEdgeBps: EXTENDED_LIGHTER_MAKER_CANCEL_EDGE_BPS,
+  postFillNetBps: EXTENDED_LIGHTER_MAKER_POST_FILL_NET_BPS,
+  exitNetBps: EXTENDED_LIGHTER_MAKER_EXIT_NET_BPS,
+  takerExitNetBps: EXTENDED_LIGHTER_MAKER_EXIT_NET_BPS,
+  quoteLatencyMs: EXTENDED_LIGHTER_MAKER_QUOTE_LATENCY_MS,
+  hedgeLatencyMs: EXTENDED_LIGHTER_MAKER_HEDGE_LATENCY_MS,
+  quoteTtlMs: LIGHTER_EXTENDED_MAKER_QUOTE_TTL_MS,
+  maxQueueUsd: LIGHTER_EXTENDED_MAKER_MAX_QUEUE_USD,
+  hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
+  maxHoldMs: LIGHTER_EXTENDED_MAKER_MAX_HOLD_MS,
+  independenceMs: MAKER_INDEPENDENCE_MS,
+  bookFreshMs: MAKER_BOOK_FRESH_MS,
+  sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  executionBufferBps: EXECUTION_BUFFER_BPS,
+  makerFeeBps: 0,
+  hedgeTakerFeeBps: FEE_BPS.lighter,
+  makerFallbackTakerFeeBps: FEE_BPS.extended,
+  fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+  requiredSamples: SHADOW_REQUIRED_SAMPLES,
+  requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  maxEntryDistanceBps: 3,
+}, {
+  onResult: (result) => {
+    appendFileSync(
+      EXTENDED_LIGHTER_MAKER_RESULTS_PATH,
+      `${JSON.stringify(result)}\n`,
+    );
+  },
+  onCheckpoint: (checkpoint) => {
+    atomicJson(EXTENDED_LIGHTER_MAKER_ACTIVE_PATH, {
       ...checkpoint,
       updatedAt: Date.now(),
     });
@@ -3159,6 +3238,10 @@ function startLighter(): void {
         ) * 10_000;
         if (mismatchBps <= LIGHTER_BBO_MISMATCH_BPS) {
           bboMismatchCounts.delete(marketId);
+          // The ticker independently confirms that the stored depth still has
+          // the live BBO. Keep the validated book fresh even when Lighter does
+          // not emit a depth delta during a quiet market.
+          markBook(book, finite(message.timestamp), receivedAt);
           return;
         }
         const mismatches = (bboMismatchCounts.get(marketId) ?? 0) + 1;
@@ -3355,6 +3438,9 @@ function startExtendedTrades(): void {
     if (EXTENDED_ASTER_MAKER_SHADOW_ENABLED) {
       extendedAsterMakerShadow.setTradeStreamConnected(true);
     }
+    if (EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED) {
+      extendedLighterMakerShadow.setTradeStreamConnected(true);
+    }
     console.warn('venue-arb extended public trades connected');
     const timer = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) ws.ping();
@@ -3399,6 +3485,9 @@ function startExtendedTrades(): void {
         if (EXTENDED_ASTER_MAKER_SHADOW_ENABLED) {
           extendedAsterMakerShadow.processTrade(trade, receivedAt);
         }
+        if (EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED) {
+          extendedLighterMakerShadow.processTrade(trade, receivedAt);
+        }
       }
     } catch (error) {
       console.warn(
@@ -3412,6 +3501,9 @@ function startExtendedTrades(): void {
     if (EXTENDED_ASTER_MAKER_SHADOW_ENABLED) {
       extendedAsterMakerShadow.setTradeStreamConnected(false);
     }
+    if (EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED) {
+      extendedLighterMakerShadow.setTradeStreamConnected(false);
+    }
     console.warn('venue-arb extended public trades websocket error', error.message);
   });
   ws.on('close', (code, reason) => {
@@ -3421,6 +3513,10 @@ function startExtendedTrades(): void {
     if (EXTENDED_ASTER_MAKER_SHADOW_ENABLED) {
       extendedAsterMakerShadow.setTradeStreamConnected(false);
       extendedAsterMakerShadow.recordTradeReconnect();
+    }
+    if (EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED) {
+      extendedLighterMakerShadow.setTradeStreamConnected(false);
+      extendedLighterMakerShadow.recordTradeReconnect();
     }
     console.warn(
       `venue-arb extended public trades closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
@@ -4096,6 +4192,10 @@ function writeStatus(): void {
       ...extendedAsterMakerShadow.status(),
       enabled: EXTENDED_ASTER_MAKER_SHADOW_ENABLED,
     },
+    extendedLighterMakerShadow: {
+      ...extendedLighterMakerShadow.status(),
+      enabled: EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED,
+    },
     lighterExtendedMakerShadow: {
       ...lighterExtendedMakerShadow.status(),
       enabled: LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED,
@@ -4447,6 +4547,7 @@ function shutdown(signal: string): void {
   grvtMakerShadow.shutdown(Date.now());
   grvtExtendedMakerShadow.shutdown(Date.now());
   extendedAsterMakerShadow.shutdown(Date.now());
+  extendedLighterMakerShadow.shutdown(Date.now());
   lighterExtendedMakerShadow.shutdown(Date.now());
   writeStatus();
   writeExecutionStatus();
@@ -4468,6 +4569,9 @@ if (!existsSync(GRVT_EXTENDED_MAKER_RESULTS_PATH)) {
 }
 if (!existsSync(EXTENDED_ASTER_MAKER_RESULTS_PATH)) {
   writeFileSync(EXTENDED_ASTER_MAKER_RESULTS_PATH, '');
+}
+if (!existsSync(EXTENDED_LIGHTER_MAKER_RESULTS_PATH)) {
+  writeFileSync(EXTENDED_LIGHTER_MAKER_RESULTS_PATH, '');
 }
 if (!existsSync(LIGHTER_EXTENDED_MAKER_RESULTS_PATH)) {
   writeFileSync(LIGHTER_EXTENDED_MAKER_RESULTS_PATH, '');
@@ -4497,6 +4601,13 @@ loadGenericMakerState(
   EXTENDED_ASTER_MAKER_SHADOW_ENABLED,
 );
 loadGenericMakerState(
+  extendedLighterMakerShadow,
+  EXTENDED_LIGHTER_MAKER_RESULTS_PATH,
+  EXTENDED_LIGHTER_MAKER_ACTIVE_PATH,
+  'Extended maker → Lighter',
+  EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED,
+);
+loadGenericMakerState(
   lighterExtendedMakerShadow,
   LIGHTER_EXTENDED_MAKER_RESULTS_PATH,
   LIGHTER_EXTENDED_MAKER_ACTIVE_PATH,
@@ -4510,7 +4621,11 @@ if (activeVenues.has('paradex')) startParadex();
 if (activeVenues.has('polymarket')) startPolymarket();
 if (activeVenues.has('extended')) {
   startExtended();
-  if (MAKER_SHADOW_ENABLED || EXTENDED_ASTER_MAKER_SHADOW_ENABLED) {
+  if (
+    MAKER_SHADOW_ENABLED
+    || EXTENDED_ASTER_MAKER_SHADOW_ENABLED
+    || EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED
+  ) {
     startExtendedTrades();
   }
 }
@@ -4558,6 +4673,16 @@ const evaluationTimer = setInterval(() => {
     extendedAsterMakerShadow.evaluate(
       now,
       genericMakerMarkets('extended', 'aster', now),
+    );
+  }
+  if (
+    EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED
+    && activeVenues.has('extended')
+    && activeVenues.has('lighter')
+  ) {
+    extendedLighterMakerShadow.evaluate(
+      now,
+      genericMakerMarkets('extended', 'lighter', now),
     );
   }
   if (

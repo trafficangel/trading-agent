@@ -346,6 +346,14 @@ type GenericMakerShadowStatus = {
   telemetry?: MakerShadow['telemetry'] & {
     bestProjectedEntryBps?: number | null;
     bestProjectedCoin?: string | null;
+    peakProjectedEntryBps?: number | null;
+    peakProjectedCoin?: string | null;
+    bestObservedTopNetBps?: number | null;
+    bestObservedTopDeviationBps?: number | null;
+    bestObservedTopCoin?: string | null;
+    peakObservedTopNetBps?: number | null;
+    peakObservedTopDeviationBps?: number | null;
+    peakObservedTopCoin?: string | null;
   };
   quote?: MakerShadow['quote'];
   pair?: {
@@ -402,6 +410,7 @@ type Status = {
   grvtMakerShadow?: GenericMakerShadowStatus;
   grvtExtendedMakerShadow?: GenericMakerShadowStatus;
   extendedAsterMakerShadow?: GenericMakerShadowStatus;
+  extendedLighterMakerShadow?: GenericMakerShadowStatus;
   lighterExtendedMakerShadow?: GenericMakerShadowStatus;
 };
 type LiveFill = {
@@ -955,37 +964,12 @@ function makerReason(reason: unknown): string {
   return labels[String(reason)] ?? esc(reason);
 }
 
-function makerShadowRows(shadow: MakerShadow | undefined): string {
-  const rows = shadow?.recent ?? [];
-  if (!rows.length) {
-    return '<tr><td colspan="10">Ждём первое подтверждённое maker-исполнение: касание цены не считается fill, очередь должна быть реально проторгована.</td></tr>';
-  }
-  return rows.map((row) => `<tr>
-    <td>${utc(row.openedAt ?? row.closedAt)}</td>
-    <td><b>${esc(row.coin)}</b></td>
-    <td>${row.extendedSide === 'long' ? 'LONG Extended / SHORT Lighter' : row.extendedSide === 'short' ? 'SHORT Extended / LONG Lighter' : '—'}</td>
-    <td>${price(row.entryExtended)} / ${price(row.entryLighter)}</td>
-    <td>${price(row.exitExtended)} / ${price(row.exitLighter)}</td>
-    <td class="${cls(row.entryEdgeBps)}">${pctFromBps(row.entryEdgeBps)}</td>
-    <td>${duration(row.holdingMs)}</td>
-    <td>${row.exitExtendedMaker == null ? '—' : row.exitExtendedMaker ? 'maker' : 'taker'}</td>
-    <td class="${cls(row.realizedNetBps)}"><b>${pctFromBps(row.realizedNetBps)}</b> · ${row.realizedNetUsd == null ? '—' : money(row.realizedNetUsd, true)}</td>
-    <td class="${row.passed ? 'pos' : 'neg'}">${row.passed ? 'PASS' : 'FAIL'}<small>${makerReason(row.reason)}${Number(row.fundingBps ?? 0) > 0 ? ` · funding ${pctFromBps(row.fundingBps)}` : ''}</small></td>
-  </tr>`).join('');
-}
-
 function makerQuoteLabel(shadow: MakerShadow | undefined): string {
   const quote = shadow?.quote;
   if (!quote) return 'нет активной котировки';
   const queueUsd = Number(quote.queue?.queueAhead ?? 0) * Number(quote.price ?? 0);
   const state = quote.activatedAt == null ? 'отправка' : 'в очереди';
   return `${esc(quote.coin)} · ${quote.stage === 'exit' ? 'выход' : 'вход'} ${String(quote.side).toUpperCase()} @ ${price(quote.price)} · ${state} · впереди ${money(queueUsd)}`;
-}
-
-function makerPairLabel(shadow: MakerShadow | undefined): string {
-  const pair = shadow?.pair;
-  if (!pair) return 'нет открытой пары';
-  return `${esc(pair.coin)} · ${String(pair.extendedSide).toUpperCase()} Extended · ${duration(Date.now() - Number(pair.openedAt ?? Date.now()))}`;
 }
 
 function genericMakerRows(
@@ -1049,7 +1033,9 @@ function genericMakerPanel(
       <div><small>Циклы / минимум</small><b>${Number(gate?.samples ?? 0)} / ${Number(gate?.requiredSamples ?? 20)}</b></div>
       <div><small>PASS</small><b class="${Number(gate?.passedPct ?? 0) >= Number(gate?.requiredPassPct ?? 90) ? 'pos' : ''}">${Number(gate?.passed ?? 0)} / ${Number(gate?.attempts ?? 0)} · ${pct(gate?.passedPct)}</b></div>
       <div><small>Накопленный net</small><b class="${cls(gate?.sumNetBps)}">${pctFromBps(gate?.sumNetBps)} · ${money(gate?.sumNetUsd, true)}</b></div>
-      <div><small>Лучший вход сейчас</small><b>${coinAndBps(telemetry?.bestProjectedCoin, telemetry?.bestProjectedEntryBps)}</b></div>
+      <div><small>Top-of-book net сейчас</small><b>${coinAndBps(telemetry?.bestObservedTopCoin, telemetry?.bestObservedTopNetBps)}</b></div>
+      <div><small>Пик top-of-book</small><b>${coinAndBps(telemetry?.peakObservedTopCoin, telemetry?.peakObservedTopNetBps)}</b></div>
+      <div><small>Активная maker-котировка</small><b>${coinAndBps(telemetry?.bestProjectedCoin, telemetry?.bestProjectedEntryBps)}</b></div>
       <div><small>Maker fills / quotes</small><b>${Number(telemetry?.queueFills ?? 0)} / ${Number(telemetry?.quotes ?? 0)}</b></div>
       <div><small>Trades / stale отброшено</small><b>${Number(telemetry?.trades ?? 0).toLocaleString('ru-RU')} / ${Number(telemetry?.staleTrades ?? 0).toLocaleString('ru-RU')}</b></div>
       <div><small>Котировка</small><b>${makerQuoteLabel({ quote: shadow?.quote })}</b></div>
@@ -1248,12 +1234,10 @@ async function render(lang: Lang): Promise<string> {
     .filter((row) => Number(currentNet1000Bps(row)) > triggerBps);
   const survival250 = summary.survival?.['250'];
   const executionShadow = status?.executionShadow;
-  const makerShadow = status?.makerShadow;
-  const makerGate = makerShadow?.readiness;
-  const makerTelemetry = makerShadow?.telemetry;
   const grvtMakerShadow = status?.grvtMakerShadow;
   const grvtExtendedMakerShadow = status?.grvtExtendedMakerShadow;
   const extendedAsterMakerShadow = status?.extendedAsterMakerShadow;
+  const extendedLighterMakerShadow = status?.extendedLighterMakerShadow;
   const lighterExtendedMakerShadow = status?.lighterExtendedMakerShadow;
   const primaryShadow = executionShadow?.routes?.['extended-lighter']
     ?? executionShadow;
@@ -1288,6 +1272,12 @@ async function render(lang: Lang): Promise<string> {
         ${activeRows(status?.active ?? [], triggerBps)}
       </section>
 
+      ${genericMakerPanel(extendedLighterMakerShadow, {
+        badge: 'EXTENDED MAKER → LIGHTER TAKER · SHADOW',
+        heading: 'Самый дешёвый маршрут на уже профинансированных биржах',
+        pagerId: 'extended-lighter-maker-shadow',
+      })}
+
       ${genericMakerPanel(lighterExtendedMakerShadow, {
         badge: 'LIGHTER MAKER → EXTENDED TAKER · SHADOW',
         heading: 'Нулекомиссионная maker-нога с реальной очередью',
@@ -1313,33 +1303,6 @@ async function render(lang: Lang): Promise<string> {
         heading: 'Кандидат с минимальными комиссиями',
         pagerId: 'grvt-maker-shadow',
       })}
-
-      <section class="va-panel va-maker-panel">
-        <div class="va-panel-head"><div><span class="va-badge">MAKER → TAKER · SHADOW ONLY</span><h2>Extended maker → Lighter hedge</h2></div>
-          <span class="${makerGate?.ready ? 'pos' : ''}">${makerGate?.ready ? 'SHADOW-GATE PASS' : 'КАПИТАЛ НЕ ВНОСИТЬ'}</span>
-        </div>
-        <div class="va-live-cards">
-          <div><small>Публичные сделки Extended</small><b class="${makerTelemetry?.tradeStreamConnected ? 'pos' : 'neg'}">${makerTelemetry?.tradeStreamConnected ? 'LIVE' : 'OFFLINE'}</b></div>
-          <div><small>Циклы / минимум</small><b>${Number(makerGate?.samples ?? 0)} / ${Number(makerGate?.requiredSamples ?? 20)}</b></div>
-          <div><small>PASS</small><b class="${Number(makerGate?.passedPct ?? 0) >= Number(makerGate?.requiredPassPct ?? 90) ? 'pos' : ''}">${Number(makerGate?.passed ?? 0)} / ${Number(makerGate?.attempts ?? 0)} · ${pct(makerGate?.passedPct)}</b></div>
-          <div><small>Накопленный net</small><b class="${cls(makerGate?.sumNetBps)}">${pctFromBps(makerGate?.sumNetBps)} · ${money(makerGate?.sumNetUsd, true)}</b></div>
-          <div><small>Средний / худший цикл</small><b>${pctFromBps(makerGate?.meanNetBps)} / ${pctFromBps(makerGate?.minNetBps)}</b></div>
-          <div><small>Maker fills / quotes</small><b>${Number(makerTelemetry?.queueFills ?? 0)} / ${Number(makerTelemetry?.quotes ?? 0)}</b></div>
-          <div><small>Поток trades</small><b>${Number(makerTelemetry?.trades ?? 0).toLocaleString('ru-RU')}<small>stale отброшено: ${Number(makerTelemetry?.staleTrades ?? 0).toLocaleString('ru-RU')}</small></b></div>
-          <div><small>Отклонено / истекло</small><b>${Number(makerTelemetry?.placementRejects ?? 0)} / ${Number(makerTelemetry?.quoteExpirations ?? 0)}<small>stale ${Number(makerTelemetry?.placementStaleRejects ?? 0)} · cross ${Number(makerTelemetry?.placementCrossRejects ?? 0)} · queue ${Number(makerTelemetry?.placementQueueRejects ?? 0)}</small></b></div>
-          <div><small>Котировка</small><b>${makerQuoteLabel(makerShadow)}</b></div>
-          <div><small>Открытая пара</small><b>${makerPairLabel(makerShadow)}</b></div>
-          <div><small>Хедж</small><b>${makerShadow?.pendingHedge ? `${esc(makerShadow.pendingHedge.coin)} · ${makerShadow.pendingHedge.stage === 'entry' ? 'вход' : 'выход'} ожидает Lighter` : 'нет незахеджированной ноги'}</b></div>
-          <div><small>Placement / hedge latency</small><b>${duration(makerShadow?.config?.quoteLatencyMs)} / ${duration(makerShadow?.config?.hedgeLatencyMs)}</b></div>
-        </div>
-        <p>Это отдельная проверка пути без четырёх taker-комиссий: лимитная post-only заявка ставится на Extended, а исполненная нога хеджируется taker-ордером на Lighter. Fill не выдумывается по касанию цены: после задержки размещения фиксируется фактическая очередь перед нами, затем она и наш объём должны быть проторгованы реальными public-trade сообщениями. Входные котировки с очередью больше ${money(makerShadow?.config?.maxQueueUsd ?? 25_000)} отбрасываются как практически неисполнимые. Backlog и сделки со старым exchange timestamp отбрасываются. После maker fill применяется задержка хеджа ${duration(makerShadow?.config?.hedgeLatencyMs)}, VWAP $${Number(makerShadow?.config?.notionalUsd ?? 500)}, funding и ${pctFromBps(makerShadow?.config?.executionBufferBps, false)} execution-буфера.</p>
-        <p class="va-wait"><b>Гейт масштабирования:</b> минимум ${Number(makerGate?.requiredSamples ?? 20)} независимых завершённых shadow-циклов, PASS ≥ ${pct(makerGate?.requiredPassPct)} и положительный суммарный net. Отдельный разрешённый canary ограничен одной реальной парой по $100 на ногу; увеличение капитала до выполнения гейта запрещено.</p>
-        <div class="va-table" data-va-pager="maker-shadow" data-page-size="20"><table><thead><tr>
-          <th>UTC</th><th>Монета</th><th>Пара</th><th>Вход Ext / Lighter</th>
-          <th>Выход Ext / Lighter</th><th>Entry edge</th><th>Жизнь</th>
-          <th>Выход Ext</th><th>Net</th><th>Результат</th>
-        </tr></thead><tbody>${makerShadowRows(makerShadow)}</tbody></table></div>
-      </section>
 
       <section class="va-panel va-shadow-panel">
         <div class="va-panel-head"><div><span class="va-badge">EXECUTION SHADOW · EXTENDED → LIGHTER</span><h2>Gate реального исполнения</h2></div>
