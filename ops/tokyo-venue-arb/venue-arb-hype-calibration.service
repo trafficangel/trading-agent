@@ -35,6 +35,7 @@ Environment=VENUE_ARB_MAKER_SHADOW_ENABLED=false
 Environment=VENUE_ARB_GRVT_MAKER_SHADOW_ENABLED=false
 Environment=VENUE_ARB_GRVT_EXTENDED_MAKER_SHADOW_ENABLED=false
 Environment=VENUE_ARB_EXTENDED_ASTER_MAKER_SHADOW_ENABLED=false
+Environment=VENUE_ARB_LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED=false
 Environment=VENUE_ARB_FEED_STALL_MS=15000
 ExecStart=/usr/bin/node /home/trader/apps/venue-arb-tokyo/dist/hft/venue-arb-monitor.js
 Restart=always

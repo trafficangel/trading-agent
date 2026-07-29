@@ -57,6 +57,7 @@ Environment=VENUE_ARB_EXTENDED_ASTER_MAKER_SHADOW_ENABLED=false
 Environment=VENUE_ARB_EXTENDED_ASTER_MAKER_CANCEL_EDGE_BPS=3
 Environment=VENUE_ARB_EXTENDED_ASTER_MAKER_POST_FILL_NET_BPS=2
 Environment=VENUE_ARB_EXTENDED_ASTER_MAKER_EXIT_NET_BPS=5
+Environment=VENUE_ARB_LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED=false
 Environment=VENUE_ARB_FEED_STALL_MS=15000
 ExecStart=/usr/bin/node /home/trader/apps/trading-agent/dist/hft/venue-arb-monitor.js
 Restart=always
