@@ -21,6 +21,10 @@ import {
 import { resolve } from 'node:path';
 import WebSocket, { type ClientOptions, type RawData } from 'ws';
 import { applyBybitDepthUpdate, createBybitDepthBook } from '../lib/bybit-depth-book.js';
+import {
+  applyEdgexDepthUpdate,
+  type EdgexDepthState,
+} from '../lib/edgex-depth-book.js';
 import { applyGrvtDepthUpdate, createGrvtDepthBook } from '../lib/grvt-depth-book.js';
 import {
   executableVwap,
@@ -64,6 +68,7 @@ type Venue =
   | 'aster'
   | 'pacifica'
   | 'grvt'
+  | 'edgex'
   | 'binance'
   | 'bybit';
 type VenueClass = 'DEX' | 'CEX';
@@ -74,6 +79,7 @@ type Market = {
   symbol: string;
   lighterMarketId: number;
   polymarketInstrumentId?: number;
+  edgexContractId: number;
 };
 
 type BookState = {
@@ -630,15 +636,15 @@ const RECONNECT_MS = 2_000;
 const HORIZONS_MS = [100, 250, 500, 1_000, 2_000, 5_000, 10_000] as const;
 
 const MARKETS: readonly Market[] = [
-  { coin: 'BTC', symbol: 'BTCUSDT', lighterMarketId: 1, polymarketInstrumentId: 6 },
-  { coin: 'ETH', symbol: 'ETHUSDT', lighterMarketId: 0, polymarketInstrumentId: 7 },
-  { coin: 'SOL', symbol: 'SOLUSDT', lighterMarketId: 2, polymarketInstrumentId: 8 },
-  { coin: 'HYPE', symbol: 'HYPEUSDT', lighterMarketId: 24, polymarketInstrumentId: 10 },
-  { coin: 'XRP', symbol: 'XRPUSDT', lighterMarketId: 7 },
-  { coin: 'DOGE', symbol: 'DOGEUSDT', lighterMarketId: 3 },
-  { coin: 'ADA', symbol: 'ADAUSDT', lighterMarketId: 39 },
-  { coin: 'BNB', symbol: 'BNBUSDT', lighterMarketId: 25 },
-  { coin: 'LTC', symbol: 'LTCUSDT', lighterMarketId: 35 },
+  { coin: 'BTC', symbol: 'BTCUSDT', lighterMarketId: 1, polymarketInstrumentId: 6, edgexContractId: 10_000_001 },
+  { coin: 'ETH', symbol: 'ETHUSDT', lighterMarketId: 0, polymarketInstrumentId: 7, edgexContractId: 10_000_002 },
+  { coin: 'SOL', symbol: 'SOLUSDT', lighterMarketId: 2, polymarketInstrumentId: 8, edgexContractId: 10_000_003 },
+  { coin: 'HYPE', symbol: 'HYPEUSDT', lighterMarketId: 24, polymarketInstrumentId: 10, edgexContractId: 10_000_072 },
+  { coin: 'XRP', symbol: 'XRPUSDT', lighterMarketId: 7, edgexContractId: 10_000_066 },
+  { coin: 'DOGE', symbol: 'DOGEUSDT', lighterMarketId: 3, edgexContractId: 10_000_067 },
+  { coin: 'ADA', symbol: 'ADAUSDT', lighterMarketId: 39, edgexContractId: 10_000_070 },
+  { coin: 'BNB', symbol: 'BNBUSDT', lighterMarketId: 25, edgexContractId: 10_000_064 },
+  { coin: 'LTC', symbol: 'LTCUSDT', lighterMarketId: 35, edgexContractId: 10_000_055 },
 ] as const;
 const ACTIVE_MARKETS: readonly Market[] = (() => {
   const configured = (process.env.VENUE_ARB_ACTIVE_COINS ?? '')
@@ -665,6 +671,7 @@ const VENUES: readonly Venue[] = [
   'aster',
   'pacifica',
   'grvt',
+  'edgex',
   'binance',
   'bybit',
 ];
@@ -694,6 +701,7 @@ const VENUE_CLASS: Record<Venue, VenueClass> = {
   aster: 'DEX',
   pacifica: 'DEX',
   grvt: 'DEX',
+  edgex: 'DEX',
   binance: 'CEX',
   bybit: 'CEX',
 };
@@ -709,6 +717,8 @@ const FEE_BPS: Record<Venue, number> = {
   pacifica: finiteEnv('VENUE_ARB_FEE_BPS_PACIFICA', 4),
   // GRVT base-tier perps taker fee is 0.045%; maker paths are researched separately.
   grvt: finiteEnv('VENUE_ARB_FEE_BPS_GRVT', 4.5),
+  // edgeX base taker rate is 0.038% per fill.
+  edgex: finiteEnv('VENUE_ARB_FEE_BPS_EDGEX', 3.8),
   binance: finiteEnv('VENUE_ARB_FEE_BPS_BINANCE', 5),
   bybit: finiteEnv('VENUE_ARB_FEE_BPS_BYBIT', 5.5),
 };
@@ -983,8 +993,10 @@ const byPolymarketId = new Map(ACTIVE_MARKETS.flatMap((market) => (
     ? []
     : [[market.polymarketInstrumentId, market] as const]
 )));
+const byEdgexId = new Map(ACTIVE_MARKETS.map((market) => [market.edgexContractId, market]));
 const bybitDepth = new Map(ACTIVE_MARKETS.map((market) => [market.symbol, createBybitDepthBook()]));
 const grvtDepth = new Map(ACTIVE_MARKETS.map((market) => [market.coin, createGrvtDepthBook()]));
+const edgexDepth = new Map<number, EdgexDepthState>();
 const connections = Object.fromEntries(VENUES.map((venue) => [
   venue,
   {
@@ -1192,6 +1204,14 @@ let shuttingDown = false;
 
 for (const venue of VENUES) {
   for (const market of ACTIVE_MARKETS) books.set(bookKey(venue, market.coin), emptyBook());
+}
+for (const market of ACTIVE_MARKETS) {
+  const book = books.get(bookKey('edgex', market.coin))!;
+  edgexDepth.set(market.edgexContractId, {
+    bids: book.bids,
+    asks: book.asks,
+    version: null,
+  });
 }
 
 function finiteEnv(name: string, fallback: number): number {
@@ -3261,6 +3281,96 @@ function startGrvt(): void {
   );
 }
 
+function startEdgex(): void {
+  const refreshedAt = new Map<number, number>();
+  const subscribe = (ws: WebSocket, contractId: number): void => {
+    ws.send(JSON.stringify({
+      type: 'subscribe',
+      channel: `depth.${contractId}.15`,
+    }));
+  };
+  const refresh = (
+    ws: WebSocket,
+    market: Market,
+    reason: 'gap' | 'invalid',
+  ): void => {
+    const now = Date.now();
+    if (now - (refreshedAt.get(market.edgexContractId) ?? 0) < 500) return;
+    refreshedAt.set(market.edgexContractId, now);
+    const depth = edgexDepth.get(market.edgexContractId);
+    const book = books.get(bookKey('edgex', market.coin));
+    if (!depth || !book) return;
+    depth.bids.clear();
+    depth.asks.clear();
+    depth.version = null;
+    book.exchangeAt = 0;
+    book.receivedAt = 0;
+    book.updates++;
+    executableBooks.delete(bookKey('edgex', market.coin));
+    console.warn(`venue-arb edgex ${market.coin} depth ${reason}; refreshing`);
+    ws.send(JSON.stringify({
+      type: 'unsubscribe',
+      channel: `depth.${market.edgexContractId}.15`,
+    }));
+    subscribe(ws, market.edgexContractId);
+  };
+
+  connect(
+    'edgex',
+    'wss://quote.edgex.exchange/api/v1/public/ws',
+    (ws) => {
+      for (const market of ACTIVE_MARKETS) {
+        subscribe(ws, market.edgexContractId);
+      }
+    },
+    (payload, receivedAt, ws) => {
+      const message = payload as {
+        type?: unknown;
+        time?: unknown;
+        content?: {
+          dataType?: unknown;
+          data?: Array<{
+            contractId?: unknown;
+            depthType?: unknown;
+            startVersion?: unknown;
+            endVersion?: unknown;
+            bids?: Array<{ price?: unknown; size?: unknown }>;
+            asks?: Array<{ price?: unknown; size?: unknown }>;
+          }>;
+        };
+      };
+      if (message.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong', time: message.time }));
+        return;
+      }
+      if (message.type !== 'quote-event') return;
+      for (const row of message.content?.data ?? []) {
+        const contractId = finite(row.contractId);
+        const market = byEdgexId.get(contractId);
+        const depth = edgexDepth.get(contractId);
+        const book = market ? books.get(bookKey('edgex', market.coin)) : null;
+        if (!market || !depth || !book) continue;
+        const result = applyEdgexDepthUpdate(depth, {
+          dataType: message.content?.dataType,
+          depthType: row.depthType,
+          startVersion: row.startVersion,
+          endVersion: row.endVersion,
+          bids: row.bids,
+          asks: row.asks,
+        });
+        if (result === 'gap' || result === 'invalid') {
+          refresh(ws, market, result);
+          continue;
+        }
+        if (result === 'duplicate') continue;
+        // The public depth message has no exchange timestamp; receive time is
+        // the only honest freshness clock available for this venue.
+        markBook(book, receivedAt, receivedAt);
+      }
+    },
+  );
+}
+
 function edge(
   now: number,
   coin: string,
@@ -4046,6 +4156,7 @@ if (activeVenues.has('extended')) {
 if (activeVenues.has('aster')) startAster();
 if (activeVenues.has('pacifica')) startPacifica();
 if (activeVenues.has('grvt')) startGrvt();
+if (activeVenues.has('edgex')) startEdgex();
 if (activeVenues.has('binance')) startBinance();
 if (activeVenues.has('bybit')) startBybit();
 const evaluationTimer = setInterval(() => {

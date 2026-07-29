@@ -14,6 +14,7 @@ type Venue =
   | 'aster'
   | 'pacifica'
   | 'grvt'
+  | 'edgex'
   | 'binance'
   | 'bybit';
 type SurvivalRow = {
@@ -459,6 +460,7 @@ const VENUES: readonly Venue[] = [
   'aster',
   'pacifica',
   'grvt',
+  'edgex',
   'binance',
   'bybit',
 ];
@@ -1235,7 +1237,7 @@ async function render(lang: Lang): Promise<string> {
       </div><div class="va-engine ${isLive ? 'live' : ''}"><i></i>${isLive ? 'РАБОТАЕТ' : 'НЕТ СВЕЖИХ ДАННЫХ'}</div></div>
 
       <div class="va-cards">
-        <div class="va-card"><small>Потоки</small><b>${connected}/${VENUES.length}</b><em>Lighter · Hyperliquid · Paradex · Polymarket · Extended · Aster · Pacifica · Binance · Bybit</em></div>
+        <div class="va-card"><small>Потоки</small><b>${connected}/${VENUES.length}</b><em>Lighter · Hyperliquid · Paradex · Polymarket · Extended · Aster · Pacifica · GRVT · edgeX · Binance · Bybit</em></div>
         <div class="va-card"><small>Максимальный возраст потока</small><b class="${maxFeedAgeMs > 15_000 ? 'neg' : ''}">${duration(maxFeedAgeMs)}</b><em>reconnect: ${feedReconnects} · stalls: ${feedStalls}</em></div>
         <div class="va-card"><small>Допуск сейчас</small><b class="${profitableActive.length ? 'pos' : ''}">${profitableActive.length}</b><em>$1,000 net &gt; ${pctFromBps(triggerBps)}</em></div>
         <div class="va-card"><small>Tradeable окон завершено</small><b class="${Number(summary.viable ?? 0) > 0 ? 'pos' : ''}">${Number(summary.viable ?? 0)}</b><em>из ${Number(summary.closed ?? 0)} честных окон</em></div>
