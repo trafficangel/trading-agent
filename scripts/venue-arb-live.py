@@ -240,6 +240,29 @@ def confirmation_grace_expired(
     )
 
 
+def adaptive_entry_confirmations(
+    *,
+    base_confirmations: int,
+    expected_net_bps: float,
+    deviation_bps: float,
+    fast_net_bps: float,
+    fast_deviation_bps: float,
+    medium_net_bps: float,
+    medium_deviation_bps: float,
+) -> int:
+    if (
+        expected_net_bps >= fast_net_bps
+        and deviation_bps >= fast_deviation_bps
+    ):
+        return 1
+    if (
+        expected_net_bps >= medium_net_bps
+        and deviation_bps >= medium_deviation_bps
+    ):
+        return min(base_confirmations, 2)
+    return base_confirmations
+
+
 def calibrated_basis_deviation(
     *,
     samples: list[tuple[int, float]],
@@ -381,6 +404,33 @@ class Canary:
         if self.entry_confirmations < 1:
             raise RuntimeError(
                 "VENUE_ARB_LIVE_ENTRY_CONFIRMATIONS must be positive"
+            )
+        self.fast_entry_net_bps = float(
+            os.getenv("VENUE_ARB_LIVE_FAST_ENTRY_NET_BPS", "25")
+        )
+        self.fast_entry_deviation_bps = float(
+            os.getenv("VENUE_ARB_LIVE_FAST_ENTRY_DEVIATION_BPS", "20")
+        )
+        self.medium_entry_net_bps = float(
+            os.getenv("VENUE_ARB_LIVE_MEDIUM_ENTRY_NET_BPS", "17.5")
+        )
+        self.medium_entry_deviation_bps = float(
+            os.getenv(
+                "VENUE_ARB_LIVE_MEDIUM_ENTRY_DEVIATION_BPS",
+                "15",
+            )
+        )
+        if not (
+            self.fast_entry_net_bps
+            >= self.medium_entry_net_bps
+            >= self.entry_net_bps
+            and self.fast_entry_deviation_bps
+            >= self.medium_entry_deviation_bps
+            >= self.basis_min_deviation_bps
+        ):
+            raise RuntimeError(
+                "adaptive entry gates must satisfy "
+                "fast >= medium >= standard"
             )
         self.entry_confirmation_grace_ms = int(
             os.getenv(
@@ -596,6 +646,31 @@ class Canary:
             "leverage": self.leverage,
             "entryNetPct": self.entry_net_bps / 100,
             "entryConfirmations": self.entry_confirmations,
+            "adaptiveEntryConfirmations": {
+                "fast": {
+                    "confirmations": 1,
+                    "minExpectedNetPct": self.fast_entry_net_bps / 100,
+                    "minDeviationPct": (
+                        self.fast_entry_deviation_bps / 100
+                    ),
+                },
+                "medium": {
+                    "confirmations": min(self.entry_confirmations, 2),
+                    "minExpectedNetPct": (
+                        self.medium_entry_net_bps / 100
+                    ),
+                    "minDeviationPct": (
+                        self.medium_entry_deviation_bps / 100
+                    ),
+                },
+                "standard": {
+                    "confirmations": self.entry_confirmations,
+                    "minExpectedNetPct": self.entry_net_bps / 100,
+                    "minDeviationPct": (
+                        self.basis_min_deviation_bps / 100
+                    ),
+                },
+            },
             "entryConfirmationGraceMs": (
                 self.entry_confirmation_grace_ms
             ),
@@ -2963,6 +3038,7 @@ class Canary:
         pending_candidate_id: str | None = None
         pending_quote_version: str | None = None
         pending_confirmations = 0
+        pending_required_confirmations = self.entry_confirmations
         pending_candidate_seen_at_ms: int | None = None
         while self.running:
             if len(self.completed_mode_trades()) >= self.max_trades:
@@ -3005,6 +3081,27 @@ class Canary:
                     quote_version = str(
                         candidate.get("_quoteVersion") or ""
                     )
+                    pending_required_confirmations = (
+                        adaptive_entry_confirmations(
+                            base_confirmations=self.entry_confirmations,
+                            expected_net_bps=finite_float(
+                                candidate.get("_basisExpectedNetBps"),
+                                -math.inf,
+                            ),
+                            deviation_bps=finite_float(
+                                candidate.get("_basisDeviationBps"),
+                                -math.inf,
+                            ),
+                            fast_net_bps=self.fast_entry_net_bps,
+                            fast_deviation_bps=(
+                                self.fast_entry_deviation_bps
+                            ),
+                            medium_net_bps=self.medium_entry_net_bps,
+                            medium_deviation_bps=(
+                                self.medium_entry_deviation_bps
+                            ),
+                        )
+                    )
                     (
                         pending_candidate_id,
                         pending_quote_version,
@@ -3019,12 +3116,16 @@ class Canary:
                     pending_candidate_seen_at_ms = int(
                         time.monotonic() * 1000
                     )
-                    if pending_confirmations >= self.entry_confirmations:
+                    if (
+                        pending_confirmations
+                        >= pending_required_confirmations
+                    ):
                         await self.execute(candidate)
                         return
                     self.last_rejection = (
                         "confirming fresh books "
-                        f"{pending_confirmations}/{self.entry_confirmations}"
+                        f"{pending_confirmations}/"
+                        f"{pending_required_confirmations}"
                     )
             elif (
                 self.execution_mode == "taker-taker"
@@ -3037,13 +3138,14 @@ class Canary:
                 pending_candidate_id = None
                 pending_quote_version = None
                 pending_confirmations = 0
+                pending_required_confirmations = self.entry_confirmations
                 pending_candidate_seen_at_ms = None
             if time.monotonic() - self.last_status_write >= 1:
                 self.write_status(
                     "armed",
                     entryConfirmationProgress={
                         "current": pending_confirmations,
-                        "required": self.entry_confirmations,
+                        "required": pending_required_confirmations,
                     },
                 )
             await asyncio.sleep(0.02)
@@ -3130,6 +3232,33 @@ def self_test() -> None:
             "currentSellBookAgeMs": 25,
         },
     ) == "1000:975"
+    confirmation_args = {
+        "base_confirmations": 3,
+        "fast_net_bps": 25,
+        "fast_deviation_bps": 20,
+        "medium_net_bps": 17.5,
+        "medium_deviation_bps": 15,
+    }
+    assert adaptive_entry_confirmations(
+        expected_net_bps=25,
+        deviation_bps=20,
+        **confirmation_args,
+    ) == 1
+    assert adaptive_entry_confirmations(
+        expected_net_bps=20,
+        deviation_bps=16,
+        **confirmation_args,
+    ) == 2
+    assert adaptive_entry_confirmations(
+        expected_net_bps=12,
+        deviation_bps=12,
+        **confirmation_args,
+    ) == 3
+    assert adaptive_entry_confirmations(
+        expected_net_bps=30,
+        deviation_bps=19,
+        **confirmation_args,
+    ) == 2
     pending_id: str | None = None
     pending_version: str | None = None
     confirmations = 0
