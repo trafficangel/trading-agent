@@ -566,9 +566,7 @@ async function readLive(): Promise<{
 
 async function readTargeted(): Promise<{
   candidateStatus: Status | null;
-  binanceMakerGate: ProfitGateStatus | null;
-  pacificaMakerGate: ProfitGateStatus | null;
-  lighterMakerGate: ProfitGateStatus | null;
+  extendedMakerGate: ProfitGateStatus | null;
 }> {
   const read = async <T>(file: string, fallback: T): Promise<T> => {
     try {
@@ -581,16 +579,8 @@ async function readTargeted(): Promise<{
   };
   return {
     candidateStatus: await read<Status | null>('cex-dex-status.json', null),
-    binanceMakerGate: await read<ProfitGateStatus | null>(
-      'aster-binance-maker-gate-status.json',
-      null,
-    ),
-    pacificaMakerGate: await read<ProfitGateStatus | null>(
-      'aster-pacifica-maker-gate-status.json',
-      null,
-    ),
-    lighterMakerGate: await read<ProfitGateStatus | null>(
-      'aster-lighter-maker-gate-status.json',
+    extendedMakerGate: await read<ProfitGateStatus | null>(
+      'extended-lighter-maker-gate-status.json',
       null,
     ),
   };
@@ -1246,20 +1236,15 @@ const VENUE_ARB_PAGINATION_SCRIPT = `<script>
 </script>`;
 
 const CANDIDATE_ROUTES = [
-  ['binance-aster', 'Binance → Aster'],
-  ['aster-binance', 'Aster → Binance'],
-  ['binance-pacifica', 'Binance → Pacifica'],
-  ['pacifica-binance', 'Pacifica → Binance'],
-  ['aster-lighter', 'Aster → Lighter'],
-  ['lighter-aster', 'Lighter → Aster'],
+  ['extended-lighter', 'Extended → Lighter'],
+  ['lighter-extended', 'Lighter → Extended'],
 ] as const;
 
 function candidateRouteRows(
   status: Status | null,
   makerProfitGates: {
-    binance: ProfitGateStatus | null;
-    pacifica: ProfitGateStatus | null;
-    lighter: ProfitGateStatus | null;
+    extendedLighter: ProfitGateStatus | null;
+    lighterExtended: ProfitGateStatus | null;
   },
 ): string {
   const shadow = status?.executionShadow;
@@ -1293,19 +1278,14 @@ function candidateRouteRows(
   }).join('');
   const makerRows = [
     {
-      label: 'Aster maker → Binance',
-      maker: status?.asterBinanceMakerShadow,
-      gate: makerProfitGates.binance,
+      label: 'Extended maker → Lighter',
+      maker: status?.extendedLighterMakerShadow,
+      gate: makerProfitGates.extendedLighter,
     },
     {
-      label: 'Aster maker → Pacifica',
-      maker: status?.asterPacificaMakerShadow,
-      gate: makerProfitGates.pacifica,
-    },
-    {
-      label: 'Aster maker → Lighter',
-      maker: status?.asterLighterMakerShadow,
-      gate: makerProfitGates.lighter,
+      label: 'Lighter maker → Extended',
+      maker: status?.lighterExtendedMakerShadow,
+      gate: makerProfitGates.lighterExtended,
     },
   ].filter(({ maker }) => maker?.enabled).map(({ label, maker, gate }) => {
     const readiness = maker?.readiness;
@@ -1319,7 +1299,7 @@ function candidateRouteRows(
     const passed = Number(
       gate?.metrics?.positive ?? readiness?.passed ?? 0,
     );
-    const state = gate?.ready
+    const state = (gate?.ready ?? readiness?.ready)
       ? '<b class="pos">ДОПУЩЕН</b>'
       : maker?.pair
         ? '<b class="pos">В РАБОТЕ</b>'
@@ -1353,9 +1333,8 @@ function candidateRouteRows(
 function candidateShadowRows(
   shadow: ExecutionShadow | undefined,
   makers: {
-    binance: GenericMakerShadowStatus | undefined;
-    pacifica: GenericMakerShadowStatus | undefined;
-    lighter: GenericMakerShadowStatus | undefined;
+    extendedLighter: GenericMakerShadowStatus | undefined;
+    lighterExtended: GenericMakerShadowStatus | undefined;
   },
 ): string {
   const labels = new Map<string, string>(CANDIDATE_ROUTES);
@@ -1381,9 +1360,8 @@ function candidateShadowRows(
     ];
   });
   ([
-    ['Aster maker → Binance', makers.binance],
-    ['Aster maker → Pacifica', makers.pacifica],
-    ['Aster maker → Lighter', makers.lighter],
+    ['Extended maker → Lighter', makers.extendedLighter],
+    ['Lighter maker → Extended', makers.lighterExtended],
   ] as const).filter(([, maker]) => maker?.enabled).forEach(([route, maker]) => {
     if (maker?.pair) {
       rows.push({
@@ -1476,16 +1454,12 @@ async function renderCompact(lang: Lang): Promise<string> {
   const routes = Object.values(candidateShadow?.routes ?? {});
   const activeMakers = [
     {
-      maker: candidateStatus?.asterBinanceMakerShadow,
-      gate: targeted.binanceMakerGate,
+      maker: candidateStatus?.extendedLighterMakerShadow,
+      gate: targeted.extendedMakerGate,
     },
     {
-      maker: candidateStatus?.asterPacificaMakerShadow,
-      gate: targeted.pacificaMakerGate,
-    },
-    {
-      maker: candidateStatus?.asterLighterMakerShadow,
-      gate: targeted.lighterMakerGate,
+      maker: candidateStatus?.lighterExtendedMakerShadow,
+      gate: null,
     },
   ].filter(({ maker }) => maker?.enabled);
   const totalSamples = routes.reduce(
@@ -1504,7 +1478,9 @@ async function renderCompact(lang: Lang): Promise<string> {
       0,
     ),
   );
-  const readyRoutes = activeMakers.filter(({ gate }) => gate?.ready).length;
+  const readyRoutes = activeMakers.filter(({ maker, gate }) => (
+    gate?.ready ?? maker?.readiness?.ready
+  )).length;
   const canaryReady = readyRoutes > 0;
   return pageShell(
     t(lang, 'Арбитраж — контроль прибыли', 'Arbitrage profit control'),
@@ -1540,9 +1516,8 @@ async function renderCompact(lang: Lang): Promise<string> {
         <div class="va-table"><table><thead><tr>
           <th>Маршрут</th><th>Net сейчас</th><th>Лучший net</th><th>Shadow</th><th>Статус</th><th>Почему нет входа</th>
         </tr></thead><tbody>${candidateRouteRows(candidateStatus, {
-          binance: targeted.binanceMakerGate,
-          pacifica: targeted.pacificaMakerGate,
-          lighter: targeted.lighterMakerGate,
+          extendedLighter: targeted.extendedMakerGate,
+          lighterExtended: null,
         })}</tbody></table></div>
       </section>
 
@@ -1551,9 +1526,8 @@ async function renderCompact(lang: Lang): Promise<string> {
         <div class="va-table" data-va-pager="target-shadow" data-page-size="20"><table><thead><tr>
           <th>UTC</th><th>Монета</th><th>Маршрут</th><th>Статус</th><th>Net</th><th>Причина</th>
         </tr></thead><tbody>${candidateShadowRows(candidateShadow, {
-          binance: candidateStatus?.asterBinanceMakerShadow,
-          pacifica: candidateStatus?.asterPacificaMakerShadow,
-          lighter: candidateStatus?.asterLighterMakerShadow,
+          extendedLighter: candidateStatus?.extendedLighterMakerShadow,
+          lighterExtended: candidateStatus?.lighterExtendedMakerShadow,
         })}</tbody></table></div>
       </section>
 
@@ -1800,14 +1774,15 @@ export async function venueArbHero(lang: Lang): Promise<string> {
     && Date.now() - status.updatedAt < 15_000,
   );
   const routeCount = Object.keys(status?.executionShadow?.routes ?? {}).length
-    + (status?.asterLighterMakerShadow?.enabled ? 1 : 0);
+    + (status?.extendedLighterMakerShadow?.enabled ? 1 : 0)
+    + (status?.lighterExtendedMakerShadow?.enabled ? 1 : 0);
   const samples = Number(
-    targeted.lighterMakerGate?.metrics?.samples
-    ?? status?.asterLighterMakerShadow?.readiness?.samples
+    targeted.extendedMakerGate?.metrics?.samples
+    ?? status?.extendedLighterMakerShadow?.readiness?.samples
     ?? 0,
   );
   return `<a class="va-hero" href="/lab/venue-arb">
-    <div><span class="va-badge">⚡ ASTER ↔ LIGHTER · SHADOW</span>
+    <div><span class="va-badge">⚡ EXTENDED ↔ LIGHTER · SHADOW</span>
       <div class="va-title">${t(lang, 'Исполнимый арбитраж', 'Executable arbitrage')}</div>
       <div class="va-sub">${t(lang, '$100 на ногу · все расходы · реальные входы выключены →', '$100 per leg · all costs · real entries disabled →')}</div>
     </div>
