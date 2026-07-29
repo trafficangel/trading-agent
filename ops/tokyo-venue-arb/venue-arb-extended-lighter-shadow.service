@@ -9,7 +9,7 @@ User=trader
 Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/extended-lighter-shadow
-Environment=VENUE_ARB_ACTIVE_VENUES=extended,lighter
+Environment=VENUE_ARB_ACTIVE_VENUES=extended,grvt,lighter
 # LIT is excluded: its Lighter depth disagreed with the independent ticker in
 # roughly 23% of checks and produced both the prior failed-flat live canary and
 # a negative reverse shadow fill. Prefer the better-validated books below.
@@ -42,7 +42,18 @@ Environment=VENUE_ARB_SHADOW_INDEPENDENCE_MS=60000
 Environment=VENUE_ARB_SHADOW_REQUIRED_SAMPLES=30
 Environment=VENUE_ARB_SHADOW_REQUIRED_PASS_PCT=60
 Environment=VENUE_ARB_MAKER_SHADOW_ENABLED=false
-Environment=VENUE_ARB_GRVT_MAKER_SHADOW_ENABLED=false
+Environment=VENUE_ARB_GRVT_MAKER_SHADOW_ENABLED=true
+Environment=VENUE_ARB_GRVT_MAKER_NOTIONAL_USD=100
+Environment=VENUE_ARB_GRVT_MAKER_ENTRY_EDGE_BPS=5
+Environment=VENUE_ARB_GRVT_MAKER_CANCEL_EDGE_BPS=3
+Environment=VENUE_ARB_GRVT_MAKER_POST_FILL_NET_BPS=2
+Environment=VENUE_ARB_GRVT_MAKER_EXIT_NET_BPS=1
+Environment=VENUE_ARB_GRVT_MAKER_QUOTE_LATENCY_MS=200
+Environment=VENUE_ARB_GRVT_MAKER_HEDGE_LATENCY_MS=300
+Environment=VENUE_ARB_GRVT_MAKER_QUOTE_DATA_GRACE_MS=600
+Environment=VENUE_ARB_GRVT_MAKER_FEE_BPS=-0.01
+Environment=VENUE_ARB_GRVT_MAKER_MAX_TRADE_IDLE_MS=15000
+Environment=VENUE_ARB_MAKER_MAX_HOLD_MS=180000
 Environment=VENUE_ARB_GRVT_EXTENDED_MAKER_SHADOW_ENABLED=false
 Environment=VENUE_ARB_EXTENDED_ASTER_MAKER_SHADOW_ENABLED=false
 Environment=VENUE_ARB_EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED=true
