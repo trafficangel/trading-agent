@@ -159,6 +159,38 @@ describe('GenericMakerShadow', () => {
     });
   });
 
+  it('waits through a brief hedge gap while activating a quote', () => {
+    const events: GenericMakerEvent[] = [];
+    const engine = new GenericMakerShadow({
+      ...config,
+      quoteLatencyMs: 100,
+      quoteDataGraceMs: 500,
+    }, {
+      onEvent: (event) => events.push(event),
+    });
+
+    engine.evaluate(2_200, [market(2_200, 100.2, 100.3)]);
+    const missingHedge = market(2_300, 100.2, 100.3);
+    missingHedge.hedge = null;
+    engine.evaluate(2_300, [missingHedge]);
+
+    const waiting = engine.status() as {
+      quote?: { activatedAt?: number | null } | null;
+    };
+    expect(waiting.quote).toBeTruthy();
+    expect(waiting.quote?.activatedAt).toBeNull();
+    expect(events.some((event) => (
+      event.type === 'placement_rejected'
+    ))).toBe(false);
+
+    engine.evaluate(2_500, [market(2_500, 100.2, 100.3)]);
+    const activated = engine.status() as {
+      quote?: { activatedAt?: number | null } | null;
+    };
+    expect(activated.quote?.activatedAt).toBe(2_500);
+    expect(events.at(-1)?.type).toBe('quote_activated');
+  });
+
   it('journals queue progress before a maker order fills', () => {
     const events: GenericMakerEvent[] = [];
     const engine = new GenericMakerShadow(config, {

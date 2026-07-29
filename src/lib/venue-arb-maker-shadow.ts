@@ -868,6 +868,13 @@ export class GenericMakerShadow {
     const minimum = quote.stage === 'entry'
       ? this.config.cancelEdgeBps
       : this.config.exitNetBps;
+    if (
+      projection == null
+      && now - quote.activeAt < (this.config.quoteDataGraceMs ?? 0)
+    ) {
+      quote.projectionUnavailableAt ??= now;
+      return;
+    }
     if (projection == null || projection < minimum) {
       this.telemetry.placementRejects++;
       this.telemetry.placementEdgeRejects++;
