@@ -420,6 +420,10 @@ const GRVT_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
   'grvt-maker-basis-active-v2.json',
 );
+const GRVT_MAKER_EVENTS_PATH = resolve(
+  DATA_DIR,
+  'grvt-maker-events-v1.ndjson',
+);
 const GRVT_EXTENDED_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
   'grvt-extended-maker-basis-shadow-v2.ndjson',
@@ -693,6 +697,10 @@ const GRVT_MAKER_QUOTE_TTL_MS = finiteEnv(
 const GRVT_MAKER_MAX_QUEUE_USD = finiteEnv(
   'VENUE_ARB_GRVT_MAKER_MAX_QUEUE_USD',
   5_000,
+);
+const GRVT_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
+  'VENUE_ARB_GRVT_MAKER_MAX_TRADE_IDLE_MS',
+  15_000,
 );
 const GRVT_MAKER_FEE_BPS = Number.isFinite(
   Number(process.env.VENUE_ARB_GRVT_MAKER_FEE_BPS),
@@ -1509,6 +1517,7 @@ const executableBooks = new Map<string, ExecutableBook>();
 const asterLastTradeAt = new Map<string, number>();
 const extendedLastTradeAt = new Map<string, number>();
 const lighterLastTradeAt = new Map<string, number>();
+const grvtLastTradeAt = new Map<string, number>();
 const bySymbol = new Map(ACTIVE_MARKETS.map((market) => [market.symbol, market]));
 const byCoin = new Map(ACTIVE_MARKETS.map((market) => [market.coin, market]));
 const byLighterId = new Map(ACTIVE_MARKETS.map((market) => [market.lighterMarketId, market]));
@@ -1627,6 +1636,7 @@ const grvtMakerShadow = new GenericMakerShadow({
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
   maxEntryDistanceBps: 3,
+  maxMakerTradeIdleMs: GRVT_MAKER_MAX_TRADE_IDLE_MS,
 }, {
   onResult: (result) => {
     appendFileSync(GRVT_MAKER_RESULTS_PATH, `${JSON.stringify(result)}\n`);
@@ -1636,6 +1646,12 @@ const grvtMakerShadow = new GenericMakerShadow({
       ...checkpoint,
       updatedAt: Date.now(),
     });
+  },
+  onEvent: (event) => {
+    appendFileSync(
+      GRVT_MAKER_EVENTS_PATH,
+      `${JSON.stringify(event)}\n`,
+    );
   },
 });
 const grvtExtendedMakerShadow = new GenericMakerShadow({
@@ -1667,6 +1683,7 @@ const grvtExtendedMakerShadow = new GenericMakerShadow({
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
   maxEntryDistanceBps: 3,
+  maxMakerTradeIdleMs: GRVT_MAKER_MAX_TRADE_IDLE_MS,
 }, {
   onResult: (result) => {
     appendFileSync(
@@ -4794,6 +4811,7 @@ function startGrvt(): void {
           && message.feed.venue === 'ORDERBOOK'
           && message.feed.is_rpi !== true
         ) {
+          grvtLastTradeAt.set(market.coin, receivedAt);
           const trade: MakerShadowTrade = {
             id: `${market.coin}:${String(
               message.feed.trade_id
@@ -5843,7 +5861,9 @@ function genericMakerMarkets(
             ? extendedLastTradeAt
             : makerVenue === 'lighter'
               ? lighterLastTradeAt
-              : null
+              : makerVenue === 'grvt'
+                ? grvtLastTradeAt
+                : null
       )?.get(market.coin) ?? null,
       hedge: hedge && hedgeBuyVwap != null && hedgeSellVwap != null
         ? {
@@ -5911,6 +5931,9 @@ if (!existsSync(SHADOW_RESULTS_PATH)) writeFileSync(SHADOW_RESULTS_PATH, '');
 if (!existsSync(MAKER_RESULTS_PATH)) writeFileSync(MAKER_RESULTS_PATH, '');
 if (!existsSync(GRVT_MAKER_RESULTS_PATH)) {
   writeFileSync(GRVT_MAKER_RESULTS_PATH, '');
+}
+if (!existsSync(GRVT_MAKER_EVENTS_PATH)) {
+  writeFileSync(GRVT_MAKER_EVENTS_PATH, '');
 }
 if (!existsSync(GRVT_EXTENDED_MAKER_RESULTS_PATH)) {
   writeFileSync(GRVT_EXTENDED_MAKER_RESULTS_PATH, '');
