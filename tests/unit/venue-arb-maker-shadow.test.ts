@@ -312,6 +312,30 @@ describe('GenericMakerShadow', () => {
     expect(status.pair).toBeNull();
   });
 
+  it('rejects a delayed print that predates quote activation', () => {
+    const engine = new GenericMakerShadow(config);
+    engine.evaluate(2_000, [market(2_000, 100.2, 100.3)]);
+    engine.evaluate(2_100, [market(2_100, 100.2, 100.3)]);
+    engine.processTrade({
+      id: 'pre-activation-print',
+      coin: 'BNB',
+      side: 'SELL',
+      price: 99,
+      size: 100,
+      tradeAt: 2_000,
+    }, 2_100);
+    const status = engine.status() as {
+      telemetry: {
+        preActivationTrades: number;
+        queueFills: number;
+      };
+      pair?: unknown;
+    };
+    expect(status.telemetry.preActivationTrades).toBe(1);
+    expect(status.telemetry.queueFills).toBe(0);
+    expect(status.pair).toBeNull();
+  });
+
   it('keeps an active quote through a brief data gap and cancels after grace', () => {
     const events: GenericMakerEvent[] = [];
     const engine = new GenericMakerShadow({

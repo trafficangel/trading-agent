@@ -112,6 +112,7 @@ export type GenericMakerTelemetry = {
   tradeReconnects: number;
   trades: number;
   staleTrades: number;
+  preActivationTrades: number;
   quotes: number;
   placementRejects: number;
   placementStaleRejects: number;
@@ -262,6 +263,7 @@ export class GenericMakerShadow {
     tradeReconnects: 0,
     trades: 0,
     staleTrades: 0,
+    preActivationTrades: 0,
     quotes: 0,
     placementRejects: 0,
     placementStaleRejects: 0,
@@ -1393,6 +1395,14 @@ export class GenericMakerShadow {
       || receivedAt < quote.activatedAt
       || receivedAt >= quote.expiresAt
     ) return;
+    // A delayed market-data print that happened before our simulated order
+    // became active cannot fill that order, even when it arrives afterwards.
+    // This is deliberately strict for venues with coarse exchange timestamps:
+    // rejecting an ambiguous fill is safer than manufacturing shadow profit.
+    if (trade.tradeAt < quote.activatedAt) {
+      this.telemetry.preActivationTrades++;
+      return;
+    }
     const previousQueueAhead = quote.queue.queueAhead;
     const previousRemaining = quote.queue.remaining;
     quote.queue = consumeMakerPrint(
