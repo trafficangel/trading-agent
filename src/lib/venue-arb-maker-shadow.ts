@@ -196,6 +196,10 @@ export type GenericMakerConfig = {
   independenceMs: number;
   bookFreshMs: number;
   sourceFreshMs: number;
+  makerBookFreshMs?: number;
+  makerSourceFreshMs?: number;
+  hedgeBookFreshMs?: number;
+  hedgeSourceFreshMs?: number;
   executionBufferBps: number;
   makerFeeBps: number;
   hedgeTakerFeeBps: number;
@@ -339,14 +343,22 @@ export class GenericMakerShadow {
     maker?: MakerShadowRawBook | null,
     hedge?: MakerShadowHedgeBook | null,
   ): boolean {
+    const makerBookFreshMs = this.config.makerBookFreshMs
+      ?? this.config.bookFreshMs;
+    const makerSourceFreshMs = this.config.makerSourceFreshMs
+      ?? this.config.sourceFreshMs;
+    const hedgeBookFreshMs = this.config.hedgeBookFreshMs
+      ?? this.config.bookFreshMs;
+    const hedgeSourceFreshMs = this.config.hedgeSourceFreshMs
+      ?? this.config.sourceFreshMs;
     return (
       (!maker || (
-        now - maker.receivedAt <= this.config.bookFreshMs
-        && now - maker.exchangeAt <= this.config.sourceFreshMs
+        now - maker.receivedAt <= makerBookFreshMs
+        && now - maker.exchangeAt <= makerSourceFreshMs
       ))
       && (!hedge || (
-        now - hedge.receivedAt <= this.config.bookFreshMs
-        && now - hedge.exchangeAt <= this.config.sourceFreshMs
+        now - hedge.receivedAt <= hedgeBookFreshMs
+        && now - hedge.exchangeAt <= hedgeSourceFreshMs
       ))
     );
   }

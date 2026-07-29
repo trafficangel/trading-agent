@@ -80,6 +80,40 @@ describe('GenericMakerShadow', () => {
     expect((engine.status() as { quote?: unknown }).quote).toBeTruthy();
   });
 
+  it('allows a quiet maker book without relaxing hedge freshness', () => {
+    const engine = new GenericMakerShadow({
+      ...config,
+      bookFreshMs: 1_000,
+      sourceFreshMs: 1_000,
+      makerBookFreshMs: 3_000,
+      makerSourceFreshMs: 3_000,
+      hedgeBookFreshMs: 1_000,
+      hedgeSourceFreshMs: 1_000,
+    });
+    const quietMaker = market(2_000, 100.2, 100.3);
+    quietMaker.maker!.receivedAt = 500;
+    quietMaker.maker!.exchangeAt = 500;
+    engine.evaluate(2_000, [quietMaker]);
+    expect((engine.status() as { quote?: unknown }).quote).toBeTruthy();
+
+    const staleHedge = market(4_000, 100.2, 100.3);
+    staleHedge.maker!.receivedAt = 2_500;
+    staleHedge.maker!.exchangeAt = 2_500;
+    staleHedge.hedge!.receivedAt = 2_500;
+    staleHedge.hedge!.exchangeAt = 2_500;
+    const second = new GenericMakerShadow({
+      ...config,
+      bookFreshMs: 1_000,
+      sourceFreshMs: 1_000,
+      makerBookFreshMs: 3_000,
+      makerSourceFreshMs: 3_000,
+      hedgeBookFreshMs: 1_000,
+      hedgeSourceFreshMs: 1_000,
+    });
+    second.evaluate(4_000, [staleHedge]);
+    expect((second.status() as { quote?: unknown }).quote).toBeNull();
+  });
+
   it('cancels an active quote when maker trading activity stops', () => {
     const events: GenericMakerEvent[] = [];
     const engine = new GenericMakerShadow({
