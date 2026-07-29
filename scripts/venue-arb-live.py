@@ -2345,6 +2345,185 @@ class Canary:
             )
         return price
 
+    async def rest_pair_quote(self, coin: str) -> dict[str, Any]:
+        assert self.extended is not None
+        extended_response, lighter_response = await asyncio.gather(
+            self.extended.info.get_orderbook_snapshot(
+                market_name=f"{coin}-USD"
+            ),
+            lighter.OrderApi(self.lighter_api).order_book_orders(
+                market_id=MARKETS[coin],
+                limit=100,
+                _request_timeout=2,
+            ),
+        )
+        if (
+            extended_response.error
+            or extended_response.data is None
+        ):
+            raise RuntimeError("Extended REST order book unavailable")
+        lighter_body = lighter_response.to_dict()
+
+        def extended_vwap(levels: list[Any]) -> float | None:
+            return order_book_vwap(
+                [
+                    {
+                        "price": level.price,
+                        "remaining_base_amount": level.qty,
+                    }
+                    for level in levels
+                ],
+                self.notional,
+            )
+
+        extended_buy = extended_vwap(extended_response.data.ask)
+        extended_sell = extended_vwap(extended_response.data.bid)
+        lighter_buy = order_book_vwap(
+            lighter_body.get("asks") or [],
+            self.notional,
+        )
+        lighter_sell = order_book_vwap(
+            lighter_body.get("bids") or [],
+            self.notional,
+        )
+        if None in {
+            extended_buy,
+            extended_sell,
+            lighter_buy,
+            lighter_sell,
+        }:
+            raise RuntimeError(
+                f"REST depth below ${self.notional:.2f} for {coin}"
+            )
+        return {
+            "notionalUsd": self.notional,
+            "extendedBuyVwap": extended_buy,
+            "extendedSellVwap": extended_sell,
+            "lighterBuyVwap": lighter_buy,
+            "lighterSellVwap": lighter_sell,
+        }
+
+    async def calibrate_rest(self, seconds: int) -> None:
+        if seconds <= 0:
+            raise RuntimeError("REST calibration duration must be positive")
+        await self.create_extended_client()
+        coins = [
+            coin
+            for coin in sorted(self.allowed_coins)
+            if f"{coin}-USD" in self.extended_markets
+            and all(
+                self.basis_samples.get(f"{route_id}:{coin}")
+                for route_id in self.live_routes
+            )
+        ]
+        if not coins:
+            raise RuntimeError("no basis-ready REST calibration markets")
+        path = self.data_dir / "rest-calibration-v1.ndjson"
+        started_at = int(time.time() * 1000)
+        deadline = time.monotonic() + seconds
+        samples = 0
+        errors = 0
+        candidates = 0
+        best: dict[str, Any] | None = None
+        last_report = 0.0
+        while self.running and time.monotonic() < deadline:
+            for coin in coins:
+                if not self.running or time.monotonic() >= deadline:
+                    break
+                at = int(time.time() * 1000)
+                try:
+                    quote = await self.rest_pair_quote(coin)
+                    for route_id in self.live_routes:
+                        metrics = self.basis_candidate_metrics(
+                            route_id=route_id,
+                            coin=coin,
+                            status={},
+                            now=at,
+                            quote=quote,
+                        )
+                        if metrics is None:
+                            continue
+                        row = {
+                            "version": "rest-calibration-v1",
+                            "at": at,
+                            "coin": coin,
+                            "routeId": route_id,
+                            "route": ROUTES[route_id][2],
+                            "notionalUsd": self.notional,
+                            **metrics,
+                            "qualified": (
+                                metrics["expectedNetBps"]
+                                >= self.entry_net_bps
+                                and metrics["deviationBps"]
+                                >= self.basis_min_deviation_bps
+                            ),
+                        }
+                        with path.open("a", encoding="utf-8") as handle:
+                            handle.write(
+                                json.dumps(
+                                    row,
+                                    separators=(",", ":"),
+                                )
+                                + "\n"
+                            )
+                        samples += 1
+                        if row["qualified"]:
+                            candidates += 1
+                        if (
+                            best is None
+                            or row["expectedNetBps"]
+                            > best["expectedNetBps"]
+                        ):
+                            best = row
+                except Exception as error:
+                    errors += 1
+                    print(
+                        json.dumps(
+                            {
+                                "event": "rest_calibration_error",
+                                "at": at,
+                                "coin": coin,
+                                "error": str(error),
+                            },
+                            separators=(",", ":"),
+                        ),
+                        flush=True,
+                    )
+                if time.monotonic() - last_report >= 10:
+                    print(
+                        json.dumps(
+                            {
+                                "event": "rest_calibration_progress",
+                                "startedAt": started_at,
+                                "samples": samples,
+                                "errors": errors,
+                                "qualified": candidates,
+                                "best": best,
+                            },
+                            separators=(",", ":"),
+                        ),
+                        flush=True,
+                    )
+                    last_report = time.monotonic()
+                await asyncio.sleep(0.1)
+        print(
+            json.dumps(
+                {
+                    "event": "rest_calibration_complete",
+                    "startedAt": started_at,
+                    "closedAt": int(time.time() * 1000),
+                    "markets": coins,
+                    "samples": samples,
+                    "errors": errors,
+                    "qualified": candidates,
+                    "best": best,
+                    "path": str(path),
+                },
+                separators=(",", ":"),
+            ),
+            flush=True,
+        )
+
     async def flatten(self, coin: str, *, emergency: bool) -> dict[str, Any]:
         ext_rows, lighter_rows = await asyncio.gather(
             self.extended_positions(), self.lighter_positions()
@@ -3783,18 +3962,26 @@ def self_test() -> None:
     print("venue-arb-live self-test ok")
 
 
-async def main(force_dry_run: bool, sign_test: bool) -> None:
+async def main(
+    force_dry_run: bool,
+    sign_test: bool,
+    rest_calibration_seconds: int,
+) -> None:
     runner = Canary(force_dry_run=force_dry_run)
     loop = asyncio.get_running_loop()
     for name in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(name, runner.request_shutdown)
     try:
-        if sign_test:
+        if rest_calibration_seconds:
+            await runner.calibrate_rest(rest_calibration_seconds)
+        elif sign_test:
             runner.acquire_lock()
             await runner.sign_test()
         else:
             await runner.run()
     except Exception as error:
+        if rest_calibration_seconds:
+            raise
         runner.log("fatal", error=str(error))
         recovery_exit_orders: dict[str, int] = {}
         with contextlib.suppress(Exception):
@@ -3839,8 +4026,19 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--sign-test", action="store_true")
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument(
+        "--rest-calibration-seconds",
+        type=int,
+        default=0,
+    )
     args = parser.parse_args()
     if args.self_test:
         self_test()
     else:
-        asyncio.run(main(args.dry_run, args.sign_test))
+        asyncio.run(
+            main(
+                args.dry_run,
+                args.sign_test,
+                args.rest_calibration_seconds,
+            )
+        )
