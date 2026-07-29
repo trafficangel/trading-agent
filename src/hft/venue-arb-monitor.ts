@@ -730,10 +730,34 @@ const ALL_SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     primary: false,
   },
   {
+    id: 'extended-edgex',
+    buyVenue: 'extended',
+    sellVenue: 'edgex',
+    primary: false,
+  },
+  {
+    id: 'edgex-extended',
+    buyVenue: 'edgex',
+    sellVenue: 'extended',
+    primary: false,
+  },
+  {
     id: 'lighter-extended',
     buyVenue: 'lighter',
     sellVenue: 'extended',
     primary: true,
+  },
+  {
+    id: 'lighter-edgex',
+    buyVenue: 'lighter',
+    sellVenue: 'edgex',
+    primary: false,
+  },
+  {
+    id: 'edgex-lighter',
+    buyVenue: 'edgex',
+    sellVenue: 'lighter',
+    primary: false,
   },
   {
     id: 'bybit-paradex',
