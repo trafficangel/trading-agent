@@ -1524,6 +1524,26 @@ function lighterBookValidated(
     && now - validation.receivedAt <= freshMs;
 }
 
+function validatedExecutableBook(
+  venue: Venue,
+  coin: string,
+  now: number,
+  lighterFreshMs: number,
+): ExecutableBook | null {
+  const book = executableBook(venue, coin);
+  if (!book || venue !== 'lighter') return book;
+  const market = byCoin.get(coin);
+  return market
+    && lighterBookValidated(
+      market.lighterMarketId,
+      book,
+      now,
+      lighterFreshMs,
+    )
+    ? book
+    : null;
+}
+
 function atomicJson(path: string, data: unknown): void {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, JSON.stringify(data));
@@ -3916,8 +3936,18 @@ function edge(
   buyVenue: Venue,
   sellVenue: Venue,
 ): EdgeSnapshot | null {
-  const buyBook = executableBook(buyVenue, coin);
-  const sellBook = executableBook(sellVenue, coin);
+  const buyBook = validatedExecutableBook(
+    buyVenue,
+    coin,
+    now,
+    SHADOW_SOURCE_FRESH_MS,
+  );
+  const sellBook = validatedExecutableBook(
+    sellVenue,
+    coin,
+    now,
+    SHADOW_SOURCE_FRESH_MS,
+  );
   if (
     !buyBook
     || !sellBook
@@ -4381,7 +4411,12 @@ function writeExecutionStatus(): void {
   }
   const closingQuotes = Object.fromEntries(ACTIVE_MARKETS.map((market) => {
     const extended = executableBook('extended', market.coin);
-    const lighter = executableBook('lighter', market.coin);
+    const lighter = validatedExecutableBook(
+      'lighter',
+      market.coin,
+      now,
+      SHADOW_SOURCE_FRESH_MS,
+    );
     return [market.coin, {
       // Conservative for the $300 canary: use $500 executable VWAP rather
       // than top-of-book when estimating whether both closing legs are net+.
