@@ -782,6 +782,10 @@ const LIGHTER_EXTENDED_MAKER_MAX_HOLD_MS = finiteEnv(
   3 * 60_000,
 );
 const FEED_STALL_MS = finiteEnv('VENUE_ARB_FEED_STALL_MS', 15_000);
+const EXTENDED_PER_MARKET_STREAMS = booleanEnv(
+  'VENUE_ARB_EXTENDED_PER_MARKET_STREAMS',
+  false,
+);
 const LIGHTER_BOOK_REFRESH_MS = finiteEnv(
   'VENUE_ARB_LIGHTER_BOOK_REFRESH_MS',
   0,
@@ -1293,7 +1297,8 @@ const connections = Object.fromEntries(VENUES.map((venue) => [
   },
 ])) as Record<Venue, ConnectionState>;
 const sockets = new Set<WebSocket>();
-const venueSockets = new Map<Venue, WebSocket>();
+const venueSockets = new Map<Venue, Set<WebSocket>>();
+const socketLastMessageAt = new WeakMap<WebSocket, number>();
 const active = new Map<string, Opportunity>();
 const latchedUntilBelowTrigger = new Set<string>();
 const shadowProbes = new Map<string, ShadowProbe>();
@@ -3202,17 +3207,22 @@ function connect(
   if (shuttingDown) return;
   const ws = new WebSocket(url, options);
   sockets.add(ws);
-  venueSockets.set(venue, ws);
+  const venueSet = venueSockets.get(venue) ?? new Set<WebSocket>();
+  venueSet.add(ws);
+  venueSockets.set(venue, venueSet);
   ws.on('open', () => {
     connections[venue].connected = true;
+    socketLastMessageAt.set(ws, Date.now());
     onOpen(ws);
     console.warn(`venue-arb ${venue} connected`);
   });
   ws.on('message', (data) => {
     const receivedAt = Date.now();
     const state = connections[venue];
+    state.connected = true;
     state.messages++;
     state.lastMessageAt = receivedAt;
+    socketLastMessageAt.set(ws, receivedAt);
     try {
       onMessage(JSON.parse(rawText(data)), receivedAt, ws);
     } catch (error) {
@@ -3220,10 +3230,14 @@ function connect(
     }
   });
   ws.on('pong', () => {
-    connections[venue].lastMessageAt = Date.now();
+    const receivedAt = Date.now();
+    connections[venue].lastMessageAt = receivedAt;
+    socketLastMessageAt.set(ws, receivedAt);
   });
   ws.on('error', (error) => {
-    connections[venue].connected = false;
+    connections[venue].connected = [...venueSet].some(
+      (socket) => socket !== ws && socket.readyState === WebSocket.OPEN,
+    );
     if (venue === 'lighter' && LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED) {
       lighterExtendedMakerShadow.setTradeStreamConnected(false);
     }
@@ -3239,8 +3253,11 @@ function connect(
   });
   ws.on('close', (code, reason) => {
     sockets.delete(ws);
-    if (venueSockets.get(venue) === ws) venueSockets.delete(venue);
-    connections[venue].connected = false;
+    venueSet.delete(ws);
+    if (!venueSet.size) venueSockets.delete(venue);
+    connections[venue].connected = [...venueSet].some(
+      (socket) => socket.readyState === WebSocket.OPEN,
+    );
     connections[venue].reconnects++;
     if (venue === 'lighter' && LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED) {
       lighterExtendedMakerShadow.setTradeStreamConnected(false);
@@ -3273,18 +3290,18 @@ function reconnectStalledFeeds(): void {
   const now = Date.now();
   for (const venue of ACTIVE_VENUES) {
     const state = connections[venue];
-    if (
-      !state.connected
-      || !state.lastMessageAt
-      || now - state.lastMessageAt <= FEED_STALL_MS
-    ) continue;
-    const ws = venueSockets.get(venue);
-    if (!ws) continue;
-    state.stalls++;
-    console.warn(
-      `venue-arb ${venue} stalled ${now - state.lastMessageAt}ms; reconnecting`,
-    );
-    ws.terminate();
+    if (!state.connected) continue;
+    const venueSet = venueSockets.get(venue);
+    if (!venueSet?.size) continue;
+    for (const ws of venueSet) {
+      const lastMessageAt = socketLastMessageAt.get(ws) ?? 0;
+      if (lastMessageAt && now - lastMessageAt <= FEED_STALL_MS) continue;
+      state.stalls++;
+      console.warn(
+        `venue-arb ${venue} stalled ${now - lastMessageAt}ms; reconnecting`,
+      );
+      ws.terminate();
+    }
   }
 }
 
@@ -3833,9 +3850,36 @@ function updateExtendedLevels(
 }
 
 function startExtended(): void {
-  connect(
+  const onMessage = (
+    payload: unknown,
+    receivedAt: number,
+  ): void => {
+    const message = payload as {
+      type?: unknown;
+      ts?: unknown;
+      data?: { m?: unknown; b?: unknown; a?: unknown };
+    };
+    if (!message.data || typeof message.data.m !== 'string') return;
+    const coin = message.data.m.endsWith('-USD')
+      ? message.data.m.slice(0, -'-USD'.length)
+      : '';
+    const market = byCoin.get(coin);
+    const book = market ? books.get(bookKey('extended', market.coin)) : null;
+    if (!book) return;
+    if (message.type === 'SNAPSHOT') {
+      replaceExtendedLevels(book.bids, message.data.b);
+      replaceExtendedLevels(book.asks, message.data.a);
+    } else if (message.type === 'DELTA') {
+      updateExtendedLevels(book.bids, message.data.b, true);
+      updateExtendedLevels(book.asks, message.data.a, true);
+    } else {
+      return;
+    }
+    markBook(book, finite(message.ts), receivedAt);
+  };
+  const startStream = (url: string): void => connect(
     'extended',
-    'wss://api.starknet.extended.exchange/stream.extended.exchange/v1/orderbooks',
+    url,
     (ws) => {
       const timer = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.ping();
@@ -3843,33 +3887,21 @@ function startExtended(): void {
       }, 10_000);
       timer.unref();
     },
-    (payload, receivedAt) => {
-      const message = payload as {
-        type?: unknown;
-        ts?: unknown;
-        data?: { m?: unknown; b?: unknown; a?: unknown };
-      };
-      if (!message.data || typeof message.data.m !== 'string') return;
-      const coin = message.data.m.endsWith('-USD')
-        ? message.data.m.slice(0, -'-USD'.length)
-        : '';
-      const market = byCoin.get(coin);
-      const book = market ? books.get(bookKey('extended', market.coin)) : null;
-      if (!book) return;
-      if (message.type === 'SNAPSHOT') {
-        replaceExtendedLevels(book.bids, message.data.b);
-        replaceExtendedLevels(book.asks, message.data.a);
-      } else if (message.type === 'DELTA') {
-        updateExtendedLevels(book.bids, message.data.b, true);
-        updateExtendedLevels(book.asks, message.data.a, true);
-      } else {
-        return;
-      }
-      markBook(book, finite(message.ts), receivedAt);
-    },
+    onMessage,
     {
       headers: { 'User-Agent': 'RobotClaude-Arb-Monitor/1.0' },
     },
+  );
+  if (EXTENDED_PER_MARKET_STREAMS) {
+    for (const market of ACTIVE_MARKETS) {
+      startStream(
+        `wss://api.starknet.extended.exchange/stream.extended.exchange/v1/orderbooks/${encodeURIComponent(`${market.coin}-USD`)}`,
+      );
+    }
+    return;
+  }
+  startStream(
+    'wss://api.starknet.extended.exchange/stream.extended.exchange/v1/orderbooks',
   );
 }
 
