@@ -132,12 +132,35 @@ def projected_net_usd(
     exit_sell: float,
     known_entry_fees: float,
     estimated_exit_fees: float,
+    execution_buffer_usd: float = 0.0,
+    funding_reserve_usd: float = 0.0,
 ) -> float:
     gross = (
         (exit_buy - entry_buy)
         + (entry_sell - exit_sell)
     ) * quantity
-    return gross - known_entry_fees - estimated_exit_fees
+    return (
+        gross
+        - known_entry_fees
+        - estimated_exit_fees
+        - execution_buffer_usd
+        - funding_reserve_usd
+    )
+
+
+def modeled_funding_reserve_usd(
+    *,
+    notional_usd: float,
+    holding_ms: int,
+    funding_bps_per_hour: float,
+) -> float:
+    return (
+        max(0.0, notional_usd)
+        * max(0, holding_ms)
+        / 3_600_000
+        * max(0.0, funding_bps_per_hour)
+        / 10_000
+    )
 
 
 class Canary:
@@ -260,6 +283,13 @@ class Canary:
         self.execution_buffer_bps = float(
             os.getenv("VENUE_ARB_EXECUTION_BUFFER_BPS", "2")
         )
+        self.funding_bps_per_hour = float(
+            os.getenv("VENUE_ARB_LIVE_FUNDING_BPS_PER_HOUR", "1")
+        )
+        if self.funding_bps_per_hour < 0:
+            raise RuntimeError(
+                "VENUE_ARB_LIVE_FUNDING_BPS_PER_HOUR must be non-negative"
+            )
         self.maker_retry_cooldown_ms = int(
             os.getenv("VENUE_ARB_LIVE_MAKER_RETRY_COOLDOWN_MS", "5000")
         )
@@ -375,6 +405,8 @@ class Canary:
             "postFillNetPct": self.post_fill_net_bps / 100,
             "exitMinProfitPct": self.exit_min_profit_bps / 100,
             "exitConfirmations": self.exit_confirmations,
+            "executionBufferPct": self.execution_buffer_bps / 100,
+            "fundingReservePctPerHour": self.funding_bps_per_hour / 100,
             "maxLossUsd": self.max_loss_usd,
             "shutdownDeferredWhenOpen": True,
             "routeId": self.route_id,
@@ -1564,6 +1596,19 @@ class Canary:
         estimated_exit_fees = (
             ext_exit * quantity * self.extended_taker_bps / 10_000
         )
+        actual_notional = min(ext_fill.notional, lit_fill.notional)
+        execution_buffer_usd = (
+            actual_notional * self.execution_buffer_bps / 10_000
+        )
+        opened_at = max(
+            ext_fill.filled_at or now,
+            lit_fill.filled_at or now,
+        )
+        funding_reserve_usd = modeled_funding_reserve_usd(
+            notional_usd=actual_notional,
+            holding_ms=max(0, now - opened_at),
+            funding_bps_per_hour=self.funding_bps_per_hour,
+        )
         net = projected_net_usd(
             quantity=quantity,
             entry_buy=entry_buy,
@@ -1572,13 +1617,17 @@ class Canary:
             exit_sell=exit_sell,
             known_entry_fees=ext_fill.fee + lit_fill.fee,
             estimated_exit_fees=estimated_exit_fees,
+            execution_buffer_usd=execution_buffer_usd,
+            funding_reserve_usd=funding_reserve_usd,
         )
         return {
             "extendedExitVwap": ext_exit,
             "lighterExitVwap": lit_exit,
             "estimatedExitFeesUsd": estimated_exit_fees,
+            "executionBufferUsd": execution_buffer_usd,
+            "fundingReserveUsd": funding_reserve_usd,
             "netPnlUsd": net,
-            "netPnlPct": net / self.notional * 100,
+            "netPnlPct": net / max(actual_notional, 1e-9) * 100,
             "quoteAt": float(status.get("updatedAt", 0) or 0),
         }
 
@@ -1630,13 +1679,35 @@ class Canary:
         estimated_exit_fees = (
             ext_exit * quantity * self.extended_taker_bps / 10_000
         )
-        net = gross - ext_fill.fee - lit_fill.fee - estimated_exit_fees
+        actual_notional = min(ext_fill.notional, lit_fill.notional)
+        execution_buffer_usd = (
+            actual_notional * self.execution_buffer_bps / 10_000
+        )
+        opened_at = max(
+            ext_fill.filled_at or now,
+            lit_fill.filled_at or now,
+        )
+        funding_reserve_usd = modeled_funding_reserve_usd(
+            notional_usd=actual_notional,
+            holding_ms=max(0, now - opened_at),
+            funding_bps_per_hour=self.funding_bps_per_hour,
+        )
+        net = (
+            gross
+            - ext_fill.fee
+            - lit_fill.fee
+            - estimated_exit_fees
+            - execution_buffer_usd
+            - funding_reserve_usd
+        )
         return {
             "extendedExitVwap": ext_exit,
             "lighterExitVwap": lit_exit,
             "estimatedExitFeesUsd": estimated_exit_fees,
+            "executionBufferUsd": execution_buffer_usd,
+            "fundingReserveUsd": funding_reserve_usd,
             "netPnlUsd": net,
-            "netPnlPct": net / max(ext_fill.notional, 1e-9) * 100,
+            "netPnlPct": net / max(actual_notional, 1e-9) * 100,
             "quoteAt": float(status.get("updatedAt", 0) or 0),
         }
 
@@ -1940,19 +2011,28 @@ class Canary:
                 + (lit_exit.price - lit_fill.price)
             ) * quantity_done
         fees = ext_fill.fee + ext_exit.fee + lit_fill.fee + lit_exit.fee
-        net = gross - fees
+        holding_ms = closed_at - opened_at
+        funding_reserve_usd = modeled_funding_reserve_usd(
+            notional_usd=actual_notional,
+            holding_ms=holding_ms,
+            funding_bps_per_hour=self.funding_bps_per_hour,
+        )
+        net_before_funding = gross - fees
+        net = net_before_funding - funding_reserve_usd
         trade.update(
             status="closed",
             closeReason=close_reason,
             closeStartedAt=close_started,
             closedAt=closed_at,
-            holdingMs=closed_at - opened_at,
+            holdingMs=holding_ms,
             exitLatencyMs=closed_at - close_started,
             projectedExit=projected,
             exitExtended=asdict(ext_exit),
             exitLighter=asdict(lit_exit),
             grossPnlUsd=round(gross, 8),
             feesUsd=round(fees, 8),
+            fundingReserveUsd=round(funding_reserve_usd, 8),
+            netPnlUsdBeforeFunding=round(net_before_funding, 8),
             netPnlUsd=round(net, 8),
             netPnlPct=round(net / max(actual_notional, 1e-9) * 100, 8),
         )
@@ -2179,21 +2259,31 @@ class Canary:
                 + (ext_fill.price - ext_exit.price)
             ) * quantity_done
         fees = ext_fill.fee + ext_exit.fee + lit_fill.fee + lit_exit.fee
-        net = gross - fees
+        actual_notional = min(ext_fill.notional, lit_fill.notional)
+        holding_ms = closed_at - opened_at
+        funding_reserve_usd = modeled_funding_reserve_usd(
+            notional_usd=actual_notional,
+            holding_ms=holding_ms,
+            funding_bps_per_hour=self.funding_bps_per_hour,
+        )
+        net_before_funding = gross - fees
+        net = net_before_funding - funding_reserve_usd
         trade.update(
             status="closed",
             closeReason=close_reason,
             closeStartedAt=close_started,
             closedAt=closed_at,
-            holdingMs=closed_at - opened_at,
+            holdingMs=holding_ms,
             exitLatencyMs=closed_at - close_started,
             projectedExit=projected,
             exitExtended=asdict(ext_exit),
             exitLighter=asdict(lit_exit),
             grossPnlUsd=round(gross, 8),
             feesUsd=round(fees, 8),
+            fundingReserveUsd=round(funding_reserve_usd, 8),
+            netPnlUsdBeforeFunding=round(net_before_funding, 8),
             netPnlUsd=round(net, 8),
-            netPnlPct=round(net / self.notional * 100, 8),
+            netPnlPct=round(net / max(actual_notional, 1e-9) * 100, 8),
         )
         self.append_trade(trade)
         self.trade_open = False
@@ -2378,6 +2468,23 @@ def self_test() -> None:
         estimated_exit_fees=0.025025,
     )
     assert round(reverse_profit, 6) == 0.149925
+    protected_profit = projected_net_usd(
+        quantity=1,
+        entry_buy=100,
+        entry_sell=100.20,
+        exit_buy=100.10,
+        exit_sell=100.10,
+        known_entry_fees=0.02505,
+        estimated_exit_fees=0.025025,
+        execution_buffer_usd=0.02,
+        funding_reserve_usd=0.001,
+    )
+    assert round(protected_profit, 6) == 0.128925
+    assert modeled_funding_reserve_usd(
+        notional_usd=100,
+        holding_ms=180_000,
+        funding_bps_per_hour=1,
+    ) == 0.0005
     route_guard = object.__new__(Canary)
     route_guard.route_id = "lighter-extended"
     route_guard.route_label = "Lighter → Extended"
