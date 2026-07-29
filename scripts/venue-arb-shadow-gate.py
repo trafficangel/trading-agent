@@ -86,7 +86,14 @@ def evaluate(
     min_profit_factor: float,
     max_drawdown_bps: float,
     independence_ms: int,
+    observation_started_at_ms: int | None = None,
+    now_ms: int | None = None,
+    no_go_after_ms: int = 12 * 60 * 60 * 1000,
+    min_trades_by_deadline: int = 3,
+    negative_assessment_min_trades: int = 10,
 ) -> dict[str, Any]:
+    evaluated_at = now_ms or int(time.time() * 1000)
+    observation_started_at = observation_started_at_ms or evaluated_at
     eligible = [
         row
         for row in rows
@@ -126,16 +133,43 @@ def evaluate(
         reasons.append(
             f"max drawdown {drawdown:.3f} bps > {max_drawdown_bps:.3f}"
         )
+    no_go_reasons: list[str] = []
+    elapsed_ms = max(0, evaluated_at - observation_started_at)
+    if (
+        no_go_after_ms > 0
+        and elapsed_ms >= no_go_after_ms
+        and len(trade_values) < min_trades_by_deadline
+    ):
+        no_go_reasons.append(
+            "completed trades "
+            f"{len(trade_values)}/{min_trades_by_deadline} "
+            f"after {elapsed_ms / 3_600_000:.1f}h"
+        )
+    if (
+        len(trade_values) >= negative_assessment_min_trades
+        and sum(trade_values) <= 0
+    ):
+        no_go_reasons.append(
+            f"cumulative net {sum(trade_values):.3f} bps "
+            f"after {len(trade_values)} trades"
+        )
+    no_go = bool(no_go_reasons)
+    ready = not reasons and not no_go
     by_coin: dict[str, list[float]] = defaultdict(list)
     for row, value in zip(eligible, trade_values):
         by_coin[str(row.get("coin") or "UNKNOWN")].append(value)
     return {
         "version": "venue-arb-shadow-gate-v1",
-        "updatedAt": int(time.time() * 1000),
+        "updatedAt": evaluated_at,
+        "observationStartedAt": observation_started_at,
+        "observationElapsedMs": elapsed_ms,
         "routeId": route_id,
         "notionalUsd": notional_usd,
-        "ready": not reasons,
+        "ready": ready,
+        "noGo": no_go,
+        "decision": "GO" if ready else "NO_GO" if no_go else "OBSERVE",
         "reasons": reasons,
+        "noGoReasons": no_go_reasons,
         "requirements": {
             "minSamples": min_samples,
             "minProfitFactor": min_profit_factor,
@@ -143,6 +177,9 @@ def evaluate(
             "positiveMean95PctLowerBound": True,
             "maxDrawdownBps": max_drawdown_bps,
             "independenceMs": independence_ms,
+            "noGoAfterMs": no_go_after_ms,
+            "minTradesByDeadline": min_trades_by_deadline,
+            "negativeAssessmentMinTrades": negative_assessment_min_trades,
         },
         "metrics": {
             "samples": len(values),
@@ -268,6 +305,23 @@ def self_test() -> None:
     assert clustered["metrics"]["trades"] == 3
     assert clustered["metrics"]["samples"] == 2
     assert clustered["metrics"]["episodeSumNetBps"] == 8
+    no_go = evaluate(
+        [],
+        route_id="a-b",
+        notional_usd=100,
+        min_samples=30,
+        min_profit_factor=1.2,
+        max_drawdown_bps=10,
+        independence_ms=60_000,
+        observation_started_at_ms=1_000,
+        now_ms=12 * 60 * 60 * 1000 + 1_000,
+        no_go_after_ms=12 * 60 * 60 * 1000,
+        min_trades_by_deadline=3,
+    )
+    assert no_go["ready"] is False
+    assert no_go["noGo"] is True
+    assert no_go["decision"] == "NO_GO"
+    assert "completed trades 0/3" in no_go["noGoReasons"][0]
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "gate.json"
         atomic_json(path, winning)
@@ -325,11 +379,44 @@ def main() -> None:
         type=int,
         default=int(os.getenv("VENUE_ARB_GATE_INDEPENDENCE_MS", "60000")),
     )
+    parser.add_argument(
+        "--no-go-after-hours",
+        type=float,
+        default=float(os.getenv("VENUE_ARB_GATE_NO_GO_AFTER_HOURS", "12")),
+    )
+    parser.add_argument(
+        "--min-trades-by-deadline",
+        type=int,
+        default=int(
+            os.getenv("VENUE_ARB_GATE_MIN_TRADES_BY_DEADLINE", "3")
+        ),
+    )
+    parser.add_argument(
+        "--negative-assessment-min-trades",
+        type=int,
+        default=int(
+            os.getenv("VENUE_ARB_GATE_NEGATIVE_ASSESSMENT_MIN_TRADES", "10")
+        ),
+    )
     args = parser.parse_args()
     if args.self_test:
         self_test()
         return
     data_dir = Path(args.data_dir)
+    output_path = data_dir / args.output_file
+    previous: dict[str, Any] = {}
+    if output_path.exists():
+        try:
+            parsed = json.loads(output_path.read_text(encoding="utf-8"))
+            if isinstance(parsed, dict):
+                previous = parsed
+        except (json.JSONDecodeError, OSError):
+            pass
+    now_ms = int(time.time() * 1000)
+    observation_started_at = int(
+        finite_number(previous.get("observationStartedAt"))
+        or now_ms
+    )
     result = evaluate(
         read_rows(data_dir / args.input_file),
         route_id=args.route,
@@ -338,8 +425,19 @@ def main() -> None:
         min_profit_factor=args.min_profit_factor,
         max_drawdown_bps=args.max_drawdown_bps,
         independence_ms=args.independence_ms,
+        observation_started_at_ms=observation_started_at,
+        now_ms=now_ms,
+        no_go_after_ms=max(
+            0,
+            int(args.no_go_after_hours * 60 * 60 * 1000),
+        ),
+        min_trades_by_deadline=max(0, args.min_trades_by_deadline),
+        negative_assessment_min_trades=max(
+            1,
+            args.negative_assessment_min_trades,
+        ),
     )
-    atomic_json(data_dir / args.output_file, result)
+    atomic_json(output_path, result)
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
 
 

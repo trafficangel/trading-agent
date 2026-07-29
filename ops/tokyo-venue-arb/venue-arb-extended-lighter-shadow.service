@@ -18,7 +18,9 @@ Environment=VENUE_ARB_SAMPLE_MS=100
 Environment=VENUE_ARB_STALE_MS=1000
 Environment=VENUE_ARB_EXECUTION_BUFFER_BPS=2
 Environment=VENUE_ARB_SHADOW_NOTIONAL_USD=100
-Environment=VENUE_ARB_SHADOW_ENTRY_NET_BPS=15
+# Disable paid taker-taker entries in this process. The focused cohort below
+# keeps only zero/rebate maker -> zero-fee Lighter taker routes active.
+Environment=VENUE_ARB_SHADOW_ENTRY_NET_BPS=10000
 Environment=VENUE_ARB_SHADOW_ENTRY_CONFIRMATIONS=3
 Environment=VENUE_ARB_SHADOW_ENTRY_CONFIRMATION_GRACE_MS=1000
 Environment=VENUE_ARB_SHADOW_BASIS_GATE_ENABLED=true
