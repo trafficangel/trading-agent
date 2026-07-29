@@ -1,0 +1,15 @@
+[Unit]
+Description=Stop fee-free arbitrage shadows after confirmed NO-GO
+After=venue-arb-aster-lighter-maker-gate.service
+After=venue-arb-extended-lighter-maker-gate.service
+After=venue-arb-grvt-lighter-maker-gate.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/trader/apps/venue-arb-tokyo
+ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-fee-free-controller.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/home/trader/apps/venue-arb-tokyo/data

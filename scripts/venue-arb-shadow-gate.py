@@ -89,6 +89,7 @@ def evaluate(
     observation_started_at_ms: int | None = None,
     now_ms: int | None = None,
     no_go_after_ms: int = 12 * 60 * 60 * 1000,
+    hard_no_go_after_ms: int = 24 * 60 * 60 * 1000,
     min_trades_by_deadline: int = 3,
     negative_assessment_min_trades: int = 10,
 ) -> dict[str, Any]:
@@ -153,6 +154,15 @@ def evaluate(
             f"cumulative net {sum(trade_values):.3f} bps "
             f"after {len(trade_values)} trades"
         )
+    if (
+        hard_no_go_after_ms > 0
+        and elapsed_ms >= hard_no_go_after_ms
+        and reasons
+    ):
+        no_go_reasons.append(
+            "profit gate not passed after "
+            f"{elapsed_ms / 3_600_000:.1f}h"
+        )
     no_go = bool(no_go_reasons)
     ready = not reasons and not no_go
     by_coin: dict[str, list[float]] = defaultdict(list)
@@ -178,6 +188,7 @@ def evaluate(
             "maxDrawdownBps": max_drawdown_bps,
             "independenceMs": independence_ms,
             "noGoAfterMs": no_go_after_ms,
+            "hardNoGoAfterMs": hard_no_go_after_ms,
             "minTradesByDeadline": min_trades_by_deadline,
             "negativeAssessmentMinTrades": negative_assessment_min_trades,
         },
@@ -322,6 +333,54 @@ def self_test() -> None:
     assert no_go["noGo"] is True
     assert no_go["decision"] == "NO_GO"
     assert "completed trades 0/3" in no_go["noGoReasons"][0]
+    hard_no_go = evaluate(
+        [
+            {
+                "routeId": "a-b",
+                "coin": "X",
+                "realizedNetBps": 1,
+                "exitAt": 1,
+            },
+            {
+                "routeId": "a-b",
+                "coin": "Y",
+                "realizedNetBps": 1,
+                "exitAt": 60_001,
+            },
+            {
+                "routeId": "a-b",
+                "coin": "Z",
+                "realizedNetBps": 1,
+                "exitAt": 120_001,
+            },
+        ],
+        route_id="a-b",
+        notional_usd=100,
+        min_samples=30,
+        min_profit_factor=1.2,
+        max_drawdown_bps=10,
+        independence_ms=60_000,
+        observation_started_at_ms=1_000,
+        now_ms=24 * 60 * 60 * 1000 + 1_000,
+        no_go_after_ms=12 * 60 * 60 * 1000,
+        hard_no_go_after_ms=24 * 60 * 60 * 1000,
+        min_trades_by_deadline=3,
+    )
+    assert hard_no_go["decision"] == "NO_GO"
+    assert "profit gate not passed" in hard_no_go["noGoReasons"][-1]
+    hard_deadline_winner = evaluate(
+        winning_rows,
+        route_id="a-b",
+        notional_usd=100,
+        min_samples=30,
+        min_profit_factor=1.2,
+        max_drawdown_bps=10,
+        independence_ms=60_000,
+        observation_started_at_ms=1_000,
+        now_ms=24 * 60 * 60 * 1000 + 1_000,
+        hard_no_go_after_ms=24 * 60 * 60 * 1000,
+    )
+    assert hard_deadline_winner["decision"] == "GO"
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "gate.json"
         atomic_json(path, winning)
@@ -392,6 +451,13 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--hard-no-go-after-hours",
+        type=float,
+        default=float(
+            os.getenv("VENUE_ARB_GATE_HARD_NO_GO_AFTER_HOURS", "24")
+        ),
+    )
+    parser.add_argument(
         "--negative-assessment-min-trades",
         type=int,
         default=int(
@@ -430,6 +496,10 @@ def main() -> None:
         no_go_after_ms=max(
             0,
             int(args.no_go_after_hours * 60 * 60 * 1000),
+        ),
+        hard_no_go_after_ms=max(
+            0,
+            int(args.hard_no_go_after_hours * 60 * 60 * 1000),
         ),
         min_trades_by_deadline=max(0, args.min_trades_by_deadline),
         negative_assessment_min_trades=max(

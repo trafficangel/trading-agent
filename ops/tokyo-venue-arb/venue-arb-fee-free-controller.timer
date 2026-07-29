@@ -1,0 +1,12 @@
+[Unit]
+Description=Enforce fee-free arbitrage NO-GO decisions
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=5s
+Persistent=true
+Unit=venue-arb-fee-free-controller.service
+
+[Install]
+WantedBy=timers.target
