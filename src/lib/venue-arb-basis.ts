@@ -17,6 +17,19 @@ export type VenueArbBasisConfig = {
   minSpanMs: number;
 };
 
+export function pairedVenueArbExpectedNetBps(
+  entryBasisBps: number,
+  exitBaselineBps: number,
+  roundTripCostBps: number,
+): number {
+  if (
+    !Number.isFinite(entryBasisBps)
+    || !Number.isFinite(exitBaselineBps)
+    || !Number.isFinite(roundTripCostBps)
+  ) return Number.NEGATIVE_INFINITY;
+  return entryBasisBps + exitBaselineBps - roundTripCostBps;
+}
+
 export function calibratedVenueArbBasis(
   samples: readonly VenueArbBasisSample[],
   now: number,

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { calibratedVenueArbBasis } from '../../src/lib/venue-arb-basis.js';
+import {
+  calibratedVenueArbBasis,
+  pairedVenueArbExpectedNetBps,
+} from '../../src/lib/venue-arb-basis.js';
 
 describe('venue arb basis calibration', () => {
   it('measures deviation from an established route baseline', () => {
@@ -31,5 +34,13 @@ describe('venue arb basis calibration', () => {
       minSamples: 120,
       minSpanMs: 120_000,
     })).toBeNull();
+  });
+
+  it('prices all four fills through the opposite executable baseline', () => {
+    expect(pairedVenueArbExpectedNetBps(25, -8, 7)).toBe(10);
+    expect(pairedVenueArbExpectedNetBps(12, -8, 7)).toBe(-3);
+    expect(
+      pairedVenueArbExpectedNetBps(Number.NaN, -8, 7),
+    ).toBe(Number.NEGATIVE_INFINITY);
   });
 });

@@ -59,6 +59,7 @@ import {
 } from '../lib/venue-arb-maker-shadow.js';
 import {
   calibratedVenueArbBasis,
+  pairedVenueArbExpectedNetBps,
   type VenueArbBasisMetrics,
   type VenueArbBasisSample,
 } from '../lib/venue-arb-basis.js';
@@ -1507,30 +1508,72 @@ function shadowBasisMetrics(
   );
 }
 
+type ShadowPairedBasisMetrics = {
+  entry: VenueArbBasisMetrics;
+  exitBaselineBps: number;
+};
+
+function shadowPairedBasisMetrics(
+  route: ShadowRouteConfig,
+  coin: string,
+  quote: ShadowQuote,
+): ShadowPairedBasisMetrics | null {
+  const entry = shadowBasisMetrics(route, coin, quote);
+  if (entry == null) return null;
+  const opposite = SHADOW_ROUTES.find((candidate) => (
+    candidate.buyVenue === route.sellVenue
+    && candidate.sellVenue === route.buyVenue
+  ));
+  if (!opposite) return null;
+  const exitSamples = shadowBasisSamples.get(
+    shadowBasisKey(opposite.id, coin),
+  ) ?? [];
+  const latestExit = exitSamples.at(-1);
+  if (!latestExit) return null;
+  const exit = calibratedVenueArbBasis(
+    exitSamples,
+    quote.at,
+    latestExit.bps,
+    {
+      windowMs: SHADOW_BASIS_WINDOW_MS,
+      excludeMs: SHADOW_BASIS_EXCLUDE_MS,
+      minSamples: SHADOW_BASIS_MIN_SAMPLES,
+      minSpanMs: SHADOW_BASIS_MIN_SPAN_MS,
+    },
+  );
+  return exit == null
+    ? null
+    : { entry, exitBaselineBps: exit.baselineBps };
+}
+
 function shadowExpectedEntryNetBps(
   route: ShadowRouteConfig,
   quote: ShadowQuote,
-  metrics: VenueArbBasisMetrics | null,
+  metrics: ShadowPairedBasisMetrics | null,
 ): number {
   if (!SHADOW_BASIS_GATE_ENABLED) return quote.openingNetBps;
   if (metrics == null) return -Infinity;
-  return metrics.deviationBps - roundTripCostBps(
-    FEE_BPS[route.buyVenue],
-    FEE_BPS[route.sellVenue],
-    EXECUTION_BUFFER_BPS,
+  return pairedVenueArbExpectedNetBps(
+    shadowRawBasisBps(route, quote),
+    metrics.exitBaselineBps,
+    roundTripCostBps(
+      FEE_BPS[route.buyVenue],
+      FEE_BPS[route.sellVenue],
+      EXECUTION_BUFFER_BPS,
+    ),
   );
 }
 
 function shadowEntryPasses(
   route: ShadowRouteConfig,
   quote: ShadowQuote,
-  metrics: VenueArbBasisMetrics | null,
+  metrics: ShadowPairedBasisMetrics | null,
 ): boolean {
   if (!SHADOW_BASIS_GATE_ENABLED) {
     return quote.openingNetBps >= SHADOW_ENTRY_NET_BPS;
   }
   return metrics != null
-    && metrics.deviationBps >= SHADOW_BASIS_MIN_DEVIATION_BPS
+    && metrics.entry.deviationBps >= SHADOW_BASIS_MIN_DEVIATION_BPS
     && shadowExpectedEntryNetBps(route, quote, metrics)
       >= SHADOW_ENTRY_NET_BPS;
 }
@@ -1644,7 +1687,7 @@ function evaluateShadow(now: number): void {
       }
       telemetry.freshQuotes++;
       observeShadowBasis(route, market.coin, quote);
-      const basis = shadowBasisMetrics(route, market.coin, quote);
+      const basis = shadowPairedBasisMetrics(route, market.coin, quote);
       const expectedEntryNetBps = shadowExpectedEntryNetBps(
         route,
         quote,
@@ -1708,8 +1751,8 @@ function evaluateShadow(now: number): void {
         state: 'awaiting_entry',
         signalAt: now,
         signalNetBps: expectedEntryNetBps,
-        signalBasisBaselineBps: basis?.baselineBps ?? null,
-        signalBasisDeviationBps: basis?.deviationBps ?? null,
+        signalBasisBaselineBps: basis?.entry.baselineBps ?? null,
+        signalBasisDeviationBps: basis?.entry.deviationBps ?? null,
         entryLatencyMs: latency.entryMs,
         exitLatencyMs: latency.exitMs,
         entryDueAt: now + latency.entryMs,
@@ -1758,7 +1801,7 @@ function evaluateShadow(now: number): void {
       SHADOW_EXECUTION_FRESH_MS,
     ).quote;
     const basis = quote
-      ? shadowBasisMetrics(route, probe.coin, quote)
+      ? shadowPairedBasisMetrics(route, probe.coin, quote)
       : null;
     if (probe.state === 'awaiting_entry') {
       if (
@@ -1803,8 +1846,8 @@ function evaluateShadow(now: number): void {
         continue;
       }
       probe.entryEdgeConfirmedAt = now;
-      probe.entryBasisBaselineBps = basis?.baselineBps ?? null;
-      probe.entryBasisDeviationBps = basis?.deviationBps ?? null;
+      probe.entryBasisBaselineBps = basis?.entry.baselineBps ?? null;
+      probe.entryBasisDeviationBps = basis?.entry.deviationBps ?? null;
       probe.state = 'open';
       probe.openedAt = now;
       probe.entryBuy = quote.buyOpenVwap;
