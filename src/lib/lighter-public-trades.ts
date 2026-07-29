@@ -29,10 +29,17 @@ export function parseLighterPublicTrades(payload: unknown): LighterPublicTrade[]
   const message = payload as {
     channel?: unknown;
     trades?: unknown;
+    liquidation_trades?: unknown;
   };
-  if (!Array.isArray(message.trades)) return [];
+  const rows = [
+    ...(Array.isArray(message.trades) ? message.trades : []),
+    ...(Array.isArray(message.liquidation_trades)
+      ? message.liquidation_trades
+      : []),
+  ];
+  if (!rows.length) return [];
   const channelMarketId = marketIdFromChannel(message.channel);
-  return message.trades.flatMap((raw, index) => {
+  return rows.flatMap((raw, index) => {
     if (!raw || typeof raw !== 'object') return [];
     const row = raw as {
       trade_id?: unknown;

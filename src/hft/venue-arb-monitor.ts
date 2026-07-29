@@ -2794,6 +2794,7 @@ function startLighter(): void {
         channel?: unknown;
         timestamp?: unknown;
         trades?: unknown;
+        liquidation_trades?: unknown;
         ticker?: {
           a?: { price?: unknown; size?: unknown };
           b?: { price?: unknown; size?: unknown };
@@ -2805,7 +2806,7 @@ function startLighter(): void {
           begin_nonce?: unknown;
         };
       };
-      if (message.trades) {
+      if (message.trades || message.liquidation_trades) {
         for (const row of parseLighterPublicTrades(message)) {
           const market = byLighterId.get(row.marketId);
           if (!market || !LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED) continue;

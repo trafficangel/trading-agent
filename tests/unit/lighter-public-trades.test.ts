@@ -62,4 +62,24 @@ describe('parseLighterPublicTrades', () => {
     })).toHaveLength(1);
     expect(parseLighterPublicTrades({ channel: 'trade/7' })).toEqual([]);
   });
+
+  it('counts liquidation prints because they also consume public queue', () => {
+    expect(parseLighterPublicTrades({
+      channel: 'trade:24',
+      liquidation_trades: [{
+        trade_id: 99,
+        market_id: 24,
+        price: '54.30',
+        size: '30',
+        is_maker_ask: false,
+        timestamp: 1_785_294_000_100,
+      }],
+    })[0]).toMatchObject({
+      id: '24:99',
+      marketId: 24,
+      side: 'SELL',
+      price: 54.3,
+      size: 30,
+    });
+  });
 });
