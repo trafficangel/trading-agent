@@ -612,6 +612,7 @@ class Canary:
             tuple[int, int] | None
         ) = None
         self.rest_calibration_cache_rows: list[dict[str, Any]] = []
+        self.direct_rest_wait_reason: str | None = None
         self.lock_path = self.data_dir / "live.lock"
         self.running = True
         self.shutdown_requested = False
@@ -1395,6 +1396,7 @@ class Canary:
     def rest_calibration_candidate(self) -> dict[str, Any] | None:
         now = int(time.time() * 1000)
         max_age_ms = max(self.source_fresh_ms, 5_000)
+        fresh_rows: list[dict[str, Any]] = []
         rows: list[dict[str, Any]] = []
         for row in self.recent_rest_calibration_rows():
             at = int(row.get("at", 0) or 0)
@@ -1413,12 +1415,42 @@ class Canary:
                 and now - max_age_ms <= at <= now + 1_000
                 and route_id in self.live_routes
                 and coin in self.allowed_coins
+                and math.isfinite(expected_net_bps)
+                and math.isfinite(deviation_bps)
+            ):
+                fresh_rows.append(row)
+            if (
+                row.get("version") == "rest-calibration-v1"
+                and now - max_age_ms <= at <= now + 1_000
+                and route_id in self.live_routes
+                and coin in self.allowed_coins
                 and expected_net_bps >= self.entry_net_bps
                 and deviation_bps >= self.basis_min_deviation_bps
             ):
                 rows.append(row)
         if not rows:
+            if fresh_rows:
+                best = max(
+                    fresh_rows,
+                    key=lambda row: finite_float(
+                        row.get("expectedNetBps"),
+                        -math.inf,
+                    ),
+                )
+                expected = finite_float(best.get("expectedNetBps"), 0)
+                deviation = finite_float(best.get("deviationBps"), 0)
+                self.direct_rest_wait_reason = (
+                    f"прямой REST {best.get('coin')}: expected net "
+                    f"{expected / 100:+.3f}% "
+                    f"(порог +{self.entry_net_bps / 100:.3f}%), "
+                    f"Δ {deviation / 100:+.3f}%"
+                )
+            else:
+                self.direct_rest_wait_reason = (
+                    "прямой REST-сканер ждёт свежий стакан"
+                )
             return None
+        self.direct_rest_wait_reason = None
         winner = max(
             rows,
             key=lambda row: finite_float(
@@ -3882,14 +3914,13 @@ class Canary:
                     observed=observed_shadow_passes,
                     required=self.required_maker_shadow_passes,
                 )
-            candidate = (
-                self.maker_candidate()
-                if self.execution_mode == "maker-taker"
-                else (
-                    self.rest_calibration_candidate()
-                    or self.candidate()
-                )
-            )
+            if self.execution_mode == "maker-taker":
+                candidate = self.maker_candidate()
+            else:
+                direct_candidate = self.rest_calibration_candidate()
+                candidate = direct_candidate or self.candidate()
+                if candidate is None and self.direct_rest_wait_reason:
+                    self.last_rejection = self.direct_rest_wait_reason
             if candidate and self.execution_mode == "taker-taker":
                 candidate = await self.revalidate_taker_candidate(candidate)
             if candidate:
@@ -4258,6 +4289,7 @@ def self_test() -> None:
         assert direct_candidate["_candidateSource"] == (
             "direct_rest_calibration"
         )
+        assert rest_guard.direct_rest_wait_reason is None
         direct_quote = rest_guard.latest_rest_quote("HYPE")
         assert direct_quote is not None
         assert direct_quote["extendedSellVwap"] == 100.0
