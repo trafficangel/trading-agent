@@ -2506,13 +2506,9 @@ class Canary:
             for coin in sorted(self.allowed_coins)
             if not requested_coins or coin in requested_coins
             if f"{coin}-USD" in self.extended_markets
-            and all(
-                self.basis_samples.get(f"{route_id}:{coin}")
-                for route_id in self.live_routes
-            )
         ]
         if not coins:
-            raise RuntimeError("no basis-ready REST calibration markets")
+            raise RuntimeError("no REST calibration markets")
         path = self.data_dir / "rest-calibration-v1.ndjson"
         started_at = int(time.time() * 1000)
         deadline = time.monotonic() + seconds
@@ -2530,6 +2526,74 @@ class Canary:
                 )
             ),
         )
+        direct_window_ms = int(
+            float(
+                os.getenv(
+                    "VENUE_ARB_REST_CALIBRATION_WINDOW_SECONDS",
+                    "1800",
+                )
+            )
+            * 1000
+        )
+        direct_exclude_ms = int(
+            float(
+                os.getenv(
+                    "VENUE_ARB_REST_CALIBRATION_EXCLUDE_SECONDS",
+                    "5",
+                )
+            )
+            * 1000
+        )
+        direct_min_samples = int(
+            os.getenv(
+                "VENUE_ARB_REST_CALIBRATION_MIN_SAMPLES",
+                "40",
+            )
+        )
+        direct_min_span_ms = int(
+            float(
+                os.getenv(
+                    "VENUE_ARB_REST_CALIBRATION_MIN_SPAN_SECONDS",
+                    "120",
+                )
+            )
+            * 1000
+        )
+        direct_samples: dict[str, list[tuple[int, float]]] = {}
+        cutoff = started_at - direct_window_ms
+        if path.exists():
+            try:
+                size = path.stat().st_size
+                with path.open("rb") as handle:
+                    handle.seek(max(0, size - 10_000_000))
+                    history_payload = handle.read().decode(
+                        "utf-8",
+                        errors="ignore",
+                    )
+                for line in history_payload.splitlines():
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    at = int(row.get("at", 0) or 0)
+                    route_id = str(row.get("routeId") or "")
+                    coin = str(row.get("coin") or "")
+                    current_bps = finite_float(
+                        row.get("currentBps"),
+                        math.nan,
+                    )
+                    if (
+                        at >= cutoff
+                        and route_id in self.live_routes
+                        and coin in coins
+                        and math.isfinite(current_bps)
+                    ):
+                        direct_samples.setdefault(
+                            f"{route_id}:{coin}",
+                            [],
+                        ).append((at, current_bps))
+            except OSError:
+                pass
         while self.running and time.monotonic() < deadline:
             for coin in coins:
                 if not self.running or time.monotonic() >= deadline:
@@ -2537,16 +2601,83 @@ class Canary:
                 at = int(time.time() * 1000)
                 try:
                     quote = await self.rest_pair_quote(coin)
-                    for route_id in self.live_routes:
-                        metrics = self.basis_candidate_metrics(
-                            route_id=route_id,
-                            coin=coin,
-                            status={},
-                            now=at,
-                            quote=quote,
+                    current_by_route = {
+                        route_id: executable_basis_bps(
+                            quote,
+                            route_id,
                         )
-                        if metrics is None:
+                        for route_id in self.live_routes
+                    }
+                    cutoff = at - direct_window_ms
+                    for route_id, current_bps in (
+                        current_by_route.items()
+                    ):
+                        if current_bps is None:
                             continue
+                        key = f"{route_id}:{coin}"
+                        values = direct_samples.setdefault(key, [])
+                        values.append((at, current_bps))
+                        direct_samples[key] = [
+                            value
+                            for value in values
+                            if value[0] >= cutoff
+                        ]
+                    for route_id in self.live_routes:
+                        current_bps = current_by_route.get(route_id)
+                        opposite_route = OPPOSITE_ROUTE[route_id]
+                        opposite_bps = current_by_route.get(
+                            opposite_route
+                        )
+                        entry = (
+                            calibrated_basis_deviation(
+                                samples=direct_samples.get(
+                                    f"{route_id}:{coin}",
+                                    [],
+                                ),
+                                now=at,
+                                current_bps=current_bps,
+                                window_ms=direct_window_ms,
+                                exclude_ms=direct_exclude_ms,
+                                min_samples=direct_min_samples,
+                                min_span_ms=direct_min_span_ms,
+                            )
+                            if current_bps is not None
+                            else None
+                        )
+                        exit_metrics = (
+                            calibrated_basis_deviation(
+                                samples=direct_samples.get(
+                                    f"{opposite_route}:{coin}",
+                                    [],
+                                ),
+                                now=at,
+                                current_bps=opposite_bps,
+                                window_ms=direct_window_ms,
+                                exclude_ms=direct_exclude_ms,
+                                min_samples=direct_min_samples,
+                                min_span_ms=direct_min_span_ms,
+                            )
+                            if opposite_bps is not None
+                            else None
+                        )
+                        metrics = (
+                            {
+                                **entry,
+                                "currentBps": current_bps,
+                                "exitBaselineBps": (
+                                    exit_metrics["baselineBps"]
+                                ),
+                                "expectedNetBps": (
+                                    current_bps
+                                    + exit_metrics["baselineBps"]
+                                    - self.basis_round_trip_cost_bps()
+                                ),
+                            }
+                            if entry is not None
+                            and exit_metrics is not None
+                            and current_bps is not None
+                            else None
+                        )
                         row = {
                             "version": "rest-calibration-v1",
                             "at": at,
@@ -2554,8 +2685,46 @@ class Canary:
                             "routeId": route_id,
                             "route": ROUTES[route_id][2],
                             "notionalUsd": self.notional,
-                            **metrics,
+                            "currentBps": current_bps,
+                            "baselineBps": (
+                                metrics["baselineBps"]
+                                if metrics
+                                else None
+                            ),
+                            "deviationBps": (
+                                metrics["deviationBps"]
+                                if metrics
+                                else None
+                            ),
+                            "exitBaselineBps": (
+                                metrics["exitBaselineBps"]
+                                if metrics
+                                else None
+                            ),
+                            "expectedNetBps": (
+                                metrics["expectedNetBps"]
+                                if metrics
+                                else None
+                            ),
+                            "samples": (
+                                metrics["samples"]
+                                if metrics
+                                else len(
+                                    direct_samples.get(
+                                        f"{route_id}:{coin}",
+                                        [],
+                                    )
+                                )
+                            ),
+                            "spanMs": (
+                                metrics["spanMs"]
+                                if metrics
+                                else None
+                            ),
+                            "calibrating": metrics is None,
                             "qualified": (
+                                metrics is not None
+                                and
                                 metrics["expectedNetBps"]
                                 >= self.entry_net_bps
                                 and metrics["deviationBps"]
@@ -2574,9 +2743,12 @@ class Canary:
                         if row["qualified"]:
                             candidates += 1
                         if (
-                            best is None
-                            or row["expectedNetBps"]
-                            > best["expectedNetBps"]
+                            metrics is not None
+                            and (
+                                best is None
+                                or metrics["expectedNetBps"]
+                                > best["expectedNetBps"]
+                            )
                         ):
                             best = row
                 except Exception as error:
