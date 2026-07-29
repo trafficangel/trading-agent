@@ -603,6 +603,23 @@ class Canary:
         self.last_basis_write_at = 0
         self.basis_samples: dict[str, list[tuple[int, float]]] = {}
         self.basis_gate_status: dict[str, Any] = {}
+        previous_status = self.read_json(self.status_path, {})
+        previous_revalidation = (
+            previous_status.get("restRevalidation") or {}
+            if isinstance(previous_status, dict)
+            else {}
+        )
+        self.rest_revalidation_attempts = int(
+            previous_revalidation.get("attempts", 0) or 0
+        )
+        self.rest_revalidation_passes = int(
+            previous_revalidation.get("passes", 0) or 0
+        )
+        self.last_rest_revalidation: dict[str, Any] | None = (
+            previous_revalidation.get("last")
+            if isinstance(previous_revalidation.get("last"), dict)
+            else None
+        )
         self.load_basis_samples()
         self.next_maker_attempt_at = 0
         self.extended: RestApiClient | None = None
@@ -730,6 +747,11 @@ class Canary:
             "maxTrades": self.max_trades,
             "makerShadowRequiredPasses": self.required_maker_shadow_passes,
             "makerShadowObservedPasses": self.maker_shadow_pass_count(),
+            "restRevalidation": {
+                "attempts": self.rest_revalidation_attempts,
+                "passes": self.rest_revalidation_passes,
+                "last": self.last_rest_revalidation,
+            },
             "lastRejection": self.last_rejection,
             "reason": None,
             "error": None,
@@ -1511,6 +1533,32 @@ class Canary:
         if route_id not in ROUTES or coin not in self.allowed_coins:
             self.last_rejection = "taker candidate route is invalid"
             return None
+        revalidation_at = int(time.time() * 1000)
+        self.rest_revalidation_attempts += 1
+        trigger_expected_net_bps = finite_float(
+            candidate.get("_basisExpectedNetBps"),
+            math.nan,
+        )
+        trigger_deviation_bps = finite_float(
+            candidate.get("_basisDeviationBps"),
+            math.nan,
+        )
+        self.last_rest_revalidation = {
+            "at": revalidation_at,
+            "coin": coin,
+            "routeId": route_id,
+            "result": "checking",
+            "triggerExpectedNetPct": (
+                trigger_expected_net_bps / 100
+                if math.isfinite(trigger_expected_net_bps)
+                else None
+            ),
+            "triggerDeviationPct": (
+                trigger_deviation_bps / 100
+                if math.isfinite(trigger_deviation_bps)
+                else None
+            ),
+        }
         extended_is_buy = ROUTES[route_id][0] == "extended"
         extended_side = (
             OrderSide.BUY if extended_is_buy else OrderSide.SELL
@@ -1531,9 +1579,12 @@ class Canary:
             self.last_rejection = (
                 f"parallel REST revalidation failed: {error}"
             )
+            self.last_rest_revalidation["result"] = "error"
+            self.last_rest_revalidation["reason"] = str(error)
             return None
         if min(extended_price, lighter_price) <= 0:
             self.last_rejection = "parallel REST revalidation is invalid"
+            self.last_rest_revalidation["result"] = "invalid"
             return None
         current_raw_bps = (
             (lighter_price / extended_price - 1) * 10_000
@@ -1552,6 +1603,7 @@ class Canary:
             exit_baseline_bps
         ):
             self.last_rejection = "taker basis revalidation is unavailable"
+            self.last_rest_revalidation["result"] = "basis_unavailable"
             return None
         deviation_bps = current_raw_bps - baseline_bps
         expected_net_bps = (
@@ -1568,7 +1620,26 @@ class Canary:
                 f"net {expected_net_bps:.2f} bps, "
                 f"deviation {deviation_bps:.2f} bps"
             )
+            self.last_rest_revalidation.update(
+                {
+                    "result": "rejected",
+                    "restExpectedNetPct": expected_net_bps / 100,
+                    "restDeviationPct": deviation_bps / 100,
+                    "extendedPrice": extended_price,
+                    "lighterPrice": lighter_price,
+                }
+            )
             return None
+        self.rest_revalidation_passes += 1
+        self.last_rest_revalidation.update(
+            {
+                "result": "passed",
+                "restExpectedNetPct": expected_net_bps / 100,
+                "restDeviationPct": deviation_bps / 100,
+                "extendedPrice": extended_price,
+                "lighterPrice": lighter_price,
+            }
+        )
         revalidated = dict(candidate)
         if extended_is_buy:
             revalidated["currentBuyVwap1000"] = extended_price
@@ -3543,6 +3614,9 @@ def self_test() -> None:
         guard.basis_min_deviation_bps = 10
         guard.entry_net_bps = 10
         guard.last_rejection = None
+        guard.rest_revalidation_attempts = 0
+        guard.rest_revalidation_passes = 0
+        guard.last_rest_revalidation = None
 
         async def extended_reference(
             _coin: str,
@@ -3569,11 +3643,17 @@ def self_test() -> None:
         }
         accepted = await guard.revalidate_taker_candidate(candidate)
         assert accepted is not None
+        assert guard.rest_revalidation_attempts == 1
+        assert guard.rest_revalidation_passes == 1
+        assert guard.last_rest_revalidation["result"] == "passed"
         assert round(accepted["_basisExpectedNetBps"], 8) == 73
         assert accepted["currentBuyVwap1000"] == 100
         assert accepted["currentSellVwap1000"] == 101
         lighter_price = 100
         assert await guard.revalidate_taker_candidate(candidate) is None
+        assert guard.rest_revalidation_attempts == 2
+        assert guard.rest_revalidation_passes == 1
+        assert guard.last_rest_revalidation["result"] == "rejected"
 
     asyncio.run(taker_revalidation_check())
     quote = {
