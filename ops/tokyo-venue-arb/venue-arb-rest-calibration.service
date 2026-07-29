@@ -1,7 +1,7 @@
 [Unit]
 Description=Robot Claude Tokyo direct REST Extended/Lighter arb calibration
-After=network-online.target venue-arb-monitor.service
-Wants=network-online.target venue-arb-monitor.service
+After=network-online.target venue-arb-extended-lighter-shadow.service
+Wants=network-online.target venue-arb-extended-lighter-shadow.service
 
 [Service]
 Type=simple
@@ -16,7 +16,7 @@ Environment=VENUE_ARB_LIVE_EXECUTION=taker-taker
 Environment=VENUE_ARB_LIVE_ROUTE=both
 Environment=VENUE_ARB_LIVE_ALLOWED_COINS=BTC,ETH,SOL,HYPE,XRP,DOGE,ADA,BNB,LTC,LIT,XMR,NEAR,CRV,FARTCOIN,PUMP,WTI,XAU,XAG,ZEC,EUR,ENA,AAVE,JUP,UNI,XPL
 Environment=VENUE_ARB_LIVE_NOTIONAL_USD=100
-Environment=VENUE_ARB_LIVE_ENTRY_NET_BPS=10
+Environment=VENUE_ARB_LIVE_ENTRY_NET_BPS=15
 Environment=VENUE_ARB_LIVE_BASIS_GATE_ENABLED=true
 Environment=VENUE_ARB_LIVE_BASIS_WINDOW_SECONDS=1800
 Environment=VENUE_ARB_LIVE_BASIS_EXCLUDE_SECONDS=5
@@ -26,7 +26,7 @@ Environment=VENUE_ARB_LIVE_BASIS_MIN_DEVIATION_BPS=10
 Environment=VENUE_ARB_LIVE_EXTENDED_TAKER_BPS=2.5
 Environment=VENUE_ARB_LIVE_LIGHTER_TAKER_BPS=0
 Environment=VENUE_ARB_LIVE_EXECUTION_BUFFER_BPS=2
-Environment=VENUE_ARB_REST_CALIBRATION_COINS=LIT
+Environment=VENUE_ARB_REST_CALIBRATION_COINS=BTC,ETH,SOL,HYPE,WTI,XAU
 Environment=VENUE_ARB_REST_CALIBRATION_INTERVAL_SECONDS=1.5
 Environment=VENUE_ARB_REST_CALIBRATION_WINDOW_SECONDS=1800
 Environment=VENUE_ARB_REST_CALIBRATION_EXCLUDE_SECONDS=5
