@@ -42,6 +42,7 @@ import {
   shadowReadiness,
 } from '../lib/venue-arb-shadow.js';
 import {
+  binanceAggTradeTakerSide,
   consumeMakerPrint,
   makerAbortAfterCosts,
   makerEntryEdgeBps,
@@ -434,6 +435,18 @@ const EXTENDED_ASTER_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
   'extended-aster-maker-basis-active-v2.json',
 );
+const ASTER_BINANCE_MAKER_RESULTS_PATH = resolve(
+  DATA_DIR,
+  'aster-binance-maker-basis-shadow-v1.ndjson',
+);
+const ASTER_BINANCE_MAKER_ACTIVE_PATH = resolve(
+  DATA_DIR,
+  'aster-binance-maker-basis-active-v1.json',
+);
+const ASTER_BINANCE_MAKER_EVENTS_PATH = resolve(
+  DATA_DIR,
+  'aster-binance-maker-events-v1.ndjson',
+);
 const EXTENDED_LIGHTER_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
   'extended-lighter-maker-basis-shadow-v2.ndjson',
@@ -696,6 +709,38 @@ const EXTENDED_ASTER_MAKER_POST_FILL_NET_BPS = finiteEnv(
 const EXTENDED_ASTER_MAKER_EXIT_NET_BPS = finiteEnv(
   'VENUE_ARB_EXTENDED_ASTER_MAKER_EXIT_NET_BPS',
   5,
+);
+const ASTER_BINANCE_MAKER_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_ASTER_BINANCE_MAKER_SHADOW_ENABLED',
+  false,
+);
+const ASTER_BINANCE_MAKER_NOTIONAL_USD = finiteEnv(
+  'VENUE_ARB_ASTER_BINANCE_MAKER_NOTIONAL_USD',
+  100,
+);
+const ASTER_BINANCE_MAKER_ENTRY_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_ASTER_BINANCE_MAKER_ENTRY_EDGE_BPS',
+  1,
+);
+const ASTER_BINANCE_MAKER_CANCEL_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_ASTER_BINANCE_MAKER_CANCEL_EDGE_BPS',
+  0.5,
+);
+const ASTER_BINANCE_MAKER_POST_FILL_NET_BPS = finiteEnv(
+  'VENUE_ARB_ASTER_BINANCE_MAKER_POST_FILL_NET_BPS',
+  0.5,
+);
+const ASTER_BINANCE_MAKER_EXIT_NET_BPS = finiteEnv(
+  'VENUE_ARB_ASTER_BINANCE_MAKER_EXIT_NET_BPS',
+  1,
+);
+const ASTER_BINANCE_MAKER_QUOTE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_ASTER_BINANCE_MAKER_QUOTE_LATENCY_MS',
+  250,
+);
+const ASTER_BINANCE_MAKER_HEDGE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_ASTER_BINANCE_MAKER_HEDGE_LATENCY_MS',
+  100,
 );
 const EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
   'VENUE_ARB_EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED',
@@ -1523,6 +1568,55 @@ const extendedAsterMakerShadow = new GenericMakerShadow({
       ...checkpoint,
       updatedAt: Date.now(),
     });
+  },
+});
+const asterBinanceMakerShadow = new GenericMakerShadow({
+  routeId: 'aster-maker-binance',
+  makerVenue: 'aster',
+  hedgeVenue: 'binance',
+  notionalUsd: ASTER_BINANCE_MAKER_NOTIONAL_USD,
+  entryEdgeBps: ASTER_BINANCE_MAKER_ENTRY_EDGE_BPS,
+  cancelEdgeBps: ASTER_BINANCE_MAKER_CANCEL_EDGE_BPS,
+  postFillNetBps: ASTER_BINANCE_MAKER_POST_FILL_NET_BPS,
+  exitNetBps: ASTER_BINANCE_MAKER_EXIT_NET_BPS,
+  takerExitNetBps: ASTER_BINANCE_MAKER_EXIT_NET_BPS,
+  quoteLatencyMs: ASTER_BINANCE_MAKER_QUOTE_LATENCY_MS,
+  hedgeLatencyMs: ASTER_BINANCE_MAKER_HEDGE_LATENCY_MS,
+  quoteTtlMs: GRVT_MAKER_QUOTE_TTL_MS,
+  maxQueueUsd: GRVT_MAKER_MAX_QUEUE_USD,
+  hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
+  maxHoldMs: MAKER_MAX_HOLD_MS,
+  independenceMs: MAKER_INDEPENDENCE_MS,
+  bookFreshMs: SHADOW_EXECUTION_FRESH_MS,
+  sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  executionBufferBps: EXECUTION_BUFFER_BPS,
+  makerFeeBps: 0,
+  hedgeTakerFeeBps: FEE_BPS.binance,
+  makerFallbackTakerFeeBps: FEE_BPS.aster,
+  fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+  requiredSamples: SHADOW_REQUIRED_SAMPLES,
+  requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  maxEntryDistanceBps: 3,
+}, {
+  onResult: (result) => {
+    appendFileSync(
+      ASTER_BINANCE_MAKER_RESULTS_PATH,
+      `${JSON.stringify(result)}\n`,
+    );
+  },
+  onCheckpoint: (checkpoint) => {
+    atomicJson(ASTER_BINANCE_MAKER_ACTIVE_PATH, {
+      ...checkpoint,
+      updatedAt: Date.now(),
+    });
+  },
+  onEvent: (event) => {
+    appendFileSync(
+      ASTER_BINANCE_MAKER_EVENTS_PATH,
+      `${JSON.stringify(event)}\n`,
+    );
   },
 });
 const extendedLighterMakerShadow = new GenericMakerShadow({
@@ -4190,6 +4284,90 @@ function startAster(): void {
   );
 }
 
+function startAsterTrades(): void {
+  if (shuttingDown || !ASTER_BINANCE_MAKER_SHADOW_ENABLED) return;
+  const streams = ACTIVE_MARKETS.map(
+    ({ symbol }) => `${symbol.toLowerCase()}@aggTrade`,
+  );
+  const ws = new WebSocket(
+    `wss://fstream.asterdex.com/stream?streams=${streams.join('/')}`,
+  );
+  sockets.add(ws);
+  ws.on('open', () => {
+    asterBinanceMakerShadow.setTradeStreamConnected(true);
+    console.warn('venue-arb aster public trades connected');
+    const timer = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.ping();
+      else clearInterval(timer);
+    }, 10_000);
+    timer.unref();
+  });
+  ws.on('message', (raw) => {
+    const receivedAt = Date.now();
+    try {
+      const message = JSON.parse(rawText(raw)) as {
+        data?: {
+          a?: unknown;
+          s?: unknown;
+          p?: unknown;
+          q?: unknown;
+          T?: unknown;
+          m?: unknown;
+        };
+      };
+      const row = message.data;
+      const market = typeof row?.s === 'string'
+        ? bySymbol.get(row.s)
+        : null;
+      const price = finite(row?.p);
+      const size = finite(row?.q);
+      if (
+        !market
+        || !(price > 0)
+        || !(size > 0)
+        || typeof row?.m !== 'boolean'
+      ) return;
+      const trade: MakerShadowTrade = {
+        id: `${market.coin}:${String(
+          row.a ?? `${row.T}:${row.p}:${row.q}:${row.m}`,
+        )}`,
+        coin: market.coin,
+        side: binanceAggTradeTakerSide(row.m),
+        price,
+        size,
+        tradeAt: normalizeExchangeTimestampMs(finite(row.T), receivedAt),
+      };
+      asterBinanceMakerShadow.processTrade(trade, receivedAt);
+    } catch (error) {
+      console.warn(
+        'venue-arb aster public trades parse',
+        (error as Error).message,
+      );
+    }
+  });
+  ws.on('error', (error) => {
+    asterBinanceMakerShadow.setTradeStreamConnected(false);
+    console.warn(
+      'venue-arb aster public trades websocket error',
+      error.message,
+    );
+  });
+  ws.on('close', (code, reason) => {
+    sockets.delete(ws);
+    asterBinanceMakerShadow.setTradeStreamConnected(false);
+    asterBinanceMakerShadow.recordTradeReconnect();
+    console.warn(
+      `venue-arb aster public trades closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
+    );
+    if (!shuttingDown) {
+      setTimeout(
+        startAsterTrades,
+        code === 1_000 ? 250 : RECONNECT_MS,
+      ).unref();
+    }
+  });
+}
+
 function startGrvt(): void {
   connect(
     'grvt',
@@ -4856,6 +5034,10 @@ function writeStatus(): void {
       ...extendedAsterMakerShadow.status(),
       enabled: EXTENDED_ASTER_MAKER_SHADOW_ENABLED,
     },
+    asterBinanceMakerShadow: {
+      ...asterBinanceMakerShadow.status(),
+      enabled: ASTER_BINANCE_MAKER_SHADOW_ENABLED,
+    },
     extendedLighterMakerShadow: {
       ...extendedLighterMakerShadow.status(),
       enabled: EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED,
@@ -5204,8 +5386,8 @@ function loadGenericMakerState(
 }
 
 function genericMakerMarkets(
-  makerVenue: 'grvt' | 'extended' | 'lighter',
-  hedgeVenue: 'lighter' | 'extended' | 'aster' | 'pacifica',
+  makerVenue: 'grvt' | 'extended' | 'lighter' | 'aster',
+  hedgeVenue: 'lighter' | 'extended' | 'aster' | 'pacifica' | 'binance',
   now: number,
 ) {
   const makerLongRoute = shadowRouteById.get(
@@ -5291,6 +5473,7 @@ function shutdown(signal: string): void {
   grvtMakerShadow.shutdown(Date.now());
   grvtExtendedMakerShadow.shutdown(Date.now());
   extendedAsterMakerShadow.shutdown(Date.now());
+  asterBinanceMakerShadow.shutdown(Date.now());
   extendedLighterMakerShadow.shutdown(Date.now());
   extendedPacificaMakerShadow.shutdown(Date.now());
   lighterExtendedMakerShadow.shutdown(Date.now());
@@ -5315,6 +5498,12 @@ if (!existsSync(GRVT_EXTENDED_MAKER_RESULTS_PATH)) {
 }
 if (!existsSync(EXTENDED_ASTER_MAKER_RESULTS_PATH)) {
   writeFileSync(EXTENDED_ASTER_MAKER_RESULTS_PATH, '');
+}
+if (!existsSync(ASTER_BINANCE_MAKER_RESULTS_PATH)) {
+  writeFileSync(ASTER_BINANCE_MAKER_RESULTS_PATH, '');
+}
+if (!existsSync(ASTER_BINANCE_MAKER_EVENTS_PATH)) {
+  writeFileSync(ASTER_BINANCE_MAKER_EVENTS_PATH, '');
 }
 if (!existsSync(EXTENDED_LIGHTER_MAKER_RESULTS_PATH)) {
   writeFileSync(EXTENDED_LIGHTER_MAKER_RESULTS_PATH, '');
@@ -5360,6 +5549,13 @@ loadGenericMakerState(
   EXTENDED_ASTER_MAKER_SHADOW_ENABLED,
 );
 loadGenericMakerState(
+  asterBinanceMakerShadow,
+  ASTER_BINANCE_MAKER_RESULTS_PATH,
+  ASTER_BINANCE_MAKER_ACTIVE_PATH,
+  'Aster maker → Binance',
+  ASTER_BINANCE_MAKER_SHADOW_ENABLED,
+);
+loadGenericMakerState(
   extendedLighterMakerShadow,
   EXTENDED_LIGHTER_MAKER_RESULTS_PATH,
   EXTENDED_LIGHTER_MAKER_ACTIVE_PATH,
@@ -5399,7 +5595,13 @@ if (activeVenues.has('extended')) {
     startExtendedTrades();
   }
 }
-if (activeVenues.has('aster')) startAster();
+if (activeVenues.has('aster')) {
+  startAster();
+  if (
+    ASTER_BINANCE_MAKER_SHADOW_ENABLED
+    && activeVenues.has('binance')
+  ) startAsterTrades();
+}
 if (activeVenues.has('pacifica')) startPacifica();
 if (activeVenues.has('grvt')) startGrvt();
 if (activeVenues.has('edgex')) startEdgex();
@@ -5443,6 +5645,16 @@ const evaluationTimer = setInterval(() => {
     extendedAsterMakerShadow.evaluate(
       now,
       genericMakerMarkets('extended', 'aster', now),
+    );
+  }
+  if (
+    ASTER_BINANCE_MAKER_SHADOW_ENABLED
+    && activeVenues.has('aster')
+    && activeVenues.has('binance')
+  ) {
+    asterBinanceMakerShadow.evaluate(
+      now,
+      genericMakerMarkets('aster', 'binance', now),
     );
   }
   if (

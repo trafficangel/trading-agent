@@ -335,6 +335,7 @@ type GenericMakerResult = {
 type GenericMakerShadowStatus = {
   version?: string;
   routeId?: string;
+  enabled?: boolean;
   config?: MakerShadow['config'] & {
     makerVenue?: string;
     hedgeVenue?: string;
@@ -410,6 +411,7 @@ type Status = {
   grvtMakerShadow?: GenericMakerShadowStatus;
   grvtExtendedMakerShadow?: GenericMakerShadowStatus;
   extendedAsterMakerShadow?: GenericMakerShadowStatus;
+  asterBinanceMakerShadow?: GenericMakerShadowStatus;
   extendedLighterMakerShadow?: GenericMakerShadowStatus;
   extendedPacificaMakerShadow?: GenericMakerShadowStatus;
   lighterExtendedMakerShadow?: GenericMakerShadowStatus;
@@ -1217,12 +1219,11 @@ const CANDIDATE_ROUTES = [
   ['aster-binance', 'Aster → Binance'],
   ['binance-pacifica', 'Binance → Pacifica'],
   ['pacifica-binance', 'Pacifica → Binance'],
-  ['bybit-aster', 'Bybit → Aster'],
-  ['aster-bybit', 'Aster → Bybit'],
 ] as const;
 
-function candidateRouteRows(shadow: ExecutionShadow | undefined): string {
-  return CANDIDATE_ROUTES.map(([id, label]) => {
+function candidateRouteRows(status: Status | null): string {
+  const shadow = status?.executionShadow;
+  const takerRows = CANDIDATE_ROUTES.map(([id, label]) => {
     const route = shadow?.routes?.[id];
     const gate = route?.readiness;
     const telemetry = route?.telemetry;
@@ -1249,9 +1250,45 @@ function candidateRouteRows(shadow: ExecutionShadow | undefined): string {
       <td>${shadowBlockers(telemetry)}</td>
     </tr>`;
   }).join('');
+  const maker = status?.asterBinanceMakerShadow;
+  const makerGate = maker?.readiness;
+  const makerTelemetry = maker?.telemetry;
+  const makerSamples = Number(makerGate?.samples ?? 0);
+  const makerRequired = Number(makerGate?.requiredSamples ?? 30);
+  const makerPassed = Number(makerGate?.passed ?? 0);
+  const makerState = makerGate?.ready
+    ? '<b class="pos">ДОПУЩЕН</b>'
+    : maker?.pair
+      ? '<b class="pos">В РАБОТЕ</b>'
+      : makerSamples > 0
+        ? '<b>НАБЛЮДЕНИЕ</b>'
+        : '<b>ЖДЁМ FILL</b>';
+  const makerBlocker = !maker?.enabled
+    ? 'выключен'
+    : !makerTelemetry?.tradeStreamConnected
+      ? 'нет потока сделок'
+      : maker?.quote
+        ? `${esc(maker.quote.coin)} · заявка в очереди`
+        : 'нет maker edge';
+  return `${takerRows}<tr>
+    <td><b>Aster maker → Binance</b><small>maker 0%</small></td>
+    <td class="${cls(makerTelemetry?.bestProjectedEntryBps)}">${coinAndBps(
+    makerTelemetry?.bestProjectedCoin,
+    makerTelemetry?.bestProjectedEntryBps,
+  )}</td>
+    <td class="${cls(makerTelemetry?.peakProjectedEntryBps)}">${coinAndBps(
+    makerTelemetry?.peakProjectedCoin,
+    makerTelemetry?.peakProjectedEntryBps,
+  )}</td>
+    <td>${makerSamples} / ${makerRequired}<small>PASS ${makerPassed}</small></td>
+    <td>${makerState}</td><td>${makerBlocker}</td>
+  </tr>`;
 }
 
-function candidateShadowRows(shadow: ExecutionShadow | undefined): string {
+function candidateShadowRows(
+  shadow: ExecutionShadow | undefined,
+  maker: GenericMakerShadowStatus | undefined,
+): string {
   const labels = new Map<string, string>(CANDIDATE_ROUTES);
   const rows = CANDIDATE_ROUTES.flatMap(([id]) => {
     const route = shadow?.routes?.[id];
@@ -1273,7 +1310,26 @@ function candidateShadowRows(shadow: ExecutionShadow | undefined): string {
         detail: shadowReason(row.reason),
       })),
     ];
-  }).sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
+  });
+  if (maker?.pair) {
+    rows.push({
+      at: maker.pair.openedAt,
+      coin: maker.pair.coin,
+      route: 'Aster maker → Binance',
+      status: 'В РАБОТЕ',
+      netBps: maker.pair.entryEdgeBps,
+      detail: 'maker fill подтверждён',
+    });
+  }
+  rows.push(...(maker?.recent ?? []).map((row) => ({
+    at: row.closedAt,
+    coin: row.coin,
+    route: 'Aster maker → Binance',
+    status: row.passed ? 'PASS' : 'FAIL',
+    netBps: row.realizedNetBps,
+    detail: makerReason(row.reason),
+  })));
+  rows.sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
   if (!rows.length) {
     return '<tr><td colspan="6">Исполнимых входов после задержки и всех расходов пока не было.</td></tr>';
   }
@@ -1338,22 +1394,24 @@ async function renderCompact(lang: Lang): Promise<string> {
     candidateStatus?.updatedAt
     && Date.now() - candidateStatus.updatedAt < 15_000,
   );
-  const candidateVenues: Venue[] = ['binance', 'bybit', 'aster', 'pacifica'];
+  const candidateVenues: Venue[] = ['binance', 'aster', 'pacifica'];
   const healthyFeeds = candidateVenues.filter(
     (venue) => candidateStatus?.connections?.[venue]?.connected,
   ).length;
   const routes = CANDIDATE_ROUTES.map(
     ([id]) => candidateShadow?.routes?.[id],
   );
+  const makerGate = candidateStatus?.asterBinanceMakerShadow?.readiness;
   const totalSamples = routes.reduce(
     (sum, route) => sum + Number(route?.readiness?.samples ?? 0),
-    0,
+    Number(makerGate?.samples ?? 0),
   );
   const totalAttempts = routes.reduce(
     (sum, route) => sum + Number(route?.readiness?.attempts ?? 0),
-    0,
+    Number(makerGate?.attempts ?? 0),
   );
-  const readyRoutes = routes.filter((route) => route?.readiness?.ready).length;
+  const readyRoutes = routes.filter((route) => route?.readiness?.ready).length
+    + (makerGate?.ready ? 1 : 0);
   const canaryReady = readyRoutes > 0;
   return pageShell(
     t(lang, 'Арбитраж — контроль прибыли', 'Arbitrage profit control'),
@@ -1376,7 +1434,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       <div class="va-cards">
         <div class="va-card"><small>Реальный net</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b><em>${closedLive.length} сделок · ${liveWins} прибыльных · комиссии ${money(liveFees)}</em></div>
         <div class="va-card"><small>Реальная торговля</small><b class="${realStateClass}">${realPaused ? 'ОСТАНОВЛЕНА' : liveState(liveStatus)}</b><em>${realPaused ? 'до доказанного положительного gate' : 'canary активен'}</em></div>
-        <div class="va-card"><small>Shadow</small><b>${totalSamples} сделок</b><em>${totalAttempts} попыток · потоки ${healthyFeeds}/4 · маршрутов ${CANDIDATE_ROUTES.length}</em></div>
+        <div class="va-card"><small>Shadow</small><b>${totalSamples} сделок</b><em>${totalAttempts} попыток · потоки ${healthyFeeds}/3 · маршрутов ${CANDIDATE_ROUTES.length + 1}</em></div>
       </div>
 
       <div class="va-summary">
@@ -1388,14 +1446,14 @@ async function renderCompact(lang: Lang): Promise<string> {
         <div class="va-panel-head"><h2>Проверяем сейчас</h2><span>все расходы · $100 · задержка 300 мс</span></div>
         <div class="va-table"><table><thead><tr>
           <th>Маршрут</th><th>Net сейчас</th><th>Лучший net</th><th>Shadow</th><th>Статус</th><th>Почему нет входа</th>
-        </tr></thead><tbody>${candidateRouteRows(candidateShadow)}</tbody></table></div>
+        </tr></thead><tbody>${candidateRouteRows(candidateStatus)}</tbody></table></div>
       </section>
 
       <section class="va-panel">
         <div class="va-panel-head"><h2>История shadow</h2><span>только попытки исполнения</span></div>
         <div class="va-table" data-va-pager="target-shadow" data-page-size="20"><table><thead><tr>
           <th>UTC</th><th>Монета</th><th>Маршрут</th><th>Статус</th><th>Net</th><th>Причина</th>
-        </tr></thead><tbody>${candidateShadowRows(candidateShadow)}</tbody></table></div>
+        </tr></thead><tbody>${candidateShadowRows(candidateShadow, candidateStatus?.asterBinanceMakerShadow)}</tbody></table></div>
       </section>
 
       <section class="va-panel va-live-panel">

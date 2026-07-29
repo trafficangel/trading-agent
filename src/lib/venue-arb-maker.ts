@@ -7,6 +7,12 @@ export type MakerQueueState = {
   filled: boolean;
 };
 
+export function binanceAggTradeTakerSide(
+  buyerIsMaker: boolean,
+): TakerSide {
+  return buyerIsMaker ? 'SELL' : 'BUY';
+}
+
 function decimalPlaces(value: number): number {
   const text = value.toString().toLowerCase();
   const [coefficient = '', exponentText] = text.split('e');

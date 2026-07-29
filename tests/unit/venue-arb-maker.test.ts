@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  binanceAggTradeTakerSide,
   consumeMakerPrint,
   makerAbortAfterCosts,
   makerEntryEdgeBps,
@@ -8,6 +9,11 @@ import {
 } from '../../src/lib/venue-arb-maker.js';
 
 describe('venue arb maker shadow math', () => {
+  it('maps Binance-style aggregate-trade maker flag to taker side', () => {
+    expect(binanceAggTradeTakerSide(true)).toBe('SELL');
+    expect(binanceAggTradeTakerSide(false)).toBe('BUY');
+  });
+
   it('snaps floating tick arithmetic to an exchange-valid decimal price', () => {
     expect(snapMakerPrice(46.369, 0.010000000000005116, 'floor')).toBe(46.36);
     expect(snapMakerPrice(46.351, 0.010000000000005116, 'ceil')).toBe(46.36);
