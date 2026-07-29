@@ -152,6 +152,60 @@ describe('GenericMakerShadow', () => {
     ]));
   });
 
+  it('hedges a filled maker order when hedging is cheaper than taker unwind', () => {
+    const results: GenericMakerResult[] = [];
+    const engine = new GenericMakerShadow(config, {
+      onResult: (result) => results.push(result),
+    });
+
+    engine.evaluate(1_100, [market(1_100, 100.2, 100.3)]);
+    engine.evaluate(1_101, [market(1_101, 100.2, 100.3)]);
+    engine.processTrade({
+      id: 'entry-print-cheaper-hedge',
+      coin: 'BNB',
+      side: 'SELL',
+      price: 100,
+      size: 2,
+      tradeAt: 1_101,
+    }, 1_101);
+    engine.evaluate(1_102, [market(1_102, 99.98, 100.3)]);
+
+    const status = engine.status() as {
+      pair?: { coin?: string; entryHedge?: number } | null;
+    };
+    expect(status.pair).toMatchObject({
+      coin: 'BNB',
+      entryHedge: 99.98,
+    });
+    expect(results).toHaveLength(0);
+  });
+
+  it('uses taker unwind only when it is cheaper than the available hedge', () => {
+    const results: GenericMakerResult[] = [];
+    const engine = new GenericMakerShadow(config, {
+      onResult: (result) => results.push(result),
+    });
+
+    engine.evaluate(1_200, [market(1_200, 100.2, 100.3)]);
+    engine.evaluate(1_201, [market(1_201, 100.2, 100.3)]);
+    engine.processTrade({
+      id: 'entry-print-cheaper-unwind',
+      coin: 'BNB',
+      side: 'SELL',
+      price: 100,
+      size: 2,
+      tradeAt: 1_201,
+    }, 1_201);
+    engine.evaluate(1_202, [market(1_202, 99.8, 100.3)]);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      reason: 'post_fill_edge_lost',
+      entryHedge: null,
+    });
+    expect(results[0]?.realizedNetBps).toBeGreaterThan(-10);
+  });
+
   it('rejects stale snapshot trades instead of inventing a fill', () => {
     const engine = new GenericMakerShadow(config);
     engine.evaluate(2_000, [market(2_000, 100.2, 100.3)]);

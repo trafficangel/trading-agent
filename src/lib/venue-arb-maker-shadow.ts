@@ -1002,17 +1002,16 @@ export class GenericMakerShadow {
     this.reset(now);
   }
 
-  private abortAfterLostEdge(
+  private abortProjection(
     pending: GenericMakerPendingHedge,
-    now: number,
     market: MakerShadowMarket,
-  ): boolean {
-    if (!market.maker) return false;
+  ): { exit: number; netBps: number } | null {
+    if (!market.maker) return null;
     const makerLevels = pending.side === 'buy'
       ? sortedLevels(market.maker, 'bids')
       : sortedLevels(market.maker, 'asks');
     const exit = executableVwap(makerLevels, this.config.notionalUsd)?.price;
-    if (exit == null) return false;
+    if (exit == null) return null;
     const makerSide = pending.side === 'buy' ? 'long' : 'short';
     const quantity = this.config.notionalUsd / pending.makerFill;
     const grossUsd = (
@@ -1027,10 +1026,24 @@ export class GenericMakerShadow {
     const bufferUsd = this.config.notionalUsd
       * this.config.executionBufferBps / 10_000;
     const netUsd = grossUsd - feesUsd - bufferUsd;
+    return {
+      exit,
+      netBps: netUsd / this.config.notionalUsd * 10_000,
+    };
+  }
+
+  private abortAfterLostEdge(
+    pending: GenericMakerPendingHedge,
+    now: number,
+    market: MakerShadowMarket,
+    projection = this.abortProjection(pending, market),
+  ): boolean {
+    if (!projection || !market.hedge) return false;
+    const makerSide = pending.side === 'buy' ? 'long' : 'short';
     const entryEdgeBps = makerEntryEdgeBps(
       pending.side,
       pending.makerFill,
-      this.hedgePrice(pending.side, market.hedge!)!,
+      this.hedgePrice(pending.side, market.hedge)!,
     );
     this.append({
       id: `GM${pending.filledAt}-${pending.coin}-${makerSide}`,
@@ -1042,13 +1055,14 @@ export class GenericMakerShadow {
       holdingMs: Math.max(0, now - pending.filledAt),
       entryMaker: pending.makerFill,
       entryHedge: null,
-      exitMaker: exit,
+      exitMaker: projection.exit,
       exitHedge: null,
       entryEdgeBps,
-      realizedNetBps: netUsd / this.config.notionalUsd * 10_000,
-      realizedNetUsd: netUsd,
+      realizedNetBps: projection.netBps,
+      realizedNetUsd: projection.netBps / 10_000
+        * this.config.notionalUsd,
       exitMakerOrder: false,
-      passed: netUsd > 0,
+      passed: projection.netBps > 0,
       reason: 'post_fill_edge_lost',
       fundingBps: 0,
     });
@@ -1074,17 +1088,31 @@ export class GenericMakerShadow {
         pending.makerFill,
         hedgeFill,
       );
-      if (
-        this.entryProjection(
+      const postFillProjection = this.config.basisGateEnabled
+        ? this.observedBasisProjection(
           pending.side,
           pending.makerFill,
           hedgeFill,
           market,
-        )
-        < this.config.postFillNetBps
-      ) {
-        this.abortAfterLostEdge(pending, now, market);
-        return;
+        )?.netBps ?? -Infinity
+        : this.entryProjection(
+          pending.side,
+          pending.makerFill,
+          hedgeFill,
+          market,
+        );
+      if (postFillProjection < this.config.postFillNetBps) {
+        const abortProjection = this.abortProjection(pending, market);
+        if (
+          abortProjection
+          && abortProjection.netBps >= postFillProjection
+          && this.abortAfterLostEdge(
+            pending,
+            now,
+            market,
+            abortProjection,
+          )
+        ) return;
       }
       this.pair = {
         id: `GM${pending.filledAt}-${pending.coin}-${makerSide}`,
