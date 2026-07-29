@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   binanceAggTradeTakerSide,
   consumeMakerPrint,
+  makerActivityTimestamp,
   makerAbortAfterCosts,
   makerEntryEdgeBps,
   makerRoundTripAfterCosts,
@@ -12,6 +13,12 @@ describe('venue arb maker shadow math', () => {
   it('maps Binance-style aggregate-trade maker flag to taker side', () => {
     expect(binanceAggTradeTakerSide(true)).toBe('SELL');
     expect(binanceAggTradeTakerSide(false)).toBe('BUY');
+  });
+
+  it('does not treat replayed or future trade prints as fresh maker activity', () => {
+    expect(makerActivityTimestamp(9_500, 10_000, 1_000)).toBe(9_500);
+    expect(makerActivityTimestamp(8_999, 10_000, 1_000)).toBeNull();
+    expect(makerActivityTimestamp(11_001, 10_000, 1_000)).toBeNull();
   });
 
   it('snaps floating tick arithmetic to an exchange-valid decimal price', () => {

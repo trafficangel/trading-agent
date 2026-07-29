@@ -44,6 +44,7 @@ import {
 import {
   binanceAggTradeTakerSide,
   consumeMakerPrint,
+  makerActivityTimestamp,
   makerAbortAfterCosts,
   makerEntryEdgeBps,
   makerRoundTripAfterCosts,
@@ -873,6 +874,10 @@ const EXTENDED_LIGHTER_MAKER_QUOTE_LATENCY_MS = finiteEnv(
 const EXTENDED_LIGHTER_MAKER_HEDGE_LATENCY_MS = finiteEnv(
   'VENUE_ARB_EXTENDED_LIGHTER_MAKER_HEDGE_LATENCY_MS',
   200,
+);
+const EXTENDED_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS = finiteEnv(
+  'VENUE_ARB_EXTENDED_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS',
+  500,
 );
 const EXTENDED_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
   'VENUE_ARB_EXTENDED_LIGHTER_MAKER_MAX_TRADE_IDLE_MS',
@@ -1877,6 +1882,7 @@ const extendedLighterMakerShadow = new GenericMakerShadow({
   hedgeLatencyMs: EXTENDED_LIGHTER_MAKER_HEDGE_LATENCY_MS,
   quoteTtlMs: LIGHTER_EXTENDED_MAKER_QUOTE_TTL_MS,
   maxQueueUsd: LIGHTER_EXTENDED_MAKER_MAX_QUEUE_USD,
+  quoteDataGraceMs: EXTENDED_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS,
   hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
   maxHoldMs: LIGHTER_EXTENDED_MAKER_MAX_HOLD_MS,
   independenceMs: MAKER_INDEPENDENCE_MS,
@@ -4046,17 +4052,25 @@ function startLighter(): void {
         for (const row of parseLighterPublicTrades(message)) {
           const market = byLighterId.get(row.marketId);
           if (!market || !LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED) continue;
-          lighterLastTradeAt.set(market.coin, receivedAt);
+          const tradeAt = normalizeExchangeTimestampMs(
+            row.exchangeAt,
+            receivedAt,
+          );
+          const activityAt = makerActivityTimestamp(
+            tradeAt,
+            receivedAt,
+            SHADOW_SOURCE_FRESH_MS,
+          );
+          if (activityAt != null) {
+            lighterLastTradeAt.set(market.coin, activityAt);
+          }
           lighterExtendedMakerShadow.processTrade({
             id: row.id,
             coin: market.coin,
             side: row.side,
             price: row.price,
             size: row.size,
-            tradeAt: normalizeExchangeTimestampMs(
-              row.exchangeAt,
-              receivedAt,
-            ),
+            tradeAt,
           }, receivedAt);
         }
         return;
@@ -4506,7 +4520,12 @@ function startExtendedTrades(): void {
           size,
           tradeAt: normalizeExchangeTimestampMs(finite(row.T), receivedAt),
         };
-        extendedLastTradeAt.set(coin, receivedAt);
+        const activityAt = makerActivityTimestamp(
+          trade.tradeAt,
+          receivedAt,
+          SHADOW_SOURCE_FRESH_MS,
+        );
+        if (activityAt != null) extendedLastTradeAt.set(coin, activityAt);
         if (MAKER_SHADOW_ENABLED) processMakerTrade(trade, receivedAt);
         if (EXTENDED_ASTER_MAKER_SHADOW_ENABLED) {
           extendedAsterMakerShadow.processTrade(trade, receivedAt);
@@ -4647,7 +4666,14 @@ function startAsterTrades(): void {
         size,
         tradeAt: normalizeExchangeTimestampMs(finite(row.T), receivedAt),
       };
-      asterLastTradeAt.set(market.coin, receivedAt);
+      const activityAt = makerActivityTimestamp(
+        trade.tradeAt,
+        receivedAt,
+        SHADOW_SOURCE_FRESH_MS,
+      );
+      if (activityAt != null) {
+        asterLastTradeAt.set(market.coin, activityAt);
+      }
       asterBinanceMakerShadow.processTrade(trade, receivedAt);
       asterPacificaMakerShadow.processTrade(trade, receivedAt);
       asterLighterMakerShadow.processTrade(trade, receivedAt);

@@ -13,6 +13,22 @@ export function binanceAggTradeTakerSide(
   return buyerIsMaker ? 'SELL' : 'BUY';
 }
 
+export function makerActivityTimestamp(
+  tradeAt: number,
+  receivedAt: number,
+  maxSourceAgeMs: number,
+): number | null {
+  if (
+    !Number.isFinite(tradeAt)
+    || !Number.isFinite(receivedAt)
+    || !Number.isFinite(maxSourceAgeMs)
+    || maxSourceAgeMs < 0
+    || tradeAt > receivedAt + 1_000
+    || receivedAt - tradeAt > maxSourceAgeMs
+  ) return null;
+  return tradeAt;
+}
+
 function decimalPlaces(value: number): number {
   const text = value.toString().toLowerCase();
   const [coefficient = '', exponentText] = text.split('e');
