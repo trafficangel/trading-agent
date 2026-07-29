@@ -711,7 +711,6 @@ export class GenericMakerShadow {
     const market = this.latestMarkets.get(pair.coin);
     if (!market?.maker || !market.hedge) return null;
     if (!this.fresh(now, market.maker, market.hedge)) return null;
-    if (!this.makerActivityFresh(now, market)) return null;
     const side: MakerSide = pair.makerSide === 'long' ? 'sell' : 'buy';
     const hedgeFill = this.hedgePrice(side, market.hedge);
     const bestBid = sortedLevels(market.maker, 'bids', 1)[0]?.[0];
@@ -1268,7 +1267,10 @@ export class GenericMakerShadow {
     this.activate(now);
     if (this.quote?.activatedAt != null && this.quote.firstFillAt == null) {
       const quoteMarket = this.latestMarkets.get(this.quote.coin);
-      if (!this.makerActivityFresh(now, quoteMarket)) {
+      if (
+        this.quote.stage === 'entry'
+        && !this.makerActivityFresh(now, quoteMarket)
+      ) {
         this.telemetry.edgeCancellations++;
         this.emitQuoteEvent('edge_cancelled', now, this.quote, {
           reason: 'maker_activity_stale',
