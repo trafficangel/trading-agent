@@ -382,35 +382,35 @@ const MAKER_RESULTS_PATH = resolve(DATA_DIR, 'maker-shadow-v1.ndjson');
 const MAKER_ACTIVE_PATH = resolve(DATA_DIR, 'maker-active-v1.json');
 const GRVT_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
-  'grvt-maker-shadow-v1.ndjson',
+  'grvt-maker-basis-shadow-v2.ndjson',
 );
 const GRVT_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
-  'grvt-maker-active-v1.json',
+  'grvt-maker-basis-active-v2.json',
 );
 const GRVT_EXTENDED_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
-  'grvt-extended-maker-shadow-v1.ndjson',
+  'grvt-extended-maker-basis-shadow-v2.ndjson',
 );
 const GRVT_EXTENDED_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
-  'grvt-extended-maker-active-v1.json',
+  'grvt-extended-maker-basis-active-v2.json',
 );
 const EXTENDED_ASTER_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
-  'extended-aster-maker-shadow-v1.ndjson',
+  'extended-aster-maker-basis-shadow-v2.ndjson',
 );
 const EXTENDED_ASTER_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
-  'extended-aster-maker-active-v1.json',
+  'extended-aster-maker-basis-active-v2.json',
 );
 const LIGHTER_EXTENDED_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
-  'lighter-extended-maker-shadow-v1.ndjson',
+  'lighter-extended-maker-basis-shadow-v2.ndjson',
 );
 const LIGHTER_EXTENDED_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
-  'lighter-extended-maker-active-v1.json',
+  'lighter-extended-maker-basis-active-v2.json',
 );
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 250);
@@ -1150,6 +1150,9 @@ const grvtMakerShadow = new GenericMakerShadow({
   fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
   requiredSamples: SHADOW_REQUIRED_SAMPLES,
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  maxEntryDistanceBps: 25,
 }, {
   onResult: (result) => {
     appendFileSync(GRVT_MAKER_RESULTS_PATH, `${JSON.stringify(result)}\n`);
@@ -1187,6 +1190,9 @@ const grvtExtendedMakerShadow = new GenericMakerShadow({
   fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
   requiredSamples: SHADOW_REQUIRED_SAMPLES,
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  maxEntryDistanceBps: 25,
 }, {
   onResult: (result) => {
     appendFileSync(
@@ -1227,6 +1233,9 @@ const extendedAsterMakerShadow = new GenericMakerShadow({
   fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
   requiredSamples: SHADOW_REQUIRED_SAMPLES,
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  maxEntryDistanceBps: 25,
 }, {
   onResult: (result) => {
     appendFileSync(
@@ -1267,6 +1276,9 @@ const lighterExtendedMakerShadow = new GenericMakerShadow({
   fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
   requiredSamples: SHADOW_REQUIRED_SAMPLES,
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  maxEntryDistanceBps: 25,
 }, {
   onResult: (result) => {
     appendFileSync(
@@ -1513,6 +1525,29 @@ type ShadowPairedBasisMetrics = {
   exitBaselineBps: number;
 };
 
+function shadowBasisBaselineBps(
+  route: ShadowRouteConfig,
+  coin: string,
+  now: number,
+): number | null {
+  const samples = shadowBasisSamples.get(
+    shadowBasisKey(route.id, coin),
+  ) ?? [];
+  const latest = samples.at(-1);
+  if (!latest) return null;
+  return calibratedVenueArbBasis(
+    samples,
+    now,
+    latest.bps,
+    {
+      windowMs: SHADOW_BASIS_WINDOW_MS,
+      excludeMs: SHADOW_BASIS_EXCLUDE_MS,
+      minSamples: SHADOW_BASIS_MIN_SAMPLES,
+      minSpanMs: SHADOW_BASIS_MIN_SPAN_MS,
+    },
+  )?.baselineBps ?? null;
+}
+
 function shadowPairedBasisMetrics(
   route: ShadowRouteConfig,
   coin: string,
@@ -1525,25 +1560,14 @@ function shadowPairedBasisMetrics(
     && candidate.sellVenue === route.buyVenue
   ));
   if (!opposite) return null;
-  const exitSamples = shadowBasisSamples.get(
-    shadowBasisKey(opposite.id, coin),
-  ) ?? [];
-  const latestExit = exitSamples.at(-1);
-  if (!latestExit) return null;
-  const exit = calibratedVenueArbBasis(
-    exitSamples,
+  const exitBaselineBps = shadowBasisBaselineBps(
+    opposite,
+    coin,
     quote.at,
-    latestExit.bps,
-    {
-      windowMs: SHADOW_BASIS_WINDOW_MS,
-      excludeMs: SHADOW_BASIS_EXCLUDE_MS,
-      minSamples: SHADOW_BASIS_MIN_SAMPLES,
-      minSpanMs: SHADOW_BASIS_MIN_SPAN_MS,
-    },
   );
-  return exit == null
+  return exitBaselineBps == null
     ? null
-    : { entry, exitBaselineBps: exit.baselineBps };
+    : { entry, exitBaselineBps };
 }
 
 function shadowExpectedEntryNetBps(
@@ -4359,10 +4383,23 @@ function loadGenericMakerState(
 function genericMakerMarkets(
   makerVenue: 'grvt' | 'extended' | 'lighter',
   hedgeVenue: 'lighter' | 'extended' | 'aster',
+  now: number,
 ) {
+  const makerLongRoute = shadowRouteById.get(
+    `${makerVenue}-${hedgeVenue}`,
+  );
+  const makerShortRoute = shadowRouteById.get(
+    `${hedgeVenue}-${makerVenue}`,
+  );
   return ACTIVE_MARKETS.map((market) => {
     const maker = books.get(bookKey(makerVenue, market.coin)) ?? null;
     const hedge = executableBook(hedgeVenue, market.coin);
+    const makerLongBaseline = makerLongRoute
+      ? shadowBasisBaselineBps(makerLongRoute, market.coin, now)
+      : null;
+    const makerShortBaseline = makerShortRoute
+      ? shadowBasisBaselineBps(makerShortRoute, market.coin, now)
+      : null;
     return {
       coin: market.coin,
       maker,
@@ -4374,6 +4411,14 @@ function genericMakerMarkets(
           receivedAt: hedge.receivedAt,
         }
         : null,
+      basisEntryBaselineBps: {
+        ...(makerLongBaseline == null ? {} : { buy: makerLongBaseline }),
+        ...(makerShortBaseline == null ? {} : { sell: makerShortBaseline }),
+      },
+      basisExitBaselineBps: {
+        ...(makerShortBaseline == null ? {} : { buy: makerShortBaseline }),
+        ...(makerLongBaseline == null ? {} : { sell: makerLongBaseline }),
+      },
     };
   });
 }
@@ -4492,7 +4537,7 @@ const evaluationTimer = setInterval(() => {
   ) {
     grvtMakerShadow.evaluate(
       now,
-      genericMakerMarkets('grvt', 'lighter'),
+      genericMakerMarkets('grvt', 'lighter', now),
     );
   }
   if (
@@ -4502,7 +4547,7 @@ const evaluationTimer = setInterval(() => {
   ) {
     grvtExtendedMakerShadow.evaluate(
       now,
-      genericMakerMarkets('grvt', 'extended'),
+      genericMakerMarkets('grvt', 'extended', now),
     );
   }
   if (
@@ -4512,7 +4557,7 @@ const evaluationTimer = setInterval(() => {
   ) {
     extendedAsterMakerShadow.evaluate(
       now,
-      genericMakerMarkets('extended', 'aster'),
+      genericMakerMarkets('extended', 'aster', now),
     );
   }
   if (
@@ -4522,7 +4567,7 @@ const evaluationTimer = setInterval(() => {
   ) {
     lighterExtendedMakerShadow.evaluate(
       now,
-      genericMakerMarkets('lighter', 'extended'),
+      genericMakerMarkets('lighter', 'extended', now),
     );
   }
   writeExecutionStatus();

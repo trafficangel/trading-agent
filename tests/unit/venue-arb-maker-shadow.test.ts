@@ -38,6 +38,10 @@ function market(
   at: number,
   hedgeSell: number,
   hedgeBuy: number,
+  basis?: {
+    entry: Partial<Record<'buy' | 'sell', number>>;
+    exit: Partial<Record<'buy' | 'sell', number>>;
+  },
 ): MakerShadowMarket {
   return {
     coin: 'BNB',
@@ -53,6 +57,8 @@ function market(
       exchangeAt: at,
       receivedAt: at,
     },
+    basisEntryBaselineBps: basis?.entry,
+    basisExitBaselineBps: basis?.exit,
   };
 }
 
@@ -222,5 +228,37 @@ describe('GenericMakerShadow', () => {
     expect(
       status.pendingHedge?.projectedNetBpsAtFill,
     ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('quotes only a basis deviation that remains positive after four fills', () => {
+    const basisConfig: GenericMakerConfig = {
+      ...config,
+      entryEdgeBps: 2,
+      cancelEdgeBps: 1,
+      postFillNetBps: 1,
+      basisGateEnabled: true,
+      basisMinDeviationBps: 5,
+    };
+    const staticEngine = new GenericMakerShadow(basisConfig);
+    staticEngine.evaluate(4_000, [
+      market(4_000, 100.2, 100.3, {
+        entry: { buy: 20 },
+        exit: { buy: -10 },
+      }),
+    ]);
+    expect((staticEngine.status() as { quote?: unknown }).quote).toBeNull();
+
+    const dislocatedEngine = new GenericMakerShadow(basisConfig);
+    dislocatedEngine.evaluate(4_001, [
+      market(4_001, 100.2, 100.3, {
+        entry: { buy: 10 },
+        exit: { buy: -10 },
+      }),
+    ]);
+    const quote = (dislocatedEngine.status() as {
+      quote?: { side?: string; projectedNetBps?: number } | null;
+    }).quote;
+    expect(quote?.side).toBe('buy');
+    expect(quote?.projectedNetBps).toBeGreaterThanOrEqual(2);
   });
 });

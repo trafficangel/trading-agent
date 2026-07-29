@@ -27,6 +27,8 @@ export type MakerShadowMarket = {
   coin: string;
   maker: MakerShadowRawBook | null;
   hedge: MakerShadowHedgeBook | null;
+  basisEntryBaselineBps?: Partial<Record<MakerSide, number>>;
+  basisExitBaselineBps?: Partial<Record<MakerSide, number>>;
 };
 
 export type MakerShadowTrade = {
@@ -155,6 +157,9 @@ export type GenericMakerConfig = {
   fundingBpsPerHour: number;
   requiredSamples: number;
   requiredPassPct: number;
+  basisGateEnabled?: boolean;
+  basisMinDeviationBps?: number;
+  maxEntryDistanceBps?: number;
 };
 
 type GenericMakerHooks = {
@@ -298,17 +303,37 @@ export class GenericMakerShadow {
     side: MakerSide,
     makerFill: number,
     hedgeFill: number,
+    market?: MakerShadowMarket,
   ): number {
-    return makerEntryEdgeBps(side, makerFill, hedgeFill)
-      - this.config.executionBufferBps
-      - this.config.makerFeeBps
-      - this.config.hedgeTakerFeeBps;
+    const rawEntryBps = makerEntryEdgeBps(side, makerFill, hedgeFill);
+    if (!this.config.basisGateEnabled) {
+      return rawEntryBps
+        - this.config.executionBufferBps
+        - this.config.makerFeeBps
+        - this.config.hedgeTakerFeeBps;
+    }
+    const entryBaselineBps = market?.basisEntryBaselineBps?.[side];
+    const exitBaselineBps = market?.basisExitBaselineBps?.[side];
+    if (
+      entryBaselineBps == null
+      || exitBaselineBps == null
+      || rawEntryBps - entryBaselineBps
+        < (this.config.basisMinDeviationBps ?? 0)
+    ) return -Infinity;
+    const conservativeRoundTripCostBps = this.config.makerFeeBps
+      + this.config.hedgeTakerFeeBps * 2
+      + this.config.makerFallbackTakerFeeBps
+      + this.config.executionBufferBps;
+    return rawEntryBps
+      + exitBaselineBps
+      - conservativeRoundTripCostBps;
   }
 
   private entryLevels(
     maker: MakerShadowRawBook,
     side: MakerSide,
     hedgeFill: number,
+    market: MakerShadowMarket,
   ): Array<{
     price: number;
     queueAhead: number;
@@ -318,10 +343,27 @@ export class GenericMakerShadow {
     const bestAsk = sortedLevels(maker, 'asks', 1)[0]?.[0];
     const tick = priceTick(maker);
     if (bestBid == null || bestAsk == null || tick == null) return [];
-    const requiredRawBps = this.config.entryEdgeBps
-      + this.config.executionBufferBps
-      + this.config.makerFeeBps
-      + this.config.hedgeTakerFeeBps;
+    const entryBaselineBps = market.basisEntryBaselineBps?.[side];
+    const exitBaselineBps = market.basisExitBaselineBps?.[side];
+    if (
+      this.config.basisGateEnabled
+      && (entryBaselineBps == null || exitBaselineBps == null)
+    ) return [];
+    const requiredRawBps = this.config.basisGateEnabled
+      ? Math.max(
+        Number(entryBaselineBps)
+          + (this.config.basisMinDeviationBps ?? 0),
+        this.config.entryEdgeBps
+          - Number(exitBaselineBps)
+          + this.config.makerFeeBps
+          + this.config.hedgeTakerFeeBps * 2
+          + this.config.makerFallbackTakerFeeBps
+          + this.config.executionBufferBps,
+      )
+      : this.config.entryEdgeBps
+        + this.config.executionBufferBps
+        + this.config.makerFeeBps
+        + this.config.hedgeTakerFeeBps;
     let syntheticPrice: number;
     if (side === 'buy') {
       const maximum = hedgeFill / (1 + requiredRawBps / 10_000);
@@ -345,7 +387,7 @@ export class GenericMakerShadow {
       .filter((price) => (
         price > 0
         && (side === 'buy' ? price < bestAsk : price > bestBid)
-        && this.entryProjection(side, price, hedgeFill)
+        && this.entryProjection(side, price, hedgeFill, market)
           >= this.config.entryEdgeBps - 1e-8
       ));
     return prices.flatMap((price) => {
@@ -356,6 +398,9 @@ export class GenericMakerShadow {
       const distanceBps = side === 'buy'
         ? Math.max(0, (bestBid / price - 1) * 10_000)
         : Math.max(0, (price / bestAsk - 1) * 10_000);
+      if (
+        distanceBps > (this.config.maxEntryDistanceBps ?? 50)
+      ) return [];
       return [{ price, queueAhead, distanceBps }];
     });
   }
@@ -408,6 +453,7 @@ export class GenericMakerShadow {
             side,
             displayedPrice,
             hedgeFill,
+            market,
           );
           if (
             this.telemetry.bestProjectedEntryBps == null
@@ -421,11 +467,13 @@ export class GenericMakerShadow {
           market.maker,
           side,
           hedgeFill,
+          market,
         )) {
           const projectedNetBps = this.entryProjection(
             side,
             level.price,
             hedgeFill,
+            market,
           );
           const quantity = this.config.notionalUsd / level.price;
           candidates.push({
@@ -542,7 +590,12 @@ export class GenericMakerShadow {
     const hedgeFill = this.hedgePrice(quote.side, market.hedge);
     if (hedgeFill == null) return null;
     if (quote.stage === 'entry') {
-      return this.entryProjection(quote.side, quote.price, hedgeFill);
+      return this.entryProjection(
+        quote.side,
+        quote.price,
+        hedgeFill,
+        market,
+      );
     }
     if (!this.pair || this.pair.coin !== quote.coin) return null;
     return this.closeProjection(now, this.pair, quote.price, hedgeFill);
@@ -781,7 +834,12 @@ export class GenericMakerShadow {
         hedgeFill,
       );
       if (
-        this.entryProjection(pending.side, pending.makerFill, hedgeFill)
+        this.entryProjection(
+          pending.side,
+          pending.makerFill,
+          hedgeFill,
+          market,
+        )
         < this.config.postFillNetBps
       ) {
         this.abortAfterLostEdge(pending, now, market);
