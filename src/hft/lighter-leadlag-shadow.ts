@@ -658,13 +658,20 @@ function statusRows(): Array<Record<string, unknown>> {
         && summary.netBps > 0
       ),
     };
-  }).sort((left, right) => (
-    Number(right.netBps) - Number(left.netBps)
-  ));
+  }).sort((left, right) => {
+    if (left.researchGate !== right.researchGate) {
+      return left.researchGate ? -1 : 1;
+    }
+    const averageDelta = Number(right.averageNetBps ?? -Infinity)
+      - Number(left.averageNetBps ?? -Infinity);
+    if (averageDelta) return averageDelta;
+    return Number(right.samples) - Number(left.samples);
+  });
 }
 
 function writeStatus(): void {
   const now = Date.now();
+  const ranked = statusRows();
   atomicJson(STATUS_PATH, {
     version: 'lighter-leadlag-shadow-v1',
     readOnly: true,
@@ -688,7 +695,8 @@ function writeStatus(): void {
     signals,
     active: [...probes.values()],
     results: results.length,
-    ranked: statusRows().slice(0, 50),
+    ranked: ranked.filter((row) => Number(row.attempts) > 0).slice(0, 50),
+    pending: ranked.filter((row) => Number(row.attempts) === 0),
     freshnessMs: Object.fromEntries(MARKETS.map((market) => [
       market.coin,
       {
