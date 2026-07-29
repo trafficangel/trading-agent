@@ -1,7 +1,7 @@
 [Unit]
 Description=Sync Tokyo venue-arb live telemetry to dashboard VPS
-After=network-online.target venue-arb-live.service
-Wants=network-online.target venue-arb-live.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
