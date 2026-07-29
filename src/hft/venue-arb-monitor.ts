@@ -134,6 +134,18 @@ type ExecutableBook = {
   sellDepthUsd: number;
 };
 
+type LighterTickerBbo = {
+  ask: number;
+  bid: number;
+  exchangeAt: number;
+  receivedAt: number;
+};
+
+type LighterBookValidation = {
+  bookUpdates: number;
+  receivedAt: number;
+};
+
 type Opportunity = {
   id: string;
   coin: string;
@@ -1128,6 +1140,8 @@ const executableBooks = new Map<string, ExecutableBook>();
 const bySymbol = new Map(ACTIVE_MARKETS.map((market) => [market.symbol, market]));
 const byCoin = new Map(ACTIVE_MARKETS.map((market) => [market.coin, market]));
 const byLighterId = new Map(ACTIVE_MARKETS.map((market) => [market.lighterMarketId, market]));
+const lighterTickerBbo = new Map<number, LighterTickerBbo>();
+const lighterBookValidation = new Map<number, LighterBookValidation>();
 const byPolymarketId = new Map(ACTIVE_MARKETS.flatMap((market) => (
   market.polymarketInstrumentId == null
     ? []
@@ -1485,6 +1499,31 @@ function executableBook(venue: Venue, coin: string): ExecutableBook | null {
   return prepared;
 }
 
+function lighterBboMatches(
+  book: BookState,
+  ticker: Pick<LighterTickerBbo, 'ask' | 'bid'>,
+): boolean {
+  const bookAsk = sortedLevels(book, 'asks', 1)[0]?.[0] ?? 0;
+  const bookBid = sortedLevels(book, 'bids', 1)[0]?.[0] ?? 0;
+  if (!(bookAsk > 0) || !(bookBid > 0)) return false;
+  return Math.max(
+    Math.abs(bookAsk / ticker.ask - 1),
+    Math.abs(bookBid / ticker.bid - 1),
+  ) * 10_000 <= LIGHTER_BBO_MISMATCH_BPS;
+}
+
+function lighterBookValidated(
+  marketId: number,
+  book: Pick<BookState, 'updates'>,
+  now: number,
+  freshMs: number,
+): boolean {
+  const validation = lighterBookValidation.get(marketId);
+  return validation != null
+    && validation.bookUpdates === book.updates
+    && now - validation.receivedAt <= freshMs;
+}
+
 function atomicJson(path: string, data: unknown): void {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, JSON.stringify(data));
@@ -1538,6 +1577,26 @@ function shadowQuote(
   const buy = executableBook(route.buyVenue, coin);
   const sell = executableBook(route.sellVenue, coin);
   if (!buy || !sell) return { quote: null, rejection: 'missing_book' };
+  const market = byCoin.get(coin);
+  if (
+    market
+    && (
+      route.buyVenue === 'lighter'
+        && !lighterBookValidated(
+          market.lighterMarketId,
+          buy,
+          now,
+          sourceFreshMs,
+        )
+      || route.sellVenue === 'lighter'
+        && !lighterBookValidated(
+          market.lighterMarketId,
+          sell,
+          now,
+          sourceFreshMs,
+        )
+    )
+  ) return { quote: null, rejection: 'stale_source' };
   if (
     now - buy.receivedAt > freshMs
     || now - sell.receivedAt > freshMs
@@ -3181,6 +3240,7 @@ function startLighter(): void {
     executableBooks.delete(bookKey('lighter', market.coin));
     nonces.delete(market.lighterMarketId);
     bboMismatchCounts.delete(market.lighterMarketId);
+    lighterBookValidation.delete(market.lighterMarketId);
     ws.send(JSON.stringify({
       type: 'unsubscribe',
       channel: `order_book/${market.lighterMarketId}`,
@@ -3199,6 +3259,14 @@ function startLighter(): void {
         lighterExtendedMakerShadow.setTradeStreamConnected(true);
       }
       for (const market of ACTIVE_MARKETS) {
+        lighterTickerBbo.delete(market.lighterMarketId);
+        lighterBookValidation.delete(market.lighterMarketId);
+        const book = books.get(bookKey('lighter', market.coin));
+        if (book) {
+          book.exchangeAt = 0;
+          book.receivedAt = 0;
+          executableBooks.delete(bookKey('lighter', market.coin));
+        }
         ws.send(JSON.stringify({
           type: 'subscribe',
           channel: `order_book/${market.lighterMarketId}`,
@@ -3272,9 +3340,20 @@ function startLighter(): void {
       if (message.ticker) {
         const tickerAsk = finite(message.ticker.a?.price);
         const tickerBid = finite(message.ticker.b?.price);
+        if (!(tickerAsk > 0) || !(tickerBid > 0)) return;
+        const ticker = {
+          ask: tickerAsk,
+          bid: tickerBid,
+          exchangeAt: normalizeExchangeTimestampMs(
+            finite(message.timestamp),
+            receivedAt,
+          ),
+          receivedAt,
+        };
+        lighterTickerBbo.set(marketId, ticker);
         const bookAsk = sortedLevels(book, 'asks', 1)[0]?.[0] ?? 0;
         const bookBid = sortedLevels(book, 'bids', 1)[0]?.[0] ?? 0;
-        if (!(tickerAsk > 0) || !(tickerBid > 0) || !bookAsk || !bookBid) return;
+        if (!bookAsk || !bookBid) return;
         const mismatchBps = Math.max(
           Math.abs(bookAsk / tickerAsk - 1),
           Math.abs(bookBid / tickerBid - 1),
@@ -3285,8 +3364,13 @@ function startLighter(): void {
           // the live BBO. Keep the validated book fresh even when Lighter does
           // not emit a depth delta during a quiet market.
           markBook(book, finite(message.timestamp), receivedAt);
+          lighterBookValidation.set(marketId, {
+            bookUpdates: book.updates,
+            receivedAt,
+          });
           return;
         }
+        lighterBookValidation.delete(marketId);
         const mismatches = (bboMismatchCounts.get(marketId) ?? 0) + 1;
         bboMismatchCounts.set(marketId, mismatches);
         if (mismatches >= 3) refreshBook(ws, market);
@@ -3309,6 +3393,19 @@ function startLighter(): void {
       }
       if (nonce > 0) nonces.set(marketId, nonce);
       markBook(book, finite(message.timestamp), receivedAt);
+      const ticker = lighterTickerBbo.get(marketId);
+      if (
+        ticker
+        && receivedAt - ticker.receivedAt <= LIGHTER_VALIDATED_BOOK_FRESH_MS
+        && lighterBboMatches(book, ticker)
+      ) {
+        lighterBookValidation.set(marketId, {
+          bookUpdates: book.updates,
+          receivedAt: ticker.receivedAt,
+        });
+      } else {
+        lighterBookValidation.delete(marketId);
+      }
     },
   );
 }
@@ -4539,8 +4636,28 @@ function genericMakerMarkets(
     `${hedgeVenue}-${makerVenue}`,
   );
   return ACTIVE_MARKETS.map((market) => {
-    const maker = books.get(bookKey(makerVenue, market.coin)) ?? null;
-    const hedge = executableBook(hedgeVenue, market.coin);
+    const rawMaker = books.get(bookKey(makerVenue, market.coin)) ?? null;
+    const maker = (
+      makerVenue === 'lighter'
+      && rawMaker
+      && !lighterBookValidated(
+        market.lighterMarketId,
+        rawMaker,
+        now,
+        LIGHTER_VALIDATED_BOOK_FRESH_MS,
+      )
+    ) ? null : rawMaker;
+    const rawHedge = executableBook(hedgeVenue, market.coin);
+    const hedge = (
+      hedgeVenue === 'lighter'
+      && rawHedge
+      && !lighterBookValidated(
+        market.lighterMarketId,
+        rawHedge,
+        now,
+        LIGHTER_VALIDATED_BOOK_FRESH_MS,
+      )
+    ) ? null : rawHedge;
     const makerLongBaseline = makerLongRoute
       ? shadowBasisBaselineBps(makerLongRoute, market.coin, now)
       : null;
