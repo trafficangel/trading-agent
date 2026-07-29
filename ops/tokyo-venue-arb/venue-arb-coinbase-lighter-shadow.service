@@ -66,7 +66,11 @@ Environment=VENUE_ARB_LIGHTER_BOOK_REFRESH_MS=0
 Environment=VENUE_ARB_LIGHTER_MARKETS_PER_CONNECTION=4
 Environment=VENUE_ARB_LIGHTER_BBO_MISMATCH_REFRESH_COUNT=0
 Environment=VENUE_ARB_LIGHTER_REST_BOOK_ENABLED=true
-Environment=VENUE_ARB_LIGHTER_REST_ACTIVE_QUOTE_ONLY=true
+# A new isolated data directory has no previously validated Lighter book.
+# Keep the four selected books validated continuously; active-only validation
+# would create a circular wait (no quote before validation, no validation
+# before an active quote).
+Environment=VENUE_ARB_LIGHTER_REST_ACTIVE_QUOTE_ONLY=false
 Environment=VENUE_ARB_LIGHTER_REST_BOOK_INTERVAL_MS=250
 Environment=VENUE_ARB_LIGHTER_REST_BOOK_LIMIT=50
 Environment=VENUE_ARB_LIGHTER_REST_BOOK_TIMEOUT_MS=2000
