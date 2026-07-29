@@ -3622,7 +3622,10 @@ function startLighterRestBookPoller(): void {
       if (!book) return;
       // A WS depth update received after the request began is fresher than
       // this REST snapshot and must never be overwritten.
-      if (book.receivedAt > requestStartedAt) {
+      if (
+        book.receivedAt > requestStartedAt
+        && book.exchangeAt >= requestStartedAt
+      ) {
         lighterRestTelemetry.ignoredFresherWs++;
         return;
       }
