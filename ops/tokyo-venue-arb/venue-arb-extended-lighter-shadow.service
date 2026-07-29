@@ -52,7 +52,10 @@ Environment=VENUE_ARB_EXTENDED_LIGHTER_MAKER_HEDGE_LATENCY_MS=300
 Environment=VENUE_ARB_EXTENDED_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS=600
 Environment=VENUE_ARB_EXTENDED_LIGHTER_MAKER_MAX_TRADE_IDLE_MS=10000
 Environment=VENUE_ARB_EXTENDED_PACIFICA_MAKER_SHADOW_ENABLED=false
-Environment=VENUE_ARB_LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED=true
+# Reverse route is structurally weaker: it pays the Extended taker fee after
+# a Lighter maker fill and its first completed shadow cycle lost 14.33 bps.
+# Keep the strict cohort focused on Extended maker -> Lighter taker.
+Environment=VENUE_ARB_LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED=false
 Environment=VENUE_ARB_LIGHTER_EXTENDED_MAKER_ENTRY_EDGE_BPS=1
 Environment=VENUE_ARB_LIGHTER_EXTENDED_MAKER_CANCEL_EDGE_BPS=0.5
 Environment=VENUE_ARB_LIGHTER_EXTENDED_MAKER_POST_FILL_NET_BPS=0.5
