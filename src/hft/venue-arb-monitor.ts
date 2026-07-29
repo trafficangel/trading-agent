@@ -1523,6 +1523,7 @@ function shadowQuote(
   coin: string,
   route: ShadowRouteConfig,
   freshMs = SHADOW_SIGNAL_FRESH_MS,
+  sourceFreshMs = SHADOW_SOURCE_FRESH_MS,
 ): { quote: ShadowQuote | null; rejection: ShadowRejectReason | null } {
   const buy = executableBook(route.buyVenue, coin);
   const sell = executableBook(route.sellVenue, coin);
@@ -1532,8 +1533,8 @@ function shadowQuote(
     || now - sell.receivedAt > freshMs
   ) return { quote: null, rejection: 'stale_book' };
   if (
-    now - buy.exchangeAt > SHADOW_SOURCE_FRESH_MS
-    || now - sell.exchangeAt > SHADOW_SOURCE_FRESH_MS
+    now - buy.exchangeAt > sourceFreshMs
+    || now - sell.exchangeAt > sourceFreshMs
   ) return { quote: null, rejection: 'stale_source' };
   if (
     buy.buyVwap500 == null
@@ -1792,6 +1793,21 @@ function evaluateShadow(now: number): void {
     let currentBestNetBps: number | null = null;
     let currentBestCoin: string | null = null;
     for (const market of ACTIVE_MARKETS) {
+      if (
+        route.buyVenue === 'lighter'
+        || route.sellVenue === 'lighter'
+      ) {
+        const calibration = shadowQuote(
+          now,
+          market.coin,
+          route,
+          LIGHTER_VALIDATED_BOOK_FRESH_MS,
+          LIGHTER_VALIDATED_BOOK_FRESH_MS,
+        );
+        if (calibration.quote) {
+          observeShadowBasis(route, market.coin, calibration.quote);
+        }
+      }
       const evaluation = shadowQuote(now, market.coin, route);
       const quote = evaluation.quote;
       const latchKey = `${route.id}:${market.coin}`;
