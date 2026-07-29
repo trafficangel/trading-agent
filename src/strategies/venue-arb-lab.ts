@@ -416,6 +416,20 @@ type Status = {
   extendedPacificaMakerShadow?: GenericMakerShadowStatus;
   lighterExtendedMakerShadow?: GenericMakerShadowStatus;
 };
+type ProfitGateStatus = {
+  ready?: boolean;
+  reasons?: string[];
+  requirements?: { minSamples?: number };
+  metrics?: {
+    samples?: number;
+    positive?: number;
+    sumNetBps?: number;
+    sumNetUsd?: number;
+    mean95PctLowerBps?: number | null;
+    profitFactor?: number | null;
+    maxDrawdownBps?: number;
+  };
+};
 type LiveFill = {
   price?: number;
   quantity?: number;
@@ -550,6 +564,7 @@ async function readLive(): Promise<{
 
 async function readTargeted(): Promise<{
   candidateStatus: Status | null;
+  makerGate: ProfitGateStatus | null;
 }> {
   const read = async <T>(file: string, fallback: T): Promise<T> => {
     try {
@@ -562,6 +577,10 @@ async function readTargeted(): Promise<{
   };
   return {
     candidateStatus: await read<Status | null>('cex-dex-status.json', null),
+    makerGate: await read<ProfitGateStatus | null>(
+      'aster-binance-maker-gate-status.json',
+      null,
+    ),
   };
 }
 
@@ -1221,7 +1240,10 @@ const CANDIDATE_ROUTES = [
   ['pacifica-binance', 'Pacifica → Binance'],
 ] as const;
 
-function candidateRouteRows(status: Status | null): string {
+function candidateRouteRows(
+  status: Status | null,
+  makerProfitGate: ProfitGateStatus | null,
+): string {
   const shadow = status?.executionShadow;
   const takerRows = CANDIDATE_ROUTES.map(([id, label]) => {
     const route = shadow?.routes?.[id];
@@ -1231,7 +1253,7 @@ function candidateRouteRows(status: Status | null): string {
     const required = Number(gate?.requiredSamples ?? 30);
     const passed = Number(gate?.passed ?? 0);
     const state = gate?.ready
-      ? '<b class="pos">ДОПУЩЕН</b>'
+      ? '<b>КАНДИДАТ</b>'
       : samples > 0
         ? '<b>НАБЛЮДЕНИЕ</b>'
         : '<b>ЖДЁМ EDGE</b>';
@@ -1253,10 +1275,18 @@ function candidateRouteRows(status: Status | null): string {
   const maker = status?.asterBinanceMakerShadow;
   const makerGate = maker?.readiness;
   const makerTelemetry = maker?.telemetry;
-  const makerSamples = Number(makerGate?.samples ?? 0);
-  const makerRequired = Number(makerGate?.requiredSamples ?? 30);
-  const makerPassed = Number(makerGate?.passed ?? 0);
-  const makerState = makerGate?.ready
+  const makerSamples = Number(
+    makerProfitGate?.metrics?.samples ?? makerGate?.samples ?? 0,
+  );
+  const makerRequired = Number(
+    makerProfitGate?.requirements?.minSamples
+      ?? makerGate?.requiredSamples
+      ?? 30,
+  );
+  const makerPassed = Number(
+    makerProfitGate?.metrics?.positive ?? makerGate?.passed ?? 0,
+  );
+  const makerState = makerProfitGate?.ready
     ? '<b class="pos">ДОПУЩЕН</b>'
     : maker?.pair
       ? '<b class="pos">В РАБОТЕ</b>'
@@ -1280,7 +1310,7 @@ function candidateRouteRows(status: Status | null): string {
     makerTelemetry?.peakProjectedCoin,
     makerTelemetry?.peakProjectedEntryBps,
   )}</td>
-    <td>${makerSamples} / ${makerRequired}<small>PASS ${makerPassed}</small></td>
+    <td>${makerSamples} / ${makerRequired}<small>+ ${makerPassed} · PF ${makerProfitGate?.metrics?.profitFactor == null ? '—' : Number(makerProfitGate.metrics.profitFactor).toFixed(2)} · LB ${pctFromBps(makerProfitGate?.metrics?.mean95PctLowerBps)}</small></td>
     <td>${makerState}</td><td>${makerBlocker}</td>
   </tr>`;
 }
@@ -1401,17 +1431,20 @@ async function renderCompact(lang: Lang): Promise<string> {
   const routes = CANDIDATE_ROUTES.map(
     ([id]) => candidateShadow?.routes?.[id],
   );
-  const makerGate = candidateStatus?.asterBinanceMakerShadow?.readiness;
+  const makerReadiness = candidateStatus?.asterBinanceMakerShadow?.readiness;
   const totalSamples = routes.reduce(
     (sum, route) => sum + Number(route?.readiness?.samples ?? 0),
-    Number(makerGate?.samples ?? 0),
+    Number(
+      targeted.makerGate?.metrics?.samples
+        ?? makerReadiness?.samples
+        ?? 0,
+    ),
   );
   const totalAttempts = routes.reduce(
     (sum, route) => sum + Number(route?.readiness?.attempts ?? 0),
-    Number(makerGate?.attempts ?? 0),
+    Number(makerReadiness?.attempts ?? 0),
   );
-  const readyRoutes = routes.filter((route) => route?.readiness?.ready).length
-    + (makerGate?.ready ? 1 : 0);
+  const readyRoutes = targeted.makerGate?.ready ? 1 : 0;
   const canaryReady = readyRoutes > 0;
   return pageShell(
     t(lang, 'Арбитраж — контроль прибыли', 'Arbitrage profit control'),
@@ -1446,7 +1479,7 @@ async function renderCompact(lang: Lang): Promise<string> {
         <div class="va-panel-head"><h2>Проверяем сейчас</h2><span>все расходы · $100 · задержка 300 мс</span></div>
         <div class="va-table"><table><thead><tr>
           <th>Маршрут</th><th>Net сейчас</th><th>Лучший net</th><th>Shadow</th><th>Статус</th><th>Почему нет входа</th>
-        </tr></thead><tbody>${candidateRouteRows(candidateStatus)}</tbody></table></div>
+        </tr></thead><tbody>${candidateRouteRows(candidateStatus, targeted.makerGate)}</tbody></table></div>
       </section>
 
       <section class="va-panel">
