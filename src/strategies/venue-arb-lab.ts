@@ -1267,13 +1267,8 @@ function candidateRouteRows(
     telemetry?.currentBestCoin,
     telemetry?.currentBestNetBps,
   )}</td>
-      <td class="${cls(telemetry?.peakOpeningNetBps)}">${coinAndBps(
-    telemetry?.peakCoin,
-    telemetry?.peakOpeningNetBps,
-  )}</td>
       <td>${samples} / ${required}<small>PASS ${passed}</small></td>
-      <td>${state}</td>
-      <td>${shadowBlockers(telemetry)}</td>
+      <td>${state}<small>${shadowBlockers(telemetry)}</small></td>
     </tr>`];
   }).join('');
   const makerRows = [
@@ -1319,12 +1314,8 @@ function candidateRouteRows(
       telemetry?.bestProjectedCoin,
       telemetry?.bestProjectedEntryBps,
     )}</td>
-      <td class="${cls(telemetry?.peakProjectedEntryBps)}">${coinAndBps(
-      telemetry?.peakProjectedCoin,
-      telemetry?.peakProjectedEntryBps,
-    )}</td>
       <td>${samples} / ${required}<small>+ ${passed} · PF ${gate?.metrics?.profitFactor == null ? '—' : Number(gate.metrics.profitFactor).toFixed(2)} · LB ${pctFromBps(gate?.metrics?.mean95PctLowerBps)}</small></td>
-      <td>${state}</td><td>${blocker}</td>
+      <td>${state}<small>${blocker}</small></td>
     </tr>`;
   }).join('');
   return takerRows + makerRows;
@@ -1384,11 +1375,10 @@ function candidateShadowRows(
   });
   rows.sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
   if (!rows.length) {
-    return '<tr><td colspan="6">Исполнимых входов после задержки и всех расходов пока не было.</td></tr>';
+    return '<tr><td colspan="5">Исполнимых входов после задержки и всех расходов пока не было.</td></tr>';
   }
   return rows.map((row) => `<tr>
-    <td>${utc(row.at)}</td><td><b>${esc(row.coin)}</b></td>
-    <td>${esc(row.route)}</td>
+    <td>${utc(row.at)}</td><td><b>${esc(row.coin)}</b><small>${esc(row.route)}</small></td>
     <td class="${row.status === 'PASS' ? 'pos' : row.status === 'FAIL' ? 'neg' : ''}">${esc(row.status)}</td>
     <td class="${cls(row.netBps)}"><b>${pctFromBps(row.netBps)}</b></td>
     <td>${esc(row.detail)}</td>
@@ -1397,14 +1387,13 @@ function candidateShadowRows(
 
 function compactLiveRows(rows: LiveTrade[]): string {
   if (!rows.length) {
-    return '<tr><td colspan="5">Реальных арбитражных сделок пока нет.</td></tr>';
+    return '<tr><td colspan="4">Реальных арбитражных сделок пока нет.</td></tr>';
   }
   return [...rows].reverse().map((row) => {
     const closed = row.status === 'closed' || row.status === 'failed_flat';
     return `<tr>
       <td>${utc(row.openedAt ?? row.startedAt)} → ${row.closedAt ? utc(row.closedAt) : '—'}</td>
-      <td><b>${esc(row.coin)}</b><small>${esc(row.route)}</small></td>
-      <td>${money(row.notionalUsdPerLeg)} × 2</td>
+      <td><b>${esc(row.coin)}</b><small>${esc(row.route)} · ${money(row.notionalUsdPerLeg)} × 2</small></td>
       <td class="${cls(row.netPnlUsd)}"><b>${money(row.netPnlUsd, true)} · ${plainPct(row.netPnlPct, true)}</b></td>
       <td>${closed ? 'закрыта' : esc(row.status)}${row.closeReason ? `<small>${esc(row.closeReason)}</small>` : ''}</td>
     </tr>`;
@@ -1478,6 +1467,15 @@ async function renderCompact(lang: Lang): Promise<string> {
       0,
     ),
   );
+  const totalRequired = routes.reduce(
+    (sum, route) => sum + Number(route?.readiness?.requiredSamples ?? 30),
+    activeMakers.reduce(
+      (sum, { maker, gate }) => sum + Number(
+        gate?.requirements?.minSamples ?? maker?.readiness?.requiredSamples ?? 30,
+      ),
+      0,
+    ),
+  );
   const readyRoutes = activeMakers.filter(({ maker, gate }) => (
     gate?.ready ?? maker?.readiness?.ready
   )).length;
@@ -1485,36 +1483,31 @@ async function renderCompact(lang: Lang): Promise<string> {
   return pageShell(
     t(lang, 'Арбитраж — контроль прибыли', 'Arbitrage profit control'),
     `<style>${VENUE_ARB_CSS}
-      .va-compact .va-head h1{margin-bottom:2px}.va-compact .va-head p{margin:0}
-      .va-compact .va-cards{grid-template-columns:repeat(3,1fr);margin:16px 0 10px}
-      .va-summary{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:13px 16px;border:1px solid ${canaryReady ? 'rgba(56,217,150,.45)' : 'rgba(255,101,119,.28)'};border-radius:12px;background:${canaryReady ? 'rgba(56,217,150,.06)' : 'rgba(255,101,119,.04)'}}
-      .va-summary b{white-space:nowrap}.va-summary span{color:var(--text-dim);font-size:12px}
+      .va-compact .va-back{margin-bottom:14px}.va-compact .va-head{align-items:center}
+      .va-compact .va-head h1{margin:6px 0 2px}.va-compact .va-head p{margin:0}
+      .va-overview{display:grid;grid-template-columns:repeat(3,1fr);margin:16px 0 10px;border:1px solid var(--border);border-radius:14px;background:var(--bg-card)}
+      .va-overview>div{display:grid;gap:3px;padding:14px 16px;border-right:1px solid var(--border)}
+      .va-overview>div:last-child{border-right:0}.va-overview small{color:var(--text-faint);font-size:10px;text-transform:uppercase}.va-overview b{font-size:18px}.va-overview span{color:var(--text-dim);font-size:11px}
       .va-compact .va-panel{padding:14px;margin-top:10px}.va-compact .va-panel-head h2{margin:0}.va-compact .va-table td small{display:block}.va-compact-note{margin:8px 0 0;color:var(--text-faint);font-size:11px}
-      @media(max-width:760px){.va-compact .va-cards{grid-template-columns:1fr}.va-summary{align-items:flex-start;flex-direction:column}}
+      @media(max-width:760px){.va-overview{grid-template-columns:1fr}.va-overview>div{border-right:0;border-bottom:1px solid var(--border)}.va-overview>div:last-child{border-bottom:0}}
     </style>
     <div class="va-wrap va-compact">
       <a class="va-back" href="/lab">← Лаборатория</a>
       <div class="va-head"><div>
-        <span class="va-badge">NET AFTER ALL COSTS</span>
         <h1>Арбитраж</h1>
-        <p>Только активные проверки, shadow‑исполнение и реальные деньги.</p>
+        <p>Только исполнимый net после всех расходов.</p>
       </div><div class="va-engine ${candidateFresh ? 'live' : ''}"><i></i>${candidateFresh ? 'SHADOW LIVE' : 'НЕТ ДАННЫХ'}</div></div>
 
-      <div class="va-cards">
-        <div class="va-card"><small>Реальный net</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b><em>${closedLive.length} сделок · ${liveWins} прибыльных · комиссии ${money(liveFees)}</em></div>
-        <div class="va-card"><small>Реальная торговля</small><b class="${realStateClass}">${realPaused ? 'ОСТАНОВЛЕНА' : liveState(liveStatus)}</b><em>${realPaused ? 'до доказанного положительного gate' : 'canary активен'}</em></div>
-        <div class="va-card"><small>Shadow</small><b>${totalSamples} сделок</b><em>${totalAttempts} попыток · потоки ${healthyFeeds}/${candidateVenues.length} · маршрутов ${routes.length + activeMakers.length}</em></div>
-      </div>
-
-      <div class="va-summary">
-        <span>${canaryReady ? `${readyRoutes} маршрут(а) прошли gate — можно готовить минимальный canary.` : 'Ни один маршрут пока не доказал положительный результат после комиссий, задержки и проскальзывания.'}</span>
-        <b class="${canaryReady ? 'pos' : 'neg'}">${canaryReady ? 'CANARY READY' : 'РЕАЛ ЗАПРЕЩЁН'}</b>
+      <div class="va-overview">
+        <div><small>Реальный net</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b><span>${closedLive.length} сделок · ${liveWins} прибыльных · комиссии ${money(liveFees)}</span></div>
+        <div><small>Shadow gate</small><b>${totalSamples} / ${totalRequired}</b><span>${totalAttempts} попыток · потоки ${healthyFeeds}/${candidateVenues.length}</span></div>
+        <div><small>Решение</small><b class="${canaryReady ? 'pos' : 'neg'}">${canaryReady ? 'CANARY READY' : 'РЕАЛ ЗАПРЕЩЁН'}</b><span>${canaryReady ? `${readyRoutes} маршрут(а) прошли gate` : 'нужен доказанный положительный net'}</span></div>
       </div>
 
       <section class="va-panel">
-        <div class="va-panel-head"><h2>Проверяем сейчас</h2><span>все расходы · $100 · задержка 300 мс</span></div>
+        <div class="va-panel-head"><h2>Активные маршруты</h2><span>$100 · все расходы</span></div>
         <div class="va-table"><table><thead><tr>
-          <th>Маршрут</th><th>Net сейчас</th><th>Лучший net</th><th>Shadow</th><th>Статус</th><th>Почему нет входа</th>
+          <th>Маршрут</th><th>Net сейчас</th><th>Shadow gate</th><th>Статус</th>
         </tr></thead><tbody>${candidateRouteRows(candidateStatus, {
           extendedLighter: targeted.extendedMakerGate,
           lighterExtended: null,
@@ -1522,9 +1515,9 @@ async function renderCompact(lang: Lang): Promise<string> {
       </section>
 
       <section class="va-panel">
-        <div class="va-panel-head"><h2>История shadow</h2><span>только попытки исполнения</span></div>
+        <div class="va-panel-head"><h2>Shadow-сделки</h2><span>после задержки и расходов</span></div>
         <div class="va-table" data-va-pager="target-shadow" data-page-size="20"><table><thead><tr>
-          <th>UTC</th><th>Монета</th><th>Маршрут</th><th>Статус</th><th>Net</th><th>Причина</th>
+          <th>UTC</th><th>Монета / маршрут</th><th>Статус</th><th>Net</th><th>Причина</th>
         </tr></thead><tbody>${candidateShadowRows(candidateShadow, {
           extendedLighter: candidateStatus?.extendedLighterMakerShadow,
           lighterExtended: candidateStatus?.lighterExtendedMakerShadow,
@@ -1532,9 +1525,9 @@ async function renderCompact(lang: Lang): Promise<string> {
       </section>
 
       <section class="va-panel va-live-panel">
-        <div class="va-panel-head"><h2>Реальные сделки</h2><span class="${realStateClass}">${realPaused ? 'ОСТАНОВЛЕНО' : liveState(liveStatus)}</span></div>
+        <div class="va-panel-head"><h2>Реальные сделки</h2><span class="${realStateClass}">${realPaused ? 'ВЫКЛЮЧЕНЫ' : liveState(liveStatus)}</span></div>
         <div class="va-table" data-va-pager="live-trades" data-page-size="20"><table><thead><tr>
-          <th>Открыта → закрыта UTC</th><th>Монета / маршрут</th><th>Размер</th><th>Net результат</th><th>Статус</th>
+          <th>Открыта → закрыта UTC</th><th>Монета / маршрут / размер</th><th>Net результат</th><th>Статус</th>
         </tr></thead><tbody>${compactLiveRows(liveTrades)}</tbody></table></div>
         ${liveStatus?.reason ? `<p class="va-compact-note">Решение: ${esc(liveStatus.reason)}</p>` : ''}
       </section>
