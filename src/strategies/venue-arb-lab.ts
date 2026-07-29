@@ -1422,8 +1422,13 @@ async function renderCompact(lang: Lang): Promise<string> {
   const extendedLighterMaker = (
     extendedLighterStatus?.extendedLighterMakerShadow
   );
-  const realPaused = !liveStatus?.enabled;
-  const realStateClass = liveStatus?.enabled ? 'pos' : 'neg';
+  const liveStatusFresh = Boolean(
+    liveStatus?.updatedAt
+    && Date.now() - liveStatus.updatedAt < 15_000,
+  );
+  const realEnabled = Boolean(liveStatusFresh && liveStatus?.enabled);
+  const realPaused = !realEnabled;
+  const realStateClass = realEnabled ? 'pos' : 'neg';
   const canaryReady = Boolean(targeted.extendedLighterGate?.ready);
   const totalTargetSamples = Number(
     targeted.extendedLighterGate?.metrics?.samples ?? 0,
@@ -1456,7 +1461,7 @@ async function renderCompact(lang: Lang): Promise<string> {
 
       <div class="va-cards">
         <div class="va-card"><small>Реальный net PnL</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b><em>после ${money(liveFees)} комиссий</em></div>
-        <div class="va-card"><small>Реальная торговля</small><b class="${realStateClass}">${realPaused ? 'ПАУЗА' : liveState(liveStatus)}</b><em>${realPaused ? 'ждёт положительный shadow-gate' : 'canary активен'}</em></div>
+        <div class="va-card"><small>Реальная торговля</small><b class="${realStateClass}">${realPaused ? 'ОСТАНОВЛЕНА' : liveState(liveStatus)}</b><em>${realPaused ? 'live-сервис выключен · ждёт gate' : 'canary активен'}</em></div>
         <div class="va-card"><small>Закрыто / прибыльных</small><b>${closedLive.length} / ${liveWins}</b><em>только фактические fills</em></div>
         <div class="va-card"><small>Актуальный тест</small><b>${totalTargetSamples} / 30</b><em>потоки ${healthyTargetFeeds}/2 · один строгий gate</em></div>
       </div>
@@ -1471,7 +1476,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       <div class="va-test-grid">
         ${compactGate(
     'Extended → Lighter',
-    'MAKER 0% / TAKER 0% · 500/300 MS',
+    'NET ПОСЛЕ РАСХОДОВ · 500/300 MS',
     targeted.extendedLighterGate,
     extendedLighterMaker?.telemetry?.bestObservedTopCoin,
     extendedLighterMaker?.telemetry?.bestObservedTopNetBps,
@@ -1494,9 +1499,6 @@ async function renderCompact(lang: Lang): Promise<string> {
         ${liveStatus?.reason ? `<p class="va-compact-note">Решение: ${esc(liveStatus.reason)}</p>` : ''}
       </section>
 
-      <section class="va-panel">
-        <div class="va-rules"><span>$100 на ногу</span><span>все комиссии</span><span>VWAP стакана</span><span>задержка Pacifica ≥250 ms</span><span>минимум 30 сделок</span><span>PF ≥1.20</span><span>95% lower bound &gt;0</span><span>реал только после gate</span></div>
-      </section>
     </div>
     ${VENUE_ARB_PAGINATION_SCRIPT}`,
     { autoRefreshSec: 5, lang },
