@@ -854,7 +854,7 @@ const EXTENDED_LIGHTER_MAKER_ENTRY_EDGE_BPS = finiteEnv(
   'VENUE_ARB_EXTENDED_LIGHTER_MAKER_ENTRY_EDGE_BPS',
   3,
 );
-const EXTENDED_LIGHTER_MAKER_CANCEL_EDGE_BPS = finiteEnv(
+const EXTENDED_LIGHTER_MAKER_CANCEL_EDGE_BPS = signedFiniteEnv(
   'VENUE_ARB_EXTENDED_LIGHTER_MAKER_CANCEL_EDGE_BPS',
   1,
 );
@@ -2033,6 +2033,11 @@ for (const market of ACTIVE_MARKETS) {
 function finiteEnv(name: string, fallback: number): number {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function signedFiniteEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) ? value : fallback;
 }
 
 function booleanEnv(name: string, fallback: boolean): boolean {
