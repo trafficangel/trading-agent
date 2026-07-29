@@ -386,6 +386,7 @@ type Status = {
   grvtMakerShadow?: GenericMakerShadowStatus;
   grvtExtendedMakerShadow?: GenericMakerShadowStatus;
   extendedAsterMakerShadow?: GenericMakerShadowStatus;
+  lighterExtendedMakerShadow?: GenericMakerShadowStatus;
 };
 type LiveFill = {
   price?: number;
@@ -1213,6 +1214,7 @@ async function render(lang: Lang): Promise<string> {
   const grvtMakerShadow = status?.grvtMakerShadow;
   const grvtExtendedMakerShadow = status?.grvtExtendedMakerShadow;
   const extendedAsterMakerShadow = status?.extendedAsterMakerShadow;
+  const lighterExtendedMakerShadow = status?.lighterExtendedMakerShadow;
   const primaryShadow = executionShadow?.routes?.['extended-lighter']
     ?? executionShadow;
   const shadowGate = primaryShadow?.readiness;
@@ -1245,6 +1247,12 @@ async function render(lang: Lang): Promise<string> {
       <section class="va-panel"><div class="va-panel-head"><h2>Tradeable расхождения сейчас</h2><span>$1,000 net &gt; ${pctFromBps(triggerBps)} · автообновление 5 сек</span></div>
         ${activeRows(status?.active ?? [], triggerBps)}
       </section>
+
+      ${genericMakerPanel(lighterExtendedMakerShadow, {
+        badge: 'LIGHTER MAKER → EXTENDED TAKER · SHADOW',
+        heading: 'Нулекомиссионная maker-нога с реальной очередью',
+        pagerId: 'lighter-extended-maker-shadow',
+      })}
 
       ${genericMakerPanel(grvtExtendedMakerShadow, {
         badge: 'GRVT MAKER → EXTENDED TAKER · SHADOW',
