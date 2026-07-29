@@ -4972,7 +4972,6 @@ function startHibachi(): void {
     (market) => HIBACHI_GRANULARITY[market.coin] != null,
   );
   if (!markets.length) return;
-  let tradeSequence = 0;
   connect(
     'hibachi',
     'wss://data-api.hibachi.xyz/ws/market',
@@ -5061,7 +5060,11 @@ function startHibachi(): void {
         receivedAt,
       );
       const trade: MakerShadowTrade = {
-        id: `${coin}:${String(row?.timestamp)}:${price}:${size}:${side}:${tradeSequence++}`,
+        // Hibachi's public trade payload has no explicit trade id. A
+        // deterministic fingerprint deliberately collapses retransmissions.
+        // It can also collapse two truly identical prints in one timestamp,
+        // which is conservative for a fill simulation.
+        id: `${coin}:${String(row?.timestamp)}:${price}:${size}:${side}`,
         coin,
         side,
         price,

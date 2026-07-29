@@ -175,6 +175,11 @@ export type GenericMakerEvent = {
   remainingUsd?: number;
   remainingBeforeUsd?: number;
   consumedUsd?: number;
+  triggerTradeId?: string;
+  triggerTradeSide?: TakerSide;
+  triggerTradePrice?: number;
+  triggerTradeSize?: number;
+  triggerTradeAt?: number;
 };
 
 export type GenericMakerConfig = {
@@ -811,6 +816,11 @@ export class GenericMakerShadow {
       | 'remainingUsd'
       | 'remainingBeforeUsd'
       | 'consumedUsd'
+      | 'triggerTradeId'
+      | 'triggerTradeSide'
+      | 'triggerTradePrice'
+      | 'triggerTradeSize'
+      | 'triggerTradeAt'
     > = {},
   ): void {
     this.hooks.onEvent?.({
@@ -1425,12 +1435,22 @@ export class GenericMakerShadow {
           - quote.queue.queueAhead
           - quote.queue.remaining
         ) * quote.price,
+        triggerTradeId: trade.id,
+        triggerTradeSide: trade.side,
+        triggerTradePrice: trade.price,
+        triggerTradeSize: trade.size,
+        triggerTradeAt: trade.tradeAt,
       });
     }
     if (!quote.queue.filled) return;
     this.telemetry.queueFills++;
     this.emitQuoteEvent('queue_filled', receivedAt, quote, {
       currentProjectionBps: this.currentProjection(receivedAt, quote),
+      triggerTradeId: trade.id,
+      triggerTradeSide: trade.side,
+      triggerTradePrice: trade.price,
+      triggerTradeSize: trade.size,
+      triggerTradeAt: trade.tradeAt,
     });
     this.pendingHedge = {
       stage: quote.stage,

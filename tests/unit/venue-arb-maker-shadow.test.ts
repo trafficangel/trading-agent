@@ -233,6 +233,13 @@ describe('GenericMakerShadow', () => {
       'quote_activated',
       'queue_filled',
     ]));
+    expect(events.find((event) => event.type === 'queue_filled')).toMatchObject({
+      triggerTradeId: 'entry-print',
+      triggerTradeSide: 'SELL',
+      triggerTradePrice: 100,
+      triggerTradeSize: 2,
+      triggerTradeAt: 1_001,
+    });
   });
 
   it('hedges a filled maker order when hedging is cheaper than taker unwind', () => {
