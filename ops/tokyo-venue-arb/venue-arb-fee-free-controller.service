@@ -6,6 +6,7 @@ After=venue-arb-grvt-lighter-maker-gate.service
 After=venue-arb-hibachi-lighter-maker-gate.service
 After=venue-arb-coinbase-lighter-maker-gate.service
 After=venue-arb-ethereal-lighter-maker-gate.service
+After=venue-arb-hotstuff-lighter-maker-gate.service
 
 [Service]
 Type=oneshot
