@@ -824,8 +824,11 @@ class Canary:
         coin: str,
         status: dict[str, Any],
         now: int,
+        quote: dict[str, Any] | None = None,
     ) -> dict[str, float] | None:
-        quote = (status.get("closingQuotes") or {}).get(coin) or {}
+        quote = quote or (
+            (status.get("closingQuotes") or {}).get(coin) or {}
+        )
         current_bps = executable_basis_bps(quote, route_id)
         if current_bps is None:
             return None
@@ -1226,6 +1229,81 @@ class Canary:
                     f"Lighter leverage failed for {coin}: {error}"
                 )
 
+    def trigger_candidate_rows(
+        self,
+        status: dict[str, Any],
+        now: int,
+    ) -> list[dict[str, Any]]:
+        if not self.basis_gate_enabled:
+            return []
+        rows: list[dict[str, Any]] = []
+        for coin, quote in (status.get("triggerQuotes") or {}).items():
+            if (
+                coin not in self.allowed_coins
+                or not quote.get("unvalidatedTriggerOnly")
+            ):
+                continue
+            for route_id in self.live_routes:
+                buy_venue, sell_venue, _ = ROUTES[route_id]
+                if route_id == "extended-lighter":
+                    buy_prefix = "extended"
+                    sell_prefix = "lighter"
+                else:
+                    buy_prefix = "lighter"
+                    sell_prefix = "extended"
+                buy_price = finite_float(
+                    quote.get(f"{buy_prefix}BuyVwap"),
+                    0,
+                )
+                sell_price = finite_float(
+                    quote.get(f"{sell_prefix}SellVwap"),
+                    0,
+                )
+                if min(buy_price, sell_price) <= 0:
+                    continue
+                raw_bps = (sell_price / buy_price - 1) * 10_000
+                rows.append(
+                    {
+                        "id": f"rest-trigger-{route_id}-{coin}",
+                        "coin": coin,
+                        "buyVenue": buy_venue,
+                        "sellVenue": sell_venue,
+                        "startedAt": now,
+                        "currentRawBps1000": raw_bps,
+                        "currentNetBps1000": (
+                            raw_bps - self.basis_round_trip_cost_bps()
+                        ),
+                        "currentBuyVwap1000": buy_price,
+                        "currentSellVwap1000": sell_price,
+                        "currentBuyDepthUsd": finite_float(
+                            quote.get(f"{buy_prefix}BuyDepthUsd"),
+                            0,
+                        ),
+                        "currentSellDepthUsd": finite_float(
+                            quote.get(f"{sell_prefix}SellDepthUsd"),
+                            0,
+                        ),
+                        "currentBuyBookAgeMs": finite_float(
+                            quote.get(f"{buy_prefix}BookAgeMs"),
+                            math.inf,
+                        ),
+                        "currentSellBookAgeMs": finite_float(
+                            quote.get(f"{sell_prefix}BookAgeMs"),
+                            math.inf,
+                        ),
+                        "currentBuyBookSourceAgeMs": finite_float(
+                            quote.get(f"{buy_prefix}SourceAgeMs"),
+                            math.inf,
+                        ),
+                        "currentSellBookSourceAgeMs": finite_float(
+                            quote.get(f"{sell_prefix}SourceAgeMs"),
+                            math.inf,
+                        ),
+                        "_unvalidatedTriggerOnly": True,
+                    }
+                )
+        return rows
+
     def candidate(self) -> dict[str, Any] | None:
         status = self.read_json(self.execution_path, {})
         now = int(time.time() * 1000)
@@ -1237,12 +1315,23 @@ class Canary:
             return None
         self.observe_basis(status, now)
         eligible = []
+        closing_quotes = status.get("closingQuotes") or {}
+        trigger_quotes = status.get("triggerQuotes") or {}
+        candidate_quotes = {
+            coin: (
+                trigger_quotes.get(coin)
+                or closing_quotes.get(coin)
+                or {}
+            )
+            for coin in self.allowed_coins
+        }
         basis_by_route_coin = {
             (route_id, coin): self.basis_candidate_metrics(
                 route_id=route_id,
                 coin=coin,
                 status=status,
                 now=now,
+                quote=candidate_quotes.get(coin),
             )
             for route_id in self.live_routes
             for coin in self.allowed_coins
@@ -1271,7 +1360,27 @@ class Canary:
                 > float(best_basis["expectedNetBps"])
             ):
                 best_basis = candidate_basis
-        for row in status.get("active") or []:
+        rows_by_route_coin: dict[
+            tuple[str, str],
+            dict[str, Any],
+        ] = {}
+        for row in [
+            *(status.get("active") or []),
+            *self.trigger_candidate_rows(status, now),
+        ]:
+            row_route = next(
+                (
+                    route_id
+                    for route_id in self.live_routes
+                    if row.get("buyVenue") == ROUTES[route_id][0]
+                    and row.get("sellVenue") == ROUTES[route_id][1]
+                ),
+                None,
+            )
+            coin = str(row.get("coin") or "")
+            if row_route is not None:
+                rows_by_route_coin[(row_route, coin)] = row
+        for row in rows_by_route_coin.values():
             row_route = next(
                 (
                     route_id
@@ -3387,6 +3496,43 @@ def self_test() -> None:
         "deviationBps": 17,
         "expectedNetBps": 10,
     }) == 10
+    basis_guard.basis_gate_enabled = True
+    basis_guard.allowed_coins = {"HYPE"}
+    basis_guard.live_routes = (
+        "extended-lighter",
+        "lighter-extended",
+    )
+    trigger_rows = basis_guard.trigger_candidate_rows(
+        {
+            "triggerQuotes": {
+                "HYPE": {
+                    "unvalidatedTriggerOnly": True,
+                    "extendedBuyVwap": 100,
+                    "extendedSellVwap": 99.9,
+                    "lighterBuyVwap": 101.1,
+                    "lighterSellVwap": 101,
+                    "extendedBuyDepthUsd": 5_000,
+                    "extendedSellDepthUsd": 4_000,
+                    "lighterBuyDepthUsd": 3_000,
+                    "lighterSellDepthUsd": 2_000,
+                    "extendedBookAgeMs": 10,
+                    "lighterBookAgeMs": 20,
+                    "extendedSourceAgeMs": 30,
+                    "lighterSourceAgeMs": 40,
+                },
+            },
+        },
+        1_000,
+    )
+    assert len(trigger_rows) == 2
+    assert trigger_rows[0]["id"] == (
+        "rest-trigger-extended-lighter-HYPE"
+    )
+    assert trigger_rows[0]["currentBuyDepthUsd"] == 5_000
+    assert trigger_rows[0]["currentSellDepthUsd"] == 2_000
+    assert trigger_rows[1]["currentBuyDepthUsd"] == 3_000
+    assert trigger_rows[1]["currentSellDepthUsd"] == 4_000
+    assert trigger_rows[1]["_unvalidatedTriggerOnly"] is True
 
     async def taker_revalidation_check() -> None:
         guard = object.__new__(Canary)

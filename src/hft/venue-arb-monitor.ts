@@ -4467,6 +4467,36 @@ function writeExecutionStatus(): void {
         : null,
     }];
   }));
+  const triggerQuotes = Object.fromEntries(ACTIVE_MARKETS.map((market) => {
+    const extended = executableBook('extended', market.coin);
+    const lighter = executableBook('lighter', market.coin);
+    return [market.coin, {
+      // These raw local L2 quotes only wake the live canary's parallel REST
+      // revalidation. They are never sufficient to authorize an order.
+      unvalidatedTriggerOnly: true,
+      notionalUsd: 1_000,
+      extendedBuyVwap: extended?.buyVwap1000 ?? null,
+      extendedSellVwap: extended?.sellVwap1000 ?? null,
+      lighterBuyVwap: lighter?.buyVwap1000 ?? null,
+      lighterSellVwap: lighter?.sellVwap1000 ?? null,
+      extendedBuyDepthUsd: extended?.buyDepthUsd ?? 0,
+      extendedSellDepthUsd: extended?.sellDepthUsd ?? 0,
+      lighterBuyDepthUsd: lighter?.buyDepthUsd ?? 0,
+      lighterSellDepthUsd: lighter?.sellDepthUsd ?? 0,
+      extendedBookAgeMs: extended?.receivedAt
+        ? Math.max(0, now - extended.receivedAt)
+        : null,
+      lighterBookAgeMs: lighter?.receivedAt
+        ? Math.max(0, now - lighter.receivedAt)
+        : null,
+      extendedSourceAgeMs: extended?.exchangeAt
+        ? Math.max(0, now - extended.exchangeAt)
+        : null,
+      lighterSourceAgeMs: lighter?.exchangeAt
+        ? Math.max(0, now - lighter.exchangeAt)
+        : null,
+    }];
+  }));
   const executionRoutes: readonly ShadowRouteConfig[] = [
     {
       id: 'extended-lighter',
@@ -4516,6 +4546,7 @@ function writeExecutionStatus(): void {
     updatedAt: now,
     sampleMs: SAMPLE_MS,
     closingQuotes,
+    triggerQuotes,
     maker: {
       quote: liveMakerQuote,
     },
