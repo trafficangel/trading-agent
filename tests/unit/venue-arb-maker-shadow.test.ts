@@ -134,6 +134,31 @@ describe('GenericMakerShadow', () => {
     expect(status.pair).toBeNull();
   });
 
+  it('keeps an active quote through a brief data gap and cancels after grace', () => {
+    const events: GenericMakerEvent[] = [];
+    const engine = new GenericMakerShadow({
+      ...config,
+      quoteDataGraceMs: 500,
+    }, {
+      onEvent: (event) => events.push(event),
+    });
+
+    engine.evaluate(2_100, [market(2_100, 100.2, 100.3)]);
+    engine.evaluate(2_101, [market(2_101, 100.2, 100.3)]);
+    engine.evaluate(3_102, [market(2_101, 100.2, 100.3)]);
+    expect((engine.status() as { quote?: unknown }).quote).toBeTruthy();
+
+    engine.evaluate(3_500, [market(2_101, 100.2, 100.3)]);
+    expect((engine.status() as { quote?: unknown }).quote).toBeTruthy();
+
+    engine.evaluate(3_603, [market(2_101, 100.2, 100.3)]);
+    expect((engine.status() as { quote?: unknown }).quote).toBeNull();
+    expect(events.at(-1)).toMatchObject({
+      type: 'edge_cancelled',
+      reason: 'projection_unavailable',
+    });
+  });
+
   it('journals queue progress before a maker order fills', () => {
     const events: GenericMakerEvent[] = [];
     const engine = new GenericMakerShadow(config, {

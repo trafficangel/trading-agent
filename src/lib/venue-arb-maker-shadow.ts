@@ -55,6 +55,7 @@ export type GenericMakerQuote = {
   touchDistanceBps: number;
   initialQuantity: number;
   firstFillAt: number | null;
+  projectionUnavailableAt?: number | null;
   queue: MakerQueueState;
 };
 
@@ -198,6 +199,7 @@ export type GenericMakerConfig = {
   basisGateEnabled?: boolean;
   basisMinDeviationBps?: number;
   maxEntryDistanceBps?: number;
+  quoteDataGraceMs?: number;
 };
 
 type GenericMakerHooks = {
@@ -877,6 +879,7 @@ export class GenericMakerShadow {
       return;
     }
     quote.activatedAt = now;
+    quote.projectionUnavailableAt = null;
     this.emitQuoteEvent('quote_activated', now, quote, {
       currentProjectionBps: projection,
     });
@@ -1169,10 +1172,21 @@ export class GenericMakerShadow {
       const minimum = this.quote.stage === 'entry'
         ? this.config.cancelEdgeBps
         : this.config.exitNetBps;
+      if (projection == null) {
+        this.quote.projectionUnavailableAt ??= now;
+        if (
+          now - this.quote.projectionUnavailableAt
+          < (this.config.quoteDataGraceMs ?? 0)
+        ) return;
+      } else {
+        this.quote.projectionUnavailableAt = null;
+      }
       if (projection == null || projection < minimum) {
         this.telemetry.edgeCancellations++;
         this.emitQuoteEvent('edge_cancelled', now, this.quote, {
-          reason: 'edge_below_cancel_threshold',
+          reason: projection == null
+            ? 'projection_unavailable'
+            : 'edge_below_cancel_threshold',
           currentProjectionBps: projection,
         });
         this.quote = null;
