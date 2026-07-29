@@ -9,6 +9,7 @@ Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_GATE_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/extended-lighter-shadow
 Environment=VENUE_ARB_GATE_INPUT_FILE=extended-lighter-maker-basis-shadow-v3.ndjson
+Environment=VENUE_ARB_GATE_EVENTS_FILE=extended-lighter-maker-events-v2.ndjson
 Environment=VENUE_ARB_GATE_OUTPUT_FILE=extended-lighter-maker-gate-status.json
 Environment=VENUE_ARB_GATE_ROUTE=extended-maker-lighter
 Environment=VENUE_ARB_GATE_NOTIONAL_USD=100
@@ -16,6 +17,7 @@ Environment=VENUE_ARB_GATE_MIN_SAMPLES=30
 Environment=VENUE_ARB_GATE_MIN_PROFIT_FACTOR=1.2
 Environment=VENUE_ARB_GATE_MAX_DRAWDOWN_BPS=50
 Environment=VENUE_ARB_GATE_INDEPENDENCE_MS=60000
+Environment=VENUE_ARB_GATE_MAX_ACTIVATED_QUOTES_WITHOUT_PROGRESS=100
 ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-shadow-gate.py
 NoNewPrivileges=true
 PrivateTmp=true

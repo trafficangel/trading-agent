@@ -77,6 +77,35 @@ def independent_episode_values(
     return [statistics.mean(episode) for episode in episodes]
 
 
+def execution_evidence(
+    events: list[dict[str, Any]],
+    *,
+    route_id: str,
+    observation_started_at_ms: int,
+) -> dict[str, int]:
+    eligible = [
+        event
+        for event in events
+        if event.get("routeId") == route_id
+        and int(finite_number(event.get("at")) or 0)
+        >= observation_started_at_ms
+    ]
+    return {
+        "quotesCreated": sum(
+            event.get("type") == "quote_created" for event in eligible
+        ),
+        "quotesActivated": sum(
+            event.get("type") == "quote_activated" for event in eligible
+        ),
+        "queueProgressEvents": sum(
+            event.get("type") == "queue_progress" for event in eligible
+        ),
+        "queueFills": sum(
+            event.get("type") == "queue_filled" for event in eligible
+        ),
+    }
+
+
 def evaluate(
     rows: list[dict[str, Any]],
     *,
@@ -92,6 +121,8 @@ def evaluate(
     hard_no_go_after_ms: int = 24 * 60 * 60 * 1000,
     min_trades_by_deadline: int = 3,
     negative_assessment_min_trades: int = 10,
+    execution: dict[str, int] | None = None,
+    max_activated_quotes_without_progress: int = 0,
 ) -> dict[str, Any]:
     evaluated_at = now_ms or int(time.time() * 1000)
     observation_started_at = observation_started_at_ms or evaluated_at
@@ -163,6 +194,23 @@ def evaluate(
             "profit gate not passed after "
             f"{elapsed_ms / 3_600_000:.1f}h"
         )
+    execution_metrics = execution or {
+        "quotesCreated": 0,
+        "quotesActivated": 0,
+        "queueProgressEvents": 0,
+        "queueFills": 0,
+    }
+    if (
+        max_activated_quotes_without_progress > 0
+        and execution_metrics["quotesActivated"]
+        >= max_activated_quotes_without_progress
+        and execution_metrics["queueProgressEvents"] == 0
+        and execution_metrics["queueFills"] == 0
+    ):
+        no_go_reasons.append(
+            f"{execution_metrics['quotesActivated']} activated quotes "
+            "without queue progress"
+        )
     no_go = bool(no_go_reasons)
     ready = not reasons and not no_go
     by_coin: dict[str, list[float]] = defaultdict(list)
@@ -191,6 +239,8 @@ def evaluate(
             "hardNoGoAfterMs": hard_no_go_after_ms,
             "minTradesByDeadline": min_trades_by_deadline,
             "negativeAssessmentMinTrades": negative_assessment_min_trades,
+            "maxActivatedQuotesWithoutProgress":
+                max_activated_quotes_without_progress,
         },
         "metrics": {
             "samples": len(values),
@@ -222,6 +272,7 @@ def evaluate(
             }
             for coin, coin_values in sorted(by_coin.items())
         },
+        "execution": execution_metrics,
     }
 
 
@@ -381,6 +432,53 @@ def self_test() -> None:
         hard_no_go_after_ms=24 * 60 * 60 * 1000,
     )
     assert hard_deadline_winner["decision"] == "GO"
+    events = [
+        {
+            "routeId": "a-b",
+            "at": 2_000 + index,
+            "type": "quote_activated",
+        }
+        for index in range(100)
+    ]
+    evidence = execution_evidence(
+        events,
+        route_id="a-b",
+        observation_started_at_ms=1_000,
+    )
+    unfillable = evaluate(
+        [],
+        route_id="a-b",
+        notional_usd=100,
+        min_samples=30,
+        min_profit_factor=1.2,
+        max_drawdown_bps=10,
+        independence_ms=60_000,
+        execution=evidence,
+        max_activated_quotes_without_progress=100,
+    )
+    assert unfillable["decision"] == "NO_GO"
+    assert "without queue progress" in unfillable["noGoReasons"][-1]
+    evidence_with_progress = execution_evidence(
+        events + [{
+            "routeId": "a-b",
+            "at": 3_000,
+            "type": "queue_progress",
+        }],
+        route_id="a-b",
+        observation_started_at_ms=1_000,
+    )
+    still_observing = evaluate(
+        [],
+        route_id="a-b",
+        notional_usd=100,
+        min_samples=30,
+        min_profit_factor=1.2,
+        max_drawdown_bps=10,
+        independence_ms=60_000,
+        execution=evidence_with_progress,
+        max_activated_quotes_without_progress=100,
+    )
+    assert still_observing["decision"] == "OBSERVE"
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "gate.json"
         atomic_json(path, winning)
@@ -464,6 +562,18 @@ def main() -> None:
             os.getenv("VENUE_ARB_GATE_NEGATIVE_ASSESSMENT_MIN_TRADES", "10")
         ),
     )
+    parser.add_argument(
+        "--events-file",
+        default=os.getenv("VENUE_ARB_GATE_EVENTS_FILE", ""),
+    )
+    parser.add_argument(
+        "--max-activated-quotes-without-progress",
+        type=int,
+        default=int(os.getenv(
+            "VENUE_ARB_GATE_MAX_ACTIVATED_QUOTES_WITHOUT_PROGRESS",
+            "0",
+        )),
+    )
     args = parser.parse_args()
     if args.self_test:
         self_test()
@@ -482,6 +592,11 @@ def main() -> None:
     observation_started_at = int(
         finite_number(previous.get("observationStartedAt"))
         or now_ms
+    )
+    events = (
+        read_rows(data_dir / args.events_file)
+        if args.events_file
+        else []
     )
     result = evaluate(
         read_rows(data_dir / args.input_file),
@@ -505,6 +620,15 @@ def main() -> None:
         negative_assessment_min_trades=max(
             1,
             args.negative_assessment_min_trades,
+        ),
+        execution=execution_evidence(
+            events,
+            route_id=args.route,
+            observation_started_at_ms=observation_started_at,
+        ),
+        max_activated_quotes_without_progress=max(
+            0,
+            args.max_activated_quotes_without_progress,
         ),
     )
     atomic_json(output_path, result)
