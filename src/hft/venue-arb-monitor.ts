@@ -3900,6 +3900,12 @@ function groupedSummaries(rows: Opportunity[]): Record<string, Record<string, un
 function executionShadowStatus(): Record<string, unknown> {
   const routeStatuses = Object.fromEntries(SHADOW_ROUTES.map((route) => {
     const rows = shadowResults.filter((row) => row.routeId === route.id);
+    const gateRows = SHADOW_BASIS_GATE_ENABLED
+      ? rows.filter((row) => (
+        row.signalBasisDeviationBps != null
+        && row.signalBasisDeviationBps >= SHADOW_BASIS_MIN_DEVIATION_BPS
+      ))
+      : rows;
     return [route.id, {
       id: route.id,
       buyVenue: route.buyVenue,
@@ -3908,14 +3914,14 @@ function executionShadowStatus(): Record<string, unknown> {
       telemetry: shadowRouteTelemetry.get(route.id),
       measuredLatency: shadowLatencyProfile(route),
       readiness: shadowReadiness(
-        rows,
+        gateRows,
         SHADOW_REQUIRED_SAMPLES,
         SHADOW_REQUIRED_PASS_PCT,
       ),
       active: [...shadowProbes.values()]
         .filter((probe) => probe.routeId === route.id)
         .sort((a, b) => a.signalAt - b.signalAt),
-      recent: rows.slice(-20).reverse(),
+      recent: gateRows.slice(-20).reverse(),
     }];
   }));
   const primaryRoute = SHADOW_ROUTES.find((route) => route.primary);
@@ -4151,9 +4157,13 @@ function loadShadowState(): void {
         Math.max(shadowLastSignalAt.get(key) ?? 0, Number(row.signalAt ?? 0)),
       );
     }
-    const latched = Array.isArray(checkpoint) ? [] : checkpoint.latched ?? [];
+    const latched = Array.isArray(checkpoint) || SHADOW_BASIS_GATE_ENABLED
+      ? []
+      : checkpoint.latched ?? [];
     for (const key of latched) shadowLatched.add(key);
-    const telemetry = Array.isArray(checkpoint) ? {} : checkpoint.telemetry ?? {};
+    const telemetry = Array.isArray(checkpoint) || SHADOW_BASIS_GATE_ENABLED
+      ? {}
+      : checkpoint.telemetry ?? {};
     for (const [routeId, row] of Object.entries(telemetry)) {
       if (!shadowRouteTelemetry.has(routeId) || !row) continue;
       const defaults = emptyShadowRouteTelemetry();
