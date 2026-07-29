@@ -571,6 +571,8 @@ async function readTargeted(): Promise<{
   status: Status | null;
   takerGate: ProfitGateStatus | null;
   makerGate: ProfitGateStatus | null;
+  extendedLighterStatus: Status | null;
+  extendedLighterGate: ProfitGateStatus | null;
 }> {
   const read = async <T>(file: string, fallback: T): Promise<T> => {
     try {
@@ -589,6 +591,14 @@ async function readTargeted(): Promise<{
     ),
     makerGate: await read<ProfitGateStatus | null>(
       'extended-pacifica-maker-gate-status.json',
+      null,
+    ),
+    extendedLighterStatus: await read<Status | null>(
+      'extended-lighter-status.json',
+      null,
+    ),
+    extendedLighterGate: await read<ProfitGateStatus | null>(
+      'extended-lighter-maker-gate-status.json',
       null,
     ),
   };
@@ -1290,6 +1300,7 @@ function compactGate(
 function targetedShadowRows(
   shadow: ExecutionShadow | undefined,
   maker: GenericMakerShadowStatus | undefined,
+  extendedLighterMaker: GenericMakerShadowStatus | undefined,
 ): string {
   const takerRoute = shadow?.routes?.['pacifica-extended'];
   const takerActive = (takerRoute?.active ?? []).map((row) => ({
@@ -1328,11 +1339,33 @@ function targetedShadowRows(
     netBps: row.realizedNetBps,
     detail: makerReason(row.reason),
   }));
+  const extendedLighterActive = extendedLighterMaker?.pair ? [{
+    at: extendedLighterMaker.pair.openedAt,
+    coin: extendedLighterMaker.pair.coin,
+    route: 'Extended → Lighter',
+    model: 'maker / taker',
+    status: 'В РАБОТЕ',
+    netBps: extendedLighterMaker.pair.entryEdgeBps,
+    detail: 'пара открыта',
+  }] : [];
+  const extendedLighterClosed = (
+    extendedLighterMaker?.recent ?? []
+  ).map((row) => ({
+    at: row.closedAt,
+    coin: row.coin,
+    route: 'Extended → Lighter',
+    model: 'maker / taker',
+    status: row.passed ? 'PASS' : 'FAIL',
+    netBps: row.realizedNetBps,
+    detail: makerReason(row.reason),
+  }));
   const rows = [
     ...takerActive,
     ...takerClosed,
     ...makerActive,
     ...makerClosed,
+    ...extendedLighterActive,
+    ...extendedLighterClosed,
   ].sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
   if (!rows.length) {
     return '<tr><td colspan="7">Подходящих исполнительно‑реалистичных входов пока не было.</td></tr>';
@@ -1386,30 +1419,47 @@ async function renderCompact(lang: Lang): Promise<string> {
     (row) => Number(row.netPnlUsd ?? 0) > 0,
   ).length;
   const targetStatus = targeted.status;
+  const extendedLighterStatus = targeted.extendedLighterStatus;
   const targetFresh = Boolean(
     targetStatus?.updatedAt
     && Date.now() - targetStatus.updatedAt < 15_000,
   );
-  const targetConnected = ['pacifica', 'extended'].filter(
-    (venue) => targetStatus?.connections?.[venue as Venue]?.connected,
-  ).length;
+  const targetConnected = targetFresh
+    ? ['pacifica', 'extended'].filter(
+      (venue) => targetStatus?.connections?.[venue as Venue]?.connected,
+    ).length
+    : 0;
   const targetShadow = targetStatus?.executionShadow;
   const takerRoute = targetShadow?.routes?.['pacifica-extended'];
   const makerShadow = targetStatus?.extendedPacificaMakerShadow;
+  const extendedLighterMaker = (
+    extendedLighterStatus?.extendedLighterMakerShadow
+  );
   const realPaused = !liveStatus?.enabled;
   const realStateClass = liveStatus?.enabled ? 'pos' : 'neg';
   const canaryReady = Boolean(
-    targeted.takerGate?.ready || targeted.makerGate?.ready,
+    targeted.takerGate?.ready
+    || targeted.makerGate?.ready
+    || targeted.extendedLighterGate?.ready,
   );
   const targetSamples = Number(targeted.takerGate?.metrics?.samples ?? 0)
     + Number(targeted.makerGate?.metrics?.samples ?? 0);
+  const totalTargetSamples = targetSamples
+    + Number(targeted.extendedLighterGate?.metrics?.samples ?? 0);
+  const extendedLighterFresh = Boolean(
+    extendedLighterStatus?.updatedAt
+    && Date.now() - extendedLighterStatus.updatedAt < 15_000,
+  );
+  const healthyTargetFeeds = targetConnected
+    + (extendedLighterStatus?.connections?.extended?.connected ? 1 : 0)
+    + (extendedLighterStatus?.connections?.lighter?.connected ? 1 : 0);
   return pageShell(
     t(lang, 'Арбитраж — контроль прибыли', 'Arbitrage profit control'),
     `<style>${VENUE_ARB_CSS}
       .va-compact .va-cards{grid-template-columns:repeat(4,1fr)}
       .va-decision{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 20px;border:1px solid ${canaryReady ? 'rgba(56,217,150,.45)' : 'rgba(255,101,119,.32)'};border-radius:14px;background:${canaryReady ? 'rgba(56,217,150,.06)' : 'rgba(255,101,119,.05)'}}
       .va-decision h2{margin:4px 0 5px;font-size:21px}.va-decision p{margin:0;color:var(--text-dim);font-size:13px}.va-decision>b{white-space:nowrap;font-size:14px}
-      .va-test-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}.va-test{padding:17px;border:1px solid var(--border);border-radius:14px;background:var(--bg-card)}.va-test.ready{border-color:rgba(56,217,150,.4)}.va-test-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.va-test-head span{color:var(--text-faint);font-size:10px;letter-spacing:.05em}.va-test-head h3{font-size:16px;margin:5px 0}.va-test-head>b{font-size:11px;white-space:nowrap}.va-test-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:12px 0}.va-test-metrics span{display:grid;gap:3px;padding:9px;background:var(--bg);border-radius:9px}.va-test-metrics small{font-size:9px;color:var(--text-faint);text-transform:uppercase}.va-test-metrics b{font-size:13px}.va-test p{margin:0;color:var(--text-dim);font-size:11px}
+      .va-test-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:12px 0}.va-test{padding:17px;border:1px solid var(--border);border-radius:14px;background:var(--bg-card)}.va-test.ready{border-color:rgba(56,217,150,.4)}.va-test-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.va-test-head span{color:var(--text-faint);font-size:10px;letter-spacing:.05em}.va-test-head h3{font-size:16px;margin:5px 0}.va-test-head>b{font-size:11px;white-space:nowrap}.va-test-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:12px 0}.va-test-metrics span{display:grid;gap:3px;padding:9px;background:var(--bg);border-radius:9px}.va-test-metrics small{font-size:9px;color:var(--text-faint);text-transform:uppercase}.va-test-metrics b{font-size:13px}.va-test p{margin:0;color:var(--text-dim);font-size:11px}
       .va-compact .va-panel{padding:16px}.va-compact .va-panel-head h2{margin:0}.va-compact .va-table td small{display:block}.va-compact-note{margin:10px 0 0;color:var(--text-faint);font-size:11px}
       @media(max-width:900px){.va-compact .va-cards{grid-template-columns:repeat(2,1fr)}.va-test-grid{grid-template-columns:1fr}.va-test-metrics{grid-template-columns:repeat(2,1fr)}}@media(max-width:520px){.va-compact .va-cards{grid-template-columns:1fr}.va-decision{display:block}.va-decision>b{display:block;margin-top:12px}}
     </style>
@@ -1418,14 +1468,14 @@ async function renderCompact(lang: Lang): Promise<string> {
       <div class="va-head"><div>
         <span class="va-badge">ARBITRAGE CONTROL · NET AFTER COSTS</span>
         <h1>Арбитраж: только доказанная прибыль</h1>
-        <p>Здесь остались только реальные деньги и два актуальных Pacifica ↔ Extended теста. Старые маршруты и техническая телеметрия продолжают собираться в фоне, но больше не загромождают экран.</p>
-      </div><div class="va-engine ${targetFresh ? 'live' : ''}"><i></i>${targetFresh ? 'МОНИТОР РАБОТАЕТ' : 'НЕТ СВЕЖИХ ДАННЫХ'}</div></div>
+        <p>Здесь показаны реальные деньги и только три изолированных теста с финансовым gate. Старые маршруты и техническая телеметрия не загромождают экран.</p>
+      </div><div class="va-engine ${targetFresh || extendedLighterFresh ? 'live' : ''}"><i></i>${targetFresh || extendedLighterFresh ? 'МОНИТОР РАБОТАЕТ' : 'НЕТ СВЕЖИХ ДАННЫХ'}</div></div>
 
       <div class="va-cards">
         <div class="va-card"><small>Реальный net PnL</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b><em>после ${money(liveFees)} комиссий</em></div>
         <div class="va-card"><small>Реальная торговля</small><b class="${realStateClass}">${realPaused ? 'ПАУЗА' : liveState(liveStatus)}</b><em>${realPaused ? 'ждёт положительный shadow-gate' : 'canary активен'}</em></div>
         <div class="va-card"><small>Закрыто / прибыльных</small><b>${closedLive.length} / ${liveWins}</b><em>только фактические fills</em></div>
-        <div class="va-card"><small>Актуальные тесты</small><b>${targetSamples} / 60</b><em>потоки ${targetConnected}/2 · два gate по 30</em></div>
+        <div class="va-card"><small>Актуальные тесты</small><b>${totalTargetSamples} / 90</b><em>потоки ${healthyTargetFeeds}/4 · три gate по 30</em></div>
       </div>
 
       <div class="va-decision">
@@ -1452,13 +1502,21 @@ async function renderCompact(lang: Lang): Promise<string> {
     makerShadow?.telemetry?.bestObservedTopNetBps,
     `<span><small>Fills / quotes</small><b>${Number(makerShadow?.telemetry?.queueFills ?? 0)} / ${Number(makerShadow?.telemetry?.quotes ?? 0)}</b></span><span><small>Поток сделок</small><b class="${makerShadow?.telemetry?.tradeStreamConnected ? 'pos' : 'neg'}">${makerShadow?.telemetry?.tradeStreamConnected ? 'LIVE' : 'OFFLINE'}</b></span>`,
   )}
+        ${compactGate(
+    'Extended → Lighter',
+    'MAKER 0% / TAKER 0% · 500/300 MS',
+    targeted.extendedLighterGate,
+    extendedLighterMaker?.telemetry?.bestObservedTopCoin,
+    extendedLighterMaker?.telemetry?.bestObservedTopNetBps,
+    `<span><small>Fills / quotes</small><b>${Number(extendedLighterMaker?.telemetry?.queueFills ?? 0)} / ${Number(extendedLighterMaker?.telemetry?.quotes ?? 0)}</b></span><span><small>Поток сделок</small><b class="${extendedLighterMaker?.telemetry?.tradeStreamConnected ? 'pos' : 'neg'}">${extendedLighterMaker?.telemetry?.tradeStreamConnected ? 'LIVE' : 'OFFLINE'}</b></span>`,
+  )}
       </div>
 
       <section class="va-panel">
         <div class="va-panel-head"><h2>Shadow-сделки актуальных тестов</h2><span>автообновление 5 сек</span></div>
         <div class="va-table" data-va-pager="target-shadow" data-page-size="20"><table><thead><tr>
           <th>UTC</th><th>Монета</th><th>Маршрут</th><th>Исполнение</th><th>Статус</th><th>Net</th><th>Причина</th>
-        </tr></thead><tbody>${targetedShadowRows(targetShadow, makerShadow)}</tbody></table></div>
+        </tr></thead><tbody>${targetedShadowRows(targetShadow, makerShadow, extendedLighterMaker)}</tbody></table></div>
       </section>
 
       <section class="va-panel va-live-panel">
