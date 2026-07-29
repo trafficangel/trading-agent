@@ -57,6 +57,11 @@ import {
   type GenericMakerResult,
   type MakerShadowTrade,
 } from '../lib/venue-arb-maker-shadow.js';
+import {
+  calibratedVenueArbBasis,
+  type VenueArbBasisMetrics,
+  type VenueArbBasisSample,
+} from '../lib/venue-arb-basis.js';
 import { parseLighterPublicTrades } from '../lib/lighter-public-trades.js';
 
 type Venue =
@@ -201,6 +206,8 @@ type ShadowRejectReason =
   | 'stale_source'
   | 'insufficient_depth'
   | 'below_gate'
+  | 'basis_calibrating'
+  | 'basis_below_gate'
   | 'latched'
   | 'cooldown';
 
@@ -228,6 +235,8 @@ type ShadowProbe = {
   state: 'awaiting_entry' | 'open' | 'awaiting_exit';
   signalAt: number;
   signalNetBps: number;
+  signalBasisBaselineBps: number | null;
+  signalBasisDeviationBps: number | null;
   entryLatencyMs: number;
   exitLatencyMs: number;
   entryDueAt: number;
@@ -235,6 +244,8 @@ type ShadowProbe = {
   entryConfirmations: number;
   lastEntryQuoteVersion: string | null;
   entryEdgeConfirmedAt: number | null;
+  entryBasisBaselineBps: number | null;
+  entryBasisDeviationBps: number | null;
   openedAt: number | null;
   entryBuy: number | null;
   entrySell: number | null;
@@ -258,12 +269,16 @@ type ShadowResult = {
   sellVenue: Venue;
   signalAt: number;
   signalNetBps: number;
+  signalBasisBaselineBps: number | null;
+  signalBasisDeviationBps: number | null;
   entryAt: number | null;
   exitAt: number;
   entryLatencyMs: number;
   exitLatencyMs: number;
   holdingMs: number | null;
   entryNetBps: number | null;
+  entryBasisBaselineBps: number | null;
+  entryBasisDeviationBps: number | null;
   entryConfirmations: number;
   entryEdgeConfirmed: boolean;
   guardNetBps: number | null;
@@ -410,6 +425,34 @@ const SHADOW_ENTRY_CONFIRMATIONS = finiteEnv(
 const SHADOW_ENTRY_CONFIRMATION_GRACE_MS = finiteEnv(
   'VENUE_ARB_SHADOW_ENTRY_CONFIRMATION_GRACE_MS',
   350,
+);
+const SHADOW_BASIS_GATE_ENABLED = booleanEnv(
+  'VENUE_ARB_SHADOW_BASIS_GATE_ENABLED',
+  true,
+);
+const SHADOW_BASIS_WINDOW_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_BASIS_WINDOW_MS',
+  30 * 60_000,
+);
+const SHADOW_BASIS_EXCLUDE_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_BASIS_EXCLUDE_MS',
+  5_000,
+);
+const SHADOW_BASIS_SAMPLE_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_BASIS_SAMPLE_MS',
+  1_000,
+);
+const SHADOW_BASIS_MIN_SAMPLES = finiteEnv(
+  'VENUE_ARB_SHADOW_BASIS_MIN_SAMPLES',
+  120,
+);
+const SHADOW_BASIS_MIN_SPAN_MS = finiteEnv(
+  'VENUE_ARB_SHADOW_BASIS_MIN_SPAN_MS',
+  120_000,
+);
+const SHADOW_BASIS_MIN_DEVIATION_BPS = finiteEnv(
+  'VENUE_ARB_SHADOW_BASIS_MIN_DEVIATION_BPS',
+  SHADOW_ENTRY_NET_BPS,
 );
 const SHADOW_EXIT_NET_BPS = finiteEnv('VENUE_ARB_SHADOW_EXIT_NET_BPS', 10);
 const SHADOW_EXIT_CONFIRMATIONS = finiteEnv(
@@ -994,6 +1037,8 @@ function emptyShadowRejections(): Record<ShadowRejectReason, number> {
     stale_source: 0,
     insufficient_depth: 0,
     below_gate: 0,
+    basis_calibrating: 0,
+    basis_below_gate: 0,
     latched: 0,
     cooldown: 0,
   };
@@ -1018,6 +1063,8 @@ function emptyShadowRouteTelemetry(): ShadowRouteTelemetry {
 const shadowRouteTelemetry = new Map<string, ShadowRouteTelemetry>(
   SHADOW_ROUTES.map((route) => [route.id, emptyShadowRouteTelemetry()]),
 );
+const shadowBasisSamples = new Map<string, VenueArbBasisSample[]>();
+const shadowBasisLastSampleAt = new Map<string, number>();
 
 const books = new Map<string, BookState>();
 const executableBooks = new Map<string, ExecutableBook>();
@@ -1406,6 +1453,68 @@ function shadowQuote(
   };
 }
 
+function shadowBasisKey(routeId: string, coin: string): string {
+  return `${routeId}:${coin}`;
+}
+
+function shadowRawBasisBps(
+  route: ShadowRouteConfig,
+  quote: ShadowQuote,
+): number {
+  return quote.openingNetBps + roundTripCostBps(
+    FEE_BPS[route.buyVenue],
+    FEE_BPS[route.sellVenue],
+    EXECUTION_BUFFER_BPS,
+  );
+}
+
+function observeShadowBasis(
+  route: ShadowRouteConfig,
+  coin: string,
+  quote: ShadowQuote,
+): void {
+  const key = shadowBasisKey(route.id, coin);
+  const lastAt = shadowBasisLastSampleAt.get(key) ?? 0;
+  if (quote.at - lastAt < SHADOW_BASIS_SAMPLE_MS) return;
+  const cutoff = quote.at - SHADOW_BASIS_WINDOW_MS;
+  const samples = shadowBasisSamples.get(key) ?? [];
+  samples.push({
+    at: quote.at,
+    bps: shadowRawBasisBps(route, quote),
+  });
+  shadowBasisSamples.set(
+    key,
+    samples.filter((sample) => sample.at >= cutoff),
+  );
+  shadowBasisLastSampleAt.set(key, quote.at);
+}
+
+function shadowBasisMetrics(
+  route: ShadowRouteConfig,
+  coin: string,
+  quote: ShadowQuote,
+): VenueArbBasisMetrics | null {
+  return calibratedVenueArbBasis(
+    shadowBasisSamples.get(shadowBasisKey(route.id, coin)) ?? [],
+    quote.at,
+    shadowRawBasisBps(route, quote),
+    {
+      windowMs: SHADOW_BASIS_WINDOW_MS,
+      excludeMs: SHADOW_BASIS_EXCLUDE_MS,
+      minSamples: SHADOW_BASIS_MIN_SAMPLES,
+      minSpanMs: SHADOW_BASIS_MIN_SPAN_MS,
+    },
+  );
+}
+
+function shadowBasisPasses(metrics: VenueArbBasisMetrics | null): boolean {
+  return !SHADOW_BASIS_GATE_ENABLED
+    || (
+      metrics != null
+      && metrics.deviationBps >= SHADOW_BASIS_MIN_DEVIATION_BPS
+    );
+}
+
 function modeledShadowExit(
   probe: ShadowProbe,
   quote: ShadowQuote,
@@ -1453,6 +1562,8 @@ function completeShadow(
     sellVenue: probe.sellVenue,
     signalAt: probe.signalAt,
     signalNetBps: probe.signalNetBps,
+    signalBasisBaselineBps: probe.signalBasisBaselineBps,
+    signalBasisDeviationBps: probe.signalBasisDeviationBps,
     entryAt: probe.openedAt,
     exitAt: now,
     entryLatencyMs: probe.entryLatencyMs,
@@ -1466,6 +1577,8 @@ function completeShadow(
         FEE_BPS[probe.sellVenue],
         EXECUTION_BUFFER_BPS,
       ),
+    entryBasisBaselineBps: probe.entryBasisBaselineBps,
+    entryBasisDeviationBps: probe.entryBasisDeviationBps,
     entryConfirmations: probe.entryConfirmations,
     entryEdgeConfirmed: probe.entryEdgeConfirmedAt != null,
     guardNetBps: probe.guardNetBps,
@@ -1504,6 +1617,8 @@ function evaluateShadow(now: number): void {
         continue;
       }
       telemetry.freshQuotes++;
+      observeShadowBasis(route, market.coin, quote);
+      const basis = shadowBasisMetrics(route, market.coin, quote);
       if (
         currentBestNetBps == null
         || quote.openingNetBps > currentBestNetBps
@@ -1521,6 +1636,18 @@ function evaluateShadow(now: number): void {
       if (quote.openingNetBps < SHADOW_ENTRY_NET_BPS) {
         telemetry.rejections.below_gate++;
         currentRejections.below_gate++;
+        shadowLatched.delete(latchKey);
+        continue;
+      }
+      if (SHADOW_BASIS_GATE_ENABLED && basis == null) {
+        telemetry.rejections.basis_calibrating++;
+        currentRejections.basis_calibrating++;
+        shadowLatched.delete(latchKey);
+        continue;
+      }
+      if (!shadowBasisPasses(basis)) {
+        telemetry.rejections.basis_below_gate++;
+        currentRejections.basis_below_gate++;
         shadowLatched.delete(latchKey);
         continue;
       }
@@ -1547,6 +1674,8 @@ function evaluateShadow(now: number): void {
         state: 'awaiting_entry',
         signalAt: now,
         signalNetBps: quote.openingNetBps,
+        signalBasisBaselineBps: basis?.baselineBps ?? null,
+        signalBasisDeviationBps: basis?.deviationBps ?? null,
         entryLatencyMs: latency.entryMs,
         exitLatencyMs: latency.exitMs,
         entryDueAt: now + latency.entryMs,
@@ -1556,6 +1685,8 @@ function evaluateShadow(now: number): void {
         entryConfirmations: 0,
         lastEntryQuoteVersion: null,
         entryEdgeConfirmedAt: null,
+        entryBasisBaselineBps: null,
+        entryBasisDeviationBps: null,
         openedAt: null,
         entryBuy: null,
         entrySell: null,
@@ -1592,15 +1723,25 @@ function evaluateShadow(now: number): void {
       route,
       SHADOW_EXECUTION_FRESH_MS,
     ).quote;
+    const basis = quote
+      ? shadowBasisMetrics(route, probe.coin, quote)
+      : null;
     if (probe.state === 'awaiting_entry') {
       if (
         quote
         && quote.openingNetBps >= SHADOW_ENTRY_NET_BPS
+        && shadowBasisPasses(basis)
         && quote.version !== probe.lastEntryQuoteVersion
       ) {
         probe.entryConfirmations++;
         probe.lastEntryQuoteVersion = quote.version;
-      } else if (quote && quote.openingNetBps < SHADOW_ENTRY_NET_BPS) {
+      } else if (
+        quote
+        && (
+          quote.openingNetBps < SHADOW_ENTRY_NET_BPS
+          || !shadowBasisPasses(basis)
+        )
+      ) {
         probe.entryConfirmations = 0;
         probe.lastEntryQuoteVersion = null;
       }
@@ -1615,7 +1756,10 @@ function evaluateShadow(now: number): void {
         completeShadow(probe, now, 'stale_at_delayed_entry', null);
         continue;
       }
-      if (quote.openingNetBps < SHADOW_ENTRY_NET_BPS) {
+      if (
+        quote.openingNetBps < SHADOW_ENTRY_NET_BPS
+        || !shadowBasisPasses(basis)
+      ) {
         completeShadow(probe, now, 'edge_lost_before_entry', quote);
         continue;
       }
@@ -1630,6 +1774,8 @@ function evaluateShadow(now: number): void {
         continue;
       }
       probe.entryEdgeConfirmedAt = now;
+      probe.entryBasisBaselineBps = basis?.baselineBps ?? null;
+      probe.entryBasisDeviationBps = basis?.deviationBps ?? null;
       probe.state = 'open';
       probe.openedAt = now;
       probe.entryBuy = quote.buyOpenVwap;
@@ -3781,6 +3927,13 @@ function executionShadowStatus(): Record<string, unknown> {
       entryNetBps: SHADOW_ENTRY_NET_BPS,
       entryConfirmations: SHADOW_ENTRY_CONFIRMATIONS,
       entryConfirmationGraceMs: SHADOW_ENTRY_CONFIRMATION_GRACE_MS,
+      basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+      basisWindowMs: SHADOW_BASIS_WINDOW_MS,
+      basisExcludeMs: SHADOW_BASIS_EXCLUDE_MS,
+      basisSampleMs: SHADOW_BASIS_SAMPLE_MS,
+      basisMinSamples: SHADOW_BASIS_MIN_SAMPLES,
+      basisMinSpanMs: SHADOW_BASIS_MIN_SPAN_MS,
+      basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
       exitNetBps: SHADOW_EXIT_NET_BPS,
       exitConfirmations: SHADOW_EXIT_CONFIRMATIONS,
       freshMs: SHADOW_SIGNAL_FRESH_MS,

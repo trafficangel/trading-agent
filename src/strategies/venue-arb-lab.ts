@@ -97,9 +97,13 @@ type ExecutionShadowResult = {
   sellVenue?: Venue;
   signalAt?: number;
   signalNetBps?: number;
+  signalBasisBaselineBps?: number | null;
+  signalBasisDeviationBps?: number | null;
   entryAt?: number | null;
   exitAt?: number;
   entryNetBps?: number | null;
+  entryBasisBaselineBps?: number | null;
+  entryBasisDeviationBps?: number | null;
   entryConfirmations?: number;
   entryEdgeConfirmed?: boolean;
   guardNetBps?: number | null;
@@ -121,6 +125,8 @@ type ExecutionShadowProbe = {
   state?: string;
   signalAt?: number;
   signalNetBps?: number;
+  signalBasisBaselineBps?: number | null;
+  signalBasisDeviationBps?: number | null;
   openedAt?: number | null;
   entryConfirmations?: number;
   guardConfirmations?: number;
@@ -146,6 +152,8 @@ type ShadowRejectReason =
   | 'stale_source'
   | 'insufficient_depth'
   | 'below_gate'
+  | 'basis_calibrating'
+  | 'basis_below_gate'
   | 'latched'
   | 'cooldown';
 type ShadowRouteTelemetry = {
@@ -182,6 +190,13 @@ type ExecutionShadow = ExecutionShadowRoute & {
     notionalUsd?: number;
     entryNetBps?: number;
     entryConfirmations?: number;
+    basisGateEnabled?: boolean;
+    basisWindowMs?: number;
+    basisExcludeMs?: number;
+    basisSampleMs?: number;
+    basisMinSamples?: number;
+    basisMinSpanMs?: number;
+    basisMinDeviationBps?: number;
     exitNetBps?: number;
     exitConfirmations?: number;
     freshMs?: number;
@@ -431,6 +446,25 @@ type LiveStatus = {
   notionalUsdPerLeg?: number;
   leverage?: number;
   entryNetPct?: number;
+  basisGate?: {
+    enabled?: boolean;
+    windowSeconds?: number;
+    excludeRecentSeconds?: number;
+    minSamples?: number;
+    minSpanSeconds?: number;
+    minDeviationPct?: number;
+    current?: {
+      readyCoins?: number;
+      requiredCoins?: number;
+      best?: {
+        coin?: string;
+        baselineBps?: number;
+        deviationBps?: number;
+        samples?: number;
+        spanMs?: number;
+      } | null;
+    };
+  };
   makerCancelNetPct?: number;
   postFillNetPct?: number;
   exitMinProfitPct?: number;
@@ -521,6 +555,8 @@ function shadowBlockers(telemetry: ShadowRouteTelemetry | undefined): string {
     stale_source: 'старый timestamp биржи',
     insufficient_depth: 'нет глубины $500',
     below_gate: 'edge ниже +0.10%',
+    basis_calibrating: 'калибровка нормы',
+    basis_below_gate: 'нет отклонения от нормы',
     latched: 'окно уже отслеживается',
     cooldown: 'интервал независимости',
   };
@@ -873,7 +909,7 @@ function executionShadowRows(
       <td><b>${esc(row.coin)}</b></td>
       <td>${esc(shadowRouteLabel(row))}</td>
       <td><b>${shadowProbeState(row.state)}</b></td>
-      <td class="${cls(row.signalNetBps)}">${pctFromBps(row.signalNetBps)}</td>
+      <td class="${cls(row.signalNetBps)}">${pctFromBps(row.signalNetBps)}<small>basis Δ ${pctFromBps(row.signalBasisDeviationBps)}</small></td>
       <td>${Number(row.entryConfirmations ?? 0)} / ${Number(shadow?.config?.entryConfirmations ?? 3)}</td>
       <td>${Number(row.guardConfirmations ?? 0)} / ${Number(shadow?.config?.exitConfirmations ?? 3)}${row.guardNetBps == null ? '' : ` · ${pctFromBps(row.guardNetBps)}`}</td>
       <td>—</td>
@@ -885,8 +921,8 @@ function executionShadowRows(
       <td><b>${esc(row.coin)}</b></td>
       <td>${esc(shadowRouteLabel(row))}</td>
       <td class="${row.passed ? 'pos' : 'neg'}"><b>${row.passed ? 'PASS' : 'FAIL'}</b></td>
-      <td class="${cls(row.signalNetBps)}">${pctFromBps(row.signalNetBps)}</td>
-      <td class="${row.entryEdgeConfirmed ? 'pos' : 'neg'}">${row.entryNetBps == null ? '—' : pctFromBps(row.entryNetBps)} · ${Number(row.entryConfirmations ?? 0)} / ${Number(shadow?.config?.entryConfirmations ?? 3)}</td>
+      <td class="${cls(row.signalNetBps)}">${pctFromBps(row.signalNetBps)}<small>basis Δ ${pctFromBps(row.signalBasisDeviationBps)}</small></td>
+      <td class="${row.entryEdgeConfirmed ? 'pos' : 'neg'}">${row.entryNetBps == null ? '—' : pctFromBps(row.entryNetBps)} · ${Number(row.entryConfirmations ?? 0)} / ${Number(shadow?.config?.entryConfirmations ?? 3)}<small>basis Δ ${pctFromBps(row.entryBasisDeviationBps)}</small></td>
       <td>${row.reachedExitGuard ? `✓ ${pctFromBps(row.guardNetBps)}` : `нет · пик ${row.peakProjectedNetBps == null ? '—' : pctFromBps(row.peakProjectedNetBps)}`}</td>
       <td class="${cls(row.realizedNetBps)}"><b>${row.realizedNetBps == null ? '—' : pctFromBps(row.realizedNetBps)}</b>${row.realizedNetUsd == null ? '' : ` · ${money(row.realizedNetUsd, true)}`}</td>
       <td>${row.holdingMs == null ? '—' : duration(row.holdingMs)}</td>
@@ -1321,7 +1357,7 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Модель entry / exit</small><b>${duration(primaryShadow?.measuredLatency?.entryMs)} / ${duration(primaryShadow?.measuredLatency?.exitMs)}</b></div>
           <div><small>Порог входа / выхода</small><b>${pctFromBps(executionShadow?.config?.entryNetBps)} / ${pctFromBps(executionShadow?.config?.exitNetBps)}</b></div>
         </div>
-        <p>Каждый probe начинается только при исполнимом net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)} и требует ${Number(executionShadow?.config?.entryConfirmations ?? 3)} независимых свежих подтверждения в течение измеренной задержки входа. Затем фиксируется $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, вычитаются четыре taker-комиссии, ${pctFromBps(executionShadow?.config?.executionBufferBps, false)} execution-буфера и funding ${pctFromBps(executionShadow?.config?.fundingBpsPerHour, false)}/час. Выход допускается после ${Number(executionShadow?.config?.exitConfirmations ?? 3)} свежих снимков с реальным модельным PnL ≥ ${pctFromBps(executionShadow?.config?.exitNetBps)}, затем применяется измеренная exit latency. Gate: минимум ${Number(shadowGate?.requiredSamples ?? 20)} подтверждённых модельных входов и PASS ≥ ${pct(shadowGate?.requiredPassPct)}; отклонённые до входа сигналы учитываются отдельно и не изображаются убытками.</p>
+        <p>Каждый probe начинается только при исполнимом net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)} и отклонении текущей базы от медианы последних ${duration(executionShadow?.config?.basisWindowMs ?? 30 * 60_000)} не меньше ${pctFromBps(executionShadow?.config?.basisMinDeviationBps)}. Последние ${duration(executionShadow?.config?.basisExcludeMs ?? 5_000)} исключены из baseline, а до накопления ${Number(executionShadow?.config?.basisMinSamples ?? 120)} наблюдений вход запрещён. После этого требуются ${Number(executionShadow?.config?.entryConfirmations ?? 3)} независимых свежих подтверждения. Затем фиксируется $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, вычитаются четыре taker-комиссии, ${pctFromBps(executionShadow?.config?.executionBufferBps, false)} execution-буфера и funding ${pctFromBps(executionShadow?.config?.fundingBpsPerHour, false)}/час. Выход допускается после ${Number(executionShadow?.config?.exitConfirmations ?? 3)} свежих снимков с реальным модельным PnL ≥ ${pctFromBps(executionShadow?.config?.exitNetBps)}, затем применяется измеренная exit latency. Gate: минимум ${Number(shadowGate?.requiredSamples ?? 20)} подтверждённых модельных входов и PASS ≥ ${pct(shadowGate?.requiredPassPct)}.</p>
         ${shadowReasons ? `<p class="va-wait">Причины завершения: ${esc(shadowReasons)}</p>` : ''}
         <div class="va-table" data-va-pager="execution-shadow" data-page-size="20"><table><thead><tr>
           <th>Сигнал UTC</th><th>Монета</th><th>Маршрут</th><th>Статус</th><th>Signal net</th>
@@ -1334,7 +1370,7 @@ async function render(lang: Lang): Promise<string> {
         <div class="va-panel-head"><div><span class="va-badge">ARB SCOUT · SHADOW ONLY</span><h2>Сравнение альтернативных маршрутов</h2></div>
           <span>ЕДИНЫЙ GATE · БЕЗ РЕАЛЬНЫХ ОРДЕРОВ</span>
         </div>
-        <p>Все направления проверяются одинаково: $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)}, три свежих подтверждения, все комиссии, funding, execution buffer и консервативная latency. Проверяется и время получения пакета ≤ ${duration(executionShadow?.config?.freshMs ?? 150)}, и exchange timestamp ≤ ${duration(executionShadow?.config?.sourceFreshMs ?? 750)} — backlog после reconnect больше не может создать ложный edge. Между сигналами одной связки маршрут+монета выдерживается минимум ${duration(executionShadow?.config?.independenceMs ?? 5 * 60_000)}, чтобы одно рыночное событие не считалось несколькими независимыми окнами. Маршрут не получает преимущества за счёт ослабления фильтра.</p>
+        <p>Все направления проверяются одинаково: $${Number(executionShadow?.config?.notionalUsd ?? 500)} VWAP, net ≥ ${pctFromBps(executionShadow?.config?.entryNetBps)}, basis Δ ≥ ${pctFromBps(executionShadow?.config?.basisMinDeviationBps)}, три свежих подтверждения, все комиссии, funding, execution buffer и консервативная latency. Проверяется и время получения пакета ≤ ${duration(executionShadow?.config?.freshMs ?? 150)}, и exchange timestamp ≤ ${duration(executionShadow?.config?.sourceFreshMs ?? 750)} — backlog после reconnect больше не может создать ложный edge. Между сигналами одной связки маршрут+монета выдерживается минимум ${duration(executionShadow?.config?.independenceMs ?? 5 * 60_000)}, чтобы одно рыночное событие не считалось несколькими независимыми окнами. Маршрут не получает преимущества за счёт ослабления фильтра.</p>
         ${capitalRecommendation(executionShadow, groups)}
         <div class="va-table" data-va-pager="execution-shadow-scout-routes" data-page-size="20"><table><thead><tr>
           <th>Маршрут</th><th>Forward samples</th><th>Forward PASS</th><th>История ≥0.10% @ 1s</th><th>Окна ≥0.10% сейчас</th>
@@ -1358,11 +1394,12 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Реальные комиссии</small><b>${money(liveFees)}</b></div>
           <div><small>Размер / плечо</small><b>${money(liveStatus?.notionalUsdPerLeg)} × 2 · ${Number(liveStatus?.leverage ?? 0)}x</b></div>
           <div><small>Extended / Lighter</small><b>${money(liveStatus?.balancesUsd?.extended)} / ${money(liveStatus?.balancesUsd?.lighter)}</b></div>
+          <div><small>Basis gate</small><b>${Number(liveStatus?.basisGate?.current?.readyCoins ?? 0)} / ${Number(liveStatus?.basisGate?.current?.requiredCoins ?? 0)}<small>${liveStatus?.basisGate?.current?.best ? `${esc(liveStatus.basisGate.current.best.coin)} · отклонение ${pctFromBps(liveStatus.basisGate.current.best.deviationBps)}` : 'калибровка собственной нормы маршрута'}</small></b></div>
           <div><small>Текущий статус</small><b>${activeLive ? `${esc(activeLive.coin)} · ${esc(activeLive.status)}` : liveState(liveStatus)}</b></div>
         </div>
         <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. ${makerLive
     ? `Для ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} maker-заявка ставится при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .15)}, отменяется при снижении ниже ${plainPct(liveStatus?.makerCancelNetPct ?? .12)}, а после фактического fill хедж допускается только при net ≥ ${plainPct(liveStatus?.postFillNetPct ?? .10)}.`
-    : `Для ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} обе taker-ноги отправляются параллельно только при расчётном полном net после round-trip комиссий и буфера ≥ ${plainPct(liveStatus?.entryNetPct ?? .08)}.`} Обычный выход требует ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .03)}. Прямой защитный выход срабатывает при projected net ≤ −${money(liveStatus?.maxLossUsd ?? .05)}.</p>
+    : `Для ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} обе taker-ноги отправляются параллельно только при расчётном полном net после round-trip комиссий и буфера ≥ ${plainPct(liveStatus?.entryNetPct ?? .08)}. Дополнительно текущая база должна отклониться от собственной медианы последних ${duration(Number(liveStatus?.basisGate?.windowSeconds ?? 1800) * 1000)} минимум на ${plainPct(liveStatus?.basisGate?.minDeviationPct ?? .10)}; недавние ${duration(Number(liveStatus?.basisGate?.excludeRecentSeconds ?? 5) * 1000)} не входят в базовую норму.`} Обычный выход требует ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .03)}. Прямой защитный выход срабатывает при projected net ≤ −${money(liveStatus?.maxLossUsd ?? .05)}.</p>
         <div class="va-table" data-va-pager="live-trades" data-page-size="20"><table><thead><tr>
           <th>ID</th><th>Открыта → закрыта UTC</th><th>Монета</th><th>Маршрут</th>
           <th>Размер</th><th>Вход Ext / Lighter</th><th>Выход Ext / Lighter</th>

@@ -18,6 +18,7 @@ import json
 import math
 import os
 import signal
+import statistics
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -207,6 +208,36 @@ def advance_entry_confirmations(
     )
 
 
+def calibrated_basis_deviation(
+    *,
+    samples: list[tuple[int, float]],
+    now: int,
+    current_bps: float,
+    window_ms: int,
+    exclude_ms: int,
+    min_samples: int,
+    min_span_ms: int,
+) -> dict[str, float] | None:
+    eligible = [
+        (at, value)
+        for at, value in samples
+        if now - window_ms <= at <= now - exclude_ms
+        and math.isfinite(value)
+    ]
+    if len(eligible) < min_samples:
+        return None
+    span_ms = eligible[-1][0] - eligible[0][0]
+    if span_ms < min_span_ms:
+        return None
+    baseline_bps = float(statistics.median(value for _, value in eligible))
+    return {
+        "baselineBps": baseline_bps,
+        "deviationBps": current_bps - baseline_bps,
+        "samples": float(len(eligible)),
+        "spanMs": float(span_ms),
+    }
+
+
 class Canary:
     def __init__(self, *, force_dry_run: bool = False) -> None:
         self.enabled = (
@@ -252,6 +283,39 @@ class Canary:
         self.notional = float(os.getenv("VENUE_ARB_LIVE_NOTIONAL_USD", "300"))
         self.leverage = int(os.getenv("VENUE_ARB_LIVE_LEVERAGE", "5"))
         self.entry_net_bps = float(os.getenv("VENUE_ARB_LIVE_ENTRY_NET_BPS", "15"))
+        self.basis_gate_enabled = (
+            os.getenv("VENUE_ARB_LIVE_BASIS_GATE_ENABLED", "true").lower()
+            == "true"
+        )
+        self.basis_window_ms = int(
+            float(os.getenv("VENUE_ARB_LIVE_BASIS_WINDOW_SECONDS", "1800"))
+            * 1000
+        )
+        self.basis_exclude_ms = int(
+            float(os.getenv("VENUE_ARB_LIVE_BASIS_EXCLUDE_SECONDS", "5"))
+            * 1000
+        )
+        self.basis_min_samples = int(
+            os.getenv("VENUE_ARB_LIVE_BASIS_MIN_SAMPLES", "120")
+        )
+        self.basis_min_span_ms = int(
+            float(os.getenv("VENUE_ARB_LIVE_BASIS_MIN_SPAN_SECONDS", "120"))
+            * 1000
+        )
+        self.basis_min_deviation_bps = float(
+            os.getenv(
+                "VENUE_ARB_LIVE_BASIS_MIN_DEVIATION_BPS",
+                str(self.entry_net_bps),
+            )
+        )
+        if (
+            self.basis_window_ms <= self.basis_exclude_ms
+            or self.basis_exclude_ms < 0
+            or self.basis_min_samples < 1
+            or self.basis_min_span_ms < 0
+            or self.basis_min_deviation_bps < 0
+        ):
+            raise RuntimeError("invalid live basis calibration settings")
         self.entry_confirmations = int(
             os.getenv("VENUE_ARB_LIVE_ENTRY_CONFIRMATIONS", "3")
         )
@@ -373,6 +437,7 @@ class Canary:
         )
         self.status_path = self.data_dir / "live-status.json"
         self.trades_path = self.data_dir / "live-trades.json"
+        self.basis_path = self.data_dir / "basis-calibration-v1.json"
         self.lock_path = self.data_dir / "live.lock"
         self.running = True
         self.shutdown_requested = False
@@ -381,6 +446,11 @@ class Canary:
         self.last_order_id = int(time.time() * 1000)
         self.last_status_write = 0.0
         self.last_rejection: str | None = None
+        self.last_basis_snapshot_at = 0
+        self.last_basis_write_at = 0
+        self.basis_samples: dict[str, list[tuple[int, float]]] = {}
+        self.basis_gate_status: dict[str, Any] = {}
+        self.load_basis_samples()
         self.next_maker_attempt_at = 0
         self.extended: RestApiClient | None = None
         self.extended_markets: dict[str, Any] = {}
@@ -453,6 +523,15 @@ class Canary:
             "leverage": self.leverage,
             "entryNetPct": self.entry_net_bps / 100,
             "entryConfirmations": self.entry_confirmations,
+            "basisGate": {
+                "enabled": self.basis_gate_enabled,
+                "windowSeconds": self.basis_window_ms / 1000,
+                "excludeRecentSeconds": self.basis_exclude_ms / 1000,
+                "minSamples": self.basis_min_samples,
+                "minSpanSeconds": self.basis_min_span_ms / 1000,
+                "minDeviationPct": self.basis_min_deviation_bps / 100,
+                "current": self.basis_gate_status,
+            },
             "makerCancelNetPct": self.maker_cancel_net_bps / 100,
             "postFillNetPct": self.post_fill_net_bps / 100,
             "exitMinProfitPct": self.exit_min_profit_bps / 100,
@@ -474,6 +553,101 @@ class Canary:
         }
         self.atomic_json(self.status_path, payload)
         self.last_status_write = time.monotonic()
+
+    def load_basis_samples(self) -> None:
+        checkpoint = self.read_json(self.basis_path, {})
+        if not isinstance(checkpoint, dict):
+            return
+        if checkpoint.get("routeId") not in {None, self.route_id}:
+            return
+        now = int(time.time() * 1000)
+        cutoff = now - self.basis_window_ms
+        rows = checkpoint.get("samples")
+        if not isinstance(rows, dict):
+            return
+        for coin, values in rows.items():
+            if coin not in MARKETS or not isinstance(values, list):
+                continue
+            parsed: list[tuple[int, float]] = []
+            for value in values:
+                if not isinstance(value, list) or len(value) != 2:
+                    continue
+                at = int(finite_float(value[0], 0))
+                basis = finite_float(value[1], math.nan)
+                if at >= cutoff and math.isfinite(basis):
+                    parsed.append((at, basis))
+            if parsed:
+                self.basis_samples[coin] = sorted(parsed)
+
+    def persist_basis_samples(self, now: int) -> None:
+        if now - self.last_basis_write_at < 1000:
+            return
+        self.atomic_json(
+            self.basis_path,
+            {
+                "version": "basis-calibration-v1",
+                "updatedAt": now,
+                "routeId": self.route_id,
+                "samples": self.basis_samples,
+            },
+        )
+        self.last_basis_write_at = now
+
+    def observe_basis(
+        self,
+        status: dict[str, Any],
+        now: int,
+    ) -> None:
+        snapshot_at = int(status.get("updatedAt", 0) or 0)
+        if snapshot_at <= self.last_basis_snapshot_at:
+            return
+        cutoff = now - self.basis_window_ms
+        closing = status.get("closingQuotes") or {}
+        for coin in self.allowed_coins:
+            quote = closing.get(coin) or {}
+            if self.buy_venue == "extended":
+                buy = finite_float(quote.get("extendedBuyVwap"), 0)
+                sell = finite_float(quote.get("lighterSellVwap"), 0)
+            else:
+                buy = finite_float(quote.get("lighterBuyVwap"), 0)
+                sell = finite_float(quote.get("extendedSellVwap"), 0)
+            if min(buy, sell) <= 0:
+                continue
+            raw_bps = (sell / buy - 1) * 10_000
+            values = self.basis_samples.setdefault(coin, [])
+            values.append((snapshot_at, raw_bps))
+            self.basis_samples[coin] = [
+                value for value in values if value[0] >= cutoff
+            ]
+        self.last_basis_snapshot_at = snapshot_at
+        self.persist_basis_samples(now)
+
+    def basis_candidate_metrics(
+        self,
+        *,
+        coin: str,
+        status: dict[str, Any],
+        now: int,
+    ) -> dict[str, float] | None:
+        quote = (status.get("closingQuotes") or {}).get(coin) or {}
+        if self.buy_venue == "extended":
+            buy = finite_float(quote.get("extendedBuyVwap"), 0)
+            sell = finite_float(quote.get("lighterSellVwap"), 0)
+        else:
+            buy = finite_float(quote.get("lighterBuyVwap"), 0)
+            sell = finite_float(quote.get("extendedSellVwap"), 0)
+        if min(buy, sell) <= 0:
+            return None
+        current_bps = (sell / buy - 1) * 10_000
+        return calibrated_basis_deviation(
+            samples=self.basis_samples.get(coin, []),
+            now=now,
+            current_bps=current_bps,
+            window_ms=self.basis_window_ms,
+            exclude_ms=self.basis_exclude_ms,
+            min_samples=self.basis_min_samples,
+            min_span_ms=self.basis_min_span_ms,
+        )
 
     def request_shutdown(self) -> None:
         self.shutdown_requested = True
@@ -818,7 +992,30 @@ class Canary:
         if now - int(status.get("updatedAt", 0) or 0) > self.fresh_ms:
             self.last_rejection = "monitor snapshot stale"
             return None
+        self.observe_basis(status, now)
         eligible = []
+        basis_by_coin = {
+            coin: self.basis_candidate_metrics(
+                coin=coin,
+                status=status,
+                now=now,
+            )
+            for coin in self.allowed_coins
+        }
+        basis_ready = sum(
+            metrics is not None for metrics in basis_by_coin.values()
+        )
+        best_basis: dict[str, Any] | None = None
+        for coin, metrics in basis_by_coin.items():
+            if metrics is None:
+                continue
+            candidate_basis = {"coin": coin, **metrics}
+            if (
+                best_basis is None
+                or metrics["deviationBps"]
+                > float(best_basis["deviationBps"])
+            ):
+                best_basis = candidate_basis
         for row in status.get("active") or []:
             if (
                 row.get("buyVenue") != self.buy_venue
@@ -849,21 +1046,53 @@ class Canary:
                 finite_float(row.get("currentBuyVwap1000"), 0),
                 finite_float(row.get("currentSellVwap1000"), 0),
             )
+            basis = basis_by_coin.get(coin)
             if (
                 coin in MARKETS
                 and coin in self.allowed_coins
                 and net >= self.entry_net_bps
+                and (
+                    not self.basis_gate_enabled
+                    or (
+                        basis is not None
+                        and basis["deviationBps"]
+                        >= self.basis_min_deviation_bps
+                    )
+                )
                 and max(ages) <= self.fresh_ms
                 and max(source_ages) <= self.source_fresh_ms
                 and depth >= max(1000, self.notional * 3)
                 and min(prices) > 0
             ):
-                eligible.append(row)
+                eligible.append(
+                    {
+                        **row,
+                        "_basisBaselineBps": (
+                            basis["baselineBps"] if basis else None
+                        ),
+                        "_basisDeviationBps": (
+                            basis["deviationBps"] if basis else None
+                        ),
+                        "_basisSamples": basis["samples"] if basis else None,
+                        "_basisSpanMs": basis["spanMs"] if basis else None,
+                    }
+                )
+        self.basis_gate_status = {
+            "readyCoins": basis_ready,
+            "requiredCoins": len(self.allowed_coins),
+            "best": best_basis,
+        }
         if not eligible:
-            self.last_rejection = (
-                f"waiting for {self.route_label} net "
-                f"≥{self.entry_net_bps:.1f} bps"
-            )
+            if self.basis_gate_enabled and basis_ready == 0:
+                self.last_rejection = (
+                    "calibrating route basis before real entry"
+                )
+            else:
+                self.last_rejection = (
+                    f"waiting for {self.route_label} net "
+                    f"≥{self.entry_net_bps:.1f} bps and basis deviation "
+                    f"≥{self.basis_min_deviation_bps:.1f} bps"
+                )
             return None
         self.last_rejection = None
         winner = max(
@@ -2617,6 +2846,27 @@ def self_test() -> None:
         "3:3",
         1,
     )
+    basis = calibrated_basis_deviation(
+        samples=[(index * 1_000, 20.0) for index in range(1, 181)],
+        now=181_000,
+        current_bps=31.0,
+        window_ms=180_000,
+        exclude_ms=5_000,
+        min_samples=120,
+        min_span_ms=120_000,
+    )
+    assert basis is not None
+    assert basis["baselineBps"] == 20.0
+    assert basis["deviationBps"] == 11.0
+    assert calibrated_basis_deviation(
+        samples=[(index * 1_000, 20.0) for index in range(1, 60)],
+        now=60_000,
+        current_bps=31.0,
+        window_ms=180_000,
+        exclude_ms=5_000,
+        min_samples=120,
+        min_span_ms=120_000,
+    ) is None
     route_guard = object.__new__(Canary)
     route_guard.route_id = "lighter-extended"
     route_guard.route_label = "Lighter → Extended"
