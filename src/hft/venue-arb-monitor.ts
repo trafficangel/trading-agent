@@ -462,6 +462,10 @@ const LIGHTER_EXTENDED_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
   'lighter-extended-maker-basis-active-v2.json',
 );
+const LIGHTER_EXTENDED_MAKER_EVENTS_PATH = resolve(
+  DATA_DIR,
+  'lighter-extended-maker-events-v1.ndjson',
+);
 const SAMPLE_MS = finiteEnv('VENUE_ARB_SAMPLE_MS', 100);
 const STALE_MS = finiteEnv('VENUE_ARB_STALE_MS', 250);
 const NET_TRIGGER_BPS = finiteEnv('VENUE_ARB_NET_TRIGGER_BPS', 3);
@@ -1609,6 +1613,12 @@ const lighterExtendedMakerShadow = new GenericMakerShadow({
       ...checkpoint,
       updatedAt: Date.now(),
     });
+  },
+  onEvent: (event) => {
+    appendFileSync(
+      LIGHTER_EXTENDED_MAKER_EVENTS_PATH,
+      `${JSON.stringify(event)}\n`,
+    );
   },
 });
 let startedAt = Date.now();
@@ -5263,6 +5273,9 @@ if (!existsSync(EXTENDED_PACIFICA_MAKER_RESULTS_PATH)) {
 }
 if (!existsSync(LIGHTER_EXTENDED_MAKER_RESULTS_PATH)) {
   writeFileSync(LIGHTER_EXTENDED_MAKER_RESULTS_PATH, '');
+}
+if (!existsSync(LIGHTER_EXTENDED_MAKER_EVENTS_PATH)) {
+  writeFileSync(LIGHTER_EXTENDED_MAKER_EVENTS_PATH, '');
 }
 loadHistory();
 loadShadowState();
