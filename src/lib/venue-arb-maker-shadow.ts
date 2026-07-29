@@ -135,6 +135,12 @@ export type GenericMakerTelemetry = {
   peakObservedTopNetBps: number | null;
   peakObservedTopDeviationBps: number | null;
   peakObservedTopCoin: string | null;
+  coins: Record<string, {
+    currentTopNetBps: number | null;
+    currentTopDeviationBps: number | null;
+    peakTopNetBps: number | null;
+    peakTopDeviationBps: number | null;
+  }>;
 };
 
 export type GenericMakerCheckpoint = {
@@ -267,6 +273,7 @@ export class GenericMakerShadow {
     peakObservedTopNetBps: null,
     peakObservedTopDeviationBps: null,
     peakObservedTopCoin: null,
+    coins: {},
   };
 
   private readonly hooks: GenericMakerHooks;
@@ -535,12 +542,21 @@ export class GenericMakerShadow {
 
   private entryCandidate(now: number): GenericMakerQuote | null {
     const candidates: GenericMakerQuote[] = [];
+    const previousCoins = this.telemetry.coins;
+    this.telemetry.coins = {};
     this.telemetry.bestProjectedEntryBps = null;
     this.telemetry.bestProjectedCoin = null;
     this.telemetry.bestObservedTopNetBps = null;
     this.telemetry.bestObservedTopDeviationBps = null;
     this.telemetry.bestObservedTopCoin = null;
     for (const market of this.latestMarkets.values()) {
+      this.telemetry.coins[market.coin] = {
+        currentTopNetBps: null,
+        currentTopDeviationBps: null,
+        peakTopNetBps: previousCoins[market.coin]?.peakTopNetBps ?? null,
+        peakTopDeviationBps:
+          previousCoins[market.coin]?.peakTopDeviationBps ?? null,
+      };
       if (!market.maker || !market.hedge) continue;
       if (!this.fresh(now, market.maker, market.hedge)) continue;
       if (!this.makerActivityFresh(now, market)) continue;
@@ -585,6 +601,25 @@ export class GenericMakerShadow {
               this.telemetry.peakObservedTopDeviationBps =
                 observed.deviationBps;
               this.telemetry.peakObservedTopCoin = market.coin;
+            }
+            if (observed) {
+              const coinTelemetry = this.telemetry.coins[market.coin]!;
+              if (
+                coinTelemetry.currentTopNetBps == null
+                || observed.netBps > coinTelemetry.currentTopNetBps
+              ) {
+                coinTelemetry.currentTopNetBps = observed.netBps;
+                coinTelemetry.currentTopDeviationBps =
+                  observed.deviationBps;
+              }
+              if (
+                coinTelemetry.peakTopNetBps == null
+                || observed.netBps > coinTelemetry.peakTopNetBps
+              ) {
+                coinTelemetry.peakTopNetBps = observed.netBps;
+                coinTelemetry.peakTopDeviationBps =
+                  observed.deviationBps;
+              }
             }
           }
           const displayedProjection = this.entryProjection(

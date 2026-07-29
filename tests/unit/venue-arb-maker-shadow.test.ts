@@ -443,12 +443,21 @@ describe('GenericMakerShadow', () => {
     ]);
     const quote = (dislocatedEngine.status() as {
       quote?: { side?: string; projectedNetBps?: number } | null;
-      telemetry?: {
-        bestObservedTopDeviationBps?: number | null;
-      };
     }).quote;
+    const coinTelemetry = (dislocatedEngine.status() as {
+      telemetry?: {
+        coins?: Record<string, {
+          currentTopNetBps?: number | null;
+          currentTopDeviationBps?: number | null;
+          peakTopNetBps?: number | null;
+        }>;
+      };
+    }).telemetry?.coins?.BNB;
     expect(quote?.side).toBe('buy');
     expect(quote?.projectedNetBps).toBeGreaterThanOrEqual(2);
+    expect(coinTelemetry?.currentTopDeviationBps).toBeGreaterThanOrEqual(5);
+    expect(coinTelemetry?.currentTopNetBps).toBeGreaterThan(0);
+    expect(coinTelemetry?.peakTopNetBps).toBeGreaterThan(0);
   });
 
   it('does not manufacture a basis deviation by quoting far from top of book', () => {
