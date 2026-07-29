@@ -790,6 +790,13 @@ const LIGHTER_BOOK_REFRESH_MS = finiteEnv(
   'VENUE_ARB_LIGHTER_BOOK_REFRESH_MS',
   0,
 );
+const LIGHTER_MARKETS_PER_CONNECTION = Math.max(
+  1,
+  Math.min(
+    7,
+    Math.floor(finiteEnv('VENUE_ARB_LIGHTER_MARKETS_PER_CONNECTION', 7)),
+  ),
+);
 const LIGHTER_REST_BOOK_ENABLED = booleanEnv(
   'VENUE_ARB_LIGHTER_REST_BOOK_ENABLED',
   false,
@@ -3446,7 +3453,6 @@ function lighterMarketId(channel: unknown): number | null {
 function startLighter(): void {
   const nonces = new Map<number, number>();
   const bboMismatchCounts = new Map<number, number>();
-  let refreshIndex = 0;
 
   const refreshBook = (
     ws: WebSocket,
@@ -3480,14 +3486,16 @@ function startLighter(): void {
     }));
   };
 
-  connect(
-    'lighter',
-    'wss://mainnet.zklighter.elliot.ai/stream',
-    (ws) => {
+  const startConnection = (markets: readonly Market[]): void => {
+    let refreshIndex = 0;
+    connect(
+      'lighter',
+      'wss://mainnet.zklighter.elliot.ai/stream',
+      (ws) => {
       if (LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED) {
         lighterExtendedMakerShadow.setTradeStreamConnected(true);
       }
-      for (const market of ACTIVE_MARKETS) {
+      for (const market of markets) {
         lighterTickerBbo.delete(market.lighterMarketId);
         lighterBookValidation.delete(market.lighterMarketId);
         const book = books.get(bookKey('lighter', market.coin));
@@ -3522,12 +3530,12 @@ function startLighter(): void {
             clearInterval(refreshTimer);
             return;
           }
-          const market = ACTIVE_MARKETS[refreshIndex % ACTIVE_MARKETS.length];
+          const market = markets[refreshIndex % markets.length];
           refreshIndex++;
           if (market) refreshBook(ws, market, 'periodic');
         }, Math.max(
           1_000,
-          LIGHTER_BOOK_REFRESH_MS / ACTIVE_MARKETS.length,
+          LIGHTER_BOOK_REFRESH_MS / markets.length,
         ));
         refreshTimer.unref();
       }
@@ -3656,8 +3664,19 @@ function startLighter(): void {
       } else {
         lighterBookValidation.delete(marketId);
       }
-    },
-  );
+      },
+    );
+  };
+
+  for (
+    let index = 0;
+    index < ACTIVE_MARKETS.length;
+    index += LIGHTER_MARKETS_PER_CONNECTION
+  ) {
+    startConnection(
+      ACTIVE_MARKETS.slice(index, index + LIGHTER_MARKETS_PER_CONNECTION),
+    );
+  }
 }
 
 function startLighterRestBookPoller(): void {
