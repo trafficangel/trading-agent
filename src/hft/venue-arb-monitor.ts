@@ -85,7 +85,7 @@ type Market = {
   symbol: string;
   lighterMarketId: number;
   polymarketInstrumentId?: number;
-  edgexContractId: number;
+  edgexContractId?: number;
 };
 
 type BookState = {
@@ -737,6 +737,12 @@ const MARKETS: readonly Market[] = [
   { coin: 'ADA', symbol: 'ADAUSDT', lighterMarketId: 39, edgexContractId: 10_000_070 },
   { coin: 'BNB', symbol: 'BNBUSDT', lighterMarketId: 25, edgexContractId: 10_000_064 },
   { coin: 'LTC', symbol: 'LTCUSDT', lighterMarketId: 35, edgexContractId: 10_000_055 },
+  { coin: 'LIT', symbol: 'LITUSDT', lighterMarketId: 120 },
+  { coin: 'XMR', symbol: 'XMRUSDT', lighterMarketId: 77 },
+  { coin: 'NEAR', symbol: 'NEARUSDT', lighterMarketId: 10 },
+  { coin: 'CRV', symbol: 'CRVUSDT', lighterMarketId: 36 },
+  { coin: 'FARTCOIN', symbol: 'FARTCOINUSDT', lighterMarketId: 21 },
+  { coin: 'PUMP', symbol: 'PUMPUSDT', lighterMarketId: 45 },
 ] as const;
 const ACTIVE_MARKETS: readonly Market[] = (() => {
   const configured = (process.env.VENUE_ARB_ACTIVE_COINS ?? '')
@@ -1113,7 +1119,11 @@ const byPolymarketId = new Map(ACTIVE_MARKETS.flatMap((market) => (
     ? []
     : [[market.polymarketInstrumentId, market] as const]
 )));
-const byEdgexId = new Map(ACTIVE_MARKETS.map((market) => [market.edgexContractId, market]));
+const byEdgexId = new Map(ACTIVE_MARKETS.flatMap((market) => (
+  market.edgexContractId == null
+    ? []
+    : [[market.edgexContractId, market] as const]
+)));
 const bybitDepth = new Map(ACTIVE_MARKETS.map((market) => [market.symbol, createBybitDepthBook()]));
 const grvtDepth = new Map(ACTIVE_MARKETS.map((market) => [market.coin, createGrvtDepthBook()]));
 const edgexDepth = new Map<number, EdgexDepthState>();
@@ -1381,6 +1391,7 @@ for (const venue of VENUES) {
   for (const market of ACTIVE_MARKETS) books.set(bookKey(venue, market.coin), emptyBook());
 }
 for (const market of ACTIVE_MARKETS) {
+  if (market.edgexContractId == null) continue;
   const book = books.get(bookKey('edgex', market.coin))!;
   edgexDepth.set(market.edgexContractId, {
     bids: book.bids,
@@ -3689,10 +3700,12 @@ function startEdgex(): void {
     market: Market,
     reason: 'gap' | 'invalid',
   ): void => {
+    const contractId = market.edgexContractId;
+    if (contractId == null) return;
     const now = Date.now();
-    if (now - (refreshedAt.get(market.edgexContractId) ?? 0) < 500) return;
-    refreshedAt.set(market.edgexContractId, now);
-    const depth = edgexDepth.get(market.edgexContractId);
+    if (now - (refreshedAt.get(contractId) ?? 0) < 500) return;
+    refreshedAt.set(contractId, now);
+    const depth = edgexDepth.get(contractId);
     const book = books.get(bookKey('edgex', market.coin));
     if (!depth || !book) return;
     depth.bids.clear();
@@ -3705,9 +3718,9 @@ function startEdgex(): void {
     console.warn(`venue-arb edgex ${market.coin} depth ${reason}; refreshing`);
     ws.send(JSON.stringify({
       type: 'unsubscribe',
-      channel: `depth.${market.edgexContractId}.15`,
+      channel: `depth.${contractId}.15`,
     }));
-    subscribe(ws, market.edgexContractId);
+    subscribe(ws, contractId);
   };
 
   connect(
@@ -3715,7 +3728,9 @@ function startEdgex(): void {
     'wss://quote.edgex.exchange/api/v1/public/ws',
     (ws) => {
       for (const market of ACTIVE_MARKETS) {
-        subscribe(ws, market.edgexContractId);
+        if (market.edgexContractId != null) {
+          subscribe(ws, market.edgexContractId);
+        }
       }
     },
     (payload, receivedAt, ws) => {
