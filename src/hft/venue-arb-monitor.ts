@@ -3716,6 +3716,7 @@ function loadMakerState(): void {
     console.warn('venue-arb maker history load', (error as Error).message);
     makerResults = [];
   }
+  if (!MAKER_SHADOW_ENABLED) return;
   try {
     if (!existsSync(MAKER_ACTIVE_PATH)) return;
     const checkpoint = JSON.parse(readFileSync(MAKER_ACTIVE_PATH, 'utf8')) as {
@@ -3748,6 +3749,7 @@ function loadGenericMakerState(
   resultsPath: string,
   activePath: string,
   label: string,
+  enabled: boolean,
 ): void {
   let results: GenericMakerResult[] = [];
   let checkpoint: GenericMakerCheckpoint | null = null;
@@ -3773,7 +3775,7 @@ function loadGenericMakerState(
       (error as Error).message,
     );
   }
-  shadow.restore(results, checkpoint);
+  shadow.restore(results, enabled ? checkpoint : null);
 }
 
 function genericMakerMarkets(
@@ -3851,18 +3853,21 @@ loadGenericMakerState(
   GRVT_MAKER_RESULTS_PATH,
   GRVT_MAKER_ACTIVE_PATH,
   'GRVT maker → Lighter',
+  GRVT_MAKER_SHADOW_ENABLED,
 );
 loadGenericMakerState(
   grvtExtendedMakerShadow,
   GRVT_EXTENDED_MAKER_RESULTS_PATH,
   GRVT_EXTENDED_MAKER_ACTIVE_PATH,
   'GRVT maker → Extended',
+  GRVT_EXTENDED_MAKER_SHADOW_ENABLED,
 );
 loadGenericMakerState(
   extendedAsterMakerShadow,
   EXTENDED_ASTER_MAKER_RESULTS_PATH,
   EXTENDED_ASTER_MAKER_ACTIVE_PATH,
   'Extended maker → Aster',
+  EXTENDED_ASTER_MAKER_SHADOW_ENABLED,
 );
 startedAt = Date.now();
 if (activeVenues.has('lighter')) startLighter();
