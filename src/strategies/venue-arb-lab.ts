@@ -433,6 +433,7 @@ type LiveStatus = {
   postFillNetPct?: number;
   exitMinProfitPct?: number;
   exitConfirmations?: number;
+  maxLossUsd?: number;
   shutdownDeferredWhenOpen?: boolean;
   route?: string;
   makerShadowRequiredPasses?: number;
@@ -1351,7 +1352,7 @@ async function render(lang: Lang): Promise<string> {
         </div>
         <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. ${makerLive
     ? `Для ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} maker-заявка ставится при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .15)}, отменяется при снижении ниже ${plainPct(liveStatus?.makerCancelNetPct ?? .12)}, а после фактического fill хедж допускается только при net ≥ ${plainPct(liveStatus?.postFillNetPct ?? .10)}.`
-    : `Для ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} обе taker-ноги отправляются параллельно только при расчётном полном net после round-trip комиссий и буфера ≥ ${plainPct(liveStatus?.entryNetPct ?? .08)}.`} Обычный выход требует ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .03)}.</p>
+    : `Для ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} обе taker-ноги отправляются параллельно только при расчётном полном net после round-trip комиссий и буфера ≥ ${plainPct(liveStatus?.entryNetPct ?? .08)}.`} Обычный выход требует ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .03)}. Прямой защитный выход срабатывает при projected net ≤ −${money(liveStatus?.maxLossUsd ?? .05)}.</p>
         <div class="va-table" data-va-pager="live-trades" data-page-size="20"><table><thead><tr>
           <th>ID</th><th>Открыта → закрыта UTC</th><th>Монета</th><th>Маршрут</th>
           <th>Размер</th><th>Вход Ext / Lighter</th><th>Выход Ext / Lighter</th>

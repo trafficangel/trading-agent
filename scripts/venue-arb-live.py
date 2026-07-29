@@ -222,6 +222,14 @@ class Canary:
         self.max_adverse_bps = float(
             os.getenv("VENUE_ARB_LIVE_MAX_ADVERSE_BPS", "20")
         )
+        self.max_loss_usd = float(
+            os.getenv(
+                "VENUE_ARB_LIVE_MAX_LOSS_USD",
+                str(self.notional * self.max_adverse_bps / 10_000),
+            )
+        )
+        if self.max_loss_usd <= 0:
+            raise RuntimeError("VENUE_ARB_LIVE_MAX_LOSS_USD must be positive")
         self.maker_max_queue_usd = float(
             os.getenv("VENUE_ARB_LIVE_MAKER_MAX_QUEUE_USD", "5000")
         )
@@ -355,6 +363,7 @@ class Canary:
             "postFillNetPct": self.post_fill_net_bps / 100,
             "exitMinProfitPct": self.exit_min_profit_bps / 100,
             "exitConfirmations": self.exit_confirmations,
+            "maxLossUsd": self.max_loss_usd,
             "shutdownDeferredWhenOpen": True,
             "routeId": self.route_id,
             "route": self.route_label,
@@ -2093,6 +2102,12 @@ class Canary:
                 close_reason = "projected_net_profit"
                 break
             if now - opened_at >= self.min_hold_ms:
+                if (
+                    projected is not None
+                    and projected["netPnlUsd"] <= -self.max_loss_usd
+                ):
+                    close_reason = "projected_loss_guard"
+                    break
                 current_net = self.opportunity_net(opportunity_id)
                 if (
                     current_net is not None
