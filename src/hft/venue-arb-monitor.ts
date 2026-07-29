@@ -30,9 +30,9 @@ import {
   type EdgexDepthState,
 } from '../lib/edgex-depth-book.js';
 import {
-  parseEtherealBook,
-  parseEtherealMakerTrades,
   parseEtherealProducts,
+  parseEtherealWsBook,
+  parseEtherealWsTrades,
   type EtherealProduct,
 } from '../lib/ethereal-market-data.js';
 import { applyGrvtDepthUpdate, createGrvtDepthBook } from '../lib/grvt-depth-book.js';
@@ -1077,10 +1077,6 @@ const ETHEREAL_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
   'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_MAX_TRADE_IDLE_MS',
   300_000,
 );
-const ETHEREAL_POLL_MS = Math.max(
-  250,
-  finiteEnv('VENUE_ARB_ETHEREAL_POLL_MS', 250),
-);
 const ETHEREAL_REQUEST_TIMEOUT_MS = Math.max(
   250,
   finiteEnv('VENUE_ARB_ETHEREAL_REQUEST_TIMEOUT_MS', 2_000),
@@ -1845,15 +1841,11 @@ const bySymbol = new Map(ACTIVE_MARKETS.map((market) => [market.symbol, market])
 const byCoin = new Map(ACTIVE_MARKETS.map((market) => [market.coin, market]));
 const byLighterId = new Map(ACTIVE_MARKETS.map((market) => [market.lighterMarketId, market]));
 const etherealProductByCoin = new Map<string, EtherealProduct>();
-const etherealCoinByProduct = new Map<string, string>();
 const etherealTelemetry = {
   productRefreshes: 0,
-  bookRequests: 0,
   bookUpdates: 0,
-  tradeRequests: 0,
   trades: 0,
   errors: 0,
-  lastPollAt: null as number | null,
   lastSuccessAt: null as number | null,
   lastErrorAt: null as number | null,
   lastError: null as string | null,
@@ -4319,6 +4311,9 @@ function connect(
     if (venue === 'coinbase' && COINBASE_LIGHTER_MAKER_SHADOW_ENABLED) {
       coinbaseLighterMakerShadow.setTradeStreamConnected(false);
     }
+    if (venue === 'ethereal' && ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED) {
+      etherealLighterMakerShadow.setTradeStreamConnected(false);
+    }
     console.warn(`venue-arb ${venue} websocket error`, error.message);
   });
   ws.on('close', (code, reason) => {
@@ -4350,6 +4345,10 @@ function connect(
     if (venue === 'coinbase' && COINBASE_LIGHTER_MAKER_SHADOW_ENABLED) {
       coinbaseLighterMakerShadow.setTradeStreamConnected(false);
       coinbaseLighterMakerShadow.recordTradeReconnect();
+    }
+    if (venue === 'ethereal' && ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED) {
+      etherealLighterMakerShadow.setTradeStreamConnected(false);
+      etherealLighterMakerShadow.recordTradeReconnect();
     }
     console.warn(
       `venue-arb ${venue} closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
@@ -4491,12 +4490,9 @@ function startCoinbase(): void {
 
 function startEthereal(): void {
   if (!ETHEREAL_VENUE_MARKETS.length) return;
-  let running = false;
-  let productRefreshDueAt = 0;
-  let tradeFeedHealthy = false;
-  const hydratedProducts = new Set<string>();
   const seenTradeIds = new Set<string>();
   const seenTradeQueue: string[] = [];
+  let initialized = false;
 
   const rememberTrade = (id: string): boolean => {
     if (seenTradeIds.has(id)) return false;
@@ -4509,165 +4505,165 @@ function startEthereal(): void {
     return true;
   };
 
-  const requestJson = async (url: string): Promise<unknown> => {
+  const requestProducts = async (): Promise<EtherealProduct[]> => {
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
       ETHEREAL_REQUEST_TIMEOUT_MS,
     );
     try {
-      const response = await fetch(url, {
+      const response = await fetch(
+        'https://api.ethereal.trade/v1/product?order=asc&orderBy=createdAt',
+        {
         signal: controller.signal,
         headers: { 'User-Agent': 'RobotClaude-Arb-Shadow/1.0' },
-      });
+        },
+      );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
+      const parsed = parseEtherealProducts(await response.json());
+      const selected = parsed.filter(
+        (product) => ETHEREAL_VENUE_COINS.has(product.coin)
+          && byCoin.has(product.coin)
+          && product.makerFeeBps === 0,
+      );
+      if (!selected.length) {
+        throw new Error('no zero-maker Ethereal products');
+      }
+      return selected;
     } finally {
       clearTimeout(timeout);
     }
   };
 
-  const refreshProducts = async (now: number): Promise<void> => {
-    const parsed = parseEtherealProducts(await requestJson(
-      'https://api.ethereal.trade/v1/product?order=asc&orderBy=createdAt',
-    ));
-    const selected = parsed.filter(
-      (product) => ETHEREAL_VENUE_COINS.has(product.coin)
-        && byCoin.has(product.coin)
-        && product.makerFeeBps === 0,
-    );
-    if (!selected.length) {
-      throw new Error('no zero-maker Ethereal products');
-    }
+  const refreshProducts = async (): Promise<void> => {
+    const selected = await requestProducts();
     etherealProductByCoin.clear();
-    etherealCoinByProduct.clear();
     for (const product of selected) {
       etherealProductByCoin.set(product.coin, product);
-      etherealCoinByProduct.set(product.productId, product.coin);
     }
     etherealTelemetry.productRefreshes++;
-    productRefreshDueAt = now + 60 * 60_000;
   };
 
-  const pollProduct = async (
-    product: EtherealProduct,
-  ): Promise<{ books: number; trades: number }> => {
-    const [bookResult, tradesResult] = await Promise.allSettled([
-      requestJson(
-        'https://api.ethereal.trade/v1/product/market-liquidity'
-        + `?productId=${encodeURIComponent(product.productId)}`,
-      ),
-      requestJson(
-        'https://api.ethereal.trade/v1/order/trade'
-        + `?productId=${encodeURIComponent(product.productId)}`
-        + '&order=desc&limit=100',
-      ),
-    ]);
-    let books = 0;
-    let trades = 0;
-    if (bookResult.status === 'fulfilled') {
-      etherealTelemetry.bookRequests++;
-      const parsed = parseEtherealBook(bookResult.value);
-      const book = booksByProduct(parsed, product);
-      if (parsed && book) {
-        const receivedAt = Date.now();
-        replacePriceLevels(book.bids, parsed.bids);
-        replacePriceLevels(book.asks, parsed.asks);
-        markBook(book, parsed.exchangeAt, receivedAt);
-        etherealTelemetry.bookUpdates++;
-        books++;
-      }
-    } else {
-      throw bookResult.reason;
+  const updateLevels = (
+    target: Map<number, number>,
+    levels: readonly PriceLevel[],
+  ): void => {
+    for (const [price, size] of levels) {
+      if (size === 0) target.delete(price);
+      else target.set(price, size);
     }
-    if (tradesResult.status === 'fulfilled') {
-      etherealTelemetry.tradeRequests++;
-      const receivedAt = Date.now();
-      const parsed = parseEtherealMakerTrades(
-        tradesResult.value,
-        etherealCoinByProduct,
-      ).sort((left, right) => left.tradeAt - right.tradeAt);
-      const latest = parsed.at(-1);
-      if (
-        latest
-        && latest.tradeAt <= receivedAt + 1_000
-        && receivedAt - latest.tradeAt
-          <= ETHEREAL_LIGHTER_MAKER_MAX_TRADE_IDLE_MS
-      ) {
-        etherealLastTradeAt.set(product.coin, latest.tradeAt);
-      }
-      const hydrated = hydratedProducts.has(product.productId);
-      for (const trade of parsed) {
-        if (!rememberTrade(trade.id) || !hydrated) continue;
-        etherealLighterMakerShadow.processTrade(trade, receivedAt);
-        etherealTelemetry.trades++;
-        trades++;
-      }
-      hydratedProducts.add(product.productId);
-    } else {
-      throw tradesResult.reason;
-    }
-    return { books, trades };
   };
 
-  function booksByProduct(
-    parsed: ReturnType<typeof parseEtherealBook>,
-    product: EtherealProduct,
-  ): BookState | null {
-    if (!parsed || parsed.productId !== product.productId) return null;
-    return books.get(bookKey('ethereal', product.coin)) ?? null;
-  }
-
-  const poll = async (): Promise<void> => {
-    if (shuttingDown || running) return;
-    running = true;
-    const now = Date.now();
-    etherealTelemetry.lastPollAt = now;
-    try {
-      if (!etherealProductByCoin.size || now >= productRefreshDueAt) {
-        await refreshProducts(now);
-      }
-      const results = await Promise.allSettled(
-        [...etherealProductByCoin.values()].map(pollProduct),
-      );
-      const succeeded = results.filter(
-        (result) => result.status === 'fulfilled',
-      ).length;
-      if (!succeeded) {
-        const rejected = results.find(
-          (result) => result.status === 'rejected',
-        ) as PromiseRejectedResult | undefined;
-        throw rejected?.reason ?? new Error('all Ethereal polls failed');
-      }
-      const receivedAt = Date.now();
-      connections.ethereal.connected = true;
-      connections.ethereal.messages += succeeded;
-      connections.ethereal.lastMessageAt = receivedAt;
-      etherealTelemetry.lastSuccessAt = receivedAt;
-      etherealTelemetry.lastError = null;
-      if (!tradeFeedHealthy) {
+  const startStream = (): void => {
+    connect(
+      'ethereal',
+      'wss://ws2.ethereal.trade/v1/stream',
+      (ws) => {
         etherealLighterMakerShadow.setTradeStreamConnected(true);
-        tradeFeedHealthy = true;
-      }
+        for (const product of etherealProductByCoin.values()) {
+          const symbol = `${product.coin}USD`;
+          ws.send(JSON.stringify({
+            event: 'subscribe',
+            data: { type: 'L2Book', symbol },
+          }));
+          ws.send(JSON.stringify({
+            event: 'subscribe',
+            data: { type: 'TradeFill', symbol },
+          }));
+        }
+        const pingTimer = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.ping();
+          else clearInterval(pingTimer);
+        }, 30_000);
+        pingTimer.unref();
+      },
+      (payload, receivedAt, ws) => {
+        const parsedBook = parseEtherealWsBook(payload);
+        if (parsedBook) {
+          const coin = parsedBook.symbol.slice(0, -'USD'.length);
+          const book = books.get(bookKey('ethereal', coin));
+          if (!book || !ETHEREAL_VENUE_COINS.has(coin)) return;
+          const snapshot = parsedBook.previousAt == null
+            || !book.bids.size
+            || !book.asks.size;
+          if (
+            !snapshot
+            && parsedBook.previousAt !== book.exchangeAt
+          ) {
+            book.bids.clear();
+            book.asks.clear();
+            book.exchangeAt = 0;
+            book.receivedAt = 0;
+            executableBooks.delete(bookKey('ethereal', coin));
+            ws.send(JSON.stringify({
+              event: 'unsubscribe',
+              data: { type: 'L2Book', symbol: parsedBook.symbol },
+            }));
+            ws.send(JSON.stringify({
+              event: 'subscribe',
+              data: { type: 'L2Book', symbol: parsedBook.symbol },
+            }));
+            return;
+          }
+          if (snapshot) {
+            replacePriceLevels(book.bids, parsedBook.bids);
+            replacePriceLevels(book.asks, parsedBook.asks);
+          } else {
+            updateLevels(book.bids, parsedBook.bids);
+            updateLevels(book.asks, parsedBook.asks);
+          }
+          markBook(book, parsedBook.exchangeAt, receivedAt);
+          etherealTelemetry.bookUpdates++;
+          etherealTelemetry.lastSuccessAt = receivedAt;
+          etherealTelemetry.lastError = null;
+          return;
+        }
+        for (const trade of parseEtherealWsTrades(payload)) {
+          if (
+            !ETHEREAL_VENUE_COINS.has(trade.coin)
+            || !rememberTrade(trade.id)
+          ) continue;
+          const activityAt = makerActivityTimestamp(
+            trade.tradeAt,
+            receivedAt,
+            SHADOW_SOURCE_FRESH_MS,
+          );
+          if (activityAt != null) {
+            etherealLastTradeAt.set(trade.coin, activityAt);
+          }
+          etherealLighterMakerShadow.processTrade(trade, receivedAt);
+          etherealTelemetry.trades++;
+        }
+      },
+      {
+        headers: { 'User-Agent': 'RobotClaude-Arb-Shadow/1.0' },
+      },
+    );
+  };
+
+  const initialize = async (): Promise<void> => {
+    if (shuttingDown || initialized) return;
+    try {
+      await refreshProducts();
+      initialized = true;
+      startStream();
+      const productTimer = setInterval(() => {
+        void refreshProducts().catch((error: unknown) => {
+          etherealTelemetry.errors++;
+          etherealTelemetry.lastErrorAt = Date.now();
+          etherealTelemetry.lastError = (error as Error).message.slice(0, 160);
+        });
+      }, 60 * 60_000);
+      productTimer.unref();
     } catch (error) {
       etherealTelemetry.errors++;
       etherealTelemetry.lastErrorAt = Date.now();
       etherealTelemetry.lastError = (error as Error).message.slice(0, 160);
-      connections.ethereal.connected = false;
-      connections.ethereal.reconnects++;
-      if (tradeFeedHealthy) {
-        etherealLighterMakerShadow.setTradeStreamConnected(false);
-        etherealLighterMakerShadow.recordTradeReconnect();
-        tradeFeedHealthy = false;
-      }
-    } finally {
-      running = false;
+      setTimeout(() => void initialize(), 5_000).unref();
     }
   };
 
-  void poll();
-  const timer = setInterval(() => void poll(), ETHEREAL_POLL_MS);
-  timer.unref();
+  void initialize();
 }
 
 function startBinance(): void {
@@ -6374,7 +6370,8 @@ function writeStatus(): void {
       ...etherealLighterMakerShadow.status(),
       enabled: ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED,
       marketData: {
-        pollMs: ETHEREAL_POLL_MS,
+        transport: 'websocket_v1',
+        bookIntervalMs: 200,
         products: [...etherealProductByCoin.values()],
         ...etherealTelemetry,
       },

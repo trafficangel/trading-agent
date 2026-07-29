@@ -15,6 +15,14 @@ export type EtherealBook = {
   asks: PriceLevel[];
 };
 
+export type EtherealWsBook = {
+  symbol: string;
+  exchangeAt: number;
+  previousAt: number | null;
+  bids: PriceLevel[];
+  asks: PriceLevel[];
+};
+
 export type EtherealMakerTrade = {
   id: string;
   coin: string;
@@ -40,6 +48,18 @@ function parseLevels(value: unknown): PriceLevel[] {
     const price = finitePositive(raw[0]);
     const size = finitePositive(raw[1]);
     return price == null || size == null ? [] : [[price, size]];
+  });
+}
+
+function parseAbsoluteLevels(value: unknown): PriceLevel[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw): PriceLevel[] => {
+    if (!Array.isArray(raw)) return [];
+    const price = finitePositive(raw[0]);
+    const size = Number(raw[1]);
+    return price == null || !Number.isFinite(size) || size < 0
+      ? []
+      : [[price, size]];
   });
 }
 
@@ -93,6 +113,37 @@ export function parseEtherealBook(payload: unknown): EtherealBook | null {
   };
 }
 
+export function parseEtherealWsBook(payload: unknown): EtherealWsBook | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const message = payload as {
+    e?: unknown;
+    data?: {
+      s?: unknown;
+      t?: unknown;
+      pt?: unknown;
+      b?: unknown;
+      a?: unknown;
+    };
+  };
+  const exchangeAt = finitePositive(message.data?.t);
+  if (
+    message.e !== 'L2Book'
+    || typeof message.data?.s !== 'string'
+    || exchangeAt == null
+  ) return null;
+  const previousAt = message.data.pt == null
+    ? null
+    : finitePositive(message.data.pt);
+  if (message.data.pt != null && previousAt == null) return null;
+  return {
+    symbol: message.data.s,
+    exchangeAt,
+    previousAt,
+    bids: parseAbsoluteLevels(message.data.b),
+    asks: parseAbsoluteLevels(message.data.a),
+  };
+}
+
 export function parseEtherealMakerTrades(
   payload: unknown,
   productCoins: ReadonlyMap<string, string>,
@@ -129,6 +180,54 @@ export function parseEtherealMakerTrades(
       id: `${coin}:${String(
         row.id ?? `${tradeAt}:${price}:${size}:${row.makerSide}`,
       )}`,
+      coin,
+      side,
+      price,
+      size,
+      tradeAt,
+    }];
+  });
+}
+
+export function parseEtherealWsTrades(
+  payload: unknown,
+): EtherealMakerTrade[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const message = payload as {
+    e?: unknown;
+    data?: {
+      s?: unknown;
+      t?: unknown;
+      d?: unknown;
+    };
+  };
+  if (
+    message.e !== 'TradeFill'
+    || typeof message.data?.s !== 'string'
+    || !message.data.s.endsWith('USD')
+    || !Array.isArray(message.data.d)
+  ) return [];
+  const coin = message.data.s.slice(0, -'USD'.length);
+  const tradeAt = finitePositive(message.data.t);
+  if (tradeAt == null) return [];
+  return message.data.d.flatMap((raw): EtherealMakerTrade[] => {
+    if (!raw || typeof raw !== 'object') return [];
+    const row = raw as {
+      id?: unknown;
+      px?: unknown;
+      sz?: unknown;
+      sd?: unknown;
+    };
+    const price = finitePositive(row.px);
+    const size = finitePositive(row.sz);
+    const side: TakerSide | null = Number(row.sd) === 0
+      ? 'BUY'
+      : Number(row.sd) === 1
+        ? 'SELL'
+        : null;
+    if (price == null || size == null || !side) return [];
+    return [{
+      id: `${coin}:${String(row.id ?? `${tradeAt}:${price}:${size}:${side}`)}`,
       coin,
       side,
       price,
