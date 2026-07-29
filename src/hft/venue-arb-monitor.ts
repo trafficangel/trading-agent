@@ -539,6 +539,14 @@ const EXTENDED_ASTER_MAKER_EXIT_NET_BPS = finiteEnv(
   5,
 );
 const FEED_STALL_MS = finiteEnv('VENUE_ARB_FEED_STALL_MS', 15_000);
+const LIGHTER_BOOK_REFRESH_MS = finiteEnv(
+  'VENUE_ARB_LIGHTER_BOOK_REFRESH_MS',
+  30_000,
+);
+const LIGHTER_BBO_MISMATCH_BPS = finiteEnv(
+  'VENUE_ARB_LIGHTER_BBO_MISMATCH_BPS',
+  2,
+);
 const RECONNECT_MS = 2_000;
 const HORIZONS_MS = [100, 250, 500, 1_000, 2_000, 5_000, 10_000] as const;
 
@@ -2534,6 +2542,33 @@ function lighterMarketId(channel: unknown): number | null {
 
 function startLighter(): void {
   const nonces = new Map<number, number>();
+  const bboMismatchCounts = new Map<number, number>();
+  let refreshIndex = 0;
+
+  const refreshBook = (
+    ws: WebSocket,
+    market: Market,
+  ): void => {
+    const book = books.get(bookKey('lighter', market.coin));
+    if (!book) return;
+    book.bids.clear();
+    book.asks.clear();
+    book.exchangeAt = 0;
+    book.receivedAt = 0;
+    book.updates++;
+    executableBooks.delete(bookKey('lighter', market.coin));
+    nonces.delete(market.lighterMarketId);
+    bboMismatchCounts.delete(market.lighterMarketId);
+    ws.send(JSON.stringify({
+      type: 'unsubscribe',
+      channel: `order_book/${market.lighterMarketId}`,
+    }));
+    ws.send(JSON.stringify({
+      type: 'subscribe',
+      channel: `order_book/${market.lighterMarketId}`,
+    }));
+  };
+
   connect(
     'lighter',
     'wss://mainnet.zklighter.elliot.ai/stream',
@@ -2543,17 +2578,35 @@ function startLighter(): void {
           type: 'subscribe',
           channel: `order_book/${market.lighterMarketId}`,
         }));
+        ws.send(JSON.stringify({
+          type: 'subscribe',
+          channel: `ticker/${market.lighterMarketId}`,
+        }));
       }
-      const timer = setInterval(() => {
+      const pingTimer = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.ping();
-        else clearInterval(timer);
+        else clearInterval(pingTimer);
       }, 5_000);
-      timer.unref();
+      pingTimer.unref();
+      const refreshTimer = setInterval(() => {
+        if (ws.readyState !== WebSocket.OPEN) {
+          clearInterval(refreshTimer);
+          return;
+        }
+        const market = MARKETS[refreshIndex % MARKETS.length];
+        refreshIndex++;
+        if (market) refreshBook(ws, market);
+      }, Math.max(1_000, LIGHTER_BOOK_REFRESH_MS / MARKETS.length));
+      refreshTimer.unref();
     },
     (payload, receivedAt, ws) => {
       const message = payload as {
         channel?: unknown;
         timestamp?: unknown;
+        ticker?: {
+          a?: { price?: unknown; size?: unknown };
+          b?: { price?: unknown; size?: unknown };
+        };
         order_book?: {
           bids?: unknown;
           asks?: unknown;
@@ -2561,20 +2614,35 @@ function startLighter(): void {
           begin_nonce?: unknown;
         };
       };
-      if (!message.order_book) return;
       const marketId = lighterMarketId(message.channel);
       const market = marketId == null ? null : byLighterId.get(marketId);
       const book = market ? books.get(bookKey('lighter', market.coin)) : null;
       if (marketId == null || !market || !book) return;
+      if (message.ticker) {
+        const tickerAsk = finite(message.ticker.a?.price);
+        const tickerBid = finite(message.ticker.b?.price);
+        const bookAsk = sortedLevels(book, 'asks', 1)[0]?.[0] ?? 0;
+        const bookBid = sortedLevels(book, 'bids', 1)[0]?.[0] ?? 0;
+        if (!(tickerAsk > 0) || !(tickerBid > 0) || !bookAsk || !bookBid) return;
+        const mismatchBps = Math.max(
+          Math.abs(bookAsk / tickerAsk - 1),
+          Math.abs(bookBid / tickerBid - 1),
+        ) * 10_000;
+        if (mismatchBps <= LIGHTER_BBO_MISMATCH_BPS) {
+          bboMismatchCounts.delete(marketId);
+          return;
+        }
+        const mismatches = (bboMismatchCounts.get(marketId) ?? 0) + 1;
+        bboMismatchCounts.set(marketId, mismatches);
+        if (mismatches >= 3) refreshBook(ws, market);
+        return;
+      }
+      if (!message.order_book) return;
       const nonce = finite(message.order_book.nonce);
       const beginNonce = finite(message.order_book.begin_nonce);
       const previous = nonces.get(marketId);
       if (previous != null && beginNonce > 0 && beginNonce !== previous) {
-        book.bids.clear();
-        book.asks.clear();
-        nonces.delete(marketId);
-        ws.send(JSON.stringify({ type: 'unsubscribe', channel: `order_book/${marketId}` }));
-        ws.send(JSON.stringify({ type: 'subscribe', channel: `order_book/${marketId}` }));
+        refreshBook(ws, market);
         return;
       }
       if (!book.bids.size || !book.asks.size || previous == null) {

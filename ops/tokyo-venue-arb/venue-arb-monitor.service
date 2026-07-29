@@ -1,5 +1,5 @@
 [Unit]
-Description=Robot Claude Tokyo Extended/Lighter arbitrage radar
+Description=Robot Claude Tokyo Lighter/Binance arbitrage execution shadow
 After=network-online.target
 Wants=network-online.target
 
@@ -9,10 +9,23 @@ User=trader
 Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data
-Environment=VENUE_ARB_ACTIVE_VENUES=extended,lighter
+Environment=VENUE_ARB_ACTIVE_VENUES=lighter,binance
 Environment=VENUE_ARB_SAMPLE_MS=100
 Environment=VENUE_ARB_STALE_MS=250
 Environment=VENUE_ARB_EXECUTION_BUFFER_BPS=2
+Environment=VENUE_ARB_SHADOW_NOTIONAL_USD=100
+Environment=VENUE_ARB_SHADOW_ENTRY_NET_BPS=10
+Environment=VENUE_ARB_SHADOW_ENTRY_CONFIRMATIONS=3
+Environment=VENUE_ARB_SHADOW_EXIT_NET_BPS=2
+Environment=VENUE_ARB_SHADOW_EXIT_CONFIRMATIONS=3
+Environment=VENUE_ARB_SHADOW_ENTRY_LATENCY_FLOOR_MS=150
+Environment=VENUE_ARB_SHADOW_EXIT_LATENCY_FLOOR_MS=200
+Environment=VENUE_ARB_SHADOW_MAX_HOLD_MS=180000
+Environment=VENUE_ARB_SHADOW_INDEPENDENCE_MS=300000
+Environment=VENUE_ARB_SHADOW_REQUIRED_SAMPLES=20
+Environment=VENUE_ARB_SHADOW_REQUIRED_PASS_PCT=90
+Environment=VENUE_ARB_LIGHTER_BOOK_REFRESH_MS=30000
+Environment=VENUE_ARB_LIGHTER_BBO_MISMATCH_BPS=2
 Environment=VENUE_ARB_MAKER_NOTIONAL_USD=100
 Environment=VENUE_ARB_MAKER_ENTRY_EDGE_BPS=5
 Environment=VENUE_ARB_MAKER_CANCEL_EDGE_BPS=3
