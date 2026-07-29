@@ -163,6 +163,50 @@ def modeled_funding_reserve_usd(
     )
 
 
+def finite_float(value: Any, fallback: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return number if math.isfinite(number) else fallback
+
+
+def candidate_quote_version(
+    snapshot_at: int,
+    row: dict[str, Any],
+) -> str:
+    buy_age = finite_float(row.get("currentBuyBookAgeMs"), math.inf)
+    sell_age = finite_float(row.get("currentSellBookAgeMs"), math.inf)
+    if not math.isfinite(buy_age) or not math.isfinite(sell_age):
+        return ""
+    return (
+        f"{round(snapshot_at - buy_age)}:"
+        f"{round(snapshot_at - sell_age)}"
+    )
+
+
+def advance_entry_confirmations(
+    *,
+    candidate_id: str,
+    quote_version: str,
+    pending_candidate_id: str | None,
+    pending_quote_version: str | None,
+    pending_confirmations: int,
+) -> tuple[str, str | None, int]:
+    if candidate_id != pending_candidate_id:
+        pending_candidate_id = candidate_id
+        pending_quote_version = None
+        pending_confirmations = 0
+    if quote_version and quote_version != pending_quote_version:
+        pending_quote_version = quote_version
+        pending_confirmations += 1
+    return (
+        pending_candidate_id,
+        pending_quote_version,
+        pending_confirmations,
+    )
+
+
 class Canary:
     def __init__(self, *, force_dry_run: bool = False) -> None:
         self.enabled = (
@@ -208,6 +252,13 @@ class Canary:
         self.notional = float(os.getenv("VENUE_ARB_LIVE_NOTIONAL_USD", "300"))
         self.leverage = int(os.getenv("VENUE_ARB_LIVE_LEVERAGE", "5"))
         self.entry_net_bps = float(os.getenv("VENUE_ARB_LIVE_ENTRY_NET_BPS", "15"))
+        self.entry_confirmations = int(
+            os.getenv("VENUE_ARB_LIVE_ENTRY_CONFIRMATIONS", "3")
+        )
+        if self.entry_confirmations < 1:
+            raise RuntimeError(
+                "VENUE_ARB_LIVE_ENTRY_CONFIRMATIONS must be positive"
+            )
         self.maker_cancel_net_bps = float(
             os.getenv(
                 "VENUE_ARB_LIVE_MAKER_CANCEL_NET_BPS",
@@ -401,6 +452,7 @@ class Canary:
             "notionalUsdPerLeg": self.notional,
             "leverage": self.leverage,
             "entryNetPct": self.entry_net_bps / 100,
+            "entryConfirmations": self.entry_confirmations,
             "makerCancelNetPct": self.maker_cancel_net_bps / 100,
             "postFillNetPct": self.post_fill_net_bps / 100,
             "exitMinProfitPct": self.exit_min_profit_bps / 100,
@@ -774,22 +826,28 @@ class Canary:
             ):
                 continue
             coin = str(row.get("coin") or "")
-            net = float(row.get("currentNetBps1000") or -math.inf)
+            net = finite_float(row.get("currentNetBps1000"), -math.inf)
             ages = (
-                float(row.get("currentBuyBookAgeMs") or math.inf),
-                float(row.get("currentSellBookAgeMs") or math.inf),
+                finite_float(row.get("currentBuyBookAgeMs"), math.inf),
+                finite_float(row.get("currentSellBookAgeMs"), math.inf),
             )
             source_ages = (
-                float(row.get("currentBuyBookSourceAgeMs") or math.inf),
-                float(row.get("currentSellBookSourceAgeMs") or math.inf),
+                finite_float(
+                    row.get("currentBuyBookSourceAgeMs"),
+                    math.inf,
+                ),
+                finite_float(
+                    row.get("currentSellBookSourceAgeMs"),
+                    math.inf,
+                ),
             )
             depth = min(
-                float(row.get("currentBuyDepthUsd") or 0),
-                float(row.get("currentSellDepthUsd") or 0),
+                finite_float(row.get("currentBuyDepthUsd"), 0),
+                finite_float(row.get("currentSellDepthUsd"), 0),
             )
             prices = (
-                float(row.get("currentBuyVwap1000") or 0),
-                float(row.get("currentSellVwap1000") or 0),
+                finite_float(row.get("currentBuyVwap1000"), 0),
+                finite_float(row.get("currentSellVwap1000"), 0),
             )
             if (
                 coin in MARKETS
@@ -808,10 +866,19 @@ class Canary:
             )
             return None
         self.last_rejection = None
-        return max(
+        winner = max(
             eligible,
-            key=lambda row: float(row.get("currentNetBps1000") or -math.inf),
+            key=lambda row: finite_float(
+                row.get("currentNetBps1000"),
+                -math.inf,
+            ),
         )
+        snapshot_at = int(status.get("updatedAt", 0) or 0)
+        return {
+            **winner,
+            "_snapshotAt": snapshot_at,
+            "_quoteVersion": candidate_quote_version(snapshot_at, winner),
+        }
 
     def maker_candidate(self) -> dict[str, Any] | None:
         status = self.read_json(self.execution_path, {})
@@ -2372,6 +2439,9 @@ class Canary:
             leverage=self.leverage,
             threshold_bps=self.entry_net_bps,
         )
+        pending_candidate_id: str | None = None
+        pending_quote_version: str | None = None
+        pending_confirmations = 0
         while self.running:
             if len(self.completed_mode_trades()) >= self.max_trades:
                 self.write_status("completed", reason="max trade count reached")
@@ -2407,10 +2477,40 @@ class Canary:
                     if len(self.completed_mode_trades()) >= self.max_trades:
                         return
                 else:
-                    await self.execute(candidate)
-                    return
+                    candidate_id = str(candidate.get("id") or "")
+                    quote_version = str(
+                        candidate.get("_quoteVersion") or ""
+                    )
+                    (
+                        pending_candidate_id,
+                        pending_quote_version,
+                        pending_confirmations,
+                    ) = advance_entry_confirmations(
+                        candidate_id=candidate_id,
+                        quote_version=quote_version,
+                        pending_candidate_id=pending_candidate_id,
+                        pending_quote_version=pending_quote_version,
+                        pending_confirmations=pending_confirmations,
+                    )
+                    if pending_confirmations >= self.entry_confirmations:
+                        await self.execute(candidate)
+                        return
+                    self.last_rejection = (
+                        "confirming fresh books "
+                        f"{pending_confirmations}/{self.entry_confirmations}"
+                    )
+            elif self.execution_mode == "taker-taker":
+                pending_candidate_id = None
+                pending_quote_version = None
+                pending_confirmations = 0
             if time.monotonic() - self.last_status_write >= 1:
-                self.write_status("armed")
+                self.write_status(
+                    "armed",
+                    entryConfirmationProgress={
+                        "current": pending_confirmations,
+                        "required": self.entry_confirmations,
+                    },
+                )
             await asyncio.sleep(0.02)
 
     async def close(self) -> None:
@@ -2485,6 +2585,38 @@ def self_test() -> None:
         holding_ms=180_000,
         funding_bps_per_hour=1,
     ) == 0.0005
+    assert finite_float(0, math.inf) == 0
+    assert candidate_quote_version(
+        1_000,
+        {
+            "currentBuyBookAgeMs": 0,
+            "currentSellBookAgeMs": 25,
+        },
+    ) == "1000:975"
+    pending_id: str | None = None
+    pending_version: str | None = None
+    confirmations = 0
+    for version, expected in [("1:1", 1), ("1:1", 1), ("2:1", 2), ("2:2", 3)]:
+        pending_id, pending_version, confirmations = advance_entry_confirmations(
+            candidate_id="HYPE-window",
+            quote_version=version,
+            pending_candidate_id=pending_id,
+            pending_quote_version=pending_version,
+            pending_confirmations=confirmations,
+        )
+        assert confirmations == expected
+    pending_id, pending_version, confirmations = advance_entry_confirmations(
+        candidate_id="new-window",
+        quote_version="3:3",
+        pending_candidate_id=pending_id,
+        pending_quote_version=pending_version,
+        pending_confirmations=confirmations,
+    )
+    assert (pending_id, pending_version, confirmations) == (
+        "new-window",
+        "3:3",
+        1,
+    )
     route_guard = object.__new__(Canary)
     route_guard.route_id = "lighter-extended"
     route_guard.route_label = "Lighter → Extended"
