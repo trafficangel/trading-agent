@@ -1237,6 +1237,18 @@ const ALL_SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     primary: false,
   },
   {
+    id: 'aster-pacifica',
+    buyVenue: 'aster',
+    sellVenue: 'pacifica',
+    primary: false,
+  },
+  {
+    id: 'pacifica-aster',
+    buyVenue: 'pacifica',
+    sellVenue: 'aster',
+    primary: false,
+  },
+  {
     id: 'extended-aster',
     buyVenue: 'extended',
     sellVenue: 'aster',
