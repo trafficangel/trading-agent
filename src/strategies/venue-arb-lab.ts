@@ -1476,7 +1476,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       <div class="va-test-grid">
         ${compactGate(
     'Extended → Lighter',
-    'NET ПОСЛЕ РАСХОДОВ · 500/300 MS',
+    'NET ПОСЛЕ РАСХОДОВ · 200/300 MS',
     targeted.extendedLighterGate,
     extendedLighterMaker?.telemetry?.bestObservedTopCoin,
     extendedLighterMaker?.telemetry?.bestObservedTopNetBps,
