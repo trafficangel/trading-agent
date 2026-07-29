@@ -2255,19 +2255,27 @@ function observeShadowBasis(
   quote: ShadowQuote,
 ): void {
   const key = shadowBasisKey(route.id, coin);
+  observeBasisSample(key, quote.at, shadowRawBasisBps(route, quote));
+}
+
+function observeBasisSample(
+  key: string,
+  at: number,
+  bps: number,
+): void {
   const lastAt = shadowBasisLastSampleAt.get(key) ?? 0;
-  if (quote.at - lastAt < SHADOW_BASIS_SAMPLE_MS) return;
-  const cutoff = quote.at - SHADOW_BASIS_WINDOW_MS;
+  if (at - lastAt < SHADOW_BASIS_SAMPLE_MS) return;
+  const cutoff = at - SHADOW_BASIS_WINDOW_MS;
   const samples = shadowBasisSamples.get(key) ?? [];
   samples.push({
-    at: quote.at,
-    bps: shadowRawBasisBps(route, quote),
+    at,
+    bps,
   });
   shadowBasisSamples.set(
     key,
     samples.filter((sample) => sample.at >= cutoff),
   );
-  shadowBasisLastSampleAt.set(key, quote.at);
+  shadowBasisLastSampleAt.set(key, at);
   shadowBasisStateDirty = true;
 }
 
@@ -2345,9 +2353,11 @@ function shadowBasisBaselineBps(
   coin: string,
   now: number,
 ): number | null {
-  const samples = shadowBasisSamples.get(
-    shadowBasisKey(route.id, coin),
-  ) ?? [];
+  return basisBaselineBps(shadowBasisKey(route.id, coin), now);
+}
+
+function basisBaselineBps(key: string, now: number): number | null {
+  const samples = shadowBasisSamples.get(key) ?? [];
   const latest = samples.at(-1);
   if (!latest) return null;
   return calibratedVenueArbBasis(
@@ -5639,12 +5649,6 @@ function genericMakerMarkets(
   now: number,
   notionalUsd: number,
 ) {
-  const makerLongRoute = shadowRouteById.get(
-    `${makerVenue}-${hedgeVenue}`,
-  );
-  const makerShortRoute = shadowRouteById.get(
-    `${hedgeVenue}-${makerVenue}`,
-  );
   return ACTIVE_MARKETS.map((market) => {
     const rawMaker = books.get(bookKey(makerVenue, market.coin)) ?? null;
     const maker = (
@@ -5683,12 +5687,52 @@ function genericMakerMarkets(
         notionalUsd,
       )?.price ?? null
       : null;
-    const makerLongBaseline = makerLongRoute
-      ? shadowBasisBaselineBps(makerLongRoute, market.coin, now)
+    const makerBuyBasisKey = shadowBasisKey(
+      `maker-${makerVenue}-${hedgeVenue}-buy`,
+      market.coin,
+    );
+    const makerSellBasisKey = shadowBasisKey(
+      `maker-${makerVenue}-${hedgeVenue}-sell`,
+      market.coin,
+    );
+    const makerBestBid = maker
+      ? sortedLevels(maker, 'bids', 1)[0]?.[0] ?? null
       : null;
-    const makerShortBaseline = makerShortRoute
-      ? shadowBasisBaselineBps(makerShortRoute, market.coin, now)
+    const makerBestAsk = maker
+      ? sortedLevels(maker, 'asks', 1)[0]?.[0] ?? null
       : null;
+    const booksFresh = Boolean(
+      maker
+      && hedge
+      && now - maker.receivedAt <= SHADOW_EXECUTION_FRESH_MS
+      && now - maker.exchangeAt <= SHADOW_SOURCE_FRESH_MS
+      && now - hedge.receivedAt <= SHADOW_EXECUTION_FRESH_MS
+      && now - hedge.exchangeAt <= SHADOW_SOURCE_FRESH_MS,
+    );
+    if (
+      booksFresh
+      && makerBestBid != null
+      && hedgeSellVwap != null
+    ) {
+      observeBasisSample(
+        makerBuyBasisKey,
+        now,
+        makerEntryEdgeBps('buy', makerBestBid, hedgeSellVwap),
+      );
+    }
+    if (
+      booksFresh
+      && makerBestAsk != null
+      && hedgeBuyVwap != null
+    ) {
+      observeBasisSample(
+        makerSellBasisKey,
+        now,
+        makerEntryEdgeBps('sell', makerBestAsk, hedgeBuyVwap),
+      );
+    }
+    const makerLongBaseline = basisBaselineBps(makerBuyBasisKey, now);
+    const makerShortBaseline = basisBaselineBps(makerSellBasisKey, now);
     return {
       coin: market.coin,
       maker,
