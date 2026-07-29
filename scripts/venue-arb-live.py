@@ -46,6 +46,22 @@ MARKETS: dict[str, int] = {
     "ADA": 39,
     "BNB": 25,
     "LTC": 35,
+    "LIT": 120,
+    "XMR": 77,
+    "NEAR": 10,
+    "CRV": 36,
+    "FARTCOIN": 21,
+    "PUMP": 45,
+    "WTI": 145,
+    "XAU": 92,
+    "XAG": 93,
+    "ZEC": 90,
+    "EUR": 96,
+    "ENA": 29,
+    "AAVE": 27,
+    "JUP": 26,
+    "UNI": 30,
+    "XPL": 71,
 }
 
 ROUTES: dict[str, tuple[str, str, str]] = {
@@ -2918,7 +2934,9 @@ class Canary:
 
 def self_test() -> None:
     assert MARKETS["BTC"] == 1
-    assert len(MARKETS) == 9
+    assert MARKETS["ZEC"] == 90
+    assert MARKETS["XAU"] == 92
+    assert len(MARKETS) == 25
     assert Decimal("1.234") > 0
     assert round(maker_entry_edge_bps("buy", 100, 101), 8) == 100
     assert round(maker_entry_edge_bps("sell", 101, 100), 8) == 100
