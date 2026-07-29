@@ -1507,12 +1507,32 @@ function shadowBasisMetrics(
   );
 }
 
-function shadowBasisPasses(metrics: VenueArbBasisMetrics | null): boolean {
-  return !SHADOW_BASIS_GATE_ENABLED
-    || (
-      metrics != null
-      && metrics.deviationBps >= SHADOW_BASIS_MIN_DEVIATION_BPS
-    );
+function shadowExpectedEntryNetBps(
+  route: ShadowRouteConfig,
+  quote: ShadowQuote,
+  metrics: VenueArbBasisMetrics | null,
+): number {
+  if (!SHADOW_BASIS_GATE_ENABLED) return quote.openingNetBps;
+  if (metrics == null) return -Infinity;
+  return metrics.deviationBps - roundTripCostBps(
+    FEE_BPS[route.buyVenue],
+    FEE_BPS[route.sellVenue],
+    EXECUTION_BUFFER_BPS,
+  );
+}
+
+function shadowEntryPasses(
+  route: ShadowRouteConfig,
+  quote: ShadowQuote,
+  metrics: VenueArbBasisMetrics | null,
+): boolean {
+  if (!SHADOW_BASIS_GATE_ENABLED) {
+    return quote.openingNetBps >= SHADOW_ENTRY_NET_BPS;
+  }
+  return metrics != null
+    && metrics.deviationBps >= SHADOW_BASIS_MIN_DEVIATION_BPS
+    && shadowExpectedEntryNetBps(route, quote, metrics)
+      >= SHADOW_ENTRY_NET_BPS;
 }
 
 function modeledShadowExit(
@@ -1571,12 +1591,18 @@ function completeShadow(
     holdingMs: probe.openedAt == null ? null : Math.max(0, now - probe.openedAt),
     entryNetBps: probe.entryBuy == null || probe.entrySell == null
       ? null
-      : netConvergenceEdgeBps(
-        rawCrossEdgeBps(probe.entryBuy, probe.entrySell),
-        FEE_BPS[probe.buyVenue],
-        FEE_BPS[probe.sellVenue],
-        EXECUTION_BUFFER_BPS,
-      ),
+      : probe.entryBasisDeviationBps != null
+        ? probe.entryBasisDeviationBps - roundTripCostBps(
+          FEE_BPS[probe.buyVenue],
+          FEE_BPS[probe.sellVenue],
+          EXECUTION_BUFFER_BPS,
+        )
+        : netConvergenceEdgeBps(
+          rawCrossEdgeBps(probe.entryBuy, probe.entrySell),
+          FEE_BPS[probe.buyVenue],
+          FEE_BPS[probe.sellVenue],
+          EXECUTION_BUFFER_BPS,
+        ),
     entryBasisBaselineBps: probe.entryBasisBaselineBps,
     entryBasisDeviationBps: probe.entryBasisDeviationBps,
     entryConfirmations: probe.entryConfirmations,
@@ -1619,21 +1645,29 @@ function evaluateShadow(now: number): void {
       telemetry.freshQuotes++;
       observeShadowBasis(route, market.coin, quote);
       const basis = shadowBasisMetrics(route, market.coin, quote);
+      const expectedEntryNetBps = shadowExpectedEntryNetBps(
+        route,
+        quote,
+        basis,
+      );
       if (
         currentBestNetBps == null
-        || quote.openingNetBps > currentBestNetBps
+        || expectedEntryNetBps > currentBestNetBps
       ) {
-        currentBestNetBps = quote.openingNetBps;
+        currentBestNetBps = expectedEntryNetBps;
         currentBestCoin = market.coin;
       }
       if (
         telemetry.peakOpeningNetBps == null
-        || quote.openingNetBps > telemetry.peakOpeningNetBps
+        || expectedEntryNetBps > telemetry.peakOpeningNetBps
       ) {
-        telemetry.peakOpeningNetBps = quote.openingNetBps;
+        telemetry.peakOpeningNetBps = expectedEntryNetBps;
         telemetry.peakCoin = market.coin;
       }
-      if (quote.openingNetBps < SHADOW_ENTRY_NET_BPS) {
+      if (
+        !SHADOW_BASIS_GATE_ENABLED
+        && quote.openingNetBps < SHADOW_ENTRY_NET_BPS
+      ) {
         telemetry.rejections.below_gate++;
         currentRejections.below_gate++;
         shadowLatched.delete(latchKey);
@@ -1645,7 +1679,7 @@ function evaluateShadow(now: number): void {
         shadowLatched.delete(latchKey);
         continue;
       }
-      if (!shadowBasisPasses(basis)) {
+      if (!shadowEntryPasses(route, quote, basis)) {
         telemetry.rejections.basis_below_gate++;
         currentRejections.basis_below_gate++;
         shadowLatched.delete(latchKey);
@@ -1673,7 +1707,7 @@ function evaluateShadow(now: number): void {
         sellVenue: route.sellVenue,
         state: 'awaiting_entry',
         signalAt: now,
-        signalNetBps: quote.openingNetBps,
+        signalNetBps: expectedEntryNetBps,
         signalBasisBaselineBps: basis?.baselineBps ?? null,
         signalBasisDeviationBps: basis?.deviationBps ?? null,
         entryLatencyMs: latency.entryMs,
@@ -1729,18 +1763,14 @@ function evaluateShadow(now: number): void {
     if (probe.state === 'awaiting_entry') {
       if (
         quote
-        && quote.openingNetBps >= SHADOW_ENTRY_NET_BPS
-        && shadowBasisPasses(basis)
+        && shadowEntryPasses(route, quote, basis)
         && quote.version !== probe.lastEntryQuoteVersion
       ) {
         probe.entryConfirmations++;
         probe.lastEntryQuoteVersion = quote.version;
       } else if (
         quote
-        && (
-          quote.openingNetBps < SHADOW_ENTRY_NET_BPS
-          || !shadowBasisPasses(basis)
-        )
+        && !shadowEntryPasses(route, quote, basis)
       ) {
         probe.entryConfirmations = 0;
         probe.lastEntryQuoteVersion = null;
@@ -1757,8 +1787,7 @@ function evaluateShadow(now: number): void {
         continue;
       }
       if (
-        quote.openingNetBps < SHADOW_ENTRY_NET_BPS
-        || !shadowBasisPasses(basis)
+        !shadowEntryPasses(route, quote, basis)
       ) {
         completeShadow(probe, now, 'edge_lost_before_entry', quote);
         continue;
@@ -4060,6 +4089,48 @@ function writeExecutionStatus(): void {
         : null,
     }];
   }));
+  const executionRoutes: readonly ShadowRouteConfig[] = [
+    {
+      id: 'extended-lighter',
+      buyVenue: 'extended',
+      sellVenue: 'lighter',
+      primary: false,
+    },
+    {
+      id: 'lighter-extended',
+      buyVenue: 'lighter',
+      sellVenue: 'extended',
+      primary: false,
+    },
+  ];
+  const executionCandidates = executionRoutes.flatMap((route) => (
+    ACTIVE_MARKETS.flatMap((market) => {
+      const snapshot = edge(
+        now,
+        market.coin,
+        route.buyVenue,
+        route.sellVenue,
+      );
+      if (!snapshot) return [];
+      return [{
+        id: `basis-${route.id}-${market.coin}`,
+        coin: market.coin,
+        buyVenue: route.buyVenue,
+        sellVenue: route.sellVenue,
+        startedAt: now,
+        currentRawBps1000: snapshot.rawBps1000,
+        currentNetBps1000: snapshot.netBps1000,
+        currentBuyVwap1000: snapshot.buyVwap1000,
+        currentSellVwap1000: snapshot.sellVwap1000,
+        currentBuyDepthUsd: snapshot.buyDepthUsd,
+        currentSellDepthUsd: snapshot.sellDepthUsd,
+        currentBuyBookAgeMs: snapshot.buyBookAgeMs,
+        currentSellBookAgeMs: snapshot.sellBookAgeMs,
+        currentBuyBookSourceAgeMs: snapshot.buyBookSourceAgeMs,
+        currentSellBookSourceAgeMs: snapshot.sellBookSourceAgeMs,
+      }];
+    })
+  ));
   const status = {
     version: 'venue-arb-execution-v2',
     updatedAt: now,
@@ -4068,28 +4139,7 @@ function writeExecutionStatus(): void {
     maker: {
       quote: liveMakerQuote,
     },
-    active: [...active.values()]
-      .filter((row) => (
-        row.buyVenue === 'extended' && row.sellVenue === 'lighter'
-      ) || (
-        row.buyVenue === 'lighter' && row.sellVenue === 'extended'
-      ))
-      .map((row) => ({
-        id: row.id,
-        coin: row.coin,
-        buyVenue: row.buyVenue,
-        sellVenue: row.sellVenue,
-        startedAt: row.startedAt,
-        currentNetBps1000: row.currentNetBps1000,
-        currentBuyVwap1000: row.currentBuyVwap1000,
-        currentSellVwap1000: row.currentSellVwap1000,
-        currentBuyDepthUsd: row.currentBuyDepthUsd,
-        currentSellDepthUsd: row.currentSellDepthUsd,
-        currentBuyBookAgeMs: row.currentBuyBookAgeMs,
-        currentSellBookAgeMs: row.currentSellBookAgeMs,
-        currentBuyBookSourceAgeMs: row.currentBuyBookSourceAgeMs,
-        currentSellBookSourceAgeMs: row.currentSellBookSourceAgeMs,
-      })),
+    active: executionCandidates,
   };
   const tmp = `${EXECUTION_STATUS_PATH}.tmp`;
   writeFileSync(tmp, JSON.stringify(status));

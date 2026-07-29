@@ -354,6 +354,9 @@ class Canary:
         self.extended_taker_bps = float(
             os.getenv("VENUE_ARB_LIVE_EXTENDED_TAKER_BPS", "2.5")
         )
+        self.lighter_taker_bps = float(
+            os.getenv("VENUE_ARB_LIVE_LIGHTER_TAKER_BPS", "0")
+        )
         self.fresh_ms = int(os.getenv("VENUE_ARB_LIVE_FRESH_MS", "150"))
         self.source_fresh_ms = int(
             os.getenv("VENUE_ARB_LIVE_SOURCE_FRESH_MS", "750")
@@ -530,6 +533,9 @@ class Canary:
                 "minSamples": self.basis_min_samples,
                 "minSpanSeconds": self.basis_min_span_ms / 1000,
                 "minDeviationPct": self.basis_min_deviation_bps / 100,
+                "roundTripCostPct": (
+                    self.basis_round_trip_cost_bps() / 100
+                ),
                 "current": self.basis_gate_status,
             },
             "makerCancelNetPct": self.maker_cancel_net_bps / 100,
@@ -647,6 +653,24 @@ class Canary:
             exclude_ms=self.basis_exclude_ms,
             min_samples=self.basis_min_samples,
             min_span_ms=self.basis_min_span_ms,
+        )
+
+    def basis_round_trip_cost_bps(self) -> float:
+        return (
+            2 * self.extended_taker_bps
+            + 2 * self.lighter_taker_bps
+            + self.execution_buffer_bps
+        )
+
+    def basis_expected_net_bps(
+        self,
+        metrics: dict[str, float] | None,
+    ) -> float:
+        if metrics is None:
+            return -math.inf
+        return (
+            metrics["deviationBps"]
+            - self.basis_round_trip_cost_bps()
         )
 
     def request_shutdown(self) -> None:
@@ -1009,7 +1033,11 @@ class Canary:
         for coin, metrics in basis_by_coin.items():
             if metrics is None:
                 continue
-            candidate_basis = {"coin": coin, **metrics}
+            candidate_basis = {
+                "coin": coin,
+                **metrics,
+                "expectedNetBps": self.basis_expected_net_bps(metrics),
+            }
             if (
                 best_basis is None
                 or metrics["deviationBps"]
@@ -1047,16 +1075,22 @@ class Canary:
                 finite_float(row.get("currentSellVwap1000"), 0),
             )
             basis = basis_by_coin.get(coin)
+            basis_expected_net = self.basis_expected_net_bps(basis)
             if (
                 coin in MARKETS
                 and coin in self.allowed_coins
-                and net >= self.entry_net_bps
                 and (
-                    not self.basis_gate_enabled
+                    (
+                        not self.basis_gate_enabled
+                        and net >= self.entry_net_bps
+                    )
                     or (
+                        self.basis_gate_enabled
+                        and
                         basis is not None
                         and basis["deviationBps"]
                         >= self.basis_min_deviation_bps
+                        and basis_expected_net >= self.entry_net_bps
                     )
                 )
                 and max(ages) <= self.fresh_ms
@@ -1072,6 +1106,11 @@ class Canary:
                         ),
                         "_basisDeviationBps": (
                             basis["deviationBps"] if basis else None
+                        ),
+                        "_basisExpectedNetBps": (
+                            basis_expected_net
+                            if math.isfinite(basis_expected_net)
+                            else None
                         ),
                         "_basisSamples": basis["samples"] if basis else None,
                         "_basisSpanMs": basis["spanMs"] if basis else None,
@@ -1089,16 +1128,21 @@ class Canary:
                 )
             else:
                 self.last_rejection = (
-                    f"waiting for {self.route_label} net "
-                    f"≥{self.entry_net_bps:.1f} bps and basis deviation "
-                    f"≥{self.basis_min_deviation_bps:.1f} bps"
+                    f"waiting for {self.route_label} expected net after "
+                    f"basis reversion ≥{self.entry_net_bps:.1f} bps "
+                    f"(deviation floor "
+                    f"{self.basis_min_deviation_bps:.1f} bps)"
                 )
             return None
         self.last_rejection = None
         winner = max(
             eligible,
             key=lambda row: finite_float(
-                row.get("currentNetBps1000"),
+                (
+                    row.get("_basisExpectedNetBps")
+                    if self.basis_gate_enabled
+                    else row.get("currentNetBps1000")
+                ),
                 -math.inf,
             ),
         )
@@ -2356,7 +2400,20 @@ class Canary:
             "opportunityId": opportunity_id,
             "signalAt": int(candidate.get("startedAt") or started_at),
             "startedAt": started_at,
-            "entryNetPct": float(candidate["currentNetBps1000"]) / 100,
+            "entryNetPct": float(
+                candidate.get("_basisExpectedNetBps")
+                if self.basis_gate_enabled
+                else candidate["currentNetBps1000"]
+            ) / 100,
+            "absoluteSpreadNetPct": (
+                float(candidate["currentNetBps1000"]) / 100
+            ),
+            "basisBaselinePct": (
+                finite_float(candidate.get("_basisBaselineBps"), 0) / 100
+            ),
+            "basisDeviationPct": (
+                finite_float(candidate.get("_basisDeviationBps"), 0) / 100
+            ),
             "notionalUsdPerLeg": self.notional,
             "leverage": self.leverage,
             "quantity": float(quantity),
@@ -2867,6 +2924,14 @@ def self_test() -> None:
         min_samples=120,
         min_span_ms=120_000,
     ) is None
+    basis_guard = object.__new__(Canary)
+    basis_guard.extended_taker_bps = 2.5
+    basis_guard.lighter_taker_bps = 0
+    basis_guard.execution_buffer_bps = 2
+    assert basis_guard.basis_round_trip_cost_bps() == 7
+    assert basis_guard.basis_expected_net_bps({
+        "deviationBps": 17,
+    }) == 10
     route_guard = object.__new__(Canary)
     route_guard.route_id = "lighter-extended"
     route_guard.route_label = "Lighter → Extended"
