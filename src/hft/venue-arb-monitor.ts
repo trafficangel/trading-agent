@@ -771,7 +771,7 @@ const LIGHTER_EXTENDED_MAKER_MAX_HOLD_MS = finiteEnv(
 const FEED_STALL_MS = finiteEnv('VENUE_ARB_FEED_STALL_MS', 15_000);
 const LIGHTER_BOOK_REFRESH_MS = finiteEnv(
   'VENUE_ARB_LIGHTER_BOOK_REFRESH_MS',
-  30_000,
+  0,
 );
 const LIGHTER_REST_BOOK_ENABLED = booleanEnv(
   'VENUE_ARB_LIGHTER_REST_BOOK_ENABLED',
@@ -3461,16 +3461,21 @@ function startLighter(): void {
         else clearInterval(pingTimer);
       }, 5_000);
       pingTimer.unref();
-      const refreshTimer = setInterval(() => {
-        if (ws.readyState !== WebSocket.OPEN) {
-          clearInterval(refreshTimer);
-          return;
-        }
-        const market = ACTIVE_MARKETS[refreshIndex % ACTIVE_MARKETS.length];
-        refreshIndex++;
-        if (market) refreshBook(ws, market);
-      }, Math.max(1_000, LIGHTER_BOOK_REFRESH_MS / ACTIVE_MARKETS.length));
-      refreshTimer.unref();
+      if (LIGHTER_BOOK_REFRESH_MS > 0) {
+        const refreshTimer = setInterval(() => {
+          if (ws.readyState !== WebSocket.OPEN) {
+            clearInterval(refreshTimer);
+            return;
+          }
+          const market = ACTIVE_MARKETS[refreshIndex % ACTIVE_MARKETS.length];
+          refreshIndex++;
+          if (market) refreshBook(ws, market);
+        }, Math.max(
+          1_000,
+          LIGHTER_BOOK_REFRESH_MS / ACTIVE_MARKETS.length,
+        ));
+        refreshTimer.unref();
+      }
     },
     (payload, receivedAt, ws) => {
       const message = payload as {
