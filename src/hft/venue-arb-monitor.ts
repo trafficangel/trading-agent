@@ -672,6 +672,18 @@ const MAKER_INDEPENDENCE_MS = finiteEnv(
   'VENUE_ARB_MAKER_INDEPENDENCE_MS',
   5 * 60_000,
 );
+const MAKER_MIN_RAW_ENTRY_NET_BPS = finiteEnv(
+  'VENUE_ARB_MAKER_MIN_RAW_ENTRY_NET_BPS',
+  -1_000_000,
+);
+const MAKER_EXIT_QUOTE_DATA_GRACE_MS = finiteEnv(
+  'VENUE_ARB_MAKER_EXIT_QUOTE_DATA_GRACE_MS',
+  0,
+);
+const MAKER_EXIT_QUOTE_TTL_MS = finiteEnv(
+  'VENUE_ARB_MAKER_EXIT_QUOTE_TTL_MS',
+  0,
+);
 const GRVT_MAKER_NOTIONAL_USD = finiteEnv(
   'VENUE_ARB_GRVT_MAKER_NOTIONAL_USD',
   100,
@@ -1747,6 +1759,9 @@ const grvtMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,
   maxMakerTradeIdleMs: GRVT_MAKER_MAX_TRADE_IDLE_MS,
 }, {
@@ -1794,6 +1809,9 @@ const grvtExtendedMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,
   maxMakerTradeIdleMs: GRVT_MAKER_MAX_TRADE_IDLE_MS,
 }, {
@@ -1838,6 +1856,9 @@ const extendedAsterMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,
 }, {
   onResult: (result) => {
@@ -1881,6 +1902,9 @@ const asterBinanceMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,
 }, {
   onResult: (result) => {
@@ -1930,6 +1954,9 @@ const asterPacificaMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,
 }, {
   onResult: (result) => {
@@ -1984,6 +2011,9 @@ const asterLighterMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,
   maxMakerTradeIdleMs: ASTER_LIGHTER_MAKER_MAX_TRADE_IDLE_MS,
 }, {
@@ -2039,6 +2069,9 @@ const hibachiLighterMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,
   maxMakerTradeIdleMs: HIBACHI_LIGHTER_MAKER_MAX_TRADE_IDLE_MS,
 }, {
@@ -2090,6 +2123,9 @@ const extendedLighterMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,
   maxMakerTradeIdleMs: EXTENDED_LIGHTER_MAKER_MAX_TRADE_IDLE_MS,
 }, {
@@ -2140,6 +2176,9 @@ const extendedPacificaMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,
 }, {
   onResult: (result) => {
@@ -2189,6 +2228,9 @@ const lighterExtendedMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,
   maxMakerTradeIdleMs: LIGHTER_EXTENDED_MAKER_MAX_TRADE_IDLE_MS,
 }, {

@@ -141,6 +141,8 @@ describe('GenericMakerShadow', () => {
     const engine = new GenericMakerShadow({
       ...config,
       maxMakerTradeIdleMs: 1_000,
+      exitQuoteDataGraceMs: 5_000,
+      exitQuoteTtlMs: 10_000,
     });
     const active = market(2_000, 100.2, 100.3);
     active.makerLastTradeAt = 2_000;
@@ -161,12 +163,24 @@ describe('GenericMakerShadow', () => {
     engine.evaluate(2_003, [exit]);
     engine.evaluate(2_004, [exit]);
     expect((engine.status() as {
-      quote?: { stage?: string } | null;
-    }).quote?.stage).toBe('exit');
+      quote?: { stage?: string; expiresAt?: number } | null;
+    }).quote).toMatchObject({
+      stage: 'exit',
+      expiresAt: 12_003,
+    });
 
     const idle = market(3_005, 100.2, 100.2);
     idle.makerLastTradeAt = 2_001;
     engine.evaluate(3_005, [idle]);
+    expect((engine.status() as {
+      quote?: { stage?: string } | null;
+    }).quote?.stage).toBe('exit');
+
+    const staleHedge = market(4_006, 100.2, 100.2);
+    staleHedge.makerLastTradeAt = 2_001;
+    staleHedge.hedge!.exchangeAt = 2_000;
+    staleHedge.hedge!.receivedAt = 2_000;
+    engine.evaluate(4_006, [staleHedge]);
     expect((engine.status() as {
       quote?: { stage?: string } | null;
     }).quote?.stage).toBe('exit');
@@ -581,6 +595,39 @@ describe('GenericMakerShadow', () => {
     expect(coinTelemetry?.currentTopDeviationBps).toBeGreaterThanOrEqual(5);
     expect(coinTelemetry?.currentTopNetBps).toBeGreaterThan(0);
     expect(coinTelemetry?.peakTopNetBps).toBeGreaterThan(0);
+  });
+
+  it('rejects a positive basis forecast when the raw entry spread is negative', () => {
+    const basis = {
+      entry: { sell: -40 },
+      exit: { sell: 30 },
+    };
+    const statistical = new GenericMakerShadow({
+      ...config,
+      entryEdgeBps: 2,
+      cancelEdgeBps: 1,
+      basisGateEnabled: true,
+      basisMinDeviationBps: 5,
+    });
+    statistical.evaluate(4_100, [market(4_100, 100.2, 100.3, basis)]);
+    expect((statistical.status() as {
+      quote?: { side?: string; projectedNetBps?: number } | null;
+    }).quote).toMatchObject({
+      side: 'sell',
+    });
+
+    const lockedSpreadOnly = new GenericMakerShadow({
+      ...config,
+      entryEdgeBps: 2,
+      cancelEdgeBps: 1,
+      basisGateEnabled: true,
+      basisMinDeviationBps: 5,
+      minRawEntryNetBps: 1,
+    });
+    lockedSpreadOnly.evaluate(4_100, [
+      market(4_100, 100.2, 100.3, basis),
+    ]);
+    expect((lockedSpreadOnly.status() as { quote?: unknown }).quote).toBeNull();
   });
 
   it('does not manufacture a basis deviation by quoting far from top of book', () => {

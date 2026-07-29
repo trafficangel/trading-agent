@@ -209,8 +209,11 @@ export type GenericMakerConfig = {
   requiredPassPct: number;
   basisGateEnabled?: boolean;
   basisMinDeviationBps?: number;
+  minRawEntryNetBps?: number;
   maxEntryDistanceBps?: number;
   quoteDataGraceMs?: number;
+  exitQuoteDataGraceMs?: number;
+  exitQuoteTtlMs?: number;
   maxMakerTradeIdleMs?: number;
 };
 
@@ -390,11 +393,16 @@ export class GenericMakerShadow {
     market?: MakerShadowMarket,
   ): number {
     const rawEntryBps = makerEntryEdgeBps(side, makerFill, hedgeFill);
+    const rawEntryNetBps = rawEntryBps
+      - this.config.executionBufferBps
+      - this.config.makerFeeBps
+      - this.config.hedgeTakerFeeBps;
+    if (
+      rawEntryNetBps
+      < (this.config.minRawEntryNetBps ?? Number.NEGATIVE_INFINITY)
+    ) return -Infinity;
     if (!this.config.basisGateEnabled) {
-      return rawEntryBps
-        - this.config.executionBufferBps
-        - this.config.makerFeeBps
-        - this.config.hedgeTakerFeeBps;
+      return rawEntryNetBps;
     }
     const observed = this.observedBasisProjection(
       side,
@@ -465,7 +473,7 @@ export class GenericMakerShadow {
         < (this.config.basisMinDeviationBps ?? 0)
       ) return [];
     }
-    const requiredRawBps = this.config.basisGateEnabled
+    const basisRequiredRawBps = this.config.basisGateEnabled
       ? Math.max(
         Number(entryBaselineBps)
           + (this.config.basisMinDeviationBps ?? 0),
@@ -480,6 +488,13 @@ export class GenericMakerShadow {
         + this.config.executionBufferBps
         + this.config.makerFeeBps
         + this.config.hedgeTakerFeeBps;
+    const requiredRawBps = Math.max(
+      basisRequiredRawBps,
+      (this.config.minRawEntryNetBps ?? Number.NEGATIVE_INFINITY)
+        + this.config.executionBufferBps
+        + this.config.makerFeeBps
+        + this.config.hedgeTakerFeeBps,
+    );
     let syntheticPrice: number;
     if (side === 'buy') {
       const maximum = hedgeFill / (1 + requiredRawBps / 10_000);
@@ -755,7 +770,13 @@ export class GenericMakerShadow {
       createdAt: now,
       activeAt: now + this.config.quoteLatencyMs,
       activatedAt: null,
-      expiresAt: now + this.config.quoteLatencyMs + this.config.quoteTtlMs,
+      expiresAt: now + this.config.quoteLatencyMs
+        + (
+          this.config.exitQuoteTtlMs != null
+          && this.config.exitQuoteTtlMs > 0
+            ? this.config.exitQuoteTtlMs
+            : this.config.quoteTtlMs
+        ),
       projectedNetBps: selected.projectedNetBps,
       distanceBps: selected.distanceBps,
       touchDistanceBps: side === 'buy'
@@ -1285,9 +1306,14 @@ export class GenericMakerShadow {
         : this.config.exitNetBps;
       if (projection == null) {
         this.quote.projectionUnavailableAt ??= now;
+        const dataGraceMs = this.quote.stage === 'exit'
+          ? this.config.exitQuoteDataGraceMs
+            ?? this.config.quoteDataGraceMs
+            ?? 0
+          : this.config.quoteDataGraceMs ?? 0;
         if (
           now - this.quote.projectionUnavailableAt
-          < (this.config.quoteDataGraceMs ?? 0)
+          < dataGraceMs
         ) return;
       } else {
         this.quote.projectionUnavailableAt = null;
