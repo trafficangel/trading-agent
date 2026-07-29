@@ -1,0 +1,44 @@
+[Unit]
+Description=Robot Claude Tokyo direct REST Extended/Lighter arb calibration
+After=network-online.target venue-arb-monitor.service
+Wants=network-online.target venue-arb-monitor.service
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/venue-arb-tokyo
+EnvironmentFile=/etc/venue-arb-tokyo/extended.env
+EnvironmentFile=/etc/venue-arb-tokyo/lighter.env
+Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/candidate-routes
+Environment=VENUE_ARB_LIVE_ENABLED=false
+Environment=VENUE_ARB_LIVE_EXECUTION=taker-taker
+Environment=VENUE_ARB_LIVE_ROUTE=both
+Environment=VENUE_ARB_LIVE_ALLOWED_COINS=BTC,ETH,SOL,HYPE,XRP,DOGE,ADA,BNB,LTC,LIT,XMR,NEAR,CRV,FARTCOIN,PUMP,WTI,XAU,XAG,ZEC,EUR,ENA,AAVE,JUP,UNI,XPL
+Environment=VENUE_ARB_LIVE_NOTIONAL_USD=100
+Environment=VENUE_ARB_LIVE_ENTRY_NET_BPS=10
+Environment=VENUE_ARB_LIVE_BASIS_GATE_ENABLED=true
+Environment=VENUE_ARB_LIVE_BASIS_WINDOW_SECONDS=1800
+Environment=VENUE_ARB_LIVE_BASIS_EXCLUDE_SECONDS=5
+Environment=VENUE_ARB_LIVE_BASIS_MIN_SAMPLES=120
+Environment=VENUE_ARB_LIVE_BASIS_MIN_SPAN_SECONDS=120
+Environment=VENUE_ARB_LIVE_BASIS_MIN_DEVIATION_BPS=10
+Environment=VENUE_ARB_LIVE_EXTENDED_TAKER_BPS=2.5
+Environment=VENUE_ARB_LIVE_LIGHTER_TAKER_BPS=0
+Environment=VENUE_ARB_LIVE_EXECUTION_BUFFER_BPS=2
+Environment=VENUE_ARB_REST_CALIBRATION_COINS=LIT,HYPE,XPL
+Environment=VENUE_ARB_REST_CALIBRATION_INTERVAL_SECONDS=1.5
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/trader/venvs/venue-arb-tokyo/bin/python /home/trader/apps/venue-arb-tokyo/venue-arb-live.py --rest-calibration-seconds 86400
+Restart=always
+RestartSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/venue-arb-tokyo/data
+MemoryMax=96M
+CPUQuota=20%
+
+[Install]
+WantedBy=multi-user.target
