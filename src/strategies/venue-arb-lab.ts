@@ -1793,22 +1793,28 @@ async function render(lang: Lang): Promise<string> {
 }
 
 export async function venueArbHero(lang: Lang): Promise<string> {
-  const status = await readStatus();
-  const isLive = live(status);
-  const summary = status?.summary ?? {};
-  const triggerBps = Number(status?.netTriggerBps ?? 3);
-  const profitableActive = (status?.active ?? [])
-    .filter((row) => Number(currentNet1000Bps(row)) > triggerBps).length;
+  const targeted = await readTargeted();
+  const status = targeted.candidateStatus;
+  const isLive = Boolean(
+    status?.updatedAt
+    && Date.now() - status.updatedAt < 15_000,
+  );
+  const routeCount = Object.keys(status?.executionShadow?.routes ?? {}).length
+    + (status?.asterLighterMakerShadow?.enabled ? 1 : 0);
+  const samples = Number(
+    targeted.lighterMakerGate?.metrics?.samples
+    ?? status?.asterLighterMakerShadow?.readiness?.samples
+    ?? 0,
+  );
   return `<a class="va-hero" href="/lab/venue-arb">
-    <div><span class="va-badge">⚡ DEX ↔ CEX · PERP ARBITRAGE · READ-ONLY</span>
-      <div class="va-title">Executable Divergence Radar</div>
-      <div class="va-sub">${t(lang, '9 площадок · $1,000 net после комиссий · скорость схождения →', '9 venues · $1,000 net after fees · convergence speed →')}</div>
+    <div><span class="va-badge">⚡ ASTER ↔ LIGHTER · SHADOW</span>
+      <div class="va-title">${t(lang, 'Исполнимый арбитраж', 'Executable arbitrage')}</div>
+      <div class="va-sub">${t(lang, '$100 на ногу · все расходы · реальные входы выключены →', '$100 per leg · all costs · real entries disabled →')}</div>
     </div>
     <div class="va-hero-stats">
-      <span><b class="${isLive ? 'pos' : 'neg'}">${isLive ? 'LIVE' : 'OFFLINE'}</b><small>engine</small></span>
-      <span><b>${profitableActive}</b><small>net+ live</small></span>
-      <span><b>${Number(summary.viable ?? 0)}</b><small>net+ closed</small></span>
-      <span><b class="${Number(summary.viable ?? 0) > 0 ? 'pos' : ''}">${Number(summary.viable ?? 0)}</b><small>net+</small></span>
+      <span><b class="${isLive ? 'pos' : 'neg'}">${isLive ? 'LIVE' : 'OFFLINE'}</b><small>shadow</small></span>
+      <span><b>${routeCount}</b><small>${t(lang, 'маршрута', 'routes')}</small></span>
+      <span><b>${samples} / 30</b><small>gate</small></span>
     </div>
   </a>`;
 }
