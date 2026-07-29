@@ -261,4 +261,23 @@ describe('GenericMakerShadow', () => {
     expect(quote?.side).toBe('buy');
     expect(quote?.projectedNetBps).toBeGreaterThanOrEqual(2);
   });
+
+  it('does not manufacture a basis deviation by quoting far from top of book', () => {
+    const engine = new GenericMakerShadow({
+      ...config,
+      entryEdgeBps: 2,
+      cancelEdgeBps: 1,
+      postFillNetBps: 1,
+      basisGateEnabled: true,
+      basisMinDeviationBps: 5,
+      maxEntryDistanceBps: 25,
+    });
+    const snapshot = market(5_000, 100.2, 100.3, {
+      entry: { buy: 20 },
+      exit: { buy: -10 },
+    });
+    snapshot.maker!.bids.set(99.8, 0.1);
+    engine.evaluate(5_000, [snapshot]);
+    expect((engine.status() as { quote?: unknown }).quote).toBeNull();
+  });
 });

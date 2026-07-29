@@ -123,6 +123,8 @@ export type GenericMakerTelemetry = {
   lastQuoteAt: number | null;
   bestProjectedEntryBps: number | null;
   bestProjectedCoin: string | null;
+  peakProjectedEntryBps: number | null;
+  peakProjectedCoin: string | null;
 };
 
 export type GenericMakerCheckpoint = {
@@ -215,6 +217,8 @@ export class GenericMakerShadow {
     lastQuoteAt: null,
     bestProjectedEntryBps: null,
     bestProjectedCoin: null,
+    peakProjectedEntryBps: null,
+    peakProjectedCoin: null,
   };
 
   private readonly hooks: GenericMakerHooks;
@@ -349,6 +353,18 @@ export class GenericMakerShadow {
       this.config.basisGateEnabled
       && (entryBaselineBps == null || exitBaselineBps == null)
     ) return [];
+    if (this.config.basisGateEnabled) {
+      const currentMakerPrice = side === 'buy' ? bestBid : bestAsk;
+      const currentRawBps = makerEntryEdgeBps(
+        side,
+        currentMakerPrice,
+        hedgeFill,
+      );
+      if (
+        currentRawBps - Number(entryBaselineBps)
+        < (this.config.basisMinDeviationBps ?? 0)
+      ) return [];
+    }
     const requiredRawBps = this.config.basisGateEnabled
       ? Math.max(
         Number(entryBaselineBps)
@@ -508,7 +524,20 @@ export class GenericMakerShadow {
         + candidate.distanceBps * 2
       )
     );
-    return candidates.sort((a, b) => score(b) - score(a))[0] ?? null;
+    const selected = candidates.sort((a, b) => score(b) - score(a))[0]
+      ?? null;
+    if (selected) {
+      this.telemetry.bestProjectedEntryBps = selected.projectedNetBps;
+      this.telemetry.bestProjectedCoin = selected.coin;
+      if (
+        this.telemetry.peakProjectedEntryBps == null
+        || selected.projectedNetBps > this.telemetry.peakProjectedEntryBps
+      ) {
+        this.telemetry.peakProjectedEntryBps = selected.projectedNetBps;
+        this.telemetry.peakProjectedCoin = selected.coin;
+      }
+    }
+    return selected;
   }
 
   private exitCandidate(now: number): GenericMakerQuote | null {

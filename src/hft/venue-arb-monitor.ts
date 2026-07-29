@@ -1152,7 +1152,7 @@ const grvtMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
-  maxEntryDistanceBps: 25,
+  maxEntryDistanceBps: 3,
 }, {
   onResult: (result) => {
     appendFileSync(GRVT_MAKER_RESULTS_PATH, `${JSON.stringify(result)}\n`);
@@ -1192,7 +1192,7 @@ const grvtExtendedMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
-  maxEntryDistanceBps: 25,
+  maxEntryDistanceBps: 3,
 }, {
   onResult: (result) => {
     appendFileSync(
@@ -1235,7 +1235,7 @@ const extendedAsterMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
-  maxEntryDistanceBps: 25,
+  maxEntryDistanceBps: 3,
 }, {
   onResult: (result) => {
     appendFileSync(
@@ -1278,7 +1278,7 @@ const lighterExtendedMakerShadow = new GenericMakerShadow({
   requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
-  maxEntryDistanceBps: 25,
+  maxEntryDistanceBps: 3,
 }, {
   onResult: (result) => {
     appendFileSync(
