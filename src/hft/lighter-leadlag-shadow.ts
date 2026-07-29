@@ -464,29 +464,46 @@ function startExtended(): void {
       } else {
         return;
       }
-      const bids = [...depth.bids.entries()]
-        .filter(([price, size]) => price > 0 && size > 0)
-        .sort((left, right) => right[0] - left[0]);
-      const asks = [...depth.asks.entries()]
-        .filter(([price, size]) => price > 0 && size > 0)
-        .sort((left, right) => left[0] - right[0]);
-      const bid = bids[0];
-      const ask = asks[0];
-      if (!bid || !ask || !(ask[0] > bid[0])) return;
-      Object.assign(quote, {
-        bid: bid[0],
-        ask: ask[0],
-        bidSize: bid[1],
-        askSize: ask[1],
-        exchangeAt: normalizeTimestamp(message.ts, receivedAt),
-        receivedAt,
-        updates: quote.updates + 1,
-      });
+      quote.exchangeAt = normalizeTimestamp(message.ts, receivedAt);
+      quote.receivedAt = receivedAt;
+      quote.updates++;
     },
     {
       headers: { 'User-Agent': 'RobotClaude-LighterLeadLag/1.0' },
     },
   );
+}
+
+function bestExtendedLevel(
+  levels: ReadonlyMap<number, number>,
+  side: 'bid' | 'ask',
+): [price: number, size: number] | null {
+  let bestPrice = side === 'bid' ? -Infinity : Infinity;
+  let bestSize = 0;
+  for (const [price, size] of levels) {
+    if (!(price > 0) || !(size > 0)) continue;
+    if (
+      (side === 'bid' && price > bestPrice)
+      || (side === 'ask' && price < bestPrice)
+    ) {
+      bestPrice = price;
+      bestSize = size;
+    }
+  }
+  return Number.isFinite(bestPrice) ? [bestPrice, bestSize] : null;
+}
+
+function refreshExtendedQuote(coin: string): void {
+  const depth = extendedDepth.get(coin);
+  const quote = extendedQuotes.get(coin);
+  if (!depth || !quote) return;
+  const bid = bestExtendedLevel(depth.bids, 'bid');
+  const ask = bestExtendedLevel(depth.asks, 'ask');
+  if (!bid || !ask || !(ask[0] > bid[0])) return;
+  quote.bid = bid[0];
+  quote.bidSize = bid[1];
+  quote.ask = ask[0];
+  quote.askSize = ask[1];
 }
 
 function quoteFresh(quote: Quote, now: number): boolean {
@@ -744,6 +761,7 @@ function sample(): void {
   const now = Date.now();
   updateProbes(now);
   for (const market of MARKETS) {
+    refreshExtendedQuote(market.coin);
     const binance = binanceQuotes.get(market.coin)!;
     const extended = extendedQuotes.get(market.coin)!;
     const lighter = lighterQuotes.get(market.coin)!;
@@ -833,15 +851,18 @@ function writeStatus(): void {
     freshnessMs: Object.fromEntries(MARKETS.map((market) => [
       market.coin,
       {
-        binance: binanceQuotes.get(market.coin)?.receivedAt
-          ? now - binanceQuotes.get(market.coin)!.receivedAt
-          : null,
-        lighter: lighterQuotes.get(market.coin)?.receivedAt
-          ? now - lighterQuotes.get(market.coin)!.receivedAt
-          : null,
-        extended: extendedQuotes.get(market.coin)?.receivedAt
-          ? now - extendedQuotes.get(market.coin)!.receivedAt
-          : null,
+        binanceReceived: binanceQuotes.get(market.coin)?.receivedAt
+          ? now - binanceQuotes.get(market.coin)!.receivedAt : null,
+        binanceExchange: binanceQuotes.get(market.coin)?.exchangeAt
+          ? now - binanceQuotes.get(market.coin)!.exchangeAt : null,
+        lighterReceived: lighterQuotes.get(market.coin)?.receivedAt
+          ? now - lighterQuotes.get(market.coin)!.receivedAt : null,
+        lighterExchange: lighterQuotes.get(market.coin)?.exchangeAt
+          ? now - lighterQuotes.get(market.coin)!.exchangeAt : null,
+        extendedReceived: extendedQuotes.get(market.coin)?.receivedAt
+          ? now - extendedQuotes.get(market.coin)!.receivedAt : null,
+        extendedExchange: extendedQuotes.get(market.coin)?.exchangeAt
+          ? now - extendedQuotes.get(market.coin)!.exchangeAt : null,
       },
     ])),
     recent: results.slice(-50).reverse(),
