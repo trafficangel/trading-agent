@@ -19,6 +19,7 @@ import math
 import os
 import signal
 import statistics
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -591,6 +592,9 @@ class Canary:
         self.status_path = self.data_dir / "live-status.json"
         self.trades_path = self.data_dir / "live-trades.json"
         self.basis_path = self.data_dir / "basis-calibration-v1.json"
+        self.rest_calibration_path = (
+            self.data_dir / "rest-calibration-v1.ndjson"
+        )
         self.lock_path = self.data_dir / "live.lock"
         self.running = True
         self.shutdown_requested = False
@@ -1325,6 +1329,88 @@ class Canary:
                     }
                 )
         return rows
+
+    def rest_calibration_candidate(self) -> dict[str, Any] | None:
+        path = self.rest_calibration_path
+        if not path.exists():
+            return None
+        now = int(time.time() * 1000)
+        max_age_ms = max(self.source_fresh_ms, 5_000)
+        try:
+            size = path.stat().st_size
+            with path.open("rb") as handle:
+                handle.seek(max(0, size - 256_000))
+                payload = handle.read().decode(
+                    "utf-8",
+                    errors="ignore",
+                )
+        except OSError:
+            return None
+        rows: list[dict[str, Any]] = []
+        for line in payload.splitlines()[-500:]:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            at = int(row.get("at", 0) or 0)
+            route_id = str(row.get("routeId") or "")
+            coin = str(row.get("coin") or "")
+            expected_net_bps = finite_float(
+                row.get("expectedNetBps"),
+                -math.inf,
+            )
+            deviation_bps = finite_float(
+                row.get("deviationBps"),
+                -math.inf,
+            )
+            if (
+                row.get("version") == "rest-calibration-v1"
+                and now - max_age_ms <= at <= now + 1_000
+                and route_id in self.live_routes
+                and coin in self.allowed_coins
+                and expected_net_bps >= self.entry_net_bps
+                and deviation_bps >= self.basis_min_deviation_bps
+            ):
+                rows.append(row)
+        if not rows:
+            return None
+        winner = max(
+            rows,
+            key=lambda row: finite_float(
+                row.get("expectedNetBps"),
+                -math.inf,
+            ),
+        )
+        route_id = str(winner["routeId"])
+        coin = str(winner["coin"])
+        at = int(winner["at"])
+        return {
+            "id": f"rest-scan-{route_id}-{coin}",
+            "coin": coin,
+            "buyVenue": ROUTES[route_id][0],
+            "sellVenue": ROUTES[route_id][1],
+            "startedAt": at,
+            "currentRawBps1000": winner.get("currentBps"),
+            "currentNetBps1000": (
+                finite_float(winner.get("currentBps"), -math.inf)
+                - self.basis_round_trip_cost_bps()
+            ),
+            "_basisBaselineBps": winner.get("baselineBps"),
+            "_basisExitBaselineBps": winner.get(
+                "exitBaselineBps"
+            ),
+            "_basisDeviationBps": winner.get("deviationBps"),
+            "_basisExpectedNetBps": winner.get("expectedNetBps"),
+            "_basisSamples": winner.get("samples"),
+            "_basisSpanMs": winner.get("spanMs"),
+            "_routeId": route_id,
+            "_routeLabel": ROUTES[route_id][2],
+            "_buyVenue": ROUTES[route_id][0],
+            "_sellVenue": ROUTES[route_id][1],
+            "_snapshotAt": at,
+            "_quoteVersion": f"rest-calibration:{at}",
+            "_candidateSource": "direct_rest_calibration",
+        }
 
     def candidate(self) -> dict[str, Any] | None:
         status = self.read_json(self.execution_path, {})
@@ -2407,9 +2493,18 @@ class Canary:
         if seconds <= 0:
             raise RuntimeError("REST calibration duration must be positive")
         await self.create_extended_client()
+        requested_coins = {
+            coin.strip().upper()
+            for coin in os.getenv(
+                "VENUE_ARB_REST_CALIBRATION_COINS",
+                "",
+            ).split(",")
+            if coin.strip()
+        }
         coins = [
             coin
             for coin in sorted(self.allowed_coins)
+            if not requested_coins or coin in requested_coins
             if f"{coin}-USD" in self.extended_markets
             and all(
                 self.basis_samples.get(f"{route_id}:{coin}")
@@ -2426,6 +2521,15 @@ class Canary:
         candidates = 0
         best: dict[str, Any] | None = None
         last_report = 0.0
+        interval_seconds = max(
+            1.0,
+            float(
+                os.getenv(
+                    "VENUE_ARB_REST_CALIBRATION_INTERVAL_SECONDS",
+                    "1.5",
+                )
+            ),
+        )
         while self.running and time.monotonic() < deadline:
             for coin in coins:
                 if not self.running or time.monotonic() >= deadline:
@@ -2477,18 +2581,29 @@ class Canary:
                             best = row
                 except Exception as error:
                     errors += 1
+                    reason = str(error).splitlines()[0][:200]
                     print(
                         json.dumps(
                             {
                                 "event": "rest_calibration_error",
                                 "at": at,
                                 "coin": coin,
-                                "error": str(error),
+                                "error": reason,
                             },
                             separators=(",", ":"),
                         ),
                         flush=True,
                     )
+                    if any(
+                        marker in str(error).lower()
+                        for marker in (
+                            "429",
+                            "too many requests",
+                            "captcha",
+                            "human verification",
+                        )
+                    ):
+                        await asyncio.sleep(30)
                 if time.monotonic() - last_report >= 10:
                     print(
                         json.dumps(
@@ -2505,7 +2620,7 @@ class Canary:
                         flush=True,
                     )
                     last_report = time.monotonic()
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(interval_seconds)
         print(
             json.dumps(
                 {
@@ -3495,7 +3610,10 @@ class Canary:
             candidate = (
                 self.maker_candidate()
                 if self.execution_mode == "maker-taker"
-                else self.candidate()
+                else (
+                    self.rest_calibration_candidate()
+                    or self.candidate()
+                )
             )
             if candidate and self.execution_mode == "taker-taker":
                 candidate = await self.revalidate_taker_candidate(candidate)
@@ -3800,6 +3918,49 @@ def self_test() -> None:
     assert trigger_rows[1]["currentBuyDepthUsd"] == 3_000
     assert trigger_rows[1]["currentSellDepthUsd"] == 4_000
     assert trigger_rows[1]["_unvalidatedTriggerOnly"] is True
+    with tempfile.TemporaryDirectory() as directory:
+        rest_guard = object.__new__(Canary)
+        rest_guard.rest_calibration_path = (
+            Path(directory) / "rest-calibration-v1.ndjson"
+        )
+        rest_guard.source_fresh_ms = 3_000
+        rest_guard.live_routes = ("lighter-extended",)
+        rest_guard.allowed_coins = {"HYPE"}
+        rest_guard.entry_net_bps = 10
+        rest_guard.basis_min_deviation_bps = 10
+        rest_guard.extended_taker_bps = 2.5
+        rest_guard.lighter_taker_bps = 0
+        rest_guard.execution_buffer_bps = 2
+        direct_at = int(time.time() * 1000)
+        rest_guard.rest_calibration_path.write_text(
+            json.dumps(
+                {
+                    "version": "rest-calibration-v1",
+                    "at": direct_at,
+                    "coin": "HYPE",
+                    "routeId": "lighter-extended",
+                    "currentBps": 30,
+                    "baselineBps": 5,
+                    "exitBaselineBps": -10,
+                    "deviationBps": 25,
+                    "expectedNetBps": 13,
+                    "samples": 200,
+                    "spanMs": 180_000,
+                    "qualified": True,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        direct_candidate = rest_guard.rest_calibration_candidate()
+        assert direct_candidate is not None
+        assert direct_candidate["id"] == (
+            "rest-scan-lighter-extended-HYPE"
+        )
+        assert direct_candidate["_basisExpectedNetBps"] == 13
+        assert direct_candidate["_candidateSource"] == (
+            "direct_rest_calibration"
+        )
 
     async def taker_revalidation_check() -> None:
         guard = object.__new__(Canary)
