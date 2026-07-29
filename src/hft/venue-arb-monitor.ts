@@ -404,6 +404,10 @@ const OPPORTUNITIES_PATH = resolve(DATA_DIR, 'opportunities.ndjson');
 const LIVE_TRADES_PATH = resolve(DATA_DIR, 'live-trades.json');
 const SHADOW_RESULTS_PATH = resolve(DATA_DIR, 'shadow-execution-v4.ndjson');
 const SHADOW_ACTIVE_PATH = resolve(DATA_DIR, 'shadow-active-v4.json');
+const SHADOW_BASIS_STATE_PATH = resolve(
+  DATA_DIR,
+  'shadow-basis-calibration-v1.json',
+);
 const MAKER_RESULTS_PATH = resolve(DATA_DIR, 'maker-shadow-v1.ndjson');
 const MAKER_ACTIVE_PATH = resolve(DATA_DIR, 'maker-active-v1.json');
 const GRVT_MAKER_RESULTS_PATH = resolve(
@@ -484,6 +488,10 @@ const SHADOW_BASIS_EXCLUDE_MS = finiteEnv(
 const SHADOW_BASIS_SAMPLE_MS = finiteEnv(
   'VENUE_ARB_SHADOW_BASIS_SAMPLE_MS',
   1_000,
+);
+const SHADOW_BASIS_PERSIST_MS = Math.max(
+  10_000,
+  finiteEnv('VENUE_ARB_SHADOW_BASIS_PERSIST_MS', 60_000),
 );
 const SHADOW_BASIS_MIN_SAMPLES = finiteEnv(
   'VENUE_ARB_SHADOW_BASIS_MIN_SAMPLES',
@@ -1247,6 +1255,7 @@ const shadowRouteTelemetry = new Map<string, ShadowRouteTelemetry>(
 );
 const shadowBasisSamples = new Map<string, VenueArbBasisSample[]>();
 const shadowBasisLastSampleAt = new Map<string, number>();
+let shadowBasisStateDirty = false;
 
 const books = new Map<string, BookState>();
 const executableBooks = new Map<string, ExecutableBook>();
@@ -1871,6 +1880,53 @@ function observeShadowBasis(
     samples.filter((sample) => sample.at >= cutoff),
   );
   shadowBasisLastSampleAt.set(key, quote.at);
+  shadowBasisStateDirty = true;
+}
+
+function loadShadowBasisState(): void {
+  if (!existsSync(SHADOW_BASIS_STATE_PATH)) return;
+  try {
+    const saved = JSON.parse(
+      readFileSync(SHADOW_BASIS_STATE_PATH, 'utf8'),
+    ) as {
+      samples?: Record<string, VenueArbBasisSample[]>;
+    };
+    const cutoff = Date.now() - SHADOW_BASIS_WINDOW_MS;
+    for (const [key, rows] of Object.entries(saved.samples ?? {})) {
+      const samples = (Array.isArray(rows) ? rows : []).filter((row) => (
+        Number.isFinite(row?.at)
+        && Number.isFinite(row?.bps)
+        && row.at >= cutoff
+      ));
+      if (!samples.length) continue;
+      samples.sort((a, b) => a.at - b.at);
+      shadowBasisSamples.set(key, samples);
+      shadowBasisLastSampleAt.set(key, samples.at(-1)!.at);
+    }
+  } catch (error) {
+    console.warn(
+      'venue-arb shadow basis load',
+      (error as Error).message,
+    );
+  }
+}
+
+function writeShadowBasisState(force = false): void {
+  if (!force && !shadowBasisStateDirty) return;
+  const cutoff = Date.now() - SHADOW_BASIS_WINDOW_MS;
+  atomicJson(SHADOW_BASIS_STATE_PATH, {
+    version: 'venue-arb-shadow-basis-calibration-v1',
+    updatedAt: Date.now(),
+    samples: Object.fromEntries(
+      [...shadowBasisSamples.entries()]
+        .map(([key, rows]) => [
+          key,
+          rows.filter((row) => row.at >= cutoff),
+        ] as const)
+        .filter(([, rows]) => rows.length > 0),
+    ),
+  });
+  shadowBasisStateDirty = false;
 }
 
 function shadowBasisMetrics(
@@ -5153,6 +5209,7 @@ function shutdown(signal: string): void {
   clearInterval(evaluationTimer);
   clearInterval(statusTimer);
   clearInterval(feedWatchdogTimer);
+  clearInterval(basisStateTimer);
   // A service restart is not market convergence and must not contaminate the
   // decay distribution with artificial "closed" opportunities.
   active.clear();
@@ -5163,6 +5220,7 @@ function shutdown(signal: string): void {
   extendedLighterMakerShadow.shutdown(Date.now());
   extendedPacificaMakerShadow.shutdown(Date.now());
   lighterExtendedMakerShadow.shutdown(Date.now());
+  writeShadowBasisState(true);
   writeStatus();
   writeExecutionStatus();
   for (const ws of sockets) ws.close();
@@ -5195,6 +5253,7 @@ if (!existsSync(LIGHTER_EXTENDED_MAKER_RESULTS_PATH)) {
 }
 loadHistory();
 loadShadowState();
+loadShadowBasisState();
 loadMakerState();
 loadGenericMakerState(
   grvtMakerShadow,
@@ -5337,6 +5396,10 @@ const evaluationTimer = setInterval(() => {
 }, SAMPLE_MS);
 const statusTimer = setInterval(writeStatus, 1_000);
 const feedWatchdogTimer = setInterval(reconnectStalledFeeds, 5_000);
+const basisStateTimer = setInterval(
+  writeShadowBasisState,
+  SHADOW_BASIS_PERSIST_MS,
+);
 writeStatus();
 writeExecutionStatus();
 process.on('SIGTERM', () => shutdown('SIGTERM'));
