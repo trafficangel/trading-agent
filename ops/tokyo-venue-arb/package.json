@@ -1,0 +1,8 @@
+{
+  "name": "robot-claude-venue-arb-tokyo",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ws": "8.20.0"
+  }
+}
