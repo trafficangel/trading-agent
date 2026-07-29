@@ -966,6 +966,10 @@ const LIGHTER_REST_BOOK_ENABLED = booleanEnv(
   'VENUE_ARB_LIGHTER_REST_BOOK_ENABLED',
   false,
 );
+const LIGHTER_REST_ACTIVE_QUOTE_ONLY = booleanEnv(
+  'VENUE_ARB_LIGHTER_REST_ACTIVE_QUOTE_ONLY',
+  false,
+);
 const LIGHTER_REST_BOOK_INTERVAL_MS = Math.max(
   250,
   finiteEnv('VENUE_ARB_LIGHTER_REST_BOOK_INTERVAL_MS', 500),
@@ -1504,6 +1508,7 @@ const lighterRestShadowBookUpdates = new Map<number, number>();
 const lighterRestTelemetry = {
   requests: 0,
   updates: 0,
+  confirmations: 0,
   errors: 0,
   ignoredFresherWs: 0,
   lastRequestAt: null as number | null,
@@ -4141,8 +4146,19 @@ function startLighterRestBookPoller(): void {
   let running = false;
   const poll = async (): Promise<void> => {
     if (shuttingDown || running || !ACTIVE_MARKETS.length) return;
-    const market = ACTIVE_MARKETS[marketIndex % ACTIVE_MARKETS.length];
-    marketIndex++;
+    const activeMaker = asterLighterMakerShadow.status() as {
+      quote?: { coin?: string } | null;
+      pair?: { coin?: string } | null;
+      pendingHedge?: { coin?: string } | null;
+    };
+    const activeCoin = activeMaker.pendingHedge?.coin
+      ?? activeMaker.quote?.coin
+      ?? activeMaker.pair?.coin
+      ?? null;
+    const market = LIGHTER_REST_ACTIVE_QUOTE_ONLY
+      ? activeCoin == null ? undefined : byCoin.get(activeCoin)
+      : ACTIVE_MARKETS[marketIndex % ACTIVE_MARKETS.length];
+    if (!LIGHTER_REST_ACTIVE_QUOTE_ONLY) marketIndex++;
     if (!market) return;
     running = true;
     const requestStartedAt = Date.now();
@@ -4173,12 +4189,28 @@ function startLighterRestBookPoller(): void {
       const book = books.get(bookKey('lighter', market.coin));
       if (!book) return;
       // A WS depth update received after the request began is fresher than
-      // this REST snapshot and must never be overwritten.
+      // this REST snapshot and must never be overwritten. A matching REST BBO
+      // may still independently validate that fresher nonce-contiguous book.
       if (
         book.receivedAt > requestStartedAt
         && book.exchangeAt >= requestStartedAt
       ) {
-        lighterRestTelemetry.ignoredFresherWs++;
+        const restAsk = parsed.asks[0]?.[0] ?? 0;
+        const restBid = parsed.bids[0]?.[0] ?? 0;
+        if (
+          restAsk > 0
+          && restBid > 0
+          && lighterBboMatches(book, { ask: restAsk, bid: restBid })
+        ) {
+          lighterBookValidation.set(market.lighterMarketId, {
+            bookUpdates: book.updates,
+            receivedAt,
+          });
+          lighterRestTelemetry.confirmations++;
+          lighterRestTelemetry.lastUpdateAt = receivedAt;
+        } else {
+          lighterRestTelemetry.ignoredFresherWs++;
+        }
         return;
       }
       replacePriceLevels(book.bids, parsed.bids);
