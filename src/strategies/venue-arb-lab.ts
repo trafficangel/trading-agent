@@ -414,27 +414,6 @@ type Status = {
   extendedPacificaMakerShadow?: GenericMakerShadowStatus;
   lighterExtendedMakerShadow?: GenericMakerShadowStatus;
 };
-type ProfitGateStatus = {
-  updatedAt?: number;
-  routeId?: string;
-  ready?: boolean;
-  reasons?: string[];
-  requirements?: {
-    minSamples?: number;
-    minProfitFactor?: number;
-    maxDrawdownBps?: number;
-  };
-  metrics?: {
-    samples?: number;
-    positive?: number;
-    winRatePct?: number | null;
-    sumNetBps?: number;
-    sumNetUsd?: number;
-    meanNetBps?: number | null;
-    profitFactor?: number | null;
-    maxDrawdownBps?: number;
-  };
-};
 type LiveFill = {
   price?: number;
   quantity?: number;
@@ -568,11 +547,7 @@ async function readLive(): Promise<{
 }
 
 async function readTargeted(): Promise<{
-  status: Status | null;
-  takerGate: ProfitGateStatus | null;
-  makerGate: ProfitGateStatus | null;
-  extendedLighterStatus: Status | null;
-  extendedLighterGate: ProfitGateStatus | null;
+  candidateStatus: Status | null;
 }> {
   const read = async <T>(file: string, fallback: T): Promise<T> => {
     try {
@@ -584,23 +559,7 @@ async function readTargeted(): Promise<{
     }
   };
   return {
-    status: await read<Status | null>('pacifica-extended-status.json', null),
-    takerGate: await read<ProfitGateStatus | null>(
-      'pacifica-extended-gate-status.json',
-      null,
-    ),
-    makerGate: await read<ProfitGateStatus | null>(
-      'extended-pacifica-maker-gate-status.json',
-      null,
-    ),
-    extendedLighterStatus: await read<Status | null>(
-      'extended-lighter-status.json',
-      null,
-    ),
-    extendedLighterGate: await read<ProfitGateStatus | null>(
-      'extended-lighter-maker-gate-status.json',
-      null,
-    ),
+    candidateStatus: await read<Status | null>('cex-dex-status.json', null),
   };
 }
 
@@ -1253,126 +1212,74 @@ const VENUE_ARB_PAGINATION_SCRIPT = `<script>
 })();
 </script>`;
 
-function gateState(gate: ProfitGateStatus | null): string {
-  if (!gate) return 'НЕТ ДАННЫХ';
-  return gate.ready ? 'ДОПУСК ПОЛУЧЕН' : 'РЕАЛ ЗАПРЕЩЁН';
+const CANDIDATE_ROUTES = [
+  ['binance-aster', 'Binance → Aster'],
+  ['aster-binance', 'Aster → Binance'],
+  ['binance-pacifica', 'Binance → Pacifica'],
+  ['pacifica-binance', 'Pacifica → Binance'],
+  ['bybit-aster', 'Bybit → Aster'],
+  ['aster-bybit', 'Aster → Bybit'],
+] as const;
+
+function candidateRouteRows(shadow: ExecutionShadow | undefined): string {
+  return CANDIDATE_ROUTES.map(([id, label]) => {
+    const route = shadow?.routes?.[id];
+    const gate = route?.readiness;
+    const telemetry = route?.telemetry;
+    const samples = Number(gate?.samples ?? 0);
+    const required = Number(gate?.requiredSamples ?? 30);
+    const passed = Number(gate?.passed ?? 0);
+    const state = gate?.ready
+      ? '<b class="pos">ДОПУЩЕН</b>'
+      : samples > 0
+        ? '<b>НАБЛЮДЕНИЕ</b>'
+        : '<b>ЖДЁМ EDGE</b>';
+    return `<tr>
+      <td><b>${esc(label)}</b></td>
+      <td class="${cls(telemetry?.currentBestNetBps)}">${coinAndBps(
+    telemetry?.currentBestCoin,
+    telemetry?.currentBestNetBps,
+  )}</td>
+      <td class="${cls(telemetry?.peakOpeningNetBps)}">${coinAndBps(
+    telemetry?.peakCoin,
+    telemetry?.peakOpeningNetBps,
+  )}</td>
+      <td>${samples} / ${required}<small>PASS ${passed}</small></td>
+      <td>${state}</td>
+      <td>${shadowBlockers(telemetry)}</td>
+    </tr>`;
+  }).join('');
 }
 
-function gateReason(gate: ProfitGateStatus | null): string {
-  if (!gate) return 'Ожидаем синхронизацию.';
-  const reasons = gate.reasons ?? [];
-  if (!reasons.length) return 'Все финансовые условия выполнены.';
-  return reasons
-    .slice(0, 3)
-    .map((reason) => reason
-      .replace(/^samples /, 'сделки ')
-      .replace('cumulative net is not positive', 'накопленный net не положительный')
-      .replace('profit factor', 'PF')
-      .replace('95% mean lower bound is not positive', 'статистическая граница прибыли ≤ 0'))
-    .join(' · ');
-}
-
-function compactGate(
-  title: string,
-  subtitle: string,
-  gate: ProfitGateStatus | null,
-  currentCoin: unknown,
-  currentNetBps: unknown,
-  extra: string,
-): string {
-  const metrics = gate?.metrics;
-  const required = Number(gate?.requirements?.minSamples ?? 30);
-  return `<article class="va-test ${gate?.ready ? 'ready' : ''}">
-    <div class="va-test-head"><div><span>${esc(subtitle)}</span><h3>${esc(title)}</h3></div>
-      <b class="${gate?.ready ? 'pos' : 'neg'}">${gateState(gate)}</b>
-    </div>
-    <div class="va-test-metrics">
-      <span><small>Сделки</small><b>${Number(metrics?.samples ?? 0)} / ${required}</b></span>
-      <span><small>Net</small><b class="${cls(metrics?.sumNetBps)}">${pctFromBps(metrics?.sumNetBps)} · ${money(metrics?.sumNetUsd, true)}</b></span>
-      <span><small>PF</small><b>${metrics?.profitFactor == null ? '—' : Number(metrics.profitFactor).toFixed(2)}</b></span>
-      <span><small>Лучший сейчас</small><b>${coinAndBps(currentCoin, currentNetBps)}</b></span>
-      ${extra}
-    </div>
-    <p>${esc(gateReason(gate))}</p>
-  </article>`;
-}
-
-function targetedShadowRows(
-  shadow: ExecutionShadow | undefined,
-  maker: GenericMakerShadowStatus | undefined,
-  extendedLighterMaker: GenericMakerShadowStatus | undefined,
-): string {
-  const takerRoute = shadow?.routes?.['pacifica-extended'];
-  const takerActive = (takerRoute?.active ?? []).map((row) => ({
-    at: row.signalAt,
-    coin: row.coin,
-    route: 'Pacifica → Extended',
-    model: 'taker / taker',
-    status: 'В РАБОТЕ',
-    netBps: row.peakProjectedNetBps ?? row.signalNetBps,
-    detail: shadowProbeState(row.state),
-  }));
-  const takerClosed = (takerRoute?.recent ?? []).map((row) => ({
-    at: row.exitAt ?? row.signalAt,
-    coin: row.coin,
-    route: 'Pacifica → Extended',
-    model: 'taker / taker',
-    status: row.passed ? 'PASS' : 'FAIL',
-    netBps: row.realizedNetBps,
-    detail: shadowReason(row.reason),
-  }));
-  const makerActive = maker?.pair ? [{
-    at: maker.pair.openedAt,
-    coin: maker.pair.coin,
-    route: 'Extended → Pacifica',
-    model: 'maker / taker',
-    status: 'В РАБОТЕ',
-    netBps: maker.pair.entryEdgeBps,
-    detail: 'пара открыта',
-  }] : [];
-  const makerClosed = (maker?.recent ?? []).map((row) => ({
-    at: row.closedAt,
-    coin: row.coin,
-    route: 'Extended → Pacifica',
-    model: 'maker / taker',
-    status: row.passed ? 'PASS' : 'FAIL',
-    netBps: row.realizedNetBps,
-    detail: makerReason(row.reason),
-  }));
-  const extendedLighterActive = extendedLighterMaker?.pair ? [{
-    at: extendedLighterMaker.pair.openedAt,
-    coin: extendedLighterMaker.pair.coin,
-    route: 'Extended → Lighter',
-    model: 'maker / taker',
-    status: 'В РАБОТЕ',
-    netBps: extendedLighterMaker.pair.entryEdgeBps,
-    detail: 'пара открыта',
-  }] : [];
-  const extendedLighterClosed = (
-    extendedLighterMaker?.recent ?? []
-  ).map((row) => ({
-    at: row.closedAt,
-    coin: row.coin,
-    route: 'Extended → Lighter',
-    model: 'maker / taker',
-    status: row.passed ? 'PASS' : 'FAIL',
-    netBps: row.realizedNetBps,
-    detail: makerReason(row.reason),
-  }));
-  const rows = [
-    ...takerActive,
-    ...takerClosed,
-    ...makerActive,
-    ...makerClosed,
-    ...extendedLighterActive,
-    ...extendedLighterClosed,
-  ].sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
+function candidateShadowRows(shadow: ExecutionShadow | undefined): string {
+  const labels = new Map<string, string>(CANDIDATE_ROUTES);
+  const rows = CANDIDATE_ROUTES.flatMap(([id]) => {
+    const route = shadow?.routes?.[id];
+    return [
+      ...(route?.active ?? []).map((row) => ({
+        at: row.signalAt,
+        coin: row.coin,
+        route: labels.get(id) ?? id,
+        status: 'В РАБОТЕ',
+        netBps: row.peakProjectedNetBps ?? row.signalNetBps,
+        detail: shadowProbeState(row.state),
+      })),
+      ...(route?.recent ?? []).map((row) => ({
+        at: row.exitAt ?? row.signalAt,
+        coin: row.coin,
+        route: labels.get(id) ?? id,
+        status: row.passed ? 'PASS' : 'FAIL',
+        netBps: row.realizedNetBps,
+        detail: shadowReason(row.reason),
+      })),
+    ];
+  }).sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
   if (!rows.length) {
-    return '<tr><td colspan="7">Подходящих исполнительно‑реалистичных входов пока не было.</td></tr>';
+    return '<tr><td colspan="6">Исполнимых входов после задержки и всех расходов пока не было.</td></tr>';
   }
   return rows.map((row) => `<tr>
     <td>${utc(row.at)}</td><td><b>${esc(row.coin)}</b></td>
-    <td>${esc(row.route)}</td><td>${esc(row.model)}</td>
+    <td>${esc(row.route)}</td>
     <td class="${row.status === 'PASS' ? 'pos' : row.status === 'FAIL' ? 'neg' : ''}">${esc(row.status)}</td>
     <td class="${cls(row.netBps)}"><b>${pctFromBps(row.netBps)}</b></td>
     <td>${esc(row.detail)}</td>
@@ -1418,10 +1325,8 @@ async function renderCompact(lang: Lang): Promise<string> {
   const liveWins = closedLive.filter(
     (row) => Number(row.netPnlUsd ?? 0) > 0,
   ).length;
-  const extendedLighterStatus = targeted.extendedLighterStatus;
-  const extendedLighterMaker = (
-    extendedLighterStatus?.extendedLighterMakerShadow
-  );
+  const candidateStatus = targeted.candidateStatus;
+  const candidateShadow = candidateStatus?.executionShadow;
   const liveStatusFresh = Boolean(
     liveStatus?.updatedAt
     && Date.now() - liveStatus.updatedAt < 15_000,
@@ -1429,70 +1334,72 @@ async function renderCompact(lang: Lang): Promise<string> {
   const realEnabled = Boolean(liveStatusFresh && liveStatus?.enabled);
   const realPaused = !realEnabled;
   const realStateClass = realEnabled ? 'pos' : 'neg';
-  const canaryReady = Boolean(targeted.extendedLighterGate?.ready);
-  const totalTargetSamples = Number(
-    targeted.extendedLighterGate?.metrics?.samples ?? 0,
+  const candidateFresh = Boolean(
+    candidateStatus?.updatedAt
+    && Date.now() - candidateStatus.updatedAt < 15_000,
   );
-  const extendedLighterFresh = Boolean(
-    extendedLighterStatus?.updatedAt
-    && Date.now() - extendedLighterStatus.updatedAt < 15_000,
+  const candidateVenues: Venue[] = ['binance', 'bybit', 'aster', 'pacifica'];
+  const healthyFeeds = candidateVenues.filter(
+    (venue) => candidateStatus?.connections?.[venue]?.connected,
+  ).length;
+  const routes = CANDIDATE_ROUTES.map(
+    ([id]) => candidateShadow?.routes?.[id],
   );
-  const healthyTargetFeeds = (
-    extendedLighterStatus?.connections?.extended?.connected ? 1 : 0
-  )
-    + (extendedLighterStatus?.connections?.lighter?.connected ? 1 : 0);
+  const totalSamples = routes.reduce(
+    (sum, route) => sum + Number(route?.readiness?.samples ?? 0),
+    0,
+  );
+  const totalAttempts = routes.reduce(
+    (sum, route) => sum + Number(route?.readiness?.attempts ?? 0),
+    0,
+  );
+  const readyRoutes = routes.filter((route) => route?.readiness?.ready).length;
+  const canaryReady = readyRoutes > 0;
   return pageShell(
     t(lang, 'Арбитраж — контроль прибыли', 'Arbitrage profit control'),
     `<style>${VENUE_ARB_CSS}
-      .va-compact .va-cards{grid-template-columns:repeat(4,1fr)}
-      .va-decision{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 20px;border:1px solid ${canaryReady ? 'rgba(56,217,150,.45)' : 'rgba(255,101,119,.32)'};border-radius:14px;background:${canaryReady ? 'rgba(56,217,150,.06)' : 'rgba(255,101,119,.05)'}}
-      .va-decision h2{margin:4px 0 5px;font-size:21px}.va-decision p{margin:0;color:var(--text-dim);font-size:13px}.va-decision>b{white-space:nowrap;font-size:14px}
-      .va-test-grid{display:grid;grid-template-columns:1fr;gap:12px;margin:12px 0}.va-test{padding:17px;border:1px solid var(--border);border-radius:14px;background:var(--bg-card)}.va-test.ready{border-color:rgba(56,217,150,.4)}.va-test-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.va-test-head span{color:var(--text-faint);font-size:10px;letter-spacing:.05em}.va-test-head h3{font-size:16px;margin:5px 0}.va-test-head>b{font-size:11px;white-space:nowrap}.va-test-metrics{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin:12px 0}.va-test-metrics span{display:grid;gap:3px;padding:9px;background:var(--bg);border-radius:9px}.va-test-metrics small{font-size:9px;color:var(--text-faint);text-transform:uppercase}.va-test-metrics b{font-size:13px}.va-test p{margin:0;color:var(--text-dim);font-size:11px}
-      .va-compact .va-panel{padding:16px}.va-compact .va-panel-head h2{margin:0}.va-compact .va-table td small{display:block}.va-compact-note{margin:10px 0 0;color:var(--text-faint);font-size:11px}
-      @media(max-width:900px){.va-compact .va-cards{grid-template-columns:repeat(2,1fr)}.va-test-grid{grid-template-columns:1fr}.va-test-metrics{grid-template-columns:repeat(2,1fr)}}@media(max-width:520px){.va-compact .va-cards{grid-template-columns:1fr}.va-decision{display:block}.va-decision>b{display:block;margin-top:12px}}
+      .va-compact .va-head h1{margin-bottom:2px}.va-compact .va-head p{margin:0}
+      .va-compact .va-cards{grid-template-columns:repeat(3,1fr);margin:16px 0 10px}
+      .va-summary{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:13px 16px;border:1px solid ${canaryReady ? 'rgba(56,217,150,.45)' : 'rgba(255,101,119,.28)'};border-radius:12px;background:${canaryReady ? 'rgba(56,217,150,.06)' : 'rgba(255,101,119,.04)'}}
+      .va-summary b{white-space:nowrap}.va-summary span{color:var(--text-dim);font-size:12px}
+      .va-compact .va-panel{padding:14px;margin-top:10px}.va-compact .va-panel-head h2{margin:0}.va-compact .va-table td small{display:block}.va-compact-note{margin:8px 0 0;color:var(--text-faint);font-size:11px}
+      @media(max-width:760px){.va-compact .va-cards{grid-template-columns:1fr}.va-summary{align-items:flex-start;flex-direction:column}}
     </style>
     <div class="va-wrap va-compact">
       <a class="va-back" href="/lab">← Лаборатория</a>
       <div class="va-head"><div>
-        <span class="va-badge">ARBITRAGE CONTROL · NET AFTER COSTS</span>
-        <h1>Арбитраж: только доказанная прибыль</h1>
-        <p>Здесь показаны реальные деньги и единственный активный изолированный тест с финансовым gate. Остановленные маршруты и техническая телеметрия экран не загромождают.</p>
-      </div><div class="va-engine ${extendedLighterFresh ? 'live' : ''}"><i></i>${extendedLighterFresh ? 'МОНИТОР РАБОТАЕТ' : 'НЕТ СВЕЖИХ ДАННЫХ'}</div></div>
+        <span class="va-badge">NET AFTER ALL COSTS</span>
+        <h1>Арбитраж</h1>
+        <p>Только активные проверки, shadow‑исполнение и реальные деньги.</p>
+      </div><div class="va-engine ${candidateFresh ? 'live' : ''}"><i></i>${candidateFresh ? 'SHADOW LIVE' : 'НЕТ ДАННЫХ'}</div></div>
 
       <div class="va-cards">
-        <div class="va-card"><small>Реальный net PnL</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b><em>после ${money(liveFees)} комиссий</em></div>
-        <div class="va-card"><small>Реальная торговля</small><b class="${realStateClass}">${realPaused ? 'ОСТАНОВЛЕНА' : liveState(liveStatus)}</b><em>${realPaused ? 'live-сервис выключен · ждёт gate' : 'canary активен'}</em></div>
-        <div class="va-card"><small>Закрыто / прибыльных</small><b>${closedLive.length} / ${liveWins}</b><em>только фактические fills</em></div>
-        <div class="va-card"><small>Актуальный тест</small><b>${totalTargetSamples} / 30</b><em>потоки ${healthyTargetFeeds}/2 · один строгий gate</em></div>
+        <div class="va-card"><small>Реальный net</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b><em>${closedLive.length} сделок · ${liveWins} прибыльных · комиссии ${money(liveFees)}</em></div>
+        <div class="va-card"><small>Реальная торговля</small><b class="${realStateClass}">${realPaused ? 'ОСТАНОВЛЕНА' : liveState(liveStatus)}</b><em>${realPaused ? 'до доказанного положительного gate' : 'canary активен'}</em></div>
+        <div class="va-card"><small>Shadow</small><b>${totalSamples} сделок</b><em>${totalAttempts} попыток · потоки ${healthyFeeds}/4 · маршрутов ${CANDIDATE_ROUTES.length}</em></div>
       </div>
 
-      <div class="va-decision">
-        <div><span class="va-badge">ТЕКУЩЕЕ РЕШЕНИЕ</span>
-          <h2>${canaryReady ? 'Можно готовить одну canary-сделку' : 'Реальные входы запрещены'}</h2>
-          <p>${canaryReady ? 'Хотя бы один маршрут прошёл финансовый допуск.' : 'Ни один маршрут ещё не доказал положительный net на достаточной независимой выборке.'}</p>
-        </div><b class="${canaryReady ? 'pos' : 'neg'}">${canaryReady ? 'GATE PASS' : 'GATE CLOSED'}</b>
-      </div>
-
-      <div class="va-test-grid">
-        ${compactGate(
-    'Extended → Lighter',
-    'NET ПОСЛЕ РАСХОДОВ · 200/300 MS',
-    targeted.extendedLighterGate,
-    extendedLighterMaker?.telemetry?.bestObservedTopCoin,
-    extendedLighterMaker?.telemetry?.bestObservedTopNetBps,
-    `<span><small>Fills / quotes</small><b>${Number(extendedLighterMaker?.telemetry?.queueFills ?? 0)} / ${Number(extendedLighterMaker?.telemetry?.quotes ?? 0)}</b></span><span><small>Пиковый net</small><b>${coinAndBps(extendedLighterMaker?.telemetry?.peakProjectedCoin, extendedLighterMaker?.telemetry?.peakProjectedEntryBps)}</b></span>`,
-  )}
+      <div class="va-summary">
+        <span>${canaryReady ? `${readyRoutes} маршрут(а) прошли gate — можно готовить минимальный canary.` : 'Ни один маршрут пока не доказал положительный результат после комиссий, задержки и проскальзывания.'}</span>
+        <b class="${canaryReady ? 'pos' : 'neg'}">${canaryReady ? 'CANARY READY' : 'РЕАЛ ЗАПРЕЩЁН'}</b>
       </div>
 
       <section class="va-panel">
-        <div class="va-panel-head"><h2>Shadow-сделки актуальных тестов</h2><span>автообновление 5 сек</span></div>
+        <div class="va-panel-head"><h2>Проверяем сейчас</h2><span>все расходы · $100 · задержка 300 мс</span></div>
+        <div class="va-table"><table><thead><tr>
+          <th>Маршрут</th><th>Net сейчас</th><th>Лучший net</th><th>Shadow</th><th>Статус</th><th>Почему нет входа</th>
+        </tr></thead><tbody>${candidateRouteRows(candidateShadow)}</tbody></table></div>
+      </section>
+
+      <section class="va-panel">
+        <div class="va-panel-head"><h2>История shadow</h2><span>только попытки исполнения</span></div>
         <div class="va-table" data-va-pager="target-shadow" data-page-size="20"><table><thead><tr>
-          <th>UTC</th><th>Монета</th><th>Маршрут</th><th>Исполнение</th><th>Статус</th><th>Net</th><th>Причина</th>
-        </tr></thead><tbody>${targetedShadowRows(undefined, undefined, extendedLighterMaker)}</tbody></table></div>
+          <th>UTC</th><th>Монета</th><th>Маршрут</th><th>Статус</th><th>Net</th><th>Причина</th>
+        </tr></thead><tbody>${candidateShadowRows(candidateShadow)}</tbody></table></div>
       </section>
 
       <section class="va-panel va-live-panel">
-        <div class="va-panel-head"><h2>Реальный журнал</h2><span class="${realStateClass}">${realPaused ? 'ТОРГОВЛЯ НА ПАУЗЕ' : liveState(liveStatus)}</span></div>
+        <div class="va-panel-head"><h2>Реальные сделки</h2><span class="${realStateClass}">${realPaused ? 'ОСТАНОВЛЕНО' : liveState(liveStatus)}</span></div>
         <div class="va-table" data-va-pager="live-trades" data-page-size="20"><table><thead><tr>
           <th>Открыта → закрыта UTC</th><th>Монета / маршрут</th><th>Размер</th><th>Вход Ext / Lighter</th><th>Выход Ext / Lighter</th><th>Комиссии</th><th>Net результат</th>
         </tr></thead><tbody>${compactLiveRows(liveTrades)}</tbody></table></div>
