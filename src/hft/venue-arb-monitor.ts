@@ -414,15 +414,15 @@ const MAKER_RESULTS_PATH = resolve(DATA_DIR, 'maker-shadow-v1.ndjson');
 const MAKER_ACTIVE_PATH = resolve(DATA_DIR, 'maker-active-v1.json');
 const GRVT_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
-  'grvt-maker-basis-shadow-v2.ndjson',
+  'grvt-maker-basis-shadow-v3.ndjson',
 );
 const GRVT_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
-  'grvt-maker-basis-active-v2.json',
+  'grvt-maker-basis-active-v3.json',
 );
 const GRVT_MAKER_EVENTS_PATH = resolve(
   DATA_DIR,
-  'grvt-maker-events-v1.ndjson',
+  'grvt-maker-events-v2.ndjson',
 );
 const GRVT_EXTENDED_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
