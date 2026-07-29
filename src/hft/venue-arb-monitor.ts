@@ -874,6 +874,10 @@ const EXTENDED_LIGHTER_MAKER_HEDGE_LATENCY_MS = finiteEnv(
   'VENUE_ARB_EXTENDED_LIGHTER_MAKER_HEDGE_LATENCY_MS',
   200,
 );
+const EXTENDED_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
+  'VENUE_ARB_EXTENDED_LIGHTER_MAKER_MAX_TRADE_IDLE_MS',
+  0,
+);
 const EXTENDED_PACIFICA_MAKER_SHADOW_ENABLED = booleanEnv(
   'VENUE_ARB_EXTENDED_PACIFICA_MAKER_SHADOW_ENABLED',
   false,
@@ -937,6 +941,10 @@ const LIGHTER_EXTENDED_MAKER_QUOTE_LATENCY_MS = finiteEnv(
 const LIGHTER_EXTENDED_MAKER_HEDGE_LATENCY_MS = finiteEnv(
   'VENUE_ARB_LIGHTER_EXTENDED_MAKER_HEDGE_LATENCY_MS',
   200,
+);
+const LIGHTER_EXTENDED_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
+  'VENUE_ARB_LIGHTER_EXTENDED_MAKER_MAX_TRADE_IDLE_MS',
+  0,
 );
 const LIGHTER_EXTENDED_MAKER_QUOTE_TTL_MS = finiteEnv(
   'VENUE_ARB_LIGHTER_EXTENDED_MAKER_QUOTE_TTL_MS',
@@ -1490,6 +1498,8 @@ let shadowBasisStateDirty = false;
 const books = new Map<string, BookState>();
 const executableBooks = new Map<string, ExecutableBook>();
 const asterLastTradeAt = new Map<string, number>();
+const extendedLastTradeAt = new Map<string, number>();
+const lighterLastTradeAt = new Map<string, number>();
 const bySymbol = new Map(ACTIVE_MARKETS.map((market) => [market.symbol, market]));
 const byCoin = new Map(ACTIVE_MARKETS.map((market) => [market.coin, market]));
 const byLighterId = new Map(ACTIVE_MARKETS.map((market) => [market.lighterMarketId, market]));
@@ -1882,6 +1892,7 @@ const extendedLighterMakerShadow = new GenericMakerShadow({
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
   maxEntryDistanceBps: 3,
+  maxMakerTradeIdleMs: EXTENDED_LIGHTER_MAKER_MAX_TRADE_IDLE_MS,
 }, {
   onResult: (result) => {
     appendFileSync(
@@ -1980,6 +1991,7 @@ const lighterExtendedMakerShadow = new GenericMakerShadow({
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
   maxEntryDistanceBps: 3,
+  maxMakerTradeIdleMs: LIGHTER_EXTENDED_MAKER_MAX_TRADE_IDLE_MS,
 }, {
   onResult: (result) => {
     appendFileSync(
@@ -4029,6 +4041,7 @@ function startLighter(): void {
         for (const row of parseLighterPublicTrades(message)) {
           const market = byLighterId.get(row.marketId);
           if (!market || !LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED) continue;
+          lighterLastTradeAt.set(market.coin, receivedAt);
           lighterExtendedMakerShadow.processTrade({
             id: row.id,
             coin: market.coin,
@@ -4152,19 +4165,30 @@ function startLighterRestBookPoller(): void {
   let running = false;
   const poll = async (): Promise<void> => {
     if (shuttingDown || running || !ACTIVE_MARKETS.length) return;
-    const activeMaker = asterLighterMakerShadow.status() as {
-      quote?: { coin?: string } | null;
-      pair?: { coin?: string } | null;
-      pendingHedge?: { coin?: string } | null;
-    };
-    const activeCoin = activeMaker.pendingHedge?.coin
-      ?? activeMaker.quote?.coin
-      ?? activeMaker.pair?.coin
-      ?? null;
+    const activeCoins = [...new Set([
+      asterLighterMakerShadow,
+      extendedLighterMakerShadow,
+      lighterExtendedMakerShadow,
+      grvtMakerShadow,
+      grvtExtendedMakerShadow,
+    ].flatMap((shadow) => {
+      const activeMaker = shadow.status() as {
+        quote?: { coin?: string } | null;
+        pair?: { coin?: string } | null;
+        pendingHedge?: { coin?: string } | null;
+      };
+      return [
+        activeMaker.pendingHedge?.coin,
+        activeMaker.quote?.coin,
+        activeMaker.pair?.coin,
+      ].filter((coin): coin is string => Boolean(coin));
+    }))];
     const market = LIGHTER_REST_ACTIVE_QUOTE_ONLY
-      ? activeCoin == null ? undefined : byCoin.get(activeCoin)
+      ? activeCoins.length === 0
+        ? undefined
+        : byCoin.get(activeCoins[marketIndex % activeCoins.length]!)
       : ACTIVE_MARKETS[marketIndex % ACTIVE_MARKETS.length];
-    if (!LIGHTER_REST_ACTIVE_QUOTE_ONLY) marketIndex++;
+    marketIndex++;
     if (!market) return;
     running = true;
     const requestStartedAt = Date.now();
@@ -4477,6 +4501,7 @@ function startExtendedTrades(): void {
           size,
           tradeAt: normalizeExchangeTimestampMs(finite(row.T), receivedAt),
         };
+        extendedLastTradeAt.set(coin, receivedAt);
         if (MAKER_SHADOW_ENABLED) processMakerTrade(trade, receivedAt);
         if (EXTENDED_ASTER_MAKER_SHADOW_ENABLED) {
           extendedAsterMakerShadow.processTrade(trade, receivedAt);
@@ -5775,9 +5800,15 @@ function genericMakerMarkets(
     return {
       coin: market.coin,
       maker,
-      makerLastTradeAt: makerVenue === 'aster'
-        ? asterLastTradeAt.get(market.coin) ?? null
-        : undefined,
+      makerLastTradeAt: (
+        makerVenue === 'aster'
+          ? asterLastTradeAt
+          : makerVenue === 'extended'
+            ? extendedLastTradeAt
+            : makerVenue === 'lighter'
+              ? lighterLastTradeAt
+              : null
+      )?.get(market.coin) ?? null,
       hedge: hedge && hedgeBuyVwap != null && hedgeSellVwap != null
         ? {
           buyVwap: hedgeBuyVwap,

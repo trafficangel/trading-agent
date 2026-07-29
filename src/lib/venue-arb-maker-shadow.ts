@@ -351,6 +351,19 @@ export class GenericMakerShadow {
     return side === 'buy' ? hedge.sellVwap : hedge.buyVwap;
   }
 
+  private makerActivityFresh(
+    now: number,
+    market?: MakerShadowMarket,
+  ): boolean {
+    const maxMakerTradeIdleMs = this.config.maxMakerTradeIdleMs ?? 0;
+    if (maxMakerTradeIdleMs <= 0) return true;
+    return (
+      market?.makerLastTradeAt != null
+      && now - market.makerLastTradeAt <= maxMakerTradeIdleMs
+      && market.makerLastTradeAt <= now + 1_000
+    );
+  }
+
   private entryProjection(
     side: MakerSide,
     makerFill: number,
@@ -530,15 +543,7 @@ export class GenericMakerShadow {
     for (const market of this.latestMarkets.values()) {
       if (!market.maker || !market.hedge) continue;
       if (!this.fresh(now, market.maker, market.hedge)) continue;
-      const maxMakerTradeIdleMs = this.config.maxMakerTradeIdleMs ?? 0;
-      if (
-        maxMakerTradeIdleMs > 0
-        && (
-          market.makerLastTradeAt == null
-          || now - market.makerLastTradeAt > maxMakerTradeIdleMs
-          || market.makerLastTradeAt > now + 1_000
-        )
-      ) continue;
+      if (!this.makerActivityFresh(now, market)) continue;
       for (const side of ['buy', 'sell'] as const) {
         const hedgeFill = this.hedgePrice(side, market.hedge);
         if (hedgeFill == null) continue;
@@ -659,6 +664,7 @@ export class GenericMakerShadow {
     const market = this.latestMarkets.get(pair.coin);
     if (!market?.maker || !market.hedge) return null;
     if (!this.fresh(now, market.maker, market.hedge)) return null;
+    if (!this.makerActivityFresh(now, market)) return null;
     const side: MakerSide = pair.makerSide === 'long' ? 'sell' : 'buy';
     const hedgeFill = this.hedgePrice(side, market.hedge);
     const bestBid = sortedLevels(market.maker, 'bids', 1)[0]?.[0];
@@ -1186,6 +1192,16 @@ export class GenericMakerShadow {
     }
     this.activate(now);
     if (this.quote?.activatedAt != null && this.quote.firstFillAt == null) {
+      const quoteMarket = this.latestMarkets.get(this.quote.coin);
+      if (!this.makerActivityFresh(now, quoteMarket)) {
+        this.telemetry.edgeCancellations++;
+        this.emitQuoteEvent('edge_cancelled', now, this.quote, {
+          reason: 'maker_activity_stale',
+          currentProjectionBps: this.currentProjection(now, this.quote),
+        });
+        this.quote = null;
+        return;
+      }
       const projection = this.currentProjection(now, this.quote);
       const minimum = this.quote.stage === 'entry'
         ? this.config.cancelEdgeBps
