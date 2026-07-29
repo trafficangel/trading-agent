@@ -454,6 +454,10 @@ const EXTENDED_PACIFICA_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
   'extended-pacifica-maker-basis-active-v1.json',
 );
+const EXTENDED_PACIFICA_MAKER_EVENTS_PATH = resolve(
+  DATA_DIR,
+  'extended-pacifica-maker-events-v1.ndjson',
+);
 const LIGHTER_EXTENDED_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
   'lighter-extended-maker-basis-shadow-v2.ndjson',
@@ -1587,6 +1591,12 @@ const extendedPacificaMakerShadow = new GenericMakerShadow({
       ...checkpoint,
       updatedAt: Date.now(),
     });
+  },
+  onEvent: (event) => {
+    appendFileSync(
+      EXTENDED_PACIFICA_MAKER_EVENTS_PATH,
+      `${JSON.stringify(event)}\n`,
+    );
   },
 });
 const lighterExtendedMakerShadow = new GenericMakerShadow({
@@ -5290,6 +5300,9 @@ if (!existsSync(EXTENDED_LIGHTER_MAKER_EVENTS_PATH)) {
 }
 if (!existsSync(EXTENDED_PACIFICA_MAKER_RESULTS_PATH)) {
   writeFileSync(EXTENDED_PACIFICA_MAKER_RESULTS_PATH, '');
+}
+if (!existsSync(EXTENDED_PACIFICA_MAKER_EVENTS_PATH)) {
+  writeFileSync(EXTENDED_PACIFICA_MAKER_EVENTS_PATH, '');
 }
 if (!existsSync(LIGHTER_EXTENDED_MAKER_RESULTS_PATH)) {
   writeFileSync(LIGHTER_EXTENDED_MAKER_RESULTS_PATH, '');
