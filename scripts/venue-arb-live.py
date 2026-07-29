@@ -149,6 +149,9 @@ class Canary:
         self.execution_mode = os.getenv(
             "VENUE_ARB_LIVE_EXECUTION", "taker-taker"
         ).strip().lower()
+        self.execution_region = os.getenv(
+            "VENUE_ARB_LIVE_REGION", ""
+        ).strip()
         if self.execution_mode not in {"taker-taker", "maker-taker"}:
             raise RuntimeError(
                 f"unsupported VENUE_ARB_LIVE_EXECUTION={self.execution_mode!r}"
@@ -344,6 +347,7 @@ class Canary:
             "enabled": self.enabled,
             "state": state,
             "executionMode": self.execution_mode,
+            "executionRegion": self.execution_region or None,
             "notionalUsdPerLeg": self.notional,
             "leverage": self.leverage,
             "entryNetPct": self.entry_net_bps / 100,

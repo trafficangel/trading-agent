@@ -424,6 +424,8 @@ type LiveStatus = {
   updatedAt?: number;
   enabled?: boolean;
   state?: string;
+  executionMode?: 'maker-taker' | 'taker-taker';
+  executionRegion?: string | null;
   notionalUsdPerLeg?: number;
   leverage?: number;
   entryNetPct?: number;
@@ -1167,6 +1169,7 @@ const VENUE_ARB_PAGINATION_SCRIPT = `<script>
 async function render(lang: Lang): Promise<string> {
   const [status, liveData] = await Promise.all([readStatus(), readLive()]);
   const liveStatus = liveData.status;
+  const makerLive = liveStatus?.executionMode === 'maker-taker';
   const liveTrades = liveData.trades ?? [];
   const closedLive = liveTrades.filter((row) => (
     row.status === 'closed' || row.status === 'failed_flat'
@@ -1335,7 +1338,7 @@ async function render(lang: Lang): Promise<string> {
       </section>
 
       <section class="va-panel va-live-panel">
-        <div class="va-panel-head"><div><span class="va-badge">REAL · EXTENDED ↔ LIGHTER</span><h2>Реальная арбитражная торговля</h2></div>
+        <div class="va-panel-head"><div><span class="va-badge">REAL · ${esc(liveStatus?.executionRegion ?? '—')} · EXTENDED ↔ LIGHTER</span><h2>Реальная арбитражная торговля</h2></div>
           <span class="va-live-state ${liveStatus?.state === 'error' || liveStatus?.state === 'blocked' || liveStatus?.state === 'stopped_after_reconciliation' ? 'neg' : liveStatus?.enabled ? 'pos' : ''}">${liveState(liveStatus)}</span>
         </div>
         <div class="va-live-cards">
@@ -1346,7 +1349,9 @@ async function render(lang: Lang): Promise<string> {
           <div><small>Extended / Lighter</small><b>${money(liveStatus?.balancesUsd?.extended)} / ${money(liveStatus?.balancesUsd?.lighter)}</b></div>
           <div><small>Текущий статус</small><b>${activeLive ? `${esc(activeLive.coin)} · ${esc(activeLive.status)}` : liveState(liveStatus)}</b></div>
         </div>
-        <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. Для ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} maker-заявка ставится при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .15)}, отменяется при снижении ниже ${plainPct(liveStatus?.makerCancelNetPct ?? .12)}, а после фактического fill хедж допускается только при net ≥ ${plainPct(liveStatus?.postFillNetPct ?? .10)}. Обычный выход требует ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .10)}.</p>
+        <p>Отдельный честный журнал canary: две ноги считаются по фактическим fill-ценам, комиссиям и итоговому PnL. ${makerLive
+    ? `Для ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} maker-заявка ставится при net ≥ ${plainPct(liveStatus?.entryNetPct ?? .15)}, отменяется при снижении ниже ${plainPct(liveStatus?.makerCancelNetPct ?? .12)}, а после фактического fill хедж допускается только при net ≥ ${plainPct(liveStatus?.postFillNetPct ?? .10)}.`
+    : `Для ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')} обе taker-ноги отправляются параллельно только при расчётном полном net после round-trip комиссий и буфера ≥ ${plainPct(liveStatus?.entryNetPct ?? .08)}.`} Обычный выход требует ${Number(liveStatus?.exitConfirmations ?? 3)} последовательных снимков с исполнимым net PnL ≥ ${plainPct(liveStatus?.exitMinProfitPct ?? .03)}.</p>
         <div class="va-table" data-va-pager="live-trades" data-page-size="20"><table><thead><tr>
           <th>ID</th><th>Открыта → закрыта UTC</th><th>Монета</th><th>Маршрут</th>
           <th>Размер</th><th>Вход Ext / Lighter</th><th>Выход Ext / Lighter</th>
@@ -1381,7 +1386,9 @@ async function render(lang: Lang): Promise<string> {
           <span>VWAP, не mid-price</span><span>две ноги одновременно</span><span>полный round-trip</span>
           <span>допуск только при $1k net &gt; ${pctFromBps(triggerBps)}</span><span>Lighter fee 0%</span><span>canary: ${esc(liveStatus?.route ?? 'Extended ↔ Lighter')}</span>
         </div>
-        <p>Радар продолжает измерять все площадки. Реальный canary отделён от него: он ставит только подтверждённую post-only заявку на Extended, при первом fill отменяет остаток и затем хеджирует фактически исполненный объём taker-ордером на Lighter. Любая потеря post-only, комиссия на maker-fill или несовпадение позиций вызывает аварийное выравнивание и остановку.</p>
+        <p>Радар продолжает измерять все площадки. Реальный canary отделён от него: ${makerLive
+    ? 'он ставит подтверждённую post-only заявку на Extended, при первом fill отменяет остаток и затем хеджирует фактически исполненный объём taker-ордером на Lighter'
+    : 'он одновременно отправляет IOC на Extended и ограниченный по slippage market-ордер на Lighter только после повторной проверки исполнимого net'}. Несовпадение fills или позиций вызывает аварийное выравнивание и остановку.</p>
       </section>
     </div>
     ${VENUE_ARB_PAGINATION_SCRIPT}`,
