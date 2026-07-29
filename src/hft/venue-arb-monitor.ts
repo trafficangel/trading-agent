@@ -740,6 +740,10 @@ const LIGHTER_VALIDATED_BOOK_FRESH_MS = finiteEnv(
   'VENUE_ARB_LIGHTER_VALIDATED_BOOK_FRESH_MS',
   3_000,
 );
+const EXECUTION_CANDIDATE_FRESH_MS = finiteEnv(
+  'VENUE_ARB_EXECUTION_CANDIDATE_FRESH_MS',
+  3_000,
+);
 const RECONNECT_MS = 2_000;
 const HORIZONS_MS = [100, 250, 500, 1_000, 2_000, 5_000, 10_000] as const;
 
@@ -3935,26 +3939,28 @@ function edge(
   coin: string,
   buyVenue: Venue,
   sellVenue: Venue,
+  bookFreshMs = STALE_MS,
+  sourceFreshMs = SHADOW_SOURCE_FRESH_MS,
 ): EdgeSnapshot | null {
   const buyBook = validatedExecutableBook(
     buyVenue,
     coin,
     now,
-    SHADOW_SOURCE_FRESH_MS,
+    sourceFreshMs,
   );
   const sellBook = validatedExecutableBook(
     sellVenue,
     coin,
     now,
-    SHADOW_SOURCE_FRESH_MS,
+    sourceFreshMs,
   );
   if (
     !buyBook
     || !sellBook
-    || now - buyBook.receivedAt > STALE_MS
-    || now - sellBook.receivedAt > STALE_MS
-    || now - buyBook.exchangeAt > SHADOW_SOURCE_FRESH_MS
-    || now - sellBook.exchangeAt > SHADOW_SOURCE_FRESH_MS
+    || now - buyBook.receivedAt > bookFreshMs
+    || now - sellBook.receivedAt > bookFreshMs
+    || now - buyBook.exchangeAt > sourceFreshMs
+    || now - sellBook.exchangeAt > sourceFreshMs
   ) return null;
   if (buyBook.buyVwap500 == null || sellBook.sellVwap500 == null) return null;
   const rawBps500 = rawCrossEdgeBps(
@@ -4415,7 +4421,7 @@ function writeExecutionStatus(): void {
       'lighter',
       market.coin,
       now,
-      SHADOW_SOURCE_FRESH_MS,
+      EXECUTION_CANDIDATE_FRESH_MS,
     );
     return [market.coin, {
       // Conservative for the $300 canary: use $500 executable VWAP rather
@@ -4456,6 +4462,8 @@ function writeExecutionStatus(): void {
         market.coin,
         route.buyVenue,
         route.sellVenue,
+        EXECUTION_CANDIDATE_FRESH_MS,
+        EXECUTION_CANDIDATE_FRESH_MS,
       );
       if (!snapshot) return [];
       return [{

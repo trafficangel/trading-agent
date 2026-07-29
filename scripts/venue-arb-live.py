@@ -1288,6 +1288,89 @@ class Canary:
             "_quoteVersion": candidate_quote_version(snapshot_at, winner),
         }
 
+    async def revalidate_taker_candidate(
+        self,
+        candidate: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        coin = str(candidate.get("coin") or "")
+        route_id = str(candidate.get("_routeId") or "")
+        if route_id not in ROUTES or coin not in self.allowed_coins:
+            self.last_rejection = "taker candidate route is invalid"
+            return None
+        extended_is_buy = ROUTES[route_id][0] == "extended"
+        extended_side = (
+            OrderSide.BUY if extended_is_buy else OrderSide.SELL
+        )
+        try:
+            extended_price = await self.extended_reference(
+                coin,
+                extended_side,
+            )
+        except Exception as error:
+            self.last_rejection = (
+                f"Extended REST revalidation failed: {error}"
+            )
+            return None
+        lighter_price = self.current_lighter_hedge_price(
+            coin,
+            "buy" if extended_is_buy else "sell",
+        )
+        if lighter_price is None or min(extended_price, lighter_price) <= 0:
+            self.last_rejection = "Lighter BBO revalidation is stale"
+            return None
+        current_raw_bps = (
+            (lighter_price / extended_price - 1) * 10_000
+            if extended_is_buy
+            else (extended_price / lighter_price - 1) * 10_000
+        )
+        baseline_bps = finite_float(
+            candidate.get("_basisBaselineBps"),
+            math.nan,
+        )
+        exit_baseline_bps = finite_float(
+            candidate.get("_basisExitBaselineBps"),
+            math.nan,
+        )
+        if not math.isfinite(baseline_bps) or not math.isfinite(
+            exit_baseline_bps
+        ):
+            self.last_rejection = "taker basis revalidation is unavailable"
+            return None
+        deviation_bps = current_raw_bps - baseline_bps
+        expected_net_bps = (
+            current_raw_bps
+            + exit_baseline_bps
+            - self.basis_round_trip_cost_bps()
+        )
+        if (
+            deviation_bps < self.basis_min_deviation_bps
+            or expected_net_bps < self.entry_net_bps
+        ):
+            self.last_rejection = (
+                "REST-revalidated taker edge fell below gate: "
+                f"net {expected_net_bps:.2f} bps, "
+                f"deviation {deviation_bps:.2f} bps"
+            )
+            return None
+        revalidated = dict(candidate)
+        if extended_is_buy:
+            revalidated["currentBuyVwap1000"] = extended_price
+            revalidated["currentSellVwap1000"] = lighter_price
+        else:
+            revalidated["currentBuyVwap1000"] = lighter_price
+            revalidated["currentSellVwap1000"] = extended_price
+        revalidated["currentRawBps1000"] = current_raw_bps
+        revalidated["currentNetBps1000"] = (
+            current_raw_bps - self.basis_round_trip_cost_bps()
+        )
+        revalidated["_basisDeviationBps"] = deviation_bps
+        revalidated["_basisExpectedNetBps"] = expected_net_bps
+        revalidated["_quoteVersion"] = (
+            f"{candidate.get('_quoteVersion')}:"
+            f"{extended_price:.12g}:{lighter_price:.12g}"
+        )
+        return revalidated
+
     def maker_candidate(self) -> dict[str, Any] | None:
         status = self.read_json(self.execution_path, {})
         now = int(time.time() * 1000)
@@ -2910,6 +2993,8 @@ class Canary:
                 if self.execution_mode == "maker-taker"
                 else self.candidate()
             )
+            if candidate and self.execution_mode == "taker-taker":
+                candidate = await self.revalidate_taker_candidate(candidate)
             if candidate:
                 if self.execution_mode == "maker-taker":
                     await self.execute_maker(candidate)
@@ -3109,6 +3194,41 @@ def self_test() -> None:
         "deviationBps": 17,
         "expectedNetBps": 10,
     }) == 10
+
+    async def taker_revalidation_check() -> None:
+        guard = object.__new__(Canary)
+        guard.allowed_coins = {"HYPE"}
+        guard.extended_taker_bps = 2.5
+        guard.lighter_taker_bps = 0
+        guard.execution_buffer_bps = 2
+        guard.basis_min_deviation_bps = 10
+        guard.entry_net_bps = 10
+        guard.last_rejection = None
+
+        async def extended_reference(
+            _coin: str,
+            _side: OrderSide,
+        ) -> float:
+            return 100
+
+        guard.extended_reference = extended_reference
+        guard.current_lighter_hedge_price = lambda *_args: 101
+        candidate = {
+            "coin": "HYPE",
+            "_routeId": "extended-lighter",
+            "_basisBaselineBps": 0,
+            "_basisExitBaselineBps": -20,
+            "_quoteVersion": "1:1",
+        }
+        accepted = await guard.revalidate_taker_candidate(candidate)
+        assert accepted is not None
+        assert round(accepted["_basisExpectedNetBps"], 8) == 73
+        assert accepted["currentBuyVwap1000"] == 100
+        assert accepted["currentSellVwap1000"] == 101
+        guard.current_lighter_hedge_price = lambda *_args: 100
+        assert await guard.revalidate_taker_candidate(candidate) is None
+
+    asyncio.run(taker_revalidation_check())
     quote = {
         "extendedBuyVwap": 100.0,
         "extendedSellVwap": 99.9,
