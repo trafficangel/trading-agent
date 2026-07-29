@@ -20,6 +20,8 @@ HIBACHI_SHADOW_SERVICE = "venue-arb-hibachi-lighter-shadow.service"
 HIBACHI_GATE_TIMER = "venue-arb-hibachi-lighter-maker-gate.timer"
 COINBASE_SHADOW_SERVICE = "venue-arb-coinbase-lighter-shadow.service"
 COINBASE_GATE_TIMER = "venue-arb-coinbase-lighter-maker-gate.timer"
+ETHEREAL_SHADOW_SERVICE = "venue-arb-ethereal-lighter-shadow.service"
+ETHEREAL_GATE_TIMER = "venue-arb-ethereal-lighter-maker-gate.timer"
 
 
 def read_gate(path: Path) -> dict[str, Any] | None:
@@ -46,12 +48,14 @@ def stop_plan(
     grvt_gate: dict[str, Any] | None,
     hibachi_gate: dict[str, Any] | None,
     coinbase_gate: dict[str, Any] | None,
+    ethereal_gate: dict[str, Any] | None,
 ) -> dict[str, Any]:
     aster_no_go = is_no_go(aster_gate)
     extended_no_go = is_no_go(extended_gate)
     grvt_no_go = is_no_go(grvt_gate)
     hibachi_no_go = is_no_go(hibachi_gate)
     coinbase_no_go = is_no_go(coinbase_gate)
+    ethereal_no_go = is_no_go(ethereal_gate)
     stop_units: list[str] = []
     disable_units: list[str] = []
     if aster_no_go:
@@ -70,18 +74,23 @@ def stop_plan(
     if coinbase_no_go:
         stop_units.append(COINBASE_SHADOW_SERVICE)
         disable_units.extend([COINBASE_SHADOW_SERVICE, COINBASE_GATE_TIMER])
+    if ethereal_no_go:
+        stop_units.append(ETHEREAL_SHADOW_SERVICE)
+        disable_units.extend([ETHEREAL_SHADOW_SERVICE, ETHEREAL_GATE_TIMER])
     return {
         "asterNoGo": aster_no_go,
         "extendedNoGo": extended_no_go,
         "grvtNoGo": grvt_no_go,
         "hibachiNoGo": hibachi_no_go,
         "coinbaseNoGo": coinbase_no_go,
+        "etherealNoGo": ethereal_no_go,
         "allNoGo": (
             aster_no_go
             and extended_no_go
             and grvt_no_go
             and hibachi_no_go
             and coinbase_no_go
+            and ethereal_no_go
         ),
         "stopUnits": stop_units,
         "disableUnits": disable_units,
@@ -125,22 +134,27 @@ def atomic_json(path: Path, payload: dict[str, Any]) -> None:
 def self_test() -> None:
     observe = {"decision": "OBSERVE"}
     no_go = {"decision": "NO_GO"}
-    assert stop_plan(observe, observe, observe, observe, observe)["stopUnits"] == []
-    aster = stop_plan(no_go, observe, observe, observe, observe)
+    assert stop_plan(
+        observe, observe, observe, observe, observe, observe
+    )["stopUnits"] == []
+    aster = stop_plan(no_go, observe, observe, observe, observe, observe)
     assert aster["stopUnits"] == [ASTER_SHADOW_SERVICE]
-    shared = stop_plan(observe, no_go, no_go, observe, observe)
+    shared = stop_plan(observe, no_go, no_go, observe, observe, observe)
     assert shared["stopUnits"] == [COMBINED_SHADOW_SERVICE]
-    hibachi = stop_plan(observe, observe, observe, no_go, observe)
+    hibachi = stop_plan(observe, observe, observe, no_go, observe, observe)
     assert hibachi["stopUnits"] == [HIBACHI_SHADOW_SERVICE]
-    coinbase = stop_plan(observe, observe, observe, observe, no_go)
+    coinbase = stop_plan(observe, observe, observe, observe, no_go, observe)
     assert coinbase["stopUnits"] == [COINBASE_SHADOW_SERVICE]
-    all_failed = stop_plan(no_go, no_go, no_go, no_go, no_go)
+    ethereal = stop_plan(observe, observe, observe, observe, observe, no_go)
+    assert ethereal["stopUnits"] == [ETHEREAL_SHADOW_SERVICE]
+    all_failed = stop_plan(no_go, no_go, no_go, no_go, no_go, no_go)
     assert all_failed["allNoGo"] is True
     assert set(all_failed["stopUnits"]) == {
         ASTER_SHADOW_SERVICE,
         COMBINED_SHADOW_SERVICE,
         HIBACHI_SHADOW_SERVICE,
         COINBASE_SHADOW_SERVICE,
+        ETHEREAL_SHADOW_SERVICE,
     }
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "controller.json"
@@ -194,6 +208,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--ethereal-gate",
+        default=os.getenv(
+            "VENUE_ARB_ETHEREAL_GATE",
+            "/home/trader/apps/venue-arb-tokyo/data/ethereal-lighter-shadow/"
+            "ethereal-lighter-maker-gate-status.json",
+        ),
+    )
+    parser.add_argument(
         "--output",
         default=os.getenv(
             "VENUE_ARB_CONTROLLER_OUTPUT",
@@ -212,6 +234,7 @@ def main() -> None:
         "grvt": read_gate(Path(args.grvt_gate)),
         "hibachi": read_gate(Path(args.hibachi_gate)),
         "coinbase": read_gate(Path(args.coinbase_gate)),
+        "ethereal": read_gate(Path(args.ethereal_gate)),
     }
     plan = stop_plan(
         gates["aster"],
@@ -219,6 +242,7 @@ def main() -> None:
         gates["grvt"],
         gates["hibachi"],
         gates["coinbase"],
+        gates["ethereal"],
     )
     actions: list[dict[str, Any]] = []
     for unit in plan["stopUnits"]:

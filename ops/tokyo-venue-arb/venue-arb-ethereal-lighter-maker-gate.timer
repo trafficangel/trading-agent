@@ -1,0 +1,11 @@
+[Unit]
+Description=Evaluate Ethereal maker/Lighter taker shadow every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=5s
+Unit=venue-arb-ethereal-lighter-maker-gate.service
+
+[Install]
+WantedBy=timers.target

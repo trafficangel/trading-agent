@@ -29,6 +29,12 @@ import {
   applyEdgexDepthUpdate,
   type EdgexDepthState,
 } from '../lib/edgex-depth-book.js';
+import {
+  parseEtherealBook,
+  parseEtherealMakerTrades,
+  parseEtherealProducts,
+  type EtherealProduct,
+} from '../lib/ethereal-market-data.js';
 import { applyGrvtDepthUpdate, createGrvtDepthBook } from '../lib/grvt-depth-book.js';
 import {
   applyHibachiDepthUpdate,
@@ -89,6 +95,7 @@ type Venue =
   | 'grvt'
   | 'edgex'
   | 'coinbase'
+  | 'ethereal'
   | 'binance'
   | 'bybit';
 type VenueClass = 'DEX' | 'CEX';
@@ -510,6 +517,18 @@ const COINBASE_LIGHTER_MAKER_ACTIVE_PATH = resolve(
 const COINBASE_LIGHTER_MAKER_EVENTS_PATH = resolve(
   DATA_DIR,
   'coinbase-lighter-maker-events-v1.ndjson',
+);
+const ETHEREAL_LIGHTER_MAKER_RESULTS_PATH = resolve(
+  DATA_DIR,
+  'ethereal-lighter-maker-basis-shadow-v1.ndjson',
+);
+const ETHEREAL_LIGHTER_MAKER_ACTIVE_PATH = resolve(
+  DATA_DIR,
+  'ethereal-lighter-maker-basis-active-v1.json',
+);
+const ETHEREAL_LIGHTER_MAKER_EVENTS_PATH = resolve(
+  DATA_DIR,
+  'ethereal-lighter-maker-events-v1.ndjson',
 );
 const EXTENDED_LIGHTER_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
@@ -1010,6 +1029,62 @@ const COINBASE_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
   'VENUE_ARB_COINBASE_LIGHTER_MAKER_MAX_TRADE_IDLE_MS',
   10_000,
 );
+const ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED',
+  false,
+);
+const ETHEREAL_LIGHTER_MAKER_NOTIONAL_USD = finiteEnv(
+  'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_NOTIONAL_USD',
+  100,
+);
+const ETHEREAL_LIGHTER_MAKER_ENTRY_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_ENTRY_EDGE_BPS',
+  1,
+);
+const ETHEREAL_LIGHTER_MAKER_CANCEL_EDGE_BPS = signedFiniteEnv(
+  'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_CANCEL_EDGE_BPS',
+  0.5,
+);
+const ETHEREAL_LIGHTER_MAKER_POST_FILL_NET_BPS = finiteEnv(
+  'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_POST_FILL_NET_BPS',
+  0.5,
+);
+const ETHEREAL_LIGHTER_MAKER_EXIT_NET_BPS = finiteEnv(
+  'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_EXIT_NET_BPS',
+  1,
+);
+const ETHEREAL_LIGHTER_MAKER_QUOTE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_QUOTE_LATENCY_MS',
+  250,
+);
+const ETHEREAL_LIGHTER_MAKER_HEDGE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_HEDGE_LATENCY_MS',
+  300,
+);
+const ETHEREAL_LIGHTER_MAKER_QUOTE_TTL_MS = finiteEnv(
+  'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_QUOTE_TTL_MS',
+  15_000,
+);
+const ETHEREAL_LIGHTER_MAKER_MAX_QUEUE_USD = finiteEnv(
+  'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_MAX_QUEUE_USD',
+  100_000,
+);
+const ETHEREAL_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS = finiteEnv(
+  'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS',
+  500,
+);
+const ETHEREAL_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
+  'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_MAX_TRADE_IDLE_MS',
+  300_000,
+);
+const ETHEREAL_POLL_MS = Math.max(
+  250,
+  finiteEnv('VENUE_ARB_ETHEREAL_POLL_MS', 250),
+);
+const ETHEREAL_REQUEST_TIMEOUT_MS = Math.max(
+  250,
+  finiteEnv('VENUE_ARB_ETHEREAL_REQUEST_TIMEOUT_MS', 2_000),
+);
 const EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
   'VENUE_ARB_EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED',
   false,
@@ -1321,6 +1396,18 @@ const COINBASE_VENUE_COINS = new Set([
 const COINBASE_VENUE_MARKETS = ACTIVE_MARKETS.filter(
   (market) => COINBASE_VENUE_COINS.has(market.coin),
 );
+const ETHEREAL_VENUE_COINS = new Set(
+  (
+    process.env.VENUE_ARB_ETHEREAL_COINS
+    ?? 'ETH,HYPE,SUI,XRP,ENA,PUMP,DOGE'
+  )
+    .split(',')
+    .map((coin) => coin.trim().toUpperCase())
+    .filter(Boolean),
+);
+const ETHEREAL_VENUE_MARKETS = ACTIVE_MARKETS.filter(
+  (market) => ETHEREAL_VENUE_COINS.has(market.coin),
+);
 
 const VENUES: readonly Venue[] = [
   'lighter',
@@ -1334,6 +1421,7 @@ const VENUES: readonly Venue[] = [
   'grvt',
   'edgex',
   'coinbase',
+  'ethereal',
   'binance',
   'bybit',
 ];
@@ -1366,6 +1454,7 @@ const VENUE_CLASS: Record<Venue, VenueClass> = {
   grvt: 'DEX',
   edgex: 'DEX',
   coinbase: 'CEX',
+  ethereal: 'DEX',
   binance: 'CEX',
   bybit: 'CEX',
 };
@@ -1388,6 +1477,8 @@ const FEE_BPS: Record<Venue, number> = {
   // Advanced Trade retail perpetuals currently advertise a 0.03% taker
   // promotion. Maker routes model the separate 0.00% promotional maker rate.
   coinbase: finiteEnv('VENUE_ARB_FEE_BPS_COINBASE', 3),
+  // Ethereal mainnet product metadata currently reports 0 maker / 3 bps taker.
+  ethereal: finiteEnv('VENUE_ARB_FEE_BPS_ETHEREAL', 3),
   binance: finiteEnv('VENUE_ARB_FEE_BPS_BINANCE', 5),
   bybit: finiteEnv('VENUE_ARB_FEE_BPS_BYBIT', 5.5),
 };
@@ -1746,12 +1837,27 @@ const executableBooks = new Map<string, ExecutableBook>();
 const asterLastTradeAt = new Map<string, number>();
 const hibachiLastTradeAt = new Map<string, number>();
 const coinbaseLastTradeAt = new Map<string, number>();
+const etherealLastTradeAt = new Map<string, number>();
 const extendedLastTradeAt = new Map<string, number>();
 const lighterLastTradeAt = new Map<string, number>();
 const grvtLastTradeAt = new Map<string, number>();
 const bySymbol = new Map(ACTIVE_MARKETS.map((market) => [market.symbol, market]));
 const byCoin = new Map(ACTIVE_MARKETS.map((market) => [market.coin, market]));
 const byLighterId = new Map(ACTIVE_MARKETS.map((market) => [market.lighterMarketId, market]));
+const etherealProductByCoin = new Map<string, EtherealProduct>();
+const etherealCoinByProduct = new Map<string, string>();
+const etherealTelemetry = {
+  productRefreshes: 0,
+  bookRequests: 0,
+  bookUpdates: 0,
+  tradeRequests: 0,
+  trades: 0,
+  errors: 0,
+  lastPollAt: null as number | null,
+  lastSuccessAt: null as number | null,
+  lastErrorAt: null as number | null,
+  lastError: null as string | null,
+};
 const lighterTickerBbo = new Map<number, LighterTickerBbo>();
 const lighterBookValidation = new Map<number, LighterBookValidation>();
 const lighterWsTelemetry = new Map<number, LighterWsMarketTelemetry>(
@@ -2260,6 +2366,64 @@ const coinbaseLighterMakerShadow = new GenericMakerShadow({
   onEvent: (event) => {
     appendFileSync(
       COINBASE_LIGHTER_MAKER_EVENTS_PATH,
+      `${JSON.stringify(event)}\n`,
+    );
+  },
+});
+const etherealLighterMakerShadow = new GenericMakerShadow({
+  routeId: 'ethereal-maker-lighter',
+  makerVenue: 'ethereal',
+  hedgeVenue: 'lighter',
+  notionalUsd: ETHEREAL_LIGHTER_MAKER_NOTIONAL_USD,
+  entryEdgeBps: ETHEREAL_LIGHTER_MAKER_ENTRY_EDGE_BPS,
+  cancelEdgeBps: ETHEREAL_LIGHTER_MAKER_CANCEL_EDGE_BPS,
+  postFillNetBps: ETHEREAL_LIGHTER_MAKER_POST_FILL_NET_BPS,
+  exitNetBps: ETHEREAL_LIGHTER_MAKER_EXIT_NET_BPS,
+  takerExitNetBps: ETHEREAL_LIGHTER_MAKER_EXIT_NET_BPS,
+  quoteLatencyMs: ETHEREAL_LIGHTER_MAKER_QUOTE_LATENCY_MS,
+  hedgeLatencyMs: ETHEREAL_LIGHTER_MAKER_HEDGE_LATENCY_MS,
+  quoteTtlMs: ETHEREAL_LIGHTER_MAKER_QUOTE_TTL_MS,
+  maxQueueUsd: ETHEREAL_LIGHTER_MAKER_MAX_QUEUE_USD,
+  quoteDataGraceMs: ETHEREAL_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS,
+  hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
+  maxHoldMs: MAKER_MAX_HOLD_MS,
+  independenceMs: MAKER_INDEPENDENCE_MS,
+  bookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  sourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  makerBookFreshMs: SHADOW_EXECUTION_FRESH_MS,
+  makerSourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  hedgeBookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  hedgeSourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  executionBufferBps: EXECUTION_BUFFER_BPS,
+  makerFeeBps: 0,
+  hedgeTakerFeeBps: FEE_BPS.lighter,
+  makerFallbackTakerFeeBps: FEE_BPS.ethereal,
+  fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+  requiredSamples: SHADOW_REQUIRED_SAMPLES,
+  requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
+  maxEntryDistanceBps: 3,
+  maxMakerTradeIdleMs: ETHEREAL_LIGHTER_MAKER_MAX_TRADE_IDLE_MS,
+}, {
+  onResult: (result) => {
+    appendFileSync(
+      ETHEREAL_LIGHTER_MAKER_RESULTS_PATH,
+      `${JSON.stringify(result)}\n`,
+    );
+  },
+  onCheckpoint: (checkpoint) => {
+    atomicJson(ETHEREAL_LIGHTER_MAKER_ACTIVE_PATH, {
+      ...checkpoint,
+      updatedAt: Date.now(),
+    });
+  },
+  onEvent: (event) => {
+    appendFileSync(
+      ETHEREAL_LIGHTER_MAKER_EVENTS_PATH,
       `${JSON.stringify(event)}\n`,
     );
   },
@@ -4325,6 +4489,187 @@ function startCoinbase(): void {
   );
 }
 
+function startEthereal(): void {
+  if (!ETHEREAL_VENUE_MARKETS.length) return;
+  let running = false;
+  let productRefreshDueAt = 0;
+  let tradeFeedHealthy = false;
+  const hydratedProducts = new Set<string>();
+  const seenTradeIds = new Set<string>();
+  const seenTradeQueue: string[] = [];
+
+  const rememberTrade = (id: string): boolean => {
+    if (seenTradeIds.has(id)) return false;
+    seenTradeIds.add(id);
+    seenTradeQueue.push(id);
+    while (seenTradeQueue.length > 20_000) {
+      const oldest = seenTradeQueue.shift();
+      if (oldest) seenTradeIds.delete(oldest);
+    }
+    return true;
+  };
+
+  const requestJson = async (url: string): Promise<unknown> => {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      ETHEREAL_REQUEST_TIMEOUT_MS,
+    );
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'RobotClaude-Arb-Shadow/1.0' },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  const refreshProducts = async (now: number): Promise<void> => {
+    const parsed = parseEtherealProducts(await requestJson(
+      'https://api.ethereal.trade/v1/product?order=asc&orderBy=createdAt',
+    ));
+    const selected = parsed.filter(
+      (product) => ETHEREAL_VENUE_COINS.has(product.coin)
+        && byCoin.has(product.coin)
+        && product.makerFeeBps === 0,
+    );
+    if (!selected.length) {
+      throw new Error('no zero-maker Ethereal products');
+    }
+    etherealProductByCoin.clear();
+    etherealCoinByProduct.clear();
+    for (const product of selected) {
+      etherealProductByCoin.set(product.coin, product);
+      etherealCoinByProduct.set(product.productId, product.coin);
+    }
+    etherealTelemetry.productRefreshes++;
+    productRefreshDueAt = now + 60 * 60_000;
+  };
+
+  const pollProduct = async (
+    product: EtherealProduct,
+  ): Promise<{ books: number; trades: number }> => {
+    const [bookResult, tradesResult] = await Promise.allSettled([
+      requestJson(
+        'https://api.ethereal.trade/v1/product/market-liquidity'
+        + `?productId=${encodeURIComponent(product.productId)}`,
+      ),
+      requestJson(
+        'https://api.ethereal.trade/v1/order/trade'
+        + `?productId=${encodeURIComponent(product.productId)}`
+        + '&order=desc&limit=100',
+      ),
+    ]);
+    let books = 0;
+    let trades = 0;
+    if (bookResult.status === 'fulfilled') {
+      etherealTelemetry.bookRequests++;
+      const parsed = parseEtherealBook(bookResult.value);
+      const book = booksByProduct(parsed, product);
+      if (parsed && book) {
+        const receivedAt = Date.now();
+        replacePriceLevels(book.bids, parsed.bids);
+        replacePriceLevels(book.asks, parsed.asks);
+        markBook(book, parsed.exchangeAt, receivedAt);
+        etherealTelemetry.bookUpdates++;
+        books++;
+      }
+    } else {
+      throw bookResult.reason;
+    }
+    if (tradesResult.status === 'fulfilled') {
+      etherealTelemetry.tradeRequests++;
+      const receivedAt = Date.now();
+      const parsed = parseEtherealMakerTrades(
+        tradesResult.value,
+        etherealCoinByProduct,
+      ).sort((left, right) => left.tradeAt - right.tradeAt);
+      const latest = parsed.at(-1);
+      if (
+        latest
+        && latest.tradeAt <= receivedAt + 1_000
+        && receivedAt - latest.tradeAt
+          <= ETHEREAL_LIGHTER_MAKER_MAX_TRADE_IDLE_MS
+      ) {
+        etherealLastTradeAt.set(product.coin, latest.tradeAt);
+      }
+      const hydrated = hydratedProducts.has(product.productId);
+      for (const trade of parsed) {
+        if (!rememberTrade(trade.id) || !hydrated) continue;
+        etherealLighterMakerShadow.processTrade(trade, receivedAt);
+        etherealTelemetry.trades++;
+        trades++;
+      }
+      hydratedProducts.add(product.productId);
+    } else {
+      throw tradesResult.reason;
+    }
+    return { books, trades };
+  };
+
+  function booksByProduct(
+    parsed: ReturnType<typeof parseEtherealBook>,
+    product: EtherealProduct,
+  ): BookState | null {
+    if (!parsed || parsed.productId !== product.productId) return null;
+    return books.get(bookKey('ethereal', product.coin)) ?? null;
+  }
+
+  const poll = async (): Promise<void> => {
+    if (shuttingDown || running) return;
+    running = true;
+    const now = Date.now();
+    etherealTelemetry.lastPollAt = now;
+    try {
+      if (!etherealProductByCoin.size || now >= productRefreshDueAt) {
+        await refreshProducts(now);
+      }
+      const results = await Promise.allSettled(
+        [...etherealProductByCoin.values()].map(pollProduct),
+      );
+      const succeeded = results.filter(
+        (result) => result.status === 'fulfilled',
+      ).length;
+      if (!succeeded) {
+        const rejected = results.find(
+          (result) => result.status === 'rejected',
+        ) as PromiseRejectedResult | undefined;
+        throw rejected?.reason ?? new Error('all Ethereal polls failed');
+      }
+      const receivedAt = Date.now();
+      connections.ethereal.connected = true;
+      connections.ethereal.messages += succeeded;
+      connections.ethereal.lastMessageAt = receivedAt;
+      etherealTelemetry.lastSuccessAt = receivedAt;
+      etherealTelemetry.lastError = null;
+      if (!tradeFeedHealthy) {
+        etherealLighterMakerShadow.setTradeStreamConnected(true);
+        tradeFeedHealthy = true;
+      }
+    } catch (error) {
+      etherealTelemetry.errors++;
+      etherealTelemetry.lastErrorAt = Date.now();
+      etherealTelemetry.lastError = (error as Error).message.slice(0, 160);
+      connections.ethereal.connected = false;
+      connections.ethereal.reconnects++;
+      if (tradeFeedHealthy) {
+        etherealLighterMakerShadow.setTradeStreamConnected(false);
+        etherealLighterMakerShadow.recordTradeReconnect();
+        tradeFeedHealthy = false;
+      }
+    } finally {
+      running = false;
+    }
+  };
+
+  void poll();
+  const timer = setInterval(() => void poll(), ETHEREAL_POLL_MS);
+  timer.unref();
+}
+
 function startBinance(): void {
   const streams = ACTIVE_MARKETS.map(({ symbol }) => `${symbol.toLowerCase()}@depth5@100ms`);
   connect(
@@ -4683,6 +5028,7 @@ function startLighterRestBookPoller(): void {
       asterLighterMakerShadow,
       hibachiLighterMakerShadow,
       coinbaseLighterMakerShadow,
+      etherealLighterMakerShadow,
       extendedLighterMakerShadow,
       lighterExtendedMakerShadow,
       grvtMakerShadow,
@@ -6024,6 +6370,15 @@ function writeStatus(): void {
       enabled: COINBASE_LIGHTER_MAKER_SHADOW_ENABLED,
       feeEligibility: 'advanced_trade_retail_promo_only',
     },
+    etherealLighterMakerShadow: {
+      ...etherealLighterMakerShadow.status(),
+      enabled: ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED,
+      marketData: {
+        pollMs: ETHEREAL_POLL_MS,
+        products: [...etherealProductByCoin.values()],
+        ...etherealTelemetry,
+      },
+    },
     extendedLighterMakerShadow: {
       ...extendedLighterMakerShadow.status(),
       enabled: EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED,
@@ -6378,7 +6733,8 @@ function genericMakerMarkets(
     | 'lighter'
     | 'aster'
     | 'hibachi'
-    | 'coinbase',
+    | 'coinbase'
+    | 'ethereal',
   hedgeVenue: 'lighter' | 'extended' | 'aster' | 'pacifica' | 'binance',
   now: number,
   notionalUsd: number,
@@ -6477,6 +6833,8 @@ function genericMakerMarkets(
             ? hibachiLastTradeAt
           : makerVenue === 'coinbase'
             ? coinbaseLastTradeAt
+          : makerVenue === 'ethereal'
+            ? etherealLastTradeAt
           : makerVenue === 'extended'
             ? extendedLastTradeAt
             : makerVenue === 'lighter'
@@ -6535,6 +6893,7 @@ function shutdown(signal: string): void {
   asterLighterMakerShadow.shutdown(Date.now());
   hibachiLighterMakerShadow.shutdown(Date.now());
   coinbaseLighterMakerShadow.shutdown(Date.now());
+  etherealLighterMakerShadow.shutdown(Date.now());
   extendedLighterMakerShadow.shutdown(Date.now());
   extendedPacificaMakerShadow.shutdown(Date.now());
   lighterExtendedMakerShadow.shutdown(Date.now());
@@ -6592,6 +6951,12 @@ if (!existsSync(COINBASE_LIGHTER_MAKER_RESULTS_PATH)) {
 }
 if (!existsSync(COINBASE_LIGHTER_MAKER_EVENTS_PATH)) {
   writeFileSync(COINBASE_LIGHTER_MAKER_EVENTS_PATH, '');
+}
+if (!existsSync(ETHEREAL_LIGHTER_MAKER_RESULTS_PATH)) {
+  writeFileSync(ETHEREAL_LIGHTER_MAKER_RESULTS_PATH, '');
+}
+if (!existsSync(ETHEREAL_LIGHTER_MAKER_EVENTS_PATH)) {
+  writeFileSync(ETHEREAL_LIGHTER_MAKER_EVENTS_PATH, '');
 }
 if (!existsSync(EXTENDED_LIGHTER_MAKER_RESULTS_PATH)) {
   writeFileSync(EXTENDED_LIGHTER_MAKER_RESULTS_PATH, '');
@@ -6672,6 +7037,13 @@ loadGenericMakerState(
   COINBASE_LIGHTER_MAKER_SHADOW_ENABLED,
 );
 loadGenericMakerState(
+  etherealLighterMakerShadow,
+  ETHEREAL_LIGHTER_MAKER_RESULTS_PATH,
+  ETHEREAL_LIGHTER_MAKER_ACTIVE_PATH,
+  'Ethereal maker → Lighter',
+  ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED,
+);
+loadGenericMakerState(
   extendedLighterMakerShadow,
   EXTENDED_LIGHTER_MAKER_RESULTS_PATH,
   EXTENDED_LIGHTER_MAKER_ACTIVE_PATH,
@@ -6733,6 +7105,7 @@ if (activeVenues.has('pacifica')) startPacifica();
 if (activeVenues.has('grvt')) startGrvt();
 if (activeVenues.has('edgex')) startEdgex();
 if (activeVenues.has('coinbase')) startCoinbase();
+if (activeVenues.has('ethereal')) startEthereal();
 if (activeVenues.has('binance')) startBinance();
 if (activeVenues.has('bybit')) startBybit();
 const evaluationTimer = setInterval(() => {
@@ -6847,6 +7220,23 @@ const evaluationTimer = setInterval(() => {
         'lighter',
         now,
         COINBASE_LIGHTER_MAKER_NOTIONAL_USD,
+      ),
+    );
+  }
+  if (
+    ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED
+    && activeVenues.has('ethereal')
+    && activeVenues.has('lighter')
+  ) {
+    etherealLighterMakerShadow.evaluate(
+      now,
+      genericMakerMarkets(
+        'ethereal',
+        'lighter',
+        now,
+        ETHEREAL_LIGHTER_MAKER_NOTIONAL_USD,
+      ).filter(
+        (market) => ETHEREAL_VENUE_COINS.has(market.coin),
       ),
     );
   }
