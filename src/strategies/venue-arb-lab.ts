@@ -412,6 +412,7 @@ type Status = {
   grvtExtendedMakerShadow?: GenericMakerShadowStatus;
   extendedAsterMakerShadow?: GenericMakerShadowStatus;
   asterBinanceMakerShadow?: GenericMakerShadowStatus;
+  asterPacificaMakerShadow?: GenericMakerShadowStatus;
   extendedLighterMakerShadow?: GenericMakerShadowStatus;
   extendedPacificaMakerShadow?: GenericMakerShadowStatus;
   lighterExtendedMakerShadow?: GenericMakerShadowStatus;
@@ -564,7 +565,8 @@ async function readLive(): Promise<{
 
 async function readTargeted(): Promise<{
   candidateStatus: Status | null;
-  makerGate: ProfitGateStatus | null;
+  binanceMakerGate: ProfitGateStatus | null;
+  pacificaMakerGate: ProfitGateStatus | null;
 }> {
   const read = async <T>(file: string, fallback: T): Promise<T> => {
     try {
@@ -577,8 +579,12 @@ async function readTargeted(): Promise<{
   };
   return {
     candidateStatus: await read<Status | null>('cex-dex-status.json', null),
-    makerGate: await read<ProfitGateStatus | null>(
+    binanceMakerGate: await read<ProfitGateStatus | null>(
       'aster-binance-maker-gate-status.json',
+      null,
+    ),
+    pacificaMakerGate: await read<ProfitGateStatus | null>(
+      'aster-pacifica-maker-gate-status.json',
       null,
     ),
   };
@@ -1242,7 +1248,10 @@ const CANDIDATE_ROUTES = [
 
 function candidateRouteRows(
   status: Status | null,
-  makerProfitGate: ProfitGateStatus | null,
+  makerProfitGates: {
+    binance: ProfitGateStatus | null;
+    pacifica: ProfitGateStatus | null;
+  },
 ): string {
   const shadow = status?.executionShadow;
   const takerRows = CANDIDATE_ROUTES.map(([id, label]) => {
@@ -1272,52 +1281,66 @@ function candidateRouteRows(
       <td>${shadowBlockers(telemetry)}</td>
     </tr>`;
   }).join('');
-  const maker = status?.asterBinanceMakerShadow;
-  const makerGate = maker?.readiness;
-  const makerTelemetry = maker?.telemetry;
-  const makerSamples = Number(
-    makerProfitGate?.metrics?.samples ?? makerGate?.samples ?? 0,
-  );
-  const makerRequired = Number(
-    makerProfitGate?.requirements?.minSamples
-      ?? makerGate?.requiredSamples
-      ?? 30,
-  );
-  const makerPassed = Number(
-    makerProfitGate?.metrics?.positive ?? makerGate?.passed ?? 0,
-  );
-  const makerState = makerProfitGate?.ready
-    ? '<b class="pos">ДОПУЩЕН</b>'
-    : maker?.pair
-      ? '<b class="pos">В РАБОТЕ</b>'
-      : makerSamples > 0
-        ? '<b>НАБЛЮДЕНИЕ</b>'
-        : '<b>ЖДЁМ FILL</b>';
-  const makerBlocker = !maker?.enabled
-    ? 'выключен'
-    : !makerTelemetry?.tradeStreamConnected
-      ? 'нет потока сделок'
-      : maker?.quote
-        ? `${esc(maker.quote.coin)} · заявка в очереди`
-        : 'нет maker edge';
-  return `${takerRows}<tr>
-    <td><b>Aster maker → Binance</b><small>maker 0%</small></td>
-    <td class="${cls(makerTelemetry?.bestProjectedEntryBps)}">${coinAndBps(
-    makerTelemetry?.bestProjectedCoin,
-    makerTelemetry?.bestProjectedEntryBps,
-  )}</td>
-    <td class="${cls(makerTelemetry?.peakProjectedEntryBps)}">${coinAndBps(
-    makerTelemetry?.peakProjectedCoin,
-    makerTelemetry?.peakProjectedEntryBps,
-  )}</td>
-    <td>${makerSamples} / ${makerRequired}<small>+ ${makerPassed} · PF ${makerProfitGate?.metrics?.profitFactor == null ? '—' : Number(makerProfitGate.metrics.profitFactor).toFixed(2)} · LB ${pctFromBps(makerProfitGate?.metrics?.mean95PctLowerBps)}</small></td>
-    <td>${makerState}</td><td>${makerBlocker}</td>
-  </tr>`;
+  const makerRows = [
+    {
+      label: 'Aster maker → Binance',
+      maker: status?.asterBinanceMakerShadow,
+      gate: makerProfitGates.binance,
+    },
+    {
+      label: 'Aster maker → Pacifica',
+      maker: status?.asterPacificaMakerShadow,
+      gate: makerProfitGates.pacifica,
+    },
+  ].map(({ label, maker, gate }) => {
+    const readiness = maker?.readiness;
+    const telemetry = maker?.telemetry;
+    const samples = Number(
+      gate?.metrics?.samples ?? readiness?.samples ?? 0,
+    );
+    const required = Number(
+      gate?.requirements?.minSamples ?? readiness?.requiredSamples ?? 30,
+    );
+    const passed = Number(
+      gate?.metrics?.positive ?? readiness?.passed ?? 0,
+    );
+    const state = gate?.ready
+      ? '<b class="pos">ДОПУЩЕН</b>'
+      : maker?.pair
+        ? '<b class="pos">В РАБОТЕ</b>'
+        : samples > 0
+          ? '<b>НАБЛЮДЕНИЕ</b>'
+          : '<b>ЖДЁМ FILL</b>';
+    const blocker = !maker?.enabled
+      ? 'выключен'
+      : !telemetry?.tradeStreamConnected
+        ? 'нет потока сделок'
+        : maker?.quote
+          ? `${esc(maker.quote.coin)} · заявка в очереди`
+          : 'нет maker edge';
+    return `<tr>
+      <td><b>${esc(label)}</b><small>maker 0%</small></td>
+      <td class="${cls(telemetry?.bestProjectedEntryBps)}">${coinAndBps(
+      telemetry?.bestProjectedCoin,
+      telemetry?.bestProjectedEntryBps,
+    )}</td>
+      <td class="${cls(telemetry?.peakProjectedEntryBps)}">${coinAndBps(
+      telemetry?.peakProjectedCoin,
+      telemetry?.peakProjectedEntryBps,
+    )}</td>
+      <td>${samples} / ${required}<small>+ ${passed} · PF ${gate?.metrics?.profitFactor == null ? '—' : Number(gate.metrics.profitFactor).toFixed(2)} · LB ${pctFromBps(gate?.metrics?.mean95PctLowerBps)}</small></td>
+      <td>${state}</td><td>${blocker}</td>
+    </tr>`;
+  }).join('');
+  return takerRows + makerRows;
 }
 
 function candidateShadowRows(
   shadow: ExecutionShadow | undefined,
-  maker: GenericMakerShadowStatus | undefined,
+  makers: {
+    binance: GenericMakerShadowStatus | undefined;
+    pacifica: GenericMakerShadowStatus | undefined;
+  },
 ): string {
   const labels = new Map<string, string>(CANDIDATE_ROUTES);
   const rows = CANDIDATE_ROUTES.flatMap(([id]) => {
@@ -1341,24 +1364,29 @@ function candidateShadowRows(
       })),
     ];
   });
-  if (maker?.pair) {
-    rows.push({
-      at: maker.pair.openedAt,
-      coin: maker.pair.coin,
-      route: 'Aster maker → Binance',
-      status: 'В РАБОТЕ',
-      netBps: maker.pair.entryEdgeBps,
-      detail: 'maker fill подтверждён',
-    });
-  }
-  rows.push(...(maker?.recent ?? []).map((row) => ({
-    at: row.closedAt,
-    coin: row.coin,
-    route: 'Aster maker → Binance',
-    status: row.passed ? 'PASS' : 'FAIL',
-    netBps: row.realizedNetBps,
-    detail: makerReason(row.reason),
-  })));
+  ([
+    ['Aster maker → Binance', makers.binance],
+    ['Aster maker → Pacifica', makers.pacifica],
+  ] as const).forEach(([route, maker]) => {
+    if (maker?.pair) {
+      rows.push({
+        at: maker.pair.openedAt,
+        coin: maker.pair.coin,
+        route,
+        status: 'В РАБОТЕ',
+        netBps: maker.pair.entryEdgeBps,
+        detail: 'maker fill подтверждён',
+      });
+    }
+    rows.push(...(maker?.recent ?? []).map((row) => ({
+      at: row.closedAt,
+      coin: row.coin,
+      route,
+      status: row.passed ? 'PASS' : 'FAIL',
+      netBps: row.realizedNetBps,
+      detail: makerReason(row.reason),
+    })));
+  });
   rows.sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
   if (!rows.length) {
     return '<tr><td colspan="6">Исполнимых входов после задержки и всех расходов пока не было.</td></tr>';
@@ -1431,20 +1459,33 @@ async function renderCompact(lang: Lang): Promise<string> {
   const routes = CANDIDATE_ROUTES.map(
     ([id]) => candidateShadow?.routes?.[id],
   );
-  const makerReadiness = candidateStatus?.asterBinanceMakerShadow?.readiness;
+  const makerReadiness = [
+    candidateStatus?.asterBinanceMakerShadow?.readiness,
+    candidateStatus?.asterPacificaMakerShadow?.readiness,
+  ];
   const totalSamples = routes.reduce(
     (sum, route) => sum + Number(route?.readiness?.samples ?? 0),
     Number(
-      targeted.makerGate?.metrics?.samples
-        ?? makerReadiness?.samples
+      targeted.binanceMakerGate?.metrics?.samples
+        ?? makerReadiness[0]?.samples
+        ?? 0,
+    ) + Number(
+      targeted.pacificaMakerGate?.metrics?.samples
+        ?? makerReadiness[1]?.samples
         ?? 0,
     ),
   );
   const totalAttempts = routes.reduce(
     (sum, route) => sum + Number(route?.readiness?.attempts ?? 0),
-    Number(makerReadiness?.attempts ?? 0),
+    makerReadiness.reduce(
+      (sum, readiness) => sum + Number(readiness?.attempts ?? 0),
+      0,
+    ),
   );
-  const readyRoutes = targeted.makerGate?.ready ? 1 : 0;
+  const readyRoutes = [
+    targeted.binanceMakerGate,
+    targeted.pacificaMakerGate,
+  ].filter((gate) => gate?.ready).length;
   const canaryReady = readyRoutes > 0;
   return pageShell(
     t(lang, 'Арбитраж — контроль прибыли', 'Arbitrage profit control'),
@@ -1467,7 +1508,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       <div class="va-cards">
         <div class="va-card"><small>Реальный net</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b><em>${closedLive.length} сделок · ${liveWins} прибыльных · комиссии ${money(liveFees)}</em></div>
         <div class="va-card"><small>Реальная торговля</small><b class="${realStateClass}">${realPaused ? 'ОСТАНОВЛЕНА' : liveState(liveStatus)}</b><em>${realPaused ? 'до доказанного положительного gate' : 'canary активен'}</em></div>
-        <div class="va-card"><small>Shadow</small><b>${totalSamples} сделок</b><em>${totalAttempts} попыток · потоки ${healthyFeeds}/3 · маршрутов ${CANDIDATE_ROUTES.length + 1}</em></div>
+        <div class="va-card"><small>Shadow</small><b>${totalSamples} сделок</b><em>${totalAttempts} попыток · потоки ${healthyFeeds}/3 · маршрутов ${CANDIDATE_ROUTES.length + 2}</em></div>
       </div>
 
       <div class="va-summary">
@@ -1479,14 +1520,20 @@ async function renderCompact(lang: Lang): Promise<string> {
         <div class="va-panel-head"><h2>Проверяем сейчас</h2><span>все расходы · $100 · задержка 300 мс</span></div>
         <div class="va-table"><table><thead><tr>
           <th>Маршрут</th><th>Net сейчас</th><th>Лучший net</th><th>Shadow</th><th>Статус</th><th>Почему нет входа</th>
-        </tr></thead><tbody>${candidateRouteRows(candidateStatus, targeted.makerGate)}</tbody></table></div>
+        </tr></thead><tbody>${candidateRouteRows(candidateStatus, {
+          binance: targeted.binanceMakerGate,
+          pacifica: targeted.pacificaMakerGate,
+        })}</tbody></table></div>
       </section>
 
       <section class="va-panel">
         <div class="va-panel-head"><h2>История shadow</h2><span>только попытки исполнения</span></div>
         <div class="va-table" data-va-pager="target-shadow" data-page-size="20"><table><thead><tr>
           <th>UTC</th><th>Монета</th><th>Маршрут</th><th>Статус</th><th>Net</th><th>Причина</th>
-        </tr></thead><tbody>${candidateShadowRows(candidateShadow, candidateStatus?.asterBinanceMakerShadow)}</tbody></table></div>
+        </tr></thead><tbody>${candidateShadowRows(candidateShadow, {
+          binance: candidateStatus?.asterBinanceMakerShadow,
+          pacifica: candidateStatus?.asterPacificaMakerShadow,
+        })}</tbody></table></div>
       </section>
 
       <section class="va-panel va-live-panel">

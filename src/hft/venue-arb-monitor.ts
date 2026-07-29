@@ -447,6 +447,18 @@ const ASTER_BINANCE_MAKER_EVENTS_PATH = resolve(
   DATA_DIR,
   'aster-binance-maker-events-v1.ndjson',
 );
+const ASTER_PACIFICA_MAKER_RESULTS_PATH = resolve(
+  DATA_DIR,
+  'aster-pacifica-maker-basis-shadow-v1.ndjson',
+);
+const ASTER_PACIFICA_MAKER_ACTIVE_PATH = resolve(
+  DATA_DIR,
+  'aster-pacifica-maker-basis-active-v1.json',
+);
+const ASTER_PACIFICA_MAKER_EVENTS_PATH = resolve(
+  DATA_DIR,
+  'aster-pacifica-maker-events-v1.ndjson',
+);
 const EXTENDED_LIGHTER_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
   'extended-lighter-maker-basis-shadow-v2.ndjson',
@@ -740,6 +752,38 @@ const ASTER_BINANCE_MAKER_QUOTE_LATENCY_MS = finiteEnv(
 );
 const ASTER_BINANCE_MAKER_HEDGE_LATENCY_MS = finiteEnv(
   'VENUE_ARB_ASTER_BINANCE_MAKER_HEDGE_LATENCY_MS',
+  100,
+);
+const ASTER_PACIFICA_MAKER_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_ASTER_PACIFICA_MAKER_SHADOW_ENABLED',
+  false,
+);
+const ASTER_PACIFICA_MAKER_NOTIONAL_USD = finiteEnv(
+  'VENUE_ARB_ASTER_PACIFICA_MAKER_NOTIONAL_USD',
+  100,
+);
+const ASTER_PACIFICA_MAKER_ENTRY_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_ASTER_PACIFICA_MAKER_ENTRY_EDGE_BPS',
+  1,
+);
+const ASTER_PACIFICA_MAKER_CANCEL_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_ASTER_PACIFICA_MAKER_CANCEL_EDGE_BPS',
+  0.5,
+);
+const ASTER_PACIFICA_MAKER_POST_FILL_NET_BPS = finiteEnv(
+  'VENUE_ARB_ASTER_PACIFICA_MAKER_POST_FILL_NET_BPS',
+  0.5,
+);
+const ASTER_PACIFICA_MAKER_EXIT_NET_BPS = finiteEnv(
+  'VENUE_ARB_ASTER_PACIFICA_MAKER_EXIT_NET_BPS',
+  1,
+);
+const ASTER_PACIFICA_MAKER_QUOTE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_ASTER_PACIFICA_MAKER_QUOTE_LATENCY_MS',
+  250,
+);
+const ASTER_PACIFICA_MAKER_HEDGE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_ASTER_PACIFICA_MAKER_HEDGE_LATENCY_MS',
   100,
 );
 const EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
@@ -1615,6 +1659,55 @@ const asterBinanceMakerShadow = new GenericMakerShadow({
   onEvent: (event) => {
     appendFileSync(
       ASTER_BINANCE_MAKER_EVENTS_PATH,
+      `${JSON.stringify(event)}\n`,
+    );
+  },
+});
+const asterPacificaMakerShadow = new GenericMakerShadow({
+  routeId: 'aster-maker-pacifica',
+  makerVenue: 'aster',
+  hedgeVenue: 'pacifica',
+  notionalUsd: ASTER_PACIFICA_MAKER_NOTIONAL_USD,
+  entryEdgeBps: ASTER_PACIFICA_MAKER_ENTRY_EDGE_BPS,
+  cancelEdgeBps: ASTER_PACIFICA_MAKER_CANCEL_EDGE_BPS,
+  postFillNetBps: ASTER_PACIFICA_MAKER_POST_FILL_NET_BPS,
+  exitNetBps: ASTER_PACIFICA_MAKER_EXIT_NET_BPS,
+  takerExitNetBps: ASTER_PACIFICA_MAKER_EXIT_NET_BPS,
+  quoteLatencyMs: ASTER_PACIFICA_MAKER_QUOTE_LATENCY_MS,
+  hedgeLatencyMs: ASTER_PACIFICA_MAKER_HEDGE_LATENCY_MS,
+  quoteTtlMs: GRVT_MAKER_QUOTE_TTL_MS,
+  maxQueueUsd: GRVT_MAKER_MAX_QUEUE_USD,
+  hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
+  maxHoldMs: MAKER_MAX_HOLD_MS,
+  independenceMs: MAKER_INDEPENDENCE_MS,
+  bookFreshMs: SHADOW_EXECUTION_FRESH_MS,
+  sourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  executionBufferBps: EXECUTION_BUFFER_BPS,
+  makerFeeBps: 0,
+  hedgeTakerFeeBps: FEE_BPS.pacifica,
+  makerFallbackTakerFeeBps: FEE_BPS.aster,
+  fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+  requiredSamples: SHADOW_REQUIRED_SAMPLES,
+  requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  maxEntryDistanceBps: 3,
+}, {
+  onResult: (result) => {
+    appendFileSync(
+      ASTER_PACIFICA_MAKER_RESULTS_PATH,
+      `${JSON.stringify(result)}\n`,
+    );
+  },
+  onCheckpoint: (checkpoint) => {
+    atomicJson(ASTER_PACIFICA_MAKER_ACTIVE_PATH, {
+      ...checkpoint,
+      updatedAt: Date.now(),
+    });
+  },
+  onEvent: (event) => {
+    appendFileSync(
+      ASTER_PACIFICA_MAKER_EVENTS_PATH,
       `${JSON.stringify(event)}\n`,
     );
   },
@@ -4285,7 +4378,13 @@ function startAster(): void {
 }
 
 function startAsterTrades(): void {
-  if (shuttingDown || !ASTER_BINANCE_MAKER_SHADOW_ENABLED) return;
+  if (
+    shuttingDown
+    || (
+      !ASTER_BINANCE_MAKER_SHADOW_ENABLED
+      && !ASTER_PACIFICA_MAKER_SHADOW_ENABLED
+    )
+  ) return;
   const streams = ACTIVE_MARKETS.map(
     ({ symbol }) => `${symbol.toLowerCase()}@aggTrade`,
   );
@@ -4295,6 +4394,7 @@ function startAsterTrades(): void {
   sockets.add(ws);
   ws.on('open', () => {
     asterBinanceMakerShadow.setTradeStreamConnected(true);
+    asterPacificaMakerShadow.setTradeStreamConnected(true);
     console.warn('venue-arb aster public trades connected');
     const timer = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) ws.ping();
@@ -4338,6 +4438,7 @@ function startAsterTrades(): void {
         tradeAt: normalizeExchangeTimestampMs(finite(row.T), receivedAt),
       };
       asterBinanceMakerShadow.processTrade(trade, receivedAt);
+      asterPacificaMakerShadow.processTrade(trade, receivedAt);
     } catch (error) {
       console.warn(
         'venue-arb aster public trades parse',
@@ -4347,6 +4448,7 @@ function startAsterTrades(): void {
   });
   ws.on('error', (error) => {
     asterBinanceMakerShadow.setTradeStreamConnected(false);
+    asterPacificaMakerShadow.setTradeStreamConnected(false);
     console.warn(
       'venue-arb aster public trades websocket error',
       error.message,
@@ -4356,6 +4458,8 @@ function startAsterTrades(): void {
     sockets.delete(ws);
     asterBinanceMakerShadow.setTradeStreamConnected(false);
     asterBinanceMakerShadow.recordTradeReconnect();
+    asterPacificaMakerShadow.setTradeStreamConnected(false);
+    asterPacificaMakerShadow.recordTradeReconnect();
     console.warn(
       `venue-arb aster public trades closed code=${code} reason=${reason.toString().slice(0, 160) || 'none'}`,
     );
@@ -5038,6 +5142,10 @@ function writeStatus(): void {
       ...asterBinanceMakerShadow.status(),
       enabled: ASTER_BINANCE_MAKER_SHADOW_ENABLED,
     },
+    asterPacificaMakerShadow: {
+      ...asterPacificaMakerShadow.status(),
+      enabled: ASTER_PACIFICA_MAKER_SHADOW_ENABLED,
+    },
     extendedLighterMakerShadow: {
       ...extendedLighterMakerShadow.status(),
       enabled: EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED,
@@ -5474,6 +5582,7 @@ function shutdown(signal: string): void {
   grvtExtendedMakerShadow.shutdown(Date.now());
   extendedAsterMakerShadow.shutdown(Date.now());
   asterBinanceMakerShadow.shutdown(Date.now());
+  asterPacificaMakerShadow.shutdown(Date.now());
   extendedLighterMakerShadow.shutdown(Date.now());
   extendedPacificaMakerShadow.shutdown(Date.now());
   lighterExtendedMakerShadow.shutdown(Date.now());
@@ -5504,6 +5613,12 @@ if (!existsSync(ASTER_BINANCE_MAKER_RESULTS_PATH)) {
 }
 if (!existsSync(ASTER_BINANCE_MAKER_EVENTS_PATH)) {
   writeFileSync(ASTER_BINANCE_MAKER_EVENTS_PATH, '');
+}
+if (!existsSync(ASTER_PACIFICA_MAKER_RESULTS_PATH)) {
+  writeFileSync(ASTER_PACIFICA_MAKER_RESULTS_PATH, '');
+}
+if (!existsSync(ASTER_PACIFICA_MAKER_EVENTS_PATH)) {
+  writeFileSync(ASTER_PACIFICA_MAKER_EVENTS_PATH, '');
 }
 if (!existsSync(EXTENDED_LIGHTER_MAKER_RESULTS_PATH)) {
   writeFileSync(EXTENDED_LIGHTER_MAKER_RESULTS_PATH, '');
@@ -5556,6 +5671,13 @@ loadGenericMakerState(
   ASTER_BINANCE_MAKER_SHADOW_ENABLED,
 );
 loadGenericMakerState(
+  asterPacificaMakerShadow,
+  ASTER_PACIFICA_MAKER_RESULTS_PATH,
+  ASTER_PACIFICA_MAKER_ACTIVE_PATH,
+  'Aster maker → Pacifica',
+  ASTER_PACIFICA_MAKER_SHADOW_ENABLED,
+);
+loadGenericMakerState(
   extendedLighterMakerShadow,
   EXTENDED_LIGHTER_MAKER_RESULTS_PATH,
   EXTENDED_LIGHTER_MAKER_ACTIVE_PATH,
@@ -5598,8 +5720,14 @@ if (activeVenues.has('extended')) {
 if (activeVenues.has('aster')) {
   startAster();
   if (
-    ASTER_BINANCE_MAKER_SHADOW_ENABLED
-    && activeVenues.has('binance')
+    (
+      ASTER_BINANCE_MAKER_SHADOW_ENABLED
+      && activeVenues.has('binance')
+    )
+    || (
+      ASTER_PACIFICA_MAKER_SHADOW_ENABLED
+      && activeVenues.has('pacifica')
+    )
   ) startAsterTrades();
 }
 if (activeVenues.has('pacifica')) startPacifica();
@@ -5655,6 +5783,16 @@ const evaluationTimer = setInterval(() => {
     asterBinanceMakerShadow.evaluate(
       now,
       genericMakerMarkets('aster', 'binance', now),
+    );
+  }
+  if (
+    ASTER_PACIFICA_MAKER_SHADOW_ENABLED
+    && activeVenues.has('aster')
+    && activeVenues.has('pacifica')
+  ) {
+    asterPacificaMakerShadow.evaluate(
+      now,
+      genericMakerMarkets('aster', 'pacifica', now),
     );
   }
   if (

@@ -20,5 +20,7 @@ while true; do
     "${candidate_dir}/status.json" "${destination}cex-dex-status.json"
   [[ -f "${candidate_dir}/aster-binance-maker-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
     "${candidate_dir}/aster-binance-maker-gate-status.json" "${destination}aster-binance-maker-gate-status.json"
+  [[ -f "${candidate_dir}/aster-pacifica-maker-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
+    "${candidate_dir}/aster-pacifica-maker-gate-status.json" "${destination}aster-pacifica-maker-gate-status.json"
   sleep 1
 done

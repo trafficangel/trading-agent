@@ -1,0 +1,16 @@
+[Unit]
+Description=Evaluate Aster maker/Pacifica taker arbitrage shadow profit gate
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/venue-arb-tokyo
+ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-shadow-gate.py --input /home/trader/apps/venue-arb-tokyo/data/binance-bybit-shadow/aster-pacifica-maker-basis-shadow-v1.ndjson --output /home/trader/apps/venue-arb-tokyo/data/binance-bybit-shadow/aster-pacifica-maker-gate-status.json --route aster-maker-pacifica --notional-usd 100 --min-samples 30 --min-profit-factor 1.2 --max-drawdown-bps 50
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/venue-arb-tokyo/data/binance-bybit-shadow
