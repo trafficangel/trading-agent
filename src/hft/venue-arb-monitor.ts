@@ -797,6 +797,10 @@ const LIGHTER_BBO_MISMATCH_BPS = finiteEnv(
   'VENUE_ARB_LIGHTER_BBO_MISMATCH_BPS',
   2,
 );
+const LIGHTER_BBO_MISMATCH_REFRESH_COUNT = Math.floor(finiteEnv(
+  'VENUE_ARB_LIGHTER_BBO_MISMATCH_REFRESH_COUNT',
+  0,
+));
 const LIGHTER_VALIDATED_BOOK_FRESH_MS = finiteEnv(
   'VENUE_ARB_LIGHTER_VALIDATED_BOOK_FRESH_MS',
   3_000,
@@ -3552,7 +3556,10 @@ function startLighter(): void {
         lighterBookValidation.delete(marketId);
         const mismatches = (bboMismatchCounts.get(marketId) ?? 0) + 1;
         bboMismatchCounts.set(marketId, mismatches);
-        if (mismatches >= 3) refreshBook(ws, market);
+        if (
+          LIGHTER_BBO_MISMATCH_REFRESH_COUNT > 0
+          && mismatches >= LIGHTER_BBO_MISMATCH_REFRESH_COUNT
+        ) refreshBook(ws, market);
         return;
       }
       if (!message.order_book) return;
