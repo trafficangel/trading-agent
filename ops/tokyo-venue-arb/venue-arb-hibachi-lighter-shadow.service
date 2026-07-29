@@ -24,7 +24,7 @@ Environment=VENUE_ARB_SHADOW_BASIS_EXCLUDE_MS=5000
 Environment=VENUE_ARB_SHADOW_BASIS_SAMPLE_MS=1000
 Environment=VENUE_ARB_SHADOW_BASIS_MIN_SAMPLES=120
 Environment=VENUE_ARB_SHADOW_BASIS_MIN_SPAN_MS=120000
-Environment=VENUE_ARB_SHADOW_BASIS_MIN_DEVIATION_BPS=10
+Environment=VENUE_ARB_SHADOW_BASIS_MIN_DEVIATION_BPS=5
 Environment=VENUE_ARB_SHADOW_EXECUTION_FRESH_MS=1000
 # Hibachi trade timestamps have one-second resolution. A 1.5s source window
 # accepts the current print without relaxing the separately validated hedge.
