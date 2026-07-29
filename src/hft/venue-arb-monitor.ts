@@ -1124,6 +1124,30 @@ const ALL_SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
     primary: false,
   },
   {
+    id: 'binance-aster',
+    buyVenue: 'binance',
+    sellVenue: 'aster',
+    primary: false,
+  },
+  {
+    id: 'aster-binance',
+    buyVenue: 'aster',
+    sellVenue: 'binance',
+    primary: false,
+  },
+  {
+    id: 'binance-pacifica',
+    buyVenue: 'binance',
+    sellVenue: 'pacifica',
+    primary: false,
+  },
+  {
+    id: 'pacifica-binance',
+    buyVenue: 'pacifica',
+    sellVenue: 'binance',
+    primary: false,
+  },
+  {
     id: 'extended-aster',
     buyVenue: 'extended',
     sellVenue: 'aster',

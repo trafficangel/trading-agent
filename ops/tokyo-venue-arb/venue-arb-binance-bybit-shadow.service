@@ -1,5 +1,5 @@
 [Unit]
-Description=Robot Claude targeted Binance/Bybit arbitrage shadow
+Description=Robot Claude targeted CEX/Aster/Pacifica arbitrage shadow
 After=network-online.target
 Wants=network-online.target
 
@@ -9,7 +9,7 @@ User=trader
 Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/binance-bybit-shadow
-Environment=VENUE_ARB_ACTIVE_VENUES=binance,bybit
+Environment=VENUE_ARB_ACTIVE_VENUES=binance,bybit,aster,pacifica
 Environment=VENUE_ARB_ACTIVE_COINS=LIT,BTC,ETH,SOL,HYPE,XRP,ADA,BNB
 Environment=VENUE_ARB_SAMPLE_MS=100
 Environment=VENUE_ARB_STALE_MS=1000
