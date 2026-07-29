@@ -97,6 +97,19 @@ type BookState = {
   updates: number;
 };
 
+type LighterWsMarketTelemetry = {
+  orderBookMessages: number;
+  tickerMessages: number;
+  tickerMatches: number;
+  tickerMismatches: number;
+  nonceGaps: number;
+  refreshes: number;
+  lastOrderBookAt: number | null;
+  lastTickerAt: number | null;
+  lastRefreshAt: number | null;
+  lastRefreshReason: string | null;
+};
+
 type ConnectionState = {
   connected: boolean;
   messages: number;
@@ -1231,6 +1244,20 @@ const byCoin = new Map(ACTIVE_MARKETS.map((market) => [market.coin, market]));
 const byLighterId = new Map(ACTIVE_MARKETS.map((market) => [market.lighterMarketId, market]));
 const lighterTickerBbo = new Map<number, LighterTickerBbo>();
 const lighterBookValidation = new Map<number, LighterBookValidation>();
+const lighterWsTelemetry = new Map<number, LighterWsMarketTelemetry>(
+  ACTIVE_MARKETS.map((market) => [market.lighterMarketId, {
+    orderBookMessages: 0,
+    tickerMessages: 0,
+    tickerMatches: 0,
+    tickerMismatches: 0,
+    nonceGaps: 0,
+    refreshes: 0,
+    lastOrderBookAt: null,
+    lastTickerAt: null,
+    lastRefreshAt: null,
+    lastRefreshReason: null,
+  }]),
+);
 const lighterRestShadowBookUpdates = new Map<number, number>();
 const lighterRestTelemetry = {
   requests: 0,
@@ -3407,7 +3434,14 @@ function startLighter(): void {
   const refreshBook = (
     ws: WebSocket,
     market: Market,
+    reason: string,
   ): void => {
+    const telemetry = lighterWsTelemetry.get(market.lighterMarketId);
+    if (telemetry) {
+      telemetry.refreshes++;
+      telemetry.lastRefreshAt = Date.now();
+      telemetry.lastRefreshReason = reason;
+    }
     const book = books.get(bookKey('lighter', market.coin));
     if (!book) return;
     book.bids.clear();
@@ -3473,7 +3507,7 @@ function startLighter(): void {
           }
           const market = ACTIVE_MARKETS[refreshIndex % ACTIVE_MARKETS.length];
           refreshIndex++;
-          if (market) refreshBook(ws, market);
+          if (market) refreshBook(ws, market, 'periodic');
         }, Math.max(
           1_000,
           LIGHTER_BOOK_REFRESH_MS / ACTIVE_MARKETS.length,
@@ -3521,6 +3555,11 @@ function startLighter(): void {
       const book = market ? books.get(bookKey('lighter', market.coin)) : null;
       if (marketId == null || !market || !book) return;
       if (message.ticker) {
+        const telemetry = lighterWsTelemetry.get(marketId);
+        if (telemetry) {
+          telemetry.tickerMessages++;
+          telemetry.lastTickerAt = receivedAt;
+        }
         const tickerAsk = finite(message.ticker.a?.price);
         const tickerBid = finite(message.ticker.b?.price);
         if (!(tickerAsk > 0) || !(tickerBid > 0)) return;
@@ -3542,6 +3581,7 @@ function startLighter(): void {
           Math.abs(bookBid / tickerBid - 1),
         ) * 10_000;
         if (mismatchBps <= LIGHTER_BBO_MISMATCH_BPS) {
+          if (telemetry) telemetry.tickerMatches++;
           bboMismatchCounts.delete(marketId);
           // The ticker independently confirms that the stored depth still has
           // the live BBO. Keep the validated book fresh even when Lighter does
@@ -3553,21 +3593,28 @@ function startLighter(): void {
           });
           return;
         }
+        if (telemetry) telemetry.tickerMismatches++;
         lighterBookValidation.delete(marketId);
         const mismatches = (bboMismatchCounts.get(marketId) ?? 0) + 1;
         bboMismatchCounts.set(marketId, mismatches);
         if (
           LIGHTER_BBO_MISMATCH_REFRESH_COUNT > 0
           && mismatches >= LIGHTER_BBO_MISMATCH_REFRESH_COUNT
-        ) refreshBook(ws, market);
+        ) refreshBook(ws, market, 'bbo_mismatch');
         return;
       }
       if (!message.order_book) return;
+      const telemetry = lighterWsTelemetry.get(marketId);
+      if (telemetry) {
+        telemetry.orderBookMessages++;
+        telemetry.lastOrderBookAt = receivedAt;
+      }
       const nonce = finite(message.order_book.nonce);
       const beginNonce = finite(message.order_book.begin_nonce);
       const previous = nonces.get(marketId);
       if (previous != null && beginNonce > 0 && beginNonce !== previous) {
-        refreshBook(ws, market);
+        if (telemetry) telemetry.nonceGaps++;
+        refreshBook(ws, market, 'nonce_gap');
         return;
       }
       if (!book.bids.size || !book.asks.size || previous == null) {
@@ -4647,6 +4694,14 @@ function writeStatus(): void {
       markets: ACTIVE_MARKETS.length,
       ...lighterRestTelemetry,
     },
+    lighterWs: Object.fromEntries(ACTIVE_MARKETS.map((market) => [
+      market.coin,
+      {
+        ...lighterWsTelemetry.get(market.lighterMarketId),
+        bids: books.get(bookKey('lighter', market.coin))?.bids.size ?? 0,
+        asks: books.get(bookKey('lighter', market.coin))?.asks.size ?? 0,
+      },
+    ])),
     freshnessMs: Object.fromEntries(ACTIVE_MARKETS.map((market) => [
       market.coin,
       Object.fromEntries(ACTIVE_VENUES.map((venue) => [
