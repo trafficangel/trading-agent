@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Aster maker/Lighter taker arbitrage shadow profit gate
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=10s
+AccuracySec=1s
+Unit=venue-arb-aster-lighter-maker-gate.service
+
+[Install]
+WantedBy=timers.target

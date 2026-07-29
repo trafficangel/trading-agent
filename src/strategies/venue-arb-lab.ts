@@ -413,6 +413,7 @@ type Status = {
   extendedAsterMakerShadow?: GenericMakerShadowStatus;
   asterBinanceMakerShadow?: GenericMakerShadowStatus;
   asterPacificaMakerShadow?: GenericMakerShadowStatus;
+  asterLighterMakerShadow?: GenericMakerShadowStatus;
   extendedLighterMakerShadow?: GenericMakerShadowStatus;
   extendedPacificaMakerShadow?: GenericMakerShadowStatus;
   lighterExtendedMakerShadow?: GenericMakerShadowStatus;
@@ -567,6 +568,7 @@ async function readTargeted(): Promise<{
   candidateStatus: Status | null;
   binanceMakerGate: ProfitGateStatus | null;
   pacificaMakerGate: ProfitGateStatus | null;
+  lighterMakerGate: ProfitGateStatus | null;
 }> {
   const read = async <T>(file: string, fallback: T): Promise<T> => {
     try {
@@ -585,6 +587,10 @@ async function readTargeted(): Promise<{
     ),
     pacificaMakerGate: await read<ProfitGateStatus | null>(
       'aster-pacifica-maker-gate-status.json',
+      null,
+    ),
+    lighterMakerGate: await read<ProfitGateStatus | null>(
+      'aster-lighter-maker-gate-status.json',
       null,
     ),
   };
@@ -1251,6 +1257,7 @@ function candidateRouteRows(
   makerProfitGates: {
     binance: ProfitGateStatus | null;
     pacifica: ProfitGateStatus | null;
+    lighter: ProfitGateStatus | null;
   },
 ): string {
   const shadow = status?.executionShadow;
@@ -1291,6 +1298,11 @@ function candidateRouteRows(
       label: 'Aster maker → Pacifica',
       maker: status?.asterPacificaMakerShadow,
       gate: makerProfitGates.pacifica,
+    },
+    {
+      label: 'Aster maker → Lighter',
+      maker: status?.asterLighterMakerShadow,
+      gate: makerProfitGates.lighter,
     },
   ].map(({ label, maker, gate }) => {
     const readiness = maker?.readiness;
@@ -1340,6 +1352,7 @@ function candidateShadowRows(
   makers: {
     binance: GenericMakerShadowStatus | undefined;
     pacifica: GenericMakerShadowStatus | undefined;
+    lighter: GenericMakerShadowStatus | undefined;
   },
 ): string {
   const labels = new Map<string, string>(CANDIDATE_ROUTES);
@@ -1367,6 +1380,7 @@ function candidateShadowRows(
   ([
     ['Aster maker → Binance', makers.binance],
     ['Aster maker → Pacifica', makers.pacifica],
+    ['Aster maker → Lighter', makers.lighter],
   ] as const).forEach(([route, maker]) => {
     if (maker?.pair) {
       rows.push({
@@ -1452,7 +1466,12 @@ async function renderCompact(lang: Lang): Promise<string> {
     candidateStatus?.updatedAt
     && Date.now() - candidateStatus.updatedAt < 15_000,
   );
-  const candidateVenues: Venue[] = ['binance', 'aster', 'pacifica'];
+  const candidateVenues: Venue[] = [
+    'binance',
+    'aster',
+    'pacifica',
+    'lighter',
+  ];
   const healthyFeeds = candidateVenues.filter(
     (venue) => candidateStatus?.connections?.[venue]?.connected,
   ).length;
@@ -1462,6 +1481,7 @@ async function renderCompact(lang: Lang): Promise<string> {
   const makerReadiness = [
     candidateStatus?.asterBinanceMakerShadow?.readiness,
     candidateStatus?.asterPacificaMakerShadow?.readiness,
+    candidateStatus?.asterLighterMakerShadow?.readiness,
   ];
   const totalSamples = routes.reduce(
     (sum, route) => sum + Number(route?.readiness?.samples ?? 0),
@@ -1472,6 +1492,10 @@ async function renderCompact(lang: Lang): Promise<string> {
     ) + Number(
       targeted.pacificaMakerGate?.metrics?.samples
         ?? makerReadiness[1]?.samples
+        ?? 0,
+    ) + Number(
+      targeted.lighterMakerGate?.metrics?.samples
+        ?? makerReadiness[2]?.samples
         ?? 0,
     ),
   );
@@ -1485,6 +1509,7 @@ async function renderCompact(lang: Lang): Promise<string> {
   const readyRoutes = [
     targeted.binanceMakerGate,
     targeted.pacificaMakerGate,
+    targeted.lighterMakerGate,
   ].filter((gate) => gate?.ready).length;
   const canaryReady = readyRoutes > 0;
   return pageShell(
@@ -1508,7 +1533,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       <div class="va-cards">
         <div class="va-card"><small>Реальный net</small><b class="${cls(liveNet)}">${money(liveNet, true)}</b><em>${closedLive.length} сделок · ${liveWins} прибыльных · комиссии ${money(liveFees)}</em></div>
         <div class="va-card"><small>Реальная торговля</small><b class="${realStateClass}">${realPaused ? 'ОСТАНОВЛЕНА' : liveState(liveStatus)}</b><em>${realPaused ? 'до доказанного положительного gate' : 'canary активен'}</em></div>
-        <div class="va-card"><small>Shadow</small><b>${totalSamples} сделок</b><em>${totalAttempts} попыток · потоки ${healthyFeeds}/3 · маршрутов ${CANDIDATE_ROUTES.length + 2}</em></div>
+        <div class="va-card"><small>Shadow</small><b>${totalSamples} сделок</b><em>${totalAttempts} попыток · потоки ${healthyFeeds}/4 · маршрутов ${CANDIDATE_ROUTES.length + 3}</em></div>
       </div>
 
       <div class="va-summary">
@@ -1523,6 +1548,7 @@ async function renderCompact(lang: Lang): Promise<string> {
         </tr></thead><tbody>${candidateRouteRows(candidateStatus, {
           binance: targeted.binanceMakerGate,
           pacifica: targeted.pacificaMakerGate,
+          lighter: targeted.lighterMakerGate,
         })}</tbody></table></div>
       </section>
 
@@ -1533,6 +1559,7 @@ async function renderCompact(lang: Lang): Promise<string> {
         </tr></thead><tbody>${candidateShadowRows(candidateShadow, {
           binance: candidateStatus?.asterBinanceMakerShadow,
           pacifica: candidateStatus?.asterPacificaMakerShadow,
+          lighter: candidateStatus?.asterLighterMakerShadow,
         })}</tbody></table></div>
       </section>
 
