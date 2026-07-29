@@ -587,6 +587,21 @@ const MARKETS: readonly Market[] = [
   { coin: 'BNB', symbol: 'BNBUSDT', lighterMarketId: 25 },
   { coin: 'LTC', symbol: 'LTCUSDT', lighterMarketId: 35 },
 ] as const;
+const ACTIVE_MARKETS: readonly Market[] = (() => {
+  const configured = (process.env.VENUE_ARB_ACTIVE_COINS ?? '')
+    .split(',')
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean);
+  if (!configured.length) return MARKETS;
+  const available = new Map(MARKETS.map((market) => [market.coin, market]));
+  const invalid = configured.filter((coin) => !available.has(coin));
+  if (invalid.length) {
+    throw new Error(
+      `invalid VENUE_ARB_ACTIVE_COINS: ${invalid.join(',')}`,
+    );
+  }
+  return [...new Set(configured)].map((coin) => available.get(coin)!);
+})();
 
 const VENUES: readonly Venue[] = [
   'lighter',
@@ -903,16 +918,16 @@ const shadowRouteTelemetry = new Map<string, ShadowRouteTelemetry>(
 
 const books = new Map<string, BookState>();
 const executableBooks = new Map<string, ExecutableBook>();
-const bySymbol = new Map(MARKETS.map((market) => [market.symbol, market]));
-const byCoin = new Map(MARKETS.map((market) => [market.coin, market]));
-const byLighterId = new Map(MARKETS.map((market) => [market.lighterMarketId, market]));
-const byPolymarketId = new Map(MARKETS.flatMap((market) => (
+const bySymbol = new Map(ACTIVE_MARKETS.map((market) => [market.symbol, market]));
+const byCoin = new Map(ACTIVE_MARKETS.map((market) => [market.coin, market]));
+const byLighterId = new Map(ACTIVE_MARKETS.map((market) => [market.lighterMarketId, market]));
+const byPolymarketId = new Map(ACTIVE_MARKETS.flatMap((market) => (
   market.polymarketInstrumentId == null
     ? []
     : [[market.polymarketInstrumentId, market] as const]
 )));
-const bybitDepth = new Map(MARKETS.map((market) => [market.symbol, createBybitDepthBook()]));
-const grvtDepth = new Map(MARKETS.map((market) => [market.coin, createGrvtDepthBook()]));
+const bybitDepth = new Map(ACTIVE_MARKETS.map((market) => [market.symbol, createBybitDepthBook()]));
+const grvtDepth = new Map(ACTIVE_MARKETS.map((market) => [market.coin, createGrvtDepthBook()]));
 const connections = Object.fromEntries(VENUES.map((venue) => [
   venue,
   {
@@ -1079,7 +1094,7 @@ let sequence = 0;
 let shuttingDown = false;
 
 for (const venue of VENUES) {
-  for (const market of MARKETS) books.set(bookKey(venue, market.coin), emptyBook());
+  for (const market of ACTIVE_MARKETS) books.set(bookKey(venue, market.coin), emptyBook());
 }
 
 function finiteEnv(name: string, fallback: number): number {
@@ -1322,7 +1337,7 @@ function evaluateShadow(now: number): void {
     const currentRejections = emptyShadowRejections();
     let currentBestNetBps: number | null = null;
     let currentBestCoin: string | null = null;
-    for (const market of MARKETS) {
+    for (const market of ACTIVE_MARKETS) {
       const evaluation = shadowQuote(now, market.coin, route);
       const quote = evaluation.quote;
       const latchKey = `${route.id}:${market.coin}`;
@@ -1892,7 +1907,7 @@ function makerExitQuoteLevel(
 
 function makerEntryQuoteCandidate(now: number): MakerQuote | null {
   const candidates: MakerQuote[] = [];
-  for (const market of MARKETS) {
+  for (const market of ACTIVE_MARKETS) {
     const rawExtended = books.get(bookKey('extended', market.coin));
     const extended = executableBook('extended', market.coin);
     const lighter = executableBook('lighter', market.coin);
@@ -2473,7 +2488,7 @@ function startHyperliquid(): void {
     'hyperliquid',
     'wss://api.hyperliquid.xyz/ws',
     (ws) => {
-      for (const market of MARKETS) {
+      for (const market of ACTIVE_MARKETS) {
         ws.send(JSON.stringify({
           method: 'subscribe',
           subscription: { type: 'l2Book', coin: market.coin },
@@ -2497,7 +2512,7 @@ function startHyperliquid(): void {
 }
 
 function startBinance(): void {
-  const streams = MARKETS.map(({ symbol }) => `${symbol.toLowerCase()}@depth5@100ms`);
+  const streams = ACTIVE_MARKETS.map(({ symbol }) => `${symbol.toLowerCase()}@depth5@100ms`);
   connect(
     'binance',
     `wss://fstream.binance.com/stream?streams=${streams.join('/')}`,
@@ -2520,7 +2535,7 @@ function startPacifica(): void {
     'pacifica',
     'wss://ws.pacifica.fi/ws',
     (ws) => {
-      for (const market of MARKETS) {
+      for (const market of ACTIVE_MARKETS) {
         ws.send(JSON.stringify({
           method: 'subscribe',
           params: {
@@ -2570,7 +2585,7 @@ function startBybit(): void {
     (ws) => {
       ws.send(JSON.stringify({
         op: 'subscribe',
-        args: MARKETS.map(({ symbol }) => `orderbook.50.${symbol}`),
+        args: ACTIVE_MARKETS.map(({ symbol }) => `orderbook.50.${symbol}`),
       }));
     },
     (payload, receivedAt) => {
@@ -2635,7 +2650,7 @@ function startLighter(): void {
     'lighter',
     'wss://mainnet.zklighter.elliot.ai/stream',
     (ws) => {
-      for (const market of MARKETS) {
+      for (const market of ACTIVE_MARKETS) {
         ws.send(JSON.stringify({
           type: 'subscribe',
           channel: `order_book/${market.lighterMarketId}`,
@@ -2655,10 +2670,10 @@ function startLighter(): void {
           clearInterval(refreshTimer);
           return;
         }
-        const market = MARKETS[refreshIndex % MARKETS.length];
+        const market = ACTIVE_MARKETS[refreshIndex % ACTIVE_MARKETS.length];
         refreshIndex++;
         if (market) refreshBook(ws, market);
-      }, Math.max(1_000, LIGHTER_BOOK_REFRESH_MS / MARKETS.length));
+      }, Math.max(1_000, LIGHTER_BOOK_REFRESH_MS / ACTIVE_MARKETS.length));
       refreshTimer.unref();
     },
     (payload, receivedAt, ws) => {
@@ -2725,7 +2740,7 @@ function startParadex(): void {
     'paradex',
     'wss://ws.api.prod.paradex.trade/v1',
     (ws) => {
-      for (const market of MARKETS) {
+      for (const market of ACTIVE_MARKETS) {
         ws.send(JSON.stringify({
           jsonrpc: '2.0',
           method: 'subscribe',
@@ -2968,7 +2983,7 @@ function startExtendedTrades(): void {
 }
 
 function startAster(): void {
-  const streams = MARKETS.map(({ symbol }) => `${symbol.toLowerCase()}@depth20@100ms`);
+  const streams = ACTIVE_MARKETS.map(({ symbol }) => `${symbol.toLowerCase()}@depth20@100ms`);
   connect(
     'aster',
     `wss://fstream.asterdex.com/stream?streams=${streams.join('/')}`,
@@ -3002,7 +3017,7 @@ function startGrvt(): void {
         method: 'subscribe',
         params: {
           stream: 'v1.book.d',
-          selectors: MARKETS.map(({ coin }) => `${coin}_USDT_Perp@100`),
+          selectors: ACTIVE_MARKETS.map(({ coin }) => `${coin}_USDT_Perp@100`),
         },
         id: 1,
       }));
@@ -3011,7 +3026,7 @@ function startGrvt(): void {
         method: 'subscribe',
         params: {
           stream: 'v1.trade',
-          selectors: MARKETS.map(({ coin }) => `${coin}_USDT_Perp@50`),
+          selectors: ACTIVE_MARKETS.map(({ coin }) => `${coin}_USDT_Perp@50`),
         },
         id: 2,
       }));
@@ -3294,7 +3309,7 @@ function evaluate(): void {
   const now = Date.now();
   evaluations++;
   const observed = new Set<string>();
-  for (const market of MARKETS) {
+  for (const market of ACTIVE_MARKETS) {
     for (const buyVenue of ACTIVE_VENUES) {
       for (const sellVenue of ACTIVE_VENUES) {
         if (buyVenue === sellVenue) continue;
@@ -3497,7 +3512,7 @@ function writeStatus(): void {
     executionBufferBps: EXECUTION_BUFFER_BPS,
     notionalsUsd: [500, 1_000],
     feesBpsPerSide: FEE_BPS,
-    markets: MARKETS.map((market) => market.coin),
+    markets: ACTIVE_MARKETS.map((market) => market.coin),
     venues: VENUES.map((venue) => ({
       venue,
       class: VENUE_CLASS[venue],
@@ -3523,7 +3538,7 @@ function writeStatus(): void {
       ...extendedAsterMakerShadow.status(),
       enabled: EXTENDED_ASTER_MAKER_SHADOW_ENABLED,
     },
-    freshnessMs: Object.fromEntries(MARKETS.map((market) => [
+    freshnessMs: Object.fromEntries(ACTIVE_MARKETS.map((market) => [
       market.coin,
       Object.fromEntries(ACTIVE_VENUES.map((venue) => [
         venue,
@@ -3558,7 +3573,7 @@ function writeExecutionStatus(): void {
     liveMakerQuote.activatedAt = now;
     liveMakerQuote.expiresAt = now + MAKER_QUOTE_TTL_MS;
   }
-  const closingQuotes = Object.fromEntries(MARKETS.map((market) => {
+  const closingQuotes = Object.fromEntries(ACTIVE_MARKETS.map((market) => {
     const extended = executableBook('extended', market.coin);
     const lighter = executableBook('lighter', market.coin);
     return [market.coin, {
@@ -3782,7 +3797,7 @@ function genericMakerMarkets(
   makerVenue: 'grvt' | 'extended',
   hedgeVenue: 'lighter' | 'extended' | 'aster',
 ) {
-  return MARKETS.map((market) => {
+  return ACTIVE_MARKETS.map((market) => {
     const maker = books.get(bookKey(makerVenue, market.coin)) ?? null;
     const hedge = executableBook(hedgeVenue, market.coin);
     return {
@@ -3934,5 +3949,5 @@ writeExecutionStatus();
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 console.warn(
-  `venue-arb read-only started: ${ACTIVE_VENUES.join(',')} · ${MARKETS.map((m) => m.coin).join(',')} @ ${SAMPLE_MS}ms`,
+  `venue-arb read-only started: ${ACTIVE_VENUES.join(',')} · ${ACTIVE_MARKETS.map((m) => m.coin).join(',')} @ ${SAMPLE_MS}ms`,
 );
