@@ -192,6 +192,36 @@ def finite_float(value: Any, fallback: float) -> float:
     return number if math.isfinite(number) else fallback
 
 
+def order_book_vwap(
+    orders: list[dict[str, Any]],
+    notional_usd: float,
+) -> float | None:
+    if notional_usd <= 0:
+        return None
+    remaining = notional_usd
+    filled_quantity = 0.0
+    filled_notional = 0.0
+    tolerance = max(1e-8, notional_usd * 1e-9)
+    for order in orders:
+        price = finite_float(order.get("price"), 0)
+        available = finite_float(
+            order.get("remaining_base_amount"),
+            0,
+        )
+        if min(price, available) <= 0:
+            continue
+        quantity = min(available, remaining / price)
+        filled_quantity += quantity
+        consumed = quantity * price
+        filled_notional += consumed
+        remaining -= consumed
+        if remaining <= tolerance:
+            break
+    if remaining > tolerance or filled_quantity <= 0:
+        return None
+    return filled_notional / filled_quantity
+
+
 def candidate_quote_version(
     snapshot_at: int,
     row: dict[str, Any],
@@ -1376,22 +1406,25 @@ class Canary:
         extended_side = (
             OrderSide.BUY if extended_is_buy else OrderSide.SELL
         )
+        lighter_side = "sell" if extended_is_buy else "buy"
         try:
-            extended_price = await self.extended_reference(
-                coin,
-                extended_side,
+            extended_price, lighter_price = await asyncio.gather(
+                self.extended_reference(
+                    coin,
+                    extended_side,
+                ),
+                self.lighter_reference(
+                    coin,
+                    lighter_side,
+                ),
             )
         except Exception as error:
             self.last_rejection = (
-                f"Extended REST revalidation failed: {error}"
+                f"parallel REST revalidation failed: {error}"
             )
             return None
-        lighter_price = self.current_lighter_hedge_price(
-            coin,
-            "buy" if extended_is_buy else "sell",
-        )
-        if lighter_price is None or min(extended_price, lighter_price) <= 0:
-            self.last_rejection = "Lighter BBO revalidation is stale"
+        if min(extended_price, lighter_price) <= 0:
+            self.last_rejection = "parallel REST revalidation is invalid"
             return None
         current_raw_bps = (
             (lighter_price / extended_price - 1) * 10_000
@@ -2095,6 +2128,25 @@ class Canary:
         return float(
             response.data.ask_price if side == OrderSide.BUY else response.data.bid_price
         )
+
+    async def lighter_reference(self, coin: str, side: str) -> float:
+        if side not in {"buy", "sell"}:
+            raise RuntimeError(f"invalid Lighter side: {side}")
+        response = await lighter.OrderApi(
+            self.lighter_api
+        ).order_book_orders(
+            market_id=MARKETS[coin],
+            limit=100,
+            _request_timeout=2,
+        )
+        body = response.to_dict()
+        orders = body.get("asks" if side == "buy" else "bids") or []
+        price = order_book_vwap(orders, self.notional)
+        if price is None:
+            raise RuntimeError(
+                f"Lighter {coin} REST depth below ${self.notional:.2f}"
+            )
+        return price
 
     async def flatten(self, coin: str, *, emergency: bool) -> dict[str, Any]:
         ext_rows, lighter_rows = await asyncio.gather(
@@ -3219,6 +3271,18 @@ def self_test() -> None:
         funding_reserve_usd=0.001,
     )
     assert round(protected_profit, 6) == 0.128925
+    vwap = order_book_vwap(
+        [
+            {"price": "100", "remaining_base_amount": "0.5"},
+            {"price": "101", "remaining_base_amount": "1"},
+        ],
+        100,
+    )
+    assert vwap is not None and round(vwap, 6) == 100.497512
+    assert order_book_vwap(
+        [{"price": "100", "remaining_base_amount": "0.5"}],
+        100,
+    ) is None
     assert modeled_funding_reserve_usd(
         notional_usd=100,
         holding_ms=180_000,
@@ -3340,8 +3404,16 @@ def self_test() -> None:
         ) -> float:
             return 100
 
+        lighter_price = 101.0
+
+        async def lighter_reference(
+            _coin: str,
+            _side: str,
+        ) -> float:
+            return lighter_price
+
         guard.extended_reference = extended_reference
-        guard.current_lighter_hedge_price = lambda *_args: 101
+        guard.lighter_reference = lighter_reference
         candidate = {
             "coin": "HYPE",
             "_routeId": "extended-lighter",
@@ -3354,7 +3426,7 @@ def self_test() -> None:
         assert round(accepted["_basisExpectedNetBps"], 8) == 73
         assert accepted["currentBuyVwap1000"] == 100
         assert accepted["currentSellVwap1000"] == 101
-        guard.current_lighter_hedge_price = lambda *_args: 100
+        lighter_price = 100
         assert await guard.revalidate_taker_candidate(candidate) is None
 
     asyncio.run(taker_revalidation_check())
