@@ -114,13 +114,10 @@ describe('GenericMakerShadow', () => {
     expect((second.status() as { quote?: unknown }).quote).toBeNull();
   });
 
-  it('cancels an active quote when maker trading activity stops', () => {
-    const events: GenericMakerEvent[] = [];
+  it('keeps an active quote through a quiet trade interval', () => {
     const engine = new GenericMakerShadow({
       ...config,
       maxMakerTradeIdleMs: 1_000,
-    }, {
-      onEvent: (event) => events.push(event),
     });
     const active = market(2_000, 100.2, 100.3);
     active.makerLastTradeAt = 2_000;
@@ -130,11 +127,9 @@ describe('GenericMakerShadow', () => {
     const idle = market(3_002, 100.2, 100.3);
     idle.makerLastTradeAt = 2_000;
     engine.evaluate(3_002, [idle]);
-    expect((engine.status() as { quote?: unknown }).quote).toBeNull();
-    expect(events.at(-1)).toMatchObject({
-      type: 'edge_cancelled',
-      reason: 'maker_activity_stale',
-    });
+    expect((engine.status() as {
+      quote?: { stage?: string } | null;
+    }).quote?.stage).toBe('entry');
   });
 
   it('keeps a risk-reducing exit quote when maker trading activity pauses', () => {

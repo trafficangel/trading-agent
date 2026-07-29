@@ -1297,19 +1297,6 @@ export class GenericMakerShadow {
     }
     this.activate(now);
     if (this.quote?.activatedAt != null && this.quote.firstFillAt == null) {
-      const quoteMarket = this.latestMarkets.get(this.quote.coin);
-      if (
-        this.quote.stage === 'entry'
-        && !this.makerActivityFresh(now, quoteMarket)
-      ) {
-        this.telemetry.edgeCancellations++;
-        this.emitQuoteEvent('edge_cancelled', now, this.quote, {
-          reason: 'maker_activity_stale',
-          currentProjectionBps: this.currentProjection(now, this.quote),
-        });
-        this.quote = null;
-        return;
-      }
       const projection = this.currentProjection(now, this.quote);
       const minimum = this.quote.stage === 'entry'
         ? this.config.cancelEdgeBps
