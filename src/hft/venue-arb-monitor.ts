@@ -5637,6 +5637,7 @@ function genericMakerMarkets(
   makerVenue: 'grvt' | 'extended' | 'lighter' | 'aster',
   hedgeVenue: 'lighter' | 'extended' | 'aster' | 'pacifica' | 'binance',
   now: number,
+  notionalUsd: number,
 ) {
   const makerLongRoute = shadowRouteById.get(
     `${makerVenue}-${hedgeVenue}`,
@@ -5656,17 +5657,32 @@ function genericMakerMarkets(
         LIGHTER_VALIDATED_BOOK_FRESH_MS,
       )
     ) ? null : rawMaker;
-    const rawHedge = executableBook(hedgeVenue, market.coin);
+    const rawHedgeBook = books.get(
+      bookKey(hedgeVenue, market.coin),
+    ) ?? null;
+    const preparedHedge = executableBook(hedgeVenue, market.coin);
     const hedge = (
       hedgeVenue === 'lighter'
-      && rawHedge
+      && preparedHedge
       && !lighterBookValidated(
         market.lighterMarketId,
-        rawHedge,
+        preparedHedge,
         now,
         LIGHTER_VALIDATED_BOOK_FRESH_MS,
       )
-    ) ? null : rawHedge;
+    ) ? null : preparedHedge;
+    const hedgeBuyVwap = rawHedgeBook
+      ? executableVwap(
+        sortedLevels(rawHedgeBook, 'asks'),
+        notionalUsd,
+      )?.price ?? null
+      : null;
+    const hedgeSellVwap = rawHedgeBook
+      ? executableVwap(
+        sortedLevels(rawHedgeBook, 'bids'),
+        notionalUsd,
+      )?.price ?? null
+      : null;
     const makerLongBaseline = makerLongRoute
       ? shadowBasisBaselineBps(makerLongRoute, market.coin, now)
       : null;
@@ -5676,10 +5692,10 @@ function genericMakerMarkets(
     return {
       coin: market.coin,
       maker,
-      hedge: hedge
+      hedge: hedge && hedgeBuyVwap != null && hedgeSellVwap != null
         ? {
-          buyVwap: hedge.buyVwap500,
-          sellVwap: hedge.sellVwap500,
+          buyVwap: hedgeBuyVwap,
+          sellVwap: hedgeSellVwap,
           exchangeAt: hedge.exchangeAt,
           receivedAt: hedge.receivedAt,
         }
@@ -5910,7 +5926,7 @@ const evaluationTimer = setInterval(() => {
   ) {
     grvtMakerShadow.evaluate(
       now,
-      genericMakerMarkets('grvt', 'lighter', now),
+      genericMakerMarkets('grvt', 'lighter', now, GRVT_MAKER_NOTIONAL_USD),
     );
   }
   if (
@@ -5920,7 +5936,7 @@ const evaluationTimer = setInterval(() => {
   ) {
     grvtExtendedMakerShadow.evaluate(
       now,
-      genericMakerMarkets('grvt', 'extended', now),
+      genericMakerMarkets('grvt', 'extended', now, GRVT_MAKER_NOTIONAL_USD),
     );
   }
   if (
@@ -5930,7 +5946,7 @@ const evaluationTimer = setInterval(() => {
   ) {
     extendedAsterMakerShadow.evaluate(
       now,
-      genericMakerMarkets('extended', 'aster', now),
+      genericMakerMarkets('extended', 'aster', now, GRVT_MAKER_NOTIONAL_USD),
     );
   }
   if (
@@ -5940,7 +5956,12 @@ const evaluationTimer = setInterval(() => {
   ) {
     asterBinanceMakerShadow.evaluate(
       now,
-      genericMakerMarkets('aster', 'binance', now),
+      genericMakerMarkets(
+        'aster',
+        'binance',
+        now,
+        ASTER_BINANCE_MAKER_NOTIONAL_USD,
+      ),
     );
   }
   if (
@@ -5950,7 +5971,12 @@ const evaluationTimer = setInterval(() => {
   ) {
     asterPacificaMakerShadow.evaluate(
       now,
-      genericMakerMarkets('aster', 'pacifica', now),
+      genericMakerMarkets(
+        'aster',
+        'pacifica',
+        now,
+        ASTER_PACIFICA_MAKER_NOTIONAL_USD,
+      ),
     );
   }
   if (
@@ -5960,7 +5986,12 @@ const evaluationTimer = setInterval(() => {
   ) {
     asterLighterMakerShadow.evaluate(
       now,
-      genericMakerMarkets('aster', 'lighter', now),
+      genericMakerMarkets(
+        'aster',
+        'lighter',
+        now,
+        ASTER_LIGHTER_MAKER_NOTIONAL_USD,
+      ),
     );
   }
   if (
@@ -5970,7 +6001,12 @@ const evaluationTimer = setInterval(() => {
   ) {
     extendedLighterMakerShadow.evaluate(
       now,
-      genericMakerMarkets('extended', 'lighter', now),
+      genericMakerMarkets(
+        'extended',
+        'lighter',
+        now,
+        LIGHTER_EXTENDED_MAKER_NOTIONAL_USD,
+      ),
     );
   }
   if (
@@ -5980,7 +6016,12 @@ const evaluationTimer = setInterval(() => {
   ) {
     extendedPacificaMakerShadow.evaluate(
       now,
-      genericMakerMarkets('extended', 'pacifica', now),
+      genericMakerMarkets(
+        'extended',
+        'pacifica',
+        now,
+        LIGHTER_EXTENDED_MAKER_NOTIONAL_USD,
+      ),
     );
   }
   if (
@@ -5990,7 +6031,12 @@ const evaluationTimer = setInterval(() => {
   ) {
     lighterExtendedMakerShadow.evaluate(
       now,
-      genericMakerMarkets('lighter', 'extended', now).filter(
+      genericMakerMarkets(
+        'lighter',
+        'extended',
+        now,
+        LIGHTER_EXTENDED_MAKER_NOTIONAL_USD,
+      ).filter(
         (market) => LIGHTER_TRADE_COINS.has(market.coin),
       ),
     );
