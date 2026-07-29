@@ -10,7 +10,10 @@ Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/extended-lighter-fill-study
 Environment=VENUE_ARB_ACTIVE_VENUES=extended,lighter
-Environment=VENUE_ARB_ACTIVE_COINS=BTC,ETH,SOL,HYPE,WTI,XAU
+# Discovery cohort favors liquid but less-efficient common markets. BTC/ETH/SOL
+# consumed most feed CPU without producing a maker attempt; the strict service
+# still keeps them until this cohort proves a better replacement.
+Environment=VENUE_ARB_ACTIVE_COINS=HYPE,WTI,XAU,XMR,NEAR,XRP,CRV
 Environment=VENUE_ARB_SAMPLE_MS=200
 Environment=VENUE_ARB_STALE_MS=1000
 Environment=VENUE_ARB_EXECUTION_BUFFER_BPS=2
@@ -58,9 +61,9 @@ Environment=VENUE_ARB_EXTENDED_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS=2000
 Environment=VENUE_ARB_EXTENDED_LIGHTER_MAKER_MAX_TRADE_IDLE_MS=10000
 Environment=VENUE_ARB_EXTENDED_PACIFICA_MAKER_SHADOW_ENABLED=false
 Environment=VENUE_ARB_LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED=false
-Environment=VENUE_ARB_LIGHTER_TRADE_COINS=BTC,ETH,SOL,HYPE,WTI,XAU
+Environment=VENUE_ARB_LIGHTER_TRADE_COINS=HYPE,WTI,XAU,XMR,NEAR,XRP,CRV
 Environment=VENUE_ARB_LIGHTER_BOOK_REFRESH_MS=0
-Environment=VENUE_ARB_LIGHTER_MARKETS_PER_CONNECTION=6
+Environment=VENUE_ARB_LIGHTER_MARKETS_PER_CONNECTION=7
 Environment=VENUE_ARB_LIGHTER_BBO_MISMATCH_REFRESH_COUNT=0
 Environment=VENUE_ARB_LIGHTER_REST_BOOK_ENABLED=true
 Environment=VENUE_ARB_LIGHTER_REST_ACTIVE_QUOTE_ONLY=true
