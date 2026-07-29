@@ -54,6 +54,40 @@ function coinFromInstrument(value: unknown): string | null {
   return coin || null;
 }
 
+function parseTradeRow(
+  data: Record<string, unknown> | null,
+  receivedAt: number,
+): HotstuffMakerTrade | null {
+  const coin = coinFromInstrument(data?.instrument);
+  const price = positive(data?.price);
+  const size = positive(data?.size);
+  const side = data?.side === 'b'
+    ? 'BUY'
+    : data?.side === 's'
+      ? 'SELL'
+      : null;
+  if (!coin || price == null || size == null || !side) return null;
+  const tradeId = data?.trade_id;
+  if (
+    typeof tradeId !== 'string'
+    && typeof tradeId !== 'number'
+    && typeof tradeId !== 'bigint'
+  ) return null;
+  return {
+    id: String(tradeId),
+    coin,
+    side,
+    price,
+    size,
+    tradeAt: normalizeExchangeTimestampMs(
+      typeof data?.timestamp === 'string'
+        ? Date.parse(data.timestamp)
+        : Number(data?.timestamp),
+      receivedAt,
+    ),
+  };
+}
+
 export function parseHotstuffBook(
   payload: unknown,
   receivedAt: number,
@@ -94,33 +128,16 @@ export function parseHotstuffTrade(
     typeof params?.channel !== 'string'
     || !params.channel.startsWith('trades:')
   ) return null;
-  const data = eventData(payload);
-  const coin = coinFromInstrument(data?.instrument);
-  const price = positive(data?.price);
-  const size = positive(data?.size);
-  const side = data?.side === 'b'
-    ? 'BUY'
-    : data?.side === 's'
-      ? 'SELL'
-      : null;
-  if (!coin || price == null || size == null || !side) return null;
-  const tradeId = data?.trade_id;
-  if (
-    typeof tradeId !== 'string'
-    && typeof tradeId !== 'number'
-    && typeof tradeId !== 'bigint'
-  ) return null;
-  return {
-    id: String(tradeId),
-    coin,
-    side,
-    price,
-    size,
-    tradeAt: normalizeExchangeTimestampMs(
-      typeof data?.timestamp === 'string'
-        ? Date.parse(data.timestamp)
-        : Number(data?.timestamp),
-      receivedAt,
-    ),
-  };
+  return parseTradeRow(eventData(payload), receivedAt);
+}
+
+export function parseHotstuffRecentTrades(
+  payload: unknown,
+  receivedAt: number,
+): HotstuffMakerTrade[] {
+  if (!Array.isArray(payload)) return [];
+  return payload.flatMap((raw) => {
+    const trade = parseTradeRow(object(raw), receivedAt);
+    return trade ? [trade] : [];
+  });
 }

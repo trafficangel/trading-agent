@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseHotstuffBook,
+  parseHotstuffRecentTrades,
   parseHotstuffTrade,
 } from '../../src/lib/hotstuff-market-data.js';
 
@@ -57,5 +58,23 @@ describe('Hotstuff market data', () => {
       size: 0.25,
       tradeAt: Date.parse('2026-07-29T23:33:28.855Z'),
     });
+  });
+
+  it('parses REST history for activity bootstrap without inventing fills', () => {
+    expect(parseHotstuffRecentTrades([{
+      instrument: 'BTC-PERP',
+      trade_id: 42,
+      side: 's',
+      price: '63940',
+      size: '0.0016',
+      timestamp: '2026-07-29T23:52:49.959Z',
+    }], Date.parse('2026-07-29T23:53:00.000Z'))).toEqual([{
+      id: '42',
+      coin: 'BTC',
+      side: 'SELL',
+      price: 63_940,
+      size: 0.0016,
+      tradeAt: Date.parse('2026-07-29T23:52:49.959Z'),
+    }]);
   });
 });

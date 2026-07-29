@@ -43,6 +43,7 @@ import {
 } from '../lib/hibachi-depth-book.js';
 import {
   parseHotstuffBook,
+  parseHotstuffRecentTrades,
   parseHotstuffTrade,
 } from '../lib/hotstuff-market-data.js';
 import {
@@ -4821,6 +4822,47 @@ function startEthereal(): void {
 
 function startHotstuff(): void {
   if (!HOTSTUFF_VENUE_MARKETS.length) return;
+  const bootstrapLastTradeAt = async (): Promise<void> => {
+    await Promise.all(HOTSTUFF_VENUE_MARKETS.map(async (market) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2_000);
+      try {
+        const response = await fetch('https://api.hotstuff.trade/info', {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'RobotClaude-Arb-Shadow/1.0',
+          },
+          body: JSON.stringify({
+            method: 'trades',
+            params: { symbol: `${market.coin}-PERP`, limit: 1 },
+          }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const receivedAt = Date.now();
+        const [latest] = parseHotstuffRecentTrades(
+          await response.json(),
+          receivedAt,
+        );
+        if (
+          latest
+          && latest.coin === market.coin
+          && receivedAt - latest.tradeAt <= HOTSTUFF_LIGHTER_MAKER_MAX_TRADE_IDLE_MS
+        ) {
+          hotstuffLastTradeAt.set(market.coin, latest.tradeAt);
+        }
+      } catch (error) {
+        console.warn(
+          `venue-arb hotstuff ${market.coin} trade bootstrap`,
+          (error as Error).message,
+        );
+      } finally {
+        clearTimeout(timeout);
+      }
+    }));
+  };
+  void bootstrapLastTradeAt();
   connect(
     'hotstuff',
     // The documented /ws endpoint currently redirects; WebSocket upgrades
