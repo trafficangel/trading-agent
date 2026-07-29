@@ -78,7 +78,7 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/home/trader/apps/venue-arb-tokyo/data/extended-lighter-shadow
 MemoryMax=128M
-CPUQuota=75%
+CPUQuota=90%
 
 [Install]
 WantedBy=multi-user.target
