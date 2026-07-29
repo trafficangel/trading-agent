@@ -894,6 +894,23 @@ const ACTIVE_MARKETS: readonly Market[] = (() => {
   }
   return [...new Set(configured)].map((coin) => available.get(coin)!);
 })();
+const LIGHTER_TRADE_COINS = (() => {
+  const configured = (
+    process.env.VENUE_ARB_LIGHTER_TRADE_COINS
+    ?? ACTIVE_MARKETS.map((market) => market.coin).join(',')
+  )
+    .split(',')
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean);
+  const activeCoins = new Set(ACTIVE_MARKETS.map((market) => market.coin));
+  const invalid = configured.filter((coin) => !activeCoins.has(coin));
+  if (invalid.length) {
+    throw new Error(
+      `invalid VENUE_ARB_LIGHTER_TRADE_COINS: ${invalid.join(',')}`,
+    );
+  }
+  return new Set(configured);
+})();
 const SECONDARY_VENUE_COINS = new Set([
   'BTC',
   'ETH',
@@ -3588,7 +3605,10 @@ function startLighter(): void {
           type: 'subscribe',
           channel: `ticker/${market.lighterMarketId}`,
         }));
-        if (LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED) {
+        if (
+          LIGHTER_EXTENDED_MAKER_SHADOW_ENABLED
+          && LIGHTER_TRADE_COINS.has(market.coin)
+        ) {
           ws.send(JSON.stringify({
             type: 'subscribe',
             channel: `trade/${market.lighterMarketId}`,
@@ -5415,7 +5435,9 @@ const evaluationTimer = setInterval(() => {
   ) {
     lighterExtendedMakerShadow.evaluate(
       now,
-      genericMakerMarkets('lighter', 'extended', now),
+      genericMakerMarkets('lighter', 'extended', now).filter(
+        (market) => LIGHTER_TRADE_COINS.has(market.coin),
+      ),
     );
   }
   writeExecutionStatus();
