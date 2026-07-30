@@ -38,6 +38,7 @@ import { allocatePortfolio, portfolioSummary } from '../lib/portfolio.js';
 import {
   lighterLuxalgoHero,
   lighterZ60Hero,
+  lighterZ60TouchHero,
   lighterLuxalgoLabRoute,
   LIGHTER_LUXALGO_CSS,
 } from './lighter-luxalgo-lab.js';
@@ -130,6 +131,7 @@ async function renderLabList(lang: Lang): Promise<string> {
     </div>
     <style>${LAB_CSS}${LIGHTER_LUXALGO_CSS}</style>
     ${await lighterZ60Hero(lang)}
+    ${await lighterZ60TouchHero(lang)}
     ${await lighterLuxalgoHero(lang)}
     `,
     { autoRefreshSec: 60, lang },

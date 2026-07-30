@@ -1663,6 +1663,8 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(163,106,255,.36);border-radius:14px;background:linear-gradient(135deg,rgba(122,71,255,.15),var(--bg-card));color:var(--text);text-decoration:none}
 .ll-z60-hero{border-color:rgba(56,217,150,.42);background:linear-gradient(135deg,rgba(56,217,150,.13),rgba(122,71,255,.08),var(--bg-card))}
 .ll-z60-hero .ll-badge{background:rgba(56,217,150,.13);color:#38d996}
+.ll-z60-touch-hero{border-color:rgba(92,163,255,.42);background:linear-gradient(135deg,rgba(92,163,255,.14),rgba(122,71,255,.08),var(--bg-card))}
+.ll-z60-touch-hero .ll-badge{background:rgba(92,163,255,.13);color:#76adff}
 .ll-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(163,106,255,.15);color:#bd91ff;font-size:11px;font-weight:750;letter-spacing:.04em}
 .ll-title{font-size:19px;font-weight:700;margin-top:8px}.ll-sub{font-size:13px;color:var(--text-dim);margin-top:3px}
 .ll-stats{display:flex;gap:22px}.ll-stats span{display:grid;text-align:right}.ll-stats b{font-size:18px}.ll-stats small{font-size:10px;color:var(--text-faint);text-transform:uppercase}
@@ -1749,6 +1751,28 @@ export async function lighterZ60Hero(lang: Lang): Promise<string> {
       <span><b class="${pnlClass(shadow.netPct)}">${signedPct(shadow.netPct)}</b><small>shadow · ${shadow.closed}/${shadow.open}</small></span>
       <span><b class="${pnlClass(realNetUsd)}">${signedUsd(realNetUsd)}</b><small>real · ${realClosed.length}/${realOpen}</small></span>
       <span><b class="${realArmed ? 'pos' : 'neg'}">${liveLabel}</b><small>$100 · 10x · SL 1.5%</small></span>
+    </div>
+  </a>`;
+}
+
+export async function lighterZ60TouchHero(lang: Lang): Promise<string> {
+  const spec = STRATEGY_BY_ID.get('sol-z60-touch')!;
+  const shadow = summary(spec);
+  const validation = gate(shadow, lang);
+  return `<a class="ll-hero ll-z60-touch-hero" href="/lab/lighter-luxalgo?strategy=${encodeURIComponent(spec.id)}&dataset=shadow#portfolio-view">
+    <div><span class="ll-badge">STRAT-031 · SOL · 5M · SHADOW</span>
+      <div class="ll-title">${esc(spec.name)}</div>
+      <div class="ll-sub">${t(
+        lang,
+        'Отдельная статистика · ранний вход при касании ±3σ · выход к средней · стоп 1.5% →',
+        'Isolated statistics · early entry on a ±3σ touch · mean exit · 1.5% stop →',
+      )}</div>
+    </div>
+    <div class="ll-stats">
+      <span><b>${spec.backtest.trades}</b><small>backtest · PF ${spec.backtest.profitFactor.toFixed(2)}</small></span>
+      <span><b class="${pnlClass(spec.backtest.netPct)}">${signedPct(spec.backtest.netPct)}</b><small>backtest net · DD ${spec.backtest.maxDrawdownPct.toFixed(2)}%</small></span>
+      <span><b class="${pnlClass(shadow.netPct)}">${signedPct(shadow.netPct)}</b><small>shadow · ${shadow.closed}/${shadow.open}</small></span>
+      <span><b class="${validation.cls}">${validation.label}</b><small>${t(lang, 'собственный форвард-гейт', 'independent forward gate')}</small></span>
     </div>
   </a>`;
 }
