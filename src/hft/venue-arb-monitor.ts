@@ -5325,6 +5325,7 @@ function startLighterRestBookPoller(): void {
       hibachiLighterMakerShadow,
       coinbaseLighterMakerShadow,
       etherealLighterMakerShadow,
+      hotstuffLighterMakerShadow,
       extendedLighterMakerShadow,
       lighterExtendedMakerShadow,
       grvtMakerShadow,

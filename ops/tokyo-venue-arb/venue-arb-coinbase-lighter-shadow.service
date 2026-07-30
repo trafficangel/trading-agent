@@ -65,11 +65,11 @@ Environment=VENUE_ARB_LIGHTER_TRADE_COINS=SOL,DOGE,XRP,PUMP
 Environment=VENUE_ARB_LIGHTER_BOOK_REFRESH_MS=0
 Environment=VENUE_ARB_LIGHTER_MARKETS_PER_CONNECTION=4
 Environment=VENUE_ARB_LIGHTER_BBO_MISMATCH_REFRESH_COUNT=0
-Environment=VENUE_ARB_LIGHTER_REST_BOOK_ENABLED=false
+Environment=VENUE_ARB_LIGHTER_REST_BOOK_ENABLED=true
 # Lighter's public REST host can challenge Tokyo server traffic with HTTP 405.
 # The nonce-contiguous order-book stream is independently checked against the
 # ticker stream, so REST polling is deliberately disabled.
-Environment=VENUE_ARB_LIGHTER_REST_ACTIVE_QUOTE_ONLY=false
+Environment=VENUE_ARB_LIGHTER_REST_ACTIVE_QUOTE_ONLY=true
 Environment=VENUE_ARB_LIGHTER_REST_BOOK_INTERVAL_MS=250
 Environment=VENUE_ARB_LIGHTER_REST_BOOK_LIMIT=50
 Environment=VENUE_ARB_LIGHTER_REST_BOOK_TIMEOUT_MS=2000
