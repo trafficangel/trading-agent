@@ -1702,7 +1702,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       </div>
 
       <section class="va-panel">
-        <div class="va-panel-head"><h2>Безкомиссионные маршруты</h2><span>$100 · maker ≤ 0% · Lighter 0% · только положительный raw edge</span></div>
+        <div class="va-panel-head"><h2>Маршруты с нулевой комиссией на входе</h2><span>maker 0% · Lighter 0% · taker-выход и буфер вычитаются из net</span></div>
         <div class="va-table"><table><thead><tr>
           <th>Маршрут</th><th>Net сейчас</th><th>Shadow gate</th><th>Статус</th>
         </tr></thead><tbody>${candidateRouteRows(candidateStatus, asterStatus, hibachiStatus, hibachiStickyStatus, coinbaseStatus, etherealStatus, hotstuffStatus, {
