@@ -206,6 +206,7 @@ export type GenericMakerConfig = {
   makerSourceFreshMs?: number;
   hedgeBookFreshMs?: number;
   hedgeSourceFreshMs?: number;
+  maxHoldExitHedgeFreshMs?: number;
   executionBufferBps: number;
   makerFeeBps: number;
   hedgeTakerFeeBps: number;
@@ -352,14 +353,17 @@ export class GenericMakerShadow {
     now: number,
     maker?: MakerShadowRawBook | null,
     hedge?: MakerShadowHedgeBook | null,
+    hedgeFreshOverrideMs?: number,
   ): boolean {
     const makerBookFreshMs = this.config.makerBookFreshMs
       ?? this.config.bookFreshMs;
     const makerSourceFreshMs = this.config.makerSourceFreshMs
       ?? this.config.sourceFreshMs;
-    const hedgeBookFreshMs = this.config.hedgeBookFreshMs
+    const hedgeBookFreshMs = hedgeFreshOverrideMs
+      ?? this.config.hedgeBookFreshMs
       ?? this.config.bookFreshMs;
-    const hedgeSourceFreshMs = this.config.hedgeSourceFreshMs
+    const hedgeSourceFreshMs = hedgeFreshOverrideMs
+      ?? this.config.hedgeSourceFreshMs
       ?? this.config.sourceFreshMs;
     return (
       (!maker || (
@@ -1122,7 +1126,18 @@ export class GenericMakerShadow {
       return;
     }
     const market = this.latestMarkets.get(pending.coin);
-    if (!market?.hedge || !this.fresh(now, market.maker, market.hedge)) return;
+    const maxHoldExitFreshMs = pending.exitReason === 'max_hold_taker_exit'
+      ? this.config.maxHoldExitHedgeFreshMs
+      : undefined;
+    if (
+      !market?.hedge
+      || !this.fresh(
+        now,
+        market.maker,
+        market.hedge,
+        maxHoldExitFreshMs,
+      )
+    ) return;
     const hedgeFill = this.hedgePrice(pending.side, market.hedge);
     if (hedgeFill == null) return;
     if (pending.stage === 'entry') {
@@ -1263,7 +1278,16 @@ export class GenericMakerShadow {
       }
       this.quote = null;
       const market = this.latestMarkets.get(this.pair.coin);
-      if (market?.maker && market.hedge && this.fresh(now, market.maker, market.hedge)) {
+      if (
+        market?.maker
+        && market.hedge
+        && this.fresh(
+          now,
+          market.maker,
+          market.hedge,
+          this.config.maxHoldExitHedgeFreshMs,
+        )
+      ) {
         const side: MakerSide = this.pair.makerSide === 'long' ? 'sell' : 'buy';
         const levels = side === 'sell'
           ? sortedLevels(market.maker, 'bids')

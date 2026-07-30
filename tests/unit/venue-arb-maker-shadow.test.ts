@@ -531,6 +531,50 @@ describe('GenericMakerShadow', () => {
     });
   });
 
+  it('allows a bounded REST-age hedge only for a max-hold exit', () => {
+    const results: GenericMakerResult[] = [];
+    const engine = new GenericMakerShadow({
+      ...config,
+      maxHoldMs: 10,
+      takerExitNetBps: 1_000,
+      maxHoldExitHedgeFreshMs: 2_500,
+    }, {
+      onResult: (result) => results.push(result),
+    });
+    engine.restore([], {
+      pair: {
+        id: 'rest-exit-pair',
+        coin: 'BNB',
+        makerSide: 'short',
+        openedAt: 100,
+        quantity: 1,
+        entryMaker: 100.1,
+        entryHedge: 100,
+        entryEdgeBps: 10,
+      },
+      pendingHedge: null,
+      cooldownUntil: 0,
+    });
+    const snapshot = market(111, 100, 100);
+    snapshot.hedge!.exchangeAt = -1_889;
+    snapshot.hedge!.receivedAt = -1_889;
+
+    engine.evaluate(111, [snapshot]);
+    expect((engine.status() as { pendingHedge?: unknown }).pendingHedge)
+      .toBeTruthy();
+
+    snapshot.maker!.exchangeAt = 112;
+    snapshot.maker!.receivedAt = 112;
+    engine.evaluate(112, [snapshot]);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      reason: 'max_hold_taker_exit',
+      exitHedge: 100,
+    });
+    expect((engine.status() as { pair?: unknown }).pair).toBeNull();
+  });
+
   it('locks a profitable taker exit instead of waiting for a second maker fill', () => {
     const engine = new GenericMakerShadow({
       ...config,
