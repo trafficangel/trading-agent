@@ -52,6 +52,8 @@ while true; do
     "${hibachi_dir}/hibachi-lighter-capacity-gate-status.json" "${destination}hibachi-lighter-capacity-gate-status.json"
   [[ -f "${hibachi_sticky_dir}/hibachi-lighter-maker-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
     "${hibachi_sticky_dir}/hibachi-lighter-maker-gate-status.json" "${destination}hibachi-lighter-sticky-gate-status.json"
+  [[ -f "${hibachi_sticky_dir}/hibachi-lighter-capacity-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
+    "${hibachi_sticky_dir}/hibachi-lighter-capacity-gate-status.json" "${destination}hibachi-lighter-sticky-capacity-gate-status.json"
   [[ -f "${coinbase_dir}/coinbase-lighter-maker-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
     "${coinbase_dir}/coinbase-lighter-maker-gate-status.json" "${destination}coinbase-lighter-maker-gate-status.json"
   [[ -f "${ethereal_dir}/ethereal-lighter-maker-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \

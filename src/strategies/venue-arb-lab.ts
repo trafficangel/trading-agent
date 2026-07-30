@@ -597,6 +597,7 @@ async function readTargeted(): Promise<{
   hibachiMakerGate: ProfitGateStatus | null;
   hibachiCapacityGate: ProfitGateStatus | null;
   hibachiStickyGate: ProfitGateStatus | null;
+  hibachiStickyCapacityGate: ProfitGateStatus | null;
   coinbaseMakerGate: ProfitGateStatus | null;
   etherealMakerGate: ProfitGateStatus | null;
   hotstuffMakerGate: ProfitGateStatus | null;
@@ -645,6 +646,10 @@ async function readTargeted(): Promise<{
     ),
     hibachiStickyGate: await read<ProfitGateStatus | null>(
       'hibachi-lighter-sticky-gate-status.json',
+      null,
+    ),
+    hibachiStickyCapacityGate: await read<ProfitGateStatus | null>(
+      'hibachi-lighter-sticky-capacity-gate-status.json',
       null,
     ),
     coinbaseMakerGate: await read<ProfitGateStatus | null>(
@@ -1340,6 +1345,7 @@ function candidateRouteRows(
     hibachiLighterMaker: ProfitGateStatus | null;
     hibachiLighterCapacity: ProfitGateStatus | null;
     hibachiLighterSticky: ProfitGateStatus | null;
+    hibachiLighterStickyCapacity: ProfitGateStatus | null;
     coinbaseLighterMaker: ProfitGateStatus | null;
     etherealLighterMaker: ProfitGateStatus | null;
     hotstuffLighterMaker: ProfitGateStatus | null;
@@ -1375,6 +1381,11 @@ function candidateRouteRows(
       label: 'Hibachi → Lighter · sticky 60s',
       maker: hibachiStickyStatus?.hibachiLighterMakerShadow,
       gate: profitGates.hibachiLighterSticky,
+    },
+    {
+      label: 'Hibachi → Lighter · sticky $1,000',
+      maker: hibachiStickyStatus?.hibachiLighterCapacityShadow,
+      gate: profitGates.hibachiLighterStickyCapacity,
     },
     {
       label: 'Coinbase maker → Lighter',
@@ -1445,6 +1456,7 @@ function candidateShadowRows(
     hibachiLighter: GenericMakerShadowStatus | undefined;
     hibachiCapacity: GenericMakerShadowStatus | undefined;
     hibachiSticky: GenericMakerShadowStatus | undefined;
+    hibachiStickyCapacity: GenericMakerShadowStatus | undefined;
     coinbaseLighter: GenericMakerShadowStatus | undefined;
     etherealLighter: GenericMakerShadowStatus | undefined;
     hotstuffLighter: GenericMakerShadowStatus | undefined;
@@ -1465,6 +1477,7 @@ function candidateShadowRows(
     ['Hibachi maker → Lighter', makers.hibachiLighter],
     ['Hibachi → Lighter · capacity $1,000', makers.hibachiCapacity],
     ['Hibachi → Lighter · sticky 60s', makers.hibachiSticky],
+    ['Hibachi → Lighter · sticky $1,000', makers.hibachiStickyCapacity],
     ['Coinbase maker → Lighter', makers.coinbaseLighter],
     ['Ethereal maker → Lighter', makers.etherealLighter],
     ['Hotstuff maker → Lighter', makers.hotstuffLighter],
@@ -1627,6 +1640,10 @@ async function renderCompact(lang: Lang): Promise<string> {
       gate: targeted.hibachiStickyGate,
     },
     {
+      maker: hibachiStickyStatus?.hibachiLighterCapacityShadow,
+      gate: targeted.hibachiStickyCapacityGate,
+    },
+    {
       maker: coinbaseStatus?.coinbaseLighterMakerShadow,
       gate: targeted.coinbaseMakerGate,
     },
@@ -1695,6 +1712,7 @@ async function renderCompact(lang: Lang): Promise<string> {
           hibachiLighterMaker: targeted.hibachiMakerGate,
           hibachiLighterCapacity: targeted.hibachiCapacityGate,
           hibachiLighterSticky: targeted.hibachiStickyGate,
+          hibachiLighterStickyCapacity: targeted.hibachiStickyCapacityGate,
           coinbaseLighterMaker: targeted.coinbaseMakerGate,
           etherealLighterMaker: targeted.etherealMakerGate,
           hotstuffLighterMaker: targeted.hotstuffMakerGate,
@@ -1712,6 +1730,7 @@ async function renderCompact(lang: Lang): Promise<string> {
           hibachiLighter: hibachiStatus?.hibachiLighterMakerShadow,
           hibachiCapacity: hibachiStatus?.hibachiLighterCapacityShadow,
           hibachiSticky: hibachiStickyStatus?.hibachiLighterMakerShadow,
+          hibachiStickyCapacity: hibachiStickyStatus?.hibachiLighterCapacityShadow,
           coinbaseLighter: coinbaseStatus?.coinbaseLighterMakerShadow,
           etherealLighter: etherealStatus?.etherealLighterMakerShadow,
           hotstuffLighter: hotstuffStatus?.hotstuffLighterMakerShadow,
