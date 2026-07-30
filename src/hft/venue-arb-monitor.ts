@@ -1014,6 +1014,10 @@ const HIBACHI_LIGHTER_MAKER_QUOTE_TTL_MS = finiteEnv(
   'VENUE_ARB_HIBACHI_LIGHTER_MAKER_QUOTE_TTL_MS',
   15_000,
 );
+const HIBACHI_LIGHTER_MAKER_MAINTAIN_BELOW_ENTRY_GATE = booleanEnv(
+  'VENUE_ARB_HIBACHI_LIGHTER_MAKER_MAINTAIN_BELOW_ENTRY_GATE',
+  false,
+);
 const HIBACHI_LIGHTER_MAKER_MAX_QUEUE_USD = finiteEnv(
   'VENUE_ARB_HIBACHI_LIGHTER_MAKER_MAX_QUEUE_USD',
   100_000,
@@ -2398,6 +2402,8 @@ const hibachiLighterMakerShadow = new GenericMakerShadow({
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
   minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  maintainQuoteBelowEntryGate:
+    HIBACHI_LIGHTER_MAKER_MAINTAIN_BELOW_ENTRY_GATE,
   exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
   exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,
@@ -2457,6 +2463,8 @@ const hibachiLighterCapacityShadow = new GenericMakerShadow({
   basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
   basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
   minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  maintainQuoteBelowEntryGate:
+    HIBACHI_LIGHTER_MAKER_MAINTAIN_BELOW_ENTRY_GATE,
   exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
   exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,

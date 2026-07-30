@@ -691,6 +691,44 @@ describe('GenericMakerShadow', () => {
     expect(coinTelemetry?.peakTopNetBps).toBeGreaterThan(0);
   });
 
+  it('can keep a sticky quote after the initial entry gate disappears', () => {
+    const basis = {
+      entry: { buy: 0, sell: 0 },
+      exit: { buy: 0, sell: 0 },
+    };
+    const sticky = new GenericMakerShadow({
+      ...config,
+      entryEdgeBps: 1,
+      cancelEdgeBps: -20,
+      basisGateEnabled: true,
+      basisMinDeviationBps: 5,
+      minRawEntryNetBps: 5,
+      maintainQuoteBelowEntryGate: true,
+    });
+    sticky.evaluate(5_000, [market(5_000, 100.2, 100, basis)]);
+    sticky.evaluate(5_001, [market(5_001, 100.2, 100, basis)]);
+    const active = sticky.status() as {
+      quote?: { side?: 'buy' | 'sell' } | null;
+    };
+    expect(active.quote).toBeTruthy();
+
+    sticky.evaluate(5_002, [market(5_002, 100.04, 100.06, basis)]);
+    expect((sticky.status() as { quote?: unknown }).quote).toBeTruthy();
+
+    const baseline = new GenericMakerShadow({
+      ...config,
+      entryEdgeBps: 1,
+      cancelEdgeBps: -20,
+      basisGateEnabled: true,
+      basisMinDeviationBps: 5,
+      minRawEntryNetBps: 5,
+    });
+    baseline.evaluate(5_000, [market(5_000, 100.2, 100, basis)]);
+    baseline.evaluate(5_001, [market(5_001, 100.2, 100, basis)]);
+    baseline.evaluate(5_002, [market(5_002, 100.04, 100.06, basis)]);
+    expect((baseline.status() as { quote?: unknown }).quote).toBeNull();
+  });
+
   it('rejects a positive basis forecast when the raw entry spread is negative', () => {
     const basis = {
       entry: { sell: -40 },

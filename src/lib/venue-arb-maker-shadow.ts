@@ -218,6 +218,7 @@ export type GenericMakerConfig = {
   basisGateEnabled?: boolean;
   basisMinDeviationBps?: number;
   minRawEntryNetBps?: number;
+  maintainQuoteBelowEntryGate?: boolean;
   maxEntryDistanceBps?: number;
   quoteDataGraceMs?: number;
   exitQuoteDataGraceMs?: number;
@@ -858,6 +859,20 @@ export class GenericMakerShadow {
     const hedgeFill = this.hedgePrice(quote.side, market.hedge);
     if (hedgeFill == null) return null;
     if (quote.stage === 'entry') {
+      if (this.config.maintainQuoteBelowEntryGate) {
+        if (this.config.basisGateEnabled) {
+          return this.observedBasisProjection(
+            quote.side,
+            quote.price,
+            hedgeFill,
+            market,
+          )?.netBps ?? null;
+        }
+        return makerEntryEdgeBps(quote.side, quote.price, hedgeFill)
+          - this.config.executionBufferBps
+          - this.config.makerFeeBps
+          - this.config.hedgeTakerFeeBps;
+      }
       return this.entryProjection(
         quote.side,
         quote.price,
