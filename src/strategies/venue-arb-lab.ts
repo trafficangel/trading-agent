@@ -587,6 +587,7 @@ async function readTargeted(): Promise<{
   candidateStatus: Status | null;
   asterStatus: Status | null;
   hibachiStatus: Status | null;
+  hibachiStickyStatus: Status | null;
   coinbaseStatus: Status | null;
   etherealStatus: Status | null;
   hotstuffStatus: Status | null;
@@ -595,6 +596,7 @@ async function readTargeted(): Promise<{
   asterMakerGate: ProfitGateStatus | null;
   hibachiMakerGate: ProfitGateStatus | null;
   hibachiCapacityGate: ProfitGateStatus | null;
+  hibachiStickyGate: ProfitGateStatus | null;
   coinbaseMakerGate: ProfitGateStatus | null;
   etherealMakerGate: ProfitGateStatus | null;
   hotstuffMakerGate: ProfitGateStatus | null;
@@ -614,6 +616,10 @@ async function readTargeted(): Promise<{
     candidateStatus: await read<Status | null>('cex-dex-status.json', null),
     asterStatus: await read<Status | null>('aster-lighter-status.json', null),
     hibachiStatus: await read<Status | null>('hibachi-lighter-status.json', null),
+    hibachiStickyStatus: await read<Status | null>(
+      'hibachi-lighter-sticky-status.json',
+      null,
+    ),
     coinbaseStatus: await read<Status | null>('coinbase-lighter-status.json', null),
     etherealStatus: await read<Status | null>('ethereal-lighter-status.json', null),
     hotstuffStatus: await read<Status | null>('hotstuff-lighter-status.json', null),
@@ -635,6 +641,10 @@ async function readTargeted(): Promise<{
     ),
     hibachiCapacityGate: await read<ProfitGateStatus | null>(
       'hibachi-lighter-capacity-gate-status.json',
+      null,
+    ),
+    hibachiStickyGate: await read<ProfitGateStatus | null>(
+      'hibachi-lighter-sticky-gate-status.json',
       null,
     ),
     coinbaseMakerGate: await read<ProfitGateStatus | null>(
@@ -1319,6 +1329,7 @@ function candidateRouteRows(
   status: Status | null,
   asterStatus: Status | null,
   hibachiStatus: Status | null,
+  hibachiStickyStatus: Status | null,
   coinbaseStatus: Status | null,
   etherealStatus: Status | null,
   hotstuffStatus: Status | null,
@@ -1328,6 +1339,7 @@ function candidateRouteRows(
     asterLighterMaker: ProfitGateStatus | null;
     hibachiLighterMaker: ProfitGateStatus | null;
     hibachiLighterCapacity: ProfitGateStatus | null;
+    hibachiLighterSticky: ProfitGateStatus | null;
     coinbaseLighterMaker: ProfitGateStatus | null;
     etherealLighterMaker: ProfitGateStatus | null;
     hotstuffLighterMaker: ProfitGateStatus | null;
@@ -1358,6 +1370,11 @@ function candidateRouteRows(
       label: 'Hibachi → Lighter · capacity $1,000',
       maker: hibachiStatus?.hibachiLighterCapacityShadow,
       gate: profitGates.hibachiLighterCapacity,
+    },
+    {
+      label: 'Hibachi → Lighter · sticky 60s',
+      maker: hibachiStickyStatus?.hibachiLighterMakerShadow,
+      gate: profitGates.hibachiLighterSticky,
     },
     {
       label: 'Coinbase maker → Lighter',
@@ -1427,6 +1444,7 @@ function candidateShadowRows(
     grvtLighter: GenericMakerShadowStatus | undefined;
     hibachiLighter: GenericMakerShadowStatus | undefined;
     hibachiCapacity: GenericMakerShadowStatus | undefined;
+    hibachiSticky: GenericMakerShadowStatus | undefined;
     coinbaseLighter: GenericMakerShadowStatus | undefined;
     etherealLighter: GenericMakerShadowStatus | undefined;
     hotstuffLighter: GenericMakerShadowStatus | undefined;
@@ -1446,6 +1464,7 @@ function candidateShadowRows(
     ['GRVT maker → Lighter', makers.grvtLighter],
     ['Hibachi maker → Lighter', makers.hibachiLighter],
     ['Hibachi → Lighter · capacity $1,000', makers.hibachiCapacity],
+    ['Hibachi → Lighter · sticky 60s', makers.hibachiSticky],
     ['Coinbase maker → Lighter', makers.coinbaseLighter],
     ['Ethereal maker → Lighter', makers.etherealLighter],
     ['Hotstuff maker → Lighter', makers.hotstuffLighter],
@@ -1520,6 +1539,7 @@ async function renderCompact(lang: Lang): Promise<string> {
   const candidateStatus = targeted.candidateStatus;
   const asterStatus = targeted.asterStatus;
   const hibachiStatus = targeted.hibachiStatus;
+  const hibachiStickyStatus = targeted.hibachiStickyStatus;
   const coinbaseStatus = targeted.coinbaseStatus;
   const etherealStatus = targeted.etherealStatus;
   const hotstuffStatus = targeted.hotstuffStatus;
@@ -1544,6 +1564,10 @@ async function renderCompact(lang: Lang): Promise<string> {
       && Date.now() - hibachiStatus.updatedAt < 15_000
     )
     || (
+      hibachiStickyStatus?.updatedAt
+      && Date.now() - hibachiStickyStatus.updatedAt < 15_000
+    )
+    || (
       coinbaseStatus?.updatedAt
       && Date.now() - coinbaseStatus.updatedAt < 15_000
     )
@@ -1561,6 +1585,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       candidateStatus,
       asterStatus,
       hibachiStatus,
+      hibachiStickyStatus,
       coinbaseStatus,
       etherealStatus,
       hotstuffStatus,
@@ -1574,6 +1599,7 @@ async function renderCompact(lang: Lang): Promise<string> {
       candidateStatus?.connections?.[venue]?.connected
       || asterStatus?.connections?.[venue]?.connected
       || hibachiStatus?.connections?.[venue]?.connected
+      || hibachiStickyStatus?.connections?.[venue]?.connected
       || coinbaseStatus?.connections?.[venue]?.connected
       || etherealStatus?.connections?.[venue]?.connected
       || hotstuffStatus?.connections?.[venue]?.connected
@@ -1595,6 +1621,10 @@ async function renderCompact(lang: Lang): Promise<string> {
     {
       maker: hibachiStatus?.hibachiLighterMakerShadow,
       gate: targeted.hibachiMakerGate,
+    },
+    {
+      maker: hibachiStickyStatus?.hibachiLighterMakerShadow,
+      gate: targeted.hibachiStickyGate,
     },
     {
       maker: coinbaseStatus?.coinbaseLighterMakerShadow,
@@ -1658,12 +1688,13 @@ async function renderCompact(lang: Lang): Promise<string> {
         <div class="va-panel-head"><h2>Безкомиссионные маршруты</h2><span>$100 · maker ≤ 0% · Lighter 0% · только положительный raw edge</span></div>
         <div class="va-table"><table><thead><tr>
           <th>Маршрут</th><th>Net сейчас</th><th>Shadow gate</th><th>Статус</th>
-        </tr></thead><tbody>${candidateRouteRows(candidateStatus, asterStatus, hibachiStatus, coinbaseStatus, etherealStatus, hotstuffStatus, {
+        </tr></thead><tbody>${candidateRouteRows(candidateStatus, asterStatus, hibachiStatus, hibachiStickyStatus, coinbaseStatus, etherealStatus, hotstuffStatus, {
           extendedLighterMaker: targeted.extendedMakerGate,
           grvtLighterMaker: targeted.grvtMakerGate,
           asterLighterMaker: targeted.asterMakerGate,
           hibachiLighterMaker: targeted.hibachiMakerGate,
           hibachiLighterCapacity: targeted.hibachiCapacityGate,
+          hibachiLighterSticky: targeted.hibachiStickyGate,
           coinbaseLighterMaker: targeted.coinbaseMakerGate,
           etherealLighterMaker: targeted.etherealMakerGate,
           hotstuffLighterMaker: targeted.hotstuffMakerGate,
@@ -1680,6 +1711,7 @@ async function renderCompact(lang: Lang): Promise<string> {
           grvtLighter: candidateStatus?.grvtMakerShadow,
           hibachiLighter: hibachiStatus?.hibachiLighterMakerShadow,
           hibachiCapacity: hibachiStatus?.hibachiLighterCapacityShadow,
+          hibachiSticky: hibachiStickyStatus?.hibachiLighterMakerShadow,
           coinbaseLighter: coinbaseStatus?.coinbaseLighterMakerShadow,
           etherealLighter: etherealStatus?.etherealLighterMakerShadow,
           hotstuffLighter: hotstuffStatus?.hotstuffLighterMakerShadow,
