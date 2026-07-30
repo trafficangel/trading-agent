@@ -38,6 +38,7 @@ import { allocatePortfolio, portfolioSummary } from '../lib/portfolio.js';
 import { crossvenueHero, crossvenueLabRoute, CROSSVENUE_CSS } from './crossvenue-lab.js';
 import {
   lighterLuxalgoHero,
+  lighterZ60Hero,
   lighterLuxalgoLabRoute,
   LIGHTER_LUXALGO_CSS,
 } from './lighter-luxalgo-lab.js';
@@ -180,6 +181,7 @@ async function renderLabList(lang: Lang): Promise<string> {
       <p class="subtitle">${t(lang, 'Собственные стратегии на форвард-тесте. Движок бэктеста == движок бумаги — никакого расхождения.', 'In-house strategies under forward-testing. The backtest engine == the paper engine — zero divergence.')}</p>
     </div>
     <style>${LAB_CSS}${CROSSVENUE_CSS}${LIGHTER_LUXALGO_CSS}</style>
+    ${await lighterZ60Hero(lang)}
     ${await lighterLuxalgoHero(lang)}
     ${await crossvenueHero(lang)}
     ${labBanner(lang)}

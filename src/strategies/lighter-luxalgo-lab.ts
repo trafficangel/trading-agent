@@ -88,8 +88,9 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // STRAT-030 is an independently reproduced SOL 5m Z-score reclaim model using
 // native Lighter candles, next-bar execution, zero commission, 2 bps
 // round-trip execution stress and adverse funding. It stayed positive over
-// every 30/60/90/120/180-day window and in both directions. All three remain
-// shadow-only and are absent from the independent Python real runner.
+// every 30/60/90/120/180-day window and in both directions. It entered an
+// isolated $100-notional / 10x real canary on 2026-07-30; every other newly
+// added candidate remains shadow-only.
 // BCH, XLM, TRX and JUP candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
@@ -1572,6 +1573,8 @@ function pager(args: {
 
 export const LIGHTER_LUXALGO_CSS = `
 .ll-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(163,106,255,.36);border-radius:14px;background:linear-gradient(135deg,rgba(122,71,255,.15),var(--bg-card));color:var(--text);text-decoration:none}
+.ll-z60-hero{border-color:rgba(56,217,150,.42);background:linear-gradient(135deg,rgba(56,217,150,.13),rgba(122,71,255,.08),var(--bg-card))}
+.ll-z60-hero .ll-badge{background:rgba(56,217,150,.13);color:#38d996}
 .ll-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(163,106,255,.15);color:#bd91ff;font-size:11px;font-weight:750;letter-spacing:.04em}
 .ll-title{font-size:19px;font-weight:700;margin-top:8px}.ll-sub{font-size:13px;color:var(--text-dim);margin-top:3px}
 .ll-stats{display:flex;gap:22px}.ll-stats span{display:grid;text-align:right}.ll-stats b{font-size:18px}.ll-stats small{font-size:10px;color:var(--text-faint);text-transform:uppercase}
@@ -1612,6 +1615,52 @@ export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
       <span><b>${s.signals}</b><small>${t(lang, 'сигналов', 'signals')}</small></span>
       <span><b>${passed}/${STRATEGIES.length}</b><small>${t(lang, 'прошли гейт', 'gates passed')}</small></span>
       <span><b class="${pnlClass(s.netPct)}">${signedPct(s.netPct)}</b><small>net · ${signedUsd(s.netUsd)}</small></span>
+    </div>
+  </a>`;
+}
+
+export async function lighterZ60Hero(lang: Lang): Promise<string> {
+  const spec = STRATEGY_BY_ID.get('sol-z60-reclaim')!;
+  const shadow = summary(spec);
+  const realRows = recentLiveTrades(1_000, spec.id);
+  const realClosed = realRows.filter(
+    (row) => row.status === 'closed' && row.net_pnl_usd != null,
+  );
+  const realOpen = realRows.filter(
+    (row) => row.status === 'opening' || row.status === 'open' || row.status === 'closing',
+  ).length;
+  const realNetUsd = realClosed.reduce(
+    (sum, row) => sum + (row.net_pnl_usd ?? 0),
+    0,
+  );
+  const state = lighterLiveState();
+  const strategyState = liveStrategyStates().find(
+    (row) => row.strategy_id === spec.id,
+  );
+  const monitorLive = state?.status === 'armed'
+    && state.heartbeat_at != null
+    && Date.now() - state.heartbeat_at < 15_000;
+  const realArmed = monitorLive
+    && state?.enabled === 1
+    && state.portfolio_paused_at == null
+    && strategyState?.enabled === 1;
+  const liveLabel = realArmed
+    ? t(lang, 'REAL ВКЛЮЧЁН', 'REAL ARMED')
+    : t(lang, 'REAL НА ПАУЗЕ', 'REAL PAUSED');
+  return `<a class="ll-hero ll-z60-hero" href="/lab/lighter-luxalgo?strategy=${encodeURIComponent(spec.id)}&dataset=real#portfolio-view">
+    <div><span class="ll-badge">STRAT-030 · SOL · 5M · ${liveLabel}</span>
+      <div class="ll-title">${esc(spec.name)}</div>
+      <div class="ll-sub">${t(
+        lang,
+        'Отдельный canary · $100 notional · 10x · биржевой reduce-only стоп 1.5% →',
+        'Isolated canary · $100 notional · 10x · exchange-native 1.5% reduce-only stop →',
+      )}</div>
+    </div>
+    <div class="ll-stats">
+      <span><b>${spec.backtest.trades}</b><small>backtest · PF ${spec.backtest.profitFactor.toFixed(2)}</small></span>
+      <span><b class="${pnlClass(shadow.netPct)}">${signedPct(shadow.netPct)}</b><small>shadow · ${shadow.closed}/${shadow.open}</small></span>
+      <span><b class="${pnlClass(realNetUsd)}">${signedUsd(realNetUsd)}</b><small>real · ${realClosed.length}/${realOpen}</small></span>
+      <span><b class="${realArmed ? 'pos' : 'neg'}">${liveLabel}</b><small>$100 · 10x · SL 1.5%</small></span>
     </div>
   </a>`;
 }
