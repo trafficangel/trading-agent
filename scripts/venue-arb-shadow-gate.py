@@ -243,7 +243,7 @@ def evaluate(
     for row, value in zip(eligible, trade_values):
         by_coin[str(row.get("coin") or "UNKNOWN")].append(value)
     return {
-        "version": "venue-arb-shadow-gate-v1",
+        "version": "venue-arb-shadow-gate-v2",
         "updatedAt": evaluated_at,
         "observationStartedAt": observation_started_at,
         "observationElapsedMs": elapsed_ms,
