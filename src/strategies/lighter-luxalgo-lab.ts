@@ -1863,9 +1863,13 @@ function liveTradeRows(rows: LiveTradeRow[], lang: Lang): string {
   }).join('');
 }
 
-function liveStrategyRows(rows: LiveStrategyStateRow[], lang: Lang): string {
+function liveStrategyRows(
+  rows: LiveStrategyStateRow[],
+  lang: Lang,
+  specs: readonly StrategySpec[] = STRATEGIES,
+): string {
   const byId = new Map(rows.map((row) => [row.strategy_id, row]));
-  return STRATEGIES.map((spec) => {
+  return specs.map((spec) => {
     const row = byId.get(spec.id);
     if (!row) {
       return `<tr><td><b>STRAT-${spec.code} · ${spec.asset}</b></td><td class="collect">${t(lang, 'ОЖИДАНИЕ', 'WAITING')}</td><td>0</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>`;
@@ -2310,7 +2314,7 @@ async function render(
     ? ''
     : `<details class="ll-details"><summary>${t(lang, 'Live-статистика по каждой стратегии', 'Per-strategy live statistics')}</summary><div class="ll-table"><table class="ll-live-strategy">
         <thead><tr><th>Strategy</th><th>Gate</th><th>N</th><th>Net</th><th>PF</th><th>½ / ½</th><th>DD $</th></tr></thead>
-        <tbody>${liveStrategyRows(liveStrategies, lang)}</tbody>
+        <tbody>${liveStrategyRows(liveStrategies, lang, scopeSpecs)}</tbody>
       </table></div></details>`;
   return pageShell(
     requested.strategy
