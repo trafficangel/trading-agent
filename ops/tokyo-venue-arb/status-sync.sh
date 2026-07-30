@@ -5,6 +5,7 @@ source_dir=/home/trader/apps/venue-arb-tokyo/data/candidate-routes
 candidate_dir=/home/trader/apps/venue-arb-tokyo/data/extended-lighter-shadow
 aster_dir=/home/trader/apps/venue-arb-tokyo/data/binance-bybit-shadow
 hibachi_dir=/home/trader/apps/venue-arb-tokyo/data/hibachi-lighter-shadow
+hibachi_sticky_dir=/home/trader/apps/venue-arb-tokyo/data/hibachi-lighter-sticky-shadow
 coinbase_dir=/home/trader/apps/venue-arb-tokyo/data/coinbase-lighter-shadow
 ethereal_dir=/home/trader/apps/venue-arb-tokyo/data/ethereal-lighter-shadow
 hotstuff_dir=/home/trader/apps/venue-arb-tokyo/data/hotstuff-lighter-shadow
@@ -27,6 +28,8 @@ while true; do
     "${aster_dir}/status.json" "${destination}aster-lighter-status.json"
   [[ -f "${hibachi_dir}/status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
     "${hibachi_dir}/status.json" "${destination}hibachi-lighter-status.json"
+  [[ -f "${hibachi_sticky_dir}/status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
+    "${hibachi_sticky_dir}/status.json" "${destination}hibachi-lighter-sticky-status.json"
   [[ -f "${coinbase_dir}/status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
     "${coinbase_dir}/status.json" "${destination}coinbase-lighter-status.json"
   [[ -f "${ethereal_dir}/status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
@@ -47,6 +50,8 @@ while true; do
     "${hibachi_dir}/hibachi-lighter-maker-gate-status.json" "${destination}hibachi-lighter-maker-gate-status.json"
   [[ -f "${hibachi_dir}/hibachi-lighter-capacity-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
     "${hibachi_dir}/hibachi-lighter-capacity-gate-status.json" "${destination}hibachi-lighter-capacity-gate-status.json"
+  [[ -f "${hibachi_sticky_dir}/hibachi-lighter-maker-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
+    "${hibachi_sticky_dir}/hibachi-lighter-maker-gate-status.json" "${destination}hibachi-lighter-sticky-gate-status.json"
   [[ -f "${coinbase_dir}/coinbase-lighter-maker-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \
     "${coinbase_dir}/coinbase-lighter-maker-gate-status.json" "${destination}coinbase-lighter-maker-gate-status.json"
   [[ -f "${ethereal_dir}/ethereal-lighter-maker-gate-status.json" ]] && rsync -az --timeout=5 --chmod=F600 -e "$ssh_args" \

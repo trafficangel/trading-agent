@@ -1,0 +1,11 @@
+[Unit]
+Description=Evaluate Hibachi sticky-maker/Lighter shadow every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=5s
+Unit=venue-arb-hibachi-lighter-sticky-gate.service
+
+[Install]
+WantedBy=timers.target
