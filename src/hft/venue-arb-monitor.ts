@@ -20,6 +20,10 @@ import {
 } from 'node:fs';
 import { resolve } from 'node:path';
 import WebSocket, { type ClientOptions, type RawData } from 'ws';
+import {
+  applyBitfinexBookMessage,
+  createBitfinexDepthBook,
+} from '../lib/bitfinex-depth-book.js';
 import { applyBybitDepthUpdate, createBybitDepthBook } from '../lib/bybit-depth-book.js';
 import {
   applyCoinbaseL2Event,
@@ -104,6 +108,7 @@ type Venue =
   | 'coinbase'
   | 'ethereal'
   | 'hotstuff'
+  | 'bitfinex'
   | 'binance'
   | 'bybit';
 type VenueClass = 'DEX' | 'CEX';
@@ -1520,6 +1525,18 @@ const HOTSTUFF_VENUE_COINS = new Set(
 const HOTSTUFF_VENUE_MARKETS = ACTIVE_MARKETS.filter(
   (market) => HOTSTUFF_VENUE_COINS.has(market.coin),
 );
+const BITFINEX_VENUE_COINS = new Set(
+  (
+    process.env.VENUE_ARB_BITFINEX_COINS
+    ?? 'BTC,ETH,SOL,HYPE,XRP,DOGE,ADA,BNB,SUI,LTC,NEAR,CRV,XAG,ZEC,ENA,AAVE,UNI,XPL,TAO'
+  )
+    .split(',')
+    .map((coin) => coin.trim().toUpperCase())
+    .filter(Boolean),
+);
+const BITFINEX_VENUE_MARKETS = ACTIVE_MARKETS.filter(
+  (market) => BITFINEX_VENUE_COINS.has(market.coin),
+);
 
 const VENUES: readonly Venue[] = [
   'lighter',
@@ -1535,6 +1552,7 @@ const VENUES: readonly Venue[] = [
   'coinbase',
   'ethereal',
   'hotstuff',
+  'bitfinex',
   'binance',
   'bybit',
 ];
@@ -1569,6 +1587,7 @@ const VENUE_CLASS: Record<Venue, VenueClass> = {
   coinbase: 'CEX',
   ethereal: 'DEX',
   hotstuff: 'DEX',
+  bitfinex: 'CEX',
   binance: 'CEX',
   bybit: 'CEX',
 };
@@ -1596,10 +1615,25 @@ const FEE_BPS: Record<Venue, number> = {
   // Hotstuff standard perps taker fee is 0.025%; its negative maker fee is
   // modelled only in the dedicated maker route.
   hotstuff: finiteEnv('VENUE_ARB_FEE_BPS_HOTSTUFF', 2.5),
+  // Bitfinex removed maker and taker trading fees for eligible customers
+  // across derivatives on 2025-12-17.
+  bitfinex: finiteEnv('VENUE_ARB_FEE_BPS_BITFINEX', 0),
   binance: finiteEnv('VENUE_ARB_FEE_BPS_BINANCE', 5),
   bybit: finiteEnv('VENUE_ARB_FEE_BPS_BYBIT', 5.5),
 };
 const ALL_SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
+  {
+    id: 'bitfinex-lighter',
+    buyVenue: 'bitfinex',
+    sellVenue: 'lighter',
+    primary: false,
+  },
+  {
+    id: 'lighter-bitfinex',
+    buyVenue: 'lighter',
+    sellVenue: 'bitfinex',
+    primary: false,
+  },
   {
     id: 'ethereal-lighter',
     buyVenue: 'ethereal',
@@ -2028,6 +2062,11 @@ const bybitDepth = new Map(ACTIVE_MARKETS.map((market) => [market.symbol, create
 const grvtDepth = new Map(ACTIVE_MARKETS.map((market) => [market.coin, createGrvtDepthBook()]));
 const hibachiDepth = new Map(
   ACTIVE_MARKETS.map((market) => [market.coin, createHibachiDepthBook()]),
+);
+const bitfinexDepth = new Map(
+  BITFINEX_VENUE_MARKETS.map(
+    (market) => [market.coin, createBitfinexDepthBook()],
+  ),
 );
 const edgexDepth = new Map<number, EdgexDepthState>();
 const connections = Object.fromEntries(VENUES.map((venue) => [
@@ -3070,21 +3109,33 @@ function shadowQuote(
     || now - sell.exchangeAt > sourceFreshMs
   ) return { quote: null, rejection: 'stale_source' };
   if (
-    buy.buyVwap500 == null
-    || sell.sellVwap500 == null
-    || buy.sellVwap500 == null
-    || sell.buyVwap500 == null
+    (SHADOW_NOTIONAL_USD > 500 ? buy.buyVwap1000 : buy.buyVwap500) == null
+    || (SHADOW_NOTIONAL_USD > 500 ? sell.sellVwap1000 : sell.sellVwap500) == null
+    || (SHADOW_NOTIONAL_USD > 500 ? buy.sellVwap1000 : buy.sellVwap500) == null
+    || (SHADOW_NOTIONAL_USD > 500 ? sell.buyVwap1000 : sell.buyVwap500) == null
   ) return { quote: null, rejection: 'insufficient_depth' };
+  const buyOpenVwap = SHADOW_NOTIONAL_USD > 500
+    ? buy.buyVwap1000!
+    : buy.buyVwap500!;
+  const sellOpenVwap = SHADOW_NOTIONAL_USD > 500
+    ? sell.sellVwap1000!
+    : sell.sellVwap500!;
+  const buyCloseVwap = SHADOW_NOTIONAL_USD > 500
+    ? buy.sellVwap1000!
+    : buy.sellVwap500!;
+  const sellCloseVwap = SHADOW_NOTIONAL_USD > 500
+    ? sell.buyVwap1000!
+    : sell.buyVwap500!;
   return {
     quote: {
       at: now,
       version: `${buy.receivedAt}:${sell.receivedAt}`,
-      buyOpenVwap: buy.buyVwap500,
-      sellOpenVwap: sell.sellVwap500,
-      buyCloseVwap: buy.sellVwap500,
-      sellCloseVwap: sell.buyVwap500,
+      buyOpenVwap,
+      sellOpenVwap,
+      buyCloseVwap,
+      sellCloseVwap,
       openingNetBps: netConvergenceEdgeBps(
-        rawCrossEdgeBps(buy.buyVwap500, sell.sellVwap500),
+        rawCrossEdgeBps(buyOpenVwap, sellOpenVwap),
         FEE_BPS[route.buyVenue],
         FEE_BPS[route.sellVenue],
         EXECUTION_BUFFER_BPS,
@@ -4771,6 +4822,71 @@ function startCoinbase(): void {
         }
         coinbaseLighterMakerShadow.processTrade(trade, receivedAt);
       }
+    },
+  );
+}
+
+function startBitfinex(): void {
+  if (!BITFINEX_VENUE_MARKETS.length) return;
+  const symbolToCoin = new Map<string, string>(
+    BITFINEX_VENUE_MARKETS.map(
+      ({ coin }) => [`t${coin}F0:USTF0`, coin] as const,
+    ),
+  );
+  const channelCoins = new Map<number, string>();
+  connect(
+    'bitfinex',
+    'wss://api-pub.bitfinex.com/ws/2',
+    (ws) => {
+      channelCoins.clear();
+      for (const symbol of symbolToCoin.keys()) {
+        ws.send(JSON.stringify({
+          event: 'subscribe',
+          channel: 'book',
+          symbol,
+          prec: 'P0',
+          freq: 'F0',
+          len: '100',
+        }));
+      }
+    },
+    (payload, receivedAt) => {
+      if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        const event = payload as {
+          event?: unknown;
+          channel?: unknown;
+          chanId?: unknown;
+          symbol?: unknown;
+          code?: unknown;
+          msg?: unknown;
+        };
+        if (
+          event.event === 'subscribed'
+          && event.channel === 'book'
+          && Number.isInteger(Number(event.chanId))
+          && typeof event.symbol === 'string'
+        ) {
+          const coin = symbolToCoin.get(event.symbol);
+          if (coin) channelCoins.set(Number(event.chanId), coin);
+        } else if (event.event === 'error') {
+          console.warn(
+            `venue-arb bitfinex subscription error ${String(event.code)} ${String(event.msg)}`,
+          );
+        }
+        return;
+      }
+      if (!Array.isArray(payload) || payload[1] === 'hb') return;
+      const channelId = Number(payload[0]);
+      const coin = channelCoins.get(channelId);
+      const depth = coin ? bitfinexDepth.get(coin) : null;
+      const book = coin ? books.get(bookKey('bitfinex', coin)) : null;
+      if (!depth || !book) return;
+      if (!applyBitfinexBookMessage(depth, payload)) return;
+      book.bids = depth.bids;
+      book.asks = depth.asks;
+      // Bitfinex book messages do not carry exchange timestamps. receivedAt
+      // is the only honest freshness boundary available on the public feed.
+      markBook(book, receivedAt, receivedAt);
     },
   );
 }
@@ -7590,6 +7706,7 @@ if (activeVenues.has('edgex')) startEdgex();
 if (activeVenues.has('coinbase')) startCoinbase();
 if (activeVenues.has('ethereal')) startEthereal();
 if (activeVenues.has('hotstuff')) startHotstuff();
+if (activeVenues.has('bitfinex')) startBitfinex();
 if (activeVenues.has('binance')) startBinance();
 if (activeVenues.has('bybit')) startBybit();
 const evaluationTimer = setInterval(() => {

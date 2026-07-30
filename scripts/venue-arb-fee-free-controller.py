@@ -37,6 +37,8 @@ ETHEREAL_GATE_TIMER = "venue-arb-ethereal-lighter-maker-gate.timer"
 ETHEREAL_TAKER_GATE_TIMER = "venue-arb-ethereal-lighter-taker-gate.timer"
 HOTSTUFF_SHADOW_SERVICE = "venue-arb-hotstuff-lighter-shadow.service"
 HOTSTUFF_GATE_TIMER = "venue-arb-hotstuff-lighter-maker-gate.timer"
+BITFINEX_SHADOW_SERVICE = "venue-arb-bitfinex-lighter-shadow.service"
+BITFINEX_GATE_TIMER = "venue-arb-bitfinex-lighter-taker-gate.timer"
 CONTROLLER_TIMER = "venue-arb-fee-free-controller.timer"
 
 
@@ -75,6 +77,8 @@ def stop_plan(
     ethereal_taker_gate: dict[str, Any] | None = None,
     ethereal_taker_enabled: bool = False,
     hotstuff_disabled: bool = False,
+    bitfinex_gate: dict[str, Any] | None = None,
+    bitfinex_enabled: bool = False,
 ) -> dict[str, Any]:
     aster_no_go = is_no_go(aster_gate)
     extended_no_go = is_no_go(extended_gate)
@@ -92,6 +96,7 @@ def stop_plan(
         or (ethereal_maker_no_go and ethereal_taker_no_go)
     )
     hotstuff_no_go = hotstuff_disabled or is_no_go(hotstuff_gate)
+    bitfinex_no_go = not bitfinex_enabled or is_no_go(bitfinex_gate)
     all_no_go = (
         aster_no_go
         and extended_no_go
@@ -101,6 +106,7 @@ def stop_plan(
         and coinbase_no_go
         and ethereal_no_go
         and hotstuff_no_go
+        and bitfinex_no_go
     )
     stop_units: list[str] = []
     disable_units: list[str] = []
@@ -155,6 +161,9 @@ def stop_plan(
     if hotstuff_no_go:
         stop_units.extend([HOTSTUFF_SHADOW_SERVICE, HOTSTUFF_GATE_TIMER])
         disable_units.extend([HOTSTUFF_SHADOW_SERVICE, HOTSTUFF_GATE_TIMER])
+    if bitfinex_enabled and bitfinex_no_go:
+        stop_units.extend([BITFINEX_SHADOW_SERVICE, BITFINEX_GATE_TIMER])
+        disable_units.extend([BITFINEX_SHADOW_SERVICE, BITFINEX_GATE_TIMER])
     if all_no_go:
         stop_units.append(CONTROLLER_TIMER)
         disable_units.append(CONTROLLER_TIMER)
@@ -175,6 +184,8 @@ def stop_plan(
         "etherealDisabled": ethereal_disabled,
         "hotstuffNoGo": hotstuff_no_go,
         "hotstuffDisabled": hotstuff_disabled,
+        "bitfinexNoGo": bitfinex_no_go,
+        "bitfinexEnabled": bitfinex_enabled,
         "allNoGo": all_no_go,
         "stopUnits": stop_units,
         "disableUnits": disable_units,
@@ -364,6 +375,34 @@ def self_test() -> None:
         HOTSTUFF_SHADOW_SERVICE,
         HOTSTUFF_GATE_TIMER,
     ]
+    bitfinex_observing = stop_plan(
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        bitfinex_gate=observe,
+        bitfinex_enabled=True,
+    )
+    assert bitfinex_observing["bitfinexNoGo"] is False
+    assert bitfinex_observing["stopUnits"] == []
+    bitfinex_failed = stop_plan(
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        bitfinex_gate=no_go,
+        bitfinex_enabled=True,
+    )
+    assert bitfinex_failed["stopUnits"] == [
+        BITFINEX_SHADOW_SERVICE,
+        BITFINEX_GATE_TIMER,
+    ]
     all_failed = stop_plan(
         no_go,
         no_go,
@@ -482,6 +521,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--bitfinex-gate",
+        default=os.getenv(
+            "VENUE_ARB_BITFINEX_GATE",
+            "/home/trader/apps/venue-arb-tokyo/data/bitfinex-lighter-shadow/"
+            "bitfinex-lighter-taker-gate-status.json",
+        ),
+    )
+    parser.add_argument(
         "--output",
         default=os.getenv(
             "VENUE_ARB_CONTROLLER_OUTPUT",
@@ -537,6 +584,14 @@ def main() -> None:
             "",
         ).strip().lower() in {"1", "true", "yes", "on"},
     )
+    parser.add_argument(
+        "--bitfinex-enabled",
+        action="store_true",
+        default=os.getenv(
+            "VENUE_ARB_CONTROLLER_BITFINEX_ENABLED",
+            "",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+    )
     args = parser.parse_args()
     if args.self_test:
         self_test()
@@ -552,6 +607,7 @@ def main() -> None:
         "ethereal": read_gate(Path(args.ethereal_gate)),
         "etherealTaker": read_gate(Path(args.ethereal_taker_gate)),
         "hotstuff": read_gate(Path(args.hotstuff_gate)),
+        "bitfinex": read_gate(Path(args.bitfinex_gate)),
     }
     plan = stop_plan(
         gates["aster"],
@@ -569,6 +625,8 @@ def main() -> None:
         ethereal_taker_gate=gates["etherealTaker"],
         ethereal_taker_enabled=args.ethereal_taker_enabled,
         hotstuff_disabled=args.hotstuff_disabled,
+        bitfinex_gate=gates["bitfinex"],
+        bitfinex_enabled=args.bitfinex_enabled,
     )
     actions: list[dict[str, Any]] = []
     for unit in plan["stopUnits"]:
