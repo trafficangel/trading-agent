@@ -9,6 +9,7 @@ Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_GATE_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/bitfinex-lighter-shadow
 Environment=VENUE_ARB_GATE_INPUT_FILE=bitfinex-lighter-maker-basis-shadow-v1.ndjson
+Environment=VENUE_ARB_GATE_EVENTS_FILE=bitfinex-lighter-maker-events-v1.ndjson
 Environment=VENUE_ARB_GATE_OUTPUT_FILE=bitfinex-lighter-maker-gate-status.json
 Environment=VENUE_ARB_GATE_ROUTE=bitfinex-maker-lighter
 Environment=VENUE_ARB_GATE_NOTIONAL_USD=1000
@@ -20,6 +21,8 @@ Environment=VENUE_ARB_GATE_NO_GO_AFTER_HOURS=4
 Environment=VENUE_ARB_GATE_HARD_NO_GO_AFTER_HOURS=4
 Environment=VENUE_ARB_GATE_MIN_TRADES_BY_DEADLINE=3
 Environment=VENUE_ARB_GATE_MAX_TECHNICAL_FAILURES=0
+Environment=VENUE_ARB_GATE_MAX_ACTIVATED_QUOTES_WITHOUT_PROGRESS=100
+Environment=VENUE_ARB_GATE_MAX_ACTIVATED_EXPOSURE_WITHOUT_PROGRESS_MS=1800000
 ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-shadow-gate.py
 NoNewPrivileges=true
 PrivateTmp=true
