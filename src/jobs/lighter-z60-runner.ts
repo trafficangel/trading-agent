@@ -203,6 +203,12 @@ async function poll(): Promise<void> {
 export function startLighterZ60Runner(): void {
   if (started) return;
   started = true;
+  logger.info({
+    strategyId: STRATEGY_ID,
+    symbol: SYMBOL,
+    timeframe: '5m',
+    commissionPct: 0,
+  }, 'lighter-z60: native shadow runner scheduled');
   const initial = setTimeout(() => void poll(), 5_000);
   initial.unref();
   timer = setInterval(() => void poll(), RETRY_MS);
