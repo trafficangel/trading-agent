@@ -35,7 +35,6 @@ import { TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 import { ALL_LAB_STRATEGIES, LAB_BY_CODE, LAB_BY_ID, LAB_TRACK, LAB_MAKER_TRACK, BT_NET_PCT_PER_TRADE, BT_MAXDD_PCT, type LabStrategy } from './lab-registry.js';
 import { labGateVerdict } from '../lib/lab-gate.js';
 import { allocatePortfolio, portfolioSummary } from '../lib/portfolio.js';
-import { crossvenueHero, crossvenueLabRoute, CROSSVENUE_CSS } from './crossvenue-lab.js';
 import {
   lighterLuxalgoHero,
   lighterZ60Hero,
@@ -120,73 +119,18 @@ function familyOf(s: LabStrategy): string {
   return 'Прочее';
 }
 
-/** Compact summary row for the /lab list. */
-function labRow(s: LabStrategy): string {
-  const live = getStrategyLiveStats(s.id, trackOf(s));
-  const makerTag = s.track === LAB_MAKER_TRACK ? ' · <b>maker</b>' : '';
-  const gate = labGateVerdict({ closed: live.closed, netPct: live.netPnlPct, winRate: live.winRate, btNetPctPerTrade: BT_NET_PCT_PER_TRADE[s.code] });
-  const working = live.open > 0;
-  const statusPill = working
-    ? '<span class="lab-status work">🟢 в работе</span>'
-    : `<span class="lab-status wait">${live.closed > 0 ? 'ждём сигнал' : 'нет сделок'}</span>`;
-  const netCell = live.closed > 0
-    ? `<span class="${cls(live.netPnlUsd)}">${pct(live.netPnlPct)} · ${usd(live.netPnlUsd, true)}</span>`
-    : '<span class="lab-row-sym">—</span>';
-  const wrCell = live.winRate !== null ? `${(live.winRate * 100).toFixed(0)}%` : '—';
-  return `
-    <a class="lab-row" href="/lab/${esc(s.code)}">
-      <div class="lab-row-top">
-        <div><span class="lab-row-code">[${esc(s.code)}]</span><span class="lab-row-name">${esc(s.name)}</span></div>
-        ${statusPill}
-      </div>
-      <div class="lab-row-sym">${esc(s.symbol)} · ${esc(s.timeframe)}m · SL ${(s.slPct * 100).toFixed(0)}%${makerTag}</div>
-      <div class="lab-row-stats">
-        <span><span class="k">Net</span>${netCell}</span>
-        <span><span class="k">WR</span>${wrCell}</span>
-        <span><span class="k">Сделок</span>${live.closed}</span>
-        <span><span class="k">Открыто</span>${live.open}</span>
-      </div>
-      <div class="lab-gate gate-${gate.status}">${gate.emoji} ${gate.label}</div>
-    </a>`;
-}
-
 async function renderLabList(lang: Lang): Promise<string> {
-  // Group rows by family for readability.
-  const fams = new Map<string, LabStrategy[]>();
-  for (const s of ALL_LAB_STRATEGIES) {
-    const f = familyOf(s);
-    (fams.get(f) ?? fams.set(f, []).get(f)!).push(s);
-  }
-  const body = ALL_LAB_STRATEGIES.length === 0
-    ? `<div class="lab-empty">${t(lang,
-        '<b>Лаборатория обновляется.</b><br>Старый набор медленных стратегий снят с форвард-теста. Сейчас в разработке — быстрые стратегии на событийных сигналах (ликвидации, фандинг, order-flow). Появятся здесь после прохождения kill-батареи и форвард-валидации.',
-        '<b>The lab is being retooled.</b><br>The old set of slow strategies has been pulled from forward-testing. In the works now — fast strategies on event-driven signals (liquidations, funding, order-flow). They will appear here once they pass the kill-battery and forward-validation.')}</div>`
-    : [...fams.entries()].map(([fam, list]) => {
-        const note = fam.startsWith('Mean-reversion') && list.length > 1
-          ? `<div class="lab-fam-note">${t(lang,
-              `⚠ Это одна логика на ${list.length} монетах = <b>коррелированная ставка</b>, а не ${list.length} независимых. При промоуте лимитируются как единый кластер (общий лимит риска), иначе широкая просадка альтов откроет все разом.`,
-              `⚠ This is one logic across ${list.length} coins = <b>a correlated bet</b>, not ${list.length} independent ones. On promotion they are capped as a single cluster (shared risk limit), otherwise a broad alt drawdown would open them all at once.`)}</div>`
-          : '';
-        return `<div class="lab-fam">${esc(fam)}</div>${note}<div class="lab-list">${list.map(labRow).join('')}</div>`;
-      }).join('');
-  const portfolioLink = ALL_LAB_STRATEGIES.length === 0
-    ? ''
-    : `<div style="margin:0 0 16px"><a class="lab-row" style="display:inline-block;padding:10px 14px" href="/lab/portfolio">💼 ${t(lang, 'План сайзинга портфеля (риск-паритет + кластер-кэп) →', 'Portfolio sizing plan (risk-parity + cluster cap) →')}</a></div>`;
   return pageShell(
     t(lang, 'Лаборатория — R&D стратегии (бумага)', 'Lab — R&D strategies (paper)'),
     `
     <div class="header">
-      <span class="strat-code">IN-HOUSE ENGINE · PAPER</span>
+      <span class="strat-code">LUXALGO · SIGNAL TRACK</span>
       <h1 class="title">${t(lang, 'Лаборатория', 'The Lab')}</h1>
-      <p class="subtitle">${t(lang, 'Собственные стратегии на форвард-тесте. Движок бэктеста == движок бумаги — никакого расхождения.', 'In-house strategies under forward-testing. The backtest engine == the paper engine — zero divergence.')}</p>
+      <p class="subtitle">${t(lang, 'Активный трек: сигналы LuxAlgo с исполнением и статистикой на Lighter.', 'Active track: LuxAlgo signals with Lighter execution and statistics.')}</p>
     </div>
-    <style>${LAB_CSS}${CROSSVENUE_CSS}${LIGHTER_LUXALGO_CSS}</style>
+    <style>${LAB_CSS}${LIGHTER_LUXALGO_CSS}</style>
     ${await lighterZ60Hero(lang)}
     ${await lighterLuxalgoHero(lang)}
-    ${await crossvenueHero(lang)}
-    ${labBanner(lang)}
-    ${portfolioLink}
-    ${body}
     `,
     { autoRefreshSec: 60, lang },
   );
@@ -364,8 +308,15 @@ function renderLabPortfolio(): string {
 }
 
 export async function labRoute(app: FastifyInstance): Promise<void> {
-  await crossvenueLabRoute(app);
   await lighterLuxalgoLabRoute(app);
+  const retiredTrackRedirect = async (
+    _req: unknown,
+    reply: { redirect: (location: string) => unknown },
+  ): Promise<unknown> => reply.redirect('/lab/lighter-luxalgo');
+  app.get('/lab/bybit-shadow', retiredTrackRedirect);
+  app.get('/lab/crossvenue', retiredTrackRedirect);
+  app.get('/lab/positioning-flow', retiredTrackRedirect);
+  app.get('/lab/venue-arb', retiredTrackRedirect);
   app.get('/lab/portfolio', async (_req, reply) => {
     // The sizing plan is only meaningful with lab strategies present. While the
     // paper book is cleared, send visitors back to the lab index.
