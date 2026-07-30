@@ -10,10 +10,13 @@ Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/bitfinex-lighter-shadow
 Environment=VENUE_ARB_ACTIVE_VENUES=bitfinex,lighter
-Environment=VENUE_ARB_ACTIVE_COINS=BTC,ETH,SOL,HYPE,XRP,DOGE,ADA,BNB,SUI,LTC,NEAR,CRV,XAG,ZEC,ENA,AAVE,UNI,XPL,TAO
-Environment=VENUE_ARB_BITFINEX_COINS=BTC,ETH,SOL,HYPE,XRP,DOGE,ADA,BNB,SUI,LTC,NEAR,CRV,XAG,ZEC,ENA,AAVE,UNI,XPL,TAO
-Environment=VENUE_ARB_BITFINEX_MAKER_COINS=BTC,ETH,SOL,XRP,NEAR
-Environment=VENUE_ARB_LIGHTER_TRADE_COINS=BTC,ETH,SOL,HYPE,XRP,DOGE,ADA,BNB,SUI,LTC,NEAR,CRV,XAG,ZEC,ENA,AAVE,UNI,XPL,TAO
+# Keep the process concentrated on the strict zero-fee maker cohort. Live
+# survival evidence added LTC (14/14 positive after 1s) and DOGE (12/14);
+# the discarded taker-only symbols produced no eligible execution windows.
+Environment=VENUE_ARB_ACTIVE_COINS=BTC,ETH,SOL,XRP,DOGE,LTC,NEAR
+Environment=VENUE_ARB_BITFINEX_COINS=BTC,ETH,SOL,XRP,DOGE,LTC,NEAR
+Environment=VENUE_ARB_BITFINEX_MAKER_COINS=BTC,ETH,SOL,XRP,DOGE,LTC,NEAR
+Environment=VENUE_ARB_LIGHTER_TRADE_COINS=BTC,ETH,SOL,XRP,DOGE,LTC,NEAR
 Environment=VENUE_ARB_SAMPLE_MS=100
 Environment=VENUE_ARB_STALE_MS=3000
 # Both venues currently publish zero taker fees. Two bps remain reserved for
