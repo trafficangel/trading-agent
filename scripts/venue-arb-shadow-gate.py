@@ -111,12 +111,36 @@ def execution_evidence(
         key=lambda event: int(finite_number(event.get("at")) or 0),
     )
     quotes_activated_since_last_progress = 0
+    activated_exposure_since_last_progress_ms = 0
+    active_quote_started_at: dict[str, int] = {}
     for event in eligible:
         event_type = event.get("type")
+        at = int(finite_number(event.get("at")) or 0)
+        quote_id = str(event.get("quoteId") or "")
         if event_type == "quote_activated":
             quotes_activated_since_last_progress += 1
+            if quote_id:
+                active_quote_started_at[quote_id] = at
         elif event_type in ("queue_progress", "queue_filled"):
             quotes_activated_since_last_progress = 0
+            activated_exposure_since_last_progress_ms = 0
+            active_quote_started_at = {
+                active_quote_id: at
+                for active_quote_id in active_quote_started_at
+            }
+            if event_type == "queue_filled" and quote_id:
+                active_quote_started_at.pop(quote_id, None)
+        elif event_type in (
+            "edge_cancelled",
+            "quote_expired",
+            "placement_rejected",
+        ):
+            started_at = active_quote_started_at.pop(quote_id, None)
+            if started_at is not None:
+                activated_exposure_since_last_progress_ms += max(
+                    0,
+                    at - started_at,
+                )
     return {
         "quotesCreated": sum(
             event.get("type") == "quote_created" for event in eligible
@@ -135,6 +159,11 @@ def execution_evidence(
         ),
         "quotesActivatedSinceLastProgress":
             quotes_activated_since_last_progress,
+        # Only completed activation intervals are counted. This avoids
+        # overstating exposure when a process restart leaves a historical
+        # activation without a terminal event.
+        "activatedExposureSinceLastProgressMs":
+            activated_exposure_since_last_progress_ms,
     }
 
 
@@ -195,6 +224,7 @@ def evaluate(
     negative_assessment_min_trades: int = 10,
     execution: dict[str, int] | None = None,
     max_activated_quotes_without_progress: int = 0,
+    max_activated_exposure_without_progress_ms: int = 0,
     max_technical_failures: int = 0,
     require_trade_through_fills: bool = False,
     confirmed_entry_fill_times: set[int] | None = None,
@@ -293,6 +323,7 @@ def evaluate(
         "queueProgressEvents": 0,
         "queueFills": 0,
         "quotesActivatedSinceLastProgress": 0,
+        "activatedExposureSinceLastProgressMs": 0,
     }
     activated_without_progress = execution_metrics.get(
         "quotesActivatedSinceLastProgress",
@@ -312,6 +343,20 @@ def evaluate(
     ):
         no_go_reasons.append(
             f"{activated_without_progress} activated quotes "
+            "since last queue progress"
+        )
+    activated_exposure_without_progress_ms = execution_metrics.get(
+        "activatedExposureSinceLastProgressMs",
+        0,
+    )
+    if (
+        max_activated_exposure_without_progress_ms > 0
+        and activated_exposure_without_progress_ms
+        >= max_activated_exposure_without_progress_ms
+    ):
+        no_go_reasons.append(
+            "active quote exposure "
+            f"{activated_exposure_without_progress_ms / 60_000:.1f}m "
             "since last queue progress"
         )
     if len(technical_failures) > max_technical_failures:
@@ -349,6 +394,8 @@ def evaluate(
             "negativeAssessmentMinTrades": negative_assessment_min_trades,
             "maxActivatedQuotesWithoutProgress":
                 max_activated_quotes_without_progress,
+            "maxActivatedExposureWithoutProgressMs":
+                max_activated_exposure_without_progress_ms,
             "maxTechnicalFailures": max_technical_failures,
             "requireTradeThroughEntryFill":
                 require_trade_through_fills,
@@ -603,6 +650,88 @@ def self_test() -> None:
         max_activated_quotes_without_progress=100,
     )
     assert still_observing["decision"] == "OBSERVE"
+    exposure_events = [
+        {
+            "routeId": "a-b",
+            "quoteId": "q1",
+            "at": 2_000,
+            "type": "quote_activated",
+        },
+        {
+            "routeId": "a-b",
+            "quoteId": "q1",
+            "at": 32_000,
+            "type": "quote_expired",
+        },
+        {
+            "routeId": "a-b",
+            "quoteId": "q2",
+            "at": 40_000,
+            "type": "quote_activated",
+        },
+        {
+            "routeId": "a-b",
+            "quoteId": "q2",
+            "at": 70_000,
+            "type": "edge_cancelled",
+        },
+    ]
+    exposure_evidence = execution_evidence(
+        exposure_events,
+        route_id="a-b",
+        observation_started_at_ms=1_000,
+    )
+    assert exposure_evidence[
+        "activatedExposureSinceLastProgressMs"
+    ] == 60_000
+    exposure_no_go = evaluate(
+        [],
+        route_id="a-b",
+        notional_usd=100,
+        min_samples=30,
+        min_profit_factor=1.2,
+        max_drawdown_bps=10,
+        independence_ms=60_000,
+        execution=exposure_evidence,
+        max_activated_exposure_without_progress_ms=60_000,
+    )
+    assert exposure_no_go["decision"] == "NO_GO"
+    assert "active quote exposure 1.0m" in (
+        exposure_no_go["noGoReasons"][-1]
+    )
+    reset_exposure_evidence = execution_evidence(
+        exposure_events + [
+            {
+                "routeId": "a-b",
+                "quoteId": "q3",
+                "at": 80_000,
+                "type": "quote_activated",
+            },
+            {
+                "routeId": "a-b",
+                "quoteId": "q3",
+                "at": 90_000,
+                "type": "queue_progress",
+            },
+            {
+                "routeId": "a-b",
+                "quoteId": "q3",
+                "at": 105_000,
+                "type": "quote_expired",
+            },
+            {
+                "routeId": "a-b",
+                "quoteId": "dangling",
+                "at": 110_000,
+                "type": "quote_activated",
+            },
+        ],
+        route_id="a-b",
+        observation_started_at_ms=1_000,
+    )
+    assert reset_exposure_evidence[
+        "activatedExposureSinceLastProgressMs"
+    ] == 15_000
     stalled_again_events = events + [{
         "routeId": "a-b",
         "at": 3_000,
@@ -849,6 +978,14 @@ def main() -> None:
         )),
     )
     parser.add_argument(
+        "--max-activated-exposure-without-progress-ms",
+        type=int,
+        default=int(os.getenv(
+            "VENUE_ARB_GATE_MAX_ACTIVATED_EXPOSURE_WITHOUT_PROGRESS_MS",
+            "0",
+        )),
+    )
+    parser.add_argument(
         "--require-trade-through-fills",
         action="store_true",
         default=os.getenv(
@@ -916,6 +1053,10 @@ def main() -> None:
         max_activated_quotes_without_progress=max(
             0,
             args.max_activated_quotes_without_progress,
+        ),
+        max_activated_exposure_without_progress_ms=max(
+            0,
+            args.max_activated_exposure_without_progress_ms,
         ),
         max_technical_failures=max(0, args.max_technical_failures),
         require_trade_through_fills=args.require_trade_through_fills,

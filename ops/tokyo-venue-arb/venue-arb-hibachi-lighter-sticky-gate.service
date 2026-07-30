@@ -17,9 +17,9 @@ Environment=VENUE_ARB_GATE_MIN_SAMPLES=30
 Environment=VENUE_ARB_GATE_MIN_PROFIT_FACTOR=1.2
 Environment=VENUE_ARB_GATE_MAX_DRAWDOWN_BPS=50
 Environment=VENUE_ARB_GATE_INDEPENDENCE_MS=60000
-# Match the baseline's nominal 100 × 15s maximum quote exposure:
-# 25 sticky quotes × 60s = the same 25 minutes without queue progress.
-Environment=VENUE_ARB_GATE_MAX_ACTIVATED_QUOTES_WITHOUT_PROGRESS=25
+# Stop after 25 completed active quote-minutes without any queue progress.
+Environment=VENUE_ARB_GATE_MAX_ACTIVATED_QUOTES_WITHOUT_PROGRESS=0
+Environment=VENUE_ARB_GATE_MAX_ACTIVATED_EXPOSURE_WITHOUT_PROGRESS_MS=1500000
 Environment=VENUE_ARB_GATE_REQUIRE_TRADE_THROUGH_FILLS=false
 ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-shadow-gate.py
 NoNewPrivileges=true
