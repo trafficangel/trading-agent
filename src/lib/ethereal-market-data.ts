@@ -195,22 +195,28 @@ export function parseEtherealWsTrades(
   if (!payload || typeof payload !== 'object') return [];
   const message = payload as {
     e?: unknown;
+    t?: unknown;
     data?: {
       s?: unknown;
       t?: unknown;
       d?: unknown;
+      fills?: unknown;
     };
   };
+  const rows = Array.isArray(message.data?.d)
+    ? message.data.d
+    : message.data?.fills;
   if (
     message.e !== 'TradeFill'
     || typeof message.data?.s !== 'string'
     || !message.data.s.endsWith('USD')
-    || !Array.isArray(message.data.d)
+    || !Array.isArray(rows)
   ) return [];
   const coin = message.data.s.slice(0, -'USD'.length);
-  const tradeAt = finitePositive(message.data.t);
+  const tradeAt = finitePositive(message.data.t)
+    ?? finitePositive(message.t);
   if (tradeAt == null) return [];
-  return message.data.d.flatMap((raw): EtherealMakerTrade[] => {
+  return rows.flatMap((raw): EtherealMakerTrade[] => {
     if (!raw || typeof raw !== 'object') return [];
     const row = raw as {
       id?: unknown;

@@ -100,4 +100,27 @@ describe('Ethereal market data', () => {
       tradeAt: 1_785_366_529_318,
     }]);
   });
+
+  it('accepts the alternate documented fills payload and server time', () => {
+    expect(parseEtherealWsTrades({
+      e: 'TradeFill',
+      t: 1_785_366_529_419,
+      data: {
+        s: 'PUMPUSD',
+        fills: [{
+          id: 'trade-3',
+          px: '0.00191',
+          sz: '17000',
+          sd: 1,
+        }],
+      },
+    })).toEqual([{
+      id: 'PUMP:trade-3',
+      coin: 'PUMP',
+      side: 'SELL',
+      price: 0.00191,
+      size: 17_000,
+      tradeAt: 1_785_366_529_419,
+    }]);
+  });
 });
