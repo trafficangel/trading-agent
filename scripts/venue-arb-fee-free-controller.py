@@ -18,11 +18,17 @@ EXTENDED_GATE_TIMER = "venue-arb-extended-lighter-maker-gate.timer"
 GRVT_GATE_TIMER = "venue-arb-grvt-lighter-maker-gate.timer"
 HIBACHI_SHADOW_SERVICE = "venue-arb-hibachi-lighter-shadow.service"
 HIBACHI_GATE_TIMER = "venue-arb-hibachi-lighter-maker-gate.timer"
+HIBACHI_CAPACITY_GATE_TIMER = (
+    "venue-arb-hibachi-lighter-capacity-gate.timer"
+)
 HIBACHI_STICKY_SHADOW_SERVICE = (
     "venue-arb-hibachi-lighter-sticky-shadow.service"
 )
 HIBACHI_STICKY_GATE_TIMER = (
     "venue-arb-hibachi-lighter-sticky-gate.timer"
+)
+HIBACHI_STICKY_CAPACITY_GATE_TIMER = (
+    "venue-arb-hibachi-lighter-sticky-capacity-gate.timer"
 )
 COINBASE_SHADOW_SERVICE = "venue-arb-coinbase-lighter-shadow.service"
 COINBASE_GATE_TIMER = "venue-arb-coinbase-lighter-maker-gate.timer"
@@ -63,15 +69,18 @@ def stop_plan(
     grvt_disabled: bool = False,
     sticky_gate: dict[str, Any] | None = None,
     sticky_enabled: bool = False,
+    coinbase_disabled: bool = False,
+    ethereal_disabled: bool = False,
+    hotstuff_disabled: bool = False,
 ) -> dict[str, Any]:
     aster_no_go = is_no_go(aster_gate)
     extended_no_go = is_no_go(extended_gate)
     grvt_no_go = grvt_disabled or is_no_go(grvt_gate)
     hibachi_no_go = is_no_go(hibachi_gate)
     sticky_no_go = not sticky_enabled or is_no_go(sticky_gate)
-    coinbase_no_go = is_no_go(coinbase_gate)
-    ethereal_no_go = is_no_go(ethereal_gate)
-    hotstuff_no_go = is_no_go(hotstuff_gate)
+    coinbase_no_go = coinbase_disabled or is_no_go(coinbase_gate)
+    ethereal_no_go = ethereal_disabled or is_no_go(ethereal_gate)
+    hotstuff_no_go = hotstuff_disabled or is_no_go(hotstuff_gate)
     all_no_go = (
         aster_no_go
         and extended_no_go
@@ -97,16 +106,26 @@ def stop_plan(
         stop_units.append(COMBINED_SHADOW_SERVICE)
         disable_units.append(COMBINED_SHADOW_SERVICE)
     if hibachi_no_go:
-        stop_units.extend([HIBACHI_SHADOW_SERVICE, HIBACHI_GATE_TIMER])
-        disable_units.extend([HIBACHI_SHADOW_SERVICE, HIBACHI_GATE_TIMER])
+        stop_units.extend([
+            HIBACHI_SHADOW_SERVICE,
+            HIBACHI_GATE_TIMER,
+            HIBACHI_CAPACITY_GATE_TIMER,
+        ])
+        disable_units.extend([
+            HIBACHI_SHADOW_SERVICE,
+            HIBACHI_GATE_TIMER,
+            HIBACHI_CAPACITY_GATE_TIMER,
+        ])
     if sticky_enabled and sticky_no_go:
         stop_units.extend([
             HIBACHI_STICKY_SHADOW_SERVICE,
             HIBACHI_STICKY_GATE_TIMER,
+            HIBACHI_STICKY_CAPACITY_GATE_TIMER,
         ])
         disable_units.extend([
             HIBACHI_STICKY_SHADOW_SERVICE,
             HIBACHI_STICKY_GATE_TIMER,
+            HIBACHI_STICKY_CAPACITY_GATE_TIMER,
         ])
     if coinbase_no_go:
         stop_units.extend([COINBASE_SHADOW_SERVICE, COINBASE_GATE_TIMER])
@@ -129,8 +148,11 @@ def stop_plan(
         "stickyNoGo": sticky_no_go,
         "stickyEnabled": sticky_enabled,
         "coinbaseNoGo": coinbase_no_go,
+        "coinbaseDisabled": coinbase_disabled,
         "etherealNoGo": ethereal_no_go,
+        "etherealDisabled": ethereal_disabled,
         "hotstuffNoGo": hotstuff_no_go,
+        "hotstuffDisabled": hotstuff_disabled,
         "allNoGo": all_no_go,
         "stopUnits": stop_units,
         "disableUnits": disable_units,
@@ -227,6 +249,7 @@ def self_test() -> None:
     assert hibachi["stopUnits"] == [
         HIBACHI_SHADOW_SERVICE,
         HIBACHI_GATE_TIMER,
+        HIBACHI_CAPACITY_GATE_TIMER,
     ]
     sticky = stop_plan(
         observe,
@@ -242,7 +265,31 @@ def self_test() -> None:
     assert sticky["stopUnits"] == [
         HIBACHI_STICKY_SHADOW_SERVICE,
         HIBACHI_STICKY_GATE_TIMER,
+        HIBACHI_STICKY_CAPACITY_GATE_TIMER,
     ]
+    disabled_legacy = stop_plan(
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        coinbase_disabled=True,
+        ethereal_disabled=True,
+        hotstuff_disabled=True,
+    )
+    assert disabled_legacy["coinbaseNoGo"] is True
+    assert disabled_legacy["etherealNoGo"] is True
+    assert disabled_legacy["hotstuffNoGo"] is True
+    assert set(disabled_legacy["stopUnits"]) == {
+        COINBASE_SHADOW_SERVICE,
+        COINBASE_GATE_TIMER,
+        ETHEREAL_SHADOW_SERVICE,
+        ETHEREAL_GATE_TIMER,
+        HOTSTUFF_SHADOW_SERVICE,
+        HOTSTUFF_GATE_TIMER,
+    }
     coinbase = stop_plan(
         observe, observe, observe, observe, no_go, observe, observe
     )
@@ -264,12 +311,23 @@ def self_test() -> None:
         HOTSTUFF_SHADOW_SERVICE,
         HOTSTUFF_GATE_TIMER,
     ]
-    all_failed = stop_plan(no_go, no_go, no_go, no_go, no_go, no_go, no_go)
+    all_failed = stop_plan(
+        no_go,
+        no_go,
+        no_go,
+        no_go,
+        no_go,
+        no_go,
+        no_go,
+        sticky_gate=no_go,
+        sticky_enabled=True,
+    )
     assert all_failed["allNoGo"] is True
     assert set(all_failed["stopUnits"]) == {
         ASTER_SHADOW_SERVICE,
         COMBINED_SHADOW_SERVICE,
         HIBACHI_SHADOW_SERVICE,
+        HIBACHI_STICKY_SHADOW_SERVICE,
         COINBASE_SHADOW_SERVICE,
         ETHEREAL_SHADOW_SERVICE,
         HOTSTUFF_SHADOW_SERVICE,
@@ -277,6 +335,9 @@ def self_test() -> None:
         EXTENDED_GATE_TIMER,
         GRVT_GATE_TIMER,
         HIBACHI_GATE_TIMER,
+        HIBACHI_CAPACITY_GATE_TIMER,
+        HIBACHI_STICKY_GATE_TIMER,
+        HIBACHI_STICKY_CAPACITY_GATE_TIMER,
         COINBASE_GATE_TIMER,
         ETHEREAL_GATE_TIMER,
         HOTSTUFF_GATE_TIMER,
@@ -382,6 +443,30 @@ def main() -> None:
             "",
         ).strip().lower() in {"1", "true", "yes", "on"},
     )
+    parser.add_argument(
+        "--coinbase-disabled",
+        action="store_true",
+        default=os.getenv(
+            "VENUE_ARB_CONTROLLER_COINBASE_DISABLED",
+            "",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+    )
+    parser.add_argument(
+        "--ethereal-disabled",
+        action="store_true",
+        default=os.getenv(
+            "VENUE_ARB_CONTROLLER_ETHEREAL_DISABLED",
+            "",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+    )
+    parser.add_argument(
+        "--hotstuff-disabled",
+        action="store_true",
+        default=os.getenv(
+            "VENUE_ARB_CONTROLLER_HOTSTUFF_DISABLED",
+            "",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+    )
     args = parser.parse_args()
     if args.self_test:
         self_test()
@@ -408,6 +493,9 @@ def main() -> None:
         grvt_disabled=args.grvt_disabled,
         sticky_gate=gates["sticky"],
         sticky_enabled=args.sticky_enabled,
+        coinbase_disabled=args.coinbase_disabled,
+        ethereal_disabled=args.ethereal_disabled,
+        hotstuff_disabled=args.hotstuff_disabled,
     )
     actions: list[dict[str, Any]] = []
     for unit in plan["stopUnits"]:
