@@ -63,26 +63,28 @@ def stop_plan(
     stop_units: list[str] = []
     disable_units: list[str] = []
     if aster_no_go:
-        stop_units.append(ASTER_SHADOW_SERVICE)
+        stop_units.extend([ASTER_SHADOW_SERVICE, ASTER_GATE_TIMER])
         disable_units.extend([ASTER_SHADOW_SERVICE, ASTER_GATE_TIMER])
+    if extended_no_go:
+        stop_units.append(EXTENDED_GATE_TIMER)
+        disable_units.append(EXTENDED_GATE_TIMER)
+    if grvt_no_go:
+        stop_units.append(GRVT_GATE_TIMER)
+        disable_units.append(GRVT_GATE_TIMER)
     if extended_no_go and grvt_no_go:
         stop_units.append(COMBINED_SHADOW_SERVICE)
-        disable_units.extend([
-            COMBINED_SHADOW_SERVICE,
-            EXTENDED_GATE_TIMER,
-            GRVT_GATE_TIMER,
-        ])
+        disable_units.append(COMBINED_SHADOW_SERVICE)
     if hibachi_no_go:
-        stop_units.append(HIBACHI_SHADOW_SERVICE)
+        stop_units.extend([HIBACHI_SHADOW_SERVICE, HIBACHI_GATE_TIMER])
         disable_units.extend([HIBACHI_SHADOW_SERVICE, HIBACHI_GATE_TIMER])
     if coinbase_no_go:
-        stop_units.append(COINBASE_SHADOW_SERVICE)
+        stop_units.extend([COINBASE_SHADOW_SERVICE, COINBASE_GATE_TIMER])
         disable_units.extend([COINBASE_SHADOW_SERVICE, COINBASE_GATE_TIMER])
     if ethereal_no_go:
-        stop_units.append(ETHEREAL_SHADOW_SERVICE)
+        stop_units.extend([ETHEREAL_SHADOW_SERVICE, ETHEREAL_GATE_TIMER])
         disable_units.extend([ETHEREAL_SHADOW_SERVICE, ETHEREAL_GATE_TIMER])
     if hotstuff_no_go:
-        stop_units.append(HOTSTUFF_SHADOW_SERVICE)
+        stop_units.extend([HOTSTUFF_SHADOW_SERVICE, HOTSTUFF_GATE_TIMER])
         disable_units.extend([HOTSTUFF_SHADOW_SERVICE, HOTSTUFF_GATE_TIMER])
     return {
         "asterNoGo": aster_no_go,
@@ -147,25 +149,49 @@ def self_test() -> None:
         observe, observe, observe, observe, observe, observe, observe
     )["stopUnits"] == []
     aster = stop_plan(no_go, observe, observe, observe, observe, observe, observe)
-    assert aster["stopUnits"] == [ASTER_SHADOW_SERVICE]
+    assert aster["stopUnits"] == [ASTER_SHADOW_SERVICE, ASTER_GATE_TIMER]
+    extended_only = stop_plan(
+        observe, no_go, observe, observe, observe, observe, observe
+    )
+    assert extended_only["stopUnits"] == [EXTENDED_GATE_TIMER]
+    grvt_only = stop_plan(
+        observe, observe, no_go, observe, observe, observe, observe
+    )
+    assert grvt_only["stopUnits"] == [GRVT_GATE_TIMER]
     shared = stop_plan(observe, no_go, no_go, observe, observe, observe, observe)
-    assert shared["stopUnits"] == [COMBINED_SHADOW_SERVICE]
+    assert shared["stopUnits"] == [
+        EXTENDED_GATE_TIMER,
+        GRVT_GATE_TIMER,
+        COMBINED_SHADOW_SERVICE,
+    ]
     hibachi = stop_plan(
         observe, observe, observe, no_go, observe, observe, observe
     )
-    assert hibachi["stopUnits"] == [HIBACHI_SHADOW_SERVICE]
+    assert hibachi["stopUnits"] == [
+        HIBACHI_SHADOW_SERVICE,
+        HIBACHI_GATE_TIMER,
+    ]
     coinbase = stop_plan(
         observe, observe, observe, observe, no_go, observe, observe
     )
-    assert coinbase["stopUnits"] == [COINBASE_SHADOW_SERVICE]
+    assert coinbase["stopUnits"] == [
+        COINBASE_SHADOW_SERVICE,
+        COINBASE_GATE_TIMER,
+    ]
     ethereal = stop_plan(
         observe, observe, observe, observe, observe, no_go, observe
     )
-    assert ethereal["stopUnits"] == [ETHEREAL_SHADOW_SERVICE]
+    assert ethereal["stopUnits"] == [
+        ETHEREAL_SHADOW_SERVICE,
+        ETHEREAL_GATE_TIMER,
+    ]
     hotstuff = stop_plan(
         observe, observe, observe, observe, observe, observe, no_go
     )
-    assert hotstuff["stopUnits"] == [HOTSTUFF_SHADOW_SERVICE]
+    assert hotstuff["stopUnits"] == [
+        HOTSTUFF_SHADOW_SERVICE,
+        HOTSTUFF_GATE_TIMER,
+    ]
     all_failed = stop_plan(no_go, no_go, no_go, no_go, no_go, no_go, no_go)
     assert all_failed["allNoGo"] is True
     assert set(all_failed["stopUnits"]) == {
@@ -175,6 +201,13 @@ def self_test() -> None:
         COINBASE_SHADOW_SERVICE,
         ETHEREAL_SHADOW_SERVICE,
         HOTSTUFF_SHADOW_SERVICE,
+        ASTER_GATE_TIMER,
+        EXTENDED_GATE_TIMER,
+        GRVT_GATE_TIMER,
+        HIBACHI_GATE_TIMER,
+        COINBASE_GATE_TIMER,
+        ETHEREAL_GATE_TIMER,
+        HOTSTUFF_GATE_TIMER,
     }
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "controller.json"
