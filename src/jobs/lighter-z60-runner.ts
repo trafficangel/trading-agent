@@ -101,7 +101,9 @@ function aggregateCompleteFiveMinuteBars(
 
 async function fetchBars(latestBarTime: number): Promise<Z60Bar[]> {
   const start = latestBarTime - (HISTORY_BARS - 1) * BAR_MS;
-  const end = latestBarTime + 4 * MINUTE_MS;
+  // Lighter treats end_timestamp as exclusive, so request the boundary after
+  // the fifth one-minute candle rather than the final candle's own timestamp.
+  const end = latestBarTime + BAR_MS;
   const url = new URL('https://mainnet.zklighter.elliot.ai/api/v1/candles');
   url.searchParams.set('market_id', String(MARKET_ID));
   url.searchParams.set('resolution', '1m');
