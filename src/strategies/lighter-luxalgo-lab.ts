@@ -601,6 +601,7 @@ type LiveMetrics = {
   secondHalfUsd: number;
   maxDrawdownUsd: number;
   maxDrawdownPct: number;
+  currentDrawdownUsd: number;
 };
 
 type LiveTradeCounts = {
@@ -1282,7 +1283,16 @@ function closedLiveTrades(): LiveTradeRow[] {
     ORDER BY real.closed_at,real.id`).all();
 }
 
-function liveTradeCounts(): LiveTradeCounts {
+function liveTradeCounts(strategyId: string | null = null): LiveTradeCounts {
+  if (strategyId) {
+    return db.prepare<[string], LiveTradeCounts>(`
+      SELECT
+        COALESCE(SUM(CASE WHEN status='closed' THEN 1 ELSE 0 END),0) closed,
+        COALESCE(SUM(CASE WHEN status IN ('opening','open','closing') THEN 1 ELSE 0 END),0) open,
+        COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) errors
+      FROM lighter_lux_live_trades
+      WHERE strategy_id=?`).get(strategyId) ?? { closed: 0, open: 0, errors: 0 };
+  }
   return db.prepare<[], LiveTradeCounts>(`
     SELECT
       COALESCE(SUM(CASE WHEN status='closed' THEN 1 ELSE 0 END),0) closed,
@@ -1291,7 +1301,18 @@ function liveTradeCounts(): LiveTradeCounts {
     FROM lighter_lux_live_trades`).get() ?? { closed: 0, open: 0, errors: 0 };
 }
 
-function liveDecisionCounts(): LiveDecisionCounts {
+function liveDecisionCounts(strategyId: string | null = null): LiveDecisionCounts {
+  if (strategyId) {
+    return db.prepare<[string], LiveDecisionCounts>(`
+      SELECT
+        COUNT(*) total,
+        COALESCE(SUM(CASE WHEN decision.decision='error' THEN 1 ELSE 0 END),0) errors,
+        COALESCE(SUM(CASE WHEN decision.decision='skip' THEN 1 ELSE 0 END),0) skipped
+      FROM lighter_lux_live_decisions decision
+      JOIN lighter_lux_signals signal ON signal.id=decision.signal_id
+      WHERE signal.strategy_id=?`).get(strategyId)
+      ?? { total: 0, errors: 0, skipped: 0 };
+  }
   return db.prepare<[], LiveDecisionCounts>(`
     SELECT
       COUNT(*) total,
@@ -1343,11 +1364,27 @@ function liveMetrics(rows: LiveTradeRow[]): LiveMetrics {
     secondHalfUsd: pnl.slice(split).reduce((sum, value) => sum + value, 0),
     maxDrawdownUsd,
     maxDrawdownPct,
+    currentDrawdownUsd: peak - equity,
   };
 }
 
-function liveExecutionComparison(): ExecutionComparison {
-  const rows = db.prepare<[], {
+function liveExecutionComparison(
+  strategyId: string | null = null,
+): ExecutionComparison {
+  const rows = strategyId
+    ? db.prepare<[string], {
+        shadow_pct: number;
+        real_pct: number;
+      }>(`
+        SELECT shadow.net_pnl_pct shadow_pct,real.net_pnl_pct real_pct
+        FROM lighter_lux_live_trades real
+        JOIN lighter_lux_trades shadow
+          ON shadow.entry_signal_id=real.entry_signal_id
+        WHERE real.status='closed' AND real.net_pnl_pct IS NOT NULL
+          AND shadow.closed_at IS NOT NULL AND shadow.net_pnl_pct IS NOT NULL
+          AND real.strategy_id=?
+        ORDER BY real.closed_at,real.id`).all(strategyId)
+    : db.prepare<[], {
     shadow_pct: number;
     real_pct: number;
   }>(`
@@ -1398,8 +1435,21 @@ function liveLatencyMetrics(rows: LiveTradeRow[]): LatencyMetrics {
   };
 }
 
-function cumulativePnlSeries(): { shadow: PnlPoint[]; live: PnlPoint[] } {
-  const shadowRows = db.prepare<string[], {
+function cumulativePnlSeries(
+  strategyId: string | null = null,
+): { shadow: PnlPoint[]; live: PnlPoint[] } {
+  const shadowRows = strategyId
+    ? db.prepare<[string], {
+        closed_at: number;
+        net_pnl_pct: number;
+        notional_usd: number;
+      }>(`
+        SELECT closed_at,net_pnl_pct,notional_usd
+        FROM lighter_lux_trades
+        WHERE strategy_id=?
+          AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
+        ORDER BY closed_at,id`).all(strategyId)
+    : db.prepare<string[], {
     closed_at: number;
     net_pnl_pct: number;
     notional_usd: number;
@@ -1409,7 +1459,18 @@ function cumulativePnlSeries(): { shadow: PnlPoint[]; live: PnlPoint[] } {
     WHERE strategy_id IN (${SQL_MARKS})
       AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
     ORDER BY closed_at,id`).all(...STRATEGY_IDS);
-  const liveRows = db.prepare<[], {
+  const liveRows = strategyId
+    ? db.prepare<[string], {
+        closed_at: number;
+        net_pnl_usd: number;
+        net_pnl_pct: number;
+      }>(`
+        SELECT closed_at,net_pnl_usd,net_pnl_pct
+        FROM lighter_lux_live_trades
+        WHERE strategy_id=? AND status='closed' AND closed_at IS NOT NULL
+          AND net_pnl_usd IS NOT NULL AND net_pnl_pct IS NOT NULL
+        ORDER BY closed_at,id`).all(strategyId)
+    : db.prepare<[], {
     closed_at: number;
     net_pnl_usd: number;
     net_pnl_pct: number;
@@ -1665,8 +1726,11 @@ export async function lighterZ60Hero(lang: Lang): Promise<string> {
   </a>`;
 }
 
-function strategyRows(lang: Lang): string {
-  return STRATEGIES.map((spec) => {
+function strategyRows(
+  lang: Lang,
+  specs: readonly StrategySpec[] = STRATEGIES,
+): string {
+  return specs.map((spec) => {
     const s = summary(spec);
     const g = gate(s, lang);
     const wr = s.closed ? s.wins / s.closed * 100 : null;
@@ -1921,8 +1985,9 @@ function pnlChart(
   lang: Lang,
   dataset: PortfolioDataset,
   unit: ChartUnit,
+  strategyId: string | null = null,
 ): string {
-  const series = cumulativePnlSeries();
+  const series = cumulativePnlSeries(strategyId);
   const points = dataset === 'shadow' ? series.shadow : series.live;
   const netUsd = points.at(-1)?.pnlUsd ?? 0;
   const netPct = points.at(-1)?.pnlPct ?? 0;
@@ -2007,8 +2072,9 @@ async function render(
     chartUnit: ChartUnit;
   },
 ): Promise<string> {
-  const s = summary();
   const strategyId = requested.strategy?.id ?? null;
+  const scopeSpecs = requested.strategy ? [requested.strategy] : [...STRATEGIES];
+  const s = summary(requested.strategy ?? undefined);
   const signalsTotal = signalTotal(strategyId);
   const tradesTotal = tradeTotal(strategyId);
   const signalsPage = Math.min(
@@ -2031,13 +2097,19 @@ async function render(
   );
   const liveState = lighterLiveState();
   const liveTrades = recentLiveTrades(30, strategyId);
-  const allLiveClosed = closedLiveTrades();
-  const liveCounts = liveTradeCounts();
-  const liveDecisions = liveDecisionCounts();
+  const allLiveClosed = strategyId
+    ? recentLiveTrades(10_000, strategyId)
+      .filter((row) => row.status === 'closed' && row.net_pnl_usd != null)
+      .reverse()
+    : closedLiveTrades();
+  const liveCounts = liveTradeCounts(strategyId);
+  const liveDecisions = liveDecisionCounts(strategyId);
   const liveSummary = liveMetrics(allLiveClosed);
-  const execution = liveExecutionComparison();
+  const execution = liveExecutionComparison(strategyId);
   const latencyMetrics = liveLatencyMetrics(liveTrades);
-  const liveStrategies = liveStrategyStates();
+  const liveStrategies = liveStrategyStates().filter(
+    (row) => strategyId == null || row.strategy_id === strategyId,
+  );
   const livePortfolioPaused = liveState?.portfolio_paused_at != null;
   const liveMonitor = liveState?.status === 'armed'
     && liveState.heartbeat_at != null
@@ -2067,7 +2139,7 @@ async function render(
     0,
   );
   const wr = s.closed ? s.wins / s.closed * 100 : 0;
-  const passed = STRATEGIES.filter((spec) => gate(summary(spec), lang).passed).length;
+  const passed = scopeSpecs.filter((spec) => gate(summary(spec), lang).passed).length;
   const liveEnabledStrategies = liveStrategies.filter((row) => row.enabled === 1).length;
   const livePassedStrategies = liveStrategies.filter(
     (row) => row.gate_status === 'passed',
@@ -2088,8 +2160,11 @@ async function render(
     chartUnit,
     anchor: 'pnl-chart',
   });
+  const scopeLabel = requested.strategy
+    ? `STRAT-${requested.strategy.code} · ${requested.strategy.asset}`
+    : ASSET_LABEL;
   const shadowCards = `
-    <div class="ll-card"><small>${t(lang, 'Стратегии / гейт', 'Strategies / gates')}</small><b>${STRATEGIES.length} / ${passed}</b><em>${ASSET_LABEL}</em></div>
+    <div class="ll-card"><small>${t(lang, 'Стратегии / гейт', 'Strategies / gates')}</small><b>${scopeSpecs.length} / ${passed}</b><em>${scopeLabel}</em></div>
     <div class="ll-card"><small>${t(lang, 'Сигналы / ошибки', 'Signals / errors')}</small><b>${s.signals} / ${s.captureErrors}</b><em>${t(lang, 'все выбранные alerts', 'all selected alerts')}</em></div>
     <div class="ll-card"><small>${t(lang, 'Закрыто / открыто', 'Closed / open')}</small><b>${s.closed} / ${s.open}</b><em>$${NOTIONAL_USD} ${t(lang, 'на позицию', 'per position')}</em></div>
     <div class="ll-card"><small>Shadow net PnL</small><b class="${pnlClass(s.netUsd)}">${signedUsd(s.netUsd)}</b><em>${signedPct(s.netPct)} · $${NOTIONAL_USD.toLocaleString('en-US')} ${t(lang, 'на сделку', 'per trade')}</em></div>
@@ -2112,14 +2187,71 @@ async function render(
     <div class="ll-card"><small>${t(lang, 'Средняя сделка', 'Average trade')}</small><b class="${pnlClass(realAverageUsd)}">${signedUsd(realAverageUsd)}</b><em>${signedPct(realAveragePct)}</em></div>
     <div class="ll-card"><small>Real max drawdown</small><b class="${liveSummary.maxDrawdownUsd > 0 ? 'neg' : ''}">−${signedUsd(liveSummary.maxDrawdownUsd).replace('+', '')}</b><em>−${liveSummary.maxDrawdownPct.toFixed(3)}%</em></div>
     <div class="ll-card"><small>Latency P50</small><b>${latency(latencyMetrics.signalToProtectedMs)}</b><em>S→O ${latency(latencyMetrics.signalToOrderMs)} · N ${latencyMetrics.measured}</em></div>`;
+  const scopeControl = requested.strategy
+    ? `<div class="ll-filter">
+        <a class="ll-back" style="margin:0" href="/lab/lighter-luxalgo">${t(lang, '← Общий портфель', '← Full portfolio')}</a>
+        <b>STRAT-${requested.strategy.code} · ${requested.strategy.asset} · ${esc(requested.strategy.name)}</b>
+        <small>${t(lang, 'На странице нет данных других стратегий.', 'This page contains no data from other strategies.')}</small>
+      </div>`
+    : `<form class="ll-filter" action="/lab/lighter-luxalgo" method="get">
+        <input type="hidden" name="dataset" value="${requested.dataset}">
+        <input type="hidden" name="chart" value="${requested.chartUnit}">
+        <label>${t(lang, 'Фильтр сигналов и сделок', 'Signals and trades filter')}
+          <select name="strategy" onchange="this.form.submit()">
+            <option value="">${t(lang, 'Все стратегии', 'All strategies')}</option>
+            ${STRATEGIES.map((spec) => `<option value="${esc(spec.id)}">STRAT-${spec.code} · ${spec.asset} · ${esc(spec.name)}</option>`).join('')}
+          </select>
+        </label>
+        <small>${t(lang, 'Показаны все стратегии портфеля', 'Showing all portfolio strategies')}</small>
+        <button type="submit">${t(lang, 'Показать', 'Apply')}</button>
+      </form>`;
+  const pageHeading = requested.strategy
+    ? `STRAT-${requested.strategy.code} · ${requested.strategy.name}`
+    : 'LuxAlgo → Lighter · единый портфель';
+  const pageBadge = requested.strategy
+    ? `STRAT-${requested.strategy.code} · ${requested.strategy.asset} · 5M · NATIVE LIGHTER`
+    : `STRAT-${CODE_LABEL} · PROSPECTIVE FORWARD`;
+  const pageDescription = requested.strategy
+    ? t(
+      lang,
+      'Только эта стратегия: нативные свечи Lighter, Shadow $1000 и изолированный Real-canary $100 с плечом 10×. Комиссия 0%; spread, slippage и funding учитываются.',
+      'This strategy only: native Lighter candles, $1,000 Shadow and an isolated $100 Real canary at 10× leverage. Trading fee is 0%; spread, slippage, and funding are included.',
+    )
+    : t(
+      lang,
+      `Все подходящие alerts собраны в одной системе и одной таблице. ${ASSET_LABEL} независимо снимают живой L2 Lighter без фиксированной задержки; каждая позиция моделируется на $1000. Комиссия Standard — 0%, spread, $1000 VWAP и funding учтены.`,
+      `All selected alerts share one system and one table. ${ASSET_LABEL} independently sample live Lighter L2 with no fixed delay; every position is modeled at $1,000. Standard trading fee is 0%, while spread, $1,000 VWAP, and funding are included.`,
+    );
+  const currentDrawdownUsd = requested.strategy
+    ? liveSummary.currentDrawdownUsd
+    : liveState?.current_drawdown_usd ?? 0;
+  const liveScopeText = requested.strategy
+    ? t(
+      lang,
+      'Real разрешён только для этой стратегии. Биржевой reduce-only stop 1.5% ставится сразу после входа. Новые входы блокируются при дневном убытке −$10, общей просадке −$15 или индивидуальной паузе.',
+      'Real trading is enabled only for this strategy. An exchange-native 1.5% reduce-only stop is placed immediately after entry. New entries are blocked at a −$10 daily loss, −$15 portfolio drawdown, or an individual strategy pause.',
+    )
+    : t(
+      lang,
+      'Разные стратегии могут торговаться одновременно. Биржевой reduce-only stop ставится сразу на каждую позицию. При ручной паузе новые входы запрещены, но существующие позиции продолжают контролироваться и закрываться. Новые входы также блокируются при дневном убытке −$10, совокупной просадке −$15 или индивидуальной паузе стратегии.',
+      'Different strategies may trade concurrently. An exchange-native reduce-only stop is placed immediately on every position. During a manual pause, new entries are blocked while existing positions remain monitored and can close. New entries are also blocked at a −$10 daily loss, −$15 cumulative drawdown, or an individual strategy pause.',
+    );
+  const liveStrategyDetails = requested.strategy
+    ? ''
+    : `<details class="ll-details"><summary>${t(lang, 'Live-статистика по каждой стратегии', 'Per-strategy live statistics')}</summary><div class="ll-table"><table class="ll-live-strategy">
+        <thead><tr><th>Strategy</th><th>Gate</th><th>N</th><th>Net</th><th>PF</th><th>½ / ½</th><th>DD $</th></tr></thead>
+        <tbody>${liveStrategyRows(liveStrategies, lang)}</tbody>
+      </table></div></details>`;
   return pageShell(
-    t(lang, 'LuxAlgo → Lighter — единый shadow-портфель', 'LuxAlgo → Lighter — unified shadow portfolio'),
+    requested.strategy
+      ? `STRAT-${requested.strategy.code} · ${requested.strategy.name}`
+      : t(lang, 'LuxAlgo → Lighter — единый shadow-портфель', 'LuxAlgo → Lighter — unified shadow portfolio'),
     `<style>${LIGHTER_LUXALGO_CSS}</style><div class="ll-wrap">
       <a class="ll-back" href="/lab">${t(lang, '← Лаборатория', '← Lab')}</a>
-      <div class="ll-head"><div><span class="ll-badge">STRAT-${CODE_LABEL} · PROSPECTIVE FORWARD</span>
-        <h1>LuxAlgo → Lighter · единый портфель</h1>
-        <p>${t(lang, `Все подходящие alerts собраны в одной системе и одной таблице. ${ASSET_LABEL} независимо снимают живой L2 Lighter без фиксированной задержки; каждая позиция моделируется на $1000. Комиссия Standard — 0%, spread, $1000 VWAP и funding учтены.`, `All selected alerts share one system and one table. ${ASSET_LABEL} independently sample live Lighter L2 with no fixed delay; every position is modeled at $1,000. Standard trading fee is 0%, while spread, $1,000 VWAP, and funding are included.`)}</p>
-      </div><div class="ll-engine ${s.feedLive ? 'live' : ''}"><i></i>${s.feedLive ? `Lighter L2 · ${STRATEGIES.length}/${STRATEGIES.length} live` : 'Lighter L2 · degraded'}</div></div>
+      <div class="ll-head"><div><span class="ll-badge">${pageBadge}</span>
+        <h1>${pageHeading}</h1>
+        <p>${pageDescription}</p>
+      </div><div class="ll-engine ${s.feedLive ? 'live' : ''}"><i></i>${s.feedLive ? `Lighter L2 · ${scopeSpecs.length}/${scopeSpecs.length} live` : 'Lighter L2 · degraded'}</div></div>
 
       <div class="ll-modebar" id="portfolio-view">
         <div><small>${t(lang, 'Показатели', 'Dataset')}</small><nav class="ll-tabs">
@@ -2136,28 +2268,15 @@ async function render(
         ${requested.dataset === 'shadow' ? shadowCards : realCards}
       </div>
 
-      ${pnlChart(lang, requested.dataset, requested.chartUnit)}
+      ${pnlChart(lang, requested.dataset, requested.chartUnit, strategyId)}
 
-      <form class="ll-filter" action="/lab/lighter-luxalgo" method="get">
-        <input type="hidden" name="dataset" value="${requested.dataset}">
-        <input type="hidden" name="chart" value="${requested.chartUnit}">
-        <label>${t(lang, 'Фильтр сигналов и сделок', 'Signals and trades filter')}
-          <select name="strategy" onchange="this.form.submit()">
-            <option value="">${t(lang, 'Все стратегии', 'All strategies')}</option>
-            ${STRATEGIES.map((spec) => `<option value="${esc(spec.id)}"${strategyId === spec.id ? ' selected' : ''}>STRAT-${spec.code} · ${spec.asset} · ${esc(spec.name)}</option>`).join('')}
-          </select>
-        </label>
-        <small>${requested.strategy
-          ? `${t(lang, 'Показаны только сигналы, Shadow и Real-сделки', 'Showing only signals, Shadow, and Real trades')} · STRAT-${requested.strategy.code} · ${requested.strategy.asset}`
-          : t(lang, 'Показаны все стратегии портфеля', 'Showing all portfolio strategies')}</small>
-        <button type="submit">${t(lang, 'Показать', 'Apply')}</button>
-      </form>
+      ${scopeControl}
 
-      <div class="ll-panel"><h2>${t(lang, 'Индивидуальная статистика стратегий', 'Individual strategy statistics')}</h2><div class="ll-table"><table class="ll-strategy-table">
+      <div class="ll-panel"><h2>${requested.strategy ? `${t(lang, 'Статистика стратегии', 'Strategy statistics')} · STRAT-${requested.strategy.code}` : t(lang, 'Индивидуальная статистика стратегий', 'Individual strategy statistics')}</h2><div class="ll-table"><table class="ll-strategy-table">
         <thead><tr><th>Strategy</th><th>L2</th><th>Backtest · N / WR / PF</th><th>Forward · closed / open</th><th>Net</th><th>DD / halves</th><th>Gate</th></tr></thead>
-        <tbody>${strategyRows(lang)}</tbody>
+        <tbody>${strategyRows(lang, scopeSpecs)}</tbody>
       </table></div>
-      <p class="ll-note">${t(lang, 'Индивидуальный гейт: ≥20 закрытых Lighter-forward сделок, net > 0%, PF ≥1.20, обе половины >0%. Общий результат — сумма PnL при $1000 на каждую одновременно открытую позицию.', 'Individual gate: ≥20 closed Lighter-forward trades, net > 0%, PF ≥1.20, and both halves >0%. Aggregate PnL sums results assuming $1,000 for every concurrently open position.')}</p></div>
+      <p class="ll-note">${t(lang, 'Гейт: ≥20 закрытых Lighter-forward сделок, net > 0%, PF ≥1.20, обе половины >0%.', 'Gate: ≥20 closed Lighter-forward trades, net > 0%, PF ≥1.20, and both halves >0%.')}</p></div>
 
       <div class="ll-panel" id="signal-history"><h2>${t(lang, 'История сигналов', 'Signal history')}</h2>
         <div class="ll-table"><table class="ll-signal-table">
@@ -2174,7 +2293,7 @@ async function render(
       ${pager({ lang, page: tradesPage, total: tradesTotal, pageSize: TRADE_PAGE_SIZE, signalsPage, tradesPage, target: 'trades', strategyId, dataset: requested.dataset, chartUnit: requested.chartUnit })}</div>
 
       <div class="ll-panel"><div class="ll-chart-head"><div><h2>${t(lang, 'Реальная торговля · canary', 'Live trading · canary')}</h2>
-        <p class="ll-note"><b class="${livePortfolioPaused || !liveMonitor || !liveEntryEnabled ? 'fail' : 'pass'}">${liveRunnerLabel} · $100 · 10x · ${t(lang, 'ПО ОДНОЙ НА МОНЕТУ', 'ONE PER MARKET')}.</b> ${t(lang, 'Разные стратегии могут торговаться одновременно. Биржевой reduce-only stop ставится сразу на каждую позицию. При ручной паузе новые входы запрещены, но существующие позиции продолжают контролироваться и закрываться. Новые входы также блокируются при дневном убытке −$10, совокупной просадке −$15 или индивидуальной паузе стратегии.', 'Different strategies may trade concurrently. An exchange-native reduce-only stop is placed immediately on every position. During a manual pause, new entries are blocked while existing positions remain monitored and can close. New entries are also blocked at a −$10 daily loss, −$15 cumulative drawdown, or an individual strategy pause.')}${liveState?.last_error ? ` <span class="neg">${esc(liveState.last_error)}</span>` : ''}${liveState?.portfolio_pause_reason ? ` <span class="neg">${esc(liveState.portfolio_pause_reason)}</span>` : ''}</p>
+        <p class="ll-note"><b class="${livePortfolioPaused || !liveMonitor || !liveEntryEnabled ? 'fail' : 'pass'}">${liveRunnerLabel} · $100 · 10x.</b> ${liveScopeText}${liveState?.last_error ? ` <span class="neg">${esc(liveState.last_error)}</span>` : ''}${liveState?.portfolio_pause_reason ? ` <span class="neg">${esc(liveState.portfolio_pause_reason)}</span>` : ''}</p>
         </div><span class="ll-badge ${liveGatePassed ? 'pass' : 'collect'}">${liveGatePassed ? t(lang, 'LIVE ГЕЙТ ПРОЙДЕН', 'LIVE GATE PASSED') : `${t(lang, 'LIVE ВАЛИДАЦИЯ', 'LIVE VALIDATION')} ${liveSummary.closed}/30`}</span></div>
         <div class="ll-live-grid">
           <div class="ll-live-metric"><small>${t(lang, 'Закрыто', 'Closed')}</small><b>${liveSummary.closed}/30</b></div>
@@ -2182,14 +2301,11 @@ async function render(
           <div class="ll-live-metric"><small>WR / PF</small><b>${liveWr == null ? '—' : `${liveWr.toFixed(0)}%`} / ${pfLabel(liveSummary.profitFactor)}</b></div>
           <div class="ll-live-metric"><small>${t(lang, 'Половины', 'Halves')}</small><b>${signedUsd(liveSummary.firstHalfUsd)} / ${signedUsd(liveSummary.secondHalfUsd)}</b></div>
           <div class="ll-live-metric"><small>Max drawdown</small><b class="${liveSummary.maxDrawdownUsd > 0 ? 'neg' : ''}">−$${liveSummary.maxDrawdownUsd.toFixed(2)} / $15</b></div>
-          <div class="ll-live-metric"><small>${t(lang, 'Текущая просадка', 'Current drawdown')}</small><b class="${(liveState?.current_drawdown_usd ?? 0) > 0 ? 'neg' : ''}">−$${(liveState?.current_drawdown_usd ?? 0).toFixed(2)}</b></div>
+          <div class="ll-live-metric"><small>${t(lang, 'Текущая просадка', 'Current drawdown')}</small><b class="${currentDrawdownUsd > 0 ? 'neg' : ''}">−$${currentDrawdownUsd.toFixed(2)}</b></div>
           <div class="ll-live-metric"><small>${t(lang, 'Real − shadow', 'Real − shadow')}</small><b class="${execution.avgGapPct == null ? '' : pnlClass(execution.avgGapPct)}">${execution.avgGapPct == null ? '—' : `${execution.avgGapPct > 0 ? '+' : execution.avgGapPct < 0 ? '−' : ''}${Math.abs(execution.avgGapPct).toFixed(4)} ${t(lang, 'п.п.', 'pp')}`}</b><em>${execution.matched ? `${signedPct(execution.realPct)} vs ${signedPct(execution.shadowPct)} · N ${execution.matched}` : t(lang, 'ждём закрытую пару', 'waiting for a closed pair')}</em></div>
           <div class="ll-live-metric"><small>Latency P50</small><b>${latency(latencyMetrics.signalToProtectedMs)}</b><em>S→O ${latency(latencyMetrics.signalToOrderMs)} · O→POS ${latency(latencyMetrics.orderToPositionMs)} · N ${latencyMetrics.measured}</em></div>
         </div>
-        <details class="ll-details"><summary>${t(lang, 'Live-статистика по каждой стратегии', 'Per-strategy live statistics')}</summary><div class="ll-table"><table class="ll-live-strategy">
-          <thead><tr><th>Strategy</th><th>Gate</th><th>N</th><th>Net</th><th>PF</th><th>½ / ½</th><th>DD $</th></tr></thead>
-          <tbody>${liveStrategyRows(liveStrategies, lang)}</tbody>
-        </table></div></details>
+        ${liveStrategyDetails}
         <div class="ll-table"><table class="ll-trades ll-live-trades">
           <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>${t(lang, 'Цена входа', 'Entry price')}</th><th>${t(lang, 'Стоп-лосс', 'Stop-loss')}</th><th>${t(lang, 'Цена выхода', 'Exit price')}</th><th>${t(lang, 'Статус', 'Status')}</th><th>Net after costs</th></tr></thead>
           <tbody>${liveTradeRows(liveTrades, lang)}</tbody>
