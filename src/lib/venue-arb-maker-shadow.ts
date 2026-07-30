@@ -1,6 +1,7 @@
 import {
   consumeMakerPrint,
   makerEntryEdgeBps,
+  makerQueueAtPrice,
   makerRoundTripAfterCosts,
   snapMakerPrice,
   type MakerQueueState,
@@ -533,9 +534,11 @@ export class GenericMakerShadow {
           >= this.config.entryEdgeBps - 1e-8
       ));
     return prices.flatMap((price) => {
-      const queueAhead = (
-        side === 'buy' ? maker.bids : maker.asks
-      ).get(price) ?? 0;
+      const queueAhead = makerQueueAtPrice(
+        side === 'buy' ? maker.bids : maker.asks,
+        price,
+        tick,
+      );
       if (queueAhead * price > this.config.maxQueueUsd) return [];
       const distanceBps = side === 'buy'
         ? Math.max(0, (bestBid / price - 1) * 10_000)
@@ -948,7 +951,11 @@ export class GenericMakerShadow {
       ? market.maker.bids
       : market.maker.asks;
     quote.queue = {
-      queueAhead: sameSide.get(quote.price) ?? 0,
+      queueAhead: makerQueueAtPrice(
+        sameSide,
+        quote.price,
+        priceTick(market.maker),
+      ),
       remaining: quote.queue.remaining,
       filled: false,
     };

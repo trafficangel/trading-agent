@@ -5,6 +5,7 @@ import {
   makerActivityTimestamp,
   makerAbortAfterCosts,
   makerEntryEdgeBps,
+  makerQueueAtPrice,
   makerRoundTripAfterCosts,
   snapMakerPrice,
 } from '../../src/lib/venue-arb-maker.js';
@@ -26,6 +27,17 @@ describe('venue arb maker shadow math', () => {
     expect(snapMakerPrice(46.351, 0.010000000000005116, 'ceil')).toBe(46.36);
     expect(snapMakerPrice(100.26, 0.25, 'floor')).toBe(100.25);
     expect(snapMakerPrice(100.26, 0.25, 'ceil')).toBe(100.5);
+  });
+
+  it('keeps displayed queue when the snapped price is float-equivalent', () => {
+    const levels = new Map([
+      [0.6907600000000001, 75],
+      [0.69076, 25],
+      [0.69077, 10],
+    ]);
+    expect(makerQueueAtPrice(levels, 0.69076, 0.00001)).toBe(100);
+    expect(makerQueueAtPrice(levels, 0.69077, 0.00001)).toBe(10);
+    expect(makerQueueAtPrice(levels, 0.690765, 0.00001)).toBe(0);
   });
 
   it('does not invent a maker fill before queue and own size trade', () => {

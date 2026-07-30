@@ -67,6 +67,7 @@ import {
   makerActivityTimestamp,
   makerAbortAfterCosts,
   makerEntryEdgeBps,
+  makerQueueAtPrice,
   makerRoundTripAfterCosts,
   snapMakerPrice,
   type MakerQueueState,
@@ -3841,7 +3842,7 @@ function makerEntryQuoteLevels(
         - EXECUTION_BUFFER_BPS >= MAKER_ENTRY_EDGE_BPS - 1e-8
     ))
     .flatMap((price) => {
-      const queueAhead = sameSide.get(price) ?? 0;
+      const queueAhead = makerQueueAtPrice(sameSide, price, tick);
       if (queueAhead * price > MAKER_MAX_QUEUE_USD) return [];
       const distanceBps = side === 'buy'
         ? Math.max(0, (bestBid / price - 1) * 10_000)
@@ -3911,7 +3912,7 @@ function makerExitQuoteLevel(
   const sameSide = side === 'buy'
     ? rawExtended.bids
     : rawExtended.asks;
-  return [quotePrice, sameSide.get(quotePrice) ?? 0];
+  return [quotePrice, makerQueueAtPrice(sameSide, quotePrice, tick)];
 }
 
 function makerEntryQuoteCandidate(now: number): MakerQuote | null {
@@ -4081,7 +4082,11 @@ function activateMakerQuote(now: number): void {
     ? rawExtended.bids
     : rawExtended.asks;
   quote.queue = {
-    queueAhead: sameSide.get(quote.price) ?? 0,
+    queueAhead: makerQueueAtPrice(
+      sameSide,
+      quote.price,
+      makerPriceTick(rawExtended),
+    ),
     remaining: quote.queue.remaining,
     filled: false,
   };

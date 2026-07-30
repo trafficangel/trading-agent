@@ -454,6 +454,30 @@ describe('GenericMakerShadow', () => {
     expect(status.quote?.distanceBps).toBeGreaterThan(0);
   });
 
+  it('does not bypass the queue limit through float-equivalent prices', () => {
+    const engine = new GenericMakerShadow({
+      ...config,
+      maxQueueUsd: 50,
+    });
+    const snapshot: MakerShadowMarket = {
+      coin: 'SUI',
+      maker: {
+        bids: new Map([[0.6907500000000001, 100]]),
+        asks: new Map([[0.6907600000000001, 100]]),
+        exchangeAt: 3_100,
+        receivedAt: 3_100,
+      },
+      hedge: {
+        sellVwap: 0.68,
+        buyVwap: 0.69,
+        exchangeAt: 3_100,
+        receivedAt: 3_100,
+      },
+    };
+    engine.evaluate(3_100, [snapshot]);
+    expect((engine.status() as { quote?: unknown }).quote).toBeNull();
+  });
+
   it('prefers the most aggressive quote that still clears the net gate', () => {
     const engine = new GenericMakerShadow({
       ...config,

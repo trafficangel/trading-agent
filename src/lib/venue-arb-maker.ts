@@ -52,6 +52,27 @@ export function snapMakerPrice(
   return Number((units * normalizedTick).toFixed(decimals));
 }
 
+export function makerQueueAtPrice(
+  levels: ReadonlyMap<number, number>,
+  price: number,
+  tick?: number | null,
+): number {
+  if (!(price > 0)) return 0;
+  const floatingTolerance = Math.abs(price) * Number.EPSILON * 16;
+  const tolerance = tick != null && tick > 0
+    ? Math.max(tick * 1e-6, floatingTolerance)
+    : floatingTolerance;
+  let queueAhead = 0;
+  for (const [levelPrice, size] of levels) {
+    if (
+      Math.abs(levelPrice - price) <= tolerance
+      && Number.isFinite(size)
+      && size > 0
+    ) queueAhead += size;
+  }
+  return queueAhead;
+}
+
 export function consumeMakerPrint(
   state: MakerQueueState,
   makerSide: MakerSide,
