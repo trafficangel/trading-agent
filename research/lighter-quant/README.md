@@ -2,8 +2,9 @@
 
 Date: 2026-07-30
 
-Status: original shared-parameter families **rejected**; one later
-native-Lighter SOL 5m candidate admitted to **Shadow only**.
+Status: original shared-parameter families **rejected**; four later
+native-Lighter 5m variants are tracked in one consolidated portfolio, with new
+BNB/LTC candidates admitted to **Shadow only**.
 
 This research tested whether a simple, symmetric long/short candle strategy
 could produce a robust edge suitable for Lighter on 1-minute and 5-minute
@@ -86,11 +87,11 @@ short-horizon mark/index dislocation, and measured fill probability. If the
 work must stay inside LuxAlgo, continue only on 5-minute candidates and require
 verifiable long/short breakdown plus a fresh shadow gate before risking money.
 
-That continuation later produced one native-Lighter exception:
-`Lighter SOL Z60 Reclaim Dual`. Its exact rule and independent
-30/60/90/120/180-day results are documented in
-`docs/quant-indicator-validation-2026-07-30.md`. It is admitted only to
-prospective Shadow; the rejected families above remain rejected.
+That continuation later produced a small native-Lighter Z60 portfolio:
+two SOL variants plus two transfer candidates on BNB and LTC. Their exact
+rules and independent 30/60/90/120/180-day results are documented in
+`docs/quant-indicator-validation-2026-07-30.md`. New candidates are admitted
+only to prospective Shadow; the rejected families above remain rejected.
 
 ## LuxAlgo database follow-up
 
@@ -180,6 +181,18 @@ and is not allowlisted in the real executor.
 
 Pine reference:
 `research/lighter-quant/lighter-sol-z60-touch.pine`.
+
+The multi-symbol continuation also admitted:
+
+- `STRAT-032 / bnb-z60-touch`: Z60 ±3 touch, 417 trades, +60.86% after
+  0.02% execution stress and adverse funding, PF 1.51, both sides and every
+  30/60/90/120/180-day window positive.
+- `STRAT-033 / ltc-z60-touch`: Z60 ±2 touch, 968 trades, +107.39% after the
+  same stress, PF 1.37, both sides and all tested windows positive.
+
+Both run through the same completed-candle native runner and remain
+Shadow-only. BTC, ETH, ADA, AVAX, and WLD were not admitted because they failed
+at least one direction, recent-window, or adverse-cost stability check.
 
 Run on the VPS, where the historical kline cache is populated:
 

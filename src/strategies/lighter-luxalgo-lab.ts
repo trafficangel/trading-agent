@@ -96,6 +96,11 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // positive over 30/60/90/120/180-day windows and in both directions, but is
 // highly correlated with STRAT-030 and has a larger historical drawdown, so it
 // is prospective Shadow only and is deliberately absent from the real runner.
+// STRAT-032 and STRAT-033 apply the same completed-bar touch family to BNB and
+// LTC, using thresholds selected from broad profitable neighborhoods rather
+// than a single peak. Both stayed positive on 30/60/90/120/180-day windows,
+// in both directions and after 0.02% round-trip execution stress plus adverse
+// funding. They are native Shadow only; neither is allowlisted for real orders.
 // BCH, XLM, TRX and JUP candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
@@ -438,13 +443,62 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 23.84,
     },
   },
+  {
+    id: 'bnb-z60-touch',
+    code: '032',
+    name: 'Z60 · 3σ Touch · Mean Exit',
+    symbol: 'BNBUSDT',
+    asset: 'BNB',
+    marketId: 25,
+    stopPct: 1.5,
+    backtest: {
+      // Native Lighter completed 5m candles, next-bar execution, 0.02%
+      // round-trip execution stress and 0.00125%/hour adverse funding.
+      // Every 30/60/90/120/180-day window and both directions are positive.
+      period: '2026-02-01 → 2026-07-30',
+      trades: 417,
+      winRatePct: 69.3,
+      profitFactor: 1.51,
+      netPct: 60.86,
+      maxDrawdownPct: 9.76,
+    },
+  },
+  {
+    id: 'ltc-z60-touch',
+    code: '033',
+    name: 'Z60 · 2σ Touch · Mean Exit',
+    symbol: 'LTCUSDT',
+    asset: 'LTC',
+    marketId: 35,
+    stopPct: 1.5,
+    backtest: {
+      // Native Lighter completed 5m candles, next-bar execution, 0.02%
+      // round-trip execution stress and 0.00125%/hour adverse funding.
+      // Periods 50/60/70 and thresholds 1.75/2.0/2.25 all passed, reducing
+      // single-parameter selection risk.
+      period: '2026-02-01 → 2026-07-30',
+      trades: 968,
+      winRatePct: 69.5,
+      profitFactor: 1.37,
+      netPct: 107.39,
+      maxDrawdownPct: 27.57,
+    },
+  },
 ] as const;
 
 const STRATEGY_BY_ID = new Map(STRATEGIES.map((spec) => [spec.id, spec]));
 const STRATEGY_IDS = STRATEGIES.map((spec) => spec.id);
-const SQL_MARKS = STRATEGIES.map(() => '?').join(', ');
-const ASSET_LABEL = [...new Set(STRATEGIES.map((spec) => spec.asset))].join(' · ');
-const CODE_LABEL = STRATEGIES.map((spec) => spec.code).join(' · ');
+const NATIVE_STRATEGY_IDS = [
+  'sol-z60-reclaim',
+  'sol-z60-touch',
+  'bnb-z60-touch',
+  'ltc-z60-touch',
+] as const;
+const NATIVE_STRATEGIES = NATIVE_STRATEGY_IDS.map((id) => STRATEGY_BY_ID.get(id)!);
+const NATIVE_STRATEGY_ID_SET = new Set<string>(NATIVE_STRATEGY_IDS);
+const LUXALGO_STRATEGIES = STRATEGIES.filter(
+  (spec) => !NATIVE_STRATEGY_ID_SET.has(spec.id),
+);
 
 type FeedState = {
   connected: boolean;
@@ -1091,28 +1145,41 @@ function checkSafetyStops(): void {
   }
 }
 
-function rowsForSummary(spec?: StrategySpec): Array<{ net_pnl_pct: number; closed_at: number }> {
-  if (spec) {
-    return db.prepare<[string], { net_pnl_pct: number; closed_at: number }>(`
-      SELECT net_pnl_pct, closed_at FROM lighter_lux_trades
-      WHERE strategy_id = ? AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
-      ORDER BY closed_at, id`).all(spec.id);
-  }
-  return db.prepare<string[], { net_pnl_pct: number; closed_at: number }>(`
-    SELECT net_pnl_pct, closed_at FROM lighter_lux_trades
-    WHERE strategy_id IN (${SQL_MARKS})
-      AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
-    ORDER BY closed_at, id`).all(...STRATEGY_IDS);
+type StrategySpecScope = StrategySpec | readonly StrategySpec[] | undefined;
+type StrategyIdScope = string | readonly string[] | null;
+
+function specsForScope(scope: StrategySpecScope): readonly StrategySpec[] {
+  if (!scope) return STRATEGIES;
+  return Array.isArray(scope) ? scope : [scope as StrategySpec];
 }
 
-function summary(spec?: StrategySpec): Summary {
-  const where = spec ? 'strategy_id = ?' : `strategy_id IN (${SQL_MARKS})`;
-  const params = spec ? [spec.id] : STRATEGY_IDS;
+function idsForScope(scope: StrategyIdScope): readonly string[] {
+  if (!scope) return STRATEGY_IDS;
+  return typeof scope === 'string' ? [scope] : scope;
+}
+
+function sqlMarks(ids: readonly string[]): string {
+  return ids.map(() => '?').join(', ');
+}
+
+function rowsForSummary(scope?: StrategySpecScope): Array<{ net_pnl_pct: number; closed_at: number }> {
+  const ids = specsForScope(scope).map((spec) => spec.id);
+  return db.prepare<string[], { net_pnl_pct: number; closed_at: number }>(`
+    SELECT net_pnl_pct, closed_at FROM lighter_lux_trades
+    WHERE strategy_id IN (${sqlMarks(ids)})
+      AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
+    ORDER BY closed_at, id`).all(...ids);
+}
+
+function summary(scope?: StrategySpecScope): Summary {
+  const specs = specsForScope(scope);
+  const params = specs.map((spec) => spec.id);
+  const where = `strategy_id IN (${sqlMarks(params)})`;
   const signalCounts = db.prepare<string[], { total: number; errors: number }>(`
     SELECT COUNT(*) total,
       COALESCE(SUM(CASE WHEN capture_status = 'error' THEN 1 ELSE 0 END), 0) errors
     FROM lighter_lux_signals WHERE ${where}`).get(...params);
-  const trades = rowsForSummary(spec);
+  const trades = rowsForSummary(specs);
   const open = db.prepare<string[], { count: number }>(`
     SELECT COUNT(*) count FROM lighter_lux_trades
     WHERE ${where} AND closed_at IS NULL`).get(...params)?.count ?? 0;
@@ -1135,10 +1202,10 @@ function summary(spec?: StrategySpec): Summary {
     maxDrawdownPct = Math.max(maxDrawdownPct, peakPct - equityPct);
   }
 
-  const snapshots = (spec ? [spec] : STRATEGIES)
+  const snapshots = specs
     .map((item) => executionSnapshot(item))
     .filter((snap): snap is ExecutionSnapshot => !('error' in snap));
-  const feedLive = snapshots.length === (spec ? 1 : STRATEGIES.length);
+  const feedLive = snapshots.length === specs.length;
   const avg = (values: number[]): number | null =>
     values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 
@@ -1166,10 +1233,10 @@ function summary(spec?: StrategySpec): Summary {
 function recentSignals(
   limit: number,
   offset: number,
-  strategyId: string | null = null,
+  strategyScope: StrategyIdScope = null,
 ): SignalRow[] {
-  const where = strategyId ? 'signal.strategy_id = ?' : `signal.strategy_id IN (${SQL_MARKS})`;
-  const strategyParams = strategyId ? [strategyId] : STRATEGY_IDS;
+  const strategyParams = idsForScope(strategyScope);
+  const where = `signal.strategy_id IN (${sqlMarks(strategyParams)})`;
   return db.prepare<Array<string | number>, SignalRow>(`
     SELECT signal.id,signal.strategy_id,signal.symbol,signal.received_at,
            signal.captured_at,signal.action,signal.side,signal.source_price,
@@ -1204,9 +1271,9 @@ function recentSignals(
     LIMIT ? OFFSET ?`).all(...strategyParams, limit, offset);
 }
 
-function signalTotal(strategyId: string | null = null): number {
-  const where = strategyId ? 'strategy_id = ?' : `strategy_id IN (${SQL_MARKS})`;
-  const strategyParams = strategyId ? [strategyId] : STRATEGY_IDS;
+function signalTotal(strategyScope: StrategyIdScope = null): number {
+  const strategyParams = idsForScope(strategyScope);
+  const where = `strategy_id IN (${sqlMarks(strategyParams)})`;
   return db.prepare<string[], { total: number }>(`
     SELECT COUNT(*) total FROM lighter_lux_signals
     WHERE ${where}`).get(...strategyParams)?.total ?? 0;
@@ -1215,10 +1282,10 @@ function signalTotal(strategyId: string | null = null): number {
 function recentTrades(
   limit: number,
   offset: number,
-  strategyId: string | null = null,
+  strategyScope: StrategyIdScope = null,
 ): TradeRow[] {
-  const where = strategyId ? 'strategy_id = ?' : `strategy_id IN (${SQL_MARKS})`;
-  const strategyParams = strategyId ? [strategyId] : STRATEGY_IDS;
+  const strategyParams = idsForScope(strategyScope);
+  const where = `strategy_id IN (${sqlMarks(strategyParams)})`;
   const rows = db.prepare<string[], TradeRow>(`
     SELECT id, strategy_id, symbol, side, entry_signal_id, exit_signal_id,
            opened_at, closed_at, entry_price, entry_funding_pct_h,
@@ -1241,9 +1308,9 @@ function recentTrades(
   return rows.reverse().slice(offset, offset + limit);
 }
 
-function tradeTotal(strategyId: string | null = null): number {
-  const where = strategyId ? 'strategy_id = ?' : `strategy_id IN (${SQL_MARKS})`;
-  const strategyParams = strategyId ? [strategyId] : STRATEGY_IDS;
+function tradeTotal(strategyScope: StrategyIdScope = null): number {
+  const strategyParams = idsForScope(strategyScope);
+  const where = `strategy_id IN (${sqlMarks(strategyParams)})`;
   return db.prepare<string[], { total: number }>(`
     SELECT COUNT(*) total FROM lighter_lux_trades
     WHERE ${where}`).get(...strategyParams)?.total ?? 0;
@@ -1259,10 +1326,11 @@ function lighterLiveState(): LiveStateRow | null {
 
 function recentLiveTrades(
   limit = 30,
-  strategyId: string | null = null,
+  strategyScope: StrategyIdScope = null,
 ): LiveTradeRow[] {
-  const filter = strategyId ? 'WHERE real.strategy_id = ?' : '';
-  const params: Array<string | number> = strategyId ? [strategyId, limit] : [limit];
+  const strategyParams = idsForScope(strategyScope);
+  const filter = `WHERE real.strategy_id IN (${sqlMarks(strategyParams)})`;
+  const params: Array<string | number> = [...strategyParams, limit];
   return db.prepare<Array<string | number>, LiveTradeRow>(`
     SELECT real.id,real.strategy_id,real.symbol,real.side,real.entry_signal_id,
            real.exit_signal_id,real.opened_at,real.closed_at,
@@ -1286,66 +1354,29 @@ function recentLiveTrades(
     ORDER BY real.opened_at DESC,real.id DESC LIMIT ?`).all(...params);
 }
 
-function closedLiveTrades(): LiveTradeRow[] {
-  return db.prepare<[], LiveTradeRow>(`
-    SELECT real.id,real.strategy_id,real.symbol,real.side,real.entry_signal_id,
-           real.exit_signal_id,real.opened_at,real.closed_at,
-           real.requested_notional_usd,real.filled_notional_usd,
-           leverage,quantity,entry_price,stop_pct,stop_price,exit_price,
-           gross_pnl_usd,funding_pnl_usd,fee_usd,net_pnl_usd,net_pnl_pct,
-           close_reason,status,error,entry_reference_source,entry_reference_l2,
-           entry_slippage_pct,entry_book_age_ms,exit_reference_source,
-           exit_reference_l2,exit_slippage_pct,
-           entry_signal.received_at entry_signal_received_at,
-           entry_signal.captured_at entry_signal_captured_at,
-           exit_signal.received_at exit_signal_received_at,
-           entry_started_at,entry_order_sent_at,entry_order_accepted_at,
-           entry_position_seen_at,stop_order_sent_at,protected_at,
-           exit_order_sent_at,exit_order_accepted_at,exit_position_gone_at,
-           entry_fill_at,entry_fill_count,exit_fill_at,exit_fill_count
-    FROM lighter_lux_live_trades real
-    JOIN lighter_lux_signals entry_signal ON entry_signal.id=real.entry_signal_id
-    LEFT JOIN lighter_lux_signals exit_signal ON exit_signal.id=real.exit_signal_id
-    WHERE real.status='closed' AND real.net_pnl_usd IS NOT NULL
-    ORDER BY real.closed_at,real.id`).all();
-}
-
-function liveTradeCounts(strategyId: string | null = null): LiveTradeCounts {
-  if (strategyId) {
-    return db.prepare<[string], LiveTradeCounts>(`
-      SELECT
-        COALESCE(SUM(CASE WHEN status='closed' THEN 1 ELSE 0 END),0) closed,
-        COALESCE(SUM(CASE WHEN status IN ('opening','open','closing') THEN 1 ELSE 0 END),0) open,
-        COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) errors
-      FROM lighter_lux_live_trades
-      WHERE strategy_id=?`).get(strategyId) ?? { closed: 0, open: 0, errors: 0 };
-  }
-  return db.prepare<[], LiveTradeCounts>(`
+function liveTradeCounts(strategyScope: StrategyIdScope = null): LiveTradeCounts {
+  const strategyParams = idsForScope(strategyScope);
+  return db.prepare<string[], LiveTradeCounts>(`
     SELECT
       COALESCE(SUM(CASE WHEN status='closed' THEN 1 ELSE 0 END),0) closed,
       COALESCE(SUM(CASE WHEN status IN ('opening','open','closing') THEN 1 ELSE 0 END),0) open,
       COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) errors
-    FROM lighter_lux_live_trades`).get() ?? { closed: 0, open: 0, errors: 0 };
+    FROM lighter_lux_live_trades
+    WHERE strategy_id IN (${sqlMarks(strategyParams)})`).get(...strategyParams)
+    ?? { closed: 0, open: 0, errors: 0 };
 }
 
-function liveDecisionCounts(strategyId: string | null = null): LiveDecisionCounts {
-  if (strategyId) {
-    return db.prepare<[string], LiveDecisionCounts>(`
-      SELECT
-        COUNT(*) total,
-        COALESCE(SUM(CASE WHEN decision.decision='error' THEN 1 ELSE 0 END),0) errors,
-        COALESCE(SUM(CASE WHEN decision.decision='skip' THEN 1 ELSE 0 END),0) skipped
-      FROM lighter_lux_live_decisions decision
-      JOIN lighter_lux_signals signal ON signal.id=decision.signal_id
-      WHERE signal.strategy_id=?`).get(strategyId)
-      ?? { total: 0, errors: 0, skipped: 0 };
-  }
-  return db.prepare<[], LiveDecisionCounts>(`
+function liveDecisionCounts(strategyScope: StrategyIdScope = null): LiveDecisionCounts {
+  const strategyParams = idsForScope(strategyScope);
+  return db.prepare<string[], LiveDecisionCounts>(`
     SELECT
       COUNT(*) total,
-      COALESCE(SUM(CASE WHEN decision='error' THEN 1 ELSE 0 END),0) errors,
-      COALESCE(SUM(CASE WHEN decision='skip' THEN 1 ELSE 0 END),0) skipped
-    FROM lighter_lux_live_decisions`).get() ?? { total: 0, errors: 0, skipped: 0 };
+      COALESCE(SUM(CASE WHEN decision.decision='error' THEN 1 ELSE 0 END),0) errors,
+      COALESCE(SUM(CASE WHEN decision.decision='skip' THEN 1 ELSE 0 END),0) skipped
+    FROM lighter_lux_live_decisions decision
+    JOIN lighter_lux_signals signal ON signal.id=decision.signal_id
+    WHERE signal.strategy_id IN (${sqlMarks(strategyParams)})`).get(...strategyParams)
+    ?? { total: 0, errors: 0, skipped: 0 };
 }
 
 function liveStrategyStates(): LiveStrategyStateRow[] {
@@ -1396,22 +1427,10 @@ function liveMetrics(rows: LiveTradeRow[]): LiveMetrics {
 }
 
 function liveExecutionComparison(
-  strategyId: string | null = null,
+  strategyScope: StrategyIdScope = null,
 ): ExecutionComparison {
-  const rows = strategyId
-    ? db.prepare<[string], {
-        shadow_pct: number;
-        real_pct: number;
-      }>(`
-        SELECT shadow.net_pnl_pct shadow_pct,real.net_pnl_pct real_pct
-        FROM lighter_lux_live_trades real
-        JOIN lighter_lux_trades shadow
-          ON shadow.entry_signal_id=real.entry_signal_id
-        WHERE real.status='closed' AND real.net_pnl_pct IS NOT NULL
-          AND shadow.closed_at IS NOT NULL AND shadow.net_pnl_pct IS NOT NULL
-          AND real.strategy_id=?
-        ORDER BY real.closed_at,real.id`).all(strategyId)
-    : db.prepare<[], {
+  const strategyParams = idsForScope(strategyScope);
+  const rows = db.prepare<string[], {
     shadow_pct: number;
     real_pct: number;
   }>(`
@@ -1421,7 +1440,8 @@ function liveExecutionComparison(
       ON shadow.entry_signal_id=real.entry_signal_id
     WHERE real.status='closed' AND real.net_pnl_pct IS NOT NULL
       AND shadow.closed_at IS NOT NULL AND shadow.net_pnl_pct IS NOT NULL
-    ORDER BY real.closed_at,real.id`).all();
+      AND real.strategy_id IN (${sqlMarks(strategyParams)})
+    ORDER BY real.closed_at,real.id`).all(...strategyParams);
   const shadowPct = rows.reduce((sum, row) => sum + row.shadow_pct, 0);
   const realPct = rows.reduce((sum, row) => sum + row.real_pct, 0);
   return {
@@ -1463,50 +1483,30 @@ function liveLatencyMetrics(rows: LiveTradeRow[]): LatencyMetrics {
 }
 
 function cumulativePnlSeries(
-  strategyId: string | null = null,
+  strategyScope: StrategyIdScope = null,
 ): { shadow: PnlPoint[]; live: PnlPoint[] } {
-  const shadowRows = strategyId
-    ? db.prepare<[string], {
-        closed_at: number;
-        net_pnl_pct: number;
-        notional_usd: number;
-      }>(`
-        SELECT closed_at,net_pnl_pct,notional_usd
-        FROM lighter_lux_trades
-        WHERE strategy_id=?
-          AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
-        ORDER BY closed_at,id`).all(strategyId)
-    : db.prepare<string[], {
+  const strategyParams = idsForScope(strategyScope);
+  const shadowRows = db.prepare<string[], {
     closed_at: number;
     net_pnl_pct: number;
     notional_usd: number;
   }>(`
     SELECT closed_at,net_pnl_pct,notional_usd
     FROM lighter_lux_trades
-    WHERE strategy_id IN (${SQL_MARKS})
+    WHERE strategy_id IN (${sqlMarks(strategyParams)})
       AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
-    ORDER BY closed_at,id`).all(...STRATEGY_IDS);
-  const liveRows = strategyId
-    ? db.prepare<[string], {
-        closed_at: number;
-        net_pnl_usd: number;
-        net_pnl_pct: number;
-      }>(`
-        SELECT closed_at,net_pnl_usd,net_pnl_pct
-        FROM lighter_lux_live_trades
-        WHERE strategy_id=? AND status='closed' AND closed_at IS NOT NULL
-          AND net_pnl_usd IS NOT NULL AND net_pnl_pct IS NOT NULL
-        ORDER BY closed_at,id`).all(strategyId)
-    : db.prepare<[], {
+    ORDER BY closed_at,id`).all(...strategyParams);
+  const liveRows = db.prepare<string[], {
     closed_at: number;
     net_pnl_usd: number;
     net_pnl_pct: number;
   }>(`
     SELECT closed_at,net_pnl_usd,net_pnl_pct
     FROM lighter_lux_live_trades
-    WHERE status='closed' AND closed_at IS NOT NULL
+    WHERE strategy_id IN (${sqlMarks(strategyParams)})
+      AND status='closed' AND closed_at IS NOT NULL
       AND net_pnl_usd IS NOT NULL AND net_pnl_pct IS NOT NULL
-    ORDER BY closed_at,id`).all();
+    ORDER BY closed_at,id`).all(...strategyParams);
 
   const cumulative = <T>(
     rows: T[],
@@ -1592,6 +1592,10 @@ function positivePage(value: unknown): number {
 function selectedStrategy(value: unknown): StrategySpec | null {
   return STRATEGY_BY_ID.get(String(value ?? '')) ?? null;
 }
+type PortfolioGroup = 'native' | null;
+function selectedGroup(value: unknown): PortfolioGroup {
+  return value === 'native' ? 'native' : null;
+}
 function selectedDataset(value: unknown): PortfolioDataset {
   return value === 'real' ? 'real' : 'shadow';
 }
@@ -1602,6 +1606,7 @@ function labHref(args: {
   signalsPage: number;
   tradesPage: number;
   strategyId: string | null;
+  group?: PortfolioGroup;
   dataset: PortfolioDataset;
   chartUnit: ChartUnit;
   anchor?: string;
@@ -1613,6 +1618,7 @@ function labHref(args: {
     chart: args.chartUnit,
   });
   if (args.strategyId) params.set('strategy', args.strategyId);
+  if (args.group) params.set('group', args.group);
   return `/lab/lighter-luxalgo?${params.toString()}${args.anchor ? `#${args.anchor}` : ''}`;
 }
 function pager(args: {
@@ -1624,6 +1630,7 @@ function pager(args: {
   tradesPage: number;
   target: 'signals' | 'trades';
   strategyId: string | null;
+  group?: PortfolioGroup;
   dataset: PortfolioDataset;
   chartUnit: ChartUnit;
 }): string {
@@ -1637,6 +1644,7 @@ function pager(args: {
       signalsPage,
       tradesPage,
       strategyId: args.strategyId,
+      group: args.group,
       dataset: args.dataset,
       chartUnit: args.chartUnit,
       anchor: args.target === 'signals' ? 'signal-history' : 'shadow-trades',
@@ -1661,10 +1669,8 @@ function pager(args: {
 
 export const LIGHTER_LUXALGO_CSS = `
 .ll-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 14px;padding:17px 20px;border:1px solid rgba(163,106,255,.36);border-radius:14px;background:linear-gradient(135deg,rgba(122,71,255,.15),var(--bg-card));color:var(--text);text-decoration:none}
-.ll-z60-hero{border-color:rgba(56,217,150,.42);background:linear-gradient(135deg,rgba(56,217,150,.13),rgba(122,71,255,.08),var(--bg-card))}
-.ll-z60-hero .ll-badge{background:rgba(56,217,150,.13);color:#38d996}
-.ll-z60-touch-hero{border-color:rgba(92,163,255,.42);background:linear-gradient(135deg,rgba(92,163,255,.14),rgba(122,71,255,.08),var(--bg-card))}
-.ll-z60-touch-hero .ll-badge{background:rgba(92,163,255,.13);color:#76adff}
+.ll-native-hero{border-color:rgba(56,217,150,.42);background:linear-gradient(135deg,rgba(56,217,150,.13),rgba(92,163,255,.09),var(--bg-card))}
+.ll-native-hero .ll-badge{background:rgba(56,217,150,.13);color:#38d996}
 .ll-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(163,106,255,.15);color:#bd91ff;font-size:11px;font-weight:750;letter-spacing:.04em}
 .ll-title{font-size:19px;font-weight:700;margin-top:8px}.ll-sub{font-size:13px;color:var(--text-dim);margin-top:3px}
 .ll-stats{display:flex;gap:22px}.ll-stats span{display:grid;text-align:right}.ll-stats b{font-size:18px}.ll-stats small{font-size:10px;color:var(--text-faint);text-transform:uppercase}
@@ -1692,27 +1698,37 @@ export const LIGHTER_LUXALGO_CSS = `
 @media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-modebar{align-items:stretch}.ll-modebar>div{width:100%}.ll-tabs a{flex:1}.ll-filter{align-items:stretch}.ll-filter label,.ll-filter select{width:100%;min-width:0}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-signal-table th:nth-child(3),.ll-signal-table td:nth-child(3){display:none}.ll-signal-table th:nth-child(1){width:17%}.ll-signal-table th:nth-child(2){width:9%}.ll-signal-table th:nth-child(4){width:17%}.ll-signal-table th:nth-child(5){width:17%}.ll-signal-table th:nth-child(6){width:16%}.ll-signal-table th:nth-child(7){width:24%}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-shadow-trades th:nth-child(1){width:16%}.ll-shadow-trades th:nth-child(2){width:19%}.ll-shadow-trades th:nth-child(4){width:12%}.ll-shadow-trades th:nth-child(5){width:14%}.ll-shadow-trades th:nth-child(6){width:11%}.ll-shadow-trades th:nth-child(7){width:8%}.ll-shadow-trades th:nth-child(8){width:20%}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}}`;
 
 export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
-  const s = summary();
-  const individual = STRATEGIES.map((spec) => ({ spec, gate: gate(summary(spec), lang) }));
+  const s = summary(LUXALGO_STRATEGIES);
+  const individual = LUXALGO_STRATEGIES.map((spec) => ({
+    spec,
+    gate: gate(summary(spec), lang),
+  }));
   const passed = individual.filter((row) => row.gate.passed).length;
+  const assets = [...new Set(LUXALGO_STRATEGIES.map((spec) => spec.asset))].join(' · ');
   return `<a class="ll-hero" href="/lab/lighter-luxalgo">
     <div><span class="ll-badge">🟣 LUXALGO → LIGHTER · ZERO FEE · SHADOW</span>
-      <div class="ll-title">${ASSET_LABEL} — единый портфель сигналов</div>
+      <div class="ll-title">${assets} — единый портфель сигналов</div>
       <div class="ll-sub">${t(lang, 'Одна карточка и одна таблица · $1000 на позицию · индивидуальная и общая статистика →', 'One card and one table · $1,000 per position · individual and aggregate statistics →')}</div>
     </div>
     <div class="ll-stats">
-      <span><b class="${s.feedLive ? 'pos' : 'neg'}">${s.feedLive ? `${STRATEGIES.length}/${STRATEGIES.length} LIVE` : 'DEGRADED'}</b><small>Lighter L2</small></span>
+      <span><b class="${s.feedLive ? 'pos' : 'neg'}">${s.feedLive ? `${LUXALGO_STRATEGIES.length}/${LUXALGO_STRATEGIES.length} LIVE` : 'DEGRADED'}</b><small>Lighter L2</small></span>
       <span><b>${s.signals}</b><small>${t(lang, 'сигналов', 'signals')}</small></span>
-      <span><b>${passed}/${STRATEGIES.length}</b><small>${t(lang, 'прошли гейт', 'gates passed')}</small></span>
+      <span><b>${passed}/${LUXALGO_STRATEGIES.length}</b><small>${t(lang, 'прошли гейт', 'gates passed')}</small></span>
       <span><b class="${pnlClass(s.netPct)}">${signedPct(s.netPct)}</b><small>net · ${signedUsd(s.netUsd)}</small></span>
     </div>
   </a>`;
 }
 
-export async function lighterZ60Hero(lang: Lang): Promise<string> {
-  const spec = STRATEGY_BY_ID.get('sol-z60-reclaim')!;
-  const shadow = summary(spec);
-  const realRows = recentLiveTrades(1_000, spec.id);
+export async function lighterNativeQuantHero(lang: Lang): Promise<string> {
+  const shadow = summary(NATIVE_STRATEGIES);
+  const passed = NATIVE_STRATEGIES.filter(
+    (spec) => gate(summary(spec), lang).passed,
+  ).length;
+  const backtestTrades = NATIVE_STRATEGIES.reduce(
+    (sum, spec) => sum + spec.backtest.trades,
+    0,
+  );
+  const realRows = recentLiveTrades(1_000, NATIVE_STRATEGY_IDS);
   const realClosed = realRows.filter(
     (row) => row.status === 'closed' && row.net_pnl_usd != null,
   );
@@ -1723,56 +1739,20 @@ export async function lighterZ60Hero(lang: Lang): Promise<string> {
     (sum, row) => sum + (row.net_pnl_usd ?? 0),
     0,
   );
-  const state = lighterLiveState();
-  const strategyState = liveStrategyStates().find(
-    (row) => row.strategy_id === spec.id,
-  );
-  const monitorLive = state?.status === 'armed'
-    && state.heartbeat_at != null
-    && Date.now() - state.heartbeat_at < 15_000;
-  const realArmed = monitorLive
-    && state?.enabled === 1
-    && state.portfolio_paused_at == null
-    && strategyState?.enabled === 1;
-  const liveLabel = realArmed
-    ? t(lang, 'REAL ВКЛЮЧЁН', 'REAL ARMED')
-    : t(lang, 'REAL НА ПАУЗЕ', 'REAL PAUSED');
-  return `<a class="ll-hero ll-z60-hero" href="/lab/lighter-luxalgo?strategy=${encodeURIComponent(spec.id)}&dataset=real#portfolio-view">
-    <div><span class="ll-badge">STRAT-030 · SOL · 5M · ${liveLabel}</span>
-      <div class="ll-title">${esc(spec.name)}</div>
+  return `<a class="ll-hero ll-native-hero" href="/lab/lighter-luxalgo?group=native&dataset=shadow#portfolio-view">
+    <div><span class="ll-badge">NATIVE QUANT → LIGHTER · ${NATIVE_STRATEGIES.length} STRATEGIES</span>
+      <div class="ll-title">${t(lang, 'Собственные стратегии · единый портфель', 'In-house strategies · unified portfolio')}</div>
       <div class="ll-sub">${t(
         lang,
-        'Отдельный canary · $100 notional · 10x · биржевой reduce-only стоп 1.5% →',
-        'Isolated canary · $100 notional · 10x · exchange-native 1.5% reduce-only stop →',
+        'SOL · BNB · LTC · completed candles · единая статистика Shadow/Real →',
+        'SOL · BNB · LTC · completed candles · consolidated Shadow/Real statistics →',
       )}</div>
     </div>
     <div class="ll-stats">
-      <span><b>${spec.backtest.trades}</b><small>backtest · PF ${spec.backtest.profitFactor.toFixed(2)}</small></span>
+      <span><b>${NATIVE_STRATEGIES.length}</b><small>${t(lang, 'стратегии', 'strategies')} · ${backtestTrades} BT trades</small></span>
       <span><b class="${pnlClass(shadow.netPct)}">${signedPct(shadow.netPct)}</b><small>shadow · ${shadow.closed}/${shadow.open}</small></span>
       <span><b class="${pnlClass(realNetUsd)}">${signedUsd(realNetUsd)}</b><small>real · ${realClosed.length}/${realOpen}</small></span>
-      <span><b class="${realArmed ? 'pos' : 'neg'}">${liveLabel}</b><small>$100 · 10x · SL 1.5%</small></span>
-    </div>
-  </a>`;
-}
-
-export async function lighterZ60TouchHero(lang: Lang): Promise<string> {
-  const spec = STRATEGY_BY_ID.get('sol-z60-touch')!;
-  const shadow = summary(spec);
-  const validation = gate(shadow, lang);
-  return `<a class="ll-hero ll-z60-touch-hero" href="/lab/lighter-luxalgo?strategy=${encodeURIComponent(spec.id)}&dataset=shadow#portfolio-view">
-    <div><span class="ll-badge">STRAT-031 · SOL · 5M · SHADOW</span>
-      <div class="ll-title">${esc(spec.name)}</div>
-      <div class="ll-sub">${t(
-        lang,
-        'Отдельная статистика · ранний вход при касании ±3σ · выход к средней · стоп 1.5% →',
-        'Isolated statistics · early entry on a ±3σ touch · mean exit · 1.5% stop →',
-      )}</div>
-    </div>
-    <div class="ll-stats">
-      <span><b>${spec.backtest.trades}</b><small>backtest · PF ${spec.backtest.profitFactor.toFixed(2)}</small></span>
-      <span><b class="${pnlClass(spec.backtest.netPct)}">${signedPct(spec.backtest.netPct)}</b><small>backtest net · DD ${spec.backtest.maxDrawdownPct.toFixed(2)}%</small></span>
-      <span><b class="${pnlClass(shadow.netPct)}">${signedPct(shadow.netPct)}</b><small>shadow · ${shadow.closed}/${shadow.open}</small></span>
-      <span><b class="${validation.cls}">${validation.label}</b><small>${t(lang, 'собственный форвард-гейт', 'independent forward gate')}</small></span>
+      <span><b class="${passed ? 'pos' : 'collect'}">${passed}/${NATIVE_STRATEGIES.length}</b><small>${t(lang, 'прошли forward-гейт', 'forward gates passed')}</small></span>
     </div>
   </a>`;
 }
@@ -2036,9 +2016,9 @@ function pnlChart(
   lang: Lang,
   dataset: PortfolioDataset,
   unit: ChartUnit,
-  strategyId: string | null = null,
+  strategyScope: StrategyIdScope = null,
 ): string {
-  const series = cumulativePnlSeries(strategyId);
+  const series = cumulativePnlSeries(strategyScope);
   const points = dataset === 'shadow' ? series.shadow : series.live;
   const netUsd = points.at(-1)?.pnlUsd ?? 0;
   const netPct = points.at(-1)?.pnlPct ?? 0;
@@ -2119,17 +2099,23 @@ async function render(
     signalsPage: number;
     tradesPage: number;
     strategy: StrategySpec | null;
+    group: PortfolioGroup;
     dataset: PortfolioDataset;
     chartUnit: ChartUnit;
   },
 ): Promise<string> {
   const strategyId = requested.strategy?.id ?? null;
-  const realSupported = strategyId == null || strategyId === 'sol-z60-reclaim';
+  const scopeSpecs = requested.strategy
+    ? [requested.strategy]
+    : requested.group === 'native'
+      ? [...NATIVE_STRATEGIES]
+      : [...LUXALGO_STRATEGIES];
+  const scopeIds = scopeSpecs.map((spec) => spec.id);
+  const realSupported = scopeIds.includes('sol-z60-reclaim');
   const dataset: PortfolioDataset = realSupported ? requested.dataset : 'shadow';
-  const scopeSpecs = requested.strategy ? [requested.strategy] : [...STRATEGIES];
-  const s = summary(requested.strategy ?? undefined);
-  const signalsTotal = signalTotal(strategyId);
-  const tradesTotal = tradeTotal(strategyId);
+  const s = summary(scopeSpecs);
+  const signalsTotal = signalTotal(scopeIds);
+  const tradesTotal = tradeTotal(scopeIds);
   const signalsPage = Math.min(
     requested.signalsPage,
     Math.max(1, Math.ceil(signalsTotal / SIGNAL_PAGE_SIZE)),
@@ -2141,27 +2127,25 @@ async function render(
   const signals = recentSignals(
     SIGNAL_PAGE_SIZE,
     (signalsPage - 1) * SIGNAL_PAGE_SIZE,
-    strategyId,
+    scopeIds,
   );
   const trades = recentTrades(
     TRADE_PAGE_SIZE,
     (tradesPage - 1) * TRADE_PAGE_SIZE,
-    strategyId,
+    scopeIds,
   );
   const liveState = lighterLiveState();
-  const liveTrades = recentLiveTrades(30, strategyId);
-  const allLiveClosed = strategyId
-    ? recentLiveTrades(10_000, strategyId)
-      .filter((row) => row.status === 'closed' && row.net_pnl_usd != null)
-      .reverse()
-    : closedLiveTrades();
-  const liveCounts = liveTradeCounts(strategyId);
-  const liveDecisions = liveDecisionCounts(strategyId);
+  const liveTrades = recentLiveTrades(30, scopeIds);
+  const allLiveClosed = recentLiveTrades(10_000, scopeIds)
+    .filter((row) => row.status === 'closed' && row.net_pnl_usd != null)
+    .reverse();
+  const liveCounts = liveTradeCounts(scopeIds);
+  const liveDecisions = liveDecisionCounts(scopeIds);
   const liveSummary = liveMetrics(allLiveClosed);
-  const execution = liveExecutionComparison(strategyId);
+  const execution = liveExecutionComparison(scopeIds);
   const latencyMetrics = liveLatencyMetrics(liveTrades);
   const liveStrategies = liveStrategyStates().filter(
-    (row) => strategyId == null || row.strategy_id === strategyId,
+    (row) => scopeIds.includes(row.strategy_id),
   );
   const livePortfolioPaused = liveState?.portfolio_paused_at != null;
   const liveMonitor = liveState?.status === 'armed'
@@ -2203,6 +2187,7 @@ async function render(
     signalsPage,
     tradesPage,
     strategyId,
+    group: requested.group,
     dataset,
     chartUnit: requested.chartUnit,
     anchor: 'portfolio-view',
@@ -2211,13 +2196,14 @@ async function render(
     signalsPage,
     tradesPage,
     strategyId,
+    group: requested.group,
     dataset,
     chartUnit,
     anchor: 'pnl-chart',
   });
   const scopeLabel = requested.strategy
     ? `STRAT-${requested.strategy.code} · ${requested.strategy.asset}`
-    : ASSET_LABEL;
+    : [...new Set(scopeSpecs.map((spec) => spec.asset))].join(' · ');
   const shadowCards = `
     <div class="ll-card"><small>${t(lang, 'Стратегии / гейт', 'Strategies / gates')}</small><b>${scopeSpecs.length} / ${passed}</b><em>${scopeLabel}</em></div>
     <div class="ll-card"><small>${t(lang, 'Сигналы / ошибки', 'Signals / errors')}</small><b>${s.signals} / ${s.captureErrors}</b><em>${t(lang, 'все выбранные alerts', 'all selected alerts')}</em></div>
@@ -2244,17 +2230,18 @@ async function render(
     <div class="ll-card"><small>Latency P50</small><b>${latency(latencyMetrics.signalToProtectedMs)}</b><em>S→O ${latency(latencyMetrics.signalToOrderMs)} · N ${latencyMetrics.measured}</em></div>`;
   const scopeControl = requested.strategy
     ? `<div class="ll-filter">
-        <a class="ll-back" style="margin:0" href="/lab/lighter-luxalgo">${t(lang, '← Общий портфель', '← Full portfolio')}</a>
+        <a class="ll-back" style="margin:0" href="${requested.group === 'native' ? '/lab/lighter-luxalgo?group=native&dataset=shadow#portfolio-view' : '/lab/lighter-luxalgo'}">${t(lang, '← Общий портфель', '← Full portfolio')}</a>
         <b>STRAT-${requested.strategy.code} · ${requested.strategy.asset} · ${esc(requested.strategy.name)}</b>
         <small>${t(lang, 'На странице нет данных других стратегий.', 'This page contains no data from other strategies.')}</small>
       </div>`
     : `<form class="ll-filter" action="/lab/lighter-luxalgo" method="get">
+        ${requested.group ? `<input type="hidden" name="group" value="${requested.group}">` : ''}
         <input type="hidden" name="dataset" value="${requested.dataset}">
         <input type="hidden" name="chart" value="${requested.chartUnit}">
         <label>${t(lang, 'Фильтр сигналов и сделок', 'Signals and trades filter')}
           <select name="strategy" onchange="this.form.submit()">
             <option value="">${t(lang, 'Все стратегии', 'All strategies')}</option>
-            ${STRATEGIES.map((spec) => `<option value="${esc(spec.id)}">STRAT-${spec.code} · ${spec.asset} · ${esc(spec.name)}</option>`).join('')}
+            ${scopeSpecs.map((spec) => `<option value="${esc(spec.id)}">STRAT-${spec.code} · ${spec.asset} · ${esc(spec.name)}</option>`).join('')}
           </select>
         </label>
         <small>${t(lang, 'Показаны все стратегии портфеля', 'Showing all portfolio strategies')}</small>
@@ -2262,10 +2249,14 @@ async function render(
       </form>`;
   const pageHeading = requested.strategy
     ? `STRAT-${requested.strategy.code} · ${requested.strategy.name}`
-    : 'LuxAlgo → Lighter · единый портфель';
+    : requested.group === 'native'
+      ? t(lang, 'Native Quant → Lighter · единый портфель', 'Native Quant → Lighter · unified portfolio')
+      : 'LuxAlgo → Lighter · единый портфель';
   const pageBadge = requested.strategy
     ? `STRAT-${requested.strategy.code} · ${requested.strategy.asset} · 5M · NATIVE LIGHTER`
-    : `STRAT-${CODE_LABEL} · PROSPECTIVE FORWARD`;
+    : requested.group === 'native'
+      ? `STRAT-${scopeSpecs.map((spec) => spec.code).join(' · ')} · NATIVE LIGHTER`
+      : `STRAT-${scopeSpecs.map((spec) => spec.code).join(' · ')} · PROSPECTIVE FORWARD`;
   const pageDescription = requested.strategy
     ? requested.strategy.id === 'sol-z60-reclaim'
       ? t(
@@ -2278,11 +2269,17 @@ async function render(
         'Только эта стратегия: нативные свечи Lighter и prospective Shadow $1000. Real отключён до отдельной проверки forward-сделок. Комиссия 0%; spread, slippage и funding учитываются.',
         'This strategy only: native Lighter candles and prospective $1,000 Shadow. Real is disabled until its own forward trades are validated. Trading fee is 0%; spread, slippage, and funding are included.',
       )
-    : t(
-      lang,
-      `Все подходящие alerts собраны в одной системе и одной таблице. ${ASSET_LABEL} независимо снимают живой L2 Lighter без фиксированной задержки; каждая позиция моделируется на $1000. Комиссия Standard — 0%, spread, $1000 VWAP и funding учтены.`,
-      `All selected alerts share one system and one table. ${ASSET_LABEL} independently sample live Lighter L2 with no fixed delay; every position is modeled at $1,000. Standard trading fee is 0%, while spread, $1,000 VWAP, and funding are included.`,
-    );
+    : requested.group === 'native'
+      ? t(
+        lang,
+        `Собственные стратегии на завершённых свечах Lighter собраны в одном портфеле: ${scopeLabel}. Единые сигналы, сделки, накопленный PnL и индивидуальная статистика; Shadow моделируется на $1000. Комиссия Standard — 0%, spread, VWAP, slippage и funding учитываются.`,
+        `In-house completed-candle Lighter strategies share one portfolio: ${scopeLabel}. Signals, trades, cumulative PnL, and per-strategy statistics are consolidated; Shadow uses $1,000 positions. Standard trading fee is 0%, while spread, VWAP, slippage, and funding are included.`,
+      )
+      : t(
+        lang,
+        `Все подходящие alerts собраны в одной системе и одной таблице. ${scopeLabel} независимо снимают живой L2 Lighter без фиксированной задержки; каждая позиция моделируется на $1000. Комиссия Standard — 0%, spread, $1000 VWAP и funding учтены.`,
+        `All selected alerts share one system and one table. ${scopeLabel} independently sample live Lighter L2 with no fixed delay; every position is modeled at $1,000. Standard trading fee is 0%, while spread, $1,000 VWAP, and funding are included.`,
+      );
   const currentDrawdownUsd = requested.strategy
     ? liveSummary.currentDrawdownUsd
     : liveState?.current_drawdown_usd ?? 0;
@@ -2298,11 +2295,17 @@ async function render(
         'Эта стратегия работает только в Shadow. Реальный исполнитель её не поддерживает и не может открыть по ней позицию.',
         'This strategy is Shadow-only. The real executor does not support it and cannot open a position from its signals.',
       )
-    : t(
-      lang,
-      'Разные стратегии могут торговаться одновременно. Биржевой reduce-only stop ставится сразу на каждую позицию. При ручной паузе новые входы запрещены, но существующие позиции продолжают контролироваться и закрываться. Новые входы также блокируются при дневном убытке −$10, совокупной просадке −$15 или индивидуальной паузе стратегии.',
-      'Different strategies may trade concurrently. An exchange-native reduce-only stop is placed immediately on every position. During a manual pause, new entries are blocked while existing positions remain monitored and can close. New entries are also blocked at a −$10 daily loss, −$15 cumulative drawdown, or an individual strategy pause.',
-    );
+    : requested.group === 'native'
+      ? t(
+        lang,
+        'В Real сейчас разрешена только STRAT-030; STRAT-031/032/033 остаются Shadow-only до собственного форвард-гейта. Их сигналы не могут открыть реальные позиции.',
+        'Only STRAT-030 is currently allowlisted for Real; STRAT-031/032/033 remain Shadow-only until their own forward gate. Their signals cannot open live positions.',
+      )
+      : t(
+        lang,
+        'Разные стратегии могут торговаться одновременно. Биржевой reduce-only stop ставится сразу на каждую позицию. При ручной паузе новые входы запрещены, но существующие позиции продолжают контролироваться и закрываться. Новые входы также блокируются при дневном убытке −$10, совокупной просадке −$15 или индивидуальной паузе стратегии.',
+        'Different strategies may trade concurrently. An exchange-native reduce-only stop is placed immediately on every position. During a manual pause, new entries are blocked while existing positions remain monitored and can close. New entries are also blocked at a −$10 daily loss, −$15 cumulative drawdown, or an individual strategy pause.',
+      );
   const liveStrategyDetails = requested.strategy
     ? ''
     : `<details class="ll-details"><summary>${t(lang, 'Live-статистика по каждой стратегии', 'Per-strategy live statistics')}</summary><div class="ll-table"><table class="ll-live-strategy">
@@ -2312,7 +2315,9 @@ async function render(
   return pageShell(
     requested.strategy
       ? `STRAT-${requested.strategy.code} · ${requested.strategy.name}`
-      : t(lang, 'LuxAlgo → Lighter — единый shadow-портфель', 'LuxAlgo → Lighter — unified shadow portfolio'),
+      : requested.group === 'native'
+        ? t(lang, 'Native Quant → Lighter — единый портфель', 'Native Quant → Lighter — unified portfolio')
+        : t(lang, 'LuxAlgo → Lighter — единый shadow-портфель', 'LuxAlgo → Lighter — unified shadow portfolio'),
     `<style>${LIGHTER_LUXALGO_CSS}</style><div class="ll-wrap">
       <a class="ll-back" href="/lab">${t(lang, '← Лаборатория', '← Lab')}</a>
       <div class="ll-head"><div><span class="ll-badge">${pageBadge}</span>
@@ -2335,7 +2340,7 @@ async function render(
         ${dataset === 'shadow' ? shadowCards : realCards}
       </div>
 
-      ${pnlChart(lang, dataset, requested.chartUnit, strategyId)}
+      ${pnlChart(lang, dataset, requested.chartUnit, scopeIds)}
 
       ${scopeControl}
 
@@ -2350,14 +2355,14 @@ async function render(
           <thead><tr><th>Strategy</th><th>${t(lang, 'Сигнал №', 'Signal #')}</th><th>${t(lang, 'Время UTC', 'Time UTC')}</th><th>Event</th><th>Shadow-${t(lang, 'сделка', 'trade')}</th><th>Real-${t(lang, 'сделка', 'trade')}</th><th>${t(lang, 'Статус сигнала', 'Signal status')}</th></tr></thead>
           <tbody>${signalRows(signals, lang)}</tbody>
         </table></div>
-        ${pager({ lang, page: signalsPage, total: signalsTotal, pageSize: SIGNAL_PAGE_SIZE, signalsPage, tradesPage, target: 'signals', strategyId, dataset, chartUnit: requested.chartUnit })}
+        ${pager({ lang, page: signalsPage, total: signalsTotal, pageSize: SIGNAL_PAGE_SIZE, signalsPage, tradesPage, target: 'signals', strategyId, group: requested.group, dataset, chartUnit: requested.chartUnit })}
       </div>
 
       <div class="ll-panel" id="shadow-trades"><h2>${t(lang, 'Сделки', 'Trades')}</h2><div class="ll-table"><table class="ll-trades ll-shadow-trades">
         <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>${t(lang, 'Цена входа', 'Entry price')}</th><th>${t(lang, 'Стоп-лосс', 'Stop-loss')}</th><th>${t(lang, 'Цена выхода', 'Exit price')}</th><th>${t(lang, 'Статус', 'Status')}</th><th>Net after costs</th></tr></thead>
         <tbody>${tradeRows(trades, lang)}</tbody>
       </table></div>
-      ${pager({ lang, page: tradesPage, total: tradesTotal, pageSize: TRADE_PAGE_SIZE, signalsPage, tradesPage, target: 'trades', strategyId, dataset, chartUnit: requested.chartUnit })}</div>
+      ${pager({ lang, page: tradesPage, total: tradesTotal, pageSize: TRADE_PAGE_SIZE, signalsPage, tradesPage, target: 'trades', strategyId, group: requested.group, dataset, chartUnit: requested.chartUnit })}</div>
 
       ${realSupported ? `<div class="ll-panel"><div class="ll-chart-head"><div><h2>${t(lang, 'Реальная торговля · canary', 'Live trading · canary')}</h2>
         <p class="ll-note"><b class="${livePortfolioPaused || !liveMonitor || !liveEntryEnabled ? 'fail' : 'pass'}">${liveRunnerLabel} · $100 · 10x.</b> ${liveScopeText}${liveState?.last_error ? ` <span class="neg">${esc(liveState.last_error)}</span>` : ''}${liveState?.portfolio_pause_reason ? ` <span class="neg">${esc(liveState.portfolio_pause_reason)}</span>` : ''}</p>
@@ -2391,6 +2396,7 @@ export async function lighterLuxalgoLabRoute(app: FastifyInstance): Promise<void
       signalsPage?: string;
       tradesPage?: string;
       strategy?: string;
+      group?: string;
       dataset?: string;
       chart?: string;
     };
@@ -2401,6 +2407,7 @@ export async function lighterLuxalgoLabRoute(app: FastifyInstance): Promise<void
       signalsPage: positivePage(req.query.signalsPage),
       tradesPage: positivePage(req.query.tradesPage),
       strategy: selectedStrategy(req.query.strategy),
+      group: selectedGroup(req.query.group),
       dataset: selectedDataset(req.query.dataset),
       chartUnit: selectedChartUnit(req.query.chart),
     });

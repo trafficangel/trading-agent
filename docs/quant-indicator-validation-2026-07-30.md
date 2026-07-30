@@ -158,3 +158,29 @@ It is not allowlisted in the real Lighter executor.
 
 The auditable Pine reference is
 `research/lighter-quant/lighter-sol-z60-touch.pine`.
+
+## Candidates 6–7 — cross-symbol native Z60 transfer
+
+The same native-candle engine was then run on additional liquid Lighter
+markets. BTC, ETH, ADA, AVAX and WLD were rejected because at least one recent
+window, direction, or adverse-cost test failed. Two two-sided candidates
+survived without adding a regime filter:
+
+| Strategy | Rule | Trades | Net after 0.02% stress/funding | PF | WR | DD | Long / short net |
+|---|---|---:|---:|---:|---:|---:|---:|
+| STRAT-032 · BNB | Z60 ±3 touch | 417 | +60.86% | 1.51 | 69.3% | 9.76% | +33.99% / +26.87% |
+| STRAT-033 · LTC | Z60 ±2 touch | 968 | +107.39% | 1.37 | 69.5% | 27.57% | +64.74% / +42.65% |
+
+BNB remained positive in every 30/60/90/120/180-day window. The 30-day
+window produced 68 trades, +5.25% net and PF 1.40; the 180-day result remained
++48.35% with PF 1.39 under the larger 0.05% round-trip execution stress.
+
+LTC also remained positive in every tested window. The 30-day result was 154
+trades, +20.62% net and PF 1.59. Periods 50/60/70 and thresholds
+1.75/2.0/2.25 were all two-sided positive, providing a broad local parameter
+plateau. At 0.05% stress its 180-day result remained +78.35% with PF 1.26.
+
+Both candidates are admitted to the consolidated Native Quant portfolio as
+prospective **Shadow only**. Neither id is present in the separately
+allowlisted live executor. Promotion requires its own forward sample and does
+not inherit STRAT-030's live permission.

@@ -37,8 +37,7 @@ import { labGateVerdict } from '../lib/lab-gate.js';
 import { allocatePortfolio, portfolioSummary } from '../lib/portfolio.js';
 import {
   lighterLuxalgoHero,
-  lighterZ60Hero,
-  lighterZ60TouchHero,
+  lighterNativeQuantHero,
   lighterLuxalgoLabRoute,
   LIGHTER_LUXALGO_CSS,
 } from './lighter-luxalgo-lab.js';
@@ -127,11 +126,10 @@ async function renderLabList(lang: Lang): Promise<string> {
     <div class="header">
       <span class="strat-code">LUXALGO · SIGNAL TRACK</span>
       <h1 class="title">${t(lang, 'Лаборатория', 'The Lab')}</h1>
-      <p class="subtitle">${t(lang, 'Активный трек: сигналы LuxAlgo с исполнением и статистикой на Lighter.', 'Active track: LuxAlgo signals with Lighter execution and statistics.')}</p>
+      <p class="subtitle">${t(lang, 'Активный трек: сигналы LuxAlgo и собственные Quant-стратегии со статистикой на Lighter.', 'Active track: LuxAlgo signals and in-house Quant strategies with Lighter statistics.')}</p>
     </div>
     <style>${LAB_CSS}${LIGHTER_LUXALGO_CSS}</style>
-    ${await lighterZ60Hero(lang)}
-    ${await lighterZ60TouchHero(lang)}
+    ${await lighterNativeQuantHero(lang)}
     ${await lighterLuxalgoHero(lang)}
     `,
     { autoRefreshSec: 60, lang },

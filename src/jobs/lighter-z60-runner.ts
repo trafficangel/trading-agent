@@ -8,8 +8,6 @@ import {
 import { logger } from '../lib/logger.js';
 import { queueLighterLuxalgoSignal } from '../strategies/lighter-luxalgo-lab.js';
 
-const SYMBOL = 'SOLUSDT';
-const MARKET_ID = 2;
 const MINUTE_MS = 60_000;
 const BAR_MS = 5 * MINUTE_MS;
 const HISTORY_BARS = 66;
@@ -47,11 +45,38 @@ type LastClosedRow = {
 type NativeStrategy = {
   id: string;
   mode: Z60EntryMode;
+  threshold: number;
 };
 
-const STRATEGIES: readonly NativeStrategy[] = [
-  { id: 'sol-z60-reclaim', mode: 'reclaim' },
-  { id: 'sol-z60-touch', mode: 'touch' },
+type NativeFeed = {
+  symbol: string;
+  marketId: number;
+  strategies: readonly NativeStrategy[];
+};
+
+const FEEDS: readonly NativeFeed[] = [
+  {
+    symbol: 'SOLUSDT',
+    marketId: 2,
+    strategies: [
+      { id: 'sol-z60-reclaim', mode: 'reclaim', threshold: 3 },
+      { id: 'sol-z60-touch', mode: 'touch', threshold: 3 },
+    ],
+  },
+  {
+    symbol: 'BNBUSDT',
+    marketId: 25,
+    strategies: [
+      { id: 'bnb-z60-touch', mode: 'touch', threshold: 3 },
+    ],
+  },
+  {
+    symbol: 'LTCUSDT',
+    marketId: 35,
+    strategies: [
+      { id: 'ltc-z60-touch', mode: 'touch', threshold: 2 },
+    ],
+  },
 ];
 
 const openPosition = db.prepare<[string], OpenRow>(`
@@ -70,7 +95,7 @@ const lastClosed = db.prepare<[string], LastClosedRow>(`
 let timer: ReturnType<typeof setInterval> | null = null;
 let started = false;
 let running = false;
-let lastEvaluatedBar = 0;
+const lastEvaluatedBars = new Map<number, number>();
 
 function finite(value: unknown): number | null {
   const number = Number(value);
@@ -115,13 +140,13 @@ function aggregateCompleteFiveMinuteBars(
     }));
 }
 
-async function fetchBars(latestBarTime: number): Promise<Z60Bar[]> {
+async function fetchBars(latestBarTime: number, marketId: number): Promise<Z60Bar[]> {
   const start = latestBarTime - (HISTORY_BARS - 1) * BAR_MS;
   // Lighter treats end_timestamp as exclusive, so request the boundary after
   // the fifth one-minute candle rather than the final candle's own timestamp.
   const end = latestBarTime + BAR_MS;
   const url = new URL('https://mainnet.zklighter.elliot.ai/api/v1/candles');
-  url.searchParams.set('market_id', String(MARKET_ID));
+  url.searchParams.set('market_id', String(marketId));
   url.searchParams.set('resolution', '1m');
   url.searchParams.set('start_timestamp', String(start));
   url.searchParams.set('end_timestamp', String(end));
@@ -142,7 +167,8 @@ async function fetchBars(latestBarTime: number): Promise<Z60Bar[]> {
 }
 
 function emit(
-  strategyId: string,
+  strategy: NativeStrategy,
+  symbol: string,
   action: 'entry' | 'exit',
   side: 'long' | 'short',
   barTime: number,
@@ -150,11 +176,11 @@ function emit(
 ): void {
   queueLighterLuxalgoSignal({
     kind: 'strategy',
-    strategy_id: strategyId,
+    strategy_id: strategy.id,
     action,
     side,
     strategy_event: action === 'entry' ? side : `exit_${side}`,
-    symbol: SYMBOL,
+    symbol,
     timeframe: '5',
     price,
     bar_time: barTime,
@@ -164,57 +190,69 @@ function emit(
 async function poll(): Promise<void> {
   if (running) return;
   const target = targetCompletedBar(Date.now());
-  if (target <= lastEvaluatedBar) return;
   running = true;
   try {
-    const bars = await fetchBars(target);
-    for (const strategy of STRATEGIES) {
-      const snapshot = evaluateZ60(bars, 60, 3, strategy.mode);
-      if (!snapshot) throw new Error('z60_history_incomplete');
+    for (const feed of FEEDS) {
+      if (target <= (lastEvaluatedBars.get(feed.marketId) ?? 0)) continue;
+      try {
+        const bars = await fetchBars(target, feed.marketId);
+        for (const strategy of feed.strategies) {
+          const snapshot = evaluateZ60(bars, 60, strategy.threshold, strategy.mode);
+          if (!snapshot) throw new Error('z60_history_incomplete');
 
-      const open = openPosition.get(strategy.id);
-      if (open) {
-        const meanExit = open.side === 'long'
-          ? snapshot.close >= snapshot.mean
-          : snapshot.close <= snapshot.mean;
-        const timeExit = target + BAR_MS - open.opened_at >= TIME_EXIT_BARS * BAR_MS;
-        if (meanExit || timeExit) {
-          emit(strategy.id, 'exit', open.side, target, snapshot.close);
-          logger.info({
-            strategyId: strategy.id,
-            side: open.side,
-            barTime: target,
-            close: snapshot.close,
-            mean: snapshot.mean,
-            reason: meanExit ? 'sma60_cross' : 'time_240_bars',
-          }, 'lighter-z60: native exit signal');
+          const open = openPosition.get(strategy.id);
+          if (open) {
+            const meanExit = open.side === 'long'
+              ? snapshot.close >= snapshot.mean
+              : snapshot.close <= snapshot.mean;
+            const timeExit = target + BAR_MS - open.opened_at >= TIME_EXIT_BARS * BAR_MS;
+            if (meanExit || timeExit) {
+              emit(strategy, feed.symbol, 'exit', open.side, target, snapshot.close);
+              logger.info({
+                strategyId: strategy.id,
+                symbol: feed.symbol,
+                side: open.side,
+                barTime: target,
+                close: snapshot.close,
+                mean: snapshot.mean,
+                reason: meanExit ? 'sma60_cross' : 'time_240_bars',
+              }, 'lighter-z60: native exit signal');
+            }
+            continue;
+          }
+
+          // A protective stop that filled during this same completed candle
+          // must not be followed by an immediate same-bar re-entry.
+          const closed = lastClosed.get(strategy.id);
+          if (closed && Math.floor(closed.closed_at / BAR_MS) * BAR_MS === target) {
+            continue;
+          }
+
+          if (snapshot.signal) {
+            emit(strategy, feed.symbol, 'entry', snapshot.signal, target, snapshot.close);
+            logger.info({
+              strategyId: strategy.id,
+              symbol: feed.symbol,
+              mode: strategy.mode,
+              threshold: strategy.threshold,
+              side: snapshot.signal,
+              barTime: target,
+              close: snapshot.close,
+              previousZ: snapshot.previousZ,
+              currentZ: snapshot.currentZ,
+            }, 'lighter-z60: native entry signal');
+          }
         }
-        continue;
-      }
-
-      // A protective stop that filled during this same completed candle must
-      // not be followed by an immediate same-bar re-entry.
-      const closed = lastClosed.get(strategy.id);
-      if (closed && Math.floor(closed.closed_at / BAR_MS) * BAR_MS === target) {
-        continue;
-      }
-
-      if (snapshot.signal) {
-        emit(strategy.id, 'entry', snapshot.signal, target, snapshot.close);
-        logger.info({
-          strategyId: strategy.id,
-          mode: strategy.mode,
-          side: snapshot.signal,
-          barTime: target,
-          close: snapshot.close,
-          previousZ: snapshot.previousZ,
-          currentZ: snapshot.currentZ,
-        }, 'lighter-z60: native entry signal');
+        lastEvaluatedBars.set(feed.marketId, target);
+      } catch (error) {
+        logger.warn({
+          error: (error as Error).message,
+          target,
+          symbol: feed.symbol,
+          marketId: feed.marketId,
+        }, 'lighter-z60: market poll failed');
       }
     }
-    lastEvaluatedBar = target;
-  } catch (error) {
-    logger.warn({ error: (error as Error).message, target }, 'lighter-z60: poll failed');
   } finally {
     running = false;
   }
@@ -224,8 +262,12 @@ export function startLighterZ60Runner(): void {
   if (started) return;
   started = true;
   logger.info({
-    strategyIds: STRATEGIES.map((strategy) => strategy.id),
-    symbol: SYMBOL,
+    strategies: FEEDS.flatMap((feed) => feed.strategies.map((strategy) => ({
+      id: strategy.id,
+      symbol: feed.symbol,
+      mode: strategy.mode,
+      threshold: strategy.threshold,
+    }))),
     timeframe: '5m',
     commissionPct: 0,
   }, 'lighter-z60: native shadow runner scheduled');

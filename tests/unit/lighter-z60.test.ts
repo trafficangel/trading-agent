@@ -53,4 +53,14 @@ describe('evaluateZ60Touch', () => {
     const result = evaluateZ60Touch(bars([...baseline, 100]), 60, 3);
     expect(result?.signal).toBeNull();
   });
+
+  it('honors a lower two-sigma threshold without changing direction symmetry', () => {
+    const baseline = Array.from({ length: 60 }, (_, index) => 100 + (index % 2 ? 0.1 : -0.1));
+    const long = evaluateZ60Touch(bars([...baseline, 94]), 60, 2);
+    const short = evaluateZ60Touch(bars([...baseline, 106]), 60, 2);
+    expect(long?.currentZ).toBeLessThan(-2);
+    expect(long?.signal).toBe('long');
+    expect(short?.currentZ).toBeGreaterThan(2);
+    expect(short?.signal).toBe('short');
+  });
 });

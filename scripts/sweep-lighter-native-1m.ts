@@ -440,14 +440,16 @@ function median(values: number[]): number {
 
 const loaded = new Map<string, Arrays>();
 for (const symbol of SYMBOLS) {
-  const file = resolve('data', 'lighter-klines', `${symbol}-1m.json`);
+  const directFile = resolve('data', 'lighter-klines', `${symbol}-${BAR_MINUTES}m.json`);
+  const oneMinuteFile = resolve('data', 'lighter-klines', `${symbol}-1m.json`);
+  const file = existsSync(directFile) ? directFile : oneMinuteFile;
   if (!existsSync(file)) continue;
   const raw = JSON.parse(readFileSync(file, 'utf8')) as Candle[];
   const maxTime = raw.at(-1)?.t ?? 0;
   const windowed = LOOKBACK_DAYS > 0
     ? raw.filter((candle) => candle.t >= maxTime - LOOKBACK_DAYS * 86_400_000)
     : raw;
-  const candles = aggregateCandles(windowed, BAR_MINUTES);
+  const candles = file === directFile ? windowed : aggregateCandles(windowed, BAR_MINUTES);
   loaded.set(symbol, build(candles));
 }
 
