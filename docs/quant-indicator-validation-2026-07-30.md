@@ -114,8 +114,9 @@ although not every neighbor passes the full gate.
 
 The additive maximum drawdown at the base stress is 19.81 percentage points,
 so the backtest does **not** justify leverage or live capital. The strategy is
-admitted only to prospective Lighter Shadow under id `sol-z60-reclaim`
-(`STRAT-030`). Real execution remains disabled.
+admitted first to prospective Lighter Shadow under id `sol-z60-reclaim`
+(`STRAT-030`). It later entered a separately risk-limited $100-notional live
+canary; that promotion does not apply to adjacent variants.
 
 The auditable Pine reference is
 `research/lighter-quant/lighter-sol-z60-reclaim.pine`.

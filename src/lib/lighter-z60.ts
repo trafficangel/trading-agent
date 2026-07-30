@@ -39,10 +39,9 @@ function zAt(closes: readonly number[], index: number, period: number): {
 }
 
 /**
- * Completed-bar Z-score reclaim used by STRAT-030.
- *
- * It deliberately has no regime, spread, or funding gate. Venue costs are
- * measured after the signal by the existing Lighter L2 shadow executor.
+ * Completed-bar Z-score evaluator used by the STRAT-030 reclaim and STRAT-031
+ * touch variants. It deliberately has no regime, spread, or funding gate.
+ * Venue costs are measured after the signal by the Lighter L2 shadow executor.
  */
 export function evaluateZ60(
   bars: readonly Z60Bar[],
