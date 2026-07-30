@@ -91,12 +91,10 @@ export function consumeMakerPrint(
     ? takerSide === 'SELL' && tradePrice <= quotePrice
     : takerSide === 'BUY' && tradePrice >= quotePrice;
   if (!relevant) return state;
-  const tradedThrough = makerSide === 'buy'
-    ? tradePrice < quotePrice
-    : tradePrice > quotePrice;
-  if (tradedThrough) {
-    return { queueAhead: 0, remaining: 0, filled: true };
-  }
+  // A print through our simulated price does not prove that the market would
+  // also have absorbed our additional order. Consume only publicly observed
+  // volume so large shadow orders cannot be "filled" by a tiny through-print.
+  // Consecutive prints from the same aggressor still accumulate naturally.
   let available = tradeSize;
   const queueConsumed = Math.min(state.queueAhead, available);
   const queueAhead = state.queueAhead - queueConsumed;

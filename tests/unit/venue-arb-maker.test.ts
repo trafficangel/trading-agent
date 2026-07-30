@@ -47,6 +47,12 @@ describe('venue arb maker shadow math', () => {
     state = consumeMakerPrint(state, 'buy', 100, 'SELL', 100, 1.5);
     expect(state).toEqual({ queueAhead: 0, remaining: 0.5, filled: false });
     state = consumeMakerPrint(state, 'buy', 100, 'SELL', 99.9, 0.01);
+    expect(state).toEqual({
+      queueAhead: 0,
+      remaining: 0.49,
+      filled: false,
+    });
+    state = consumeMakerPrint(state, 'buy', 100, 'SELL', 99.8, 0.49);
     expect(state).toEqual({ queueAhead: 0, remaining: 0, filled: true });
   });
 
@@ -56,8 +62,25 @@ describe('venue arb maker shadow math', () => {
       .toEqual(initial);
     expect(consumeMakerPrint(initial, 'sell', 101, 'BUY', 100.9, 10))
       .toEqual(initial);
-    expect(consumeMakerPrint(initial, 'sell', 101, 'BUY', 101.1, 0.01).filled)
-      .toBe(true);
+    expect(consumeMakerPrint(initial, 'sell', 101, 'BUY', 101.1, 0.01))
+      .toEqual({ queueAhead: 0.99, remaining: 1, filled: false });
+  });
+
+  it('does not invent a large maker fill from a tiny trade-through print', () => {
+    const initial = { queueAhead: 0, remaining: 1_000, filled: false };
+    const afterTinyPrint = consumeMakerPrint(
+      initial,
+      'buy',
+      1,
+      'SELL',
+      0.999,
+      2,
+    );
+    expect(afterTinyPrint).toEqual({
+      queueAhead: 0,
+      remaining: 998,
+      filled: false,
+    });
   });
 
   it('calculates locked entry edge for either Extended maker side', () => {
