@@ -14,6 +14,8 @@ export type Z60Snapshot = {
   signal: Z60Signal;
 };
 
+export type Z60EntryMode = 'reclaim' | 'touch';
+
 function populationStats(values: readonly number[]): { mean: number; sigma: number } | null {
   if (!values.length || values.some((value) => !Number.isFinite(value))) return null;
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -42,10 +44,11 @@ function zAt(closes: readonly number[], index: number, period: number): {
  * It deliberately has no regime, spread, or funding gate. Venue costs are
  * measured after the signal by the existing Lighter L2 shadow executor.
  */
-export function evaluateZ60Reclaim(
+export function evaluateZ60(
   bars: readonly Z60Bar[],
   period = 60,
   threshold = 3,
+  mode: Z60EntryMode = 'reclaim',
 ): Z60Snapshot | null {
   if (bars.length < period + 1 || period < 2 || !(threshold > 0)) return null;
   const closes = bars.map((bar) => bar.close);
@@ -55,8 +58,13 @@ export function evaluateZ60Reclaim(
   if (!previous || !current) return null;
 
   let signal: Z60Signal = null;
-  if (previous.z < -threshold && current.z >= -threshold) signal = 'long';
-  else if (previous.z > threshold && current.z <= threshold) signal = 'short';
+  if (mode === 'touch') {
+    if (current.z < -threshold) signal = 'long';
+    else if (current.z > threshold) signal = 'short';
+  } else {
+    if (previous.z < -threshold && current.z >= -threshold) signal = 'long';
+    else if (previous.z > threshold && current.z <= threshold) signal = 'short';
+  }
 
   return {
     barTime: bars[currentIndex]!.time,
@@ -66,4 +74,20 @@ export function evaluateZ60Reclaim(
     currentZ: current.z,
     signal,
   };
+}
+
+export function evaluateZ60Reclaim(
+  bars: readonly Z60Bar[],
+  period = 60,
+  threshold = 3,
+): Z60Snapshot | null {
+  return evaluateZ60(bars, period, threshold, 'reclaim');
+}
+
+export function evaluateZ60Touch(
+  bars: readonly Z60Bar[],
+  period = 60,
+  threshold = 3,
+): Z60Snapshot | null {
+  return evaluateZ60(bars, period, threshold, 'touch');
 }

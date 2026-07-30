@@ -90,7 +90,12 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // round-trip execution stress and adverse funding. It stayed positive over
 // every 30/60/90/120/180-day window and in both directions. It entered an
 // isolated $100-notional / 10x real canary on 2026-07-30; every other newly
-// added candidate remains shadow-only.
+// added candidate remains shadow-only. STRAT-031 is the adjacent, earlier
+// three-sigma touch entry. It is the highest-frequency member of the stable
+// Z60 neighborhood that still clears the base execution-stress gate. It stayed
+// positive over 30/60/90/120/180-day windows and in both directions, but is
+// highly correlated with STRAT-030 and has a larger historical drawdown, so it
+// is prospective Shadow only and is deliberately absent from the real runner.
 // BCH, XLM, TRX and JUP candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
@@ -409,6 +414,28 @@ const STRATEGIES: readonly StrategySpec[] = [
       profitFactor: 1.28,
       netPct: 49.06,
       maxDrawdownPct: 19.81,
+    },
+  },
+  {
+    id: 'sol-z60-touch',
+    code: '031',
+    name: 'Z60 · 3σ Touch · Mean Exit',
+    symbol: 'SOLUSDT',
+    asset: 'SOL',
+    marketId: 2,
+    stopPct: 1.5,
+    backtest: {
+      // Native Lighter 1m candles aggregated into complete 5m bars. Signals
+      // use completed candles and fill at the next bar open. Net includes
+      // 0.02% round-trip execution stress plus 0.00125%/hour adverse funding.
+      // No real fan-out: this correlated variant must earn its own forward
+      // record before capital is considered.
+      period: '2026-02-01 → 2026-07-30',
+      trades: 451,
+      winRatePct: 63.0,
+      profitFactor: 1.25,
+      netPct: 49.71,
+      maxDrawdownPct: 23.84,
     },
   },
 ] as const;
@@ -2212,11 +2239,17 @@ async function render(
     ? `STRAT-${requested.strategy.code} · ${requested.strategy.asset} · 5M · NATIVE LIGHTER`
     : `STRAT-${CODE_LABEL} · PROSPECTIVE FORWARD`;
   const pageDescription = requested.strategy
-    ? t(
-      lang,
-      'Только эта стратегия: нативные свечи Lighter, Shadow $1000 и изолированный Real-canary $100 с плечом 10×. Комиссия 0%; spread, slippage и funding учитываются.',
-      'This strategy only: native Lighter candles, $1,000 Shadow and an isolated $100 Real canary at 10× leverage. Trading fee is 0%; spread, slippage, and funding are included.',
-    )
+    ? requested.strategy.id === 'sol-z60-reclaim'
+      ? t(
+        lang,
+        'Только эта стратегия: нативные свечи Lighter, Shadow $1000 и изолированный Real-canary $100 с плечом 10×. Комиссия 0%; spread, slippage и funding учитываются.',
+        'This strategy only: native Lighter candles, $1,000 Shadow and an isolated $100 Real canary at 10× leverage. Trading fee is 0%; spread, slippage, and funding are included.',
+      )
+      : t(
+        lang,
+        'Только эта стратегия: нативные свечи Lighter и prospective Shadow $1000. Real отключён до отдельной проверки forward-сделок. Комиссия 0%; spread, slippage и funding учитываются.',
+        'This strategy only: native Lighter candles and prospective $1,000 Shadow. Real is disabled until its own forward trades are validated. Trading fee is 0%; spread, slippage, and funding are included.',
+      )
     : t(
       lang,
       `Все подходящие alerts собраны в одной системе и одной таблице. ${ASSET_LABEL} независимо снимают живой L2 Lighter без фиксированной задержки; каждая позиция моделируется на $1000. Комиссия Standard — 0%, spread, $1000 VWAP и funding учтены.`,
@@ -2226,11 +2259,17 @@ async function render(
     ? liveSummary.currentDrawdownUsd
     : liveState?.current_drawdown_usd ?? 0;
   const liveScopeText = requested.strategy
-    ? t(
-      lang,
-      'Real разрешён только для этой стратегии. Биржевой reduce-only stop 1.5% ставится сразу после входа. Новые входы блокируются при дневном убытке −$10, общей просадке −$15 или индивидуальной паузе.',
-      'Real trading is enabled only for this strategy. An exchange-native 1.5% reduce-only stop is placed immediately after entry. New entries are blocked at a −$10 daily loss, −$15 portfolio drawdown, or an individual strategy pause.',
-    )
+    ? requested.strategy.id === 'sol-z60-reclaim'
+      ? t(
+        lang,
+        'Real разрешён только для этой стратегии. Биржевой reduce-only stop 1.5% ставится сразу после входа. Новые входы блокируются при дневном убытке −$10, общей просадке −$15 или индивидуальной паузе.',
+        'Real trading is enabled only for this strategy. An exchange-native 1.5% reduce-only stop is placed immediately after entry. New entries are blocked at a −$10 daily loss, −$15 portfolio drawdown, or an individual strategy pause.',
+      )
+      : t(
+        lang,
+        'Эта стратегия работает только в Shadow. Реальный исполнитель её не поддерживает и не может открыть по ней позицию.',
+        'This strategy is Shadow-only. The real executor does not support it and cannot open a position from its signals.',
+      )
     : t(
       lang,
       'Разные стратегии могут торговаться одновременно. Биржевой reduce-only stop ставится сразу на каждую позицию. При ручной паузе новые входы запрещены, но существующие позиции продолжают контролироваться и закрываться. Новые входы также блокируются при дневном убытке −$10, совокупной просадке −$15 или индивидуальной паузе стратегии.',

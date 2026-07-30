@@ -1,10 +1,13 @@
 import { request } from 'undici';
 import { db } from '../db/client.js';
-import { evaluateZ60Reclaim, type Z60Bar } from '../lib/lighter-z60.js';
+import {
+  evaluateZ60,
+  type Z60Bar,
+  type Z60EntryMode,
+} from '../lib/lighter-z60.js';
 import { logger } from '../lib/logger.js';
 import { queueLighterLuxalgoSignal } from '../strategies/lighter-luxalgo-lab.js';
 
-const STRATEGY_ID = 'sol-z60-reclaim';
 const SYMBOL = 'SOLUSDT';
 const MARKET_ID = 2;
 const MINUTE_MS = 60_000;
@@ -37,6 +40,16 @@ type OpenRow = {
 type LastClosedRow = {
   closed_at: number;
 };
+
+type NativeStrategy = {
+  id: string;
+  mode: Z60EntryMode;
+};
+
+const STRATEGIES: readonly NativeStrategy[] = [
+  { id: 'sol-z60-reclaim', mode: 'reclaim' },
+  { id: 'sol-z60-touch', mode: 'touch' },
+];
 
 const openPosition = db.prepare<[string], OpenRow>(`
   SELECT side, opened_at
@@ -126,6 +139,7 @@ async function fetchBars(latestBarTime: number): Promise<Z60Bar[]> {
 }
 
 function emit(
+  strategyId: string,
   action: 'entry' | 'exit',
   side: 'long' | 'short',
   barTime: number,
@@ -133,7 +147,7 @@ function emit(
 ): void {
   queueLighterLuxalgoSignal({
     kind: 'strategy',
-    strategy_id: STRATEGY_ID,
+    strategy_id: strategyId,
     action,
     side,
     strategy_event: action === 'entry' ? side : `exit_${side}`,
@@ -151,48 +165,49 @@ async function poll(): Promise<void> {
   running = true;
   try {
     const bars = await fetchBars(target);
-    const snapshot = evaluateZ60Reclaim(bars);
-    if (!snapshot) throw new Error('z60_history_incomplete');
+    for (const strategy of STRATEGIES) {
+      const snapshot = evaluateZ60(bars, 60, 3, strategy.mode);
+      if (!snapshot) throw new Error('z60_history_incomplete');
 
-    const open = openPosition.get(STRATEGY_ID);
-    if (open) {
-      const meanExit = open.side === 'long'
-        ? snapshot.close >= snapshot.mean
-        : snapshot.close <= snapshot.mean;
-      const timeExit = target + BAR_MS - open.opened_at >= TIME_EXIT_BARS * BAR_MS;
-      if (meanExit || timeExit) {
-        emit('exit', open.side, target, snapshot.close);
+      const open = openPosition.get(strategy.id);
+      if (open) {
+        const meanExit = open.side === 'long'
+          ? snapshot.close >= snapshot.mean
+          : snapshot.close <= snapshot.mean;
+        const timeExit = target + BAR_MS - open.opened_at >= TIME_EXIT_BARS * BAR_MS;
+        if (meanExit || timeExit) {
+          emit(strategy.id, 'exit', open.side, target, snapshot.close);
+          logger.info({
+            strategyId: strategy.id,
+            side: open.side,
+            barTime: target,
+            close: snapshot.close,
+            mean: snapshot.mean,
+            reason: meanExit ? 'sma60_cross' : 'time_240_bars',
+          }, 'lighter-z60: native exit signal');
+        }
+        continue;
+      }
+
+      // A protective stop that filled during this same completed candle must
+      // not be followed by an immediate same-bar re-entry.
+      const closed = lastClosed.get(strategy.id);
+      if (closed && Math.floor(closed.closed_at / BAR_MS) * BAR_MS === target) {
+        continue;
+      }
+
+      if (snapshot.signal) {
+        emit(strategy.id, 'entry', snapshot.signal, target, snapshot.close);
         logger.info({
-          strategyId: STRATEGY_ID,
-          side: open.side,
+          strategyId: strategy.id,
+          mode: strategy.mode,
+          side: snapshot.signal,
           barTime: target,
           close: snapshot.close,
-          mean: snapshot.mean,
-          reason: meanExit ? 'sma60_cross' : 'time_240_bars',
-        }, 'lighter-z60: native exit signal');
+          previousZ: snapshot.previousZ,
+          currentZ: snapshot.currentZ,
+        }, 'lighter-z60: native entry signal');
       }
-      lastEvaluatedBar = target;
-      return;
-    }
-
-    // A protective stop that filled during this same completed candle must not
-    // be followed by an immediate same-bar re-entry.
-    const closed = lastClosed.get(STRATEGY_ID);
-    if (closed && Math.floor(closed.closed_at / BAR_MS) * BAR_MS === target) {
-      lastEvaluatedBar = target;
-      return;
-    }
-
-    if (snapshot.signal) {
-      emit('entry', snapshot.signal, target, snapshot.close);
-      logger.info({
-        strategyId: STRATEGY_ID,
-        side: snapshot.signal,
-        barTime: target,
-        close: snapshot.close,
-        previousZ: snapshot.previousZ,
-        currentZ: snapshot.currentZ,
-      }, 'lighter-z60: native entry signal');
     }
     lastEvaluatedBar = target;
   } catch (error) {
@@ -206,7 +221,7 @@ export function startLighterZ60Runner(): void {
   if (started) return;
   started = true;
   logger.info({
-    strategyId: STRATEGY_ID,
+    strategyIds: STRATEGIES.map((strategy) => strategy.id),
     symbol: SYMBOL,
     timeframe: '5m',
     commissionPct: 0,

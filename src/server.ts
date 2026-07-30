@@ -236,9 +236,9 @@ async function main(): Promise<void> {
   // No API keys and no transaction path; records executable $1000 VWAP at
   // webhook+300ms for the public /lab card.
   startLighterLuxalgoShadowFeed();
-  // STRAT-030 uses native Lighter 1m candles aggregated into completed 5m
-  // bars. It writes only to the existing shadow tables and never places an
-  // exchange order, avoiding LuxAlgo Quant's unsupported custom-alert path.
+  // STRAT-030/031 use native Lighter 1m candles aggregated into completed 5m
+  // bars. The runner writes only to the existing shadow signal path; the
+  // independent live executor remains explicitly allowlisted to STRAT-030.
   startLighterZ60Runner();
   // Hyperliquid microstructure collector: WS trades→CVD + per-min OI/funding/
   // book → hl_micro. Forward-collects the data the order-flow strategies need

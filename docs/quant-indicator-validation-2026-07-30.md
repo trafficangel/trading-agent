@@ -121,3 +121,39 @@ The auditable Pine reference is
 `research/lighter-quant/lighter-sol-z60-reclaim.pine`.
 
 The native reproduction runner is `scripts/sweep-lighter-native-1m.ts`.
+
+## Candidate 5 — Lighter SOL Z60 Touch Dual
+
+The highest-frequency adjacent configuration that still clears the base
+robustness gate enters on the completed candle **outside** the same three-sigma
+band instead of waiting for a reclaim:
+
+- long when current Z-score is below `-3`;
+- short when current Z-score is above `+3`;
+- next-bar execution, SMA(60) mean exit, 1.5% catastrophe stop and 240-bar time
+  exit are unchanged;
+- no regime filter, pyramiding or same-bar reversal.
+
+| Lookback | Trades | Net after 0.02% stress/funding | PF | Long / short net |
+|---:|---:|---:|---:|---:|
+| 30d | 67 | +12.84% | 1.69 | +6.54% / +6.30% |
+| 60d | 143 | +28.51% | 1.48 | +13.28% / +15.23% |
+| 90d | 213 | +26.83% | 1.31 | +12.71% / +14.12% |
+| 120d | 287 | +42.79% | 1.41 | +21.71% / +21.08% |
+| 180d | 451 | +49.71% | 1.25 | +30.79% / +18.93% |
+
+At 0.05% round-trip stress the 30/60/90/120-day windows still clear PF 1.2;
+the full 180-day result remains positive at +36.18% but PF falls to 1.18. The
+base-stress maximum drawdown is 23.84 percentage points.
+
+Lower thresholds increase turnover but fail the robustness gate: at thresholds
+2.6–2.9 the 180-day PF is only 1.07–1.17 and drawdown rises to 33.58–37.00
+percentage points. Therefore `3.0` is the maximum-frequency point admitted;
+it was not loosened merely to manufacture more trades.
+
+This model is highly correlated with STRAT-030 and has the larger drawdown. It
+is admitted only to prospective Shadow as `sol-z60-touch` (`STRAT-031`).
+It is not allowlisted in the real Lighter executor.
+
+The auditable Pine reference is
+`research/lighter-quant/lighter-sol-z60-touch.pine`.

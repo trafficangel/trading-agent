@@ -164,6 +164,23 @@ until its incremental portfolio value is measured.
 
 ## Reproduction
 
+### Native Lighter Z60 variants
+
+`STRAT-031 / sol-z60-touch` is the only additional native-candle candidate
+admitted from the high-frequency sweep. It enters on a completed SOL 5m candle
+outside the Z60 ±3 band, then uses the same SMA60 mean exit, 1.5% catastrophe
+stop and 240-bar time exit as STRAT-030.
+
+The 180-day native Lighter result is 451 trades and +49.71% after 0.02%
+round-trip execution stress plus adverse funding (PF 1.25); both directions
+and every 30/60/90/120/180-day window are positive. Lower Z thresholds created
+more turnover but failed the PF/drawdown gate. Because the touch version is
+highly correlated with STRAT-030 and has the larger drawdown, it is Shadow-only
+and is not allowlisted in the real executor.
+
+Pine reference:
+`research/lighter-quant/lighter-sol-z60-touch.pine`.
+
 Run on the VPS, where the historical kline cache is populated:
 
 ```bash
