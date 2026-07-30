@@ -99,13 +99,23 @@ def execution_evidence(
     route_id: str,
     observation_started_at_ms: int,
 ) -> dict[str, int]:
-    eligible = [
-        event
-        for event in events
-        if event.get("routeId") == route_id
-        and int(finite_number(event.get("at")) or 0)
-        >= observation_started_at_ms
-    ]
+    eligible = sorted(
+        [
+            event
+            for event in events
+            if event.get("routeId") == route_id
+            and int(finite_number(event.get("at")) or 0)
+            >= observation_started_at_ms
+        ],
+        key=lambda event: int(finite_number(event.get("at")) or 0),
+    )
+    quotes_activated_since_last_progress = 0
+    for event in eligible:
+        event_type = event.get("type")
+        if event_type == "quote_activated":
+            quotes_activated_since_last_progress += 1
+        elif event_type in ("queue_progress", "queue_filled"):
+            quotes_activated_since_last_progress = 0
     return {
         "quotesCreated": sum(
             event.get("type") == "quote_created" for event in eligible
@@ -119,6 +129,8 @@ def execution_evidence(
         "queueFills": sum(
             event.get("type") == "queue_filled" for event in eligible
         ),
+        "quotesActivatedSinceLastProgress":
+            quotes_activated_since_last_progress,
     }
 
 
@@ -220,17 +232,27 @@ def evaluate(
         "quotesActivated": 0,
         "queueProgressEvents": 0,
         "queueFills": 0,
+        "quotesActivatedSinceLastProgress": 0,
     }
+    activated_without_progress = execution_metrics.get(
+        "quotesActivatedSinceLastProgress",
+        (
+            execution_metrics["quotesActivated"]
+            if (
+                execution_metrics["queueProgressEvents"] == 0
+                and execution_metrics["queueFills"] == 0
+            )
+            else 0
+        ),
+    )
     if (
         max_activated_quotes_without_progress > 0
-        and execution_metrics["quotesActivated"]
+        and activated_without_progress
         >= max_activated_quotes_without_progress
-        and execution_metrics["queueProgressEvents"] == 0
-        and execution_metrics["queueFills"] == 0
     ):
         no_go_reasons.append(
-            f"{execution_metrics['quotesActivated']} activated quotes "
-            "without queue progress"
+            f"{activated_without_progress} activated quotes "
+            "since last queue progress"
         )
     if len(technical_failures) > max_technical_failures:
         no_go_reasons.append(
@@ -496,7 +518,7 @@ def self_test() -> None:
         max_activated_quotes_without_progress=100,
     )
     assert unfillable["decision"] == "NO_GO"
-    assert "without queue progress" in unfillable["noGoReasons"][-1]
+    assert "since last queue progress" in unfillable["noGoReasons"][-1]
     evidence_with_progress = execution_evidence(
         events + [{
             "routeId": "a-b",
@@ -518,6 +540,37 @@ def self_test() -> None:
         max_activated_quotes_without_progress=100,
     )
     assert still_observing["decision"] == "OBSERVE"
+    stalled_again_events = events + [{
+        "routeId": "a-b",
+        "at": 3_000,
+        "type": "queue_filled",
+    }] + [
+        {
+            "routeId": "a-b",
+            "at": 4_000 + index,
+            "type": "quote_activated",
+        }
+        for index in range(100)
+    ]
+    stalled_again = evaluate(
+        [],
+        route_id="a-b",
+        notional_usd=100,
+        min_samples=30,
+        min_profit_factor=1.2,
+        max_drawdown_bps=10,
+        independence_ms=60_000,
+        execution=execution_evidence(
+            stalled_again_events,
+            route_id="a-b",
+            observation_started_at_ms=1_000,
+        ),
+        max_activated_quotes_without_progress=100,
+    )
+    assert stalled_again["decision"] == "NO_GO"
+    assert stalled_again["execution"][
+        "quotesActivatedSinceLastProgress"
+    ] == 100
     technical_failure = evaluate(
         [{
             "routeId": "a-b",
