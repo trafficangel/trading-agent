@@ -69,6 +69,10 @@ Environment=VENUE_ARB_BITFINEX_LIGHTER_MAKER_QUOTE_TTL_MS=30000
 Environment=VENUE_ARB_BITFINEX_LIGHTER_MAKER_MAX_QUEUE_USD=100000
 Environment=VENUE_ARB_BITFINEX_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS=1000
 Environment=VENUE_ARB_BITFINEX_LIGHTER_MAKER_MAX_TRADE_IDLE_MS=15000
+# Exploratory shadow only: the strict 5 bps deviation gate produced no quotes
+# despite positive full-cycle maker projections. Queue/fill/hedge validation
+# remains unchanged and real trading stays disabled.
+Environment=VENUE_ARB_BITFINEX_LIGHTER_MAKER_BASIS_MIN_DEVIATION_BPS=1
 Environment=VENUE_ARB_ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED=false
 Environment=VENUE_ARB_HOTSTUFF_LIGHTER_MAKER_SHADOW_ENABLED=false
 Environment=VENUE_ARB_EXTENDED_LIGHTER_MAKER_SHADOW_ENABLED=false
