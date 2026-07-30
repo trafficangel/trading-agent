@@ -2100,6 +2100,8 @@ async function render(
   },
 ): Promise<string> {
   const strategyId = requested.strategy?.id ?? null;
+  const realSupported = strategyId == null || strategyId === 'sol-z60-reclaim';
+  const dataset: PortfolioDataset = realSupported ? requested.dataset : 'shadow';
   const scopeSpecs = requested.strategy ? [requested.strategy] : [...STRATEGIES];
   const s = summary(requested.strategy ?? undefined);
   const signalsTotal = signalTotal(strategyId);
@@ -2144,15 +2146,17 @@ async function render(
   const liveEntryEnabled = liveState?.enabled === 1;
   const liveRunnerLabel = !liveMonitor
     ? 'OFFLINE'
-    : livePortfolioPaused
-      ? 'RISK PAUSED'
-      : liveEntryEnabled
-        ? 'ARMED'
-        : t(
-          lang,
-          'REAL НА ПАУЗЕ · ВЫХОДЫ И СТОПЫ АКТИВНЫ',
-          'REAL PAUSED · EXITS AND STOPS ACTIVE',
-        );
+    : !realSupported
+      ? 'SHADOW ONLY'
+      : livePortfolioPaused
+        ? 'RISK PAUSED'
+        : liveEntryEnabled
+          ? 'ARMED'
+          : t(
+            lang,
+            'REAL НА ПАУЗЕ · ВЫХОДЫ И СТОПЫ АКТИВНЫ',
+            'REAL PAUSED · EXITS AND STOPS ACTIVE',
+          );
   const liveGatePassed = liveSummary.closed >= 30
     && liveSummary.netUsd > 0
     && (liveSummary.profitFactor ?? 0) >= 1.2
@@ -2183,7 +2187,7 @@ async function render(
     signalsPage,
     tradesPage,
     strategyId,
-    dataset: requested.dataset,
+    dataset,
     chartUnit,
     anchor: 'pnl-chart',
   });
@@ -2294,8 +2298,8 @@ async function render(
 
       <div class="ll-modebar" id="portfolio-view">
         <div><small>${t(lang, 'Показатели', 'Dataset')}</small><nav class="ll-tabs">
-          <a href="${datasetHref('shadow')}" class="${requested.dataset === 'shadow' ? 'active' : ''}">Shadow</a>
-          <a href="${datasetHref('real')}" class="real ${requested.dataset === 'real' ? 'active' : ''}">Real</a>
+          <a href="${datasetHref('shadow')}" class="${dataset === 'shadow' ? 'active' : ''}">Shadow</a>
+          ${realSupported ? `<a href="${datasetHref('real')}" class="real ${dataset === 'real' ? 'active' : ''}">Real</a>` : ''}
         </nav></div>
         <div><small>${t(lang, 'Шкала графика', 'Chart scale')}</small><nav class="ll-tabs">
           <a href="${chartHref('usd')}" class="${requested.chartUnit === 'usd' ? 'active' : ''}">${t(lang, 'Деньги $', 'Money $')}</a>
@@ -2304,10 +2308,10 @@ async function render(
       </div>
 
       <div class="ll-grid">
-        ${requested.dataset === 'shadow' ? shadowCards : realCards}
+        ${dataset === 'shadow' ? shadowCards : realCards}
       </div>
 
-      ${pnlChart(lang, requested.dataset, requested.chartUnit, strategyId)}
+      ${pnlChart(lang, dataset, requested.chartUnit, strategyId)}
 
       ${scopeControl}
 
@@ -2322,16 +2326,16 @@ async function render(
           <thead><tr><th>Strategy</th><th>${t(lang, 'Сигнал №', 'Signal #')}</th><th>${t(lang, 'Время UTC', 'Time UTC')}</th><th>Event</th><th>Shadow-${t(lang, 'сделка', 'trade')}</th><th>Real-${t(lang, 'сделка', 'trade')}</th><th>${t(lang, 'Статус сигнала', 'Signal status')}</th></tr></thead>
           <tbody>${signalRows(signals, lang)}</tbody>
         </table></div>
-        ${pager({ lang, page: signalsPage, total: signalsTotal, pageSize: SIGNAL_PAGE_SIZE, signalsPage, tradesPage, target: 'signals', strategyId, dataset: requested.dataset, chartUnit: requested.chartUnit })}
+        ${pager({ lang, page: signalsPage, total: signalsTotal, pageSize: SIGNAL_PAGE_SIZE, signalsPage, tradesPage, target: 'signals', strategyId, dataset, chartUnit: requested.chartUnit })}
       </div>
 
       <div class="ll-panel" id="shadow-trades"><h2>${t(lang, 'Сделки', 'Trades')}</h2><div class="ll-table"><table class="ll-trades ll-shadow-trades">
         <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>${t(lang, 'Цена входа', 'Entry price')}</th><th>${t(lang, 'Стоп-лосс', 'Stop-loss')}</th><th>${t(lang, 'Цена выхода', 'Exit price')}</th><th>${t(lang, 'Статус', 'Status')}</th><th>Net after costs</th></tr></thead>
         <tbody>${tradeRows(trades, lang)}</tbody>
       </table></div>
-      ${pager({ lang, page: tradesPage, total: tradesTotal, pageSize: TRADE_PAGE_SIZE, signalsPage, tradesPage, target: 'trades', strategyId, dataset: requested.dataset, chartUnit: requested.chartUnit })}</div>
+      ${pager({ lang, page: tradesPage, total: tradesTotal, pageSize: TRADE_PAGE_SIZE, signalsPage, tradesPage, target: 'trades', strategyId, dataset, chartUnit: requested.chartUnit })}</div>
 
-      <div class="ll-panel"><div class="ll-chart-head"><div><h2>${t(lang, 'Реальная торговля · canary', 'Live trading · canary')}</h2>
+      ${realSupported ? `<div class="ll-panel"><div class="ll-chart-head"><div><h2>${t(lang, 'Реальная торговля · canary', 'Live trading · canary')}</h2>
         <p class="ll-note"><b class="${livePortfolioPaused || !liveMonitor || !liveEntryEnabled ? 'fail' : 'pass'}">${liveRunnerLabel} · $100 · 10x.</b> ${liveScopeText}${liveState?.last_error ? ` <span class="neg">${esc(liveState.last_error)}</span>` : ''}${liveState?.portfolio_pause_reason ? ` <span class="neg">${esc(liveState.portfolio_pause_reason)}</span>` : ''}</p>
         </div><span class="ll-badge ${liveGatePassed ? 'pass' : 'collect'}">${liveGatePassed ? t(lang, 'LIVE ГЕЙТ ПРОЙДЕН', 'LIVE GATE PASSED') : `${t(lang, 'LIVE ВАЛИДАЦИЯ', 'LIVE VALIDATION')} ${liveSummary.closed}/30`}</span></div>
         <div class="ll-live-grid">
@@ -2349,7 +2353,7 @@ async function render(
           <thead><tr><th>Strategy</th><th>${t(lang, 'Открыта → закрыта UTC', 'Opened → closed UTC')}</th><th>Side / size</th><th>${t(lang, 'Цена входа', 'Entry price')}</th><th>${t(lang, 'Стоп-лосс', 'Stop-loss')}</th><th>${t(lang, 'Цена выхода', 'Exit price')}</th><th>${t(lang, 'Статус', 'Status')}</th><th>Net after costs</th></tr></thead>
           <tbody>${liveTradeRows(liveTrades, lang)}</tbody>
         </table></div>
-      </div>
+      </div>` : ''}
 
       <p class="ll-note">${t(lang, 'Комиссия Lighter Standard — 0%. Spread и slippage уже включены в entry/exit VWAP; funding учитывается отдельно. Расхождение Lux→VWAP измеряется, но не блокирует shadow-вход; значения выше 0.2% подсвечиваются.', 'Lighter Standard trading fee is 0%. Spread and slippage are embedded in entry/exit VWAP; funding is accounted separately. Lux→VWAP deviation is measured but does not block shadow entry; values above 0.2% are highlighted.')}</p>
     </div>`,
