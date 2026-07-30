@@ -48,6 +48,28 @@ def mean_confidence_lower(values: list[float]) -> float | None:
     return mean - 1.96 * standard_error
 
 
+def row_timestamp(row: dict[str, Any]) -> int:
+    return int(
+        finite_number(row.get("exitAt"))
+        or finite_number(row.get("closedAt"))
+        or finite_number(row.get("signalAt"))
+        or finite_number(row.get("openedAt"))
+        or 0
+    )
+
+
+def technical_failure_reason(row: dict[str, Any]) -> str | None:
+    if finite_number(row.get("realizedNetBps")) is not None:
+        return None
+    reason = str(row.get("reason") or "")
+    unsafe_fragments = (
+        "hedge_timeout",
+        "unhedged",
+        "exit_without_pair",
+    )
+    return reason if any(fragment in reason for fragment in unsafe_fragments) else None
+
+
 def independent_episode_values(
     rows: list[dict[str, Any]],
     independence_ms: int,
@@ -56,13 +78,7 @@ def independent_episode_values(
     episode_started_at: int | None = None
     for row in rows:
         value = finite_number(row.get("realizedNetBps"))
-        at = int(
-            finite_number(row.get("exitAt"))
-            or finite_number(row.get("closedAt"))
-            or finite_number(row.get("signalAt"))
-            or finite_number(row.get("openedAt"))
-            or 0
-        )
+        at = row_timestamp(row)
         if value is None:
             continue
         if (
@@ -123,22 +139,27 @@ def evaluate(
     negative_assessment_min_trades: int = 10,
     execution: dict[str, int] | None = None,
     max_activated_quotes_without_progress: int = 0,
+    max_technical_failures: int = 0,
 ) -> dict[str, Any]:
     evaluated_at = now_ms or int(time.time() * 1000)
     observation_started_at = observation_started_at_ms or evaluated_at
+    row_cutoff_at = observation_started_at_ms or 0
     eligible = [
         row
         for row in rows
         if row.get("routeId") == route_id
+        and row_timestamp(row) >= row_cutoff_at
         and finite_number(row.get("realizedNetBps")) is not None
     ]
-    eligible.sort(
-        key=lambda row: int(
-            finite_number(row.get("exitAt"))
-            or finite_number(row.get("closedAt"))
-            or 0
-        )
-    )
+    eligible.sort(key=row_timestamp)
+    technical_failures = [
+        row
+        for row in rows
+        if row.get("routeId") == route_id
+        and row_timestamp(row) >= row_cutoff_at
+        and technical_failure_reason(row) is not None
+    ]
+    technical_failures.sort(key=row_timestamp)
     trade_values = [
         float(finite_number(row["realizedNetBps"]))
         for row in eligible
@@ -211,6 +232,11 @@ def evaluate(
             f"{execution_metrics['quotesActivated']} activated quotes "
             "without queue progress"
         )
+    if len(technical_failures) > max_technical_failures:
+        no_go_reasons.append(
+            f"technical execution failures {len(technical_failures)}"
+            f"/{max_technical_failures}"
+        )
     no_go = bool(no_go_reasons)
     ready = not reasons and not no_go
     by_coin: dict[str, list[float]] = defaultdict(list)
@@ -241,10 +267,23 @@ def evaluate(
             "negativeAssessmentMinTrades": negative_assessment_min_trades,
             "maxActivatedQuotesWithoutProgress":
                 max_activated_quotes_without_progress,
+            "maxTechnicalFailures": max_technical_failures,
         },
         "metrics": {
+            "attempts": len(trade_values) + len(technical_failures),
             "samples": len(values),
             "trades": len(trade_values),
+            "technicalFailures": len(technical_failures),
+            "technicalFailuresByReason": dict(sorted({
+                reason: sum(
+                    technical_failure_reason(row) == reason
+                    for row in technical_failures
+                )
+                for reason in {
+                    str(technical_failure_reason(row))
+                    for row in technical_failures
+                }
+            }.items())),
             "positive": sum(value > 0 for value in values),
             "winRatePct": (
                 sum(value > 0 for value in values) / len(values) * 100
@@ -320,7 +359,7 @@ def self_test() -> None:
             "routeId": "a-b",
             "coin": "X",
             "realizedNetBps": 2 + (index % 3),
-            "exitAt": index * 60_000,
+            "exitAt": (index + 1) * 60_000,
         }
         for index in range(30)
     ]
@@ -479,6 +518,47 @@ def self_test() -> None:
         max_activated_quotes_without_progress=100,
     )
     assert still_observing["decision"] == "OBSERVE"
+    technical_failure = evaluate(
+        [{
+            "routeId": "a-b",
+            "coin": "X",
+            "realizedNetBps": None,
+            "closedAt": 2_000,
+            "reason": "exit_hedge_timeout",
+        }],
+        route_id="a-b",
+        notional_usd=100,
+        min_samples=30,
+        min_profit_factor=1.2,
+        max_drawdown_bps=10,
+        independence_ms=60_000,
+        observation_started_at_ms=1_000,
+        now_ms=3_000,
+    )
+    assert technical_failure["decision"] == "NO_GO"
+    assert technical_failure["metrics"]["technicalFailures"] == 1
+    assert "technical execution failures 1/0" in (
+        technical_failure["noGoReasons"][-1]
+    )
+    pre_observation_failure = evaluate(
+        [{
+            "routeId": "a-b",
+            "coin": "X",
+            "realizedNetBps": None,
+            "closedAt": 999,
+            "reason": "exit_hedge_timeout",
+        }],
+        route_id="a-b",
+        notional_usd=100,
+        min_samples=30,
+        min_profit_factor=1.2,
+        max_drawdown_bps=10,
+        independence_ms=60_000,
+        observation_started_at_ms=1_000,
+        now_ms=3_000,
+    )
+    assert pre_observation_failure["decision"] == "OBSERVE"
+    assert pre_observation_failure["metrics"]["technicalFailures"] == 0
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "gate.json"
         atomic_json(path, winning)
@@ -574,6 +654,14 @@ def main() -> None:
             "0",
         )),
     )
+    parser.add_argument(
+        "--max-technical-failures",
+        type=int,
+        default=int(os.getenv(
+            "VENUE_ARB_GATE_MAX_TECHNICAL_FAILURES",
+            "0",
+        )),
+    )
     args = parser.parse_args()
     if args.self_test:
         self_test()
@@ -630,6 +718,7 @@ def main() -> None:
             0,
             args.max_activated_quotes_without_progress,
         ),
+        max_technical_failures=max(0, args.max_technical_failures),
     )
     atomic_json(output_path, result)
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
