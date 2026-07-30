@@ -17,6 +17,10 @@ Environment=VENUE_ARB_GATE_MIN_SAMPLES=30
 Environment=VENUE_ARB_GATE_MIN_PROFIT_FACTOR=1.2
 Environment=VENUE_ARB_GATE_MAX_DRAWDOWN_BPS=50
 Environment=VENUE_ARB_GATE_INDEPENDENCE_MS=60000
+# No activated quote after two hours is enough evidence that this route does
+# not currently offer executable positive edge.
+Environment=VENUE_ARB_GATE_NO_GO_AFTER_HOURS=2
+Environment=VENUE_ARB_GATE_HARD_NO_GO_AFTER_HOURS=2
 Environment=VENUE_ARB_GATE_MAX_ACTIVATED_QUOTES_WITHOUT_PROGRESS=100
 Environment=VENUE_ARB_GATE_REQUIRE_TRADE_THROUGH_FILLS=false
 ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-shadow-gate.py
