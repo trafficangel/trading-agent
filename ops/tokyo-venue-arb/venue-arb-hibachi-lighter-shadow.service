@@ -10,10 +10,10 @@ Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/hibachi-lighter-shadow
 Environment=VENUE_ARB_ACTIVE_VENUES=hibachi,lighter
-# All three completed positive Hibachi cycles were SUI. Other markets consumed
-# the route's single maker slot without queue progress. Use prior evidence only
-# to select SUI; the strict forward gate still requires 30 new episodes.
-Environment=VENUE_ARB_ACTIVE_COINS=SUI
+# The earlier SUI-only selection relied on fills produced by the retired
+# optimistic model. Scan every common market under the volume-constrained
+# model; the separate sticky cohort remains the SUI control.
+Environment=VENUE_ARB_ACTIVE_COINS=BTC,ETH,SOL,HYPE,XRP,BNB,SUI,PAXG
 Environment=VENUE_ARB_SAMPLE_MS=100
 Environment=VENUE_ARB_STALE_MS=1500
 Environment=VENUE_ARB_EXECUTION_BUFFER_BPS=2
@@ -69,7 +69,7 @@ Environment=VENUE_ARB_MAKER_MIN_RAW_ENTRY_NET_BPS=5
 Environment=VENUE_ARB_MAKER_EXIT_QUOTE_DATA_GRACE_MS=5000
 Environment=VENUE_ARB_MAKER_EXIT_QUOTE_TTL_MS=900000
 Environment=VENUE_ARB_FEE_BPS_HIBACHI=4.5
-Environment=VENUE_ARB_LIGHTER_TRADE_COINS=SUI
+Environment=VENUE_ARB_LIGHTER_TRADE_COINS=BTC,ETH,SOL,HYPE,XRP,BNB,SUI,PAXG
 Environment=VENUE_ARB_LIGHTER_BOOK_REFRESH_MS=0
 Environment=VENUE_ARB_LIGHTER_MARKETS_PER_CONNECTION=6
 Environment=VENUE_ARB_LIGHTER_BBO_MISMATCH_REFRESH_COUNT=0
