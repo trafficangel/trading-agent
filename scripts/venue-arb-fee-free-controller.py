@@ -24,6 +24,7 @@ ETHEREAL_SHADOW_SERVICE = "venue-arb-ethereal-lighter-shadow.service"
 ETHEREAL_GATE_TIMER = "venue-arb-ethereal-lighter-maker-gate.timer"
 HOTSTUFF_SHADOW_SERVICE = "venue-arb-hotstuff-lighter-shadow.service"
 HOTSTUFF_GATE_TIMER = "venue-arb-hotstuff-lighter-maker-gate.timer"
+CONTROLLER_TIMER = "venue-arb-fee-free-controller.timer"
 
 
 def read_gate(path: Path) -> dict[str, Any] | None:
@@ -60,6 +61,15 @@ def stop_plan(
     coinbase_no_go = is_no_go(coinbase_gate)
     ethereal_no_go = is_no_go(ethereal_gate)
     hotstuff_no_go = is_no_go(hotstuff_gate)
+    all_no_go = (
+        aster_no_go
+        and extended_no_go
+        and grvt_no_go
+        and hibachi_no_go
+        and coinbase_no_go
+        and ethereal_no_go
+        and hotstuff_no_go
+    )
     stop_units: list[str] = []
     disable_units: list[str] = []
     if aster_no_go:
@@ -86,6 +96,9 @@ def stop_plan(
     if hotstuff_no_go:
         stop_units.extend([HOTSTUFF_SHADOW_SERVICE, HOTSTUFF_GATE_TIMER])
         disable_units.extend([HOTSTUFF_SHADOW_SERVICE, HOTSTUFF_GATE_TIMER])
+    if all_no_go:
+        stop_units.append(CONTROLLER_TIMER)
+        disable_units.append(CONTROLLER_TIMER)
     return {
         "asterNoGo": aster_no_go,
         "extendedNoGo": extended_no_go,
@@ -94,15 +107,7 @@ def stop_plan(
         "coinbaseNoGo": coinbase_no_go,
         "etherealNoGo": ethereal_no_go,
         "hotstuffNoGo": hotstuff_no_go,
-        "allNoGo": (
-            aster_no_go
-            and extended_no_go
-            and grvt_no_go
-            and hibachi_no_go
-            and coinbase_no_go
-            and ethereal_no_go
-            and hotstuff_no_go
-        ),
+        "allNoGo": all_no_go,
         "stopUnits": stop_units,
         "disableUnits": disable_units,
     }
@@ -208,6 +213,7 @@ def self_test() -> None:
         COINBASE_GATE_TIMER,
         ETHEREAL_GATE_TIMER,
         HOTSTUFF_GATE_TIMER,
+        CONTROLLER_TIMER,
     }
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "controller.json"
