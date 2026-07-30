@@ -1554,7 +1554,7 @@ export class GenericMakerShadow {
     const netBps = completed.map((row) => Number(row.realizedNetBps));
     const sumNetBps = netBps.reduce((sum, value) => sum + value, 0);
     return {
-      version: 'generic-maker-shadow-v1',
+      version: 'generic-maker-shadow-v2-volume-constrained',
       routeId: this.config.routeId,
       config: this.config,
       readiness: {

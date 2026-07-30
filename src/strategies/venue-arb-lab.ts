@@ -1703,6 +1703,7 @@ async function renderCompact(lang: Lang): Promise<string> {
 
       <section class="va-panel">
         <div class="va-panel-head"><h2>Маршруты с нулевой комиссией на входе</h2><span>maker 0% · Lighter 0% · taker-выход и буфер вычитаются из net</span></div>
+        <p class="va-compact-note">Строгая эпоха с 07-30 03:48 UTC: maker-fill засчитывается только после публично наблюдаемого объёма, достаточного для очереди и всей нашей заявки. Более ранние оптимистичные fills исключены.</p>
         <div class="va-table"><table><thead><tr>
           <th>Маршрут</th><th>Net сейчас</th><th>Shadow gate</th><th>Статус</th>
         </tr></thead><tbody>${candidateRouteRows(candidateStatus, asterStatus, hibachiStatus, hibachiStickyStatus, coinbaseStatus, etherealStatus, hotstuffStatus, {
