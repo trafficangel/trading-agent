@@ -1,0 +1,11 @@
+[Unit]
+Description=Evaluate $1,000 Hibachi/Lighter capacity gate every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=5s
+Unit=venue-arb-hibachi-lighter-capacity-gate.service
+
+[Install]
+WantedBy=timers.target

@@ -515,6 +515,18 @@ const HIBACHI_LIGHTER_MAKER_EVENTS_PATH = resolve(
   DATA_DIR,
   'hibachi-lighter-maker-events-v1.ndjson',
 );
+const HIBACHI_LIGHTER_CAPACITY_RESULTS_PATH = resolve(
+  DATA_DIR,
+  'hibachi-lighter-capacity-shadow-v1.ndjson',
+);
+const HIBACHI_LIGHTER_CAPACITY_ACTIVE_PATH = resolve(
+  DATA_DIR,
+  'hibachi-lighter-capacity-active-v1.json',
+);
+const HIBACHI_LIGHTER_CAPACITY_EVENTS_PATH = resolve(
+  DATA_DIR,
+  'hibachi-lighter-capacity-events-v1.ndjson',
+);
 const COINBASE_LIGHTER_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
   'coinbase-lighter-maker-basis-shadow-v1.ndjson',
@@ -961,6 +973,18 @@ const HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
 const HIBACHI_LIGHTER_MAKER_NOTIONAL_USD = finiteEnv(
   'VENUE_ARB_HIBACHI_LIGHTER_MAKER_NOTIONAL_USD',
   100,
+);
+const HIBACHI_LIGHTER_CAPACITY_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_HIBACHI_LIGHTER_CAPACITY_SHADOW_ENABLED',
+  false,
+);
+const HIBACHI_LIGHTER_CAPACITY_NOTIONAL_USD = finiteEnv(
+  'VENUE_ARB_HIBACHI_LIGHTER_CAPACITY_NOTIONAL_USD',
+  1_000,
+);
+const HIBACHI_LIGHTER_ANY_SHADOW_ENABLED = (
+  HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED
+  || HIBACHI_LIGHTER_CAPACITY_SHADOW_ENABLED
 );
 const HIBACHI_LIGHTER_MAKER_ENTRY_EDGE_BPS = finiteEnv(
   'VENUE_ARB_HIBACHI_LIGHTER_MAKER_ENTRY_EDGE_BPS',
@@ -2394,6 +2418,65 @@ const hibachiLighterMakerShadow = new GenericMakerShadow({
   onEvent: (event) => {
     appendFileSync(
       HIBACHI_LIGHTER_MAKER_EVENTS_PATH,
+      `${JSON.stringify(event)}\n`,
+    );
+  },
+});
+const hibachiLighterCapacityShadow = new GenericMakerShadow({
+  routeId: 'hibachi-maker-lighter-capacity',
+  makerVenue: 'hibachi',
+  hedgeVenue: 'lighter',
+  notionalUsd: HIBACHI_LIGHTER_CAPACITY_NOTIONAL_USD,
+  entryEdgeBps: HIBACHI_LIGHTER_MAKER_ENTRY_EDGE_BPS,
+  cancelEdgeBps: HIBACHI_LIGHTER_MAKER_CANCEL_EDGE_BPS,
+  postFillNetBps: HIBACHI_LIGHTER_MAKER_POST_FILL_NET_BPS,
+  exitNetBps: HIBACHI_LIGHTER_MAKER_EXIT_NET_BPS,
+  takerExitNetBps: HIBACHI_LIGHTER_MAKER_EXIT_NET_BPS,
+  quoteLatencyMs: HIBACHI_LIGHTER_MAKER_QUOTE_LATENCY_MS,
+  hedgeLatencyMs: HIBACHI_LIGHTER_MAKER_HEDGE_LATENCY_MS,
+  quoteTtlMs: HIBACHI_LIGHTER_MAKER_QUOTE_TTL_MS,
+  maxQueueUsd: HIBACHI_LIGHTER_MAKER_MAX_QUEUE_USD,
+  quoteDataGraceMs: HIBACHI_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS,
+  hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
+  maxHoldMs: MAKER_MAX_HOLD_MS,
+  independenceMs: MAKER_INDEPENDENCE_MS,
+  bookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  sourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  maxHoldExitHedgeFreshMs: LIGHTER_REST_MAX_HOLD_EXIT_FRESH_MS,
+  makerBookFreshMs: SHADOW_EXECUTION_FRESH_MS,
+  makerSourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  hedgeBookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  hedgeSourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  executionBufferBps: EXECUTION_BUFFER_BPS,
+  makerFeeBps: 0,
+  hedgeTakerFeeBps: FEE_BPS.lighter,
+  makerFallbackTakerFeeBps: FEE_BPS.hibachi,
+  fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+  requiredSamples: SHADOW_REQUIRED_SAMPLES,
+  requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
+  maxEntryDistanceBps: 3,
+  maxMakerTradeIdleMs: HIBACHI_LIGHTER_MAKER_MAX_TRADE_IDLE_MS,
+}, {
+  onResult: (result) => {
+    appendFileSync(
+      HIBACHI_LIGHTER_CAPACITY_RESULTS_PATH,
+      `${JSON.stringify(result)}\n`,
+    );
+  },
+  onCheckpoint: (checkpoint) => {
+    atomicJson(HIBACHI_LIGHTER_CAPACITY_ACTIVE_PATH, {
+      ...checkpoint,
+      updatedAt: Date.now(),
+    });
+  },
+  onEvent: (event) => {
+    appendFileSync(
+      HIBACHI_LIGHTER_CAPACITY_EVENTS_PATH,
       `${JSON.stringify(event)}\n`,
     );
   },
@@ -4468,8 +4551,13 @@ function connect(
         grvtExtendedMakerShadow.setTradeStreamConnected(false);
       }
     }
-    if (venue === 'hibachi' && HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED) {
-      hibachiLighterMakerShadow.setTradeStreamConnected(false);
+    if (venue === 'hibachi' && HIBACHI_LIGHTER_ANY_SHADOW_ENABLED) {
+      if (HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED) {
+        hibachiLighterMakerShadow.setTradeStreamConnected(false);
+      }
+      if (HIBACHI_LIGHTER_CAPACITY_SHADOW_ENABLED) {
+        hibachiLighterCapacityShadow.setTradeStreamConnected(false);
+      }
     }
     if (venue === 'coinbase' && COINBASE_LIGHTER_MAKER_SHADOW_ENABLED) {
       coinbaseLighterMakerShadow.setTradeStreamConnected(false);
@@ -4504,9 +4592,15 @@ function connect(
         grvtExtendedMakerShadow.recordTradeReconnect();
       }
     }
-    if (venue === 'hibachi' && HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED) {
-      hibachiLighterMakerShadow.setTradeStreamConnected(false);
-      hibachiLighterMakerShadow.recordTradeReconnect();
+    if (venue === 'hibachi' && HIBACHI_LIGHTER_ANY_SHADOW_ENABLED) {
+      if (HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED) {
+        hibachiLighterMakerShadow.setTradeStreamConnected(false);
+        hibachiLighterMakerShadow.recordTradeReconnect();
+      }
+      if (HIBACHI_LIGHTER_CAPACITY_SHADOW_ENABLED) {
+        hibachiLighterCapacityShadow.setTradeStreamConnected(false);
+        hibachiLighterCapacityShadow.recordTradeReconnect();
+      }
     }
     if (venue === 'coinbase' && COINBASE_LIGHTER_MAKER_SHADOW_ENABLED) {
       coinbaseLighterMakerShadow.setTradeStreamConnected(false);
@@ -5339,6 +5433,7 @@ function startLighterRestBookPoller(): void {
     const activeCoins = [...new Set([
       asterLighterMakerShadow,
       hibachiLighterMakerShadow,
+      hibachiLighterCapacityShadow,
       coinbaseLighterMakerShadow,
       etherealLighterMakerShadow,
       hotstuffLighterMakerShadow,
@@ -5906,8 +6001,13 @@ function startHibachi(): void {
           ]),
         },
       }));
-      if (HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED) {
-        hibachiLighterMakerShadow.setTradeStreamConnected(true);
+      if (HIBACHI_LIGHTER_ANY_SHADOW_ENABLED) {
+        if (HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED) {
+          hibachiLighterMakerShadow.setTradeStreamConnected(true);
+        }
+        if (HIBACHI_LIGHTER_CAPACITY_SHADOW_ENABLED) {
+          hibachiLighterCapacityShadow.setTradeStreamConnected(true);
+        }
       }
     },
     (payload, receivedAt, ws) => {
@@ -5957,7 +6057,7 @@ function startHibachi(): void {
 
       if (
         message.topic !== 'trades'
-        || !HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED
+        || !HIBACHI_LIGHTER_ANY_SHADOW_ENABLED
       ) return;
       const row = message.data?.trade;
       const price = finite(row?.price);
@@ -5990,7 +6090,12 @@ function startHibachi(): void {
         SHADOW_SOURCE_FRESH_MS,
       );
       if (activityAt != null) hibachiLastTradeAt.set(coin, activityAt);
-      hibachiLighterMakerShadow.processTrade(trade, receivedAt);
+      if (HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED) {
+        hibachiLighterMakerShadow.processTrade(trade, receivedAt);
+      }
+      if (HIBACHI_LIGHTER_CAPACITY_SHADOW_ENABLED) {
+        hibachiLighterCapacityShadow.processTrade(trade, receivedAt);
+      }
     },
   );
 }
@@ -6678,6 +6783,11 @@ function writeStatus(): void {
       ...hibachiLighterMakerShadow.status(),
       enabled: HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED,
     },
+    hibachiLighterCapacityShadow: {
+      ...hibachiLighterCapacityShadow.status(),
+      enabled: HIBACHI_LIGHTER_CAPACITY_SHADOW_ENABLED,
+      targetNotionalUsd: HIBACHI_LIGHTER_CAPACITY_NOTIONAL_USD,
+    },
     coinbaseLighterMakerShadow: {
       ...coinbaseLighterMakerShadow.status(),
       enabled: COINBASE_LIGHTER_MAKER_SHADOW_ENABLED,
@@ -7214,6 +7324,7 @@ function shutdown(signal: string): void {
   asterPacificaMakerShadow.shutdown(Date.now());
   asterLighterMakerShadow.shutdown(Date.now());
   hibachiLighterMakerShadow.shutdown(Date.now());
+  hibachiLighterCapacityShadow.shutdown(Date.now());
   coinbaseLighterMakerShadow.shutdown(Date.now());
   etherealLighterMakerShadow.shutdown(Date.now());
   hotstuffLighterMakerShadow.shutdown(Date.now());
@@ -7268,6 +7379,12 @@ if (!existsSync(HIBACHI_LIGHTER_MAKER_RESULTS_PATH)) {
 }
 if (!existsSync(HIBACHI_LIGHTER_MAKER_EVENTS_PATH)) {
   writeFileSync(HIBACHI_LIGHTER_MAKER_EVENTS_PATH, '');
+}
+if (!existsSync(HIBACHI_LIGHTER_CAPACITY_RESULTS_PATH)) {
+  writeFileSync(HIBACHI_LIGHTER_CAPACITY_RESULTS_PATH, '');
+}
+if (!existsSync(HIBACHI_LIGHTER_CAPACITY_EVENTS_PATH)) {
+  writeFileSync(HIBACHI_LIGHTER_CAPACITY_EVENTS_PATH, '');
 }
 if (!existsSync(COINBASE_LIGHTER_MAKER_RESULTS_PATH)) {
   writeFileSync(COINBASE_LIGHTER_MAKER_RESULTS_PATH, '');
@@ -7357,6 +7474,13 @@ loadGenericMakerState(
   HIBACHI_LIGHTER_MAKER_ACTIVE_PATH,
   'Hibachi maker → Lighter',
   HIBACHI_LIGHTER_MAKER_SHADOW_ENABLED,
+);
+loadGenericMakerState(
+  hibachiLighterCapacityShadow,
+  HIBACHI_LIGHTER_CAPACITY_RESULTS_PATH,
+  HIBACHI_LIGHTER_CAPACITY_ACTIVE_PATH,
+  'Hibachi maker → Lighter capacity',
+  HIBACHI_LIGHTER_CAPACITY_SHADOW_ENABLED,
 );
 loadGenericMakerState(
   coinbaseLighterMakerShadow,
@@ -7542,6 +7666,21 @@ const evaluationTimer = setInterval(() => {
         'lighter',
         now,
         HIBACHI_LIGHTER_MAKER_NOTIONAL_USD,
+      ),
+    );
+  }
+  if (
+    HIBACHI_LIGHTER_CAPACITY_SHADOW_ENABLED
+    && activeVenues.has('hibachi')
+    && activeVenues.has('lighter')
+  ) {
+    hibachiLighterCapacityShadow.evaluate(
+      now,
+      genericMakerMarkets(
+        'hibachi',
+        'lighter',
+        now,
+        HIBACHI_LIGHTER_CAPACITY_NOTIONAL_USD,
       ),
     );
   }

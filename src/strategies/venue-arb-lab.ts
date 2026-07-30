@@ -420,6 +420,7 @@ type Status = {
   asterPacificaMakerShadow?: GenericMakerShadowStatus;
   asterLighterMakerShadow?: GenericMakerShadowStatus;
   hibachiLighterMakerShadow?: GenericMakerShadowStatus;
+  hibachiLighterCapacityShadow?: GenericMakerShadowStatus;
   coinbaseLighterMakerShadow?: GenericMakerShadowStatus;
   etherealLighterMakerShadow?: GenericMakerShadowStatus;
   hotstuffLighterMakerShadow?: GenericMakerShadowStatus;
@@ -593,6 +594,7 @@ async function readTargeted(): Promise<{
   grvtMakerGate: ProfitGateStatus | null;
   asterMakerGate: ProfitGateStatus | null;
   hibachiMakerGate: ProfitGateStatus | null;
+  hibachiCapacityGate: ProfitGateStatus | null;
   coinbaseMakerGate: ProfitGateStatus | null;
   etherealMakerGate: ProfitGateStatus | null;
   hotstuffMakerGate: ProfitGateStatus | null;
@@ -629,6 +631,10 @@ async function readTargeted(): Promise<{
     ),
     hibachiMakerGate: await read<ProfitGateStatus | null>(
       'hibachi-lighter-maker-gate-status.json',
+      null,
+    ),
+    hibachiCapacityGate: await read<ProfitGateStatus | null>(
+      'hibachi-lighter-capacity-gate-status.json',
       null,
     ),
     coinbaseMakerGate: await read<ProfitGateStatus | null>(
@@ -1321,6 +1327,7 @@ function candidateRouteRows(
     grvtLighterMaker: ProfitGateStatus | null;
     asterLighterMaker: ProfitGateStatus | null;
     hibachiLighterMaker: ProfitGateStatus | null;
+    hibachiLighterCapacity: ProfitGateStatus | null;
     coinbaseLighterMaker: ProfitGateStatus | null;
     etherealLighterMaker: ProfitGateStatus | null;
     hotstuffLighterMaker: ProfitGateStatus | null;
@@ -1346,6 +1353,11 @@ function candidateRouteRows(
       label: 'Hibachi maker → Lighter',
       maker: hibachiStatus?.hibachiLighterMakerShadow,
       gate: profitGates.hibachiLighterMaker,
+    },
+    {
+      label: 'Hibachi → Lighter · capacity $1,000',
+      maker: hibachiStatus?.hibachiLighterCapacityShadow,
+      gate: profitGates.hibachiLighterCapacity,
     },
     {
       label: 'Coinbase maker → Lighter',
@@ -1414,6 +1426,7 @@ function candidateShadowRows(
     extendedLighter: GenericMakerShadowStatus | undefined;
     grvtLighter: GenericMakerShadowStatus | undefined;
     hibachiLighter: GenericMakerShadowStatus | undefined;
+    hibachiCapacity: GenericMakerShadowStatus | undefined;
     coinbaseLighter: GenericMakerShadowStatus | undefined;
     etherealLighter: GenericMakerShadowStatus | undefined;
     hotstuffLighter: GenericMakerShadowStatus | undefined;
@@ -1432,6 +1445,7 @@ function candidateShadowRows(
     ['Extended maker → Lighter', makers.extendedLighter],
     ['GRVT maker → Lighter', makers.grvtLighter],
     ['Hibachi maker → Lighter', makers.hibachiLighter],
+    ['Hibachi → Lighter · capacity $1,000', makers.hibachiCapacity],
     ['Coinbase maker → Lighter', makers.coinbaseLighter],
     ['Ethereal maker → Lighter', makers.etherealLighter],
     ['Hotstuff maker → Lighter', makers.hotstuffLighter],
@@ -1649,6 +1663,7 @@ async function renderCompact(lang: Lang): Promise<string> {
           grvtLighterMaker: targeted.grvtMakerGate,
           asterLighterMaker: targeted.asterMakerGate,
           hibachiLighterMaker: targeted.hibachiMakerGate,
+          hibachiLighterCapacity: targeted.hibachiCapacityGate,
           coinbaseLighterMaker: targeted.coinbaseMakerGate,
           etherealLighterMaker: targeted.etherealMakerGate,
           hotstuffLighterMaker: targeted.hotstuffMakerGate,
@@ -1664,6 +1679,7 @@ async function renderCompact(lang: Lang): Promise<string> {
           extendedLighter: candidateStatus?.extendedLighterMakerShadow,
           grvtLighter: candidateStatus?.grvtMakerShadow,
           hibachiLighter: hibachiStatus?.hibachiLighterMakerShadow,
+          hibachiCapacity: hibachiStatus?.hibachiLighterCapacityShadow,
           coinbaseLighter: coinbaseStatus?.coinbaseLighterMakerShadow,
           etherealLighter: etherealStatus?.etherealLighterMakerShadow,
           hotstuffLighter: hotstuffStatus?.hotstuffLighterMakerShadow,
