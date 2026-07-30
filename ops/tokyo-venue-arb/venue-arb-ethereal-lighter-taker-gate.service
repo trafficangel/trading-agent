@@ -1,0 +1,28 @@
+[Unit]
+Description=Evaluate Ethereal/Lighter taker arbitrage shadow profit gate
+After=venue-arb-ethereal-lighter-shadow.service
+
+[Service]
+Type=oneshot
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/venue-arb-tokyo
+Environment=VENUE_ARB_GATE_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/ethereal-lighter-shadow
+Environment=VENUE_ARB_GATE_INPUT_FILE=shadow-execution-v5.ndjson
+Environment=VENUE_ARB_GATE_OUTPUT_FILE=ethereal-lighter-taker-gate-status.json
+Environment=VENUE_ARB_GATE_ROUTE=ethereal-lighter
+Environment=VENUE_ARB_GATE_NOTIONAL_USD=100
+Environment=VENUE_ARB_GATE_MIN_SAMPLES=30
+Environment=VENUE_ARB_GATE_MIN_PROFIT_FACTOR=1.2
+Environment=VENUE_ARB_GATE_MAX_DRAWDOWN_BPS=50
+Environment=VENUE_ARB_GATE_INDEPENDENCE_MS=60000
+Environment=VENUE_ARB_GATE_NO_GO_AFTER_HOURS=2
+Environment=VENUE_ARB_GATE_HARD_NO_GO_AFTER_HOURS=2
+Environment=VENUE_ARB_GATE_MIN_TRADES_BY_DEADLINE=3
+Environment=VENUE_ARB_GATE_MAX_TECHNICAL_FAILURES=0
+ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-shadow-gate.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/venue-arb-tokyo/data/ethereal-lighter-shadow

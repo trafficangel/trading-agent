@@ -18,9 +18,13 @@ Environment=VENUE_ARB_SAMPLE_MS=250
 Environment=VENUE_ARB_STALE_MS=3000
 Environment=VENUE_ARB_EXECUTION_BUFFER_BPS=2
 Environment=VENUE_ARB_SHADOW_NOTIONAL_USD=100
-# This cohort evaluates only zero-fee Ethereal post-only maker fills followed
-# by a zero-fee Lighter taker hedge.
-Environment=VENUE_ARB_SHADOW_ENTRY_NET_BPS=10000
+# Test the executable Ethereal taker/Lighter taker path alongside the maker
+# cohort. The basis gate still requires a >=5 bps dislocation and the 1 bps
+# threshold is net of both round-trip fees and the execution buffer.
+Environment=VENUE_ARB_SHADOW_ENTRY_NET_BPS=1
+Environment=VENUE_ARB_SHADOW_EXIT_NET_BPS=1
+Environment=VENUE_ARB_SHADOW_MAX_LOSS_BPS=20
+Environment=VENUE_ARB_SHADOW_MAX_HOLD_MS=900000
 Environment=VENUE_ARB_SHADOW_BASIS_GATE_ENABLED=true
 Environment=VENUE_ARB_SHADOW_BASIS_WINDOW_MS=1800000
 Environment=VENUE_ARB_SHADOW_BASIS_EXCLUDE_MS=5000

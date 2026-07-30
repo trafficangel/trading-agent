@@ -34,6 +34,7 @@ COINBASE_SHADOW_SERVICE = "venue-arb-coinbase-lighter-shadow.service"
 COINBASE_GATE_TIMER = "venue-arb-coinbase-lighter-maker-gate.timer"
 ETHEREAL_SHADOW_SERVICE = "venue-arb-ethereal-lighter-shadow.service"
 ETHEREAL_GATE_TIMER = "venue-arb-ethereal-lighter-maker-gate.timer"
+ETHEREAL_TAKER_GATE_TIMER = "venue-arb-ethereal-lighter-taker-gate.timer"
 HOTSTUFF_SHADOW_SERVICE = "venue-arb-hotstuff-lighter-shadow.service"
 HOTSTUFF_GATE_TIMER = "venue-arb-hotstuff-lighter-maker-gate.timer"
 CONTROLLER_TIMER = "venue-arb-fee-free-controller.timer"
@@ -71,6 +72,8 @@ def stop_plan(
     sticky_enabled: bool = False,
     coinbase_disabled: bool = False,
     ethereal_disabled: bool = False,
+    ethereal_taker_gate: dict[str, Any] | None = None,
+    ethereal_taker_enabled: bool = False,
     hotstuff_disabled: bool = False,
 ) -> dict[str, Any]:
     aster_no_go = is_no_go(aster_gate)
@@ -79,7 +82,15 @@ def stop_plan(
     hibachi_no_go = is_no_go(hibachi_gate)
     sticky_no_go = not sticky_enabled or is_no_go(sticky_gate)
     coinbase_no_go = coinbase_disabled or is_no_go(coinbase_gate)
-    ethereal_no_go = ethereal_disabled or is_no_go(ethereal_gate)
+    ethereal_maker_no_go = is_no_go(ethereal_gate)
+    ethereal_taker_no_go = (
+        not ethereal_taker_enabled
+        or is_no_go(ethereal_taker_gate)
+    )
+    ethereal_no_go = (
+        ethereal_disabled
+        or (ethereal_maker_no_go and ethereal_taker_no_go)
+    )
     hotstuff_no_go = hotstuff_disabled or is_no_go(hotstuff_gate)
     all_no_go = (
         aster_no_go
@@ -131,8 +142,16 @@ def stop_plan(
         stop_units.extend([COINBASE_SHADOW_SERVICE, COINBASE_GATE_TIMER])
         disable_units.extend([COINBASE_SHADOW_SERVICE, COINBASE_GATE_TIMER])
     if ethereal_no_go:
-        stop_units.extend([ETHEREAL_SHADOW_SERVICE, ETHEREAL_GATE_TIMER])
-        disable_units.extend([ETHEREAL_SHADOW_SERVICE, ETHEREAL_GATE_TIMER])
+        stop_units.extend([
+            ETHEREAL_SHADOW_SERVICE,
+            ETHEREAL_GATE_TIMER,
+            ETHEREAL_TAKER_GATE_TIMER,
+        ])
+        disable_units.extend([
+            ETHEREAL_SHADOW_SERVICE,
+            ETHEREAL_GATE_TIMER,
+            ETHEREAL_TAKER_GATE_TIMER,
+        ])
     if hotstuff_no_go:
         stop_units.extend([HOTSTUFF_SHADOW_SERVICE, HOTSTUFF_GATE_TIMER])
         disable_units.extend([HOTSTUFF_SHADOW_SERVICE, HOTSTUFF_GATE_TIMER])
@@ -150,6 +169,9 @@ def stop_plan(
         "coinbaseNoGo": coinbase_no_go,
         "coinbaseDisabled": coinbase_disabled,
         "etherealNoGo": ethereal_no_go,
+        "etherealMakerNoGo": ethereal_maker_no_go,
+        "etherealTakerNoGo": ethereal_taker_no_go,
+        "etherealTakerEnabled": ethereal_taker_enabled,
         "etherealDisabled": ethereal_disabled,
         "hotstuffNoGo": hotstuff_no_go,
         "hotstuffDisabled": hotstuff_disabled,
@@ -287,6 +309,7 @@ def self_test() -> None:
         COINBASE_GATE_TIMER,
         ETHEREAL_SHADOW_SERVICE,
         ETHEREAL_GATE_TIMER,
+        ETHEREAL_TAKER_GATE_TIMER,
         HOTSTUFF_SHADOW_SERVICE,
         HOTSTUFF_GATE_TIMER,
     }
@@ -303,6 +326,36 @@ def self_test() -> None:
     assert ethereal["stopUnits"] == [
         ETHEREAL_SHADOW_SERVICE,
         ETHEREAL_GATE_TIMER,
+        ETHEREAL_TAKER_GATE_TIMER,
+    ]
+    ethereal_taker_observing = stop_plan(
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        no_go,
+        observe,
+        ethereal_taker_gate=observe,
+        ethereal_taker_enabled=True,
+    )
+    assert ethereal_taker_observing["etherealNoGo"] is False
+    assert ethereal_taker_observing["stopUnits"] == []
+    ethereal_both_failed = stop_plan(
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        no_go,
+        observe,
+        ethereal_taker_gate=no_go,
+        ethereal_taker_enabled=True,
+    )
+    assert ethereal_both_failed["stopUnits"] == [
+        ETHEREAL_SHADOW_SERVICE,
+        ETHEREAL_GATE_TIMER,
+        ETHEREAL_TAKER_GATE_TIMER,
     ]
     hotstuff = stop_plan(
         observe, observe, observe, observe, observe, observe, no_go
@@ -340,6 +393,7 @@ def self_test() -> None:
         HIBACHI_STICKY_CAPACITY_GATE_TIMER,
         COINBASE_GATE_TIMER,
         ETHEREAL_GATE_TIMER,
+        ETHEREAL_TAKER_GATE_TIMER,
         HOTSTUFF_GATE_TIMER,
         CONTROLLER_TIMER,
     }
@@ -412,6 +466,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--ethereal-taker-gate",
+        default=os.getenv(
+            "VENUE_ARB_ETHEREAL_TAKER_GATE",
+            "/home/trader/apps/venue-arb-tokyo/data/ethereal-lighter-shadow/"
+            "ethereal-lighter-taker-gate-status.json",
+        ),
+    )
+    parser.add_argument(
         "--hotstuff-gate",
         default=os.getenv(
             "VENUE_ARB_HOTSTUFF_GATE",
@@ -460,6 +522,14 @@ def main() -> None:
         ).strip().lower() in {"1", "true", "yes", "on"},
     )
     parser.add_argument(
+        "--ethereal-taker-enabled",
+        action="store_true",
+        default=os.getenv(
+            "VENUE_ARB_CONTROLLER_ETHEREAL_TAKER_ENABLED",
+            "",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+    )
+    parser.add_argument(
         "--hotstuff-disabled",
         action="store_true",
         default=os.getenv(
@@ -480,6 +550,7 @@ def main() -> None:
         "sticky": read_gate(Path(args.sticky_gate)),
         "coinbase": read_gate(Path(args.coinbase_gate)),
         "ethereal": read_gate(Path(args.ethereal_gate)),
+        "etherealTaker": read_gate(Path(args.ethereal_taker_gate)),
         "hotstuff": read_gate(Path(args.hotstuff_gate)),
     }
     plan = stop_plan(
@@ -495,6 +566,8 @@ def main() -> None:
         sticky_enabled=args.sticky_enabled,
         coinbase_disabled=args.coinbase_disabled,
         ethereal_disabled=args.ethereal_disabled,
+        ethereal_taker_gate=gates["etherealTaker"],
+        ethereal_taker_enabled=args.ethereal_taker_enabled,
         hotstuff_disabled=args.hotstuff_disabled,
     )
     actions: list[dict[str, Any]] = []

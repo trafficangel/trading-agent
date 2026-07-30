@@ -1601,6 +1601,18 @@ const FEE_BPS: Record<Venue, number> = {
 };
 const ALL_SHADOW_ROUTES: readonly ShadowRouteConfig[] = [
   {
+    id: 'ethereal-lighter',
+    buyVenue: 'ethereal',
+    sellVenue: 'lighter',
+    primary: true,
+  },
+  {
+    id: 'lighter-ethereal',
+    buyVenue: 'lighter',
+    sellVenue: 'ethereal',
+    primary: false,
+  },
+  {
     id: 'extended-lighter',
     buyVenue: 'extended',
     sellVenue: 'lighter',

@@ -9,6 +9,7 @@ After=venue-arb-hibachi-lighter-sticky-gate.service
 After=venue-arb-hibachi-lighter-sticky-capacity-gate.service
 After=venue-arb-coinbase-lighter-maker-gate.service
 After=venue-arb-ethereal-lighter-maker-gate.service
+After=venue-arb-ethereal-lighter-taker-gate.service
 After=venue-arb-hotstuff-lighter-maker-gate.service
 
 [Service]
@@ -18,6 +19,7 @@ Environment=VENUE_ARB_CONTROLLER_GRVT_DISABLED=true
 Environment=VENUE_ARB_CONTROLLER_HIBACHI_STICKY_ENABLED=true
 Environment=VENUE_ARB_CONTROLLER_COINBASE_DISABLED=true
 Environment=VENUE_ARB_CONTROLLER_ETHEREAL_DISABLED=false
+Environment=VENUE_ARB_CONTROLLER_ETHEREAL_TAKER_ENABLED=true
 Environment=VENUE_ARB_CONTROLLER_HOTSTUFF_DISABLED=true
 ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-fee-free-controller.py
 NoNewPrivileges=true
