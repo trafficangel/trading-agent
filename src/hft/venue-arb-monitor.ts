@@ -1385,6 +1385,9 @@ const MARKETS: readonly Market[] = [
   { coin: 'JUP', symbol: 'JUPUSDT', lighterMarketId: 26 },
   { coin: 'UNI', symbol: 'UNIUSDT', lighterMarketId: 30 },
   { coin: 'XPL', symbol: 'XPLUSDT', lighterMarketId: 71 },
+  { coin: 'MON', symbol: 'MONUSDT', lighterMarketId: 91 },
+  { coin: 'BERA', symbol: 'BERAUSDT', lighterMarketId: 20 },
+  { coin: 'TAO', symbol: 'TAOUSDT', lighterMarketId: 13 },
 ] as const;
 const ACTIVE_MARKETS: readonly Market[] = (() => {
   const configured = (process.env.VENUE_ARB_ACTIVE_COINS ?? '')
