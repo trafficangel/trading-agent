@@ -14,7 +14,10 @@ const MINUTE_MS = 60_000;
 const BAR_MS = 5 * MINUTE_MS;
 const HISTORY_BARS = 66;
 const TIME_EXIT_BARS = 240;
-const PUBLISH_GRACE_MS = 10_000;
+// Lighter commonly publishes the fifth one-minute candle 15–25 seconds after
+// the nominal 5m boundary. Waiting 25s avoids a guaranteed failed request while
+// preserving the same effective evaluation time as the previous 15s retry.
+const PUBLISH_GRACE_MS = 25_000;
 const RETRY_MS = 15_000;
 
 type RawCandle = {
