@@ -617,6 +617,14 @@ def main() -> None:
         default=int(os.getenv("VENUE_ARB_GATE_INDEPENDENCE_MS", "60000")),
     )
     parser.add_argument(
+        "--observation-started-at-ms",
+        type=int,
+        default=int(os.getenv(
+            "VENUE_ARB_GATE_OBSERVATION_STARTED_AT_MS",
+            "0",
+        )),
+    )
+    parser.add_argument(
         "--no-go-after-hours",
         type=float,
         default=float(os.getenv("VENUE_ARB_GATE_NO_GO_AFTER_HOURS", "12")),
@@ -679,6 +687,11 @@ def main() -> None:
     now_ms = int(time.time() * 1000)
     observation_started_at = int(
         finite_number(previous.get("observationStartedAt"))
+        or (
+            args.observation_started_at_ms
+            if args.observation_started_at_ms > 0
+            else 0
+        )
         or now_ms
     )
     events = (
