@@ -190,9 +190,20 @@ The multi-symbol continuation also admitted:
 - `STRAT-033 / ltc-z60-touch`: Z60 ±2 touch, 968 trades, +107.39% after the
   same stress, PF 1.37, both sides and all tested windows positive.
 
-Both run through the same completed-candle native runner and remain
-Shadow-only. BTC, ETH, ADA, AVAX, and WLD were not admitted because they failed
-at least one direction, recent-window, or adverse-cost stability check.
+Both run through the same completed-candle native runner. On the user's
+explicit instruction they were additionally admitted as isolated $100-notional
+Real canaries with 1.5% exchange-native stops before the normal forward gate.
+That exception is a bounded execution experiment and must not be treated as
+live validation. BTC, ETH, ADA, and WLD were not admitted because they
+failed at least one direction, recent-window, or adverse-cost stability check.
+
+A subsequent multi-window audit retained AVAX Z50 ±3 reclaim as a Shadow
+research candidate: it was positive on 30/60/90/120/180-day windows, both
+directions, and 0.05% round-trip stress (180 days: 454 trades, +36.98%, PF
+1.21). It is intentionally absent from the live allowlist pending forward
+evidence. WLD RSI2 was rejected despite its high frequency because every
+variant failed at least one 0.05%-stress window; XRP produced no qualified
+candidate.
 
 Run on the VPS, where the historical kline cache is populated:
 

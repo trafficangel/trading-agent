@@ -162,8 +162,9 @@ The auditable Pine reference is
 ## Candidates 6–7 — cross-symbol native Z60 transfer
 
 The same native-candle engine was then run on additional liquid Lighter
-markets. BTC, ETH, ADA, AVAX and WLD were rejected because at least one recent
-window, direction, or adverse-cost test failed. Two two-sided candidates
+markets. BTC, ETH, ADA and WLD were rejected because at least one recent
+window, direction, or adverse-cost test failed. AVAX was retained by a later,
+stricter audit as a Shadow research candidate. Two two-sided candidates
 survived without adding a regime filter:
 
 | Strategy | Rule | Trades | Net after 0.02% stress/funding | PF | WR | DD | Long / short net |
@@ -180,7 +181,24 @@ trades, +20.62% net and PF 1.59. Periods 50/60/70 and thresholds
 1.75/2.0/2.25 were all two-sided positive, providing a broad local parameter
 plateau. At 0.05% stress its 180-day result remained +78.35% with PF 1.26.
 
-Both candidates are admitted to the consolidated Native Quant portfolio as
-prospective **Shadow only**. Neither id is present in the separately
-allowlisted live executor. Promotion requires its own forward sample and does
-not inherit STRAT-030's live permission.
+Both candidates were first admitted to the consolidated Native Quant portfolio
+as prospective Shadow. On the user's explicit 2026-07-30 instruction they were
+also allowlisted as separately risk-capped **$100-notional / 10× Real
+canaries**, before the normal forward gate. Each uses an exchange-native 1.5%
+reduce-only stop and remains subject to the $10 daily-loss and $15 portfolio
+drawdown breakers. This early canary is an execution experiment, not evidence
+that the historical edge survives live trading. STRAT-031 remains Shadow-only
+because it would collide with STRAT-030 in the same one-way SOL market.
+
+## Additional market and indicator sweep
+
+The next sweep tested BTC, ETH, AVAX, WLD and XRP on completed 5-minute Lighter
+candles. WLD RSI2 was very active and profitable at 0.02% round-trip execution
+stress, but no variant passed every 30/60/90/120/180-day gate at 0.05%; it was
+therefore rejected for live use. XRP produced no qualified candidate.
+
+AVAX Z-reclaim was materially stronger. The Z50 ±3 reclaim neighborhood stayed
+positive in both directions across every tested window and at 0.05% stress
+(180 days: 454 trades, +36.98% stressed net, PF 1.21, 15.96% max drawdown).
+It remains a research/Shadow candidate until its own forward sample exists;
+these historical results do not authorize live orders.

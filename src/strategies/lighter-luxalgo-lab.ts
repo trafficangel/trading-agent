@@ -89,8 +89,7 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // native Lighter candles, next-bar execution, zero commission, 2 bps
 // round-trip execution stress and adverse funding. It stayed positive over
 // every 30/60/90/120/180-day window and in both directions. It entered an
-// isolated $100-notional / 10x real canary on 2026-07-30; every other newly
-// added candidate remains shadow-only. STRAT-031 is the adjacent, earlier
+// isolated $100-notional / 10x real canary on 2026-07-30. STRAT-031 is the adjacent, earlier
 // three-sigma touch entry. It is the highest-frequency member of the stable
 // Z60 neighborhood that still clears the base execution-stress gate. It stayed
 // positive over 30/60/90/120/180-day windows and in both directions, but is
@@ -100,7 +99,9 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // LTC, using thresholds selected from broad profitable neighborhoods rather
 // than a single peak. Both stayed positive on 30/60/90/120/180-day windows,
 // in both directions and after 0.02% round-trip execution stress plus adverse
-// funding. They are native Shadow only; neither is allowlisted for real orders.
+// funding. On the user's explicit instruction, STRAT-032/033 were admitted as
+// separately risk-capped $100/10x Real canaries before their normal forward
+// gate; this is an experiment, not evidence that the backtest edge is live.
 // BCH, XLM, TRX and JUP candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
@@ -491,6 +492,11 @@ const STRATEGY_IDS = STRATEGIES.map((spec) => spec.id);
 const NATIVE_STRATEGY_IDS = [
   'sol-z60-reclaim',
   'sol-z60-touch',
+  'bnb-z60-touch',
+  'ltc-z60-touch',
+] as const;
+const NATIVE_LIVE_STRATEGY_IDS = [
+  'sol-z60-reclaim',
   'bnb-z60-touch',
   'ltc-z60-touch',
 ] as const;
@@ -2115,7 +2121,8 @@ async function render(
       ? [...NATIVE_STRATEGIES]
       : [...LUXALGO_STRATEGIES];
   const scopeIds = scopeSpecs.map((spec) => spec.id);
-  const realSupported = scopeIds.includes('sol-z60-reclaim');
+  const realSupported = scopeIds.some((id) =>
+    (NATIVE_LIVE_STRATEGY_IDS as readonly string[]).includes(id));
   const dataset: PortfolioDataset = realSupported ? requested.dataset : 'shadow';
   const s = summary(scopeSpecs);
   const signalsTotal = signalTotal(scopeIds);
@@ -2262,7 +2269,7 @@ async function render(
       ? `STRAT-${scopeSpecs.map((spec) => spec.code).join(' · ')} · NATIVE LIGHTER`
       : `STRAT-${scopeSpecs.map((spec) => spec.code).join(' · ')} · PROSPECTIVE FORWARD`;
   const pageDescription = requested.strategy
-    ? requested.strategy.id === 'sol-z60-reclaim'
+    ? (NATIVE_LIVE_STRATEGY_IDS as readonly string[]).includes(requested.strategy.id)
       ? t(
         lang,
         'Только эта стратегия: нативные свечи Lighter, Shadow $1000 и изолированный Real-canary $100 с плечом 10×. Комиссия 0%; spread, slippage и funding учитываются.',
@@ -2288,7 +2295,7 @@ async function render(
     ? liveSummary.currentDrawdownUsd
     : liveState?.current_drawdown_usd ?? 0;
   const liveScopeText = requested.strategy
-    ? requested.strategy.id === 'sol-z60-reclaim'
+    ? (NATIVE_LIVE_STRATEGY_IDS as readonly string[]).includes(requested.strategy.id)
       ? t(
         lang,
         'Real разрешён только для этой стратегии. Биржевой reduce-only stop 1.5% ставится сразу после входа. Новые входы блокируются при дневном убытке −$10, общей просадке −$15 или индивидуальной паузе.',
@@ -2302,8 +2309,8 @@ async function render(
     : requested.group === 'native'
       ? t(
         lang,
-        'В Real сейчас разрешена только STRAT-030; STRAT-031/032/033 остаются Shadow-only до собственного форвард-гейта. Их сигналы не могут открыть реальные позиции.',
-        'Only STRAT-030 is currently allowlisted for Real; STRAT-031/032/033 remain Shadow-only until their own forward gate. Their signals cannot open live positions.',
+        'В Real разрешены изолированные canary STRAT-030/032/033 по $100; STRAT-031 остаётся Shadow-only, потому что её SOL-позиция конфликтовала бы со STRAT-030. На каждую Real-позицию сразу ставится биржевой reduce-only stop 1.5%.',
+        'Isolated $100 Real canaries are allowlisted for STRAT-030/032/033; STRAT-031 remains Shadow-only because its SOL position would collide with STRAT-030. Every Real position receives an exchange-native 1.5% reduce-only stop immediately.',
       )
       : t(
         lang,
