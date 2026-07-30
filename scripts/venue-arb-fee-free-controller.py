@@ -40,6 +40,8 @@ HOTSTUFF_GATE_TIMER = "venue-arb-hotstuff-lighter-maker-gate.timer"
 BITFINEX_SHADOW_SERVICE = "venue-arb-bitfinex-lighter-shadow.service"
 BITFINEX_GATE_TIMER = "venue-arb-bitfinex-lighter-taker-gate.timer"
 BITFINEX_MAKER_GATE_TIMER = "venue-arb-bitfinex-lighter-maker-gate.timer"
+RAYDIUM_SHADOW_SERVICE = "venue-arb-raydium-lighter-shadow.service"
+RAYDIUM_MAKER_GATE_TIMER = "venue-arb-raydium-lighter-maker-gate.timer"
 CONTROLLER_TIMER = "venue-arb-fee-free-controller.timer"
 
 
@@ -82,6 +84,8 @@ def stop_plan(
     bitfinex_enabled: bool = False,
     bitfinex_maker_gate: dict[str, Any] | None = None,
     bitfinex_maker_enabled: bool = False,
+    raydium_gate: dict[str, Any] | None = None,
+    raydium_enabled: bool = False,
 ) -> dict[str, Any]:
     aster_no_go = is_no_go(aster_gate)
     extended_no_go = is_no_go(extended_gate)
@@ -108,6 +112,7 @@ def stop_plan(
         not bitfinex_enabled
         or (bitfinex_taker_no_go and bitfinex_maker_no_go)
     )
+    raydium_no_go = not raydium_enabled or is_no_go(raydium_gate)
     all_no_go = (
         aster_no_go
         and extended_no_go
@@ -118,6 +123,7 @@ def stop_plan(
         and ethereal_no_go
         and hotstuff_no_go
         and bitfinex_no_go
+        and raydium_no_go
     )
     stop_units: list[str] = []
     disable_units: list[str] = []
@@ -183,6 +189,15 @@ def stop_plan(
             BITFINEX_GATE_TIMER,
             BITFINEX_MAKER_GATE_TIMER,
         ])
+    if raydium_enabled and raydium_no_go:
+        stop_units.extend([
+            RAYDIUM_SHADOW_SERVICE,
+            RAYDIUM_MAKER_GATE_TIMER,
+        ])
+        disable_units.extend([
+            RAYDIUM_SHADOW_SERVICE,
+            RAYDIUM_MAKER_GATE_TIMER,
+        ])
     if all_no_go:
         stop_units.append(CONTROLLER_TIMER)
         disable_units.append(CONTROLLER_TIMER)
@@ -208,6 +223,8 @@ def stop_plan(
         "bitfinexMakerNoGo": bitfinex_maker_no_go,
         "bitfinexEnabled": bitfinex_enabled,
         "bitfinexMakerEnabled": bitfinex_maker_enabled,
+        "raydiumNoGo": raydium_no_go,
+        "raydiumEnabled": raydium_enabled,
         "allNoGo": all_no_go,
         "stopUnits": stop_units,
         "disableUnits": disable_units,
@@ -445,6 +462,35 @@ def self_test() -> None:
     )
     assert bitfinex_maker_survives["bitfinexNoGo"] is False
     assert bitfinex_maker_survives["stopUnits"] == []
+    raydium_observing = stop_plan(
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        raydium_gate=observe,
+        raydium_enabled=True,
+    )
+    assert raydium_observing["raydiumNoGo"] is False
+    assert raydium_observing["allNoGo"] is False
+    assert raydium_observing["stopUnits"] == []
+    raydium_failed = stop_plan(
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        raydium_gate=no_go,
+        raydium_enabled=True,
+    )
+    assert raydium_failed["stopUnits"] == [
+        RAYDIUM_SHADOW_SERVICE,
+        RAYDIUM_MAKER_GATE_TIMER,
+    ]
     all_failed = stop_plan(
         no_go,
         no_go,
@@ -579,6 +625,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--raydium-gate",
+        default=os.getenv(
+            "VENUE_ARB_RAYDIUM_GATE",
+            "/home/trader/apps/venue-arb-tokyo/data/raydium-lighter-shadow/"
+            "raydium-lighter-maker-gate-status.json",
+        ),
+    )
+    parser.add_argument(
         "--output",
         default=os.getenv(
             "VENUE_ARB_CONTROLLER_OUTPUT",
@@ -650,6 +704,14 @@ def main() -> None:
             "",
         ).strip().lower() in {"1", "true", "yes", "on"},
     )
+    parser.add_argument(
+        "--raydium-enabled",
+        action="store_true",
+        default=os.getenv(
+            "VENUE_ARB_CONTROLLER_RAYDIUM_ENABLED",
+            "",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+    )
     args = parser.parse_args()
     if args.self_test:
         self_test()
@@ -667,6 +729,7 @@ def main() -> None:
         "hotstuff": read_gate(Path(args.hotstuff_gate)),
         "bitfinex": read_gate(Path(args.bitfinex_gate)),
         "bitfinexMaker": read_gate(Path(args.bitfinex_maker_gate)),
+        "raydium": read_gate(Path(args.raydium_gate)),
     }
     plan = stop_plan(
         gates["aster"],
@@ -688,6 +751,8 @@ def main() -> None:
         bitfinex_enabled=args.bitfinex_enabled,
         bitfinex_maker_gate=gates["bitfinexMaker"],
         bitfinex_maker_enabled=args.bitfinex_maker_enabled,
+        raydium_gate=gates["raydium"],
+        raydium_enabled=args.raydium_enabled,
     )
     actions: list[dict[str, Any]] = []
     for unit in plan["stopUnits"]:

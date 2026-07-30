@@ -94,6 +94,10 @@ import {
 import { parseLighterPublicTrades } from '../lib/lighter-public-trades.js';
 import { parseLighterRestBook } from '../lib/lighter-rest-book.js';
 import { lighterValidationMode } from '../lib/lighter-ws-validation.js';
+import {
+  parseOrderlyBookMessage,
+  parseOrderlyMakerTrades,
+} from '../lib/orderly-market-data.js';
 
 type Venue =
   | 'lighter'
@@ -110,6 +114,7 @@ type Venue =
   | 'ethereal'
   | 'hotstuff'
   | 'bitfinex'
+  | 'raydium'
   | 'binance'
   | 'bybit';
 type VenueClass = 'DEX' | 'CEX';
@@ -556,6 +561,18 @@ const BITFINEX_LIGHTER_MAKER_ACTIVE_PATH = resolve(
 const BITFINEX_LIGHTER_MAKER_EVENTS_PATH = resolve(
   DATA_DIR,
   'bitfinex-lighter-maker-events-v1.ndjson',
+);
+const RAYDIUM_LIGHTER_MAKER_RESULTS_PATH = resolve(
+  DATA_DIR,
+  'raydium-lighter-maker-basis-shadow-v1.ndjson',
+);
+const RAYDIUM_LIGHTER_MAKER_ACTIVE_PATH = resolve(
+  DATA_DIR,
+  'raydium-lighter-maker-basis-active-v1.json',
+);
+const RAYDIUM_LIGHTER_MAKER_EVENTS_PATH = resolve(
+  DATA_DIR,
+  'raydium-lighter-maker-events-v1.ndjson',
 );
 const ETHEREAL_LIGHTER_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
@@ -1148,6 +1165,62 @@ const BITFINEX_LIGHTER_MAKER_BASIS_MIN_DEVIATION_BPS = finiteEnv(
   'VENUE_ARB_BITFINEX_LIGHTER_MAKER_BASIS_MIN_DEVIATION_BPS',
   SHADOW_BASIS_MIN_DEVIATION_BPS,
 );
+const RAYDIUM_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_SHADOW_ENABLED',
+  false,
+);
+const RAYDIUM_LIGHTER_MAKER_NOTIONAL_USD = finiteEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_NOTIONAL_USD',
+  1_000,
+);
+const RAYDIUM_LIGHTER_MAKER_ENTRY_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_ENTRY_EDGE_BPS',
+  1,
+);
+const RAYDIUM_LIGHTER_MAKER_CANCEL_EDGE_BPS = signedFiniteEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_CANCEL_EDGE_BPS',
+  0.5,
+);
+const RAYDIUM_LIGHTER_MAKER_POST_FILL_NET_BPS = finiteEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_POST_FILL_NET_BPS',
+  0.5,
+);
+const RAYDIUM_LIGHTER_MAKER_EXIT_NET_BPS = finiteEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_EXIT_NET_BPS',
+  1,
+);
+const RAYDIUM_LIGHTER_MAKER_QUOTE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_QUOTE_LATENCY_MS',
+  250,
+);
+const RAYDIUM_LIGHTER_MAKER_HEDGE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_HEDGE_LATENCY_MS',
+  500,
+);
+const RAYDIUM_LIGHTER_MAKER_QUOTE_TTL_MS = finiteEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_QUOTE_TTL_MS',
+  30_000,
+);
+const RAYDIUM_LIGHTER_MAKER_MAX_QUEUE_USD = finiteEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_MAX_QUEUE_USD',
+  100_000,
+);
+const RAYDIUM_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS = finiteEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS',
+  1_000,
+);
+const RAYDIUM_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_MAX_TRADE_IDLE_MS',
+  15_000,
+);
+const RAYDIUM_LIGHTER_MAKER_BASIS_MIN_DEVIATION_BPS = finiteEnv(
+  'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_BASIS_MIN_DEVIATION_BPS',
+  SHADOW_BASIS_MIN_DEVIATION_BPS,
+);
+const ORDERLY_PUBLIC_WS_URL = (
+  process.env.VENUE_ARB_ORDERLY_PUBLIC_WS_URL
+  ?? 'wss://ws-evm.orderly.org/ws/stream/OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY'
+);
 const ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
   'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED',
   false,
@@ -1611,6 +1684,27 @@ const BITFINEX_MAKER_COINS = new Set(
     .map((coin) => coin.trim().toUpperCase())
     .filter(Boolean),
 );
+const RAYDIUM_VENUE_COINS = new Set(
+  (
+    process.env.VENUE_ARB_RAYDIUM_COINS
+    ?? 'BTC,ETH,SOL,XRP,DOGE,NEAR'
+  )
+    .split(',')
+    .map((coin) => coin.trim().toUpperCase())
+    .filter(Boolean),
+);
+const RAYDIUM_VENUE_MARKETS = ACTIVE_MARKETS.filter(
+  (market) => RAYDIUM_VENUE_COINS.has(market.coin),
+);
+const RAYDIUM_MAKER_COINS = new Set(
+  (
+    process.env.VENUE_ARB_RAYDIUM_MAKER_COINS
+    ?? 'BTC,ETH,SOL,XRP,DOGE,NEAR'
+  )
+    .split(',')
+    .map((coin) => coin.trim().toUpperCase())
+    .filter(Boolean),
+);
 
 const VENUES: readonly Venue[] = [
   'lighter',
@@ -1627,6 +1721,7 @@ const VENUES: readonly Venue[] = [
   'ethereal',
   'hotstuff',
   'bitfinex',
+  'raydium',
   'binance',
   'bybit',
 ];
@@ -1662,6 +1757,7 @@ const VENUE_CLASS: Record<Venue, VenueClass> = {
   ethereal: 'DEX',
   hotstuff: 'DEX',
   bitfinex: 'CEX',
+  raydium: 'DEX',
   binance: 'CEX',
   bybit: 'CEX',
 };
@@ -1692,6 +1788,9 @@ const FEE_BPS: Record<Venue, number> = {
   // Bitfinex removed maker and taker trading fees for eligible customers
   // across derivatives on 2025-12-17.
   bitfinex: finiteEnv('VENUE_ARB_FEE_BPS_BITFINEX', 0),
+  // Raydium Perps uses Orderly's shared CLOB. Maker orders are zero-fee,
+  // while an emergency taker exit starts at 0.045%.
+  raydium: finiteEnv('VENUE_ARB_FEE_BPS_RAYDIUM', 4.5),
   binance: finiteEnv('VENUE_ARB_FEE_BPS_BINANCE', 5),
   bybit: finiteEnv('VENUE_ARB_FEE_BPS_BYBIT', 5.5),
 };
@@ -2075,6 +2174,7 @@ const asterLastTradeAt = new Map<string, number>();
 const hibachiLastTradeAt = new Map<string, number>();
 const coinbaseLastTradeAt = new Map<string, number>();
 const bitfinexLastTradeAt = new Map<string, number>();
+const raydiumLastTradeAt = new Map<string, number>();
 const etherealLastTradeAt = new Map<string, number>();
 const hotstuffLastTradeAt = new Map<string, number>();
 const extendedLastTradeAt = new Map<string, number>();
@@ -2734,6 +2834,65 @@ const bitfinexLighterMakerShadow = new GenericMakerShadow({
   onEvent: (event) => {
     appendFileSync(
       BITFINEX_LIGHTER_MAKER_EVENTS_PATH,
+      `${JSON.stringify(event)}\n`,
+    );
+  },
+});
+const raydiumLighterMakerShadow = new GenericMakerShadow({
+  routeId: 'raydium-maker-lighter',
+  makerVenue: 'raydium',
+  hedgeVenue: 'lighter',
+  notionalUsd: RAYDIUM_LIGHTER_MAKER_NOTIONAL_USD,
+  entryEdgeBps: RAYDIUM_LIGHTER_MAKER_ENTRY_EDGE_BPS,
+  cancelEdgeBps: RAYDIUM_LIGHTER_MAKER_CANCEL_EDGE_BPS,
+  postFillNetBps: RAYDIUM_LIGHTER_MAKER_POST_FILL_NET_BPS,
+  exitNetBps: RAYDIUM_LIGHTER_MAKER_EXIT_NET_BPS,
+  takerExitNetBps: RAYDIUM_LIGHTER_MAKER_EXIT_NET_BPS,
+  quoteLatencyMs: RAYDIUM_LIGHTER_MAKER_QUOTE_LATENCY_MS,
+  hedgeLatencyMs: RAYDIUM_LIGHTER_MAKER_HEDGE_LATENCY_MS,
+  quoteTtlMs: RAYDIUM_LIGHTER_MAKER_QUOTE_TTL_MS,
+  maxQueueUsd: RAYDIUM_LIGHTER_MAKER_MAX_QUEUE_USD,
+  quoteDataGraceMs: RAYDIUM_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS,
+  hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
+  maxHoldMs: MAKER_MAX_HOLD_MS,
+  independenceMs: MAKER_INDEPENDENCE_MS,
+  bookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  sourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  maxHoldExitHedgeFreshMs: LIGHTER_REST_MAX_HOLD_EXIT_FRESH_MS,
+  makerBookFreshMs: SHADOW_EXECUTION_FRESH_MS,
+  makerSourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  hedgeBookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  hedgeSourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  executionBufferBps: EXECUTION_BUFFER_BPS,
+  makerFeeBps: 0,
+  hedgeTakerFeeBps: FEE_BPS.lighter,
+  makerFallbackTakerFeeBps: FEE_BPS.raydium,
+  fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+  requiredSamples: SHADOW_REQUIRED_SAMPLES,
+  requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: RAYDIUM_LIGHTER_MAKER_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
+  maxEntryDistanceBps: 3,
+  maxMakerTradeIdleMs: RAYDIUM_LIGHTER_MAKER_MAX_TRADE_IDLE_MS,
+}, {
+  onResult: (result) => {
+    appendFileSync(
+      RAYDIUM_LIGHTER_MAKER_RESULTS_PATH,
+      `${JSON.stringify(result)}\n`,
+    );
+  },
+  onCheckpoint: (checkpoint) => {
+    atomicJson(RAYDIUM_LIGHTER_MAKER_ACTIVE_PATH, {
+      ...checkpoint,
+      updatedAt: Date.now(),
+    });
+  },
+  onEvent: (event) => {
+    appendFileSync(
+      RAYDIUM_LIGHTER_MAKER_EVENTS_PATH,
       `${JSON.stringify(event)}\n`,
     );
   },
@@ -4667,6 +4826,16 @@ function replaceStringLevels(target: Map<number, number>, rows: unknown): void {
   }
 }
 
+function updateTupleLevels(
+  target: Map<number, number>,
+  levels: readonly PriceLevel[],
+): void {
+  for (const [price, size] of levels) {
+    if (size === 0) target.delete(price);
+    else target.set(price, size);
+  }
+}
+
 function replaceObjectLevels(target: Map<number, number>, rows: unknown): void {
   target.clear();
   updateObjectLevels(target, rows);
@@ -4773,6 +4942,9 @@ function connect(
     if (venue === 'bitfinex' && BITFINEX_LIGHTER_MAKER_SHADOW_ENABLED) {
       bitfinexLighterMakerShadow.setTradeStreamConnected(false);
     }
+    if (venue === 'raydium' && RAYDIUM_LIGHTER_MAKER_SHADOW_ENABLED) {
+      raydiumLighterMakerShadow.setTradeStreamConnected(false);
+    }
     if (venue === 'ethereal' && ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED) {
       etherealLighterMakerShadow.setTradeStreamConnected(false);
     }
@@ -4820,6 +4992,10 @@ function connect(
     if (venue === 'bitfinex' && BITFINEX_LIGHTER_MAKER_SHADOW_ENABLED) {
       bitfinexLighterMakerShadow.setTradeStreamConnected(false);
       bitfinexLighterMakerShadow.recordTradeReconnect();
+    }
+    if (venue === 'raydium' && RAYDIUM_LIGHTER_MAKER_SHADOW_ENABLED) {
+      raydiumLighterMakerShadow.setTradeStreamConnected(false);
+      raydiumLighterMakerShadow.recordTradeReconnect();
     }
     if (venue === 'ethereal' && ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED) {
       etherealLighterMakerShadow.setTradeStreamConnected(false);
@@ -5060,6 +5236,93 @@ function startBitfinex(): void {
       // Bitfinex book messages do not carry exchange timestamps. receivedAt
       // is the only honest freshness boundary available on the public feed.
       markBook(book, receivedAt, receivedAt);
+    },
+  );
+}
+
+function startRaydium(): void {
+  if (!RAYDIUM_VENUE_MARKETS.length) return;
+  connect(
+    'raydium',
+    ORDERLY_PUBLIC_WS_URL,
+    (ws) => {
+      for (const { coin } of RAYDIUM_VENUE_MARKETS) {
+        const book = books.get(bookKey('raydium', coin));
+        book?.bids.clear();
+        book?.asks.clear();
+        if (book) {
+          book.exchangeAt = 0;
+          book.receivedAt = 0;
+        }
+        const symbol = `PERP_${coin}_USDC`;
+        for (const suffix of ['orderbook', 'orderbookupdate', 'trade']) {
+          const topic = `${symbol}@${suffix}`;
+          ws.send(JSON.stringify({
+            id: `raydium-${topic}`,
+            event: 'subscribe',
+            topic,
+          }));
+        }
+      }
+      if (RAYDIUM_LIGHTER_MAKER_SHADOW_ENABLED) {
+        raydiumLighterMakerShadow.setTradeStreamConnected(true);
+      }
+    },
+    (payload, receivedAt, ws) => {
+      if (payload && typeof payload === 'object') {
+        const event = payload as {
+          event?: unknown;
+          success?: unknown;
+          id?: unknown;
+          message?: unknown;
+        };
+        if (event.event === 'ping') {
+          ws.send(JSON.stringify({ event: 'pong', ts: receivedAt }));
+          return;
+        }
+        if (event.success === false) {
+          console.warn(
+            `venue-arb raydium subscription error ${String(
+              event.id ?? event.message ?? 'unknown',
+            )}`,
+          );
+          return;
+        }
+      }
+      const bookMessage = parseOrderlyBookMessage(payload);
+      if (bookMessage && RAYDIUM_VENUE_COINS.has(bookMessage.coin)) {
+        const book = books.get(bookKey('raydium', bookMessage.coin));
+        if (!book) return;
+        if (bookMessage.snapshot) {
+          replacePriceLevels(book.bids, bookMessage.bids);
+          replacePriceLevels(book.asks, bookMessage.asks);
+        } else {
+          // Orderly deltas form an explicit timestamp chain. A missed link
+          // invalidates the incremental book until the next 1s full snapshot.
+          if (
+            !book.bids.size
+            || !book.asks.size
+            || bookMessage.previousAt !== book.exchangeAt
+          ) return;
+          updateTupleLevels(book.bids, bookMessage.bids);
+          updateTupleLevels(book.asks, bookMessage.asks);
+        }
+        markBook(book, bookMessage.exchangeAt, receivedAt);
+        return;
+      }
+      if (!RAYDIUM_LIGHTER_MAKER_SHADOW_ENABLED) return;
+      for (const trade of parseOrderlyMakerTrades(payload)) {
+        if (!RAYDIUM_MAKER_COINS.has(trade.coin)) continue;
+        const activityAt = makerActivityTimestamp(
+          trade.tradeAt,
+          receivedAt,
+          SHADOW_SOURCE_FRESH_MS,
+        );
+        if (activityAt != null) {
+          raydiumLastTradeAt.set(trade.coin, activityAt);
+        }
+        raydiumLighterMakerShadow.processTrade(trade, receivedAt);
+      }
     },
   );
 }
@@ -7111,6 +7374,17 @@ function writeStatus(): void {
       makerCoins: [...BITFINEX_MAKER_COINS],
       feeEligibility: 'bitfinex_zero_fee_eligible_customer',
     },
+    raydiumLighterMakerShadow: {
+      ...raydiumLighterMakerShadow.status(),
+      enabled: RAYDIUM_LIGHTER_MAKER_SHADOW_ENABLED,
+      makerCoins: [...RAYDIUM_MAKER_COINS],
+      marketData: 'orderly_public_ws_200ms_delta_plus_1s_snapshot',
+      feeModel: {
+        makerBps: 0,
+        emergencyTakerBps: FEE_BPS.raydium,
+        hedgeTakerBps: FEE_BPS.lighter,
+      },
+    },
     etherealLighterMakerShadow: {
       ...etherealLighterMakerShadow.status(),
       enabled: ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED,
@@ -7482,6 +7756,7 @@ function genericMakerMarkets(
     | 'hibachi'
     | 'coinbase'
     | 'bitfinex'
+    | 'raydium'
     | 'ethereal'
     | 'hotstuff',
   hedgeVenue: 'lighter' | 'extended' | 'aster' | 'pacifica' | 'binance',
@@ -7584,6 +7859,8 @@ function genericMakerMarkets(
             ? coinbaseLastTradeAt
           : makerVenue === 'bitfinex'
             ? bitfinexLastTradeAt
+          : makerVenue === 'raydium'
+            ? raydiumLastTradeAt
           : makerVenue === 'ethereal'
             ? etherealLastTradeAt
           : makerVenue === 'hotstuff'
@@ -7648,6 +7925,7 @@ function shutdown(signal: string): void {
   hibachiLighterCapacityShadow.shutdown(Date.now());
   coinbaseLighterMakerShadow.shutdown(Date.now());
   bitfinexLighterMakerShadow.shutdown(Date.now());
+  raydiumLighterMakerShadow.shutdown(Date.now());
   etherealLighterMakerShadow.shutdown(Date.now());
   hotstuffLighterMakerShadow.shutdown(Date.now());
   extendedLighterMakerShadow.shutdown(Date.now());
@@ -7719,6 +7997,12 @@ if (!existsSync(BITFINEX_LIGHTER_MAKER_RESULTS_PATH)) {
 }
 if (!existsSync(BITFINEX_LIGHTER_MAKER_EVENTS_PATH)) {
   writeFileSync(BITFINEX_LIGHTER_MAKER_EVENTS_PATH, '');
+}
+if (!existsSync(RAYDIUM_LIGHTER_MAKER_RESULTS_PATH)) {
+  writeFileSync(RAYDIUM_LIGHTER_MAKER_RESULTS_PATH, '');
+}
+if (!existsSync(RAYDIUM_LIGHTER_MAKER_EVENTS_PATH)) {
+  writeFileSync(RAYDIUM_LIGHTER_MAKER_EVENTS_PATH, '');
 }
 if (!existsSync(ETHEREAL_LIGHTER_MAKER_RESULTS_PATH)) {
   writeFileSync(ETHEREAL_LIGHTER_MAKER_RESULTS_PATH, '');
@@ -7825,6 +8109,13 @@ loadGenericMakerState(
   BITFINEX_LIGHTER_MAKER_SHADOW_ENABLED,
 );
 loadGenericMakerState(
+  raydiumLighterMakerShadow,
+  RAYDIUM_LIGHTER_MAKER_RESULTS_PATH,
+  RAYDIUM_LIGHTER_MAKER_ACTIVE_PATH,
+  'Raydium maker → Lighter',
+  RAYDIUM_LIGHTER_MAKER_SHADOW_ENABLED,
+);
+loadGenericMakerState(
   etherealLighterMakerShadow,
   ETHEREAL_LIGHTER_MAKER_RESULTS_PATH,
   ETHEREAL_LIGHTER_MAKER_ACTIVE_PATH,
@@ -7903,6 +8194,7 @@ if (activeVenues.has('coinbase')) startCoinbase();
 if (activeVenues.has('ethereal')) startEthereal();
 if (activeVenues.has('hotstuff')) startHotstuff();
 if (activeVenues.has('bitfinex')) startBitfinex();
+if (activeVenues.has('raydium')) startRaydium();
 if (activeVenues.has('binance')) startBinance();
 if (activeVenues.has('bybit')) startBybit();
 const evaluationTimer = setInterval(() => {
@@ -8049,6 +8341,23 @@ const evaluationTimer = setInterval(() => {
         BITFINEX_LIGHTER_MAKER_NOTIONAL_USD,
       ).filter(
         (market) => BITFINEX_MAKER_COINS.has(market.coin),
+      ),
+    );
+  }
+  if (
+    RAYDIUM_LIGHTER_MAKER_SHADOW_ENABLED
+    && activeVenues.has('raydium')
+    && activeVenues.has('lighter')
+  ) {
+    raydiumLighterMakerShadow.evaluate(
+      now,
+      genericMakerMarkets(
+        'raydium',
+        'lighter',
+        now,
+        RAYDIUM_LIGHTER_MAKER_NOTIONAL_USD,
+      ).filter(
+        (market) => RAYDIUM_MAKER_COINS.has(market.coin),
       ),
     );
   }

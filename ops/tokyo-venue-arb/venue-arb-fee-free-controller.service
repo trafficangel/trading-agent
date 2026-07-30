@@ -13,6 +13,7 @@ After=venue-arb-ethereal-lighter-taker-gate.service
 After=venue-arb-hotstuff-lighter-maker-gate.service
 After=venue-arb-bitfinex-lighter-taker-gate.service
 After=venue-arb-bitfinex-lighter-maker-gate.service
+After=venue-arb-raydium-lighter-maker-gate.service
 
 [Service]
 Type=oneshot
@@ -25,6 +26,7 @@ Environment=VENUE_ARB_CONTROLLER_ETHEREAL_TAKER_ENABLED=true
 Environment=VENUE_ARB_CONTROLLER_HOTSTUFF_DISABLED=true
 Environment=VENUE_ARB_CONTROLLER_BITFINEX_ENABLED=true
 Environment=VENUE_ARB_CONTROLLER_BITFINEX_MAKER_ENABLED=true
+Environment=VENUE_ARB_CONTROLLER_RAYDIUM_ENABLED=true
 ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-fee-free-controller.py
 NoNewPrivileges=true
 PrivateTmp=true
