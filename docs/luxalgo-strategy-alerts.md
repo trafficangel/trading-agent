@@ -74,7 +74,10 @@ LuxAlgo-плейсхолдер.
 ```
 
 Один webhook на 4 события — **Long, Short, Exit Long, Exit Short** —
-все 4 чекбокса включены. Сервер сам разберётся по `strategy_event`:
+все 4 чекбокса включены. Кроме них обязательно включён отдельный
+чекбокс слева от поля **URL**: без него alert остаётся `Active`, payload
+показывается как `Valid`, но LuxAlgo не отправляет webhook. Сервер сам
+разберётся по `strategy_event`:
 - `long` → entry long (открыть позицию)
 - `short` → entry short
 - `exit long` → закрыть LONG позицию (force_close_reason='strategy_exit')
@@ -173,6 +176,10 @@ Webhook URL: `https://robotclaude.biz/webhook/luxalgo/<WEBHOOK_SECRET>` —
    бектест из STRATEGY_CONFIGS и постит в @luxalgosignal со ссылкой
    на лендинг.
 5. Пользователь создаёт ONE webhook алерт в LuxAlgo с payload выше
-   (хардкодит `strategy_id` под нашу запись), включает все 4 события.
-6. Готово — следующий сигнал прилетит в @luxalgosignal с пометкой
+   (хардкодит `strategy_id` под нашу запись), включает чекбокс слева
+   от URL и все 4 события.
+6. Перед завершением повторно открыть сохранённый alert и проверить:
+   URL включён, Long/Short/Exit Long/Exit Short включены, payload
+   `Valid`, alert `Active`.
+7. Готово — следующий сигнал прилетит в @luxalgosignal с пометкой
    `STRAT-00X`.
