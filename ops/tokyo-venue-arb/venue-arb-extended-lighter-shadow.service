@@ -13,12 +13,11 @@ Environment=VENUE_ARB_ACTIVE_VENUES=extended,grvt,lighter
 # LIT is excluded: its Lighter depth disagreed with the independent ticker in
 # roughly 23% of checks and produced both the prior failed-flat live canary and
 # a negative reverse shadow fill. Prefer the better-validated books below.
-Environment=VENUE_ARB_ACTIVE_COINS=BTC,ETH,SOL,HYPE,WTI,XAU,XMR,NEAR,XRP,XAG
-# This service observes two secondary routes. Queue fills are consumed from
-# trade streams event-by-event, so a 250 ms quote-evaluation cadence preserves
-# fill evidence while leaving the single Tokyo CPU available to the leading
-# Hibachi route.
-Environment=VENUE_ARB_SAMPLE_MS=250
+# The only completed positive cycles on both Extended and GRVT used HYPE.
+# Focus the clean forward cohort there so unrelated books cannot occupy either
+# route's single maker slot. The gate still requires 30 new episodes.
+Environment=VENUE_ARB_ACTIVE_COINS=HYPE
+Environment=VENUE_ARB_SAMPLE_MS=100
 Environment=VENUE_ARB_STALE_MS=1000
 Environment=VENUE_ARB_EXECUTION_BUFFER_BPS=2
 Environment=VENUE_ARB_SHADOW_NOTIONAL_USD=100
@@ -94,7 +93,7 @@ Environment=VENUE_ARB_LIGHTER_EXTENDED_MAKER_EXIT_NET_BPS=1
 Environment=VENUE_ARB_LIGHTER_EXTENDED_MAKER_QUOTE_LATENCY_MS=200
 Environment=VENUE_ARB_LIGHTER_EXTENDED_MAKER_HEDGE_LATENCY_MS=200
 Environment=VENUE_ARB_LIGHTER_EXTENDED_MAKER_MAX_TRADE_IDLE_MS=10000
-Environment=VENUE_ARB_LIGHTER_TRADE_COINS=BTC,ETH,SOL,HYPE,WTI,XAU,XMR,NEAR,XRP,XAG
+Environment=VENUE_ARB_LIGHTER_TRADE_COINS=HYPE
 Environment=VENUE_ARB_LIGHTER_BOOK_REFRESH_MS=0
 Environment=VENUE_ARB_LIGHTER_MARKETS_PER_CONNECTION=6
 Environment=VENUE_ARB_LIGHTER_BBO_MISMATCH_REFRESH_COUNT=0
