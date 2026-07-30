@@ -17,6 +17,7 @@ import { keltnerMr, zscoreMr } from '../src/backtest/strategies/families-lowtf.j
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { request } from 'undici';
+import { missingCandleWindows } from '../src/lib/lighter-candle-windows.js';
 
 const DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LTCUSDT', 'LINKUSDT', 'DOGEUSDT', 'AVAXUSDT'];
 const SYMBOLS = (process.env.SYMBOLS?.split(',').map((symbol) => symbol.trim()).filter(Boolean) ?? DEFAULT_SYMBOLS);
@@ -229,6 +230,49 @@ function fmt(x: number, digits = 1): string { return `${x >= 0 ? '+' : ''}${x.to
 type LighterOrderBook = { symbol: string; market_id: number; market_type: string };
 type LighterCandleResponse = { code: number; message?: string; c?: Candle[] };
 
+const wait = (ms: number): Promise<void> => new Promise((resolveWait) => setTimeout(resolveWait, ms));
+
+let lighterMarketsPromise: Promise<Map<string, LighterOrderBook>> | null = null;
+
+function lighterMarkets(): Promise<Map<string, LighterOrderBook>> {
+  lighterMarketsPromise ??= (async () => {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const response = await request('https://mainnet.zklighter.elliot.ai/api/v1/orderBooks');
+      const body = await response.body.json() as {
+        code?: number;
+        message?: string;
+        order_books?: LighterOrderBook[];
+      };
+      if (body.order_books) {
+        return new Map(
+          body.order_books
+            .filter((book) => book.market_type === 'perp')
+            .map((book) => [book.symbol, book]),
+        );
+      }
+      if (body.code !== 23000 || attempt === 5) {
+        throw new Error(`Lighter orderBooks code=${body.code ?? 'unknown'}${body.message ? `: ${body.message}` : ''}`);
+      }
+      await wait(Math.min(4_000, 250 * 2 ** attempt));
+    }
+    throw new Error('Lighter orderBooks retry exhausted');
+  })();
+  return lighterMarketsPromise;
+}
+
+async function lighterCandlePage(url: URL): Promise<Candle[]> {
+  for (let attempt = 0; attempt < 7; attempt++) {
+    const response = await request(url);
+    const body = await response.body.json() as LighterCandleResponse;
+    if (body.code === 200) return body.c ?? [];
+    if (body.code !== 23000 || attempt === 6) {
+      throw new Error(`Lighter candles code=${body.code}${body.message ? `: ${body.message}` : ''}`);
+    }
+    await wait(Math.min(4_000, 250 * 2 ** attempt));
+  }
+  throw new Error('Lighter candles retry exhausted');
+}
+
 async function lighterCandles(symbol: string, fromMs: number, toMs: number): Promise<Candle[]> {
   const lighterSymbol = symbol.replace(/USDT$/, '');
   const cacheDir = resolve('data', 'lighter-klines');
@@ -238,45 +282,28 @@ async function lighterCandles(symbol: string, fromMs: number, toMs: number): Pro
     : [];
   const byTime = new Map(cached.map((candle) => [candle.t, candle]));
   const stepMs = Number(TF) * 60_000;
-  const fetchConcurrency = Number(process.env.LIGHTER_FETCH_CONCURRENCY ?? 6);
-  const fetchDelayMs = Number(process.env.LIGHTER_FETCH_DELAY_MS ?? 40);
+  const fetchConcurrency = Number(process.env.LIGHTER_FETCH_CONCURRENCY ?? 3);
+  const fetchDelayMs = Number(process.env.LIGHTER_FETCH_DELAY_MS ?? 200);
 
-  const booksRes = await request('https://mainnet.zklighter.elliot.ai/api/v1/orderBooks');
-  const booksBody = await booksRes.body.json() as { order_books?: LighterOrderBook[] };
-  const market = booksBody.order_books?.find((book) => book.symbol === lighterSymbol && book.market_type === 'perp');
+  const market = (await lighterMarkets()).get(lighterSymbol);
   if (!market) throw new Error(`Lighter market not found: ${lighterSymbol}`);
 
-  const cachedMin = cached.length ? cached[0]!.t : Infinity;
-  const cachedMax = cached.length ? cached[cached.length - 1]!.t : -Infinity;
-  const ranges: Array<[number, number]> = [];
-  if (fromMs < cachedMin) ranges.push([fromMs, Math.min(toMs, cachedMin - stepMs)]);
-  if (toMs > cachedMax) ranges.push([Math.max(fromMs, cachedMax + stepMs), toMs]);
-  if (!cached.length) ranges.splice(0, ranges.length, [fromMs, toMs]);
-
-  const windows: Array<[number, number]> = [];
-  for (const [rangeStart, rangeEnd] of ranges) {
-    for (let start = rangeStart; start <= rangeEnd; start += 500 * stepMs) {
-      windows.push([start, Math.min(rangeEnd, start + 499 * stepMs)]);
-    }
-  }
+  const windows = missingCandleWindows(byTime.keys(), fromMs, toMs, stepMs);
 
   for (let offset = 0; offset < windows.length; offset += fetchConcurrency) {
     const batch = windows.slice(offset, offset + fetchConcurrency);
-    const pages = await Promise.all(batch.map(async ([start, end]) => {
+    const pages = await Promise.all(batch.map(async ([start, endExclusive]) => {
       const url = new URL('https://mainnet.zklighter.elliot.ai/api/v1/candles');
       url.searchParams.set('market_id', String(market.market_id));
       url.searchParams.set('resolution', `${TF}m`);
       url.searchParams.set('start_timestamp', String(start));
-      url.searchParams.set('end_timestamp', String(end));
+      url.searchParams.set('end_timestamp', String(endExclusive));
       url.searchParams.set('count_back', '0');
       url.searchParams.set('set_timestamp_to_end', 'false');
-      const response = await request(url);
-      const body = await response.body.json() as LighterCandleResponse;
-      if (body.code !== 200) throw new Error(`Lighter candles code=${body.code}${body.message ? `: ${body.message}` : ''}`);
-      return body.c ?? [];
+      return lighterCandlePage(url);
     }));
     for (const page of pages) for (const candle of page) byTime.set(candle.t, candle);
-    if (offset + batch.length < windows.length) await new Promise((resolveBatch) => setTimeout(resolveBatch, fetchDelayMs));
+    if (offset + batch.length < windows.length) await wait(fetchDelayMs);
   }
 
   const merged = [...byTime.values()].sort((a, b) => a.t - b.t);

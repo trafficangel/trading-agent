@@ -84,9 +84,8 @@ Reproducible runners:
 
 ## Candidate 4 — Lighter SOL Z60 Reclaim Dual
 
-A second search used **native Lighter one-minute candles**, aggregated into
-complete five-minute bars. It found one materially stronger, two-sided
-coin-specific candidate:
+A second search used **native Lighter candles** and complete five-minute bars.
+It found one materially stronger, two-sided coin-specific candidate:
 
 - mean: population `SMA(60)` / standard deviation over 60 bars;
 - long entry: prior Z-score below `-3`, current completed bar reclaims `-3`;
@@ -95,24 +94,24 @@ coin-specific candidate:
 - exit when price reaches the current SMA(60);
 - catastrophe stop: 1.5% from the actual entry;
 - time exit: 240 bars;
-- zero commission, 0.02% round-trip execution stress and 0.00125% per holding
+- zero commission, 0.05% round-trip execution stress and 0.00125% per holding
   hour adverse funding.
 
-| Lookback | Trades | Net after stress/funding | PF | WR | Long / short net |
+| Lookback | Trades | Net after 0.05% stress/funding | PF | WR | Long / short net |
 |---:|---:|---:|---:|---:|---:|
-| 30d | 66 | +9.51% | 1.54 | 72.7% | +5.44% / +4.07% |
-| 60d | 144 | +31.81% | 1.61 | 68.1% | +17.73% / +14.08% |
-| 90d | 215 | +27.16% | 1.34 | 67.0% | +14.64% / +12.53% |
-| 120d | 290 | +41.35% | 1.43 | 68.3% | +24.05% / +17.29% |
-| 180d | 446 | +49.06% | 1.28 | 65.2% | +31.99% / +17.07% |
+| 30d | 67 | +5.36% | 1.28 | 67.2% | +3.42% / +1.94% |
+| 60d | 146 | +24.80% | 1.44 | 65.1% | +15.44% / +9.35% |
+| 90d | 220 | +18.49% | 1.22 | 64.5% | +10.95% / +7.54% |
+| 120d | 299 | +31.08% | 1.31 | 66.2% | +19.28% / +11.79% |
+| 180d | 457 | +37.93% | 1.21 | 63.9% | +29.13% / +8.80% |
 
-At a larger 0.05% round-trip execution stress the 180-day result remains
-+35.68% with PF 1.20. At 0.10% it remains nominally positive (+13.38%) but
-fails the stability gate because the earlier in-sample partition and short
-side become marginal. Nearby periods and thresholds form a positive plateau,
-although not every neighbor passes the full gate.
+These figures supersede the earlier cache-based results. A pagination audit
+found one missing candle at every historical API page boundary. The cache was
+repaired with end-exclusive Lighter request windows and revalidated with zero
+five-minute gaps. The corrected reclaim model still clears the strict gate,
+but only narrowly on the full 180-day PF.
 
-The additive maximum drawdown at the base stress is 19.81 percentage points,
+The additive maximum drawdown at the base stress is 21.85 percentage points,
 so the backtest does **not** justify leverage or live capital. The strategy is
 admitted first to prospective Lighter Shadow under id `sol-z60-reclaim`
 (`STRAT-030`). It later entered a separately risk-limited $100-notional live
@@ -135,22 +134,19 @@ band instead of waiting for a reclaim:
   exit are unchanged;
 - no regime filter, pyramiding or same-bar reversal.
 
-| Lookback | Trades | Net after 0.02% stress/funding | PF | Long / short net |
+| Lookback | Trades | Net after 0.05% stress/funding | PF | Long / short net |
 |---:|---:|---:|---:|---:|
-| 30d | 67 | +12.84% | 1.69 | +6.54% / +6.30% |
-| 60d | 143 | +28.51% | 1.48 | +13.28% / +15.23% |
-| 90d | 213 | +26.83% | 1.31 | +12.71% / +14.12% |
-| 120d | 287 | +42.79% | 1.41 | +21.71% / +21.08% |
-| 180d | 451 | +49.71% | 1.25 | +30.79% / +18.93% |
+| 30d | 68 | +7.44% | 1.35 | +3.86% / +3.58% |
+| 60d | 144 | +22.09% | 1.35 | +10.67% / +11.42% |
+| 90d | 218 | +18.16% | 1.20 | +8.61% / +9.56% |
+| 120d | 297 | +33.65% | 1.30 | +16.68% / +16.97% |
+| 180d | 462 | +39.46% | 1.19 | +28.32% / +11.13% |
 
-At 0.05% round-trip stress the 30/60/90/120-day windows still clear PF 1.2;
-the full 180-day result remains positive at +36.18% but PF falls to 1.18. The
-base-stress maximum drawdown is 23.84 percentage points.
+The corrected full-window PF is below the 1.20 gate. It remains Shadow-only
+and is not eligible for Real promotion.
 
-Lower thresholds increase turnover but fail the robustness gate: at thresholds
-2.6–2.9 the 180-day PF is only 1.07–1.17 and drawdown rises to 33.58–37.00
-percentage points. Therefore `3.0` is the maximum-frequency point admitted;
-it was not loosened merely to manufacture more trades.
+Lower thresholds increase turnover but fail the robustness gate. Therefore
+`3.0` was not loosened merely to manufacture more trades.
 
 This model is highly correlated with STRAT-030 and has the larger drawdown. It
 is admitted only to prospective Shadow as `sol-z60-touch` (`STRAT-031`).
@@ -162,24 +158,21 @@ The auditable Pine reference is
 ## Candidates 6–7 — cross-symbol native Z60 transfer
 
 The same native-candle engine was then run on additional liquid Lighter
-markets. BTC, ETH, ADA and WLD were rejected because at least one recent
-window, direction, or adverse-cost test failed. AVAX was retained by a later,
-stricter audit as a Shadow research candidate. Two two-sided candidates
+markets. BTC, ETH, ADA, WLD and AVAX were rejected because at least one recent
+window, direction, or adverse-cost test failed. Two two-sided candidates
 survived without adding a regime filter:
 
-| Strategy | Rule | Trades | Net after 0.02% stress/funding | PF | WR | DD | Long / short net |
+| Strategy | Rule | Trades | Net after 0.05% stress/funding | PF | WR | DD | Long / short net |
 |---|---|---:|---:|---:|---:|---:|---:|
-| STRAT-032 · BNB | Z60 ±3 touch | 417 | +60.86% | 1.51 | 69.3% | 9.76% | +33.99% / +26.87% |
-| STRAT-033 · LTC | Z60 ±2 touch | 968 | +107.39% | 1.37 | 69.5% | 27.57% | +64.74% / +42.65% |
+| STRAT-032 · BNB | Z60 ±3 touch | 415 | +45.95% | 1.37 | 68.2% | 11.87% | +25.18% / +20.77% |
+| STRAT-033 · LTC | Z60 ±2 touch | 972 | +80.40% | 1.27 | 68.0% | 28.22% | +51.08% / +29.32% |
 
-BNB remained positive in every 30/60/90/120/180-day window. The 30-day
-window produced 68 trades, +5.25% net and PF 1.40; the 180-day result remained
-+48.35% with PF 1.39 under the larger 0.05% round-trip execution stress.
+BNB remains positive in aggregate, but the corrected recent sample is weaker:
+30 days produced 67 trades, +2.54% and PF 1.18, with long −0.75% and short
++3.29%. It must not be scaled while that directional weakness persists.
 
-LTC also remained positive in every tested window. The 30-day result was 154
-trades, +20.62% net and PF 1.59. Periods 50/60/70 and thresholds
-1.75/2.0/2.25 were all two-sided positive, providing a broad local parameter
-plateau. At 0.05% stress its 180-day result remained +78.35% with PF 1.26.
+LTC remains positive and two-sided in every tested 30/60/90/120/180-day
+window. Its corrected 30-day result is 153 trades, +16.06% and PF 1.44.
 
 Both candidates were first admitted to the consolidated Native Quant portfolio
 as prospective Shadow. On the user's explicit 2026-07-30 instruction they were
@@ -197,8 +190,20 @@ candles. WLD RSI2 was very active and profitable at 0.02% round-trip execution
 stress, but no variant passed every 30/60/90/120/180-day gate at 0.05%; it was
 therefore rejected for live use. XRP produced no qualified candidate.
 
-AVAX Z-reclaim was materially stronger. The Z50 ±3 reclaim neighborhood stayed
-positive in both directions across every tested window and at 0.05% stress
-(180 days: 454 trades, +36.98% stressed net, PF 1.21, 15.96% max drawdown).
-It remains a research/Shadow candidate until its own forward sample exists;
-these historical results do not authorize live orders.
+AVAX Z50 ±3 reclaim remained profitable and two-sided after the cache repair
+(180 days: 453 trades, +33.60% stressed net, PF 1.19, 15.00% max drawdown),
+but now misses the strict PF gate. It was therefore **not** added to Shadow or
+Real.
+
+WLD RSI7 20/80 with EMA400 looked promising on the full window (224 trades,
++20.23%, PF 1.25), but failed the 30-day stress window and had a negative
+recent long side. It was rejected.
+
+Two additional standard, causal indicator families were tested on BTC, ETH,
+SOL, BNB, LTC, XRP, AVAX and WLD:
+
+- stochastic 14/3 oversold/overbought crossover, with and without EMA400;
+- CCI20 ±100 reclaim, with and without EMA400.
+
+Neither family produced a candidate that survived 0.05% round-trip stress,
+adverse funding, both directions, chronological folds and IS/OOS checks.

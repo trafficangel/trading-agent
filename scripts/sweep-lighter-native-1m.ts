@@ -54,6 +54,9 @@ type Arrays = {
   rsi2: number[];
   rsi7: number[];
   rsi14: number[];
+  stoch14: number[];
+  stoch14Signal: number[];
+  cci20: number[];
 };
 type Rule = {
   name: string;
@@ -88,6 +91,33 @@ function aggregateCandles(candles: Candle[], minutes: number): Candle[] {
     .sort((a, b) => a.t - b.t);
 }
 
+function stochastic(candles: Candle[], period: number): number[] {
+  return candles.map((bar, i) => {
+    if (i + 1 < period) return 50;
+    let high = -Infinity;
+    let low = Infinity;
+    for (let j = i - period + 1; j <= i; j++) {
+      high = Math.max(high, candles[j]!.h);
+      low = Math.min(low, candles[j]!.l);
+    }
+    return high > low ? (bar.c - low) / (high - low) * 100 : 50;
+  });
+}
+
+function cci(candles: Candle[], period: number): number[] {
+  const typical = candles.map((bar) => (bar.h + bar.l + bar.c) / 3);
+  const mean = sma(typical, period);
+  return typical.map((value, i) => {
+    if (i + 1 < period) return 0;
+    let deviation = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      deviation += Math.abs(typical[j]! - mean[i]!);
+    }
+    deviation /= period;
+    return deviation > 0 ? (value - mean[i]!) / (0.015 * deviation) : 0;
+  });
+}
+
 function build(c: Candle[]): Arrays {
   const close = c.map((bar) => bar.c);
   const volume = c.map((bar) => bar.v);
@@ -96,6 +126,7 @@ function build(c: Candle[]): Arrays {
   const ema12Values = ema(close, 12);
   const ema26Values = ema(close, 26);
   const macd = ema12Values.map((value, i) => value - ema26Values[i]!);
+  const stoch14 = stochastic(c, 14);
   return {
     c,
     close,
@@ -121,6 +152,9 @@ function build(c: Candle[]): Arrays {
     rsi2: rsi(c, 2),
     rsi7: rsi(c, 7),
     rsi14: rsi(c, 14),
+    stoch14,
+    stoch14Signal: sma(stoch14, 3),
+    cci20: cci(c, 20),
   };
 }
 
@@ -170,6 +204,46 @@ function rules(): Rule[] {
         },
       });
     }
+  }
+
+  for (const trend of [0, 400] as const) {
+    out.push({
+      name: `STOCH14/3-20/80${trend ? '+EMA400' : ''}`,
+      warmup: Math.max(30, trend + 1),
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        const crossUp = a.stoch14[i - 1]! <= a.stoch14Signal[i - 1]!
+          && a.stoch14[i]! > a.stoch14Signal[i]!;
+        const crossDown = a.stoch14[i - 1]! >= a.stoch14Signal[i - 1]!
+          && a.stoch14[i]! < a.stoch14Signal[i]!;
+        const longOk = trend === 0 || a.close[i]! > a.ema400[i]!;
+        const shortOk = trend === 0 || a.close[i]! < a.ema400[i]!;
+        if (crossUp && a.stoch14[i]! < 20 && longOk) return 'long';
+        if (crossDown && a.stoch14[i]! > 80 && shortOk) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.stoch14[i]! >= 50 : a.stoch14[i]! <= 50;
+      },
+    });
+
+    out.push({
+      name: `CCI20-reclaim-100${trend ? '+EMA400' : ''}`,
+      warmup: Math.max(30, trend + 1),
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        const longOk = trend === 0 || a.close[i]! > a.ema400[i]!;
+        const shortOk = trend === 0 || a.close[i]! < a.ema400[i]!;
+        if (a.cci20[i - 1]! < -100 && a.cci20[i]! >= -100 && longOk) return 'long';
+        if (a.cci20[i - 1]! > 100 && a.cci20[i]! <= 100 && shortOk) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.cci20[i]! >= 0 : a.cci20[i]! <= 0;
+      },
+    });
   }
 
   for (const period of Z_PERIODS) for (const threshold of Z_THRESHOLDS) {
