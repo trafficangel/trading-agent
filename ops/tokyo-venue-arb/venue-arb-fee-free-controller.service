@@ -11,6 +11,7 @@ After=venue-arb-hotstuff-lighter-maker-gate.service
 [Service]
 Type=oneshot
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
+Environment=VENUE_ARB_CONTROLLER_GRVT_DISABLED=true
 ExecStart=/usr/bin/python3 /home/trader/apps/venue-arb-tokyo/venue-arb-fee-free-controller.py
 NoNewPrivileges=true
 PrivateTmp=true

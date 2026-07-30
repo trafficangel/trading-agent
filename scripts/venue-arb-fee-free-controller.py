@@ -53,10 +53,12 @@ def stop_plan(
     coinbase_gate: dict[str, Any] | None,
     ethereal_gate: dict[str, Any] | None,
     hotstuff_gate: dict[str, Any] | None,
+    *,
+    grvt_disabled: bool = False,
 ) -> dict[str, Any]:
     aster_no_go = is_no_go(aster_gate)
     extended_no_go = is_no_go(extended_gate)
-    grvt_no_go = is_no_go(grvt_gate)
+    grvt_no_go = grvt_disabled or is_no_go(grvt_gate)
     hibachi_no_go = is_no_go(hibachi_gate)
     coinbase_no_go = is_no_go(coinbase_gate)
     ethereal_no_go = is_no_go(ethereal_gate)
@@ -103,6 +105,7 @@ def stop_plan(
         "asterNoGo": aster_no_go,
         "extendedNoGo": extended_no_go,
         "grvtNoGo": grvt_no_go,
+        "grvtDisabled": grvt_disabled,
         "hibachiNoGo": hibachi_no_go,
         "coinbaseNoGo": coinbase_no_go,
         "etherealNoGo": ethereal_no_go,
@@ -163,6 +166,34 @@ def self_test() -> None:
         observe, observe, no_go, observe, observe, observe, observe
     )
     assert grvt_only["stopUnits"] == [GRVT_GATE_TIMER]
+    grvt_disabled = stop_plan(
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        grvt_disabled=True,
+    )
+    assert grvt_disabled["grvtNoGo"] is True
+    assert grvt_disabled["grvtDisabled"] is True
+    assert grvt_disabled["stopUnits"] == [GRVT_GATE_TIMER]
+    shared_with_disabled_grvt = stop_plan(
+        observe,
+        no_go,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        grvt_disabled=True,
+    )
+    assert shared_with_disabled_grvt["stopUnits"] == [
+        EXTENDED_GATE_TIMER,
+        GRVT_GATE_TIMER,
+        COMBINED_SHADOW_SERVICE,
+    ]
     shared = stop_plan(observe, no_go, no_go, observe, observe, observe, observe)
     assert shared["stopUnits"] == [
         EXTENDED_GATE_TIMER,
@@ -290,6 +321,14 @@ def main() -> None:
             "fee-free-controller-status.json",
         ),
     )
+    parser.add_argument(
+        "--grvt-disabled",
+        action="store_true",
+        default=os.getenv(
+            "VENUE_ARB_CONTROLLER_GRVT_DISABLED",
+            "",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+    )
     args = parser.parse_args()
     if args.self_test:
         self_test()
@@ -312,6 +351,7 @@ def main() -> None:
         gates["coinbase"],
         gates["ethereal"],
         gates["hotstuff"],
+        grvt_disabled=args.grvt_disabled,
     )
     actions: list[dict[str, Any]] = []
     for unit in plan["stopUnits"]:
