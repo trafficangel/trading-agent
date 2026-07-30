@@ -532,6 +532,7 @@ describe('GenericMakerShadow', () => {
         makerSide: 'short',
         openedAt: 100,
         quantity: 1,
+        notionalUsd: 100.1,
         entryMaker: 100.1,
         entryHedge: 100,
         entryEdgeBps: 10,
@@ -572,6 +573,7 @@ describe('GenericMakerShadow', () => {
         makerSide: 'short',
         openedAt: 100,
         quantity: 1,
+        notionalUsd: 100.1,
         entryMaker: 100.1,
         entryHedge: 100,
         entryEdgeBps: 10,
@@ -611,6 +613,7 @@ describe('GenericMakerShadow', () => {
         makerSide: 'short',
         openedAt: 100,
         quantity: 1,
+        notionalUsd: 100.2,
         entryMaker: 100.2,
         entryHedge: 100,
         entryEdgeBps: 20,
@@ -779,5 +782,78 @@ describe('GenericMakerShadow', () => {
     snapshot.maker!.bids.set(99.8, 0.1);
     engine.evaluate(5_000, [snapshot]);
     expect((engine.status() as { quote?: unknown }).quote).toBeNull();
+  });
+
+  it('cancels the remainder and hedges a material partial entry fill', () => {
+    const results: GenericMakerResult[] = [];
+    const events: GenericMakerEvent[] = [];
+    const engine = new GenericMakerShadow({
+      ...config,
+      hedgePartialEntryFills: true,
+      partialFillCancelLatencyMs: 100,
+      minPartialHedgeUsd: 25,
+      makerExitEnabled: false,
+      hedgeLatencyMs: 200,
+    }, {
+      onResult: (result) => results.push(result),
+      onEvent: (event) => events.push(event),
+    });
+
+    engine.evaluate(6_000, [market(6_000, 100.2, 100.3)]);
+    engine.evaluate(6_001, [market(6_001, 100.2, 100.3)]);
+    engine.processTrade({
+      id: 'partial-entry-print',
+      coin: 'BNB',
+      side: 'SELL',
+      price: 100,
+      size: 1.4,
+      tradeAt: 6_001,
+    }, 6_001);
+
+    engine.evaluate(6_100, [market(6_100, 100.2, 100.3)]);
+    expect((engine.status() as { pendingHedge?: unknown }).pendingHedge)
+      .toBeNull();
+
+    engine.evaluate(6_101, [market(6_101, 100.2, 100.3)]);
+    const pending = (engine.status() as {
+      pendingHedge?: {
+        quantity?: number;
+        notionalUsd?: number;
+      } | null;
+    }).pendingHedge;
+    expect(pending?.quantity).toBeCloseTo(0.4);
+    expect(pending?.notionalUsd).toBeCloseTo(40);
+
+    engine.evaluate(6_301, [market(6_301, 100.2, 100.3)]);
+    const paired = engine.status() as {
+      pair?: {
+        quantity?: number;
+        notionalUsd?: number;
+      } | null;
+      quote?: unknown;
+      telemetry?: { partialFillHedges?: number };
+    };
+    expect(paired.pair?.quantity).toBeCloseTo(0.4);
+    expect(paired.pair?.notionalUsd).toBeCloseTo(40);
+    expect(paired.quote).toBeNull();
+    expect(paired.telemetry?.partialFillHedges).toBe(1);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'edge_cancelled',
+      reason: 'partial_fill_cancel_remainder',
+    }));
+
+    engine.evaluate(6_302, [market(6_302, 100.2, 99.9)]);
+    expect((engine.status() as { pendingHedge?: unknown }).pendingHedge)
+      .toBeTruthy();
+    engine.evaluate(6_502, [market(6_502, 100.2, 99.9)]);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      reason: 'profitable_taker_exit',
+      exitMakerOrder: false,
+      passed: true,
+    });
+    expect(results[0]?.realizedNetUsd).toBeGreaterThan(0);
+    expect(results[0]?.realizedNetUsd).toBeLessThan(1);
   });
 });

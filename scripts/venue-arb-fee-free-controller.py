@@ -644,7 +644,7 @@ def main() -> None:
         default=os.getenv(
             "VENUE_ARB_BITFINEX_MAKER_GATE",
             "/home/trader/apps/venue-arb-tokyo/data/bitfinex-lighter-shadow/"
-            "bitfinex-lighter-maker-gate-status.json",
+            "bitfinex-lighter-maker-partial-gate-status.json",
         ),
     )
     parser.add_argument(

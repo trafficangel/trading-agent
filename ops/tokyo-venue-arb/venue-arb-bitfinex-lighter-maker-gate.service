@@ -8,10 +8,10 @@ User=trader
 Group=trader
 WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_GATE_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/bitfinex-lighter-shadow
-Environment=VENUE_ARB_GATE_INPUT_FILE=bitfinex-lighter-maker-basis-shadow-v1.ndjson
-Environment=VENUE_ARB_GATE_EVENTS_FILE=bitfinex-lighter-maker-events-v1.ndjson
-Environment=VENUE_ARB_GATE_OUTPUT_FILE=bitfinex-lighter-maker-gate-status.json
-Environment=VENUE_ARB_GATE_ROUTE=bitfinex-maker-lighter
+Environment=VENUE_ARB_GATE_INPUT_FILE=bitfinex-lighter-maker-partial-shadow-v1.ndjson
+Environment=VENUE_ARB_GATE_EVENTS_FILE=bitfinex-lighter-maker-partial-events-v1.ndjson
+Environment=VENUE_ARB_GATE_OUTPUT_FILE=bitfinex-lighter-maker-partial-gate-status.json
+Environment=VENUE_ARB_GATE_ROUTE=bitfinex-maker-lighter-partial
 Environment=VENUE_ARB_GATE_NOTIONAL_USD=1000
 Environment=VENUE_ARB_GATE_MIN_SAMPLES=30
 Environment=VENUE_ARB_GATE_MIN_PROFIT_FACTOR=1.2

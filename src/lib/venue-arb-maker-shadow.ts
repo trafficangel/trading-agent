@@ -8,8 +8,6 @@ import {
   type MakerSide,
   type TakerSide,
 } from './venue-arb-maker.js';
-import { executableVwap } from './venue-arb.js';
-
 export type MakerShadowRawBook = {
   bids: Map<number, number>;
   asks: Map<number, number>;
@@ -57,6 +55,7 @@ export type GenericMakerQuote = {
   touchDistanceBps: number;
   initialQuantity: number;
   firstFillAt: number | null;
+  partialCancelAt?: number | null;
   projectionUnavailableAt?: number | null;
   queue: MakerQueueState;
 };
@@ -67,6 +66,7 @@ export type GenericMakerPair = {
   makerSide: 'long' | 'short';
   openedAt: number;
   quantity: number;
+  notionalUsd: number;
   entryMaker: number;
   entryHedge: number;
   entryEdgeBps: number;
@@ -77,6 +77,8 @@ export type GenericMakerPendingHedge = {
   coin: string;
   side: MakerSide;
   makerFill: number;
+  quantity: number;
+  notionalUsd: number;
   filledAt: number;
   dueAt: number;
   deadlineAt: number;
@@ -89,6 +91,7 @@ export type GenericMakerResult = {
   id: string;
   routeId: string;
   coin: string;
+  notionalUsd?: number | null;
   makerSide: 'long' | 'short' | null;
   openedAt: number | null;
   closedAt: number;
@@ -124,6 +127,7 @@ export type GenericMakerTelemetry = {
   quoteExpirations: number;
   queueProgressEvents: number;
   queueFills: number;
+  partialFillHedges: number;
   hedgeTimeouts: number;
   lastTradeAt: number | null;
   lastQuoteAt: number | null;
@@ -224,6 +228,10 @@ export type GenericMakerConfig = {
   exitQuoteDataGraceMs?: number;
   exitQuoteTtlMs?: number;
   maxMakerTradeIdleMs?: number;
+  hedgePartialEntryFills?: boolean;
+  partialFillCancelLatencyMs?: number;
+  minPartialHedgeUsd?: number;
+  makerExitEnabled?: boolean;
 };
 
 type GenericMakerHooks = {
@@ -241,6 +249,23 @@ function sortedLevels(
     .filter(([price, size]) => price > 0 && size > 0)
     .sort((a, b) => side === 'bids' ? b[0] - a[0] : a[0] - b[0])
     .slice(0, limit);
+}
+
+function executableQuantityVwap(
+  levels: readonly [number, number][],
+  quantity: number,
+): number | null {
+  if (!(quantity > 0)) return null;
+  let remaining = quantity;
+  let cost = 0;
+  for (const [price, size] of levels) {
+    if (!(price > 0) || !(size > 0)) continue;
+    const taken = Math.min(size, remaining);
+    cost += taken * price;
+    remaining -= taken;
+    if (remaining <= 1e-12) return cost / quantity;
+  }
+  return null;
 }
 
 function priceTick(book: MakerShadowRawBook): number | null {
@@ -277,6 +302,7 @@ export class GenericMakerShadow {
     quoteExpirations: 0,
     queueProgressEvents: 0,
     queueFills: 0,
+    partialFillHedges: 0,
     hedgeTimeouts: 0,
     lastTradeAt: null,
     lastQuoteAt: null,
@@ -331,11 +357,26 @@ export class GenericMakerShadow {
       checkpoint?.pair?.id
       && checkpoint.pair.coin
       && checkpoint.pair.quantity > 0
-    ) this.pair = checkpoint.pair;
+    ) {
+      this.pair = {
+        ...checkpoint.pair,
+        notionalUsd: Number(checkpoint.pair.notionalUsd)
+          || checkpoint.pair.quantity * checkpoint.pair.entryMaker,
+      };
+    }
     if (
       checkpoint?.pendingHedge?.coin
       && checkpoint.pendingHedge.makerFill > 0
-    ) this.pendingHedge = checkpoint.pendingHedge;
+    ) {
+      const quantity = Number(checkpoint.pendingHedge.quantity)
+        || this.config.notionalUsd / checkpoint.pendingHedge.makerFill;
+      this.pendingHedge = {
+        ...checkpoint.pendingHedge,
+        quantity,
+        notionalUsd: Number(checkpoint.pendingHedge.notionalUsd)
+          || quantity * checkpoint.pendingHedge.makerFill,
+      };
+    }
   }
 
   setTradeStreamConnected(connected: boolean): void {
@@ -565,7 +606,7 @@ export class GenericMakerShadow {
       / 3_600_000 * this.config.fundingBpsPerHour;
     return makerRoundTripAfterCosts({
       extendedSide: pair.makerSide,
-      notionalUsd: this.config.notionalUsd,
+      notionalUsd: pair.notionalUsd,
       quantity: pair.quantity,
       entryExtended: pair.entryMaker,
       entryLighter: pair.entryHedge,
@@ -763,7 +804,7 @@ export class GenericMakerShadow {
         : Math.max(0, (price / bestAsk - 1) * 10_000);
       const score = projectedNetBps / (
         1
-        + queueAhead * price / this.config.notionalUsd
+        + queueAhead * price / pair.notionalUsd
         + distanceBps * 2
       );
       return [{
@@ -809,7 +850,11 @@ export class GenericMakerShadow {
 
   private candidate(now: number): GenericMakerQuote | null {
     if (this.pendingHedge) return null;
-    if (this.pair) return this.exitCandidate(now);
+    if (this.pair) {
+      return this.config.makerExitEnabled === false
+        ? null
+        : this.exitCandidate(now);
+    }
     if (now < this.cooldownUntil) return null;
     return this.entryCandidate(now);
   }
@@ -898,10 +943,10 @@ export class GenericMakerShadow {
     const levels = side === 'sell'
       ? sortedLevels(market.maker, 'bids')
       : sortedLevels(market.maker, 'asks');
-    const makerFill = executableVwap(
+    const makerFill = executableQuantityVwap(
       levels,
-      this.config.notionalUsd,
-    )?.price;
+      pair.quantity,
+    );
     const hedgeFill = this.hedgePrice(side, market.hedge);
     if (makerFill == null || hedgeFill == null) return false;
     const projectedNetBpsAtFill = this.closeProjection(
@@ -918,6 +963,8 @@ export class GenericMakerShadow {
       coin: pair.coin,
       side,
       makerFill,
+      quantity: pair.quantity,
+      notionalUsd: pair.notionalUsd,
       filledAt: now,
       dueAt: now + this.config.hedgeLatencyMs,
       deadlineAt: now + this.config.hedgeLatencyMs
@@ -1045,6 +1092,7 @@ export class GenericMakerShadow {
       id: this.pair?.id ?? `GM${pending.filledAt}-${pending.coin}`,
       routeId: this.config.routeId,
       coin: pending.coin,
+      notionalUsd: this.pair?.notionalUsd ?? pending.notionalUsd,
       makerSide: this.pair?.makerSide
         ?? (pending.side === 'buy' ? 'long' : 'short'),
       openedAt: this.pair?.openedAt
@@ -1080,10 +1128,10 @@ export class GenericMakerShadow {
     const makerLevels = pending.side === 'buy'
       ? sortedLevels(market.maker, 'bids')
       : sortedLevels(market.maker, 'asks');
-    const exit = executableVwap(makerLevels, this.config.notionalUsd)?.price;
+    const exit = executableQuantityVwap(makerLevels, pending.quantity);
     if (exit == null) return null;
     const makerSide = pending.side === 'buy' ? 'long' : 'short';
-    const quantity = this.config.notionalUsd / pending.makerFill;
+    const quantity = pending.quantity;
     const grossUsd = (
       makerSide === 'long'
         ? exit - pending.makerFill
@@ -1093,12 +1141,12 @@ export class GenericMakerShadow {
       pending.makerFill * this.config.makerFeeBps
       + exit * this.config.makerFallbackTakerFeeBps
     ) / 10_000;
-    const bufferUsd = this.config.notionalUsd
+    const bufferUsd = pending.notionalUsd
       * this.config.executionBufferBps / 10_000;
     const netUsd = grossUsd - feesUsd - bufferUsd;
     return {
       exit,
-      netBps: netUsd / this.config.notionalUsd * 10_000,
+      netBps: netUsd / pending.notionalUsd * 10_000,
     };
   }
 
@@ -1119,6 +1167,7 @@ export class GenericMakerShadow {
       id: `GM${pending.filledAt}-${pending.coin}-${makerSide}`,
       routeId: this.config.routeId,
       coin: pending.coin,
+      notionalUsd: pending.notionalUsd,
       makerSide,
       openedAt: pending.filledAt,
       closedAt: now,
@@ -1130,7 +1179,7 @@ export class GenericMakerShadow {
       entryEdgeBps,
       realizedNetBps: projection.netBps,
       realizedNetUsd: projection.netBps / 10_000
-        * this.config.notionalUsd,
+        * pending.notionalUsd,
       exitMakerOrder: false,
       passed: projection.netBps > 0,
       reason: 'post_fill_edge_lost',
@@ -1200,7 +1249,8 @@ export class GenericMakerShadow {
         coin: pending.coin,
         makerSide,
         openedAt: now,
-        quantity: this.config.notionalUsd / pending.makerFill,
+        quantity: pending.quantity,
+        notionalUsd: pending.notionalUsd,
         entryMaker: pending.makerFill,
         entryHedge: hedgeFill,
         entryEdgeBps,
@@ -1218,7 +1268,7 @@ export class GenericMakerShadow {
       / 3_600_000 * this.config.fundingBpsPerHour;
     const modeled = makerRoundTripAfterCosts({
       extendedSide: pair.makerSide,
-      notionalUsd: this.config.notionalUsd,
+      notionalUsd: pair.notionalUsd,
       quantity: pair.quantity,
       entryExtended: pair.entryMaker,
       entryLighter: pair.entryHedge,
@@ -1237,6 +1287,7 @@ export class GenericMakerShadow {
       id: pair.id,
       routeId: this.config.routeId,
       coin: pair.coin,
+      notionalUsd: pair.notionalUsd,
       makerSide: pair.makerSide,
       openedAt: pair.openedAt,
       closedAt: now,
@@ -1260,6 +1311,70 @@ export class GenericMakerShadow {
         : modeled.netBps - pending.projectedNetBpsAtFill,
     });
     this.reset(now);
+  }
+
+  private cancelAndHedgePartialEntry(now: number): boolean {
+    const quote = this.quote;
+    if (
+      !this.config.hedgePartialEntryFills
+      || quote?.stage !== 'entry'
+      || quote.partialCancelAt == null
+      || now < quote.partialCancelAt
+      || quote.queue.filled
+    ) return false;
+    const quantity = quote.initialQuantity - quote.queue.remaining;
+    const notionalUsd = quantity * quote.price;
+    const minimum = this.config.minPartialHedgeUsd ?? 0;
+    if (!(quantity > 0) || notionalUsd < minimum) {
+      this.append({
+        id: `GM${quote.firstFillAt ?? now}-${quote.coin}`,
+        routeId: this.config.routeId,
+        coin: quote.coin,
+        notionalUsd,
+        makerSide: quote.side === 'buy' ? 'long' : 'short',
+        openedAt: quote.firstFillAt ?? null,
+        closedAt: now,
+        holdingMs: quote.firstFillAt == null
+          ? null
+          : Math.max(0, now - quote.firstFillAt),
+        entryMaker: quote.price,
+        entryHedge: null,
+        exitMaker: null,
+        exitHedge: null,
+        entryEdgeBps: null,
+        realizedNetBps: null,
+        realizedNetUsd: null,
+        exitMakerOrder: null,
+        passed: false,
+        reason: 'entry_partial_fill_below_hedge_minimum',
+        fundingBps: 0,
+      });
+      this.reset(now);
+      return true;
+    }
+    this.telemetry.partialFillHedges++;
+    this.emitQuoteEvent('edge_cancelled', now, quote, {
+      reason: 'partial_fill_cancel_remainder',
+      currentProjectionBps: this.currentProjection(now, quote),
+      remainingUsd: quote.queue.remaining * quote.price,
+    });
+    this.pendingHedge = {
+      stage: 'entry',
+      coin: quote.coin,
+      side: quote.side,
+      makerFill: quote.price,
+      quantity,
+      notionalUsd,
+      filledAt: quote.firstFillAt ?? now,
+      dueAt: now + this.config.hedgeLatencyMs,
+      deadlineAt: now + this.config.hedgeLatencyMs
+        + this.config.hedgeGraceMs,
+      makerOrder: true,
+      projectedNetBpsAtFill: this.currentProjection(now, quote),
+    };
+    this.quote = null;
+    this.checkpoint();
+    return true;
   }
 
   evaluate(now: number, markets: MakerShadowMarket[]): void {
@@ -1314,16 +1429,18 @@ export class GenericMakerShadow {
         const levels = side === 'sell'
           ? sortedLevels(market.maker, 'bids')
           : sortedLevels(market.maker, 'asks');
-        const makerFill = executableVwap(
+        const makerFill = executableQuantityVwap(
           levels,
-          this.config.notionalUsd,
-        )?.price;
+          this.pair.quantity,
+        );
         if (makerFill != null) {
           this.pendingHedge = {
             stage: 'exit',
             coin: this.pair.coin,
             side,
             makerFill,
+            quantity: this.pair.quantity,
+            notionalUsd: this.pair.notionalUsd,
             filledAt: now,
             dueAt: now + this.config.hedgeLatencyMs,
             deadlineAt: now + this.config.hedgeLatencyMs
@@ -1343,6 +1460,7 @@ export class GenericMakerShadow {
       }
       return;
     }
+    if (this.cancelAndHedgePartialEntry(now)) return;
     this.activate(now);
     if (this.quote?.activatedAt != null && this.quote.firstFillAt == null) {
       const projection = this.currentProjection(now, this.quote);
@@ -1465,6 +1583,15 @@ export class GenericMakerShadow {
       quote.firstFillAt == null
       && orderFilledPartially
     ) quote.firstFillAt = receivedAt;
+    if (
+      orderFilledPartially
+      && !quote.queue.filled
+      && quote.stage === 'entry'
+      && this.config.hedgePartialEntryFills
+    ) {
+      quote.partialCancelAt ??= receivedAt
+        + (this.config.partialFillCancelLatencyMs ?? 0);
+    }
     if ((queueMoved || orderFilledPartially) && !quote.queue.filled) {
       this.telemetry.queueProgressEvents++;
       this.emitQuoteEvent('queue_progress', receivedAt, quote, {
@@ -1500,6 +1627,9 @@ export class GenericMakerShadow {
       coin: quote.coin,
       side: quote.side,
       makerFill: quote.price,
+      quantity: quote.initialQuantity,
+      notionalUsd: this.pair?.notionalUsd
+        ?? quote.initialQuantity * quote.price,
       filledAt: quote.firstFillAt ?? receivedAt,
       dueAt: (quote.firstFillAt ?? receivedAt) + this.config.hedgeLatencyMs,
       deadlineAt: (quote.firstFillAt ?? receivedAt)

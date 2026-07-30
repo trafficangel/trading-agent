@@ -552,15 +552,15 @@ const COINBASE_LIGHTER_MAKER_EVENTS_PATH = resolve(
 );
 const BITFINEX_LIGHTER_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
-  'bitfinex-lighter-maker-basis-shadow-v1.ndjson',
+  'bitfinex-lighter-maker-partial-shadow-v1.ndjson',
 );
 const BITFINEX_LIGHTER_MAKER_ACTIVE_PATH = resolve(
   DATA_DIR,
-  'bitfinex-lighter-maker-basis-active-v1.json',
+  'bitfinex-lighter-maker-partial-active-v1.json',
 );
 const BITFINEX_LIGHTER_MAKER_EVENTS_PATH = resolve(
   DATA_DIR,
-  'bitfinex-lighter-maker-events-v1.ndjson',
+  'bitfinex-lighter-maker-partial-events-v1.ndjson',
 );
 const RAYDIUM_LIGHTER_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
@@ -1164,6 +1164,14 @@ const BITFINEX_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
 const BITFINEX_LIGHTER_MAKER_BASIS_MIN_DEVIATION_BPS = finiteEnv(
   'VENUE_ARB_BITFINEX_LIGHTER_MAKER_BASIS_MIN_DEVIATION_BPS',
   SHADOW_BASIS_MIN_DEVIATION_BPS,
+);
+const BITFINEX_LIGHTER_MAKER_PARTIAL_CANCEL_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_PARTIAL_CANCEL_LATENCY_MS',
+  250,
+);
+const BITFINEX_LIGHTER_MAKER_MIN_PARTIAL_HEDGE_USD = finiteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_MIN_PARTIAL_HEDGE_USD',
+  100,
 );
 const RAYDIUM_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
   'VENUE_ARB_RAYDIUM_LIGHTER_MAKER_SHADOW_ENABLED',
@@ -2780,7 +2788,7 @@ const coinbaseLighterMakerShadow = new GenericMakerShadow({
   },
 });
 const bitfinexLighterMakerShadow = new GenericMakerShadow({
-  routeId: 'bitfinex-maker-lighter',
+  routeId: 'bitfinex-maker-lighter-partial',
   makerVenue: 'bitfinex',
   hedgeVenue: 'lighter',
   notionalUsd: BITFINEX_LIGHTER_MAKER_NOTIONAL_USD,
@@ -2818,6 +2826,14 @@ const bitfinexLighterMakerShadow = new GenericMakerShadow({
   exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
   maxEntryDistanceBps: 3,
   maxMakerTradeIdleMs: BITFINEX_LIGHTER_MAKER_MAX_TRADE_IDLE_MS,
+  hedgePartialEntryFills: true,
+  partialFillCancelLatencyMs:
+    BITFINEX_LIGHTER_MAKER_PARTIAL_CANCEL_LATENCY_MS,
+  minPartialHedgeUsd: BITFINEX_LIGHTER_MAKER_MIN_PARTIAL_HEDGE_USD,
+  // Bitfinex taker is also zero-fee. Once paired, waiting for a second maker
+  // fill only recreates partial-exit risk; close both legs as takers after
+  // convergence or at max hold.
+  makerExitEnabled: false,
 }, {
   onResult: (result) => {
     appendFileSync(
