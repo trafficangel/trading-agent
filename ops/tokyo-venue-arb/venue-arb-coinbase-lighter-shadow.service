@@ -11,7 +11,9 @@ WorkingDirectory=/home/trader/apps/venue-arb-tokyo
 Environment=VENUE_ARB_DATA_DIR=/home/trader/apps/venue-arb-tokyo/data/coinbase-lighter-shadow
 Environment=VENUE_ARB_ACTIVE_VENUES=coinbase,lighter
 Environment=VENUE_ARB_ACTIVE_COINS=SOL,DOGE,XRP,PUMP
-Environment=VENUE_ARB_SAMPLE_MS=100
+# Secondary discovery route: fills remain event-driven; slower quote evaluation
+# prevents it from competing with the leading Hibachi route on one Tokyo CPU.
+Environment=VENUE_ARB_SAMPLE_MS=250
 Environment=VENUE_ARB_STALE_MS=1000
 Environment=VENUE_ARB_EXECUTION_BUFFER_BPS=2
 Environment=VENUE_ARB_SHADOW_NOTIONAL_USD=100

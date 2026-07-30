@@ -14,7 +14,11 @@ Environment=VENUE_ARB_ACTIVE_VENUES=extended,grvt,lighter
 # roughly 23% of checks and produced both the prior failed-flat live canary and
 # a negative reverse shadow fill. Prefer the better-validated books below.
 Environment=VENUE_ARB_ACTIVE_COINS=BTC,ETH,SOL,HYPE,WTI,XAU,XMR,NEAR,XRP,XAG
-Environment=VENUE_ARB_SAMPLE_MS=100
+# This service observes two secondary routes. Queue fills are consumed from
+# trade streams event-by-event, so a 250 ms quote-evaluation cadence preserves
+# fill evidence while leaving the single Tokyo CPU available to the leading
+# Hibachi route.
+Environment=VENUE_ARB_SAMPLE_MS=250
 Environment=VENUE_ARB_STALE_MS=1000
 Environment=VENUE_ARB_EXECUTION_BUFFER_BPS=2
 Environment=VENUE_ARB_SHADOW_NOTIONAL_USD=100
