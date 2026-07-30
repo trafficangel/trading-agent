@@ -35,15 +35,11 @@ import { TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 import { ALL_LAB_STRATEGIES, LAB_BY_CODE, LAB_BY_ID, LAB_TRACK, LAB_MAKER_TRACK, BT_NET_PCT_PER_TRADE, BT_MAXDD_PCT, type LabStrategy } from './lab-registry.js';
 import { labGateVerdict } from '../lib/lab-gate.js';
 import { allocatePortfolio, portfolioSummary } from '../lib/portfolio.js';
-import { crossvenueLabRoute } from './crossvenue-lab.js';
 import {
+  LIGHTER_LUXALGO_CSS,
+  lighterLuxalgoHero,
   lighterLuxalgoLabRoute,
 } from './lighter-luxalgo-lab.js';
-import {
-  venueArbHero,
-  venueArbLabRoute,
-  VENUE_ARB_CSS,
-} from './venue-arb-lab.js';
 
 const trackOf = (s: LabStrategy): string => s.track ?? LAB_TRACK;
 
@@ -127,12 +123,12 @@ async function renderLabList(lang: Lang): Promise<string> {
     t(lang, 'Лаборатория — R&D стратегии (бумага)', 'Lab — R&D strategies (paper)'),
     `
     <div class="header">
-      <span class="strat-code">ARBITRAGE · NET AFTER COSTS</span>
+      <span class="strat-code">LUXALGO · SIGNAL TRACK</span>
       <h1 class="title">${t(lang, 'Лаборатория', 'The Lab')}</h1>
-      <p class="subtitle">${t(lang, 'Один актуальный эксперимент: исполнимый арбитраж после всех расходов.', 'One active experiment: executable arbitrage after all costs.')}</p>
+      <p class="subtitle">${t(lang, 'Активный трек: сигналы LuxAlgo с исполнением и статистикой на Lighter.', 'Active track: LuxAlgo signals with Lighter execution and statistics.')}</p>
     </div>
-    <style>${LAB_CSS}${VENUE_ARB_CSS}</style>
-    ${await venueArbHero(lang)}
+    <style>${LAB_CSS}${LIGHTER_LUXALGO_CSS}</style>
+    ${await lighterLuxalgoHero(lang)}
     `,
     { autoRefreshSec: 60, lang },
   );
@@ -310,9 +306,13 @@ function renderLabPortfolio(): string {
 }
 
 export async function labRoute(app: FastifyInstance): Promise<void> {
-  await crossvenueLabRoute(app);
   await lighterLuxalgoLabRoute(app);
-  await venueArbLabRoute(app);
+  const retiredArbitrageRedirect = async (
+    _req: unknown,
+    reply: { redirect: (location: string) => unknown },
+  ): Promise<unknown> => reply.redirect('/lab/lighter-luxalgo');
+  app.get('/lab/crossvenue', retiredArbitrageRedirect);
+  app.get('/lab/venue-arb', retiredArbitrageRedirect);
   app.get('/lab/portfolio', async (_req, reply) => {
     // The sizing plan is only meaningful with lab strategies present. While the
     // paper book is cleared, send visitors back to the lab index.
