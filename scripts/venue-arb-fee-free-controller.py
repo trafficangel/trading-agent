@@ -175,6 +175,9 @@ def stop_plan(
             ETHEREAL_GATE_TIMER,
             ETHEREAL_TAKER_GATE_TIMER,
         ])
+    elif ethereal_maker_no_go:
+        stop_units.append(ETHEREAL_GATE_TIMER)
+        disable_units.append(ETHEREAL_GATE_TIMER)
     if hotstuff_no_go:
         stop_units.extend([HOTSTUFF_SHADOW_SERVICE, HOTSTUFF_GATE_TIMER])
         disable_units.extend([HOTSTUFF_SHADOW_SERVICE, HOTSTUFF_GATE_TIMER])
@@ -189,6 +192,9 @@ def stop_plan(
             BITFINEX_GATE_TIMER,
             BITFINEX_MAKER_GATE_TIMER,
         ])
+    elif bitfinex_enabled and bitfinex_maker_no_go:
+        stop_units.append(BITFINEX_MAKER_GATE_TIMER)
+        disable_units.append(BITFINEX_MAKER_GATE_TIMER)
     if raydium_enabled and raydium_no_go:
         stop_units.extend([
             RAYDIUM_SHADOW_SERVICE,
@@ -390,7 +396,7 @@ def self_test() -> None:
         ethereal_taker_enabled=True,
     )
     assert ethereal_taker_observing["etherealNoGo"] is False
-    assert ethereal_taker_observing["stopUnits"] == []
+    assert ethereal_taker_observing["stopUnits"] == [ETHEREAL_GATE_TIMER]
     ethereal_both_failed = stop_plan(
         observe,
         observe,
@@ -462,6 +468,23 @@ def self_test() -> None:
     )
     assert bitfinex_maker_survives["bitfinexNoGo"] is False
     assert bitfinex_maker_survives["stopUnits"] == []
+    bitfinex_taker_survives = stop_plan(
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        observe,
+        bitfinex_gate=observe,
+        bitfinex_enabled=True,
+        bitfinex_maker_gate=no_go,
+        bitfinex_maker_enabled=True,
+    )
+    assert bitfinex_taker_survives["bitfinexNoGo"] is False
+    assert bitfinex_taker_survives["stopUnits"] == [
+        BITFINEX_MAKER_GATE_TIMER,
+    ]
     raydium_observing = stop_plan(
         observe,
         observe,
