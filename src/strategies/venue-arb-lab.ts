@@ -1351,55 +1351,76 @@ function candidateRouteRows(
     hotstuffLighterMaker: ProfitGateStatus | null;
   },
 ): string {
+  const live = (target: Status | null): boolean => Boolean(
+    target?.updatedAt && Date.now() - target.updatedAt < 15_000,
+  );
   const makerRows = [
     {
       label: 'Aster maker → Lighter',
-      maker: asterStatus?.asterLighterMakerShadow,
+      maker: live(asterStatus)
+        ? asterStatus?.asterLighterMakerShadow
+        : undefined,
       gate: profitGates.asterLighterMaker,
     },
     {
       label: 'Extended maker → Lighter',
-      maker: status?.extendedLighterMakerShadow,
+      maker: live(status)
+        ? status?.extendedLighterMakerShadow
+        : undefined,
       gate: profitGates.extendedLighterMaker,
     },
     {
       label: 'GRVT maker → Lighter',
-      maker: status?.grvtMakerShadow,
+      maker: live(status) ? status?.grvtMakerShadow : undefined,
       gate: profitGates.grvtLighterMaker,
     },
     {
       label: 'Hibachi maker → Lighter',
-      maker: hibachiStatus?.hibachiLighterMakerShadow,
+      maker: live(hibachiStatus)
+        ? hibachiStatus?.hibachiLighterMakerShadow
+        : undefined,
       gate: profitGates.hibachiLighterMaker,
     },
     {
       label: 'Hibachi → Lighter · capacity $1,000',
-      maker: hibachiStatus?.hibachiLighterCapacityShadow,
+      maker: live(hibachiStatus)
+        ? hibachiStatus?.hibachiLighterCapacityShadow
+        : undefined,
       gate: profitGates.hibachiLighterCapacity,
     },
     {
       label: 'Hibachi → Lighter · sticky 60s',
-      maker: hibachiStickyStatus?.hibachiLighterMakerShadow,
+      maker: live(hibachiStickyStatus)
+        ? hibachiStickyStatus?.hibachiLighterMakerShadow
+        : undefined,
       gate: profitGates.hibachiLighterSticky,
     },
     {
       label: 'Hibachi → Lighter · sticky $1,000',
-      maker: hibachiStickyStatus?.hibachiLighterCapacityShadow,
+      maker: live(hibachiStickyStatus)
+        ? hibachiStickyStatus?.hibachiLighterCapacityShadow
+        : undefined,
       gate: profitGates.hibachiLighterStickyCapacity,
     },
     {
       label: 'Coinbase maker → Lighter',
-      maker: coinbaseStatus?.coinbaseLighterMakerShadow,
+      maker: live(coinbaseStatus)
+        ? coinbaseStatus?.coinbaseLighterMakerShadow
+        : undefined,
       gate: profitGates.coinbaseLighterMaker,
     },
     {
       label: 'Ethereal maker → Lighter',
-      maker: etherealStatus?.etherealLighterMakerShadow,
+      maker: live(etherealStatus)
+        ? etherealStatus?.etherealLighterMakerShadow
+        : undefined,
       gate: profitGates.etherealLighterMaker,
     },
     {
       label: 'Hotstuff maker → Lighter',
-      maker: hotstuffStatus?.hotstuffLighterMakerShadow,
+      maker: live(hotstuffStatus)
+        ? hotstuffStatus?.hotstuffLighterMakerShadow
+        : undefined,
       gate: profitGates.hotstuffLighterMaker,
     },
   ].filter(({ maker }) => maker?.enabled).map(({ label, maker, gate }) => {
@@ -1593,16 +1614,19 @@ async function renderCompact(lang: Lang): Promise<string> {
       && Date.now() - hotstuffStatus.updatedAt < 15_000
     )
   );
+  const freshStatuses = [
+    candidateStatus,
+    asterStatus,
+    hibachiStatus,
+    hibachiStickyStatus,
+    coinbaseStatus,
+    etherealStatus,
+    hotstuffStatus,
+  ].filter((status) => (
+    status?.updatedAt && Date.now() - status.updatedAt < 15_000
+  ));
   const candidateVenues = Array.from(new Set(
-    [
-      candidateStatus,
-      asterStatus,
-      hibachiStatus,
-      hibachiStickyStatus,
-      coinbaseStatus,
-      etherealStatus,
-      hotstuffStatus,
-    ].flatMap((status) => (
+    freshStatuses.flatMap((status) => (
       status?.venues ?? []
     )).filter((row) => row.enabled && row.venue)
       .map((row) => row.venue as Venue),
@@ -1620,39 +1644,57 @@ async function renderCompact(lang: Lang): Promise<string> {
   ).length;
   const activeMakers = [
     {
-      maker: asterStatus?.asterLighterMakerShadow,
+      maker: freshStatuses.includes(asterStatus)
+        ? asterStatus?.asterLighterMakerShadow
+        : undefined,
       gate: targeted.asterMakerGate,
     },
     {
-      maker: candidateStatus?.extendedLighterMakerShadow,
+      maker: freshStatuses.includes(candidateStatus)
+        ? candidateStatus?.extendedLighterMakerShadow
+        : undefined,
       gate: targeted.extendedMakerGate,
     },
     {
-      maker: candidateStatus?.grvtMakerShadow,
+      maker: freshStatuses.includes(candidateStatus)
+        ? candidateStatus?.grvtMakerShadow
+        : undefined,
       gate: targeted.grvtMakerGate,
     },
     {
-      maker: hibachiStatus?.hibachiLighterMakerShadow,
+      maker: freshStatuses.includes(hibachiStatus)
+        ? hibachiStatus?.hibachiLighterMakerShadow
+        : undefined,
       gate: targeted.hibachiMakerGate,
     },
     {
-      maker: hibachiStickyStatus?.hibachiLighterMakerShadow,
+      maker: freshStatuses.includes(hibachiStickyStatus)
+        ? hibachiStickyStatus?.hibachiLighterMakerShadow
+        : undefined,
       gate: targeted.hibachiStickyGate,
     },
     {
-      maker: hibachiStickyStatus?.hibachiLighterCapacityShadow,
+      maker: freshStatuses.includes(hibachiStickyStatus)
+        ? hibachiStickyStatus?.hibachiLighterCapacityShadow
+        : undefined,
       gate: targeted.hibachiStickyCapacityGate,
     },
     {
-      maker: coinbaseStatus?.coinbaseLighterMakerShadow,
+      maker: freshStatuses.includes(coinbaseStatus)
+        ? coinbaseStatus?.coinbaseLighterMakerShadow
+        : undefined,
       gate: targeted.coinbaseMakerGate,
     },
     {
-      maker: etherealStatus?.etherealLighterMakerShadow,
+      maker: freshStatuses.includes(etherealStatus)
+        ? etherealStatus?.etherealLighterMakerShadow
+        : undefined,
       gate: targeted.etherealMakerGate,
     },
     {
-      maker: hotstuffStatus?.hotstuffLighterMakerShadow,
+      maker: freshStatuses.includes(hotstuffStatus)
+        ? hotstuffStatus?.hotstuffLighterMakerShadow
+        : undefined,
       gate: targeted.hotstuffMakerGate,
     },
   ].filter(({ maker }) => maker?.enabled);
@@ -1725,16 +1767,26 @@ async function renderCompact(lang: Lang): Promise<string> {
         <div class="va-table" data-va-pager="target-shadow" data-page-size="20"><table><thead><tr>
           <th>UTC</th><th>Монета / маршрут</th><th>Статус</th><th>Net</th><th>Причина</th>
         </tr></thead><tbody>${candidateShadowRows({
-          asterLighter: asterStatus?.asterLighterMakerShadow,
-          extendedLighter: candidateStatus?.extendedLighterMakerShadow,
-          grvtLighter: candidateStatus?.grvtMakerShadow,
-          hibachiLighter: hibachiStatus?.hibachiLighterMakerShadow,
-          hibachiCapacity: hibachiStatus?.hibachiLighterCapacityShadow,
-          hibachiSticky: hibachiStickyStatus?.hibachiLighterMakerShadow,
-          hibachiStickyCapacity: hibachiStickyStatus?.hibachiLighterCapacityShadow,
-          coinbaseLighter: coinbaseStatus?.coinbaseLighterMakerShadow,
-          etherealLighter: etherealStatus?.etherealLighterMakerShadow,
-          hotstuffLighter: hotstuffStatus?.hotstuffLighterMakerShadow,
+          asterLighter: freshStatuses.includes(asterStatus)
+            ? asterStatus?.asterLighterMakerShadow : undefined,
+          extendedLighter: freshStatuses.includes(candidateStatus)
+            ? candidateStatus?.extendedLighterMakerShadow : undefined,
+          grvtLighter: freshStatuses.includes(candidateStatus)
+            ? candidateStatus?.grvtMakerShadow : undefined,
+          hibachiLighter: freshStatuses.includes(hibachiStatus)
+            ? hibachiStatus?.hibachiLighterMakerShadow : undefined,
+          hibachiCapacity: freshStatuses.includes(hibachiStatus)
+            ? hibachiStatus?.hibachiLighterCapacityShadow : undefined,
+          hibachiSticky: freshStatuses.includes(hibachiStickyStatus)
+            ? hibachiStickyStatus?.hibachiLighterMakerShadow : undefined,
+          hibachiStickyCapacity: freshStatuses.includes(hibachiStickyStatus)
+            ? hibachiStickyStatus?.hibachiLighterCapacityShadow : undefined,
+          coinbaseLighter: freshStatuses.includes(coinbaseStatus)
+            ? coinbaseStatus?.coinbaseLighterMakerShadow : undefined,
+          etherealLighter: freshStatuses.includes(etherealStatus)
+            ? etherealStatus?.etherealLighterMakerShadow : undefined,
+          hotstuffLighter: freshStatuses.includes(hotstuffStatus)
+            ? hotstuffStatus?.hotstuffLighterMakerShadow : undefined,
         })}</tbody></table></div>
       </section>
 
