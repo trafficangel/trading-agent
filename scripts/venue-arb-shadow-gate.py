@@ -5,6 +5,7 @@ import argparse
 import json
 import math
 import os
+import re
 import statistics
 import tempfile
 import time
@@ -129,9 +130,52 @@ def execution_evidence(
         "queueFills": sum(
             event.get("type") == "queue_filled" for event in eligible
         ),
+        "tradeThroughEntryFills": sum(
+            is_trade_through_entry_fill(event) for event in eligible
+        ),
         "quotesActivatedSinceLastProgress":
             quotes_activated_since_last_progress,
     }
+
+
+def is_trade_through_entry_fill(event: dict[str, Any]) -> bool:
+    if (
+        event.get("type") != "queue_filled"
+        or event.get("stage") != "entry"
+    ):
+        return False
+    quote_price = finite_number(event.get("price"))
+    trade_price = finite_number(event.get("triggerTradePrice"))
+    if quote_price is None or trade_price is None:
+        return False
+    tolerance = max(abs(quote_price) * 1e-10, 1e-12)
+    side = str(event.get("side") or "").lower()
+    return (
+        side == "buy" and trade_price < quote_price - tolerance
+    ) or (
+        side == "sell" and trade_price > quote_price + tolerance
+    )
+
+
+def trade_through_entry_fill_times(
+    events: list[dict[str, Any]],
+    *,
+    route_id: str,
+    observation_started_at_ms: int,
+) -> set[int]:
+    return {
+        int(finite_number(event.get("at")) or 0)
+        for event in events
+        if event.get("routeId") == route_id
+        and int(finite_number(event.get("at")) or 0)
+        >= observation_started_at_ms
+        and is_trade_through_entry_fill(event)
+    }
+
+
+def maker_entry_fill_at(row: dict[str, Any]) -> int | None:
+    match = re.match(r"^GM(\d+)-", str(row.get("id") or ""))
+    return int(match.group(1)) if match else None
 
 
 def evaluate(
@@ -152,16 +196,32 @@ def evaluate(
     execution: dict[str, int] | None = None,
     max_activated_quotes_without_progress: int = 0,
     max_technical_failures: int = 0,
+    require_trade_through_fills: bool = False,
+    confirmed_entry_fill_times: set[int] | None = None,
 ) -> dict[str, Any]:
     evaluated_at = now_ms or int(time.time() * 1000)
     observation_started_at = observation_started_at_ms or evaluated_at
     row_cutoff_at = observation_started_at_ms or 0
-    eligible = [
+    realized = [
         row
         for row in rows
         if row.get("routeId") == route_id
         and row_timestamp(row) >= row_cutoff_at
         and finite_number(row.get("realizedNetBps")) is not None
+    ]
+    confirmed_fill_times = confirmed_entry_fill_times or set()
+    eligible = [
+        row
+        for row in realized
+        if (
+            not require_trade_through_fills
+            or maker_entry_fill_at(row) in confirmed_fill_times
+        )
+    ]
+    unconfirmed = [
+        row
+        for row in realized
+        if row not in eligible
     ]
     eligible.sort(key=row_timestamp)
     technical_failures = [
@@ -290,12 +350,15 @@ def evaluate(
             "maxActivatedQuotesWithoutProgress":
                 max_activated_quotes_without_progress,
             "maxTechnicalFailures": max_technical_failures,
+            "requireTradeThroughEntryFill":
+                require_trade_through_fills,
         },
         "metrics": {
-            "attempts": len(trade_values) + len(technical_failures),
+            "attempts": len(realized) + len(technical_failures),
             "samples": len(values),
             "trades": len(trade_values),
             "technicalFailures": len(technical_failures),
+            "unconfirmedTrades": len(unconfirmed),
             "technicalFailuresByReason": dict(sorted({
                 reason: sum(
                     technical_failure_reason(row) == reason
@@ -612,6 +675,68 @@ def self_test() -> None:
     )
     assert pre_observation_failure["decision"] == "OBSERVE"
     assert pre_observation_failure["metrics"]["technicalFailures"] == 0
+    confidence_events = [
+        {
+            "routeId": "a-b",
+            "at": 2_000,
+            "type": "queue_filled",
+            "stage": "entry",
+            "side": "buy",
+            "price": 100,
+            "triggerTradePrice": 99.99,
+        },
+        {
+            "routeId": "a-b",
+            "at": 3_000,
+            "type": "queue_filled",
+            "stage": "entry",
+            "side": "sell",
+            "price": 101,
+            "triggerTradePrice": 101,
+        },
+    ]
+    confirmed = trade_through_entry_fill_times(
+        confidence_events,
+        route_id="a-b",
+        observation_started_at_ms=1_000,
+    )
+    strict_fill_evidence = evaluate(
+        [
+            {
+                "id": "GM2000-X-long",
+                "routeId": "a-b",
+                "coin": "X",
+                "realizedNetBps": 5,
+                "closedAt": 4_000,
+            },
+            {
+                "id": "GM3000-X-short",
+                "routeId": "a-b",
+                "coin": "X",
+                "realizedNetBps": 5,
+                "closedAt": 5_000,
+            },
+        ],
+        route_id="a-b",
+        notional_usd=100,
+        min_samples=2,
+        min_profit_factor=1.2,
+        max_drawdown_bps=10,
+        independence_ms=1,
+        observation_started_at_ms=1_000,
+        now_ms=6_000,
+        require_trade_through_fills=True,
+        confirmed_entry_fill_times=confirmed,
+        execution=execution_evidence(
+            confidence_events,
+            route_id="a-b",
+            observation_started_at_ms=1_000,
+        ),
+    )
+    assert strict_fill_evidence["metrics"]["trades"] == 1
+    assert strict_fill_evidence["metrics"]["unconfirmedTrades"] == 1
+    assert strict_fill_evidence["execution"]["tradeThroughEntryFills"] == 1
+    assert strict_fill_evidence["ready"] is False
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "gate.json"
         atomic_json(path, winning)
@@ -723,6 +848,14 @@ def main() -> None:
             "0",
         )),
     )
+    parser.add_argument(
+        "--require-trade-through-fills",
+        action="store_true",
+        default=os.getenv(
+            "VENUE_ARB_GATE_REQUIRE_TRADE_THROUGH_FILLS",
+            "false",
+        ).lower() in ("1", "true", "yes"),
+    )
     args = parser.parse_args()
     if args.self_test:
         self_test()
@@ -785,6 +918,12 @@ def main() -> None:
             args.max_activated_quotes_without_progress,
         ),
         max_technical_failures=max(0, args.max_technical_failures),
+        require_trade_through_fills=args.require_trade_through_fills,
+        confirmed_entry_fill_times=trade_through_entry_fill_times(
+            events,
+            route_id=args.route,
+            observation_started_at_ms=observation_started_at,
+        ),
     )
     atomic_json(output_path, result)
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
