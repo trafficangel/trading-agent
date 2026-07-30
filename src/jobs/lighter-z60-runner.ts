@@ -44,6 +44,7 @@ type LastClosedRow = {
 
 type NativeStrategy = {
   id: string;
+  period: number;
   mode: Z60EntryMode;
   threshold: number;
 };
@@ -59,22 +60,29 @@ const FEEDS: readonly NativeFeed[] = [
     symbol: 'SOLUSDT',
     marketId: 2,
     strategies: [
-      { id: 'sol-z60-reclaim', mode: 'reclaim', threshold: 3 },
-      { id: 'sol-z60-touch', mode: 'touch', threshold: 3 },
+      { id: 'sol-z60-reclaim', period: 60, mode: 'reclaim', threshold: 3 },
+      { id: 'sol-z60-touch', period: 60, mode: 'touch', threshold: 3 },
     ],
   },
   {
     symbol: 'BNBUSDT',
     marketId: 25,
     strategies: [
-      { id: 'bnb-z60-touch', mode: 'touch', threshold: 3 },
+      { id: 'bnb-z60-touch', period: 60, mode: 'touch', threshold: 3 },
     ],
   },
   {
     symbol: 'LTCUSDT',
     marketId: 35,
     strategies: [
-      { id: 'ltc-z60-touch', mode: 'touch', threshold: 2 },
+      { id: 'ltc-z60-touch', period: 60, mode: 'touch', threshold: 2 },
+    ],
+  },
+  {
+    symbol: 'AVAXUSDT',
+    marketId: 9,
+    strategies: [
+      { id: 'avax-z50-reclaim', period: 50, mode: 'reclaim', threshold: 3 },
     ],
   },
 ];
@@ -197,7 +205,12 @@ async function poll(): Promise<void> {
       try {
         const bars = await fetchBars(target, feed.marketId);
         for (const strategy of feed.strategies) {
-          const snapshot = evaluateZ60(bars, 60, strategy.threshold, strategy.mode);
+          const snapshot = evaluateZ60(
+            bars,
+            strategy.period,
+            strategy.threshold,
+            strategy.mode,
+          );
           if (!snapshot) throw new Error('z60_history_incomplete');
 
           const open = openPosition.get(strategy.id);
@@ -215,7 +228,7 @@ async function poll(): Promise<void> {
                 barTime: target,
                 close: snapshot.close,
                 mean: snapshot.mean,
-                reason: meanExit ? 'sma60_cross' : 'time_240_bars',
+                reason: meanExit ? `sma${strategy.period}_cross` : 'time_240_bars',
               }, 'lighter-z60: native exit signal');
             }
             continue;
@@ -233,6 +246,7 @@ async function poll(): Promise<void> {
             logger.info({
               strategyId: strategy.id,
               symbol: feed.symbol,
+              period: strategy.period,
               mode: strategy.mode,
               threshold: strategy.threshold,
               side: snapshot.signal,
@@ -265,6 +279,7 @@ export function startLighterZ60Runner(): void {
     strategies: FEEDS.flatMap((feed) => feed.strategies.map((strategy) => ({
       id: strategy.id,
       symbol: feed.symbol,
+      period: strategy.period,
       mode: strategy.mode,
       threshold: strategy.threshold,
     }))),

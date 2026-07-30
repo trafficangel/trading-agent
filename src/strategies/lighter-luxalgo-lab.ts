@@ -102,6 +102,10 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // funding. On the user's explicit instruction, STRAT-032/033 were admitted as
 // separately risk-capped $100/10x Real canaries before their normal forward
 // gate; this is an experiment, not evidence that the backtest edge is live.
+// STRAT-034 transfers the completed-bar reclaim mechanic to AVAX with a fixed
+// 50-bar population Z-score. It passed every 30/60/90/120/180-day window at
+// the stricter 0.05% round-trip stress, plus adverse funding, and remained
+// positive in both directions. It starts in prospective Shadow only.
 // BCH, XLM, TRX and JUP candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
@@ -485,6 +489,26 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 27.57,
     },
   },
+  {
+    id: 'avax-z50-reclaim',
+    code: '034',
+    name: 'Z50 · 3σ Reclaim · Mean Exit',
+    symbol: 'AVAXUSDT',
+    asset: 'AVAX',
+    marketId: 9,
+    stopPct: 1.5,
+    backtest: {
+      // Native Lighter completed 5m candles, next-bar execution, 0.05%
+      // round-trip execution stress and 0.00125%/hour adverse funding.
+      // Every 30/60/90/120/180-day window and both directions are positive.
+      period: '2026-01-31 → 2026-07-30',
+      trades: 454,
+      winRatePct: 64.5,
+      profitFactor: 1.21,
+      netPct: 36.98,
+      maxDrawdownPct: 15.96,
+    },
+  },
 ] as const;
 
 const STRATEGY_BY_ID = new Map(STRATEGIES.map((spec) => [spec.id, spec]));
@@ -494,6 +518,7 @@ const NATIVE_STRATEGY_IDS = [
   'sol-z60-touch',
   'bnb-z60-touch',
   'ltc-z60-touch',
+  'avax-z50-reclaim',
 ] as const;
 const NATIVE_LIVE_STRATEGY_IDS = [
   'sol-z60-reclaim',

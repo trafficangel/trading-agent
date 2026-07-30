@@ -31,6 +31,14 @@ describe('evaluateZ60Reclaim', () => {
     const result = evaluateZ60Reclaim(bars([...baseline, 90, 89]), 60, 3);
     expect(result?.signal).toBeNull();
   });
+
+  it('supports the fixed 50-bar AVAX reclaim period', () => {
+    const baseline = Array.from({ length: 49 }, (_, index) => 100 + (index % 2 ? 0.1 : -0.1));
+    const long = evaluateZ60Reclaim(bars([...baseline, 90, 99]), 50, 3);
+    const short = evaluateZ60Reclaim(bars([...baseline, 110, 101]), 50, 3);
+    expect(long?.signal).toBe('long');
+    expect(short?.signal).toBe('short');
+  });
 });
 
 describe('evaluateZ60Touch', () => {

@@ -200,5 +200,6 @@ therefore rejected for live use. XRP produced no qualified candidate.
 AVAX Z-reclaim was materially stronger. The Z50 ±3 reclaim neighborhood stayed
 positive in both directions across every tested window and at 0.05% stress
 (180 days: 454 trades, +36.98% stressed net, PF 1.21, 15.96% max drawdown).
-It remains a research/Shadow candidate until its own forward sample exists;
-these historical results do not authorize live orders.
+It was registered as `avax-z50-reclaim` (`STRAT-034`) for prospective Shadow
+on 2026-07-30. It is deliberately absent from the Real allowlist until its own
+forward sample exists; these historical results do not authorize live orders.
