@@ -1,0 +1,107 @@
+//@version=6
+strategy(
+     "Lighter SOL Z60 Reclaim Dual",
+     overlay = true,
+     pyramiding = 0,
+     initial_capital = 1000,
+     default_qty_type = strategy.cash,
+     default_qty_value = 1000,
+     commission_type = strategy.commission.percent,
+     commission_value = 0,
+     process_orders_on_close = false,
+     calc_on_every_tick = false,
+     calc_on_order_fills = true)
+
+int startAt = input.time(timestamp("01 Feb 2026 00:00 +0000"), "Start")
+int endAt = input.time(timestamp("31 Dec 2030 23:59 +0000"), "End")
+int zPeriod = input.int(60, "Z period", minval = 20)
+float threshold = input.float(3.0, "Z threshold", minval = 1.0, step = 0.25)
+float stopPct = input.float(1.5, "Catastrophe stop %", minval = 0.1, step = 0.1) / 100
+int timeStopBars = input.int(240, "Time stop bars", minval = 1)
+
+float mean = ta.sma(close, zPeriod)
+float sigma = ta.stdev(close, zPeriod, true)
+float z = sigma > 0 ? (close - mean) / sigma : 0
+float upper = mean + threshold * sigma
+float lower = mean - threshold * sigma
+bool inRange = time >= startAt and time <= endAt
+
+var int filledBarIndex = na
+var int exitedBarIndex = na
+var float tradeStopPrice = na
+var bool exitRequested = false
+
+f_payload(string action, string side, string reason, float price) =>
+    '{"kind":"strategy","strategy_id":"sol-z60-reclaim","action":"' + action +
+    '","side":"' + side + '","symbol":"SOLUSDT","timeframe":"5","price":' +
+    str.tostring(math.max(price, syminfo.mintick), format.mintick) +
+    ',"bar_time":' + str.tostring(time) + ',"reason":"' + reason + '"}'
+
+bool newLongFill = strategy.position_size > 0 and strategy.position_size[1] <= 0
+bool newShortFill = strategy.position_size < 0 and strategy.position_size[1] >= 0
+bool newFlat = strategy.position_size == 0 and strategy.position_size[1] != 0
+
+if newLongFill
+    filledBarIndex := bar_index
+    tradeStopPrice := strategy.position_avg_price * (1 - stopPct)
+    exitRequested := false
+
+if newShortFill
+    filledBarIndex := bar_index
+    tradeStopPrice := strategy.position_avg_price * (1 + stopPct)
+    exitRequested := false
+
+if newFlat
+    string closedSide = strategy.position_size[1] > 0 ? "long" : "short"
+    if not exitRequested
+        alert(f_payload("exit", closedSide, "catastrophe_stop", nz(tradeStopPrice, close)), alert.freq_all)
+    exitedBarIndex := bar_index
+    filledBarIndex := na
+    tradeStopPrice := na
+    exitRequested := false
+
+bool canEnter = barstate.isconfirmed and inRange and strategy.position_size == 0 and
+     (na(exitedBarIndex) or bar_index > exitedBarIndex)
+bool longSignal = canEnter and z[1] < -threshold and z >= -threshold
+bool shortSignal = canEnter and z[1] > threshold and z <= threshold
+
+if longSignal
+    strategy.entry("Long", strategy.long)
+    alert(f_payload("entry", "long", "z60_reclaim", close), alert.freq_once_per_bar_close)
+else if shortSignal
+    strategy.entry("Short", strategy.short)
+    alert(f_payload("entry", "short", "z60_reclaim", close), alert.freq_once_per_bar_close)
+
+if strategy.position_size > 0 and not na(tradeStopPrice)
+    strategy.exit("Long Catastrophe Stop", "Long", stop = tradeStopPrice)
+if strategy.position_size < 0 and not na(tradeStopPrice)
+    strategy.exit("Short Catastrophe Stop", "Short", stop = tradeStopPrice)
+
+bool canSignalExit = barstate.isconfirmed and not na(filledBarIndex) and bar_index > filledBarIndex
+bool timeExit = canSignalExit and bar_index - filledBarIndex >= timeStopBars
+bool longMeanExit = canSignalExit and strategy.position_size > 0 and close >= mean
+bool shortMeanExit = canSignalExit and strategy.position_size < 0 and close <= mean
+
+if longMeanExit or (timeExit and strategy.position_size > 0)
+    string reason = longMeanExit ? "sma60_cross" : "time_240_bars"
+    strategy.cancel("Long Catastrophe Stop")
+    strategy.close("Long", comment = "EXIT LONG " + reason)
+    exitRequested := true
+    alert(f_payload("exit", "long", reason, close), alert.freq_once_per_bar_close)
+
+if shortMeanExit or (timeExit and strategy.position_size < 0)
+    string reason = shortMeanExit ? "sma60_cross" : "time_240_bars"
+    strategy.cancel("Short Catastrophe Stop")
+    strategy.close("Short", comment = "EXIT SHORT " + reason)
+    exitRequested := true
+    alert(f_payload("exit", "short", reason, close), alert.freq_once_per_bar_close)
+
+if barstate.isconfirmed and time > endAt and strategy.position_size != 0 and not exitRequested
+    string side = strategy.position_size > 0 ? "long" : "short"
+    strategy.close_all(comment = "EXIT date range")
+    exitRequested := true
+    alert(f_payload("exit", side, "date_range", close), alert.freq_once_per_bar_close)
+
+plot(mean, "SMA60", color = color.orange, linewidth = 2)
+plot(upper, "+3 sigma", color = color.new(color.red, 25))
+plot(lower, "-3 sigma", color = color.new(color.green, 25))

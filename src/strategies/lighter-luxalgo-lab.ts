@@ -85,7 +85,11 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // two-sided and shadow-only. SUI kept all five chronological folds positive
 // even at 12 bps; SOL kept all five positive at 6 bps but one fold was
 // negative at 12 bps, so it is explicitly the weaker secondary candidate.
-// Neither strategy is present in the independent Python real runner.
+// STRAT-030 is an independently reproduced SOL 5m Z-score reclaim model using
+// native Lighter candles, next-bar execution, zero commission, 2 bps
+// round-trip execution stress and adverse funding. It stayed positive over
+// every 30/60/90/120/180-day window and in both directions. All three remain
+// shadow-only and are absent from the independent Python real runner.
 // BCH, XLM, TRX and JUP candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
@@ -384,6 +388,26 @@ const STRATEGIES: readonly StrategySpec[] = [
       profitFactor: 1.644,
       netPct: 37.972,
       maxDrawdownPct: 8.581,
+    },
+  },
+  {
+    id: 'sol-z60-reclaim',
+    code: '030',
+    name: 'Z60 · 3σ Reclaim · Mean Exit',
+    symbol: 'SOLUSDT',
+    asset: 'SOL',
+    marketId: 2,
+    stopPct: 1.5,
+    backtest: {
+      // Native Lighter 1m candles aggregated into complete 5m bars. Signals
+      // use completed candles and fill at the next bar open. Net includes
+      // 0.02% round-trip execution stress plus 0.00125%/hour adverse funding.
+      period: '2026-02-01 → 2026-07-30',
+      trades: 446,
+      winRatePct: 65.2,
+      profitFactor: 1.28,
+      netPct: 49.06,
+      maxDrawdownPct: 19.81,
     },
   },
 ] as const;

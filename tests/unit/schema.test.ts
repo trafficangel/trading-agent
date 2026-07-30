@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { LuxAlgoPayload } from '../../src/webhooks/luxalgo.schema.js';
+import {
+  LuxAlgoPayload,
+  deriveActionSide,
+  parseLuxAlgoWebhook,
+} from '../../src/webhooks/luxalgo.schema.js';
 
 describe('LuxAlgoPayload', () => {
   it('accepts unix ms bar_time', () => {
@@ -57,5 +61,44 @@ describe('LuxAlgoPayload', () => {
         bar_time: 0,
       }),
     ).toThrow();
+  });
+});
+
+describe('LuxAlgo custom strategy payload', () => {
+  it('accepts the explicit SOL Z60 entry alert', () => {
+    const result = parseLuxAlgoWebhook({
+      kind: 'strategy',
+      strategy_id: 'sol-z60-reclaim',
+      action: 'entry',
+      side: 'long',
+      symbol: 'SOLUSDT',
+      timeframe: '5',
+      price: 180.25,
+      bar_time: 1785409200000,
+      reason: 'z60_reclaim',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success || result.data.kind !== 'strategy') return;
+    expect(deriveActionSide(result.data)).toEqual({ action: 'entry', side: 'long' });
+    expect(result.data.symbol).toBe('SOLUSDT');
+  });
+
+  it('accepts the explicit SOL Z60 exit alert', () => {
+    const result = parseLuxAlgoWebhook({
+      kind: 'strategy',
+      strategy_id: 'sol-z60-reclaim',
+      action: 'exit',
+      side: 'short',
+      symbol: 'SOLUSDT',
+      timeframe: '5',
+      price: 178.5,
+      bar_time: 1785409500000,
+      reason: 'sma60_cross',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success || result.data.kind !== 'strategy') return;
+    expect(deriveActionSide(result.data)).toEqual({ action: 'exit', side: 'short' });
   });
 });

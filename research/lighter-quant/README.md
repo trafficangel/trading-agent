@@ -2,7 +2,8 @@
 
 Date: 2026-07-30
 
-Status: **rejected for shadow and live trading**.
+Status: original shared-parameter families **rejected**; one later
+native-Lighter SOL 5m candidate admitted to **Shadow only**.
 
 This research tested whether a simple, symmetric long/short candle strategy
 could produce a robust edge suitable for Lighter on 1-minute and 5-minute
@@ -84,6 +85,12 @@ more indicator parameter search: order-book imbalance, aggressive trade flow,
 short-horizon mark/index dislocation, and measured fill probability. If the
 work must stay inside LuxAlgo, continue only on 5-minute candidates and require
 verifiable long/short breakdown plus a fresh shadow gate before risking money.
+
+That continuation later produced one native-Lighter exception:
+`Lighter SOL Z60 Reclaim Dual`. Its exact rule and independent
+30/60/90/120/180-day results are documented in
+`docs/quant-indicator-validation-2026-07-30.md`. It is admitted only to
+prospective Shadow; the rejected families above remain rejected.
 
 ## LuxAlgo database follow-up
 

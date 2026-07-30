@@ -14,24 +14,37 @@ import { getKlines } from '../src/backtest/klines.js';
 import type { Candle } from '../src/backtest/indicators.js';
 import type { CustomStrategy, MakerQuote } from '../src/backtest/strategy.js';
 import { keltnerMr, zscoreMr } from '../src/backtest/strategies/families-lowtf.js';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { request } from 'undici';
 
-const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LTCUSDT', 'LINKUSDT', 'DOGEUSDT', 'AVAXUSDT'];
+const DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LTCUSDT', 'LINKUSDT', 'DOGEUSDT', 'AVAXUSDT'];
+const SYMBOLS = (process.env.SYMBOLS?.split(',').map((symbol) => symbol.trim()).filter(Boolean) ?? DEFAULT_SYMBOLS);
 const DAYS = Number(process.argv[2] ?? 180);
 const NOW = Date.now();
-const TF = '5';
-const MAKER_SIDE_PCT = 0.02;
-const TAKER_SIDE_PCT = 0.045;
-const EXTRA_STRESS_PCT = MAKER_SIDE_PCT + TAKER_SIDE_PCT;
-const MAX_HOLD_BARS = 48;
+const TF = process.env.TF ?? '5';
+const MAKER_SIDE_PCT = Number(process.env.MAKER_SIDE_PCT ?? 0.02);
+const TAKER_SIDE_PCT = Number(process.env.TAKER_SIDE_PCT ?? 0.045);
+const EXTRA_STRESS_PCT = Number(process.env.STRESS_RT_PCT ?? (MAKER_SIDE_PCT + TAKER_SIDE_PCT));
+const MAX_HOLD_BARS = Number(process.env.MAX_HOLD_BARS ?? (TF === '1' ? 240 : 48));
+const FILL_BUFFER_PCT = Number(process.env.FILL_BUFFER_PCT ?? 0);
+const SL_PCT = Number(process.env.SL_PCT ?? 0.05);
+const TREND_EMA = Number(process.env.TREND_EMA ?? 200);
+const DATA_SOURCE = process.env.DATA_SOURCE ?? 'bybit';
+const Z_PERIODS = (process.env.Z_PERIODS?.split(',').map(Number).filter(Number.isFinite) ?? [50, 100]);
+const Z_THRESHOLDS = (process.env.Z_THRESHOLDS?.split(',').map(Number).filter(Number.isFinite) ?? [1.5, 2, 2.5, 3]);
 
 type Spec = { label: string; build: (symbol: string) => CustomStrategy };
 const SPECS: Spec[] = [];
 for (const mult of [1.5, 2, 2.5, 3]) {
-  SPECS.push({ label: `Keltner20/10/${mult}+EMA200`, build: (s) => keltnerMr(s, TF, 20, 10, mult, 200, 0.05) });
+  SPECS.push({ label: `Keltner20/10/${mult}+EMA${TREND_EMA}`, build: (s) => keltnerMr(s, TF, 20, 10, mult, TREND_EMA, SL_PCT) });
 }
-for (const period of [50, 100]) for (const z of [1.5, 2, 2.5, 3]) {
-  SPECS.push({ label: `Z${period}/${z}+EMA200`, build: (s) => zscoreMr(s, TF, period, z, 200, 0.05) });
+for (const period of Z_PERIODS) for (const z of Z_THRESHOLDS) {
+  SPECS.push({ label: `Z${period}/${z}+EMA${TREND_EMA}`, build: (s) => zscoreMr(s, TF, period, z, TREND_EMA, SL_PCT) });
 }
+const SELECTED_SPECS = process.env.SPEC_FILTER
+  ? SPECS.filter((spec) => spec.label.includes(process.env.SPEC_FILTER!))
+  : SPECS;
 
 type ExitKind = 'maker' | 'taker-mean' | 'time' | 'sl' | 'end';
 type Trade = {
@@ -92,7 +105,9 @@ function simulate(strategy: CustomStrategy, c: Candle[]): SimResult {
       const stopped = pos.side === 'long' ? bar.l <= pos.sl : bar.h >= pos.sl;
       if (stopped) {
         close(bar, pos.sl, 'sl');
-      } else if (exitQuote && (pos.side === 'long' ? bar.h >= exitQuote.limit : bar.l <= exitQuote.limit)) {
+      } else if (exitQuote && (pos.side === 'long'
+        ? bar.h >= exitQuote.limit * (1 + FILL_BUFFER_PCT / 100)
+        : bar.l <= exitQuote.limit * (1 - FILL_BUFFER_PCT / 100))) {
         close(bar, exitQuote.limit, 'maker');
       } else if (i - pos.entryIdx >= MAX_HOLD_BARS) {
         close(bar, bar.c, 'time');
@@ -115,7 +130,9 @@ function simulate(strategy: CustomStrategy, c: Candle[]): SimResult {
 
     if (entryQuote) {
       quoteBars++;
-      const touched = entryQuote.side === 'long' ? bar.l <= entryQuote.limit : bar.h >= entryQuote.limit;
+      const touched = entryQuote.side === 'long'
+        ? bar.l <= entryQuote.limit * (1 - FILL_BUFFER_PCT / 100)
+        : bar.h >= entryQuote.limit * (1 + FILL_BUFFER_PCT / 100);
       if (touched) {
         fills++;
         const side = entryQuote.side;
@@ -209,17 +226,81 @@ function median(a: number[]): number {
 
 function fmt(x: number, digits = 1): string { return `${x >= 0 ? '+' : ''}${x.toFixed(digits)}`; }
 
+type LighterOrderBook = { symbol: string; market_id: number; market_type: string };
+type LighterCandleResponse = { code: number; message?: string; c?: Candle[] };
+
+async function lighterCandles(symbol: string, fromMs: number, toMs: number): Promise<Candle[]> {
+  const lighterSymbol = symbol.replace(/USDT$/, '');
+  const cacheDir = resolve('data', 'lighter-klines');
+  const cacheFile = resolve(cacheDir, `${lighterSymbol}-${TF}m.json`);
+  const cached = existsSync(cacheFile)
+    ? JSON.parse(readFileSync(cacheFile, 'utf8')) as Candle[]
+    : [];
+  const byTime = new Map(cached.map((candle) => [candle.t, candle]));
+  const stepMs = Number(TF) * 60_000;
+  const fetchConcurrency = Number(process.env.LIGHTER_FETCH_CONCURRENCY ?? 6);
+  const fetchDelayMs = Number(process.env.LIGHTER_FETCH_DELAY_MS ?? 40);
+
+  const booksRes = await request('https://mainnet.zklighter.elliot.ai/api/v1/orderBooks');
+  const booksBody = await booksRes.body.json() as { order_books?: LighterOrderBook[] };
+  const market = booksBody.order_books?.find((book) => book.symbol === lighterSymbol && book.market_type === 'perp');
+  if (!market) throw new Error(`Lighter market not found: ${lighterSymbol}`);
+
+  const cachedMin = cached.length ? cached[0]!.t : Infinity;
+  const cachedMax = cached.length ? cached[cached.length - 1]!.t : -Infinity;
+  const ranges: Array<[number, number]> = [];
+  if (fromMs < cachedMin) ranges.push([fromMs, Math.min(toMs, cachedMin - stepMs)]);
+  if (toMs > cachedMax) ranges.push([Math.max(fromMs, cachedMax + stepMs), toMs]);
+  if (!cached.length) ranges.splice(0, ranges.length, [fromMs, toMs]);
+
+  const windows: Array<[number, number]> = [];
+  for (const [rangeStart, rangeEnd] of ranges) {
+    for (let start = rangeStart; start <= rangeEnd; start += 500 * stepMs) {
+      windows.push([start, Math.min(rangeEnd, start + 499 * stepMs)]);
+    }
+  }
+
+  for (let offset = 0; offset < windows.length; offset += fetchConcurrency) {
+    const batch = windows.slice(offset, offset + fetchConcurrency);
+    const pages = await Promise.all(batch.map(async ([start, end]) => {
+      const url = new URL('https://mainnet.zklighter.elliot.ai/api/v1/candles');
+      url.searchParams.set('market_id', String(market.market_id));
+      url.searchParams.set('resolution', `${TF}m`);
+      url.searchParams.set('start_timestamp', String(start));
+      url.searchParams.set('end_timestamp', String(end));
+      url.searchParams.set('count_back', '0');
+      url.searchParams.set('set_timestamp_to_end', 'false');
+      const response = await request(url);
+      const body = await response.body.json() as LighterCandleResponse;
+      if (body.code !== 200) throw new Error(`Lighter candles code=${body.code}${body.message ? `: ${body.message}` : ''}`);
+      return body.c ?? [];
+    }));
+    for (const page of pages) for (const candle of page) byTime.set(candle.t, candle);
+    if (offset + batch.length < windows.length) await new Promise((resolveBatch) => setTimeout(resolveBatch, fetchDelayMs));
+  }
+
+  const merged = [...byTime.values()].sort((a, b) => a.t - b.t);
+  mkdirSync(cacheDir, { recursive: true });
+  writeFileSync(cacheFile, JSON.stringify(merged));
+  return merged.filter((candle) => candle.t >= fromMs && candle.t <= toMs);
+}
+
 (async () => {
-  console.log(`Faithful passive 5m verification · ${DAYS}d · maker ${MAKER_SIDE_PCT}%/side · taker ${TAKER_SIDE_PCT}%/side`);
-  console.log(`next-bar fills · post-only rejection · SL-first ambiguity · ${MAX_HOLD_BARS}-bar timeout · stress +${EXTRA_STRESS_PCT}%/trade\n`);
+  console.log(`Faithful passive ${TF}m verification · ${DATA_SOURCE} candles · ${DAYS}d · maker ${MAKER_SIDE_PCT}%/side · taker ${TAKER_SIDE_PCT}%/side`);
+  console.log(`next-bar fills · post-only rejection · penetration ${FILL_BUFFER_PCT}% · SL-first ambiguity · ${MAX_HOLD_BARS}-bar timeout · SL ${SL_PCT * 100}% · stress +${EXTRA_STRESS_PCT}%/trade\n`);
 
   const candles = new Map<string, Candle[]>();
   for (const symbol of SYMBOLS) {
-    try { candles.set(symbol, await getKlines(symbol, TF, NOW - DAYS * 86_400_000, NOW)); }
+    try {
+      const fromMs = NOW - DAYS * 86_400_000;
+      candles.set(symbol, DATA_SOURCE === 'lighter'
+        ? await lighterCandles(symbol, fromMs, NOW)
+        : await getKlines(symbol, TF, fromMs, NOW));
+    }
     catch (error) { process.stderr.write(`${symbol}: ${(error as Error).message}\n`); }
   }
 
-  for (const spec of SPECS) {
+  for (const spec of SELECTED_SPECS) {
     const all: Trade[] = [];
     let green = 0;
     let stressGreen = 0;
@@ -234,11 +315,13 @@ function fmt(x: number, digits = 1): string { return `${x >= 0 ? '+' : ''}${x.to
       const net = sum(t, 'netPct');
       const stress = sum(t, 'stressPct');
       const folds = positiveFolds(t);
+      const longs = t.filter((trade) => trade.side === 'long');
+      const shorts = t.filter((trade) => trade.side === 'short');
       const ok = t.length >= 30 && net > 0 && pf(t) >= 1.2 && folds >= 3;
       const stressOk = ok && stress > 0;
       if (ok) green++;
       if (stressOk) stressGreen++;
-      lines.push(`  ${stressOk ? '*' : ok ? '+' : ' '} ${symbol.replace('USDT', '').padEnd(5)} N${String(t.length).padStart(4)} ${(t.length / DAYS).toFixed(2).padStart(5)}/d net ${fmt(net).padStart(7)} stress ${fmt(stress).padStart(7)} PF ${pf(t).toFixed(2).padStart(4)} DD ${drawdown(t).toFixed(1).padStart(5)} f${folds}/4 fill ${result.quoteBars ? (result.fills / result.quoteBars * 100).toFixed(0) : '0'}%`);
+      lines.push(`  ${stressOk ? '*' : ok ? '+' : ' '} ${symbol.replace('USDT', '').padEnd(5)} N${String(t.length).padStart(4)} ${(t.length / DAYS).toFixed(2).padStart(5)}/d net ${fmt(net).padStart(7)} stress ${fmt(stress).padStart(7)} PF ${pf(t).toFixed(2).padStart(4)} DD ${drawdown(t).toFixed(1).padStart(5)} f${folds}/4 L${longs.length}/${fmt(sum(longs, 'netPct'))} S${shorts.length}/${fmt(sum(shorts, 'netPct'))} fill ${result.quoteBars ? (result.fills / result.quoteBars * 100).toFixed(2) : '0'}%`);
     }
 
     const capSummary: string[] = [];

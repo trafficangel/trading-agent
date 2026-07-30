@@ -71,14 +71,53 @@ independent result again failed everywhere:
 
 Verdict: **REJECT**.
 
-## Decision
+## Interim decision
 
-No alert and no Shadow strategy were created. The 17-day Quant preview is too
-short and materially overstates robustness. Adding either candidate would
-increase activity but reduce expected value.
+No alert or Shadow strategy was created from the three failed shared-parameter
+families above. Their 17-day Quant previews were too short and materially
+overstated robustness.
 
 Reproducible runners:
 
 - `scripts/test-quant-atr-donchian.ts`
 - `scripts/test-quant-volatility-reversion.ts`
 
+## Candidate 4 — Lighter SOL Z60 Reclaim Dual
+
+A second search used **native Lighter one-minute candles**, aggregated into
+complete five-minute bars. It found one materially stronger, two-sided
+coin-specific candidate:
+
+- mean: population `SMA(60)` / standard deviation over 60 bars;
+- long entry: prior Z-score below `-3`, current completed bar reclaims `-3`;
+- short entry: prior Z-score above `+3`, current completed bar reclaims `+3`;
+- entry and signal exits fill at the next bar open;
+- exit when price reaches the current SMA(60);
+- catastrophe stop: 1.5% from the actual entry;
+- time exit: 240 bars;
+- zero commission, 0.02% round-trip execution stress and 0.00125% per holding
+  hour adverse funding.
+
+| Lookback | Trades | Net after stress/funding | PF | WR | Long / short net |
+|---:|---:|---:|---:|---:|---:|
+| 30d | 66 | +9.51% | 1.54 | 72.7% | +5.44% / +4.07% |
+| 60d | 144 | +31.81% | 1.61 | 68.1% | +17.73% / +14.08% |
+| 90d | 215 | +27.16% | 1.34 | 67.0% | +14.64% / +12.53% |
+| 120d | 290 | +41.35% | 1.43 | 68.3% | +24.05% / +17.29% |
+| 180d | 446 | +49.06% | 1.28 | 65.2% | +31.99% / +17.07% |
+
+At a larger 0.05% round-trip execution stress the 180-day result remains
++35.68% with PF 1.20. At 0.10% it remains nominally positive (+13.38%) but
+fails the stability gate because the earlier in-sample partition and short
+side become marginal. Nearby periods and thresholds form a positive plateau,
+although not every neighbor passes the full gate.
+
+The additive maximum drawdown at the base stress is 19.81 percentage points,
+so the backtest does **not** justify leverage or live capital. The strategy is
+admitted only to prospective Lighter Shadow under id `sol-z60-reclaim`
+(`STRAT-030`). Real execution remains disabled.
+
+The auditable Pine reference is
+`research/lighter-quant/lighter-sol-z60-reclaim.pine`.
+
+The native reproduction runner is `scripts/sweep-lighter-native-1m.ts`.
