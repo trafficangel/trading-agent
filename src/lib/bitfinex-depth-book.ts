@@ -8,6 +8,15 @@ export type BitfinexBookMessage =
   | readonly [number, readonly (readonly [number, number, number])[]]
   | readonly [number, readonly [number, number, number]];
 
+export type BitfinexMakerTrade = {
+  id: string;
+  coin: string;
+  side: 'BUY' | 'SELL';
+  price: number;
+  size: number;
+  tradeAt: number;
+};
+
 export function createBitfinexDepthBook(): BitfinexDepthBook {
   return { bids: new Map(), asks: new Map(), initialized: false };
 }
@@ -67,4 +76,40 @@ export function applyBitfinexBookMessage(
   }
   if (!book.initialized) return false;
   return applyLevel(book, body);
+}
+
+/**
+ * Parse only the real-time execution event (`te`). Bitfinex follows it with a
+ * duplicate trade-update (`tu`), while the initial subscription snapshot
+ * contains historical executions and must not consume a simulated queue.
+ */
+export function parseBitfinexTradeMessage(
+  payload: unknown,
+  coin: string,
+): BitfinexMakerTrade | null {
+  if (
+    !Array.isArray(payload)
+    || payload[1] !== 'te'
+    || !Array.isArray(payload[2])
+  ) return null;
+  const row = payload[2];
+  const id = Number(row[0]);
+  const tradeAt = Number(row[1]);
+  const amount = Number(row[2]);
+  const price = Number(row[3]);
+  if (
+    !Number.isFinite(id)
+    || !(tradeAt > 0)
+    || !Number.isFinite(amount)
+    || amount === 0
+    || !(price > 0)
+  ) return null;
+  return {
+    id: `${coin}:${id}`,
+    coin,
+    side: amount > 0 ? 'BUY' : 'SELL',
+    price,
+    size: Math.abs(amount),
+    tradeAt,
+  };
 }

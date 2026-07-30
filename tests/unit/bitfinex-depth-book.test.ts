@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyBitfinexBookMessage,
   createBitfinexDepthBook,
+  parseBitfinexTradeMessage,
 } from '../../src/lib/bitfinex-depth-book.js';
 
 describe('Bitfinex depth book', () => {
@@ -36,5 +37,27 @@ describe('Bitfinex depth book', () => {
     const book = createBitfinexDepthBook();
     expect(applyBitfinexBookMessage(book, [17, 'hb'])).toBe(false);
     expect(applyBitfinexBookMessage(book, [17, [100, 1, 2]])).toBe(false);
+  });
+
+  it('parses each execution once and maps amount sign to taker side', () => {
+    expect(parseBitfinexTradeMessage(
+      [22, 'te', [1234, 1_785_000_000_000, -0.25, 64_000]],
+      'BTC',
+    )).toEqual({
+      id: 'BTC:1234',
+      coin: 'BTC',
+      side: 'SELL',
+      price: 64_000,
+      size: 0.25,
+      tradeAt: 1_785_000_000_000,
+    });
+    expect(parseBitfinexTradeMessage(
+      [22, 'tu', [1234, 1_785_000_000_000, -0.25, 64_000]],
+      'BTC',
+    )).toBeNull();
+    expect(parseBitfinexTradeMessage(
+      [22, [[1234, 1_785_000_000_000, -0.25, 64_000]]],
+      'BTC',
+    )).toBeNull();
   });
 });

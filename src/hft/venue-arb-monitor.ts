@@ -23,6 +23,7 @@ import WebSocket, { type ClientOptions, type RawData } from 'ws';
 import {
   applyBitfinexBookMessage,
   createBitfinexDepthBook,
+  parseBitfinexTradeMessage,
 } from '../lib/bitfinex-depth-book.js';
 import { applyBybitDepthUpdate, createBybitDepthBook } from '../lib/bybit-depth-book.js';
 import {
@@ -543,6 +544,18 @@ const COINBASE_LIGHTER_MAKER_ACTIVE_PATH = resolve(
 const COINBASE_LIGHTER_MAKER_EVENTS_PATH = resolve(
   DATA_DIR,
   'coinbase-lighter-maker-events-v1.ndjson',
+);
+const BITFINEX_LIGHTER_MAKER_RESULTS_PATH = resolve(
+  DATA_DIR,
+  'bitfinex-lighter-maker-basis-shadow-v1.ndjson',
+);
+const BITFINEX_LIGHTER_MAKER_ACTIVE_PATH = resolve(
+  DATA_DIR,
+  'bitfinex-lighter-maker-basis-active-v1.json',
+);
+const BITFINEX_LIGHTER_MAKER_EVENTS_PATH = resolve(
+  DATA_DIR,
+  'bitfinex-lighter-maker-events-v1.ndjson',
 );
 const ETHEREAL_LIGHTER_MAKER_RESULTS_PATH = resolve(
   DATA_DIR,
@@ -1083,6 +1096,54 @@ const COINBASE_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
   'VENUE_ARB_COINBASE_LIGHTER_MAKER_MAX_TRADE_IDLE_MS',
   10_000,
 );
+const BITFINEX_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_SHADOW_ENABLED',
+  false,
+);
+const BITFINEX_LIGHTER_MAKER_NOTIONAL_USD = finiteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_NOTIONAL_USD',
+  1_000,
+);
+const BITFINEX_LIGHTER_MAKER_ENTRY_EDGE_BPS = finiteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_ENTRY_EDGE_BPS',
+  1,
+);
+const BITFINEX_LIGHTER_MAKER_CANCEL_EDGE_BPS = signedFiniteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_CANCEL_EDGE_BPS',
+  0.5,
+);
+const BITFINEX_LIGHTER_MAKER_POST_FILL_NET_BPS = finiteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_POST_FILL_NET_BPS',
+  0.5,
+);
+const BITFINEX_LIGHTER_MAKER_EXIT_NET_BPS = finiteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_EXIT_NET_BPS',
+  1,
+);
+const BITFINEX_LIGHTER_MAKER_QUOTE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_QUOTE_LATENCY_MS',
+  250,
+);
+const BITFINEX_LIGHTER_MAKER_HEDGE_LATENCY_MS = finiteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_HEDGE_LATENCY_MS',
+  500,
+);
+const BITFINEX_LIGHTER_MAKER_QUOTE_TTL_MS = finiteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_QUOTE_TTL_MS',
+  30_000,
+);
+const BITFINEX_LIGHTER_MAKER_MAX_QUEUE_USD = finiteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_MAX_QUEUE_USD',
+  100_000,
+);
+const BITFINEX_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS = finiteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS',
+  1_000,
+);
+const BITFINEX_LIGHTER_MAKER_MAX_TRADE_IDLE_MS = finiteEnv(
+  'VENUE_ARB_BITFINEX_LIGHTER_MAKER_MAX_TRADE_IDLE_MS',
+  15_000,
+);
 const ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED = booleanEnv(
   'VENUE_ARB_ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED',
   false,
@@ -1536,6 +1597,15 @@ const BITFINEX_VENUE_COINS = new Set(
 );
 const BITFINEX_VENUE_MARKETS = ACTIVE_MARKETS.filter(
   (market) => BITFINEX_VENUE_COINS.has(market.coin),
+);
+const BITFINEX_MAKER_COINS = new Set(
+  (
+    process.env.VENUE_ARB_BITFINEX_MAKER_COINS
+    ?? 'BTC,ETH,SOL,XRP,NEAR'
+  )
+    .split(',')
+    .map((coin) => coin.trim().toUpperCase())
+    .filter(Boolean),
 );
 
 const VENUES: readonly Venue[] = [
@@ -2000,6 +2070,7 @@ const executableBooks = new Map<string, ExecutableBook>();
 const asterLastTradeAt = new Map<string, number>();
 const hibachiLastTradeAt = new Map<string, number>();
 const coinbaseLastTradeAt = new Map<string, number>();
+const bitfinexLastTradeAt = new Map<string, number>();
 const etherealLastTradeAt = new Map<string, number>();
 const hotstuffLastTradeAt = new Map<string, number>();
 const extendedLastTradeAt = new Map<string, number>();
@@ -2600,6 +2671,65 @@ const coinbaseLighterMakerShadow = new GenericMakerShadow({
   onEvent: (event) => {
     appendFileSync(
       COINBASE_LIGHTER_MAKER_EVENTS_PATH,
+      `${JSON.stringify(event)}\n`,
+    );
+  },
+});
+const bitfinexLighterMakerShadow = new GenericMakerShadow({
+  routeId: 'bitfinex-maker-lighter',
+  makerVenue: 'bitfinex',
+  hedgeVenue: 'lighter',
+  notionalUsd: BITFINEX_LIGHTER_MAKER_NOTIONAL_USD,
+  entryEdgeBps: BITFINEX_LIGHTER_MAKER_ENTRY_EDGE_BPS,
+  cancelEdgeBps: BITFINEX_LIGHTER_MAKER_CANCEL_EDGE_BPS,
+  postFillNetBps: BITFINEX_LIGHTER_MAKER_POST_FILL_NET_BPS,
+  exitNetBps: BITFINEX_LIGHTER_MAKER_EXIT_NET_BPS,
+  takerExitNetBps: BITFINEX_LIGHTER_MAKER_EXIT_NET_BPS,
+  quoteLatencyMs: BITFINEX_LIGHTER_MAKER_QUOTE_LATENCY_MS,
+  hedgeLatencyMs: BITFINEX_LIGHTER_MAKER_HEDGE_LATENCY_MS,
+  quoteTtlMs: BITFINEX_LIGHTER_MAKER_QUOTE_TTL_MS,
+  maxQueueUsd: BITFINEX_LIGHTER_MAKER_MAX_QUEUE_USD,
+  quoteDataGraceMs: BITFINEX_LIGHTER_MAKER_QUOTE_DATA_GRACE_MS,
+  hedgeGraceMs: MAKER_HEDGE_GRACE_MS,
+  maxHoldMs: MAKER_MAX_HOLD_MS,
+  independenceMs: MAKER_INDEPENDENCE_MS,
+  bookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  sourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  maxHoldExitHedgeFreshMs: LIGHTER_REST_MAX_HOLD_EXIT_FRESH_MS,
+  makerBookFreshMs: SHADOW_EXECUTION_FRESH_MS,
+  makerSourceFreshMs: SHADOW_SOURCE_FRESH_MS,
+  hedgeBookFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  hedgeSourceFreshMs: LIGHTER_VALIDATED_BOOK_FRESH_MS,
+  executionBufferBps: EXECUTION_BUFFER_BPS,
+  makerFeeBps: FEE_BPS.bitfinex,
+  hedgeTakerFeeBps: FEE_BPS.lighter,
+  makerFallbackTakerFeeBps: FEE_BPS.bitfinex,
+  fundingBpsPerHour: SHADOW_FUNDING_BPS_PER_HOUR,
+  requiredSamples: SHADOW_REQUIRED_SAMPLES,
+  requiredPassPct: SHADOW_REQUIRED_PASS_PCT,
+  basisGateEnabled: SHADOW_BASIS_GATE_ENABLED,
+  basisMinDeviationBps: SHADOW_BASIS_MIN_DEVIATION_BPS,
+  minRawEntryNetBps: MAKER_MIN_RAW_ENTRY_NET_BPS,
+  exitQuoteDataGraceMs: MAKER_EXIT_QUOTE_DATA_GRACE_MS,
+  exitQuoteTtlMs: MAKER_EXIT_QUOTE_TTL_MS,
+  maxEntryDistanceBps: 3,
+  maxMakerTradeIdleMs: BITFINEX_LIGHTER_MAKER_MAX_TRADE_IDLE_MS,
+}, {
+  onResult: (result) => {
+    appendFileSync(
+      BITFINEX_LIGHTER_MAKER_RESULTS_PATH,
+      `${JSON.stringify(result)}\n`,
+    );
+  },
+  onCheckpoint: (checkpoint) => {
+    atomicJson(BITFINEX_LIGHTER_MAKER_ACTIVE_PATH, {
+      ...checkpoint,
+      updatedAt: Date.now(),
+    });
+  },
+  onEvent: (event) => {
+    appendFileSync(
+      BITFINEX_LIGHTER_MAKER_EVENTS_PATH,
       `${JSON.stringify(event)}\n`,
     );
   },
@@ -4636,6 +4766,9 @@ function connect(
     if (venue === 'coinbase' && COINBASE_LIGHTER_MAKER_SHADOW_ENABLED) {
       coinbaseLighterMakerShadow.setTradeStreamConnected(false);
     }
+    if (venue === 'bitfinex' && BITFINEX_LIGHTER_MAKER_SHADOW_ENABLED) {
+      bitfinexLighterMakerShadow.setTradeStreamConnected(false);
+    }
     if (venue === 'ethereal' && ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED) {
       etherealLighterMakerShadow.setTradeStreamConnected(false);
     }
@@ -4679,6 +4812,10 @@ function connect(
     if (venue === 'coinbase' && COINBASE_LIGHTER_MAKER_SHADOW_ENABLED) {
       coinbaseLighterMakerShadow.setTradeStreamConnected(false);
       coinbaseLighterMakerShadow.recordTradeReconnect();
+    }
+    if (venue === 'bitfinex' && BITFINEX_LIGHTER_MAKER_SHADOW_ENABLED) {
+      bitfinexLighterMakerShadow.setTradeStreamConnected(false);
+      bitfinexLighterMakerShadow.recordTradeReconnect();
     }
     if (venue === 'ethereal' && ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED) {
       etherealLighterMakerShadow.setTradeStreamConnected(false);
@@ -4833,12 +4970,14 @@ function startBitfinex(): void {
       ({ coin }) => [`t${coin}F0:USTF0`, coin] as const,
     ),
   );
-  const channelCoins = new Map<number, string>();
+  const bookChannelCoins = new Map<number, string>();
+  const tradeChannelCoins = new Map<number, string>();
   connect(
     'bitfinex',
     'wss://api-pub.bitfinex.com/ws/2',
     (ws) => {
-      channelCoins.clear();
+      bookChannelCoins.clear();
+      tradeChannelCoins.clear();
       for (const symbol of symbolToCoin.keys()) {
         ws.send(JSON.stringify({
           event: 'subscribe',
@@ -4848,6 +4987,17 @@ function startBitfinex(): void {
           freq: 'F0',
           len: '100',
         }));
+      }
+      if (BITFINEX_LIGHTER_MAKER_SHADOW_ENABLED) {
+        for (const [symbol, coin] of symbolToCoin) {
+          if (!BITFINEX_MAKER_COINS.has(coin)) continue;
+          ws.send(JSON.stringify({
+            event: 'subscribe',
+            channel: 'trades',
+            symbol,
+          }));
+        }
+        bitfinexLighterMakerShadow.setTradeStreamConnected(true);
       }
     },
     (payload, receivedAt) => {
@@ -4862,12 +5012,16 @@ function startBitfinex(): void {
         };
         if (
           event.event === 'subscribed'
-          && event.channel === 'book'
+          && (event.channel === 'book' || event.channel === 'trades')
           && Number.isInteger(Number(event.chanId))
           && typeof event.symbol === 'string'
         ) {
           const coin = symbolToCoin.get(event.symbol);
-          if (coin) channelCoins.set(Number(event.chanId), coin);
+          if (coin && event.channel === 'book') {
+            bookChannelCoins.set(Number(event.chanId), coin);
+          } else if (coin && event.channel === 'trades') {
+            tradeChannelCoins.set(Number(event.chanId), coin);
+          }
         } else if (event.event === 'error') {
           console.warn(
             `venue-arb bitfinex subscription error ${String(event.code)} ${String(event.msg)}`,
@@ -4877,7 +5031,22 @@ function startBitfinex(): void {
       }
       if (!Array.isArray(payload) || payload[1] === 'hb') return;
       const channelId = Number(payload[0]);
-      const coin = channelCoins.get(channelId);
+      const tradeCoin = tradeChannelCoins.get(channelId);
+      if (tradeCoin) {
+        const trade = parseBitfinexTradeMessage(payload, tradeCoin);
+        if (!trade) return;
+        const activityAt = makerActivityTimestamp(
+          trade.tradeAt,
+          receivedAt,
+          SHADOW_SOURCE_FRESH_MS,
+        );
+        if (activityAt != null) {
+          bitfinexLastTradeAt.set(tradeCoin, activityAt);
+        }
+        bitfinexLighterMakerShadow.processTrade(trade, receivedAt);
+        return;
+      }
+      const coin = bookChannelCoins.get(channelId);
       const depth = coin ? bitfinexDepth.get(coin) : null;
       const book = coin ? books.get(bookKey('bitfinex', coin)) : null;
       if (!depth || !book) return;
@@ -6932,6 +7101,12 @@ function writeStatus(): void {
       enabled: COINBASE_LIGHTER_MAKER_SHADOW_ENABLED,
       feeEligibility: 'advanced_trade_retail_promo_only',
     },
+    bitfinexLighterMakerShadow: {
+      ...bitfinexLighterMakerShadow.status(),
+      enabled: BITFINEX_LIGHTER_MAKER_SHADOW_ENABLED,
+      makerCoins: [...BITFINEX_MAKER_COINS],
+      feeEligibility: 'bitfinex_zero_fee_eligible_customer',
+    },
     etherealLighterMakerShadow: {
       ...etherealLighterMakerShadow.status(),
       enabled: ETHEREAL_LIGHTER_MAKER_SHADOW_ENABLED,
@@ -7302,6 +7477,7 @@ function genericMakerMarkets(
     | 'aster'
     | 'hibachi'
     | 'coinbase'
+    | 'bitfinex'
     | 'ethereal'
     | 'hotstuff',
   hedgeVenue: 'lighter' | 'extended' | 'aster' | 'pacifica' | 'binance',
@@ -7402,6 +7578,8 @@ function genericMakerMarkets(
             ? hibachiLastTradeAt
           : makerVenue === 'coinbase'
             ? coinbaseLastTradeAt
+          : makerVenue === 'bitfinex'
+            ? bitfinexLastTradeAt
           : makerVenue === 'ethereal'
             ? etherealLastTradeAt
           : makerVenue === 'hotstuff'
@@ -7465,6 +7643,7 @@ function shutdown(signal: string): void {
   hibachiLighterMakerShadow.shutdown(Date.now());
   hibachiLighterCapacityShadow.shutdown(Date.now());
   coinbaseLighterMakerShadow.shutdown(Date.now());
+  bitfinexLighterMakerShadow.shutdown(Date.now());
   etherealLighterMakerShadow.shutdown(Date.now());
   hotstuffLighterMakerShadow.shutdown(Date.now());
   extendedLighterMakerShadow.shutdown(Date.now());
@@ -7530,6 +7709,12 @@ if (!existsSync(COINBASE_LIGHTER_MAKER_RESULTS_PATH)) {
 }
 if (!existsSync(COINBASE_LIGHTER_MAKER_EVENTS_PATH)) {
   writeFileSync(COINBASE_LIGHTER_MAKER_EVENTS_PATH, '');
+}
+if (!existsSync(BITFINEX_LIGHTER_MAKER_RESULTS_PATH)) {
+  writeFileSync(BITFINEX_LIGHTER_MAKER_RESULTS_PATH, '');
+}
+if (!existsSync(BITFINEX_LIGHTER_MAKER_EVENTS_PATH)) {
+  writeFileSync(BITFINEX_LIGHTER_MAKER_EVENTS_PATH, '');
 }
 if (!existsSync(ETHEREAL_LIGHTER_MAKER_RESULTS_PATH)) {
   writeFileSync(ETHEREAL_LIGHTER_MAKER_RESULTS_PATH, '');
@@ -7627,6 +7812,13 @@ loadGenericMakerState(
   COINBASE_LIGHTER_MAKER_ACTIVE_PATH,
   'Coinbase maker → Lighter',
   COINBASE_LIGHTER_MAKER_SHADOW_ENABLED,
+);
+loadGenericMakerState(
+  bitfinexLighterMakerShadow,
+  BITFINEX_LIGHTER_MAKER_RESULTS_PATH,
+  BITFINEX_LIGHTER_MAKER_ACTIVE_PATH,
+  'Bitfinex maker → Lighter',
+  BITFINEX_LIGHTER_MAKER_SHADOW_ENABLED,
 );
 loadGenericMakerState(
   etherealLighterMakerShadow,
@@ -7836,6 +8028,23 @@ const evaluationTimer = setInterval(() => {
         'lighter',
         now,
         COINBASE_LIGHTER_MAKER_NOTIONAL_USD,
+      ),
+    );
+  }
+  if (
+    BITFINEX_LIGHTER_MAKER_SHADOW_ENABLED
+    && activeVenues.has('bitfinex')
+    && activeVenues.has('lighter')
+  ) {
+    bitfinexLighterMakerShadow.evaluate(
+      now,
+      genericMakerMarkets(
+        'bitfinex',
+        'lighter',
+        now,
+        BITFINEX_LIGHTER_MAKER_NOTIONAL_USD,
+      ).filter(
+        (market) => BITFINEX_MAKER_COINS.has(market.coin),
       ),
     );
   }
