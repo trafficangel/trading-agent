@@ -232,10 +232,15 @@ def evaluate(
     evaluated_at = now_ms or int(time.time() * 1000)
     observation_started_at = observation_started_at_ms or evaluated_at
     row_cutoff_at = observation_started_at_ms or 0
+    route_ids = {
+        candidate.strip()
+        for candidate in route_id.split(",")
+        if candidate.strip()
+    }
     realized = [
         row
         for row in rows
-        if row.get("routeId") == route_id
+        if row.get("routeId") in route_ids
         and row_timestamp(row) >= row_cutoff_at
         and finite_number(row.get("realizedNetBps")) is not None
     ]
@@ -257,7 +262,7 @@ def evaluate(
     technical_failures = [
         row
         for row in rows
-        if row.get("routeId") == route_id
+        if row.get("routeId") in route_ids
         and row_timestamp(row) >= row_cutoff_at
         and technical_failure_reason(row) is not None
     ]
@@ -537,6 +542,25 @@ def self_test() -> None:
     )
     assert clustered["metrics"]["trades"] == 3
     assert clustered["metrics"]["samples"] == 2
+    bidirectional = evaluate(
+        [
+            {
+                "routeId": "a-b" if index % 2 == 0 else "b-a",
+                "coin": "X",
+                "realizedNetBps": 3,
+                "exitAt": (index + 1) * 60_000,
+            }
+            for index in range(30)
+        ],
+        route_id="a-b,b-a",
+        notional_usd=100,
+        min_samples=30,
+        min_profit_factor=1.2,
+        max_drawdown_bps=10,
+        independence_ms=60_000,
+    )
+    assert bidirectional["ready"] is True
+    assert bidirectional["metrics"]["trades"] == 30
     assert clustered["metrics"]["episodeSumNetBps"] == 8
     no_go = evaluate(
         [],
