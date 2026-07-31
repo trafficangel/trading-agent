@@ -1,0 +1,24 @@
+[Unit]
+Description=Lighter read-only native microstructure recorder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/trading-agent
+Environment=NODE_ENV=production
+Environment=LIGHTER_MICRO_DB=/home/trader/apps/trading-agent/data/lighter-native-microstructure.sqlite
+Environment=LIGHTER_MICRO_STATUS=/home/trader/apps/trading-agent/data/lighter-native-microstructure-status.json
+ExecStart=/usr/bin/node /home/trader/apps/trading-agent/dist/hft/lighter-microstructure-recorder.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/home/trader/apps/trading-agent/data
+
+[Install]
+WantedBy=multi-user.target

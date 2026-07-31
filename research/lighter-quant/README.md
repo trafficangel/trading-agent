@@ -163,6 +163,36 @@ Decision: do not add a correlated P3 merely because an adjacent parameter has
 a larger in-sample total. Continue the clean P2 prospective sample and search
 for a genuinely different information source before adding portfolio risk.
 
+## Independent native microstructure track
+
+The next research source is deliberately independent from the Z-score family.
+`src/hft/lighter-microstructure-recorder.ts` is a public-data-only Lighter
+recorder covering the same 15-market universe. It imports no signer, account,
+API key or order client and therefore cannot trade.
+
+The recorder follows the official public WebSocket contract:
+
+- `order_book/{market}` supplies a full subscription snapshot followed by
+  50ms state changes. Every delta must have `begin_nonce` equal to the prior
+  `nonce`; a mismatch clears the local book and forces a fresh subscription.
+- `trade/{market}` supplies public trades and liquidation trades. Aggressor
+  direction is derived from the documented resting-maker flag:
+  `is_maker_ask=true` means an aggressive buy, otherwise an aggressive sell.
+- `market_stats/{market}` supplies mark/index price, estimated current funding
+  and the last paid funding rate.
+
+Only compact completed one-minute aggregates are retained: mid OHLC, average
+and maximum executable spread, top-five quote depth and imbalance, taker buy
+and sell USD flow/CVD, liquidation flow, basis/funding, book freshness and gap
+quality counters. Five-minute features must be derived from consecutive
+`quality_ok=1` one-minute rows; incomplete or gap-affected minutes are excluded,
+not forward-filled. Default retention is 60 days.
+
+This is a data-collection track, not a strategy launch. No entry rule may be
+selected until enough strictly prospective rows exist for chronological
+train/validation/test, execution-stressed evaluation, both-side checks and a
+frozen Shadow gate.
+
 ## LuxAlgo database follow-up
 
 A separate LuxAlgo AI Backtesting database search was run for symmetric
