@@ -1085,6 +1085,31 @@ gate, holding period, stop, symbol subset, timeframe or regime may be changed
 after the first result is inspected; failure closes the family without a
 rescue grid.
 
+### Adaptive serial-dependence result: rejected
+
+The preregistration was committed as `6f843b1` and its tested implementation
+as `d0951bd` before either result was calculated. Both frozen timeframes failed
+despite zero exchange commission and complete measured-cost/exact-funding
+inputs:
+
+- 1m: 41,506 accepted trades, `-1435.60%` net, PF `0.81`, observed-maximum
+  execution `-1826.61%` / PF `0.77`, mean-trade L95 `-0.0386%`, drawdown
+  `-147.09%` of ten-position capacity, 0/4 positive folds and IS/OOS
+  `-1048.71% / -386.89%`;
+- 5m: 12,506 trades, `-294.64%` net, PF `0.88`, observed-maximum execution
+  `-382.31%` / PF `0.85`, mean-trade L95 `-0.0321%`, drawdown `-38.15%`,
+  1/4 folds and IS/OOS `-214.61% / -80.04%`.
+
+Both Long and Short portfolios were negative at both timeframes, as were every
+bull/bear/mixed regime and every high/low-volatility regime. HYPE at 1m and LIT
+and SOL at 5m had positive individual headline net, but each had PF at or below
+`1.05`, a negative mean-trade L95 and a failed side, fold or recent-window
+gate. Selecting any of them after observing the common-universe result would
+be post-hoc cherry-picking. The frozen family is closed without parameter
+changes, Shadow or Real registration; reproducible evidence is stored in
+`data/lighter-serial-adaptive-1m-results.json` and
+`data/lighter-serial-adaptive-5m-results.json`.
+
 ## Prospective L2 microstructure research cost policy
 
 The continuously recorded gap-free Lighter L2 dataset has not yet reached its
