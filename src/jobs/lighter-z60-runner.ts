@@ -126,12 +126,13 @@ function aggregateCompleteFiveMinuteBars(
   for (const candle of raw) {
     const time = finite(candle.t);
     const close = finite(candle.c);
-    const volume = finite(candle.v);
+    // Lighter omits zero-valued fields from candle responses. A missing `v`
+    // therefore means zero volume, not a missing minute.
+    const volume = finite(candle.v) ?? 0;
     if (
       time == null
       || close == null
       || close <= 0
-      || volume == null
       || volume < 0
       || time % MINUTE_MS !== 0
     ) continue;
