@@ -21,11 +21,21 @@ type MinuteStatsRow = {
   nonce_gaps: number;
   stale_samples: number;
   avg_book_age_p95_ms: number | null;
+  avg_execution_cost_pct: number | null;
+  avg_execution_cost_p95_pct: number | null;
+  max_execution_cost_p95_pct: number | null;
 };
 
 type FiveMinuteStatsRow = {
   market_id: number;
   valid_buckets: number;
+};
+
+type LatestExecutionCostRow = {
+  market_id: number;
+  minute_ts_ms: number;
+  execution_cost_avg_pct: number | null;
+  execution_cost_p95_pct: number | null;
 };
 
 function flagValue(name: string): string | null {
@@ -61,6 +71,13 @@ const fiveMinuteExecutionCostCountSql = hasRollingExecutionCost
       AND exec_cost_100_samples >= samples * 0.8
       THEN 1 ELSE 0 END)`
   : '0';
+const executionCostStatsSql = hasRollingExecutionCost
+  ? `AVG(exec_cost_100_avg_pct) AS avg_execution_cost_pct,
+    AVG(exec_cost_100_p95_pct) AS avg_execution_cost_p95_pct,
+    MAX(exec_cost_100_p95_pct) AS max_execution_cost_p95_pct`
+  : `NULL AS avg_execution_cost_pct,
+    NULL AS avg_execution_cost_p95_pct,
+    NULL AS max_execution_cost_p95_pct`;
 
 const minuteRows = db
   .prepare(
@@ -75,7 +92,8 @@ const minuteRows = db
     ${executionCostRowsSql} AS execution_cost_rows,
     COALESCE(SUM(nonce_gaps), 0) AS nonce_gaps,
     COALESCE(SUM(stale_samples), 0) AS stale_samples,
-    AVG(book_age_p95_ms) AS avg_book_age_p95_ms
+    AVG(book_age_p95_ms) AS avg_book_age_p95_ms,
+    ${executionCostStatsSql}
   FROM lighter_microstructure_1m
   WHERE minute_ts_ms >= ? AND minute_ts_ms < ?
   GROUP BY market_id, symbol
@@ -83,6 +101,29 @@ const minuteRows = db
 `,
   )
   .all(cutoff, closedMinute) as MinuteStatsRow[];
+
+const latestExecutionCostRows = hasRollingExecutionCost
+  ? db.prepare(
+    `
+      SELECT
+        current.market_id,
+        current.minute_ts_ms,
+        current.exec_cost_100_avg_pct AS execution_cost_avg_pct,
+        current.exec_cost_100_p95_pct AS execution_cost_p95_pct
+      FROM lighter_microstructure_1m AS current
+      WHERE current.minute_ts_ms < ?
+        AND current.exec_cost_100_p95_pct IS NOT NULL
+        AND current.minute_ts_ms = (
+          SELECT MAX(latest.minute_ts_ms)
+          FROM lighter_microstructure_1m AS latest
+          WHERE latest.market_id = current.market_id
+            AND latest.minute_ts_ms < ?
+            AND latest.exec_cost_100_p95_pct IS NOT NULL
+        )
+      ORDER BY current.market_id
+    `,
+  ).all(closedMinute, closedMinute) as LatestExecutionCostRow[]
+  : [];
 
 const fiveMinuteRows = db
   .prepare(
@@ -119,6 +160,9 @@ const fiveMinuteRows = db
 db.close();
 
 const fiveByMarket = new Map(fiveMinuteRows.map((row) => [row.market_id, row.valid_buckets]));
+const latestExecutionCostByMarket = new Map(
+  latestExecutionCostRows.map((row) => [row.market_id, row]),
+);
 const perMarket = minuteRows.map((row) => {
   const expectedMinutes = Math.floor((row.last_minute - row.first_minute) / MINUTE_MS) + 1;
   const firstFullFiveMinute = Math.ceil(row.first_minute / FIVE_MINUTES_MS) * FIVE_MINUTES_MS;
@@ -131,6 +175,7 @@ const perMarket = minuteRows.map((row) => {
       ? Math.floor((lastFullFiveMinute - firstFullFiveMinute) / FIVE_MINUTES_MS) + 1
       : 0;
   const validFiveMinuteBuckets = fiveByMarket.get(row.market_id) ?? 0;
+  const latestExecutionCost = latestExecutionCostByMarket.get(row.market_id);
   return {
     marketId: row.market_id,
     symbol: row.symbol,
@@ -152,6 +197,14 @@ const perMarket = minuteRows.map((row) => {
     nonceGaps: row.nonce_gaps,
     staleSamples: row.stale_samples,
     avgBookAgeP95Ms: row.avg_book_age_p95_ms,
+    avgExecutionCostPct: row.avg_execution_cost_pct,
+    avgExecutionCostP95Pct: row.avg_execution_cost_p95_pct,
+    maxExecutionCostP95Pct: row.max_execution_cost_p95_pct,
+    latestExecutionCostMinute: latestExecutionCost
+      ? new Date(latestExecutionCost.minute_ts_ms).toISOString()
+      : null,
+    latestExecutionCostAvgPct: latestExecutionCost?.execution_cost_avg_pct ?? null,
+    latestExecutionCostP95Pct: latestExecutionCost?.execution_cost_p95_pct ?? null,
     freshnessMs: now - row.last_minute,
   };
 });
@@ -167,6 +220,13 @@ const minExecutionCostRatio = minimum(perMarket.map((row) => row.executionCostRa
 const minFiveMinuteQualityRatio = minimum(perMarket.map((row) => row.fiveMinuteQualityRatio));
 const maxFreshnessMs = maximum(perMarket.map((row) => row.freshnessMs));
 const totalNonceGaps = perMarket.reduce((sum, row) => sum + row.nonceGaps, 0);
+const latestExecutionCostP95Values = perMarket
+  .map((row) => row.latestExecutionCostP95Pct)
+  .filter((value): value is number => value != null && Number.isFinite(value));
+const minLatestExecutionCostP95Pct = minimum(latestExecutionCostP95Values);
+const maxLatestExecutionCostP95Pct = latestExecutionCostP95Values.length
+  ? Math.max(...latestExecutionCostP95Values)
+  : 0;
 
 function reasons(minDays: number, requireFiveMinute: boolean): string[] {
   const failures: string[] = [];
@@ -217,6 +277,9 @@ const report = {
     minFiveMinuteQualityRatio,
     totalNonceGaps,
     maxFreshnessMs,
+    latestExecutionCostMarkets: latestExecutionCostP95Values.length,
+    minLatestExecutionCostP95Pct,
+    maxLatestExecutionCostP95Pct,
   },
   gates: {
     collectionHealthy: { passed: healthFailures.length === 0, failures: healthFailures },

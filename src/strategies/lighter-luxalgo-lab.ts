@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import WebSocket, { type RawData } from 'ws';
 import { db } from '../db/client.js';
@@ -532,9 +534,10 @@ const STRATEGIES: readonly StrategySpec[] = [
     marketId: 1,
     stopPct: 1.5,
     backtest: {
-      // Native Lighter completed 5m candles, next-bar execution, volume-
-      // weighted rolling distribution and 0.065% round-trip execution/funding
-      // stress. Prospective Shadow only until its own forward evidence passes.
+      // Native Lighter completed 5m candles and next-bar execution. The
+      // displayed historical row used a conservative 0.065% sensitivity
+      // reserve; current qualification uses measured market-specific $100
+      // L2 p95 plus funding instead of a fixed cost. Prospective Shadow only.
       period: '2026-02-01 → 2026-07-30',
       trades: 103,
       winRatePct: 68.0,
@@ -552,10 +555,10 @@ const STRATEGIES: readonly StrategySpec[] = [
     marketId: 24,
     stopPct: 1.5,
     backtest: {
-      // Native Lighter completed 5m candles, next-bar execution, volume-
-      // weighted rolling distribution and 0.065% round-trip execution/funding
-      // stress. The same model remained positive through 0.15% stress and
-      // thresholds 2.25/2.5/2.75 formed a profitable neighborhood.
+      // Native Lighter completed 5m candles and next-bar execution. The
+      // displayed historical row used a conservative 0.065% sensitivity
+      // reserve. Current qualification uses measured market-specific $100
+      // L2 p95 plus funding; 0.10/0.15% were non-blocking robustness rows.
       period: '2026-02-01 → 2026-07-31',
       trades: 356,
       winRatePct: 64.3,
@@ -1951,6 +1954,103 @@ function selectedStrategy(value: unknown): StrategySpec | null {
   return STRATEGY_BY_ID.get(String(value ?? '')) ?? null;
 }
 type PortfolioGroup = 'native' | null;
+
+type NativeMicrostructureAudit = {
+  generatedAt?: string;
+  summary?: {
+    markets?: number;
+    minDurationDays?: number;
+    minCoverageRatio?: number;
+    minQualityRatio?: number;
+    minExecutionCostRatio?: number;
+    minFiveMinuteQualityRatio?: number;
+    latestExecutionCostMarkets?: number;
+    minLatestExecutionCostP95Pct?: number;
+    maxLatestExecutionCostP95Pct?: number;
+  };
+  gates?: {
+    collectionHealthy?: { passed?: boolean };
+    exploratoryResearch?: { passed?: boolean };
+    frozenCandidateResearch?: { passed?: boolean };
+  };
+  perMarket?: Array<{
+    symbol?: string;
+    latestExecutionCostP95Pct?: number | null;
+  }>;
+};
+
+function nativeMicrostructureAudit(): NativeMicrostructureAudit | null {
+  try {
+    const path = resolve(
+      process.env.LIGHTER_MICRO_AUDIT
+        ?? 'data/lighter-native-microstructure-audit.json',
+    );
+    return JSON.parse(readFileSync(path, 'utf8')) as NativeMicrostructureAudit;
+  } catch {
+    return null;
+  }
+}
+
+function nativeMicrostructureReadiness(
+  lang: Lang,
+  strategy: StrategySpec | null,
+): string {
+  const audit = nativeMicrostructureAudit();
+  if (!audit?.summary) {
+    return `<div class="ll-readiness"><b>Native data</b><span class="collect">${t(
+      lang,
+      'аудит ещё не сформирован',
+      'audit not generated yet',
+    )}</span></div>`;
+  }
+
+  const summary = audit.summary;
+  const durationDays = summary.minDurationDays ?? 0;
+  const qualityRatio = summary.minQualityRatio ?? 0;
+  const executionRatio = summary.minExecutionCostRatio ?? 0;
+  const fiveMinuteRatio = summary.minFiveMinuteQualityRatio ?? 0;
+  const generatedAt = Date.parse(audit.generatedAt ?? '');
+  const ageMinutes = Number.isFinite(generatedAt)
+    ? Math.max(0, Math.round((Date.now() - generatedAt) / 60_000))
+    : null;
+  const specificCost = strategy
+    ? audit.perMarket?.find((row) => row.symbol === strategy.asset)
+      ?.latestExecutionCostP95Pct
+    : null;
+  const costMarkets = summary.latestExecutionCostMarkets ?? 0;
+  const minCost = summary.minLatestExecutionCostP95Pct;
+  const maxCost = summary.maxLatestExecutionCostP95Pct;
+  const costLabel = specificCost != null && Number.isFinite(specificCost)
+    ? `${strategy?.asset} ${specificCost.toFixed(4)}%`
+    : minCost != null && maxCost != null && costMarkets > 0
+      ? `${minCost.toFixed(4)}–${maxCost.toFixed(4)}% · ${costMarkets}/${NATIVE_TREND_PORTFOLIO_MARKETS.length}`
+      : t(lang, 'накапливается', 'collecting');
+  const gate = (
+    label: string,
+    passed: boolean | undefined,
+  ): string => `<span><small>${label}</small><b class="${passed ? 'pass' : 'collect'}">${passed
+    ? t(lang, 'готово', 'ready')
+    : t(lang, 'сбор', 'collecting')}</b></span>`;
+
+  return `<div class="ll-readiness" title="${t(
+    lang,
+    'Фактически исполнимый полный круг $100 по свежему L2; фиксированные 0,10/0,15% здесь не используются.',
+    'Immediately executable $100 round trip from fresh L2; fixed 0.10/0.15% assumptions are not used here.',
+  )}">
+    <b>Native data v3</b>
+    <span><small>${t(lang, 'история', 'history')}</small><b>${durationDays.toFixed(2)}d</b></span>
+    <span><small>1m quality</small><b>${(qualityRatio * 100).toFixed(1)}%</b></span>
+    <span><small>$100 cost coverage</small><b>${(executionRatio * 100).toFixed(1)}%</b></span>
+    <span><small>${t(lang, 'измеренный RT p95', 'measured RT p95')}</small><b>${costLabel}</b></span>
+    <span><small>5m quality</small><b>${(fiveMinuteRatio * 100).toFixed(1)}%</b></span>
+    ${gate('1d', audit.gates?.collectionHealthy?.passed)}
+    ${gate('7d', audit.gates?.exploratoryResearch?.passed)}
+    ${gate('21d', audit.gates?.frozenCandidateResearch?.passed)}
+    <em>${ageMinutes == null
+    ? t(lang, 'время неизвестно', 'time unknown')
+    : `${t(lang, 'обновлено', 'updated')} ${ageMinutes}m`}</em>
+  </div>`;
+}
 function selectedGroup(value: unknown): PortfolioGroup {
   return value === 'native' ? 'native' : null;
 }
@@ -2037,6 +2137,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.ll-head h1{font-size:34px;margin:10px 0 7px}.ll-head p{max-width:860px;color:var(--text-dim)}
 .ll-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.ll-engine i{width:8px;height:8px;border-radius:50%;background:#ff6577}.ll-engine.live i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}
 .ll-modebar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:18px 0 0;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-card)}.ll-modebar>div{display:grid;gap:4px}.ll-modebar small{color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.04em}.ll-tabs{display:flex;align-items:center;gap:5px}.ll-tabs a{display:grid;place-items:center;min-width:82px;height:31px;padding:0 11px;border:1px solid var(--border);border-radius:8px;color:var(--text-dim);font-size:10px;font-weight:750;text-decoration:none}.ll-tabs a:hover{border-color:#bd91ff;color:var(--text)}.ll-tabs a.active{border-color:rgba(163,106,255,.58);background:rgba(163,106,255,.16);color:#bd91ff}.ll-tabs a.real.active{border-color:rgba(56,217,150,.5);background:rgba(56,217,150,.12);color:#38d996}
+.ll-readiness{display:flex;align-items:center;gap:9px 16px;min-height:34px;margin:7px 0 0;padding:6px 10px;border:1px solid rgba(56,217,150,.22);border-radius:9px;background:rgba(56,217,150,.035);font-size:9px;white-space:nowrap;overflow:hidden}.ll-readiness>span{display:flex;align-items:baseline;gap:4px}.ll-readiness small{color:var(--text-faint);font-size:8px;text-transform:uppercase;letter-spacing:.025em}.ll-readiness b{font-variant-numeric:tabular-nums}.ll-readiness>em{margin-left:auto;color:var(--text-faint);font-size:8px;font-style:normal}
 .ll-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}.ll-card,.ll-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.ll-card{padding:13px 14px;display:grid;gap:4px}.ll-card small,.ll-card em{color:var(--text-faint);font-size:10px;font-style:normal}.ll-card b{font-size:20px;font-variant-numeric:tabular-nums}
 .ll-panel{padding:15px;margin:10px 0}.ll-panel h2{font-size:16px;margin:0 0 11px}
 .ll-filter{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:10px 0;padding:11px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-card)}.ll-filter label{display:grid;gap:5px;color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.04em}.ll-filter select{min-width:285px;height:34px;padding:0 32px 0 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:11px}.ll-filter button{height:34px;padding:0 13px;border:1px solid rgba(163,106,255,.5);border-radius:8px;background:rgba(163,106,255,.14);color:#bd91ff;font:inherit;font-size:10px;font-weight:700;cursor:pointer}.ll-filter small{color:var(--text-faint);font-size:10px}
@@ -2055,7 +2156,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-native-guide{border-color:rgba(56,217,150,.28)}.ll-guide-body{padding:0 15px 15px}.ll-guide-body>.ll-note{margin:0 0 10px}.ll-guide-flow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 20px;margin:0;padding:0;list-style:none;counter-reset:guide}.ll-guide-flow li{position:relative;min-height:45px;padding:8px 9px 8px 35px;border-top:1px solid var(--border);color:var(--text-dim);font-size:10px;line-height:1.45;counter-increment:guide}.ll-guide-flow li::before{content:counter(guide);position:absolute;top:8px;left:7px;display:grid;place-items:center;width:19px;height:19px;border-radius:50%;background:rgba(56,217,150,.12);color:#38d996;font-size:9px;font-weight:800}.ll-guide-flow b{color:var(--text)}.ll-native-specs{margin-top:11px;border:1px solid var(--border);border-radius:10px;overflow:hidden}.ll-native-spec{display:grid;grid-template-columns:120px 130px minmax(220px,1.15fr) minmax(260px,1.6fr) 145px;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--border);font-size:9px;line-height:1.4}.ll-native-spec:last-child{border-bottom:0}.ll-native-spec>b{font-size:10px;white-space:nowrap}.ll-native-spec>span{color:var(--text-dim)}.ll-native-spec>span:nth-child(2){color:#bd91ff;font-weight:750;white-space:nowrap}.ll-native-spec>em{font-size:8px;font-style:normal;font-weight:800;text-align:right;white-space:nowrap}
 .ll-chart-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}.ll-chart-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px}.ll-chart-legend span{display:flex;align-items:center;gap:6px;color:var(--text-dim)}.ll-chart-legend i{width:18px;height:3px;border-radius:2px}.ll-chart-legend .shadow i{background:#a36aff}.ll-chart-legend .real i{background:#38d996}.ll-chart-legend b{font-variant-numeric:tabular-nums}.ll-chart{width:100%;margin-top:8px;overflow:hidden}.ll-chart svg{display:block;width:100%;height:auto;min-height:190px}.ll-chart-grid{stroke:rgba(255,255,255,.075);stroke-width:1}.ll-chart-zero{stroke:rgba(255,255,255,.24);stroke-width:1}.ll-chart-axis{fill:var(--text-faint);font-size:10px;font-family:inherit}.ll-chart-shadow{fill:none;stroke:#a36aff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-real{fill:none;stroke:#38d996;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-dot-shadow{fill:#a36aff}.ll-chart-dot-real{fill:#38d996}.ll-chart-empty{display:grid;place-items:center;min-height:170px;color:var(--text-faint);font-size:12px}
 .ll-live-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px;margin:12px 0}.ll-live-metric{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.015);display:grid;gap:3px}.ll-live-metric small{font-size:9px;color:var(--text-faint);text-transform:uppercase}.ll-live-metric b{font-size:15px;font-variant-numeric:tabular-nums}.ll-live-metric em{font-size:9px;color:var(--text-faint);font-style:normal}.ll-live-strategy th:nth-child(1){width:25%}.ll-live-strategy th:nth-child(2){width:11%}.ll-live-strategy th:nth-child(3){width:10%}.ll-live-strategy th:nth-child(4){width:12%}.ll-live-strategy th:nth-child(5){width:12%}.ll-live-strategy th:nth-child(6){width:18%}.ll-live-strategy th:nth-child(7){width:12%}
-@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-modebar{align-items:stretch}.ll-modebar>div{width:100%}.ll-tabs a{flex:1}.ll-filter{align-items:stretch}.ll-filter label,.ll-filter select{width:100%;min-width:0}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-signal-table th:nth-child(3),.ll-signal-table td:nth-child(3){display:none}.ll-signal-table th:nth-child(1){width:17%}.ll-signal-table th:nth-child(2){width:9%}.ll-signal-table th:nth-child(4){width:17%}.ll-signal-table th:nth-child(5){width:17%}.ll-signal-table th:nth-child(6){width:16%}.ll-signal-table th:nth-child(7){width:24%}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-shadow-trades th:nth-child(1){width:16%}.ll-shadow-trades th:nth-child(2){width:19%}.ll-shadow-trades th:nth-child(4){width:12%}.ll-shadow-trades th:nth-child(5){width:14%}.ll-shadow-trades th:nth-child(6){width:11%}.ll-shadow-trades th:nth-child(7){width:8%}.ll-shadow-trades th:nth-child(8){width:20%}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}.ll-guide-flow{grid-template-columns:1fr}.ll-native-spec{grid-template-columns:1fr;gap:3px}.ll-native-spec>em{text-align:left}.ll-strategy-name::after{left:50%;width:90vw}}`;
+@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-modebar{align-items:stretch}.ll-modebar>div{width:100%}.ll-tabs a{flex:1}.ll-readiness{overflow-x:auto}.ll-readiness>em{margin-left:0}.ll-filter{align-items:stretch}.ll-filter label,.ll-filter select{width:100%;min-width:0}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-signal-table th:nth-child(3),.ll-signal-table td:nth-child(3){display:none}.ll-signal-table th:nth-child(1){width:17%}.ll-signal-table th:nth-child(2){width:9%}.ll-signal-table th:nth-child(4){width:17%}.ll-signal-table th:nth-child(5){width:17%}.ll-signal-table th:nth-child(6){width:16%}.ll-signal-table th:nth-child(7){width:24%}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-shadow-trades th:nth-child(1){width:16%}.ll-shadow-trades th:nth-child(2){width:19%}.ll-shadow-trades th:nth-child(4){width:12%}.ll-shadow-trades th:nth-child(5){width:14%}.ll-shadow-trades th:nth-child(6){width:11%}.ll-shadow-trades th:nth-child(7){width:8%}.ll-shadow-trades th:nth-child(8){width:20%}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}.ll-guide-flow{grid-template-columns:1fr}.ll-native-spec{grid-template-columns:1fr;gap:3px}.ll-native-spec>em{text-align:left}.ll-strategy-name::after{left:50%;width:90vw}}`;
 
 export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
   const s = summary(LUXALGO_STRATEGIES);
@@ -2886,6 +2987,10 @@ async function render(
           <a href="${chartHref('pct')}" class="${requested.chartUnit === 'pct' ? 'active' : ''}">${t(lang, 'Проценты %', 'Percent %')}</a>
         </nav></div>
       </div>
+
+      ${requested.group === 'native'
+    ? nativeMicrostructureReadiness(lang, requested.strategy)
+    : ''}
 
       <div class="ll-grid">
         ${dataset === 'shadow' ? shadowCards : realCards}
