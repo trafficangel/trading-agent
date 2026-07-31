@@ -4,7 +4,7 @@ import WebSocket, { type RawData } from 'ws';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import {
-  evaluateNativeForwardGate,
+  evaluateNativeForwardRows,
   estimatedFundingPnlPct,
   pricePnlPct,
   quoteNotionalVwap,
@@ -1062,28 +1062,7 @@ function evaluateForwardRows(
   }[],
   drawdownCapacityUnits = 1,
 ): NativeForwardGateEvaluation {
-  const captured = signalRows.filter((row) => row.capture_status === 'captured');
-  const executionCostPcts = captured.flatMap((row) => {
-    if (
-      row.bid == null
-      || row.ask == null
-      || !(row.bid > 0)
-      || !(row.ask > row.bid)
-      || row.buy_slippage_pct == null
-      || row.sell_slippage_pct == null
-    ) return [];
-    const mid = (row.ask + row.bid) / 2;
-    return [((row.ask - row.bid) / mid * 100)
-      + row.buy_slippage_pct + row.sell_slippage_pct];
-  });
-  return evaluateNativeForwardGate({
-    netPcts: pnlRows.map((row) => row.net_pnl_pct),
-    signalCount: signalRows.length,
-    captureErrors: signalRows.filter((row) => row.capture_status === 'error').length,
-    executionCostPcts,
-    bookAgesMs: captured.flatMap((row) => row.book_age_ms == null ? [] : [row.book_age_ms]),
-    drawdownCapacityUnits,
-  });
+  return evaluateNativeForwardRows(pnlRows, signalRows, drawdownCapacityUnits);
 }
 
 function nativeForwardGate(strategyId: string): NativeForwardGateEvaluation {

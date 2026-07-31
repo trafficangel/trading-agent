@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   evaluateNativeForwardGate,
+  evaluateNativeForwardRows,
   estimatedFundingPnlPct,
   pricePnlPct,
   quoteNotionalVwap,
@@ -104,5 +105,23 @@ describe('Lighter LuxAlgo shadow math', () => {
     });
     expect(standalone.maxDrawdownPct).toBeCloseTo(8);
     expect(portfolio.maxDrawdownPct).toBeCloseTo(0.8);
+  });
+
+  it('uses the same captured L2 rows for runtime and independent promotion evidence', () => {
+    const pnlRows = Array.from({ length: 20 }, (_, index) => ({
+      net_pnl_pct: index % 4 === 0 ? -0.2 : 0.25,
+    }));
+    const signalRows = Array.from({ length: 40 }, () => ({
+      capture_status: 'captured',
+      book_age_ms: 100,
+      bid: 99.99,
+      ask: 100.01,
+      buy_slippage_pct: 0.005,
+      sell_slippage_pct: 0.005,
+    }));
+    const evaluation = evaluateNativeForwardRows(pnlRows, signalRows);
+    expect(evaluation.status).toBe('passed');
+    expect(evaluation.avgExecutionCostPct).toBeCloseTo(0.03, 6);
+    expect(evaluation.p95BookAgeMs).toBe(100);
   });
 });

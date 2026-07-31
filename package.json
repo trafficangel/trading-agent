@@ -30,6 +30,7 @@
     "lighter:microstructure": "tsx src/hft/lighter-microstructure-recorder.ts",
     "lighter:micro-audit": "tsx scripts/audit-lighter-microstructure.ts",
     "lighter:micro-sweep": "tsx scripts/sweep-lighter-microstructure.ts",
+    "lighter:promotion-audit": "tsx scripts/audit-lighter-native-promotion.ts",
     "wick:recovery": "tsx scripts/wick-fade-recovery.ts",
     "audit": "tsx scripts/audit-sl-distribution.ts",
     "backtest": "tsx scripts/backtest-custom.ts",

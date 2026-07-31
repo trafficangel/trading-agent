@@ -33,6 +33,16 @@ export type NativeForwardGateEvaluation = {
   reasons: readonly string[];
 };
 
+export type NativeForwardPnlRow = { net_pnl_pct: number };
+export type NativeForwardSignalRow = {
+  capture_status: string;
+  book_age_ms: number | null;
+  bid: number | null;
+  ask: number | null;
+  buy_slippage_pct: number | null;
+  sell_slippage_pct: number | null;
+};
+
 function sum(values: readonly number[]): number {
   return values.reduce((total, value) => total + value, 0);
 }
@@ -144,6 +154,40 @@ export function evaluateNativeForwardGate(
     p95BookAgeMs,
     reasons,
   };
+}
+
+/**
+ * Canonical DB-row adapter shared by the Shadow entry path and the independent
+ * Real-promotion audit. Keeping one implementation prevents a looser audit
+ * from disagreeing with the runtime gate.
+ */
+export function evaluateNativeForwardRows(
+  pnlRows: readonly NativeForwardPnlRow[],
+  signalRows: readonly NativeForwardSignalRow[],
+  drawdownCapacityUnits = 1,
+): NativeForwardGateEvaluation {
+  const captured = signalRows.filter((row) => row.capture_status === 'captured');
+  const executionCostPcts = captured.flatMap((row) => {
+    if (
+      row.bid == null
+      || row.ask == null
+      || !(row.bid > 0)
+      || !(row.ask > row.bid)
+      || row.buy_slippage_pct == null
+      || row.sell_slippage_pct == null
+    ) return [];
+    const mid = (row.ask + row.bid) / 2;
+    return [((row.ask - row.bid) / mid * 100)
+      + row.buy_slippage_pct + row.sell_slippage_pct];
+  });
+  return evaluateNativeForwardGate({
+    netPcts: pnlRows.map((row) => row.net_pnl_pct),
+    signalCount: signalRows.length,
+    captureErrors: signalRows.filter((row) => row.capture_status === 'error').length,
+    executionCostPcts,
+    bookAgesMs: captured.flatMap((row) => row.book_age_ms == null ? [] : [row.book_age_ms]),
+    drawdownCapacityUnits,
+  });
 }
 
 /** VWAP for a fixed quote-currency notional. Returns null if depth is short. */

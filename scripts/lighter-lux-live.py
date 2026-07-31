@@ -60,6 +60,10 @@ STRATEGIES = {
     "aave-cntr-strong": Strategy(27, "AAVEUSDT", "AAVE", 5.0),
 }
 
+NATIVE_SHADOW_GATED_STRATEGIES = frozenset(
+    {"sol-z60-reclaim", "bnb-z60-touch", "ltc-z60-touch"}
+)
+
 
 class LiveRunner:
     def __init__(self) -> None:
@@ -80,6 +84,13 @@ class LiveRunner:
             os.getenv("LIGHTER_LIVE_STRATEGY_GATE_SAMPLE", "20")
         )
         self.max_slippage = float(os.getenv("LIGHTER_LIVE_MAX_SLIPPAGE", "0.003"))
+        self.native_promotion_report = os.getenv(
+            "LIGHTER_NATIVE_PROMOTION_REPORT",
+            "/home/trader/apps/trading-agent/data/lighter-native-promotion-audit.json",
+        )
+        self.native_promotion_max_age_ms = int(
+            os.getenv("LIGHTER_NATIVE_PROMOTION_MAX_AGE_MS", str(2 * 60 * 60 * 1000))
+        )
         self.signal_batch_size = max(
             1,
             int(os.getenv("LIGHTER_LIVE_SIGNAL_BATCH_SIZE", "16")),
@@ -128,6 +139,29 @@ class LiveRunner:
             ),
             flush=True,
         )
+
+    def native_promotion_error(self, strategy_id: str) -> str | None:
+        """Fail closed for Native entries; exits never call this method."""
+        if strategy_id not in NATIVE_SHADOW_GATED_STRATEGIES:
+            return None
+        try:
+            with open(self.native_promotion_report, encoding="utf-8") as handle:
+                report = json.load(handle)
+            generated_raw = str(report["generatedAt"])
+            generated = datetime.fromisoformat(generated_raw.replace("Z", "+00:00"))
+            if generated.tzinfo is None:
+                generated = generated.replace(tzinfo=timezone.utc)
+            age_ms = int(time.time() * 1000 - generated.timestamp() * 1000)
+            if age_ms < -5 * 60 * 1000:
+                return "native promotion report timestamp is in the future"
+            if age_ms > self.native_promotion_max_age_ms:
+                return f"native promotion report stale: {age_ms // 60000}m"
+            eligible = report.get("eligibleStrategyIds")
+            if not isinstance(eligible, list) or strategy_id not in eligible:
+                return "native Shadow promotion gate not passed"
+            return None
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            return f"native promotion report unavailable: {type(exc).__name__}"
 
     def order_id(self) -> int:
         self.last_order_id = max(self.last_order_id + 1, int(time.time() * 1000))
@@ -739,6 +773,9 @@ class LiveRunner:
         self.refresh_strategy_stats()
         if not self.strategy_enabled(str(signal["strategy_id"])):
             return "strategy live-paused", None
+        promotion_error = self.native_promotion_error(str(signal["strategy_id"]))
+        if promotion_error is not None:
+            return promotion_error, None
         account = await self.account()
         if float(account["available_balance"]) < 20:
             return "balance below 20 USDC", None

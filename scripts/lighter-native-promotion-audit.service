@@ -1,0 +1,19 @@
+[Unit]
+Description=Native Quant Shadow to Real promotion audit
+After=trading-agent.service
+
+[Service]
+Type=oneshot
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/trading-agent
+ExecStart=/home/trader/apps/trading-agent/node_modules/.bin/tsx scripts/audit-lighter-native-promotion.ts --db data/trading.sqlite --output data/lighter-native-promotion-audit.json
+Nice=15
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/trading-agent/data
+MemoryMax=256M
+
