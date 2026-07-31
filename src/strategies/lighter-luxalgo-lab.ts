@@ -576,14 +576,14 @@ const STRATEGIES: readonly StrategySpec[] = [
     stopPct: 1.5,
     backtest: {
       // One fixed rule across all 15 markets. These are portfolio-level
-      // metrics after each market's measured p95 execution cost, adverse
-      // funding and a maximum of ten naturally concurrent $100 positions.
+      // metrics after each market's measured p95 execution cost, exact public
+      // hourly Lighter funding and at most ten concurrent $100 positions.
       period: '2026-02-01 → 2026-07-31',
-      trades: 758,
-      winRatePct: 70.1,
-      profitFactor: 1.45,
-      netPct: 122.80,
-      maxDrawdownPct: 2.45,
+      trades: 759,
+      winRatePct: 70.2,
+      profitFactor: 1.46,
+      netPct: 125.27,
+      maxDrawdownPct: 2.43,
     },
   })),
 ] as const;
@@ -2499,8 +2499,8 @@ function strategyRows(
   const assets = portfolioSpecs.map((spec) => spec.asset).join(' · ');
   const tooltip = t(
     lang,
-    `Одно фиксированное двухстороннее правило на 15 рынках без настройки по монете. Long: Z60 < −2.5 и close > EMA200 > EMA400; Short — зеркально. Выход у SMA60, stop 1.5% или через 20 часов. Издержки отбора и prospective Shadow используют один целевой размер $100: измеренный p95 полного круга; неблокирующий adverse-сценарий использует худший фактически наблюдавшийся полный круг. Повторяемый 180d-прогон: 758 сделок, PF 1.45, net +122.80%, observed-max +115.86% / PF 1.42, DD 2.45%, 4/4 периода, обе стороны и оба режима волатильности положительны. Отдельный перенос того же правила на шесть внешних рынков провалился: 5m net −16.25%, PF 0.89, OOS −4.24%. Новые рынки не добавлены; исходный P2 остаётся только prospective Shadow и не может получить Real по историческому бэктесту. 1m отвергнут.`,
-    `One fixed two-sided rule across 15 markets with no per-market tuning. Long: Z60 < −2.5 and close > EMA200 > EMA400; Short is the mirrored condition. Exit at SMA60, 1.5% stop, or after 20 hours. Selection costs and prospective Shadow use the same $100 target size: measured full-round-trip p95; the non-blocking adverse scenario uses the worst actually observed round trip. Reproducible 180d run: 758 trades, PF 1.45, net +122.80%, observed-max +115.86% / PF 1.42, 2.45% DD, 4/4 folds, both sides and both volatility regimes positive. A separate unchanged transfer to six external markets failed: 5m net −16.25%, PF 0.89, OOS −4.24%. No new market was added; the original P2 remains prospective Shadow-only and cannot reach Real from historical backtest evidence. The 1m transfer was rejected.`,
+    `Одно фиксированное двухстороннее правило на 15 рынках без настройки по монете. Long: Z60 < −2.5 и close > EMA200 > EMA400; Short — зеркально. Выход у SMA60, stop 1.5% или через 20 часов. Издержки отбора и prospective Shadow используют один целевой размер $100: измеренный p95 полного круга; funding берётся из фактических часовых расчётов Lighter для каждой сделки; неблокирующий adverse-сценарий использует худший фактически наблюдавшийся полный круг. Повторяемый 180d-прогон: 759 сделок, PF 1.46, net +125.27%, observed-max +118.32% / PF 1.43, DD 2.43%, 4/4 периода, обе стороны и оба режима волатильности положительны. Отдельный перенос того же правила на шесть внешних рынков провалился: 5m net −15.41%, PF 0.89, OOS −3.95%. Новые рынки не добавлены; исходный P2 остаётся только prospective Shadow и не может получить Real по историческому бэктесту. 1m отвергнут.`,
+    `One fixed two-sided rule across 15 markets with no per-market tuning. Long: Z60 < −2.5 and close > EMA200 > EMA400; Short is the mirrored condition. Exit at SMA60, 1.5% stop, or after 20 hours. Selection costs and prospective Shadow use the same $100 target size: measured full-round-trip p95; funding comes from each trade's actual hourly Lighter settlements; the non-blocking adverse scenario uses the worst actually observed round trip. Reproducible 180d run: 759 trades, PF 1.46, net +125.27%, observed-max +118.32% / PF 1.43, 2.43% DD, 4/4 folds, both sides and both volatility regimes positive. A separate unchanged transfer to six external markets failed: 5m net −15.41%, PF 0.89, OOS −3.95%. No new market was added; the original P2 remains prospective Shadow-only and cannot reach Real from historical backtest evidence. The 1m transfer was rejected.`,
   );
   return `${regularRows}<tr>
     <td><span class="ll-strategy-name" tabindex="0" title="${esc(tooltip)}" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>PORTFOLIO P2 · 15 markets</b><small> · Z60 Stack 2.5σ Touch</small><i>?</i></span><small>${assets}</small></td>

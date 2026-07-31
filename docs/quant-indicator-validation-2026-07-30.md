@@ -644,13 +644,24 @@ recorded L2 dataset passes its frozen 21-day quality gate, its longer-window
 tail estimate supersedes the short discovery samples; until then no new
 candidate can use that dataset for promotion.
 
-The unchanged P2 rule was rerun immediately after the policy correction. Its
-blocking p95 result remains qualified: 758 trades, net `+122.80%`, PF `1.45`,
-4/4 folds, Long/Short `+82.70 / +40.10`, high/low-volatility regimes
-`+67.10 / +55.71`, maximum capacity drawdown `−2.45%`, and all six months
-positive. Replacing `1.5 × p95` with each market's observed maximum produced
-`+115.86%` and PF `1.42`; this is reported as sensitivity evidence and does not
-alter the prospective Shadow gate.
+The last arbitrary funding deduction was then removed as well. The public
+Lighter `/api/v1/fundings` history is fetched in sub-750-row chunks, checked for
+at least 99% internal hourly coverage and required to span every tested candle.
+Each backtest trade receives the exact signed settlements in `(entry, exit]`;
+the payer side comes from the historical `direction` field. Missing or stale
+funding now fails a qualifying run closed. The old `0.00125%/h` assumption is
+available only behind an explicit exploratory flag and cannot qualify a
+strategy.
+
+The unchanged P2 rule was rerun after both corrections. Its blocking p95
+result remains qualified: 759 trades, net `+125.27%`, PF `1.46`, 4/4 folds,
+Long/Short `+83.14 / +42.14`, high/low-volatility regimes
+`+67.85 / +57.43`, maximum capacity drawdown `−2.43%`, and all six months
+positive. Exact funding contributed `−0.1412%` across all 759 trades. Replacing
+p95 with each market's observed maximum produced `+118.32%` and PF `1.43`;
+this remains non-blocking sensitivity evidence and does not alter the
+prospective Shadow gate. The reproducible structured output is frozen in
+`data/lighter-p2-portfolio-results.json`.
 
 Native execution capacity is now cohort-consistent end to end. Selection,
 prospective Shadow, promotion evidence and the future isolated Real canary all
@@ -799,10 +810,11 @@ LINK, PUMP, UNI and XRP. No threshold, stop, holding period or exit was
 altered. Each market used a fresh 40-snapshot `$100` executable p95 and
 worst-observed cost sample.
 
-Transfer failed at both timeframes. The 1m holdout produced 1,388 trades,
-`-46.04%`, PF `0.85`, L95 `-0.0595%`, negative Long/Short books and only 1/4
-positive folds. The 5m holdout produced 297 trades, `-16.25%`, PF `0.89`,
-L95 `-0.1594%`, OOS `-4.24%`, negative Long/Short books and 2/4 folds. The
+Transfer failed at both timeframes after replacing assumed funding with exact
+hourly settlements. The 1m holdout produced 1,388 trades, `-45.00%`, PF
+`0.85`, L95 `-0.0587%`, negative Long/Short books and only 1/4 positive folds.
+The 5m holdout produced 297 trades, `-15.41%`, PF `0.89`, L95 `-0.1566%`, OOS
+`-3.95%`, negative Long/Short books and 2/4 folds. The
 latest 30/60-day 5m windows were positive, but the 90-day window remained
 negative and no individual market passed the full frozen gate.
 

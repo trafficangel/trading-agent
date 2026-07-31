@@ -13,9 +13,16 @@
  *     pnpm tsx scripts/sweep-lighter-native-1m.ts
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { atr, ema, rollingStd, rsi, sma, type Candle } from '../src/backtest/indicators.js';
+import {
+  buildLighterFundingSeries,
+  fundingSeriesCoverage,
+  lighterFundingPnlPct,
+  type LighterFundingPoint,
+  type LighterFundingSeries,
+} from '../src/lib/lighter-funding-history.js';
 
 const SYMBOLS = (process.env.SYMBOLS ?? 'BTC,ETH,SOL')
   .split(',')
@@ -31,7 +38,14 @@ const FALLBACK_EXECUTION_COST_PCT = Number(
   process.env.FALLBACK_EXECUTION_COST_PCT ?? 0.02,
 );
 const ALLOW_FALLBACK_EXECUTION_COST = process.env.ALLOW_FALLBACK_EXECUTION_COST === '1';
-const FUNDING_PER_HOUR_PCT = Number(process.env.FUNDING_PER_HOUR_PCT ?? 0.00125);
+const FALLBACK_FUNDING_PER_HOUR_PCT = Number(
+  process.env.FALLBACK_FUNDING_PER_HOUR_PCT ?? 0.00125,
+);
+const ALLOW_FALLBACK_FUNDING = process.env.ALLOW_FALLBACK_FUNDING === '1';
+const FUNDING_HISTORY_FILE = resolve(
+  process.env.FUNDING_HISTORY_FILE ?? 'data/lighter-funding-history-native.json',
+);
+const OUTPUT_JSON = process.env.OUTPUT_JSON ? resolve(process.env.OUTPUT_JSON) : null;
 const BAR_MINUTES = Number(process.env.BAR_MINUTES ?? 1);
 const Z_PERIODS = (process.env.Z_PERIODS ?? '20,60').split(',').map(Number);
 const Z_THRESHOLDS = (process.env.Z_THRESHOLDS ?? '1.5,2,2.5,3').split(',').map(Number);
@@ -124,7 +138,14 @@ type Rule = {
 };
 type TrendRegime = 'bull' | 'bear' | 'mixed';
 type VolatilityRegime = 'highVol' | 'lowVol';
-type Trade = { side: Side; entryAt: number; exitAt: number; entryIdx: number; pct: number };
+type Trade = {
+  side: Side;
+  entryAt: number;
+  exitAt: number;
+  entryIdx: number;
+  pct: number;
+  fundingPct?: number;
+};
 type PortfolioTrade = Trade & {
   symbol: string;
   costPct: number;
@@ -152,6 +173,7 @@ type ExecutionCostFile = {
 
 type ExecutionCost = { p95Pct: number; adversePct: number };
 const executionCostBySymbol = new Map<string, ExecutionCost>();
+let usedFallbackExecutionCost = false;
 for (const file of EXECUTION_COST_FILES) {
   const parsed = JSON.parse(readFileSync(resolve(file), 'utf8')) as ExecutionCostFile;
   // VWAP/slippage is not portable across order sizes. Never qualify a
@@ -175,13 +197,85 @@ for (const file of EXECUTION_COST_FILES) {
   }
 }
 
+type FundingHistoryFile = {
+  symbols?: Record<string, {
+    fundings?: LighterFundingPoint[];
+  }>;
+};
+const fundingBySymbol = new Map<string, LighterFundingSeries>();
+let usedFallbackFunding = false;
+const fundingCoverageBySymbol = new Map<string, {
+  points: number;
+  internalCoverage: number;
+  firstTimestampMs: number | null;
+  lastTimestampMs: number | null;
+}>();
+if (existsSync(FUNDING_HISTORY_FILE)) {
+  const parsed = JSON.parse(readFileSync(FUNDING_HISTORY_FILE, 'utf8')) as FundingHistoryFile;
+  for (const [symbol, value] of Object.entries(parsed.symbols ?? {})) {
+    fundingBySymbol.set(
+      symbol.toUpperCase(),
+      buildLighterFundingSeries(value.fundings ?? []),
+    );
+  }
+}
+
+function fundingSeries(symbol: string, candles: readonly Candle[]): LighterFundingSeries | null {
+  const series = fundingBySymbol.get(symbol.toUpperCase());
+  const firstCandle = candles[0]?.t ?? 0;
+  const lastCandle = candles.at(-1)?.t ?? 0;
+  if (series != null) {
+    const coverage = fundingSeriesCoverage(series, firstCandle, lastCandle);
+    fundingCoverageBySymbol.set(symbol.toUpperCase(), {
+      points: coverage.points,
+      internalCoverage: coverage.internalCoverage,
+      firstTimestampMs: coverage.firstTimestampMs,
+      lastTimestampMs: coverage.lastTimestampMs,
+    });
+    if (coverage.covered) return series;
+    if (!ALLOW_FALLBACK_FUNDING) {
+      throw new Error(
+        `${symbol}: funding history coverage ${(coverage.internalCoverage * 100).toFixed(2)}% `
+        + `does not span ${new Date(firstCandle).toISOString()}..${new Date(lastCandle).toISOString()}`,
+      );
+    }
+  }
+  if (ALLOW_FALLBACK_FUNDING) {
+    usedFallbackFunding = true;
+    return null;
+  }
+  throw new Error(
+    `${symbol}: measured hourly funding history missing. Fetch it first or explicitly set `
+    + 'ALLOW_FALLBACK_FUNDING=1 for a non-qualifying exploratory run.',
+  );
+}
+
+function tradeFundingPct(
+  series: LighterFundingSeries | null,
+  trade: Trade,
+): number {
+  if (series != null) {
+    return lighterFundingPnlPct(
+      series,
+      trade.side,
+      trade.entryAt,
+      trade.exitAt,
+    );
+  }
+  const holdHours = Math.max(0, trade.exitAt - trade.entryAt) / 3_600_000;
+  return -holdHours * FALLBACK_FUNDING_PER_HOUR_PCT;
+}
+
 function executionCost(symbol: string): ExecutionCost {
   const measured = executionCostBySymbol.get(symbol.toUpperCase());
   if (measured != null) return measured;
-  if (ALLOW_FALLBACK_EXECUTION_COST) return {
-    p95Pct: FALLBACK_EXECUTION_COST_PCT,
-    adversePct: FALLBACK_EXECUTION_COST_PCT,
-  };
+  if (ALLOW_FALLBACK_EXECUTION_COST) {
+    usedFallbackExecutionCost = true;
+    return {
+      p95Pct: FALLBACK_EXECUTION_COST_PCT,
+      adversePct: FALLBACK_EXECUTION_COST_PCT,
+    };
+  }
   throw new Error(
     `No measured executable p95 cost for ${symbol}. Sample its L2 first or explicitly set `
     + 'ALLOW_FALLBACK_EXECUTION_COST=1 for a non-qualifying exploratory run.',
@@ -1125,20 +1219,20 @@ function simulate(rule: Rule, a: Arrays): Trade[] {
   return trades;
 }
 
-function tradeNet(trade: Trade, stress = 0): number {
-  const holdHours = Math.max(0, trade.exitAt - trade.entryAt) / 3_600_000;
-  return trade.pct - stress - (stress > 0 ? holdHours * FUNDING_PER_HOUR_PCT : 0);
+function tradeNet(trade: Trade, executionCostPct?: number): number {
+  if (executionCostPct == null) return trade.pct;
+  return trade.pct - executionCostPct + (trade.fundingPct ?? 0);
 }
 
-function sum(trades: Trade[], stress = 0): number {
-  return trades.reduce((acc, trade) => acc + tradeNet(trade, stress), 0);
+function sum(trades: Trade[], executionCostPct?: number): number {
+  return trades.reduce((acc, trade) => acc + tradeNet(trade, executionCostPct), 0);
 }
 
-function pf(trades: Trade[], stress = 0): number {
+function pf(trades: Trade[], executionCostPct?: number): number {
   let gains = 0;
   let losses = 0;
   for (const trade of trades) {
-    const pnl = tradeNet(trade, stress);
+    const pnl = tradeNet(trade, executionCostPct);
     if (pnl >= 0) gains += pnl;
     else losses -= pnl;
   }
@@ -1278,9 +1372,13 @@ for (const [symbol, arrays] of loaded) {
   const measuredCost = executionCost(symbol);
   const costPct = measuredCost.p95Pct;
   const adverseCostPct = measuredCost.adversePct;
+  const measuredFunding = fundingSeries(symbol, arrays.c);
   for (const rule of rules()) {
     if (RULE_FILTER && !rule.name.includes(RULE_FILTER)) continue;
-    const trades = simulate(rule, arrays);
+    const trades = simulate(rule, arrays).map((trade) => ({
+      ...trade,
+      fundingPct: tradeFundingPct(measuredFunding, trade),
+    }));
     if (coverageDays >= PORTFOLIO_MIN_COVERAGE_DAYS) {
       const group = portfolioGroups.get(rule.name) ?? [];
       group.push(...trades.map((trade) => ({
@@ -1318,8 +1416,11 @@ for (const [symbol, arrays] of loaded) {
 }
 
 const requiredCoverageDays = Math.max(0, ...RECENT_WINDOWS_DAYS);
+const qualificationInputsMeasured =
+  !usedFallbackExecutionCost && !usedFallbackFunding;
 const qualified = rows
-  .filter((row) => row.trades.length >= 30
+  .filter((row) => qualificationInputsMeasured
+    && row.trades.length >= 30
     && row.coverageDays >= requiredCoverageDays * 0.95
     && row.stress > 0
     && row.meanL95 > 0
@@ -1574,7 +1675,8 @@ const portfolioRows: PortfolioRow[] = [...portfolioGroups.entries()].map(
 ).filter((row) => row.trades.length >= 30);
 
 const portfolioQualified = portfolioRows.filter((row) =>
-  row.trades.length >= 120
+  qualificationInputsMeasured
+  && row.trades.length >= 120
   && row.net > 0
   && row.profitFactor >= 1.2
   && row.robustNet > 0
@@ -1653,7 +1755,10 @@ const printPortfolio = (row: PortfolioRow): string =>
 const costLabel = executionCostBySymbol.size
   ? `${executionCostBySymbol.size} market-specific p95 costs`
   : `${FALLBACK_EXECUTION_COST_PCT}% explicitly enabled fallback cost`;
-console.log(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${costLabel} · adverse measured max (non-blocking) · ${FUNDING_PER_HOUR_PCT}%/h adverse funding · max DD ${MAX_BACKTEST_DD_PCT}%`);
+const fundingLabel = fundingBySymbol.size
+  ? `${fundingBySymbol.size} market-specific hourly funding histories`
+  : `${FALLBACK_FUNDING_PER_HOUR_PCT}%/h explicitly enabled fallback funding`;
+console.log(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${costLabel} · adverse measured max (non-blocking) · ${fundingLabel} · max DD ${MAX_BACKTEST_DD_PCT}%`);
 console.log(`\nQUALIFIED (${qualified.length})`);
 console.log(qualified.length ? qualified.slice(0, 30).map(print).join('\n') : '— none —');
 console.log('\nTOP 30 (including failures)');
@@ -1664,3 +1769,50 @@ console.log(portfolioQualified.length
   : '— none —');
 console.log('\nPORTFOLIO TOP 20 (including failures)');
 console.log(portfolioBest.slice(0, 20).map(printPortfolio).join('\n'));
+
+if (OUTPUT_JSON) {
+  const compactRows = rows.map(({ trades, ...row }) => ({
+    ...row,
+    trades: trades.length,
+    grossPct: row.baseline,
+    netPct: row.stress,
+    adverseNetPct: row.robustStress,
+    fundingPct: trades.reduce((total, trade) => total + (trade.fundingPct ?? 0), 0),
+    maxDrawdownPct: drawdown(trades, row.costPct),
+  }));
+  const compactPortfolioRows = portfolioRows.map(({ trades, ...row }) => ({
+    ...row,
+    trades: trades.length,
+    fundingPct: trades.reduce((total, trade) => total + (trade.fundingPct ?? 0), 0),
+  }));
+  const report = {
+    version: 'lighter-native-sweep-v2',
+    generatedAt: new Date().toISOString(),
+    input: {
+      symbols: [...loaded.keys()],
+      barMinutes: BAR_MINUTES,
+      lookbackDays: LOOKBACK_DAYS || null,
+      ruleFilter: RULE_FILTER || null,
+      positionNotionalUsd: PORTFOLIO_POSITION_NOTIONAL_USD,
+      portfolioMaxOpen: PORTFOLIO_MAX_OPEN,
+      executionCosts: 'market-specific executable $100 full-round-trip p95',
+      adverseExecution: 'market-specific observed maximum; non-blocking sensitivity',
+      funding: 'exact Lighter hourly settlements in (entry, exit]',
+      fundingHistoryFile:
+        process.env.FUNDING_HISTORY_FILE ?? 'data/lighter-funding-history-native.json',
+      fundingCoverage: Object.fromEntries(fundingCoverageBySymbol),
+      qualificationInputsMeasured,
+      usedFallbackExecutionCost,
+      usedFallbackFunding,
+    },
+    qualified: qualified.map((row) => `${row.symbol}:${row.rule}`),
+    rows: compactRows,
+    portfolioQualified: portfolioQualified.map((row) => row.rule),
+    portfolioRows: compactPortfolioRows,
+  };
+  mkdirSync(dirname(OUTPUT_JSON), { recursive: true });
+  const temporary = `${OUTPUT_JSON}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(report, null, 2)}\n`);
+  renameSync(temporary, OUTPUT_JSON);
+  console.log(`\nJSON → ${OUTPUT_JSON}`);
+}
