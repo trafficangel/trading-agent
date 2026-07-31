@@ -1,0 +1,19 @@
+[Unit]
+Description=Audit Lighter native microstructure data readiness
+After=lighter-native-microstructure.service
+
+[Service]
+Type=oneshot
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/trading-agent
+ExecStart=/home/trader/apps/trading-agent/node_modules/.bin/tsx scripts/audit-lighter-microstructure.ts --db data/lighter-native-microstructure.sqlite --days 60 --output data/lighter-native-microstructure-audit.json
+Nice=15
+IOSchedulingClass=idle
+MemoryMax=256M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/trading-agent/data
+StandardOutput=null

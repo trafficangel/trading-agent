@@ -1,7 +1,7 @@
 /** Read-only readiness audit for the prospective Lighter microstructure dataset. */
 
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 
 const MINUTE_MS = 60_000;
@@ -201,4 +201,13 @@ const report = {
   perMarket,
 };
 
-console.log(JSON.stringify(report, null, 2));
+const serialized = JSON.stringify(report, null, 2);
+const outputPath = flagValue('--output');
+if (outputPath) {
+  const absoluteOutputPath = resolve(outputPath);
+  mkdirSync(dirname(absoluteOutputPath), { recursive: true });
+  const temporaryPath = `${absoluteOutputPath}.tmp`;
+  writeFileSync(temporaryPath, serialized);
+  renameSync(temporaryPath, absoluteOutputPath);
+}
+console.log(serialized);
