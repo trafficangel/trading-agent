@@ -742,6 +742,11 @@ prevent Real promotion, but no longer keep a recovered Shadow feed disabled.
 Real remains manual and is never enabled by the audit itself.
 
 The isolated `$100` Real-canary has a second, independent fail-closed layer.
+The Python executor verifies the promotion report version, `$100` notional,
+every frozen threshold, freshness, explicit strategy evidence and the manual
+canary-review decision. A schema or threshold change therefore blocks new
+Native Real entries until it is independently reviewed in the executor; an ID
+appearing in `eligibleStrategyIds` alone is not sufficient.
 Each strategy is permanently paused for manual review as soon as its observed
 maximum Real drawdown reaches `$5`, even before ten closes. Starting at ten
 closes, cumulative net/PF, the chronological second half and the most recent

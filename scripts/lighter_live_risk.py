@@ -3,7 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Sequence
+
+
+NATIVE_PROMOTION_REPORT_VERSION = "lighter-native-promotion-audit-v2"
+NATIVE_PROMOTION_NOTIONAL_USD = 100.0
+NATIVE_PROMOTION_GATE = {
+    "targetClosed": 20.0,
+    "minDurationDays": 7.0,
+    "minClosedPerSide": 3.0,
+    "minProfitFactor": 1.2,
+    "maxDrawdownPct": 5.0,
+    "maxCaptureErrorRatePct": 2.0,
+    "maxP95BookAgeMs": 2_000.0,
+    "recentDecayMinClosed": 40.0,
+    "recentClosedWindow": 20.0,
+    "minRecentSignalsForHealth": 20.0,
+    "recentSignalWindow": 100.0,
+}
 
 
 @dataclass(frozen=True)
@@ -36,6 +54,99 @@ class StrategyRiskDecision:
     passed: bool
     gate_status: str
     reason: str | None
+
+
+def native_promotion_report_error(
+    report: object,
+    strategy_id: str,
+    now_ms: int,
+    max_age_ms: int,
+) -> str | None:
+    """Validate the complete frozen Shadow -> Real contract fail-closed.
+
+    The executor deliberately carries its own reviewed copy of the gate. If
+    the TypeScript audit schema or any qualifying threshold changes, Native
+    entries stop until the new contract is explicitly reviewed here. Exits do
+    not call this function.
+    """
+    if not isinstance(report, dict):
+        return "native promotion report is not an object"
+    if report.get("version") != NATIVE_PROMOTION_REPORT_VERSION:
+        return "native promotion report version mismatch"
+    if report.get("autoPromotion") is not False:
+        return "native promotion report autoPromotion invariant failed"
+    try:
+        notional = float(report.get("shadowNotionalUsd"))
+    except (TypeError, ValueError):
+        return "native promotion report notional missing"
+    if notional != NATIVE_PROMOTION_NOTIONAL_USD:
+        return f"native promotion report notional {notional:g} != 100"
+
+    gate = report.get("gate")
+    if not isinstance(gate, dict):
+        return "native promotion report gate missing"
+    for key, expected in NATIVE_PROMOTION_GATE.items():
+        try:
+            actual = float(gate.get(key))
+        except (TypeError, ValueError):
+            return f"native promotion gate {key} missing"
+        if actual != expected:
+            return (
+                f"native promotion gate {key} changed: "
+                f"{actual:g} != {expected:g}"
+            )
+
+    generated_raw = report.get("generatedAt")
+    if not isinstance(generated_raw, str):
+        return "native promotion report timestamp missing"
+    try:
+        generated = datetime.fromisoformat(generated_raw.replace("Z", "+00:00"))
+    except ValueError:
+        return "native promotion report timestamp invalid"
+    if generated.tzinfo is None:
+        generated = generated.replace(tzinfo=timezone.utc)
+    age_ms = int(now_ms - generated.timestamp() * 1000)
+    if age_ms < -5 * 60 * 1000:
+        return "native promotion report timestamp is in the future"
+    if age_ms > max_age_ms:
+        return f"native promotion report stale: {age_ms // 60000}m"
+
+    eligible = report.get("eligibleStrategyIds")
+    if not isinstance(eligible, list) or any(
+        not isinstance(value, str) for value in eligible
+    ):
+        return "native promotion eligibleStrategyIds invalid"
+    if strategy_id not in eligible:
+        return "native Shadow promotion gate not passed"
+
+    strategies = report.get("strategies")
+    if not isinstance(strategies, list):
+        return "native promotion strategies missing"
+    matching = [
+        row
+        for row in strategies
+        if isinstance(row, dict) and row.get("strategyId") == strategy_id
+    ]
+    if len(matching) != 1:
+        return "native promotion strategy evidence missing or duplicated"
+    row = matching[0]
+    evaluation = row.get("evaluation")
+    decision = row.get("decision")
+    if row.get("realExecutorRegistered") is not True:
+        return "native promotion strategy is not executor-registered"
+    if not isinstance(evaluation, dict):
+        return "native promotion strategy evaluation missing"
+    if evaluation.get("status") != "passed" or evaluation.get("entryAllowed") is not True:
+        return "native promotion strategy evaluation not passed"
+    if not isinstance(decision, dict):
+        return "native promotion strategy decision missing"
+    if (
+        decision.get("shadowAction") != "continue"
+        or decision.get("realAction") != "manual_canary_review"
+        or decision.get("manualReviewRequired") is not True
+    ):
+        return "native promotion strategy decision is not manual canary review"
+    return None
 
 
 def pnl_stats(values: Sequence[float]) -> PnlStats:

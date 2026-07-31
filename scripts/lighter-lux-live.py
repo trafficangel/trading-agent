@@ -26,6 +26,7 @@ import lighter
 from lighter_live_risk import (
     StrategyRiskPolicy,
     evaluate_strategy_risk,
+    native_promotion_report_error,
     pnl_stats,
 )
 
@@ -159,20 +160,13 @@ class LiveRunner:
         try:
             with open(self.native_promotion_report, encoding="utf-8") as handle:
                 report = json.load(handle)
-            generated_raw = str(report["generatedAt"])
-            generated = datetime.fromisoformat(generated_raw.replace("Z", "+00:00"))
-            if generated.tzinfo is None:
-                generated = generated.replace(tzinfo=timezone.utc)
-            age_ms = int(time.time() * 1000 - generated.timestamp() * 1000)
-            if age_ms < -5 * 60 * 1000:
-                return "native promotion report timestamp is in the future"
-            if age_ms > self.native_promotion_max_age_ms:
-                return f"native promotion report stale: {age_ms // 60000}m"
-            eligible = report.get("eligibleStrategyIds")
-            if not isinstance(eligible, list) or strategy_id not in eligible:
-                return "native Shadow promotion gate not passed"
-            return None
-        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            return native_promotion_report_error(
+                report,
+                strategy_id,
+                int(time.time() * 1000),
+                self.native_promotion_max_age_ms,
+            )
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
             return f"native promotion report unavailable: {type(exc).__name__}"
 
     def order_id(self) -> int:
