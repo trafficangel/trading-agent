@@ -7,7 +7,9 @@
  * pairs the two residual extremes when dispersion is at least 0.80%.
  * `reversion` buys the laggard and sells the leader. Its independently
  * preregistered `momentum` sibling does the exact reverse without changing
- * any lookback, threshold, holding period, cost, or qualification gate.
+ * any lookback, threshold, holding period, cost, or qualification gate. The
+ * separate `catchup` family trades only after a two-sigma 15-minute BTC shock:
+ * it pairs BTC against the single beta-adjusted alt laggard for 30 minutes.
  * Entry is the next bar open and exit is exactly one hour later.
  *
  * Qualification is intentionally fail-closed and uses the same $100 market-
@@ -29,22 +31,26 @@ const FACTOR = 'BTC';
 const BAR_MS = 60_000;
 const DAY_MS = 86_400_000;
 const BETA_DAYS = 7;
-const SIGNAL_MINUTES = 60;
-const HOLD_MINUTES = 60;
-const DECISION_MINUTES = 15;
+const familyInput = process.env.XS_RESIDUAL_FAMILY ?? 'reversion';
+type Family = 'reversion' | 'momentum' | 'catchup';
+if (!['reversion', 'momentum', 'catchup'].includes(familyInput)) {
+  throw new Error(`XS_RESIDUAL_FAMILY must be reversion, momentum or catchup, got ${familyInput}`);
+}
+const FAMILY = familyInput as Family;
+const SIGNAL_MINUTES = FAMILY === 'catchup' ? 15 : 60;
+const HOLD_MINUTES = FAMILY === 'catchup' ? 30 : 60;
+const DECISION_MINUTES = FAMILY === 'catchup' ? 5 : 15;
 const MIN_DISPERSION_PCT = 0.8;
+const CATCHUP_FACTOR_Z = 2;
+const CATCHUP_RESIDUAL_Z = 1;
 const FUNDING_PER_HOUR_PCT = 0.00125;
 const MAX_DRAWDOWN_PCT = 5;
 const POSITION_NOTIONAL_USD = 100;
-type Family = 'reversion' | 'momentum';
-const familyInput = process.env.XS_RESIDUAL_FAMILY ?? 'reversion';
-if (familyInput !== 'reversion' && familyInput !== 'momentum') {
-  throw new Error(`XS_RESIDUAL_FAMILY must be reversion or momentum, got ${familyInput}`);
-}
-const FAMILY: Family = familyInput;
 const RESULT_PATH = resolve(FAMILY === 'reversion'
   ? 'data/lighter-xs-residual-results.json'
-  : 'data/lighter-xs-momentum-results.json');
+  : FAMILY === 'momentum'
+    ? 'data/lighter-xs-momentum-results.json'
+    : 'data/lighter-btc-shock-catchup-results.json');
 const COST_PATH = resolve('data/lighter-execution-costs-native-portfolio-100-20260731.json');
 
 type Asset = typeof ASSETS[number];
@@ -171,9 +177,10 @@ function rollingFactorStats(
   factor: number[],
   asset: number[],
   window: number,
-): { beta: number[]; correlation: number[] } {
+): { beta: number[]; correlation: number[]; residualVariance: number[] } {
   const beta = Array(factor.length).fill(Number.NaN) as number[];
   const correlation = Array(factor.length).fill(Number.NaN) as number[];
+  const residualVariance = Array(factor.length).fill(Number.NaN) as number[];
   let sx = 0;
   let sy = 0;
   let sxx = 0;
@@ -203,8 +210,12 @@ function rollingFactorStats(
     if (!(varianceX > 0) || !(varianceY > 0)) continue;
     beta[i] = covariance / varianceX;
     correlation[i] = covariance / Math.sqrt(varianceX * varianceY);
+    residualVariance[i] = Math.max(
+      0,
+      (varianceY + beta[i]! * beta[i]! * varianceX - 2 * beta[i]! * covariance) / window,
+    );
   }
-  return { beta, correlation };
+  return { beta, correlation, residualVariance };
 }
 
 function rollingVariance(values: number[], window: number): number[] {
@@ -255,6 +266,7 @@ function simulate(
   }
   const shortVol = rollingVariance(factor.c, profile.signalBars);
   const longVol = rollingVariance(factor.c, 24 * 60 / profile.timeframeMinutes);
+  const factorVariance = rollingVariance(factor.c, profile.betaBars);
   const trades: Trade[] = [];
   let nextAvailable = profile.betaBars;
   for (
@@ -268,20 +280,57 @@ function simulate(
     );
     const ranked = ASSETS.flatMap((asset) => {
       if (asset === FACTOR) return [];
-      const beta = stats.get(asset)!.beta[signalIndex]!;
-      const correlation = stats.get(asset)!.correlation[signalIndex]!;
+      const assetStats = stats.get(asset)!;
+      const beta = assetStats.beta[signalIndex]!;
+      const correlation = assetStats.correlation[signalIndex]!;
       if (!(beta >= 0.2 && beta <= 2.5 && correlation >= 0.4)) return [];
       const prices = data.get(asset)!;
       const move = Math.log(prices.c[signalIndex]! / prices.c[signalIndex - profile.signalBars]!);
-      return [{ asset, beta, residualPct: (move - beta * factorMove) * 100 }];
+      const residual = move - beta * factorMove;
+      const residualSigma = Math.sqrt(
+        assetStats.residualVariance[signalIndex]! * profile.signalBars,
+      );
+      return [{
+        asset,
+        beta,
+        residualPct: residual * 100,
+        residualZ: residualSigma > 0 ? residual / residualSigma : Number.NaN,
+      }];
     }).sort((a, b) => a.residualPct - b.residualPct);
-    const laggard = ranked[0];
-    const leader = ranked.at(-1);
-    if (!laggard || !leader || laggard.asset === leader.asset) continue;
-    const dispersionPct = leader.residualPct - laggard.residualPct;
-    if (dispersionPct < MIN_DISPERSION_PCT) continue;
-    const longCandidate = FAMILY === 'reversion' ? laggard : leader;
-    const shortCandidate = FAMILY === 'reversion' ? leader : laggard;
+    let longCandidate: { asset: Asset; beta: number };
+    let shortCandidate: { asset: Asset; beta: number };
+    let dispersionPct: number;
+    if (FAMILY === 'catchup') {
+      const factorSigma = Math.sqrt(factorVariance[signalIndex]! * profile.signalBars);
+      if (!(factorSigma > 0) || Math.abs(factorMove) < CATCHUP_FACTOR_Z * factorSigma) continue;
+      const direction = Math.sign(factorMove);
+      const laggard = ranked
+        .filter((candidate) => Number.isFinite(candidate.residualZ))
+        .map((candidate) => ({
+          ...candidate,
+          lagScore: -direction * candidate.residualZ,
+        }))
+        .filter((candidate) => candidate.lagScore >= CATCHUP_RESIDUAL_Z)
+        .sort((a, b) => b.lagScore - a.lagScore)[0];
+      if (!laggard) continue;
+      const btc = { asset: FACTOR as Asset, beta: 1 };
+      if (factorMove > 0) {
+        longCandidate = laggard;
+        shortCandidate = btc;
+      } else {
+        longCandidate = btc;
+        shortCandidate = laggard;
+      }
+      dispersionPct = Math.abs(laggard.residualPct);
+    } else {
+      const laggard = ranked[0];
+      const leader = ranked.at(-1);
+      if (!laggard || !leader || laggard.asset === leader.asset) continue;
+      dispersionPct = leader.residualPct - laggard.residualPct;
+      if (dispersionPct < MIN_DISPERSION_PCT) continue;
+      longCandidate = FAMILY === 'reversion' ? laggard : leader;
+      shortCandidate = FAMILY === 'reversion' ? leader : laggard;
+    }
     const hedge = longCandidate.beta / shortCandidate.beta;
     const longWeight = 1 / (1 + hedge);
     const shortWeight = hedge / (1 + hedge);
@@ -486,13 +535,24 @@ function main(): void {
     const trades = simulate(profile, data, costs);
     return profileReport(profile, trades);
   });
+  const qualifiedTimeframes = results
+    .filter((result) => result.pass)
+    .map((result) => result.profile.timeframeMinutes);
   const report = {
     version: FAMILY === 'reversion'
       ? 'lighter-xs-residual-v1'
-      : 'lighter-xs-momentum-v1',
+      : FAMILY === 'momentum'
+        ? 'lighter-xs-momentum-v1'
+        : 'lighter-btc-shock-catchup-v1',
     generatedAt: new Date().toISOString(),
     preregistered: true,
     canTrade: false,
+    decision: qualifiedTimeframes.length
+      ? 'research_pass_requires_separate_prospective_registration'
+      : 'reject_without_retuning',
+    reason: qualifiedTimeframes.length
+      ? 'At least one frozen timeframe passed; this report still cannot register or trade it.'
+      : 'No frozen timeframe passed the net, PF, adverse-cost, confidence, drawdown, chronological, regime and breadth gates.',
     hypothesis: {
       factor: FACTOR,
       assets: ASSETS,
@@ -500,11 +560,15 @@ function main(): void {
       signalMinutes: SIGNAL_MINUTES,
       holdMinutes: HOLD_MINUTES,
       decisionMinutes: DECISION_MINUTES,
-      minDispersionPct: MIN_DISPERSION_PCT,
+      minDispersionPct: FAMILY === 'catchup' ? null : MIN_DISPERSION_PCT,
+      factorShockZ: FAMILY === 'catchup' ? CATCHUP_FACTOR_Z : null,
+      residualLagZ: FAMILY === 'catchup' ? CATCHUP_RESIDUAL_Z : null,
       family: FAMILY,
       direction: FAMILY === 'reversion'
         ? 'long residual laggard / short residual leader'
-        : 'long residual leader / short residual laggard',
+        : FAMILY === 'momentum'
+          ? 'long residual leader / short residual laggard'
+          : 'after a BTC shock, trade the beta-adjusted laggard toward BTC and hedge with BTC',
       nextBarOpen: true,
       noOverlap: true,
     },
@@ -532,7 +596,12 @@ function main(): void {
       breadthAndLeaveOneOut: true,
     },
     results,
-    qualifiedTimeframes: results.filter((result) => result.pass).map((result) => result.profile.timeframeMinutes),
+    qualifiedTimeframes,
+    deployment: {
+      shadow: false,
+      real: false,
+      website: false,
+    },
   };
   writeFileSync(RESULT_PATH, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`Cross-sectional residual ${FAMILY} · frozen parameters · report ${RESULT_PATH}`);

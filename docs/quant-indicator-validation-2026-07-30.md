@@ -680,6 +680,26 @@ rule, without opening a duplicate position or using the historical selection
 sample as if it were new OOS evidence. Frozen evidence lives in
 `data/lighter-er60-results.json`.
 
+### BTC-shock alt catch-up: rejected
+
+An independent two-leg lead/lag hypothesis was preregistered before its first
+run. After a two-standard-deviation 15-minute BTC shock, the model selected
+the single most delayed beta-adjusted alt (`residual z <= -1` in the shock
+direction), traded that alt toward BTC, hedged with BTC, entered at the next
+bar open and exited after 30 minutes. The same rule was tested at 1m and 5m
+over all 15 markets with a seven-day causal beta, no overlapping pair,
+market-specific `$100` p95 execution costs and adverse funding.
+
+Neither timeframe passed. The 1m path produced 618 pairs, `-3.78%`, PF `0.94`
+and `-9.27%` under adverse execution. The 5m path produced 848 pairs,
+`-1.89%`, PF `0.98`, `-12.47%` adverse net, a negative mean-trade L95,
+`-11.10%` drawdown and only one positive chronological fold of four. Although
+its final 30% OOS slice was positive, discovery, bull and low-volatility
+segments were negative. That isolated OOS observation is insufficient to
+override the frozen multidimensional gate. No Shadow or Real strategy was
+registered; the evidence is frozen in
+`data/lighter-btc-shock-catchup-results.json` without retuning.
+
 The transition to long-window costs is now mechanical. The exporter
 `scripts/export-lighter-native-execution-costs.ts` refuses to create a scanner
 cost file unless the audit is fresh, all 15 markets are present, the notional

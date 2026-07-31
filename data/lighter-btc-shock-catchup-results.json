@@ -1,0 +1,398 @@
+{
+  "version": "lighter-btc-shock-catchup-v1",
+  "generatedAt": "2026-07-31T15:36:43.801Z",
+  "preregistered": true,
+  "canTrade": false,
+  "decision": "reject_without_retuning",
+  "reason": "No frozen timeframe passed the net, PF, adverse-cost, confidence, drawdown, chronological, regime and breadth gates.",
+  "hypothesis": {
+    "factor": "BTC",
+    "assets": [
+      "BTC",
+      "ETH",
+      "SOL",
+      "BNB",
+      "LTC",
+      "HYPE",
+      "ZEC",
+      "DOGE",
+      "NEAR",
+      "JUP",
+      "LIT",
+      "GRAM",
+      "XMR",
+      "ENA",
+      "TAO"
+    ],
+    "betaDays": 7,
+    "signalMinutes": 15,
+    "holdMinutes": 30,
+    "decisionMinutes": 5,
+    "minDispersionPct": null,
+    "factorShockZ": 2,
+    "residualLagZ": 1,
+    "family": "catchup",
+    "direction": "after a BTC shock, trade the beta-adjusted laggard toward BTC and hedge with BTC",
+    "nextBarOpen": true,
+    "noOverlap": true
+  },
+  "execution": {
+    "positionNotionalUsd": 100,
+    "costs": "market-specific immediately executable L2 p95, weighted by pair leg",
+    "costStressMultiplier": 1.5,
+    "adverseFundingPerHourPct": 0.00125
+  },
+  "data": {
+    "source": "Lighter native 1m candles; 5m strictly aggregated from five consecutive 1m bars",
+    "from": "2026-02-01T10:05:00.000Z",
+    "through": "2026-07-31T07:24:00.000Z",
+    "days": 179.889,
+    "gapsFilled": 0
+  },
+  "gate": {
+    "minimumTrades": 120,
+    "profitFactor": 1.2,
+    "stressProfitFactor": 1.1,
+    "meanL95Positive": true,
+    "oosFraction": 0.3,
+    "maximumDrawdownPct": 5,
+    "bothRegimesAndVolatilityHalves": true,
+    "breadthAndLeaveOneOut": true
+  },
+  "results": [
+    {
+      "profile": {
+        "timeframeMinutes": 1,
+        "betaBars": 10080,
+        "signalBars": 15,
+        "holdBars": 30,
+        "decisionBars": 5
+      },
+      "full": {
+        "n": 618,
+        "netPct": -3.776236,
+        "stressPct": -9.271447,
+        "profitFactor": 0.938122,
+        "stressProfitFactor": 0.854935,
+        "meanL95Pct": -0.026573,
+        "maxDrawdownPct": -10.23642,
+        "winRatePct": 49.190939
+      },
+      "discovery": {
+        "n": 432,
+        "netPct": -2.418568,
+        "stressPct": -6.456483,
+        "profitFactor": 0.946022,
+        "stressProfitFactor": 0.862433,
+        "meanL95Pct": -0.031682,
+        "maxDrawdownPct": -9.501179,
+        "winRatePct": 49.305556
+      },
+      "oos": {
+        "n": 186,
+        "netPct": -1.357669,
+        "stressPct": -2.814964,
+        "profitFactor": 0.9163,
+        "stressProfitFactor": 0.834212,
+        "meanL95Pct": -0.038258,
+        "maxDrawdownPct": -4.674641,
+        "winRatePct": 48.924731
+      },
+      "foldsPositive": 1,
+      "regimes": {
+        "bull": {
+          "n": 286,
+          "netPct": -0.504678,
+          "stressPct": -3.136939,
+          "profitFactor": 0.980811,
+          "stressProfitFactor": 0.886636,
+          "meanL95Pct": -0.02956,
+          "maxDrawdownPct": -6.291615,
+          "winRatePct": 50
+        },
+        "bear": {
+          "n": 332,
+          "netPct": -3.271558,
+          "stressPct": -6.134508,
+          "profitFactor": 0.90579,
+          "stressProfitFactor": 0.83073,
+          "meanL95Pct": -0.039512,
+          "maxDrawdownPct": -7.394148,
+          "winRatePct": 48.493976
+        },
+        "highVol": {
+          "n": 511,
+          "netPct": -1.990955,
+          "stressPct": -6.639884,
+          "profitFactor": 0.960041,
+          "stressProfitFactor": 0.873026,
+          "meanL95Pct": -0.026085,
+          "maxDrawdownPct": -7.540905,
+          "winRatePct": 48.53229
+        },
+        "lowVol": {
+          "n": 107,
+          "netPct": -1.785282,
+          "stressPct": -2.631563,
+          "profitFactor": 0.840635,
+          "stressProfitFactor": 0.773514,
+          "meanL95Pct": -0.069231,
+          "maxDrawdownPct": -3.294987,
+          "winRatePct": 52.336449
+        }
+      },
+      "breadth": {
+        "activeAssets": 9,
+        "bothSidesAssets": 9,
+        "dominance": 0.389362,
+        "leaveOneOutMinPct": -6.040905,
+        "byAsset": {
+          "BTC": {
+            "n": 618,
+            "contribution": -1.888118,
+            "long": 296,
+            "short": 322
+          },
+          "ETH": {
+            "n": 163,
+            "contribution": 1.132335,
+            "long": 109,
+            "short": 54
+          },
+          "SOL": {
+            "n": 136,
+            "contribution": 0.297153,
+            "long": 75,
+            "short": 61
+          },
+          "HYPE": {
+            "n": 112,
+            "contribution": 0.535344,
+            "long": 45,
+            "short": 67
+          },
+          "ZEC": {
+            "n": 45,
+            "contribution": -0.101787,
+            "long": 23,
+            "short": 22
+          },
+          "DOGE": {
+            "n": 39,
+            "contribution": -0.838177,
+            "long": 14,
+            "short": 25
+          },
+          "NEAR": {
+            "n": 36,
+            "contribution": -1.171563,
+            "long": 16,
+            "short": 20
+          },
+          "LIT": {
+            "n": 28,
+            "contribution": 0.943348,
+            "long": 14,
+            "short": 14
+          },
+          "ENA": {
+            "n": 25,
+            "contribution": -1.148507,
+            "long": 12,
+            "short": 13
+          }
+        }
+      },
+      "months": {
+        "positive": 2,
+        "total": 6
+      },
+      "pass": false
+    },
+    {
+      "profile": {
+        "timeframeMinutes": 5,
+        "betaBars": 2016,
+        "signalBars": 3,
+        "holdBars": 6,
+        "decisionBars": 1
+      },
+      "full": {
+        "n": 848,
+        "netPct": -1.889811,
+        "stressPct": -12.465956,
+        "profitFactor": 0.97913,
+        "stressProfitFactor": 0.870053,
+        "meanL95Pct": -0.021495,
+        "maxDrawdownPct": -11.101354,
+        "winRatePct": 48.466981
+      },
+      "discovery": {
+        "n": 593,
+        "netPct": -5.15521,
+        "stressPct": -12.771195,
+        "profitFactor": 0.922329,
+        "stressProfitFactor": 0.818425,
+        "meanL95Pct": -0.032237,
+        "maxDrawdownPct": -11.101354,
+        "winRatePct": 47.892074
+      },
+      "oos": {
+        "n": 255,
+        "netPct": 3.265399,
+        "stressPct": 0.305238,
+        "profitFactor": 1.135038,
+        "stressProfitFactor": 1.011925,
+        "meanL95Pct": -0.020493,
+        "maxDrawdownPct": -4.428541,
+        "winRatePct": 49.803922
+      },
+      "foldsPositive": 1,
+      "regimes": {
+        "bull": {
+          "n": 392,
+          "netPct": -3.500505,
+          "stressPct": -8.514954,
+          "profitFactor": 0.916299,
+          "stressProfitFactor": 0.807864,
+          "meanL95Pct": -0.036847,
+          "maxDrawdownPct": -7.859691,
+          "winRatePct": 51.020408
+        },
+        "bear": {
+          "n": 456,
+          "netPct": 1.610694,
+          "stressPct": -3.951003,
+          "profitFactor": 1.033052,
+          "stressProfitFactor": 0.923451,
+          "meanL95Pct": -0.023092,
+          "maxDrawdownPct": -8.487002,
+          "winRatePct": 46.27193
+        },
+        "highVol": {
+          "n": 442,
+          "netPct": 3.022558,
+          "stressPct": -2.483928,
+          "profitFactor": 1.066643,
+          "stressProfitFactor": 0.948218,
+          "meanL95Pct": -0.020824,
+          "maxDrawdownPct": -6.614286,
+          "winRatePct": 50.226244
+        },
+        "lowVol": {
+          "n": 406,
+          "netPct": -4.912369,
+          "stressPct": -9.982029,
+          "profitFactor": 0.891318,
+          "stressProfitFactor": 0.791878,
+          "meanL95Pct": -0.038805,
+          "maxDrawdownPct": -9.365752,
+          "winRatePct": 46.551724
+        }
+      },
+      "breadth": {
+        "activeAssets": 14,
+        "bothSidesAssets": 14,
+        "dominance": 0.388832,
+        "leaveOneOutMinPct": -11.736986,
+        "byAsset": {
+          "BTC": {
+            "n": 848,
+            "contribution": -0.944906,
+            "long": 418,
+            "short": 430
+          },
+          "ETH": {
+            "n": 134,
+            "contribution": 0.070038,
+            "long": 83,
+            "short": 51
+          },
+          "SOL": {
+            "n": 93,
+            "contribution": -0.162343,
+            "long": 56,
+            "short": 37
+          },
+          "BNB": {
+            "n": 62,
+            "contribution": 1.726713,
+            "long": 36,
+            "short": 26
+          },
+          "LTC": {
+            "n": 49,
+            "contribution": 2.153351,
+            "long": 23,
+            "short": 26
+          },
+          "HYPE": {
+            "n": 91,
+            "contribution": -1.441339,
+            "long": 36,
+            "short": 55
+          },
+          "ZEC": {
+            "n": 66,
+            "contribution": -3.705245,
+            "long": 29,
+            "short": 37
+          },
+          "DOGE": {
+            "n": 69,
+            "contribution": 1.950211,
+            "long": 25,
+            "short": 44
+          },
+          "NEAR": {
+            "n": 62,
+            "contribution": -1.408896,
+            "long": 34,
+            "short": 28
+          },
+          "JUP": {
+            "n": 51,
+            "contribution": 1.838611,
+            "long": 26,
+            "short": 25
+          },
+          "LIT": {
+            "n": 33,
+            "contribution": -1.325288,
+            "long": 15,
+            "short": 18
+          },
+          "GRAM": {
+            "n": 24,
+            "contribution": -1.880256,
+            "long": 11,
+            "short": 13
+          },
+          "ENA": {
+            "n": 68,
+            "contribution": -3.100167,
+            "long": 30,
+            "short": 38
+          },
+          "TAO": {
+            "n": 37,
+            "contribution": 4.923587,
+            "long": 20,
+            "short": 17
+          }
+        }
+      },
+      "months": {
+        "positive": 2,
+        "total": 6
+      },
+      "pass": false
+    }
+  ],
+  "qualifiedTimeframes": [],
+  "deployment": {
+    "shadow": false,
+    "real": false,
+    "website": false
+  }
+}
