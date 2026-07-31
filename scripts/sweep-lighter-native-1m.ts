@@ -4,10 +4,11 @@
  * Uses candles downloaded by verify-passive-lowtf.ts with DATA_SOURCE=lighter.
  * Signals are computed only from completed candles and execute at the next
  * candle open. Commission is zero for a Standard account; an independent
- * round-trip stress is subtracted from every trade.
+ * round-trip execution reserve is subtracted from every trade.
  *
  * Run after downloading native candles:
- *   STRESS_RT_PCT=0.02 pnpm tsx scripts/sweep-lighter-native-1m.ts
+ *   pnpm tsx scripts/sweep-lighter-native-1m.ts
+ *   STRESS_RT_PCT=0.10 pnpm tsx scripts/sweep-lighter-native-1m.ts
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -18,7 +19,10 @@ const SYMBOLS = (process.env.SYMBOLS ?? 'BTC,ETH,SOL')
   .split(',')
   .map((symbol) => symbol.trim())
   .filter(Boolean);
-const STRESS_RT_PCT = Number(process.env.STRESS_RT_PCT ?? 0.02);
+// Base production-like reserve: 0% venue commission plus 0.065% round-trip
+// allowance for spread, slippage and signal-to-fill drift. Override upward for
+// adverse-cost sensitivity tests; never rely on an unstressed headline result.
+const STRESS_RT_PCT = Number(process.env.STRESS_RT_PCT ?? 0.065);
 const FUNDING_PER_HOUR_PCT = Number(process.env.FUNDING_PER_HOUR_PCT ?? 0.00125);
 const BAR_MINUTES = Number(process.env.BAR_MINUTES ?? 1);
 const Z_PERIODS = (process.env.Z_PERIODS ?? '20,60').split(',').map(Number);

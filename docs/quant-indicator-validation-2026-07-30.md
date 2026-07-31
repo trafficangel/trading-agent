@@ -280,3 +280,31 @@ five-minute aggregate result failed the IS, direction and L95 gates. XRP
 volume-Z `3σ` touch made +17.44% with PF 1.21 after base stress, but its
 mean-trade L95 was `−0.0219%`; it remains rejected rather than being promoted
 from headline PnL alone.
+
+## Extended liquid-market control sweep
+
+Gap-free 180-day one-minute samples for BNB, UNI, AAVE and LTC were downloaded
+from the native Lighter candles API and evaluated with the same causal rules.
+The research runner's default is now the production-like `0.065%` round-trip
+execution reserve plus `0.00125%` adverse funding per holding hour. Lighter
+Standard commission remains zero; the reserve represents spread, slippage and
+signal-to-fill drift rather than an exchange fee.
+
+No new one-minute candidate qualified:
+
+- LTC contained 259,200 consecutive candles with zero gaps. Even its best
+  headline rule, Z60 `3σ` touch, fell to `−28.71%`, PF `0.91`, L95
+  `−0.0360%`, one positive chronological fold out of four and negative long
+  and short sides after execution reserve and funding.
+- UNI and AAVE produced no rule that simultaneously passed L95, IS/OOS,
+  both directions and the recent windows. AAVE's best five-minute reclaim
+  headline was rejected because its latest 30-day window was negative
+  (`−3.69%`, PF `0.88`).
+- BNB produced no additional qualified model. Its existing five-minute
+  `STRAT-032` remains under prospective monitoring rather than being replaced
+  by a weaker high-frequency variant.
+
+The existing five-minute LTC `STRAT-033` was reconfirmed as the stronger
+timeframe choice. The failed one-minute transfer is useful negative evidence:
+greater signal frequency did not survive realistic execution reserve, so no
+one-minute strategy was added merely to increase trade count.
