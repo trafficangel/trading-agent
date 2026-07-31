@@ -1298,7 +1298,13 @@ function portfolioMeanL95(trades: PortfolioTrade[]): number {
 }
 
 function portfolioRecent(trades: PortfolioTrade[]): WindowStats[] {
-  const latest = Math.max(0, ...trades.map((trade) => trade.exitAt));
+  // High-frequency portfolios can contain hundreds of thousands of trades.
+  // Avoid spreading the full array into Math.max: it exhausts the JS argument
+  // stack even when there is enough heap to complete the research run.
+  const latest = trades.reduce(
+    (maximum, trade) => Math.max(maximum, trade.exitAt),
+    0,
+  );
   return RECENT_WINDOWS_DAYS.map((days) => {
     const recent = trades.filter(
       (trade) => trade.entryAt >= latest - days * 86_400_000,

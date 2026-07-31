@@ -529,7 +529,7 @@ class LiveRunner:
         for strategy_id in STRATEGIES:
             self.db.execute(
                 """INSERT OR IGNORE INTO lighter_lux_live_strategy_state
-                   (strategy_id,updated_at) VALUES (?,?)""",
+                   (strategy_id,enabled,updated_at) VALUES (?,0,?)""",
                 (strategy_id, now),
             )
             state = self.db.execute(

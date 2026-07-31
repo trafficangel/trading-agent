@@ -112,7 +112,10 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // native Lighter candles, next-bar execution, zero commission, 5 bps
 // round-trip execution/funding stress. It stayed positive over
 // every 30/60/90/120/180-day window and in both directions. It entered an
-// isolated $100-notional / 10x real canary on 2026-07-30. STRAT-031 is the adjacent, earlier
+// isolated $100-notional / 10x real canary on 2026-07-30. New Real entries
+// were paused again on 2026-07-31 until the frozen 20-close prospective gate
+// passes; existing positions keep their exchange stop and exit handling.
+// STRAT-031 is the adjacent, earlier
 // three-sigma touch entry. It is the highest-frequency member of the stable
 // Z60 neighborhood that still clears the base execution-stress gate. It stayed
 // positive over 30/60/90/120/180-day windows and in both directions, but is
@@ -122,9 +125,10 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // LTC, using thresholds selected from broad profitable neighborhoods rather
 // than a single peak. Both stayed positive on 30/60/90/120/180-day windows,
 // in both directions and after 0.05% round-trip execution/funding stress. On
-// the user's explicit instruction, STRAT-032/033 were admitted as
-// separately risk-capped $100/10x Real canaries before their normal forward
-// gate; this is an experiment, not evidence that the backtest edge is live.
+// the user's earlier instruction, STRAT-032/033 were admitted as separately
+// risk-capped $100/10x Real canaries before their normal forward gate. That
+// exception is now removed: they remain registered in the executor, but new
+// Real entries are disabled until their frozen prospective gate passes.
 // STRAT-034 is a BTC volume-weighted Z60 touch model. It passed 180d,
 // chronological folds, IS/OOS, both directions and 30/60/90d windows after a
 // conservative 0.065% round-trip execution/funding stress. Its one-sided 95%
@@ -2240,8 +2244,8 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Real-canary и защита.', 'Real canary and protection.')}</b> ${t(
           lang,
-          'Тот же сигнал видит отдельный Real-исполнитель. Только разрешённые STRAT-030/032/033 могут открыть $100 с плечом 10×. После подтверждения позиции сразу ставится биржевой reduce-only stop 1.5%; новые входы отключаются при дневном убытке −$10, портфельной просадке −$15 или паузе конкретной стратегии. STRAT-031/034/035 и портфель P2 остаются только в Shadow.',
-          'A separate Real executor observes the same signal. Only allowlisted STRAT-030/032/033 may open $100 at 10× leverage. Once the position is confirmed, an exchange-native 1.5% reduce-only stop is placed immediately; new entries stop at a −$10 daily loss, −$15 portfolio drawdown, or per-strategy pause. STRAT-031/034/035 and portfolio P2 remain Shadow-only.',
+          'Тот же сигнал видит отдельный Real-исполнитель. STRAT-030/032/033 технически поддерживаются, но каждая новая стратегия по умолчанию выключена и может открыть $100 с плечом 10× только после ручного допуска по frozen prospective-гейту. После подтверждения позиции сразу ставится биржевой reduce-only stop 1.5%; пауза не мешает сопровождению и выходу уже открытой позиции. STRAT-031/034/035 и портфель P2 остаются только в Shadow.',
+          'A separate Real executor observes the same signal. STRAT-030/032/033 are technically supported, but every new strategy defaults to disabled and may open $100 at 10× only after manual promotion through the frozen prospective gate. Once a position is confirmed, an exchange-native 1.5% reduce-only stop is placed immediately; pausing entries does not disable monitoring or exits for an existing position. STRAT-031/034/035 and portfolio P2 remain Shadow-only.',
         )}</li>
       </ol>
       <div class="ll-native-specs">${strategyLines}</div>
@@ -2684,11 +2688,15 @@ async function render(
   const liveStrategies = liveStrategyStates().filter(
     (row) => scopeIds.includes(row.strategy_id),
   );
+  const requestedLiveStrategyState = requested.strategy
+    ? liveStrategies.find((row) => row.strategy_id === requested.strategy?.id) ?? null
+    : null;
+  const enabledLiveStrategies = liveStrategies.filter((row) => row.enabled === 1).length;
   const livePortfolioPaused = liveState?.portfolio_paused_at != null;
   const liveMonitor = liveState?.status === 'armed'
     && liveState.heartbeat_at != null
     && Date.now() - liveState.heartbeat_at < 15_000;
-  const liveEntryEnabled = liveState?.enabled === 1;
+  const liveEntryEnabled = liveState?.enabled === 1 && enabledLiveStrategies > 0;
   const liveRunnerLabel = !liveMonitor
     ? 'OFFLINE'
     : !realSupported
@@ -2805,16 +2813,23 @@ async function render(
       : `STRAT-${scopeSpecs.map((spec) => spec.code).join(' · ')} · PROSPECTIVE FORWARD`;
   const pageDescription = requested.strategy
     ? (NATIVE_LIVE_STRATEGY_IDS as readonly string[]).includes(requested.strategy.id)
+      && requestedLiveStrategyState?.enabled === 1
       ? t(
         lang,
         'Только эта стратегия: нативные свечи Lighter, Shadow $1000 и изолированный Real-canary $100 с плечом 10×. Комиссия 0%; spread, slippage и funding учитываются.',
         'This strategy only: native Lighter candles, $1,000 Shadow and an isolated $100 Real canary at 10× leverage. Trading fee is 0%; spread, slippage, and funding are included.',
       )
-      : t(
+      : (NATIVE_LIVE_STRATEGY_IDS as readonly string[]).includes(requested.strategy.id)
+        ? t(
+          lang,
+          'Только эта стратегия: нативные свечи Lighter и prospective Shadow $1000. Она зарегистрирована в Real-исполнителе, но новые входы $100/10× выключены до прохождения frozen forward-гейта; уже открытые позиции продолжают сопровождаться.',
+          'This strategy only: native Lighter candles and prospective $1,000 Shadow. It is registered with the Real executor, but new $100/10× entries are disabled until the frozen forward gate passes; existing positions remain monitored.',
+        )
+        : t(
         lang,
         'Только эта стратегия: нативные свечи Lighter и prospective Shadow $1000. Real отключён до отдельной проверки forward-сделок. Комиссия 0%; spread, slippage и funding учитываются.',
         'This strategy only: native Lighter candles and prospective $1,000 Shadow. Real is disabled until its own forward trades are validated. Trading fee is 0%; spread, slippage, and funding are included.',
-      )
+        )
     : requested.group === 'native'
       ? t(
         lang,
@@ -2831,21 +2846,32 @@ async function render(
     : liveState?.current_drawdown_usd ?? 0;
   const liveScopeText = requested.strategy
     ? (NATIVE_LIVE_STRATEGY_IDS as readonly string[]).includes(requested.strategy.id)
+      && requestedLiveStrategyState?.enabled === 1
       ? t(
         lang,
         'Real разрешён только для этой стратегии. Биржевой reduce-only stop 1.5% ставится сразу после входа. Новые входы блокируются при дневном убытке −$10, общей просадке −$15 или индивидуальной паузе.',
         'Real trading is enabled only for this strategy. An exchange-native 1.5% reduce-only stop is placed immediately after entry. New entries are blocked at a −$10 daily loss, −$15 portfolio drawdown, or an individual strategy pause.',
       )
-      : t(
+      : (NATIVE_LIVE_STRATEGY_IDS as readonly string[]).includes(requested.strategy.id)
+        ? t(
+          lang,
+          'Новые Real-входы этой стратегии выключены до 20 закрытых prospective-сделок и прохождения frozen-гейта. Уже открытая позиция остаётся под биржевым reduce-only stop и будет закрыта штатным сигналом или стопом.',
+          'New Real entries for this strategy are disabled until 20 prospective closes pass the frozen gate. Any existing position remains protected by its exchange-native reduce-only stop and will close through the normal signal or stop path.',
+        )
+        : t(
         lang,
         'Эта стратегия работает только в Shadow. Реальный исполнитель её не поддерживает и не может открыть по ней позицию.',
         'This strategy is Shadow-only. The real executor does not support it and cannot open a position from its signals.',
-      )
+        )
     : requested.group === 'native'
       ? t(
         lang,
-        'В Real разрешены только изолированные canary STRAT-030/032/033 по $100. STRAT-031/034/035 и единый портфель P2 из 15 рынков копят prospective Shadow; открыть по ним реальную позицию исполнитель не может. На каждую разрешённую Real-позицию сразу ставится биржевой reduce-only stop 1.5%.',
-        'Only isolated $100 Real canaries STRAT-030/032/033 are allowlisted. STRAT-031/034/035 and unified 15-market portfolio P2 collect prospective Shadow evidence; the executor cannot open a real position for them. Every allowlisted Real position receives an exchange-native 1.5% reduce-only stop immediately.',
+        enabledLiveStrategies > 0
+          ? `Новые Real-входы разрешены у ${enabledLiveStrategies} стратегий, прошедших отдельный допуск. Остальные Native-модели, включая P2, копят prospective Shadow. На каждую открытую Real-позицию сразу ставится биржевой reduce-only stop.`
+          : 'Все новые Real-входы Native Quant сейчас на паузе до 20 закрытых prospective-сделок и прохождения frozen-гейтов. Уже открытая позиция остаётся под биржевым reduce-only stop и штатным сопровождением; P2 и остальные модели продолжают Shadow.',
+        enabledLiveStrategies > 0
+          ? `New Real entries are enabled for ${enabledLiveStrategies} separately promoted strategies. All other Native models, including P2, continue collecting prospective Shadow evidence. Every open Real position receives an exchange-native reduce-only stop immediately.`
+          : 'All new Native Quant Real entries are currently paused until 20 prospective closes pass the frozen gates. Any existing position remains protected by its exchange-native reduce-only stop and normal monitoring; P2 and the other models continue in Shadow.',
       )
       : t(
         lang,

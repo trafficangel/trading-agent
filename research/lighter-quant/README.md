@@ -137,6 +137,32 @@ P1 had zero prospective signals and zero trades before replacement, so P2
 starts with a clean forward sample. Real remains physically disabled until the
 predeclared forward gate passes.
 
+### Full frozen-family rerun after the P2 launch
+
+The complete shared-rule scanner was rerun on 2026-07-31 over the same 15
+markets, the refreshed rolling 180-day native cache, the measured $100 p95
+cost for each market, adverse funding, both sides, four chronological folds,
+IS/OOS, bull/bear/mixed trend regimes, high/low volatility, 30/60/90-day
+windows, leave-one-market-out, monthly stability and a ten-position capacity.
+
+- **1m:** zero individual or portfolio candidates passed. The strongest
+  headline rows failed OOS, recent windows, one side or drawdown. The best
+  portfolio rule was still negative (`Z60T-3-touch`: −39.13%, PF 0.88); the
+  exact P2 transfer lost 95.18% with PF 0.88. No 1m strategy was admitted.
+- **5m:** 16 individual rows passed, but they were adjacent versions of the
+  already registered HYPE/BTC/BNB/LTC Z/VWZ family and therefore add
+  concentration rather than a new independent edge. Only one shared
+  cross-market portfolio passed every gate: P2. On the refreshed rolling
+  window it had 758 trades, +122.80%, PF 1.45, adverse +104.15%/PF 1.38,
+  4/4 folds, IS/OOS +64.74%/+58.06%, both sides positive, 12/15 profitable
+  markets, 20% dominance, six of six positive months and −2.45% capacity
+  drawdown. The one-trade difference from the frozen launch card is caused by
+  the rolling 180-day boundary; the launch card remains an immutable record.
+
+Decision: do not add a correlated P3 merely because an adjacent parameter has
+a larger in-sample total. Continue the clean P2 prospective sample and search
+for a genuinely different information source before adding portfolio risk.
+
 ## LuxAlgo database follow-up
 
 A separate LuxAlgo AI Backtesting database search was run for symmetric
@@ -234,12 +260,14 @@ The multi-symbol continuation also admitted:
 - `STRAT-033 / ltc-z60-touch`: Z60 ±2 touch, 968 trades, +107.39% after the
   same stress, PF 1.37, both sides and all tested windows positive.
 
-Both run through the same completed-candle native runner. On the user's
-explicit instruction they were additionally admitted as isolated $100-notional
-Real canaries with 1.5% exchange-native stops before the normal forward gate.
-That exception is a bounded execution experiment and must not be treated as
-live validation. BTC, ETH, ADA, and WLD were not admitted because they
-failed at least one direction, recent-window, or adverse-cost stability check.
+Both run through the same completed-candle native runner. They briefly ran as
+isolated $100-notional Real canaries with 1.5% exchange-native stops before the
+normal forward gate. That early exception ended on 2026-07-31: new Real entries
+for STRAT-030/032/033 are disabled until each strategy has at least 20 closed
+prospective trades and passes the frozen gate. An already open position keeps
+its exchange stop and normal exit handling. BTC, ETH, ADA, and WLD were not
+admitted because they failed at least one direction, recent-window, or
+adverse-cost stability check.
 
 A subsequent multi-window audit retained AVAX Z50 ±3 reclaim as a Shadow
 research candidate: it was positive on 30/60/90/120/180-day windows, both
