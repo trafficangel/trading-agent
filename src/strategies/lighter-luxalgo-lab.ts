@@ -10,6 +10,7 @@ import {
   parseNativeRunnerStatus,
   type NativeRunnerEvaluation,
 } from '../lib/lighter-native-runner-status.js';
+import { evaluateNativeHistoricalEvidence } from '../lib/lighter-native-historical.js';
 import { logger } from '../lib/logger.js';
 import {
   evaluateNativeForwardRows,
@@ -83,6 +84,17 @@ const MAX_CAPTURE_ATTEMPTS = 50;
 const VALIDATION_TARGET = 20;
 const STOP_CHECK_MS = 250;
 const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
+const NATIVE_HISTORICAL_EVIDENCE = (() => {
+  try {
+    return evaluateNativeHistoricalEvidence(JSON.parse(readFileSync(resolve(
+      process.env['LIGHTER_NATIVE_HISTORICAL_REPORT_PATH']
+        ?? 'data/lighter-native-current-z60-validation.json',
+    ), 'utf8')) as unknown);
+  } catch (error) {
+    logger.error({ error }, 'Native historical evidence unavailable');
+    return null;
+  }
+})();
 
 // Selection frozen on 2026-07-26 from commission-net prospective evidence:
 // SOL +7.58%/30 and ETH +0.71%/12 (both halves positive). AVAX STRAT-012
@@ -119,9 +131,10 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // even at 12 bps; SOL kept all five positive at 6 bps but one fold was
 // negative at 12 bps, so it is explicitly the weaker secondary candidate.
 // STRAT-030 is an independently reproduced SOL 5m Z-score reclaim model using
-// native Lighter candles, next-bar execution, zero commission, 5 bps
-// round-trip execution/funding stress. It stayed positive over
-// every 30/60/90/120/180-day window and in both directions. It entered an
+// native Lighter candles, next-bar execution, measured executable $100 L2 p95
+// and exact hourly funding. It stayed positive over every 30/60/90/120/180-day
+// window and in both directions, but currently fails the maximum 15% drawdown
+// gate. It entered an
 // isolated $100-notional / 10x real canary on 2026-07-30. New Real entries
 // were paused again on 2026-07-31 until the frozen 20-close prospective gate
 // passes; existing positions keep their exchange stop and exit handling.
@@ -133,20 +146,21 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // is prospective Shadow only and is deliberately absent from the real runner.
 // STRAT-032 and STRAT-033 apply the same completed-bar touch family to BNB and
 // LTC, using thresholds selected from broad profitable neighborhoods rather
-// than a single peak. Both stayed positive on 30/60/90/120/180-day windows,
-// in both directions and after 0.05% round-trip execution/funding stress. On
+// than a single peak. Both stayed positive overall under measured execution
+// and exact funding, but BNB fails its recent long-side gate and LTC fails the
+// maximum drawdown gate. On
 // the user's earlier instruction, STRAT-032/033 were admitted as separately
 // risk-capped $100/10x Real canaries before their normal forward gate. That
 // exception is now removed: they remain registered in the executor, but new
 // Real entries are disabled until their frozen prospective gate passes.
 // STRAT-034 is a BTC volume-weighted Z60 touch model. It passed 180d,
-// chronological folds, IS/OOS, both directions and 30/60/90d windows after a
-// conservative 0.065% round-trip execution/funding stress. Its one-sided 95%
-// lower confidence bound is only marginally positive, so it starts in
+// chronological folds, IS/OOS, both directions and 30/60/90d windows with
+// measured executable $100 L2 p95 and exact funding. Its one-sided 95% lower
+// confidence bound is only marginally positive, so it starts in
 // prospective Shadow and is deliberately excluded from the Real allowlist.
 // STRAT-035 applies the same completed-bar volume-weighted family to HYPE at
 // 2.5 sigma. It passed 180d, four chronological folds, both sides and every
-// recent window even after 0.15% round-trip stress. It still starts in
+// recent window with measured executable $100 L2 p95 and exact funding. It still starts in
 // prospective Shadow because no historical result substitutes for forward
 // execution evidence.
 // BCH, XLM, TRX and JUP candidates remain excluded.
@@ -459,14 +473,14 @@ const STRATEGIES: readonly StrategySpec[] = [
     stopPct: 1.5,
     backtest: {
       // Native Lighter 1m candles aggregated into complete 5m bars. Signals
-      // use completed candles and fill at the next bar open. Net includes
-      // 0.05% round-trip execution/funding stress.
+      // use completed candles and fill at the next bar open. Net subtracts
+      // measured executable $100 L2 p95 per full round trip and exact funding.
       period: '2026-02-01 → 2026-07-30',
       trades: 457,
-      winRatePct: 63.9,
-      profitFactor: 1.21,
-      netPct: 37.93,
-      maxDrawdownPct: 21.85,
+      winRatePct: 65.4,
+      profitFactor: 1.334,
+      netPct: 57.241,
+      maxDrawdownPct: 19.237,
     },
   },
   {
@@ -479,16 +493,16 @@ const STRATEGIES: readonly StrategySpec[] = [
     stopPct: 1.5,
     backtest: {
       // Native Lighter 1m candles aggregated into complete 5m bars. Signals
-      // use completed candles and fill at the next bar open. Net includes
-      // 0.05% round-trip execution/funding stress.
+      // use completed candles and fill at the next bar open. Net subtracts
+      // measured executable $100 L2 p95 per full round trip and exact funding.
       // No real fan-out: this correlated variant must earn its own forward
       // record before capital is considered.
       period: '2026-02-01 → 2026-07-30',
       trades: 462,
-      winRatePct: 63.4,
-      profitFactor: 1.19,
-      netPct: 39.46,
-      maxDrawdownPct: 24.22,
+      winRatePct: 64.1,
+      profitFactor: 1.298,
+      netPct: 58.962,
+      maxDrawdownPct: 22.861,
     },
   },
   {
@@ -500,16 +514,16 @@ const STRATEGIES: readonly StrategySpec[] = [
     marketId: 25,
     stopPct: 1.5,
     backtest: {
-      // Native Lighter completed 5m candles, next-bar execution and 0.05%
-      // round-trip execution/funding stress. The full 180d sample is
+      // Native Lighter completed 5m candles, next-bar execution, measured
+      // executable $100 L2 p95 and exact funding. The full 180d sample is
       // two-sided, while the recent 30d long side is weak, so this canary must
       // not be scaled from backtest evidence alone.
       period: '2026-02-01 → 2026-07-30',
-      trades: 415,
-      winRatePct: 68.2,
-      profitFactor: 1.37,
-      netPct: 45.95,
-      maxDrawdownPct: 11.87,
+      trades: 416,
+      winRatePct: 69.5,
+      profitFactor: 1.461,
+      netPct: 55.847,
+      maxDrawdownPct: 10.769,
     },
   },
   {
@@ -521,16 +535,16 @@ const STRATEGIES: readonly StrategySpec[] = [
     marketId: 35,
     stopPct: 1.5,
     backtest: {
-      // Native Lighter completed 5m candles, next-bar execution and 0.05%
-      // round-trip execution/funding stress.
+      // Native Lighter completed 5m candles, next-bar execution, measured
+      // executable $100 L2 p95 and exact funding.
       // Periods 50/60/70 and thresholds 1.75/2.0/2.25 all passed, reducing
       // single-parameter selection risk.
       period: '2026-02-01 → 2026-07-30',
-      trades: 972,
-      winRatePct: 68.0,
-      profitFactor: 1.27,
-      netPct: 80.40,
-      maxDrawdownPct: 28.22,
+      trades: 974,
+      winRatePct: 67.6,
+      profitFactor: 1.224,
+      netPct: 68.661,
+      maxDrawdownPct: 29.020,
     },
   },
   {
@@ -542,16 +556,15 @@ const STRATEGIES: readonly StrategySpec[] = [
     marketId: 1,
     stopPct: 1.5,
     backtest: {
-      // Native Lighter completed 5m candles and next-bar execution. The
-      // displayed historical row used a conservative 0.065% sensitivity
-      // reserve; current qualification uses measured market-specific $100
-      // L2 p95 plus funding instead of a fixed cost. Prospective Shadow only.
+      // Native Lighter completed 5m candles and next-bar execution. Current
+      // qualification uses measured executable $100 L2 p95 plus exact hourly
+      // funding instead of a fixed stress assumption. Prospective Shadow only.
       period: '2026-02-01 → 2026-07-30',
       trades: 103,
-      winRatePct: 68.0,
-      profitFactor: 1.58,
-      netPct: 12.94,
-      maxDrawdownPct: 5.90,
+      winRatePct: 75.7,
+      profitFactor: 1.931,
+      netPct: 19.144,
+      maxDrawdownPct: 5.343,
     },
   },
   {
@@ -563,16 +576,15 @@ const STRATEGIES: readonly StrategySpec[] = [
     marketId: 24,
     stopPct: 1.5,
     backtest: {
-      // Native Lighter completed 5m candles and next-bar execution. The
-      // displayed historical row used a conservative 0.065% sensitivity
-      // reserve. Current qualification uses measured market-specific $100
-      // L2 p95 plus funding; 0.10/0.15% were non-blocking robustness rows.
+      // Native Lighter completed 5m candles and next-bar execution. Current
+      // qualification uses measured executable $100 L2 p95 plus exact hourly
+      // funding; the observed maximum is reported only as sensitivity.
       period: '2026-02-01 → 2026-07-31',
       trades: 356,
-      winRatePct: 64.3,
-      profitFactor: 1.47,
-      netPct: 74.52,
-      maxDrawdownPct: 13.62,
+      winRatePct: 64.9,
+      profitFactor: 1.587,
+      netPct: 89.950,
+      maxDrawdownPct: 11.462,
     },
   },
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
@@ -631,8 +643,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     period: 60,
     timeExitBars: 240,
     realEnabled: true,
-    noteRu: 'Основной SOL-canary: вход позже touch-варианта, после подтверждённого возврата цены внутрь диапазона.',
-    noteEn: 'Primary SOL canary: it enters later than the touch variant, after price confirms a return inside the band.',
+    noteRu: 'Вход позже touch-варианта, после подтверждённого возврата цены внутрь диапазона. Real недоступен: историческая просадка 19.24% выше гейта 15%.',
+    noteEn: 'Enters later than the touch variant, after price confirms a return inside the band. Real is unavailable: historical drawdown of 19.24% exceeds the 15% gate.',
   },
   'sol-z60-touch': {
     family: 'zscore',
@@ -641,8 +653,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     period: 60,
     timeExitBars: 240,
     realEnabled: false,
-    noteRu: 'Более ранний и частый SOL-вход. Только Shadow: 180-дневный PF 1.19 ниже гейта 1.20 и сделки сильно коррелируют со STRAT-030.',
-    noteEn: 'Earlier and more frequent SOL entry. Shadow only: 180-day PF 1.19 is below the 1.20 gate and trades are highly correlated with STRAT-030.',
+    noteRu: 'Более ранний и частый SOL-вход. Только Shadow: историческая просадка 22.86% выше гейта 15%, а сделки сильно коррелируют со STRAT-030.',
+    noteEn: 'Earlier and more frequent SOL entry. Shadow only: historical drawdown of 22.86% exceeds the 15% gate and trades are highly correlated with STRAT-030.',
   },
   'bnb-z60-touch': {
     family: 'zscore',
@@ -651,8 +663,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     period: 60,
     timeExitBars: 240,
     realEnabled: true,
-    noteRu: 'BNB-canary. Полный 180-дневный тест двухсторонний, но свежая 30-дневная long-часть слабая — масштабирование запрещено до подтверждения forward.',
-    noteEn: 'BNB canary. The full 180-day test is two-sided, but the recent 30-day long book is weak, so scaling is blocked pending forward evidence.',
+    noteRu: 'Полный 180-дневный тест двухсторонний, но Real недоступен: свежая 30-дневная long-часть −0.126%.',
+    noteEn: 'The full 180-day test is two-sided, but Real is unavailable: the recent 30-day long book is −0.126%.',
   },
   'ltc-z60-touch': {
     family: 'zscore',
@@ -661,8 +673,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     period: 60,
     timeExitBars: 240,
     realEnabled: true,
-    noteRu: 'Самый частый вариант: более близкий порог ±2σ даёт больше входов. Из-за исторической просадки 28.22% остаётся малым canary.',
-    noteEn: 'Highest-frequency variant: the closer ±2σ threshold creates more entries. Its 28.22% historical drawdown keeps it at small-canary size.',
+    noteRu: 'Самый частый вариант: более близкий порог ±2σ даёт больше входов. Real недоступен: историческая просадка 29.02% выше гейта 15%.',
+    noteEn: 'Highest-frequency variant: the closer ±2σ threshold creates more entries. Real is unavailable: historical drawdown of 29.02% exceeds the 15% gate.',
   },
   'btc-vwz60-touch': {
     family: 'vwz',
@@ -713,6 +725,50 @@ const NATIVE_STANDALONE_STRATEGIES = NATIVE_STRATEGIES.filter(
 const LUXALGO_STRATEGIES = STRATEGIES.filter(
   (spec) => !NATIVE_STRATEGY_ID_SET.has(spec.id),
 );
+
+function nativeHistoricalGate(spec: StrategySpec): {
+  passed: boolean;
+  reasons: readonly string[];
+} | null {
+  if (!NATIVE_HISTORICAL_EVIDENCE) return null;
+  if (spec.portfolioId === NATIVE_TREND_PORTFOLIO_ID) {
+    return {
+      passed: NATIVE_HISTORICAL_EVIDENCE.portfolio.passed,
+      reasons: NATIVE_HISTORICAL_EVIDENCE.portfolio.passed
+        ? []
+        : ['historical portfolio gate failed'],
+    };
+  }
+  return NATIVE_HISTORICAL_EVIDENCE.candidates.find(
+    (candidate) => candidate.strategyId === spec.id,
+  ) ?? null;
+}
+
+function historicalGateLabel(
+  historical: ReturnType<typeof nativeHistoricalGate>,
+  lang: Lang,
+): { suffix: string; title: string } {
+  if (!historical) return {
+    suffix: t(lang, 'ИСТОРИЯ НЕДОСТУПНА', 'HISTORY UNAVAILABLE'),
+    title: t(
+      lang,
+      'Frozen historical evidence unavailable; Real fails closed.',
+      'Frozen historical evidence unavailable; Real fails closed.',
+    ),
+  };
+  if (historical.passed) return {
+    suffix: t(lang, 'ИСТОРИЯ OK', 'HISTORY OK'),
+    title: t(
+      lang,
+      'Исторический гейт пройден; для Real всё равно нужен отдельный prospective forward-гейт и ручной допуск.',
+      'Historical gate passed; Real still requires the separate prospective forward gate and manual approval.',
+    ),
+  };
+  return {
+    suffix: t(lang, 'ИСТОРИЯ FAIL', 'HISTORY FAIL'),
+    title: t(lang, 'Real запрещён: ', 'Real disabled: ') + historical.reasons.join('; '),
+  };
+}
 
 function shadowNotionalUsd(spec: StrategySpec): number {
   return shadowExecutionNotionalUsd(NATIVE_STRATEGY_ID_SET.has(spec.id));
@@ -2764,12 +2820,19 @@ function nativeStrategyGuide(
   const strategyLines = nativeSpecs.filter((spec) => !spec.portfolioId).map((spec) => {
     const info = NATIVE_STRATEGY_INFO[spec.id]!;
     const family = info.family === 'vwz' ? 'VOLUME Z' : 'Z';
+    const historical = nativeHistoricalGate(spec);
+    const realPathOpen = info.realEnabled && historical?.passed === true;
+    const executionLabel = realPathOpen
+      ? t(lang, 'SHADOW · REAL ПОСЛЕ FORWARD-ГЕЙТА', 'SHADOW · REAL AFTER FORWARD GATE')
+      : info.realEnabled
+        ? t(lang, 'SHADOW · REAL HIST FAIL', 'SHADOW · REAL HIST FAIL')
+        : 'SHADOW ONLY';
     return `<div class="ll-native-spec">
       <b>STRAT-${spec.code} · ${spec.asset}</b>
       <span>${info.mode === 'reclaim' ? 'RECLAIM' : 'TOUCH'} · ${family}${info.period} · ±${info.threshold}σ</span>
       <span>${esc(nativeEntryDescription(info, lang))}</span>
       <span>${t(lang, info.noteRu, info.noteEn)}</span>
-      <em class="${info.realEnabled ? 'pass' : 'collect'}">${info.realEnabled ? 'SHADOW + REAL $100 / 10×' : 'SHADOW ONLY'}</em>
+      <em class="${realPathOpen ? 'pass' : 'collect'}">${executionLabel}</em>
     </div>`;
   }).join('') + (nativeSpecs.some((spec) => spec.portfolioId === NATIVE_TREND_PORTFOLIO_ID)
     ? `<div class="ll-native-spec">
@@ -2817,8 +2880,8 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Real-canary и защита.', 'Real canary and protection.')}</b> ${t(
           lang,
-          'Тот же сигнал видит отдельный Real-исполнитель. STRAT-030/032/033 технически поддерживаются, но каждая новая стратегия по умолчанию выключена и может открыть $100 с плечом 10× только после ручного допуска по frozen prospective-гейту. После подтверждения позиции сразу ставится биржевой reduce-only stop 1.5%; пауза не мешает сопровождению и выходу уже открытой позиции. STRAT-031/034/035 и портфель P2 остаются только в Shadow.',
-          'A separate Real executor observes the same signal. STRAT-030/032/033 are technically supported, but every new strategy defaults to disabled and may open $100 at 10× only after manual promotion through the frozen prospective gate. Once a position is confirmed, an exchange-native 1.5% reduce-only stop is placed immediately; pausing entries does not disable monitoring or exits for an existing position. STRAT-031/034/035 and portfolio P2 remain Shadow-only.',
+          'Тот же сигнал видит отдельный Real-исполнитель. Real требует одновременно неизменённый исторический гейт, минимум 20 prospective закрытий за 7+ дней и ручной допуск. Сейчас технически зарегистрированные STRAT-030/032/033 исторический гейт не проходят, поэтому их новые Real-входы запрещены независимо от будущего Shadow-результата. После допуска и подтверждения позиции биржевой reduce-only stop 1.5% ставится сразу; пауза не мешает выходу уже открытой позиции. STRAT-031/034/035 и портфель P2 остаются только в Shadow.',
+          'A separate Real executor observes the same signal. Real requires an unchanged historical pass, at least 20 prospective closes over 7+ days, and manual approval. The technically registered STRAT-030/032/033 currently fail the historical gate, so new Real entries remain disabled regardless of future Shadow results. After approval and position confirmation, an exchange-native 1.5% reduce-only stop is placed immediately; an entry pause does not block exits for an existing position. STRAT-031/034/035 and portfolio P2 remain Shadow-only.',
         )}</li>
       </ol>
       <div class="ll-native-specs">${strategyLines}</div>
@@ -2837,6 +2900,11 @@ function strategyRows(
     const feed = executionSnapshot(spec);
     const tooltip = nativeStrategyTooltip(spec, lang);
     const gateTitle = nativeGateTitle(s.forwardGate, lang);
+    const historical = NATIVE_STRATEGY_ID_SET.has(spec.id)
+      ? historicalGateLabel(nativeHistoricalGate(spec), lang)
+      : null;
+    const combinedGateTitle = [gateTitle, historical?.title].filter(Boolean).join(' ');
+    const combinedGateLabel = historical ? `${g.label} · ${historical.suffix}` : g.label;
     const strategyLabel = tooltip
       ? `<span class="ll-strategy-name" tabindex="0" title="${esc(tooltip)}" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small><i>?</i></span>`
       : `<b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small>`;
@@ -2847,7 +2915,7 @@ function strategyRows(
       <td class="num"><b>${s.closed} / ${s.open}</b><small> · WR ${wr == null ? '—' : `${wr.toFixed(0)}%`} · PF ${pfLabel(s.profitFactor)}</small></td>
       <td class="${pnlClass(s.netPct)}"><b>${signedPct(s.netPct)} · ${signedUsd(s.netUsd)}</b></td>
       <td class="num">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}<small> · ½ ${signedPct(s.firstHalfPct)} · ½ ${signedPct(s.secondHalfPct)}</small></td>
-      <td class="${g.cls}"${gateTitle ? ` title="${esc(gateTitle)}"` : ''}><b>${esc(g.label)}</b></td>
+      <td class="${g.cls}"${combinedGateTitle ? ` title="${esc(combinedGateTitle)}"` : ''}><b>${esc(combinedGateLabel)}</b></td>
     </tr>`;
   }).join('');
   const portfolioSpecs = specs.filter(
@@ -2858,6 +2926,9 @@ function strategyRows(
   const g = gate(s, lang, true);
   const wr = s.closed ? s.wins / s.closed * 100 : null;
   const gateTitle = nativeGateTitle(s.forwardGate, lang);
+  const historical = historicalGateLabel(nativeHistoricalGate(portfolioSpecs[0]!), lang);
+  const combinedGateTitle = [gateTitle, historical.title].filter(Boolean).join(' ');
+  const combinedGateLabel = `${g.label} · ${historical.suffix}`;
   const backtest = portfolioSpecs[0]!.backtest;
   const assets = portfolioSpecs.map((spec) => spec.asset).join(' · ');
   const tooltip = t(
@@ -2872,7 +2943,7 @@ function strategyRows(
     <td class="num"><b>${s.closed} / ${s.open}</b><small> · WR ${wr == null ? '—' : `${wr.toFixed(0)}%`} · PF ${pfLabel(s.profitFactor)}</small></td>
     <td class="${pnlClass(s.netPct)}"><b>${signedPct(s.netPct)} · ${signedUsd(s.netUsd)}</b></td>
     <td class="num">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}<small> · ½ ${signedPct(s.firstHalfPct)} · ½ ${signedPct(s.secondHalfPct)}</small></td>
-    <td class="${g.cls}"${gateTitle ? ` title="${esc(gateTitle)}"` : ''}><b>${esc(g.label)}</b></td>
+    <td class="${g.cls}"${combinedGateTitle ? ` title="${esc(combinedGateTitle)}"` : ''}><b>${esc(combinedGateLabel)}</b></td>
   </tr>`;
 }
 

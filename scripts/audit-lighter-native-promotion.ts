@@ -3,7 +3,7 @@
  * It writes evidence only; it never toggles a strategy or sends an order.
  */
 
-import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import {
@@ -14,6 +14,7 @@ import {
   type NativeForwardPnlRow,
   type NativeForwardSignalRow,
 } from '../src/lib/lighter-luxalgo-math.js';
+import { evaluateNativeHistoricalEvidence } from '../src/lib/lighter-native-historical.js';
 
 const REAL_NATIVE_IDS = [
   'sol-z60-reclaim',
@@ -45,6 +46,13 @@ function sqlMarks(count: number): string {
 
 const databasePath = resolve(flagValue('--db') ?? 'data/trading.sqlite');
 if (!existsSync(databasePath)) throw new Error(`trading database missing: ${databasePath}`);
+const historicalPath = resolve(
+  flagValue('--historical') ?? 'data/lighter-native-current-z60-validation.json',
+);
+if (!existsSync(historicalPath)) throw new Error(`historical evidence missing: ${historicalPath}`);
+const historicalEvidence = evaluateNativeHistoricalEvidence(
+  JSON.parse(readFileSync(historicalPath, 'utf8')) as unknown,
+);
 const db = new Database(databasePath, { readonly: true, fileMustExist: true });
 const pnlStatement = db.prepare<[string], NativeForwardPnlRow>(`
   SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
@@ -73,16 +81,22 @@ const portfolioSignals = db.prepare<string[], NativeForwardSignalRow>(`
     AND execution_notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
   ORDER BY received_at, id`);
 
-const strategies = SHADOW_NATIVE_IDS.map((strategyId) => ({
-  strategyId,
-  realExecutorRegistered: REAL_NATIVE_IDS.includes(
-    strategyId as (typeof REAL_NATIVE_IDS)[number],
-  ),
-  evaluation: evaluateNativeForwardRows(
-    pnlStatement.all(strategyId),
-    signalStatement.all(strategyId),
-  ),
-}));
+const strategies = SHADOW_NATIVE_IDS.map((strategyId) => {
+  const historical = historicalEvidence.candidates.find((row) =>
+    row.strategyId === strategyId);
+  if (!historical) throw new Error(`historical strategy evidence missing: ${strategyId}`);
+  return {
+    strategyId,
+    realExecutorRegistered: REAL_NATIVE_IDS.includes(
+      strategyId as (typeof REAL_NATIVE_IDS)[number],
+    ),
+    historicalEvidence: historical,
+    evaluation: evaluateNativeForwardRows(
+      pnlStatement.all(strategyId),
+      signalStatement.all(strategyId),
+    ),
+  };
+});
 const portfolio = evaluateNativeForwardRows(
   portfolioPnls.all(...P2_IDS),
   portfolioSignals.all(...P2_IDS),
@@ -94,6 +108,7 @@ db.close();
 function decision(
   evaluation: NativeForwardGateEvaluation,
   realExecutorRegistered: boolean,
+  historicalPassed: boolean,
 ) {
   const operationalPause = evaluation.reasons.every((reason) =>
     reason.startsWith('recent ') && (
@@ -106,6 +121,12 @@ function decision(
     realAction: 'disabled',
     recoverableFromNewSignals: operationalPause,
     manualReviewRequired: !operationalPause,
+  };
+  if (!historicalPassed) return {
+    shadowAction: 'continue',
+    realAction: 'disabled',
+    recoverableFromNewSignals: false,
+    manualReviewRequired: false,
   };
   if (evaluation.status === 'passed' && realExecutorRegistered) return {
     shadowAction: 'continue',
@@ -123,24 +144,37 @@ function decision(
 
 const evaluatedStrategies = strategies.map((row) => ({
   ...row,
-  decision: decision(row.evaluation, row.realExecutorRegistered),
+  decision: decision(
+    row.evaluation,
+    row.realExecutorRegistered,
+    row.historicalEvidence.passed,
+  ),
 }));
 const eligibleStrategyIds = evaluatedStrategies
-  .filter((row) => row.realExecutorRegistered && row.evaluation.status === 'passed')
+  .filter((row) =>
+    row.realExecutorRegistered
+    && row.historicalEvidence.passed
+    && row.evaluation.status === 'passed')
   .map((row) => row.strategyId);
 const generatedAt = new Date().toISOString();
 const report = {
-  version: 'lighter-native-promotion-audit-v2',
+  version: 'lighter-native-promotion-audit-v3',
   generatedAt,
   databasePath,
   gate: NATIVE_FORWARD_GATE,
   shadowNotionalUsd: NATIVE_SHADOW_NOTIONAL_USD,
   eligibleStrategyIds,
+  historicalEvidence: {
+    version: historicalEvidence.version,
+    sourceGeneratedAt: historicalEvidence.sourceGeneratedAt,
+    sourceSha256: historicalEvidence.sourceSha256,
+    portfolio: historicalEvidence.portfolio,
+  },
   p2: {
     portfolioId: 'z60stack25-portfolio',
     realExecutorRegistered: false,
     evaluation: portfolio,
-    decision: decision(portfolio, false),
+    decision: decision(portfolio, false, historicalEvidence.portfolio.passed),
   },
   strategies: evaluatedStrategies,
   autoPromotion: false,

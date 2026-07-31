@@ -7,8 +7,12 @@ from datetime import datetime, timezone
 from typing import Sequence
 
 
-NATIVE_PROMOTION_REPORT_VERSION = "lighter-native-promotion-audit-v2"
+NATIVE_PROMOTION_REPORT_VERSION = "lighter-native-promotion-audit-v3"
 NATIVE_PROMOTION_NOTIONAL_USD = 100.0
+NATIVE_HISTORICAL_EVIDENCE_VERSION = "lighter-native-historical-evidence-v1"
+NATIVE_HISTORICAL_REPORT_SHA256 = (
+    "8327517f63cd44b508aa8824e5393ad46f48ab129223e2d4fbaeaa320d496f4e"
+)
 NATIVE_PROMOTION_GATE = {
     "targetClosed": 20.0,
     "minDurationDays": 7.0,
@@ -119,6 +123,14 @@ def native_promotion_report_error(
     if strategy_id not in eligible:
         return "native Shadow promotion gate not passed"
 
+    historical = report.get("historicalEvidence")
+    if not isinstance(historical, dict):
+        return "native historical evidence missing"
+    if historical.get("version") != NATIVE_HISTORICAL_EVIDENCE_VERSION:
+        return "native historical evidence version mismatch"
+    if historical.get("sourceSha256") != NATIVE_HISTORICAL_REPORT_SHA256:
+        return "native historical evidence hash mismatch"
+
     strategies = report.get("strategies")
     if not isinstance(strategies, list):
         return "native promotion strategies missing"
@@ -132,8 +144,16 @@ def native_promotion_report_error(
     row = matching[0]
     evaluation = row.get("evaluation")
     decision = row.get("decision")
+    strategy_historical = row.get("historicalEvidence")
     if row.get("realExecutorRegistered") is not True:
         return "native promotion strategy is not executor-registered"
+    if not isinstance(strategy_historical, dict):
+        return "native strategy historical evidence missing"
+    if strategy_historical.get("passed") is not True:
+        return "native strategy historical evidence not passed"
+    reasons = strategy_historical.get("reasons")
+    if not isinstance(reasons, list) or reasons:
+        return "native strategy historical evidence reasons invalid"
     if not isinstance(evaluation, dict):
         return "native promotion strategy evaluation missing"
     if evaluation.get("status") != "passed" or evaluation.get("entryAllowed") is not True:

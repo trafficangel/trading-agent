@@ -1287,3 +1287,30 @@ portfolio entry at and after that timestamp while retaining prior evidence.
 No candidate is eligible merely because the combined portfolio is positive. The output is
 `data/lighter-native-microstructure-promotion-audit.json` and always carries
 `autoPromotion=false` and `realEnabled=false`.
+
+## Corrected-cost Native Z audit and fail-closed Real gate (2026-07-31)
+
+The fixed `0.05%`, `0.10%`, and `0.15%` execution stress assumptions are no
+longer qualification inputs for the current Native Z candidates. The frozen
+audit in `data/lighter-native-current-z60-validation.json` uses instead:
+
+- market-specific executable `$100` full-round-trip L2 p95;
+- exact public Lighter hourly funding settlements in `(entry, exit]`;
+- no execution-cost or funding fallback;
+- the observed maximum executable round trip as a reported, non-blocking
+  sensitivity only.
+
+The corrected 180-day audit passes BTC `VWZ60-3-touch`, HYPE
+`VWZ60-2.5-touch`, and portfolio P2 `Z60STACK-2.5-touch`. It rejects the
+currently executor-registered SOL reclaim (19.24% drawdown), BNB touch
+(30-day Long net `-0.126%`), and LTC touch (29.02% drawdown). These failures
+cannot be overridden by a later positive prospective sample.
+
+`audit-lighter-native-promotion.ts` now emits report version v3 containing the
+canonical SHA-256 of that frozen historical artifact and per-strategy
+historical evidence. The Python Real executor independently verifies the
+version, hash, strategy-level pass and empty reason list before considering the
+separate forward gate. A missing, changed, stale, or failed historical record
+therefore disables new Real entries. Historical pass still cannot promote a
+strategy automatically: the `$100` prospective forward gate and manual review
+remain mandatory.

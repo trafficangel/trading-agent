@@ -10,6 +10,8 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "scripts"))
 
 from lighter_live_risk import (  # noqa: E402
+    NATIVE_HISTORICAL_EVIDENCE_VERSION,
+    NATIVE_HISTORICAL_REPORT_SHA256,
     NATIVE_PROMOTION_GATE,
     native_promotion_report_error,
 )
@@ -21,7 +23,7 @@ STRATEGY_ID = "sol-z60-reclaim"
 
 def valid_report() -> dict:
     return {
-        "version": "lighter-native-promotion-audit-v2",
+        "version": "lighter-native-promotion-audit-v3",
         "generatedAt": datetime.fromtimestamp(
             (NOW_MS - 60_000) / 1000,
             tz=timezone.utc,
@@ -29,10 +31,15 @@ def valid_report() -> dict:
         "gate": dict(NATIVE_PROMOTION_GATE),
         "shadowNotionalUsd": 100,
         "eligibleStrategyIds": [STRATEGY_ID],
+        "historicalEvidence": {
+            "version": NATIVE_HISTORICAL_EVIDENCE_VERSION,
+            "sourceSha256": NATIVE_HISTORICAL_REPORT_SHA256,
+        },
         "strategies": [
             {
                 "strategyId": STRATEGY_ID,
                 "realExecutorRegistered": True,
+                "historicalEvidence": {"passed": True, "reasons": []},
                 "evaluation": {"status": "passed", "entryAllowed": True},
                 "decision": {
                     "shadowAction": "continue",
@@ -71,6 +78,17 @@ class NativePromotionReportTest(unittest.TestCase):
         report = valid_report()
         report["strategies"][0]["evaluation"]["status"] = "collecting"
         self.assertIn("evaluation not passed", self.check(report) or "")
+
+    def test_historical_failure_cannot_be_overridden_by_forward_result(self) -> None:
+        report = valid_report()
+        report["strategies"][0]["historicalEvidence"]["passed"] = False
+        report["strategies"][0]["historicalEvidence"]["reasons"] = ["drawdown"]
+        self.assertIn("historical evidence not passed", self.check(report) or "")
+
+    def test_changed_historical_artifact_fails_closed(self) -> None:
+        report = valid_report()
+        report["historicalEvidence"]["sourceSha256"] = "0" * 64
+        self.assertIn("historical evidence hash mismatch", self.check(report) or "")
 
     def test_duplicate_strategy_evidence_fails_closed(self) -> None:
         report = valid_report()
