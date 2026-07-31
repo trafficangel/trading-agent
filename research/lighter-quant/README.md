@@ -112,9 +112,10 @@ capacity. Its sole change is the mirrored completed-bar trend stack:
 Selection subtracts each market's measured immediately executable full-round-
 trip L2 p95 at the target $100 Real-canary notional. It does not use a common
 0.10% or 0.15% cost assumption. A separate `1.5 × p95` result is sensitivity
-evidence only and is not a cost estimate. Prospective Shadow records actual
-side-specific $1,000 VWAP and funding and therefore remains the authoritative
-execution test.
+evidence only and is not a cost estimate. The current prospective cohort uses
+actual side-specific `$100` VWAP and exact settled funding, matching the future
+isolated Real-canary notional; legacy `$1,000` rows remain audit-only and are
+excluded from promotion evidence.
 
 | Test | N | Net | PF | Drawdown | Long / Short | Folds |
 |---|---:|---:|---:|---:|---:|---:|
