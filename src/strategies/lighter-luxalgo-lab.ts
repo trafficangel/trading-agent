@@ -86,8 +86,8 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // even at 12 bps; SOL kept all five positive at 6 bps but one fold was
 // negative at 12 bps, so it is explicitly the weaker secondary candidate.
 // STRAT-030 is an independently reproduced SOL 5m Z-score reclaim model using
-// native Lighter candles, next-bar execution, zero commission, 2 bps
-// round-trip execution stress and adverse funding. It stayed positive over
+// native Lighter candles, next-bar execution, zero commission, 5 bps
+// round-trip execution/funding stress. It stayed positive over
 // every 30/60/90/120/180-day window and in both directions. It entered an
 // isolated $100-notional / 10x real canary on 2026-07-30. STRAT-031 is the adjacent, earlier
 // three-sigma touch entry. It is the highest-frequency member of the stable
@@ -98,8 +98,8 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // STRAT-032 and STRAT-033 apply the same completed-bar touch family to BNB and
 // LTC, using thresholds selected from broad profitable neighborhoods rather
 // than a single peak. Both stayed positive on 30/60/90/120/180-day windows,
-// in both directions and after 0.02% round-trip execution stress plus adverse
-// funding. On the user's explicit instruction, STRAT-032/033 were admitted as
+// in both directions and after 0.05% round-trip execution/funding stress. On
+// the user's explicit instruction, STRAT-032/033 were admitted as
 // separately risk-capped $100/10x Real canaries before their normal forward
 // gate; this is an experiment, not evidence that the backtest edge is live.
 // BCH, XLM, TRX and JUP candidates remain excluded.
@@ -413,13 +413,13 @@ const STRATEGIES: readonly StrategySpec[] = [
     backtest: {
       // Native Lighter 1m candles aggregated into complete 5m bars. Signals
       // use completed candles and fill at the next bar open. Net includes
-      // 0.02% round-trip execution stress plus 0.00125%/hour adverse funding.
+      // 0.05% round-trip execution/funding stress.
       period: '2026-02-01 → 2026-07-30',
-      trades: 446,
-      winRatePct: 65.2,
-      profitFactor: 1.28,
-      netPct: 49.06,
-      maxDrawdownPct: 19.81,
+      trades: 457,
+      winRatePct: 63.9,
+      profitFactor: 1.21,
+      netPct: 37.93,
+      maxDrawdownPct: 21.85,
     },
   },
   {
@@ -433,15 +433,15 @@ const STRATEGIES: readonly StrategySpec[] = [
     backtest: {
       // Native Lighter 1m candles aggregated into complete 5m bars. Signals
       // use completed candles and fill at the next bar open. Net includes
-      // 0.02% round-trip execution stress plus 0.00125%/hour adverse funding.
+      // 0.05% round-trip execution/funding stress.
       // No real fan-out: this correlated variant must earn its own forward
       // record before capital is considered.
       period: '2026-02-01 → 2026-07-30',
-      trades: 451,
-      winRatePct: 63.0,
-      profitFactor: 1.25,
-      netPct: 49.71,
-      maxDrawdownPct: 23.84,
+      trades: 462,
+      winRatePct: 63.4,
+      profitFactor: 1.19,
+      netPct: 39.46,
+      maxDrawdownPct: 24.22,
     },
   },
   {
@@ -453,15 +453,16 @@ const STRATEGIES: readonly StrategySpec[] = [
     marketId: 25,
     stopPct: 1.5,
     backtest: {
-      // Native Lighter completed 5m candles, next-bar execution, 0.02%
-      // round-trip execution stress and 0.00125%/hour adverse funding.
-      // Every 30/60/90/120/180-day window and both directions are positive.
+      // Native Lighter completed 5m candles, next-bar execution and 0.05%
+      // round-trip execution/funding stress. The full 180d sample is
+      // two-sided, while the recent 30d long side is weak, so this canary must
+      // not be scaled from backtest evidence alone.
       period: '2026-02-01 → 2026-07-30',
-      trades: 417,
-      winRatePct: 69.3,
-      profitFactor: 1.51,
-      netPct: 60.86,
-      maxDrawdownPct: 9.76,
+      trades: 415,
+      winRatePct: 68.2,
+      profitFactor: 1.37,
+      netPct: 45.95,
+      maxDrawdownPct: 11.87,
     },
   },
   {
@@ -473,16 +474,16 @@ const STRATEGIES: readonly StrategySpec[] = [
     marketId: 35,
     stopPct: 1.5,
     backtest: {
-      // Native Lighter completed 5m candles, next-bar execution, 0.02%
-      // round-trip execution stress and 0.00125%/hour adverse funding.
+      // Native Lighter completed 5m candles, next-bar execution and 0.05%
+      // round-trip execution/funding stress.
       // Periods 50/60/70 and thresholds 1.75/2.0/2.25 all passed, reducing
       // single-parameter selection risk.
       period: '2026-02-01 → 2026-07-30',
-      trades: 968,
-      winRatePct: 69.5,
-      profitFactor: 1.37,
-      netPct: 107.39,
-      maxDrawdownPct: 27.57,
+      trades: 972,
+      winRatePct: 68.0,
+      profitFactor: 1.27,
+      netPct: 80.40,
+      maxDrawdownPct: 28.22,
     },
   },
 ] as const;
@@ -500,6 +501,56 @@ const NATIVE_LIVE_STRATEGY_IDS = [
   'bnb-z60-touch',
   'ltc-z60-touch',
 ] as const;
+
+type NativeStrategyInfo = {
+  mode: 'reclaim' | 'touch';
+  threshold: number;
+  period: number;
+  timeExitBars: number;
+  realEnabled: boolean;
+  noteRu: string;
+  noteEn: string;
+};
+
+const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
+  'sol-z60-reclaim': {
+    mode: 'reclaim',
+    threshold: 3,
+    period: 60,
+    timeExitBars: 240,
+    realEnabled: true,
+    noteRu: 'Основной SOL-canary: вход позже touch-варианта, после подтверждённого возврата цены внутрь диапазона.',
+    noteEn: 'Primary SOL canary: it enters later than the touch variant, after price confirms a return inside the band.',
+  },
+  'sol-z60-touch': {
+    mode: 'touch',
+    threshold: 3,
+    period: 60,
+    timeExitBars: 240,
+    realEnabled: false,
+    noteRu: 'Более ранний и частый SOL-вход. Только Shadow: 180-дневный PF 1.19 ниже гейта 1.20 и сделки сильно коррелируют со STRAT-030.',
+    noteEn: 'Earlier and more frequent SOL entry. Shadow only: 180-day PF 1.19 is below the 1.20 gate and trades are highly correlated with STRAT-030.',
+  },
+  'bnb-z60-touch': {
+    mode: 'touch',
+    threshold: 3,
+    period: 60,
+    timeExitBars: 240,
+    realEnabled: true,
+    noteRu: 'BNB-canary. Полный 180-дневный тест двухсторонний, но свежая 30-дневная long-часть слабая — масштабирование запрещено до подтверждения forward.',
+    noteEn: 'BNB canary. The full 180-day test is two-sided, but the recent 30-day long book is weak, so scaling is blocked pending forward evidence.',
+  },
+  'ltc-z60-touch': {
+    mode: 'touch',
+    threshold: 2,
+    period: 60,
+    timeExitBars: 240,
+    realEnabled: true,
+    noteRu: 'Самый частый вариант: более близкий порог ±2σ даёт больше входов. Из-за исторической просадки 28.22% остаётся малым canary.',
+    noteEn: 'Highest-frequency variant: the closer ±2σ threshold creates more entries. Its 28.22% historical drawdown keeps it at small-canary size.',
+  },
+};
+
 const NATIVE_STRATEGIES = NATIVE_STRATEGY_IDS.map((id) => STRATEGY_BY_ID.get(id)!);
 const NATIVE_STRATEGY_ID_SET = new Set<string>(NATIVE_STRATEGY_IDS);
 const LUXALGO_STRATEGIES = STRATEGIES.filter(
@@ -1692,6 +1743,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-live{display:inline-block;margin-left:5px;padding:2px 5px;border-radius:999px;background:rgba(56,217,150,.12);color:#38d996;font-size:9px;letter-spacing:.04em}
 .ll-table{width:100%;overflow:hidden}.ll-table table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:11px}.ll-table th,.ll-table td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border);white-space:normal;overflow-wrap:anywhere;vertical-align:middle}.ll-table th{color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.025em}.ll-table small{color:var(--text-faint);font-size:9px}.ll-table .num{font-variant-numeric:tabular-nums}
 .ll-strategy-table{font-size:10px!important}.ll-strategy-table th,.ll-strategy-table td{padding:9px 6px!important;white-space:nowrap!important;overflow-wrap:normal!important;overflow:hidden;text-overflow:clip}.ll-strategy-table small{display:inline;font-size:8px}.ll-strategy-table th:nth-child(1){width:24%}.ll-strategy-table th:nth-child(2){width:7%}.ll-strategy-table th:nth-child(3){width:20%}.ll-strategy-table th:nth-child(4){width:14%}.ll-strategy-table th:nth-child(5){width:11%}.ll-strategy-table th:nth-child(6){width:12%}.ll-strategy-table th:nth-child(7){width:12%}
+.ll-strategy-panel .ll-table,.ll-strategy-panel .ll-strategy-table td:first-child{overflow:visible}.ll-strategy-name{position:relative;display:inline-flex;align-items:center;max-width:100%;cursor:help}.ll-strategy-name>i{display:inline-grid;place-items:center;flex:0 0 auto;width:14px;height:14px;margin-left:5px;border:1px solid rgba(163,106,255,.48);border-radius:50%;color:#bd91ff;font-size:8px;font-style:normal}.ll-strategy-name::after{content:attr(data-tooltip);position:absolute;z-index:40;top:calc(100% + 7px);left:0;width:min(430px,75vw);padding:10px 11px;border:1px solid rgba(163,106,255,.45);border-radius:9px;background:#171a22;color:var(--text);font-size:10px;font-weight:500;line-height:1.5;white-space:normal;box-shadow:0 12px 32px rgba(0,0,0,.42);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-3px);transition:opacity .12s ease,transform .12s ease}.ll-strategy-name:hover,.ll-strategy-name:focus{z-index:41;outline:none}.ll-strategy-name:hover::after,.ll-strategy-name:focus::after{opacity:1;visibility:visible;transform:translateY(0)}
 .ll-signal-table{font-size:9px!important}.ll-signal-table th,.ll-signal-table td{padding:7px 6px!important;white-space:nowrap!important;overflow-wrap:normal!important;overflow:hidden;text-overflow:clip}.ll-signal-table small{display:inline;font-size:8px}.ll-signal-table th:nth-child(1){width:14%}.ll-signal-table th:nth-child(2){width:6%}.ll-signal-table th:nth-child(3){width:15%}.ll-signal-table th:nth-child(4){width:11%}.ll-signal-table th:nth-child(5){width:20%}.ll-signal-table th:nth-child(6){width:18%}.ll-signal-table th:nth-child(7){width:16%}.ll-signal-table td:nth-child(7){white-space:normal!important;line-height:1.35}.ll-signal-table td:nth-child(2){font-weight:750;font-variant-numeric:tabular-nums}.ll-signal-table .ll-trade-ref{display:inline;white-space:nowrap;font-variant-numeric:tabular-nums}.ll-signal-status{display:inline-block;padding:2px 6px;border-radius:999px;font-size:9px;font-weight:800;letter-spacing:.025em;white-space:nowrap}.ll-signal-status.work{background:rgba(56,217,150,.12);color:#38d996}.ll-signal-status.done{background:rgba(92,163,255,.12);color:#76adff}.ll-signal-status.skip{background:rgba(255,190,92,.12);color:#ffc56e}.ll-signal-status.shadow{background:rgba(163,106,255,.13);color:#bd91ff}.ll-signal-status.error{background:rgba(255,101,119,.12);color:#ff6577}.ll-signal-status.wait{background:rgba(255,255,255,.06);color:var(--text-dim)}
 .ll-trades th:nth-child(1){width:14%}.ll-trades th:nth-child(2){width:21%}.ll-trades th:nth-child(3){width:9%}.ll-trades th:nth-child(4){width:12%}.ll-trades th:nth-child(5){width:13%}.ll-trades th:nth-child(6){width:11%}.ll-trades th:nth-child(7){width:8%}.ll-trades th:nth-child(8){width:12%}
 .ll-shadow-trades,.ll-live-trades{font-size:10px!important}.ll-shadow-trades th,.ll-shadow-trades td,.ll-live-trades th,.ll-live-trades td{padding:9px 6px!important;white-space:nowrap!important;overflow-wrap:normal!important;overflow:hidden;text-overflow:clip}.ll-shadow-trades small,.ll-live-trades small{display:inline;font-size:8px}.ll-shadow-trades th:nth-child(1),.ll-live-trades th:nth-child(1){width:16%}.ll-shadow-trades th:nth-child(2),.ll-live-trades th:nth-child(2){width:21%}.ll-shadow-trades th:nth-child(3),.ll-live-trades th:nth-child(3){width:9%}.ll-shadow-trades th:nth-child(4),.ll-live-trades th:nth-child(4){width:11%}.ll-shadow-trades th:nth-child(5),.ll-live-trades th:nth-child(5){width:12%}.ll-shadow-trades th:nth-child(6),.ll-live-trades th:nth-child(6){width:10%}.ll-shadow-trades th:nth-child(7),.ll-live-trades th:nth-child(7){width:7%}.ll-shadow-trades th:nth-child(8),.ll-live-trades th:nth-child(8){width:14%}
@@ -1699,9 +1751,10 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-note{font-size:11px;color:var(--text-faint);line-height:1.45}.ll-empty{padding:18px;text-align:center;color:var(--text-faint)}.collect{color:#bd91ff}.pass{color:#38d996}.fail{color:#ff6577}
 .ll-pager{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:11px}.ll-pager>small{color:var(--text-faint);font-size:10px}.ll-pager nav{display:flex;align-items:center;gap:5px}.ll-pager a,.ll-pager nav>span{display:grid;place-items:center;min-width:26px;height:26px;padding:0 6px;border:1px solid var(--border);border-radius:7px;color:var(--text-dim);font-size:10px;text-decoration:none}.ll-pager a:hover{border-color:#bd91ff;color:var(--text)}.ll-pager .active{border-color:rgba(163,106,255,.55);background:rgba(163,106,255,.16);color:#bd91ff;font-weight:700}.ll-pager .disabled{opacity:.35}
 .ll-details{padding:0}.ll-details>summary{cursor:pointer;list-style:none;padding:14px 15px;font-size:15px;font-weight:700}.ll-details>summary::-webkit-details-marker{display:none}.ll-details>summary::after{content:'＋';float:right;color:var(--text-faint)}.ll-details[open]>summary::after{content:'−'}.ll-details[open]>.ll-table{padding:0 15px 14px}
+.ll-native-guide{border-color:rgba(56,217,150,.28)}.ll-guide-body{padding:0 15px 15px}.ll-guide-body>.ll-note{margin:0 0 10px}.ll-guide-flow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 20px;margin:0;padding:0;list-style:none;counter-reset:guide}.ll-guide-flow li{position:relative;min-height:45px;padding:8px 9px 8px 35px;border-top:1px solid var(--border);color:var(--text-dim);font-size:10px;line-height:1.45;counter-increment:guide}.ll-guide-flow li::before{content:counter(guide);position:absolute;top:8px;left:7px;display:grid;place-items:center;width:19px;height:19px;border-radius:50%;background:rgba(56,217,150,.12);color:#38d996;font-size:9px;font-weight:800}.ll-guide-flow b{color:var(--text)}.ll-native-specs{margin-top:11px;border:1px solid var(--border);border-radius:10px;overflow:hidden}.ll-native-spec{display:grid;grid-template-columns:120px 130px minmax(220px,1.15fr) minmax(260px,1.6fr) 145px;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--border);font-size:9px;line-height:1.4}.ll-native-spec:last-child{border-bottom:0}.ll-native-spec>b{font-size:10px;white-space:nowrap}.ll-native-spec>span{color:var(--text-dim)}.ll-native-spec>span:nth-child(2){color:#bd91ff;font-weight:750;white-space:nowrap}.ll-native-spec>em{font-size:8px;font-style:normal;font-weight:800;text-align:right;white-space:nowrap}
 .ll-chart-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}.ll-chart-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px}.ll-chart-legend span{display:flex;align-items:center;gap:6px;color:var(--text-dim)}.ll-chart-legend i{width:18px;height:3px;border-radius:2px}.ll-chart-legend .shadow i{background:#a36aff}.ll-chart-legend .real i{background:#38d996}.ll-chart-legend b{font-variant-numeric:tabular-nums}.ll-chart{width:100%;margin-top:8px;overflow:hidden}.ll-chart svg{display:block;width:100%;height:auto;min-height:190px}.ll-chart-grid{stroke:rgba(255,255,255,.075);stroke-width:1}.ll-chart-zero{stroke:rgba(255,255,255,.24);stroke-width:1}.ll-chart-axis{fill:var(--text-faint);font-size:10px;font-family:inherit}.ll-chart-shadow{fill:none;stroke:#a36aff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-real{fill:none;stroke:#38d996;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ll-chart-dot-shadow{fill:#a36aff}.ll-chart-dot-real{fill:#38d996}.ll-chart-empty{display:grid;place-items:center;min-height:170px;color:var(--text-faint);font-size:12px}
 .ll-live-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px;margin:12px 0}.ll-live-metric{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.015);display:grid;gap:3px}.ll-live-metric small{font-size:9px;color:var(--text-faint);text-transform:uppercase}.ll-live-metric b{font-size:15px;font-variant-numeric:tabular-nums}.ll-live-metric em{font-size:9px;color:var(--text-faint);font-style:normal}.ll-live-strategy th:nth-child(1){width:25%}.ll-live-strategy th:nth-child(2){width:11%}.ll-live-strategy th:nth-child(3){width:10%}.ll-live-strategy th:nth-child(4){width:12%}.ll-live-strategy th:nth-child(5){width:12%}.ll-live-strategy th:nth-child(6){width:18%}.ll-live-strategy th:nth-child(7){width:12%}
-@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-modebar{align-items:stretch}.ll-modebar>div{width:100%}.ll-tabs a{flex:1}.ll-filter{align-items:stretch}.ll-filter label,.ll-filter select{width:100%;min-width:0}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-signal-table th:nth-child(3),.ll-signal-table td:nth-child(3){display:none}.ll-signal-table th:nth-child(1){width:17%}.ll-signal-table th:nth-child(2){width:9%}.ll-signal-table th:nth-child(4){width:17%}.ll-signal-table th:nth-child(5){width:17%}.ll-signal-table th:nth-child(6){width:16%}.ll-signal-table th:nth-child(7){width:24%}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-shadow-trades th:nth-child(1){width:16%}.ll-shadow-trades th:nth-child(2){width:19%}.ll-shadow-trades th:nth-child(4){width:12%}.ll-shadow-trades th:nth-child(5){width:14%}.ll-shadow-trades th:nth-child(6){width:11%}.ll-shadow-trades th:nth-child(7){width:8%}.ll-shadow-trades th:nth-child(8){width:20%}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}}`;
+@media(max-width:760px){.ll-stats{width:100%;justify-content:space-between;gap:8px}.ll-grid{grid-template-columns:repeat(2,1fr)}.ll-live-grid{grid-template-columns:repeat(2,1fr)}.ll-head{display:block}.ll-engine{margin-top:10px;width:max-content}.ll-modebar{align-items:stretch}.ll-modebar>div{width:100%}.ll-tabs a{flex:1}.ll-filter{align-items:stretch}.ll-filter label,.ll-filter select{width:100%;min-width:0}.ll-signal-labels{display:none}.ll-signal-row{grid-template-columns:1fr auto;gap:3px 10px;padding:8px 10px}.ll-signal-row>span:nth-child(n+3){font-size:10px}.ll-table table{font-size:10px}.ll-table th,.ll-table td{padding:6px 4px}.ll-strategy-table th:nth-child(3),.ll-strategy-table td:nth-child(3),.ll-strategy-table th:nth-child(6),.ll-strategy-table td:nth-child(6){display:none}.ll-signal-table th:nth-child(3),.ll-signal-table td:nth-child(3){display:none}.ll-signal-table th:nth-child(1){width:17%}.ll-signal-table th:nth-child(2){width:9%}.ll-signal-table th:nth-child(4){width:17%}.ll-signal-table th:nth-child(5){width:17%}.ll-signal-table th:nth-child(6){width:16%}.ll-signal-table th:nth-child(7){width:24%}.ll-trades th:nth-child(3),.ll-trades td:nth-child(3){display:none}.ll-shadow-trades th:nth-child(1){width:16%}.ll-shadow-trades th:nth-child(2){width:19%}.ll-shadow-trades th:nth-child(4){width:12%}.ll-shadow-trades th:nth-child(5){width:14%}.ll-shadow-trades th:nth-child(6){width:11%}.ll-shadow-trades th:nth-child(7){width:8%}.ll-shadow-trades th:nth-child(8){width:20%}.ll-live-strategy th:nth-child(5),.ll-live-strategy td:nth-child(5),.ll-live-strategy th:nth-child(6),.ll-live-strategy td:nth-child(6){display:none}.ll-guide-flow{grid-template-columns:1fr}.ll-native-spec{grid-template-columns:1fr;gap:3px}.ll-native-spec>em{text-align:left}.ll-strategy-name::after{position:fixed;top:18%;left:5vw;width:90vw}}`;
 
 export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
   const s = summary(LUXALGO_STRATEGIES);
@@ -1763,6 +1816,104 @@ export async function lighterNativeQuantHero(lang: Lang): Promise<string> {
   </a>`;
 }
 
+function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
+  if (info.mode === 'reclaim') {
+    return t(
+      lang,
+      `Long: предыдущий Z < −${info.threshold}, текущий Z ≥ −${info.threshold}. Short: предыдущий Z > +${info.threshold}, текущий Z ≤ +${info.threshold}.`,
+      `Long: previous Z < −${info.threshold}, current Z ≥ −${info.threshold}. Short: previous Z > +${info.threshold}, current Z ≤ +${info.threshold}.`,
+    );
+  }
+  return t(
+    lang,
+    `Long: текущий Z < −${info.threshold}. Short: текущий Z > +${info.threshold}.`,
+    `Long: current Z < −${info.threshold}. Short: current Z > +${info.threshold}.`,
+  );
+}
+
+function nativeStrategyTooltip(spec: StrategySpec, lang: Lang): string | null {
+  const info = NATIVE_STRATEGY_INFO[spec.id];
+  if (!info) return null;
+  return [
+    `${spec.name}.`,
+    t(
+      lang,
+      `Z-score считается по ${info.period} завершённым 5m закрытиям Lighter.`,
+      `Z-score is calculated from ${info.period} completed Lighter 5m closes.`,
+    ),
+    nativeEntryDescription(info, lang),
+    t(
+      lang,
+      `Выход у SMA${info.period} или через ${info.timeExitBars} баров (20 ч); stop ${spec.stopPct.toFixed(1)}%.`,
+      `Exit at SMA${info.period} or after ${info.timeExitBars} bars (20h); ${spec.stopPct.toFixed(1)}% stop.`,
+    ),
+    t(lang, info.noteRu, info.noteEn),
+  ].join(' ');
+}
+
+function nativeStrategyGuide(
+  lang: Lang,
+  specs: readonly StrategySpec[],
+): string {
+  const nativeSpecs = specs.filter((spec) => NATIVE_STRATEGY_INFO[spec.id]);
+  if (!nativeSpecs.length) return '';
+
+  const strategyLines = nativeSpecs.map((spec) => {
+    const info = NATIVE_STRATEGY_INFO[spec.id]!;
+    return `<div class="ll-native-spec">
+      <b>STRAT-${spec.code} · ${spec.asset}</b>
+      <span>${info.mode === 'reclaim' ? 'RECLAIM' : 'TOUCH'} · Z${info.period} · ±${info.threshold}σ</span>
+      <span>${esc(nativeEntryDescription(info, lang))}</span>
+      <span>${t(lang, info.noteRu, info.noteEn)}</span>
+      <em class="${info.realEnabled ? 'pass' : 'collect'}">${info.realEnabled ? 'SHADOW + REAL $100 / 10×' : 'SHADOW ONLY'}</em>
+    </div>`;
+  }).join('');
+
+  return `<details class="ll-panel ll-details ll-native-guide" open>
+    <summary>${t(lang, 'Как работают и отправляются сигналы Native Quant', 'How Native Quant signals are formed and delivered')}</summary>
+    <div class="ll-guide-body">
+      <p class="ll-note"><b>${t(lang, 'Важно:', 'Important:')}</b> ${t(
+        lang,
+        'это собственный движок. Он не зависит от LuxAlgo alerts, внешнего webhook и галочки Webhooks.',
+        'this is an in-house engine. It does not depend on LuxAlgo alerts, an external webhook, or the Webhooks checkbox.',
+      )}</p>
+      <ol class="ll-guide-flow">
+        <li><b>${t(lang, 'Завершённая свеча.', 'Completed candle.')}</b> ${t(
+          lang,
+          'Каждые 15 секунд runner проверяет новую закрытую 5m свечу с 25-секундным запасом на публикацию. Из Lighter загружаются 1m свечи; 5m бар принимается только при наличии всех пяти минут.',
+          'Every 15 seconds the runner checks for a newly completed 5m candle with a 25-second publication grace. It fetches Lighter 1m candles and accepts a 5m bar only when all five minutes exist.',
+        )}</li>
+        <li><b>${t(lang, 'Расчёт.', 'Calculation.')}</b> ${t(
+          lang,
+          'По последним 60 закрытиям считается SMA60, стандартное отклонение всей выборки и Z = (Close − SMA60) / σ. Незавершённая свеча в расчёт не попадает.',
+          'The latest 60 closes produce SMA60, population standard deviation, and Z = (Close − SMA60) / σ. The unfinished candle is never included.',
+        )}</li>
+        <li><b>${t(lang, 'Решение.', 'Decision.')}</b> ${t(
+          lang,
+          'Touch входит сразу за порогом ±σ; Reclaim ждёт возврата Z обратно внутрь порога. Открытый Long закрывается при Close ≥ SMA60, Short — при Close ≤ SMA60; резервный выход по времени — 240 баров, то есть 20 часов.',
+          'Touch enters immediately beyond its ±σ threshold; Reclaim waits for Z to return inside the threshold. An open Long exits at Close ≥ SMA60 and a Short at Close ≤ SMA60; the fallback time exit is 240 bars, or 20 hours.',
+        )}</li>
+        <li><b>${t(lang, 'Внутренний сигнал.', 'Internal signal.')}</b> ${t(
+          lang,
+          'Runner передаёт в общую очередь strategy_id, entry/exit, side, symbol, timeframe=5, цену закрытия и bar_time. SHA-256 ключ из стратегии, события и времени бара не позволяет обработать дубль повторно.',
+          'The runner sends strategy_id, entry/exit, side, symbol, timeframe=5, close price, and bar_time to the shared queue. A SHA-256 key built from strategy, event, and bar time prevents duplicate processing.',
+        )}</li>
+        <li><b>${t(lang, 'Shadow-исполнение.', 'Shadow execution.')}</b> ${t(
+          lang,
+          'Сразу снимается свежий WebSocket L2 Lighter. Допускается до 5 секунд коротких повторов по 100 мс, но фиксированной задержки нет. Стакан должен исполнить $1000; вход и выход записываются по реальному VWAP нужной стороны, поэтому spread и slippage уже внутри PnL, funding добавляется отдельно.',
+          'A fresh Lighter WebSocket L2 snapshot is taken immediately. Up to five seconds of 100ms retries are allowed, with no fixed delay. The book must fill $1,000; entry and exit use executable side-specific VWAP, so spread and slippage are already embedded in PnL, while funding is added separately.',
+        )}</li>
+        <li><b>${t(lang, 'Real-canary и защита.', 'Real canary and protection.')}</b> ${t(
+          lang,
+          'Тот же сигнал видит отдельный Real-исполнитель. Только разрешённые STRAT-030/032/033 могут открыть $100 с плечом 10×. После подтверждения позиции сразу ставится биржевой reduce-only stop 1.5%; новые входы отключаются при дневном убытке −$10, портфельной просадке −$15 или паузе конкретной стратегии. STRAT-031 остаётся только в Shadow.',
+          'A separate Real executor observes the same signal. Only allowlisted STRAT-030/032/033 may open $100 at 10× leverage. Once the position is confirmed, an exchange-native 1.5% reduce-only stop is placed immediately; new entries stop at a −$10 daily loss, −$15 portfolio drawdown, or per-strategy pause. STRAT-031 remains Shadow-only.',
+        )}</li>
+      </ol>
+      <div class="ll-native-specs">${strategyLines}</div>
+    </div>
+  </details>`;
+}
+
 function strategyRows(
   lang: Lang,
   specs: readonly StrategySpec[] = STRATEGIES,
@@ -1772,8 +1923,12 @@ function strategyRows(
     const g = gate(s, lang);
     const wr = s.closed ? s.wins / s.closed * 100 : null;
     const feed = executionSnapshot(spec);
+    const tooltip = nativeStrategyTooltip(spec, lang);
+    const strategyLabel = tooltip
+      ? `<span class="ll-strategy-name" tabindex="0" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small><i>?</i></span>`
+      : `<b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small>`;
     return `<tr>
-      <td><b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small></td>
+      <td>${strategyLabel}</td>
       <td class="${'error' in feed ? 'neg' : 'pos'}">${'error' in feed ? 'OFF' : 'LIVE'}</td>
       <td class="num"><b>${spec.backtest.trades} · ${spec.backtest.winRatePct.toFixed(1)}% · ${spec.backtest.profitFactor.toFixed(2)}</b><small> · ${signedPct(spec.backtest.netPct)} · SL ${spec.stopPct.toFixed(1)}%</small></td>
       <td class="num"><b>${s.closed} / ${s.open}</b><small> · WR ${wr == null ? '—' : `${wr.toFixed(0)}%`} · PF ${pfLabel(s.profitFactor)}</small></td>
@@ -2355,7 +2510,9 @@ async function render(
 
       ${scopeControl}
 
-      <div class="ll-panel"><h2>${requested.strategy ? `${t(lang, 'Статистика стратегии', 'Strategy statistics')} · STRAT-${requested.strategy.code}` : t(lang, 'Индивидуальная статистика стратегий', 'Individual strategy statistics')}</h2><div class="ll-table"><table class="ll-strategy-table">
+      ${nativeStrategyGuide(lang, scopeSpecs)}
+
+      <div class="ll-panel ll-strategy-panel"><h2>${requested.strategy ? `${t(lang, 'Статистика стратегии', 'Strategy statistics')} · STRAT-${requested.strategy.code}` : t(lang, 'Индивидуальная статистика стратегий', 'Individual strategy statistics')}</h2><div class="ll-table"><table class="ll-strategy-table">
         <thead><tr><th>Strategy</th><th>L2</th><th>Backtest · N / WR / PF</th><th>Forward · closed / open</th><th>Net</th><th>DD / halves</th><th>Gate</th></tr></thead>
         <tbody>${strategyRows(lang, scopeSpecs)}</tbody>
       </table></div>
