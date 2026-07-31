@@ -250,7 +250,16 @@ const auditPath = resolve(
 );
 const generatedAt = new Date().toISOString();
 if (!existsSync(auditPath)) {
-  output({ version: 'lighter-microstructure-sweep-v3', generatedAt, mode, status: 'not_ready', failures: ['readiness audit missing'] });
+  output({
+    version: 'lighter-microstructure-sweep-v3',
+    generatedAt,
+    mode,
+    status: 'not_ready',
+    failures: ['readiness audit missing'],
+    rules: RULE_VARIANTS,
+    shadowEligibleRules: [],
+    autoPromotion: false,
+  });
   process.exit(0);
 }
 const audit = JSON.parse(readFileSync(auditPath, 'utf8')) as Audit;
@@ -273,6 +282,8 @@ if (!selectedGate.passed || readinessFailures.length) {
     auditGeneratedAt: audit.generatedAt,
     failures: readinessFailures,
     rules: RULE_VARIANTS,
+    shadowEligibleRules: [],
+    autoPromotion: false,
   });
   process.exit(0);
 }
@@ -296,6 +307,8 @@ try {
     status: 'not_ready',
     failures: [error instanceof Error ? error.message : String(error)],
     rules: RULE_VARIANTS,
+    shadowEligibleRules: [],
+    autoPromotion: false,
   });
   process.exit(0);
 }

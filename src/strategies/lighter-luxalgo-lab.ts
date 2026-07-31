@@ -2123,6 +2123,17 @@ type NativeMicrostructureAudit = {
   }>;
 };
 
+type NativeMicrostructureSweep = {
+  generatedAt?: string;
+  mode?: 'exploratory' | 'frozen';
+  status?: 'not_ready' | 'evaluated';
+  failures?: string[];
+  rules?: string[];
+  evaluations?: unknown[];
+  shadowEligibleRules?: string[];
+  autoPromotion?: boolean;
+};
+
 function nativeMicrostructureAudit(): NativeMicrostructureAudit | null {
   try {
     const path = resolve(
@@ -2135,11 +2146,78 @@ function nativeMicrostructureAudit(): NativeMicrostructureAudit | null {
   }
 }
 
+function nativeMicrostructureSweep(
+  environmentKey: string,
+  fallbackPath: string,
+): NativeMicrostructureSweep | null {
+  try {
+    const path = resolve(process.env[environmentKey] ?? fallbackPath);
+    return JSON.parse(readFileSync(path, 'utf8')) as NativeMicrostructureSweep;
+  } catch {
+    return null;
+  }
+}
+
+function nativeMicrostructureSweepStatus(
+  lang: Lang,
+  label: string,
+  expectedMode: 'exploratory' | 'frozen',
+  report: NativeMicrostructureSweep | null,
+): string {
+  const valid = report?.mode === expectedMode && report.autoPromotion === false;
+  const generatedAt = Date.parse(report?.generatedAt ?? '');
+  const ageMinutes = Number.isFinite(generatedAt)
+    ? Math.max(0, Math.round((Date.now() - generatedAt) / 60_000))
+    : null;
+  const ruleCount = report?.rules?.length ?? report?.evaluations?.length ?? 0;
+  const eligible = expectedMode === 'frozen'
+    ? report?.shadowEligibleRules?.length ?? 0
+    : 0;
+  const title = report?.failures?.length
+    ? report.failures.join('; ')
+    : expectedMode === 'exploratory'
+      ? t(
+        lang,
+        'Диагностический результат никогда не допускает стратегию в Shadow.',
+        'Diagnostic output can never qualify a strategy for Shadow.',
+      )
+      : t(
+        lang,
+        'Только этот независимый frozen-отчёт может создать кандидата для ручного Shadow-допуска.',
+        'Only this independent frozen report can create a candidate for manual Shadow admission.',
+      );
+  let text: string;
+  let cls = 'collect';
+  if (!valid) {
+    text = t(lang, 'нет отчёта', 'no report');
+  } else if (report.status !== 'evaluated') {
+    text = `${t(lang, 'ждём', 'waiting')} · ${ruleCount}`;
+  } else if (expectedMode === 'exploratory') {
+    text = `${t(lang, 'диагностика', 'diagnostic')} · ${ruleCount}`;
+    cls = 'pass';
+  } else if (eligible > 0) {
+    text = `${t(lang, 'кандидаты', 'candidates')} ${eligible}/${ruleCount}`;
+    cls = 'pass';
+  } else {
+    text = `${t(lang, 'нет кандидатов', 'no candidates')} · ${ruleCount}`;
+  }
+  const freshness = ageMinutes == null ? '' : ` · ${ageMinutes}m`;
+  return `<span title="${esc(title)}"><small>${label}</small><b class="${cls}">${text}${freshness}</b></span>`;
+}
+
 function nativeMicrostructureReadiness(
   lang: Lang,
   strategy: StrategySpec | null,
 ): string {
   const audit = nativeMicrostructureAudit();
+  const exploratory = nativeMicrostructureSweep(
+    'LIGHTER_MICRO_EXPLORATORY',
+    'data/lighter-native-microstructure-exploratory.json',
+  );
+  const frozen = nativeMicrostructureSweep(
+    'LIGHTER_MICRO_SWEEP',
+    'data/lighter-native-microstructure-sweep.json',
+  );
   if (!audit?.summary) {
     return `<div class="ll-readiness"><b>Native data</b><span class="collect">${t(
       lang,
@@ -2207,6 +2285,13 @@ function nativeMicrostructureReadiness(
     ${gate('1d', audit.gates?.collectionHealthy?.passed)}
     ${gate('7d', audit.gates?.exploratoryResearch?.passed)}
     ${gate('21d', audit.gates?.frozenCandidateResearch?.passed)}
+    ${nativeMicrostructureSweepStatus(
+      lang,
+      t(lang, '7d диагностика', '7d diagnostic'),
+      'exploratory',
+      exploratory,
+    )}
+    ${nativeMicrostructureSweepStatus(lang, '21d frozen', 'frozen', frozen)}
     <em>${ageMinutes == null
     ? t(lang, 'время неизвестно', 'time unknown')
     : `${t(lang, 'обновлено', 'updated')} ${ageMinutes}m`}</em>
