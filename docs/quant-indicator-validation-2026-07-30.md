@@ -1050,6 +1050,41 @@ No threshold, lookback, holding period or pair subset is retuned. The family is
 closed without Shadow, Real or website registration. Frozen evidence is in
 `data/lighter-dynamic-pair-spread-results.json`.
 
+## Preregistered adaptive serial-dependence strategy
+
+Before its first result is calculated, the next independent candle-based
+family is frozen as `SERIAL120-A0.15-B0.5-V1-H15`. It tests whether a market's
+recent one-bar return path is persistently trend-like or mean-reverting, rather
+than assuming one behaviour for every regime:
+
+- at completed bar `t`, calculate Pearson lag-one autocorrelation from the 120
+  completed log returns ending at `t-1`; the signal candle is excluded from
+  regime estimation;
+- require `rho >= +0.15` for continuation or `rho <= -0.15` for reversal;
+- require the completed signal candle body to be at least `0.5 x ATR14` and its
+  volume to be at least the trailing 20-bar mean;
+- in the positive-rho regime, follow the signal candle direction; in the
+  negative-rho regime, fade it. Long and Short rules are exact mirrors;
+- enter only at the next bar open, allow one position per market and exit after
+  15 clock minutes or at a symmetric 1% safety stop. No take-profit or
+  intrabar indicator value is used;
+- run the identical frozen rule on the common 15-market universe at 1m and 5m,
+  deduct each market's measured executable `$100` round-trip p95 and exact
+  signed Lighter funding, and retain observed maximum execution only as a
+  non-blocking sensitivity result.
+
+Qualification uses the existing Native portfolio gate without exceptions:
+at least 120 closes, positive net and mean-trade L95, PF at least 1.20,
+positive observed-maximum net with PF at least 1.10, drawdown no worse than 5%
+of observed fixed-notional capacity, at least three of four positive
+chronological folds, positive IS/OOS, Long/Short, bull/bear, high/low
+volatility and 30/60/90-day books, broad market contribution and no more than
+10% position-cap drops. A historical pass can create prospective Shadow only;
+Real remains disabled. No autocorrelation threshold, lookback, body/volume
+gate, holding period, stop, symbol subset, timeframe or regime may be changed
+after the first result is inspected; failure closes the family without a
+rescue grid.
+
 ## Prospective L2 microstructure research cost policy
 
 The continuously recorded gap-free Lighter L2 dataset has not yet reached its
