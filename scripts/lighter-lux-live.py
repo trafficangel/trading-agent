@@ -23,6 +23,12 @@ from typing import Any
 
 import lighter
 
+from lighter_live_risk import (
+    StrategyRiskPolicy,
+    evaluate_strategy_risk,
+    pnl_stats,
+)
+
 
 @dataclass(frozen=True)
 class Strategy:
@@ -82,6 +88,12 @@ class LiveRunner:
         )
         self.strategy_gate_sample = int(
             os.getenv("LIGHTER_LIVE_STRATEGY_GATE_SAMPLE", "20")
+        )
+        self.strategy_max_drawdown_usd = float(
+            os.getenv("LIGHTER_LIVE_STRATEGY_MAX_DRAWDOWN_USD", "5")
+        )
+        self.strategy_recent_window = int(
+            os.getenv("LIGHTER_LIVE_STRATEGY_RECENT_WINDOW", "10")
         )
         self.max_slippage = float(os.getenv("LIGHTER_LIVE_MAX_SLIPPAGE", "0.003"))
         self.native_promotion_report = os.getenv(
@@ -489,30 +501,16 @@ class LiveRunner:
 
     @staticmethod
     def pnl_stats(rows: list[sqlite3.Row]) -> dict[str, float | int | None]:
-        pnls = [float(row["net_pnl_usd"] or 0) for row in rows]
-        gross_win = sum(value for value in pnls if value > 0)
-        gross_loss = abs(sum(value for value in pnls if value < 0))
-        split = len(pnls) // 2
-        equity = 0.0
-        peak = 0.0
-        max_drawdown = 0.0
-        for value in pnls:
-            equity += value
-            peak = max(peak, equity)
-            max_drawdown = max(max_drawdown, peak - equity)
+        stats = pnl_stats([float(row["net_pnl_usd"] or 0) for row in rows])
         return {
-            "closed": len(pnls),
-            "net": sum(pnls),
-            "profit_factor": (
-                gross_win / gross_loss
-                if gross_loss > 0
-                else None
-            ),
-            "first_half": sum(pnls[:split]),
-            "second_half": sum(pnls[split:]),
-            "equity_peak": peak,
-            "current_drawdown": peak - equity,
-            "max_drawdown": max_drawdown,
+            "closed": stats.closed,
+            "net": stats.net,
+            "profit_factor": stats.profit_factor,
+            "first_half": stats.first_half,
+            "second_half": stats.second_half,
+            "equity_peak": stats.equity_peak,
+            "current_drawdown": stats.current_drawdown,
+            "max_drawdown": stats.max_drawdown,
         }
 
     def refresh_portfolio_risk(self) -> sqlite3.Row:
@@ -579,59 +577,30 @@ class LiveRunner:
                    ORDER BY closed_at,id""",
                 (strategy_id,),
             ).fetchall()
-            stats = self.pnl_stats(rows)
-            closed = int(stats["closed"] or 0)
-            net = float(stats["net"] or 0)
-            profit_factor = stats["profit_factor"]
-            second_half = float(stats["second_half"] or 0)
-            max_drawdown = float(stats["max_drawdown"] or 0)
+            pnls = [float(row["net_pnl_usd"] or 0) for row in rows]
             enabled = int(state["enabled"])
             paused_at = state["paused_at"]
             pause_reason = state["pause_reason"]
-
-            weak_after_sample = (
-                closed >= self.strategy_pause_sample
-                and (
-                    net <= 0
-                    or (
-                        profit_factor is not None
-                        and float(profit_factor) < 1.0
-                    )
-                    or second_half <= 0
-                )
+            decision = evaluate_strategy_risk(
+                pnls,
+                enabled == 1,
+                StrategyRiskPolicy(
+                    pause_sample=self.strategy_pause_sample,
+                    gate_sample=self.strategy_gate_sample,
+                    maximum_drawdown_usd=self.strategy_max_drawdown_usd,
+                    recent_window=self.strategy_recent_window,
+                ),
             )
-            passed = (
-                closed >= self.strategy_gate_sample
-                and net > 0
-                and (
-                    profit_factor is None
-                    or float(profit_factor) >= 1.2
-                )
-                and second_half > 0
-                and max_drawdown <= self.max_drawdown_usd
-            )
-            if enabled and weak_after_sample:
+            stats = decision.stats
+            if decision.pause:
                 enabled = 0
                 paused_at = now
-                pause_reason = (
-                    f"live gate failed after {closed}: net ${net:.2f}, "
-                    f"PF {'inf' if profit_factor is None else f'{float(profit_factor):.2f}'}, "
-                    f"second half ${second_half:.2f}"
-                )
+                pause_reason = decision.reason
                 self.log(
                     "strategy_paused",
                     strategy=strategy_id,
                     reason=pause_reason,
                 )
-            gate_status = (
-                "paused"
-                if not enabled
-                else "passed"
-                if passed
-                else "watch"
-                if closed >= self.strategy_pause_sample
-                else "collecting"
-            )
             self.db.execute(
                 """UPDATE lighter_lux_live_strategy_state
                    SET enabled=?,closed_trades=?,net_pnl_usd=?,
@@ -641,13 +610,13 @@ class LiveRunner:
                    WHERE strategy_id=?""",
                 (
                     enabled,
-                    closed,
-                    net,
-                    profit_factor,
-                    stats["first_half"],
-                    second_half,
-                    max_drawdown,
-                    gate_status,
+                    stats.closed,
+                    stats.net,
+                    stats.profit_factor,
+                    stats.first_half,
+                    stats.second_half,
+                    stats.max_drawdown,
+                    decision.gate_status,
                     paused_at,
                     pause_reason,
                     now,
@@ -1546,6 +1515,8 @@ class LiveRunner:
             leverage=self.leverage,
             daily_loss=self.daily_loss_usd,
             max_drawdown=self.max_drawdown_usd,
+            strategy_max_drawdown=self.strategy_max_drawdown_usd,
+            strategy_recent_window=self.strategy_recent_window,
         )
 
     async def run(self) -> None:

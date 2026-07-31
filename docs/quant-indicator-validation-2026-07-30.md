@@ -741,6 +741,17 @@ rows age out of the fixed recent window. Whole-cohort execution failures still
 prevent Real promotion, but no longer keep a recovered Shadow feed disabled.
 Real remains manual and is never enabled by the audit itself.
 
+The isolated `$100` Real-canary has a second, independent fail-closed layer.
+Each strategy is permanently paused for manual review as soon as its observed
+maximum Real drawdown reaches `$5`, even before ten closes. Starting at ten
+closes, cumulative net/PF, the chronological second half and the most recent
+ten exact Real trades must remain positive with PF at least `1.00`; starting at
+twenty, the full Real book needs PF at least `1.20` to show `passed`. The
+existing `$10` daily and `$15` portfolio-drawdown breakers remain additional
+ceilings. A paused strategy is never re-enabled automatically, and disabling
+entries never blocks reconciliation, reduce-only stops or exits for an open
+position.
+
 ### Frozen breakout-family rejection (2026-07-31)
 
 The next independent hypothesis was symmetric trend/breakout rather than
