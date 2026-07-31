@@ -2125,6 +2125,7 @@ type NativeMicrostructureAudit = {
 
 type NativeMicrostructureSweep = {
   generatedAt?: string;
+  suite?: 'core' | 'challenger';
   mode?: 'exploratory' | 'frozen';
   status?: 'not_ready' | 'evaluated';
   failures?: string[];
@@ -2306,6 +2307,14 @@ function nativeMicrostructureReadiness(
     'LIGHTER_MICRO_SWEEP',
     'data/lighter-native-microstructure-sweep.json',
   );
+  const challengerExploratory = nativeMicrostructureSweep(
+    'LIGHTER_MICRO_CHALLENGER_EXPLORATORY',
+    'data/lighter-native-microstructure-challenger-exploratory.json',
+  );
+  const challengerFrozen = nativeMicrostructureSweep(
+    'LIGHTER_MICRO_CHALLENGER_SWEEP',
+    'data/lighter-native-microstructure-challenger-sweep.json',
+  );
   if (!audit?.summary) {
     return `<div class="ll-readiness"><b>Native data</b><span class="collect">${t(
       lang,
@@ -2380,6 +2389,18 @@ function nativeMicrostructureReadiness(
       exploratory,
     )}
     ${nativeMicrostructureSweepStatus(lang, '21d frozen', 'frozen', frozen)}
+    ${nativeMicrostructureSweepStatus(
+      lang,
+      t(lang, '7d challenger', '7d challenger'),
+      'exploratory',
+      challengerExploratory,
+    )}
+    ${nativeMicrostructureSweepStatus(
+      lang,
+      t(lang, '21d challenger', '21d challenger'),
+      'frozen',
+      challengerFrozen,
+    )}
     ${nativeMicrostructureShadowStatus(lang)}
     <em>${ageMinutes == null
     ? t(lang, 'время неизвестно', 'time unknown')
