@@ -297,6 +297,28 @@ lookback or hold after seeing these results, and do not add it to Native
 Shadow or Real. The independent search remains focused on the preregistered
 prospective microstructure hypotheses once their data-readiness gates open.
 
+## Preregistered residual-momentum sibling — awaiting first run
+
+The economically opposite continuation rule is frozen before its first run.
+It inherits the rejected residual-reversion experiment's complete design and
+changes exactly one semantic choice: buy the one-hour residual leader and sell
+the residual laggard. The 15-market universe, BTC factor, seven-day causal
+beta/correlation window, 15-minute decisions, 0.80% minimum dispersion,
+beta-neutral weights, next-bar-open entry, one-hour hold, no-overlap rule,
+measured market-specific $100 p95 execution cost, funding, 1.5x sensitivity
+and every qualification gate remain unchanged. Both 1m and strict 5m are one
+elapsed-time hypothesis, not separately tuned models.
+
+This sibling is motivated by residual continuation rather than by changing a
+parameter after the mean-reversion loss. It is nevertheless a second family
+tested on the same history, so a historical pass can authorize prospective
+Shadow only and cannot authorize Real. The first run must be retained whether
+it passes or fails:
+
+```bash
+XS_RESIDUAL_FAMILY=momentum pnpm tsx scripts/research-lighter-xs-residual.ts
+```
+
 ## LuxAlgo database follow-up
 
 A separate LuxAlgo AI Backtesting database search was run for symmetric

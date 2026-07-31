@@ -1,11 +1,14 @@
 /**
- * Preregistered Lighter-native cross-sectional residual reversion.
+ * Preregistered Lighter-native cross-sectional residual pair research.
  *
  * This is one economic hypothesis expressed at 1m and 5m, not a parameter
  * optimizer. At fixed 15-minute decisions it beta-neutralizes every alt to
  * BTC over the prior seven days, ranks the causal one-hour residual move, and
- * pairs the laggard long with the leader short when dispersion is at least
- * 0.80%. Entry is the next bar open and exit is exactly one hour later.
+ * pairs the two residual extremes when dispersion is at least 0.80%.
+ * `reversion` buys the laggard and sells the leader. Its independently
+ * preregistered `momentum` sibling does the exact reverse without changing
+ * any lookback, threshold, holding period, cost, or qualification gate.
+ * Entry is the next bar open and exit is exactly one hour later.
  *
  * Qualification is intentionally fail-closed and uses the same $100 market-
  * specific executable L2 p95 costs as Native Quant, adverse funding, 1.5x
@@ -33,7 +36,15 @@ const MIN_DISPERSION_PCT = 0.8;
 const FUNDING_PER_HOUR_PCT = 0.00125;
 const MAX_DRAWDOWN_PCT = 5;
 const POSITION_NOTIONAL_USD = 100;
-const RESULT_PATH = resolve('data/lighter-xs-residual-results.json');
+type Family = 'reversion' | 'momentum';
+const familyInput = process.env.XS_RESIDUAL_FAMILY ?? 'reversion';
+if (familyInput !== 'reversion' && familyInput !== 'momentum') {
+  throw new Error(`XS_RESIDUAL_FAMILY must be reversion or momentum, got ${familyInput}`);
+}
+const FAMILY: Family = familyInput;
+const RESULT_PATH = resolve(FAMILY === 'reversion'
+  ? 'data/lighter-xs-residual-results.json'
+  : 'data/lighter-xs-momentum-results.json');
 const COST_PATH = resolve('data/lighter-execution-costs-native-portfolio-100-20260731.json');
 
 type Asset = typeof ASSETS[number];
@@ -269,18 +280,20 @@ function simulate(
     if (!laggard || !leader || laggard.asset === leader.asset) continue;
     const dispersionPct = leader.residualPct - laggard.residualPct;
     if (dispersionPct < MIN_DISPERSION_PCT) continue;
-    const hedge = laggard.beta / leader.beta;
+    const longCandidate = FAMILY === 'reversion' ? laggard : leader;
+    const shortCandidate = FAMILY === 'reversion' ? leader : laggard;
+    const hedge = longCandidate.beta / shortCandidate.beta;
     const longWeight = 1 / (1 + hedge);
     const shortWeight = hedge / (1 + hedge);
     const entryIndex = signalIndex + 1;
     const exitIndex = entryIndex + profile.holdBars;
-    const longSeries = data.get(laggard.asset)!;
-    const shortSeries = data.get(leader.asset)!;
+    const longSeries = data.get(longCandidate.asset)!;
+    const shortSeries = data.get(shortCandidate.asset)!;
     const longReturn = longSeries.o[exitIndex]! / longSeries.o[entryIndex]! - 1;
     const shortReturn = shortSeries.o[exitIndex]! / shortSeries.o[entryIndex]! - 1;
     const grossPct = (longWeight * longReturn - shortWeight * shortReturn) * 100;
-    const costPct = longWeight * costs.get(laggard.asset)!
-      + shortWeight * costs.get(leader.asset)!;
+    const costPct = longWeight * costs.get(longCandidate.asset)!
+      + shortWeight * costs.get(shortCandidate.asset)!;
     const fundingPct = FUNDING_PER_HOUR_PCT * HOLD_MINUTES / 60;
     const regime: Regime = factor.c[signalIndex]! >= factor.c[signalIndex - 24 * 60 / profile.timeframeMinutes]!
       ? 'bull'
@@ -291,8 +304,8 @@ function simulate(
     trades.push({
       entryAt: factor.t[entryIndex]!,
       exitAt: factor.t[exitIndex]!,
-      long: laggard.asset,
-      short: leader.asset,
+      long: longCandidate.asset,
+      short: shortCandidate.asset,
       longWeight,
       shortWeight,
       dispersionPct,
@@ -474,7 +487,9 @@ function main(): void {
     return profileReport(profile, trades);
   });
   const report = {
-    version: 'lighter-xs-residual-v1',
+    version: FAMILY === 'reversion'
+      ? 'lighter-xs-residual-v1'
+      : 'lighter-xs-momentum-v1',
     generatedAt: new Date().toISOString(),
     preregistered: true,
     canTrade: false,
@@ -486,6 +501,10 @@ function main(): void {
       holdMinutes: HOLD_MINUTES,
       decisionMinutes: DECISION_MINUTES,
       minDispersionPct: MIN_DISPERSION_PCT,
+      family: FAMILY,
+      direction: FAMILY === 'reversion'
+        ? 'long residual laggard / short residual leader'
+        : 'long residual leader / short residual laggard',
       nextBarOpen: true,
       noOverlap: true,
     },
@@ -516,6 +535,7 @@ function main(): void {
     qualifiedTimeframes: results.filter((result) => result.pass).map((result) => result.profile.timeframeMinutes),
   };
   writeFileSync(RESULT_PATH, `${JSON.stringify(report, null, 2)}\n`);
+  console.log(`Cross-sectional residual ${FAMILY} · frozen parameters · report ${RESULT_PATH}`);
   console.table(results.map((result) => ({
     tf: `${result.profile.timeframeMinutes}m`,
     n: result.full.n,
