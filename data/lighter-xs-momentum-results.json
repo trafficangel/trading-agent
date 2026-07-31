@@ -1,0 +1,419 @@
+{
+  "version": "lighter-xs-momentum-v1",
+  "generatedAt": "2026-07-31T13:42:24.265Z",
+  "preregistered": true,
+  "canTrade": false,
+  "hypothesis": {
+    "factor": "BTC",
+    "assets": [
+      "BTC",
+      "ETH",
+      "SOL",
+      "BNB",
+      "LTC",
+      "HYPE",
+      "ZEC",
+      "DOGE",
+      "NEAR",
+      "JUP",
+      "LIT",
+      "GRAM",
+      "XMR",
+      "ENA",
+      "TAO"
+    ],
+    "betaDays": 7,
+    "signalMinutes": 60,
+    "holdMinutes": 60,
+    "decisionMinutes": 15,
+    "minDispersionPct": 0.8,
+    "family": "momentum",
+    "direction": "long residual leader / short residual laggard",
+    "nextBarOpen": true,
+    "noOverlap": true
+  },
+  "execution": {
+    "positionNotionalUsd": 100,
+    "costs": "market-specific immediately executable L2 p95, weighted by pair leg",
+    "costStressMultiplier": 1.5,
+    "adverseFundingPerHourPct": 0.00125
+  },
+  "data": {
+    "source": "Lighter native 1m candles; 5m strictly aggregated from five consecutive 1m bars",
+    "from": "2026-02-01T10:05:00.000Z",
+    "through": "2026-07-31T07:24:00.000Z",
+    "days": 179.889,
+    "gapsFilled": 0
+  },
+  "gate": {
+    "minimumTrades": 120,
+    "profitFactor": 1.2,
+    "stressProfitFactor": 1.1,
+    "meanL95Positive": true,
+    "oosFraction": 0.3,
+    "maximumDrawdownPct": 5,
+    "bothRegimesAndVolatilityHalves": true,
+    "breadthAndLeaveOneOut": true
+  },
+  "results": [
+    {
+      "profile": {
+        "timeframeMinutes": 1,
+        "betaBars": 10080,
+        "signalBars": 60,
+        "holdBars": 60,
+        "decisionBars": 15
+      },
+      "full": {
+        "n": 2743,
+        "netPct": -150.918646,
+        "stressPct": -210.969376,
+        "profitFactor": 0.757102,
+        "stressProfitFactor": 0.679086,
+        "meanL95Pct": -0.073658,
+        "maxDrawdownPct": -165.1405,
+        "winRatePct": 40.90412
+      },
+      "discovery": {
+        "n": 1920,
+        "netPct": -82.034203,
+        "stressPct": -124.77463,
+        "profitFactor": 0.814502,
+        "stressProfitFactor": 0.732913,
+        "meanL95Pct": -0.066466,
+        "maxDrawdownPct": -96.661956,
+        "winRatePct": 42.864583
+      },
+      "oos": {
+        "n": 823,
+        "netPct": -68.884443,
+        "stressPct": -86.194746,
+        "profitFactor": 0.615362,
+        "stressProfitFactor": 0.546899,
+        "meanL95Pct": -0.111784,
+        "maxDrawdownPct": -69.128965,
+        "winRatePct": 36.330498
+      },
+      "foldsPositive": 0,
+      "regimes": {
+        "bull": {
+          "n": 1384,
+          "netPct": -68.560421,
+          "stressPct": -98.589785,
+          "profitFactor": 0.775576,
+          "stressProfitFactor": 0.6953,
+          "meanL95Pct": -0.074363,
+          "maxDrawdownPct": -82.747721,
+          "winRatePct": 40.823699
+        },
+        "bear": {
+          "n": 1359,
+          "netPct": -82.358225,
+          "stressPct": -112.379591,
+          "profitFactor": 0.739234,
+          "stressProfitFactor": 0.663371,
+          "meanL95Pct": -0.088467,
+          "maxDrawdownPct": -87.503766,
+          "winRatePct": 40.986019
+        },
+        "highVol": {
+          "n": 915,
+          "netPct": -51.381662,
+          "stressPct": -70.999575,
+          "profitFactor": 0.774428,
+          "stressProfitFactor": 0.704124,
+          "meanL95Pct": -0.093698,
+          "maxDrawdownPct": -55.359132,
+          "winRatePct": 39.562842
+        },
+        "lowVol": {
+          "n": 1828,
+          "netPct": -99.536984,
+          "stressPct": -139.969801,
+          "profitFactor": 0.747074,
+          "stressProfitFactor": 0.664693,
+          "meanL95Pct": -0.075173,
+          "maxDrawdownPct": -115.361512,
+          "winRatePct": 41.575492
+        }
+      },
+      "breadth": {
+        "activeAssets": 14,
+        "bothSidesAssets": 14,
+        "dominance": 1,
+        "leaveOneOutMinPct": -152.546283,
+        "byAsset": {
+          "ETH": {
+            "n": 354,
+            "contribution": -6.963332,
+            "long": 181,
+            "short": 173
+          },
+          "SOL": {
+            "n": 337,
+            "contribution": -5.685769,
+            "long": 169,
+            "short": 168
+          },
+          "BNB": {
+            "n": 274,
+            "contribution": -3.887789,
+            "long": 143,
+            "short": 131
+          },
+          "LTC": {
+            "n": 133,
+            "contribution": -3.83464,
+            "long": 69,
+            "short": 64
+          },
+          "HYPE": {
+            "n": 1186,
+            "contribution": -38.905296,
+            "long": 589,
+            "short": 597
+          },
+          "ZEC": {
+            "n": 950,
+            "contribution": -17.311009,
+            "long": 488,
+            "short": 462
+          },
+          "DOGE": {
+            "n": 483,
+            "contribution": -15.332396,
+            "long": 240,
+            "short": 243
+          },
+          "NEAR": {
+            "n": 492,
+            "contribution": -25.845202,
+            "long": 234,
+            "short": 258
+          },
+          "JUP": {
+            "n": 72,
+            "contribution": -3.241041,
+            "long": 29,
+            "short": 43
+          },
+          "LIT": {
+            "n": 284,
+            "contribution": -7.203078,
+            "long": 143,
+            "short": 141
+          },
+          "GRAM": {
+            "n": 172,
+            "contribution": -8.847182,
+            "long": 80,
+            "short": 92
+          },
+          "XMR": {
+            "n": 32,
+            "contribution": 0.813819,
+            "long": 23,
+            "short": 9
+          },
+          "ENA": {
+            "n": 527,
+            "contribution": -12.880792,
+            "long": 253,
+            "short": 274
+          },
+          "TAO": {
+            "n": 190,
+            "contribution": -1.794939,
+            "long": 102,
+            "short": 88
+          }
+        }
+      },
+      "months": {
+        "positive": 0,
+        "total": 6
+      },
+      "pass": false
+    },
+    {
+      "profile": {
+        "timeframeMinutes": 5,
+        "betaBars": 2016,
+        "signalBars": 12,
+        "holdBars": 12,
+        "decisionBars": 3
+      },
+      "full": {
+        "n": 3167,
+        "netPct": -288.763981,
+        "stressPct": -374.167095,
+        "profitFactor": 0.663582,
+        "stressProfitFactor": 0.588935,
+        "meanL95Pct": -0.110124,
+        "maxDrawdownPct": -301.554534,
+        "winRatePct": 40.795706
+      },
+      "discovery": {
+        "n": 2216,
+        "netPct": -172.775681,
+        "stressPct": -231.919326,
+        "profitFactor": 0.712861,
+        "stressProfitFactor": 0.635709,
+        "meanL95Pct": -0.101339,
+        "maxDrawdownPct": -185.566234,
+        "winRatePct": 42.057762
+      },
+      "oos": {
+        "n": 951,
+        "netPct": -115.9883,
+        "stressPct": -142.247768,
+        "profitFactor": 0.548038,
+        "stressProfitFactor": 0.480098,
+        "meanL95Pct": -0.153773,
+        "maxDrawdownPct": -119.192138,
+        "winRatePct": 37.85489
+      },
+      "foldsPositive": 0,
+      "regimes": {
+        "bull": {
+          "n": 1584,
+          "netPct": -121.803628,
+          "stressPct": -164.672171,
+          "profitFactor": 0.703625,
+          "stressProfitFactor": 0.623039,
+          "meanL95Pct": -0.103248,
+          "maxDrawdownPct": -131.548771,
+          "winRatePct": 40.782828
+        },
+        "bear": {
+          "n": 1583,
+          "netPct": -166.960353,
+          "stressPct": -209.494924,
+          "profitFactor": 0.626796,
+          "stressProfitFactor": 0.557463,
+          "meanL95Pct": -0.132694,
+          "maxDrawdownPct": -170.590231,
+          "winRatePct": 40.808591
+        },
+        "highVol": {
+          "n": 914,
+          "netPct": -78.232887,
+          "stressPct": -102.401663,
+          "profitFactor": 0.707489,
+          "stressProfitFactor": 0.636799,
+          "meanL95Pct": -0.125939,
+          "maxDrawdownPct": -83.600651,
+          "winRatePct": 42.450766
+        },
+        "lowVol": {
+          "n": 2253,
+          "netPct": -210.531094,
+          "stressPct": -271.765431,
+          "profitFactor": 0.643708,
+          "stressProfitFactor": 0.567455,
+          "meanL95Pct": -0.114458,
+          "maxDrawdownPct": -220.835429,
+          "winRatePct": 40.124279
+        }
+      },
+      "breadth": {
+        "activeAssets": 14,
+        "bothSidesAssets": 14,
+        "dominance": 1,
+        "leaveOneOutMinPct": -281.196053,
+        "byAsset": {
+          "ETH": {
+            "n": 173,
+            "contribution": -5.402065,
+            "long": 91,
+            "short": 82
+          },
+          "SOL": {
+            "n": 183,
+            "contribution": -3.783964,
+            "long": 89,
+            "short": 94
+          },
+          "BNB": {
+            "n": 234,
+            "contribution": -5.320635,
+            "long": 118,
+            "short": 116
+          },
+          "LTC": {
+            "n": 159,
+            "contribution": -5.108801,
+            "long": 77,
+            "short": 82
+          },
+          "HYPE": {
+            "n": 860,
+            "contribution": -36.941459,
+            "long": 437,
+            "short": 423
+          },
+          "ZEC": {
+            "n": 1027,
+            "contribution": -33.074273,
+            "long": 511,
+            "short": 516
+          },
+          "DOGE": {
+            "n": 314,
+            "contribution": -22.460932,
+            "long": 161,
+            "short": 153
+          },
+          "NEAR": {
+            "n": 718,
+            "contribution": -31.630749,
+            "long": 369,
+            "short": 349
+          },
+          "JUP": {
+            "n": 435,
+            "contribution": -23.244826,
+            "long": 221,
+            "short": 214
+          },
+          "LIT": {
+            "n": 506,
+            "contribution": -44.497766,
+            "long": 247,
+            "short": 259
+          },
+          "GRAM": {
+            "n": 248,
+            "contribution": -12.508188,
+            "long": 107,
+            "short": 141
+          },
+          "XMR": {
+            "n": 116,
+            "contribution": -11.687118,
+            "long": 57,
+            "short": 59
+          },
+          "ENA": {
+            "n": 824,
+            "contribution": -29.550514,
+            "long": 402,
+            "short": 422
+          },
+          "TAO": {
+            "n": 537,
+            "contribution": -23.552691,
+            "long": 280,
+            "short": 257
+          }
+        }
+      },
+      "months": {
+        "positive": 0,
+        "total": 6
+      },
+      "pass": false
+    }
+  ],
+  "qualifiedTimeframes": []
+}

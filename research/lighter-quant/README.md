@@ -297,7 +297,7 @@ lookback or hold after seeing these results, and do not add it to Native
 Shadow or Real. The independent search remains focused on the preregistered
 prospective microstructure hypotheses once their data-readiness gates open.
 
-## Preregistered residual-momentum sibling — awaiting first run
+## Frozen residual-momentum sibling result
 
 The economically opposite continuation rule is frozen before its first run.
 It inherits the rejected residual-reversion experiment's complete design and
@@ -311,13 +311,31 @@ elapsed-time hypothesis, not separately tuned models.
 
 This sibling is motivated by residual continuation rather than by changing a
 parameter after the mean-reversion loss. It is nevertheless a second family
-tested on the same history, so a historical pass can authorize prospective
-Shadow only and cannot authorize Real. The first run must be retained whether
-it passes or fails:
+tested on the same history, so a historical pass could have authorized
+prospective Shadow only and never Real. The first run was retained unchanged:
 
 ```bash
 XS_RESIDUAL_FAMILY=momentum pnpm tsx scripts/research-lighter-xs-residual.ts
 ```
+
+The same 179.889-day gap-free common window produced a decisive rejection:
+
+| TF | N | Net at measured p95 | PF | 1.5x-cost net / PF | L95 | DD | Folds | Discovery / OOS |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1m | 2,743 | -150.92% | 0.76 | -210.97% / 0.68 | -0.074% | -165.14% | 0/4 | -82.03% / -68.88% |
+| 5m | 3,167 | -288.76% | 0.66 | -374.17% / 0.59 | -0.110% | -301.55% | 0/4 | -172.78% / -115.99% |
+
+Bull, bear, high- and low-volatility slices were all negative at both
+timeframes. Neither timeframe had a positive calendar month out of six, and
+leave-one-asset-out net remained negative. The result is stored in
+`data/lighter-xs-momentum-results.json`.
+
+**Decision:** reject residual continuation unchanged. Together with the
+previous reversion rejection, this closes the candle-only residual-pair track:
+the small gross mean-reversion tendency is not large enough to pay executable
+pair costs, while continuation has no gross advantage. Do not tune the
+dispersion, beta window, decision interval or holding period on this sample.
+No Shadow or Real registration is permitted.
 
 ## LuxAlgo database follow-up
 
