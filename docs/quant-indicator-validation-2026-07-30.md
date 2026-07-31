@@ -885,3 +885,46 @@ optimization rather than independent evidence.
 The family is rejected with no Shadow or Real registration. The failure leaves
 the existing frozen P2 prospective test unchanged. Reproducible summary
 evidence is in `data/lighter-cross-sectional-reversal-results.json`.
+
+## Preregistered BTC+ETH factor-residual hedge
+
+Before calculating any result, one independent three-leg mean-reversion rule
+was frozen. It models alt returns rather than price levels so that a persistent
+uptrend cannot manufacture cointegration. The exact same clock-time rule is
+tested at 1m and 5m:
+
+- universe: the 13 non-BTC/ETH markets from the common 15-market gap-free
+  Native dataset; BTC and ETH are the two hedge factors;
+- estimate a causal centered two-factor OLS on bar log returns over the prior
+  seven days, using a fixed `1e-6 × trace` diagonal ridge only to stabilize the
+  highly correlated BTC/ETH covariance matrix;
+- accept an alt estimate only when rolling multiple R-squared is at least
+  `0.30` and both factor betas are finite with absolute value at most `3`;
+- sum each alt's causal OLS residual returns over one hour and standardize that
+  sum against its own trailing seven-day history; every 15 minutes select the
+  single most extreme eligible absolute residual Z-score;
+- at `|Z| >= 2.5`, take the opposite residual exposure at the next bar open:
+  alt exposure `d`, BTC `−d × betaBTC`, ETH `−d × betaETH`, where `d=+1` for a
+  negative residual and `d=−1` for a positive residual;
+- normalize absolute leg notionals to one fixed `$100` gross package. A leg
+  below `$100` is charged its market's measured `$100` p95 full-round-trip
+  percentage, which is conservative because it does not assume better
+  percentage execution for the smaller order;
+- close all legs at the next bar open after the residual crosses zero, reaches
+  `|Z| >= 4` against the position, or after 60 minutes. Only one package may be
+  open, and no same-bar execution is permitted;
+- deduct each weighted leg's measured p95 cost and exact signed hourly Lighter
+  funding; report weighted observed-maximum execution separately;
+- no threshold, beta window, Z window, exit, market subset or regime may be
+  changed after the first result is viewed, and no rescue run is permitted.
+
+Qualification requires at least 120 closed packages, positive net, PF at least
+`1.20`, positive mean-trade L95, positive observed-maximum net with PF at least
+`1.10`, maximum additive drawdown no worse than `−5%` of the fixed `$100`
+package capacity, 4/4 positive chronological folds, positive IS and untouched
+final-30% OOS with PF at least `1.10`, positive negative-Z and positive-Z books,
+positive 30/60/90-day windows on both directions, at least five positive
+calendar months, positive causal BTC bull/bear and high/low-volatility regimes,
+at least six active alts, leave-one-alt-out minimum above zero and positive-PnL
+dominance no higher than `60%`. A historical pass can enter prospective Shadow
+only; Real remains governed by the separate frozen forward gate.
