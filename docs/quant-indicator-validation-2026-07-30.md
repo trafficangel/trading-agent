@@ -963,3 +963,63 @@ The family is rejected without Shadow, Real or website registration. Exact
 funding was economically immaterial (`+0.0095%` at 1m and `+0.0201%` at 5m);
 the failure is the signal rather than an assumed fee reserve. Reproducible
 summary evidence is in `data/lighter-factor-residual-hedge-results.json`.
+
+## Closed cross-sectional residual directions
+
+Two earlier preregistered directions used the same fixed 15-market universe,
+seven-day causal BTC beta, one-hour residual move, 15-minute decision clock,
+one-hour hold and next-bar execution. Residual reversion bought the laggard
+and sold the leader; residual momentum did the exact reverse. Both used the
+then-current market-specific `$100` executable p95 costs and a deliberately
+adverse funding allowance.
+
+Neither direction is a candidate for a corrected-cost rescue run. Residual
+reversion lost `−96.14%`/PF `0.84` at 1m and `−60.77%`/PF `0.92` at 5m, with
+0/4 positive folds at both timeframes. Residual momentum lost `−150.92%`/PF
+`0.76` at 1m and `−288.76%`/PF `0.66` at 5m, with negative IS, OOS, bull,
+bear, high- and low-volatility segments. Replacing the old non-blocking
+`1.5× p95` sensitivity and small adverse funding allowance with the current
+observed-maximum/exact-funding reporting cannot repair the blocking p95 net or
+PF. The families are closed without Shadow or Real registration. Frozen
+evidence is in `data/lighter-xs-residual-results.json` and
+`data/lighter-xs-momentum-results.json`.
+
+## Preregistered dynamic pair-spread mean reversion
+
+Before calculating any result, the next independent two-sided hypothesis is
+frozen as a dynamically selected market-neutral pair rather than a BTC-factor
+residual or a winner/loser return rank:
+
+- universe: all unordered pairs among the same 15 synchronized, gap-free
+  Native markets;
+- every 15 completed minutes, estimate each pair's causal return beta and
+  correlation over the prior 30 days; require positive beta in `[0.20, 3.00]`
+  and correlation at least `0.75`;
+- form the causal log-price spread `log(A) − beta × log(B)` and standardize it
+  against its trailing seven-day mean and variance;
+- select only the single eligible pair with the largest absolute spread
+  Z-score and require `|Z| >= 3.0`; sell the rich leg and buy the cheap leg,
+  with absolute leg notionals normalized to one fixed `$100` gross package;
+- enter at the next bar open, permit only one package at a time and close both
+  legs after six hours or at the first next-bar open after completed-bar
+  package PnL reaches `−2%` of package capacity;
+- run the same clock-time economics at 1m and 5m, deduct each weighted leg's
+  market-specific measured `$100` full-round-trip p95 and exact signed Lighter
+  funding, and report observed-maximum execution as a separate adverse
+  sensitivity;
+- no correlation threshold, beta window, spread window, Z threshold, holding
+  period, stop, pair subset, timeframe or regime may be changed after the
+  first result is inspected. A failed run closes the family without a rescue
+  grid.
+
+Qualification requires at least 120 packages, positive p95 net, PF at least
+`1.20`, positive mean-trade L95, positive observed-maximum net with PF at
+least `1.10`, maximum additive drawdown no worse than `−5%` of the fixed `$100`
+package capacity, 4/4 positive chronological folds, positive IS and untouched
+final-30% OOS with PF at least `1.10`, positive rich-A and rich-B directions,
+positive 30/60/90-day windows on both directions, at least five positive
+calendar months, positive causal BTC bull/bear and high/low-volatility
+segments, at least six active markets, leave-one-market-out minimum above zero
+and positive-PnL dominance no higher than `60%`. A historical pass may create
+prospective Shadow only; Real remains disabled and requires its separate frozen
+forward gate.
