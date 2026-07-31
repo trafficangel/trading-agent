@@ -589,3 +589,27 @@ admission boundary:
 Every causal trend and volatility regime was negative. No individual-market
 rule qualified either. The family is closed without a rescue grid, is not
 registered in prospective Shadow and cannot enter Real.
+
+## Preregistered RSI2 trend-pullback challenger
+
+Before viewing its first result on 2026-07-31, a four-rule `RSI2PB` family was
+frozen as a second independent candidate. It attempts to buy a short
+counter-trend shock inside a fully aligned bull trend and sell the mirrored
+shock inside a fully aligned bear trend.
+
+- one shared rule over the same 15 markets; 5m is primary and the identical 1m
+  transfer is a falsification control;
+- trend is strictly `EMA21 > EMA55 > EMA200` for Long and the mirrored stack
+  for Short;
+- RSI2 threshold is 5 or 10, with either immediate touch or completed-candle
+  reclaim; no other thresholds are allowed;
+- exit when RSI2 reaches 50, otherwise a 1% safety stop or a maximum of 60 bars;
+- execution is at the next bar open with market-specific measured `$100` p95,
+  adverse funding and separate `1.5 × p95` sensitivity;
+- the unchanged portfolio qualification requires PF, mean L95, 4 folds,
+  IS/OOS, both sides, recent windows, drawdown, breadth, leave-one-out,
+  dominance, months and causal trend/volatility regimes with a maximum of six
+  simultaneous positions.
+
+This is one frozen run. Complete failure closes the family without adding a
+larger RSI/EMA grid; only a fully qualified rule may enter prospective Shadow.
