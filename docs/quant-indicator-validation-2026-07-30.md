@@ -468,7 +468,10 @@ No frequency or direction gate was relaxed to make any individual market pass.
 The same preregistered `Z60T-2.5-touch` rule was then evaluated as one fixed-
 notional cross-market portfolio instead of selecting individual winners. All
 15 liquid markets had the full 180-day, gap-free history and used their own
-measured `$1,000` executable p95 cost plus time-weighted adverse funding.
+measured `$100` executable p95 cost plus time-weighted adverse funding. The
+prospective Shadow ledger deliberately uses the larger `$1,000` notional and
+records its side-specific live VWAP, so it is a stricter execution transfer
+check rather than an understated replica of the candidate-selection cost.
 
 The five-minute portfolio qualified without dropping a signal or tuning a
 parameter by market:
