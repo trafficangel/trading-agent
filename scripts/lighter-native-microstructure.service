@@ -14,6 +14,9 @@ Environment=LIGHTER_MICRO_STATUS=/home/trader/apps/trading-agent/data/lighter-na
 ExecStart=/usr/bin/node /home/trader/apps/trading-agent/dist/hft/lighter-microstructure-recorder.js
 Restart=always
 RestartSec=3
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=256M
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

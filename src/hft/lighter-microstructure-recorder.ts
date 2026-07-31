@@ -35,6 +35,7 @@ const STALE_MS = Math.max(1_000, Number(process.env.LIGHTER_MICRO_STALE_MS ?? 3_
 const RETENTION_DAYS = Math.max(7, Number(process.env.LIGHTER_MICRO_RETENTION_DAYS ?? 60));
 const MINUTE_MS = 60_000;
 const RECONNECT_MS = 2_000;
+const PING_MS = 30_000;
 
 const ALL_MARKETS = [
   { symbol: 'BTC', marketId: 1 },
@@ -298,6 +299,7 @@ function addTrades(runtime: MarketRuntime, rows: unknown, liquidation: boolean, 
 
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let pingTimer: ReturnType<typeof setInterval> | null = null;
 let shuttingDown = false;
 
 function subscribe(ws: WebSocket, marketId: number): void {
@@ -326,7 +328,6 @@ function scheduleReconnect(): void {
     reconnectTimer = null;
     connect();
   }, RECONNECT_MS);
-  reconnectTimer.unref();
 }
 
 function connect(): void {
@@ -345,6 +346,14 @@ function connect(): void {
       runtime.lastBookAt = 0;
       subscribe(socket as WebSocket, runtime.marketId);
     }
+    if (pingTimer) clearInterval(pingTimer);
+    pingTimer = setInterval(() => {
+      try {
+        socket?.ping();
+      } catch {
+        // The close handler owns reconnect and data-quality marking.
+      }
+    }, PING_MS);
     console.warn(`lighter-microstructure: connected ${markets.size} markets`);
   });
 
@@ -401,6 +410,10 @@ function connect(): void {
   socket.on('close', () => {
     state.connected = false;
     state.reconnects++;
+    if (pingTimer) {
+      clearInterval(pingTimer);
+      pingTimer = null;
+    }
     const now = Date.now();
     for (const runtime of markets.values()) {
       accumulatorFor(runtime, now).noteNonceGap();
@@ -426,6 +439,7 @@ function shutdown(signal: string): void {
   state.connected = false;
   console.warn(`lighter-microstructure: shutdown ${signal}`);
   if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (pingTimer) clearInterval(pingTimer);
   try {
     socket?.close();
   } catch {
@@ -436,12 +450,9 @@ function shutdown(signal: string): void {
   process.exit(0);
 }
 
-const sampleTimer = setInterval(sampleBooks, SAMPLE_MS);
-const statusTimer = setInterval(writeStatus, 5_000);
-const pruneTimer = setInterval(prune, 60 * MINUTE_MS);
-sampleTimer.unref();
-statusTimer.unref();
-pruneTimer.unref();
+setInterval(sampleBooks, SAMPLE_MS);
+setInterval(writeStatus, 5_000);
+setInterval(prune, 60 * MINUTE_MS);
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
