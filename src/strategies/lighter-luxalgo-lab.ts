@@ -43,6 +43,7 @@ type StrategySpec = {
 };
 
 const NATIVE_TREND_PORTFOLIO_ID = 'z60t25-portfolio';
+const NATIVE_TREND_PORTFOLIO_MAX_OPEN = 10;
 const NATIVE_TREND_PORTFOLIO_MARKETS = [
   { id: 'z60t25-btc', code: '036', symbol: 'BTCUSDT', asset: 'BTC', marketId: 1 },
   { id: 'z60t25-eth', code: '037', symbol: 'ETHUSDT', asset: 'ETH', marketId: 0 },
@@ -1040,6 +1041,10 @@ const nativePortfolioForwardSignals = db.prepare<string[], {
   FROM lighter_lux_signals
   WHERE strategy_id IN (${sqlMarks(NATIVE_TREND_PORTFOLIO_IDS)})
   ORDER BY received_at, id`);
+const nativePortfolioOpenCount = db.prepare<string[], { count: number }>(`
+  SELECT COUNT(*) count FROM lighter_lux_trades
+  WHERE strategy_id IN (${sqlMarks(NATIVE_TREND_PORTFOLIO_IDS)})
+    AND closed_at IS NULL`);
 
 function evaluateForwardRows(
   pnlRows: readonly { net_pnl_pct: number }[],
@@ -1051,6 +1056,7 @@ function evaluateForwardRows(
     buy_slippage_pct: number | null;
     sell_slippage_pct: number | null;
   }[],
+  drawdownCapacityUnits = 1,
 ): NativeForwardGateEvaluation {
   const captured = signalRows.filter((row) => row.capture_status === 'captured');
   const executionCostPcts = captured.flatMap((row) => {
@@ -1072,6 +1078,7 @@ function evaluateForwardRows(
     captureErrors: signalRows.filter((row) => row.capture_status === 'error').length,
     executionCostPcts,
     bookAgesMs: captured.flatMap((row) => row.book_age_ms == null ? [] : [row.book_age_ms]),
+    drawdownCapacityUnits,
   });
 }
 
@@ -1084,6 +1091,7 @@ function nativeTrendPortfolioForwardGate(): NativeForwardGateEvaluation {
   return evaluateForwardRows(
     nativePortfolioForwardPnls.all(...NATIVE_TREND_PORTFOLIO_IDS),
     nativePortfolioForwardSignals.all(...NATIVE_TREND_PORTFOLIO_IDS),
+    NATIVE_TREND_PORTFOLIO_MAX_OPEN,
   );
 }
 
@@ -1352,6 +1360,14 @@ const applyCapturedSignal = db.transaction((
       const portfolioForward = nativeTrendPortfolioForwardGate();
       if (!portfolioForward.entryAllowed) {
         const reason = `native portfolio forward gate failed after ${portfolioForward.closed}: ${portfolioForward.reasons.join('; ')}`;
+        markShadowDecision.run(reason, signalId);
+        return { gateBlocked: true, reason, forward: portfolioForward };
+      }
+      const openCount = nativePortfolioOpenCount.get(
+        ...NATIVE_TREND_PORTFOLIO_IDS,
+      )?.count ?? 0;
+      if (openCount >= NATIVE_TREND_PORTFOLIO_MAX_OPEN) {
+        const reason = `native portfolio capacity ${openCount}/${NATIVE_TREND_PORTFOLIO_MAX_OPEN}`;
         markShadowDecision.run(reason, signalId);
         return { gateBlocked: true, reason, forward: portfolioForward };
       }
@@ -2183,7 +2199,7 @@ function nativeStrategyGuide(
       <b>PORTFOLIO P1 · 15 markets</b>
       <span>TOUCH · Z60 · ±2.5σ · EMA200</span>
       <span>${t(lang, 'Long только выше EMA200; Short только ниже EMA200. Одно правило на всех рынках.', 'Long only above EMA200; Short only below EMA200. One rule across every market.')}</span>
-      <span>${t(lang, 'Выход у SMA60, stop 1.5% или через 20 часов. Общий forward-гейт; Real отключён.', 'Exit at SMA60, 1.5% stop, or after 20 hours. Combined forward gate; Real disabled.')}</span>
+      <span>${t(lang, 'Выход у SMA60, stop 1.5% или через 20 часов; максимум 10 одновременных Shadow-позиций. Общий forward-гейт; Real отключён.', 'Exit at SMA60, 1.5% stop, or after 20 hours; at most 10 concurrent Shadow positions. Combined forward gate; Real disabled.')}</span>
       <em class="collect">SHADOW ONLY</em>
     </div>`
     : '');
@@ -2883,8 +2899,8 @@ async function render(
       <p class="ll-note">${requested.group === 'native'
         ? t(
           lang,
-          'Native forward-гейт: ≥20 закрытых сделок, net > 0%, PF ≥1.20, обе половины >0%, max DD ≤5%, ошибки снимка ≤2%, средняя цена исполнения ≤0.10% и p95 возраста стакана ≤2с. При провале новые Shadow-входы останавливаются автоматически; выходы остаются активны.',
-          'Native forward gate: ≥20 closed trades, net > 0%, PF ≥1.20, both halves >0%, max DD ≤5%, capture errors ≤2%, average execution cost ≤0.10%, and book-age p95 ≤2s. A failure automatically pauses new Shadow entries while exits remain active.',
+          'Native forward-гейт: ≥20 закрытых сделок, net после фактических spread/slippage/funding > 0%, PF ≥1.20, обе половины >0%, max DD ≤5% выделенной мощности, ошибки снимка ≤2%, полный execution-sample на каждую закрытую сделку и p95 возраста стакана ≤2с. Для P1 мощность заранее зафиксирована как 10 одновременных позиций. Универсального лимита издержек нет: их влияние уже отражено в net PnL. При провале новые Shadow-входы останавливаются автоматически; выходы остаются активны.',
+          'Native forward gate: ≥20 closed trades, net after actual spread/slippage/funding > 0%, PF ≥1.20, both halves >0%, max DD ≤5% of allocated capacity, capture errors ≤2%, a complete execution sample for every closed trade, and book-age p95 ≤2s. P1 capacity is frozen at 10 concurrent positions. There is no universal cost ceiling because its impact is already embedded in net PnL. A failure automatically pauses new Shadow entries while exits remain active.',
         )
         : t(lang, 'Гейт: ≥20 закрытых Lighter-forward сделок, net > 0%, PF ≥1.20, обе половины >0%.', 'Gate: ≥20 closed Lighter-forward trades, net > 0%, PF ≥1.20, and both halves >0%.')}</p></div>
 

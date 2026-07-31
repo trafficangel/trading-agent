@@ -503,9 +503,10 @@ every attempted new entry is admitted only when all frozen conditions hold:
 
 - cumulative net PnL is positive and PF is at least 1.20;
 - both chronological halves are positive;
-- additive maximum drawdown is at most 5%;
+- maximum drawdown is at most 5% of frozen allocated capacity (one unit for an
+  individual strategy and ten fixed-notional units for portfolio P1);
 - L2 capture errors are at most 2% of signals;
-- mean executable round-trip spread/slippage cost is at most 0.10%;
+- every closed trade has a valid executable round-trip spread/slippage sample;
 - p95 age of the captured order book is at most 2,000ms;
 - there is at least one valid execution-quality sample per closed trade.
 
@@ -513,5 +514,14 @@ If any condition fails, the signal is still captured and remains auditable,
 but a new Shadow position is not opened and the exact gate failure is saved on
 the signal. An opposite signal may still close the existing position before
 the gate is evaluated, and explicit exits plus safety stops are never blocked.
-This prevents a strategy that deteriorates after initially passing from
+There is deliberately no universal execution-cost ceiling: actual executable
+VWAP and funding are already deducted in each trade's net PnL, and a common
+number would incorrectly treat BTC and less liquid markets as equivalent.
+The observed average cost remains reported for diagnosis. This prevents a
+strategy that deteriorates after initially passing from
 continuing to accumulate risk merely because it remains registered.
+
+Portfolio P1 additionally refuses an eleventh simultaneous Shadow entry. Its
+historical maximum was ten, so this frozen cap did not drop a backtest signal;
+it keeps the prospective drawdown denominator and future capacity claim fixed
+instead of allowing apparent risk to improve by silently adding exposure.

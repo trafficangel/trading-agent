@@ -55,7 +55,7 @@ describe('Lighter LuxAlgo shadow math', () => {
     expect(result.profitFactor).toBeGreaterThanOrEqual(1.2);
   });
 
-  it('blocks new entries when execution quality fails after the sample target', () => {
+  it('blocks new entries when capture quality or book freshness fails', () => {
     const result = evaluateNativeForwardGate({
       netPcts: Array.from({ length: 20 }, (_, index) => index % 4 === 0 ? -0.2 : 0.25),
       signalCount: 40,
@@ -67,8 +67,42 @@ describe('Lighter LuxAlgo shadow math', () => {
     expect(result.entryAllowed).toBe(false);
     expect(result.reasons).toEqual(expect.arrayContaining([
       expect.stringContaining('capture errors'),
-      expect.stringContaining('execution cost'),
       expect.stringContaining('book age p95'),
     ]));
+  });
+
+  it('does not apply one universal cost ceiling after net PnL already includes execution', () => {
+    const result = evaluateNativeForwardGate({
+      netPcts: Array.from({ length: 20 }, (_, index) => index % 4 === 0 ? -0.2 : 0.25),
+      signalCount: 40,
+      captureErrors: 0,
+      executionCostPcts: Array.from({ length: 40 }, () => 0.12),
+      bookAgesMs: Array.from({ length: 40 }, () => 120),
+    });
+    expect(result.status).toBe('passed');
+    expect(result.avgExecutionCostPct).toBeCloseTo(0.12);
+    expect(result.reasons).not.toEqual(expect.arrayContaining([
+      expect.stringContaining('execution cost'),
+    ]));
+  });
+
+  it('normalizes a multi-position portfolio drawdown by its frozen capacity', () => {
+    const standalone = evaluateNativeForwardGate({
+      netPcts: [5, -4, -4, ...Array.from({ length: 17 }, () => 0.5)],
+      signalCount: 20,
+      captureErrors: 0,
+      executionCostPcts: Array.from({ length: 20 }, () => 0.02),
+      bookAgesMs: Array.from({ length: 20 }, () => 100),
+    });
+    const portfolio = evaluateNativeForwardGate({
+      netPcts: [5, -4, -4, ...Array.from({ length: 17 }, () => 0.5)],
+      signalCount: 20,
+      captureErrors: 0,
+      executionCostPcts: Array.from({ length: 20 }, () => 0.02),
+      bookAgesMs: Array.from({ length: 20 }, () => 100),
+      drawdownCapacityUnits: 10,
+    });
+    expect(standalone.maxDrawdownPct).toBeCloseTo(8);
+    expect(portfolio.maxDrawdownPct).toBeCloseTo(0.8);
   });
 });

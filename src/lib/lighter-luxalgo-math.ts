@@ -5,7 +5,6 @@ export const NATIVE_FORWARD_GATE = {
   minProfitFactor: 1.2,
   maxDrawdownPct: 5,
   maxCaptureErrorRatePct: 2,
-  maxAvgExecutionCostPct: 0.10,
   maxP95BookAgeMs: 2_000,
 } as const;
 
@@ -15,6 +14,8 @@ export type NativeForwardGateInput = {
   captureErrors: number;
   executionCostPcts: readonly number[];
   bookAgesMs: readonly number[];
+  /** Fixed-notional portfolio capacity. One for a standalone strategy. */
+  drawdownCapacityUnits?: number;
 };
 
 export type NativeForwardGateEvaluation = {
@@ -68,6 +69,7 @@ export function evaluateNativeForwardGate(
     peak = Math.max(peak, equity);
     maxDrawdownPct = Math.max(maxDrawdownPct, peak - equity);
   }
+  maxDrawdownPct /= Math.max(1, input.drawdownCapacityUnits ?? 1);
 
   const validCosts = input.executionCostPcts.filter(
     (value) => Number.isFinite(value) && value >= 0,
@@ -119,13 +121,6 @@ export function evaluateNativeForwardGate(
   }
   if (validCosts.length < closed) {
     reasons.push(`execution samples ${validCosts.length} < ${closed}`);
-  } else if (
-    avgExecutionCostPct == null
-    || avgExecutionCostPct > NATIVE_FORWARD_GATE.maxAvgExecutionCostPct
-  ) {
-    reasons.push(
-      `execution cost ${avgExecutionCostPct == null ? 'n/a' : `${avgExecutionCostPct.toFixed(4)}%`} > ${NATIVE_FORWARD_GATE.maxAvgExecutionCostPct.toFixed(2)}%`,
-    );
   }
   if (validBookAges.length < closed) {
     reasons.push(`book-age samples ${validBookAges.length} < ${closed}`);
