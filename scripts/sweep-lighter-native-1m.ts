@@ -33,6 +33,7 @@ const Z_THRESHOLDS = (process.env.Z_THRESHOLDS ?? '1.5,2,2.5,3').split(',').map(
 const VWZ_THRESHOLDS = (process.env.VWZ_THRESHOLDS ?? '2.25,2.5,2.75,3').split(',').map(Number);
 const Z_SL_PCT = Number(process.env.Z_SL_PCT ?? 1.5) / 100;
 const Z_MAX_HOLD_BARS = Number(process.env.Z_MAX_HOLD_BARS ?? 240);
+const MAX_BACKTEST_DD_PCT = Number(process.env.MAX_BACKTEST_DD_PCT ?? 15);
 const RULE_FILTER = process.env.RULE_FILTER ?? '';
 const LOOKBACK_DAYS = Number(process.env.LOOKBACK_DAYS ?? 0);
 const RECENT_WINDOWS_DAYS = (process.env.RECENT_WINDOWS_DAYS ?? '30,60,90')
@@ -73,6 +74,7 @@ type Arrays = {
   williams14: number[];
   vwap60: number[];
   vwapSd60: number[];
+  efficiencyRatio60: number[];
 };
 type Rule = {
   name: string;
@@ -202,6 +204,26 @@ function rollingVolumeWeighted(
   return { mean, deviation };
 }
 
+/**
+ * Kaufman's efficiency ratio. Values near zero describe a noisy/choppy path;
+ * values near one describe directional movement. Only completed closes up to
+ * index i are used, so it is safe for next-bar execution.
+ */
+function efficiencyRatio(values: number[], period: number): number[] {
+  const result = new Array<number>(values.length).fill(0);
+  const changes = values.map((value, i) =>
+    i === 0 ? 0 : Math.abs(value - values[i - 1]!));
+  let path = 0;
+  for (let i = 1; i < values.length; i++) {
+    path += changes[i]!;
+    if (i > period) path -= changes[i - period]!;
+    if (i >= period && path > 0) {
+      result[i] = Math.abs(values[i]! - values[i - period]!) / path;
+    }
+  }
+  return result;
+}
+
 function build(c: Candle[]): Arrays {
   const close = c.map((bar) => bar.c);
   const volume = c.map((bar) => bar.v);
@@ -244,6 +266,7 @@ function build(c: Candle[]): Arrays {
     williams14: williamsR(c, 14),
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
+    efficiencyRatio60: efficiencyRatio(close, 60),
   };
 }
 
@@ -458,6 +481,35 @@ function rules(): Rule[] {
             if (prior < -threshold && current >= -threshold) return 'long';
             if (prior > threshold && current <= threshold) return 'short';
           }
+          return null;
+        },
+        exit(a, i, side) {
+          return side === 'long'
+            ? a.close[i]! >= a.vwap60[i]!
+            : a.close[i]! <= a.vwap60[i]!;
+        },
+      });
+    }
+  }
+
+  // A predeclared two-sided mean-reversion variant for choppy regimes.
+  // Kaufman ER prevents fading a statistically extreme move when the recent
+  // path is strongly directional. The small fixed grid is evaluated across
+  // every market and must still pass the same OOS/recent/direction gates.
+  for (const threshold of [2.5, 3]) {
+    for (const efficiencyMax of [0.25, 0.35]) {
+      out.push({
+        name: `VWZ60-${threshold}-touch+ER60<${efficiencyMax}`,
+        warmup: 62,
+        slPct: Z_SL_PCT,
+        maxBars: Z_MAX_HOLD_BARS,
+        entry(a, i) {
+          if (a.efficiencyRatio60[i]! > efficiencyMax) return null;
+          const current = a.vwapSd60[i]! > 0
+            ? (a.close[i]! - a.vwap60[i]!) / a.vwapSd60[i]!
+            : 0;
+          if (current < -threshold) return 'long';
+          if (current > threshold) return 'short';
           return null;
         },
         exit(a, i, side) {
@@ -863,6 +915,7 @@ const qualified = rows
     && row.oos > 0
     && row.long > 0
     && row.short > 0
+    && drawdown(row.trades, STRESS_RT_PCT) >= -MAX_BACKTEST_DD_PCT
     && row.recent.every((window) =>
       window.n >= 20
       && window.net > 0
@@ -881,9 +934,10 @@ const print = (row: typeof rows[number]): string =>
   + `hold ${median(row.trades.map((trade) => (trade.exitAt - trade.entryAt) / 60_000)).toFixed(0)}m `
   + `f${row.folds}/4 IS/OOS ${fmt(row.is)}/${fmt(row.oos)} L/S ${fmt(row.long)}/${fmt(row.short)} `
   + row.recent.map((window) =>
-    `W${window.days} n${window.n} ${fmt(window.net)}/PF${window.profitFactor.toFixed(2)}`).join(' ');
+    `W${window.days} n${window.n} ${fmt(window.net)}/PF${window.profitFactor.toFixed(2)} `
+    + `L/S${fmt(window.long)}/${fmt(window.short)}`).join(' ');
 
-console.log(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${STRESS_RT_PCT}% measured-cost discovery reserve · ${ROBUST_STRESS_RT_PCT}% adverse sensitivity (non-blocking) · ${FUNDING_PER_HOUR_PCT}%/h adverse funding`);
+console.log(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${STRESS_RT_PCT}% measured-cost discovery reserve · ${ROBUST_STRESS_RT_PCT}% adverse sensitivity (non-blocking) · ${FUNDING_PER_HOUR_PCT}%/h adverse funding · max DD ${MAX_BACKTEST_DD_PCT}%`);
 console.log(`\nQUALIFIED (${qualified.length})`);
 console.log(qualified.length ? qualified.slice(0, 30).map(print).join('\n') : '— none —');
 console.log('\nTOP 30 (including failures)');

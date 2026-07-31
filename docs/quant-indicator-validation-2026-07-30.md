@@ -350,6 +350,53 @@ costs. Those values are retained only as optional adverse scenarios. Final
 evidence still comes from prospective Shadow fills and their recorded
 market-specific executable costs.
 
+### Second executable-cost market batch
+
+The next batch expanded the liquid native universe to LIT, PUMP, GRAM and XMR.
+As above, forty live Lighter L2 snapshots per market simulated an immediate
+`$1,000` buy and sell. The scan used the observed p95 executable round-trip
+loss rather than a common arbitrary stress:
+
+| Symbol | Median | p95 used by scan |
+|---|---:|---:|
+| LIT | 0.0458% | 0.0586% |
+| PUMP | 0.1005% | 0.1376% |
+| GRAM | 0.0208% | 0.0460% |
+| XMR | 0.0636% | 0.0970% |
+
+Each market has at least 259,200 consecutive native one-minute candles with
+zero gaps or duplicate timestamps. The scan evaluated one- and five-minute
+bars, both Long and Short trades, chronological IS/OOS folds, recent
+30/60/90-day windows, confidence bounds and a separate non-blocking adverse
+cost scenario. A maximum 15% historical additive drawdown is now a mandatory
+research gate; this prevents a high headline return from hiding an unsuitable
+risk path.
+
+No model from this batch qualified:
+
+- LIT's best five-minute Z20 `2.5σ` touch model made `+84.34%`, but PF was only
+  1.13 and maximum drawdown was `−26.79%`.
+- PUMP remained weak after its measured 0.1376% p95 executable cost. Its best
+  five-minute families had PF around 1.03–1.05 and failed recent, direction,
+  confidence or drawdown gates.
+- GRAM produced the closest risk-adjusted near-miss. Five-minute
+  `VWZ60-3-reclaim` had 292 trades, `+35.58%`, PF 1.38, robust `+28.57%`,
+  3/4 positive folds, `+28.75% / +6.84%` IS/OOS, positive aggregate Long and
+  Short results, `−12.88%` drawdown and a positive `+0.0253%` mean-trade L95.
+  However, its latest 30-day Long result was `−0.30%` while Short was
+  `+2.98%`. It therefore fails the frozen two-sided recent gate and was not
+  admitted to Shadow.
+- XMR produced no qualified model. Several five-minute rules were profitable
+  in aggregate, but failed the PF, confidence, drawdown or recent
+  direction-balance gates.
+
+The engine also added a predeclared, causal Kaufman efficiency-ratio filter to
+the two-sided volume-weighted Z-score family. It is intended to avoid fading
+strongly directional paths, uses completed closes only, and was evaluated on
+the earlier ZEC/DOGE/NEAR/JUP set as well as this batch. It did not create a
+qualified candidate. No strategy was added merely because a new indicator
+improved one headline metric.
+
 ## Prospective Native Shadow continuation gate
 
 Native strategies now have an automatic continuation gate in the actual
