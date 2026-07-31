@@ -1123,6 +1123,12 @@ to `data/lighter-native-microstructure-shadow-report.json`; the report carries
 `realEnabled=false`. Pre-activation data is used only for the 240-minute causal
 feature warm-up and can never appear as a Shadow trade.
 
+Exact funding reconciliation is intentionally broader than the promotion
+sample: every closed Native trade, including preserved legacy `$1,000` rows,
+is replaced with public Lighter hourly settlements. Promotion SQL still admits
+only the new `$100` cohort, so correcting historical display accounting cannot
+leak old trades into the Real gate.
+
 ## Preregistered dual-timeframe L2 protocol
 
 Before the first seven-day microstructure result was available, the six frozen

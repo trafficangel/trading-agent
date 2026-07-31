@@ -14,7 +14,6 @@ import {
   lighterFundingPnlPct,
   type LighterFundingPoint,
 } from '../src/lib/lighter-funding-history.js';
-import { NATIVE_SHADOW_NOTIONAL_USD } from '../src/lib/lighter-luxalgo-math.js';
 
 const BASE_URL = process.env.LIGHTER_API_BASE ?? 'https://mainnet.zklighter.elliot.ai';
 const HOUR_SECONDS = 3_600;
@@ -146,7 +145,6 @@ const pending = db.prepare<string[], PendingTrade>(`
   SELECT id, symbol, side, opened_at, closed_at, gross_pnl_pct
   FROM lighter_lux_trades
   WHERE strategy_id IN (${sqlMarks(NATIVE_IDS.length)})
-    AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
     AND closed_at IS NOT NULL
     AND gross_pnl_pct IS NOT NULL
     AND funding_source != 'lighter_api_settlements'
