@@ -498,8 +498,11 @@ Real-capacity decision is made.
 
 Native strategies now have an automatic continuation gate in the actual
 Shadow entry path, not only a dashboard label. Until 20 closed prospective
-trades the strategy continues collecting evidence. Starting with close 20,
-every attempted new entry is admitted only when all frozen conditions hold:
+trades the strategy continues collecting evidence, except for the frozen
+maximum-drawdown ceiling: because an observed maximum drawdown cannot improve
+with more trades, breaching it blocks the next entry immediately. Starting
+with close 20, every attempted new entry is admitted only when all remaining
+frozen conditions hold:
 
 - cumulative net PnL is positive and PF is at least 1.20;
 - both chronological halves are positive;

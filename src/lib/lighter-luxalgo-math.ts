@@ -93,6 +93,32 @@ export function evaluateNativeForwardGate(
   const avgExecutionCostPct = validCosts.length ? sum(validCosts) / validCosts.length : null;
   const p95BookAgeMs = percentile95(validBookAges);
 
+  // Maximum drawdown is path-dependent and cannot improve after it has been
+  // observed. Waiting for the full sample after the frozen ceiling is already
+  // breached would only accumulate more exposure for a strategy that can no
+  // longer qualify. Other statistics may still recover, so they remain
+  // observational until targetClosed.
+  if (
+    closed < NATIVE_FORWARD_GATE.targetClosed
+    && maxDrawdownPct > NATIVE_FORWARD_GATE.maxDrawdownPct
+  ) {
+    const reason = `drawdown ${maxDrawdownPct.toFixed(3)}% > ${NATIVE_FORWARD_GATE.maxDrawdownPct.toFixed(1)}%`;
+    return {
+      status: 'failed',
+      entryAllowed: false,
+      closed,
+      netPct,
+      profitFactor,
+      firstHalfPct,
+      secondHalfPct,
+      maxDrawdownPct,
+      captureErrorRatePct,
+      avgExecutionCostPct,
+      p95BookAgeMs,
+      reasons: [reason],
+    };
+  }
+
   if (closed < NATIVE_FORWARD_GATE.targetClosed) {
     return {
       status: 'collecting',

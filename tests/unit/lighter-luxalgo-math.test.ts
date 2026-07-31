@@ -42,6 +42,23 @@ describe('Lighter LuxAlgo shadow math', () => {
     expect(result.entryAllowed).toBe(true);
   });
 
+  it('fails closed immediately when the frozen drawdown ceiling is irreversibly breached', () => {
+    const result = evaluateNativeForwardGate({
+      netPcts: [1, -2, -2, -2, -2],
+      signalCount: 5,
+      captureErrors: 0,
+      executionCostPcts: Array.from({ length: 5 }, () => 0.02),
+      bookAgesMs: Array.from({ length: 5 }, () => 100),
+    });
+    expect(result.status).toBe('failed');
+    expect(result.entryAllowed).toBe(false);
+    expect(result.closed).toBe(5);
+    expect(result.maxDrawdownPct).toBeCloseTo(8);
+    expect(result.reasons).toEqual([
+      expect.stringContaining('drawdown'),
+    ]);
+  });
+
   it('passes a profitable, stable and executable Native forward sample', () => {
     const result = evaluateNativeForwardGate({
       netPcts: Array.from({ length: 20 }, (_, index) => index % 4 === 0 ? -0.2 : 0.25),
