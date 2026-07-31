@@ -188,6 +188,12 @@ quality counters. Five-minute features must be derived from consecutive
 `quality_ok=1` one-minute rows; incomplete or gap-affected minutes are excluded,
 not forward-filled. Default retention is 60 days.
 
+Order-book updates are change-driven. Therefore a quiet market's unchanged
+book age is retained as a feature but is not by itself treated as a broken
+stream. Sampling is rejected only when the shared socket has been silent for
+five seconds, the specific market has produced no channel message for 60
+seconds, the book is missing/crossed, or continuity was broken.
+
 This is a data-collection track, not a strategy launch. No entry rule may be
 selected until enough strictly prospective rows exist for chronological
 train/validation/test, execution-stressed evaluation, both-side checks and a

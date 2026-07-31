@@ -31,7 +31,11 @@ const STATUS_PATH = resolve(
   process.env.LIGHTER_MICRO_STATUS ?? 'data/lighter-native-microstructure-status.json',
 );
 const SAMPLE_MS = Math.max(250, Number(process.env.LIGHTER_MICRO_SAMPLE_MS ?? 1_000));
-const STALE_MS = Math.max(1_000, Number(process.env.LIGHTER_MICRO_STALE_MS ?? 3_000));
+const SOCKET_STALE_MS = Math.max(1_000, Number(process.env.LIGHTER_MICRO_SOCKET_STALE_MS ?? 5_000));
+const MARKET_STALE_MS = Math.max(
+  10_000,
+  Number(process.env.LIGHTER_MICRO_MARKET_STALE_MS ?? 60_000),
+);
 const RETENTION_DAYS = Math.max(7, Number(process.env.LIGHTER_MICRO_RETENTION_DAYS ?? 60));
 const MINUTE_MS = 60_000;
 const RECONNECT_MS = 2_000;
@@ -70,6 +74,7 @@ type MarketRuntime = {
   book: ReturnType<typeof createLighterBookState>;
   accumulator: LighterMinuteAccumulator;
   lastBookAt: number;
+  lastMarketMessageAt: number;
   exchangeAt: number;
   resyncs: number;
   messages: number;
@@ -185,6 +190,7 @@ const markets = new Map<number, MarketRuntime>(
       book: createLighterBookState(),
       accumulator: new LighterMinuteAccumulator(minuteStart(startedAt)),
       lastBookAt: 0,
+      lastMarketMessageAt: 0,
       exchangeAt: 0,
       resyncs: 0,
       messages: 0,
@@ -238,10 +244,11 @@ function writeStatus(): void {
     /* status remains useful */
   }
   const payload = {
-    version: 'lighter-native-microstructure-v1',
+    version: 'lighter-native-microstructure-v2',
     checkedAt: now,
     sampleMs: SAMPLE_MS,
-    staleMs: STALE_MS,
+    socketStaleMs: SOCKET_STALE_MS,
+    marketStaleMs: MARKET_STALE_MS,
     retentionDays: RETENTION_DAYS,
     dbPath: DB_PATH,
     dbBytes,
@@ -252,6 +259,9 @@ function writeStatus(): void {
       messages: runtime.messages,
       resyncs: runtime.resyncs,
       lastBookAgeMs: runtime.lastBookAt ? now - runtime.lastBookAt : null,
+      lastMarketMessageAgeMs: runtime.lastMarketMessageAt
+        ? now - runtime.lastMarketMessageAt
+        : null,
       bookLevels: { bids: runtime.book.bids.size, asks: runtime.book.asks.size },
     })),
   };
@@ -267,7 +277,11 @@ function sampleBooks(): void {
     const accumulator = runtime.accumulator;
     const ageMs = runtime.lastBookAt ? now - runtime.lastBookAt : Number.POSITIVE_INFINITY;
     const metrics = lighterBookMetrics(runtime.book);
-    if (!metrics || ageMs > STALE_MS) {
+    const socketAgeMs = state.lastMessageAt ? now - state.lastMessageAt : Number.POSITIVE_INFINITY;
+    const marketAgeMs = runtime.lastMarketMessageAt
+      ? now - runtime.lastMarketMessageAt
+      : Number.POSITIVE_INFINITY;
+    if (!metrics || socketAgeMs > SOCKET_STALE_MS || marketAgeMs > MARKET_STALE_MS) {
       accumulator.noteStaleSample();
       continue;
     }
@@ -344,6 +358,7 @@ function connect(): void {
     for (const runtime of markets.values()) {
       resetLighterBookState(runtime.book);
       runtime.lastBookAt = 0;
+      runtime.lastMarketMessageAt = 0;
       subscribe(socket as WebSocket, runtime.marketId);
     }
     if (pingTimer) clearInterval(pingTimer);
@@ -373,6 +388,7 @@ function connect(): void {
       const runtime = marketId == null ? null : markets.get(marketId);
       if (!runtime) return;
       runtime.messages++;
+      runtime.lastMarketMessageAt = receivedAt;
       const accumulator = accumulatorFor(runtime, receivedAt);
 
       if (message.order_book) {
@@ -419,6 +435,7 @@ function connect(): void {
       accumulatorFor(runtime, now).noteNonceGap();
       resetLighterBookState(runtime.book);
       runtime.lastBookAt = 0;
+      runtime.lastMarketMessageAt = 0;
     }
     scheduleReconnect();
   });
