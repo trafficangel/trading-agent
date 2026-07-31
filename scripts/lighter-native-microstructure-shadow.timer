@@ -1,0 +1,11 @@
+[Unit]
+Description=Update prospective Lighter microstructure Shadow accounting
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+RandomizedDelaySec=15s
+Unit=lighter-native-microstructure-shadow.service
+
+[Install]
+WantedBy=timers.target

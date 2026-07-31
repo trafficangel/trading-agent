@@ -1,8 +1,12 @@
 import { createHash } from 'node:crypto';
 import {
+  type MicroFeatureBar,
+  type MicroTrade,
   existingImmutableFrozenMicrostructureReport,
   PREREGISTERED_MICRO_RULES,
+  simulateMicrostructureRule,
 } from './lighter-microstructure-research.js';
+import type { LighterFundingSeries } from './lighter-funding-history.js';
 
 export const MICROSTRUCTURE_SHADOW_MANIFEST_VERSION =
   'lighter-microstructure-shadow-manifest-v1';
@@ -55,7 +59,7 @@ function parseCandidate(value: string): MicrostructureShadowCandidate {
   return { id: value, timeframeMinutes, ruleId };
 }
 
-function validateManifest(
+export function validateMicrostructureShadowManifest(
   value: unknown,
   expectedHash: string,
 ): MicrostructureShadowManifest {
@@ -107,7 +111,7 @@ export function prepareMicrostructureShadowManifest(
   }
   const hash = frozenMicrostructureReportSha256(locked);
   if (existingManifest != null) {
-    return { status: 'existing', manifest: validateManifest(existingManifest, hash) };
+    return { status: 'existing', manifest: validateMicrostructureShadowManifest(existingManifest, hash) };
   }
 
   const eligible = locked.shadowEligibleRules as unknown[];
@@ -149,4 +153,112 @@ export function prepareMicrostructureShadowManifest(
     realEnabled: false,
   };
   return { status: 'created', manifest };
+}
+
+export type MicrostructureShadowReport = {
+  version: 'lighter-microstructure-shadow-report-v1';
+  generatedAt: string;
+  status: 'active' | 'no_candidates';
+  activatedAt: string;
+  frozenReportSha256: string;
+  notionalUsd: 100;
+  maximumConcurrentPositions: 10;
+  candidates: MicrostructureShadowCandidate[];
+  closedTrades: MicroTrade[];
+  summary: {
+    closed: number;
+    long: number;
+    short: number;
+    netPct: number;
+    netUsd: number;
+    wins: number;
+    losses: number;
+    profitFactor: number | null;
+  };
+  prospectiveOnly: true;
+  exactFunding: true;
+  autoPromotion: false;
+  realEnabled: false;
+};
+
+/**
+ * Reconstruct only trades whose entries happened after the immutable Shadow
+ * activation. Pre-activation bars may warm causal indicators, but can never
+ * become reported trades. Capacity is enforced once across the whole cohort.
+ */
+export function prospectiveMicrostructureShadowTrades(
+  manifest: MicrostructureShadowManifest,
+  featuresByTimeframe: ReadonlyMap<1 | 5, readonly MicroFeatureBar[]>,
+  fundingByMarket: ReadonlyMap<number, LighterFundingSeries>,
+  nowMs: number,
+): MicroTrade[] {
+  if (!Number.isFinite(nowMs)) throw new Error('invalid Shadow report time');
+  if (manifest.status !== 'active') return [];
+  const activatedAtMs = Date.parse(manifest.activatedAt);
+  const proposed: MicroTrade[] = [];
+  for (const candidate of manifest.candidates) {
+    const rule = PREREGISTERED_MICRO_RULES.find((item) => item.id === candidate.ruleId);
+    if (!rule) throw new Error(`unknown Shadow candidate rule: ${candidate.ruleId}`);
+    const features = featuresByTimeframe.get(candidate.timeframeMinutes) ?? [];
+    proposed.push(...simulateMicrostructureRule(
+      features,
+      rule,
+      fundingByMarket,
+      Number.MAX_SAFE_INTEGER,
+    ).filter((trade) => trade.entryTimeMs >= activatedAtMs && trade.exitTimeMs <= nowMs));
+  }
+
+  proposed.sort((left, right) =>
+    left.entryTimeMs - right.entryTimeMs
+    || left.marketId - right.marketId
+    || left.ruleId.localeCompare(right.ruleId));
+  const accepted: MicroTrade[] = [];
+  const activeExitTimes: number[] = [];
+  for (const trade of proposed) {
+    for (let index = activeExitTimes.length - 1; index >= 0; index--) {
+      if (activeExitTimes[index]! <= trade.entryTimeMs) activeExitTimes.splice(index, 1);
+    }
+    if (activeExitTimes.length >= manifest.maximumConcurrentPositions) continue;
+    accepted.push(trade);
+    activeExitTimes.push(trade.exitTimeMs);
+  }
+  return accepted;
+}
+
+export function buildMicrostructureShadowReport(
+  manifest: MicrostructureShadowManifest,
+  closedTrades: readonly MicroTrade[],
+  generatedAtMs: number,
+): MicrostructureShadowReport {
+  if (!Number.isFinite(generatedAtMs)) throw new Error('invalid Shadow report time');
+  const wins = closedTrades.filter((trade) => trade.netPct > 0);
+  const losses = closedTrades.filter((trade) => trade.netPct < 0);
+  const grossWins = wins.reduce((sum, trade) => sum + trade.netPct, 0);
+  const grossLosses = Math.abs(losses.reduce((sum, trade) => sum + trade.netPct, 0));
+  const netPct = closedTrades.reduce((sum, trade) => sum + trade.netPct, 0);
+  return {
+    version: 'lighter-microstructure-shadow-report-v1',
+    generatedAt: new Date(generatedAtMs).toISOString(),
+    status: manifest.status,
+    activatedAt: manifest.activatedAt,
+    frozenReportSha256: manifest.frozenReportSha256,
+    notionalUsd: manifest.notionalUsd,
+    maximumConcurrentPositions: manifest.maximumConcurrentPositions,
+    candidates: manifest.candidates,
+    closedTrades: [...closedTrades],
+    summary: {
+      closed: closedTrades.length,
+      long: closedTrades.filter((trade) => trade.side === 'long').length,
+      short: closedTrades.filter((trade) => trade.side === 'short').length,
+      netPct,
+      netUsd: netPct * manifest.notionalUsd / 100,
+      wins: wins.length,
+      losses: losses.length,
+      profitFactor: grossLosses > 0 ? grossWins / grossLosses : closedTrades.length ? Infinity : null,
+    },
+    prospectiveOnly: true,
+    exactFunding: true,
+    autoPromotion: false,
+    realEnabled: false,
+  };
 }

@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildMicrostructureShadowReport,
   frozenMicrostructureReportSha256,
   prepareMicrostructureShadowManifest,
+  prospectiveMicrostructureShadowTrades,
 } from '../../src/lib/lighter-microstructure-shadow.js';
+import { buildLighterFundingSeries } from '../../src/lib/lighter-funding-history.js';
+import type { MicroFeatureBar } from '../../src/lib/lighter-microstructure-research.js';
 
 const NOW = Date.parse('2026-08-22T04:00:00Z');
 
@@ -81,5 +85,60 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
     const right = { a: { c: 3, d: 4 }, b: 2 };
     expect(frozenMicrostructureReportSha256(left))
       .toBe(frozenMicrostructureReportSha256(right));
+  });
+
+  it('records only post-activation closed trades and enforces cohort-wide capacity', () => {
+    const manifest = prepareMicrostructureShadowManifest(report(), null, NOW).manifest!;
+    const bars: MicroFeatureBar[] = [];
+    const funding = new Map<number, ReturnType<typeof buildLighterFundingSeries>>();
+    for (let marketId = 1; marketId <= 11; marketId++) {
+      funding.set(marketId, buildLighterFundingSeries([]));
+      for (let minute = 0; minute <= 6; minute++) {
+        bars.push({
+          marketId,
+          symbol: `M${marketId}`,
+          timeMs: NOW - 60_000 + minute * 60_000,
+          barMinutes: 1,
+          open: 100 + minute,
+          close: 100 + minute,
+          returnPct: 0,
+          spreadPct: 0.01,
+          bid5Usd: 1_000,
+          ask5Usd: 1_000,
+          depthImbalance: minute === 0 ? 0.3 : 0,
+          flowImbalance: minute === 0 ? 0.3 : 0,
+          liquidationImbalance: 0,
+          basisPct: 0,
+          fundingRatePctH: 0,
+          executionCostPct: 0.02,
+          adverseExecutionCostPct: 0.03,
+          trend: 'bull',
+          volatility: 'low',
+        });
+      }
+    }
+    const trades = prospectiveMicrostructureShadowTrades(
+      manifest,
+      new Map([[1, bars], [5, []]]),
+      funding,
+      NOW + 10 * 60_000,
+    );
+    expect(trades).toHaveLength(10);
+    expect(trades.every((trade) => trade.entryTimeMs >= NOW)).toBe(true);
+  });
+
+  it('reports prospective $100 PnL and cannot enable Real', () => {
+    const manifest = prepareMicrostructureShadowManifest(report(), null, NOW).manifest!;
+    const trade = {
+      ruleId: 'OF-CONT-25-H1', marketId: 1, symbol: 'BTC', side: 'long' as const,
+      barMinutes: 1 as const, signalTimeMs: NOW, entryTimeMs: NOW + 60_000,
+      exitTimeMs: NOW + 360_000, entryPrice: 100, exitPrice: 101,
+      grossPct: 1, fundingPct: -0.01, executionCostPct: 0.02,
+      adverseExecutionCostPct: 0.03, netPct: 0.97,
+      trend: 'bull' as const, volatility: 'low' as const,
+    };
+    const value = buildMicrostructureShadowReport(manifest, [trade], NOW + 600_000);
+    expect(value.summary).toMatchObject({ closed: 1, netPct: 0.97, netUsd: 0.97 });
+    expect(value).toMatchObject({ prospectiveOnly: true, exactFunding: true, realEnabled: false });
   });
 });

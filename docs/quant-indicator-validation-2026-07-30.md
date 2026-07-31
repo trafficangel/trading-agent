@@ -1100,6 +1100,16 @@ than waiting for a later rerun. The manifest fixes `$100`, ten maximum
 concurrent Shadow positions, `autoPromotion=false` and `realEnabled=false`;
 historical selection-period trades cannot enter the prospective cohort.
 
+The five-minute Shadow accounting timer is dormant until that manifest exists.
+Once active, it reconstructs only entries at or after `activatedAt`, uses the
+same causal next-bar fills, measured market/bar `$100` p95, `$500` depth gate,
+exact settled funding and frozen holds, and enforces the ten-position limit
+once across the complete cohort. It writes only completed prospective trades
+to `data/lighter-native-microstructure-shadow-report.json`; the report carries
+`prospectiveOnly=true`, `exactFunding=true`, `autoPromotion=false` and
+`realEnabled=false`. Pre-activation data is used only for the 240-minute causal
+feature warm-up and can never appear as a Shadow trade.
+
 ## Preregistered dual-timeframe L2 protocol
 
 Before the first seven-day microstructure result was available, the six frozen

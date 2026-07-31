@@ -2139,7 +2139,20 @@ type NativeMicrostructureShadowManifest = {
   version?: string;
   status?: 'active' | 'no_candidates';
   activatedAt?: string;
+  frozenReportSha256?: string;
   candidates?: unknown[];
+  autoPromotion?: boolean;
+  realEnabled?: boolean;
+};
+
+type NativeMicrostructureShadowReport = {
+  version?: string;
+  generatedAt?: string;
+  status?: 'active' | 'no_candidates';
+  frozenReportSha256?: string;
+  summary?: { closed?: number; netPct?: number; netUsd?: number };
+  prospectiveOnly?: boolean;
+  exactFunding?: boolean;
   autoPromotion?: boolean;
   realEnabled?: boolean;
 };
@@ -2254,6 +2267,21 @@ function nativeMicrostructureShadowStatus(lang: Lang): string {
   const since = Number.isFinite(activated)
     ? new Date(activated).toISOString().slice(5, 10)
     : '—';
+  const report = nativeMicrostructureSweep(
+    'LIGHTER_MICRO_SHADOW_REPORT',
+    'data/lighter-native-microstructure-shadow-report.json',
+  ) as NativeMicrostructureShadowReport | null;
+  const reportValid = report?.version === 'lighter-microstructure-shadow-report-v1'
+    && report.status === 'active'
+    && report.frozenReportSha256 === manifest.frozenReportSha256
+    && report.prospectiveOnly === true
+    && report.exactFunding === true
+    && report.autoPromotion === false
+    && report.realEnabled === false
+    && report.summary != null;
+  const performance = reportValid
+    ? ` · ${report.summary!.closed ?? 0} · ${signedPct(report.summary!.netPct ?? 0)} / ${signedUsd(report.summary!.netUsd ?? 0)}`
+    : ` · ${t(lang, 'ждёт первую закрытую', 'waiting first close')}`;
   return `<span title="${t(
     lang,
     'Новая prospective-выборка начинается после отбора; исторические сделки не засчитываются. Real запрещён.',
@@ -2262,7 +2290,7 @@ function nativeMicrostructureShadowStatus(lang: Lang): string {
     lang,
     'активен',
     'active',
-  )} · ${manifest.candidates!.length} · ${since}</b></span>`;
+  )} · ${manifest.candidates!.length} · ${since}${performance}</b></span>`;
 }
 
 function nativeMicrostructureReadiness(
