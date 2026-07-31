@@ -30,6 +30,8 @@ function bar(
     bid5Usd: 10_000,
     ask5Usd: 10_000,
     depthImbalance: 0,
+    tradedUsd: 10_000,
+    tradeCount: 20,
     flowImbalance: 0,
     liquidationImbalance: 0,
     basisPct: 0,
@@ -174,6 +176,26 @@ describe('Lighter microstructure research', () => {
     ], rule, EMPTY_FUNDING);
     expect(trades).toHaveLength(1);
     expect(trades[0]!.netPct).toBeCloseTo(0.7);
+  });
+
+  it('rejects one-print flow imbalance while leaving measured basis signals available', () => {
+    const flowRule = PREREGISTERED_MICRO_RULES.find((candidate) => candidate.id === 'OF-CONT-25-H1')!;
+    const basisRule = PREREGISTERED_MICRO_RULES.find((candidate) => candidate.id === 'BASIS-4BP-H3')!;
+    const sparse = [
+      bar(0, {
+        depthImbalance: 0.5,
+        flowImbalance: 1,
+        tradedUsd: 50,
+        tradeCount: 1,
+        basisPct: -0.05,
+      }),
+      bar(1),
+      bar(2),
+      bar(3),
+      bar(4),
+    ];
+    expect(simulateMicrostructureRule(sparse, flowRule, EMPTY_FUNDING)).toEqual([]);
+    expect(simulateMicrostructureRule(sparse, basisRule, EMPTY_FUNDING)).toHaveLength(1);
   });
 
   it('rejects a signal without a prospective signal-time execution cost', () => {

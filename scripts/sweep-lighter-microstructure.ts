@@ -23,6 +23,7 @@ import {
   buildCausalMicroFeatureBars,
   evaluateMicrostructureRule,
   existingImmutableFrozenMicrostructureReport,
+  MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS,
   PREREGISTERED_MICRO_RULES,
   simulateMicrostructureRule,
 } from '../src/lib/lighter-microstructure-research.js';
@@ -312,8 +313,9 @@ if (!existsSync(databasePath)) throw new Error(`microstructure database missing:
 const db = new Database(databasePath, { readonly: true, fileMustExist: true });
 const rows = db.prepare(`
   SELECT * FROM lighter_microstructure_1m
+  WHERE minute_ts_ms >= ?
   ORDER BY market_id, minute_ts_ms
-`).all() as DbRow[];
+`).all(MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS) as DbRow[];
 db.close();
 
 let exactFunding: Awaited<ReturnType<typeof exactFundingForRows>>;
@@ -396,6 +398,7 @@ output({
     validFiveMinuteRows: fiveMinute.length,
     featureSummary,
     commonDatasetStartAt: new Date(commonDatasetStartMs).toISOString(),
+    researchEpochAt: new Date(MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS).toISOString(),
     discoveryCutoffAt: new Date(discoveryCutoffMs).toISOString(),
     executionCostSource: 'completed signal-bar $100 p95; native minute p95 at 1m and max of five causal minute p95 values at 5m',
     adverseExecutionCostSource: 'completed signal-bar worst actually observed $100 round trip; sensitivity only',
@@ -408,6 +411,7 @@ output({
     adverseExecution: 'observed maximum; no fixed percentage or multiplier',
     maximumPortfolioDrawdownPct: 5,
     minimumDepthUsdPerSide: 500,
+    flowQuality: { minimumTradesPerBar: 5, minimumTradedUsdPerBar: 500 },
     bothSides: true,
     chronologicalThirds: 3,
     discoveryDays: 7,

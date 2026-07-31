@@ -1086,6 +1086,16 @@ The independent 21-day frozen sweep continues to write
 `data/lighter-native-microstructure-sweep.json`. Exploratory results therefore
 cannot overwrite or relax the frozen candidate gate.
 
+Before any seven-day result existed, raw feed diagnostics showed that a
+single small print can mathematically produce a flow imbalance near `1.0` on
+thin markets. Flow-continuation and absorption rules therefore require at
+least five prints and `$500` traded notional in the completed signal bar.
+This is a feature-quality requirement, not an assumed trading cost; basis
+rules remain eligible when order-book depth and measured execution pass. To
+avoid using already inspected raw minutes, the research clock was restarted at
+`2026-07-31T18:45:00Z`; readiness, exploration and the immutable 21-day frozen
+selection all ignore earlier rows.
+
 The frozen timer is a one-shot selection despite running daily. The first
 report produced after every 21-day readiness condition passes is marked
 `immutableSelection=true` and is returned unchanged on every later run. An

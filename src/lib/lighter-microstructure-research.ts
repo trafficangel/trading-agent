@@ -7,6 +7,11 @@ import {
 const MINUTE_MS = 60_000;
 const DAY_MS = 86_400_000;
 
+/** First eligible minute after the preregistered flow-quality correction. */
+export const MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS = Date.parse(
+  '2026-07-31T18:45:00.000Z',
+);
+
 type MicrostructureSourceBar = Omit<MicrostructureFiveMinute, 'sourceMinutes'>;
 
 export type MicroSide = 'long' | 'short';
@@ -25,6 +30,8 @@ export type MicroFeatureBar = {
   bid5Usd: number;
   ask5Usd: number;
   depthImbalance: number;
+  tradedUsd: number;
+  tradeCount: number;
   flowImbalance: number;
   liquidationImbalance: number;
   basisPct: number;
@@ -132,6 +139,7 @@ function sideFromMirrored(
 }
 
 function flowContinuation(bar: MicroFeatureBar): MicroSide | null {
+  if (bar.tradeCount < 5 || bar.tradedUsd < 500) return null;
   return sideFromMirrored(
     bar.depthImbalance >= 0.20 && bar.flowImbalance >= 0.25,
     bar.depthImbalance <= -0.20 && bar.flowImbalance <= -0.25,
@@ -139,6 +147,7 @@ function flowContinuation(bar: MicroFeatureBar): MicroSide | null {
 }
 
 function absorptionReversal(bar: MicroFeatureBar): MicroSide | null {
+  if (bar.tradeCount < 5 || bar.tradedUsd < 500) return null;
   return sideFromMirrored(
     bar.flowImbalance <= -0.55 && bar.depthImbalance >= 0.15 && bar.returnPct <= 0,
     bar.flowImbalance >= 0.55 && bar.depthImbalance <= -0.15 && bar.returnPct >= 0,
@@ -274,6 +283,8 @@ export function buildCausalMicroFeatureBars(
         bid5Usd: row.bid5UsdAvg,
         ask5Usd: row.ask5UsdAvg,
         depthImbalance: row.depthImbalanceClose,
+        tradedUsd,
+        tradeCount: row.tradeCount,
         flowImbalance: tradedUsd > 0 ? row.cvdUsd / tradedUsd : 0,
         liquidationImbalance: liquidationUsd > 0
           ? (row.liquidationBuyUsd - row.liquidationSellUsd) / liquidationUsd

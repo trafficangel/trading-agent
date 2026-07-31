@@ -107,6 +107,8 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
           bid5Usd: 1_000,
           ask5Usd: 1_000,
           depthImbalance: minute === 0 ? 0.3 : 0,
+          tradedUsd: 10_000,
+          tradeCount: 20,
           flowImbalance: minute === 0 ? 0.3 : 0,
           liquidationImbalance: 0,
           basisPct: 0,

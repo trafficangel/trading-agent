@@ -3,6 +3,7 @@
 import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
+import { MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS } from '../src/lib/lighter-microstructure-research.js';
 
 const MINUTE_MS = 60_000;
 const FIVE_MINUTES_MS = 5 * MINUTE_MS;
@@ -61,7 +62,10 @@ if (!existsSync(databasePath))
 
 const now = Date.now();
 const closedMinute = Math.floor(now / MINUTE_MS) * MINUTE_MS;
-const cutoff = closedMinute - windowDays * DAY_MS;
+const cutoff = Math.max(
+  closedMinute - windowDays * DAY_MS,
+  MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS,
+);
 const db = new Database(databasePath, { readonly: true, fileMustExist: true });
 const tableColumns = new Set(
   (db.pragma('table_info(lighter_microstructure_1m)') as Array<{ name: string }>)
@@ -129,7 +133,8 @@ const latestExecutionCostRows = hasRollingExecutionCost
         current.exec_cost_100_avg_pct AS execution_cost_avg_pct,
         current.exec_cost_100_p95_pct AS execution_cost_p95_pct
       FROM lighter_microstructure_1m AS current
-      WHERE current.minute_ts_ms < ?
+      WHERE current.minute_ts_ms >= ?
+        AND current.minute_ts_ms < ?
         AND current.quality_ok = 1
         AND current.exec_cost_100_p95_pct IS NOT NULL
         AND current.exec_cost_100_samples >= current.samples * 0.8
@@ -137,6 +142,7 @@ const latestExecutionCostRows = hasRollingExecutionCost
           SELECT MAX(latest.minute_ts_ms)
           FROM lighter_microstructure_1m AS latest
           WHERE latest.market_id = current.market_id
+            AND latest.minute_ts_ms >= ?
             AND latest.minute_ts_ms < ?
             AND latest.quality_ok = 1
             AND latest.exec_cost_100_p95_pct IS NOT NULL
@@ -144,7 +150,12 @@ const latestExecutionCostRows = hasRollingExecutionCost
         )
       ORDER BY current.market_id
     `,
-  ).all(closedMinute, closedMinute) as LatestExecutionCostRow[]
+  ).all(
+    MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS,
+    closedMinute,
+    MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS,
+    closedMinute,
+  ) as LatestExecutionCostRow[]
   : [];
 
 const recentHealthRows = db.prepare(
@@ -161,7 +172,10 @@ const recentHealthRows = db.prepare(
     ORDER BY market_id
   `,
 ).all(
-  closedMinute - RECENT_HEALTH_MINUTES * MINUTE_MS,
+  Math.max(
+    closedMinute - RECENT_HEALTH_MINUTES * MINUTE_MS,
+    MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS,
+  ),
   closedMinute,
 ) as RecentHealthRow[];
 
@@ -268,14 +282,20 @@ const maxLatestExecutionCostP95Pct = latestExecutionCostP95Values.length
   ? Math.max(...latestExecutionCostP95Values)
   : 0;
 const recentMarkets = recentHealthRows.length;
+const recentExpectedMinutes = Math.max(0, Math.min(
+  RECENT_HEALTH_MINUTES,
+  Math.floor((closedMinute - MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS) / MINUTE_MS),
+));
 const minRecentCoverageRatio = minimum(
-  recentHealthRows.map((row) => row.rows / RECENT_HEALTH_MINUTES),
+  recentHealthRows.map((row) => recentExpectedMinutes ? row.rows / recentExpectedMinutes : 0),
 );
 const minRecentQualityRatio = minimum(
-  recentHealthRows.map((row) => row.quality_rows / RECENT_HEALTH_MINUTES),
+  recentHealthRows.map((row) =>
+    recentExpectedMinutes ? row.quality_rows / recentExpectedMinutes : 0),
 );
 const minRecentExecutionCostRatio = minimum(
-  recentHealthRows.map((row) => row.execution_cost_rows / RECENT_HEALTH_MINUTES),
+  recentHealthRows.map((row) =>
+    recentExpectedMinutes ? row.execution_cost_rows / recentExpectedMinutes : 0),
 );
 const recentNonceGaps = recentHealthRows.reduce((sum, row) => sum + row.nonce_gaps, 0);
 
@@ -315,6 +335,7 @@ const report = {
     expectedMarkets: EXPECTED_MARKETS,
     minimumQualityRatio: MIN_QUALITY_RATIO,
     rollingExecutionNotionalUsd: 100,
+    researchEpochAt: new Date(MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS).toISOString(),
     healthHistoryDays: 1,
     exploratoryHistoryDays: 7,
     frozenResearchHistoryDays: 21,
@@ -331,7 +352,7 @@ const report = {
     latestExecutionCostMarkets: latestExecutionCostP95Values.length,
     minLatestExecutionCostP95Pct,
     maxLatestExecutionCostP95Pct,
-    recentWindowMinutes: RECENT_HEALTH_MINUTES,
+    recentWindowMinutes: recentExpectedMinutes,
     recentMarkets,
     minRecentCoverageRatio,
     minRecentQualityRatio,
