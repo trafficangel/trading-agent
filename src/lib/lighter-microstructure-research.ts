@@ -21,6 +21,8 @@ export type MicroFeatureBar = {
   liquidationImbalance: number;
   basisPct: number;
   fundingRatePctH: number;
+  /** Causal p95 from the completed signal bar's $100 L2 samples. */
+  executionCostPct: number | null;
   trend: TrendRegime;
   volatility: VolatilityRegime;
 };
@@ -229,6 +231,7 @@ export function buildCausalMicroFeatureBars(
           : 0,
         basisPct: row.basisPct,
         fundingRatePctH: row.currentFundingRate,
+        executionCostPct: row.execCost100P95Pct,
         trend,
         volatility,
       });
@@ -260,7 +263,6 @@ function fundingPnlPct(
 export function simulateMicrostructureRule(
   features: readonly MicroFeatureBar[],
   rule: MicroRule,
-  executionCostsPct: ReadonlyMap<string, number>,
 ): MicroTrade[] {
   const byMarket = new Map<number, MicroFeatureBar[]>();
   for (const bar of features) {
@@ -273,7 +275,7 @@ export function simulateMicrostructureRule(
     marketBars.sort((left, right) => left.timeMs - right.timeMs);
     for (let index = 0; index < marketBars.length; index++) {
       const signalBar = marketBars[index]!;
-      const cost = executionCostsPct.get(signalBar.symbol);
+      const cost = signalBar.executionCostPct;
       if (cost == null || !Number.isFinite(cost) || cost < 0 || !liquidityPass(signalBar, cost)) {
         continue;
       }
