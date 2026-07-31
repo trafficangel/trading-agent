@@ -790,3 +790,23 @@ was negative in both the 60- and 90-day windows, and choosing the best market
 after viewing holdout results would be post-hoc cherry-picking. The entire
 family is rejected without Shadow or Real registration. Frozen evidence is in
 `data/lighter-hourfade-results.json`.
+
+### P2 external-market transfer: rejected
+
+The already frozen `Z60STACK-2.5-touch` rule was then tested unchanged on six
+liquid markets excluded from the original 15-market P2 selection: AAVE, ARB,
+LINK, PUMP, UNI and XRP. No threshold, stop, holding period or exit was
+altered. Each market used a fresh 40-snapshot `$100` executable p95 and
+worst-observed cost sample.
+
+Transfer failed at both timeframes. The 1m holdout produced 1,388 trades,
+`-46.04%`, PF `0.85`, L95 `-0.0595%`, negative Long/Short books and only 1/4
+positive folds. The 5m holdout produced 297 trades, `-16.25%`, PF `0.89`,
+L95 `-0.1594%`, OOS `-4.24%`, negative Long/Short books and 2/4 folds. The
+latest 30/60-day 5m windows were positive, but the 90-day window remained
+negative and no individual market passed the full frozen gate.
+
+No external leg is added. The failure does not rewrite the original P2 sample,
+but it prevents any claim that the rule transfers universally and reinforces
+the decision to keep P2 prospective Shadow-only. Frozen evidence is in
+`data/lighter-p2-transfer-holdout-results.json`.
