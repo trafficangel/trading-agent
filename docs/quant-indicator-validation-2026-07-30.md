@@ -312,6 +312,44 @@ timeframe choice. The failed one-minute transfer is useful negative evidence:
 greater signal frequency did not survive realistic execution reserve, so no
 one-minute strategy was added merely to increase trade count.
 
+### Per-market executable-cost calibration
+
+The next control batch replaced the common execution reserve with a measured
+reserve for each market. Forty live Lighter L2 snapshots per symbol were
+sampled, and every snapshot simulated an immediate `$1,000` buy and sell
+against available depth. The value below is the p95 round-trip loss from
+executable VWAP versus mid; it is spread plus book slippage, not an exchange
+commission:
+
+| Symbol | Median | p90 | p95 used by scan | Maximum |
+|---|---:|---:|---:|---:|
+| ZEC | 0.0428% | 0.0491% | 0.0520% | 0.0522% |
+| DOGE | 0.0477% | 0.0653% | 0.0724% | 0.0760% |
+| NEAR | 0.0438% | 0.0625% | 0.0685% | 0.1038% |
+| JUP | 0.0711% | 0.0926% | 0.0934% | 0.0985% |
+
+Each market then received a gap-free 180-day history of 259,200 native
+one-minute candles and was scanned independently at one and five minutes using
+its own measured p95. The adverse sensitivity column remained non-blocking.
+No candidate qualified:
+
+- ZEC's strongest one-minute headline had PF 1.09 and an effectively flat
+  latest 30-day window; its adverse-sensitivity result was negative. Its best
+  five-minute candidates failed confidence, OOS or direction gates.
+- DOGE was negative after its measured p95 at both timeframes.
+- NEAR five-minute volume-Z `2.25σ` touch was a genuine near-miss
+  (`+132.15%`, PF 1.30, 4/4 folds, positive IS/OOS and both directions), but
+  the latest 30 days were `−0.13%`, PF 1.00. The `3σ` reclaim variant also
+  failed the frozen 90-day PF gate at 1.04. Neither was launched.
+- JUP produced no qualified rule. Its best five-minute headline, Z60 `2.5σ`
+  touch, had only PF 1.06, negative IS, a negative short side and a negative
+  mean-trade confidence bound after the measured 0.0934% p95 cost.
+
+This calibration supersedes use of `0.10%` or `0.15%` as universal eligibility
+costs. Those values are retained only as optional adverse scenarios. Final
+evidence still comes from prospective Shadow fills and their recorded
+market-specific executable costs.
+
 ## Prospective Native Shadow continuation gate
 
 Native strategies now have an automatic continuation gate in the actual
