@@ -159,6 +159,23 @@ describe('Lighter microstructure research', () => {
     expect(trades).toEqual([]);
   });
 
+  it('does not apply a second arbitrary spread threshold after measured cost', () => {
+    const rule = PREREGISTERED_MICRO_RULES.find((candidate) => candidate.id === 'OF-CONT-25-H1')!;
+    const trades = simulateMicrostructureRule([
+      bar(0, {
+        depthImbalance: 0.5,
+        flowImbalance: 0.5,
+        spreadPct: 0.25,
+        executionCostPct: 0.3,
+        adverseExecutionCostPct: 0.35,
+      }),
+      bar(1),
+      bar(2, { open: 101 }),
+    ], rule, EMPTY_FUNDING);
+    expect(trades).toHaveLength(1);
+    expect(trades[0]!.netPct).toBeCloseTo(0.7);
+  });
+
   it('rejects a signal without a prospective signal-time execution cost', () => {
     const rule = PREREGISTERED_MICRO_RULES.find((candidate) => candidate.id === 'OF-CONT-25-H1')!;
     const trades = simulateMicrostructureRule([

@@ -290,10 +290,12 @@ export function buildCausalMicroFeatureBars(
   return result.sort((left, right) => left.timeMs - right.timeMs || left.marketId - right.marketId);
 }
 
-function liquidityPass(bar: MicroFeatureBar, executionCostPct: number): boolean {
+function liquidityPass(bar: MicroFeatureBar): boolean {
+  // Spread and slippage are already present in the measured executable $100
+  // round-trip cost. A second ratio/fixed-spread gate would double-filter the
+  // same cost and reintroduce an arbitrary assumption.
   return bar.bid5Usd >= 500
-    && bar.ask5Usd >= 500
-    && bar.spreadPct <= Math.max(0.02, executionCostPct * 1.5);
+    && bar.ask5Usd >= 500;
 }
 
 /**
@@ -330,7 +332,7 @@ export function simulateMicrostructureRule(
         || adverseCost == null
         || !Number.isFinite(adverseCost)
         || adverseCost < cost
-        || !liquidityPass(signalBar, cost)
+        || !liquidityPass(signalBar)
       ) {
         continue;
       }

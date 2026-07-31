@@ -1063,6 +1063,9 @@ aligned with the corrected Native execution policy:
   observed inside the same completed signal bar;
 - no fixed `0.10%`/`0.15%` reserve and no `1.5 x p95` multiplier can qualify or
   reject a rule;
+- spread is not filtered a second time because it is already contained in the
+  executable round-trip measurement; only the independent `$500` depth-per-side
+  floor remains;
 - missing observed-maximum execution data rejects that signal rather than
   falling back to an assumed value.
 - holding-period funding is the exact signed public Lighter hourly settlement
