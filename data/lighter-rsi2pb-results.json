@@ -1,0 +1,89 @@
+{
+  "version": "lighter-rsi2pb-frozen-v1",
+  "generatedAt": "2026-07-31T14:11:21Z",
+  "status": "rejected",
+  "preregisteredRules": [
+    "RSI2PB-5-touch+STACK21/55/200",
+    "RSI2PB-5-reclaim+STACK21/55/200",
+    "RSI2PB-10-touch+STACK21/55/200",
+    "RSI2PB-10-reclaim+STACK21/55/200"
+  ],
+  "input": {
+    "markets": [
+      "BTC", "ETH", "SOL", "BNB", "LTC", "HYPE", "ZEC", "DOGE",
+      "NEAR", "JUP", "LIT", "GRAM", "XMR", "ENA", "TAO"
+    ],
+    "lookbackDays": 180,
+    "notionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific measured executable round-trip p95",
+    "adverseExecutionCostMultiplier": 1.5,
+    "adverseFundingPctPerHour": 0.00125,
+    "portfolioMaxOpen": 6
+  },
+  "fiveMinute": {
+    "qualifiedIndividualRules": 0,
+    "qualifiedPortfolioRules": 0,
+    "leastNegativePortfolio": {
+      "rule": "RSI2PB-5-touch+STACK21/55/200",
+      "trades": 16320,
+      "netPct": -387.83,
+      "profitFactor": 0.86,
+      "adverseNetPct": -806.88,
+      "adverseProfitFactor": 0.72,
+      "maxDrawdownPct": -69.47,
+      "positiveFolds": 0,
+      "folds": 4,
+      "inSampleNetPct": -280.99,
+      "outOfSampleNetPct": -106.84,
+      "longNetPct": -140.37,
+      "shortNetPct": -247.46,
+      "positiveMarkets": 3,
+      "activeMarkets": 15,
+      "positiveMonths": 1,
+      "months": 6
+    },
+    "bestRejectedIndividual": {
+      "market": "HYPE",
+      "rule": "RSI2PB-5-touch+STACK21/55/200",
+      "trades": 1107,
+      "netPct": 29.08,
+      "profitFactor": 1.18,
+      "adverseNetPct": 15.54,
+      "adverseProfitFactor": 1.09,
+      "maxDrawdownPct": -12.18,
+      "positiveFolds": 3,
+      "folds": 4,
+      "inSampleNetPct": 24.35,
+      "outOfSampleNetPct": 4.73,
+      "longNetPct": 22.99,
+      "shortNetPct": 6.09,
+      "meanL95Pct": 0.0042,
+      "failedFrozenGates": ["profit factor 1.18 < 1.20"]
+    }
+  },
+  "oneMinute": {
+    "qualifiedIndividualRules": 0,
+    "qualifiedPortfolioRules": 0,
+    "leastNegativePortfolio": {
+      "rule": "RSI2PB-5-touch+STACK21/55/200",
+      "trades": 78559,
+      "netPct": -2673.63,
+      "profitFactor": 0.64,
+      "adverseNetPct": -4616.83,
+      "adverseProfitFactor": 0.45,
+      "maxDrawdownPct": -447.41,
+      "positiveFolds": 0,
+      "folds": 4,
+      "inSampleNetPct": -1754.93,
+      "outOfSampleNetPct": -918.71,
+      "longNetPct": -1312.54,
+      "shortNetPct": -1361.10,
+      "positiveMarkets": 0,
+      "activeMarkets": 15,
+      "positiveMonths": 0,
+      "months": 6
+    }
+  },
+  "decision": "Closed without retuning. No prospective Shadow or Real registration."
+}

@@ -613,3 +613,18 @@ shock inside a fully aligned bear trend.
 
 This is one frozen run. Complete failure closes the family without adding a
 larger RSI/EMA grid; only a fully qualified rule may enter prospective Shadow.
+
+### Frozen result: rejected
+
+No portfolio or individual rule qualified. The least-negative five-minute
+portfolio, `RSI2PB-5-touch+STACK21/55/200`, had 16,320 trades, net `−387.83%`,
+PF `0.86`, adverse net `−806.88%` / PF `0.72`, drawdown `−69.47%`, 0/4 folds,
+negative IS/OOS and negative Long/Short books. Its one-minute transfer was
+worse: 78,559 trades, net `−2673.63%`, PF `0.64`, drawdown `−447.41%` and 0/4
+folds.
+
+HYPE 5m under the `5-touch` rule was the strongest individual row (`+29.08%`,
+positive IS/OOS and Long/Short), but still failed the frozen PF gate at `1.18 <
+1.20`; it therefore remains a rejected observation rather than a post-hoc
+single-market strategy. The family is closed without retuning and is not added
+to Shadow or Real.
