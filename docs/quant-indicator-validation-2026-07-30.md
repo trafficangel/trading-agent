@@ -763,3 +763,30 @@ generated `+13.59%` versus only `+1.69%` Long, and drawdown reached `-17.38%`.
 The family is therefore rejected without post-hoc retuning and is not added to
 Shadow or Real. Frozen evidence is in
 `data/lighter-failed-breakout-results.json`.
+
+### UTC hour-boundary fade: rejected, including independent holdout
+
+One fixed symmetric rule faded only the first completed candle of each UTC
+hour when its body was at least ATR14 and volume was at least SMA20. Entry was
+next-bar open, with a 30-minute timeout and 1.5% safety stop. The common
+15-market discovery portfolio failed: 1m returned `-348.03%`/PF `0.83`; 5m
+returned `-50.15%`/PF `0.97`. The 5m diagnostic split was positive in high
+volatility (`+92.60%`, PF `1.12`) and negative in low volatility (`-142.76%`,
+PF `0.84`). Because that split was observed after the run, it was not treated
+as validated evidence.
+
+A single follow-up was frozen before inspecting seven markets excluded from
+discovery. It kept all mechanics unchanged and admitted a signal only when
+completed-bar ATR14/close exceeded its causal trailing 288-bar mean. Fresh
+40-snapshot `$100` L2 samples supplied each holdout market's own p95 and
+worst-observed full-round-trip costs. The high-volatility 1m holdout failed at
+`-117.76%`, PF `0.70`, negative OOS and 0/4 folds. The 5m holdout had positive
+headline net (`+45.92%`, PF `1.15`) but failed the frozen gate: mean L95
+`-0.0025%`, OOS `-14.37%`, latest 30 days `-12.37%`/PF `0.80`, and only 2/4
+folds.
+
+AAVE was the strongest individual holdout but was not selected: its Short book
+was negative in both the 60- and 90-day windows, and choosing the best market
+after viewing holdout results would be post-hoc cherry-picking. The entire
+family is rejected without Shadow or Real registration. Frozen evidence is in
+`data/lighter-hourfade-results.json`.

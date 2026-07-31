@@ -43,6 +43,8 @@ const RULE_FILTER = process.env.RULE_FILTER ?? '';
 const ENABLE_SQUEEZE = process.env.ENABLE_SQUEEZE === '1';
 const ENABLE_TREND_PULLBACK = process.env.ENABLE_TREND_PULLBACK === '1';
 const ENABLE_FAILED_BREAKOUT = process.env.ENABLE_FAILED_BREAKOUT === '1';
+const ENABLE_HOURLY_FADE = process.env.ENABLE_HOURLY_FADE === '1';
+const ENABLE_HOURLY_FADE_HIGHVOL = process.env.ENABLE_HOURLY_FADE_HIGHVOL === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -98,6 +100,7 @@ type Arrays = {
   means: Map<number, number[]>;
   deviations: Map<number, number[]>;
   atr14: number[];
+  atrPctMean288: number[];
   rsi2: number[];
   rsi7: number[];
   rsi14: number[];
@@ -328,6 +331,10 @@ function build(c: Candle[]): Arrays {
   const sma20Values = sma(close, 20);
   const sd20Values = rollingStd(close, 20);
   const atr14Values = atr(c, 14);
+  const atrPctMean288 = sma(
+    atr14Values.map((value, i) => close[i]! > 0 ? value / close[i]! : 0),
+    288,
+  );
   return {
     c,
     close,
@@ -350,6 +357,7 @@ function build(c: Candle[]): Arrays {
     means: new Map(Z_PERIODS.map((period) => [period, sma(close, period)])),
     deviations: new Map(Z_PERIODS.map((period) => [period, rollingStd(close, period)])),
     atr14: atr14Values,
+    atrPctMean288,
     rsi2: rsi(c, 2),
     rsi7: rsi(c, 7),
     rsi14: rsi(c, 14),
@@ -746,6 +754,57 @@ function rules(): Rule[] {
       return side === 'long'
         ? a.close[i]! >= a.sma20[i]!
         : a.close[i]! <= a.sma20[i]!;
+    },
+  });
+
+  // Preregistered hour-boundary overreaction fade. Only the first completed
+  // candle of each UTC hour can signal. A body of at least one ATR14 with
+  // trailing-mean-or-better volume is faded at the next open and held for a
+  // fixed 30 minutes. The exact mirrored rule is shared by every market and
+  // both tested timeframes; no time-zone, threshold, or symbol grid exists.
+  if (ENABLE_HOURLY_FADE) out.push({
+    name: 'HOURFADE-A1-V1-H30',
+    warmup: 30,
+    slPct: 0.015,
+    maxBars: Math.max(1, Math.round(30 / BAR_MINUTES)),
+    entry(a, i) {
+      const bar = a.c[i]!;
+      const minute = new Date(bar.t).getUTCMinutes();
+      if (minute !== 0) return null;
+      const body = Math.abs(bar.c - bar.o);
+      if (body < a.atr14[i]! || bar.v < a.volumeSma20[i]!) return null;
+      if (bar.c > bar.o) return 'short';
+      if (bar.c < bar.o) return 'long';
+      return null;
+    },
+    exit() {
+      return false;
+    },
+  });
+
+  // This follow-up was frozen only after the unfiltered discovery portfolio
+  // showed a positive high-volatility segment. It may therefore qualify only
+  // on markets excluded from that discovery set. High volatility is defined
+  // causally as current ATR14/close above its trailing 288-bar mean; all other
+  // hour-fade mechanics remain unchanged.
+  if (ENABLE_HOURLY_FADE_HIGHVOL) out.push({
+    name: 'HOURFADE-A1-V1-H30+HV288',
+    warmup: 290,
+    slPct: 0.015,
+    maxBars: Math.max(1, Math.round(30 / BAR_MINUTES)),
+    entry(a, i) {
+      const bar = a.c[i]!;
+      if (new Date(bar.t).getUTCMinutes() !== 0) return null;
+      const atrPct = bar.c > 0 ? a.atr14[i]! / bar.c : 0;
+      if (atrPct <= a.atrPctMean288[i]!) return null;
+      const body = Math.abs(bar.c - bar.o);
+      if (body < a.atr14[i]! || bar.v < a.volumeSma20[i]!) return null;
+      if (bar.c > bar.o) return 'short';
+      if (bar.c < bar.o) return 'long';
+      return null;
+    },
+    exit() {
+      return false;
     },
   });
 

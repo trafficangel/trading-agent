@@ -1,0 +1,145 @@
+{
+  "version": "lighter-hourfade-v1",
+  "testedAt": "2026-07-31",
+  "status": "rejected",
+  "shadowRegistered": false,
+  "realRegistered": false,
+  "reason": "The unfiltered hour-boundary fade failed. Its post-discovery high-volatility challenger was frozen and then failed on seven markets excluded from discovery: 1m was deeply negative and 5m failed OOS, recent-window, confidence and fold gates.",
+  "baseHypothesis": {
+    "name": "HOURFADE-A1-V1-H30",
+    "entry": "Only the first completed candle of each UTC hour may signal. Require body >= ATR14 and volume >= SMA20, then fade the candle at next-bar open.",
+    "exit": "Fixed 30-minute timeout or 1.5% safety stop.",
+    "directions": "A bullish impulse opens Short; a bearish impulse opens Long.",
+    "selection": "One fixed rule across all discovery markets and both 1m/5m timeframes; no parameter grid."
+  },
+  "discovery": {
+    "markets": ["BTC", "ETH", "SOL", "BNB", "LTC", "HYPE", "ZEC", "DOGE", "NEAR", "JUP", "LIT", "GRAM", "XMR", "ENA", "TAO"],
+    "results": {
+      "1m": {
+        "trades": 8469,
+        "netPct": -348.03,
+        "profitFactor": 0.83,
+        "adverseNetPct": -403.13,
+        "adverseProfitFactor": 0.8,
+        "meanTradeL95Pct": -0.0526,
+        "maxDrawdownPctOfCapacity": -35.44,
+        "positiveFolds": 0,
+        "folds": 4,
+        "inSamplePct": -280.51,
+        "outOfSamplePct": -67.52,
+        "longPct": -194.61,
+        "shortPct": -153.42
+      },
+      "5m": {
+        "trades": 6640,
+        "netPct": -50.15,
+        "profitFactor": 0.97,
+        "adverseNetPct": -100.72,
+        "adverseProfitFactor": 0.94,
+        "meanTradeL95Pct": -0.0226,
+        "maxDrawdownPctOfCapacity": -14.11,
+        "positiveFolds": 1,
+        "folds": 4,
+        "inSamplePct": -52.19,
+        "outOfSamplePct": 2.03,
+        "longPct": -9.31,
+        "shortPct": -40.85,
+        "highVolPct": 92.6,
+        "highVolProfitFactor": 1.12,
+        "lowVolPct": -142.76,
+        "lowVolProfitFactor": 0.84
+      }
+    }
+  },
+  "holdoutHypothesis": {
+    "name": "HOURFADE-A1-V1-H30+HV288",
+    "frozenAfterDiscovery": true,
+    "change": "Admit a signal only when completed-bar ATR14/close is above its causal trailing 288-bar mean. All other mechanics are unchanged.",
+    "marketsExcludedFromDiscovery": ["AAVE", "ADA", "ARB", "LINK", "PUMP", "UNI", "XRP"],
+    "costSample": {
+      "generatedAt": "2026-07-31T15:53:07.036Z",
+      "samplesPerMarket": 40,
+      "notionalUsd": 100,
+      "p95Pct": {
+        "AAVE": 0.06651423820410825,
+        "ADA": 0.08922994556972337,
+        "ARB": 0.14303361289902994,
+        "LINK": 0.11895213533889273,
+        "PUMP": 0.09671179883947126,
+        "UNI": 0.06829233830610178,
+        "XRP": 0.03481462157497609
+      },
+      "maxPct": {
+        "AAVE": 0.08098511119877562,
+        "ADA": 0.10706638115630843,
+        "ARB": 0.14303361289902994,
+        "LINK": 0.12058329698949456,
+        "PUMP": 0.09689922480619341,
+        "UNI": 0.07300043564775832,
+        "XRP": 0.039154951237917485
+      }
+    },
+    "results": {
+      "1m": {
+        "trades": 1361,
+        "activeMarkets": 6,
+        "netPct": -117.76,
+        "profitFactor": 0.7,
+        "adverseNetPct": -124.15,
+        "adverseProfitFactor": 0.68,
+        "meanTradeL95Pct": -0.1168,
+        "maxDrawdownPctOfCapacity": -20.12,
+        "positiveFolds": 0,
+        "folds": 4,
+        "inSamplePct": -81.47,
+        "outOfSamplePct": -36.28,
+        "longPct": -74.04,
+        "shortPct": -43.71
+      },
+      "5m": {
+        "trades": 1081,
+        "activeMarkets": 6,
+        "netPct": 45.92,
+        "profitFactor": 1.15,
+        "adverseNetPct": 41.04,
+        "adverseProfitFactor": 1.13,
+        "meanTradeL95Pct": -0.0025,
+        "maxDrawdownPctOfCapacity": -4.21,
+        "positiveFolds": 2,
+        "folds": 4,
+        "inSamplePct": 60.29,
+        "outOfSamplePct": -14.37,
+        "longPct": 25.1,
+        "shortPct": 20.82,
+        "recent30Pct": -12.37,
+        "recent30ProfitFactor": 0.8,
+        "recent60Pct": 9.65,
+        "recent60ProfitFactor": 1.07,
+        "recent90Pct": 5.56,
+        "recent90ProfitFactor": 1.03,
+        "bestIndividual": {
+          "market": "AAVE",
+          "trades": 200,
+          "netPct": 28.17,
+          "profitFactor": 1.52,
+          "meanTradeL95Pct": 0.0316,
+          "positiveFolds": 3,
+          "outOfSamplePct": 4.1,
+          "longPct": 21.42,
+          "shortPct": 6.76,
+          "recent60ShortPct": -6.4,
+          "recent90ShortPct": -7.34,
+          "selected": false,
+          "selectionReason": "It fails the frozen both-sides recent-window gate, and selecting the best market after holdout inspection would be post-hoc cherry-picking."
+        }
+      }
+    }
+  },
+  "data": {
+    "source": "Gap-free native Lighter 1m candles; 5m strictly aggregated from five consecutive 1m bars",
+    "commissionPct": 0,
+    "fundingPctPerHour": 0.00125,
+    "executionCost": "Market-specific measured executable $100 full-round-trip p95",
+    "adverseExecution": "Market-specific worst observed full round trip"
+  }
+}
