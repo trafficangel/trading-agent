@@ -1173,3 +1173,36 @@ keeps the same economic meaning at `1m` and `5m`.
 Only a timeframe/rule that passes every frozen condition may be registered in
 prospective Shadow. Historical qualification cannot enable Real; the separate
 prospective `$100` forward gate remains mandatory.
+
+## Independently preregistered L2 challenger suite
+
+At `2026-07-31T19:00:00Z`, before any strategy result could be produced, a
+second six-rule suite was frozen with its own research epoch and immutable
+output. It does not reuse the first 15 minutes that had already been inspected
+for recorder health, and it cannot be rescued by results from the core suite.
+The three mirrored mechanisms are:
+
+- `BOOK-FLIP-30`: follow a completed-bar order-book regime change when close
+  top-five imbalance moves at least `0.30` from its same-bar average, finishes
+  beyond `±0.20`, and signed trade flow agrees by at least `±0.10`;
+- `LOW-IMPACT-60`: fade signed flow beyond `±0.60` when price moves no more
+  than `0.25` causal trailing-volatility units with that flow and the closing
+  book leans at least `0.10` against it;
+- `LIQ-EXHAUST-20`: fade a forced move when liquidation prints are at least
+  20% of completed-bar turnover, their signed imbalance exceeds `±0.60`, the
+  move reaches `0.50` trailing-volatility units, and the closing book has
+  rebuilt by at least `0.10` in the reversal direction.
+
+Every flow-dependent signal still requires five prints and `$500` completed-
+bar turnover, and every simulated entry requires at least `$500` top-five
+depth on each side. Each mechanism is evaluated unchanged at 1m and 5m with
+two clock-time holds: 5/15 minutes for book flip and low-impact absorption,
+15/30 minutes for liquidation exhaustion. All entries are next-bar, costs are
+the signal bar's measured `$100` p95, observed maximum is sensitivity only,
+and funding is exact hourly settlement data.
+
+The challenger uses the same 7-day diagnostic and 21-day immutable OOS gates,
+but writes separate files:
+`lighter-native-microstructure-challenger-exploratory.json` and
+`lighter-native-microstructure-challenger-sweep.json`. It can create no Real
+trade and cannot change the core suite's frozen output.

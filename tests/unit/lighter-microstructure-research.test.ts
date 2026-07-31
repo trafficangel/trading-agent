@@ -3,6 +3,7 @@ import {
   buildCausalMicroFeatureBars,
   evaluateMicrostructureRule,
   existingImmutableFrozenMicrostructureReport,
+  PREREGISTERED_MICRO_CHALLENGERS,
   PREREGISTERED_MICRO_RULES,
   simulateMicrostructureRule,
   type MicroFeatureBar,
@@ -30,10 +31,13 @@ function bar(
     bid5Usd: 10_000,
     ask5Usd: 10_000,
     depthImbalance: 0,
+    depthImbalanceChange: 0,
     tradedUsd: 10_000,
     tradeCount: 20,
     flowImbalance: 0,
+    returnVolRatio: 0,
     liquidationImbalance: 0,
+    liquidationShare: 0,
     basisPct: 0,
     fundingRatePctH: 0,
     executionCostPct: 0.1,
@@ -115,6 +119,54 @@ describe('Lighter microstructure research', () => {
       ...locked,
       mode: 'exploratory',
     })).toThrow(/refusing overwrite/);
+    expect(existingImmutableFrozenMicrostructureReport({
+      ...locked,
+      version: 'lighter-microstructure-challenger-sweep-v1',
+    }, 'lighter-microstructure-challenger-sweep-v1')).toBeTruthy();
+  });
+
+  it('keeps challenger signals symmetric and distinct from the core level rules', () => {
+    const flip = PREREGISTERED_MICRO_CHALLENGERS.find(
+      (candidate) => candidate.id === 'BOOK-FLIP-30-H1',
+    )!;
+    const absorption = PREREGISTERED_MICRO_CHALLENGERS.find(
+      (candidate) => candidate.id === 'LOW-IMPACT-60-H1',
+    )!;
+    const liquidation = PREREGISTERED_MICRO_CHALLENGERS.find(
+      (candidate) => candidate.id === 'LIQ-EXHAUST-20-H3',
+    )!;
+    expect(flip.signal(bar(0, {
+      depthImbalanceChange: 0.35,
+      depthImbalance: 0.25,
+      flowImbalance: 0.15,
+    }))).toBe('long');
+    expect(flip.signal(bar(0, {
+      depthImbalanceChange: -0.35,
+      depthImbalance: -0.25,
+      flowImbalance: -0.15,
+    }))).toBe('short');
+    expect(absorption.signal(bar(0, {
+      flowImbalance: -0.7,
+      returnVolRatio: -0.1,
+      depthImbalance: 0.2,
+    }))).toBe('long');
+    expect(absorption.signal(bar(0, {
+      flowImbalance: 0.7,
+      returnVolRatio: 0.1,
+      depthImbalance: -0.2,
+    }))).toBe('short');
+    expect(liquidation.signal(bar(0, {
+      liquidationShare: 0.25,
+      liquidationImbalance: -0.7,
+      returnVolRatio: -0.7,
+      depthImbalance: 0.2,
+    }))).toBe('long');
+    expect(liquidation.signal(bar(0, {
+      liquidationShare: 0.25,
+      liquidationImbalance: 0.7,
+      returnVolRatio: 0.7,
+      depthImbalance: -0.2,
+    }))).toBe('short');
   });
 
   it('uses clock-equivalent causal warmups and resets them across a native gap', () => {

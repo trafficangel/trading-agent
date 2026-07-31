@@ -12,6 +12,11 @@ export const MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS = Date.parse(
   '2026-07-31T18:45:00.000Z',
 );
 
+/** Independent challenger clock, frozen after the core feed was health-checked. */
+export const MICROSTRUCTURE_CHALLENGER_EPOCH_AT_MS = Date.parse(
+  '2026-07-31T19:00:00.000Z',
+);
+
 type MicrostructureSourceBar = Omit<MicrostructureFiveMinute, 'sourceMinutes'>;
 
 export type MicroSide = 'long' | 'short';
@@ -30,10 +35,13 @@ export type MicroFeatureBar = {
   bid5Usd: number;
   ask5Usd: number;
   depthImbalance: number;
+  depthImbalanceChange: number;
   tradedUsd: number;
   tradeCount: number;
   flowImbalance: number;
+  returnVolRatio: number;
   liquidationImbalance: number;
+  liquidationShare: number;
   basisPct: number;
   fundingRatePctH: number;
   /** Causal p95 from the completed signal bar's $100 L2 samples. */
@@ -46,7 +54,13 @@ export type MicroFeatureBar = {
 
 export type MicroRule = {
   id: string;
-  family: 'flow-continuation' | 'absorption-reversal' | 'basis-reversion';
+  family:
+    | 'flow-continuation'
+    | 'absorption-reversal'
+    | 'basis-reversion'
+    | 'book-flip-continuation'
+    | 'low-impact-absorption'
+    | 'liquidation-exhaustion';
   holdMinutes: 5 | 15 | 30;
   signal: (bar: MicroFeatureBar) => MicroSide | null;
 };
@@ -111,12 +125,13 @@ export type MicroRuleEvaluation = {
  */
 export function existingImmutableFrozenMicrostructureReport(
   value: unknown,
+  expectedVersion = 'lighter-microstructure-sweep-v3',
 ): Record<string, unknown> | null {
   if (!value || typeof value !== 'object') return null;
   const report = value as Record<string, unknown>;
   if (report.status !== 'evaluated') return null;
   if (
-    report.version !== 'lighter-microstructure-sweep-v3'
+    report.version !== expectedVersion
     || report.mode !== 'frozen'
     || report.immutableSelection !== true
     || report.autoPromotion !== false
@@ -124,7 +139,7 @@ export function existingImmutableFrozenMicrostructureReport(
     || !Array.isArray(report.evaluations)
   ) {
     throw new Error(
-      'existing evaluated frozen microstructure report is not an immutable v3 selection; refusing overwrite',
+      `existing evaluated frozen microstructure report is not an immutable ${expectedVersion} selection; refusing overwrite`,
     );
   }
   return report;
@@ -161,6 +176,44 @@ function basisReversion(bar: MicroFeatureBar): MicroSide | null {
   );
 }
 
+function bookFlipContinuation(bar: MicroFeatureBar): MicroSide | null {
+  if (bar.tradeCount < 5 || bar.tradedUsd < 500) return null;
+  return sideFromMirrored(
+    bar.depthImbalanceChange >= 0.30
+      && bar.depthImbalance >= 0.20
+      && bar.flowImbalance >= 0.10,
+    bar.depthImbalanceChange <= -0.30
+      && bar.depthImbalance <= -0.20
+      && bar.flowImbalance <= -0.10,
+  );
+}
+
+function lowImpactAbsorption(bar: MicroFeatureBar): MicroSide | null {
+  if (bar.tradeCount < 5 || bar.tradedUsd < 500) return null;
+  return sideFromMirrored(
+    bar.flowImbalance <= -0.60
+      && bar.returnVolRatio >= -0.25
+      && bar.depthImbalance >= 0.10,
+    bar.flowImbalance >= 0.60
+      && bar.returnVolRatio <= 0.25
+      && bar.depthImbalance <= -0.10,
+  );
+}
+
+function liquidationExhaustion(bar: MicroFeatureBar): MicroSide | null {
+  if (bar.tradeCount < 5 || bar.tradedUsd < 500) return null;
+  return sideFromMirrored(
+    bar.liquidationShare >= 0.20
+      && bar.liquidationImbalance <= -0.60
+      && bar.returnVolRatio <= -0.50
+      && bar.depthImbalance >= 0.10,
+    bar.liquidationShare >= 0.20
+      && bar.liquidationImbalance >= 0.60
+      && bar.returnVolRatio >= 0.50
+      && bar.depthImbalance <= -0.10,
+  );
+}
+
 /**
  * Frozen before the first seven-day exploratory sample. These are six whole
  * hypotheses, not a parameter grid. Changing them requires a new preregistered
@@ -173,6 +226,19 @@ export const PREREGISTERED_MICRO_RULES: readonly MicroRule[] = [
   { id: 'ABSORB-55-H3', family: 'absorption-reversal', holdMinutes: 15, signal: absorptionReversal },
   { id: 'BASIS-4BP-H3', family: 'basis-reversion', holdMinutes: 15, signal: basisReversion },
   { id: 'BASIS-4BP-H6', family: 'basis-reversion', holdMinutes: 30, signal: basisReversion },
+] as const;
+
+/**
+ * Independently dated challenger set. It is not a parameter grid: the paired
+ * rows alter only the fixed holding horizon and every signal is mirrored.
+ */
+export const PREREGISTERED_MICRO_CHALLENGERS: readonly MicroRule[] = [
+  { id: 'BOOK-FLIP-30-H1', family: 'book-flip-continuation', holdMinutes: 5, signal: bookFlipContinuation },
+  { id: 'BOOK-FLIP-30-H3', family: 'book-flip-continuation', holdMinutes: 15, signal: bookFlipContinuation },
+  { id: 'LOW-IMPACT-60-H1', family: 'low-impact-absorption', holdMinutes: 5, signal: lowImpactAbsorption },
+  { id: 'LOW-IMPACT-60-H3', family: 'low-impact-absorption', holdMinutes: 15, signal: lowImpactAbsorption },
+  { id: 'LIQ-EXHAUST-20-H3', family: 'liquidation-exhaustion', holdMinutes: 15, signal: liquidationExhaustion },
+  { id: 'LIQ-EXHAUST-20-H6', family: 'liquidation-exhaustion', holdMinutes: 30, signal: liquidationExhaustion },
 ] as const;
 
 function finite(value: number | null): value is number {
@@ -226,6 +292,7 @@ export function buildCausalMicroFeatureBars(
         || !finite(row.spreadAvgPct)
         || !finite(row.bid5UsdAvg)
         || !finite(row.ask5UsdAvg)
+        || !finite(row.depthImbalanceAvg)
         || !finite(row.depthImbalanceClose)
         || !finite(row.basisPct)
         || !finite(row.currentFundingRate)
@@ -271,6 +338,7 @@ export function buildCausalMicroFeatureBars(
         > Math.max(1e-9, absoluteReturnEma) * 1.25
         ? 'high'
         : 'low';
+      const trailingVolatility = standardDeviation(recentReturns);
       result.push({
         marketId: row.marketId,
         symbol: row.symbol,
@@ -283,12 +351,15 @@ export function buildCausalMicroFeatureBars(
         bid5Usd: row.bid5UsdAvg,
         ask5Usd: row.ask5UsdAvg,
         depthImbalance: row.depthImbalanceClose,
+        depthImbalanceChange: row.depthImbalanceClose - row.depthImbalanceAvg,
         tradedUsd,
         tradeCount: row.tradeCount,
         flowImbalance: tradedUsd > 0 ? row.cvdUsd / tradedUsd : 0,
+        returnVolRatio: trailingVolatility > 1e-9 ? returnPct / trailingVolatility : 0,
         liquidationImbalance: liquidationUsd > 0
           ? (row.liquidationBuyUsd - row.liquidationSellUsd) / liquidationUsd
           : 0,
+        liquidationShare: tradedUsd > 0 ? liquidationUsd / tradedUsd : 0,
         basisPct: row.basisPct,
         fundingRatePctH: row.currentFundingRate,
         executionCostPct: row.execCost100P95Pct,

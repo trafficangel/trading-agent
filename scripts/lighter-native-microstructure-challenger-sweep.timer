@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily frozen Lighter microstructure challenger sweep
+
+[Timer]
+OnCalendar=*-*-* 03:40:00 UTC
+Persistent=true
+RandomizedDelaySec=10m
+Unit=lighter-native-microstructure-challenger-sweep.service
+
+[Install]
+WantedBy=timers.target

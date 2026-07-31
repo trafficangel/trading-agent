@@ -23,7 +23,9 @@ import {
   buildCausalMicroFeatureBars,
   evaluateMicrostructureRule,
   existingImmutableFrozenMicrostructureReport,
+  MICROSTRUCTURE_CHALLENGER_EPOCH_AT_MS,
   MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS,
+  PREREGISTERED_MICRO_CHALLENGERS,
   PREREGISTERED_MICRO_RULES,
   simulateMicrostructureRule,
 } from '../src/lib/lighter-microstructure-research.js';
@@ -34,9 +36,8 @@ const HOUR_SECONDS = 3_600;
 const FUNDING_CHUNK_SECONDS = 28 * 86_400;
 const LIGHTER_BASE_URL = 'https://mainnet.zklighter.elliot.ai';
 const TIMEFRAMES = [1, 5] as const;
-const RULE_VARIANTS = TIMEFRAMES.flatMap((timeframeMinutes) =>
-  PREREGISTERED_MICRO_RULES.map((rule) => `${timeframeMinutes}m:${rule.id}`));
 type Mode = 'exploratory' | 'frozen';
+type Suite = 'core' | 'challenger';
 type Audit = {
   generatedAt: string;
   gates: {
@@ -242,6 +243,22 @@ if (modeValue !== 'exploratory' && modeValue !== 'frozen') {
   throw new Error('--mode must be exploratory or frozen');
 }
 const mode = modeValue as Mode;
+const suiteValue = flagValue('--suite') ?? 'core';
+if (suiteValue !== 'core' && suiteValue !== 'challenger') {
+  throw new Error('--suite must be core or challenger');
+}
+const suite = suiteValue as Suite;
+const selectedRules = suite === 'challenger'
+  ? PREREGISTERED_MICRO_CHALLENGERS
+  : PREREGISTERED_MICRO_RULES;
+const researchEpochAtMs = suite === 'challenger'
+  ? MICROSTRUCTURE_CHALLENGER_EPOCH_AT_MS
+  : MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS;
+const reportVersion = suite === 'challenger'
+  ? 'lighter-microstructure-challenger-sweep-v1'
+  : 'lighter-microstructure-sweep-v3';
+const ruleVariants = TIMEFRAMES.flatMap((timeframeMinutes) =>
+  selectedRules.map((rule) => `${timeframeMinutes}m:${rule.id}`));
 const databasePath = resolve(
   flagValue('--db') ?? process.env.LIGHTER_MICRO_DB ?? 'data/lighter-native-microstructure.sqlite',
 );
@@ -261,7 +278,7 @@ if (mode === 'frozen' && outputPath) {
     } catch {
       throw new Error('existing frozen microstructure report is unreadable; refusing overwrite');
     }
-    const locked = existingImmutableFrozenMicrostructureReport(existing);
+    const locked = existingImmutableFrozenMicrostructureReport(existing, reportVersion);
     if (locked) {
       console.log(JSON.stringify(locked, null, 2));
       process.exit(0);
@@ -270,12 +287,13 @@ if (mode === 'frozen' && outputPath) {
 }
 if (!existsSync(auditPath)) {
   output({
-    version: 'lighter-microstructure-sweep-v3',
+    version: reportVersion,
+    suite,
     generatedAt,
     mode,
     status: 'not_ready',
     failures: ['readiness audit missing'],
-    rules: RULE_VARIANTS,
+    rules: ruleVariants,
     shadowEligibleRules: [],
     autoPromotion: false,
     immutableSelection: false,
@@ -287,21 +305,27 @@ const auditAgeMs = Date.now() - Date.parse(audit.generatedAt);
 const selectedGate = mode === 'frozen'
   ? audit.gates.frozenCandidateResearch
   : audit.gates.exploratoryResearch;
+const minimumSuiteDays = mode === 'frozen' ? 21 : 7;
+const suiteDurationDays = Math.max(0, Date.now() - researchEpochAtMs) / DAY_MS;
 const readinessFailures = [
   ...(Number.isFinite(auditAgeMs) && auditAgeMs <= 2 * HOUR_MS
     ? []
     : [`readiness audit stale: ${Math.round(auditAgeMs / 60_000)}m`]),
   ...selectedGate.failures,
+  ...(suiteDurationDays >= minimumSuiteDays
+    ? []
+    : [`${suite} suite history ${suiteDurationDays.toFixed(3)}d < ${minimumSuiteDays}d`]),
 ];
 if (!selectedGate.passed || readinessFailures.length) {
   output({
-    version: 'lighter-microstructure-sweep-v3',
+    version: reportVersion,
+    suite,
     generatedAt,
     mode,
     status: 'not_ready',
     auditGeneratedAt: audit.generatedAt,
     failures: readinessFailures,
-    rules: RULE_VARIANTS,
+    rules: ruleVariants,
     shadowEligibleRules: [],
     autoPromotion: false,
     immutableSelection: false,
@@ -315,7 +339,7 @@ const rows = db.prepare(`
   SELECT * FROM lighter_microstructure_1m
   WHERE minute_ts_ms >= ?
   ORDER BY market_id, minute_ts_ms
-`).all(MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS) as DbRow[];
+`).all(researchEpochAtMs) as DbRow[];
 db.close();
 
 let exactFunding: Awaited<ReturnType<typeof exactFundingForRows>>;
@@ -323,12 +347,13 @@ try {
   exactFunding = await exactFundingForRows(rows);
 } catch (error) {
   output({
-    version: 'lighter-microstructure-sweep-v3',
+    version: reportVersion,
+    suite,
     generatedAt,
     mode,
     status: 'not_ready',
     failures: [error instanceof Error ? error.message : String(error)],
-    rules: RULE_VARIANTS,
+    rules: ruleVariants,
     shadowEligibleRules: [],
     autoPromotion: false,
     immutableSelection: false,
@@ -362,7 +387,7 @@ for (const row of rows) {
 const commonDatasetStartMs = Math.max(...firstMinuteByMarket.values());
 const discoveryCutoffMs = commonDatasetStartMs + 7 * DAY_MS;
 const evaluations = featureSets.flatMap(({ timeframeMinutes, features }) =>
-  PREREGISTERED_MICRO_RULES.map((rule) => ({
+  selectedRules.map((rule) => ({
     timeframeMinutes,
     ...evaluateMicrostructureRule(
       rule.id,
@@ -384,7 +409,8 @@ const featureSummary = Object.fromEntries(featureSets.map(({ timeframeMinutes, f
 ]));
 
 output({
-  version: 'lighter-microstructure-sweep-v3',
+  version: reportVersion,
+  suite,
   generatedAt,
   mode,
   status: 'evaluated',
@@ -398,7 +424,7 @@ output({
     validFiveMinuteRows: fiveMinute.length,
     featureSummary,
     commonDatasetStartAt: new Date(commonDatasetStartMs).toISOString(),
-    researchEpochAt: new Date(MICROSTRUCTURE_RESEARCH_EPOCH_AT_MS).toISOString(),
+    researchEpochAt: new Date(researchEpochAtMs).toISOString(),
     discoveryCutoffAt: new Date(discoveryCutoffMs).toISOString(),
     executionCostSource: 'completed signal-bar $100 p95; native minute p95 at 1m and max of five causal minute p95 values at 5m',
     adverseExecutionCostSource: 'completed signal-bar worst actually observed $100 round trip; sensitivity only',
