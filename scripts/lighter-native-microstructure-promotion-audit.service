@@ -1,0 +1,18 @@
+[Unit]
+Description=Prospective L2 Shadow to Real promotion evidence
+After=lighter-native-microstructure-shadow.service lighter-native-microstructure-audit.service
+
+[Service]
+Type=oneshot
+User=trader
+Group=trader
+WorkingDirectory=/home/trader/apps/trading-agent
+ExecStart=/home/trader/apps/trading-agent/node_modules/.bin/tsx scripts/audit-lighter-microstructure-promotion.ts --shadow data/lighter-native-microstructure-shadow-report.json --data-audit data/lighter-native-microstructure-audit.json --output data/lighter-native-microstructure-promotion-audit.json
+Nice=15
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/trader/apps/trading-agent/data
+MemoryMax=256M

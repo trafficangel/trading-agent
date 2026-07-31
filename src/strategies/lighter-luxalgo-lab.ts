@@ -2158,6 +2158,16 @@ type NativeMicrostructureShadowReport = {
   realEnabled?: boolean;
 };
 
+type NativeMicrostructurePromotionAudit = {
+  generatedAt?: string;
+  status?: 'not_ready' | 'waiting_for_candidates' | 'evaluated';
+  eligibleCandidateIds?: string[];
+  candidates?: unknown[];
+  dataHealth?: { passed?: boolean; failures?: string[] };
+  autoPromotion?: boolean;
+  realEnabled?: boolean;
+};
+
 function nativeMicrostructureAudit(): NativeMicrostructureAudit | null {
   try {
     const path = resolve(
@@ -2294,6 +2304,36 @@ function nativeMicrostructureShadowStatus(lang: Lang): string {
   )} · ${manifest.candidates!.length} · ${since}${performance}</b></span>`;
 }
 
+function nativeMicrostructurePromotionStatus(lang: Lang): string {
+  const report = nativeMicrostructureSweep(
+    'LIGHTER_MICRO_PROMOTION_AUDIT',
+    'data/lighter-native-microstructure-promotion-audit.json',
+  ) as NativeMicrostructurePromotionAudit | null;
+  const valid = report?.autoPromotion === false
+    && report.realEnabled === false
+    && Array.isArray(report.eligibleCandidateIds);
+  if (!valid || report.status === 'not_ready') {
+    return `<span title="${t(
+      lang,
+      'Prospective-аудит начнётся только после появления неизменяемых Shadow-кандидатов.',
+      'The prospective audit starts only after immutable Shadow candidates exist.',
+    )}"><small>L2 forward</small><b class="collect">${t(lang, 'ждёт Shadow', 'waiting Shadow')}</b></span>`;
+  }
+  const total = report.candidates?.length ?? 0;
+  const eligible = report.eligibleCandidateIds?.length ?? 0;
+  const healthy = report.dataHealth?.passed === true;
+  const title = report.dataHealth?.failures?.length
+    ? report.dataHealth.failures.join('; ')
+    : t(
+      lang,
+      'Каждый кандидат и общий портфель проходят отдельный prospective-гейт; Real включается только вручную.',
+      'Each candidate and the combined portfolio have separate prospective gates; Real remains manual.',
+    );
+  return `<span title="${esc(title)}"><small>L2 forward</small><b class="${eligible > 0 && healthy ? 'pass' : 'collect'}">${eligible}/${total} · ${healthy
+    ? t(lang, 'data ok', 'data ok')
+    : t(lang, 'сбор данных', 'collecting')}</b></span>`;
+}
+
 function nativeMicrostructureReadiness(
   lang: Lang,
   strategy: StrategySpec | null,
@@ -2402,6 +2442,7 @@ function nativeMicrostructureReadiness(
       challengerFrozen,
     )}
     ${nativeMicrostructureShadowStatus(lang)}
+    ${nativeMicrostructurePromotionStatus(lang)}
     <em>${ageMinutes == null
     ? t(lang, 'время неизвестно', 'time unknown')
     : `${t(lang, 'обновлено', 'updated')} ${ageMinutes}m`}</em>

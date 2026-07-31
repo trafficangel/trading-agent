@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh prospective L2 promotion evidence every 15 minutes
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=lighter-native-microstructure-promotion-audit.service
+
+[Install]
+WantedBy=timers.target

@@ -48,6 +48,8 @@ export type MicroFeatureBar = {
   executionCostPct: number | null;
   /** Worst causal $100 round trip observed inside the completed signal bar. */
   adverseExecutionCostPct: number | null;
+  /** P95 age of the completed signal bar's native L2 snapshots. */
+  bookAgeMs: number;
   trend: TrendRegime;
   volatility: VolatilityRegime;
 };
@@ -80,6 +82,7 @@ export type MicroTrade = {
   fundingPct: number;
   executionCostPct: number;
   adverseExecutionCostPct: number;
+  bookAgeMs: number;
   netPct: number;
   trend: TrendRegime;
   volatility: VolatilityRegime;
@@ -294,6 +297,7 @@ export function buildCausalMicroFeatureBars(
         || !finite(row.ask5UsdAvg)
         || !finite(row.depthImbalanceAvg)
         || !finite(row.depthImbalanceClose)
+        || !finite(row.bookAgeP95Ms)
         || !finite(row.basisPct)
         || !finite(row.currentFundingRate)
       ) {
@@ -364,6 +368,7 @@ export function buildCausalMicroFeatureBars(
         fundingRatePctH: row.currentFundingRate,
         executionCostPct: row.execCost100P95Pct,
         adverseExecutionCostPct: row.execCost100MaxPct,
+        bookAgeMs: row.bookAgeP95Ms,
         trend,
         volatility,
       });
@@ -459,6 +464,7 @@ export function simulateMicrostructureRule(
         fundingPct,
         executionCostPct: cost,
         adverseExecutionCostPct: adverseCost,
+        bookAgeMs: signalBar.bookAgeMs,
         netPct: grossPct + fundingPct - cost,
         trend: signalBar.trend,
         volatility: signalBar.volatility,

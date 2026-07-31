@@ -1212,3 +1212,15 @@ trade and cannot change the core suite's frozen output. Shadow activation waits
 until both suites have completed their first immutable selection, then combines
 their passing candidates into one capacity-limited prospective portfolio; a
 timer-order race therefore cannot lock out the later challenger report.
+
+Once that prospective portfolio exists, a separate read-only promotion audit
+evaluates every timeframe/rule independently and also evaluates the combined
+ten-slot book. Net PnL already includes the signal bar's measured `$100` p95
+and exact settlements; the audit additionally requires a complete cost and L2
+book-age sample for every close, at least four traded markets, both Long and
+Short, seven calendar days, positive chronological halves, PF `>=1.20` and
+drawdown `<=5%` of allocated capacity. Twenty recent stale L2 samples or a
+prospective performance failure produces `pause_new_entries`; no candidate is
+eligible merely because the combined portfolio is positive. The output is
+`data/lighter-native-microstructure-promotion-audit.json` and always carries
+`autoPromotion=false` and `realEnabled=false`.

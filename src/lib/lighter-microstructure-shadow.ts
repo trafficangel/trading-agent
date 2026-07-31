@@ -8,6 +8,10 @@ import {
   simulateMicrostructureRule,
 } from './lighter-microstructure-research.js';
 import type { LighterFundingSeries } from './lighter-funding-history.js';
+import {
+  evaluateNativeForwardGate,
+  type NativeForwardGateEvaluation,
+} from './lighter-luxalgo-math.js';
 
 export const MICROSTRUCTURE_SHADOW_MANIFEST_VERSION =
   'lighter-microstructure-shadow-manifest-v2';
@@ -51,6 +55,26 @@ export type MicrostructureShadowManifest = {
 export type MicrostructureShadowPreparation =
   | { status: 'not_ready'; manifest: null }
   | { status: 'created' | 'existing'; manifest: MicrostructureShadowManifest };
+
+/** Shared adapter for per-candidate and portfolio prospective promotion evidence. */
+export function evaluateMicrostructureForwardTrades(
+  trades: readonly MicroTrade[],
+  capacityUnits: number,
+): NativeForwardGateEvaluation {
+  return evaluateNativeForwardGate({
+    netPcts: trades.map((trade) => trade.netPct),
+    executionCostPcts: trades.map((trade) => trade.executionCostPct),
+    bookAgesMs: trades.map((trade) => trade.bookAgeMs),
+    signalCount: trades.length,
+    captureErrors: 0,
+    sides: trades.map((trade) => trade.side),
+    symbols: trades.map((trade) => trade.symbol),
+    openedAtMs: trades.map((trade) => trade.entryTimeMs),
+    closedAtMs: trades.map((trade) => trade.exitTimeMs),
+    drawdownCapacityUnits: capacityUnits,
+    minUniqueSymbols: 4,
+  });
+}
 
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -166,8 +190,7 @@ export function validateMicrostructureShadowManifest(
       candidate.suite !== manifest.candidates![index]!.suite
       || candidate.timeframeMinutes !== manifest.candidates![index]!.timeframeMinutes
       || candidate.ruleId !== manifest.candidates![index]!.ruleId)
-    || new Set(candidates.map((candidate) => `${candidate.suite}:${candidate.id}`)).size
-      !== candidates.length
+    || new Set(candidates.map((candidate) => candidate.id)).size !== candidates.length
     || (manifest.status === 'active') !== (candidates.length > 0)
   ) {
     throw new Error('existing microstructure Shadow manifest candidates mismatch');
@@ -232,8 +255,7 @@ export function prepareMicrostructureShadowManifest(
       selectionEpochAt: generatedAt,
     });
   }
-  if (new Set(candidates.map((candidate) => `${candidate.suite}:${candidate.id}`)).size
-      !== candidates.length) {
+  if (new Set(candidates.map((candidate) => candidate.id)).size !== candidates.length) {
     throw new Error('frozen candidate list contains duplicates');
   }
   const generatedAtMs = Math.max(...generatedAtValues);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildMicrostructureShadowReport,
+  evaluateMicrostructureForwardTrades,
   frozenMicrostructureReportSha256,
   immutableMicrostructureSelectionBundle,
   mergeMicrostructureShadowTrades,
@@ -156,6 +157,7 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
           fundingRatePctH: 0,
           executionCostPct: 0.02,
           adverseExecutionCostPct: 0.03,
+          bookAgeMs: 30,
           trend: 'bull',
           volatility: 'low',
         });
@@ -178,12 +180,47 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
       barMinutes: 1 as const, signalTimeMs: NOW, entryTimeMs: NOW + 60_000,
       exitTimeMs: NOW + 360_000, entryPrice: 100, exitPrice: 101,
       grossPct: 1, fundingPct: -0.01, executionCostPct: 0.02,
-      adverseExecutionCostPct: 0.03, netPct: 0.97,
+      adverseExecutionCostPct: 0.03, bookAgeMs: 30, netPct: 0.97,
       trend: 'bull' as const, volatility: 'low' as const,
     };
     const value = buildMicrostructureShadowReport(manifest, [trade], NOW + 600_000);
     expect(value.summary).toMatchObject({ closed: 1, netPct: 0.97, netUsd: 0.97 });
     expect(value).toMatchObject({ prospectiveOnly: true, exactFunding: true, realEnabled: false });
+  });
+
+  it('requires per-candidate PnL, both sides, breadth, duration and fresh L2 evidence', () => {
+    const trades = Array.from({ length: 20 }, (_, index) => ({
+      ruleId: 'OF-CONT-25-H1',
+      marketId: index % 4,
+      symbol: ['BTC', 'ETH', 'SOL', 'HYPE'][index % 4]!,
+      side: index % 2 ? 'long' as const : 'short' as const,
+      barMinutes: 1 as const,
+      signalTimeMs: NOW + index * 12 * 3_600_000,
+      entryTimeMs: NOW + index * 12 * 3_600_000 + 60_000,
+      exitTimeMs: NOW + index * 12 * 3_600_000 + 6 * 60_000,
+      entryPrice: 100,
+      exitPrice: 100.12,
+      grossPct: 0.12,
+      fundingPct: 0,
+      executionCostPct: 0.02,
+      adverseExecutionCostPct: 0.03,
+      bookAgeMs: 30,
+      netPct: 0.1,
+      trend: index % 2 ? 'bull' as const : 'bear' as const,
+      volatility: index % 3 ? 'low' as const : 'high' as const,
+    }));
+    expect(evaluateMicrostructureForwardTrades(trades, 1)).toMatchObject({
+      status: 'passed',
+      entryAllowed: true,
+      closed: 20,
+      uniqueSymbols: 4,
+    });
+    const stale = trades.map((trade) => ({ ...trade, bookAgeMs: 2_500 }));
+    const staleEvaluation = evaluateMicrostructureForwardTrades(stale, 1);
+    expect(staleEvaluation).toMatchObject({ status: 'failed', entryAllowed: false });
+    expect(staleEvaluation.reasons).toEqual(expect.arrayContaining([
+      expect.stringContaining('book age p95'),
+    ]));
   });
 
   it('preserves retained trades and fails if a closed trade changes', () => {
@@ -192,7 +229,7 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
       barMinutes: 1 as const, signalTimeMs: NOW, entryTimeMs: NOW + 60_000,
       exitTimeMs: NOW + 360_000, entryPrice: 100, exitPrice: 101,
       grossPct: 1, fundingPct: 0, executionCostPct: 0.02,
-      adverseExecutionCostPct: 0.03, netPct: 0.98,
+      adverseExecutionCostPct: 0.03, bookAgeMs: 30, netPct: 0.98,
       trend: 'bull' as const, volatility: 'low' as const,
     };
     const later = { ...base, marketId: 2, symbol: 'ETH', entryTimeMs: NOW + 600_000 };
