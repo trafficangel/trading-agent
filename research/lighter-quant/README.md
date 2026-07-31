@@ -243,6 +243,32 @@ timer writes the immutable report but never edits strategy or Real state;
 promotion remains a reviewed Shadow-only code change followed by the normal
 20-close prospective gate.
 
+## Preregistered cross-sectional residual pair
+
+While the microstructure dataset accumulates, one additional independent
+candle hypothesis was frozen before its first run. It is a market-neutral
+cross-sectional pair rather than another own-price oscillator:
+
+- use the same 15 native Lighter markets and BTC as the common factor;
+- estimate each alt's causal rolling beta and correlation from the previous
+  seven days only;
+- every 15 minutes rank the completed one-hour beta residual move;
+- when leader-to-laggard dispersion is at least 0.80%, buy the laggard and sell
+  the leader with beta-neutral weights;
+- enter both legs at the next bar open and exit exactly one hour later;
+- express the same elapsed-time rule at 1m and strict 5m, with no per-market
+  tuning and no overlapping portfolio trades.
+
+Selection uses each leg's measured immediately executable $100 L2 p95,
+adverse funding and a separate 1.5x-cost stress. Qualification requires
+positive discovery and untouched final-30% OOS, PF >=1.20, positive mean L95,
+at least three positive chronological folds, <=5% drawdown, positive bull,
+bear, high- and low-volatility regimes, both long and short usage across the
+asset breadth, <=60% winner dominance and positive leave-one-asset-out net.
+The research script writes a report only and has no registration or trading
+imports. A passing historical result would still enter prospective Shadow,
+never Real.
+
 ## LuxAlgo database follow-up
 
 A separate LuxAlgo AI Backtesting database search was run for symmetric
