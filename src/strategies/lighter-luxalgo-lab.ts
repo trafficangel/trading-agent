@@ -1917,6 +1917,34 @@ function gate(
     : { cls: 'fail', label: t(lang, 'ГЕЙТ НЕ ПРОЙДЕН', 'GATE FAILED'), passed };
 }
 
+function nativeGateTitle(
+  evaluation: NativeForwardGateEvaluation | null,
+  lang: Lang,
+): string {
+  if (!evaluation) return '';
+  const recentPf = evaluation.recentProfitFactor == null
+    ? '—'
+    : Number.isFinite(evaluation.recentProfitFactor)
+      ? evaluation.recentProfitFactor.toFixed(2)
+      : '∞';
+  const recentBook = evaluation.recentP95BookAgeMs == null
+    ? '—'
+    : `${evaluation.recentP95BookAgeMs.toFixed(0)}ms`;
+  return [
+    ...evaluation.reasons,
+    t(
+      lang,
+      `Последние сделки: ${evaluation.recentClosed}, net ${signedPct(evaluation.recentNetPct)}, PF ${recentPf}`,
+      `Recent trades: ${evaluation.recentClosed}, net ${signedPct(evaluation.recentNetPct)}, PF ${recentPf}`,
+    ),
+    t(
+      lang,
+      `Последние сигналы: ${evaluation.recentSignalCount}, ошибки ${evaluation.recentCaptureErrorRatePct.toFixed(2)}%, L2 p95 ${recentBook}`,
+      `Recent signals: ${evaluation.recentSignalCount}, errors ${evaluation.recentCaptureErrorRatePct.toFixed(2)}%, L2 p95 ${recentBook}`,
+    ),
+  ].join('; ');
+}
+
 function nativeDisplayStats(lang: Lang): {
   models: number;
   passed: number;
@@ -2368,9 +2396,7 @@ function strategyRows(
     const wr = s.closed ? s.wins / s.closed * 100 : null;
     const feed = executionSnapshot(spec);
     const tooltip = nativeStrategyTooltip(spec, lang);
-    const gateTitle = s.forwardGate?.reasons.length
-      ? s.forwardGate.reasons.join('; ')
-      : '';
+    const gateTitle = nativeGateTitle(s.forwardGate, lang);
     const strategyLabel = tooltip
       ? `<span class="ll-strategy-name" tabindex="0" title="${esc(tooltip)}" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small><i>?</i></span>`
       : `<b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small>`;
@@ -2391,9 +2417,7 @@ function strategyRows(
   const s = summary(portfolioSpecs);
   const g = gate(s, lang, true);
   const wr = s.closed ? s.wins / s.closed * 100 : null;
-  const gateTitle = s.forwardGate?.reasons.length
-    ? s.forwardGate.reasons.join('; ')
-    : '';
+  const gateTitle = nativeGateTitle(s.forwardGate, lang);
   const backtest = portfolioSpecs[0]!.backtest;
   const assets = portfolioSpecs.map((spec) => spec.asset).join(' · ');
   const tooltip = t(

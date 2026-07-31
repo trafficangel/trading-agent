@@ -126,6 +126,52 @@ describe('Lighter LuxAlgo shadow math', () => {
     ]));
   });
 
+  it('pauses before promotion when the latest resolved signal window is unhealthy', () => {
+    const result = evaluateNativeForwardGate({
+      ...forwardCoverage(0),
+      netPcts: [],
+      signalCount: 20,
+      captureErrors: 1,
+      executionCostPcts: Array.from({ length: 19 }, () => 0.02),
+      bookAgesMs: Array.from({ length: 19 }, () => 100),
+      recentSignalCount: 20,
+      recentCaptureErrors: 1,
+      recentBookAgesMs: Array.from({ length: 19 }, () => 100),
+    });
+    expect(result.status).toBe('failed');
+    expect(result.entryAllowed).toBe(false);
+    expect(result.recentCaptureErrorRatePct).toBe(5);
+    expect(result.reasons).toEqual([
+      expect.stringContaining('recent 20 capture errors'),
+    ]);
+  });
+
+  it('stops a mature strategy when the latest twenty trades decay', () => {
+    const netPcts = [
+      ...Array.from({ length: 30 }, () => 0.3),
+      ...Array.from({ length: 10 }, () => 1),
+      ...Array.from({ length: 20 }, () => -0.1),
+    ];
+    const result = evaluateNativeForwardGate({
+      ...forwardCoverage(60, 4),
+      netPcts,
+      signalCount: 100,
+      captureErrors: 0,
+      executionCostPcts: Array.from({ length: 100 }, () => 0.02),
+      bookAgesMs: Array.from({ length: 100 }, () => 100),
+    });
+    expect(result.netPct).toBeGreaterThan(0);
+    expect(result.firstHalfPct).toBeGreaterThan(0);
+    expect(result.secondHalfPct).toBeGreaterThan(0);
+    expect(result.status).toBe('failed');
+    expect(result.entryAllowed).toBe(false);
+    expect(result.recentClosed).toBe(20);
+    expect(result.recentNetPct).toBeCloseTo(-2);
+    expect(result.reasons).toEqual([
+      expect.stringContaining('recent 20 decay'),
+    ]);
+  });
+
   it('does not apply one universal cost ceiling after net PnL already includes execution', () => {
     const result = evaluateNativeForwardGate({
       ...forwardCoverage(20),
@@ -185,5 +231,42 @@ describe('Lighter LuxAlgo shadow math', () => {
     expect(evaluation.status).toBe('passed');
     expect(evaluation.avgExecutionCostPct).toBeCloseTo(0.03, 6);
     expect(evaluation.p95BookAgeMs).toBe(100);
+  });
+
+  it('resumes Shadow after startup capture errors leave the recent health window', () => {
+    const pnlRows = Array.from({ length: 20 }, (_, index) => ({
+      net_pnl_pct: index % 4 === 0 ? -0.2 : 0.25,
+      side: index % 2 ? 'short' as const : 'long' as const,
+      symbol: 'SOL',
+      opened_at: index / 19 * 8 * DAY_MS,
+      closed_at: index / 19 * 8 * DAY_MS + 60_000,
+    }));
+    const signalRows = [
+      ...Array.from({ length: 20 }, () => ({
+        capture_status: 'error',
+        book_age_ms: null,
+        bid: null,
+        ask: null,
+        buy_slippage_pct: null,
+        sell_slippage_pct: null,
+      })),
+      ...Array.from({ length: 100 }, () => ({
+        capture_status: 'captured',
+        book_age_ms: 100,
+        bid: 99.99,
+        ask: 100.01,
+        buy_slippage_pct: 0.005,
+        sell_slippage_pct: 0.005,
+      })),
+    ];
+    const evaluation = evaluateNativeForwardRows(pnlRows, signalRows);
+    expect(evaluation.status).toBe('collecting');
+    expect(evaluation.entryAllowed).toBe(true);
+    expect(evaluation.captureErrorRatePct).toBeCloseTo(20 / 120 * 100);
+    expect(evaluation.recentSignalCount).toBe(100);
+    expect(evaluation.recentCaptureErrorRatePct).toBe(0);
+    expect(evaluation.reasons).toEqual([
+      expect.stringContaining('capture errors'),
+    ]);
   });
 });

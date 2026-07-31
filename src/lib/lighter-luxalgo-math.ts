@@ -8,6 +8,12 @@ export const NATIVE_FORWARD_GATE = {
   maxDrawdownPct: 5,
   maxCaptureErrorRatePct: 2,
   maxP95BookAgeMs: 2_000,
+  // A profitable early cohort must not hide a later loss of edge. Once forty
+  // closes exist, the latest twenty form a separate, frozen decay gate.
+  recentDecayMinClosed: 40,
+  recentClosedWindow: 20,
+  minRecentSignalsForHealth: 20,
+  recentSignalWindow: 100,
 } as const;
 
 export type NativeForwardGateInput = {
@@ -20,6 +26,10 @@ export type NativeForwardGateInput = {
   captureErrors: number;
   executionCostPcts: readonly number[];
   bookAgesMs: readonly number[];
+  /** Resolved captured/error rows from the latest frozen signal window. */
+  recentSignalCount?: number;
+  recentCaptureErrors?: number;
+  recentBookAgesMs?: readonly number[];
   /** Fixed-notional portfolio capacity. One for a standalone strategy. */
   drawdownCapacityUnits?: number;
   /** One for a standalone strategy; frozen at four for portfolio P2. */
@@ -42,6 +52,12 @@ export type NativeForwardGateEvaluation = {
   longClosed: number;
   shortClosed: number;
   uniqueSymbols: number;
+  recentClosed: number;
+  recentNetPct: number;
+  recentProfitFactor: number | null;
+  recentSignalCount: number;
+  recentCaptureErrorRatePct: number;
+  recentP95BookAgeMs: number | null;
   reasons: readonly string[];
 };
 
@@ -87,6 +103,14 @@ export function evaluateNativeForwardGate(
   const grossWin = sum(netPcts.filter((value) => value > 0));
   const grossLoss = Math.abs(sum(netPcts.filter((value) => value < 0)));
   const profitFactor = grossLoss > 0 ? grossWin / grossLoss : closed ? Infinity : null;
+  const recentPcts = netPcts.slice(-NATIVE_FORWARD_GATE.recentClosedWindow);
+  const recentClosed = recentPcts.length;
+  const recentNetPct = sum(recentPcts);
+  const recentGrossWin = sum(recentPcts.filter((value) => value > 0));
+  const recentGrossLoss = Math.abs(sum(recentPcts.filter((value) => value < 0)));
+  const recentProfitFactor = recentGrossLoss > 0
+    ? recentGrossWin / recentGrossLoss
+    : recentClosed ? Infinity : null;
   const split = Math.floor(closed / 2);
   const firstHalfPct = sum(netPcts.slice(0, split));
   const secondHalfPct = sum(netPcts.slice(split));
@@ -112,6 +136,21 @@ export function evaluateNativeForwardGate(
   const captureErrorRatePct = signalCount > 0 ? captureErrors / signalCount * 100 : 0;
   const avgExecutionCostPct = validCosts.length ? sum(validCosts) / validCosts.length : null;
   const p95BookAgeMs = percentile95(validBookAges);
+  const recentSignalCount = Math.max(0, Math.trunc(
+    input.recentSignalCount
+      ?? Math.min(signalCount, NATIVE_FORWARD_GATE.recentSignalWindow),
+  ));
+  const recentCaptureErrors = Math.min(
+    recentSignalCount,
+    Math.max(0, Math.trunc(input.recentCaptureErrors ?? captureErrors)),
+  );
+  const recentCaptureErrorRatePct = recentSignalCount > 0
+    ? recentCaptureErrors / recentSignalCount * 100
+    : 0;
+  const recentBookAges = (input.recentBookAgesMs ?? validBookAges.slice(
+    -NATIVE_FORWARD_GATE.recentSignalWindow,
+  )).filter((value) => Number.isFinite(value) && value >= 0);
+  const recentP95BookAgeMs = percentile95(recentBookAges);
   const longClosed = input.sides.filter((side) => side === 'long').length;
   const shortClosed = input.sides.filter((side) => side === 'short').length;
   const uniqueSymbols = new Set(input.symbols.filter(Boolean)).size;
@@ -120,6 +159,62 @@ export function evaluateNativeForwardGate(
   const durationDays = validOpenedAt.length && validClosedAt.length
     ? (Math.max(...validClosedAt) - Math.min(...validOpenedAt)) / 86_400_000
     : 0;
+
+  const base = {
+    closed,
+    netPct,
+    profitFactor,
+    firstHalfPct,
+    secondHalfPct,
+    maxDrawdownPct,
+    captureErrorRatePct,
+    avgExecutionCostPct,
+    p95BookAgeMs,
+    durationDays,
+    longClosed,
+    shortClosed,
+    uniqueSymbols,
+    recentClosed,
+    recentNetPct,
+    recentProfitFactor,
+    recentSignalCount,
+    recentCaptureErrorRatePct,
+    recentP95BookAgeMs,
+  };
+
+  // Execution health is recoverable and intentionally independent of PnL.
+  // It may pause entries before twenty closes, but resumes automatically only
+  // after bad rows age out of the latest 100 resolved-signal window. Exits are
+  // outside this gate and remain executable.
+  if (recentSignalCount >= NATIVE_FORWARD_GATE.minRecentSignalsForHealth) {
+    const healthReasons: string[] = [];
+    if (recentCaptureErrorRatePct > NATIVE_FORWARD_GATE.maxCaptureErrorRatePct) {
+      healthReasons.push(
+        `recent ${recentSignalCount} capture errors ${recentCaptureErrorRatePct.toFixed(2)}% > ${NATIVE_FORWARD_GATE.maxCaptureErrorRatePct.toFixed(1)}%`,
+      );
+    }
+    const expectedBookAges = recentSignalCount - recentCaptureErrors;
+    if (recentBookAges.length < expectedBookAges) {
+      healthReasons.push(
+        `recent book-age samples ${recentBookAges.length} < ${expectedBookAges}`,
+      );
+    } else if (
+      recentP95BookAgeMs == null
+      || recentP95BookAgeMs > NATIVE_FORWARD_GATE.maxP95BookAgeMs
+    ) {
+      healthReasons.push(
+        `recent book age p95 ${recentP95BookAgeMs == null ? 'n/a' : `${recentP95BookAgeMs.toFixed(0)}ms`} > ${NATIVE_FORWARD_GATE.maxP95BookAgeMs}ms`,
+      );
+    }
+    if (healthReasons.length) {
+      return {
+        status: 'failed',
+        entryAllowed: false,
+        ...base,
+        reasons: healthReasons,
+      };
+    }
+  }
 
   // Maximum drawdown is path-dependent and cannot improve after it has been
   // observed. Waiting for the full sample after the frozen ceiling is already
@@ -134,19 +229,7 @@ export function evaluateNativeForwardGate(
     return {
       status: 'failed',
       entryAllowed: false,
-      closed,
-      netPct,
-      profitFactor,
-      firstHalfPct,
-      secondHalfPct,
-      maxDrawdownPct,
-      captureErrorRatePct,
-      avgExecutionCostPct,
-      p95BookAgeMs,
-      durationDays,
-      longClosed,
-      shortClosed,
-      uniqueSymbols,
+      ...base,
       reasons: [reason],
     };
   }
@@ -155,75 +238,62 @@ export function evaluateNativeForwardGate(
     return {
       status: 'collecting',
       entryAllowed: true,
-      closed,
-      netPct,
-      profitFactor,
-      firstHalfPct,
-      secondHalfPct,
-      maxDrawdownPct,
-      captureErrorRatePct,
-      avgExecutionCostPct,
-      p95BookAgeMs,
-      durationDays,
-      longClosed,
-      shortClosed,
-      uniqueSymbols,
+      ...base,
       reasons: [],
     };
   }
 
-  const reasons: string[] = [];
-  if (!(netPct > 0)) reasons.push(`net ${netPct.toFixed(3)}% <= 0%`);
+  const performanceReasons: string[] = [];
+  if (!(netPct > 0)) performanceReasons.push(`net ${netPct.toFixed(3)}% <= 0%`);
   if (!(profitFactor != null && profitFactor >= NATIVE_FORWARD_GATE.minProfitFactor)) {
-    reasons.push(
+    performanceReasons.push(
       `PF ${profitFactor == null ? 'n/a' : profitFactor.toFixed(2)} < ${NATIVE_FORWARD_GATE.minProfitFactor.toFixed(2)}`,
     );
   }
-  if (!(firstHalfPct > 0)) reasons.push(`first half ${firstHalfPct.toFixed(3)}% <= 0%`);
-  if (!(secondHalfPct > 0)) reasons.push(`second half ${secondHalfPct.toFixed(3)}% <= 0%`);
+  if (!(firstHalfPct > 0)) performanceReasons.push(`first half ${firstHalfPct.toFixed(3)}% <= 0%`);
+  if (!(secondHalfPct > 0)) performanceReasons.push(`second half ${secondHalfPct.toFixed(3)}% <= 0%`);
+  if (
+    closed >= NATIVE_FORWARD_GATE.recentDecayMinClosed
+    && (!(recentNetPct > 0)
+      || !(recentProfitFactor != null && recentProfitFactor >= 1))
+  ) {
+    performanceReasons.push(
+      `recent ${recentClosed} decay: net ${recentNetPct.toFixed(3)}%, PF ${recentProfitFactor == null ? 'n/a' : recentProfitFactor.toFixed(2)} < required positive / 1.00`,
+    );
+  }
   if (maxDrawdownPct > NATIVE_FORWARD_GATE.maxDrawdownPct) {
-    reasons.push(
+    performanceReasons.push(
       `drawdown ${maxDrawdownPct.toFixed(3)}% > ${NATIVE_FORWARD_GATE.maxDrawdownPct.toFixed(1)}%`,
     );
   }
-  if (captureErrorRatePct > NATIVE_FORWARD_GATE.maxCaptureErrorRatePct) {
-    reasons.push(
-      `capture errors ${captureErrorRatePct.toFixed(2)}% > ${NATIVE_FORWARD_GATE.maxCaptureErrorRatePct.toFixed(1)}%`,
-    );
-  }
-  if (validCosts.length < closed) {
-    reasons.push(`execution samples ${validCosts.length} < ${closed}`);
-  }
-  if (validBookAges.length < closed) {
-    reasons.push(`book-age samples ${validBookAges.length} < ${closed}`);
-  } else if (p95BookAgeMs == null || p95BookAgeMs > NATIVE_FORWARD_GATE.maxP95BookAgeMs) {
-    reasons.push(
-      `book age p95 ${p95BookAgeMs == null ? 'n/a' : `${p95BookAgeMs.toFixed(0)}ms`} > ${NATIVE_FORWARD_GATE.maxP95BookAgeMs}ms`,
-    );
-  }
-
-  if (reasons.length) {
+  if (performanceReasons.length) {
     return {
       status: 'failed',
       entryAllowed: false,
-      closed,
-      netPct,
-      profitFactor,
-      firstHalfPct,
-      secondHalfPct,
-      maxDrawdownPct,
-      captureErrorRatePct,
-      avgExecutionCostPct,
-      p95BookAgeMs,
-      durationDays,
-      longClosed,
-      shortClosed,
-      uniqueSymbols,
-      reasons,
+      ...base,
+      reasons: performanceReasons,
     };
   }
 
   const evidenceReasons: string[] = [];
+  // Whole-cohort execution evidence is a Real-promotion requirement. When
+  // the current 100-signal health window has recovered, old startup errors do
+  // not keep Shadow disabled, but they still prevent promotion.
+  if (captureErrorRatePct > NATIVE_FORWARD_GATE.maxCaptureErrorRatePct) {
+    evidenceReasons.push(
+      `capture errors ${captureErrorRatePct.toFixed(2)}% > ${NATIVE_FORWARD_GATE.maxCaptureErrorRatePct.toFixed(1)}%`,
+    );
+  }
+  if (validCosts.length < closed) {
+    evidenceReasons.push(`execution samples ${validCosts.length} < ${closed}`);
+  }
+  if (validBookAges.length < closed) {
+    evidenceReasons.push(`book-age samples ${validBookAges.length} < ${closed}`);
+  } else if (p95BookAgeMs == null || p95BookAgeMs > NATIVE_FORWARD_GATE.maxP95BookAgeMs) {
+    evidenceReasons.push(
+      `book age p95 ${p95BookAgeMs == null ? 'n/a' : `${p95BookAgeMs.toFixed(0)}ms`} > ${NATIVE_FORWARD_GATE.maxP95BookAgeMs}ms`,
+    );
+  }
   if (durationDays < NATIVE_FORWARD_GATE.minDurationDays) {
     evidenceReasons.push(
       `duration ${durationDays.toFixed(1)}d < ${NATIVE_FORWARD_GATE.minDurationDays}d`,
@@ -248,19 +318,7 @@ export function evaluateNativeForwardGate(
     return {
       status: 'collecting',
       entryAllowed: true,
-      closed,
-      netPct,
-      profitFactor,
-      firstHalfPct,
-      secondHalfPct,
-      maxDrawdownPct,
-      captureErrorRatePct,
-      avgExecutionCostPct,
-      p95BookAgeMs,
-      durationDays,
-      longClosed,
-      shortClosed,
-      uniqueSymbols,
+      ...base,
       reasons: evidenceReasons,
     };
   }
@@ -268,19 +326,7 @@ export function evaluateNativeForwardGate(
   return {
     status: 'passed',
     entryAllowed: true,
-    closed,
-    netPct,
-    profitFactor,
-    firstHalfPct,
-    secondHalfPct,
-    maxDrawdownPct,
-    captureErrorRatePct,
-    avgExecutionCostPct,
-    p95BookAgeMs,
-    durationDays,
-    longClosed,
-    shortClosed,
-    uniqueSymbols,
+    ...base,
     reasons: [],
   };
 }
@@ -297,6 +343,9 @@ export function evaluateNativeForwardRows(
   minUniqueSymbols = 1,
 ): NativeForwardGateEvaluation {
   const captured = signalRows.filter((row) => row.capture_status === 'captured');
+  const recentResolved = signalRows
+    .filter((row) => row.capture_status === 'captured' || row.capture_status === 'error')
+    .slice(-NATIVE_FORWARD_GATE.recentSignalWindow);
   const executionCostPcts = captured.flatMap((row) => {
     if (
       row.bid == null
@@ -320,6 +369,10 @@ export function evaluateNativeForwardRows(
     captureErrors: signalRows.filter((row) => row.capture_status === 'error').length,
     executionCostPcts,
     bookAgesMs: captured.flatMap((row) => row.book_age_ms == null ? [] : [row.book_age_ms]),
+    recentSignalCount: recentResolved.length,
+    recentCaptureErrors: recentResolved.filter((row) => row.capture_status === 'error').length,
+    recentBookAgesMs: recentResolved.flatMap((row) =>
+      row.capture_status === 'captured' && row.book_age_ms != null ? [row.book_age_ms] : []),
     drawdownCapacityUnits,
     minUniqueSymbols,
   });

@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import {
   evaluateNativeForwardRows,
   NATIVE_FORWARD_GATE,
+  type NativeForwardGateEvaluation,
   type NativeForwardPnlRow,
   type NativeForwardSignalRow,
 } from '../src/lib/lighter-luxalgo-math.js';
@@ -83,7 +84,41 @@ const portfolio = evaluateNativeForwardRows(
 );
 db.close();
 
-const eligibleStrategyIds = strategies
+function decision(
+  evaluation: NativeForwardGateEvaluation,
+  realExecutorRegistered: boolean,
+) {
+  const operationalPause = evaluation.reasons.every((reason) =>
+    reason.startsWith('recent ') && (
+      reason.includes('capture errors')
+      || reason.includes('book-age samples')
+      || reason.includes('book age p95')
+    ));
+  if (!evaluation.entryAllowed) return {
+    shadowAction: 'pause_new_entries',
+    realAction: 'disabled',
+    recoverableFromNewSignals: operationalPause,
+    manualReviewRequired: !operationalPause,
+  };
+  if (evaluation.status === 'passed' && realExecutorRegistered) return {
+    shadowAction: 'continue',
+    realAction: 'manual_canary_review',
+    recoverableFromNewSignals: false,
+    manualReviewRequired: true,
+  };
+  return {
+    shadowAction: 'continue',
+    realAction: 'disabled',
+    recoverableFromNewSignals: false,
+    manualReviewRequired: false,
+  };
+}
+
+const evaluatedStrategies = strategies.map((row) => ({
+  ...row,
+  decision: decision(row.evaluation, row.realExecutorRegistered),
+}));
+const eligibleStrategyIds = evaluatedStrategies
   .filter((row) => row.realExecutorRegistered && row.evaluation.status === 'passed')
   .map((row) => row.strategyId);
 const generatedAt = new Date().toISOString();
@@ -97,8 +132,9 @@ const report = {
     portfolioId: 'z60stack25-portfolio',
     realExecutorRegistered: false,
     evaluation: portfolio,
+    decision: decision(portfolio, false),
   },
-  strategies,
+  strategies: evaluatedStrategies,
   autoPromotion: false,
 };
 const serialized = JSON.stringify(report, null, 2);

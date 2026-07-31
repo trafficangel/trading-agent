@@ -660,3 +660,14 @@ execution-cost coverage and valid 5m rollups are each at least 95%. Its output
 is loaded after the discovery file and therefore supersedes the short sample
 only after those conditions pass. A production audit with less than one day of
 history was verified to return `not_ready` and create no file.
+
+Forward decay is evaluated separately from the cumulative promotion sample.
+After 40 prospective closes, the latest 20 must remain net-positive with PF at
+least 1.00; otherwise new Shadow entries stop and require manual re-research,
+while existing positions can still exit. Operational execution health uses the
+latest 100 resolved signals and starts after 20: capture errors must stay at or
+below 2%, every captured row must have book age, and book-age p95 must stay at
+or below two seconds. This operational pause is recoverable only when unhealthy
+rows age out of the fixed recent window. Whole-cohort execution failures still
+prevent Real promotion, but no longer keep a recovered Shadow feed disabled.
+Real remains manual and is never enabled by the audit itself.
