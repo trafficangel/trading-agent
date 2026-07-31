@@ -8,8 +8,11 @@ import { logger } from '../lib/logger.js';
 import {
   evaluateNativeForwardRows,
   estimatedFundingPnlPct,
+  LUXALGO_SHADOW_NOTIONAL_USD,
+  NATIVE_SHADOW_NOTIONAL_USD,
   pricePnlPct,
   quoteNotionalVwap,
+  shadowExecutionNotionalUsd,
   type NativeForwardGateEvaluation,
   type PriceLevel,
 } from '../lib/lighter-luxalgo-math.js';
@@ -65,7 +68,6 @@ const NATIVE_TREND_PORTFOLIO_MARKETS = [
 ] as const;
 
 const t = (lang: Lang, ru: string, en: string): string => lang === 'en' ? en : ru;
-const NOTIONAL_USD = 1_000;
 const LIVE_NOTIONAL_USD = 100;
 const SIGNAL_PAGE_SIZE = 20;
 const TRADE_PAGE_SIZE = 20;
@@ -706,6 +708,26 @@ const LUXALGO_STRATEGIES = STRATEGIES.filter(
   (spec) => !NATIVE_STRATEGY_ID_SET.has(spec.id),
 );
 
+function shadowNotionalUsd(spec: StrategySpec): number {
+  return shadowExecutionNotionalUsd(NATIVE_STRATEGY_ID_SET.has(spec.id));
+}
+
+function isNativeIdScope(ids: readonly string[]): boolean {
+  return ids.length > 0 && ids.every((id) => NATIVE_STRATEGY_ID_SET.has(id));
+}
+
+function signalCohortClause(ids: readonly string[], alias = ''): string {
+  return isNativeIdScope(ids)
+    ? ` AND ${alias}execution_notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}`
+    : '';
+}
+
+function tradeCohortClause(ids: readonly string[], alias = ''): string {
+  return isNativeIdScope(ids)
+    ? ` AND ${alias}notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}`
+    : '';
+}
+
 type FeedState = {
   connected: boolean;
   connectedAt: number | null;
@@ -723,6 +745,7 @@ type FeedState = {
 };
 
 type ExecutionSnapshot = {
+  notionalUsd: number;
   capturedAt: number;
   exchangeAt: number;
   bookAgeMs: number;
@@ -769,6 +792,7 @@ type SignalRow = {
   live_decision: 'enter' | 'close' | 'skip' | 'error' | null;
   live_decision_reason: string | null;
   shadow_decision_reason: string | null;
+  execution_notional_usd: number;
 };
 
 type OpenTradeRow = {
@@ -776,6 +800,7 @@ type OpenTradeRow = {
   side: Side;
   opened_at: number;
   entry_price: number;
+  notional_usd: number;
 };
 
 type TradeRow = {
@@ -930,6 +955,7 @@ type Summary = {
   captureErrors: number;
   closed: number;
   open: number;
+  legacyOpen: number;
   netPct: number;
   netUsd: number;
   wins: number;
@@ -971,8 +997,8 @@ let started = false;
 const insertSignal = db.prepare(`
   INSERT OR IGNORE INTO lighter_lux_signals
     (dedup_key, strategy_id, symbol, action, side, strategy_event, bar_time,
-     received_at, capture_due_at, source_price)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+     received_at, capture_due_at, source_price, execution_notional_usd)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const markCaptureError = db.prepare(`
   UPDATE lighter_lux_signals
   SET captured_at = ?, capture_status = 'error', capture_error = ?
@@ -987,7 +1013,7 @@ const markCaptured = db.prepare(`
       index_price = ?, mark_price = ?
   WHERE id = ?`);
 const findOpenTrade = db.prepare<[string], OpenTradeRow>(`
-  SELECT id, side, opened_at, entry_price
+  SELECT id, side, opened_at, entry_price, notional_usd
   FROM lighter_lux_trades
   WHERE strategy_id = ? AND closed_at IS NULL
   LIMIT 1`);
@@ -1020,7 +1046,8 @@ const nativeForwardPnls = db.prepare<[string], {
   closed_at: number;
 }>(`
   SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
-  WHERE strategy_id = ? AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
+  WHERE strategy_id = ? AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
+    AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
   ORDER BY closed_at, id`);
 const nativeForwardSignals = db.prepare<[string], {
   capture_status: string;
@@ -1034,6 +1061,7 @@ const nativeForwardSignals = db.prepare<[string], {
          buy_slippage_pct, sell_slippage_pct
   FROM lighter_lux_signals
   WHERE strategy_id = ?
+    AND execution_notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
   ORDER BY received_at, id`);
 
 const nativePortfolioForwardPnls = db.prepare<string[], {
@@ -1045,6 +1073,7 @@ const nativePortfolioForwardPnls = db.prepare<string[], {
 }>(`
   SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
   WHERE strategy_id IN (${sqlMarks(NATIVE_TREND_PORTFOLIO_IDS)})
+    AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
     AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
   ORDER BY closed_at, id`);
 const nativePortfolioForwardSignals = db.prepare<string[], {
@@ -1059,6 +1088,7 @@ const nativePortfolioForwardSignals = db.prepare<string[], {
          buy_slippage_pct, sell_slippage_pct
   FROM lighter_lux_signals
   WHERE strategy_id IN (${sqlMarks(NATIVE_TREND_PORTFOLIO_IDS)})
+    AND execution_notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
   ORDER BY received_at, id`);
 const nativePortfolioOpenCount = db.prepare<string[], { count: number }>(`
   SELECT COUNT(*) count FROM lighter_lux_trades
@@ -1269,7 +1299,10 @@ export function startLighterLuxalgoShadowFeed(): void {
   stopTimer.unref();
 }
 
-function executionSnapshot(spec: StrategySpec): ExecutionSnapshot | { error: string } {
+function executionSnapshot(
+  spec: StrategySpec,
+  notionalUsd = shadowNotionalUsd(spec),
+): ExecutionSnapshot | { error: string } {
   const feed = feeds.get(spec.marketId);
   const now = Date.now();
   if (
@@ -1299,13 +1332,14 @@ function executionSnapshot(spec: StrategySpec): ExecutionSnapshot | { error: str
   const ask = bestAsk[0];
   if (!(bid > 0) || !(ask > bid)) return { error: `${spec.asset.toLowerCase()}_invalid_bbo` };
 
-  const buyVwap = quoteNotionalVwap(asks, NOTIONAL_USD);
-  const sellVwap = quoteNotionalVwap(bids, NOTIONAL_USD);
+  const buyVwap = quoteNotionalVwap(asks, notionalUsd);
+  const sellVwap = quoteNotionalVwap(bids, notionalUsd);
   if (buyVwap == null || sellVwap == null)
-    return { error: `${spec.asset.toLowerCase()}_depth_below_1000` };
+    return { error: `${spec.asset.toLowerCase()}_depth_below_${notionalUsd}` };
 
   const mid = (bid + ask) / 2;
   return {
+    notionalUsd,
     capturedAt: now,
     exchangeAt: feed.exchangeAt,
     bookAgeMs: now - feed.lastBookAt,
@@ -1342,17 +1376,25 @@ const applyCapturedSignal = db.transaction((
     || (action === 'exit' && open.side === side)
   );
   if (open && shouldClose) {
-    const exitPrice = open.side === 'long' ? snap.sellVwap : snap.buyVwap;
+    // A signal belongs to the new target cohort, but an already-open legacy
+    // trade must be exited at its own executable notional. This lets the old
+    // $1,000 cohort drain honestly while a reverse signal opens a fresh $100
+    // Native position from the same in-memory book.
+    const closeSnap = Math.abs(open.notional_usd - snap.notionalUsd) < 0.01
+      ? snap
+      : executionSnapshot(spec, open.notional_usd);
+    if ('error' in closeSnap) throw new Error(`legacy_close:${closeSnap.error}`);
+    const exitPrice = open.side === 'long' ? closeSnap.sellVwap : closeSnap.buyVwap;
     const gross = pricePnlPct(open.side, open.entry_price, exitPrice);
     const entryRate = entryFunding.get(open.id)?.entry_funding_pct_h ?? 0;
     const funding = estimatedFundingPnlPct(
       open.side,
       entryRate,
-      snap.fundingRatePctH,
-      snap.capturedAt - open.opened_at,
+      closeSnap.fundingRatePctH,
+      closeSnap.capturedAt - open.opened_at,
     );
     closeTrade.run(
-      signalId, snap.capturedAt, exitPrice, snap.fundingRatePctH,
+      signalId, closeSnap.capturedAt, exitPrice, closeSnap.fundingRatePctH,
       gross, funding, gross + funding,
       action === 'exit' ? 'strategy_exit' : 'reverse_signal',
       open.id,
@@ -1387,7 +1429,7 @@ const applyCapturedSignal = db.transaction((
   const entryPrice = side === 'long' ? snap.buyVwap : snap.sellVwap;
   insertTrade.run(
     spec.id, spec.asset, side, signalId, snap.capturedAt, entryPrice,
-    snap.fundingRatePctH, NOTIONAL_USD,
+    snap.fundingRatePctH, snap.notionalUsd,
   );
   return { gateBlocked: false };
 });
@@ -1446,7 +1488,7 @@ export function queueLighterLuxalgoSignal(payload: LuxAlgoStrategyPayload): void
   const result = insertSignal.run(
     key, payload.strategy_id, payload.symbol, action, side,
     String(payload.strategy_event ?? side), payload.bar_time,
-    receivedAt, receivedAt, finite(payload.price),
+    receivedAt, receivedAt, finite(payload.price), shadowNotionalUsd(spec),
   );
   if (result.changes !== 1) return;
   capture(spec, Number(result.lastInsertRowid), action, side);
@@ -1457,7 +1499,7 @@ function checkSafetyStops(): void {
     try {
       const open = findOpenTrade.get(spec.id);
       if (!open) continue;
-      const snap = executionSnapshot(spec);
+      const snap = executionSnapshot(spec, open.notional_usd);
       if ('error' in snap) continue;
       const exitPrice = open.side === 'long' ? snap.sellVwap : snap.buyVwap;
       const gross = pricePnlPct(open.side, open.entry_price, exitPrice);
@@ -1498,11 +1540,20 @@ function sqlMarks(ids: readonly string[]): string {
   return ids.map(() => '?').join(', ');
 }
 
-function rowsForSummary(scope?: StrategySpecScope): Array<{ net_pnl_pct: number; closed_at: number }> {
+function rowsForSummary(scope?: StrategySpecScope): Array<{
+  net_pnl_pct: number;
+  closed_at: number;
+  notional_usd: number;
+}> {
   const ids = specsForScope(scope).map((spec) => spec.id);
-  return db.prepare<string[], { net_pnl_pct: number; closed_at: number }>(`
-    SELECT net_pnl_pct, closed_at FROM lighter_lux_trades
+  return db.prepare<string[], {
+    net_pnl_pct: number;
+    closed_at: number;
+    notional_usd: number;
+  }>(`
+    SELECT net_pnl_pct, closed_at, notional_usd FROM lighter_lux_trades
     WHERE strategy_id IN (${sqlMarks(ids)})
+      ${tradeCohortClause(ids)}
       AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
     ORDER BY closed_at, id`).all(...ids);
 }
@@ -1514,11 +1565,19 @@ function summary(scope?: StrategySpecScope): Summary {
   const signalCounts = db.prepare<string[], { total: number; errors: number }>(`
     SELECT COUNT(*) total,
       COALESCE(SUM(CASE WHEN capture_status = 'error' THEN 1 ELSE 0 END), 0) errors
-    FROM lighter_lux_signals WHERE ${where}`).get(...params);
+    FROM lighter_lux_signals WHERE ${where}
+      ${signalCohortClause(params)}`).get(...params);
   const trades = rowsForSummary(specs);
   const open = db.prepare<string[], { count: number }>(`
     SELECT COUNT(*) count FROM lighter_lux_trades
-    WHERE ${where} AND closed_at IS NULL`).get(...params)?.count ?? 0;
+    WHERE ${where} ${tradeCohortClause(params)}
+      AND closed_at IS NULL`).get(...params)?.count ?? 0;
+  const legacyOpen = isNativeIdScope(params)
+    ? db.prepare<string[], { count: number }>(`
+      SELECT COUNT(*) count FROM lighter_lux_trades
+      WHERE ${where} AND closed_at IS NULL
+        AND notional_usd != ${NATIVE_SHADOW_NOTIONAL_USD}`).get(...params)?.count ?? 0
+    : 0;
 
   const netPct = trades.reduce((sum, row) => sum + row.net_pnl_pct, 0);
   const positive = trades.filter((row) => row.net_pnl_pct > 0);
@@ -1558,8 +1617,12 @@ function summary(scope?: StrategySpecScope): Summary {
     captureErrors: signalCounts?.errors ?? 0,
     closed: trades.length,
     open,
+    legacyOpen,
     netPct,
-    netUsd: netPct / 100 * NOTIONAL_USD,
+    netUsd: trades.reduce(
+      (sum, row) => sum + row.net_pnl_pct / 100 * row.notional_usd,
+      0,
+    ),
     wins: positive.length,
     profitFactor: grossLoss > 0 ? grossWin / grossLoss : trades.length ? Infinity : null,
     avgNetPct: trades.length ? netPct / trades.length : 0,
@@ -1588,6 +1651,7 @@ function recentSignals(
            signal.bid,signal.ask,signal.buy_vwap_1000,signal.sell_vwap_1000,
            signal.spread_pct,signal.buy_slippage_pct,signal.sell_slippage_pct,
            signal.funding_rate_pct_h,signal.shadow_decision_reason,
+           signal.execution_notional_usd,
            (SELECT id FROM lighter_lux_trades
             WHERE entry_signal_id=signal.id LIMIT 1) shadow_entry_trade_id,
            (SELECT CASE WHEN closed_at IS NULL THEN 'open' ELSE 'closed' END
@@ -1610,7 +1674,7 @@ function recentSignals(
            decision.reason live_decision_reason
     FROM lighter_lux_signals signal
     LEFT JOIN lighter_lux_live_decisions decision ON decision.signal_id=signal.id
-    WHERE ${where}
+    WHERE ${where} ${signalCohortClause(strategyParams, 'signal.')}
     ORDER BY signal.received_at DESC
     LIMIT ? OFFSET ?`).all(...strategyParams, limit, offset);
 }
@@ -1620,7 +1684,7 @@ function signalTotal(strategyScope: StrategyIdScope = null): number {
   const where = `strategy_id IN (${sqlMarks(strategyParams)})`;
   return db.prepare<string[], { total: number }>(`
     SELECT COUNT(*) total FROM lighter_lux_signals
-    WHERE ${where}`).get(...strategyParams)?.total ?? 0;
+    WHERE ${where} ${signalCohortClause(strategyParams)}`).get(...strategyParams)?.total ?? 0;
 }
 
 function recentTrades(
@@ -1637,7 +1701,7 @@ function recentTrades(
            funding_pnl_pct, net_pnl_pct, notional_usd, close_reason,
            NULL cumulative_net_pct, NULL strategy_cumulative_net_pct
     FROM lighter_lux_trades
-    WHERE ${where}
+    WHERE ${where} ${tradeCohortClause(strategyParams)}
     ORDER BY opened_at, id`).all(...strategyParams);
   let portfolioTotal = 0;
   const strategyTotals = new Map<string, number>();
@@ -1657,7 +1721,7 @@ function tradeTotal(strategyScope: StrategyIdScope = null): number {
   const where = `strategy_id IN (${sqlMarks(strategyParams)})`;
   return db.prepare<string[], { total: number }>(`
     SELECT COUNT(*) total FROM lighter_lux_trades
-    WHERE ${where}`).get(...strategyParams)?.total ?? 0;
+    WHERE ${where} ${tradeCohortClause(strategyParams)}`).get(...strategyParams)?.total ?? 0;
 }
 
 function lighterLiveState(): LiveStateRow | null {
@@ -1785,6 +1849,7 @@ function liveExecutionComparison(
     WHERE real.status='closed' AND real.net_pnl_pct IS NOT NULL
       AND shadow.closed_at IS NOT NULL AND shadow.net_pnl_pct IS NOT NULL
       AND real.strategy_id IN (${sqlMarks(strategyParams)})
+      ${tradeCohortClause(strategyParams, 'shadow.')}
     ORDER BY real.closed_at,real.id`).all(...strategyParams);
   const shadowPct = rows.reduce((sum, row) => sum + row.shadow_pct, 0);
   const realPct = rows.reduce((sum, row) => sum + row.real_pct, 0);
@@ -1838,6 +1903,7 @@ function cumulativePnlSeries(
     SELECT closed_at,net_pnl_pct,notional_usd
     FROM lighter_lux_trades
     WHERE strategy_id IN (${sqlMarks(strategyParams)})
+      ${tradeCohortClause(strategyParams)}
       AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
     ORDER BY closed_at,id`).all(...strategyParams);
   const liveRows = db.prepare<string[], {
@@ -2422,8 +2488,8 @@ function strategyRows(
   const assets = portfolioSpecs.map((spec) => spec.asset).join(' · ');
   const tooltip = t(
     lang,
-    `Одно фиксированное двухстороннее правило на 15 рынках без настройки по монете. Long: Z60 < −2.5 и close > EMA200 > EMA400; Short — зеркально. Выход у SMA60, stop 1.5% или через 20 часов. Издержки отбора — измеренный p95 полного круга для целевой позиции $100; неблокирующий adverse-сценарий использует худший фактически наблюдавшийся полный круг, а Shadow отдельно фиксирует VWAP $1000. Повторяемый 180d-прогон: 758 сделок, PF 1.45, net +122.80%, observed-max +115.86% / PF 1.42, DD 2.45%, 4/4 периода, обе стороны и оба режима волатильности положительны. 1m отвергнут. Только prospective Shadow.`,
-    `One fixed two-sided rule across 15 markets with no per-market tuning. Long: Z60 < −2.5 and close > EMA200 > EMA400; Short is the mirrored condition. Exit at SMA60, 1.5% stop, or after 20 hours. Selection costs use measured full-round-trip p95 for the target $100 position; the non-blocking adverse scenario uses the worst actually observed round trip, while Shadow separately records $1,000 VWAP. Reproducible 180d run: 758 trades, PF 1.45, net +122.80%, observed-max +115.86% / PF 1.42, 2.45% DD, 4/4 folds, both sides and both volatility regimes positive. The 1m transfer was rejected. Prospective Shadow only.`,
+    `Одно фиксированное двухстороннее правило на 15 рынках без настройки по монете. Long: Z60 < −2.5 и close > EMA200 > EMA400; Short — зеркально. Выход у SMA60, stop 1.5% или через 20 часов. Издержки отбора и prospective Shadow используют один целевой размер $100: измеренный p95 полного круга; неблокирующий adverse-сценарий использует худший фактически наблюдавшийся полный круг. Повторяемый 180d-прогон: 758 сделок, PF 1.45, net +122.80%, observed-max +115.86% / PF 1.42, DD 2.45%, 4/4 периода, обе стороны и оба режима волатильности положительны. 1m отвергнут. Только prospective Shadow.`,
+    `One fixed two-sided rule across 15 markets with no per-market tuning. Long: Z60 < −2.5 and close > EMA200 > EMA400; Short is the mirrored condition. Exit at SMA60, 1.5% stop, or after 20 hours. Selection costs and prospective Shadow use the same $100 target size: measured full-round-trip p95; the non-blocking adverse scenario uses the worst actually observed round trip. Reproducible 180d run: 758 trades, PF 1.45, net +122.80%, observed-max +115.86% / PF 1.42, 2.45% DD, 4/4 folds, both sides and both volatility regimes positive. The 1m transfer was rejected. Prospective Shadow only.`,
   );
   return `${regularRows}<tr>
     <td><span class="ll-strategy-name" tabindex="0" title="${esc(tooltip)}" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>PORTFOLIO P2 · 15 markets</b><small> · Z60 Stack 2.5σ Touch</small><i>?</i></span><small>${assets}</small></td>
@@ -2445,7 +2511,7 @@ function openTradeMark(row: TradeRow): {
   if (row.closed_at != null) return null;
   const spec = STRATEGY_BY_ID.get(row.strategy_id);
   if (!spec) return null;
-  const snap = executionSnapshot(spec);
+  const snap = executionSnapshot(spec, row.notional_usd);
   if ('error' in snap) return null;
   const exitPrice = row.side === 'long' ? snap.sellVwap : snap.buyVwap;
   const grossPct = pricePnlPct(row.side, row.entry_price, exitPrice);
@@ -2496,12 +2562,12 @@ function liveTradeRows(rows: LiveTradeRow[], lang: Lang): string {
       && row.entry_price != null
       && row.quantity != null
     ) {
-      const snap = executionSnapshot(spec);
+      const base = row.filled_notional_usd ?? row.requested_notional_usd;
+      const snap = executionSnapshot(spec, base);
       if (!('error' in snap)) {
         const mark = row.side === 'long' ? snap.sellVwap : snap.buyVwap;
         liveNetUsd = (row.side === 'long' ? 1 : -1)
           * (mark - row.entry_price) * row.quantity;
-        const base = row.filled_notional_usd ?? row.requested_notional_usd;
         liveNetPct = base > 0 ? liveNetUsd / base * 100 : 0;
       }
     }
@@ -2691,7 +2757,12 @@ function pnlChart(
   const points = dataset === 'shadow' ? series.shadow : series.live;
   const netUsd = points.at(-1)?.pnlUsd ?? 0;
   const netPct = points.at(-1)?.pnlPct ?? 0;
-  const datasetLabel = dataset === 'shadow' ? 'Shadow · $1,000' : 'Real · $100';
+  const shadowNotional = isNativeIdScope(idsForScope(strategyScope))
+    ? NATIVE_SHADOW_NOTIONAL_USD
+    : LUXALGO_SHADOW_NOTIONAL_USD;
+  const datasetLabel = dataset === 'shadow'
+    ? `Shadow · $${shadowNotional.toLocaleString('en-US')}`
+    : 'Real · $100';
   const unitLabel = unit === 'usd'
     ? t(lang, 'Деньги, $', 'Money, $')
     : t(lang, 'Проценты, %', 'Percent, %');
@@ -2780,6 +2851,9 @@ async function render(
       ? [...NATIVE_STRATEGIES]
       : [...LUXALGO_STRATEGIES];
   const scopeIds = scopeSpecs.map((spec) => spec.id);
+  const shadowNotional = isNativeIdScope(scopeIds)
+    ? NATIVE_SHADOW_NOTIONAL_USD
+    : LUXALGO_SHADOW_NOTIONAL_USD;
   const realSupported = scopeIds.some((id) =>
     (NATIVE_LIVE_STRATEGY_IDS as readonly string[]).includes(id));
   const dataset: PortfolioDataset = realSupported ? requested.dataset : 'shadow';
@@ -2887,14 +2961,22 @@ async function render(
       ? t(lang, '6 самостоятельных + P2 · 15 рынков', '6 standalone + P2 · 15 markets')
       : [...new Set(scopeSpecs.map((spec) => spec.asset))].join(' · ');
   const scopeMarketCount = new Set(scopeSpecs.map((spec) => spec.marketId)).size;
+  const shadowAverageUsd = s.closed ? s.netUsd / s.closed : 0;
+  const legacyDrainNote = s.legacyOpen > 0
+    ? t(
+      lang,
+      ` · legacy $1,000 закрываются: ${s.legacyOpen}`,
+      ` · legacy $1,000 draining: ${s.legacyOpen}`,
+    )
+    : '';
   const shadowCards = `
     <div class="ll-card"><small>${t(lang, 'Модели / гейт', 'Models / gates')}</small><b>${displayModelCount} / ${passed}</b><em>${scopeLabel}</em></div>
     <div class="ll-card"><small>${t(lang, 'Сигналы / ошибки', 'Signals / errors')}</small><b>${s.signals} / ${s.captureErrors}</b><em>${t(lang, 'все выбранные alerts', 'all selected alerts')}</em></div>
-    <div class="ll-card"><small>${t(lang, 'Закрыто / открыто', 'Closed / open')}</small><b>${s.closed} / ${s.open}</b><em>$${NOTIONAL_USD} ${t(lang, 'на позицию', 'per position')}</em></div>
-    <div class="ll-card"><small>Shadow net PnL</small><b class="${pnlClass(s.netUsd)}">${signedUsd(s.netUsd)}</b><em>${signedPct(s.netPct)} · $${NOTIONAL_USD.toLocaleString('en-US')} ${t(lang, 'на сделку', 'per trade')}</em></div>
+    <div class="ll-card"><small>${t(lang, 'Закрыто / открыто', 'Closed / open')}</small><b>${s.closed} / ${s.open}</b><em>$${shadowNotional.toLocaleString('en-US')} ${t(lang, 'на позицию', 'per position')}${legacyDrainNote}</em></div>
+    <div class="ll-card"><small>Shadow net PnL</small><b class="${pnlClass(s.netUsd)}">${signedUsd(s.netUsd)}</b><em>${signedPct(s.netPct)} · $${shadowNotional.toLocaleString('en-US')} ${t(lang, 'на сделку', 'per trade')}</em></div>
     <div class="ll-card"><small>Shadow WR / PF</small><b>${s.closed ? `${wr.toFixed(0)}% / ${pfLabel(s.profitFactor)}` : '—'}</b><em>${t(lang, 'после всех издержек', 'after all costs')}</em></div>
-    <div class="ll-card"><small>${t(lang, 'Средняя сделка', 'Average trade')}</small><b class="${pnlClass(s.avgNetPct)}">${signedPct(s.avgNetPct)}</b><em>${signedUsd(s.avgNetPct / 100 * NOTIONAL_USD)}</em></div>
-    <div class="ll-card"><small>Shadow max drawdown</small><b class="${s.maxDrawdownPct > 0 ? 'neg' : ''}">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}</b><em>${s.closed ? `−$${(s.maxDrawdownPct / 100 * NOTIONAL_USD).toFixed(2)}` : '—'}</em></div>
+    <div class="ll-card"><small>${t(lang, 'Средняя сделка', 'Average trade')}</small><b class="${pnlClass(s.avgNetPct)}">${signedPct(s.avgNetPct)}</b><em>${signedUsd(shadowAverageUsd)}</em></div>
+    <div class="ll-card"><small>Shadow max drawdown</small><b class="${s.maxDrawdownPct > 0 ? 'neg' : ''}">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}</b><em>${s.closed ? `−$${(s.maxDrawdownPct / 100 * shadowNotional).toFixed(2)}` : '—'}</em></div>
     <div class="ll-card"><small>${t(lang, 'Средний spread / круг', 'Average spread / round trip')}</small><b>${s.currentSpreadPct == null ? '—' : `${s.currentSpreadPct.toFixed(4)}%`}</b><em>${s.currentRoundTripCostPct == null ? '—' : `≈${s.currentRoundTripCostPct.toFixed(4)}%`}</em></div>`;
   const realAverageUsd = liveSummary.closed
     ? liveSummary.netUsd / liveSummary.closed
@@ -2945,25 +3027,25 @@ async function render(
       && requestedLiveStrategyState?.enabled === 1
       ? t(
         lang,
-        'Только эта стратегия: нативные свечи Lighter, Shadow $1000 и изолированный Real-canary $100 с плечом 10×. Комиссия 0%; spread, slippage и funding учитываются.',
-        'This strategy only: native Lighter candles, $1,000 Shadow and an isolated $100 Real canary at 10× leverage. Trading fee is 0%; spread, slippage, and funding are included.',
+        'Только эта стратегия: нативные свечи Lighter, Shadow $100 и изолированный Real-canary $100 с плечом 10×. Комиссия 0%; spread, slippage и funding учитываются.',
+        'This strategy only: native Lighter candles, $100 Shadow and an isolated $100 Real canary at 10× leverage. Trading fee is 0%; spread, slippage, and funding are included.',
       )
       : (NATIVE_LIVE_STRATEGY_IDS as readonly string[]).includes(requested.strategy.id)
         ? t(
           lang,
-          'Только эта стратегия: нативные свечи Lighter и prospective Shadow $1000. Она зарегистрирована в Real-исполнителе, но новые входы $100/10× выключены до прохождения frozen forward-гейта; уже открытые позиции продолжают сопровождаться.',
-          'This strategy only: native Lighter candles and prospective $1,000 Shadow. It is registered with the Real executor, but new $100/10× entries are disabled until the frozen forward gate passes; existing positions remain monitored.',
+          'Только эта стратегия: нативные свечи Lighter и prospective Shadow $100. Она зарегистрирована в Real-исполнителе, но новые входы $100/10× выключены до прохождения frozen forward-гейта; старые Shadow-позиции $1000 продолжают сопровождаться до закрытия.',
+          'This strategy only: native Lighter candles and prospective $100 Shadow. It is registered with the Real executor, but new $100/10× entries are disabled until the frozen forward gate passes; legacy $1,000 Shadow positions remain monitored until closed.',
         )
         : t(
         lang,
-        'Только эта стратегия: нативные свечи Lighter и prospective Shadow $1000. Real отключён до отдельной проверки forward-сделок. Комиссия 0%; spread, slippage и funding учитываются.',
-        'This strategy only: native Lighter candles and prospective $1,000 Shadow. Real is disabled until its own forward trades are validated. Trading fee is 0%; spread, slippage, and funding are included.',
+        'Только эта стратегия: нативные свечи Lighter и prospective Shadow $100. Real отключён до отдельной проверки forward-сделок. Комиссия 0%; spread, slippage и funding учитываются.',
+        'This strategy only: native Lighter candles and prospective $100 Shadow. Real is disabled until its own forward trades are validated. Trading fee is 0%; spread, slippage, and funding are included.',
         )
     : requested.group === 'native'
       ? t(
         lang,
-        `Собственные стратегии на завершённых свечах Lighter собраны в одном портфеле: ${scopeLabel}. Единые сигналы, сделки, накопленный PnL и индивидуальная статистика; Shadow моделируется на $1000. Комиссия Standard — 0%, spread, VWAP, slippage и funding учитываются.`,
-        `In-house completed-candle Lighter strategies share one portfolio: ${scopeLabel}. Signals, trades, cumulative PnL, and per-strategy statistics are consolidated; Shadow uses $1,000 positions. Standard trading fee is 0%, while spread, VWAP, slippage, and funding are included.`,
+        `Собственные стратегии на завершённых свечах Lighter собраны в одном портфеле: ${scopeLabel}. Единые сигналы, сделки, накопленный PnL и индивидуальная статистика; новая prospective Shadow-когорта моделируется на $100, как отбор и будущий Real-canary. Старые сделки $1000 сохранены отдельно и не участвуют в гейте. Комиссия Standard — 0%, spread, VWAP, slippage и funding учитываются.`,
+        `In-house completed-candle Lighter strategies share one portfolio: ${scopeLabel}. Signals, trades, cumulative PnL, and per-strategy statistics are consolidated; the new prospective Shadow cohort uses $100, matching selection and the future Real canary. Legacy $1,000 trades are preserved separately and excluded from the gate. Standard trading fee is 0%, while spread, VWAP, slippage, and funding are included.`,
       )
       : t(
         lang,

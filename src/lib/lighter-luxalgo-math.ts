@@ -1,5 +1,17 @@
 export type PriceLevel = readonly [price: number, size: number];
 
+export const LUXALGO_SHADOW_NOTIONAL_USD = 1_000;
+export const NATIVE_SHADOW_NOTIONAL_USD = 100;
+
+/**
+ * Native selection, prospective Shadow and the future isolated Real canary all
+ * use the same $100 execution capacity. Legacy LuxAlgo alerts retain their
+ * original $1,000 Shadow cohort.
+ */
+export function shadowExecutionNotionalUsd(isNative: boolean): number {
+  return isNative ? NATIVE_SHADOW_NOTIONAL_USD : LUXALGO_SHADOW_NOTIONAL_USD;
+}
+
 export const NATIVE_FORWARD_GATE = {
   targetClosed: 20,
   minDurationDays: 7,

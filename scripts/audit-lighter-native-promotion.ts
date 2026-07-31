@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import {
   evaluateNativeForwardRows,
   NATIVE_FORWARD_GATE,
+  NATIVE_SHADOW_NOTIONAL_USD,
   type NativeForwardGateEvaluation,
   type NativeForwardPnlRow,
   type NativeForwardSignalRow,
@@ -47,16 +48,19 @@ if (!existsSync(databasePath)) throw new Error(`trading database missing: ${data
 const db = new Database(databasePath, { readonly: true, fileMustExist: true });
 const pnlStatement = db.prepare<[string], NativeForwardPnlRow>(`
   SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
-  WHERE strategy_id = ? AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
+  WHERE strategy_id = ? AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
+    AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
   ORDER BY closed_at, id`);
 const signalStatement = db.prepare<[string], NativeForwardSignalRow>(`
   SELECT capture_status, book_age_ms, bid, ask,
          buy_slippage_pct, sell_slippage_pct
   FROM lighter_lux_signals WHERE strategy_id = ?
+    AND execution_notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
   ORDER BY received_at, id`);
 const portfolioPnls = db.prepare<string[], NativeForwardPnlRow>(`
   SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
   WHERE strategy_id IN (${sqlMarks(P2_IDS.length)})
+    AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
     AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
   ORDER BY closed_at, id`);
 const portfolioSignals = db.prepare<string[], NativeForwardSignalRow>(`
@@ -64,6 +68,7 @@ const portfolioSignals = db.prepare<string[], NativeForwardSignalRow>(`
          buy_slippage_pct, sell_slippage_pct
   FROM lighter_lux_signals
   WHERE strategy_id IN (${sqlMarks(P2_IDS.length)})
+    AND execution_notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
   ORDER BY received_at, id`);
 
 const strategies = SHADOW_NATIVE_IDS.map((strategyId) => ({
@@ -123,10 +128,11 @@ const eligibleStrategyIds = evaluatedStrategies
   .map((row) => row.strategyId);
 const generatedAt = new Date().toISOString();
 const report = {
-  version: 'lighter-native-promotion-audit-v1',
+  version: 'lighter-native-promotion-audit-v2',
   generatedAt,
   databasePath,
   gate: NATIVE_FORWARD_GATE,
+  shadowNotionalUsd: NATIVE_SHADOW_NOTIONAL_USD,
   eligibleStrategyIds,
   p2: {
     portfolioId: 'z60stack25-portfolio',

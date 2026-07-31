@@ -652,6 +652,14 @@ positive. Replacing `1.5 × p95` with each market's observed maximum produced
 `+115.86%` and PF `1.42`; this is reported as sensitivity evidence and does not
 alter the prospective Shadow gate.
 
+Native execution capacity is now cohort-consistent end to end. Selection,
+prospective Shadow, promotion evidence and the future isolated Real canary all
+use `$100` executable VWAP. Earlier Native `$1,000` Shadow rows are preserved
+for auditability but excluded from the new promotion cohort. Any legacy open
+position continues to be marked, stopped and closed against `$1,000` depth;
+after a reverse signal the replacement Native position opens at `$100`.
+LuxAlgo-sourced Shadow remains an independent `$1,000` cohort.
+
 The transition to long-window costs is now mechanical. The exporter
 `scripts/export-lighter-native-execution-costs.ts` refuses to create a scanner
 cost file unless the audit is fresh, all 15 markets are present, the notional

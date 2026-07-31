@@ -3,8 +3,11 @@ import {
   evaluateNativeForwardGate,
   evaluateNativeForwardRows,
   estimatedFundingPnlPct,
+  LUXALGO_SHADOW_NOTIONAL_USD,
+  NATIVE_SHADOW_NOTIONAL_USD,
   pricePnlPct,
   quoteNotionalVwap,
+  shadowExecutionNotionalUsd,
 } from '../../src/lib/lighter-luxalgo-math.js';
 
 const DAY_MS = 86_400_000;
@@ -18,6 +21,13 @@ function forwardCoverage(count: number, marketCount = 1) {
 }
 
 describe('Lighter LuxAlgo shadow math', () => {
+  it('keeps Native Shadow aligned with the $100 selection and Real canary', () => {
+    expect(shadowExecutionNotionalUsd(true)).toBe(NATIVE_SHADOW_NOTIONAL_USD);
+    expect(NATIVE_SHADOW_NOTIONAL_USD).toBe(100);
+    expect(shadowExecutionNotionalUsd(false)).toBe(LUXALGO_SHADOW_NOTIONAL_USD);
+    expect(LUXALGO_SHADOW_NOTIONAL_USD).toBe(1_000);
+  });
+
   it('sweeps fixed USD notional across depth', () => {
     const vwap = quoteNotionalVwap([[100, 5], [101, 10]], 1_000);
     expect(vwap).not.toBeNull();
