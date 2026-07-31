@@ -10,6 +10,12 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import {
+  buildLighterFundingSeries,
+  fundingSeriesCoverage,
+  type LighterFundingPoint,
+  type LighterFundingSeries,
+} from '../src/lib/lighter-funding-history.js';
+import {
   rollupLighterMicrostructureFiveMinute,
   type StoredMicrostructureMinute,
 } from '../src/lib/lighter-microstructure.js';
@@ -21,6 +27,9 @@ import {
 } from '../src/lib/lighter-microstructure-research.js';
 
 const HOUR_MS = 3_600_000;
+const HOUR_SECONDS = 3_600;
+const FUNDING_CHUNK_SECONDS = 28 * 86_400;
+const LIGHTER_BASE_URL = 'https://mainnet.zklighter.elliot.ai';
 type Mode = 'exploratory' | 'frozen';
 type Audit = {
   generatedAt: string;
@@ -86,6 +95,102 @@ function output(report: unknown): void {
   console.log(serialized);
 }
 
+async function getJson(url: string): Promise<Record<string, unknown>> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          accept: 'application/json',
+          'user-agent': 'robotclaude-native-microstructure-funding/1.0',
+        },
+      });
+      const body = await response.json() as Record<string, unknown>;
+      if (!response.ok || Number(body.code) !== 200) {
+        throw new Error(`http_${response.status}:${String(body.message ?? body.code)}`);
+      }
+      return body;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 5) break;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 500 * 2 ** attempt));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('funding_api_retry_exhausted');
+}
+
+async function exactFundingForRows(rows: readonly DbRow[]): Promise<{
+  byMarket: Map<number, LighterFundingSeries>;
+  coverage: Record<string, ReturnType<typeof fundingSeriesCoverage>>;
+}> {
+  const ranges = new Map<number, { symbol: string; startMs: number; endMs: number }>();
+  for (const row of rows) {
+    const current = ranges.get(row.market_id);
+    if (!current) {
+      ranges.set(row.market_id, {
+        symbol: row.symbol,
+        startMs: row.minute_ts_ms,
+        endMs: row.minute_ts_ms + 5 * 60_000,
+      });
+    } else {
+      current.startMs = Math.min(current.startMs, row.minute_ts_ms);
+      current.endMs = Math.max(current.endMs, row.minute_ts_ms + 5 * 60_000);
+    }
+  }
+
+  const byMarket = new Map<number, LighterFundingSeries>();
+  const coverage: Record<string, ReturnType<typeof fundingSeriesCoverage>> = {};
+  for (const [marketId, range] of ranges) {
+    const startSeconds = Math.floor(range.startMs / 1_000) - HOUR_SECONDS;
+    const endSeconds = Math.ceil(range.endMs / 1_000) + HOUR_SECONDS;
+    const points = new Map<number, LighterFundingPoint>();
+    for (
+      let chunkStart = startSeconds;
+      chunkStart <= endSeconds;
+      chunkStart += FUNDING_CHUNK_SECONDS
+    ) {
+      const chunkEnd = Math.min(endSeconds, chunkStart + FUNDING_CHUNK_SECONDS - 1);
+      const url = new URL(`${LIGHTER_BASE_URL}/api/v1/fundings`);
+      for (const [key, value] of Object.entries({
+        market_id: marketId,
+        resolution: '1h',
+        start_timestamp: chunkStart,
+        end_timestamp: chunkEnd,
+        count_back: 0,
+      })) url.searchParams.set(key, String(value));
+      const body = await getJson(url.toString());
+      const fundings = Array.isArray(body.fundings) ? body.fundings : [];
+      for (const item of fundings) {
+        const row = item as Record<string, unknown>;
+        const timestampMs = Number(row.timestamp) * 1_000;
+        const ratePctH = Math.abs(Number(row.rate));
+        const direction = String(row.direction).toLowerCase();
+        if (
+          timestampMs > 0
+          && Number.isFinite(ratePctH)
+          && (direction === 'long' || direction === 'short')
+        ) {
+          points.set(timestampMs, {
+            timestampMs,
+            ratePctH,
+            direction,
+          });
+        }
+      }
+    }
+    const series = buildLighterFundingSeries([...points.values()]);
+    const status = fundingSeriesCoverage(series, range.startMs, range.endMs);
+    if (!status.covered) {
+      throw new Error(
+        `${range.symbol}: exact funding coverage ${(status.internalCoverage * 100).toFixed(2)}%`,
+      );
+    }
+    byMarket.set(marketId, series);
+    coverage[range.symbol] = status;
+  }
+  return { byMarket, coverage };
+}
+
 function stored(row: DbRow): StoredMicrostructureMinute {
   return {
     marketId: row.market_id,
@@ -141,7 +246,7 @@ const auditPath = resolve(
 );
 const generatedAt = new Date().toISOString();
 if (!existsSync(auditPath)) {
-  output({ version: 'lighter-microstructure-sweep-v1', generatedAt, mode, status: 'not_ready', failures: ['readiness audit missing'] });
+  output({ version: 'lighter-microstructure-sweep-v2', generatedAt, mode, status: 'not_ready', failures: ['readiness audit missing'] });
   process.exit(0);
 }
 const audit = JSON.parse(readFileSync(auditPath, 'utf8')) as Audit;
@@ -157,7 +262,7 @@ const readinessFailures = [
 ];
 if (!selectedGate.passed || readinessFailures.length) {
   output({
-    version: 'lighter-microstructure-sweep-v1',
+    version: 'lighter-microstructure-sweep-v2',
     generatedAt,
     mode,
     status: 'not_ready',
@@ -176,6 +281,21 @@ const rows = db.prepare(`
 `).all() as DbRow[];
 db.close();
 
+let exactFunding: Awaited<ReturnType<typeof exactFundingForRows>>;
+try {
+  exactFunding = await exactFundingForRows(rows);
+} catch (error) {
+  output({
+    version: 'lighter-microstructure-sweep-v2',
+    generatedAt,
+    mode,
+    status: 'not_ready',
+    failures: [error instanceof Error ? error.message : String(error)],
+    rules: PREREGISTERED_MICRO_RULES.map((rule) => rule.id),
+  });
+  process.exit(0);
+}
+
 const buckets = new Map<string, StoredMicrostructureMinute[]>();
 for (const row of rows.map(stored)) {
   const bucket = Math.floor(row.minuteTsMs / (5 * 60_000)) * (5 * 60_000);
@@ -191,7 +311,7 @@ const features = buildCausalMicroFeatureBars(fiveMinute);
 const evaluations = PREREGISTERED_MICRO_RULES.map((rule) =>
   evaluateMicrostructureRule(
     rule.id,
-    simulateMicrostructureRule(features, rule),
+    simulateMicrostructureRule(features, rule, exactFunding.byMarket),
   ));
 const rollingCostMarkets = new Set(
   features
@@ -200,7 +320,7 @@ const rollingCostMarkets = new Set(
 );
 
 output({
-  version: 'lighter-microstructure-sweep-v1',
+  version: 'lighter-microstructure-sweep-v2',
   generatedAt,
   mode,
   status: 'evaluated',
@@ -215,11 +335,14 @@ output({
     featureRows: features.length,
     rollingCostMarkets: rollingCostMarkets.size,
     executionCostSource: 'signal-time completed 5m max of five rolling $100 minute p95 values',
+    adverseExecutionCostSource: 'signal-time completed 5m worst actually observed $100 round trip; sensitivity only',
+    fundingSource: 'exact public Lighter hourly settlements in (entry, exit]',
+    fundingCoverage: exactFunding.coverage,
   },
   gates: {
     minimumTrades: 120,
     minimumProfitFactor: 1.2,
-    adverseCostMultiplier: 1.5,
+    adverseExecution: 'observed maximum; no fixed percentage or multiplier',
     maximumPortfolioDrawdownPct: 5,
     minimumDepthUsdPerSide: 500,
     bothSides: true,

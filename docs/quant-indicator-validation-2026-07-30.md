@@ -1044,3 +1044,28 @@ price result.
 No threshold, lookback, holding period or pair subset is retuned. The family is
 closed without Shadow, Real or website registration. Frozen evidence is in
 `data/lighter-dynamic-pair-spread-results.json`.
+
+## Prospective L2 microstructure research cost policy
+
+The continuously recorded gap-free Lighter L2 dataset has not yet reached its
+first seven-day exploratory gate or its 21-day frozen candidate gate. Before
+either result could be inspected, the preregistered microstructure sweep was
+aligned with the corrected Native execution policy:
+
+- blocking net deducts the completed signal bar's causal `$100` executable
+  round-trip p95 for that market;
+- the separate adverse column deducts the worst `$100` round trip actually
+  observed inside the same completed signal bar;
+- no fixed `0.10%`/`0.15%` reserve and no `1.5 x p95` multiplier can qualify or
+  reject a rule;
+- missing observed-maximum execution data rejects that signal rather than
+  falling back to an assumed value.
+- holding-period funding is the exact signed public Lighter hourly settlement
+  in `(entry, exit]`; the recorded current rate remains a causal signal feature
+  but is not interpolated into trade PnL.
+
+This is a preregistration correction, not a result-dependent rescue: the sweep
+was still `not_ready`, and no microstructure rule had produced an eligible
+evaluation when the policy was changed. The first future output will therefore
+use measured p95 for the blocking economics and observed maximum only as
+non-blocking sensitivity from its first admissible run.

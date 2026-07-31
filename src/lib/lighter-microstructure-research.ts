@@ -1,4 +1,8 @@
 import type { MicrostructureFiveMinute } from './lighter-microstructure.js';
+import {
+  lighterFundingPnlPct,
+  type LighterFundingSeries,
+} from './lighter-funding-history.js';
 
 const FIVE_MINUTES_MS = 5 * 60_000;
 
@@ -23,6 +27,8 @@ export type MicroFeatureBar = {
   fundingRatePctH: number;
   /** Causal p95 from the completed signal bar's $100 L2 samples. */
   executionCostPct: number | null;
+  /** Worst causal $100 round trip observed inside the completed signal bar. */
+  adverseExecutionCostPct: number | null;
   trend: TrendRegime;
   volatility: VolatilityRegime;
 };
@@ -47,6 +53,7 @@ export type MicroTrade = {
   grossPct: number;
   fundingPct: number;
   executionCostPct: number;
+  adverseExecutionCostPct: number;
   netPct: number;
   trend: TrendRegime;
   volatility: VolatilityRegime;
@@ -232,6 +239,7 @@ export function buildCausalMicroFeatureBars(
         basisPct: row.basisPct,
         fundingRatePctH: row.currentFundingRate,
         executionCostPct: row.execCost100P95Pct,
+        adverseExecutionCostPct: row.execCost100MaxPct,
         trend,
         volatility,
       });
@@ -246,23 +254,15 @@ function liquidityPass(bar: MicroFeatureBar, executionCostPct: number): boolean 
     && bar.spreadPct <= Math.max(0.02, executionCostPct * 1.5);
 }
 
-function fundingPnlPct(
-  side: MicroSide,
-  entryRatePctH: number,
-  exitRatePctH: number,
-  heldMs: number,
-): number {
-  const meanRate = (entryRatePctH + exitRatePctH) / 2;
-  return (side === 'long' ? -meanRate : meanRate) * heldMs / 3_600_000;
-}
-
 /**
  * Signal at completed bar t, entry at t+1 open, exit after the frozen horizon.
- * Missing bars, costs, funding or $500 per-side top-five depth reject the trade.
+ * Missing bars, costs, exact funding history or $500 per-side top-five depth
+ * reject the trade.
  */
 export function simulateMicrostructureRule(
   features: readonly MicroFeatureBar[],
   rule: MicroRule,
+  fundingByMarket: ReadonlyMap<number, LighterFundingSeries>,
 ): MicroTrade[] {
   const byMarket = new Map<number, MicroFeatureBar[]>();
   for (const bar of features) {
@@ -273,10 +273,21 @@ export function simulateMicrostructureRule(
   const trades: MicroTrade[] = [];
   for (const marketBars of byMarket.values()) {
     marketBars.sort((left, right) => left.timeMs - right.timeMs);
+    const fundingSeries = fundingByMarket.get(marketBars[0]!.marketId);
+    if (!fundingSeries) continue;
     for (let index = 0; index < marketBars.length; index++) {
       const signalBar = marketBars[index]!;
       const cost = signalBar.executionCostPct;
-      if (cost == null || !Number.isFinite(cost) || cost < 0 || !liquidityPass(signalBar, cost)) {
+      const adverseCost = signalBar.adverseExecutionCostPct;
+      if (
+        cost == null
+        || !Number.isFinite(cost)
+        || cost < 0
+        || adverseCost == null
+        || !Number.isFinite(adverseCost)
+        || adverseCost < cost
+        || !liquidityPass(signalBar, cost)
+      ) {
         continue;
       }
       const side = rule.signal(signalBar);
@@ -294,11 +305,11 @@ export function simulateMicrostructureRule(
       const grossPct = side === 'long'
         ? (exit.open - entry.open) / entry.open * 100
         : (entry.open - exit.open) / entry.open * 100;
-      const fundingPct = fundingPnlPct(
+      const fundingPct = lighterFundingPnlPct(
+        fundingSeries,
         side,
-        entry.fundingRatePctH,
-        exit.fundingRatePctH,
-        exit.timeMs - entry.timeMs,
+        entry.timeMs,
+        exit.timeMs,
       );
       trades.push({
         ruleId: rule.id,
@@ -313,6 +324,7 @@ export function simulateMicrostructureRule(
         grossPct,
         fundingPct,
         executionCostPct: cost,
+        adverseExecutionCostPct: adverseCost,
         netPct: grossPct + fundingPct - cost,
         trend: signalBar.trend,
         volatility: signalBar.volatility,
@@ -323,12 +335,15 @@ export function simulateMicrostructureRule(
   return trades.sort((left, right) => left.entryTimeMs - right.entryTimeMs || left.marketId - right.marketId);
 }
 
-function tradeNet(trade: MicroTrade, costMultiplier = 1): number {
-  return trade.grossPct + trade.fundingPct - trade.executionCostPct * costMultiplier;
+function tradeNet(trade: MicroTrade, adverse = false): number {
+  const executionCost = adverse
+    ? trade.adverseExecutionCostPct
+    : trade.executionCostPct;
+  return trade.grossPct + trade.fundingPct - executionCost;
 }
 
-function stats(trades: readonly MicroTrade[], costMultiplier = 1): MicroStats {
-  const values = trades.map((trade) => tradeNet(trade, costMultiplier));
+function stats(trades: readonly MicroTrade[], adverse = false): MicroStats {
+  const values = trades.map((trade) => tradeNet(trade, adverse));
   const wins = values.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
   const losses = Math.abs(
     values.filter((value) => value < 0).reduce((sum, value) => sum + value, 0),
@@ -375,7 +390,7 @@ export function evaluateMicrostructureRule(
     (left, right) => left.entryTimeMs - right.entryTimeMs || left.marketId - right.marketId,
   );
   const base = stats(trades);
-  const adverse = stats(trades, 1.5);
+  const adverse = stats(trades, true);
   const long = stats(trades.filter((trade) => trade.side === 'long'));
   const short = stats(trades.filter((trade) => trade.side === 'short'));
   const folds = thirds(trades);
@@ -410,9 +425,6 @@ export function evaluateMicrostructureRule(
   if (!(base.netPct > 0)) reasons.push(`net ${base.netPct.toFixed(3)}% <= 0%`);
   if (!(base.profitFactor != null && base.profitFactor >= 1.2)) {
     reasons.push(`PF ${base.profitFactor?.toFixed(2) ?? 'n/a'} < 1.20`);
-  }
-  if (!(adverse.netPct > 0 && adverse.profitFactor != null && adverse.profitFactor >= 1.1)) {
-    reasons.push('1.5x cost stress failed');
   }
   if (!(meanL95Pct > 0)) reasons.push(`mean L95 ${meanL95Pct.toFixed(4)}% <= 0%`);
   if (!(long.trades >= 30 && long.netPct > 0)) reasons.push('long side failed');
