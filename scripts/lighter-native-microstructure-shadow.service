@@ -7,7 +7,7 @@ Type=oneshot
 User=trader
 Group=trader
 WorkingDirectory=/home/trader/apps/trading-agent
-ExecStart=/home/trader/apps/trading-agent/node_modules/.bin/tsx scripts/run-lighter-microstructure-shadow.ts --db data/lighter-native-microstructure.sqlite --frozen data/lighter-native-microstructure-sweep.json --manifest data/lighter-native-microstructure-shadow-manifest.json --output data/lighter-native-microstructure-shadow-report.json
+ExecStart=/home/trader/apps/trading-agent/node_modules/.bin/tsx scripts/run-lighter-microstructure-shadow.ts --db data/lighter-native-microstructure.sqlite --core-frozen data/lighter-native-microstructure-sweep.json --challenger-frozen data/lighter-native-microstructure-challenger-sweep.json --manifest data/lighter-native-microstructure-shadow-manifest.json --output data/lighter-native-microstructure-shadow-report.json
 Nice=15
 IOSchedulingClass=idle
 NoNewPrivileges=true
@@ -16,4 +16,3 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/home/trader/apps/trading-agent/data
 MemoryMax=512M
-

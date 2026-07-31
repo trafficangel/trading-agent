@@ -1,13 +1,13 @@
 [Unit]
 Description=Prepare immutable prospective Lighter microstructure Shadow cohort
-After=lighter-native-microstructure-sweep.service
+After=lighter-native-microstructure-sweep.service lighter-native-microstructure-challenger-sweep.service
 
 [Service]
 Type=oneshot
 User=trader
 Group=trader
 WorkingDirectory=/home/trader/apps/trading-agent
-ExecStart=/home/trader/apps/trading-agent/node_modules/.bin/tsx scripts/prepare-lighter-microstructure-shadow.ts --frozen data/lighter-native-microstructure-sweep.json --output data/lighter-native-microstructure-shadow-manifest.json
+ExecStart=/home/trader/apps/trading-agent/node_modules/.bin/tsx scripts/prepare-lighter-microstructure-shadow.ts --core-frozen data/lighter-native-microstructure-sweep.json --challenger-frozen data/lighter-native-microstructure-challenger-sweep.json --output data/lighter-native-microstructure-shadow-manifest.json
 Nice=15
 IOSchedulingClass=idle
 NoNewPrivileges=true

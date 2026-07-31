@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildMicrostructureShadowReport,
   frozenMicrostructureReportSha256,
+  immutableMicrostructureSelectionBundle,
   mergeMicrostructureShadowTrades,
   prepareMicrostructureShadowManifest,
   prospectiveMicrostructureShadowTrades,
@@ -11,9 +12,15 @@ import type { MicroFeatureBar } from '../../src/lib/lighter-microstructure-resea
 
 const NOW = Date.parse('2026-08-22T04:00:00Z');
 
-function report(eligible: string[] = ['1m:OF-CONT-25-H1']): Record<string, unknown> {
+function report(
+  eligible: string[] = ['1m:OF-CONT-25-H1'],
+  suite: 'core' | 'challenger' = 'core',
+): Record<string, unknown> {
   return {
-    version: 'lighter-microstructure-sweep-v3',
+    version: suite === 'core'
+      ? 'lighter-microstructure-sweep-v3'
+      : 'lighter-microstructure-challenger-sweep-v1',
+    suite,
     generatedAt: '2026-08-22T03:20:00Z',
     mode: 'frozen',
     status: 'evaluated',
@@ -27,6 +34,20 @@ function report(eligible: string[] = ['1m:OF-CONT-25-H1']): Record<string, unkno
   };
 }
 
+function sources(
+  core: Record<string, unknown> = report(),
+  challenger: Record<string, unknown> = report([], 'challenger'),
+) {
+  return [
+    { suite: 'core' as const, version: 'lighter-microstructure-sweep-v3', report: core },
+    {
+      suite: 'challenger' as const,
+      version: 'lighter-microstructure-challenger-sweep-v1',
+      report: challenger,
+    },
+  ];
+}
+
 describe('Lighter microstructure prospective Shadow manifest', () => {
   it('does nothing before the immutable 21d report is evaluated', () => {
     const pending = {
@@ -34,17 +55,17 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
       status: 'not_ready',
       immutableSelection: false,
     };
-    expect(prepareMicrostructureShadowManifest(pending, null, NOW))
+    expect(prepareMicrostructureShadowManifest(sources(pending), null, NOW))
       .toEqual({ status: 'not_ready', manifest: null });
     expect(() => prepareMicrostructureShadowManifest(
-      pending,
-      prepareMicrostructureShadowManifest(report(), null, NOW).manifest,
+      sources(pending),
+      prepareMicrostructureShadowManifest(sources(), null, NOW).manifest,
       NOW,
-    )).toThrow(/without immutable frozen evidence/);
+    )).toThrow(/without both immutable frozen suites/);
   });
 
   it('starts the cohort after selection and keeps Real disabled', () => {
-    const result = prepareMicrostructureShadowManifest(report(), null, NOW);
+    const result = prepareMicrostructureShadowManifest(sources(), null, NOW);
     expect(result.status).toBe('created');
     expect(result.manifest).toMatchObject({
       status: 'active',
@@ -55,6 +76,7 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
       realEnabled: false,
       candidates: [{
         id: '1m:OF-CONT-25-H1',
+        suite: 'core',
         timeframeMinutes: 1,
         ruleId: 'OF-CONT-25-H1',
       }],
@@ -62,7 +84,7 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
   });
 
   it('freezes an empty result as a terminal no-candidate cohort', () => {
-    const result = prepareMicrostructureShadowManifest(report([]), null, NOW);
+    const result = prepareMicrostructureShadowManifest(sources(report([])), null, NOW);
     expect(result.manifest?.status).toBe('no_candidates');
     expect(result.manifest?.candidates).toEqual([]);
   });
@@ -70,14 +92,14 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
   it('rejects eligible ids without exact qualified evidence', () => {
     const value = report();
     value.evaluations = [];
-    expect(() => prepareMicrostructureShadowManifest(value, null, NOW))
+    expect(() => prepareMicrostructureShadowManifest(sources(value), null, NOW))
       .toThrow(/evidence missing/);
   });
 
   it('refuses to mutate an existing cohort when the frozen report changes', () => {
-    const first = prepareMicrostructureShadowManifest(report(), null, NOW).manifest!;
+    const first = prepareMicrostructureShadowManifest(sources(), null, NOW).manifest!;
     const changed = report(['5m:BASIS-4BP-H3']);
-    expect(() => prepareMicrostructureShadowManifest(changed, first, NOW + 60_000))
+    expect(() => prepareMicrostructureShadowManifest(sources(changed), first, NOW + 60_000))
       .toThrow(/contract mismatch/);
   });
 
@@ -88,8 +110,24 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
       .toBe(frozenMicrostructureReportSha256(right));
   });
 
+  it('waits for both suites and binds their immutable reports into one hash', () => {
+    expect(immutableMicrostructureSelectionBundle(sources())?.hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(immutableMicrostructureSelectionBundle(sources(
+      report(),
+      { ...report([], 'challenger'), status: 'not_ready', immutableSelection: false },
+    ))).toBeNull();
+    const result = prepareMicrostructureShadowManifest(sources(
+      report(),
+      report(['1m:BOOK-FLIP-30-H1'], 'challenger'),
+    ), null, NOW);
+    expect(result.manifest?.candidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ suite: 'core', ruleId: 'OF-CONT-25-H1' }),
+      expect.objectContaining({ suite: 'challenger', ruleId: 'BOOK-FLIP-30-H1' }),
+    ]));
+  });
+
   it('records only post-activation closed trades and enforces cohort-wide capacity', () => {
-    const manifest = prepareMicrostructureShadowManifest(report(), null, NOW).manifest!;
+    const manifest = prepareMicrostructureShadowManifest(sources(), null, NOW).manifest!;
     const bars: MicroFeatureBar[] = [];
     const funding = new Map<number, ReturnType<typeof buildLighterFundingSeries>>();
     for (let marketId = 1; marketId <= 11; marketId++) {
@@ -134,7 +172,7 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
   });
 
   it('reports prospective $100 PnL and cannot enable Real', () => {
-    const manifest = prepareMicrostructureShadowManifest(report(), null, NOW).manifest!;
+    const manifest = prepareMicrostructureShadowManifest(sources(), null, NOW).manifest!;
     const trade = {
       ruleId: 'OF-CONT-25-H1', marketId: 1, symbol: 'BTC', side: 'long' as const,
       barMinutes: 1 as const, signalTimeMs: NOW, entryTimeMs: NOW + 60_000,

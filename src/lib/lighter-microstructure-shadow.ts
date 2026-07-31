@@ -3,24 +3,42 @@ import {
   type MicroFeatureBar,
   type MicroTrade,
   existingImmutableFrozenMicrostructureReport,
+  PREREGISTERED_MICRO_CHALLENGERS,
   PREREGISTERED_MICRO_RULES,
   simulateMicrostructureRule,
 } from './lighter-microstructure-research.js';
 import type { LighterFundingSeries } from './lighter-funding-history.js';
 
 export const MICROSTRUCTURE_SHADOW_MANIFEST_VERSION =
-  'lighter-microstructure-shadow-manifest-v1';
+  'lighter-microstructure-shadow-manifest-v2';
+
+export type MicrostructureSuite = 'core' | 'challenger';
+
+export type MicrostructureFrozenSource = {
+  suite: MicrostructureSuite;
+  version: string;
+  report: unknown;
+};
 
 export type MicrostructureShadowCandidate = {
   id: string;
+  suite: MicrostructureSuite;
   timeframeMinutes: 1 | 5;
   ruleId: string;
+};
+
+export type MicrostructureShadowFrozenSource = {
+  suite: MicrostructureSuite;
+  version: string;
+  sha256: string;
+  selectionEpochAt: string;
 };
 
 export type MicrostructureShadowManifest = {
   version: typeof MICROSTRUCTURE_SHADOW_MANIFEST_VERSION;
   status: 'active' | 'no_candidates';
   frozenReportSha256: string;
+  frozenSources: MicrostructureShadowFrozenSource[];
   selectionEpochAt: string;
   activatedAt: string;
   notionalUsd: 100;
@@ -48,15 +66,59 @@ export function frozenMicrostructureReportSha256(report: unknown): string {
   return createHash('sha256').update(canonicalJson(report)).digest('hex');
 }
 
-function parseCandidate(value: string): MicrostructureShadowCandidate {
+const EXPECTED_FROZEN_SOURCES: Readonly<Record<MicrostructureSuite, string>> = {
+  core: 'lighter-microstructure-sweep-v3',
+  challenger: 'lighter-microstructure-challenger-sweep-v1',
+};
+
+export function immutableMicrostructureSelectionBundle(
+  sources: readonly MicrostructureFrozenSource[],
+): {
+  hash: string;
+  locked: Array<MicrostructureFrozenSource & { report: Record<string, unknown> }>;
+} | null {
+  if (sources.length !== 2) throw new Error('both frozen microstructure suites are required');
+  const locked: Array<MicrostructureFrozenSource & { report: Record<string, unknown> }> = [];
+  for (const suite of ['core', 'challenger'] as const) {
+    const matches = sources.filter((source) => source.suite === suite);
+    if (matches.length !== 1 || matches[0]!.version !== EXPECTED_FROZEN_SOURCES[suite]) {
+      throw new Error(`invalid frozen microstructure source: ${suite}`);
+    }
+    const source = matches[0]!;
+    const report = existingImmutableFrozenMicrostructureReport(source.report, source.version);
+    if (!report) return null;
+    if (report.suite !== suite) throw new Error(`frozen report suite mismatch: ${suite}`);
+    locked.push({ ...source, report });
+  }
+  const ordered = locked.sort((left, right) => left.suite.localeCompare(right.suite));
+  return {
+    hash: frozenMicrostructureReportSha256({
+      version: 'lighter-microstructure-selection-bundle-v1',
+      sources: ordered.map((source) => ({
+        suite: source.suite,
+        version: source.version,
+        report: source.report,
+      })),
+    }),
+    locked: ordered,
+  };
+}
+
+function rulesForSuite(suite: MicrostructureSuite) {
+  return suite === 'challenger'
+    ? PREREGISTERED_MICRO_CHALLENGERS
+    : PREREGISTERED_MICRO_RULES;
+}
+
+function parseCandidate(value: string, suite: MicrostructureSuite): MicrostructureShadowCandidate {
   const match = value.match(/^(1|5)m:(.+)$/);
   if (!match?.[1] || !match[2]) throw new Error(`invalid frozen candidate id: ${value}`);
   const timeframeMinutes = Number(match[1]) as 1 | 5;
   const ruleId = match[2];
-  if (!PREREGISTERED_MICRO_RULES.some((rule) => rule.id === ruleId)) {
+  if (!rulesForSuite(suite).some((rule) => rule.id === ruleId)) {
     throw new Error(`unknown frozen candidate rule: ${ruleId}`);
   }
-  return { id: value, timeframeMinutes, ruleId };
+  return { id: value, suite, timeframeMinutes, ruleId };
 }
 
 export function validateMicrostructureShadowManifest(
@@ -71,6 +133,8 @@ export function validateMicrostructureShadowManifest(
     manifest.version !== MICROSTRUCTURE_SHADOW_MANIFEST_VERSION
     || (manifest.status !== 'active' && manifest.status !== 'no_candidates')
     || manifest.frozenReportSha256 !== expectedHash
+    || !Array.isArray(manifest.frozenSources)
+    || manifest.frozenSources.length !== 2
     || typeof manifest.selectionEpochAt !== 'string'
     || !Number.isFinite(Date.parse(manifest.selectionEpochAt))
     || typeof manifest.activatedAt !== 'string'
@@ -83,12 +147,27 @@ export function validateMicrostructureShadowManifest(
   ) {
     throw new Error('existing microstructure Shadow manifest contract mismatch');
   }
-  const candidates = manifest.candidates.map((candidate) => parseCandidate(candidate.id));
+  const sourceSuites = new Set(manifest.frozenSources.map((source) => source.suite));
+  if (
+    sourceSuites.size !== 2
+    || !sourceSuites.has('core')
+    || !sourceSuites.has('challenger')
+    || manifest.frozenSources.some((source) =>
+      source.version !== EXPECTED_FROZEN_SOURCES[source.suite]
+      || !/^[a-f0-9]{64}$/.test(source.sha256)
+      || !Number.isFinite(Date.parse(source.selectionEpochAt)))
+  ) {
+    throw new Error('existing microstructure Shadow manifest sources mismatch');
+  }
+  const candidates = manifest.candidates.map((candidate) =>
+    parseCandidate(candidate.id, candidate.suite));
   if (
     candidates.some((candidate, index) =>
-      candidate.timeframeMinutes !== manifest.candidates![index]!.timeframeMinutes
+      candidate.suite !== manifest.candidates![index]!.suite
+      || candidate.timeframeMinutes !== manifest.candidates![index]!.timeframeMinutes
       || candidate.ruleId !== manifest.candidates![index]!.ruleId)
-    || new Set(candidates.map((candidate) => candidate.id)).size !== candidates.length
+    || new Set(candidates.map((candidate) => `${candidate.suite}:${candidate.id}`)).size
+      !== candidates.length
     || (manifest.status === 'active') !== (candidates.length > 0)
   ) {
     throw new Error('existing microstructure Shadow manifest candidates mismatch');
@@ -97,54 +176,73 @@ export function validateMicrostructureShadowManifest(
 }
 
 export function prepareMicrostructureShadowManifest(
-  frozenReport: unknown,
+  frozenSources: readonly MicrostructureFrozenSource[],
   existingManifest: unknown | null,
   nowMs: number,
 ): MicrostructureShadowPreparation {
   if (!Number.isFinite(nowMs) || nowMs <= 0) throw new Error('invalid activation time');
-  const locked = existingImmutableFrozenMicrostructureReport(frozenReport);
-  if (!locked) {
+  const bundle = immutableMicrostructureSelectionBundle(frozenSources);
+  if (!bundle) {
     if (existingManifest != null) {
-      throw new Error('microstructure Shadow manifest exists without immutable frozen evidence');
+      throw new Error('microstructure Shadow manifest exists without both immutable frozen suites');
     }
     return { status: 'not_ready', manifest: null };
   }
-  const hash = frozenMicrostructureReportSha256(locked);
   if (existingManifest != null) {
-    return { status: 'existing', manifest: validateMicrostructureShadowManifest(existingManifest, hash) };
+    return {
+      status: 'existing',
+      manifest: validateMicrostructureShadowManifest(existingManifest, bundle.hash),
+    };
   }
 
-  const eligible = locked.shadowEligibleRules as unknown[];
-  if (eligible.some((value) => typeof value !== 'string')) {
-    throw new Error('frozen candidate list contains a non-string value');
+  const candidates: MicrostructureShadowCandidate[] = [];
+  const frozenSourceDetails: MicrostructureShadowFrozenSource[] = [];
+  const generatedAtValues: number[] = [];
+  for (const source of bundle.locked) {
+    const eligible = source.report.shadowEligibleRules as unknown[];
+    if (eligible.some((value) => typeof value !== 'string')) {
+      throw new Error(`frozen candidate list contains a non-string value: ${source.suite}`);
+    }
+    const sourceCandidates = (eligible as string[]).map((value) =>
+      parseCandidate(value, source.suite));
+    const evaluations = source.report.evaluations as unknown[];
+    for (const candidate of sourceCandidates) {
+      const matches = evaluations.filter((value) => {
+        if (!value || typeof value !== 'object') return false;
+        const row = value as Record<string, unknown>;
+        return row.timeframeMinutes === candidate.timeframeMinutes
+          && row.ruleId === candidate.ruleId
+          && row.qualified === true;
+      });
+      if (matches.length !== 1) {
+        throw new Error(`frozen candidate evidence missing or duplicated: ${source.suite}:${candidate.id}`);
+      }
+    }
+    const generatedAt = String(source.report.generatedAt ?? '');
+    const generatedAtMs = Date.parse(generatedAt);
+    if (!Number.isFinite(generatedAtMs) || generatedAtMs > nowMs + 5 * 60_000) {
+      throw new Error(`frozen selection timestamp invalid: ${source.suite}`);
+    }
+    generatedAtValues.push(generatedAtMs);
+    candidates.push(...sourceCandidates);
+    frozenSourceDetails.push({
+      suite: source.suite,
+      version: source.version,
+      sha256: frozenMicrostructureReportSha256(source.report),
+      selectionEpochAt: generatedAt,
+    });
   }
-  const candidates = (eligible as string[]).map(parseCandidate);
-  if (new Set(candidates.map((candidate) => candidate.id)).size !== candidates.length) {
+  if (new Set(candidates.map((candidate) => `${candidate.suite}:${candidate.id}`)).size
+      !== candidates.length) {
     throw new Error('frozen candidate list contains duplicates');
   }
-  const evaluations = locked.evaluations as unknown[];
-  for (const candidate of candidates) {
-    const matches = evaluations.filter((value) => {
-      if (!value || typeof value !== 'object') return false;
-      const row = value as Record<string, unknown>;
-      return row.timeframeMinutes === candidate.timeframeMinutes
-        && row.ruleId === candidate.ruleId
-        && row.qualified === true;
-    });
-    if (matches.length !== 1) {
-      throw new Error(`frozen candidate evidence missing or duplicated: ${candidate.id}`);
-    }
-  }
-  const generatedAt = String(locked.generatedAt ?? '');
-  const generatedAtMs = Date.parse(generatedAt);
-  if (!Number.isFinite(generatedAtMs) || generatedAtMs > nowMs + 5 * 60_000) {
-    throw new Error('frozen selection timestamp invalid');
-  }
+  const generatedAtMs = Math.max(...generatedAtValues);
   const manifest: MicrostructureShadowManifest = {
     version: MICROSTRUCTURE_SHADOW_MANIFEST_VERSION,
     status: candidates.length ? 'active' : 'no_candidates',
-    frozenReportSha256: hash,
-    selectionEpochAt: generatedAt,
+    frozenReportSha256: bundle.hash,
+    frozenSources: frozenSourceDetails,
+    selectionEpochAt: new Date(generatedAtMs).toISOString(),
     activatedAt: new Date(Math.max(nowMs, generatedAtMs)).toISOString(),
     notionalUsd: 100,
     maximumConcurrentPositions: 10,
@@ -156,7 +254,7 @@ export function prepareMicrostructureShadowManifest(
 }
 
 export type MicrostructureShadowReport = {
-  version: 'lighter-microstructure-shadow-report-v1';
+  version: 'lighter-microstructure-shadow-report-v2';
   generatedAt: string;
   status: 'active' | 'no_candidates';
   activatedAt: string;
@@ -197,7 +295,8 @@ export function prospectiveMicrostructureShadowTrades(
   const activatedAtMs = Date.parse(manifest.activatedAt);
   const proposed: MicroTrade[] = [];
   for (const candidate of manifest.candidates) {
-    const rule = PREREGISTERED_MICRO_RULES.find((item) => item.id === candidate.ruleId);
+    const rule = rulesForSuite(candidate.suite)
+      .find((item) => item.id === candidate.ruleId);
     if (!rule) throw new Error(`unknown Shadow candidate rule: ${candidate.ruleId}`);
     const features = featuresByTimeframe.get(candidate.timeframeMinutes) ?? [];
     proposed.push(...simulateMicrostructureRule(
@@ -237,7 +336,7 @@ export function buildMicrostructureShadowReport(
   const grossLosses = Math.abs(losses.reduce((sum, trade) => sum + trade.netPct, 0));
   const netPct = closedTrades.reduce((sum, trade) => sum + trade.netPct, 0);
   return {
-    version: 'lighter-microstructure-shadow-report-v1',
+    version: 'lighter-microstructure-shadow-report-v2',
     generatedAt: new Date(generatedAtMs).toISOString(),
     status: manifest.status,
     activatedAt: manifest.activatedAt,

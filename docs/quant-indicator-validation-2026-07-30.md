@@ -1104,14 +1104,17 @@ the sweep to fail closed rather than overwrite it. Thus an initially rejected
 rule cannot become a candidate merely because the same holdout was inspected
 again on a longer rolling window.
 
-After that immutable selection, a separate fail-closed preparation timer
-creates `data/lighter-native-microstructure-shadow-manifest.json`. Its
-activation timestamp is later than the selection timestamp, its rule IDs must
-have exactly one matching qualified evaluation, and its frozen-report hash may
-never change. An empty first selection is persisted as `no_candidates` rather
-than waiting for a later rerun. The manifest fixes `$100`, ten maximum
-concurrent Shadow positions, `autoPromotion=false` and `realEnabled=false`;
-historical selection-period trades cannot enter the prospective cohort.
+After both immutable core and challenger selections, a separate fail-closed
+preparation timer creates
+`data/lighter-native-microstructure-shadow-manifest.json`. It refuses to act
+until both reports are evaluated, hashes the two-report bundle, and verifies
+that every selected rule has exactly one qualified row in its own suite. Its
+activation timestamp is later than both selection timestamps and the bundle
+hash may never change. An empty combined selection is persisted as
+`no_candidates` rather than waiting for a later rerun. The manifest fixes
+`$100`, ten maximum concurrent Shadow positions, `autoPromotion=false` and
+`realEnabled=false`; historical selection-period trades cannot enter the
+prospective cohort.
 
 The five-minute Shadow accounting timer is dormant until that manifest exists.
 Once active, it reconstructs only entries at or after `activatedAt`, uses the
@@ -1205,4 +1208,7 @@ The challenger uses the same 7-day diagnostic and 21-day immutable OOS gates,
 but writes separate files:
 `lighter-native-microstructure-challenger-exploratory.json` and
 `lighter-native-microstructure-challenger-sweep.json`. It can create no Real
-trade and cannot change the core suite's frozen output.
+trade and cannot change the core suite's frozen output. Shadow activation waits
+until both suites have completed their first immutable selection, then combines
+their passing candidates into one capacity-limited prospective portfolio; a
+timer-order race therefore cannot lock out the later challenger report.

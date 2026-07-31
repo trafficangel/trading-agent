@@ -20,12 +20,11 @@ import {
 import { buildCausalMicroFeatureBars } from '../src/lib/lighter-microstructure-research.js';
 import {
   buildMicrostructureShadowReport,
-  frozenMicrostructureReportSha256,
+  immutableMicrostructureSelectionBundle,
   mergeMicrostructureShadowTrades,
   prospectiveMicrostructureShadowTrades,
   validateMicrostructureShadowManifest,
 } from '../src/lib/lighter-microstructure-shadow.js';
-import { existingImmutableFrozenMicrostructureReport } from '../src/lib/lighter-microstructure-research.js';
 
 const HOUR_MS = 3_600_000;
 const WARMUP_MS = 5 * HOUR_MS;
@@ -152,27 +151,45 @@ async function fundingForRows(rows: readonly DbRow[]): Promise<Map<number, Light
 }
 
 const databasePath = resolve(flagValue('--db') ?? 'data/lighter-native-microstructure.sqlite');
-const frozenPath = resolve(flagValue('--frozen') ?? 'data/lighter-native-microstructure-sweep.json');
+const coreFrozenPath = resolve(
+  flagValue('--core-frozen') ?? 'data/lighter-native-microstructure-sweep.json',
+);
+const challengerFrozenPath = resolve(
+  flagValue('--challenger-frozen')
+    ?? 'data/lighter-native-microstructure-challenger-sweep.json',
+);
 const manifestPath = resolve(flagValue('--manifest') ?? 'data/lighter-native-microstructure-shadow-manifest.json');
 const outputPath = resolve(flagValue('--output') ?? 'data/lighter-native-microstructure-shadow-report.json');
-if (!existsSync(frozenPath)) throw new Error(`frozen report missing: ${frozenPath}`);
 if (!existsSync(manifestPath)) {
   console.log(JSON.stringify({ status: 'waiting_for_immutable_selection', realEnabled: false }));
   process.exit(0);
 }
 if (!existsSync(databasePath)) throw new Error(`microstructure database missing: ${databasePath}`);
-
-const frozen = existingImmutableFrozenMicrostructureReport(readJson(frozenPath));
-if (!frozen) throw new Error('immutable frozen report missing after Shadow activation');
+if (!existsSync(coreFrozenPath) || !existsSync(challengerFrozenPath)) {
+  throw new Error('both immutable frozen reports are required after Shadow activation');
+}
+const frozenBundle = immutableMicrostructureSelectionBundle([
+  {
+    suite: 'core',
+    version: 'lighter-microstructure-sweep-v3',
+    report: readJson(coreFrozenPath),
+  },
+  {
+    suite: 'challenger',
+    version: 'lighter-microstructure-challenger-sweep-v1',
+    report: readJson(challengerFrozenPath),
+  },
+]);
+if (!frozenBundle) throw new Error('immutable frozen reports missing after Shadow activation');
 const manifest = validateMicrostructureShadowManifest(
   readJson(manifestPath),
-  frozenMicrostructureReportSha256(frozen),
+  frozenBundle.hash,
 );
 let existingTrades: import('../src/lib/lighter-microstructure-research.js').MicroTrade[] = [];
 if (existsSync(outputPath)) {
   const existing = readJson(outputPath) as Record<string, unknown>;
   if (
-    existing.version !== 'lighter-microstructure-shadow-report-v1'
+    existing.version !== 'lighter-microstructure-shadow-report-v2'
     || existing.frozenReportSha256 !== manifest.frozenReportSha256
     || existing.prospectiveOnly !== true
     || existing.exactFunding !== true

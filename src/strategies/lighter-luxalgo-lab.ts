@@ -2238,7 +2238,7 @@ function nativeMicrostructureShadowStatus(lang: Lang): string {
     'LIGHTER_MICRO_SHADOW_MANIFEST',
     'data/lighter-native-microstructure-shadow-manifest.json',
   ) as NativeMicrostructureShadowManifest | null;
-  const valid = manifest?.version === 'lighter-microstructure-shadow-manifest-v1'
+  const valid = manifest?.version === 'lighter-microstructure-shadow-manifest-v2'
     && manifest.autoPromotion === false
     && manifest.realEnabled === false
     && Array.isArray(manifest.candidates);
@@ -2272,7 +2272,7 @@ function nativeMicrostructureShadowStatus(lang: Lang): string {
     'LIGHTER_MICRO_SHADOW_REPORT',
     'data/lighter-native-microstructure-shadow-report.json',
   ) as NativeMicrostructureShadowReport | null;
-  const reportValid = report?.version === 'lighter-microstructure-shadow-report-v1'
+  const reportValid = report?.version === 'lighter-microstructure-shadow-report-v2'
     && report.status === 'active'
     && report.frozenReportSha256 === manifest.frozenReportSha256
     && report.prospectiveOnly === true

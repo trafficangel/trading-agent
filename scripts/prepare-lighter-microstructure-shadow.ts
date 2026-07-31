@@ -23,15 +23,29 @@ function writeAtomic(path: string, value: unknown): void {
   renameSync(temporary, path);
 }
 
-const frozenPath = resolve(
-  flagValue('--frozen') ?? 'data/lighter-native-microstructure-sweep.json',
+const coreFrozenPath = resolve(
+  flagValue('--core-frozen') ?? 'data/lighter-native-microstructure-sweep.json',
+);
+const challengerFrozenPath = resolve(
+  flagValue('--challenger-frozen')
+    ?? 'data/lighter-native-microstructure-challenger-sweep.json',
 );
 const manifestPath = resolve(
   flagValue('--output') ?? 'data/lighter-native-microstructure-shadow-manifest.json',
 );
-if (!existsSync(frozenPath)) throw new Error(`frozen report missing: ${frozenPath}`);
-const frozenReport = readJson(frozenPath);
+const frozenSources = [
+  {
+    suite: 'core' as const,
+    version: 'lighter-microstructure-sweep-v3',
+    report: existsSync(coreFrozenPath) ? readJson(coreFrozenPath) : null,
+  },
+  {
+    suite: 'challenger' as const,
+    version: 'lighter-microstructure-challenger-sweep-v1',
+    report: existsSync(challengerFrozenPath) ? readJson(challengerFrozenPath) : null,
+  },
+];
 const existing = existsSync(manifestPath) ? readJson(manifestPath) : null;
-const result = prepareMicrostructureShadowManifest(frozenReport, existing, Date.now());
+const result = prepareMicrostructureShadowManifest(frozenSources, existing, Date.now());
 if (result.status === 'created') writeAtomic(manifestPath, result.manifest);
 console.log(JSON.stringify(result, null, 2));
