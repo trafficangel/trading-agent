@@ -243,3 +243,40 @@ candles when `count_back=0`. Both the production Native runner and resumable
 research downloader now request `count_back=500` explicitly. Bulk historical
 downloads run from an isolated research host so WAF/rate-limit pressure cannot
 interfere with live signal polling.
+
+## Candidate 9 — HYPE volume-weighted Z60 touch
+
+The isolated downloader produced 259,200 consecutive native HYPE one-minute
+candles covering 180 days with no gaps or duplicate timestamps. The predeclared
+two-sided sweep tested the same data at both one- and five-minute aggregation.
+No one-minute rule qualified after 0.065% round-trip execution/funding stress.
+
+On five-minute candles, the volume-weighted Z60 touch rule at `±2.5σ` passed
+every strengthened gate:
+
+| Stress per round trip | Net | PF | Mean-trade L95 | Positive folds |
+|---:|---:|---:|---:|---:|
+| 0.065% | +74.52% | 1.47 | +0.0954% | 4/4 |
+| 0.100% | +62.06% | 1.38 | +0.0604% | 4/4 |
+| 0.150% | +44.26% | 1.26 | +0.0104% | 4/4 |
+
+At the base stress the 356-trade sample had a 64.3% win rate, 13.62%
+additive maximum drawdown, IS/OOS `+44.55% / +29.98%`, Long/Short
+`+43.28% / +31.24%`, and positive 30/60/90-day windows. Neighboring touch
+thresholds `2.25`, `2.5`, and `2.75` remained profitable after 0.10% stress,
+which reduces single-parameter peak risk.
+
+The model is admitted as `hype-vwz60-touch` (`STRAT-035`) in prospective
+Shadow only. It is absent from the Real allowlist until its own forward fills
+provide enough evidence under the predeclared promotion gates.
+
+The same sweep added RSI14 trend-reclaim, Bollinger breakout/reclaim and
+Keltner breakout families before evaluating HYPE. None qualified on BTC, ETH,
+SOL or HYPE at one minute, so no one-minute strategy was launched.
+
+Gap-free 180-day LINK and XRP samples were then evaluated with the same frozen
+rules. Neither produced a qualified one- or five-minute candidate. LINK's best
+five-minute aggregate result failed the IS, direction and L95 gates. XRP
+volume-Z `3σ` touch made +17.44% with PF 1.21 after base stress, but its
+mean-trade L95 was `−0.0219%`; it remains rejected rather than being promoted
+from headline PnL alone.
