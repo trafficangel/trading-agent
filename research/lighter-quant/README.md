@@ -279,6 +279,59 @@ until its incremental portfolio value is measured.
 
 ## Reproduction
 
+## Independent native-family rejection — 2026-07-31
+
+Two predeclared, symmetric rule families that do not use the Z-score strategy
+were evaluated on the same frozen 15-market universe. Every market supplied
+180 complete days of native Lighter one-minute candles with no missing or
+duplicated timestamps. Five-minute bars were aggregated from those minutes.
+Entries execute at the next completed-bar open and each market pays its own
+measured $100-notional p95 executable L2 round-trip cost plus adverse funding.
+
+The selection gate required positive long and short results, positive IS and
+OOS, at least three positive folds, positive 30/60/90-day windows, mean-return
+L95 above zero, PF >= 1.20 and a portfolio drawdown no worse than 5%. The
+portfolio gate additionally required broad market and regime contribution,
+positive leave-one-market-out net, and robustness at 1.5x measured cost.
+
+### RSI2 trend pullback
+
+The rule buys an RSI2 oversold touch or reclaim only when
+`EMA21 > EMA55 > EMA200`, and shorts the mirrored setup in a fully bearish
+stack. Thresholds 5 and 10 were tested at one and five minutes.
+
+- 1m: zero individual or portfolio qualifiers. Even BTC at the lowest measured
+  cost lost 32.57 percentage points after cost for the least-bad variant.
+- 5m: zero qualifiers. The strongest isolated result was HYPE threshold-5
+  touch: +29.08 points after cost, PF 1.18, but drawdown was 12.18%, the gate PF
+  was missed, and the same fixed rule lost 389.87 dollars in the 15-market
+  $100-per-position portfolio.
+
+### Squeeze breakout
+
+The rule requires Bollinger Bands to remain inside a Keltner Channel for five
+or ten bars, then enters a symmetric directional breakout, optionally with a
+1.25x volume filter, and exits at EMA8 or EMA21. It was tested at one and five
+minutes.
+
+- 1m: zero qualifiers; every portfolio variant was negative after cost.
+- 5m: zero qualifiers. The positive isolated rows failed OOS, recent windows,
+  both-side consistency and/or drawdown. The least-bad fixed portfolio lost
+  322.93 dollars and drew down 36.39%.
+
+**Decision:** both families are rejected and are not added to Shadow or Real.
+The HYPE and ZEC headline rows are retained only as examples of why an
+in-sample positive result is insufficient.
+
+Reproduce the four frozen scans:
+
+```bash
+ENABLE_TREND_PULLBACK=1 RULE_FILTER=RSI2PB BAR_MINUTES=1 pnpm tsx scripts/sweep-lighter-native-1m.ts
+ENABLE_TREND_PULLBACK=1 RULE_FILTER=RSI2PB BAR_MINUTES=5 pnpm tsx scripts/sweep-lighter-native-1m.ts
+ENABLE_SQUEEZE=1 RULE_FILTER=SQZ20 BAR_MINUTES=1 pnpm tsx scripts/sweep-lighter-native-1m.ts
+ENABLE_SQUEEZE=1 RULE_FILTER=SQZ20 BAR_MINUTES=5 pnpm tsx scripts/sweep-lighter-native-1m.ts
+```
+
 ### Native Lighter Z60 variants
 
 `STRAT-031 / sol-z60-touch` is the only additional native-candle candidate
