@@ -7,8 +7,50 @@ import {
   isUsableMicrostructureMinute,
   lighterBookMetrics,
   resetLighterBookState,
+  rollupLighterMicrostructureFiveMinute,
   tradeUsd,
+  type StoredMicrostructureMinute,
 } from '../../src/lib/lighter-microstructure.js';
+
+function storedMinute(
+  minuteTsMs: number,
+  overrides: Partial<StoredMicrostructureMinute> = {},
+): StoredMicrostructureMinute {
+  return {
+    marketId: 1,
+    symbol: 'BTC',
+    qualityOk: true,
+    minuteTsMs,
+    samples: 60,
+    bookUpdates: 100,
+    nonceGaps: 0,
+    staleSamples: 0,
+    midOpen: 100,
+    midHigh: 102,
+    midLow: 99,
+    midClose: 101,
+    spreadAvgPct: 0.01,
+    spreadMaxPct: 0.02,
+    bid5UsdAvg: 1_000,
+    ask5UsdAvg: 900,
+    depthImbalanceAvg: 0.05,
+    depthImbalanceClose: 0.06,
+    bookAgeAvgMs: 100,
+    bookAgeP95Ms: 200,
+    buyUsd: 1_000,
+    sellUsd: 800,
+    cvdUsd: 200,
+    tradeCount: 10,
+    liquidationBuyUsd: 5,
+    liquidationSellUsd: 3,
+    indexPrice: 100,
+    markPrice: 100.1,
+    basisPct: 0.1,
+    currentFundingRate: 0.001,
+    lastFundingRate: 0.0005,
+    ...overrides,
+  };
+}
 
 describe('Lighter order-book continuity', () => {
   it('applies the subscription snapshot and contiguous deltas', () => {
@@ -185,5 +227,73 @@ describe('Lighter microstructure features', () => {
       lastFundingRate: 0.0005,
     });
     expect(snapshot.basisPct).toBeCloseTo(0.2, 10);
+  });
+});
+
+describe('Lighter 5m microstructure rollup', () => {
+  it('aggregates five aligned consecutive quality minutes', () => {
+    const start = 1_800_000;
+    const rows = Array.from({ length: 5 }, (_, index) =>
+      storedMinute(start + index * 60_000, {
+        midOpen: 100 + index,
+        midHigh: 102 + index,
+        midLow: 99 - index,
+        midClose: 101 + index,
+        samples: index === 0 ? 30 : 60,
+        spreadAvgPct: index === 0 ? 0.02 : 0.01,
+        buyUsd: 1_000 + index,
+        sellUsd: 800 + index,
+      }),
+    );
+    const rolled = rollupLighterMicrostructureFiveMinute(rows);
+    expect(rolled).not.toBeNull();
+    expect(rolled).toMatchObject({
+      marketId: 1,
+      symbol: 'BTC',
+      sourceMinutes: 5,
+      minuteTsMs: start,
+      samples: 270,
+      midOpen: 100,
+      midHigh: 106,
+      midLow: 95,
+      midClose: 105,
+      buyUsd: 5_010,
+      sellUsd: 4_010,
+      tradeCount: 50,
+      bookUpdates: 500,
+      nonceGaps: 0,
+    });
+    expect(rolled?.spreadAvgPct).toBeCloseTo((0.02 * 30 + 0.01 * 240) / 270, 10);
+  });
+
+  it('rejects gaps, bad quality, mixed markets and unaligned buckets', () => {
+    const start = 1_800_000;
+    const valid = Array.from({ length: 5 }, (_, index) => storedMinute(start + index * 60_000));
+    expect(rollupLighterMicrostructureFiveMinute(valid.slice(0, 4))).toBeNull();
+    expect(
+      rollupLighterMicrostructureFiveMinute(
+        valid.map((row, index) =>
+          index === 2 ? { ...row, minuteTsMs: row.minuteTsMs + 60_000 } : row,
+        ),
+      ),
+    ).toBeNull();
+    expect(
+      rollupLighterMicrostructureFiveMinute(
+        valid.map((row, index) => (index === 2 ? { ...row, qualityOk: false } : row)),
+      ),
+    ).toBeNull();
+    expect(
+      rollupLighterMicrostructureFiveMinute(
+        valid.map((row, index) => (index === 2 ? { ...row, marketId: 2 } : row)),
+      ),
+    ).toBeNull();
+    expect(
+      rollupLighterMicrostructureFiveMinute(
+        valid.map((row) => ({
+          ...row,
+          minuteTsMs: row.minuteTsMs + 60_000,
+        })),
+      ),
+    ).toBeNull();
   });
 });

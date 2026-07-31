@@ -193,6 +193,14 @@ selected until enough strictly prospective rows exist for chronological
 train/validation/test, execution-stressed evaluation, both-side checks and a
 frozen Shadow gate.
 
+`scripts/audit-lighter-microstructure.ts` enforces staged data gates across all
+15 markets: 24 hours for collection-health assessment, seven days before any
+exploratory hypothesis scan, and 21 days before frozen candidate research. The
+minimum per-market 1m coverage, usable 1m share and strict consecutive 5m share
+are each 95%. A reported stream gap invalidates its affected minute; it is
+never filled or included in a 5m row. These are data-readiness gates only and
+do not waive the later execution-stressed backtest and prospective Shadow gate.
+
 ## LuxAlgo database follow-up
 
 A separate LuxAlgo AI Backtesting database search was run for symmetric

@@ -28,6 +28,7 @@
     "hft:post-shock": "tsx src/hft/post-shock-analyzer.ts",
     "hft:cascade": "tsx src/hft/cascade-leadlag-analyzer.ts",
     "lighter:microstructure": "tsx src/hft/lighter-microstructure-recorder.ts",
+    "lighter:micro-audit": "tsx scripts/audit-lighter-microstructure.ts",
     "wick:recovery": "tsx scripts/wick-fade-recovery.ts",
     "audit": "tsx scripts/audit-sl-distribution.ts",
     "backtest": "tsx scripts/backtest-custom.ts",

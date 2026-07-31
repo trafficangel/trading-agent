@@ -63,6 +63,18 @@ export type MinuteMicrostructure = {
   lastFundingRate: number | null;
 };
 
+export type StoredMicrostructureMinute = MinuteMicrostructure & {
+  marketId: number;
+  symbol: string;
+  qualityOk: boolean;
+};
+
+export type MicrostructureFiveMinute = MinuteMicrostructure & {
+  marketId: number;
+  symbol: string;
+  sourceMinutes: 5;
+};
+
 export function isUsableMicrostructureMinute(
   row: Pick<MinuteMicrostructure, 'samples' | 'nonceGaps' | 'staleSamples'>,
   expectedSamples: number,
@@ -73,6 +85,92 @@ export function isUsableMicrostructureMinute(
     row.nonceGaps === 0 &&
     row.staleSamples <= expectedSamples * 0.1
   );
+}
+
+function weightedAverage(
+  rows: StoredMicrostructureMinute[],
+  field: keyof Pick<
+    MinuteMicrostructure,
+    'spreadAvgPct' | 'bid5UsdAvg' | 'ask5UsdAvg' | 'depthImbalanceAvg' | 'bookAgeAvgMs'
+  >,
+): number | null {
+  let weighted = 0;
+  let samples = 0;
+  for (const row of rows) {
+    const value = row[field];
+    if (value == null || row.samples <= 0) continue;
+    weighted += value * row.samples;
+    samples += row.samples;
+  }
+  return samples ? weighted / samples : null;
+}
+
+function maximum(values: Array<number | null>): number | null {
+  const finiteValues = values.filter((value): value is number => value != null);
+  return finiteValues.length ? Math.max(...finiteValues) : null;
+}
+
+function minimum(values: Array<number | null>): number | null {
+  const finiteValues = values.filter((value): value is number => value != null);
+  return finiteValues.length ? Math.min(...finiteValues) : null;
+}
+
+/**
+ * Builds a 5m feature row only from five aligned, consecutive, quality-approved
+ * 1m rows. Invalid or missing input returns null; nothing is forward-filled.
+ */
+export function rollupLighterMicrostructureFiveMinute(
+  source: StoredMicrostructureMinute[],
+): MicrostructureFiveMinute | null {
+  if (source.length !== 5) return null;
+  const rows = [...source].sort((left, right) => left.minuteTsMs - right.minuteTsMs);
+  const first = rows[0];
+  const last = rows[4];
+  if (!first || !last || first.minuteTsMs % (5 * 60_000) !== 0) return null;
+  if (
+    rows.some(
+      (row, index) =>
+        row.marketId !== first.marketId ||
+        row.symbol !== first.symbol ||
+        !row.qualityOk ||
+        row.minuteTsMs !== first.minuteTsMs + index * 60_000,
+    )
+  )
+    return null;
+
+  return {
+    marketId: first.marketId,
+    symbol: first.symbol,
+    sourceMinutes: 5,
+    minuteTsMs: first.minuteTsMs,
+    samples: rows.reduce((sum, row) => sum + row.samples, 0),
+    bookUpdates: rows.reduce((sum, row) => sum + row.bookUpdates, 0),
+    nonceGaps: rows.reduce((sum, row) => sum + row.nonceGaps, 0),
+    staleSamples: rows.reduce((sum, row) => sum + row.staleSamples, 0),
+    midOpen: first.midOpen,
+    midHigh: maximum(rows.map((row) => row.midHigh)),
+    midLow: minimum(rows.map((row) => row.midLow)),
+    midClose: last.midClose,
+    spreadAvgPct: weightedAverage(rows, 'spreadAvgPct'),
+    spreadMaxPct: maximum(rows.map((row) => row.spreadMaxPct)),
+    bid5UsdAvg: weightedAverage(rows, 'bid5UsdAvg'),
+    ask5UsdAvg: weightedAverage(rows, 'ask5UsdAvg'),
+    depthImbalanceAvg: weightedAverage(rows, 'depthImbalanceAvg'),
+    depthImbalanceClose: last.depthImbalanceClose,
+    bookAgeAvgMs: weightedAverage(rows, 'bookAgeAvgMs'),
+    bookAgeP95Ms: maximum(rows.map((row) => row.bookAgeP95Ms)),
+    buyUsd: rows.reduce((sum, row) => sum + row.buyUsd, 0),
+    sellUsd: rows.reduce((sum, row) => sum + row.sellUsd, 0),
+    cvdUsd: rows.reduce((sum, row) => sum + row.cvdUsd, 0),
+    tradeCount: rows.reduce((sum, row) => sum + row.tradeCount, 0),
+    liquidationBuyUsd: rows.reduce((sum, row) => sum + row.liquidationBuyUsd, 0),
+    liquidationSellUsd: rows.reduce((sum, row) => sum + row.liquidationSellUsd, 0),
+    indexPrice: last.indexPrice,
+    markPrice: last.markPrice,
+    basisPct: last.basisPct,
+    currentFundingRate: last.currentFundingRate,
+    lastFundingRate: last.lastFundingRate,
+  };
 }
 
 function finite(value: unknown): number | null {

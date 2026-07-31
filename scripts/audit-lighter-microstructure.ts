@@ -1,0 +1,204 @@
+/** Read-only readiness audit for the prospective Lighter microstructure dataset. */
+
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import Database from 'better-sqlite3';
+
+const MINUTE_MS = 60_000;
+const FIVE_MINUTES_MS = 5 * MINUTE_MS;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+const EXPECTED_MARKETS = 15;
+const MIN_QUALITY_RATIO = 0.95;
+
+type MinuteStatsRow = {
+  market_id: number;
+  symbol: string;
+  first_minute: number;
+  last_minute: number;
+  rows: number;
+  quality_rows: number;
+  nonce_gaps: number;
+  stale_samples: number;
+  avg_book_age_p95_ms: number | null;
+};
+
+type FiveMinuteStatsRow = {
+  market_id: number;
+  valid_buckets: number;
+};
+
+function flagValue(name: string): string | null {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? (process.argv[index + 1] ?? null) : null;
+}
+
+const databasePath = resolve(
+  flagValue('--db') ?? process.env.LIGHTER_MICRO_DB ?? 'data/lighter-native-microstructure.sqlite',
+);
+const windowDays = Math.max(1, Number(flagValue('--days') ?? 60));
+if (!existsSync(databasePath))
+  throw new Error(`microstructure database not found: ${databasePath}`);
+
+const now = Date.now();
+const closedMinute = Math.floor(now / MINUTE_MS) * MINUTE_MS;
+const cutoff = closedMinute - windowDays * DAY_MS;
+const db = new Database(databasePath, { readonly: true, fileMustExist: true });
+
+const minuteRows = db
+  .prepare(
+    `
+  SELECT
+    market_id,
+    symbol,
+    MIN(minute_ts_ms) AS first_minute,
+    MAX(minute_ts_ms) AS last_minute,
+    COUNT(*) AS rows,
+    COALESCE(SUM(quality_ok), 0) AS quality_rows,
+    COALESCE(SUM(nonce_gaps), 0) AS nonce_gaps,
+    COALESCE(SUM(stale_samples), 0) AS stale_samples,
+    AVG(book_age_p95_ms) AS avg_book_age_p95_ms
+  FROM lighter_microstructure_1m
+  WHERE minute_ts_ms >= ? AND minute_ts_ms < ?
+  GROUP BY market_id, symbol
+  ORDER BY market_id
+`,
+  )
+  .all(cutoff, closedMinute) as MinuteStatsRow[];
+
+const fiveMinuteRows = db
+  .prepare(
+    `
+  WITH buckets AS (
+    SELECT
+      market_id,
+      CAST(minute_ts_ms / 300000 AS INTEGER) * 300000 AS bucket,
+      COUNT(*) AS source_minutes,
+      SUM(quality_ok) AS quality_minutes,
+      MIN(minute_ts_ms) AS first_minute,
+      MAX(minute_ts_ms) AS last_minute,
+      SUM(nonce_gaps) AS nonce_gaps
+    FROM lighter_microstructure_1m
+    WHERE minute_ts_ms >= ? AND minute_ts_ms < ?
+    GROUP BY market_id, bucket
+  )
+  SELECT
+    market_id,
+    SUM(CASE WHEN
+      source_minutes = 5
+      AND quality_minutes = 5
+      AND first_minute = bucket
+      AND last_minute = bucket + 240000
+      AND nonce_gaps = 0
+      THEN 1 ELSE 0 END) AS valid_buckets
+  FROM buckets
+  GROUP BY market_id
+`,
+  )
+  .all(cutoff, closedMinute) as FiveMinuteStatsRow[];
+db.close();
+
+const fiveByMarket = new Map(fiveMinuteRows.map((row) => [row.market_id, row.valid_buckets]));
+const perMarket = minuteRows.map((row) => {
+  const expectedMinutes = Math.floor((row.last_minute - row.first_minute) / MINUTE_MS) + 1;
+  const firstFullFiveMinute = Math.ceil(row.first_minute / FIVE_MINUTES_MS) * FIVE_MINUTES_MS;
+  const lastFullFiveMinute =
+    Math.floor(
+      (Math.min(row.last_minute + MINUTE_MS, closedMinute) - FIVE_MINUTES_MS) / FIVE_MINUTES_MS,
+    ) * FIVE_MINUTES_MS;
+  const expectedFiveMinuteBuckets =
+    lastFullFiveMinute >= firstFullFiveMinute
+      ? Math.floor((lastFullFiveMinute - firstFullFiveMinute) / FIVE_MINUTES_MS) + 1
+      : 0;
+  const validFiveMinuteBuckets = fiveByMarket.get(row.market_id) ?? 0;
+  return {
+    marketId: row.market_id,
+    symbol: row.symbol,
+    firstMinute: new Date(row.first_minute).toISOString(),
+    lastMinute: new Date(row.last_minute).toISOString(),
+    durationDays: (row.last_minute - row.first_minute + MINUTE_MS) / DAY_MS,
+    expectedMinutes,
+    observedMinutes: row.rows,
+    qualityMinutes: row.quality_rows,
+    coverageRatio: expectedMinutes ? row.rows / expectedMinutes : 0,
+    qualityRatio: expectedMinutes ? row.quality_rows / expectedMinutes : 0,
+    validFiveMinuteBuckets,
+    expectedFiveMinuteBuckets,
+    fiveMinuteQualityRatio: expectedFiveMinuteBuckets
+      ? validFiveMinuteBuckets / expectedFiveMinuteBuckets
+      : 0,
+    nonceGaps: row.nonce_gaps,
+    staleSamples: row.stale_samples,
+    avgBookAgeP95Ms: row.avg_book_age_p95_ms,
+    freshnessMs: now - row.last_minute,
+  };
+});
+
+const minimum = (values: number[]): number => (values.length ? Math.min(...values) : 0);
+const maximum = (values: number[]): number =>
+  values.length ? Math.max(...values) : Number.POSITIVE_INFINITY;
+const allMarketsPresent = perMarket.length === EXPECTED_MARKETS;
+const minDurationDays = minimum(perMarket.map((row) => row.durationDays));
+const minCoverageRatio = minimum(perMarket.map((row) => row.coverageRatio));
+const minQualityRatio = minimum(perMarket.map((row) => row.qualityRatio));
+const minFiveMinuteQualityRatio = minimum(perMarket.map((row) => row.fiveMinuteQualityRatio));
+const maxFreshnessMs = maximum(perMarket.map((row) => row.freshnessMs));
+const totalNonceGaps = perMarket.reduce((sum, row) => sum + row.nonceGaps, 0);
+
+function reasons(minDays: number, requireFiveMinute: boolean): string[] {
+  const failures: string[] = [];
+  if (!allMarketsPresent) failures.push(`markets ${perMarket.length}/${EXPECTED_MARKETS}`);
+  if (minDurationDays < minDays)
+    failures.push(`history ${minDurationDays.toFixed(3)}d < ${minDays}d`);
+  if (minCoverageRatio < MIN_QUALITY_RATIO) {
+    failures.push(`1m coverage ${(minCoverageRatio * 100).toFixed(2)}% < 95%`);
+  }
+  if (minQualityRatio < MIN_QUALITY_RATIO) {
+    failures.push(`1m quality ${(minQualityRatio * 100).toFixed(2)}% < 95%`);
+  }
+  if (requireFiveMinute && minFiveMinuteQualityRatio < MIN_QUALITY_RATIO) {
+    failures.push(`5m quality ${(minFiveMinuteQualityRatio * 100).toFixed(2)}% < 95%`);
+  }
+  if (maxFreshnessMs > 3 * MINUTE_MS)
+    failures.push(`freshness ${Math.round(maxFreshnessMs / 1000)}s > 180s`);
+  return failures;
+}
+
+const healthFailures = reasons(1, false);
+const exploratoryFailures = reasons(7, true);
+const frozenResearchFailures = reasons(21, true);
+const report = {
+  version: 'lighter-microstructure-audit-v1',
+  generatedAt: new Date(now).toISOString(),
+  databasePath,
+  windowDays,
+  thresholds: {
+    expectedMarkets: EXPECTED_MARKETS,
+    minimumQualityRatio: MIN_QUALITY_RATIO,
+    healthHistoryDays: 1,
+    exploratoryHistoryDays: 7,
+    frozenResearchHistoryDays: 21,
+  },
+  summary: {
+    markets: perMarket.length,
+    minDurationDays,
+    minCoverageRatio,
+    minQualityRatio,
+    minFiveMinuteQualityRatio,
+    totalNonceGaps,
+    maxFreshnessMs,
+  },
+  gates: {
+    collectionHealthy: { passed: healthFailures.length === 0, failures: healthFailures },
+    exploratoryResearch: {
+      passed: exploratoryFailures.length === 0,
+      failures: exploratoryFailures,
+    },
+    frozenCandidateResearch: {
+      passed: frozenResearchFailures.length === 0,
+      failures: frozenResearchFailures,
+    },
+  },
+  perMarket,
+};
+
+console.log(JSON.stringify(report, null, 2));
