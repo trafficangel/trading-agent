@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily exploratory Lighter microstructure strategy sweep
+
+[Timer]
+OnCalendar=*-*-* 03:10:00 UTC
+Persistent=true
+RandomizedDelaySec=5m
+Unit=lighter-native-microstructure-exploratory.service
+
+[Install]
+WantedBy=timers.target

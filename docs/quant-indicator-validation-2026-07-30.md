@@ -1070,6 +1070,14 @@ evaluation when the policy was changed. The first future output will therefore
 use measured p95 for the blocking economics and observed maximum only as
 non-blocking sensitivity from its first admissible run.
 
+The operational outputs are deliberately separated. A daily seven-day
+exploratory sweep writes
+`data/lighter-native-microstructure-exploratory.json`; its implementation
+always emits an empty `shadowEligibleRules` list and cannot promote anything.
+The independent 21-day frozen sweep continues to write
+`data/lighter-native-microstructure-sweep.json`. Exploratory results therefore
+cannot overwrite or relax the frozen candidate gate.
+
 ## Preregistered dual-timeframe L2 protocol
 
 Before the first seven-day microstructure result was available, the six frozen
