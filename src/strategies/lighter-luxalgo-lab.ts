@@ -1925,7 +1925,7 @@ function strategyRows(
     const feed = executionSnapshot(spec);
     const tooltip = nativeStrategyTooltip(spec, lang);
     const strategyLabel = tooltip
-      ? `<span class="ll-strategy-name" tabindex="0" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small><i>?</i></span>`
+      ? `<span class="ll-strategy-name" tabindex="0" title="${esc(tooltip)}" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small><i>?</i></span>`
       : `<b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small>`;
     return `<tr>
       <td>${strategyLabel}</td>
