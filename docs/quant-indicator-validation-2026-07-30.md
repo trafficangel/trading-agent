@@ -1110,6 +1110,43 @@ changes, Shadow or Real registration; reproducible evidence is stored in
 `data/lighter-serial-adaptive-1m-results.json` and
 `data/lighter-serial-adaptive-5m-results.json`.
 
+## Preregistered funding-crowding price-extreme strategy
+
+Before calculating its first result, the next independent two-sided Native
+Quant hypothesis is frozen as `FUNDZ168-PZ60-2-H360`. It tests whether an
+unusually crowded funding side combined with an equally extended price can be
+faded while receiving, rather than paying, the currently crowded side's
+funding:
+
+- normalize every completed hourly Lighter settlement as positive when Longs
+  pay Shorts and negative when Shorts pay Longs;
+- at each completed candle, compare the latest settlement with the preceding
+  168 completed hourly settlements. The current settlement is excluded from
+  its own mean and standard deviation; require funding Z at least `+2.0` or at
+  most `-2.0`;
+- independently calculate completed-candle price Z from SMA60 and SD60;
+  Short requires funding Z `>= +2.0` and price Z `>= +2.0`; Long is the exact
+  mirror at `<= -2.0` for both inputs;
+- enter only at the next bar open. Exit at SMA60, when the latest causal
+  funding Z crosses zero against the position, after six clock hours, or at a
+  symmetric 1.5% safety stop;
+- run the identical rule on all 15 fixed markets at 1m and 5m. Deduct each
+  market's measured executable `$100` full-round-trip p95 and exact signed
+  hourly settlements in `(entry, exit]`; observed maximum execution remains a
+  separate non-blocking sensitivity;
+- allow one position per market and at most ten concurrent `$100` positions
+  in the common portfolio. No symbol subset, threshold, lookback, exit, stop,
+  timeframe or regime may be changed after the first result is viewed.
+
+Qualification is the unchanged Native gate: at least 120 portfolio closes,
+positive p95 and observed-maximum net, PF `>=1.20` and adverse PF `>=1.10`,
+positive mean-trade L95, drawdown no worse than 5% of fixed capacity, at least
+three of four positive chronological folds, positive IS/OOS, Long/Short,
+30/60/90-day windows, bull/bear and high/low-volatility regimes, broad market
+contribution and no more than 10% capacity drops. A historical pass may enter
+prospective Shadow only; Real remains disabled. A failure closes this exact
+family without a rescue grid.
+
 ## Prospective L2 microstructure research cost policy
 
 The continuously recorded gap-free Lighter L2 dataset has not yet reached its
