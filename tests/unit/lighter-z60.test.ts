@@ -1,12 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
+  evaluateVwz60,
   evaluateZ60Reclaim,
   evaluateZ60Touch,
+  type Vwz60Bar,
   type Z60Bar,
 } from '../../src/lib/lighter-z60.js';
 
 function bars(closes: number[]): Z60Bar[] {
   return closes.map((close, index) => ({ time: index * 300_000, close }));
+}
+
+function volumeBars(closes: number[], volumes?: number[]): Vwz60Bar[] {
+  return closes.map((close, index) => ({
+    time: index * 300_000,
+    close,
+    volume: volumes?.[index] ?? 1,
+  }));
 }
 
 describe('evaluateZ60Reclaim', () => {
@@ -62,5 +72,31 @@ describe('evaluateZ60Touch', () => {
     expect(long?.signal).toBe('long');
     expect(short?.currentZ).toBeGreaterThan(2);
     expect(short?.signal).toBe('short');
+  });
+});
+
+describe('evaluateVwz60', () => {
+  it('detects symmetric touch signals with completed-bar volume weighting', () => {
+    const baseline = Array.from({ length: 60 }, (_, index) => 100 + (index % 2 ? 0.1 : -0.1));
+    const long = evaluateVwz60(volumeBars([...baseline, 90]), 60, 3, 'touch');
+    const short = evaluateVwz60(volumeBars([...baseline, 110]), 60, 3, 'touch');
+    expect(long?.currentZ).toBeLessThan(-3);
+    expect(long?.signal).toBe('long');
+    expect(short?.currentZ).toBeGreaterThan(3);
+    expect(short?.signal).toBe('short');
+  });
+
+  it('uses volume rather than treating every completed bar equally', () => {
+    const closes = Array.from({ length: 61 }, (_, index) => index === 59 ? 90 : 100);
+    const equal = evaluateVwz60(volumeBars(closes), 60, 3, 'touch');
+    const volumes = closes.map((_, index) => index === 59 ? 100 : 1);
+    const weighted = evaluateVwz60(volumeBars(closes, volumes), 60, 3, 'touch');
+    expect(equal?.mean).not.toBe(weighted?.mean);
+    expect(weighted?.mean).toBeLessThan(equal?.mean ?? 0);
+  });
+
+  it('rejects a window without usable native volume', () => {
+    const closes = Array.from({ length: 61 }, () => 100);
+    expect(evaluateVwz60(volumeBars(closes, closes.map(() => 0)), 60, 3, 'touch')).toBeNull();
   });
 });

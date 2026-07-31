@@ -27,6 +27,10 @@ const Z_SL_PCT = Number(process.env.Z_SL_PCT ?? 1.5) / 100;
 const Z_MAX_HOLD_BARS = Number(process.env.Z_MAX_HOLD_BARS ?? 240);
 const RULE_FILTER = process.env.RULE_FILTER ?? '';
 const LOOKBACK_DAYS = Number(process.env.LOOKBACK_DAYS ?? 0);
+const RECENT_WINDOWS_DAYS = (process.env.RECENT_WINDOWS_DAYS ?? '30,60,90')
+  .split(',')
+  .map(Number)
+  .filter((days) => Number.isFinite(days) && days > 0);
 
 type Side = 'long' | 'short';
 type Arrays = {
@@ -57,6 +61,10 @@ type Arrays = {
   stoch14: number[];
   stoch14Signal: number[];
   cci20: number[];
+  mfi14: number[];
+  williams14: number[];
+  vwap60: number[];
+  vwapSd60: number[];
 };
 type Rule = {
   name: string;
@@ -67,6 +75,14 @@ type Rule = {
   exit: (a: Arrays, i: number, side: Side) => boolean;
 };
 type Trade = { side: Side; entryAt: number; exitAt: number; pct: number };
+type WindowStats = {
+  days: number;
+  n: number;
+  net: number;
+  profitFactor: number;
+  long: number;
+  short: number;
+};
 
 function aggregateCandles(candles: Candle[], minutes: number): Candle[] {
   if (minutes <= 1) return candles;
@@ -118,6 +134,66 @@ function cci(candles: Candle[], period: number): number[] {
   });
 }
 
+function moneyFlowIndex(candles: Candle[], period: number): number[] {
+  const typical = candles.map((bar) => (bar.h + bar.l + bar.c) / 3);
+  const positive = typical.map((value, i) =>
+    i > 0 && value > typical[i - 1]! ? value * candles[i]!.v : 0);
+  const negative = typical.map((value, i) =>
+    i > 0 && value < typical[i - 1]! ? value * candles[i]!.v : 0);
+  const positiveSum = sma(positive, period).map((value) => value * period);
+  const negativeSum = sma(negative, period).map((value) => value * period);
+  return typical.map((_, i) => {
+    if (i + 1 < period) return 50;
+    if (negativeSum[i]! === 0) return positiveSum[i]! > 0 ? 100 : 50;
+    const ratio = positiveSum[i]! / negativeSum[i]!;
+    return 100 - 100 / (1 + ratio);
+  });
+}
+
+function williamsR(candles: Candle[], period: number): number[] {
+  return candles.map((bar, i) => {
+    if (i + 1 < period) return -50;
+    let high = -Infinity;
+    let low = Infinity;
+    for (let j = i - period + 1; j <= i; j++) {
+      high = Math.max(high, candles[j]!.h);
+      low = Math.min(low, candles[j]!.l);
+    }
+    return high > low ? -100 * (high - bar.c) / (high - low) : -50;
+  });
+}
+
+function rollingVolumeWeighted(
+  candles: Candle[],
+  period: number,
+): { mean: number[]; deviation: number[] } {
+  const mean = new Array<number>(candles.length).fill(0);
+  const deviation = new Array<number>(candles.length).fill(0);
+  let volumeSum = 0;
+  let weightedSum = 0;
+  let weightedSquareSum = 0;
+  for (let i = 0; i < candles.length; i++) {
+    const bar = candles[i]!;
+    volumeSum += bar.v;
+    weightedSum += bar.c * bar.v;
+    weightedSquareSum += bar.c * bar.c * bar.v;
+    if (i >= period) {
+      const removed = candles[i - period]!;
+      volumeSum -= removed.v;
+      weightedSum -= removed.c * removed.v;
+      weightedSquareSum -= removed.c * removed.c * removed.v;
+    }
+    if (volumeSum > 0) {
+      mean[i] = weightedSum / volumeSum;
+      const variance = Math.max(0, weightedSquareSum / volumeSum - mean[i]! * mean[i]!);
+      deviation[i] = Math.sqrt(variance);
+    } else {
+      mean[i] = bar.c;
+    }
+  }
+  return { mean, deviation };
+}
+
 function build(c: Candle[]): Arrays {
   const close = c.map((bar) => bar.c);
   const volume = c.map((bar) => bar.v);
@@ -127,6 +203,7 @@ function build(c: Candle[]): Arrays {
   const ema26Values = ema(close, 26);
   const macd = ema12Values.map((value, i) => value - ema26Values[i]!);
   const stoch14 = stochastic(c, 14);
+  const vw60 = rollingVolumeWeighted(c, 60);
   return {
     c,
     close,
@@ -155,6 +232,10 @@ function build(c: Candle[]): Arrays {
     stoch14,
     stoch14Signal: sma(stoch14, 3),
     cci20: cci(c, 20),
+    mfi14: moneyFlowIndex(c, 14),
+    williams14: williamsR(c, 14),
+    vwap60: vw60.mean,
+    vwapSd60: vw60.deviation,
   };
 }
 
@@ -244,6 +325,72 @@ function rules(): Rule[] {
         return side === 'long' ? a.cci20[i]! >= 0 : a.cci20[i]! <= 0;
       },
     });
+
+    out.push({
+      name: `MFI14-20/80${trend ? '+EMA400' : ''}`,
+      warmup: Math.max(30, trend + 1),
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        const longOk = trend === 0 || a.close[i]! > a.ema400[i]!;
+        const shortOk = trend === 0 || a.close[i]! < a.ema400[i]!;
+        if (a.mfi14[i]! < 20 && longOk) return 'long';
+        if (a.mfi14[i]! > 80 && shortOk) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.mfi14[i]! >= 50 : a.mfi14[i]! <= 50;
+      },
+    });
+
+    out.push({
+      name: `WILLR14-reclaim-10/90${trend ? '+EMA400' : ''}`,
+      warmup: Math.max(30, trend + 1),
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        const longOk = trend === 0 || a.close[i]! > a.ema400[i]!;
+        const shortOk = trend === 0 || a.close[i]! < a.ema400[i]!;
+        if (a.williams14[i - 1]! < -90 && a.williams14[i]! >= -90 && longOk) return 'long';
+        if (a.williams14[i - 1]! > -10 && a.williams14[i]! <= -10 && shortOk) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.williams14[i]! >= -50 : a.williams14[i]! <= -50;
+      },
+    });
+  }
+
+  for (const threshold of [2.5, 3]) {
+    for (const mode of ['touch', 'reclaim'] as const) {
+      out.push({
+        name: `VWZ60-${threshold}-${mode}`,
+        warmup: 62,
+        slPct: Z_SL_PCT,
+        maxBars: Z_MAX_HOLD_BARS,
+        entry(a, i) {
+          const current = a.vwapSd60[i]! > 0
+            ? (a.close[i]! - a.vwap60[i]!) / a.vwapSd60[i]!
+            : 0;
+          const prior = a.vwapSd60[i - 1]! > 0
+            ? (a.close[i - 1]! - a.vwap60[i - 1]!) / a.vwapSd60[i - 1]!
+            : 0;
+          if (mode === 'touch') {
+            if (current < -threshold) return 'long';
+            if (current > threshold) return 'short';
+          } else {
+            if (prior < -threshold && current >= -threshold) return 'long';
+            if (prior > threshold && current <= threshold) return 'short';
+          }
+          return null;
+        },
+        exit(a, i, side) {
+          return side === 'long'
+            ? a.close[i]! >= a.vwap60[i]!
+            : a.close[i]! <= a.vwap60[i]!;
+        },
+      });
+    }
   }
 
   for (const period of Z_PERIODS) for (const threshold of Z_THRESHOLDS) {
@@ -512,6 +659,31 @@ function median(values: number[]): number {
   return sorted[Math.floor(sorted.length / 2)]!;
 }
 
+function meanL95(trades: Trade[], stress: number): number {
+  if (trades.length < 2) return Number.NEGATIVE_INFINITY;
+  const values = trades.map((trade) => tradeNet(trade, stress));
+  const mean = values.reduce((total, value) => total + value, 0) / values.length;
+  const variance = values.reduce((total, value) => total + (value - mean) ** 2, 0)
+    / (values.length - 1);
+  return mean - 1.645 * Math.sqrt(variance / values.length);
+}
+
+function recentStats(trades: Trade[], stress: number): WindowStats[] {
+  const latest = trades.at(-1)?.exitAt ?? 0;
+  return RECENT_WINDOWS_DAYS.map((days) => {
+    const cutoff = latest - days * 86_400_000;
+    const recent = trades.filter((trade) => trade.entryAt >= cutoff);
+    return {
+      days,
+      n: recent.length,
+      net: sum(recent, stress),
+      profitFactor: pf(recent, stress),
+      long: sum(recent.filter((trade) => trade.side === 'long'), stress),
+      short: sum(recent.filter((trade) => trade.side === 'short'), stress),
+    };
+  });
+}
+
 const loaded = new Map<string, Arrays>();
 for (const symbol of SYMBOLS) {
   const directFile = resolve('data', 'lighter-klines', `${symbol}-${BAR_MINUTES}m.json`);
@@ -539,6 +711,9 @@ const rows: Array<{
   oos: number;
   long: number;
   short: number;
+  recent: WindowStats[];
+  coverageDays: number;
+  meanL95: number;
 }> = [];
 
 for (const [symbol, arrays] of loaded) {
@@ -559,28 +734,46 @@ for (const [symbol, arrays] of loaded) {
       oos: sum(trades.slice(cut), STRESS_RT_PCT),
       long: sum(trades.filter((trade) => trade.side === 'long'), STRESS_RT_PCT),
       short: sum(trades.filter((trade) => trade.side === 'short'), STRESS_RT_PCT),
+      recent: recentStats(trades, STRESS_RT_PCT),
+      coverageDays: Math.max(
+        0,
+        ((arrays.c.at(-1)?.t ?? 0) - (arrays.c[0]?.t ?? 0)) / 86_400_000,
+      ),
+      meanL95: meanL95(trades, STRESS_RT_PCT),
     });
   }
 }
 
+const requiredCoverageDays = Math.max(0, ...RECENT_WINDOWS_DAYS);
 const qualified = rows
   .filter((row) => row.trades.length >= 30
+    && row.coverageDays >= requiredCoverageDays * 0.95
     && row.stress > 0
+    && row.meanL95 > 0
     && row.stressPf >= 1.2
     && row.folds >= 3
     && row.is > 0
     && row.oos > 0
     && row.long > 0
-    && row.short > 0)
+    && row.short > 0
+    && row.recent.every((window) =>
+      window.n >= 20
+      && window.net > 0
+      && window.profitFactor >= 1.1
+      && window.long > 0
+      && window.short > 0))
   .sort((a, b) => b.stress - a.stress);
 const best = [...rows].sort((a, b) => b.stress - a.stress);
 
 const print = (row: typeof rows[number]): string =>
-  `${row.symbol.padEnd(5)} ${row.rule.padEnd(27)} N${String(row.trades.length).padStart(4)} `
+  `${row.symbol.padEnd(5)} ${row.rule.padEnd(27)} N${String(row.trades.length).padStart(4)} D${row.coverageDays.toFixed(0).padStart(3)} `
   + `gross ${fmt(row.baseline).padStart(8)} stress ${fmt(row.stress).padStart(8)} PF ${row.stressPf.toFixed(2)} `
   + `DD ${fmt(drawdown(row.trades, STRESS_RT_PCT))} WR ${(row.trades.filter((trade) => tradeNet(trade, STRESS_RT_PCT) > 0).length / row.trades.length * 100).toFixed(1)}% `
+  + `L95 ${fmt(row.meanL95)} `
   + `hold ${median(row.trades.map((trade) => (trade.exitAt - trade.entryAt) / 60_000)).toFixed(0)}m `
-  + `f${row.folds}/4 IS/OOS ${fmt(row.is)}/${fmt(row.oos)} L/S ${fmt(row.long)}/${fmt(row.short)}`;
+  + `f${row.folds}/4 IS/OOS ${fmt(row.is)}/${fmt(row.oos)} L/S ${fmt(row.long)}/${fmt(row.short)} `
+  + row.recent.map((window) =>
+    `W${window.days} n${window.n} ${fmt(window.net)}/PF${window.profitFactor.toFixed(2)}`).join(' ');
 
 console.log(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${STRESS_RT_PCT}% RT stress + ${FUNDING_PER_HOUR_PCT}%/h adverse funding`);
 console.log(`\nQUALIFIED (${qualified.length})`);

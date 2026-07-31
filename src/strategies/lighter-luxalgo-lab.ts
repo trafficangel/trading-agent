@@ -102,6 +102,11 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // the user's explicit instruction, STRAT-032/033 were admitted as
 // separately risk-capped $100/10x Real canaries before their normal forward
 // gate; this is an experiment, not evidence that the backtest edge is live.
+// STRAT-034 is a BTC volume-weighted Z60 touch model. It passed 180d,
+// chronological folds, IS/OOS, both directions and 30/60/90d windows after a
+// conservative 0.065% round-trip execution/funding stress. Its one-sided 95%
+// lower confidence bound is only marginally positive, so it starts in
+// prospective Shadow and is deliberately excluded from the Real allowlist.
 // BCH, XLM, TRX and JUP candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
@@ -486,6 +491,26 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 28.22,
     },
   },
+  {
+    id: 'btc-vwz60-touch',
+    code: '034',
+    name: 'Volume Z60 · 3σ Touch · VWMA Exit',
+    symbol: 'BTCUSDT',
+    asset: 'BTC',
+    marketId: 1,
+    stopPct: 1.5,
+    backtest: {
+      // Native Lighter completed 5m candles, next-bar execution, volume-
+      // weighted rolling distribution and 0.065% round-trip execution/funding
+      // stress. Prospective Shadow only until its own forward evidence passes.
+      period: '2026-02-01 → 2026-07-30',
+      trades: 103,
+      winRatePct: 68.0,
+      profitFactor: 1.58,
+      netPct: 12.94,
+      maxDrawdownPct: 5.90,
+    },
+  },
 ] as const;
 
 const STRATEGY_BY_ID = new Map(STRATEGIES.map((spec) => [spec.id, spec]));
@@ -495,6 +520,7 @@ const NATIVE_STRATEGY_IDS = [
   'sol-z60-touch',
   'bnb-z60-touch',
   'ltc-z60-touch',
+  'btc-vwz60-touch',
 ] as const;
 const NATIVE_LIVE_STRATEGY_IDS = [
   'sol-z60-reclaim',
@@ -503,6 +529,7 @@ const NATIVE_LIVE_STRATEGY_IDS = [
 ] as const;
 
 type NativeStrategyInfo = {
+  family: 'zscore' | 'vwz';
   mode: 'reclaim' | 'touch';
   threshold: number;
   period: number;
@@ -514,6 +541,7 @@ type NativeStrategyInfo = {
 
 const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
   'sol-z60-reclaim': {
+    family: 'zscore',
     mode: 'reclaim',
     threshold: 3,
     period: 60,
@@ -523,6 +551,7 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     noteEn: 'Primary SOL canary: it enters later than the touch variant, after price confirms a return inside the band.',
   },
   'sol-z60-touch': {
+    family: 'zscore',
     mode: 'touch',
     threshold: 3,
     period: 60,
@@ -532,6 +561,7 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     noteEn: 'Earlier and more frequent SOL entry. Shadow only: 180-day PF 1.19 is below the 1.20 gate and trades are highly correlated with STRAT-030.',
   },
   'bnb-z60-touch': {
+    family: 'zscore',
     mode: 'touch',
     threshold: 3,
     period: 60,
@@ -541,6 +571,7 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     noteEn: 'BNB canary. The full 180-day test is two-sided, but the recent 30-day long book is weak, so scaling is blocked pending forward evidence.',
   },
   'ltc-z60-touch': {
+    family: 'zscore',
     mode: 'touch',
     threshold: 2,
     period: 60,
@@ -548,6 +579,16 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     realEnabled: true,
     noteRu: 'Самый частый вариант: более близкий порог ±2σ даёт больше входов. Из-за исторической просадки 28.22% остаётся малым canary.',
     noteEn: 'Highest-frequency variant: the closer ±2σ threshold creates more entries. Its 28.22% historical drawdown keeps it at small-canary size.',
+  },
+  'btc-vwz60-touch': {
+    family: 'vwz',
+    mode: 'touch',
+    threshold: 3,
+    period: 60,
+    timeExitBars: 240,
+    realEnabled: false,
+    noteRu: 'Новый BTC-кандидат. Прошёл 180d, 4/4 периода, IS/OOS, Long/Short и окна 30/60/90d при стрессе 0.065%, но L95 лишь немного выше нуля — только prospective Shadow.',
+    noteEn: 'New BTC candidate. It passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows at 0.065% stress, but L95 is only marginally above zero, so it is prospective Shadow only.',
   },
 };
 
@@ -1803,8 +1844,8 @@ export async function lighterNativeQuantHero(lang: Lang): Promise<string> {
       <div class="ll-title">${t(lang, 'Собственные стратегии · единый портфель', 'In-house strategies · unified portfolio')}</div>
       <div class="ll-sub">${t(
         lang,
-        'SOL · BNB · LTC · completed candles · единая статистика Shadow/Real →',
-        'SOL · BNB · LTC · completed candles · consolidated Shadow/Real statistics →',
+        'BTC · SOL · BNB · LTC · completed candles · единая статистика Shadow/Real →',
+        'BTC · SOL · BNB · LTC · completed candles · consolidated Shadow/Real statistics →',
       )}</div>
     </div>
     <div class="ll-stats">
@@ -1834,18 +1875,26 @@ function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
 function nativeStrategyTooltip(spec: StrategySpec, lang: Lang): string | null {
   const info = NATIVE_STRATEGY_INFO[spec.id];
   if (!info) return null;
-  return [
-    `${spec.name}.`,
-    t(
+  const distribution = info.family === 'vwz'
+    ? t(
+      lang,
+      `Volume Z-score считается по ${info.period} завершённым 5m свечам Lighter с весом их торгового объёма.`,
+      `Volume Z-score is calculated from ${info.period} completed Lighter 5m candles weighted by their traded volume.`,
+    )
+    : t(
       lang,
       `Z-score считается по ${info.period} завершённым 5m закрытиям Lighter.`,
       `Z-score is calculated from ${info.period} completed Lighter 5m closes.`,
-    ),
+    );
+  const exitMean = info.family === 'vwz' ? `VWMA${info.period}` : `SMA${info.period}`;
+  return [
+    `${spec.name}.`,
+    distribution,
     nativeEntryDescription(info, lang),
     t(
       lang,
-      `Выход у SMA${info.period} или через ${info.timeExitBars} баров (20 ч); stop ${spec.stopPct.toFixed(1)}%.`,
-      `Exit at SMA${info.period} or after ${info.timeExitBars} bars (20h); ${spec.stopPct.toFixed(1)}% stop.`,
+      `Выход у ${exitMean} или через ${info.timeExitBars} баров (20 ч); stop ${spec.stopPct.toFixed(1)}%.`,
+      `Exit at ${exitMean} or after ${info.timeExitBars} bars (20h); ${spec.stopPct.toFixed(1)}% stop.`,
     ),
     t(lang, info.noteRu, info.noteEn),
   ].join(' ');
@@ -1860,9 +1909,10 @@ function nativeStrategyGuide(
 
   const strategyLines = nativeSpecs.map((spec) => {
     const info = NATIVE_STRATEGY_INFO[spec.id]!;
+    const family = info.family === 'vwz' ? 'VOLUME Z' : 'Z';
     return `<div class="ll-native-spec">
       <b>STRAT-${spec.code} · ${spec.asset}</b>
-      <span>${info.mode === 'reclaim' ? 'RECLAIM' : 'TOUCH'} · Z${info.period} · ±${info.threshold}σ</span>
+      <span>${info.mode === 'reclaim' ? 'RECLAIM' : 'TOUCH'} · ${family}${info.period} · ±${info.threshold}σ</span>
       <span>${esc(nativeEntryDescription(info, lang))}</span>
       <span>${t(lang, info.noteRu, info.noteEn)}</span>
       <em class="${info.realEnabled ? 'pass' : 'collect'}">${info.realEnabled ? 'SHADOW + REAL $100 / 10×' : 'SHADOW ONLY'}</em>

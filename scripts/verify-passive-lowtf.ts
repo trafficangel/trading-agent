@@ -262,13 +262,22 @@ function lighterMarkets(): Promise<Map<string, LighterOrderBook>> {
 
 async function lighterCandlePage(url: URL): Promise<Candle[]> {
   for (let attempt = 0; attempt < 7; attempt++) {
-    const response = await request(url);
-    const body = await response.body.json() as LighterCandleResponse;
-    if (body.code === 200) return body.c ?? [];
-    if (body.code !== 23000 || attempt === 6) {
-      throw new Error(`Lighter candles code=${body.code}${body.message ? `: ${body.message}` : ''}`);
+    try {
+      const response = await request(url);
+      const contentType = String(response.headers['content-type'] ?? '');
+      const text = await response.body.text();
+      if (response.statusCode !== 200 || !contentType.includes('application/json')) {
+        throw new Error(`http_${response.statusCode}:${contentType || 'unknown_content_type'}`);
+      }
+      const body = JSON.parse(text) as LighterCandleResponse;
+      if (body.code === 200) return body.c ?? [];
+      if (body.code !== 23000) {
+        throw new Error(`code_${body.code}${body.message ? `:${body.message}` : ''}`);
+      }
+    } catch (error) {
+      if (attempt === 6) throw error;
     }
-    await wait(Math.min(4_000, 250 * 2 ** attempt));
+    await wait(Math.min(30_000, 1_000 * 2 ** attempt));
   }
   throw new Error('Lighter candles retry exhausted');
 }
@@ -307,6 +316,10 @@ async function lighterCandles(symbol: string, fromMs: number, toMs: number): Pro
       return lighterCandlePage(url);
     }));
     for (const page of pages) for (const candle of page) byTime.set(candle.t, candle);
+    // Persist each successful batch so a temporary WAF/rate-limit response can
+    // be resumed without downloading the preceding months again.
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(cacheFile, JSON.stringify([...byTime.values()].sort((a, b) => a.t - b.t)));
     if (offset + batch.length < windows.length) await wait(fetchDelayMs);
   }
 

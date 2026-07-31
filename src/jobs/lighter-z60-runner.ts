@@ -1,9 +1,10 @@
 import { request } from 'undici';
 import { db } from '../db/client.js';
 import {
+  evaluateVwz60,
   evaluateZ60,
-  type Z60Bar,
   type Z60EntryMode,
+  type Vwz60Bar,
 } from '../lib/lighter-z60.js';
 import { logger } from '../lib/logger.js';
 import { queueLighterLuxalgoSignal } from '../strategies/lighter-luxalgo-lab.js';
@@ -44,6 +45,7 @@ type LastClosedRow = {
 
 type NativeStrategy = {
   id: string;
+  family: 'zscore' | 'vwz';
   mode: Z60EntryMode;
   threshold: number;
 };
@@ -59,22 +61,29 @@ const FEEDS: readonly NativeFeed[] = [
     symbol: 'SOLUSDT',
     marketId: 2,
     strategies: [
-      { id: 'sol-z60-reclaim', mode: 'reclaim', threshold: 3 },
-      { id: 'sol-z60-touch', mode: 'touch', threshold: 3 },
+      { id: 'sol-z60-reclaim', family: 'zscore', mode: 'reclaim', threshold: 3 },
+      { id: 'sol-z60-touch', family: 'zscore', mode: 'touch', threshold: 3 },
     ],
   },
   {
     symbol: 'BNBUSDT',
     marketId: 25,
     strategies: [
-      { id: 'bnb-z60-touch', mode: 'touch', threshold: 3 },
+      { id: 'bnb-z60-touch', family: 'zscore', mode: 'touch', threshold: 3 },
     ],
   },
   {
     symbol: 'LTCUSDT',
     marketId: 35,
     strategies: [
-      { id: 'ltc-z60-touch', mode: 'touch', threshold: 2 },
+      { id: 'ltc-z60-touch', family: 'zscore', mode: 'touch', threshold: 2 },
+    ],
+  },
+  {
+    symbol: 'BTCUSDT',
+    marketId: 1,
+    strategies: [
+      { id: 'btc-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 3 },
     ],
   },
 ];
@@ -109,38 +118,49 @@ function targetCompletedBar(now: number): number {
 function aggregateCompleteFiveMinuteBars(
   raw: readonly RawCandle[],
   latestBarTime: number,
-): Z60Bar[] {
+): Vwz60Bar[] {
   const buckets = new Map<number, {
-    closes: Map<number, number>;
+    candles: Map<number, { close: number; volume: number }>;
   }>();
 
   for (const candle of raw) {
     const time = finite(candle.t);
     const close = finite(candle.c);
-    if (time == null || close == null || close <= 0 || time % MINUTE_MS !== 0) continue;
+    const volume = finite(candle.v);
+    if (
+      time == null
+      || close == null
+      || close <= 0
+      || volume == null
+      || volume < 0
+      || time % MINUTE_MS !== 0
+    ) continue;
     const bucket = Math.floor(time / BAR_MS) * BAR_MS;
     if (bucket > latestBarTime) continue;
-    const state = buckets.get(bucket) ?? { closes: new Map<number, number>() };
-    state.closes.set(time, close);
+    const state = buckets.get(bucket) ?? {
+      candles: new Map<number, { close: number; volume: number }>(),
+    };
+    state.candles.set(time, { close, volume });
     buckets.set(bucket, state);
   }
 
   return [...buckets.entries()]
     .filter(([bucket, state]) => {
-      if (state.closes.size !== 5) return false;
+      if (state.candles.size !== 5) return false;
       for (let offset = 0; offset < 5; offset += 1) {
-        if (!state.closes.has(bucket + offset * MINUTE_MS)) return false;
+        if (!state.candles.has(bucket + offset * MINUTE_MS)) return false;
       }
       return true;
     })
     .sort(([a], [b]) => a - b)
     .map(([time, state]) => ({
       time,
-      close: state.closes.get(time + 4 * MINUTE_MS)!,
+      close: state.candles.get(time + 4 * MINUTE_MS)!.close,
+      volume: [...state.candles.values()].reduce((total, candle) => total + candle.volume, 0),
     }));
 }
 
-async function fetchBars(latestBarTime: number, marketId: number): Promise<Z60Bar[]> {
+async function fetchBars(latestBarTime: number, marketId: number): Promise<Vwz60Bar[]> {
   const start = latestBarTime - (HISTORY_BARS - 1) * BAR_MS;
   // Lighter treats end_timestamp as exclusive, so request the boundary after
   // the fifth one-minute candle rather than the final candle's own timestamp.
@@ -201,7 +221,9 @@ async function poll(): Promise<void> {
       try {
         const bars = await fetchBars(target, feed.marketId);
         for (const strategy of feed.strategies) {
-          const snapshot = evaluateZ60(bars, 60, strategy.threshold, strategy.mode);
+          const snapshot = strategy.family === 'vwz'
+            ? evaluateVwz60(bars, 60, strategy.threshold, strategy.mode)
+            : evaluateZ60(bars, 60, strategy.threshold, strategy.mode);
           if (!snapshot) throw new Error('z60_history_incomplete');
 
           const open = openPosition.get(strategy.id);
@@ -219,7 +241,9 @@ async function poll(): Promise<void> {
                 barTime: target,
                 close: snapshot.close,
                 mean: snapshot.mean,
-                reason: meanExit ? 'sma60_cross' : 'time_240_bars',
+                reason: meanExit
+                  ? strategy.family === 'vwz' ? 'vwma60_cross' : 'sma60_cross'
+                  : 'time_240_bars',
               }, 'lighter-z60: native exit signal');
             }
             continue;
@@ -237,6 +261,7 @@ async function poll(): Promise<void> {
             logger.info({
               strategyId: strategy.id,
               symbol: feed.symbol,
+              family: strategy.family,
               mode: strategy.mode,
               threshold: strategy.threshold,
               side: snapshot.signal,
@@ -269,6 +294,7 @@ export function startLighterZ60Runner(): void {
     strategies: FEEDS.flatMap((feed) => feed.strategies.map((strategy) => ({
       id: strategy.id,
       symbol: feed.symbol,
+      family: strategy.family,
       mode: strategy.mode,
       threshold: strategy.threshold,
     }))),
