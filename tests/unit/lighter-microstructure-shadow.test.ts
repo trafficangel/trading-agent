@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildMicrostructureShadowReport,
   frozenMicrostructureReportSha256,
+  mergeMicrostructureShadowTrades,
   prepareMicrostructureShadowManifest,
   prospectiveMicrostructureShadowTrades,
 } from '../../src/lib/lighter-microstructure-shadow.js';
@@ -140,5 +141,20 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
     const value = buildMicrostructureShadowReport(manifest, [trade], NOW + 600_000);
     expect(value.summary).toMatchObject({ closed: 1, netPct: 0.97, netUsd: 0.97 });
     expect(value).toMatchObject({ prospectiveOnly: true, exactFunding: true, realEnabled: false });
+  });
+
+  it('preserves retained trades and fails if a closed trade changes', () => {
+    const base = {
+      ruleId: 'OF-CONT-25-H1', marketId: 1, symbol: 'BTC', side: 'long' as const,
+      barMinutes: 1 as const, signalTimeMs: NOW, entryTimeMs: NOW + 60_000,
+      exitTimeMs: NOW + 360_000, entryPrice: 100, exitPrice: 101,
+      grossPct: 1, fundingPct: 0, executionCostPct: 0.02,
+      adverseExecutionCostPct: 0.03, netPct: 0.98,
+      trend: 'bull' as const, volatility: 'low' as const,
+    };
+    const later = { ...base, marketId: 2, symbol: 'ETH', entryTimeMs: NOW + 600_000 };
+    expect(mergeMicrostructureShadowTrades([base], [base, later])).toEqual([base, later]);
+    expect(() => mergeMicrostructureShadowTrades([base], [{ ...base, netPct: 0.5 }]))
+      .toThrow(/trade changed/);
   });
 });

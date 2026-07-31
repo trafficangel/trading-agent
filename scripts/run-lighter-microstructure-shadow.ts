@@ -21,6 +21,7 @@ import { buildCausalMicroFeatureBars } from '../src/lib/lighter-microstructure-r
 import {
   buildMicrostructureShadowReport,
   frozenMicrostructureReportSha256,
+  mergeMicrostructureShadowTrades,
   prospectiveMicrostructureShadowTrades,
   validateMicrostructureShadowManifest,
 } from '../src/lib/lighter-microstructure-shadow.js';
@@ -28,6 +29,7 @@ import { existingImmutableFrozenMicrostructureReport } from '../src/lib/lighter-
 
 const HOUR_MS = 3_600_000;
 const WARMUP_MS = 5 * HOUR_MS;
+const FUNDING_CHUNK_SECONDS = 28 * 86_400;
 const LIGHTER_BASE_URL = 'https://mainnet.zklighter.elliot.ai';
 
 type DbRow = {
@@ -119,24 +121,27 @@ async function fundingForRows(rows: readonly DbRow[]): Promise<Map<number, Light
   for (const [marketId, range] of ranges) {
     const start = Math.floor(range.startMs / 1_000) - 3_600;
     const end = Math.ceil(range.endMs / 1_000) + 3_600;
-    const url = new URL(`${LIGHTER_BASE_URL}/api/v1/fundings`);
-    for (const [key, value] of Object.entries({
-      market_id: marketId, resolution: '1h', start_timestamp: start,
-      end_timestamp: end, count_back: 0,
-    })) url.searchParams.set(key, String(value));
-    const body = await getJson(url.toString());
-    const points: LighterFundingPoint[] = [];
-    for (const item of Array.isArray(body.fundings) ? body.fundings : []) {
-      const value = item as Record<string, unknown>;
-      const timestampMs = Number(value.timestamp) * 1_000;
-      const ratePctH = Math.abs(Number(value.rate));
-      const direction = String(value.direction).toLowerCase();
-      if (timestampMs > 0 && Number.isFinite(ratePctH)
-        && (direction === 'long' || direction === 'short')) {
-        points.push({ timestampMs, ratePctH, direction });
+    const points = new Map<number, LighterFundingPoint>();
+    for (let chunkStart = start; chunkStart <= end; chunkStart += FUNDING_CHUNK_SECONDS) {
+      const chunkEnd = Math.min(end, chunkStart + FUNDING_CHUNK_SECONDS - 1);
+      const url = new URL(`${LIGHTER_BASE_URL}/api/v1/fundings`);
+      for (const [key, value] of Object.entries({
+        market_id: marketId, resolution: '1h', start_timestamp: chunkStart,
+        end_timestamp: chunkEnd, count_back: 0,
+      })) url.searchParams.set(key, String(value));
+      const body = await getJson(url.toString());
+      for (const item of Array.isArray(body.fundings) ? body.fundings : []) {
+        const value = item as Record<string, unknown>;
+        const timestampMs = Number(value.timestamp) * 1_000;
+        const ratePctH = Math.abs(Number(value.rate));
+        const direction = String(value.direction).toLowerCase();
+        if (timestampMs > 0 && Number.isFinite(ratePctH)
+          && (direction === 'long' || direction === 'short')) {
+          points.set(timestampMs, { timestampMs, ratePctH, direction });
+        }
       }
     }
-    const series = buildLighterFundingSeries(points);
+    const series = buildLighterFundingSeries([...points.values()]);
     const coverage = fundingSeriesCoverage(series, range.startMs, range.endMs);
     if (!coverage.covered) {
       throw new Error(`${range.symbol}: exact funding coverage ${(coverage.internalCoverage * 100).toFixed(2)}%`);
@@ -163,8 +168,22 @@ const manifest = validateMicrostructureShadowManifest(
   readJson(manifestPath),
   frozenMicrostructureReportSha256(frozen),
 );
+let existingTrades: import('../src/lib/lighter-microstructure-research.js').MicroTrade[] = [];
+if (existsSync(outputPath)) {
+  const existing = readJson(outputPath) as Record<string, unknown>;
+  if (
+    existing.version !== 'lighter-microstructure-shadow-report-v1'
+    || existing.frozenReportSha256 !== manifest.frozenReportSha256
+    || existing.prospectiveOnly !== true
+    || existing.exactFunding !== true
+    || existing.autoPromotion !== false
+    || existing.realEnabled !== false
+    || !Array.isArray(existing.closedTrades)
+  ) throw new Error('existing microstructure Shadow report contract mismatch');
+  existingTrades = existing.closedTrades as typeof existingTrades;
+}
 if (manifest.status === 'no_candidates') {
-  const report = buildMicrostructureShadowReport(manifest, [], Date.now());
+  const report = buildMicrostructureShadowReport(manifest, existingTrades, Date.now());
   writeAtomic(outputPath, report);
   console.log(JSON.stringify(report));
   process.exit(0);
@@ -172,6 +191,12 @@ if (manifest.status === 'no_candidates') {
 
 const activatedAtMs = Date.parse(manifest.activatedAt);
 const db = new Database(databasePath, { readonly: true, fileMustExist: true });
+const earliest = db.prepare('SELECT MIN(minute_ts_ms) AS value FROM lighter_microstructure_1m')
+  .get() as { value: number | null };
+if (!existingTrades.length && earliest.value != null && earliest.value > activatedAtMs - WARMUP_MS) {
+  db.close();
+  throw new Error('prospective microstructure history starts after required activation warm-up');
+}
 const rows = db.prepare(`
   SELECT * FROM lighter_microstructure_1m
   WHERE minute_ts_ms >= ?
@@ -197,7 +222,8 @@ const features = new Map<1 | 5, ReturnType<typeof buildCausalMicroFeatureBars>>(
 ]);
 const funding = rows.length ? await fundingForRows(rows) : new Map<number, LighterFundingSeries>();
 const nowMs = Date.now();
-const trades = prospectiveMicrostructureShadowTrades(manifest, features, funding, nowMs);
+const reconstructed = prospectiveMicrostructureShadowTrades(manifest, features, funding, nowMs);
+const trades = mergeMicrostructureShadowTrades(existingTrades, reconstructed);
 const report = buildMicrostructureShadowReport(manifest, trades, nowMs);
 writeAtomic(outputPath, report);
 console.log(JSON.stringify(report));

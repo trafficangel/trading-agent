@@ -262,3 +262,28 @@ export function buildMicrostructureShadowReport(
     realEnabled: false,
   };
 }
+
+function shadowTradeKey(trade: MicroTrade): string {
+  return `${trade.barMinutes}:${trade.ruleId}:${trade.marketId}:${trade.entryTimeMs}`;
+}
+
+/** Preserve trades that have aged out of the recorder retention window. */
+export function mergeMicrostructureShadowTrades(
+  existing: readonly MicroTrade[],
+  reconstructed: readonly MicroTrade[],
+): MicroTrade[] {
+  const merged = new Map<string, MicroTrade>();
+  for (const trade of existing) merged.set(shadowTradeKey(trade), trade);
+  for (const trade of reconstructed) {
+    const key = shadowTradeKey(trade);
+    const previous = merged.get(key);
+    if (previous && JSON.stringify(previous) !== JSON.stringify(trade)) {
+      throw new Error(`closed microstructure Shadow trade changed: ${key}`);
+    }
+    merged.set(key, trade);
+  }
+  return [...merged.values()].sort((left, right) =>
+    left.entryTimeMs - right.entryTimeMs
+    || left.marketId - right.marketId
+    || left.ruleId.localeCompare(right.ruleId));
+}
