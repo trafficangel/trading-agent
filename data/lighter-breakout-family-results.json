@@ -1,0 +1,119 @@
+{
+  "version": "lighter-breakout-family-frozen-v1",
+  "generatedAt": "2026-07-31T14:51:37.000Z",
+  "researchOnly": true,
+  "decision": "reject",
+  "reason": "No individual market or common 15-market portfolio passed at either 1m or 5m. Every best portfolio remained net-negative after measured market-specific $100 p95 execution costs and adverse funding; OOS, both sides and all chronological folds failed.",
+  "frozenInputs": {
+    "symbols": [
+      "BTC", "ETH", "SOL", "BNB", "LTC", "HYPE", "ZEC", "DOGE",
+      "NEAR", "JUP", "LIT", "GRAM", "XMR", "ENA", "TAO"
+    ],
+    "lookbackDays": 180,
+    "timeframesMinutes": [1, 5],
+    "notionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific measured full-round-trip p95; observed maximum reported as adverse sensitivity",
+    "funding": "adverse holding-time charge",
+    "entry": "next bar open",
+    "portfolioMaxOpen": 10,
+    "minimumCoverageDays": 171
+  },
+  "families": [
+    {
+      "family": "Donchian breakout",
+      "grid": "period 20/60/120; symmetric EMA200-side Long/Short; 1% stop; EMA200/time exit",
+      "results": [
+        {
+          "timeframeMinutes": 5,
+          "qualifiedMarkets": 0,
+          "qualifiedPortfolios": 0,
+          "bestRule": "Donchian120-breakout",
+          "trades": 5605,
+          "netPct": -601.12,
+          "profitFactor": 0.83,
+          "adverseNetPct": -647.42,
+          "positiveFolds": 1,
+          "totalFolds": 4
+        },
+        {
+          "timeframeMinutes": 1,
+          "qualifiedMarkets": 0,
+          "qualifiedPortfolios": 0,
+          "bestRule": "Donchian120-breakout",
+          "trades": 26034,
+          "netPct": -2956.99,
+          "profitFactor": 0.69,
+          "adverseNetPct": -3165.63,
+          "positiveFolds": 0,
+          "totalFolds": 4
+        }
+      ]
+    },
+    {
+      "family": "Keltner reclaim and trend breakout",
+      "grid": "ATR multipliers 1.5/2/2.5/3; symmetric reclaim or EMA200-side breakout; next-bar execution",
+      "results": [
+        {
+          "timeframeMinutes": 5,
+          "qualifiedMarkets": 0,
+          "qualifiedPortfolios": 0,
+          "bestRule": "Keltner20-3-reclaim",
+          "trades": 18352,
+          "netPct": -717.77,
+          "profitFactor": 0.87,
+          "adverseNetPct": -900.08,
+          "positiveFolds": 0,
+          "totalFolds": 4
+        },
+        {
+          "timeframeMinutes": 1,
+          "qualifiedMarkets": 0,
+          "qualifiedPortfolios": 0,
+          "bestRule": "Keltner20-3-reclaim",
+          "trades": 112449,
+          "netPct": -5259.53,
+          "profitFactor": 0.65,
+          "adverseNetPct": -6233.54,
+          "positiveFolds": 0,
+          "totalFolds": 4
+        }
+      ]
+    },
+    {
+      "family": "Impulse continuation",
+      "grid": "body 0.75/1/1.5/2 ATR; volume 0/1/1.5/2 times SMA20; hold 5/15/30 bars; symmetric Long/Short",
+      "results": [
+        {
+          "timeframeMinutes": 5,
+          "qualifiedMarkets": 0,
+          "qualifiedPortfolios": 0,
+          "bestRule": "IMP-A2-V2-H5",
+          "trades": 6876,
+          "netPct": -531.11,
+          "profitFactor": 0.73,
+          "adverseNetPct": -604.96,
+          "positiveFolds": 0,
+          "totalFolds": 4
+        },
+        {
+          "timeframeMinutes": 1,
+          "qualifiedMarkets": 0,
+          "qualifiedPortfolios": 0,
+          "bestRule": "IMP-A2-V2-H30",
+          "trades": 31184,
+          "netPct": -2362.19,
+          "profitFactor": 0.72,
+          "adverseNetPct": -2609.92,
+          "positiveFolds": 0,
+          "totalFolds": 4
+        }
+      ]
+    }
+  ],
+  "deployment": {
+    "shadow": false,
+    "real": false,
+    "website": false
+  }
+}

@@ -671,3 +671,21 @@ or below two seconds. This operational pause is recoverable only when unhealthy
 rows age out of the fixed recent window. Whole-cohort execution failures still
 prevent Real promotion, but no longer keep a recovered Shadow feed disabled.
 Real remains manual and is never enabled by the audit itself.
+
+### Frozen breakout-family rejection (2026-07-31)
+
+The next independent hypothesis was symmetric trend/breakout rather than
+another P2 mean-reversion variation. A frozen common grid tested Donchian
+breakouts, Keltner reclaim/trend breakouts and strong-candle impulse
+continuation on the same 15 markets at both 1m and 5m. Entries used the next
+bar, costs used each market's measured `$100` full-round-trip p95 plus adverse
+funding, and the same individual/portfolio OOS, side, fold, regime, drawdown and
+concentration gates applied.
+
+Nothing qualified. The best portfolio result in each family remained deeply
+negative: Donchian `-601.12%`/PF `0.83` at 5m and `-2956.99%`/PF `0.69` at 1m;
+Keltner `-717.77%`/PF `0.87` and `-5259.53%`/PF `0.65`; impulse continuation
+`-531.11%`/PF `0.73` and `-2362.19%`/PF `0.72`. Both sides and OOS were red and
+no variant passed more than one of four folds. The full frozen record is in
+`data/lighter-breakout-family-results.json`. These families are rejected and
+must not be added to Shadow or revisited through per-market parameter fitting.
