@@ -72,9 +72,18 @@ const fiveMinuteExecutionCostCountSql = hasRollingExecutionCost
       THEN 1 ELSE 0 END)`
   : '0';
 const executionCostStatsSql = hasRollingExecutionCost
-  ? `AVG(exec_cost_100_avg_pct) AS avg_execution_cost_pct,
-    AVG(exec_cost_100_p95_pct) AS avg_execution_cost_p95_pct,
-    MAX(exec_cost_100_p95_pct) AS max_execution_cost_p95_pct`
+  ? `AVG(CASE WHEN quality_ok = 1
+      AND exec_cost_100_p95_pct IS NOT NULL
+      AND exec_cost_100_samples >= samples * 0.8
+      THEN exec_cost_100_avg_pct END) AS avg_execution_cost_pct,
+    AVG(CASE WHEN quality_ok = 1
+      AND exec_cost_100_p95_pct IS NOT NULL
+      AND exec_cost_100_samples >= samples * 0.8
+      THEN exec_cost_100_p95_pct END) AS avg_execution_cost_p95_pct,
+    MAX(CASE WHEN quality_ok = 1
+      AND exec_cost_100_p95_pct IS NOT NULL
+      AND exec_cost_100_samples >= samples * 0.8
+      THEN exec_cost_100_p95_pct END) AS max_execution_cost_p95_pct`
   : `NULL AS avg_execution_cost_pct,
     NULL AS avg_execution_cost_p95_pct,
     NULL AS max_execution_cost_p95_pct`;
@@ -112,13 +121,17 @@ const latestExecutionCostRows = hasRollingExecutionCost
         current.exec_cost_100_p95_pct AS execution_cost_p95_pct
       FROM lighter_microstructure_1m AS current
       WHERE current.minute_ts_ms < ?
+        AND current.quality_ok = 1
         AND current.exec_cost_100_p95_pct IS NOT NULL
+        AND current.exec_cost_100_samples >= current.samples * 0.8
         AND current.minute_ts_ms = (
           SELECT MAX(latest.minute_ts_ms)
           FROM lighter_microstructure_1m AS latest
           WHERE latest.market_id = current.market_id
             AND latest.minute_ts_ms < ?
+            AND latest.quality_ok = 1
             AND latest.exec_cost_100_p95_pct IS NOT NULL
+            AND latest.exec_cost_100_samples >= latest.samples * 0.8
         )
       ORDER BY current.market_id
     `,

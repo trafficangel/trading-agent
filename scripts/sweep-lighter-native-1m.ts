@@ -59,6 +59,9 @@ const DEFAULT_EXECUTION_COST_FILES = [
   // The portfolio trades $100 notionals. Keep this file last so its
   // market-specific measurements supersede older $1,000 discovery samples.
   'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+  // Created only after the continuous native dataset passes the frozen 21-day
+  // quality gate. Once present, it supersedes the short discovery sample.
+  'data/lighter-execution-costs-native-frozen.json',
 ];
 const EXECUTION_COST_FILES = (process.env.EXECUTION_COST_FILES
   ?? DEFAULT_EXECUTION_COST_FILES.filter((file) => existsSync(resolve(file))).join(','))

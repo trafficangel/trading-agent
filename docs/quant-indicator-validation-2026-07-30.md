@@ -651,3 +651,12 @@ blocking p95 result remains qualified: 758 trades, net `+122.80%`, PF `1.45`,
 positive. Replacing `1.5 × p95` with each market's observed maximum produced
 `+115.86%` and PF `1.42`; this is reported as sensitivity evidence and does not
 alter the prospective Shadow gate.
+
+The transition to long-window costs is now mechanical. The exporter
+`scripts/export-lighter-native-execution-costs.ts` refuses to create a scanner
+cost file unless the audit is fresh, all 15 markets are present, the notional
+is exactly `$100`, at least 21 days are covered, and 1m coverage, 1m quality,
+execution-cost coverage and valid 5m rollups are each at least 95%. Its output
+is loaded after the discovery file and therefore supersedes the short sample
+only after those conditions pass. A production audit with less than one day of
+history was verified to return `not_ready` and create no file.

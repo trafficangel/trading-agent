@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily frozen Lighter Native execution-cost calibration
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+RandomizedDelaySec=10m
+Unit=lighter-native-execution-cost-export.service
+
+[Install]
+WantedBy=timers.target
