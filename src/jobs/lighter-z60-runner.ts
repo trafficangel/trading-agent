@@ -2,6 +2,7 @@ import { request } from 'undici';
 import { db } from '../db/client.js';
 import {
   evaluateTrendFilteredZ60,
+  evaluateTrendStackZ60,
   evaluateVwz60,
   evaluateZ60,
   type Z60EntryMode,
@@ -13,7 +14,11 @@ import { queueLighterLuxalgoSignal } from '../strategies/lighter-luxalgo-lab.js'
 const MINUTE_MS = 60_000;
 const BAR_MS = 5 * MINUTE_MS;
 const HISTORY_BARS = 66;
-const TREND_HISTORY_BARS = 500;
+// EMA400 needs substantially more than one period of warmup. A 500-bar seed
+// produced a live trend-side mismatch on LIT; 1,500 bars matched the full
+// 180-day calculation on all 15 portfolio markets.
+const TREND_HISTORY_BARS = 1_500;
+const TREND_PAGE_BARS = 500;
 const TIME_EXIT_BARS = 240;
 // Lighter commonly publishes the fifth one-minute candle 15–25 seconds after
 // the nominal 5m boundary. Waiting 25s avoids a guaranteed failed request while
@@ -50,7 +55,7 @@ type NativeStrategy = {
   family: 'zscore' | 'vwz';
   mode: Z60EntryMode;
   threshold: number;
-  trendFilter?: boolean;
+  trendFilter?: 'ema200' | 'ema200_400';
 };
 
 type NativeFeed = {
@@ -99,21 +104,21 @@ const BASE_FEEDS: readonly NativeFeed[] = [
 ];
 
 const TREND_PORTFOLIO_FEEDS: readonly NativeFeed[] = [
-  { symbol: 'BTCUSDT', marketId: 1, strategies: [{ id: 'z60t25-btc', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'ETHUSDT', marketId: 0, strategies: [{ id: 'z60t25-eth', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'SOLUSDT', marketId: 2, strategies: [{ id: 'z60t25-sol', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'BNBUSDT', marketId: 25, strategies: [{ id: 'z60t25-bnb', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'LTCUSDT', marketId: 35, strategies: [{ id: 'z60t25-ltc', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'HYPEUSDT', marketId: 24, strategies: [{ id: 'z60t25-hype', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'ZECUSDT', marketId: 90, strategies: [{ id: 'z60t25-zec', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'DOGEUSDT', marketId: 3, strategies: [{ id: 'z60t25-doge', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'NEARUSDT', marketId: 10, strategies: [{ id: 'z60t25-near', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'JUPUSDT', marketId: 26, strategies: [{ id: 'z60t25-jup', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'LITUSDT', marketId: 120, strategies: [{ id: 'z60t25-lit', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'GRAMUSDT', marketId: 12, strategies: [{ id: 'z60t25-gram', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'XMRUSDT', marketId: 77, strategies: [{ id: 'z60t25-xmr', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'ENAUSDT', marketId: 29, strategies: [{ id: 'z60t25-ena', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
-  { symbol: 'TAOUSDT', marketId: 13, strategies: [{ id: 'z60t25-tao', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: true }] },
+  { symbol: 'BTCUSDT', marketId: 1, strategies: [{ id: 'z60stack25-btc', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'ETHUSDT', marketId: 0, strategies: [{ id: 'z60stack25-eth', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'SOLUSDT', marketId: 2, strategies: [{ id: 'z60stack25-sol', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'BNBUSDT', marketId: 25, strategies: [{ id: 'z60stack25-bnb', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'LTCUSDT', marketId: 35, strategies: [{ id: 'z60stack25-ltc', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'HYPEUSDT', marketId: 24, strategies: [{ id: 'z60stack25-hype', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'ZECUSDT', marketId: 90, strategies: [{ id: 'z60stack25-zec', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'DOGEUSDT', marketId: 3, strategies: [{ id: 'z60stack25-doge', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'NEARUSDT', marketId: 10, strategies: [{ id: 'z60stack25-near', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'JUPUSDT', marketId: 26, strategies: [{ id: 'z60stack25-jup', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'LITUSDT', marketId: 120, strategies: [{ id: 'z60stack25-lit', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'GRAMUSDT', marketId: 12, strategies: [{ id: 'z60stack25-gram', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'XMRUSDT', marketId: 77, strategies: [{ id: 'z60stack25-xmr', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'ENAUSDT', marketId: 29, strategies: [{ id: 'z60stack25-ena', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'TAOUSDT', marketId: 13, strategies: [{ id: 'z60stack25-tao', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
 ];
 
 const feedByMarket = new Map<number, NativeFeed>();
@@ -228,41 +233,49 @@ async function fetchBars(latestBarTime: number, marketId: number): Promise<Vwz60
   return bars;
 }
 
-async function fetchTrendBars(
+export async function fetchTrendBars(
   latestBarTime: number,
   marketId: number,
 ): Promise<Vwz60Bar[]> {
-  const start = latestBarTime - (TREND_HISTORY_BARS - 1) * BAR_MS;
-  const url = new URL('https://mainnet.zklighter.elliot.ai/api/v1/candles');
-  url.searchParams.set('market_id', String(marketId));
-  url.searchParams.set('resolution', '5m');
-  url.searchParams.set('start_timestamp', String(start));
-  url.searchParams.set('end_timestamp', String(latestBarTime + BAR_MS));
-  url.searchParams.set('count_back', String(TREND_HISTORY_BARS));
-  url.searchParams.set('set_timestamp_to_end', 'false');
-
-  const response = await request(url, {
-    headersTimeout: 8_000,
-    bodyTimeout: 8_000,
-  });
-  const body = await response.body.json() as CandleResponse;
-  if (Number(body.code) !== 200) {
-    throw new Error(`trend_candles_${String(body.code)}:${String(body.message ?? 'unknown')}`);
-  }
   const unique = new Map<number, Vwz60Bar>();
-  for (const candle of body.c ?? []) {
-    const time = finite(candle.t);
-    const close = finite(candle.c);
-    const volume = finite(candle.v) ?? 0;
-    if (
-      time == null
-      || close == null
-      || close <= 0
-      || volume < 0
-      || time % BAR_MS !== 0
-      || time > latestBarTime
-    ) continue;
-    unique.set(time, { time, close, volume });
+  let pageEnd = latestBarTime + BAR_MS;
+  let remaining = TREND_HISTORY_BARS;
+  while (remaining > 0) {
+    const pageBars = Math.min(TREND_PAGE_BARS, remaining);
+    const pageStart = pageEnd - pageBars * BAR_MS;
+    const url = new URL('https://mainnet.zklighter.elliot.ai/api/v1/candles');
+    url.searchParams.set('market_id', String(marketId));
+    url.searchParams.set('resolution', '5m');
+    url.searchParams.set('start_timestamp', String(pageStart));
+    url.searchParams.set('end_timestamp', String(pageEnd));
+    url.searchParams.set('count_back', String(pageBars));
+    url.searchParams.set('set_timestamp_to_end', 'false');
+
+    const response = await request(url, {
+      headersTimeout: 8_000,
+      bodyTimeout: 8_000,
+    });
+    const body = await response.body.json() as CandleResponse;
+    if (Number(body.code) !== 200) {
+      throw new Error(`trend_candles_${String(body.code)}:${String(body.message ?? 'unknown')}`);
+    }
+    for (const candle of body.c ?? []) {
+      const time = finite(candle.t);
+      const close = finite(candle.c);
+      const volume = finite(candle.v) ?? 0;
+      if (
+        time == null
+        || close == null
+        || close <= 0
+        || volume < 0
+        || time % BAR_MS !== 0
+        || time < pageStart
+        || time >= pageEnd
+      ) continue;
+      unique.set(time, { time, close, volume });
+    }
+    pageEnd = pageStart;
+    remaining -= pageBars;
   }
   const bars = [...unique.values()].sort((a, b) => a.time - b.time);
   if (bars.length < TREND_HISTORY_BARS || bars.at(-1)?.time !== latestBarTime) {
@@ -343,13 +356,22 @@ async function poll(): Promise<void> {
         if (!strategyBars) continue;
         try {
           const snapshot = strategy.trendFilter
-            ? evaluateTrendFilteredZ60(
+            ? strategy.trendFilter === 'ema200_400'
+              ? evaluateTrendStackZ60(
+                strategyBars,
+                60,
+                strategy.threshold,
+                strategy.mode,
+                200,
+                400,
+              )
+              : evaluateTrendFilteredZ60(
               strategyBars,
               60,
               strategy.threshold,
               strategy.mode,
               200,
-            )
+              )
             : strategy.family === 'vwz'
             ? evaluateVwz60(strategyBars, 60, strategy.threshold, strategy.mode)
             : evaluateZ60(strategyBars, 60, strategy.threshold, strategy.mode);

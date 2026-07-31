@@ -54,6 +54,9 @@ const DEFAULT_EXECUTION_COST_FILES = [
   'data/lighter-execution-costs-lit-pump-gram-xmr.json',
   'data/lighter-execution-costs-popcat-ena-arb-tao.json',
   'data/lighter-execution-costs-hype-20260731.json',
+  // The portfolio trades $100 notionals. Keep this file last so its
+  // market-specific measurements supersede older $1,000 discovery samples.
+  'data/lighter-execution-costs-native-portfolio-100-20260731.json',
 ];
 const EXECUTION_COST_FILES = (process.env.EXECUTION_COST_FILES
   ?? DEFAULT_EXECUTION_COST_FILES.filter((file) => existsSync(resolve(file))).join(','))
@@ -110,8 +113,15 @@ type Rule = {
   entry: (a: Arrays, i: number) => Side | null;
   exit: (a: Arrays, i: number, side: Side) => boolean;
 };
-type Trade = { side: Side; entryAt: number; exitAt: number; pct: number };
-type PortfolioTrade = Trade & { symbol: string; costPct: number };
+type TrendRegime = 'bull' | 'bear' | 'mixed';
+type VolatilityRegime = 'highVol' | 'lowVol';
+type Trade = { side: Side; entryAt: number; exitAt: number; entryIdx: number; pct: number };
+type PortfolioTrade = Trade & {
+  symbol: string;
+  costPct: number;
+  trendRegime: TrendRegime;
+  volatilityRegime: VolatilityRegime;
+};
 type WindowStats = {
   days: number;
   n: number;
@@ -130,6 +140,12 @@ type ExecutionCostFile = {
 const executionCostBySymbol = new Map<string, number>();
 for (const file of EXECUTION_COST_FILES) {
   const parsed = JSON.parse(readFileSync(resolve(file), 'utf8')) as ExecutionCostFile;
+  // VWAP/slippage is not portable across order sizes. Never qualify a
+  // strategy with measurements collected for a different notional.
+  if (
+    parsed.notionalUsd == null
+    || Math.abs(parsed.notionalUsd - PORTFOLIO_POSITION_NOTIONAL_USD) > 0.01
+  ) continue;
   for (const [symbol, summary] of Object.entries(parsed.summaries ?? {})) {
     if (summary.p95Pct != null && Number.isFinite(summary.p95Pct) && summary.p95Pct >= 0) {
       executionCostBySymbol.set(symbol.toUpperCase(), summary.p95Pct);
@@ -645,6 +661,35 @@ function rules(): Rule[] {
     }
   }
 
+  // Preregistered P2 challenger derived from the P1 regime audit. It keeps
+  // the exact P1 threshold, stop, hold and mean exit; the only change is a
+  // symmetric EMA200/EMA400 stack. There is deliberately no parameter grid:
+  // long requires bull alignment and short requires bear alignment.
+  out.push({
+    name: 'Z60STACK-2.5-touch',
+    warmup: 402,
+    slPct: Z_SL_PCT,
+    maxBars: Z_MAX_HOLD_BARS,
+    entry(a, i) {
+      const current = z(a, i, 60);
+      if (
+        current < -2.5
+        && a.close[i]! > a.ema200[i]!
+        && a.ema200[i]! > a.ema400[i]!
+      ) return 'long';
+      if (
+        current > 2.5
+        && a.close[i]! < a.ema200[i]!
+        && a.ema200[i]! < a.ema400[i]!
+      ) return 'short';
+      return null;
+    },
+    exit(a, i, side) {
+      const mean = meanFor(a, i, 60);
+      return side === 'long' ? a.close[i]! >= mean : a.close[i]! <= mean;
+    },
+  });
+
   // A predeclared two-sided mean-reversion variant for choppy regimes.
   // Kaufman ER prevents fading a statistically extreme move when the recent
   // path is strongly directional. The small fixed grid is evaluated across
@@ -926,6 +971,7 @@ function simulate(rule: Rule, a: Arrays): Trade[] {
       side: position.side,
       entryAt: position.entryAt,
       exitAt: bar.t,
+      entryIdx: position.entryIdx,
       pct: sign * (price - position.entry) / position.entry * 100,
     });
     position = null;
@@ -1078,6 +1124,33 @@ const rows: Array<{
 }> = [];
 const portfolioGroups = new Map<string, PortfolioTrade[]>();
 
+function classifyRegimes(
+  arrays: Arrays,
+  entryIdx: number,
+): { trendRegime: TrendRegime; volatilityRegime: VolatilityRegime } {
+  // The trade enters at entryIdx open, so only entryIdx-1 and earlier are
+  // available. Regime labels are diagnostic and cannot influence the signal.
+  const index = Math.max(0, entryIdx - 1);
+  const close = arrays.close[index]!;
+  const trendRegime: TrendRegime = close > arrays.ema200[index]!
+    && arrays.ema200[index]! > arrays.ema400[index]!
+    ? 'bull'
+    : close < arrays.ema200[index]! && arrays.ema200[index]! < arrays.ema400[index]!
+      ? 'bear'
+      : 'mixed';
+  const start = Math.max(0, index - 287);
+  let atrPctTotal = 0;
+  for (let cursor = start; cursor <= index; cursor += 1) {
+    atrPctTotal += arrays.atr14[cursor]! / arrays.close[cursor]!;
+  }
+  const atrPctAverage = atrPctTotal / (index - start + 1);
+  const currentAtrPct = arrays.atr14[index]! / close;
+  return {
+    trendRegime,
+    volatilityRegime: currentAtrPct > atrPctAverage ? 'highVol' : 'lowVol',
+  };
+}
+
 for (const [symbol, arrays] of loaded) {
   const coverageDays = Math.max(
     0,
@@ -1089,7 +1162,12 @@ for (const [symbol, arrays] of loaded) {
     const trades = simulate(rule, arrays);
     if (coverageDays >= PORTFOLIO_MIN_COVERAGE_DAYS) {
       const group = portfolioGroups.get(rule.name) ?? [];
-      group.push(...trades.map((trade) => ({ ...trade, symbol, costPct })));
+      group.push(...trades.map((trade) => ({
+        ...trade,
+        symbol,
+        costPct,
+        ...classifyRegimes(arrays, trade.entryIdx),
+      })));
       portfolioGroups.set(rule.name, group);
     }
     if (trades.length < 20) continue;
@@ -1239,6 +1317,37 @@ function portfolioRecent(trades: PortfolioTrade[]): WindowStats[] {
   });
 }
 
+type RegimeStat = { n: number; net: number; profitFactor: number };
+type TrendRegimeStats = Record<TrendRegime, RegimeStat>;
+type VolatilityRegimeStats = Record<VolatilityRegime, RegimeStat>;
+
+function portfolioRegimeStat(trades: PortfolioTrade[]): RegimeStat {
+  return {
+    n: trades.length,
+    net: portfolioSum(trades),
+    profitFactor: portfolioPf(trades),
+  };
+}
+
+function portfolioTrendRegimes(trades: PortfolioTrade[]): TrendRegimeStats {
+  return {
+    bull: portfolioRegimeStat(trades.filter((trade) => trade.trendRegime === 'bull')),
+    bear: portfolioRegimeStat(trades.filter((trade) => trade.trendRegime === 'bear')),
+    mixed: portfolioRegimeStat(trades.filter((trade) => trade.trendRegime === 'mixed')),
+  };
+}
+
+function portfolioVolatilityRegimes(trades: PortfolioTrade[]): VolatilityRegimeStats {
+  return {
+    highVol: portfolioRegimeStat(
+      trades.filter((trade) => trade.volatilityRegime === 'highVol'),
+    ),
+    lowVol: portfolioRegimeStat(
+      trades.filter((trade) => trade.volatilityRegime === 'lowVol'),
+    ),
+  };
+}
+
 type PortfolioRow = {
   rule: string;
   trades: PortfolioTrade[];
@@ -1265,6 +1374,8 @@ type PortfolioRow = {
   leaveOneOutMinNet: number;
   positiveMonths: number;
   totalMonths: number;
+  trendRegimes: TrendRegimeStats;
+  volatilityRegimes: VolatilityRegimeStats;
 };
 
 const portfolioRows: PortfolioRow[] = [...portfolioGroups.entries()].map(
@@ -1327,6 +1438,8 @@ const portfolioRows: PortfolioRow[] = [...portfolioGroups.entries()].map(
         : Number.NEGATIVE_INFINITY,
       positiveMonths: [...monthly.values()].filter((value) => value > 0).length,
       totalMonths: monthly.size,
+      trendRegimes: portfolioTrendRegimes(trades),
+      volatilityRegimes: portfolioVolatilityRegimes(trades),
     };
   },
 ).filter((row) => row.trades.length >= 30);
@@ -1350,6 +1463,21 @@ const portfolioQualified = portfolioRows.filter((row) =>
   && row.leaveOneOutMinNet > 0
   && row.positiveMonths >= Math.max(1, row.totalMonths - 2)
   && row.dropped / (row.trades.length + row.dropped) <= 0.1
+  && row.trendRegimes.bull.n >= 20
+  && row.trendRegimes.bull.net > 0
+  && row.trendRegimes.bull.profitFactor >= 1.1
+  && row.trendRegimes.bear.n >= 20
+  && row.trendRegimes.bear.net > 0
+  && row.trendRegimes.bear.profitFactor >= 1.1
+  && (row.trendRegimes.mixed.n < 20
+    || (row.trendRegimes.mixed.net > 0
+      && row.trendRegimes.mixed.profitFactor >= 1.1))
+  && row.volatilityRegimes.highVol.n >= 20
+  && row.volatilityRegimes.highVol.net > 0
+  && row.volatilityRegimes.highVol.profitFactor >= 1.1
+  && row.volatilityRegimes.lowVol.n >= 20
+  && row.volatilityRegimes.lowVol.net > 0
+  && row.volatilityRegimes.lowVol.profitFactor >= 1.1
   && row.recent.every((window) =>
     window.n >= 20
     && window.net > 0
@@ -1383,6 +1511,11 @@ const printPortfolio = (row: PortfolioRow): string =>
   + `L/S ${fmt(row.long)}/${fmt(row.short)} `
   + `symbols ${row.positiveSymbols}/${row.activeSymbols}+ dom ${(row.dominance * 100).toFixed(0)}% `
   + `LOO ${fmt(row.leaveOneOutMinNet)} months ${row.positiveMonths}/${row.totalMonths} `
+  + `trend BULL[n${row.trendRegimes.bull.n} ${fmt(row.trendRegimes.bull.net)}/PF${row.trendRegimes.bull.profitFactor.toFixed(2)}] `
+  + `BEAR[n${row.trendRegimes.bear.n} ${fmt(row.trendRegimes.bear.net)}/PF${row.trendRegimes.bear.profitFactor.toFixed(2)}] `
+  + `MIX[n${row.trendRegimes.mixed.n} ${fmt(row.trendRegimes.mixed.net)}/PF${row.trendRegimes.mixed.profitFactor.toFixed(2)}] `
+  + `vol HI[n${row.volatilityRegimes.highVol.n} ${fmt(row.volatilityRegimes.highVol.net)}/PF${row.volatilityRegimes.highVol.profitFactor.toFixed(2)}] `
+  + `LO[n${row.volatilityRegimes.lowVol.n} ${fmt(row.volatilityRegimes.lowVol.net)}/PF${row.volatilityRegimes.lowVol.profitFactor.toFixed(2)}] `
   + `cap ${row.maxConcurrent}/${PORTFOLIO_MAX_OPEN} drop ${row.dropped} `
   + row.recent.map((window) =>
     `W${window.days} n${window.n} ${fmt(window.net)}/PF${window.profitFactor.toFixed(2)} `

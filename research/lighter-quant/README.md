@@ -1,15 +1,16 @@
 # Lighter low-timeframe LuxAlgo research
 
-Date: 2026-07-30
+Date: 2026-07-31
 
-Status: original shared-parameter families **rejected**; four later
-native-Lighter 5m variants are tracked in one consolidated portfolio, with new
-BNB/LTC candidates admitted to **Shadow only**.
+Status: original shared-parameter families **rejected**. The current unified
+15-market candidate is `Z60STACK-2.5-touch` (Portfolio P2), running in
+**prospective Shadow only**. The historical sections below are retained to
+show the rejected hypotheses and the path to P2.
 
-This research tested whether a simple, symmetric long/short candle strategy
+The initial phase tested whether a simple, symmetric long/short candle strategy
 could produce a robust edge suitable for Lighter on 1-minute and 5-minute
-timeframes. It deliberately did not change the production strategy registry,
-webhook routing, or order execution.
+timeframes. That phase deliberately did not change production. Later candidates
+were integrated only after their own validation, with Shadow/Real separation.
 
 ## LuxAlgo prototype
 
@@ -92,6 +93,49 @@ two SOL variants plus two transfer candidates on BNB and LTC. Their exact
 rules and independent 30/60/90/120/180-day results are documented in
 `docs/quant-indicator-validation-2026-07-30.md`. New candidates are admitted
 only to prospective Shadow; the rejected families above remain rejected.
+
+## 2026-07-31 Portfolio P2 preregistered challenger
+
+P1 used one symmetric rule on 15 markets: buy a completed 5m close below
+Z60 −2.5 only above EMA200, sell above Z60 +2.5 only below EMA200, exit at
+SMA60, stop at 1.5%, and time-exit after 240 bars. A causal regime audit found
+that P1's 47 mixed-trend trades lost 10.93 percentage points after measured
+costs (PF 0.58), while clear bull and bear regimes were both profitable.
+
+P2 was preregistered without a parameter sweep. It keeps P1's exact Z period,
+threshold, entry mode, exit, stop, time limit, market list, and ten-position
+capacity. Its sole change is the mirrored completed-bar trend stack:
+
+- long only when `Z60 < -2.5` and `close > EMA200 > EMA400`;
+- short only when `Z60 > +2.5` and `close < EMA200 < EMA400`.
+
+Selection subtracts each market's measured immediately executable full-round-
+trip L2 p95 at the target $100 Real-canary notional. It does not use a common
+0.10% or 0.15% cost assumption. A separate `1.5 × p95` result is sensitivity
+evidence only and is not a cost estimate. Prospective Shadow records actual
+side-specific $1,000 VWAP and funding and therefore remains the authoritative
+execution test.
+
+| Test | N | Net | PF | Drawdown | Long / Short | Folds |
+|---|---:|---:|---:|---:|---:|---:|
+| P1 5m, market p95 | 806 | +112.46% | 1.38 | −2.58% capacity | +73.28% / +39.18% | 4/4 |
+| P2 5m, market p95 | 759 | +123.39% | 1.45 | −2.45% capacity | +82.70% / +40.69% | 4/4 |
+| P2 5m, 1.5× p95 | 759 | +104.71% | 1.38 | — | both positive | — |
+| P2 1m transfer | 3,398 | −95.18% | 0.88 | −12.19% capacity | −58.07% / −37.11% | 1/4 |
+
+Additional 5m checks: IS/OOS +65.33%/+58.06%, 13/15 profitable markets,
+leave-one-market-out minimum +97.77%, six of six positive months, bull/bear
++82.70%/+40.69%, high/low volatility +67.10%/+56.30%, and zero signals
+dropped by the predeclared ten-position cap. The 1m transfer is rejected and
+must not be launched.
+
+The live runner uses 1,500 gap-checked native 5m candles, fetched in three
+500-bar pages. A 500-bar EMA400 seed produced a wrong EMA200/EMA400 side on
+LIT; 1,500 bars matched the full-history side on all 15 markets and reduced
+the observed EMA400 initialization difference to roughly 0.0013% or less.
+P1 had zero prospective signals and zero trades before replacement, so P2
+starts with a clean forward sample. Real remains physically disabled until the
+predeclared forward gate passes.
 
 ## LuxAlgo database follow-up
 

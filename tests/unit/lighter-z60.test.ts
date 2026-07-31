@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   evaluateTrendFilteredZ60,
+  evaluateTrendStackZ60,
   evaluateVwz60,
   evaluateZ60Reclaim,
   evaluateZ60Touch,
@@ -143,6 +144,44 @@ describe('evaluateTrendFilteredZ60', () => {
     const result = evaluateTrendFilteredZ60(bars(closes));
     expect(result?.currentZ).toBeLessThan(-2.5);
     expect(result?.close).toBeLessThan(result?.trendMean ?? -Infinity);
+    expect(result?.signal).toBeNull();
+  });
+});
+
+describe('evaluateTrendStackZ60', () => {
+  it('admits both sides only with aligned EMA200/EMA400 trends', () => {
+    const longHistory = [
+      ...Array.from({ length: 1_100 }, () => 80),
+      ...Array.from({ length: 340 }, () => 100),
+      ...Array.from({ length: 59 }, (_, index) => 120 + (index % 2 ? 0.1 : -0.1)),
+      110,
+    ];
+    const shortHistory = [
+      ...Array.from({ length: 1_100 }, () => 120),
+      ...Array.from({ length: 340 }, () => 100),
+      ...Array.from({ length: 59 }, (_, index) => 80 + (index % 2 ? 0.1 : -0.1)),
+      90,
+    ];
+    const long = evaluateTrendStackZ60(bars(longHistory));
+    const short = evaluateTrendStackZ60(bars(shortHistory));
+    expect(long?.currentZ).toBeLessThan(-2.5);
+    expect(long?.close).toBeGreaterThan(long?.trendMean ?? Infinity);
+    expect(long?.trendMean).toBeGreaterThan(long?.slowTrendMean ?? Infinity);
+    expect(long?.signal).toBe('long');
+    expect(short?.currentZ).toBeGreaterThan(2.5);
+    expect(short?.close).toBeLessThan(short?.trendMean ?? -Infinity);
+    expect(short?.trendMean).toBeLessThan(short?.slowTrendMean ?? -Infinity);
+    expect(short?.signal).toBe('short');
+  });
+
+  it('blocks a Z excursion when the two trend averages are not aligned', () => {
+    const closes = [
+      ...Array.from({ length: 1_100 }, () => 120),
+      ...Array.from({ length: 399 }, (_, index) => 100 + (index % 2 ? 0.1 : -0.1)),
+      90,
+    ];
+    const result = evaluateTrendStackZ60(bars(closes));
+    expect(result?.currentZ).toBeLessThan(-2.5);
     expect(result?.signal).toBeNull();
   });
 });

@@ -42,24 +42,24 @@ type StrategySpec = {
   };
 };
 
-const NATIVE_TREND_PORTFOLIO_ID = 'z60t25-portfolio';
+const NATIVE_TREND_PORTFOLIO_ID = 'z60stack25-portfolio';
 const NATIVE_TREND_PORTFOLIO_MAX_OPEN = 10;
 const NATIVE_TREND_PORTFOLIO_MARKETS = [
-  { id: 'z60t25-btc', code: '036', symbol: 'BTCUSDT', asset: 'BTC', marketId: 1 },
-  { id: 'z60t25-eth', code: '037', symbol: 'ETHUSDT', asset: 'ETH', marketId: 0 },
-  { id: 'z60t25-sol', code: '038', symbol: 'SOLUSDT', asset: 'SOL', marketId: 2 },
-  { id: 'z60t25-bnb', code: '039', symbol: 'BNBUSDT', asset: 'BNB', marketId: 25 },
-  { id: 'z60t25-ltc', code: '040', symbol: 'LTCUSDT', asset: 'LTC', marketId: 35 },
-  { id: 'z60t25-hype', code: '041', symbol: 'HYPEUSDT', asset: 'HYPE', marketId: 24 },
-  { id: 'z60t25-zec', code: '042', symbol: 'ZECUSDT', asset: 'ZEC', marketId: 90 },
-  { id: 'z60t25-doge', code: '043', symbol: 'DOGEUSDT', asset: 'DOGE', marketId: 3 },
-  { id: 'z60t25-near', code: '044', symbol: 'NEARUSDT', asset: 'NEAR', marketId: 10 },
-  { id: 'z60t25-jup', code: '045', symbol: 'JUPUSDT', asset: 'JUP', marketId: 26 },
-  { id: 'z60t25-lit', code: '046', symbol: 'LITUSDT', asset: 'LIT', marketId: 120 },
-  { id: 'z60t25-gram', code: '047', symbol: 'GRAMUSDT', asset: 'GRAM', marketId: 12 },
-  { id: 'z60t25-xmr', code: '048', symbol: 'XMRUSDT', asset: 'XMR', marketId: 77 },
-  { id: 'z60t25-ena', code: '049', symbol: 'ENAUSDT', asset: 'ENA', marketId: 29 },
-  { id: 'z60t25-tao', code: '050', symbol: 'TAOUSDT', asset: 'TAO', marketId: 13 },
+  { id: 'z60stack25-btc', code: '036', symbol: 'BTCUSDT', asset: 'BTC', marketId: 1 },
+  { id: 'z60stack25-eth', code: '037', symbol: 'ETHUSDT', asset: 'ETH', marketId: 0 },
+  { id: 'z60stack25-sol', code: '038', symbol: 'SOLUSDT', asset: 'SOL', marketId: 2 },
+  { id: 'z60stack25-bnb', code: '039', symbol: 'BNBUSDT', asset: 'BNB', marketId: 25 },
+  { id: 'z60stack25-ltc', code: '040', symbol: 'LTCUSDT', asset: 'LTC', marketId: 35 },
+  { id: 'z60stack25-hype', code: '041', symbol: 'HYPEUSDT', asset: 'HYPE', marketId: 24 },
+  { id: 'z60stack25-zec', code: '042', symbol: 'ZECUSDT', asset: 'ZEC', marketId: 90 },
+  { id: 'z60stack25-doge', code: '043', symbol: 'DOGEUSDT', asset: 'DOGE', marketId: 3 },
+  { id: 'z60stack25-near', code: '044', symbol: 'NEARUSDT', asset: 'NEAR', marketId: 10 },
+  { id: 'z60stack25-jup', code: '045', symbol: 'JUPUSDT', asset: 'JUP', marketId: 26 },
+  { id: 'z60stack25-lit', code: '046', symbol: 'LITUSDT', asset: 'LIT', marketId: 120 },
+  { id: 'z60stack25-gram', code: '047', symbol: 'GRAMUSDT', asset: 'GRAM', marketId: 12 },
+  { id: 'z60stack25-xmr', code: '048', symbol: 'XMRUSDT', asset: 'XMR', marketId: 77 },
+  { id: 'z60stack25-ena', code: '049', symbol: 'ENAUSDT', asset: 'ENA', marketId: 29 },
+  { id: 'z60stack25-tao', code: '050', symbol: 'TAOUSDT', asset: 'TAO', marketId: 13 },
 ] as const;
 
 const t = (lang: Lang, ru: string, en: string): string => lang === 'en' ? en : ru;
@@ -563,18 +563,18 @@ const STRATEGIES: readonly StrategySpec[] = [
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
     ...market,
     portfolioId: NATIVE_TREND_PORTFOLIO_ID,
-    name: 'Portfolio Z60 · 2.5σ Touch · EMA200 Trend · Mean Exit',
+    name: 'Portfolio Z60 · 2.5σ Touch · EMA200/400 Stack · Mean Exit',
     stopPct: 1.5,
     backtest: {
       // One fixed rule across all 15 markets. These are portfolio-level
       // metrics after each market's measured p95 execution cost, adverse
       // funding and a maximum of ten naturally concurrent $100 positions.
       period: '2026-02-01 → 2026-07-31',
-      trades: 806,
-      winRatePct: 69.1,
-      profitFactor: 1.37,
-      netPct: 109.19,
-      maxDrawdownPct: 2.63,
+      trades: 759,
+      winRatePct: 70.1,
+      profitFactor: 1.45,
+      netPct: 123.39,
+      maxDrawdownPct: 2.45,
     },
   })),
 ] as const;
@@ -602,7 +602,7 @@ type NativeStrategyInfo = {
   threshold: number;
   period: number;
   timeExitBars: number;
-  trendFilter?: boolean;
+  trendFilter?: 'ema200' | 'ema200_400';
   realEnabled: boolean;
   noteRu: string;
   noteEn: string;
@@ -677,10 +677,10 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
       threshold: 2.5,
       period: 60,
       timeExitBars: 240,
-      trendFilter: true,
+      trendFilter: 'ema200_400' as const,
       realEnabled: false,
-      noteRu: `Нога единого ${market.asset}-портфеля. Одно правило без подбора по монете; Real отключён до общего prospective forward-гейта.`,
-      noteEn: `${market.asset} leg of one unified portfolio. One rule with no per-market tuning; Real is disabled until the combined prospective forward gate passes.`,
+      noteRu: `Нога единого ${market.asset}-портфеля P2. Одно правило без подбора по монете; вход только при согласованных EMA200/EMA400. Real отключён до общего prospective forward-гейта.`,
+      noteEn: `${market.asset} leg of the unified P2 portfolio. One rule with no per-market tuning; entry requires aligned EMA200/EMA400. Real is disabled until the combined prospective forward gate passes.`,
     },
   ])),
 };
@@ -2115,8 +2115,8 @@ export async function lighterNativeQuantHero(lang: Lang): Promise<string> {
       <div class="ll-title">${t(lang, 'Собственные стратегии · единый портфель', 'In-house strategies · unified portfolio')}</div>
       <div class="ll-sub">${t(
         lang,
-        '6 самостоятельных моделей + P1 на 15 рынках · единая статистика Shadow/Real →',
-        '6 standalone models + P1 across 15 markets · consolidated Shadow/Real statistics →',
+        '6 самостоятельных моделей + P2 на 15 рынках · единая статистика Shadow/Real →',
+        '6 standalone models + P2 across 15 markets · consolidated Shadow/Real statistics →',
       )}</div>
     </div>
     <div class="ll-stats">
@@ -2144,8 +2144,8 @@ function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
   if (!info.trendFilter) return touch;
   return `${touch} ${t(
     lang,
-    'Long разрешён только выше EMA200, Short — только ниже EMA200.',
-    'Long is allowed only above EMA200; Short only below EMA200.',
+    'P2: Long только при close > EMA200 > EMA400; Short — зеркально ниже обеих EMA.',
+    'P2: Long only when close > EMA200 > EMA400; Short is the mirrored condition below both EMAs.',
   )}`;
 }
 
@@ -2196,9 +2196,9 @@ function nativeStrategyGuide(
     </div>`;
   }).join('') + (nativeSpecs.some((spec) => spec.portfolioId === NATIVE_TREND_PORTFOLIO_ID)
     ? `<div class="ll-native-spec">
-      <b>PORTFOLIO P1 · 15 markets</b>
-      <span>TOUCH · Z60 · ±2.5σ · EMA200</span>
-      <span>${t(lang, 'Long только выше EMA200; Short только ниже EMA200. Одно правило на всех рынках.', 'Long only above EMA200; Short only below EMA200. One rule across every market.')}</span>
+      <b>PORTFOLIO P2 · 15 markets</b>
+      <span>TOUCH · Z60 · ±2.5σ · EMA200/400</span>
+      <span>${t(lang, 'Long: close > EMA200 > EMA400; Short: close < EMA200 < EMA400. Одно правило на всех рынках.', 'Long: close > EMA200 > EMA400; Short: close < EMA200 < EMA400. One rule across every market.')}</span>
       <span>${t(lang, 'Выход у SMA60, stop 1.5% или через 20 часов; максимум 10 одновременных Shadow-позиций. Общий forward-гейт; Real отключён.', 'Exit at SMA60, 1.5% stop, or after 20 hours; at most 10 concurrent Shadow positions. Combined forward gate; Real disabled.')}</span>
       <em class="collect">SHADOW ONLY</em>
     </div>`
@@ -2215,13 +2215,13 @@ function nativeStrategyGuide(
       <ol class="ll-guide-flow">
         <li><b>${t(lang, 'Завершённая свеча.', 'Completed candle.')}</b> ${t(
           lang,
-          'Каждые 15 секунд runner проверяет новую закрытую 5m свечу с 25-секундным запасом на публикацию. Базовые модели собирают 5m только из всех пяти 1m свечей; P1 получает 500 нативных 5m свечей и отклоняет историю с любым разрывом.',
-          'Every 15 seconds the runner checks for a newly completed 5m candle with a 25-second publication grace. Base models build 5m only from all five 1m candles; P1 fetches 500 native 5m candles and rejects any history containing a gap.',
+          'Каждые 15 секунд runner проверяет новую закрытую 5m свечу с 25-секундным запасом на публикацию. Базовые модели собирают 5m только из всех пяти 1m свечей; P2 постранично получает 1500 нативных 5m свечей и отклоняет историю с любым разрывом.',
+          'Every 15 seconds the runner checks for a newly completed 5m candle with a 25-second publication grace. Base models build 5m only from all five 1m candles; P2 paginates 1,500 native 5m candles and rejects any history containing a gap.',
         )}</li>
         <li><b>${t(lang, 'Расчёт.', 'Calculation.')}</b> ${t(
           lang,
-          'Для STRAT-030–033 по последним 60 закрытиям считаются SMA60 и Z. STRAT-034–035 взвешивают их объёмом. Portfolio P1 дополнительно считает EMA200 по завершённым 5m свечам. Незавершённая свеча в расчёт не попадает.',
-          'STRAT-030–033 calculate SMA60 and Z from the latest 60 closes. STRAT-034–035 volume-weight them. Portfolio P1 also calculates EMA200 from completed 5m candles. The unfinished candle is never included.',
+          'Для STRAT-030–033 по последним 60 закрытиям считаются SMA60 и Z. STRAT-034–035 взвешивают их объёмом. Portfolio P2 дополнительно считает EMA200 и EMA400 по завершённым 5m свечам. Незавершённая свеча в расчёт не попадает.',
+          'STRAT-030–033 calculate SMA60 and Z from the latest 60 closes. STRAT-034–035 volume-weight them. Portfolio P2 also calculates EMA200 and EMA400 from completed 5m candles. The unfinished candle is never included.',
         )}</li>
         <li><b>${t(lang, 'Решение.', 'Decision.')}</b> ${t(
           lang,
@@ -2240,8 +2240,8 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Real-canary и защита.', 'Real canary and protection.')}</b> ${t(
           lang,
-          'Тот же сигнал видит отдельный Real-исполнитель. Только разрешённые STRAT-030/032/033 могут открыть $100 с плечом 10×. После подтверждения позиции сразу ставится биржевой reduce-only stop 1.5%; новые входы отключаются при дневном убытке −$10, портфельной просадке −$15 или паузе конкретной стратегии. STRAT-031/034/035 и портфель P1 остаются только в Shadow.',
-          'A separate Real executor observes the same signal. Only allowlisted STRAT-030/032/033 may open $100 at 10× leverage. Once the position is confirmed, an exchange-native 1.5% reduce-only stop is placed immediately; new entries stop at a −$10 daily loss, −$15 portfolio drawdown, or per-strategy pause. STRAT-031/034/035 and portfolio P1 remain Shadow-only.',
+          'Тот же сигнал видит отдельный Real-исполнитель. Только разрешённые STRAT-030/032/033 могут открыть $100 с плечом 10×. После подтверждения позиции сразу ставится биржевой reduce-only stop 1.5%; новые входы отключаются при дневном убытке −$10, портфельной просадке −$15 или паузе конкретной стратегии. STRAT-031/034/035 и портфель P2 остаются только в Shadow.',
+          'A separate Real executor observes the same signal. Only allowlisted STRAT-030/032/033 may open $100 at 10× leverage. Once the position is confirmed, an exchange-native 1.5% reduce-only stop is placed immediately; new entries stop at a −$10 daily loss, −$15 portfolio drawdown, or per-strategy pause. STRAT-031/034/035 and portfolio P2 remain Shadow-only.',
         )}</li>
       </ol>
       <div class="ll-native-specs">${strategyLines}</div>
@@ -2289,11 +2289,11 @@ function strategyRows(
   const assets = portfolioSpecs.map((spec) => spec.asset).join(' · ');
   const tooltip = t(
     lang,
-    `Одно фиксированное двухстороннее правило на 15 рынках без настройки по монете. Long: Z60 < −2.5 и цена выше EMA200; Short: Z60 > +2.5 и цена ниже EMA200. Выход у SMA60, stop 1.5% или через 20 часов. 180d: 806 сделок, PF 1.37, OOS положительный, 13/15 рынков прибыльны, шесть из шести месяцев положительны. Только prospective Shadow.`,
-    `One fixed two-sided rule across 15 markets with no per-market tuning. Long: Z60 < −2.5 while price is above EMA200; Short: Z60 > +2.5 while price is below EMA200. Exit at SMA60, 1.5% stop, or after 20 hours. 180d: 806 trades, PF 1.37, positive OOS, 13/15 profitable markets, and six of six positive months. Prospective Shadow only.`,
+    `Одно фиксированное двухстороннее правило на 15 рынках без настройки по монете. Long: Z60 < −2.5 и close > EMA200 > EMA400; Short — зеркально. Выход у SMA60, stop 1.5% или через 20 часов. Издержки отбора — измеренный p95 полного круга для целевой позиции $100; Shadow отдельно фиксирует фактический VWAP $1000. 180d: 759 сделок, PF 1.45, net +123.39%, DD 2.45%, 4/4 периода, обе стороны и оба режима волатильности положительны. 1m отвергнут. Только prospective Shadow.`,
+    `One fixed two-sided rule across 15 markets with no per-market tuning. Long: Z60 < −2.5 and close > EMA200 > EMA400; Short is the mirrored condition. Exit at SMA60, 1.5% stop, or after 20 hours. Selection costs use measured full-round-trip p95 for the target $100 position; Shadow separately records actual $1,000 VWAP. 180d: 759 trades, PF 1.45, net +123.39%, 2.45% DD, 4/4 folds, both sides and both volatility regimes positive. The 1m transfer was rejected. Prospective Shadow only.`,
   );
   return `${regularRows}<tr>
-    <td><span class="ll-strategy-name" tabindex="0" title="${esc(tooltip)}" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>PORTFOLIO P1 · 15 markets</b><small> · Z60T 2.5σ Touch</small><i>?</i></span><small>${assets}</small></td>
+    <td><span class="ll-strategy-name" tabindex="0" title="${esc(tooltip)}" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>PORTFOLIO P2 · 15 markets</b><small> · Z60 Stack 2.5σ Touch</small><i>?</i></span><small>${assets}</small></td>
     <td class="${s.feedLive ? 'pos' : 'neg'}">${s.feedLive ? 'LIVE' : 'OFF'}</td>
     <td class="num"><b>${backtest.trades} · ${backtest.winRatePct.toFixed(1)}% · ${backtest.profitFactor.toFixed(2)}</b><small> · ${signedPct(backtest.netPct)} · DD ${backtest.maxDrawdownPct.toFixed(2)}%</small></td>
     <td class="num"><b>${s.closed} / ${s.open}</b><small> · WR ${wr == null ? '—' : `${wr.toFixed(0)}%`} · PF ${pfLabel(s.profitFactor)}</small></td>
@@ -2747,7 +2747,7 @@ async function render(
   const scopeLabel = requested.strategy
     ? `STRAT-${requested.strategy.code} · ${requested.strategy.asset}`
     : requested.group === 'native'
-      ? t(lang, '6 самостоятельных + P1 · 15 рынков', '6 standalone + P1 · 15 markets')
+      ? t(lang, '6 самостоятельных + P2 · 15 рынков', '6 standalone + P2 · 15 markets')
       : [...new Set(scopeSpecs.map((spec) => spec.asset))].join(' · ');
   const scopeMarketCount = new Set(scopeSpecs.map((spec) => spec.marketId)).size;
   const shadowCards = `
@@ -2801,7 +2801,7 @@ async function render(
   const pageBadge = requested.strategy
     ? `STRAT-${requested.strategy.code} · ${requested.strategy.asset} · 5M · NATIVE LIGHTER`
     : requested.group === 'native'
-      ? `NATIVE LIGHTER · ${displayModelCount} MODELS · P1 SHADOW`
+      ? `NATIVE LIGHTER · ${displayModelCount} MODELS · P2 SHADOW`
       : `STRAT-${scopeSpecs.map((spec) => spec.code).join(' · ')} · PROSPECTIVE FORWARD`;
   const pageDescription = requested.strategy
     ? (NATIVE_LIVE_STRATEGY_IDS as readonly string[]).includes(requested.strategy.id)
@@ -2844,8 +2844,8 @@ async function render(
     : requested.group === 'native'
       ? t(
         lang,
-        'В Real разрешены только изолированные canary STRAT-030/032/033 по $100. STRAT-031/034/035 и единый портфель P1 из 15 рынков копят prospective Shadow; открыть по ним реальную позицию исполнитель не может. На каждую разрешённую Real-позицию сразу ставится биржевой reduce-only stop 1.5%.',
-        'Only isolated $100 Real canaries STRAT-030/032/033 are allowlisted. STRAT-031/034/035 and unified 15-market portfolio P1 collect prospective Shadow evidence; the executor cannot open a real position for them. Every allowlisted Real position receives an exchange-native 1.5% reduce-only stop immediately.',
+        'В Real разрешены только изолированные canary STRAT-030/032/033 по $100. STRAT-031/034/035 и единый портфель P2 из 15 рынков копят prospective Shadow; открыть по ним реальную позицию исполнитель не может. На каждую разрешённую Real-позицию сразу ставится биржевой reduce-only stop 1.5%.',
+        'Only isolated $100 Real canaries STRAT-030/032/033 are allowlisted. STRAT-031/034/035 and unified 15-market portfolio P2 collect prospective Shadow evidence; the executor cannot open a real position for them. Every allowlisted Real position receives an exchange-native 1.5% reduce-only stop immediately.',
       )
       : t(
         lang,
@@ -2899,8 +2899,8 @@ async function render(
       <p class="ll-note">${requested.group === 'native'
         ? t(
           lang,
-          'Native forward-гейт: ≥20 закрытых сделок, net после фактических spread/slippage/funding > 0%, PF ≥1.20, обе половины >0%, max DD ≤5% выделенной мощности, ошибки снимка ≤2%, полный execution-sample на каждую закрытую сделку и p95 возраста стакана ≤2с. Для P1 мощность заранее зафиксирована как 10 одновременных позиций. Универсального лимита издержек нет: их влияние уже отражено в net PnL. При провале новые Shadow-входы останавливаются автоматически; выходы остаются активны.',
-          'Native forward gate: ≥20 closed trades, net after actual spread/slippage/funding > 0%, PF ≥1.20, both halves >0%, max DD ≤5% of allocated capacity, capture errors ≤2%, a complete execution sample for every closed trade, and book-age p95 ≤2s. P1 capacity is frozen at 10 concurrent positions. There is no universal cost ceiling because its impact is already embedded in net PnL. A failure automatically pauses new Shadow entries while exits remain active.',
+          'Native forward-гейт: ≥20 закрытых сделок, net после фактических spread/slippage/funding > 0%, PF ≥1.20, обе половины >0%, max DD ≤5% выделенной мощности, ошибки снимка ≤2%, полный execution-sample на каждую закрытую сделку и p95 возраста стакана ≤2с. Для P2 мощность заранее зафиксирована как 10 одновременных позиций. Универсального лимита издержек нет: их влияние уже отражено в net PnL. При провале новые Shadow-входы останавливаются автоматически; выходы остаются активны.',
+          'Native forward gate: ≥20 closed trades, net after actual spread/slippage/funding > 0%, PF ≥1.20, both halves >0%, max DD ≤5% of allocated capacity, capture errors ≤2%, a complete execution sample for every closed trade, and book-age p95 ≤2s. P2 capacity is frozen at 10 concurrent positions. There is no universal cost ceiling because its impact is already embedded in net PnL. A failure automatically pauses new Shadow entries while exits remain active.',
         )
         : t(lang, 'Гейт: ≥20 закрытых Lighter-forward сделок, net > 0%, PF ≥1.20, обе половины >0%.', 'Gate: ≥20 closed Lighter-forward trades, net > 0%, PF ≥1.20, and both halves >0%.')}</p></div>
 

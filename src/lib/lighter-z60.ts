@@ -17,6 +17,7 @@ export type Z60Snapshot = {
   currentZ: number;
   signal: Z60Signal;
   trendMean?: number;
+  slowTrendMean?: number;
 };
 
 export type Z60EntryMode = 'reclaim' | 'touch';
@@ -152,6 +153,47 @@ export function evaluateTrendFilteredZ60(
       ? null
       : snapshot.signal;
   return { ...snapshot, signal, trendMean };
+}
+
+/**
+ * Two-sided Z-score pullback that requires a fully aligned trend stack.
+ * Long: close > EMA(fast) > EMA(slow). Short is the exact mirror image.
+ * Every value is calculated from completed bars only.
+ */
+export function evaluateTrendStackZ60(
+  bars: readonly Z60Bar[],
+  period = 60,
+  threshold = 2.5,
+  mode: Z60EntryMode = 'touch',
+  fastTrendPeriod = 200,
+  slowTrendPeriod = 400,
+): Z60Snapshot | null {
+  if (
+    bars.length < Math.max(period + 1, fastTrendPeriod, slowTrendPeriod)
+    || fastTrendPeriod < 2
+    || slowTrendPeriod <= fastTrendPeriod
+  ) return null;
+  const snapshot = evaluateZ60(bars, period, threshold, mode);
+  if (!snapshot) return null;
+
+  const fastAlpha = 2 / (fastTrendPeriod + 1);
+  const slowAlpha = 2 / (slowTrendPeriod + 1);
+  let trendMean = bars[0]!.close;
+  let slowTrendMean = bars[0]!.close;
+  for (let index = 1; index < bars.length; index += 1) {
+    const close = bars[index]!.close;
+    trendMean = close * fastAlpha + trendMean * (1 - fastAlpha);
+    slowTrendMean = close * slowAlpha + slowTrendMean * (1 - slowAlpha);
+  }
+
+  const signal = snapshot.signal === 'long'
+    && !(snapshot.close > trendMean && trendMean > slowTrendMean)
+    ? null
+    : snapshot.signal === 'short'
+      && !(snapshot.close < trendMean && trendMean < slowTrendMean)
+      ? null
+      : snapshot.signal;
+  return { ...snapshot, signal, trendMean, slowTrendMean };
 }
 
 /**
