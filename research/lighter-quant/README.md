@@ -269,6 +269,27 @@ The research script writes a report only and has no registration or trading
 imports. A passing historical result would still enter prospective Shadow,
 never Real.
 
+### Frozen result
+
+The one preregistered run used 179.889 strictly common days from
+2026-02-01 through 2026-07-31. No gaps were filled. Neither timeframe passed:
+
+| TF | N | Net at measured p95 | PF | 1.5x-cost net / PF | L95 | DD | Folds | Discovery / OOS |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1m | 2,743 | -96.14% | 0.84 | -156.19% / 0.75 | -0.054% | -116.63% | 0/4 | -93.73% / -2.41% |
+| 5m | 3,167 | -60.77% | 0.92 | -146.17% / 0.81 | -0.038% | -85.44% | 0/4 | -69.34% / +8.57% |
+
+The isolated positive 5m OOS total is not an edge: its PF is only 1.05, its
+L95 is negative, its stressed OOS is -17.69%, and the frozen discovery sample
+lost 69.34%. Bull, bear, high-volatility and low-volatility slices were all
+negative at both timeframes; only one of six months was positive. The result
+file is `data/lighter-xs-residual-results.json`.
+
+**Decision:** reject this family unchanged. Do not tune the dispersion,
+lookback or hold after seeing these results, and do not add it to Native
+Shadow or Real. The independent search remains focused on the preregistered
+prospective microstructure hypotheses once their data-readiness gates open.
+
 ## LuxAlgo database follow-up
 
 A separate LuxAlgo AI Backtesting database search was run for symmetric
