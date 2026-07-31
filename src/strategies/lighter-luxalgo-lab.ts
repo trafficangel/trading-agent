@@ -577,10 +577,10 @@ const STRATEGIES: readonly StrategySpec[] = [
       // metrics after each market's measured p95 execution cost, adverse
       // funding and a maximum of ten naturally concurrent $100 positions.
       period: '2026-02-01 → 2026-07-31',
-      trades: 759,
+      trades: 758,
       winRatePct: 70.1,
       profitFactor: 1.45,
-      netPct: 123.39,
+      netPct: 122.80,
       maxDrawdownPct: 2.45,
     },
   })),
@@ -2398,8 +2398,8 @@ function strategyRows(
   const assets = portfolioSpecs.map((spec) => spec.asset).join(' · ');
   const tooltip = t(
     lang,
-    `Одно фиксированное двухстороннее правило на 15 рынках без настройки по монете. Long: Z60 < −2.5 и close > EMA200 > EMA400; Short — зеркально. Выход у SMA60, stop 1.5% или через 20 часов. Издержки отбора — измеренный p95 полного круга для целевой позиции $100; Shadow отдельно фиксирует фактический VWAP $1000. 180d: 759 сделок, PF 1.45, net +123.39%, DD 2.45%, 4/4 периода, обе стороны и оба режима волатильности положительны. 1m отвергнут. Только prospective Shadow.`,
-    `One fixed two-sided rule across 15 markets with no per-market tuning. Long: Z60 < −2.5 and close > EMA200 > EMA400; Short is the mirrored condition. Exit at SMA60, 1.5% stop, or after 20 hours. Selection costs use measured full-round-trip p95 for the target $100 position; Shadow separately records actual $1,000 VWAP. 180d: 759 trades, PF 1.45, net +123.39%, 2.45% DD, 4/4 folds, both sides and both volatility regimes positive. The 1m transfer was rejected. Prospective Shadow only.`,
+    `Одно фиксированное двухстороннее правило на 15 рынках без настройки по монете. Long: Z60 < −2.5 и close > EMA200 > EMA400; Short — зеркально. Выход у SMA60, stop 1.5% или через 20 часов. Издержки отбора — измеренный p95 полного круга для целевой позиции $100; неблокирующий adverse-сценарий использует худший фактически наблюдавшийся полный круг, а Shadow отдельно фиксирует VWAP $1000. Повторяемый 180d-прогон: 758 сделок, PF 1.45, net +122.80%, observed-max +115.86% / PF 1.42, DD 2.45%, 4/4 периода, обе стороны и оба режима волатильности положительны. 1m отвергнут. Только prospective Shadow.`,
+    `One fixed two-sided rule across 15 markets with no per-market tuning. Long: Z60 < −2.5 and close > EMA200 > EMA400; Short is the mirrored condition. Exit at SMA60, 1.5% stop, or after 20 hours. Selection costs use measured full-round-trip p95 for the target $100 position; the non-blocking adverse scenario uses the worst actually observed round trip, while Shadow separately records $1,000 VWAP. Reproducible 180d run: 758 trades, PF 1.45, net +122.80%, observed-max +115.86% / PF 1.42, 2.45% DD, 4/4 folds, both sides and both volatility regimes positive. The 1m transfer was rejected. Prospective Shadow only.`,
   );
   return `${regularRows}<tr>
     <td><span class="ll-strategy-name" tabindex="0" title="${esc(tooltip)}" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>PORTFOLIO P2 · 15 markets</b><small> · Z60 Stack 2.5σ Touch</small><i>?</i></span><small>${assets}</small></td>

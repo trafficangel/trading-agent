@@ -5,7 +5,7 @@
  * Signals are computed only from completed candles and execute at the next
  * candle open. Commission is zero for a Standard account; an independent
  * measured-cost discovery reserve is subtracted from every trade. A second,
- * deliberately adverse reserve is reported as sensitivity evidence only.
+ * measured worst-observed reserve is reported as sensitivity evidence only.
  *
  * Run after downloading native candles:
  *   pnpm tsx scripts/sweep-lighter-native-1m.ts
@@ -24,7 +24,9 @@ const SYMBOLS = (process.env.SYMBOLS ?? 'BTC,ETH,SOL')
 // Selection uses each market's measured executable L2 p95. A common fallback
 // would silently turn an adverse scenario into an assumed trading cost, so it
 // is disabled unless an exploratory run explicitly opts in. The separate
-// adverse result is 1.5x the measured p95 and is sensitivity evidence only.
+// adverse result uses the worst executable round-trip observed in the same
+// market/notional sample. It is sensitivity evidence only: no arbitrary fixed
+// percentage or multiplier can become an eligibility filter.
 const FALLBACK_EXECUTION_COST_PCT = Number(
   process.env.FALLBACK_EXECUTION_COST_PCT ?? 0.02,
 );
@@ -119,6 +121,7 @@ type Trade = { side: Side; entryAt: number; exitAt: number; entryIdx: number; pc
 type PortfolioTrade = Trade & {
   symbol: string;
   costPct: number;
+  adverseCostPct: number;
   trendRegime: TrendRegime;
   volatilityRegime: VolatilityRegime;
 };
@@ -134,10 +137,14 @@ type WindowStats = {
 
 type ExecutionCostFile = {
   notionalUsd?: number;
-  summaries?: Record<string, { p95Pct?: number | null }>;
+  summaries?: Record<string, {
+    p95Pct?: number | null;
+    maxPct?: number | null;
+  }>;
 };
 
-const executionCostBySymbol = new Map<string, number>();
+type ExecutionCost = { p95Pct: number; adversePct: number };
+const executionCostBySymbol = new Map<string, ExecutionCost>();
 for (const file of EXECUTION_COST_FILES) {
   const parsed = JSON.parse(readFileSync(resolve(file), 'utf8')) as ExecutionCostFile;
   // VWAP/slippage is not portable across order sizes. Never qualify a
@@ -148,15 +155,26 @@ for (const file of EXECUTION_COST_FILES) {
   ) continue;
   for (const [symbol, summary] of Object.entries(parsed.summaries ?? {})) {
     if (summary.p95Pct != null && Number.isFinite(summary.p95Pct) && summary.p95Pct >= 0) {
-      executionCostBySymbol.set(symbol.toUpperCase(), summary.p95Pct);
+      const measuredMax = summary.maxPct != null
+        && Number.isFinite(summary.maxPct)
+        && summary.maxPct >= summary.p95Pct
+        ? summary.maxPct
+        : summary.p95Pct;
+      executionCostBySymbol.set(symbol.toUpperCase(), {
+        p95Pct: summary.p95Pct,
+        adversePct: measuredMax,
+      });
     }
   }
 }
 
-function executionCost(symbol: string): number {
+function executionCost(symbol: string): ExecutionCost {
   const measured = executionCostBySymbol.get(symbol.toUpperCase());
   if (measured != null) return measured;
-  if (ALLOW_FALLBACK_EXECUTION_COST) return FALLBACK_EXECUTION_COST_PCT;
+  if (ALLOW_FALLBACK_EXECUTION_COST) return {
+    p95Pct: FALLBACK_EXECUTION_COST_PCT,
+    adversePct: FALLBACK_EXECUTION_COST_PCT,
+  };
   throw new Error(
     `No measured executable p95 cost for ${symbol}. Sample its L2 first or explicitly set `
     + 'ALLOW_FALLBACK_EXECUTION_COST=1 for a non-qualifying exploratory run.',
@@ -1107,6 +1125,7 @@ const rows: Array<{
   symbol: string;
   rule: string;
   costPct: number;
+  adverseCostPct: number;
   trades: Trade[];
   baseline: number;
   stress: number;
@@ -1156,7 +1175,9 @@ for (const [symbol, arrays] of loaded) {
     0,
     ((arrays.c.at(-1)?.t ?? 0) - (arrays.c[0]?.t ?? 0)) / 86_400_000,
   );
-  const costPct = executionCost(symbol);
+  const measuredCost = executionCost(symbol);
+  const costPct = measuredCost.p95Pct;
+  const adverseCostPct = measuredCost.adversePct;
   for (const rule of rules()) {
     if (RULE_FILTER && !rule.name.includes(RULE_FILTER)) continue;
     const trades = simulate(rule, arrays);
@@ -1166,6 +1187,7 @@ for (const [symbol, arrays] of loaded) {
         ...trade,
         symbol,
         costPct,
+        adverseCostPct,
         ...classifyRegimes(arrays, trade.entryIdx),
       })));
       portfolioGroups.set(rule.name, group);
@@ -1176,12 +1198,13 @@ for (const [symbol, arrays] of loaded) {
       symbol,
       rule: rule.name,
       costPct,
+      adverseCostPct,
       trades,
       baseline: sum(trades),
       stress: sum(trades, costPct),
       stressPf: pf(trades, costPct),
-      robustStress: sum(trades, costPct * 1.5),
-      robustPf: pf(trades, costPct * 1.5),
+      robustStress: sum(trades, adverseCostPct),
+      robustPf: pf(trades, adverseCostPct),
       folds: positiveFolds(trades, costPct),
       is: sum(trades.slice(0, cut), costPct),
       oos: sum(trades.slice(cut), costPct),
@@ -1239,22 +1262,22 @@ function applyPositionCap(
   return { accepted, dropped, maxConcurrent };
 }
 
-function portfolioTradeNet(trade: PortfolioTrade, costMultiplier = 1): number {
-  return tradeNet(trade, trade.costPct * costMultiplier);
+function portfolioTradeNet(trade: PortfolioTrade, adverse = false): number {
+  return tradeNet(trade, adverse ? trade.adverseCostPct : trade.costPct);
 }
 
-function portfolioSum(trades: PortfolioTrade[], costMultiplier = 1): number {
+function portfolioSum(trades: PortfolioTrade[], adverse = false): number {
   return trades.reduce(
-    (total, trade) => total + portfolioTradeNet(trade, costMultiplier),
+    (total, trade) => total + portfolioTradeNet(trade, adverse),
     0,
   );
 }
 
-function portfolioPf(trades: PortfolioTrade[], costMultiplier = 1): number {
+function portfolioPf(trades: PortfolioTrade[], adverse = false): number {
   let gains = 0;
   let losses = 0;
   for (const trade of trades) {
-    const pnl = portfolioTradeNet(trade, costMultiplier);
+    const pnl = portfolioTradeNet(trade, adverse);
     if (pnl >= 0) gains += pnl;
     else losses -= pnl;
   }
@@ -1418,12 +1441,12 @@ const portfolioRows: PortfolioRow[] = [...portfolioGroups.entries()].map(
       dropped: capped.dropped,
       maxConcurrent: capped.maxConcurrent,
       net,
-      robustNet: portfolioSum(trades, 1.5),
+      robustNet: portfolioSum(trades, true),
       profitFactor: portfolioPf(trades),
       winRatePct: trades.length
         ? trades.filter((trade) => portfolioTradeNet(trade) > 0).length / trades.length * 100
         : 0,
-      robustProfitFactor: portfolioPf(trades, 1.5),
+      robustProfitFactor: portfolioPf(trades, true),
       drawdownUsd: drawdownUnits * PORTFOLIO_POSITION_NOTIONAL_USD / 100,
       drawdownPct: capacityUsd > 0
         ? drawdownUnits * PORTFOLIO_POSITION_NOTIONAL_USD / capacityUsd
@@ -1496,8 +1519,8 @@ const portfolioBest = [...portfolioRows].sort((a, b) => b.net - a.net);
 
 const print = (row: typeof rows[number]): string =>
   `${row.symbol.padEnd(5)} ${row.rule.padEnd(27)} N${String(row.trades.length).padStart(4)} D${row.coverageDays.toFixed(0).padStart(3)} `
-  + `cost ${row.costPct.toFixed(4)}% gross ${fmt(row.baseline).padStart(8)} base ${fmt(row.stress).padStart(8)} PF ${row.stressPf.toFixed(2)} `
-  + `robust ${fmt(row.robustStress).padStart(8)}/PF${row.robustPf.toFixed(2)} `
+  + `cost p95/max ${row.costPct.toFixed(4)}/${row.adverseCostPct.toFixed(4)}% gross ${fmt(row.baseline).padStart(8)} base ${fmt(row.stress).padStart(8)} PF ${row.stressPf.toFixed(2)} `
+  + `observed-max ${fmt(row.robustStress).padStart(8)}/PF${row.robustPf.toFixed(2)} `
   + `DD ${fmt(drawdown(row.trades, row.costPct))} WR ${(row.trades.filter((trade) => tradeNet(trade, row.costPct) > 0).length / row.trades.length * 100).toFixed(1)}% `
   + `L95 ${row.meanL95 >= 0 ? '+' : ''}${row.meanL95.toFixed(4)} `
   + `hold ${median(row.trades.map((trade) => (trade.exitAt - trade.entryAt) / 60_000)).toFixed(0)}m `
@@ -1530,7 +1553,7 @@ const printPortfolio = (row: PortfolioRow): string =>
 const costLabel = executionCostBySymbol.size
   ? `${executionCostBySymbol.size} market-specific p95 costs`
   : `${FALLBACK_EXECUTION_COST_PCT}% explicitly enabled fallback cost`;
-console.log(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${costLabel} · adverse 1.5x measured p95 (non-blocking) · ${FUNDING_PER_HOUR_PCT}%/h adverse funding · max DD ${MAX_BACKTEST_DD_PCT}%`);
+console.log(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${costLabel} · adverse measured max (non-blocking) · ${FUNDING_PER_HOUR_PCT}%/h adverse funding · max DD ${MAX_BACKTEST_DD_PCT}%`);
 console.log(`\nQUALIFIED (${qualified.length})`);
 console.log(qualified.length ? qualified.slice(0, 30).map(print).join('\n') : '— none —');
 console.log('\nTOP 30 (including failures)');

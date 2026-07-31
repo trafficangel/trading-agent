@@ -628,3 +628,26 @@ positive IS/OOS and Long/Short), but still failed the frozen PF gate at `1.18 <
 1.20`; it therefore remains a rejected observation rather than a post-hoc
 single-market strategy. The family is closed without retuning and is not added
 to Shadow or Real.
+
+## Execution sensitivity policy correction
+
+On 2026-07-31 the remaining arbitrary cost sensitivity was removed from future
+Native Quant scans. The blocking execution deduction remains each market's
+measured executable `$100` round-trip p95. The separate non-blocking adverse
+column now uses the maximum round-trip cost actually observed in the same
+market/notional sample, not a fixed `0.10%`/`0.15%` value and not `1.5 × p95`.
+
+The historical SQZ20 and RSI2PB result records above retain their original
+`1.5 × p95` labels because changing a completed frozen result would be false
+reporting. This policy correction applies prospectively. Once the continuously
+recorded L2 dataset passes its frozen 21-day quality gate, its longer-window
+tail estimate supersedes the short discovery samples; until then no new
+candidate can use that dataset for promotion.
+
+The unchanged P2 rule was rerun immediately after the policy correction. Its
+blocking p95 result remains qualified: 758 trades, net `+122.80%`, PF `1.45`,
+4/4 folds, Long/Short `+82.70 / +40.10`, high/low-volatility regimes
+`+67.10 / +55.71`, maximum capacity drawdown `−2.45%`, and all six months
+positive. Replacing `1.5 × p95` with each market's observed maximum produced
+`+115.86%` and PF `1.42`; this is reported as sensitivity evidence and does not
+alter the prospective Shadow gate.
