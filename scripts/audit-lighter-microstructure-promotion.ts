@@ -10,6 +10,7 @@ import {
 } from '../src/lib/lighter-luxalgo-math.js';
 import {
   evaluateMicrostructureForwardTrades,
+  microstructureCandidateKey,
   type MicrostructureShadowCandidate,
   type MicrostructureShadowReport,
 } from '../src/lib/lighter-microstructure-shadow.js';
@@ -64,6 +65,30 @@ const outputPath = resolve(
   flagValue('--output') ?? 'data/lighter-native-microstructure-promotion-audit.json',
 );
 const generatedAt = new Date().toISOString();
+let existingAudit: Record<string, unknown> | null = null;
+if (existsSync(outputPath)) {
+  const value = readJson(outputPath);
+  if (value && typeof value === 'object') existingAudit = value as Record<string, unknown>;
+}
+
+function existingCandidatePause(candidateKey: string): string | null {
+  const candidates = Array.isArray(existingAudit?.candidates) ? existingAudit.candidates : [];
+  for (const value of candidates) {
+    if (!value || typeof value !== 'object') continue;
+    const row = value as Record<string, unknown>;
+    if (row.candidateKey !== candidateKey) continue;
+    const pausedAt = String(row.pausedAt ?? '');
+    if (Number.isFinite(Date.parse(pausedAt))) return pausedAt;
+  }
+  return null;
+}
+
+function existingPortfolioPause(): string | null {
+  const portfolio = existingAudit?.portfolio;
+  if (!portfolio || typeof portfolio !== 'object') return null;
+  const pausedAt = String((portfolio as Record<string, unknown>).pausedAt ?? '');
+  return Number.isFinite(Date.parse(pausedAt)) ? pausedAt : null;
+}
 
 if (!existsSync(shadowPath)) {
   const report = {
@@ -118,17 +143,30 @@ const evaluations = candidates.map((candidate) => {
   const candidateTrades = trades.filter((trade) =>
     trade.ruleId === candidate.ruleId && trade.barMinutes === candidate.timeframeMinutes);
   const evaluation = evaluateMicrostructureForwardTrades(candidateTrades, 1);
+  const candidateKey = microstructureCandidateKey(candidate);
+  const pausedAt = existingCandidatePause(candidateKey)
+    ?? (!evaluation.entryAllowed ? generatedAt : null);
   return {
+    candidateKey,
     candidate,
     evaluation,
-    decision: decision(evaluation, dataHealthy),
+    pausedAt,
+    decision: pausedAt == null
+      ? decision(evaluation, dataHealthy)
+      : {
+        shadowAction: 'pause_new_entries',
+        realAction: 'disabled',
+        manualReviewRequired: true,
+      },
   };
 });
 const portfolioEvaluation = evaluateMicrostructureForwardTrades(trades, 10);
+const portfolioPausedAt = existingPortfolioPause()
+  ?? (!portfolioEvaluation.entryAllowed ? generatedAt : null);
 const eligibleCandidateIds = dataHealthy
   ? evaluations
-    .filter((row) => row.evaluation.status === 'passed')
-    .map((row) => `${row.candidate.suite}:${row.candidate.id}`)
+    .filter((row) => row.evaluation.status === 'passed' && row.pausedAt == null)
+    .map((row) => row.candidateKey)
   : [];
 const report = {
   version: 'lighter-microstructure-promotion-audit-v1',
@@ -146,8 +184,16 @@ const report = {
   candidates: evaluations,
   portfolio: {
     evaluation: portfolioEvaluation,
-    decision: decision(portfolioEvaluation, dataHealthy),
+    pausedAt: portfolioPausedAt,
+    decision: portfolioPausedAt == null
+      ? decision(portfolioEvaluation, dataHealthy)
+      : {
+        shadowAction: 'pause_new_entries',
+        realAction: 'disabled',
+        manualReviewRequired: true,
+      },
   },
+  permanentPauses: true,
   exactFunding: true,
   measuredExecutionCosts: true,
   autoPromotion: false,

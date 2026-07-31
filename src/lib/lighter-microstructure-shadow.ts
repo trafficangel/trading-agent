@@ -31,6 +31,15 @@ export type MicrostructureShadowCandidate = {
   ruleId: string;
 };
 
+export function microstructureCandidateKey(candidate: MicrostructureShadowCandidate): string {
+  return `${candidate.suite}:${candidate.id}`;
+}
+
+export type MicrostructureEntryPauses = {
+  portfolioPausedAtMs?: number | null;
+  candidatePausedAtMs?: ReadonlyMap<string, number>;
+};
+
 export type MicrostructureShadowFrozenSource = {
   suite: MicrostructureSuite;
   version: string;
@@ -311,6 +320,7 @@ export function prospectiveMicrostructureShadowTrades(
   featuresByTimeframe: ReadonlyMap<1 | 5, readonly MicroFeatureBar[]>,
   fundingByMarket: ReadonlyMap<number, LighterFundingSeries>,
   nowMs: number,
+  pauses: MicrostructureEntryPauses = {},
 ): MicroTrade[] {
   if (!Number.isFinite(nowMs)) throw new Error('invalid Shadow report time');
   if (manifest.status !== 'active') return [];
@@ -321,12 +331,21 @@ export function prospectiveMicrostructureShadowTrades(
       .find((item) => item.id === candidate.ruleId);
     if (!rule) throw new Error(`unknown Shadow candidate rule: ${candidate.ruleId}`);
     const features = featuresByTimeframe.get(candidate.timeframeMinutes) ?? [];
+    const candidatePause = pauses.candidatePausedAtMs?.get(
+      microstructureCandidateKey(candidate),
+    );
+    const pauseTimes = [pauses.portfolioPausedAtMs, candidatePause]
+      .filter((value): value is number => value != null && Number.isFinite(value));
+    const pausedAtMs = pauseTimes.length ? Math.min(...pauseTimes) : null;
     proposed.push(...simulateMicrostructureRule(
       features,
       rule,
       fundingByMarket,
       Number.MAX_SAFE_INTEGER,
-    ).filter((trade) => trade.entryTimeMs >= activatedAtMs && trade.exitTimeMs <= nowMs));
+    ).filter((trade) =>
+      trade.entryTimeMs >= activatedAtMs
+      && trade.exitTimeMs <= nowMs
+      && (pausedAtMs == null || trade.entryTimeMs < pausedAtMs)));
   }
 
   proposed.sort((left, right) =>

@@ -2321,6 +2321,10 @@ function nativeMicrostructurePromotionStatus(lang: Lang): string {
   }
   const total = report.candidates?.length ?? 0;
   const eligible = report.eligibleCandidateIds?.length ?? 0;
+  const paused = (report.candidates ?? []).filter((value) => {
+    if (!value || typeof value !== 'object') return false;
+    return Number.isFinite(Date.parse(String((value as Record<string, unknown>).pausedAt ?? '')));
+  }).length;
   const healthy = report.dataHealth?.passed === true;
   const title = report.dataHealth?.failures?.length
     ? report.dataHealth.failures.join('; ')
@@ -2329,7 +2333,7 @@ function nativeMicrostructurePromotionStatus(lang: Lang): string {
       'Каждый кандидат и общий портфель проходят отдельный prospective-гейт; Real включается только вручную.',
       'Each candidate and the combined portfolio have separate prospective gates; Real remains manual.',
     );
-  return `<span title="${esc(title)}"><small>L2 forward</small><b class="${eligible > 0 && healthy ? 'pass' : 'collect'}">${eligible}/${total} · ${healthy
+  return `<span title="${esc(title)}"><small>L2 forward</small><b class="${eligible > 0 && healthy ? 'pass' : 'collect'}">${eligible}/${total}${paused ? ` · ${t(lang, 'пауза', 'paused')} ${paused}` : ''} · ${healthy
     ? t(lang, 'data ok', 'data ok')
     : t(lang, 'сбор данных', 'collecting')}</b></span>`;
 }

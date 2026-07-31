@@ -1220,7 +1220,10 @@ and exact settlements; the audit additionally requires a complete cost and L2
 book-age sample for every close, at least four traded markets, both Long and
 Short, seven calendar days, positive chronological halves, PF `>=1.20` and
 drawdown `<=5%` of allocated capacity. Twenty recent stale L2 samples or a
-prospective performance failure produces `pause_new_entries`; no candidate is
-eligible merely because the combined portfolio is positive. The output is
+prospective performance failure produces `pause_new_entries`. L2 older than
+two seconds is rejected before simulation; a performance/drawdown pause is
+timestamped permanently and the next Shadow cycle refuses every candidate or
+portfolio entry at and after that timestamp while retaining prior evidence.
+No candidate is eligible merely because the combined portfolio is positive. The output is
 `data/lighter-native-microstructure-promotion-audit.json` and always carries
 `autoPromotion=false` and `realEnabled=false`.

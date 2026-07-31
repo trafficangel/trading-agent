@@ -214,6 +214,16 @@ describe('Lighter microstructure research', () => {
     expect(trades).toEqual([]);
   });
 
+  it('rejects a signal from L2 older than the frozen two-second freshness ceiling', () => {
+    const rule = PREREGISTERED_MICRO_RULES.find((candidate) => candidate.id === 'OF-CONT-25-H1')!;
+    const trades = simulateMicrostructureRule([
+      bar(0, { depthImbalance: 0.5, flowImbalance: 0.5, bookAgeMs: 2_001 }),
+      bar(1),
+      bar(2),
+    ], rule, EMPTY_FUNDING);
+    expect(trades).toEqual([]);
+  });
+
   it('does not apply a second arbitrary spread threshold after measured cost', () => {
     const rule = PREREGISTERED_MICRO_RULES.find((candidate) => candidate.id === 'OF-CONT-25-H1')!;
     const trades = simulateMicrostructureRule([

@@ -382,13 +382,14 @@ function liquidityPass(bar: MicroFeatureBar): boolean {
   // round-trip cost. A second ratio/fixed-spread gate would double-filter the
   // same cost and reintroduce an arbitrary assumption.
   return bar.bid5Usd >= 500
-    && bar.ask5Usd >= 500;
+    && bar.ask5Usd >= 500
+    && bar.bookAgeMs <= 2_000;
 }
 
 /**
  * Signal at completed bar t, entry at t+1 open, exit after the frozen horizon.
- * Missing bars, costs, exact funding history or $500 per-side top-five depth
- * reject the trade.
+ * Missing bars, costs, exact funding history, stale L2 or $500 per-side
+ * top-five depth reject the trade.
  */
 export function simulateMicrostructureRule(
   features: readonly MicroFeatureBar[],

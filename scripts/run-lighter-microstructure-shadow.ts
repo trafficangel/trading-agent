@@ -160,6 +160,10 @@ const challengerFrozenPath = resolve(
 );
 const manifestPath = resolve(flagValue('--manifest') ?? 'data/lighter-native-microstructure-shadow-manifest.json');
 const outputPath = resolve(flagValue('--output') ?? 'data/lighter-native-microstructure-shadow-report.json');
+const promotionAuditPath = resolve(
+  flagValue('--promotion-audit')
+    ?? 'data/lighter-native-microstructure-promotion-audit.json',
+);
 if (!existsSync(manifestPath)) {
   console.log(JSON.stringify({ status: 'waiting_for_immutable_selection', realEnabled: false }));
   process.exit(0);
@@ -185,6 +189,28 @@ const manifest = validateMicrostructureShadowManifest(
   readJson(manifestPath),
   frozenBundle.hash,
 );
+let portfolioPausedAtMs: number | null = null;
+const candidatePausedAtMs = new Map<string, number>();
+if (existsSync(promotionAuditPath)) {
+  const promotion = readJson(promotionAuditPath) as Record<string, unknown>;
+  if (
+    promotion.version !== 'lighter-microstructure-promotion-audit-v1'
+    || promotion.autoPromotion !== false
+    || promotion.realEnabled !== false
+  ) throw new Error('invalid microstructure promotion audit');
+  const portfolio = promotion.portfolio;
+  if (portfolio && typeof portfolio === 'object') {
+    const parsed = Date.parse(String((portfolio as Record<string, unknown>).pausedAt ?? ''));
+    if (Number.isFinite(parsed)) portfolioPausedAtMs = parsed;
+  }
+  for (const value of Array.isArray(promotion.candidates) ? promotion.candidates : []) {
+    if (!value || typeof value !== 'object') continue;
+    const row = value as Record<string, unknown>;
+    const key = typeof row.candidateKey === 'string' ? row.candidateKey : null;
+    const parsed = Date.parse(String(row.pausedAt ?? ''));
+    if (key && Number.isFinite(parsed)) candidatePausedAtMs.set(key, parsed);
+  }
+}
 let existingTrades: import('../src/lib/lighter-microstructure-research.js').MicroTrade[] = [];
 if (existsSync(outputPath)) {
   const existing = readJson(outputPath) as Record<string, unknown>;
@@ -239,7 +265,13 @@ const features = new Map<1 | 5, ReturnType<typeof buildCausalMicroFeatureBars>>(
 ]);
 const funding = rows.length ? await fundingForRows(rows) : new Map<number, LighterFundingSeries>();
 const nowMs = Date.now();
-const reconstructed = prospectiveMicrostructureShadowTrades(manifest, features, funding, nowMs);
+const reconstructed = prospectiveMicrostructureShadowTrades(
+  manifest,
+  features,
+  funding,
+  nowMs,
+  { portfolioPausedAtMs, candidatePausedAtMs },
+);
 const trades = mergeMicrostructureShadowTrades(existingTrades, reconstructed);
 const report = buildMicrostructureShadowReport(manifest, trades, nowMs);
 writeAtomic(outputPath, report);

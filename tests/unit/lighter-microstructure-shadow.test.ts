@@ -173,6 +173,51 @@ describe('Lighter microstructure prospective Shadow manifest', () => {
     expect(trades.every((trade) => trade.entryTimeMs >= NOW)).toBe(true);
   });
 
+  it('keeps completed evidence but blocks entries at and after a permanent forward pause', () => {
+    const manifest = prepareMicrostructureShadowManifest(sources(), null, NOW).manifest!;
+    const bars: MicroFeatureBar[] = Array.from({ length: 14 }, (_, minute) => ({
+      marketId: 1,
+      symbol: 'BTC',
+      timeMs: NOW + minute * 60_000,
+      barMinutes: 1,
+      open: 100 + minute * 0.1,
+      close: 100 + minute * 0.1,
+      returnPct: 0,
+      spreadPct: 0.01,
+      bid5Usd: 1_000,
+      ask5Usd: 1_000,
+      depthImbalance: minute === 0 || minute === 7 ? 0.3 : 0,
+      depthImbalanceChange: 0,
+      tradedUsd: 10_000,
+      tradeCount: 20,
+      flowImbalance: minute === 0 || minute === 7 ? 0.3 : 0,
+      returnVolRatio: 0,
+      liquidationImbalance: 0,
+      liquidationShare: 0,
+      basisPct: 0,
+      fundingRatePctH: 0,
+      executionCostPct: 0.02,
+      adverseExecutionCostPct: 0.03,
+      bookAgeMs: 30,
+      trend: 'bull',
+      volatility: 'low',
+    }));
+    const trades = prospectiveMicrostructureShadowTrades(
+      manifest,
+      new Map([[1, bars], [5, []]]),
+      new Map([[1, buildLighterFundingSeries([])]]),
+      NOW + 20 * 60_000,
+      {
+        candidatePausedAtMs: new Map([[
+          'core:1m:OF-CONT-25-H1',
+          NOW + 7 * 60_000,
+        ]]),
+      },
+    );
+    expect(trades).toHaveLength(1);
+    expect(trades[0]!.entryTimeMs).toBe(NOW + 60_000);
+  });
+
   it('reports prospective $100 PnL and cannot enable Real', () => {
     const manifest = prepareMicrostructureShadowManifest(sources(), null, NOW).manifest!;
     const trade = {
