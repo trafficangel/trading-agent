@@ -1089,6 +1089,11 @@ keeps the same economic meaning at `1m` and `5m`.
   raw bar count that changes when the timeframe changes;
 - every signal enters only at the next bar open and exits at the first bar open
   after the frozen holding horizon. Missing intermediate bars reject the trade;
+- the portfolio admits at most ten overlapping `$100` positions. Capacity is
+  released when an exit timestamp is reached; simultaneous entries are ordered
+  by immutable numeric Lighter market ID and every proposal after slot ten is
+  skipped. Reported drawdown therefore cannot assume more capital than the
+  executable portfolio;
 - each timeframe/rule is evaluated separately. A positive 1m result cannot
   repair a failed 5m result or vice versa, and results may not be pooled to pass
   a gate;
