@@ -737,3 +737,29 @@ Keltner `-717.77%`/PF `0.87` and `-5259.53%`/PF `0.65`; impulse continuation
 no variant passed more than one of four folds. The full frozen record is in
 `data/lighter-breakout-family-results.json`. These families are rejected and
 must not be added to Shadow or revisited through per-market parameter fitting.
+
+### Failed-breakout liquidity sweep: rejected (2026-07-31)
+
+The next independent two-sided hypothesis was frozen before its first run and
+used no parameter grid. On a completed candle, price had to penetrate the
+prior 20-bar Donchian boundary by at least `0.25 ATR14`, close back inside the
+old range in the reversal direction and print volume at or above its trailing
+20-bar mean. Entry was the next bar open; exit was SMA20, a 1.5% safety stop or
+a fixed 60-minute timeout. Long and Short rules were exact mirrors.
+
+The same rule was tested across the common 15-market portfolio at 1m and 5m,
+using each market's measured executable `$100` p95 full-round-trip cost,
+separate worst-observed sensitivity and adverse time-weighted funding. Both
+timeframes failed decisively. The 1m portfolio produced 26,568 trades,
+`-849.67%`, PF `0.78`, `-992.05%` under observed-maximum execution and 0/4
+positive chronological folds. The 5m portfolio produced 7,472 trades,
+`-286.54%`, PF `0.87`, `-333.28%` adverse net, 0/4 folds, negative IS/OOS,
+negative Long/Short books and negative bull, bear, mixed, high- and
+low-volatility regimes.
+
+HYPE 5m was the best individual row but was not a valid exception: PF was only
+`1.08`, mean-trade L95 was `-0.0277%`, only 2/4 folds were positive, Short
+generated `+13.59%` versus only `+1.69%` Long, and drawdown reached `-17.38%`.
+The family is therefore rejected without post-hoc retuning and is not added to
+Shadow or Real. Frozen evidence is in
+`data/lighter-failed-breakout-results.json`.

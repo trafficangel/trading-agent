@@ -42,6 +42,7 @@ const MAX_BACKTEST_DD_PCT = Number(process.env.MAX_BACKTEST_DD_PCT ?? 15);
 const RULE_FILTER = process.env.RULE_FILTER ?? '';
 const ENABLE_SQUEEZE = process.env.ENABLE_SQUEEZE === '1';
 const ENABLE_TREND_PULLBACK = process.env.ENABLE_TREND_PULLBACK === '1';
+const ENABLE_FAILED_BREAKOUT = process.env.ENABLE_FAILED_BREAKOUT === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -708,6 +709,43 @@ function rules(): Rule[] {
     exit(a, i, side) {
       const mean = meanFor(a, i, 60);
       return side === 'long' ? a.close[i]! >= mean : a.close[i]! <= mean;
+    },
+  });
+
+  // Preregistered independent liquidity-sweep / failed-breakout family.
+  // The completed signal candle must penetrate the PRIOR 20-bar Donchian
+  // boundary by at least 0.25 ATR, close back inside the old range in the
+  // reversal direction, and carry at least its trailing 20-bar mean volume.
+  // Entry is still next-bar open in simulate(). One exact, symmetric rule is
+  // shared by every market and both 1m/5m tests; there is no parameter grid.
+  if (ENABLE_FAILED_BREAKOUT) out.push({
+    name: 'FBR20-A0.25-V1-SMA20',
+    warmup: 30,
+    slPct: 0.015,
+    maxBars: Math.max(1, Math.round(60 / BAR_MINUTES)),
+    entry(a, i) {
+      const bar = a.c[i]!;
+      const priorHigh = highestBefore(a.c, i, 20);
+      const priorLow = lowestBefore(a.c, i, 20);
+      const penetration = 0.25 * a.atr14[i]!;
+      const volumeOk = bar.v >= a.volumeSma20[i]!;
+      if (!volumeOk) return null;
+      if (
+        bar.l <= priorLow - penetration
+        && bar.c > priorLow
+        && bar.c > bar.o
+      ) return 'long';
+      if (
+        bar.h >= priorHigh + penetration
+        && bar.c < priorHigh
+        && bar.c < bar.o
+      ) return 'short';
+      return null;
+    },
+    exit(a, i, side) {
+      return side === 'long'
+        ? a.close[i]! >= a.sma20[i]!
+        : a.close[i]! <= a.sma20[i]!;
     },
   });
 

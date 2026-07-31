@@ -1,0 +1,83 @@
+{
+  "version": "lighter-failed-breakout-v1",
+  "testedAt": "2026-07-31",
+  "status": "rejected",
+  "shadowRegistered": false,
+  "realRegistered": false,
+  "reason": "The one preregistered symmetric rule failed at both 1m and 5m after measured market-specific $100 execution costs and adverse funding. No parameter or market-specific retuning was performed.",
+  "hypothesis": {
+    "name": "FBR20-A0.25-V1-SMA20",
+    "entry": "On a completed bar, penetrate the prior 20-bar Donchian boundary by at least 0.25 ATR14, close back inside the prior range in the reversal direction, and require volume at or above SMA20; enter at the next bar open.",
+    "exit": "Exit at SMA20, a 1.5% safety stop, or a fixed 60-minute timeout.",
+    "directions": "Long and Short are exact mirrors.",
+    "selection": "One fixed rule across the same 15 markets and both 1m/5m timeframes; no parameter grid."
+  },
+  "data": {
+    "source": "Gap-free native Lighter 1m candles; 5m strictly aggregated from five consecutive 1m bars",
+    "historyDays": 180,
+    "markets": 15,
+    "notionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "Each market's measured executable full-round-trip p95",
+    "adverseExecution": "Each market's worst observed full round trip, reported separately",
+    "fundingPctPerHour": 0.00125,
+    "portfolioMaxOpen": 10
+  },
+  "results": {
+    "1m": {
+      "qualified": 0,
+      "trades": 26568,
+      "netPct": -849.67,
+      "profitFactor": 0.78,
+      "adverseNetPct": -992.05,
+      "adverseProfitFactor": 0.74,
+      "maxDrawdownPctOfCapacity": -87.9,
+      "positiveFolds": 0,
+      "folds": 4,
+      "inSamplePct": -550.57,
+      "outOfSamplePct": -299.1,
+      "longPct": -458.42,
+      "shortPct": -391.25,
+      "bullPct": -314.96,
+      "bearPct": -229.93,
+      "mixedPct": -304.79,
+      "highVolPct": -341.68,
+      "lowVolPct": -507.99,
+      "positiveMarkets": 1,
+      "activeMarkets": 15
+    },
+    "5m": {
+      "qualified": 0,
+      "trades": 7472,
+      "netPct": -286.54,
+      "profitFactor": 0.87,
+      "adverseNetPct": -333.28,
+      "adverseProfitFactor": 0.85,
+      "maxDrawdownPctOfCapacity": -31.39,
+      "positiveFolds": 0,
+      "folds": 4,
+      "inSamplePct": -202.15,
+      "outOfSamplePct": -84.39,
+      "longPct": -111.64,
+      "shortPct": -174.9,
+      "bullPct": -117.97,
+      "bearPct": -72.44,
+      "mixedPct": -96.13,
+      "highVolPct": -99.61,
+      "lowVolPct": -186.93,
+      "positiveMarkets": 1,
+      "activeMarkets": 15,
+      "bestIndividual": {
+        "market": "HYPE",
+        "trades": 673,
+        "netPct": 15.28,
+        "profitFactor": 1.08,
+        "meanTradeL95Pct": -0.0277,
+        "positiveFolds": 2,
+        "longPct": 1.69,
+        "shortPct": 13.59,
+        "maxDrawdownPct": -17.38
+      }
+    }
+  }
+}
