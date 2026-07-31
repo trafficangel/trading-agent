@@ -540,3 +540,33 @@ Portfolio P1 additionally refuses an eleventh simultaneous Shadow entry. Its
 historical maximum was ten, so this frozen cap did not drop a backtest signal;
 it keeps the prospective drawdown denominator and future capacity claim fixed
 instead of allowing apparent risk to improve by silently adding exposure.
+
+## Preregistered volatility-compression breakout challenger
+
+Before its first result was inspected on 2026-07-31, the next independent
+Native Quant family was frozen as a small eight-rule set named `SQZ20`. It is
+deliberately a two-sided trend/breakout challenger to the existing Z-score
+reversion book, not another threshold variation of that book.
+
+- markets: the same 15 liquid P2 markets, with one shared rule and no
+  market-specific parameters;
+- timeframes: five minutes is the primary hypothesis; the identical one-minute
+  transfer is a separate falsification control and cannot replace it;
+- compression: completed-candle Bollinger `2σ` width must have been inside a
+  `1.5 × ATR14` Keltner envelope during one of the preceding 5 or 10 bars and
+  must be released on the signal bar;
+- entry: completed close through the preceding 20-bar high above EMA200 for
+  Long, mirrored through the low below EMA200 for Short; optional volume gate
+  is either none or `volume >= 1.25 × SMA20(volume)`;
+- execution: next-bar open, 1% safety stop, maximum 90 bars, exit on a completed
+  close through EMA8 or EMA21 against the position;
+- costs and gates: market-specific measured `$100` executable p95, adverse
+  funding, separate `1.5 × p95` sensitivity, PF, mean L95, 4 chronological
+  folds, IS/OOS, Long/Short, 30/60/90-day windows, drawdown, breadth,
+  leave-one-market-out, dominance, calendar months and causal trend/volatility
+  regimes. The same maximum-six-position portfolio capacity is used for every
+  rule.
+
+No rule may be changed after viewing this run. A complete failure closes this
+family; a passing rule may enter prospective Shadow only after the frozen
+result and its exact parameters are recorded here.
