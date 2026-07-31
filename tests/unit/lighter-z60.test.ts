@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  evaluateTrendFilteredZ60,
   evaluateVwz60,
   evaluateZ60Reclaim,
   evaluateZ60Touch,
@@ -108,5 +109,40 @@ describe('evaluateVwz60', () => {
     expect(long?.signal).toBe('long');
     expect(short?.currentZ).toBeGreaterThan(2.5);
     expect(short?.signal).toBe('short');
+  });
+});
+
+describe('evaluateTrendFilteredZ60', () => {
+  it('admits symmetric pullbacks that remain on the trend side of EMA200', () => {
+    const longHistory = [
+      ...Array.from({ length: 180 }, () => 90),
+      ...Array.from({ length: 59 }, (_, index) => 120 + (index % 2 ? 0.1 : -0.1)),
+      110,
+    ];
+    const shortHistory = [
+      ...Array.from({ length: 180 }, () => 110),
+      ...Array.from({ length: 59 }, (_, index) => 80 + (index % 2 ? 0.1 : -0.1)),
+      90,
+    ];
+    const long = evaluateTrendFilteredZ60(bars(longHistory));
+    const short = evaluateTrendFilteredZ60(bars(shortHistory));
+    expect(long?.currentZ).toBeLessThan(-2.5);
+    expect(long?.close).toBeGreaterThan(long?.trendMean ?? Infinity);
+    expect(long?.signal).toBe('long');
+    expect(short?.currentZ).toBeGreaterThan(2.5);
+    expect(short?.close).toBeLessThan(short?.trendMean ?? -Infinity);
+    expect(short?.signal).toBe('short');
+  });
+
+  it('blocks a statistical excursion on the wrong side of EMA200', () => {
+    const closes = [
+      ...Array.from({ length: 180 }, () => 120),
+      ...Array.from({ length: 59 }, (_, index) => 100 + (index % 2 ? 0.1 : -0.1)),
+      90,
+    ];
+    const result = evaluateTrendFilteredZ60(bars(closes));
+    expect(result?.currentZ).toBeLessThan(-2.5);
+    expect(result?.close).toBeLessThan(result?.trendMean ?? -Infinity);
+    expect(result?.signal).toBeNull();
   });
 });

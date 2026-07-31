@@ -464,10 +464,35 @@ or recently one-sided for admission:
 - BTC `VWZ60T-2.5-reclaim`: 46 trades, `+6.34%`, PF 1.93 and drawdown
   `-2.65%`, but only 10 trades in the latest 30 days.
 
-No frequency or direction gate was relaxed to make these rows pass, and no
-new Shadow strategy was registered from this experiment. The trend-filtered
-rules remain available for reproducible research rather than being presented
-as validated high-frequency models.
+No frequency or direction gate was relaxed to make any individual market pass.
+The same preregistered `Z60T-2.5-touch` rule was then evaluated as one fixed-
+notional cross-market portfolio instead of selecting individual winners. All
+15 liquid markets had the full 180-day, gap-free history and used their own
+measured `$1,000` executable p95 cost plus time-weighted adverse funding.
+
+The five-minute portfolio qualified without dropping a signal or tuning a
+parameter by market:
+
+- 806 closed trades, 69.1% win rate, `+109.19` percentage-points of net PnL
+  (`+$109.19` at `$100` fixed notional per leg), PF `1.37`;
+- `+87.81` and PF `1.29` when every market's execution reserve is increased to
+  `1.5 ×` its measured p95;
+- maximum ten naturally concurrent positions and `−2.63%` drawdown relative
+  to that observed `$1,000` peak capacity;
+- four of four chronological folds, positive IS/OOS (`+58.02 / +51.18`) and
+  positive Long/Short (`+71.97 / +37.23`);
+- 13 of 15 active markets profitable, largest contributor 18% of positive
+  PnL, leave-one-market-out minimum `+88.50`, and all six calendar months
+  positive;
+- latest 30/60/90-day windows all positive on both sides.
+
+The identical one-minute transfer failed decisively (3,582 trades,
+`−128.75%`, PF `0.85`, `−24.23%` drawdown, zero of four positive folds and
+negative Long and Short books). It was rejected rather than promoted for
+frequency. Only the five-minute portfolio `P1` is registered for prospective
+Shadow. Its 15 market legs are shown as one consolidated model; all are absent
+from the Real allowlist until the combined forward gate passes and a separate
+Real-capacity decision is made.
 
 ## Prospective Native Shadow continuation gate
 

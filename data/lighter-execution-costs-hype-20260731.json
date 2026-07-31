@@ -1,0 +1,15 @@
+{
+  "generatedAt": "2026-07-31T10:37:16.518Z",
+  "targetSamples": 40,
+  "intervalMs": 1000,
+  "notionalUsd": 1000,
+  "summaries": {
+    "HYPE": {
+      "n": 40,
+      "medianPct": 0.01709625528462109,
+      "p90Pct": 0.02657766020337688,
+      "p95Pct": 0.039482158073873994,
+      "maxPct": 0.040254730938890114
+    }
+  }
+}

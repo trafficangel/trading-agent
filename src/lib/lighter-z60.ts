@@ -16,6 +16,7 @@ export type Z60Snapshot = {
   previousZ: number;
   currentZ: number;
   signal: Z60Signal;
+  trendMean?: number;
 };
 
 export type Z60EntryMode = 'reclaim' | 'touch';
@@ -120,6 +121,37 @@ export function evaluateZ60Touch(
   threshold = 3,
 ): Z60Snapshot | null {
   return evaluateZ60(bars, period, threshold, 'touch');
+}
+
+/**
+ * Symmetric Z-score pullback aligned with a slower completed-bar EMA. The
+ * signal is identical on both sides: buy a negative Z excursion only while
+ * price remains above the trend EMA, and sell a positive excursion only while
+ * price remains below it. No unfinished candle or future value is used.
+ */
+export function evaluateTrendFilteredZ60(
+  bars: readonly Z60Bar[],
+  period = 60,
+  threshold = 2.5,
+  mode: Z60EntryMode = 'touch',
+  trendPeriod = 200,
+): Z60Snapshot | null {
+  if (bars.length < Math.max(period + 1, trendPeriod) || trendPeriod < 2) return null;
+  const snapshot = evaluateZ60(bars, period, threshold, mode);
+  if (!snapshot) return null;
+
+  const alpha = 2 / (trendPeriod + 1);
+  let trendMean = bars[0]!.close;
+  for (let index = 1; index < bars.length; index += 1) {
+    trendMean = bars[index]!.close * alpha + trendMean * (1 - alpha);
+  }
+
+  const signal = snapshot.signal === 'long' && snapshot.close <= trendMean
+    ? null
+    : snapshot.signal === 'short' && snapshot.close >= trendMean
+      ? null
+      : snapshot.signal;
+  return { ...snapshot, signal, trendMean };
 }
 
 /**

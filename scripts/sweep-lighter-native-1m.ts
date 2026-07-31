@@ -4,12 +4,13 @@
  * Uses candles downloaded by verify-passive-lowtf.ts with DATA_SOURCE=lighter.
  * Signals are computed only from completed candles and execute at the next
  * candle open. Commission is zero for a Standard account; an independent
- * a measured-cost discovery reserve is subtracted from every trade. A second,
+ * measured-cost discovery reserve is subtracted from every trade. A second,
  * deliberately adverse reserve is reported as sensitivity evidence only.
  *
  * Run after downloading native candles:
  *   pnpm tsx scripts/sweep-lighter-native-1m.ts
- *   STRESS_RT_PCT=0.02 pnpm tsx scripts/sweep-lighter-native-1m.ts
+ *   ALLOW_FALLBACK_EXECUTION_COST=1 FALLBACK_EXECUTION_COST_PCT=0.02 \
+ *     pnpm tsx scripts/sweep-lighter-native-1m.ts
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -20,16 +21,14 @@ const SYMBOLS = (process.env.SYMBOLS ?? 'BTC,ETH,SOL')
   .split(',')
   .map((symbol) => symbol.trim())
   .filter(Boolean);
-// Discovery reserve: 0% Lighter Standard commission plus 0.02% round-trip
-// allowance, close to the currently observed SOL/BNB executable L2 cost.
-// The adverse result defaults to 1.5x the measured reserve and is shown
-// separately; it does not reject a candidate by itself. Prospective Shadow
-// then records the market's actual VWAP/funding.
-const STRESS_RT_PCT = Number(process.env.STRESS_RT_PCT ?? 0.02);
-const robustStressOverride = Number(process.env.ROBUST_STRESS_RT_PCT);
-const ROBUST_STRESS_RT_PCT = Number.isFinite(robustStressOverride)
-  ? robustStressOverride
-  : STRESS_RT_PCT * 1.5;
+// Selection uses each market's measured executable L2 p95. A common fallback
+// would silently turn an adverse scenario into an assumed trading cost, so it
+// is disabled unless an exploratory run explicitly opts in. The separate
+// adverse result is 1.5x the measured p95 and is sensitivity evidence only.
+const FALLBACK_EXECUTION_COST_PCT = Number(
+  process.env.FALLBACK_EXECUTION_COST_PCT ?? 0.02,
+);
+const ALLOW_FALLBACK_EXECUTION_COST = process.env.ALLOW_FALLBACK_EXECUTION_COST === '1';
 const FUNDING_PER_HOUR_PCT = Number(process.env.FUNDING_PER_HOUR_PCT ?? 0.00125);
 const BAR_MINUTES = Number(process.env.BAR_MINUTES ?? 1);
 const Z_PERIODS = (process.env.Z_PERIODS ?? '20,60').split(',').map(Number);
@@ -41,6 +40,26 @@ const MAX_BACKTEST_DD_PCT = Number(process.env.MAX_BACKTEST_DD_PCT ?? 15);
 const RULE_FILTER = process.env.RULE_FILTER ?? '';
 const ENABLE_SQUEEZE = process.env.ENABLE_SQUEEZE === '1';
 const ENABLE_TREND_PULLBACK = process.env.ENABLE_TREND_PULLBACK === '1';
+const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
+const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
+  process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
+);
+const MAX_PORTFOLIO_DD_PCT = Number(process.env.MAX_PORTFOLIO_DD_PCT ?? 5);
+const PORTFOLIO_MIN_COVERAGE_DAYS = Number(
+  process.env.PORTFOLIO_MIN_COVERAGE_DAYS ?? 171,
+);
+const DEFAULT_EXECUTION_COST_FILES = [
+  'data/lighter-execution-costs-majors-20260731.json',
+  'data/lighter-execution-costs-zec-doge-near-jup.json',
+  'data/lighter-execution-costs-lit-pump-gram-xmr.json',
+  'data/lighter-execution-costs-popcat-ena-arb-tao.json',
+  'data/lighter-execution-costs-hype-20260731.json',
+];
+const EXECUTION_COST_FILES = (process.env.EXECUTION_COST_FILES
+  ?? DEFAULT_EXECUTION_COST_FILES.filter((file) => existsSync(resolve(file))).join(','))
+  .split(',')
+  .map((file) => file.trim())
+  .filter(Boolean);
 const LOOKBACK_DAYS = Number(process.env.LOOKBACK_DAYS ?? 0);
 const RECENT_WINDOWS_DAYS = (process.env.RECENT_WINDOWS_DAYS ?? '30,60,90')
   .split(',')
@@ -92,14 +111,41 @@ type Rule = {
   exit: (a: Arrays, i: number, side: Side) => boolean;
 };
 type Trade = { side: Side; entryAt: number; exitAt: number; pct: number };
+type PortfolioTrade = Trade & { symbol: string; costPct: number };
 type WindowStats = {
   days: number;
   n: number;
   net: number;
   profitFactor: number;
+  winRatePct: number;
   long: number;
   short: number;
 };
+
+type ExecutionCostFile = {
+  notionalUsd?: number;
+  summaries?: Record<string, { p95Pct?: number | null }>;
+};
+
+const executionCostBySymbol = new Map<string, number>();
+for (const file of EXECUTION_COST_FILES) {
+  const parsed = JSON.parse(readFileSync(resolve(file), 'utf8')) as ExecutionCostFile;
+  for (const [symbol, summary] of Object.entries(parsed.summaries ?? {})) {
+    if (summary.p95Pct != null && Number.isFinite(summary.p95Pct) && summary.p95Pct >= 0) {
+      executionCostBySymbol.set(symbol.toUpperCase(), summary.p95Pct);
+    }
+  }
+}
+
+function executionCost(symbol: string): number {
+  const measured = executionCostBySymbol.get(symbol.toUpperCase());
+  if (measured != null) return measured;
+  if (ALLOW_FALLBACK_EXECUTION_COST) return FALLBACK_EXECUTION_COST_PCT;
+  throw new Error(
+    `No measured executable p95 cost for ${symbol}. Sample its L2 first or explicitly set `
+    + 'ALLOW_FALLBACK_EXECUTION_COST=1 for a non-qualifying exploratory run.',
+  );
+}
 
 function aggregateCandles(candles: Candle[], minutes: number): Candle[] {
   if (minutes <= 1) return candles;
@@ -987,6 +1033,9 @@ function recentStats(trades: Trade[], stress: number): WindowStats[] {
       n: recent.length,
       net: sum(recent, stress),
       profitFactor: pf(recent, stress),
+      winRatePct: recent.length
+        ? recent.filter((trade) => tradeNet(trade, stress) > 0).length / recent.length * 100
+        : 0,
       long: sum(recent.filter((trade) => trade.side === 'long'), stress),
       short: sum(recent.filter((trade) => trade.side === 'short'), stress),
     };
@@ -1011,6 +1060,7 @@ for (const symbol of SYMBOLS) {
 const rows: Array<{
   symbol: string;
   rule: string;
+  costPct: number;
   trades: Trade[];
   baseline: number;
   stress: number;
@@ -1026,33 +1076,42 @@ const rows: Array<{
   coverageDays: number;
   meanL95: number;
 }> = [];
+const portfolioGroups = new Map<string, PortfolioTrade[]>();
 
 for (const [symbol, arrays] of loaded) {
+  const coverageDays = Math.max(
+    0,
+    ((arrays.c.at(-1)?.t ?? 0) - (arrays.c[0]?.t ?? 0)) / 86_400_000,
+  );
+  const costPct = executionCost(symbol);
   for (const rule of rules()) {
     if (RULE_FILTER && !rule.name.includes(RULE_FILTER)) continue;
     const trades = simulate(rule, arrays);
+    if (coverageDays >= PORTFOLIO_MIN_COVERAGE_DAYS) {
+      const group = portfolioGroups.get(rule.name) ?? [];
+      group.push(...trades.map((trade) => ({ ...trade, symbol, costPct })));
+      portfolioGroups.set(rule.name, group);
+    }
     if (trades.length < 20) continue;
     const cut = Math.floor(trades.length * 0.7);
     rows.push({
       symbol,
       rule: rule.name,
+      costPct,
       trades,
       baseline: sum(trades),
-      stress: sum(trades, STRESS_RT_PCT),
-      stressPf: pf(trades, STRESS_RT_PCT),
-      robustStress: sum(trades, ROBUST_STRESS_RT_PCT),
-      robustPf: pf(trades, ROBUST_STRESS_RT_PCT),
-      folds: positiveFolds(trades, STRESS_RT_PCT),
-      is: sum(trades.slice(0, cut), STRESS_RT_PCT),
-      oos: sum(trades.slice(cut), STRESS_RT_PCT),
-      long: sum(trades.filter((trade) => trade.side === 'long'), STRESS_RT_PCT),
-      short: sum(trades.filter((trade) => trade.side === 'short'), STRESS_RT_PCT),
-      recent: recentStats(trades, STRESS_RT_PCT),
-      coverageDays: Math.max(
-        0,
-        ((arrays.c.at(-1)?.t ?? 0) - (arrays.c[0]?.t ?? 0)) / 86_400_000,
-      ),
-      meanL95: meanL95(trades, STRESS_RT_PCT),
+      stress: sum(trades, costPct),
+      stressPf: pf(trades, costPct),
+      robustStress: sum(trades, costPct * 1.5),
+      robustPf: pf(trades, costPct * 1.5),
+      folds: positiveFolds(trades, costPct),
+      is: sum(trades.slice(0, cut), costPct),
+      oos: sum(trades.slice(cut), costPct),
+      long: sum(trades.filter((trade) => trade.side === 'long'), costPct),
+      short: sum(trades.filter((trade) => trade.side === 'short'), costPct),
+      recent: recentStats(trades, costPct),
+      coverageDays,
+      meanL95: meanL95(trades, costPct),
     });
   }
 }
@@ -1069,7 +1128,7 @@ const qualified = rows
     && row.oos > 0
     && row.long > 0
     && row.short > 0
-    && drawdown(row.trades, STRESS_RT_PCT) >= -MAX_BACKTEST_DD_PCT
+    && drawdown(row.trades, row.costPct) >= -MAX_BACKTEST_DD_PCT
     && row.recent.every((window) =>
       window.n >= 20
       && window.net > 0
@@ -1079,11 +1138,233 @@ const qualified = rows
   .sort((a, b) => b.stress - a.stress);
 const best = [...rows].sort((a, b) => b.stress - a.stress);
 
+function applyPositionCap(
+  source: PortfolioTrade[],
+  maxOpen: number,
+): { accepted: PortfolioTrade[]; dropped: number; maxConcurrent: number } {
+  const ordered = [...source].sort((a, b) =>
+    a.entryAt - b.entryAt || a.symbol.localeCompare(b.symbol));
+  const accepted: PortfolioTrade[] = [];
+  let openExitTimes: number[] = [];
+  let dropped = 0;
+  let maxConcurrent = 0;
+  for (const trade of ordered) {
+    openExitTimes = openExitTimes.filter((exitAt) => exitAt > trade.entryAt);
+    if (openExitTimes.length >= maxOpen) {
+      dropped++;
+      continue;
+    }
+    accepted.push(trade);
+    openExitTimes.push(trade.exitAt);
+    maxConcurrent = Math.max(maxConcurrent, openExitTimes.length);
+  }
+  return { accepted, dropped, maxConcurrent };
+}
+
+function portfolioTradeNet(trade: PortfolioTrade, costMultiplier = 1): number {
+  return tradeNet(trade, trade.costPct * costMultiplier);
+}
+
+function portfolioSum(trades: PortfolioTrade[], costMultiplier = 1): number {
+  return trades.reduce(
+    (total, trade) => total + portfolioTradeNet(trade, costMultiplier),
+    0,
+  );
+}
+
+function portfolioPf(trades: PortfolioTrade[], costMultiplier = 1): number {
+  let gains = 0;
+  let losses = 0;
+  for (const trade of trades) {
+    const pnl = portfolioTradeNet(trade, costMultiplier);
+    if (pnl >= 0) gains += pnl;
+    else losses -= pnl;
+  }
+  return losses === 0 ? (gains > 0 ? 99 : 0) : gains / losses;
+}
+
+function portfolioDrawdown(trades: PortfolioTrade[]): number {
+  let equity = 0;
+  let peak = 0;
+  let worst = 0;
+  for (const trade of [...trades].sort((a, b) => a.exitAt - b.exitAt)) {
+    equity += portfolioTradeNet(trade);
+    peak = Math.max(peak, equity);
+    worst = Math.min(worst, equity - peak);
+  }
+  return worst;
+}
+
+function portfolioFolds(trades: PortfolioTrade[]): number {
+  if (trades.length < 16) return -1;
+  const ordered = [...trades].sort((a, b) => a.exitAt - b.exitAt);
+  const size = Math.floor(ordered.length / 4);
+  let positive = 0;
+  for (let fold = 0; fold < 4; fold++) {
+    const slice = ordered.slice(
+      fold * size,
+      fold === 3 ? undefined : (fold + 1) * size,
+    );
+    if (portfolioSum(slice) > 0) positive++;
+  }
+  return positive;
+}
+
+function portfolioMeanL95(trades: PortfolioTrade[]): number {
+  if (trades.length < 2) return Number.NEGATIVE_INFINITY;
+  const values = trades.map((trade) => portfolioTradeNet(trade));
+  const mean = values.reduce((total, value) => total + value, 0) / values.length;
+  const variance = values.reduce((total, value) => total + (value - mean) ** 2, 0)
+    / (values.length - 1);
+  return mean - 1.645 * Math.sqrt(variance / values.length);
+}
+
+function portfolioRecent(trades: PortfolioTrade[]): WindowStats[] {
+  const latest = Math.max(0, ...trades.map((trade) => trade.exitAt));
+  return RECENT_WINDOWS_DAYS.map((days) => {
+    const recent = trades.filter(
+      (trade) => trade.entryAt >= latest - days * 86_400_000,
+    );
+    return {
+      days,
+      n: recent.length,
+      net: portfolioSum(recent),
+      profitFactor: portfolioPf(recent),
+      winRatePct: recent.length
+        ? recent.filter((trade) => portfolioTradeNet(trade) > 0).length / recent.length * 100
+        : 0,
+      long: portfolioSum(recent.filter((trade) => trade.side === 'long')),
+      short: portfolioSum(recent.filter((trade) => trade.side === 'short')),
+    };
+  });
+}
+
+type PortfolioRow = {
+  rule: string;
+  trades: PortfolioTrade[];
+  dropped: number;
+  maxConcurrent: number;
+  net: number;
+  robustNet: number;
+  profitFactor: number;
+  winRatePct: number;
+  robustProfitFactor: number;
+  drawdownUsd: number;
+  drawdownPct: number;
+  netUsd: number;
+  folds: number;
+  is: number;
+  oos: number;
+  long: number;
+  short: number;
+  meanL95: number;
+  recent: WindowStats[];
+  activeSymbols: number;
+  positiveSymbols: number;
+  dominance: number;
+  leaveOneOutMinNet: number;
+  positiveMonths: number;
+  totalMonths: number;
+};
+
+const portfolioRows: PortfolioRow[] = [...portfolioGroups.entries()].map(
+  ([rule, rawTrades]) => {
+    const capped = applyPositionCap(rawTrades, PORTFOLIO_MAX_OPEN);
+    const trades = [...capped.accepted].sort((a, b) => a.exitAt - b.exitAt);
+    const cut = Math.floor(trades.length * 0.7);
+    const bySymbol = new Map<string, PortfolioTrade[]>();
+    for (const trade of trades) {
+      const symbolTrades = bySymbol.get(trade.symbol) ?? [];
+      symbolTrades.push(trade);
+      bySymbol.set(trade.symbol, symbolTrades);
+    }
+    const active = [...bySymbol.values()].filter((symbolTrades) =>
+      symbolTrades.length >= 10);
+    const symbolNets = active.map((symbolTrades) => portfolioSum(symbolTrades));
+    const positiveTotal = symbolNets.reduce(
+      (total, value) => total + Math.max(0, value),
+      0,
+    );
+    const monthly = new Map<string, number>();
+    for (const trade of trades) {
+      const date = new Date(trade.exitAt);
+      const month = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+      monthly.set(month, (monthly.get(month) ?? 0) + portfolioTradeNet(trade));
+    }
+    const net = portfolioSum(trades);
+    const drawdownUnits = portfolioDrawdown(trades);
+    const capacityUsd = PORTFOLIO_POSITION_NOTIONAL_USD
+      * Math.max(1, capped.maxConcurrent);
+    return {
+      rule,
+      trades,
+      dropped: capped.dropped,
+      maxConcurrent: capped.maxConcurrent,
+      net,
+      robustNet: portfolioSum(trades, 1.5),
+      profitFactor: portfolioPf(trades),
+      winRatePct: trades.length
+        ? trades.filter((trade) => portfolioTradeNet(trade) > 0).length / trades.length * 100
+        : 0,
+      robustProfitFactor: portfolioPf(trades, 1.5),
+      drawdownUsd: drawdownUnits * PORTFOLIO_POSITION_NOTIONAL_USD / 100,
+      drawdownPct: capacityUsd > 0
+        ? drawdownUnits * PORTFOLIO_POSITION_NOTIONAL_USD / capacityUsd
+        : Number.NEGATIVE_INFINITY,
+      netUsd: net * PORTFOLIO_POSITION_NOTIONAL_USD / 100,
+      folds: portfolioFolds(trades),
+      is: portfolioSum(trades.slice(0, cut)),
+      oos: portfolioSum(trades.slice(cut)),
+      long: portfolioSum(trades.filter((trade) => trade.side === 'long')),
+      short: portfolioSum(trades.filter((trade) => trade.side === 'short')),
+      meanL95: portfolioMeanL95(trades),
+      recent: portfolioRecent(trades),
+      activeSymbols: active.length,
+      positiveSymbols: symbolNets.filter((value) => value > 0).length,
+      dominance: positiveTotal > 0 ? Math.max(0, ...symbolNets) / positiveTotal : 1,
+      leaveOneOutMinNet: symbolNets.length
+        ? Math.min(...symbolNets.map((symbolNet) => net - symbolNet))
+        : Number.NEGATIVE_INFINITY,
+      positiveMonths: [...monthly.values()].filter((value) => value > 0).length,
+      totalMonths: monthly.size,
+    };
+  },
+).filter((row) => row.trades.length >= 30);
+
+const portfolioQualified = portfolioRows.filter((row) =>
+  row.trades.length >= 120
+  && row.net > 0
+  && row.profitFactor >= 1.2
+  && row.robustNet > 0
+  && row.robustProfitFactor >= 1.1
+  && row.meanL95 > 0
+  && row.folds >= 3
+  && row.is > 0
+  && row.oos > 0
+  && row.long > 0
+  && row.short > 0
+  && row.drawdownPct >= -MAX_PORTFOLIO_DD_PCT
+  && row.activeSymbols >= 4
+  && row.positiveSymbols >= Math.max(3, Math.ceil(row.activeSymbols / 2))
+  && row.dominance <= 0.6
+  && row.leaveOneOutMinNet > 0
+  && row.positiveMonths >= Math.max(1, row.totalMonths - 2)
+  && row.dropped / (row.trades.length + row.dropped) <= 0.1
+  && row.recent.every((window) =>
+    window.n >= 20
+    && window.net > 0
+    && window.profitFactor >= 1.1
+    && window.long > 0
+    && window.short > 0),
+).sort((a, b) => b.net - a.net);
+
+const portfolioBest = [...portfolioRows].sort((a, b) => b.net - a.net);
+
 const print = (row: typeof rows[number]): string =>
   `${row.symbol.padEnd(5)} ${row.rule.padEnd(27)} N${String(row.trades.length).padStart(4)} D${row.coverageDays.toFixed(0).padStart(3)} `
-  + `gross ${fmt(row.baseline).padStart(8)} base ${fmt(row.stress).padStart(8)} PF ${row.stressPf.toFixed(2)} `
+  + `cost ${row.costPct.toFixed(4)}% gross ${fmt(row.baseline).padStart(8)} base ${fmt(row.stress).padStart(8)} PF ${row.stressPf.toFixed(2)} `
   + `robust ${fmt(row.robustStress).padStart(8)}/PF${row.robustPf.toFixed(2)} `
-  + `DD ${fmt(drawdown(row.trades, STRESS_RT_PCT))} WR ${(row.trades.filter((trade) => tradeNet(trade, STRESS_RT_PCT) > 0).length / row.trades.length * 100).toFixed(1)}% `
+  + `DD ${fmt(drawdown(row.trades, row.costPct))} WR ${(row.trades.filter((trade) => tradeNet(trade, row.costPct) > 0).length / row.trades.length * 100).toFixed(1)}% `
   + `L95 ${row.meanL95 >= 0 ? '+' : ''}${row.meanL95.toFixed(4)} `
   + `hold ${median(row.trades.map((trade) => (trade.exitAt - trade.entryAt) / 60_000)).toFixed(0)}m `
   + `f${row.folds}/4 IS/OOS ${fmt(row.is)}/${fmt(row.oos)} L/S ${fmt(row.long)}/${fmt(row.short)} `
@@ -1091,8 +1372,33 @@ const print = (row: typeof rows[number]): string =>
     `W${window.days} n${window.n} ${fmt(window.net)}/PF${window.profitFactor.toFixed(2)} `
     + `L/S${fmt(window.long)}/${fmt(window.short)}`).join(' ');
 
-console.log(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${STRESS_RT_PCT}% measured-cost discovery reserve · ${ROBUST_STRESS_RT_PCT}% adverse sensitivity (non-blocking) · ${FUNDING_PER_HOUR_PCT}%/h adverse funding · max DD ${MAX_BACKTEST_DD_PCT}%`);
+const printPortfolio = (row: PortfolioRow): string =>
+  `${row.rule.padEnd(27)} N${String(row.trades.length).padStart(4)} `
+  + `net ${fmt(row.net).padStart(8)} PF ${row.profitFactor.toFixed(2)} `
+  + `WR ${row.winRatePct.toFixed(1)}% `
+  + `adverse ${fmt(row.robustNet).padStart(8)}/PF${row.robustProfitFactor.toFixed(2)} `
+  + `PnL $${row.netUsd.toFixed(2)} DD $${row.drawdownUsd.toFixed(2)}/${fmt(row.drawdownPct)}% `
+  + `L95 ${row.meanL95 >= 0 ? '+' : ''}${row.meanL95.toFixed(4)} `
+  + `f${row.folds}/4 IS/OOS ${fmt(row.is)}/${fmt(row.oos)} `
+  + `L/S ${fmt(row.long)}/${fmt(row.short)} `
+  + `symbols ${row.positiveSymbols}/${row.activeSymbols}+ dom ${(row.dominance * 100).toFixed(0)}% `
+  + `LOO ${fmt(row.leaveOneOutMinNet)} months ${row.positiveMonths}/${row.totalMonths} `
+  + `cap ${row.maxConcurrent}/${PORTFOLIO_MAX_OPEN} drop ${row.dropped} `
+  + row.recent.map((window) =>
+    `W${window.days} n${window.n} ${fmt(window.net)}/PF${window.profitFactor.toFixed(2)} `
+    + `L/S${fmt(window.long)}/${fmt(window.short)}`).join(' ');
+
+const costLabel = executionCostBySymbol.size
+  ? `${executionCostBySymbol.size} market-specific p95 costs`
+  : `${FALLBACK_EXECUTION_COST_PCT}% explicitly enabled fallback cost`;
+console.log(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${costLabel} · adverse 1.5x measured p95 (non-blocking) · ${FUNDING_PER_HOUR_PCT}%/h adverse funding · max DD ${MAX_BACKTEST_DD_PCT}%`);
 console.log(`\nQUALIFIED (${qualified.length})`);
 console.log(qualified.length ? qualified.slice(0, 30).map(print).join('\n') : '— none —');
 console.log('\nTOP 30 (including failures)');
 console.log(best.slice(0, 30).map(print).join('\n'));
+console.log(`\nPORTFOLIO QUALIFIED (${portfolioQualified.length}) · one fixed rule across all >=${PORTFOLIO_MIN_COVERAGE_DAYS}d markets · max ${PORTFOLIO_MAX_OPEN} concurrent`);
+console.log(portfolioQualified.length
+  ? portfolioQualified.slice(0, 20).map(printPortfolio).join('\n')
+  : '— none —');
+console.log('\nPORTFOLIO TOP 20 (including failures)');
+console.log(portfolioBest.slice(0, 20).map(printPortfolio).join('\n'));
