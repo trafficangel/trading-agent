@@ -2132,6 +2132,7 @@ type NativeMicrostructureSweep = {
   evaluations?: unknown[];
   shadowEligibleRules?: string[];
   autoPromotion?: boolean;
+  immutableSelection?: boolean;
 };
 
 function nativeMicrostructureAudit(): NativeMicrostructureAudit | null {
@@ -2164,7 +2165,11 @@ function nativeMicrostructureSweepStatus(
   expectedMode: 'exploratory' | 'frozen',
   report: NativeMicrostructureSweep | null,
 ): string {
-  const valid = report?.mode === expectedMode && report.autoPromotion === false;
+  const valid = report?.mode === expectedMode
+    && report.autoPromotion === false
+    && (expectedMode === 'exploratory' || (
+      report.status !== 'evaluated' || report.immutableSelection === true
+    ));
   const generatedAt = Date.parse(report?.generatedAt ?? '');
   const ageMinutes = Number.isFinite(generatedAt)
     ? Math.max(0, Math.round((Date.now() - generatedAt) / 60_000))

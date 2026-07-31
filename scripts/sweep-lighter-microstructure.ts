@@ -22,6 +22,7 @@ import {
 import {
   buildCausalMicroFeatureBars,
   evaluateMicrostructureRule,
+  existingImmutableFrozenMicrostructureReport,
   PREREGISTERED_MICRO_RULES,
   simulateMicrostructureRule,
 } from '../src/lib/lighter-microstructure-research.js';
@@ -249,6 +250,23 @@ const auditPath = resolve(
     ?? 'data/lighter-native-microstructure-audit.json',
 );
 const generatedAt = new Date().toISOString();
+const outputPath = flagValue('--output');
+if (mode === 'frozen' && outputPath) {
+  const absoluteOutputPath = resolve(outputPath);
+  if (existsSync(absoluteOutputPath)) {
+    let existing: unknown;
+    try {
+      existing = JSON.parse(readFileSync(absoluteOutputPath, 'utf8')) as unknown;
+    } catch {
+      throw new Error('existing frozen microstructure report is unreadable; refusing overwrite');
+    }
+    const locked = existingImmutableFrozenMicrostructureReport(existing);
+    if (locked) {
+      console.log(JSON.stringify(locked, null, 2));
+      process.exit(0);
+    }
+  }
+}
 if (!existsSync(auditPath)) {
   output({
     version: 'lighter-microstructure-sweep-v3',
@@ -259,6 +277,7 @@ if (!existsSync(auditPath)) {
     rules: RULE_VARIANTS,
     shadowEligibleRules: [],
     autoPromotion: false,
+    immutableSelection: false,
   });
   process.exit(0);
 }
@@ -284,6 +303,7 @@ if (!selectedGate.passed || readinessFailures.length) {
     rules: RULE_VARIANTS,
     shadowEligibleRules: [],
     autoPromotion: false,
+    immutableSelection: false,
   });
   process.exit(0);
 }
@@ -309,6 +329,7 @@ try {
     rules: RULE_VARIANTS,
     shadowEligibleRules: [],
     autoPromotion: false,
+    immutableSelection: false,
   });
   process.exit(0);
 }
@@ -400,5 +421,7 @@ output({
       .map((row) => `${row.timeframeMinutes}m:${row.ruleId}`)
     : [],
   autoPromotion: false,
+  immutableSelection: mode === 'frozen',
+  selectionEpochAt: mode === 'frozen' ? generatedAt : null,
   evaluations,
 });

@@ -96,6 +96,33 @@ export type MicroRuleEvaluation = {
   oosShort: MicroStats;
 };
 
+/**
+ * Return an already locked first-admissible frozen selection, or null while
+ * the file is still pre-gate. An evaluated file with a missing/mismatched
+ * lock is never overwritten: doing so would turn the 21d holdout into a
+ * rolling, repeatedly inspected selection window.
+ */
+export function existingImmutableFrozenMicrostructureReport(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null;
+  const report = value as Record<string, unknown>;
+  if (report.status !== 'evaluated') return null;
+  if (
+    report.version !== 'lighter-microstructure-sweep-v3'
+    || report.mode !== 'frozen'
+    || report.immutableSelection !== true
+    || report.autoPromotion !== false
+    || !Array.isArray(report.shadowEligibleRules)
+    || !Array.isArray(report.evaluations)
+  ) {
+    throw new Error(
+      'existing evaluated frozen microstructure report is not an immutable v3 selection; refusing overwrite',
+    );
+  }
+  return report;
+}
+
 function sideFromMirrored(
   longCondition: boolean,
   shortCondition: boolean,

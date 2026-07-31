@@ -1083,6 +1083,14 @@ The independent 21-day frozen sweep continues to write
 `data/lighter-native-microstructure-sweep.json`. Exploratory results therefore
 cannot overwrite or relax the frozen candidate gate.
 
+The frozen timer is a one-shot selection despite running daily. The first
+report produced after every 21-day readiness condition passes is marked
+`immutableSelection=true` and is returned unchanged on every later run. An
+evaluated file without the immutable marker or with a mismatched schema causes
+the sweep to fail closed rather than overwrite it. Thus an initially rejected
+rule cannot become a candidate merely because the same holdout was inspected
+again on a longer rolling window.
+
 ## Preregistered dual-timeframe L2 protocol
 
 Before the first seven-day microstructure result was available, the six frozen

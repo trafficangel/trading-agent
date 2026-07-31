@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCausalMicroFeatureBars,
   evaluateMicrostructureRule,
+  existingImmutableFrozenMicrostructureReport,
   PREREGISTERED_MICRO_RULES,
   simulateMicrostructureRule,
   type MicroFeatureBar,
@@ -88,6 +89,32 @@ function microMinute(
 }
 
 describe('Lighter microstructure research', () => {
+  it('locks the first admissible frozen selection and rejects an unlocked evaluated file', () => {
+    const locked = {
+      version: 'lighter-microstructure-sweep-v3',
+      mode: 'frozen',
+      status: 'evaluated',
+      immutableSelection: true,
+      autoPromotion: false,
+      shadowEligibleRules: ['1m:OF-CONT-25-H1'],
+      evaluations: [{}],
+    };
+    expect(existingImmutableFrozenMicrostructureReport(locked)).toBe(locked);
+    expect(existingImmutableFrozenMicrostructureReport({
+      ...locked,
+      status: 'not_ready',
+      immutableSelection: false,
+    })).toBeNull();
+    expect(() => existingImmutableFrozenMicrostructureReport({
+      ...locked,
+      immutableSelection: false,
+    })).toThrow(/refusing overwrite/);
+    expect(() => existingImmutableFrozenMicrostructureReport({
+      ...locked,
+      mode: 'exploratory',
+    })).toThrow(/refusing overwrite/);
+  });
+
   it('uses clock-equivalent causal warmups and resets them across a native gap', () => {
     const oneMinuteRows = Array.from({ length: 240 }, (_, index) => microMinute(index));
     const fiveMinuteRows = Array.from({ length: 48 }, (_, index) => microMinute(index, 5));
