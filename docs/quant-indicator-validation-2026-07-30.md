@@ -928,3 +928,27 @@ calendar months, positive causal BTC bull/bear and high/low-volatility regimes,
 at least six active alts, leave-one-alt-out minimum above zero and positive-PnL
 dominance no higher than `60%`. A historical pass can enter prospective Shadow
 only; Real remains governed by the separate frozen forward gate.
+
+### BTC+ETH factor-residual hedge: rejected
+
+The preregistration was committed as `2afe7f9` and the matching implementation
+as `122d940` before the first result was generated. The single frozen run
+failed at both timeframes. At 1m it produced 784 packages, `−8.26%`, PF `0.88`,
+mean-pair L95 `−0.0241%`, 0/4 positive folds and `−12.58%` maximum additive
+drawdown. At 5m it produced 1,426 packages, `−32.98%`, PF `0.81`, L95
+`−0.0372%`, 1/4 folds and `−38.27%` drawdown. Observed-maximum execution
+sensitivity remained negative at `−10.27%` and `−38.30%` respectively.
+
+The final 30% OOS slice was mildly positive (`+3.28%` at 1m and `+3.76%` at
+5m), but this cannot override the deeply negative IS (`−11.54%` and
+`−36.74%`). The 1m negative-Z book lost `−9.67%`, its latest 30 and 90 days
+were negative, bull/bear and low-volatility segments were negative, and only
+two months were positive. Both 5m directions, all recent windows, bear/high-
+and low-volatility segments and all calendar months were negative. Selecting
+only positive-Z 1m, high-volatility 1m, HYPE or the final OOS after observing
+the report would be an unregistered rescue rule.
+
+The family is rejected without Shadow, Real or website registration. Exact
+funding was economically immaterial (`+0.0095%` at 1m and `+0.0201%` at 5m);
+the failure is the signal rather than an assumed fee reserve. Reproducible
+summary evidence is in `data/lighter-factor-residual-hedge-results.json`.
