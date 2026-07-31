@@ -570,3 +570,22 @@ reversion book, not another threshold variation of that book.
 No rule may be changed after viewing this run. A complete failure closes this
 family; a passing rule may enter prospective Shadow only after the frozen
 result and its exact parameters are recorded here.
+
+### Frozen result: rejected
+
+The single preregistered run rejected all eight rules on both timeframes. The
+least-negative portfolio was `SQZ20-L5-V1.25-E8`, but it was not close to an
+admission boundary:
+
+- 5m: 4,479 trades, net `−318.32%`, PF `0.76`, adverse net `−406.07%` / PF
+  `0.71`, drawdown `−53.86%`, 0/4 folds, IS/OOS `−191.97 / −126.35`,
+  Long/Short `−101.80 / −216.52`, one of 15 markets positive and 0/6 positive
+  calendar months;
+- 1m falsification control: 14,340 trades, net `−771.75%`, PF `0.64`, adverse
+  net `−1009.38%` / PF `0.56`, drawdown `−129.49%`, 0/4 folds, IS/OOS
+  `−565.84 / −205.92`, Long/Short `−374.85 / −396.91`, one of 15 markets
+  positive and 0/6 positive months.
+
+Every causal trend and volatility regime was negative. No individual-market
+rule qualified either. The family is closed without a rescue grid, is not
+registered in prospective Shadow and cannot enter Real.

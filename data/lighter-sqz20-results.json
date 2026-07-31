@@ -1,0 +1,75 @@
+{
+  "version": "lighter-sqz20-frozen-v1",
+  "generatedAt": "2026-07-31T14:07:55Z",
+  "status": "rejected",
+  "preregisteredRules": [
+    "SQZ20-L5-V0-E8",
+    "SQZ20-L5-V0-E21",
+    "SQZ20-L5-V1.25-E8",
+    "SQZ20-L5-V1.25-E21",
+    "SQZ20-L10-V0-E8",
+    "SQZ20-L10-V0-E21",
+    "SQZ20-L10-V1.25-E8",
+    "SQZ20-L10-V1.25-E21"
+  ],
+  "input": {
+    "markets": [
+      "BTC", "ETH", "SOL", "BNB", "LTC", "HYPE", "ZEC", "DOGE",
+      "NEAR", "JUP", "LIT", "GRAM", "XMR", "ENA", "TAO"
+    ],
+    "lookbackDays": 180,
+    "notionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific measured executable round-trip p95",
+    "adverseExecutionCostMultiplier": 1.5,
+    "adverseFundingPctPerHour": 0.00125,
+    "portfolioMaxOpen": 6
+  },
+  "fiveMinute": {
+    "qualifiedIndividualRules": 0,
+    "qualifiedPortfolioRules": 0,
+    "leastNegativePortfolio": {
+      "rule": "SQZ20-L5-V1.25-E8",
+      "trades": 4479,
+      "netPct": -318.32,
+      "profitFactor": 0.76,
+      "adverseNetPct": -406.07,
+      "adverseProfitFactor": 0.71,
+      "maxDrawdownPct": -53.86,
+      "positiveFolds": 0,
+      "folds": 4,
+      "inSampleNetPct": -191.97,
+      "outOfSampleNetPct": -126.35,
+      "longNetPct": -101.80,
+      "shortNetPct": -216.52,
+      "positiveMarkets": 1,
+      "activeMarkets": 15,
+      "positiveMonths": 0,
+      "months": 6
+    }
+  },
+  "oneMinute": {
+    "qualifiedIndividualRules": 0,
+    "qualifiedPortfolioRules": 0,
+    "leastNegativePortfolio": {
+      "rule": "SQZ20-L5-V1.25-E8",
+      "trades": 14340,
+      "netPct": -771.75,
+      "profitFactor": 0.64,
+      "adverseNetPct": -1009.38,
+      "adverseProfitFactor": 0.56,
+      "maxDrawdownPct": -129.49,
+      "positiveFolds": 0,
+      "folds": 4,
+      "inSampleNetPct": -565.84,
+      "outOfSampleNetPct": -205.92,
+      "longNetPct": -374.85,
+      "shortNetPct": -396.91,
+      "positiveMarkets": 1,
+      "activeMarkets": 15,
+      "positiveMonths": 0,
+      "months": 6
+    }
+  },
+  "decision": "Closed without retuning. No prospective Shadow or Real registration."
+}
