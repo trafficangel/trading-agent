@@ -1069,3 +1069,43 @@ was still `not_ready`, and no microstructure rule had produced an eligible
 evaluation when the policy was changed. The first future output will therefore
 use measured p95 for the blocking economics and observed maximum only as
 non-blocking sensitivity from its first admissible run.
+
+## Preregistered dual-timeframe L2 protocol
+
+Before the first seven-day microstructure result was available, the six frozen
+L2 hypotheses were extended from a five-minute-only implementation to two
+independent timeframe paths. This is not a larger parameter grid: every rule
+keeps the same economic meaning at `1m` and `5m`.
+
+- signal features use only the completed bar and require an unbroken native
+  sequence; 1m never comes from interpolating a 5m candle, while 5m is built
+  only from all five consecutive quality-approved 1m rows;
+- trend uses causal 60-minute and 240-minute EMAs on each timeframe; volatility
+  compares the trailing 60-minute return dispersion with its own causal
+  240-minute absolute-return EMA;
+- `OF-CONT-25-H1` and `ABSORB-55-H1` hold five clock minutes,
+  `OF-CONT-25-H3`, `ABSORB-55-H3` and `BASIS-4BP-H3` hold 15 minutes, and
+  `BASIS-4BP-H6` holds 30 minutes. Thus a suffix is an economic horizon, not a
+  raw bar count that changes when the timeframe changes;
+- every signal enters only at the next bar open and exits at the first bar open
+  after the frozen holding horizon. Missing intermediate bars reject the trade;
+- each timeframe/rule is evaluated separately. A positive 1m result cannot
+  repair a failed 5m result or vice versa, and results may not be pooled to pass
+  a gate;
+- the first seven calendar days form a diagnostic discovery segment that can
+  never qualify a strategy. Frozen research starts only after 21 complete days
+  and requires the subsequent 14-day OOS segment to be independently positive
+  with PF at least `1.10`;
+- the existing total-sample gates remain: at least 120 trades, net positive, PF
+  at least `1.20`, positive mean-trade L95, positive Long and Short books with
+  at least 30 trades each, three positive chronological thirds, drawdown no
+  worse than 5% of ten fixed `$100` capacity units, positive bull/bear and
+  high/low-volatility regimes, at least four active markets, majority-positive
+  breadth, dominance at most 60% and positive leave-one-market-out net;
+- OOS additionally requires at least 60 trades and positive Long and Short
+  contributions with at least 15 trades per side. Observed-maximum execution is
+  reported but remains non-blocking; p95 and exact funding determine the gate.
+
+Only a timeframe/rule that passes every frozen condition may be registered in
+prospective Shadow. Historical qualification cannot enable Real; the separate
+prospective `$100` forward gate remains mandatory.
