@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily prospective Native ER60 audit
+
+[Timer]
+OnCalendar=*-*-* 00:20:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

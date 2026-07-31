@@ -1,0 +1,82 @@
+{
+  "version": "lighter-er60-frozen-v1",
+  "generatedAt": "2026-07-31T15:21:13.000Z",
+  "researchOnly": true,
+  "decision": "reject_as_separate_strategy",
+  "reason": "The ER60 variants are filtered subsets of the existing BTC/HYPE VWZ60 strategies, not independent return sources. The marginal historical improvement comes from removing only a few old trades, while recent windows are unchanged. Running both would duplicate highly correlated exposure. The common 15-market portfolio and every 1m variant also failed the frozen gates. ER60 is recorded prospectively as signal telemetry instead of opening a second position.",
+  "frozenInputs": {
+    "symbols": [
+      "BTC", "ETH", "SOL", "BNB", "LTC", "HYPE", "ZEC", "DOGE",
+      "NEAR", "JUP", "LIT", "GRAM", "XMR", "ENA", "TAO"
+    ],
+    "lookbackDays": 180,
+    "timeframesMinutes": [1, 5],
+    "notionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific measured full-round-trip p95; observed maximum reported as adverse sensitivity",
+    "funding": "0.00125% per holding hour adverse charge",
+    "entry": "next bar open",
+    "portfolioMaxOpen": 10,
+    "grid": "VWZ60 threshold 2.5/3.0; symmetric ER60 maximum 0.25/0.35"
+  },
+  "duplicateChecks": [
+    {
+      "symbol": "HYPE",
+      "timeframeMinutes": 5,
+      "baseRule": "VWZ60-2.5-touch",
+      "baseTrades": 356,
+      "baseNetPct": 88.95,
+      "baseProfitFactor": 1.58,
+      "filteredRule": "VWZ60-2.5-touch+ER60<0.35",
+      "filteredTrades": 352,
+      "filteredNetPct": 89.93,
+      "filteredProfitFactor": 1.60,
+      "removedTrades": 4,
+      "incrementalNetPct": 0.98,
+      "recent30dNetBasePct": 13.92,
+      "recent30dNetFilteredPct": 13.93
+    },
+    {
+      "symbol": "BTC",
+      "timeframeMinutes": 5,
+      "baseRule": "VWZ60-3-touch",
+      "baseTrades": 103,
+      "baseNetPct": 18.83,
+      "baseProfitFactor": 1.91,
+      "filteredRule": "VWZ60-3-touch+ER60<0.35",
+      "filteredTrades": 100,
+      "filteredNetPct": 20.71,
+      "filteredProfitFactor": 2.12,
+      "removedTrades": 3,
+      "incrementalNetPct": 1.88,
+      "recent30dNetBasePct": 3.05,
+      "recent30dNetFilteredPct": 3.05,
+      "recent60dNetBasePct": 7.97,
+      "recent60dNetFilteredPct": 7.97,
+      "recent90dNetBasePct": 10.00,
+      "recent90dNetFilteredPct": 10.00
+    }
+  ],
+  "portfolioEvidence": {
+    "qualified5m": 0,
+    "qualified1m": 0,
+    "best5mRule": "VWZ60-2.5-touch+ER60<0.35",
+    "best5mTrades": 8475,
+    "best5mNetPct": 417.72,
+    "best5mProfitFactor": 1.11,
+    "best5mAdverseNetPct": 333.02,
+    "best5mAdverseProfitFactor": 1.09,
+    "best5mDrawdownPct": -11.82,
+    "best5mPositiveFolds": 3,
+    "best5mTotalFolds": 4,
+    "best1mNetPct": -527.75,
+    "best1mProfitFactor": 0.92,
+    "best1mDrawdownPct": -57.41
+  },
+  "deployment": {
+    "separateShadowStrategy": false,
+    "real": false,
+    "prospectiveTelemetry": true,
+    "telemetryField": "lighter_lux_signals.native_er60"
+  }
+}

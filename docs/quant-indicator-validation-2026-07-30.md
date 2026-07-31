@@ -660,6 +660,26 @@ position continues to be marked, stopped and closed against `$1,000` depth;
 after a reverse signal the replacement Native position opens at `$100`.
 LuxAlgo-sourced Shadow remains an independent `$1,000` cohort.
 
+### ER60 challenger: rejected as a second strategy, retained as telemetry
+
+A symmetric Kaufman efficiency-ratio filter was tested on the existing
+two-sided VWZ60 family at both 1m and 5m. It did not produce an independent
+portfolio: no common 15-market rule qualified and every 1m variant failed.
+On HYPE, `ER60 < 0.35` kept 352 of the existing strategy's 356 trades and
+improved 180-day net by only `0.98` percentage points. On BTC it kept 100 of
+103 trades; the `1.88` point improvement came entirely from older trades,
+while the 30/60/90-day windows were unchanged. Running these variants beside
+their parent strategies would therefore double-count substantially identical
+exposure.
+
+The separate Shadow candidates are rejected. Instead, every future Native
+signal stores the completed-bar `ER60` value in
+`lighter_lux_signals.native_er60`. This creates a clean prospective dataset
+for deciding whether the filter should eventually replace part of a parent
+rule, without opening a duplicate position or using the historical selection
+sample as if it were new OOS evidence. Frozen evidence lives in
+`data/lighter-er60-results.json`.
+
 The transition to long-window costs is now mechanical. The exporter
 `scripts/export-lighter-native-execution-costs.ts` refuses to create a scanner
 cost file unless the audit is fresh, all 15 markets are present, the notional

@@ -1,6 +1,7 @@
 import { request } from 'undici';
 import { db } from '../db/client.js';
 import {
+  efficiencyRatio,
   evaluateTrendFilteredZ60,
   evaluateTrendStackZ60,
   evaluateVwz60,
@@ -297,6 +298,7 @@ function emit(
   side: 'long' | 'short',
   barTime: number,
   price: number,
+  er60: number | null,
 ): void {
   queueLighterLuxalgoSignal({
     kind: 'strategy',
@@ -308,7 +310,7 @@ function emit(
     timeframe: '5',
     price,
     bar_time: barTime,
-  });
+  }, { efficiencyRatio60: er60 });
 }
 
 async function poll(): Promise<void> {
@@ -376,6 +378,7 @@ async function poll(): Promise<void> {
             ? evaluateVwz60(strategyBars, 60, strategy.threshold, strategy.mode)
             : evaluateZ60(strategyBars, 60, strategy.threshold, strategy.mode);
           if (!snapshot) throw new Error('z60_history_incomplete');
+          const er60 = efficiencyRatio(strategyBars, 60);
 
           const open = openPosition.get(strategy.id);
           if (open) {
@@ -384,7 +387,7 @@ async function poll(): Promise<void> {
               : snapshot.close <= snapshot.mean;
             const timeExit = target + BAR_MS - open.opened_at >= TIME_EXIT_BARS * BAR_MS;
             if (meanExit || timeExit) {
-              emit(strategy, feed.symbol, 'exit', open.side, target, snapshot.close);
+              emit(strategy, feed.symbol, 'exit', open.side, target, snapshot.close, er60);
               logger.info({
                 strategyId: strategy.id,
                 symbol: feed.symbol,
@@ -410,7 +413,7 @@ async function poll(): Promise<void> {
           }
 
           if (snapshot.signal) {
-            emit(strategy, feed.symbol, 'entry', snapshot.signal, target, snapshot.close);
+            emit(strategy, feed.symbol, 'entry', snapshot.signal, target, snapshot.close, er60);
             logger.info({
               strategyId: strategy.id,
               symbol: feed.symbol,
@@ -423,6 +426,7 @@ async function poll(): Promise<void> {
               previousZ: snapshot.previousZ,
               currentZ: snapshot.currentZ,
               trendMean: snapshot.trendMean,
+              efficiencyRatio60: er60,
             }, 'lighter-z60: native entry signal');
           }
           lastEvaluatedBars.set(strategy.id, target);

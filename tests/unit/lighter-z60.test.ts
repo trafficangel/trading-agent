@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  efficiencyRatio,
   evaluateTrendFilteredZ60,
   evaluateTrendStackZ60,
   evaluateVwz60,
@@ -20,6 +21,20 @@ function volumeBars(closes: number[], volumes?: number[]): Vwz60Bar[] {
     volume: volumes?.[index] ?? 1,
   }));
 }
+
+describe('efficiencyRatio', () => {
+  it('returns one for a fully directional completed-bar path', () => {
+    expect(efficiencyRatio(bars([1, 2, 3, 4, 5]), 4)).toBe(1);
+  });
+
+  it('returns zero when a noisy path finishes where it started', () => {
+    expect(efficiencyRatio(bars([1, 2, 1, 2, 1]), 4)).toBe(0);
+  });
+
+  it('refuses an incomplete lookback', () => {
+    expect(efficiencyRatio(bars([1, 2, 3]), 3)).toBeNull();
+  });
+});
 
 describe('evaluateZ60Reclaim', () => {
   it('detects a symmetric long reclaim', () => {

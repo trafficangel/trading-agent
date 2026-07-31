@@ -22,6 +22,32 @@ export type Z60Snapshot = {
 
 export type Z60EntryMode = 'reclaim' | 'touch';
 
+/**
+ * Kaufman's efficiency ratio on completed closes. Zero means that the path
+ * travelled but ended where it started; one means a perfectly directional
+ * path. It is exposed as telemetry only: the live Native rules do not use it
+ * to block entries until an independent prospective sample validates that
+ * change.
+ */
+export function efficiencyRatio(
+  bars: readonly Z60Bar[],
+  period = 60,
+): number | null {
+  if (period < 1 || bars.length < period + 1) return null;
+  const end = bars.length - 1;
+  const start = end - period;
+  const displacement = Math.abs(bars[end]!.close - bars[start]!.close);
+  let path = 0;
+  for (let index = start + 1; index <= end; index += 1) {
+    const current = bars[index]!.close;
+    const previous = bars[index - 1]!.close;
+    if (!Number.isFinite(current) || !Number.isFinite(previous)) return null;
+    path += Math.abs(current - previous);
+  }
+  if (!(path > 0)) return 0;
+  return Math.min(1, displacement / path);
+}
+
 function populationStats(values: readonly number[]): { mean: number; sigma: number } | null {
   if (!values.length || values.some((value) => !Number.isFinite(value))) return null;
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;

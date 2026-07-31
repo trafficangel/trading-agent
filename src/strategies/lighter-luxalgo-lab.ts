@@ -997,8 +997,9 @@ let started = false;
 const insertSignal = db.prepare(`
   INSERT OR IGNORE INTO lighter_lux_signals
     (dedup_key, strategy_id, symbol, action, side, strategy_event, bar_time,
-     received_at, capture_due_at, source_price, execution_notional_usd)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+     received_at, capture_due_at, source_price, execution_notional_usd,
+     native_er60)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const markCaptureError = db.prepare(`
   UPDATE lighter_lux_signals
   SET captured_at = ?, capture_status = 'error', capture_error = ?
@@ -1474,7 +1475,14 @@ function capture(
 }
 
 /** Independent portfolio shadow; it never delays or changes Track C. */
-export function queueLighterLuxalgoSignal(payload: LuxAlgoStrategyPayload): void {
+export type NativeSignalDiagnostics = {
+  efficiencyRatio60?: number | null;
+};
+
+export function queueLighterLuxalgoSignal(
+  payload: LuxAlgoStrategyPayload,
+  diagnostics?: NativeSignalDiagnostics,
+): void {
   const spec = STRATEGY_BY_ID.get(payload.strategy_id);
   if (!spec || payload.symbol !== spec.symbol) return;
   const derived = deriveActionSide(payload);
@@ -1489,6 +1497,9 @@ export function queueLighterLuxalgoSignal(payload: LuxAlgoStrategyPayload): void
     key, payload.strategy_id, payload.symbol, action, side,
     String(payload.strategy_event ?? side), payload.bar_time,
     receivedAt, receivedAt, finite(payload.price), shadowNotionalUsd(spec),
+    NATIVE_STRATEGY_ID_SET.has(spec.id)
+      ? finite(diagnostics?.efficiencyRatio60)
+      : null,
   );
   if (result.changes !== 1) return;
   capture(spec, Number(result.lastInsertRowid), action, side);
