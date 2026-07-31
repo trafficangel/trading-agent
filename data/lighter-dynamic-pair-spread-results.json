@@ -1,0 +1,428 @@
+{
+  "version": "lighter-dynamic-pair-spread-v1-frozen",
+  "generatedAt": "2026-07-31T17:20:16.274Z",
+  "preregistrationCommit": "20749d2",
+  "rule": {
+    "symbols": [
+      "BTC",
+      "ETH",
+      "SOL",
+      "BNB",
+      "LTC",
+      "HYPE",
+      "ZEC",
+      "DOGE",
+      "NEAR",
+      "JUP",
+      "LIT",
+      "GRAM",
+      "XMR",
+      "ENA",
+      "TAO"
+    ],
+    "betaDays": 30,
+    "spreadDays": 7,
+    "decisionMinutes": 15,
+    "entryZ": 3,
+    "minimumCorrelation": 0.75,
+    "betaRange": [
+      0.2,
+      3
+    ],
+    "maximumHoldMinutes": 360,
+    "stopPct": 2,
+    "packageNotionalUsd": 100,
+    "execution": "next-bar open, measured market-specific $100 p95; exact funding",
+    "maximumConcurrentPackages": 1
+  },
+  "results": [
+    {
+      "timeframe": "1m",
+      "commonStart": "2026-02-01T10:04:00.000Z",
+      "commonEnd": "2026-07-31T07:27:00.000Z",
+      "packages": 0,
+      "netPct": 0,
+      "netUsd": 0,
+      "profitFactor": 0,
+      "adverseNetPct": 0,
+      "adverseProfitFactor": 0,
+      "meanL95Pct": null,
+      "maxDrawdownPct": 0,
+      "positiveFolds": 0,
+      "inSample": {
+        "n": 0,
+        "netPct": 0,
+        "profitFactor": 0
+      },
+      "outOfSample": {
+        "n": 0,
+        "netPct": 0,
+        "profitFactor": 0
+      },
+      "directions": {
+        "richA": {
+          "n": 0,
+          "netPct": 0,
+          "profitFactor": 0
+        },
+        "richB": {
+          "n": 0,
+          "netPct": 0,
+          "profitFactor": 0
+        }
+      },
+      "regimes": {
+        "bull": {
+          "n": 0,
+          "netPct": 0,
+          "profitFactor": 0
+        },
+        "bear": {
+          "n": 0,
+          "netPct": 0,
+          "profitFactor": 0
+        },
+        "high": {
+          "n": 0,
+          "netPct": 0,
+          "profitFactor": 0
+        },
+        "low": {
+          "n": 0,
+          "netPct": 0,
+          "profitFactor": 0
+        }
+      },
+      "windows": [
+        {
+          "days": 30,
+          "total": {
+            "n": 0,
+            "netPct": 0,
+            "profitFactor": 0
+          },
+          "richA": {
+            "n": 0,
+            "netPct": 0,
+            "profitFactor": 0
+          },
+          "richB": {
+            "n": 0,
+            "netPct": 0,
+            "profitFactor": 0
+          }
+        },
+        {
+          "days": 60,
+          "total": {
+            "n": 0,
+            "netPct": 0,
+            "profitFactor": 0
+          },
+          "richA": {
+            "n": 0,
+            "netPct": 0,
+            "profitFactor": 0
+          },
+          "richB": {
+            "n": 0,
+            "netPct": 0,
+            "profitFactor": 0
+          }
+        },
+        {
+          "days": 90,
+          "total": {
+            "n": 0,
+            "netPct": 0,
+            "profitFactor": 0
+          },
+          "richA": {
+            "n": 0,
+            "netPct": 0,
+            "profitFactor": 0
+          },
+          "richB": {
+            "n": 0,
+            "netPct": 0,
+            "profitFactor": 0
+          }
+        }
+      ],
+      "months": [],
+      "positiveMonths": 0,
+      "breadth": {
+        "activeSymbols": 0,
+        "dominance": 1,
+        "leaveOneOutMinPct": null,
+        "bySymbol": {
+          "BTC": {
+            "n": 0,
+            "netPct": 0
+          },
+          "ETH": {
+            "n": 0,
+            "netPct": 0
+          },
+          "SOL": {
+            "n": 0,
+            "netPct": 0
+          },
+          "BNB": {
+            "n": 0,
+            "netPct": 0
+          },
+          "LTC": {
+            "n": 0,
+            "netPct": 0
+          },
+          "HYPE": {
+            "n": 0,
+            "netPct": 0
+          },
+          "ZEC": {
+            "n": 0,
+            "netPct": 0
+          },
+          "DOGE": {
+            "n": 0,
+            "netPct": 0
+          },
+          "NEAR": {
+            "n": 0,
+            "netPct": 0
+          },
+          "JUP": {
+            "n": 0,
+            "netPct": 0
+          },
+          "LIT": {
+            "n": 0,
+            "netPct": 0
+          },
+          "GRAM": {
+            "n": 0,
+            "netPct": 0
+          },
+          "XMR": {
+            "n": 0,
+            "netPct": 0
+          },
+          "ENA": {
+            "n": 0,
+            "netPct": 0
+          },
+          "TAO": {
+            "n": 0,
+            "netPct": 0
+          }
+        }
+      },
+      "fundingNetPct": 0,
+      "closeReasons": {
+        "stop": 0,
+        "time": 0
+      },
+      "qualified": false
+    },
+    {
+      "timeframe": "5m",
+      "commonStart": "2026-02-01T10:05:00.000Z",
+      "commonEnd": "2026-07-31T07:20:00.000Z",
+      "packages": 6,
+      "netPct": -1.2123714587683123,
+      "netUsd": -1.2123714587683123,
+      "profitFactor": 0.4997001025459017,
+      "adverseNetPct": -1.2186175281452523,
+      "adverseProfitFactor": 0.49798540270972547,
+      "meanL95Pct": -0.6584424068887931,
+      "maxDrawdownPct": -2.14411234404785,
+      "positiveFolds": 2,
+      "inSample": {
+        "n": 4,
+        "netPct": -1.6169404841061188,
+        "profitFactor": 0.2458695139763471
+      },
+      "outOfSample": {
+        "n": 2,
+        "netPct": 0.4045690253378064,
+        "profitFactor": 2.4491483361084025
+      },
+      "directions": {
+        "richA": {
+          "n": 6,
+          "netPct": -1.2123714587683123,
+          "profitFactor": 0.4997001025459017
+        },
+        "richB": {
+          "n": 0,
+          "netPct": 0,
+          "profitFactor": 0
+        }
+      },
+      "regimes": {
+        "bull": {
+          "n": 6,
+          "netPct": -1.2123714587683123,
+          "profitFactor": 0.4997001025459017
+        },
+        "bear": {
+          "n": 0,
+          "netPct": 0,
+          "profitFactor": 0
+        },
+        "high": {
+          "n": 0,
+          "netPct": 0,
+          "profitFactor": 0
+        },
+        "low": {
+          "n": 6,
+          "netPct": -1.2123714587683123,
+          "profitFactor": 0.4997001025459017
+        }
+      },
+      "windows": [
+        {
+          "days": 30,
+          "total": {
+            "n": 6,
+            "netPct": -1.2123714587683123,
+            "profitFactor": 0.4997001025459017
+          },
+          "richA": {
+            "n": 6,
+            "netPct": -1.2123714587683123,
+            "profitFactor": 0.4997001025459017
+          },
+          "richB": {
+            "n": 0,
+            "netPct": 0,
+            "profitFactor": 0
+          }
+        },
+        {
+          "days": 60,
+          "total": {
+            "n": 6,
+            "netPct": -1.2123714587683123,
+            "profitFactor": 0.4997001025459017
+          },
+          "richA": {
+            "n": 6,
+            "netPct": -1.2123714587683123,
+            "profitFactor": 0.4997001025459017
+          },
+          "richB": {
+            "n": 0,
+            "netPct": 0,
+            "profitFactor": 0
+          }
+        },
+        {
+          "days": 90,
+          "total": {
+            "n": 6,
+            "netPct": -1.2123714587683123,
+            "profitFactor": 0.4997001025459017
+          },
+          "richA": {
+            "n": 6,
+            "netPct": -1.2123714587683123,
+            "profitFactor": 0.4997001025459017
+          },
+          "richB": {
+            "n": 0,
+            "netPct": 0,
+            "profitFactor": 0
+          }
+        }
+      ],
+      "months": [
+        {
+          "month": "2026-03",
+          "netPct": -1.6169404841061188
+        },
+        {
+          "month": "2026-04",
+          "netPct": 0.4045690253378064
+        }
+      ],
+      "positiveMonths": 1,
+      "breadth": {
+        "activeSymbols": 0,
+        "dominance": 1,
+        "leaveOneOutMinPct": null,
+        "bySymbol": {
+          "BTC": {
+            "n": 0,
+            "netPct": 0
+          },
+          "ETH": {
+            "n": 6,
+            "netPct": -0.6061857293841562
+          },
+          "SOL": {
+            "n": 0,
+            "netPct": 0
+          },
+          "BNB": {
+            "n": 6,
+            "netPct": -0.6061857293841562
+          },
+          "LTC": {
+            "n": 0,
+            "netPct": 0
+          },
+          "HYPE": {
+            "n": 0,
+            "netPct": 0
+          },
+          "ZEC": {
+            "n": 0,
+            "netPct": 0
+          },
+          "DOGE": {
+            "n": 0,
+            "netPct": 0
+          },
+          "NEAR": {
+            "n": 0,
+            "netPct": 0
+          },
+          "JUP": {
+            "n": 0,
+            "netPct": 0
+          },
+          "LIT": {
+            "n": 0,
+            "netPct": 0
+          },
+          "GRAM": {
+            "n": 0,
+            "netPct": 0
+          },
+          "XMR": {
+            "n": 0,
+            "netPct": 0
+          },
+          "ENA": {
+            "n": 0,
+            "netPct": 0
+          },
+          "TAO": {
+            "n": 0,
+            "netPct": 0
+          }
+        }
+      },
+      "fundingNetPct": -0.021792817360206024,
+      "closeReasons": {
+        "stop": 0,
+        "time": 6
+      },
+      "qualified": false
+    }
+  ],
+  "admittedToShadow": false
+}

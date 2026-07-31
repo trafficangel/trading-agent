@@ -1023,3 +1023,24 @@ segments, at least six active markets, leave-one-market-out minimum above zero
 and positive-PnL dominance no higher than `60%`. A historical pass may create
 prospective Shadow only; Real remains disabled and requires its separate frozen
 forward gate.
+
+### Dynamic pair-spread mean reversion: rejected
+
+The preregistration was committed as `20749d2` and the matching implementation
+as `908c853` before the first result was calculated. The frozen rule found no
+eligible 1m packages: over the 30-day causal window, no pair simultaneously
+met the `0.75` return-correlation requirement and reached a three-sigma
+seven-day level spread at an otherwise available decision. This is a valid
+zero-sample rejection, not permission to lower the gate after seeing it.
+
+The 5m path produced only six packages and also failed economically: net
+`−1.21%`, PF `0.50`, observed-maximum net `−1.22%`, mean-trade L95
+`−0.6584%`, 2/4 positive folds and IS/OOS `−1.62% / +0.40%`. Only the
+`rich_a` direction traded and it was negative; the required two-sided breadth,
+minimum sample, regimes and recent windows therefore failed as well. Exact
+funding was included but cannot explain the absence of signals or the negative
+price result.
+
+No threshold, lookback, holding period or pair subset is retuned. The family is
+closed without Shadow, Real or website registration. Frozen evidence is in
+`data/lighter-dynamic-pair-spread-results.json`.
