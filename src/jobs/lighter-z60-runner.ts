@@ -86,6 +86,13 @@ const FEEDS: readonly NativeFeed[] = [
       { id: 'btc-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 3 },
     ],
   },
+  {
+    symbol: 'HYPEUSDT',
+    marketId: 24,
+    strategies: [
+      { id: 'hype-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 2.5 },
+    ],
+  },
 ];
 
 const openPosition = db.prepare<[string], OpenRow>(`

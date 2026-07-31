@@ -107,6 +107,11 @@ const LIGHTER_WS = 'wss://mainnet.zklighter.elliot.ai/stream';
 // conservative 0.065% round-trip execution/funding stress. Its one-sided 95%
 // lower confidence bound is only marginally positive, so it starts in
 // prospective Shadow and is deliberately excluded from the Real allowlist.
+// STRAT-035 applies the same completed-bar volume-weighted family to HYPE at
+// 2.5 sigma. It passed 180d, four chronological folds, both sides and every
+// recent window even after 0.15% round-trip stress. It still starts in
+// prospective Shadow because no historical result substitutes for forward
+// execution evidence.
 // BCH, XLM, TRX and JUP candidates remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
@@ -511,6 +516,27 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 5.90,
     },
   },
+  {
+    id: 'hype-vwz60-touch',
+    code: '035',
+    name: 'Volume Z60 · 2.5σ Touch · VWMA Exit',
+    symbol: 'HYPEUSDT',
+    asset: 'HYPE',
+    marketId: 24,
+    stopPct: 1.5,
+    backtest: {
+      // Native Lighter completed 5m candles, next-bar execution, volume-
+      // weighted rolling distribution and 0.065% round-trip execution/funding
+      // stress. The same model remained positive through 0.15% stress and
+      // thresholds 2.25/2.5/2.75 formed a profitable neighborhood.
+      period: '2026-02-01 → 2026-07-31',
+      trades: 356,
+      winRatePct: 64.3,
+      profitFactor: 1.47,
+      netPct: 74.52,
+      maxDrawdownPct: 13.62,
+    },
+  },
 ] as const;
 
 const STRATEGY_BY_ID = new Map(STRATEGIES.map((spec) => [spec.id, spec]));
@@ -521,6 +547,7 @@ const NATIVE_STRATEGY_IDS = [
   'bnb-z60-touch',
   'ltc-z60-touch',
   'btc-vwz60-touch',
+  'hype-vwz60-touch',
 ] as const;
 const NATIVE_LIVE_STRATEGY_IDS = [
   'sol-z60-reclaim',
@@ -589,6 +616,16 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     realEnabled: false,
     noteRu: 'Новый BTC-кандидат. Прошёл 180d, 4/4 периода, IS/OOS, Long/Short и окна 30/60/90d при стрессе 0.065%, но L95 лишь немного выше нуля — только prospective Shadow.',
     noteEn: 'New BTC candidate. It passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows at 0.065% stress, but L95 is only marginally above zero, so it is prospective Shadow only.',
+  },
+  'hype-vwz60-touch': {
+    family: 'vwz',
+    mode: 'touch',
+    threshold: 2.5,
+    period: 60,
+    timeExitBars: 240,
+    realEnabled: false,
+    noteRu: 'Новый HYPE-кандидат. Прошёл 180d, 4/4 периода, IS/OOS, Long/Short, окна 30/60/90d и сохранил положительный L95 даже при стрессе 0.15%; сначала только prospective Shadow.',
+    noteEn: 'New HYPE candidate. It passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows, retaining a positive L95 even at 0.15% stress; it still starts in prospective Shadow.',
   },
 };
 
@@ -1935,13 +1972,13 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Расчёт.', 'Calculation.')}</b> ${t(
           lang,
-          'Для STRAT-030–033 по последним 60 закрытиям считаются SMA60 и Z. STRAT-034 использует те же 60 завершённых свечей, но среднее и σ взвешены нативным объёмом Lighter. Незавершённая свеча в расчёт не попадает.',
-          'STRAT-030–033 calculate SMA60 and Z from the latest 60 closes. STRAT-034 uses the same 60 completed candles, but weights the mean and sigma by native Lighter volume. The unfinished candle is never included.',
+          'Для STRAT-030–033 по последним 60 закрытиям считаются SMA60 и Z. STRAT-034–035 используют те же 60 завершённых свечей, но среднее и σ взвешены нативным объёмом Lighter. Незавершённая свеча в расчёт не попадает.',
+          'STRAT-030–033 calculate SMA60 and Z from the latest 60 closes. STRAT-034–035 use the same 60 completed candles, but weight the mean and sigma by native Lighter volume. The unfinished candle is never included.',
         )}</li>
         <li><b>${t(lang, 'Решение.', 'Decision.')}</b> ${t(
           lang,
-          'Touch входит сразу за порогом ±σ; Reclaim ждёт возврата Z обратно внутрь порога. Позиция закрывается у своей средней: SMA60 для STRAT-030–033 или VWMA60 для STRAT-034; резервный выход — 240 баров, то есть 20 часов.',
-          'Touch enters immediately beyond its ±σ threshold; Reclaim waits for Z to return inside the threshold. A position exits at its own mean: SMA60 for STRAT-030–033 or VWMA60 for STRAT-034; the fallback exit is 240 bars, or 20 hours.',
+          'Touch входит сразу за порогом ±σ; Reclaim ждёт возврата Z обратно внутрь порога. Позиция закрывается у своей средней: SMA60 для STRAT-030–033 или VWMA60 для STRAT-034–035; резервный выход — 240 баров, то есть 20 часов.',
+          'Touch enters immediately beyond its ±σ threshold; Reclaim waits for Z to return inside the threshold. A position exits at its own mean: SMA60 for STRAT-030–033 or VWMA60 for STRAT-034–035; the fallback exit is 240 bars, or 20 hours.',
         )}</li>
         <li><b>${t(lang, 'Внутренний сигнал.', 'Internal signal.')}</b> ${t(
           lang,
@@ -1955,8 +1992,8 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Real-canary и защита.', 'Real canary and protection.')}</b> ${t(
           lang,
-          'Тот же сигнал видит отдельный Real-исполнитель. Только разрешённые STRAT-030/032/033 могут открыть $100 с плечом 10×. После подтверждения позиции сразу ставится биржевой reduce-only stop 1.5%; новые входы отключаются при дневном убытке −$10, портфельной просадке −$15 или паузе конкретной стратегии. STRAT-031 и новый STRAT-034 остаются только в Shadow.',
-          'A separate Real executor observes the same signal. Only allowlisted STRAT-030/032/033 may open $100 at 10× leverage. Once the position is confirmed, an exchange-native 1.5% reduce-only stop is placed immediately; new entries stop at a −$10 daily loss, −$15 portfolio drawdown, or per-strategy pause. STRAT-031 and the new STRAT-034 remain Shadow-only.',
+          'Тот же сигнал видит отдельный Real-исполнитель. Только разрешённые STRAT-030/032/033 могут открыть $100 с плечом 10×. После подтверждения позиции сразу ставится биржевой reduce-only stop 1.5%; новые входы отключаются при дневном убытке −$10, портфельной просадке −$15 или паузе конкретной стратегии. STRAT-031/034/035 остаются только в Shadow.',
+          'A separate Real executor observes the same signal. Only allowlisted STRAT-030/032/033 may open $100 at 10× leverage. Once the position is confirmed, an exchange-native 1.5% reduce-only stop is placed immediately; new entries stop at a −$10 daily loss, −$15 portfolio drawdown, or per-strategy pause. STRAT-031/034/035 remain Shadow-only.',
         )}</li>
       </ol>
       <div class="ll-native-specs">${strategyLines}</div>
@@ -2514,8 +2551,8 @@ async function render(
     : requested.group === 'native'
       ? t(
         lang,
-        'В Real разрешены изолированные canary STRAT-030/032/033 по $100. STRAT-031 остаётся Shadow-only из-за конфликта SOL-позиции со STRAT-030; STRAT-034 копит собственный prospective forward. На каждую Real-позицию сразу ставится биржевой reduce-only stop 1.5%.',
-        'Isolated $100 Real canaries are allowlisted for STRAT-030/032/033. STRAT-031 remains Shadow-only because its SOL position would collide with STRAT-030; STRAT-034 is collecting its own prospective forward record. Every Real position receives an exchange-native 1.5% reduce-only stop immediately.',
+        'В Real разрешены изолированные canary STRAT-030/032/033 по $100. STRAT-031 остаётся Shadow-only из-за конфликта SOL-позиции со STRAT-030; STRAT-034/035 копят собственный prospective forward. На каждую Real-позицию сразу ставится биржевой reduce-only stop 1.5%.',
+        'Isolated $100 Real canaries are allowlisted for STRAT-030/032/033. STRAT-031 remains Shadow-only because its SOL position would collide with STRAT-030; STRAT-034/035 are collecting their own prospective forward records. Every Real position receives an exchange-native 1.5% reduce-only stop immediately.',
       )
       : t(
         lang,

@@ -99,4 +99,14 @@ describe('evaluateVwz60', () => {
     const closes = Array.from({ length: 61 }, () => 100);
     expect(evaluateVwz60(volumeBars(closes, closes.map(() => 0)), 60, 3, 'touch')).toBeNull();
   });
+
+  it('honors the two-and-a-half-sigma HYPE threshold symmetrically', () => {
+    const baseline = Array.from({ length: 60 }, (_, index) => 100 + (index % 2 ? 0.1 : -0.1));
+    const long = evaluateVwz60(volumeBars([...baseline, 95]), 60, 2.5, 'touch');
+    const short = evaluateVwz60(volumeBars([...baseline, 105]), 60, 2.5, 'touch');
+    expect(long?.currentZ).toBeLessThan(-2.5);
+    expect(long?.signal).toBe('long');
+    expect(short?.currentZ).toBeGreaterThan(2.5);
+    expect(short?.signal).toBe('short');
+  });
 });

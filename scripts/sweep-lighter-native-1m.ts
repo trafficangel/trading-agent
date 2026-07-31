@@ -23,6 +23,7 @@ const FUNDING_PER_HOUR_PCT = Number(process.env.FUNDING_PER_HOUR_PCT ?? 0.00125)
 const BAR_MINUTES = Number(process.env.BAR_MINUTES ?? 1);
 const Z_PERIODS = (process.env.Z_PERIODS ?? '20,60').split(',').map(Number);
 const Z_THRESHOLDS = (process.env.Z_THRESHOLDS ?? '1.5,2,2.5,3').split(',').map(Number);
+const VWZ_THRESHOLDS = (process.env.VWZ_THRESHOLDS ?? '2.25,2.5,2.75,3').split(',').map(Number);
 const Z_SL_PCT = Number(process.env.Z_SL_PCT ?? 1.5) / 100;
 const Z_MAX_HOLD_BARS = Number(process.env.Z_MAX_HOLD_BARS ?? 240);
 const RULE_FILTER = process.env.RULE_FILTER ?? '';
@@ -361,7 +362,75 @@ function rules(): Rule[] {
     });
   }
 
-  for (const threshold of [2.5, 3]) {
+  for (const trend of [200, 400] as const) {
+    const trendLabel = trend === 200 ? 'T200' : 'T400';
+    out.push({
+      name: `RSI14-reclaim-30/70+${trendLabel}`,
+      warmup: trend + 2,
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        const trendAverage = trend === 200 ? a.ema200 : a.ema400;
+        const crossUp = a.rsi14[i - 1]! < 30 && a.rsi14[i]! >= 30;
+        const crossDown = a.rsi14[i - 1]! > 70 && a.rsi14[i]! <= 70;
+        if (crossUp && a.close[i]! > trendAverage[i]!) return 'long';
+        if (crossDown && a.close[i]! < trendAverage[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.rsi14[i]! >= 55 : a.rsi14[i]! <= 45;
+      },
+    });
+  }
+
+  for (const multiplier of [2, 2.5]) {
+    for (const mode of ['reclaim', 'breakout'] as const) {
+      out.push({
+        name: `BB20-${multiplier}-${mode}+T200`,
+        warmup: 202,
+        slPct: 0.01,
+        maxBars: 180,
+        entry(a, i) {
+          const priorLower = a.sma20[i - 1]! - multiplier * a.sd20[i - 1]!;
+          const priorUpper = a.sma20[i - 1]! + multiplier * a.sd20[i - 1]!;
+          const lower = a.sma20[i]! - multiplier * a.sd20[i]!;
+          const upper = a.sma20[i]! + multiplier * a.sd20[i]!;
+          if (mode === 'reclaim') {
+            if (
+              a.close[i - 1]! < priorLower
+              && a.close[i]! >= lower
+              && a.close[i]! > a.ema200[i]!
+            ) return 'long';
+            if (
+              a.close[i - 1]! > priorUpper
+              && a.close[i]! <= upper
+              && a.close[i]! < a.ema200[i]!
+            ) return 'short';
+          } else {
+            if (
+              a.close[i - 1]! <= priorUpper
+              && a.close[i]! > upper
+              && a.close[i]! > a.ema200[i]!
+            ) return 'long';
+            if (
+              a.close[i - 1]! >= priorLower
+              && a.close[i]! < lower
+              && a.close[i]! < a.ema200[i]!
+            ) return 'short';
+          }
+          return null;
+        },
+        exit(a, i, side) {
+          if (mode === 'reclaim') {
+            return side === 'long' ? a.close[i]! >= a.sma20[i]! : a.close[i]! <= a.sma20[i]!;
+          }
+          return side === 'long' ? a.close[i]! < a.ema21[i]! : a.close[i]! > a.ema21[i]!;
+        },
+      });
+    }
+  }
+
+  for (const threshold of VWZ_THRESHOLDS) {
     for (const mode of ['touch', 'reclaim'] as const) {
       out.push({
         name: `VWZ60-${threshold}-${mode}`,
@@ -438,6 +507,33 @@ function rules(): Rule[] {
       },
       exit(a, i, side) {
         return side === 'long' ? a.close[i]! >= a.sma20[i]! : a.close[i]! <= a.sma20[i]!;
+      },
+    });
+
+    out.push({
+      name: `Keltner20-${multiplier}-breakout+T200`,
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: 180,
+      entry(a, i) {
+        const priorLower = a.sma20[i - 1]! - multiplier * a.atr14[i - 1]!;
+        const priorUpper = a.sma20[i - 1]! + multiplier * a.atr14[i - 1]!;
+        const lower = a.sma20[i]! - multiplier * a.atr14[i]!;
+        const upper = a.sma20[i]! + multiplier * a.atr14[i]!;
+        if (
+          a.close[i - 1]! <= priorUpper
+          && a.close[i]! > upper
+          && a.close[i]! > a.ema200[i]!
+        ) return 'long';
+        if (
+          a.close[i - 1]! >= priorLower
+          && a.close[i]! < lower
+          && a.close[i]! < a.ema200[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.close[i]! < a.ema21[i]! : a.close[i]! > a.ema21[i]!;
       },
     });
   }
