@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildCausalMicroFeatureBars,
   evaluateMicrostructureRule,
   PREREGISTERED_MICRO_RULES,
   simulateMicrostructureRule,
@@ -7,6 +8,7 @@ import {
   type MicroTrade,
 } from '../../src/lib/lighter-microstructure-research.js';
 import { buildLighterFundingSeries } from '../../src/lib/lighter-funding-history.js';
+import type { StoredMicrostructureMinute } from '../../src/lib/lighter-microstructure.js';
 
 const FIVE_MINUTES_MS = 5 * 60_000;
 const EMPTY_FUNDING = new Map([[1, buildLighterFundingSeries([])]]);
@@ -19,6 +21,7 @@ function bar(
     marketId: 1,
     symbol: 'BTC',
     timeMs: index * FIVE_MINUTES_MS,
+    barMinutes: 5,
     open: 100,
     close: 100,
     returnPct: 0,
@@ -38,7 +41,65 @@ function bar(
   };
 }
 
+function microMinute(
+  index: number,
+  minutes = 1,
+  overrides: Partial<StoredMicrostructureMinute> = {},
+): StoredMicrostructureMinute {
+  const price = 100 + index * 0.01;
+  return {
+    marketId: 1,
+    symbol: 'BTC',
+    qualityOk: true,
+    minuteTsMs: index * minutes * 60_000,
+    samples: 60,
+    bookUpdates: 60,
+    nonceGaps: 0,
+    staleSamples: 0,
+    midOpen: price,
+    midHigh: price + 0.01,
+    midLow: price - 0.01,
+    midClose: price,
+    spreadAvgPct: 0.01,
+    spreadMaxPct: 0.02,
+    bid5UsdAvg: 10_000,
+    ask5UsdAvg: 10_000,
+    depthImbalanceAvg: 0.1,
+    depthImbalanceClose: 0.1,
+    bookAgeAvgMs: 20,
+    bookAgeP95Ms: 30,
+    execCost100Samples: 60,
+    execCost100AvgPct: 0.01,
+    execCost100P95Pct: 0.02,
+    execCost100MaxPct: 0.03,
+    buyUsd: 1_000,
+    sellUsd: 900,
+    cvdUsd: 100,
+    tradeCount: 10,
+    liquidationBuyUsd: 0,
+    liquidationSellUsd: 0,
+    indexPrice: price,
+    markPrice: price,
+    basisPct: 0,
+    currentFundingRate: 0,
+    lastFundingRate: 0,
+    ...overrides,
+  };
+}
+
 describe('Lighter microstructure research', () => {
+  it('uses clock-equivalent causal warmups and resets them across a native gap', () => {
+    const oneMinuteRows = Array.from({ length: 240 }, (_, index) => microMinute(index));
+    const fiveMinuteRows = Array.from({ length: 48 }, (_, index) => microMinute(index, 5));
+    expect(buildCausalMicroFeatureBars(oneMinuteRows, 1)).toHaveLength(1);
+    expect(buildCausalMicroFeatureBars(oneMinuteRows, 1)[0]?.barMinutes).toBe(1);
+    expect(buildCausalMicroFeatureBars(fiveMinuteRows, 5)).toHaveLength(1);
+    expect(buildCausalMicroFeatureBars(fiveMinuteRows, 5)[0]?.barMinutes).toBe(5);
+    expect(
+      buildCausalMicroFeatureBars(oneMinuteRows.filter((_, index) => index !== 120), 1),
+    ).toEqual([]);
+  });
+
   it('enters only at the next bar open and subtracts measured round-trip cost', () => {
     const rule = PREREGISTERED_MICRO_RULES.find((candidate) => candidate.id === 'OF-CONT-25-H1')!;
     const trades = simulateMicrostructureRule([
@@ -117,12 +178,53 @@ describe('Lighter microstructure research', () => {
     expect(trades[0]!.netPct).toBeCloseTo(2.7);
   });
 
+  it('keeps the H3 horizon at 15 clock minutes on native 1m bars', () => {
+    const rule = PREREGISTERED_MICRO_RULES.find((candidate) => candidate.id === 'OF-CONT-25-H3')!;
+    const minuteBars = Array.from({ length: 17 }, (_, index) => bar(index, {
+      barMinutes: 1,
+      timeMs: index * 60_000,
+      open: index === 1 ? 100 : index === 16 ? 103 : 100,
+      close: 100,
+      depthImbalance: index === 0 ? 0.5 : 0,
+      flowImbalance: index === 0 ? 0.5 : 0,
+    }));
+    const trades = simulateMicrostructureRule(minuteBars, rule, EMPTY_FUNDING);
+    expect(trades).toHaveLength(1);
+    expect(trades[0]).toMatchObject({
+      barMinutes: 1,
+      entryTimeMs: 60_000,
+      exitTimeMs: 16 * 60_000,
+    });
+    expect(trades[0]!.netPct).toBeCloseTo(2.9);
+  });
+
+  it('enforces ten portfolio slots with a deterministic market-id tie break', () => {
+    const rule = PREREGISTERED_MICRO_RULES.find((candidate) => candidate.id === 'OF-CONT-25-H1')!;
+    const features = Array.from({ length: 11 }, (_, marketId) => [
+      bar(0, {
+        marketId,
+        symbol: `M${marketId}`,
+        depthImbalance: 0.5,
+        flowImbalance: 0.5,
+      }),
+      bar(1, { marketId, symbol: `M${marketId}` }),
+      bar(2, { marketId, symbol: `M${marketId}`, open: 101 }),
+    ]).flat();
+    const funding = new Map(
+      Array.from({ length: 11 }, (_, marketId) => [marketId, buildLighterFundingSeries([])]),
+    );
+    const trades = simulateMicrostructureRule(features, rule, funding);
+    expect(trades).toHaveLength(10);
+    expect(trades.map((trade) => trade.marketId)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+
   it('does not qualify a profitable but single-market result', () => {
     const trades: MicroTrade[] = Array.from({ length: 120 }, (_, index) => ({
       ruleId: 'TEST',
       marketId: 1,
       symbol: 'BTC',
       side: index % 2 ? 'long' : 'short',
+      barMinutes: 5,
       signalTimeMs: index * FIVE_MINUTES_MS,
       entryTimeMs: (index + 1) * FIVE_MINUTES_MS,
       exitTimeMs: (index + 2) * FIVE_MINUTES_MS,
@@ -150,6 +252,7 @@ describe('Lighter microstructure research', () => {
       marketId: index % 4,
       symbol: ['BTC', 'ETH', 'SOL', 'HYPE'][index % 4]!,
       side: index % 2 ? 'long' : 'short',
+      barMinutes: 5,
       signalTimeMs: index * FIVE_MINUTES_MS,
       entryTimeMs: (index + 1) * FIVE_MINUTES_MS,
       exitTimeMs: (index + 2) * FIVE_MINUTES_MS,
@@ -168,6 +271,43 @@ describe('Lighter microstructure research', () => {
     expect(evaluation.adverseNetPct).toBeCloseTo(-6);
     expect(evaluation.reasons).not.toEqual(expect.arrayContaining([
       expect.stringContaining('observed-maximum'),
+    ]));
+  });
+
+  it('keeps the first seven days diagnostic and fails a negative frozen OOS segment', () => {
+    const cutoff = 7 * 86_400_000;
+    const trades: MicroTrade[] = Array.from({ length: 120 }, (_, index) => {
+      const inOos = index >= 60;
+      const offset = inOos ? index - 60 : index;
+      const entryTimeMs = (inOos ? cutoff : 0) + offset * 3_600_000;
+      const grossPct = inOos ? -0.1 : 0.3;
+      return {
+        ruleId: 'OOS-CHECK',
+        marketId: index % 4,
+        symbol: ['BTC', 'ETH', 'SOL', 'HYPE'][index % 4]!,
+        side: index % 2 ? 'long' : 'short',
+        barMinutes: 5,
+        signalTimeMs: entryTimeMs - FIVE_MINUTES_MS,
+        entryTimeMs,
+        exitTimeMs: entryTimeMs + FIVE_MINUTES_MS,
+        entryPrice: 100,
+        exitPrice: 100 + grossPct,
+        grossPct,
+        fundingPct: 0,
+        executionCostPct: 0.02,
+        adverseExecutionCostPct: 0.03,
+        netPct: grossPct - 0.02,
+        trend: index % 2 ? 'bull' : 'bear',
+        volatility: index % 3 ? 'low' : 'high',
+      };
+    });
+    const evaluation = evaluateMicrostructureRule('OOS-CHECK', trades, 10, cutoff);
+    expect(evaluation.discovery.netPct).toBeCloseTo(16.8);
+    expect(evaluation.oos.netPct).toBeCloseTo(-7.2);
+    expect(evaluation.reasons).toEqual(expect.arrayContaining([
+      'frozen OOS failed',
+      'OOS long side failed',
+      'OOS short side failed',
     ]));
   });
 });

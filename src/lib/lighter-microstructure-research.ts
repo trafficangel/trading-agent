@@ -4,7 +4,10 @@ import {
   type LighterFundingSeries,
 } from './lighter-funding-history.js';
 
-const FIVE_MINUTES_MS = 5 * 60_000;
+const MINUTE_MS = 60_000;
+const DAY_MS = 86_400_000;
+
+type MicrostructureSourceBar = Omit<MicrostructureFiveMinute, 'sourceMinutes'>;
 
 export type MicroSide = 'long' | 'short';
 export type TrendRegime = 'bull' | 'bear' | 'mixed';
@@ -14,6 +17,7 @@ export type MicroFeatureBar = {
   marketId: number;
   symbol: string;
   timeMs: number;
+  barMinutes: 1 | 5;
   open: number;
   close: number;
   returnPct: number;
@@ -36,7 +40,7 @@ export type MicroFeatureBar = {
 export type MicroRule = {
   id: string;
   family: 'flow-continuation' | 'absorption-reversal' | 'basis-reversion';
-  holdBars: number;
+  holdMinutes: 5 | 15 | 30;
   signal: (bar: MicroFeatureBar) => MicroSide | null;
 };
 
@@ -45,6 +49,7 @@ export type MicroTrade = {
   marketId: number;
   symbol: string;
   side: MicroSide;
+  barMinutes: 1 | 5;
   signalTimeMs: number;
   entryTimeMs: number;
   exitTimeMs: number;
@@ -85,6 +90,10 @@ export type MicroRuleEvaluation = {
   positiveSymbols: number;
   dominance: number;
   leaveOneOutMinNetPct: number;
+  discovery: MicroStats;
+  oos: MicroStats;
+  oosLong: MicroStats;
+  oosShort: MicroStats;
 };
 
 function sideFromMirrored(
@@ -122,12 +131,12 @@ function basisReversion(bar: MicroFeatureBar): MicroSide | null {
  * dataset epoch; otherwise the future 21-day result would be post-selected.
  */
 export const PREREGISTERED_MICRO_RULES: readonly MicroRule[] = [
-  { id: 'OF-CONT-25-H1', family: 'flow-continuation', holdBars: 1, signal: flowContinuation },
-  { id: 'OF-CONT-25-H3', family: 'flow-continuation', holdBars: 3, signal: flowContinuation },
-  { id: 'ABSORB-55-H1', family: 'absorption-reversal', holdBars: 1, signal: absorptionReversal },
-  { id: 'ABSORB-55-H3', family: 'absorption-reversal', holdBars: 3, signal: absorptionReversal },
-  { id: 'BASIS-4BP-H3', family: 'basis-reversion', holdBars: 3, signal: basisReversion },
-  { id: 'BASIS-4BP-H6', family: 'basis-reversion', holdBars: 6, signal: basisReversion },
+  { id: 'OF-CONT-25-H1', family: 'flow-continuation', holdMinutes: 5, signal: flowContinuation },
+  { id: 'OF-CONT-25-H3', family: 'flow-continuation', holdMinutes: 15, signal: flowContinuation },
+  { id: 'ABSORB-55-H1', family: 'absorption-reversal', holdMinutes: 5, signal: absorptionReversal },
+  { id: 'ABSORB-55-H3', family: 'absorption-reversal', holdMinutes: 15, signal: absorptionReversal },
+  { id: 'BASIS-4BP-H3', family: 'basis-reversion', holdMinutes: 15, signal: basisReversion },
+  { id: 'BASIS-4BP-H6', family: 'basis-reversion', holdMinutes: 30, signal: basisReversion },
 ] as const;
 
 function finite(value: number | null): value is number {
@@ -148,11 +157,16 @@ function standardDeviation(values: readonly number[]): number {
   return Math.sqrt(Math.max(0, variance));
 }
 
-/** Causal features: the current completed 5m row may be used, future rows may not. */
+/** Causal features: the current completed bar may be used, future rows may not. */
 export function buildCausalMicroFeatureBars(
-  rows: readonly MicrostructureFiveMinute[],
+  rows: readonly MicrostructureSourceBar[],
+  barMinutes: 1 | 5,
 ): MicroFeatureBar[] {
-  const byMarket = new Map<number, MicrostructureFiveMinute[]>();
+  const barMs = barMinutes * MINUTE_MS;
+  const fastPeriod = 60 / barMinutes;
+  const slowPeriod = 240 / barMinutes;
+  const volatilityWindow = 60 / barMinutes;
+  const byMarket = new Map<number, MicrostructureSourceBar[]>();
   for (const row of rows) {
     const market = byMarket.get(row.marketId) ?? [];
     market.push(row);
@@ -189,7 +203,7 @@ export function buildCausalMicroFeatureBars(
         absoluteReturnEma = null;
         continue;
       }
-      if (previousTime == null || row.minuteTsMs - previousTime !== FIVE_MINUTES_MS) {
+      if (previousTime == null || row.minuteTsMs - previousTime !== barMs) {
         consecutive = 0;
         previousClose = null;
         recentReturns.length = 0;
@@ -203,12 +217,12 @@ export function buildCausalMicroFeatureBars(
         ? 0
         : (row.midClose - previousClose) / previousClose * 100;
       previousClose = row.midClose;
-      fast = ema(fast, row.midClose, 12);
-      slow = ema(slow, row.midClose, 48);
-      absoluteReturnEma = ema(absoluteReturnEma, Math.abs(returnPct), 48);
+      fast = ema(fast, row.midClose, fastPeriod);
+      slow = ema(slow, row.midClose, slowPeriod);
+      absoluteReturnEma = ema(absoluteReturnEma, Math.abs(returnPct), slowPeriod);
       recentReturns.push(returnPct);
-      if (recentReturns.length > 12) recentReturns.shift();
-      if (consecutive < 48 || recentReturns.length < 12) continue;
+      if (recentReturns.length > volatilityWindow) recentReturns.shift();
+      if (consecutive < slowPeriod || recentReturns.length < volatilityWindow) continue;
 
       const tradedUsd = row.buyUsd + row.sellUsd;
       const liquidationUsd = row.liquidationBuyUsd + row.liquidationSellUsd;
@@ -225,6 +239,7 @@ export function buildCausalMicroFeatureBars(
         marketId: row.marketId,
         symbol: row.symbol,
         timeMs: row.minuteTsMs,
+        barMinutes,
         open: row.midOpen,
         close: row.midClose,
         returnPct,
@@ -263,7 +278,9 @@ export function simulateMicrostructureRule(
   features: readonly MicroFeatureBar[],
   rule: MicroRule,
   fundingByMarket: ReadonlyMap<number, LighterFundingSeries>,
+  maximumConcurrentPositions = 10,
 ): MicroTrade[] {
+  if (!Number.isInteger(maximumConcurrentPositions) || maximumConcurrentPositions < 1) return [];
   const byMarket = new Map<number, MicroFeatureBar[]>();
   for (const bar of features) {
     const rows = byMarket.get(bar.marketId) ?? [];
@@ -292,15 +309,20 @@ export function simulateMicrostructureRule(
       }
       const side = rule.signal(signalBar);
       if (!side) continue;
+      const holdBars = rule.holdMinutes / signalBar.barMinutes;
+      if (!Number.isInteger(holdBars) || holdBars < 1) continue;
+      const barMs = signalBar.barMinutes * MINUTE_MS;
       const entryIndex = index + 1;
-      const exitIndex = entryIndex + rule.holdBars;
+      const exitIndex = entryIndex + holdBars;
       const entry = marketBars[entryIndex];
       const exit = marketBars[exitIndex];
       if (
         !entry
         || !exit
-        || entry.timeMs !== signalBar.timeMs + FIVE_MINUTES_MS
-        || exit.timeMs !== entry.timeMs + rule.holdBars * FIVE_MINUTES_MS
+        || entry.barMinutes !== signalBar.barMinutes
+        || exit.barMinutes !== signalBar.barMinutes
+        || entry.timeMs !== signalBar.timeMs + barMs
+        || exit.timeMs !== entry.timeMs + rule.holdMinutes * MINUTE_MS
       ) continue;
       const grossPct = side === 'long'
         ? (exit.open - entry.open) / entry.open * 100
@@ -316,6 +338,7 @@ export function simulateMicrostructureRule(
         marketId: signalBar.marketId,
         symbol: signalBar.symbol,
         side,
+        barMinutes: signalBar.barMinutes,
         signalTimeMs: signalBar.timeMs,
         entryTimeMs: entry.timeMs,
         exitTimeMs: exit.timeMs,
@@ -332,7 +355,20 @@ export function simulateMicrostructureRule(
       index = exitIndex - 1;
     }
   }
-  return trades.sort((left, right) => left.entryTimeMs - right.entryTimeMs || left.marketId - right.marketId);
+  const ordered = trades.sort(
+    (left, right) => left.entryTimeMs - right.entryTimeMs || left.marketId - right.marketId,
+  );
+  const accepted: MicroTrade[] = [];
+  const activeExitTimes: number[] = [];
+  for (const trade of ordered) {
+    for (let index = activeExitTimes.length - 1; index >= 0; index--) {
+      if (activeExitTimes[index]! <= trade.entryTimeMs) activeExitTimes.splice(index, 1);
+    }
+    if (activeExitTimes.length >= maximumConcurrentPositions) continue;
+    accepted.push(trade);
+    activeExitTimes.push(trade.exitTimeMs);
+  }
+  return accepted;
 }
 
 function tradeNet(trade: MicroTrade, adverse = false): number {
@@ -385,6 +421,7 @@ export function evaluateMicrostructureRule(
   ruleId: string,
   sourceTrades: readonly MicroTrade[],
   capacityUnits = 10,
+  discoveryCutoffMs = (sourceTrades[0]?.entryTimeMs ?? 0) + 7 * DAY_MS,
 ): MicroRuleEvaluation {
   const trades = [...sourceTrades].sort(
     (left, right) => left.entryTimeMs - right.entryTimeMs || left.marketId - right.marketId,
@@ -420,6 +457,12 @@ export function evaluateMicrostructureRule(
     : Number.NEGATIVE_INFINITY;
   const meanL95Pct = lowerConfidence95(trades.map((trade) => trade.netPct));
   const maxDrawdownPct = drawdown(trades, capacityUnits);
+  const discoveryTrades = trades.filter((trade) => trade.entryTimeMs < discoveryCutoffMs);
+  const oosTrades = trades.filter((trade) => trade.entryTimeMs >= discoveryCutoffMs);
+  const discovery = stats(discoveryTrades);
+  const oos = stats(oosTrades);
+  const oosLong = stats(oosTrades.filter((trade) => trade.side === 'long'));
+  const oosShort = stats(oosTrades.filter((trade) => trade.side === 'short'));
   const reasons: string[] = [];
   if (base.trades < 120) reasons.push(`trades ${base.trades} < 120`);
   if (!(base.netPct > 0)) reasons.push(`net ${base.netPct.toFixed(3)}% <= 0%`);
@@ -449,6 +492,11 @@ export function evaluateMicrostructureRule(
   }
   if (dominance > 0.6) reasons.push(`dominance ${(dominance * 100).toFixed(1)}% > 60%`);
   if (!(leaveOneOutMinNetPct > 0)) reasons.push('leave-one-market-out failed');
+  if (!(oos.trades >= 60 && oos.netPct > 0 && oos.profitFactor != null && oos.profitFactor >= 1.1)) {
+    reasons.push('frozen OOS failed');
+  }
+  if (!(oosLong.trades >= 15 && oosLong.netPct > 0)) reasons.push('OOS long side failed');
+  if (!(oosShort.trades >= 15 && oosShort.netPct > 0)) reasons.push('OOS short side failed');
 
   return {
     ruleId,
@@ -470,5 +518,9 @@ export function evaluateMicrostructureRule(
     positiveSymbols,
     dominance,
     leaveOneOutMinNetPct,
+    discovery,
+    oos,
+    oosLong,
+    oosShort,
   };
 }

@@ -27,9 +27,13 @@ import {
 } from '../src/lib/lighter-microstructure-research.js';
 
 const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
 const HOUR_SECONDS = 3_600;
 const FUNDING_CHUNK_SECONDS = 28 * 86_400;
 const LIGHTER_BASE_URL = 'https://mainnet.zklighter.elliot.ai';
+const TIMEFRAMES = [1, 5] as const;
+const RULE_VARIANTS = TIMEFRAMES.flatMap((timeframeMinutes) =>
+  PREREGISTERED_MICRO_RULES.map((rule) => `${timeframeMinutes}m:${rule.id}`));
 type Mode = 'exploratory' | 'frozen';
 type Audit = {
   generatedAt: string;
@@ -246,7 +250,7 @@ const auditPath = resolve(
 );
 const generatedAt = new Date().toISOString();
 if (!existsSync(auditPath)) {
-  output({ version: 'lighter-microstructure-sweep-v2', generatedAt, mode, status: 'not_ready', failures: ['readiness audit missing'] });
+  output({ version: 'lighter-microstructure-sweep-v3', generatedAt, mode, status: 'not_ready', failures: ['readiness audit missing'] });
   process.exit(0);
 }
 const audit = JSON.parse(readFileSync(auditPath, 'utf8')) as Audit;
@@ -262,13 +266,13 @@ const readinessFailures = [
 ];
 if (!selectedGate.passed || readinessFailures.length) {
   output({
-    version: 'lighter-microstructure-sweep-v2',
+    version: 'lighter-microstructure-sweep-v3',
     generatedAt,
     mode,
     status: 'not_ready',
     auditGeneratedAt: audit.generatedAt,
     failures: readinessFailures,
-    rules: PREREGISTERED_MICRO_RULES.map((rule) => rule.id),
+    rules: RULE_VARIANTS,
   });
   process.exit(0);
 }
@@ -286,12 +290,12 @@ try {
   exactFunding = await exactFundingForRows(rows);
 } catch (error) {
   output({
-    version: 'lighter-microstructure-sweep-v2',
+    version: 'lighter-microstructure-sweep-v3',
     generatedAt,
     mode,
     status: 'not_ready',
     failures: [error instanceof Error ? error.message : String(error)],
-    rules: PREREGISTERED_MICRO_RULES.map((rule) => rule.id),
+    rules: RULE_VARIANTS,
   });
   process.exit(0);
 }
@@ -307,20 +311,44 @@ for (const row of rows.map(stored)) {
 const fiveMinute = [...buckets.values()]
   .map((source) => rollupLighterMicrostructureFiveMinute(source))
   .filter((row) => row != null);
-const features = buildCausalMicroFeatureBars(fiveMinute);
-const evaluations = PREREGISTERED_MICRO_RULES.map((rule) =>
-  evaluateMicrostructureRule(
-    rule.id,
-    simulateMicrostructureRule(features, rule, exactFunding.byMarket),
-  ));
-const rollingCostMarkets = new Set(
-  features
-    .filter((feature) => feature.executionCostPct != null)
-    .map((feature) => feature.symbol),
-);
+const oneMinute = rows.map(stored).filter((row) => row.qualityOk);
+const featureSets = [
+  { timeframeMinutes: 1 as const, features: buildCausalMicroFeatureBars(oneMinute, 1) },
+  { timeframeMinutes: 5 as const, features: buildCausalMicroFeatureBars(fiveMinute, 5) },
+];
+const firstMinuteByMarket = new Map<number, number>();
+for (const row of rows) {
+  firstMinuteByMarket.set(
+    row.market_id,
+    Math.min(firstMinuteByMarket.get(row.market_id) ?? Number.POSITIVE_INFINITY, row.minute_ts_ms),
+  );
+}
+const commonDatasetStartMs = Math.max(...firstMinuteByMarket.values());
+const discoveryCutoffMs = commonDatasetStartMs + 7 * DAY_MS;
+const evaluations = featureSets.flatMap(({ timeframeMinutes, features }) =>
+  PREREGISTERED_MICRO_RULES.map((rule) => ({
+    timeframeMinutes,
+    ...evaluateMicrostructureRule(
+      rule.id,
+      simulateMicrostructureRule(features, rule, exactFunding.byMarket),
+      10,
+      discoveryCutoffMs,
+    ),
+  })));
+const featureSummary = Object.fromEntries(featureSets.map(({ timeframeMinutes, features }) => [
+  `${timeframeMinutes}m`,
+  {
+    rows: features.length,
+    rollingCostMarkets: new Set(
+      features
+        .filter((feature) => feature.executionCostPct != null)
+        .map((feature) => feature.symbol),
+    ).size,
+  },
+]));
 
 output({
-  version: 'lighter-microstructure-sweep-v2',
+  version: 'lighter-microstructure-sweep-v3',
   generatedAt,
   mode,
   status: 'evaluated',
@@ -332,10 +360,11 @@ output({
     auditGeneratedAt: audit.generatedAt,
     oneMinuteRows: rows.length,
     validFiveMinuteRows: fiveMinute.length,
-    featureRows: features.length,
-    rollingCostMarkets: rollingCostMarkets.size,
-    executionCostSource: 'signal-time completed 5m max of five rolling $100 minute p95 values',
-    adverseExecutionCostSource: 'signal-time completed 5m worst actually observed $100 round trip; sensitivity only',
+    featureSummary,
+    commonDatasetStartAt: new Date(commonDatasetStartMs).toISOString(),
+    discoveryCutoffAt: new Date(discoveryCutoffMs).toISOString(),
+    executionCostSource: 'completed signal-bar $100 p95; native minute p95 at 1m and max of five causal minute p95 values at 5m',
+    adverseExecutionCostSource: 'completed signal-bar worst actually observed $100 round trip; sensitivity only',
     fundingSource: 'exact public Lighter hourly settlements in (entry, exit]',
     fundingCoverage: exactFunding.coverage,
   },
@@ -347,11 +376,15 @@ output({
     minimumDepthUsdPerSide: 500,
     bothSides: true,
     chronologicalThirds: 3,
+    discoveryDays: 7,
+    frozenOos: { minimumTrades: 60, minimumProfitFactor: 1.1, minimumTradesPerSide: 15 },
     causalTrendAndVolatilityRegimes: true,
     marketBreadthAndLeaveOneOut: true,
   },
   shadowEligibleRules: mode === 'frozen'
-    ? evaluations.filter((row) => row.qualified).map((row) => row.ruleId)
+    ? evaluations
+      .filter((row) => row.qualified)
+      .map((row) => `${row.timeframeMinutes}m:${row.ruleId}`)
     : [],
   autoPromotion: false,
   evaluations,
