@@ -9,7 +9,7 @@
  *
  * Run after downloading native candles:
  *   pnpm tsx scripts/sweep-lighter-native-1m.ts
- *   STRESS_RT_PCT=0.02 ROBUST_STRESS_RT_PCT=0.065 pnpm tsx scripts/sweep-lighter-native-1m.ts
+ *   STRESS_RT_PCT=0.02 pnpm tsx scripts/sweep-lighter-native-1m.ts
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -22,10 +22,14 @@ const SYMBOLS = (process.env.SYMBOLS ?? 'BTC,ETH,SOL')
   .filter(Boolean);
 // Discovery reserve: 0% Lighter Standard commission plus 0.02% round-trip
 // allowance, close to the currently observed SOL/BNB executable L2 cost.
-// The adverse 0.065% result is shown separately and does not reject a candidate
-// by itself; prospective Shadow then records the market's actual VWAP/funding.
+// The adverse result defaults to 1.5x the measured reserve and is shown
+// separately; it does not reject a candidate by itself. Prospective Shadow
+// then records the market's actual VWAP/funding.
 const STRESS_RT_PCT = Number(process.env.STRESS_RT_PCT ?? 0.02);
-const ROBUST_STRESS_RT_PCT = Number(process.env.ROBUST_STRESS_RT_PCT ?? 0.065);
+const robustStressOverride = Number(process.env.ROBUST_STRESS_RT_PCT);
+const ROBUST_STRESS_RT_PCT = Number.isFinite(robustStressOverride)
+  ? robustStressOverride
+  : STRESS_RT_PCT * 1.5;
 const FUNDING_PER_HOUR_PCT = Number(process.env.FUNDING_PER_HOUR_PCT ?? 0.00125);
 const BAR_MINUTES = Number(process.env.BAR_MINUTES ?? 1);
 const Z_PERIODS = (process.env.Z_PERIODS ?? '20,60').split(',').map(Number);
@@ -35,6 +39,8 @@ const Z_SL_PCT = Number(process.env.Z_SL_PCT ?? 1.5) / 100;
 const Z_MAX_HOLD_BARS = Number(process.env.Z_MAX_HOLD_BARS ?? 240);
 const MAX_BACKTEST_DD_PCT = Number(process.env.MAX_BACKTEST_DD_PCT ?? 15);
 const RULE_FILTER = process.env.RULE_FILTER ?? '';
+const ENABLE_SQUEEZE = process.env.ENABLE_SQUEEZE === '1';
+const ENABLE_TREND_PULLBACK = process.env.ENABLE_TREND_PULLBACK === '1';
 const LOOKBACK_DAYS = Number(process.env.LOOKBACK_DAYS ?? 0);
 const RECENT_WINDOWS_DAYS = (process.env.RECENT_WINDOWS_DAYS ?? '30,60,90')
   .split(',')
@@ -75,6 +81,7 @@ type Arrays = {
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
+  squeeze20: boolean[];
 };
 type Rule = {
   name: string;
@@ -234,6 +241,9 @@ function build(c: Candle[]): Arrays {
   const macd = ema12Values.map((value, i) => value - ema26Values[i]!);
   const stoch14 = stochastic(c, 14);
   const vw60 = rollingVolumeWeighted(c, 60);
+  const sma20Values = sma(close, 20);
+  const sd20Values = rollingStd(close, 20);
+  const atr14Values = atr(c, 14);
   return {
     c,
     close,
@@ -247,15 +257,15 @@ function build(c: Candle[]): Arrays {
     ema55: ema(close, 55),
     macd,
     macdSignal: ema(macd, 9),
-    sma20: sma(close, 20),
+    sma20: sma20Values,
     sma60: sma(close, 60),
     volumeSma20: sma(volume, 20),
     volumeSma60: sma(volume, 60),
-    sd20: rollingStd(close, 20),
+    sd20: sd20Values,
     sd60: rollingStd(close, 60),
     means: new Map(Z_PERIODS.map((period) => [period, sma(close, period)])),
     deviations: new Map(Z_PERIODS.map((period) => [period, rollingStd(close, period)])),
-    atr14: atr(c, 14),
+    atr14: atr14Values,
     rsi2: rsi(c, 2),
     rsi7: rsi(c, 7),
     rsi14: rsi(c, 14),
@@ -267,6 +277,11 @@ function build(c: Candle[]): Arrays {
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
+    // Standard TTM-style compression: 2-sigma Bollinger width is contained
+    // inside a 1.5 ATR Keltner envelope. Every input is from the completed
+    // candle at i; entry still executes only at the next candle open.
+    squeeze20: close.map((_, i) =>
+      i >= 20 && 2 * sd20Values[i]! <= 1.5 * atr14Values[i]!),
   };
 }
 
@@ -413,6 +428,38 @@ function rules(): Rule[] {
     });
   }
 
+  // Classic two-sided trend pullback: EMA21/55/200 must be fully stacked in
+  // the trade direction, while RSI2 identifies a short counter-trend shock.
+  // The small threshold/mode grid is frozen and shared by every market.
+  for (const threshold of ENABLE_TREND_PULLBACK ? [5, 10] : []) {
+    for (const mode of ['touch', 'reclaim'] as const) {
+      out.push({
+        name: `RSI2PB-${threshold}-${mode}+STACK21/55/200`,
+        warmup: 202,
+        slPct: 0.01,
+        maxBars: 60,
+        entry(a, i) {
+          const longTrend = a.ema21[i]! > a.ema55[i]!
+            && a.ema55[i]! > a.ema200[i]!;
+          const shortTrend = a.ema21[i]! < a.ema55[i]!
+            && a.ema55[i]! < a.ema200[i]!;
+          const longSignal = mode === 'touch'
+            ? a.rsi2[i]! < threshold
+            : a.rsi2[i - 1]! < threshold && a.rsi2[i]! >= threshold;
+          const shortSignal = mode === 'touch'
+            ? a.rsi2[i]! > 100 - threshold
+            : a.rsi2[i - 1]! > 100 - threshold && a.rsi2[i]! <= 100 - threshold;
+          if (longTrend && longSignal) return 'long';
+          if (shortTrend && shortSignal) return 'short';
+          return null;
+        },
+        exit(a, i, side) {
+          return side === 'long' ? a.rsi2[i]! >= 50 : a.rsi2[i]! <= 50;
+        },
+      });
+    }
+  }
+
   for (const multiplier of [2, 2.5]) {
     for (const mode of ['reclaim', 'breakout'] as const) {
       out.push({
@@ -487,6 +534,66 @@ function rules(): Rule[] {
           return side === 'long'
             ? a.close[i]! >= a.vwap60[i]!
             : a.close[i]! <= a.vwap60[i]!;
+        },
+      });
+    }
+  }
+
+  // Two-sided pullback-in-trend variants. These retain the statistically
+  // extreme Z/VWZ entry and mean exit, but only buy above EMA200 and sell
+  // below EMA200. The filter is symmetric and identical for every market.
+  for (const threshold of [2.5, 3]) {
+    for (const mode of ['touch', 'reclaim'] as const) {
+      out.push({
+        name: `VWZ60T-${threshold}-${mode}`,
+        warmup: 202,
+        slPct: Z_SL_PCT,
+        maxBars: Z_MAX_HOLD_BARS,
+        entry(a, i) {
+          const current = a.vwapSd60[i]! > 0
+            ? (a.close[i]! - a.vwap60[i]!) / a.vwapSd60[i]!
+            : 0;
+          const prior = a.vwapSd60[i - 1]! > 0
+            ? (a.close[i - 1]! - a.vwap60[i - 1]!) / a.vwapSd60[i - 1]!
+            : 0;
+          const longSignal = mode === 'touch'
+            ? current < -threshold
+            : prior < -threshold && current >= -threshold;
+          const shortSignal = mode === 'touch'
+            ? current > threshold
+            : prior > threshold && current <= threshold;
+          if (longSignal && a.close[i]! > a.ema200[i]!) return 'long';
+          if (shortSignal && a.close[i]! < a.ema200[i]!) return 'short';
+          return null;
+        },
+        exit(a, i, side) {
+          return side === 'long'
+            ? a.close[i]! >= a.vwap60[i]!
+            : a.close[i]! <= a.vwap60[i]!;
+        },
+      });
+
+      out.push({
+        name: `Z60T-${threshold}-${mode}`,
+        warmup: 202,
+        slPct: Z_SL_PCT,
+        maxBars: Z_MAX_HOLD_BARS,
+        entry(a, i) {
+          const current = z(a, i, 60);
+          const prior = z(a, i - 1, 60);
+          const longSignal = mode === 'touch'
+            ? current < -threshold
+            : prior < -threshold && current >= -threshold;
+          const shortSignal = mode === 'touch'
+            ? current > threshold
+            : prior > threshold && current <= threshold;
+          if (longSignal && a.close[i]! > a.ema200[i]!) return 'long';
+          if (shortSignal && a.close[i]! < a.ema200[i]!) return 'short';
+          return null;
+        },
+        exit(a, i, side) {
+          const mean = meanFor(a, i, 60);
+          return side === 'long' ? a.close[i]! >= mean : a.close[i]! <= mean;
         },
       });
     }
@@ -680,6 +787,53 @@ function rules(): Rule[] {
           },
           exit(a, i, side) {
             return side === 'long' ? a.close[i]! < a[exitKey][i]! : a.close[i]! > a[exitKey][i]!;
+          },
+        });
+      }
+    }
+  }
+
+  // Two-sided volatility-compression breakout. This is deliberately a small,
+  // frozen grid rather than a market-specific optimization: a squeeze must
+  // have existed recently, be released on the signal candle, and price must
+  // close through the prior range in the EMA200 direction. Execution occurs
+  // at the next open in simulate().
+  for (const squeezeLookback of ENABLE_SQUEEZE ? [5, 10] : []) {
+    for (const volumeRatio of [0, 1.25]) {
+      for (const exitEma of [8, 21] as const) {
+        const exitKey = emaKey(exitEma);
+        out.push({
+          name: `SQZ20-L${squeezeLookback}-V${volumeRatio}-E${exitEma}`,
+          warmup: 202,
+          slPct: 0.01,
+          maxBars: 90,
+          entry(a, i) {
+            if (a.squeeze20[i]!) return null;
+            let recentSqueeze = false;
+            for (let j = Math.max(20, i - squeezeLookback); j < i; j++) {
+              if (a.squeeze20[j]!) {
+                recentSqueeze = true;
+                break;
+              }
+            }
+            if (!recentSqueeze) return null;
+            const volumeOk = volumeRatio === 0
+              || a.c[i]!.v >= a.volumeSma20[i]! * volumeRatio;
+            if (!volumeOk) return null;
+            if (
+              a.close[i]! > highestBefore(a.c, i, 20)
+              && a.close[i]! > a.ema200[i]!
+            ) return 'long';
+            if (
+              a.close[i]! < lowestBefore(a.c, i, 20)
+              && a.close[i]! < a.ema200[i]!
+            ) return 'short';
+            return null;
+          },
+          exit(a, i, side) {
+            return side === 'long'
+              ? a.close[i]! < a[exitKey][i]!
+              : a.close[i]! > a[exitKey][i]!;
           },
         });
       }

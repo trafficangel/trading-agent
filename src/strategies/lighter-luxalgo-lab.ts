@@ -616,8 +616,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     period: 60,
     timeExitBars: 240,
     realEnabled: false,
-    noteRu: 'Новый BTC-кандидат. Прошёл 180d, 4/4 периода, IS/OOS, Long/Short и окна 30/60/90d при стрессе 0.065%, но L95 лишь немного выше нуля — только prospective Shadow.',
-    noteEn: 'New BTC candidate. It passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows at 0.065% stress, but L95 is only marginally above zero, so it is prospective Shadow only.',
+    noteRu: 'Новый BTC-кандидат. Прошёл 180d, 4/4 периода, IS/OOS, Long/Short и окна 30/60/90d. Для отбора используется измеренный p95 стака, а не фиксированный «стресс». L95 лишь немного выше нуля — только prospective Shadow.',
+    noteEn: 'New BTC candidate. It passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows. Selection uses measured book p95 rather than a fixed stress assumption. L95 is only marginally above zero, so it is prospective Shadow only.',
   },
   'hype-vwz60-touch': {
     family: 'vwz',
@@ -626,8 +626,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     period: 60,
     timeExitBars: 240,
     realEnabled: false,
-    noteRu: 'Новый HYPE-кандидат. Прошёл 180d, 4/4 периода, IS/OOS, Long/Short, окна 30/60/90d и сохранил положительный L95 даже при стрессе 0.15%; сначала только prospective Shadow.',
-    noteEn: 'New HYPE candidate. It passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows, retaining a positive L95 even at 0.15% stress; it still starts in prospective Shadow.',
+    noteRu: 'Новый HYPE-кандидат. Прошёл 180d, 4/4 периода, IS/OOS, Long/Short и окна 30/60/90d. Сценарий 0.15% был только неблокирующей проверкой, а не оценкой издержек. Отбор и Shadow используют измеренный p95 стака.',
+    noteEn: 'New HYPE candidate. It passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows. The 0.15% row was a non-blocking adverse scenario, not an execution-cost estimate. Selection and Shadow use measured book p95.',
   },
 };
 

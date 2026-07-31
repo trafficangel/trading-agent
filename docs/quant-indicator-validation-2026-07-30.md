@@ -293,6 +293,15 @@ exchange costs and not automatic rejection thresholds. Final eligibility is
 decided by prospective executable VWAP, spread, slippage and funding recorded
 for the specific market.
 
+A fresh 40-snapshot control on 2026-07-31 confirmed that those old scenarios
+are materially above the observed book cost. At `$100` notional, executable
+round-trip p95 was BTC `0.0067%`, SOL `0.0095%`, BNB `0.0220%`, LTC `0.0333%`
+and HYPE `0.0320%`. HYPE p95 at `$1,000` was `0.0395%`. Consequently the
+scanner now uses the measured market/notional p95 as its blocking cost and
+derives the non-blocking adverse scenario as `1.5 × p95`; fixed `0.10%` and
+`0.15%` values are not eligibility filters. Funding remains a separate
+time-weighted deduction.
+
 No new one-minute candidate qualified:
 
 - LTC contained 259,200 consecutive candles with zero gaps. Even its best
@@ -430,6 +439,35 @@ These failures reinforce that zero exchange commission is useful but not
 sufficient: executable spread/book slippage and an unstable or one-sided
 return path can still erase the apparent indicator edge. No strategy from this
 batch was registered for prospective Shadow.
+
+### Additional two-sided indicator families
+
+Three causal, symmetric families were then tested against the same native
+one- and five-minute data and market-specific executable costs:
+
+- a TTM-style Bollinger/Keltner compression breakout with EMA200 direction;
+- an EMA21/55/200 trend stack with RSI2 pullback and reclaim entries;
+- Z60 and volume-weighted Z60 mean reversion restricted to pullbacks aligned
+  with EMA200 (`Z60T` / `VWZ60T`).
+
+The squeeze and RSI2 families were broadly negative after measured costs and
+are disabled by default. The trend-filtered Z families materially improved
+risk-adjusted results on several five-minute markets, but remained too sparse
+or recently one-sided for admission:
+
+- ZEC `Z60T-2.5-reclaim`: 78 trades, `+26.73%`, PF 1.99, drawdown `-4.66%`,
+  but only 13 trades in the latest 30 days and negative Long over 60 days;
+- NEAR `VWZ60T-2.5-touch`: 110 trades, `+31.28%`, PF 1.88, drawdown `-5.92%`,
+  but only 15 recent trades and negative Long over 60 and 90 days;
+- JUP `Z60T-2.5-touch`: 68 trades, `+20.69%`, PF 1.79, positive aggregate
+  Long/Short, but only 8 trades in the latest 30 days;
+- BTC `VWZ60T-2.5-reclaim`: 46 trades, `+6.34%`, PF 1.93 and drawdown
+  `-2.65%`, but only 10 trades in the latest 30 days.
+
+No frequency or direction gate was relaxed to make these rows pass, and no
+new Shadow strategy was registered from this experiment. The trend-filtered
+rules remain available for reproducible research rather than being presented
+as validated high-frequency models.
 
 ## Prospective Native Shadow continuation gate
 
