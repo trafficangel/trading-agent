@@ -207,3 +207,39 @@ SOL, BNB, LTC, XRP, AVAX and WLD:
 
 Neither family produced a candidate that survived 0.05% round-trip stress,
 adverse funding, both directions, chronological folds and IS/OOS checks.
+
+## Candidate 8 — BTC volume-weighted Z60 touch
+
+A predeclared volume-weighted variant was tested without changing the common
+entry threshold or exit horizon for any individual coin:
+
+- each completed 5-minute close is weighted by its native Lighter volume;
+- long below volume Z `−3`, short above volume Z `+3`;
+- next-bar execution, exit at the rolling 60-bar volume-weighted mean;
+- 1.5% catastrophe stop and 240-bar time exit;
+- 0.065% round-trip execution/funding stress.
+
+BTC was the only market to clear the strengthened gate:
+
+| Window | Trades | Net | PF |
+|---:|---:|---:|---:|
+| 30d | 22 | +1.79% | 1.45 |
+| 60d | 36 | +5.91% | 1.85 |
+| 90d | 52 | +7.03% | 1.84 |
+| 180d | 103 | +12.94% | 1.58 |
+
+The full sample had 4/4 positive chronological folds, IS/OOS
+`+11.07% / +1.87%`, Long/Short `+6.85% / +6.08%`, 68.0% win rate and
+5.90% additive maximum drawdown. The one-sided 95% lower confidence bound of
+mean net trade was only `+0.0010%`, so this is not sufficient evidence for
+capital. It is admitted as `btc-vwz60-touch` (`STRAT-034`) in prospective
+Shadow only.
+
+XRP produced positive aggregate results but failed the same confidence gate
+(mean-trade L95 `−0.0219%`) and was rejected.
+
+During this audit the Lighter candles API was also observed returning only ten
+candles when `count_back=0`. Both the production Native runner and resumable
+research downloader now request `count_back=500` explicitly. Bulk historical
+downloads run from an isolated research host so WAF/rate-limit pressure cannot
+interfere with live signal polling.

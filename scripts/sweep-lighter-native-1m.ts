@@ -769,7 +769,7 @@ const print = (row: typeof rows[number]): string =>
   `${row.symbol.padEnd(5)} ${row.rule.padEnd(27)} N${String(row.trades.length).padStart(4)} D${row.coverageDays.toFixed(0).padStart(3)} `
   + `gross ${fmt(row.baseline).padStart(8)} stress ${fmt(row.stress).padStart(8)} PF ${row.stressPf.toFixed(2)} `
   + `DD ${fmt(drawdown(row.trades, STRESS_RT_PCT))} WR ${(row.trades.filter((trade) => tradeNet(trade, STRESS_RT_PCT) > 0).length / row.trades.length * 100).toFixed(1)}% `
-  + `L95 ${fmt(row.meanL95)} `
+  + `L95 ${row.meanL95 >= 0 ? '+' : ''}${row.meanL95.toFixed(4)} `
   + `hold ${median(row.trades.map((trade) => (trade.exitAt - trade.entryAt) / 60_000)).toFixed(0)}m `
   + `f${row.folds}/4 IS/OOS ${fmt(row.is)}/${fmt(row.oos)} L/S ${fmt(row.long)}/${fmt(row.short)} `
   + row.recent.map((window) =>
