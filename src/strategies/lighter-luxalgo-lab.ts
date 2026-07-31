@@ -4,9 +4,11 @@ import WebSocket, { type RawData } from 'ws';
 import { db } from '../db/client.js';
 import { logger } from '../lib/logger.js';
 import {
+  evaluateNativeForwardGate,
   estimatedFundingPnlPct,
   pricePnlPct,
   quoteNotionalVwap,
+  type NativeForwardGateEvaluation,
   type PriceLevel,
 } from '../lib/lighter-luxalgo-math.js';
 import {
@@ -697,6 +699,7 @@ type SignalRow = {
   live_exit_trade_status: 'opening' | 'open' | 'closing' | 'closed' | 'error' | null;
   live_decision: 'enter' | 'close' | 'skip' | 'error' | null;
   live_decision_reason: string | null;
+  shadow_decision_reason: string | null;
 };
 
 type OpenTradeRow = {
@@ -868,6 +871,7 @@ type Summary = {
   secondHalfPct: number;
   currentSpreadPct: number | null;
   currentRoundTripCostPct: number | null;
+  forwardGate: NativeForwardGateEvaluation | null;
 };
 
 function emptyFeed(): FeedState {
@@ -907,6 +911,7 @@ const markCaptureError = db.prepare(`
 const markCaptured = db.prepare(`
   UPDATE lighter_lux_signals
   SET captured_at = ?, capture_status = 'captured', capture_error = NULL,
+      shadow_decision_reason = NULL,
       book_exchange_at = ?, book_age_ms = ?, bid = ?, ask = ?,
       buy_vwap_1000 = ?, sell_vwap_1000 = ?, spread_pct = ?,
       buy_slippage_pct = ?, sell_slippage_pct = ?, funding_rate_pct_h = ?,
@@ -936,6 +941,50 @@ const stopTrade = db.prepare(`
   WHERE id = ? AND closed_at IS NULL`);
 const entryFunding = db.prepare<[number], { entry_funding_pct_h: number }>(`
   SELECT entry_funding_pct_h FROM lighter_lux_trades WHERE id = ?`);
+const markShadowDecision = db.prepare(`
+  UPDATE lighter_lux_signals SET shadow_decision_reason = ? WHERE id = ?`);
+const nativeForwardPnls = db.prepare<[string], { net_pnl_pct: number }>(`
+  SELECT net_pnl_pct FROM lighter_lux_trades
+  WHERE strategy_id = ? AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
+  ORDER BY closed_at, id`);
+const nativeForwardSignals = db.prepare<[string], {
+  capture_status: string;
+  book_age_ms: number | null;
+  bid: number | null;
+  ask: number | null;
+  buy_slippage_pct: number | null;
+  sell_slippage_pct: number | null;
+}>(`
+  SELECT capture_status, book_age_ms, bid, ask,
+         buy_slippage_pct, sell_slippage_pct
+  FROM lighter_lux_signals
+  WHERE strategy_id = ?
+  ORDER BY received_at, id`);
+
+function nativeForwardGate(strategyId: string): NativeForwardGateEvaluation {
+  const signalRows = nativeForwardSignals.all(strategyId);
+  const captured = signalRows.filter((row) => row.capture_status === 'captured');
+  const executionCostPcts = captured.flatMap((row) => {
+    if (
+      row.bid == null
+      || row.ask == null
+      || !(row.bid > 0)
+      || !(row.ask > row.bid)
+      || row.buy_slippage_pct == null
+      || row.sell_slippage_pct == null
+    ) return [];
+    const mid = (row.ask + row.bid) / 2;
+    return [((row.ask - row.bid) / mid * 100)
+      + row.buy_slippage_pct + row.sell_slippage_pct];
+  });
+  return evaluateNativeForwardGate({
+    netPcts: nativeForwardPnls.all(strategyId).map((row) => row.net_pnl_pct),
+    signalCount: signalRows.length,
+    captureErrors: signalRows.filter((row) => row.capture_status === 'error').length,
+    executionCostPcts,
+    bookAgesMs: captured.flatMap((row) => row.book_age_ms == null ? [] : [row.book_age_ms]),
+  });
+}
 
 function rawText(data: RawData): string {
   if (typeof data === 'string') return data;
@@ -1191,11 +1240,20 @@ const applyCapturedSignal = db.transaction((
   }
 
   if (action === 'exit' || open?.side === side) return;
+  if (NATIVE_STRATEGY_ID_SET.has(spec.id)) {
+    const forward = nativeForwardGate(spec.id);
+    if (!forward.entryAllowed) {
+      const reason = `native forward gate failed after ${forward.closed}: ${forward.reasons.join('; ')}`;
+      markShadowDecision.run(reason, signalId);
+      return { gateBlocked: true, reason, forward };
+    }
+  }
   const entryPrice = side === 'long' ? snap.buyVwap : snap.sellVwap;
   insertTrade.run(
     spec.id, spec.asset, side, signalId, snap.capturedAt, entryPrice,
     snap.fundingRatePctH, NOTIONAL_USD,
   );
+  return { gateBlocked: false };
 });
 
 function capture(
@@ -1223,7 +1281,14 @@ function capture(
       markCaptureError.run(failedAt, snap.error, signalId);
       return;
     }
-    applyCapturedSignal(spec, signalId, action, side, snap);
+    const result = applyCapturedSignal(spec, signalId, action, side, snap);
+    if (result?.gateBlocked) {
+      logger.warn({
+        signalId,
+        strategyId: spec.id,
+        reason: result.reason,
+      }, 'lighter-lux: native Shadow entry blocked by forward gate');
+    }
   } catch (error) {
     markCaptureError.run(Date.now(), `capture_exception:${(error as Error).message}`, signalId);
     logger.error({ error, signalId, strategyId: spec.id }, 'lighter-lux: capture failed');
@@ -1343,6 +1408,9 @@ function summary(scope?: StrategySpecScope): Summary {
   const feedLive = snapshots.length === specs.length;
   const avg = (values: number[]): number | null =>
     values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  const forwardGate = specs.length === 1 && NATIVE_STRATEGY_ID_SET.has(specs[0]!.id)
+    ? nativeForwardGate(specs[0]!.id)
+    : null;
 
   return {
     feedLive,
@@ -1362,6 +1430,7 @@ function summary(scope?: StrategySpecScope): Summary {
     currentRoundTripCostPct: avg(snapshots.map(
       (snap) => snap.spreadPct + snap.buySlippagePct + snap.sellSlippagePct,
     )),
+    forwardGate,
   };
 }
 
@@ -1378,7 +1447,7 @@ function recentSignals(
            signal.capture_status,signal.capture_error,signal.book_age_ms,
            signal.bid,signal.ask,signal.buy_vwap_1000,signal.sell_vwap_1000,
            signal.spread_pct,signal.buy_slippage_pct,signal.sell_slippage_pct,
-           signal.funding_rate_pct_h,
+           signal.funding_rate_pct_h,signal.shadow_decision_reason,
            (SELECT id FROM lighter_lux_trades
             WHERE entry_signal_id=signal.id LIMIT 1) shadow_entry_trade_id,
            (SELECT CASE WHEN closed_at IS NULL THEN 'open' ELSE 'closed' END
@@ -1674,7 +1743,26 @@ function cumulativePnlSeries(
   };
 }
 
-function gate(s: Summary, lang: Lang): { cls: string; label: string; passed: boolean } {
+function gate(
+  s: Summary,
+  lang: Lang,
+  strictNative = false,
+): { cls: string; label: string; passed: boolean } {
+  if (strictNative && s.forwardGate) {
+    if (s.forwardGate.status === 'collecting') return {
+      cls: 'collect',
+      label: t(
+        lang,
+        `КОПИМ ${s.forwardGate.closed}/${VALIDATION_TARGET}`,
+        `COLLECTING ${s.forwardGate.closed}/${VALIDATION_TARGET}`,
+      ),
+      passed: false,
+    };
+    const passed = s.forwardGate.status === 'passed';
+    return passed
+      ? { cls: 'pass', label: t(lang, 'ГЕЙТ ПРОЙДЕН', 'GATE PASSED'), passed }
+      : { cls: 'fail', label: t(lang, 'SHADOW ОСТАНОВЛЕН', 'SHADOW PAUSED'), passed };
+  }
   if (s.closed < VALIDATION_TARGET) return {
     cls: 'collect',
     label: t(lang, `КОПИМ ${s.closed}/${VALIDATION_TARGET}`, `COLLECTING ${s.closed}/${VALIDATION_TARGET}`),
@@ -1859,7 +1947,7 @@ export async function lighterLuxalgoHero(lang: Lang): Promise<string> {
 export async function lighterNativeQuantHero(lang: Lang): Promise<string> {
   const shadow = summary(NATIVE_STRATEGIES);
   const passed = NATIVE_STRATEGIES.filter(
-    (spec) => gate(summary(spec), lang).passed,
+    (spec) => gate(summary(spec), lang, true).passed,
   ).length;
   const backtestTrades = NATIVE_STRATEGIES.reduce(
     (sum, spec) => sum + spec.backtest.trades,
@@ -2007,10 +2095,13 @@ function strategyRows(
 ): string {
   return specs.map((spec) => {
     const s = summary(spec);
-    const g = gate(s, lang);
+    const g = gate(s, lang, NATIVE_STRATEGY_ID_SET.has(spec.id));
     const wr = s.closed ? s.wins / s.closed * 100 : null;
     const feed = executionSnapshot(spec);
     const tooltip = nativeStrategyTooltip(spec, lang);
+    const gateTitle = s.forwardGate?.status === 'failed'
+      ? s.forwardGate.reasons.join('; ')
+      : '';
     const strategyLabel = tooltip
       ? `<span class="ll-strategy-name" tabindex="0" title="${esc(tooltip)}" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small><i>?</i></span>`
       : `<b>STRAT-${spec.code} · ${spec.asset}</b><small> · ${esc(spec.name)}</small>`;
@@ -2021,7 +2112,7 @@ function strategyRows(
       <td class="num"><b>${s.closed} / ${s.open}</b><small> · WR ${wr == null ? '—' : `${wr.toFixed(0)}%`} · PF ${pfLabel(s.profitFactor)}</small></td>
       <td class="${pnlClass(s.netPct)}"><b>${signedPct(s.netPct)} · ${signedUsd(s.netUsd)}</b></td>
       <td class="num">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}<small> · ½ ${signedPct(s.firstHalfPct)} · ½ ${signedPct(s.secondHalfPct)}</small></td>
-      <td class="${g.cls}"><b>${esc(g.label)}</b></td>
+      <td class="${g.cls}"${gateTitle ? ` title="${esc(gateTitle)}"` : ''}><b>${esc(g.label)}</b></td>
     </tr>`;
   }).join('');
 }
@@ -2193,6 +2284,13 @@ function signalLifecycle(
       label: t(lang, 'ОШИБКА', 'ERROR'),
       css: 'error',
       detail: row.live_decision_reason ?? detail,
+    };
+  }
+  if (row.shadow_decision_reason) {
+    return {
+      label: t(lang, 'SHADOW ОСТАНОВЛЕН', 'SHADOW PAUSED'),
+      css: 'skip',
+      detail: row.shadow_decision_reason,
     };
   }
   if (
@@ -2431,7 +2529,9 @@ async function render(
     0,
   );
   const wr = s.closed ? s.wins / s.closed * 100 : 0;
-  const passed = scopeSpecs.filter((spec) => gate(summary(spec), lang).passed).length;
+  const passed = scopeSpecs.filter(
+    (spec) => gate(summary(spec), lang, NATIVE_STRATEGY_ID_SET.has(spec.id)).passed,
+  ).length;
   const liveEnabledStrategies = liveStrategies.filter((row) => row.enabled === 1).length;
   const livePassedStrategies = liveStrategies.filter(
     (row) => row.gate_status === 'passed',
@@ -2603,7 +2703,13 @@ async function render(
         <thead><tr><th>Strategy</th><th>L2</th><th>Backtest · N / WR / PF</th><th>Forward · closed / open</th><th>Net</th><th>DD / halves</th><th>Gate</th></tr></thead>
         <tbody>${strategyRows(lang, scopeSpecs)}</tbody>
       </table></div>
-      <p class="ll-note">${t(lang, 'Гейт: ≥20 закрытых Lighter-forward сделок, net > 0%, PF ≥1.20, обе половины >0%.', 'Gate: ≥20 closed Lighter-forward trades, net > 0%, PF ≥1.20, and both halves >0%.')}</p></div>
+      <p class="ll-note">${requested.group === 'native'
+        ? t(
+          lang,
+          'Native forward-гейт: ≥20 закрытых сделок, net > 0%, PF ≥1.20, обе половины >0%, max DD ≤5%, ошибки снимка ≤2%, средняя цена исполнения ≤0.10% и p95 возраста стакана ≤2с. При провале новые Shadow-входы останавливаются автоматически; выходы остаются активны.',
+          'Native forward gate: ≥20 closed trades, net > 0%, PF ≥1.20, both halves >0%, max DD ≤5%, capture errors ≤2%, average execution cost ≤0.10%, and book-age p95 ≤2s. A failure automatically pauses new Shadow entries while exits remain active.',
+        )
+        : t(lang, 'Гейт: ≥20 закрытых Lighter-forward сделок, net > 0%, PF ≥1.20, обе половины >0%.', 'Gate: ≥20 closed Lighter-forward trades, net > 0%, PF ≥1.20, and both halves >0%.')}</p></div>
 
       <div class="ll-panel" id="signal-history"><h2>${t(lang, 'История сигналов', 'Signal history')}</h2>
         <div class="ll-table"><table class="ll-signal-table">

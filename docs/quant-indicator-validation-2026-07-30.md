@@ -308,3 +308,25 @@ The existing five-minute LTC `STRAT-033` was reconfirmed as the stronger
 timeframe choice. The failed one-minute transfer is useful negative evidence:
 greater signal frequency did not survive realistic execution reserve, so no
 one-minute strategy was added merely to increase trade count.
+
+## Prospective Native Shadow continuation gate
+
+Native strategies now have an automatic continuation gate in the actual
+Shadow entry path, not only a dashboard label. Until 20 closed prospective
+trades the strategy continues collecting evidence. Starting with close 20,
+every attempted new entry is admitted only when all frozen conditions hold:
+
+- cumulative net PnL is positive and PF is at least 1.20;
+- both chronological halves are positive;
+- additive maximum drawdown is at most 5%;
+- L2 capture errors are at most 2% of signals;
+- mean executable round-trip spread/slippage cost is at most 0.10%;
+- p95 age of the captured order book is at most 2,000ms;
+- there is at least one valid execution-quality sample per closed trade.
+
+If any condition fails, the signal is still captured and remains auditable,
+but a new Shadow position is not opened and the exact gate failure is saved on
+the signal. An opposite signal may still close the existing position before
+the gate is evaluated, and explicit exits plus safety stops are never blocked.
+This prevents a strategy that deteriorates after initially passing from
+continuing to accumulate risk merely because it remains registered.
