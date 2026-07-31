@@ -207,6 +207,42 @@ are each 95%. A reported stream gap invalidates its affected minute; it is
 never filled or included in a 5m row. These are data-readiness gates only and
 do not waive the later execution-stressed backtest and prospective Shadow gate.
 
+### Preregistered microstructure hypotheses
+
+The rules below were frozen on 2026-07-31 before the first seven-day dataset
+existed. They are deliberately six complete hypotheses rather than a broad
+parameter optimizer:
+
+- `OF-CONT-25-H1/H3`: follow aligned completed-bar taker-flow imbalance
+  (absolute 0.25) and top-five depth imbalance (absolute 0.20), holding one or
+  three five-minute bars;
+- `ABSORB-55-H1/H3`: reverse extreme taker flow (absolute 0.55) only when the
+  opposite side still owns at least 0.15 depth imbalance, holding one or three
+  bars;
+- `BASIS-4BP-H3/H6`: fade an absolute 0.04% mark/index basis dislocation when
+  taker flow is not strongly fighting the reversion, holding three or six bars.
+
+Every rule is exactly mirrored long/short. A signal uses only a completed 5m
+row, entry is the next consecutive bar's mid-open, and exit is a later
+consecutive mid-open. Each simulated trade subtracts the market's measured
+$100 p95 full round-trip L2 cost and funding. The trade is rejected if either
+top-five side has less than $500, the spread is outside the preregistered
+liquidity envelope, any bar is missing, or a required field is absent.
+
+Qualification requires at least 120 trades, PF >=1.20, positive mean-return
+L95, positive long and short books, three positive chronological thirds,
+positive bull/bear and high/low-volatility regimes, at least four active
+markets, majority-positive market breadth, <=60% winner dominance, positive
+leave-one-market-out net, positive 1.5x-cost stress and <=5% drawdown at the
+frozen ten-position capacity.
+
+`scripts/sweep-lighter-microstructure.ts` is fail-closed. Exploratory mode
+refuses to run before the seven-day audit gate and can never qualify a Shadow
+candidate. Frozen mode refuses to run before the 21-day gate. A daily systemd
+timer writes the immutable report but never edits strategy or Real state;
+promotion remains a reviewed Shadow-only code change followed by the normal
+20-close prospective gate.
+
 ## LuxAlgo database follow-up
 
 A separate LuxAlgo AI Backtesting database search was run for symmetric

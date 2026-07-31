@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily frozen Lighter microstructure strategy sweep
+
+[Timer]
+OnCalendar=*-*-* 03:20:00 UTC
+Persistent=true
+RandomizedDelaySec=10m
+Unit=lighter-native-microstructure-sweep.service
+
+[Install]
+WantedBy=timers.target
