@@ -113,6 +113,8 @@ class LiveRunner:
         self.last_stop_check = 0.0
         self.last_heartbeat = 0.0
         self.reconcile_cursor = 0
+        self.reconcile_error_streak = 0
+        self.reconcile_last_error: str | None = None
         self.leverage_ready: set[int] = set()
         self.market_locks: dict[int, asyncio.Lock] = {}
         self.signal_slots = asyncio.Semaphore(self.signal_parallelism)
@@ -146,6 +148,24 @@ class LiveRunner:
                WHERE id=1""",
             (1 if self.enabled else 0, now, status, error),
         )
+
+    @staticmethod
+    def error_summary(exc: Exception) -> str:
+        text = str(exc)
+        if (
+            "x-amzn-waf-action" in text.lower()
+            or "human verification" in text.lower()
+            or "captcha" in text.lower()
+        ):
+            return "lighter_waf_captcha"
+        compact = " ".join(text.split())
+        return compact[:500] if compact else exc.__class__.__name__
+
+    def heartbeat_state(self) -> None:
+        if self.reconcile_last_error is None:
+            self.state("armed")
+            return
+        self.state("degraded", f"reconcile: {self.reconcile_last_error}")
 
     async def auth(self) -> str:
         token, error = self.signer.create_auth_token_with_expiry(
@@ -705,6 +725,12 @@ class LiveRunner:
         side: str,
     ) -> tuple[str, int | None]:
         entry_started_at = int(time.time() * 1000)
+        if self.reconcile_last_error is not None:
+            return (
+                f"account reconciliation degraded: "
+                f"{self.reconcile_last_error}",
+                None,
+            )
         if self.daily_net() <= -self.daily_loss_usd:
             return "daily loss breaker", None
         risk_state = self.refresh_portfolio_risk()
@@ -1380,6 +1406,7 @@ class LiveRunner:
     async def reconcile_loop(self) -> None:
         while self.running:
             started = time.monotonic()
+            retry_delay = 0.0
             try:
                 trades = self.open_trades()
                 if trades:
@@ -1395,13 +1422,33 @@ class LiveRunner:
                         ).fetchone()
                         if trade is not None:
                             await self.reconcile_open_trade(trade)
+                self.reconcile_error_streak = 0
+                self.reconcile_last_error = None
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self.state("error", f"reconcile: {exc}")
-                self.log("reconcile_error", error=str(exc))
+                self.reconcile_error_streak += 1
+                self.reconcile_last_error = self.error_summary(exc)
+                retry_delay = min(
+                    60.0,
+                    float(2 ** min(self.reconcile_error_streak - 1, 6)),
+                )
+                self.state(
+                    "degraded",
+                    f"reconcile: {self.reconcile_last_error}",
+                )
+                self.log(
+                    "reconcile_error",
+                    error=self.reconcile_last_error,
+                    streak=self.reconcile_error_streak,
+                    retry_in_s=retry_delay,
+                )
             elapsed = time.monotonic() - started
-            await asyncio.sleep(max(0.05, 1.0 - elapsed))
+            await asyncio.sleep(
+                retry_delay
+                if retry_delay > 0
+                else max(0.05, 1.0 - elapsed)
+            )
 
     async def initialize(self) -> None:
         await self.load_market_meta()
@@ -1497,19 +1544,16 @@ class LiveRunner:
                     await self.process_signal_batch(ready_rows)
                     self.db.execute(
                         """UPDATE lighter_lux_live_state
-                           SET last_signal_id=?,heartbeat_at=?,status='armed',
-                               last_error=NULL WHERE id=1""",
-                        (
-                            ready_rows[-1]["id"],
-                            int(time.time() * 1000),
-                        ),
+                           SET last_signal_id=? WHERE id=1""",
+                        (ready_rows[-1]["id"],),
                     )
+                    self.heartbeat_state()
                     continue
                 if signal_rows:
                     await asyncio.sleep(0.05)
                     continue
                 if time.monotonic() - self.last_heartbeat >= 5:
-                    self.state("armed")
+                    self.heartbeat_state()
                     self.last_heartbeat = time.monotonic()
                 await asyncio.sleep(0.05)
         finally:
