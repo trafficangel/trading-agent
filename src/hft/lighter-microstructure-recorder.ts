@@ -136,6 +136,10 @@ db.exec(`
     depth_imbalance_close REAL,
     book_age_avg_ms REAL,
     book_age_p95_ms REAL,
+    exec_cost_100_samples INTEGER NOT NULL DEFAULT 0,
+    exec_cost_100_avg_pct REAL,
+    exec_cost_100_p95_pct REAL,
+    exec_cost_100_max_pct REAL,
     buy_usd REAL NOT NULL,
     sell_usd REAL NOT NULL,
     cvd_usd REAL NOT NULL,
@@ -155,19 +159,40 @@ db.exec(`
     ON lighter_microstructure_1m(symbol, minute_ts_ms);
 `);
 
+// The recorder owns this research-only database. Additive migration keeps the
+// already collected rows immutable while starting a new execution-cost epoch.
+const existingColumns = new Set(
+  (db.pragma('table_info(lighter_microstructure_1m)') as Array<{ name: string }>)
+    .map((column) => column.name),
+);
+for (const [column, definition] of [
+  ['exec_cost_100_samples', 'INTEGER NOT NULL DEFAULT 0'],
+  ['exec_cost_100_avg_pct', 'REAL'],
+  ['exec_cost_100_p95_pct', 'REAL'],
+  ['exec_cost_100_max_pct', 'REAL'],
+] as const) {
+  if (!existingColumns.has(column)) {
+    db.exec(`ALTER TABLE lighter_microstructure_1m ADD COLUMN ${column} ${definition}`);
+  }
+}
+
 const insertRow = db.prepare(`
   INSERT OR REPLACE INTO lighter_microstructure_1m (
     market_id, symbol, minute_ts_ms, samples, book_updates, nonce_gaps, stale_samples,
     mid_open, mid_high, mid_low, mid_close, spread_avg_pct, spread_max_pct,
     bid5_usd_avg, ask5_usd_avg, depth_imbalance_avg, depth_imbalance_close,
-    book_age_avg_ms, book_age_p95_ms, buy_usd, sell_usd, cvd_usd, trade_count,
+    book_age_avg_ms, book_age_p95_ms, exec_cost_100_samples,
+    exec_cost_100_avg_pct, exec_cost_100_p95_pct, exec_cost_100_max_pct,
+    buy_usd, sell_usd, cvd_usd, trade_count,
     liquidation_buy_usd, liquidation_sell_usd, index_price, mark_price, basis_pct,
     current_funding_rate, last_funding_rate, quality_ok, recorded_at_ms
   ) VALUES (
     @marketId, @symbol, @minuteTsMs, @samples, @bookUpdates, @nonceGaps, @staleSamples,
     @midOpen, @midHigh, @midLow, @midClose, @spreadAvgPct, @spreadMaxPct,
     @bid5UsdAvg, @ask5UsdAvg, @depthImbalanceAvg, @depthImbalanceClose,
-    @bookAgeAvgMs, @bookAgeP95Ms, @buyUsd, @sellUsd, @cvdUsd, @tradeCount,
+    @bookAgeAvgMs, @bookAgeP95Ms, @execCost100Samples,
+    @execCost100AvgPct, @execCost100P95Pct, @execCost100MaxPct,
+    @buyUsd, @sellUsd, @cvdUsd, @tradeCount,
     @liquidationBuyUsd, @liquidationSellUsd, @indexPrice, @markPrice, @basisPct,
     @currentFundingRate, @lastFundingRate, @qualityOk, @recordedAtMs
   )
@@ -244,7 +269,7 @@ function writeStatus(): void {
     /* status remains useful */
   }
   const payload = {
-    version: 'lighter-native-microstructure-v2',
+    version: 'lighter-native-microstructure-v3',
     checkedAt: now,
     sampleMs: SAMPLE_MS,
     socketStaleMs: SOCKET_STALE_MS,

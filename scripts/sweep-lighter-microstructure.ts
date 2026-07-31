@@ -21,16 +21,6 @@ import {
 } from '../src/lib/lighter-microstructure-research.js';
 
 const HOUR_MS = 3_600_000;
-const COST_FILES = [
-  'data/lighter-execution-costs-majors-20260731.json',
-  'data/lighter-execution-costs-zec-doge-near-jup.json',
-  'data/lighter-execution-costs-lit-pump-gram-xmr.json',
-  'data/lighter-execution-costs-popcat-ena-arb-tao.json',
-  'data/lighter-execution-costs-hype-20260731.json',
-  // The research portfolio is sized at $100. Keep this override last.
-  'data/lighter-execution-costs-native-portfolio-100-20260731.json',
-] as const;
-
 type Mode = 'exploratory' | 'frozen';
 type Audit = {
   generatedAt: string;
@@ -38,10 +28,6 @@ type Audit = {
     exploratoryResearch: { passed: boolean; failures: string[] };
     frozenCandidateResearch: { passed: boolean; failures: string[] };
   };
-};
-type CostFile = {
-  notionalUsd?: number;
-  summaries?: Record<string, { p95Pct?: number }>;
 };
 type DbRow = {
   market_id: number;
@@ -63,6 +49,10 @@ type DbRow = {
   depth_imbalance_close: number | null;
   book_age_avg_ms: number | null;
   book_age_p95_ms: number | null;
+  exec_cost_100_samples: number;
+  exec_cost_100_avg_pct: number | null;
+  exec_cost_100_p95_pct: number | null;
+  exec_cost_100_max_pct: number | null;
   buy_usd: number;
   sell_usd: number;
   cvd_usd: number;
@@ -117,6 +107,10 @@ function stored(row: DbRow): StoredMicrostructureMinute {
     depthImbalanceClose: row.depth_imbalance_close,
     bookAgeAvgMs: row.book_age_avg_ms,
     bookAgeP95Ms: row.book_age_p95_ms,
+    execCost100Samples: row.exec_cost_100_samples,
+    execCost100AvgPct: row.exec_cost_100_avg_pct,
+    execCost100P95Pct: row.exec_cost_100_p95_pct,
+    execCost100MaxPct: row.exec_cost_100_max_pct,
     buyUsd: row.buy_usd,
     sellUsd: row.sell_usd,
     cvdUsd: row.cvd_usd,
@@ -130,21 +124,6 @@ function stored(row: DbRow): StoredMicrostructureMinute {
     lastFundingRate: row.last_funding_rate,
     qualityOk: row.quality_ok === 1,
   };
-}
-
-function executionCosts(): Map<string, number> {
-  const result = new Map<string, number>();
-  for (const relative of COST_FILES) {
-    const path = resolve(relative);
-    if (!existsSync(path)) continue;
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as CostFile;
-    for (const [symbol, summary] of Object.entries(parsed.summaries ?? {})) {
-      if (Number.isFinite(summary.p95Pct) && Number(summary.p95Pct) >= 0) {
-        result.set(symbol, Number(summary.p95Pct));
-      }
-    }
-  }
-  return result;
 }
 
 const modeValue = flagValue('--mode') ?? 'frozen';
@@ -209,12 +188,16 @@ const fiveMinute = [...buckets.values()]
   .map((source) => rollupLighterMicrostructureFiveMinute(source))
   .filter((row) => row != null);
 const features = buildCausalMicroFeatureBars(fiveMinute);
-const costs = executionCosts();
 const evaluations = PREREGISTERED_MICRO_RULES.map((rule) =>
   evaluateMicrostructureRule(
     rule.id,
-    simulateMicrostructureRule(features, rule, costs),
+    simulateMicrostructureRule(features, rule),
   ));
+const rollingCostMarkets = new Set(
+  features
+    .filter((feature) => feature.executionCostPct != null)
+    .map((feature) => feature.symbol),
+);
 
 output({
   version: 'lighter-microstructure-sweep-v1',
@@ -230,7 +213,8 @@ output({
     oneMinuteRows: rows.length,
     validFiveMinuteRows: fiveMinute.length,
     featureRows: features.length,
-    measuredCostMarkets: costs.size,
+    rollingCostMarkets: rollingCostMarkets.size,
+    executionCostSource: 'signal-time completed 5m max of five rolling $100 minute p95 values',
   },
   gates: {
     minimumTrades: 120,

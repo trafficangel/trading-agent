@@ -17,6 +17,7 @@ type MinuteStatsRow = {
   last_minute: number;
   rows: number;
   quality_rows: number;
+  execution_cost_rows: number;
   nonce_gaps: number;
   stale_samples: number;
   avg_book_age_p95_ms: number | null;
@@ -43,6 +44,23 @@ const now = Date.now();
 const closedMinute = Math.floor(now / MINUTE_MS) * MINUTE_MS;
 const cutoff = closedMinute - windowDays * DAY_MS;
 const db = new Database(databasePath, { readonly: true, fileMustExist: true });
+const tableColumns = new Set(
+  (db.pragma('table_info(lighter_microstructure_1m)') as Array<{ name: string }>)
+    .map((column) => column.name),
+);
+const hasRollingExecutionCost = tableColumns.has('exec_cost_100_p95_pct')
+  && tableColumns.has('exec_cost_100_samples');
+const executionCostRowsSql = hasRollingExecutionCost
+  ? `COALESCE(SUM(CASE WHEN quality_ok = 1
+      AND exec_cost_100_p95_pct IS NOT NULL
+      AND exec_cost_100_samples >= samples * 0.8
+      THEN 1 ELSE 0 END), 0)`
+  : '0';
+const fiveMinuteExecutionCostCountSql = hasRollingExecutionCost
+  ? `SUM(CASE WHEN exec_cost_100_p95_pct IS NOT NULL
+      AND exec_cost_100_samples >= samples * 0.8
+      THEN 1 ELSE 0 END)`
+  : '0';
 
 const minuteRows = db
   .prepare(
@@ -54,6 +72,7 @@ const minuteRows = db
     MAX(minute_ts_ms) AS last_minute,
     COUNT(*) AS rows,
     COALESCE(SUM(quality_ok), 0) AS quality_rows,
+    ${executionCostRowsSql} AS execution_cost_rows,
     COALESCE(SUM(nonce_gaps), 0) AS nonce_gaps,
     COALESCE(SUM(stale_samples), 0) AS stale_samples,
     AVG(book_age_p95_ms) AS avg_book_age_p95_ms
@@ -76,7 +95,8 @@ const fiveMinuteRows = db
       SUM(quality_ok) AS quality_minutes,
       MIN(minute_ts_ms) AS first_minute,
       MAX(minute_ts_ms) AS last_minute,
-      SUM(nonce_gaps) AS nonce_gaps
+      SUM(nonce_gaps) AS nonce_gaps,
+      ${fiveMinuteExecutionCostCountSql} AS execution_cost_minutes
     FROM lighter_microstructure_1m
     WHERE minute_ts_ms >= ? AND minute_ts_ms < ?
     GROUP BY market_id, bucket
@@ -89,6 +109,7 @@ const fiveMinuteRows = db
       AND first_minute = bucket
       AND last_minute = bucket + 240000
       AND nonce_gaps = 0
+      AND execution_cost_minutes = 5
       THEN 1 ELSE 0 END) AS valid_buckets
   FROM buckets
   GROUP BY market_id
@@ -119,8 +140,10 @@ const perMarket = minuteRows.map((row) => {
     expectedMinutes,
     observedMinutes: row.rows,
     qualityMinutes: row.quality_rows,
+    executionCostMinutes: row.execution_cost_rows,
     coverageRatio: expectedMinutes ? row.rows / expectedMinutes : 0,
     qualityRatio: expectedMinutes ? row.quality_rows / expectedMinutes : 0,
+    executionCostRatio: expectedMinutes ? row.execution_cost_rows / expectedMinutes : 0,
     validFiveMinuteBuckets,
     expectedFiveMinuteBuckets,
     fiveMinuteQualityRatio: expectedFiveMinuteBuckets
@@ -140,6 +163,7 @@ const allMarketsPresent = perMarket.length === EXPECTED_MARKETS;
 const minDurationDays = minimum(perMarket.map((row) => row.durationDays));
 const minCoverageRatio = minimum(perMarket.map((row) => row.coverageRatio));
 const minQualityRatio = minimum(perMarket.map((row) => row.qualityRatio));
+const minExecutionCostRatio = minimum(perMarket.map((row) => row.executionCostRatio));
 const minFiveMinuteQualityRatio = minimum(perMarket.map((row) => row.fiveMinuteQualityRatio));
 const maxFreshnessMs = maximum(perMarket.map((row) => row.freshnessMs));
 const totalNonceGaps = perMarket.reduce((sum, row) => sum + row.nonceGaps, 0);
@@ -155,6 +179,11 @@ function reasons(minDays: number, requireFiveMinute: boolean): string[] {
   if (minQualityRatio < MIN_QUALITY_RATIO) {
     failures.push(`1m quality ${(minQualityRatio * 100).toFixed(2)}% < 95%`);
   }
+  if (minExecutionCostRatio < MIN_QUALITY_RATIO) {
+    failures.push(
+      `$100 rolling execution cost ${(minExecutionCostRatio * 100).toFixed(2)}% < 95%`,
+    );
+  }
   if (requireFiveMinute && minFiveMinuteQualityRatio < MIN_QUALITY_RATIO) {
     failures.push(`5m quality ${(minFiveMinuteQualityRatio * 100).toFixed(2)}% < 95%`);
   }
@@ -167,13 +196,14 @@ const healthFailures = reasons(1, false);
 const exploratoryFailures = reasons(7, true);
 const frozenResearchFailures = reasons(21, true);
 const report = {
-  version: 'lighter-microstructure-audit-v1',
+  version: 'lighter-microstructure-audit-v2',
   generatedAt: new Date(now).toISOString(),
   databasePath,
   windowDays,
   thresholds: {
     expectedMarkets: EXPECTED_MARKETS,
     minimumQualityRatio: MIN_QUALITY_RATIO,
+    rollingExecutionNotionalUsd: 100,
     healthHistoryDays: 1,
     exploratoryHistoryDays: 7,
     frozenResearchHistoryDays: 21,
@@ -183,6 +213,7 @@ const report = {
     minDurationDays,
     minCoverageRatio,
     minQualityRatio,
+    minExecutionCostRatio,
     minFiveMinuteQualityRatio,
     totalNonceGaps,
     maxFreshnessMs,

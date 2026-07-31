@@ -30,6 +30,9 @@ export type BookMetrics = {
   bid5Usd: number;
   ask5Usd: number;
   depthImbalance: number;
+  executableBuyVwap100: number | null;
+  executableSellVwap100: number | null;
+  executableRoundTrip100Pct: number | null;
 };
 
 export type MinuteMicrostructure = {
@@ -50,6 +53,10 @@ export type MinuteMicrostructure = {
   depthImbalanceClose: number | null;
   bookAgeAvgMs: number | null;
   bookAgeP95Ms: number | null;
+  execCost100Samples: number;
+  execCost100AvgPct: number | null;
+  execCost100P95Pct: number | null;
+  execCost100MaxPct: number | null;
   buyUsd: number;
   sellUsd: number;
   cvdUsd: number;
@@ -159,6 +166,21 @@ export function rollupLighterMicrostructureFiveMinute(
     depthImbalanceClose: last.depthImbalanceClose,
     bookAgeAvgMs: weightedAverage(rows, 'bookAgeAvgMs'),
     bookAgeP95Ms: maximum(rows.map((row) => row.bookAgeP95Ms)),
+    execCost100Samples: rows.reduce((sum, row) => sum + row.execCost100Samples, 0),
+    execCost100AvgPct: (() => {
+      let weighted = 0;
+      let samples = 0;
+      for (const row of rows) {
+        if (row.execCost100AvgPct == null || row.execCost100Samples <= 0) continue;
+        weighted += row.execCost100AvgPct * row.execCost100Samples;
+        samples += row.execCost100Samples;
+      }
+      return samples ? weighted / samples : null;
+    })(),
+    // A five-minute signal may only know the five completed source minutes.
+    // Their largest minute p95 is a conservative causal reserve for entry.
+    execCost100P95Pct: maximum(rows.map((row) => row.execCost100P95Pct)),
+    execCost100MaxPct: maximum(rows.map((row) => row.execCost100MaxPct)),
     buyUsd: rows.reduce((sum, row) => sum + row.buyUsd, 0),
     sellUsd: rows.reduce((sum, row) => sum + row.sellUsd, 0),
     cvdUsd: rows.reduce((sum, row) => sum + row.cvdUsd, 0),
@@ -223,6 +245,27 @@ function topNotional(levels: Map<number, number>, descending: boolean, count: nu
   return top.reduce((sum, [price, size]) => sum + price * size, 0);
 }
 
+function executableVwap(
+  levels: Map<number, number>,
+  ascending: boolean,
+  quoteNotional: number,
+): number | null {
+  const ordered = [...levels.entries()].sort((left, right) =>
+    ascending ? left[0] - right[0] : right[0] - left[0]);
+  let remaining = quoteNotional;
+  let base = 0;
+  let quote = 0;
+  for (const [price, size] of ordered) {
+    if (!(price > 0) || !(size > 0)) continue;
+    const take = Math.min(size, remaining / price);
+    base += take;
+    quote += take * price;
+    remaining -= take * price;
+    if (remaining <= 1e-8) return base > 0 ? quote / base : null;
+  }
+  return null;
+}
+
 export function lighterBookMetrics(state: LighterBookState): BookMetrics | null {
   if (!state.bids.size || !state.asks.size) return null;
   let bid = Number.NEGATIVE_INFINITY;
@@ -234,6 +277,8 @@ export function lighterBookMetrics(state: LighterBookState): BookMetrics | null 
   const bid5Usd = topNotional(state.bids, true, 5);
   const ask5Usd = topNotional(state.asks, false, 5);
   const depth = bid5Usd + ask5Usd;
+  const executableBuyVwap100 = executableVwap(state.asks, true, 100);
+  const executableSellVwap100 = executableVwap(state.bids, false, 100);
   return {
     bid,
     ask,
@@ -242,6 +287,12 @@ export function lighterBookMetrics(state: LighterBookState): BookMetrics | null 
     bid5Usd,
     ask5Usd,
     depthImbalance: depth > 0 ? (bid5Usd - ask5Usd) / depth : 0,
+    executableBuyVwap100,
+    executableSellVwap100,
+    executableRoundTrip100Pct:
+      executableBuyVwap100 != null && executableSellVwap100 != null
+        ? ((executableBuyVwap100 - executableSellVwap100) / mid) * 100
+        : null,
   };
 }
 
@@ -284,6 +335,7 @@ export class LighterMinuteAccumulator {
   private depthImbalanceSum = 0;
   private depthImbalanceClose: number | null = null;
   private readonly bookAgesMs: number[] = [];
+  private readonly execCosts100Pct: number[] = [];
   private buyUsd = 0;
   private sellUsd = 0;
   private tradeCount = 0;
@@ -324,6 +376,9 @@ export class LighterMinuteAccumulator {
     this.depthImbalanceSum += metrics.depthImbalance;
     this.depthImbalanceClose = metrics.depthImbalance;
     this.bookAgesMs.push(Math.max(0, ageMs));
+    if (metrics.executableRoundTrip100Pct != null) {
+      this.execCosts100Pct.push(metrics.executableRoundTrip100Pct);
+    }
   }
 
   addTrade(trade: LighterTrade, liquidation = false): boolean {
@@ -375,6 +430,15 @@ export class LighterMinuteAccumulator {
       depthImbalanceClose: this.depthImbalanceClose,
       bookAgeAvgMs,
       bookAgeP95Ms: percentile(this.bookAgesMs, 0.95),
+      execCost100Samples: this.execCosts100Pct.length,
+      execCost100AvgPct: this.execCosts100Pct.length
+        ? this.execCosts100Pct.reduce((sum, value) => sum + value, 0)
+          / this.execCosts100Pct.length
+        : null,
+      execCost100P95Pct: percentile(this.execCosts100Pct, 0.95),
+      execCost100MaxPct: this.execCosts100Pct.length
+        ? Math.max(...this.execCosts100Pct)
+        : null,
       buyUsd: this.buyUsd,
       sellUsd: this.sellUsd,
       cvdUsd: this.buyUsd - this.sellUsd,

@@ -203,9 +203,11 @@ frozen Shadow gate.
 15 markets: 24 hours for collection-health assessment, seven days before any
 exploratory hypothesis scan, and 21 days before frozen candidate research. The
 minimum per-market 1m coverage, usable 1m share and strict consecutive 5m share
-are each 95%. A reported stream gap invalidates its affected minute; it is
-never filled or included in a 5m row. These are data-readiness gates only and
-do not waive the later execution-stressed backtest and prospective Shadow gate.
+are each 95%. At least 95% of expected minutes must also contain rolling $100
+execution-cost samples for at least 80% of their valid book snapshots. A
+reported stream gap invalidates its affected minute; it is never filled or
+included in a 5m row. These are data-readiness gates only and do not waive the
+later execution-stressed backtest and prospective Shadow gate.
 
 ### Preregistered microstructure hypotheses
 
@@ -224,10 +226,15 @@ parameter optimizer:
 
 Every rule is exactly mirrored long/short. A signal uses only a completed 5m
 row, entry is the next consecutive bar's mid-open, and exit is a later
-consecutive mid-open. Each simulated trade subtracts the market's measured
-$100 p95 full round-trip L2 cost and funding. The trade is rejected if either
-top-five side has less than $500, the spread is outside the preregistered
-liquidity envelope, any bar is missing, or a required field is absent.
+consecutive mid-open. Recorder v3 continuously computes immediately executable
+buy and sell VWAP for $100 from every one-second public L2 sample. Each 1m row
+stores the observed avg/p95/max round-trip cost; the strict 5m row uses the
+maximum of its five completed minute p95 values. Each simulated trade subtracts
+that causal signal-time cost and funding; it never substitutes the short
+40-sample launch estimate. The trade is rejected if the rolling cost is
+missing, either top-five side has less than $500, the spread is outside the
+preregistered liquidity envelope, any bar is missing, or a required field is
+absent.
 
 Qualification requires at least 120 trades, PF >=1.20, positive mean-return
 L95, positive long and short books, three positive chronological thirds,

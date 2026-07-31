@@ -37,6 +37,10 @@ function storedMinute(
     depthImbalanceClose: 0.06,
     bookAgeAvgMs: 100,
     bookAgeP95Ms: 200,
+    execCost100Samples: 60,
+    execCost100AvgPct: 0.015,
+    execCost100P95Pct: 0.02,
+    execCost100MaxPct: 0.025,
     buyUsd: 1_000,
     sellUsd: 800,
     cvdUsd: 200,
@@ -133,6 +137,9 @@ describe('Lighter microstructure features', () => {
     expect(metrics?.bid5Usd).toBe(586);
     expect(metrics?.ask5Usd).toBe(306);
     expect(metrics?.depthImbalance).toBeCloseTo(280 / 892, 10);
+    expect(metrics?.executableBuyVwap100).toBe(101);
+    expect(metrics?.executableSellVwap100).toBeCloseTo(98.9898989899, 10);
+    expect(metrics?.executableRoundTrip100Pct).toBeCloseTo(2.0101010101, 10);
   });
 
   it('classifies the taker from the resting maker side', () => {
@@ -173,6 +180,9 @@ describe('Lighter microstructure features', () => {
         bid5Usd: 600,
         ask5Usd: 400,
         depthImbalance: 0.2,
+        executableBuyVwap100: 101,
+        executableSellVwap100: 99,
+        executableRoundTrip100Pct: 2,
       },
       10,
     );
@@ -185,6 +195,9 @@ describe('Lighter microstructure features', () => {
         bid5Usd: 300,
         ask5Usd: 700,
         depthImbalance: -0.4,
+        executableBuyVwap100: 103,
+        executableSellVwap100: 101,
+        executableRoundTrip100Pct: 1.9607843137254901,
       },
       30,
     );
@@ -217,6 +230,7 @@ describe('Lighter microstructure features', () => {
       depthImbalanceClose: -0.4,
       bookAgeAvgMs: 20,
       bookAgeP95Ms: 30,
+      execCost100Samples: 2,
       buyUsd: 50,
       sellUsd: 20,
       cvdUsd: 30,
@@ -227,6 +241,9 @@ describe('Lighter microstructure features', () => {
       lastFundingRate: 0.0005,
     });
     expect(snapshot.basisPct).toBeCloseTo(0.2, 10);
+    expect(snapshot.execCost100AvgPct).toBeCloseTo(1.9803921569, 8);
+    expect(snapshot.execCost100P95Pct).toBe(2);
+    expect(snapshot.execCost100MaxPct).toBe(2);
   });
 });
 

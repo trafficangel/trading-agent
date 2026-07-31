@@ -28,6 +28,7 @@ function bar(
     liquidationImbalance: 0,
     basisPct: 0,
     fundingRatePctH: 0,
+    executionCostPct: 0.1,
     trend: 'bull',
     volatility: 'low',
     ...overrides,
@@ -41,7 +42,7 @@ describe('Lighter microstructure research', () => {
       bar(0, { close: 50, depthImbalance: 0.5, flowImbalance: 0.5 }),
       bar(1, { open: 100, close: 100 }),
       bar(2, { open: 103, close: 103 }),
-    ], rule, new Map([['BTC', 0.1]]));
+    ], rule);
     expect(trades).toHaveLength(1);
     expect(trades[0]!.entryPrice).toBe(100);
     expect(trades[0]!.exitPrice).toBe(103);
@@ -53,7 +54,7 @@ describe('Lighter microstructure research', () => {
     const trades = simulateMicrostructureRule([
       bar(0, { depthImbalance: 0.5, flowImbalance: 0.5 }),
       bar(2, { open: 103 }),
-    ], rule, new Map([['BTC', 0.1]]));
+    ], rule);
     expect(trades).toEqual([]);
   });
 
@@ -63,7 +64,21 @@ describe('Lighter microstructure research', () => {
       bar(0, { depthImbalance: 0.5, flowImbalance: 0.5, bid5Usd: 499 }),
       bar(1),
       bar(2),
-    ], rule, new Map([['BTC', 0.1]]));
+    ], rule);
+    expect(trades).toEqual([]);
+  });
+
+  it('rejects a signal without a prospective signal-time execution cost', () => {
+    const rule = PREREGISTERED_MICRO_RULES.find((candidate) => candidate.id === 'OF-CONT-25-H1')!;
+    const trades = simulateMicrostructureRule([
+      bar(0, {
+        depthImbalance: 0.5,
+        flowImbalance: 0.5,
+        executionCostPct: null,
+      }),
+      bar(1),
+      bar(2),
+    ], rule);
     expect(trades).toEqual([]);
   });
 
