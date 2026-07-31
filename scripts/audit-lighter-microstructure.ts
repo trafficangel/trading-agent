@@ -272,7 +272,9 @@ const minCoverageRatio = minimum(perMarket.map((row) => row.coverageRatio));
 const minQualityRatio = minimum(perMarket.map((row) => row.qualityRatio));
 const minExecutionCostRatio = minimum(perMarket.map((row) => row.executionCostRatio));
 const minFiveMinuteQualityRatio = minimum(perMarket.map((row) => row.fiveMinuteQualityRatio));
-const maxFreshnessMs = maximum(perMarket.map((row) => row.freshnessMs));
+const maxFreshnessMs = perMarket.length
+  ? maximum(perMarket.map((row) => row.freshnessMs))
+  : null;
 const totalNonceGaps = perMarket.reduce((sum, row) => sum + row.nonceGaps, 0);
 const latestExecutionCostP95Values = perMarket
   .map((row) => row.latestExecutionCostP95Pct)
@@ -318,7 +320,8 @@ function reasons(minDays: number, requireFiveMinute: boolean): string[] {
   if (requireFiveMinute && minFiveMinuteQualityRatio < MIN_QUALITY_RATIO) {
     failures.push(`5m quality ${(minFiveMinuteQualityRatio * 100).toFixed(2)}% < 95%`);
   }
-  if (maxFreshnessMs > 3 * MINUTE_MS)
+  if (maxFreshnessMs == null) failures.push('freshness unavailable');
+  else if (maxFreshnessMs > 3 * MINUTE_MS)
     failures.push(`freshness ${Math.round(maxFreshnessMs / 1000)}s > 180s`);
   return failures;
 }
