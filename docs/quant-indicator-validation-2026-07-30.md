@@ -1147,6 +1147,34 @@ contribution and no more than 10% capacity drops. A historical pass may enter
 prospective Shadow only; Real remains disabled. A failure closes this exact
 family without a rescue grid.
 
+### Funding-crowding result: rejected
+
+The preregistration was committed as `9878cd3` and the causal implementation
+as `236b310` before either result was calculated. The unchanged rule failed at
+both timeframes:
+
+- 1m: 2,106 portfolio trades, net `-10.38%`, PF `0.98`, observed-maximum net
+  `-28.09%` / PF `0.95`, mean-trade L95 `-0.0300%`, drawdown `-6.85%`, 2/4
+  positive folds and IS/OOS `-21.72% / +11.34%`. Long net was `-17.13%`, both
+  volatility regimes were negative and only two of six months were positive;
+- 5m: 682 trades and positive headline net `+55.01%`, but PF was only `1.17 <
+  1.20`, observed-maximum PF `1.15`, mean-trade L95 `-0.0022%` and drawdown
+  `-5.68%` exceeded the frozen 5% capacity limit. The untouched OOS added only
+  `+2.50%`, the bull regime lost `-10.79%`, and the latest 30-day Short book
+  lost `-3.87%`.
+
+Exact funding contributed only `+3.47%` at 1m and `+3.67%` at 5m; the 5m
+headline is mostly a one-sided bearish/high-volatility price effect, not a
+stable funding yield. HYPE and ETH individual rows are not promoted: HYPE 1m
+had no recent Short sample, while ETH 5m had only 42 trades, aggregate Short
+`-0.55%`, and insufficient recent counts. Selecting either after the common
+portfolio result would be post-hoc market selection.
+
+The frozen family is closed without threshold, regime or symbol retuning and
+is not registered in Shadow or Real. Reproducible evidence is stored in
+`data/lighter-funding-crowding-1m-results.json` and
+`data/lighter-funding-crowding-5m-results.json`.
+
 ## Prospective L2 microstructure research cost policy
 
 The continuously recorded gap-free Lighter L2 dataset has not yet reached its
