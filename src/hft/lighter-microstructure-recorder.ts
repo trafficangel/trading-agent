@@ -16,6 +16,7 @@ import {
   createLighterBookState,
   isUsableMicrostructureMinute,
   lighterBookMetrics,
+  lighterTradeBelongsToMinute,
   resetLighterBookState,
   type LighterBookUpdate,
   type LighterTrade,
@@ -325,6 +326,7 @@ function addTrades(runtime: MarketRuntime, rows: unknown, liquidation: boolean, 
   for (const value of rows) {
     if (!value || typeof value !== 'object') continue;
     const trade = value as LighterTrade;
+    if (!lighterTradeBelongsToMinute(trade, accumulator.minuteTsMs)) continue;
     const id = tradeId(trade);
     if (id && runtime.seenTradeIds.has(id)) continue;
     if (id) runtime.seenTradeIds.add(id);

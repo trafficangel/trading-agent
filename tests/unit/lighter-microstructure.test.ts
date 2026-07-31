@@ -6,11 +6,23 @@ import {
   createLighterBookState,
   isUsableMicrostructureMinute,
   lighterBookMetrics,
+  lighterTradeBelongsToMinute,
   resetLighterBookState,
   rollupLighterMicrostructureFiveMinute,
   tradeUsd,
   type StoredMicrostructureMinute,
 } from '../../src/lib/lighter-microstructure.js';
+
+describe('Lighter trade snapshot causality', () => {
+  it('rejects replayed subscription trades outside the active minute', () => {
+    const minute = 1_800_000;
+    expect(lighterTradeBelongsToMinute({ timestamp: minute }, minute)).toBe(true);
+    expect(lighterTradeBelongsToMinute({ timestamp: minute + 59_999 }, minute)).toBe(true);
+    expect(lighterTradeBelongsToMinute({ timestamp: minute - 1 }, minute)).toBe(false);
+    expect(lighterTradeBelongsToMinute({ timestamp: minute + 60_000 }, minute)).toBe(false);
+    expect(lighterTradeBelongsToMinute({}, minute)).toBe(false);
+  });
+});
 
 function storedMinute(
   minuteTsMs: number,

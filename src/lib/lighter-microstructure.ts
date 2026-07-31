@@ -14,6 +14,7 @@ export type LighterTrade = {
   size?: string | number;
   usd_amount?: string | number;
   is_maker_ask?: boolean;
+  timestamp?: string | number;
 };
 
 export type LighterBookState = {
@@ -212,6 +213,21 @@ function updateSide(target: Map<number, number>, rows: LighterLevel[] | undefine
 
 export function createLighterBookState(): LighterBookState {
   return { bids: new Map(), asks: new Map(), nonce: null };
+}
+
+/**
+ * Subscription snapshots contain older trades. Admit only exchange-stamped
+ * events from the active accumulator minute so reconnects cannot replay
+ * history into a new causal bar.
+ */
+export function lighterTradeBelongsToMinute(
+  trade: LighterTrade,
+  minuteTsMs: number,
+): boolean {
+  const timestampMs = finite(trade.timestamp);
+  return timestampMs != null
+    && timestampMs >= minuteTsMs
+    && timestampMs < minuteTsMs + 60_000;
 }
 
 export function resetLighterBookState(state: LighterBookState): void {
