@@ -16,4 +16,4 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/home/trader/apps/trading-agent/data
 MemoryMax=256M
-
+ExecStartPre=-/home/trader/apps/trading-agent/node_modules/.bin/tsx scripts/reconcile-lighter-native-funding.ts --db data/trading.sqlite

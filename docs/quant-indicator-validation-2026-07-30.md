@@ -663,6 +663,16 @@ this remains non-blocking sensitivity evidence and does not alter the
 prospective Shadow gate. The reproducible structured output is frozen in
 `data/lighter-p2-portfolio-results.json`.
 
+Prospective funding is now held to the same standard. A newly closed `$100`
+Native Shadow trade first carries only a provisional entry/exit-rate estimate.
+The 15-minute promotion job then reads the public hourly Lighter settlements,
+requires at least 99% internal coverage spanning the trade, recalculates signed
+funding over `(entry, exit]`, and atomically replaces `funding_pnl_pct` and net
+PnL. A closed trade is excluded from every Native promotion gate until its
+`funding_source` is `lighter_api_settlements`. API failure therefore delays the
+sample instead of silently promoting on an estimate; it never blocks exits or
+changes the price fill.
+
 Native execution capacity is now cohort-consistent end to end. Selection,
 prospective Shadow, promotion evidence and the future isolated Real canary all
 use `$100` executable VWAP. Earlier Native `$1,000` Shadow rows are preserved

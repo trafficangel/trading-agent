@@ -50,6 +50,7 @@ const pnlStatement = db.prepare<[string], NativeForwardPnlRow>(`
   SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
   WHERE strategy_id = ? AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
     AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
+    AND funding_source = 'lighter_api_settlements'
   ORDER BY closed_at, id`);
 const signalStatement = db.prepare<[string], NativeForwardSignalRow>(`
   SELECT capture_status, book_age_ms, bid, ask,
@@ -62,6 +63,7 @@ const portfolioPnls = db.prepare<string[], NativeForwardPnlRow>(`
   WHERE strategy_id IN (${sqlMarks(P2_IDS.length)})
     AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
     AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
+    AND funding_source = 'lighter_api_settlements'
   ORDER BY closed_at, id`);
 const portfolioSignals = db.prepare<string[], NativeForwardSignalRow>(`
   SELECT capture_status, book_age_ms, bid, ask,

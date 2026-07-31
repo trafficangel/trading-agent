@@ -675,8 +675,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     period: 60,
     timeExitBars: 240,
     realEnabled: false,
-    noteRu: 'Новый HYPE-кандидат. Прошёл 180d, 4/4 периода, IS/OOS, Long/Short и окна 30/60/90d. Сценарий 0.15% был только неблокирующей проверкой, а не оценкой издержек. Отбор и Shadow используют измеренный p95 стака.',
-    noteEn: 'New HYPE candidate. It passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows. The 0.15% row was a non-blocking adverse scenario, not an execution-cost estimate. Selection and Shadow use measured book p95.',
+    noteRu: 'Новый HYPE-кандидат. Прошёл 180d, 4/4 периода, IS/OOS, Long/Short и окна 30/60/90d. Отбор и Shadow используют измеренный p95 исполнимого круга $100; отдельная чувствительность берёт только худшее реально наблюдавшееся значение.',
+    noteEn: 'New HYPE candidate. It passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows. Selection and Shadow use the measured executable $100 round-trip p95; separate sensitivity uses only the worst actually observed value.',
   },
   ...Object.fromEntries(NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => [
     market.id,
@@ -1049,6 +1049,7 @@ const nativeForwardPnls = db.prepare<[string], {
   SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
   WHERE strategy_id = ? AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
     AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
+    AND funding_source = 'lighter_api_settlements'
   ORDER BY closed_at, id`);
 const nativeForwardSignals = db.prepare<[string], {
   capture_status: string;
@@ -1076,6 +1077,7 @@ const nativePortfolioForwardPnls = db.prepare<string[], {
   WHERE strategy_id IN (${sqlMarks(NATIVE_TREND_PORTFOLIO_IDS)})
     AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
     AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
+    AND funding_source = 'lighter_api_settlements'
   ORDER BY closed_at, id`);
 const nativePortfolioForwardSignals = db.prepare<string[], {
   capture_status: string;
@@ -3151,8 +3153,8 @@ async function render(
       <p class="ll-note">${requested.group === 'native'
         ? t(
           lang,
-          'Native forward-гейт: ≥20 закрытых сделок, net после фактических spread/slippage/funding > 0%, PF ≥1.20, обе половины >0%, max DD ≤5% выделенной мощности, ошибки снимка ≤2%, полный execution-sample на каждую закрытую сделку и p95 возраста стакана ≤2с. Для P2 мощность заранее зафиксирована как 10 одновременных позиций. Универсального лимита издержек нет: их влияние уже отражено в net PnL. При провале новые Shadow-входы останавливаются автоматически; выходы остаются активны.',
-          'Native forward gate: ≥20 closed trades, net after actual spread/slippage/funding > 0%, PF ≥1.20, both halves >0%, max DD ≤5% of allocated capacity, capture errors ≤2%, a complete execution sample for every closed trade, and book-age p95 ≤2s. P2 capacity is frozen at 10 concurrent positions. There is no universal cost ceiling because its impact is already embedded in net PnL. A failure automatically pauses new Shadow entries while exits remain active.',
+          'Native forward-гейт: ≥20 закрытых и сверенных сделок, net после фактических spread/slippage и точных часовых settlements funding > 0%, PF ≥1.20, обе половины >0%, max DD ≤5% выделенной мощности, ошибки снимка ≤2%, полный execution-sample на каждую закрытую сделку и p95 возраста стакана ≤2с. Несверенный funding не попадает в гейт. Для P2 мощность заранее зафиксирована как 10 одновременных позиций. Универсального лимита издержек нет: их влияние уже отражено в net PnL. При провале новые Shadow-входы останавливаются автоматически; выходы остаются активны.',
+          'Native forward gate: ≥20 closed and reconciled trades, net after actual spread/slippage and exact hourly funding settlements > 0%, PF ≥1.20, both halves >0%, max DD ≤5% of allocated capacity, capture errors ≤2%, a complete execution sample for every closed trade, and book-age p95 ≤2s. Unreconciled funding is excluded from the gate. P2 capacity is frozen at 10 concurrent positions. There is no universal cost ceiling because its impact is already embedded in net PnL. A failure automatically pauses new Shadow entries while exits remain active.',
         )
         : t(lang, 'Гейт: ≥20 закрытых Lighter-forward сделок, net > 0%, PF ≥1.20, обе половины >0%.', 'Gate: ≥20 closed Lighter-forward trades, net > 0%, PF ≥1.20, and both halves >0%.')}</p></div>
 
