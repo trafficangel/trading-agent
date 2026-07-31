@@ -9,6 +9,7 @@ const FIVE_MINUTES_MS = 5 * MINUTE_MS;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 const EXPECTED_MARKETS = 15;
 const MIN_QUALITY_RATIO = 0.95;
+const RECENT_HEALTH_MINUTES = 120;
 
 type MinuteStatsRow = {
   market_id: number;
@@ -36,6 +37,14 @@ type LatestExecutionCostRow = {
   minute_ts_ms: number;
   execution_cost_avg_pct: number | null;
   execution_cost_p95_pct: number | null;
+};
+
+type RecentHealthRow = {
+  market_id: number;
+  rows: number;
+  quality_rows: number;
+  execution_cost_rows: number;
+  nonce_gaps: number;
 };
 
 function flagValue(name: string): string | null {
@@ -137,6 +146,24 @@ const latestExecutionCostRows = hasRollingExecutionCost
     `,
   ).all(closedMinute, closedMinute) as LatestExecutionCostRow[]
   : [];
+
+const recentHealthRows = db.prepare(
+  `
+    SELECT
+      market_id,
+      COUNT(*) AS rows,
+      COALESCE(SUM(quality_ok), 0) AS quality_rows,
+      ${executionCostRowsSql} AS execution_cost_rows,
+      COALESCE(SUM(nonce_gaps), 0) AS nonce_gaps
+    FROM lighter_microstructure_1m
+    WHERE minute_ts_ms >= ? AND minute_ts_ms < ?
+    GROUP BY market_id
+    ORDER BY market_id
+  `,
+).all(
+  closedMinute - RECENT_HEALTH_MINUTES * MINUTE_MS,
+  closedMinute,
+) as RecentHealthRow[];
 
 const fiveMinuteRows = db
   .prepare(
@@ -240,6 +267,17 @@ const minLatestExecutionCostP95Pct = minimum(latestExecutionCostP95Values);
 const maxLatestExecutionCostP95Pct = latestExecutionCostP95Values.length
   ? Math.max(...latestExecutionCostP95Values)
   : 0;
+const recentMarkets = recentHealthRows.length;
+const minRecentCoverageRatio = minimum(
+  recentHealthRows.map((row) => row.rows / RECENT_HEALTH_MINUTES),
+);
+const minRecentQualityRatio = minimum(
+  recentHealthRows.map((row) => row.quality_rows / RECENT_HEALTH_MINUTES),
+);
+const minRecentExecutionCostRatio = minimum(
+  recentHealthRows.map((row) => row.execution_cost_rows / RECENT_HEALTH_MINUTES),
+);
+const recentNonceGaps = recentHealthRows.reduce((sum, row) => sum + row.nonce_gaps, 0);
 
 function reasons(minDays: number, requireFiveMinute: boolean): string[] {
   const failures: string[] = [];
@@ -269,7 +307,7 @@ const healthFailures = reasons(1, false);
 const exploratoryFailures = reasons(7, true);
 const frozenResearchFailures = reasons(21, true);
 const report = {
-  version: 'lighter-microstructure-audit-v2',
+  version: 'lighter-microstructure-audit-v3',
   generatedAt: new Date(now).toISOString(),
   databasePath,
   windowDays,
@@ -293,6 +331,12 @@ const report = {
     latestExecutionCostMarkets: latestExecutionCostP95Values.length,
     minLatestExecutionCostP95Pct,
     maxLatestExecutionCostP95Pct,
+    recentWindowMinutes: RECENT_HEALTH_MINUTES,
+    recentMarkets,
+    minRecentCoverageRatio,
+    minRecentQualityRatio,
+    minRecentExecutionCostRatio,
+    recentNonceGaps,
   },
   gates: {
     collectionHealthy: { passed: healthFailures.length === 0, failures: healthFailures },

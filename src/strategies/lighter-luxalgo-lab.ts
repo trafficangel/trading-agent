@@ -2105,6 +2105,12 @@ type NativeMicrostructureAudit = {
     latestExecutionCostMarkets?: number;
     minLatestExecutionCostP95Pct?: number;
     maxLatestExecutionCostP95Pct?: number;
+    recentWindowMinutes?: number;
+    recentMarkets?: number;
+    minRecentCoverageRatio?: number;
+    minRecentQualityRatio?: number;
+    minRecentExecutionCostRatio?: number;
+    recentNonceGaps?: number;
   };
   gates?: {
     collectionHealthy?: { passed?: boolean };
@@ -2158,6 +2164,18 @@ function nativeMicrostructureReadiness(
   const costMarkets = summary.latestExecutionCostMarkets ?? 0;
   const minCost = summary.minLatestExecutionCostP95Pct;
   const maxCost = summary.maxLatestExecutionCostP95Pct;
+  const recentWindowMinutes = summary.recentWindowMinutes ?? 0;
+  const recentQualityRatio = summary.minRecentQualityRatio;
+  const recentExecutionRatio = summary.minRecentExecutionCostRatio;
+  const recentCoverageRatio = summary.minRecentCoverageRatio;
+  const recentMarkets = summary.recentMarkets ?? 0;
+  const recentNonceGaps = summary.recentNonceGaps ?? 0;
+  const recentLabel = recentWindowMinutes > 0
+    && recentQualityRatio != null
+    && recentExecutionRatio != null
+    && recentCoverageRatio != null
+    ? `${Math.round(recentWindowMinutes / 60)}h · ${(recentCoverageRatio * 100).toFixed(0)}/${(recentQualityRatio * 100).toFixed(0)}/${(recentExecutionRatio * 100).toFixed(0)}% · gaps ${recentNonceGaps} · ${recentMarkets}/${NATIVE_TREND_PORTFOLIO_MARKETS.length}`
+    : t(lang, 'накапливается', 'collecting');
   const costLabel = specificCost != null && Number.isFinite(specificCost)
     ? `${strategy?.asset} ${specificCost.toFixed(4)}%`
     : minCost != null && maxCost != null && costMarkets > 0
@@ -2181,6 +2199,11 @@ function nativeMicrostructureReadiness(
     <span><small>$100 cost coverage</small><b>${(executionRatio * 100).toFixed(1)}%</b></span>
     <span><small>${t(lang, 'измеренный RT p95', 'measured RT p95')}</small><b>${costLabel}</b></span>
     <span><small>5m quality</small><b>${(fiveMinuteRatio * 100).toFixed(1)}%</b></span>
+    <span title="${t(
+      lang,
+      'Последнее окно: coverage / quality / $100 execution-cost coverage / nonce gaps / рынки.',
+      'Latest window: coverage / quality / $100 execution-cost coverage / nonce gaps / markets.',
+    )}"><small>${t(lang, 'сейчас C/Q/Cost', 'now C/Q/Cost')}</small><b>${recentLabel}</b></span>
     ${gate('1d', audit.gates?.collectionHealthy?.passed)}
     ${gate('7d', audit.gates?.exploratoryResearch?.passed)}
     ${gate('21d', audit.gates?.frozenCandidateResearch?.passed)}
