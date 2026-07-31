@@ -397,6 +397,40 @@ the earlier ZEC/DOGE/NEAR/JUP set as well as this batch. It did not create a
 qualified candidate. No strategy was added merely because a new indicator
 improved one headline metric.
 
+### Third executable-cost market batch
+
+POPCAT, ENA, ARB and TAO were sampled next with the same forty-snapshot,
+`$1,000` executable round-trip method:
+
+| Symbol | Median | p95 |
+|---|---:|---:|
+| POPCAT | 0.1016% | 0.1634% |
+| ENA | 0.0507% | 0.0737% |
+| ARB | 0.0507% | 0.1066% |
+| TAO | 0.0827% | 0.0970% |
+
+POPCAT was rejected before historical testing because the live book was too
+expensive for the intended high-frequency use. ENA, ARB and TAO each received
+259,200 consecutive one-minute candles with zero gaps or duplicate timestamps.
+They were scanned at one and five minutes using their individual p95 costs.
+No rule qualified:
+
+- every one-minute TAO, ENA and ARB rule was negative after its measured
+  executable cost;
+- TAO five-minute Z20 `3σ` touch was the best near-miss (`+37.14%`, PF 1.25,
+  4/4 positive folds, `−14.60%` drawdown), but had negative aggregate Short
+  (`−4.73%`), negative latest 30-day Short (`−2.03%`) and negative L95;
+- ENA five-minute Z60 `2σ` touch made `+81.59%`, but PF was only 1.10, L95 was
+  negative and drawdown reached `−49.58%`. The lower-frequency `3σ` variant
+  improved PF to 1.16 but still had negative L95 and `−20.94%` drawdown;
+- ARB five-minute RSI14 `25/75` made `+27.17%`, but PF was 1.11, drawdown was
+  `−33.89%`, L95 was negative and aggregate Long was `−4.66%`.
+
+These failures reinforce that zero exchange commission is useful but not
+sufficient: executable spread/book slippage and an unstable or one-sided
+return path can still erase the apparent indicator edge. No strategy from this
+batch was registered for prospective Shadow.
+
 ## Prospective Native Shadow continuation gate
 
 Native strategies now have an automatic continuation gate in the actual
