@@ -1,5 +1,12 @@
 import { request } from 'undici';
 import { db } from '../db/client.js';
+import { setRuntimeConfig } from '../db/repos/runtime-config.js';
+import {
+  LIGHTER_NATIVE_RUNNER_STATUS_KEY,
+  nativeWaitingReason,
+  type NativeRunnerEvaluation,
+  type NativeRunnerStatus,
+} from '../lib/lighter-native-runner-status.js';
 import {
   efficiencyRatio,
   evaluateTrendFilteredZ60,
@@ -148,10 +155,94 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let started = false;
 let running = false;
 const lastEvaluatedBars = new Map<string, number>();
+const runnerEvaluations = new Map<string, NativeRunnerEvaluation>();
 
 function finite(value: unknown): number | null {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function recordError(
+  strategy: NativeStrategy,
+  feed: NativeFeed,
+  target: number,
+  state: 'data_error' | 'evaluation_error',
+  error: string,
+): void {
+  const previous = runnerEvaluations.get(strategy.id);
+  runnerEvaluations.set(strategy.id, {
+    strategyId: strategy.id,
+    symbol: feed.symbol,
+    marketId: feed.marketId,
+    family: strategy.family,
+    mode: strategy.mode,
+    threshold: strategy.threshold,
+    trendFilter: strategy.trendFilter ?? null,
+    attemptedBarTime: target,
+    barTime: previous?.barTime ?? null,
+    evaluatedAt: Date.now(),
+    state,
+    reason: state,
+    side: null,
+    close: previous?.close ?? null,
+    mean: previous?.mean ?? null,
+    previousZ: previous?.previousZ ?? null,
+    currentZ: previous?.currentZ ?? null,
+    trendMean: previous?.trendMean ?? null,
+    slowTrendMean: previous?.slowTrendMean ?? null,
+    efficiencyRatio60: previous?.efficiencyRatio60 ?? null,
+    error,
+  });
+}
+
+function recordEvaluation(
+  strategy: NativeStrategy,
+  feed: NativeFeed,
+  target: number,
+  snapshot: NonNullable<ReturnType<typeof evaluateZ60>>,
+  er60: number | null,
+  state: NativeRunnerEvaluation['state'],
+  reason: string,
+  side: 'long' | 'short' | null = null,
+): void {
+  runnerEvaluations.set(strategy.id, {
+    strategyId: strategy.id,
+    symbol: feed.symbol,
+    marketId: feed.marketId,
+    family: strategy.family,
+    mode: strategy.mode,
+    threshold: strategy.threshold,
+    trendFilter: strategy.trendFilter ?? null,
+    attemptedBarTime: target,
+    barTime: target,
+    evaluatedAt: Date.now(),
+    state,
+    reason,
+    side,
+    close: snapshot.close,
+    mean: snapshot.mean,
+    previousZ: snapshot.previousZ,
+    currentZ: snapshot.currentZ,
+    trendMean: snapshot.trendMean ?? null,
+    slowTrendMean: snapshot.slowTrendMean ?? null,
+    efficiencyRatio60: er60,
+    error: null,
+  });
+}
+
+function persistRunnerStatus(target: number): void {
+  const status: NativeRunnerStatus = {
+    version: 1,
+    heartbeatAt: Date.now(),
+    targetBarTime: target,
+    evaluations: [...runnerEvaluations.values()]
+      .sort((a, b) => a.strategyId.localeCompare(b.strategyId)),
+  };
+  setRuntimeConfig(
+    LIGHTER_NATIVE_RUNNER_STATUS_KEY,
+    JSON.stringify(status),
+    'native completed-bar runner heartbeat and last decision',
+  );
 }
 
 function targetCompletedBar(now: number): number {
@@ -330,8 +421,12 @@ async function poll(): Promise<void> {
         try {
           baseBars = await fetchBars(target, feed.marketId);
         } catch (error) {
+          const message = (error as Error).message;
+          for (const strategy of pending.filter((row) => !row.trendFilter)) {
+            recordError(strategy, feed, target, 'data_error', message);
+          }
           logger.warn({
-            error: (error as Error).message,
+            error: message,
             target,
             symbol: feed.symbol,
             marketId: feed.marketId,
@@ -343,8 +438,12 @@ async function poll(): Promise<void> {
         try {
           trendBars = await fetchTrendBars(target, feed.marketId);
         } catch (error) {
+          const message = (error as Error).message;
+          for (const strategy of pending.filter((row) => row.trendFilter)) {
+            recordError(strategy, feed, target, 'data_error', message);
+          }
           logger.warn({
-            error: (error as Error).message,
+            error: message,
             target,
             symbol: feed.symbol,
             marketId: feed.marketId,
@@ -388,6 +487,18 @@ async function poll(): Promise<void> {
             const timeExit = target + BAR_MS - open.opened_at >= TIME_EXIT_BARS * BAR_MS;
             if (meanExit || timeExit) {
               emit(strategy, feed.symbol, 'exit', open.side, target, snapshot.close, er60);
+              recordEvaluation(
+                strategy,
+                feed,
+                target,
+                snapshot,
+                er60,
+                'exit_emitted',
+                meanExit
+                  ? strategy.family === 'vwz' ? 'vwma60_cross' : 'sma60_cross'
+                  : 'time_240_bars',
+                open.side,
+              );
               logger.info({
                 strategyId: strategy.id,
                 symbol: feed.symbol,
@@ -398,7 +509,18 @@ async function poll(): Promise<void> {
                 reason: meanExit
                   ? strategy.family === 'vwz' ? 'vwma60_cross' : 'sma60_cross'
                   : 'time_240_bars',
-              }, 'lighter-z60: native exit signal');
+                }, 'lighter-z60: native exit signal');
+            } else {
+              recordEvaluation(
+                strategy,
+                feed,
+                target,
+                snapshot,
+                er60,
+                'position_open',
+                'waiting_mean_or_time_exit',
+                open.side,
+              );
             }
             lastEvaluatedBars.set(strategy.id, target);
             continue;
@@ -408,12 +530,31 @@ async function poll(): Promise<void> {
           // must not be followed by an immediate same-bar re-entry.
           const closed = lastClosed.get(strategy.id);
           if (closed && Math.floor(closed.closed_at / BAR_MS) * BAR_MS === target) {
+            recordEvaluation(
+              strategy,
+              feed,
+              target,
+              snapshot,
+              er60,
+              'same_bar_reentry_blocked',
+              'same_bar_stop_or_close',
+            );
             lastEvaluatedBars.set(strategy.id, target);
             continue;
           }
 
           if (snapshot.signal) {
             emit(strategy, feed.symbol, 'entry', snapshot.signal, target, snapshot.close, er60);
+            recordEvaluation(
+              strategy,
+              feed,
+              target,
+              snapshot,
+              er60,
+              'signal_emitted',
+              'entry_signal',
+              snapshot.signal,
+            );
             logger.info({
               strategyId: strategy.id,
               symbol: feed.symbol,
@@ -428,11 +569,31 @@ async function poll(): Promise<void> {
               trendMean: snapshot.trendMean,
               efficiencyRatio60: er60,
             }, 'lighter-z60: native entry signal');
+          } else {
+            recordEvaluation(
+              strategy,
+              feed,
+              target,
+              snapshot,
+              er60,
+              'waiting',
+              nativeWaitingReason({
+                mode: strategy.mode,
+                threshold: strategy.threshold,
+                previousZ: snapshot.previousZ,
+                currentZ: snapshot.currentZ,
+                close: snapshot.close,
+                trendMean: snapshot.trendMean,
+                slowTrendMean: snapshot.slowTrendMean,
+              }),
+            );
           }
           lastEvaluatedBars.set(strategy.id, target);
         } catch (error) {
+          const message = (error as Error).message;
+          recordError(strategy, feed, target, 'evaluation_error', message);
           logger.warn({
-            error: (error as Error).message,
+            error: message,
             target,
             symbol: feed.symbol,
             marketId: feed.marketId,
@@ -442,6 +603,11 @@ async function poll(): Promise<void> {
       }
     }
   } finally {
+    try {
+      persistRunnerStatus(target);
+    } catch (error) {
+      logger.error({ error: (error as Error).message }, 'lighter-z60: status heartbeat failed');
+    }
     running = false;
   }
 }

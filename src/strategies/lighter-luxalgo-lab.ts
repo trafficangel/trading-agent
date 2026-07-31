@@ -4,6 +4,12 @@ import { resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import WebSocket, { type RawData } from 'ws';
 import { db } from '../db/client.js';
+import { getRuntimeConfig } from '../db/repos/runtime-config.js';
+import {
+  LIGHTER_NATIVE_RUNNER_STATUS_KEY,
+  parseNativeRunnerStatus,
+  type NativeRunnerEvaluation,
+} from '../lib/lighter-native-runner-status.js';
 import { logger } from '../lib/logger.js';
 import {
   evaluateNativeForwardRows,
@@ -2183,6 +2189,97 @@ function nativeMicrostructureReadiness(
     : `${t(lang, 'обновлено', 'updated')} ${ageMinutes}m`}</em>
   </div>`;
 }
+
+function nativeRunnerReason(lang: Lang, row: NativeRunnerEvaluation): string {
+  const labels: Record<string, readonly [string, string]> = {
+    z_inside_threshold: ['Z внутри порога', 'Z inside threshold'],
+    waiting_reclaim: ['ждёт возврата Z', 'waiting for Z reclaim'],
+    long_trend_stack_not_aligned: ['Long: EMA-стек не выровнен', 'Long: EMA stack not aligned'],
+    short_trend_stack_not_aligned: ['Short: EMA-стек не выровнен', 'Short: EMA stack not aligned'],
+    long_trend_not_aligned: ['Long: цена ниже EMA', 'Long: price below EMA'],
+    short_trend_not_aligned: ['Short: цена выше EMA', 'Short: price above EMA'],
+    long_setup_ready: ['Long-условия готовы', 'Long setup ready'],
+    short_setup_ready: ['Short-условия готовы', 'Short setup ready'],
+    entry_signal: ['сигнал отправлен', 'signal emitted'],
+    waiting_mean_or_time_exit: ['позиция: ждёт mean/time exit', 'position: waiting for mean/time exit'],
+    same_bar_stop_or_close: ['повторный вход в том же баре запрещён', 'same-bar re-entry blocked'],
+    sma60_cross: ['SMA60 exit отправлен', 'SMA60 exit emitted'],
+    vwma60_cross: ['VWMA60 exit отправлен', 'VWMA60 exit emitted'],
+    time_240_bars: ['time exit отправлен', 'time exit emitted'],
+    data_error: ['ошибка свечей', 'candle error'],
+    evaluation_error: ['ошибка расчёта', 'evaluation error'],
+  };
+  const label = labels[row.reason];
+  return label ? label[lang === 'en' ? 1 : 0] : row.reason;
+}
+
+function nativeRunnerTrend(row: NativeRunnerEvaluation): string {
+  if (row.trendMean == null) return '—';
+  if (row.slowTrendMean == null || row.close == null) {
+    return `EMA200 ${row.trendMean.toFixed(5)}`;
+  }
+  const closeRelation = row.close > row.trendMean ? 'C>200' : 'C≤200';
+  const stackRelation = row.trendMean > row.slowTrendMean ? '200>400' : '200≤400';
+  return `${closeRelation} · ${stackRelation}`;
+}
+
+function nativeRunnerHealth(lang: Lang, specs: readonly StrategySpec[]): string {
+  const status = parseNativeRunnerStatus(getRuntimeConfig(LIGHTER_NATIVE_RUNNER_STATUS_KEY));
+  if (!status) {
+    return `<div class="ll-runner-health fail"><b>Native runner</b><span>${t(
+      lang,
+      'heartbeat ещё не получен',
+      'heartbeat not received yet',
+    )}</span></div>`;
+  }
+  const ids = new Set(specs.map((spec) => spec.id));
+  const rows = status.evaluations
+    .filter((row) => ids.has(row.strategyId))
+    .sort((a, b) => a.strategyId.localeCompare(b.strategyId));
+  const ageMs = Math.max(0, Date.now() - status.heartbeatAt);
+  const errors = rows.filter(
+    (row) => row.state === 'data_error' || row.state === 'evaluation_error',
+  ).length;
+  const current = rows.filter((row) => row.barTime === status.targetBarTime).length;
+  const runnerLive = ageMs <= 90_000;
+  const healthy = runnerLive && rows.length === specs.length && current === specs.length && errors === 0;
+  const signals = rows.filter(
+    (row) => row.state === 'signal_emitted' || row.state === 'exit_emitted',
+  ).length;
+  const ageLabel = ageMs < 1_000 ? '<1s' : `${Math.round(ageMs / 1_000)}s`;
+  const rowHtml = rows.map((row) => {
+    const spec = STRATEGY_BY_ID.get(row.strategyId);
+    const reason = nativeRunnerReason(lang, row);
+    const error = row.error ? ` title="${esc(row.error)}"` : '';
+    const stateClass = row.state === 'data_error' || row.state === 'evaluation_error'
+      ? 'fail'
+      : row.state === 'signal_emitted' || row.state === 'exit_emitted'
+        ? 'pass'
+        : 'collect';
+    return `<tr>
+      <td><b>${spec ? `STRAT-${spec.code} · ${spec.asset}` : esc(row.strategyId)}</b></td>
+      <td class="num">${row.barTime == null ? '—' : utcShort(row.barTime)}</td>
+      <td class="num">${row.currentZ == null ? '—' : `${row.currentZ.toFixed(2)} / ±${row.threshold.toFixed(1)}`}</td>
+      <td class="num">${nativeRunnerTrend(row)}</td>
+      <td class="${stateClass}"${error}><b>${esc(reason)}</b></td>
+    </tr>`;
+  }).join('');
+  return `<div class="ll-runner-health ${healthy ? 'pass' : 'fail'}">
+      <b>Native runner</b>
+      <span>heartbeat ${ageLabel}</span>
+      <span>${t(lang, 'бар', 'bar')} ${utcShort(status.targetBarTime)}</span>
+      <span>${t(lang, 'рассчитано', 'evaluated')} ${current}/${specs.length}</span>
+      <span>${t(lang, 'ошибки', 'errors')} ${errors}</span>
+      <span>${t(lang, 'сигналы сейчас', 'signals now')} ${signals}</span>
+    </div>
+    <details class="ll-panel ll-details ll-native-runner">
+      <summary>${t(lang, 'Почему сейчас нет входа · последний расчёт', 'Why there is no entry now · latest evaluation')}</summary>
+      <div class="ll-table"><table>
+        <thead><tr><th>Strategy</th><th>${t(lang, 'Бар UTC', 'Bar UTC')}</th><th>Z / threshold</th><th>Trend</th><th>${t(lang, 'Решение', 'Decision')}</th></tr></thead>
+        <tbody>${rowHtml || `<tr><td colspan="5" class="ll-empty">${t(lang, 'ждём первый полный расчёт', 'waiting for the first complete evaluation')}</td></tr>`}</tbody>
+      </table></div>
+    </details>`;
+}
 function selectedGroup(value: unknown): PortfolioGroup {
   return value === 'native' ? 'native' : null;
 }
@@ -2270,6 +2367,7 @@ export const LIGHTER_LUXALGO_CSS = `
 .ll-engine{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;background:var(--bg-card);white-space:nowrap}.ll-engine i{width:8px;height:8px;border-radius:50%;background:#ff6577}.ll-engine.live i{background:#38d996;box-shadow:0 0 10px rgba(56,217,150,.5)}
 .ll-modebar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:18px 0 0;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-card)}.ll-modebar>div{display:grid;gap:4px}.ll-modebar small{color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.04em}.ll-tabs{display:flex;align-items:center;gap:5px}.ll-tabs a{display:grid;place-items:center;min-width:82px;height:31px;padding:0 11px;border:1px solid var(--border);border-radius:8px;color:var(--text-dim);font-size:10px;font-weight:750;text-decoration:none}.ll-tabs a:hover{border-color:#bd91ff;color:var(--text)}.ll-tabs a.active{border-color:rgba(163,106,255,.58);background:rgba(163,106,255,.16);color:#bd91ff}.ll-tabs a.real.active{border-color:rgba(56,217,150,.5);background:rgba(56,217,150,.12);color:#38d996}
 .ll-readiness{display:flex;align-items:center;gap:7px 8px;min-height:34px;margin:7px 0 0;padding:6px 8px;border:1px solid rgba(56,217,150,.22);border-radius:9px;background:rgba(56,217,150,.035);font-size:9px;white-space:nowrap;overflow:hidden}.ll-readiness>span{display:flex;align-items:baseline;gap:3px}.ll-readiness small{color:var(--text-faint);font-size:8px;text-transform:uppercase;letter-spacing:.015em}.ll-readiness b{font-variant-numeric:tabular-nums}.ll-readiness>em{margin-left:auto;color:var(--text-faint);font-size:8px;font-style:normal}
+.ll-runner-health{display:flex;align-items:center;gap:7px 12px;min-height:34px;margin:7px 0 0;padding:6px 8px;border:1px solid currentColor;border-radius:9px;background:rgba(255,255,255,.018);font-size:9px;white-space:nowrap;overflow:hidden}.ll-runner-health>span{color:var(--text-dim);font-variant-numeric:tabular-nums}.ll-native-runner{margin-top:7px}.ll-native-runner>summary{padding:10px 12px;font-size:11px}.ll-native-runner table{font-size:9px}.ll-native-runner th,.ll-native-runner td{padding:6px!important;white-space:nowrap!important;overflow:hidden}.ll-native-runner th:nth-child(1){width:19%}.ll-native-runner th:nth-child(2){width:15%}.ll-native-runner th:nth-child(3){width:16%}.ll-native-runner th:nth-child(4){width:20%}.ll-native-runner th:nth-child(5){width:30%}
 .ll-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}.ll-card,.ll-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:14px}.ll-card{padding:13px 14px;display:grid;gap:4px}.ll-card small,.ll-card em{color:var(--text-faint);font-size:10px;font-style:normal}.ll-card b{font-size:20px;font-variant-numeric:tabular-nums}
 .ll-panel{padding:15px;margin:10px 0}.ll-panel h2{font-size:16px;margin:0 0 11px}
 .ll-filter{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:10px 0;padding:11px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-card)}.ll-filter label{display:grid;gap:5px;color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.04em}.ll-filter select{min-width:285px;height:34px;padding:0 32px 0 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:11px}.ll-filter button{height:34px;padding:0 13px;border:1px solid rgba(163,106,255,.5);border-radius:8px;background:rgba(163,106,255,.14);color:#bd91ff;font:inherit;font-size:10px;font-weight:700;cursor:pointer}.ll-filter small{color:var(--text-faint);font-size:10px}
@@ -2451,8 +2549,8 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Shadow-исполнение.', 'Shadow execution.')}</b> ${t(
           lang,
-          'Сразу снимается свежий WebSocket L2 Lighter. Допускается до 5 секунд коротких повторов по 100 мс, но фиксированной задержки нет. Стакан должен исполнить $1000; вход и выход записываются по реальному VWAP нужной стороны, поэтому spread и slippage уже внутри PnL, funding добавляется отдельно.',
-          'A fresh Lighter WebSocket L2 snapshot is taken immediately. Up to five seconds of 100ms retries are allowed, with no fixed delay. The book must fill $1,000; entry and exit use executable side-specific VWAP, so spread and slippage are already embedded in PnL, while funding is added separately.',
+          'Сразу снимается свежий WebSocket L2 Lighter. Допускается до 5 секунд коротких повторов по 100 мс, но фиксированной задержки нет. Стакан должен исполнить целевые $100; вход и выход записываются по реальному VWAP нужной стороны, поэтому spread и slippage уже внутри PnL, funding добавляется отдельно.',
+          'A fresh Lighter WebSocket L2 snapshot is taken immediately. Up to five seconds of 100ms retries are allowed, with no fixed delay. The book must fill the target $100; entry and exit use executable side-specific VWAP, so spread and slippage are already embedded in PnL, while funding is added separately.',
         )}</li>
         <li><b>${t(lang, 'Real-canary и защита.', 'Real canary and protection.')}</b> ${t(
           lang,
@@ -3134,6 +3232,10 @@ async function render(
 
       ${requested.group === 'native'
     ? nativeMicrostructureReadiness(lang, requested.strategy)
+    : ''}
+
+      ${requested.group === 'native'
+    ? nativeRunnerHealth(lang, scopeSpecs)
     : ''}
 
       <div class="ll-grid">
