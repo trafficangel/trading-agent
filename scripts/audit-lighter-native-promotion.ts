@@ -45,7 +45,7 @@ const databasePath = resolve(flagValue('--db') ?? 'data/trading.sqlite');
 if (!existsSync(databasePath)) throw new Error(`trading database missing: ${databasePath}`);
 const db = new Database(databasePath, { readonly: true, fileMustExist: true });
 const pnlStatement = db.prepare<[string], NativeForwardPnlRow>(`
-  SELECT net_pnl_pct FROM lighter_lux_trades
+  SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
   WHERE strategy_id = ? AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
   ORDER BY closed_at, id`);
 const signalStatement = db.prepare<[string], NativeForwardSignalRow>(`
@@ -54,7 +54,7 @@ const signalStatement = db.prepare<[string], NativeForwardSignalRow>(`
   FROM lighter_lux_signals WHERE strategy_id = ?
   ORDER BY received_at, id`);
 const portfolioPnls = db.prepare<string[], NativeForwardPnlRow>(`
-  SELECT net_pnl_pct FROM lighter_lux_trades
+  SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
   WHERE strategy_id IN (${sqlMarks(P2_IDS.length)})
     AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
   ORDER BY closed_at, id`);
@@ -79,6 +79,7 @@ const portfolio = evaluateNativeForwardRows(
   portfolioPnls.all(...P2_IDS),
   portfolioSignals.all(...P2_IDS),
   10,
+  4,
 );
 db.close();
 

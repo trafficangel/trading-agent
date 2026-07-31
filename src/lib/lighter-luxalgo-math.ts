@@ -2,6 +2,8 @@ export type PriceLevel = readonly [price: number, size: number];
 
 export const NATIVE_FORWARD_GATE = {
   targetClosed: 20,
+  minDurationDays: 7,
+  minClosedPerSide: 3,
   minProfitFactor: 1.2,
   maxDrawdownPct: 5,
   maxCaptureErrorRatePct: 2,
@@ -10,12 +12,18 @@ export const NATIVE_FORWARD_GATE = {
 
 export type NativeForwardGateInput = {
   netPcts: readonly number[];
+  sides: readonly ('long' | 'short')[];
+  symbols: readonly string[];
+  openedAtMs: readonly number[];
+  closedAtMs: readonly number[];
   signalCount: number;
   captureErrors: number;
   executionCostPcts: readonly number[];
   bookAgesMs: readonly number[];
   /** Fixed-notional portfolio capacity. One for a standalone strategy. */
   drawdownCapacityUnits?: number;
+  /** One for a standalone strategy; frozen at four for portfolio P2. */
+  minUniqueSymbols?: number;
 };
 
 export type NativeForwardGateEvaluation = {
@@ -30,10 +38,20 @@ export type NativeForwardGateEvaluation = {
   captureErrorRatePct: number;
   avgExecutionCostPct: number | null;
   p95BookAgeMs: number | null;
+  durationDays: number;
+  longClosed: number;
+  shortClosed: number;
+  uniqueSymbols: number;
   reasons: readonly string[];
 };
 
-export type NativeForwardPnlRow = { net_pnl_pct: number };
+export type NativeForwardPnlRow = {
+  net_pnl_pct: number;
+  side: 'long' | 'short';
+  symbol: string;
+  opened_at: number;
+  closed_at: number;
+};
 export type NativeForwardSignalRow = {
   capture_status: string;
   book_age_ms: number | null;
@@ -55,8 +73,10 @@ function percentile95(values: readonly number[]): number | null {
 
 /**
  * Prospective Native Quant promotion/continuation gate. Before the frozen
- * sample target it only observes. At and after the target, a failed condition
- * blocks new Shadow entries; exits remain independently executable.
+ * sample target it observes unless the irreversible drawdown ceiling is
+ * breached. At and after the target, a failed condition blocks new Shadow
+ * entries; coverage gaps keep collecting but never qualify for Real. Exits
+ * remain independently executable.
  */
 export function evaluateNativeForwardGate(
   input: NativeForwardGateInput,
@@ -92,6 +112,14 @@ export function evaluateNativeForwardGate(
   const captureErrorRatePct = signalCount > 0 ? captureErrors / signalCount * 100 : 0;
   const avgExecutionCostPct = validCosts.length ? sum(validCosts) / validCosts.length : null;
   const p95BookAgeMs = percentile95(validBookAges);
+  const longClosed = input.sides.filter((side) => side === 'long').length;
+  const shortClosed = input.sides.filter((side) => side === 'short').length;
+  const uniqueSymbols = new Set(input.symbols.filter(Boolean)).size;
+  const validOpenedAt = input.openedAtMs.filter(Number.isFinite);
+  const validClosedAt = input.closedAtMs.filter(Number.isFinite);
+  const durationDays = validOpenedAt.length && validClosedAt.length
+    ? (Math.max(...validClosedAt) - Math.min(...validOpenedAt)) / 86_400_000
+    : 0;
 
   // Maximum drawdown is path-dependent and cannot improve after it has been
   // observed. Waiting for the full sample after the frozen ceiling is already
@@ -115,6 +143,10 @@ export function evaluateNativeForwardGate(
       captureErrorRatePct,
       avgExecutionCostPct,
       p95BookAgeMs,
+      durationDays,
+      longClosed,
+      shortClosed,
+      uniqueSymbols,
       reasons: [reason],
     };
   }
@@ -132,6 +164,10 @@ export function evaluateNativeForwardGate(
       captureErrorRatePct,
       avgExecutionCostPct,
       p95BookAgeMs,
+      durationDays,
+      longClosed,
+      shortClosed,
+      uniqueSymbols,
       reasons: [],
     };
   }
@@ -166,9 +202,72 @@ export function evaluateNativeForwardGate(
     );
   }
 
+  if (reasons.length) {
+    return {
+      status: 'failed',
+      entryAllowed: false,
+      closed,
+      netPct,
+      profitFactor,
+      firstHalfPct,
+      secondHalfPct,
+      maxDrawdownPct,
+      captureErrorRatePct,
+      avgExecutionCostPct,
+      p95BookAgeMs,
+      durationDays,
+      longClosed,
+      shortClosed,
+      uniqueSymbols,
+      reasons,
+    };
+  }
+
+  const evidenceReasons: string[] = [];
+  if (durationDays < NATIVE_FORWARD_GATE.minDurationDays) {
+    evidenceReasons.push(
+      `duration ${durationDays.toFixed(1)}d < ${NATIVE_FORWARD_GATE.minDurationDays}d`,
+    );
+  }
+  if (longClosed < NATIVE_FORWARD_GATE.minClosedPerSide) {
+    evidenceReasons.push(
+      `long closes ${longClosed} < ${NATIVE_FORWARD_GATE.minClosedPerSide}`,
+    );
+  }
+  if (shortClosed < NATIVE_FORWARD_GATE.minClosedPerSide) {
+    evidenceReasons.push(
+      `short closes ${shortClosed} < ${NATIVE_FORWARD_GATE.minClosedPerSide}`,
+    );
+  }
+  const minUniqueSymbols = Math.max(1, Math.trunc(input.minUniqueSymbols ?? 1));
+  if (uniqueSymbols < minUniqueSymbols) {
+    evidenceReasons.push(`markets ${uniqueSymbols} < ${minUniqueSymbols}`);
+  }
+
+  if (evidenceReasons.length) {
+    return {
+      status: 'collecting',
+      entryAllowed: true,
+      closed,
+      netPct,
+      profitFactor,
+      firstHalfPct,
+      secondHalfPct,
+      maxDrawdownPct,
+      captureErrorRatePct,
+      avgExecutionCostPct,
+      p95BookAgeMs,
+      durationDays,
+      longClosed,
+      shortClosed,
+      uniqueSymbols,
+      reasons: evidenceReasons,
+    };
+  }
+
   return {
-    status: reasons.length ? 'failed' : 'passed',
-    entryAllowed: reasons.length === 0,
+    status: 'passed',
+    entryAllowed: true,
     closed,
     netPct,
     profitFactor,
@@ -178,7 +277,11 @@ export function evaluateNativeForwardGate(
     captureErrorRatePct,
     avgExecutionCostPct,
     p95BookAgeMs,
-    reasons,
+    durationDays,
+    longClosed,
+    shortClosed,
+    uniqueSymbols,
+    reasons: [],
   };
 }
 
@@ -191,6 +294,7 @@ export function evaluateNativeForwardRows(
   pnlRows: readonly NativeForwardPnlRow[],
   signalRows: readonly NativeForwardSignalRow[],
   drawdownCapacityUnits = 1,
+  minUniqueSymbols = 1,
 ): NativeForwardGateEvaluation {
   const captured = signalRows.filter((row) => row.capture_status === 'captured');
   const executionCostPcts = captured.flatMap((row) => {
@@ -208,11 +312,16 @@ export function evaluateNativeForwardRows(
   });
   return evaluateNativeForwardGate({
     netPcts: pnlRows.map((row) => row.net_pnl_pct),
+    sides: pnlRows.map((row) => row.side),
+    symbols: pnlRows.map((row) => row.symbol),
+    openedAtMs: pnlRows.map((row) => row.opened_at),
+    closedAtMs: pnlRows.map((row) => row.closed_at),
     signalCount: signalRows.length,
     captureErrors: signalRows.filter((row) => row.capture_status === 'error').length,
     executionCostPcts,
     bookAgesMs: captured.flatMap((row) => row.book_age_ms == null ? [] : [row.book_age_ms]),
     drawdownCapacityUnits,
+    minUniqueSymbols,
   });
 }
 

@@ -7,6 +7,16 @@ import {
   quoteNotionalVwap,
 } from '../../src/lib/lighter-luxalgo-math.js';
 
+const DAY_MS = 86_400_000;
+function forwardCoverage(count: number, marketCount = 1) {
+  return {
+    sides: Array.from({ length: count }, (_, index) => index % 2 ? 'short' as const : 'long' as const),
+    symbols: Array.from({ length: count }, (_, index) => `M${index % marketCount}`),
+    openedAtMs: Array.from({ length: count }, (_, index) => index / Math.max(1, count - 1) * 8 * DAY_MS),
+    closedAtMs: Array.from({ length: count }, (_, index) => index / Math.max(1, count - 1) * 8 * DAY_MS + 60_000),
+  };
+}
+
 describe('Lighter LuxAlgo shadow math', () => {
   it('sweeps fixed USD notional across depth', () => {
     const vwap = quoteNotionalVwap([[100, 5], [101, 10]], 1_000);
@@ -32,6 +42,7 @@ describe('Lighter LuxAlgo shadow math', () => {
 
   it('keeps collecting Native forward evidence before 20 closes', () => {
     const result = evaluateNativeForwardGate({
+      ...forwardCoverage(19),
       netPcts: Array.from({ length: 19 }, () => -0.2),
       signalCount: 19,
       captureErrors: 19,
@@ -44,6 +55,7 @@ describe('Lighter LuxAlgo shadow math', () => {
 
   it('fails closed immediately when the frozen drawdown ceiling is irreversibly breached', () => {
     const result = evaluateNativeForwardGate({
+      ...forwardCoverage(5),
       netPcts: [1, -2, -2, -2, -2],
       signalCount: 5,
       captureErrors: 0,
@@ -61,6 +73,7 @@ describe('Lighter LuxAlgo shadow math', () => {
 
   it('passes a profitable, stable and executable Native forward sample', () => {
     const result = evaluateNativeForwardGate({
+      ...forwardCoverage(20),
       netPcts: Array.from({ length: 20 }, (_, index) => index % 4 === 0 ? -0.2 : 0.25),
       signalCount: 40,
       captureErrors: 0,
@@ -73,8 +86,32 @@ describe('Lighter LuxAlgo shadow math', () => {
     expect(result.profitFactor).toBeGreaterThanOrEqual(1.2);
   });
 
+  it('keeps profitable evidence in Shadow until duration, both sides and portfolio breadth mature', () => {
+    const shortCoverage = forwardCoverage(20, 3);
+    const result = evaluateNativeForwardGate({
+      ...shortCoverage,
+      sides: Array.from({ length: 20 }, () => 'long' as const),
+      openedAtMs: Array.from({ length: 20 }, (_, index) => index * 60_000),
+      closedAtMs: Array.from({ length: 20 }, (_, index) => index * 60_000 + 30_000),
+      netPcts: Array.from({ length: 20 }, (_, index) => index % 4 === 0 ? -0.2 : 0.25),
+      signalCount: 40,
+      captureErrors: 0,
+      executionCostPcts: Array.from({ length: 40 }, () => 0.04),
+      bookAgesMs: Array.from({ length: 40 }, () => 120),
+      minUniqueSymbols: 4,
+    });
+    expect(result.status).toBe('collecting');
+    expect(result.entryAllowed).toBe(true);
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      expect.stringContaining('duration'),
+      expect.stringContaining('short closes'),
+      expect.stringContaining('markets'),
+    ]));
+  });
+
   it('blocks new entries when capture quality or book freshness fails', () => {
     const result = evaluateNativeForwardGate({
+      ...forwardCoverage(20),
       netPcts: Array.from({ length: 20 }, (_, index) => index % 4 === 0 ? -0.2 : 0.25),
       signalCount: 40,
       captureErrors: 2,
@@ -91,6 +128,7 @@ describe('Lighter LuxAlgo shadow math', () => {
 
   it('does not apply one universal cost ceiling after net PnL already includes execution', () => {
     const result = evaluateNativeForwardGate({
+      ...forwardCoverage(20),
       netPcts: Array.from({ length: 20 }, (_, index) => index % 4 === 0 ? -0.2 : 0.25),
       signalCount: 40,
       captureErrors: 0,
@@ -106,6 +144,7 @@ describe('Lighter LuxAlgo shadow math', () => {
 
   it('normalizes a multi-position portfolio drawdown by its frozen capacity', () => {
     const standalone = evaluateNativeForwardGate({
+      ...forwardCoverage(20),
       netPcts: [5, -4, -4, ...Array.from({ length: 17 }, () => 0.5)],
       signalCount: 20,
       captureErrors: 0,
@@ -113,12 +152,14 @@ describe('Lighter LuxAlgo shadow math', () => {
       bookAgesMs: Array.from({ length: 20 }, () => 100),
     });
     const portfolio = evaluateNativeForwardGate({
+      ...forwardCoverage(20, 4),
       netPcts: [5, -4, -4, ...Array.from({ length: 17 }, () => 0.5)],
       signalCount: 20,
       captureErrors: 0,
       executionCostPcts: Array.from({ length: 20 }, () => 0.02),
       bookAgesMs: Array.from({ length: 20 }, () => 100),
       drawdownCapacityUnits: 10,
+      minUniqueSymbols: 4,
     });
     expect(standalone.maxDrawdownPct).toBeCloseTo(8);
     expect(portfolio.maxDrawdownPct).toBeCloseTo(0.8);
@@ -127,6 +168,10 @@ describe('Lighter LuxAlgo shadow math', () => {
   it('uses the same captured L2 rows for runtime and independent promotion evidence', () => {
     const pnlRows = Array.from({ length: 20 }, (_, index) => ({
       net_pnl_pct: index % 4 === 0 ? -0.2 : 0.25,
+      side: index % 2 ? 'short' as const : 'long' as const,
+      symbol: 'SOL',
+      opened_at: index / 19 * 8 * DAY_MS,
+      closed_at: index / 19 * 8 * DAY_MS + 60_000,
     }));
     const signalRows = Array.from({ length: 40 }, () => ({
       capture_status: 'captured',

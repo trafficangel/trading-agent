@@ -504,8 +504,17 @@ Shadow entry path, not only a dashboard label. Until 20 closed prospective
 trades the strategy continues collecting evidence, except for the frozen
 maximum-drawdown ceiling: because an observed maximum drawdown cannot improve
 with more trades, breaching it blocks the next entry immediately. Starting
-with close 20, every attempted new entry is admitted only when all remaining
-frozen conditions hold:
+with close 20, negative performance or execution-quality evidence blocks new
+entries. A profitable model remains in Shadow collection, without Real
+eligibility, until the following coverage conditions also hold:
+
+- the prospective sample spans at least seven calendar days;
+- at least three Long and three Short trades are closed;
+- portfolio P2 has closed trades from at least four distinct markets (an
+  individual strategy naturally requires one).
+
+After both the performance and coverage requirements mature, every attempted
+new entry is admitted only when all remaining frozen conditions hold:
 
 - cumulative net PnL is positive and PF is at least 1.20;
 - both chronological halves are positive;

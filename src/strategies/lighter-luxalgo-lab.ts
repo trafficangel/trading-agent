@@ -1012,8 +1012,14 @@ const entryFunding = db.prepare<[number], { entry_funding_pct_h: number }>(`
   SELECT entry_funding_pct_h FROM lighter_lux_trades WHERE id = ?`);
 const markShadowDecision = db.prepare(`
   UPDATE lighter_lux_signals SET shadow_decision_reason = ? WHERE id = ?`);
-const nativeForwardPnls = db.prepare<[string], { net_pnl_pct: number }>(`
-  SELECT net_pnl_pct FROM lighter_lux_trades
+const nativeForwardPnls = db.prepare<[string], {
+  net_pnl_pct: number;
+  side: Side;
+  symbol: string;
+  opened_at: number;
+  closed_at: number;
+}>(`
+  SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
   WHERE strategy_id = ? AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
   ORDER BY closed_at, id`);
 const nativeForwardSignals = db.prepare<[string], {
@@ -1030,8 +1036,14 @@ const nativeForwardSignals = db.prepare<[string], {
   WHERE strategy_id = ?
   ORDER BY received_at, id`);
 
-const nativePortfolioForwardPnls = db.prepare<string[], { net_pnl_pct: number }>(`
-  SELECT net_pnl_pct FROM lighter_lux_trades
+const nativePortfolioForwardPnls = db.prepare<string[], {
+  net_pnl_pct: number;
+  side: Side;
+  symbol: string;
+  opened_at: number;
+  closed_at: number;
+}>(`
+  SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
   WHERE strategy_id IN (${sqlMarks(NATIVE_TREND_PORTFOLIO_IDS)})
     AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
   ORDER BY closed_at, id`);
@@ -1054,7 +1066,13 @@ const nativePortfolioOpenCount = db.prepare<string[], { count: number }>(`
     AND closed_at IS NULL`);
 
 function evaluateForwardRows(
-  pnlRows: readonly { net_pnl_pct: number }[],
+  pnlRows: readonly {
+    net_pnl_pct: number;
+    side: Side;
+    symbol: string;
+    opened_at: number;
+    closed_at: number;
+  }[],
   signalRows: readonly {
     capture_status: string;
     book_age_ms: number | null;
@@ -1064,8 +1082,14 @@ function evaluateForwardRows(
     sell_slippage_pct: number | null;
   }[],
   drawdownCapacityUnits = 1,
+  minUniqueSymbols = 1,
 ): NativeForwardGateEvaluation {
-  return evaluateNativeForwardRows(pnlRows, signalRows, drawdownCapacityUnits);
+  return evaluateNativeForwardRows(
+    pnlRows,
+    signalRows,
+    drawdownCapacityUnits,
+    minUniqueSymbols,
+  );
 }
 
 function nativeForwardGate(strategyId: string): NativeForwardGateEvaluation {
@@ -1078,6 +1102,7 @@ function nativeTrendPortfolioForwardGate(): NativeForwardGateEvaluation {
     nativePortfolioForwardPnls.all(...NATIVE_TREND_PORTFOLIO_IDS),
     nativePortfolioForwardSignals.all(...NATIVE_TREND_PORTFOLIO_IDS),
     NATIVE_TREND_PORTFOLIO_MAX_OPEN,
+    4,
   );
 }
 
@@ -2343,7 +2368,7 @@ function strategyRows(
     const wr = s.closed ? s.wins / s.closed * 100 : null;
     const feed = executionSnapshot(spec);
     const tooltip = nativeStrategyTooltip(spec, lang);
-    const gateTitle = s.forwardGate?.status === 'failed'
+    const gateTitle = s.forwardGate?.reasons.length
       ? s.forwardGate.reasons.join('; ')
       : '';
     const strategyLabel = tooltip
@@ -2366,7 +2391,7 @@ function strategyRows(
   const s = summary(portfolioSpecs);
   const g = gate(s, lang, true);
   const wr = s.closed ? s.wins / s.closed * 100 : null;
-  const gateTitle = s.forwardGate?.status === 'failed'
+  const gateTitle = s.forwardGate?.reasons.length
     ? s.forwardGate.reasons.join('; ')
     : '';
   const backtest = portfolioSpecs[0]!.backtest;
