@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily immutable prospective Lighter microstructure Shadow cohort preparation
+
+[Timer]
+OnCalendar=*-*-* 03:40:00 UTC
+Persistent=true
+RandomizedDelaySec=5m
+Unit=lighter-native-microstructure-shadow-prepare.service
+
+[Install]
+WantedBy=timers.target

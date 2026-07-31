@@ -1091,6 +1091,15 @@ the sweep to fail closed rather than overwrite it. Thus an initially rejected
 rule cannot become a candidate merely because the same holdout was inspected
 again on a longer rolling window.
 
+After that immutable selection, a separate fail-closed preparation timer
+creates `data/lighter-native-microstructure-shadow-manifest.json`. Its
+activation timestamp is later than the selection timestamp, its rule IDs must
+have exactly one matching qualified evaluation, and its frozen-report hash may
+never change. An empty first selection is persisted as `no_candidates` rather
+than waiting for a later rerun. The manifest fixes `$100`, ten maximum
+concurrent Shadow positions, `autoPromotion=false` and `realEnabled=false`;
+historical selection-period trades cannot enter the prospective cohort.
+
 ## Preregistered dual-timeframe L2 protocol
 
 Before the first seven-day microstructure result was available, the six frozen

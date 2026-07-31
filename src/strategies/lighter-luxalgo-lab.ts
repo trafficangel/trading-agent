@@ -2135,6 +2135,15 @@ type NativeMicrostructureSweep = {
   immutableSelection?: boolean;
 };
 
+type NativeMicrostructureShadowManifest = {
+  version?: string;
+  status?: 'active' | 'no_candidates';
+  activatedAt?: string;
+  candidates?: unknown[];
+  autoPromotion?: boolean;
+  realEnabled?: boolean;
+};
+
 function nativeMicrostructureAudit(): NativeMicrostructureAudit | null {
   try {
     const path = resolve(
@@ -2208,6 +2217,52 @@ function nativeMicrostructureSweepStatus(
   }
   const freshness = ageMinutes == null ? '' : ` · ${ageMinutes}m`;
   return `<span title="${esc(title)}"><small>${label}</small><b class="${cls}">${text}${freshness}</b></span>`;
+}
+
+function nativeMicrostructureShadowStatus(lang: Lang): string {
+  const manifest = nativeMicrostructureSweep(
+    'LIGHTER_MICRO_SHADOW_MANIFEST',
+    'data/lighter-native-microstructure-shadow-manifest.json',
+  ) as NativeMicrostructureShadowManifest | null;
+  const valid = manifest?.version === 'lighter-microstructure-shadow-manifest-v1'
+    && manifest.autoPromotion === false
+    && manifest.realEnabled === false
+    && Array.isArray(manifest.candidates);
+  if (!valid) {
+    return `<span title="${t(
+      lang,
+      'Manifest появится только после неизменяемого 21d frozen-отбора.',
+      'The manifest appears only after the immutable 21d frozen selection.',
+    )}"><small>prospective Shadow</small><b class="collect">${t(
+      lang,
+      'ждёт 21d',
+      'waiting 21d',
+    )}</b></span>`;
+  }
+  if (manifest.status === 'no_candidates') {
+    return `<span title="${t(
+      lang,
+      'Первый frozen-отбор завершён без прошедших правил; позднее добавление запрещено.',
+      'The first frozen selection produced no passing rules; later additions are forbidden.',
+    )}"><small>prospective Shadow</small><b class="collect">${t(
+      lang,
+      'трек закрыт',
+      'track closed',
+    )}</b></span>`;
+  }
+  const activated = Date.parse(manifest.activatedAt ?? '');
+  const since = Number.isFinite(activated)
+    ? new Date(activated).toISOString().slice(5, 10)
+    : '—';
+  return `<span title="${t(
+    lang,
+    'Новая prospective-выборка начинается после отбора; исторические сделки не засчитываются. Real запрещён.',
+    'The new prospective sample starts after selection; historical trades are not counted. Real is disabled.',
+  )}"><small>prospective Shadow</small><b class="pass">${t(
+    lang,
+    'активен',
+    'active',
+  )} · ${manifest.candidates!.length} · ${since}</b></span>`;
 }
 
 function nativeMicrostructureReadiness(
@@ -2297,6 +2352,7 @@ function nativeMicrostructureReadiness(
       exploratory,
     )}
     ${nativeMicrostructureSweepStatus(lang, '21d frozen', 'frozen', frozen)}
+    ${nativeMicrostructureShadowStatus(lang)}
     <em>${ageMinutes == null
     ? t(lang, 'время неизвестно', 'time unknown')
     : `${t(lang, 'обновлено', 'updated')} ${ageMinutes}m`}</em>
