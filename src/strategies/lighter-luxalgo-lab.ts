@@ -1935,13 +1935,13 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Расчёт.', 'Calculation.')}</b> ${t(
           lang,
-          'По последним 60 закрытиям считается SMA60, стандартное отклонение всей выборки и Z = (Close − SMA60) / σ. Незавершённая свеча в расчёт не попадает.',
-          'The latest 60 closes produce SMA60, population standard deviation, and Z = (Close − SMA60) / σ. The unfinished candle is never included.',
+          'Для STRAT-030–033 по последним 60 закрытиям считаются SMA60 и Z. STRAT-034 использует те же 60 завершённых свечей, но среднее и σ взвешены нативным объёмом Lighter. Незавершённая свеча в расчёт не попадает.',
+          'STRAT-030–033 calculate SMA60 and Z from the latest 60 closes. STRAT-034 uses the same 60 completed candles, but weights the mean and sigma by native Lighter volume. The unfinished candle is never included.',
         )}</li>
         <li><b>${t(lang, 'Решение.', 'Decision.')}</b> ${t(
           lang,
-          'Touch входит сразу за порогом ±σ; Reclaim ждёт возврата Z обратно внутрь порога. Открытый Long закрывается при Close ≥ SMA60, Short — при Close ≤ SMA60; резервный выход по времени — 240 баров, то есть 20 часов.',
-          'Touch enters immediately beyond its ±σ threshold; Reclaim waits for Z to return inside the threshold. An open Long exits at Close ≥ SMA60 and a Short at Close ≤ SMA60; the fallback time exit is 240 bars, or 20 hours.',
+          'Touch входит сразу за порогом ±σ; Reclaim ждёт возврата Z обратно внутрь порога. Позиция закрывается у своей средней: SMA60 для STRAT-030–033 или VWMA60 для STRAT-034; резервный выход — 240 баров, то есть 20 часов.',
+          'Touch enters immediately beyond its ±σ threshold; Reclaim waits for Z to return inside the threshold. A position exits at its own mean: SMA60 for STRAT-030–033 or VWMA60 for STRAT-034; the fallback exit is 240 bars, or 20 hours.',
         )}</li>
         <li><b>${t(lang, 'Внутренний сигнал.', 'Internal signal.')}</b> ${t(
           lang,
@@ -1955,8 +1955,8 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Real-canary и защита.', 'Real canary and protection.')}</b> ${t(
           lang,
-          'Тот же сигнал видит отдельный Real-исполнитель. Только разрешённые STRAT-030/032/033 могут открыть $100 с плечом 10×. После подтверждения позиции сразу ставится биржевой reduce-only stop 1.5%; новые входы отключаются при дневном убытке −$10, портфельной просадке −$15 или паузе конкретной стратегии. STRAT-031 остаётся только в Shadow.',
-          'A separate Real executor observes the same signal. Only allowlisted STRAT-030/032/033 may open $100 at 10× leverage. Once the position is confirmed, an exchange-native 1.5% reduce-only stop is placed immediately; new entries stop at a −$10 daily loss, −$15 portfolio drawdown, or per-strategy pause. STRAT-031 remains Shadow-only.',
+          'Тот же сигнал видит отдельный Real-исполнитель. Только разрешённые STRAT-030/032/033 могут открыть $100 с плечом 10×. После подтверждения позиции сразу ставится биржевой reduce-only stop 1.5%; новые входы отключаются при дневном убытке −$10, портфельной просадке −$15 или паузе конкретной стратегии. STRAT-031 и новый STRAT-034 остаются только в Shadow.',
+          'A separate Real executor observes the same signal. Only allowlisted STRAT-030/032/033 may open $100 at 10× leverage. Once the position is confirmed, an exchange-native 1.5% reduce-only stop is placed immediately; new entries stop at a −$10 daily loss, −$15 portfolio drawdown, or per-strategy pause. STRAT-031 and the new STRAT-034 remain Shadow-only.',
         )}</li>
       </ol>
       <div class="ll-native-specs">${strategyLines}</div>
@@ -2514,8 +2514,8 @@ async function render(
     : requested.group === 'native'
       ? t(
         lang,
-        'В Real разрешены изолированные canary STRAT-030/032/033 по $100; STRAT-031 остаётся Shadow-only, потому что её SOL-позиция конфликтовала бы со STRAT-030. На каждую Real-позицию сразу ставится биржевой reduce-only stop 1.5%.',
-        'Isolated $100 Real canaries are allowlisted for STRAT-030/032/033; STRAT-031 remains Shadow-only because its SOL position would collide with STRAT-030. Every Real position receives an exchange-native 1.5% reduce-only stop immediately.',
+        'В Real разрешены изолированные canary STRAT-030/032/033 по $100. STRAT-031 остаётся Shadow-only из-за конфликта SOL-позиции со STRAT-030; STRAT-034 копит собственный prospective forward. На каждую Real-позицию сразу ставится биржевой reduce-only stop 1.5%.',
+        'Isolated $100 Real canaries are allowlisted for STRAT-030/032/033. STRAT-031 remains Shadow-only because its SOL position would collide with STRAT-030; STRAT-034 is collecting its own prospective forward record. Every Real position receives an exchange-native 1.5% reduce-only stop immediately.',
       )
       : t(
         lang,
