@@ -24,6 +24,10 @@ import {
   type LighterFundingSeries,
 } from '../src/lib/lighter-funding-history.js';
 import {
+  completedFundingZScore,
+  fundingCrowdingSide,
+} from '../src/lib/lighter-funding-crowding.js';
+import {
   completedLagOneReturnCorrelation,
   serialAdaptiveSide,
 } from '../src/lib/lighter-serial-adaptive.js';
@@ -64,6 +68,7 @@ const ENABLE_FAILED_BREAKOUT = process.env.ENABLE_FAILED_BREAKOUT === '1';
 const ENABLE_HOURLY_FADE = process.env.ENABLE_HOURLY_FADE === '1';
 const ENABLE_HOURLY_FADE_HIGHVOL = process.env.ENABLE_HOURLY_FADE_HIGHVOL === '1';
 const ENABLE_SERIAL_ADAPTIVE = process.env.ENABLE_SERIAL_ADAPTIVE === '1';
+const ENABLE_FUNDING_CROWDING = process.env.ENABLE_FUNDING_CROWDING === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -132,6 +137,7 @@ type Arrays = {
   vwapSd60: number[];
   efficiencyRatio60: number[];
   serialCorrelation120: number[];
+  fundingZ168: number[];
   squeeze20: boolean[];
 };
 type Rule = {
@@ -418,7 +424,7 @@ function efficiencyRatio(values: number[], period: number): number[] {
   return result;
 }
 
-function build(c: Candle[]): Arrays {
+function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
   const close = c.map((bar) => bar.c);
   const volume = c.map((bar) => bar.v);
   const ema8Values = ema(close, 8);
@@ -470,6 +476,12 @@ function build(c: Candle[]): Arrays {
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
     serialCorrelation120: completedLagOneReturnCorrelation(close, 120),
+    fundingZ168: completedFundingZScore(
+      c.map((bar) => bar.t),
+      BAR_MINUTES,
+      funding,
+      168,
+    ),
     // Standard TTM-style compression: 2-sigma Bollinger width is contained
     // inside a 1.5 ATR Keltner envelope. Every input is from the completed
     // candle at i; entry still executes only at the next candle open.
@@ -933,6 +945,32 @@ function rules(): Rule[] {
     },
   });
 
+  // Preregistered funding-crowding fade. The latest completed hourly
+  // settlement is compared with the preceding 168 settlements, excluding
+  // itself from normalization. Price and funding must be extended in the same
+  // direction; the trade fades both and executes only at the next bar open.
+  if (ENABLE_FUNDING_CROWDING) out.push({
+    name: 'FUNDZ168-PZ60-2-H360',
+    warmup: 62,
+    slPct: 0.015,
+    maxBars: Math.max(1, Math.round(360 / BAR_MINUTES)),
+    entry(a, i) {
+      const priceZ = a.sd60[i]! > 0
+        ? (a.close[i]! - a.sma60[i]!) / a.sd60[i]!
+        : Number.NaN;
+      return fundingCrowdingSide(a.fundingZ168[i]!, priceZ, 2);
+    },
+    exit(a, i, side) {
+      const fundingNormalized = side === 'long'
+        ? a.fundingZ168[i]! >= 0
+        : a.fundingZ168[i]! <= 0;
+      const priceNormalized = side === 'long'
+        ? a.close[i]! >= a.sma60[i]!
+        : a.close[i]! <= a.sma60[i]!;
+      return fundingNormalized || priceNormalized;
+    },
+  });
+
   // A predeclared two-sided mean-reversion variant for choppy regimes.
   // Kaufman ER prevents fading a statistically extreme move when the recent
   // path is strongly directional. The small fixed grid is evaluated across
@@ -1343,7 +1381,7 @@ for (const symbol of SYMBOLS) {
     ? raw.filter((candle) => candle.t >= maxTime - LOOKBACK_DAYS * 86_400_000)
     : raw;
   const candles = file === directFile ? windowed : aggregateCandles(windowed, BAR_MINUTES);
-  loaded.set(symbol, build(candles));
+  loaded.set(symbol, build(candles, fundingBySymbol.get(symbol.toUpperCase())));
 }
 
 const rows: Array<{
