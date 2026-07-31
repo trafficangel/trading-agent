@@ -298,7 +298,11 @@ async function lighterCandles(symbol: string, fromMs: number, toMs: number): Pro
       url.searchParams.set('resolution', `${TF}m`);
       url.searchParams.set('start_timestamp', String(start));
       url.searchParams.set('end_timestamp', String(endExclusive));
-      url.searchParams.set('count_back', '0');
+      // Lighter currently defaults count_back=0 to a short (10-candle)
+      // response even when the requested timestamp window spans 500 bars.
+      // Match missingCandleWindows() page size explicitly so every requested
+      // window is actually filled and we do not hammer the API with gap retries.
+      url.searchParams.set('count_back', '500');
       url.searchParams.set('set_timestamp_to_end', 'false');
       return lighterCandlePage(url);
     }));

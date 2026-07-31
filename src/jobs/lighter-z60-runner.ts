@@ -150,7 +150,11 @@ async function fetchBars(latestBarTime: number, marketId: number): Promise<Z60Ba
   url.searchParams.set('resolution', '1m');
   url.searchParams.set('start_timestamp', String(start));
   url.searchParams.set('end_timestamp', String(end));
-  url.searchParams.set('count_back', '0');
+  // Lighter currently defaults count_back=0 to a short 10-candle response,
+  // which is insufficient to reconstruct the 60 completed five-minute bars.
+  // Request the documented maximum explicitly; start/end still bound the
+  // response to the exact history window used by the evaluator.
+  url.searchParams.set('count_back', '500');
   url.searchParams.set('set_timestamp_to_end', 'false');
 
   const response = await request(url, {
