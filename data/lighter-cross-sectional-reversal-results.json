@@ -1,0 +1,221 @@
+{
+  "version": "lighter-cross-sectional-reversal-v1-frozen",
+  "generatedAt": "2026-07-31T16:42:39.493Z",
+  "rule": {
+    "symbols": [
+      "BTC",
+      "ETH",
+      "SOL",
+      "BNB",
+      "LTC",
+      "HYPE",
+      "ZEC",
+      "DOGE",
+      "NEAR",
+      "JUP",
+      "LIT",
+      "GRAM",
+      "XMR",
+      "ENA",
+      "TAO"
+    ],
+    "lookbackMinutes": 60,
+    "rebalance": "final completed candle of each UTC hour",
+    "minimumDispersionPct": 2,
+    "holdingMinutes": 60,
+    "pairStopPct": -2,
+    "notionalPerLegUsd": 100,
+    "execution": "next-bar open; market-specific measured $100 full-round-trip p95",
+    "funding": "exact public hourly settlements in (entry, exit]",
+    "maximumConcurrentPairs": 1
+  },
+  "results": [
+    {
+      "timeframe": "1m",
+      "commonStart": "2026-02-01T10:04:00.000Z",
+      "commonEnd": "2026-07-31T07:27:00.000Z",
+      "pairs": 2411,
+      "netPct": -29.940311333346532,
+      "netUsd": -59.880622666693064,
+      "profitFactor": 0.9620932453614084,
+      "winRatePct": 51.22355868934052,
+      "meanL95Pct": -0.04227716248374837,
+      "adverseNetPct": -52.967919039107194,
+      "adverseProfitFactor": 0.9338892010539626,
+      "maxDrawdownPct": -99.01343161248973,
+      "positiveFolds": 2,
+      "inSampleNetPct": -62.84637947155908,
+      "outOfSampleNetPct": 32.90606813821246,
+      "longLegNetPct": 34.0626550625951,
+      "shortLegNetPct": -93.9432777292884,
+      "fundingNetPct": -0.32549999999999807,
+      "windows": [
+        {
+          "days": 30,
+          "n": 314,
+          "netPct": 3.4252358954340836,
+          "profitFactor": 1.0433840159326393
+        },
+        {
+          "days": 60,
+          "n": 852,
+          "netPct": 42.43867463568843,
+          "profitFactor": 1.1600097622349301
+        },
+        {
+          "days": 90,
+          "n": 1336,
+          "netPct": 33.22932762034835,
+          "profitFactor": 1.074317715053437
+        }
+      ],
+      "months": [
+        {
+          "month": "2026-02",
+          "netPct": -14.526450606746604
+        },
+        {
+          "month": "2026-03",
+          "netPct": -27.639618814721313
+        },
+        {
+          "month": "2026-04",
+          "netPct": -18.597110388137388
+        },
+        {
+          "month": "2026-05",
+          "netPct": -12.598481953982512
+        },
+        {
+          "month": "2026-06",
+          "netPct": 39.099999094815466
+        },
+        {
+          "month": "2026-07",
+          "netPct": 4.321351335425845
+        }
+      ],
+      "positiveMonths": 2,
+      "trend": {
+        "bull": {
+          "n": 1001,
+          "netPct": -45.56353732102441,
+          "profitFactor": 0.8591887073666248
+        },
+        "bear": {
+          "n": 1006,
+          "netPct": 34.379996116107236,
+          "profitFactor": 1.1023499944893254
+        }
+      },
+      "volatility": {
+        "high": {
+          "n": 619,
+          "netPct": 15.953633659217257,
+          "profitFactor": 1.0733784212698894
+        },
+        "low": {
+          "n": 1388,
+          "netPct": -27.13717486413434,
+          "profitFactor": 0.9386132633601219
+        }
+      },
+      "stopCloses": 91,
+      "qualified": false
+    },
+    {
+      "timeframe": "5m",
+      "commonStart": "2026-02-01T10:05:00.000Z",
+      "commonEnd": "2026-07-31T07:20:00.000Z",
+      "pairs": 2411,
+      "netPct": -18.06058583775422,
+      "netUsd": -36.12117167550844,
+      "profitFactor": 0.9768534539363086,
+      "winRatePct": 51.38946495230194,
+      "meanL95Pct": -0.037366566335947246,
+      "adverseNetPct": -41.088193543514826,
+      "adverseProfitFactor": 0.9480955943213512,
+      "maxDrawdownPct": -93.1270429630118,
+      "positiveFolds": 2,
+      "inSampleNetPct": -57.24532207268278,
+      "outOfSampleNetPct": 39.184736234928494,
+      "longLegNetPct": 26.712741146139194,
+      "shortLegNetPct": -62.83391282164763,
+      "fundingNetPct": -0.3294999999999975,
+      "windows": [
+        {
+          "days": 30,
+          "n": 314,
+          "netPct": 3.885650005776386,
+          "profitFactor": 1.0495043075354418
+        },
+        {
+          "days": 60,
+          "n": 852,
+          "netPct": 45.06064099631861,
+          "profitFactor": 1.1711651813467947
+        },
+        {
+          "days": 90,
+          "n": 1336,
+          "netPct": 42.31434782351806,
+          "profitFactor": 1.0962963734687046
+        }
+      ],
+      "months": [
+        {
+          "month": "2026-02",
+          "netPct": -14.933007145977562
+        },
+        {
+          "month": "2026-03",
+          "netPct": -26.423905255970205
+        },
+        {
+          "month": "2026-04",
+          "netPct": -16.4339956104345
+        },
+        {
+          "month": "2026-05",
+          "netPct": -6.401394877342234
+        },
+        {
+          "month": "2026-06",
+          "netPct": 41.349951606202126
+        },
+        {
+          "month": "2026-07",
+          "netPct": 4.781765445768144
+        }
+      ],
+      "positiveMonths": 2,
+      "trend": {
+        "bull": {
+          "n": 1001,
+          "netPct": -36.69636744624535,
+          "profitFactor": 0.8840069201203626
+        },
+        "bear": {
+          "n": 1006,
+          "netPct": 37.79910827615139,
+          "profitFactor": 1.1134625460389442
+        }
+      },
+      "volatility": {
+        "high": {
+          "n": 619,
+          "netPct": 16.49527166607117,
+          "profitFactor": 1.0758494107036451
+        },
+        "low": {
+          "n": 1388,
+          "netPct": -15.39253083616502,
+          "profitFactor": 0.964371997905006
+        }
+      },
+      "stopCloses": 76,
+      "qualified": false
+    }
+  ],
+  "admittedToShadow": false
+}

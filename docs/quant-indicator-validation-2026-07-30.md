@@ -832,3 +832,56 @@ No external leg is added. The failure does not rewrite the original P2 sample,
 but it prevents any claim that the rule transfers universally and reinforces
 the decision to keep P2 prospective Shadow-only. Frozen evidence is in
 `data/lighter-p2-transfer-holdout-results.json`.
+
+## Preregistered cross-sectional reversal pair
+
+Before inspecting any result, the next independent family was frozen as one
+market-neutral rule rather than another per-coin Z-score variation:
+
+- universe: the same 15 P2 markets, with synchronized gap-free candles;
+- at the final completed candle of each UTC hour, rank every market by its
+  trailing one-hour close-to-close return;
+- require the winner/loser return spread to be at least `2%`; buy the laggard
+  and short the leader at the next candle open, `$100` per leg;
+- allow only one pair at a time; close both legs at the first next-bar open
+  after one hour, or after completed-bar pair PnL breaches `−2%`;
+- run the exact same clock-time rule at 1m and 5m, so lookback/holding periods
+  remain one hour rather than changing economic meaning with timeframe;
+- subtract each selected leg's market-specific measured `$100` full-round-trip
+  p95, sum exact signed hourly Lighter funding for both legs and separately
+  report the two observed-maximum execution costs;
+- no parameter grid, per-market tuning, replacement of losing legs or rescue
+  run is permitted after viewing the result.
+
+Qualification requires at least 100 pairs, positive net, PF at least `1.20`,
+positive mean-trade L95, 4/4 positive chronological folds, positive IS/OOS,
+positive long-leg and short-leg contributions after allocating each leg's own
+cost and funding, positive 30/60/90-day windows, maximum additive drawdown no
+worse than `−5%` of the fixed `$200` pair capacity, at least five positive
+calendar months, positive causal BTC 30-day bull/bear segments, and positive
+high/low-volatility segments where the trailing seven-day hourly BTC realized
+volatility is compared only with its own trailing 30-day value. Passing
+historical evidence can admit prospective Shadow only; Real still requires the
+separate frozen forward gate.
+
+### Cross-sectional reversal pair: rejected
+
+The single preregistered run failed at both timeframes and was not retuned. At
+1m it produced 2,411 pairs, `−29.94%`, PF `0.96`, mean-pair L95 `−0.0423%`,
+2/4 positive chronological folds and a `−99.01%` maximum additive drawdown on
+the fixed `$200` pair capacity. The 5m clock produced the same 2,411 hourly
+pairs, `−18.06%`, PF `0.98`, L95 `−0.0374%`, 2/4 folds and `−93.13%` drawdown.
+Observed-maximum execution sensitivity was also negative at `−52.97%` (1m)
+and `−41.09%` (5m).
+
+The apparent recent improvement is not admissible as a rescue rule. The 5m
+OOS slice was `+39.18%` and its latest 30/60/90-day windows were all positive,
+but IS was `−57.25%`; only two calendar months were positive; the Short-leader
+leg lost `−62.83%`; bull markets lost `−36.70%`; and low-volatility periods
+lost `−15.39%`. Selecting only the later sample, the Long leg, bear markets or
+high-volatility periods after viewing the result would be post-hoc
+optimization rather than independent evidence.
+
+The family is rejected with no Shadow or Real registration. The failure leaves
+the existing frozen P2 prospective test unchanged. Reproducible summary
+evidence is in `data/lighter-cross-sectional-reversal-results.json`.
