@@ -23,6 +23,10 @@ import {
   type LighterFundingPoint,
   type LighterFundingSeries,
 } from '../src/lib/lighter-funding-history.js';
+import {
+  completedLagOneReturnCorrelation,
+  serialAdaptiveSide,
+} from '../src/lib/lighter-serial-adaptive.js';
 
 const SYMBOLS = (process.env.SYMBOLS ?? 'BTC,ETH,SOL')
   .split(',')
@@ -59,6 +63,7 @@ const ENABLE_TREND_PULLBACK = process.env.ENABLE_TREND_PULLBACK === '1';
 const ENABLE_FAILED_BREAKOUT = process.env.ENABLE_FAILED_BREAKOUT === '1';
 const ENABLE_HOURLY_FADE = process.env.ENABLE_HOURLY_FADE === '1';
 const ENABLE_HOURLY_FADE_HIGHVOL = process.env.ENABLE_HOURLY_FADE_HIGHVOL === '1';
+const ENABLE_SERIAL_ADAPTIVE = process.env.ENABLE_SERIAL_ADAPTIVE === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -126,6 +131,7 @@ type Arrays = {
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
+  serialCorrelation120: number[];
   squeeze20: boolean[];
 };
 type Rule = {
@@ -463,6 +469,7 @@ function build(c: Candle[]): Arrays {
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
+    serialCorrelation120: completedLagOneReturnCorrelation(close, 120),
     // Standard TTM-style compression: 2-sigma Bollinger width is contained
     // inside a 1.5 ATR Keltner envelope. Every input is from the completed
     // candle at i; entry still executes only at the next candle open.
@@ -896,6 +903,30 @@ function rules(): Rule[] {
       if (bar.c > bar.o) return 'short';
       if (bar.c < bar.o) return 'long';
       return null;
+    },
+    exit() {
+      return false;
+    },
+  });
+
+  // Preregistered adaptive serial-dependence family. The correlation at i
+  // uses returns only through i-1; the completed candle at i supplies the
+  // symmetric impulse/fade direction and execution remains at i+1 open.
+  if (ENABLE_SERIAL_ADAPTIVE) out.push({
+    name: 'SERIAL120-A0.15-B0.5-V1-H15',
+    warmup: 122,
+    slPct: 0.01,
+    maxBars: Math.max(1, Math.round(15 / BAR_MINUTES)),
+    entry(a, i) {
+      const bar = a.c[i]!;
+      return serialAdaptiveSide({
+        correlation: a.serialCorrelation120[i]!,
+        open: bar.o,
+        close: bar.c,
+        atr: a.atr14[i]!,
+        volume: bar.v,
+        volumeMean: a.volumeSma20[i]!,
+      });
     },
     exit() {
       return false;
