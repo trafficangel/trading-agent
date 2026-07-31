@@ -285,10 +285,13 @@ from headline PnL alone.
 
 Gap-free 180-day one-minute samples for BNB, UNI, AAVE and LTC were downloaded
 from the native Lighter candles API and evaluated with the same causal rules.
-The research runner's default is now the production-like `0.065%` round-trip
-execution reserve plus `0.00125%` adverse funding per holding hour. Lighter
-Standard commission remains zero; the reserve represents spread, slippage and
-signal-to-fill drift rather than an exchange fee.
+Lighter Standard commission remains zero. The research output now separates a
+`0.02%` measured-cost discovery reserve from a non-blocking `0.065%` adverse
+sensitivity column; both also include `0.00125%` adverse funding per holding
+hour. The 0.10% and 0.15% HYPE rows above are robustness scenarios, not assumed
+exchange costs and not automatic rejection thresholds. Final eligibility is
+decided by prospective executable VWAP, spread, slippage and funding recorded
+for the specific market.
 
 No new one-minute candidate qualified:
 

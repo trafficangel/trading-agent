@@ -4,11 +4,12 @@
  * Uses candles downloaded by verify-passive-lowtf.ts with DATA_SOURCE=lighter.
  * Signals are computed only from completed candles and execute at the next
  * candle open. Commission is zero for a Standard account; an independent
- * round-trip execution reserve is subtracted from every trade.
+ * a measured-cost discovery reserve is subtracted from every trade. A second,
+ * deliberately adverse reserve is reported as sensitivity evidence only.
  *
  * Run after downloading native candles:
  *   pnpm tsx scripts/sweep-lighter-native-1m.ts
- *   STRESS_RT_PCT=0.10 pnpm tsx scripts/sweep-lighter-native-1m.ts
+ *   STRESS_RT_PCT=0.02 ROBUST_STRESS_RT_PCT=0.065 pnpm tsx scripts/sweep-lighter-native-1m.ts
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -19,10 +20,12 @@ const SYMBOLS = (process.env.SYMBOLS ?? 'BTC,ETH,SOL')
   .split(',')
   .map((symbol) => symbol.trim())
   .filter(Boolean);
-// Base production-like reserve: 0% venue commission plus 0.065% round-trip
-// allowance for spread, slippage and signal-to-fill drift. Override upward for
-// adverse-cost sensitivity tests; never rely on an unstressed headline result.
-const STRESS_RT_PCT = Number(process.env.STRESS_RT_PCT ?? 0.065);
+// Discovery reserve: 0% Lighter Standard commission plus 0.02% round-trip
+// allowance, close to the currently observed SOL/BNB executable L2 cost.
+// The adverse 0.065% result is shown separately and does not reject a candidate
+// by itself; prospective Shadow then records the market's actual VWAP/funding.
+const STRESS_RT_PCT = Number(process.env.STRESS_RT_PCT ?? 0.02);
+const ROBUST_STRESS_RT_PCT = Number(process.env.ROBUST_STRESS_RT_PCT ?? 0.065);
 const FUNDING_PER_HOUR_PCT = Number(process.env.FUNDING_PER_HOUR_PCT ?? 0.00125);
 const BAR_MINUTES = Number(process.env.BAR_MINUTES ?? 1);
 const Z_PERIODS = (process.env.Z_PERIODS ?? '20,60').split(',').map(Number);
@@ -806,6 +809,8 @@ const rows: Array<{
   baseline: number;
   stress: number;
   stressPf: number;
+  robustStress: number;
+  robustPf: number;
   folds: number;
   is: number;
   oos: number;
@@ -829,6 +834,8 @@ for (const [symbol, arrays] of loaded) {
       baseline: sum(trades),
       stress: sum(trades, STRESS_RT_PCT),
       stressPf: pf(trades, STRESS_RT_PCT),
+      robustStress: sum(trades, ROBUST_STRESS_RT_PCT),
+      robustPf: pf(trades, ROBUST_STRESS_RT_PCT),
       folds: positiveFolds(trades, STRESS_RT_PCT),
       is: sum(trades.slice(0, cut), STRESS_RT_PCT),
       oos: sum(trades.slice(cut), STRESS_RT_PCT),
@@ -867,7 +874,8 @@ const best = [...rows].sort((a, b) => b.stress - a.stress);
 
 const print = (row: typeof rows[number]): string =>
   `${row.symbol.padEnd(5)} ${row.rule.padEnd(27)} N${String(row.trades.length).padStart(4)} D${row.coverageDays.toFixed(0).padStart(3)} `
-  + `gross ${fmt(row.baseline).padStart(8)} stress ${fmt(row.stress).padStart(8)} PF ${row.stressPf.toFixed(2)} `
+  + `gross ${fmt(row.baseline).padStart(8)} base ${fmt(row.stress).padStart(8)} PF ${row.stressPf.toFixed(2)} `
+  + `robust ${fmt(row.robustStress).padStart(8)}/PF${row.robustPf.toFixed(2)} `
   + `DD ${fmt(drawdown(row.trades, STRESS_RT_PCT))} WR ${(row.trades.filter((trade) => tradeNet(trade, STRESS_RT_PCT) > 0).length / row.trades.length * 100).toFixed(1)}% `
   + `L95 ${row.meanL95 >= 0 ? '+' : ''}${row.meanL95.toFixed(4)} `
   + `hold ${median(row.trades.map((trade) => (trade.exitAt - trade.entryAt) / 60_000)).toFixed(0)}m `
@@ -875,7 +883,7 @@ const print = (row: typeof rows[number]): string =>
   + row.recent.map((window) =>
     `W${window.days} n${window.n} ${fmt(window.net)}/PF${window.profitFactor.toFixed(2)}`).join(' ');
 
-console.log(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${STRESS_RT_PCT}% RT stress + ${FUNDING_PER_HOUR_PCT}%/h adverse funding`);
+console.log(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${STRESS_RT_PCT}% measured-cost discovery reserve · ${ROBUST_STRESS_RT_PCT}% adverse sensitivity (non-blocking) · ${FUNDING_PER_HOUR_PCT}%/h adverse funding`);
 console.log(`\nQUALIFIED (${qualified.length})`);
 console.log(qualified.length ? qualified.slice(0, 30).map(print).join('\n') : '— none —');
 console.log('\nTOP 30 (including failures)');
