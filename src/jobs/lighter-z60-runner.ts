@@ -63,6 +63,8 @@ type NativeStrategy = {
   family: 'zscore' | 'vwz';
   mode: Z60EntryMode;
   threshold: number;
+  /** False keeps exit management/status alive while blocking every new entry. */
+  entryEnabled?: boolean;
   trendFilter?: 'ema200' | 'ema200_400';
 };
 
@@ -77,22 +79,22 @@ const BASE_FEEDS: readonly NativeFeed[] = [
     symbol: 'SOLUSDT',
     marketId: 2,
     strategies: [
-      { id: 'sol-z60-reclaim', family: 'zscore', mode: 'reclaim', threshold: 3 },
-      { id: 'sol-z60-touch', family: 'zscore', mode: 'touch', threshold: 3 },
+      { id: 'sol-z60-reclaim', family: 'zscore', mode: 'reclaim', threshold: 3, entryEnabled: false },
+      { id: 'sol-z60-touch', family: 'zscore', mode: 'touch', threshold: 3, entryEnabled: false },
     ],
   },
   {
     symbol: 'BNBUSDT',
     marketId: 25,
     strategies: [
-      { id: 'bnb-z60-touch', family: 'zscore', mode: 'touch', threshold: 3 },
+      { id: 'bnb-z60-touch', family: 'zscore', mode: 'touch', threshold: 3, entryEnabled: false },
     ],
   },
   {
     symbol: 'LTCUSDT',
     marketId: 35,
     strategies: [
-      { id: 'ltc-z60-touch', family: 'zscore', mode: 'touch', threshold: 2 },
+      { id: 'ltc-z60-touch', family: 'zscore', mode: 'touch', threshold: 2, entryEnabled: false },
     ],
   },
   {
@@ -538,6 +540,23 @@ async function poll(): Promise<void> {
               er60,
               'same_bar_reentry_blocked',
               'same_bar_stop_or_close',
+            );
+            lastEvaluatedBars.set(strategy.id, target);
+            continue;
+          }
+
+          // Historical evidence is frozen before prospective collection. A
+          // failed candidate remains in the runner so an existing Shadow
+          // position can exit normally, but it cannot create another entry.
+          if (strategy.entryEnabled === false) {
+            recordEvaluation(
+              strategy,
+              feed,
+              target,
+              snapshot,
+              er60,
+              'entry_disabled',
+              'historical_gate_failed',
             );
             lastEvaluatedBars.set(strategy.id, target);
             continue;

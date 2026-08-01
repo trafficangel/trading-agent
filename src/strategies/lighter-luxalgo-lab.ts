@@ -617,11 +617,9 @@ const NATIVE_STRATEGY_IDS = [
   'hype-vwz60-touch',
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => market.id),
 ] as const;
-const NATIVE_LIVE_STRATEGY_IDS = [
-  'sol-z60-reclaim',
-  'bnb-z60-touch',
-  'ltc-z60-touch',
-] as const;
+// Native Quant remains prospective Shadow-only. Historical rows stay visible,
+// but no Native strategy is currently registered for Real execution.
+const NATIVE_LIVE_STRATEGY_IDS: readonly string[] = [];
 
 type NativeStrategyInfo = {
   family: 'zscore' | 'vwz';
@@ -642,7 +640,7 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     threshold: 3,
     period: 60,
     timeExitBars: 240,
-    realEnabled: true,
+    realEnabled: false,
     noteRu: 'Вход позже touch-варианта, после подтверждённого возврата цены внутрь диапазона. Real недоступен: историческая просадка 19.24% выше гейта 15%.',
     noteEn: 'Enters later than the touch variant, after price confirms a return inside the band. Real is unavailable: historical drawdown of 19.24% exceeds the 15% gate.',
   },
@@ -662,7 +660,7 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     threshold: 3,
     period: 60,
     timeExitBars: 240,
-    realEnabled: true,
+    realEnabled: false,
     noteRu: 'Полный 180-дневный тест двухсторонний, но Real недоступен: свежая 30-дневная long-часть −0.126%.',
     noteEn: 'The full 180-day test is two-sided, but Real is unavailable: the recent 30-day long book is −0.126%.',
   },
@@ -672,7 +670,7 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     threshold: 2,
     period: 60,
     timeExitBars: 240,
-    realEnabled: true,
+    realEnabled: false,
     noteRu: 'Самый частый вариант: более близкий порог ±2σ даёт больше входов. Real недоступен: историческая просадка 29.02% выше гейта 15%.',
     noteEn: 'Highest-frequency variant: the closer ±2σ threshold creates more entries. Real is unavailable: historical drawdown of 29.02% exceeds the 15% gate.',
   },
@@ -2522,6 +2520,7 @@ function nativeRunnerReason(lang: Lang, row: NativeRunnerEvaluation): string {
     entry_signal: ['сигнал отправлен', 'signal emitted'],
     waiting_mean_or_time_exit: ['позиция: ждёт mean/time exit', 'position: waiting for mean/time exit'],
     same_bar_stop_or_close: ['повторный вход в том же баре запрещён', 'same-bar re-entry blocked'],
+    historical_gate_failed: ['новые входы отключены: исторический гейт', 'new entries disabled: historical gate'],
     sma60_cross: ['SMA60 exit отправлен', 'SMA60 exit emitted'],
     vwma60_cross: ['VWMA60 exit отправлен', 'VWMA60 exit emitted'],
     time_240_bars: ['time exit отправлен', 'time exit emitted'],

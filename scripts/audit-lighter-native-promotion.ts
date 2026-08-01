@@ -16,14 +16,12 @@ import {
 } from '../src/lib/lighter-luxalgo-math.js';
 import { evaluateNativeHistoricalEvidence } from '../src/lib/lighter-native-historical.js';
 
-const REAL_NATIVE_IDS = [
+const REAL_NATIVE_IDS: readonly string[] = [];
+const SHADOW_NATIVE_IDS = [
   'sol-z60-reclaim',
+  'sol-z60-touch',
   'bnb-z60-touch',
   'ltc-z60-touch',
-] as const;
-const SHADOW_NATIVE_IDS = [
-  ...REAL_NATIVE_IDS,
-  'sol-z60-touch',
   'btc-vwz60-touch',
   'hype-vwz60-touch',
 ] as const;
@@ -87,9 +85,7 @@ const strategies = SHADOW_NATIVE_IDS.map((strategyId) => {
   if (!historical) throw new Error(`historical strategy evidence missing: ${strategyId}`);
   return {
     strategyId,
-    realExecutorRegistered: REAL_NATIVE_IDS.includes(
-      strategyId as (typeof REAL_NATIVE_IDS)[number],
-    ),
+    realExecutorRegistered: REAL_NATIVE_IDS.includes(strategyId),
     historicalEvidence: historical,
     evaluation: evaluateNativeForwardRows(
       pnlStatement.all(strategyId),

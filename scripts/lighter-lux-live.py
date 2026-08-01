@@ -50,13 +50,9 @@ class FillSummary:
 
 
 STRATEGIES = {
-    "sol-z60-reclaim": Strategy(2, "SOLUSDT", "SOL", 1.5),
-    # Independently validated native-candle Z60 transfer candidates. They use
-    # different markets from the SOL canary, so positions remain isolated at
-    # exchange level. sol-z60-touch intentionally stays excluded because it
-    # would collide with sol-z60-reclaim in Lighter's one-way SOL position.
-    "bnb-z60-touch": Strategy(25, "BNBUSDT", "BNB", 1.5),
-    "ltc-z60-touch": Strategy(35, "LTCUSDT", "LTC", 1.5),
+    # Native Quant is deliberately absent: its historical failures and small
+    # prospective sample do not justify a Real execution path. The entries
+    # below are the separately managed LuxAlgo live canary only.
     "sol-lg-mf50": Strategy(2, "SOLUSDT", "SOL", 5.0),
     "eth-cntr-st": Strategy(0, "ETHUSDT", "ETH", 4.0),
     "btc-choch-cfm-tc": Strategy(1, "BTCUSDT", "BTC", 3.5),
@@ -67,9 +63,7 @@ STRATEGIES = {
     "aave-cntr-strong": Strategy(27, "AAVEUSDT", "AAVE", 5.0),
 }
 
-NATIVE_SHADOW_GATED_STRATEGIES = frozenset(
-    {"sol-z60-reclaim", "bnb-z60-touch", "ltc-z60-touch"}
-)
+NATIVE_SHADOW_GATED_STRATEGIES: frozenset[str] = frozenset()
 
 
 class LiveRunner:
