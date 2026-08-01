@@ -22,6 +22,7 @@ const SHADOW_NATIVE_IDS = [
   'hype-vwz60-touch',
   'xrp-vwz60-touch',
   'xlm-vwz60-touch-er25',
+  'data-vwz60-touch',
 ] as const;
 const P2_IDS = [
   'z60stack25-btc', 'z60stack25-eth', 'z60stack25-sol',
@@ -58,10 +59,18 @@ const xlmSupplementalHistoricalPath = resolve(
 if (!existsSync(xlmSupplementalHistoricalPath)) {
   throw new Error(`XLM supplemental historical evidence missing: ${xlmSupplementalHistoricalPath}`);
 }
+const dataSupplementalHistoricalPath = resolve(
+  flagValue('--historical-data-supplement')
+    ?? 'data/lighter-data-vwz60-1m-rebuild-validation.json',
+);
+if (!existsSync(dataSupplementalHistoricalPath)) {
+  throw new Error(`DATA supplemental historical evidence missing: ${dataSupplementalHistoricalPath}`);
+}
 const historicalEvidence = evaluateNativeHistoricalEvidence(
   JSON.parse(readFileSync(historicalPath, 'utf8')) as unknown,
   JSON.parse(readFileSync(supplementalHistoricalPath, 'utf8')) as unknown,
   JSON.parse(readFileSync(xlmSupplementalHistoricalPath, 'utf8')) as unknown,
+  JSON.parse(readFileSync(dataSupplementalHistoricalPath, 'utf8')) as unknown,
 );
 const db = new Database(databasePath, { readonly: true, fileMustExist: true });
 const pnlStatement = db.prepare<[string], NativeForwardPnlRow>(`
@@ -178,6 +187,7 @@ const report = {
     sourceSha256: historicalEvidence.sourceSha256,
     supplementalSourceSha256: historicalEvidence.supplementalSourceSha256,
     xlmSupplementalSourceSha256: historicalEvidence.xlmSupplementalSourceSha256,
+    dataSupplementalSourceSha256: historicalEvidence.dataSupplementalSourceSha256,
     portfolio: historicalEvidence.portfolio,
   },
   p2: {

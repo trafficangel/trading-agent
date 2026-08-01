@@ -8,6 +8,8 @@ export const NATIVE_HISTORICAL_SUPPLEMENT_SHA256 =
   'afa6e2b1de6b64fd7917eb033177db4d1654538f54262b0bcfca0b110ea0fed1';
 export const NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256 =
   'cb507f67f7e34d005b1b5360dd6aede718d9f8a1d6cf6ebba037b84b9018f445';
+export const NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256 =
+  'ea089a8d09788ca652e6cc7ce4543dd8f65ef269375bcf3405329ec17239c74f';
 
 const HISTORICAL_CANDIDATES = [
   { strategyId: 'sol-z60-reclaim', symbol: 'SOL', rule: 'Z60-3-reclaim' },
@@ -27,6 +29,14 @@ const XLM_SUPPLEMENTAL_HISTORICAL_CANDIDATES = [
     strategyId: 'xlm-vwz60-touch-er25',
     symbol: 'XLM',
     rule: 'VWZ60-3-touch+ER60<0.25',
+  },
+] as const;
+
+const DATA_SUPPLEMENTAL_HISTORICAL_CANDIDATES = [
+  {
+    strategyId: 'data-vwz60-touch',
+    symbol: 'DATA',
+    rule: 'VWZ60-2.5-touch',
   },
 ] as const;
 
@@ -194,6 +204,7 @@ export function evaluateNativeHistoricalEvidence(
   value: unknown,
   supplementalValue?: unknown,
   xlmSupplementalValue?: unknown,
+  dataSupplementalValue?: unknown,
 ) {
   if (!value || typeof value !== 'object') throw new Error('historical evidence missing');
   const report = value as HistoricalReport;
@@ -273,6 +284,26 @@ export function evaluateNativeHistoricalEvidence(
       'VWZ60-3-touch',
       'XLM supplemental',
     );
+  const dataSupplementalReport = dataSupplementalValue == null
+    ? null
+    : validateSupplementalReport(
+      dataSupplementalValue,
+      NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256,
+      'VWZ60-2.5-touch',
+      'DATA supplemental',
+    );
+  if (dataSupplementalReport != null) {
+    const symbols = dataSupplementalReport.input.symbols;
+    const sources = dataSupplementalReport.input.candleSources;
+    if (
+      !Array.isArray(symbols)
+      || symbols.length !== 1
+      || symbols[0] !== 'DATA'
+      || !sources
+      || typeof sources !== 'object'
+      || (sources as Record<string, unknown>).DATA !== 'aggregated_from_1m'
+    ) throw new Error('DATA supplemental historical evidence source contract invalid');
+  }
   const supplementalCandidates = evaluateSupplementalCandidates(
     supplementalReport,
     SUPPLEMENTAL_HISTORICAL_CANDIDATES,
@@ -283,6 +314,11 @@ export function evaluateNativeHistoricalEvidence(
     XLM_SUPPLEMENTAL_HISTORICAL_CANDIDATES,
     'XLM supplemental',
   );
+  const dataSupplementalCandidates = evaluateSupplementalCandidates(
+    dataSupplementalReport,
+    DATA_SUPPLEMENTAL_HISTORICAL_CANDIDATES,
+    'DATA supplemental',
+  );
 
   const portfolioRule = 'Z60STACK-2.5-touch';
   const portfolioRows = report.portfolioRows.filter((row) => row.rule === portfolioRule);
@@ -291,13 +327,21 @@ export function evaluateNativeHistoricalEvidence(
     version: 'lighter-native-historical-evidence-v1',
     sourceGeneratedAt: report.generatedAt,
     sourceSha256,
-    candidates: [...candidates, ...supplementalCandidates, ...xlmSupplementalCandidates],
+    candidates: [
+      ...candidates,
+      ...supplementalCandidates,
+      ...xlmSupplementalCandidates,
+      ...dataSupplementalCandidates,
+    ],
     supplementalSourceSha256: supplementalReport == null
       ? null
       : nativeHistoricalReportSha256(supplementalReport),
     xlmSupplementalSourceSha256: xlmSupplementalReport == null
       ? null
       : nativeHistoricalReportSha256(xlmSupplementalReport),
+    dataSupplementalSourceSha256: dataSupplementalReport == null
+      ? null
+      : nativeHistoricalReportSha256(dataSupplementalReport),
     portfolio: {
       portfolioId: 'z60stack25-portfolio',
       rule: portfolioRule,

@@ -54,6 +54,7 @@ const FUNDING_HISTORY_FILE = resolve(
   process.env.FUNDING_HISTORY_FILE ?? 'data/lighter-funding-history-native.json',
 );
 const OUTPUT_JSON = process.env.OUTPUT_JSON ? resolve(process.env.OUTPUT_JSON) : null;
+const KLINES_DIR = resolve(process.env.LIGHTER_KLINES_DIR ?? 'data/lighter-klines');
 const BAR_MINUTES = Number(process.env.BAR_MINUTES ?? 1);
 const Z_PERIODS = (process.env.Z_PERIODS ?? '20,60').split(',').map(Number);
 const Z_THRESHOLDS = (process.env.Z_THRESHOLDS ?? '1.5,2,2.5,3').split(',').map(Number);
@@ -1370,9 +1371,10 @@ function recentStats(trades: Trade[], stress: number): WindowStats[] {
 }
 
 const loaded = new Map<string, Arrays>();
+const candleSourceBySymbol = new Map<string, 'direct' | 'aggregated_from_1m'>();
 for (const symbol of SYMBOLS) {
-  const directFile = resolve('data', 'lighter-klines', `${symbol}-${BAR_MINUTES}m.json`);
-  const oneMinuteFile = resolve('data', 'lighter-klines', `${symbol}-1m.json`);
+  const directFile = resolve(KLINES_DIR, `${symbol}-${BAR_MINUTES}m.json`);
+  const oneMinuteFile = resolve(KLINES_DIR, `${symbol}-1m.json`);
   const file = existsSync(directFile) ? directFile : oneMinuteFile;
   if (!existsSync(file)) continue;
   const raw = JSON.parse(readFileSync(file, 'utf8')) as Candle[];
@@ -1382,6 +1384,7 @@ for (const symbol of SYMBOLS) {
     : raw;
   const candles = file === directFile ? windowed : aggregateCandles(windowed, BAR_MINUTES);
   loaded.set(symbol, build(candles, fundingBySymbol.get(symbol.toUpperCase())));
+  candleSourceBySymbol.set(symbol, file === directFile ? 'direct' : 'aggregated_from_1m');
 }
 
 const rows: Array<{
@@ -1859,6 +1862,7 @@ if (OUTPUT_JSON) {
     generatedAt: new Date().toISOString(),
     input: {
       symbols: [...loaded.keys()],
+      candleSources: Object.fromEntries(candleSourceBySymbol),
       barMinutes: BAR_MINUTES,
       lookbackDays: LOOKBACK_DAYS || null,
       ruleFilter: RULE_FILTER || null,

@@ -99,6 +99,10 @@ const NATIVE_HISTORICAL_EVIDENCE = (() => {
         process.env['LIGHTER_NATIVE_HISTORICAL_XLM_SUPPLEMENT_PATH']
           ?? 'data/lighter-vwz60-transfer2-validation.json',
       ), 'utf8')) as unknown,
+      JSON.parse(readFileSync(resolve(
+        process.env['LIGHTER_NATIVE_HISTORICAL_DATA_SUPPLEMENT_PATH']
+          ?? 'data/lighter-data-vwz60-1m-rebuild-validation.json',
+      ), 'utf8')) as unknown,
     );
   } catch (error) {
     logger.error({ error }, 'Native historical evidence unavailable');
@@ -181,6 +185,10 @@ const NATIVE_HISTORICAL_EVIDENCE = (() => {
 // preregistered choppy-regime condition: completed-bar ER60 must be <= 0.25.
 // It passed the same frozen gates, including both directions and every recent
 // window. It is also prospective Shadow only. BCH, TRX and JUP remain excluded.
+// STRAT-053 applies the existing 2.5-sigma VWZ touch rule to DATA. The direct
+// 5m result was independently reproduced by aggregating 259,200 gap-free native
+// 1m candles. It passed measured $100 L2 p95, exact funding, 4/4 folds,
+// IS/OOS, both sides and every recent window. It remains Shadow-only.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -644,6 +652,26 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 11.054,
     },
   },
+  {
+    id: 'data-vwz60-touch',
+    code: '053',
+    name: 'Volume Z60 · 2.5σ Touch · VWMA Exit',
+    symbol: 'DATAUSDT',
+    asset: 'DATA',
+    marketId: 34,
+    stopPct: 1.5,
+    backtest: {
+      // Independently rebuilt from gap-free native 1m candles into completed
+      // 5m bars. Costs use measured executable $100 L2 p95 and exact hourly
+      // funding. Historical qualification grants prospective Shadow only.
+      period: '2026-02-02 → 2026-08-01',
+      trades: 963,
+      winRatePct: 63.3,
+      profitFactor: 1.57,
+      netPct: 245.22,
+      maxDrawdownPct: 13.19,
+    },
+  },
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
     ...market,
     portfolioId: NATIVE_TREND_PORTFOLIO_ID,
@@ -670,6 +698,7 @@ const NATIVE_STRATEGY_IDS = [
   'hype-vwz60-touch',
   'xrp-vwz60-touch',
   'xlm-vwz60-touch-er25',
+  'data-vwz60-touch',
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => market.id),
 ] as const;
 const RETIRED_NATIVE_STRATEGY_IDS = [
@@ -777,6 +806,16 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     realEnabled: false,
     noteRu: 'XLM использует двусторонний вход за ±3σ от VWMA60 только при ER60≤0.25: фильтр исключает выраженный направленный рынок. После измеренного p95 стака и точного funding прошёл 180d, 4/4 периода, IS/OOS, Long/Short и окна 30/60/90d. Только prospective Shadow.',
     noteEn: 'XLM uses symmetric entries beyond ±3σ from VWMA60 only when ER60≤0.25, excluding strongly directional paths. After measured book p95 and exact funding it passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows. Prospective Shadow only.',
+  },
+  'data-vwz60-touch': {
+    family: 'vwz',
+    mode: 'touch',
+    threshold: 2.5,
+    period: 60,
+    timeExitBars: 240,
+    realEnabled: false,
+    noteRu: 'DATA использует двусторонний вход за ±2.5σ от VWMA60 и выход при возврате к VWMA60. Результат независимо воспроизведён из 259 200 gap-free свечей 1m, агрегированных в 5m, с измеренным p95 стака $100 и точным funding. Только prospective Shadow.',
+    noteEn: 'DATA uses symmetric entries beyond ±2.5σ from VWMA60 and exits on the return to VWMA60. The result was independently reproduced from 259,200 gap-free native 1m candles aggregated to 5m with measured $100 book p95 and exact funding. Prospective Shadow only.',
   },
   ...Object.fromEntries(NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => [
     market.id,

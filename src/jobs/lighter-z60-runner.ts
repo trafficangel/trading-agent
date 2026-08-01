@@ -109,6 +109,13 @@ const BASE_FEEDS: readonly NativeFeed[] = [
       },
     ],
   },
+  {
+    symbol: 'DATAUSDT',
+    marketId: 34,
+    strategies: [
+      { id: 'data-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 2.5 },
+    ],
+  },
 ];
 
 const TREND_PORTFOLIO_FEEDS: readonly NativeFeed[] = [

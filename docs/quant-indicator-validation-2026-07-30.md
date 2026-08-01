@@ -1379,3 +1379,37 @@ separate forward gate. A missing, changed, stale, or failed historical record
 therefore disables new Real entries. Historical pass still cannot promote a
 strategy automatically: the `$100` prospective forward gate and manual review
 remain mandatory.
+
+## Fourth standalone transfer — XLM and DATA (2026-08-01)
+
+Two additional standalone candidates were admitted only after market-specific
+`$100` executable L2 p95 costs and exact public hourly funding were available.
+Both remain prospective Shadow-only and are absent from the Real allowlist.
+
+XLM `VWZ60-3-touch+ER60<0.25` (`STRAT-052`) passed with 387 trades,
+`+48.52%` net, PF `1.344`, `-11.05%` additive drawdown, positive Long and
+Short books, 4/4 chronological folds, positive IS/OOS and positive 30/60/90d
+windows on both sides. Its frozen artifact is
+`data/lighter-vwz60-transfer2-validation.json`.
+
+DATA `VWZ60-2.5-touch` (`STRAT-053`) was selected from the pre-existing common
+indicator library, then independently reconstructed from 259,200 consecutive
+native one-minute candles aggregated into complete five-minute bars. The
+reconstruction produced 963 trades, `+245.22%` net after the measured
+`0.09195%` round-trip p95 and exact funding, PF `1.57`, `-13.19%` drawdown,
+4/4 folds, IS/OOS `+114.21 / +131.00`, Long/Short `+94.65 / +150.56`, and
+positive 30/60/90d windows on both sides. The immutable artifact is
+`data/lighter-data-vwz60-1m-rebuild-validation.json`.
+
+The magnitude of the DATA historical result is not treated as a profit claim.
+Its market has occasional zero-volume candles and large five-minute moves, so
+only signal-time executable L2 fills in the new prospective cohort can validate
+whether the historical edge transfers. New entries stop automatically at the
+same frozen Native forward drawdown, performance and execution-health gates.
+
+The unchanged XLM rule was also transferred to ZRO, XPL, AVAX, WLD and SUI;
+none qualified. A full standard-library sweep on those markets produced no
+qualified row. WLD's best aggregate result failed recent Short and drawdown
+gates, while ZRO's near-misses failed PF, confidence or recent direction gates.
+The same library found no qualifying VVV or PYTH rule. These rejected rows are
+not registered on the website or in Shadow.

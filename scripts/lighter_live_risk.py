@@ -13,6 +13,15 @@ NATIVE_HISTORICAL_EVIDENCE_VERSION = "lighter-native-historical-evidence-v1"
 NATIVE_HISTORICAL_REPORT_SHA256 = (
     "8327517f63cd44b508aa8824e5393ad46f48ab129223e2d4fbaeaa320d496f4e"
 )
+NATIVE_HISTORICAL_SUPPLEMENT_SHA256 = (
+    "afa6e2b1de6b64fd7917eb033177db4d1654538f54262b0bcfca0b110ea0fed1"
+)
+NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256 = (
+    "cb507f67f7e34d005b1b5360dd6aede718d9f8a1d6cf6ebba037b84b9018f445"
+)
+NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256 = (
+    "ea089a8d09788ca652e6cc7ce4543dd8f65ef269375bcf3405329ec17239c74f"
+)
 NATIVE_PROMOTION_GATE = {
     "targetClosed": 20.0,
     "minDurationDays": 7.0,
@@ -130,6 +139,18 @@ def native_promotion_report_error(
         return "native historical evidence version mismatch"
     if historical.get("sourceSha256") != NATIVE_HISTORICAL_REPORT_SHA256:
         return "native historical evidence hash mismatch"
+    if historical.get("supplementalSourceSha256") != NATIVE_HISTORICAL_SUPPLEMENT_SHA256:
+        return "native supplemental historical evidence hash mismatch"
+    if (
+        historical.get("xlmSupplementalSourceSha256")
+        != NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256
+    ):
+        return "native XLM supplemental historical evidence hash mismatch"
+    if (
+        historical.get("dataSupplementalSourceSha256")
+        != NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256
+    ):
+        return "native DATA supplemental historical evidence hash mismatch"
 
     strategies = report.get("strategies")
     if not isinstance(strategies, list):
