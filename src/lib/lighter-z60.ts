@@ -95,14 +95,18 @@ function volumeWeightedZAt(bars: readonly Vwz60Bar[], index: number, period: num
     weighted += bar.close * bar.volume;
     weightedSquares += bar.close * bar.close * bar.volume;
   }
-  if (!(volume > 0)) return null;
+  // The research engine maps an all-zero-volume window to VWMA=close and Z=0.
+  // Native Lighter can legitimately emit such completed candles on thin
+  // markets. Preserve that fail-closed, no-signal state instead of turning a
+  // quiet market into a runner evaluation error.
+  if (!(volume > 0)) return { mean: bars[index]!.close, z: 0 };
   const mean = weighted / volume;
   const variance = Math.max(0, weightedSquares / volume - mean * mean);
   const sigma = Math.sqrt(variance);
   // The research engine defines a positive-volume zero-variance window as
   // Z=0. Floating-point cancellation can also round a very small variance to
   // zero for low-priced markets. Treat both as an ordinary no-signal state;
-  // a truly unusable zero-volume window still fails closed above.
+  // an all-zero-volume window already returns the same neutral state above.
   if (!(sigma > 0)) return { mean, z: 0 };
   return {
     mean,

@@ -177,6 +177,10 @@ type PortfolioTrade = Trade & {
   trendRegime: TrendRegime;
   volatilityRegime: VolatilityRegime;
 };
+type ClassifiedTrade = Trade & {
+  trendRegime: TrendRegime;
+  volatilityRegime: VolatilityRegime;
+};
 type WindowStats = {
   days: number;
   n: number;
@@ -1782,6 +1786,8 @@ const rows: Array<{
   recent: WindowStats[];
   coverageDays: number;
   meanL95: number;
+  trendRegimes: TrendRegimeStats;
+  volatilityRegimes: VolatilityRegimeStats;
 }> = [];
 const portfolioGroups = new Map<string, PortfolioTrade[]>();
 
@@ -1812,6 +1818,49 @@ function classifyRegimes(
   };
 }
 
+type RegimeStat = { n: number; net: number; profitFactor: number };
+type TrendRegimeStats = Record<TrendRegime, RegimeStat>;
+type VolatilityRegimeStats = Record<VolatilityRegime, RegimeStat>;
+
+function standaloneRegimeStat(trades: ClassifiedTrade[], costPct: number): RegimeStat {
+  return {
+    n: trades.length,
+    net: sum(trades, costPct),
+    profitFactor: pf(trades, costPct),
+  };
+}
+
+function standaloneTrendRegimes(
+  trades: ClassifiedTrade[],
+  costPct: number,
+): TrendRegimeStats {
+  return {
+    bull: standaloneRegimeStat(
+      trades.filter((trade) => trade.trendRegime === 'bull'), costPct,
+    ),
+    bear: standaloneRegimeStat(
+      trades.filter((trade) => trade.trendRegime === 'bear'), costPct,
+    ),
+    mixed: standaloneRegimeStat(
+      trades.filter((trade) => trade.trendRegime === 'mixed'), costPct,
+    ),
+  };
+}
+
+function standaloneVolatilityRegimes(
+  trades: ClassifiedTrade[],
+  costPct: number,
+): VolatilityRegimeStats {
+  return {
+    highVol: standaloneRegimeStat(
+      trades.filter((trade) => trade.volatilityRegime === 'highVol'), costPct,
+    ),
+    lowVol: standaloneRegimeStat(
+      trades.filter((trade) => trade.volatilityRegime === 'lowVol'), costPct,
+    ),
+  };
+}
+
 for (const [symbol, arrays] of loaded) {
   const coverageDays = Math.max(
     0,
@@ -1826,6 +1875,10 @@ for (const [symbol, arrays] of loaded) {
     const trades = simulate(rule, arrays).map((trade) => ({
       ...trade,
       fundingPct: tradeFundingPct(measuredFunding, trade),
+    }));
+    const classifiedTrades: ClassifiedTrade[] = trades.map((trade) => ({
+      ...trade,
+      ...classifyRegimes(arrays, trade.entryIdx),
     }));
     if (coverageDays >= PORTFOLIO_MIN_COVERAGE_DAYS) {
       const group = portfolioGroups.get(rule.name) ?? [];
@@ -1859,6 +1912,8 @@ for (const [symbol, arrays] of loaded) {
       recent: recentStats(trades, costPct),
       coverageDays,
       meanL95: meanL95(trades, costPct),
+      trendRegimes: standaloneTrendRegimes(classifiedTrades, costPct),
+      volatilityRegimes: standaloneVolatilityRegimes(classifiedTrades, costPct),
     });
   }
 }
@@ -1878,6 +1933,21 @@ const qualified = rows
     && row.oos > 0
     && row.long > 0
     && row.short > 0
+    && row.trendRegimes.bull.n >= 20
+    && row.trendRegimes.bull.net > 0
+    && row.trendRegimes.bull.profitFactor >= 1.1
+    && row.trendRegimes.bear.n >= 20
+    && row.trendRegimes.bear.net > 0
+    && row.trendRegimes.bear.profitFactor >= 1.1
+    && (row.trendRegimes.mixed.n < 20
+      || (row.trendRegimes.mixed.net > 0
+        && row.trendRegimes.mixed.profitFactor >= 1.1))
+    && row.volatilityRegimes.highVol.n >= 20
+    && row.volatilityRegimes.highVol.net > 0
+    && row.volatilityRegimes.highVol.profitFactor >= 1.1
+    && row.volatilityRegimes.lowVol.n >= 20
+    && row.volatilityRegimes.lowVol.net > 0
+    && row.volatilityRegimes.lowVol.profitFactor >= 1.1
     && drawdown(row.trades, row.costPct) >= -MAX_BACKTEST_DD_PCT
     && row.recent.every((window) =>
       window.n >= 20
@@ -1994,10 +2064,6 @@ function portfolioRecent(trades: PortfolioTrade[]): WindowStats[] {
     };
   });
 }
-
-type RegimeStat = { n: number; net: number; profitFactor: number };
-type TrendRegimeStats = Record<TrendRegime, RegimeStat>;
-type VolatilityRegimeStats = Record<VolatilityRegime, RegimeStat>;
 
 function portfolioRegimeStat(trades: PortfolioTrade[]): RegimeStat {
   return {
@@ -2175,6 +2241,11 @@ const print = (row: typeof rows[number]): string =>
   + `L95 ${row.meanL95 >= 0 ? '+' : ''}${row.meanL95.toFixed(4)} `
   + `hold ${median(row.trades.map((trade) => (trade.exitAt - trade.entryAt) / 60_000)).toFixed(0)}m `
   + `f${row.folds}/4 IS/OOS ${fmt(row.is)}/${fmt(row.oos)} L/S ${fmt(row.long)}/${fmt(row.short)} `
+  + `trend B[n${row.trendRegimes.bull.n} ${fmt(row.trendRegimes.bull.net)}/PF${row.trendRegimes.bull.profitFactor.toFixed(2)}] `
+  + `R[n${row.trendRegimes.bear.n} ${fmt(row.trendRegimes.bear.net)}/PF${row.trendRegimes.bear.profitFactor.toFixed(2)}] `
+  + `M[n${row.trendRegimes.mixed.n} ${fmt(row.trendRegimes.mixed.net)}/PF${row.trendRegimes.mixed.profitFactor.toFixed(2)}] `
+  + `vol H[n${row.volatilityRegimes.highVol.n} ${fmt(row.volatilityRegimes.highVol.net)}/PF${row.volatilityRegimes.highVol.profitFactor.toFixed(2)}] `
+  + `L[n${row.volatilityRegimes.lowVol.n} ${fmt(row.volatilityRegimes.lowVol.net)}/PF${row.volatilityRegimes.lowVol.profitFactor.toFixed(2)}] `
   + row.recent.map((window) =>
     `W${window.days} n${window.n} ${fmt(window.net)}/PF${window.profitFactor.toFixed(2)} `
     + `L/S${fmt(window.long)}/${fmt(window.short)}`).join(' ');

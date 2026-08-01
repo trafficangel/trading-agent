@@ -3,7 +3,7 @@
 /**
  * Prove that the live runner's bounded 1,500-bar EMA seed produces the same
  * completed-bar entry decisions as the full-history research calculation for
- * the two frozen oscillator-confluence candidates.
+ * the two frozen regime-qualified oscillator-confluence candidates.
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -16,7 +16,7 @@ import {
 } from '../src/lib/lighter-oscillator-confluence.js';
 import type { Vwz60Bar, Z60Signal } from '../src/lib/lighter-z60.js';
 
-const RUNTIME_BARS = 1_500;
+const RUNTIME_BARS = Number(process.env.RUNTIME_BARS ?? 2_000);
 const BAR_MS = 300_000;
 
 type RawBar = { t: number; h: number; l: number; c: number; v: number };
@@ -72,9 +72,9 @@ function readBars(path: string): Vwz60Bar[] {
 
 const configs: readonly AuditConfig[] = [
   {
-    strategyId: 'hype-rsi14-willr14-ema400',
-    symbol: 'HYPE',
-    path: 'data/lighter-klines/HYPE-5m.json',
+    strategyId: 'zec-rsi14-willr14-ema400',
+    symbol: 'ZEC',
+    path: 'data/lighter-klines/ZEC-5m.json',
     evaluate: (bars) => evaluateRsiWilliamsTrend(bars),
     fullSignal(snapshot, fullEma) {
       const value = snapshot as RsiWilliamsSnapshot;
@@ -88,9 +88,9 @@ const configs: readonly AuditConfig[] = [
     },
   },
   {
-    strategyId: 'xlm-vwz60-mfi14-ema400',
-    symbol: 'XLM',
-    path: 'data/lighter-klines/XLM-5m.json',
+    strategyId: 'data-vwz60-mfi14-ema400',
+    symbol: 'DATA',
+    path: 'data/lighter-klines/DATA-5m.json',
     evaluate: (bars) => evaluateVwzMfiTrend(bars),
     fullSignal(snapshot, fullEma) {
       const value = snapshot as VwzMfiSnapshot;

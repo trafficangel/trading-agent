@@ -38,9 +38,11 @@ const MINUTE_MS = 60_000;
 const BAR_MS = 5 * MINUTE_MS;
 const HISTORY_BARS = 66;
 // EMA400 needs substantially more than one period of warmup. A 500-bar seed
-// produced a live trend-side mismatch on LIT; 1,500 bars matched the full
-// 180-day calculation on all 15 portfolio markets.
-const TREND_HISTORY_BARS = 1_500;
+// produced a live trend-side mismatch on LIT; the original 1,500-bar seed
+// matched the portfolio rules but missed two rare DATA confluence decisions.
+// Four 500-bar pages are sufficient to reproduce full-history EMA400 entry
+// decisions for the frozen oscillator candidates with zero signal mismatches.
+const TREND_HISTORY_BARS = 2_000;
 const TREND_PAGE_BARS = 500;
 const TIME_EXIT_BARS = 240;
 // Lighter commonly publishes the fifth one-minute candle 15–25 seconds after
@@ -106,15 +108,6 @@ const BASE_FEEDS: readonly NativeFeed[] = [
     marketId: 24,
     strategies: [
       { id: 'hype-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 2.5 },
-      {
-        id: 'hype-rsi14-willr14-ema400',
-        family: 'rsi_williams',
-        mode: 'touch',
-        threshold: 30,
-        auxiliaryThreshold: 20,
-        trendFilter: 'ema400',
-        maxBars: 120,
-      },
     ],
   },
   {
@@ -135,8 +128,15 @@ const BASE_FEEDS: readonly NativeFeed[] = [
         threshold: 3,
         efficiencyMax: 0.25,
       },
+    ],
+  },
+  {
+    symbol: 'DATAUSDT',
+    marketId: 34,
+    strategies: [
+      { id: 'data-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 2.5 },
       {
-        id: 'xlm-vwz60-mfi14-ema400',
+        id: 'data-vwz60-mfi14-ema400',
         family: 'vwz_mfi',
         mode: 'touch',
         threshold: 2.5,
@@ -147,10 +147,18 @@ const BASE_FEEDS: readonly NativeFeed[] = [
     ],
   },
   {
-    symbol: 'DATAUSDT',
-    marketId: 34,
+    symbol: 'ZECUSDT',
+    marketId: 90,
     strategies: [
-      { id: 'data-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 2.5 },
+      {
+        id: 'zec-rsi14-willr14-ema400',
+        family: 'rsi_williams',
+        mode: 'touch',
+        threshold: 30,
+        auxiliaryThreshold: 20,
+        trendFilter: 'ema400',
+        maxBars: 120,
+      },
     ],
   },
   {

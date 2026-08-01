@@ -4,12 +4,12 @@ import { describe, expect, it } from 'vitest';
 import {
   evaluateNativeHistoricalEvidence,
   NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256,
-  NATIVE_HISTORICAL_HYPE_CONFLUENCE_SHA256,
+  NATIVE_HISTORICAL_ZEC_CONFLUENCE_SHA256,
   NATIVE_HISTORICAL_REPORT_SHA256,
   NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256,
   NATIVE_HISTORICAL_SUPPLEMENT_SHA256,
   NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256,
-  NATIVE_HISTORICAL_XLM_CONFLUENCE_SHA256,
+  NATIVE_HISTORICAL_DATA_CONFLUENCE_SHA256,
 } from '../../src/lib/lighter-native-historical.js';
 
 describe('frozen Native historical evidence', () => {
@@ -142,27 +142,27 @@ describe('frozen Native historical evidence', () => {
     }
   });
 
-  it('admits the frozen HYPE and XLM oscillator-confluence reports', () => {
+  it('admits only the frozen regime-qualified ZEC and DATA confluence reports', () => {
     const paths = [
       'data/lighter-native-current-z60-validation.json',
       'data/lighter-vwz60-holdout-validation.json',
       'data/lighter-vwz60-transfer2-validation.json',
       'data/lighter-data-vwz60-1m-rebuild-validation.json',
       'data/lighter-rsi14-trend-transfer-validation.json',
-      'data/lighter-hype-confluence-direct5m-validation.json',
-      'data/lighter-oscillator-confluence-transfer2-5m-20260801.json',
+      'data/lighter-zec-confluence-regime-validation.json',
+      'data/lighter-data-confluence-regime-validation.json',
     ];
     const values = paths.map((path) => JSON.parse(readFileSync(resolve(path), 'utf8')) as unknown);
     const evidence = evaluateNativeHistoricalEvidence(
       values[0], values[1], values[2], values[3], values[4], values[5], values[6],
     );
-    expect(evidence.hypeConfluenceSourceSha256)
-      .toBe(NATIVE_HISTORICAL_HYPE_CONFLUENCE_SHA256);
-    expect(evidence.xlmConfluenceSourceSha256)
-      .toBe(NATIVE_HISTORICAL_XLM_CONFLUENCE_SHA256);
+    expect(evidence.zecConfluenceSourceSha256)
+      .toBe(NATIVE_HISTORICAL_ZEC_CONFLUENCE_SHA256);
+    expect(evidence.dataConfluenceSourceSha256)
+      .toBe(NATIVE_HISTORICAL_DATA_CONFLUENCE_SHA256);
     for (const strategyId of [
-      'hype-rsi14-willr14-ema400',
-      'xlm-vwz60-mfi14-ema400',
+      'zec-rsi14-willr14-ema400',
+      'data-vwz60-mfi14-ema400',
     ]) {
       const candidate = evidence.candidates.find((row) => row.strategyId === strategyId);
       expect(candidate?.passed).toBe(true);

@@ -128,7 +128,8 @@ describe('evaluateVwz60', () => {
 
   it('rejects a window without usable native volume', () => {
     const closes = Array.from({ length: 61 }, () => 100);
-    expect(evaluateVwz60(volumeBars(closes, closes.map(() => 0)), 60, 3, 'touch')).toBeNull();
+    expect(evaluateVwz60(volumeBars(closes, closes.map(() => 0)), 60, 3, 'touch'))
+      .toMatchObject({ currentZ: 0, signal: null });
   });
 
   it('treats a positive-volume flat window as a valid zero-Z no-signal state', () => {

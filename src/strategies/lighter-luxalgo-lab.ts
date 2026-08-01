@@ -109,12 +109,12 @@ const NATIVE_HISTORICAL_EVIDENCE = (() => {
           ?? 'data/lighter-rsi14-trend-transfer-validation.json',
       ), 'utf8')) as unknown,
       JSON.parse(readFileSync(resolve(
-        process.env['LIGHTER_NATIVE_HISTORICAL_HYPE_CONFLUENCE_PATH']
-          ?? 'data/lighter-hype-confluence-direct5m-validation.json',
+        process.env['LIGHTER_NATIVE_HISTORICAL_ZEC_CONFLUENCE_PATH']
+          ?? 'data/lighter-zec-confluence-regime-validation.json',
       ), 'utf8')) as unknown,
       JSON.parse(readFileSync(resolve(
-        process.env['LIGHTER_NATIVE_HISTORICAL_XLM_CONFLUENCE_PATH']
-          ?? 'data/lighter-oscillator-confluence-transfer2-5m-20260801.json',
+        process.env['LIGHTER_NATIVE_HISTORICAL_DATA_CONFLUENCE_PATH']
+          ?? 'data/lighter-data-confluence-regime-validation.json',
       ), 'utf8')) as unknown,
     );
   } catch (error) {
@@ -726,37 +726,37 @@ const STRATEGIES: readonly StrategySpec[] = [
     },
   },
   {
-    id: 'hype-rsi14-willr14-ema400',
+    id: 'zec-rsi14-willr14-ema400',
     code: '056',
     name: 'RSI14 + Williams %R14 · EMA400 · RSI50 Exit',
-    symbol: 'HYPEUSDT',
-    asset: 'HYPE',
-    marketId: 24,
+    symbol: 'ZECUSDT',
+    asset: 'ZEC',
+    marketId: 90,
     stopPct: 1,
     backtest: {
       period: '2026-02-01 → 2026-08-01',
-      trades: 145,
-      winRatePct: 69.0,
-      profitFactor: 1.678,
-      netPct: 28.010,
-      maxDrawdownPct: 6.101,
+      trades: 168,
+      winRatePct: 58.9,
+      profitFactor: 1.686,
+      netPct: 46.438,
+      maxDrawdownPct: 13.541,
     },
   },
   {
-    id: 'xlm-vwz60-mfi14-ema400',
+    id: 'data-vwz60-mfi14-ema400',
     code: '057',
     name: 'Volume Z60 + MFI14 · EMA400 · VWMA Exit',
-    symbol: 'XLMUSDT',
-    asset: 'XLM',
-    marketId: 119,
+    symbol: 'DATAUSDT',
+    asset: 'DATA',
+    marketId: 34,
     stopPct: 1,
     backtest: {
       period: '2026-02-02 → 2026-08-01',
-      trades: 178,
-      winRatePct: 63.5,
-      profitFactor: 1.556,
-      netPct: 28.146,
-      maxDrawdownPct: 6.423,
+      trades: 211,
+      winRatePct: 60.7,
+      profitFactor: 1.478,
+      netPct: 36.809,
+      maxDrawdownPct: 9.749,
     },
   },
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
@@ -788,8 +788,8 @@ const NATIVE_STRATEGY_IDS = [
   'data-vwz60-touch',
   'apt-rsi14-pullback-ema400',
   'dot-rsi14-pullback-ema400',
-  'hype-rsi14-willr14-ema400',
-  'xlm-vwz60-mfi14-ema400',
+  'zec-rsi14-willr14-ema400',
+  'data-vwz60-mfi14-ema400',
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => market.id),
 ] as const;
 const RETIRED_NATIVE_STRATEGY_IDS = [
@@ -797,6 +797,8 @@ const RETIRED_NATIVE_STRATEGY_IDS = [
   'sol-z60-touch',
   'bnb-z60-touch',
   'ltc-z60-touch',
+  'hype-rsi14-willr14-ema400',
+  'xlm-vwz60-mfi14-ema400',
 ] as const;
 const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(RETIRED_NATIVE_STRATEGY_IDS);
 // Native Quant remains prospective Shadow-only. Historical rows stay visible,
@@ -931,7 +933,7 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     noteRu: 'DOT прошёл IS/OOS, обе стороны, 3/4 фолда и окна 30/60/90d после измеренных издержек и funding. Соседние RSI20 и EMA500 также проходят, но просадка выше APT, поэтому это вторичный prospective Shadow-кандидат.',
     noteEn: 'DOT passed IS/OOS, both sides, 3/4 folds and 30/60/90d windows after measured execution and funding. Adjacent RSI20 and EMA500 also pass, but drawdown is higher than APT, so this is the secondary prospective Shadow candidate.',
   },
-  'hype-rsi14-willr14-ema400': {
+  'zec-rsi14-willr14-ema400': {
     family: 'rsi_williams',
     mode: 'touch',
     threshold: 30,
@@ -940,10 +942,10 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     timeExitBars: 120,
     trendFilter: 'ema400',
     realEnabled: false,
-    noteRu: 'HYPE прошёл 181d, 145 сделок, 4/4 фолда, IS/OOS, Long/Short и окна 30/60/90d после измеренного $100 p95 и точного funding. Прямые 5m свечи полностью совпали с независимой агрегацией из 1m на 51 661 баре; соседние RSI/Williams/EMA остаются положительными. Только prospective Shadow.',
-    noteEn: 'HYPE passed 181d, 145 trades, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows after measured $100 p95 and exact funding. Direct 5m candles matched independent 1m aggregation across 51,661 bars; adjacent RSI/Williams/EMA settings remain positive. Prospective Shadow only.',
+    noteRu: 'ZEC прошёл 181d, 168 сделок, 3/4 фолда, IS/OOS, Long/Short и окна 30/60/90d после измеренного $100 p95 и точного funding. Отдельно положителен в bull, bear, mixed, high-vol и low-vol режимах; центральная настройка и четыре соседние клетки прошли строгий режимный аудит. Только prospective Shadow.',
+    noteEn: 'ZEC passed 181d, 168 trades, 3/4 folds, IS/OOS, Long/Short and 30/60/90d windows after measured $100 p95 and exact funding. It is independently positive in bull, bear, mixed, high-vol and low-vol regimes; the centre setting and four neighbours passed the strict regime audit. Prospective Shadow only.',
   },
-  'xlm-vwz60-mfi14-ema400': {
+  'data-vwz60-mfi14-ema400': {
     family: 'vwz_mfi',
     mode: 'touch',
     threshold: 2.5,
@@ -952,8 +954,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     timeExitBars: 120,
     trendFilter: 'ema400',
     realEnabled: false,
-    noteRu: 'XLM прошёл 180d, 178 сделок, 4/4 фолда, IS/OOS, Long/Short и окна 30/60/90d после измеренного $100 p95 и точного funding. Соседние VWZ/MFI/EMA параметры остаются положительными. Только prospective Shadow.',
-    noteEn: 'XLM passed 180d, 178 trades, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows after measured $100 p95 and exact funding. Adjacent VWZ/MFI/EMA settings remain positive. Prospective Shadow only.',
+    noteRu: 'DATA прошёл 180d, 211 сделок, 4/4 фолда, IS/OOS, Long/Short и окна 30/60/90d после измеренного $100 p95 и точного funding. Bull, bear, mixed, high-vol и low-vol сегменты положительны; MFI30/35/40 при фиксированных VWZ2.5/EMA400 подтверждают устойчивость. Только prospective Shadow.',
+    noteEn: 'DATA passed 180d, 211 trades, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows after measured $100 p95 and exact funding. Bull, bear, mixed, high-vol and low-vol segments are positive; MFI30/35/40 at fixed VWZ2.5/EMA400 confirm stability. Prospective Shadow only.',
   },
   ...Object.fromEntries(NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => [
     market.id,

@@ -12,10 +12,10 @@ export const NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256 =
   'ea089a8d09788ca652e6cc7ce4543dd8f65ef269375bcf3405329ec17239c74f';
 export const NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256 =
   '831526b9c633b1d9020ee84b7893d52566751eea11d3b5e8c962cb8ff6270e54';
-export const NATIVE_HISTORICAL_HYPE_CONFLUENCE_SHA256 =
-  '9c830dc699fe787b7ee67a5f63dc351247d4d8279f2fb9a7e827db7143e71bb4';
-export const NATIVE_HISTORICAL_XLM_CONFLUENCE_SHA256 =
-  'ece3a58fc2804607849aec0f80e19d40c6238ae44d710f8035db254454182629';
+export const NATIVE_HISTORICAL_ZEC_CONFLUENCE_SHA256 =
+  '5e61b12d3d6b66f4036c37372d8743f49fcf7f5aa7b205596c20d0e6aa555734';
+export const NATIVE_HISTORICAL_DATA_CONFLUENCE_SHA256 =
+  'd3bb8d91fa961e02805482db07608ce763b1531cdb4f6b193dfb43b728b72d07';
 
 const HISTORICAL_CANDIDATES = [
   { strategyId: 'sol-z60-reclaim', symbol: 'SOL', rule: 'Z60-3-reclaim' },
@@ -59,15 +59,15 @@ const RSI_SUPPLEMENTAL_HISTORICAL_CANDIDATES = [
   },
 ] as const;
 
-const HYPE_CONFLUENCE_HISTORICAL_CANDIDATES = [{
-  strategyId: 'hype-rsi14-willr14-ema400',
-  symbol: 'HYPE',
+const ZEC_CONFLUENCE_HISTORICAL_CANDIDATES = [{
+  strategyId: 'zec-rsi14-willr14-ema400',
+  symbol: 'ZEC',
   rule: 'CONF-RSI14-WILLR14-30/70+EMA400',
 }] as const;
 
-const XLM_CONFLUENCE_HISTORICAL_CANDIDATES = [{
-  strategyId: 'xlm-vwz60-mfi14-ema400',
-  symbol: 'XLM',
+const DATA_CONFLUENCE_HISTORICAL_CANDIDATES = [{
+  strategyId: 'data-vwz60-mfi14-ema400',
+  symbol: 'DATA',
   rule: 'CONF-VWZ60-2.5+MFI14-35/65+EMA400',
 }] as const;
 
@@ -78,6 +78,12 @@ type HistoricalWindow = {
   profitFactor: number;
   long: number;
   short: number;
+};
+
+type HistoricalRegime = {
+  n: number;
+  net: number;
+  profitFactor: number;
 };
 
 type HistoricalRow = {
@@ -97,6 +103,15 @@ type HistoricalRow = {
   long: number;
   short: number;
   recent: HistoricalWindow[];
+  trendRegimes?: {
+    bull: HistoricalRegime;
+    bear: HistoricalRegime;
+    mixed: HistoricalRegime;
+  };
+  volatilityRegimes?: {
+    highVol: HistoricalRegime;
+    lowVol: HistoricalRegime;
+  };
 };
 
 type HistoricalReport = {
@@ -195,6 +210,7 @@ function evaluateSupplementalCandidates(
   report: HistoricalReport | null,
   definitions: readonly { strategyId: string; symbol: string; rule: string }[],
   label: string,
+  requireRegimes = false,
 ) {
   if (report == null) return [];
   return definitions.map((candidate) => {
@@ -223,6 +239,37 @@ function evaluateSupplementalCandidates(
       throw new Error(`${label} historical evidence recent windows invalid: ${candidate.strategyId}`);
     }
     const reasons = rowReasons(row);
+    if (requireRegimes) {
+      if (!row.trendRegimes || !row.volatilityRegimes) {
+        throw new Error(`${label} historical evidence regimes missing: ${candidate.strategyId}`);
+      }
+      const requiredRegimes = [
+        ['bull', row.trendRegimes.bull],
+        ['bear', row.trendRegimes.bear],
+        ['highVol', row.volatilityRegimes.highVol],
+        ['lowVol', row.volatilityRegimes.lowVol],
+      ] as const;
+      for (const [regimeLabel, regime] of requiredRegimes) {
+        number(regime.n, `${candidate.strategyId}.${regimeLabel}.n`);
+        number(regime.net, `${candidate.strategyId}.${regimeLabel}.net`);
+        number(regime.profitFactor, `${candidate.strategyId}.${regimeLabel}.profitFactor`);
+        if (regime.n < 20) reasons.push(`${regimeLabel} trades ${regime.n} < 20`);
+        if (!(regime.net > 0)) reasons.push(`${regimeLabel} net ${regime.net.toFixed(3)}% <= 0%`);
+        if (regime.profitFactor < 1.1) {
+          reasons.push(`${regimeLabel} PF ${regime.profitFactor.toFixed(2)} < 1.10`);
+        }
+      }
+      const mixed = row.trendRegimes.mixed;
+      number(mixed.n, `${candidate.strategyId}.mixed.n`);
+      number(mixed.net, `${candidate.strategyId}.mixed.net`);
+      number(mixed.profitFactor, `${candidate.strategyId}.mixed.profitFactor`);
+      if (mixed.n >= 20) {
+        if (!(mixed.net > 0)) reasons.push(`mixed net ${mixed.net.toFixed(3)}% <= 0%`);
+        if (mixed.profitFactor < 1.1) {
+          reasons.push(`mixed PF ${mixed.profitFactor.toFixed(2)} < 1.10`);
+        }
+      }
+    }
     const passed = report.qualified.includes(`${candidate.symbol}:${candidate.rule}`);
     if (passed !== (reasons.length === 0)) {
       throw new Error(`${label} historical evidence qualification mismatch: ${candidate.strategyId}`);
@@ -237,8 +284,8 @@ export function evaluateNativeHistoricalEvidence(
   xlmSupplementalValue?: unknown,
   dataSupplementalValue?: unknown,
   rsiSupplementalValue?: unknown,
-  hypeConfluenceValue?: unknown,
-  xlmConfluenceValue?: unknown,
+  zecConfluenceValue?: unknown,
+  dataConfluenceValue?: unknown,
 ) {
   if (!value || typeof value !== 'object') throw new Error('historical evidence missing');
   const report = value as HistoricalReport;
@@ -334,21 +381,21 @@ export function evaluateNativeHistoricalEvidence(
       'RSI14-',
       'RSI supplemental',
     );
-  const hypeConfluenceReport = hypeConfluenceValue == null
+  const zecConfluenceReport = zecConfluenceValue == null
     ? null
     : validateSupplementalReport(
-      hypeConfluenceValue,
-      NATIVE_HISTORICAL_HYPE_CONFLUENCE_SHA256,
-      'CONF-',
-      'HYPE confluence',
+      zecConfluenceValue,
+      NATIVE_HISTORICAL_ZEC_CONFLUENCE_SHA256,
+      'CONF-RSI14-WILLR14-30/70+EMA400',
+      'ZEC confluence',
     );
-  const xlmConfluenceReport = xlmConfluenceValue == null
+  const dataConfluenceReport = dataConfluenceValue == null
     ? null
     : validateSupplementalReport(
-      xlmConfluenceValue,
-      NATIVE_HISTORICAL_XLM_CONFLUENCE_SHA256,
-      'CONF-',
-      'XLM confluence',
+      dataConfluenceValue,
+      NATIVE_HISTORICAL_DATA_CONFLUENCE_SHA256,
+      'CONF-VWZ60-2.5+MFI14-35/65+EMA400',
+      'DATA confluence',
     );
   if (dataSupplementalReport != null) {
     const symbols = dataSupplementalReport.input.symbols;
@@ -362,28 +409,29 @@ export function evaluateNativeHistoricalEvidence(
       || (sources as Record<string, unknown>).DATA !== 'aggregated_from_1m'
     ) throw new Error('DATA supplemental historical evidence source contract invalid');
   }
-  if (hypeConfluenceReport != null) {
-    const symbols = hypeConfluenceReport.input.symbols;
-    const sources = hypeConfluenceReport.input.candleSources;
+  if (zecConfluenceReport != null) {
+    const symbols = zecConfluenceReport.input.symbols;
+    const sources = zecConfluenceReport.input.candleSources;
     if (
       !Array.isArray(symbols)
       || symbols.length !== 1
-      || symbols[0] !== 'HYPE'
+      || symbols[0] !== 'ZEC'
       || !sources
       || typeof sources !== 'object'
-      || (sources as Record<string, unknown>).HYPE !== 'direct'
-    ) throw new Error('HYPE confluence historical evidence source contract invalid');
+      || (sources as Record<string, unknown>).ZEC !== 'direct'
+    ) throw new Error('ZEC confluence historical evidence source contract invalid');
   }
-  if (xlmConfluenceReport != null) {
-    const symbols = xlmConfluenceReport.input.symbols;
-    const sources = xlmConfluenceReport.input.candleSources;
+  if (dataConfluenceReport != null) {
+    const symbols = dataConfluenceReport.input.symbols;
+    const sources = dataConfluenceReport.input.candleSources;
     if (
       !Array.isArray(symbols)
-      || !symbols.includes('XLM')
+      || symbols.length !== 1
+      || symbols[0] !== 'DATA'
       || !sources
       || typeof sources !== 'object'
-      || (sources as Record<string, unknown>).XLM !== 'direct'
-    ) throw new Error('XLM confluence historical evidence source contract invalid');
+      || (sources as Record<string, unknown>).DATA !== 'direct'
+    ) throw new Error('DATA confluence historical evidence source contract invalid');
   }
   const supplementalCandidates = evaluateSupplementalCandidates(
     supplementalReport,
@@ -405,15 +453,17 @@ export function evaluateNativeHistoricalEvidence(
     RSI_SUPPLEMENTAL_HISTORICAL_CANDIDATES,
     'RSI supplemental',
   );
-  const hypeConfluenceCandidates = evaluateSupplementalCandidates(
-    hypeConfluenceReport,
-    HYPE_CONFLUENCE_HISTORICAL_CANDIDATES,
-    'HYPE confluence',
+  const zecConfluenceCandidates = evaluateSupplementalCandidates(
+    zecConfluenceReport,
+    ZEC_CONFLUENCE_HISTORICAL_CANDIDATES,
+    'ZEC confluence',
+    true,
   );
-  const xlmConfluenceCandidates = evaluateSupplementalCandidates(
-    xlmConfluenceReport,
-    XLM_CONFLUENCE_HISTORICAL_CANDIDATES,
-    'XLM confluence',
+  const dataConfluenceCandidates = evaluateSupplementalCandidates(
+    dataConfluenceReport,
+    DATA_CONFLUENCE_HISTORICAL_CANDIDATES,
+    'DATA confluence',
+    true,
   );
 
   const portfolioRule = 'Z60STACK-2.5-touch';
@@ -429,8 +479,8 @@ export function evaluateNativeHistoricalEvidence(
       ...xlmSupplementalCandidates,
       ...dataSupplementalCandidates,
       ...rsiSupplementalCandidates,
-      ...hypeConfluenceCandidates,
-      ...xlmConfluenceCandidates,
+      ...zecConfluenceCandidates,
+      ...dataConfluenceCandidates,
     ],
     supplementalSourceSha256: supplementalReport == null
       ? null
@@ -444,12 +494,12 @@ export function evaluateNativeHistoricalEvidence(
     rsiSupplementalSourceSha256: rsiSupplementalReport == null
       ? null
       : nativeHistoricalReportSha256(rsiSupplementalReport),
-    hypeConfluenceSourceSha256: hypeConfluenceReport == null
+    zecConfluenceSourceSha256: zecConfluenceReport == null
       ? null
-      : nativeHistoricalReportSha256(hypeConfluenceReport),
-    xlmConfluenceSourceSha256: xlmConfluenceReport == null
+      : nativeHistoricalReportSha256(zecConfluenceReport),
+    dataConfluenceSourceSha256: dataConfluenceReport == null
       ? null
-      : nativeHistoricalReportSha256(xlmConfluenceReport),
+      : nativeHistoricalReportSha256(dataConfluenceReport),
     portfolio: {
       portfolioId: 'z60stack25-portfolio',
       rule: portfolioRule,
