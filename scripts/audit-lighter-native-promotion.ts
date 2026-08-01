@@ -130,7 +130,6 @@ const portfolio = evaluateNativeForwardRows(
   10,
   4,
 );
-db.close();
 
 const evaluatedStrategies = strategies.map((row) => ({
   ...row,
@@ -156,6 +155,7 @@ const p2Members = P2_IDS.map((strategyId) => {
     ),
   };
 });
+db.close();
 const pausedShadowStrategyIds = [...evaluatedStrategies, ...p2Members]
   .filter((row) => row.decision.shadowAction === 'pause_new_entries')
   .map((row) => row.strategyId);
