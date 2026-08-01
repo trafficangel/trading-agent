@@ -2867,13 +2867,13 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Расчёт.', 'Calculation.')}</b> ${t(
           lang,
-          'Для STRAT-030–033 по последним 60 закрытиям считаются SMA60 и Z. STRAT-034–035 взвешивают их объёмом. Portfolio P2 дополнительно считает EMA200 и EMA400 по завершённым 5m свечам. Незавершённая свеча в расчёт не попадает.',
-          'STRAT-030–033 calculate SMA60 and Z from the latest 60 closes. STRAT-034–035 volume-weight them. Portfolio P2 also calculates EMA200 and EMA400 from completed 5m candles. The unfinished candle is never included.',
+          'STRAT-034–035 считают объёмно-взвешенные Z60 и VWMA60. Portfolio P2 считает обычные Z60/SMA60 и дополнительно EMA200/EMA400 по завершённым 5m свечам. Незавершённая свеча в расчёт не попадает.',
+          'STRAT-034–035 calculate volume-weighted Z60 and VWMA60. Portfolio P2 uses standard Z60/SMA60 plus EMA200/EMA400 on completed 5m candles. The unfinished candle is never included.',
         )}</li>
         <li><b>${t(lang, 'Решение.', 'Decision.')}</b> ${t(
           lang,
-          'Touch входит сразу за порогом ±σ; Reclaim ждёт возврата Z обратно внутрь порога. Позиция закрывается у своей средней: SMA60 для STRAT-030–033 или VWMA60 для STRAT-034–035; резервный выход — 240 баров, то есть 20 часов.',
-          'Touch enters immediately beyond its ±σ threshold; Reclaim waits for Z to return inside the threshold. A position exits at its own mean: SMA60 for STRAT-030–033 or VWMA60 for STRAT-034–035; the fallback exit is 240 bars, or 20 hours.',
+          'Touch входит сразу за своим порогом ±σ. STRAT-034–035 выходят у VWMA60; P2 — у SMA60. Резервный выход для всех рабочих моделей — 240 баров, то есть 20 часов.',
+          'Touch enters immediately beyond its ±σ threshold. STRAT-034–035 exit at VWMA60; P2 exits at SMA60. Every active model has a 240-bar, or 20-hour, fallback exit.',
         )}</li>
         <li><b>${t(lang, 'Внутренний сигнал.', 'Internal signal.')}</b> ${t(
           lang,
@@ -2887,8 +2887,8 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Real-canary и защита.', 'Real canary and protection.')}</b> ${t(
           lang,
-          'Тот же сигнал видит отдельный Real-исполнитель. Real требует одновременно неизменённый исторический гейт, минимум 20 prospective закрытий за 7+ дней и ручной допуск. Сейчас технически зарегистрированные STRAT-030/032/033 исторический гейт не проходят, поэтому их новые Real-входы запрещены независимо от будущего Shadow-результата. После допуска и подтверждения позиции биржевой reduce-only stop 1.5% ставится сразу; пауза не мешает выходу уже открытой позиции. STRAT-031/034/035 и портфель P2 остаются только в Shadow.',
-          'A separate Real executor observes the same signal. Real requires an unchanged historical pass, at least 20 prospective closes over 7+ days, and manual approval. The technically registered STRAT-030/032/033 currently fail the historical gate, so new Real entries remain disabled regardless of future Shadow results. After approval and position confirmation, an exchange-native 1.5% reduce-only stop is placed immediately; an entry pause does not block exits for an existing position. STRAT-031/034/035 and portfolio P2 remain Shadow-only.',
+          'Сейчас ни одна Native‑стратегия не зарегистрирована в Real‑исполнителе. STRAT-034/035 и P2 сначала должны накопить минимум 20 prospective закрытий за 7+ дней, пройти frozen‑гейт и получить ручной допуск. До этого они физически работают только в Shadow.',
+          'No Native strategy is currently registered with the Real executor. STRAT-034/035 and P2 must first collect at least 20 prospective closes over 7+ days, pass the frozen gate, and receive manual approval. Until then they are physically Shadow-only.',
         )}</li>
       </ol>
       <div class="ll-native-specs">${strategyLines}</div>
@@ -3410,7 +3410,7 @@ async function render(
   const scopeLabel = requested.strategy
     ? `STRAT-${requested.strategy.code} · ${requested.strategy.asset}`
     : requested.group === 'native'
-      ? t(lang, '6 самостоятельных + P2 · 15 рынков', '6 standalone + P2 · 15 markets')
+      ? t(lang, '2 самостоятельные + P2 · 15 рынков', '2 standalone + P2 · 15 markets')
       : [...new Set(scopeSpecs.map((spec) => spec.asset))].join(' · ');
   const scopeMarketCount = new Set(scopeSpecs.map((spec) => spec.marketId)).size;
   const shadowAverageUsd = s.closed ? s.netUsd / s.closed : 0;
