@@ -1444,3 +1444,23 @@ last 30% chronological segment (for example `VWZ60-2.5+ER60<0.25` had IS/OOS
 `+22.76/+548.17`). This is treated as a regime-shift warning, not as evidence
 for a new strategy. DATA therefore remains registered only as the independently
 validated five-minute `STRAT-053`; no 1m Shadow or Real route was added.
+
+## Independent 5m challenger rejection audit (2026-08-01)
+
+Two fixed symmetric challengers were then evaluated at 5m with the same
+completed-bar/next-open convention, measured `$100` execution costs and exact
+hourly settlements. No threshold was changed after seeing the result.
+
+`FUNDZ168-PZ60-2-H360` fades price and funding crowding in the same direction.
+Across 15 discovery markets it produced `+54.86%` aggregate net and 4/4
+positive chronological folds, but still failed the frozen gate: PF was only
+`1.17`, capacity drawdown was `5.71%`, mean L95 was negative, the bull regime
+lost money and the recent 30-day Short book was negative. ETH's positive
+headline was almost entirely Long and therefore was not promoted separately.
+
+The unfiltered `HOURFADE-A1-V1-H30` portfolio was negative (PF `0.96`) but its
+high-volatility diagnostic segment was positive. The already frozen high-vol
+filter was therefore tested unchanged only on six markets excluded from that
+discovery set: CRV, EIGEN, FARTCOIN, MNT, ONDO and PENGU. This holdout failed
+with PF `0.91`, 1/4 folds, negative IS/OOS, `13.80%` capacity drawdown and a
+negative Short book. Neither challenger was registered in Shadow or Real.
