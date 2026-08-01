@@ -70,6 +70,7 @@ const ENABLE_HOURLY_FADE = process.env.ENABLE_HOURLY_FADE === '1';
 const ENABLE_HOURLY_FADE_HIGHVOL = process.env.ENABLE_HOURLY_FADE_HIGHVOL === '1';
 const ENABLE_SERIAL_ADAPTIVE = process.env.ENABLE_SERIAL_ADAPTIVE === '1';
 const ENABLE_FUNDING_CROWDING = process.env.ENABLE_FUNDING_CROWDING === '1';
+const ENABLE_SHOCK_REVERSAL = process.env.ENABLE_SHOCK_REVERSAL === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -971,6 +972,45 @@ function rules(): Rule[] {
       return fundingNormalized || priceNormalized;
     },
   });
+
+  // Preregistered symmetric one-minute shock reversal. A completed candle
+  // must move by a fixed multiple of the completed ATR14 and trade at least a
+  // fixed multiple of its trailing volume mean. The position fades that move
+  // at the next bar open, exits on a completed EMA5 mean reversion, or at the
+  // frozen time limit. The intentionally small grid is for discovery across
+  // markets; any selected rule must then survive a separate holdout universe.
+  if (ENABLE_SHOCK_REVERSAL) {
+    for (const bodyAtr of [1.5, 2, 2.5]) {
+      for (const volumeRatio of [1, 1.5]) {
+        for (const holdMinutes of [15, 30]) {
+          out.push({
+            name: `SHOCKREV-A${bodyAtr}-V${volumeRatio}-E5-H${holdMinutes}`,
+            warmup: 22,
+            slPct: 0.01,
+            maxBars: Math.max(1, Math.round(holdMinutes / BAR_MINUTES)),
+            entry(a, i) {
+              const bar = a.c[i]!;
+              const normalizedBody = a.atr14[i]! > 0
+                ? (bar.c - bar.o) / a.atr14[i]!
+                : 0;
+              const relativeVolume = a.volumeSma20[i]! > 0
+                ? bar.v / a.volumeSma20[i]!
+                : 0;
+              if (relativeVolume < volumeRatio) return null;
+              if (normalizedBody >= bodyAtr) return 'short';
+              if (normalizedBody <= -bodyAtr) return 'long';
+              return null;
+            },
+            exit(a, i, side) {
+              return side === 'long'
+                ? a.close[i]! >= a.ema5[i]!
+                : a.close[i]! <= a.ema5[i]!;
+            },
+          });
+        }
+      }
+    }
+  }
 
   // A predeclared two-sided mean-reversion variant for choppy regimes.
   // Kaufman ER prevents fading a statistically extreme move when the recent

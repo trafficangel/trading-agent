@@ -1413,3 +1413,34 @@ qualified row. WLD's best aggregate result failed recent Short and drawdown
 gates, while ZRO's near-misses failed PF, confidence or recent direction gates.
 The same library found no qualifying VVV or PYTH rule. These rejected rows are
 not registered on the website or in Shadow.
+
+## Native 1m rejection audit (2026-08-01)
+
+The one-minute search remains a separate research track; a profitable five-
+minute rule is never assumed to transfer to one minute. Three symmetric
+families were evaluated on 15 discovery markets over 180 days with completed-
+bar signals, next-bar execution, market-specific executable `$100` L2 p95,
+observed-max sensitivity and exact hourly funding:
+
+- `SHOCKREV`: fade a completed 1m body of 1.5/2/2.5 ATR when trailing-volume
+  participation is at least 1/1.5x, then exit at EMA5 or after 15/30 minutes;
+- `FBR20`: fade a volume-confirmed failed break of the preceding 20-bar range;
+- `SQZ20`: trade a symmetric volume-confirmed release from completed
+  Bollinger/Keltner compression.
+
+None qualified. The best `SHOCKREV` discovery row had PF only `1.04`, negative
+IS and drawdown near `39%`; its best fixed-rule portfolio had PF `0.77`, all
+four chronological folds negative and negative Long/Short, bull/bear/mixed and
+high/low-volatility books. `FBR20` produced portfolio PF `0.78`, negative OOS
+and negative recent windows. `SQZ20` produced portfolio PF `0.64`, 0/4 folds
+and negative results in every reported regime. Because every discovery family
+failed before selection, no holdout tuning or Shadow registration was done.
+
+DATA was also tested separately on its gap-free native 1m candles because its
+five-minute rule had passed. Several 1m mean-reversion rows showed large recent
+profits, but none passed the frozen `15%` drawdown gate. The best candidates
+had `30-54%` additive drawdown and most of their profit appeared only in the
+last 30% chronological segment (for example `VWZ60-2.5+ER60<0.25` had IS/OOS
+`+22.76/+548.17`). This is treated as a regime-shift warning, not as evidence
+for a new strategy. DATA therefore remains registered only as the independently
+validated five-minute `STRAT-053`; no 1m Shadow or Real route was added.
