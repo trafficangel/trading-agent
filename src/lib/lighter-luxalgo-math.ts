@@ -110,6 +110,13 @@ export type NativeForwardSignalRow = {
   sell_slippage_pct: number | null;
 };
 
+export type NativePromotionDecision = {
+  shadowAction: 'continue' | 'pause_new_entries';
+  realAction: 'disabled' | 'manual_canary_review';
+  recoverableFromNewSignals: boolean;
+  manualReviewRequired: boolean;
+};
+
 function sum(values: readonly number[]): number {
   return values.reduce((total, value) => total + value, 0);
 }
@@ -409,6 +416,50 @@ export function evaluateNativeForwardRows(
     drawdownCapacityUnits,
     minUniqueSymbols,
   });
+}
+
+/**
+ * One canonical operator decision for the independent audit. Runtime applies
+ * the same two gates directly before every Native entry: frozen historical
+ * evidence first, then prospective forward evidence. A failed historical
+ * contract is never recoverable from new signals and therefore cannot be
+ * reported as a continuing Shadow cohort.
+ */
+export function nativePromotionDecision(
+  evaluation: NativeForwardGateEvaluation,
+  realExecutorRegistered: boolean,
+  historicalPassed: boolean,
+): NativePromotionDecision {
+  if (!historicalPassed) return {
+    shadowAction: 'pause_new_entries',
+    realAction: 'disabled',
+    recoverableFromNewSignals: false,
+    manualReviewRequired: true,
+  };
+  const operationalPause = evaluation.reasons.every((reason) =>
+    reason.startsWith('recent ') && (
+      reason.includes('capture errors')
+      || reason.includes('book-age samples')
+      || reason.includes('book age p95')
+    ));
+  if (!evaluation.entryAllowed) return {
+    shadowAction: 'pause_new_entries',
+    realAction: 'disabled',
+    recoverableFromNewSignals: operationalPause,
+    manualReviewRequired: !operationalPause,
+  };
+  if (evaluation.status === 'passed' && realExecutorRegistered) return {
+    shadowAction: 'continue',
+    realAction: 'manual_canary_review',
+    recoverableFromNewSignals: false,
+    manualReviewRequired: true,
+  };
+  return {
+    shadowAction: 'continue',
+    realAction: 'disabled',
+    recoverableFromNewSignals: false,
+    manualReviewRequired: false,
+  };
 }
 
 /** VWAP for a fixed quote-currency notional. Returns null if depth is short. */

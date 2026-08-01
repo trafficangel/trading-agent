@@ -5,6 +5,7 @@ import {
   estimatedFundingPnlPct,
   LUXALGO_SHADOW_NOTIONAL_USD,
   nativeHistoricalShadowBlockReason,
+  nativePromotionDecision,
   NATIVE_SHADOW_NOTIONAL_USD,
   pricePnlPct,
   quoteNotionalVwap,
@@ -46,6 +47,38 @@ describe('Lighter LuxAlgo shadow math', () => {
   it('allows Native Shadow only when frozen historical evidence passed', () => {
     expect(nativeHistoricalShadowBlockReason({ passed: true, reasons: [] }))
       .toBeNull();
+  });
+
+  it('reports a failed historical contract as a Shadow pause', () => {
+    const evaluation = evaluateNativeForwardGate({
+      ...forwardCoverage(0),
+      netPcts: [],
+      signalCount: 0,
+      captureErrors: 0,
+      executionCostPcts: [],
+      bookAgesMs: [],
+    });
+    expect(nativePromotionDecision(evaluation, false, false)).toEqual({
+      shadowAction: 'pause_new_entries',
+      realAction: 'disabled',
+      recoverableFromNewSignals: false,
+      manualReviewRequired: true,
+    });
+  });
+
+  it('keeps Real manual after every frozen gate passes', () => {
+    const evaluation = evaluateNativeForwardGate({
+      ...forwardCoverage(20),
+      netPcts: Array.from({ length: 20 }, (_, index) =>
+        index % 4 === 0 ? -0.2 : 0.25),
+      signalCount: 20,
+      captureErrors: 0,
+      executionCostPcts: Array.from({ length: 20 }, () => 0.02),
+      bookAgesMs: Array.from({ length: 20 }, () => 100),
+    });
+    expect(evaluation.status).toBe('passed');
+    expect(nativePromotionDecision(evaluation, true, true).realAction)
+      .toBe('manual_canary_review');
   });
 
   it('sweeps fixed USD notional across depth', () => {

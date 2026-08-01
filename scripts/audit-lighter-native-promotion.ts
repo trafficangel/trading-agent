@@ -8,9 +8,9 @@ import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import {
   evaluateNativeForwardRows,
+  nativePromotionDecision,
   NATIVE_FORWARD_GATE,
   NATIVE_SHADOW_NOTIONAL_USD,
-  type NativeForwardGateEvaluation,
   type NativeForwardPnlRow,
   type NativeForwardSignalRow,
 } from '../src/lib/lighter-luxalgo-math.js';
@@ -132,51 +132,33 @@ const portfolio = evaluateNativeForwardRows(
 );
 db.close();
 
-function decision(
-  evaluation: NativeForwardGateEvaluation,
-  realExecutorRegistered: boolean,
-  historicalPassed: boolean,
-) {
-  const operationalPause = evaluation.reasons.every((reason) =>
-    reason.startsWith('recent ') && (
-      reason.includes('capture errors')
-      || reason.includes('book-age samples')
-      || reason.includes('book age p95')
-    ));
-  if (!evaluation.entryAllowed) return {
-    shadowAction: 'pause_new_entries',
-    realAction: 'disabled',
-    recoverableFromNewSignals: operationalPause,
-    manualReviewRequired: !operationalPause,
-  };
-  if (!historicalPassed) return {
-    shadowAction: 'continue',
-    realAction: 'disabled',
-    recoverableFromNewSignals: false,
-    manualReviewRequired: false,
-  };
-  if (evaluation.status === 'passed' && realExecutorRegistered) return {
-    shadowAction: 'continue',
-    realAction: 'manual_canary_review',
-    recoverableFromNewSignals: false,
-    manualReviewRequired: true,
-  };
-  return {
-    shadowAction: 'continue',
-    realAction: 'disabled',
-    recoverableFromNewSignals: false,
-    manualReviewRequired: false,
-  };
-}
-
 const evaluatedStrategies = strategies.map((row) => ({
   ...row,
-  decision: decision(
+  decision: nativePromotionDecision(
     row.evaluation,
     row.realExecutorRegistered,
     row.historicalEvidence.passed,
   ),
 }));
+const p2Members = P2_IDS.map((strategyId) => {
+  const evaluation = evaluateNativeForwardRows(
+    pnlStatement.all(strategyId),
+    signalStatement.all(strategyId),
+  );
+  return {
+    strategyId,
+    realExecutorRegistered: false,
+    evaluation,
+    decision: nativePromotionDecision(
+      evaluation,
+      false,
+      historicalEvidence.portfolio.passed,
+    ),
+  };
+});
+const pausedShadowStrategyIds = [...evaluatedStrategies, ...p2Members]
+  .filter((row) => row.decision.shadowAction === 'pause_new_entries')
+  .map((row) => row.strategyId);
 const eligibleStrategyIds = evaluatedStrategies
   .filter((row) =>
     row.realExecutorRegistered
@@ -205,9 +187,15 @@ const report = {
     portfolioId: 'z60stack25-portfolio',
     realExecutorRegistered: false,
     evaluation: portfolio,
-    decision: decision(portfolio, false, historicalEvidence.portfolio.passed),
+    decision: nativePromotionDecision(
+      portfolio,
+      false,
+      historicalEvidence.portfolio.passed,
+    ),
+    members: p2Members,
   },
   strategies: evaluatedStrategies,
+  pausedShadowStrategyIds,
   autoPromotion: false,
 };
 const serialized = JSON.stringify(report, null, 2);
