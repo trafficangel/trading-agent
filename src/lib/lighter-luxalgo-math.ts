@@ -12,6 +12,27 @@ export function shadowExecutionNotionalUsd(isNative: boolean): number {
   return isNative ? NATIVE_SHADOW_NOTIONAL_USD : LUXALGO_SHADOW_NOTIONAL_USD;
 }
 
+export type NativeHistoricalShadowGate = {
+  passed: boolean;
+  reasons: readonly string[];
+} | null;
+
+/**
+ * Frozen historical evidence is part of the Native Shadow cohort contract,
+ * not only a later Real-promotion requirement. Missing or failed evidence
+ * blocks a new entry while exits remain outside this helper.
+ */
+export function nativeHistoricalShadowBlockReason(
+  historical: NativeHistoricalShadowGate,
+): string | null {
+  if (historical == null) return 'native historical evidence unavailable';
+  if (historical.passed) return null;
+  const detail = historical.reasons.length
+    ? historical.reasons.join('; ')
+    : 'no passing historical record';
+  return `native historical gate failed: ${detail}`;
+}
+
 export const NATIVE_FORWARD_GATE = {
   targetClosed: 20,
   minDurationDays: 7,

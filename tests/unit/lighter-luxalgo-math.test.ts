@@ -4,6 +4,7 @@ import {
   evaluateNativeForwardRows,
   estimatedFundingPnlPct,
   LUXALGO_SHADOW_NOTIONAL_USD,
+  nativeHistoricalShadowBlockReason,
   NATIVE_SHADOW_NOTIONAL_USD,
   pricePnlPct,
   quoteNotionalVwap,
@@ -26,6 +27,25 @@ describe('Lighter LuxAlgo shadow math', () => {
     expect(NATIVE_SHADOW_NOTIONAL_USD).toBe(100);
     expect(shadowExecutionNotionalUsd(false)).toBe(LUXALGO_SHADOW_NOTIONAL_USD);
     expect(LUXALGO_SHADOW_NOTIONAL_USD).toBe(1_000);
+  });
+
+  it('fails Native Shadow closed when frozen historical evidence is unavailable', () => {
+    expect(nativeHistoricalShadowBlockReason(null))
+      .toBe('native historical evidence unavailable');
+  });
+
+  it('blocks a failed historical cohort and preserves the audited reasons', () => {
+    expect(nativeHistoricalShadowBlockReason({
+      passed: false,
+      reasons: ['drawdown 18% > 15%', 'short book negative'],
+    })).toBe(
+      'native historical gate failed: drawdown 18% > 15%; short book negative',
+    );
+  });
+
+  it('allows Native Shadow only when frozen historical evidence passed', () => {
+    expect(nativeHistoricalShadowBlockReason({ passed: true, reasons: [] }))
+      .toBeNull();
   });
 
   it('sweeps fixed USD notional across depth', () => {

@@ -16,6 +16,7 @@ import {
   evaluateNativeForwardRows,
   estimatedFundingPnlPct,
   LUXALGO_SHADOW_NOTIONAL_USD,
+  nativeHistoricalShadowBlockReason,
   NATIVE_SHADOW_NOTIONAL_USD,
   pricePnlPct,
   quoteNotionalVwap,
@@ -1592,6 +1593,13 @@ const applyCapturedSignal = db.transaction((
 
   if (action === 'exit' || open?.side === side) return;
   if (NATIVE_STRATEGY_ID_SET.has(spec.id)) {
+    const historicalBlock = nativeHistoricalShadowBlockReason(
+      nativeHistoricalGate(spec),
+    );
+    if (historicalBlock) {
+      markShadowDecision.run(historicalBlock, signalId);
+      return { gateBlocked: true, reason: historicalBlock };
+    }
     const forward = nativeForwardGate(spec.id);
     if (!forward.entryAllowed) {
       const reason = `native forward gate failed after ${forward.closed}: ${forward.reasons.join('; ')}`;
