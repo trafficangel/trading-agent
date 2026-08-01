@@ -742,23 +742,6 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 13.541,
     },
   },
-  {
-    id: 'data-vwz60-mfi14-ema400',
-    code: '057',
-    name: 'Volume Z60 + MFI14 · EMA400 · VWMA Exit',
-    symbol: 'DATAUSDT',
-    asset: 'DATA',
-    marketId: 34,
-    stopPct: 1,
-    backtest: {
-      period: '2026-02-02 → 2026-08-01',
-      trades: 211,
-      winRatePct: 60.7,
-      profitFactor: 1.478,
-      netPct: 36.809,
-      maxDrawdownPct: 9.749,
-    },
-  },
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
     ...market,
     portfolioId: NATIVE_TREND_PORTFOLIO_ID,
@@ -789,7 +772,6 @@ const NATIVE_STRATEGY_IDS = [
   'apt-rsi14-pullback-ema400',
   'dot-rsi14-pullback-ema400',
   'zec-rsi14-willr14-ema400',
-  'data-vwz60-mfi14-ema400',
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => market.id),
 ] as const;
 const RETIRED_NATIVE_STRATEGY_IDS = [
@@ -799,6 +781,7 @@ const RETIRED_NATIVE_STRATEGY_IDS = [
   'ltc-z60-touch',
   'hype-rsi14-willr14-ema400',
   'xlm-vwz60-mfi14-ema400',
+  'data-vwz60-mfi14-ema400',
 ] as const;
 const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(RETIRED_NATIVE_STRATEGY_IDS);
 // Native Quant remains prospective Shadow-only. Historical rows stay visible,
@@ -942,20 +925,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     timeExitBars: 120,
     trendFilter: 'ema400',
     realEnabled: false,
-    noteRu: 'ZEC прошёл 181d, 168 сделок, 3/4 фолда, IS/OOS, Long/Short и окна 30/60/90d после измеренного $100 p95 и точного funding. Отдельно положителен в bull, bear, mixed, high-vol и low-vol режимах; центральная настройка и четыре соседние клетки прошли строгий режимный аудит. Только prospective Shadow.',
-    noteEn: 'ZEC passed 181d, 168 trades, 3/4 folds, IS/OOS, Long/Short and 30/60/90d windows after measured $100 p95 and exact funding. It is independently positive in bull, bear, mixed, high-vol and low-vol regimes; the centre setting and four neighbours passed the strict regime audit. Prospective Shadow only.',
-  },
-  'data-vwz60-mfi14-ema400': {
-    family: 'vwz_mfi',
-    mode: 'touch',
-    threshold: 2.5,
-    secondaryThreshold: 35,
-    period: 60,
-    timeExitBars: 120,
-    trendFilter: 'ema400',
-    realEnabled: false,
-    noteRu: 'DATA прошёл 180d, 211 сделок, 4/4 фолда, IS/OOS, Long/Short и окна 30/60/90d после измеренного $100 p95 и точного funding. Bull, bear, mixed, high-vol и low-vol сегменты положительны; MFI30/35/40 при фиксированных VWZ2.5/EMA400 подтверждают устойчивость. Только prospective Shadow.',
-    noteEn: 'DATA passed 180d, 211 trades, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows after measured $100 p95 and exact funding. Bull, bear, mixed, high-vol and low-vol segments are positive; MFI30/35/40 at fixed VWZ2.5/EMA400 confirm stability. Prospective Shadow only.',
+    noteRu: 'ZEC прошёл 181d, 168 сделок, режимы, IS/OOS и обе стороны после измеренного $100 p95 и funding. Дополнительный нативный 1m тест с задержкой входа на одну минуту сохранил +30.18%, PF 1.49 и DD −8.80% (63% исходного net). Только prospective Shadow.',
+    noteEn: 'ZEC passed 181d, 168 trades, regimes, IS/OOS and both sides after measured $100 p95 and funding. A separate native 1m audit with a one-minute delayed fill retained +30.18%, PF 1.49 and −8.80% DD (63% of baseline net). Prospective Shadow only.',
   },
   ...Object.fromEntries(NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => [
     market.id,

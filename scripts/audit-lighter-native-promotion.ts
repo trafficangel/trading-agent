@@ -26,7 +26,6 @@ const SHADOW_NATIVE_IDS = [
   'apt-rsi14-pullback-ema400',
   'dot-rsi14-pullback-ema400',
   'zec-rsi14-willr14-ema400',
-  'data-vwz60-mfi14-ema400',
 ] as const;
 const P2_IDS = [
   'z60stack25-btc', 'z60stack25-eth', 'z60stack25-sol',

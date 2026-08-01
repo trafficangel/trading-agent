@@ -1,18 +1,16 @@
 #!/usr/bin/env tsx
 
 /**
- * Prove that the live runner's bounded 1,500-bar EMA seed produces the same
+ * Prove that the live runner's bounded 2,000-bar EMA seed produces the same
  * completed-bar entry decisions as the full-history research calculation for
- * the two frozen regime-qualified oscillator-confluence candidates.
+ * the active frozen regime-qualified oscillator-confluence candidate.
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
   evaluateRsiWilliamsTrend,
-  evaluateVwzMfiTrend,
   type RsiWilliamsSnapshot,
-  type VwzMfiSnapshot,
 } from '../src/lib/lighter-oscillator-confluence.js';
 import type { Vwz60Bar, Z60Signal } from '../src/lib/lighter-z60.js';
 
@@ -24,9 +22,9 @@ type AuditConfig = {
   strategyId: string;
   symbol: string;
   path: string;
-  evaluate: (bars: readonly Vwz60Bar[]) => RsiWilliamsSnapshot | VwzMfiSnapshot | null;
+  evaluate: (bars: readonly Vwz60Bar[]) => RsiWilliamsSnapshot | null;
   fullSignal: (
-    snapshot: RsiWilliamsSnapshot | VwzMfiSnapshot,
+    snapshot: RsiWilliamsSnapshot,
     fullEma: number,
   ) => Z60Signal;
 };
@@ -82,22 +80,6 @@ const configs: readonly AuditConfig[] = [
         return 'long';
       }
       if (value.currentRsi > 70 && value.currentWilliams > -20 && value.close < fullEma) {
-        return 'short';
-      }
-      return null;
-    },
-  },
-  {
-    strategyId: 'data-vwz60-mfi14-ema400',
-    symbol: 'DATA',
-    path: 'data/lighter-klines/DATA-5m.json',
-    evaluate: (bars) => evaluateVwzMfiTrend(bars),
-    fullSignal(snapshot, fullEma) {
-      const value = snapshot as VwzMfiSnapshot;
-      if (value.currentZ < -2.5 && value.currentMfi < 35 && value.close > fullEma) {
-        return 'long';
-      }
-      if (value.currentZ > 2.5 && value.currentMfi > 65 && value.close < fullEma) {
         return 'short';
       }
       return null;
@@ -181,5 +163,5 @@ if (outputPath) {
   writeFileSync(temporary, serialized);
   renameSync(temporary, absolute);
 }
-console.log(serialized);
+console.warn(serialized);
 if (!report.passed) process.exitCode = 1;

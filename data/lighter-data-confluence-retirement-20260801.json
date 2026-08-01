@@ -1,0 +1,47 @@
+{
+  "version": "lighter-native-strategy-retirement-v1",
+  "generatedAt": "2026-08-01T23:55:00.000Z",
+  "strategyId": "data-vwz60-mfi14-ema400",
+  "symbol": "DATA",
+  "decision": "retire_before_first_prospective_trade",
+  "realWasEnabled": false,
+  "prospectiveClosedTrades": 0,
+  "reason": "The direct 5m candle opens used by the discovery backtest are not executable proxies for DATA. Native 1m reconstruction reduced the same next-open rule to PF 1.038 with negative L95 and two positive folds; a one-minute delayed fill produced negative net, PF below one and excessive drawdown.",
+  "observedProductionSignalDelaySeconds": {
+    "minimum": 30,
+    "maximum": 41
+  },
+  "directFiveMinuteVsNativeOneMinute": {
+    "alignedCompleteBars": 51840,
+    "openExactBars": 45906,
+    "openDifferenceP95Pct": 0.27364772416309524,
+    "openDifferenceMaxPct": 6.281491434329856,
+    "closeExactBars": 51840
+  },
+  "nativeOneMinuteNextOpen": {
+    "trades": 204,
+    "netPct": 3.692353323957782,
+    "profitFactor": 1.0379169050136439,
+    "meanL95Pct": -0.12348728701492094,
+    "positiveFolds": 2,
+    "maxDrawdownPct": -21.931673413299468,
+    "longPct": -2.065941262357747,
+    "shortPct": 5.75829458631553
+  },
+  "nativeOneMinuteDelayed": {
+    "trades": 209,
+    "netPct": -14.40300891259018,
+    "profitFactor": 0.86640439394736,
+    "meanL95Pct": -0.20543328554908177,
+    "positiveFolds": 2,
+    "maxDrawdownPct": -26.39808277949735,
+    "longPct": -1.8435021016456195,
+    "shortPct": -12.559506810944564
+  },
+  "evidence": {
+    "entryDelayAudit": "data/lighter-zec-data-entry-delay-audit-20260801.json",
+    "entryDelayAuditSha256": "b8113ca6e7616bf3db947b467036ee505288d1dedacb24aee201982108463e3c",
+    "nativeOneMinuteCandlesSha256": "3610fbea6d25a60e9614da2168ef8cd4a48da06c6b9e8baf87714d1df2cb1568",
+    "directFiveMinuteCandlesSha256": "92fd7ef4e2bff7215936d0a00d6cd228a75c759b8a7c8779c31b369b371521a9"
+  }
+}

@@ -135,15 +135,6 @@ const BASE_FEEDS: readonly NativeFeed[] = [
     marketId: 34,
     strategies: [
       { id: 'data-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 2.5 },
-      {
-        id: 'data-vwz60-mfi14-ema400',
-        family: 'vwz_mfi',
-        mode: 'touch',
-        threshold: 2.5,
-        auxiliaryThreshold: 35,
-        trendFilter: 'ema400',
-        maxBars: 120,
-      },
     ],
   },
   {

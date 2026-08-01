@@ -16,8 +16,11 @@ const OUTPUT_JSON = resolve(
 const POSITION_NOTIONAL_USD = Number(process.env.POSITION_NOTIONAL_USD ?? 100);
 const MAX_DRAWDOWN_PCT = Number(process.env.MAX_DRAWDOWN_PCT ?? 10);
 const RECENT_WINDOWS_DAYS = [30, 60, 90];
-const selections = (process.env.SELECTED_STRATEGIES
-  ?? 'zec-rsi14-willr14-ema400=ZEC:CONF-RSI14-WILLR14-30/70+EMA400,data-vwz60-mfi14-ema400=DATA:CONF-VWZ60-2.5+MFI14-35/65+EMA400')
+const selectedStrategies = process.env.SELECTED_STRATEGIES;
+if (!selectedStrategies) {
+  throw new Error('SELECTED_STRATEGIES is required; retired selections must never be implicit');
+}
+const selections = selectedStrategies
   .split(',')
   .map((entry) => {
     const [strategyId, selector] = entry.split('=');

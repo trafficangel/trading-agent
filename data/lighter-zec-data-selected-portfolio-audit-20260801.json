@@ -1,6 +1,9 @@
 {
   "version": "lighter-selected-portfolio-audit-v1",
   "generatedAt": "2026-08-01T23:26:18.818Z",
+  "status": "superseded_by_native_1m_entry_delay_audit",
+  "supersededReason": "DATA failed executable native 1m reconstruction and delayed-entry validation; this earlier direct-5m portfolio pass is not promotion evidence.",
+  "supersededBy": "data/lighter-zec-data-entry-delay-audit-20260801.json",
   "source": {
     "file": "/private/tmp/trading-agent-lighter-quant-strategy/data/lighter-zec-data-selected-sweep-20260801.json",
     "generatedAt": "2026-08-01T23:26:04.734Z"
@@ -26,7 +29,7 @@
     "maxDrawdownCapitalPct": 10,
     "realPromotion": "not authorized; prospective Shadow gate remains independent"
   },
-  "passedHistoricalPortfolioGate": true,
+  "passedHistoricalPortfolioGate": false,
   "capacityTwo": {
     "accepted": 379,
     "dropped": 0,
