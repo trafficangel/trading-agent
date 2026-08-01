@@ -1499,3 +1499,26 @@ the maximum EMA warmup deviation was below `0.009%`. Both strategies are
 prospective Shadow-only with `$100` simulated notional, a 1% safety stop and
 the existing frozen 20-close/7-day forward gate. Real remains unregistered and
 cannot be enabled by this historical result.
+
+## Directional trend suite — rejected (2026-08-01)
+
+After the APT/DOT admission, two independent, canonical trend-following rules
+were frozen before testing: `DMI14-X25-T200-H240` (DMI14 cross, ADX at least
+25 and EMA200 direction) and `SUPERTREND10-3-T200-H240` (Supertrend 10/3 flip
+aligned with EMA200). Both rules are exactly mirrored for Long and Short, use a
+1% protective stop and a four-hour maximum hold. Signals use completed candles
+and enter only at the next bar open.
+
+The unchanged suite was evaluated on 22 native 1m markets and 58 native 5m
+markets over up to 180 days. Every row used market-specific executable `$100`
+L2 p95 cost, observed-maximum sensitivity and exact hourly Lighter funding;
+fallbacks were disabled. No row passed the frozen individual gate.
+
+At 1m even the best row, ETH DMI, lost `8.48%` after measured costs with PF
+`0.92`, OOS `-12.27%`, and negative Long and Short books. At 5m the best
+headline, SOL Supertrend, returned `+17.41%`, but PF was only `1.08`, only 2/4
+folds were positive, OOS was `-2.36%`, mean-trade L95 was negative and its
+latest 30-day window lost `6.33%`. JTO DMI and BTC DMI likewise failed PF,
+confidence, folds, OOS or direction requirements. Neither family is registered
+in Shadow or Real, and its parameters will not be rescued post hoc. The frozen
+evidence is `data/lighter-directional-trend-suite-results.json`.

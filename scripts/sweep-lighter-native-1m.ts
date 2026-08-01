@@ -72,6 +72,7 @@ const ENABLE_SERIAL_ADAPTIVE = process.env.ENABLE_SERIAL_ADAPTIVE === '1';
 const ENABLE_FUNDING_CROWDING = process.env.ENABLE_FUNDING_CROWDING === '1';
 const ENABLE_SHOCK_REVERSAL = process.env.ENABLE_SHOCK_REVERSAL === '1';
 const ENABLE_RSI_PULLBACK_ROBUSTNESS = process.env.ENABLE_RSI_PULLBACK_ROBUSTNESS === '1';
+const ENABLE_DIRECTIONAL_TREND = process.env.ENABLE_DIRECTIONAL_TREND === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -129,6 +130,10 @@ type Arrays = {
   means: Map<number, number[]>;
   deviations: Map<number, number[]>;
   atr14: number[];
+  plusDi14: number[];
+  minusDi14: number[];
+  adx14: number[];
+  supertrend10x3: number[];
   atrPctMean288: number[];
   rsi2: number[];
   rsi7: number[];
@@ -429,6 +434,103 @@ function efficiencyRatio(values: number[], period: number): number[] {
   return result;
 }
 
+/** Wilder DMI/ADX from completed candles only. */
+function directionalIndex(
+  candles: Candle[],
+  period: number,
+): { plusDi: number[]; minusDi: number[]; adx: number[] } {
+  const length = candles.length;
+  const trueRange = new Array<number>(length).fill(0);
+  const plusDm = new Array<number>(length).fill(0);
+  const minusDm = new Array<number>(length).fill(0);
+  for (let i = 1; i < length; i += 1) {
+    const bar = candles[i]!;
+    const prior = candles[i - 1]!;
+    trueRange[i] = Math.max(
+      bar.h - bar.l,
+      Math.abs(bar.h - prior.c),
+      Math.abs(bar.l - prior.c),
+    );
+    const up = bar.h - prior.h;
+    const down = prior.l - bar.l;
+    plusDm[i] = up > down && up > 0 ? up : 0;
+    minusDm[i] = down > up && down > 0 ? down : 0;
+  }
+
+  const plusDi = new Array<number>(length).fill(0);
+  const minusDi = new Array<number>(length).fill(0);
+  const dx = new Array<number>(length).fill(0);
+  let trSmooth = 0;
+  let plusSmooth = 0;
+  let minusSmooth = 0;
+  for (let i = 1; i <= period && i < length; i += 1) {
+    trSmooth += trueRange[i]!;
+    plusSmooth += plusDm[i]!;
+    minusSmooth += minusDm[i]!;
+  }
+  for (let i = period; i < length; i += 1) {
+    if (i > period) {
+      trSmooth = trSmooth - trSmooth / period + trueRange[i]!;
+      plusSmooth = plusSmooth - plusSmooth / period + plusDm[i]!;
+      minusSmooth = minusSmooth - minusSmooth / period + minusDm[i]!;
+    }
+    if (trSmooth <= 0) continue;
+    plusDi[i] = 100 * plusSmooth / trSmooth;
+    minusDi[i] = 100 * minusSmooth / trSmooth;
+    const denominator = plusDi[i]! + minusDi[i]!;
+    dx[i] = denominator > 0
+      ? 100 * Math.abs(plusDi[i]! - minusDi[i]!) / denominator
+      : 0;
+  }
+
+  const adx = new Array<number>(length).fill(0);
+  const firstAdx = 2 * period - 1;
+  if (firstAdx < length) {
+    let dxSum = 0;
+    for (let i = period; i <= firstAdx; i += 1) dxSum += dx[i]!;
+    adx[firstAdx] = dxSum / period;
+    for (let i = firstAdx + 1; i < length; i += 1) {
+      adx[i] = (adx[i - 1]! * (period - 1) + dx[i]!) / period;
+    }
+  }
+  return { plusDi, minusDi, adx };
+}
+
+/** Standard close-confirmed Supertrend direction: +1 bull, -1 bear. */
+function supertrendDirection(
+  candles: Candle[],
+  period: number,
+  multiplier: number,
+): number[] {
+  const atrValues = atr(candles, period);
+  const direction = new Array<number>(candles.length).fill(1);
+  const upper = new Array<number>(candles.length).fill(0);
+  const lower = new Array<number>(candles.length).fill(0);
+  for (let i = 0; i < candles.length; i += 1) {
+    const bar = candles[i]!;
+    const midpoint = (bar.h + bar.l) / 2;
+    const basicUpper = midpoint + multiplier * atrValues[i]!;
+    const basicLower = midpoint - multiplier * atrValues[i]!;
+    if (i === 0) {
+      upper[i] = basicUpper;
+      lower[i] = basicLower;
+      direction[i] = bar.c >= midpoint ? 1 : -1;
+      continue;
+    }
+    const prior = candles[i - 1]!;
+    upper[i] = basicUpper < upper[i - 1]! || prior.c > upper[i - 1]!
+      ? basicUpper
+      : upper[i - 1]!;
+    lower[i] = basicLower > lower[i - 1]! || prior.c < lower[i - 1]!
+      ? basicLower
+      : lower[i - 1]!;
+    direction[i] = direction[i - 1] === 1
+      ? (bar.c < lower[i]! ? -1 : 1)
+      : (bar.c > upper[i]! ? 1 : -1);
+  }
+  return direction;
+}
+
 function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
   const close = c.map((bar) => bar.c);
   const volume = c.map((bar) => bar.v);
@@ -442,6 +544,7 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
   const sma20Values = sma(close, 20);
   const sd20Values = rollingStd(close, 20);
   const atr14Values = atr(c, 14);
+  const dmi14 = directionalIndex(c, 14);
   const atrPctMean288 = sma(
     atr14Values.map((value, i) => close[i]! > 0 ? value / close[i]! : 0),
     288,
@@ -470,6 +573,10 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     means: new Map(Z_PERIODS.map((period) => [period, sma(close, period)])),
     deviations: new Map(Z_PERIODS.map((period) => [period, rollingStd(close, period)])),
     atr14: atr14Values,
+    plusDi14: dmi14.plusDi,
+    minusDi14: dmi14.minusDi,
+    adx14: dmi14.adx,
+    supertrend10x3: supertrendDirection(c, 10, 3),
     atrPctMean288,
     rsi2: rsi(c, 2),
     rsi7: rsi(c, 7),
@@ -521,6 +628,52 @@ function lowestBefore(c: Candle[], i: number, period: number): number {
 
 function rules(): Rule[] {
   const out: Rule[] = [];
+
+  // Preregistered independent trend-following suite. Both rules are canonical,
+  // mirrored across Long/Short and share one four-hour time stop at every
+  // timeframe. They are opt-in so a rejected result cannot silently change the
+  // established research library or be rescued with a post-hoc parameter grid.
+  if (ENABLE_DIRECTIONAL_TREND) {
+    const maxBars = Math.max(1, Math.round(240 / BAR_MINUTES));
+    out.push({
+      name: 'DMI14-X25-T200-H240',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars,
+      entry(a, i) {
+        const crossUp = a.plusDi14[i - 1]! <= a.minusDi14[i - 1]!
+          && a.plusDi14[i]! > a.minusDi14[i]!;
+        const crossDown = a.minusDi14[i - 1]! <= a.plusDi14[i - 1]!
+          && a.minusDi14[i]! > a.plusDi14[i]!;
+        if (crossUp && a.adx14[i]! >= 25 && a.close[i]! > a.ema200[i]!) return 'long';
+        if (crossDown && a.adx14[i]! >= 25 && a.close[i]! < a.ema200[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.minusDi14[i]! > a.plusDi14[i]!
+          : a.plusDi14[i]! > a.minusDi14[i]!;
+      },
+    });
+    out.push({
+      name: 'SUPERTREND10-3-T200-H240',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars,
+      entry(a, i) {
+        const flipUp = a.supertrend10x3[i - 1]! < 0 && a.supertrend10x3[i]! > 0;
+        const flipDown = a.supertrend10x3[i - 1]! > 0 && a.supertrend10x3[i]! < 0;
+        if (flipUp && a.close[i]! > a.ema200[i]!) return 'long';
+        if (flipDown && a.close[i]! < a.ema200[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.supertrend10x3[i]! < 0
+          : a.supertrend10x3[i]! > 0;
+      },
+    });
+  }
   for (const [period, os, ob] of [[2, 5, 95], [2, 10, 90], [7, 20, 80], [14, 25, 75]] as const) {
     for (const trend of [0, 400] as const) {
       const key = period === 2 ? 'rsi2' : period === 7 ? 'rsi7' : 'rsi14';
