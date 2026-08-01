@@ -5,6 +5,7 @@ import {
   evaluateNativeHistoricalEvidence,
   NATIVE_HISTORICAL_REPORT_SHA256,
   NATIVE_HISTORICAL_SUPPLEMENT_SHA256,
+  NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256,
 } from '../../src/lib/lighter-native-historical.js';
 
 describe('frozen Native historical evidence', () => {
@@ -40,6 +41,29 @@ describe('frozen Native historical evidence', () => {
     expect(xrp?.reasons).toEqual([]);
   });
 
+  it('admits the immutable XLM ER60 transfer report as a separate artifact', () => {
+    const source = JSON.parse(readFileSync(
+      resolve('data/lighter-native-current-z60-validation.json'),
+      'utf8',
+    )) as unknown;
+    const supplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-vwz60-holdout-validation.json'),
+      'utf8',
+    )) as unknown;
+    const xlmSupplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-vwz60-transfer2-validation.json'),
+      'utf8',
+    )) as unknown;
+    const evidence = evaluateNativeHistoricalEvidence(source, supplemental, xlmSupplemental);
+    expect(evidence.xlmSupplementalSourceSha256)
+      .toBe(NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256);
+    const xlm = evidence.candidates.find((row) => row.strategyId === 'xlm-vwz60-touch-er25');
+    expect(xlm?.passed).toBe(true);
+    expect(xlm?.reasons).toEqual([]);
+    expect(xlm?.metrics.recent.every((window) => window.long > 0 && window.short > 0))
+      .toBe(true);
+  });
+
   it('rejects a changed frozen result even when headline qualification remains', () => {
     const source = JSON.parse(readFileSync(
       resolve('data/lighter-native-current-z60-validation.json'),
@@ -61,5 +85,23 @@ describe('frozen Native historical evidence', () => {
     supplemental.rows[0]!.netPct += 0.001;
     expect(() => evaluateNativeHistoricalEvidence(source, supplemental))
       .toThrow('supplemental historical evidence hash mismatch');
+  });
+
+  it('rejects a changed XLM supplemental result', () => {
+    const source = JSON.parse(readFileSync(
+      resolve('data/lighter-native-current-z60-validation.json'),
+      'utf8',
+    )) as unknown;
+    const supplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-vwz60-holdout-validation.json'),
+      'utf8',
+    )) as unknown;
+    const xlmSupplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-vwz60-transfer2-validation.json'),
+      'utf8',
+    )) as { rows: Array<{ netPct: number }> };
+    xlmSupplemental.rows[0]!.netPct += 0.001;
+    expect(() => evaluateNativeHistoricalEvidence(source, supplemental, xlmSupplemental))
+      .toThrow('XLM supplemental historical evidence hash mismatch');
   });
 });

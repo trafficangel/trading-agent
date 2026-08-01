@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  allowsEntryByEfficiency,
   efficiencyRatio,
   evaluateTrendFilteredZ60,
   evaluateTrendStackZ60,
@@ -33,6 +34,19 @@ describe('efficiencyRatio', () => {
 
   it('refuses an incomplete lookback', () => {
     expect(efficiencyRatio(bars([1, 2, 3]), 3)).toBeNull();
+  });
+});
+
+describe('allowsEntryByEfficiency', () => {
+  it('leaves strategies without a frozen gate unchanged', () => {
+    expect(allowsEntryByEfficiency(null)).toBe(true);
+    expect(allowsEntryByEfficiency(0.9)).toBe(true);
+  });
+
+  it('admits the frozen boundary and rejects directional or missing paths', () => {
+    expect(allowsEntryByEfficiency(0.25, 0.25)).toBe(true);
+    expect(allowsEntryByEfficiency(0.250001, 0.25)).toBe(false);
+    expect(allowsEntryByEfficiency(null, 0.25)).toBe(false);
   });
 });
 

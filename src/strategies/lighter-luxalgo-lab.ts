@@ -95,6 +95,10 @@ const NATIVE_HISTORICAL_EVIDENCE = (() => {
         process.env['LIGHTER_NATIVE_HISTORICAL_SUPPLEMENT_PATH']
           ?? 'data/lighter-vwz60-holdout-validation.json',
       ), 'utf8')) as unknown,
+      JSON.parse(readFileSync(resolve(
+        process.env['LIGHTER_NATIVE_HISTORICAL_XLM_SUPPLEMENT_PATH']
+          ?? 'data/lighter-vwz60-transfer2-validation.json',
+      ), 'utf8')) as unknown,
     );
   } catch (error) {
     logger.error({ error }, 'Native historical evidence unavailable');
@@ -173,7 +177,10 @@ const NATIVE_HISTORICAL_EVIDENCE = (() => {
 // excluded from the original discovery universe and passed the same frozen
 // gates over 180 days with fresh $100 L2 p95 costs and exact funding. It is
 // prospective Shadow only; the Real executor does not register it.
-// BCH, XLM, TRX and JUP candidates remain excluded.
+// STRAT-052 transfers that same symmetric rule to XLM and adds one
+// preregistered choppy-regime condition: completed-bar ER60 must be <= 0.25.
+// It passed the same frozen gates, including both directions and every recent
+// window. It is also prospective Shadow only. BCH, TRX and JUP remain excluded.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -617,6 +624,26 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 6.243,
     },
   },
+  {
+    id: 'xlm-vwz60-touch-er25',
+    code: '052',
+    name: 'Volume Z60 · 3σ Touch · ER60≤0.25 · VWMA Exit',
+    symbol: 'XLMUSDT',
+    asset: 'XLM',
+    marketId: 119,
+    stopPct: 1.5,
+    backtest: {
+      // Frozen two-sided rule on native completed 5m candles. Entry requires
+      // the predeclared ER60 <= 0.25 choppy-regime condition; costs are measured
+      // executable $100 L2 p95 and funding is exact. Prospective Shadow only.
+      period: '2026-02-02 → 2026-08-01',
+      trades: 387,
+      winRatePct: 64.3,
+      profitFactor: 1.344,
+      netPct: 48.520,
+      maxDrawdownPct: 11.054,
+    },
+  },
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
     ...market,
     portfolioId: NATIVE_TREND_PORTFOLIO_ID,
@@ -642,6 +669,7 @@ const NATIVE_STRATEGY_IDS = [
   'btc-vwz60-touch',
   'hype-vwz60-touch',
   'xrp-vwz60-touch',
+  'xlm-vwz60-touch-er25',
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => market.id),
 ] as const;
 const RETIRED_NATIVE_STRATEGY_IDS = [
@@ -661,6 +689,7 @@ type NativeStrategyInfo = {
   threshold: number;
   period: number;
   timeExitBars: number;
+  efficiencyMax?: number;
   trendFilter?: 'ema200' | 'ema200_400';
   realEnabled: boolean;
   noteRu: string;
@@ -737,6 +766,17 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     realEnabled: false,
     noteRu: 'XRP-кандидат использует без изменений правило STRAT-034: вход за ±3σ от VWMA60 и возврат к VWMA60. На независимом 180d рынке прошёл 4/4 периода, IS/OOS, Long/Short и окна 30/60/90d после измеренного p95 стака и точного funding. Только prospective Shadow.',
     noteEn: 'The XRP candidate transfers STRAT-034 unchanged: enter beyond ±3σ from VWMA60 and exit on the return to VWMA60. On an independent 180d market it passed 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows after measured book p95 and exact funding. Prospective Shadow only.',
+  },
+  'xlm-vwz60-touch-er25': {
+    family: 'vwz',
+    mode: 'touch',
+    threshold: 3,
+    period: 60,
+    timeExitBars: 240,
+    efficiencyMax: 0.25,
+    realEnabled: false,
+    noteRu: 'XLM использует двусторонний вход за ±3σ от VWMA60 только при ER60≤0.25: фильтр исключает выраженный направленный рынок. После измеренного p95 стака и точного funding прошёл 180d, 4/4 периода, IS/OOS, Long/Short и окна 30/60/90d. Только prospective Shadow.',
+    noteEn: 'XLM uses symmetric entries beyond ±3σ from VWMA60 only when ER60≤0.25, excluding strongly directional paths. After measured book p95 and exact funding it passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows. Prospective Shadow only.',
   },
   ...Object.fromEntries(NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => [
     market.id,
@@ -2796,8 +2836,8 @@ export async function lighterNativeQuantHero(lang: Lang): Promise<string> {
       <div class="ll-title">${t(lang, 'Собственные стратегии · единый портфель', 'In-house strategies · unified portfolio')}</div>
       <div class="ll-sub">${t(
         lang,
-        '2 самостоятельные модели + P2 на 15 рынках · чистая prospective-статистика →',
-        '2 standalone models + P2 across 15 markets · clean prospective statistics →',
+        '4 самостоятельные модели + P2 на 15 рынках · чистая prospective-статистика →',
+        '4 standalone models + P2 across 15 markets · clean prospective statistics →',
       )}</div>
     </div>
     <div class="ll-stats">
@@ -2822,7 +2862,12 @@ function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
     `Long: текущий Z < −${info.threshold}. Short: текущий Z > +${info.threshold}.`,
     `Long: current Z < −${info.threshold}. Short: current Z > +${info.threshold}.`,
   );
-  if (!info.trendFilter) return touch;
+  const efficiency = info.efficiencyMax == null ? '' : ` ${t(
+    lang,
+    `Вход разрешён только при ER60≤${info.efficiencyMax}.`,
+    `Entry is allowed only when ER60≤${info.efficiencyMax}.`,
+  )}`;
+  if (!info.trendFilter) return `${touch}${efficiency}`;
   return `${touch} ${t(
     lang,
     'P2: Long только при close > EMA200 > EMA400; Short — зеркально ниже обеих EMA.',
@@ -2908,13 +2953,13 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Расчёт.', 'Calculation.')}</b> ${t(
           lang,
-          'STRAT-034/035/051 считают объёмно-взвешенные Z60 и VWMA60. Portfolio P2 считает обычные Z60/SMA60 и дополнительно EMA200/EMA400 по завершённым 5m свечам. Незавершённая свеча в расчёт не попадает.',
-          'STRAT-034/035/051 calculate volume-weighted Z60 and VWMA60. Portfolio P2 uses standard Z60/SMA60 plus EMA200/EMA400 on completed 5m candles. The unfinished candle is never included.',
+          'STRAT-034/035/051/052 считают объёмно-взвешенные Z60 и VWMA60; STRAT-052 также считает ER60. Portfolio P2 считает обычные Z60/SMA60 и дополнительно EMA200/EMA400 по завершённым 5m свечам. Незавершённая свеча в расчёт не попадает.',
+          'STRAT-034/035/051/052 calculate volume-weighted Z60 and VWMA60; STRAT-052 also calculates ER60. Portfolio P2 uses standard Z60/SMA60 plus EMA200/EMA400 on completed 5m candles. The unfinished candle is never included.',
         )}</li>
         <li><b>${t(lang, 'Решение.', 'Decision.')}</b> ${t(
           lang,
-          'Touch входит сразу за своим порогом ±σ. STRAT-034/035/051 выходят у VWMA60; P2 — у SMA60. Резервный выход для всех рабочих моделей — 240 баров, то есть 20 часов.',
-          'Touch enters immediately beyond its ±σ threshold. STRAT-034/035/051 exit at VWMA60; P2 exits at SMA60. Every active model has a 240-bar, or 20-hour, fallback exit.',
+          'Touch входит сразу за своим порогом ±σ; STRAT-052 дополнительно требует ER60≤0.25. STRAT-034/035/051/052 выходят у VWMA60; P2 — у SMA60. Резервный выход для всех рабочих моделей — 240 баров, то есть 20 часов.',
+          'Touch enters immediately beyond its ±σ threshold; STRAT-052 additionally requires ER60≤0.25. STRAT-034/035/051/052 exit at VWMA60; P2 exits at SMA60. Every active model has a 240-bar, or 20-hour, fallback exit.',
         )}</li>
         <li><b>${t(lang, 'Внутренний сигнал.', 'Internal signal.')}</b> ${t(
           lang,
@@ -2928,8 +2973,8 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Real-canary и защита.', 'Real canary and protection.')}</b> ${t(
           lang,
-          'Сейчас ни одна Native‑стратегия не зарегистрирована в Real‑исполнителе. STRAT-034/035/051 и P2 сначала должны накопить минимум 20 prospective закрытий за 7+ дней, пройти frozen‑гейт и получить ручной допуск. До этого они физически работают только в Shadow.',
-          'No Native strategy is currently registered with the Real executor. STRAT-034/035/051 and P2 must first collect at least 20 prospective closes over 7+ days, pass the frozen gate, and receive manual approval. Until then they are physically Shadow-only.',
+          'Сейчас ни одна Native‑стратегия не зарегистрирована в Real‑исполнителе. STRAT-034/035/051/052 и P2 сначала должны накопить минимум 20 prospective закрытий за 7+ дней, пройти frozen‑гейт и получить ручной допуск. До этого они физически работают только в Shadow.',
+          'No Native strategy is currently registered with the Real executor. STRAT-034/035/051/052 and P2 must first collect at least 20 prospective closes over 7+ days, pass the frozen gate, and receive manual approval. Until then they are physically Shadow-only.',
         )}</li>
       </ol>
       <div class="ll-native-specs">${strategyLines}</div>

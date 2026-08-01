@@ -21,6 +21,7 @@ const strategyIds = [
   'btc-vwz60-touch',
   'hype-vwz60-touch',
   'xrp-vwz60-touch',
+  'xlm-vwz60-touch-er25',
 ] as const;
 const rows = db.prepare<string[], Row>(`
   SELECT trade.strategy_id, trade.side, trade.opened_at, trade.closed_at,

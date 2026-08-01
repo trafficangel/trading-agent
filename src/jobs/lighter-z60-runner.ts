@@ -8,6 +8,7 @@ import {
   type NativeRunnerStatus,
 } from '../lib/lighter-native-runner-status.js';
 import {
+  allowsEntryByEfficiency,
   efficiencyRatio,
   evaluateTrendFilteredZ60,
   evaluateTrendStackZ60,
@@ -63,6 +64,7 @@ type NativeStrategy = {
   family: 'zscore' | 'vwz';
   mode: Z60EntryMode;
   threshold: number;
+  efficiencyMax?: number;
   trendFilter?: 'ema200' | 'ema200_400';
 };
 
@@ -92,6 +94,19 @@ const BASE_FEEDS: readonly NativeFeed[] = [
     marketId: 7,
     strategies: [
       { id: 'xrp-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 3 },
+    ],
+  },
+  {
+    symbol: 'XLMUSDT',
+    marketId: 119,
+    strategies: [
+      {
+        id: 'xlm-vwz60-touch-er25',
+        family: 'vwz',
+        mode: 'touch',
+        threshold: 3,
+        efficiencyMax: 0.25,
+      },
     ],
   },
 ];
@@ -528,7 +543,19 @@ async function poll(): Promise<void> {
             continue;
           }
 
-          if (snapshot.signal) {
+          if (snapshot.signal && !allowsEntryByEfficiency(er60, strategy.efficiencyMax)) {
+            recordEvaluation(
+              strategy,
+              feed,
+              target,
+              snapshot,
+              er60,
+              'waiting',
+              er60 == null
+                ? 'er60_history_incomplete'
+                : `er60_above_${strategy.efficiencyMax}`,
+            );
+          } else if (snapshot.signal) {
             emit(strategy, feed.symbol, 'entry', snapshot.signal, target, snapshot.close, er60);
             recordEvaluation(
               strategy,
@@ -546,6 +573,7 @@ async function poll(): Promise<void> {
               family: strategy.family,
               mode: strategy.mode,
               threshold: strategy.threshold,
+              efficiencyMax: strategy.efficiencyMax,
               side: snapshot.signal,
               barTime: target,
               close: snapshot.close,

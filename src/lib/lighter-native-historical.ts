@@ -6,6 +6,8 @@ export const NATIVE_HISTORICAL_REPORT_SHA256 =
 export const NATIVE_HISTORICAL_SUPPLEMENT_VERSION = 'lighter-native-sweep-v2';
 export const NATIVE_HISTORICAL_SUPPLEMENT_SHA256 =
   'afa6e2b1de6b64fd7917eb033177db4d1654538f54262b0bcfca0b110ea0fed1';
+export const NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256 =
+  'cb507f67f7e34d005b1b5360dd6aede718d9f8a1d6cf6ebba037b84b9018f445';
 
 const HISTORICAL_CANDIDATES = [
   { strategyId: 'sol-z60-reclaim', symbol: 'SOL', rule: 'Z60-3-reclaim' },
@@ -18,6 +20,14 @@ const HISTORICAL_CANDIDATES = [
 
 const SUPPLEMENTAL_HISTORICAL_CANDIDATES = [
   { strategyId: 'xrp-vwz60-touch', symbol: 'XRP', rule: 'VWZ60-3-touch' },
+] as const;
+
+const XLM_SUPPLEMENTAL_HISTORICAL_CANDIDATES = [
+  {
+    strategyId: 'xlm-vwz60-touch-er25',
+    symbol: 'XLM',
+    rule: 'VWZ60-3-touch+ER60<0.25',
+  },
 ] as const;
 
 type HistoricalWindow = {
@@ -109,8 +119,13 @@ function rowReasons(row: HistoricalRow): string[] {
   return reasons;
 }
 
-function validateSupplementalReport(value: unknown): HistoricalReport {
-  if (!value || typeof value !== 'object') throw new Error('supplemental historical evidence missing');
+function validateSupplementalReport(
+  value: unknown,
+  expectedSha256: string,
+  expectedRuleFilter: string,
+  label: string,
+): HistoricalReport {
+  if (!value || typeof value !== 'object') throw new Error(`${label} historical evidence missing`);
   const report = value as HistoricalReport;
   const input = report.input;
   if (
@@ -118,7 +133,7 @@ function validateSupplementalReport(value: unknown): HistoricalReport {
     || !Number.isFinite(Date.parse(report.generatedAt))
     || !input
     || input.barMinutes !== 5
-    || input.ruleFilter !== 'VWZ60'
+    || input.ruleFilter !== expectedRuleFilter
     || input.positionNotionalUsd !== 100
     || input.executionCosts !== 'market-specific executable $100 full-round-trip p95'
     || input.adverseExecution !== 'market-specific observed maximum; non-blocking sensitivity'
@@ -128,14 +143,58 @@ function validateSupplementalReport(value: unknown): HistoricalReport {
     || input.usedFallbackFunding !== false
     || !Array.isArray(report.qualified)
     || !Array.isArray(report.rows)
-  ) throw new Error('supplemental historical evidence contract invalid');
-  if (nativeHistoricalReportSha256(report) !== NATIVE_HISTORICAL_SUPPLEMENT_SHA256) {
-    throw new Error('supplemental historical evidence hash mismatch');
+  ) throw new Error(`${label} historical evidence contract invalid`);
+  if (nativeHistoricalReportSha256(report) !== expectedSha256) {
+    throw new Error(`${label} historical evidence hash mismatch`);
   }
   return report;
 }
 
-export function evaluateNativeHistoricalEvidence(value: unknown, supplementalValue?: unknown) {
+function evaluateSupplementalCandidates(
+  report: HistoricalReport | null,
+  definitions: readonly { strategyId: string; symbol: string; rule: string }[],
+  label: string,
+) {
+  if (report == null) return [];
+  return definitions.map((candidate) => {
+    const matches = report.rows.filter((row) =>
+      row.symbol === candidate.symbol && row.rule === candidate.rule);
+    if (matches.length !== 1) {
+      throw new Error(`${label} historical evidence row missing or duplicated: ${candidate.strategyId}`);
+    }
+    const row = matches[0]!;
+    for (const [metricLabel, metric] of Object.entries({
+      trades: row.trades,
+      coverageDays: row.coverageDays,
+      netPct: row.netPct,
+      adverseNetPct: row.adverseNetPct,
+      stressPf: row.stressPf,
+      robustPf: row.robustPf,
+      meanL95: row.meanL95,
+      maxDrawdownPct: row.maxDrawdownPct,
+      folds: row.folds,
+      is: row.is,
+      oos: row.oos,
+      long: row.long,
+      short: row.short,
+    })) number(metric, `${candidate.strategyId}.${metricLabel}`);
+    if (!Array.isArray(row.recent) || row.recent.length !== 3) {
+      throw new Error(`${label} historical evidence recent windows invalid: ${candidate.strategyId}`);
+    }
+    const reasons = rowReasons(row);
+    const passed = report.qualified.includes(`${candidate.symbol}:${candidate.rule}`);
+    if (passed !== (reasons.length === 0)) {
+      throw new Error(`${label} historical evidence qualification mismatch: ${candidate.strategyId}`);
+    }
+    return { ...candidate, passed, reasons, metrics: row };
+  });
+}
+
+export function evaluateNativeHistoricalEvidence(
+  value: unknown,
+  supplementalValue?: unknown,
+  xlmSupplementalValue?: unknown,
+) {
   if (!value || typeof value !== 'object') throw new Error('historical evidence missing');
   const report = value as HistoricalReport;
   const input = report.input;
@@ -200,41 +259,30 @@ export function evaluateNativeHistoricalEvidence(value: unknown, supplementalVal
 
   const supplementalReport = supplementalValue == null
     ? null
-    : validateSupplementalReport(supplementalValue);
-  const supplementalCandidates = supplementalReport == null
-    ? []
-    : SUPPLEMENTAL_HISTORICAL_CANDIDATES.map((candidate) => {
-      const matches = supplementalReport.rows.filter((row) =>
-        row.symbol === candidate.symbol && row.rule === candidate.rule);
-      if (matches.length !== 1) {
-        throw new Error(`supplemental historical evidence row missing or duplicated: ${candidate.strategyId}`);
-      }
-      const row = matches[0]!;
-      for (const [label, metric] of Object.entries({
-        trades: row.trades,
-        coverageDays: row.coverageDays,
-        netPct: row.netPct,
-        adverseNetPct: row.adverseNetPct,
-        stressPf: row.stressPf,
-        robustPf: row.robustPf,
-        meanL95: row.meanL95,
-        maxDrawdownPct: row.maxDrawdownPct,
-        folds: row.folds,
-        is: row.is,
-        oos: row.oos,
-        long: row.long,
-        short: row.short,
-      })) number(metric, `${candidate.strategyId}.${label}`);
-      if (!Array.isArray(row.recent) || row.recent.length !== 3) {
-        throw new Error(`supplemental historical evidence recent windows invalid: ${candidate.strategyId}`);
-      }
-      const reasons = rowReasons(row);
-      const passed = supplementalReport.qualified.includes(`${candidate.symbol}:${candidate.rule}`);
-      if (passed !== (reasons.length === 0)) {
-        throw new Error(`supplemental historical evidence qualification mismatch: ${candidate.strategyId}`);
-      }
-      return { ...candidate, passed, reasons, metrics: row };
-    });
+    : validateSupplementalReport(
+      supplementalValue,
+      NATIVE_HISTORICAL_SUPPLEMENT_SHA256,
+      'VWZ60',
+      'supplemental',
+    );
+  const xlmSupplementalReport = xlmSupplementalValue == null
+    ? null
+    : validateSupplementalReport(
+      xlmSupplementalValue,
+      NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256,
+      'VWZ60-3-touch',
+      'XLM supplemental',
+    );
+  const supplementalCandidates = evaluateSupplementalCandidates(
+    supplementalReport,
+    SUPPLEMENTAL_HISTORICAL_CANDIDATES,
+    'supplemental',
+  );
+  const xlmSupplementalCandidates = evaluateSupplementalCandidates(
+    xlmSupplementalReport,
+    XLM_SUPPLEMENTAL_HISTORICAL_CANDIDATES,
+    'XLM supplemental',
+  );
 
   const portfolioRule = 'Z60STACK-2.5-touch';
   const portfolioRows = report.portfolioRows.filter((row) => row.rule === portfolioRule);
@@ -243,10 +291,13 @@ export function evaluateNativeHistoricalEvidence(value: unknown, supplementalVal
     version: 'lighter-native-historical-evidence-v1',
     sourceGeneratedAt: report.generatedAt,
     sourceSha256,
-    candidates: [...candidates, ...supplementalCandidates],
+    candidates: [...candidates, ...supplementalCandidates, ...xlmSupplementalCandidates],
     supplementalSourceSha256: supplementalReport == null
       ? null
       : nativeHistoricalReportSha256(supplementalReport),
+    xlmSupplementalSourceSha256: xlmSupplementalReport == null
+      ? null
+      : nativeHistoricalReportSha256(xlmSupplementalReport),
     portfolio: {
       portfolioId: 'z60stack25-portfolio',
       rule: portfolioRule,

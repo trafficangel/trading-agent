@@ -25,9 +25,8 @@ export type Z60EntryMode = 'reclaim' | 'touch';
 /**
  * Kaufman's efficiency ratio on completed closes. Zero means that the path
  * travelled but ended where it started; one means a perfectly directional
- * path. It is exposed as telemetry only: the live Native rules do not use it
- * to block entries until an independent prospective sample validates that
- * change.
+ * path. Most Native rules expose it as telemetry only. A strategy may opt in
+ * to a frozen maximum after that exact filter passes the historical gates.
  */
 export function efficiencyRatio(
   bars: readonly Z60Bar[],
@@ -46,6 +45,14 @@ export function efficiencyRatio(
   }
   if (!(path > 0)) return 0;
   return Math.min(1, displacement / path);
+}
+
+export function allowsEntryByEfficiency(
+  ratio: number | null,
+  maximum?: number,
+): boolean {
+  if (maximum == null) return true;
+  return ratio != null && Number.isFinite(ratio) && ratio <= maximum;
 }
 
 function populationStats(values: readonly number[]): { mean: number; sigma: number } | null {
