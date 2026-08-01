@@ -609,14 +609,17 @@ const STRATEGIES: readonly StrategySpec[] = [
 const STRATEGY_BY_ID = new Map(STRATEGIES.map((spec) => [spec.id, spec]));
 const STRATEGY_IDS = STRATEGIES.map((spec) => spec.id);
 const NATIVE_STRATEGY_IDS = [
-  'sol-z60-reclaim',
-  'sol-z60-touch',
-  'bnb-z60-touch',
-  'ltc-z60-touch',
   'btc-vwz60-touch',
   'hype-vwz60-touch',
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => market.id),
 ] as const;
+const RETIRED_NATIVE_STRATEGY_IDS = [
+  'sol-z60-reclaim',
+  'sol-z60-touch',
+  'bnb-z60-touch',
+  'ltc-z60-touch',
+] as const;
+const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(RETIRED_NATIVE_STRATEGY_IDS);
 // Native Quant remains prospective Shadow-only. Historical rows stay visible,
 // but no Native strategy is currently registered for Real execution.
 const NATIVE_LIVE_STRATEGY_IDS: readonly string[] = [];
@@ -711,7 +714,10 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
 };
 
 const NATIVE_STRATEGIES = NATIVE_STRATEGY_IDS.map((id) => STRATEGY_BY_ID.get(id)!);
-const NATIVE_STRATEGY_ID_SET = new Set<string>(NATIVE_STRATEGY_IDS);
+const NATIVE_STRATEGY_ID_SET = new Set<string>([
+  ...NATIVE_STRATEGY_IDS,
+  ...RETIRED_NATIVE_STRATEGY_IDS,
+]);
 const NATIVE_TREND_PORTFOLIO_STRATEGIES = NATIVE_TREND_PORTFOLIO_MARKETS
   .map((market) => STRATEGY_BY_ID.get(market.id)!);
 const NATIVE_TREND_PORTFOLIO_IDS = NATIVE_TREND_PORTFOLIO_STRATEGIES
@@ -1545,6 +1551,7 @@ export function queueLighterLuxalgoSignal(
   payload: LuxAlgoStrategyPayload,
   diagnostics?: NativeSignalDiagnostics,
 ): void {
+  if (RETIRED_NATIVE_STRATEGY_ID_SET.has(payload.strategy_id)) return;
   const spec = STRATEGY_BY_ID.get(payload.strategy_id);
   if (!spec || payload.symbol !== spec.symbol) return;
   const derived = deriveActionSide(payload);
@@ -2143,7 +2150,9 @@ function positivePage(value: unknown): number {
   return Number.isFinite(page) && page > 0 ? page : 1;
 }
 function selectedStrategy(value: unknown): StrategySpec | null {
-  return STRATEGY_BY_ID.get(String(value ?? '')) ?? null;
+  const id = String(value ?? '');
+  if (RETIRED_NATIVE_STRATEGY_ID_SET.has(id)) return null;
+  return STRATEGY_BY_ID.get(id) ?? null;
 }
 type PortfolioGroup = 'native' | null;
 
@@ -2520,7 +2529,6 @@ function nativeRunnerReason(lang: Lang, row: NativeRunnerEvaluation): string {
     entry_signal: ['сигнал отправлен', 'signal emitted'],
     waiting_mean_or_time_exit: ['позиция: ждёт mean/time exit', 'position: waiting for mean/time exit'],
     same_bar_stop_or_close: ['повторный вход в том же баре запрещён', 'same-bar re-entry blocked'],
-    historical_gate_failed: ['новые входы отключены: исторический гейт', 'new entries disabled: historical gate'],
     sma60_cross: ['SMA60 exit отправлен', 'SMA60 exit emitted'],
     vwma60_cross: ['VWMA60 exit отправлен', 'VWMA60 exit emitted'],
     time_240_bars: ['time exit отправлен', 'time exit emitted'],
@@ -2747,8 +2755,8 @@ export async function lighterNativeQuantHero(lang: Lang): Promise<string> {
       <div class="ll-title">${t(lang, 'Собственные стратегии · единый портфель', 'In-house strategies · unified portfolio')}</div>
       <div class="ll-sub">${t(
         lang,
-        '6 самостоятельных моделей + P2 на 15 рынках · единая статистика Shadow/Real →',
-        '6 standalone models + P2 across 15 markets · consolidated Shadow/Real statistics →',
+        '2 самостоятельные модели + P2 на 15 рынках · чистая prospective-статистика →',
+        '2 standalone models + P2 across 15 markets · clean prospective statistics →',
       )}</div>
     </div>
     <div class="ll-stats">
@@ -3488,8 +3496,8 @@ async function render(
     : requested.group === 'native'
       ? t(
         lang,
-        `Собственные стратегии на завершённых свечах Lighter собраны в одном портфеле: ${scopeLabel}. Единые сигналы, сделки, накопленный PnL и индивидуальная статистика; новая prospective Shadow-когорта моделируется на $100, как отбор и будущий Real-canary. Старые сделки $1000 сохранены отдельно и не участвуют в гейте. Комиссия Standard — 0%, spread, VWAP, slippage и funding учитываются.`,
-        `In-house completed-candle Lighter strategies share one portfolio: ${scopeLabel}. Signals, trades, cumulative PnL, and per-strategy statistics are consolidated; the new prospective Shadow cohort uses $100, matching selection and the future Real canary. Legacy $1,000 trades are preserved separately and excluded from the gate. Standard trading fee is 0%, while spread, VWAP, slippage, and funding are included.`,
+        `Рабочие стратегии на завершённых свечах Lighter собраны в одном портфеле: ${scopeLabel}. После очистки сигналы, сделки, PnL и индивидуальная статистика считаются с нуля на $100. Комиссия Standard — 0%, spread, VWAP, slippage и funding учитываются.`,
+        `Qualified completed-candle Lighter strategies share one portfolio: ${scopeLabel}. After the reset, signals, trades, PnL, and per-strategy statistics start from zero at $100. Standard trading fee is 0%, while spread, VWAP, slippage, and funding are included.`,
       )
       : t(
         lang,

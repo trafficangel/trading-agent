@@ -85,18 +85,6 @@ describe('parseNativeRunnerStatus', () => {
     expect(parseNativeRunnerStatus(JSON.stringify(valid))).toEqual(valid);
   });
 
-  it('accepts an explicit historical-gate entry disable as healthy runner state', () => {
-    const disabled: NativeRunnerStatus = {
-      ...valid,
-      evaluations: [{
-        ...valid.evaluations[0]!,
-        state: 'entry_disabled',
-        reason: 'historical_gate_failed',
-      }],
-    };
-    expect(parseNativeRunnerStatus(JSON.stringify(disabled))).toEqual(disabled);
-  });
-
   it('fails closed on a malformed state instead of showing a false green runner', () => {
     expect(parseNativeRunnerStatus(JSON.stringify({ ...valid, heartbeatAt: 'now' }))).toBeNull();
     expect(parseNativeRunnerStatus('{')).toBeNull();

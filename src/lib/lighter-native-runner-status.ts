@@ -6,7 +6,6 @@ export type NativeRunnerEvaluationState =
   | 'position_open'
   | 'exit_emitted'
   | 'same_bar_reentry_blocked'
-  | 'entry_disabled'
   | 'data_error'
   | 'evaluation_error';
 
@@ -100,7 +99,6 @@ const STATES = new Set<NativeRunnerEvaluationState>([
   'position_open',
   'exit_emitted',
   'same_bar_reentry_blocked',
-  'entry_disabled',
   'data_error',
   'evaluation_error',
 ]);
