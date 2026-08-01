@@ -1,0 +1,556 @@
+{
+  "version": "lighter-selected-portfolio-audit-v1",
+  "generatedAt": "2026-08-01T23:26:18.818Z",
+  "source": {
+    "file": "/private/tmp/trading-agent-lighter-quant-strategy/data/lighter-zec-data-selected-sweep-20260801.json",
+    "generatedAt": "2026-08-01T23:26:04.734Z"
+  },
+  "frozenSelection": [
+    {
+      "strategyId": "zec-rsi14-willr14-ema400",
+      "symbol": "ZEC",
+      "rule": "CONF-RSI14-WILLR14-30/70+EMA400"
+    },
+    {
+      "strategyId": "data-vwz60-mfi14-ema400",
+      "symbol": "DATA",
+      "rule": "CONF-VWZ60-2.5+MFI14-35/65+EMA400"
+    }
+  ],
+  "assumptions": {
+    "positionNotionalUsd": 100,
+    "capacity": 2,
+    "commissionPct": 0,
+    "executionCost": "market-specific executable $100 full-round-trip p95",
+    "funding": "exact hourly settlements in (entry, exit]",
+    "maxDrawdownCapitalPct": 10,
+    "realPromotion": "not authorized; prospective Shadow gate remains independent"
+  },
+  "passedHistoricalPortfolioGate": true,
+  "capacityTwo": {
+    "accepted": 379,
+    "dropped": 0,
+    "maxConcurrent": 2,
+    "trades": 379,
+    "netPctUnits": 83.24631178057767,
+    "netUsd": 83.24631178057767,
+    "profitFactor": 1.5753558690278304,
+    "adverseNetPctUnits": 81.67795631073847,
+    "adverseProfitFactor": 1.5620068514323733,
+    "winRatePct": 59.894459102902374,
+    "maxDrawdownPctUnits": -8.458290430351644,
+    "maxDrawdownUsd": -8.458290430351644,
+    "maxDrawdownCapitalPct": -4.229145215175822,
+    "meanL95Pct": 0.11771968576730564,
+    "positiveFolds": 4,
+    "foldNets": [
+      10.695597142462171,
+      18.812581747686785,
+      36.802657924378266,
+      16.935474966050414
+    ],
+    "inSamplePctUnits": 53.08586741555114,
+    "outOfSamplePctUnits": 30.160444365026503,
+    "longPctUnits": 32.29318406031934,
+    "shortPctUnits": 50.953127720258315,
+    "recent": [
+      {
+        "days": 30,
+        "trades": 47,
+        "netPctUnits": 11.186645611828974,
+        "profitFactor": 1.8231343491193754,
+        "longPctUnits": 1.2596324861468755,
+        "shortPctUnits": 9.927013125682103
+      },
+      {
+        "days": 60,
+        "trades": 128,
+        "netPctUnits": 52.9481067094045,
+        "profitFactor": 2.180771866004922,
+        "longPctUnits": 8.495322509511674,
+        "shortPctUnits": 44.452784199892854
+      },
+      {
+        "days": 90,
+        "trades": 199,
+        "netPctUnits": 59.57147309362644,
+        "profitFactor": 1.8486649116522156,
+        "longPctUnits": 19.86450827813097,
+        "shortPctUnits": 39.70696481549549
+      }
+    ]
+  },
+  "capacityOneSensitivity": {
+    "frozenPriority": {
+      "priority": [
+        "zec-rsi14-willr14-ema400",
+        "data-vwz60-mfi14-ema400"
+      ],
+      "accepted": 353,
+      "dropped": 26,
+      "trades": 353,
+      "netPctUnits": 82.85753798735747,
+      "netUsd": 82.85753798735749,
+      "profitFactor": 1.6185811383054773,
+      "adverseNetPctUnits": 81.4198788066715,
+      "adverseProfitFactor": 1.6051404675108103,
+      "winRatePct": 59.773371104815865,
+      "maxDrawdownPctUnits": -8.911027249383782,
+      "maxDrawdownUsd": -8.911027249383782,
+      "maxDrawdownCapitalPct": -8.911027249383782,
+      "meanL95Pct": 0.12765962867388841,
+      "positiveFolds": 4,
+      "foldNets": [
+        13.067772853273668,
+        16.488622901770597,
+        36.73775120778296,
+        16.56339102453021
+      ],
+      "inSamplePctUnits": 58.63449512214303,
+      "outOfSamplePctUnits": 24.22304286521444,
+      "longPctUnits": 27.45082121185655,
+      "shortPctUnits": 55.406716775500904,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 46,
+          "netPctUnits": 10.10424551799832,
+          "profitFactor": 1.7434893216788059,
+          "longPctUnits": 1.2596324861468755,
+          "shortPctUnits": 8.84461303185145
+        },
+        {
+          "days": 60,
+          "trades": 122,
+          "netPctUnits": 50.961632139423614,
+          "profitFactor": 2.1948425570393386,
+          "longPctUnits": 7.857340714758616,
+          "shortPctUnits": 43.104291424665014
+        },
+        {
+          "days": 90,
+          "trades": 188,
+          "netPctUnits": 59.627832377409646,
+          "profitFactor": 1.9200287230084079,
+          "longPctUnits": 18.650854892240847,
+          "shortPctUnits": 40.976977485168824
+        }
+      ]
+    },
+    "reversePriority": {
+      "priority": [
+        "data-vwz60-mfi14-ema400",
+        "zec-rsi14-willr14-ema400"
+      ],
+      "accepted": 353,
+      "dropped": 26,
+      "trades": 353,
+      "netPctUnits": 82.82085385485163,
+      "netUsd": 82.82085385485163,
+      "profitFactor": 1.6181379804481129,
+      "adverseNetPctUnits": 81.3925301233909,
+      "adverseProfitFactor": 1.6048142652679374,
+      "winRatePct": 59.773371104815865,
+      "maxDrawdownPctUnits": -8.911027249383782,
+      "maxDrawdownUsd": -8.911027249383782,
+      "maxDrawdownCapitalPct": -8.911027249383782,
+      "meanL95Pct": 0.12754595327079876,
+      "positiveFolds": 4,
+      "foldNets": [
+        13.031088720767835,
+        16.488622901770597,
+        36.73775120778296,
+        16.56339102453021
+      ],
+      "inSamplePctUnits": 58.59781098963719,
+      "outOfSamplePctUnits": 24.22304286521444,
+      "longPctUnits": 27.45082121185655,
+      "shortPctUnits": 55.370032642995064,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 46,
+          "netPctUnits": 10.10424551799832,
+          "profitFactor": 1.7434893216788059,
+          "longPctUnits": 1.2596324861468755,
+          "shortPctUnits": 8.84461303185145
+        },
+        {
+          "days": 60,
+          "trades": 122,
+          "netPctUnits": 50.961632139423614,
+          "profitFactor": 2.1948425570393386,
+          "longPctUnits": 7.857340714758616,
+          "shortPctUnits": 43.104291424665014
+        },
+        {
+          "days": 90,
+          "trades": 188,
+          "netPctUnits": 59.627832377409646,
+          "profitFactor": 1.9200287230084079,
+          "longPctUnits": 18.650854892240847,
+          "shortPctUnits": 40.976977485168824
+        }
+      ]
+    }
+  },
+  "contributionDominance": 0.5578328820640256,
+  "contributions": [
+    {
+      "strategyId": "zec-rsi14-willr14-ema400",
+      "symbol": "ZEC",
+      "trades": 168,
+      "netPctUnits": 46.4375300217601,
+      "netUsd": 46.4375300217601,
+      "profitFactor": 1.685946658122878,
+      "adverseNetPctUnits": 44.869174551920835,
+      "adverseProfitFactor": 1.656514982805256,
+      "winRatePct": 58.92857142857143,
+      "maxDrawdownPctUnits": -13.54103814254926,
+      "maxDrawdownUsd": -13.54103814254926,
+      "maxDrawdownCapitalPct": -13.54103814254926,
+      "meanL95Pct": 0.10436495239948165,
+      "positiveFolds": 3,
+      "foldNets": [
+        -9.588230135075117,
+        14.916052322227483,
+        25.43184462340559,
+        15.67786321120214
+      ],
+      "inSamplePctUnits": 15.351791194252314,
+      "outOfSamplePctUnits": 31.085738827507758,
+      "longPctUnits": 23.179279442111646,
+      "shortPctUnits": 23.258250579648443,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 20,
+          "netPctUnits": 1.639125757131238,
+          "profitFactor": 1.2536710937025182,
+          "longPctUnits": 0.23966521567783627,
+          "shortPctUnits": 1.3994605414534018
+        },
+        {
+          "days": 60,
+          "trades": 54,
+          "netPctUnits": 34.31799316938732,
+          "profitFactor": 2.901506991906728,
+          "longPctUnits": 7.209372716539587,
+          "shortPctUnits": 27.10862045284774
+        },
+        {
+          "days": 90,
+          "trades": 81,
+          "netPctUnits": 39.64245065338905,
+          "profitFactor": 2.3384645710698257,
+          "longPctUnits": 11.278639228255543,
+          "shortPctUnits": 28.363811425133523
+        }
+      ]
+    },
+    {
+      "strategyId": "data-vwz60-mfi14-ema400",
+      "symbol": "DATA",
+      "trades": 211,
+      "netPctUnits": 36.80878175881758,
+      "netUsd": 36.80878175881758,
+      "profitFactor": 1.4781094518805693,
+      "adverseNetPctUnits": 36.80878175881758,
+      "adverseProfitFactor": 1.4781094518805693,
+      "winRatePct": 60.66350710900474,
+      "maxDrawdownPctUnits": -9.748746393629592,
+      "maxDrawdownUsd": -9.748746393629592,
+      "maxDrawdownCapitalPct": -9.748746393629592,
+      "meanL95Pct": 0.05284203817357745,
+      "positiveFolds": 4,
+      "foldNets": [
+        19.2337690085858,
+        2.3369364642772292,
+        9.744704666409563,
+        5.493371619544979
+      ],
+      "inSamplePctUnits": 26.10640468550643,
+      "outOfSamplePctUnits": 10.702377073311135,
+      "longPctUnits": 9.113904618207682,
+      "shortPctUnits": 27.69487714060988,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 27,
+          "netPctUnits": 9.547519854697741,
+          "profitFactor": 2.3393100525894615,
+          "longPctUnits": 1.0199672704690392,
+          "shortPctUnits": 8.527552584228701
+        },
+        {
+          "days": 60,
+          "trades": 74,
+          "netPctUnits": 18.63011354001718,
+          "profitFactor": 1.6953050644192589,
+          "longPctUnits": 1.2859497929720882,
+          "shortPctUnits": 17.344163747045094
+        },
+        {
+          "days": 90,
+          "trades": 120,
+          "netPctUnits": 20.01334179510597,
+          "profitFactor": 1.4921450156272664,
+          "longPctUnits": 8.585869049875424,
+          "shortPctUnits": 11.427472745230547
+        }
+      ]
+    }
+  ],
+  "regimes": {
+    "bull": {
+      "trades": 66,
+      "netPctUnits": 18.71705674668214,
+      "netUsd": 18.71705674668214,
+      "profitFactor": 1.904663308529109,
+      "adverseNetPctUnits": 18.464999617600828,
+      "adverseProfitFactor": 1.888471545190905,
+      "winRatePct": 63.63636363636363,
+      "maxDrawdownPctUnits": -3.652398082660966,
+      "maxDrawdownUsd": -3.652398082660966,
+      "maxDrawdownCapitalPct": -1.826199041330483,
+      "meanL95Pct": 0.07365441949718551,
+      "positiveFolds": 3,
+      "foldNets": [
+        -0.9110923124587049,
+        7.856269120971067,
+        5.242076470005319,
+        6.529803468164455
+      ],
+      "inSamplePctUnits": 9.420143512845886,
+      "outOfSamplePctUnits": 9.296913233836248,
+      "longPctUnits": 18.71705674668214,
+      "shortPctUnits": 0,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 17,
+          "netPctUnits": 4.7998676504228985,
+          "profitFactor": 1.7436614814682827,
+          "longPctUnits": 4.7998676504228985,
+          "shortPctUnits": 0
+        },
+        {
+          "days": 60,
+          "trades": 28,
+          "netPctUnits": 9.505430848479893,
+          "profitFactor": 2.103473262429547,
+          "longPctUnits": 9.505430848479893,
+          "shortPctUnits": 0
+        },
+        {
+          "days": 90,
+          "trades": 45,
+          "netPctUnits": 18.909007386076482,
+          "profitFactor": 2.895861566441039,
+          "longPctUnits": 18.909007386076482,
+          "shortPctUnits": 0
+        }
+      ]
+    },
+    "bear": {
+      "trades": 98,
+      "netPctUnits": 25.990645466787864,
+      "netUsd": 25.990645466787864,
+      "profitFactor": 1.7850003041365317,
+      "adverseNetPctUnits": 25.68257564235515,
+      "adverseProfitFactor": 1.7730362120440182,
+      "winRatePct": 63.26530612244898,
+      "maxDrawdownPctUnits": -4.22900166426874,
+      "maxDrawdownUsd": -4.22900166426874,
+      "maxDrawdownCapitalPct": -2.11450083213437,
+      "meanL95Pct": 0.06894656153059125,
+      "positiveFolds": 4,
+      "foldNets": [
+        3.006265294493505,
+        2.9496620414791623,
+        14.522348270548624,
+        5.512369860266573
+      ],
+      "inSamplePctUnits": 11.338932381436072,
+      "outOfSamplePctUnits": 14.65171308535179,
+      "longPctUnits": 0,
+      "shortPctUnits": 25.990645466787864,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 8,
+          "netPctUnits": 2.872084060377086,
+          "profitFactor": 3.226072759210547,
+          "longPctUnits": 0,
+          "shortPctUnits": 2.872084060377086
+        },
+        {
+          "days": 60,
+          "trades": 36,
+          "netPctUnits": 17.565285660861516,
+          "profitFactor": 2.590666554210776,
+          "longPctUnits": 0,
+          "shortPctUnits": 17.565285660861516
+        },
+        {
+          "days": 90,
+          "trades": 52,
+          "netPctUnits": 19.953122943941207,
+          "profitFactor": 2.2912380997696795,
+          "longPctUnits": 0,
+          "shortPctUnits": 19.953122943941207
+        }
+      ]
+    },
+    "mixed": {
+      "trades": 215,
+      "netPctUnits": 38.538609567107656,
+      "netUsd": 38.538609567107656,
+      "profitFactor": 1.4240229391481078,
+      "adverseNetPctUnits": 37.5303810507824,
+      "adverseProfitFactor": 1.410945994968803,
+      "winRatePct": 57.20930232558139,
+      "maxDrawdownPctUnits": -8.461883919300762,
+      "maxDrawdownUsd": -8.461883919300762,
+      "maxDrawdownCapitalPct": -4.230941959650381,
+      "meanL95Pct": 0.03700752314551431,
+      "positiveFolds": 4,
+      "foldNets": [
+        8.605568228296791,
+        8.578444061531522,
+        6.43680421692269,
+        14.917793060356656
+      ],
+      "inSamplePctUnits": 24.942527577129407,
+      "outOfSamplePctUnits": 13.596081989978252,
+      "longPctUnits": 13.576127313637198,
+      "shortPctUnits": 24.962482253470466,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 35,
+          "netPctUnits": 8.66585068628344,
+          "profitFactor": 1.9540623343318604,
+          "longPctUnits": -0.15769878703258622,
+          "shortPctUnits": 8.823549473316026
+        },
+        {
+          "days": 60,
+          "trades": 78,
+          "netPctUnits": 27.43819200451749,
+          "profitFactor": 1.9649237382010891,
+          "longPctUnits": -0.5902693732734395,
+          "shortPctUnits": 28.02846137779093
+        },
+        {
+          "days": 90,
+          "trades": 113,
+          "netPctUnits": 25.542587007322453,
+          "profitFactor": 1.5672465043225923,
+          "longPctUnits": 5.870340322642164,
+          "shortPctUnits": 19.672246684680292
+        }
+      ]
+    },
+    "highVol": {
+      "trades": 161,
+      "netPctUnits": 53.47591005033476,
+      "netUsd": 53.47591005033476,
+      "profitFactor": 1.8626565994682855,
+      "adverseNetPctUnits": 52.87844129991981,
+      "adverseProfitFactor": 1.8497932971446338,
+      "winRatePct": 61.49068322981367,
+      "maxDrawdownPctUnits": -6.967071109747534,
+      "maxDrawdownUsd": -6.9670711097475335,
+      "maxDrawdownCapitalPct": -3.483535554873767,
+      "meanL95Pct": 0.16167664500122475,
+      "positiveFolds": 4,
+      "foldNets": [
+        5.219852501324776,
+        19.016513504144662,
+        16.048694368925737,
+        13.190849675939594
+      ],
+      "inSamplePctUnits": 40.4607037150501,
+      "outOfSamplePctUnits": 13.01520633528468,
+      "longPctUnits": 10.574332178828875,
+      "shortPctUnits": 42.901577871505886,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 23,
+          "netPctUnits": 7.696230056027677,
+          "profitFactor": 2.162061184816378,
+          "longPctUnits": 0.17588199320043918,
+          "shortPctUnits": 7.520348062827241
+        },
+        {
+          "days": 60,
+          "trades": 58,
+          "netPctUnits": 29.167456278901508,
+          "profitFactor": 2.40859566049896,
+          "longPctUnits": 1.238110174371855,
+          "shortPctUnits": 27.929346104529657
+        },
+        {
+          "days": 90,
+          "trades": 84,
+          "netPctUnits": 32.76318093537466,
+          "profitFactor": 2.037751557237477,
+          "longPctUnits": 6.335986260760681,
+          "shortPctUnits": 26.427194674614007
+        }
+      ]
+    },
+    "lowVol": {
+      "trades": 218,
+      "netPctUnits": 29.7704017302429,
+      "netUsd": 29.7704017302429,
+      "profitFactor": 1.3599943968842447,
+      "adverseNetPctUnits": 28.79951501081859,
+      "adverseProfitFactor": 1.3465328381799686,
+      "winRatePct": 58.71559633027523,
+      "maxDrawdownPctUnits": -5.82161051175448,
+      "maxDrawdownUsd": -5.82161051175448,
+      "maxDrawdownCapitalPct": -2.91080525587724,
+      "meanL95Pct": 0.01232167966435807,
+      "positiveFolds": 3,
+      "foldNets": [
+        5.644703534196019,
+        -0.2577838692758472,
+        16.108431146419463,
+        8.275050918903252
+      ],
+      "inSamplePctUnits": 15.204168223138568,
+      "outOfSamplePctUnits": 14.566233507104325,
+      "longPctUnits": 21.718851881490462,
+      "shortPctUnits": 8.051549848752432,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 24,
+          "netPctUnits": 3.490415555801302,
+          "profitFactor": 1.5009645337668145,
+          "longPctUnits": 1.0837504929464363,
+          "shortPctUnits": 2.4066650628548656
+        },
+        {
+          "days": 60,
+          "trades": 71,
+          "netPctUnits": 22.72718054002036,
+          "profitFactor": 1.9022785646465528,
+          "longPctUnits": 6.203742444657172,
+          "shortPctUnits": 16.52343809536318
+        },
+        {
+          "days": 90,
+          "trades": 118,
+          "netPctUnits": 26.778428917133805,
+          "profitFactor": 1.6896988730503786,
+          "longPctUnits": 13.325285398395234,
+          "shortPctUnits": 13.453143518738568
+        }
+      ]
+    }
+  }
+}

@@ -50,10 +50,17 @@ const FALLBACK_FUNDING_PER_HOUR_PCT = Number(
   process.env.FALLBACK_FUNDING_PER_HOUR_PCT ?? 0.00125,
 );
 const ALLOW_FALLBACK_FUNDING = process.env.ALLOW_FALLBACK_FUNDING === '1';
-const FUNDING_HISTORY_FILE = resolve(
-  process.env.FUNDING_HISTORY_FILE ?? 'data/lighter-funding-history-native.json',
-);
+const FUNDING_HISTORY_FILES = (
+  process.env.FUNDING_HISTORY_FILES
+    ?? process.env.FUNDING_HISTORY_FILE
+    ?? 'data/lighter-funding-history-native.json'
+)
+  .split(',')
+  .map((file) => file.trim())
+  .filter(Boolean)
+  .map((file) => resolve(file));
 const OUTPUT_JSON = process.env.OUTPUT_JSON ? resolve(process.env.OUTPUT_JSON) : null;
+const OUTPUT_INCLUDE_TRADE_DETAILS = process.env.OUTPUT_INCLUDE_TRADE_DETAILS === '1';
 const KLINES_DIR = resolve(process.env.LIGHTER_KLINES_DIR ?? 'data/lighter-klines');
 const BAR_MINUTES = Number(process.env.BAR_MINUTES ?? 1);
 const Z_PERIODS = (process.env.Z_PERIODS ?? '20,60').split(',').map(Number);
@@ -238,8 +245,9 @@ const fundingCoverageBySymbol = new Map<string, {
   firstTimestampMs: number | null;
   lastTimestampMs: number | null;
 }>();
-if (existsSync(FUNDING_HISTORY_FILE)) {
-  const parsed = JSON.parse(readFileSync(FUNDING_HISTORY_FILE, 'utf8')) as FundingHistoryFile;
+for (const file of FUNDING_HISTORY_FILES) {
+  if (!existsSync(file)) continue;
+  const parsed = JSON.parse(readFileSync(file, 'utf8')) as FundingHistoryFile;
   for (const [symbol, value] of Object.entries(parsed.symbols ?? {})) {
     fundingBySymbol.set(
       symbol.toUpperCase(),
@@ -1772,7 +1780,7 @@ const rows: Array<{
   rule: string;
   costPct: number;
   adverseCostPct: number;
-  trades: Trade[];
+  trades: ClassifiedTrade[];
   baseline: number;
   stress: number;
   stressPf: number;
@@ -1898,7 +1906,7 @@ for (const [symbol, arrays] of loaded) {
       rule: rule.name,
       costPct,
       adverseCostPct,
-      trades,
+      trades: classifiedTrades,
       baseline: sum(trades),
       stress: sum(trades, costPct),
       stressPf: pf(trades, costPct),
@@ -2293,6 +2301,7 @@ if (OUTPUT_JSON) {
   const compactRows = rows.map(({ trades, ...row }) => ({
     ...row,
     trades: trades.length,
+    ...(OUTPUT_INCLUDE_TRADE_DETAILS ? { tradeDetails: trades } : {}),
     grossPct: row.baseline,
     netPct: row.stress,
     adverseNetPct: row.robustStress,
@@ -2318,8 +2327,7 @@ if (OUTPUT_JSON) {
       executionCosts: 'market-specific executable $100 full-round-trip p95',
       adverseExecution: 'market-specific observed maximum; non-blocking sensitivity',
       funding: 'exact Lighter hourly settlements in (entry, exit]',
-      fundingHistoryFile:
-        process.env.FUNDING_HISTORY_FILE ?? 'data/lighter-funding-history-native.json',
+      fundingHistoryFiles: FUNDING_HISTORY_FILES,
       fundingCoverage: Object.fromEntries(fundingCoverageBySymbol),
       qualificationInputsMeasured,
       usedFallbackExecutionCost,
