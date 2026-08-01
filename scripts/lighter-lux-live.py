@@ -26,7 +26,9 @@ import lighter
 from lighter_live_risk import (
     StrategyRiskPolicy,
     evaluate_strategy_risk,
+    native_canary_config_error,
     native_promotion_report_error,
+    native_registry_error,
     pnl_stats,
 )
 
@@ -98,6 +100,15 @@ class LiveRunner:
         self.native_promotion_max_age_ms = int(
             os.getenv("LIGHTER_NATIVE_PROMOTION_MAX_AGE_MS", str(2 * 60 * 60 * 1000))
         )
+        registry_error = native_registry_error(
+            {
+                strategy_id: strategy.market_id
+                for strategy_id, strategy in STRATEGIES.items()
+            },
+            NATIVE_SHADOW_GATED_STRATEGIES,
+        )
+        if registry_error is not None:
+            raise RuntimeError(registry_error)
         self.signal_batch_size = max(
             1,
             int(os.getenv("LIGHTER_LIVE_SIGNAL_BATCH_SIZE", "16")),
@@ -151,6 +162,9 @@ class LiveRunner:
         """Fail closed for Native entries; exits never call this method."""
         if strategy_id not in NATIVE_SHADOW_GATED_STRATEGIES:
             return None
+        config_error = native_canary_config_error(self.notional, self.leverage)
+        if config_error is not None:
+            return config_error
         try:
             with open(self.native_promotion_report, encoding="utf-8") as handle:
                 report = json.load(handle)

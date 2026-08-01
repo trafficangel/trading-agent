@@ -5,7 +5,12 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "scripts"))
 
-from lighter_live_risk import StrategyRiskPolicy, evaluate_strategy_risk  # noqa: E402
+from lighter_live_risk import (  # noqa: E402
+    StrategyRiskPolicy,
+    evaluate_strategy_risk,
+    native_canary_config_error,
+    native_registry_error,
+)
 
 
 class StrategyRiskTest(unittest.TestCase):
@@ -43,6 +48,17 @@ class StrategyRiskTest(unittest.TestCase):
         self.assertTrue(decision.passed)
         self.assertFalse(decision.pause)
         self.assertEqual(decision.gate_status, "paused")
+
+    def test_native_canary_requires_frozen_notional_and_safe_leverage(self) -> None:
+        self.assertIsNone(native_canary_config_error(100, 10))
+        self.assertIn("notional", native_canary_config_error(1000, 10) or "")
+        self.assertIn("leverage", native_canary_config_error(100, 11) or "")
+        self.assertIn("leverage", native_canary_config_error(100, 0) or "")
+
+    def test_native_registry_rejects_missing_and_same_market_owners(self) -> None:
+        self.assertIsNone(native_registry_error({"a": 1, "b": 2}, {"a", "b"}))
+        self.assertIn("not executor-registered", native_registry_error({"a": 1}, {"a", "b"}) or "")
+        self.assertIn("collision", native_registry_error({"a": 1, "b": 1}, {"a", "b"}) or "")
 
 
 if __name__ == "__main__":

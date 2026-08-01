@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Sequence
+from typing import Collection, Mapping, Sequence
 
 
 NATIVE_PROMOTION_REPORT_VERSION = "lighter-native-promotion-audit-v3"
@@ -38,6 +38,38 @@ NATIVE_PROMOTION_GATE = {
     "minRecentSignalsForHealth": 20.0,
     "recentSignalWindow": 100.0,
 }
+
+
+def native_canary_config_error(notional_usd: float, leverage: int) -> str | None:
+    """Keep every Native Real canary inside the frozen capital envelope."""
+    if float(notional_usd) != NATIVE_PROMOTION_NOTIONAL_USD:
+        return (
+            f"native canary notional ${float(notional_usd):g} "
+            f"!= ${NATIVE_PROMOTION_NOTIONAL_USD:g}"
+        )
+    if int(leverage) < 1 or int(leverage) > 10:
+        return f"native canary leverage {int(leverage)}x outside 1x..10x"
+    return None
+
+
+def native_registry_error(
+    market_ids_by_strategy: Mapping[str, int],
+    native_strategy_ids: Collection[str],
+) -> str | None:
+    """Reject missing registrations and one-way market ownership collisions."""
+    owner_by_market: dict[int, str] = {}
+    for strategy_id in sorted(native_strategy_ids):
+        market_id = market_ids_by_strategy.get(strategy_id)
+        if market_id is None:
+            return f"native strategy {strategy_id} is not executor-registered"
+        owner = owner_by_market.get(int(market_id))
+        if owner is not None:
+            return (
+                f"native market {int(market_id)} collision: "
+                f"{owner} and {strategy_id}"
+            )
+        owner_by_market[int(market_id)] = strategy_id
+    return None
 
 
 @dataclass(frozen=True)
