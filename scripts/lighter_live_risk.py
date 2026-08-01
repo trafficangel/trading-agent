@@ -22,6 +22,9 @@ NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256 = (
 NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256 = (
     "ea089a8d09788ca652e6cc7ce4543dd8f65ef269375bcf3405329ec17239c74f"
 )
+NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256 = (
+    "831526b9c633b1d9020ee84b7893d52566751eea11d3b5e8c962cb8ff6270e54"
+)
 NATIVE_PROMOTION_GATE = {
     "targetClosed": 20.0,
     "minDurationDays": 7.0,
@@ -151,6 +154,11 @@ def native_promotion_report_error(
         != NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256
     ):
         return "native DATA supplemental historical evidence hash mismatch"
+    if (
+        historical.get("rsiSupplementalSourceSha256")
+        != NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256
+    ):
+        return "native RSI supplemental historical evidence hash mismatch"
 
     strategies = report.get("strategies")
     if not isinstance(strategies, list):

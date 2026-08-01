@@ -13,6 +13,7 @@ from lighter_live_risk import (  # noqa: E402
     NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256,
     NATIVE_HISTORICAL_EVIDENCE_VERSION,
     NATIVE_HISTORICAL_REPORT_SHA256,
+    NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256,
     NATIVE_HISTORICAL_SUPPLEMENT_SHA256,
     NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256,
     NATIVE_PROMOTION_GATE,
@@ -40,6 +41,7 @@ def valid_report() -> dict:
             "supplementalSourceSha256": NATIVE_HISTORICAL_SUPPLEMENT_SHA256,
             "xlmSupplementalSourceSha256": NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256,
             "dataSupplementalSourceSha256": NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256,
+            "rsiSupplementalSourceSha256": NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256,
         },
         "strategies": [
             {
@@ -100,6 +102,11 @@ class NativePromotionReportTest(unittest.TestCase):
         report = valid_report()
         report["historicalEvidence"]["dataSupplementalSourceSha256"] = "0" * 64
         self.assertIn("DATA supplemental", self.check(report) or "")
+
+    def test_changed_rsi_supplement_fails_closed(self) -> None:
+        report = valid_report()
+        report["historicalEvidence"]["rsiSupplementalSourceSha256"] = "0" * 64
+        self.assertIn("RSI supplemental", self.check(report) or "")
 
     def test_duplicate_strategy_evidence_fails_closed(self) -> None:
         report = valid_report()

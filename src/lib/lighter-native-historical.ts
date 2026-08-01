@@ -10,6 +10,8 @@ export const NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256 =
   'cb507f67f7e34d005b1b5360dd6aede718d9f8a1d6cf6ebba037b84b9018f445';
 export const NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256 =
   'ea089a8d09788ca652e6cc7ce4543dd8f65ef269375bcf3405329ec17239c74f';
+export const NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256 =
+  '831526b9c633b1d9020ee84b7893d52566751eea11d3b5e8c962cb8ff6270e54';
 
 const HISTORICAL_CANDIDATES = [
   { strategyId: 'sol-z60-reclaim', symbol: 'SOL', rule: 'Z60-3-reclaim' },
@@ -37,6 +39,19 @@ const DATA_SUPPLEMENTAL_HISTORICAL_CANDIDATES = [
     strategyId: 'data-vwz60-touch',
     symbol: 'DATA',
     rule: 'VWZ60-2.5-touch',
+  },
+] as const;
+
+const RSI_SUPPLEMENTAL_HISTORICAL_CANDIDATES = [
+  {
+    strategyId: 'apt-rsi14-pullback-ema400',
+    symbol: 'APT',
+    rule: 'RSI14-25/75+EMA400',
+  },
+  {
+    strategyId: 'dot-rsi14-pullback-ema400',
+    symbol: 'DOT',
+    rule: 'RSI14-25/75+EMA400',
   },
 ] as const;
 
@@ -205,6 +220,7 @@ export function evaluateNativeHistoricalEvidence(
   supplementalValue?: unknown,
   xlmSupplementalValue?: unknown,
   dataSupplementalValue?: unknown,
+  rsiSupplementalValue?: unknown,
 ) {
   if (!value || typeof value !== 'object') throw new Error('historical evidence missing');
   const report = value as HistoricalReport;
@@ -292,6 +308,14 @@ export function evaluateNativeHistoricalEvidence(
       'VWZ60-2.5-touch',
       'DATA supplemental',
     );
+  const rsiSupplementalReport = rsiSupplementalValue == null
+    ? null
+    : validateSupplementalReport(
+      rsiSupplementalValue,
+      NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256,
+      'RSI14-',
+      'RSI supplemental',
+    );
   if (dataSupplementalReport != null) {
     const symbols = dataSupplementalReport.input.symbols;
     const sources = dataSupplementalReport.input.candleSources;
@@ -319,6 +343,11 @@ export function evaluateNativeHistoricalEvidence(
     DATA_SUPPLEMENTAL_HISTORICAL_CANDIDATES,
     'DATA supplemental',
   );
+  const rsiSupplementalCandidates = evaluateSupplementalCandidates(
+    rsiSupplementalReport,
+    RSI_SUPPLEMENTAL_HISTORICAL_CANDIDATES,
+    'RSI supplemental',
+  );
 
   const portfolioRule = 'Z60STACK-2.5-touch';
   const portfolioRows = report.portfolioRows.filter((row) => row.rule === portfolioRule);
@@ -332,6 +361,7 @@ export function evaluateNativeHistoricalEvidence(
       ...supplementalCandidates,
       ...xlmSupplementalCandidates,
       ...dataSupplementalCandidates,
+      ...rsiSupplementalCandidates,
     ],
     supplementalSourceSha256: supplementalReport == null
       ? null
@@ -342,6 +372,9 @@ export function evaluateNativeHistoricalEvidence(
     dataSupplementalSourceSha256: dataSupplementalReport == null
       ? null
       : nativeHistoricalReportSha256(dataSupplementalReport),
+    rsiSupplementalSourceSha256: rsiSupplementalReport == null
+      ? null
+      : nativeHistoricalReportSha256(rsiSupplementalReport),
     portfolio: {
       portfolioId: 'z60stack25-portfolio',
       rule: portfolioRule,

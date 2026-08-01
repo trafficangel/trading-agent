@@ -23,6 +23,8 @@ const SHADOW_NATIVE_IDS = [
   'xrp-vwz60-touch',
   'xlm-vwz60-touch-er25',
   'data-vwz60-touch',
+  'apt-rsi14-pullback-ema400',
+  'dot-rsi14-pullback-ema400',
 ] as const;
 const P2_IDS = [
   'z60stack25-btc', 'z60stack25-eth', 'z60stack25-sol',
@@ -66,11 +68,19 @@ const dataSupplementalHistoricalPath = resolve(
 if (!existsSync(dataSupplementalHistoricalPath)) {
   throw new Error(`DATA supplemental historical evidence missing: ${dataSupplementalHistoricalPath}`);
 }
+const rsiSupplementalHistoricalPath = resolve(
+  flagValue('--historical-rsi-supplement')
+    ?? 'data/lighter-rsi14-trend-transfer-validation.json',
+);
+if (!existsSync(rsiSupplementalHistoricalPath)) {
+  throw new Error(`RSI supplemental historical evidence missing: ${rsiSupplementalHistoricalPath}`);
+}
 const historicalEvidence = evaluateNativeHistoricalEvidence(
   JSON.parse(readFileSync(historicalPath, 'utf8')) as unknown,
   JSON.parse(readFileSync(supplementalHistoricalPath, 'utf8')) as unknown,
   JSON.parse(readFileSync(xlmSupplementalHistoricalPath, 'utf8')) as unknown,
   JSON.parse(readFileSync(dataSupplementalHistoricalPath, 'utf8')) as unknown,
+  JSON.parse(readFileSync(rsiSupplementalHistoricalPath, 'utf8')) as unknown,
 );
 const db = new Database(databasePath, { readonly: true, fileMustExist: true });
 const pnlStatement = db.prepare<[string], NativeForwardPnlRow>(`
@@ -188,6 +198,7 @@ const report = {
     supplementalSourceSha256: historicalEvidence.supplementalSourceSha256,
     xlmSupplementalSourceSha256: historicalEvidence.xlmSupplementalSourceSha256,
     dataSupplementalSourceSha256: historicalEvidence.dataSupplementalSourceSha256,
+    rsiSupplementalSourceSha256: historicalEvidence.rsiSupplementalSourceSha256,
     portfolio: historicalEvidence.portfolio,
   },
   p2: {

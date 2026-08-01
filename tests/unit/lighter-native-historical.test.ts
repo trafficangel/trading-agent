@@ -5,6 +5,7 @@ import {
   evaluateNativeHistoricalEvidence,
   NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256,
   NATIVE_HISTORICAL_REPORT_SHA256,
+  NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256,
   NATIVE_HISTORICAL_SUPPLEMENT_SHA256,
   NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256,
 } from '../../src/lib/lighter-native-historical.js';
@@ -97,6 +98,48 @@ describe('frozen Native historical evidence', () => {
       .toBe(true);
   });
 
+  it('admits the frozen APT and DOT RSI transfer report', () => {
+    const source = JSON.parse(readFileSync(
+      resolve('data/lighter-native-current-z60-validation.json'),
+      'utf8',
+    )) as unknown;
+    const supplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-vwz60-holdout-validation.json'),
+      'utf8',
+    )) as unknown;
+    const xlmSupplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-vwz60-transfer2-validation.json'),
+      'utf8',
+    )) as unknown;
+    const dataSupplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-data-vwz60-1m-rebuild-validation.json'),
+      'utf8',
+    )) as unknown;
+    const rsiSupplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-rsi14-trend-transfer-validation.json'),
+      'utf8',
+    )) as unknown;
+    const evidence = evaluateNativeHistoricalEvidence(
+      source,
+      supplemental,
+      xlmSupplemental,
+      dataSupplemental,
+      rsiSupplemental,
+    );
+    expect(evidence.rsiSupplementalSourceSha256)
+      .toBe(NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256);
+    for (const strategyId of [
+      'apt-rsi14-pullback-ema400',
+      'dot-rsi14-pullback-ema400',
+    ]) {
+      const candidate = evidence.candidates.find((row) => row.strategyId === strategyId);
+      expect(candidate?.passed).toBe(true);
+      expect(candidate?.reasons).toEqual([]);
+      expect(candidate?.metrics.recent.every((window) =>
+        window.long > 0 && window.short > 0)).toBe(true);
+    }
+  });
+
   it('rejects a changed frozen result even when headline qualification remains', () => {
     const source = JSON.parse(readFileSync(
       resolve('data/lighter-native-current-z60-validation.json'),
@@ -162,5 +205,36 @@ describe('frozen Native historical evidence', () => {
       xlmSupplemental,
       dataSupplemental,
     )).toThrow('DATA supplemental historical evidence hash mismatch');
+  });
+
+  it('rejects a changed RSI supplemental result', () => {
+    const source = JSON.parse(readFileSync(
+      resolve('data/lighter-native-current-z60-validation.json'),
+      'utf8',
+    )) as unknown;
+    const supplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-vwz60-holdout-validation.json'),
+      'utf8',
+    )) as unknown;
+    const xlmSupplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-vwz60-transfer2-validation.json'),
+      'utf8',
+    )) as unknown;
+    const dataSupplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-data-vwz60-1m-rebuild-validation.json'),
+      'utf8',
+    )) as unknown;
+    const rsiSupplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-rsi14-trend-transfer-validation.json'),
+      'utf8',
+    )) as { rows: Array<{ netPct: number }> };
+    rsiSupplemental.rows[0]!.netPct += 0.001;
+    expect(() => evaluateNativeHistoricalEvidence(
+      source,
+      supplemental,
+      xlmSupplemental,
+      dataSupplemental,
+      rsiSupplemental,
+    )).toThrow('RSI supplemental historical evidence hash mismatch');
   });
 });

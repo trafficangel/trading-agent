@@ -13,10 +13,10 @@ export type NativeRunnerEvaluation = {
   strategyId: string;
   symbol: string;
   marketId: number;
-  family: 'zscore' | 'vwz';
+  family: 'zscore' | 'vwz' | 'rsi';
   mode: 'touch' | 'reclaim';
   threshold: number;
-  trendFilter: 'ema200' | 'ema200_400' | null;
+  trendFilter: 'ema200' | 'ema400' | 'ema200_400' | null;
   attemptedBarTime: number;
   barTime: number | null;
   evaluatedAt: number;
@@ -30,6 +30,8 @@ export type NativeRunnerEvaluation = {
   trendMean: number | null;
   slowTrendMean: number | null;
   efficiencyRatio60: number | null;
+  previousRsi: number | null;
+  currentRsi: number | null;
   error: string | null;
 };
 
@@ -89,6 +91,25 @@ export function nativeWaitingReason(input: WaitingReasonInput): string {
   return 'z_inside_threshold';
 }
 
+export function nativeRsiWaitingReason(input: {
+  level: number;
+  currentRsi: number;
+  close: number;
+  trendMean: number;
+}): string {
+  if (input.currentRsi < input.level) {
+    return input.close > input.trendMean
+      ? 'long_setup_ready'
+      : 'long_trend_not_aligned';
+  }
+  if (input.currentRsi > 100 - input.level) {
+    return input.close < input.trendMean
+      ? 'short_setup_ready'
+      : 'short_trend_not_aligned';
+  }
+  return 'rsi_inside_threshold';
+}
+
 function finiteOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -121,12 +142,13 @@ export function parseNativeRunnerStatus(raw: string | null): NativeRunnerStatus 
         typeof row.strategyId !== 'string'
         || typeof row.symbol !== 'string'
         || finiteOrNull(row.marketId) == null
-        || (row.family !== 'zscore' && row.family !== 'vwz')
+        || (row.family !== 'zscore' && row.family !== 'vwz' && row.family !== 'rsi')
         || (row.mode !== 'touch' && row.mode !== 'reclaim')
         || finiteOrNull(row.threshold) == null
         || !(row.threshold! > 0)
         || (row.trendFilter != null
           && row.trendFilter !== 'ema200'
+          && row.trendFilter !== 'ema400'
           && row.trendFilter !== 'ema200_400')
         || finiteOrNull(row.attemptedBarTime) == null
         || finiteOrNull(row.evaluatedAt) == null
@@ -156,6 +178,8 @@ export function parseNativeRunnerStatus(raw: string | null): NativeRunnerStatus 
         trendMean: finiteOrNull(row.trendMean),
         slowTrendMean: finiteOrNull(row.slowTrendMean),
         efficiencyRatio60: finiteOrNull(row.efficiencyRatio60),
+        previousRsi: finiteOrNull(row.previousRsi),
+        currentRsi: finiteOrNull(row.currentRsi),
         error: typeof row.error === 'string' ? row.error : null,
       });
     }

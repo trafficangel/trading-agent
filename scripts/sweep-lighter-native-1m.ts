@@ -71,6 +71,7 @@ const ENABLE_HOURLY_FADE_HIGHVOL = process.env.ENABLE_HOURLY_FADE_HIGHVOL === '1
 const ENABLE_SERIAL_ADAPTIVE = process.env.ENABLE_SERIAL_ADAPTIVE === '1';
 const ENABLE_FUNDING_CROWDING = process.env.ENABLE_FUNDING_CROWDING === '1';
 const ENABLE_SHOCK_REVERSAL = process.env.ENABLE_SHOCK_REVERSAL === '1';
+const ENABLE_RSI_PULLBACK_ROBUSTNESS = process.env.ENABLE_RSI_PULLBACK_ROBUSTNESS === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -108,7 +109,9 @@ type Arrays = {
   c: Candle[];
   close: number[];
   ema200: number[];
+  ema300: number[];
   ema400: number[];
+  ema500: number[];
   ema5: number[];
   ema8: number[];
   ema13: number[];
@@ -447,7 +450,9 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     c,
     close,
     ema200: ema(close, 200),
+    ema300: ema(close, 300),
     ema400: ema(close, 400),
+    ema500: ema(close, 500),
     ema5: ema(close, 5),
     ema8: ema8Values,
     ema13: ema(close, 13),
@@ -537,6 +542,38 @@ function rules(): Rule[] {
           return side === 'long' ? value >= 50 : value <= 50;
         },
       });
+    }
+  }
+
+  // Frozen neighbourhood around the two-sided RSI14/EMA400 discovery rule.
+  // This family is opt-in so the normal research library remains unchanged.
+  // A candidate is only credible when nearby RSI levels and trend horizons
+  // retain the effect; an isolated profitable cell is treated as overfit.
+  if (ENABLE_RSI_PULLBACK_ROBUSTNESS) {
+    const trendAverages = [
+      [300, (a: Arrays) => a.ema300],
+      [400, (a: Arrays) => a.ema400],
+      [500, (a: Arrays) => a.ema500],
+    ] as const;
+    for (const level of [20, 25, 30] as const) {
+      for (const [trend, average] of trendAverages) {
+        if (level === 25 && trend === 400) continue;
+        out.push({
+          name: `RSI14-${level}/${100 - level}+EMA${trend}`,
+          warmup: trend + 2,
+          slPct: 0.01,
+          maxBars: 120,
+          entry(a, i) {
+            const trendAverage = average(a);
+            if (a.rsi14[i]! < level && a.close[i]! > trendAverage[i]!) return 'long';
+            if (a.rsi14[i]! > 100 - level && a.close[i]! < trendAverage[i]!) return 'short';
+            return null;
+          },
+          exit(a, i, side) {
+            return side === 'long' ? a.rsi14[i]! >= 50 : a.rsi14[i]! <= 50;
+          },
+        });
+      }
     }
   }
 

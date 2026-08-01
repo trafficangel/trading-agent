@@ -104,6 +104,10 @@ const NATIVE_HISTORICAL_EVIDENCE = (() => {
         process.env['LIGHTER_NATIVE_HISTORICAL_DATA_SUPPLEMENT_PATH']
           ?? 'data/lighter-data-vwz60-1m-rebuild-validation.json',
       ), 'utf8')) as unknown,
+      JSON.parse(readFileSync(resolve(
+        process.env['LIGHTER_NATIVE_HISTORICAL_RSI_SUPPLEMENT_PATH']
+          ?? 'data/lighter-rsi14-trend-transfer-validation.json',
+      ), 'utf8')) as unknown,
     );
   } catch (error) {
     logger.error({ error }, 'Native historical evidence unavailable');
@@ -190,6 +194,12 @@ const NATIVE_HISTORICAL_EVIDENCE = (() => {
 // 5m result was independently reproduced by aggregating 259,200 gap-free native
 // 1m candles. It passed measured $100 L2 p95, exact funding, 4/4 folds,
 // IS/OOS, both sides and every recent window. It remains Shadow-only.
+// STRAT-054/055 are the first non-Z Native challengers. They use the same
+// symmetric RSI14 25/75 pullback in the direction of EMA400 and exit at RSI50
+// or after 120 completed 5m bars. APT and DOT both passed measured $100 L2
+// p95, observed-max sensitivity, exact funding, IS/OOS, both sides and every
+// recent window. The 20/25/30 RSI and EMA300/400/500 neighbourhood was checked
+// separately; they still start in prospective Shadow with Real disabled.
 const STRATEGIES: readonly StrategySpec[] = [
   {
     id: 'sol-lg-mf50',
@@ -673,6 +683,40 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 13.19,
     },
   },
+  {
+    id: 'apt-rsi14-pullback-ema400',
+    code: '054',
+    name: 'RSI14 25/75 Pullback · EMA400 · RSI50 Exit',
+    symbol: 'APTUSDT',
+    asset: 'APT',
+    marketId: 31,
+    stopPct: 1,
+    backtest: {
+      period: '2026-02-02 → 2026-08-01',
+      trades: 85,
+      winRatePct: 74.1,
+      profitFactor: 1.749,
+      netPct: 16.362,
+      maxDrawdownPct: 2.395,
+    },
+  },
+  {
+    id: 'dot-rsi14-pullback-ema400',
+    code: '055',
+    name: 'RSI14 25/75 Pullback · EMA400 · RSI50 Exit',
+    symbol: 'DOTUSDT',
+    asset: 'DOT',
+    marketId: 11,
+    stopPct: 1,
+    backtest: {
+      period: '2026-02-02 → 2026-08-01',
+      trades: 189,
+      winRatePct: 69.8,
+      profitFactor: 1.435,
+      netPct: 19.345,
+      maxDrawdownPct: 12.842,
+    },
+  },
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
     ...market,
     portfolioId: NATIVE_TREND_PORTFOLIO_ID,
@@ -700,6 +744,8 @@ const NATIVE_STRATEGY_IDS = [
   'xrp-vwz60-touch',
   'xlm-vwz60-touch-er25',
   'data-vwz60-touch',
+  'apt-rsi14-pullback-ema400',
+  'dot-rsi14-pullback-ema400',
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => market.id),
 ] as const;
 const RETIRED_NATIVE_STRATEGY_IDS = [
@@ -714,13 +760,13 @@ const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(RETIRED_NATIVE_STRATEGY_I
 const NATIVE_LIVE_STRATEGY_IDS: readonly string[] = [];
 
 type NativeStrategyInfo = {
-  family: 'zscore' | 'vwz';
+  family: 'zscore' | 'vwz' | 'rsi';
   mode: 'reclaim' | 'touch';
   threshold: number;
   period: number;
   timeExitBars: number;
   efficiencyMax?: number;
-  trendFilter?: 'ema200' | 'ema200_400';
+  trendFilter?: 'ema200' | 'ema400' | 'ema200_400';
   realEnabled: boolean;
   noteRu: string;
   noteEn: string;
@@ -817,6 +863,28 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     realEnabled: false,
     noteRu: 'DATA использует двусторонний вход за ±2.5σ от VWMA60 и выход при возврате к VWMA60. Результат независимо воспроизведён из 259 200 gap-free свечей 1m, агрегированных в 5m, с измеренным p95 стака $100 и точным funding. Только prospective Shadow.',
     noteEn: 'DATA uses symmetric entries beyond ±2.5σ from VWMA60 and exits on the return to VWMA60. The result was independently reproduced from 259,200 gap-free native 1m candles aggregated to 5m with measured $100 book p95 and exact funding. Prospective Shadow only.',
+  },
+  'apt-rsi14-pullback-ema400': {
+    family: 'rsi',
+    mode: 'touch',
+    threshold: 25,
+    period: 14,
+    timeExitBars: 120,
+    trendFilter: 'ema400',
+    realEnabled: false,
+    noteRu: 'APT прошёл 180d, 4/4 фолда, IS/OOS, Long/Short и окна 30/60/90d после измеренного $100 p95, observed-max чувствительности и точного funding. Соседние RSI 20/25/30 и EMA300/400/500 подтверждают неединственность точки. Только prospective Shadow.',
+    noteEn: 'APT passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows after measured $100 p95, observed-max sensitivity and exact funding. Adjacent RSI 20/25/30 and EMA300/400/500 show the result is not an isolated parameter cell. Prospective Shadow only.',
+  },
+  'dot-rsi14-pullback-ema400': {
+    family: 'rsi',
+    mode: 'touch',
+    threshold: 25,
+    period: 14,
+    timeExitBars: 120,
+    trendFilter: 'ema400',
+    realEnabled: false,
+    noteRu: 'DOT прошёл IS/OOS, обе стороны, 3/4 фолда и окна 30/60/90d после измеренных издержек и funding. Соседние RSI20 и EMA500 также проходят, но просадка выше APT, поэтому это вторичный prospective Shadow-кандидат.',
+    noteEn: 'DOT passed IS/OOS, both sides, 3/4 folds and 30/60/90d windows after measured execution and funding. Adjacent RSI20 and EMA500 also pass, but drawdown is higher than APT, so this is the secondary prospective Shadow candidate.',
   },
   ...Object.fromEntries(NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => [
     market.id,
@@ -2647,6 +2715,7 @@ function nativeMicrostructureReadiness(
 function nativeRunnerReason(lang: Lang, row: NativeRunnerEvaluation): string {
   const labels: Record<string, readonly [string, string]> = {
     z_inside_threshold: ['Z внутри порога', 'Z inside threshold'],
+    rsi_inside_threshold: ['RSI внутри 25/75', 'RSI inside 25/75'],
     waiting_reclaim: ['ждёт возврата Z', 'waiting for Z reclaim'],
     long_trend_stack_not_aligned: ['Long: EMA-стек не выровнен', 'Long: EMA stack not aligned'],
     short_trend_stack_not_aligned: ['Short: EMA-стек не выровнен', 'Short: EMA stack not aligned'],
@@ -2656,10 +2725,13 @@ function nativeRunnerReason(lang: Lang, row: NativeRunnerEvaluation): string {
     short_setup_ready: ['Short-условия готовы', 'Short setup ready'],
     entry_signal: ['сигнал отправлен', 'signal emitted'],
     waiting_mean_or_time_exit: ['позиция: ждёт mean/time exit', 'position: waiting for mean/time exit'],
+    waiting_rsi50_or_time_exit: ['позиция: ждёт RSI50/time exit', 'position: waiting for RSI50/time exit'],
     same_bar_stop_or_close: ['повторный вход в том же баре запрещён', 'same-bar re-entry blocked'],
     sma60_cross: ['SMA60 exit отправлен', 'SMA60 exit emitted'],
     vwma60_cross: ['VWMA60 exit отправлен', 'VWMA60 exit emitted'],
+    rsi50_cross: ['RSI50 exit отправлен', 'RSI50 exit emitted'],
     time_240_bars: ['time exit отправлен', 'time exit emitted'],
+    time_120_bars: ['time exit отправлен', 'time exit emitted'],
     data_error: ['ошибка свечей', 'candle error'],
     evaluation_error: ['ошибка расчёта', 'evaluation error'],
   };
@@ -2670,7 +2742,8 @@ function nativeRunnerReason(lang: Lang, row: NativeRunnerEvaluation): string {
 function nativeRunnerTrend(row: NativeRunnerEvaluation): string {
   if (row.trendMean == null) return '—';
   if (row.slowTrendMean == null || row.close == null) {
-    return `EMA200 ${row.trendMean.toFixed(5)}`;
+    const period = row.trendFilter === 'ema400' ? 400 : 200;
+    return `EMA${period} ${row.trendMean.toFixed(5)}`;
   }
   const closeRelation = row.close > row.trendMean ? 'C>200' : 'C≤200';
   const stackRelation = row.trendMean > row.slowTrendMean ? '200>400' : '200≤400';
@@ -2710,10 +2783,13 @@ function nativeRunnerHealth(lang: Lang, specs: readonly StrategySpec[]): string 
       : row.state === 'signal_emitted' || row.state === 'exit_emitted'
         ? 'pass'
         : 'collect';
+    const indicator = row.family === 'rsi'
+      ? row.currentRsi == null ? '—' : `${row.currentRsi.toFixed(1)} / ${row.threshold.toFixed(0)}–${(100 - row.threshold).toFixed(0)}`
+      : row.currentZ == null ? '—' : `${row.currentZ.toFixed(2)} / ±${row.threshold.toFixed(1)}`;
     return `<tr>
       <td><b>${spec ? `STRAT-${spec.code} · ${spec.asset}` : esc(row.strategyId)}</b></td>
       <td class="num">${row.barTime == null ? '—' : utcShort(row.barTime)}</td>
-      <td class="num">${row.currentZ == null ? '—' : `${row.currentZ.toFixed(2)} / ±${row.threshold.toFixed(1)}`}</td>
+      <td class="num">${indicator}</td>
       <td class="num">${nativeRunnerTrend(row)}</td>
       <td class="${stateClass}"${error}><b>${esc(reason)}</b></td>
     </tr>`;
@@ -2729,7 +2805,7 @@ function nativeRunnerHealth(lang: Lang, specs: readonly StrategySpec[]): string 
     <details class="ll-panel ll-details ll-native-runner">
       <summary>${t(lang, 'Почему сейчас нет входа · последний расчёт', 'Why there is no entry now · latest evaluation')}</summary>
       <div class="ll-table"><table>
-        <thead><tr><th>Strategy</th><th>${t(lang, 'Бар UTC', 'Bar UTC')}</th><th>Z / threshold</th><th>Trend</th><th>${t(lang, 'Решение', 'Decision')}</th></tr></thead>
+        <thead><tr><th>Strategy</th><th>${t(lang, 'Бар UTC', 'Bar UTC')}</th><th>Indicator</th><th>Trend</th><th>${t(lang, 'Решение', 'Decision')}</th></tr></thead>
         <tbody>${rowHtml || `<tr><td colspan="5" class="ll-empty">${t(lang, 'ждём первый полный расчёт', 'waiting for the first complete evaluation')}</td></tr>`}</tbody>
       </table></div>
     </details>`;
@@ -2883,8 +2959,8 @@ export async function lighterNativeQuantHero(lang: Lang): Promise<string> {
       <div class="ll-title">${t(lang, 'Собственные стратегии · единый портфель', 'In-house strategies · unified portfolio')}</div>
       <div class="ll-sub">${t(
         lang,
-        '4 самостоятельные модели + P2 на 15 рынках · чистая prospective-статистика →',
-        '4 standalone models + P2 across 15 markets · clean prospective statistics →',
+        `${NATIVE_STANDALONE_STRATEGIES.length} самостоятельных моделей + P2 на 15 рынках · чистая prospective-статистика →`,
+        `${NATIVE_STANDALONE_STRATEGIES.length} standalone models + P2 across 15 markets · clean prospective statistics →`,
       )}</div>
     </div>
     <div class="ll-stats">
@@ -2897,6 +2973,13 @@ export async function lighterNativeQuantHero(lang: Lang): Promise<string> {
 }
 
 function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
+  if (info.family === 'rsi') {
+    return t(
+      lang,
+      `Long: RSI${info.period}<${info.threshold} и close>EMA400. Short: RSI${info.period}>${100 - info.threshold} и close<EMA400.`,
+      `Long: RSI${info.period}<${info.threshold} and close>EMA400. Short: RSI${info.period}>${100 - info.threshold} and close<EMA400.`,
+    );
+  }
   if (info.mode === 'reclaim') {
     return t(
       lang,
@@ -2925,7 +3008,13 @@ function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
 function nativeStrategyTooltip(spec: StrategySpec, lang: Lang): string | null {
   const info = NATIVE_STRATEGY_INFO[spec.id];
   if (!info) return null;
-  const distribution = info.family === 'vwz'
+  const distribution = info.family === 'rsi'
+    ? t(
+      lang,
+      `RSI${info.period} и EMA400 считаются только по завершённым 5m свечам Lighter.`,
+      `RSI${info.period} and EMA400 use completed Lighter 5m candles only.`,
+    )
+    : info.family === 'vwz'
     ? t(
       lang,
       `Volume Z-score считается по ${info.period} завершённым 5m свечам Lighter с весом их торгового объёма.`,
@@ -2936,15 +3025,18 @@ function nativeStrategyTooltip(spec: StrategySpec, lang: Lang): string | null {
       `Z-score считается по ${info.period} завершённым 5m закрытиям Lighter.`,
       `Z-score is calculated from ${info.period} completed Lighter 5m closes.`,
     );
-  const exitMean = info.family === 'vwz' ? `VWMA${info.period}` : `SMA${info.period}`;
+  const exitMean = info.family === 'rsi'
+    ? 'RSI50'
+    : info.family === 'vwz' ? `VWMA${info.period}` : `SMA${info.period}`;
+  const timeExitHours = info.timeExitBars * 5 / 60;
   return [
     `${spec.name}.`,
     distribution,
     nativeEntryDescription(info, lang),
     t(
       lang,
-      `Выход у ${exitMean} или через ${info.timeExitBars} баров (20 ч); stop ${spec.stopPct.toFixed(1)}%.`,
-      `Exit at ${exitMean} or after ${info.timeExitBars} bars (20h); ${spec.stopPct.toFixed(1)}% stop.`,
+      `Выход у ${exitMean} или через ${info.timeExitBars} баров (${timeExitHours} ч); stop ${spec.stopPct.toFixed(1)}%.`,
+      `Exit at ${exitMean} or after ${info.timeExitBars} bars (${timeExitHours}h); ${spec.stopPct.toFixed(1)}% stop.`,
     ),
     t(lang, info.noteRu, info.noteEn),
   ].join(' ');
@@ -2959,7 +3051,7 @@ function nativeStrategyGuide(
 
   const strategyLines = nativeSpecs.filter((spec) => !spec.portfolioId).map((spec) => {
     const info = NATIVE_STRATEGY_INFO[spec.id]!;
-    const family = info.family === 'vwz' ? 'VOLUME Z' : 'Z';
+    const family = info.family === 'rsi' ? 'RSI' : info.family === 'vwz' ? 'VOLUME Z' : 'Z';
     const historical = nativeHistoricalGate(spec);
     const realPathOpen = info.realEnabled && historical?.passed === true;
     const executionLabel = realPathOpen
@@ -2969,7 +3061,9 @@ function nativeStrategyGuide(
         : 'SHADOW ONLY';
     return `<div class="ll-native-spec">
       <b>STRAT-${spec.code} · ${spec.asset}</b>
-      <span>${info.mode === 'reclaim' ? 'RECLAIM' : 'TOUCH'} · ${family}${info.period} · ±${info.threshold}σ</span>
+      <span>${info.family === 'rsi'
+        ? `${family}${info.period} · ${info.threshold}/${100 - info.threshold} · EMA400`
+        : `${info.mode === 'reclaim' ? 'RECLAIM' : 'TOUCH'} · ${family}${info.period} · ±${info.threshold}σ`}</span>
       <span>${esc(nativeEntryDescription(info, lang))}</span>
       <span>${t(lang, info.noteRu, info.noteEn)}</span>
       <em class="${realPathOpen ? 'pass' : 'collect'}">${executionLabel}</em>
@@ -3000,13 +3094,13 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Расчёт.', 'Calculation.')}</b> ${t(
           lang,
-          'STRAT-034/035/051/052 считают объёмно-взвешенные Z60 и VWMA60; STRAT-052 также считает ER60. Portfolio P2 считает обычные Z60/SMA60 и дополнительно EMA200/EMA400 по завершённым 5m свечам. Незавершённая свеча в расчёт не попадает.',
-          'STRAT-034/035/051/052 calculate volume-weighted Z60 and VWMA60; STRAT-052 also calculates ER60. Portfolio P2 uses standard Z60/SMA60 plus EMA200/EMA400 on completed 5m candles. The unfinished candle is never included.',
+          'STRAT-034/035/051/052/053 считают объёмно-взвешенные Z60 и VWMA60; STRAT-052 также считает ER60. STRAT-054/055 считают RSI14 и EMA400. Portfolio P2 считает обычные Z60/SMA60 и EMA200/EMA400. Все расчёты используют только завершённые 5m свечи.',
+          'STRAT-034/035/051/052/053 calculate volume-weighted Z60 and VWMA60; STRAT-052 also calculates ER60. STRAT-054/055 calculate RSI14 and EMA400. Portfolio P2 uses standard Z60/SMA60 plus EMA200/EMA400. Every calculation uses completed 5m candles only.',
         )}</li>
         <li><b>${t(lang, 'Решение.', 'Decision.')}</b> ${t(
           lang,
-          'Touch входит сразу за своим порогом ±σ; STRAT-052 дополнительно требует ER60≤0.25. STRAT-034/035/051/052 выходят у VWMA60; P2 — у SMA60. Резервный выход для всех рабочих моделей — 240 баров, то есть 20 часов.',
-          'Touch enters immediately beyond its ±σ threshold; STRAT-052 additionally requires ER60≤0.25. STRAT-034/035/051/052 exit at VWMA60; P2 exits at SMA60. Every active model has a 240-bar, or 20-hour, fallback exit.',
+          'Z-модели входят за своим порогом ±σ; STRAT-052 дополнительно требует ER60≤0.25. STRAT-054/055 входят при RSI14<25 или >75 только по стороне EMA400 и выходят у RSI50. Резервный выход: 240 баров для Z и 120 баров для RSI.',
+          'Z models enter beyond their ±σ threshold; STRAT-052 additionally requires ER60≤0.25. STRAT-054/055 enter at RSI14<25 or >75 only on the EMA400 side and exit at RSI50. Fallback exit is 240 bars for Z and 120 bars for RSI.',
         )}</li>
         <li><b>${t(lang, 'Внутренний сигнал.', 'Internal signal.')}</b> ${t(
           lang,
@@ -3020,8 +3114,8 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Real-canary и защита.', 'Real canary and protection.')}</b> ${t(
           lang,
-          'Сейчас ни одна Native‑стратегия не зарегистрирована в Real‑исполнителе. STRAT-034/035/051/052 и P2 сначала должны накопить минимум 20 prospective закрытий за 7+ дней, пройти frozen‑гейт и получить ручной допуск. До этого они физически работают только в Shadow.',
-          'No Native strategy is currently registered with the Real executor. STRAT-034/035/051/052 and P2 must first collect at least 20 prospective closes over 7+ days, pass the frozen gate, and receive manual approval. Until then they are physically Shadow-only.',
+          'Сейчас ни одна Native‑стратегия не зарегистрирована в Real‑исполнителе. Все standalone-модели и P2 сначала должны накопить минимум 20 prospective закрытий за 7+ дней, пройти frozen‑гейт и получить ручной допуск. До этого они физически работают только в Shadow.',
+          'No Native strategy is currently registered with the Real executor. Every standalone model and P2 must first collect at least 20 prospective closes over 7+ days, pass the frozen gate, and receive manual approval. Until then they are physically Shadow-only.',
         )}</li>
       </ol>
       <div class="ll-native-specs">${strategyLines}</div>

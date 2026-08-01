@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  nativeRsiWaitingReason,
   nativeWaitingReason,
   parseNativeRunnerStatus,
   type NativeRunnerStatus,
@@ -51,6 +52,23 @@ describe('nativeWaitingReason', () => {
   });
 });
 
+describe('nativeRsiWaitingReason', () => {
+  it('distinguishes an ordinary RSI wait from a trend-blocked extreme', () => {
+    expect(nativeRsiWaitingReason({
+      level: 25,
+      currentRsi: 50,
+      close: 100,
+      trendMean: 99,
+    })).toBe('rsi_inside_threshold');
+    expect(nativeRsiWaitingReason({
+      level: 25,
+      currentRsi: 20,
+      close: 98,
+      trendMean: 99,
+    })).toBe('long_trend_not_aligned');
+  });
+});
+
 describe('parseNativeRunnerStatus', () => {
   const valid: NativeRunnerStatus = {
     version: 1,
@@ -77,6 +95,8 @@ describe('parseNativeRunnerStatus', () => {
       trendMean: 63_000,
       slowTrendMean: 62_000,
       efficiencyRatio60: 0.3,
+      previousRsi: null,
+      currentRsi: null,
       error: null,
     }],
   };

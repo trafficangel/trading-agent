@@ -1464,3 +1464,38 @@ filter was therefore tested unchanged only on six markets excluded from that
 discovery set: CRV, EIGEN, FARTCOIN, MNT, ONDO and PENGU. This holdout failed
 with PF `0.91`, 1/4 folds, negative IS/OOS, `13.80%` capacity drawdown and a
 negative Short book. Neither challenger was registered in Shadow or Real.
+
+## RSI14 trend-pullback transfer — APT and DOT (2026-08-01)
+
+The full standard 5m library was next applied to 43 additional markets with
+available 180-day native candles, measured executable `$100` L2 costs and
+fresh exact hourly funding. The scan used completed-bar signals, next-bar
+execution, a 1% protective stop and no cost or funding fallback. It produced
+only three qualifying rows: one DOT RSI model and two APT models. The two APT
+rows share the same market, so they were not counted as independent strategies.
+
+The frozen rule retained for both markets is the originally discovered,
+symmetric `RSI14-25/75+EMA400`: Long only when completed RSI14 is below 25 and
+close is above EMA400; Short only when RSI14 is above 75 and close is below
+EMA400. Exit is at RSI50 or after 120 five-minute bars. The selected rule was
+then checked without changing its centre across the predeclared RSI 20/25/30
+and EMA300/400/500 neighbourhood. APT retained qualifying 25/400 and 30/400
+cells; DOT retained 20/400, 20/500, 25/400 and 25/500 cells. This reduces, but
+does not eliminate, multiple-testing and selection risk.
+
+APT `STRAT-054` had 85 trades, `+16.362%` net after measured `0.07326%` p95
+round-trip execution and exact funding, PF `1.749`, drawdown `2.395%`, 4/4
+positive folds, IS/OOS `+10.379/+5.983`, Long/Short `+7.431/+8.931`, and
+positive 30/60/90-day windows on both sides. DOT `STRAT-055` had 189 trades,
+`+19.345%` net after measured `0.09230%` p95 and exact funding, PF `1.435`,
+drawdown `12.842%`, 3/4 positive folds, IS/OOS `+5.003/+14.342`, Long/Short
+`+6.821/+12.524`, and positive 30/60/90-day windows on both sides.
+
+The immutable artifact is
+`data/lighter-rsi14-trend-transfer-validation.json`. The live evaluator was
+compared to the full-history research calculation over the last 90 days:
+APT and DOT both had zero entry-condition mismatches; RSI matched exactly and
+the maximum EMA warmup deviation was below `0.009%`. Both strategies are
+prospective Shadow-only with `$100` simulated notional, a 1% safety stop and
+the existing frozen 20-close/7-day forward gate. Real remains unregistered and
+cannot be enabled by this historical result.
