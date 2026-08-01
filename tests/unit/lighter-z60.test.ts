@@ -131,6 +131,13 @@ describe('evaluateVwz60', () => {
     expect(evaluateVwz60(volumeBars(closes, closes.map(() => 0)), 60, 3, 'touch')).toBeNull();
   });
 
+  it('treats a positive-volume flat window as a valid zero-Z no-signal state', () => {
+    const closes = Array.from({ length: 61 }, () => 0.17402);
+    const result = evaluateVwz60(volumeBars(closes), 60, 3, 'touch');
+    expect(result?.currentZ).toBe(0);
+    expect(result?.signal).toBeNull();
+  });
+
   it('honors the two-and-a-half-sigma HYPE threshold symmetrically', () => {
     const baseline = Array.from({ length: 60 }, (_, index) => 100 + (index % 2 ? 0.1 : -0.1));
     const long = evaluateVwz60(volumeBars([...baseline, 95]), 60, 2.5, 'touch');

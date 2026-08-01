@@ -1,0 +1,38 @@
+{
+  "version": "lighter-confluence-runtime-parity-v1",
+  "generatedAt": "2026-08-01T22:44:19.378Z",
+  "barMinutes": 5,
+  "completedBarsOnly": true,
+  "runtimeWindowBars": 1500,
+  "passed": true,
+  "results": [
+    {
+      "strategyId": "hype-rsi14-willr14-ema400",
+      "symbol": "HYPE",
+      "candles": 52128,
+      "comparableBars": 50629,
+      "runtimeWindowBars": 1500,
+      "fullSignals": 324,
+      "runtimeSignals": 324,
+      "signalMismatches": 0,
+      "trendSideMismatches": 9,
+      "maxEmaDifferencePct": 0.010404455711118992,
+      "firstMismatches": [],
+      "passed": true
+    },
+    {
+      "strategyId": "xlm-vwz60-mfi14-ema400",
+      "symbol": "XLM",
+      "candles": 51840,
+      "comparableBars": 50341,
+      "runtimeWindowBars": 1500,
+      "fullSignals": 916,
+      "runtimeSignals": 916,
+      "signalMismatches": 0,
+      "trendSideMismatches": 5,
+      "maxEmaDifferencePct": 0.018598790049423372,
+      "firstMismatches": [],
+      "passed": true
+    }
+  ]
+}

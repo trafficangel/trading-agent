@@ -99,7 +99,11 @@ function volumeWeightedZAt(bars: readonly Vwz60Bar[], index: number, period: num
   const mean = weighted / volume;
   const variance = Math.max(0, weightedSquares / volume - mean * mean);
   const sigma = Math.sqrt(variance);
-  if (!(sigma > 0)) return null;
+  // The research engine defines a positive-volume zero-variance window as
+  // Z=0. Floating-point cancellation can also round a very small variance to
+  // zero for low-priced markets. Treat both as an ordinary no-signal state;
+  // a truly unusable zero-volume window still fails closed above.
+  if (!(sigma > 0)) return { mean, z: 0 };
   return {
     mean,
     z: (bars[index]!.close - mean) / sigma,
