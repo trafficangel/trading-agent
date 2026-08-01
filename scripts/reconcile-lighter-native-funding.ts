@@ -21,6 +21,7 @@ const CHUNK_SECONDS = 28 * 86_400;
 const NATIVE_IDS = [
   'sol-z60-reclaim', 'sol-z60-touch', 'bnb-z60-touch', 'ltc-z60-touch',
   'btc-vwz60-touch', 'hype-vwz60-touch',
+  'xrp-vwz60-touch',
   'z60stack25-btc', 'z60stack25-eth', 'z60stack25-sol',
   'z60stack25-bnb', 'z60stack25-ltc', 'z60stack25-hype',
   'z60stack25-zec', 'z60stack25-doge', 'z60stack25-near',

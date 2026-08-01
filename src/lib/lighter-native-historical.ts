@@ -3,6 +3,9 @@ import { createHash } from 'node:crypto';
 export const NATIVE_HISTORICAL_REPORT_VERSION = 'lighter-native-sweep-v2';
 export const NATIVE_HISTORICAL_REPORT_SHA256 =
   '8327517f63cd44b508aa8824e5393ad46f48ab129223e2d4fbaeaa320d496f4e';
+export const NATIVE_HISTORICAL_SUPPLEMENT_VERSION = 'lighter-native-sweep-v2';
+export const NATIVE_HISTORICAL_SUPPLEMENT_SHA256 =
+  'afa6e2b1de6b64fd7917eb033177db4d1654538f54262b0bcfca0b110ea0fed1';
 
 const HISTORICAL_CANDIDATES = [
   { strategyId: 'sol-z60-reclaim', symbol: 'SOL', rule: 'Z60-3-reclaim' },
@@ -11,6 +14,10 @@ const HISTORICAL_CANDIDATES = [
   { strategyId: 'ltc-z60-touch', symbol: 'LTC', rule: 'Z60-2-touch' },
   { strategyId: 'btc-vwz60-touch', symbol: 'BTC', rule: 'VWZ60-3-touch' },
   { strategyId: 'hype-vwz60-touch', symbol: 'HYPE', rule: 'VWZ60-2.5-touch' },
+] as const;
+
+const SUPPLEMENTAL_HISTORICAL_CANDIDATES = [
+  { strategyId: 'xrp-vwz60-touch', symbol: 'XRP', rule: 'VWZ60-3-touch' },
 ] as const;
 
 type HistoricalWindow = {
@@ -102,7 +109,33 @@ function rowReasons(row: HistoricalRow): string[] {
   return reasons;
 }
 
-export function evaluateNativeHistoricalEvidence(value: unknown) {
+function validateSupplementalReport(value: unknown): HistoricalReport {
+  if (!value || typeof value !== 'object') throw new Error('supplemental historical evidence missing');
+  const report = value as HistoricalReport;
+  const input = report.input;
+  if (
+    report.version !== NATIVE_HISTORICAL_SUPPLEMENT_VERSION
+    || !Number.isFinite(Date.parse(report.generatedAt))
+    || !input
+    || input.barMinutes !== 5
+    || input.ruleFilter !== 'VWZ60'
+    || input.positionNotionalUsd !== 100
+    || input.executionCosts !== 'market-specific executable $100 full-round-trip p95'
+    || input.adverseExecution !== 'market-specific observed maximum; non-blocking sensitivity'
+    || input.funding !== 'exact Lighter hourly settlements in (entry, exit]'
+    || input.qualificationInputsMeasured !== true
+    || input.usedFallbackExecutionCost !== false
+    || input.usedFallbackFunding !== false
+    || !Array.isArray(report.qualified)
+    || !Array.isArray(report.rows)
+  ) throw new Error('supplemental historical evidence contract invalid');
+  if (nativeHistoricalReportSha256(report) !== NATIVE_HISTORICAL_SUPPLEMENT_SHA256) {
+    throw new Error('supplemental historical evidence hash mismatch');
+  }
+  return report;
+}
+
+export function evaluateNativeHistoricalEvidence(value: unknown, supplementalValue?: unknown) {
   if (!value || typeof value !== 'object') throw new Error('historical evidence missing');
   const report = value as HistoricalReport;
   const input = report.input;
@@ -165,6 +198,44 @@ export function evaluateNativeHistoricalEvidence(value: unknown) {
     return { ...candidate, passed, reasons, metrics: row };
   });
 
+  const supplementalReport = supplementalValue == null
+    ? null
+    : validateSupplementalReport(supplementalValue);
+  const supplementalCandidates = supplementalReport == null
+    ? []
+    : SUPPLEMENTAL_HISTORICAL_CANDIDATES.map((candidate) => {
+      const matches = supplementalReport.rows.filter((row) =>
+        row.symbol === candidate.symbol && row.rule === candidate.rule);
+      if (matches.length !== 1) {
+        throw new Error(`supplemental historical evidence row missing or duplicated: ${candidate.strategyId}`);
+      }
+      const row = matches[0]!;
+      for (const [label, metric] of Object.entries({
+        trades: row.trades,
+        coverageDays: row.coverageDays,
+        netPct: row.netPct,
+        adverseNetPct: row.adverseNetPct,
+        stressPf: row.stressPf,
+        robustPf: row.robustPf,
+        meanL95: row.meanL95,
+        maxDrawdownPct: row.maxDrawdownPct,
+        folds: row.folds,
+        is: row.is,
+        oos: row.oos,
+        long: row.long,
+        short: row.short,
+      })) number(metric, `${candidate.strategyId}.${label}`);
+      if (!Array.isArray(row.recent) || row.recent.length !== 3) {
+        throw new Error(`supplemental historical evidence recent windows invalid: ${candidate.strategyId}`);
+      }
+      const reasons = rowReasons(row);
+      const passed = supplementalReport.qualified.includes(`${candidate.symbol}:${candidate.rule}`);
+      if (passed !== (reasons.length === 0)) {
+        throw new Error(`supplemental historical evidence qualification mismatch: ${candidate.strategyId}`);
+      }
+      return { ...candidate, passed, reasons, metrics: row };
+    });
+
   const portfolioRule = 'Z60STACK-2.5-touch';
   const portfolioRows = report.portfolioRows.filter((row) => row.rule === portfolioRule);
   if (portfolioRows.length !== 1) throw new Error('historical P2 evidence missing or duplicated');
@@ -172,7 +243,10 @@ export function evaluateNativeHistoricalEvidence(value: unknown) {
     version: 'lighter-native-historical-evidence-v1',
     sourceGeneratedAt: report.generatedAt,
     sourceSha256,
-    candidates,
+    candidates: [...candidates, ...supplementalCandidates],
+    supplementalSourceSha256: supplementalReport == null
+      ? null
+      : nativeHistoricalReportSha256(supplementalReport),
     portfolio: {
       portfolioId: 'z60stack25-portfolio',
       rule: portfolioRule,

@@ -87,6 +87,13 @@ const BASE_FEEDS: readonly NativeFeed[] = [
       { id: 'hype-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 2.5 },
     ],
   },
+  {
+    symbol: 'XRPUSDT',
+    marketId: 7,
+    strategies: [
+      { id: 'xrp-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 3 },
+    ],
+  },
 ];
 
 const TREND_PORTFOLIO_FEEDS: readonly NativeFeed[] = [

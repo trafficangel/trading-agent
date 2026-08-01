@@ -17,7 +17,11 @@ type Row = {
   native_er60: number;
 };
 
-const strategyIds = ['btc-vwz60-touch', 'hype-vwz60-touch'] as const;
+const strategyIds = [
+  'btc-vwz60-touch',
+  'hype-vwz60-touch',
+  'xrp-vwz60-touch',
+] as const;
 const rows = db.prepare<string[], Row>(`
   SELECT trade.strategy_id, trade.side, trade.opened_at, trade.closed_at,
          trade.net_pnl_pct, signal.native_er60

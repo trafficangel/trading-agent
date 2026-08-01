@@ -20,6 +20,7 @@ const REAL_NATIVE_IDS: readonly string[] = [];
 const SHADOW_NATIVE_IDS = [
   'btc-vwz60-touch',
   'hype-vwz60-touch',
+  'xrp-vwz60-touch',
 ] as const;
 const P2_IDS = [
   'z60stack25-btc', 'z60stack25-eth', 'z60stack25-sol',
@@ -44,8 +45,15 @@ const historicalPath = resolve(
   flagValue('--historical') ?? 'data/lighter-native-current-z60-validation.json',
 );
 if (!existsSync(historicalPath)) throw new Error(`historical evidence missing: ${historicalPath}`);
+const supplementalHistoricalPath = resolve(
+  flagValue('--historical-supplement') ?? 'data/lighter-vwz60-holdout-validation.json',
+);
+if (!existsSync(supplementalHistoricalPath)) {
+  throw new Error(`supplemental historical evidence missing: ${supplementalHistoricalPath}`);
+}
 const historicalEvidence = evaluateNativeHistoricalEvidence(
   JSON.parse(readFileSync(historicalPath, 'utf8')) as unknown,
+  JSON.parse(readFileSync(supplementalHistoricalPath, 'utf8')) as unknown,
 );
 const db = new Database(databasePath, { readonly: true, fileMustExist: true });
 const pnlStatement = db.prepare<[string], NativeForwardPnlRow>(`
@@ -160,6 +168,7 @@ const report = {
     version: historicalEvidence.version,
     sourceGeneratedAt: historicalEvidence.sourceGeneratedAt,
     sourceSha256: historicalEvidence.sourceSha256,
+    supplementalSourceSha256: historicalEvidence.supplementalSourceSha256,
     portfolio: historicalEvidence.portfolio,
   },
   p2: {

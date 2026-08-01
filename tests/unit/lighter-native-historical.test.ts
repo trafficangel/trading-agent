@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   evaluateNativeHistoricalEvidence,
   NATIVE_HISTORICAL_REPORT_SHA256,
+  NATIVE_HISTORICAL_SUPPLEMENT_SHA256,
 } from '../../src/lib/lighter-native-historical.js';
 
 describe('frozen Native historical evidence', () => {
@@ -23,6 +24,22 @@ describe('frozen Native historical evidence', () => {
       .toContain('30d Long -0.126% <= 0%');
   });
 
+  it('admits the immutable XRP transfer report without changing the base artifact', () => {
+    const source = JSON.parse(readFileSync(
+      resolve('data/lighter-native-current-z60-validation.json'),
+      'utf8',
+    )) as unknown;
+    const supplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-vwz60-holdout-validation.json'),
+      'utf8',
+    )) as unknown;
+    const evidence = evaluateNativeHistoricalEvidence(source, supplemental);
+    expect(evidence.supplementalSourceSha256).toBe(NATIVE_HISTORICAL_SUPPLEMENT_SHA256);
+    const xrp = evidence.candidates.find((row) => row.strategyId === 'xrp-vwz60-touch');
+    expect(xrp?.passed).toBe(true);
+    expect(xrp?.reasons).toEqual([]);
+  });
+
   it('rejects a changed frozen result even when headline qualification remains', () => {
     const source = JSON.parse(readFileSync(
       resolve('data/lighter-native-current-z60-validation.json'),
@@ -30,5 +47,19 @@ describe('frozen Native historical evidence', () => {
     )) as { rows: Array<{ netPct: number }> };
     source.rows[0]!.netPct += 0.001;
     expect(() => evaluateNativeHistoricalEvidence(source)).toThrow('hash mismatch');
+  });
+
+  it('rejects a changed supplemental result', () => {
+    const source = JSON.parse(readFileSync(
+      resolve('data/lighter-native-current-z60-validation.json'),
+      'utf8',
+    )) as unknown;
+    const supplemental = JSON.parse(readFileSync(
+      resolve('data/lighter-vwz60-holdout-validation.json'),
+      'utf8',
+    )) as { rows: Array<{ netPct: number }> };
+    supplemental.rows[0]!.netPct += 0.001;
+    expect(() => evaluateNativeHistoricalEvidence(source, supplemental))
+      .toThrow('supplemental historical evidence hash mismatch');
   });
 });
