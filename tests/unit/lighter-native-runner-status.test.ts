@@ -97,6 +97,7 @@ describe('parseNativeRunnerStatus', () => {
       efficiencyRatio60: 0.3,
       previousRsi: null,
       currentRsi: null,
+      secondaryOscillator: null,
       error: null,
     }],
   };

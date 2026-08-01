@@ -24,6 +24,8 @@ const NATIVE_IDS = [
   'xrp-vwz60-touch',
   'xlm-vwz60-touch-er25',
   'data-vwz60-touch',
+  'apt-rsi14-pullback-ema400', 'dot-rsi14-pullback-ema400',
+  'hype-rsi14-willr14-ema400', 'xlm-vwz60-mfi14-ema400',
   'z60stack25-btc', 'z60stack25-eth', 'z60stack25-sol',
   'z60stack25-bnb', 'z60stack25-ltc', 'z60stack25-hype',
   'z60stack25-zec', 'z60stack25-doge', 'z60stack25-near',

@@ -13,7 +13,7 @@ export type NativeRunnerEvaluation = {
   strategyId: string;
   symbol: string;
   marketId: number;
-  family: 'zscore' | 'vwz' | 'rsi';
+  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi';
   mode: 'touch' | 'reclaim';
   threshold: number;
   trendFilter: 'ema200' | 'ema400' | 'ema200_400' | null;
@@ -32,6 +32,7 @@ export type NativeRunnerEvaluation = {
   efficiencyRatio60: number | null;
   previousRsi: number | null;
   currentRsi: number | null;
+  secondaryOscillator: number | null;
   error: string | null;
 };
 
@@ -142,7 +143,11 @@ export function parseNativeRunnerStatus(raw: string | null): NativeRunnerStatus 
         typeof row.strategyId !== 'string'
         || typeof row.symbol !== 'string'
         || finiteOrNull(row.marketId) == null
-        || (row.family !== 'zscore' && row.family !== 'vwz' && row.family !== 'rsi')
+        || (row.family !== 'zscore'
+          && row.family !== 'vwz'
+          && row.family !== 'rsi'
+          && row.family !== 'rsi_williams'
+          && row.family !== 'vwz_mfi')
         || (row.mode !== 'touch' && row.mode !== 'reclaim')
         || finiteOrNull(row.threshold) == null
         || !(row.threshold! > 0)
@@ -180,6 +185,7 @@ export function parseNativeRunnerStatus(raw: string | null): NativeRunnerStatus 
         efficiencyRatio60: finiteOrNull(row.efficiencyRatio60),
         previousRsi: finiteOrNull(row.previousRsi),
         currentRsi: finiteOrNull(row.currentRsi),
+        secondaryOscillator: finiteOrNull(row.secondaryOscillator),
         error: typeof row.error === 'string' ? row.error : null,
       });
     }

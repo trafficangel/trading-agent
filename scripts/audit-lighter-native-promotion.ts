@@ -25,6 +25,8 @@ const SHADOW_NATIVE_IDS = [
   'data-vwz60-touch',
   'apt-rsi14-pullback-ema400',
   'dot-rsi14-pullback-ema400',
+  'hype-rsi14-willr14-ema400',
+  'xlm-vwz60-mfi14-ema400',
 ] as const;
 const P2_IDS = [
   'z60stack25-btc', 'z60stack25-eth', 'z60stack25-sol',
@@ -75,12 +77,28 @@ const rsiSupplementalHistoricalPath = resolve(
 if (!existsSync(rsiSupplementalHistoricalPath)) {
   throw new Error(`RSI supplemental historical evidence missing: ${rsiSupplementalHistoricalPath}`);
 }
+const hypeConfluenceHistoricalPath = resolve(
+  flagValue('--historical-hype-confluence')
+    ?? 'data/lighter-hype-confluence-direct5m-validation.json',
+);
+if (!existsSync(hypeConfluenceHistoricalPath)) {
+  throw new Error(`HYPE confluence historical evidence missing: ${hypeConfluenceHistoricalPath}`);
+}
+const xlmConfluenceHistoricalPath = resolve(
+  flagValue('--historical-xlm-confluence')
+    ?? 'data/lighter-oscillator-confluence-transfer2-5m-20260801.json',
+);
+if (!existsSync(xlmConfluenceHistoricalPath)) {
+  throw new Error(`XLM confluence historical evidence missing: ${xlmConfluenceHistoricalPath}`);
+}
 const historicalEvidence = evaluateNativeHistoricalEvidence(
   JSON.parse(readFileSync(historicalPath, 'utf8')) as unknown,
   JSON.parse(readFileSync(supplementalHistoricalPath, 'utf8')) as unknown,
   JSON.parse(readFileSync(xlmSupplementalHistoricalPath, 'utf8')) as unknown,
   JSON.parse(readFileSync(dataSupplementalHistoricalPath, 'utf8')) as unknown,
   JSON.parse(readFileSync(rsiSupplementalHistoricalPath, 'utf8')) as unknown,
+  JSON.parse(readFileSync(hypeConfluenceHistoricalPath, 'utf8')) as unknown,
+  JSON.parse(readFileSync(xlmConfluenceHistoricalPath, 'utf8')) as unknown,
 );
 const db = new Database(databasePath, { readonly: true, fileMustExist: true });
 const pnlStatement = db.prepare<[string], NativeForwardPnlRow>(`

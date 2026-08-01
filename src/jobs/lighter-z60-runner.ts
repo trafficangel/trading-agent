@@ -14,6 +14,13 @@ import {
   type RsiTrendPullbackSnapshot,
 } from '../lib/lighter-rsi-pullback.js';
 import {
+  evaluateRsiWilliamsTrend,
+  evaluateVwzMfiTrend,
+  rsiWilliamsExit,
+  type RsiWilliamsSnapshot,
+  type VwzMfiSnapshot,
+} from '../lib/lighter-oscillator-confluence.js';
+import {
   allowsEntryByEfficiency,
   efficiencyRatio,
   evaluateTrendFilteredZ60,
@@ -68,15 +75,17 @@ type LastClosedRow = {
 
 type NativeStrategy = {
   id: string;
-  family: 'zscore' | 'vwz' | 'rsi';
+  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi';
   mode: Z60EntryMode;
   threshold: number;
+  auxiliaryThreshold?: number;
   efficiencyMax?: number;
   trendFilter?: 'ema200' | 'ema400' | 'ema200_400';
   maxBars?: number;
 };
 
-type NativeSnapshot = Z60Snapshot | RsiTrendPullbackSnapshot;
+type NativeSnapshot = Z60Snapshot | RsiTrendPullbackSnapshot
+  | RsiWilliamsSnapshot | VwzMfiSnapshot;
 
 type NativeFeed = {
   symbol: string;
@@ -97,6 +106,15 @@ const BASE_FEEDS: readonly NativeFeed[] = [
     marketId: 24,
     strategies: [
       { id: 'hype-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 2.5 },
+      {
+        id: 'hype-rsi14-willr14-ema400',
+        family: 'rsi_williams',
+        mode: 'touch',
+        threshold: 30,
+        auxiliaryThreshold: 20,
+        trendFilter: 'ema400',
+        maxBars: 120,
+      },
     ],
   },
   {
@@ -116,6 +134,15 @@ const BASE_FEEDS: readonly NativeFeed[] = [
         mode: 'touch',
         threshold: 3,
         efficiencyMax: 0.25,
+      },
+      {
+        id: 'xlm-vwz60-mfi14-ema400',
+        family: 'vwz_mfi',
+        mode: 'touch',
+        threshold: 2.5,
+        auxiliaryThreshold: 35,
+        trendFilter: 'ema400',
+        maxBars: 120,
       },
     ],
   },
@@ -238,6 +265,7 @@ function recordError(
     efficiencyRatio60: previous?.efficiencyRatio60 ?? null,
     previousRsi: previous?.previousRsi ?? null,
     currentRsi: previous?.currentRsi ?? null,
+    secondaryOscillator: previous?.secondaryOscillator ?? null,
     error,
   });
 }
@@ -275,6 +303,9 @@ function recordEvaluation(
     efficiencyRatio60: er60,
     previousRsi: 'previousRsi' in snapshot ? snapshot.previousRsi : null,
     currentRsi: 'currentRsi' in snapshot ? snapshot.currentRsi : null,
+    secondaryOscillator: 'currentWilliams' in snapshot
+      ? snapshot.currentWilliams
+      : 'currentMfi' in snapshot ? snapshot.currentMfi : null,
     error: null,
   });
 }
@@ -403,17 +434,22 @@ export async function fetchTrendBars(
     for (const candle of body.c ?? []) {
       const time = finite(candle.t);
       const close = finite(candle.c);
+      const high = finite(candle.h);
+      const low = finite(candle.l);
       const volume = finite(candle.v) ?? 0;
       if (
         time == null
         || close == null
         || close <= 0
+        || high == null
+        || low == null
+        || high < low
         || volume < 0
         || time % BAR_MS !== 0
         || time < pageStart
         || time >= pageEnd
       ) continue;
-      unique.set(time, { time, close, volume });
+      unique.set(time, { time, close, high, low, volume });
     }
     pageEnd = pageStart;
     remaining -= pageBars;
@@ -512,6 +548,24 @@ async function poll(): Promise<void> {
               strategy.threshold,
               strategy.trendFilter === 'ema400' ? 400 : 200,
             )
+            : strategy.family === 'rsi_williams'
+            ? evaluateRsiWilliamsTrend(
+              strategyBars,
+              14,
+              strategy.threshold,
+              14,
+              strategy.auxiliaryThreshold ?? 20,
+              400,
+            )
+            : strategy.family === 'vwz_mfi'
+            ? evaluateVwzMfiTrend(
+              strategyBars,
+              60,
+              strategy.threshold,
+              14,
+              strategy.auxiliaryThreshold ?? 35,
+              400,
+            )
             : strategy.trendFilter
             ? strategy.trendFilter === 'ema200_400'
               ? evaluateTrendStackZ60(
@@ -539,6 +593,8 @@ async function poll(): Promise<void> {
           if (open) {
             const indicatorExit = strategy.family === 'rsi'
               ? rsiTrendExit(snapshot as RsiTrendPullbackSnapshot, open.side)
+              : strategy.family === 'rsi_williams'
+              ? rsiWilliamsExit(snapshot as RsiWilliamsSnapshot, open.side)
               : open.side === 'long'
                 ? snapshot.close >= (snapshot as Z60Snapshot).mean
                 : snapshot.close <= (snapshot as Z60Snapshot).mean;
@@ -554,9 +610,10 @@ async function poll(): Promise<void> {
                 er60,
                 'exit_emitted',
                 indicatorExit
-                  ? strategy.family === 'rsi'
+                  ? strategy.family === 'rsi' || strategy.family === 'rsi_williams'
                     ? 'rsi50_cross'
-                    : strategy.family === 'vwz' ? 'vwma60_cross' : 'sma60_cross'
+                    : strategy.family === 'vwz' || strategy.family === 'vwz_mfi'
+                      ? 'vwma60_cross' : 'sma60_cross'
                   : `time_${maxBars}_bars`,
                 open.side,
               );
@@ -569,9 +626,10 @@ async function poll(): Promise<void> {
                 mean: 'mean' in snapshot ? snapshot.mean : null,
                 currentRsi: 'currentRsi' in snapshot ? snapshot.currentRsi : null,
                 reason: indicatorExit
-                  ? strategy.family === 'rsi'
+                  ? strategy.family === 'rsi' || strategy.family === 'rsi_williams'
                     ? 'rsi50_cross'
-                    : strategy.family === 'vwz' ? 'vwma60_cross' : 'sma60_cross'
+                    : strategy.family === 'vwz' || strategy.family === 'vwz_mfi'
+                      ? 'vwma60_cross' : 'sma60_cross'
                   : `time_${maxBars}_bars`,
                 }, 'lighter-z60: native exit signal');
             } else {
@@ -582,7 +640,7 @@ async function poll(): Promise<void> {
                 snapshot,
                 er60,
                 'position_open',
-                strategy.family === 'rsi'
+                strategy.family === 'rsi' || strategy.family === 'rsi_williams'
                   ? 'waiting_rsi50_or_time_exit'
                   : 'waiting_mean_or_time_exit',
                 open.side,
@@ -658,6 +716,45 @@ async function poll(): Promise<void> {
                 close: snapshot.close,
                 trendMean: snapshot.trendMean!,
               })
+              : strategy.family === 'rsi_williams'
+              ? (() => {
+                const value = snapshot as RsiWilliamsSnapshot;
+                if (value.currentRsi >= strategy.threshold
+                  && value.currentRsi <= 100 - strategy.threshold) return 'rsi_inside_threshold';
+                if (value.currentRsi < strategy.threshold
+                  && value.currentWilliams >= -100 + (strategy.auxiliaryThreshold ?? 20)) {
+                  return 'williams_not_confirmed';
+                }
+                if (value.currentRsi > 100 - strategy.threshold
+                  && value.currentWilliams <= -(strategy.auxiliaryThreshold ?? 20)) {
+                  return 'williams_not_confirmed';
+                }
+                return nativeRsiWaitingReason({
+                  level: strategy.threshold,
+                  currentRsi: value.currentRsi,
+                  close: value.close,
+                  trendMean: value.trendMean,
+                });
+              })()
+              : strategy.family === 'vwz_mfi'
+              ? (() => {
+                const value = snapshot as VwzMfiSnapshot;
+                const mfiLevel = strategy.auxiliaryThreshold ?? 35;
+                if (value.currentZ < -strategy.threshold && value.currentMfi >= mfiLevel) {
+                  return 'mfi_not_confirmed';
+                }
+                if (value.currentZ > strategy.threshold && value.currentMfi <= 100 - mfiLevel) {
+                  return 'mfi_not_confirmed';
+                }
+                return nativeWaitingReason({
+                  mode: strategy.mode,
+                  threshold: strategy.threshold,
+                  previousZ: value.previousZ,
+                  currentZ: value.currentZ,
+                  close: value.close,
+                  trendMean: value.trendMean,
+                });
+              })()
               : nativeWaitingReason({
                 mode: strategy.mode,
                 threshold: strategy.threshold,

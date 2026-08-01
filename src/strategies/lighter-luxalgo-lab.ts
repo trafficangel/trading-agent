@@ -108,6 +108,14 @@ const NATIVE_HISTORICAL_EVIDENCE = (() => {
         process.env['LIGHTER_NATIVE_HISTORICAL_RSI_SUPPLEMENT_PATH']
           ?? 'data/lighter-rsi14-trend-transfer-validation.json',
       ), 'utf8')) as unknown,
+      JSON.parse(readFileSync(resolve(
+        process.env['LIGHTER_NATIVE_HISTORICAL_HYPE_CONFLUENCE_PATH']
+          ?? 'data/lighter-hype-confluence-direct5m-validation.json',
+      ), 'utf8')) as unknown,
+      JSON.parse(readFileSync(resolve(
+        process.env['LIGHTER_NATIVE_HISTORICAL_XLM_CONFLUENCE_PATH']
+          ?? 'data/lighter-oscillator-confluence-transfer2-5m-20260801.json',
+      ), 'utf8')) as unknown,
     );
   } catch (error) {
     logger.error({ error }, 'Native historical evidence unavailable');
@@ -717,6 +725,40 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 12.842,
     },
   },
+  {
+    id: 'hype-rsi14-willr14-ema400',
+    code: '056',
+    name: 'RSI14 + Williams %R14 · EMA400 · RSI50 Exit',
+    symbol: 'HYPEUSDT',
+    asset: 'HYPE',
+    marketId: 24,
+    stopPct: 1,
+    backtest: {
+      period: '2026-02-01 → 2026-08-01',
+      trades: 145,
+      winRatePct: 69.0,
+      profitFactor: 1.678,
+      netPct: 28.010,
+      maxDrawdownPct: 6.101,
+    },
+  },
+  {
+    id: 'xlm-vwz60-mfi14-ema400',
+    code: '057',
+    name: 'Volume Z60 + MFI14 · EMA400 · VWMA Exit',
+    symbol: 'XLMUSDT',
+    asset: 'XLM',
+    marketId: 119,
+    stopPct: 1,
+    backtest: {
+      period: '2026-02-02 → 2026-08-01',
+      trades: 178,
+      winRatePct: 63.5,
+      profitFactor: 1.556,
+      netPct: 28.146,
+      maxDrawdownPct: 6.423,
+    },
+  },
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
     ...market,
     portfolioId: NATIVE_TREND_PORTFOLIO_ID,
@@ -746,6 +788,8 @@ const NATIVE_STRATEGY_IDS = [
   'data-vwz60-touch',
   'apt-rsi14-pullback-ema400',
   'dot-rsi14-pullback-ema400',
+  'hype-rsi14-willr14-ema400',
+  'xlm-vwz60-mfi14-ema400',
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => market.id),
 ] as const;
 const RETIRED_NATIVE_STRATEGY_IDS = [
@@ -760,12 +804,13 @@ const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(RETIRED_NATIVE_STRATEGY_I
 const NATIVE_LIVE_STRATEGY_IDS: readonly string[] = [];
 
 type NativeStrategyInfo = {
-  family: 'zscore' | 'vwz' | 'rsi';
+  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi';
   mode: 'reclaim' | 'touch';
   threshold: number;
   period: number;
   timeExitBars: number;
   efficiencyMax?: number;
+  secondaryThreshold?: number;
   trendFilter?: 'ema200' | 'ema400' | 'ema200_400';
   realEnabled: boolean;
   noteRu: string;
@@ -885,6 +930,30 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     realEnabled: false,
     noteRu: 'DOT прошёл IS/OOS, обе стороны, 3/4 фолда и окна 30/60/90d после измеренных издержек и funding. Соседние RSI20 и EMA500 также проходят, но просадка выше APT, поэтому это вторичный prospective Shadow-кандидат.',
     noteEn: 'DOT passed IS/OOS, both sides, 3/4 folds and 30/60/90d windows after measured execution and funding. Adjacent RSI20 and EMA500 also pass, but drawdown is higher than APT, so this is the secondary prospective Shadow candidate.',
+  },
+  'hype-rsi14-willr14-ema400': {
+    family: 'rsi_williams',
+    mode: 'touch',
+    threshold: 30,
+    secondaryThreshold: 20,
+    period: 14,
+    timeExitBars: 120,
+    trendFilter: 'ema400',
+    realEnabled: false,
+    noteRu: 'HYPE прошёл 181d, 145 сделок, 4/4 фолда, IS/OOS, Long/Short и окна 30/60/90d после измеренного $100 p95 и точного funding. Прямые 5m свечи полностью совпали с независимой агрегацией из 1m на 51 661 баре; соседние RSI/Williams/EMA остаются положительными. Только prospective Shadow.',
+    noteEn: 'HYPE passed 181d, 145 trades, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows after measured $100 p95 and exact funding. Direct 5m candles matched independent 1m aggregation across 51,661 bars; adjacent RSI/Williams/EMA settings remain positive. Prospective Shadow only.',
+  },
+  'xlm-vwz60-mfi14-ema400': {
+    family: 'vwz_mfi',
+    mode: 'touch',
+    threshold: 2.5,
+    secondaryThreshold: 35,
+    period: 60,
+    timeExitBars: 120,
+    trendFilter: 'ema400',
+    realEnabled: false,
+    noteRu: 'XLM прошёл 180d, 178 сделок, 4/4 фолда, IS/OOS, Long/Short и окна 30/60/90d после измеренного $100 p95 и точного funding. Соседние VWZ/MFI/EMA параметры остаются положительными. Только prospective Shadow.',
+    noteEn: 'XLM passed 180d, 178 trades, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows after measured $100 p95 and exact funding. Adjacent VWZ/MFI/EMA settings remain positive. Prospective Shadow only.',
   },
   ...Object.fromEntries(NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => [
     market.id,
@@ -2716,6 +2785,8 @@ function nativeRunnerReason(lang: Lang, row: NativeRunnerEvaluation): string {
   const labels: Record<string, readonly [string, string]> = {
     z_inside_threshold: ['Z внутри порога', 'Z inside threshold'],
     rsi_inside_threshold: ['RSI внутри 25/75', 'RSI inside 25/75'],
+    williams_not_confirmed: ['Williams %R не подтвердил RSI', 'Williams %R did not confirm RSI'],
+    mfi_not_confirmed: ['MFI не подтвердил VWZ', 'MFI did not confirm VWZ'],
     waiting_reclaim: ['ждёт возврата Z', 'waiting for Z reclaim'],
     long_trend_stack_not_aligned: ['Long: EMA-стек не выровнен', 'Long: EMA stack not aligned'],
     short_trend_stack_not_aligned: ['Short: EMA-стек не выровнен', 'Short: EMA stack not aligned'],
@@ -2785,6 +2856,12 @@ function nativeRunnerHealth(lang: Lang, specs: readonly StrategySpec[]): string 
         : 'collect';
     const indicator = row.family === 'rsi'
       ? row.currentRsi == null ? '—' : `${row.currentRsi.toFixed(1)} / ${row.threshold.toFixed(0)}–${(100 - row.threshold).toFixed(0)}`
+      : row.family === 'rsi_williams'
+        ? row.currentRsi == null || row.secondaryOscillator == null
+          ? '—' : `RSI ${row.currentRsi.toFixed(1)} · W%R ${row.secondaryOscillator.toFixed(1)}`
+        : row.family === 'vwz_mfi'
+          ? row.currentZ == null || row.secondaryOscillator == null
+            ? '—' : `Z ${row.currentZ.toFixed(2)} · MFI ${row.secondaryOscillator.toFixed(1)}`
       : row.currentZ == null ? '—' : `${row.currentZ.toFixed(2)} / ±${row.threshold.toFixed(1)}`;
     return `<tr>
       <td><b>${spec ? `STRAT-${spec.code} · ${spec.asset}` : esc(row.strategyId)}</b></td>
@@ -2973,6 +3050,22 @@ export async function lighterNativeQuantHero(lang: Lang): Promise<string> {
 }
 
 function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
+  if (info.family === 'rsi_williams') {
+    const edge = info.secondaryThreshold ?? 20;
+    return t(
+      lang,
+      `Long: RSI${info.period}<${info.threshold}, Williams %R14<−${100 - edge} и close>EMA400. Short: RSI${info.period}>${100 - info.threshold}, Williams %R14>−${edge} и close<EMA400.`,
+      `Long: RSI${info.period}<${info.threshold}, Williams %R14<−${100 - edge}, and close>EMA400. Short: RSI${info.period}>${100 - info.threshold}, Williams %R14>−${edge}, and close<EMA400.`,
+    );
+  }
+  if (info.family === 'vwz_mfi') {
+    const level = info.secondaryThreshold ?? 35;
+    return t(
+      lang,
+      `Long: VWZ60<−${info.threshold}, MFI14<${level} и close>EMA400. Short: VWZ60>+${info.threshold}, MFI14>${100 - level} и close<EMA400.`,
+      `Long: VWZ60<−${info.threshold}, MFI14<${level}, and close>EMA400. Short: VWZ60>+${info.threshold}, MFI14>${100 - level}, and close<EMA400.`,
+    );
+  }
   if (info.family === 'rsi') {
     return t(
       lang,
@@ -3008,26 +3101,27 @@ function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
 function nativeStrategyTooltip(spec: StrategySpec, lang: Lang): string | null {
   const info = NATIVE_STRATEGY_INFO[spec.id];
   if (!info) return null;
-  const distribution = info.family === 'rsi'
+  const distribution = info.family === 'rsi' || info.family === 'rsi_williams'
     ? t(
       lang,
-      `RSI${info.period} и EMA400 считаются только по завершённым 5m свечам Lighter.`,
-      `RSI${info.period} and EMA400 use completed Lighter 5m candles only.`,
+      `${info.family === 'rsi_williams' ? `RSI${info.period}, Williams %R14` : `RSI${info.period}`} и EMA400 считаются только по завершённым 5m свечам Lighter.`,
+      `${info.family === 'rsi_williams' ? `RSI${info.period}, Williams %R14` : `RSI${info.period}`} and EMA400 use completed Lighter 5m candles only.`,
     )
-    : info.family === 'vwz'
+    : info.family === 'vwz' || info.family === 'vwz_mfi'
     ? t(
       lang,
-      `Volume Z-score считается по ${info.period} завершённым 5m свечам Lighter с весом их торгового объёма.`,
-      `Volume Z-score is calculated from ${info.period} completed Lighter 5m candles weighted by their traded volume.`,
+      `Volume Z-score${info.family === 'vwz_mfi' ? ' и MFI14' : ''} считается по завершённым 5m свечам Lighter с нативным объёмом.`,
+      `Volume Z-score${info.family === 'vwz_mfi' ? ' and MFI14' : ''} use completed Lighter 5m candles and native volume.`,
     )
     : t(
       lang,
       `Z-score считается по ${info.period} завершённым 5m закрытиям Lighter.`,
       `Z-score is calculated from ${info.period} completed Lighter 5m closes.`,
     );
-  const exitMean = info.family === 'rsi'
+  const exitMean = info.family === 'rsi' || info.family === 'rsi_williams'
     ? 'RSI50'
-    : info.family === 'vwz' ? `VWMA${info.period}` : `SMA${info.period}`;
+    : info.family === 'vwz' || info.family === 'vwz_mfi'
+      ? `VWMA${info.period}` : `SMA${info.period}`;
   const timeExitHours = info.timeExitBars * 5 / 60;
   return [
     `${spec.name}.`,
@@ -3051,7 +3145,13 @@ function nativeStrategyGuide(
 
   const strategyLines = nativeSpecs.filter((spec) => !spec.portfolioId).map((spec) => {
     const info = NATIVE_STRATEGY_INFO[spec.id]!;
-    const family = info.family === 'rsi' ? 'RSI' : info.family === 'vwz' ? 'VOLUME Z' : 'Z';
+    const family = info.family === 'rsi'
+      ? 'RSI'
+      : info.family === 'rsi_williams'
+        ? 'RSI + WILLIAMS %R'
+        : info.family === 'vwz_mfi'
+          ? 'VOLUME Z + MFI'
+          : info.family === 'vwz' ? 'VOLUME Z' : 'Z';
     const historical = nativeHistoricalGate(spec);
     const realPathOpen = info.realEnabled && historical?.passed === true;
     const executionLabel = realPathOpen
@@ -3061,9 +3161,9 @@ function nativeStrategyGuide(
         : 'SHADOW ONLY';
     return `<div class="ll-native-spec">
       <b>STRAT-${spec.code} · ${spec.asset}</b>
-      <span>${info.family === 'rsi'
+      <span>${info.family === 'rsi' || info.family === 'rsi_williams'
         ? `${family}${info.period} · ${info.threshold}/${100 - info.threshold} · EMA400`
-        : `${info.mode === 'reclaim' ? 'RECLAIM' : 'TOUCH'} · ${family}${info.period} · ±${info.threshold}σ`}</span>
+        : `${info.mode === 'reclaim' ? 'RECLAIM' : 'TOUCH'} · ${family}${info.period} · ±${info.threshold}σ${info.trendFilter ? ' · EMA400' : ''}`}</span>
       <span>${esc(nativeEntryDescription(info, lang))}</span>
       <span>${t(lang, info.noteRu, info.noteEn)}</span>
       <em class="${realPathOpen ? 'pass' : 'collect'}">${executionLabel}</em>
@@ -3094,13 +3194,13 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Расчёт.', 'Calculation.')}</b> ${t(
           lang,
-          'STRAT-034/035/051/052/053 считают объёмно-взвешенные Z60 и VWMA60; STRAT-052 также считает ER60. STRAT-054/055 считают RSI14 и EMA400. Portfolio P2 считает обычные Z60/SMA60 и EMA200/EMA400. Все расчёты используют только завершённые 5m свечи.',
-          'STRAT-034/035/051/052/053 calculate volume-weighted Z60 and VWMA60; STRAT-052 also calculates ER60. STRAT-054/055 calculate RSI14 and EMA400. Portfolio P2 uses standard Z60/SMA60 plus EMA200/EMA400. Every calculation uses completed 5m candles only.',
+          'STRAT-034/035/051/052/053 считают объёмно-взвешенные Z60 и VWMA60; STRAT-052 также считает ER60. STRAT-054/055 считают RSI14 и EMA400. STRAT-056 добавляет Williams %R14, STRAT-057 — MFI14 к VWZ60. Portfolio P2 считает обычные Z60/SMA60 и EMA200/EMA400. Все расчёты используют только завершённые 5m свечи.',
+          'STRAT-034/035/051/052/053 calculate volume-weighted Z60 and VWMA60; STRAT-052 also calculates ER60. STRAT-054/055 calculate RSI14 and EMA400. STRAT-056 adds Williams %R14, while STRAT-057 adds MFI14 to VWZ60. Portfolio P2 uses standard Z60/SMA60 plus EMA200/EMA400. Every calculation uses completed 5m candles only.',
         )}</li>
         <li><b>${t(lang, 'Решение.', 'Decision.')}</b> ${t(
           lang,
-          'Z-модели входят за своим порогом ±σ; STRAT-052 дополнительно требует ER60≤0.25. STRAT-054/055 входят при RSI14<25 или >75 только по стороне EMA400 и выходят у RSI50. Резервный выход: 240 баров для Z и 120 баров для RSI.',
-          'Z models enter beyond their ±σ threshold; STRAT-052 additionally requires ER60≤0.25. STRAT-054/055 enter at RSI14<25 or >75 only on the EMA400 side and exit at RSI50. Fallback exit is 240 bars for Z and 120 bars for RSI.',
+          'Z-модели входят за своим порогом ±σ; STRAT-052 дополнительно требует ER60≤0.25. STRAT-054/055 входят при RSI14<25 или >75 по стороне EMA400. STRAT-056 требует совместного экстремума RSI/Williams, STRAT-057 — VWZ/MFI. Выходы: RSI50 либо VWMA60; резервный выход новых моделей — 120 баров.',
+          'Z models enter beyond their ±σ threshold; STRAT-052 additionally requires ER60≤0.25. STRAT-054/055 enter at RSI14<25 or >75 on the EMA400 side. STRAT-056 requires a joint RSI/Williams extreme; STRAT-057 requires VWZ/MFI confluence. Exits use RSI50 or VWMA60, with a 120-bar fallback for the new models.',
         )}</li>
         <li><b>${t(lang, 'Внутренний сигнал.', 'Internal signal.')}</b> ${t(
           lang,

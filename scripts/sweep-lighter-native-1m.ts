@@ -73,6 +73,8 @@ const ENABLE_FUNDING_CROWDING = process.env.ENABLE_FUNDING_CROWDING === '1';
 const ENABLE_SHOCK_REVERSAL = process.env.ENABLE_SHOCK_REVERSAL === '1';
 const ENABLE_RSI_PULLBACK_ROBUSTNESS = process.env.ENABLE_RSI_PULLBACK_ROBUSTNESS === '1';
 const ENABLE_DIRECTIONAL_TREND = process.env.ENABLE_DIRECTIONAL_TREND === '1';
+const ENABLE_OSCILLATOR_CONFLUENCE = process.env.ENABLE_OSCILLATOR_CONFLUENCE === '1';
+const ENABLE_CONFLUENCE_ROBUSTNESS = process.env.ENABLE_CONFLUENCE_ROBUSTNESS === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -628,6 +630,150 @@ function lowestBefore(c: Candle[], i: number, period: number): number {
 
 function rules(): Rule[] {
   const out: Rule[] = [];
+
+  // Preregistered two-sided confluence suite. The four rules are deliberately
+  // few and fixed before looking at their results: a price/RSI extreme must be
+  // confirmed by an independent volume or range-position oscillator, while
+  // EMA400 keeps the fade aligned with the long regime. This is opt-in so a
+  // failed experiment cannot alter the established production library.
+  if (ENABLE_OSCILLATOR_CONFLUENCE) {
+    out.push({
+      name: 'CONF-RSI14-MFI14-30/70+EMA400',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        if (a.rsi14[i]! < 30 && a.mfi14[i]! < 30 && a.close[i]! > a.ema400[i]!) return 'long';
+        if (a.rsi14[i]! > 70 && a.mfi14[i]! > 70 && a.close[i]! < a.ema400[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.rsi14[i]! >= 50 : a.rsi14[i]! <= 50;
+      },
+    });
+    out.push({
+      name: 'CONF-RSI14-WILLR14-30/70+EMA400',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        if (a.rsi14[i]! < 30 && a.williams14[i]! < -80 && a.close[i]! > a.ema400[i]!) return 'long';
+        if (a.rsi14[i]! > 70 && a.williams14[i]! > -20 && a.close[i]! < a.ema400[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.rsi14[i]! >= 50 : a.rsi14[i]! <= 50;
+      },
+    });
+    out.push({
+      name: 'CONF-VWZ60-2+RSI14-30/70+EMA400',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        const current = a.vwapSd60[i]! > 0
+          ? (a.close[i]! - a.vwap60[i]!) / a.vwapSd60[i]!
+          : 0;
+        if (current < -2 && a.rsi14[i]! < 30 && a.close[i]! > a.ema400[i]!) return 'long';
+        if (current > 2 && a.rsi14[i]! > 70 && a.close[i]! < a.ema400[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.close[i]! >= a.vwap60[i]! : a.close[i]! <= a.vwap60[i]!;
+      },
+    });
+    out.push({
+      name: 'CONF-VWZ60-2.5+MFI14-35/65+EMA400',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        const current = a.vwapSd60[i]! > 0
+          ? (a.close[i]! - a.vwap60[i]!) / a.vwapSd60[i]!
+          : 0;
+        if (current < -2.5 && a.mfi14[i]! < 35 && a.close[i]! > a.ema400[i]!) return 'long';
+        if (current > 2.5 && a.mfi14[i]! > 65 && a.close[i]! < a.ema400[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.close[i]! >= a.vwap60[i]! : a.close[i]! <= a.vwap60[i]!;
+      },
+    });
+  }
+
+  // Post-selection stability check around the frozen confluence discoveries.
+  // This grid is diagnostic only: the centre cells remain the strategies under
+  // consideration and neighbouring cells cannot replace them after the fact.
+  if (ENABLE_CONFLUENCE_ROBUSTNESS) {
+    const trendAverages = [
+      [300, (a: Arrays) => a.ema300],
+      [400, (a: Arrays) => a.ema400],
+      [500, (a: Arrays) => a.ema500],
+    ] as const;
+    for (const level of [25, 30, 35] as const) {
+      for (const williamsEdge of [15, 20, 25] as const) {
+        for (const [trend, average] of trendAverages) {
+          out.push({
+            name: `ROB-RSIW-R${level}-W${williamsEdge}+EMA${trend}`,
+            warmup: trend + 2,
+            slPct: 0.01,
+            maxBars: 120,
+            entry(a, i) {
+              const trendAverage = average(a);
+              if (
+                a.rsi14[i]! < level
+                && a.williams14[i]! < -100 + williamsEdge
+                && a.close[i]! > trendAverage[i]!
+              ) return 'long';
+              if (
+                a.rsi14[i]! > 100 - level
+                && a.williams14[i]! > -williamsEdge
+                && a.close[i]! < trendAverage[i]!
+              ) return 'short';
+              return null;
+            },
+            exit(a, i, side) {
+              return side === 'long' ? a.rsi14[i]! >= 50 : a.rsi14[i]! <= 50;
+            },
+          });
+        }
+      }
+    }
+    for (const threshold of [2.25, 2.5, 2.75] as const) {
+      for (const mfiLevel of [30, 35, 40] as const) {
+        for (const [trend, average] of trendAverages) {
+          out.push({
+            name: `ROB-VWZMFI-Z${threshold}-M${mfiLevel}+EMA${trend}`,
+            warmup: trend + 2,
+            slPct: 0.01,
+            maxBars: 120,
+            entry(a, i) {
+              const current = a.vwapSd60[i]! > 0
+                ? (a.close[i]! - a.vwap60[i]!) / a.vwapSd60[i]!
+                : 0;
+              const trendAverage = average(a);
+              if (
+                current < -threshold
+                && a.mfi14[i]! < mfiLevel
+                && a.close[i]! > trendAverage[i]!
+              ) return 'long';
+              if (
+                current > threshold
+                && a.mfi14[i]! > 100 - mfiLevel
+                && a.close[i]! < trendAverage[i]!
+              ) return 'short';
+              return null;
+            },
+            exit(a, i, side) {
+              return side === 'long'
+                ? a.close[i]! >= a.vwap60[i]!
+                : a.close[i]! <= a.vwap60[i]!;
+            },
+          });
+        }
+      }
+    }
+  }
 
   // Preregistered independent trend-following suite. Both rules are canonical,
   // mirrored across Long/Short and share one four-hour time stop at every

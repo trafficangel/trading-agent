@@ -5,6 +5,8 @@ export type Z60Bar = {
 
 export type Vwz60Bar = Z60Bar & {
   volume: number;
+  high?: number;
+  low?: number;
 };
 
 export type Z60Signal = 'long' | 'short' | null;
