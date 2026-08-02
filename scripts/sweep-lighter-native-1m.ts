@@ -17,7 +17,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, resolve } from 'node:path';
 import { atr, ema, rollingStd, rsi, sma, type Candle } from '../src/backtest/indicators.js';
 import {
+  choppinessIndex,
   elderForceIndexZScore,
+  priceVolumeTrendOscillator,
   ultimateOscillator,
 } from '../src/lib/lighter-independent-indicators.js';
 import {
@@ -120,6 +122,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V13 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V13 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V14 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V14 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V15 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V15 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -211,6 +215,9 @@ type Arrays = {
   trixSignal9: number[];
   ultimateOscillator7x14x28: number[];
   elderForceIndex13Z60: number[];
+  choppiness14: number[];
+  pvt12x26: number[];
+  pvtSignal9: number[];
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
@@ -879,6 +886,7 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     low: bar.l,
     volume: bar.v,
   }));
+  const pvt12x26 = priceVolumeTrendOscillator(completedBars, 12, 26, 9);
   const atrPctMean288 = sma(
     atr14Values.map((value, i) => close[i]! > 0 ? value / close[i]! : 0),
     288,
@@ -941,6 +949,9 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     trixSignal9: trix15.signal,
     ultimateOscillator7x14x28: ultimateOscillator(completedBars, 7, 14, 28),
     elderForceIndex13Z60: elderForceIndexZScore(completedBars, 13, 60),
+    choppiness14: choppinessIndex(completedBars, 14),
+    pvt12x26: pvt12x26.oscillator,
+    pvtSignal9: pvt12x26.signal,
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
@@ -1892,6 +1903,71 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.elderForceIndex13Z60[i]! >= 0
           : a.elderForceIndex13Z60[i]! <= 0;
+      },
+    });
+  }
+
+  // Preregistered independent v15 suite. The first rule trades the transition
+  // from compression into a completed-bar 20-bar range breakout, confirmed by
+  // native relative volume. The second trades a price-volume-trend crossover.
+  // Both are mirrored Long/Short, share fixed parameters across every market
+  // and timeframe, and execute at the following native bar open.
+  if (ENABLE_INDEPENDENT_FAMILIES_V15) {
+    out.push({
+      name: 'V15-CHOP14-X38-DONCHIAN20+RVOL1.25+EMA200-EXIT10-H240M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(240 / BAR_MINUTES)),
+      entry(a, i) {
+        const expansionStarted = a.choppiness14[i - 1]! >= 38.2
+          && a.choppiness14[i]! < 38.2;
+        const volumeOk = a.c[i]!.v >= a.volumeSma20[i]! * 1.25;
+        if (!expansionStarted || !volumeOk) return null;
+        if (
+          a.close[i]! > highestBefore(a.c, i, 20)
+          && a.close[i]! > a.ema200[i]!
+        ) return 'long';
+        if (
+          a.close[i]! < lowestBefore(a.c, i, 20)
+          && a.close[i]! < a.ema200[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! < lowestBefore(a.c, i, 10)
+          : a.close[i]! > highestBefore(a.c, i, 10);
+      },
+    });
+
+    out.push({
+      name: 'V15-PVT12/26/9-X+EMA200+ADX18-H240M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(240 / BAR_MINUTES)),
+      entry(a, i) {
+        const crossedUp = a.pvt12x26[i - 1]! <= a.pvtSignal9[i - 1]!
+          && a.pvt12x26[i]! > a.pvtSignal9[i]!;
+        const crossedDown = a.pvt12x26[i - 1]! >= a.pvtSignal9[i - 1]!
+          && a.pvt12x26[i]! < a.pvtSignal9[i]!;
+        if (
+          crossedUp
+          && a.close[i]! > a.ema200[i]!
+          && a.adx14[i]! >= 18
+          && a.plusDi14[i]! > a.minusDi14[i]!
+        ) return 'long';
+        if (
+          crossedDown
+          && a.close[i]! < a.ema200[i]!
+          && a.adx14[i]! >= 18
+          && a.minusDi14[i]! > a.plusDi14[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.pvt12x26[i]! < a.pvtSignal9[i]!
+          : a.pvt12x26[i]! > a.pvtSignal9[i]!;
       },
     });
   }

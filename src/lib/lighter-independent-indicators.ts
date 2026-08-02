@@ -79,3 +79,76 @@ export function elderForceIndexZScore(
     return deviation > 0 ? (value - mean) / deviation : 0;
   });
 }
+
+/**
+ * Canonical Choppiness Index. A high value means that completed bars have
+ * travelled a large path inside a comparatively small range; a low value
+ * means directional range expansion. Future bars cannot change past values.
+ */
+export function choppinessIndex(
+  bars: readonly CompletedOhlcv[],
+  period = 14,
+): number[] {
+  if (!(period > 1)) throw new Error('Choppiness period must exceed one');
+  const trueRanges = bars.map((bar, index) => {
+    const previousClose = index > 0 ? bars[index - 1]!.close : bar.close;
+    return Math.max(
+      bar.high - bar.low,
+      Math.abs(bar.high - previousClose),
+      Math.abs(bar.low - previousClose),
+    );
+  });
+  const scale = Math.log10(period);
+  return bars.map((_bar, index) => {
+    if (index + 1 < period) return 50;
+    let rangeSum = 0;
+    let highest = Number.NEGATIVE_INFINITY;
+    let lowest = Number.POSITIVE_INFINITY;
+    for (let cursor = index - period + 1; cursor <= index; cursor += 1) {
+      rangeSum += trueRanges[cursor]!;
+      highest = Math.max(highest, bars[cursor]!.high);
+      lowest = Math.min(lowest, bars[cursor]!.low);
+    }
+    const span = highest - lowest;
+    if (!(span > 0) || !(rangeSum > 0)) return 50;
+    return Math.max(0, Math.min(100, 100 * Math.log10(rangeSum / span) / scale));
+  });
+}
+
+/**
+ * Price Volume Trend MACD-style oscillator. PVT accumulates completed close
+ * returns weighted by native traded volume; two causal EMAs and a causal
+ * signal EMA turn it into a scale-independent crossover series.
+ */
+export function priceVolumeTrendOscillator(
+  bars: readonly CompletedOhlcv[],
+  fastPeriod = 12,
+  slowPeriod = 26,
+  signalPeriod = 9,
+): { oscillator: number[]; signal: number[] } {
+  if (!(fastPeriod > 1 && fastPeriod < slowPeriod && signalPeriod > 1)) {
+    throw new Error('PVT periods must satisfy 1 < fast < slow and signal > 1');
+  }
+  const pvt = new Array<number>(bars.length).fill(0);
+  for (let index = 1; index < bars.length; index += 1) {
+    const previousClose = bars[index - 1]!.close;
+    const returnPct = previousClose > 0
+      ? (bars[index]!.close - previousClose) / previousClose
+      : 0;
+    pvt[index] = pvt[index - 1]! + bars[index]!.volume * returnPct;
+  }
+  const causalEma = (values: readonly number[], period: number): number[] => {
+    const alpha = 2 / (period + 1);
+    const output = new Array<number>(values.length).fill(0);
+    for (let index = 0; index < values.length; index += 1) {
+      output[index] = index === 0
+        ? values[index]!
+        : values[index]! * alpha + output[index - 1]! * (1 - alpha);
+    }
+    return output;
+  };
+  const fast = causalEma(pvt, fastPeriod);
+  const slow = causalEma(pvt, slowPeriod);
+  const oscillator = fast.map((value, index) => value - slow[index]!);
+  return { oscillator, signal: causalEma(oscillator, signalPeriod) };
+}

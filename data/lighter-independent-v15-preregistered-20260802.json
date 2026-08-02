@@ -1,0 +1,54 @@
+{
+  "version": "lighter-independent-v15-preregistration-v1",
+  "createdAt": "2026-08-02T09:05:00Z",
+  "status": "frozen_before_universe_results",
+  "objective": "Test two bidirectional completed-candle families based on range expansion and native-volume-confirmed momentum, without symbol-specific or timeframe-specific tuning.",
+  "universe": [
+    "AAVE", "APT", "ARB", "BNB", "BTC", "DATA", "DOGE", "DOT", "ENA", "ETH", "GRAM", "HYPE", "JUP", "LINK", "LIT", "LTC", "NEAR", "PUMP", "SOL", "TAO", "UNI", "XLM", "XMR", "XRP"
+  ],
+  "unseenRuleHoldout": ["ADA", "ZEC"],
+  "timeframesMinutes": [1, 5],
+  "rules": [
+    {
+      "name": "V15-CHOP14-X38-DONCHIAN20+RVOL1.25+EMA200-EXIT10-H240M",
+      "entry": "Choppiness(14) crosses below 38.2 while the completed close breaks the prior 20-bar range, volume is at least 1.25x SMA20 and price agrees with EMA200",
+      "exit": "Completed close crosses the opposite prior 10-bar channel, 1% stop or 240-minute timeout",
+      "stopPct": 1,
+      "maxHoldMinutes": 240
+    },
+    {
+      "name": "V15-PVT12/26/9-X+EMA200+ADX18-H240M",
+      "entry": "Price Volume Trend EMA12 minus EMA26 crosses its EMA9 signal, aligned with EMA200, ADX14 at least 18 and matching DMI direction",
+      "exit": "PVT oscillator crosses back through its signal, 1% stop or 240-minute timeout",
+      "stopPct": 1,
+      "maxHoldMinutes": 240
+    }
+  ],
+  "execution": {
+    "signal": "completed gap-free native bar",
+    "fill": "next native bar open",
+    "positionNotionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific executable $100 full-round-trip L2 p95",
+    "funding": "exact Lighter hourly settlements in (entry, exit]"
+  },
+  "qualification": {
+    "minimumTrades": 30,
+    "minimumProfitFactor": 1.2,
+    "minimumPositiveFolds": 3,
+    "maximumDrawdownPct": 15,
+    "requiresPositiveMeanL95": true,
+    "requiresPositiveISAndOOS": true,
+    "requiresPositiveLongAndShort": true,
+    "requiresPositiveBullBearAndVolatilityRegimes": true,
+    "requiresPositive30d60d90dBothSides": true,
+    "requiresMeasuredCostsAndFunding": true,
+    "requiresDelayedFillAudit": true
+  },
+  "frozenInputHashes": {
+    "executionCostsNativePortfolio100": "4afa14dd731014df5c806f7d5c2a06a0a02797561ce12a83847a4d841b42fce9",
+    "fundingHistoryNative": "5a44a8cba48306dad60ee695045d5fdcf4542ef1a6a75b55ad4aa3d12fe7e9f4",
+    "fundingHistoryTransfer2": "a0fb74c290cee83f8f574e7b678872cd35328cf3da54548e66fe5708a93830ed",
+    "fundingHistoryAda": "146e1baf78d16ffc5e13b58b6fc0e41009f94c5beb9068ed979cffd07bcc400e"
+  }
+}
