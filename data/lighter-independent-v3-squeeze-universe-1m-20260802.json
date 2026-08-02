@@ -1,0 +1,2008 @@
+{
+  "version": "lighter-native-sweep-v2",
+  "generatedAt": "2026-08-02T04:18:12.609Z",
+  "input": {
+    "symbols": [
+      "AAVE",
+      "ARB",
+      "BNB",
+      "BTC",
+      "DOGE",
+      "ENA",
+      "ETH",
+      "GRAM",
+      "HYPE",
+      "JUP",
+      "LINK",
+      "LIT",
+      "LTC",
+      "NEAR",
+      "PUMP",
+      "SOL",
+      "TAO",
+      "UNI",
+      "XLM",
+      "XMR",
+      "XRP"
+    ],
+    "candleSources": {
+      "AAVE": "direct",
+      "ARB": "direct",
+      "BNB": "direct",
+      "BTC": "direct",
+      "DOGE": "direct",
+      "ENA": "direct",
+      "ETH": "direct",
+      "GRAM": "direct",
+      "HYPE": "direct",
+      "JUP": "direct",
+      "LINK": "direct",
+      "LIT": "direct",
+      "LTC": "direct",
+      "NEAR": "direct",
+      "PUMP": "direct",
+      "SOL": "direct",
+      "TAO": "direct",
+      "UNI": "direct",
+      "XLM": "direct",
+      "XMR": "direct",
+      "XRP": "direct"
+    },
+    "barMinutes": 1,
+    "lookbackDays": null,
+    "ruleFilter": "SQUEEZE20",
+    "positionNotionalUsd": 100,
+    "portfolioMaxOpen": 6,
+    "executionCosts": "market-specific executable $100 full-round-trip p95",
+    "adverseExecution": "market-specific observed maximum; non-blocking sensitivity",
+    "funding": "exact Lighter hourly settlements in (entry, exit]",
+    "fundingHistoryFiles": [
+      "/private/tmp/trading-agent-lighter-quant-strategy/data/lighter-funding-history-native.json",
+      "/private/tmp/trading-agent-lighter-quant-strategy/data/lighter-funding-history-transfer2-20260801.json"
+    ],
+    "fundingCoverage": {
+      "AAVE": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769936400000,
+        "lastTimestampMs": 1785488400000
+      },
+      "ARB": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769943600000,
+        "lastTimestampMs": 1785495600000
+      },
+      "BNB": {
+        "points": 4332,
+        "internalCoverage": 0.9986168741355463,
+        "firstTimestampMs": 1769875200000,
+        "lastTimestampMs": 1785488400000
+      },
+      "BTC": {
+        "points": 4331,
+        "internalCoverage": 0.998616555222504,
+        "firstTimestampMs": 1769875200000,
+        "lastTimestampMs": 1785484800000
+      },
+      "DOGE": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769936400000,
+        "lastTimestampMs": 1785488400000
+      },
+      "ENA": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769943600000,
+        "lastTimestampMs": 1785495600000
+      },
+      "ETH": {
+        "points": 4331,
+        "internalCoverage": 0.998616555222504,
+        "firstTimestampMs": 1769875200000,
+        "lastTimestampMs": 1785484800000
+      },
+      "GRAM": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769940000000,
+        "lastTimestampMs": 1785492000000
+      },
+      "HYPE": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769932800000,
+        "lastTimestampMs": 1785484800000
+      },
+      "JUP": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769940000000,
+        "lastTimestampMs": 1785492000000
+      },
+      "LINK": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769932800000,
+        "lastTimestampMs": 1785484800000
+      },
+      "LIT": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769940000000,
+        "lastTimestampMs": 1785492000000
+      },
+      "LTC": {
+        "points": 4332,
+        "internalCoverage": 0.9986168741355463,
+        "firstTimestampMs": 1769875200000,
+        "lastTimestampMs": 1785488400000
+      },
+      "NEAR": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769940000000,
+        "lastTimestampMs": 1785492000000
+      },
+      "PUMP": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769940000000,
+        "lastTimestampMs": 1785492000000
+      },
+      "SOL": {
+        "points": 4326,
+        "internalCoverage": 0.9986149584487535,
+        "firstTimestampMs": 1769893200000,
+        "lastTimestampMs": 1785484800000
+      },
+      "TAO": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769943600000,
+        "lastTimestampMs": 1785495600000
+      },
+      "UNI": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769936400000,
+        "lastTimestampMs": 1785488400000
+      },
+      "XLM": {
+        "points": 4316,
+        "internalCoverage": 0.9988428604489702,
+        "firstTimestampMs": 1770058800000,
+        "lastTimestampMs": 1785610800000
+      },
+      "XMR": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769940000000,
+        "lastTimestampMs": 1785492000000
+      },
+      "XRP": {
+        "points": 4331,
+        "internalCoverage": 0.998616555222504,
+        "firstTimestampMs": 1769875200000,
+        "lastTimestampMs": 1785484800000
+      }
+    },
+    "qualificationInputsMeasured": true,
+    "usedFallbackExecutionCost": false,
+    "usedFallbackFunding": false
+  },
+  "qualified": [],
+  "rows": [
+    {
+      "symbol": "AAVE",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.06651423820410825,
+      "adverseCostPct": 0.08098511119877562,
+      "baseline": -5.779374367180984,
+      "stress": -20.079835581064266,
+      "stressPf": 0.5158789905010055,
+      "robustStress": -23.191073274917745,
+      "robustPf": 0.4709584188032411,
+      "folds": 0,
+      "is": -16.697883020035626,
+      "oos": -3.381952561028627,
+      "long": -10.593046629466174,
+      "short": -9.486788951598085,
+      "recent": [
+        {
+          "days": 30,
+          "n": 50,
+          "net": -0.8424792378773626,
+          "profitFactor": 0.8751221895487231,
+          "winRatePct": 30,
+          "long": -2.052228231888587,
+          "short": 1.2097489940112243
+        },
+        {
+          "days": 60,
+          "n": 89,
+          "net": -8.974265639523097,
+          "profitFactor": 0.48840255125884646,
+          "winRatePct": 23.595505617977526,
+          "long": -7.432758026293011,
+          "short": -1.541507613230087
+        },
+        {
+          "days": 90,
+          "n": 125,
+          "net": -13.01566622766181,
+          "profitFactor": 0.4380459486948228,
+          "winRatePct": 22.400000000000002,
+          "long": -9.440391647477599,
+          "short": -3.575274580184208
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.1401848217760352,
+      "trendRegimes": {
+        "bull": {
+          "n": 77,
+          "net": -7.278653263414986,
+          "profitFactor": 0.5699069912889121
+        },
+        "bear": {
+          "n": 91,
+          "net": -7.442854185167626,
+          "profitFactor": 0.545034912375232
+        },
+        "mixed": {
+          "n": 47,
+          "net": -5.358328132481646,
+          "profitFactor": 0.34608896302777103
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 98,
+          "net": -11.769458828997834,
+          "profitFactor": 0.4204425094811312
+        },
+        "lowVol": {
+          "n": 117,
+          "net": -8.31037675206643,
+          "profitFactor": 0.6074313069537386
+        }
+      },
+      "trades": 215,
+      "grossPct": -5.779374367180984,
+      "netPct": -20.079835581064266,
+      "adverseNetPct": -23.191073274917745,
+      "fundingPct": 0.00009999999999910775,
+      "maxDrawdownPct": -20.889276706594398
+    },
+    {
+      "symbol": "ARB",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.14303361289902994,
+      "adverseCostPct": 0.14303361289902994,
+      "baseline": -79.22324527354041,
+      "stress": -231.11314217231023,
+      "stressPf": 0.2077643355808237,
+      "robustStress": -231.11314217231023,
+      "robustPf": 0.2077643355808237,
+      "folds": 0,
+      "is": -154.07468299954456,
+      "oos": -77.0384591727657,
+      "long": -92.66991228478662,
+      "short": -138.44322988752361,
+      "recent": [
+        {
+          "days": 30,
+          "n": 53,
+          "net": -17.71354352478392,
+          "profitFactor": 0.019832602883287892,
+          "winRatePct": 3.7735849056603774,
+          "long": -7.62357442209565,
+          "short": -10.08996910268828
+        },
+        {
+          "days": 60,
+          "n": 125,
+          "net": -38.92523317910019,
+          "profitFactor": 0.09070873443367543,
+          "winRatePct": 6.4,
+          "long": -15.41452468113659,
+          "short": -23.510708497963584
+        },
+        {
+          "days": 90,
+          "n": 264,
+          "net": -67.56639328471937,
+          "profitFactor": 0.1475657093572286,
+          "winRatePct": 8.712121212121213,
+          "long": -24.946944708726853,
+          "short": -42.61944857599251
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.23631193897064015,
+      "trendRegimes": {
+        "bull": {
+          "n": 325,
+          "net": -61.790331191587214,
+          "profitFactor": 0.30188517885963695
+        },
+        "bear": {
+          "n": 462,
+          "net": -104.60426966958482,
+          "profitFactor": 0.17233700683293868
+        },
+        "mixed": {
+          "n": 275,
+          "net": -64.71854131113824,
+          "profitFactor": 0.15761064971343702
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 428,
+          "net": -88.23699884223782,
+          "profitFactor": 0.3041731212924834
+        },
+        "lowVol": {
+          "n": 634,
+          "net": -142.87614333007227,
+          "profitFactor": 0.13363178693773048
+        }
+      },
+      "trades": 1062,
+      "grossPct": -79.22324527354041,
+      "netPct": -231.11314217231023,
+      "adverseNetPct": -231.11314217231023,
+      "fundingPct": 0.011800000000000425,
+      "maxDrawdownPct": -231.11314217231023
+    },
+    {
+      "symbol": "BNB",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.031030898474158262,
+      "adverseCostPct": 0.03192868989814438,
+      "baseline": -1.263208253721571,
+      "stress": -5.266594156887987,
+      "stressPf": 0.681920092483446,
+      "robustStress": -5.382409250582196,
+      "robustPf": 0.6766814845097846,
+      "folds": 1,
+      "is": -2.674075343050499,
+      "oos": -2.5925188138374873,
+      "long": 1.074598532649547,
+      "short": -6.341192689537536,
+      "recent": [
+        {
+          "days": 30,
+          "n": 11,
+          "net": -0.416138614576141,
+          "profitFactor": 0.49154904702292485,
+          "winRatePct": 18.181818181818183,
+          "long": 0.16171707885038053,
+          "short": -0.5778556934265217
+        },
+        {
+          "days": 60,
+          "n": 42,
+          "net": -2.8761932996190342,
+          "profitFactor": 0.35361075899789945,
+          "winRatePct": 19.047619047619047,
+          "long": -1.838621005672564,
+          "short": -1.0375722939464704
+        },
+        {
+          "days": 90,
+          "n": 46,
+          "net": -3.2630735056393005,
+          "profitFactor": 0.3253248705091562,
+          "winRatePct": 17.391304347826086,
+          "long": -2.1264015114489476,
+          "short": -1.1366719941903534
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.096521545015969,
+      "trendRegimes": {
+        "bull": {
+          "n": 53,
+          "net": 1.213325328097846,
+          "profitFactor": 1.2002882888810742
+        },
+        "bear": {
+          "n": 53,
+          "net": -5.321079378092915,
+          "profitFactor": 0.35275262563746107
+        },
+        "mixed": {
+          "n": 23,
+          "net": -1.158840106892919,
+          "profitFactor": 0.49139572436249623
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 74,
+          "net": -1.3097790836001988,
+          "profitFactor": 0.862819183481523
+        },
+        "lowVol": {
+          "n": 55,
+          "net": -3.956815073287788,
+          "profitFactor": 0.4355169884979741
+        }
+      },
+      "trades": 129,
+      "grossPct": -1.263208253721571,
+      "netPct": -5.266594156887987,
+      "adverseNetPct": -5.382409250582196,
+      "fundingPct": -0.000400000000000289,
+      "maxDrawdownPct": -5.398558342371814
+    },
+    {
+      "symbol": "BTC",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.007823746635788947,
+      "adverseCostPct": 0.00809092878539461,
+      "baseline": -14.067227148031874,
+      "stress": -31.99327317043905,
+      "stressPf": 0.8187121008821571,
+      "robustStress": -32.60699056808326,
+      "robustPf": 0.8157115211630557,
+      "folds": 0,
+      "is": -21.12479894673605,
+      "oos": -10.868474223703014,
+      "long": -14.822692975964797,
+      "short": -17.170580194474237,
+      "recent": [
+        {
+          "days": 30,
+          "n": 394,
+          "net": -6.286104910637349,
+          "profitFactor": 0.7401565040050627,
+          "winRatePct": 21.065989847715734,
+          "long": -3.4399813145707365,
+          "short": -2.846123596066611
+        },
+        {
+          "days": 60,
+          "n": 789,
+          "net": -11.674775347652044,
+          "profitFactor": 0.7902917909152303,
+          "winRatePct": 23.193916349809886,
+          "long": -7.8463147403665685,
+          "short": -3.828460607285475
+        },
+        {
+          "days": 90,
+          "n": 1185,
+          "net": -20.480615067085047,
+          "profitFactor": 0.7337575728080632,
+          "winRatePct": 23.628691983122362,
+          "long": -13.09373734842872,
+          "short": -7.386877718656318
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.022271521162403052,
+      "trendRegimes": {
+        "bull": {
+          "n": 871,
+          "net": -14.667058616556659,
+          "profitFactor": 0.7731383957324488
+        },
+        "bear": {
+          "n": 834,
+          "net": -8.282261573728666,
+          "profitFactor": 0.8806439821208886
+        },
+        "mixed": {
+          "n": 592,
+          "net": -9.043952980153732,
+          "profitFactor": 0.7868724587560949
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 817,
+          "net": -14.216424781168495,
+          "profitFactor": 0.8184592859058628
+        },
+        "lowVol": {
+          "n": 1480,
+          "net": -17.77684838927055,
+          "profitFactor": 0.8189137748284548
+        }
+      },
+      "trades": 2297,
+      "grossPct": -14.067227148031874,
+      "netPct": -31.99327317043905,
+      "adverseNetPct": -32.60699056808326,
+      "fundingPct": 0.045100000000000674,
+      "maxDrawdownPct": -34.28540310898148
+    },
+    {
+      "symbol": "DOGE",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.06468072873621526,
+      "adverseCostPct": 0.07047064322438212,
+      "baseline": -9.966744219597395,
+      "stress": -50.34701895099571,
+      "stressPf": 0.5002142480603199,
+      "robustStress": -53.959925591611864,
+      "robustPf": 0.4793504658291468,
+      "folds": 0,
+      "is": -36.91516239236254,
+      "oos": -13.431856558633182,
+      "long": -13.606202043427693,
+      "short": -36.74081690756803,
+      "recent": [
+        {
+          "days": 30,
+          "n": 20,
+          "net": -1.9135801165623356,
+          "profitFactor": 0.16824019796622755,
+          "winRatePct": 15,
+          "long": -1.1627950850423623,
+          "short": -0.7507850315199731
+        },
+        {
+          "days": 60,
+          "n": 47,
+          "net": -2.8794326294431656,
+          "profitFactor": 0.5306137277291803,
+          "winRatePct": 23.404255319148938,
+          "long": -2.800703944566022,
+          "short": -0.07872868487714459
+        },
+        {
+          "days": 90,
+          "n": 150,
+          "net": -17.05111226835751,
+          "profitFactor": 0.2575820786046886,
+          "winRatePct": 16,
+          "long": -9.704621482927346,
+          "short": -7.3464907854301655
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.1043416573479059,
+      "trendRegimes": {
+        "bull": {
+          "n": 194,
+          "net": -9.413941717248541,
+          "profitFactor": 0.7142349290150627
+        },
+        "bear": {
+          "n": 294,
+          "net": -29.48299598765095,
+          "profitFactor": 0.393745391304384
+        },
+        "mixed": {
+          "n": 136,
+          "net": -11.450081246096223,
+          "profitFactor": 0.40248661724620605
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 200,
+          "net": -16.905165527015615,
+          "profitFactor": 0.5594285066604117
+        },
+        "lowVol": {
+          "n": 424,
+          "net": -33.44185342398011,
+          "profitFactor": 0.4637825031643196
+        }
+      },
+      "trades": 624,
+      "grossPct": -9.966744219597395,
+      "netPct": -50.34701895099571,
+      "adverseNetPct": -53.959925591611864,
+      "fundingPct": -0.01950000000000042,
+      "maxDrawdownPct": -50.99752741337149
+    },
+    {
+      "symbol": "ENA",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.060816152770169066,
+      "adverseCostPct": 0.06089021494246895,
+      "baseline": -15.330435009626084,
+      "stress": -29.862995521696504,
+      "stressPf": 0.4842334485451256,
+      "robustStress": -29.880696380876163,
+      "robustPf": 0.48404785032281405,
+      "folds": 0,
+      "is": -9.637284269611897,
+      "oos": -20.225711252084604,
+      "long": -16.663544612809474,
+      "short": -13.199450908887025,
+      "recent": [
+        {
+          "days": 30,
+          "n": 24,
+          "net": -3.9662294872645,
+          "profitFactor": 0.32027133524193246,
+          "winRatePct": 20.833333333333336,
+          "long": -4.7563925370110445,
+          "short": 0.7901630497465435
+        },
+        {
+          "days": 60,
+          "n": 69,
+          "net": -19.536807421992176,
+          "profitFactor": 0.17676052097059658,
+          "winRatePct": 13.043478260869565,
+          "long": -11.897918514938757,
+          "short": -7.638888907053406
+        },
+        {
+          "days": 90,
+          "n": 93,
+          "net": -21.928031650373146,
+          "profitFactor": 0.2321541246083686,
+          "winRatePct": 13.978494623655912,
+          "long": -12.48025672141481,
+          "short": -9.447774928958323
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.17200556611116552,
+      "trendRegimes": {
+        "bull": {
+          "n": 84,
+          "net": -11.008631888280354,
+          "profitFactor": 0.49883930466222137
+        },
+        "bear": {
+          "n": 94,
+          "net": -10.83250270393602,
+          "profitFactor": 0.517394826380919
+        },
+        "mixed": {
+          "n": 61,
+          "net": -8.02186092948012,
+          "profitFactor": 0.40526188653212636
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 117,
+          "net": -15.848017523686044,
+          "profitFactor": 0.45454159962691737
+        },
+        "lowVol": {
+          "n": 122,
+          "net": -14.014977998010448,
+          "profitFactor": 0.5141401906312517
+        }
+      },
+      "trades": 239,
+      "grossPct": -15.330435009626084,
+      "netPct": -29.862995521696504,
+      "adverseNetPct": -29.880696380876163,
+      "fundingPct": 0.0024999999999997524,
+      "maxDrawdownPct": -31.009479033145823
+    },
+    {
+      "symbol": "ETH",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.008975093532760582,
+      "adverseCostPct": 0.01017682250584965,
+      "baseline": -33.95745640798408,
+      "stress": -54.260517604957656,
+      "stressPf": 0.7720576540206684,
+      "robustStress": -56.97402162619248,
+      "robustPf": 0.7626997943783048,
+      "folds": 0,
+      "is": -37.023398046506884,
+      "oos": -17.237119558450658,
+      "long": -22.450547679855664,
+      "short": -31.809969925101775,
+      "recent": [
+        {
+          "days": 30,
+          "n": 395,
+          "net": -13.009624887245309,
+          "profitFactor": 0.6264852651957002,
+          "winRatePct": 22.531645569620252,
+          "long": -6.440392532345722,
+          "short": -6.569232354899581
+        },
+        {
+          "days": 60,
+          "n": 762,
+          "net": -19.66878876095717,
+          "profitFactor": 0.7471508068145143,
+          "winRatePct": 24.409448818897637,
+          "long": -11.880429170353146,
+          "short": -7.788359590604057
+        },
+        {
+          "days": 90,
+          "n": 1117,
+          "net": -25.079915134334875,
+          "profitFactor": 0.7526905493613534,
+          "winRatePct": 24.350940017905103,
+          "long": -12.791728228708813,
+          "short": -12.288186905626096
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.03556845134494109,
+      "trendRegimes": {
+        "bull": {
+          "n": 831,
+          "net": -19.170793056983722,
+          "profitFactor": 0.7729432772729845
+        },
+        "bear": {
+          "n": 843,
+          "net": -31.069180441042793,
+          "profitFactor": 0.685446520894188
+        },
+        "mixed": {
+          "n": 584,
+          "net": -4.0205441069309416,
+          "profitFactor": 0.9266870624986446
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 778,
+          "net": -13.363285024096351,
+          "profitFactor": 0.8662667692977889
+        },
+        "lowVol": {
+          "n": 1480,
+          "net": -40.897232580861115,
+          "profitFactor": 0.7039006782675072
+        }
+      },
+      "trades": 2258,
+      "grossPct": -33.95745640798408,
+      "netPct": -54.260517604957656,
+      "adverseNetPct": -56.97402162619248,
+      "fundingPct": -0.03730000000000046,
+      "maxDrawdownPct": -57.86549135173959
+    },
+    {
+      "symbol": "GRAM",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.0416445280526175,
+      "adverseCostPct": 0.0416445280526175,
+      "baseline": -33.14417864584155,
+      "stress": -49.44400005830981,
+      "stressPf": 0.4760081769080221,
+      "robustStress": -49.44400005830981,
+      "robustPf": 0.4760081769080221,
+      "folds": 0,
+      "is": -28.533495293232043,
+      "oos": -20.91050476507775,
+      "long": -27.32440386777389,
+      "short": -22.119596190535894,
+      "recent": [
+        {
+          "days": 30,
+          "n": 41,
+          "net": -5.037180100894981,
+          "profitFactor": 0.3604308489922409,
+          "winRatePct": 17.073170731707318,
+          "long": -4.137082052620949,
+          "short": -0.9000980482740314
+        },
+        {
+          "days": 60,
+          "n": 117,
+          "net": -20.91050476507775,
+          "profitFactor": 0.29216561916120765,
+          "winRatePct": 18.803418803418804,
+          "long": -11.717885498732752,
+          "short": -9.192619266344984
+        },
+        {
+          "days": 90,
+          "n": 291,
+          "net": -43.157750697987424,
+          "profitFactor": 0.4435043160891231,
+          "winRatePct": 21.649484536082475,
+          "long": -24.50712447562763,
+          "short": -18.650626222359758
+        }
+      ],
+      "coverageDays": 180.0048611111111,
+      "meanL95": -0.1687436656403998,
+      "trendRegimes": {
+        "bull": {
+          "n": 170,
+          "net": -22.83640355747247,
+          "profitFactor": 0.4854975040490191
+        },
+        "bear": {
+          "n": 128,
+          "net": -12.146549525845607,
+          "profitFactor": 0.5890164899212814
+        },
+        "mixed": {
+          "n": 91,
+          "net": -14.4610469749917,
+          "profitFactor": 0.2918197290313731
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 186,
+          "net": -23.501335538259088,
+          "profitFactor": 0.5145641279869134
+        },
+        "lowVol": {
+          "n": 203,
+          "net": -25.942664520050684,
+          "profitFactor": 0.43538338271303334
+        }
+      },
+      "trades": 389,
+      "grossPct": -33.14417864584155,
+      "netPct": -49.44400005830981,
+      "adverseNetPct": -49.44400005830981,
+      "fundingPct": -0.10010000000000002,
+      "maxDrawdownPct": -50.18612658018362
+    },
+    {
+      "symbol": "HYPE",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.02446483180428919,
+      "adverseCostPct": 0.030343521566756557,
+      "baseline": -44.84023933423215,
+      "stress": -82.5098154810333,
+      "stressPf": 0.7009354734977754,
+      "robustStress": -91.5571190254708,
+      "robustPf": 0.6758808458280569,
+      "folds": 0,
+      "is": -60.12893198110483,
+      "oos": -22.380883499928505,
+      "long": -27.738590102454978,
+      "short": -54.77122537857831,
+      "recent": [
+        {
+          "days": 30,
+          "n": 235,
+          "net": -14.916319050196552,
+          "profitFactor": 0.517946372606356,
+          "winRatePct": 25.106382978723403,
+          "long": -7.061016415727144,
+          "short": -7.855302634469408
+        },
+        {
+          "days": 60,
+          "n": 509,
+          "net": -28.02115478849378,
+          "profitFactor": 0.6981497443300715,
+          "winRatePct": 28.487229862475445,
+          "long": -15.711578306690878,
+          "short": -12.309576481802893
+        },
+        {
+          "days": 90,
+          "n": 756,
+          "net": -34.69259082706826,
+          "profitFactor": 0.7437560054627356,
+          "winRatePct": 28.703703703703702,
+          "long": -13.292301050330032,
+          "short": -21.400289776738237
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.07327646282257042,
+      "trendRegimes": {
+        "bull": {
+          "n": 613,
+          "net": -12.086924882104336,
+          "profitFactor": 0.8834386448233579
+        },
+        "bear": {
+          "n": 559,
+          "net": -42.50608021727768,
+          "profitFactor": 0.5986624384377511
+        },
+        "mixed": {
+          "n": 367,
+          "net": -27.916810381651242,
+          "profitFactor": 0.578844052958162
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 663,
+          "net": -37.28683567654046,
+          "profitFactor": 0.7283973816336811
+        },
+        "lowVol": {
+          "n": 876,
+          "net": -45.222979804492745,
+          "profitFactor": 0.6737358790573705
+        }
+      },
+      "trades": 1539,
+      "grossPct": -44.84023933423215,
+      "netPct": -82.5098154810333,
+      "adverseNetPct": -91.5571190254708,
+      "fundingPct": -0.018200000000001812,
+      "maxDrawdownPct": -89.60094283352731
+    },
+    {
+      "symbol": "JUP",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.1099044877665775,
+      "adverseCostPct": 0.17251744778733144,
+      "baseline": -54.08982754587637,
+      "stress": -121.71378752232155,
+      "stressPf": 0.3048800760418379,
+      "robustStress": -160.22075793508506,
+      "robustPf": 0.22925416852277627,
+      "folds": 0,
+      "is": -90.21827638719479,
+      "oos": -31.495511135126716,
+      "long": -46.181183697832346,
+      "short": -75.53260382448907,
+      "recent": [
+        {
+          "days": 30,
+          "n": 20,
+          "net": -2.553841779755599,
+          "profitFactor": 0.44457207128796283,
+          "winRatePct": 25,
+          "long": -0.7560392150740401,
+          "short": -1.7978025646815592
+        },
+        {
+          "days": 60,
+          "n": 47,
+          "net": -8.251737384913358,
+          "profitFactor": 0.42120445432329534,
+          "winRatePct": 23.404255319148938,
+          "long": -1.8623064365931499,
+          "short": -6.389430948320208
+        },
+        {
+          "days": 90,
+          "n": 85,
+          "net": -15.298392624276214,
+          "profitFactor": 0.34099270960991,
+          "winRatePct": 21.176470588235293,
+          "long": -5.631089182735727,
+          "short": -9.667303441540493
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.22753965419518576,
+      "trendRegimes": {
+        "bull": {
+          "n": 168,
+          "net": -29.92027299309527,
+          "profitFactor": 0.3826250491729772
+        },
+        "bear": {
+          "n": 290,
+          "net": -62.40382301871218,
+          "profitFactor": 0.24758216526982016
+        },
+        "mixed": {
+          "n": 157,
+          "net": -29.389691510513988,
+          "profitFactor": 0.32740723730994986
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 297,
+          "net": -54.5895827420124,
+          "profitFactor": 0.3705993746204875
+        },
+        "lowVol": {
+          "n": 318,
+          "net": -67.12420478030907,
+          "profitFactor": 0.24037471946023242
+        }
+      },
+      "trades": 615,
+      "grossPct": -54.08982754587637,
+      "netPct": -121.71378752232155,
+      "adverseNetPct": -160.22075793508506,
+      "fundingPct": -0.03270000000000022,
+      "maxDrawdownPct": -125.94495511686343
+    },
+    {
+      "symbol": "LINK",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.11895213533889273,
+      "adverseCostPct": 0.12058329698949456,
+      "baseline": -11.882351274183486,
+      "stress": -81.71415471811353,
+      "stressPf": 0.26630634155404664,
+      "robustStress": -82.67164660701671,
+      "robustPf": 0.26315901793809193,
+      "folds": 0,
+      "is": -59.36813980803545,
+      "oos": -22.346014910078075,
+      "long": -32.70872873102345,
+      "short": -49.00542598709007,
+      "recent": [
+        {
+          "days": 30,
+          "n": 52,
+          "net": -5.14740875987689,
+          "profitFactor": 0.4448849037664459,
+          "winRatePct": 23.076923076923077,
+          "long": -2.1568399094735127,
+          "short": -2.990568850403377
+        },
+        {
+          "days": 60,
+          "n": 105,
+          "net": -11.517704386874833,
+          "profitFactor": 0.4696657185257361,
+          "winRatePct": 19.047619047619047,
+          "long": -7.13150014581513,
+          "short": -4.386204241059695
+        },
+        {
+          "days": 90,
+          "n": 231,
+          "net": -30.183207984161108,
+          "profitFactor": 0.33276661225805876,
+          "winRatePct": 15.151515151515152,
+          "long": -13.505567440648592,
+          "short": -16.677640543512517
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.15751805249128312,
+      "trendRegimes": {
+        "bull": {
+          "n": 195,
+          "net": -26.37231542357176,
+          "profitFactor": 0.2900782003918897
+        },
+        "bear": {
+          "n": 251,
+          "net": -37.325630188793376,
+          "profitFactor": 0.2282924787721118
+        },
+        "mixed": {
+          "n": 141,
+          "net": -18.01620910574839,
+          "profitFactor": 0.3032605271275042
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 250,
+          "net": -35.65252585304148,
+          "profitFactor": 0.2940413644338615
+        },
+        "lowVol": {
+          "n": 337,
+          "net": -46.06162886507204,
+          "profitFactor": 0.2432958224203587
+        }
+      },
+      "trades": 587,
+      "grossPct": -11.882351274183486,
+      "netPct": -81.71415471811353,
+      "adverseNetPct": -82.67164660701671,
+      "fundingPct": -0.00690000000000008,
+      "maxDrawdownPct": -83.47336440811777
+    },
+    {
+      "symbol": "LIT",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.040537801499904186,
+      "adverseCostPct": 0.045043016080371784,
+      "baseline": -61.458164359851224,
+      "stress": -131.38193414568647,
+      "stressPf": 0.7099285338665874,
+      "robustStress": -139.14892408241215,
+      "robustPf": 0.6965857470676871,
+      "folds": 0,
+      "is": -95.51206625459268,
+      "oos": -35.869867891093634,
+      "long": -73.41954402279508,
+      "short": -57.962390122891165,
+      "recent": [
+        {
+          "days": 30,
+          "n": 287,
+          "net": -26.24236322768739,
+          "profitFactor": 0.6437837855658614,
+          "winRatePct": 27.177700348432055,
+          "long": -11.522241981734066,
+          "short": -14.720121245953344
+        },
+        {
+          "days": 60,
+          "n": 565,
+          "net": -51.04668601289194,
+          "profitFactor": 0.6889464758462185,
+          "winRatePct": 25.309734513274336,
+          "long": -41.62644604554676,
+          "short": -9.420239967345147
+        },
+        {
+          "days": 90,
+          "n": 845,
+          "net": -82.50742543719711,
+          "profitFactor": 0.6668510659478782,
+          "winRatePct": 25.325443786982248,
+          "long": -53.5751095210752,
+          "short": -28.932315916121894
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.10408940577753699,
+      "trendRegimes": {
+        "bull": {
+          "n": 555,
+          "net": -52.425459305330584,
+          "profitFactor": 0.6869935165656229
+        },
+        "bear": {
+          "n": 742,
+          "net": -50.33580948404135,
+          "profitFactor": 0.7128979049144666
+        },
+        "mixed": {
+          "n": 427,
+          "net": -28.62066535631424,
+          "profitFactor": 0.7400857430064827
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 616,
+          "net": -65.87661634989104,
+          "profitFactor": 0.6549278035228026
+        },
+        "lowVol": {
+          "n": 1108,
+          "net": -65.5053177957951,
+          "profitFactor": 0.7500014306529142
+        }
+      },
+      "trades": 1724,
+      "grossPct": -61.458164359851224,
+      "netPct": -131.38193414568647,
+      "adverseNetPct": -139.14892408241215,
+      "fundingPct": -0.036600000000002714,
+      "maxDrawdownPct": -136.67475536033004
+    },
+    {
+      "symbol": "LTC",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.06653655074521189,
+      "adverseCostPct": 0.07774754262230597,
+      "baseline": -42.524938777290075,
+      "stress": -102.20392479574534,
+      "stressPf": 0.2936476983979805,
+      "robustStress": -112.26018450949863,
+      "robustPf": 0.2670175808661917,
+      "folds": 0,
+      "is": -69.46440632819706,
+      "oos": -32.73951846754813,
+      "long": -48.59053633646701,
+      "short": -53.61338845927811,
+      "recent": [
+        {
+          "days": 30,
+          "n": 38,
+          "net": -5.785868068255617,
+          "profitFactor": 0.20915900327887377,
+          "winRatePct": 21.052631578947366,
+          "long": -2.5166081107336877,
+          "short": -3.269259957521928
+        },
+        {
+          "days": 60,
+          "n": 80,
+          "net": -8.151078477360004,
+          "profitFactor": 0.3561825194078052,
+          "winRatePct": 23.75,
+          "long": -3.9674821417415354,
+          "short": -4.1835963356184696
+        },
+        {
+          "days": 90,
+          "n": 190,
+          "net": -19.613368802480355,
+          "profitFactor": 0.28926901161666,
+          "winRatePct": 16.315789473684212,
+          "long": -11.524985982184264,
+          "short": -8.088382820296106
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.1292865973761404,
+      "trendRegimes": {
+        "bull": {
+          "n": 292,
+          "net": -33.019183635556516,
+          "profitFactor": 0.2594859033001926
+        },
+        "bear": {
+          "n": 365,
+          "net": -46.22541370083907,
+          "profitFactor": 0.2604599028632875
+        },
+        "mixed": {
+          "n": 240,
+          "net": -22.959327459349566,
+          "profitFactor": 0.38933736208768177
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 404,
+          "net": -47.142462742156695,
+          "profitFactor": 0.3295711055654909
+        },
+        "lowVol": {
+          "n": 493,
+          "net": -55.061462053588436,
+          "profitFactor": 0.2596846979431952
+        }
+      },
+      "trades": 897,
+      "grossPct": -42.524938777290075,
+      "netPct": -102.20392479574534,
+      "adverseNetPct": -112.26018450949863,
+      "fundingPct": 0.004300000000000373,
+      "maxDrawdownPct": -102.20392479574534
+    },
+    {
+      "symbol": "NEAR",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.05831435079727089,
+      "adverseCostPct": 0.06378074003881486,
+      "baseline": -64.08496535679336,
+      "stress": -114.49856444563571,
+      "stressPf": 0.43318998720667984,
+      "robustStress": -119.22152475032938,
+      "robustPf": 0.4209564780586923,
+      "folds": 0,
+      "is": -80.77150892668024,
+      "oos": -33.72705551895532,
+      "long": -49.979944027089,
+      "short": -64.51862041854643,
+      "recent": [
+        {
+          "days": 30,
+          "n": 63,
+          "net": -6.715607334468846,
+          "profitFactor": 0.38947514042308756,
+          "winRatePct": 23.809523809523807,
+          "long": -2.8163358027215475,
+          "short": -3.8992715317473
+        },
+        {
+          "days": 60,
+          "n": 226,
+          "net": -25.75995576393905,
+          "profitFactor": 0.5609125381894228,
+          "winRatePct": 25.663716814159294,
+          "long": -14.03366187087278,
+          "short": -11.726293893066257
+        },
+        {
+          "days": 90,
+          "n": 298,
+          "net": -36.651763310668755,
+          "profitFactor": 0.556137301878986,
+          "winRatePct": 24.161073825503358,
+          "long": -15.80556125054625,
+          "short": -20.846202060122497
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.15824012468421356,
+      "trendRegimes": {
+        "bull": {
+          "n": 264,
+          "net": -32.51289834550226,
+          "profitFactor": 0.4878101627835129
+        },
+        "bear": {
+          "n": 400,
+          "net": -57.26572804743685,
+          "profitFactor": 0.3779594758995746
+        },
+        "mixed": {
+          "n": 200,
+          "net": -24.71993805269634,
+          "profitFactor": 0.467998097686544
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 362,
+          "net": -40.96750094818835,
+          "profitFactor": 0.5516489441155737
+        },
+        "lowVol": {
+          "n": 502,
+          "net": -73.53106349744711,
+          "profitFactor": 0.33535133294568087
+        }
+      },
+      "trades": 864,
+      "grossPct": -64.08496535679336,
+      "netPct": -114.49856444563571,
+      "adverseNetPct": -119.22152475032938,
+      "fundingPct": -0.030000000000000776,
+      "maxDrawdownPct": -115.51849773108884
+    },
+    {
+      "symbol": "PUMP",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.09671179883947126,
+      "adverseCostPct": 0.09689922480619341,
+      "baseline": -44.94817975582632,
+      "stress": -149.95709329549206,
+      "stressPf": 0.4230681105778746,
+      "robustStress": -150.1606378953522,
+      "robustPf": 0.4226555313282237,
+      "folds": 0,
+      "is": -101.09718264521308,
+      "oos": -48.85991065027898,
+      "long": -73.85412986679306,
+      "short": -76.10296342869901,
+      "recent": [
+        {
+          "days": 30,
+          "n": 95,
+          "net": -10.660863177291182,
+          "profitFactor": 0.5698701215395138,
+          "winRatePct": 22.105263157894736,
+          "long": -7.427335170235071,
+          "short": -3.2335280070561185
+        },
+        {
+          "days": 60,
+          "n": 167,
+          "net": -22.164987865600576,
+          "profitFactor": 0.5351948399174677,
+          "winRatePct": 19.760479041916167,
+          "long": -13.454901943627332,
+          "short": -8.710085921973246
+        },
+        {
+          "days": 90,
+          "n": 327,
+          "net": -49.01150719116015,
+          "profitFactor": 0.41792624029776354,
+          "winRatePct": 17.12538226299694,
+          "long": -25.997029158410463,
+          "short": -23.014478032749672
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.1608880473076899,
+      "trendRegimes": {
+        "bull": {
+          "n": 337,
+          "net": -55.53929559791115,
+          "profitFactor": 0.32765355029281434
+        },
+        "bear": {
+          "n": 463,
+          "net": -53.7591827632356,
+          "profitFactor": 0.5004367727698955
+        },
+        "mixed": {
+          "n": 286,
+          "net": -40.6586149343454,
+          "profitFactor": 0.4166970559831718
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 440,
+          "net": -51.80455389478029,
+          "profitFactor": 0.5114890513718849
+        },
+        "lowVol": {
+          "n": 646,
+          "net": -98.15253940071175,
+          "profitFactor": 0.36213148611783225
+        }
+      },
+      "trades": 1086,
+      "grossPct": -44.94817975582632,
+      "netPct": -149.95709329549206,
+      "adverseNetPct": -150.1606378953522,
+      "fundingPct": 0.02009999999999966,
+      "maxDrawdownPct": -150.88780387036655
+    },
+    {
+      "symbol": "SOL",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.011757808702046454,
+      "adverseCostPct": 0.013582158476632052,
+      "baseline": -42.567664667730604,
+      "stress": -64.61159351445144,
+      "stressPf": 0.7034483579022653,
+      "robustStress": -68.01765454360287,
+      "robustPf": 0.6913685276568544,
+      "folds": 0,
+      "is": -47.557159277705445,
+      "oos": -17.054434236746012,
+      "long": -38.95555947750491,
+      "short": -25.656034036946473,
+      "recent": [
+        {
+          "days": 30,
+          "n": 302,
+          "net": -11.500165999570443,
+          "profitFactor": 0.5669208225584623,
+          "winRatePct": 25.496688741721858,
+          "long": -8.265996811361102,
+          "short": -3.234169188209325
+        },
+        {
+          "days": 60,
+          "n": 598,
+          "net": -15.556955788262067,
+          "profitFactor": 0.7636784468236582,
+          "winRatePct": 27.257525083612038,
+          "long": -12.736480008007184,
+          "short": -2.8204757802548777
+        },
+        {
+          "days": 90,
+          "n": 901,
+          "net": -24.41773094768963,
+          "profitFactor": 0.7387574155807705,
+          "winRatePct": 26.859045504994448,
+          "long": -16.68310367104919,
+          "short": -7.734627276640426
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.04665347896207944,
+      "trendRegimes": {
+        "bull": {
+          "n": 662,
+          "net": -26.63212907421404,
+          "profitFactor": 0.6524762422660502
+        },
+        "bear": {
+          "n": 732,
+          "net": -19.727317135402707,
+          "profitFactor": 0.7774895676677941
+        },
+        "mixed": {
+          "n": 473,
+          "net": -18.252147304834622,
+          "profitFactor": 0.6528983251657668
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 689,
+          "net": -11.686456501880016,
+          "profitFactor": 0.8786042882413766
+        },
+        "lowVol": {
+          "n": 1178,
+          "net": -52.92513701257137,
+          "profitFactor": 0.5647922634276356
+        }
+      },
+      "trades": 1867,
+      "grossPct": -42.567664667730604,
+      "netPct": -64.61159351445144,
+      "adverseNetPct": -68.01765454360287,
+      "fundingPct": -0.09210000000000194,
+      "maxDrawdownPct": -65.44871635790955
+    },
+    {
+      "symbol": "TAO",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.08349009199371563,
+      "adverseCostPct": 0.08660954560920864,
+      "baseline": -8.645792491306226,
+      "stress": -27.505543373879654,
+      "stressPf": 0.5342547756397615,
+      "robustStress": -28.21365934459658,
+      "robustPf": 0.5264120654891482,
+      "folds": 0,
+      "is": -23.939229009879732,
+      "oos": -3.5663143639999344,
+      "long": -12.558169645132415,
+      "short": -14.947373728747253,
+      "recent": [
+        {
+          "days": 30,
+          "n": 11,
+          "net": -0.45321676247788817,
+          "profitFactor": 0.83815352420318,
+          "winRatePct": 18.181818181818183,
+          "long": -1.0992791424813888,
+          "short": 0.6460623800035006
+        },
+        {
+          "days": 60,
+          "n": 30,
+          "net": -0.6615424556538917,
+          "profitFactor": 0.9018442432436138,
+          "winRatePct": 36.666666666666664,
+          "long": -2.3123964433353175,
+          "short": 1.6508539876814259
+        },
+        {
+          "days": 90,
+          "n": 50,
+          "net": -1.0413172529528558,
+          "profitFactor": 0.8994220054090587,
+          "winRatePct": 36,
+          "long": -2.405301244569392,
+          "short": 1.3639839916165364
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.17950504296644365,
+      "trendRegimes": {
+        "bull": {
+          "n": 63,
+          "net": -7.710655349090573,
+          "profitFactor": 0.578908676684963
+        },
+        "bear": {
+          "n": 112,
+          "net": -11.72680995838635,
+          "profitFactor": 0.5794364743735787
+        },
+        "mixed": {
+          "n": 52,
+          "net": -8.068078066402748,
+          "profitFactor": 0.37273791454422833
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 123,
+          "net": -16.348373482725446,
+          "profitFactor": 0.5239190269453453
+        },
+        "lowVol": {
+          "n": 104,
+          "net": -11.15716989115422,
+          "profitFactor": 0.5486139591319275
+        }
+      },
+      "trades": 227,
+      "grossPct": -8.645792491306226,
+      "netPct": -27.505543373879654,
+      "adverseNetPct": -28.21365934459658,
+      "fundingPct": 0.0924999999999997,
+      "maxDrawdownPct": -28.227147461568915
+    },
+    {
+      "symbol": "UNI",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.06829233830610178,
+      "adverseCostPct": 0.07300043564775832,
+      "baseline": -19.66584998850459,
+      "stress": -71.7403117777541,
+      "stressPf": 0.4547046621880508,
+      "robustStress": -75.3278819520964,
+      "robustPf": 0.43970631748057293,
+      "folds": 0,
+      "is": -44.00392517247143,
+      "oos": -27.736386605282675,
+      "long": -26.04180277555141,
+      "short": -45.698509002202734,
+      "recent": [
+        {
+          "days": 30,
+          "n": 27,
+          "net": -4.13875893923181,
+          "profitFactor": 0.4020576338938686,
+          "winRatePct": 14.814814814814813,
+          "long": -0.5616835801653439,
+          "short": -3.5770753590664666
+        },
+        {
+          "days": 60,
+          "n": 77,
+          "net": -11.860808682599512,
+          "profitFactor": 0.3430157431520788,
+          "winRatePct": 20.77922077922078,
+          "long": -4.111046262914734,
+          "short": -7.749762419684776
+        },
+        {
+          "days": 90,
+          "n": 176,
+          "net": -22.909169984790857,
+          "profitFactor": 0.2829887414283928,
+          "winRatePct": 17.045454545454543,
+          "long": -10.740380825364738,
+          "short": -12.168789159426122
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.11390508225971557,
+      "trendRegimes": {
+        "bull": {
+          "n": 231,
+          "net": -18.665317145183444,
+          "profitFactor": 0.5479393985225531
+        },
+        "bear": {
+          "n": 340,
+          "net": -34.71774540062328,
+          "profitFactor": 0.4126338697704611
+        },
+        "mixed": {
+          "n": 191,
+          "net": -18.357249231947428,
+          "profitFactor": 0.41097319748450956
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 296,
+          "net": -24.27004155431874,
+          "profitFactor": 0.5634010463904454
+        },
+        "lowVol": {
+          "n": 466,
+          "net": -47.47027022343539,
+          "profitFactor": 0.3751728002841133
+        }
+      },
+      "trades": 762,
+      "grossPct": -19.66584998850459,
+      "netPct": -71.7403117777541,
+      "adverseNetPct": -75.3278819520964,
+      "fundingPct": -0.0356999999999998,
+      "maxDrawdownPct": -73.94853669169417
+    },
+    {
+      "symbol": "XLM",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.0415023863872094,
+      "adverseCostPct": 0.04306045930423453,
+      "baseline": -23.323335535450084,
+      "stress": -38.715920885104765,
+      "stressPf": 0.516018298892138,
+      "robustStress": -39.29396593732106,
+      "robustPf": 0.5115228176049464,
+      "folds": 0,
+      "is": -29.56475677298783,
+      "oos": -9.151164112116925,
+      "long": -20.93263186553396,
+      "short": -17.78328901957079,
+      "recent": [
+        {
+          "days": 30,
+          "n": 34,
+          "net": -2.937298850620303,
+          "profitFactor": 0.5461500879690534,
+          "winRatePct": 26.47058823529412,
+          "long": -2.3720918211891378,
+          "short": -0.5652070294311656
+        },
+        {
+          "days": 60,
+          "n": 84,
+          "net": -7.741078014757256,
+          "profitFactor": 0.5873749913572571,
+          "winRatePct": 22.61904761904762,
+          "long": -5.230041622227431,
+          "short": -2.5110363925298245
+        },
+        {
+          "days": 90,
+          "n": 172,
+          "net": -18.531267533992327,
+          "profitFactor": 0.49812707772232845,
+          "winRatePct": 21.511627906976745,
+          "long": -9.306193822509512,
+          "short": -9.22507371148283
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.14158736312703038,
+      "trendRegimes": {
+        "bull": {
+          "n": 100,
+          "net": -18.57994694043367,
+          "profitFactor": 0.25368746079510635
+        },
+        "bear": {
+          "n": 175,
+          "net": -14.030257184587018,
+          "profitFactor": 0.6316566474964275
+        },
+        "mixed": {
+          "n": 96,
+          "net": -6.105716760084064,
+          "profitFactor": 0.6410254138431773
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 218,
+          "net": -25.73042380909844,
+          "profitFactor": 0.49083692360115616
+        },
+        "lowVol": {
+          "n": 153,
+          "net": -12.985497076006327,
+          "profitFactor": 0.5592138341725075
+        }
+      },
+      "trades": 371,
+      "grossPct": -23.323335535450084,
+      "netPct": -38.715920885104765,
+      "adverseNetPct": -39.29396593732106,
+      "fundingPct": 0.004800000000000363,
+      "maxDrawdownPct": -40.30412948654379
+    },
+    {
+      "symbol": "XMR",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.0923871561954084,
+      "adverseCostPct": 0.10270372535716482,
+      "baseline": -18.86035368921635,
+      "stress": -68.25958225375986,
+      "stressPf": 0.40126656749732653,
+      "robustStress": -73.77894675529947,
+      "robustPf": 0.3773935781991707,
+      "folds": 0,
+      "is": -39.762192993984115,
+      "oos": -28.49738925977573,
+      "long": -34.03382217192164,
+      "short": -34.22576008183825,
+      "recent": [
+        {
+          "days": 30,
+          "n": 56,
+          "net": -9.62045733612829,
+          "profitFactor": 0.1308135239712012,
+          "winRatePct": 16.071428571428573,
+          "long": -4.876247935689329,
+          "short": -4.744209400438964
+        },
+        {
+          "days": 60,
+          "n": 99,
+          "net": -19.83872389269595,
+          "profitFactor": 0.13244617363272948,
+          "winRatePct": 15.151515151515152,
+          "long": -8.080123955585563,
+          "short": -11.758599937110391
+        },
+        {
+          "days": 90,
+          "n": 129,
+          "net": -21.57090673375154,
+          "profitFactor": 0.2593325339772982,
+          "winRatePct": 14.728682170542637,
+          "long": -11.996812161066408,
+          "short": -9.574094572685135
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.15615501536781032,
+      "trendRegimes": {
+        "bull": {
+          "n": 194,
+          "net": -27.42679017709814,
+          "profitFactor": 0.35107983045807667
+        },
+        "bear": {
+          "n": 196,
+          "net": -21.715454634310188,
+          "profitFactor": 0.4713585122707824
+        },
+        "mixed": {
+          "n": 145,
+          "net": -19.117337442351555,
+          "profitFactor": 0.37654434907363876
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 243,
+          "net": -33.553320080398805,
+          "profitFactor": 0.3895654951463036
+        },
+        "lowVol": {
+          "n": 292,
+          "net": -34.706262173361104,
+          "profitFactor": 0.41216021265442404
+        }
+      },
+      "trades": 535,
+      "grossPct": -18.86035368921635,
+      "netPct": -68.25958225375986,
+      "adverseNetPct": -73.77894675529947,
+      "fundingPct": 0.027899999999997295,
+      "maxDrawdownPct": -70.08720628476098
+    },
+    {
+      "symbol": "XRP",
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "costPct": 0.03481462157497609,
+      "adverseCostPct": 0.039154951237917485,
+      "baseline": -7.021864555477255,
+      "stress": -16.492941623870752,
+      "stressPf": 0.5976477374041655,
+      "robustStress": -17.673511292190817,
+      "robustPf": 0.5783257754974679,
+      "folds": 0,
+      "is": -11.707633275703829,
+      "oos": -4.785308348166929,
+      "long": -5.170967055524265,
+      "short": -11.321974568346484,
+      "recent": [
+        {
+          "days": 30,
+          "n": 26,
+          "net": -0.44728800181841927,
+          "profitFactor": 0.8331001636566775,
+          "winRatePct": 26.923076923076923,
+          "long": -0.15216202256387273,
+          "short": -0.29512597925454664
+        },
+        {
+          "days": 60,
+          "n": 52,
+          "net": -2.65669521829649,
+          "profitFactor": 0.611062849771658,
+          "winRatePct": 23.076923076923077,
+          "long": -0.6406392463137719,
+          "short": -2.0160559719827176
+        },
+        {
+          "days": 90,
+          "n": 112,
+          "net": -5.725797622609294,
+          "profitFactor": 0.5290764372583585,
+          "winRatePct": 20.535714285714285,
+          "long": -2.2069027803672463,
+          "short": -3.5188948422420485
+        }
+      ],
+      "coverageDays": 179.99930555555557,
+      "meanL95": -0.09523067412031691,
+      "trendRegimes": {
+        "bull": {
+          "n": 98,
+          "net": -7.115086575690972,
+          "profitFactor": 0.5071234733542916
+        },
+        "bear": {
+          "n": 124,
+          "net": -10.56735748408967,
+          "profitFactor": 0.5011515428686872
+        },
+        "mixed": {
+          "n": 50,
+          "net": 1.1895024359098927,
+          "profitFactor": 1.221428173724445
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 145,
+          "net": -14.718891737987382,
+          "profitFactor": 0.4199958460838216
+        },
+        "lowVol": {
+          "n": 127,
+          "net": -1.7740498858833753,
+          "profitFactor": 0.8863814052971222
+        }
+      },
+      "trades": 272,
+      "grossPct": -7.021864555477255,
+      "netPct": -16.492941623870752,
+      "adverseNetPct": -17.673511292190817,
+      "fundingPct": -0.001499999999999873,
+      "maxDrawdownPct": -16.50538846626391
+    }
+  ],
+  "portfolioQualified": [],
+  "portfolioRows": [
+    {
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "dropped": 317,
+      "maxConcurrent": 6,
+      "net": -1526.5201558672081,
+      "robustNet": -1620.7759092681044,
+      "profitFactor": 0.5262276830934924,
+      "winRatePct": 22.245367832474507,
+      "robustProfitFactor": 0.5085998820104514,
+      "drawdownUsd": -1534.4985478995693,
+      "drawdownPct": -255.74975798326156,
+      "netUsd": -1526.5201558672081,
+      "folds": 0,
+      "is": -1140.0248097551148,
+      "oos": -386.4953461121023,
+      "long": -683.370214139829,
+      "short": -843.149941727381,
+      "meanL95": -0.08874742704732527,
+      "recent": [
+        {
+          "days": 30,
+          "n": 2180,
+          "net": -143.05133344594512,
+          "profitFactor": 0.5386078173846859,
+          "winRatePct": 22.93577981651376,
+          "long": -76.66261510350913,
+          "short": -66.38871834243612
+        },
+        {
+          "days": 60,
+          "n": 4582,
+          "net": -324.3812252795507,
+          "profitFactor": 0.588071195854691,
+          "winRatePct": 24.028808380619818,
+          "long": -193.63732655419767,
+          "short": -130.74389872535227
+        },
+        {
+          "days": 90,
+          "n": 7448,
+          "net": -561.7892188808329,
+          "profitFactor": 0.553797026865129,
+          "winRatePct": 22.95918367346939,
+          "long": -297.55279921157415,
+          "short": -264.2364196692585
+        }
+      ],
+      "activeSymbols": 21,
+      "positiveSymbols": 0,
+      "dominance": 1,
+      "leaveOneOutMinNet": -1522.8441712496399,
+      "positiveMonths": 0,
+      "totalMonths": 6,
+      "trendRegimes": {
+        "bull": {
+          "n": 6270,
+          "net": -490.6733964726711,
+          "profitFactor": 0.5561974104696225
+        },
+        "bear": {
+          "n": 7384,
+          "net": -658.792658336253,
+          "profitFactor": 0.5072410912335515
+        },
+        "mixed": {
+          "n": 4588,
+          "net": -377.054101058289,
+          "profitFactor": 0.5162843080650874
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 7270,
+          "net": -635.8146711878001,
+          "profitFactor": 0.5664909088907736
+        },
+        "lowVol": {
+          "n": 10972,
+          "net": -890.705484679409,
+          "profitFactor": 0.49258670471248145
+        }
+      },
+      "trades": 18242,
+      "fundingPct": -0.19690000000001096
+    }
+  ]
+}

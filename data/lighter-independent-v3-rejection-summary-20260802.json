@@ -1,0 +1,71 @@
+{
+  "version": "lighter-independent-v3-rejection-summary-v1",
+  "generatedAt": "2026-08-02T04:20:00.000Z",
+  "decision": "reject_all",
+  "shadowAdmission": false,
+  "realAdmission": false,
+  "assumptions": {
+    "universeSize": 21,
+    "timeframesMinutes": [1, 5],
+    "positionNotionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific executable full-round-trip p95",
+    "funding": "exact Lighter hourly settlements in (entry, exit]",
+    "signalTiming": "completed bar, next-open execution",
+    "qualificationInputsMeasured": true
+  },
+  "families": [
+    {
+      "rule": "SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M",
+      "qualified1m": [],
+      "qualified5m": [],
+      "best1m": {
+        "symbol": "BNB",
+        "netPct": -5.267,
+        "profitFactor": 0.682,
+        "reason": "negative net and OOS; short side negative"
+      },
+      "best5m": {
+        "symbol": "TAO",
+        "netPct": 14.951,
+        "profitFactor": 1.285,
+        "reason": "failed high-volatility regime and recent Long-side gate"
+      }
+    },
+    {
+      "rule": "CCI20-RECLAIM100+EMA200/400+ADX18-DMI-H120M",
+      "qualified1m": [],
+      "qualified5m": [],
+      "best1m": {
+        "symbol": "SOL",
+        "netPct": 3.978,
+        "profitFactor": 1.069,
+        "reason": "PF below gate; OOS and Long side negative"
+      },
+      "best5m": {
+        "symbol": "GRAM",
+        "netPct": 3.895,
+        "profitFactor": 1.130,
+        "reason": "PF below gate; latest 30-day window negative"
+      }
+    }
+  ],
+  "sources": [
+    {
+      "path": "data/lighter-independent-v3-squeeze-universe-1m-20260802.json",
+      "sha256": "13ab0268ed0c26e8e2b6a4a8eeb0b79ef34d57e14fd46d292bf1adb3d98d394a"
+    },
+    {
+      "path": "data/lighter-independent-v3-squeeze-universe-5m-20260802.json",
+      "sha256": "62ae72770c3c73723f7b409915fab595ef7ec35c0d679a70ff56ddccdfc9a452"
+    },
+    {
+      "path": "data/lighter-independent-v3-cci-universe-1m-20260802.json",
+      "sha256": "6ec5e41b35b147ed1ece904a0694d630ea10cc6765b2e32dfe396d71b6986c67"
+    },
+    {
+      "path": "data/lighter-independent-v3-cci-universe-5m-20260802.json",
+      "sha256": "f50709746d4affcc270495f0b6374d3160d5177fce0569ae20d519524778c717"
+    }
+  ]
+}

@@ -92,6 +92,8 @@ const ENABLE_FAST_CONFLUENCE_FAMILIES =
   process.env.ENABLE_FAST_CONFLUENCE_FAMILIES === '1';
 const ENABLE_FAST_CONFLUENCE_FAMILIES_V2 =
   process.env.ENABLE_FAST_CONFLUENCE_FAMILIES_V2 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V3 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V3 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -834,6 +836,70 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.close[i]! >= a.sma20[i]!
           : a.close[i]! <= a.sma20[i]!;
+      },
+    });
+  }
+
+  // Preregistered independent v3 suite. These hypotheses intentionally use
+  // different state variables from the selected VWZ/oscillator challengers:
+  // (1) volatility-compression release with trend momentum, and (2) a CCI
+  // pullback reclaim inside an established directional trend. Parameters are
+  // frozen before the universe run, mirrored exactly for Long/Short, and use
+  // completed bars with next-open execution in simulate().
+  if (ENABLE_INDEPENDENT_FAMILIES_V3) {
+    out.push({
+      name: 'SQUEEZE20-RELEASE+STACK21/55/200+MACD-H120M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const released = a.squeeze20[i - 1] === true && a.squeeze20[i] === false;
+        if (!released) return null;
+        const longTrend = a.close[i]! > a.ema21[i]!
+          && a.ema21[i]! > a.ema55[i]!
+          && a.ema55[i]! > a.ema200[i]!
+          && a.macd[i]! > a.macdSignal[i]!;
+        const shortTrend = a.close[i]! < a.ema21[i]!
+          && a.ema21[i]! < a.ema55[i]!
+          && a.ema55[i]! < a.ema200[i]!
+          && a.macd[i]! < a.macdSignal[i]!;
+        if (longTrend) return 'long';
+        if (shortTrend) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! < a.ema21[i]!
+          : a.close[i]! > a.ema21[i]!;
+      },
+    });
+
+    out.push({
+      name: 'CCI20-RECLAIM100+EMA200/400+ADX18-DMI-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const longReclaim = a.cci20[i - 1]! < -100 && a.cci20[i]! >= -100;
+        const shortReclaim = a.cci20[i - 1]! > 100 && a.cci20[i]! <= 100;
+        if (
+          longReclaim
+          && a.close[i]! > a.ema200[i]!
+          && a.ema200[i]! > a.ema400[i]!
+          && a.adx14[i]! >= 18
+          && a.plusDi14[i]! > a.minusDi14[i]!
+        ) return 'long';
+        if (
+          shortReclaim
+          && a.close[i]! < a.ema200[i]!
+          && a.ema200[i]! < a.ema400[i]!
+          && a.adx14[i]! >= 18
+          && a.minusDi14[i]! > a.plusDi14[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.cci20[i]! >= 0 : a.cci20[i]! <= 0;
       },
     });
   }
