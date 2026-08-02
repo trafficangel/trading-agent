@@ -78,6 +78,56 @@ const NATIVE_TREND_PORTFOLIO_MARKETS = [
   { id: 'z60stack25-ena', code: '049', symbol: 'ENAUSDT', asset: 'ENA', marketId: 29 },
   { id: 'z60stack25-tao', code: '050', symbol: 'TAOUSDT', asset: 'TAO', marketId: 13 },
 ] as const;
+const NATIVE_POSITIVE_EXECUTION_PORTFOLIO_ID =
+  'z60stack25-positive-execution-portfolio';
+const NATIVE_POSITIVE_EXECUTION_PORTFOLIO_MAX_OPEN = 6;
+const NATIVE_POSITIVE_EXECUTION_PORTFOLIO_MARKETS = [
+  { id: 'z60stack25p3-btc', code: '062', symbol: 'BTCUSDT', asset: 'BTC', marketId: 1 },
+  { id: 'z60stack25p3-eth', code: '063', symbol: 'ETHUSDT', asset: 'ETH', marketId: 0 },
+  { id: 'z60stack25p3-sol', code: '064', symbol: 'SOLUSDT', asset: 'SOL', marketId: 2 },
+  { id: 'z60stack25p3-hype', code: '065', symbol: 'HYPEUSDT', asset: 'HYPE', marketId: 24 },
+  { id: 'z60stack25p3-zec', code: '066', symbol: 'ZECUSDT', asset: 'ZEC', marketId: 90 },
+  { id: 'z60stack25p3-doge', code: '067', symbol: 'DOGEUSDT', asset: 'DOGE', marketId: 3 },
+  { id: 'z60stack25p3-near', code: '068', symbol: 'NEARUSDT', asset: 'NEAR', marketId: 10 },
+  { id: 'z60stack25p3-jup', code: '069', symbol: 'JUPUSDT', asset: 'JUP', marketId: 26 },
+  { id: 'z60stack25p3-gram', code: '070', symbol: 'GRAMUSDT', asset: 'GRAM', marketId: 12 },
+  { id: 'z60stack25p3-xmr', code: '071', symbol: 'XMRUSDT', asset: 'XMR', marketId: 77 },
+] as const;
+const NATIVE_P3_PARENT_EVIDENCE_SHA256 =
+  'ef7361a77d619d39b620c0422e5e1491f5f8b1f1063f36f41c2212fd4f7c4cd3';
+const NATIVE_P3_HISTORICAL_GATE = (() => {
+  try {
+    const raw = readFileSync(resolve('data/lighter-p2-entry-delay-portfolio-20260802.json'));
+    const sha256 = createHash('sha256').update(raw).digest('hex');
+    if (sha256 !== NATIVE_P3_PARENT_EVIDENCE_SHA256) {
+      throw new Error(`P3 parent evidence hash mismatch: ${sha256}`);
+    }
+    const value = JSON.parse(raw.toString('utf8')) as {
+      positiveExecutionSubset?: {
+        memberIds?: unknown;
+        passedHistoricalLatencyGate?: unknown;
+      };
+    };
+    const expectedParentIds = NATIVE_POSITIVE_EXECUTION_PORTFOLIO_MARKETS.map(
+      (market) => market.id.replace('z60stack25p3-', 'z60stack25-'),
+    );
+    const memberIds = value.positiveExecutionSubset?.memberIds;
+    const passed = value.positiveExecutionSubset?.passedHistoricalLatencyGate === true
+      && Array.isArray(memberIds)
+      && memberIds.length === expectedParentIds.length
+      && expectedParentIds.every((id) => memberIds.includes(id));
+    return {
+      passed,
+      reasons: passed ? [] : ['P3 frozen historical/latency evidence failed'],
+    } as const;
+  } catch (error) {
+    logger.error({ error }, 'Native P3 historical evidence unavailable');
+    return {
+      passed: false,
+      reasons: ['P3 frozen historical/latency evidence unavailable'],
+    } as const;
+  }
+})();
 
 const t = (lang: Lang, ru: string, en: string): string => lang === 'en' ? en : ru;
 const LIVE_NOTIONAL_USD = 100;
@@ -869,6 +919,23 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 2.43,
     },
   })),
+  ...NATIVE_POSITIVE_EXECUTION_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
+    ...market,
+    portfolioId: NATIVE_POSITIVE_EXECUTION_PORTFOLIO_ID,
+    name: 'Portfolio P3 · Positive Execution · Z60 Stack 2.5σ',
+    stopPct: 1.5,
+    backtest: {
+      // Historical evidence motivates the candidate but never counts toward
+      // its new-ID prospective forward gate. Metrics use the frozen +1m
+      // delayed fill, measured $100 L2 p95 and exact hourly funding.
+      period: '2026-02-01 → 2026-07-31',
+      trades: 522,
+      winRatePct: 72.8,
+      profitFactor: 1.624,
+      netPct: 102.539,
+      maxDrawdownPct: 2.594,
+    },
+  })),
 ] as const;
 
 const STRATEGY_BY_ID = new Map(STRATEGIES.map((spec) => [spec.id, spec]));
@@ -876,6 +943,7 @@ const STRATEGY_IDS = STRATEGIES.map((spec) => spec.id);
 const NATIVE_STRATEGY_IDS = [
   ...NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS,
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => market.id),
+  ...NATIVE_POSITIVE_EXECUTION_PORTFOLIO_MARKETS.map((market) => market.id),
 ] as const;
 const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(NATIVE_RETIRED_STRATEGY_IDS);
 // Native Quant remains prospective Shadow-only. Historical rows stay visible,
@@ -1096,6 +1164,20 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
       noteEn: `${market.asset} leg of the unified P2 portfolio. One rule with no per-market tuning; entry requires aligned EMA200/EMA400. The portfolio passed the conservative +1m delayed-entry audit, but Real remains disabled until the combined prospective forward gate passes.`,
     },
   ])),
+  ...Object.fromEntries(NATIVE_POSITIVE_EXECUTION_PORTFOLIO_MARKETS.map((market) => [
+    market.id,
+    {
+      family: 'zscore' as const,
+      mode: 'touch' as const,
+      threshold: 2.5,
+      period: 60,
+      timeExitBars: 240,
+      trendFilter: 'ema200_400' as const,
+      realEnabled: false,
+      noteRu: `Новая нога prospective-портфеля P3 (${market.asset}). Исторический delayed-аудит мотивирует состав, но в forward-гейт идут только сделки с новым P3 ID после запуска. Real отключён.`,
+      noteEn: `New ${market.asset} leg of prospective portfolio P3. The delayed historical audit motivates the cohort, but only new-ID P3 trades after launch count toward its forward gate. Real is disabled.`,
+    },
+  ])),
 };
 
 const NATIVE_STRATEGIES = NATIVE_STRATEGY_IDS.map((id) => STRATEGY_BY_ID.get(id)!);
@@ -1108,6 +1190,42 @@ const NATIVE_TREND_PORTFOLIO_STRATEGIES = NATIVE_TREND_PORTFOLIO_MARKETS
 const NATIVE_TREND_PORTFOLIO_IDS = NATIVE_TREND_PORTFOLIO_STRATEGIES
   .map((spec) => spec.id);
 const NATIVE_TREND_PORTFOLIO_ID_SET = new Set(NATIVE_TREND_PORTFOLIO_IDS);
+const NATIVE_POSITIVE_EXECUTION_PORTFOLIO_STRATEGIES =
+  NATIVE_POSITIVE_EXECUTION_PORTFOLIO_MARKETS.map(
+    (market) => STRATEGY_BY_ID.get(market.id)!,
+  );
+const NATIVE_POSITIVE_EXECUTION_PORTFOLIO_IDS =
+  NATIVE_POSITIVE_EXECUTION_PORTFOLIO_STRATEGIES.map((spec) => spec.id);
+const NATIVE_POSITIVE_EXECUTION_PORTFOLIO_ID_SET = new Set(
+  NATIVE_POSITIVE_EXECUTION_PORTFOLIO_IDS,
+);
+const NATIVE_PORTFOLIOS = [
+  {
+    id: NATIVE_TREND_PORTFOLIO_ID,
+    label: 'P2',
+    maxOpen: NATIVE_TREND_PORTFOLIO_MAX_OPEN,
+    minUniqueSymbols: 4,
+    specs: NATIVE_TREND_PORTFOLIO_STRATEGIES,
+    ids: NATIVE_TREND_PORTFOLIO_IDS,
+    idSet: NATIVE_TREND_PORTFOLIO_ID_SET,
+  },
+  {
+    id: NATIVE_POSITIVE_EXECUTION_PORTFOLIO_ID,
+    label: 'P3',
+    maxOpen: NATIVE_POSITIVE_EXECUTION_PORTFOLIO_MAX_OPEN,
+    minUniqueSymbols: 4,
+    specs: NATIVE_POSITIVE_EXECUTION_PORTFOLIO_STRATEGIES,
+    ids: NATIVE_POSITIVE_EXECUTION_PORTFOLIO_IDS,
+    idSet: NATIVE_POSITIVE_EXECUTION_PORTFOLIO_ID_SET,
+  },
+] as const;
+const NATIVE_PORTFOLIO_BY_ID = new Map(
+  NATIVE_PORTFOLIOS.map((portfolio) => [portfolio.id, portfolio]),
+);
+const NATIVE_PORTFOLIO_BY_STRATEGY_ID = new Map(
+  NATIVE_PORTFOLIOS.flatMap((portfolio) =>
+    portfolio.ids.map((strategyId) => [strategyId, portfolio] as const)),
+);
 const NATIVE_STANDALONE_STRATEGIES = NATIVE_STRATEGIES.filter(
   (spec) => !spec.portfolioId,
 );
@@ -1120,6 +1238,9 @@ function nativeHistoricalGate(spec: StrategySpec): {
   reasons: readonly string[];
 } | null {
   if (!NATIVE_HISTORICAL_EVIDENCE) return null;
+  if (spec.portfolioId === NATIVE_POSITIVE_EXECUTION_PORTFOLIO_ID) {
+    return NATIVE_P3_HISTORICAL_GATE;
+  }
   if (spec.portfolioId === NATIVE_TREND_PORTFOLIO_ID) {
     return {
       passed: NATIVE_HISTORICAL_EVIDENCE.portfolio.passed,
@@ -1517,37 +1638,42 @@ const nativeForwardSignals = db.prepare<[string], {
     AND execution_notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
   ORDER BY received_at, id`);
 
-const nativePortfolioForwardPnls = db.prepare<string[], {
-  net_pnl_pct: number;
-  side: Side;
-  symbol: string;
-  opened_at: number;
-  closed_at: number;
-}>(`
-  SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
-  WHERE strategy_id IN (${sqlMarks(NATIVE_TREND_PORTFOLIO_IDS)})
-    AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
-    AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
-    AND funding_source = 'lighter_api_settlements'
-  ORDER BY closed_at, id`);
-const nativePortfolioForwardSignals = db.prepare<string[], {
-  capture_status: string;
-  book_age_ms: number | null;
-  bid: number | null;
-  ask: number | null;
-  buy_slippage_pct: number | null;
-  sell_slippage_pct: number | null;
-}>(`
-  SELECT capture_status, book_age_ms, bid, ask,
-         buy_slippage_pct, sell_slippage_pct
-  FROM lighter_lux_signals
-  WHERE strategy_id IN (${sqlMarks(NATIVE_TREND_PORTFOLIO_IDS)})
-    AND execution_notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
-  ORDER BY received_at, id`);
-const nativePortfolioOpenCount = db.prepare<string[], { count: number }>(`
-  SELECT COUNT(*) count FROM lighter_lux_trades
-  WHERE strategy_id IN (${sqlMarks(NATIVE_TREND_PORTFOLIO_IDS)})
-    AND closed_at IS NULL`);
+const nativePortfolioQueries = new Map(NATIVE_PORTFOLIOS.map((portfolio) => [
+  portfolio.id,
+  {
+    pnls: db.prepare<string[], {
+      net_pnl_pct: number;
+      side: Side;
+      symbol: string;
+      opened_at: number;
+      closed_at: number;
+    }>(`
+      SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
+      WHERE strategy_id IN (${sqlMarks(portfolio.ids)})
+        AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
+        AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
+        AND funding_source = 'lighter_api_settlements'
+      ORDER BY closed_at, id`),
+    signals: db.prepare<string[], {
+      capture_status: string;
+      book_age_ms: number | null;
+      bid: number | null;
+      ask: number | null;
+      buy_slippage_pct: number | null;
+      sell_slippage_pct: number | null;
+    }>(`
+      SELECT capture_status, book_age_ms, bid, ask,
+             buy_slippage_pct, sell_slippage_pct
+      FROM lighter_lux_signals
+      WHERE strategy_id IN (${sqlMarks(portfolio.ids)})
+        AND execution_notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
+      ORDER BY received_at, id`),
+    openCount: db.prepare<string[], { count: number }>(`
+      SELECT COUNT(*) count FROM lighter_lux_trades
+      WHERE strategy_id IN (${sqlMarks(portfolio.ids)})
+        AND closed_at IS NULL`),
+  },
+] as const));
 
 function evaluateForwardRows(
   pnlRows: readonly {
@@ -1581,12 +1707,17 @@ function nativeForwardGate(strategyId: string): NativeForwardGateEvaluation {
   return evaluateForwardRows(nativeForwardPnls.all(strategyId), signalRows);
 }
 
-function nativeTrendPortfolioForwardGate(): NativeForwardGateEvaluation {
+function nativePortfolioForwardGate(
+  portfolioId: (typeof NATIVE_PORTFOLIOS)[number]['id'],
+): NativeForwardGateEvaluation {
+  const portfolio = NATIVE_PORTFOLIO_BY_ID.get(portfolioId);
+  const queries = nativePortfolioQueries.get(portfolioId);
+  if (!portfolio || !queries) throw new Error(`Unknown Native portfolio: ${portfolioId}`);
   return evaluateForwardRows(
-    nativePortfolioForwardPnls.all(...NATIVE_TREND_PORTFOLIO_IDS),
-    nativePortfolioForwardSignals.all(...NATIVE_TREND_PORTFOLIO_IDS),
-    NATIVE_TREND_PORTFOLIO_MAX_OPEN,
-    4,
+    queries.pnls.all(...portfolio.ids),
+    queries.signals.all(...portfolio.ids),
+    portfolio.maxOpen,
+    portfolio.minUniqueSymbols,
   );
 }
 
@@ -1870,18 +2001,19 @@ const applyCapturedSignal = db.transaction((
       markShadowDecision.run(reason, signalId);
       return { gateBlocked: true, reason, forward };
     }
-    if (NATIVE_TREND_PORTFOLIO_ID_SET.has(spec.id)) {
-      const portfolioForward = nativeTrendPortfolioForwardGate();
+    const portfolio = NATIVE_PORTFOLIO_BY_STRATEGY_ID.get(spec.id);
+    if (portfolio) {
+      const portfolioForward = nativePortfolioForwardGate(portfolio.id);
       if (!portfolioForward.entryAllowed) {
         const reason = `native portfolio forward gate failed after ${portfolioForward.closed}: ${portfolioForward.reasons.join('; ')}`;
         markShadowDecision.run(reason, signalId);
         return { gateBlocked: true, reason, forward: portfolioForward };
       }
-      const openCount = nativePortfolioOpenCount.get(
-        ...NATIVE_TREND_PORTFOLIO_IDS,
+      const openCount = nativePortfolioQueries.get(portfolio.id)?.openCount.get(
+        ...portfolio.ids,
       )?.count ?? 0;
-      if (openCount >= NATIVE_TREND_PORTFOLIO_MAX_OPEN) {
-        const reason = `native portfolio capacity ${openCount}/${NATIVE_TREND_PORTFOLIO_MAX_OPEN}`;
+      if (openCount >= portfolio.maxOpen) {
+        const reason = `native portfolio capacity ${openCount}/${portfolio.maxOpen}`;
         markShadowDecision.run(reason, signalId);
         return { gateBlocked: true, reason, forward: portfolioForward };
       }
@@ -2075,10 +2207,11 @@ function summary(scope?: StrategySpecScope): Summary {
   const feedLive = snapshots.length === specs.length;
   const avg = (values: number[]): number | null =>
     values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-  const isTrendPortfolioScope = specs.length === NATIVE_TREND_PORTFOLIO_IDS.length
-    && specs.every((spec) => NATIVE_TREND_PORTFOLIO_ID_SET.has(spec.id));
-  const forwardGate = isTrendPortfolioScope
-    ? nativeTrendPortfolioForwardGate()
+  const scopedPortfolio = NATIVE_PORTFOLIOS.find((portfolio) =>
+    specs.length === portfolio.ids.length
+      && specs.every((spec) => portfolio.idSet.has(spec.id)));
+  const forwardGate = scopedPortfolio
+    ? nativePortfolioForwardGate(scopedPortfolio.id)
     : specs.length === 1 && NATIVE_STRATEGY_ID_SET.has(specs[0]!.id)
       ? nativeForwardGate(specs[0]!.id)
       : null;
@@ -3177,8 +3310,8 @@ export async function lighterNativeQuantHero(lang: Lang): Promise<string> {
       <div class="ll-title">${t(lang, 'Собственные стратегии · единый портфель', 'In-house strategies · unified portfolio')}</div>
       <div class="ll-sub">${t(
         lang,
-        `${NATIVE_STANDALONE_STRATEGIES.length} самостоятельных моделей + P2 на 15 рынках · чистая prospective-статистика →`,
-        `${NATIVE_STANDALONE_STRATEGIES.length} standalone models + P2 across 15 markets · clean prospective statistics →`,
+        `${NATIVE_STANDALONE_STRATEGIES.length} самостоятельных моделей + P2/P3 · чистая prospective-статистика →`,
+        `${NATIVE_STANDALONE_STRATEGIES.length} standalone models + P2/P3 · clean prospective statistics →`,
       )}</div>
     </div>
     <div class="ll-stats">
@@ -3258,8 +3391,8 @@ function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
   if (!info.trendFilter) return `${touch}${efficiency}`;
   return `${touch} ${t(
     lang,
-    'P2: Long только при close > EMA200 > EMA400; Short — зеркально ниже обеих EMA.',
-    'P2: Long only when close > EMA200 > EMA400; Short is the mirrored condition below both EMAs.',
+    'P2/P3: Long только при close > EMA200 > EMA400; Short — зеркально ниже обеих EMA.',
+    'P2/P3: Long only when close > EMA200 > EMA400; Short is the mirrored condition below both EMAs.',
   )}`;
 }
 
@@ -3353,15 +3486,20 @@ function nativeStrategyGuide(
       <span>${t(lang, info.noteRu, info.noteEn)}</span>
       <em class="${realPathOpen ? 'pass' : 'collect'}">${executionLabel}</em>
     </div>`;
-  }).join('') + (nativeSpecs.some((spec) => spec.portfolioId === NATIVE_TREND_PORTFOLIO_ID)
-    ? `<div class="ll-native-spec">
-      <b>PORTFOLIO P2 · 15 markets</b>
-      <span>TOUCH · Z60 · ±2.5σ · EMA200/400</span>
-      <span>${t(lang, 'Long: close > EMA200 > EMA400; Short: close < EMA200 < EMA400. Одно правило на всех рынках.', 'Long: close > EMA200 > EMA400; Short: close < EMA200 < EMA400. One rule across every market.')}</span>
-      <span>${t(lang, 'Выход у SMA60, stop 1.5% или через 20 часов; максимум 10 одновременных Shadow-позиций. Общий forward-гейт; Real отключён.', 'Exit at SMA60, 1.5% stop, or after 20 hours; at most 10 concurrent Shadow positions. Combined forward gate; Real disabled.')}</span>
-      <em class="collect">SHADOW ONLY</em>
-    </div>`
-    : '');
+  }).join('') + NATIVE_PORTFOLIOS.map((portfolio) =>
+    nativeSpecs.some((spec) => spec.portfolioId === portfolio.id)
+      ? `<div class="ll-native-spec">
+        <b>PORTFOLIO ${portfolio.label} · ${portfolio.specs.length} markets</b>
+        <span>TOUCH · Z60 · ±2.5σ · EMA200/400</span>
+        <span>${t(lang, 'Long: close > EMA200 > EMA400; Short: close < EMA200 < EMA400. Одно правило на всех рынках.', 'Long: close > EMA200 > EMA400; Short: close < EMA200 < EMA400. One rule across every market.')}</span>
+        <span>${t(
+          lang,
+          `Выход у SMA60, stop 1.5% или через 20 часов; максимум ${portfolio.maxOpen} одновременных Shadow-позиций. Отдельный forward-гейт; Real отключён.`,
+          `Exit at SMA60, 1.5% stop, or after 20 hours; at most ${portfolio.maxOpen} concurrent Shadow positions. Separate forward gate; Real disabled.`,
+        )}</span>
+        <em class="collect">SHADOW ONLY</em>
+      </div>`
+      : '').join('');
 
   return `<details class="ll-panel ll-details ll-native-guide" open>
     <summary>${t(lang, 'Как работают и отправляются сигналы Native Quant', 'How Native Quant signals are formed and delivered')}</summary>
@@ -3374,13 +3512,13 @@ function nativeStrategyGuide(
       <ol class="ll-guide-flow">
         <li><b>${t(lang, 'Завершённая свеча.', 'Completed candle.')}</b> ${t(
           lang,
-          'Каждые 15 секунд runner проверяет новую закрытую 5m свечу с 25-секундным запасом на публикацию. Базовые модели собирают 5m только из всех пяти 1m свечей; P2 постранично получает 1500 нативных 5m свечей и отклоняет историю с любым разрывом.',
-          'Every 15 seconds the runner checks for a newly completed 5m candle with a 25-second publication grace. Base models build 5m only from all five 1m candles; P2 paginates 1,500 native 5m candles and rejects any history containing a gap.',
+          'Каждые 15 секунд runner проверяет новую закрытую 5m свечу с 25-секундным запасом на публикацию. Базовые модели собирают 5m только из всех пяти 1m свечей; P2/P3 постранично получают 1500 нативных 5m свечей и отклоняют историю с любым разрывом.',
+          'Every 15 seconds the runner checks for a newly completed 5m candle with a 25-second publication grace. Base models build 5m only from all five 1m candles; P2/P3 paginate 1,500 native 5m candles and reject any history containing a gap.',
         )}</li>
         <li><b>${t(lang, 'Расчёт.', 'Calculation.')}</b> ${t(
           lang,
-          'STRAT-034/035/051/052/053 считают объёмно-взвешенные Z60 и VWMA60; STRAT-052 также считает ER60. STRAT-054/055 считают RSI14 и EMA400. STRAT-056 добавляет Williams %R14, STRAT-057 — MFI14 к VWZ60. Portfolio P2 считает обычные Z60/SMA60 и EMA200/EMA400. Все расчёты используют только завершённые 5m свечи.',
-          'STRAT-034/035/051/052/053 calculate volume-weighted Z60 and VWMA60; STRAT-052 also calculates ER60. STRAT-054/055 calculate RSI14 and EMA400. STRAT-056 adds Williams %R14, while STRAT-057 adds MFI14 to VWZ60. Portfolio P2 uses standard Z60/SMA60 plus EMA200/EMA400. Every calculation uses completed 5m candles only.',
+          'Standalone-модели считают свои замороженные VWZ/RSI/Bollinger‑сигналы; P2/P3 используют обычные Z60/SMA60 и EMA200/EMA400. Все расчёты используют только завершённые 5m свечи.',
+          'Standalone models calculate their frozen VWZ/RSI/Bollinger signals; P2/P3 use standard Z60/SMA60 plus EMA200/EMA400. Every calculation uses completed 5m candles only.',
         )}</li>
         <li><b>${t(lang, 'Решение.', 'Decision.')}</b> ${t(
           lang,
@@ -3399,8 +3537,8 @@ function nativeStrategyGuide(
         )}</li>
         <li><b>${t(lang, 'Real-canary и защита.', 'Real canary and protection.')}</b> ${t(
           lang,
-          'Сейчас ни одна Native‑стратегия не зарегистрирована в Real‑исполнителе. Все standalone-модели и P2 сначала должны накопить минимум 20 prospective закрытий за 7+ дней, пройти frozen‑гейт и получить ручной допуск. До этого они физически работают только в Shadow.',
-          'No Native strategy is currently registered with the Real executor. Every standalone model and P2 must first collect at least 20 prospective closes over 7+ days, pass the frozen gate, and receive manual approval. Until then they are physically Shadow-only.',
+          'Сейчас ни одна Native‑стратегия не зарегистрирована в Real‑исполнителе. Standalone, P2 и P3 должны отдельно накопить минимум 20 prospective закрытий за 7+ дней, пройти frozen‑гейт и получить ручной допуск.',
+          'No Native strategy is currently registered with the Real executor. Standalone models, P2 and P3 must separately collect at least 20 prospective closes over 7+ days, pass the frozen gate, and receive manual approval.',
         )}</li>
       </ol>
       <div class="ll-native-specs">${strategyLines}</div>
@@ -3437,33 +3575,41 @@ function strategyRows(
       <td class="${g.cls}"${combinedGateTitle ? ` title="${esc(combinedGateTitle)}"` : ''}><b>${esc(combinedGateLabel)}</b></td>
     </tr>`;
   }).join('');
-  const portfolioSpecs = specs.filter(
-    (spec) => spec.portfolioId === NATIVE_TREND_PORTFOLIO_ID,
-  );
-  if (!portfolioSpecs.length) return regularRows;
-  const s = summary(portfolioSpecs);
-  const g = gate(s, lang, true);
-  const wr = s.closed ? s.wins / s.closed * 100 : null;
-  const gateTitle = nativeGateTitle(s.forwardGate, lang);
-  const historical = historicalGateLabel(nativeHistoricalGate(portfolioSpecs[0]!), lang);
-  const combinedGateTitle = [gateTitle, historical.title].filter(Boolean).join(' ');
-  const combinedGateLabel = `${g.label} · ${historical.suffix}`;
-  const backtest = portfolioSpecs[0]!.backtest;
-  const assets = portfolioSpecs.map((spec) => spec.asset).join(' · ');
-  const tooltip = t(
-    lang,
-    `Одно фиксированное двухстороннее правило на 15 рынках без настройки по монете. Long: Z60 < −2.5 и close > EMA200 > EMA400; Short — зеркально. Выход у SMA60, stop 1.5% или через 20 часов. Издержки отбора и prospective Shadow используют один целевой размер $100: измеренный p95 полного круга и точный funding Lighter. Повторяемый 180d-прогон: 759 сделок, PF 1.46, net +125.27%, DD 2.43%. Отдельный frozen-аудит с нативным исполнением на минуту позже сохранил 80.8% результата: 744 сделки, +$90.63, PF 1.33, L95 +0.058%, DD 3.29% выделенного капитала, положительные Long/Short и окна 30/60/90d. Диагностическое исключение BNB/LTC/LIT/ENA/TAO улучшает исторический результат, но является постфактум-отбором и не заменяет P2 без нового prospective Shadow. Перенос правила на шесть внешних рынков провалился. P2 остаётся только Shadow; Real требует отдельного forward-гейта.`,
-    `One fixed two-sided rule across 15 markets with no per-market tuning. Long: Z60 < −2.5 and close > EMA200 > EMA400; Short is mirrored. Exit at SMA60, 1.5% stop, or after 20 hours. Selection and prospective Shadow use the same $100 target size with measured full-round-trip p95 and exact Lighter funding. The reproducible 180d run produced 759 trades, PF 1.46, +125.27% net and 2.43% DD. A separate frozen native audit filling one minute later retained 80.8% of baseline: 744 trades, +$90.63, PF 1.33, L95 +0.058%, 3.29% allocated-capital DD, with positive Long/Short and 30/60/90d windows. Excluding BNB/LTC/LIT/ENA/TAO improves the historical result, but that is post-hoc selection and cannot replace P2 without fresh prospective Shadow. Transfer to six external markets failed. P2 remains Shadow-only and still requires the separate forward gate for Real.`,
-  );
-  return `${regularRows}<tr>
-    <td><span class="ll-strategy-name" tabindex="0" title="${esc(tooltip)}" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>PORTFOLIO P2 · 15 markets</b><small> · Z60 Stack 2.5σ Touch</small><i>?</i></span><small>${assets}</small></td>
-    <td class="${s.feedLive ? 'pos' : 'neg'}">${s.feedLive ? 'LIVE' : 'OFF'}</td>
-    <td class="num"><b>${backtest.trades} · ${backtest.winRatePct.toFixed(1)}% · ${backtest.profitFactor.toFixed(2)}</b><small> · ${signedPct(backtest.netPct)} · DD ${backtest.maxDrawdownPct.toFixed(2)}%</small></td>
-    <td class="num"><b>${s.closed} / ${s.open}</b><small> · WR ${wr == null ? '—' : `${wr.toFixed(0)}%`} · PF ${pfLabel(s.profitFactor)}</small></td>
-    <td class="${pnlClass(s.netPct)}"><b>${signedPct(s.netPct)} · ${signedUsd(s.netUsd)}</b></td>
-    <td class="num">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}<small> · ½ ${signedPct(s.firstHalfPct)} · ½ ${signedPct(s.secondHalfPct)}</small></td>
-    <td class="${g.cls}"${combinedGateTitle ? ` title="${esc(combinedGateTitle)}"` : ''}><b>${esc(combinedGateLabel)}</b></td>
-  </tr>`;
+  const portfolioRows = NATIVE_PORTFOLIOS.map((portfolio) => {
+    const portfolioSpecs = specs.filter((spec) => spec.portfolioId === portfolio.id);
+    if (!portfolioSpecs.length) return '';
+    const s = summary(portfolioSpecs);
+    const g = gate(s, lang, true);
+    const wr = s.closed ? s.wins / s.closed * 100 : null;
+    const gateTitle = nativeGateTitle(s.forwardGate, lang);
+    const historical = historicalGateLabel(nativeHistoricalGate(portfolioSpecs[0]!), lang);
+    const combinedGateTitle = [gateTitle, historical.title].filter(Boolean).join(' ');
+    const combinedGateLabel = `${g.label} · ${historical.suffix}`;
+    const backtest = portfolioSpecs[0]!.backtest;
+    const assets = portfolioSpecs.map((spec) => spec.asset).join(' · ');
+    const isP3 = portfolio.id === NATIVE_POSITIVE_EXECUTION_PORTFOLIO_ID;
+    const tooltip = isP3
+      ? t(
+        lang,
+        `Новый prospective P3: то же фиксированное двухстороннее правило P2, но только 10 рынков и полностью новые ID. Исторический +1m delayed-аудит: 522 сделки, +102.54%, PF 1.62, L95 +0.124%, DD 2.59% мощности, Long +65.71%, Short +36.83%, 10/10 рынков положительны. Состав выбран после исторического анализа, поэтому эти цифры только мотивируют гипотезу и не считаются forward. Real запрещён до 20 новых закрытий за 7+ дней и полного frozen-гейта.`,
+        `New prospective P3: the same fixed two-sided P2 rule across 10 markets with entirely new IDs. Historical +1m delayed audit: 522 trades, +102.54%, PF 1.62, L95 +0.124%, 2.59% capacity DD, Long +65.71%, Short +36.83%, and 10/10 positive markets. Because the cohort was selected after historical analysis, these metrics motivate the hypothesis only and do not count as forward evidence. Real is blocked until 20 fresh closes over 7+ days pass the full frozen gate.`,
+      )
+      : t(
+        lang,
+        `Одно фиксированное двухстороннее правило на 15 рынках без настройки по монете. Long: Z60 < −2.5 и close > EMA200 > EMA400; Short — зеркально. Выход у SMA60, stop 1.5% или через 20 часов. Frozen +1m delayed-аудит: 744 сделки, +$90.63, PF 1.33, L95 +0.058%, DD 3.29% мощности. P2 остаётся контрольным Shadow-портфелем; Real требует отдельного forward-гейта.`,
+        `One fixed two-sided rule across 15 markets with no per-market tuning. Long: Z60 < −2.5 and close > EMA200 > EMA400; Short is mirrored. Exit at SMA60, 1.5% stop, or after 20 hours. Frozen +1m delayed audit: 744 trades, +$90.63, PF 1.33, L95 +0.058%, and 3.29% capacity DD. P2 remains the control Shadow portfolio; Real requires its own forward gate.`,
+      );
+    return `<tr>
+      <td><span class="ll-strategy-name" tabindex="0" title="${esc(tooltip)}" data-tooltip="${esc(tooltip)}" aria-label="${esc(tooltip)}"><b>PORTFOLIO ${portfolio.label} · ${portfolioSpecs.length} markets</b><small> · Z60 Stack 2.5σ Touch</small><i>?</i></span><small>${assets}</small></td>
+      <td class="${s.feedLive ? 'pos' : 'neg'}">${s.feedLive ? 'LIVE' : 'OFF'}</td>
+      <td class="num"><b>${backtest.trades} · ${backtest.winRatePct.toFixed(1)}% · ${backtest.profitFactor.toFixed(2)}</b><small> · ${signedPct(backtest.netPct)} · DD ${backtest.maxDrawdownPct.toFixed(2)}%</small></td>
+      <td class="num"><b>${s.closed} / ${s.open}</b><small> · WR ${wr == null ? '—' : `${wr.toFixed(0)}%`} · PF ${pfLabel(s.profitFactor)}</small></td>
+      <td class="${pnlClass(s.netPct)}"><b>${signedPct(s.netPct)} · ${signedUsd(s.netUsd)}</b></td>
+      <td class="num">${s.closed ? `−${s.maxDrawdownPct.toFixed(3)}%` : '—'}<small> · ½ ${signedPct(s.firstHalfPct)} · ½ ${signedPct(s.secondHalfPct)}</small></td>
+      <td class="${g.cls}"${combinedGateTitle ? ` title="${esc(combinedGateTitle)}"` : ''}><b>${esc(combinedGateLabel)}</b></td>
+    </tr>`;
+  }).join('');
+  return `${regularRows}${portfolioRows}`;
 }
 
 function openTradeMark(row: TradeRow): {
@@ -3924,8 +4070,8 @@ async function render(
     : requested.group === 'native'
       ? t(
         lang,
-        `${NATIVE_STANDALONE_STRATEGIES.length} самостоятельных + P2 · 15 рынков`,
-        `${NATIVE_STANDALONE_STRATEGIES.length} standalone + P2 · 15 markets`,
+        `${NATIVE_STANDALONE_STRATEGIES.length} самостоятельных + P2/P3 · 15 рынков`,
+        `${NATIVE_STANDALONE_STRATEGIES.length} standalone + P2/P3 · 15 markets`,
       )
       : [...new Set(scopeSpecs.map((spec) => spec.asset))].join(' · ');
   const scopeMarketCount = new Set(scopeSpecs.map((spec) => spec.marketId)).size;
@@ -3988,7 +4134,7 @@ async function render(
   const pageBadge = requested.strategy
     ? `STRAT-${requested.strategy.code} · ${requested.strategy.asset} · 5M · NATIVE LIGHTER`
     : requested.group === 'native'
-      ? `NATIVE LIGHTER · ${displayModelCount} MODELS · P2 SHADOW`
+      ? `NATIVE LIGHTER · ${displayModelCount} MODELS · P2/P3 SHADOW`
       : `STRAT-${scopeSpecs.map((spec) => spec.code).join(' · ')} · PROSPECTIVE FORWARD`;
   const pageDescription = requested.strategy
     ? (NATIVE_LIVE_STRATEGY_IDS as readonly string[]).includes(requested.strategy.id)
@@ -4046,11 +4192,11 @@ async function render(
       ? t(
         lang,
         enabledLiveStrategies > 0
-          ? `Новые Real-входы разрешены у ${enabledLiveStrategies} стратегий, прошедших отдельный допуск. Остальные Native-модели, включая P2, копят prospective Shadow. На каждую открытую Real-позицию сразу ставится биржевой reduce-only stop.`
-          : 'Все новые Real-входы Native Quant сейчас на паузе до 20 закрытых prospective-сделок и прохождения frozen-гейтов. Уже открытая позиция остаётся под биржевым reduce-only stop и штатным сопровождением; P2 и остальные модели продолжают Shadow.',
+          ? `Новые Real-входы разрешены у ${enabledLiveStrategies} стратегий, прошедших отдельный допуск. Остальные Native-модели, включая P2/P3, копят prospective Shadow. На каждую открытую Real-позицию сразу ставится биржевой reduce-only stop.`
+          : 'Все новые Real-входы Native Quant сейчас на паузе до прохождения frozen-гейтов; P2, P3 и остальные модели продолжают Shadow.',
         enabledLiveStrategies > 0
-          ? `New Real entries are enabled for ${enabledLiveStrategies} separately promoted strategies. All other Native models, including P2, continue collecting prospective Shadow evidence. Every open Real position receives an exchange-native reduce-only stop immediately.`
-          : 'All new Native Quant Real entries are currently paused until 20 prospective closes pass the frozen gates. Any existing position remains protected by its exchange-native reduce-only stop and normal monitoring; P2 and the other models continue in Shadow.',
+          ? `New Real entries are enabled for ${enabledLiveStrategies} separately promoted strategies. All other Native models, including P2/P3, continue collecting prospective Shadow evidence. Every open Real position receives an exchange-native reduce-only stop immediately.`
+          : 'All new Native Quant Real entries are paused until the frozen gates pass; P2, P3 and the other models continue in Shadow.',
       )
       : t(
         lang,
@@ -4112,8 +4258,8 @@ async function render(
       <p class="ll-note">${requested.group === 'native'
         ? t(
           lang,
-          'Native forward-гейт: ≥20 закрытых и сверенных сделок, net после фактических spread/slippage и точных часовых settlements funding > 0%, PF ≥1.20, обе половины >0%, max DD ≤5% выделенной мощности, ошибки снимка ≤2%, полный execution-sample на каждую закрытую сделку и p95 возраста стакана ≤2с. Несверенный funding не попадает в гейт. Для P2 мощность заранее зафиксирована как 10 одновременных позиций. Универсального лимита издержек нет: их влияние уже отражено в net PnL. При провале новые Shadow-входы останавливаются автоматически; выходы остаются активны.',
-          'Native forward gate: ≥20 closed and reconciled trades, net after actual spread/slippage and exact hourly funding settlements > 0%, PF ≥1.20, both halves >0%, max DD ≤5% of allocated capacity, capture errors ≤2%, a complete execution sample for every closed trade, and book-age p95 ≤2s. Unreconciled funding is excluded from the gate. P2 capacity is frozen at 10 concurrent positions. There is no universal cost ceiling because its impact is already embedded in net PnL. A failure automatically pauses new Shadow entries while exits remain active.',
+          'Native forward-гейт: ≥20 закрытых и сверенных сделок за 7+ дней, net после фактических spread/slippage и точного funding > 0%, PF ≥1.20, обе половины >0%, max DD ≤5% выделенной мощности, ошибки снимка ≤2% и p95 возраста стакана ≤2с. P2 ограничен 10, P3 — 6 одновременными позициями. При провале новые Shadow-входы останавливаются, выходы остаются активны.',
+          'Native forward gate: ≥20 closed and reconciled trades over 7+ days, net after actual spread/slippage and exact funding > 0%, PF ≥1.20, both halves >0%, max DD ≤5% of allocated capacity, capture errors ≤2%, and book-age p95 ≤2s. P2 is capped at 10 and P3 at 6 concurrent positions. A failure pauses new Shadow entries while exits remain active.',
         )
         : t(lang, 'Гейт: ≥20 закрытых Lighter-forward сделок, net > 0%, PF ≥1.20, обе половины >0%.', 'Gate: ≥20 closed Lighter-forward trades, net > 0%, PF ≥1.20, and both halves >0%.')}</p></div>
 

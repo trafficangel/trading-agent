@@ -46,6 +46,14 @@ const P2_IDS = [
   'z60stack25-jup', 'z60stack25-lit', 'z60stack25-gram',
   'z60stack25-xmr', 'z60stack25-ena', 'z60stack25-tao',
 ] as const;
+const P3_IDS = [
+  'z60stack25p3-btc', 'z60stack25p3-eth', 'z60stack25p3-sol',
+  'z60stack25p3-hype', 'z60stack25p3-zec', 'z60stack25p3-doge',
+  'z60stack25p3-near', 'z60stack25p3-jup', 'z60stack25p3-gram',
+  'z60stack25p3-xmr',
+] as const;
+const P3_PARENT_IDS = P3_IDS.map((id) => id.replace('z60stack25p3-', 'z60stack25-'));
+const RUNNER_REQUIRED_IDS = [...SHADOW_NATIVE_IDS, ...P2_IDS, ...P3_IDS];
 
 type LatencyEvidenceRow = {
   strategyId: string;
@@ -93,6 +101,19 @@ type P2LatencyEvidence = {
     memberIds: string[];
     excludedMemberIds: string[];
     passedHistoricalLatencyGate: boolean;
+    delayed: {
+      trades: number;
+      netPctUnits: number;
+      netUsd: number;
+      profitFactor: number;
+      maxDrawdownCapitalPct: number;
+      meanL95Pct: number;
+      positiveFolds: number;
+      longPctUnits: number;
+      shortPctUnits: number;
+      positiveSymbols: number;
+      activeSymbols: number;
+    };
   };
   realPromotion: boolean;
 };
@@ -267,6 +288,13 @@ if (p2LatencyEvidence.allMembers.memberIds.length !== P2_IDS.length
     || P2_IDS.some((id) => !p2LatencyEvidence.allMembers.memberIds.includes(id))) {
   throw new Error('P2 latency evidence members mismatch');
 }
+if (!p2LatencyEvidence.positiveExecutionSubset.passedHistoricalLatencyGate
+    || p2LatencyEvidence.positiveExecutionSubset.memberIds.length !== P3_PARENT_IDS.length
+    || P3_PARENT_IDS.some(
+      (id) => !p2LatencyEvidence.positiveExecutionSubset.memberIds.includes(id),
+    )) {
+  throw new Error('P3 frozen parent evidence members/gate mismatch');
+}
 const historicalEvidence = evaluateNativeHistoricalEvidence(
   JSON.parse(readFileSync(historicalPath, 'utf8')) as unknown,
   JSON.parse(readFileSync(supplementalHistoricalPath, 'utf8')) as unknown,
@@ -282,7 +310,7 @@ const runnerStatusRaw = db.prepare<[string], { value: string }>(`
 `).get(LIGHTER_NATIVE_RUNNER_STATUS_KEY)?.value ?? null;
 const runnerLiveness = evaluateNativeRunnerLiveness(
   parseNativeRunnerStatus(runnerStatusRaw),
-  SHADOW_NATIVE_IDS,
+  RUNNER_REQUIRED_IDS,
   Date.now(),
 );
 const pnlStatement = db.prepare<[string], NativeForwardPnlRow>(`
@@ -309,6 +337,20 @@ const portfolioSignals = db.prepare<string[], NativeForwardSignalRow>(`
          buy_slippage_pct, sell_slippage_pct
   FROM lighter_lux_signals
   WHERE strategy_id IN (${sqlMarks(P2_IDS.length)})
+    AND execution_notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
+  ORDER BY received_at, id`);
+const p3PortfolioPnls = db.prepare<string[], NativeForwardPnlRow>(`
+  SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
+  WHERE strategy_id IN (${sqlMarks(P3_IDS.length)})
+    AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
+    AND closed_at IS NOT NULL AND net_pnl_pct IS NOT NULL
+    AND funding_source = 'lighter_api_settlements'
+  ORDER BY closed_at, id`);
+const p3PortfolioSignals = db.prepare<string[], NativeForwardSignalRow>(`
+  SELECT capture_status, book_age_ms, bid, ask,
+         buy_slippage_pct, sell_slippage_pct
+  FROM lighter_lux_signals
+  WHERE strategy_id IN (${sqlMarks(P3_IDS.length)})
     AND execution_notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
   ORDER BY received_at, id`);
 
@@ -341,6 +383,12 @@ const portfolio = evaluateNativeForwardRows(
   10,
   4,
 );
+const p3Portfolio = evaluateNativeForwardRows(
+  p3PortfolioPnls.all(...P3_IDS),
+  p3PortfolioSignals.all(...P3_IDS),
+  6,
+  4,
+);
 
 const evaluatedStrategies = strategies.map((row) => ({
   ...row,
@@ -366,8 +414,24 @@ const p2Members = P2_IDS.map((strategyId) => {
     ),
   };
 });
+const p3Members = P3_IDS.map((strategyId) => {
+  const evaluation = evaluateNativeForwardRows(
+    pnlStatement.all(strategyId),
+    signalStatement.all(strategyId),
+  );
+  return {
+    strategyId,
+    realExecutorRegistered: false,
+    evaluation,
+    decision: nativePromotionDecision(
+      evaluation,
+      false,
+      p2LatencyEvidence.positiveExecutionSubset.passedHistoricalLatencyGate,
+    ),
+  };
+});
 db.close();
-const pausedShadowStrategyIds = [...evaluatedStrategies, ...p2Members]
+const pausedShadowStrategyIds = [...evaluatedStrategies, ...p2Members, ...p3Members]
   .filter((row) => row.decision.shadowAction === 'pause_new_entries')
   .map((row) => row.strategyId);
 const eligibleStrategyIds = evaluatedStrategies
@@ -381,7 +445,7 @@ const eligibleStrategyIds = evaluatedStrategies
   .map((row) => row.strategyId);
 const generatedAt = new Date().toISOString();
 const report = {
-  version: 'lighter-native-promotion-audit-v4',
+  version: 'lighter-native-promotion-audit-v5',
   generatedAt,
   databasePath,
   gate: NATIVE_FORWARD_GATE,
@@ -434,6 +498,22 @@ const report = {
       historicalEvidence.portfolio.passed && p2LatencyEvidence.allMembers.passed,
     ),
     members: p2Members,
+  },
+  p3: {
+    portfolioId: 'z60stack25-positive-execution-portfolio',
+    status: 'fresh_prospective_shadow_only',
+    parentPortfolioId: 'z60stack25-portfolio',
+    parentSelectionStatus: p2LatencyEvidence.positiveExecutionSubset.status,
+    historicalRowsCountTowardForward: false,
+    realExecutorRegistered: false,
+    historicalLatencyEvidence: p2LatencyEvidence.positiveExecutionSubset,
+    evaluation: p3Portfolio,
+    decision: nativePromotionDecision(
+      p3Portfolio,
+      false,
+      p2LatencyEvidence.positiveExecutionSubset.passedHistoricalLatencyGate,
+    ),
+    members: p3Members,
   },
   strategies: evaluatedStrategies,
   pausedShadowStrategyIds,

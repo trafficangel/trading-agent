@@ -1,0 +1,546 @@
+{
+  "version": "lighter-native-sweep-v2",
+  "generatedAt": "2026-08-02T06:35:46.714Z",
+  "input": {
+    "symbols": [
+      "ADA",
+      "ZEC"
+    ],
+    "candleSources": {
+      "ADA": "direct",
+      "ZEC": "direct"
+    },
+    "barMinutes": 1,
+    "lookbackDays": 180,
+    "ruleFilter": "V11-",
+    "positionNotionalUsd": 100,
+    "portfolioMaxOpen": 6,
+    "executionCosts": "market-specific executable $100 full-round-trip p95",
+    "adverseExecution": "market-specific observed maximum; non-blocking sensitivity",
+    "funding": "exact Lighter hourly settlements in (entry, exit]",
+    "fundingHistoryFiles": [
+      "/private/tmp/trading-agent-lighter-quant-strategy/data/lighter-funding-history-v10-holdout-20260802.json"
+    ],
+    "fundingCoverage": {
+      "ADA": {
+        "points": 722,
+        "internalCoverage": 0.9986168741355463,
+        "firstTimestampMs": 1782817200000,
+        "lastTimestampMs": 1785416400000
+      },
+      "ZEC": {
+        "points": 4354,
+        "internalCoverage": 0.9986238532110092,
+        "firstTimestampMs": 1769936400000,
+        "lastTimestampMs": 1785628800000
+      }
+    },
+    "qualificationInputsMeasured": true,
+    "usedFallbackExecutionCost": false,
+    "usedFallbackFunding": false
+  },
+  "qualified": [],
+  "rows": [
+    {
+      "symbol": "ADA",
+      "rule": "V11-STOCHRSI14-3/3-X20/80+EMA400-EXIT50-H120M",
+      "costPct": 0.08922994556972337,
+      "adverseCostPct": 0.10706638115630843,
+      "baseline": 12.500702449690607,
+      "stress": -115.92338922514172,
+      "stressPf": 0.3728539009109382,
+      "robustStress": -141.59002003423777,
+      "robustPf": 0.304159932090808,
+      "folds": 0,
+      "is": -80.30292940486027,
+      "oos": -35.620459820281006,
+      "long": -54.31772206214254,
+      "short": -61.60566716299814,
+      "recent": [
+        {
+          "days": 30,
+          "n": 1439,
+          "net": -115.92338922514172,
+          "profitFactor": 0.3728539009109382,
+          "winRatePct": 28.769979152189016,
+          "long": -54.31772206214254,
+          "short": -61.60566716299814
+        },
+        {
+          "days": 60,
+          "n": 1439,
+          "net": -115.92338922514172,
+          "profitFactor": 0.3728539009109382,
+          "winRatePct": 28.769979152189016,
+          "long": -54.31772206214254,
+          "short": -61.60566716299814
+        },
+        {
+          "days": 90,
+          "n": 1439,
+          "net": -115.92338922514172,
+          "profitFactor": 0.3728539009109382,
+          "winRatePct": 28.769979152189016,
+          "long": -54.31772206214254,
+          "short": -61.60566716299814
+        }
+      ],
+      "coverageDays": 30.088194444444444,
+      "meanL95": -0.09183159959493982,
+      "trendRegimes": {
+        "bull": {
+          "n": 479,
+          "net": -35.81544021542506,
+          "profitFactor": 0.4977248771056705
+        },
+        "bear": {
+          "n": 522,
+          "net": -41.34453926854534,
+          "profitFactor": 0.28052105655952686
+        },
+        "mixed": {
+          "n": 438,
+          "net": -38.76340974117064,
+          "profitFactor": 0.30868189592003514
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 618,
+          "net": -44.51677169265665,
+          "profitFactor": 0.4945053552243312
+        },
+        "lowVol": {
+          "n": 821,
+          "net": -71.4066175324842,
+          "profitFactor": 0.26215266786225494
+        }
+      },
+      "trades": 1439,
+      "grossPct": 12.500702449690607,
+      "netPct": -115.92338922514172,
+      "adverseNetPct": -141.59002003423777,
+      "fundingPct": -0.02219999999999936,
+      "maxDrawdownPct": -115.92338922514172
+    },
+    {
+      "symbol": "ADA",
+      "rule": "V11-TSI25/13-X7-EXT20+EMA400-EXIT0-H120M",
+      "costPct": 0.08922994556972337,
+      "adverseCostPct": 0.10706638115630843,
+      "baseline": 4.743861672360789,
+      "stress": -23.561231073241512,
+      "stressPf": 0.43887543428962544,
+      "robustStress": -29.21538115418898,
+      "robustPf": 0.35960320234696996,
+      "folds": 0,
+      "is": -18.870317270562865,
+      "oos": -4.690913802678655,
+      "long": -10.2005078562478,
+      "short": -13.360723216993724,
+      "recent": [
+        {
+          "days": 30,
+          "n": 317,
+          "net": -23.561231073241512,
+          "profitFactor": 0.43887543428962544,
+          "winRatePct": 36.59305993690852,
+          "long": -10.2005078562478,
+          "short": -13.360723216993724
+        },
+        {
+          "days": 60,
+          "n": 317,
+          "net": -23.561231073241512,
+          "profitFactor": 0.43887543428962544,
+          "winRatePct": 36.59305993690852,
+          "long": -10.2005078562478,
+          "short": -13.360723216993724
+        },
+        {
+          "days": 90,
+          "n": 317,
+          "net": -23.561231073241512,
+          "profitFactor": 0.43887543428962544,
+          "winRatePct": 36.59305993690852,
+          "long": -10.2005078562478,
+          "short": -13.360723216993724
+        }
+      ],
+      "coverageDays": 30.088194444444444,
+      "meanL95": -0.10155533878372475,
+      "trendRegimes": {
+        "bull": {
+          "n": 100,
+          "net": -6.138449299422342,
+          "profitFactor": 0.47671592712422983
+        },
+        "bear": {
+          "n": 103,
+          "net": -11.299135977240612,
+          "profitFactor": 0.301500713077844
+        },
+        "mixed": {
+          "n": 114,
+          "net": -6.12364579657857,
+          "profitFactor": 0.5651554169798716
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 142,
+          "net": -12.410623969717154,
+          "profitFactor": 0.38607731784361626
+        },
+        "lowVol": {
+          "n": 175,
+          "net": -11.15060710352436,
+          "profitFactor": 0.4878939091918649
+        }
+      },
+      "trades": 317,
+      "grossPct": 4.743861672360789,
+      "netPct": -23.561231073241512,
+      "adverseNetPct": -29.21538115418898,
+      "fundingPct": -0.01919999999999978,
+      "maxDrawdownPct": -25.829446573532085
+    },
+    {
+      "symbol": "ZEC",
+      "rule": "V11-STOCHRSI14-3/3-X20/80+EMA400-EXIT50-H120M",
+      "costPct": 0.0522698904826598,
+      "adverseCostPct": 0.06160533970789347,
+      "baseline": 103.19377200793183,
+      "stress": -393.6237467011954,
+      "stressPf": 0.7525501013635417,
+      "robustStress": -482.38519793472403,
+      "robustPf": 0.7047717727758674,
+      "folds": 0,
+      "is": -256.1050409687961,
+      "oos": -137.51870573240132,
+      "long": -182.84265115553396,
+      "short": -210.78109554566353,
+      "recent": [
+        {
+          "days": 30,
+          "n": 1519,
+          "net": -73.75569385619036,
+          "profitFactor": 0.6179811579499409,
+          "winRatePct": 50.69124423963134,
+          "long": -32.890860033119054,
+          "short": -40.864833823071294
+        },
+        {
+          "days": 60,
+          "n": 3206,
+          "net": -148.72597163825495,
+          "profitFactor": 0.7315524609940844,
+          "winRatePct": 52.12102308172177,
+          "long": -67.47822729654803,
+          "short": -81.24774434170705
+        },
+        {
+          "days": 90,
+          "n": 4845,
+          "net": -214.88241559953966,
+          "profitFactor": 0.7482305485500976,
+          "winRatePct": 52.34262125902993,
+          "long": -104.0334604561207,
+          "short": -110.84895514341842
+        }
+      ],
+      "coverageDays": 180,
+      "meanL95": -0.04880244692005035,
+      "trendRegimes": {
+        "bull": {
+          "n": 3175,
+          "net": -101.87123817316028,
+          "profitFactor": 0.8210286961903812
+        },
+        "bear": {
+          "n": 3477,
+          "net": -168.8969899551586,
+          "profitFactor": 0.7079629155078216
+        },
+        "mixed": {
+          "n": 2856,
+          "net": -122.85551857287928,
+          "profitFactor": 0.7227837665809378
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 4125,
+          "net": -185.43725553094274,
+          "profitFactor": 0.7764707917799069
+        },
+        "lowVol": {
+          "n": 5383,
+          "net": -208.18649117025453,
+          "profitFactor": 0.7264779931198939
+        }
+      },
+      "trades": 9508,
+      "grossPct": 103.19377200793183,
+      "netPct": -393.6237467011954,
+      "adverseNetPct": -482.38519793472403,
+      "fundingPct": 0.16460000000000122,
+      "maxDrawdownPct": -394.46089426465437
+    },
+    {
+      "symbol": "ZEC",
+      "rule": "V11-TSI25/13-X7-EXT20+EMA400-EXIT0-H120M",
+      "costPct": 0.0522698904826598,
+      "adverseCostPct": 0.06160533970789347,
+      "baseline": 46.29730712199851,
+      "stress": -6.792741389349207,
+      "stressPf": 0.97092560438852,
+      "robustStress": -16.296228700637066,
+      "robustPf": 0.9312284625157277,
+      "folds": 1,
+      "is": -15.934467406528828,
+      "oos": 9.14172601717964,
+      "long": 2.1580830031445792,
+      "short": -8.950824392493777,
+      "recent": [
+        {
+          "days": 30,
+          "n": 173,
+          "net": 1.7963137875930202,
+          "profitFactor": 1.0743200185516504,
+          "winRatePct": 68.20809248554913,
+          "long": 6.01318810330256,
+          "short": -4.21687431570954
+        },
+        {
+          "days": 60,
+          "n": 341,
+          "net": 15.436390767356551,
+          "profitFactor": 1.2453768236936373,
+          "winRatePct": 67.74193548387096,
+          "long": 17.73063484806967,
+          "short": -2.294244080713138
+        },
+        {
+          "days": 90,
+          "n": 517,
+          "net": 9.633525524450917,
+          "profitFactor": 1.0860715315812668,
+          "winRatePct": 66.34429400386847,
+          "long": 12.918114074885299,
+          "short": -3.2845885504343904
+        }
+      ],
+      "coverageDays": 180,
+      "meanL95": -0.038538540846328,
+      "trendRegimes": {
+        "bull": {
+          "n": 277,
+          "net": -6.694912176771939,
+          "profitFactor": 0.9028394021416372
+        },
+        "bear": {
+          "n": 271,
+          "net": -4.075908765404396,
+          "profitFactor": 0.9326334092096952
+        },
+        "mixed": {
+          "n": 470,
+          "net": 3.9780795528271433,
+          "profitFactor": 1.0381685326226822
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 392,
+          "net": -18.837197039306787,
+          "profitFactor": 0.8296411070067113
+        },
+        "lowVol": {
+          "n": 626,
+          "net": 12.04445564995759,
+          "profitFactor": 1.097875056224678
+        }
+      },
+      "trades": 1018,
+      "grossPct": 46.29730712199851,
+      "netPct": -6.792741389349207,
+      "adverseNetPct": -16.296228700637066,
+      "fundingPct": 0.12070000000000022,
+      "maxDrawdownPct": -28.42817992351718
+    }
+  ],
+  "portfolioQualified": [],
+  "portfolioRows": [
+    {
+      "rule": "V11-STOCHRSI14-3/3-X20/80+EMA400-EXIT50-H120M",
+      "dropped": 0,
+      "maxConcurrent": 1,
+      "net": -393.6237467011954,
+      "robustNet": -482.38519793472403,
+      "profitFactor": 0.7525501013635417,
+      "winRatePct": 52.092974337400086,
+      "robustProfitFactor": 0.7047717727758674,
+      "drawdownUsd": -394.46089426465437,
+      "drawdownPct": -394.46089426465437,
+      "netUsd": -393.6237467011954,
+      "folds": 0,
+      "is": -256.1050409687961,
+      "oos": -137.51870573240132,
+      "long": -182.84265115553396,
+      "short": -210.78109554566353,
+      "meanL95": -0.04880244692005035,
+      "recent": [
+        {
+          "days": 30,
+          "n": 1519,
+          "net": -73.75569385619036,
+          "profitFactor": 0.6179811579499409,
+          "winRatePct": 50.69124423963134,
+          "long": -32.890860033119054,
+          "short": -40.864833823071294
+        },
+        {
+          "days": 60,
+          "n": 3206,
+          "net": -148.72597163825495,
+          "profitFactor": 0.7315524609940844,
+          "winRatePct": 52.12102308172177,
+          "long": -67.47822729654803,
+          "short": -81.24774434170705
+        },
+        {
+          "days": 90,
+          "n": 4845,
+          "net": -214.88241559953966,
+          "profitFactor": 0.7482305485500976,
+          "winRatePct": 52.34262125902993,
+          "long": -104.0334604561207,
+          "short": -110.84895514341842
+        }
+      ],
+      "activeSymbols": 1,
+      "positiveSymbols": 0,
+      "dominance": 1,
+      "leaveOneOutMinNet": 0,
+      "positiveMonths": 0,
+      "totalMonths": 7,
+      "trendRegimes": {
+        "bull": {
+          "n": 3175,
+          "net": -101.87123817316028,
+          "profitFactor": 0.8210286961903812
+        },
+        "bear": {
+          "n": 3477,
+          "net": -168.8969899551586,
+          "profitFactor": 0.7079629155078216
+        },
+        "mixed": {
+          "n": 2856,
+          "net": -122.85551857287928,
+          "profitFactor": 0.7227837665809378
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 4125,
+          "net": -185.43725553094274,
+          "profitFactor": 0.7764707917799069
+        },
+        "lowVol": {
+          "n": 5383,
+          "net": -208.18649117025453,
+          "profitFactor": 0.7264779931198939
+        }
+      },
+      "trades": 9508,
+      "fundingPct": 0.16460000000000122
+    },
+    {
+      "rule": "V11-TSI25/13-X7-EXT20+EMA400-EXIT0-H120M",
+      "dropped": 0,
+      "maxConcurrent": 1,
+      "net": -6.792741389349207,
+      "robustNet": -16.296228700637066,
+      "profitFactor": 0.97092560438852,
+      "winRatePct": 65.42239685658153,
+      "robustProfitFactor": 0.9312284625157277,
+      "drawdownUsd": -28.42817992351718,
+      "drawdownPct": -28.42817992351718,
+      "netUsd": -6.792741389349207,
+      "folds": 1,
+      "is": -15.934467406528828,
+      "oos": 9.14172601717964,
+      "long": 2.1580830031445792,
+      "short": -8.950824392493777,
+      "meanL95": -0.038538540846328,
+      "recent": [
+        {
+          "days": 30,
+          "n": 173,
+          "net": 1.7963137875930202,
+          "profitFactor": 1.0743200185516504,
+          "winRatePct": 68.20809248554913,
+          "long": 6.01318810330256,
+          "short": -4.21687431570954
+        },
+        {
+          "days": 60,
+          "n": 341,
+          "net": 15.436390767356551,
+          "profitFactor": 1.2453768236936373,
+          "winRatePct": 67.74193548387096,
+          "long": 17.73063484806967,
+          "short": -2.294244080713138
+        },
+        {
+          "days": 90,
+          "n": 517,
+          "net": 9.633525524450917,
+          "profitFactor": 1.0860715315812668,
+          "winRatePct": 66.34429400386847,
+          "long": 12.918114074885299,
+          "short": -3.2845885504343904
+        }
+      ],
+      "activeSymbols": 1,
+      "positiveSymbols": 0,
+      "dominance": 1,
+      "leaveOneOutMinNet": 0,
+      "positiveMonths": 2,
+      "totalMonths": 7,
+      "trendRegimes": {
+        "bull": {
+          "n": 277,
+          "net": -6.694912176771939,
+          "profitFactor": 0.9028394021416372
+        },
+        "bear": {
+          "n": 271,
+          "net": -4.075908765404396,
+          "profitFactor": 0.9326334092096952
+        },
+        "mixed": {
+          "n": 470,
+          "net": 3.9780795528271433,
+          "profitFactor": 1.0381685326226822
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 392,
+          "net": -18.837197039306787,
+          "profitFactor": 0.8296411070067113
+        },
+        "lowVol": {
+          "n": 626,
+          "net": 12.04445564995759,
+          "profitFactor": 1.097875056224678
+        }
+      },
+      "trades": 1018,
+      "fundingPct": 0.12070000000000022
+    }
+  ]
+}

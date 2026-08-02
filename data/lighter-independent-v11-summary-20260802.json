@@ -1,0 +1,79 @@
+{
+  "version": "lighter-independent-v11-summary-v1",
+  "generatedAt": "2026-08-02T06:42:00Z",
+  "decision": "reject_both_frozen_families",
+  "preregistration": {
+    "path": "data/lighter-independent-v11-preregistered-20260802.json",
+    "sha256": "db88e7464ba48e79efe285747db5538522dd9965e4b24ddf660815ad2ccc82cd"
+  },
+  "evidence": [
+    { "path": "data/lighter-independent-v11-universe-5m-20260802.json", "sha256": "2ce616ee0a371680ccc05d10aa37f80536299ab54e9dec96cb8b73e72852532c", "qualified": 0 },
+    { "path": "data/lighter-independent-v11-universe-1m-a-20260802.json", "sha256": "2c297c6d27b2b207e80bad549a48bb8464331a0f1ce4674d85223e4016a921bc", "qualified": 0 },
+    { "path": "data/lighter-independent-v11-universe-1m-b-20260802.json", "sha256": "2f3b8963b7a0ad34074456a4b316c27c6d9557fca06df0cf0fe5ae1bd11ae550", "qualified": 0 },
+    { "path": "data/lighter-independent-v11-universe-1m-c-20260802.json", "sha256": "7249777787bf3af9e7696bb78de854abd7104e2b43f642584375c9ae301a828a", "qualified": 0 },
+    { "path": "data/lighter-independent-v11-universe-1m-d-20260802.json", "sha256": "3090219cc4129cf3af3d58f440a4fadd146e35601e72cfeb33042c962dc48914", "qualified": 0 },
+    { "path": "data/lighter-independent-v11-holdout-1m-20260802.json", "sha256": "146584503a53d627456ef0ecce421c612d1e4b2a0496ac2e8e5b6dca643fdedd", "qualified": 0 },
+    { "path": "data/lighter-independent-v11-holdout-5m-20260802.json", "sha256": "c8e572a82db3ec4752b729455b2a8e86acaf7ad306e189e0b0c68367c51c6568", "qualified": 0 }
+  ],
+  "bestRejected": [
+    {
+      "scope": "main_5m",
+      "symbol": "SOL",
+      "rule": "V11-TSI25/13-X7-EXT20+EMA400-EXIT0-H120M",
+      "trades": 244,
+      "netAfterMeasuredCostsAndFundingPct": 10.7068,
+      "profitFactor": 1.1706,
+      "meanL95Pct": -0.0275,
+      "positiveFolds": 3,
+      "maxDrawdownPct": -9.3496,
+      "failures": [
+        "profit factor below 1.20",
+        "mean L95 is not positive",
+        "short side is negative in the 30d, 60d and 90d windows",
+        "bear regime is negative",
+        "high-volatility regime is negative"
+      ]
+    },
+    {
+      "scope": "holdout_5m",
+      "symbol": "ADA",
+      "rule": "V11-TSI25/13-X7-EXT20+EMA400-EXIT0-H120M",
+      "trades": 42,
+      "coverageDays": 30,
+      "netAfterMeasuredCostsAndFundingPct": 2.6610,
+      "profitFactor": 1.3127,
+      "meanL95Pct": -0.0899,
+      "positiveFolds": 3,
+      "maxDrawdownPct": -2.8907,
+      "failures": [
+        "only 30 days of history, below the frozen 90-day evidence requirement",
+        "mean L95 is not positive",
+        "short side is negative",
+        "bull and bear regimes are negative"
+      ]
+    },
+    {
+      "scope": "main_1m",
+      "symbol": "BTC",
+      "rule": "V11-TSI25/13-X7-EXT20+EMA400-EXIT0-H120M",
+      "trades": 972,
+      "netAfterMeasuredCostsAndFundingPct": 1.2926,
+      "profitFactor": 1.0161,
+      "meanL95Pct": -0.0129,
+      "positiveFolds": 2,
+      "maxDrawdownPct": -7.9871,
+      "failures": [
+        "profit factor below 1.20",
+        "mean L95 is not positive",
+        "OOS and short side are negative",
+        "all frozen recent windows are negative"
+      ]
+    }
+  ],
+  "action": {
+    "shadowAdded": false,
+    "realAdded": false,
+    "retuneAllowed": false,
+    "nextEvidence": "Do not retune Stochastic RSI or TSI on these results. Keep the frozen rules as rejected evidence and direct prospective capacity to the preregistered positive-execution P3 portfolio plus the already identified HYPE WaveTrend near-miss only after unseen evidence matures."
+  }
+}

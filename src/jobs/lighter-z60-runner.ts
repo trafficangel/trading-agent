@@ -315,12 +315,33 @@ const TREND_PORTFOLIO_FEEDS: readonly NativeFeed[] = [
   { symbol: 'TAOUSDT', marketId: 13, strategies: [{ id: 'z60stack25-tao', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
 ];
 
+// P3 is a separately identified, preregistered prospective cohort. It reuses
+// the exact frozen P2 rule on the ten legs that passed the delayed-execution
+// member rule, but new IDs guarantee that no historical/P2 Shadow rows leak
+// into its forward gate. Real execution is not registered.
+const POSITIVE_EXECUTION_PORTFOLIO_FEEDS: readonly NativeFeed[] = [
+  { symbol: 'BTCUSDT', marketId: 1, strategies: [{ id: 'z60stack25p3-btc', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'ETHUSDT', marketId: 0, strategies: [{ id: 'z60stack25p3-eth', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'SOLUSDT', marketId: 2, strategies: [{ id: 'z60stack25p3-sol', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'HYPEUSDT', marketId: 24, strategies: [{ id: 'z60stack25p3-hype', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'ZECUSDT', marketId: 90, strategies: [{ id: 'z60stack25p3-zec', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'DOGEUSDT', marketId: 3, strategies: [{ id: 'z60stack25p3-doge', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'NEARUSDT', marketId: 10, strategies: [{ id: 'z60stack25p3-near', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'JUPUSDT', marketId: 26, strategies: [{ id: 'z60stack25p3-jup', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'GRAMUSDT', marketId: 12, strategies: [{ id: 'z60stack25p3-gram', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'XMRUSDT', marketId: 77, strategies: [{ id: 'z60stack25p3-xmr', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+] as const;
+
 assertNativeStandaloneLifecycle(
   BASE_FEEDS.flatMap((feed) => feed.strategies.map((strategy) => strategy.id)),
 );
 
 const feedByMarket = new Map<number, NativeFeed>();
-for (const feed of [...BASE_FEEDS, ...TREND_PORTFOLIO_FEEDS]) {
+for (const feed of [
+  ...BASE_FEEDS,
+  ...TREND_PORTFOLIO_FEEDS,
+  ...POSITIVE_EXECUTION_PORTFOLIO_FEEDS,
+]) {
   const existing = feedByMarket.get(feed.marketId);
   feedByMarket.set(feed.marketId, existing
     ? { ...existing, strategies: [...existing.strategies, ...feed.strategies] }

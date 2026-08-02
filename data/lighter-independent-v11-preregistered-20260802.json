@@ -1,0 +1,53 @@
+{
+  "version": "lighter-independent-v11-preregistration-v1",
+  "createdAt": "2026-08-02T06:35:00Z",
+  "status": "frozen_before_universe_results",
+  "objective": "Find robust bidirectional Native Quant candidates from normalized momentum reversal and double-smoothed directional momentum without retuning earlier price Z-score, RSI-threshold or volatility-band families.",
+  "universe": [
+    "AAVE", "APT", "ARB", "BNB", "BTC", "DATA", "DOGE", "DOT", "ENA", "ETH", "GRAM", "HYPE", "JUP", "LINK", "LIT", "LTC", "NEAR", "PUMP", "SOL", "TAO", "UNI", "XLM", "XMR", "XRP"
+  ],
+  "unseenHoldout": ["ADA", "ZEC"],
+  "timeframesMinutes": [1, 5],
+  "rules": [
+    {
+      "name": "V11-STOCHRSI14-3/3-X20/80+EMA400-EXIT50-H120M",
+      "entry": "Stochastic RSI(14) K3 crosses D3 after the prior K reached the mirrored 20/80 extreme, aligned with EMA400",
+      "exit": "Stochastic RSI K reaches 50",
+      "stopPct": 1,
+      "maxHoldMinutes": 120
+    },
+    {
+      "name": "V11-TSI25/13-X7-EXT20+EMA400-EXIT0-H120M",
+      "entry": "True Strength Index(25,13) crosses its EMA7 signal after the prior TSI reached the mirrored -20/+20 extreme, aligned with EMA400",
+      "exit": "True Strength Index reaches zero",
+      "stopPct": 1,
+      "maxHoldMinutes": 120
+    }
+  ],
+  "execution": {
+    "signal": "completed gap-free native bar",
+    "fill": "next native bar open",
+    "positionNotionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific executable $100 full-round-trip L2 p95",
+    "funding": "exact Lighter hourly settlements in (entry, exit]"
+  },
+  "qualification": {
+    "minimumTrades": 30,
+    "minimumProfitFactor": 1.2,
+    "minimumPositiveFolds": 3,
+    "maximumDrawdownPct": 15,
+    "requiresPositiveMeanL95": true,
+    "requiresPositiveISAndOOS": true,
+    "requiresPositiveLongAndShort": true,
+    "requiresPositiveBullBearAndVolatilityRegimes": true,
+    "requiresPositive30d60d90dBothSides": true,
+    "requiresMeasuredCostsAndFunding": true
+  },
+  "frozenInputHashes": {
+    "executionCostsNativePortfolio100": "4afa14dd731014df5c806f7d5c2a06a0a02797561ce12a83847a4d841b42fce9",
+    "fundingHistoryNative": "5a44a8cba48306dad60ee695045d5fdcf4542ef1a6a75b55ad4aa3d12fe7e9f4",
+    "fundingHistoryTransfer2": "a0fb74c290cee83f8f574e7b678872cd35328cf3da54548e66fe5708a93830ed",
+    "fundingHistoryAda": "146e1baf78d16ffc5e13b58b6fc0e41009f94c5beb9068ed979cffd07bcc400e"
+  }
+}

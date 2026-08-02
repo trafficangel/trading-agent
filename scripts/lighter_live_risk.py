@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Collection, Mapping, Sequence
 
 
-NATIVE_PROMOTION_REPORT_VERSION = "lighter-native-promotion-audit-v4"
+NATIVE_PROMOTION_REPORT_VERSION = "lighter-native-promotion-audit-v5"
 NATIVE_PROMOTION_NOTIONAL_USD = 100.0
 NATIVE_HISTORICAL_EVIDENCE_VERSION = "lighter-native-historical-evidence-v1"
 NATIVE_HISTORICAL_REPORT_SHA256 = (

@@ -108,6 +108,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V9 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V9 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V10 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V10 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V11 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V11 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -185,6 +187,10 @@ type Arrays = {
   chaikinMoneyFlow20: number[];
   aroonUp25: number[];
   aroonDown25: number[];
+  stochasticRsi14K3: number[];
+  stochasticRsi14D3: number[];
+  trueStrengthIndex25x13: number[];
+  trueStrengthSignal7: number[];
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
@@ -524,6 +530,43 @@ function aroon(
   return { up, down };
 }
 
+/** Completed-bar Stochastic RSI with smoothed K/D lines. */
+function stochasticRsi(
+  rsiValues: number[],
+  period: number,
+  smoothK: number,
+  smoothD: number,
+): { k: number[]; d: number[] } {
+  const raw = new Array<number>(rsiValues.length).fill(50);
+  for (let i = period - 1; i < rsiValues.length; i += 1) {
+    let low = Infinity;
+    let high = -Infinity;
+    for (let j = i - period + 1; j <= i; j += 1) {
+      low = Math.min(low, rsiValues[j]!);
+      high = Math.max(high, rsiValues[j]!);
+    }
+    raw[i] = high > low ? 100 * (rsiValues[i]! - low) / (high - low) : 50;
+  }
+  const k = sma(raw, smoothK);
+  return { k, d: sma(k, smoothD) };
+}
+
+/** William Blau True Strength Index and its completed-bar EMA signal. */
+function trueStrengthIndex(
+  values: number[],
+  longPeriod: number,
+  shortPeriod: number,
+  signalPeriod: number,
+): { tsi: number[]; signal: number[] } {
+  const momentum = values.map((value, i) => i === 0 ? 0 : value - values[i - 1]!);
+  const absoluteMomentum = momentum.map(Math.abs);
+  const smoothedMomentum = ema(ema(momentum, longPeriod), shortPeriod);
+  const smoothedAbsolute = ema(ema(absoluteMomentum, longPeriod), shortPeriod);
+  const tsi = smoothedMomentum.map((value, i) =>
+    smoothedAbsolute[i]! > 0 ? 100 * value / smoothedAbsolute[i]! : 0);
+  return { tsi, signal: ema(tsi, signalPeriod) };
+}
+
 function rollingVolumeWeighted(
   candles: Candle[],
   period: number,
@@ -689,6 +732,9 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
   const waveTrend10x21 = waveTrend(c, 10, 21, 4);
   const fisher10 = fisherTransform(c, 10);
   const aroon25 = aroon(c, 25);
+  const rsi14Values = rsi(c, 14);
+  const stochasticRsi14 = stochasticRsi(rsi14Values, 14, 3, 3);
+  const tsi25x13 = trueStrengthIndex(close, 25, 13, 7);
   const atrPctMean288 = sma(
     atr14Values.map((value, i) => close[i]! > 0 ? value / close[i]! : 0),
     288,
@@ -724,7 +770,7 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     atrPctMean288,
     rsi2: rsi(c, 2),
     rsi7: rsi(c, 7),
-    rsi14: rsi(c, 14),
+    rsi14: rsi14Values,
     stoch14,
     stoch14Signal: sma(stoch14, 3),
     cci20: cci(c, 20),
@@ -737,6 +783,10 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     chaikinMoneyFlow20: chaikinMoneyFlow(c, 20),
     aroonUp25: aroon25.up,
     aroonDown25: aroon25.down,
+    stochasticRsi14K3: stochasticRsi14.k,
+    stochasticRsi14D3: stochasticRsi14.d,
+    trueStrengthIndex25x13: tsi25x13.tsi,
+    trueStrengthSignal7: tsi25x13.signal,
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
@@ -1468,6 +1518,70 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.aroonDown25[i]! > a.aroonUp25[i]!
           : a.aroonUp25[i]! > a.aroonDown25[i]!;
+      },
+    });
+  }
+
+  // Preregistered independent v11 suite. Stochastic RSI tests a normalized
+  // momentum reversal, while TSI tests double-smoothed directional momentum.
+  // Both rules require a completed-bar signal-line cross after a mirrored
+  // extreme, align with EMA400 and fill only at the next native bar open.
+  if (ENABLE_INDEPENDENT_FAMILIES_V11) {
+    out.push({
+      name: 'V11-STOCHRSI14-3/3-X20/80+EMA400-EXIT50-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const crossedUp = a.stochasticRsi14K3[i - 1]! <= a.stochasticRsi14D3[i - 1]!
+          && a.stochasticRsi14K3[i]! > a.stochasticRsi14D3[i]!;
+        const crossedDown = a.stochasticRsi14K3[i - 1]! >= a.stochasticRsi14D3[i - 1]!
+          && a.stochasticRsi14K3[i]! < a.stochasticRsi14D3[i]!;
+        if (
+          crossedUp
+          && a.stochasticRsi14K3[i - 1]! <= 20
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          crossedDown
+          && a.stochasticRsi14K3[i - 1]! >= 80
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.stochasticRsi14K3[i]! >= 50
+          : a.stochasticRsi14K3[i]! <= 50;
+      },
+    });
+
+    out.push({
+      name: 'V11-TSI25/13-X7-EXT20+EMA400-EXIT0-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const crossedUp = a.trueStrengthIndex25x13[i - 1]! <= a.trueStrengthSignal7[i - 1]!
+          && a.trueStrengthIndex25x13[i]! > a.trueStrengthSignal7[i]!;
+        const crossedDown = a.trueStrengthIndex25x13[i - 1]! >= a.trueStrengthSignal7[i - 1]!
+          && a.trueStrengthIndex25x13[i]! < a.trueStrengthSignal7[i]!;
+        if (
+          crossedUp
+          && a.trueStrengthIndex25x13[i - 1]! <= -20
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          crossedDown
+          && a.trueStrengthIndex25x13[i - 1]! >= 20
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.trueStrengthIndex25x13[i]! >= 0
+          : a.trueStrengthIndex25x13[i]! <= 0;
       },
     });
   }

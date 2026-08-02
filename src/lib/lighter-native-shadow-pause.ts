@@ -1,4 +1,4 @@
-export const NATIVE_PROMOTION_AUDIT_VERSION = 'lighter-native-promotion-audit-v4';
+export const NATIVE_PROMOTION_AUDIT_VERSION = 'lighter-native-promotion-audit-v5';
 export const NATIVE_PROMOTION_AUDIT_MAX_AGE_MS = 60 * 60_000;
 
 export type NativeShadowPauseAudit = {

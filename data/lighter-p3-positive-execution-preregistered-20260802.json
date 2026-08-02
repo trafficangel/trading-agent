@@ -1,0 +1,55 @@
+{
+  "version": "lighter-p3-positive-execution-preregistration-v1",
+  "createdAt": "2026-08-02T06:45:00Z",
+  "status": "frozen_before_any_p3_forward_signal",
+  "portfolioId": "z60stack25-positive-execution-portfolio",
+  "objective": "Prospectively validate whether the frozen positive-execution member rule improves the original P2 portfolio without rewriting P2 history.",
+  "parentEvidence": {
+    "path": "data/lighter-p2-entry-delay-portfolio-20260802.json",
+    "sha256": "ef7361a77d619d39b620c0422e5e1491f5f8b1f1063f36f41c2212fd4f7c4cd3",
+    "selectionRule": "delayed net > 0, delayed PF >= 1.10 and >=50% baseline net retention",
+    "selectionStatus": "post_hoc_hypothesis_only_until_fresh_p3_forward_gate"
+  },
+  "members": [
+    { "id": "z60stack25p3-btc", "parentId": "z60stack25-btc", "symbol": "BTCUSDT", "marketId": 1 },
+    { "id": "z60stack25p3-eth", "parentId": "z60stack25-eth", "symbol": "ETHUSDT", "marketId": 0 },
+    { "id": "z60stack25p3-sol", "parentId": "z60stack25-sol", "symbol": "SOLUSDT", "marketId": 2 },
+    { "id": "z60stack25p3-hype", "parentId": "z60stack25-hype", "symbol": "HYPEUSDT", "marketId": 24 },
+    { "id": "z60stack25p3-zec", "parentId": "z60stack25-zec", "symbol": "ZECUSDT", "marketId": 90 },
+    { "id": "z60stack25p3-doge", "parentId": "z60stack25-doge", "symbol": "DOGEUSDT", "marketId": 3 },
+    { "id": "z60stack25p3-near", "parentId": "z60stack25-near", "symbol": "NEARUSDT", "marketId": 10 },
+    { "id": "z60stack25p3-jup", "parentId": "z60stack25-jup", "symbol": "JUPUSDT", "marketId": 26 },
+    { "id": "z60stack25p3-gram", "parentId": "z60stack25-gram", "symbol": "GRAMUSDT", "marketId": 12 },
+    { "id": "z60stack25p3-xmr", "parentId": "z60stack25-xmr", "symbol": "XMRUSDT", "marketId": 77 }
+  ],
+  "rule": {
+    "timeframeMinutes": 5,
+    "entry": "Long when Z60 < -2.5 and close > EMA200 > EMA400; Short mirrored above +2.5 and below EMA200 < EMA400",
+    "exit": "SMA60, 1.5% stop, or 240 completed 5m bars",
+    "signal": "completed gap-free native candle",
+    "shadowFill": "fresh executable Lighter $100 L2 VWAP with no fixed delay",
+    "maxConcurrentPositions": 6
+  },
+  "frozenHistoricalMotivationOnly": {
+    "delayedTrades": 522,
+    "netAfterMeasuredCostsAndExactFundingPctUnits": 102.5387,
+    "profitFactor": 1.6238,
+    "meanL95Pct": 0.1239,
+    "positiveFolds": 3,
+    "maxDrawdownCapitalPct": 2.5940,
+    "longPctUnits": 65.7134,
+    "shortPctUnits": 36.8253,
+    "positiveSymbols": "10/10"
+  },
+  "promotion": {
+    "historicalRowsCountTowardForward": false,
+    "minimumFreshClosedTrades": 20,
+    "minimumFreshDays": 7,
+    "minimumProfitFactor": 1.20,
+    "requiresPositiveNetAndBothHalves": true,
+    "maximumDrawdownCapitalPct": 5,
+    "requiresCompleteExecutionAndFundingReconciliation": true,
+    "realExecutorRegistered": false,
+    "autoPromotion": false
+  }
+}

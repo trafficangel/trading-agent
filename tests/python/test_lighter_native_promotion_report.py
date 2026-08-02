@@ -31,7 +31,7 @@ STRATEGY_ID = "sol-z60-reclaim"
 
 def valid_report() -> dict:
     return {
-        "version": "lighter-native-promotion-audit-v4",
+        "version": "lighter-native-promotion-audit-v5",
         "generatedAt": datetime.fromtimestamp(
             (NOW_MS - 60_000) / 1000,
             tz=timezone.utc,
