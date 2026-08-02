@@ -1,0 +1,58 @@
+{
+  "version": "lighter-native-runner-latency-audit-v1",
+  "generatedAt": "2026-08-02T00:51:00.000Z",
+  "scope": "Native Quant completed 5m candle evaluation on Lighter",
+  "before": {
+    "source": "trading-agent journal, 48h before af8c474",
+    "signalCount": 6,
+    "closeToSignalSeconds": [
+      31.178,
+      35.025,
+      30.775,
+      36.815,
+      35.392,
+      38.534
+    ],
+    "medianSeconds": 35.2085,
+    "minSeconds": 30.775,
+    "maxSeconds": 38.534
+  },
+  "change": {
+    "commit": "af8c474",
+    "trendHistoryBars": 2000,
+    "coldFetch": "four 500-bar pages per trend market, bounded to four concurrent feeds",
+    "warmFetch": "one newly completed 5m candle per trend market, merged into a gap-checked 2000-bar cache",
+    "pollIntervalMs": 5000,
+    "publishGraceMs": 25000,
+    "unfinishedBarsAllowed": false
+  },
+  "benchmarks": {
+    "local15MarketColdFetchMs": 7700,
+    "local15MarketWarmFetchMs": 1235,
+    "productionColdCatchUpFetchMs": 5188,
+    "productionWarmFetchMs": 1297,
+    "productionWarmCloseToDataReadyMs": 26666
+  },
+  "candleFinalizationProbe": {
+    "market": "BTC",
+    "observedFinalMutationAfterCloseMs": 6753,
+    "stableThroughAfterCloseMs": 32485,
+    "decision": "retain the conservative 25s publish grace; optimize only network collection"
+  },
+  "microstructureReadiness": {
+    "auditGeneratedAt": "2026-08-01T23:43:35.703Z",
+    "markets": 15,
+    "minimumHistoryDays": 1.2069444444444444,
+    "collectionHealthy": true,
+    "exploratoryResearchReady": false,
+    "exploratoryMinimumDays": 7,
+    "frozenCandidateResearchReady": false,
+    "frozenCandidateMinimumDays": 21
+  },
+  "safety": {
+    "realEnabled": false,
+    "openRealNativePositions": 0,
+    "autoPromotion": false,
+    "eligibleForReal": 0
+  }
+}
