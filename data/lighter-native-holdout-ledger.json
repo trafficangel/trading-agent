@@ -1,0 +1,37 @@
+{
+  "version": "lighter-native-holdout-ledger-v1",
+  "createdAt": "2026-08-02T10:35:00Z",
+  "policy": "Reserved symbols may be selected using market age, data quality and executable L2 cost only. No strategy performance may be computed on them until a frozen rule passes every discovery-universe gate. The holdout is opened once and is then permanently marked spent.",
+  "reservedSymbols": ["SPX", "BERA"],
+  "performanceOpened": false,
+  "selection": {
+    "pool": ["SPX", "SYRUP", "RESOLV", "GRASS", "ZORA", "USELESS", "NMR", "DOLO", "LINEA", "MYX", "BERA", "STBL"],
+    "rule": "Require an active Lighter perp and a full first 500-candle page at the start of the 180-day window, then select the two lowest $100 round-trip L2 p95 values from the frozen 20-snapshot discovery sample.",
+    "selectedDiscoveryP95Pct": {"SPX": 0.09035816105563647, "BERA": 0.09060315816722835},
+    "discoveryEvidence": "data/lighter-execution-costs-new-holdout-discovery-20260802.json",
+    "discoveryEvidenceSha256": "c54852c4d6b8c11831e1c30412fb816dee9a582d5366e73e4975894f36693f6e"
+  },
+  "files": {
+    "candleDirectory": "data/lighter-klines",
+    "executionCosts": "data/lighter-execution-costs-new-holdout-20260802.json",
+    "fundingHistory": "data/lighter-funding-history-new-holdout-20260802.json"
+  },
+  "sealedReadinessEvidence": {
+    "audit": "data/lighter-native-holdout-audit-20260802.json",
+    "auditSha256": "ac30d8355e9f19cd883cba0620a3e7e3f3199cb28a8475be9119f52aaf8e8b7e",
+    "executionCostsSha256": "31eb85cd6438eb2853d61c575f19928f9c4443852de8bc905c5a5629049ee7b7",
+    "fundingHistorySha256": "8fabd7f3a41c797ff8c868d6034ab97e8ddbd74f79fde3d44468f95bc91d5f70",
+    "candleHashes": {
+      "SPX-1m": "da7d824da11fb1bd49735358017227d54873027b4b3705c90e674a7814692d10",
+      "SPX-5m": "9fce4959b1cecb53b760b8ad203f4ea7e213fc04c45478d2b279be7ea26c5c91",
+      "BERA-1m": "a1f0dd31626ed2e24391428db9c79ca3ede33bf62aaab6e3b4c442922c3a36a1",
+      "BERA-5m": "20308338a2e81aa1fc429a003c124e66f29581a8337ad299d4c877ef0a5bd1fa"
+    }
+  },
+  "requirements": {
+    "minimumCoverageDays": 171,
+    "minimumCandleCoverageRatio": 0.995,
+    "minimumCostSamples": 120,
+    "minimumFundingCoverageRatio": 0.95
+  }
+}
