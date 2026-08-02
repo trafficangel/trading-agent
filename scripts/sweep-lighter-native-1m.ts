@@ -17,6 +17,10 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, resolve } from 'node:path';
 import { atr, ema, rollingStd, rsi, sma, type Candle } from '../src/backtest/indicators.js';
 import {
+  elderForceIndexZScore,
+  ultimateOscillator,
+} from '../src/lib/lighter-independent-indicators.js';
+import {
   buildLighterFundingSeries,
   fundingSeriesCoverage,
   lighterFundingPnlPct,
@@ -114,6 +118,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V12 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V12 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V13 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V13 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V14 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V14 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -203,6 +209,8 @@ type Arrays = {
   relativeVigorSignal4: number[];
   trix15: number[];
   trixSignal9: number[];
+  ultimateOscillator7x14x28: number[];
+  elderForceIndex13Z60: number[];
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
@@ -865,6 +873,12 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
   const vortex14 = vortexIndicator(c, 14);
   const relativeVigor10 = relativeVigorIndex(c, 10, 4);
   const trix15 = trix(close, 15, 9);
+  const completedBars = c.map((bar) => ({
+    close: bar.c,
+    high: bar.h,
+    low: bar.l,
+    volume: bar.v,
+  }));
   const atrPctMean288 = sma(
     atr14Values.map((value, i) => close[i]! > 0 ? value / close[i]! : 0),
     288,
@@ -925,6 +939,8 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     relativeVigorSignal4: relativeVigor10.signal,
     trix15: trix15.oscillator,
     trixSignal9: trix15.signal,
+    ultimateOscillator7x14x28: ultimateOscillator(completedBars, 7, 14, 28),
+    elderForceIndex13Z60: elderForceIndexZScore(completedBars, 13, 60),
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
@@ -1831,6 +1847,51 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.trix15[i]! < a.trixSignal9[i]!
           : a.trix15[i]! > a.trixSignal9[i]!;
+      },
+    });
+  }
+
+  // Preregistered independent v14 suite. Ultimate Oscillator combines buying
+  // pressure over three completed-bar horizons; Elder Force Index combines
+  // completed close change with native Lighter volume. Both wait for an
+  // extreme to reclaim its boundary, mirror Long/Short exactly, use the same
+  // parameters on every market and timeframe, and fill only at next-bar open.
+  if (ENABLE_INDEPENDENT_FAMILIES_V14) {
+    out.push({
+      name: 'V14-UO7/14/28-RECLAIM30/70+EMA400-EXIT50-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const prior = a.ultimateOscillator7x14x28[i - 1]!;
+        const current = a.ultimateOscillator7x14x28[i]!;
+        if (prior < 30 && current >= 30 && a.close[i]! > a.ema400[i]!) return 'long';
+        if (prior > 70 && current <= 70 && a.close[i]! < a.ema400[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.ultimateOscillator7x14x28[i]! >= 50
+          : a.ultimateOscillator7x14x28[i]! <= 50;
+      },
+    });
+
+    out.push({
+      name: 'V14-EFI13-Z60-RECLAIM2+EMA400-EXIT0-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const prior = a.elderForceIndex13Z60[i - 1]!;
+        const current = a.elderForceIndex13Z60[i]!;
+        if (prior < -2 && current >= -2 && a.close[i]! > a.ema400[i]!) return 'long';
+        if (prior > 2 && current <= 2 && a.close[i]! < a.ema400[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.elderForceIndex13Z60[i]! >= 0
+          : a.elderForceIndex13Z60[i]! <= 0;
       },
     });
   }
