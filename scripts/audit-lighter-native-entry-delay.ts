@@ -18,11 +18,21 @@ import {
   type LighterFundingPoint,
 } from '../src/lib/lighter-funding-history.js';
 import {
+  evaluateRsiMfiTrend,
   evaluateRsiWilliamsTrend,
   evaluateVwzMfiTrend,
   rsiWilliamsExit,
 } from '../src/lib/lighter-oscillator-confluence.js';
-import type { Vwz60Bar } from '../src/lib/lighter-z60.js';
+import {
+  efficiencyRatio,
+  evaluateVwz60,
+  evaluateZ60,
+  type Vwz60Bar,
+} from '../src/lib/lighter-z60.js';
+import {
+  evaluateRsiTrendPullback,
+  rsiTrendExit,
+} from '../src/lib/lighter-rsi-pullback.js';
 
 const MINUTE_MS = 60_000;
 const FIVE_MINUTES_MS = 5 * MINUTE_MS;
@@ -67,7 +77,19 @@ type StrategyConfig = {
   } | null;
 };
 
-const STRATEGIES: readonly StrategyConfig[] = [
+function completedEma(values: readonly number[], period: number): number | null {
+  if (period < 2 || values.length < period) return null;
+  const alpha = 2 / (period + 1);
+  let result = values[0]!;
+  for (let index = 1; index < values.length; index += 1) {
+    const value = values[index]!;
+    if (!Number.isFinite(value) || value <= 0) return null;
+    result = value * alpha + result * (1 - alpha);
+  }
+  return result;
+}
+
+const ALL_STRATEGIES: readonly StrategyConfig[] = [
   {
     strategyId: 'zec-rsi14-willr14-ema400',
     symbol: 'ZEC',
@@ -96,7 +118,96 @@ const STRATEGIES: readonly StrategyConfig[] = [
       } : null;
     },
   },
+  {
+    strategyId: 'bnb-z60-3-touch',
+    symbol: 'BNB',
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    evaluate(bars) {
+      const snapshot = evaluateZ60(bars, 60, 3, 'touch');
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      } : null;
+    },
+  },
+  {
+    strategyId: 'xlm-rsi14-mfi14-ema400',
+    symbol: 'XLM',
+    fundingFile: 'data/lighter-funding-history-transfer2-20260801.json',
+    executionCostFile: 'data/lighter-execution-costs-transfer2-20260801.json',
+    evaluate(bars) {
+      const snapshot = evaluateRsiMfiTrend(bars, 14, 30, 14, 30, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.currentRsi >= 50,
+        exitShort: snapshot.currentRsi <= 50,
+      } : null;
+    },
+  },
+  {
+    strategyId: 'hype-rsi7-pullback-ema400',
+    symbol: 'HYPE',
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    evaluate(bars) {
+      const snapshot = evaluateRsiTrendPullback(bars, 7, 20, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: rsiTrendExit(snapshot, 'long'),
+        exitShort: rsiTrendExit(snapshot, 'short'),
+      } : null;
+    },
+  },
+  {
+    strategyId: 'btc-vwz60-2.5-touch-er25',
+    symbol: 'BTC',
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    evaluate(bars) {
+      const snapshot = evaluateVwz60(bars, 60, 2.5, 'touch');
+      const er60 = efficiencyRatio(bars, 60);
+      return snapshot ? {
+        signal: er60 != null && er60 <= 0.25 ? snapshot.signal : null,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      } : null;
+    },
+  },
+  {
+    strategyId: 'apt-vwz60-3-reclaim-ema200',
+    symbol: 'APT',
+    fundingFile: 'data/lighter-funding-history-apt-rebuilt-20260801.json',
+    executionCostFile: 'data/lighter-execution-costs-transfer2-20260801.json',
+    evaluate(bars) {
+      const snapshot = evaluateVwz60(bars, 60, 3, 'reclaim');
+      const trend = completedEma(bars.map((bar) => bar.close), 200);
+      if (!snapshot || trend == null) return null;
+      const signal = snapshot.signal === 'long' && snapshot.close <= trend
+        ? null
+        : snapshot.signal === 'short' && snapshot.close >= trend
+          ? null
+          : snapshot.signal;
+      return {
+        signal,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      };
+    },
+  },
 ];
+
+const requestedIds = new Set(
+  (process.env.STRATEGY_IDS ?? 'zec-rsi14-willr14-ema400,data-vwz60-mfi14-ema400')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean),
+);
+const STRATEGIES = ALL_STRATEGIES.filter((strategy) => requestedIds.has(strategy.strategyId));
+if (STRATEGIES.length !== requestedIds.size) {
+  throw new Error('Unknown STRATEGY_IDS entry');
+}
 
 function candles(file: string): Candle[] {
   const parsed = JSON.parse(readFileSync(file, 'utf8')) as RawCandle[];
@@ -321,12 +432,16 @@ function metrics(trades: readonly Trade[]) {
 
 const audits = STRATEGIES.map((config) => {
   const bounds = fundingBounds(config);
-  // A delayed fill needs the minute after the next 5m open. Exclude the
-  // unresolved tail rather than inventing funding beyond the last settlement.
-  const fiveMinute = candles(resolve(KLINES_DIR, `${config.symbol}-5m.json`))
-    .filter((bar) => bar.t + FIVE_MINUTES_MS + MINUTE_MS <= bounds.last);
   const oneMinute = candles(resolve(KLINES_DIR, `${config.symbol}-1m.json`))
     .filter((bar) => bar.t >= bounds.first && bar.t <= bounds.last);
+  const lastOneMinute = oneMinute.at(-1)?.t;
+  if (lastOneMinute == null) throw new Error(`${config.symbol}: native 1m coverage missing`);
+  // A delayed fill needs the minute after the next 5m open. Exclude the
+  // unresolved tail rather than inventing funding or a native fill beyond the
+  // shorter of the funding and 1m-candle histories.
+  const fiveMinute = candles(resolve(KLINES_DIR, `${config.symbol}-5m.json`))
+    .filter((bar) =>
+      bar.t + FIVE_MINUTES_MS + MINUTE_MS <= Math.min(bounds.last, lastOneMinute));
   requireGapFree(fiveMinute, FIVE_MINUTES_MS, `${config.symbol}-5m`);
   requireGapFree(oneMinute, MINUTE_MS, `${config.symbol}-1m`);
   const strategyDecisions = decisions(config, fiveMinute);

@@ -1,0 +1,104 @@
+{
+  "version": "lighter-native-candidate-search-summary-v1",
+  "generatedAt": "2026-08-02T00:31:35Z",
+  "decision": "no_new_candidate_qualified",
+  "candidateCountAdded": 0,
+  "policy": {
+    "timeframes": [1, 5],
+    "commissionPct": 0,
+    "notionalUsd": 100,
+    "executionCost": "market-specific executable full-round-trip p95",
+    "funding": "exact Lighter hourly settlements",
+    "required": [
+      "gap-free native 1m source",
+      "no look-ahead",
+      "positive net and mean L95",
+      "PF >= 1.2",
+      "at least 3 of 4 positive folds",
+      "positive IS and OOS",
+      "positive Long and Short",
+      "positive 30d, 60d and 90d windows on both sides",
+      "max drawdown no worse than -15%",
+      "for 5m candidates, positive native +1m delayed-fill audit with at least 50% net retention"
+    ]
+  },
+  "searches": [
+    {
+      "name": "native_1m_standard_and_confluence",
+      "symbols": ["AAVE", "ARB", "BNB", "BTC", "DOGE", "ENA", "ETH", "GRAM", "HYPE", "JUP", "LINK", "LIT", "LTC", "NEAR", "PUMP", "SOL", "TAO", "UNI", "XLM", "XMR", "XRP"],
+      "qualified": 0
+    },
+    {
+      "name": "native_1m_new_two_sided_families",
+      "families": ["squeeze", "trend_pullback", "failed_breakout", "hourly_fade", "hourly_fade_high_vol", "shock_reversal"],
+      "symbols": ["AAVE", "ARB", "LINK", "UNI", "PUMP", "BTC", "ETH", "SOL", "HYPE", "XMR"],
+      "qualified": 0
+    },
+    {
+      "name": "new_universe_5m_shortlist",
+      "symbolsScreened": 43,
+      "source": "direct 5m was used only for shortlisting and could not qualify a deployment",
+      "shortlist": ["APT:CONF-RSI14-MFI14-30/70+EMA400", "APT:VWZ60T-3-reclaim", "DOT:RSI14-25/75+EMA400"],
+      "note": "DOT is already active; APT was rebuilt from native 1m before final evaluation"
+    }
+  ],
+  "delayedFillNearMisses": [
+    {
+      "strategyId": "bnb-z60-3-touch",
+      "delayedNetPctUnits": 37.69614670378155,
+      "delayedProfitFactor": 1.3501844612054836,
+      "delayedMeanL95Pct": 0.029423032806465306,
+      "failure": "Long side was negative in the trailing 60d and 90d windows"
+    },
+    {
+      "strategyId": "xlm-rsi14-mfi14-ema400",
+      "delayedNetPctUnits": 14.604079669132028,
+      "delayedProfitFactor": 1.1815889728776852,
+      "delayedMeanL95Pct": -0.026799985307991325,
+      "failure": "PF and L95 failed; aggregate Long side was negative"
+    },
+    {
+      "strategyId": "hype-rsi7-pullback-ema400",
+      "delayedNetPctUnits": 25.883761075057883,
+      "delayedProfitFactor": 1.446534187119155,
+      "delayedMeanL95Pct": 0.03175063550214735,
+      "failure": "Long side was negative in the trailing 60d window"
+    },
+    {
+      "strategyId": "btc-vwz60-2.5-touch-er25",
+      "delayedNetPctUnits": 11.965939207152882,
+      "delayedProfitFactor": 1.150685772207208,
+      "delayedMeanL95Pct": -0.022608737429359912,
+      "failure": "PF and L95 failed; trailing 30d Short and PF failed"
+    },
+    {
+      "strategyId": "apt-vwz60-3-reclaim-ema200",
+      "delayedNetPctUnits": 9.197123883255804,
+      "delayedProfitFactor": 1.30685687568638,
+      "delayedMeanL95Pct": -0.0374634066132664,
+      "failure": "L95 failed; trailing 60d Short and trailing 90d PF failed"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "data/lighter-native-candidate-search-5m-20260801.json",
+      "sha256": "f92edefc954ea02e48d2b45012a904a905c80a3c24176fc3a7dc13a9cfa463bc"
+    },
+    {
+      "path": "data/lighter-bnb-xlm-entry-delay-audit-20260801.json",
+      "sha256": "093d7e61e2ecd72129c0ce7c9ea2bae52350507bc9ef479d0b8d0aa2f51f9e6b"
+    },
+    {
+      "path": "data/lighter-hype-btc-entry-delay-audit-20260801.json",
+      "sha256": "fd1b0ecb27af0fd06498419c24f4d54f6dff585528f9412dc56fd387aa469b3d"
+    },
+    {
+      "path": "data/lighter-native-apt-5m-rebuilt-20260801.json",
+      "sha256": "7adefe35cb57454f274b564f308b22113294c962ee9a9593447d88810df2b61f"
+    },
+    {
+      "path": "data/lighter-apt-entry-delay-audit-20260801.json",
+      "sha256": "7a712cd0d4e9b90946a712ff5f40c1af164fd57c8868a9f1fa26958505acc8f1"
+    }
+  ]
+}

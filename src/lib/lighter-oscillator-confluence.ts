@@ -19,6 +19,16 @@ export type VwzMfiSnapshot = Z60Snapshot & {
   currentMfi: number;
 };
 
+export type RsiMfiSnapshot = {
+  barTime: number;
+  close: number;
+  previousRsi: number;
+  currentRsi: number;
+  currentMfi: number;
+  trendMean: number;
+  signal: Z60Signal;
+};
+
 function completedEma(closes: readonly number[], period: number): number | null {
   if (period < 2 || closes.length < period) return null;
   const alpha = 2 / (period + 1);
@@ -172,6 +182,49 @@ export function evaluateVwzMfiTrend(
     signal,
     trendMean,
     currentMfi: currentMfiValue,
+  };
+}
+
+/** Frozen two-sided RSI14 + MFI14 pullback aligned with EMA400. */
+export function evaluateRsiMfiTrend(
+  bars: readonly Vwz60Bar[],
+  rsiPeriod = 14,
+  rsiLevel = 30,
+  mfiPeriod = 14,
+  mfiLevel = 30,
+  trendPeriod = 400,
+): RsiMfiSnapshot | null {
+  if (
+    !(rsiLevel > 0 && rsiLevel < 50)
+    || !(mfiLevel > 0 && mfiLevel < 50)
+    || trendPeriod < 2
+  ) return null;
+  const closes = bars.map((bar) => bar.close);
+  if (closes.length < Math.max(rsiPeriod + 2, mfiPeriod + 1, trendPeriod)) return null;
+  const values = completedRsi(closes, rsiPeriod);
+  const trendMean = completedEma(closes, trendPeriod);
+  const currentMfiValue = currentMfi(bars, mfiPeriod);
+  if (!values || trendMean == null || currentMfiValue == null) return null;
+  const currentIndex = bars.length - 1;
+  const currentRsi = values[currentIndex]!;
+  const close = closes[currentIndex]!;
+  const signal = currentRsi < rsiLevel
+    && currentMfiValue < mfiLevel
+    && close > trendMean
+    ? 'long'
+    : currentRsi > 100 - rsiLevel
+      && currentMfiValue > 100 - mfiLevel
+      && close < trendMean
+      ? 'short'
+      : null;
+  return {
+    barTime: bars[currentIndex]!.time,
+    close,
+    previousRsi: values[currentIndex - 1]!,
+    currentRsi,
+    currentMfi: currentMfiValue,
+    trendMean,
+    signal,
   };
 }
 

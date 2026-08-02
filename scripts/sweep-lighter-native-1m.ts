@@ -1763,14 +1763,19 @@ const candleSourceBySymbol = new Map<string, 'direct' | 'aggregated_from_1m'>();
 for (const symbol of SYMBOLS) {
   const directFile = resolve(KLINES_DIR, `${symbol}-${BAR_MINUTES}m.json`);
   const oneMinuteFile = resolve(KLINES_DIR, `${symbol}-1m.json`);
-  const file = existsSync(directFile) ? directFile : oneMinuteFile;
+  // Native 5m opens can diverge materially from the executable 1m path on
+  // some Lighter markets. Prefer the native 1m series and aggregate it for
+  // every higher timeframe; use a direct file only when no 1m source exists.
+  const file = existsSync(oneMinuteFile) ? oneMinuteFile : directFile;
   if (!existsSync(file)) continue;
   const raw = JSON.parse(readFileSync(file, 'utf8')) as Candle[];
   const maxTime = raw.at(-1)?.t ?? 0;
   const windowed = LOOKBACK_DAYS > 0
     ? raw.filter((candle) => candle.t >= maxTime - LOOKBACK_DAYS * 86_400_000)
     : raw;
-  const candles = file === directFile ? windowed : aggregateCandles(windowed, BAR_MINUTES);
+  const candles = file === oneMinuteFile
+    ? aggregateCandles(windowed, BAR_MINUTES)
+    : windowed;
   loaded.set(symbol, build(candles, fundingBySymbol.get(symbol.toUpperCase())));
   candleSourceBySymbol.set(symbol, file === directFile ? 'direct' : 'aggregated_from_1m');
 }
@@ -2285,17 +2290,17 @@ const costLabel = executionCostBySymbol.size
 const fundingLabel = fundingBySymbol.size
   ? `${fundingBySymbol.size} market-specific hourly funding histories`
   : `${FALLBACK_FUNDING_PER_HOUR_PCT}%/h explicitly enabled fallback funding`;
-console.log(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${costLabel} · adverse measured max (non-blocking) · ${fundingLabel} · max DD ${MAX_BACKTEST_DD_PCT}%`);
-console.log(`\nQUALIFIED (${qualified.length})`);
-console.log(qualified.length ? qualified.slice(0, 30).map(print).join('\n') : '— none —');
-console.log('\nTOP 30 (including failures)');
-console.log(best.slice(0, 30).map(print).join('\n'));
-console.log(`\nPORTFOLIO QUALIFIED (${portfolioQualified.length}) · one fixed rule across all >=${PORTFOLIO_MIN_COVERAGE_DAYS}d markets · max ${PORTFOLIO_MAX_OPEN} concurrent`);
-console.log(portfolioQualified.length
+console.warn(`Native Lighter ${BAR_MINUTES}m · ${[...loaded.keys()].join(', ')} · ${LOOKBACK_DAYS || 'all-cache'}d · zero commission · ${costLabel} · adverse measured max (non-blocking) · ${fundingLabel} · max DD ${MAX_BACKTEST_DD_PCT}%`);
+console.warn(`\nQUALIFIED (${qualified.length})`);
+console.warn(qualified.length ? qualified.slice(0, 30).map(print).join('\n') : '— none —');
+console.warn('\nTOP 30 (including failures)');
+console.warn(best.slice(0, 30).map(print).join('\n'));
+console.warn(`\nPORTFOLIO QUALIFIED (${portfolioQualified.length}) · one fixed rule across all >=${PORTFOLIO_MIN_COVERAGE_DAYS}d markets · max ${PORTFOLIO_MAX_OPEN} concurrent`);
+console.warn(portfolioQualified.length
   ? portfolioQualified.slice(0, 20).map(printPortfolio).join('\n')
   : '— none —');
-console.log('\nPORTFOLIO TOP 20 (including failures)');
-console.log(portfolioBest.slice(0, 20).map(printPortfolio).join('\n'));
+console.warn('\nPORTFOLIO TOP 20 (including failures)');
+console.warn(portfolioBest.slice(0, 20).map(printPortfolio).join('\n'));
 
 if (OUTPUT_JSON) {
   const compactRows = rows.map(({ trades, ...row }) => ({
@@ -2342,5 +2347,5 @@ if (OUTPUT_JSON) {
   const temporary = `${OUTPUT_JSON}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(report, null, 2)}\n`);
   renameSync(temporary, OUTPUT_JSON);
-  console.log(`\nJSON → ${OUTPUT_JSON}`);
+  console.warn(`\nJSON → ${OUTPUT_JSON}`);
 }

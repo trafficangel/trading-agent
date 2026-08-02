@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  evaluateRsiMfiTrend,
   evaluateRsiWilliamsTrend,
   evaluateVwzMfiTrend,
   rsiWilliamsExit,
@@ -97,9 +98,21 @@ describe('Native oscillator confluence', () => {
     expect(short?.signal).toBe('short');
   });
 
+  it('emits mirrored RSI/MFI signals from completed OHLCV bars', () => {
+    const long = evaluateRsiMfiTrend(trendThenPullback('up'));
+    const short = evaluateRsiMfiTrend(trendThenPullback('down'));
+    expect(long?.currentRsi).toBeLessThan(30);
+    expect(long?.currentMfi).toBeLessThan(30);
+    expect(long?.signal).toBe('long');
+    expect(short?.currentRsi).toBeGreaterThan(70);
+    expect(short?.currentMfi).toBeGreaterThan(70);
+    expect(short?.signal).toBe('short');
+  });
+
   it('fails closed when native high/low data needed by confirmation is absent', () => {
     const bars = trendThenPullback('up').map(({ high: _high, low: _low, ...bar }) => bar);
     expect(evaluateRsiWilliamsTrend(bars)).toBeNull();
     expect(evaluateVwzMfiTrend(bars)).toBeNull();
+    expect(evaluateRsiMfiTrend(bars)).toBeNull();
   });
 });
