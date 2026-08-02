@@ -106,6 +106,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V8 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V8 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V9 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V9 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V10 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V10 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -180,6 +182,9 @@ type Arrays = {
   waveTrendSignal4: number[];
   fisher10: number[];
   fisherSignal: number[];
+  chaikinMoneyFlow20: number[];
+  aroonUp25: number[];
+  aroonDown25: number[];
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
@@ -478,6 +483,47 @@ function fisherTransform(
   return { fisher, signal };
 }
 
+/** Completed-bar Chaikin Money Flow; values are bounded to [-1, 1]. */
+function chaikinMoneyFlow(candles: Candle[], period: number): number[] {
+  const flowVolume = candles.map((bar) => {
+    const range = bar.h - bar.l;
+    return range > 0 ? ((2 * bar.c - bar.h - bar.l) / range) * bar.v : 0;
+  });
+  const output = new Array<number>(candles.length).fill(0);
+  let flowSum = 0;
+  let volumeSum = 0;
+  for (let i = 0; i < candles.length; i += 1) {
+    flowSum += flowVolume[i]!;
+    volumeSum += candles[i]!.v;
+    if (i >= period) {
+      flowSum -= flowVolume[i - period]!;
+      volumeSum -= candles[i - period]!.v;
+    }
+    if (i + 1 >= period && volumeSum > 0) output[i] = flowSum / volumeSum;
+  }
+  return output;
+}
+
+/** Time-since-extreme Aroon pair, computed only from completed candles. */
+function aroon(
+  candles: Candle[],
+  period: number,
+): { up: number[]; down: number[] } {
+  const up = new Array<number>(candles.length).fill(50);
+  const down = new Array<number>(candles.length).fill(50);
+  for (let i = period - 1; i < candles.length; i += 1) {
+    let highestIndex = i - period + 1;
+    let lowestIndex = highestIndex;
+    for (let j = highestIndex + 1; j <= i; j += 1) {
+      if (candles[j]!.h >= candles[highestIndex]!.h) highestIndex = j;
+      if (candles[j]!.l <= candles[lowestIndex]!.l) lowestIndex = j;
+    }
+    up[i] = 100 * (period - (i - highestIndex)) / period;
+    down[i] = 100 * (period - (i - lowestIndex)) / period;
+  }
+  return { up, down };
+}
+
 function rollingVolumeWeighted(
   candles: Candle[],
   period: number,
@@ -642,6 +688,7 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
   const dmi14 = directionalIndex(c, 14);
   const waveTrend10x21 = waveTrend(c, 10, 21, 4);
   const fisher10 = fisherTransform(c, 10);
+  const aroon25 = aroon(c, 25);
   const atrPctMean288 = sma(
     atr14Values.map((value, i) => close[i]! > 0 ? value / close[i]! : 0),
     288,
@@ -687,6 +734,9 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     waveTrendSignal4: waveTrend10x21.signal,
     fisher10: fisher10.fisher,
     fisherSignal: fisher10.signal,
+    chaikinMoneyFlow20: chaikinMoneyFlow(c, 20),
+    aroonUp25: aroon25.up,
+    aroonDown25: aroon25.down,
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
@@ -1365,6 +1415,59 @@ function rules(): Rule[] {
       },
       exit(a, i, side) {
         return side === 'long' ? a.fisher10[i]! >= 0 : a.fisher10[i]! <= 0;
+      },
+    });
+  }
+
+  // Preregistered independent v10 suite. CMF tests a volume-weighted
+  // accumulation/distribution reversal, while Aroon tests time-since-extreme
+  // trend dominance. Neither family reuses price Z-scores or RSI thresholds.
+  // Parameters and mirrored long/short rules are frozen before the universe
+  // run and every signal still fills only at the next native bar open.
+  if (ENABLE_INDEPENDENT_FAMILIES_V10) {
+    out.push({
+      name: 'V10-CMF20-RECLAIM-0.20+EMA400-EXIT0-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const crossedUp = a.chaikinMoneyFlow20[i - 1]! <= -0.2
+          && a.chaikinMoneyFlow20[i]! > -0.2;
+        const crossedDown = a.chaikinMoneyFlow20[i - 1]! >= 0.2
+          && a.chaikinMoneyFlow20[i]! < 0.2;
+        if (crossedUp && a.close[i]! > a.ema400[i]!) return 'long';
+        if (crossedDown && a.close[i]! < a.ema400[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.chaikinMoneyFlow20[i]! >= 0
+          : a.chaikinMoneyFlow20[i]! <= 0;
+      },
+    });
+
+    out.push({
+      name: 'V10-AROON25-X-70+EMA400-REVERSE-H240M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(240 / BAR_MINUTES)),
+      entry(a, i) {
+        const crossedUp = a.aroonUp25[i - 1]! <= a.aroonDown25[i - 1]!
+          && a.aroonUp25[i]! > a.aroonDown25[i]!;
+        const crossedDown = a.aroonDown25[i - 1]! <= a.aroonUp25[i - 1]!
+          && a.aroonDown25[i]! > a.aroonUp25[i]!;
+        if (crossedUp && a.aroonUp25[i]! >= 70 && a.close[i]! > a.ema400[i]!) {
+          return 'long';
+        }
+        if (crossedDown && a.aroonDown25[i]! >= 70 && a.close[i]! < a.ema400[i]!) {
+          return 'short';
+        }
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.aroonDown25[i]! > a.aroonUp25[i]!
+          : a.aroonUp25[i]! > a.aroonDown25[i]!;
       },
     });
   }

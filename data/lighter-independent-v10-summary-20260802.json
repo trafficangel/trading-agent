@@ -1,0 +1,107 @@
+{
+  "version": "lighter-independent-v10-summary-v1",
+  "generatedAt": "2026-08-02T06:22:00Z",
+  "preregistration": "data/lighter-independent-v10-preregistered-20260802.json",
+  "sources": [
+    {
+      "file": "data/lighter-independent-v10-universe-1m-a-20260802.json",
+      "sha256": "2823c98f21abc1172970f3e420b9a050f4ef5a912d19f8c6d1fe8e581d878719"
+    },
+    {
+      "file": "data/lighter-independent-v10-universe-1m-b-20260802.json",
+      "sha256": "069f8045753ba238a3bca7a7324360ff03e319dddd336f5f718b811b9d10dce8"
+    },
+    {
+      "file": "data/lighter-independent-v10-universe-1m-c-20260802.json",
+      "sha256": "900fbc391505e651e61bc0316e76fcc81542cfada8e40bde27a41210ffed3477"
+    },
+    {
+      "file": "data/lighter-independent-v10-universe-1m-d-20260802.json",
+      "sha256": "34dd49da2c483c59563a458c6e3c2c7e88ea5947739d438afe6da377b2f95749"
+    },
+    {
+      "file": "data/lighter-independent-v10-universe-5m-20260802.json",
+      "sha256": "62ac71f59ac24f8ec81fbe358c10432b330867e92d34999305156571813148f6"
+    },
+    {
+      "file": "data/lighter-independent-v10-holdout-1m-20260802.json",
+      "sha256": "213da74bdad8b899e5c906b33e823250f163ceef4cc6d292fcb530a608665d17"
+    },
+    {
+      "file": "data/lighter-independent-v10-holdout-5m-20260802.json",
+      "sha256": "3e51bb8895f24b9d3b5617086ef9fdd26c9f279bd47fb9e9038d25e3446eecd4"
+    },
+    {
+      "file": "data/lighter-funding-history-v10-holdout-20260802.json",
+      "sha256": "d39301aeec3f8b70d9bb8f0c6dabff3ba06d532b71abc715a2377fec69359a84"
+    }
+  ],
+  "scope": {
+    "universeSymbols": 24,
+    "unseenHoldoutSymbols": ["ADA", "ZEC"],
+    "timeframesMinutes": [1, 5],
+    "qualified": []
+  },
+  "bestRejected": [
+    {
+      "symbol": "HYPE",
+      "timeframeMinutes": 5,
+      "rule": "V10-CMF20-RECLAIM-0.20+EMA400-EXIT0-H120M",
+      "trades": 815,
+      "netPctUnits": 14.648709021263334,
+      "profitFactor": 1.0649407117170218,
+      "maxDrawdownPct": -14.428770443741232,
+      "meanL95Pct": -0.024951602879886178,
+      "positiveFolds": 2,
+      "longPctUnits": 15.769061591335678,
+      "shortPctUnits": -1.120352570072307,
+      "reasons": [
+        "profit factor is below 1.20 and mean L95 is negative",
+        "OOS is -0.3578% units and only two of four folds are positive",
+        "aggregate Short, bear regime, and every recent Short leg are negative"
+      ]
+    },
+    {
+      "symbol": "SOL",
+      "timeframeMinutes": 5,
+      "rule": "V10-AROON25-X-70+EMA400-REVERSE-H240M",
+      "trades": 933,
+      "netPctUnits": 15.40448743604638,
+      "profitFactor": 1.053725716685705,
+      "maxDrawdownPct": -21.384454921343362,
+      "meanL95Pct": -0.03671268839585178,
+      "positiveFolds": 2,
+      "longPctUnits": -1.6459358924453364,
+      "shortPctUnits": 17.05042332849171,
+      "reasons": [
+        "profit factor and mean L95 fail",
+        "drawdown exceeds 15%, OOS is -14.7467% units, and Long is negative",
+        "bull, bear, high-vol, 30-day, and 60-day gates are negative"
+      ]
+    },
+    {
+      "symbol": "ZEC",
+      "timeframeMinutes": 5,
+      "rule": "V10-AROON25-X-70+EMA400-REVERSE-H240M",
+      "trades": 936,
+      "netPctUnits": 20.650283853922463,
+      "profitFactor": 1.0400225566275194,
+      "maxDrawdownPct": -35.25940540221821,
+      "meanL95Pct": -0.0793170225970767,
+      "positiveFolds": 2,
+      "longPctUnits": 35.933040387944224,
+      "shortPctUnits": -15.282756534021773,
+      "reasons": [
+        "unseen holdout has negative Short and OOS",
+        "profit factor, mean L95, drawdown, regimes, and recent windows fail"
+      ]
+    }
+  ],
+  "decision": {
+    "addToShadow": [],
+    "addToReal": [],
+    "status": "reject_all_without_parameter_rescue",
+    "keepRuntimeChanges": false,
+    "nextEvidence": "Do not tune CMF or Aroon on these results. Continue collecting the frozen microstructure dataset and reconsider HYPE WaveTrend only on unseen prospective observations."
+  }
+}
