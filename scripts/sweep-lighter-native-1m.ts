@@ -22,6 +22,7 @@ import {
   elderForceIndexZScore,
   priceVolumeTrendOscillator,
   rollingRegressionResidualZScore,
+  rollingVarianceRatio,
   ultimateOscillator,
 } from '../src/lib/lighter-independent-indicators.js';
 import {
@@ -130,6 +131,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V16 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V16 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V17 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V17 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V18 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V18 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -229,6 +232,7 @@ type Arrays = {
   stochasticMomentumSignal3: number[];
   connorsRsi3x2x100: number[];
   regressionResidualZ60x60: number[];
+  varianceRatio120x5: number[];
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
@@ -1013,6 +1017,7 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     stochasticMomentumSignal3: stochasticMomentum14x3x3.signal,
     connorsRsi3x2x100: connorsRsi(close, 3, 2, 100),
     regressionResidualZ60x60: rollingRegressionResidualZScore(close, 60, 60),
+    varianceRatio120x5: rollingVarianceRatio(close, 120, 5),
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
@@ -2129,6 +2134,65 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.regressionResidualZ60x60[i]! >= 0
           : a.regressionResidualZ60x60[i]! <= 0;
+      },
+    });
+  }
+
+  // Preregistered independent v18 suite. Both hypotheses use the same causal
+  // variance-ratio regime classifier but express opposite, predeclared edges:
+  // reversion after an extreme only in anti-persistent paths, and range
+  // breakout only in persistent paths. Rules are mirrored, fixed across all
+  // markets/timeframes and execute at the next native bar open.
+  if (ENABLE_INDEPENDENT_FAMILIES_V18) {
+    out.push({
+      name: 'V18-VR120K5<0.85-Z60-2.5-RECLAIM+EMA400-EXIT0-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const priorZ = z(a, i - 1, 60);
+        const currentZ = z(a, i, 60);
+        if (
+          a.varianceRatio120x5[i]! < 0.85
+          && priorZ < -2.5
+          && currentZ >= -2.5
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          a.varianceRatio120x5[i]! < 0.85
+          && priorZ > 2.5
+          && currentZ <= 2.5
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? z(a, i, 60) >= 0 : z(a, i, 60) <= 0;
+      },
+    });
+
+    out.push({
+      name: 'V18-VR120K5>1.15-DONCHIAN20+EMA200-EXIT10-H240M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(240 / BAR_MINUTES)),
+      entry(a, i) {
+        if (
+          a.varianceRatio120x5[i]! > 1.15
+          && a.close[i]! > highestBefore(a.c, i, 20)
+          && a.close[i]! > a.ema200[i]!
+        ) return 'long';
+        if (
+          a.varianceRatio120x5[i]! > 1.15
+          && a.close[i]! < lowestBefore(a.c, i, 20)
+          && a.close[i]! < a.ema200[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! < lowestBefore(a.c, i, 10)
+          : a.close[i]! > highestBefore(a.c, i, 10);
       },
     });
   }

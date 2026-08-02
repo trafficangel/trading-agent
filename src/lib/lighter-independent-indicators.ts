@@ -6,6 +6,50 @@ export type CompletedOhlcv = {
 };
 
 /**
+ * Causal rolling variance ratio of q-bar log returns to q times one-bar
+ * variance. Values below one indicate short-horizon mean reversion; values
+ * above one indicate persistence. Every window ends at the completed bar.
+ */
+export function rollingVarianceRatio(
+  closes: readonly number[],
+  period = 120,
+  aggregation = 5,
+): number[] {
+  if (!(period > aggregation * 2 && aggregation > 1)) {
+    throw new Error('Variance-ratio period must exceed twice the aggregation');
+  }
+  const returns = closes.map((close, index) => (
+    index > 0 && close > 0 && closes[index - 1]! > 0
+      ? Math.log(close / closes[index - 1]!)
+      : 0
+  ));
+  return closes.map((_close, index) => {
+    if (index < period + aggregation - 1) return 1;
+    const start = index - period + 1;
+    const one = returns.slice(start, index + 1);
+    const oneMean = one.reduce((sum, value) => sum + value, 0) / one.length;
+    const oneVariance = one.reduce(
+      (sum, value) => sum + (value - oneMean) ** 2,
+      0,
+    ) / one.length;
+    if (!(oneVariance > 0)) return 1;
+    const aggregated: number[] = [];
+    for (let cursor = start + aggregation - 1; cursor <= index; cursor += 1) {
+      let total = 0;
+      for (let lag = 0; lag < aggregation; lag += 1) total += returns[cursor - lag]!;
+      aggregated.push(total);
+    }
+    const aggregateMean = aggregated.reduce((sum, value) => sum + value, 0)
+      / aggregated.length;
+    const aggregateVariance = aggregated.reduce(
+      (sum, value) => sum + (value - aggregateMean) ** 2,
+      0,
+    ) / aggregated.length;
+    return aggregateVariance / (aggregation * oneVariance);
+  });
+}
+
+/**
  * Canonical Ultimate Oscillator (7/14/28). Each value uses only bars up to the
  * same index. Warm-up and degenerate ranges are neutral rather than signals.
  */

@@ -6,6 +6,40 @@ export type NativeShadowPauseAudit = {
   pausedStrategyIds: ReadonlySet<string>;
 };
 
+type NativeShadowPauseRow = {
+  strategyId: string;
+  decision: { shadowAction: 'continue' | 'pause_new_entries' };
+};
+
+type NativeShadowPauseCohort = {
+  members: readonly NativeShadowPauseRow[];
+  portfolioDecision: { shadowAction: 'continue' | 'pause_new_entries' };
+};
+
+/**
+ * Build the exact runner pause set. A cohort is one risk unit, so a failed
+ * portfolio gate pauses every member even when no single member has yet
+ * accumulated enough evidence to fail on its own.
+ */
+export function nativePausedShadowStrategyIds(
+  standalone: readonly NativeShadowPauseRow[],
+  cohorts: readonly NativeShadowPauseCohort[],
+): string[] {
+  const paused = new Set<string>();
+  for (const row of standalone) {
+    if (row.decision.shadowAction === 'pause_new_entries') paused.add(row.strategyId);
+  }
+  for (const cohort of cohorts) {
+    const portfolioPaused = cohort.portfolioDecision.shadowAction === 'pause_new_entries';
+    for (const member of cohort.members) {
+      if (portfolioPaused || member.decision.shadowAction === 'pause_new_entries') {
+        paused.add(member.strategyId);
+      }
+    }
+  }
+  return [...paused];
+}
+
 /**
  * Parse the atomic promotion-audit snapshot used to stop new Shadow entries.
  * A missing, malformed, future-dated or stale report is ignored: Shadow has no

@@ -5,6 +5,7 @@ import {
   elderForceIndexZScore,
   priceVolumeTrendOscillator,
   rollingRegressionResidualZScore,
+  rollingVarianceRatio,
   ultimateOscillator,
   type CompletedOhlcv,
 } from '../../src/lib/lighter-independent-indicators.js';
@@ -75,5 +76,15 @@ describe('independent completed-bar indicators', () => {
     expect(base.slice(118).some((value) => Math.abs(value) > 0.1)).toBe(true);
     const linear = Array.from({ length: 180 }, (_value, index) => 100 + index * 0.25);
     expect(rollingRegressionResidualZScore(linear).slice(118).every((value) => Math.abs(value) < 1e-6)).toBe(true);
+  });
+
+  it('keeps rolling variance ratio causal, finite and neutral on a flat series', () => {
+    const closes = sample(260).map((bar) => bar.close);
+    const base = rollingVarianceRatio(closes);
+    const extended = rollingVarianceRatio([...closes, ...sample(5).map((bar) => bar.close + 9)]);
+    expect(extended.slice(0, closes.length)).toEqual(base);
+    expect(base.every(Number.isFinite)).toBe(true);
+    expect(base.slice(124).some((value) => Math.abs(value - 1) > 0.05)).toBe(true);
+    expect(rollingVarianceRatio(new Array(260).fill(100)).every((value) => value === 1)).toBe(true);
   });
 });

@@ -26,6 +26,7 @@ import {
   LIGHTER_NATIVE_RUNNER_STATUS_KEY,
   parseNativeRunnerStatus,
 } from '../src/lib/lighter-native-runner-status.js';
+import { nativePausedShadowStrategyIds } from '../src/lib/lighter-native-shadow-pause.js';
 
 const REAL_NATIVE_IDS: readonly string[] = [];
 const LATENCY_EVIDENCE_VERSION = 'lighter-native-entry-delay-audit-v1';
@@ -423,10 +424,21 @@ const p3Members = P3_IDS.map((strategyId) => {
     ),
   };
 });
+const p2Decision = nativePromotionDecision(
+  portfolio,
+  false,
+  historicalEvidence.portfolio.passed && p2LatencyEvidence.allMembers.passed,
+);
+const p3Decision = nativePromotionDecision(
+  p3Portfolio,
+  false,
+  p2LatencyEvidence.positiveExecutionSubset.passedHistoricalLatencyGate,
+);
 db.close();
-const pausedShadowStrategyIds = [...evaluatedStrategies, ...p2Members, ...p3Members]
-  .filter((row) => row.decision.shadowAction === 'pause_new_entries')
-  .map((row) => row.strategyId);
+const pausedShadowStrategyIds = nativePausedShadowStrategyIds(evaluatedStrategies, [
+  { members: p2Members, portfolioDecision: p2Decision },
+  { members: p3Members, portfolioDecision: p3Decision },
+]);
 const eligibleStrategyIds = evaluatedStrategies
   .filter((row) =>
     runnerLiveness.passed
@@ -485,11 +497,7 @@ const report = {
     realExecutorRegistered: false,
     latencyEvidence: p2LatencyEvidence,
     evaluation: portfolio,
-    decision: nativePromotionDecision(
-      portfolio,
-      false,
-      historicalEvidence.portfolio.passed && p2LatencyEvidence.allMembers.passed,
-    ),
+    decision: p2Decision,
     members: p2Members,
   },
   p3: {
@@ -501,11 +509,7 @@ const report = {
     realExecutorRegistered: false,
     historicalLatencyEvidence: p2LatencyEvidence.positiveExecutionSubset,
     evaluation: p3Portfolio,
-    decision: nativePromotionDecision(
-      p3Portfolio,
-      false,
-      p2LatencyEvidence.positiveExecutionSubset.passedHistoricalLatencyGate,
-    ),
+    decision: p3Decision,
     members: p3Members,
   },
   strategies: evaluatedStrategies,

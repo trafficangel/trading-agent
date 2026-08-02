@@ -1,0 +1,56 @@
+{
+  "version": "lighter-independent-v18-preregistration-v1",
+  "createdAt": "2026-08-02T09:41:00Z",
+  "status": "frozen_before_universe_results",
+  "objective": "Test two bidirectional completed-candle strategies conditioned on a causal rolling variance-ratio regime: anti-persistent Z-score reversion and persistent Donchian breakout. No symbol-specific or timeframe-specific tuning is allowed.",
+  "universe": [
+    "AAVE", "APT", "ARB", "BNB", "BTC", "DATA", "DOGE", "DOT", "ENA", "ETH", "GRAM", "HYPE", "JUP", "LINK", "LIT", "LTC", "NEAR", "PUMP", "SOL", "TAO", "UNI", "XLM", "XMR", "XRP"
+  ],
+  "unseenRuleHoldout": ["ADA", "ZEC"],
+  "timeframesMinutes": [1, 5],
+  "rules": [
+    {
+      "name": "V18-VR120K5<0.85-Z60-2.5-RECLAIM+EMA400-EXIT0-H120M",
+      "entry": "Rolling 120-bar variance ratio at aggregation 5 is below 0.85 and price Z60 reclaims -2.5 for Long or +2.5 for Short on a completed candle, aligned with EMA400",
+      "exit": "Price Z60 reaches zero, 1% stop or 120-minute timeout",
+      "stopPct": 1,
+      "maxHoldMinutes": 120
+    },
+    {
+      "name": "V18-VR120K5>1.15-DONCHIAN20+EMA200-EXIT10-H240M",
+      "entry": "Rolling 120-bar variance ratio at aggregation 5 is above 1.15 and the completed close breaks the prior 20-bar range in the EMA200 direction",
+      "exit": "Opposite 10-bar range exit, 1% stop or 240-minute timeout",
+      "stopPct": 1,
+      "maxHoldMinutes": 240
+    }
+  ],
+  "execution": {
+    "signal": "completed gap-free native bar",
+    "fill": "next native bar open",
+    "positionNotionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific executable $100 full-round-trip L2 p95",
+    "funding": "exact Lighter hourly settlements in (entry, exit]"
+  },
+  "qualification": {
+    "minimumTrades": 30,
+    "minimumProfitFactor": 1.2,
+    "minimumPositiveFolds": 3,
+    "maximumDrawdownPct": 15,
+    "requiresPositiveMeanL95": true,
+    "requiresPositiveISAndOOS": true,
+    "requiresPositiveLongAndShort": true,
+    "requiresPositiveBullBearAndVolatilityRegimes": true,
+    "requiresPositive30d60d90dBothSides": true,
+    "requiresMeasuredCostsAndFunding": true,
+    "requiresDelayedFillAudit": true
+  },
+  "frozenInputHashes": {
+    "executionCostsNativePortfolio100": "4afa14dd731014df5c806f7d5c2a06a0a02797561ce12a83847a4d841b42fce9",
+    "executionCostsHoldout": "4ef46b9be738080fc0d5e41893c7817e9ec750f1958c175111c6216a797d7df7",
+    "fundingHistoryNative": "5a44a8cba48306dad60ee695045d5fdcf4542ef1a6a75b55ad4aa3d12fe7e9f4",
+    "fundingHistoryTransfer2": "a0fb74c290cee83f8f574e7b678872cd35328cf3da54548e66fe5708a93830ed",
+    "fundingHistoryMainHoldoutSupport": "725d7e757f69be387c6c579f01d715e9a5d18bb0e8ae21e1eef497b018d5d0d6",
+    "fundingHistoryUnseenHoldout": "d39301aeec3f8b70d9bb8f0c6dabff3ba06d532b71abc715a2377fec69359a84"
+  }
+}
