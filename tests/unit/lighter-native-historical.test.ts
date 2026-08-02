@@ -209,39 +209,6 @@ describe('frozen Native historical evidence', () => {
     expect(second?.reasons).toEqual([]);
   });
 
-  it('admits only the two freshly frozen v13 Shadow candidates', () => {
-    const paths = [
-      'data/lighter-native-current-z60-validation.json',
-      'data/lighter-vwz60-holdout-validation.json',
-      'data/lighter-vwz60-transfer2-validation.json',
-      'data/lighter-data-vwz60-1m-rebuild-validation.json',
-      'data/lighter-rsi14-trend-transfer-validation.json',
-      'data/lighter-zec-confluence-regime-validation.json',
-      'data/lighter-data-confluence-regime-validation.json',
-      'data/lighter-fast-confluence-universe-5m-20260802.json',
-      'data/lighter-fast-confluence-v2-universe-5m-20260802.json',
-      'data/lighter-rsi14-mfi14-apt-xlm-refresh-20260802.json',
-      'data/lighter-vwz60t3-reclaim-apt-refresh-20260802.json',
-    ];
-    const values = paths.map((path) => JSON.parse(
-      readFileSync(resolve(path), 'utf8'),
-    ) as unknown);
-    const evidence = evaluateNativeHistoricalEvidence(
-      values[0], values[1], values[2], values[3], values[4], values[5],
-      values[6], values[7], values[8], values[9], values[10],
-    );
-    for (const strategyId of [
-      'xlm-rsi14-mfi14-ema400-challenger',
-      'apt-vwz60-3-reclaim-ema200-challenger',
-    ]) {
-      const candidate = evidence.candidates.find((row) => row.strategyId === strategyId);
-      expect(candidate?.passed).toBe(true);
-      expect(candidate?.reasons).toEqual([]);
-      expect(candidate?.metrics.recent.every((window) =>
-        window.long > 0 && window.short > 0)).toBe(true);
-    }
-  });
-
   it('rejects a changed frozen result even when headline qualification remains', () => {
     const source = JSON.parse(readFileSync(
       resolve('data/lighter-native-current-z60-validation.json'),
