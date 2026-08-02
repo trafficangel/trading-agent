@@ -1,0 +1,54 @@
+{
+  "version": "lighter-independent-v14-summary-v1",
+  "generatedAt": "2026-08-02T08:28:00Z",
+  "status": "rejected_without_shadow_or_real",
+  "preregistration": "data/lighter-independent-v14-preregistered-20260802.json",
+  "decision": "Neither Ultimate Oscillator nor Elder Force Index produced a robust executable edge. No parameter rescue, symbol-specific selection, Shadow registration or Real registration is allowed for this frozen family.",
+  "mainUniverse": {
+    "symbols": 24,
+    "timeframe1m": {
+      "qualifiedIndividuals": 0,
+      "qualifiedPortfolios": 0,
+      "parts": [
+        { "symbols": 6, "ultimateNetUsd": -2058.253, "forceIndexNetUsd": -746.698 },
+        { "symbols": 6, "ultimateNetUsd": -1402.194, "forceIndexNetUsd": -512.835 },
+        { "symbols": 6, "ultimateNetUsd": -1904.685, "forceIndexNetUsd": -748.614 },
+        { "symbols": 6, "ultimateNetUsd": -1564.454, "forceIndexNetUsd": -531.114 }
+      ]
+    },
+    "timeframe5m": [
+      {
+        "rule": "V14-UO7/14/28-RECLAIM30/70+EMA400-EXIT50-H120M",
+        "trades": 15356,
+        "netUsd": -973.207,
+        "profitFactor": 0.664,
+        "observedMaxNetUsd": -1139.366,
+        "positiveFolds": 0,
+        "meanL95Pct": -0.0697,
+        "longPctUnits": -519.364,
+        "shortPctUnits": -453.843,
+        "positiveSymbols": 2,
+        "activeSymbols": 24
+      },
+      {
+        "rule": "V14-EFI13-Z60-RECLAIM2+EMA400-EXIT0-H120M",
+        "trades": 10382,
+        "netUsd": -405.305,
+        "profitFactor": 0.867,
+        "observedMaxNetUsd": -502.829,
+        "positiveFolds": 0,
+        "meanL95Pct": -0.0510,
+        "longPctUnits": -245.936,
+        "shortPctUnits": -159.369,
+        "positiveSymbols": 4,
+        "activeSymbols": 24
+      }
+    ]
+  },
+  "unseenHoldout": {
+    "symbols": ["ADA", "ZEC"],
+    "timeframe1mQualified": [],
+    "timeframe5mQualified": [],
+    "note": "ZEC produced positive 5m headlines for both rules, but failed PF, L95, folds, OOS, direction/regime and recent-window gates. It was not selected post hoc."
+  }
+}

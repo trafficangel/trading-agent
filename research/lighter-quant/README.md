@@ -513,3 +513,24 @@ pnpm tsx scripts/research-lighter-quant.ts 5
 pnpm tsx scripts/research-lighter-range.ts 1
 pnpm tsx scripts/research-lighter-range.ts 5
 ```
+
+### Independent V14: Ultimate Oscillator and Elder Force Index
+
+V14 was frozen before inspecting results. It tested two mirrored completed-bar
+rules on the same 24-market universe at 1m and 5m, with ADA/ZEC held out:
+Ultimate Oscillator(7/14/28) boundary reclaim and EMA13 Elder Force Index Z60
+reclaim. Entries filled at the next native open and paid market-specific $100
+L2 p95 execution cost plus exact funding.
+
+- 1m: zero individual or portfolio qualifiers in every six-market batch and
+  zero qualifiers on the unseen ADA/ZEC holdout. Measured execution cost
+  dominated the very short holds.
+- 5m: zero qualifiers. Ultimate Oscillator produced 15,356 portfolio trades,
+  −$973.21, PF 0.66, L95 −0.0697 and 0/4 positive folds. Elder Force Index
+  produced 10,382 trades, −$405.31, PF 0.87, L95 −0.0510 and 0/4 folds.
+- ZEC showed positive isolated 5m headlines, but failed PF, L95, OOS, regime,
+  direction and recent-window gates; it was not selected after seeing results.
+
+**Decision:** both V14 families are rejected without Shadow or Real. Their
+negative artifacts remain tracked so the same hypotheses are not repeatedly
+rediscovered or rescue-tuned.
