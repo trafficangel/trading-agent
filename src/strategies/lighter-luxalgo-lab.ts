@@ -902,8 +902,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     timeExitBars: 120,
     trendFilter: 'ema400',
     realEnabled: false,
-    noteRu: 'APT прошёл 180d, 4/4 фолда, IS/OOS, Long/Short и окна 30/60/90d после измеренного $100 p95, observed-max чувствительности и точного funding. Соседние RSI 20/25/30 и EMA300/400/500 подтверждают неединственность точки. Только prospective Shadow.',
-    noteEn: 'APT passed 180d, 4/4 folds, IS/OOS, Long/Short and 30/60/90d windows after measured $100 p95, observed-max sensitivity and exact funding. Adjacent RSI 20/25/30 and EMA300/400/500 show the result is not an isolated parameter cell. Prospective Shadow only.',
+    noteRu: 'APT сохраняет +9.20% и PF 1.34 при консервативном входе через одну минуту, но строгий latency-гейт не пройден: L95 −0.047%, а long за последние 30d −1.15%. Только Shadow; Real заблокирован до нового независимого подтверждения.',
+    noteEn: 'APT retains +9.20% and PF 1.34 with a conservative one-minute delayed fill, but fails the strict latency gate: L95 is −0.047% and the latest 30d long leg is −1.15%. Shadow only; Real is blocked pending new independent evidence.',
   },
   'dot-rsi14-pullback-ema400': {
     family: 'rsi',
@@ -913,8 +913,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     timeExitBars: 120,
     trendFilter: 'ema400',
     realEnabled: false,
-    noteRu: 'DOT прошёл IS/OOS, обе стороны, 3/4 фолда и окна 30/60/90d после измеренных издержек и funding. Соседние RSI20 и EMA500 также проходят, но просадка выше APT, поэтому это вторичный prospective Shadow-кандидат.',
-    noteEn: 'DOT passed IS/OOS, both sides, 3/4 folds and 30/60/90d windows after measured execution and funding. Adjacent RSI20 and EMA500 also pass, but drawdown is higher than APT, so this is the secondary prospective Shadow candidate.',
+    noteRu: 'DOT сохраняет +8.04% при консервативном входе через одну минуту, но строгий latency-гейт не пройден: PF 1.16, L95 −0.051%, DD −15.88%, только 2/4 положительных фолда и отрицательный IS. Только Shadow; Real заблокирован.',
+    noteEn: 'DOT retains +8.04% with a conservative one-minute delayed fill, but fails the strict latency gate: PF 1.16, L95 −0.051%, DD −15.88%, only 2/4 positive folds and negative IS. Shadow only; Real is blocked.',
   },
   'zec-rsi14-willr14-ema400': {
     family: 'rsi_williams',
