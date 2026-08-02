@@ -3,6 +3,7 @@ import {
   normalizeHoldoutSymbol,
   performanceSymbols,
   reservedHoldoutLeaks,
+  undeclaredHoldoutLeaks,
 } from '../../src/lib/lighter-native-holdout.js';
 
 describe('Native Quant sealed holdout', () => {
@@ -21,6 +22,15 @@ describe('Native Quant sealed holdout', () => {
     ], ['SPX', 'BERA'])).toEqual({
       BERA: ['holdout.json'],
       SPX: ['discovery.json'],
+    });
+  });
+
+  it('allows only ledger-declared performance artifacts after opening', () => {
+    expect(undeclaredHoldoutLeaks({
+      SPX: ['data/declared.json', 'data/rogue.json'],
+      BERA: ['data/declared.json'],
+    }, ['data/declared.json'])).toEqual({
+      SPX: ['data/rogue.json'],
     });
   });
 });

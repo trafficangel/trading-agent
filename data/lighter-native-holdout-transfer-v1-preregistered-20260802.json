@@ -1,0 +1,99 @@
+{
+  "version": "lighter-native-holdout-transfer-v1",
+  "createdAt": "2026-08-02T11:46:13Z",
+  "state": "preregistered_before_performance_open",
+  "purpose": "One-time generalization test of two already-frozen Native Quant rules on two executability-selected markets whose strategy performance has never been viewed.",
+  "sealedLedger": {
+    "file": "data/lighter-native-holdout-ledger.json",
+    "sha256": "e9b8182050747e7bb44571416f55bdf64ccc4c2348ace2a189b59b73e1e602bf",
+    "performanceOpenedAtRegistration": false
+  },
+  "runner": {
+    "file": "scripts/sweep-lighter-native-1m.ts",
+    "sha256": "723b864d7d722c1ff34d010d9d7c912e3b3d0bece679d3d26d2499e0c29e7913"
+  },
+  "reservedMarkets": ["SPX", "BERA"],
+  "timeframesMinutes": [1, 5],
+  "frozenRules": [
+    {
+      "name": "CONF-RSI14-WILLR14-30/70+EMA400",
+      "warmupBars": 402,
+      "stopLossPct": 1,
+      "maximumHoldingBars": 120,
+      "longEntryOnCompletedBar": "RSI14 < 30 and Williams %R14 < -80 and close > EMA400",
+      "shortEntryOnCompletedBar": "RSI14 > 70 and Williams %R14 > -20 and close < EMA400",
+      "longExitOnCompletedBar": "RSI14 >= 50",
+      "shortExitOnCompletedBar": "RSI14 <= 50"
+    },
+    {
+      "name": "CONF-VWZ60-2.5+MFI14-35/65+EMA400",
+      "warmupBars": 402,
+      "stopLossPct": 1,
+      "maximumHoldingBars": 120,
+      "longEntryOnCompletedBar": "VWAP60 z-score < -2.5 and MFI14 < 35 and close > EMA400",
+      "shortEntryOnCompletedBar": "VWAP60 z-score > 2.5 and MFI14 > 65 and close < EMA400",
+      "longExitOnCompletedBar": "close >= VWAP60",
+      "shortExitOnCompletedBar": "close <= VWAP60"
+    }
+  ],
+  "executionContract": {
+    "completedBarsOnly": true,
+    "entry": "next bar open after a completed-bar signal",
+    "indicatorExit": "next bar open after a completed-bar exit signal",
+    "stop": "intrabar at the frozen 1% stop price",
+    "maximumHoldingTime": {
+      "1m": "120 bars = 120 minutes",
+      "5m": "120 bars = 600 minutes"
+    },
+    "positionNotionalUsd": 100,
+    "commissionPct": 0,
+    "executionCosts": {
+      "file": "data/lighter-execution-costs-new-holdout-20260802.json",
+      "sha256": "31eb85cd6438eb2853d61c575f19928f9c4443852de8bc905c5a5629049ee7b7",
+      "primary": "market-specific executable $100 full-round-trip p95",
+      "sensitivity": "market-specific measured observed maximum"
+    },
+    "funding": {
+      "file": "data/lighter-funding-history-new-holdout-20260802.json",
+      "sha256": "8fabd7f3a41c797ff8c868d6034ab97e8ddbd74f79fde3d44468f95bc91d5f70",
+      "method": "exact Lighter hourly settlements during each position"
+    },
+    "candleHashes": {
+      "SPX-1m": "da7d824da11fb1bd49735358017227d54873027b4b3705c90e674a7814692d10",
+      "SPX-5m": "9fce4959b1cecb53b760b8ad203f4ea7e213fc04c45478d2b279be7ea26c5c91",
+      "BERA-1m": "a1f0dd31626ed2e24391428db9c79ca3ede33bf62aaab6e3b4c442922c3a36a1",
+      "BERA-5m": "20308338a2e81aa1fc429a003c124e66f29581a8337ad299d4c877ef0a5bd1fa"
+    }
+  },
+  "individualMarketGate": {
+    "minimumTrades": 30,
+    "minimumCoverageDays": 171,
+    "primaryNetPct": "> 0",
+    "primaryProfitFactor": ">= 1.20",
+    "meanTradeL95Pct": "> 0",
+    "positiveChronologicalFolds": ">= 3 of 4",
+    "inSampleNetPct": "> 0",
+    "outOfSampleNetPct": "> 0",
+    "longNetPct": "> 0",
+    "shortNetPct": "> 0",
+    "maximumDrawdownPct": ">= -15",
+    "trendRegimes": "bull and bear each N >= 20, net > 0, PF >= 1.10; mixed must pass the same net/PF gate when N >= 20",
+    "volatilityRegimes": "high and low volatility each N >= 20, net > 0, PF >= 1.10",
+    "recentWindows": "30d, 60d and 90d each N >= 20, net > 0, PF >= 1.10 and both Long/Short net > 0",
+    "observedMaximumSensitivity": "net > 0 and PF >= 1.10",
+    "measuredInputsOnly": true
+  },
+  "transferDecision": {
+    "pass": "A rule/timeframe transfers only if both SPX and BERA independently pass every individualMarketGate condition. A result on only one market is rejected as non-generalizing. 1m and 5m are evaluated as separately preregistered hypotheses.",
+    "multipleTestingControl": "No best-cell selection: a transferable candidate requires the same frozen rule and timeframe to pass on both reserved markets.",
+    "onPass": "Require runtime-parity verification, then register only a fresh zero-history prospective Shadow strategy. Real remains disabled until the normal frozen forward gate passes.",
+    "onFailure": "Reject the rule/timeframe transfer. Do not tune thresholds, holding time, stop, symbols, costs, period or market subset on this spent holdout.",
+    "automaticRealPromotion": false
+  },
+  "resultArtifacts": [
+    "data/lighter-native-holdout-transfer-rsi-1m-20260802.json",
+    "data/lighter-native-holdout-transfer-rsi-5m-20260802.json",
+    "data/lighter-native-holdout-transfer-vwzmfi-1m-20260802.json",
+    "data/lighter-native-holdout-transfer-vwzmfi-5m-20260802.json"
+  ]
+}

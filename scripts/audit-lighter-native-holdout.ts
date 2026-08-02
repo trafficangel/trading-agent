@@ -1,15 +1,21 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import {
   reservedHoldoutLeaks,
   type JsonReport,
+  undeclaredHoldoutLeaks,
 } from '../src/lib/lighter-native-holdout.js';
 
 type Candle = { t?: number };
+type EvidenceRef = { file: string; sha256: string };
 type Ledger = {
   version: string;
   reservedSymbols: string[];
   performanceOpened: boolean;
+  openedAt?: string;
+  preregistration?: EvidenceRef;
+  performanceArtifacts?: EvidenceRef[];
   files: {
     candleDirectory: string;
     executionCosts: string;
@@ -22,6 +28,30 @@ type Ledger = {
     minimumFundingCoverageRatio: number;
   };
 };
+
+function fileSha256(path: string): string {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function verifyEvidenceRef(
+  evidence: EvidenceRef | undefined,
+  label: string,
+  failures: string[],
+): void {
+  if (!evidence || typeof evidence.file !== 'string' || typeof evidence.sha256 !== 'string') {
+    failures.push(`${label} evidence missing`);
+    return;
+  }
+  const path = resolve(evidence.file);
+  if (!existsSync(path)) {
+    failures.push(`${label} file missing: ${evidence.file}`);
+    return;
+  }
+  const actual = fileSha256(path);
+  if (actual !== evidence.sha256) {
+    failures.push(`${label} hash mismatch: ${evidence.file}`);
+  }
+}
 
 const ledgerPath = resolve(process.argv[2] ?? 'data/lighter-native-holdout-ledger.json');
 const outputPath = process.argv[3] ? resolve(process.argv[3]) : null;
@@ -47,6 +77,25 @@ const leaks = reservedHoldoutLeaks(reports, ledger.reservedSymbols);
 const failures: string[] = [];
 if (!ledger.performanceOpened && Object.keys(leaks).length) {
   failures.push(`sealed holdout leaked into performance reports: ${JSON.stringify(leaks)}`);
+}
+if (ledger.performanceOpened) {
+  const openedAt = Date.parse(ledger.openedAt ?? '');
+  if (!Number.isFinite(openedAt)) failures.push('opened holdout timestamp missing or invalid');
+  verifyEvidenceRef(ledger.preregistration, 'preregistration', failures);
+  if (!Array.isArray(ledger.performanceArtifacts) || !ledger.performanceArtifacts.length) {
+    failures.push('opened holdout performance artifacts missing');
+  } else {
+    for (const [index, artifact] of ledger.performanceArtifacts.entries()) {
+      verifyEvidenceRef(artifact, `performance artifact ${index + 1}`, failures);
+    }
+    const undeclared = undeclaredHoldoutLeaks(
+      leaks,
+      ledger.performanceArtifacts.map((artifact) => artifact.file),
+    );
+    if (Object.keys(undeclared).length) {
+      failures.push(`opened holdout has undeclared performance reports: ${JSON.stringify(undeclared)}`);
+    }
+  }
 }
 
 const execution = JSON.parse(readFileSync(resolve(ledger.files.executionCosts), 'utf8')) as {
@@ -110,7 +159,11 @@ const output = {
   version: 'lighter-native-holdout-audit-v1',
   generatedAt: new Date().toISOString(),
   ledgerPath: relative(process.cwd(), ledgerPath),
-  status: failures.length ? 'failed' : 'sealed_ready',
+  status: failures.length
+    ? 'failed'
+    : ledger.performanceOpened
+      ? 'spent_verified'
+      : 'sealed_ready',
   performanceOpened: ledger.performanceOpened,
   reservedSymbols: ledger.reservedSymbols,
   leaks,

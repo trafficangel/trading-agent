@@ -49,3 +49,22 @@ export function reservedHoldoutLeaks(
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([symbol, files]) => [symbol, [...new Set(files)].sort()]));
 }
+
+/**
+ * Once a sealed holdout is spent, every performance exposure must be declared
+ * in the ledger. This keeps an opened holdout auditable without treating its
+ * preregistered result artifacts as accidental leaks.
+ */
+export function undeclaredHoldoutLeaks(
+  leaks: Readonly<Record<string, readonly string[]>>,
+  declaredPerformanceFiles: readonly string[],
+): Record<string, string[]> {
+  const declared = new Set(declaredPerformanceFiles);
+  return Object.fromEntries(Object.entries(leaks)
+    .map(([symbol, files]) => [
+      symbol,
+      [...new Set(files.filter((file) => !declared.has(file)))].sort(),
+    ] as const)
+    .filter(([, files]) => files.length > 0)
+    .sort(([left], [right]) => left.localeCompare(right)));
+}
