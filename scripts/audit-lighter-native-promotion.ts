@@ -28,7 +28,15 @@ import {
 } from '../src/lib/lighter-native-runner-status.js';
 import { nativePausedShadowStrategyIds } from '../src/lib/lighter-native-shadow-pause.js';
 
-const REAL_NATIVE_IDS: readonly string[] = [];
+/**
+ * Manual operator approval registers only the execution path. The audit still
+ * returns no eligible ID until the complete historical, latency, runner and
+ * prospective Shadow gates pass without exception.
+ */
+const REAL_NATIVE_IDS: readonly string[] = [
+  'hype-rsi14-willr14-ema400-challenger',
+  'zec-vwz60-mfi14-ema400-challenger',
+];
 const LATENCY_EVIDENCE_VERSION = 'lighter-native-entry-delay-audit-v1';
 const LATENCY_EVIDENCE_SHA256 =
   'a6d1cf2b5e8aa5625fe001eb87f6334e223a9f3879b6921ee336156c19ac2ded';

@@ -54,9 +54,18 @@ class FillSummary:
 
 
 STRATEGIES = {
-    # Native Quant is deliberately absent: its historical failures and small
-    # prospective sample do not justify a Real execution path. The entries
-    # below are the separately managed LuxAlgo live canary only.
+    # Native Quant candidates are executor-registered now, but remain
+    # fail-closed until the immutable promotion audit confirms at least 20
+    # prospective Shadow closes across >=7 days, both sides, PF >=1.20 and all
+    # execution-quality gates. Registration is not permission to bypass that
+    # contract.
+    "hype-rsi14-willr14-ema400-challenger": Strategy(
+        24, "HYPEUSDT", "HYPE", 1.0
+    ),
+    "zec-vwz60-mfi14-ema400-challenger": Strategy(
+        90, "ZECUSDT", "ZEC", 1.0
+    ),
+    # The entries below are the separately managed LuxAlgo live canary.
     "sol-lg-mf50": Strategy(2, "SOLUSDT", "SOL", 5.0),
     "eth-cntr-st": Strategy(0, "ETHUSDT", "ETH", 4.0),
     "btc-choch-cfm-tc": Strategy(1, "BTCUSDT", "BTC", 3.5),
@@ -67,7 +76,12 @@ STRATEGIES = {
     "aave-cntr-strong": Strategy(27, "AAVEUSDT", "AAVE", 5.0),
 }
 
-NATIVE_SHADOW_GATED_STRATEGIES: frozenset[str] = frozenset()
+NATIVE_SHADOW_GATED_STRATEGIES: frozenset[str] = frozenset(
+    {
+        "hype-rsi14-willr14-ema400-challenger",
+        "zec-vwz60-mfi14-ema400-challenger",
+    }
+)
 
 
 class LiveRunner:
