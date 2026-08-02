@@ -17,6 +17,7 @@ from lighter_live_risk import (  # noqa: E402
     NATIVE_HISTORICAL_SUPPLEMENT_SHA256,
     NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256,
     NATIVE_LATENCY_EVIDENCE_SHA256,
+    NATIVE_LATENCY_SUPPLEMENT_SHA256_BY_STRATEGY,
     NATIVE_LATENCY_EVIDENCE_VERSION,
     NATIVE_PROMOTION_GATE,
     native_promotion_report_error,
@@ -124,6 +125,37 @@ class NativePromotionReportTest(unittest.TestCase):
         report = valid_report()
         report["strategies"][0]["latencyEvidence"]["passed"] = False
         self.assertIn("latency evidence not passed", self.check(report) or "")
+
+    def test_supplemental_latency_artifact_is_required_for_new_candidate(self) -> None:
+        strategy_id = "xlm-vwz60-willr14-ema400-challenger"
+        report = valid_report()
+        report["eligibleStrategyIds"] = [strategy_id]
+        report["strategies"][0]["strategyId"] = strategy_id
+        self.assertIn(
+            "supplemental evidence missing",
+            native_promotion_report_error(report, strategy_id, NOW_MS, 7_200_000) or "",
+        )
+        report["latencyEvidence"]["supplementalSources"] = [{
+            "strategyIds": [strategy_id],
+            "sourceSha256": NATIVE_LATENCY_SUPPLEMENT_SHA256_BY_STRATEGY[strategy_id],
+        }]
+        self.assertIsNone(
+            native_promotion_report_error(report, strategy_id, NOW_MS, 7_200_000)
+        )
+
+    def test_changed_supplemental_latency_artifact_fails_closed(self) -> None:
+        strategy_id = "hype-vwz60-stoch14-ema400-challenger"
+        report = valid_report()
+        report["eligibleStrategyIds"] = [strategy_id]
+        report["strategies"][0]["strategyId"] = strategy_id
+        report["latencyEvidence"]["supplementalSources"] = [{
+            "strategyIds": [strategy_id],
+            "sourceSha256": "0" * 64,
+        }]
+        self.assertIn(
+            "supplemental evidence hash mismatch",
+            native_promotion_report_error(report, strategy_id, NOW_MS, 7_200_000) or "",
+        )
 
     def test_duplicate_strategy_evidence_fails_closed(self) -> None:
         report = valid_report()

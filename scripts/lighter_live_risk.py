@@ -29,6 +29,14 @@ NATIVE_LATENCY_EVIDENCE_VERSION = "lighter-native-entry-delay-audit-v1"
 NATIVE_LATENCY_EVIDENCE_SHA256 = (
     "a6d1cf2b5e8aa5625fe001eb87f6334e223a9f3879b6921ee336156c19ac2ded"
 )
+NATIVE_LATENCY_SUPPLEMENT_SHA256_BY_STRATEGY = {
+    "xlm-vwz60-willr14-ema400-challenger": (
+        "89a0453021b9a9adcadead95b7a02c7da38a1facefd2f17a65206653566b4052"
+    ),
+    "hype-vwz60-stoch14-ema400-challenger": (
+        "93b9abca3696ea12aaeb61acac29c76aa91ac89def21a9dcb2955e57ad2360d9"
+    ),
+}
 NATIVE_PROMOTION_GATE = {
     "targetClosed": 20.0,
     "minDurationDays": 7.0,
@@ -203,6 +211,24 @@ def native_promotion_report_error(
         return "native latency evidence version mismatch"
     if latency.get("sourceSha256") != NATIVE_LATENCY_EVIDENCE_SHA256:
         return "native latency evidence hash mismatch"
+    expected_latency_supplement = NATIVE_LATENCY_SUPPLEMENT_SHA256_BY_STRATEGY.get(
+        strategy_id
+    )
+    if expected_latency_supplement is not None:
+        supplemental_sources = latency.get("supplementalSources")
+        if not isinstance(supplemental_sources, list):
+            return "native latency supplemental evidence missing"
+        matching_supplements = [
+            source
+            for source in supplemental_sources
+            if isinstance(source, dict)
+            and isinstance(source.get("strategyIds"), list)
+            and strategy_id in source.get("strategyIds")
+        ]
+        if len(matching_supplements) != 1:
+            return "native latency supplemental evidence missing or duplicated"
+        if matching_supplements[0].get("sourceSha256") != expected_latency_supplement:
+            return "native latency supplemental evidence hash mismatch"
 
     strategies = report.get("strategies")
     if not isinstance(strategies, list):

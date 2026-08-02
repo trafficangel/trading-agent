@@ -22,6 +22,10 @@ const REAL_NATIVE_IDS: readonly string[] = [];
 const LATENCY_EVIDENCE_VERSION = 'lighter-native-entry-delay-audit-v1';
 const LATENCY_EVIDENCE_SHA256 =
   'a6d1cf2b5e8aa5625fe001eb87f6334e223a9f3879b6921ee336156c19ac2ded';
+const XLM_CONFLUENCE_LATENCY_EVIDENCE_SHA256 =
+  '89a0453021b9a9adcadead95b7a02c7da38a1facefd2f17a65206653566b4052';
+const HYPE_CONFLUENCE_LATENCY_EVIDENCE_SHA256 =
+  '93b9abca3696ea12aaeb61acac29c76aa91ac89def21a9dcb2955e57ad2360d9';
 const P2_LATENCY_EVIDENCE_VERSION = 'lighter-p2-entry-delay-portfolio-audit-v1';
 const P2_LATENCY_EVIDENCE_SHA256 =
   'ef7361a77d619d39b620c0422e5e1491f5f8b1f1063f36f41c2212fd4f7c4cd3';
@@ -106,6 +110,23 @@ function latencyEvidenceRows(value: unknown): Map<string, LatencyEvidenceRow> {
   return rows;
 }
 
+function readLatencyEvidence(
+  path: string,
+  expectedSha256: string,
+  label: string,
+): { sha256: string; rows: Map<string, LatencyEvidenceRow> } {
+  if (!existsSync(path)) throw new Error(`${label} latency evidence missing: ${path}`);
+  const raw = readFileSync(path);
+  const sha256 = createHash('sha256').update(raw).digest('hex');
+  if (sha256 !== expectedSha256) {
+    throw new Error(`${label} latency evidence hash mismatch: ${sha256}`);
+  }
+  return {
+    sha256,
+    rows: latencyEvidenceRows(JSON.parse(raw.toString('utf8'))),
+  };
+}
+
 function flagValue(name: string): string | null {
   const index = process.argv.indexOf(name);
   return index >= 0 ? (process.argv[index + 1] ?? null) : null;
@@ -164,15 +185,42 @@ if (!existsSync(dataConfluenceHistoricalPath)) {
 const latencyEvidencePath = resolve(
   flagValue('--latency') ?? 'data/lighter-native-active-entry-delay-audit-20260802.json',
 );
-if (!existsSync(latencyEvidencePath)) {
-  throw new Error(`latency evidence missing: ${latencyEvidencePath}`);
+const xlmConfluenceLatencyEvidencePath = resolve(
+  flagValue('--latency-xlm-confluence')
+    ?? 'data/lighter-xlm-vwz-williams-entry-delay-20260802.json',
+);
+const hypeConfluenceLatencyEvidencePath = resolve(
+  flagValue('--latency-hype-confluence')
+    ?? 'data/lighter-hype-vwz-stochastic-entry-delay-20260802.json',
+);
+const latencyEvidence = readLatencyEvidence(
+  latencyEvidencePath,
+  LATENCY_EVIDENCE_SHA256,
+  'base',
+);
+const xlmConfluenceLatencyEvidence = readLatencyEvidence(
+  xlmConfluenceLatencyEvidencePath,
+  XLM_CONFLUENCE_LATENCY_EVIDENCE_SHA256,
+  'XLM confluence',
+);
+const hypeConfluenceLatencyEvidence = readLatencyEvidence(
+  hypeConfluenceLatencyEvidencePath,
+  HYPE_CONFLUENCE_LATENCY_EVIDENCE_SHA256,
+  'HYPE confluence',
+);
+const latencyByStrategy = new Map<string, LatencyEvidenceRow>();
+for (const source of [
+  latencyEvidence,
+  xlmConfluenceLatencyEvidence,
+  hypeConfluenceLatencyEvidence,
+]) {
+  for (const [strategyId, row] of source.rows) {
+    if (latencyByStrategy.has(strategyId)) {
+      throw new Error(`duplicate latency evidence across sources: ${strategyId}`);
+    }
+    latencyByStrategy.set(strategyId, row);
+  }
 }
-const latencyEvidenceRaw = readFileSync(latencyEvidencePath);
-const latencyEvidenceSha256 = createHash('sha256').update(latencyEvidenceRaw).digest('hex');
-if (latencyEvidenceSha256 !== LATENCY_EVIDENCE_SHA256) {
-  throw new Error(`latency evidence hash mismatch: ${latencyEvidenceSha256}`);
-}
-const latencyByStrategy = latencyEvidenceRows(JSON.parse(latencyEvidenceRaw.toString('utf8')));
 const p2LatencyEvidencePath = resolve(
   flagValue('--p2-latency') ?? 'data/lighter-p2-entry-delay-portfolio-20260802.json',
 );
@@ -324,7 +372,17 @@ const report = {
   },
   latencyEvidence: {
     version: LATENCY_EVIDENCE_VERSION,
-    sourceSha256: latencyEvidenceSha256,
+    sourceSha256: latencyEvidence.sha256,
+    supplementalSources: [
+      {
+        strategyIds: [...xlmConfluenceLatencyEvidence.rows.keys()],
+        sourceSha256: xlmConfluenceLatencyEvidence.sha256,
+      },
+      {
+        strategyIds: [...hypeConfluenceLatencyEvidence.rows.keys()],
+        sourceSha256: hypeConfluenceLatencyEvidence.sha256,
+      },
+    ],
     conservativeScenario: 'native 1m open one minute after the next 5m open',
   },
   p2LatencyEvidence: {
