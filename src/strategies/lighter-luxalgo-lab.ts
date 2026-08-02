@@ -946,9 +946,13 @@ const NATIVE_STRATEGY_IDS = [
   ...NATIVE_POSITIVE_EXECUTION_PORTFOLIO_MARKETS.map((market) => market.id),
 ] as const;
 const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(NATIVE_RETIRED_STRATEGY_IDS);
-// Native Quant remains prospective Shadow-only. Historical rows stay visible,
-// but no Native strategy is currently registered for Real execution.
-const NATIVE_LIVE_STRATEGY_IDS: readonly string[] = [];
+// These candidates are registered with the protected Real executor. Runtime
+// state remains authoritative: HYPE may run as one capped experimental canary,
+// while ZEC stays disabled and continues prospective Shadow collection.
+const NATIVE_LIVE_STRATEGY_IDS: readonly string[] = [
+  'hype-rsi14-willr14-ema400-challenger',
+  'zec-vwz60-mfi14-ema400-challenger',
+];
 
 type NativeStrategyInfo = {
   family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic' | 'bb_williams_reclaim';
