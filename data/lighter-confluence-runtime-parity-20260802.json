@@ -1,11 +1,25 @@
 {
   "version": "lighter-confluence-runtime-parity-v1",
-  "generatedAt": "2026-08-02T03:47:19.519Z",
+  "generatedAt": "2026-08-02T04:57:00.521Z",
   "barMinutes": 5,
   "completedBarsOnly": true,
   "runtimeWindowBars": 2000,
   "passed": true,
   "results": [
+    {
+      "strategyId": "hype-bb20-willr14-reclaim-ema400-challenger",
+      "symbol": "HYPE",
+      "candles": 51839,
+      "comparableBars": 49840,
+      "runtimeWindowBars": 2000,
+      "fullSignals": 493,
+      "runtimeSignals": 493,
+      "signalMismatches": 0,
+      "trendSideMismatches": 0,
+      "maxEmaDifferencePct": 0.000854362317880283,
+      "firstMismatches": [],
+      "passed": true
+    },
     {
       "strategyId": "hype-vwz60-stoch14-ema400-challenger",
       "symbol": "HYPE",

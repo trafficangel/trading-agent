@@ -94,6 +94,12 @@ const ENABLE_FAST_CONFLUENCE_FAMILIES_V2 =
   process.env.ENABLE_FAST_CONFLUENCE_FAMILIES_V2 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V3 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V3 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V4 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V4 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V5 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V5 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V6 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V6 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -900,6 +906,187 @@ function rules(): Rule[] {
       },
       exit(a, i, side) {
         return side === 'long' ? a.cci20[i]! >= 0 : a.cci20[i]! <= 0;
+      },
+    });
+  }
+
+  // Preregistered independent v4 suite. Both rules wait for a completed-bar
+  // reclaim after an extreme rather than buying/selling the first touch. The
+  // parameters are frozen before the universe run, mirrored exactly for both
+  // sides and shared unchanged by every market and both timeframes.
+  if (ENABLE_INDEPENDENT_FAMILIES_V4) {
+    out.push({
+      name: 'BB20-2-RECLAIM+WILLR14-80/20+EMA400-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const priorLower = a.sma20[i - 1]! - 2 * a.sd20[i - 1]!;
+        const priorUpper = a.sma20[i - 1]! + 2 * a.sd20[i - 1]!;
+        const lower = a.sma20[i]! - 2 * a.sd20[i]!;
+        const upper = a.sma20[i]! + 2 * a.sd20[i]!;
+        if (
+          a.close[i - 1]! < priorLower
+          && a.close[i]! >= lower
+          && a.williams14[i]! < -80
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          a.close[i - 1]! > priorUpper
+          && a.close[i]! <= upper
+          && a.williams14[i]! > -20
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.sma20[i]!
+          : a.close[i]! <= a.sma20[i]!;
+      },
+    });
+
+    out.push({
+      name: 'VWZ60-2.25-RECLAIM+RSI2-10/90+EMA400-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const priorZ = a.vwapSd60[i - 1]! > 0
+          ? (a.close[i - 1]! - a.vwap60[i - 1]!) / a.vwapSd60[i - 1]!
+          : 0;
+        const currentZ = a.vwapSd60[i]! > 0
+          ? (a.close[i]! - a.vwap60[i]!) / a.vwapSd60[i]!
+          : 0;
+        if (
+          priorZ < -2.25
+          && currentZ >= -2.25
+          && a.rsi2[i]! < 10
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          priorZ > 2.25
+          && currentZ <= 2.25
+          && a.rsi2[i]! > 90
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.vwap60[i]!
+          : a.close[i]! <= a.vwap60[i]!;
+      },
+    });
+  }
+
+  // Preregistered independent v5 suite. The first family tests whether volume
+  // pressure confirms a Bollinger reclaim; the second uses an ATR-normalised
+  // Keltner reclaim with RSI confirmation. Both are frozen before evaluation,
+  // exactly mirrored and execute only after the signal candle has completed.
+  if (ENABLE_INDEPENDENT_FAMILIES_V5) {
+    out.push({
+      name: 'BB20-2-RECLAIM+MFI14-30/70+EMA400-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const priorLower = a.sma20[i - 1]! - 2 * a.sd20[i - 1]!;
+        const priorUpper = a.sma20[i - 1]! + 2 * a.sd20[i - 1]!;
+        const lower = a.sma20[i]! - 2 * a.sd20[i]!;
+        const upper = a.sma20[i]! + 2 * a.sd20[i]!;
+        if (
+          a.close[i - 1]! < priorLower
+          && a.close[i]! >= lower
+          && a.mfi14[i]! < 30
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          a.close[i - 1]! > priorUpper
+          && a.close[i]! <= upper
+          && a.mfi14[i]! > 70
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.sma20[i]!
+          : a.close[i]! <= a.sma20[i]!;
+      },
+    });
+
+    out.push({
+      name: 'KELTNER21-ATR2-RECLAIM+RSI14-35/65+EMA400-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const priorLower = a.ema21[i - 1]! - 2 * a.atr14[i - 1]!;
+        const priorUpper = a.ema21[i - 1]! + 2 * a.atr14[i - 1]!;
+        const lower = a.ema21[i]! - 2 * a.atr14[i]!;
+        const upper = a.ema21[i]! + 2 * a.atr14[i]!;
+        if (
+          a.close[i - 1]! < priorLower
+          && a.close[i]! >= lower
+          && a.rsi14[i]! < 35
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          a.close[i - 1]! > priorUpper
+          && a.close[i]! <= upper
+          && a.rsi14[i]! > 65
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.ema21[i]!
+          : a.close[i]! <= a.ema21[i]!;
+      },
+    });
+  }
+
+  // Preregistered independent v6 suite. These are canonical short-horizon
+  // mean-reversion hypotheses: Connors-style RSI2 and Internal Bar Strength,
+  // each traded only in the EMA200 regime and exited at EMA5. The same fixed,
+  // mirrored rule is applied to every market and both timeframes.
+  if (ENABLE_INDEPENDENT_FAMILIES_V6) {
+    out.push({
+      name: 'CONNORS-RSI2-10/90+EMA200-EXIT-EMA5-H120M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        if (a.rsi2[i]! < 10 && a.close[i]! > a.ema200[i]!) return 'long';
+        if (a.rsi2[i]! > 90 && a.close[i]! < a.ema200[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.ema5[i]!
+          : a.close[i]! <= a.ema5[i]!;
+      },
+    });
+
+    out.push({
+      name: 'IBS-10/90+EMA200-EXIT-EMA5-H120M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const range = a.c[i]!.h - a.c[i]!.l;
+        if (!(range > 0)) return null;
+        const ibs = (a.close[i]! - a.c[i]!.l) / range;
+        if (ibs < 0.1 && a.close[i]! > a.ema200[i]!) return 'long';
+        if (ibs > 0.9 && a.close[i]! < a.ema200[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.ema5[i]!
+          : a.close[i]! <= a.ema5[i]!;
       },
     });
   }

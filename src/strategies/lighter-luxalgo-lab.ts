@@ -832,6 +832,26 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 5.089,
     },
   },
+  {
+    id: 'hype-bb20-willr14-reclaim-ema400-challenger',
+    code: '061',
+    name: 'Bollinger20 Reclaim + Williams %R14 · EMA400 · Mean Exit',
+    symbol: 'HYPEUSDT',
+    asset: 'HYPE',
+    marketId: 24,
+    stopPct: 1,
+    backtest: {
+      // Gap-free native 1m candles aggregated into completed 5m decisions.
+      // Metrics use the conservative +1m fill, measured executable $100 p95,
+      // exact hourly funding and the same bounded EMA seed as production.
+      period: '2026-02-08 → 2026-07-31',
+      trades: 426,
+      winRatePct: 65.5,
+      profitFactor: 1.336,
+      netPct: 35.714,
+      maxDrawdownPct: 9.759,
+    },
+  },
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
     ...market,
     portfolioId: NATIVE_TREND_PORTFOLIO_ID,
@@ -863,7 +883,7 @@ const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(NATIVE_RETIRED_STRATEGY_I
 const NATIVE_LIVE_STRATEGY_IDS: readonly string[] = [];
 
 type NativeStrategyInfo = {
-  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic';
+  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic' | 'bb_williams_reclaim';
   mode: 'reclaim' | 'touch';
   threshold: number;
   period: number;
@@ -1049,6 +1069,18 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     realEnabled: false,
     noteRu: 'Новый двусторонний HYPE-кандидат. При консервативном входе на одну минуту позже: 168 сделок, +41.42%, PF 1.65, DD −5.09%, 4/4 фолда, положительные IS/OOS, Long/Short и окна 30/60/90d. Runtime parity: 0 расхождений на 49 840 барах. Только новый prospective Shadow; Real заблокирован.',
     noteEn: 'New two-sided HYPE candidate. With a conservative one-minute-delayed fill: 168 trades, +41.42%, PF 1.65, −5.09% DD, 4/4 folds, positive IS/OOS, Long/Short and 30/60/90d windows. Runtime parity: zero mismatches across 49,840 bars. Fresh prospective Shadow only; Real is blocked.',
+  },
+  'hype-bb20-willr14-reclaim-ema400-challenger': {
+    family: 'bb_williams_reclaim',
+    mode: 'reclaim',
+    threshold: 2,
+    secondaryThreshold: 20,
+    period: 20,
+    timeExitBars: 24,
+    trendFilter: 'ema400',
+    realEnabled: false,
+    noteRu: 'Новый двусторонний HYPE-кандидат. После консервативного входа на одну минуту позже: 426 сделок, +35.71%, PF 1.34, DD −9.76%, 4/4 фолда, положительные IS/OOS, Long/Short и окна 30/60/90d. Runtime parity: 0 расхождений на 49 840 барах. Только новый prospective Shadow; Real заблокирован.',
+    noteEn: 'New two-sided HYPE candidate. With a conservative one-minute-delayed fill: 426 trades, +35.71%, PF 1.34, −9.76% DD, 4/4 folds, positive IS/OOS, Long/Short and 30/60/90d windows. Runtime parity: zero mismatches across 49,840 bars. Fresh prospective Shadow only; Real is blocked.',
   },
   ...Object.fromEntries(NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => [
     market.id,
@@ -2892,10 +2924,14 @@ function nativeRunnerReason(lang: Lang, row: NativeRunnerEvaluation): string {
     entry_signal: ['сигнал отправлен', 'signal emitted'],
     waiting_mean_or_time_exit: ['позиция: ждёт mean/time exit', 'position: waiting for mean/time exit'],
     waiting_rsi50_or_time_exit: ['позиция: ждёт RSI50/time exit', 'position: waiting for RSI50/time exit'],
+    waiting_bollinger_mean_or_time_exit: ['позиция: ждёт средней Bollinger/time exit', 'position: waiting for Bollinger mean/time exit'],
+    waiting_bollinger_reclaim_williams_or_trend: ['ждёт возврата в Bollinger + Williams/EMA', 'waiting for Bollinger reclaim + Williams/EMA'],
     same_bar_stop_or_close: ['повторный вход в том же баре запрещён', 'same-bar re-entry blocked'],
     sma60_cross: ['SMA60 exit отправлен', 'SMA60 exit emitted'],
     vwma60_cross: ['VWMA60 exit отправлен', 'VWMA60 exit emitted'],
     rsi50_cross: ['RSI50 exit отправлен', 'RSI50 exit emitted'],
+    bollinger_mean_cross: ['выход у средней Bollinger отправлен', 'Bollinger mean exit emitted'],
+    time_24_bars: ['time exit отправлен', 'time exit emitted'],
     time_240_bars: ['time exit отправлен', 'time exit emitted'],
     time_120_bars: ['time exit отправлен', 'time exit emitted'],
     data_error: ['ошибка свечей', 'candle error'],
@@ -2949,7 +2985,10 @@ function nativeRunnerHealth(lang: Lang, specs: readonly StrategySpec[]): string 
       : row.state === 'signal_emitted' || row.state === 'exit_emitted'
         ? 'pass'
         : 'collect';
-    const indicator = row.family === 'rsi'
+    const indicator = row.family === 'bb_williams_reclaim'
+      ? row.secondaryOscillator == null
+        ? '—' : `BB20 · W%R ${row.secondaryOscillator.toFixed(1)}`
+      : row.family === 'rsi'
       ? row.currentRsi == null ? '—' : `${row.currentRsi.toFixed(1)} / ${row.threshold.toFixed(0)}–${(100 - row.threshold).toFixed(0)}`
       : row.family === 'rsi_williams'
         ? row.currentRsi == null || row.secondaryOscillator == null
@@ -3151,6 +3190,14 @@ export async function lighterNativeQuantHero(lang: Lang): Promise<string> {
 }
 
 function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
+  if (info.family === 'bb_williams_reclaim') {
+    const edge = info.secondaryThreshold ?? 20;
+    return t(
+      lang,
+      `Long: предыдущий close ниже нижней Bollinger(20, ${info.threshold}), текущий вернулся внутрь, Williams %R14<−${100 - edge} и close>EMA400. Short: зеркальный возврат от верхней полосы, Williams %R14>−${edge} и close<EMA400.`,
+      `Long: previous close below the lower Bollinger(20, ${info.threshold}), current close reclaimed the band, Williams %R14<−${100 - edge}, and close>EMA400. Short: mirrored reclaim from the upper band, Williams %R14>−${edge}, and close<EMA400.`,
+    );
+  }
   if (info.family === 'rsi_williams') {
     const edge = info.secondaryThreshold ?? 20;
     return t(
@@ -3218,7 +3265,13 @@ function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
 function nativeStrategyTooltip(spec: StrategySpec, lang: Lang): string | null {
   const info = NATIVE_STRATEGY_INFO[spec.id];
   if (!info) return null;
-  const distribution = info.family === 'rsi' || info.family === 'rsi_williams'
+  const distribution = info.family === 'bb_williams_reclaim'
+    ? t(
+      lang,
+      'Bollinger(20,2), Williams %R14 и EMA400 считаются только по завершённым 5m свечам Lighter.',
+      'Bollinger(20,2), Williams %R14, and EMA400 use completed Lighter 5m candles only.',
+    )
+    : info.family === 'rsi' || info.family === 'rsi_williams'
     ? t(
       lang,
       `${info.family === 'rsi_williams' ? `RSI${info.period}, Williams %R14` : `RSI${info.period}`} и EMA400 считаются только по завершённым 5m свечам Lighter.`,
@@ -3237,7 +3290,9 @@ function nativeStrategyTooltip(spec: StrategySpec, lang: Lang): string | null {
       `Z-score считается по ${info.period} завершённым 5m закрытиям Lighter.`,
       `Z-score is calculated from ${info.period} completed Lighter 5m closes.`,
     );
-  const exitMean = info.family === 'rsi' || info.family === 'rsi_williams'
+  const exitMean = info.family === 'bb_williams_reclaim'
+    ? 'Bollinger SMA20'
+    : info.family === 'rsi' || info.family === 'rsi_williams'
     ? 'RSI50'
     : info.family === 'vwz' || info.family === 'vwz_mfi'
       || info.family === 'vwz_williams'
@@ -3268,6 +3323,8 @@ function nativeStrategyGuide(
     const info = NATIVE_STRATEGY_INFO[spec.id]!;
     const family = info.family === 'rsi'
       ? 'RSI'
+      : info.family === 'bb_williams_reclaim'
+        ? 'BOLLINGER + WILLIAMS %R'
       : info.family === 'rsi_williams'
         ? 'RSI + WILLIAMS %R'
         : info.family === 'vwz_mfi'
@@ -3286,7 +3343,9 @@ function nativeStrategyGuide(
         : 'SHADOW ONLY';
     return `<div class="ll-native-spec">
       <b>STRAT-${spec.code} · ${spec.asset}</b>
-      <span>${info.family === 'rsi' || info.family === 'rsi_williams'
+      <span>${info.family === 'bb_williams_reclaim'
+        ? `${family} · 20/${info.threshold}σ · EMA400`
+        : info.family === 'rsi' || info.family === 'rsi_williams'
         ? `${family}${info.period} · ${info.threshold}/${100 - info.threshold} · EMA400`
         : `${info.mode === 'reclaim' ? 'RECLAIM' : 'TOUCH'} · ${family}${info.period} · ±${info.threshold}σ${info.trendFilter ? ' · EMA400' : ''}`}</span>
       <span>${esc(nativeEntryDescription(info, lang))}</span>

@@ -7,6 +7,7 @@
  */
 export const NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS = [
   'hype-vwz60-touch',
+  'hype-bb20-willr14-reclaim-ema400-challenger',
   'hype-rsi14-willr14-ema400-challenger',
   'hype-vwz60-stoch14-ema400-challenger',
   'xlm-vwz60-touch-er25',

@@ -18,6 +18,8 @@ import {
   type LighterFundingPoint,
 } from '../src/lib/lighter-funding-history.js';
 import {
+  bollingerMeanExit,
+  evaluateBollingerWilliamsReclaim,
   evaluateRsiMfiTrend,
   evaluateRsiWilliamsTrend,
   evaluateVwzMfiTrend,
@@ -99,6 +101,23 @@ function completedEma(values: readonly number[], period: number): number | null 
 }
 
 const ALL_STRATEGIES: readonly StrategyConfig[] = [
+  {
+    strategyId: 'hype-bb20-willr14-reclaim-ema400-challenger',
+    symbol: 'HYPE',
+    stopPct: 0.01,
+    maxHoldBars: 24,
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    candleSource: 'aggregated_from_1m',
+    evaluate(bars) {
+      const snapshot = evaluateBollingerWilliamsReclaim(bars, 20, 2, 14, 20, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: bollingerMeanExit(snapshot, 'long'),
+        exitShort: bollingerMeanExit(snapshot, 'short'),
+      } : null;
+    },
+  },
   {
     strategyId: 'hype-vwz60-stoch14-ema400-challenger',
     symbol: 'HYPE',

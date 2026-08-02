@@ -14,12 +14,15 @@ import {
   type RsiTrendPullbackSnapshot,
 } from '../lib/lighter-rsi-pullback.js';
 import {
+  bollingerMeanExit,
+  evaluateBollingerWilliamsReclaim,
   evaluateRsiWilliamsTrend,
   evaluateVwzMfiTrend,
   evaluateVwzStochasticTrend,
   evaluateVwzWilliamsTrend,
   rsiWilliamsExit,
   type RsiWilliamsSnapshot,
+  type BollingerWilliamsReclaimSnapshot,
   type VwzMfiSnapshot,
   type VwzStochasticSnapshot,
   type VwzWilliamsSnapshot,
@@ -167,7 +170,7 @@ type LastClosedRow = {
 type NativeStrategy = {
   id: string;
   timeframeMinutes: NativeTimeframeMinutes;
-  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic';
+  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic' | 'bb_williams_reclaim';
   mode: Z60EntryMode;
   threshold: number;
   auxiliaryThreshold?: number;
@@ -178,7 +181,8 @@ type NativeStrategy = {
 };
 
 type NativeSnapshot = Z60Snapshot | RsiTrendPullbackSnapshot
-  | RsiWilliamsSnapshot | VwzMfiSnapshot | VwzWilliamsSnapshot | VwzStochasticSnapshot;
+  | RsiWilliamsSnapshot | VwzMfiSnapshot | VwzWilliamsSnapshot | VwzStochasticSnapshot
+  | BollingerWilliamsReclaimSnapshot;
 
 type NativeFeed = {
   symbol: string;
@@ -192,6 +196,16 @@ const BASE_FEEDS: readonly NativeFeed[] = [
     marketId: 24,
     strategies: [
       { id: 'hype-vwz60-touch', timeframeMinutes: 5, family: 'vwz', mode: 'touch', threshold: 2.5 },
+      {
+        id: 'hype-bb20-willr14-reclaim-ema400-challenger',
+        timeframeMinutes: 5,
+        family: 'bb_williams_reclaim',
+        mode: 'reclaim',
+        threshold: 2,
+        auxiliaryThreshold: 20,
+        trendFilter: 'ema400',
+        maxBars: 24,
+      },
       {
         id: 'hype-rsi14-willr14-ema400-challenger',
         timeframeMinutes: 5,
@@ -681,7 +695,16 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
         const strategyBars = strategy.trendFilter ? trendBars : baseBars;
         if (!strategyBars) continue;
         try {
-          const snapshot: NativeSnapshot | null = strategy.family === 'rsi'
+          const snapshot: NativeSnapshot | null = strategy.family === 'bb_williams_reclaim'
+            ? evaluateBollingerWilliamsReclaim(
+              strategyBars,
+              20,
+              strategy.threshold,
+              14,
+              strategy.auxiliaryThreshold ?? 20,
+              400,
+            )
+            : strategy.family === 'rsi'
             ? evaluateRsiTrendPullback(
               strategyBars,
               14,
@@ -749,7 +772,9 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
 
           const open = openPosition.get(strategy.id);
           if (open) {
-            const indicatorExit = strategy.family === 'rsi'
+            const indicatorExit = strategy.family === 'bb_williams_reclaim'
+              ? bollingerMeanExit(snapshot as BollingerWilliamsReclaimSnapshot, open.side)
+              : strategy.family === 'rsi'
               ? rsiTrendExit(snapshot as RsiTrendPullbackSnapshot, open.side)
               : strategy.family === 'rsi_williams'
               ? rsiWilliamsExit(snapshot as RsiWilliamsSnapshot, open.side)
@@ -773,7 +798,9 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
                 er60,
                 'exit_emitted',
                 indicatorExit
-                  ? strategy.family === 'rsi' || strategy.family === 'rsi_williams'
+                  ? strategy.family === 'bb_williams_reclaim'
+                    ? 'bollinger_mean_cross'
+                    : strategy.family === 'rsi' || strategy.family === 'rsi_williams'
                     ? 'rsi50_cross'
                     : strategy.family === 'vwz' || strategy.family === 'vwz_mfi'
                       || strategy.family === 'vwz_williams'
@@ -792,7 +819,9 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
                 mean: 'mean' in snapshot ? snapshot.mean : null,
                 currentRsi: 'currentRsi' in snapshot ? snapshot.currentRsi : null,
                 reason: indicatorExit
-                  ? strategy.family === 'rsi' || strategy.family === 'rsi_williams'
+                  ? strategy.family === 'bb_williams_reclaim'
+                    ? 'bollinger_mean_cross'
+                    : strategy.family === 'rsi' || strategy.family === 'rsi_williams'
                     ? 'rsi50_cross'
                     : strategy.family === 'vwz' || strategy.family === 'vwz_mfi'
                       || strategy.family === 'vwz_williams'
@@ -808,7 +837,9 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
                 snapshot,
                 er60,
                 'position_open',
-                strategy.family === 'rsi' || strategy.family === 'rsi_williams'
+                strategy.family === 'bb_williams_reclaim'
+                  ? 'waiting_bollinger_mean_or_time_exit'
+                  : strategy.family === 'rsi' || strategy.family === 'rsi_williams'
                   ? 'waiting_rsi50_or_time_exit'
                   : 'waiting_mean_or_time_exit',
                 open.side,
@@ -902,7 +933,9 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
               efficiencyRatio60: er60,
             }, 'lighter-z60: native entry signal');
           } else {
-            const waitingReason = strategy.family === 'rsi'
+            const waitingReason = strategy.family === 'bb_williams_reclaim'
+              ? 'waiting_bollinger_reclaim_williams_or_trend'
+              : strategy.family === 'rsi'
               ? nativeRsiWaitingReason({
                 level: strategy.threshold,
                 currentRsi: (snapshot as RsiTrendPullbackSnapshot).currentRsi,

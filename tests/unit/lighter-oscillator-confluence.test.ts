@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bollingerMeanExit,
+  evaluateBollingerWilliamsReclaim,
   evaluateRsiMfiTrend,
   evaluateRsiWilliamsTrend,
   evaluateVwzMfiTrend,
@@ -68,6 +70,38 @@ function trendThenVwzShock(direction: 'up' | 'down'): Vwz60Bar[] {
   return bars;
 }
 
+function trendThenBollingerReclaim(direction: 'up' | 'down'): Vwz60Bar[] {
+  const bars = trendThenPullback(direction).slice(0, 430);
+  let close = bars.at(-1)!.close;
+  for (let index = 430; index < 448; index += 1) {
+    close += direction === 'up' ? -0.15 : 0.15;
+    bars.push({
+      time: index * 300_000,
+      close,
+      high: close + 0.04,
+      low: close - 0.04,
+      volume: 1_000,
+    });
+  }
+  close += direction === 'up' ? -1.8 : 1.8;
+  bars.push({
+    time: 448 * 300_000,
+    close,
+    high: close + 0.04,
+    low: close - 0.04,
+    volume: 1_000,
+  });
+  close += direction === 'up' ? 0.56 : -0.56;
+  bars.push({
+    time: 449 * 300_000,
+    close,
+    high: close + 0.04,
+    low: close - 0.04,
+    volume: 1_000,
+  });
+  return bars;
+}
+
 describe('Native oscillator confluence', () => {
   it('emits mirrored RSI/Williams signals from completed OHLC bars', () => {
     const long = evaluateRsiWilliamsTrend(trendThenPullback('up'));
@@ -118,6 +152,21 @@ describe('Native oscillator confluence', () => {
     expect(short?.signal).toBe('short');
   });
 
+  it('emits mirrored Bollinger/Williams reclaim signals and exits at the mean', () => {
+    const long = evaluateBollingerWilliamsReclaim(trendThenBollingerReclaim('up'))!;
+    const short = evaluateBollingerWilliamsReclaim(trendThenBollingerReclaim('down'))!;
+    expect(long.signal).toBe('long');
+    expect(long.previousClose).toBeLessThan(long.previousLower);
+    expect(long.close).toBeGreaterThanOrEqual(long.lower);
+    expect(long.currentWilliams).toBeLessThan(-80);
+    expect(short.signal).toBe('short');
+    expect(short.previousClose).toBeGreaterThan(short.previousUpper);
+    expect(short.close).toBeLessThanOrEqual(short.upper);
+    expect(short.currentWilliams).toBeGreaterThan(-20);
+    expect(bollingerMeanExit({ ...long, close: long.mean }, 'long')).toBe(true);
+    expect(bollingerMeanExit({ ...short, close: short.mean }, 'short')).toBe(true);
+  });
+
   it('emits mirrored RSI/MFI signals from completed OHLCV bars', () => {
     const long = evaluateRsiMfiTrend(trendThenPullback('up'));
     const short = evaluateRsiMfiTrend(trendThenPullback('down'));
@@ -136,5 +185,6 @@ describe('Native oscillator confluence', () => {
     expect(evaluateVwzWilliamsTrend(bars)).toBeNull();
     expect(evaluateVwzStochasticTrend(bars)).toBeNull();
     expect(evaluateRsiMfiTrend(bars)).toBeNull();
+    expect(evaluateBollingerWilliamsReclaim(bars)).toBeNull();
   });
 });

@@ -128,6 +128,27 @@ describe('parseNativeRunnerStatus', () => {
       .toBe(5);
   });
 
+  it('accepts the frozen Bollinger/Williams reclaim family', () => {
+    const bollinger = {
+      ...valid,
+      evaluations: [{
+        ...valid.evaluations[0]!,
+        strategyId: 'hype-bb20-willr14-reclaim-ema400-challenger',
+        symbol: 'HYPEUSDT',
+        marketId: 24,
+        family: 'bb_williams_reclaim' as const,
+        mode: 'reclaim' as const,
+        threshold: 2,
+        trendFilter: 'ema400' as const,
+        reason: 'waiting_bollinger_reclaim_williams_or_trend',
+        secondaryOscillator: -51.25,
+      }],
+    };
+    const parsed = parseNativeRunnerStatus(JSON.stringify(bollinger));
+    expect(parsed?.evaluations[0]?.family).toBe('bb_williams_reclaim');
+    expect(parsed?.evaluations[0]?.secondaryOscillator).toBe(-51.25);
+  });
+
   it('requires a fresh successful evaluation for every promoted strategy', () => {
     const result = evaluateNativeRunnerLiveness(valid, ['z60stack25-btc'], 2_050);
     expect(result.passed).toBe(true);

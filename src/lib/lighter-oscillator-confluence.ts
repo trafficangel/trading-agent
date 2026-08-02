@@ -37,6 +37,20 @@ export type RsiMfiSnapshot = {
   signal: Z60Signal;
 };
 
+export type BollingerWilliamsReclaimSnapshot = {
+  barTime: number;
+  close: number;
+  previousClose: number;
+  mean: number;
+  lower: number;
+  upper: number;
+  previousLower: number;
+  previousUpper: number;
+  currentWilliams: number;
+  trendMean: number;
+  signal: Z60Signal;
+};
+
 function completedEma(closes: readonly number[], period: number): number | null {
   if (period < 2 || closes.length < period) return null;
   const alpha = 2 / (period + 1);
@@ -124,6 +138,77 @@ function currentMfi(bars: readonly Vwz60Bar[], period: number): number | null {
   }
   if (negative === 0) return positive > 0 ? 100 : 50;
   return 100 - 100 / (1 + positive / negative);
+}
+
+function completedMeanStd(values: readonly number[]): { mean: number; std: number } | null {
+  if (!values.length || values.some((value) => !Number.isFinite(value) || value <= 0)) return null;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce(
+    (sum, value) => sum + (value - mean) ** 2,
+    0,
+  ) / values.length;
+  return { mean, std: Math.sqrt(variance) };
+}
+
+/** Frozen Bollinger(20,2) reclaim + Williams %R14 aligned with EMA400. */
+export function evaluateBollingerWilliamsReclaim(
+  bars: readonly Vwz60Bar[],
+  bollingerPeriod = 20,
+  deviations = 2,
+  williamsPeriod = 14,
+  williamsEdge = 20,
+  trendPeriod = 400,
+): BollingerWilliamsReclaimSnapshot | null {
+  if (
+    bollingerPeriod < 2
+    || !(deviations > 0)
+    || !(williamsEdge > 0 && williamsEdge < 50)
+    || trendPeriod < 2
+    || bars.length < Math.max(bollingerPeriod + 1, williamsPeriod, trendPeriod)
+  ) return null;
+  const closes = bars.map((bar) => bar.close);
+  const currentStats = completedMeanStd(closes.slice(-bollingerPeriod));
+  const previousStats = completedMeanStd(closes.slice(-bollingerPeriod - 1, -1));
+  const trendMean = completedEma(closes, trendPeriod);
+  const williams = currentWilliams(bars, williamsPeriod);
+  if (!currentStats || !previousStats || trendMean == null || williams == null) return null;
+  const close = closes.at(-1)!;
+  const previousClose = closes.at(-2)!;
+  const lower = currentStats.mean - deviations * currentStats.std;
+  const upper = currentStats.mean + deviations * currentStats.std;
+  const previousLower = previousStats.mean - deviations * previousStats.std;
+  const previousUpper = previousStats.mean + deviations * previousStats.std;
+  const signal = previousClose < previousLower
+    && close >= lower
+    && williams < -100 + williamsEdge
+    && close > trendMean
+    ? 'long'
+    : previousClose > previousUpper
+      && close <= upper
+      && williams > -williamsEdge
+      && close < trendMean
+      ? 'short'
+      : null;
+  return {
+    barTime: bars.at(-1)!.time,
+    close,
+    previousClose,
+    mean: currentStats.mean,
+    lower,
+    upper,
+    previousLower,
+    previousUpper,
+    currentWilliams: williams,
+    trendMean,
+    signal,
+  };
+}
+
+export function bollingerMeanExit(
+  snapshot: BollingerWilliamsReclaimSnapshot,
+  side: 'long' | 'short',
+): boolean {
+  return side === 'long' ? snapshot.close >= snapshot.mean : snapshot.close <= snapshot.mean;
 }
 
 /** Frozen two-sided RSI14 + Williams %R14 pullback aligned with EMA400. */

@@ -9,9 +9,11 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
+  evaluateBollingerWilliamsReclaim,
   evaluateRsiWilliamsTrend,
   evaluateVwzWilliamsTrend,
   evaluateVwzStochasticTrend,
+  type BollingerWilliamsReclaimSnapshot,
   type RsiWilliamsSnapshot,
   type VwzWilliamsSnapshot,
   type VwzStochasticSnapshot,
@@ -23,7 +25,7 @@ const RUNTIME_BARS = Number(process.env.RUNTIME_BARS ?? 2_000);
 const BAR_MS = 300_000;
 
 type RawBar = { t: number; h: number; l: number; c: number; v?: number };
-type ConfluenceSnapshot = RsiWilliamsSnapshot | VwzWilliamsSnapshot | VwzStochasticSnapshot;
+type ConfluenceSnapshot = BollingerWilliamsReclaimSnapshot | RsiWilliamsSnapshot | VwzWilliamsSnapshot | VwzStochasticSnapshot;
 type AuditConfig = {
   strategyId: string;
   symbol: string;
@@ -84,6 +86,29 @@ function readBars(path: string, sourceMinutes: 1 | 5): Vwz60Bar[] {
 }
 
 const configs: readonly AuditConfig[] = [
+  {
+    strategyId: 'hype-bb20-willr14-reclaim-ema400-challenger',
+    symbol: 'HYPE',
+    path: 'data/lighter-klines/HYPE-1m.json',
+    sourceMinutes: 1,
+    evaluate: (bars) => evaluateBollingerWilliamsReclaim(bars),
+    fullSignal(snapshot, fullEma) {
+      const value = snapshot as BollingerWilliamsReclaimSnapshot;
+      if (
+        value.previousClose < value.previousLower
+        && value.close >= value.lower
+        && value.currentWilliams < -80
+        && value.close > fullEma
+      ) return 'long';
+      if (
+        value.previousClose > value.previousUpper
+        && value.close <= value.upper
+        && value.currentWilliams > -20
+        && value.close < fullEma
+      ) return 'short';
+      return null;
+    },
+  },
   {
     strategyId: 'hype-vwz60-stoch14-ema400-challenger',
     symbol: 'HYPE',

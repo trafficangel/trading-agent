@@ -31,6 +31,8 @@ const XLM_CONFLUENCE_LATENCY_EVIDENCE_SHA256 =
   '89a0453021b9a9adcadead95b7a02c7da38a1facefd2f17a65206653566b4052';
 const HYPE_CONFLUENCE_LATENCY_EVIDENCE_SHA256 =
   '93b9abca3696ea12aaeb61acac29c76aa91ac89def21a9dcb2955e57ad2360d9';
+const HYPE_BB_WILLIAMS_LATENCY_EVIDENCE_SHA256 =
+  'a0d083b41ab27f187c957ff6831b03a69cd32c8df6442a3df11e6306c2742646';
 const P2_LATENCY_EVIDENCE_VERSION = 'lighter-p2-entry-delay-portfolio-audit-v1';
 const P2_LATENCY_EVIDENCE_SHA256 =
   'ef7361a77d619d39b620c0422e5e1491f5f8b1f1063f36f41c2212fd4f7c4cd3';
@@ -198,6 +200,10 @@ const hypeConfluenceLatencyEvidencePath = resolve(
   flagValue('--latency-hype-confluence')
     ?? 'data/lighter-hype-vwz-stochastic-entry-delay-20260802.json',
 );
+const hypeBbWilliamsLatencyEvidencePath = resolve(
+  flagValue('--latency-hype-bb-williams')
+    ?? 'data/lighter-hype-bb-willr-entry-delay-audit-20260802.json',
+);
 const latencyEvidence = readLatencyEvidence(
   latencyEvidencePath,
   LATENCY_EVIDENCE_SHA256,
@@ -213,11 +219,17 @@ const hypeConfluenceLatencyEvidence = readLatencyEvidence(
   HYPE_CONFLUENCE_LATENCY_EVIDENCE_SHA256,
   'HYPE confluence',
 );
+const hypeBbWilliamsLatencyEvidence = readLatencyEvidence(
+  hypeBbWilliamsLatencyEvidencePath,
+  HYPE_BB_WILLIAMS_LATENCY_EVIDENCE_SHA256,
+  'HYPE Bollinger Williams',
+);
 const latencyByStrategy = new Map<string, LatencyEvidenceRow>();
 for (const source of [
   latencyEvidence,
   xlmConfluenceLatencyEvidence,
   hypeConfluenceLatencyEvidence,
+  hypeBbWilliamsLatencyEvidence,
 ]) {
   for (const [strategyId, row] of source.rows) {
     if (latencyByStrategy.has(strategyId)) {
@@ -397,6 +409,10 @@ const report = {
       {
         strategyIds: [...hypeConfluenceLatencyEvidence.rows.keys()],
         sourceSha256: hypeConfluenceLatencyEvidence.sha256,
+      },
+      {
+        strategyIds: [...hypeBbWilliamsLatencyEvidence.rows.keys()],
+        sourceSha256: hypeBbWilliamsLatencyEvidence.sha256,
       },
     ],
     conservativeScenario: 'native 1m open one minute after the next 5m open',
