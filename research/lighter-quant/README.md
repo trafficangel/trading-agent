@@ -560,3 +560,30 @@ exact funding.
 Shadow, Real or parameter rescue. The result further weakens the case for
 adding generic single-market candle indicators; the higher-value next evidence
 is the already-running prospective portfolio and longer native L2 history.
+
+### Independent V16: DeMarker and Stochastic Momentum Index
+
+V16 preregistered two new mirrored completed-bar families before any result was
+read: DeMarker(14) 0.20/0.80 reclaim and SMI(14/3/3) extreme crossover. Both
+used an EMA400 direction filter, next-open fills, market-specific executable
+$100 L2 p95 round-trip cost and exact Lighter funding. The same frozen rules
+were evaluated on 24 markets at 1m/5m and on unseen ADA/ZEC holdouts.
+
+- 1m: zero qualifiers. DeMarker produced 75,560 trades and −$4,852.68 across
+  the four fixed batches; SMI produced 138,683 trades and −$8,745.78. Every
+  batch had 0/4 positive folds, with both Long and Short books negative.
+- 5m: zero qualifiers. DeMarker produced 11,952 trades, −$587.28, PF 0.79,
+  L95 −0.0580 and 0/4 folds. SMI produced 21,869 trades, −$1,232.49, PF 0.77,
+  L95 −0.0630 and 0/4 folds. Both portfolio directions lost money.
+- HYPE and SOL DeMarker had positive isolated 5m headlines, but HYPE had
+  negative OOS and all 30/60/90-day windows; SOL missed PF/L95 and had a
+  negative recent Long sub-book. Selecting either after seeing the result would
+  be post-hoc symbol selection.
+- Holdout: no qualifier. All 1m cases lost. ADA DeMarker made only +0.64% on
+  5m with PF 1.03, L95 −0.0780 and a losing Short side; every other holdout
+  case was negative.
+
+**Decision:** both V16 families are rejected without Shadow, Real, rescue
+tuning or post-result symbol selection. The complete negative evidence is kept
+in `data/lighter-independent-v16-summary-20260802.json` and its hashed source
+artifacts so these hypotheses are not rediscovered and retested later.

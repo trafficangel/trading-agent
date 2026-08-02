@@ -1,0 +1,121 @@
+{
+  "version": "lighter-independent-v16-summary-v1",
+  "generatedAt": "2026-08-02T09:15:00.000Z",
+  "status": "rejected_without_shadow_or_real",
+  "preregistration": {
+    "file": "data/lighter-independent-v16-preregistered-20260802.json",
+    "sha256": "ed366fe402f4fc6a727da62d00c813f8f09f94cecca8a3ece51223f9b8b80cc4",
+    "rules": [
+      "V16-DEMARKER14-RECLAIM0.20/0.80+EMA400-EXIT0.50-H120M",
+      "V16-SMI14/3/3-X3-EXT40+EMA400-EXIT0-H120M"
+    ]
+  },
+  "method": {
+    "timeframes": ["1m", "5m"],
+    "mainUniverse": ["AAVE", "APT", "ARB", "BNB", "BTC", "DATA", "DOGE", "DOT", "ENA", "ETH", "GRAM", "HYPE", "JUP", "LINK", "LIT", "LTC", "NEAR", "PUMP", "SOL", "TAO", "UNI", "XLM", "XMR", "XRP"],
+    "unseenHoldout": ["ADA", "ZEC"],
+    "positionNotionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific executable $100 full-round-trip p95",
+    "funding": "exact Lighter hourly settlements in (entry, exit]",
+    "fallbackExecutionCostUsed": false,
+    "fallbackFundingUsed": false
+  },
+  "main1m": {
+    "qualifiedIndividuals": 0,
+    "qualifiedPortfolios": 0,
+    "deMarker": {
+      "trades": 75560,
+      "netUsd": -4852.675452092844,
+      "positiveFoldsByBatch": [0, 0, 0, 0],
+      "longNetUsd": -2389.817853098425,
+      "shortNetUsd": -2462.8575989943006
+    },
+    "smi": {
+      "trades": 138683,
+      "netUsd": -8745.784578882956,
+      "positiveFoldsByBatch": [0, 0, 0, 0],
+      "longNetUsd": -4557.428866489786,
+      "shortNetUsd": -4188.355712393382
+    }
+  },
+  "main5m": {
+    "qualifiedIndividuals": 0,
+    "qualifiedPortfolios": 0,
+    "deMarker": {
+      "trades": 11952,
+      "netUsd": -587.2813656335817,
+      "profitFactor": 0.7898691678282935,
+      "meanReturnL95Pct": -0.057985433971068055,
+      "positiveFolds": 0,
+      "longNetUsd": -356.060279615976,
+      "shortNetUsd": -231.22108601760843
+    },
+    "smi": {
+      "trades": 21869,
+      "netUsd": -1232.4925285306765,
+      "profitFactor": 0.7660274795945874,
+      "meanReturnL95Pct": -0.06303429337376497,
+      "positiveFolds": 0,
+      "longNetUsd": -670.3334532233976,
+      "shortNetUsd": -562.1590753072574
+    },
+    "bestRejectedIndividuals": [
+      {
+        "symbol": "HYPE",
+        "rule": "V16-DEMARKER14-RECLAIM0.20/0.80+EMA400-EXIT0.50-H120M",
+        "trades": 465,
+        "netPct": 21.48811729628959,
+        "profitFactor": 1.179106116702487,
+        "meanReturnL95Pct": -0.006380024545404109,
+        "positiveFolds": 3,
+        "oosPct": -2.167146194876986,
+        "recent30dPct": -0.22203966661637115,
+        "recent60dPct": -4.110092914370952,
+        "recent90dPct": -0.1574103143568229,
+        "decision": "reject"
+      },
+      {
+        "symbol": "SOL",
+        "rule": "V16-DEMARKER14-RECLAIM0.20/0.80+EMA400-EXIT0.50-H120M",
+        "trades": 459,
+        "netPct": 15.77638263496835,
+        "profitFactor": 1.1897176250464445,
+        "meanReturnL95Pct": -0.007020133690192498,
+        "positiveFolds": 3,
+        "oosPct": 0.8093910072667019,
+        "recent90dLongPct": -0.2049755982100247,
+        "decision": "reject"
+      }
+    ]
+  },
+  "holdout": {
+    "qualifiedIndividuals": 0,
+    "qualifiedPortfolios": 0,
+    "oneMinuteAllNetNegative": true,
+    "fiveMinute": {
+      "adaDeMarkerNetPct": 0.6433704047755368,
+      "adaDeMarkerProfitFactor": 1.0345567490194283,
+      "adaDeMarkerMeanReturnL95Pct": -0.07804668966794774,
+      "adaDeMarkerLongNetPct": 3.3205117096386347,
+      "adaDeMarkerShortNetPct": -2.6771413048630968,
+      "otherCandidatesNetNegative": true
+    }
+  },
+  "decision": {
+    "addToShadow": false,
+    "addToReal": false,
+    "rescueTune": false,
+    "selectSingleSymbolAfterResults": false,
+    "reason": "Both preregistered two-sided families fail the measured-cost portfolio, OOS/L95/fold gates and unseen holdout. Positive isolated headlines are unstable and cannot justify promotion."
+  },
+  "artifacts": [
+    {"file": "data/lighter-independent-v16-universe-1m-a-20260802.json", "sha256": "4480d390f1673e9d72c862ce201a8c9e0275baebd9156dcc12d387e57867c84d"},
+    {"file": "data/lighter-independent-v16-universe-1m-b-20260802.json", "sha256": "e58f1863c080cd90aa909881f8fe9d781f1be8c1528ded7b75457ddc9316b1e2"},
+    {"file": "data/lighter-independent-v16-universe-1m-c-20260802.json", "sha256": "a6e68e89d23a1955b038e80c5179703791881199382da4bb9874dd4d9e80f886"},
+    {"file": "data/lighter-independent-v16-universe-1m-d-20260802.json", "sha256": "42d723db689520f03e130c30d61a0943e27c11a6e356dc93a70de995689dc1ec"},
+    {"file": "data/lighter-independent-v16-universe-5m-20260802.json", "sha256": "c7157015b53546cb81a024decf58082df235b60bf57d77ac50f037db05df3323"},
+    {"file": "data/lighter-independent-v16-holdout-1m-20260802.json", "sha256": "f5a44c442018edf7f9fdccb5a9b89d18e703a5fe11cdfd95363c29dfb8451fa2"},
+    {"file": "data/lighter-independent-v16-holdout-5m-20260802.json", "sha256": "aae12ed4c33553487f81e1270b6194b7dd1ceabc281c7c106658178af206a15c"}
+  ]
+}
