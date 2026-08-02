@@ -124,6 +124,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V14 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V14 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V15 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V15 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V16 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V16 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -218,6 +220,9 @@ type Arrays = {
   choppiness14: number[];
   pvt12x26: number[];
   pvtSignal9: number[];
+  deMarker14: number[];
+  stochasticMomentum14x3x3: number[];
+  stochasticMomentumSignal3: number[];
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
@@ -461,6 +466,50 @@ function williamsR(candles: Candle[], period: number): number[] {
     }
     return high > low ? -100 * (high - bar.c) / (high - low) : -50;
   });
+}
+
+/** Completed-bar DeMarker oscillator, bounded to [0, 1]. */
+function deMarker(candles: Candle[], period: number): number[] {
+  const up = candles.map((bar, i) =>
+    i > 0 ? Math.max(0, bar.h - candles[i - 1]!.h) : 0);
+  const down = candles.map((bar, i) =>
+    i > 0 ? Math.max(0, candles[i - 1]!.l - bar.l) : 0);
+  const upMean = sma(up, period);
+  const downMean = sma(down, period);
+  return candles.map((_, i) => {
+    const denominator = upMean[i]! + downMean[i]!;
+    return denominator > 0 ? upMean[i]! / denominator : 0.5;
+  });
+}
+
+/**
+ * Completed-bar Stochastic Momentum Index. The distance from the rolling
+ * high/low midpoint and half-range are both double-smoothed before division.
+ */
+function stochasticMomentumIndex(
+  candles: Candle[],
+  period: number,
+  firstSmooth: number,
+  secondSmooth: number,
+  signalPeriod: number,
+): { oscillator: number[]; signal: number[] } {
+  const distance = new Array<number>(candles.length).fill(0);
+  const halfRange = new Array<number>(candles.length).fill(0);
+  for (let i = period - 1; i < candles.length; i += 1) {
+    let high = -Infinity;
+    let low = Infinity;
+    for (let j = i - period + 1; j <= i; j += 1) {
+      high = Math.max(high, candles[j]!.h);
+      low = Math.min(low, candles[j]!.l);
+    }
+    distance[i] = candles[i]!.c - (high + low) / 2;
+    halfRange[i] = (high - low) / 2;
+  }
+  const smoothDistance = ema(ema(distance, firstSmooth), secondSmooth);
+  const smoothRange = ema(ema(halfRange, firstSmooth), secondSmooth);
+  const oscillator = smoothDistance.map((value, i) =>
+    smoothRange[i]! > 0 ? 100 * value / smoothRange[i]! : 0);
+  return { oscillator, signal: ema(oscillator, signalPeriod) };
 }
 
 /**
@@ -887,6 +936,7 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     volume: bar.v,
   }));
   const pvt12x26 = priceVolumeTrendOscillator(completedBars, 12, 26, 9);
+  const stochasticMomentum14x3x3 = stochasticMomentumIndex(c, 14, 3, 3, 3);
   const atrPctMean288 = sma(
     atr14Values.map((value, i) => close[i]! > 0 ? value / close[i]! : 0),
     288,
@@ -952,6 +1002,9 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     choppiness14: choppinessIndex(completedBars, 14),
     pvt12x26: pvt12x26.oscillator,
     pvtSignal9: pvt12x26.signal,
+    deMarker14: deMarker(c, 14),
+    stochasticMomentum14x3x3: stochasticMomentum14x3x3.oscillator,
+    stochasticMomentumSignal3: stochasticMomentum14x3x3.signal,
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
@@ -1968,6 +2021,61 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.pvt12x26[i]! < a.pvtSignal9[i]!
           : a.pvt12x26[i]! > a.pvtSignal9[i]!;
+      },
+    });
+  }
+
+  // Preregistered independent v16 suite. Both rules test a completed-bar
+  // reversal from an intrabar-range extreme while staying on the EMA400 side
+  // of the long regime. DeMarker uses high/low pressure; SMI uses a double-
+  // smoothed close location inside the rolling range. Parameters are frozen
+  // across every market and both timeframes, with next-bar-open execution.
+  if (ENABLE_INDEPENDENT_FAMILIES_V16) {
+    out.push({
+      name: 'V16-DEMARKER14-RECLAIM0.20/0.80+EMA400-EXIT0.50-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const prior = a.deMarker14[i - 1]!;
+        const current = a.deMarker14[i]!;
+        if (prior < 0.2 && current >= 0.2 && a.close[i]! > a.ema400[i]!) return 'long';
+        if (prior > 0.8 && current <= 0.8 && a.close[i]! < a.ema400[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.deMarker14[i]! >= 0.5 : a.deMarker14[i]! <= 0.5;
+      },
+    });
+
+    out.push({
+      name: 'V16-SMI14/3/3-X3-EXT40+EMA400-EXIT0-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const crossedUp = a.stochasticMomentum14x3x3[i - 1]!
+            <= a.stochasticMomentumSignal3[i - 1]!
+          && a.stochasticMomentum14x3x3[i]! > a.stochasticMomentumSignal3[i]!;
+        const crossedDown = a.stochasticMomentum14x3x3[i - 1]!
+            >= a.stochasticMomentumSignal3[i - 1]!
+          && a.stochasticMomentum14x3x3[i]! < a.stochasticMomentumSignal3[i]!;
+        if (
+          crossedUp
+          && a.stochasticMomentum14x3x3[i - 1]! <= -40
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          crossedDown
+          && a.stochasticMomentum14x3x3[i - 1]! >= 40
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.stochasticMomentum14x3x3[i]! >= 0
+          : a.stochasticMomentum14x3x3[i]! <= 0;
       },
     });
   }
