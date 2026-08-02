@@ -20,6 +20,7 @@ from lighter_live_risk import (  # noqa: E402
     NATIVE_LATENCY_SUPPLEMENT_SHA256_BY_STRATEGY,
     NATIVE_LATENCY_EVIDENCE_VERSION,
     NATIVE_PROMOTION_GATE,
+    native_experimental_canary_report_error,
     native_promotion_report_error,
     native_runner_liveness_error,
 )
@@ -79,6 +80,60 @@ class NativePromotionReportTest(unittest.TestCase):
 
     def test_exact_frozen_contract_passes(self) -> None:
         self.assertIsNone(self.check(valid_report()))
+
+    def test_experimental_canary_accepts_collecting_with_frozen_evidence(self) -> None:
+        report = valid_report()
+        report["eligibleStrategyIds"] = []
+        report["strategies"][0]["evaluation"] = {
+            "status": "collecting",
+            "entryAllowed": True,
+        }
+        report["strategies"][0]["decision"] = {
+            "shadowAction": "continue",
+            "realAction": "disabled",
+            "manualReviewRequired": False,
+        }
+        self.assertIsNone(
+            native_experimental_canary_report_error(
+                report,
+                STRATEGY_ID,
+                NOW_MS,
+                7_200_000,
+                20,
+                5,
+                10,
+                15,
+            )
+        )
+        self.assertEqual(report["eligibleStrategyIds"], [])
+        self.assertEqual(report["strategies"][0]["evaluation"]["status"], "collecting")
+
+    def test_experimental_canary_rejects_failed_evidence_and_loose_risk(self) -> None:
+        report = valid_report()
+        report["strategies"][0]["evaluation"] = {
+            "status": "collecting",
+            "entryAllowed": True,
+        }
+        report["strategies"][0]["historicalEvidence"]["passed"] = False
+        self.assertIn(
+            "historical evidence not passed",
+            native_experimental_canary_report_error(
+                report, STRATEGY_ID, NOW_MS, 7_200_000, 20, 5, 10, 15
+            )
+            or "",
+        )
+        report = valid_report()
+        report["strategies"][0]["evaluation"] = {
+            "status": "collecting",
+            "entryAllowed": True,
+        }
+        self.assertIn(
+            "lifetime loss",
+            native_experimental_canary_report_error(
+                report, STRATEGY_ID, NOW_MS, 7_200_000, 20.01, 5, 10, 15
+            )
+            or "",
+        )
 
     def test_looser_gate_fails_closed(self) -> None:
         report = valid_report()

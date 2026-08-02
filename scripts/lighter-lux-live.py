@@ -27,6 +27,7 @@ from lighter_live_risk import (
     StrategyRiskPolicy,
     evaluate_strategy_risk,
     native_canary_config_error,
+    native_experimental_canary_report_error,
     native_promotion_report_error,
     native_runner_liveness_error,
     native_registry_error,
@@ -119,6 +120,26 @@ class LiveRunner:
         self.native_promotion_max_age_ms = int(
             os.getenv("LIGHTER_NATIVE_PROMOTION_MAX_AGE_MS", str(2 * 60 * 60 * 1000))
         )
+        self.native_experimental_canary_ids = frozenset(
+            strategy_id.strip()
+            for strategy_id in os.getenv(
+                "LIGHTER_NATIVE_EXPERIMENTAL_CANARY_IDS", ""
+            ).split(",")
+            if strategy_id.strip()
+        )
+        self.native_experimental_canary_expires_at_ms = int(
+            os.getenv("LIGHTER_NATIVE_EXPERIMENTAL_CANARY_EXPIRES_AT_MS", "0")
+        )
+        unknown_experimental = (
+            self.native_experimental_canary_ids - NATIVE_SHADOW_GATED_STRATEGIES
+        )
+        if unknown_experimental:
+            raise RuntimeError(
+                "unknown experimental Native canary IDs: "
+                + ", ".join(sorted(unknown_experimental))
+            )
+        if len(self.native_experimental_canary_ids) > 1:
+            raise RuntimeError("only one experimental Native Real canary is allowed")
         registry_error = native_registry_error(
             {
                 strategy_id: strategy.market_id
@@ -188,12 +209,26 @@ class LiveRunner:
             now_ms = int(time.time() * 1000)
             with open(self.native_promotion_report, encoding="utf-8") as handle:
                 report = json.load(handle)
-            report_error = native_promotion_report_error(
-                report,
-                strategy_id,
-                now_ms,
-                self.native_promotion_max_age_ms,
-            )
+            if strategy_id in self.native_experimental_canary_ids:
+                if self.native_experimental_canary_expires_at_ms <= now_ms:
+                    return "experimental Native canary approval missing or expired"
+                report_error = native_experimental_canary_report_error(
+                    report,
+                    strategy_id,
+                    now_ms,
+                    self.native_promotion_max_age_ms,
+                    self.lifetime_loss_usd,
+                    self.strategy_max_drawdown_usd,
+                    self.daily_loss_usd,
+                    self.max_drawdown_usd,
+                )
+            else:
+                report_error = native_promotion_report_error(
+                    report,
+                    strategy_id,
+                    now_ms,
+                    self.native_promotion_max_age_ms,
+                )
             if report_error is not None:
                 return report_error
             row = self.db.execute(

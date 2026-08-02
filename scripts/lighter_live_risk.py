@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Collection, Mapping, Sequence
@@ -354,6 +355,80 @@ def native_promotion_report_error(
     ):
         return "native promotion strategy decision is not manual canary review"
     return None
+
+
+def native_experimental_canary_report_error(
+    report: object,
+    strategy_id: str,
+    now_ms: int,
+    max_age_ms: int,
+    lifetime_loss_usd: float,
+    strategy_drawdown_usd: float,
+    daily_loss_usd: float,
+    portfolio_drawdown_usd: float,
+) -> str | None:
+    """Validate a user-approved, tightly capped pre-promotion Real experiment.
+
+    This is deliberately not a promotion. It permits a single candidate with
+    frozen historical and latency evidence to collect genuinely prospective
+    Real fills before the normal 20-close/7-day Shadow contract completes.
+    Every immutable evidence check from ``native_promotion_report_error`` is
+    still enforced; only the prospective Shadow decision is substituted in a
+    private copy of the report. The original report is never modified.
+    """
+    risk_caps = (
+        ("lifetime loss", float(lifetime_loss_usd), 20.0),
+        ("strategy drawdown", float(strategy_drawdown_usd), 5.0),
+        ("daily loss", float(daily_loss_usd), 10.0),
+        ("portfolio drawdown", float(portfolio_drawdown_usd), 15.0),
+    )
+    for label, actual, maximum in risk_caps:
+        if actual <= 0 or actual > maximum:
+            return f"experimental native {label} ${actual:g} outside $0..${maximum:g}"
+
+    if not isinstance(report, dict):
+        return "native promotion report is not an object"
+    strategies = report.get("strategies")
+    if not isinstance(strategies, list):
+        return "native promotion strategies missing"
+    matching = [
+        row
+        for row in strategies
+        if isinstance(row, dict) and row.get("strategyId") == strategy_id
+    ]
+    if len(matching) != 1:
+        return "native promotion strategy evidence missing or duplicated"
+    evaluation = matching[0].get("evaluation")
+    if not isinstance(evaluation, dict):
+        return "native promotion strategy evaluation missing"
+    if evaluation.get("entryAllowed") is not True:
+        return "experimental native strategy entry is not allowed"
+    if evaluation.get("status") not in ("collecting", "passed"):
+        return "experimental native strategy is not collecting or passed"
+
+    candidate_report = copy.deepcopy(report)
+    eligible = candidate_report.get("eligibleStrategyIds")
+    if not isinstance(eligible, list):
+        return "native promotion eligibleStrategyIds invalid"
+    if strategy_id not in eligible:
+        eligible.append(strategy_id)
+    candidate_rows = [
+        row
+        for row in candidate_report["strategies"]
+        if isinstance(row, dict) and row.get("strategyId") == strategy_id
+    ]
+    candidate_rows[0]["evaluation"] = {"status": "passed", "entryAllowed": True}
+    candidate_rows[0]["decision"] = {
+        "shadowAction": "continue",
+        "realAction": "manual_canary_review",
+        "manualReviewRequired": True,
+    }
+    return native_promotion_report_error(
+        candidate_report,
+        strategy_id,
+        now_ms,
+        max_age_ms,
+    )
 
 
 def pnl_stats(values: Sequence[float]) -> PnlStats:
