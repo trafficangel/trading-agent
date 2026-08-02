@@ -6,8 +6,9 @@
  * selection before 21 ready days. It never writes trading state.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { writeJsonAtomicSync } from '../src/lib/atomic-json.js';
 import Database from 'better-sqlite3';
 import {
   buildLighterFundingSeries,
@@ -88,17 +89,10 @@ function flagValue(name: string): string | null {
   return index >= 0 ? (process.argv[index + 1] ?? null) : null;
 }
 
-function writeAtomic(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.tmp`;
-  writeFileSync(temporary, JSON.stringify(value, null, 2));
-  renameSync(temporary, path);
-}
-
 function output(report: unknown): void {
   const serialized = JSON.stringify(report, null, 2);
   const target = flagValue('--output');
-  if (target) writeAtomic(resolve(target), report);
+  if (target) writeJsonAtomicSync(resolve(target), report);
   console.log(serialized);
 }
 

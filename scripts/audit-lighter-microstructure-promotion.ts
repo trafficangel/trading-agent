@@ -3,8 +3,9 @@
  * It cannot enable Real or send orders.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { writeJsonAtomicSync } from '../src/lib/atomic-json.js';
 import {
   NATIVE_FORWARD_GATE,
 } from '../src/lib/lighter-luxalgo-math.js';
@@ -25,13 +26,6 @@ function flagValue(name: string): string | null {
 
 function readJson(path: string): unknown {
   return JSON.parse(readFileSync(path, 'utf8')) as unknown;
-}
-
-function writeAtomic(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.tmp`;
-  writeFileSync(temporary, JSON.stringify(value, null, 2));
-  renameSync(temporary, path);
 }
 
 function decision(
@@ -100,7 +94,7 @@ if (!existsSync(shadowPath)) {
     autoPromotion: false,
     realEnabled: false,
   };
-  writeAtomic(outputPath, report);
+  writeJsonAtomicSync(outputPath, report);
   console.log(JSON.stringify(report));
   process.exit(0);
 }
@@ -199,5 +193,5 @@ const report = {
   autoPromotion: false,
   realEnabled: false,
 };
-writeAtomic(outputPath, report);
+writeJsonAtomicSync(outputPath, report);
 console.log(JSON.stringify(report));

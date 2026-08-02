@@ -4,9 +4,10 @@
  * no signer, account endpoint or order client.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import Database from 'better-sqlite3';
+import { writeJsonAtomicSync } from '../src/lib/atomic-json.js';
 import {
   buildLighterFundingSeries,
   fundingSeriesCoverage,
@@ -55,13 +56,6 @@ function flagValue(name: string): string | null {
 
 function readJson(path: string): unknown {
   return JSON.parse(readFileSync(path, 'utf8')) as unknown;
-}
-
-function writeAtomic(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.tmp`;
-  writeFileSync(temporary, JSON.stringify(value, null, 2));
-  renameSync(temporary, path);
 }
 
 function stored(row: DbRow): StoredMicrostructureMinute {
@@ -227,7 +221,7 @@ if (existsSync(outputPath)) {
 }
 if (manifest.status === 'no_candidates') {
   const report = buildMicrostructureShadowReport(manifest, existingTrades, Date.now());
-  writeAtomic(outputPath, report);
+  writeJsonAtomicSync(outputPath, report);
   console.log(JSON.stringify(report));
   process.exit(0);
 }
@@ -274,5 +268,5 @@ const reconstructed = prospectiveMicrostructureShadowTrades(
 );
 const trades = mergeMicrostructureShadowTrades(existingTrades, reconstructed);
 const report = buildMicrostructureShadowReport(manifest, trades, nowMs);
-writeAtomic(outputPath, report);
+writeJsonAtomicSync(outputPath, report);
 console.log(JSON.stringify(report));
