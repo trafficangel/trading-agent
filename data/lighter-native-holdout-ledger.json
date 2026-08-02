@@ -3,7 +3,64 @@
   "createdAt": "2026-08-02T10:35:00Z",
   "policy": "Reserved symbols may be selected using market age, data quality and executable L2 cost only. No strategy performance may be computed on them until a frozen rule passes every discovery-universe gate. The holdout is opened once and is then permanently marked spent.",
   "reservedSymbols": ["SPX", "BERA"],
-  "performanceOpened": false,
+  "performanceOpened": true,
+  "openedAt": "2026-08-02T11:49:27Z",
+  "preregistration": {
+    "file": "data/lighter-native-holdout-transfer-v1-preregistered-20260802.json",
+    "sha256": "6e7df540ec2713d6365542576d636a02a09a82e4edae16186ac3df5ac6d0c436"
+  },
+  "performanceArtifacts": [
+    {
+      "file": "data/lighter-native-holdout-transfer-rsi-1m-20260802.json",
+      "sha256": "6c6847978af0010253e44f1085ad156fcc5a5e7862f261cabeff71617a4296ad"
+    },
+    {
+      "file": "data/lighter-native-holdout-transfer-rsi-5m-20260802.json",
+      "sha256": "a64487d071b6ced1e332b0a15d500f5231fcf424eb6e079206e272468aaf7246"
+    },
+    {
+      "file": "data/lighter-native-holdout-transfer-vwzmfi-1m-20260802.json",
+      "sha256": "53342fdaa4cbd2b11a4fb0f5d15630ed7f8dc8e63a159095d6ece1e9edd9798c"
+    },
+    {
+      "file": "data/lighter-native-holdout-transfer-vwzmfi-5m-20260802.json",
+      "sha256": "346f9e80c9c6935a2f433ab98311274b674c5eeffac6a94f3bac66ebfc621a5c"
+    }
+  ],
+  "decision": {
+    "status": "rejected",
+    "transferableCandidates": [],
+    "summary": "Neither frozen rule transferred on either preregistered timeframe. Every result file reported an empty qualified list; no rule/timeframe passed independently on both SPX and BERA.",
+    "cells": [
+      {
+        "rule": "CONF-RSI14-WILLR14-30/70+EMA400",
+        "timeframeMinutes": 1,
+        "SPX": {"trades": 1049, "netPct": -93.00422410887329, "profitFactor": 0.7428013024009674, "meanL95Pct": -0.12765462274248887, "positiveFolds": 0},
+        "BERA": {"trades": 1028, "netPct": 11.445677423430102, "profitFactor": 1.0462369585679896, "meanL95Pct": -0.02613478570405592, "positiveFolds": 2}
+      },
+      {
+        "rule": "CONF-RSI14-WILLR14-30/70+EMA400",
+        "timeframeMinutes": 5,
+        "SPX": {"trades": 394, "netPct": 13.046391285970007, "profitFactor": 1.0698365433467114, "meanL95Pct": -0.06216109156703709, "positiveFolds": 2},
+        "BERA": {"trades": 351, "netPct": 25.915072271635076, "profitFactor": 1.1934315913527418, "meanL95Pct": -0.01767838825534221, "positiveFolds": 4}
+      },
+      {
+        "rule": "CONF-VWZ60-2.5+MFI14-35/65+EMA400",
+        "timeframeMinutes": 1,
+        "SPX": {"trades": 743, "netPct": -65.96493773402513, "profitFactor": 0.7146174013512541, "meanL95Pct": -0.13091413082909956, "positiveFolds": 1},
+        "BERA": {"trades": 802, "netPct": 4.57845267784006, "profitFactor": 1.0246004429202067, "meanL95Pct": -0.03197875149838828, "positiveFolds": 1}
+      },
+      {
+        "rule": "CONF-VWZ60-2.5+MFI14-35/65+EMA400",
+        "timeframeMinutes": 5,
+        "SPX": {"trades": 214, "netPct": 18.04032368808054, "profitFactor": 1.1804325413441208, "meanL95Pct": -0.04862728026758539, "positiveFolds": 3},
+        "BERA": {"trades": 211, "netPct": -1.7009630265352025, "profitFactor": 0.9834893385328023, "meanL95Pct": -0.1394487982275653, "positiveFolds": 2}
+      }
+    ],
+    "shadowRegistration": false,
+    "realRegistration": false,
+    "rescueTuningAllowed": false
+  },
   "selection": {
     "pool": ["SPX", "SYRUP", "RESOLV", "GRASS", "ZORA", "USELESS", "NMR", "DOLO", "LINEA", "MYX", "BERA", "STBL"],
     "rule": "Require an active Lighter perp and a full first 500-candle page at the start of the 180-day window, then select the two lowest $100 round-trip L2 p95 values from the frozen 20-snapshot discovery sample.",
