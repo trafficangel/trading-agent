@@ -112,6 +112,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V11 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V11 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V12 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V12 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V13 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V13 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -197,6 +199,10 @@ type Arrays = {
   vortexMinus14: number[];
   kama10: number[];
   kama30: number[];
+  relativeVigor10: number[];
+  relativeVigorSignal4: number[];
+  trix15: number[];
+  trixSignal9: number[];
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
@@ -641,6 +647,53 @@ function kaufmanAdaptiveMovingAverage(
   return output;
 }
 
+/**
+ * Relative Vigor Index with the canonical four-bar symmetric smoothing.
+ * Every output value is derived exclusively from completed OHLC bars.
+ */
+function relativeVigorIndex(
+  candles: Candle[],
+  period: number,
+  signalPeriod: number,
+): { vigor: number[]; signal: number[] } {
+  const numerator = new Array<number>(candles.length).fill(0);
+  const denominator = new Array<number>(candles.length).fill(0);
+  for (let i = 3; i < candles.length; i += 1) {
+    numerator[i] = (
+      (candles[i]!.c - candles[i]!.o)
+      + 2 * (candles[i - 1]!.c - candles[i - 1]!.o)
+      + 2 * (candles[i - 2]!.c - candles[i - 2]!.o)
+      + (candles[i - 3]!.c - candles[i - 3]!.o)
+    ) / 6;
+    denominator[i] = (
+      (candles[i]!.h - candles[i]!.l)
+      + 2 * (candles[i - 1]!.h - candles[i - 1]!.l)
+      + 2 * (candles[i - 2]!.h - candles[i - 2]!.l)
+      + (candles[i - 3]!.h - candles[i - 3]!.l)
+    ) / 6;
+  }
+  const numeratorMean = sma(numerator, period);
+  const denominatorMean = sma(denominator, period);
+  const vigor = numeratorMean.map((value, i) => (
+    denominatorMean[i]! > 0 ? value / denominatorMean[i]! : 0
+  ));
+  return { vigor, signal: sma(vigor, signalPeriod) };
+}
+
+/** Triple-smoothed rate of change (TRIX), plus its canonical EMA9 signal. */
+function trix(
+  values: number[],
+  period: number,
+  signalPeriod: number,
+): { oscillator: number[]; signal: number[] } {
+  const triple = ema(ema(ema(values, period), period), period);
+  const oscillator = triple.map((value, i) => {
+    const previous = i > 0 ? triple[i - 1]! : value;
+    return previous !== 0 ? ((value / previous) - 1) * 100 : 0;
+  });
+  return { oscillator, signal: ema(oscillator, signalPeriod) };
+}
+
 function rollingVolumeWeighted(
   candles: Candle[],
   period: number,
@@ -810,6 +863,8 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
   const stochasticRsi14 = stochasticRsi(rsi14Values, 14, 3, 3);
   const tsi25x13 = trueStrengthIndex(close, 25, 13, 7);
   const vortex14 = vortexIndicator(c, 14);
+  const relativeVigor10 = relativeVigorIndex(c, 10, 4);
+  const trix15 = trix(close, 15, 9);
   const atrPctMean288 = sma(
     atr14Values.map((value, i) => close[i]! > 0 ? value / close[i]! : 0),
     288,
@@ -866,6 +921,10 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     vortexMinus14: vortex14.minus,
     kama10: kaufmanAdaptiveMovingAverage(close, 10),
     kama30: kaufmanAdaptiveMovingAverage(close, 30),
+    relativeVigor10: relativeVigor10.vigor,
+    relativeVigorSignal4: relativeVigor10.signal,
+    trix15: trix15.oscillator,
+    trixSignal9: trix15.signal,
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
@@ -1718,6 +1777,60 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.kama10[i]! < a.kama30[i]!
           : a.kama10[i]! > a.kama30[i]!;
+      },
+    });
+  }
+
+  // Preregistered independent v13 suite. RVI tests whether completed candles
+  // are closing directionally inside their own ranges; TRIX tests a triple-
+  // smoothed trend impulse. The two indicators do not reuse the Z/VWZ signal
+  // that already runs in Shadow. Both rules are exactly mirrored, use one
+  // canonical parameterisation on every market/timeframe, and fill only at
+  // the next native bar open.
+  if (ENABLE_INDEPENDENT_FAMILIES_V13) {
+    out.push({
+      name: 'V13-RVI10-X4+EMA200-EXIT-REVERSE-H120M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const crossedUp = a.relativeVigor10[i - 1]! <= a.relativeVigorSignal4[i - 1]!
+          && a.relativeVigor10[i]! > a.relativeVigorSignal4[i]!;
+        const crossedDown = a.relativeVigor10[i - 1]! >= a.relativeVigorSignal4[i - 1]!
+          && a.relativeVigor10[i]! < a.relativeVigorSignal4[i]!;
+        if (crossedUp && a.relativeVigor10[i]! > 0 && a.close[i]! > a.ema200[i]!) {
+          return 'long';
+        }
+        if (crossedDown && a.relativeVigor10[i]! < 0 && a.close[i]! < a.ema200[i]!) {
+          return 'short';
+        }
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.relativeVigor10[i]! < a.relativeVigorSignal4[i]!
+          : a.relativeVigor10[i]! > a.relativeVigorSignal4[i]!;
+      },
+    });
+
+    out.push({
+      name: 'V13-TRIX15-X9+EMA200-EXIT-REVERSE-H240M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(240 / BAR_MINUTES)),
+      entry(a, i) {
+        const crossedUp = a.trix15[i - 1]! <= a.trixSignal9[i - 1]!
+          && a.trix15[i]! > a.trixSignal9[i]!;
+        const crossedDown = a.trix15[i - 1]! >= a.trixSignal9[i - 1]!
+          && a.trix15[i]! < a.trixSignal9[i]!;
+        if (crossedUp && a.trix15[i]! > 0 && a.close[i]! > a.ema200[i]!) return 'long';
+        if (crossedDown && a.trix15[i]! < 0 && a.close[i]! < a.ema200[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.trix15[i]! < a.trixSignal9[i]!
+          : a.trix15[i]! > a.trixSignal9[i]!;
       },
     });
   }
