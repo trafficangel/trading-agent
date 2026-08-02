@@ -37,8 +37,6 @@ import {
 const MINUTE_MS = 60_000;
 const FIVE_MINUTES_MS = 5 * MINUTE_MS;
 const HISTORY_BARS = 2_000;
-const MAX_HOLD_BARS = 120;
-const STOP_PCT = 0.01;
 const POSITION_NOTIONAL_USD = 100;
 const OUTPUT_JSON = resolve(
   process.env.OUTPUT_JSON ?? 'data/lighter-native-entry-delay-audit.json',
@@ -68,6 +66,8 @@ type Trade = {
 type StrategyConfig = {
   strategyId: string;
   symbol: string;
+  stopPct: number;
+  maxHoldBars: number;
   fundingFile: string;
   executionCostFile: string;
   evaluate: (bars: readonly Vwz60Bar[]) => {
@@ -91,8 +91,90 @@ function completedEma(values: readonly number[], period: number): number | null 
 
 const ALL_STRATEGIES: readonly StrategyConfig[] = [
   {
+    strategyId: 'hype-rsi14-willr14-ema400-challenger',
+    symbol: 'HYPE',
+    stopPct: 0.01,
+    maxHoldBars: 120,
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    evaluate(bars) {
+      const snapshot = evaluateRsiWilliamsTrend(bars, 14, 30, 14, 20, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: rsiWilliamsExit(snapshot, 'long'),
+        exitShort: rsiWilliamsExit(snapshot, 'short'),
+      } : null;
+    },
+  },
+  {
+    strategyId: 'zec-rsi14-mfi14-ema400-challenger',
+    symbol: 'ZEC',
+    stopPct: 0.01,
+    maxHoldBars: 120,
+    fundingFile: 'data/lighter-funding-history-zec-direct-20260801.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    evaluate(bars) {
+      const snapshot = evaluateRsiMfiTrend(bars, 14, 30, 14, 30, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.currentRsi >= 50,
+        exitShort: snapshot.currentRsi <= 50,
+      } : null;
+    },
+  },
+  {
+    strategyId: 'hype-rsi14-mfi14-ema400-challenger',
+    symbol: 'HYPE',
+    stopPct: 0.01,
+    maxHoldBars: 120,
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    evaluate(bars) {
+      const snapshot = evaluateRsiMfiTrend(bars, 14, 30, 14, 30, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.currentRsi >= 50,
+        exitShort: snapshot.currentRsi <= 50,
+      } : null;
+    },
+  },
+  {
+    strategyId: 'hype-vwz60-mfi14-ema400-challenger',
+    symbol: 'HYPE',
+    stopPct: 0.01,
+    maxHoldBars: 120,
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    evaluate(bars) {
+      const snapshot = evaluateVwzMfiTrend(bars, 60, 2.5, 14, 35, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      } : null;
+    },
+  },
+  {
+    strategyId: 'zec-vwz60-mfi14-ema400-challenger',
+    symbol: 'ZEC',
+    stopPct: 0.01,
+    maxHoldBars: 120,
+    fundingFile: 'data/lighter-funding-history-zec-direct-20260801.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    evaluate(bars) {
+      const snapshot = evaluateVwzMfiTrend(bars, 60, 2.5, 14, 35, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      } : null;
+    },
+  },
+  {
     strategyId: 'zec-rsi14-willr14-ema400',
     symbol: 'ZEC',
+    stopPct: 0.01,
+    maxHoldBars: 120,
     fundingFile: 'data/lighter-funding-history-zec-direct-20260801.json',
     executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
     evaluate(bars) {
@@ -107,6 +189,8 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
   {
     strategyId: 'apt-rsi14-pullback-ema400',
     symbol: 'APT',
+    stopPct: 0.01,
+    maxHoldBars: 120,
     fundingFile: 'data/lighter-funding-history-rsi14-transfer-20260801.json',
     executionCostFile: 'data/lighter-execution-costs-transfer2-20260801.json',
     evaluate(bars) {
@@ -121,6 +205,8 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
   {
     strategyId: 'dot-rsi14-pullback-ema400',
     symbol: 'DOT',
+    stopPct: 0.01,
+    maxHoldBars: 120,
     fundingFile: 'data/lighter-funding-history-rsi14-transfer-20260801.json',
     executionCostFile: 'data/lighter-execution-costs-transfer3-20260801.json',
     evaluate(bars) {
@@ -135,6 +221,8 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
   {
     strategyId: 'data-vwz60-mfi14-ema400',
     symbol: 'DATA',
+    stopPct: 0.01,
+    maxHoldBars: 120,
     fundingFile: 'data/lighter-funding-history-transfer6-20260801.json',
     executionCostFile: 'data/lighter-execution-costs-transfer6-20260801.json',
     evaluate(bars) {
@@ -149,6 +237,8 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
   {
     strategyId: 'bnb-z60-3-touch',
     symbol: 'BNB',
+    stopPct: 0.015,
+    maxHoldBars: 240,
     fundingFile: 'data/lighter-funding-history-native.json',
     executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
     evaluate(bars) {
@@ -163,6 +253,8 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
   {
     strategyId: 'xlm-rsi14-mfi14-ema400',
     symbol: 'XLM',
+    stopPct: 0.01,
+    maxHoldBars: 120,
     fundingFile: 'data/lighter-funding-history-transfer2-20260801.json',
     executionCostFile: 'data/lighter-execution-costs-transfer2-20260801.json',
     evaluate(bars) {
@@ -177,6 +269,8 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
   {
     strategyId: 'hype-rsi7-pullback-ema400',
     symbol: 'HYPE',
+    stopPct: 0.01,
+    maxHoldBars: 120,
     fundingFile: 'data/lighter-funding-history-native.json',
     executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
     evaluate(bars) {
@@ -191,6 +285,8 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
   {
     strategyId: 'btc-vwz60-2.5-touch-er25',
     symbol: 'BTC',
+    stopPct: 0.015,
+    maxHoldBars: 240,
     fundingFile: 'data/lighter-funding-history-native.json',
     executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
     evaluate(bars) {
@@ -206,6 +302,8 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
   {
     strategyId: 'apt-vwz60-3-reclaim-ema200',
     symbol: 'APT',
+    stopPct: 0.015,
+    maxHoldBars: 240,
     fundingFile: 'data/lighter-funding-history-apt-rebuilt-20260801.json',
     executionCostFile: 'data/lighter-execution-costs-transfer2-20260801.json',
     evaluate(bars) {
@@ -222,6 +320,87 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
         exitLong: snapshot.close >= snapshot.mean,
         exitShort: snapshot.close <= snapshot.mean,
       };
+    },
+  },
+  {
+    strategyId: 'btc-vwz60-touch',
+    symbol: 'BTC',
+    stopPct: 0.015,
+    maxHoldBars: 240,
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    evaluate(bars) {
+      const snapshot = evaluateVwz60(bars, 60, 3, 'touch');
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      } : null;
+    },
+  },
+  {
+    strategyId: 'hype-vwz60-touch',
+    symbol: 'HYPE',
+    stopPct: 0.015,
+    maxHoldBars: 240,
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    evaluate(bars) {
+      const snapshot = evaluateVwz60(bars, 60, 2.5, 'touch');
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      } : null;
+    },
+  },
+  {
+    strategyId: 'xrp-vwz60-touch',
+    symbol: 'XRP',
+    stopPct: 0.015,
+    maxHoldBars: 240,
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-holdout-20260731.json',
+    evaluate(bars) {
+      const snapshot = evaluateVwz60(bars, 60, 3, 'touch');
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      } : null;
+    },
+  },
+  {
+    strategyId: 'xlm-vwz60-touch-er25',
+    symbol: 'XLM',
+    stopPct: 0.015,
+    maxHoldBars: 240,
+    fundingFile: 'data/lighter-funding-history-transfer2-20260801.json',
+    executionCostFile: 'data/lighter-execution-costs-transfer2-20260801.json',
+    evaluate(bars) {
+      const snapshot = evaluateVwz60(bars, 60, 3, 'touch');
+      const er60 = efficiencyRatio(bars, 60);
+      return snapshot ? {
+        signal: er60 != null && er60 <= 0.25 ? snapshot.signal : null,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      } : null;
+    },
+  },
+  {
+    strategyId: 'data-vwz60-touch',
+    symbol: 'DATA',
+    stopPct: 0.015,
+    maxHoldBars: 240,
+    fundingFile: 'data/lighter-funding-history-transfer6-20260801.json',
+    executionCostFile: 'data/lighter-execution-costs-transfer6-20260801.json',
+    evaluate(bars) {
+      const snapshot = evaluateVwz60(bars, 60, 2.5, 'touch');
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      } : null;
     },
   },
 ];
@@ -372,7 +551,7 @@ function simulate(
         const indicatorExit = position.side === 'long'
           ? decision.exitLong : decision.exitShort;
         const timedOut = decision.barTime + FIVE_MINUTES_MS - position.entryAt
-          >= MAX_HOLD_BARS * FIVE_MINUTES_MS;
+          >= config.maxHoldBars * FIVE_MINUTES_MS;
         if (indicatorExit || timedOut) close(minute, minute.o, indicatorExit ? 'indicator' : 'time');
       }
       if (
@@ -385,8 +564,8 @@ function simulate(
     }
     if (position) {
       const stop = position.side === 'long'
-        ? position.entryPrice * (1 - STOP_PCT)
-        : position.entryPrice * (1 + STOP_PCT);
+        ? position.entryPrice * (1 - config.stopPct)
+        : position.entryPrice * (1 + config.stopPct);
       const stopped = position.side === 'long' ? minute.l <= stop : minute.h >= stop;
       if (stopped) {
         const fill = position.side === 'long' ? Math.min(stop, minute.o) : Math.max(stop, minute.o);
@@ -531,8 +710,10 @@ const output = {
     signalHistoryBars: HISTORY_BARS,
     baselineDelayMinutes: 0,
     delayedScenarioMinutes: 1,
-    stopPct: STOP_PCT * 100,
-    maxHoldBars: MAX_HOLD_BARS,
+    strategyRisk: Object.fromEntries(STRATEGIES.map((strategy) => [
+      strategy.strategyId,
+      { stopPct: strategy.stopPct * 100, maxHoldBars: strategy.maxHoldBars },
+    ])),
     notionalUsd: POSITION_NOTIONAL_USD,
     commissionPct: 0,
     delayedFill: 'native 1m open one minute after the next 5m open',

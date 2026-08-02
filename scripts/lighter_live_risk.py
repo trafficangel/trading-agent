@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Collection, Mapping, Sequence
 
 
-NATIVE_PROMOTION_REPORT_VERSION = "lighter-native-promotion-audit-v3"
+NATIVE_PROMOTION_REPORT_VERSION = "lighter-native-promotion-audit-v4"
 NATIVE_PROMOTION_NOTIONAL_USD = 100.0
 NATIVE_HISTORICAL_EVIDENCE_VERSION = "lighter-native-historical-evidence-v1"
 NATIVE_HISTORICAL_REPORT_SHA256 = (
@@ -24,6 +24,10 @@ NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256 = (
 )
 NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256 = (
     "831526b9c633b1d9020ee84b7893d52566751eea11d3b5e8c962cb8ff6270e54"
+)
+NATIVE_LATENCY_EVIDENCE_VERSION = "lighter-native-entry-delay-audit-v1"
+NATIVE_LATENCY_EVIDENCE_SHA256 = (
+    "170404590ad7bbd2d7481191316ad10679485790daf8209640ef6baf14b35c44"
 )
 NATIVE_PROMOTION_GATE = {
     "targetClosed": 20.0,
@@ -192,6 +196,14 @@ def native_promotion_report_error(
     ):
         return "native RSI supplemental historical evidence hash mismatch"
 
+    latency = report.get("latencyEvidence")
+    if not isinstance(latency, dict):
+        return "native latency evidence missing"
+    if latency.get("version") != NATIVE_LATENCY_EVIDENCE_VERSION:
+        return "native latency evidence version mismatch"
+    if latency.get("sourceSha256") != NATIVE_LATENCY_EVIDENCE_SHA256:
+        return "native latency evidence hash mismatch"
+
     strategies = report.get("strategies")
     if not isinstance(strategies, list):
         return "native promotion strategies missing"
@@ -206,6 +218,7 @@ def native_promotion_report_error(
     evaluation = row.get("evaluation")
     decision = row.get("decision")
     strategy_historical = row.get("historicalEvidence")
+    strategy_latency = row.get("latencyEvidence")
     if row.get("realExecutorRegistered") is not True:
         return "native promotion strategy is not executor-registered"
     if not isinstance(strategy_historical, dict):
@@ -215,6 +228,10 @@ def native_promotion_report_error(
     reasons = strategy_historical.get("reasons")
     if not isinstance(reasons, list) or reasons:
         return "native strategy historical evidence reasons invalid"
+    if not isinstance(strategy_latency, dict):
+        return "native strategy latency evidence missing"
+    if strategy_latency.get("passed") is not True:
+        return "native strategy latency evidence not passed"
     if not isinstance(evaluation, dict):
         return "native promotion strategy evaluation missing"
     if evaluation.get("status") != "passed" or evaluation.get("entryAllowed") is not True:

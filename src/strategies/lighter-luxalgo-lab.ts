@@ -742,6 +742,44 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 13.541,
     },
   },
+  {
+    id: 'hype-rsi14-willr14-ema400-challenger',
+    code: '057',
+    name: 'RSI14 + Williams %R14 · EMA400 · RSI50 Exit',
+    symbol: 'HYPEUSDT',
+    asset: 'HYPE',
+    marketId: 24,
+    stopPct: 1,
+    backtest: {
+      // Conservative native 1m execution one minute after the next 5m open,
+      // measured executable $100 p95 and exact hourly funding.
+      period: '2026-02-01 → 2026-08-01',
+      trades: 145,
+      winRatePct: 71.7,
+      profitFactor: 1.813,
+      netPct: 31.394,
+      maxDrawdownPct: 6.274,
+    },
+  },
+  {
+    id: 'zec-vwz60-mfi14-ema400-challenger',
+    code: '058',
+    name: 'VWZ60 + MFI14 · EMA400 · VWMA Exit',
+    symbol: 'ZECUSDT',
+    asset: 'ZEC',
+    marketId: 90,
+    stopPct: 1,
+    backtest: {
+      // Conservative native 1m execution one minute after the next 5m open,
+      // measured executable $100 p95 and exact hourly funding.
+      period: '2026-02-01 → 2026-08-01',
+      trades: 112,
+      winRatePct: 59.8,
+      profitFactor: 1.449,
+      netPct: 20.245,
+      maxDrawdownPct: 6.328,
+    },
+  },
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
     ...market,
     portfolioId: NATIVE_TREND_PORTFOLIO_ID,
@@ -764,13 +802,13 @@ const STRATEGIES: readonly StrategySpec[] = [
 const STRATEGY_BY_ID = new Map(STRATEGIES.map((spec) => [spec.id, spec]));
 const STRATEGY_IDS = STRATEGIES.map((spec) => spec.id);
 const NATIVE_STRATEGY_IDS = [
-  'btc-vwz60-touch',
   'hype-vwz60-touch',
-  'xrp-vwz60-touch',
+  'hype-rsi14-willr14-ema400-challenger',
   'xlm-vwz60-touch-er25',
-  'data-vwz60-touch',
+  'zec-vwz60-mfi14-ema400-challenger',
+  // APT remains visible only while its existing Shadow position drains. The
+  // runner blocks every new entry after the frozen latency-gate failure.
   'apt-rsi14-pullback-ema400',
-  'dot-rsi14-pullback-ema400',
   'zec-rsi14-willr14-ema400',
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => market.id),
 ] as const;
@@ -782,6 +820,10 @@ const RETIRED_NATIVE_STRATEGY_IDS = [
   'hype-rsi14-willr14-ema400',
   'xlm-vwz60-mfi14-ema400',
   'data-vwz60-mfi14-ema400',
+  'btc-vwz60-touch',
+  'xrp-vwz60-touch',
+  'data-vwz60-touch',
+  'dot-rsi14-pullback-ema400',
 ] as const;
 const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(RETIRED_NATIVE_STRATEGY_IDS);
 // Native Quant remains prospective Shadow-only. Historical rows stay visible,
@@ -902,8 +944,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     timeExitBars: 120,
     trendFilter: 'ema400',
     realEnabled: false,
-    noteRu: 'APT сохраняет +9.20% и PF 1.34 при консервативном входе через одну минуту, но строгий latency-гейт не пройден: L95 −0.047%, а long за последние 30d −1.15%. Только Shadow; Real заблокирован до нового независимого подтверждения.',
-    noteEn: 'APT retains +9.20% and PF 1.34 with a conservative one-minute delayed fill, but fails the strict latency gate: L95 is −0.047% and the latest 30d long leg is −1.15%. Shadow only; Real is blocked pending new independent evidence.',
+    noteRu: 'APT сохраняет +9.20% и PF 1.34 при консервативном входе через одну минуту, но строгий latency-гейт не пройден: L95 −0.047%, а long за последние 30d −1.15%. Новые Shadow-входы отключены; текущая позиция только корректно закрывается. Real заблокирован.',
+    noteEn: 'APT retains +9.20% and PF 1.34 with a conservative one-minute delayed fill, but fails the strict latency gate: L95 is −0.047% and the latest 30d long leg is −1.15%. New Shadow entries are disabled while the existing position drains. Real is blocked.',
   },
   'dot-rsi14-pullback-ema400': {
     family: 'rsi',
@@ -927,6 +969,30 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     realEnabled: false,
     noteRu: 'ZEC прошёл 181d, 168 сделок, режимы, IS/OOS и обе стороны после измеренного $100 p95 и funding. Дополнительный нативный 1m тест с задержкой входа на одну минуту сохранил +30.18%, PF 1.49 и DD −8.80% (63% исходного net). Только prospective Shadow.',
     noteEn: 'ZEC passed 181d, 168 trades, regimes, IS/OOS and both sides after measured $100 p95 and funding. A separate native 1m audit with a one-minute delayed fill retained +30.18%, PF 1.49 and −8.80% DD (63% of baseline net). Prospective Shadow only.',
+  },
+  'hype-rsi14-willr14-ema400-challenger': {
+    family: 'rsi_williams',
+    mode: 'touch',
+    threshold: 30,
+    secondaryThreshold: 20,
+    period: 14,
+    timeExitBars: 120,
+    trendFilter: 'ema400',
+    realEnabled: false,
+    noteRu: 'Новый двусторонний HYPE-кандидат. Консервативный нативный тест с входом через одну минуту: 145 сделок, +31.39%, PF 1.81, DD −6.27%, 4/4 фолда, положительные Long/Short и окна 30/60/90d. Только новый prospective Shadow; Real заблокирован.',
+    noteEn: 'New two-sided HYPE candidate. Conservative native one-minute-delayed execution: 145 trades, +31.39%, PF 1.81, −6.27% DD, 4/4 folds, positive Long/Short and 30/60/90d windows. Fresh prospective Shadow only; Real is blocked.',
+  },
+  'zec-vwz60-mfi14-ema400-challenger': {
+    family: 'vwz_mfi',
+    mode: 'touch',
+    threshold: 2.5,
+    secondaryThreshold: 35,
+    period: 60,
+    timeExitBars: 120,
+    trendFilter: 'ema400',
+    realEnabled: false,
+    noteRu: 'Новый двусторонний ZEC-кандидат. Консервативный нативный тест с входом через одну минуту: 112 сделок, +20.25%, PF 1.45, DD −6.33%, 4/4 фолда, положительные Long/Short и окна 30/60/90d. Только новый prospective Shadow; Real заблокирован.',
+    noteEn: 'New two-sided ZEC candidate. Conservative native one-minute-delayed execution: 112 trades, +20.25%, PF 1.45, −6.33% DD, 4/4 folds, positive Long/Short and 30/60/90d windows. Fresh prospective Shadow only; Real is blocked.',
   },
   ...Object.fromEntries(NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => [
     market.id,

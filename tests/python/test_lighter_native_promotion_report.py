@@ -16,6 +16,8 @@ from lighter_live_risk import (  # noqa: E402
     NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256,
     NATIVE_HISTORICAL_SUPPLEMENT_SHA256,
     NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256,
+    NATIVE_LATENCY_EVIDENCE_SHA256,
+    NATIVE_LATENCY_EVIDENCE_VERSION,
     NATIVE_PROMOTION_GATE,
     native_promotion_report_error,
 )
@@ -27,7 +29,7 @@ STRATEGY_ID = "sol-z60-reclaim"
 
 def valid_report() -> dict:
     return {
-        "version": "lighter-native-promotion-audit-v3",
+        "version": "lighter-native-promotion-audit-v4",
         "generatedAt": datetime.fromtimestamp(
             (NOW_MS - 60_000) / 1000,
             tz=timezone.utc,
@@ -43,11 +45,16 @@ def valid_report() -> dict:
             "dataSupplementalSourceSha256": NATIVE_HISTORICAL_DATA_SUPPLEMENT_SHA256,
             "rsiSupplementalSourceSha256": NATIVE_HISTORICAL_RSI_SUPPLEMENT_SHA256,
         },
+        "latencyEvidence": {
+            "version": NATIVE_LATENCY_EVIDENCE_VERSION,
+            "sourceSha256": NATIVE_LATENCY_EVIDENCE_SHA256,
+        },
         "strategies": [
             {
                 "strategyId": STRATEGY_ID,
                 "realExecutorRegistered": True,
                 "historicalEvidence": {"passed": True, "reasons": []},
+                "latencyEvidence": {"passed": True},
                 "evaluation": {"status": "passed", "entryAllowed": True},
                 "decision": {
                     "shadowAction": "continue",
@@ -107,6 +114,16 @@ class NativePromotionReportTest(unittest.TestCase):
         report = valid_report()
         report["historicalEvidence"]["rsiSupplementalSourceSha256"] = "0" * 64
         self.assertIn("RSI supplemental", self.check(report) or "")
+
+    def test_changed_latency_artifact_fails_closed(self) -> None:
+        report = valid_report()
+        report["latencyEvidence"]["sourceSha256"] = "0" * 64
+        self.assertIn("latency evidence hash mismatch", self.check(report) or "")
+
+    def test_strategy_latency_failure_cannot_be_overridden(self) -> None:
+        report = valid_report()
+        report["strategies"][0]["latencyEvidence"]["passed"] = False
+        self.assertIn("latency evidence not passed", self.check(report) or "")
 
     def test_duplicate_strategy_evidence_fails_closed(self) -> None:
         report = valid_report()

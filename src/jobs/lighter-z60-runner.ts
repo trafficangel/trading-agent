@@ -85,6 +85,7 @@ type NativeStrategy = {
   efficiencyMax?: number;
   trendFilter?: 'ema200' | 'ema400' | 'ema200_400';
   maxBars?: number;
+  entryEnabled?: boolean;
 };
 
 type NativeSnapshot = Z60Snapshot | RsiTrendPullbackSnapshot
@@ -98,24 +99,19 @@ type NativeFeed = {
 
 const BASE_FEEDS: readonly NativeFeed[] = [
   {
-    symbol: 'BTCUSDT',
-    marketId: 1,
-    strategies: [
-      { id: 'btc-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 3 },
-    ],
-  },
-  {
     symbol: 'HYPEUSDT',
     marketId: 24,
     strategies: [
       { id: 'hype-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 2.5 },
-    ],
-  },
-  {
-    symbol: 'XRPUSDT',
-    marketId: 7,
-    strategies: [
-      { id: 'xrp-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 3 },
+      {
+        id: 'hype-rsi14-willr14-ema400-challenger',
+        family: 'rsi_williams',
+        mode: 'touch',
+        threshold: 30,
+        auxiliaryThreshold: 20,
+        trendFilter: 'ema400',
+        maxBars: 120,
+      },
     ],
   },
   {
@@ -132,13 +128,6 @@ const BASE_FEEDS: readonly NativeFeed[] = [
     ],
   },
   {
-    symbol: 'DATAUSDT',
-    marketId: 34,
-    strategies: [
-      { id: 'data-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 2.5 },
-    ],
-  },
-  {
     symbol: 'ZECUSDT',
     marketId: 90,
     strategies: [
@@ -148,6 +137,15 @@ const BASE_FEEDS: readonly NativeFeed[] = [
         mode: 'touch',
         threshold: 30,
         auxiliaryThreshold: 20,
+        trendFilter: 'ema400',
+        maxBars: 120,
+      },
+      {
+        id: 'zec-vwz60-mfi14-ema400-challenger',
+        family: 'vwz_mfi',
+        mode: 'touch',
+        threshold: 2.5,
+        auxiliaryThreshold: 35,
         trendFilter: 'ema400',
         maxBars: 120,
       },
@@ -164,20 +162,9 @@ const BASE_FEEDS: readonly NativeFeed[] = [
         threshold: 25,
         trendFilter: 'ema400',
         maxBars: 120,
-      },
-    ],
-  },
-  {
-    symbol: 'DOTUSDT',
-    marketId: 11,
-    strategies: [
-      {
-        id: 'dot-rsi14-pullback-ema400',
-        family: 'rsi',
-        mode: 'touch',
-        threshold: 25,
-        trendFilter: 'ema400',
-        maxBars: 120,
+        // This strategy failed the frozen +1m executable-entry gate. Keep its
+        // evaluator alive only to close the already-open Shadow position.
+        entryEnabled: false,
       },
     ],
   },
@@ -758,7 +745,17 @@ async function poll(): Promise<void> {
             continue;
           }
 
-          if (snapshot.signal && !allowsEntryByEfficiency(er60, strategy.efficiencyMax)) {
+          if (snapshot.signal && strategy.entryEnabled === false) {
+            recordEvaluation(
+              strategy,
+              feed,
+              target,
+              snapshot,
+              er60,
+              'waiting',
+              'latency_gate_failed_entry_disabled',
+            );
+          } else if (snapshot.signal && !allowsEntryByEfficiency(er60, strategy.efficiencyMax)) {
             recordEvaluation(
               strategy,
               feed,
@@ -900,6 +897,7 @@ export function startLighterZ60Runner(): void {
       mode: strategy.mode,
       threshold: strategy.threshold,
       trendFilter: strategy.trendFilter ?? false,
+      entryEnabled: strategy.entryEnabled !== false,
     }))),
     timeframe: '5m',
     commissionPct: 0,

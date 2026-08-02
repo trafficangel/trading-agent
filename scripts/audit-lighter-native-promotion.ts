@@ -3,6 +3,7 @@
  * It writes evidence only; it never toggles a strategy or sends an order.
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
@@ -17,14 +18,17 @@ import {
 import { evaluateNativeHistoricalEvidence } from '../src/lib/lighter-native-historical.js';
 
 const REAL_NATIVE_IDS: readonly string[] = [];
+const LATENCY_EVIDENCE_VERSION = 'lighter-native-entry-delay-audit-v1';
+const LATENCY_EVIDENCE_SHA256 =
+  '170404590ad7bbd2d7481191316ad10679485790daf8209640ef6baf14b35c44';
 const SHADOW_NATIVE_IDS = [
-  'btc-vwz60-touch',
   'hype-vwz60-touch',
-  'xrp-vwz60-touch',
+  'hype-rsi14-willr14-ema400-challenger',
   'xlm-vwz60-touch-er25',
-  'data-vwz60-touch',
+  'zec-vwz60-mfi14-ema400-challenger',
+  // Exit-only until its existing Shadow position closes; new entries are
+  // disabled by the runtime after the executable latency audit failed.
   'apt-rsi14-pullback-ema400',
-  'dot-rsi14-pullback-ema400',
   'zec-rsi14-willr14-ema400',
 ] as const;
 const P2_IDS = [
@@ -34,6 +38,44 @@ const P2_IDS = [
   'z60stack25-jup', 'z60stack25-lit', 'z60stack25-gram',
   'z60stack25-xmr', 'z60stack25-ena', 'z60stack25-tao',
 ] as const;
+
+type LatencyEvidenceRow = {
+  strategyId: string;
+  passed: boolean;
+  observedProductionDataReadySeconds: number;
+  conservativeDelayedScenarioSeconds: number;
+  delayedOneMinute: {
+    trades: number;
+    netPctUnits: number;
+    profitFactor: number | null;
+    maxDrawdownPct: number;
+    meanL95Pct: number | null;
+    positiveFolds: number;
+    longPctUnits: number;
+    shortPctUnits: number;
+  };
+  delayedNetRetention: number;
+};
+
+function latencyEvidenceRows(value: unknown): Map<string, LatencyEvidenceRow> {
+  if (!value || typeof value !== 'object') throw new Error('latency evidence is not an object');
+  const report = value as { version?: unknown; strategies?: unknown };
+  if (report.version !== LATENCY_EVIDENCE_VERSION) {
+    throw new Error(`latency evidence version mismatch: ${String(report.version)}`);
+  }
+  if (!Array.isArray(report.strategies)) throw new Error('latency evidence strategies missing');
+  const rows = new Map<string, LatencyEvidenceRow>();
+  for (const valueRow of report.strategies) {
+    if (!valueRow || typeof valueRow !== 'object') throw new Error('invalid latency evidence row');
+    const row = valueRow as Partial<LatencyEvidenceRow>;
+    if (typeof row.strategyId !== 'string' || typeof row.passed !== 'boolean') {
+      throw new Error('invalid latency evidence strategy row');
+    }
+    if (rows.has(row.strategyId)) throw new Error(`duplicate latency evidence: ${row.strategyId}`);
+    rows.set(row.strategyId, row as LatencyEvidenceRow);
+  }
+  return rows;
+}
 
 function flagValue(name: string): string | null {
   const index = process.argv.indexOf(name);
@@ -90,6 +132,18 @@ const dataConfluenceHistoricalPath = resolve(
 if (!existsSync(dataConfluenceHistoricalPath)) {
   throw new Error(`DATA confluence historical evidence missing: ${dataConfluenceHistoricalPath}`);
 }
+const latencyEvidencePath = resolve(
+  flagValue('--latency') ?? 'data/lighter-native-active-entry-delay-audit-20260802.json',
+);
+if (!existsSync(latencyEvidencePath)) {
+  throw new Error(`latency evidence missing: ${latencyEvidencePath}`);
+}
+const latencyEvidenceRaw = readFileSync(latencyEvidencePath);
+const latencyEvidenceSha256 = createHash('sha256').update(latencyEvidenceRaw).digest('hex');
+if (latencyEvidenceSha256 !== LATENCY_EVIDENCE_SHA256) {
+  throw new Error(`latency evidence hash mismatch: ${latencyEvidenceSha256}`);
+}
+const latencyByStrategy = latencyEvidenceRows(JSON.parse(latencyEvidenceRaw.toString('utf8')));
 const historicalEvidence = evaluateNativeHistoricalEvidence(
   JSON.parse(readFileSync(historicalPath, 'utf8')) as unknown,
   JSON.parse(readFileSync(supplementalHistoricalPath, 'utf8')) as unknown,
@@ -128,13 +182,22 @@ const portfolioSignals = db.prepare<string[], NativeForwardSignalRow>(`
   ORDER BY received_at, id`);
 
 const strategies = SHADOW_NATIVE_IDS.map((strategyId) => {
+  const latency = latencyByStrategy.get(strategyId);
+  if (!latency) throw new Error(`latency strategy evidence missing: ${strategyId}`);
   const historical = historicalEvidence.candidates.find((row) =>
-    row.strategyId === strategyId);
-  if (!historical) throw new Error(`historical strategy evidence missing: ${strategyId}`);
+    row.strategyId === strategyId) ?? {
+    strategyId,
+    symbol: latency.strategyId.split('-')[0]!.toUpperCase(),
+    rule: 'frozen_native_latency_candidate',
+    passed: latency.passed,
+    reasons: latency.passed ? [] : ['frozen latency evidence not passed'],
+    metrics: latency.delayedOneMinute,
+  };
   return {
     strategyId,
     realExecutorRegistered: REAL_NATIVE_IDS.includes(strategyId),
     historicalEvidence: historical,
+    latencyEvidence: latency,
     evaluation: evaluateNativeForwardRows(
       pnlStatement.all(strategyId),
       signalStatement.all(strategyId),
@@ -153,7 +216,7 @@ const evaluatedStrategies = strategies.map((row) => ({
   decision: nativePromotionDecision(
     row.evaluation,
     row.realExecutorRegistered,
-    row.historicalEvidence.passed,
+    row.historicalEvidence.passed && row.latencyEvidence.passed,
   ),
 }));
 const p2Members = P2_IDS.map((strategyId) => {
@@ -180,11 +243,12 @@ const eligibleStrategyIds = evaluatedStrategies
   .filter((row) =>
     row.realExecutorRegistered
     && row.historicalEvidence.passed
+    && row.latencyEvidence.passed
     && row.evaluation.status === 'passed')
   .map((row) => row.strategyId);
 const generatedAt = new Date().toISOString();
 const report = {
-  version: 'lighter-native-promotion-audit-v3',
+  version: 'lighter-native-promotion-audit-v4',
   generatedAt,
   databasePath,
   gate: NATIVE_FORWARD_GATE,
@@ -200,9 +264,18 @@ const report = {
     rsiSupplementalSourceSha256: historicalEvidence.rsiSupplementalSourceSha256,
     portfolio: historicalEvidence.portfolio,
   },
+  latencyEvidence: {
+    version: LATENCY_EVIDENCE_VERSION,
+    sourceSha256: latencyEvidenceSha256,
+    conservativeScenario: 'native 1m open one minute after the next 5m open',
+  },
   p2: {
     portfolioId: 'z60stack25-portfolio',
     realExecutorRegistered: false,
+    latencyEvidence: {
+      passed: false,
+      status: 'not_audited',
+    },
     evaluation: portfolio,
     decision: nativePromotionDecision(
       portfolio,
