@@ -1,0 +1,50 @@
+{
+  "version": "lighter-trend-volatility-search-summary-v1",
+  "generatedAt": "2026-08-02T03:19:00Z",
+  "decision": "reject_both_families",
+  "candidateCountAdded": 0,
+  "hypotheses": [
+    "TREND-KELTNER20-ATR1.5-RECLAIM+EMA200+ADX20-H240M",
+    "TREND-DONCHIAN20-BREAKOUT+EMA200+ADX25-H240M"
+  ],
+  "design": {
+    "directions": ["long", "short"],
+    "timeframesMinutes": [1, 5],
+    "symbols": 21,
+    "entryExecution": "next completed candle open",
+    "commissionPct": 0,
+    "executionCost": "market-specific executable $100 full-round-trip p95",
+    "funding": "measured Lighter hourly settlements",
+    "lookAhead": false
+  },
+  "result": {
+    "qualified1m": 0,
+    "qualified5m": 0,
+    "portfolioQualified1m": 0,
+    "portfolioQualified5m": 0,
+    "bestNearMiss": {
+      "symbol": "HYPE",
+      "timeframeMinutes": 5,
+      "rule": "TREND-KELTNER20-ATR1.5-RECLAIM+EMA200+ADX20-H240M",
+      "trades": 622,
+      "netAfterCostsPctUnits": 33.6619325761719,
+      "profitFactor": 1.2141893856652988,
+      "meanL95Pct": 0.008871298038915829,
+      "positiveFolds": 3,
+      "oosNetPctUnits": -0.6536036687340354,
+      "recent30dNetPctUnits": -0.8306378869227002,
+      "recent60dNetPctUnits": -4.1471981296566245,
+      "failure": "negative OOS and negative recent 30d/60d; Long side negative in both recent windows"
+    }
+  },
+  "evidence": [
+    {
+      "path": "data/lighter-trend-volatility-universe-1m-20260802.json",
+      "sha256": "dd1da1a45e44a8cd21e3f4f33f09bf0d4c2b38a7688301de15f6fa2a90817095"
+    },
+    {
+      "path": "data/lighter-trend-volatility-universe-5m-20260802.json",
+      "sha256": "544f0a2f41a400f11310d123db83a7e60e2a85e1fad2fe167695adeedc711f14"
+    }
+  ]
+}

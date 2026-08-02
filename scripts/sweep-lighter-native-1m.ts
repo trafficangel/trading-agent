@@ -86,6 +86,8 @@ const ENABLE_BOLLINGER_RSI_CONFLUENCE =
   process.env.ENABLE_BOLLINGER_RSI_CONFLUENCE === '1';
 const ENABLE_TREND_MOMENTUM_RECLAIM =
   process.env.ENABLE_TREND_MOMENTUM_RECLAIM === '1';
+const ENABLE_TREND_VOLATILITY_FAMILIES =
+  process.env.ENABLE_TREND_VOLATILITY_FAMILIES === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -773,6 +775,72 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.ema8[i]! < a.ema21[i]!
           : a.ema8[i]! > a.ema21[i]!;
+      },
+    });
+  }
+
+  // Preregistered, mirrored trend/volatility suite. Parameters are fixed
+  // before inspecting results and shared unchanged by every market and both
+  // timeframes. Signals use only the just-completed candle and execute on the
+  // next candle, so neither family can see its own fill candle.
+  if (ENABLE_TREND_VOLATILITY_FAMILIES) {
+    const maxBars = Math.max(1, Math.round(240 / BAR_MINUTES));
+    out.push({
+      name: 'TREND-KELTNER20-ATR1.5-RECLAIM+EMA200+ADX20-H240M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars,
+      entry(a, i) {
+        const priorLower = a.ema21[i - 1]! - 1.5 * a.atr14[i - 1]!;
+        const priorUpper = a.ema21[i - 1]! + 1.5 * a.atr14[i - 1]!;
+        const lower = a.ema21[i]! - 1.5 * a.atr14[i]!;
+        const upper = a.ema21[i]! + 1.5 * a.atr14[i]!;
+        const longTrend = a.ema21[i]! > a.ema200[i]!;
+        const shortTrend = a.ema21[i]! < a.ema200[i]!;
+        if (
+          longTrend
+          && a.adx14[i]! >= 20
+          && a.close[i - 1]! < priorLower
+          && a.close[i]! >= lower
+        ) return 'long';
+        if (
+          shortTrend
+          && a.adx14[i]! >= 20
+          && a.close[i - 1]! > priorUpper
+          && a.close[i]! <= upper
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.ema21[i]!
+          : a.close[i]! <= a.ema21[i]!;
+      },
+    });
+    out.push({
+      name: 'TREND-DONCHIAN20-BREAKOUT+EMA200+ADX25-H240M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars,
+      entry(a, i) {
+        const priorHigh = highestBefore(a.c, i, 20);
+        const priorLow = lowestBefore(a.c, i, 20);
+        if (
+          a.close[i]! > priorHigh
+          && a.close[i]! > a.ema200[i]!
+          && a.adx14[i]! >= 25
+        ) return 'long';
+        if (
+          a.close[i]! < priorLow
+          && a.close[i]! < a.ema200[i]!
+          && a.adx14[i]! >= 25
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! < a.ema21[i]!
+          : a.close[i]! > a.ema21[i]!;
       },
     });
   }
