@@ -100,6 +100,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V5 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V5 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V6 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V6 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V7 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V7 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -1087,6 +1089,79 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.close[i]! >= a.ema5[i]!
           : a.close[i]! <= a.ema5[i]!;
+      },
+    });
+  }
+
+  // Preregistered independent v7 suite. These rules deliberately avoid the
+  // oscillator/Z-score families selected in earlier rounds. The first is a
+  // canonical 20-bar false-breakout (Turtle Soup) with relative-volume and
+  // EMA400 regime confirmation. The second looks for a completed one-bar
+  // liquidation impulse that is reclaimed on the following completed bar.
+  // Both are exactly mirrored, shared unchanged by every symbol/timeframe,
+  // and execute only at the next bar open.
+  if (ENABLE_INDEPENDENT_FAMILIES_V7) {
+    out.push({
+      name: 'V7-TURTLESOUP20+RVOL1.25+EMA400-EXIT-SMA20-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const priorLow = lowestBefore(a.c, i - 1, 20);
+        const priorHigh = highestBefore(a.c, i - 1, 20);
+        const sweptLow = a.c[i - 1]!.l < priorLow;
+        const sweptHigh = a.c[i - 1]!.h > priorHigh;
+        const relativeVolume = a.c[i - 1]!.v / Math.max(a.volumeSma20[i - 1]!, 1e-12);
+        if (
+          sweptLow
+          && a.close[i]! >= priorLow
+          && relativeVolume >= 1.25
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          sweptHigh
+          && a.close[i]! <= priorHigh
+          && relativeVolume >= 1.25
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.sma20[i]!
+          : a.close[i]! <= a.sma20[i]!;
+      },
+    });
+
+    out.push({
+      name: 'V7-ABSORB-ATR1-RVOL1.5-MIDRECLAIM+EMA200-EXIT-EMA8-H60M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(60 / BAR_MINUTES)),
+      entry(a, i) {
+        const impulse = a.c[i - 1]!;
+        const body = Math.abs(impulse.c - impulse.o);
+        const midpoint = (impulse.o + impulse.c) / 2;
+        const relativeVolume = impulse.v / Math.max(a.volumeSma20[i - 1]!, 1e-12);
+        const impulseReady = body >= a.atr14[i - 1]! && relativeVolume >= 1.5;
+        if (
+          impulseReady
+          && impulse.c < impulse.o
+          && a.close[i]! > midpoint
+          && a.close[i]! > a.ema200[i]!
+        ) return 'long';
+        if (
+          impulseReady
+          && impulse.c > impulse.o
+          && a.close[i]! < midpoint
+          && a.close[i]! < a.ema200[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.ema8[i]!
+          : a.close[i]! <= a.ema8[i]!;
       },
     });
   }

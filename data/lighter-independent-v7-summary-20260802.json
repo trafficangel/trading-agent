@@ -1,0 +1,68 @@
+{
+  "version": "lighter-independent-v7-summary-v1",
+  "generatedAt": "2026-08-02T05:20:00.000Z",
+  "design": {
+    "status": "preregistered_before_universe_run",
+    "symbols": 21,
+    "timeframesMinutes": [1, 5],
+    "twoSided": true,
+    "completedBarsOnly": true,
+    "nextOpenExecution": true,
+    "positionNotionalUsd": 100,
+    "executionCosts": "market-specific executable $100 full-round-trip p95",
+    "funding": "exact Lighter hourly settlements in (entry, exit]"
+  },
+  "sources": [
+    {
+      "file": "data/lighter-independent-v7-universe-1m-20260802.json",
+      "sha256": "f222e61232bf3a75e26206685c62e70d7d0c9210682794687f828341730a177e"
+    },
+    {
+      "file": "data/lighter-independent-v7-universe-5m-20260802.json",
+      "sha256": "2e0d75019fc7166bd9ae9e0642311873106f70e38bed75fdb8cb58859d389ac2"
+    }
+  ],
+  "families": [
+    "V7-TURTLESOUP20+RVOL1.25+EMA400-EXIT-SMA20-H120M",
+    "V7-ABSORB-ATR1-RVOL1.5-MIDRECLAIM+EMA200-EXIT-EMA8-H60M"
+  ],
+  "qualified": [],
+  "bestRejected": [
+    {
+      "symbol": "HYPE",
+      "timeframeMinutes": 5,
+      "family": "V7-TURTLESOUP20+RVOL1.25+EMA400-EXIT-SMA20-H120M",
+      "trades": 645,
+      "netPctUnits": 23.46327562757059,
+      "profitFactor": 1.1499049377873525,
+      "maxDrawdownPct": -10.793403388289152,
+      "meanL95Pct": -0.005735503428429635,
+      "positiveFolds": 4,
+      "longPctUnits": 6.62665360706166,
+      "shortPctUnits": 16.83662202050891,
+      "reasons": [
+        "profit factor below 1.20",
+        "mean L95 is not positive",
+        "long leg is negative in 30d, 60d and 90d windows"
+      ]
+    },
+    {
+      "symbol": "HYPE",
+      "timeframeMinutes": 5,
+      "family": "V7-ABSORB-ATR1-RVOL1.5-MIDRECLAIM+EMA200-EXIT-EMA8-H60M",
+      "trades": 190,
+      "netPctUnits": 6.032705701992914,
+      "profitFactor": 1.2208168784918334,
+      "maxDrawdownPct": -5.939614346992258,
+      "meanL95Pct": -0.02505920406118118,
+      "positiveFolds": 3,
+      "longPctUnits": 4.356574116300252,
+      "shortPctUnits": 1.676131585692662,
+      "reasons": [
+        "mean L95 is not positive",
+        "short leg is negative in the latest 30d window"
+      ]
+    }
+  ],
+  "decision": "reject_all_do_not_start_shadow_or_real"
+}

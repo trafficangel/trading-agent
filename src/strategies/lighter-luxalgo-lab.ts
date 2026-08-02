@@ -2922,6 +2922,7 @@ function nativeRunnerReason(lang: Lang, row: NativeRunnerEvaluation): string {
     long_setup_ready: ['Long-условия готовы', 'Long setup ready'],
     short_setup_ready: ['Short-условия готовы', 'Short setup ready'],
     entry_signal: ['сигнал отправлен', 'signal emitted'],
+    forward_gate_paused_new_entries: ['новые входы остановлены forward-гейтом', 'new entries paused by forward gate'],
     waiting_mean_or_time_exit: ['позиция: ждёт mean/time exit', 'position: waiting for mean/time exit'],
     waiting_rsi50_or_time_exit: ['позиция: ждёт RSI50/time exit', 'position: waiting for RSI50/time exit'],
     waiting_bollinger_mean_or_time_exit: ['позиция: ждёт средней Bollinger/time exit', 'position: waiting for Bollinger mean/time exit'],

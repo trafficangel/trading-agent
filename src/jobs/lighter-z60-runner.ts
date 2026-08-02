@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { request } from 'undici';
 import { db } from '../db/client.js';
 import { setRuntimeConfig } from '../db/repos/runtime-config.js';
@@ -40,6 +42,7 @@ import {
 } from '../lib/lighter-z60.js';
 import { logger } from '../lib/logger.js';
 import { assertNativeStandaloneLifecycle } from '../lib/lighter-native-strategy-lifecycle.js';
+import { parseNativeShadowPauseAudit } from '../lib/lighter-native-shadow-pause.js';
 import {
   aggregateCompleteNativeBars,
   isSameNativeDecisionBar,
@@ -77,6 +80,10 @@ const CANDLE_API_COOLDOWN_MS = 120_000;
 // Exits remain allowed after this boundary, but a late cold-start signal must
 // never be converted into a new position at an unaudited price.
 const MAX_ENTRY_DECISION_DELAY_MS = 60_000;
+const NATIVE_PROMOTION_AUDIT_PATH = resolve(
+  process.env.LIGHTER_NATIVE_PROMOTION_AUDIT_PATH
+    ?? 'data/lighter-native-promotion-audit.json',
+);
 
 type CandleResponse = {
   code?: unknown;
@@ -87,6 +94,16 @@ type CandleResponse = {
 let candleRequestTail: Promise<void> = Promise.resolve();
 let nextCandleRequestAt = 0;
 let candleApiBackoffUntil = 0;
+
+function pausedShadowStrategyIds(): ReadonlySet<string> {
+  try {
+    return parseNativeShadowPauseAudit(
+      readFileSync(NATIVE_PROMOTION_AUDIT_PATH, 'utf8'),
+    )?.pausedStrategyIds ?? new Set<string>();
+  } catch {
+    return new Set<string>();
+  }
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
@@ -658,6 +675,7 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
   const target = targetCompletedBar(Date.now(), timeframeMinutes);
   const pollStartedAt = Date.now();
   runningTimeframes.add(timeframeMinutes);
+  const forwardPaused = pausedShadowStrategyIds();
   try {
     const pendingFeeds = FEEDS
       .map((feed): PendingFeed => ({
@@ -870,7 +888,17 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
             continue;
           }
 
-          if (snapshot.signal && closeToDataReadyMs > MAX_ENTRY_DECISION_DELAY_MS) {
+          if (snapshot.signal && forwardPaused.has(strategy.id)) {
+            recordEvaluation(
+              strategy,
+              feed,
+              target,
+              snapshot,
+              er60,
+              'waiting',
+              'forward_gate_paused_new_entries',
+            );
+          } else if (snapshot.signal && closeToDataReadyMs > MAX_ENTRY_DECISION_DELAY_MS) {
             recordEvaluation(
               strategy,
               feed,
@@ -1089,6 +1117,7 @@ export function startLighterZ60Runner(): void {
     }))),
     timeframes: ACTIVE_TIMEFRAMES.map((timeframe) => `${timeframe}m`),
     commissionPct: 0,
+    automaticShadowPauseAudit: NATIVE_PROMOTION_AUDIT_PATH,
   }, 'lighter-z60: native shadow runner scheduled');
   const initial = setTimeout(pollAllTimeframes, 5_000);
   initial.unref();
