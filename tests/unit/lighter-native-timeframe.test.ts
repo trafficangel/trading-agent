@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   aggregateCompleteNativeBars,
+  isSameNativeDecisionBar,
   nativeEntryDecisionDelayMs,
+  nativeTimeExitReached,
   targetCompletedNativeBar,
 } from '../../src/lib/lighter-native-timeframe.js';
 
@@ -30,6 +32,19 @@ describe('Native completed-bar source', () => {
       .toBe(59_000);
     expect(nativeEntryDecisionDelayMs(5 * MINUTE, 5, 9 * MINUTE))
       .toBe(0);
+  });
+
+  it('applies max-hold bars in the strategy timeframe', () => {
+    const openedAt = 10 * MINUTE;
+    expect(nativeTimeExitReached(openedAt, 13 * MINUTE, 1, 4)).toBe(true);
+    expect(nativeTimeExitReached(openedAt, 25 * MINUTE, 5, 4)).toBe(true);
+    expect(nativeTimeExitReached(openedAt, 20 * MINUTE, 5, 4)).toBe(false);
+  });
+
+  it('blocks re-entry only in the matching 1m or 5m decision bucket', () => {
+    expect(isSameNativeDecisionBar(7 * MINUTE + 30_000, 7 * MINUTE, 1)).toBe(true);
+    expect(isSameNativeDecisionBar(7 * MINUTE + 30_000, 5 * MINUTE, 5)).toBe(true);
+    expect(isSameNativeDecisionBar(10 * MINUTE, 5 * MINUTE, 5)).toBe(false);
   });
 
   it('aggregates exact consecutive 1m candles with full OHLCV semantics', () => {

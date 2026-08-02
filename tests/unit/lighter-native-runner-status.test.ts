@@ -78,6 +78,7 @@ describe('parseNativeRunnerStatus', () => {
       strategyId: 'z60stack25-btc',
       symbol: 'BTCUSDT',
       marketId: 1,
+      timeframeMinutes: 5,
       family: 'zscore',
       mode: 'touch',
       threshold: 2.5,
@@ -109,5 +110,20 @@ describe('parseNativeRunnerStatus', () => {
   it('fails closed on a malformed state instead of showing a false green runner', () => {
     expect(parseNativeRunnerStatus(JSON.stringify({ ...valid, heartbeatAt: 'now' }))).toBeNull();
     expect(parseNativeRunnerStatus('{')).toBeNull();
+  });
+
+  it('accepts 1m evaluations and defaults legacy rows to 5m', () => {
+    const oneMinute = {
+      ...valid,
+      evaluations: [{ ...valid.evaluations[0]!, timeframeMinutes: 1 as const }],
+    };
+    expect(parseNativeRunnerStatus(JSON.stringify(oneMinute))?.evaluations[0]?.timeframeMinutes)
+      .toBe(1);
+    const legacy = {
+      ...valid,
+      evaluations: valid.evaluations.map(({ timeframeMinutes: _timeframe, ...row }) => row),
+    };
+    expect(parseNativeRunnerStatus(JSON.stringify(legacy))?.evaluations[0]?.timeframeMinutes)
+      .toBe(5);
   });
 });

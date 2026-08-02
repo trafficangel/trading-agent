@@ -44,6 +44,25 @@ export function nativeEntryDecisionDelayMs(
   ));
 }
 
+export function nativeTimeExitReached(
+  openedAt: number,
+  targetBarTime: number,
+  timeframeMinutes: NativeTimeframeMinutes,
+  maxBars: number,
+): boolean {
+  const barMs = nativeTimeframeMs(timeframeMinutes);
+  return targetBarTime + barMs - openedAt >= Math.max(1, maxBars) * barMs;
+}
+
+export function isSameNativeDecisionBar(
+  timestamp: number,
+  targetBarTime: number,
+  timeframeMinutes: NativeTimeframeMinutes,
+): boolean {
+  const barMs = nativeTimeframeMs(timeframeMinutes);
+  return Math.floor(timestamp / barMs) * barMs === targetBarTime;
+}
+
 /**
  * Build a decision series exclusively from complete, consecutive native 1m
  * candles. Incomplete buckets are omitted rather than silently manufacturing

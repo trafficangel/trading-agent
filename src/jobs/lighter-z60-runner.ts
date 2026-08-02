@@ -35,15 +35,16 @@ import { logger } from '../lib/logger.js';
 import { assertNativeStandaloneLifecycle } from '../lib/lighter-native-strategy-lifecycle.js';
 import {
   aggregateCompleteNativeBars,
+  isSameNativeDecisionBar,
   nativeEntryDecisionDelayMs,
-  NATIVE_MINUTE_MS,
+  nativeTimeExitReached,
+  nativeTimeframeMs,
   targetCompletedNativeBar,
   type NativeRawCandle,
+  type NativeTimeframeMinutes,
 } from '../lib/lighter-native-timeframe.js';
 import { queueLighterLuxalgoSignal } from '../strategies/lighter-luxalgo-lab.js';
 
-const MINUTE_MS = NATIVE_MINUTE_MS;
-const BAR_MS = 5 * MINUTE_MS;
 const HISTORY_BARS = 66;
 // EMA400 needs substantially more than one period of warmup. A 500-bar seed
 // produced a live trend-side mismatch on LIT; the original 1,500-bar seed
@@ -52,7 +53,6 @@ const HISTORY_BARS = 66;
 // entry decisions from the exact aggregated source used by frozen research.
 const TREND_HISTORY_BARS = 2_000;
 const TREND_PAGE_MINUTES = 500;
-const TREND_PAGE_BARS = TREND_PAGE_MINUTES / 5;
 const TIME_EXIT_BARS = 240;
 // Lighter commonly publishes the fifth one-minute candle 15–25 seconds after
 // the nominal 5m boundary. Waiting 25s avoids a guaranteed failed request while
@@ -162,6 +162,7 @@ type LastClosedRow = {
 
 type NativeStrategy = {
   id: string;
+  timeframeMinutes: NativeTimeframeMinutes;
   family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi';
   mode: Z60EntryMode;
   threshold: number;
@@ -186,9 +187,10 @@ const BASE_FEEDS: readonly NativeFeed[] = [
     symbol: 'HYPEUSDT',
     marketId: 24,
     strategies: [
-      { id: 'hype-vwz60-touch', family: 'vwz', mode: 'touch', threshold: 2.5 },
+      { id: 'hype-vwz60-touch', timeframeMinutes: 5, family: 'vwz', mode: 'touch', threshold: 2.5 },
       {
         id: 'hype-rsi14-willr14-ema400-challenger',
+        timeframeMinutes: 5,
         family: 'rsi_williams',
         mode: 'touch',
         threshold: 30,
@@ -204,6 +206,7 @@ const BASE_FEEDS: readonly NativeFeed[] = [
     strategies: [
       {
         id: 'xlm-vwz60-touch-er25',
+        timeframeMinutes: 5,
         family: 'vwz',
         mode: 'touch',
         threshold: 3,
@@ -217,6 +220,7 @@ const BASE_FEEDS: readonly NativeFeed[] = [
     strategies: [
       {
         id: 'zec-rsi14-willr14-ema400',
+        timeframeMinutes: 5,
         family: 'rsi_williams',
         mode: 'touch',
         threshold: 30,
@@ -226,6 +230,7 @@ const BASE_FEEDS: readonly NativeFeed[] = [
       },
       {
         id: 'zec-vwz60-mfi14-ema400-challenger',
+        timeframeMinutes: 5,
         family: 'vwz_mfi',
         mode: 'touch',
         threshold: 2.5,
@@ -238,21 +243,21 @@ const BASE_FEEDS: readonly NativeFeed[] = [
 ];
 
 const TREND_PORTFOLIO_FEEDS: readonly NativeFeed[] = [
-  { symbol: 'BTCUSDT', marketId: 1, strategies: [{ id: 'z60stack25-btc', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'ETHUSDT', marketId: 0, strategies: [{ id: 'z60stack25-eth', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'SOLUSDT', marketId: 2, strategies: [{ id: 'z60stack25-sol', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'BNBUSDT', marketId: 25, strategies: [{ id: 'z60stack25-bnb', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'LTCUSDT', marketId: 35, strategies: [{ id: 'z60stack25-ltc', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'HYPEUSDT', marketId: 24, strategies: [{ id: 'z60stack25-hype', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'ZECUSDT', marketId: 90, strategies: [{ id: 'z60stack25-zec', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'DOGEUSDT', marketId: 3, strategies: [{ id: 'z60stack25-doge', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'NEARUSDT', marketId: 10, strategies: [{ id: 'z60stack25-near', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'JUPUSDT', marketId: 26, strategies: [{ id: 'z60stack25-jup', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'LITUSDT', marketId: 120, strategies: [{ id: 'z60stack25-lit', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'GRAMUSDT', marketId: 12, strategies: [{ id: 'z60stack25-gram', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'XMRUSDT', marketId: 77, strategies: [{ id: 'z60stack25-xmr', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'ENAUSDT', marketId: 29, strategies: [{ id: 'z60stack25-ena', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
-  { symbol: 'TAOUSDT', marketId: 13, strategies: [{ id: 'z60stack25-tao', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'BTCUSDT', marketId: 1, strategies: [{ id: 'z60stack25-btc', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'ETHUSDT', marketId: 0, strategies: [{ id: 'z60stack25-eth', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'SOLUSDT', marketId: 2, strategies: [{ id: 'z60stack25-sol', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'BNBUSDT', marketId: 25, strategies: [{ id: 'z60stack25-bnb', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'LTCUSDT', marketId: 35, strategies: [{ id: 'z60stack25-ltc', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'HYPEUSDT', marketId: 24, strategies: [{ id: 'z60stack25-hype', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'ZECUSDT', marketId: 90, strategies: [{ id: 'z60stack25-zec', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'DOGEUSDT', marketId: 3, strategies: [{ id: 'z60stack25-doge', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'NEARUSDT', marketId: 10, strategies: [{ id: 'z60stack25-near', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'JUPUSDT', marketId: 26, strategies: [{ id: 'z60stack25-jup', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'LITUSDT', marketId: 120, strategies: [{ id: 'z60stack25-lit', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'GRAMUSDT', marketId: 12, strategies: [{ id: 'z60stack25-gram', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'XMRUSDT', marketId: 77, strategies: [{ id: 'z60stack25-xmr', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'ENAUSDT', marketId: 29, strategies: [{ id: 'z60stack25-ena', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
+  { symbol: 'TAOUSDT', marketId: 13, strategies: [{ id: 'z60stack25-tao', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
 ];
 
 assertNativeStandaloneLifecycle(
@@ -267,6 +272,9 @@ for (const feed of [...BASE_FEEDS, ...TREND_PORTFOLIO_FEEDS]) {
     : feed);
 }
 const FEEDS: readonly NativeFeed[] = [...feedByMarket.values()];
+const ACTIVE_TIMEFRAMES: readonly NativeTimeframeMinutes[] = [
+  ...new Set(FEEDS.flatMap((feed) => feed.strategies.map((row) => row.timeframeMinutes))),
+].sort((left, right) => left - right);
 
 const openPosition = db.prepare<[string], OpenRow>(`
   SELECT side, opened_at
@@ -283,10 +291,10 @@ const lastClosed = db.prepare<[string], LastClosedRow>(`
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let started = false;
-let running = false;
+const runningTimeframes = new Set<NativeTimeframeMinutes>();
 const lastEvaluatedBars = new Map<string, number>();
 const runnerEvaluations = new Map<string, NativeRunnerEvaluation>();
-const trendBarCache = new Map<number, Vwz60Bar[]>();
+const trendBarCache = new Map<string, Vwz60Bar[]>();
 
 function recordError(
   strategy: NativeStrategy,
@@ -300,6 +308,7 @@ function recordError(
     strategyId: strategy.id,
     symbol: feed.symbol,
     marketId: feed.marketId,
+    timeframeMinutes: strategy.timeframeMinutes,
     family: strategy.family,
     mode: strategy.mode,
     threshold: strategy.threshold,
@@ -338,6 +347,7 @@ function recordEvaluation(
     strategyId: strategy.id,
     symbol: feed.symbol,
     marketId: feed.marketId,
+    timeframeMinutes: strategy.timeframeMinutes,
     family: strategy.family,
     mode: strategy.mode,
     threshold: strategy.threshold,
@@ -364,13 +374,14 @@ function recordEvaluation(
   });
 }
 
-function persistRunnerStatus(target: number): void {
+function persistRunnerStatus(): void {
+  const evaluations = [...runnerEvaluations.values()]
+    .sort((a, b) => a.strategyId.localeCompare(b.strategyId));
   const status: NativeRunnerStatus = {
     version: 1,
     heartbeatAt: Date.now(),
-    targetBarTime: target,
-    evaluations: [...runnerEvaluations.values()]
-      .sort((a, b) => a.strategyId.localeCompare(b.strategyId)),
+    targetBarTime: Math.max(0, ...evaluations.map((row) => row.attemptedBarTime)),
+    evaluations,
   };
   setRuntimeConfig(
     LIGHTER_NATIVE_RUNNER_STATUS_KEY,
@@ -379,15 +390,23 @@ function persistRunnerStatus(target: number): void {
   );
 }
 
-function targetCompletedBar(now: number): number {
-  return targetCompletedNativeBar(now, 5, PUBLISH_GRACE_MS);
+function targetCompletedBar(
+  now: number,
+  timeframeMinutes: NativeTimeframeMinutes,
+): number {
+  return targetCompletedNativeBar(now, timeframeMinutes, PUBLISH_GRACE_MS);
 }
 
-async function fetchBars(latestBarTime: number, marketId: number): Promise<Vwz60Bar[]> {
-  const start = latestBarTime - (HISTORY_BARS - 1) * BAR_MS;
+async function fetchBars(
+  latestBarTime: number,
+  marketId: number,
+  timeframeMinutes: NativeTimeframeMinutes,
+): Promise<Vwz60Bar[]> {
+  const barMs = nativeTimeframeMs(timeframeMinutes);
+  const start = latestBarTime - (HISTORY_BARS - 1) * barMs;
   // Lighter treats end_timestamp as exclusive, so request the boundary after
   // the fifth one-minute candle rather than the final candle's own timestamp.
-  const end = latestBarTime + BAR_MS;
+  const end = latestBarTime + barMs;
   const url = new URL('https://mainnet.zklighter.elliot.ai/api/v1/candles');
   url.searchParams.set('market_id', String(marketId));
   url.searchParams.set('resolution', '1m');
@@ -401,7 +420,11 @@ async function fetchBars(latestBarTime: number, marketId: number): Promise<Vwz60
   url.searchParams.set('set_timestamp_to_end', 'false');
 
   const body = await requestCandlePage(url, 'candles');
-  const bars = aggregateCompleteNativeBars(body.c ?? [], 5, latestBarTime);
+  const bars = aggregateCompleteNativeBars(
+    body.c ?? [],
+    timeframeMinutes,
+    latestBarTime,
+  );
   if (bars.at(-1)?.time !== latestBarTime) throw new Error('latest_completed_bar_missing');
   return bars;
 }
@@ -409,8 +432,11 @@ async function fetchBars(latestBarTime: number, marketId: number): Promise<Vwz60
 export async function fetchTrendBars(
   latestBarTime: number,
   marketId: number,
+  timeframeMinutes: NativeTimeframeMinutes = 5,
 ): Promise<Vwz60Bar[]> {
-  const cached = trendBarCache.get(marketId);
+  const barMs = nativeTimeframeMs(timeframeMinutes);
+  const cacheKey = `${marketId}:${timeframeMinutes}`;
+  const cached = trendBarCache.get(cacheKey);
   const cachedLastTime = cached?.at(-1)?.time;
   if (cachedLastTime === latestBarTime) return cached!;
 
@@ -421,13 +447,14 @@ export async function fetchTrendBars(
     cached
     && cachedLastTime != null
     && cachedLastTime < latestBarTime
-    && latestBarTime - cachedLastTime <= TREND_PAGE_BARS * BAR_MS
+    && latestBarTime - cachedLastTime
+      <= Math.floor(TREND_PAGE_MINUTES / timeframeMinutes) * barMs
   ) {
     for (const bar of cached) unique.set(bar.time, bar);
-    pageEnd = latestBarTime + BAR_MS;
-    remaining = Math.round((latestBarTime - cachedLastTime) / BAR_MS);
+    pageEnd = latestBarTime + barMs;
+    remaining = Math.round((latestBarTime - cachedLastTime) / barMs);
   } else {
-    pageEnd = latestBarTime + BAR_MS;
+    pageEnd = latestBarTime + barMs;
     remaining = TREND_HISTORY_BARS;
   }
 
@@ -435,21 +462,22 @@ export async function fetchTrendBars(
     // The research and frozen latency audit build every completed 5m candle
     // from five native 1m candles. Fetch the same source here; direct exchange
     // 5m OHLC can diverge and would make Williams/MFI signals non-reproducible.
-    const pageBars = Math.min(TREND_PAGE_BARS, remaining);
-    const pageStart = pageEnd - pageBars * BAR_MS;
+    const pageCapacity = Math.floor(TREND_PAGE_MINUTES / timeframeMinutes);
+    const pageBars = Math.min(pageCapacity, remaining);
+    const pageStart = pageEnd - pageBars * barMs;
     const url = new URL('https://mainnet.zklighter.elliot.ai/api/v1/candles');
     url.searchParams.set('market_id', String(marketId));
     url.searchParams.set('resolution', '1m');
     url.searchParams.set('start_timestamp', String(pageStart));
     url.searchParams.set('end_timestamp', String(pageEnd));
-    url.searchParams.set('count_back', String(pageBars * 5));
+    url.searchParams.set('count_back', String(pageBars * timeframeMinutes));
     url.searchParams.set('set_timestamp_to_end', 'false');
 
     const body = await requestCandlePage(url, 'trend_candles');
     for (const bar of aggregateCompleteNativeBars(
       body.c ?? [],
-      5,
-      pageEnd - BAR_MS,
+      timeframeMinutes,
+      pageEnd - barMs,
     )) {
       if (bar.time >= pageStart && bar.time < pageEnd) unique.set(bar.time, bar);
     }
@@ -465,11 +493,11 @@ export async function fetchTrendBars(
   }
   const warmup = bars.slice(-TREND_HISTORY_BARS);
   for (let index = 1; index < warmup.length; index += 1) {
-    if (warmup[index]!.time - warmup[index - 1]!.time !== BAR_MS) {
+    if (warmup[index]!.time - warmup[index - 1]!.time !== barMs) {
       throw new Error('trend_history_gap');
     }
   }
-  trendBarCache.set(marketId, bars);
+  trendBarCache.set(cacheKey, bars);
   return bars;
 }
 
@@ -497,6 +525,8 @@ async function mapWithConcurrency<T, R>(
 type PendingFeed = {
   feed: NativeFeed;
   pending: NativeStrategy[];
+  target: number;
+  timeframeMinutes: NativeTimeframeMinutes;
 };
 
 type PreparedFeed = PendingFeed & {
@@ -505,20 +535,20 @@ type PreparedFeed = PendingFeed & {
 };
 
 async function prepareFeed(
-  target: number,
-  { feed, pending }: PendingFeed,
+  row: PendingFeed,
 ): Promise<PreparedFeed> {
+  const { feed, pending, target, timeframeMinutes } = row;
   const needsBase = pending.some((strategy) => !strategy.trendFilter);
   const needsTrend = pending.some((strategy) => strategy.trendFilter);
   const [baseResult, trendResult] = await Promise.all([
     needsBase
-      ? fetchBars(target, feed.marketId).then(
+      ? fetchBars(target, feed.marketId, timeframeMinutes).then(
         (bars) => ({ bars, error: null }),
         (error: Error) => ({ bars: null, error }),
       )
       : Promise.resolve({ bars: null, error: null }),
     needsTrend
-      ? fetchTrendBars(target, feed.marketId).then(
+      ? fetchTrendBars(target, feed.marketId, timeframeMinutes).then(
         (bars) => ({ bars, error: null }),
         (error: Error) => ({ bars: null, error }),
       )
@@ -535,6 +565,7 @@ async function prepareFeed(
       target,
       symbol: feed.symbol,
       marketId: feed.marketId,
+      timeframeMinutes,
       source: '1m-aggregate',
     }, 'lighter-z60: market poll failed');
   }
@@ -548,13 +579,13 @@ async function prepareFeed(
       target,
       symbol: feed.symbol,
       marketId: feed.marketId,
+      timeframeMinutes,
       source: 'native-1m-aggregate-trend',
     }, 'lighter-z60: market poll failed');
   }
 
   return {
-    feed,
-    pending,
+    ...row,
     baseBars: baseResult.bars,
     trendBars: trendResult.bars,
   };
@@ -576,35 +607,43 @@ function emit(
     side,
     strategy_event: action === 'entry' ? side : `exit_${side}`,
     symbol,
-    timeframe: '5',
+    timeframe: String(strategy.timeframeMinutes),
     price,
     bar_time: barTime,
   }, { efficiencyRatio60: er60 });
 }
 
-async function poll(): Promise<void> {
-  if (running) return;
-  const target = targetCompletedBar(Date.now());
+async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
+  if (runningTimeframes.has(timeframeMinutes)) return;
+  const target = targetCompletedBar(Date.now(), timeframeMinutes);
   const pollStartedAt = Date.now();
-  running = true;
+  runningTimeframes.add(timeframeMinutes);
   try {
     const pendingFeeds = FEEDS
       .map((feed): PendingFeed => ({
         feed,
         pending: feed.strategies.filter(
-          (strategy) => target > (lastEvaluatedBars.get(strategy.id) ?? 0),
+          (strategy) => strategy.timeframeMinutes === timeframeMinutes
+            && target > (lastEvaluatedBars.get(strategy.id) ?? 0),
         ),
+        target,
+        timeframeMinutes,
       }))
       .filter((row) => row.pending.length > 0);
     const preparedFeeds = await mapWithConcurrency(
       pendingFeeds,
       FETCH_CONCURRENCY,
-      (row) => prepareFeed(target, row),
+      prepareFeed,
     );
-    const closeToDataReadyMs = nativeEntryDecisionDelayMs(target, 5, Date.now());
+    const closeToDataReadyMs = nativeEntryDecisionDelayMs(
+      target,
+      timeframeMinutes,
+      Date.now(),
+    );
     if (pendingFeeds.length > 0) {
       logger.info({
         target,
+        timeframeMinutes,
         feeds: pendingFeeds.length,
         fetchMs: Date.now() - pollStartedAt,
         closeToDataReadyMs,
@@ -674,7 +713,12 @@ async function poll(): Promise<void> {
                 ? snapshot.close >= (snapshot as Z60Snapshot).mean
                 : snapshot.close <= (snapshot as Z60Snapshot).mean;
             const maxBars = strategy.maxBars ?? TIME_EXIT_BARS;
-            const timeExit = target + BAR_MS - open.opened_at >= maxBars * BAR_MS;
+            const timeExit = nativeTimeExitReached(
+              open.opened_at,
+              target,
+              strategy.timeframeMinutes,
+              maxBars,
+            );
             if (indicatorExit || timeExit) {
               emit(strategy, feed.symbol, 'exit', open.side, target, snapshot.close, er60);
               recordEvaluation(
@@ -695,6 +739,7 @@ async function poll(): Promise<void> {
               logger.info({
                 strategyId: strategy.id,
                 symbol: feed.symbol,
+                timeframeMinutes: strategy.timeframeMinutes,
                 side: open.side,
                 barTime: target,
                 close: snapshot.close,
@@ -728,7 +773,11 @@ async function poll(): Promise<void> {
           // A protective stop that filled during this same completed candle
           // must not be followed by an immediate same-bar re-entry.
           const closed = lastClosed.get(strategy.id);
-          if (closed && Math.floor(closed.closed_at / BAR_MS) * BAR_MS === target) {
+          if (closed && isSameNativeDecisionBar(
+            closed.closed_at,
+            target,
+            strategy.timeframeMinutes,
+          )) {
             recordEvaluation(
               strategy,
               feed,
@@ -789,6 +838,7 @@ async function poll(): Promise<void> {
             logger.info({
               strategyId: strategy.id,
               symbol: feed.symbol,
+              timeframeMinutes: strategy.timeframeMinutes,
               family: strategy.family,
               mode: strategy.mode,
               threshold: strategy.threshold,
@@ -879,17 +929,24 @@ async function poll(): Promise<void> {
             symbol: feed.symbol,
             marketId: feed.marketId,
             strategyId: strategy.id,
+            timeframeMinutes: strategy.timeframeMinutes,
           }, 'lighter-z60: strategy evaluation failed');
         }
       }
     }
   } finally {
     try {
-      persistRunnerStatus(target);
+      persistRunnerStatus();
     } catch (error) {
       logger.error({ error: (error as Error).message }, 'lighter-z60: status heartbeat failed');
     }
-    running = false;
+    runningTimeframes.delete(timeframeMinutes);
+  }
+}
+
+function pollAllTimeframes(): void {
+  for (const timeframeMinutes of ACTIVE_TIMEFRAMES) {
+    void poll(timeframeMinutes);
   }
 }
 
@@ -903,14 +960,15 @@ export function startLighterZ60Runner(): void {
       family: strategy.family,
       mode: strategy.mode,
       threshold: strategy.threshold,
+      timeframeMinutes: strategy.timeframeMinutes,
       trendFilter: strategy.trendFilter ?? false,
       entryEnabled: strategy.entryEnabled !== false,
     }))),
-    timeframe: '5m',
+    timeframes: ACTIVE_TIMEFRAMES.map((timeframe) => `${timeframe}m`),
     commissionPct: 0,
   }, 'lighter-z60: native shadow runner scheduled');
-  const initial = setTimeout(() => void poll(), 5_000);
+  const initial = setTimeout(pollAllTimeframes, 5_000);
   initial.unref();
-  timer = setInterval(() => void poll(), RETRY_MS);
+  timer = setInterval(pollAllTimeframes, RETRY_MS);
   timer.unref();
 }

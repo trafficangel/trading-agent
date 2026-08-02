@@ -13,6 +13,7 @@ export type NativeRunnerEvaluation = {
   strategyId: string;
   symbol: string;
   marketId: number;
+  timeframeMinutes: 1 | 5;
   family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi';
   mode: 'touch' | 'reclaim';
   threshold: number;
@@ -143,6 +144,9 @@ export function parseNativeRunnerStatus(raw: string | null): NativeRunnerStatus 
         typeof row.strategyId !== 'string'
         || typeof row.symbol !== 'string'
         || finiteOrNull(row.marketId) == null
+        || (row.timeframeMinutes != null
+          && row.timeframeMinutes !== 1
+          && row.timeframeMinutes !== 5)
         || (row.family !== 'zscore'
           && row.family !== 'vwz'
           && row.family !== 'rsi'
@@ -166,6 +170,7 @@ export function parseNativeRunnerStatus(raw: string | null): NativeRunnerStatus 
         strategyId: row.strategyId,
         symbol: row.symbol,
         marketId: row.marketId!,
+        timeframeMinutes: row.timeframeMinutes ?? 5,
         family: row.family,
         mode: row.mode,
         threshold: row.threshold!,
