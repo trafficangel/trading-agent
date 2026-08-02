@@ -152,3 +152,123 @@ export function priceVolumeTrendOscillator(
   const oscillator = fast.map((value, index) => value - slow[index]!);
   return { oscillator, signal: causalEma(oscillator, signalPeriod) };
 }
+
+function wilderRsi(values: readonly number[], period: number): number[] {
+  const output = new Array<number>(values.length).fill(50);
+  if (values.length <= period) return output;
+  let gain = 0;
+  let loss = 0;
+  for (let index = 1; index <= period; index += 1) {
+    const change = values[index]! - values[index - 1]!;
+    gain += Math.max(change, 0);
+    loss += Math.max(-change, 0);
+  }
+  gain /= period;
+  loss /= period;
+  const value = (): number => {
+    if (loss === 0) return gain === 0 ? 50 : 100;
+    return 100 - 100 / (1 + gain / loss);
+  };
+  output[period] = value();
+  for (let index = period + 1; index < values.length; index += 1) {
+    const change = values[index]! - values[index - 1]!;
+    gain = (gain * (period - 1) + Math.max(change, 0)) / period;
+    loss = (loss * (period - 1) + Math.max(-change, 0)) / period;
+    output[index] = value();
+  }
+  return output;
+}
+
+/**
+ * Full Connors RSI: RSI of close, RSI of signed close streak and percentile
+ * rank of the completed one-bar return. The percentile window excludes the
+ * current return, so every component is known at the completed bar and a
+ * future append cannot revise history.
+ */
+export function connorsRsi(
+  closes: readonly number[],
+  closeRsiPeriod = 3,
+  streakRsiPeriod = 2,
+  percentilePeriod = 100,
+): number[] {
+  if (!(closeRsiPeriod > 1 && streakRsiPeriod > 1 && percentilePeriod > 1)) {
+    throw new Error('Connors RSI periods must exceed one');
+  }
+  const streak = new Array<number>(closes.length).fill(0);
+  const returns = new Array<number>(closes.length).fill(0);
+  for (let index = 1; index < closes.length; index += 1) {
+    const change = closes[index]! - closes[index - 1]!;
+    if (change > 0) streak[index] = Math.max(1, streak[index - 1]! + 1);
+    else if (change < 0) streak[index] = Math.min(-1, streak[index - 1]! - 1);
+    returns[index] = closes[index - 1]! !== 0
+      ? change / closes[index - 1]!
+      : 0;
+  }
+  const closeRsi = wilderRsi(closes, closeRsiPeriod);
+  const streakRsi = wilderRsi(streak, streakRsiPeriod);
+  return closes.map((_close, index) => {
+    if (index <= percentilePeriod) return 50;
+    let below = 0;
+    let equal = 0;
+    for (let cursor = index - percentilePeriod; cursor < index; cursor += 1) {
+      if (returns[cursor]! < returns[index]!) below += 1;
+      else if (returns[cursor] === returns[index]!) equal += 1;
+    }
+    const percentile = 100 * (below + 0.5 * equal) / percentilePeriod;
+    return (closeRsi[index]! + streakRsi[index]! + percentile) / 3;
+  });
+}
+
+/**
+ * Causal Z-score of the right-edge residual from a rolling least-squares
+ * price trend. The trend window is re-fitted only with completed closes; the
+ * residual scale is itself estimated from past completed residuals.
+ */
+export function rollingRegressionResidualZScore(
+  closes: readonly number[],
+  regressionPeriod = 60,
+  residualPeriod = 60,
+): number[] {
+  if (!(regressionPeriod > 2 && residualPeriod > 2)) {
+    throw new Error('Regression residual periods must exceed two');
+  }
+  const residuals = new Array<number>(closes.length).fill(0);
+  const output = new Array<number>(closes.length).fill(0);
+  const sumX = regressionPeriod * (regressionPeriod - 1) / 2;
+  const sumX2 = regressionPeriod * (regressionPeriod - 1) * (2 * regressionPeriod - 1) / 6;
+  const denominator = regressionPeriod * sumX2 - sumX ** 2;
+  let sumY = 0;
+  let sumXY = 0;
+  let residualSum = 0;
+  let residualSquareSum = 0;
+  for (let index = 0; index < closes.length; index += 1) {
+    const current = closes[index]!;
+    if (index < regressionPeriod) {
+      sumY += current;
+      sumXY += index * current;
+    } else {
+      const removed = closes[index - regressionPeriod]!;
+      const remainingSum = sumY - removed;
+      sumXY = sumXY - remainingSum + (regressionPeriod - 1) * current;
+      sumY = remainingSum + current;
+    }
+    if (index + 1 >= regressionPeriod) {
+      const slope = (regressionPeriod * sumXY - sumX * sumY) / denominator;
+      const intercept = (sumY - slope * sumX) / regressionPeriod;
+      residuals[index] = current - (intercept + slope * (regressionPeriod - 1));
+    }
+    residualSum += residuals[index]!;
+    residualSquareSum += residuals[index]! ** 2;
+    if (index >= residualPeriod) {
+      residualSum -= residuals[index - residualPeriod]!;
+      residualSquareSum -= residuals[index - residualPeriod]! ** 2;
+    }
+    if (index + 1 >= regressionPeriod + residualPeriod - 1) {
+      const mean = residualSum / residualPeriod;
+      const variance = Math.max(0, residualSquareSum / residualPeriod - mean ** 2);
+      const deviation = Math.sqrt(variance);
+      output[index] = deviation > 0 ? (residuals[index]! - mean) / deviation : 0;
+    }
+  }
+  return output;
+}

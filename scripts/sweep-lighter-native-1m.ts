@@ -18,8 +18,10 @@ import { dirname, resolve } from 'node:path';
 import { atr, ema, rollingStd, rsi, sma, type Candle } from '../src/backtest/indicators.js';
 import {
   choppinessIndex,
+  connorsRsi,
   elderForceIndexZScore,
   priceVolumeTrendOscillator,
+  rollingRegressionResidualZScore,
   ultimateOscillator,
 } from '../src/lib/lighter-independent-indicators.js';
 import {
@@ -126,6 +128,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V15 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V15 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V16 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V16 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V17 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V17 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -223,6 +227,8 @@ type Arrays = {
   deMarker14: number[];
   stochasticMomentum14x3x3: number[];
   stochasticMomentumSignal3: number[];
+  connorsRsi3x2x100: number[];
+  regressionResidualZ60x60: number[];
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
@@ -1005,6 +1011,8 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     deMarker14: deMarker(c, 14),
     stochasticMomentum14x3x3: stochasticMomentum14x3x3.oscillator,
     stochasticMomentumSignal3: stochasticMomentum14x3x3.signal,
+    connorsRsi3x2x100: connorsRsi(close, 3, 2, 100),
+    regressionResidualZ60x60: rollingRegressionResidualZScore(close, 60, 60),
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
@@ -2076,6 +2084,51 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.stochasticMomentum14x3x3[i]! >= 0
           : a.stochasticMomentum14x3x3[i]! <= 0;
+      },
+    });
+  }
+
+  // Preregistered independent v17 suite. Full Connors RSI combines close
+  // momentum, signed streak and a 100-bar return percentile; the regression
+  // family measures a completed close against its causal 60-bar least-squares
+  // trend and the historical scale of that residual. Both rules are exactly
+  // mirrored, share one frozen parameter set across symbols/timeframes, trade
+  // only with EMA400 and execute at the next bar open.
+  if (ENABLE_INDEPENDENT_FAMILIES_V17) {
+    out.push({
+      name: 'V17-CRSI3/2/100-RECLAIM10/90+EMA400-EXIT50-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const prior = a.connorsRsi3x2x100[i - 1]!;
+        const current = a.connorsRsi3x2x100[i]!;
+        if (prior < 10 && current >= 10 && a.close[i]! > a.ema400[i]!) return 'long';
+        if (prior > 90 && current <= 90 && a.close[i]! < a.ema400[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.connorsRsi3x2x100[i]! >= 50
+          : a.connorsRsi3x2x100[i]! <= 50;
+      },
+    });
+
+    out.push({
+      name: 'V17-REGRES60-RESIDZ60-TOUCH2.5+EMA400-EXIT0-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const residualZ = a.regressionResidualZ60x60[i]!;
+        if (residualZ <= -2.5 && a.close[i]! > a.ema400[i]!) return 'long';
+        if (residualZ >= 2.5 && a.close[i]! < a.ema400[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.regressionResidualZ60x60[i]! >= 0
+          : a.regressionResidualZ60x60[i]! <= 0;
       },
     });
   }
