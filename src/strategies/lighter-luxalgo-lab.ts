@@ -1099,8 +1099,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     timeExitBars: 120,
     trendFilter: 'ema400',
     realEnabled: false,
-    noteRu: 'Новый двусторонний HYPE-кандидат. Консервативный нативный тест с входом через одну минуту: 145 сделок, +31.39%, PF 1.81, DD −6.27%, 4/4 фолда, положительные Long/Short и окна 30/60/90d. Только новый prospective Shadow; Real заблокирован.',
-    noteEn: 'New two-sided HYPE candidate. Conservative native one-minute-delayed execution: 145 trades, +31.39%, PF 1.81, −6.27% DD, 4/4 folds, positive Long/Short and 30/60/90d windows. Fresh prospective Shadow only; Real is blocked.',
+    noteRu: 'Новый двусторонний HYPE-кандидат. Консервативный нативный тест с входом через одну минуту: 145 сделок, +31.39%, PF 1.81, DD −6.27%, 4/4 фолда, положительные Long/Short и окна 30/60/90d. Prospective Shadow продолжается; отдельно разрешён один ограниченный экспериментальный Real-canary $100/10× со стопом 1%, индивидуальной паузой при просадке $5 и lifetime-лимитом $20. Это ещё не прохождение обычного Real-гейта.',
+    noteEn: 'New two-sided HYPE candidate. Conservative native one-minute-delayed execution: 145 trades, +31.39%, PF 1.81, −6.27% DD, 4/4 folds, positive Long/Short and 30/60/90d windows. Prospective Shadow continues; one separate capped experimental $100/10× Real canary is enabled with a 1% stop, a $5 strategy drawdown pause, and a $20 lifetime loss limit. This is not normal Real-gate promotion.',
   },
   'zec-vwz60-mfi14-ema400-challenger': {
     family: 'vwz_mfi',
@@ -4174,8 +4174,8 @@ async function render(
       && requestedLiveStrategyState?.enabled === 1
       ? t(
         lang,
-        'Real разрешён только для этой стратегии. Биржевой reduce-only stop 1.5% ставится сразу после входа. Новые входы блокируются при дневном убытке −$10, общей просадке −$15 или индивидуальной паузе.',
-        'Real trading is enabled only for this strategy. An exchange-native 1.5% reduce-only stop is placed immediately after entry. New entries are blocked at a −$10 daily loss, −$15 portfolio drawdown, or an individual strategy pause.',
+        `Real разрешён только для этой экспериментальной стратегии. Биржевой reduce-only stop ${requested.strategy.stopPct.toFixed(1)}% ставится сразу после входа. Новые входы блокируются при просадке стратегии $5, дневном убытке −$10, общей просадке −$15 или lifetime-убытке −$20.`,
+        `Real trading is enabled only for this experimental strategy. An exchange-native ${requested.strategy.stopPct.toFixed(1)}% reduce-only stop is placed immediately after entry. New entries are blocked at a $5 strategy drawdown, −$10 daily loss, −$15 portfolio drawdown, or −$20 lifetime loss.`,
       )
       : (NATIVE_LIVE_STRATEGY_IDS as readonly string[]).includes(requested.strategy.id)
         ? t(
@@ -4192,10 +4192,10 @@ async function render(
       ? t(
         lang,
         enabledLiveStrategies > 0
-          ? `Новые Real-входы разрешены у ${enabledLiveStrategies} стратегий, прошедших отдельный допуск. Остальные Native-модели, включая P2/P3, копят prospective Shadow. На каждую открытую Real-позицию сразу ставится биржевой reduce-only stop.`
+          ? `Новые Real-входы разрешены у ${enabledLiveStrategies} отдельно ограниченных экспериментальных canary-стратегий; это не означает прохождение обычного forward-гейта. Остальные Native-модели, включая P2/P3, копят prospective Shadow. На каждую открытую Real-позицию сразу ставится биржевой reduce-only stop.`
           : 'Все новые Real-входы Native Quant сейчас на паузе до прохождения frozen-гейтов; P2, P3 и остальные модели продолжают Shadow.',
         enabledLiveStrategies > 0
-          ? `New Real entries are enabled for ${enabledLiveStrategies} separately promoted strategies. All other Native models, including P2/P3, continue collecting prospective Shadow evidence. Every open Real position receives an exchange-native reduce-only stop immediately.`
+          ? `New Real entries are enabled for ${enabledLiveStrategies} separately capped experimental canary strategies; this is not normal forward-gate promotion. All other Native models, including P2/P3, continue collecting prospective Shadow evidence. Every open Real position receives an exchange-native reduce-only stop immediately.`
           : 'All new Native Quant Real entries are paused until the frozen gates pass; P2, P3 and the other models continue in Shadow.',
       )
       : t(
