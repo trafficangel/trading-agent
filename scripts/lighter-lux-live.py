@@ -30,6 +30,7 @@ from lighter_live_risk import (
     native_promotion_report_error,
     native_runner_liveness_error,
     native_registry_error,
+    portfolio_risk_pause_reason,
     pnl_stats,
 )
 
@@ -80,6 +81,9 @@ class LiveRunner:
         self.daily_loss_usd = float(os.getenv("LIGHTER_LIVE_DAILY_LOSS_USD", "10"))
         self.max_drawdown_usd = float(
             os.getenv("LIGHTER_LIVE_MAX_DRAWDOWN_USD", "15")
+        )
+        self.lifetime_loss_usd = float(
+            os.getenv("LIGHTER_LIVE_LIFETIME_LOSS_USD", "20")
         )
         self.strategy_pause_sample = int(
             os.getenv("LIGHTER_LIVE_STRATEGY_PAUSE_SAMPLE", "10")
@@ -538,16 +542,15 @@ class LiveRunner:
         ).fetchone()
         paused_at = state["portfolio_paused_at"]
         pause_reason = state["portfolio_pause_reason"]
-        if (
-            paused_at is None
-            and float(stats["current_drawdown"] or 0) >= self.max_drawdown_usd
-        ):
+        risk_reason = portfolio_risk_pause_reason(
+            float(stats["net"] or 0),
+            float(stats["current_drawdown"] or 0),
+            self.lifetime_loss_usd,
+            self.max_drawdown_usd,
+        )
+        if paused_at is None and risk_reason is not None:
             paused_at = int(time.time() * 1000)
-            pause_reason = (
-                f"cumulative drawdown "
-                f"${float(stats['current_drawdown'] or 0):.2f} "
-                f">= ${self.max_drawdown_usd:.2f}"
-            )
+            pause_reason = risk_reason
             self.log("portfolio_paused", reason=pause_reason)
         self.db.execute(
             """UPDATE lighter_lux_live_state

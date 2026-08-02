@@ -10,6 +10,7 @@ from lighter_live_risk import (  # noqa: E402
     evaluate_strategy_risk,
     native_canary_config_error,
     native_registry_error,
+    portfolio_risk_pause_reason,
 )
 
 
@@ -59,6 +60,17 @@ class StrategyRiskTest(unittest.TestCase):
         self.assertIsNone(native_registry_error({"a": 1, "b": 2}, {"a", "b"}))
         self.assertIn("not executor-registered", native_registry_error({"a": 1}, {"a", "b"}) or "")
         self.assertIn("collision", native_registry_error({"a": 1, "b": 1}, {"a", "b"}) or "")
+
+    def test_portfolio_lifetime_loss_budget_is_irreversible(self) -> None:
+        self.assertIn(
+            "lifetime net $-20.00",
+            portfolio_risk_pause_reason(-20, 3, 20, 15) or "",
+        )
+        self.assertIn(
+            "cumulative drawdown $15.00",
+            portfolio_risk_pause_reason(2, 15, 20, 15) or "",
+        )
+        self.assertIsNone(portfolio_risk_pause_reason(-19.99, 14.99, 20, 15))
 
 
 if __name__ == "__main__":

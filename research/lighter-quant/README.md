@@ -612,3 +612,29 @@ charged measured $100 L2 p95 execution plus exact funding. The fixed 24-market
 **Decision:** both V17 families are rejected without Shadow, Real, delayed-fill
 audit or rescue tuning. The hashed evidence is preserved in
 `data/lighter-independent-v17-summary-20260802.json`.
+
+### Independent V18: variance-ratio regime split
+
+V18 was committed before results and tested one causal regime classifier in
+two opposite, fixed hypotheses: Z60 reversion only when the 120-bar variance
+ratio was below 0.85, and Donchian20 breakout only when it was above 1.15.
+Both rules were symmetric, filled at the next native open and paid measured
+$100 L2 p95 execution plus exact funding.
+
+- 1m: zero qualifiers. Reversion produced 9,225 trades and −$471.03; breakout
+  produced 18,271 trades and −$1,464.89. Every fixed batch had 0/4 folds and
+  both Long and Short books lost.
+- 5m: breakout failed broadly with 3,407 trades, −$271.66, PF 0.82 and 0/4
+  folds. Reversion was only +$5.57 over 1,704 trades: PF 1.01, L95 −0.0300,
+  IS −$4.65, recent 90d −$18.37, mixed regime −$21.39 and low volatility
+  −$18.00. It therefore has no usable lower confidence bound.
+- JUP reversion was the strongest isolated cell (+13.73%, PF 1.45, 4/4), but
+  L95 remained negative and mixed-regime PnL was −4.79%. Selecting it after
+  reading the universe would be prohibited post-hoc symbol selection.
+- Holdout did not rescue the family: 1m lost on both rules. The 5m reversion
+  holdout was +$21.04/PF 1.57 but still had negative L95 and cannot override
+  the preregistered main-universe failure.
+
+**Decision:** both V18 strategies are rejected without Shadow, Real,
+delayed-fill audit or parameter rescue. Evidence is frozen in
+`data/lighter-independent-v18-summary-20260802.json`.

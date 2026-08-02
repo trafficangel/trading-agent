@@ -170,6 +170,28 @@ class StrategyRiskDecision:
     reason: str | None
 
 
+def portfolio_risk_pause_reason(
+    cumulative_net_usd: float,
+    current_drawdown_usd: float,
+    lifetime_loss_usd: float,
+    maximum_drawdown_usd: float,
+) -> str | None:
+    """Return an irreversible portfolio pause reason at either capital limit."""
+    if lifetime_loss_usd <= 0 or maximum_drawdown_usd <= 0:
+        return "portfolio risk limits must be positive"
+    if cumulative_net_usd <= -lifetime_loss_usd:
+        return (
+            f"lifetime net ${cumulative_net_usd:.2f} "
+            f"<= -${lifetime_loss_usd:.2f}"
+        )
+    if current_drawdown_usd >= maximum_drawdown_usd:
+        return (
+            f"cumulative drawdown ${current_drawdown_usd:.2f} "
+            f">= ${maximum_drawdown_usd:.2f}"
+        )
+    return None
+
+
 def native_promotion_report_error(
     report: object,
     strategy_id: str,

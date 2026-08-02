@@ -1,0 +1,113 @@
+{
+  "version": "lighter-independent-v18-summary-v1",
+  "generatedAt": "2026-08-02T09:47:00Z",
+  "status": "rejected_without_shadow_or_real",
+  "preregistration": {
+    "file": "data/lighter-independent-v18-preregistered-20260802.json",
+    "sha256": "99f3dc1907b8b1cf6b398e33a9545cb96d317f4e16e06f967dd0384ebd9d0716",
+    "commitsBeforeResults": ["5632500", "f8bb45f"]
+  },
+  "method": {
+    "timeframes": ["1m", "5m"],
+    "mainUniverseCount": 24,
+    "unseenHoldout": ["ADA", "ZEC"],
+    "positionNotionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific executable $100 full-round-trip p95",
+    "funding": "exact Lighter hourly settlements in (entry, exit]",
+    "fallbackExecutionCostUsed": false,
+    "fallbackFundingUsed": false
+  },
+  "main1m": {
+    "qualifiedIndividuals": 0,
+    "qualifiedPortfolios": 0,
+    "antiPersistentReversion": {
+      "trades": 9225,
+      "netUsd": -471.03202139570914,
+      "longNetUsd": -193.63952505397074,
+      "shortNetUsd": -277.39249634173876,
+      "positiveFoldsByBatch": [0, 0, 0, 0]
+    },
+    "persistentBreakout": {
+      "trades": 18271,
+      "netUsd": -1464.893398208358,
+      "longNetUsd": -655.2549960310918,
+      "shortNetUsd": -809.6384021772699,
+      "positiveFoldsByBatch": [0, 0, 0, 0]
+    }
+  },
+  "main5m": {
+    "qualifiedIndividuals": 0,
+    "qualifiedPortfolios": 0,
+    "antiPersistentReversion": {
+      "trades": 1704,
+      "netUsd": 5.570168672178173,
+      "profitFactor": 1.009475815557293,
+      "meanReturnL95Pct": -0.0300125824627416,
+      "positiveFolds": 2,
+      "inSampleNetUsd": -4.645093810887892,
+      "outOfSampleNetUsd": 10.215262483066079,
+      "longNetUsd": 3.913413898768179,
+      "shortNetUsd": 1.6567547734099541,
+      "recent90dNetUsd": -18.36570671150904,
+      "mixedRegimeNetUsd": -21.39251096246773,
+      "lowVolNetUsd": -17.995824487165812
+    },
+    "persistentBreakout": {
+      "trades": 3407,
+      "netUsd": -271.66213218493107,
+      "profitFactor": 0.8159050922719813,
+      "meanReturnL95Pct": -0.1125708617404491,
+      "positiveFolds": 0,
+      "inSampleNetUsd": -204.72332499766836,
+      "outOfSampleNetUsd": -66.93880718726274,
+      "longNetUsd": -101.7470182306488,
+      "shortNetUsd": -169.915113954282
+    },
+    "bestRejectedIndividual": {
+      "symbol": "JUP",
+      "rule": "V18-VR120K5<0.85-Z60-2.5-RECLAIM+EMA400-EXIT0-H120M",
+      "trades": 93,
+      "netPct": 13.729011297503135,
+      "profitFactor": 1.4452887659375149,
+      "meanReturnL95Pct": -0.012814703567295083,
+      "positiveFolds": 4,
+      "outOfSamplePct": 4.516193296831371,
+      "longPct": 7.991886567897591,
+      "shortPct": 5.737124729605545,
+      "mixedRegimePct": -4.786764902623817,
+      "decision": "reject"
+    }
+  },
+  "holdout": {
+    "qualifiedIndividuals": 0,
+    "qualifiedPortfolios": 0,
+    "oneMinute": {
+      "antiPersistentReversionNetUsd": -20.392522554927865,
+      "persistentBreakoutNetUsd": -67.98600980850566
+    },
+    "fiveMinute": {
+      "antiPersistentReversionNetUsd": 21.037361261400964,
+      "antiPersistentReversionProfitFactor": 1.5681569372918973,
+      "antiPersistentReversionMeanL95Pct": -0.006895801826826947,
+      "persistentBreakoutNetUsd": -19.302379026281297
+    }
+  },
+  "decision": {
+    "addToShadow": false,
+    "addToReal": false,
+    "runDelayedFillAudit": false,
+    "rescueTune": false,
+    "selectSingleSymbolAfterResults": false,
+    "reason": "The breakout family loses broadly. The 5m anti-persistent portfolio is only marginally positive, but PF is 1.01, L95 is negative, IS and recent 90d are negative, and mixed/low-vol regimes fail. JUP is an isolated post-result cell with negative L95 and mixed-regime PnL. Holdout strength does not override the frozen main-universe failure."
+  },
+  "artifacts": [
+    {"file": "data/lighter-independent-v18-universe-1m-a-20260802.json", "sha256": "6076ea99d2b280555f72a3fbcf46c4f248e7808f862142c3646eeb644b2fad95"},
+    {"file": "data/lighter-independent-v18-universe-1m-b-20260802.json", "sha256": "9b2c104d8b83d5867397825f3d7b2fe9521a33742ea98e8dbc1dec03532983b3"},
+    {"file": "data/lighter-independent-v18-universe-1m-c-20260802.json", "sha256": "ce9acc14d272eb4d330aaf906bdbf560d8f1345526d3002cec03ee7e06419262"},
+    {"file": "data/lighter-independent-v18-universe-1m-d-20260802.json", "sha256": "030c60976885daaff1c61e6f50249b0f34d6be0640a285347a64502b1ffa48c5"},
+    {"file": "data/lighter-independent-v18-universe-5m-20260802.json", "sha256": "d7a2379020fee8e299a2dbc768da1856a64a70edf6371cca4725d5ffd1e18ebe"},
+    {"file": "data/lighter-independent-v18-holdout-1m-20260802.json", "sha256": "312fe0970a7537bdebd93d98533c3fffe2bd844df70001b7fb7277e2c6649d95"},
+    {"file": "data/lighter-independent-v18-holdout-5m-20260802.json", "sha256": "501c1f6ba2c8dabe35263e11d93169eb5609d43978e7051664978c923c87b50f"}
+  ]
+}
