@@ -3,8 +3,8 @@
  *
  * Signals are evaluated from the same trailing 2,000 completed 5m bars as the
  * production runner. Baseline fills at the next 5m open; the delayed scenario
- * fills one native minute later, conservatively approximating the observed
- * 30–41 second signal-close -> L2 capture path. Stops are checked on every 1m
+ * fills one native minute later, conservatively exceeding the measured
+ * 26.7-second completed-bar data path after the runner latency fix. Stops are checked on every 1m
  * candle, execution uses market-specific $100 p95 round-trip cost, and funding
  * uses exact hourly settlements.
  */
@@ -101,6 +101,34 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
         signal: snapshot.signal,
         exitLong: rsiWilliamsExit(snapshot, 'long'),
         exitShort: rsiWilliamsExit(snapshot, 'short'),
+      } : null;
+    },
+  },
+  {
+    strategyId: 'apt-rsi14-pullback-ema400',
+    symbol: 'APT',
+    fundingFile: 'data/lighter-funding-history-rsi14-transfer-20260801.json',
+    executionCostFile: 'data/lighter-execution-costs-transfer2-20260801.json',
+    evaluate(bars) {
+      const snapshot = evaluateRsiTrendPullback(bars, 14, 25, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: rsiTrendExit(snapshot, 'long'),
+        exitShort: rsiTrendExit(snapshot, 'short'),
+      } : null;
+    },
+  },
+  {
+    strategyId: 'dot-rsi14-pullback-ema400',
+    symbol: 'DOT',
+    fundingFile: 'data/lighter-funding-history-rsi14-transfer-20260801.json',
+    executionCostFile: 'data/lighter-execution-costs-transfer3-20260801.json',
+    evaluate(bars) {
+      const snapshot = evaluateRsiTrendPullback(bars, 14, 25, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: rsiTrendExit(snapshot, 'long'),
+        exitShort: rsiTrendExit(snapshot, 'short'),
       } : null;
     },
   },
@@ -488,7 +516,8 @@ const audits = STRATEGIES.map((config) => {
       first: new Date(first).toISOString(),
       last: new Date(last).toISOString(),
     },
-    observedProductionDelaySeconds: { minimum: 30, maximum: 41 },
+    observedProductionDataReadySeconds: 26.666,
+    conservativeDelayedScenarioSeconds: 60,
     baselineNextOpen: baseline,
     delayedOneMinute: delayed,
     delayedNetRetention: retention,

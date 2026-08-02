@@ -237,23 +237,32 @@ let lighterMarketsPromise: Promise<Map<string, LighterOrderBook>> | null = null;
 function lighterMarkets(): Promise<Map<string, LighterOrderBook>> {
   lighterMarketsPromise ??= (async () => {
     for (let attempt = 0; attempt < 6; attempt++) {
-      const response = await request('https://mainnet.zklighter.elliot.ai/api/v1/orderBooks');
-      const body = await response.body.json() as {
-        code?: number;
-        message?: string;
-        order_books?: LighterOrderBook[];
-      };
-      if (body.order_books) {
-        return new Map(
-          body.order_books
-            .filter((book) => book.market_type === 'perp')
-            .map((book) => [book.symbol, book]),
-        );
+      try {
+        const response = await request('https://mainnet.zklighter.elliot.ai/api/v1/orderBooks');
+        const contentType = String(response.headers['content-type'] ?? '');
+        const text = await response.body.text();
+        if (response.statusCode !== 200 || !contentType.includes('application/json')) {
+          throw new Error(`http_${response.statusCode}:${contentType || 'unknown_content_type'}`);
+        }
+        const body = JSON.parse(text) as {
+          code?: number;
+          message?: string;
+          order_books?: LighterOrderBook[];
+        };
+        if (body.order_books) {
+          return new Map(
+            body.order_books
+              .filter((book) => book.market_type === 'perp')
+              .map((book) => [book.symbol, book]),
+          );
+        }
+        if (body.code !== 23000) {
+          throw new Error(`code_${body.code ?? 'unknown'}${body.message ? `:${body.message}` : ''}`);
+        }
+      } catch (error) {
+        if (attempt === 5) throw error;
       }
-      if (body.code !== 23000 || attempt === 5) {
-        throw new Error(`Lighter orderBooks code=${body.code ?? 'unknown'}${body.message ? `: ${body.message}` : ''}`);
-      }
-      await wait(Math.min(4_000, 250 * 2 ** attempt));
+      await wait(Math.min(8_000, 500 * 2 ** attempt));
     }
     throw new Error('Lighter orderBooks retry exhausted');
   })();
