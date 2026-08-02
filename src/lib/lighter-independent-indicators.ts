@@ -23,28 +23,41 @@ export function rollingVarianceRatio(
       ? Math.log(close / closes[index - 1]!)
       : 0
   ));
+  const prefix = new Array<number>(returns.length + 1).fill(0);
+  const prefixSquares = new Array<number>(returns.length + 1).fill(0);
+  const aggregated = new Array<number>(returns.length).fill(0);
+  const aggregatePrefix = new Array<number>(returns.length + 1).fill(0);
+  const aggregatePrefixSquares = new Array<number>(returns.length + 1).fill(0);
+  let aggregateRolling = 0;
+  for (let index = 0; index < returns.length; index += 1) {
+    prefix[index + 1] = prefix[index]! + returns[index]!;
+    prefixSquares[index + 1] = prefixSquares[index]! + returns[index]! ** 2;
+    aggregateRolling += returns[index]!;
+    if (index >= aggregation) aggregateRolling -= returns[index - aggregation]!;
+    if (index + 1 >= aggregation) aggregated[index] = aggregateRolling;
+    aggregatePrefix[index + 1] = aggregatePrefix[index]! + aggregated[index]!;
+    aggregatePrefixSquares[index + 1] = aggregatePrefixSquares[index]!
+      + aggregated[index]! ** 2;
+  }
   return closes.map((_close, index) => {
     if (index < period + aggregation - 1) return 1;
     const start = index - period + 1;
-    const one = returns.slice(start, index + 1);
-    const oneMean = one.reduce((sum, value) => sum + value, 0) / one.length;
-    const oneVariance = one.reduce(
-      (sum, value) => sum + (value - oneMean) ** 2,
-      0,
-    ) / one.length;
+    const oneCount = period;
+    const oneSum = prefix[index + 1]! - prefix[start]!;
+    const oneSquareSum = prefixSquares[index + 1]! - prefixSquares[start]!;
+    const oneMean = oneSum / oneCount;
+    const oneVariance = Math.max(0, oneSquareSum / oneCount - oneMean ** 2);
     if (!(oneVariance > 0)) return 1;
-    const aggregated: number[] = [];
-    for (let cursor = start + aggregation - 1; cursor <= index; cursor += 1) {
-      let total = 0;
-      for (let lag = 0; lag < aggregation; lag += 1) total += returns[cursor - lag]!;
-      aggregated.push(total);
-    }
-    const aggregateMean = aggregated.reduce((sum, value) => sum + value, 0)
-      / aggregated.length;
-    const aggregateVariance = aggregated.reduce(
-      (sum, value) => sum + (value - aggregateMean) ** 2,
+    const aggregateStart = start + aggregation - 1;
+    const aggregateCount = index - aggregateStart + 1;
+    const aggregateSum = aggregatePrefix[index + 1]! - aggregatePrefix[aggregateStart]!;
+    const aggregateSquareSum = aggregatePrefixSquares[index + 1]!
+      - aggregatePrefixSquares[aggregateStart]!;
+    const aggregateMean = aggregateSum / aggregateCount;
+    const aggregateVariance = Math.max(
       0,
-    ) / aggregated.length;
+      aggregateSquareSum / aggregateCount - aggregateMean ** 2,
+    );
     return aggregateVariance / (aggregation * oneVariance);
   });
 }
