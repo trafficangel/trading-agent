@@ -14,25 +14,12 @@ import {
   lighterFundingPnlPct,
   type LighterFundingPoint,
 } from '../src/lib/lighter-funding-history.js';
+import { NATIVE_FUNDING_RECONCILIATION_STRATEGY_IDS } from '../src/lib/lighter-native-strategy-lifecycle.js';
 
 const BASE_URL = process.env.LIGHTER_API_BASE ?? 'https://mainnet.zklighter.elliot.ai';
 const HOUR_SECONDS = 3_600;
 const CHUNK_SECONDS = 28 * 86_400;
-const NATIVE_IDS = [
-  'sol-z60-reclaim', 'sol-z60-touch', 'bnb-z60-touch', 'ltc-z60-touch',
-  'btc-vwz60-touch', 'hype-vwz60-touch',
-  'xrp-vwz60-touch',
-  'xlm-vwz60-touch-er25',
-  'data-vwz60-touch',
-  'apt-rsi14-pullback-ema400', 'dot-rsi14-pullback-ema400',
-  'hype-rsi14-willr14-ema400', 'xlm-vwz60-mfi14-ema400',
-  'zec-rsi14-willr14-ema400',
-  'z60stack25-btc', 'z60stack25-eth', 'z60stack25-sol',
-  'z60stack25-bnb', 'z60stack25-ltc', 'z60stack25-hype',
-  'z60stack25-zec', 'z60stack25-doge', 'z60stack25-near',
-  'z60stack25-jup', 'z60stack25-lit', 'z60stack25-gram',
-  'z60stack25-xmr', 'z60stack25-ena', 'z60stack25-tao',
-] as const;
+const NATIVE_IDS = NATIVE_FUNDING_RECONCILIATION_STRATEGY_IDS;
 
 type PendingTrade = {
   id: number;

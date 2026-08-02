@@ -16,7 +16,11 @@ import {
   type NativeForwardSignalRow,
 } from '../src/lib/lighter-luxalgo-math.js';
 import { evaluateNativeHistoricalEvidence } from '../src/lib/lighter-native-historical.js';
-import { NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS } from '../src/lib/lighter-native-strategy-lifecycle.js';
+import {
+  NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS,
+  NATIVE_P2_PORTFOLIO_STRATEGY_IDS,
+  NATIVE_P3_PORTFOLIO_STRATEGY_IDS,
+} from '../src/lib/lighter-native-strategy-lifecycle.js';
 import {
   evaluateNativeRunnerLiveness,
   LIGHTER_NATIVE_RUNNER_STATUS_KEY,
@@ -39,19 +43,8 @@ const P2_LATENCY_EVIDENCE_SHA256 =
 const P2_MEMBER_LATENCY_EVIDENCE_SHA256 =
   '39c13fba1a766d931014b1be302fbaf98da52746ba3dbfa15327ab0fd96ce901';
 const SHADOW_NATIVE_IDS = NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS;
-const P2_IDS = [
-  'z60stack25-btc', 'z60stack25-eth', 'z60stack25-sol',
-  'z60stack25-bnb', 'z60stack25-ltc', 'z60stack25-hype',
-  'z60stack25-zec', 'z60stack25-doge', 'z60stack25-near',
-  'z60stack25-jup', 'z60stack25-lit', 'z60stack25-gram',
-  'z60stack25-xmr', 'z60stack25-ena', 'z60stack25-tao',
-] as const;
-const P3_IDS = [
-  'z60stack25p3-btc', 'z60stack25p3-eth', 'z60stack25p3-sol',
-  'z60stack25p3-hype', 'z60stack25p3-zec', 'z60stack25p3-doge',
-  'z60stack25p3-near', 'z60stack25p3-jup', 'z60stack25p3-gram',
-  'z60stack25p3-xmr',
-] as const;
+const P2_IDS = NATIVE_P2_PORTFOLIO_STRATEGY_IDS;
+const P3_IDS = NATIVE_P3_PORTFOLIO_STRATEGY_IDS;
 const P3_PARENT_IDS = P3_IDS.map((id) => id.replace('z60stack25p3-', 'z60stack25-'));
 const RUNNER_REQUIRED_IDS = [...SHADOW_NATIVE_IDS, ...P2_IDS, ...P3_IDS];
 

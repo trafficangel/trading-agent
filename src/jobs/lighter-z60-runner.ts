@@ -41,7 +41,10 @@ import {
   type Vwz60Bar,
 } from '../lib/lighter-z60.js';
 import { logger } from '../lib/logger.js';
-import { assertNativeStandaloneLifecycle } from '../lib/lighter-native-strategy-lifecycle.js';
+import {
+  assertNativePortfolioLifecycle,
+  assertNativeStandaloneLifecycle,
+} from '../lib/lighter-native-strategy-lifecycle.js';
 import { parseNativeShadowPauseAudit } from '../lib/lighter-native-shadow-pause.js';
 import {
   aggregateCompleteNativeBars,
@@ -331,6 +334,13 @@ const POSITIVE_EXECUTION_PORTFOLIO_FEEDS: readonly NativeFeed[] = [
   { symbol: 'GRAMUSDT', marketId: 12, strategies: [{ id: 'z60stack25p3-gram', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
   { symbol: 'XMRUSDT', marketId: 77, strategies: [{ id: 'z60stack25p3-xmr', timeframeMinutes: 5, family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
 ] as const;
+
+assertNativePortfolioLifecycle(
+  TREND_PORTFOLIO_FEEDS.flatMap((feed) => feed.strategies.map((strategy) => strategy.id)),
+  POSITIVE_EXECUTION_PORTFOLIO_FEEDS.flatMap(
+    (feed) => feed.strategies.map((strategy) => strategy.id),
+  ),
+);
 
 assertNativeStandaloneLifecycle(
   BASE_FEEDS.flatMap((feed) => feed.strategies.map((strategy) => strategy.id)),

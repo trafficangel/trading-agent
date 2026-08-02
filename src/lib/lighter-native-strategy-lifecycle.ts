@@ -31,6 +31,33 @@ export const NATIVE_RETIRED_STRATEGY_IDS = [
   'apt-rsi14-pullback-ema400',
 ] as const;
 
+/** Frozen two-sided Z60 portfolio cohorts that collect independent forward evidence. */
+export const NATIVE_P2_PORTFOLIO_STRATEGY_IDS = [
+  'z60stack25-btc', 'z60stack25-eth', 'z60stack25-sol',
+  'z60stack25-bnb', 'z60stack25-ltc', 'z60stack25-hype',
+  'z60stack25-zec', 'z60stack25-doge', 'z60stack25-near',
+  'z60stack25-jup', 'z60stack25-lit', 'z60stack25-gram',
+  'z60stack25-xmr', 'z60stack25-ena', 'z60stack25-tao',
+] as const;
+
+export const NATIVE_P3_PORTFOLIO_STRATEGY_IDS = [
+  'z60stack25p3-btc', 'z60stack25p3-eth', 'z60stack25p3-sol',
+  'z60stack25p3-hype', 'z60stack25p3-zec', 'z60stack25p3-doge',
+  'z60stack25p3-near', 'z60stack25p3-jup', 'z60stack25p3-gram',
+  'z60stack25p3-xmr',
+] as const;
+
+/**
+ * Every Native strategy whose closed Shadow rows require exact Lighter funding.
+ * Retired IDs remain in scope so historical rows can still be reconciled.
+ */
+export const NATIVE_FUNDING_RECONCILIATION_STRATEGY_IDS = [
+  ...NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS,
+  ...NATIVE_RETIRED_STRATEGY_IDS,
+  ...NATIVE_P2_PORTFOLIO_STRATEGY_IDS,
+  ...NATIVE_P3_PORTFOLIO_STRATEGY_IDS,
+] as const;
+
 const active = new Set<string>(NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS);
 const retired = new Set<string>(NATIVE_RETIRED_STRATEGY_IDS);
 
@@ -51,6 +78,28 @@ export function assertNativeStandaloneLifecycle(
   const overlap = expected.filter((strategyId) => retired.has(strategyId));
   if (overlap.length) {
     throw new Error(`Native lifecycle active/retired overlap: ${overlap.join(',')}`);
+  }
+}
+
+export function assertNativePortfolioLifecycle(
+  executableP2Ids: readonly string[],
+  executableP3Ids: readonly string[],
+): void {
+  for (const [label, actualIds, expectedIds] of [
+    ['P2', executableP2Ids, NATIVE_P2_PORTFOLIO_STRATEGY_IDS],
+    ['P3', executableP3Ids, NATIVE_P3_PORTFOLIO_STRATEGY_IDS],
+  ] as const) {
+    const actual = [...new Set(actualIds)].sort();
+    const expected = [...expectedIds].sort();
+    if (
+      actual.length !== actualIds.length
+      || actual.length !== expected.length
+      || actual.some((value, index) => value !== expected[index])
+    ) {
+      throw new Error(
+        `Native ${label} runner/lifecycle mismatch: expected ${expected.join(',')}; got ${actual.join(',')}`,
+      );
+    }
   }
 }
 
