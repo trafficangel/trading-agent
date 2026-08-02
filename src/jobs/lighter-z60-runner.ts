@@ -35,6 +35,7 @@ import { logger } from '../lib/logger.js';
 import { assertNativeStandaloneLifecycle } from '../lib/lighter-native-strategy-lifecycle.js';
 import {
   aggregateCompleteNativeBars,
+  nativeEntryDecisionDelayMs,
   NATIVE_MINUTE_MS,
   targetCompletedNativeBar,
   type NativeRawCandle,
@@ -59,12 +60,60 @@ const TIME_EXIT_BARS = 240;
 const PUBLISH_GRACE_MS = 25_000;
 const RETRY_MS = 5_000;
 const FETCH_CONCURRENCY = 4;
+// Lighter's public candle API throttles bursty cold starts. Serialize all
+// page requests to a measured-safe global cadence; feed concurrency still
+// overlaps parsing/evaluation while the request queue protects the provider.
+const CANDLE_REQUEST_INTERVAL_MS = 450;
+const CANDLE_REQUEST_MAX_ATTEMPTS = 5;
+// Historical research assumes at most a conservative +1m decision delay.
+// Exits remain allowed after this boundary, but a late cold-start signal must
+// never be converted into a new position at an unaudited price.
+const MAX_ENTRY_DECISION_DELAY_MS = 60_000;
 
 type CandleResponse = {
   code?: unknown;
   message?: unknown;
   c?: NativeRawCandle[];
 };
+
+let candleRequestTail: Promise<void> = Promise.resolve();
+let nextCandleRequestAt = 0;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
+async function scheduleCandleRequest<T>(work: () => Promise<T>): Promise<T> {
+  const scheduled = candleRequestTail.then(async () => {
+    const waitMs = Math.max(0, nextCandleRequestAt - Date.now());
+    if (waitMs > 0) await delay(waitMs);
+    nextCandleRequestAt = Date.now() + CANDLE_REQUEST_INTERVAL_MS;
+    return work();
+  });
+  candleRequestTail = scheduled.then(() => undefined, () => undefined);
+  return scheduled;
+}
+
+async function requestCandlePage(url: URL, label: string): Promise<CandleResponse> {
+  for (let attempt = 0; attempt < CANDLE_REQUEST_MAX_ATTEMPTS; attempt += 1) {
+    const body = await scheduleCandleRequest(async () => {
+      const response = await request(url, {
+        headersTimeout: 8_000,
+        bodyTimeout: 8_000,
+      });
+      return response.body.json() as Promise<CandleResponse>;
+    });
+    if (Number(body.code) === 200) return body;
+    if (
+      Number(body.code) !== 23_000
+      || attempt === CANDLE_REQUEST_MAX_ATTEMPTS - 1
+    ) {
+      throw new Error(`${label}_${String(body.code)}:${String(body.message ?? 'unknown')}`);
+    }
+    await delay(1_000 * 2 ** attempt);
+  }
+  throw new Error(`${label}_retry_exhausted`);
+}
 
 type OpenRow = {
   side: 'long' | 'short';
@@ -315,14 +364,7 @@ async function fetchBars(latestBarTime: number, marketId: number): Promise<Vwz60
   url.searchParams.set('count_back', '500');
   url.searchParams.set('set_timestamp_to_end', 'false');
 
-  const response = await request(url, {
-    headersTimeout: 8_000,
-    bodyTimeout: 8_000,
-  });
-  const body = await response.body.json() as CandleResponse;
-  if (Number(body.code) !== 200) {
-    throw new Error(`candles_${String(body.code)}:${String(body.message ?? 'unknown')}`);
-  }
+  const body = await requestCandlePage(url, 'candles');
   const bars = aggregateCompleteNativeBars(body.c ?? [], 5, latestBarTime);
   if (bars.at(-1)?.time !== latestBarTime) throw new Error('latest_completed_bar_missing');
   return bars;
@@ -367,14 +409,7 @@ export async function fetchTrendBars(
     url.searchParams.set('count_back', String(pageBars * 5));
     url.searchParams.set('set_timestamp_to_end', 'false');
 
-    const response = await request(url, {
-      headersTimeout: 8_000,
-      bodyTimeout: 8_000,
-    });
-    const body = await response.body.json() as CandleResponse;
-    if (Number(body.code) !== 200) {
-      throw new Error(`trend_candles_${String(body.code)}:${String(body.message ?? 'unknown')}`);
-    }
+    const body = await requestCandlePage(url, 'trend_candles');
     for (const bar of aggregateCompleteNativeBars(
       body.c ?? [],
       5,
@@ -477,7 +512,7 @@ async function prepareFeed(
       target,
       symbol: feed.symbol,
       marketId: feed.marketId,
-      source: 'native-5m-trend',
+      source: 'native-1m-aggregate-trend',
     }, 'lighter-z60: market poll failed');
   }
 
@@ -530,12 +565,13 @@ async function poll(): Promise<void> {
       FETCH_CONCURRENCY,
       (row) => prepareFeed(target, row),
     );
+    const closeToDataReadyMs = nativeEntryDecisionDelayMs(target, 5, Date.now());
     if (pendingFeeds.length > 0) {
       logger.info({
         target,
         feeds: pendingFeeds.length,
         fetchMs: Date.now() - pollStartedAt,
-        closeToDataReadyMs: Date.now() - (target + BAR_MS),
+        closeToDataReadyMs,
       }, 'lighter-z60: completed-bar data prepared');
     }
 
@@ -670,7 +706,17 @@ async function poll(): Promise<void> {
             continue;
           }
 
-          if (snapshot.signal && strategy.entryEnabled === false) {
+          if (snapshot.signal && closeToDataReadyMs > MAX_ENTRY_DECISION_DELAY_MS) {
+            recordEvaluation(
+              strategy,
+              feed,
+              target,
+              snapshot,
+              er60,
+              'waiting',
+              `decision_latency_${closeToDataReadyMs}ms_above_${MAX_ENTRY_DECISION_DELAY_MS}ms`,
+            );
+          } else if (snapshot.signal && strategy.entryEnabled === false) {
             recordEvaluation(
               strategy,
               feed,

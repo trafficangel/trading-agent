@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   aggregateCompleteNativeBars,
+  nativeEntryDecisionDelayMs,
   targetCompletedNativeBar,
 } from '../../src/lib/lighter-native-timeframe.js';
 
@@ -22,6 +23,13 @@ describe('Native completed-bar source', () => {
       .toBe(5 * MINUTE);
     expect(targetCompletedNativeBar(11 * MINUTE + 25_000, 1, 25_000))
       .toBe(10 * MINUTE);
+  });
+
+  it('measures execution delay from the decision bar close, never below zero', () => {
+    expect(nativeEntryDecisionDelayMs(5 * MINUTE, 5, 10 * MINUTE + 59_000))
+      .toBe(59_000);
+    expect(nativeEntryDecisionDelayMs(5 * MINUTE, 5, 9 * MINUTE))
+      .toBe(0);
   });
 
   it('aggregates exact consecutive 1m candles with full OHLCV semantics', () => {

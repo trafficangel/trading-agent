@@ -34,6 +34,16 @@ export function targetCompletedNativeBar(
   return Math.floor((now - publicationGraceMs) / barMs) * barMs - barMs;
 }
 
+export function nativeEntryDecisionDelayMs(
+  targetBarTime: number,
+  timeframeMinutes: NativeTimeframeMinutes,
+  dataReadyAt: number,
+): number {
+  return Math.max(0, dataReadyAt - (
+    targetBarTime + nativeTimeframeMs(timeframeMinutes)
+  ));
+}
+
 /**
  * Build a decision series exclusively from complete, consecutive native 1m
  * candles. Incomplete buckets are omitted rather than silently manufacturing
