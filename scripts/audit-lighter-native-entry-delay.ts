@@ -201,6 +201,26 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
     },
   },
   {
+    // Independent candidate from the preregistered fast-confluence universe.
+    // Keep the exact RSI7/MFI14/EMA400 thresholds and two-hour exit horizon
+    // frozen here; this audit is allowed to reject it, never tune it.
+    strategyId: 'hype-rsi7-mfi14-ema400-candidate',
+    symbol: 'HYPE',
+    stopPct: 0.01,
+    maxHoldBars: 120,
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    candleSource: 'aggregated_from_1m',
+    evaluate(bars) {
+      const snapshot = evaluateRsiMfiTrend(bars, 7, 20, 14, 35, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.currentRsi >= 50,
+        exitShort: snapshot.currentRsi <= 50,
+      } : null;
+    },
+  },
+  {
     strategyId: 'hype-vwz60-mfi14-ema400-challenger',
     symbol: 'HYPE',
     stopPct: 0.01,
@@ -336,6 +356,26 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
     maxHoldBars: 120,
     fundingFile: 'data/lighter-funding-history-transfer2-20260801.json',
     executionCostFile: 'data/lighter-execution-costs-transfer2-20260801.json',
+    evaluate(bars) {
+      const snapshot = evaluateRsiMfiTrend(bars, 14, 30, 14, 30, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.currentRsi >= 50,
+        exitShort: snapshot.currentRsi <= 50,
+      } : null;
+    },
+  },
+  {
+    // Previously qualified on the independent APT 180d regime report, but it
+    // cannot enter Shadow until the executable aggregated-1m path survives
+    // this separate one-minute delayed-fill audit.
+    strategyId: 'apt-rsi14-mfi14-ema400-candidate',
+    symbol: 'APT',
+    stopPct: 0.01,
+    maxHoldBars: 120,
+    fundingFile: 'data/lighter-funding-history-transfer2-20260801.json',
+    executionCostFile: 'data/lighter-execution-costs-transfer2-20260801.json',
+    candleSource: 'aggregated_from_1m',
     evaluate(bars) {
       const snapshot = evaluateRsiMfiTrend(bars, 14, 30, 14, 30, 400);
       return snapshot ? {

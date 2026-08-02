@@ -1,0 +1,116 @@
+{
+  "version": "lighter-independent-v8-summary-v1",
+  "generatedAt": "2026-08-02T05:44:00Z",
+  "preregistration": "data/lighter-independent-v8-preregistered-20260802.json",
+  "sources": [
+    {
+      "file": "data/lighter-independent-v8-universe-1m-20260802.json",
+      "sha256": "b744aef649bb6bc9c6a647090e52ee04401982a2da367ec401fd27f390c1c421"
+    },
+    {
+      "file": "data/lighter-independent-v8-universe-5m-20260802.json",
+      "sha256": "b31f3d15cf5e463c71436ea1e4881faa4a033d68673a95e9b63d518374ef7755"
+    },
+    {
+      "file": "data/lighter-hype-rsi7-mfi14-entry-delay-audit-20260802.json",
+      "sha256": "c50f306d94065129f2ccef50e297fdd15e8b4e02131528dd39125811abad1c9a"
+    },
+    {
+      "file": "data/lighter-apt-rsi14-mfi14-entry-delay-audit-20260802.json",
+      "sha256": "333a54ae19de25c9cbb02976ab9765f547f55fecc0324ccb1b01cc24f63816de"
+    },
+    {
+      "file": "data/lighter-hype-rsi14-mfi14-aggregated-regime-20260802.json",
+      "sha256": "b2e46ee8fdab9b26cda29690c514fe1105e27106d5bfab8bf4d9aaa79c841812"
+    },
+    {
+      "file": "data/lighter-hype-rsi14-mfi14-entry-delay-aggregated-20260802.json",
+      "sha256": "25466da3fd898f0008f4e0326d5f2fa5f9086bdd201f1b7f60b4f6559d05efed"
+    }
+  ],
+  "universeResult": {
+    "qualified1m": [],
+    "qualified5m": [],
+    "bestRejected": [
+      {
+        "symbol": "HYPE",
+        "timeframeMinutes": 5,
+        "rule": "V8-BB20-2-RECLAIM+ER60<0.25+EMA400-EXIT-SMA20-H120M",
+        "trades": 834,
+        "netPctUnits": 59.70031690075239,
+        "profitFactor": 1.2860164674645616,
+        "maxDrawdownPct": -14.254543918016797,
+        "meanL95Pct": 0.03165678348327311,
+        "positiveFolds": 4,
+        "longPctUnits": 10.443047536577506,
+        "shortPctUnits": 49.25726936417489,
+        "reasons": [
+          "high-volatility regime profit factor 1.0604 is below the frozen 1.10 minimum"
+        ]
+      },
+      {
+        "symbol": "SOL",
+        "timeframeMinutes": 5,
+        "rule": "V8-KELTNER21-ATR2-RECLAIM+ADX<20+EMA400-EXIT-EMA21-H120M",
+        "trades": 115,
+        "netPctUnits": 12.185802303215464,
+        "profitFactor": 1.916591224978132,
+        "maxDrawdownPct": -1.7791019138380824,
+        "meanL95Pct": 0.034385163252696804,
+        "positiveFolds": 4,
+        "longPctUnits": 3.208812147274225,
+        "shortPctUnits": 8.976990155941236,
+        "reasons": [
+          "mixed-trend regime profit factor 1.0613 is below the frozen 1.10 minimum"
+        ]
+      }
+    ]
+  },
+  "legacyCandidateRechecks": [
+    {
+      "strategyId": "hype-rsi7-mfi14-ema400-candidate",
+      "latencyPassed": false,
+      "delayedTrades": 199,
+      "delayedNetPctUnits": 21.03898282421074,
+      "delayedProfitFactor": 1.4242449910722412,
+      "delayedMeanL95Pct": 0.020433785041753,
+      "reasons": [
+        "60-day Long leg is -0.0108%"
+      ]
+    },
+    {
+      "strategyId": "apt-rsi14-mfi14-ema400-candidate",
+      "latencyPassed": false,
+      "delayedTrades": 178,
+      "delayedNetPctUnits": 13.874408742567015,
+      "delayedProfitFactor": 1.2381628793709345,
+      "delayedMeanL95Pct": -0.02910054641489135,
+      "positiveFolds": 2,
+      "shortPctUnits": -0.6891153530873061,
+      "reasons": [
+        "mean L95 is negative",
+        "only 2 of 4 folds are positive",
+        "all-history Short leg is negative",
+        "90-day Short leg is negative"
+      ]
+    },
+    {
+      "strategyId": "hype-rsi14-mfi14-ema400-challenger",
+      "latencyPassed": true,
+      "historicalRegimePassed": false,
+      "delayedTrades": 120,
+      "delayedNetPctUnits": 21.54085449546131,
+      "delayedProfitFactor": 1.6132538872948397,
+      "delayedMeanL95Pct": 0.05024185091918584,
+      "reasons": [
+        "bull-regime sample has 15 trades, below the frozen minimum of 20"
+      ]
+    }
+  ],
+  "decision": {
+    "addToShadow": [],
+    "addToReal": [],
+    "status": "reject_all_without_parameter_rescue",
+    "nextEvidence": "Only unseen future prospective bars may resolve the near-miss regime failures; do not retune on this 180-day sample."
+  }
+}

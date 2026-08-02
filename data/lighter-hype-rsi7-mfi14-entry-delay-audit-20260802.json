@@ -1,0 +1,153 @@
+{
+  "version": "lighter-native-entry-delay-audit-v1",
+  "generatedAt": "2026-08-02T05:34:20.999Z",
+  "assumptions": {
+    "signalHistoryBars": 2000,
+    "baselineDelayMinutes": 0,
+    "delayedScenarioMinutes": 1,
+    "strategyRisk": {
+      "hype-rsi7-mfi14-ema400-candidate": {
+        "stopPct": 1,
+        "maxHoldBars": 120
+      }
+    },
+    "notionalUsd": 100,
+    "commissionPct": 0,
+    "signalCandleSource": "five complete gap-free native 1m candles aggregated into each 5m decision",
+    "delayedFill": "native 1m open one minute after the next 5m open",
+    "stopFill": "1m intrabar stop, gap-through filled at worse 1m open",
+    "qualification": "net>0 PF>=1.2 L95>0 3/4 folds IS/OOS and both sides positive DD<=15%, recent windows positive, >=50% baseline net retained"
+  },
+  "passed": false,
+  "strategies": [
+    {
+      "strategyId": "hype-rsi7-mfi14-ema400-candidate",
+      "symbol": "HYPE",
+      "passed": false,
+      "executionCostP95Pct": 0.02446483180428919,
+      "candleSource": "aggregated_from_1m",
+      "fundingCoverage": {
+        "covered": true,
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769932800000,
+        "lastTimestampMs": 1785484800000
+      },
+      "candleCoverage": {
+        "fiveMinuteBars": 51833,
+        "oneMinuteBars": 259168,
+        "first": "2026-02-08T06:40:00.000Z",
+        "last": "2026-07-31T07:26:00.000Z"
+      },
+      "observedProductionDataReadySeconds": 26.666,
+      "conservativeDelayedScenarioSeconds": 60,
+      "baselineNextOpen": {
+        "trades": 195,
+        "netPctUnits": 22.9428798519291,
+        "netUsd": 22.942879851929103,
+        "profitFactor": 1.498578492450842,
+        "winRatePct": 70.25641025641025,
+        "maxDrawdownPct": -5.0236908796566775,
+        "meanL95Pct": 0.03597507086619513,
+        "positiveFolds": 4,
+        "foldNets": [
+          9.502713013455747,
+          0.3561859082696279,
+          6.9314088763380175,
+          6.152572053865696
+        ],
+        "inSamplePctUnits": 13.889784020513272,
+        "outOfSamplePctUnits": 9.053095831415819,
+        "longPctUnits": 9.51342986810383,
+        "shortPctUnits": 13.429449983825258,
+        "fundingPctUnits": 0.006500000000000727,
+        "closeReasons": {
+          "indicator": 153,
+          "time": 0,
+          "stop": 42,
+          "end": 0
+        },
+        "recent": [
+          {
+            "days": 30,
+            "trades": 29,
+            "netPctUnits": 3.031023760909052,
+            "profitFactor": 1.6044385973847937,
+            "longPctUnits": 1.4656433562750946,
+            "shortPctUnits": 1.5653804046339568
+          },
+          {
+            "days": 60,
+            "trades": 67,
+            "netPctUnits": 8.067942130832396,
+            "profitFactor": 1.5255794882303229,
+            "longPctUnits": 2.719576785918568,
+            "shortPctUnits": 5.34836534491383
+          },
+          {
+            "days": 90,
+            "trades": 101,
+            "netPctUnits": 13.585569082121179,
+            "profitFactor": 1.6221358696187753,
+            "longPctUnits": 8.31004847364778,
+            "shortPctUnits": 5.2755206084734025
+          }
+        ]
+      },
+      "delayedOneMinute": {
+        "trades": 199,
+        "netPctUnits": 21.03898282421074,
+        "netUsd": 21.038982824210745,
+        "profitFactor": 1.4242449910722412,
+        "winRatePct": 68.84422110552764,
+        "maxDrawdownPct": -5.449122669883012,
+        "meanL95Pct": 0.020433785041753,
+        "positiveFolds": 4,
+        "foldNets": [
+          9.848881279476194,
+          2.1959619847345757,
+          5.830054998544165,
+          3.164084561455792
+        ],
+        "inSamplePctUnits": 17.052782018367736,
+        "outOfSamplePctUnits": 3.98620080584299,
+        "longPctUnits": 10.491238132461511,
+        "shortPctUnits": 10.547744691749212,
+        "fundingPctUnits": 0.004600000000000604,
+        "closeReasons": {
+          "indicator": 154,
+          "time": 0,
+          "stop": 45,
+          "end": 0
+        },
+        "recent": [
+          {
+            "days": 30,
+            "trades": 30,
+            "netPctUnits": 1.582954574746273,
+            "profitFactor": 1.2710080246200912,
+            "longPctUnits": 1.1311942418041692,
+            "shortPctUnits": 0.4517603329421038
+          },
+          {
+            "days": 60,
+            "trades": 68,
+            "netPctUnits": 3.4430367120853873,
+            "profitFactor": 1.1882789610376165,
+            "longPctUnits": -0.010770314942684128,
+            "shortPctUnits": 3.4538070270280734
+          },
+          {
+            "days": 90,
+            "trades": 102,
+            "netPctUnits": 9.350174371165151,
+            "profitFactor": 1.375677678886874,
+            "longPctUnits": 6.92398300432153,
+            "shortPctUnits": 2.426191366843623
+          }
+        ]
+      },
+      "delayedNetRetention": 0.917015778315281
+    }
+  ]
+}

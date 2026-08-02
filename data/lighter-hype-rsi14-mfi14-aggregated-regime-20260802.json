@@ -1,0 +1,1429 @@
+{
+  "version": "lighter-native-sweep-v2",
+  "generatedAt": "2026-08-02T05:41:57.246Z",
+  "input": {
+    "symbols": [
+      "HYPE"
+    ],
+    "candleSources": {
+      "HYPE": "aggregated_from_1m"
+    },
+    "barMinutes": 5,
+    "lookbackDays": null,
+    "ruleFilter": "CONF-RSI14-MFI14-30/70+EMA400",
+    "positionNotionalUsd": 100,
+    "portfolioMaxOpen": 6,
+    "executionCosts": "market-specific executable $100 full-round-trip p95",
+    "adverseExecution": "market-specific observed maximum; non-blocking sensitivity",
+    "funding": "exact Lighter hourly settlements in (entry, exit]",
+    "fundingHistoryFiles": [
+      "/private/tmp/trading-agent-lighter-quant-strategy/data/lighter-funding-history-native.json"
+    ],
+    "fundingCoverage": {
+      "HYPE": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769932800000,
+        "lastTimestampMs": 1785484800000
+      }
+    },
+    "qualificationInputsMeasured": true,
+    "usedFallbackExecutionCost": false,
+    "usedFallbackFunding": false
+  },
+  "qualified": [],
+  "rows": [
+    {
+      "symbol": "HYPE",
+      "rule": "CONF-RSI14-MFI14-30/70+EMA400",
+      "costPct": 0.02446483180428919,
+      "adverseCostPct": 0.030343521566756557,
+      "baseline": 21.84038660878246,
+      "stress": 18.867377128659182,
+      "stressPf": 1.4959952173951139,
+      "robustStress": 18.150176977638168,
+      "robustPf": 1.4742096823019584,
+      "folds": 4,
+      "is": 10.077880644319027,
+      "oos": 8.789496484340159,
+      "long": 10.970663537585443,
+      "short": 7.896713591073743,
+      "recent": [
+        {
+          "days": 30,
+          "n": 23,
+          "net": 6.188298135950838,
+          "profitFactor": 2.9975165063074822,
+          "winRatePct": 82.6086956521739,
+          "long": 3.9301059437261623,
+          "short": 2.258192192224676
+        },
+        {
+          "days": 60,
+          "n": 40,
+          "net": 10.306537750797805,
+          "profitFactor": 2.1144148699359877,
+          "winRatePct": 75,
+          "long": 4.406080222116057,
+          "short": 5.900457528681745
+        },
+        {
+          "days": 90,
+          "n": 60,
+          "net": 13.928185981120372,
+          "profitFactor": 1.8428492284575528,
+          "winRatePct": 70,
+          "long": 8.970468200654409,
+          "short": 4.957717780465957
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": 0.02837208016656076,
+      "trendRegimes": {
+        "bull": {
+          "n": 15,
+          "net": 11.545639533528506,
+          "profitFactor": 12.266068039435849
+        },
+        "bear": {
+          "n": 22,
+          "net": 1.7870230799389277,
+          "profitFactor": 1.2456106668463587
+        },
+        "mixed": {
+          "n": 85,
+          "net": 5.53471451519175,
+          "profitFactor": 1.1861110043312508
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 55,
+          "net": 4.126540282542098,
+          "profitFactor": 1.1918383106815704
+        },
+        "lowVol": {
+          "n": 67,
+          "net": 14.74083684611709,
+          "profitFactor": 1.8918208466958997
+        }
+      },
+      "trades": 122,
+      "tradeDetails": [
+        {
+          "side": "long",
+          "entryAt": 1770130800000,
+          "exitAt": 1770130800000,
+          "entryIdx": 666,
+          "pct": -1.0000000000000036,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1770131400000,
+          "exitAt": 1770131400000,
+          "entryIdx": 668,
+          "pct": -0.9999999999999932,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1770132000000,
+          "exitAt": 1770132000000,
+          "entryIdx": 670,
+          "pct": -1.0000000000000107,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1770810900000,
+          "exitAt": 1770815100000,
+          "entryIdx": 2933,
+          "pct": 0.7939911954130956,
+          "fundingPct": 0.0024000000000000132,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1771044300000,
+          "exitAt": 1771052100000,
+          "entryIdx": 3711,
+          "pct": 0.42145471908324217,
+          "fundingPct": -0.0023999999999999577,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1771074000000,
+          "exitAt": 1771075200000,
+          "entryIdx": 3810,
+          "pct": -1.000000000000002,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1771245000000,
+          "exitAt": 1771249500000,
+          "entryIdx": 4380,
+          "pct": 0.49271446555765597,
+          "fundingPct": 0.0011999999999999789,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1771401000000,
+          "exitAt": 1771404900000,
+          "entryIdx": 4900,
+          "pct": 0.8733080288430761,
+          "fundingPct": 0.0011999999999999789,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1771473900000,
+          "exitAt": 1771476000000,
+          "entryIdx": 5143,
+          "pct": 0.6358886830547728,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1771677300000,
+          "exitAt": 1771682400000,
+          "entryIdx": 5821,
+          "pct": 0.07131193975140745,
+          "fundingPct": -0.0007000000000000339,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1771827900000,
+          "exitAt": 1771833900000,
+          "entryIdx": 6323,
+          "pct": 0.625157368439984,
+          "fundingPct": 0.0016999999999999238,
+          "trendRegime": "bear",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1771839600000,
+          "exitAt": 1771843200000,
+          "entryIdx": 6362,
+          "pct": 0.5732806933626473,
+          "fundingPct": 0.0011999999999999789,
+          "trendRegime": "bear",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1771990800000,
+          "exitAt": 1771994400000,
+          "entryIdx": 6866,
+          "pct": 0.49736008058118253,
+          "fundingPct": 0.00029999999999996696,
+          "trendRegime": "bull",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1772191800000,
+          "exitAt": 1772193300000,
+          "entryIdx": 7536,
+          "pct": -1.0000000000000022,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1772355300000,
+          "exitAt": 1772356800000,
+          "entryIdx": 8081,
+          "pct": 1.2508406186953582,
+          "fundingPct": -0.0011999999999999789,
+          "trendRegime": "bull",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1772427600000,
+          "exitAt": 1772427900000,
+          "entryIdx": 8322,
+          "pct": -1,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1772428800000,
+          "exitAt": 1772431200000,
+          "entryIdx": 8326,
+          "pct": -1.0000000000000058,
+          "fundingPct": -0.0011999999999999789,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1772607000000,
+          "exitAt": 1772610300000,
+          "entryIdx": 8920,
+          "pct": -1.0000000000000007,
+          "fundingPct": 0.0011999999999999789,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1772824200000,
+          "exitAt": 1772826600000,
+          "entryIdx": 9644,
+          "pct": -0.9999999999999978,
+          "fundingPct": 0,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1772827500000,
+          "exitAt": 1772827800000,
+          "entryIdx": 9655,
+          "pct": -1.0000000000000033,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1773123600000,
+          "exitAt": 1773126900000,
+          "entryIdx": 10642,
+          "pct": 1.0932284180358973,
+          "fundingPct": -0.00009999999999998899,
+          "trendRegime": "bull",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1773151500000,
+          "exitAt": 1773152100000,
+          "entryIdx": 10735,
+          "pct": -0.9999999999999981,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1773326400000,
+          "exitAt": 1773329400000,
+          "entryIdx": 11318,
+          "pct": 1.4340881925026012,
+          "fundingPct": 0.0008000000000000229,
+          "trendRegime": "bull",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1773346800000,
+          "exitAt": 1773349500000,
+          "entryIdx": 11386,
+          "pct": 0.7741928483460995,
+          "fundingPct": 0.0026000000000000467,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1773381900000,
+          "exitAt": 1773384000000,
+          "entryIdx": 11503,
+          "pct": 0.7754521027040877,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1773672000000,
+          "exitAt": 1773674700000,
+          "entryIdx": 12470,
+          "pct": 1.1827661483098595,
+          "fundingPct": -0.0011999999999999789,
+          "trendRegime": "bull",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1773760500000,
+          "exitAt": 1773762000000,
+          "entryIdx": 12765,
+          "pct": -1.0000000000000053,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1773793500000,
+          "exitAt": 1773795900000,
+          "entryIdx": 12875,
+          "pct": 1.1289590261501292,
+          "fundingPct": -0.0011999999999999789,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1773824700000,
+          "exitAt": 1773829800000,
+          "entryIdx": 12979,
+          "pct": 0.8409678062830556,
+          "fundingPct": -0.0011999999999999789,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1773873300000,
+          "exitAt": 1773876900000,
+          "entryIdx": 13141,
+          "pct": 0.9912095302142229,
+          "fundingPct": -0.0008000000000000229,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1773968700000,
+          "exitAt": 1773972000000,
+          "entryIdx": 13459,
+          "pct": 0.9385714463824771,
+          "fundingPct": 0.0011999999999999789,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1774134000000,
+          "exitAt": 1774136700000,
+          "entryIdx": 14010,
+          "pct": -0.9999999999999962,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1774212300000,
+          "exitAt": 1774213200000,
+          "entryIdx": 14271,
+          "pct": 0.8323843750979424,
+          "fundingPct": 0.0011999999999999789,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1774448700000,
+          "exitAt": 1774455000000,
+          "entryIdx": 15059,
+          "pct": 0.36987789812108257,
+          "fundingPct": -0.0023999999999999577,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1774516200000,
+          "exitAt": 1774517700000,
+          "entryIdx": 15284,
+          "pct": 0.8173909510581122,
+          "fundingPct": 0,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1774597500000,
+          "exitAt": 1774600200000,
+          "entryIdx": 15555,
+          "pct": 0.558583489561094,
+          "fundingPct": 0.0011999999999999789,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1774741500000,
+          "exitAt": 1774746600000,
+          "entryIdx": 16035,
+          "pct": 0.3626682638620931,
+          "fundingPct": -0.0024000000000001798,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1774876500000,
+          "exitAt": 1774878600000,
+          "entryIdx": 16485,
+          "pct": 0.557965392085904,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1774920300000,
+          "exitAt": 1774926000000,
+          "entryIdx": 16631,
+          "pct": 0.2840074952354025,
+          "fundingPct": 0.0024000000000001798,
+          "trendRegime": "bear",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1774965600000,
+          "exitAt": 1774966500000,
+          "entryIdx": 16782,
+          "pct": -1.0000000000000044,
+          "fundingPct": 0,
+          "trendRegime": "bear",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1774975800000,
+          "exitAt": 1774977000000,
+          "entryIdx": 16816,
+          "pct": -1.0000000000000053,
+          "fundingPct": 0.0012000000000000899,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1775020500000,
+          "exitAt": 1775022000000,
+          "entryIdx": 16965,
+          "pct": -0.9999999999999999,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1775147700000,
+          "exitAt": 1775149500000,
+          "entryIdx": 17389,
+          "pct": 0.8445605131017812,
+          "fundingPct": 0.0012000000000000899,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1775163000000,
+          "exitAt": 1775166000000,
+          "entryIdx": 17440,
+          "pct": 0.6434196235895968,
+          "fundingPct": 0.0012000000000000899,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1775495100000,
+          "exitAt": 1775503500000,
+          "entryIdx": 18547,
+          "pct": 0.7213535254597664,
+          "fundingPct": -0.0024000000000001798,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1775513700000,
+          "exitAt": 1775516100000,
+          "entryIdx": 18609,
+          "pct": -0.9999999999999943,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1775553000000,
+          "exitAt": 1775554500000,
+          "entryIdx": 18740,
+          "pct": -1.0000000000000036,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1775658900000,
+          "exitAt": 1775664300000,
+          "entryIdx": 19093,
+          "pct": 0.7680869583238209,
+          "fundingPct": 0.0014999999999998348,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1775913300000,
+          "exitAt": 1775916600000,
+          "entryIdx": 19941,
+          "pct": 0.5157335590608737,
+          "fundingPct": -0.0012000000000000899,
+          "trendRegime": "bull",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1775918700000,
+          "exitAt": 1775923800000,
+          "entryIdx": 19959,
+          "pct": 0.28294221669932895,
+          "fundingPct": -0.0024000000000001798,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1776009900000,
+          "exitAt": 1776011400000,
+          "entryIdx": 20263,
+          "pct": -0.9999999999999974,
+          "fundingPct": 0,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1776175500000,
+          "exitAt": 1776176100000,
+          "entryIdx": 20815,
+          "pct": -1.000000000000006,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1776599700000,
+          "exitAt": 1776601800000,
+          "entryIdx": 22229,
+          "pct": 0.5338291470253401,
+          "fundingPct": 0.00009999999999998899,
+          "trendRegime": "bear",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1776687300000,
+          "exitAt": 1776691500000,
+          "entryIdx": 22521,
+          "pct": 0.48368763452561303,
+          "fundingPct": 0.0012000000000000899,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1776964800000,
+          "exitAt": 1776967800000,
+          "entryIdx": 23446,
+          "pct": 0.5711129280305333,
+          "fundingPct": 0.0007999999999999119,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1777267200000,
+          "exitAt": 1777273200000,
+          "entryIdx": 24454,
+          "pct": 0.026514307167088566,
+          "fundingPct": -0.0024000000000001798,
+          "trendRegime": "bull",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1777335300000,
+          "exitAt": 1777338600000,
+          "entryIdx": 24681,
+          "pct": 0.2991263497237647,
+          "fundingPct": 0.0012000000000000899,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1777405800000,
+          "exitAt": 1777407600000,
+          "entryIdx": 24916,
+          "pct": 0.4561891238323887,
+          "fundingPct": 0.0012000000000000899,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1777434000000,
+          "exitAt": 1777435500000,
+          "entryIdx": 25010,
+          "pct": 0.6692890997604332,
+          "fundingPct": 0.0012000000000000899,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1777557000000,
+          "exitAt": 1777560000000,
+          "entryIdx": 25420,
+          "pct": 0.7135308572810978,
+          "fundingPct": -0.00039999999999995595,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1777586700000,
+          "exitAt": 1777595400000,
+          "entryIdx": 25519,
+          "pct": -0.9999999999999959,
+          "fundingPct": -0.0014000000000000679,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1777617900000,
+          "exitAt": 1777623900000,
+          "entryIdx": 25623,
+          "pct": 0.7437136990908649,
+          "fundingPct": 0.0008999999999999009,
+          "trendRegime": "bull",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1777731300000,
+          "exitAt": 1777734000000,
+          "entryIdx": 26001,
+          "pct": 0.5247153256065494,
+          "fundingPct": -0.0009999999999998899,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1777875900000,
+          "exitAt": 1777879500000,
+          "entryIdx": 26483,
+          "pct": 0.5404486418144808,
+          "fundingPct": -0.0012000000000000899,
+          "trendRegime": "bull",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1778024400000,
+          "exitAt": 1778030400000,
+          "entryIdx": 26978,
+          "pct": 0.5920130967420987,
+          "fundingPct": 0.0025000000000001688,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1778132700000,
+          "exitAt": 1778138400000,
+          "entryIdx": 27339,
+          "pct": -0.08841794861027627,
+          "fundingPct": 0.0024000000000001798,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1778321700000,
+          "exitAt": 1778325300000,
+          "entryIdx": 27969,
+          "pct": 0.7483504474886774,
+          "fundingPct": -0.0012000000000000899,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1778420400000,
+          "exitAt": 1778424300000,
+          "entryIdx": 28298,
+          "pct": 0.2070600730416527,
+          "fundingPct": 0.0012000000000000899,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1778737800000,
+          "exitAt": 1778743500000,
+          "entryIdx": 29356,
+          "pct": 0.5570112092434725,
+          "fundingPct": 0.0024000000000001798,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1778849400000,
+          "exitAt": 1778849400000,
+          "entryIdx": 29728,
+          "pct": -0.9999999999999938,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1778958600000,
+          "exitAt": 1778970900000,
+          "entryIdx": 30092,
+          "pct": -1.0000000000000018,
+          "fundingPct": 0.0035000000000002807,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1779061500000,
+          "exitAt": 1779063300000,
+          "entryIdx": 30435,
+          "pct": 1.7020120711015663,
+          "fundingPct": -0.0012000000000000899,
+          "trendRegime": "bull",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1779116100000,
+          "exitAt": 1779116400000,
+          "entryIdx": 30617,
+          "pct": -1.0000000000000013,
+          "fundingPct": 0.0036000000000000476,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1779391200000,
+          "exitAt": 1779394500000,
+          "entryIdx": 31534,
+          "pct": 1.4414070299410517,
+          "fundingPct": -0.0012000000000000899,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1779414000000,
+          "exitAt": 1779415800000,
+          "entryIdx": 31610,
+          "pct": 1.3027424118158393,
+          "fundingPct": -0.0021999999999999797,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1779462000000,
+          "exitAt": 1779464100000,
+          "entryIdx": 31770,
+          "pct": -0.9999999999999981,
+          "fundingPct": 0,
+          "trendRegime": "bull",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1779465000000,
+          "exitAt": 1779465900000,
+          "entryIdx": 31780,
+          "pct": -1.0000000000000042,
+          "fundingPct": -0.0012000000000000899,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1779632400000,
+          "exitAt": 1779636000000,
+          "entryIdx": 32338,
+          "pct": 1.6323519202858172,
+          "fundingPct": 0.0013000000000000789,
+          "trendRegime": "bull",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1779656100000,
+          "exitAt": 1779659700000,
+          "entryIdx": 32417,
+          "pct": -0.9999999999999976,
+          "fundingPct": -0.0008999999999999009,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1779773400000,
+          "exitAt": 1779779400000,
+          "entryIdx": 32808,
+          "pct": 0.5164959089351,
+          "fundingPct": 0.0024000000000001798,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1779790800000,
+          "exitAt": 1779791100000,
+          "entryIdx": 32866,
+          "pct": -1.0000000000000009,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1780115700000,
+          "exitAt": 1780117800000,
+          "entryIdx": 33949,
+          "pct": 1.4249546790023122,
+          "fundingPct": 0.0005999999999999339,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1780322100000,
+          "exitAt": 1780322700000,
+          "entryIdx": 34637,
+          "pct": -0.999999999999994,
+          "fundingPct": -0.0012000000000000899,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1780346700000,
+          "exitAt": 1780350000000,
+          "entryIdx": 34719,
+          "pct": 0.9919305967531005,
+          "fundingPct": -0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1780446000000,
+          "exitAt": 1780448400000,
+          "entryIdx": 35050,
+          "pct": 1.599705165117408,
+          "fundingPct": 0.0011999999999998678,
+          "trendRegime": "bear",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1780794600000,
+          "exitAt": 1780800300000,
+          "entryIdx": 36212,
+          "pct": 0.7134302380685712,
+          "fundingPct": 0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1780908600000,
+          "exitAt": 1780913700000,
+          "entryIdx": 36592,
+          "pct": 0.5871317171848937,
+          "fundingPct": -0.0023999999999997357,
+          "trendRegime": "bull",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1780966200000,
+          "exitAt": 1780970100000,
+          "entryIdx": 36784,
+          "pct": 0.8868046426264076,
+          "fundingPct": -0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1781099100000,
+          "exitAt": 1781104800000,
+          "entryIdx": 37227,
+          "pct": 1.5280056650373968,
+          "fundingPct": 0.0023999999999997357,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1781150400000,
+          "exitAt": 1781154300000,
+          "entryIdx": 37398,
+          "pct": 1.1763510804834658,
+          "fundingPct": 0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1781157300000,
+          "exitAt": 1781159400000,
+          "entryIdx": 37421,
+          "pct": -0.999999999999995,
+          "fundingPct": 0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1781229900000,
+          "exitAt": 1781231100000,
+          "entryIdx": 37663,
+          "pct": 1.4922859896940297,
+          "fundingPct": 0,
+          "trendRegime": "bull",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1781245200000,
+          "exitAt": 1781246100000,
+          "entryIdx": 37714,
+          "pct": -0.9999999999999969,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1781306700000,
+          "exitAt": 1781309100000,
+          "entryIdx": 37919,
+          "pct": -0.999999999999999,
+          "fundingPct": -0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1781564400000,
+          "exitAt": 1781568300000,
+          "entryIdx": 38778,
+          "pct": 0.7488048183700506,
+          "fundingPct": -0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1781678400000,
+          "exitAt": 1781686200000,
+          "entryIdx": 39158,
+          "pct": -0.9999999999999953,
+          "fundingPct": -0.0023999999999997357,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1782054300000,
+          "exitAt": 1782059700000,
+          "entryIdx": 40411,
+          "pct": 0.637620327004197,
+          "fundingPct": 0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1782114300000,
+          "exitAt": 1782120600000,
+          "entryIdx": 40611,
+          "pct": 0.17207151518034405,
+          "fundingPct": 0.0023999999999997357,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1782331800000,
+          "exitAt": 1782332400000,
+          "entryIdx": 41336,
+          "pct": -1.0000000000000029,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1782913800000,
+          "exitAt": 1782915000000,
+          "entryIdx": 43276,
+          "pct": -1.000000000000002,
+          "fundingPct": 0.0011999999999998678,
+          "trendRegime": "bear",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1782964800000,
+          "exitAt": 1782971100000,
+          "entryIdx": 43446,
+          "pct": 0.23486983903398378,
+          "fundingPct": -0.0019999999999997797,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1783315800000,
+          "exitAt": 1783320900000,
+          "entryIdx": 44616,
+          "pct": 0.4406419046354204,
+          "fundingPct": -0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1783380600000,
+          "exitAt": 1783383900000,
+          "entryIdx": 44832,
+          "pct": 0.5729357545021909,
+          "fundingPct": -0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1783511700000,
+          "exitAt": 1783515000000,
+          "entryIdx": 45269,
+          "pct": 0.7373993135609556,
+          "fundingPct": 0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1783559400000,
+          "exitAt": 1783561200000,
+          "entryIdx": 45428,
+          "pct": 0.7771861019456788,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1783894200000,
+          "exitAt": 1783901100000,
+          "entryIdx": 46544,
+          "pct": 0.08152109469489265,
+          "fundingPct": -0.0023999999999997357,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1784005800000,
+          "exitAt": 1784012700000,
+          "entryIdx": 46916,
+          "pct": 0.22396785144459178,
+          "fundingPct": 0.0023999999999997357,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1784079900000,
+          "exitAt": 1784081700000,
+          "entryIdx": 47163,
+          "pct": 0.8046516278390073,
+          "fundingPct": -0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1784144400000,
+          "exitAt": 1784147100000,
+          "entryIdx": 47378,
+          "pct": 0.5305079404433093,
+          "fundingPct": -0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1784280300000,
+          "exitAt": 1784280900000,
+          "entryIdx": 47831,
+          "pct": -0.9999999999999971,
+          "fundingPct": 0,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1784281500000,
+          "exitAt": 1784287500000,
+          "entryIdx": 47835,
+          "pct": 1.0856766979115329,
+          "fundingPct": 0.0023999999999997357,
+          "trendRegime": "bear",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1784385600000,
+          "exitAt": 1784390700000,
+          "entryIdx": 48182,
+          "pct": 0.4837208989300959,
+          "fundingPct": 0.0023999999999997357,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1784395200000,
+          "exitAt": 1784399700000,
+          "entryIdx": 48214,
+          "pct": 0.20508394055576493,
+          "fundingPct": 0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1784631900000,
+          "exitAt": 1784639400000,
+          "entryIdx": 49003,
+          "pct": 0.3514882280227897,
+          "fundingPct": -0.001000000000000334,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1784641500000,
+          "exitAt": 1784642100000,
+          "entryIdx": 49035,
+          "pct": 0.6781164431989052,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1784857500000,
+          "exitAt": 1784860500000,
+          "entryIdx": 49755,
+          "pct": 0.8806216800425035,
+          "fundingPct": -0.001100000000000101,
+          "trendRegime": "bear",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1784973000000,
+          "exitAt": 1784979000000,
+          "entryIdx": 50140,
+          "pct": 0.5354840384565401,
+          "fundingPct": 0,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1785155400000,
+          "exitAt": 1785159600000,
+          "entryIdx": 50748,
+          "pct": 0.4780897895599227,
+          "fundingPct": -0.0011999999999998678,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1785250500000,
+          "exitAt": 1785252300000,
+          "entryIdx": 51065,
+          "pct": -1.0000000000000009,
+          "fundingPct": 0.0011999999999998678,
+          "trendRegime": "bear",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1785253200000,
+          "exitAt": 1785259200000,
+          "entryIdx": 51074,
+          "pct": 0.427926143117522,
+          "fundingPct": 0.0023999999999997357,
+          "trendRegime": "mixed",
+          "volatilityRegime": "highVol"
+        },
+        {
+          "side": "short",
+          "entryAt": 1785304500000,
+          "exitAt": 1785312600000,
+          "entryIdx": 51245,
+          "pct": 0.00036333248555668694,
+          "fundingPct": -0.0028999999999999027,
+          "trendRegime": "mixed",
+          "volatilityRegime": "lowVol"
+        },
+        {
+          "side": "long",
+          "entryAt": 1785466500000,
+          "exitAt": 1785473700000,
+          "entryIdx": 51785,
+          "pct": 0.22413664706832648,
+          "fundingPct": -0.0023999999999997357,
+          "trendRegime": "bull",
+          "volatilityRegime": "lowVol"
+        }
+      ],
+      "grossPct": 21.84038660878246,
+      "netPct": 18.867377128659182,
+      "adverseNetPct": 18.150176977638168,
+      "fundingPct": 0.011699999999999766,
+      "maxDrawdownPct": -5.1223241590214545
+    }
+  ],
+  "portfolioQualified": [],
+  "portfolioRows": [
+    {
+      "rule": "CONF-RSI14-MFI14-30/70+EMA400",
+      "dropped": 0,
+      "maxConcurrent": 1,
+      "net": 18.867377128659182,
+      "robustNet": 18.150176977638168,
+      "profitFactor": 1.4959952173951139,
+      "winRatePct": 67.21311475409836,
+      "robustProfitFactor": 1.4742096823019584,
+      "drawdownUsd": -5.1223241590214545,
+      "drawdownPct": -5.1223241590214545,
+      "netUsd": 18.867377128659182,
+      "folds": 4,
+      "is": 10.077880644319027,
+      "oos": 8.789496484340159,
+      "long": 10.970663537585443,
+      "short": 7.896713591073743,
+      "meanL95": 0.02837208016656076,
+      "recent": [
+        {
+          "days": 30,
+          "n": 23,
+          "net": 6.188298135950838,
+          "profitFactor": 2.9975165063074822,
+          "winRatePct": 82.6086956521739,
+          "long": 3.9301059437261623,
+          "short": 2.258192192224676
+        },
+        {
+          "days": 60,
+          "n": 40,
+          "net": 10.306537750797805,
+          "profitFactor": 2.1144148699359877,
+          "winRatePct": 75,
+          "long": 4.406080222116057,
+          "short": 5.900457528681745
+        },
+        {
+          "days": 90,
+          "n": 60,
+          "net": 13.928185981120372,
+          "profitFactor": 1.8428492284575528,
+          "winRatePct": 70,
+          "long": 8.970468200654409,
+          "short": 4.957717780465957
+        }
+      ],
+      "activeSymbols": 1,
+      "positiveSymbols": 1,
+      "dominance": 1,
+      "leaveOneOutMinNet": 0,
+      "positiveMonths": 5,
+      "totalMonths": 6,
+      "trendRegimes": {
+        "bull": {
+          "n": 15,
+          "net": 11.545639533528506,
+          "profitFactor": 12.266068039435849
+        },
+        "bear": {
+          "n": 22,
+          "net": 1.7870230799389277,
+          "profitFactor": 1.2456106668463587
+        },
+        "mixed": {
+          "n": 85,
+          "net": 5.53471451519175,
+          "profitFactor": 1.1861110043312508
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 55,
+          "net": 4.126540282542098,
+          "profitFactor": 1.1918383106815704
+        },
+        "lowVol": {
+          "n": 67,
+          "net": 14.74083684611709,
+          "profitFactor": 1.8918208466958997
+        }
+      },
+      "trades": 122,
+      "fundingPct": 0.011699999999999766
+    }
+  ]
+}

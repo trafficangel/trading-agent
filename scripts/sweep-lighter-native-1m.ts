@@ -102,6 +102,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V6 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V6 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V7 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V7 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V8 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V8 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -1162,6 +1164,78 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.close[i]! >= a.ema8[i]!
           : a.close[i]! <= a.ema8[i]!;
+      },
+    });
+  }
+
+  // Preregistered independent v8 suite. These hypotheses test whether an
+  // explicit low-efficiency/choppy-regime condition can prevent the adverse
+  // continuation that hurt earlier short-horizon reversion families. The
+  // first uses a Bollinger reclaim plus Kaufman ER60; the second uses a
+  // Keltner reclaim only while completed ADX14 is below 20. Both retain a
+  // long-horizon EMA400 direction filter, are exactly mirrored, and execute
+  // only on the next bar open. No parameter grid is exposed for post-hoc
+  // rescue if either frozen rule fails.
+  if (ENABLE_INDEPENDENT_FAMILIES_V8) {
+    out.push({
+      name: 'V8-BB20-2-RECLAIM+ER60<0.25+EMA400-EXIT-SMA20-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const priorLower = a.sma20[i - 1]! - 2 * a.sd20[i - 1]!;
+        const priorUpper = a.sma20[i - 1]! + 2 * a.sd20[i - 1]!;
+        const lower = a.sma20[i]! - 2 * a.sd20[i]!;
+        const upper = a.sma20[i]! + 2 * a.sd20[i]!;
+        if (
+          a.efficiencyRatio60[i]! <= 0.25
+          && a.close[i - 1]! < priorLower
+          && a.close[i]! >= lower
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          a.efficiencyRatio60[i]! <= 0.25
+          && a.close[i - 1]! > priorUpper
+          && a.close[i]! <= upper
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.sma20[i]!
+          : a.close[i]! <= a.sma20[i]!;
+      },
+    });
+
+    out.push({
+      name: 'V8-KELTNER21-ATR2-RECLAIM+ADX<20+EMA400-EXIT-EMA21-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const priorLower = a.ema21[i - 1]! - 2 * a.atr14[i - 1]!;
+        const priorUpper = a.ema21[i - 1]! + 2 * a.atr14[i - 1]!;
+        const lower = a.ema21[i]! - 2 * a.atr14[i]!;
+        const upper = a.ema21[i]! + 2 * a.atr14[i]!;
+        if (
+          a.adx14[i]! < 20
+          && a.close[i - 1]! < priorLower
+          && a.close[i]! >= lower
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          a.adx14[i]! < 20
+          && a.close[i - 1]! > priorUpper
+          && a.close[i]! <= upper
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.ema21[i]!
+          : a.close[i]! <= a.ema21[i]!;
       },
     });
   }

@@ -1,0 +1,46 @@
+{
+  "version": "lighter-independent-v8-preregistration-v1",
+  "createdAt": "2026-08-02T05:35:39Z",
+  "status": "frozen_before_universe_results",
+  "objective": "Find an independent bidirectional low-efficiency mean-reversion candidate without weakening the Native Quant admission gates.",
+  "universe": [
+    "AAVE", "ARB", "BNB", "BTC", "DOGE", "ENA", "ETH", "GRAM", "HYPE", "JUP", "LINK", "LIT", "LTC", "NEAR", "PUMP", "SOL", "TAO", "UNI", "XLM", "XMR", "XRP"
+  ],
+  "timeframesMinutes": [1, 5],
+  "rules": [
+    {
+      "name": "V8-BB20-2-RECLAIM+ER60<0.25+EMA400-EXIT-SMA20-H120M",
+      "stopPct": 1,
+      "maxHoldMinutes": 120
+    },
+    {
+      "name": "V8-KELTNER21-ATR2-RECLAIM+ADX<20+EMA400-EXIT-EMA21-H120M",
+      "stopPct": 1,
+      "maxHoldMinutes": 120
+    }
+  ],
+  "execution": {
+    "signal": "completed gap-free native bar",
+    "fill": "next native bar open",
+    "positionNotionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific executable $100 full-round-trip L2 p95",
+    "funding": "exact Lighter hourly settlements in (entry, exit]"
+  },
+  "qualification": {
+    "minimumTrades": 30,
+    "minimumProfitFactor": 1.2,
+    "minimumPositiveFolds": 3,
+    "maximumDrawdownPct": 15,
+    "requiresPositiveMeanL95": true,
+    "requiresPositiveISAndOOS": true,
+    "requiresPositiveLongAndShort": true,
+    "requiresPositiveBullBearAndVolatilityRegimes": true,
+    "requiresPositive30d60d90dBothSides": true,
+    "requiresMeasuredCostsAndFunding": true
+  },
+  "frozenInputHashes": {
+    "executionCostsNativePortfolio100": "4afa14dd731014df5c806f7d5c2a06a0a02797561ce12a83847a4d841b42fce9",
+    "fundingHistoryNative": "5a44a8cba48306dad60ee695045d5fdcf4542ef1a6a75b55ad4aa3d12fe7e9f4"
+  }
+}
