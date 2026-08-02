@@ -178,6 +178,14 @@ const NATIVE_HISTORICAL_EVIDENCE = (() => {
         process.env['LIGHTER_NATIVE_HISTORICAL_FAST_CONFLUENCE_V2_PATH']
           ?? 'data/lighter-fast-confluence-v2-universe-5m-20260802.json',
       ), 'utf8')) as unknown,
+      JSON.parse(readFileSync(resolve(
+        process.env['LIGHTER_NATIVE_HISTORICAL_RSI_MFI_V13_PATH']
+          ?? 'data/lighter-rsi14-mfi14-apt-xlm-refresh-20260802.json',
+      ), 'utf8')) as unknown,
+      JSON.parse(readFileSync(resolve(
+        process.env['LIGHTER_NATIVE_HISTORICAL_APT_VWZ_V13_PATH']
+          ?? 'data/lighter-vwz60t3-reclaim-apt-refresh-20260802.json',
+      ), 'utf8')) as unknown,
     );
   } catch (error) {
     logger.error({ error }, 'Native historical evidence unavailable');
@@ -902,6 +910,40 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 9.759,
     },
   },
+  {
+    id: 'apt-vwz60-3-reclaim-ema200-challenger',
+    code: '062',
+    name: 'VWZ60 3σ Reclaim · EMA200 · VWMA Exit',
+    symbol: 'APTUSDT',
+    asset: 'APT',
+    marketId: 31,
+    stopPct: 1.5,
+    backtest: {
+      period: '2026-02-02 → 2026-08-02',
+      trades: 108,
+      winRatePct: 68.5,
+      profitFactor: 1.67,
+      netPct: 17.49,
+      maxDrawdownPct: 4.81,
+    },
+  },
+  {
+    id: 'xlm-rsi14-mfi14-ema400-challenger',
+    code: '063',
+    name: 'RSI14 + MFI14 · EMA400 · RSI50 Exit',
+    symbol: 'XLMUSDT',
+    asset: 'XLM',
+    marketId: 119,
+    stopPct: 1,
+    backtest: {
+      period: '2026-02-02 → 2026-08-01',
+      trades: 287,
+      winRatePct: 66.6,
+      profitFactor: 1.35,
+      netPct: 25.62,
+      maxDrawdownPct: 10.64,
+    },
+  },
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
     ...market,
     portfolioId: NATIVE_TREND_PORTFOLIO_ID,
@@ -951,7 +993,7 @@ const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(NATIVE_RETIRED_STRATEGY_I
 const NATIVE_LIVE_STRATEGY_IDS: readonly string[] = [];
 
 type NativeStrategyInfo = {
-  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic' | 'bb_williams_reclaim';
+  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_mfi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic' | 'bb_williams_reclaim';
   mode: 'reclaim' | 'touch';
   threshold: number;
   period: number;
@@ -1149,6 +1191,29 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     realEnabled: false,
     noteRu: 'Новый двусторонний HYPE-кандидат. После консервативного входа на одну минуту позже: 426 сделок, +35.71%, PF 1.34, DD −9.76%, 4/4 фолда, положительные IS/OOS, Long/Short и окна 30/60/90d. Runtime parity: 0 расхождений на 49 840 барах. Только новый prospective Shadow; Real заблокирован.',
     noteEn: 'New two-sided HYPE candidate. With a conservative one-minute-delayed fill: 426 trades, +35.71%, PF 1.34, −9.76% DD, 4/4 folds, positive IS/OOS, Long/Short and 30/60/90d windows. Runtime parity: zero mismatches across 49,840 bars. Fresh prospective Shadow only; Real is blocked.',
+  },
+  'apt-vwz60-3-reclaim-ema200-challenger': {
+    family: 'vwz',
+    mode: 'reclaim',
+    threshold: 3,
+    period: 60,
+    timeExitBars: 240,
+    trendFilter: 'ema200',
+    realEnabled: false,
+    noteRu: 'Новый двусторонний APT-кандидат. Свежий 181d тест: 108 сделок, +17.49%, PF 1.67, DD −4.81%, 4/4 фолда, положительные IS/OOS, Long/Short, все режимы и окна 30/60/90d после измеренного $100 p95 и точного funding. Только новый prospective Shadow; Real заблокирован.',
+    noteEn: 'New two-sided APT candidate. Fresh 181d test: 108 trades, +17.49%, PF 1.67, −4.81% DD, 4/4 folds, positive IS/OOS, Long/Short, all regimes and 30/60/90d windows after measured $100 p95 and exact funding. Fresh prospective Shadow only; Real is blocked.',
+  },
+  'xlm-rsi14-mfi14-ema400-challenger': {
+    family: 'rsi_mfi',
+    mode: 'touch',
+    threshold: 30,
+    secondaryThreshold: 30,
+    period: 14,
+    timeExitBars: 120,
+    trendFilter: 'ema400',
+    realEnabled: false,
+    noteRu: 'Новый двусторонний XLM-кандидат. Свежий 180d тест: 287 сделок, +25.62%, PF 1.35, DD −10.64%, 4/4 фолда, положительные IS/OOS, Long/Short, все режимы и окна 30/60/90d после измеренного $100 p95 и точного funding. Только новый prospective Shadow; Real заблокирован.',
+    noteEn: 'New two-sided XLM candidate. Fresh 180d test: 287 trades, +25.62%, PF 1.35, −10.64% DD, 4/4 folds, positive IS/OOS, Long/Short, all regimes and 30/60/90d windows after measured $100 p95 and exact funding. Fresh prospective Shadow only; Real is blocked.',
   },
   ...Object.fromEntries(NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => [
     market.id,
@@ -3124,6 +3189,9 @@ function nativeRunnerHealth(lang: Lang, specs: readonly StrategySpec[]): string 
         ? '—' : `BB20 · W%R ${row.secondaryOscillator.toFixed(1)}`
       : row.family === 'rsi'
       ? row.currentRsi == null ? '—' : `${row.currentRsi.toFixed(1)} / ${row.threshold.toFixed(0)}–${(100 - row.threshold).toFixed(0)}`
+      : row.family === 'rsi_mfi'
+        ? row.currentRsi == null || row.secondaryOscillator == null
+          ? '—' : `RSI ${row.currentRsi.toFixed(1)} · MFI ${row.secondaryOscillator.toFixed(1)}`
       : row.family === 'rsi_williams'
         ? row.currentRsi == null || row.secondaryOscillator == null
           ? '—' : `RSI ${row.currentRsi.toFixed(1)} · W%R ${row.secondaryOscillator.toFixed(1)}`
@@ -3340,6 +3408,14 @@ function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
       `Long: RSI${info.period}<${info.threshold}, Williams %R14<−${100 - edge}, and close>EMA400. Short: RSI${info.period}>${100 - info.threshold}, Williams %R14>−${edge}, and close<EMA400.`,
     );
   }
+  if (info.family === 'rsi_mfi') {
+    const level = info.secondaryThreshold ?? 30;
+    return t(
+      lang,
+      `Long: RSI${info.period}<${info.threshold}, MFI14<${level} и close>EMA400. Short: RSI${info.period}>${100 - info.threshold}, MFI14>${100 - level} и close<EMA400.`,
+      `Long: RSI${info.period}<${info.threshold}, MFI14<${level}, and close>EMA400. Short: RSI${info.period}>${100 - info.threshold}, MFI14>${100 - level}, and close<EMA400.`,
+    );
+  }
   if (info.family === 'vwz_mfi') {
     const level = info.secondaryThreshold ?? 35;
     return t(
@@ -3371,12 +3447,19 @@ function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
       `Long: RSI${info.period}<${info.threshold} and close>EMA400. Short: RSI${info.period}>${100 - info.threshold} and close<EMA400.`,
     );
   }
+  const trendQualifier = info.trendFilter === 'ema200'
+    ? t(lang, ' Long требует close>EMA200, Short — close<EMA200.', ' Long requires close>EMA200; Short requires close<EMA200.')
+    : info.trendFilter === 'ema400'
+      ? t(lang, ' Long требует close>EMA400, Short — close<EMA400.', ' Long requires close>EMA400; Short requires close<EMA400.')
+      : info.trendFilter === 'ema200_400'
+        ? t(lang, ' Long требует close>EMA200>EMA400, Short — close<EMA200<EMA400.', ' Long requires close>EMA200>EMA400; Short requires close<EMA200<EMA400.')
+        : '';
   if (info.mode === 'reclaim') {
-    return t(
+    return `${t(
       lang,
       `Long: предыдущий Z < −${info.threshold}, текущий Z ≥ −${info.threshold}. Short: предыдущий Z > +${info.threshold}, текущий Z ≤ +${info.threshold}.`,
       `Long: previous Z < −${info.threshold}, current Z ≥ −${info.threshold}. Short: previous Z > +${info.threshold}, current Z ≤ +${info.threshold}.`,
-    );
+    )}${trendQualifier}`;
   }
   const touch = t(
     lang,
@@ -3388,12 +3471,7 @@ function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
     `Вход разрешён только при ER60≤${info.efficiencyMax}.`,
     `Entry is allowed only when ER60≤${info.efficiencyMax}.`,
   )}`;
-  if (!info.trendFilter) return `${touch}${efficiency}`;
-  return `${touch} ${t(
-    lang,
-    'P2/P3: Long только при close > EMA200 > EMA400; Short — зеркально ниже обеих EMA.',
-    'P2/P3: Long only when close > EMA200 > EMA400; Short is the mirrored condition below both EMAs.',
-  )}`;
+  return `${touch}${efficiency}${trendQualifier}`;
 }
 
 function nativeStrategyTooltip(spec: StrategySpec, lang: Lang): string | null {
@@ -3405,11 +3483,11 @@ function nativeStrategyTooltip(spec: StrategySpec, lang: Lang): string | null {
       'Bollinger(20,2), Williams %R14 и EMA400 считаются только по завершённым 5m свечам Lighter.',
       'Bollinger(20,2), Williams %R14, and EMA400 use completed Lighter 5m candles only.',
     )
-    : info.family === 'rsi' || info.family === 'rsi_williams'
+    : info.family === 'rsi' || info.family === 'rsi_mfi' || info.family === 'rsi_williams'
     ? t(
       lang,
-      `${info.family === 'rsi_williams' ? `RSI${info.period}, Williams %R14` : `RSI${info.period}`} и EMA400 считаются только по завершённым 5m свечам Lighter.`,
-      `${info.family === 'rsi_williams' ? `RSI${info.period}, Williams %R14` : `RSI${info.period}`} and EMA400 use completed Lighter 5m candles only.`,
+      `${info.family === 'rsi_williams' ? `RSI${info.period}, Williams %R14` : info.family === 'rsi_mfi' ? `RSI${info.period}, MFI14` : `RSI${info.period}`} и EMA400 считаются только по завершённым 5m свечам Lighter.`,
+      `${info.family === 'rsi_williams' ? `RSI${info.period}, Williams %R14` : info.family === 'rsi_mfi' ? `RSI${info.period}, MFI14` : `RSI${info.period}`} and EMA400 use completed Lighter 5m candles only.`,
     )
     : info.family === 'vwz' || info.family === 'vwz_mfi'
       || info.family === 'vwz_williams'
@@ -3426,7 +3504,7 @@ function nativeStrategyTooltip(spec: StrategySpec, lang: Lang): string | null {
     );
   const exitMean = info.family === 'bb_williams_reclaim'
     ? 'Bollinger SMA20'
-    : info.family === 'rsi' || info.family === 'rsi_williams'
+    : info.family === 'rsi' || info.family === 'rsi_mfi' || info.family === 'rsi_williams'
     ? 'RSI50'
     : info.family === 'vwz' || info.family === 'vwz_mfi'
       || info.family === 'vwz_williams'
@@ -3457,6 +3535,8 @@ function nativeStrategyGuide(
     const info = NATIVE_STRATEGY_INFO[spec.id]!;
     const family = info.family === 'rsi'
       ? 'RSI'
+      : info.family === 'rsi_mfi'
+        ? 'RSI + MFI'
       : info.family === 'bb_williams_reclaim'
         ? 'BOLLINGER + WILLIAMS %R'
       : info.family === 'rsi_williams'
@@ -3479,9 +3559,9 @@ function nativeStrategyGuide(
       <b>STRAT-${spec.code} · ${spec.asset}</b>
       <span>${info.family === 'bb_williams_reclaim'
         ? `${family} · 20/${info.threshold}σ · EMA400`
-        : info.family === 'rsi' || info.family === 'rsi_williams'
+        : info.family === 'rsi' || info.family === 'rsi_mfi' || info.family === 'rsi_williams'
         ? `${family}${info.period} · ${info.threshold}/${100 - info.threshold} · EMA400`
-        : `${info.mode === 'reclaim' ? 'RECLAIM' : 'TOUCH'} · ${family}${info.period} · ±${info.threshold}σ${info.trendFilter ? ' · EMA400' : ''}`}</span>
+        : `${info.mode === 'reclaim' ? 'RECLAIM' : 'TOUCH'} · ${family}${info.period} · ±${info.threshold}σ${info.trendFilter ? ` · ${info.trendFilter === 'ema200_400' ? 'EMA200/400' : info.trendFilter.toUpperCase()}` : ''}`}</span>
       <span>${esc(nativeEntryDescription(info, lang))}</span>
       <span>${t(lang, info.noteRu, info.noteEn)}</span>
       <em class="${realPathOpen ? 'pass' : 'collect'}">${executionLabel}</em>

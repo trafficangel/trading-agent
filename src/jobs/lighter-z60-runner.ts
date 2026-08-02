@@ -18,12 +18,14 @@ import {
 import {
   bollingerMeanExit,
   evaluateBollingerWilliamsReclaim,
+  evaluateRsiMfiTrend,
   evaluateRsiWilliamsTrend,
   evaluateVwzMfiTrend,
   evaluateVwzStochasticTrend,
   evaluateVwzWilliamsTrend,
   rsiWilliamsExit,
   type RsiWilliamsSnapshot,
+  type RsiMfiSnapshot,
   type BollingerWilliamsReclaimSnapshot,
   type VwzMfiSnapshot,
   type VwzStochasticSnapshot,
@@ -187,7 +189,7 @@ type LastClosedRow = {
 type NativeStrategy = {
   id: string;
   timeframeMinutes: NativeTimeframeMinutes;
-  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic' | 'bb_williams_reclaim';
+  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_mfi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic' | 'bb_williams_reclaim';
   mode: Z60EntryMode;
   threshold: number;
   auxiliaryThreshold?: number;
@@ -198,7 +200,7 @@ type NativeStrategy = {
 };
 
 type NativeSnapshot = Z60Snapshot | RsiTrendPullbackSnapshot
-  | RsiWilliamsSnapshot | VwzMfiSnapshot | VwzWilliamsSnapshot | VwzStochasticSnapshot
+  | RsiMfiSnapshot | RsiWilliamsSnapshot | VwzMfiSnapshot | VwzWilliamsSnapshot | VwzStochasticSnapshot
   | BollingerWilliamsReclaimSnapshot;
 
 type NativeFeed = {
@@ -208,6 +210,19 @@ type NativeFeed = {
 };
 
 const BASE_FEEDS: readonly NativeFeed[] = [
+  {
+    symbol: 'APTUSDT',
+    marketId: 31,
+    strategies: [{
+      id: 'apt-vwz60-3-reclaim-ema200-challenger',
+      timeframeMinutes: 5,
+      family: 'vwz',
+      mode: 'reclaim',
+      threshold: 3,
+      trendFilter: 'ema200',
+      maxBars: 240,
+    }],
+  },
   {
     symbol: 'HYPEUSDT',
     marketId: 24,
@@ -264,6 +279,16 @@ const BASE_FEEDS: readonly NativeFeed[] = [
         mode: 'touch',
         threshold: 2.5,
         auxiliaryThreshold: 20,
+        trendFilter: 'ema400',
+        maxBars: 120,
+      },
+      {
+        id: 'xlm-rsi14-mfi14-ema400-challenger',
+        timeframeMinutes: 5,
+        family: 'rsi_mfi',
+        mode: 'touch',
+        threshold: 30,
+        auxiliaryThreshold: 30,
         trendFilter: 'ema400',
         maxBars: 120,
       },
@@ -750,6 +775,15 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
               strategy.threshold,
               strategy.trendFilter === 'ema400' ? 400 : 200,
             )
+            : strategy.family === 'rsi_mfi'
+            ? evaluateRsiMfiTrend(
+              strategyBars,
+              14,
+              strategy.threshold,
+              14,
+              strategy.auxiliaryThreshold ?? 30,
+              400,
+            )
             : strategy.family === 'rsi_williams'
             ? evaluateRsiWilliamsTrend(
               strategyBars,
@@ -815,6 +849,10 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
               ? bollingerMeanExit(snapshot as BollingerWilliamsReclaimSnapshot, open.side)
               : strategy.family === 'rsi'
               ? rsiTrendExit(snapshot as RsiTrendPullbackSnapshot, open.side)
+              : strategy.family === 'rsi_mfi'
+              ? (open.side === 'long'
+                ? (snapshot as RsiMfiSnapshot).currentRsi >= 50
+                : (snapshot as RsiMfiSnapshot).currentRsi <= 50)
               : strategy.family === 'rsi_williams'
               ? rsiWilliamsExit(snapshot as RsiWilliamsSnapshot, open.side)
               : open.side === 'long'
@@ -839,7 +877,8 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
                 indicatorExit
                   ? strategy.family === 'bb_williams_reclaim'
                     ? 'bollinger_mean_cross'
-                    : strategy.family === 'rsi' || strategy.family === 'rsi_williams'
+                    : strategy.family === 'rsi' || strategy.family === 'rsi_mfi'
+                      || strategy.family === 'rsi_williams'
                     ? 'rsi50_cross'
                     : strategy.family === 'vwz' || strategy.family === 'vwz_mfi'
                       || strategy.family === 'vwz_williams'
@@ -991,6 +1030,23 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
                 close: snapshot.close,
                 trendMean: snapshot.trendMean!,
               })
+              : strategy.family === 'rsi_mfi'
+              ? (() => {
+                const value = snapshot as RsiMfiSnapshot;
+                if (value.currentRsi >= strategy.threshold
+                  && value.currentRsi <= 100 - strategy.threshold) return 'rsi_inside_threshold';
+                if (value.currentRsi < strategy.threshold
+                  && value.currentMfi >= (strategy.auxiliaryThreshold ?? 30)) {
+                  return 'mfi_not_confirmed';
+                }
+                if (value.currentRsi > 100 - strategy.threshold
+                  && value.currentMfi <= 100 - (strategy.auxiliaryThreshold ?? 30)) {
+                  return 'mfi_not_confirmed';
+                }
+                return value.close >= value.trendMean
+                  ? 'short_blocked_above_trend'
+                  : 'long_blocked_below_trend';
+              })()
               : strategy.family === 'rsi_williams'
               ? (() => {
                 const value = snapshot as RsiWilliamsSnapshot;

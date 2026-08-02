@@ -20,6 +20,10 @@ export const NATIVE_HISTORICAL_FAST_CONFLUENCE_SHA256 =
   '2204431695c0bc47d1a05f454368896b2e3bb4ce933fa97eca0f8e15b3de59bf';
 export const NATIVE_HISTORICAL_FAST_CONFLUENCE_V2_SHA256 =
   '26a01b5c395885430325284b736727585e214c82d2ff998b1c0399955f37f2cd';
+export const NATIVE_HISTORICAL_RSI_MFI_V13_SHA256 =
+  '77cadb991d075559e7cff5cea60644a0900bc75381b2d7223bd37946f061f467';
+export const NATIVE_HISTORICAL_APT_VWZ_V13_SHA256 =
+  '595eeb8e4140d66a5e9a204753d973763137bbb177ee96ea571abd292c4e4b78';
 
 const HISTORICAL_CANDIDATES = [
   { strategyId: 'sol-z60-reclaim', symbol: 'SOL', rule: 'Z60-3-reclaim' },
@@ -85,6 +89,18 @@ const FAST_CONFLUENCE_V2_HISTORICAL_CANDIDATES = [{
   strategyId: 'hype-vwz60-stoch14-ema400-challenger',
   symbol: 'HYPE',
   rule: 'CONF-VWZ60-2.25+STOCH14-20/80+EMA400',
+}] as const;
+
+const RSI_MFI_V13_HISTORICAL_CANDIDATES = [{
+  strategyId: 'xlm-rsi14-mfi14-ema400-challenger',
+  symbol: 'XLM',
+  rule: 'CONF-RSI14-MFI14-30/70+EMA400',
+}] as const;
+
+const APT_VWZ_V13_HISTORICAL_CANDIDATES = [{
+  strategyId: 'apt-vwz60-3-reclaim-ema200-challenger',
+  symbol: 'APT',
+  rule: 'VWZ60T-3-reclaim',
 }] as const;
 
 type HistoricalWindow = {
@@ -304,6 +320,8 @@ export function evaluateNativeHistoricalEvidence(
   dataConfluenceValue?: unknown,
   fastConfluenceValue?: unknown,
   fastConfluenceV2Value?: unknown,
+  rsiMfiV13Value?: unknown,
+  aptVwzV13Value?: unknown,
 ) {
   if (!value || typeof value !== 'object') throw new Error('historical evidence missing');
   const report = value as HistoricalReport;
@@ -431,6 +449,22 @@ export function evaluateNativeHistoricalEvidence(
       'CONF-',
       'fast confluence v2',
     );
+  const rsiMfiV13Report = rsiMfiV13Value == null
+    ? null
+    : validateSupplementalReport(
+      rsiMfiV13Value,
+      NATIVE_HISTORICAL_RSI_MFI_V13_SHA256,
+      'CONF-RSI14-MFI14-30/70+EMA400',
+      'RSI MFI v13',
+    );
+  const aptVwzV13Report = aptVwzV13Value == null
+    ? null
+    : validateSupplementalReport(
+      aptVwzV13Value,
+      NATIVE_HISTORICAL_APT_VWZ_V13_SHA256,
+      'VWZ60T-3-reclaim',
+      'APT VWZ v13',
+    );
   if (dataSupplementalReport != null) {
     const symbols = dataSupplementalReport.input.symbols;
     const sources = dataSupplementalReport.input.candleSources;
@@ -527,6 +561,18 @@ export function evaluateNativeHistoricalEvidence(
     'fast confluence v2',
     true,
   );
+  const rsiMfiV13Candidates = evaluateSupplementalCandidates(
+    rsiMfiV13Report,
+    RSI_MFI_V13_HISTORICAL_CANDIDATES,
+    'RSI MFI v13',
+    true,
+  );
+  const aptVwzV13Candidates = evaluateSupplementalCandidates(
+    aptVwzV13Report,
+    APT_VWZ_V13_HISTORICAL_CANDIDATES,
+    'APT VWZ v13',
+    true,
+  );
 
   const portfolioRule = 'Z60STACK-2.5-touch';
   const portfolioRows = report.portfolioRows.filter((row) => row.rule === portfolioRule);
@@ -545,6 +591,8 @@ export function evaluateNativeHistoricalEvidence(
       ...dataConfluenceCandidates,
       ...fastConfluenceCandidates,
       ...fastConfluenceV2Candidates,
+      ...rsiMfiV13Candidates,
+      ...aptVwzV13Candidates,
     ],
     supplementalSourceSha256: supplementalReport == null
       ? null
@@ -570,6 +618,12 @@ export function evaluateNativeHistoricalEvidence(
     fastConfluenceV2SourceSha256: fastConfluenceV2Report == null
       ? null
       : nativeHistoricalReportSha256(fastConfluenceV2Report),
+    rsiMfiV13SourceSha256: rsiMfiV13Report == null
+      ? null
+      : nativeHistoricalReportSha256(rsiMfiV13Report),
+    aptVwzV13SourceSha256: aptVwzV13Report == null
+      ? null
+      : nativeHistoricalReportSha256(aptVwzV13Report),
     portfolio: {
       portfolioId: 'z60stack25-portfolio',
       rule: portfolioRule,

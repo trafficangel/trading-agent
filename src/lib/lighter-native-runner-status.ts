@@ -15,7 +15,7 @@ export type NativeRunnerEvaluation = {
   symbol: string;
   marketId: number;
   timeframeMinutes: 1 | 5;
-  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic' | 'bb_williams_reclaim';
+  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_mfi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic' | 'bb_williams_reclaim';
   mode: 'touch' | 'reclaim';
   threshold: number;
   trendFilter: 'ema200' | 'ema400' | 'ema200_400' | null;

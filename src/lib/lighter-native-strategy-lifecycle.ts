@@ -6,12 +6,14 @@
  * trade history but can never silently re-enter the signal path.
  */
 export const NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS = [
+  'apt-vwz60-3-reclaim-ema200-challenger',
   'hype-vwz60-touch',
   'hype-bb20-willr14-reclaim-ema400-challenger',
   'hype-rsi14-willr14-ema400-challenger',
   'hype-vwz60-stoch14-ema400-challenger',
   'xlm-vwz60-touch-er25',
   'xlm-vwz60-willr14-ema400-challenger',
+  'xlm-rsi14-mfi14-ema400-challenger',
   'zec-rsi14-willr14-ema400',
   'zec-vwz60-mfi14-ema400-challenger',
 ] as const;

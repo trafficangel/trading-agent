@@ -164,6 +164,32 @@ Decision: do not add a correlated P3 merely because an adjacent parameter has
 a larger in-sample total. Continue the clean P2 prospective sample and search
 for a genuinely different information source before adding portfolio risk.
 
+## 2026-08-02 fresh standalone Shadow candidates
+
+Two previously frozen, symmetric rules were re-evaluated on the current
+native 5m caches with next-bar-open fills, each market's measured executable
+`$100` L2 p95, observed-maximum sensitivity and newly refreshed exact hourly
+funding. Exactly two individual candidates passed the full current gate:
+
+- `apt-vwz60-3-reclaim-ema200-challenger`: 108 trades, `+17.49%`, PF `1.67`,
+  observed-max `+15.51%`/PF `1.58`, 4/4 folds, IS/OOS `+15.22%/+2.27%`,
+  Long/Short `+3.43%/+14.07%`, all causal regimes and 30/60/90-day windows
+  positive, maximum drawdown `−4.81%`.
+- `xlm-rsi14-mfi14-ema400-challenger`: 287 trades, `+25.62%`, PF `1.35`,
+  observed-max `+25.18%`/PF `1.34`, 4/4 folds, IS/OOS `+8.45%/+17.18%`,
+  Long/Short `+1.05%/+24.58%`, all causal regimes and 30/60/90-day windows
+  positive, maximum drawdown `−10.64%`.
+
+Both start with new IDs and zero prospective trades in Shadow only. Historical
+rows do not count toward promotion; Real is physically disabled until the
+separate frozen forward and execution-latency gates pass.
+
+The separately preregistered V13 RVI/TRIX family was rejected. Across the
+24-market main universe, both rules were deeply negative on 1m and 5m after
+measured costs, with 0/4 positive folds and negative IS/OOS and both sides.
+The ADA/ZEC holdout qualified neither rule. No V13 strategy was registered.
+Frozen evidence is in `data/lighter-independent-v13-*-20260802.json`.
+
 ## Independent native microstructure track
 
 The next research source is deliberately independent from the Z-score family.
