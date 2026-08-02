@@ -21,6 +21,7 @@ from lighter_live_risk import (  # noqa: E402
     NATIVE_LATENCY_EVIDENCE_VERSION,
     NATIVE_PROMOTION_GATE,
     native_promotion_report_error,
+    native_runner_liveness_error,
 )
 
 
@@ -49,6 +50,10 @@ def valid_report() -> dict:
         "latencyEvidence": {
             "version": NATIVE_LATENCY_EVIDENCE_VERSION,
             "sourceSha256": NATIVE_LATENCY_EVIDENCE_SHA256,
+        },
+        "runnerLiveness": {
+            "passed": True,
+            "healthyStrategyIds": [STRATEGY_ID],
         },
         "strategies": [
             {
@@ -121,6 +126,32 @@ class NativePromotionReportTest(unittest.TestCase):
         report["latencyEvidence"]["sourceSha256"] = "0" * 64
         self.assertIn("latency evidence hash mismatch", self.check(report) or "")
 
+    def test_runner_liveness_evidence_is_required(self) -> None:
+        report = valid_report()
+        report["runnerLiveness"]["passed"] = False
+        self.assertIn("runner liveness evidence", self.check(report) or "")
+
+    def test_direct_runner_liveness_guard_fails_closed(self) -> None:
+        status = {
+            "version": 1,
+            "heartbeatAt": NOW_MS - 1_000,
+            "evaluations": [{
+                "strategyId": STRATEGY_ID,
+                "timeframeMinutes": 5,
+                "attemptedBarTime": NOW_MS - 480_000,
+                "barTime": NOW_MS - 480_000,
+                "evaluatedAt": NOW_MS - 120_000,
+                "state": "waiting",
+                "error": None,
+            }],
+        }
+        self.assertIsNone(native_runner_liveness_error(status, STRATEGY_ID, NOW_MS))
+        status["heartbeatAt"] = NOW_MS - 100_000
+        self.assertIn(
+            "heartbeat stale",
+            native_runner_liveness_error(status, STRATEGY_ID, NOW_MS) or "",
+        )
+
     def test_strategy_latency_failure_cannot_be_overridden(self) -> None:
         report = valid_report()
         report["strategies"][0]["latencyEvidence"]["passed"] = False
@@ -131,6 +162,7 @@ class NativePromotionReportTest(unittest.TestCase):
         report = valid_report()
         report["eligibleStrategyIds"] = [strategy_id]
         report["strategies"][0]["strategyId"] = strategy_id
+        report["runnerLiveness"]["healthyStrategyIds"] = [strategy_id]
         self.assertIn(
             "supplemental evidence missing",
             native_promotion_report_error(report, strategy_id, NOW_MS, 7_200_000) or "",

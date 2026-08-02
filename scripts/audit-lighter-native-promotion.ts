@@ -17,6 +17,11 @@ import {
 } from '../src/lib/lighter-luxalgo-math.js';
 import { evaluateNativeHistoricalEvidence } from '../src/lib/lighter-native-historical.js';
 import { NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS } from '../src/lib/lighter-native-strategy-lifecycle.js';
+import {
+  evaluateNativeRunnerLiveness,
+  LIGHTER_NATIVE_RUNNER_STATUS_KEY,
+  parseNativeRunnerStatus,
+} from '../src/lib/lighter-native-runner-status.js';
 
 const REAL_NATIVE_IDS: readonly string[] = [];
 const LATENCY_EVIDENCE_VERSION = 'lighter-native-entry-delay-audit-v1';
@@ -260,6 +265,14 @@ const historicalEvidence = evaluateNativeHistoricalEvidence(
   JSON.parse(readFileSync(dataConfluenceHistoricalPath, 'utf8')) as unknown,
 );
 const db = new Database(databasePath, { readonly: true, fileMustExist: true });
+const runnerStatusRaw = db.prepare<[string], { value: string }>(`
+  SELECT value FROM runtime_config WHERE key = ?
+`).get(LIGHTER_NATIVE_RUNNER_STATUS_KEY)?.value ?? null;
+const runnerLiveness = evaluateNativeRunnerLiveness(
+  parseNativeRunnerStatus(runnerStatusRaw),
+  SHADOW_NATIVE_IDS,
+  Date.now(),
+);
 const pnlStatement = db.prepare<[string], NativeForwardPnlRow>(`
   SELECT net_pnl_pct, side, symbol, opened_at, closed_at FROM lighter_lux_trades
   WHERE strategy_id = ? AND notional_usd = ${NATIVE_SHADOW_NOTIONAL_USD}
@@ -347,7 +360,9 @@ const pausedShadowStrategyIds = [...evaluatedStrategies, ...p2Members]
   .map((row) => row.strategyId);
 const eligibleStrategyIds = evaluatedStrategies
   .filter((row) =>
-    row.realExecutorRegistered
+    runnerLiveness.passed
+    && runnerLiveness.healthyStrategyIds.includes(row.strategyId)
+    && row.realExecutorRegistered
     && row.historicalEvidence.passed
     && row.latencyEvidence.passed
     && row.evaluation.status === 'passed')
@@ -359,6 +374,7 @@ const report = {
   databasePath,
   gate: NATIVE_FORWARD_GATE,
   shadowNotionalUsd: NATIVE_SHADOW_NOTIONAL_USD,
+  runnerLiveness,
   eligibleStrategyIds,
   historicalEvidence: {
     version: historicalEvidence.version,

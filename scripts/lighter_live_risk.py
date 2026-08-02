@@ -37,6 +37,7 @@ NATIVE_LATENCY_SUPPLEMENT_SHA256_BY_STRATEGY = {
         "93b9abca3696ea12aaeb61acac29c76aa91ac89def21a9dcb2955e57ad2360d9"
     ),
 }
+NATIVE_RUNNER_HEARTBEAT_MAX_AGE_MS = 90_000
 NATIVE_PROMOTION_GATE = {
     "targetClosed": 20.0,
     "minDurationDays": 7.0,
@@ -61,6 +62,59 @@ def native_canary_config_error(notional_usd: float, leverage: int) -> str | None
         )
     if int(leverage) < 1 or int(leverage) > 10:
         return f"native canary leverage {int(leverage)}x outside 1x..10x"
+    return None
+
+
+def native_runner_liveness_error(
+    status: object,
+    strategy_id: str,
+    now_ms: int,
+) -> str | None:
+    """Require a fresh, successful completed-bar decision before Native Real."""
+    if not isinstance(status, dict) or status.get("version") != 1:
+        return "native runner status unavailable"
+    try:
+        heartbeat_at = int(status.get("heartbeatAt"))
+    except (TypeError, ValueError):
+        return "native runner heartbeat missing"
+    heartbeat_age = now_ms - heartbeat_at
+    if heartbeat_age < -300_000:
+        return "native runner heartbeat is in the future"
+    if heartbeat_age > NATIVE_RUNNER_HEARTBEAT_MAX_AGE_MS:
+        return f"native runner heartbeat stale: {heartbeat_age}ms"
+    evaluations = status.get("evaluations")
+    if not isinstance(evaluations, list):
+        return "native runner evaluations missing"
+    matching = [
+        row
+        for row in evaluations
+        if isinstance(row, dict) and row.get("strategyId") == strategy_id
+    ]
+    if len(matching) != 1:
+        return "native runner strategy evaluation missing or duplicated"
+    row = matching[0]
+    try:
+        timeframe_minutes = int(row.get("timeframeMinutes", 5))
+        attempted_at = int(row.get("attemptedBarTime"))
+        bar_at = int(row.get("barTime"))
+        evaluated_at = int(row.get("evaluatedAt"))
+    except (TypeError, ValueError):
+        return "native runner strategy timestamps missing"
+    if timeframe_minutes not in (1, 5):
+        return "native runner strategy timeframe invalid"
+    timeframe_ms = timeframe_minutes * 60_000
+    evaluation_age = now_ms - evaluated_at
+    bar_age = now_ms - attempted_at
+    if evaluation_age < -300_000 or bar_age < -300_000:
+        return "native runner strategy evaluation is in the future"
+    if evaluation_age > timeframe_ms + NATIVE_RUNNER_HEARTBEAT_MAX_AGE_MS:
+        return f"native runner strategy evaluation stale: {evaluation_age}ms"
+    if bar_age > 2 * timeframe_ms + NATIVE_RUNNER_HEARTBEAT_MAX_AGE_MS:
+        return f"native runner strategy decision bar stale: {bar_age}ms"
+    if bar_at != attempted_at:
+        return "native runner latest attempted bar was not evaluated"
+    if row.get("state") in ("data_error", "evaluation_error") or row.get("error") is not None:
+        return "native runner strategy evaluation failed"
     return None
 
 
@@ -229,6 +283,13 @@ def native_promotion_report_error(
             return "native latency supplemental evidence missing or duplicated"
         if matching_supplements[0].get("sourceSha256") != expected_latency_supplement:
             return "native latency supplemental evidence hash mismatch"
+
+    runner_liveness = report.get("runnerLiveness")
+    if not isinstance(runner_liveness, dict) or runner_liveness.get("passed") is not True:
+        return "native runner liveness evidence not passed"
+    healthy_strategy_ids = runner_liveness.get("healthyStrategyIds")
+    if not isinstance(healthy_strategy_ids, list) or strategy_id not in healthy_strategy_ids:
+        return "native runner strategy liveness evidence missing"
 
     strategies = report.get("strategies")
     if not isinstance(strategies, list):

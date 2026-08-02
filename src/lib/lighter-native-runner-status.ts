@@ -1,4 +1,5 @@
 export const LIGHTER_NATIVE_RUNNER_STATUS_KEY = 'lighter_native_runner_status_v1';
+export const NATIVE_RUNNER_HEARTBEAT_MAX_AGE_MS = 90_000;
 
 export type NativeRunnerEvaluationState =
   | 'waiting'
@@ -42,6 +43,15 @@ export type NativeRunnerStatus = {
   heartbeatAt: number;
   targetBarTime: number;
   evaluations: NativeRunnerEvaluation[];
+};
+
+export type NativeRunnerLivenessEvaluation = {
+  passed: boolean;
+  checkedAt: number;
+  heartbeatAgeMs: number | null;
+  requiredStrategyIds: readonly string[];
+  healthyStrategyIds: readonly string[];
+  reasons: readonly string[];
 };
 
 type WaitingReasonInput = {
@@ -205,4 +215,80 @@ export function parseNativeRunnerStatus(raw: string | null): NativeRunnerStatus 
   } catch {
     return null;
   }
+}
+
+/**
+ * Fail-closed operational proof shared by the promotion audit. A fresh global
+ * heartbeat alone is insufficient: every strategy must have a current,
+ * successfully evaluated completed bar. The wider per-bar age allowance is
+ * intentional because a 5m decision remains current until the next 5m bar.
+ */
+export function evaluateNativeRunnerLiveness(
+  status: NativeRunnerStatus | null,
+  requiredStrategyIds: readonly string[],
+  nowMs: number,
+): NativeRunnerLivenessEvaluation {
+  const required = [...new Set(requiredStrategyIds)].sort();
+  const reasons: string[] = [];
+  if (!status) return {
+    passed: false,
+    checkedAt: nowMs,
+    heartbeatAgeMs: null,
+    requiredStrategyIds: required,
+    healthyStrategyIds: [],
+    reasons: ['runner status unavailable'],
+  };
+
+  const heartbeatAgeMs = nowMs - status.heartbeatAt;
+  if (heartbeatAgeMs < -300_000) reasons.push('runner heartbeat is in the future');
+  if (heartbeatAgeMs > NATIVE_RUNNER_HEARTBEAT_MAX_AGE_MS) {
+    reasons.push(
+      `runner heartbeat age ${heartbeatAgeMs}ms > ${NATIVE_RUNNER_HEARTBEAT_MAX_AGE_MS}ms`,
+    );
+  }
+
+  const healthyStrategyIds: string[] = [];
+  for (const strategyId of required) {
+    const matching = status.evaluations.filter((row) => row.strategyId === strategyId);
+    if (matching.length !== 1) {
+      reasons.push(`${strategyId}: evaluation missing or duplicated`);
+      continue;
+    }
+    const row = matching[0]!;
+    const timeframeMs = row.timeframeMinutes * 60_000;
+    const maxEvaluationAgeMs = timeframeMs + NATIVE_RUNNER_HEARTBEAT_MAX_AGE_MS;
+    const maxBarAgeMs = 2 * timeframeMs + NATIVE_RUNNER_HEARTBEAT_MAX_AGE_MS;
+    const evaluationAgeMs = nowMs - row.evaluatedAt;
+    const barAgeMs = nowMs - row.attemptedBarTime;
+    const rowReasons: string[] = [];
+    if (evaluationAgeMs < -300_000 || barAgeMs < -300_000) {
+      rowReasons.push('evaluation is in the future');
+    }
+    if (evaluationAgeMs > maxEvaluationAgeMs) {
+      rowReasons.push(`evaluation age ${evaluationAgeMs}ms > ${maxEvaluationAgeMs}ms`);
+    }
+    if (barAgeMs > maxBarAgeMs) {
+      rowReasons.push(`decision bar age ${barAgeMs}ms > ${maxBarAgeMs}ms`);
+    }
+    if (row.barTime !== row.attemptedBarTime) {
+      rowReasons.push('latest attempted bar was not evaluated');
+    }
+    if (row.state === 'data_error' || row.state === 'evaluation_error' || row.error != null) {
+      rowReasons.push(`runner state ${row.state}${row.error ? `: ${row.error}` : ''}`);
+    }
+    if (rowReasons.length) {
+      reasons.push(`${strategyId}: ${rowReasons.join('; ')}`);
+    } else {
+      healthyStrategyIds.push(strategyId);
+    }
+  }
+
+  return {
+    passed: reasons.length === 0,
+    checkedAt: nowMs,
+    heartbeatAgeMs,
+    requiredStrategyIds: required,
+    healthyStrategyIds,
+    reasons,
+  };
 }

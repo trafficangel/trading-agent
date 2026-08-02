@@ -28,6 +28,7 @@ from lighter_live_risk import (
     evaluate_strategy_risk,
     native_canary_config_error,
     native_promotion_report_error,
+    native_runner_liveness_error,
     native_registry_error,
     pnl_stats,
 )
@@ -166,14 +167,23 @@ class LiveRunner:
         if config_error is not None:
             return config_error
         try:
+            now_ms = int(time.time() * 1000)
             with open(self.native_promotion_report, encoding="utf-8") as handle:
                 report = json.load(handle)
-            return native_promotion_report_error(
+            report_error = native_promotion_report_error(
                 report,
                 strategy_id,
-                int(time.time() * 1000),
+                now_ms,
                 self.native_promotion_max_age_ms,
             )
+            if report_error is not None:
+                return report_error
+            row = self.db.execute(
+                "SELECT value FROM runtime_config WHERE key = ?",
+                ("lighter_native_runner_status_v1",),
+            ).fetchone()
+            status = json.loads(row["value"]) if row is not None else None
+            return native_runner_liveness_error(status, strategy_id, now_ms)
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
             return f"native promotion report unavailable: {type(exc).__name__}"
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  evaluateNativeRunnerLiveness,
   nativeRsiWaitingReason,
   nativeWaitingReason,
   parseNativeRunnerStatus,
@@ -125,5 +126,29 @@ describe('parseNativeRunnerStatus', () => {
     };
     expect(parseNativeRunnerStatus(JSON.stringify(legacy))?.evaluations[0]?.timeframeMinutes)
       .toBe(5);
+  });
+
+  it('requires a fresh successful evaluation for every promoted strategy', () => {
+    const result = evaluateNativeRunnerLiveness(valid, ['z60stack25-btc'], 2_050);
+    expect(result.passed).toBe(true);
+    expect(result.healthyStrategyIds).toEqual(['z60stack25-btc']);
+  });
+
+  it('fails closed on stale heartbeat, missing rows and latest-bar errors', () => {
+    expect(evaluateNativeRunnerLiveness(valid, ['z60stack25-btc'], 100_000).passed)
+      .toBe(false);
+    expect(evaluateNativeRunnerLiveness(valid, ['missing'], 2_050).reasons)
+      .toEqual([expect.stringContaining('missing or duplicated')]);
+    const failed = {
+      ...valid,
+      evaluations: [{
+        ...valid.evaluations[0]!,
+        state: 'data_error' as const,
+        barTime: 1_200,
+        error: 'gap',
+      }],
+    };
+    expect(evaluateNativeRunnerLiveness(failed, ['z60stack25-btc'], 2_050).reasons)
+      .toEqual([expect.stringContaining('latest attempted bar was not evaluated')]);
   });
 });
