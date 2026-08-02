@@ -534,3 +534,29 @@ L2 p95 execution cost plus exact funding.
 **Decision:** both V14 families are rejected without Shadow or Real. Their
 negative artifacts remain tracked so the same hypotheses are not repeatedly
 rediscovered or rescue-tuned.
+
+### Independent V15: range expansion and Price Volume Trend
+
+V15 was frozen before its first result. It tested two mirrored completed-bar
+rules across the same 24-market 1m/5m universe with ADA/ZEC held out. The first
+required Choppiness(14) to cross below 38.2 while price broke the prior 20-bar
+range on at least 1.25x relative volume. The second required a PVT 12/26/9
+crossover aligned with EMA200, ADX14 and DMI. Every trade filled at the next
+native open and paid the market's measured $100 L2 p95 round-trip cost plus
+exact funding.
+
+- 1m: zero qualifiers in all four independent six-market batches. The fixed
+  Choppiness portfolio produced 42,029 trades and −$3,854.34; PVT produced
+  79,053 trades and −$5,931.90. Every batch had 0/4 positive folds and a
+  negative mean-return L95.
+- 5m: zero qualifiers. Choppiness produced 7,289 trades, −$960.07, PF 0.71,
+  L95 −0.1534 and 0/4 folds. PVT produced 13,621 trades, −$1,234.15, PF 0.74,
+  L95 −0.1031 and 0/4 folds. Both Long and Short books lost money.
+- Holdout: 1m remained negative. ZEC Choppiness was superficially positive on
+  5m (+$15.24), but PF 1.05, L95 −0.1206, OOS −32.82, Short −37.69 and recent
+  30/60/90-day windows were all negative. It therefore cannot be selected.
+
+**Decision:** both V15 families are rejected without delayed-fill promotion,
+Shadow, Real or parameter rescue. The result further weakens the case for
+adding generic single-market candle indicators; the higher-value next evidence
+is the already-running prospective portfolio and longer native L2 history.

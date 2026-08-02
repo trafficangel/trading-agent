@@ -1,0 +1,61 @@
+{
+  "version": "lighter-independent-v15-summary-v1",
+  "generatedAt": "2026-08-02T09:45:00Z",
+  "status": "rejected_without_shadow_or_real",
+  "preregistration": "data/lighter-independent-v15-preregistered-20260802.json",
+  "decision": "Neither range-expansion nor Price Volume Trend produced a robust executable edge. No parameter rescue, symbol-specific selection, delayed-fill promotion, Shadow registration or Real registration is allowed for this frozen family.",
+  "mainUniverse": {
+    "symbols": 24,
+    "timeframe1m": [
+      {
+        "rule": "V15-CHOP14-X38-DONCHIAN20+RVOL1.25+EMA200-EXIT10-H240M",
+        "tradesAcrossFourBatches": 42029,
+        "netUsdAcrossFourBatches": -3854.335,
+        "bestBatchProfitFactor": 0.6904,
+        "bestBatchMeanL95Pct": -0.0811,
+        "positiveFoldsByBatch": [0, 0, 0, 0],
+        "longPctUnits": -1855.952,
+        "shortPctUnits": -1998.383
+      },
+      {
+        "rule": "V15-PVT12/26/9-X+EMA200+ADX18-H240M",
+        "tradesAcrossFourBatches": 79053,
+        "netUsdAcrossFourBatches": -5931.902,
+        "bestBatchProfitFactor": 0.6516,
+        "bestBatchMeanL95Pct": -0.0681,
+        "positiveFoldsByBatch": [0, 0, 0, 0],
+        "longPctUnits": -2746.575,
+        "shortPctUnits": -3185.327
+      }
+    ],
+    "timeframe5m": [
+      {
+        "rule": "V15-CHOP14-X38-DONCHIAN20+RVOL1.25+EMA200-EXIT10-H240M",
+        "trades": 7289,
+        "netUsd": -960.073,
+        "profitFactor": 0.7098,
+        "meanL95Pct": -0.1534,
+        "positiveFolds": 0,
+        "longPctUnits": -502.450,
+        "shortPctUnits": -457.623
+      },
+      {
+        "rule": "V15-PVT12/26/9-X+EMA200+ADX18-H240M",
+        "trades": 13621,
+        "netUsd": -1234.154,
+        "profitFactor": 0.7441,
+        "meanL95Pct": -0.1031,
+        "positiveFolds": 0,
+        "longPctUnits": -602.288,
+        "shortPctUnits": -631.866
+      }
+    ]
+  },
+  "unseenHoldout": {
+    "symbols": ["ADA", "ZEC"],
+    "actualFundingHistoryFileSha256": "d39301aeec3f8b70d9bb8f0c6dabff3ba06d532b71abc715a2377fec69359a84",
+    "timeframe1mQualified": [],
+    "timeframe5mQualified": [],
+    "note": "ZEC Choppiness had a positive 5m headline but failed PF, L95, OOS, Short, drawdown, regimes and all recent-window gates. It was not selected post hoc."
+  }
+}
