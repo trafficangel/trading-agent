@@ -4,7 +4,9 @@ import {
   connorsRsi,
   elderForceIndexZScore,
   priceVolumeTrendOscillator,
+  relativeMomentumIndex,
   rollingRegressionResidualZScore,
+  rollingReturnZScore,
   rollingVarianceRatio,
   ultimateOscillator,
   type CompletedOhlcv,
@@ -86,5 +88,25 @@ describe('independent completed-bar indicators', () => {
     expect(base.every(Number.isFinite)).toBe(true);
     expect(base.slice(124).some((value) => Math.abs(value - 1) > 0.05)).toBe(true);
     expect(rollingVarianceRatio(new Array(260).fill(100)).every((value) => value === 1)).toBe(true);
+  });
+
+  it('keeps Relative Momentum Index causal, bounded and neutral on a flat series', () => {
+    const closes = sample(180).map((bar) => bar.close);
+    const base = relativeMomentumIndex(closes);
+    const extended = relativeMomentumIndex([...closes, ...sample(5).map((bar) => bar.close + 11)]);
+    expect(extended.slice(0, closes.length)).toEqual(base);
+    expect(base.every((value) => value >= 0 && value <= 100)).toBe(true);
+    expect(base.slice(18).some((value) => Math.abs(value - 50) > 5)).toBe(true);
+    expect(relativeMomentumIndex(new Array(180).fill(100)).every((value) => value === 50)).toBe(true);
+  });
+
+  it('keeps rolling multi-bar return Z-score causal, finite and neutral on a flat series', () => {
+    const closes = sample(260).map((bar) => bar.close);
+    const base = rollingReturnZScore(closes);
+    const extended = rollingReturnZScore([...closes, ...sample(5).map((bar) => bar.close - 8)]);
+    expect(extended.slice(0, closes.length)).toEqual(base);
+    expect(base.every(Number.isFinite)).toBe(true);
+    expect(base.slice(124).some((value) => Math.abs(value) > 0.1)).toBe(true);
+    expect(rollingReturnZScore(new Array(260).fill(100)).every((value) => value === 0)).toBe(true);
   });
 });

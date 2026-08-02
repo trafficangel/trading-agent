@@ -63,6 +63,83 @@ export function rollingVarianceRatio(
 }
 
 /**
+ * Relative Momentum Index: Wilder RSI applied to a completed close change
+ * over `momentum` bars instead of the usual one-bar change. The output is
+ * causal, bounded and neutral during warm-up/flat paths.
+ */
+export function relativeMomentumIndex(
+  closes: readonly number[],
+  period = 14,
+  momentum = 5,
+): number[] {
+  if (!(period > 1 && momentum > 0)) {
+    throw new Error('RMI period must exceed one and momentum must be positive');
+  }
+  const output = new Array<number>(closes.length).fill(50);
+  const changes = closes.map((close, index) => (
+    index >= momentum ? close - closes[index - momentum]! : 0
+  ));
+  const first = momentum + period - 1;
+  if (first >= closes.length) return output;
+  let gain = 0;
+  let loss = 0;
+  for (let index = momentum; index <= first; index += 1) {
+    gain += Math.max(changes[index]!, 0);
+    loss += Math.max(-changes[index]!, 0);
+  }
+  gain /= period;
+  loss /= period;
+  const value = (): number => {
+    if (loss === 0) return gain === 0 ? 50 : 100;
+    return 100 - 100 / (1 + gain / loss);
+  };
+  output[first] = value();
+  for (let index = first + 1; index < closes.length; index += 1) {
+    gain = (gain * (period - 1) + Math.max(changes[index]!, 0)) / period;
+    loss = (loss * (period - 1) + Math.max(-changes[index]!, 0)) / period;
+    output[index] = value();
+  }
+  return output;
+}
+
+/**
+ * Causal rolling Z-score of a completed multi-bar log return. The current
+ * return is standardized only by a window ending at the same completed bar;
+ * future observations cannot revise prior values.
+ */
+export function rollingReturnZScore(
+  closes: readonly number[],
+  returnPeriod = 5,
+  zPeriod = 120,
+): number[] {
+  if (!(returnPeriod > 0 && zPeriod > 2)) {
+    throw new Error('Return period must be positive and Z period must exceed two');
+  }
+  const returns = closes.map((close, index) => (
+    index >= returnPeriod && close > 0 && closes[index - returnPeriod]! > 0
+      ? Math.log(close / closes[index - returnPeriod]!)
+      : 0
+  ));
+  const output = new Array<number>(closes.length).fill(0);
+  let sum = 0;
+  let squareSum = 0;
+  for (let index = 0; index < returns.length; index += 1) {
+    sum += returns[index]!;
+    squareSum += returns[index]! ** 2;
+    if (index >= zPeriod) {
+      sum -= returns[index - zPeriod]!;
+      squareSum -= returns[index - zPeriod]! ** 2;
+    }
+    if (index + 1 < returnPeriod + zPeriod - 1) continue;
+    const mean = sum / zPeriod;
+    const variance = Math.max(0, squareSum / zPeriod - mean ** 2);
+    const deviation = Math.sqrt(variance);
+    output[index] = deviation > 0 ? (returns[index]! - mean) / deviation : 0;
+  }
+  return output;
+}
+
+/**
  * Canonical Ultimate Oscillator (7/14/28). Each value uses only bars up to the
  * same index. Warm-up and degenerate ranges are neutral rather than signals.
  */

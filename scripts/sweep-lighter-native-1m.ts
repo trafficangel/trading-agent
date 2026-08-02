@@ -21,7 +21,9 @@ import {
   connorsRsi,
   elderForceIndexZScore,
   priceVolumeTrendOscillator,
+  relativeMomentumIndex,
   rollingRegressionResidualZScore,
+  rollingReturnZScore,
   rollingVarianceRatio,
   ultimateOscillator,
 } from '../src/lib/lighter-independent-indicators.js';
@@ -133,6 +135,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V17 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V17 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V18 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V18 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V19 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V19 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -233,6 +237,8 @@ type Arrays = {
   connorsRsi3x2x100: number[];
   regressionResidualZ60x60: number[];
   varianceRatio120x5: number[];
+  relativeMomentum14x5: number[];
+  return5Z120: number[];
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
@@ -1018,6 +1024,8 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     connorsRsi3x2x100: connorsRsi(close, 3, 2, 100),
     regressionResidualZ60x60: rollingRegressionResidualZScore(close, 60, 60),
     varianceRatio120x5: rollingVarianceRatio(close, 120, 5),
+    relativeMomentum14x5: relativeMomentumIndex(close, 14, 5),
+    return5Z120: rollingReturnZScore(close, 5, 120),
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
@@ -2193,6 +2201,50 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.close[i]! < lowestBefore(a.c, i, 10)
           : a.close[i]! > highestBefore(a.c, i, 10);
+      },
+    });
+  }
+
+  // Preregistered independent v19 suite. RMI measures directional momentum
+  // over a five-bar displacement while the return-shock rule standardizes a
+  // five-bar log return against its own completed 120-bar history. Both wait
+  // for a completed-bar reclaim from a symmetric extreme, align entries with
+  // EMA400, execute next-open and share one frozen specification across every
+  // market and both timeframes.
+  if (ENABLE_INDEPENDENT_FAMILIES_V19) {
+    out.push({
+      name: 'V19-RMI14/5-RECLAIM20/80+EMA400-EXIT50-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const prior = a.relativeMomentum14x5[i - 1]!;
+        const current = a.relativeMomentum14x5[i]!;
+        if (prior < 20 && current >= 20 && a.close[i]! > a.ema400[i]!) return 'long';
+        if (prior > 80 && current <= 80 && a.close[i]! < a.ema400[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.relativeMomentum14x5[i]! >= 50
+          : a.relativeMomentum14x5[i]! <= 50;
+      },
+    });
+
+    out.push({
+      name: 'V19-RET5-Z120-RECLAIM2.5+EMA400-EXIT0-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const prior = a.return5Z120[i - 1]!;
+        const current = a.return5Z120[i]!;
+        if (prior < -2.5 && current >= -2.5 && a.close[i]! > a.ema400[i]!) return 'long';
+        if (prior > 2.5 && current <= 2.5 && a.close[i]! < a.ema400[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.return5Z120[i]! >= 0 : a.return5Z120[i]! <= 0;
       },
     });
   }
