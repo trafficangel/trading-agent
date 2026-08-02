@@ -16,6 +16,7 @@ import {
   type NativeForwardSignalRow,
 } from '../src/lib/lighter-luxalgo-math.js';
 import { evaluateNativeHistoricalEvidence } from '../src/lib/lighter-native-historical.js';
+import { NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS } from '../src/lib/lighter-native-strategy-lifecycle.js';
 
 const REAL_NATIVE_IDS: readonly string[] = [];
 const LATENCY_EVIDENCE_VERSION = 'lighter-native-entry-delay-audit-v1';
@@ -26,16 +27,7 @@ const P2_LATENCY_EVIDENCE_SHA256 =
   'ef7361a77d619d39b620c0422e5e1491f5f8b1f1063f36f41c2212fd4f7c4cd3';
 const P2_MEMBER_LATENCY_EVIDENCE_SHA256 =
   '39c13fba1a766d931014b1be302fbaf98da52746ba3dbfa15327ab0fd96ce901';
-const SHADOW_NATIVE_IDS = [
-  'hype-vwz60-touch',
-  'hype-rsi14-willr14-ema400-challenger',
-  'xlm-vwz60-touch-er25',
-  'zec-vwz60-mfi14-ema400-challenger',
-  // Exit-only until its existing Shadow position closes; new entries are
-  // disabled by the runtime after the executable latency audit failed.
-  'apt-rsi14-pullback-ema400',
-  'zec-rsi14-willr14-ema400',
-] as const;
+const SHADOW_NATIVE_IDS = NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS;
 const P2_IDS = [
   'z60stack25-btc', 'z60stack25-eth', 'z60stack25-sol',
   'z60stack25-bnb', 'z60stack25-ltc', 'z60stack25-hype',

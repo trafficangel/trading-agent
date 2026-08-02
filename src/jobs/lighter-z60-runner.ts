@@ -32,6 +32,7 @@ import {
   type Vwz60Bar,
 } from '../lib/lighter-z60.js';
 import { logger } from '../lib/logger.js';
+import { assertNativeStandaloneLifecycle } from '../lib/lighter-native-strategy-lifecycle.js';
 import { queueLighterLuxalgoSignal } from '../strategies/lighter-luxalgo-lab.js';
 
 const MINUTE_MS = 60_000;
@@ -151,23 +152,6 @@ const BASE_FEEDS: readonly NativeFeed[] = [
       },
     ],
   },
-  {
-    symbol: 'APTUSDT',
-    marketId: 31,
-    strategies: [
-      {
-        id: 'apt-rsi14-pullback-ema400',
-        family: 'rsi',
-        mode: 'touch',
-        threshold: 25,
-        trendFilter: 'ema400',
-        maxBars: 120,
-        // This strategy failed the frozen +1m executable-entry gate. Keep its
-        // evaluator alive only to close the already-open Shadow position.
-        entryEnabled: false,
-      },
-    ],
-  },
 ];
 
 const TREND_PORTFOLIO_FEEDS: readonly NativeFeed[] = [
@@ -187,6 +171,10 @@ const TREND_PORTFOLIO_FEEDS: readonly NativeFeed[] = [
   { symbol: 'ENAUSDT', marketId: 29, strategies: [{ id: 'z60stack25-ena', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
   { symbol: 'TAOUSDT', marketId: 13, strategies: [{ id: 'z60stack25-tao', family: 'zscore', mode: 'touch', threshold: 2.5, trendFilter: 'ema200_400' }] },
 ];
+
+assertNativeStandaloneLifecycle(
+  BASE_FEEDS.flatMap((feed) => feed.strategies.map((strategy) => strategy.id)),
+);
 
 const feedByMarket = new Map<number, NativeFeed>();
 for (const feed of [...BASE_FEEDS, ...TREND_PORTFOLIO_FEEDS]) {

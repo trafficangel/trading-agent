@@ -11,6 +11,10 @@ import {
   type NativeRunnerEvaluation,
 } from '../lib/lighter-native-runner-status.js';
 import { evaluateNativeHistoricalEvidence } from '../lib/lighter-native-historical.js';
+import {
+  NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS,
+  NATIVE_RETIRED_STRATEGY_IDS,
+} from '../lib/lighter-native-strategy-lifecycle.js';
 import { logger } from '../lib/logger.js';
 import {
   evaluateNativeForwardRows,
@@ -802,30 +806,10 @@ const STRATEGIES: readonly StrategySpec[] = [
 const STRATEGY_BY_ID = new Map(STRATEGIES.map((spec) => [spec.id, spec]));
 const STRATEGY_IDS = STRATEGIES.map((spec) => spec.id);
 const NATIVE_STRATEGY_IDS = [
-  'hype-vwz60-touch',
-  'hype-rsi14-willr14-ema400-challenger',
-  'xlm-vwz60-touch-er25',
-  'zec-vwz60-mfi14-ema400-challenger',
-  // APT remains visible only while its existing Shadow position drains. The
-  // runner blocks every new entry after the frozen latency-gate failure.
-  'apt-rsi14-pullback-ema400',
-  'zec-rsi14-willr14-ema400',
+  ...NATIVE_ACTIVE_STANDALONE_STRATEGY_IDS,
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => market.id),
 ] as const;
-const RETIRED_NATIVE_STRATEGY_IDS = [
-  'sol-z60-reclaim',
-  'sol-z60-touch',
-  'bnb-z60-touch',
-  'ltc-z60-touch',
-  'hype-rsi14-willr14-ema400',
-  'xlm-vwz60-mfi14-ema400',
-  'data-vwz60-mfi14-ema400',
-  'btc-vwz60-touch',
-  'xrp-vwz60-touch',
-  'data-vwz60-touch',
-  'dot-rsi14-pullback-ema400',
-] as const;
-const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(RETIRED_NATIVE_STRATEGY_IDS);
+const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(NATIVE_RETIRED_STRATEGY_IDS);
 // Native Quant remains prospective Shadow-only. Historical rows stay visible,
 // but no Native strategy is currently registered for Real execution.
 const NATIVE_LIVE_STRATEGY_IDS: readonly string[] = [];
@@ -944,8 +928,8 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     timeExitBars: 120,
     trendFilter: 'ema400',
     realEnabled: false,
-    noteRu: 'APT сохраняет +9.20% и PF 1.34 при консервативном входе через одну минуту, но строгий latency-гейт не пройден: L95 −0.047%, а long за последние 30d −1.15%. Новые Shadow-входы отключены; текущая позиция только корректно закрывается. Real заблокирован.',
-    noteEn: 'APT retains +9.20% and PF 1.34 with a conservative one-minute delayed fill, but fails the strict latency gate: L95 is −0.047% and the latest 30d long leg is −1.15%. New Shadow entries are disabled while the existing position drains. Real is blocked.',
+    noteRu: 'APT сохраняет +9.20% и PF 1.34 при консервативном входе через одну минуту, но строгий latency-гейт не пройден: L95 −0.047%, а long за последние 30d −1.15%. Последняя Shadow-позиция закрыта; стратегия выведена из активного runner и сохранена только в архивной истории. Real заблокирован.',
+    noteEn: 'APT retains +9.20% and PF 1.34 with a conservative one-minute delayed fill, but fails the strict latency gate: L95 is −0.047% and the latest 30d long leg is −1.15%. Its last Shadow position is closed; the strategy has been removed from the active runner and retained only in archived history. Real is blocked.',
   },
   'dot-rsi14-pullback-ema400': {
     family: 'rsi',
@@ -1013,7 +997,7 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
 const NATIVE_STRATEGIES = NATIVE_STRATEGY_IDS.map((id) => STRATEGY_BY_ID.get(id)!);
 const NATIVE_STRATEGY_ID_SET = new Set<string>([
   ...NATIVE_STRATEGY_IDS,
-  ...RETIRED_NATIVE_STRATEGY_IDS,
+  ...NATIVE_RETIRED_STRATEGY_IDS,
 ]);
 const NATIVE_TREND_PORTFOLIO_STRATEGIES = NATIVE_TREND_PORTFOLIO_MARKETS
   .map((market) => STRATEGY_BY_ID.get(market.id)!);
