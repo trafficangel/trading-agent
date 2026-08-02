@@ -63,8 +63,9 @@ const FETCH_CONCURRENCY = 4;
 // Lighter's public candle API throttles bursty cold starts. Serialize all
 // page requests to a measured-safe global cadence; feed concurrency still
 // overlaps parsing/evaluation while the request queue protects the provider.
-const CANDLE_REQUEST_INTERVAL_MS = 450;
+const CANDLE_REQUEST_INTERVAL_MS = 1_000;
 const CANDLE_REQUEST_MAX_ATTEMPTS = 5;
+const CANDLE_API_COOLDOWN_MS = 120_000;
 // Historical research assumes at most a conservative +1m decision delay.
 // Exits remain allowed after this boundary, but a late cold-start signal must
 // never be converted into a new position at an unaudited price.
@@ -78,6 +79,7 @@ type CandleResponse = {
 
 let candleRequestTail: Promise<void> = Promise.resolve();
 let nextCandleRequestAt = 0;
+let candleApiBackoffUntil = 0;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
@@ -85,7 +87,11 @@ function delay(ms: number): Promise<void> {
 
 async function scheduleCandleRequest<T>(work: () => Promise<T>): Promise<T> {
   const scheduled = candleRequestTail.then(async () => {
-    const waitMs = Math.max(0, nextCandleRequestAt - Date.now());
+    const waitMs = Math.max(
+      0,
+      nextCandleRequestAt - Date.now(),
+      candleApiBackoffUntil - Date.now(),
+    );
     if (waitMs > 0) await delay(waitMs);
     nextCandleRequestAt = Date.now() + CANDLE_REQUEST_INTERVAL_MS;
     return work();
@@ -96,21 +102,51 @@ async function scheduleCandleRequest<T>(work: () => Promise<T>): Promise<T> {
 
 async function requestCandlePage(url: URL, label: string): Promise<CandleResponse> {
   for (let attempt = 0; attempt < CANDLE_REQUEST_MAX_ATTEMPTS; attempt += 1) {
-    const body = await scheduleCandleRequest(async () => {
+    const result = await scheduleCandleRequest(async () => {
       const response = await request(url, {
         headersTimeout: 8_000,
         bodyTimeout: 8_000,
       });
-      return response.body.json() as Promise<CandleResponse>;
+      return {
+        statusCode: response.statusCode,
+        text: await response.body.text(),
+      };
     });
+    let body: CandleResponse;
+    try {
+      body = JSON.parse(result.text) as CandleResponse;
+    } catch {
+      candleApiBackoffUntil = Math.max(
+        candleApiBackoffUntil,
+        Date.now() + CANDLE_API_COOLDOWN_MS,
+      );
+      logger.warn({
+        label,
+        statusCode: result.statusCode,
+        attempt: attempt + 1,
+        backoffMs: CANDLE_API_COOLDOWN_MS,
+      }, 'lighter-z60: candle API returned non-JSON; global cooldown engaged');
+      if (attempt === CANDLE_REQUEST_MAX_ATTEMPTS - 1) {
+        throw new Error(`${label}_non_json_http_${result.statusCode}`);
+      }
+      continue;
+    }
     if (Number(body.code) === 200) return body;
-    if (
-      Number(body.code) !== 23_000
-      || attempt === CANDLE_REQUEST_MAX_ATTEMPTS - 1
-    ) {
+    if (Number(body.code) !== 23_000) {
       throw new Error(`${label}_${String(body.code)}:${String(body.message ?? 'unknown')}`);
     }
-    await delay(1_000 * 2 ** attempt);
+    candleApiBackoffUntil = Math.max(
+      candleApiBackoffUntil,
+      Date.now() + CANDLE_API_COOLDOWN_MS,
+    );
+    logger.warn({
+      label,
+      attempt: attempt + 1,
+      backoffMs: CANDLE_API_COOLDOWN_MS,
+    }, 'lighter-z60: candle API rate limit; global cooldown engaged');
+    if (attempt === CANDLE_REQUEST_MAX_ATTEMPTS - 1) {
+      throw new Error(`${label}_${String(body.code)}:${String(body.message ?? 'unknown')}`);
+    }
   }
   throw new Error(`${label}_retry_exhausted`);
 }
