@@ -49,7 +49,8 @@ const TIME_EXIT_BARS = 240;
 // the nominal 5m boundary. Waiting 25s avoids a guaranteed failed request while
 // preserving the same effective evaluation time as the previous 15s retry.
 const PUBLISH_GRACE_MS = 25_000;
-const RETRY_MS = 15_000;
+const RETRY_MS = 5_000;
+const FETCH_CONCURRENCY = 4;
 
 type RawCandle = {
   t?: unknown;
@@ -227,6 +228,7 @@ let started = false;
 let running = false;
 const lastEvaluatedBars = new Map<string, number>();
 const runnerEvaluations = new Map<string, NativeRunnerEvaluation>();
+const trendBarCache = new Map<number, Vwz60Bar[]>();
 
 function finite(value: unknown): number | null {
   const number = Number(value);
@@ -408,9 +410,27 @@ export async function fetchTrendBars(
   latestBarTime: number,
   marketId: number,
 ): Promise<Vwz60Bar[]> {
+  const cached = trendBarCache.get(marketId);
+  const cachedLastTime = cached?.at(-1)?.time;
+  if (cachedLastTime === latestBarTime) return cached!;
+
   const unique = new Map<number, Vwz60Bar>();
-  let pageEnd = latestBarTime + BAR_MS;
-  let remaining = TREND_HISTORY_BARS;
+  let pageEnd: number;
+  let remaining: number;
+  if (
+    cached
+    && cachedLastTime != null
+    && cachedLastTime < latestBarTime
+    && latestBarTime - cachedLastTime <= TREND_PAGE_BARS * BAR_MS
+  ) {
+    for (const bar of cached) unique.set(bar.time, bar);
+    pageEnd = latestBarTime + BAR_MS;
+    remaining = Math.round((latestBarTime - cachedLastTime) / BAR_MS);
+  } else {
+    pageEnd = latestBarTime + BAR_MS;
+    remaining = TREND_HISTORY_BARS;
+  }
+
   while (remaining > 0) {
     const pageBars = Math.min(TREND_PAGE_BARS, remaining);
     const pageStart = pageEnd - pageBars * BAR_MS;
@@ -453,7 +473,10 @@ export async function fetchTrendBars(
     pageEnd = pageStart;
     remaining -= pageBars;
   }
-  const bars = [...unique.values()].sort((a, b) => a.time - b.time);
+  const bars = [...unique.values()]
+    .filter((bar) => bar.time <= latestBarTime)
+    .sort((a, b) => a.time - b.time)
+    .slice(-TREND_HISTORY_BARS);
   if (bars.length < TREND_HISTORY_BARS || bars.at(-1)?.time !== latestBarTime) {
     throw new Error('trend_history_incomplete');
   }
@@ -463,7 +486,95 @@ export async function fetchTrendBars(
       throw new Error('trend_history_gap');
     }
   }
+  trendBarCache.set(marketId, bars);
   return bars;
+}
+
+async function mapWithConcurrency<T, R>(
+  rows: readonly T[],
+  concurrency: number,
+  worker: (row: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(rows.length);
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(Math.max(1, concurrency), rows.length) },
+    async () => {
+      while (nextIndex < rows.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await worker(rows[index]!);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+type PendingFeed = {
+  feed: NativeFeed;
+  pending: NativeStrategy[];
+};
+
+type PreparedFeed = PendingFeed & {
+  baseBars: Vwz60Bar[] | null;
+  trendBars: Vwz60Bar[] | null;
+};
+
+async function prepareFeed(
+  target: number,
+  { feed, pending }: PendingFeed,
+): Promise<PreparedFeed> {
+  const needsBase = pending.some((strategy) => !strategy.trendFilter);
+  const needsTrend = pending.some((strategy) => strategy.trendFilter);
+  const [baseResult, trendResult] = await Promise.all([
+    needsBase
+      ? fetchBars(target, feed.marketId).then(
+        (bars) => ({ bars, error: null }),
+        (error: Error) => ({ bars: null, error }),
+      )
+      : Promise.resolve({ bars: null, error: null }),
+    needsTrend
+      ? fetchTrendBars(target, feed.marketId).then(
+        (bars) => ({ bars, error: null }),
+        (error: Error) => ({ bars: null, error }),
+      )
+      : Promise.resolve({ bars: null, error: null }),
+  ]);
+
+  if (baseResult.error) {
+    const message = baseResult.error.message;
+    for (const strategy of pending.filter((row) => !row.trendFilter)) {
+      recordError(strategy, feed, target, 'data_error', message);
+    }
+    logger.warn({
+      error: message,
+      target,
+      symbol: feed.symbol,
+      marketId: feed.marketId,
+      source: '1m-aggregate',
+    }, 'lighter-z60: market poll failed');
+  }
+  if (trendResult.error) {
+    const message = trendResult.error.message;
+    for (const strategy of pending.filter((row) => row.trendFilter)) {
+      recordError(strategy, feed, target, 'data_error', message);
+    }
+    logger.warn({
+      error: message,
+      target,
+      symbol: feed.symbol,
+      marketId: feed.marketId,
+      source: 'native-5m-trend',
+    }, 'lighter-z60: market poll failed');
+  }
+
+  return {
+    feed,
+    pending,
+    baseBars: baseResult.bars,
+    trendBars: trendResult.bars,
+  };
 }
 
 function emit(
@@ -491,51 +602,32 @@ function emit(
 async function poll(): Promise<void> {
   if (running) return;
   const target = targetCompletedBar(Date.now());
+  const pollStartedAt = Date.now();
   running = true;
   try {
-    for (const feed of FEEDS) {
-      const pending = feed.strategies.filter(
-        (strategy) => target > (lastEvaluatedBars.get(strategy.id) ?? 0),
-      );
-      if (!pending.length) continue;
-      let baseBars: Vwz60Bar[] | null = null;
-      let trendBars: Vwz60Bar[] | null = null;
+    const pendingFeeds = FEEDS
+      .map((feed): PendingFeed => ({
+        feed,
+        pending: feed.strategies.filter(
+          (strategy) => target > (lastEvaluatedBars.get(strategy.id) ?? 0),
+        ),
+      }))
+      .filter((row) => row.pending.length > 0);
+    const preparedFeeds = await mapWithConcurrency(
+      pendingFeeds,
+      FETCH_CONCURRENCY,
+      (row) => prepareFeed(target, row),
+    );
+    if (pendingFeeds.length > 0) {
+      logger.info({
+        target,
+        feeds: pendingFeeds.length,
+        fetchMs: Date.now() - pollStartedAt,
+        closeToDataReadyMs: Date.now() - (target + BAR_MS),
+      }, 'lighter-z60: completed-bar data prepared');
+    }
 
-      if (pending.some((strategy) => !strategy.trendFilter)) {
-        try {
-          baseBars = await fetchBars(target, feed.marketId);
-        } catch (error) {
-          const message = (error as Error).message;
-          for (const strategy of pending.filter((row) => !row.trendFilter)) {
-            recordError(strategy, feed, target, 'data_error', message);
-          }
-          logger.warn({
-            error: message,
-            target,
-            symbol: feed.symbol,
-            marketId: feed.marketId,
-            source: '1m-aggregate',
-          }, 'lighter-z60: market poll failed');
-        }
-      }
-      if (pending.some((strategy) => strategy.trendFilter)) {
-        try {
-          trendBars = await fetchTrendBars(target, feed.marketId);
-        } catch (error) {
-          const message = (error as Error).message;
-          for (const strategy of pending.filter((row) => row.trendFilter)) {
-            recordError(strategy, feed, target, 'data_error', message);
-          }
-          logger.warn({
-            error: message,
-            target,
-            symbol: feed.symbol,
-            marketId: feed.marketId,
-            source: 'native-5m-trend',
-          }, 'lighter-z60: market poll failed');
-        }
-      }
-
+    for (const { feed, pending, baseBars, trendBars } of preparedFeeds) {
       for (const strategy of pending) {
         const strategyBars = strategy.trendFilter ? trendBars : baseBars;
         if (!strategyBars) continue;
