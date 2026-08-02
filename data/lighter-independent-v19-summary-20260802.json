@@ -1,0 +1,70 @@
+{
+  "version": "lighter-independent-v19-summary-v1",
+  "generatedAt": "2026-08-02T10:20:00Z",
+  "preregistration": "data/lighter-independent-v19-preregistered-20260802.json",
+  "decision": "rejected",
+  "reason": "Both frozen two-sided rules fail the measured-cost 1m and 5m portfolios, mean-L95, folds, IS/OOS, directional, regime and unseen-holdout gates. Neither may be registered in Shadow or Real, and no symbol-specific rescue is allowed.",
+  "rules": [
+    {
+      "rule": "V19-RMI14/5-RECLAIM20/80+EMA400-EXIT50-H120M",
+      "oneMinute": {
+        "tradesAcrossFourFrozenChunks": 29927,
+        "netPctUnits": -1670.4239827534125,
+        "profitFactorRange": [0.567053023084499, 0.6926622796398614],
+        "positiveFoldsPerChunk": [0, 0, 0, 0]
+      },
+      "fiveMinute": {
+        "trades": 5578,
+        "netPctUnits": -285.74668220870353,
+        "profitFactor": 0.8171682084318304,
+        "meanL95Pct": -0.06585673041571238,
+        "positiveFolds": 0,
+        "inSamplePctUnits": -250.27349976993887,
+        "outOfSamplePctUnits": -35.47318243876512,
+        "longPctUnits": -159.74471769266196,
+        "shortPctUnits": -126.00196451604252
+      },
+      "unseenHoldout": {
+        "oneMinuteNetPctUnits": -29.343026038989766,
+        "oneMinuteProfitFactor": 0.8675841914846887,
+        "fiveMinuteNetPctUnits": -7.968554831846708,
+        "fiveMinuteProfitFactor": 0.9232710323440392
+      }
+    },
+    {
+      "rule": "V19-RET5-Z120-RECLAIM2.5+EMA400-EXIT0-H120M",
+      "oneMinute": {
+        "tradesAcrossFourFrozenChunks": 25924,
+        "netPctUnits": -1476.010404809771,
+        "profitFactorRange": [0.4365719807697606, 0.6502652841782395],
+        "positiveFoldsPerChunk": [0, 0, 0, 0]
+      },
+      "fiveMinute": {
+        "trades": 5036,
+        "netPctUnits": -224.08474802264044,
+        "profitFactor": 0.7953601926361442,
+        "meanL95Pct": -0.05731076768028174,
+        "positiveFolds": 0,
+        "inSamplePctUnits": -158.10614960202952,
+        "outOfSamplePctUnits": -65.97859842061092,
+        "longPctUnits": -94.57503794809426,
+        "shortPctUnits": -129.50971007454604
+      },
+      "unseenHoldout": {
+        "oneMinuteNetPctUnits": -45.63036723479406,
+        "oneMinuteProfitFactor": 0.6943843896623105,
+        "fiveMinuteNetPctUnits": -1.9256944472120279,
+        "fiveMinuteProfitFactor": 0.9730059393690684
+      }
+    }
+  ],
+  "outputHashes": [
+    {"file": "data/lighter-independent-v19-universe-1m-a-20260802.json", "sha256": "43230237aadc0e006428ed355e273ce0b394a607e0f2cb6634447e1a3a73080d"},
+    {"file": "data/lighter-independent-v19-universe-1m-b-20260802.json", "sha256": "c663fec57be11c6369f30f39b8129e1099d28545eba16b0e9e0603889a7b3449"},
+    {"file": "data/lighter-independent-v19-universe-1m-c-20260802.json", "sha256": "f02ec9894efe0bcbf984e47e2b580f88383b3c8e0c78c6725a26c3b9124976f5"},
+    {"file": "data/lighter-independent-v19-universe-1m-d-20260802.json", "sha256": "18cbfac3d0c8123d1a26260c939bf01b6d58e71df9d0a26afa7a1fe4afa80066"},
+    {"file": "data/lighter-independent-v19-universe-5m-20260802.json", "sha256": "4c232645ea0b3dcd19d12cc4989a9da5aa4259dec45179814fdeffbd2bf655d9"},
+    {"file": "data/lighter-independent-v19-holdout-1m-20260802.json", "sha256": "dfb569ae05b2fa3b9b1638140641c40b865746ad1734cbc1d284a6247b8370c5"},
+    {"file": "data/lighter-independent-v19-holdout-5m-20260802.json", "sha256": "30592f0705b27ad0a713a6fbc0b3084c40e32f60922c3111c3e5e27b39506d1e"}
+  ]
+}
