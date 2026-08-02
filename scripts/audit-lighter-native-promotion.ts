@@ -21,6 +21,11 @@ const REAL_NATIVE_IDS: readonly string[] = [];
 const LATENCY_EVIDENCE_VERSION = 'lighter-native-entry-delay-audit-v1';
 const LATENCY_EVIDENCE_SHA256 =
   '170404590ad7bbd2d7481191316ad10679485790daf8209640ef6baf14b35c44';
+const P2_LATENCY_EVIDENCE_VERSION = 'lighter-p2-entry-delay-portfolio-audit-v1';
+const P2_LATENCY_EVIDENCE_SHA256 =
+  'ef7361a77d619d39b620c0422e5e1491f5f8b1f1063f36f41c2212fd4f7c4cd3';
+const P2_MEMBER_LATENCY_EVIDENCE_SHA256 =
+  '39c13fba1a766d931014b1be302fbaf98da52746ba3dbfa15327ab0fd96ce901';
 const SHADOW_NATIVE_IDS = [
   'hype-vwz60-touch',
   'hype-rsi14-willr14-ema400-challenger',
@@ -55,6 +60,38 @@ type LatencyEvidenceRow = {
     shortPctUnits: number;
   };
   delayedNetRetention: number;
+};
+
+type P2LatencyEvidence = {
+  version: string;
+  source: { sha256: string };
+  assumptions: {
+    positionNotionalUsd: number;
+    maxOpen: number;
+    delayedFill: string;
+  };
+  allMembers: {
+    memberIds: string[];
+    delayedNetRetention: number;
+    passed: boolean;
+    delayed: {
+      trades: number;
+      netUsd: number;
+      profitFactor: number;
+      maxDrawdownCapitalPct: number;
+      meanL95Pct: number;
+      positiveFolds: number;
+      longPctUnits: number;
+      shortPctUnits: number;
+    };
+  };
+  positiveExecutionSubset: {
+    status: string;
+    memberIds: string[];
+    excludedMemberIds: string[];
+    passedHistoricalLatencyGate: boolean;
+  };
+  realPromotion: boolean;
 };
 
 function latencyEvidenceRows(value: unknown): Map<string, LatencyEvidenceRow> {
@@ -144,6 +181,35 @@ if (latencyEvidenceSha256 !== LATENCY_EVIDENCE_SHA256) {
   throw new Error(`latency evidence hash mismatch: ${latencyEvidenceSha256}`);
 }
 const latencyByStrategy = latencyEvidenceRows(JSON.parse(latencyEvidenceRaw.toString('utf8')));
+const p2LatencyEvidencePath = resolve(
+  flagValue('--p2-latency') ?? 'data/lighter-p2-entry-delay-portfolio-20260802.json',
+);
+if (!existsSync(p2LatencyEvidencePath)) {
+  throw new Error(`P2 latency evidence missing: ${p2LatencyEvidencePath}`);
+}
+const p2LatencyEvidenceRaw = readFileSync(p2LatencyEvidencePath);
+const p2LatencyEvidenceSha256 = createHash('sha256')
+  .update(p2LatencyEvidenceRaw).digest('hex');
+if (p2LatencyEvidenceSha256 !== P2_LATENCY_EVIDENCE_SHA256) {
+  throw new Error(`P2 latency evidence hash mismatch: ${p2LatencyEvidenceSha256}`);
+}
+const p2LatencyEvidence = JSON.parse(
+  p2LatencyEvidenceRaw.toString('utf8'),
+) as P2LatencyEvidence;
+if (p2LatencyEvidence.version !== P2_LATENCY_EVIDENCE_VERSION) {
+  throw new Error(`P2 latency evidence version mismatch: ${p2LatencyEvidence.version}`);
+}
+if (p2LatencyEvidence.source.sha256 !== P2_MEMBER_LATENCY_EVIDENCE_SHA256) {
+  throw new Error(`P2 member latency evidence hash mismatch: ${p2LatencyEvidence.source.sha256}`);
+}
+if (p2LatencyEvidence.assumptions.positionNotionalUsd !== NATIVE_SHADOW_NOTIONAL_USD
+    || p2LatencyEvidence.assumptions.maxOpen !== 10) {
+  throw new Error('P2 latency evidence assumptions mismatch');
+}
+if (p2LatencyEvidence.allMembers.memberIds.length !== P2_IDS.length
+    || P2_IDS.some((id) => !p2LatencyEvidence.allMembers.memberIds.includes(id))) {
+  throw new Error('P2 latency evidence members mismatch');
+}
 const historicalEvidence = evaluateNativeHistoricalEvidence(
   JSON.parse(readFileSync(historicalPath, 'utf8')) as unknown,
   JSON.parse(readFileSync(supplementalHistoricalPath, 'utf8')) as unknown,
@@ -231,7 +297,7 @@ const p2Members = P2_IDS.map((strategyId) => {
     decision: nativePromotionDecision(
       evaluation,
       false,
-      historicalEvidence.portfolio.passed,
+      historicalEvidence.portfolio.passed && p2LatencyEvidence.allMembers.passed,
     ),
   };
 });
@@ -269,18 +335,21 @@ const report = {
     sourceSha256: latencyEvidenceSha256,
     conservativeScenario: 'native 1m open one minute after the next 5m open',
   },
+  p2LatencyEvidence: {
+    version: P2_LATENCY_EVIDENCE_VERSION,
+    sourceSha256: p2LatencyEvidenceSha256,
+    memberSourceSha256: p2LatencyEvidence.source.sha256,
+    conservativeScenario: p2LatencyEvidence.assumptions.delayedFill,
+  },
   p2: {
     portfolioId: 'z60stack25-portfolio',
     realExecutorRegistered: false,
-    latencyEvidence: {
-      passed: false,
-      status: 'not_audited',
-    },
+    latencyEvidence: p2LatencyEvidence,
     evaluation: portfolio,
     decision: nativePromotionDecision(
       portfolio,
       false,
-      historicalEvidence.portfolio.passed,
+      historicalEvidence.portfolio.passed && p2LatencyEvidence.allMembers.passed,
     ),
     members: p2Members,
   },

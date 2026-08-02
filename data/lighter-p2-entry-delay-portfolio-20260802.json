@@ -1,0 +1,832 @@
+{
+  "version": "lighter-p2-entry-delay-portfolio-audit-v1",
+  "generatedAt": "2026-08-02T01:39:19.314Z",
+  "source": {
+    "file": "/private/tmp/trading-agent-lighter-quant-strategy/data/lighter-p2-entry-delay-members-20260802.json",
+    "sha256": "39c13fba1a766d931014b1be302fbaf98da52746ba3dbfa15327ab0fd96ce901"
+  },
+  "assumptions": {
+    "positionNotionalUsd": 100,
+    "maxOpen": 10,
+    "commissionPct": 0,
+    "executionCost": "market-specific executable $100 full-round-trip p95 already in each trade",
+    "funding": "exact Lighter hourly settlements already in each trade",
+    "delayedFill": "native 1m open one minute after the next 5m open",
+    "historicalRegimes": "validated by frozen P2 historical evidence; latency changes fills, not signals"
+  },
+  "allMembers": {
+    "memberIds": [
+      "z60stack25-btc",
+      "z60stack25-eth",
+      "z60stack25-sol",
+      "z60stack25-bnb",
+      "z60stack25-ltc",
+      "z60stack25-hype",
+      "z60stack25-zec",
+      "z60stack25-doge",
+      "z60stack25-near",
+      "z60stack25-jup",
+      "z60stack25-lit",
+      "z60stack25-gram",
+      "z60stack25-xmr",
+      "z60stack25-ena",
+      "z60stack25-tao"
+    ],
+    "baseline": {
+      "passed": true,
+      "trades": 740,
+      "dropped": 0,
+      "maxConcurrent": 10,
+      "netPctUnits": 112.21555823559176,
+      "netUsd": 112.21555823559176,
+      "profitFactor": 1.4234663027036736,
+      "winRatePct": 70,
+      "maxDrawdownPctUnits": -23.836650546116505,
+      "maxDrawdownUsd": -23.836650546116505,
+      "maxDrawdownCapitalPct": -2.3836650546116505,
+      "meanL95Pct": 0.08749977568012428,
+      "positiveFolds": 3,
+      "foldNets": [
+        -9.614084257268704,
+        32.28197125361051,
+        44.67951845900566,
+        44.868152780244216
+      ],
+      "inSamplePctUnits": 50.645248685928884,
+      "outOfSamplePctUnits": 61.570309549662824,
+      "longPctUnits": 82.75743021460178,
+      "shortPctUnits": 29.458128020989896,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 123,
+          "netPctUnits": 40.273875555114856,
+          "profitFactor": 2.8692852733082868,
+          "longPctUnits": 17.099176600007137,
+          "shortPctUnits": 23.17469895510773
+        },
+        {
+          "days": 60,
+          "trades": 221,
+          "netPctUnits": 61.88661844359068,
+          "profitFactor": 1.9465949038450119,
+          "longPctUnits": 27.713105260109042,
+          "shortPctUnits": 34.173513183481624
+        },
+        {
+          "days": 90,
+          "trades": 346,
+          "netPctUnits": 84.99698638946752,
+          "profitFactor": 1.8034034395050025,
+          "longPctUnits": 54.29417884841741,
+          "shortPctUnits": 30.70280754105015
+        }
+      ],
+      "activeSymbols": 15,
+      "positiveSymbols": 11,
+      "dominance": 0.23566486174510154,
+      "leaveOneOutMinNet": 83.02442741532128,
+      "positiveMonths": 5,
+      "totalMonths": 6,
+      "members": [
+        {
+          "strategyId": "z60stack25-btc",
+          "symbol": "BTC",
+          "trades": 57,
+          "netPctUnits": 4.204755155831211,
+          "profitFactor": 1.3660729236980695
+        },
+        {
+          "strategyId": "z60stack25-eth",
+          "symbol": "ETH",
+          "trades": 56,
+          "netPctUnits": 10.613152756071301,
+          "profitFactor": 1.982156810397633
+        },
+        {
+          "strategyId": "z60stack25-sol",
+          "symbol": "SOL",
+          "trades": 56,
+          "netPctUnits": 4.573597024368644,
+          "profitFactor": 1.2547027896097434
+        },
+        {
+          "strategyId": "z60stack25-bnb",
+          "symbol": "BNB",
+          "trades": 47,
+          "netPctUnits": -0.41082075078429225,
+          "profitFactor": 0.9693998111091457
+        },
+        {
+          "strategyId": "z60stack25-ltc",
+          "symbol": "LTC",
+          "trades": 47,
+          "netPctUnits": -4.157718522582967,
+          "profitFactor": 0.7787991417849124
+        },
+        {
+          "strategyId": "z60stack25-hype",
+          "symbol": "HYPE",
+          "trades": 54,
+          "netPctUnits": 29.19113082027047,
+          "profitFactor": 2.877067980331185
+        },
+        {
+          "strategyId": "z60stack25-zec",
+          "symbol": "ZEC",
+          "trades": 58,
+          "netPctUnits": 10.439060465183402,
+          "profitFactor": 1.4126785055431892
+        },
+        {
+          "strategyId": "z60stack25-doge",
+          "symbol": "DOGE",
+          "trades": 61,
+          "netPctUnits": 1.035813066775658,
+          "profitFactor": 1.0570430857920683
+        },
+        {
+          "strategyId": "z60stack25-near",
+          "symbol": "NEAR",
+          "trades": 37,
+          "netPctUnits": 12.088209362559809,
+          "profitFactor": 1.9518403064010186
+        },
+        {
+          "strategyId": "z60stack25-jup",
+          "symbol": "JUP",
+          "trades": 62,
+          "netPctUnits": 16.29816150344855,
+          "profitFactor": 1.6709818553286881
+        },
+        {
+          "strategyId": "z60stack25-lit",
+          "symbol": "LIT",
+          "trades": 43,
+          "netPctUnits": 15.082260634424099,
+          "profitFactor": 1.6483223229075927
+        },
+        {
+          "strategyId": "z60stack25-gram",
+          "symbol": "GRAM",
+          "trades": 43,
+          "netPctUnits": 13.395083824778371,
+          "profitFactor": 1.9352242630033651
+        },
+        {
+          "strategyId": "z60stack25-xmr",
+          "symbol": "XMR",
+          "trades": 35,
+          "netPctUnits": 6.94590858599313,
+          "profitFactor": 1.6243955659585907
+        },
+        {
+          "strategyId": "z60stack25-ena",
+          "symbol": "ENA",
+          "trades": 43,
+          "netPctUnits": -2.3090466454190204,
+          "profitFactor": 0.9014757053035455
+        },
+        {
+          "strategyId": "z60stack25-tao",
+          "symbol": "TAO",
+          "trades": 41,
+          "netPctUnits": -4.773989045326688,
+          "profitFactor": 0.804185350673721
+        }
+      ]
+    },
+    "delayed": {
+      "passed": true,
+      "trades": 744,
+      "dropped": 0,
+      "maxConcurrent": 10,
+      "netPctUnits": 90.62954728596999,
+      "netUsd": 90.62954728596998,
+      "profitFactor": 1.3285585119363792,
+      "winRatePct": 69.35483870967742,
+      "maxDrawdownPctUnits": -32.92791802915456,
+      "maxDrawdownUsd": -32.92791802915456,
+      "maxDrawdownCapitalPct": -3.292791802915456,
+      "meanL95Pct": 0.057829117166470476,
+      "positiveFolds": 3,
+      "foldNets": [
+        -23.320856890370322,
+        33.17083526528257,
+        41.99570081823852,
+        38.78386809281918
+      ],
+      "inSamplePctUnits": 33.60933465159506,
+      "outOfSamplePctUnits": 57.02021263437488,
+      "longPctUnits": 66.65333968227065,
+      "shortPctUnits": 23.976207603699287,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 124,
+          "netPctUnits": 35.63438399031268,
+          "profitFactor": 2.399899895995963,
+          "longPctUnits": 11.75323132418693,
+          "shortPctUnits": 23.881152666125747
+        },
+        {
+          "days": 60,
+          "trades": 223,
+          "netPctUnits": 57.33652152830273,
+          "profitFactor": 1.829740577334139,
+          "longPctUnits": 20.712635438168757,
+          "shortPctUnits": 36.62388609013395
+        },
+        {
+          "days": 90,
+          "trades": 347,
+          "netPctUnits": 77.01558507724927,
+          "profitFactor": 1.704238150943323,
+          "longPctUnits": 47.565714346394884,
+          "shortPctUnits": 29.449870730854308
+        }
+      ],
+      "activeSymbols": 15,
+      "positiveSymbols": 11,
+      "dominance": 0.23811426243073258,
+      "leaveOneOutMinNet": 65.13561553701193,
+      "positiveMonths": 5,
+      "totalMonths": 6,
+      "members": [
+        {
+          "strategyId": "z60stack25-btc",
+          "symbol": "BTC",
+          "trades": 57,
+          "netPctUnits": 2.229739409636442,
+          "profitFactor": 1.1764440704456476
+        },
+        {
+          "strategyId": "z60stack25-eth",
+          "symbol": "ETH",
+          "trades": 56,
+          "netPctUnits": 9.52605096516487,
+          "profitFactor": 1.889123945449268
+        },
+        {
+          "strategyId": "z60stack25-sol",
+          "symbol": "SOL",
+          "trades": 56,
+          "netPctUnits": 3.7142962791777405,
+          "profitFactor": 1.2135390505236288
+        },
+        {
+          "strategyId": "z60stack25-bnb",
+          "symbol": "BNB",
+          "trades": 46,
+          "netPctUnits": -0.6516324580251123,
+          "profitFactor": 0.9482483708011863
+        },
+        {
+          "strategyId": "z60stack25-ltc",
+          "symbol": "LTC",
+          "trades": 47,
+          "netPctUnits": -5.225084401181292,
+          "profitFactor": 0.7228638070890343
+        },
+        {
+          "strategyId": "z60stack25-hype",
+          "symbol": "HYPE",
+          "trades": 54,
+          "netPctUnits": 25.493931748958065,
+          "profitFactor": 2.518435311792627
+        },
+        {
+          "strategyId": "z60stack25-zec",
+          "symbol": "ZEC",
+          "trades": 58,
+          "netPctUnits": 11.481166703183519,
+          "profitFactor": 1.480046559414893
+        },
+        {
+          "strategyId": "z60stack25-doge",
+          "symbol": "DOGE",
+          "trades": 62,
+          "netPctUnits": 3.165239139689677,
+          "profitFactor": 1.187465602308212
+        },
+        {
+          "strategyId": "z60stack25-near",
+          "symbol": "NEAR",
+          "trades": 37,
+          "netPctUnits": 12.644554244108688,
+          "profitFactor": 1.9695364348123265
+        },
+        {
+          "strategyId": "z60stack25-jup",
+          "symbol": "JUP",
+          "trades": 63,
+          "netPctUnits": 15.025831570836807,
+          "profitFactor": 1.57734088521791
+        },
+        {
+          "strategyId": "z60stack25-lit",
+          "symbol": "LIT",
+          "trades": 43,
+          "netPctUnits": 4.527269908105925,
+          "profitFactor": 1.1638156542906446
+        },
+        {
+          "strategyId": "z60stack25-gram",
+          "symbol": "GRAM",
+          "trades": 44,
+          "netPctUnits": 13.009843155992641,
+          "profitFactor": 1.825442991735651
+        },
+        {
+          "strategyId": "z60stack25-xmr",
+          "symbol": "XMR",
+          "trades": 35,
+          "netPctUnits": 6.248035414165306,
+          "profitFactor": 1.5566295789689204
+        },
+        {
+          "strategyId": "z60stack25-ena",
+          "symbol": "ENA",
+          "trades": 45,
+          "netPctUnits": -3.240903908485323,
+          "profitFactor": 0.8770989405946051
+        },
+        {
+          "strategyId": "z60stack25-tao",
+          "symbol": "TAO",
+          "trades": 41,
+          "netPctUnits": -7.318790485358034,
+          "profitFactor": 0.718494207016903
+        }
+      ]
+    },
+    "delayedNetRetention": 0.8076379845270398,
+    "passed": true
+  },
+  "positiveExecutionSubset": {
+    "status": "diagnostic_only_requires_fresh_prospective_shadow",
+    "selectionRule": "delayed net > 0, delayed PF >= 1.10 and >=50% baseline net retention",
+    "memberIds": [
+      "z60stack25-btc",
+      "z60stack25-eth",
+      "z60stack25-sol",
+      "z60stack25-hype",
+      "z60stack25-zec",
+      "z60stack25-doge",
+      "z60stack25-near",
+      "z60stack25-jup",
+      "z60stack25-gram",
+      "z60stack25-xmr"
+    ],
+    "excludedMemberIds": [
+      "z60stack25-bnb",
+      "z60stack25-ltc",
+      "z60stack25-lit",
+      "z60stack25-ena",
+      "z60stack25-tao"
+    ],
+    "baseline": {
+      "passed": true,
+      "trades": 519,
+      "dropped": 0,
+      "maxConcurrent": 6,
+      "netPctUnits": 108.78487256528061,
+      "netUsd": 108.78487256528061,
+      "profitFactor": 1.6727933939805144,
+      "winRatePct": 73.21772639691714,
+      "maxDrawdownPctUnits": -13.906955709399478,
+      "maxDrawdownUsd": -13.906955709399478,
+      "maxDrawdownCapitalPct": -2.31782595156658,
+      "meanL95Pct": 0.13669466127378088,
+      "positiveFolds": 4,
+      "foldNets": [
+        0.26509232083151024,
+        31.982069033928102,
+        33.68646082347625,
+        42.85125038704471
+      ],
+      "inSamplePctUnits": 57.11484267599539,
+      "outOfSamplePctUnits": 51.67002988928518,
+      "longPctUnits": 73.01905818362253,
+      "shortPctUnits": 35.76581438165801,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 86,
+          "netPctUnits": 34.00901304138583,
+          "profitFactor": 5.052209372145059,
+          "longPctUnits": 17.14485446542431,
+          "shortPctUnits": 16.864158575961525
+        },
+        {
+          "days": 60,
+          "trades": 156,
+          "netPctUnits": 51.67002988928518,
+          "profitFactor": 2.433406636084639,
+          "longPctUnits": 24.934190909921483,
+          "shortPctUnits": 26.735838979363688
+        },
+        {
+          "days": 90,
+          "trades": 242,
+          "netPctUnits": 73.81436713085665,
+          "profitFactor": 2.2066492081919336,
+          "longPctUnits": 46.63011405990743,
+          "shortPctUnits": 27.184253070949246
+        }
+      ],
+      "activeSymbols": 10,
+      "positiveSymbols": 10,
+      "dominance": 0.2683381441914473,
+      "leaveOneOutMinNet": 79.59374174501013,
+      "positiveMonths": 5,
+      "totalMonths": 6,
+      "members": [
+        {
+          "strategyId": "z60stack25-btc",
+          "symbol": "BTC",
+          "trades": 57,
+          "netPctUnits": 4.204755155831211,
+          "profitFactor": 1.3660729236980695
+        },
+        {
+          "strategyId": "z60stack25-eth",
+          "symbol": "ETH",
+          "trades": 56,
+          "netPctUnits": 10.613152756071301,
+          "profitFactor": 1.982156810397633
+        },
+        {
+          "strategyId": "z60stack25-sol",
+          "symbol": "SOL",
+          "trades": 56,
+          "netPctUnits": 4.573597024368644,
+          "profitFactor": 1.2547027896097434
+        },
+        {
+          "strategyId": "z60stack25-hype",
+          "symbol": "HYPE",
+          "trades": 54,
+          "netPctUnits": 29.19113082027047,
+          "profitFactor": 2.877067980331185
+        },
+        {
+          "strategyId": "z60stack25-zec",
+          "symbol": "ZEC",
+          "trades": 58,
+          "netPctUnits": 10.439060465183402,
+          "profitFactor": 1.4126785055431892
+        },
+        {
+          "strategyId": "z60stack25-doge",
+          "symbol": "DOGE",
+          "trades": 61,
+          "netPctUnits": 1.035813066775658,
+          "profitFactor": 1.0570430857920683
+        },
+        {
+          "strategyId": "z60stack25-near",
+          "symbol": "NEAR",
+          "trades": 37,
+          "netPctUnits": 12.088209362559809,
+          "profitFactor": 1.9518403064010186
+        },
+        {
+          "strategyId": "z60stack25-jup",
+          "symbol": "JUP",
+          "trades": 62,
+          "netPctUnits": 16.29816150344855,
+          "profitFactor": 1.6709818553286881
+        },
+        {
+          "strategyId": "z60stack25-gram",
+          "symbol": "GRAM",
+          "trades": 43,
+          "netPctUnits": 13.395083824778371,
+          "profitFactor": 1.9352242630033651
+        },
+        {
+          "strategyId": "z60stack25-xmr",
+          "symbol": "XMR",
+          "trades": 35,
+          "netPctUnits": 6.94590858599313,
+          "profitFactor": 1.6243955659585907
+        }
+      ]
+    },
+    "delayed": {
+      "passed": true,
+      "trades": 522,
+      "dropped": 0,
+      "maxConcurrent": 6,
+      "netPctUnits": 102.53868863091381,
+      "netUsd": 102.5386886309138,
+      "profitFactor": 1.6237548661793535,
+      "winRatePct": 72.79693486590038,
+      "maxDrawdownPctUnits": -15.56384526468667,
+      "maxDrawdownUsd": -15.56384526468667,
+      "maxDrawdownCapitalPct": -2.5939742107811115,
+      "meanL95Pct": 0.1239064581843053,
+      "positiveFolds": 3,
+      "foldNets": [
+        -6.6876538238006455,
+        34.39921294406705,
+        33.33194341176088,
+        41.495186098886485
+      ],
+      "inSamplePctUnits": 50.51936236943442,
+      "outOfSamplePctUnits": 52.019326261479364,
+      "longPctUnits": 65.7133978501863,
+      "shortPctUnits": 36.8252907807275,
+      "recent": [
+        {
+          "days": 30,
+          "trades": 87,
+          "netPctUnits": 33.26525323695086,
+          "profitFactor": 4.064506690843604,
+          "longPctUnits": 15.498874903060571,
+          "shortPctUnits": 17.766378333890295
+        },
+        {
+          "days": 60,
+          "trades": 157,
+          "netPctUnits": 52.019326261479364,
+          "profitFactor": 2.418595360948227,
+          "longPctUnits": 22.590987520298032,
+          "shortPctUnits": 29.428338741181314
+        },
+        {
+          "days": 90,
+          "trades": 243,
+          "netPctUnits": 73.68745619407036,
+          "profitFactor": 2.2112897447376048,
+          "longPctUnits": 44.69638526534883,
+          "shortPctUnits": 28.991070928721452
+        }
+      ],
+      "activeSymbols": 10,
+      "positiveSymbols": 10,
+      "dominance": 0.24862744091377093,
+      "leaveOneOutMinNet": 77.04475688195575,
+      "positiveMonths": 5,
+      "totalMonths": 6,
+      "members": [
+        {
+          "strategyId": "z60stack25-btc",
+          "symbol": "BTC",
+          "trades": 57,
+          "netPctUnits": 2.229739409636442,
+          "profitFactor": 1.1764440704456476
+        },
+        {
+          "strategyId": "z60stack25-eth",
+          "symbol": "ETH",
+          "trades": 56,
+          "netPctUnits": 9.52605096516487,
+          "profitFactor": 1.889123945449268
+        },
+        {
+          "strategyId": "z60stack25-sol",
+          "symbol": "SOL",
+          "trades": 56,
+          "netPctUnits": 3.7142962791777405,
+          "profitFactor": 1.2135390505236288
+        },
+        {
+          "strategyId": "z60stack25-hype",
+          "symbol": "HYPE",
+          "trades": 54,
+          "netPctUnits": 25.493931748958065,
+          "profitFactor": 2.518435311792627
+        },
+        {
+          "strategyId": "z60stack25-zec",
+          "symbol": "ZEC",
+          "trades": 58,
+          "netPctUnits": 11.481166703183519,
+          "profitFactor": 1.480046559414893
+        },
+        {
+          "strategyId": "z60stack25-doge",
+          "symbol": "DOGE",
+          "trades": 62,
+          "netPctUnits": 3.165239139689677,
+          "profitFactor": 1.187465602308212
+        },
+        {
+          "strategyId": "z60stack25-near",
+          "symbol": "NEAR",
+          "trades": 37,
+          "netPctUnits": 12.644554244108688,
+          "profitFactor": 1.9695364348123265
+        },
+        {
+          "strategyId": "z60stack25-jup",
+          "symbol": "JUP",
+          "trades": 63,
+          "netPctUnits": 15.025831570836807,
+          "profitFactor": 1.57734088521791
+        },
+        {
+          "strategyId": "z60stack25-gram",
+          "symbol": "GRAM",
+          "trades": 44,
+          "netPctUnits": 13.009843155992641,
+          "profitFactor": 1.825442991735651
+        },
+        {
+          "strategyId": "z60stack25-xmr",
+          "symbol": "XMR",
+          "trades": 35,
+          "netPctUnits": 6.248035414165306,
+          "profitFactor": 1.5566295789689204
+        }
+      ]
+    },
+    "delayedNetRetention": 0.9425822378877309,
+    "passedHistoricalLatencyGate": true
+  },
+  "memberAudits": [
+    {
+      "strategyId": "z60stack25-btc",
+      "symbol": "BTC",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": 4.204755155831211,
+      "delayedNetPctUnits": 2.229739409636442,
+      "delayedProfitFactor": 1.1764440704456476,
+      "delayedMeanL95Pct": -0.10274734625259246,
+      "delayedLongPctUnits": 6.690631224984963,
+      "delayedShortPctUnits": -4.4608918153485195,
+      "delayedNetRetention": 0.5302899519712128
+    },
+    {
+      "strategyId": "z60stack25-eth",
+      "symbol": "ETH",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": 10.613152756071301,
+      "delayedNetPctUnits": 9.52605096516487,
+      "delayedProfitFactor": 1.889123945449268,
+      "delayedMeanL95Pct": 0.01707071297075355,
+      "delayedLongPctUnits": 1.8102470908964399,
+      "delayedShortPctUnits": 7.71580387426843,
+      "delayedNetRetention": 0.8975703246818388
+    },
+    {
+      "strategyId": "z60stack25-sol",
+      "symbol": "SOL",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": 4.573597024368644,
+      "delayedNetPctUnits": 3.7142962791777405,
+      "delayedProfitFactor": 1.2135390505236288,
+      "delayedMeanL95Pct": -0.11881006617939287,
+      "delayedLongPctUnits": 3.912768519548881,
+      "delayedShortPctUnits": -0.19847224037113986,
+      "delayedNetRetention": 0.8121170840779256
+    },
+    {
+      "strategyId": "z60stack25-bnb",
+      "symbol": "BNB",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": -0.41082075078429225,
+      "delayedNetPctUnits": -0.6516324580251123,
+      "delayedProfitFactor": 0.9482483708011863,
+      "delayedMeanL95Pct": -0.18849940288134956,
+      "delayedLongPctUnits": -2.052097855392614,
+      "delayedShortPctUnits": 1.4004653973675016,
+      "delayedNetRetention": null
+    },
+    {
+      "strategyId": "z60stack25-ltc",
+      "symbol": "LTC",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": -4.157718522582967,
+      "delayedNetPctUnits": -5.225084401181292,
+      "delayedProfitFactor": 0.7228638070890343,
+      "delayedMeanL95Pct": -0.3225347454085617,
+      "delayedLongPctUnits": -3.068443593477663,
+      "delayedShortPctUnits": -2.156640807703629,
+      "delayedNetRetention": null
+    },
+    {
+      "strategyId": "z60stack25-hype",
+      "symbol": "HYPE",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": 29.19113082027047,
+      "delayedNetPctUnits": 25.493931748958065,
+      "delayedProfitFactor": 2.518435311792627,
+      "delayedMeanL95Pct": 0.21275887268619081,
+      "delayedLongPctUnits": 17.574618151145014,
+      "delayedShortPctUnits": 7.9193135978130496,
+      "delayedNetRetention": 0.8733451234186156
+    },
+    {
+      "strategyId": "z60stack25-zec",
+      "symbol": "ZEC",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": 10.439060465183402,
+      "delayedNetPctUnits": 11.481166703183519,
+      "delayedProfitFactor": 1.480046559414893,
+      "delayedMeanL95Pct": -0.049609807066752915,
+      "delayedLongPctUnits": 3.78984461008441,
+      "delayedShortPctUnits": 7.691322093099109,
+      "delayedNetRetention": 1.0998275890321523
+    },
+    {
+      "strategyId": "z60stack25-doge",
+      "symbol": "DOGE",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": 1.035813066775658,
+      "delayedNetPctUnits": 3.165239139689677,
+      "delayedProfitFactor": 1.187465602308212,
+      "delayedMeanL95Pct": -0.11137030633911585,
+      "delayedLongPctUnits": -4.014563300792736,
+      "delayedShortPctUnits": 7.17980244048241,
+      "delayedNetRetention": 3.0558015159459475
+    },
+    {
+      "strategyId": "z60stack25-near",
+      "symbol": "NEAR",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": 12.088209362559809,
+      "delayedNetPctUnits": 12.644554244108688,
+      "delayedProfitFactor": 1.9695364348123265,
+      "delayedMeanL95Pct": -0.02053754542525854,
+      "delayedLongPctUnits": 5.342346171612586,
+      "delayedShortPctUnits": 7.302208072496101,
+      "delayedNetRetention": 1.0460237628967626
+    },
+    {
+      "strategyId": "z60stack25-jup",
+      "symbol": "JUP",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": 16.29816150344855,
+      "delayedNetPctUnits": 15.025831570836807,
+      "delayedProfitFactor": 1.57734088521791,
+      "delayedMeanL95Pct": -0.017369509941076527,
+      "delayedLongPctUnits": 17.52222183103922,
+      "delayedShortPctUnits": -2.4963902602024186,
+      "delayedNetRetention": 0.9219341437779636
+    },
+    {
+      "strategyId": "z60stack25-lit",
+      "symbol": "LIT",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": 15.082260634424099,
+      "delayedNetPctUnits": 4.527269908105925,
+      "delayedProfitFactor": 1.1638156542906446,
+      "delayedMeanL95Pct": -0.2994692526186197,
+      "delayedLongPctUnits": 9.045709839142411,
+      "delayedShortPctUnits": -4.518439931036483,
+      "delayedNetRetention": 0.3001718388139229
+    },
+    {
+      "strategyId": "z60stack25-gram",
+      "symbol": "GRAM",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": 13.395083824778371,
+      "delayedNetPctUnits": 13.009843155992641,
+      "delayedProfitFactor": 1.825442991735651,
+      "delayedMeanL95Pct": 0.01343946572736765,
+      "delayedLongPctUnits": 6.056555213769835,
+      "delayedShortPctUnits": 6.953287942222806,
+      "delayedNetRetention": 0.9712401449796747
+    },
+    {
+      "strategyId": "z60stack25-xmr",
+      "symbol": "XMR",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": 6.94590858599313,
+      "delayedNetPctUnits": 6.248035414165306,
+      "delayedProfitFactor": 1.5566295789689204,
+      "delayedMeanL95Pct": -0.0930046764824817,
+      "delayedLongPctUnits": 7.028728337897651,
+      "delayedShortPctUnits": -0.780692923732347,
+      "delayedNetRetention": 0.8995274465265596
+    },
+    {
+      "strategyId": "z60stack25-ena",
+      "symbol": "ENA",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": -2.3090466454190204,
+      "delayedNetPctUnits": -3.240903908485323,
+      "delayedProfitFactor": 0.8770989405946051,
+      "delayedMeanL95Pct": -0.37022383360605127,
+      "delayedLongPctUnits": 1.8026493589707018,
+      "delayedShortPctUnits": -5.043553267456026,
+      "delayedNetRetention": null
+    },
+    {
+      "strategyId": "z60stack25-tao",
+      "symbol": "TAO",
+      "individualStrictGatePassed": false,
+      "baselineNetPctUnits": -4.773989045326688,
+      "delayedNetPctUnits": -7.318790485358034,
+      "delayedProfitFactor": 0.718494207016903,
+      "delayedMeanL95Pct": -0.49993523308238413,
+      "delayedLongPctUnits": -4.787875917158483,
+      "delayedShortPctUnits": -2.530914568199548,
+      "delayedNetRetention": null
+    }
+  ],
+  "realPromotion": false
+}

@@ -25,6 +25,7 @@ import {
 } from '../src/lib/lighter-oscillator-confluence.js';
 import {
   efficiencyRatio,
+  evaluateTrendStackZ60,
   evaluateVwz60,
   evaluateZ60,
   type Vwz60Bar,
@@ -70,12 +71,18 @@ type StrategyConfig = {
   maxHoldBars: number;
   fundingFile: string;
   executionCostFile: string;
+  candleSource?: 'direct_5m' | 'aggregated_from_1m';
   evaluate: (bars: readonly Vwz60Bar[]) => {
     signal: Side | null;
     exitLong: boolean;
     exitShort: boolean;
   } | null;
 };
+
+const P2_SYMBOLS = [
+  'BTC', 'ETH', 'SOL', 'BNB', 'LTC', 'HYPE', 'ZEC', 'DOGE',
+  'NEAR', 'JUP', 'LIT', 'GRAM', 'XMR', 'ENA', 'TAO',
+] as const;
 
 function completedEma(values: readonly number[], period: number): number | null {
   if (period < 2 || values.length < period) return null;
@@ -106,6 +113,23 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
       } : null;
     },
   },
+  ...P2_SYMBOLS.map((symbol): StrategyConfig => ({
+    strategyId: `z60stack25-${symbol.toLowerCase()}`,
+    symbol,
+    stopPct: 0.015,
+    maxHoldBars: 240,
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    candleSource: 'aggregated_from_1m',
+    evaluate(bars) {
+      const snapshot = evaluateTrendStackZ60(bars, 60, 2.5, 'touch', 200, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      } : null;
+    },
+  })),
   {
     strategyId: 'zec-rsi14-mfi14-ema400-challenger',
     symbol: 'ZEC',
@@ -441,6 +465,34 @@ function requireGapFree(source: readonly Candle[], stepMs: number, label: string
   }
 }
 
+function aggregateFiveMinute(source: readonly Candle[], label: string): Candle[] {
+  const groups = new Map<number, Candle[]>();
+  for (const candle of source) {
+    const bucket = Math.floor(candle.t / FIVE_MINUTES_MS) * FIVE_MINUTES_MS;
+    const values = groups.get(bucket) ?? [];
+    values.push(candle);
+    groups.set(bucket, values);
+  }
+  const result: Candle[] = [];
+  for (const [bucket, values] of [...groups].sort(([left], [right]) => left - right)) {
+    values.sort((left, right) => left.t - right.t);
+    if (
+      values.length !== 5
+      || values.some((value, index) => value.t !== bucket + index * MINUTE_MS)
+    ) continue;
+    result.push({
+      t: bucket,
+      o: values[0]!.o,
+      h: Math.max(...values.map((value) => value.h)),
+      l: Math.min(...values.map((value) => value.l)),
+      c: values[4]!.c,
+      v: values.reduce((sum, value) => sum + value.v, 0),
+    });
+  }
+  requireGapFree(result, FIVE_MINUTES_MS, label);
+  return result;
+}
+
 function executionCost(config: StrategyConfig): number {
   const parsed = JSON.parse(readFileSync(resolve(config.executionCostFile), 'utf8')) as {
     notionalUsd?: number;
@@ -646,7 +698,10 @@ const audits = STRATEGIES.map((config) => {
   // A delayed fill needs the minute after the next 5m open. Exclude the
   // unresolved tail rather than inventing funding or a native fill beyond the
   // shorter of the funding and 1m-candle histories.
-  const fiveMinute = candles(resolve(KLINES_DIR, `${config.symbol}-5m.json`))
+  const fiveMinuteSource = config.candleSource === 'aggregated_from_1m'
+    ? aggregateFiveMinute(oneMinute, `${config.symbol}-5m-aggregated`)
+    : candles(resolve(KLINES_DIR, `${config.symbol}-5m.json`));
+  const fiveMinute = fiveMinuteSource
     .filter((bar) =>
       bar.t + FIVE_MINUTES_MS + MINUTE_MS <= Math.min(bounds.last, lastOneMinute));
   requireGapFree(fiveMinute, FIVE_MINUTES_MS, `${config.symbol}-5m`);
@@ -700,6 +755,10 @@ const audits = STRATEGIES.map((config) => {
     baselineNextOpen: baseline,
     delayedOneMinute: delayed,
     delayedNetRetention: retention,
+    baselineTradeDetails: process.env.OUTPUT_INCLUDE_TRADE_DETAILS === '1'
+      ? baselineTrades : undefined,
+    delayedTradeDetails: process.env.OUTPUT_INCLUDE_TRADE_DETAILS === '1'
+      ? delayedTrades : undefined,
   };
 });
 
