@@ -1,0 +1,42 @@
+{
+  "version": "lighter-native-holdout-selection-audit-v1",
+  "generatedAt": "2026-08-02T12:23:48Z",
+  "reportsScanned": 306,
+  "reservedSymbols": [
+    "RESOLV",
+    "NMR"
+  ],
+  "performanceLeaks": {},
+  "selection": {
+    "pool": [
+      "SPX",
+      "SYRUP",
+      "RESOLV",
+      "GRASS",
+      "ZORA",
+      "USELESS",
+      "NMR",
+      "DOLO",
+      "LINEA",
+      "MYX",
+      "BERA",
+      "STBL"
+    ],
+    "excludedSpentSymbols": [
+      "SPX",
+      "BERA"
+    ],
+    "rule": "From the same frozen active-market discovery pool, exclude the permanently spent SPX/BERA holdout and reserve the next two lowest $100 round-trip L2 p95 markets. No price-return or strategy-performance statistic may participate in selection.",
+    "selectedDiscoveryP95Pct": {
+      "RESOLV": 0.13478386444594323,
+      "NMR": 0.14834175113904163
+    }
+  },
+  "evidence": {
+    "discoveryFile": "data/lighter-execution-costs-new-holdout-discovery-20260802.json",
+    "discoverySha256": "c54852c4d6b8c11831e1c30412fb816dee9a582d5366e73e4975894f36693f6e",
+    "spentHoldoutLedger": "data/lighter-native-holdout-ledger.json",
+    "spentHoldoutLedgerSha256": "f1bc668269eeef576f7316e64ad9b1f426b010bdf03cc0360435a68a8ff34945"
+  },
+  "decision": "clean_and_reserved"
+}

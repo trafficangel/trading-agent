@@ -11,7 +11,13 @@
  *   node scripts/download-lighter-candles.mjs 180 1 BTC,ETH,SOL
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { resolve } from 'node:path';
 
 const BASE_URL = 'https://mainnet.zklighter.elliot.ai';
@@ -33,6 +39,12 @@ if (!(days > 0) || !(resolutionMinutes > 0) || !symbols.length) {
 }
 
 const wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms));
+
+function atomicWrite(path, value) {
+  const temporary = `${path}.tmp`;
+  writeFileSync(temporary, JSON.stringify(value));
+  renameSync(temporary, path);
+}
 
 async function getJson(url) {
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -125,7 +137,7 @@ for (const symbol of symbols) {
       const timestamp = Number(candle.t);
       if (timestamp >= fromMs && timestamp < toExclusiveMs) byTime.set(timestamp, candle);
     }
-    writeFileSync(cacheFile, JSON.stringify([...byTime.values()].sort((a, b) => a.t - b.t)));
+    atomicWrite(cacheFile, [...byTime.values()].sort((a, b) => a.t - b.t));
     if ((index + 1) % 50 === 0 || index + 1 === windows.length) {
       console.log(`${symbol}: ${index + 1}/${windows.length} pages · ${byTime.size} candles`);
     }

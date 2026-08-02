@@ -1,0 +1,57 @@
+{
+  "version": "lighter-native-holdout-audit-v1",
+  "generatedAt": "2026-08-02T12:31:22.567Z",
+  "ledgerPath": "data/lighter-native-holdout-ledger-v2.json",
+  "status": "sealed_ready",
+  "performanceOpened": false,
+  "reservedSymbols": [
+    "RESOLV",
+    "NMR"
+  ],
+  "leaks": {},
+  "readiness": {
+    "RESOLV": {
+      "candles": {
+        "1m": {
+          "candles": 259200,
+          "durationDays": 179.99930555555557,
+          "coverageRatio": 1,
+          "first": "2026-02-03T12:05:00.000Z",
+          "last": "2026-08-02T12:04:00.000Z"
+        },
+        "5m": {
+          "candles": 51840,
+          "durationDays": 179.99652777777777,
+          "coverageRatio": 1,
+          "first": "2026-02-03T12:05:00.000Z",
+          "last": "2026-08-02T12:00:00.000Z"
+        }
+      },
+      "executionCostSamples": 120,
+      "executionCostP95Pct": 0.1747290082510984,
+      "fundingCoverage": 0.9988425925925926
+    },
+    "NMR": {
+      "candles": {
+        "1m": {
+          "candles": 259200,
+          "durationDays": 179.99930555555557,
+          "coverageRatio": 1,
+          "first": "2026-02-03T12:05:00.000Z",
+          "last": "2026-08-02T12:04:00.000Z"
+        },
+        "5m": {
+          "candles": 51840,
+          "durationDays": 179.99652777777777,
+          "coverageRatio": 1,
+          "first": "2026-02-03T12:05:00.000Z",
+          "last": "2026-08-02T12:00:00.000Z"
+        }
+      },
+      "executionCostSamples": 120,
+      "executionCostP95Pct": 0.15034061545689884,
+      "fundingCoverage": 0.9988425925925926
+    }
+  },
+  "failures": []
+}

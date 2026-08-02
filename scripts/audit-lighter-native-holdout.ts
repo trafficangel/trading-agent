@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import {
   reservedHoldoutLeaks,
   type JsonReport,
@@ -11,6 +12,7 @@ type Candle = { t?: number };
 type EvidenceRef = { file: string; sha256: string };
 type Ledger = {
   version: string;
+  generation?: number;
   reservedSymbols: string[];
   performanceOpened: boolean;
   openedAt?: string;
@@ -20,6 +22,18 @@ type Ledger = {
     candleDirectory: string;
     executionCosts: string;
     fundingHistory: string;
+  };
+  selection?: {
+    audit?: string;
+    auditSha256?: string;
+  };
+  sealedReadinessEvidence?: {
+    audit?: string;
+    auditSha256?: string;
+    executionCostsSha256?: string;
+    fundingHistorySha256?: string;
+    candleHashes?: Record<string, string>;
+    candleArchives?: Record<string, EvidenceRef>;
   };
   requirements: {
     minimumCoverageDays: number;
@@ -53,6 +67,24 @@ function verifyEvidenceRef(
   }
 }
 
+function verifyExpectedHash(
+  file: string,
+  expected: string | undefined,
+  label: string,
+  failures: string[],
+): void {
+  if (typeof expected !== 'string' || !expected) {
+    failures.push(`${label} sealed hash missing`);
+    return;
+  }
+  const path = resolve(file);
+  if (!existsSync(path)) {
+    failures.push(`${label} file missing: ${file}`);
+    return;
+  }
+  if (fileSha256(path) !== expected) failures.push(`${label} sealed hash mismatch: ${file}`);
+}
+
 const ledgerPath = resolve(process.argv[2] ?? 'data/lighter-native-holdout-ledger.json');
 const outputPath = process.argv[3] ? resolve(process.argv[3]) : null;
 const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8')) as Ledger;
@@ -75,6 +107,69 @@ for (const file of readdirSync(dataDirectory)) {
 }
 const leaks = reservedHoldoutLeaks(reports, ledger.reservedSymbols);
 const failures: string[] = [];
+const sealed = ledger.sealedReadinessEvidence;
+if (!sealed) {
+  failures.push('sealed readiness evidence missing');
+} else {
+  verifyExpectedHash(
+    ledger.files.executionCosts,
+    sealed.executionCostsSha256,
+    'execution costs',
+    failures,
+  );
+  verifyExpectedHash(
+    ledger.files.fundingHistory,
+    sealed.fundingHistorySha256,
+    'funding history',
+    failures,
+  );
+  for (const symbol of ledger.reservedSymbols) {
+    for (const timeframe of [1, 5]) {
+      const key = `${symbol}-${timeframe}m`;
+      const expectedCandleHash = sealed.candleHashes?.[key];
+      const candlePath = resolve(ledger.files.candleDirectory, `${key}.json`);
+      const archive = sealed.candleArchives?.[key];
+      if (existsSync(candlePath)) {
+        verifyExpectedHash(candlePath, expectedCandleHash, `${key} candles`, failures);
+      } else if (!archive) {
+        failures.push(`${key} candles and sealed archive missing`);
+      }
+      if (archive) {
+        verifyExpectedHash(archive.file, archive.sha256, `${key} archive`, failures);
+        if (existsSync(resolve(archive.file)) && expectedCandleHash) {
+          try {
+            const uncompressedHash = createHash('sha256')
+              .update(gunzipSync(readFileSync(resolve(archive.file))))
+              .digest('hex');
+            if (uncompressedHash !== expectedCandleHash) {
+              failures.push(`${key} archive content hash mismatch: ${archive.file}`);
+            }
+          } catch {
+            failures.push(`${key} archive cannot be decompressed: ${archive.file}`);
+          }
+        }
+      } else if ((ledger.generation ?? 1) >= 2) {
+        failures.push(`${key} sealed archive missing`);
+      }
+    }
+  }
+  if (sealed.audit || sealed.auditSha256) {
+    verifyExpectedHash(
+      sealed.audit ?? '',
+      sealed.auditSha256,
+      'sealed readiness audit',
+      failures,
+    );
+  }
+}
+if (ledger.selection?.audit || ledger.selection?.auditSha256) {
+  verifyExpectedHash(
+    ledger.selection.audit ?? '',
+    ledger.selection.auditSha256,
+    'holdout selection audit',
+    failures,
+  );
+}
 if (!ledger.performanceOpened && Object.keys(leaks).length) {
   failures.push(`sealed holdout leaked into performance reports: ${JSON.stringify(leaks)}`);
 }
@@ -109,11 +204,22 @@ for (const symbol of ledger.reservedSymbols) {
   const candleReadiness: Record<string, unknown> = {};
   for (const timeframe of [1, 5]) {
     const path = resolve(ledger.files.candleDirectory, `${symbol}-${timeframe}m.json`);
-    if (!existsSync(path)) {
+    const archive = ledger.sealedReadinessEvidence?.candleArchives?.[`${symbol}-${timeframe}m`];
+    let candleJson: string | null = null;
+    try {
+      candleJson = existsSync(path)
+        ? readFileSync(path, 'utf8')
+        : archive && existsSync(resolve(archive.file))
+          ? gunzipSync(readFileSync(resolve(archive.file))).toString('utf8')
+          : null;
+    } catch {
+      failures.push(`${symbol} ${timeframe}m candles unreadable`);
+    }
+    if (candleJson == null) {
       failures.push(`${symbol} ${timeframe}m candles missing`);
       continue;
     }
-    const candles = JSON.parse(readFileSync(path, 'utf8')) as Candle[];
+    const candles = JSON.parse(candleJson) as Candle[];
     const timestamps = candles
       .map((candle) => Number(candle.t))
       .filter((timestamp) => Number.isFinite(timestamp) && timestamp > 0)

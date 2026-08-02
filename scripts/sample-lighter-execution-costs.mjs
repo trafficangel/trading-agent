@@ -14,7 +14,13 @@
  *   # symbols, samples per symbol, interval ms, quote notional USD
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const BASE_URL = 'https://mainnet.zklighter.elliot.ai';
@@ -102,14 +108,38 @@ const marketIds = new Map(
     .filter((book) => book.market_type === 'perp' && book.status === 'active')
     .map((book) => [String(book.symbol).toUpperCase(), Number(book.market_id)]),
 );
-const samples = Object.fromEntries(symbols.map((symbol) => [symbol, []]));
+const previous = existsSync(outputFile)
+  ? JSON.parse(readFileSync(outputFile, 'utf8'))
+  : null;
+if (
+  previous
+  && Number(previous.notionalUsd) !== notionalUsd
+) {
+  throw new Error(
+    `Existing output notional ${String(previous.notionalUsd)} does not match ${notionalUsd}`,
+  );
+}
+const samples = Object.fromEntries(symbols.map((symbol) => [
+  symbol,
+  Array.isArray(previous?.samples?.[symbol])
+    ? previous.samples[symbol].slice(0, targetSamples)
+    : [],
+]));
 const missing = symbols.filter((symbol) => !marketIds.has(symbol));
 if (missing.length) throw new Error(`Markets not found: ${missing.join(', ')}`);
 
 mkdirSync(dirname(outputFile), { recursive: true });
-for (let cycle = 0; cycle < targetSamples; cycle += 1) {
+let cycle = 0;
+const maxCycles = targetSamples * 5;
+while (symbols.some((symbol) => samples[symbol].length < targetSamples)) {
+  cycle += 1;
+  if (cycle > maxCycles) {
+    throw new Error(`Could not collect ${targetSamples} valid samples per symbol`);
+  }
   const startedAt = Date.now();
-  for (const symbol of symbols) {
+  for (const symbol of symbols.filter(
+    (candidate) => samples[candidate].length < targetSamples,
+  )) {
     const marketId = marketIds.get(symbol);
     try {
       const url = new URL(`${BASE_URL}/api/v1/orderBookOrders`);
@@ -155,13 +185,18 @@ for (let cycle = 0; cycle < targetSamples; cycle += 1) {
     ),
     samples,
   };
-  writeFileSync(outputFile, JSON.stringify(result));
+  const temporary = `${outputFile}.tmp`;
+  writeFileSync(temporary, JSON.stringify(result));
+  renameSync(temporary, outputFile);
   const compact = symbols.map((symbol) => {
     const item = result.summaries[symbol];
     return `${symbol} n${item.n} med ${item.medianPct?.toFixed(4) ?? '—'}% p95 ${item.p95Pct?.toFixed(4) ?? '—'}%`;
   }).join(' · ');
-  console.log(`${cycle + 1}/${targetSamples} ${compact}`);
+  console.log(`${compact}`);
 
   const remaining = intervalMs - (Date.now() - startedAt);
-  if (cycle + 1 < targetSamples && remaining > 0) await wait(remaining);
+  if (
+    symbols.some((symbol) => samples[symbol].length < targetSamples)
+    && remaining > 0
+  ) await wait(remaining);
 }

@@ -1,0 +1,74 @@
+{
+  "version": "lighter-native-holdout-ledger-v1",
+  "generation": 2,
+  "createdAt": "2026-08-02T12:23:48Z",
+  "sealedAt": "2026-08-02T12:23:48Z",
+  "policy": "Reserved symbols may be selected using market age, data quality and executable L2 cost only. No strategy performance may be computed on them until a fully frozen rule passes every discovery-universe gate. The holdout may be opened only once under a hashed preregistration and is then permanently marked spent.",
+  "reservedSymbols": [
+    "RESOLV",
+    "NMR"
+  ],
+  "performanceOpened": false,
+  "selection": {
+    "rule": "After excluding the permanently spent SPX/BERA holdout, reserve the next two lowest $100 round-trip L2 p95 markets from the already frozen 20-snapshot discovery sample.",
+    "selectedDiscoveryP95Pct": {
+      "RESOLV": 0.13478386444594323,
+      "NMR": 0.14834175113904163
+    },
+    "audit": "data/lighter-native-holdout-v2-selection-audit-20260802.json",
+    "auditSha256": "419d20221fa177d50e1c58e77cba7bfa3dafc05936bb50101755962d19b5d81f"
+  },
+  "files": {
+    "candleDirectory": "data/lighter-klines",
+    "executionCosts": "data/lighter-execution-costs-holdout-v2-20260802.json",
+    "fundingHistory": "data/lighter-funding-history-holdout-v2-20260802.json"
+  },
+  "sealedReadinessEvidence": {
+    "executionCostsSha256": "c21033c987eca99110c9aa45bdb6780fdbe6c726fbf42d615e8e8f626e2088fa",
+    "fundingHistorySha256": "d0313e050e329dc0203c2578903a4a095aac2f7cf667bc25c38528d58cc72356",
+    "candleHashes": {
+      "RESOLV-1m": "d8598662f64d75dd86a45eb5d270d4d2be16ae6f82eeddf744c7594b0fb78db1",
+      "RESOLV-5m": "490aa3d9f2bda3b56975b8e7cd78d22f7b8805d9f1d67a3c3aae7bffeb351c0f",
+      "NMR-1m": "7a5595d8d10ebf33c6c7f1218a4f49ffaabc4170fec665381db4a1ad51d65c86",
+      "NMR-5m": "a732a0c617486650834f39c511dc9fc9209fe8f2d80e25a0c35b38f29025ba59"
+    },
+    "candleArchives": {
+      "RESOLV-1m": {
+        "file": "data/lighter-holdout-v2/RESOLV-1m.json.gz",
+        "sha256": "1a72b249b111d5174c742023048915557cac98cf78f5b147bd63d4f8f1c35721"
+      },
+      "RESOLV-5m": {
+        "file": "data/lighter-holdout-v2/RESOLV-5m.json.gz",
+        "sha256": "99983bc707daa91109ce576bfffc8e14797478a909ce9f4785935dc07ef635bd"
+      },
+      "NMR-1m": {
+        "file": "data/lighter-holdout-v2/NMR-1m.json.gz",
+        "sha256": "4881a2dff6d592fbea2a76676817a027e8a5f2e64bc69c00655f223e9a7bc493"
+      },
+      "NMR-5m": {
+        "file": "data/lighter-holdout-v2/NMR-5m.json.gz",
+        "sha256": "f7827549a01d58b3dd2620d73601053d9f341014e2889666979c3c5bf658f8e3"
+      }
+    },
+    "candleCounts": {
+      "RESOLV-1m": 259200,
+      "RESOLV-5m": 51840,
+      "NMR-1m": 259200,
+      "NMR-5m": 51840
+    },
+    "executionCostP95Pct": {
+      "RESOLV": 0.1747290082510984,
+      "NMR": 0.15034061545689884
+    },
+    "fundingInternalCoverage": {
+      "RESOLV": 0.9988425925925926,
+      "NMR": 0.9988425925925926
+    }
+  },
+  "requirements": {
+    "minimumCoverageDays": 171,
+    "minimumCandleCoverageRatio": 0.995,
+    "minimumCostSamples": 120,
+    "minimumFundingCoverageRatio": 0.95
+  }
+}
