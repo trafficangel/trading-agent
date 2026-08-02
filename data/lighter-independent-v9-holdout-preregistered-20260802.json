@@ -1,0 +1,27 @@
+{
+  "version": "lighter-independent-v9-holdout-preregistration-v1",
+  "createdAt": "2026-08-02T06:25:00Z",
+  "status": "frozen_before_holdout_results",
+  "parentPreregistration": "data/lighter-independent-v9-preregistered-20260802.json",
+  "selection": {
+    "includedUnseenSymbols": ["APT", "DOT", "DATA"],
+    "reason": "All locally available symbols excluded from the original v9 universe that have approximately 180 days of native 1m candles plus measured $100 L2 cost and funding history.",
+    "excludedBeforeTesting": {
+      "ADA": "Only 30.1 days of candles; cannot satisfy the frozen 90-day recent gate."
+    }
+  },
+  "timeframesMinutes": [1, 5],
+  "rules": [
+    "V9-WAVETREND10/21-X4-EXT60+EMA400-EXIT0-H120M",
+    "V9-FISHER10-XTRIGGER-EXT1.5+EMA400-EXIT0-H120M"
+  ],
+  "ruleParameters": "Unchanged from the parent preregistration after viewing the original-universe results.",
+  "execution": {
+    "fill": "next native bar open",
+    "positionNotionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific executable $100 full-round-trip L2 p95",
+    "funding": "exact Lighter hourly settlements in (entry, exit]"
+  },
+  "qualification": "Exactly the parent preregistration gates; no holdout-specific relaxation."
+}

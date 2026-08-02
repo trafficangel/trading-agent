@@ -1,0 +1,51 @@
+{
+  "version": "lighter-independent-v9-preregistration-v1",
+  "createdAt": "2026-08-02T06:10:00Z",
+  "status": "frozen_before_universe_results",
+  "objective": "Find a second robust bidirectional Native Quant candidate using independent nonlinear cycle oscillators rather than retuning prior RSI, Bollinger or relative-value families.",
+  "universe": [
+    "AAVE", "ARB", "BNB", "BTC", "DOGE", "ENA", "ETH", "GRAM", "HYPE", "JUP", "LINK", "LIT", "LTC", "NEAR", "PUMP", "SOL", "TAO", "UNI", "XLM", "XMR", "XRP"
+  ],
+  "timeframesMinutes": [1, 5],
+  "rules": [
+    {
+      "name": "V9-WAVETREND10/21-X4-EXT60+EMA400-EXIT0-H120M",
+      "entry": "WaveTrend(10,21) crosses its SMA4 trigger after the prior oscillator reached the mirrored +/-60 extreme, aligned with EMA400",
+      "exit": "WaveTrend reaches zero",
+      "stopPct": 1,
+      "maxHoldMinutes": 120
+    },
+    {
+      "name": "V9-FISHER10-XTRIGGER-EXT1.5+EMA400-EXIT0-H120M",
+      "entry": "Fisher(10) crosses its one-bar trigger after the prior transform reached the mirrored +/-1.5 extreme, aligned with EMA400",
+      "exit": "Fisher reaches zero",
+      "stopPct": 1,
+      "maxHoldMinutes": 120
+    }
+  ],
+  "execution": {
+    "signal": "completed gap-free native bar",
+    "fill": "next native bar open",
+    "positionNotionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific executable $100 full-round-trip L2 p95",
+    "funding": "exact Lighter hourly settlements in (entry, exit]"
+  },
+  "qualification": {
+    "minimumTrades": 30,
+    "minimumProfitFactor": 1.2,
+    "minimumPositiveFolds": 3,
+    "maximumDrawdownPct": 15,
+    "requiresPositiveMeanL95": true,
+    "requiresPositiveISAndOOS": true,
+    "requiresPositiveLongAndShort": true,
+    "requiresPositiveBullBearAndVolatilityRegimes": true,
+    "requiresPositive30d60d90dBothSides": true,
+    "requiresMeasuredCostsAndFunding": true
+  },
+  "frozenInputHashes": {
+    "executionCostsNativePortfolio100": "4afa14dd731014df5c806f7d5c2a06a0a02797561ce12a83847a4d841b42fce9",
+    "fundingHistoryNative": "5a44a8cba48306dad60ee695045d5fdcf4542ef1a6a75b55ad4aa3d12fe7e9f4",
+    "fundingHistoryTransfer2": "a0fb74c290cee83f8f574e7b678872cd35328cf3da54548e66fe5708a93830ed"
+  }
+}

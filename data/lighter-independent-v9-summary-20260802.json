@@ -1,0 +1,96 @@
+{
+  "version": "lighter-independent-v9-summary-v1",
+  "generatedAt": "2026-08-02T06:31:00Z",
+  "preregistrations": [
+    "data/lighter-independent-v9-preregistered-20260802.json",
+    "data/lighter-independent-v9-holdout-preregistered-20260802.json"
+  ],
+  "sources": [
+    {
+      "file": "data/lighter-independent-v9-universe-1m-20260802.json",
+      "sha256": "c53adeb14f16141e6788df9637fc7e595884bbc9934d8a3acb64da7ab1e05dca"
+    },
+    {
+      "file": "data/lighter-independent-v9-universe-5m-20260802.json",
+      "sha256": "cd54e414e8e1ea9160dd25780165aa114169200744bfdc76e39bbff81cfa72f4"
+    },
+    {
+      "file": "data/lighter-independent-v9-holdout-1m-20260802.json",
+      "sha256": "708085d97ddb76462b969946a7ae0e8f02ae2d4ad7a50274f55ae636a5516c24"
+    },
+    {
+      "file": "data/lighter-independent-v9-holdout-5m-20260802.json",
+      "sha256": "387d7d7c605b8fda87fd2db53a686685935e4e2a37261f0b43ea6460260c5bfd"
+    },
+    {
+      "file": "data/lighter-funding-history-v9-holdout-20260802.json",
+      "sha256": "725d7e757f69be387c6c579f01d715e9a5d18bb0e8ae21e1eef497b018d5d0d6"
+    }
+  ],
+  "scope": {
+    "originalUniverse": 21,
+    "unseenHoldoutSymbols": ["APT", "DOT", "DATA"],
+    "timeframesMinutes": [1, 5],
+    "qualified": []
+  },
+  "bestRejected": [
+    {
+      "symbol": "HYPE",
+      "timeframeMinutes": 5,
+      "rule": "V9-WAVETREND10/21-X4-EXT60+EMA400-EXIT0-H120M",
+      "trades": 104,
+      "netPctUnits": 19.834433639228223,
+      "profitFactor": 1.7206544556331405,
+      "maxDrawdownPct": -6.832574340377628,
+      "meanL95Pct": 0.055206323221289405,
+      "positiveFolds": 3,
+      "longPctUnits": 12.671963986529747,
+      "shortPctUnits": 7.162469652698481,
+      "reasons": [
+        "30-day sample has 18 trades, below the frozen minimum of 20"
+      ]
+    },
+    {
+      "symbol": "TAO",
+      "timeframeMinutes": 5,
+      "rule": "V9-WAVETREND10/21-X4-EXT60+EMA400-EXIT0-H120M",
+      "trades": 115,
+      "netPctUnits": 27.066548734422494,
+      "profitFactor": 1.9048787226685484,
+      "maxDrawdownPct": -4.435030537788688,
+      "meanL95Pct": 0.09610741613376064,
+      "positiveFolds": 4,
+      "longPctUnits": 8.147364639117436,
+      "shortPctUnits": 18.919184095305052,
+      "reasons": [
+        "bull-regime net is -0.1124% units with PF 0.9849",
+        "30-day net is -1.3982% units with PF 0.7654"
+      ]
+    },
+    {
+      "symbol": "BTC",
+      "timeframeMinutes": 5,
+      "rule": "V9-WAVETREND10/21-X4-EXT60+EMA400-EXIT0-H120M",
+      "trades": 111,
+      "netPctUnits": 11.691516250461607,
+      "profitFactor": 1.9192334165007021,
+      "maxDrawdownPct": -2.1254430945914073,
+      "meanL95Pct": 0.03445798427181011,
+      "positiveFolds": 4,
+      "longPctUnits": 6.268581635984298,
+      "shortPctUnits": 5.422934614477304,
+      "reasons": [
+        "mixed-trend net is -0.5077% units with PF 0.9490",
+        "30-day sample has 16 trades and net -0.2497% units",
+        "60-day Short leg is -0.7549% units"
+      ]
+    }
+  ],
+  "decision": {
+    "addToShadow": [],
+    "addToReal": [],
+    "status": "reject_all_without_parameter_rescue",
+    "keepRuntimeChanges": false,
+    "nextEvidence": "Do not retune on this sample. HYPE WaveTrend may be reconsidered only after enough unseen prospective observations make the 30-day sample reach the frozen minimum while all other gates remain positive."
+  }
+}

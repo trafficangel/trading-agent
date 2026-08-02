@@ -104,6 +104,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V7 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V7 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V8 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V8 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V9 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V9 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -174,6 +176,10 @@ type Arrays = {
   cci20: number[];
   mfi14: number[];
   williams14: number[];
+  waveTrend10x21: number[];
+  waveTrendSignal4: number[];
+  fisher10: number[];
+  fisherSignal: number[];
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
@@ -419,6 +425,59 @@ function williamsR(candles: Candle[], period: number): number[] {
   });
 }
 
+/**
+ * LazyBear-style WaveTrend oscillator. All values at index i use only the
+ * completed candle i and earlier candles; orders are still filled on i + 1.
+ */
+function waveTrend(
+  candles: Candle[],
+  channelPeriod: number,
+  averagePeriod: number,
+  signalPeriod: number,
+): { oscillator: number[]; signal: number[] } {
+  const averagePrice = candles.map((bar) => (bar.h + bar.l + bar.c) / 3);
+  const esa = ema(averagePrice, channelPeriod);
+  const deviation = ema(
+    averagePrice.map((value, i) => Math.abs(value - esa[i]!)),
+    channelPeriod,
+  );
+  const channelIndex = averagePrice.map((value, i) =>
+    deviation[i]! > 0 ? (value - esa[i]!) / (0.015 * deviation[i]!) : 0);
+  const oscillator = ema(channelIndex, averagePeriod);
+  return { oscillator, signal: sma(oscillator, signalPeriod) };
+}
+
+/** Standard Ehlers Fisher Transform of the rolling HL2 position. */
+function fisherTransform(
+  candles: Candle[],
+  period: number,
+): { fisher: number[]; signal: number[] } {
+  const fisher = new Array<number>(candles.length).fill(0);
+  const signal = new Array<number>(candles.length).fill(0);
+  const value = new Array<number>(candles.length).fill(0);
+  const hl2 = candles.map((bar) => (bar.h + bar.l) / 2);
+  for (let i = 1; i < candles.length; i += 1) {
+    signal[i] = fisher[i - 1]!;
+    if (i + 1 < period) continue;
+    let low = Infinity;
+    let high = -Infinity;
+    for (let j = i - period + 1; j <= i; j += 1) {
+      low = Math.min(low, hl2[j]!);
+      high = Math.max(high, hl2[j]!);
+    }
+    const normalized = high > low
+      ? 2 * ((hl2[i]! - low) / (high - low) - 0.5)
+      : 0;
+    value[i] = Math.max(
+      -0.999,
+      Math.min(0.999, 0.33 * normalized + 0.67 * value[i - 1]!),
+    );
+    fisher[i] = 0.5 * Math.log((1 + value[i]!) / (1 - value[i]!))
+      + 0.5 * fisher[i - 1]!;
+  }
+  return { fisher, signal };
+}
+
 function rollingVolumeWeighted(
   candles: Candle[],
   period: number,
@@ -581,6 +640,8 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
   const sd20Values = rollingStd(close, 20);
   const atr14Values = atr(c, 14);
   const dmi14 = directionalIndex(c, 14);
+  const waveTrend10x21 = waveTrend(c, 10, 21, 4);
+  const fisher10 = fisherTransform(c, 10);
   const atrPctMean288 = sma(
     atr14Values.map((value, i) => close[i]! > 0 ? value / close[i]! : 0),
     288,
@@ -622,6 +683,10 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     cci20: cci(c, 20),
     mfi14: moneyFlowIndex(c, 14),
     williams14: williamsR(c, 14),
+    waveTrend10x21: waveTrend10x21.oscillator,
+    waveTrendSignal4: waveTrend10x21.signal,
+    fisher10: fisher10.fisher,
+    fisherSignal: fisher10.signal,
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
@@ -1236,6 +1301,70 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.close[i]! >= a.ema21[i]!
           : a.close[i]! <= a.ema21[i]!;
+      },
+    });
+  }
+
+  // Preregistered independent v9 suite. WaveTrend and Fisher are nonlinear
+  // cycle oscillators that have not appeared in the earlier Native Quant
+  // families. Both rules are exactly mirrored, require an actual completed-
+  // bar reversal from an extreme, align the fade with EMA400, and close at
+  // oscillator neutrality. Parameters are deliberately fixed before the
+  // universe run; this opt-in block exposes no grid for post-hoc rescue.
+  if (ENABLE_INDEPENDENT_FAMILIES_V9) {
+    out.push({
+      name: 'V9-WAVETREND10/21-X4-EXT60+EMA400-EXIT0-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const crossedUp = a.waveTrend10x21[i - 1]! <= a.waveTrendSignal4[i - 1]!
+          && a.waveTrend10x21[i]! > a.waveTrendSignal4[i]!;
+        const crossedDown = a.waveTrend10x21[i - 1]! >= a.waveTrendSignal4[i - 1]!
+          && a.waveTrend10x21[i]! < a.waveTrendSignal4[i]!;
+        if (
+          crossedUp
+          && a.waveTrend10x21[i - 1]! <= -60
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          crossedDown
+          && a.waveTrend10x21[i - 1]! >= 60
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.waveTrend10x21[i]! >= 0
+          : a.waveTrend10x21[i]! <= 0;
+      },
+    });
+
+    out.push({
+      name: 'V9-FISHER10-XTRIGGER-EXT1.5+EMA400-EXIT0-H120M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(120 / BAR_MINUTES)),
+      entry(a, i) {
+        const crossedUp = a.fisher10[i - 1]! <= a.fisherSignal[i - 1]!
+          && a.fisher10[i]! > a.fisherSignal[i]!;
+        const crossedDown = a.fisher10[i - 1]! >= a.fisherSignal[i - 1]!
+          && a.fisher10[i]! < a.fisherSignal[i]!;
+        if (
+          crossedUp
+          && a.fisher10[i - 1]! <= -1.5
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          crossedDown
+          && a.fisher10[i - 1]! >= 1.5
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.fisher10[i]! >= 0 : a.fisher10[i]! <= 0;
       },
     });
   }
