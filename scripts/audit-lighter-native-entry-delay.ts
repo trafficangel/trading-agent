@@ -21,6 +21,8 @@ import {
   evaluateRsiMfiTrend,
   evaluateRsiWilliamsTrend,
   evaluateVwzMfiTrend,
+  evaluateVwzStochasticTrend,
+  evaluateVwzWilliamsTrend,
   rsiWilliamsExit,
 } from '../src/lib/lighter-oscillator-confluence.js';
 import {
@@ -97,6 +99,23 @@ function completedEma(values: readonly number[], period: number): number | null 
 }
 
 const ALL_STRATEGIES: readonly StrategyConfig[] = [
+  {
+    strategyId: 'hype-vwz60-stoch14-ema400-challenger',
+    symbol: 'HYPE',
+    stopPct: 0.01,
+    maxHoldBars: 120,
+    fundingFile: 'data/lighter-funding-history-native.json',
+    executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
+    candleSource: 'aggregated_from_1m',
+    evaluate(bars) {
+      const snapshot = evaluateVwzStochasticTrend(bars, 60, 2.25, 14, 20, 400);
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      } : null;
+    },
+  },
   {
     strategyId: 'hype-rsi14-willr14-ema400-challenger',
     symbol: 'HYPE',
@@ -267,6 +286,23 @@ const ALL_STRATEGIES: readonly StrategyConfig[] = [
     executionCostFile: 'data/lighter-execution-costs-native-portfolio-100-20260731.json',
     evaluate(bars) {
       const snapshot = evaluateZ60(bars, 60, 3, 'touch');
+      return snapshot ? {
+        signal: snapshot.signal,
+        exitLong: snapshot.close >= snapshot.mean,
+        exitShort: snapshot.close <= snapshot.mean,
+      } : null;
+    },
+  },
+  {
+    strategyId: 'xlm-vwz60-willr14-ema400-challenger',
+    symbol: 'XLM',
+    stopPct: 0.01,
+    maxHoldBars: 120,
+    fundingFile: 'data/lighter-funding-history-transfer2-20260801.json',
+    executionCostFile: 'data/lighter-execution-costs-transfer2-20260801.json',
+    candleSource: 'aggregated_from_1m',
+    evaluate(bars) {
+      const snapshot = evaluateVwzWilliamsTrend(bars, 60, 2.5, 14, 20, 400);
       return snapshot ? {
         signal: snapshot.signal,
         exitLong: snapshot.close >= snapshot.mean,

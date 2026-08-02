@@ -19,6 +19,14 @@ export type VwzMfiSnapshot = Z60Snapshot & {
   currentMfi: number;
 };
 
+export type VwzWilliamsSnapshot = Z60Snapshot & {
+  currentWilliams: number;
+};
+
+export type VwzStochasticSnapshot = Z60Snapshot & {
+  currentStochastic: number;
+};
+
 export type RsiMfiSnapshot = {
   barTime: number;
   close: number;
@@ -85,6 +93,11 @@ function currentWilliams(bars: readonly Vwz60Bar[], period: number): number | nu
     low = Math.min(low, bar.low!);
   }
   return high > low ? -100 * (high - bars.at(-1)!.close) / (high - low) : -50;
+}
+
+function currentStochastic(bars: readonly Vwz60Bar[], period: number): number | null {
+  const williams = currentWilliams(bars, period);
+  return williams == null ? null : williams + 100;
 }
 
 function currentMfi(bars: readonly Vwz60Bar[], period: number): number | null {
@@ -182,6 +195,70 @@ export function evaluateVwzMfiTrend(
     signal,
     trendMean,
     currentMfi: currentMfiValue,
+  };
+}
+
+/** Frozen two-sided VWZ60 + Williams %R14 pullback aligned with EMA400. */
+export function evaluateVwzWilliamsTrend(
+  bars: readonly Vwz60Bar[],
+  period = 60,
+  threshold = 2.5,
+  williamsPeriod = 14,
+  williamsEdge = 20,
+  trendPeriod = 400,
+): VwzWilliamsSnapshot | null {
+  if (
+    !(williamsEdge > 0 && williamsEdge < 50)
+    || trendPeriod < 2
+  ) return null;
+  const snapshot = evaluateVwz60(bars, period, threshold, 'touch');
+  const trendMean = completedEma(bars.map((bar) => bar.close), trendPeriod);
+  const currentWilliamsValue = currentWilliams(bars, williamsPeriod);
+  if (!snapshot || trendMean == null || currentWilliamsValue == null) return null;
+  const signal = snapshot.signal === 'long'
+    && (currentWilliamsValue >= -100 + williamsEdge || snapshot.close <= trendMean)
+    ? null
+    : snapshot.signal === 'short'
+      && (currentWilliamsValue <= -williamsEdge || snapshot.close >= trendMean)
+      ? null
+      : snapshot.signal;
+  return {
+    ...snapshot,
+    signal,
+    trendMean,
+    currentWilliams: currentWilliamsValue,
+  };
+}
+
+/** Frozen two-sided VWZ60 + Stochastic14 pullback aligned with EMA400. */
+export function evaluateVwzStochasticTrend(
+  bars: readonly Vwz60Bar[],
+  period = 60,
+  threshold = 2.25,
+  stochasticPeriod = 14,
+  stochasticEdge = 20,
+  trendPeriod = 400,
+): VwzStochasticSnapshot | null {
+  if (
+    !(stochasticEdge > 0 && stochasticEdge < 50)
+    || trendPeriod < 2
+  ) return null;
+  const snapshot = evaluateVwz60(bars, period, threshold, 'touch');
+  const trendMean = completedEma(bars.map((bar) => bar.close), trendPeriod);
+  const stochastic = currentStochastic(bars, stochasticPeriod);
+  if (!snapshot || trendMean == null || stochastic == null) return null;
+  const signal = snapshot.signal === 'long'
+    && (stochastic >= stochasticEdge || snapshot.close <= trendMean)
+    ? null
+    : snapshot.signal === 'short'
+      && (stochastic <= 100 - stochasticEdge || snapshot.close >= trendMean)
+      ? null
+      : snapshot.signal;
+  return {
+    ...snapshot,
+    signal,
+    trendMean,
+    currentStochastic: stochastic,
   };
 }
 

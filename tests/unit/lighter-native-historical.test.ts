@@ -10,6 +10,8 @@ import {
   NATIVE_HISTORICAL_SUPPLEMENT_SHA256,
   NATIVE_HISTORICAL_XLM_SUPPLEMENT_SHA256,
   NATIVE_HISTORICAL_DATA_CONFLUENCE_SHA256,
+  NATIVE_HISTORICAL_FAST_CONFLUENCE_SHA256,
+  NATIVE_HISTORICAL_FAST_CONFLUENCE_V2_SHA256,
 } from '../../src/lib/lighter-native-historical.js';
 
 describe('frozen Native historical evidence', () => {
@@ -170,6 +172,41 @@ describe('frozen Native historical evidence', () => {
       expect(candidate?.metrics.recent.every((window) =>
         window.long > 0 && window.short > 0)).toBe(true);
     }
+  });
+
+  it('admits the frozen XLM fast-confluence report from aggregated native 1m candles', () => {
+    const paths = [
+      'data/lighter-native-current-z60-validation.json',
+      'data/lighter-vwz60-holdout-validation.json',
+      'data/lighter-vwz60-transfer2-validation.json',
+      'data/lighter-data-vwz60-1m-rebuild-validation.json',
+      'data/lighter-rsi14-trend-transfer-validation.json',
+      'data/lighter-zec-confluence-regime-validation.json',
+      'data/lighter-data-confluence-regime-validation.json',
+      'data/lighter-fast-confluence-universe-5m-20260802.json',
+      'data/lighter-fast-confluence-v2-universe-5m-20260802.json',
+    ];
+    const values = paths.map((path) => JSON.parse(readFileSync(resolve(path), 'utf8')) as unknown);
+    const evidence = evaluateNativeHistoricalEvidence(
+      values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7],
+      values[8],
+    );
+    expect(evidence.fastConfluenceSourceSha256)
+      .toBe(NATIVE_HISTORICAL_FAST_CONFLUENCE_SHA256);
+    const candidate = evidence.candidates.find(
+      (row) => row.strategyId === 'xlm-vwz60-willr14-ema400-challenger',
+    );
+    expect(candidate?.passed).toBe(true);
+    expect(candidate?.reasons).toEqual([]);
+    expect(candidate?.metrics.recent.every((window) =>
+      window.long > 0 && window.short > 0)).toBe(true);
+    expect(evidence.fastConfluenceV2SourceSha256)
+      .toBe(NATIVE_HISTORICAL_FAST_CONFLUENCE_V2_SHA256);
+    const second = evidence.candidates.find(
+      (row) => row.strategyId === 'hype-vwz60-stoch14-ema400-challenger',
+    );
+    expect(second?.passed).toBe(true);
+    expect(second?.reasons).toEqual([]);
   });
 
   it('rejects a changed frozen result even when headline qualification remains', () => {

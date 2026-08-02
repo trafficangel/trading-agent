@@ -1,0 +1,52 @@
+{
+  "version": "lighter-confluence-runtime-parity-v1",
+  "generatedAt": "2026-08-02T03:47:19.519Z",
+  "barMinutes": 5,
+  "completedBarsOnly": true,
+  "runtimeWindowBars": 2000,
+  "passed": true,
+  "results": [
+    {
+      "strategyId": "hype-vwz60-stoch14-ema400-challenger",
+      "symbol": "HYPE",
+      "candles": 51839,
+      "comparableBars": 49840,
+      "runtimeWindowBars": 2000,
+      "fullSignals": 440,
+      "runtimeSignals": 440,
+      "signalMismatches": 0,
+      "trendSideMismatches": 0,
+      "maxEmaDifferencePct": 0.000854362317880283,
+      "firstMismatches": [],
+      "passed": true
+    },
+    {
+      "strategyId": "zec-rsi14-willr14-ema400",
+      "symbol": "ZEC",
+      "candles": 52129,
+      "comparableBars": 50130,
+      "runtimeWindowBars": 2000,
+      "fullSignals": 361,
+      "runtimeSignals": 361,
+      "signalMismatches": 0,
+      "trendSideMismatches": 1,
+      "maxEmaDifferencePct": 0.002590180996812047,
+      "firstMismatches": [],
+      "passed": true
+    },
+    {
+      "strategyId": "xlm-vwz60-willr14-ema400-challenger",
+      "symbol": "XLM",
+      "candles": 51839,
+      "comparableBars": 49840,
+      "runtimeWindowBars": 2000,
+      "fullSignals": 1143,
+      "runtimeSignals": 1143,
+      "signalMismatches": 0,
+      "trendSideMismatches": 0,
+      "maxEmaDifferencePct": 0.0016709367953086256,
+      "firstMismatches": [],
+      "passed": true
+    }
+  ]
+}

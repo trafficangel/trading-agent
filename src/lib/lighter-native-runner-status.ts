@@ -14,7 +14,7 @@ export type NativeRunnerEvaluation = {
   symbol: string;
   marketId: number;
   timeframeMinutes: 1 | 5;
-  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi';
+  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic';
   mode: 'touch' | 'reclaim';
   threshold: number;
   trendFilter: 'ema200' | 'ema400' | 'ema200_400' | null;
@@ -151,7 +151,9 @@ export function parseNativeRunnerStatus(raw: string | null): NativeRunnerStatus 
           && row.family !== 'vwz'
           && row.family !== 'rsi'
           && row.family !== 'rsi_williams'
-          && row.family !== 'vwz_mfi')
+          && row.family !== 'vwz_mfi'
+          && row.family !== 'vwz_williams'
+          && row.family !== 'vwz_stochastic')
         || (row.mode !== 'touch' && row.mode !== 'reclaim')
         || finiteOrNull(row.threshold) == null
         || !(row.threshold! > 0)

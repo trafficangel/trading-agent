@@ -3,6 +3,8 @@ import {
   evaluateRsiMfiTrend,
   evaluateRsiWilliamsTrend,
   evaluateVwzMfiTrend,
+  evaluateVwzStochasticTrend,
+  evaluateVwzWilliamsTrend,
   rsiWilliamsExit,
 } from '../../src/lib/lighter-oscillator-confluence.js';
 import type { Vwz60Bar } from '../../src/lib/lighter-z60.js';
@@ -98,6 +100,24 @@ describe('Native oscillator confluence', () => {
     expect(short?.signal).toBe('short');
   });
 
+  it('requires mirrored Williams confirmation in addition to VWZ and EMA400', () => {
+    const long = evaluateVwzWilliamsTrend(trendThenVwzShock('up'));
+    const short = evaluateVwzWilliamsTrend(trendThenVwzShock('down'));
+    expect(long?.currentWilliams).toBeLessThan(-80);
+    expect(short?.currentWilliams).toBeGreaterThan(-20);
+    expect(long?.signal).toBe('long');
+    expect(short?.signal).toBe('short');
+  });
+
+  it('requires mirrored Stochastic confirmation in addition to VWZ and EMA400', () => {
+    const long = evaluateVwzStochasticTrend(trendThenVwzShock('up'));
+    const short = evaluateVwzStochasticTrend(trendThenVwzShock('down'));
+    expect(long?.currentStochastic).toBeLessThan(20);
+    expect(short?.currentStochastic).toBeGreaterThan(80);
+    expect(long?.signal).toBe('long');
+    expect(short?.signal).toBe('short');
+  });
+
   it('emits mirrored RSI/MFI signals from completed OHLCV bars', () => {
     const long = evaluateRsiMfiTrend(trendThenPullback('up'));
     const short = evaluateRsiMfiTrend(trendThenPullback('down'));
@@ -113,6 +133,8 @@ describe('Native oscillator confluence', () => {
     const bars = trendThenPullback('up').map(({ high: _high, low: _low, ...bar }) => bar);
     expect(evaluateRsiWilliamsTrend(bars)).toBeNull();
     expect(evaluateVwzMfiTrend(bars)).toBeNull();
+    expect(evaluateVwzWilliamsTrend(bars)).toBeNull();
+    expect(evaluateVwzStochasticTrend(bars)).toBeNull();
     expect(evaluateRsiMfiTrend(bars)).toBeNull();
   });
 });

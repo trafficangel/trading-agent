@@ -120,6 +120,14 @@ const NATIVE_HISTORICAL_EVIDENCE = (() => {
         process.env['LIGHTER_NATIVE_HISTORICAL_DATA_CONFLUENCE_PATH']
           ?? 'data/lighter-data-confluence-regime-validation.json',
       ), 'utf8')) as unknown,
+      JSON.parse(readFileSync(resolve(
+        process.env['LIGHTER_NATIVE_HISTORICAL_FAST_CONFLUENCE_PATH']
+          ?? 'data/lighter-fast-confluence-universe-5m-20260802.json',
+      ), 'utf8')) as unknown,
+      JSON.parse(readFileSync(resolve(
+        process.env['LIGHTER_NATIVE_HISTORICAL_FAST_CONFLUENCE_V2_PATH']
+          ?? 'data/lighter-fast-confluence-v2-universe-5m-20260802.json',
+      ), 'utf8')) as unknown,
     );
   } catch (error) {
     logger.error({ error }, 'Native historical evidence unavailable');
@@ -784,6 +792,46 @@ const STRATEGIES: readonly StrategySpec[] = [
       maxDrawdownPct: 6.328,
     },
   },
+  {
+    id: 'xlm-vwz60-willr14-ema400-challenger',
+    code: '059',
+    name: 'VWZ60 + Williams %R14 · EMA400 · VWMA Exit',
+    symbol: 'XLMUSDT',
+    asset: 'XLM',
+    marketId: 119,
+    stopPct: 1,
+    backtest: {
+      // Gap-free native 1m candles aggregated into completed 5m decisions.
+      // Metrics use a conservative +1m fill, measured executable $100 p95,
+      // exact hourly funding and the same bounded EMA seed as production.
+      period: '2026-02-09 → 2026-08-01',
+      trades: 205,
+      winRatePct: 60.5,
+      profitFactor: 1.413,
+      netPct: 27.676,
+      maxDrawdownPct: 7.400,
+    },
+  },
+  {
+    id: 'hype-vwz60-stoch14-ema400-challenger',
+    code: '060',
+    name: 'VWZ60 + Stochastic14 · EMA400 · VWMA Exit',
+    symbol: 'HYPEUSDT',
+    asset: 'HYPE',
+    marketId: 24,
+    stopPct: 1,
+    backtest: {
+      // Gap-free native 1m candles aggregated into completed 5m decisions.
+      // Metrics use a conservative +1m fill, measured executable $100 p95,
+      // exact hourly funding and the same bounded EMA seed as production.
+      period: '2026-02-08 → 2026-07-31',
+      trades: 168,
+      winRatePct: 60.1,
+      profitFactor: 1.650,
+      netPct: 41.417,
+      maxDrawdownPct: 5.089,
+    },
+  },
   ...NATIVE_TREND_PORTFOLIO_MARKETS.map((market): StrategySpec => ({
     ...market,
     portfolioId: NATIVE_TREND_PORTFOLIO_ID,
@@ -815,7 +863,7 @@ const RETIRED_NATIVE_STRATEGY_ID_SET = new Set<string>(NATIVE_RETIRED_STRATEGY_I
 const NATIVE_LIVE_STRATEGY_IDS: readonly string[] = [];
 
 type NativeStrategyInfo = {
-  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi';
+  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic';
   mode: 'reclaim' | 'touch';
   threshold: number;
   period: number;
@@ -977,6 +1025,30 @@ const NATIVE_STRATEGY_INFO: Readonly<Record<string, NativeStrategyInfo>> = {
     realEnabled: false,
     noteRu: 'Новый двусторонний ZEC-кандидат. Консервативный нативный тест с входом через одну минуту: 112 сделок, +20.25%, PF 1.45, DD −6.33%, 4/4 фолда, положительные Long/Short и окна 30/60/90d. Только новый prospective Shadow; Real заблокирован.',
     noteEn: 'New two-sided ZEC candidate. Conservative native one-minute-delayed execution: 112 trades, +20.25%, PF 1.45, −6.33% DD, 4/4 folds, positive Long/Short and 30/60/90d windows. Fresh prospective Shadow only; Real is blocked.',
+  },
+  'xlm-vwz60-willr14-ema400-challenger': {
+    family: 'vwz_williams',
+    mode: 'touch',
+    threshold: 2.5,
+    secondaryThreshold: 20,
+    period: 60,
+    timeExitBars: 120,
+    trendFilter: 'ema400',
+    realEnabled: false,
+    noteRu: 'Новый двусторонний XLM-кандидат. При консервативном входе на одну минуту позже: 205 сделок, +27.68%, PF 1.41, DD −7.40%, 4/4 фолда, положительные IS/OOS, Long/Short и окна 30/60/90d. Runtime parity: 0 расхождений на 49 840 барах. Только новый prospective Shadow; Real заблокирован.',
+    noteEn: 'New two-sided XLM candidate. With a conservative one-minute-delayed fill: 205 trades, +27.68%, PF 1.41, −7.40% DD, 4/4 folds, positive IS/OOS, Long/Short and 30/60/90d windows. Runtime parity: zero mismatches across 49,840 bars. Fresh prospective Shadow only; Real is blocked.',
+  },
+  'hype-vwz60-stoch14-ema400-challenger': {
+    family: 'vwz_stochastic',
+    mode: 'touch',
+    threshold: 2.25,
+    secondaryThreshold: 20,
+    period: 60,
+    timeExitBars: 120,
+    trendFilter: 'ema400',
+    realEnabled: false,
+    noteRu: 'Новый двусторонний HYPE-кандидат. При консервативном входе на одну минуту позже: 168 сделок, +41.42%, PF 1.65, DD −5.09%, 4/4 фолда, положительные IS/OOS, Long/Short и окна 30/60/90d. Runtime parity: 0 расхождений на 49 840 барах. Только новый prospective Shadow; Real заблокирован.',
+    noteEn: 'New two-sided HYPE candidate. With a conservative one-minute-delayed fill: 168 trades, +41.42%, PF 1.65, −5.09% DD, 4/4 folds, positive IS/OOS, Long/Short and 30/60/90d windows. Runtime parity: zero mismatches across 49,840 bars. Fresh prospective Shadow only; Real is blocked.',
   },
   ...Object.fromEntries(NATIVE_TREND_PORTFOLIO_MARKETS.map((market) => [
     market.id,
@@ -2885,7 +2957,13 @@ function nativeRunnerHealth(lang: Lang, specs: readonly StrategySpec[]): string 
         : row.family === 'vwz_mfi'
           ? row.currentZ == null || row.secondaryOscillator == null
             ? '—' : `Z ${row.currentZ.toFixed(2)} · MFI ${row.secondaryOscillator.toFixed(1)}`
-      : row.currentZ == null ? '—' : `${row.currentZ.toFixed(2)} / ±${row.threshold.toFixed(1)}`;
+          : row.family === 'vwz_williams'
+            ? row.currentZ == null || row.secondaryOscillator == null
+              ? '—' : `Z ${row.currentZ.toFixed(2)} · W%R ${row.secondaryOscillator.toFixed(1)}`
+            : row.family === 'vwz_stochastic'
+              ? row.currentZ == null || row.secondaryOscillator == null
+                ? '—' : `Z ${row.currentZ.toFixed(2)} · STOCH ${row.secondaryOscillator.toFixed(1)}`
+            : row.currentZ == null ? '—' : `${row.currentZ.toFixed(2)} / ±${row.threshold.toFixed(1)}`;
     return `<tr>
       <td><b>${spec ? `STRAT-${spec.code} · ${spec.asset}` : esc(row.strategyId)}</b></td>
       <td class="num">${row.barTime == null ? '—' : utcShort(row.barTime)}</td>
@@ -3089,6 +3167,22 @@ function nativeEntryDescription(info: NativeStrategyInfo, lang: Lang): string {
       `Long: VWZ60<−${info.threshold}, MFI14<${level}, and close>EMA400. Short: VWZ60>+${info.threshold}, MFI14>${100 - level}, and close<EMA400.`,
     );
   }
+  if (info.family === 'vwz_williams') {
+    const edge = info.secondaryThreshold ?? 20;
+    return t(
+      lang,
+      `Long: VWZ60<−${info.threshold}, Williams %R14<−${100 - edge} и close>EMA400. Short: VWZ60>+${info.threshold}, Williams %R14>−${edge} и close<EMA400.`,
+      `Long: VWZ60<−${info.threshold}, Williams %R14<−${100 - edge}, and close>EMA400. Short: VWZ60>+${info.threshold}, Williams %R14>−${edge}, and close<EMA400.`,
+    );
+  }
+  if (info.family === 'vwz_stochastic') {
+    const edge = info.secondaryThreshold ?? 20;
+    return t(
+      lang,
+      `Long: VWZ60<−${info.threshold}, Stochastic14<${edge} и close>EMA400. Short: VWZ60>+${info.threshold}, Stochastic14>${100 - edge} и close<EMA400.`,
+      `Long: VWZ60<−${info.threshold}, Stochastic14<${edge}, and close>EMA400. Short: VWZ60>+${info.threshold}, Stochastic14>${100 - edge}, and close<EMA400.`,
+    );
+  }
   if (info.family === 'rsi') {
     return t(
       lang,
@@ -3131,10 +3225,12 @@ function nativeStrategyTooltip(spec: StrategySpec, lang: Lang): string | null {
       `${info.family === 'rsi_williams' ? `RSI${info.period}, Williams %R14` : `RSI${info.period}`} and EMA400 use completed Lighter 5m candles only.`,
     )
     : info.family === 'vwz' || info.family === 'vwz_mfi'
+      || info.family === 'vwz_williams'
+      || info.family === 'vwz_stochastic'
     ? t(
       lang,
-      `Volume Z-score${info.family === 'vwz_mfi' ? ' и MFI14' : ''} считается по завершённым 5m свечам Lighter с нативным объёмом.`,
-      `Volume Z-score${info.family === 'vwz_mfi' ? ' and MFI14' : ''} use completed Lighter 5m candles and native volume.`,
+      `Volume Z-score${info.family === 'vwz_mfi' ? ' и MFI14' : info.family === 'vwz_williams' ? ' и Williams %R14' : info.family === 'vwz_stochastic' ? ' и Stochastic14' : ''} считается по завершённым 5m свечам Lighter с нативным объёмом.`,
+      `Volume Z-score${info.family === 'vwz_mfi' ? ' and MFI14' : info.family === 'vwz_williams' ? ' and Williams %R14' : info.family === 'vwz_stochastic' ? ' and Stochastic14' : ''} use completed Lighter 5m candles and native volume.`,
     )
     : t(
       lang,
@@ -3144,6 +3240,8 @@ function nativeStrategyTooltip(spec: StrategySpec, lang: Lang): string | null {
   const exitMean = info.family === 'rsi' || info.family === 'rsi_williams'
     ? 'RSI50'
     : info.family === 'vwz' || info.family === 'vwz_mfi'
+      || info.family === 'vwz_williams'
+      || info.family === 'vwz_stochastic'
       ? `VWMA${info.period}` : `SMA${info.period}`;
   const timeExitHours = info.timeExitBars * 5 / 60;
   return [
@@ -3174,6 +3272,10 @@ function nativeStrategyGuide(
         ? 'RSI + WILLIAMS %R'
         : info.family === 'vwz_mfi'
           ? 'VOLUME Z + MFI'
+          : info.family === 'vwz_williams'
+            ? 'VOLUME Z + WILLIAMS %R'
+            : info.family === 'vwz_stochastic'
+              ? 'VOLUME Z + STOCHASTIC'
           : info.family === 'vwz' ? 'VOLUME Z' : 'Z';
     const historical = nativeHistoricalGate(spec);
     const realPathOpen = info.realEnabled && historical?.passed === true;
@@ -3760,7 +3862,11 @@ async function render(
   const scopeLabel = requested.strategy
     ? `STRAT-${requested.strategy.code} · ${requested.strategy.asset}`
     : requested.group === 'native'
-      ? t(lang, '2 самостоятельные + P2 · 15 рынков', '2 standalone + P2 · 15 markets')
+      ? t(
+        lang,
+        `${NATIVE_STANDALONE_STRATEGIES.length} самостоятельных + P2 · 15 рынков`,
+        `${NATIVE_STANDALONE_STRATEGIES.length} standalone + P2 · 15 markets`,
+      )
       : [...new Set(scopeSpecs.map((spec) => spec.asset))].join(' · ');
   const scopeMarketCount = new Set(scopeSpecs.map((spec) => spec.marketId)).size;
   const shadowAverageUsd = s.closed ? s.netUsd / s.closed : 0;

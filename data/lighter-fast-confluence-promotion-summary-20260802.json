@@ -1,0 +1,80 @@
+{
+  "version": "lighter-fast-confluence-promotion-v1",
+  "generatedAt": "2026-08-02T03:52:00.000Z",
+  "scope": {
+    "symbols": 21,
+    "timeframesMinutes": [1, 5],
+    "familiesTested": 4,
+    "commissionPct": 0,
+    "positionNotionalUsd": 100,
+    "selectionCost": "market-specific executable full-round-trip p95",
+    "funding": "exact hourly settlements",
+    "execution": "completed decision bar, next open, plus separate one-minute delayed audit"
+  },
+  "search": {
+    "oneMinuteQualified": [],
+    "fiveMinuteQualified": [
+      "XLM:CONF-VWZ60-2.5+WILLR14-20/80+EMA400",
+      "HYPE:CONF-VWZ60-2.25+STOCH14-20/80+EMA400"
+    ],
+    "reports": [
+      {
+        "path": "data/lighter-fast-confluence-universe-1m-20260802.json",
+        "sha256": "f6eceb6d4e6dda85a79a2945b7ba69af9972565d53bac3d23b5bd68c5eb63bda"
+      },
+      {
+        "path": "data/lighter-fast-confluence-universe-5m-20260802.json",
+        "sha256": "f434da8df96abc4c70ce319228f5f99f864453a8d3f2603ee939b47b63ca3d86"
+      },
+      {
+        "path": "data/lighter-fast-confluence-v2-universe-1m-20260802.json",
+        "sha256": "f7cef1c841f7f491b7a02e165404b954f3807294e0e777deceae6f80763757f8"
+      },
+      {
+        "path": "data/lighter-fast-confluence-v2-universe-5m-20260802.json",
+        "sha256": "56d826a0d2de37992aa3489defe9a1efca3cbe1a9cdbb10985c0a506ea9ceeea"
+      }
+    ]
+  },
+  "prospectiveShadow": [
+    {
+      "strategyId": "xlm-vwz60-willr14-ema400-challenger",
+      "symbol": "XLMUSDT",
+      "timeframeMinutes": 5,
+      "delayedTrades": 205,
+      "delayedNetPctUnits": 27.675554942756943,
+      "delayedProfitFactor": 1.4129199025018047,
+      "delayedMaxDrawdownPct": -7.399625128868377,
+      "delayedMeanL95Pct": 0.01828491020470592,
+      "positiveFolds": 4,
+      "longPctUnits": 10.906305142279813,
+      "shortPctUnits": 16.769249800477127,
+      "netRetention": 0.9610321185179642,
+      "auditSha256": "89a0453021b9a9adcadead95b7a02c7da38a1facefd2f17a65206653566b4052"
+    },
+    {
+      "strategyId": "hype-vwz60-stoch14-ema400-challenger",
+      "symbol": "HYPEUSDT",
+      "timeframeMinutes": 5,
+      "delayedTrades": 168,
+      "delayedNetPctUnits": 41.4170309406224,
+      "delayedProfitFactor": 1.649915641053921,
+      "delayedMaxDrawdownPct": -5.089021188724413,
+      "delayedMeanL95Pct": 0.10617688346315168,
+      "positiveFolds": 4,
+      "longPctUnits": 29.93279214982689,
+      "shortPctUnits": 11.484238790795516,
+      "netRetention": 0.7980261092966614,
+      "auditSha256": "93b9abca3696ea12aaeb61acac29c76aa91ac89def21a9dcb2955e57ad2360d9"
+    }
+  ],
+  "runtimeParity": {
+    "passed": true,
+    "signalMismatches": 0,
+    "reportSha256": "aae76ea1fdf2a7659ad11482917c2c1596506289416c601efb6a36a207f06203"
+  },
+  "real": {
+    "enabled": false,
+    "reason": "fresh prospective Shadow evidence required before any isolated manual canary"
+  }
+}

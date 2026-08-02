@@ -88,6 +88,10 @@ const ENABLE_TREND_MOMENTUM_RECLAIM =
   process.env.ENABLE_TREND_MOMENTUM_RECLAIM === '1';
 const ENABLE_TREND_VOLATILITY_FAMILIES =
   process.env.ENABLE_TREND_VOLATILITY_FAMILIES === '1';
+const ENABLE_FAST_CONFLUENCE_FAMILIES =
+  process.env.ENABLE_FAST_CONFLUENCE_FAMILIES === '1';
+const ENABLE_FAST_CONFLUENCE_FAMILIES_V2 =
+  process.env.ENABLE_FAST_CONFLUENCE_FAMILIES_V2 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -715,6 +719,121 @@ function rules(): Rule[] {
       },
       exit(a, i, side) {
         return side === 'long' ? a.close[i]! >= a.vwap60[i]! : a.close[i]! <= a.vwap60[i]!;
+      },
+    });
+  }
+
+  // Preregistered fast, mirrored oscillator suite. These are independent
+  // combinations of price deviation, range position and volume pressure; the
+  // exact parameters are frozen before running the universe sweep. The same
+  // completed-bar rule is applied to every market and both timeframes.
+  if (ENABLE_FAST_CONFLUENCE_FAMILIES) {
+    out.push({
+      name: 'CONF-VWZ60-2.5+WILLR14-20/80+EMA400',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        const current = a.vwapSd60[i]! > 0
+          ? (a.close[i]! - a.vwap60[i]!) / a.vwapSd60[i]!
+          : 0;
+        if (
+          current < -2.5
+          && a.williams14[i]! < -80
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          current > 2.5
+          && a.williams14[i]! > -20
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.vwap60[i]!
+          : a.close[i]! <= a.vwap60[i]!;
+      },
+    });
+    out.push({
+      name: 'CONF-RSI7-20/80+MFI14-35/65+EMA400',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        if (
+          a.rsi7[i]! < 20
+          && a.mfi14[i]! < 35
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          a.rsi7[i]! > 80
+          && a.mfi14[i]! > 65
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.rsi7[i]! >= 50 : a.rsi7[i]! <= 50;
+      },
+    });
+  }
+
+  // Second preregistered mirrored suite. Parameters are frozen before the
+  // universe run: one range/volume-weighted setup and one volatility/flow
+  // setup, each aligned with EMA400 and evaluated on completed bars only.
+  if (ENABLE_FAST_CONFLUENCE_FAMILIES_V2) {
+    out.push({
+      name: 'CONF-VWZ60-2.25+STOCH14-20/80+EMA400',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        const current = a.vwapSd60[i]! > 0
+          ? (a.close[i]! - a.vwap60[i]!) / a.vwapSd60[i]!
+          : 0;
+        if (
+          current < -2.25
+          && a.stoch14[i]! < 20
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          current > 2.25
+          && a.stoch14[i]! > 80
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.vwap60[i]!
+          : a.close[i]! <= a.vwap60[i]!;
+      },
+    });
+    out.push({
+      name: 'CONF-BB20-2+MFI14-30/70+EMA400',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: 120,
+      entry(a, i) {
+        const lower = a.sma20[i]! - 2 * a.sd20[i]!;
+        const upper = a.sma20[i]! + 2 * a.sd20[i]!;
+        if (
+          a.close[i]! < lower
+          && a.mfi14[i]! < 30
+          && a.close[i]! > a.ema400[i]!
+        ) return 'long';
+        if (
+          a.close[i]! > upper
+          && a.mfi14[i]! > 70
+          && a.close[i]! < a.ema400[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.close[i]! >= a.sma20[i]!
+          : a.close[i]! <= a.sma20[i]!;
       },
     });
   }

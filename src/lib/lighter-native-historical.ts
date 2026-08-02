@@ -16,6 +16,10 @@ export const NATIVE_HISTORICAL_ZEC_CONFLUENCE_SHA256 =
   '5e61b12d3d6b66f4036c37372d8743f49fcf7f5aa7b205596c20d0e6aa555734';
 export const NATIVE_HISTORICAL_DATA_CONFLUENCE_SHA256 =
   'd3bb8d91fa961e02805482db07608ce763b1531cdb4f6b193dfb43b728b72d07';
+export const NATIVE_HISTORICAL_FAST_CONFLUENCE_SHA256 =
+  '2204431695c0bc47d1a05f454368896b2e3bb4ce933fa97eca0f8e15b3de59bf';
+export const NATIVE_HISTORICAL_FAST_CONFLUENCE_V2_SHA256 =
+  '26a01b5c395885430325284b736727585e214c82d2ff998b1c0399955f37f2cd';
 
 const HISTORICAL_CANDIDATES = [
   { strategyId: 'sol-z60-reclaim', symbol: 'SOL', rule: 'Z60-3-reclaim' },
@@ -69,6 +73,18 @@ const DATA_CONFLUENCE_HISTORICAL_CANDIDATES = [{
   strategyId: 'data-vwz60-mfi14-ema400',
   symbol: 'DATA',
   rule: 'CONF-VWZ60-2.5+MFI14-35/65+EMA400',
+}] as const;
+
+const FAST_CONFLUENCE_HISTORICAL_CANDIDATES = [{
+  strategyId: 'xlm-vwz60-willr14-ema400-challenger',
+  symbol: 'XLM',
+  rule: 'CONF-VWZ60-2.5+WILLR14-20/80+EMA400',
+}] as const;
+
+const FAST_CONFLUENCE_V2_HISTORICAL_CANDIDATES = [{
+  strategyId: 'hype-vwz60-stoch14-ema400-challenger',
+  symbol: 'HYPE',
+  rule: 'CONF-VWZ60-2.25+STOCH14-20/80+EMA400',
 }] as const;
 
 type HistoricalWindow = {
@@ -286,6 +302,8 @@ export function evaluateNativeHistoricalEvidence(
   rsiSupplementalValue?: unknown,
   zecConfluenceValue?: unknown,
   dataConfluenceValue?: unknown,
+  fastConfluenceValue?: unknown,
+  fastConfluenceV2Value?: unknown,
 ) {
   if (!value || typeof value !== 'object') throw new Error('historical evidence missing');
   const report = value as HistoricalReport;
@@ -397,6 +415,22 @@ export function evaluateNativeHistoricalEvidence(
       'CONF-VWZ60-2.5+MFI14-35/65+EMA400',
       'DATA confluence',
     );
+  const fastConfluenceReport = fastConfluenceValue == null
+    ? null
+    : validateSupplementalReport(
+      fastConfluenceValue,
+      NATIVE_HISTORICAL_FAST_CONFLUENCE_SHA256,
+      'CONF-',
+      'fast confluence',
+    );
+  const fastConfluenceV2Report = fastConfluenceV2Value == null
+    ? null
+    : validateSupplementalReport(
+      fastConfluenceV2Value,
+      NATIVE_HISTORICAL_FAST_CONFLUENCE_V2_SHA256,
+      'CONF-',
+      'fast confluence v2',
+    );
   if (dataSupplementalReport != null) {
     const symbols = dataSupplementalReport.input.symbols;
     const sources = dataSupplementalReport.input.candleSources;
@@ -433,6 +467,22 @@ export function evaluateNativeHistoricalEvidence(
       || (sources as Record<string, unknown>).DATA !== 'direct'
     ) throw new Error('DATA confluence historical evidence source contract invalid');
   }
+  if (fastConfluenceReport != null) {
+    const sources = fastConfluenceReport.input.candleSources;
+    if (
+      !sources
+      || typeof sources !== 'object'
+      || (sources as Record<string, unknown>).XLM !== 'aggregated_from_1m'
+    ) throw new Error('fast confluence historical evidence source contract invalid');
+  }
+  if (fastConfluenceV2Report != null) {
+    const sources = fastConfluenceV2Report.input.candleSources;
+    if (
+      !sources
+      || typeof sources !== 'object'
+      || (sources as Record<string, unknown>).HYPE !== 'aggregated_from_1m'
+    ) throw new Error('fast confluence v2 historical evidence source contract invalid');
+  }
   const supplementalCandidates = evaluateSupplementalCandidates(
     supplementalReport,
     SUPPLEMENTAL_HISTORICAL_CANDIDATES,
@@ -465,6 +515,18 @@ export function evaluateNativeHistoricalEvidence(
     'DATA confluence',
     true,
   );
+  const fastConfluenceCandidates = evaluateSupplementalCandidates(
+    fastConfluenceReport,
+    FAST_CONFLUENCE_HISTORICAL_CANDIDATES,
+    'fast confluence',
+    true,
+  );
+  const fastConfluenceV2Candidates = evaluateSupplementalCandidates(
+    fastConfluenceV2Report,
+    FAST_CONFLUENCE_V2_HISTORICAL_CANDIDATES,
+    'fast confluence v2',
+    true,
+  );
 
   const portfolioRule = 'Z60STACK-2.5-touch';
   const portfolioRows = report.portfolioRows.filter((row) => row.rule === portfolioRule);
@@ -481,6 +543,8 @@ export function evaluateNativeHistoricalEvidence(
       ...rsiSupplementalCandidates,
       ...zecConfluenceCandidates,
       ...dataConfluenceCandidates,
+      ...fastConfluenceCandidates,
+      ...fastConfluenceV2Candidates,
     ],
     supplementalSourceSha256: supplementalReport == null
       ? null
@@ -500,6 +564,12 @@ export function evaluateNativeHistoricalEvidence(
     dataConfluenceSourceSha256: dataConfluenceReport == null
       ? null
       : nativeHistoricalReportSha256(dataConfluenceReport),
+    fastConfluenceSourceSha256: fastConfluenceReport == null
+      ? null
+      : nativeHistoricalReportSha256(fastConfluenceReport),
+    fastConfluenceV2SourceSha256: fastConfluenceV2Report == null
+      ? null
+      : nativeHistoricalReportSha256(fastConfluenceV2Report),
     portfolio: {
       portfolioId: 'z60stack25-portfolio',
       rule: portfolioRule,

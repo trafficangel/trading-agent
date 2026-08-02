@@ -16,9 +16,13 @@ import {
 import {
   evaluateRsiWilliamsTrend,
   evaluateVwzMfiTrend,
+  evaluateVwzStochasticTrend,
+  evaluateVwzWilliamsTrend,
   rsiWilliamsExit,
   type RsiWilliamsSnapshot,
   type VwzMfiSnapshot,
+  type VwzStochasticSnapshot,
+  type VwzWilliamsSnapshot,
 } from '../lib/lighter-oscillator-confluence.js';
 import {
   allowsEntryByEfficiency,
@@ -163,7 +167,7 @@ type LastClosedRow = {
 type NativeStrategy = {
   id: string;
   timeframeMinutes: NativeTimeframeMinutes;
-  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi';
+  family: 'zscore' | 'vwz' | 'rsi' | 'rsi_williams' | 'vwz_mfi' | 'vwz_williams' | 'vwz_stochastic';
   mode: Z60EntryMode;
   threshold: number;
   auxiliaryThreshold?: number;
@@ -174,7 +178,7 @@ type NativeStrategy = {
 };
 
 type NativeSnapshot = Z60Snapshot | RsiTrendPullbackSnapshot
-  | RsiWilliamsSnapshot | VwzMfiSnapshot;
+  | RsiWilliamsSnapshot | VwzMfiSnapshot | VwzWilliamsSnapshot | VwzStochasticSnapshot;
 
 type NativeFeed = {
   symbol: string;
@@ -198,6 +202,16 @@ const BASE_FEEDS: readonly NativeFeed[] = [
         trendFilter: 'ema400',
         maxBars: 120,
       },
+      {
+        id: 'hype-vwz60-stoch14-ema400-challenger',
+        timeframeMinutes: 5,
+        family: 'vwz_stochastic',
+        mode: 'touch',
+        threshold: 2.25,
+        auxiliaryThreshold: 20,
+        trendFilter: 'ema400',
+        maxBars: 120,
+      },
     ],
   },
   {
@@ -211,6 +225,16 @@ const BASE_FEEDS: readonly NativeFeed[] = [
         mode: 'touch',
         threshold: 3,
         efficiencyMax: 0.25,
+      },
+      {
+        id: 'xlm-vwz60-willr14-ema400-challenger',
+        timeframeMinutes: 5,
+        family: 'vwz_williams',
+        mode: 'touch',
+        threshold: 2.5,
+        auxiliaryThreshold: 20,
+        trendFilter: 'ema400',
+        maxBars: 120,
       },
     ],
   },
@@ -369,7 +393,9 @@ function recordEvaluation(
     currentRsi: 'currentRsi' in snapshot ? snapshot.currentRsi : null,
     secondaryOscillator: 'currentWilliams' in snapshot
       ? snapshot.currentWilliams
-      : 'currentMfi' in snapshot ? snapshot.currentMfi : null,
+      : 'currentMfi' in snapshot
+        ? snapshot.currentMfi
+        : 'currentStochastic' in snapshot ? snapshot.currentStochastic : null,
     error: null,
   });
 }
@@ -680,6 +706,24 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
               strategy.auxiliaryThreshold ?? 35,
               400,
             )
+            : strategy.family === 'vwz_williams'
+            ? evaluateVwzWilliamsTrend(
+              strategyBars,
+              60,
+              strategy.threshold,
+              14,
+              strategy.auxiliaryThreshold ?? 20,
+              400,
+            )
+            : strategy.family === 'vwz_stochastic'
+            ? evaluateVwzStochasticTrend(
+              strategyBars,
+              60,
+              strategy.threshold,
+              14,
+              strategy.auxiliaryThreshold ?? 20,
+              400,
+            )
             : strategy.trendFilter
             ? strategy.trendFilter === 'ema200_400'
               ? evaluateTrendStackZ60(
@@ -732,6 +776,8 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
                   ? strategy.family === 'rsi' || strategy.family === 'rsi_williams'
                     ? 'rsi50_cross'
                     : strategy.family === 'vwz' || strategy.family === 'vwz_mfi'
+                      || strategy.family === 'vwz_williams'
+                      || strategy.family === 'vwz_stochastic'
                       ? 'vwma60_cross' : 'sma60_cross'
                   : `time_${maxBars}_bars`,
                 open.side,
@@ -749,6 +795,8 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
                   ? strategy.family === 'rsi' || strategy.family === 'rsi_williams'
                     ? 'rsi50_cross'
                     : strategy.family === 'vwz' || strategy.family === 'vwz_mfi'
+                      || strategy.family === 'vwz_williams'
+                      || strategy.family === 'vwz_stochastic'
                       ? 'vwma60_cross' : 'sma60_cross'
                   : `time_${maxBars}_bars`,
                 }, 'lighter-z60: native exit signal');
@@ -890,6 +938,48 @@ async function poll(timeframeMinutes: NativeTimeframeMinutes): Promise<void> {
                 }
                 if (value.currentZ > strategy.threshold && value.currentMfi <= 100 - mfiLevel) {
                   return 'mfi_not_confirmed';
+                }
+                return nativeWaitingReason({
+                  mode: strategy.mode,
+                  threshold: strategy.threshold,
+                  previousZ: value.previousZ,
+                  currentZ: value.currentZ,
+                  close: value.close,
+                  trendMean: value.trendMean,
+                });
+              })()
+              : strategy.family === 'vwz_williams'
+              ? (() => {
+                const value = snapshot as VwzWilliamsSnapshot;
+                const edge = strategy.auxiliaryThreshold ?? 20;
+                if (value.currentZ < -strategy.threshold
+                  && value.currentWilliams >= -100 + edge) {
+                  return 'williams_not_confirmed';
+                }
+                if (value.currentZ > strategy.threshold
+                  && value.currentWilliams <= -edge) {
+                  return 'williams_not_confirmed';
+                }
+                return nativeWaitingReason({
+                  mode: strategy.mode,
+                  threshold: strategy.threshold,
+                  previousZ: value.previousZ,
+                  currentZ: value.currentZ,
+                  close: value.close,
+                  trendMean: value.trendMean,
+                });
+              })()
+              : strategy.family === 'vwz_stochastic'
+              ? (() => {
+                const value = snapshot as VwzStochasticSnapshot;
+                const edge = strategy.auxiliaryThreshold ?? 20;
+                if (value.currentZ < -strategy.threshold
+                  && value.currentStochastic >= edge) {
+                  return 'stochastic_not_confirmed';
+                }
+                if (value.currentZ > strategy.threshold
+                  && value.currentStochastic <= 100 - edge) {
+                  return 'stochastic_not_confirmed';
                 }
                 return nativeWaitingReason({
                   mode: strategy.mode,
