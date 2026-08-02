@@ -33,18 +33,25 @@ import {
 } from '../lib/lighter-z60.js';
 import { logger } from '../lib/logger.js';
 import { assertNativeStandaloneLifecycle } from '../lib/lighter-native-strategy-lifecycle.js';
+import {
+  aggregateCompleteNativeBars,
+  NATIVE_MINUTE_MS,
+  targetCompletedNativeBar,
+  type NativeRawCandle,
+} from '../lib/lighter-native-timeframe.js';
 import { queueLighterLuxalgoSignal } from '../strategies/lighter-luxalgo-lab.js';
 
-const MINUTE_MS = 60_000;
+const MINUTE_MS = NATIVE_MINUTE_MS;
 const BAR_MS = 5 * MINUTE_MS;
 const HISTORY_BARS = 66;
 // EMA400 needs substantially more than one period of warmup. A 500-bar seed
 // produced a live trend-side mismatch on LIT; the original 1,500-bar seed
 // matched the portfolio rules but missed two rare DATA confluence decisions.
-// Four 500-bar pages are sufficient to reproduce full-history EMA400 entry
-// decisions for the frozen oscillator candidates with zero signal mismatches.
+// Twenty 500-minute pages are sufficient to reproduce full-history EMA400
+// entry decisions from the exact aggregated source used by frozen research.
 const TREND_HISTORY_BARS = 2_000;
-const TREND_PAGE_BARS = 500;
+const TREND_PAGE_MINUTES = 500;
+const TREND_PAGE_BARS = TREND_PAGE_MINUTES / 5;
 const TIME_EXIT_BARS = 240;
 // Lighter commonly publishes the fifth one-minute candle 15–25 seconds after
 // the nominal 5m boundary. Waiting 25s avoids a guaranteed failed request while
@@ -53,19 +60,10 @@ const PUBLISH_GRACE_MS = 25_000;
 const RETRY_MS = 5_000;
 const FETCH_CONCURRENCY = 4;
 
-type RawCandle = {
-  t?: unknown;
-  o?: unknown;
-  h?: unknown;
-  l?: unknown;
-  c?: unknown;
-  v?: unknown;
-};
-
 type CandleResponse = {
   code?: unknown;
   message?: unknown;
-  c?: RawCandle[];
+  c?: NativeRawCandle[];
 };
 
 type OpenRow = {
@@ -205,11 +203,6 @@ const lastEvaluatedBars = new Map<string, number>();
 const runnerEvaluations = new Map<string, NativeRunnerEvaluation>();
 const trendBarCache = new Map<number, Vwz60Bar[]>();
 
-function finite(value: unknown): number | null {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
 function recordError(
   strategy: NativeStrategy,
   feed: NativeFeed,
@@ -302,53 +295,7 @@ function persistRunnerStatus(target: number): void {
 }
 
 function targetCompletedBar(now: number): number {
-  return Math.floor((now - PUBLISH_GRACE_MS) / BAR_MS) * BAR_MS - BAR_MS;
-}
-
-function aggregateCompleteFiveMinuteBars(
-  raw: readonly RawCandle[],
-  latestBarTime: number,
-): Vwz60Bar[] {
-  const buckets = new Map<number, {
-    candles: Map<number, { close: number; volume: number }>;
-  }>();
-
-  for (const candle of raw) {
-    const time = finite(candle.t);
-    const close = finite(candle.c);
-    // Lighter omits zero-valued fields from candle responses. A missing `v`
-    // therefore means zero volume, not a missing minute.
-    const volume = finite(candle.v) ?? 0;
-    if (
-      time == null
-      || close == null
-      || close <= 0
-      || volume < 0
-      || time % MINUTE_MS !== 0
-    ) continue;
-    const bucket = Math.floor(time / BAR_MS) * BAR_MS;
-    if (bucket > latestBarTime) continue;
-    const state = buckets.get(bucket) ?? {
-      candles: new Map<number, { close: number; volume: number }>(),
-    };
-    state.candles.set(time, { close, volume });
-    buckets.set(bucket, state);
-  }
-
-  return [...buckets.entries()]
-    .filter(([bucket, state]) => {
-      if (state.candles.size !== 5) return false;
-      for (let offset = 0; offset < 5; offset += 1) {
-        if (!state.candles.has(bucket + offset * MINUTE_MS)) return false;
-      }
-      return true;
-    })
-    .sort(([a], [b]) => a - b)
-    .map(([time, state]) => ({
-      time,
-      close: state.candles.get(time + 4 * MINUTE_MS)!.close,
-      volume: [...state.candles.values()].reduce((total, candle) => total + candle.volume, 0),
-    }));
+  return targetCompletedNativeBar(now, 5, PUBLISH_GRACE_MS);
 }
 
 async function fetchBars(latestBarTime: number, marketId: number): Promise<Vwz60Bar[]> {
@@ -376,7 +323,7 @@ async function fetchBars(latestBarTime: number, marketId: number): Promise<Vwz60
   if (Number(body.code) !== 200) {
     throw new Error(`candles_${String(body.code)}:${String(body.message ?? 'unknown')}`);
   }
-  const bars = aggregateCompleteFiveMinuteBars(body.c ?? [], latestBarTime);
+  const bars = aggregateCompleteNativeBars(body.c ?? [], 5, latestBarTime);
   if (bars.at(-1)?.time !== latestBarTime) throw new Error('latest_completed_bar_missing');
   return bars;
 }
@@ -407,14 +354,17 @@ export async function fetchTrendBars(
   }
 
   while (remaining > 0) {
+    // The research and frozen latency audit build every completed 5m candle
+    // from five native 1m candles. Fetch the same source here; direct exchange
+    // 5m OHLC can diverge and would make Williams/MFI signals non-reproducible.
     const pageBars = Math.min(TREND_PAGE_BARS, remaining);
     const pageStart = pageEnd - pageBars * BAR_MS;
     const url = new URL('https://mainnet.zklighter.elliot.ai/api/v1/candles');
     url.searchParams.set('market_id', String(marketId));
-    url.searchParams.set('resolution', '5m');
+    url.searchParams.set('resolution', '1m');
     url.searchParams.set('start_timestamp', String(pageStart));
     url.searchParams.set('end_timestamp', String(pageEnd));
-    url.searchParams.set('count_back', String(pageBars));
+    url.searchParams.set('count_back', String(pageBars * 5));
     url.searchParams.set('set_timestamp_to_end', 'false');
 
     const response = await request(url, {
@@ -425,25 +375,12 @@ export async function fetchTrendBars(
     if (Number(body.code) !== 200) {
       throw new Error(`trend_candles_${String(body.code)}:${String(body.message ?? 'unknown')}`);
     }
-    for (const candle of body.c ?? []) {
-      const time = finite(candle.t);
-      const close = finite(candle.c);
-      const high = finite(candle.h);
-      const low = finite(candle.l);
-      const volume = finite(candle.v) ?? 0;
-      if (
-        time == null
-        || close == null
-        || close <= 0
-        || high == null
-        || low == null
-        || high < low
-        || volume < 0
-        || time % BAR_MS !== 0
-        || time < pageStart
-        || time >= pageEnd
-      ) continue;
-      unique.set(time, { time, close, high, low, volume });
+    for (const bar of aggregateCompleteNativeBars(
+      body.c ?? [],
+      5,
+      pageEnd - BAR_MS,
+    )) {
+      if (bar.time >= pageStart && bar.time < pageEnd) unique.set(bar.time, bar);
     }
     pageEnd = pageStart;
     remaining -= pageBars;
