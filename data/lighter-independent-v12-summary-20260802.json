@@ -1,0 +1,95 @@
+{
+  "version": "lighter-independent-v12-summary-v1",
+  "generatedAt": "2026-08-02T07:21:48Z",
+  "decision": "reject_both_frozen_families",
+  "preregistration": {
+    "path": "data/lighter-independent-v12-preregistered-20260802.json",
+    "sha256": "07093035afc6316ff902946dc7cd7af65f731b28391581ed96fd87c14e3e8256"
+  },
+  "evidence": [
+    { "path": "data/lighter-independent-v12-universe-5m-20260802.json", "sha256": "63d87d5dd304f0b937686c722dadbaa5a1df4fb39a3db299695276f1a2603ba2", "qualified": 0 },
+    { "path": "data/lighter-independent-v12-universe-1m-a-20260802.json", "sha256": "a67a566c6c70e8dbbe1d8175c2298c74fb81ca9002d4106089f961ddcc5628af", "qualified": 0 },
+    { "path": "data/lighter-independent-v12-universe-1m-b-20260802.json", "sha256": "8d316f610b3eec772fc7c5eb455d8d68e0ee1e0349d6920651b6b89391f4612b", "qualified": 0 },
+    { "path": "data/lighter-independent-v12-universe-1m-c-20260802.json", "sha256": "c884640c088dda288a7ccebd81414fcf3da24a45d489aaac28a9e81e9984b225", "qualified": 0 },
+    { "path": "data/lighter-independent-v12-universe-1m-d-20260802.json", "sha256": "7efa2169ba38434094c2402b7b1316cb4bc2802b7bd99a37a947666206c78fe1", "qualified": 0 },
+    { "path": "data/lighter-independent-v12-holdout-1m-20260802.json", "sha256": "c81a72b8eb0881d27b5da8125de68e80349237cb676b53ea4f8e5208f3abae88", "qualified": 0 },
+    { "path": "data/lighter-independent-v12-holdout-5m-20260802.json", "sha256": "5a9d7ee09220c2caa024e67f6a9a9d238bda6aee4a85c959cfb227ccb2c37cb1", "qualified": 0 }
+  ],
+  "bestRejected": [
+    {
+      "scope": "main_5m",
+      "symbol": "DOGE",
+      "rule": "V12-KAMA10/30-X+ER60>0.25+EMA200-H240M",
+      "trades": 93,
+      "netAfterMeasuredCostsAndFundingPct": 12.3236,
+      "profitFactor": 1.3826,
+      "meanL95Pct": -0.0846,
+      "positiveFolds": 1,
+      "maxDrawdownPct": -14.1140,
+      "failures": [
+        "OOS is -7.0803%",
+        "mean L95 is not positive",
+        "only one of four folds is positive",
+        "30d, 60d and 90d windows are all negative with both sides negative"
+      ]
+    },
+    {
+      "scope": "holdout_5m",
+      "symbol": "ZEC",
+      "rule": "V12-KAMA10/30-X+ER60>0.25+EMA200-H240M",
+      "trades": 53,
+      "netAfterMeasuredCostsAndFundingPct": 16.1338,
+      "profitFactor": 1.5148,
+      "meanL95Pct": -0.2616,
+      "positiveFolds": 3,
+      "maxDrawdownPct": -7.7357,
+      "failures": [
+        "mean L95 is not positive",
+        "latest 30d is -4.1813% with both Long and Short negative",
+        "mixed regime is -6.4827%",
+        "low-volatility regime is -7.6543%"
+      ]
+    },
+    {
+      "scope": "main_5m",
+      "symbol": "BTC",
+      "rule": "V12-VORTEX14-X+ADX20+EMA200-H240M",
+      "trades": 1213,
+      "netAfterMeasuredCostsAndFundingPct": -0.4536,
+      "profitFactor": 0.9970,
+      "meanL95Pct": -0.0224,
+      "positiveFolds": 2,
+      "maxDrawdownPct": -18.7825,
+      "failures": [
+        "net and OOS are negative",
+        "profit factor is below 1.20",
+        "mean L95 is not positive",
+        "drawdown exceeds 15%",
+        "all recent windows are negative"
+      ]
+    },
+    {
+      "scope": "main_1m",
+      "symbol": "ETH",
+      "rule": "V12-KAMA10/30-X+ER60>0.25+EMA200-H240M",
+      "trades": 283,
+      "netAfterMeasuredCostsAndFundingPct": -12.2732,
+      "profitFactor": 0.8091,
+      "meanL95Pct": -0.1139,
+      "positiveFolds": 1,
+      "maxDrawdownPct": -15.7533,
+      "failures": [
+        "net, IS, OOS, Long and Short are all negative",
+        "profit factor is below 1.20",
+        "mean L95 is not positive",
+        "drawdown exceeds 15%"
+      ]
+    }
+  ],
+  "action": {
+    "shadowAdded": false,
+    "realAdded": false,
+    "retuneAllowed": false,
+    "nextEvidence": "Do not tune Vortex or KAMA on these results. Preserve ZEC KAMA as a rejected near-miss and reconsider it only on future unseen prospective bars after the latest 30-day and regime failures can be evaluated without changing the frozen rule."
+  }
+}

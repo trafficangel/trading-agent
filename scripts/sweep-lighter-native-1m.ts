@@ -110,6 +110,8 @@ const ENABLE_INDEPENDENT_FAMILIES_V10 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V10 === '1';
 const ENABLE_INDEPENDENT_FAMILIES_V11 =
   process.env.ENABLE_INDEPENDENT_FAMILIES_V11 === '1';
+const ENABLE_INDEPENDENT_FAMILIES_V12 =
+  process.env.ENABLE_INDEPENDENT_FAMILIES_V12 === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -191,6 +193,10 @@ type Arrays = {
   stochasticRsi14D3: number[];
   trueStrengthIndex25x13: number[];
   trueStrengthSignal7: number[];
+  vortexPlus14: number[];
+  vortexMinus14: number[];
+  kama10: number[];
+  kama30: number[];
   vwap60: number[];
   vwapSd60: number[];
   efficiencyRatio60: number[];
@@ -567,6 +573,74 @@ function trueStrengthIndex(
   return { tsi, signal: ema(tsi, signalPeriod) };
 }
 
+/** Completed-bar Vortex Indicator using rolling true-range normalisation. */
+function vortexIndicator(
+  candles: Candle[],
+  period: number,
+): { plus: number[]; minus: number[] } {
+  const plus = new Array<number>(candles.length).fill(1);
+  const minus = new Array<number>(candles.length).fill(1);
+  const trueRanges = new Array<number>(candles.length).fill(0);
+  const plusMovement = new Array<number>(candles.length).fill(0);
+  const minusMovement = new Array<number>(candles.length).fill(0);
+  let trSum = 0;
+  let plusSum = 0;
+  let minusSum = 0;
+  for (let i = 1; i < candles.length; i += 1) {
+    const current = candles[i]!;
+    const previous = candles[i - 1]!;
+    trueRanges[i] = Math.max(
+      current.h - current.l,
+      Math.abs(current.h - previous.c),
+      Math.abs(current.l - previous.c),
+    );
+    plusMovement[i] = Math.abs(current.h - previous.l);
+    minusMovement[i] = Math.abs(current.l - previous.h);
+    trSum += trueRanges[i]!;
+    plusSum += plusMovement[i]!;
+    minusSum += minusMovement[i]!;
+    if (i >= period) {
+      trSum -= trueRanges[i - period]!;
+      plusSum -= plusMovement[i - period]!;
+      minusSum -= minusMovement[i - period]!;
+    }
+    if (i + 1 >= period && trSum > 0) {
+      plus[i] = plusSum / trSum;
+      minus[i] = minusSum / trSum;
+    }
+  }
+  return { plus, minus };
+}
+
+/** Kaufman Adaptive Moving Average; every value uses completed closes only. */
+function kaufmanAdaptiveMovingAverage(
+  values: number[],
+  efficiencyPeriod: number,
+  fastPeriod = 2,
+  slowPeriod = 30,
+): number[] {
+  if (!values.length) return [];
+  const output = new Array<number>(values.length).fill(values[0]!);
+  const fast = 2 / (fastPeriod + 1);
+  const slow = 2 / (slowPeriod + 1);
+  let volatility = 0;
+  for (let i = 1; i < values.length; i += 1) {
+    volatility += Math.abs(values[i]! - values[i - 1]!);
+    if (i > efficiencyPeriod) {
+      volatility -= Math.abs(
+        values[i - efficiencyPeriod]! - values[i - efficiencyPeriod - 1]!,
+      );
+    }
+    const change = i >= efficiencyPeriod
+      ? Math.abs(values[i]! - values[i - efficiencyPeriod]!)
+      : 0;
+    const efficiency = volatility > 0 ? change / volatility : 0;
+    const smoothing = (efficiency * (fast - slow) + slow) ** 2;
+    output[i] = output[i - 1]! + smoothing * (values[i]! - output[i - 1]!);
+  }
+  return output;
+}
+
 function rollingVolumeWeighted(
   candles: Candle[],
   period: number,
@@ -735,6 +809,7 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
   const rsi14Values = rsi(c, 14);
   const stochasticRsi14 = stochasticRsi(rsi14Values, 14, 3, 3);
   const tsi25x13 = trueStrengthIndex(close, 25, 13, 7);
+  const vortex14 = vortexIndicator(c, 14);
   const atrPctMean288 = sma(
     atr14Values.map((value, i) => close[i]! > 0 ? value / close[i]! : 0),
     288,
@@ -787,6 +862,10 @@ function build(c: Candle[], funding: LighterFundingSeries | undefined): Arrays {
     stochasticRsi14D3: stochasticRsi14.d,
     trueStrengthIndex25x13: tsi25x13.tsi,
     trueStrengthSignal7: tsi25x13.signal,
+    vortexPlus14: vortex14.plus,
+    vortexMinus14: vortex14.minus,
+    kama10: kaufmanAdaptiveMovingAverage(close, 10),
+    kama30: kaufmanAdaptiveMovingAverage(close, 30),
     vwap60: vw60.mean,
     vwapSd60: vw60.deviation,
     efficiencyRatio60: efficiencyRatio(close, 60),
@@ -1582,6 +1661,63 @@ function rules(): Rule[] {
         return side === 'long'
           ? a.trueStrengthIndex25x13[i]! >= 0
           : a.trueStrengthIndex25x13[i]! <= 0;
+      },
+    });
+  }
+
+  // Preregistered independent v12 suite. Vortex tests directional range
+  // expansion confirmed by DMI trend strength, while dual KAMA tests an
+  // adaptive trend crossover only when the completed path is efficient.
+  // Rules are fixed, mirrored and shared by every symbol/timeframe; entries
+  // fill at the next native bar open and never use the signal bar fill.
+  if (ENABLE_INDEPENDENT_FAMILIES_V12) {
+    out.push({
+      name: 'V12-VORTEX14-X+ADX20+EMA200-H240M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(240 / BAR_MINUTES)),
+      entry(a, i) {
+        const crossedUp = a.vortexPlus14[i - 1]! <= a.vortexMinus14[i - 1]!
+          && a.vortexPlus14[i]! > a.vortexMinus14[i]!;
+        const crossedDown = a.vortexMinus14[i - 1]! <= a.vortexPlus14[i - 1]!
+          && a.vortexMinus14[i]! > a.vortexPlus14[i]!;
+        if (crossedUp && a.adx14[i]! >= 20 && a.close[i]! > a.ema200[i]!) return 'long';
+        if (crossedDown && a.adx14[i]! >= 20 && a.close[i]! < a.ema200[i]!) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.vortexMinus14[i]! > a.vortexPlus14[i]!
+          : a.vortexPlus14[i]! > a.vortexMinus14[i]!;
+      },
+    });
+
+    out.push({
+      name: 'V12-KAMA10/30-X+ER60>0.25+EMA200-H240M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(240 / BAR_MINUTES)),
+      entry(a, i) {
+        const crossedUp = a.kama10[i - 1]! <= a.kama30[i - 1]!
+          && a.kama10[i]! > a.kama30[i]!;
+        const crossedDown = a.kama10[i - 1]! >= a.kama30[i - 1]!
+          && a.kama10[i]! < a.kama30[i]!;
+        if (
+          crossedUp
+          && a.efficiencyRatio60[i]! > 0.25
+          && a.close[i]! > a.ema200[i]!
+        ) return 'long';
+        if (
+          crossedDown
+          && a.efficiencyRatio60[i]! > 0.25
+          && a.close[i]! < a.ema200[i]!
+        ) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.kama10[i]! < a.kama30[i]!
+          : a.kama10[i]! > a.kama30[i]!;
       },
     });
   }
