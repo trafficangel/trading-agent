@@ -1,0 +1,2011 @@
+{
+  "version": "lighter-native-sweep-v2",
+  "generatedAt": "2026-08-02T02:10:59.762Z",
+  "input": {
+    "symbols": [
+      "AAVE",
+      "ARB",
+      "BNB",
+      "BTC",
+      "DOGE",
+      "ENA",
+      "ETH",
+      "GRAM",
+      "HYPE",
+      "JUP",
+      "LINK",
+      "LIT",
+      "LTC",
+      "NEAR",
+      "PUMP",
+      "SOL",
+      "TAO",
+      "UNI",
+      "XLM",
+      "XMR",
+      "XRP"
+    ],
+    "candleSources": {
+      "AAVE": "aggregated_from_1m",
+      "ARB": "aggregated_from_1m",
+      "BNB": "aggregated_from_1m",
+      "BTC": "aggregated_from_1m",
+      "DOGE": "aggregated_from_1m",
+      "ENA": "aggregated_from_1m",
+      "ETH": "aggregated_from_1m",
+      "GRAM": "aggregated_from_1m",
+      "HYPE": "aggregated_from_1m",
+      "JUP": "aggregated_from_1m",
+      "LINK": "aggregated_from_1m",
+      "LIT": "aggregated_from_1m",
+      "LTC": "aggregated_from_1m",
+      "NEAR": "aggregated_from_1m",
+      "PUMP": "aggregated_from_1m",
+      "SOL": "aggregated_from_1m",
+      "TAO": "aggregated_from_1m",
+      "UNI": "aggregated_from_1m",
+      "XLM": "aggregated_from_1m",
+      "XMR": "aggregated_from_1m",
+      "XRP": "aggregated_from_1m"
+    },
+    "barMinutes": 5,
+    "lookbackDays": null,
+    "ruleFilter": "TREND-STACK8",
+    "positionNotionalUsd": 100,
+    "portfolioMaxOpen": 6,
+    "executionCosts": "market-specific executable $100 full-round-trip p95",
+    "adverseExecution": "market-specific observed maximum; non-blocking sensitivity",
+    "funding": "exact Lighter hourly settlements in (entry, exit]",
+    "fundingHistoryFiles": [
+      "/private/tmp/trading-agent-lighter-quant-strategy/data/lighter-funding-history-native.json",
+      "/private/tmp/trading-agent-lighter-quant-strategy/data/lighter-funding-history-native-20260801.json",
+      "/private/tmp/trading-agent-lighter-quant-strategy/data/lighter-funding-history-transfer2-20260801.json",
+      "/private/tmp/trading-agent-lighter-quant-strategy/data/lighter-funding-history-transfer3-20260801.json",
+      "/private/tmp/trading-agent-lighter-quant-strategy/data/lighter-funding-history-transfer4-20260801.json"
+    ],
+    "fundingCoverage": {
+      "AAVE": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769936400000,
+        "lastTimestampMs": 1785488400000
+      },
+      "ARB": {
+        "points": 4348,
+        "internalCoverage": 0.9988513668734206,
+        "firstTimestampMs": 1769943600000,
+        "lastTimestampMs": 1785610800000
+      },
+      "BNB": {
+        "points": 4332,
+        "internalCoverage": 0.9986168741355463,
+        "firstTimestampMs": 1769875200000,
+        "lastTimestampMs": 1785488400000
+      },
+      "BTC": {
+        "points": 4331,
+        "internalCoverage": 0.998616555222504,
+        "firstTimestampMs": 1769875200000,
+        "lastTimestampMs": 1785484800000
+      },
+      "DOGE": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769936400000,
+        "lastTimestampMs": 1785488400000
+      },
+      "ENA": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769943600000,
+        "lastTimestampMs": 1785495600000
+      },
+      "ETH": {
+        "points": 4331,
+        "internalCoverage": 0.998616555222504,
+        "firstTimestampMs": 1769875200000,
+        "lastTimestampMs": 1785484800000
+      },
+      "GRAM": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769940000000,
+        "lastTimestampMs": 1785492000000
+      },
+      "HYPE": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769932800000,
+        "lastTimestampMs": 1785484800000
+      },
+      "JUP": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769940000000,
+        "lastTimestampMs": 1785492000000
+      },
+      "LINK": {
+        "points": 4351,
+        "internalCoverage": 0.998852157943067,
+        "firstTimestampMs": 1769932800000,
+        "lastTimestampMs": 1785610800000
+      },
+      "LIT": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769940000000,
+        "lastTimestampMs": 1785492000000
+      },
+      "LTC": {
+        "points": 4332,
+        "internalCoverage": 0.9986168741355463,
+        "firstTimestampMs": 1769875200000,
+        "lastTimestampMs": 1785488400000
+      },
+      "NEAR": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769940000000,
+        "lastTimestampMs": 1785492000000
+      },
+      "PUMP": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769940000000,
+        "lastTimestampMs": 1785492000000
+      },
+      "SOL": {
+        "points": 4326,
+        "internalCoverage": 0.9986149584487535,
+        "firstTimestampMs": 1769893200000,
+        "lastTimestampMs": 1785484800000
+      },
+      "TAO": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769943600000,
+        "lastTimestampMs": 1785495600000
+      },
+      "UNI": {
+        "points": 4315,
+        "internalCoverage": 0.9986114325387642,
+        "firstTimestampMs": 1769936400000,
+        "lastTimestampMs": 1785488400000
+      },
+      "XLM": {
+        "points": 4316,
+        "internalCoverage": 0.9988428604489702,
+        "firstTimestampMs": 1770058800000,
+        "lastTimestampMs": 1785610800000
+      },
+      "XMR": {
+        "points": 4349,
+        "internalCoverage": 0.9988516306844281,
+        "firstTimestampMs": 1769940000000,
+        "lastTimestampMs": 1785610800000
+      },
+      "XRP": {
+        "points": 4331,
+        "internalCoverage": 0.998616555222504,
+        "firstTimestampMs": 1769875200000,
+        "lastTimestampMs": 1785484800000
+      }
+    },
+    "qualificationInputsMeasured": true,
+    "usedFallbackExecutionCost": false,
+    "usedFallbackFunding": false
+  },
+  "qualified": [],
+  "rows": [
+    {
+      "symbol": "AAVE",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.06651423820410825,
+      "adverseCostPct": 0.08098511119877562,
+      "baseline": -8.162028252640967,
+      "stress": -13.150296117949077,
+      "stressPf": 0.334910327993691,
+      "robustStress": -14.235611592549136,
+      "robustPf": 0.3102709095936342,
+      "folds": 0,
+      "is": -10.540857940723484,
+      "oos": -2.6094381772255972,
+      "long": -5.232751592668616,
+      "short": -7.917544525280467,
+      "recent": [
+        {
+          "days": 30,
+          "n": 18,
+          "net": -1.2841363852157022,
+          "profitFactor": 0.5242535564695225,
+          "winRatePct": 38.88888888888889,
+          "long": -0.38959268301472844,
+          "short": -0.8945437022009737
+        },
+        {
+          "days": 60,
+          "n": 31,
+          "net": -5.916117820720297,
+          "profitFactor": 0.21393706749623786,
+          "winRatePct": 29.03225806451613,
+          "long": -2.341569596116475,
+          "short": -3.5745482246038214
+        },
+        {
+          "days": 90,
+          "n": 41,
+          "net": -8.819892046013722,
+          "profitFactor": 0.15442143134019812,
+          "winRatePct": 24.390243902439025,
+          "long": -3.233342398624234,
+          "short": -5.586549647389494
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.26358098290757137,
+      "trendRegimes": {
+        "bull": {
+          "n": 27,
+          "net": -3.067666511919757,
+          "profitFactor": 0.5237666371139873
+        },
+        "bear": {
+          "n": 27,
+          "net": -6.036025792604804,
+          "profitFactor": 0.30431684036189477
+        },
+        "mixed": {
+          "n": 21,
+          "net": -4.046603813424519,
+          "profitFactor": 0.13056568681982098
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 45,
+          "net": -7.908124620880262,
+          "profitFactor": 0.36419385935798404
+        },
+        "lowVol": {
+          "n": 30,
+          "net": -5.242171497068821,
+          "profitFactor": 0.28524931303727646
+        }
+      },
+      "trades": 75,
+      "grossPct": -8.162028252640967,
+      "netPct": -13.150296117949077,
+      "adverseNetPct": -14.235611592549136,
+      "fundingPct": 0.00030000000000197924,
+      "maxDrawdownPct": -13.17100282187686
+    },
+    {
+      "symbol": "ARB",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.15278838808251718,
+      "adverseCostPct": 0.19094901661257874,
+      "baseline": 3.2807282913099876,
+      "stress": -9.860873083786492,
+      "stressPf": 0.6498894644392036,
+      "robustStress": -13.142687137371789,
+      "robustPf": 0.571389048691254,
+      "folds": 1,
+      "is": -7.521422729265041,
+      "oos": -2.3394503545214516,
+      "long": -7.462906725934876,
+      "short": -2.397966357851616,
+      "recent": [
+        {
+          "days": 30,
+          "n": 20,
+          "net": -0.33401001771139854,
+          "profitFactor": 0.9477345457949706,
+          "winRatePct": 30,
+          "long": -3.425777321262372,
+          "short": 3.0917673035509736
+        },
+        {
+          "days": 60,
+          "n": 32,
+          "net": -5.299138487147873,
+          "profitFactor": 0.5542834186319263,
+          "winRatePct": 25,
+          "long": -5.966920905246836,
+          "short": 0.6677824180989613
+        },
+        {
+          "days": 90,
+          "n": 47,
+          "net": -7.9989701419083445,
+          "profitFactor": 0.4804907260510584,
+          "winRatePct": 27.659574468085108,
+          "long": -7.097802641683936,
+          "short": -0.9011675002244133
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.26791243014916966,
+      "trendRegimes": {
+        "bull": {
+          "n": 33,
+          "net": -2.817417234961655,
+          "profitFactor": 0.7405155923187264
+        },
+        "bear": {
+          "n": 28,
+          "net": -4.9874453604706455,
+          "profitFactor": 0.4604974749520471
+        },
+        "mixed": {
+          "n": 25,
+          "net": -2.0560104883541914,
+          "profitFactor": 0.7449988578912647
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 46,
+          "net": -9.881615151148468,
+          "profitFactor": 0.3712448699016829
+        },
+        "lowVol": {
+          "n": 40,
+          "net": 0.020742067361974148,
+          "profitFactor": 1.001666180755812
+        }
+      },
+      "trades": 86,
+      "grossPct": 3.2807282913099876,
+      "netPct": -9.860873083786492,
+      "adverseNetPct": -13.142687137371789,
+      "fundingPct": -0.0018000000000009467,
+      "maxDrawdownPct": -16.91129802851421
+    },
+    {
+      "symbol": "BNB",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.031030898474158262,
+      "adverseCostPct": 0.03192868989814438,
+      "baseline": -2.7638713283794116,
+      "stress": -5.011496018518807,
+      "stressPf": 0.5057379309739479,
+      "robustStress": -5.076137001045809,
+      "robustPf": 0.5021837452842627,
+      "folds": 0,
+      "is": -4.134654801462037,
+      "oos": -0.876841217056771,
+      "long": -0.647719977644808,
+      "short": -4.363776040874002,
+      "recent": [
+        {
+          "days": 30,
+          "n": 15,
+          "net": -1.038245629762859,
+          "profitFactor": 0.2611389990451339,
+          "winRatePct": 6.666666666666667,
+          "long": -0.6275189713937674,
+          "short": -0.4107266583690917
+        },
+        {
+          "days": 60,
+          "n": 24,
+          "net": -1.06064087542263,
+          "profitFactor": 0.5601173392294216,
+          "winRatePct": 8.333333333333332,
+          "long": 0.2837675428493099,
+          "short": -1.34440841827194
+        },
+        {
+          "days": 90,
+          "n": 38,
+          "net": -2.1959109658202234,
+          "profitFactor": 0.4226839161128083,
+          "winRatePct": 10.526315789473683,
+          "long": -0.22122443926078067,
+          "short": -1.9746865265594427
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.14357074613574256,
+      "trendRegimes": {
+        "bull": {
+          "n": 25,
+          "net": -3.5930703502667285,
+          "profitFactor": 0
+        },
+        "bear": {
+          "n": 27,
+          "net": -3.2333497607477866,
+          "profitFactor": 0.3193661761913731
+        },
+        "mixed": {
+          "n": 20,
+          "net": 1.814924092495707,
+          "profitFactor": 2.010659892774892
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 35,
+          "net": -5.390518012623495,
+          "profitFactor": 0.06855485432354655
+        },
+        "lowVol": {
+          "n": 37,
+          "net": 0.37902199410468956,
+          "profitFactor": 1.087089713211699
+        }
+      },
+      "trades": 72,
+      "grossPct": -2.7638713283794116,
+      "netPct": -5.011496018518807,
+      "adverseNetPct": -5.076137001045809,
+      "fundingPct": -0.013399999999999503,
+      "maxDrawdownPct": -6.432080103145079
+    },
+    {
+      "symbol": "BTC",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.007823746635788947,
+      "adverseCostPct": 0.00809092878539461,
+      "baseline": -5.486481822877672,
+      "stress": -5.971054114296589,
+      "stressPf": 0.29810027631461256,
+      "robustStress": -5.98761940757214,
+      "robustPf": 0.29719046926635095,
+      "folds": 0,
+      "is": -3.6409733635007093,
+      "oos": -2.3300807507958803,
+      "long": -4.35845527334711,
+      "short": -1.612598840949479,
+      "recent": [
+        {
+          "days": 30,
+          "n": 13,
+          "net": -1.881050235200279,
+          "profitFactor": 0.0907919646260941,
+          "winRatePct": 30.76923076923077,
+          "long": -1.7415620006098802,
+          "short": -0.13948823459039883
+        },
+        {
+          "days": 60,
+          "n": 25,
+          "net": -1.77573768694413,
+          "profitFactor": 0.42497082269670805,
+          "winRatePct": 36,
+          "long": -2.2594526647312856,
+          "short": 0.4837149777871556
+        },
+        {
+          "days": 90,
+          "n": 36,
+          "net": -2.8018995149182704,
+          "profitFactor": 0.3304292157351444,
+          "winRatePct": 27.77777777777778,
+          "long": -2.532289873157928,
+          "short": -0.2696096417603422
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.14855963941564218,
+      "trendRegimes": {
+        "bull": {
+          "n": 30,
+          "net": -3.284504499190332,
+          "profitFactor": 0.20406089456921775
+        },
+        "bear": {
+          "n": 17,
+          "net": -0.9743558967782796,
+          "profitFactor": 0.4600885612400288
+        },
+        "mixed": {
+          "n": 15,
+          "net": -1.7121937183279776,
+          "profitFactor": 0.33526502013614634
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 34,
+          "net": -2.428873096062066,
+          "profitFactor": 0.4070586324039835
+        },
+        "lowVol": {
+          "n": 28,
+          "net": -3.5421810182345226,
+          "profitFactor": 0.19690778708515766
+        }
+      },
+      "trades": 62,
+      "grossPct": -5.486481822877672,
+      "netPct": -5.971054114296589,
+      "adverseNetPct": -5.98761940757214,
+      "fundingPct": 0.0004999999999998478,
+      "maxDrawdownPct": -6.710986060111923
+    },
+    {
+      "symbol": "DOGE",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.06468072873621526,
+      "adverseCostPct": 0.07047064322438212,
+      "baseline": 0.023409338819925518,
+      "stress": -5.477852603758374,
+      "stressPf": 0.6449097227094538,
+      "robustStress": -5.969995335252557,
+      "robustPf": 0.6233277794272417,
+      "folds": 1,
+      "is": 0.8771655388750941,
+      "oos": -6.35501814263347,
+      "long": 1.0621563728961143,
+      "short": -6.540008976654487,
+      "recent": [
+        {
+          "days": 30,
+          "n": 21,
+          "net": -4.9736904705822536,
+          "profitFactor": 0.022717813269744695,
+          "winRatePct": 9.523809523809524,
+          "long": -1.3119922989177952,
+          "short": -3.6616981716644577
+        },
+        {
+          "days": 60,
+          "n": 43,
+          "net": -6.383757789342709,
+          "profitFactor": 0.3501544198715519,
+          "winRatePct": 9.30232558139535,
+          "long": -1.1324439621551035,
+          "short": -5.251313827187604
+        },
+        {
+          "days": 90,
+          "n": 53,
+          "net": -8.116866699974,
+          "profitFactor": 0.2976428421718613,
+          "winRatePct": 7.547169811320755,
+          "long": -1.3845692676465235,
+          "short": -6.732297432327477
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.160795199760975,
+      "trendRegimes": {
+        "bull": {
+          "n": 28,
+          "net": 3.032188944703367,
+          "profitFactor": 1.9747086427473288
+        },
+        "bear": {
+          "n": 38,
+          "net": -4.702666458827946,
+          "profitFactor": 0.4472916925580038
+        },
+        "mixed": {
+          "n": 19,
+          "net": -3.807375089633795,
+          "profitFactor": 0
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 44,
+          "net": -2.585537365370388,
+          "profitFactor": 0.7228695233954272
+        },
+        "lowVol": {
+          "n": 41,
+          "net": -2.892315238387984,
+          "profitFactor": 0.5256145081137038
+        }
+      },
+      "trades": 85,
+      "grossPct": 0.023409338819925518,
+      "netPct": -5.477852603758374,
+      "adverseNetPct": -5.969995335252557,
+      "fundingPct": -0.003400000000000708,
+      "maxDrawdownPct": -9.573365775260136
+    },
+    {
+      "symbol": "ENA",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.060816152770169066,
+      "adverseCostPct": 0.06089021494246895,
+      "baseline": -12.720819380762379,
+      "stress": -18.134456977307423,
+      "stressPf": 0.2642454533982665,
+      "robustStress": -18.141048510642104,
+      "robustPf": 0.26413722456069455,
+      "folds": 0,
+      "is": -16.273481421957815,
+      "oos": -1.8609755553496095,
+      "long": -9.242648960712442,
+      "short": -8.891808016594982,
+      "recent": [
+        {
+          "days": 30,
+          "n": 16,
+          "net": -2.8192974361110017,
+          "profitFactor": 0.35850479125086027,
+          "winRatePct": 12.5,
+          "long": 0.31435021920924916,
+          "short": -3.1336476553202512
+        },
+        {
+          "days": 60,
+          "n": 27,
+          "net": -1.8609755553496095,
+          "profitFactor": 0.700846197588352,
+          "winRatePct": 22.22222222222222,
+          "long": -0.12756107185540594,
+          "short": -1.733414483494204
+        },
+        {
+          "days": 90,
+          "n": 45,
+          "net": -7.4999026527439,
+          "profitFactor": 0.42929783228442114,
+          "winRatePct": 20,
+          "long": -2.745597325426038,
+          "short": -4.754305327317862
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.2875191375767598,
+      "trendRegimes": {
+        "bull": {
+          "n": 23,
+          "net": -5.352380768037769,
+          "profitFactor": 0.2879390614312172
+        },
+        "bear": {
+          "n": 43,
+          "net": -8.989569781832513,
+          "profitFactor": 0.16941009544167918
+        },
+        "mixed": {
+          "n": 23,
+          "net": -3.7925064274371403,
+          "profitFactor": 0.39873709660791357
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 57,
+          "net": -13.714634832847317,
+          "profitFactor": 0.20821766202968572
+        },
+        "lowVol": {
+          "n": 32,
+          "net": -4.419822144460106,
+          "profitFactor": 0.3967109046636719
+        }
+      },
+      "trades": 89,
+      "grossPct": -12.720819380762379,
+      "netPct": -18.134456977307423,
+      "adverseNetPct": -18.141048510642104,
+      "fundingPct": -0.0010000000000009654,
+      "maxDrawdownPct": -18.57283950205701
+    },
+    {
+      "symbol": "ETH",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.008975093532760582,
+      "adverseCostPct": 0.01017682250584965,
+      "baseline": 10.047921707421583,
+      "stress": 9.409165160128346,
+      "stressPf": 1.8844880710526184,
+      "robustStress": 9.325044132012103,
+      "robustPf": 1.871461295154741,
+      "folds": 2,
+      "is": 11.310643415227169,
+      "oos": -1.9014782550988252,
+      "long": 1.3943589420036733,
+      "short": 8.014806218124669,
+      "recent": [
+        {
+          "days": 30,
+          "n": 13,
+          "net": -0.6401827927719168,
+          "profitFactor": 0.4957604303430547,
+          "winRatePct": 30.76923076923077,
+          "long": -0.6201353282030966,
+          "short": -0.020047464568820367
+        },
+        {
+          "days": 60,
+          "n": 25,
+          "net": -0.6928378691765296,
+          "profitFactor": 0.8196291675276854,
+          "winRatePct": 32,
+          "long": -1.3752406110712583,
+          "short": 0.6824027418947287
+        },
+        {
+          "days": 90,
+          "n": 38,
+          "net": -1.8935821672508149,
+          "profitFactor": 0.625504960300725,
+          "winRatePct": 23.684210526315788,
+          "long": -1.8927954289724847,
+          "short": -0.0007867382783296739
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.07168019362114617,
+      "trendRegimes": {
+        "bull": {
+          "n": 23,
+          "net": 0.9727814456245075,
+          "profitFactor": 1.2579010835614823
+        },
+        "bear": {
+          "n": 28,
+          "net": 7.755786963624894,
+          "profitFactor": 2.4055546786831106
+        },
+        "mixed": {
+          "n": 19,
+          "net": 0.6805967508789391,
+          "profitFactor": 1.504853627079029
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 35,
+          "net": 11.909704689066265,
+          "profitFactor": 2.943667753236436
+        },
+        "lowVol": {
+          "n": 35,
+          "net": -2.500539528937927,
+          "profitFactor": 0.4456230296501896
+        }
+      },
+      "trades": 70,
+      "grossPct": 10.047921707421583,
+      "netPct": 9.409165160128346,
+      "adverseNetPct": 9.325044132012103,
+      "fundingPct": -0.01050000000000034,
+      "maxDrawdownPct": -2.774263820152237
+    },
+    {
+      "symbol": "GRAM",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.0416445280526175,
+      "adverseCostPct": 0.0416445280526175,
+      "baseline": -10.610172255131964,
+      "stress": -14.935803172604182,
+      "stressPf": 0.34318403941414116,
+      "robustStress": -14.935803172604182,
+      "robustPf": 0.34318403941414116,
+      "folds": 0,
+      "is": -9.336545848993708,
+      "oos": -5.5992573236104715,
+      "long": -10.261309377787335,
+      "short": -4.674493794816847,
+      "recent": [
+        {
+          "days": 30,
+          "n": 22,
+          "net": -2.4223933688142276,
+          "profitFactor": 0.4784086348029422,
+          "winRatePct": 18.181818181818183,
+          "long": -1.7696910418100216,
+          "short": -0.6527023270042059
+        },
+        {
+          "days": 60,
+          "n": 38,
+          "net": -7.833584040795581,
+          "profitFactor": 0.22799389959150998,
+          "winRatePct": 13.157894736842104,
+          "long": -4.328287505841919,
+          "short": -3.505296534953662
+        },
+        {
+          "days": 90,
+          "n": 52,
+          "net": -9.445879872349039,
+          "profitFactor": 0.21849510410162287,
+          "winRatePct": 17.307692307692307,
+          "long": -5.055445607118182,
+          "short": -4.390434265230854
+        }
+      ],
+      "coverageDays": 180,
+      "meanL95": -0.20475339820020158,
+      "trendRegimes": {
+        "bull": {
+          "n": 29,
+          "net": -6.414445834429079,
+          "profitFactor": 0.17378219469532744
+        },
+        "bear": {
+          "n": 45,
+          "net": -2.854644795673336,
+          "profitFactor": 0.6541653281721933
+        },
+        "mixed": {
+          "n": 30,
+          "net": -5.666712542501765,
+          "profitFactor": 0.15695493785133513
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 63,
+          "net": -8.35916437760852,
+          "profitFactor": 0.3889851854226653
+        },
+        "lowVol": {
+          "n": 41,
+          "net": -6.5766387949956595,
+          "profitFactor": 0.2740151085911453
+        }
+      },
+      "trades": 104,
+      "grossPct": -10.610172255131964,
+      "netPct": -14.935803172604182,
+      "adverseNetPct": -14.935803172604182,
+      "fundingPct": 0.0053999999999989265,
+      "maxDrawdownPct": -16.52746941694828
+    },
+    {
+      "symbol": "HYPE",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.02446483180428919,
+      "adverseCostPct": 0.030343521566756557,
+      "baseline": -10.504640844675254,
+      "stress": -11.951765921128322,
+      "stressPf": 0.23118573267835837,
+      "robustStress": -12.298608617113892,
+      "robustPf": 0.2227342976219551,
+      "folds": 0,
+      "is": -7.11508323454374,
+      "oos": -4.836682686584579,
+      "long": -6.178526273010961,
+      "short": -5.773239648117359,
+      "recent": [
+        {
+          "days": 30,
+          "n": 12,
+          "net": -1.3709922853440044,
+          "profitFactor": 0.354559456795183,
+          "winRatePct": 25,
+          "long": -0.468959233290536,
+          "short": -0.9020330520534681
+        },
+        {
+          "days": 60,
+          "n": 28,
+          "net": -6.1021883190026145,
+          "profitFactor": 0.29197279228799444,
+          "winRatePct": 21.428571428571427,
+          "long": -3.169453145849474,
+          "short": -2.9327351731531413
+        },
+        {
+          "days": 90,
+          "n": 37,
+          "net": -7.7422343601061225,
+          "profitFactor": 0.3028008326631548,
+          "winRatePct": 18.91891891891892,
+          "long": -4.076694227853116,
+          "short": -3.665540132253008
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.2939294723398276,
+      "trendRegimes": {
+        "bull": {
+          "n": 16,
+          "net": -4.667059796692982,
+          "profitFactor": 0.0399573002999967
+        },
+        "bear": {
+          "n": 25,
+          "net": -2.4320244227190355,
+          "profitFactor": 0.5459395974097145
+        },
+        "mixed": {
+          "n": 18,
+          "net": -4.8526817017163015,
+          "profitFactor": 0.0892522787231482
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 28,
+          "net": -8.690188941137965,
+          "profitFactor": 0.03747555483162795
+        },
+        "lowVol": {
+          "n": 31,
+          "net": -3.2615769799903562,
+          "profitFactor": 0.49954125628642176
+        }
+      },
+      "trades": 59,
+      "grossPct": -10.504640844675254,
+      "netPct": -11.951765921128322,
+      "adverseNetPct": -12.298608617113892,
+      "fundingPct": -0.0037000000000005084,
+      "maxDrawdownPct": -12.463569621776122
+    },
+    {
+      "symbol": "JUP",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.1099044877665775,
+      "adverseCostPct": 0.17251744778733144,
+      "baseline": 0.11285615672521515,
+      "stress": -10.895592619932536,
+      "stressPf": 0.7196862839692979,
+      "robustStress": -17.156888622007923,
+      "robustPf": 0.6099646158552573,
+      "folds": 2,
+      "is": -11.40534195660626,
+      "oos": 0.5097493366737256,
+      "long": -2.0108315579626117,
+      "short": -8.884761061969927,
+      "recent": [
+        {
+          "days": 30,
+          "n": 21,
+          "net": 4.40004619693114,
+          "profitFactor": 1.6744898227239422,
+          "winRatePct": 28.57142857142857,
+          "long": -0.3555515887133676,
+          "short": 4.7555977856445075
+        },
+        {
+          "days": 60,
+          "n": 48,
+          "net": 3.5449582590274162,
+          "profitFactor": 1.2207361026029644,
+          "winRatePct": 25,
+          "long": 1.5248911405719152,
+          "short": 2.0200671184555006
+        },
+        {
+          "days": 90,
+          "n": 66,
+          "net": -3.6402004216570134,
+          "profitFactor": 0.8524475459685298,
+          "winRatePct": 21.21212121212121,
+          "long": -2.351837665616978,
+          "short": -1.2883627560400346
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.28452686862177645,
+      "trendRegimes": {
+        "bull": {
+          "n": 32,
+          "net": -5.262255279666985,
+          "profitFactor": 0.5942873394792891
+        },
+        "bear": {
+          "n": 36,
+          "net": -5.193898551002423,
+          "profitFactor": 0.6233782871704622
+        },
+        "mixed": {
+          "n": 32,
+          "net": -0.43943878926312985,
+          "profitFactor": 0.963707113506486
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 58,
+          "net": -6.03352316366507,
+          "profitFactor": 0.7451288158199039
+        },
+        "lowVol": {
+          "n": 42,
+          "net": -4.862069456267469,
+          "profitFactor": 0.6800522292687314
+        }
+      },
+      "trades": 100,
+      "grossPct": 0.11285615672521515,
+      "netPct": -10.895592619932536,
+      "adverseNetPct": -17.156888622007923,
+      "fundingPct": -0.01800000000000016,
+      "maxDrawdownPct": -18.87322185565435
+    },
+    {
+      "symbol": "LINK",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.09696739471353022,
+      "adverseCostPct": 0.10511823301375565,
+      "baseline": -5.482592324741639,
+      "stress": -14.78556221724054,
+      "stressPf": 0.41776453746013287,
+      "robustStress": -15.568042694062182,
+      "robustPf": 0.40304622073228935,
+      "folds": 1,
+      "is": -6.624893498972907,
+      "oos": -8.160668718267633,
+      "long": -0.24506755382759257,
+      "short": -14.54049466341295,
+      "recent": [
+        {
+          "days": 30,
+          "n": 18,
+          "net": -2.9752546371234994,
+          "profitFactor": 0.23333641395981844,
+          "winRatePct": 16.666666666666664,
+          "long": -0.9084399106335385,
+          "short": -2.0668147264899615
+        },
+        {
+          "days": 60,
+          "n": 46,
+          "net": -14.600370468242014,
+          "profitFactor": 0.05839893017688278,
+          "winRatePct": 6.521739130434782,
+          "long": -4.807766613317155,
+          "short": -9.792603854924861
+        },
+        {
+          "days": 90,
+          "n": 64,
+          "net": -18.447840372570692,
+          "profitFactor": 0.048323861818477094,
+          "winRatePct": 6.25,
+          "long": -6.872308659884076,
+          "short": -11.575531712686608
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.2692862207289025,
+      "trendRegimes": {
+        "bull": {
+          "n": 37,
+          "net": -1.5289954125353313,
+          "profitFactor": 0.7793192699965007
+        },
+        "bear": {
+          "n": 40,
+          "net": -11.571905429198159,
+          "profitFactor": 0.0811902244952899
+        },
+        "mixed": {
+          "n": 19,
+          "net": -1.6846613755070468,
+          "profitFactor": 0.7130772008739905
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 49,
+          "net": -10.08316228803208,
+          "profitFactor": 0.33260331310949987
+        },
+        "lowVol": {
+          "n": 47,
+          "net": -4.7023999292084575,
+          "profitFactor": 0.5428470444522902
+        }
+      },
+      "trades": 96,
+      "grossPct": -5.482592324741639,
+      "netPct": -14.78556221724054,
+      "adverseNetPct": -15.568042694062182,
+      "fundingPct": 0.005900000000000696,
+      "maxDrawdownPct": -21.77274070880219
+    },
+    {
+      "symbol": "LIT",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.040537801499904186,
+      "adverseCostPct": 0.045043016080371784,
+      "baseline": -1.066988234983182,
+      "stress": -4.797103774474273,
+      "stressPf": 0.860582749862115,
+      "robustStress": -5.216088730457761,
+      "robustPf": 0.84972418308042,
+      "folds": 1,
+      "is": -1.7944492348139018,
+      "oos": -3.0026545396603703,
+      "long": 3.4714469850965486,
+      "short": -8.268550759570822,
+      "recent": [
+        {
+          "days": 30,
+          "n": 16,
+          "net": -5.746923777837318,
+          "profitFactor": 0.12408697445929787,
+          "winRatePct": 12.5,
+          "long": -2.884931394342574,
+          "short": -2.8619923834947434
+        },
+        {
+          "days": 60,
+          "n": 32,
+          "net": -5.699170111382074,
+          "profitFactor": 0.5389597247054594,
+          "winRatePct": 21.875,
+          "long": -5.152123663393156,
+          "short": -0.5470464479889169
+        },
+        {
+          "days": 90,
+          "n": 44,
+          "net": -0.20792530949259924,
+          "profitFactor": 0.9883519779773341,
+          "winRatePct": 27.27272727272727,
+          "long": 0.08106995790776739,
+          "short": -0.2889952674003674
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.2477415406527304,
+      "trendRegimes": {
+        "bull": {
+          "n": 31,
+          "net": 2.489887845254912,
+          "profitFactor": 1.1963415216593747
+        },
+        "bear": {
+          "n": 40,
+          "net": -3.2004428182500053,
+          "profitFactor": 0.7703669141944037
+        },
+        "mixed": {
+          "n": 22,
+          "net": -4.0865488014791795,
+          "profitFactor": 0.47538643542459874
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 57,
+          "net": -6.050432859448701,
+          "profitFactor": 0.743140062839358
+        },
+        "lowVol": {
+          "n": 36,
+          "net": 1.253329084974427,
+          "profitFactor": 1.115483617054887
+        }
+      },
+      "trades": 93,
+      "grossPct": -1.066988234983182,
+      "netPct": -4.797103774474273,
+      "adverseNetPct": -5.216088730457761,
+      "fundingPct": 0.03989999999999966,
+      "maxDrawdownPct": -11.17586774571718
+    },
+    {
+      "symbol": "LTC",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.06653655074521189,
+      "adverseCostPct": 0.07774754262230597,
+      "baseline": -1.685011985708154,
+      "stress": -7.223645697560739,
+      "stressPf": 0.5646446179727455,
+      "robustStress": -8.154158023359548,
+      "robustPf": 0.5301104917392611,
+      "folds": 1,
+      "is": -2.1039472372962256,
+      "oos": -5.119698460264513,
+      "long": -5.05761294828161,
+      "short": -2.166032749279129,
+      "recent": [
+        {
+          "days": 30,
+          "n": 17,
+          "net": -3.404974573948954,
+          "profitFactor": 0.05622998313377886,
+          "winRatePct": 5.88235294117647,
+          "long": -1.7307487644775048,
+          "short": -1.6742258094714488
+        },
+        {
+          "days": 60,
+          "n": 28,
+          "net": -6.0153703732174275,
+          "profitFactor": 0.035031339155507484,
+          "winRatePct": 7.142857142857142,
+          "long": -2.9178624161749394,
+          "short": -3.097507957042488
+        },
+        {
+          "days": 90,
+          "n": 45,
+          "net": -6.452676598709207,
+          "profitFactor": 0.3881642549968831,
+          "winRatePct": 8.88888888888889,
+          "long": -2.658202724692705,
+          "short": -3.7944738740165014
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.178214128212689,
+      "trendRegimes": {
+        "bull": {
+          "n": 32,
+          "net": -5.709823162797857,
+          "profitFactor": 0.10909389016186595
+        },
+        "bear": {
+          "n": 22,
+          "net": -0.7132838852942878,
+          "profitFactor": 0.817607873114534
+        },
+        "mixed": {
+          "n": 29,
+          "net": -0.8005386494685954,
+          "profitFactor": 0.8723794456446711
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 45,
+          "net": -3.4513325053052073,
+          "profitFactor": 0.6472786523470909
+        },
+        "lowVol": {
+          "n": 38,
+          "net": -3.7723131922555324,
+          "profitFactor": 0.44587198713015236
+        }
+      },
+      "trades": 83,
+      "grossPct": -1.685011985708154,
+      "netPct": -7.223645697560739,
+      "adverseNetPct": -8.154158023359548,
+      "fundingPct": -0.016099999999999885,
+      "maxDrawdownPct": -8.931088339865736
+    },
+    {
+      "symbol": "NEAR",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.05831435079727089,
+      "adverseCostPct": 0.06378074003881486,
+      "baseline": -16.37038279552653,
+      "stress": -22.520789629239985,
+      "stressPf": 0.3004302623619381,
+      "robustStress": -23.094760499602103,
+      "robustPf": 0.29264931335295485,
+      "folds": 0,
+      "is": -16.963214839083285,
+      "oos": -5.557574790156697,
+      "long": -13.345785540509686,
+      "short": -9.175004088730292,
+      "recent": [
+        {
+          "days": 30,
+          "n": 12,
+          "net": 0.7161316762507628,
+          "profitFactor": 1.266026455834507,
+          "winRatePct": 25,
+          "long": 1.344688408305885,
+          "short": -0.628556732055122
+        },
+        {
+          "days": 60,
+          "n": 36,
+          "net": -9.006717291245792,
+          "profitFactor": 0.32392596291894105,
+          "winRatePct": 13.88888888888889,
+          "long": -3.5318813760122243,
+          "short": -5.474835915233573
+        },
+        {
+          "days": 90,
+          "n": 56,
+          "net": -12.08739351117455,
+          "profitFactor": 0.3607430865439683,
+          "winRatePct": 16.071428571428573,
+          "long": -5.347197289861764,
+          "short": -6.740196221312793
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.3003639805046301,
+      "trendRegimes": {
+        "bull": {
+          "n": 44,
+          "net": -9.910266659792608,
+          "profitFactor": 0.35588199078691723
+        },
+        "bear": {
+          "n": 35,
+          "net": -7.2594473621864015,
+          "profitFactor": 0.2261048325229646
+        },
+        "mixed": {
+          "n": 26,
+          "net": -5.351075607260971,
+          "profitFactor": 0.27942792732938254
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 68,
+          "net": -16.36810154824485,
+          "profitFactor": 0.259295902904672
+        },
+        "lowVol": {
+          "n": 37,
+          "net": -6.1526880809951265,
+          "profitFactor": 0.39047980362275825
+        }
+      },
+      "trades": 105,
+      "grossPct": -16.37038279552653,
+      "netPct": -22.520789629239985,
+      "adverseNetPct": -23.094760499602103,
+      "fundingPct": -0.027399999999998814,
+      "maxDrawdownPct": -24.383599841078254
+    },
+    {
+      "symbol": "PUMP",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.09671179883947126,
+      "adverseCostPct": 0.09689922480619341,
+      "baseline": -3.897953311712997,
+      "stress": -12.221968011907522,
+      "stressPf": 0.5112210627723597,
+      "robustStress": -12.238086645045632,
+      "robustPf": 0.5108367724688234,
+      "folds": 0,
+      "is": -9.040735313815334,
+      "oos": -3.181232698092189,
+      "long": -6.995406829448286,
+      "short": -5.226561182459239,
+      "recent": [
+        {
+          "days": 30,
+          "n": 14,
+          "net": -3.917400504710493,
+          "profitFactor": 0.1372548731013674,
+          "winRatePct": 14.285714285714285,
+          "long": -3.0111538094335986,
+          "short": -0.9062466952768945
+        },
+        {
+          "days": 60,
+          "n": 30,
+          "net": -5.949439224374034,
+          "profitFactor": 0.4514473638462505,
+          "winRatePct": 13.333333333333334,
+          "long": -4.356284070030328,
+          "short": -1.5931551543437055
+        },
+        {
+          "days": 90,
+          "n": 44,
+          "net": -7.679304122812926,
+          "profitFactor": 0.493089300653637,
+          "winRatePct": 15.909090909090908,
+          "long": -4.8463692448922,
+          "short": -2.8329348779207257
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.26559702084444364,
+      "trendRegimes": {
+        "bull": {
+          "n": 28,
+          "net": -4.403052470495511,
+          "profitFactor": 0.41514869017220196
+        },
+        "bear": {
+          "n": 36,
+          "net": -2.7040905741327745,
+          "profitFactor": 0.7452195757261936
+        },
+        "mixed": {
+          "n": 22,
+          "net": -5.11482496727924,
+          "profitFactor": 0.2547451361486115
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 45,
+          "net": -3.4605659642060655,
+          "profitFactor": 0.7602579401831818
+        },
+        "lowVol": {
+          "n": 41,
+          "net": -8.761402047701456,
+          "profitFactor": 0.17115104217542293
+        }
+      },
+      "trades": 86,
+      "grossPct": -3.897953311712997,
+      "netPct": -12.221968011907522,
+      "adverseNetPct": -12.238086645045632,
+      "fundingPct": -0.00679999999999941,
+      "maxDrawdownPct": -14.806034421686904
+    },
+    {
+      "symbol": "SOL",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.011757808702046454,
+      "adverseCostPct": 0.013582158476632052,
+      "baseline": -1.7152644042682748,
+      "stress": -2.443848543795154,
+      "stressPf": 0.7530842597608957,
+      "robustStress": -2.556958229819461,
+      "robustPf": 0.7435000409398185,
+      "folds": 1,
+      "is": 0.14265263691210384,
+      "oos": -2.5865011807072573,
+      "long": 2.468926773347752,
+      "short": -4.912775317142908,
+      "recent": [
+        {
+          "days": 30,
+          "n": 10,
+          "net": -0.3255694309066389,
+          "profitFactor": 0.5993643463705884,
+          "winRatePct": 50,
+          "long": -0.023337260972091274,
+          "short": -0.3022321699345476
+        },
+        {
+          "days": 60,
+          "n": 20,
+          "net": -2.464254961301738,
+          "profitFactor": 0.27228124807749504,
+          "winRatePct": 40,
+          "long": -0.5778699445772384,
+          "short": -1.8863850167245004
+        },
+        {
+          "days": 90,
+          "n": 28,
+          "net": -3.0230693007391,
+          "profitFactor": 0.2561897244866829,
+          "winRatePct": 32.142857142857146,
+          "long": -0.6917494303576848,
+          "short": -2.331319870381416
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.1682262326485304,
+      "trendRegimes": {
+        "bull": {
+          "n": 25,
+          "net": -2.051797143411891,
+          "profitFactor": 0.39441998151255164
+        },
+        "bear": {
+          "n": 29,
+          "net": -3.704641334821085,
+          "profitFactor": 0.3005156562670848
+        },
+        "mixed": {
+          "n": 8,
+          "net": 3.312589934437822,
+          "profitFactor": 3.73067766790493
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 39,
+          "net": -4.0117129754126735,
+          "profitFactor": 0.37830688654377415
+        },
+        "lowVol": {
+          "n": 23,
+          "net": 1.5678644316175188,
+          "profitFactor": 1.4551636542330957
+        }
+      },
+      "trades": 62,
+      "grossPct": -1.7152644042682748,
+      "netPct": -2.443848543795154,
+      "adverseNetPct": -2.556958229819461,
+      "fundingPct": 0.000400000000000289,
+      "maxDrawdownPct": -5.304084199940942
+    },
+    {
+      "symbol": "TAO",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.08349009199371563,
+      "adverseCostPct": 0.08660954560920864,
+      "baseline": 15.061997489833615,
+      "stress": 8.079729762361497,
+      "stressPf": 1.3444325244804702,
+      "robustStress": 7.817695658660081,
+      "robustPf": 1.3302321354891398,
+      "folds": 1,
+      "is": 12.375310740956225,
+      "oos": -4.295580978594731,
+      "long": 15.52675785510365,
+      "short": -7.447028092742156,
+      "recent": [
+        {
+          "days": 30,
+          "n": 7,
+          "net": -0.7458451725333869,
+          "profitFactor": 0.47010069679657573,
+          "winRatePct": 28.57142857142857,
+          "long": -0.7458451725333869,
+          "short": 0
+        },
+        {
+          "days": 60,
+          "n": 28,
+          "net": -4.695973915479631,
+          "profitFactor": 0.4458204761536503,
+          "winRatePct": 14.285714285714285,
+          "long": -3.6955103269550973,
+          "short": -1.0004635885245328
+        },
+        {
+          "days": 90,
+          "n": 42,
+          "net": -6.259259036434519,
+          "profitFactor": 0.5032332397556015,
+          "winRatePct": 16.666666666666664,
+          "long": -4.1235742296416165,
+          "short": -2.135684806792902
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.17675395086377443,
+      "trendRegimes": {
+        "bull": {
+          "n": 29,
+          "net": 17.536615914562017,
+          "profitFactor": 3.860065785462837
+        },
+        "bear": {
+          "n": 28,
+          "net": -3.0590243350482567,
+          "profitFactor": 0.6428498288128075
+        },
+        "mixed": {
+          "n": 27,
+          "net": -6.397861817152268,
+          "profitFactor": 0.2697718632729129
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 44,
+          "net": 4.772241713988745,
+          "profitFactor": 1.3795906120348735
+        },
+        "lowVol": {
+          "n": 40,
+          "net": 3.3074880483727527,
+          "profitFactor": 1.303829047783368
+        }
+      },
+      "trades": 84,
+      "grossPct": 15.061997489833615,
+      "netPct": 8.079729762361497,
+      "adverseNetPct": 7.817695658660081,
+      "fundingPct": 0.03090000000000022,
+      "maxDrawdownPct": -12.67612531412629
+    },
+    {
+      "symbol": "UNI",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.06829233830610178,
+      "adverseCostPct": 0.07300043564775832,
+      "baseline": 11.249032903079648,
+      "stress": 5.286499470448799,
+      "stressPf": 1.2940664011498124,
+      "robustStress": 4.876895001724678,
+      "robustPf": 1.2664665737797336,
+      "folds": 3,
+      "is": 3.8274541419447417,
+      "oos": 1.4590453285040579,
+      "long": 0.6845216280349133,
+      "short": 4.601977842413879,
+      "recent": [
+        {
+          "days": 30,
+          "n": 14,
+          "net": 3.100790047513829,
+          "profitFactor": 1.8112175383270093,
+          "winRatePct": 28.57142857142857,
+          "long": 4.756158727799903,
+          "short": -1.6553686802860743
+        },
+        {
+          "days": 60,
+          "n": 26,
+          "net": 1.8175020933185198,
+          "profitFactor": 1.296671818633744,
+          "winRatePct": 26.923076923076923,
+          "long": 5.152277874956036,
+          "short": -3.334775781637517
+        },
+        {
+          "days": 90,
+          "n": 44,
+          "net": 2.9586838403668145,
+          "profitFactor": 1.320966420355254,
+          "winRatePct": 22.727272727272727,
+          "long": 4.245684043444589,
+          "short": -1.2870002030777747
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.12627786490523812,
+      "trendRegimes": {
+        "bull": {
+          "n": 29,
+          "net": -0.3463388742182641,
+          "profitFactor": 0.9399357027273675
+        },
+        "bear": {
+          "n": 34,
+          "net": -3.7877101682287377,
+          "profitFactor": 0.4078953608536519
+        },
+        "mixed": {
+          "n": 24,
+          "net": 9.4205485128958,
+          "profitFactor": 2.6203028026633475
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 43,
+          "net": 7.232922905162077,
+          "profitFactor": 1.7978995705457281
+        },
+        "lowVol": {
+          "n": 44,
+          "net": -1.9464234347132807,
+          "profitFactor": 0.7816019914673423
+        }
+      },
+      "trades": 87,
+      "grossPct": 11.249032903079648,
+      "netPct": 5.286499470448799,
+      "adverseNetPct": 4.876895001724678,
+      "fundingPct": -0.021099999999998148,
+      "maxDrawdownPct": -4.604963081823332
+    },
+    {
+      "symbol": "XLM",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.0415023863872094,
+      "adverseCostPct": 0.04306045930423453,
+      "baseline": 8.720676066824797,
+      "stress": 4.396027882555001,
+      "stressPf": 1.1790282271186472,
+      "robustStress": 4.2339882991844044,
+      "robustPf": 1.1716016351699297,
+      "folds": 3,
+      "is": 10.245528486724663,
+      "oos": -5.84950060416966,
+      "long": 7.08011928927248,
+      "short": -2.6840914067174766,
+      "recent": [
+        {
+          "days": 30,
+          "n": 21,
+          "net": -5.750535131700872,
+          "profitFactor": 0.07150774964742274,
+          "winRatePct": 9.523809523809524,
+          "long": -2.186920700647251,
+          "short": -3.5636144310536197
+        },
+        {
+          "days": 60,
+          "n": 34,
+          "net": -5.814961606394224,
+          "profitFactor": 0.2529560218987203,
+          "winRatePct": 17.647058823529413,
+          "long": -2.495866532636047,
+          "short": -3.319095073758176
+        },
+        {
+          "days": 90,
+          "n": 50,
+          "net": -0.8770485904282177,
+          "profitFactor": 0.9204036611969528,
+          "winRatePct": 20,
+          "long": 3.568665584449674,
+          "short": -4.445714174877892
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.11011862770533963,
+      "trendRegimes": {
+        "bull": {
+          "n": 24,
+          "net": -2.105584364531844,
+          "profitFactor": 0.7340064432256915
+        },
+        "bear": {
+          "n": 47,
+          "net": -0.8247181751064508,
+          "profitFactor": 0.9152195914459474
+        },
+        "mixed": {
+          "n": 33,
+          "net": 7.326330422193303,
+          "profitFactor": 2.060047492719658
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 58,
+          "net": 4.324071723362637,
+          "profitFactor": 1.310039316733374
+        },
+        "lowVol": {
+          "n": 46,
+          "net": 0.07195615919237089,
+          "profitFactor": 1.0067831378992318
+        }
+      },
+      "trades": 104,
+      "grossPct": 8.720676066824797,
+      "netPct": 4.396027882555001,
+      "adverseNetPct": 4.2339882991844044,
+      "fundingPct": -0.008399999999999803,
+      "maxDrawdownPct": -7.825504978962071
+    },
+    {
+      "symbol": "XMR",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.07591113995979198,
+      "adverseCostPct": 0.08663688008219628,
+      "baseline": -5.135211319016488,
+      "stress": -11.103880235880268,
+      "stressPf": 0.4453521864401653,
+      "robustStress": -11.940487965427806,
+      "robustPf": 0.42393275986819395,
+      "folds": 0,
+      "is": -7.794309590756331,
+      "oos": -3.309570645123936,
+      "long": -4.703852262442729,
+      "short": -6.400027973437537,
+      "recent": [
+        {
+          "days": 30,
+          "n": 18,
+          "net": -0.3179993802802064,
+          "profitFactor": 0.8816264986669301,
+          "winRatePct": 22.22222222222222,
+          "long": -1.682055607385282,
+          "short": 1.3640562271050758
+        },
+        {
+          "days": 60,
+          "n": 29,
+          "net": -2.2818261145554453,
+          "profitFactor": 0.7084453223880851,
+          "winRatePct": 17.24137931034483,
+          "long": -0.7895883257613481,
+          "short": -1.4922377887940963
+        },
+        {
+          "days": 90,
+          "n": 46,
+          "net": -5.137126245516214,
+          "profitFactor": 0.5392480526221787,
+          "winRatePct": 15.217391304347828,
+          "long": -2.8694493174498135,
+          "short": -2.267676928066402
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.25049887308300167,
+      "trendRegimes": {
+        "bull": {
+          "n": 31,
+          "net": -2.692070134714616,
+          "profitFactor": 0.6522771880498937
+        },
+        "bear": {
+          "n": 23,
+          "net": -6.0694609725285416,
+          "profitFactor": 0.08528652235317775
+        },
+        "mixed": {
+          "n": 24,
+          "net": -2.3423491286371103,
+          "profitFactor": 0.5848611144775889
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 38,
+          "net": -1.6802947806162025,
+          "profitFactor": 0.8111449544905076
+        },
+        "lowVol": {
+          "n": 40,
+          "net": -9.423585455264067,
+          "profitFactor": 0.15273987420838553
+        }
+      },
+      "trades": 78,
+      "grossPct": -5.135211319016488,
+      "netPct": -11.103880235880268,
+      "adverseNetPct": -11.940487965427806,
+      "fundingPct": -0.04760000000000669,
+      "maxDrawdownPct": -11.4608957072726
+    },
+    {
+      "symbol": "XRP",
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "costPct": 0.03481462157497609,
+      "adverseCostPct": 0.039154951237917485,
+      "baseline": -7.002303028065782,
+      "stress": -9.241324187289278,
+      "stressPf": 0.23569017788784283,
+      "robustStress": -9.514764956054586,
+      "robustPf": 0.22831080127938697,
+      "folds": 0,
+      "is": -6.883370379829508,
+      "oos": -2.35795380745977,
+      "long": -5.33197281249783,
+      "short": -3.909351374791446,
+      "recent": [
+        {
+          "days": 30,
+          "n": 13,
+          "net": -1.0386509698781379,
+          "profitFactor": 0.037177436861308644,
+          "winRatePct": 15.384615384615385,
+          "long": -0.4601363507633356,
+          "short": -0.5785146191148024
+        },
+        {
+          "days": 60,
+          "n": 24,
+          "net": -4.213207530218452,
+          "profitFactor": 0.11385639208586708,
+          "winRatePct": 12.5,
+          "long": -1.6351015970569434,
+          "short": -2.578105933161507
+        },
+        {
+          "days": 90,
+          "n": 31,
+          "net": -5.039626061215073,
+          "profitFactor": 0.11393529186999309,
+          "winRatePct": 12.903225806451612,
+          "long": -2.018152587459851,
+          "short": -3.0214734737552216
+        }
+      ],
+      "coverageDays": 179.99305555555554,
+      "meanL95": -0.21314657675043708,
+      "trendRegimes": {
+        "bull": {
+          "n": 23,
+          "net": -4.094725628221626,
+          "profitFactor": 0.09279676026480188
+        },
+        "bear": {
+          "n": 29,
+          "net": -3.3851943717226645,
+          "profitFactor": 0.4179610864200338
+        },
+        "mixed": {
+          "n": 11,
+          "net": -1.7614041873449855,
+          "profitFactor": 0
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 39,
+          "net": -4.882439572761984,
+          "profitFactor": 0.32294083446522587
+        },
+        "lowVol": {
+          "n": 24,
+          "net": -4.358884614527293,
+          "profitFactor": 0.10675404360702218
+        }
+      },
+      "trades": 63,
+      "grossPct": -7.002303028065782,
+      "netPct": -9.241324187289278,
+      "adverseNetPct": -9.514764956054586,
+      "fundingPct": -0.04569999999999991,
+      "maxDrawdownPct": -9.241324187289278
+    }
+  ],
+  "portfolioQualified": [],
+  "portfolioRows": [
+    {
+      "rule": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "dropped": 16,
+      "maxConcurrent": 6,
+      "net": -145.6578224203578,
+      "robustNet": -161.95839951839363,
+      "profitFactor": 0.6605848103568395,
+      "winRatePct": 20.845396641574983,
+      "robustProfitFactor": 0.633778934513329,
+      "drawdownUsd": -177.19229700292794,
+      "drawdownPct": -29.532049500487993,
+      "netUsd": -145.6578224203578,
+      "folds": 1,
+      "is": -87.43212086750503,
+      "oos": -58.22570155285281,
+      "long": -46.87956501654624,
+      "short": -98.77825740381164,
+      "meanL95": -0.11535220751789922,
+      "recent": [
+        {
+          "days": 30,
+          "n": 306,
+          "net": -24.993169285051472,
+          "profitFactor": 0.6172427110193638,
+          "winRatePct": 21.241830065359476,
+          "long": -15.891241806567255,
+          "short": -9.101927478484228
+        },
+        {
+          "days": 60,
+          "n": 630,
+          "net": -83.09302737369475,
+          "profitFactor": 0.5013808421694094,
+          "winRatePct": 19.047619047619047,
+          "long": -40.39555577328346,
+          "short": -42.697471600411156
+        },
+        {
+          "days": 90,
+          "n": 912,
+          "net": -113.38366613064413,
+          "profitFactor": 0.5210821979619829,
+          "winRatePct": 18.311403508771928,
+          "long": -50.8842684295002,
+          "short": -62.499397701143906
+        }
+      ],
+      "activeSymbols": 21,
+      "positiveSymbols": 4,
+      "dominance": 0.3179910554278855,
+      "leaveOneOutMinNet": -155.06698758048614,
+      "positiveMonths": 2,
+      "totalMonths": 7,
+      "trendRegimes": {
+        "bull": {
+          "n": 598,
+          "net": -43.20646085663596,
+          "profitFactor": 0.7106855537086779
+        },
+        "bear": {
+          "n": 666,
+          "net": -73.47442725875796,
+          "profitFactor": 0.5550964849230969
+        },
+        "mixed": {
+          "n": 463,
+          "net": -28.97693430496399,
+          "profitFactor": 0.7472701956195016
+        }
+      },
+      "volatilityRegimes": {
+        "highVol": {
+          "n": 958,
+          "net": -82.22407587989626,
+          "profitFactor": 0.6785702096395324
+        },
+        "lowVol": {
+          "n": 769,
+          "net": -63.43374654046165,
+          "profitFactor": 0.6340422017337781
+        }
+      },
+      "trades": 1727,
+      "fundingPct": -0.14000000000000418
+    }
+  ]
+}

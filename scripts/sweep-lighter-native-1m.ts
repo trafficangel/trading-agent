@@ -82,6 +82,10 @@ const ENABLE_RSI_PULLBACK_ROBUSTNESS = process.env.ENABLE_RSI_PULLBACK_ROBUSTNES
 const ENABLE_DIRECTIONAL_TREND = process.env.ENABLE_DIRECTIONAL_TREND === '1';
 const ENABLE_OSCILLATOR_CONFLUENCE = process.env.ENABLE_OSCILLATOR_CONFLUENCE === '1';
 const ENABLE_CONFLUENCE_ROBUSTNESS = process.env.ENABLE_CONFLUENCE_ROBUSTNESS === '1';
+const ENABLE_BOLLINGER_RSI_CONFLUENCE =
+  process.env.ENABLE_BOLLINGER_RSI_CONFLUENCE === '1';
+const ENABLE_TREND_MOMENTUM_RECLAIM =
+  process.env.ENABLE_TREND_MOMENTUM_RECLAIM === '1';
 const PORTFOLIO_MAX_OPEN = Number(process.env.PORTFOLIO_MAX_OPEN ?? 6);
 const PORTFOLIO_POSITION_NOTIONAL_USD = Number(
   process.env.PORTFOLIO_POSITION_NOTIONAL_USD ?? 100,
@@ -709,6 +713,66 @@ function rules(): Rule[] {
       },
       exit(a, i, side) {
         return side === 'long' ? a.close[i]! >= a.vwap60[i]! : a.close[i]! <= a.vwap60[i]!;
+      },
+    });
+  }
+
+  // Preregistered two-sided volatility/oscillator pullback. The completed
+  // candle must close beyond Bollinger(20,2), RSI14 must confirm the extreme,
+  // and the long-horizon EMA400 trend must still point in the trade direction.
+  // One canonical rule is shared by every market and both 1m/5m timeframes;
+  // there is deliberately no parameter grid to rescue a failed hypothesis.
+  if (ENABLE_BOLLINGER_RSI_CONFLUENCE) {
+    out.push({
+      name: 'CONF-BB20-2+RSI14-30/70+EMA400-H240M',
+      warmup: 402,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(240 / BAR_MINUTES)),
+      entry(a, i) {
+        const lower = a.sma20[i]! - 2 * a.sd20[i]!;
+        const upper = a.sma20[i]! + 2 * a.sd20[i]!;
+        if (a.close[i]! < lower && a.rsi14[i]! < 30 && a.close[i]! > a.ema400[i]!) {
+          return 'long';
+        }
+        if (a.close[i]! > upper && a.rsi14[i]! > 70 && a.close[i]! < a.ema400[i]!) {
+          return 'short';
+        }
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long' ? a.close[i]! >= a.sma20[i]! : a.close[i]! <= a.sma20[i]!;
+      },
+    });
+  }
+
+  // Preregistered two-sided trend-continuation hypothesis. A fully stacked
+  // EMA8/21/55/200 trend must already exist, ADX14 must confirm a directional
+  // regime, and RSI14 must reclaim the neutral pullback level from the adverse
+  // side. The exact mirror is used for shorts. One canonical rule is applied
+  // unchanged to all markets and both 1m/5m datasets.
+  if (ENABLE_TREND_MOMENTUM_RECLAIM) {
+    out.push({
+      name: 'TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M',
+      warmup: 202,
+      slPct: 0.01,
+      maxBars: Math.max(1, Math.round(240 / BAR_MINUTES)),
+      entry(a, i) {
+        const longTrend = a.ema8[i]! > a.ema21[i]!
+          && a.ema21[i]! > a.ema55[i]!
+          && a.ema55[i]! > a.ema200[i]!;
+        const shortTrend = a.ema8[i]! < a.ema21[i]!
+          && a.ema21[i]! < a.ema55[i]!
+          && a.ema55[i]! < a.ema200[i]!;
+        const longReclaim = a.rsi14[i - 1]! < 45 && a.rsi14[i]! >= 45;
+        const shortReclaim = a.rsi14[i - 1]! > 55 && a.rsi14[i]! <= 55;
+        if (longTrend && longReclaim && a.adx14[i]! >= 20) return 'long';
+        if (shortTrend && shortReclaim && a.adx14[i]! >= 20) return 'short';
+        return null;
+      },
+      exit(a, i, side) {
+        return side === 'long'
+          ? a.ema8[i]! < a.ema21[i]!
+          : a.ema8[i]! > a.ema21[i]!;
       },
     });
   }

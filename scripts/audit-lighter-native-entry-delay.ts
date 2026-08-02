@@ -698,7 +698,12 @@ const audits = STRATEGIES.map((config) => {
   // A delayed fill needs the minute after the next 5m open. Exclude the
   // unresolved tail rather than inventing funding or a native fill beyond the
   // shorter of the funding and 1m-candle histories.
-  const fiveMinuteSource = config.candleSource === 'aggregated_from_1m'
+  // Production builds every standalone 5m decision from five complete native
+  // 1m candles. Default to that exact path; direct exchange 5m candles are
+  // allowed only for an explicit diagnostic run and can never be assumed to
+  // match the executable runner input.
+  const candleSource = config.candleSource ?? 'aggregated_from_1m';
+  const fiveMinuteSource = candleSource === 'aggregated_from_1m'
     ? aggregateFiveMinute(oneMinute, `${config.symbol}-5m-aggregated`)
     : candles(resolve(KLINES_DIR, `${config.symbol}-5m.json`));
   const fiveMinute = fiveMinuteSource
@@ -743,6 +748,7 @@ const audits = STRATEGIES.map((config) => {
     symbol: config.symbol,
     passed,
     executionCostP95Pct: costPct,
+    candleSource,
     fundingCoverage: fundingInput.coverage,
     candleCoverage: {
       fiveMinuteBars: fiveMinute.length,
@@ -775,6 +781,7 @@ const output = {
     ])),
     notionalUsd: POSITION_NOTIONAL_USD,
     commissionPct: 0,
+    signalCandleSource: 'five complete gap-free native 1m candles aggregated into each 5m decision',
     delayedFill: 'native 1m open one minute after the next 5m open',
     stopFill: '1m intrabar stop, gap-through filled at worse 1m open',
     qualification: 'net>0 PF>=1.2 L95>0 3/4 folds IS/OOS and both sides positive DD<=15%, recent windows positive, >=50% baseline net retained',

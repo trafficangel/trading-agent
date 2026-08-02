@@ -20,7 +20,7 @@ import { evaluateNativeHistoricalEvidence } from '../src/lib/lighter-native-hist
 const REAL_NATIVE_IDS: readonly string[] = [];
 const LATENCY_EVIDENCE_VERSION = 'lighter-native-entry-delay-audit-v1';
 const LATENCY_EVIDENCE_SHA256 =
-  '170404590ad7bbd2d7481191316ad10679485790daf8209640ef6baf14b35c44';
+  'a6d1cf2b5e8aa5625fe001eb87f6334e223a9f3879b6921ee336156c19ac2ded';
 const P2_LATENCY_EVIDENCE_VERSION = 'lighter-p2-entry-delay-portfolio-audit-v1';
 const P2_LATENCY_EVIDENCE_SHA256 =
   'ef7361a77d619d39b620c0422e5e1491f5f8b1f1063f36f41c2212fd4f7c4cd3';

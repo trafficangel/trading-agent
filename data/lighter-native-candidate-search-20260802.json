@@ -1,0 +1,93 @@
+{
+  "version": "lighter-native-candidate-search-summary-v2",
+  "generatedAt": "2026-08-02T02:17:51Z",
+  "decision": "no_new_candidate_qualified",
+  "candidateCountAdded": 0,
+  "policy": {
+    "timeframes": [1, 5],
+    "symbols": 21,
+    "commissionPct": 0,
+    "notionalUsd": 100,
+    "executionCost": "market-specific executable full-round-trip p95",
+    "funding": "exact Lighter hourly settlements",
+    "source": "gap-free native 1m candles; every 5m candle aggregated from five native 1m candles",
+    "selection": "one preregistered symmetric parameter set per family; no rescue grid",
+    "required": [
+      "positive net and mean L95",
+      "PF >= 1.2",
+      "at least 3 of 4 positive folds",
+      "positive IS and OOS",
+      "positive Long and Short",
+      "positive bull, bear, high-vol and low-vol regimes",
+      "positive 30d, 60d and 90d windows on both sides",
+      "max drawdown no worse than -15%"
+    ]
+  },
+  "families": [
+    {
+      "name": "CONF-BB20-2+RSI14-30/70+EMA400-H240M",
+      "qualified1m": 0,
+      "qualified5m": 0,
+      "best1m": {
+        "symbol": "HYPE",
+        "trades": 595,
+        "netPctUnits": 16.8059,
+        "profitFactor": 1.205,
+        "failure": "only 3 of 4 positive folds and high-volatility regime negative"
+      },
+      "best5m": {
+        "symbol": "HYPE",
+        "trades": 119,
+        "netPctUnits": 21.4152,
+        "profitFactor": 1.6941,
+        "meanL95Pct": 0.0622,
+        "failure": "bear regime negative and bull/bear regime samples below 20"
+      },
+      "second5m": {
+        "symbol": "XLM",
+        "trades": 296,
+        "netPctUnits": 20.156,
+        "profitFactor": 1.3126,
+        "meanL95Pct": 0.0048,
+        "failure": "bull regime -3.9335% with PF 0.7539"
+      }
+    },
+    {
+      "name": "TREND-STACK8/21/55/200+ADX20+RSI45/55-RECLAIM-H240M",
+      "qualified1m": 0,
+      "qualified5m": 0,
+      "best1m": {
+        "symbol": "ETH",
+        "trades": 343,
+        "netPctUnits": -3.9406,
+        "profitFactor": 0.82,
+        "failure": "negative after measured execution cost"
+      },
+      "best5m": {
+        "symbol": "ETH",
+        "trades": 70,
+        "netPctUnits": 9.409,
+        "profitFactor": 1.88,
+        "failure": "OOS, recent 30d/60d/90d and low-volatility regime negative"
+      }
+    }
+  ],
+  "evidence": [
+    {
+      "path": "data/lighter-bbrsi-universe-1m-20260802.json",
+      "sha256": "35e14f2f758adbde4a212e1a691944213737d682619d254a89594bdfc958509a"
+    },
+    {
+      "path": "data/lighter-bbrsi-universe-5m-20260802.json",
+      "sha256": "6d8a9a67be6f2a240abec598cb3225daf85b09433bfbc26cf45d34b2b8373d87"
+    },
+    {
+      "path": "data/lighter-trend-momentum-universe-1m-20260802.json",
+      "sha256": "2348a3af18a7e99a95e8b0f6da9616f52ee30a3f4e8e1f7eea40db07c47cf640"
+    },
+    {
+      "path": "data/lighter-trend-momentum-universe-5m-20260802.json",
+      "sha256": "4e7d9ecc8fb0b4eb3c88d0dde9e30dee835a5e2706f34797d12d1214b6d65d6c"
+    }
+  ]
+}

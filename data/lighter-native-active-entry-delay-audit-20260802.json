@@ -1,6 +1,6 @@
 {
   "version": "lighter-native-entry-delay-audit-v1",
-  "generatedAt": "2026-08-02T01:23:18.909Z",
+  "generatedAt": "2026-08-02T02:16:29.886Z",
   "assumptions": {
     "signalHistoryBars": 2000,
     "baselineDelayMinutes": 0,
@@ -33,6 +33,7 @@
     },
     "notionalUsd": 100,
     "commissionPct": 0,
+    "signalCandleSource": "five complete gap-free native 1m candles aggregated into each 5m decision",
     "delayedFill": "native 1m open one minute after the next 5m open",
     "stopFill": "1m intrabar stop, gap-through filled at worse 1m open",
     "qualification": "net>0 PF>=1.2 L95>0 3/4 folds IS/OOS and both sides positive DD<=15%, recent windows positive, >=50% baseline net retained"
@@ -44,6 +45,7 @@
       "symbol": "HYPE",
       "passed": true,
       "executionCostP95Pct": 0.02446483180428919,
+      "candleSource": "aggregated_from_1m",
       "fundingCoverage": {
         "covered": true,
         "points": 4315,
@@ -52,9 +54,9 @@
         "lastTimestampMs": 1785484800000
       },
       "candleCoverage": {
-        "fiveMinuteBars": 51661,
+        "fiveMinuteBars": 51833,
         "oneMinuteBars": 259168,
-        "first": "2026-02-08T21:00:00.000Z",
+        "first": "2026-02-08T06:40:00.000Z",
         "last": "2026-07-31T07:26:00.000Z"
       },
       "observedProductionDataReadySeconds": 26.666,
@@ -172,6 +174,7 @@
       "symbol": "ZEC",
       "passed": true,
       "executionCostP95Pct": 0.0522698904826598,
+      "candleSource": "aggregated_from_1m",
       "fundingCoverage": {
         "covered": true,
         "points": 4353,
@@ -180,9 +183,9 @@
         "lastTimestampMs": 1785621600000
       },
       "candleCoverage": {
-        "fiveMinuteBars": 52116,
+        "fiveMinuteBars": 52283,
         "oneMinuteBars": 261421,
-        "first": "2026-02-08T21:35:00.000Z",
+        "first": "2026-02-08T07:40:00.000Z",
         "last": "2026-08-01T21:56:00.000Z"
       },
       "observedProductionDataReadySeconds": 26.666,
@@ -300,6 +303,7 @@
       "symbol": "ZEC",
       "passed": true,
       "executionCostP95Pct": 0.0522698904826598,
+      "candleSource": "aggregated_from_1m",
       "fundingCoverage": {
         "covered": true,
         "points": 4353,
@@ -308,9 +312,9 @@
         "lastTimestampMs": 1785621600000
       },
       "candleCoverage": {
-        "fiveMinuteBars": 52116,
+        "fiveMinuteBars": 52283,
         "oneMinuteBars": 261421,
-        "first": "2026-02-08T21:35:00.000Z",
+        "first": "2026-02-08T07:40:00.000Z",
         "last": "2026-08-01T21:56:00.000Z"
       },
       "observedProductionDataReadySeconds": 26.666,
@@ -428,6 +432,7 @@
       "symbol": "APT",
       "passed": false,
       "executionCostP95Pct": 0.07326007326008552,
+      "candleSource": "aggregated_from_1m",
       "fundingCoverage": {
         "covered": true,
         "points": 4315,
@@ -436,10 +441,10 @@
         "lastTimestampMs": 1785610800000
       },
       "candleCoverage": {
-        "fiveMinuteBars": 51840,
+        "fiveMinuteBars": 51839,
         "oneMinuteBars": 259201,
-        "first": "2026-02-09T17:30:00.000Z",
-        "last": "2026-08-01T18:51:00.000Z"
+        "first": "2026-02-09T17:40:00.000Z",
+        "last": "2026-08-01T18:56:00.000Z"
       },
       "observedProductionDataReadySeconds": 26.666,
       "conservativeDelayedScenarioSeconds": 60,
@@ -556,6 +561,7 @@
       "symbol": "HYPE",
       "passed": true,
       "executionCostP95Pct": 0.02446483180428919,
+      "candleSource": "aggregated_from_1m",
       "fundingCoverage": {
         "covered": true,
         "points": 4315,
@@ -564,9 +570,9 @@
         "lastTimestampMs": 1785484800000
       },
       "candleCoverage": {
-        "fiveMinuteBars": 51661,
+        "fiveMinuteBars": 51833,
         "oneMinuteBars": 259168,
-        "first": "2026-02-08T21:00:00.000Z",
+        "first": "2026-02-08T06:40:00.000Z",
         "last": "2026-07-31T07:26:00.000Z"
       },
       "observedProductionDataReadySeconds": 26.666,
@@ -684,6 +690,7 @@
       "symbol": "XLM",
       "passed": true,
       "executionCostP95Pct": 0.0415023863872094,
+      "candleSource": "aggregated_from_1m",
       "fundingCoverage": {
         "covered": true,
         "points": 4316,
@@ -692,10 +699,10 @@
         "lastTimestampMs": 1785610800000
       },
       "candleCoverage": {
-        "fiveMinuteBars": 51840,
+        "fiveMinuteBars": 51834,
         "oneMinuteBars": 259178,
-        "first": "2026-02-09T17:30:00.000Z",
-        "last": "2026-08-01T18:51:00.000Z"
+        "first": "2026-02-09T18:05:00.000Z",
+        "last": "2026-08-01T18:56:00.000Z"
       },
       "observedProductionDataReadySeconds": 26.666,
       "conservativeDelayedScenarioSeconds": 60,
