@@ -587,3 +587,28 @@ were evaluated on 24 markets at 1m/5m and on unseen ADA/ZEC holdouts.
 tuning or post-result symbol selection. The complete negative evidence is kept
 in `data/lighter-independent-v16-summary-20260802.json` and its hashed source
 artifacts so these hypotheses are not rediscovered and retested later.
+
+### Independent V17: full Connors RSI and regression residual
+
+V17 was committed before its first result. It tested the full Connors
+RSI(3,2,100) composite and a causal 60-bar linear-regression residual Z-score.
+Both rules were mirrored, EMA400-aligned, filled at the next native open and
+charged measured $100 L2 p95 execution plus exact funding. The fixed 24-market
+1m/5m universe and unseen ADA/ZEC holdout were unchanged.
+
+- 1m: zero qualifiers. Connors RSI produced 86,715 portfolio trades and
+  −$4,351.20; regression residual produced 25,064 trades and −$694.23. Every
+  batch had 0/4 positive folds and both sides lost.
+- 5m: zero qualifiers. Connors RSI produced 16,422 trades, −$684.10, PF 0.71,
+  L95 −0.0465 and 0/4 folds. Regression residual produced 4,600 trades,
+  −$23.42, PF 0.99, L95 −0.0281, 2/4 folds and −$42.19 OOS; its Short book
+  lost −$29.38.
+- LIT and GRAM regression residual had positive isolated headlines, but LIT
+  failed PF/L95/folds/OOS/recent windows and GRAM failed PF/L95/regime/recent
+  Long-side gates. Post-result symbol selection is forbidden.
+- Holdout: both rules lost at 1m and 5m. The least-negative 5m regression
+  portfolio still lost −$3.73, with Long +$6.53 but Short −$10.27.
+
+**Decision:** both V17 families are rejected without Shadow, Real, delayed-fill
+audit or rescue tuning. The hashed evidence is preserved in
+`data/lighter-independent-v17-summary-20260802.json`.

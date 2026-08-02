@@ -1,0 +1,124 @@
+{
+  "version": "lighter-independent-v17-summary-v1",
+  "generatedAt": "2026-08-02T09:30:00Z",
+  "status": "rejected_without_shadow_or_real",
+  "preregistration": {
+    "file": "data/lighter-independent-v17-preregistered-20260802.json",
+    "sha256": "cd788906b77460419252f13cec03af6e51dde4ce0b23edbf9fff70876bfc4623",
+    "commit": "4fe5294"
+  },
+  "method": {
+    "timeframes": ["1m", "5m"],
+    "mainUniverseCount": 24,
+    "unseenHoldout": ["ADA", "ZEC"],
+    "positionNotionalUsd": 100,
+    "commissionPct": 0,
+    "executionCost": "market-specific executable $100 full-round-trip p95",
+    "funding": "exact Lighter hourly settlements in (entry, exit]",
+    "fallbackExecutionCostUsed": false,
+    "fallbackFundingUsed": false
+  },
+  "main1m": {
+    "qualifiedIndividuals": 0,
+    "qualifiedPortfolios": 0,
+    "connorsRsi": {
+      "trades": 86715,
+      "netUsd": -4351.2001529502995,
+      "longNetUsd": -2152.387813330016,
+      "shortNetUsd": -2198.812339620276,
+      "positiveFoldsByBatch": [0, 0, 0, 0]
+    },
+    "regressionResidual": {
+      "trades": 25064,
+      "netUsd": -694.2346355692637,
+      "longNetUsd": -296.97208446545386,
+      "shortNetUsd": -397.26255110381237,
+      "positiveFoldsByBatch": [0, 0, 0, 0]
+    }
+  },
+  "main5m": {
+    "qualifiedIndividuals": 0,
+    "qualifiedPortfolios": 0,
+    "connorsRsi": {
+      "trades": 16422,
+      "netUsd": -684.0993260306051,
+      "profitFactor": 0.7067815498611703,
+      "meanReturnL95Pct": -0.04654045178255394,
+      "positiveFolds": 0,
+      "inSampleNetUsd": -462.53517804614273,
+      "outOfSampleNetUsd": -221.56414798446386,
+      "longNetUsd": -374.7671015744625,
+      "shortNetUsd": -309.3322244561421
+    },
+    "regressionResidual": {
+      "trades": 4600,
+      "netUsd": -23.421630956861158,
+      "profitFactor": 0.9865054365422498,
+      "meanReturnL95Pct": -0.0281335209904481,
+      "positiveFolds": 2,
+      "inSampleNetUsd": 18.771640513768556,
+      "outOfSampleNetUsd": -42.19327147062961,
+      "longNetUsd": 5.9578244693242475,
+      "shortNetUsd": -29.379455426185256
+    },
+    "bestRejectedIndividuals": [
+      {
+        "symbol": "LIT",
+        "rule": "V17-REGRES60-RESIDZ60-TOUCH2.5+EMA400-EXIT0-H120M",
+        "trades": 277,
+        "netPct": 16.840470169924753,
+        "profitFactor": 1.1115079744275438,
+        "meanReturnL95Pct": -0.08168919930164675,
+        "positiveFolds": 2,
+        "outOfSamplePct": -3.913333486436545,
+        "recent30dPct": -10.333776760320841,
+        "decision": "reject"
+      },
+      {
+        "symbol": "GRAM",
+        "rule": "V17-REGRES60-RESIDZ60-TOUCH2.5+EMA400-EXIT0-H120M",
+        "trades": 242,
+        "netPct": 11.558052014544565,
+        "profitFactor": 1.1470152383520256,
+        "meanReturnL95Pct": -0.04825753433616394,
+        "positiveFolds": 3,
+        "mixedRegimePct": -5.88819153632514,
+        "highVolPct": -6.438068817229223,
+        "recent60dLongPct": -5.8966188925033265,
+        "recent90dLongPct": -1.693579597805854,
+        "decision": "reject"
+      }
+    ]
+  },
+  "holdout": {
+    "qualifiedIndividuals": 0,
+    "qualifiedPortfolios": 0,
+    "oneMinute": {
+      "connorsRsiNetUsd": -134.92507222438982,
+      "regressionResidualNetUsd": -15.13875956724378
+    },
+    "fiveMinute": {
+      "connorsRsiNetUsd": -19.798412439628148,
+      "regressionResidualNetUsd": -3.7320347559756915,
+      "regressionResidualLongNetUsd": 6.533905345642484,
+      "regressionResidualShortNetUsd": -10.265940101618177
+    }
+  },
+  "decision": {
+    "addToShadow": false,
+    "addToReal": false,
+    "runDelayedFillAudit": false,
+    "rescueTune": false,
+    "selectSingleSymbolAfterResults": false,
+    "reason": "Both preregistered families fail the measured-cost portfolio, L95/fold/OOS/direction gates and unseen holdout. No historical candidate passed far enough to justify delayed-fill validation."
+  },
+  "artifacts": [
+    {"file": "data/lighter-independent-v17-universe-1m-a-20260802.json", "sha256": "67f78f7fe46bedd98f661ceca86e57cf60bb02d878dc4c7a656dcf816724db65"},
+    {"file": "data/lighter-independent-v17-universe-1m-b-20260802.json", "sha256": "9d1cc69672d3dcf2ab0e9bf83a858f2a1298ea2382afd333a747488120bb3c56"},
+    {"file": "data/lighter-independent-v17-universe-1m-c-20260802.json", "sha256": "f8c08402f835d01f6646edc3205f8eea7d3540a815a2886b1a3c9f194cfc1801"},
+    {"file": "data/lighter-independent-v17-universe-1m-d-20260802.json", "sha256": "bed245e17a2d459561d397054ae7d29c51f537d4d24c3839b9557450eb404bde"},
+    {"file": "data/lighter-independent-v17-universe-5m-20260802.json", "sha256": "d44b84bb948b7b8b0e0711747b84b0f6b527ad99755caf6c25c653c988b084ab"},
+    {"file": "data/lighter-independent-v17-holdout-1m-20260802.json", "sha256": "770b83de204c76dfd57b252f5f86d5816af45a14b14e5dca4adeedd68796b24a"},
+    {"file": "data/lighter-independent-v17-holdout-5m-20260802.json", "sha256": "23521f21db33b71f2b111edebe015225770d9943cd08a2b2624e81bcb3b52964"}
+  ]
+}
