@@ -113,6 +113,11 @@ const Schema = z.object({
    */
   TRACK_C_ENABLED: envBool(false),
 
+  /** Master switch for DEX-only in-process runtimes. This gates Lighter
+   * Shadow/Native Quant and Hyperliquid collectors/runners without affecting
+   * the Bybit SaaS, HTTP routes or persisted research evidence. */
+  DEX_TRACK_ENABLED: envBool(true),
+
   /** Comma-separated user_id list whose orphan-position alerts should be
    *  silently dropped by the recovery-monitor. Use for the operator's own
    *  account (we manually open positions on Bybit there all the time —

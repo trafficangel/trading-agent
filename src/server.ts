@@ -232,24 +232,22 @@ async function main(): Promise<void> {
   // Watchdog: alert if LuxAlgo webhooks go silent (>18h) — catches an
   // upstream outage in an hour instead of days.
   startWebhookWatchdog();
-  // STRAT-010 prospective Lighter shadow: read-only SOL L2/funding feed.
-  // No API keys and no transaction path; records executable $1000 VWAP at
-  // webhook+300ms for the public /lab card.
-  startLighterLuxalgoShadowFeed();
-  // STRAT-030/031 use native Lighter 1m candles aggregated into completed 5m
-  // bars. The runner writes only to the existing shadow signal path; the
-  // independent live executor remains explicitly allowlisted to STRAT-030.
-  startLighterZ60Runner();
-  // Hyperliquid microstructure collector: WS trades→CVD + per-min OI/funding/
-  // book → hl_micro. Forward-collects the data the order-flow strategies need
-  // (no REST history on HL). Isolated; no orders, no Telegram.
-  startHlCollector();
-  startHlCandleCollector();
-  startHlMinuteCandleCollector();
-  // The public/trading Hyperliquid track is closed. Keep only read-only market
-  // collectors so historical option value is not lost. Funding Flip runs in
-  // drain mode solely to settle its last paper position; it cannot enter anew.
-  startFundingFlipRunner();
+  if (config.DEX_TRACK_ENABLED) {
+    // STRAT-010 prospective Lighter shadow: read-only SOL L2/funding feed.
+    // No API keys and no transaction path; records executable $1000 VWAP at
+    // webhook+300ms for the public /lab card.
+    startLighterLuxalgoShadowFeed();
+    // Native Quant uses native Lighter 1m candles aggregated into completed 5m
+    // bars. The runner writes only to the existing shadow signal path.
+    startLighterZ60Runner();
+    // Hyperliquid read-only collectors and the drain-only paper runner.
+    startHlCollector();
+    startHlCandleCollector();
+    startHlMinuteCandleCollector();
+    startFundingFlipRunner();
+  } else {
+    logger.info('DEX track disabled: Lighter and Hyperliquid in-process runtimes not started');
+  }
   // Phase G — money-back guarantee disabled per operator decision.
   // Cron registration commented out, DB columns + repo helpers preserved
   // so it can be re-enabled later without re-migrating. UI mentions
