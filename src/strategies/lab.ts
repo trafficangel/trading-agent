@@ -35,12 +35,6 @@ import { TRACK_C_NOTIONAL_USD } from './track-c-config.js';
 import { ALL_LAB_STRATEGIES, LAB_BY_CODE, LAB_BY_ID, LAB_TRACK, LAB_MAKER_TRACK, BT_NET_PCT_PER_TRADE, BT_MAXDD_PCT, type LabStrategy } from './lab-registry.js';
 import { labGateVerdict } from '../lib/lab-gate.js';
 import { allocatePortfolio, portfolioSummary } from '../lib/portfolio.js';
-import {
-  lighterLuxalgoHero,
-  lighterNativeQuantHero,
-  lighterLuxalgoLabRoute,
-  LIGHTER_LUXALGO_CSS,
-} from './lighter-luxalgo-lab.js';
 
 const trackOf = (s: LabStrategy): string => s.track ?? LAB_TRACK;
 
@@ -124,13 +118,11 @@ async function renderLabList(lang: Lang): Promise<string> {
     t(lang, 'Лаборатория — R&D стратегии (бумага)', 'Lab — R&D strategies (paper)'),
     `
     <div class="header">
-      <span class="strat-code">LUXALGO · SIGNAL TRACK</span>
+      <span class="strat-code">LAB · ARCHIVE</span>
       <h1 class="title">${t(lang, 'Лаборатория', 'The Lab')}</h1>
-      <p class="subtitle">${t(lang, 'Активный трек: сигналы LuxAlgo и собственные Quant-стратегии со статистикой на Lighter.', 'Active track: LuxAlgo signals and in-house Quant strategies with Lighter statistics.')}</p>
+      <p class="subtitle">${t(lang, 'Активных публичных экспериментальных треков сейчас нет.', 'There are currently no active public experimental tracks.')}</p>
     </div>
-    <style>${LAB_CSS}${LIGHTER_LUXALGO_CSS}</style>
-    ${await lighterNativeQuantHero(lang)}
-    ${await lighterLuxalgoHero(lang)}
+    <style>${LAB_CSS}</style>
     `,
     { autoRefreshSec: 60, lang },
   );
@@ -308,11 +300,11 @@ function renderLabPortfolio(): string {
 }
 
 export async function labRoute(app: FastifyInstance): Promise<void> {
-  await lighterLuxalgoLabRoute(app);
   const retiredTrackRedirect = async (
     _req: unknown,
     reply: { redirect: (location: string) => unknown },
-  ): Promise<unknown> => reply.redirect('/lab/lighter-luxalgo');
+  ): Promise<unknown> => reply.redirect('/lab');
+  app.get('/lab/lighter-luxalgo', retiredTrackRedirect);
   app.get('/lab/bybit-shadow', retiredTrackRedirect);
   app.get('/lab/crossvenue', retiredTrackRedirect);
   app.get('/lab/positioning-flow', retiredTrackRedirect);
